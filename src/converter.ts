@@ -82,98 +82,180 @@ function updateStateFromOutput(output: string, state: MarkdownState): void {
   }
 }
 
-// Maps for enter handlers by tag name
-const enterTagHandlers: Record<string, (
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState,
-  nodeDepthMap: Map<Node, number>
-) => string> = {
-  h1: () => '\n\n# ',
-  h2: () => '\n\n## ',
-  h3: () => '\n\n### ',
-  h4: () => '\n\n#### ',
-  h5: () => '\n\n##### ',
-  h6: () => '\n\n###### ',
-  p: (node, parent, state) => state.inBlockquote ? '' : '\n\n',
-  br: () => '\n',
-  hr: () => '\n\n---\n', // Fixed hr handler to have only one newline after
-  strong: () => '**',
-  b: () => '**',
-  em: () => '*',
-  i: () => '*',
-  del: () => '~~',
-  sub: () => '<sub>',
-  sup: () => '<sup>',
-  ins: () => '<ins>',
-  blockquote: handleBlockquoteEnter,
-  code: handleCodeEnter,
-  pre: () => '',
-  ul: (node, parent, state, nodeDepthMap) => {
-    // Check if this is a nested list inside a list item
-    const isNested = parent?.type === ELEMENT_NODE && parent.name === 'li';
-
-    // For nested lists, don't add any additional indentation
-    // The list items themselves will handle proper indentation
-    if (isNested) {
-      return '';
-    }
-
-    // For top-level lists, add spacing
-    return '\n\n';
-  },
-  ol: (node, parent, state, nodeDepthMap) => {
-    // Check if this is a nested list inside a list item
-    const isNested = parent?.type === ELEMENT_NODE && parent.name === 'li';
-
-    // For nested lists, don't add any additional indentation
-    // The list items themselves will handle proper indentation
-    if (isNested) {
-      return '';
-    }
-
-    // For top-level lists, add spacing
-    return '\n\n';
-  },
-  li: handleListItemEnter,
-  a: () => '[',
-  img: handleImageEnter,
-  table: handleTableEnter,
-  thead: handleTableHeadEnter,
-  tbody: () => '',
-  tfoot: () => '',
-  tr: handleTableRowEnter,
-  th: (node, parent, state) => {
-    state.inTableHead = true
-    return handleTableCellEnter(node, parent, state)
-  },
-  td: handleTableCellEnter,
-  input: handleInputEnter
+// Define handler context type
+type HandlerContext = {
+  node: Node;
+  parent?: Node;
+  state: MarkdownState;
+  nodeDepthMap?: Map<Node, number>;
 };
 
-// Maps for exit handlers by tag name
-const exitTagHandlers: Record<string, (
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-) => string> = {
-  strong: () => '**',
-  b: () => '**',
-  em: () => '*',
-  i: () => '*',
-  del: () => '~~',
-  sub: () => '</sub>',
-  sup: () => '</sup>',
-  ins: () => '</ins>',
-  code: handleCodeExit,
-  a: handleLinkExit,
-  th: handleTableCellExit,
-  td: handleTableCellExit,
-  tr: handleTableRowExit,
-  table: handleTableExit,
-  blockquote: handleBlockquoteExit,
-  p: (node, parent, state) => state.inBlockquote ? '\n' : '',
-  li: handleListItemExit
+function stateAwareOutput(s: string, state: MarkdownState) {
+  if (state.inTable && !state.inColspan) {
+    return ''
+  }
+
+  // avoid adding extra new lines
+  if (state.lastOutputType === 'newline' && (s === '\n\n')) {
+    return '\n'
+  }
+  if (state.lastOutputType === 'none' && (s === '\n' || s === '\n\n')) {
+    return s.replace(/\n+/g, '')
+  }
+  return s
+}
+
+// Single tagHandlers record with enter/leave functions
+const tagHandlers: Record<
+  string,
+  {
+    enter?: (context: HandlerContext) => string;
+    leave?: (context: HandlerContext) => string;
+  }
+> = {
+  h1: {
+    enter: () => '\n\n# '
+  },
+  h2: {
+    enter: () => '\n\n## '
+  },
+  h3: {
+    enter: () => '\n\n### '
+  },
+  h4: {
+    enter: () => '\n\n#### '
+  },
+  h5: {
+    enter: () => '\n\n##### '
+  },
+  h6: {
+    enter: () => '\n\n###### '
+  },
+  p: {
+    enter: ({ state }) => stateAwareOutput(state.inBlockquote ? '' : '\n\n', state),
+    leave: ({ state }) => state.inBlockquote ? '\n' : ''
+  },
+  br: {
+    enter: () => '\n'
+  },
+  hr: {
+    enter: ({ state }) => stateAwareOutput('\n\n---\n', state)
+  },
+  strong: {
+    enter: ({ state }) => stateAwareOutput('**', state),
+    leave: ({ state }) => stateAwareOutput('**', state)
+  },
+  b: {
+    enter: ({ state }) => stateAwareOutput('**', state),
+    leave: ({ state }) => stateAwareOutput('**', state)
+  },
+  em: {
+    enter: ({ state }) => stateAwareOutput('*', state),
+    leave: ({ state }) => stateAwareOutput('*', state)
+  },
+  i: {
+    enter: ({ state }) => stateAwareOutput('*', state),
+    leave: ({ state }) => stateAwareOutput('*', state)
+  },
+  del: {
+    enter: ({ state }) => stateAwareOutput('~~', state),
+    leave: ({ state }) => stateAwareOutput('~~', state)
+  },
+  sub: {
+    enter: ({ state }) => stateAwareOutput('<sub>', state),
+    leave: ({ state }) => stateAwareOutput('</sub>', state)
+  },
+  sup: {
+    enter: ({ state }) => stateAwareOutput('<sup>', state),
+    leave: ({ state }) => stateAwareOutput('</sup>', state)
+  },
+  ins: {
+    enter: ({ state }) => stateAwareOutput('<ins>', state),
+    leave: ({ state }) => stateAwareOutput('</ins>', state)
+  },
+  blockquote: {
+    enter: handleBlockquoteEnter,
+    leave: handleBlockquoteExit
+  },
+  code: {
+    enter: handleCodeEnter,
+    leave: handleCodeExit
+  },
+  pre: {
+    enter: () => ''
+  },
+  ul: {
+    enter: ({ parent, state }) => {
+      // Check if this is a nested list inside a list item
+      const isNested = parent?.type === ELEMENT_NODE && parent.name === 'li';
+
+      // For nested lists, don't add any additional indentation
+      // The list items themselves will handle proper indentation
+      if (isNested) {
+        return '';
+      }
+
+      // For top-level lists, add spacing
+      return '\n\n';
+    }
+  },
+  ol: {
+    enter: ({ parent }) => {
+      // Check if this is a nested list inside a list item
+      const isNested = parent?.type === ELEMENT_NODE && parent.name === 'li';
+
+      // For nested lists, don't add any additional indentation
+      // The list items themselves will handle proper indentation
+      if (isNested) {
+        return '';
+      }
+
+      // For top-level lists, add spacing
+      return '\n\n';
+    }
+  },
+  li: {
+    enter: handleListItemEnter,
+    leave: handleListItemExit
+  },
+  a: {
+    enter: ({ state }) => stateAwareOutput('[', state),
+    leave: handleLinkExit
+  },
+  img: {
+    enter: handleImageEnter
+  },
+  table: {
+    enter: handleTableEnter,
+    leave: handleTableExit
+  },
+  thead: {
+    enter: handleTableHeadEnter
+  },
+  tbody: {
+    enter: () => ''
+  },
+  tfoot: {
+    enter: () => ''
+  },
+  tr: {
+    enter: handleTableRowEnter,
+    leave: handleTableRowExit
+  },
+  th: {
+    enter: ({ node, parent, state }) => {
+      state.inTableHead = true;
+      return handleTableCellEnter({ node, parent, state });
+    },
+    leave: handleTableCellExit
+  },
+  td: {
+    enter: handleTableCellEnter,
+    leave: handleTableCellExit
+  },
+  input: {
+    enter: handleInputEnter
+  }
 };
 
 /**
@@ -186,7 +268,7 @@ export function handleNodeEnter(
   nodeDepthMap: Map<Node, number>
 ): string {
   if (node.type === TEXT_NODE) {
-    return handleTextNode(node, parent, state);
+    return handleTextNode({ node, parent, state });
   }
 
   if (node.type !== ELEMENT_NODE) {
@@ -194,10 +276,11 @@ export function handleNodeEnter(
   }
 
   // Use tag handler if available
-  const handler = enterTagHandlers[node.name || ''];
+  const handler = tagHandlers[node.name || '']?.enter;
   if (!handler) return '';
 
-  let output = handler(node, parent, state, nodeDepthMap);
+  const context: HandlerContext = { node, parent, state, nodeDepthMap };
+  let output = handler(context);
 
   // Remove leading newlines when at the beginning of document
   if (state.lastOutputType === 'none' && output.startsWith('\n')) {
@@ -210,11 +293,7 @@ export function handleNodeEnter(
 /**
  * Handle text node conversion
  */
-function handleTextNode(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleTextNode({ node, parent, state }: HandlerContext): string {
   const parentIsCode =
     parent?.type === ELEMENT_NODE &&
     parent.name === 'code';
@@ -280,49 +359,35 @@ function handleTextNode(
 /**
  * Handle blockquote element enter
  */
-function handleBlockquoteEnter(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleBlockquoteEnter({ state }: HandlerContext): string {
   state.blockquoteLevel++;
   state.inBlockquote = true;
 
+  console.log('blockquote enter', state)
   // Check if we're at the beginning of the document
-  const prefix = state.lastOutputType === 'none'
-                 ? '' // No prefix at document start
-                 : (state.blockquoteLevel > 1) ? '\n' : '\n\n';
+  const prefix = stateAwareOutput((state.blockquoteLevel > 1) ? '\n' : '\n\n', state)
 
-  state.lastOutputType = 'blockstart';
   return prefix + '> '.repeat(state.blockquoteLevel);
 }
 
 /**
  * Handle code element enter
  */
-function handleCodeEnter(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleCodeEnter({ node, parent, state }: HandlerContext): string {
   if (parent?.type === ELEMENT_NODE && parent.name === 'pre') {
     const language = ((node.attributes?.class || '')
       .replace('language-', '')
       .trim());
 
-    return `\n\n\`\`\`${language}\n`;
+    return stateAwareOutput(`\n\n\`\`\`${language}\n`, state)
   }
-  return '`';
+  return stateAwareOutput('`', state);
 }
 
 /**
  * Handle input element enter (for task lists)
  */
-function handleInputEnter(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleInputEnter({ node }: HandlerContext): string {
   if (node.attributes?.type === 'checkbox') {
     const isChecked = node.attributes.checked !== undefined;
     // Don't add trailing space, the text node will provide spacing
@@ -334,14 +399,9 @@ function handleInputEnter(
 /**
  * Handle list item element enter
  */
-function handleListItemEnter(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState,
-  nodeDepthMap: Map<Node, number>
-): string {
+function handleListItemEnter({ node, parent, state, nodeDepthMap }: HandlerContext): string {
   const isOrdered = parent?.type === ELEMENT_NODE && parent.name === 'ol';
-  const depth = nodeDepthMap.get(node) || 0;
+  const depth = nodeDepthMap?.get(node) || 0;
   const indent = '  '.repeat(depth);
 
   // Get list item index for ordered lists
@@ -362,45 +422,9 @@ function handleListItemEnter(
 }
 
 /**
- * Handle list item element exit
- */
-function handleListItemExit(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
-  // Find current item index in parent's children
-  if (!parent || !parent.children) return '\n';
-
-  const currentIndex = parent.children.findIndex(child => child === node);
-
-  // Check if this is the last item in the list
-  const isLastItem = currentIndex === parent.children.length - 1;
-
-  // Don't add a newline if this is the last list item in a nested list
-  // This avoids unwanted blank lines between nested lists and subsequent items
-  if (isLastItem && parent.parent &&
-      parent.parent.type === ELEMENT_NODE &&
-      parent.parent.name === 'li') {
-    return '';
-  }
-
-  // Don't add newline after the last item in a list to avoid trailing newlines
-  if (isLastItem) {
-    return '';
-  }
-
-  return '\n';
-}
-
-/**
  * Handle image element enter
  */
-function handleImageEnter(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleImageEnter({ node }: HandlerContext): string {
   const alt = node.attributes?.alt || '';
   const src = node.attributes?.src || '';
   return `![${alt}](${src})`;
@@ -409,11 +433,7 @@ function handleImageEnter(
 /**
  * Handle table element enter
  */
-function handleTableEnter(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleTableEnter({ state }: HandlerContext): string {
   state.inTable = true;
   state.tableData = [];
   state.currentRowCells = [];
@@ -427,11 +447,7 @@ function handleTableEnter(
 /**
  * Handle table head element enter
  */
-function handleTableHeadEnter(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleTableHeadEnter({ state }: HandlerContext): string {
   state.inTableHead = true;
   return '';
 }
@@ -439,11 +455,7 @@ function handleTableHeadEnter(
 /**
  * Handle table row element enter
  */
-function handleTableRowEnter(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleTableRowEnter({ state }: HandlerContext): string {
   state.currentRowCells = [];
   return '';
 }
@@ -451,11 +463,7 @@ function handleTableRowEnter(
 /**
  * Handle table cell element enter (th or td)
  */
-function handleTableCellEnter(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleTableCellEnter({ node, state }: HandlerContext): string {
   // Handle alignment for header cells
   if (node.attributes?.align && state.inTableHead) {
     const align = node.attributes.align.toLowerCase();
@@ -494,44 +502,62 @@ export function handleNodeExit(
   }
 
   // Use tag handler if available
-  const handler = exitTagHandlers[node.name || ''];
-  return handler ? handler(node, parent, state) : '';
+  const handler = tagHandlers[node.name || '']?.leave;
+  if (!handler) return '';
+
+  return handler({ node, parent, state });
 }
 
 /**
  * Handle code element exit
  */
-function handleCodeExit(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleCodeExit({ parent, state }: HandlerContext): string {
   if (parent?.type === ELEMENT_NODE && parent.name === 'pre') {
-    return '\n```';
+    return stateAwareOutput('\n```', state)
   }
-  return '`';
+  return stateAwareOutput('`', state)
 }
 
 /**
  * Handle link element exit
  */
-function handleLinkExit(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleLinkExit({ node, state }: HandlerContext): string {
   const href = node.attributes?.href || '';
-  return `](${href})`;
+  return stateAwareOutput(`](${href})`, state)
+}
+
+/**
+ * Handle list item element exit
+ */
+function handleListItemExit({ node, parent, state }: HandlerContext): string {
+  // Find current item index in parent's children
+  if (!parent || !parent.children) return '\n';
+
+  const currentIndex = parent.children.findIndex(child => child === node);
+
+  // Check if this is the last item in the list
+  const isLastItem = currentIndex === parent.children.length - 1;
+
+  // Don't add a newline if this is the last list item in a nested list
+  // This avoids unwanted blank lines between nested lists and subsequent items
+  if (isLastItem && parent.parent &&
+      parent.parent.type === ELEMENT_NODE &&
+      parent.parent.name === 'li') {
+    return '';
+  }
+
+  // Don't add newline after the last item in a list to avoid trailing newlines
+  if (isLastItem) {
+    return '';
+  }
+
+  return '\n';
 }
 
 /**
  * Handle table cell element exit (th or td)
  */
-function handleTableCellExit(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleTableCellExit({ node, state }: HandlerContext): string {
   // Collect cell content
   const cellContent = collectTextFromNode(node);
 
@@ -555,11 +581,7 @@ function handleTableCellExit(
 /**
  * Handle table row element exit
  */
-function handleTableRowExit(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleTableRowExit({ state }: HandlerContext): string {
   // Store the row
   state.tableData.push([...state.currentRowCells]);
   if (state.inTableHead) {
@@ -571,11 +593,7 @@ function handleTableRowExit(
 /**
  * Handle table element exit
  */
-function handleTableExit(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleTableExit({ state }: HandlerContext): string {
   state.inTable = false;
   state.inTableHead = false;
 
@@ -641,11 +659,7 @@ function renderMarkdownTable(state: MarkdownState): string {
 /**
  * Handle blockquote element exit
  */
-function handleBlockquoteExit(
-  node: Node,
-  parent: Node | undefined,
-  state: MarkdownState
-): string {
+function handleBlockquoteExit({ state }: HandlerContext): string {
   state.blockquoteLevel--;
   if (state.blockquoteLevel === 0) {
     state.inBlockquote = false;
@@ -725,3 +739,4 @@ export function collectTextFromNode(node: Node): string {
 
   return result.join('');
 }
+
