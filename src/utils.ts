@@ -1,91 +1,5 @@
+import type { DownstreamState } from './types.ts'
 import { HTML_ENTITIES } from './const.ts'
-
-/**
- * Count occurrences of a character in a string
- */
-export function countChar(str: string, char: string): number {
-  let count = 0
-  for (let i = 0; i < str.length; i++) {
-    if (str[i] === char)
-      count++
-  }
-  return count
-}
-
-/**
- * Finds optimal break point to split text chunks
- */
-export function findBestBreakPoint(text: string, maxSize: number): number {
-  if (text.length <= maxSize)
-    return text.length
-
-  // Use a single-pass approach to find all potential break points
-  const checkRange = Math.min(maxSize, text.length)
-  let bestBreak = maxSize
-  let paragraphBreak = -1
-  let lineBreak = -1
-  let sentenceBreak = -1
-  let spaceBreak = -1
-  let horizontalRuleBreak = -1
-
-  // Scan backwards from maxSize to find best break point
-  for (let i = checkRange; i > checkRange - 200 && i > 0; i--) {
-    const char = text[i]
-    const nextChar = i < text.length - 1 ? text[i + 1] : ''
-
-    // Check for horizontal rule
-    if (i >= 4 && text.substring(i-3, i+1) === '---\n') {
-      horizontalRuleBreak = i + 1;
-      break; // Horizontal rule is a very good break point, stop searching
-    }
-
-    // Check for paragraph break
-    if (char === '\n' && nextChar === '\n') {
-      paragraphBreak = i + 2
-      break // Paragraph break is best option, stop searching
-    }
-
-    // Check for line break
-    if (char === '\n' && lineBreak === -1) {
-      lineBreak = i + 1
-    }
-
-    // Check for sentence break
-    if ((char === '.' || char === '!' || char === '?')
-      && (nextChar === ' ' || nextChar === '\n')
-      && sentenceBreak === -1) {
-      sentenceBreak = i + 2
-    }
-
-    // Check for space
-    if (char === ' ' && spaceBreak === -1) {
-      spaceBreak = i + 1
-    }
-
-    // Check for HTML entity boundary to avoid breaking in middle
-    if (char === ';' && i > 5) {
-      const entityStart = text.lastIndexOf('&', i)
-      if (entityStart !== -1 && i - entityStart < 8) {
-        // Avoid breaking inside an entity
-        bestBreak = entityStart
-      }
-    }
-  }
-
-  // Return best break point in order of preference
-  if (horizontalRuleBreak !== -1)
-    return horizontalRuleBreak
-  if (paragraphBreak !== -1)
-    return paragraphBreak
-  if (lineBreak !== -1)
-    return lineBreak
-  if (sentenceBreak !== -1)
-    return sentenceBreak
-  if (spaceBreak !== -1)
-    return spaceBreak
-
-  return bestBreak
-}
 
 /**
  * Decode HTML entities - optimized version with single pass
@@ -138,13 +52,13 @@ export function decodeHTMLEntities(text: string): string {
           // Parse the number and convert to character if valid
           try {
             const codePoint = Number.parseInt(numStr, base)
-            if (!isNaN(codePoint)) {
+            if (!Number.isNaN(codePoint)) {
               result += String.fromCodePoint(codePoint)
               i++ // Skip the semicolon
               continue
             }
           }
-          catch (e) {
+          catch {
             // If parsing fails, treat as plain text
           }
         }
@@ -162,3 +76,47 @@ export function decodeHTMLEntities(text: string): string {
   return result
 }
 
+/**
+ * Escape markdown code block syntax within code blocks
+ * This prevents triple backticks inside code blocks from breaking the syntax
+ */
+export function escapeMarkdownCodeBlock(text: string): string {
+  // Replace triple backticks with escaped version
+  return text.replace(/```/g, '\\`\\`\\`')
+}
+
+export function trimNewLines(s: string) {
+  return trimWhitespace(s.replace(/^\n+/, '').replace(/\n+$/, ''))
+}
+
+export function trimWhitespace(s: string) {
+  return s.replace(/\s+/g, ' ')
+}
+
+export function isNodeInStack(state: DownstreamState, elementName: string): boolean {
+  for (let i = state.nodeStack.length - 1; i >= 0; i--) {
+    const ctx = state.nodeStack[i]
+    if (ctx?.name === elementName) {
+      return true
+    }
+  }
+  return false
+}
+
+export function getNodeDepth(state: DownstreamState, elementName: string): number {
+  return state.nodeStack.filter(Boolean).filter(ctx =>
+    ctx.name === elementName,
+  ).length
+}
+
+/**
+ * Find first occurrence of any character in a set
+ */
+export function findFirstOf(str: string, startIndex: number, chars: string): number {
+  for (let i = startIndex; i < str.length; i++) {
+    if (chars.includes(str[i])) {
+      return i
+    }
+  }
+  return -1
+}

@@ -1,48 +1,55 @@
-# downstream
+# mdream
 
 [![npm version][npm-version-src]][npm-version-href]
 [![npm downloads][npm-downloads-src]][npm-downloads-href]
 [![License][license-src]][license-href]
 [![Node.js][nodejs-src]][nodejs-href]
 
-**The fastest HTML to Markdown converter with streaming support, purpose-built for LLM workflows.**
-
-Downstream transforms HTML into clean Markdown with unmatched performance, processing content as it arrives rather than waiting for complete documents. This streaming architecture makes it the ideal solution for large-scale LLM content processing where speed and memory efficiency are critical.
+> Finely tuned HTML to Markdown streaming built for LLM workflows.
 
 <p align="center">
 <table>
 <tbody>
 <td align="center">
-<sub>Questions? Join our <a href="https://discord.gg/downstream">Discord</a> for help • Follow <a href="https://twitter.com/downstream_dev">@downstream_dev</a> 🐦</sub><br>
+<sub>Questions? Join our <a href="https://discord.gg/mdream">Discord</a> for help • Follow <a href="https://twitter.com/downstream_dev">@downstream_dev</a> 🐦</sub><br>
 </td>
 </tbody>
 </table>
 </p>
+
+## Features
+
+Mdream is a tiny high-performance, low-memory HTML to Markdown JavaScript tool designed for large-scale content analysis through LLM.
+
+- MCP server endpoint
+- 4.4kb, 0 deps
 
 ## Quick Start
 
 ### CLI Usage
 ```bash
 # Convert a local HTML file to Markdown
-npx downstream convert path/to/file.html
+npx mdream convert path/to/file.html
 
 # Convert a website to Markdown
-npx downstream convert https://example.com
+npx mdream convert https://example.com
 ```
 
 ### API Usage
+
 ```javascript
-import { htmlToMarkdown, htmlToMarkdownStream } from 'downstream';
+import { htmlToMarkdown, htmlToMarkdownStream } from 'mdream'
 
 // Simple conversion
-const markdown = await htmlToMarkdown('<h1>Hello World</h1>');
-console.log(markdown); // # Hello World
+const markdown = await htmlToMarkdown('<h1>Hello World</h1>')
+console.log(markdown) // # Hello World
 
 // Streaming conversion
-const htmlContent = '<h1>Hello</h1><p>This is a test</p>...'; // Large HTML content
+const htmlContent = '<h1>Hello</h1><p>This is a test</p>...' // Large HTML content
 for await (const chunk of htmlToMarkdownStream(htmlContent)) {
-  console.log('Markdown chunk:', chunk);
+  console.log('Markdown chunk:', chunk)
 }
+````
 
 ## Benchmark: Fastest HTML to Markdown Conversion
 
@@ -80,161 +87,14 @@ LLMs work more efficiently with Markdown than HTML. Downstream's streaming appro
 
 ```bash
 # npm
-npm install downstream
+npm install mdream
 
 # yarn
-yarn add downstream
+yarn add mdream
 
 # pnpm
-pnpm add downstream
+pnpm add mdream
 ```
-
-## Basic HTML to Markdown Conversion
-
-```javascript
-import { htmlToMarkdown, htmlToMarkdownStream } from 'downstream'
-import fetch from 'node-fetch'
-
-// Simple conversion for small content
-const markdown = await htmlToMarkdown('<h1>Hello World</h1>')
-console.log(markdown) // # Hello World
-
-// Streaming conversion for large content
-async function convertLargeWebpage(url) {
-  const response = await fetch(url) // This only waits for headers, not full body
-  const htmlText = await response.text() // Get the full HTML content
-
-  // Process content in manageable chunks
-  for await (const chunk of htmlToMarkdownStream(htmlText, { chunkSize: 8192 })) {
-    // Each chunk of Markdown is processed without loading the entire content into memory at once
-    console.log('Converted chunk:', chunk)
-  }
-}
-
-// Command line equivalent:
-// npx downstream convert https://example.com
-```
-
-## Optimized for LLM Workflows
-
-```javascript
-import { htmlToMarkdown, htmlToMarkdownStream } from 'downstream'
-import fetch from 'node-fetch'
-import { OpenAI } from 'openai'
-
-const openai = new OpenAI()
-
-// Real-world example: Web scraping to LLM analysis pipeline
-async function webToLLMPipeline(url) {
-  console.log(`Processing content from ${url}...`)
-
-  // Fetch HTML content from a webpage
-  const response = await fetch(url) // This only waits for headers, not the full body
-  const htmlContent = await response.text()
-
-  // Convert HTML to Markdown in chunks
-  const markdownChunks = []
-
-  // Process the Markdown in chunks as it's converted
-  for await (const chunk of htmlToMarkdownStream(htmlContent, { chunkSize: 4096 })) {
-    markdownChunks.push(chunk)
-
-    // Optional: Update UI with conversion progress
-    updateProgressBar(markdownChunks.length)
-
-    // Once we have enough content, we can start processing with the LLM
-    // without waiting for the entire page to be converted
-    if (markdownChunks.length % 5 === 0) {
-      const partialMarkdown = markdownChunks.join('')
-      // Process the current content with an LLM
-      analyzeContentChunk(partialMarkdown)
-    }
-  }
-
-  // Final analysis with complete content
-  const fullMarkdown = markdownChunks.join('')
-  return await analyzeFinalContent(fullMarkdown)
-}
-```
-
-## Low-Level HTML Parser API
-
-```javascript
-import { htmlToMarkdown, htmlToMarkdownStream } from 'downstream'
-
-// Use advanced options to control chunk size
-const options = {
-  chunkSize: 8192 // Process 8KB chunks at a time (default is 4096)
-}
-
-// For large HTML documents
-const largeHtmlContent = getVeryLargeHtmlDocument()
-
-// Process in manageable chunks to avoid memory issues
-for await (const markdownChunk of htmlToMarkdownStream(largeHtmlContent, options)) {
-  // Each chunk is processed independently, keeping memory usage low
-  processMarkdownChunk(markdownChunk)
-}
-
-// Command line equivalent with custom chunk size:
-// npx downstream convert huge-file.html --chunk-size=8192
-```
-
-## API Reference
-
-```typescript
-/**
- * Options for HTML to Markdown conversion
- */
-export interface HTMLToMarkdownOptions {
-  /**
-   * Size of chunks to process at once in bytes
-   * @default 4096
-   */
-  chunkSize?: number
-}
-
-/**
- * Convert HTML string to Markdown (all at once)
- *
- * @param html HTML content to convert
- * @param options Conversion options
- * @returns Promise resolving to full Markdown content
- */
-export async function htmlToMarkdown(
-  html: string,
-  options: HTMLToMarkdownOptions = {}
-): Promise<string>
-
-/**
- * Convert HTML string to Markdown in streaming chunks
- *
- * @param html HTML content to convert
- * @param options Conversion options
- * @returns AsyncGenerator yielding Markdown chunks
- */
-export async function* htmlToMarkdownStream(
-  html: string,
-  options: HTMLToMarkdownOptions = {}
-): AsyncGenerator<string>
-```
-
-## CLI Usage
-
-```bash
-# Basic conversion of HTML file to Markdown
-npx downstream convert input.html > output.md
-
-# Convert a webpage to Markdown
-npx downstream convert https://example.com > example.md
-
-# Control chunk size for large files
-npx downstream convert large-file.html --chunk-size=8192 > output.md
-
-# Get help
-npx downstream --help
-```
-
 
 ## CLI Usage
 
@@ -263,7 +123,7 @@ curl https://example.com | html2md | grep "important" > filtered.md
 
 ## Documentation
 
-[📖 Read the full documentation](https://downstream.js.org) for details on:
+[📖 Read the full documentation](https://mdream.js.org) for details on:
 - Advanced configuration for optimal HTML to Markdown conversion
 - Integrating with popular LLM platforms
 - Fine-tuning parser performance
@@ -271,23 +131,23 @@ curl https://example.com | html2md | grep "important" > filtered.md
 
 ## Examples
 
-- [High-Performance HTML to Markdown Converter Demo](https://downstream.js.org/demo)
-- [LLM Streaming Pipeline Example](https://github.com/downstream/llm-streaming-example)
-- [Enterprise-Scale Processing Benchmark](https://github.com/downstream/benchmark)
+- [High-Performance HTML to Markdown Converter Demo](https://mdream.js.org/demo)
+- [LLM Streaming Pipeline Example](https://github.com/mdream/llm-streaming-example)
+- [Enterprise-Scale Processing Benchmark](https://github.com/mdream/benchmark)
 
 ## License
 
-Licensed under the [MIT license](https://github.com/downstream/downstream/blob/main/LICENSE.md).
+Licensed under the [MIT license](https://github.com/mdream/mdream/blob/main/LICENSE.md).
 
 <!-- Badges -->
-[npm-version-src]: https://img.shields.io/npm/v/downstream/latest.svg?style=flat&colorA=18181B&colorB=4C9BE0
-[npm-version-href]: https://npmjs.com/package/downstream
+[npm-version-src]: https://img.shields.io/npm/v/mdream/latest.svg?style=flat&colorA=18181B&colorB=4C9BE0
+[npm-version-href]: https://npmjs.com/package/mdream
 
-[npm-downloads-src]: https://img.shields.io/npm/dm/downstream.svg?style=flat&colorA=18181B&colorB=4C9BE0
-[npm-downloads-href]: https://npmjs.com/package/downstream
+[npm-downloads-src]: https://img.shields.io/npm/dm/mdream.svg?style=flat&colorA=18181B&colorB=4C9BE0
+[npm-downloads-href]: https://npmjs.com/package/mdream
 
-[license-src]: https://img.shields.io/github/license/downstream/downstream.svg?style=flat&colorA=18181B&colorB=4C9BE0
-[license-href]: https://github.com/downstream/downstream/blob/main/LICENSE.md
+[license-src]: https://img.shields.io/github/license/mdream/mdream.svg?style=flat&colorA=18181B&colorB=4C9BE0
+[license-href]: https://github.com/mdream/mdream/blob/main/LICENSE.md
 
 [nodejs-src]: https://img.shields.io/badge/Node.js-18181B?logo=node.js&colorB=4C9BE0
 [nodejs-href]: https://nodejs.org

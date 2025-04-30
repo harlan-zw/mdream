@@ -1,7 +1,7 @@
 {
   "name": "nuxt-app",
-  "private": true,
   "type": "module",
+  "private": true,
   "scripts": {
     "build": "nuxt build",
     "dev": "nuxt dev",
@@ -14,11 +14,11 @@
     "@nuxt/fonts": "0.11.1",
     "@nuxt/scripts": "0.11.5",
     "@nuxt/ui": "3.0.2",
-    "@unhead/vue": "^2.0.0-rc.8",
-    "eslint": "^9.0.0",
-    "nuxt": "^3.16.2",
-    "typescript": "^5.6.3",
+    "@unhead/vue": "^2.0.8",
+    "eslint": "^9.25.1",
+    "nuxt": "^3.17.1",
+    "typescript": "^5.8.3",
     "vue": "^3.5.13",
-    "vue-router": "^4.5.0"
+    "vue-router": "^4.5.1"
   }
 }

@@ -1,173 +1,165 @@
-import type { HTMLToMarkdownOptions } from './types.ts';
-import { pipeline, Transform } from 'node:stream';
-import { promisify } from 'node:util';
-import { cac } from 'cac';
-import { createMarkdownStreamFromHTMLStream } from './htmlStreamAdapter.ts';
+import type { HTMLToMarkdownOptions } from './types.ts'
+import { cac } from 'cac'
+import { createMarkdownStreamFromHTMLStream } from './stream.ts'
 
-const pipelineAsync = promisify(pipeline);
+/**
+ * CLI options interface
+ */
+interface CliOptions {
+  chunkSize?: number | string
+  verbose?: boolean
+  origin?: string
+  delay?: number | string
+}
 
 /**
  * Creates a configured logger based on verbosity setting
  */
-function createLogger(options = {}) {
+function createLogger(options: CliOptions = {}) {
   // Safely access properties with fallbacks
-  const verbose = options?.verbose === true;
+  const verbose = options?.verbose === true
 
   // Return a no-op function if verbose is false
   if (!verbose) {
-    return () => {}; // Does nothing when called
+    return () => {} // Does nothing when called
   }
 
   // Return an actual logging function when verbose is true
-  const startTime = Date.now();
-  return (message) => {
-    const elapsed = Date.now() - startTime;
-    process.stderr.write(`[${elapsed}ms] ${message}\n`);
-  };
+  const startTime = Date.now()
+  return (message: string) => {
+    const elapsed = Date.now() - startTime
+    process.stdout.write(`[${elapsed}ms] ${message}\n`)
+  }
 }
 
-const cli = cac();
+/**
+ * Creates a buffered async iterable from an input stream
+ * Collects chunks up to chunkSize before yielding
+ */
+class ChunkedStreamReader {
+  private buffer: string = ''
+  private streamEnded: boolean = false
+  private streamReader: AsyncIterator<string>
+  private chunkSize: number
+
+  constructor(stream: AsyncIterable<string>, chunkSize: number) {
+    this.streamReader = stream[Symbol.asyncIterator]()
+    this.chunkSize = chunkSize
+  }
+
+  async* iterate(): AsyncGenerator<string> {
+    while (!this.streamEnded || this.buffer.length > 0) {
+      // Try to fill buffer if not at desired chunk size and stream not ended
+      while (!this.streamEnded && this.buffer.length < this.chunkSize) {
+        const result = await this.streamReader.next()
+        if (result.done) {
+          this.streamEnded = true
+          break
+        }
+        this.buffer += result.value
+      }
+
+      // Yield available chunk if we have any data
+      if (this.buffer.length > 0) {
+        const yieldSize = Math.min(this.buffer.length, this.chunkSize)
+        const chunk = this.buffer.slice(0, yieldSize)
+        this.buffer = this.buffer.slice(yieldSize)
+        yield chunk
+      }
+    }
+  }
+}
+
+/**
+ * Creates an AsyncIterable from stdin
+ */
+async function* streamToAsyncIterable(stream: NodeJS.ReadableStream): AsyncIterable<string> {
+  // Set up stdin to provide string data
+  stream.setEncoding('utf8')
+
+  for await (const chunk of stream) {
+    yield chunk as string
+  }
+}
+
+/**
+ * Introduces an artificial delay
+ */
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+async function streamingConvert(options: CliOptions = {}) {
+  // Create logger with safe property access
+  const log = createLogger({ verbose: options?.verbose === true })
+
+  log('streamingConvert started')
+
+  // Configure conversion options with safe property access
+  const chunkSize = Number.parseInt(String(options?.chunkSize || ''), 10) || 4096
+  const delayMs = Number.parseInt(String(options?.delay || ''), 10) || 0
+
+  const convertOptions: HTMLToMarkdownOptions = {
+    chunkSize,
+  }
+
+  // Add origin if provided
+  if (options?.origin) {
+    convertOptions.origin = options.origin
+    log(`Using origin ${convertOptions.origin}`)
+  }
+
+  log(`Using chunk size ${chunkSize} with delay ${delayMs}ms`)
+
+  const inputStream = process.stdin
+  const outputStream = process.stdout
+
+  log('Reading from stdin, writing to stdout')
+
+  try {
+    log('Starting conversion process')
+
+    // Create HTML input stream from stdin
+    const rawHtmlStream = streamToAsyncIterable(inputStream)
+
+    // Use our chunked reader to read in chunks of the specified size
+    const chunkedReader = new ChunkedStreamReader(rawHtmlStream, chunkSize)
+
+    // Create a single markdown generator that processes the chunked HTML
+    const markdownGenerator = createMarkdownStreamFromHTMLStream(chunkedReader.iterate(), convertOptions)
+
+    // Process the markdown output with optional delay
+    for await (const markdownChunk of markdownGenerator) {
+      if (markdownChunk && markdownChunk.length > 0) {
+        log(`Writing markdown chunk of length ${markdownChunk.length}`)
+        outputStream.write(markdownChunk)
+
+        // Add artificial delay if configured
+        if (delayMs > 0) {
+          log(`Delaying for ${delayMs}ms before next chunk`)
+          await sleep(delayMs)
+        }
+      }
+    }
+
+    log('Conversion completed successfully')
+  }
+  catch (error) {
+    log(`Conversion error: ${(error as Error)?.message || 'Unknown error'}`)
+    throw error
+  }
+}
+
+const cli = cac()
 
 cli.command('[options]', 'Convert HTML from stdin to Markdown on stdout')
   .option('--chunk-size <size>', 'Chunk size for streaming', { default: 4096 })
   .option('-v, --verbose', 'Enable verbose debug logging')
-  .action(async (options = {}) => {
-    try {
-      await streamingConvert(options);
-    }
-    catch (error) {
-      console.error('Error:', error?.message || 'Unknown error');
-      process.exit(1);
-    }
-  });
+  .option('--origin <url>', 'Origin URL for resolving relative image paths')
+  .option('--delay <ms>', 'Artificial delay in ms between processing chunks', { default: 0 })
+  .action(async (_, opts) => {
+    await streamingConvert(opts)
+  })
 
 cli
   .help()
   .version('1.0.0')
-  .parse();
-
-/**
- * Creates a transform stream that converts HTML chunks to Markdown
- */
-function createHtmlToMarkdownTransform(options = {}, log = () => {}) {
-  let buffer = '';
-  log('Creating transform stream');
-
-  return new Transform({
-    decodeStrings: false,
-    encoding: 'utf8',
-    transform(chunk, encoding, callback) {
-      try {
-        const chunkStr = chunk.toString();
-        log(`Received chunk of length ${chunkStr.length}`);
-
-        // Add new chunk to the buffer
-        buffer += chunkStr;
-        log(`Buffer size now ${buffer.length}`);
-
-        // Process immediately
-        (async () => {
-          try {
-            log('Processing buffer');
-
-            // Create a generator for this chunk of HTML
-            const generator = createMarkdownStreamFromHTMLStream([buffer], options);
-            let processedAny = false;
-
-            for await (const markdownChunk of generator) {
-              if (markdownChunk && markdownChunk.length > 0) {
-                processedAny = true;
-                log(`Pushing markdown chunk of length ${markdownChunk.length}`);
-                this.push(markdownChunk);
-              }
-            }
-
-            if (processedAny) {
-              log('Cleared buffer after processing');
-              buffer = '';
-            }
-            else {
-              log('No output generated, keeping buffer');
-            }
-
-            callback();
-          }
-          catch (err) {
-            log(`Error in transform processing: ${err?.message || 'Unknown error'}`);
-            callback(err);
-          }
-        })();
-      }
-      catch (error) {
-        log(`Transform error: ${error?.message || 'Unknown error'}`);
-        callback(error);
-      }
-    },
-    flush(callback) {
-      log(`Flush called with remaining buffer of length ${buffer.length}`);
-
-      if (buffer.length > 0) {
-        (async () => {
-          try {
-            const generator = createMarkdownStreamFromHTMLStream([buffer], options);
-
-            for await (const markdownChunk of generator) {
-              if (markdownChunk && markdownChunk.length > 0) {
-                log(`Flush pushing markdown chunk of length ${markdownChunk.length}`);
-                this.push(markdownChunk);
-              }
-            }
-
-            log('Flush complete');
-            callback();
-          }
-          catch (err) {
-            log(`Flush error: ${err?.message || 'Unknown error'}`);
-            callback(err);
-          }
-        })();
-      }
-      else {
-        log('Nothing to flush');
-        callback();
-      }
-    },
-  });
-}
-
-async function streamingConvert(options = {}) {
-  // Create logger with safe property access
-  const log = createLogger({ verbose: options?.verbose === true });
-
-  log('streamingConvert started');
-
-  // Configure conversion options with safe property access
-  const convertOptions = {
-    chunkSize: parseInt(options?.chunkSize, 10) || 4096,
-  };
-  log(`Using chunk size ${convertOptions.chunkSize}`);
-
-  // Always use stdin and stdout for streaming
-  const inputStream = process.stdin;
-  const outputStream = process.stdout;
-
-  log('Reading from stdin, writing to stdout');
-
-  // Create HTML to Markdown transform stream
-  const transformStream = createHtmlToMarkdownTransform(convertOptions, log);
-
-  try {
-    log('Starting pipeline');
-    // Connect stdin -> transform -> stdout
-    await pipelineAsync(
-      inputStream,
-      transformStream,
-      outputStream,
-    );
-    log('Pipeline completed successfully');
-  }
-  catch (error) {
-    log(`Pipeline error: ${error?.message || 'Unknown error'}`);
-    throw error;
-  }
-}
+  .parse()

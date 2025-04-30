@@ -10,3 +10,5 @@ JS
 - https://github.com/mixmark-io/turndown
 
 Spec: https://github.github.com/gfm/
+
+compare: https://html-to-markdown.com/api/demo-convert

@@ -1,10 +1,23 @@
 {
   "compilerOptions": {
     "target": "esnext",
-    "module": "nodenext",
-    "noEmit": true, // Optional - see note below
-    "rewriteRelativeImportExtensions": true,
-    "verbatimModuleSyntax": true,
-    "erasableSyntaxOnly": true
+    "jsx": "preserve",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "moduleDetection": "force",
+    "experimentalDecorators": true,
+    "baseUrl": ".",
+    "rootDir": ".",
+    "module": "preserve",
+    "resolveJsonModule": true,
+    "types": ["node", "vitest/globals"],
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "strictFunctionTypes": true,
+    "strictNullChecks": true,
+    "noUnusedLocals": true,
+    "declaration": true,
+    "esModuleInterop": true,
+    "skipDefaultLibCheck": true,
+    "skipLibCheck": true
   }
 }

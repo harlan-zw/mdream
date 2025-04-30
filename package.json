@@ -1,5 +1,5 @@
 {
-  "name": "downstream",
+  "name": "mdream",
   "type": "module",
   "version": "4.3.0",
   "description": "Convert HTML to Markdown using ultrahtml",
@@ -18,30 +18,37 @@
   },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
-  "bin": "./bin/downstream.mjs",
+  "bin": "./bin/mdream.mjs",
   "files": [
     "bin",
     "dist"
   ],
   "scripts": {
     "ts": "node  --experimental-strip-types",
-    "test:github": " cat test/github-markdown.html | node ./bin/downstream.mjs > test/github-markdown.md",
+    "test::live": "curl -s https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax | node ./bin/mdream.mjs --origin https://docs.github.com | tee test/github-markdown.md",
+    "test:images": "cat test/fixtures/test-origin.html | node ./bin/mdream.mjs --origin https://docs.github.com",
+    "test:github:live": "curl -s https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax | node ./bin/mdream.mjs --origin https://docs.github.com | tee test/github-markdown.md",
+    "test:github:file": "cat test/fixtures/github-markdown-complete.html | node ./bin/mdream.mjs --origin https://docs.github.com | tee test/github-markdown.md",
+    "test:wiki:file": "cat test/fixtures/wikipedia-largest.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
+    "test:wiki-small:file": "cat test/fixtures/wikipedia-small.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "build": "unbuild",
     "dev:prepare": "unbuild --stub",
     "test": "vitest"
   },
   "dependencies": {
-    "cac": "^6.7.14"
+    "cac": "^6.7.14",
+    "ofetch": "^1.4.1"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.12.0",
+    "@types/node": "^22.15.3",
     "bumpp": "^10.1.0",
-    "eslint": "^9.24.0",
+    "eslint": "^9.25.1",
     "jsdom": "^26.1.0",
     "showdown": "^2.1.0",
     "turndown": "^7.2.0",
     "typescript": "5.8.3",
-    "unbuild": "^2.0.0",
-    "vitest": "^3.1.1"
+    "unbuild": "^3.5.0",
+    "vitest": "^3.1.2"
   }
 }
