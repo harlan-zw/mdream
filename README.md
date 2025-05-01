@@ -20,7 +20,7 @@
 
 Traditional HTML to Markdown converters are either slow and bloated with dependencies or produce output poorly suited for LLMs and content analysis.
 
-Mdream is a high-performance, streaming HTML to Markdown parser built specifically for LLM pipelines. Features blazing-fast conversion speeds, minimal dependencies, ultra-low memory usage, and opinionated output optimized for both human readability and AI processing.
+Mdream is a high-performance, streaming HTML to Markdown parser built specifically for LLM pipelines. With zero dependencies, ultra-low memory usage, and opinionated output optimized for both human readability and AI processing.
 
 Perfect for: RAG systems, web scraping, content extraction, ChatGPT/Claude integration, and large-scale document processing.
 
