@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/mdream/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-<img src=".github/logo.png" alt="mdream logo" width="200">
+<img src=".github/logo.png" alt="mdream logo" width="300">
 
 > Ultra performant HTML to Markdown built for LLM content analysis.
 
