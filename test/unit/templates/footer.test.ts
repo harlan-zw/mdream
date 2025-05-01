@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src'
+import { asyncHtmlToMarkdown } from '../../../src'
 
-describe('footer', () => {
-  it('github', () => {
+describe('footer', async () => {
+  it('github', async () => {
     const html = ` <footer data-container="footer">
         <section class="container-xl mt-lg-8 mt-6 px-3 px-md-6 no-print mx-auto"><h2 class="f3">Help and support</h2>
           <div class="container-xl mx-auto py-6 py-lg-6 clearfix border-top border-color-secondary">
@@ -94,7 +94,7 @@ describe('footer', () => {
           </button>
         </div>
       </footer>`
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = await asyncHtmlToMarkdown(html)
     expect(markdown).toMatchInlineSnapshot(`
       "## Help and support
 

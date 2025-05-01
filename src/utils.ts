@@ -1,13 +1,9 @@
-import type { DownstreamState } from './types.ts'
 import { HTML_ENTITIES } from './const.ts'
 
 /**
  * Decode HTML entities - optimized version with single pass
  */
 export function decodeHTMLEntities(text: string): string {
-  if (!text || !text.includes('&'))
-    return text
-
   let result = ''
   let i = 0
 
@@ -77,46 +73,34 @@ export function decodeHTMLEntities(text: string): string {
 }
 
 /**
- * Escape markdown code block syntax within code blocks
- * This prevents triple backticks inside code blocks from breaking the syntax
+ * Converts a string into an AsyncIterable that yields the string in chunks of the specified size
+ * @param input The input string to chunk
+ * @returns An AsyncIterable that yields chunks of the input string
  */
-export function escapeMarkdownCodeBlock(text: string): string {
-  // Replace triple backticks with escaped version
-  return text.replace(/```/g, '\\`\\`\\`')
-}
-
-export function trimNewLines(s: string) {
-  return trimWhitespace(s.replace(/^\n+/, '').replace(/\n+$/, ''))
-}
-
-export function trimWhitespace(s: string) {
-  return s.replace(/\s+/g, ' ')
-}
-
-export function isNodeInStack(state: DownstreamState, elementName: string): boolean {
-  for (let i = state.nodeStack.length - 1; i >= 0; i--) {
-    const ctx = state.nodeStack[i]
-    if (ctx?.name === elementName) {
-      return true
-    }
-  }
-  return false
-}
-
-export function getNodeDepth(state: DownstreamState, elementName: string): number {
-  return state.nodeStack.filter(Boolean).filter(ctx =>
-    ctx.name === elementName,
-  ).length
+export function stringToReadableStream(
+  input: string,
+) {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(input)
+      controller.close()
+    },
+  })
 }
 
 /**
- * Find first occurrence of any character in a set
+ * Converts an AsyncIterable<string> back into a complete string
+ * @param asyncIterable The AsyncIterable that yields string chunks
+ * @returns A promise that resolves to the complete string
  */
-export function findFirstOf(str: string, startIndex: number, chars: string): number {
-  for (let i = startIndex; i < str.length; i++) {
-    if (chars.includes(str[i])) {
-      return i
-    }
+export async function asyncIterableToString(
+  asyncIterable: AsyncIterable<string>,
+): Promise<string> {
+  let result = ''
+
+  for await (const chunk of asyncIterable) {
+    result += chunk
   }
-  return -1
+
+  return result
 }

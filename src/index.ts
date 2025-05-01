@@ -1,16 +1,17 @@
 import type { HTMLToMarkdownOptions } from './types.ts'
-import { processPartialHTMLToMarkdown } from './parser.ts'
+import { streamHtmlToMarkdown } from './stream.ts'
+import { asyncIterableToString, stringToReadableStream } from './utils.ts'
 
-export function syncHtmlToMarkdown(
+export async function asyncHtmlToMarkdown(
   html: string,
   options: HTMLToMarkdownOptions = {},
-): string {
-  const { chunk } = processPartialHTMLToMarkdown(html, { options })
-  // Fix double newlines in lists by normalizing
-  return chunk
-    .trimEnd()
+): Promise<string> {
+  const res = await asyncIterableToString(
+    streamHtmlToMarkdown(stringToReadableStream(html), options),
+  )
+  return res.trimEnd()
 }
 
-export { createMarkdownStreamFromHTMLStream } from './stream.ts'
+export { streamHtmlToMarkdown } from './stream.ts'
 
 export type * from './types.ts'

@@ -6,83 +6,154 @@ export interface HTMLToMarkdownOptions {
   chunkSize?: number
 
   /**
-   * Base URL for resolving relative image paths
-   * If provided, relative image paths will be prefixed with this URL
-   */
-  imageResolver?: string
-
-  /**
-   * Origin URL for resolving relative image paths
-   * If provided, relative image paths will be resolved against this origin
+   * Origin URL for resolving relative image paths and internal links.
    */
   origin?: string
 
   /**
-   * Only start processing nodes after encountering the first h1 element
-   * @default true
+   * Does not wait for a header tag to be opened before processing HTML to markdown.
+   * @default false
    */
-  startAtFirstH1?: boolean
+  full?: boolean
 }
 
-// Node interface for HTML DOM
+// Node types
+export const ELEMENT_NODE = 1
+export const TEXT_NODE = 3
+
+/**
+ * Base DOM node interface
+ */
 export interface Node {
+  /** Node type (ELEMENT_NODE or TEXT_NODE) */
   type: number
+
+  /** Element tag name (for ELEMENT_NODE) */
   name?: string
+
+  /** Text content (for TEXT_NODE) */
   value?: string
+
+  /** HTML attributes (for ELEMENT_NODE) */
   attributes?: Record<string, string>
-  parentNode?: Node | null
-  children?: Node[]
-  context?: Record<string, any>
-  depth?: number // Adding depth property used during processing
-  pre?: boolean // Flag to indicate if the node is inside a pre tag
+
+  /** Parent node reference */
+  parentNode?: ParentNode | null
+
+  /** Current nesting depth in the DOM tree */
+  depth: number
+
+  /** Map of tag names to their nesting count */
+  depthMap: Record<string, number>
+
+  /** Whether this node has been completely processed */
   complete?: boolean
+
+  /** Whether this node should be excluded from output */
+  excluded: boolean
+
+  /** Whether this node is unsupported for processing */
+  unsupported: boolean
+
+  /** Index of this node within its parent's children */
+  index: number
 }
 
-// State management for markdown generation
-export interface DownstreamState {
-  processingHTMLDocument: boolean
+/**
+ * Parent node that can contain child nodes
+ */
+export interface ParentNode extends Node {
+  /** Current walk index for child traversal */
+  currentWalkIndex: number
+
+  /** Child nodes (not used in streaming mode) */
+  children?: Node[]
+}
+
+/**
+ * State interface for HTML parsing and processing
+ */
+export interface MdreamProcessingState {
+  /** Map of tag names to their current nesting depth */
+  depthMap: Record<string, number>
+
+  /** Current overall nesting depth */
+  depth: number
+
+  /** Currently processing element node */
+  currentElementNode: ParentNode | null
+
+  /** Depth at which an unsupported node was encountered */
+  inUnsupportedNodeDepth?: number
+
+  /** Depth at which an excluded node was encountered */
+  isExcludedNodeDepth?: number
+
+  /** Whether we're processing a full HTML document (with DOCTYPE) */
+  processingHTMLDocument?: boolean
+
+  /** Whether current content contains HTML entities that need decoding */
+  hasEncodedHtmlEntity?: boolean
+
+  /** Whether the last processed character was whitespace */
+  lastCharWasWhitespace?: boolean
+
+  /** Whether a tag was just closed (affects whitespace handling) */
+  justClosedTag?: boolean
+
+  /** Whether the next text node is the first in its element */
+  isFirstTextInElement?: boolean
+
+  /** Reference to the last processed text node */
+  lastTextNode?: Node
+
+  /** Whether we've entered the body tag */
+  enteredBody?: boolean
+
+  /** Whether we've seen a header tag */
+  hasSeenHeader?: boolean
+}
+
+/**
+ * Runtime state for markdown generation
+ */
+export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
+  /** Last new lines emitted */
+  lastNewLines: number
+
+  /** Accumulated markdown output buffer */
   buffer: string
 
-  // Configuration options
-  options: HTMLToMarkdownOptions
+  /** Configuration options */
+  options?: HTMLToMarkdownOptions
 
-  // Element context stack to track nested elements
-  nodeStack: Node[]
-
-  // Node tracking state
-  isInSupportedNode?: boolean
-  unsupportedNode?: Node // Reference to the currently skipped unsupported node
-
-  // Event tracking for streaming processing
-  previousEvents?: NodeEvent[]
-
-  // Table state
-  tableData: string[][]
-  tableCurrentRowCells: string[]
-  tableColumnAlignments: string[]
-  tableColspanWidth: number
-
-  // Parser state for handling incomplete HTML chunks
-  parseState?: {
-    inTag: boolean
-    inComment: boolean
-    inDoctype: boolean
-    inPreTag: boolean
-  }
-
-  // State for tracking first h1
-  seenFirstH1?: boolean
-  waitForFirstH1?: boolean
+  /** Table processing state */
+  tableNeedsThead?: boolean
+  tableCurrentRowCells?: number
+  tableColumnAlignments?: string[]
 }
 
-// Node event type for traversal
-export type NodeEvent =
-  | { type: 'enter', node: Node }
-  | { type: 'exit', node: Node }
+/**
+ * Node event for DOM traversal
+ */
+export interface NodeEvent {
+  /** Event type - enter or exit */
+  type: 'enter' | 'exit'
 
-// Define handler context type
-export interface HandlerContext {
+  /** The node being processed */
   node: Node
+}
+
+/**
+ * Handler context for markdown conversion
+ */
+export interface HandlerContext {
+  /** Current node being processed */
+  node: Node
+
+  /** Parent node (if any) */
   parent?: Node
-  state: DownstreamState
+
+  /** Runtime state */
+  state: MdreamRuntimeState
 }

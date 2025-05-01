@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src'
+import { asyncHtmlToMarkdown } from '../../../src'
 
-describe('combined Elements', () => {
+describe('combined Elements', async () => {
   it('handles complex content with multiple element types', async () => {
     const html = `
       <h1>Document Title</h1>
@@ -15,7 +15,7 @@ describe('combined Elements', () => {
       </blockquote>
       <pre><code class="language-js">console.log("Hello world!");</code></pre>
     `
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = await asyncHtmlToMarkdown(html)
     expect(markdown).toBe(
       '# Document Title\n\n'
       + 'This is a **bold** and *important* paragraph with a [link](https://example.com).\n\n'

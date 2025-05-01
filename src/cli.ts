@@ -1,6 +1,6 @@
 import type { HTMLToMarkdownOptions } from './types.ts'
 import { cac } from 'cac'
-import { createMarkdownStreamFromHTMLStream } from './stream.ts'
+import { streamHtmlToMarkdown } from './stream.ts'
 
 /**
  * CLI options interface
@@ -32,54 +32,24 @@ function createLogger(options: CliOptions = {}) {
   }
 }
 
-/**
- * Creates a buffered async iterable from an input stream
- * Collects chunks up to chunkSize before yielding
- */
-class ChunkedStreamReader {
-  private buffer: string = ''
-  private streamEnded: boolean = false
-  private streamReader: AsyncIterator<string>
-  private chunkSize: number
+function nodeStreamToWebReadable(nodeStream: NodeJS.ReadableStream): ReadableStream<Uint8Array | string> {
+  nodeStream.setEncoding('utf8') // Ensure we get string chunks
 
-  constructor(stream: AsyncIterable<string>, chunkSize: number) {
-    this.streamReader = stream[Symbol.asyncIterator]()
-    this.chunkSize = chunkSize
-  }
+  return new ReadableStream({
+    start(controller) {
+      nodeStream.on('data', (chunk) => {
+        controller.enqueue(chunk)
+      })
 
-  async* iterate(): AsyncGenerator<string> {
-    while (!this.streamEnded || this.buffer.length > 0) {
-      // Try to fill buffer if not at desired chunk size and stream not ended
-      while (!this.streamEnded && this.buffer.length < this.chunkSize) {
-        const result = await this.streamReader.next()
-        if (result.done) {
-          this.streamEnded = true
-          break
-        }
-        this.buffer += result.value
-      }
+      nodeStream.on('end', () => {
+        controller.close()
+      })
 
-      // Yield available chunk if we have any data
-      if (this.buffer.length > 0) {
-        const yieldSize = Math.min(this.buffer.length, this.chunkSize)
-        const chunk = this.buffer.slice(0, yieldSize)
-        this.buffer = this.buffer.slice(yieldSize)
-        yield chunk
-      }
-    }
-  }
-}
-
-/**
- * Creates an AsyncIterable from stdin
- */
-async function* streamToAsyncIterable(stream: NodeJS.ReadableStream): AsyncIterable<string> {
-  // Set up stdin to provide string data
-  stream.setEncoding('utf8')
-
-  for await (const chunk of stream) {
-    yield chunk as string
-  }
+      nodeStream.on('error', (err) => {
+        controller.error(err)
+      })
+    },
+  })
 }
 
 /**
@@ -117,14 +87,8 @@ async function streamingConvert(options: CliOptions = {}) {
   try {
     log('Starting conversion process')
 
-    // Create HTML input stream from stdin
-    const rawHtmlStream = streamToAsyncIterable(inputStream)
-
-    // Use our chunked reader to read in chunks of the specified size
-    const chunkedReader = new ChunkedStreamReader(rawHtmlStream, chunkSize)
-
     // Create a single markdown generator that processes the chunked HTML
-    const markdownGenerator = createMarkdownStreamFromHTMLStream(chunkedReader.iterate(), convertOptions)
+    const markdownGenerator = streamHtmlToMarkdown(nodeStreamToWebReadable(inputStream), convertOptions)
 
     // Process the markdown output with optional delay
     for await (const markdownChunk of markdownGenerator) {

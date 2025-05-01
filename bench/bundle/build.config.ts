@@ -6,6 +6,9 @@ import { defineBuildConfig } from 'unbuild'
 export default defineBuildConfig({
   entries: [
     'src/minimal',
+    'src/fetch',
+    'src/string',
+    'src/string2',
   ],
   outDir: 'dist',
   failOnWarn: false,

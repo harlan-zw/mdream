@@ -1,4 +1,4 @@
-import { createMarkdownStreamFromHTMLStream } from '../../../src/stream'
+import { streamHtmlToMarkdown } from '../../../src/stream'
 
 export default defineEventHandler(async (event) => {
   // Get the URL from query params
@@ -60,7 +60,7 @@ export default defineEventHandler(async (event) => {
     }
 
     // Convert HTML stream to markdown stream
-    const markdownStream = createMarkdownStreamFromHTMLStream(streamHTML())
+    const markdownStream = streamHtmlToMarkdown(streamHTML())
 
     // Send markdown chunks as SSE events
     for await (const chunk of markdownStream) {

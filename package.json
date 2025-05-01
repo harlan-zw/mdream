@@ -24,6 +24,8 @@
     "dist"
   ],
   "scripts": {
+    "flame": "pnpm build && unbuild bench/bundle && clinic flame -- node bench/bundle/dist/string2.mjs 10",
+    "bench": "pnpm build && unbuild bench/bundle && hyperfine --runs 100 'node bench/bundle/dist/string.mjs' --warmup 3",
     "ts": "node  --experimental-strip-types",
     "test::live": "curl -s https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax | node ./bin/mdream.mjs --origin https://docs.github.com | tee test/github-markdown.md",
     "test:images": "cat test/fixtures/test-origin.html | node ./bin/mdream.mjs --origin https://docs.github.com",
@@ -32,12 +34,12 @@
     "test:wiki:file": "cat test/fixtures/wikipedia-largest.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "test:wiki-small:file": "cat test/fixtures/wikipedia-small.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "build": "unbuild",
+    "typecheck": "tsc --noEmit",
     "dev:prepare": "unbuild --stub",
     "test": "vitest"
   },
   "dependencies": {
-    "cac": "^6.7.14",
-    "ofetch": "^1.4.1"
+    "cac": "^6.7.14"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.12.0",

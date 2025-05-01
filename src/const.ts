@@ -31,7 +31,6 @@ export const HTML_ENTITIES: Record<string, string> = {
 // Node type constants
 export const ELEMENT_NODE = 1
 export const TEXT_NODE = 2
-export const COMMENT_NODE = 3
 
 export const NON_SUPPORTED_NODES = new Set([
   'form',
@@ -56,8 +55,8 @@ export const NON_SUPPORTED_NODES = new Set([
   'meter',
   'progress',
   'template',
-
 ])
+
 export const NEW_LINE_CONFIG: Record<string, { enter: number, exit: number }> = {
   blockquote: { enter: 1, exit: 1 },
   code: { enter: 0, exit: 0 },
@@ -92,6 +91,8 @@ export const INLINE_ELEMENTS = [
   'link',
   'meta',
   'title',
+  'meta',
+  'head',
 ]
 
 export const MINIMAL_EXCLUDE_ELEMENTS = new Set([
@@ -100,3 +101,26 @@ export const MINIMAL_EXCLUDE_ELEMENTS = new Set([
   'nav',
   'aside',
 ])
+// Tags that don't support nested tags - they should be automatically closed when a new tag opens
+export const NON_NESTING_TAGS = new Set([
+  'title',
+  'textarea',
+  'style',
+  'script',
+  'noscript',
+  'iframe',
+  'noframes',
+  'xmp',
+  'plaintext',
+  'option',
+])
+
+export const USES_ATTRIBUTES = new Set([
+  'a',
+  'meta',
+  'code',
+  'img',
+  'th',
+])
+
+export const DEFAULT_CHUNK_SIZE = 8224

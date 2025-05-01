@@ -1,4 +1,4 @@
-import { syncHtmlToMarkdown } from '../../../src/index'
+import { asyncHtmlToMarkdown } from '../../../dist'
 
 function run() {
   // Full usage with all core features
@@ -17,7 +17,7 @@ function run() {
 <img src="image.jpg" alt="Image description">
 <p>Another paragraph.</p>
   `
-  const markdown = syncHtmlToMarkdown(html)
+  const markdown = asyncHtmlToMarkdown(html)
 
   process.stdout.write(markdown)
 }
