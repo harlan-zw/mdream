@@ -1,10 +1,10 @@
 <h1>mdream</h1>
 
-![logo](.github/logo.png)
-
 [![npm version](https://img.shields.io/npm/v/mdream?color=yellow)](https://npmjs.com/package/mdream)
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/mdream/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
+
+<img src=".github/logo.png" alt="mdream logo" width="200">
 
 > Ultra performant HTML to Markdown built for LLM content analysis.
 
