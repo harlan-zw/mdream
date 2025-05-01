@@ -1,11 +1,9 @@
-# mdream
+<h1>mdream</h1>
 
-[![npm version][npm-version-src]][npm-version-href]
-[![npm downloads][npm-downloads-src]][npm-downloads-href]
-[![License][license-src]][license-href]
-[![Node.js][nodejs-src]][nodejs-href]
+[![npm version](https://img.shields.io/npm/v/mdream?color=yellow)](https://npmjs.com/package/mdream)
+[![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 
-> Ultra performant HTML to Markdown streaming built for LLM workflows.
+> Ultra performant HTML to Markdown built for LLM content analysis.
 
 <p align="center">
 <table>
@@ -17,10 +15,11 @@
 </table>
 </p>
 
-Mdream is an opinionated, high-performance HTML to Markdown TypeScript package designed for large-scale content analysis through LLM. It can
-be used as a CLI or a package.
+Traditional HTML to Markdown converters are slow, bloated with dependencies, and produce output poorly suited for LLMs and content analysis.
 
-It's inspired by modern HTML parsing tools like [ultrahtml](https://github.com/natemoo-re/ultrahtml).
+Mdream is a high-performance, streaming HTML to Markdown parser built specifically for LLM pipelines. Features blazing-fast conversion speeds, minimal dependencies, ultra-low memory usage, and opinionated output optimized for both human readability and AI processing.
+
+Perfect for: RAG systems, web scraping, content extraction, ChatGPT/Claude integration, and large-scale document processing.
 
 ## Features
 
@@ -138,6 +137,12 @@ curl https://example.com | html2md | grep "important" > filtered.md
 - [High-Performance HTML to Markdown Converter Demo](https://mdream.js.org/demo)
 - [LLM Streaming Pipeline Example](https://github.com/mdream/llm-streaming-example)
 - [Enterprise-Scale Processing Benchmark](https://github.com/mdream/benchmark)
+
+## Credits
+
+Inspired by the work of:
+
+- [ultrahtml](https://github.com/natemoo-re/ultrahtml): HTML parsing
 
 ## License
 
