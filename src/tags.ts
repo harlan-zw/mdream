@@ -191,6 +191,7 @@ export const tagHandlers: Record<string, TagHandler> = {
   },
   table: {
     enter: ({ node, state }) => {
+      state.tableRenderedTable = false
       if (isInsideTableCell(node)) {
         return '<table>'
       }
@@ -204,7 +205,6 @@ export const tagHandlers: Record<string, TagHandler> = {
       if (isInsideTableCell(node)) {
         return '<thead>'
       }
-      state.tableNeedsThead = true
     },
     exit: ({ node }) => isInsideTableCell(node) ? '</thead>' : undefined,
   },
@@ -222,8 +222,8 @@ export const tagHandlers: Record<string, TagHandler> = {
       }
 
       // Handle header row separator
-      if (state.tableNeedsThead) {
-        state.tableNeedsThead = false
+      if (!state.tableRenderedTable) {
+        state.tableRenderedTable = true
 
         // Ensure we have alignments for all columns
         const alignments = state.tableColumnAlignments!
@@ -251,10 +251,6 @@ export const tagHandlers: Record<string, TagHandler> = {
     enter: ({ node, state }) => {
       if (node.depthMap.table > 1) {
         return '<th>'
-      }
-
-      if (state.tableNeedsThead !== false) {
-        state.tableNeedsThead = true
       }
 
       // Handle alignment

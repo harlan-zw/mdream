@@ -128,7 +128,7 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   options?: HTMLToMarkdownOptions
 
   /** Table processing state */
-  tableNeedsThead?: boolean
+  tableRenderedTable?: boolean
   tableCurrentRowCells?: number
   tableColumnAlignments?: string[]
 }
