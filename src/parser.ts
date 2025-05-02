@@ -54,7 +54,7 @@ function isWhitespace(charCode: number): boolean {
  */
 export function parseHTML(htmlChunk: string, state: MdreamProcessingState): {
   events: NodeEvent[]
-  partialHTML: string
+  unprocessedHtml: string
 } {
   const events: NodeEvent[] = []
   let textBuffer = '' // Buffer to accumulate text content
@@ -186,7 +186,7 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState): {
 
   return {
     events,
-    partialHTML: textBuffer,
+    unprocessedHtml: textBuffer,
   }
 }
 
@@ -806,16 +806,18 @@ export function processPartialHTMLToMarkdown(
   state.buffer ??= ''
 
   // Check for DOCTYPE at the beginning (optimized)
-  if (!state.buffer && partialHtml.charCodeAt(0) === LT_CHAR
-    && partialHtml.charCodeAt(1) === EXCLAMATION_CHAR) {
-    state.processingHTMLDocument = true
+  if (!state.buffer) {
+    partialHtml = partialHtml.trimStart()
+    if (partialHtml.charCodeAt(0) === LT_CHAR && partialHtml.charCodeAt(1) === EXCLAMATION_CHAR) {
+      state.processingHTMLDocument = true
+    }
   }
 
   state.options ??= { chunkSize }
 
   // Parse HTML into a DOM tree with events
   // @ts-expect-error untyped
-  const { events, partialHTML } = parseHTML(partialHtml, state)
+  const { events, unprocessedHtml } = parseHTML(partialHtml, state)
 
   // Process events from the parser
   let chunk = ''
@@ -858,5 +860,5 @@ export function processPartialHTMLToMarkdown(
     }
   }
 
-  return { chunk, remainingHTML: partialHTML }
+  return { chunk, remainingHTML: unprocessedHtml }
 }

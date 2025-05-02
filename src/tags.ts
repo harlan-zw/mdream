@@ -7,7 +7,7 @@ interface TagHandler {
 
 // Pre-defined strings to avoid repeated allocations
 const FRONTMATTER_START = '---'
-const FRONTMATTER_END = '\n---\n\n'
+const FRONTMATTER_END = '\n---'
 const MARKDOWN_STRONG = '**'
 const MARKDOWN_EMPHASIS = '*'
 const MARKDOWN_STRIKETHROUGH = '~~'
