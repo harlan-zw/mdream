@@ -204,6 +204,9 @@ export const tagHandlers: Record<string, TagHandler> = {
       if (isInsideTableCell(node)) {
         return '<table>'
       }
+      if (node.depthMap.table <= 1) {
+        state.tableRenderedTable = false
+      }
       // Initialize table state
       state.tableColumnAlignments = []
     },
@@ -226,7 +229,7 @@ export const tagHandlers: Record<string, TagHandler> = {
       return '| '
     },
     exit: ({ node, state }) => {
-      if (isInsideTableCell(node)) {
+      if (isInsideTableCell(node) || node.depthMap.table > 1) {
         return '</tr>'
       }
 
