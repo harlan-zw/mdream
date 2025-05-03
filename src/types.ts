@@ -1,3 +1,18 @@
+/**
+ * Worker factory configuration
+ */
+export interface WorkerConfig {
+  /**
+   * Worker factory function
+   */
+  factory: any // Using any to avoid circular dependencies
+  
+  /**
+   * Maximum number of workers to create
+   */
+  maxWorkers?: number
+}
+
 export interface HTMLToMarkdownOptions {
   /**
    * Size of chunks to yield in streaming mode
@@ -15,6 +30,24 @@ export interface HTMLToMarkdownOptions {
    * @default false
    */
   full?: boolean
+
+  /**
+   * Use worker threads for parallel processing
+   * @default true
+   */
+  useWorkers?: boolean
+
+  /**
+   * Number of worker threads to use for parsing
+   * @default CPU count - 1 (min 1, max 4)
+   */
+  workerCount?: number
+  
+  /**
+   * Worker configuration - provides a specific worker implementation
+   * When specified, this overrides useWorkers and workerCount
+   */
+  worker?: WorkerConfig
 }
 
 // Node types

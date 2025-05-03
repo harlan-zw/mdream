@@ -31,6 +31,7 @@ Perfect for: RAG systems, web scraping, content extraction, ChatGPT/Claude integ
 - 🔍 Advanced Content Preservation: Maintain tables, code blocks, and complex structures accurately.
 - ⚙️ Flexible Implementation: Simple API with sync/streaming options and command-line interface.
 - ⚡ Ultra Fast Performance: Tiny 4.4kb footprint, zero dependencies, and 5-10x faster than similar libraries.
+- 🔄 Parallel Processing: Use worker threads to process HTML chunks in parallel for even faster performance.
 
 ### Opinionated Parsing
 
@@ -69,6 +70,8 @@ cat index.html \
 
 - `--chunk-size <size>`: Set the chunk size for processing (default: 4096)
 - `-v, --verbose`: Enable verbose debug logging to stderr
+- `--workers <count>`: Number of worker threads to use for parallel processing (default: 4)
+- `--no-workers`: Disable worker threads and process in a single thread
 - `--help`: Display help information
 - `--version`: Display version information
 
@@ -108,8 +111,56 @@ console.log(markdown) // # Hello World
 ```ts
 import { streamHtmlToMarkdown } from 'mdream'
 
-fetch()
+const response = await fetch('https://example.com')
+const htmlStream = response.body
+const markdownStream = streamHtmlToMarkdown(htmlStream, {
+  origin: 'https://example.com'
+  // Workers are enabled by default with 4 threads
+  // You can customize with useWorkers: false or workerCount: n
+})
+
+// Process the markdown stream
+for await (const chunk of markdownStream) {
+  console.log(chunk)
+}
 ```
+
+**Worker Configuration**
+
+```ts
+// OPTION 1: Automatic detection (recommended)
+// Default behavior automatically uses the right worker type for your environment
+import { asyncHtmlToMarkdown } from 'mdream'
+
+const markdown = await asyncHtmlToMarkdown(html)
+
+// OPTION 2: Explicit worker configuration
+import { asyncHtmlToMarkdown } from 'mdream'
+import { worker, createWorker } from 'mdream/worker'
+
+// Using the worker factory directly
+const markdown = await asyncHtmlToMarkdown(html, {
+  worker: {
+    factory: worker,
+    maxWorkers: 4 // Optional: control number of workers
+  }
+})
+
+// Or using the helper function
+const markdown = await asyncHtmlToMarkdown(html, {
+  worker: createWorker({ maxWorkers: 4 })
+})
+
+// OPTION 3: Disable workers completely
+import { asyncHtmlToMarkdown } from 'mdream'
+
+const markdown = await asyncHtmlToMarkdown(html, {
+  useWorkers: false
+})
+console.log(markdown)
+```
+
+See [examples/workers-usage.md](examples/workers-usage.md) for more examples.
 
 ## CLI Usage
 

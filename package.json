@@ -14,7 +14,14 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs"
     },
-    "./cli": "./dist/cli.mjs"
+    "./cli": "./dist/cli.mjs",
+    "./worker": {
+      "types": "./dist/workers/native/parser.worker.d.mts",
+      "browser": "./dist/workers/native/parser.worker.mjs",
+      "node": "./dist/workers/node/parser.worker.mjs",
+      "worker": "./dist/workers/native/parser.worker.mjs",
+      "workerd": "./dist/workers/native/parser.worker.mjs"
+    }
   },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.ts",

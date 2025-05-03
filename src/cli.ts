@@ -1,6 +1,7 @@
 import type { HTMLToMarkdownOptions } from './types.ts'
 import { cac } from 'cac'
 import { streamHtmlToMarkdown } from './stream.ts'
+import nodeWorkerFactory from './workers/node/node-factory'
 
 /**
  * CLI options interface
@@ -10,6 +11,8 @@ interface CliOptions {
   verbose?: boolean
   origin?: string
   delay?: number | string
+  workers?: number | string | boolean
+  noWorkers?: boolean
 }
 
 /**
@@ -64,11 +67,23 @@ async function streamingConvert(options: CliOptions = {}) {
   log('streamingConvert started')
 
   // Configure conversion options with safe property access
-  const chunkSize = Number.parseInt(String(options?.chunkSize || ''), 10) || 4096
+  const chunkSize = Number.parseInt(String(options?.chunkSize || ''), 10) || 30_000
   const delayMs = Number.parseInt(String(options?.delay || ''), 10) || 0
+
+  // Handle worker thread options
+  const useWorkers = !options?.noWorkers
 
   const convertOptions: HTMLToMarkdownOptions = {
     chunkSize,
+    useWorkers
+  }
+
+  // Configure workers if enabled
+  if (useWorkers) {
+    // Use auto-detecting worker factory
+    convertOptions.worker = {
+      factory: nodeWorkerFactory,
+    }
   }
 
   // Add origin if provided
@@ -119,6 +134,8 @@ cli.command('[options]', 'Convert HTML from stdin to Markdown on stdout')
   .option('-v, --verbose', 'Enable verbose debug logging')
   .option('--origin <url>', 'Origin URL for resolving relative image paths')
   .option('--delay <ms>', 'Artificial delay in ms between processing chunks', { default: 0 })
+  .option('--workers <count>', 'Number of worker threads to use for parallel processing', { default: 4 })
+  .option('--no-workers', 'Disable worker threads and process in a single thread', { default: false })
   .action(async (_, opts) => {
     await streamingConvert(opts)
   })

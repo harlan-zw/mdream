@@ -224,7 +224,7 @@ export const tagHandlers: Record<string, TagHandler> = {
       // Handle header row separator
       if (!state.tableRenderedTable) {
         state.tableRenderedTable = true
-
+        state.tableColumnAlignments = state.tableColumnAlignments || []
         // Ensure we have alignments for all columns
         const alignments = state.tableColumnAlignments!
         while (alignments.length < state.tableCurrentRowCells!) {
@@ -253,6 +253,7 @@ export const tagHandlers: Record<string, TagHandler> = {
         return '<th>'
       }
 
+      state.tableColumnAlignments = state.tableColumnAlignments || []
       // Handle alignment
       const align = node.attributes?.align?.toLowerCase()
       if (align) {

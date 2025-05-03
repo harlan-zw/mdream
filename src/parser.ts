@@ -800,7 +800,7 @@ export function processPartialHTMLToMarkdown(
   partialHtml: string,
   state: Partial<MdreamRuntimeState> = {},
 ): { chunk: string, remainingHTML: string } {
-  const chunkSize = state?.options?.chunkSize || 4096
+  const chunkSize = state?.options?.chunkSize || 30_000
 
   // Initialize state if not already present
   state.buffer ??= ''
