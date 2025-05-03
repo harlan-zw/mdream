@@ -24,10 +24,19 @@ function resolveUrl(url: string, origin?: string): string {
     return `https:${url}`
   }
 
-  if (url.startsWith('/') && origin) {
-    // Remove trailing slash from origin if present
-    const cleanOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin
-    return `${cleanOrigin}${url}`
+  if (origin) {
+    if (url.startsWith('/') && origin) {
+      // Remove trailing slash from origin if present
+      const cleanOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin
+      return `${cleanOrigin}${url}`
+    }
+
+    // relative url
+    if (!url.startsWith('http')) {
+      // Remove leading slash if present
+      const cleanUrl = url.startsWith('/') ? url.slice(1) : url
+      return `${origin}/${cleanUrl}`
+    }
   }
 
   return url
