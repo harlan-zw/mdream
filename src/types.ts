@@ -60,14 +60,15 @@ export interface Node {
 
   /** Current walk index for child traversal */
   currentWalkIndex: number
+
+  /** The text child nodes of the parent node */
+  childTextNodeIndex: number
 }
 
 /**
  * Parent node that can contain child nodes
  */
 export interface ParentNode extends Node {
-  /** The text child nodes of the parent node */
-  childTextNodeIndex: number
 
   /** Child nodes (not used in streaming mode) */
   children?: Node[]

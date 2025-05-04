@@ -203,8 +203,8 @@ export const tagHandlers: Record<string, TagHandler> = {
         return ''
       }
       let prefix = ''
-      // no link was emitting, try and use aria label or title
-      if (state.buffer[state.buffer.length - 1] === '[') {
+      // no text children were emitted - should try use fallback
+      if (!node.childTextNodeIndex) {
         prefix = node.attributes?.title || node.attributes?.['aria-label'] || ''
       }
       const href = resolveUrl(node.attributes?.href || '', state.options?.origin)
