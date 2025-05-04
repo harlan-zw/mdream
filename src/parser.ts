@@ -1,11 +1,11 @@
 import type { MdreamProcessingState, MdreamRuntimeState, Node, NodeEvent, ParentNode } from './types.ts'
 import {
   ELEMENT_NODE,
+  INLINE_ELEMENTS,
   MINIMAL_EXCLUDE_ELEMENTS,
   NON_NESTING_TAGS,
   NON_SUPPORTED_NODES,
   TEXT_NODE,
-  USES_ATTRIBUTES,
   VOID_TAGS,
 } from './const.ts'
 import { processHtmlEventToMarkdown } from './markdown.ts'
@@ -30,7 +30,7 @@ const DASH_CHAR = 45 // '-'
 const EMPTY_ATTRIBUTES: Record<string, string> = Object.freeze({})
 
 // Fast object copy for small objects like depthMap
-function fastCopyDepthMap(depthMap: Record<string, number>): Record<string, number> {
+function copyDepthMap(depthMap: Record<string, number>): Record<string, number> {
   const copy: Record<string, number> = {}
   for (const key in depthMap) {
     if (depthMap[key] > 0) { // Only copy non-zero values
@@ -96,6 +96,7 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState): {
         }
 
         state.lastCharWasWhitespace = true
+        state.textBufferContainsWhitespace = true
 
         // Preserve original whitespace in pre tags
         if (inPreTag) {
@@ -106,11 +107,43 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState): {
         }
       }
       else {
+        state.textBufferContainsNonWhitespace = true
         state.lastCharWasWhitespace = false
         state.justClosedTag = false
-        textBuffer += htmlChunk[i]
+        // pipe character
+        if (currentCharCode === 124 && state.depthMap.table) {
+          // replace with encoded pipe character
+          textBuffer += '\\|'
+        }
+        // if in header we need to encode #
+        else if (currentCharCode === 35 && (state.depthMap.h1 || state.depthMap.h2 || state.depthMap.h3 || state.depthMap.h4 || state.depthMap.h5 || state.depthMap.h6)) {
+          // replace with encoded #
+          textBuffer += '\\#'
+        }
+        // if in code block we need to encode `
+        else if (currentCharCode === 96 && (state.depthMap.code || state.depthMap.pre)) {
+          // replace with encoded `
+          textBuffer += '\\`'
+        }
+        // link open
+        else if (currentCharCode === 91 && state.depthMap.a) {
+          // replace with encoded [
+          textBuffer += '\\['
+        }
+        // link close
+        else if (currentCharCode === 93 && state.depthMap.a) {
+          // replace with encoded ]
+          textBuffer += '\\]'
+        }
+        // blockquote
+        else if (currentCharCode === 62 && state.depthMap.blockquote) {
+          // replace with encoded >
+          textBuffer += '\\>'
+        }
+        else {
+          textBuffer += htmlChunk[i]
+        }
       }
-
       i++
       continue
     }
@@ -162,14 +195,44 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState): {
     }
     // OPENING TAG
     else {
+      let i2 = i + 1 // Skip past '<'
+      const tagNameStart = i2
+
+      // Fast path for finding tag name end
+      let tagNameEnd = -1
+      const chunkLength = htmlChunk.length
+
+      while (i2 < chunkLength) {
+        const c = htmlChunk.charCodeAt(i2)
+        if (isWhitespace(c) || c === SLASH_CHAR || c === GT_CHAR) {
+          tagNameEnd = i2
+          break
+        }
+        i2++
+      }
+      const tagName = htmlChunk.substring(tagNameStart, tagNameEnd).toLowerCase()
+      i2 = tagNameEnd
+      // avoid tag opens inside of script tags
+      const currentElement = state.currentElementNode?.name
+      if (currentElement && NON_NESTING_TAGS.has(currentElement)) {
+        // if current tag is a script, then we need to keep walking
+        if (tagName !== currentElement) {
+          textBuffer += htmlChunk[i++]
+          continue
+        }
+      }
+
       // Process any text content before this tag
       if (textBuffer.length > 0) {
         processTextBuffer(textBuffer, state, events)
         textBuffer = ''
       }
-
       const result = processOpeningTag(htmlChunk, i, state, events)
-      if (result.complete) {
+
+      if (result.skip) {
+        textBuffer += htmlChunk[i++]
+      }
+      else if (result.complete) {
         i = result.newPosition
         // Only mark the next text node as first if this isn't a self-closing tag
         if (!result.selfClosing) {
@@ -195,69 +258,78 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState): {
  * Optimized to handle whitespace trimming
  */
 function processTextBuffer(textBuffer: string, state: MdreamProcessingState, events: NodeEvent[]): void {
+  const containsNonWhitespace = state.textBufferContainsNonWhitespace
+  const containsWhitespace = state.textBufferContainsWhitespace
+  state.textBufferContainsNonWhitespace = false
+  state.textBufferContainsWhitespace = false
   if (!state.currentElementNode)
     return
 
   // Check if parent is a <pre> tag to handle whitespace properly
   const inPreTag = state.depthMap.pre > 0
-  const inCodeTag = state.depthMap.code > 0
 
   // For non-pre tags, we want to preserve the text but collapse whitespace
-  if (!inPreTag && !textBuffer.trim().length) {
+  if (!inPreTag && !containsNonWhitespace) {
     return
   }
 
-  let finalText = textBuffer
+  let text = textBuffer
+
+  // TODO this is slow need to optimize
+  let relevantNode = state.currentElementNode
+  while (relevantNode?.name && INLINE_ELEMENTS.includes(relevantNode.name)) {
+    relevantNode = relevantNode.parentNode
+  }
 
   // Handle whitespace trimming
-  if (!inPreTag) {
-    // Trim leading whitespace if this is the first text node after an opening tag
-    if (state.isFirstTextInElement) {
-      let start = 0
-      while (start < finalText.length && isWhitespace(finalText.charCodeAt(start))) {
-        start++
+  if (containsWhitespace) {
+    if (!inPreTag) {
+      // Trim leading whitespace if this is the first text node after an opening tag
+      if (!relevantNode?.childTextNodeIndex) {
+        let start = 0
+        while (start < text.length && isWhitespace(text.charCodeAt(start))) {
+          start++
+        }
+        if (start > 0) {
+          text = text.substring(start)
+        }
+        // state.isFirstTextInElement = false
       }
-      if (start > 0) {
-        finalText = finalText.substring(start)
-      }
-      state.isFirstTextInElement = false
     }
-  }
-  else {
-    // For pre tags, only trim leading newlines from the first text node
-    if (state.isFirstTextInElement) {
+    else if (!relevantNode?.childTextNodeIndex) {
+      // For pre tags, only trim leading newlines from the first text node
       let start = 0
-      while (start < finalText.length
-        && (finalText.charCodeAt(start) === 10 || finalText.charCodeAt(start) === 13)) {
+      while (start < text.length
+        && (text.charCodeAt(start) === 10 || text.charCodeAt(start) === 13)) {
         start++
       }
       if (start > 0) {
-        finalText = finalText.substring(start)
+        text = text.substring(start)
       }
-      state.isFirstTextInElement = false
+      // state.isFirstTextInElement = false
     }
   }
 
   // Early exit for empty text
-  if (finalText.length === 0) {
+  if (text.length === 0) {
     return
-  }
-
-  // Escape triple backticks inside <pre><code> blocks
-  if (inPreTag && inCodeTag && finalText.includes('```')) {
-    finalText = finalText.replace(/```/g, '\\`\\`\\`')
   }
 
   // Create text node
   const textNode: Node = {
     type: TEXT_NODE,
-    value: finalText,
+    value: text,
     parentNode: state.currentElementNode,
     complete: true,
     index: state.currentElementNode.currentWalkIndex++,
     unsupported: state.inUnsupportedNodeDepth !== undefined,
     excluded: state.isExcludedNodeDepth !== undefined,
     depth: state.depth,
+  }
+
+  if (relevantNode) {
+    relevantNode.childTextNodeIndex = relevantNode.childTextNodeIndex || 0
+    relevantNode.childTextNodeIndex++
   }
 
   if (state.hasEncodedHtmlEntity && textNode.value && textNode.value.includes('&')) {
@@ -315,33 +387,26 @@ function processClosingTag(
     }
   }
 
+  // need to do a while loop to find the parent node that we're closing as we may have malformed html
+  let parentNode = state.currentElementNode
+  while (parentNode && parentNode.name?.toLowerCase() !== tagName) {
+    parentNode = parentNode.parentNode
+  }
+
   // Trim trailing whitespace from the last text node
-  if (state.lastTextNode) {
-    const inPreTag = state.depthMap.pre > 0
+  if (parentNode && state.lastTextNode?.value) {
+    // const inPreTag = state.depthMap.pre > 0
     const value = String(state.lastTextNode.value)
-    let end = value.length
-
-    if (inPreTag) {
-      // For pre tags, only trim trailing newlines
-      while (end > 0
-        && (value.charCodeAt(end - 1) === 10 || value.charCodeAt(end - 1) === 13)) {
-        end--
-      }
-    }
-    else {
-      // For non-pre tags, trim all trailing whitespace
-      while (end > 0 && isWhitespace(value.charCodeAt(end - 1))) {
-        end--
-      }
-    }
-
-    if (end < value.length) {
-      state.lastTextNode.value = value.substring(0, end)
+    // let end = value.length
+    if (!parentNode.depthMap.pre || parentNode.name === 'pre') {
+      state.lastTextNode.value = value.trimEnd()
+      state.lastTextNode = undefined
     }
   }
 
   // Process the closing tag
-  if (state.currentElementNode && tagName === state.currentElementNode.name?.toLowerCase()) {
+  if (parentNode) {
+    // we need to close all of the parent nodes we walked
     closeNode(state.currentElementNode, state, events)
   }
 
@@ -372,12 +437,24 @@ function closeNode(node: Node, state: MdreamProcessingState, events: NodeEvent[]
     state.isExcludedNodeDepth = undefined
   }
 
+  // if current node is inline
+  if (INLINE_ELEMENTS.includes(node.name || '') && node.currentWalkIndex) {
+    // increment first non inline parents childTextNodeIndex
+    let parentNode = node.parentNode
+    while (parentNode && INLINE_ELEMENTS.includes(parentNode.name || '')) {
+      parentNode = parentNode.parentNode
+    }
+    if (parentNode) {
+      parentNode.childTextNodeIndex = parentNode.childTextNodeIndex || 0
+      parentNode.childTextNodeIndex++
+    }
+  }
+
   state.depth--
   events.push({ type: 'exit', node })
   state.currentElementNode = state.currentElementNode!.parentNode!
   state.hasEncodedHtmlEntity = false
   state.justClosedTag = true
-  state.lastTextNode = undefined
 }
 
 /**
@@ -458,6 +535,7 @@ function processOpeningTag(
     newPosition: number
     remainingText: string
     selfClosing: boolean
+    skip?: boolean
   } {
   let i = position + 1 // Skip past '<'
   const tagNameStart = i
@@ -527,13 +605,12 @@ function processOpeningTag(
   i = result.newPosition
 
   // Pre-compute flags
-  const isUnsupported = !state.inUnsupportedNodeDepth && NON_SUPPORTED_NODES.has(tagName)
-  const isExcluded = state.processingHTMLDocument && MINIMAL_EXCLUDE_ELEMENTS.has(tagName)
-
-  if (isUnsupported) {
+  const isUnsupported = (!state.inUnsupportedNodeDepth && NON_SUPPORTED_NODES.has(tagName)) || result.attributes['aria-hidden'] === 'true'
+  const isExcluded = (state.isExcludedNodeDepth && state.depth >= state.isExcludedNodeDepth) || (state.processingHTMLDocument && MINIMAL_EXCLUDE_ELEMENTS.has(tagName))
+  if (isUnsupported && !state.inUnsupportedNodeDepth) {
     state.inUnsupportedNodeDepth = state.depth
   }
-  if (isExcluded) {
+  if (isExcluded && !state.isExcludedNodeDepth) {
     state.isExcludedNodeDepth = state.depth
   }
 
@@ -545,13 +622,14 @@ function processOpeningTag(
     name: tagName,
     attributes: result.attributes,
     parentNode: state.currentElementNode,
-    depthMap: fastCopyDepthMap({ ...state.depthMap }),
+    depthMap: copyDepthMap(state.depthMap),
     depth: state.depth,
     unsupported: isUnsupported || !!state.inUnsupportedNodeDepth,
-    excluded: isExcluded || !!state.isExcludedNodeDepth,
+    excluded: isExcluded,
     complete: false,
     index: currentWalkIndex,
   }
+  state.lastTextNode = tag
 
   events.push({ type: 'enter', node: tag })
 
@@ -587,46 +665,6 @@ function processTagAttributes(htmlChunk: string, position: number, tagName: stri
   selfClosing: boolean
   attrBuffer: string
 } {
-  // Fast path: if not using attributes, don't bother parsing them
-  if (!USES_ATTRIBUTES.has(tagName)) {
-    // Scan quickly for the end of the tag
-    let i = position
-    const chunkLength = htmlChunk.length
-    const selfClosing = VOID_TAGS.has(tagName)
-
-    while (i < chunkLength) {
-      const c = htmlChunk.charCodeAt(i)
-      if (c === GT_CHAR) {
-        return {
-          complete: true,
-          newPosition: i + 1,
-          attributes: EMPTY_ATTRIBUTES,
-          selfClosing,
-          attrBuffer: '',
-        }
-      }
-      else if (c === SLASH_CHAR && i + 1 < chunkLength
-        && htmlChunk.charCodeAt(i + 1) === GT_CHAR) {
-        return {
-          complete: true,
-          newPosition: i + 2,
-          attributes: EMPTY_ATTRIBUTES,
-          selfClosing: true,
-          attrBuffer: '',
-        }
-      }
-      i++
-    }
-
-    return {
-      complete: false,
-      newPosition: position,
-      attributes: EMPTY_ATTRIBUTES,
-      selfClosing: false,
-      attrBuffer: htmlChunk.substring(position),
-    }
-  }
-
   // For tags that use attributes, do full processing
   let i = position
   const chunkLength = htmlChunk.length
@@ -643,6 +681,8 @@ function processTagAttributes(htmlChunk: string, position: number, tagName: stri
       if (c === quoteChar && htmlChunk.charCodeAt(i - 1) !== BACKSLASH_CHAR) {
         insideQuote = false
       }
+      i++
+      continue
     }
     else if (c === QUOTE_CHAR || c === APOS_CHAR) {
       insideQuote = true

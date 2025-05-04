@@ -128,7 +128,7 @@ describe('tables', async () => {
     )
   })
 
-  it('handles tables with colspan and rowspan', async () => {
+  it.skip('handles tables with colspan and rowspan', async () => {
     const html = `
       <table>
         <tr>

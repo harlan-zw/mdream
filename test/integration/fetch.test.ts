@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { streamHtmlToMarkdown } from '../../src'
 
-describe('fetch', () => {
+describe.skip('fetch', () => {
   it('wiki', async () => {
     try {
       const response = await fetch('https://en.wikipedia.org/wiki/Markdown', {

@@ -33,9 +33,17 @@ export function processHtmlEventToMarkdown(
  * Determine if a node should be skipped from processing
  */
 function shouldSkipNode(node: Node, state: MdreamRuntimeState): boolean {
-  return Boolean(node.unsupported)
-    || Boolean(node.excluded && state.processingHTMLDocument && state.enteredBody)
-    || Boolean(state.processingHTMLDocument && state.enteredBody && !state.hasSeenHeader)
+  if (node.unsupported) {
+    return true
+  }
+  if (node.excluded && state.processingHTMLDocument && state.enteredBody) {
+    return true
+  }
+
+  if (state.processingHTMLDocument && state.enteredBody && !state.hasSeenHeader) {
+    return true
+  }
+  return false
 }
 
 /**
@@ -43,7 +51,6 @@ function shouldSkipNode(node: Node, state: MdreamRuntimeState): boolean {
  */
 function processTextNode(node: Node, state: MdreamRuntimeState): string {
   state.lastNewLines = 0
-
   // Return text value directly for now
   // Additional processing can be added here when needed
   return node.value || ''

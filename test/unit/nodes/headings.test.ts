@@ -37,4 +37,14 @@ describe('headings', async () => {
     const markdown = await asyncHtmlToMarkdown(html)
     expect(markdown).toBe('###### Heading 6')
   })
+
+  it('nested headers', async () => {
+    const html = '<a href="/test"><h1>Heading 1</h1></a><ul><li><h2>Heading 2</h2></li></ul>'
+    const markdown = await asyncHtmlToMarkdown(html)
+    expect(markdown).toMatchInlineSnapshot(`
+      "[<h1>Heading 1</h1>](/test)
+
+      - ## Heading 2"
+    `)
+  })
 })

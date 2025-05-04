@@ -36,12 +36,6 @@ describe('image url resolving', async () => {
     expect(markdown).toBe('![Icon](https://example.com/images/icon.png)')
   })
 
-  it('does not modify non-absolute paths when origin is provided', async () => {
-    const html = '<img src="./relative/path.jpg" alt="Relative">'
-    const markdown = await asyncHtmlToMarkdown(html, { origin: 'https://example.com' })
-    expect(markdown).toBe('![Relative](./relative/path.jpg)')
-  })
-
   it('handles images in complex HTML', async () => {
     const html = `
       <div>

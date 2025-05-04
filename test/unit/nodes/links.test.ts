@@ -19,4 +19,10 @@ describe('links', async () => {
     const markdown = await asyncHtmlToMarkdown(html)
     expect(markdown).toBe('Visit [Example](https://example.com) for more info.')
   })
+
+  it('handles links with only aria-label', async () => {
+    const html = `<a href="https://nuxt.new/s/v3" tabindex="-1" rel="noopener noreferrer" target="_blank" aria-label="Open on StackBlitz" class="focus:outline-none"><!--[--><!--[--><span class="absolute inset-0" aria-hidden="true"></span><!--]--><!--]--></a>`
+    const markdown = await asyncHtmlToMarkdown(html)
+    expect(markdown).toBe('[Open on StackBlitz](https://nuxt.new/s/v3)')
+  })
 })

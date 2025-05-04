@@ -57,14 +57,17 @@ export interface Node {
 
   /** Index of this node within its parent's children */
   index: number
+
+  /** Current walk index for child traversal */
+  currentWalkIndex: number
 }
 
 /**
  * Parent node that can contain child nodes
  */
 export interface ParentNode extends Node {
-  /** Current walk index for child traversal */
-  currentWalkIndex: number
+  /** The text child nodes of the parent node */
+  childTextNodeIndex: number
 
   /** Child nodes (not used in streaming mode) */
   children?: Node[]
@@ -97,6 +100,12 @@ export interface MdreamProcessingState {
 
   /** Whether the last processed character was whitespace */
   lastCharWasWhitespace?: boolean
+
+  /** Whether the last processed buffer has whitespace */
+  textBufferContainsWhitespace?: boolean
+
+  /** Whether the last processed buffer contains non-whitespace characters */
+  textBufferContainsNonWhitespace?: boolean
 
   /** Whether a tag was just closed (affects whitespace handling) */
   justClosedTag?: boolean

@@ -42,4 +42,30 @@ describe('lists', async () => {
       - [Basic formatting syntax](/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax)"
     `)
   })
+
+  it('self closing tags in lists', async () => {
+    const html = `<ul class="hds-term-items"></li>
+
+<li class='hds-term-item mission-terms-10828 hds-term-depth-0'><div class="hds-term-item-inner">
+\t\t\t\t\t<label class="hds-term-item-checkbox selectit hds-term-depth-0">
+\t\t\t\t\t<input
+\t\t\t\t\t\tvalue="10828"
+\t\t\t\t\t\ttype="checkbox"
+\t\t\t\t\t\tname="mission-terms[]"
+\t\t\t\t\t\tid="in-mission-terms-10828" /> Active</label></div></li>
+
+<li class='hds-term-item mission-terms-10873 hds-term-depth-0'><div class="hds-term-item-inner">
+\t\t\t\t\t<label class="hds-term-item-checkbox selectit hds-term-depth-0">
+\t\t\t\t\t<input
+\t\t\t\t\t\tvalue="10873"
+\t\t\t\t\t\ttype="checkbox"
+\t\t\t\t\t\tname="mission-terms[]"
+\t\t\t\t\t\tid="in-mission-terms-10873" /> Future</label></div></li>
+`
+    const markdown = await asyncHtmlToMarkdown(html)
+    expect(markdown).toMatchInlineSnapshot(`
+      "- Active
+      - Future"
+    `)
+  })
 })

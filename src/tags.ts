@@ -30,6 +30,10 @@ function resolveUrl(url: string, origin?: string): string {
       const cleanOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin
       return `${cleanOrigin}${url}`
     }
+    // handle ./ paths
+    if (url.startsWith('./')) {
+      return `${origin}/${url.slice(2)}`
+    }
 
     // relative url
     if (!url.startsWith('http')) {
@@ -60,6 +64,22 @@ function getLanguageFromClass(className: string | undefined): string {
   return langParts.length > 0 ? langParts[0].trim() : ''
 }
 
+function handleHeading(depth: number): TagHandler {
+  return {
+    enter: ({ node }) => {
+      if (node.depthMap?.a) {
+        return `<h${depth}>`
+      }
+      return `${'#'.repeat(depth)} `
+    },
+    exit: ({ node }) => {
+      if (node.depthMap?.a) {
+        return `</h${depth}>`
+      }
+    },
+  }
+}
+
 export const tagHandlers: Record<string, TagHandler> = {
   head: {
     enter: () => FRONTMATTER_START,
@@ -67,11 +87,11 @@ export const tagHandlers: Record<string, TagHandler> = {
   },
   details: {
     enter: () => '<details>',
-    exit: () => '</details>',
+    exit: () => '</details>\n\n',
   },
   summary: {
     enter: () => '<summary>',
-    exit: () => '</summary>',
+    exit: () => '</summary>\n\n',
   },
   title: {
     enter: () => '\ntitle: "',
@@ -91,24 +111,12 @@ export const tagHandlers: Record<string, TagHandler> = {
       return isInsideTableCell(node) ? '<br>' : undefined
     },
   },
-  h1: {
-    enter: () => '# ',
-  },
-  h2: {
-    enter: () => '## ',
-  },
-  h3: {
-    enter: () => '### ',
-  },
-  h4: {
-    enter: () => '#### ',
-  },
-  h5: {
-    enter: () => '##### ',
-  },
-  h6: {
-    enter: () => '###### ',
-  },
+  h1: handleHeading(1),
+  h2: handleHeading(2),
+  h3: handleHeading(3),
+  h4: handleHeading(4),
+  h5: handleHeading(5),
+  h6: handleHeading(6),
   hr: {
     enter: () => MARKDOWN_HORIZONTAL_RULE,
   },
@@ -185,10 +193,22 @@ export const tagHandlers: Record<string, TagHandler> = {
     exit: ({ node }) => isInsideTableCell(node) ? '</li>' : undefined,
   },
   a: {
-    enter: () => '[',
+    enter: ({ node }) => {
+      if (node.attributes?.href) {
+        return '['
+      }
+    },
     exit: ({ node, state }) => {
+      if (!node.attributes?.href) {
+        return ''
+      }
+      let prefix = ''
+      // no link was emitting, try and use aria label or title
+      if (state.buffer[state.buffer.length - 1] === '[') {
+        prefix = node.attributes?.title || node.attributes?.['aria-label'] || ''
+      }
       const href = resolveUrl(node.attributes?.href || '', state.options?.origin)
-      return `](${href})`
+      return `${prefix}](${href})`
     },
   },
   img: {
@@ -200,7 +220,6 @@ export const tagHandlers: Record<string, TagHandler> = {
   },
   table: {
     enter: ({ node, state }) => {
-      state.tableRenderedTable = false
       if (isInsideTableCell(node)) {
         return '<table>'
       }
@@ -213,7 +232,7 @@ export const tagHandlers: Record<string, TagHandler> = {
     exit: ({ node }) => isInsideTableCell(node) ? '</table>' : undefined,
   },
   thead: {
-    enter: ({ node, state }) => {
+    enter: ({ node }) => {
       if (isInsideTableCell(node)) {
         return '<thead>'
       }

@@ -41,7 +41,6 @@ export const NON_SUPPORTED_NODES = new Set([
   'select',
   'textarea',
   'option',
-  'label',
   'fieldset',
   'legend',
   'audio',
