@@ -54,3 +54,5 @@ Temporary Items
 
 .data
 .fixtures
+
+**/.claude/settings.local.json
