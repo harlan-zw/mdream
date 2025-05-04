@@ -202,13 +202,8 @@ export const tagHandlers: Record<string, TagHandler> = {
       if (!node.attributes?.href) {
         return ''
       }
-      let prefix = ''
-      // no text children were emitted - should try use fallback
-      if (!node.childTextNodeIndex) {
-        prefix = node.attributes?.title || node.attributes?.['aria-label'] || ''
-      }
       const href = resolveUrl(node.attributes?.href || '', state.options?.origin)
-      return `${prefix}](${href})`
+      return `](${href})`
     },
   },
   img: {

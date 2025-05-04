@@ -1,4 +1,5 @@
-import { HTML_ENTITIES } from './const.ts'
+import type { Node } from './types.ts'
+import { HTML_ENTITIES, INLINE_ELEMENTS } from './const.ts'
 
 /**
  * Decode HTML entities - optimized version with single pass
@@ -103,4 +104,18 @@ export async function asyncIterableToString(
   }
 
   return result
+}
+
+export function traverseUpToFirstBlockNode(node: Node) {
+  let firstBlockParent = node
+  const parentsToIncrement = [firstBlockParent]
+  // find first block element
+  while (firstBlockParent?.name && INLINE_ELEMENTS.includes(firstBlockParent.name)) {
+    if (!firstBlockParent.parentNode) {
+      break
+    }
+    firstBlockParent = firstBlockParent.parentNode
+    parentsToIncrement.push(firstBlockParent)
+  }
+  return parentsToIncrement
 }
