@@ -122,4 +122,23 @@ export const USES_ATTRIBUTES = new Set([
   'th',
 ])
 
+export const TRACK_DEPTH_MAP_KEYS = [
+  'pre',
+  'li',
+  'blockquote',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'a',
+  'code',
+  'table',
+  'ol',
+  'ul',
+  'td',
+  'th'
+]
+
 export const DEFAULT_CHUNK_SIZE = 8224

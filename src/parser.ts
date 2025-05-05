@@ -4,7 +4,7 @@ import {
   MINIMAL_EXCLUDE_ELEMENTS,
   NON_NESTING_TAGS,
   NON_SUPPORTED_NODES,
-  TEXT_NODE,
+  TEXT_NODE, TRACK_DEPTH_MAP_KEYS,
   VOID_TAGS,
 } from './const.ts'
 import { processHtmlEventToMarkdown } from './markdown.ts'
@@ -32,8 +32,9 @@ const EMPTY_ATTRIBUTES: Record<string, string> = Object.freeze({})
 // Fast object copy for small objects like depthMap
 function copyDepthMap(depthMap: Record<string, number>): Record<string, number> {
   const copy: Record<string, number> = {}
-  for (const key in depthMap) {
-    if (depthMap[key] > 0) { // Only copy non-zero values
+  for (let i = 0; i < TRACK_DEPTH_MAP_KEYS.length; i++) {
+    const key = TRACK_DEPTH_MAP_KEYS[i]
+    if (depthMap[key]) {
       copy[key] = depthMap[key]
     }
   }
@@ -636,11 +637,12 @@ function processTagAttributes(htmlChunk: string, position: number, tagName: stri
   let quoteChar = 0
 
   // Find the end of tag
+  let prevChar = 0
   while (i < chunkLength) {
     const c = htmlChunk.charCodeAt(i)
 
     if (insideQuote) {
-      if (c === quoteChar && htmlChunk.charCodeAt(i - 1) !== BACKSLASH_CHAR) {
+      if (c === quoteChar && prevChar !== BACKSLASH_CHAR) {
         insideQuote = false
       }
       i++
@@ -675,6 +677,7 @@ function processTagAttributes(htmlChunk: string, position: number, tagName: stri
     }
 
     i++
+    prevChar = c
   }
 
   // Incomplete tag
@@ -823,7 +826,8 @@ export function processPartialHTMLToMarkdown(
 
   // Process events from the parser
   let chunk = ''
-  for (const event of events) {
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i]
     let fragment: string | undefined
 
     // Fast path for text nodes
