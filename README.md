@@ -1,4 +1,4 @@
-<img src=".github/logo.png" alt="mdream logo" width="300">
+<img src=".github/logo.png" alt="mdream logo" width="200">
 
 <h1>mdream</h1>
 
