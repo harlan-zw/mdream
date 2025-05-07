@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { asyncHtmlToMarkdown } from '../../../src'
+import { syncHtmlToMarkdown } from '../../../src'
 
-describe('nav', async () => {
-  it('github', async () => {
+describe('nav', () => {
+  it('github', () => {
     const html = `<nav aria-label="Product sidebar" class="NavList__NavBox-sc-1c8ygf7-0">
                 <ul class="List__ListBox-sc-1x7olzq-0 gAwGiF">
                   <li aria-labelledby=":R3b6n6:" class="Box-sc-g0xbh4-0 bvBlwX">
@@ -1174,7 +1174,10 @@ describe('nav', async () => {
                   </li>
                 </ul>
               </nav>`
-    const markdown = await asyncHtmlToMarkdown(html)
+    const now = performance.now()
+    const markdown = syncHtmlToMarkdown(html)
+    const end = performance.now()
+    console.log('Time taken to convert HTML to Markdown:', end - now, 'ms')
     expect(markdown).toMatchInlineSnapshot(`
       "- Start your journey
         - [About GitHub and Git](/en/get-started/start-your-journey/about-github-and-git)

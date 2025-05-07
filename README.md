@@ -90,16 +90,16 @@ pnpm add mdream
 ### Usage
 
 Mdream provides two utils for working with HTML, both will process content as a stream.
-- `asyncHtmlToMarkdown`: Useful if you already have the entire HTML payload you want to convert.
+- `syncHtmlToMarkdown`: Useful if you already have the entire HTML payload you want to convert.
 - `streamHtmlToMarkdown`: Best practice if you are fetching or reading from a local file.
 
 **Convert existing HTML**
 
 ```ts
-import { asyncHtmlToMarkdown } from 'mdream'
+import { syncHtmlToMarkdown } from 'mdream'
 
 // Simple conversion
-const markdown = await asyncHtmlToMarkdown('<h1>Hello World</h1>')
+const markdown = syncHtmlToMarkdown('<h1>Hello World</h1>')
 console.log(markdown) // # Hello World
 ````
 

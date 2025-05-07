@@ -1,5 +1,5 @@
 import type { HandlerContext, MdreamRuntimeState, Node, NodeEvent } from './types.ts'
-import { ELEMENT_NODE, INLINE_ELEMENTS, NEW_LINE_CONFIG, TEXT_NODE } from './const.ts'
+import { ELEMENT_NODE, INLINE_ELEMENTS, NodeEventEnter, TEXT_NODE } from './const.ts'
 import { tagHandlers } from './tags.ts'
 
 /**
@@ -8,147 +8,140 @@ import { tagHandlers } from './tags.ts'
 export function processHtmlEventToMarkdown(
   event: NodeEvent,
   state: MdreamRuntimeState,
-): string | undefined {
+  fragments: string[],
+): void {
+  const totalFragments = fragments.length + state.fragmentCount
   const { type: eventType, node } = event
 
-  // Early return for nodes we should skip
-  if (shouldSkipNode(node, state)) {
-    return undefined
+  // Handle text nodes
+  if (node.type === TEXT_NODE && eventType === NodeEventEnter && node.value) {
+    state.lastNewLines = 0
+    if (node.value) {
+      state.currentLine++
+      fragments.push(node.value)
+    }
+    state.lastTextNode = node
+    return
   }
 
-  // Handle text nodes
-  if (node.type === TEXT_NODE && eventType === 'enter') {
-    return processTextNode(node, state)
+  if (node.type !== ELEMENT_NODE) {
+    return
   }
 
   // Handle element nodes
-  if (node.type === ELEMENT_NODE) {
-    return processElementNode(node, state, eventType)
-  }
-
-  return undefined
-}
-
-/**
- * Determine if a node should be skipped from processing
- */
-function shouldSkipNode(node: Node, state: MdreamRuntimeState): boolean {
-  if (node.unsupported) {
-    return true
-  }
-  if (node.excluded && state.processingHTMLDocument && state.enteredBody) {
-    return true
-  }
-
-  if (state.processingHTMLDocument && state.enteredBody && !state.hasSeenHeader) {
-    return true
-  }
-  return false
-}
-
-/**
- * Process text nodes
- */
-function processTextNode(node: Node, state: MdreamRuntimeState): string {
-  state.lastNewLines = 0
-  // Return text value directly for now
-  // Additional processing can be added here when needed
-  return node.value || ''
-}
-
-/**
- * Process element nodes
- */
-function processElementNode(
-  node: Node,
-  state: MdreamRuntimeState,
-  eventType: NodeEvent['type'],
-): string {
   const elementName = node.name || ''
   const context: HandlerContext = { node, state }
+  const output = []
+  const lastFragment = fragments.length ? fragments[fragments.length - 1] : ''
 
-  // Get handler output
-  const handlerTable = tagHandlers[elementName]
-  const handler = handlerTable?.[eventType]
-  const handlerOutput = handler ? handler(context) || '' : ''
+  // TODO find a solution
+  // if (!node.parentNode?.depthMap.pre && !state.lastNewLines && node.parentNode?.childTextNodeIndex > 0) {
+  //   // if we're closing an element which had text content, we need to add a space
+  //   if (eventType === NodeEventEnter && node.parentNode && elementName === 'a') {
+  //     if (lastFragment && lastFragment.at(-1) !== ' ') {
+  //       output.push(' ')
+  //       console.log('adding space for node', node)
+  //     }
+  //   }
+  // }
 
-  // Handle newlines
-  const newLineConfig = calculateNewLineConfig(node, elementName)
-  const newLines = newLineConfig[eventType] || 0
-
-  if (newLines > 0) {
-    return addNewLines(handlerOutput, newLines, state, eventType)
+  const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
+  if ((elementName in tagHandlers) && tagHandlers[elementName]![eventFn]) {
+    const res = tagHandlers[elementName][eventFn](context)
+    if (res) {
+      output.push(res)
+    }
   }
 
-  state.lastNewLines = 0
-  return handlerOutput
+  // Trim trailing whitespace from the last text node
+  if (!state.lastNewLines && fragments.length && state.lastTextNode?.containsWhitespace && !!node.parentNode && typeof state.lastTextNode?.value === 'string') {
+    if (!node.parentNode.depthMap.pre || node.parentNode.name === 'pre') {
+      fragments[fragments.length - 1] = lastFragment!.trimEnd()
+      state.lastTextNode = undefined
+    }
+  }
+
+  // Handle newlines
+  const newLineConfig = calculateNewLineConfig(node)
+  let newLines = newLineConfig[eventType] || 0
+
+  if (newLines > 0) {
+    // Initialize lastNewLines if undefined
+    state.lastNewLines ??= 0
+
+    // Adjust count based on existing newlines
+    newLines = Math.max(0, newLines - state.lastNewLines)
+
+    // Handle enter events with content
+    if (eventType === NodeEventEnter && output.length) {
+      state.lastNewLines = 0
+    }
+    if (newLines > 0) {
+      if (!totalFragments) {
+        fragments.push(...output)
+        return
+      }
+      // Update state for non-enter events
+      if (eventType !== NodeEventEnter || !output.length) {
+        state.lastNewLines = newLines
+      }
+
+      // Add newlines
+      const newlinesStr = '\n'.repeat(newLines)
+      // trim only whitespace
+      if (lastFragment.at(-1) === ' ') {
+        fragments[fragments.length - 1] = lastFragment.substring(0, lastFragment.length - 1)
+      }
+      if (eventType === NodeEventEnter) {
+        output.unshift(newlinesStr)
+      }
+      else {
+        output.push(newlinesStr)
+      }
+    }
+  }
+  else {
+    state.lastNewLines = 0
+  }
+
+  fragments.push(...output)
 }
+
+const NoSpaces = [0, 0] as const
+const DefaultBlockSpaces = [2, 2] as const
 
 /**
  * Calculate newline configuration based on element context
  */
-function calculateNewLineConfig(node: Node, elementName: string): { enter: number, exit: number } {
-  // Start with default or element-specific config
-  const config = elementName in NEW_LINE_CONFIG
-    ? { ...NEW_LINE_CONFIG[elementName as keyof typeof NEW_LINE_CONFIG] }
-    : { enter: 2, exit: 2 }
+function calculateNewLineConfig(node: Node): readonly [number, number] {
+  const elementName = node.name || ''
+  if (elementName === 'head' || elementName === 'html' || elementName === 'body' || elementName === 'code') {
+    return NoSpaces
+  }
 
   const depthMap = node.depthMap
 
   // Adjust for list items and blockquotes
-  if ((node.name !== 'li' && depthMap.li > 0)
-    || (node.name !== 'blockquote' && depthMap.blockquote > 0)) {
-    config.enter = 0
-    config.exit = 0
-    return config
+  if ((elementName !== 'li' && depthMap.li > 0)
+    || (elementName !== 'blockquote' && depthMap.blockquote > 0)) {
+    return NoSpaces
   }
 
   // Adjust for inline elements
-  if (INLINE_ELEMENTS.includes(node.name || '')
+  if (INLINE_ELEMENTS.includes(elementName)
     || INLINE_ELEMENTS.some(el => depthMap[el] > 0)) {
-    config.enter = 0
-    config.exit = 0
+    return NoSpaces
   }
 
-  return config
-}
-
-/**
- * Add newlines to string
- */
-function addNewLines(
-  content: string,
-  count: number,
-  state: MdreamRuntimeState,
-  eventType: 'enter' | 'exit',
-): string {
-  // Early return if buffer is empty or no newlines needed
-  if (!state.buffer.length) {
-    return content
+  switch (elementName) {
+    case 'blockquote':
+      return [1, 1]
+    case 'li':
+      return [1, 0]
+    case 'tr':
+    case 'thead':
+    case 'tbody':
+      return [0, 1]
   }
-
-  // Initialize lastNewLines if undefined
-  state.lastNewLines ??= 0
-
-  // Adjust count based on existing newlines
-  count = Math.max(0, count - state.lastNewLines)
-
-  // Handle enter events with content
-  if (eventType === 'enter' && content) {
-    state.lastNewLines = 0
-  }
-
-  // Return early if no newlines needed
-  if (count <= 0) {
-    return content
-  }
-
-  // Update state for non-enter events
-  if (eventType !== 'enter' || !content) {
-    state.lastNewLines = count
-  }
-
-  // Add newlines
-  const newlines = '\n'.repeat(count)
-  return eventType === 'enter' ? newlines + content : content + newlines
+  return DefaultBlockSpaces
 }

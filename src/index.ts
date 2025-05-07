@@ -1,15 +1,15 @@
-import type { HTMLToMarkdownOptions } from './types.ts'
-import { streamHtmlToMarkdown } from './stream.ts'
-import { asyncIterableToString, stringToReadableStream } from './utils.ts'
+import type { HTMLToMarkdownOptions, MdreamRuntimeState } from './types.ts'
+import { processPartialHTMLToMarkdown } from './parser.ts'
 
-export async function asyncHtmlToMarkdown(
+export function syncHtmlToMarkdown(
   html: string,
   options: HTMLToMarkdownOptions = {},
-): Promise<string> {
-  const res = await asyncIterableToString(
-    streamHtmlToMarkdown(stringToReadableStream(html), options),
-  )
-  return res.trimEnd()
+): string {
+  // Initialize state
+  const state: Partial<MdreamRuntimeState> = {
+    options,
+  }
+  return processPartialHTMLToMarkdown(html, state).chunk.trimEnd()
 }
 
 export { streamHtmlToMarkdown } from './stream.ts'

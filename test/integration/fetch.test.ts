@@ -18,9 +18,7 @@ describe.skip('fetch', () => {
         throw new Error('Response body stream is null')
       }
 
-      const markdownStream = streamHtmlToMarkdown(htmlStream, {
-        chunkSize: 20000, // less files
-      })
+      const markdownStream = streamHtmlToMarkdown(htmlStream)
 
       let chunkIndex = 0
       let final = ''

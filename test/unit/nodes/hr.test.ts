@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { asyncHtmlToMarkdown } from '../../../src/index.js'
+import { syncHtmlToMarkdown } from '../../../src/index.js'
 
-describe('horizontal Rules', async () => {
-  it('converts hr elements', async () => {
+describe('horizontal Rules', () => {
+  it('converts hr elements', () => {
     const html = '<p>Above</p><hr><p>Below</p>'
-    const markdown = await asyncHtmlToMarkdown(html)
+    const markdown = syncHtmlToMarkdown(html)
     expect(markdown).toBe('Above\n\n---\n\nBelow')
   })
 })

@@ -56,17 +56,9 @@ export const NON_SUPPORTED_NODES = new Set([
   'template',
 ])
 
-export const NEW_LINE_CONFIG: Record<string, { enter: number, exit: number }> = {
-  blockquote: { enter: 1, exit: 1 },
-  code: { enter: 0, exit: 0 },
-  li: { enter: 1, exit: 0 },
-  tr: { enter: 0, exit: 1 },
-  thead: { enter: 0, exit: 1 },
-  tbody: { enter: 0, exit: 1 },
-  head: { enter: 0, exit: 0 },
-  html: { enter: 0, exit: 0 },
-  body: { enter: 0, exit: 0 },
-}
+export const NodeEventEnter = 0
+export const NodeEventExit = 1
+
 export const INLINE_ELEMENTS = [
   'a',
   'abbr',
@@ -94,12 +86,14 @@ export const INLINE_ELEMENTS = [
   'head',
 ]
 
-export const MINIMAL_EXCLUDE_ELEMENTS = new Set([
+// tags that add too much noise to the markdown output
+export const MINIMAL_EXCLUDE_TAGS = new Set([
   'footer',
   'header',
   'nav',
   'aside',
 ])
+
 // Tags that don't support nested tags - they should be automatically closed when a new tag opens
 export const NON_NESTING_TAGS = new Set([
   'title',
@@ -138,7 +132,7 @@ export const TRACK_DEPTH_MAP_KEYS = [
   'ol',
   'ul',
   'td',
-  'th'
+  'th',
 ]
 
 export const DEFAULT_CHUNK_SIZE = 8224

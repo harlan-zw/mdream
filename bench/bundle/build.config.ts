@@ -6,19 +6,21 @@ import { defineBuildConfig } from 'unbuild'
 export default defineBuildConfig({
   entries: [
     'src/minimal',
-    'src/fetch',
+    'src/await',
+    'src/await-fetch',
+    'src/stream',
+    'src/stream-fetch',
     'src/string',
-    'src/string2',
   ],
   outDir: 'dist',
   failOnWarn: false,
-  rollup: {
-    inlineDependencies: true,
-    esbuild: {
-      treeShaking: true,
-      minify: true,
-    },
-  },
+  // rollup: {
+  //   inlineDependencies: true,
+  //   esbuild: {
+  //     treeShaking: true,
+  //     minify: true,
+  //   },
+  // },
   externals: [
     'cac',
   ],

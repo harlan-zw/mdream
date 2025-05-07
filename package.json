@@ -24,8 +24,11 @@
     "dist"
   ],
   "scripts": {
-    "flame": "pnpm build && unbuild bench/bundle && clinic flame -- node bench/bundle/dist/string2.mjs 10",
-    "bench": "pnpm build && unbuild bench/bundle && hyperfine --runs 100 'node bench/bundle/dist/string2.mjs' --warmup 3",
+    "flame": "pnpm build && unbuild bench/bundle && clinic flame -- node bench/bundle/dist/string.mjs 10",
+    "bench:build": "pnpm build && unbuild bench/bundle",
+    "bench:stream": "pnpm build && unbuild bench/bundle && hyperfine --runs 100 'node bench/bundle/dist/stream.mjs' --warmup 3",
+    "bench:await": "pnpm build && unbuild bench/bundle && hyperfine --runs 100 'node bench/bundle/dist/await.mjs' --warmup 3",
+    "bench:string": "pnpm build && unbuild bench/bundle && hyperfine --runs 100 'node bench/bundle/dist/string.mjs' --warmup 3",
     "ts": "node  --experimental-strip-types",
     "test::live": "curl -s https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax | node ./bin/mdream.mjs --origin https://docs.github.com | tee test/github-markdown.md",
     "test:images": "cat test/fixtures/test-origin.html | node ./bin/mdream.mjs --origin https://docs.github.com",

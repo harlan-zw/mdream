@@ -1,11 +1,5 @@
 export interface HTMLToMarkdownOptions {
   /**
-   * Size of chunks to yield in streaming mode
-   * @default 4096
-   */
-  chunkSize?: number
-
-  /**
    * Origin URL for resolving relative image paths and internal links.
    */
   origin?: string
@@ -14,7 +8,7 @@ export interface HTMLToMarkdownOptions {
    * Does not wait for a header tag to be opened before processing HTML to markdown.
    * @default false
    */
-  full?: boolean
+  strategy?: 'minimal' | 'minimal-from-first-header' | 'full'
 }
 
 // Node types
@@ -46,11 +40,8 @@ export interface Node {
   /** Map of tag names to their nesting count */
   depthMap: Record<string, number>
 
-  /** Whether this node has been completely processed */
-  complete?: boolean
-
   /** Whether this node should be excluded from output */
-  excluded: boolean
+  minimal: boolean
 
   /** Whether this node is unsupported for processing */
   unsupported: boolean
@@ -59,10 +50,13 @@ export interface Node {
   index: number
 
   /** Current walk index for child traversal */
-  currentWalkIndex: number
+  currentWalkIndex?: number
 
   /** The text child nodes of the parent node */
-  childTextNodeIndex: number
+  childTextNodeIndex?: number
+
+  /** Does this node contain whitespace? */
+  containsWhitespace?: boolean
 }
 
 /**
@@ -91,10 +85,7 @@ export interface MdreamProcessingState {
   inUnsupportedNodeDepth?: number
 
   /** Depth at which an excluded node was encountered */
-  isExcludedNodeDepth?: number
-
-  /** Whether we're processing a full HTML document (with DOCTYPE) */
-  processingHTMLDocument?: boolean
+  isMinimalNodeDepth?: number
 
   /** Whether current content contains HTML entities that need decoding */
   hasEncodedHtmlEntity?: boolean
@@ -131,6 +122,12 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   /** Last new lines emitted */
   lastNewLines: number
 
+  /** Current count of fragments **/
+  fragmentCount: number
+
+  /** Current line - may not be accurate, just used for non-zero */
+  currentLine: number
+
   /** Accumulated markdown output buffer */
   buffer: string
 
@@ -143,12 +140,15 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   tableColumnAlignments?: string[]
 }
 
+type NodeEventEnter = 0
+type NodeEventExit = 1
+
 /**
  * Node event for DOM traversal
  */
 export interface NodeEvent {
   /** Event type - enter or exit */
-  type: 'enter' | 'exit'
+  type: NodeEventEnter | NodeEventExit
 
   /** The node being processed */
   node: Node

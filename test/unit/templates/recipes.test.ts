@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { asyncHtmlToMarkdown } from '../../../src'
+import { syncHtmlToMarkdown } from '../../../src'
 
-describe('recipes', async () => {
-  it('tables', async () => {
+describe('recipes', () => {
+  it('tables', () => {
     const html = `<h2 class="mm-recipes-nutrition-facts-summary__heading text-headline-300" colspan="2">Nutrition Facts <span class="mm-recipes-nutrition-facts-summary__heading-aside text-body-100">(per serving)</h2>
 <table class="mm-recipes-nutrition-facts-summary__table">
 <tbody class="mm-recipes-nutrition-facts-summary__table-body">
@@ -25,7 +25,7 @@ describe('recipes', async () => {
 </tbody>
 </table>
 </div>`
-    const markdown = await asyncHtmlToMarkdown(html)
+    const markdown = syncHtmlToMarkdown(html)
     expect(markdown).toMatchInlineSnapshot(`
       "## Nutrition Facts (per serving)
 
@@ -36,7 +36,7 @@ describe('recipes', async () => {
       | 9g | Protein |"
     `)
   })
-  it.skip('malformed', async () => {
+  it.skip('malformed', () => {
     const html = `<div class="mntl-header__menu-button-container">
       <button class="mntl-header__menu-button" aria-label="Main menu for Allrecipes">
         <div class="mntl-header__menu-button-inner">
@@ -52,7 +52,7 @@ describe('recipes', async () => {
           foo
       </button>
     </div>`
-    const markdown = await asyncHtmlToMarkdown(html)
+    const markdown = syncHtmlToMarkdown(html)
     expect(markdown).toMatchInlineSnapshot(`""`)
   })
 })
