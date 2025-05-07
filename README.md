@@ -1,13 +1,13 @@
 <h1>mdream</h1>
 
-> Universal HTML to Markdown streamer optimized for LLMs & Human readability
-
-<img src=".github/logo.png" alt="mdream logo" width="200">
-
 [![npm version](https://img.shields.io/npm/v/mdream?color=yellow)](https://npmjs.com/package/mdream)
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/mdream/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
+
+> Universal HTML to Markdown streamer optimized for LLMs & Human readability
+
+<img src=".github/logo.png" alt="mdream logo" width="200">
 
 <p align="center">
 <table>
