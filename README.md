@@ -20,27 +20,17 @@
 
 Traditional HTML to Markdown converters are either slow and bloated with dependencies or produce output poorly suited for LLMs and content analysis.
 
-Mdream is a high-performance, streaming HTML to Markdown parser built specifically for LLM pipelines. With zero dependencies, ultra-low memory usage, and opinionated output optimized for both human readability and AI processing.
+Mdream is a ultra-performant, HTML to Markdown convertor built specifically for LLM pipelines. With zero dependencies, streaming built-in and opinionated output optimized for both human readability and AI processing.
 
 Perfect for: RAG systems, web scraping, content extraction, ChatGPT/Claude integration, and large-scale document processing.
 
 ## Features
 
-- 🚀 Streaming Conversion Architecture: Process web content in real-time with minimal memory overhead.
-- 📉 LLM Optimization: Reduce token usage by converting HTML to efficient Markdown.
-- 🔍 Advanced Content Preservation: Maintain tables, code blocks, and complex structures accurately.
-- ⚙️ Flexible Implementation: Simple API with sync/streaming options and command-line interface.
-- ⚡ Ultra Fast Performance: Tiny 4.4kb footprint, zero dependencies, and 5-10x faster than similar libraries.
-
-### Opinionated Parsing
-
-Mdream supports parsing partial HTML content as well as full documents. When working with full documents, Mdream
-will attempt to create "clean" markdown.
-
-Clean markdown is considered the actual "content" of the page, we want to avoid all of the boilerplate
-around the content of the site such as the header, footer, asides, and extra nav links.
-
-This is due
+- 🤖 LLM & Human Optimized: [Opinionated Markdown](#opinionated-markdown) output maximised for on-page content.
+- 🚀 Fast: Convert 1.4MB of HTML in [~65 ms*]() with streaming support.
+- ⚡ Tiny: 5kB gzip, zero dependencies
+- 🔍 Advanced Content Preservation: Full GitHub Markdown support including nested lists, tables, and code blocks.
+- ⚙️ Run anywhere: CLI, edge workers, browsers, Node, etc.
 
 ## CLI Usage
 
@@ -111,41 +101,21 @@ import { streamHtmlToMarkdown } from 'mdream'
 fetch()
 ```
 
-## CLI Usage
-
-```bash
-# Basic usage
-cat example.html | html2md > example.md
-
-# Adjust chunk size for very large files
-cat large.html | html2md --chunk-size 8192 > large.md
-
-# Enable verbose mode to see processing details
-cat troublesome.html | html2md --verbose > troublesome.md
-
-# Combine with other Unix tools
-curl https://example.com | html2md | grep "important" > filtered.md
-```
-
 ## Documentation
 
-[📖 Read the full documentation](https://mdream.js.org) for details on:
-- Advanced configuration for optimal HTML to Markdown conversion
-- Integrating with popular LLM platforms
-- Fine-tuning parser performance
-- Handling edge cases in LLM-generated HTML
+### Opinionated Markdown
 
-## Examples
+Mdream supports parsing partial HTML content as well as full documents. When working with full documents, Mdream
+will attempt to create "clean" markdown.
 
-- [High-Performance HTML to Markdown Converter Demo](https://mdream.js.org/demo)
-- [LLM Streaming Pipeline Example](https://github.com/mdream/llm-streaming-example)
-- [Enterprise-Scale Processing Benchmark](https://github.com/mdream/benchmark)
+Clean markdown is considered the actual "content" of the page, we want to avoid all of the boilerplate
+around the content of the site such as the header, footer, asides, and extra nav links.
+
+This is due
 
 ## Credits
 
-Inspired by the work of:
-
-- [ultrahtml](https://github.com/natemoo-re/ultrahtml): HTML parsing
+- [ultrahtml](https://github.com/natemoo-re/ultrahtml): HTML parsing inspiration
 
 ## License
 

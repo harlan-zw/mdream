@@ -30,14 +30,15 @@ export default defineBuildConfig({
       config.experimentalLogSideEffects = true
     },
     'build:done': () => {
-      // check gzip size of ./dist/minimal.mjs
-      const file = path.resolve(__dirname, 'dist/minimal.mjs')
-      const contents = fs.readFileSync(file)
-      const size = contents.length
-      const compressed = zlib.gzipSync(contents).length
-      // show as kB size instead of bytes
-      // round to 1 decimal place
-      console.log(`Size: ${Math.round(size / 102.4) / 10} kB (gzipped: ${Math.round(compressed / 102.4) / 10} kB)`)
+      const files = fs.readdirSync(path.resolve(__dirname, 'dist', 'shared'))
+      files.forEach((file) => {
+        const contents = fs.readFileSync(path.resolve(__dirname, 'dist', 'shared', file))
+        const size = contents.length
+        const compressed = zlib.gzipSync(contents).length
+        // show as kB size instead of bytes
+        // round to 1 decimal place
+        console.log(`Size: ${Math.round(size / 102.4) / 10} kB (gzipped: ${Math.round(compressed / 102.4) / 10} kB)`)
+      })
     },
   },
 })

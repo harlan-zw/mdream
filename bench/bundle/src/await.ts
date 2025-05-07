@@ -5,18 +5,20 @@ import { syncHtmlToMarkdown } from '../../../src'
 async function run() {
   // read times to run it from command line argument
   const times = Number.parseInt(process.argv[2], 10) || 1
-  const start = performance.now()
   // extend the timings
   for (let i = 0; i < times; i++) {
-    logMemoryUsage('before await creation')
     // create a read stream for ../elon.html
     const html = await readFile(resolve(import.meta.dirname, '../wiki.html'), { encoding: 'utf-8' })
-    await writeFile(resolve(import.meta.dirname, '../dist/wiki.md'), syncHtmlToMarkdown(html), { encoding: 'utf-8' })
+    logMemoryUsage('before await creation')
+    const start = performance.now()
+    const converted = syncHtmlToMarkdown(html)
+    const end = performance.now()
+    const duration = end - start
+    console.log(`\n\nFetched and converted ${times} times in ${duration.toFixed(2)} ms`)
     logMemoryUsage('after await creation')
+    await writeFile(resolve(import.meta.dirname, '../dist/wiki.md'), converted, { encoding: 'utf-8' })
   }
-  const end = performance.now()
-  const duration = end - start
-  console.log(`\n\nFetched and converted ${times} times in ${duration.toFixed(2)} ms`)
+
 }
 
 function logMemoryUsage(label) {

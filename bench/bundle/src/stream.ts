@@ -1,7 +1,7 @@
 import { createReadStream, createWriteStream } from 'node:fs'
 import { resolve } from 'node:path'
 import { Readable } from 'node:stream'
-import { streamHtmlToMarkdown } from '../../../src/stream'
+import { streamHtmlToMarkdown } from '../../../src'
 
 async function run() {
   // read times to run it from command line argument

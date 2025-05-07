@@ -1,4 +1,4 @@
-import { syncHtmlToMarkdown } from '../../../dist'
+import { syncHtmlToMarkdown } from '../../../src'
 
 function run() {
   // Full usage with all core features
