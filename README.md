@@ -19,12 +19,6 @@
 </table>
 </p>
 
-Traditional HTML to Markdown converters are either slow and bloated with dependencies or produce output poorly suited for LLMs and content analysis.
-
-Mdream is a ultra-performant, HTML to Markdown convertor built specifically for LLM pipelines. With zero dependencies, streaming built-in and opinionated output optimized for both human readability and AI processing.
-
-Perfect for: RAG systems, web scraping, content extraction, ChatGPT/Claude integration, and large-scale document processing.
-
 ## Features
 
 - 🤖 LLM & Human Optimized: [Opinionated Markdown](#opinionated-markdown) output maximised for on-page content.
@@ -32,6 +26,15 @@ Perfect for: RAG systems, web scraping, content extraction, ChatGPT/Claude integ
 - ⚡ Tiny: 5kB gzip, zero dependencies
 - 🔍 Advanced Content Preservation: Full GitHub Markdown support including nested lists, tables, and code blocks.
 - ⚙️ Run anywhere: CLI, edge workers, browsers, Node, etc.
+
+## Why Mdream?
+
+Traditional HTML to Markdown converters were not built for LLMs or humans. They tend to be slow and bloated and produce output that's poorly suited for LLMs token usage or for
+human readability.
+
+Mdream is a ultra-performant, HTML to Markdown convertor built specifically for LLM Content Analysis & Humans Readibility. With zero dependencies, streaming built-in and opinionated output optimized for both human readability and AI processing.
+
+Perfect for: RAG systems, web scraping, content extraction, ChatGPT/Claude integration, and large-scale document processing.
 
 ## CLI Usage
 
