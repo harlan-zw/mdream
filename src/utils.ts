@@ -1,5 +1,5 @@
 import type { Node } from './types.ts'
-import { HTML_ENTITIES, INLINE_ELEMENTS } from './const.ts'
+import { HTML_ENTITIES } from './const.ts'
 
 /**
  * Decode HTML entities - optimized version with single pass
@@ -73,44 +73,11 @@ export function decodeHTMLEntities(text: string): string {
   return result
 }
 
-/**
- * Converts a string into an AsyncIterable that yields the string in chunks of the specified size
- * @param input The input string to chunk
- * @returns An AsyncIterable that yields chunks of the input string
- */
-export function stringToReadableStream(
-  input: string,
-) {
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(input)
-      controller.close()
-    },
-  })
-}
-
-/**
- * Converts an AsyncIterable<string> back into a complete string
- * @param asyncIterable The AsyncIterable that yields string chunks
- * @returns A promise that resolves to the complete string
- */
-export async function asyncIterableToString(
-  asyncIterable: AsyncIterable<string>,
-): Promise<string> {
-  let result = ''
-
-  for await (const chunk of asyncIterable) {
-    result += chunk
-  }
-
-  return result
-}
-
 export function traverseUpToFirstBlockNode(node: Node) {
   let firstBlockParent = node
   const parentsToIncrement = [firstBlockParent]
   // find first block element
-  while (firstBlockParent?.name && INLINE_ELEMENTS.includes(firstBlockParent.name)) {
+  while (firstBlockParent?.name && firstBlockParent.tagHandler?.isInline) {
     if (!firstBlockParent.parentNode) {
       break
     }

@@ -21,7 +21,7 @@
 ## Features
 
 - 🤖 LLM & Human Optimized: [Opinionated Markdown](#opinionated-markdown) output maximised for on-page content.
-- 🚀 Fast: Convert 1.4MB of HTML in [~65 ms*]() with streaming support.
+- 🚀 Fast: Convert 1.4MB of HTML in [~50 ms*]() with streaming support.
 - ⚡ Tiny: 5kB gzip, zero dependencies.
 - 🔍 Optimized Markdown: Frontmatter, GitHub Flavored with nested markup support.
 - ⚙️ Run anywhere: CLI, edge workers, browsers, Node, etc.

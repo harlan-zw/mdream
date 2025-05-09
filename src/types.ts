@@ -1,3 +1,5 @@
+import type { TagHandler } from './tags.ts'
+
 export interface HTMLToMarkdownOptions {
   /**
    * Origin URL for resolving relative image paths and internal links.
@@ -38,7 +40,7 @@ export interface Node {
   depth: number
 
   /** Map of tag names to their nesting count */
-  depthMap: Record<string, number>
+  depthMap: Required<MdreamRuntimeState>['depthMap']
 
   /** Whether this node should be excluded from output */
   minimal: boolean
@@ -57,6 +59,12 @@ export interface Node {
 
   /** Does this node contain whitespace? */
   containsWhitespace?: boolean
+
+  /** Tag handler reference (for fast lookup) */
+  tagHandler: TagHandler
+
+  /** Tag ID (numeric constant for the tag) */
+  tagId: number
 }
 
 /**
@@ -73,7 +81,7 @@ export interface ParentNode extends Node {
  */
 export interface MdreamProcessingState {
   /** Map of tag names to their current nesting depth */
-  depthMap: Record<string, number>
+  depthMap: Record<number, number>
 
   /** Current overall nesting depth */
   depth: number
@@ -113,6 +121,9 @@ export interface MdreamProcessingState {
 
   /** Whether we've seen a header tag */
   hasSeenHeader?: boolean
+
+  /** If we try and recover from malformed HTML */
+  strictMode?: boolean
 }
 
 /**
@@ -130,6 +141,8 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
 
   /** Accumulated markdown output buffer */
   buffer: string
+  /** Fragments to emit */
+  fragments: string[]
 
   /** Configuration options */
   options?: HTMLToMarkdownOptions

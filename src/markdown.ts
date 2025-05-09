@@ -1,6 +1,14 @@
 import type { HandlerContext, MdreamRuntimeState, Node, NodeEvent } from './types.ts'
-import { ELEMENT_NODE, INLINE_ELEMENTS, NodeEventEnter, TEXT_NODE } from './const.ts'
-import { tagHandlers } from './tags.ts'
+import {
+  DEFAULT_BLOCK_SPACING,
+  ELEMENT_NODE,
+  NO_SPACING,
+  NodeEventEnter,
+  TAG_BLOCKQUOTE,
+  TAG_LI,
+  TAG_PRE,
+  TEXT_NODE,
+} from './const.ts'
 
 /**
  * Process a node event and generate markdown
@@ -8,8 +16,8 @@ import { tagHandlers } from './tags.ts'
 export function processHtmlEventToMarkdown(
   event: NodeEvent,
   state: MdreamRuntimeState,
-  fragments: string[],
 ): void {
+  const fragments = state.fragments
   const totalFragments = fragments.length + state.fragmentCount
   const { type: eventType, node } = event
 
@@ -29,7 +37,6 @@ export function processHtmlEventToMarkdown(
   }
 
   // Handle element nodes
-  const elementName = node.name || ''
   const context: HandlerContext = { node, state }
   const output = []
   const lastFragment = fragments.length ? fragments[fragments.length - 1] : ''
@@ -46,8 +53,10 @@ export function processHtmlEventToMarkdown(
   // }
 
   const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
-  if ((elementName in tagHandlers) && tagHandlers[elementName]![eventFn]) {
-    const res = tagHandlers[elementName][eventFn](context)
+  // Use the cached tag handler directly from the node
+  const handler = node.tagHandler
+  if (handler?.[eventFn]) {
+    const res = handler[eventFn](context)
     if (res) {
       output.push(res)
     }
@@ -55,7 +64,7 @@ export function processHtmlEventToMarkdown(
 
   // Trim trailing whitespace from the last text node
   if (!state.lastNewLines && fragments.length && state.lastTextNode?.containsWhitespace && !!node.parentNode && typeof state.lastTextNode?.value === 'string') {
-    if (!node.parentNode.depthMap.pre || node.parentNode.name === 'pre') {
+    if (!node.parentNode.depthMap[TAG_PRE] || node.parentNode.tagId === TAG_PRE) {
       fragments[fragments.length - 1] = lastFragment!.trimEnd()
       state.lastTextNode = undefined
     }
@@ -107,41 +116,29 @@ export function processHtmlEventToMarkdown(
   fragments.push(...output)
 }
 
-const NoSpaces = [0, 0] as const
-const DefaultBlockSpaces = [2, 2] as const
-
 /**
- * Calculate newline configuration based on element context
+ * Calculate newline configuration based on tag handler spacing config
  */
 function calculateNewLineConfig(node: Node): readonly [number, number] {
-  const elementName = node.name || ''
-  if (elementName === 'head' || elementName === 'html' || elementName === 'body' || elementName === 'code') {
-    return NoSpaces
-  }
-
+  const tagId = node.tagId
   const depthMap = node.depthMap
 
   // Adjust for list items and blockquotes
-  if ((elementName !== 'li' && depthMap.li > 0)
-    || (elementName !== 'blockquote' && depthMap.blockquote > 0)) {
-    return NoSpaces
+  if ((tagId !== TAG_LI && depthMap[TAG_LI] > 0)
+    || (tagId !== TAG_BLOCKQUOTE && depthMap[TAG_BLOCKQUOTE] > 0)) {
+    return NO_SPACING
   }
 
   // Adjust for inline elements
-  if (INLINE_ELEMENTS.includes(elementName)
-    || INLINE_ELEMENTS.some(el => depthMap[el] > 0)) {
-    return NoSpaces
+  let currParent = node.parentNode
+  while (currParent) {
+    if (currParent.tagHandler?.collapsesInnerWhiteSpace) {
+      return NO_SPACING
+    }
+    currParent = currParent.parentNode
   }
-
-  switch (elementName) {
-    case 'blockquote':
-      return [1, 1]
-    case 'li':
-      return [1, 0]
-    case 'tr':
-    case 'thead':
-    case 'tbody':
-      return [0, 1]
+  if (node.tagHandler?.spacing) {
+    return node.tagHandler?.spacing
   }
-  return DefaultBlockSpaces
+  return DEFAULT_BLOCK_SPACING
 }

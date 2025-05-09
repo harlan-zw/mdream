@@ -7,7 +7,8 @@ describe('footer', () => {
         <section class="container-xl mt-lg-8 mt-6 px-3 px-md-6 no-print mx-auto"><h2 class="f3">Help and support</h2>
           <div class="container-xl mx-auto py-6 py-lg-6 clearfix border-top border-color-secondary">
             <div class="float-left pr-4 mb-6 mb-xl-0 col-12 col-lg-6 col-xl-3">
-              <form class="f5" data-testid="survey-form" aria-live="polite"><h3 id="survey-title" class="f4 mb-3">Did
+              <form class="f5" data-testid="survey-form" aria-live="polite">
+              <h3 id="survey-title" class="f4 mb-3">Did
                 you find what you needed?</h3><input type="text" class="d-none" name="survey-token" value=""/>
                 <div class="mb-2" role="radiogroup" aria-labelledby="survey-title"><input
                   class="Survey_visuallyHidden__Xh_nl Survey_customRadio__aNqUl" id="survey-yes" type="radio"
@@ -27,7 +28,8 @@ describe('footer', () => {
                       d="M7.653 15.369a.75.75 0 0 1-.776.371l-.238-.04a3.25 3.25 0 0 1-2.591-4.099L4.506 10h-.665A3.25 3.25 0 0 1 .723 5.833l1.135-3.859A2.75 2.75 0 0 1 4.482 0H9.43c.78.003 1.538.25 2.168.702A1.752 1.752 0 0 1 12.989 0h1.272A1.75 1.75 0 0 1 16 1.75v6.5A1.75 1.75 0 0 1 14.25 10h-3.417a.25.25 0 0 0-.217.127ZM11.25 2.351l-.396-.33a2.248 2.248 0 0 0-1.44-.521H4.496a1.25 1.25 0 0 0-1.199.897L2.162 6.256A1.75 1.75 0 0 0 3.841 8.5H5.5a.75.75 0 0 1 .721.956l-.731 2.558a1.75 1.75 0 0 0 1.127 2.14L9.31 9.389a1.75 1.75 0 0 1 1.523-.889h.417Zm1.5 6.149h1.5a.25.25 0 0 0 .25-.25v-6.5a.25.25 0 0 0-.25-.25H13a.25.25 0 0 0-.25.25Z"></path>
                   </svg> <!-- -->No</label></div>
                 <a rel="" class="f6 text-underline" target="_blank"
-                   href="/en/site-policy/privacy-policies/github-privacy-statement">Privacy policy</a></form>
+                   href="/en/site-policy/privacy-policies/github-privacy-statement">Privacy policy</a>
+                   </form>
             </div>
             <div class="float-left pr-4 mb-6 mb-xl-0 col-12 col-lg-6 col-xl-4 offset-xl-1">
               <div class="f5 contribution"><h3 class="f4 mb-3">Help us make these docs great!</h3>

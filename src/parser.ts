@@ -1,17 +1,26 @@
 import type { MdreamProcessingState, MdreamRuntimeState, Node, NodeEvent, ParentNode } from './types.ts'
 import {
   ELEMENT_NODE,
-  MINIMAL_EXCLUDE_TAGS,
   NodeEventEnter,
   NodeEventExit,
-  NON_NESTING_TAGS,
-  NON_SUPPORTED_NODES,
+  TAG_A,
+  TAG_BLOCKQUOTE,
+  TAG_BODY,
+  TAG_CODE,
+  TAG_H1,
+  TAG_H2,
+  TAG_H3,
+  TAG_H4,
+  TAG_H5,
+  TAG_H6,
+  TAG_PRE,
+  TAG_TABLE,
+  TagIdMap,
   TEXT_NODE,
   TRACK_DEPTH_MAP_KEYS,
-  USES_ATTRIBUTES,
-  VOID_TAGS,
 } from './const.ts'
 import { processHtmlEventToMarkdown } from './markdown.ts'
+import { tagHandlers } from './tags.ts'
 import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils.ts'
 
 // Cache frequently used character codes
@@ -34,8 +43,8 @@ const CARRIAGE_RETURN_CHAR = 13 // '\r'
 const EMPTY_ATTRIBUTES: Record<string, string> = Object.freeze({})
 
 // Fast object copy for small objects like depthMap
-function copyDepthMap(depthMap: Record<string, number>): Record<string, number> {
-  const copy: Record<string, number> = {}
+function copyDepthMap(depthMap: Node['depthMap']): Node['depthMap'] {
+  const copy: Node['depthMap'] = {}
   for (let i = 0; i < TRACK_DEPTH_MAP_KEYS.length; i++) {
     const key = TRACK_DEPTH_MAP_KEYS[i]
     if (depthMap[key]) {
@@ -86,7 +95,7 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState, handl
 
       // Whitespace handling optimization
       if (isWhitespace(currentCharCode)) {
-        const inPreTag = state.depthMap.pre > 0
+        const inPreTag = state.depthMap[TAG_PRE] > 0
 
         // Handle space after a tag
         if (state.justClosedTag) {
@@ -118,32 +127,32 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState, handl
         state.lastCharWasWhitespace = false
         state.justClosedTag = false
         // pipe character
-        if (currentCharCode === 124 && state.depthMap.table) {
+        if (currentCharCode === 124 && state.depthMap[TAG_TABLE]) {
           // replace with encoded pipe character
           textBuffer += '\\|'
         }
         // if in header we need to encode #
-        else if (currentCharCode === 35 && (state.depthMap.h1 || state.depthMap.h2 || state.depthMap.h3 || state.depthMap.h4 || state.depthMap.h5 || state.depthMap.h6)) {
+        else if (currentCharCode === 35 && (state.depthMap[TAG_H1] || state.depthMap[TAG_H2] || state.depthMap[TAG_H3] || state.depthMap[TAG_H4] || state.depthMap[TAG_H5] || state.depthMap[TAG_H6])) {
           // replace with encoded #
           textBuffer += '\\#'
         }
         // if in code block we need to encode `
-        else if (currentCharCode === 96 && (state.depthMap.code || state.depthMap.pre)) {
+        else if (currentCharCode === 96 && (state.depthMap[TAG_CODE] || state.depthMap[TAG_PRE])) {
           // replace with encoded `
           textBuffer += '\\`'
         }
         // link open
-        else if (currentCharCode === 91 && state.depthMap.a) {
+        else if (currentCharCode === 91 && state.depthMap[TAG_A]) {
           // replace with encoded [
           textBuffer += '\\['
         }
         // link close
-        else if (currentCharCode === 93 && state.depthMap.a) {
+        else if (currentCharCode === 93 && state.depthMap[TAG_A]) {
           // replace with encoded ]
           textBuffer += '\\]'
         }
         // blockquote
-        else if (currentCharCode === 62 && state.depthMap.blockquote) {
+        else if (currentCharCode === 62 && state.depthMap[TAG_BLOCKQUOTE]) {
           // replace with encoded >
           textBuffer += '\\>'
         }
@@ -227,12 +236,12 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState, handl
         i = tagNameEnd
         break
       }
+      const tagId = TagIdMap[tagName] || -1
       i2 = tagNameEnd
       // avoid tag opens inside of script tags
-      const currentElement = state.currentElementNode?.name
-      if (currentElement && NON_NESTING_TAGS.has(currentElement)) {
+      if (state.currentElementNode?.tagHandler?.isNonNesting) {
         // if current tag is a script, then we need to keep walking
-        if (tagName !== currentElement) {
+        if (tagId !== state.currentElementNode?.tagId) {
           textBuffer += htmlChunk[i++]
           continue
         }
@@ -243,7 +252,7 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState, handl
         processTextBuffer(textBuffer, state, handleEvent)
         textBuffer = ''
       }
-      const result = processOpeningTag(tagName, htmlChunk, i2, state, handleEvent)
+      const result = processOpeningTag(tagName, tagId, htmlChunk, i2, state, handleEvent)
 
       if (result.skip) {
         textBuffer += htmlChunk[i++]
@@ -266,13 +275,6 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState, handl
   return textBuffer
 }
 
-const IgnoreWhitespaceTags = new Set([
-  'thead',
-  'tbody',
-  'tfoot',
-  'tr',
-])
-
 /**
  * Process accumulated text buffer and create a text node if needed
  * Optimized to handle whitespace trimming
@@ -282,18 +284,15 @@ function processTextBuffer(textBuffer: string, state: MdreamProcessingState, han
   const containsWhitespace = state.textBufferContainsWhitespace
   state.textBufferContainsNonWhitespace = false
   state.textBufferContainsWhitespace = false
-  if (!state.currentElementNode) {
+  if (!state.currentElementNode || state.currentElementNode?.tagHandler?.excludesTextNodes) {
     return
   }
 
   // Check if parent is a <pre> tag to handle whitespace properly
-  const inPreTag = state.depthMap.pre > 0
+  const inPreTag = state.depthMap[TAG_PRE] > 0
 
   // For non-pre tags, we want to preserve the text but collapse whitespace
   if (!inPreTag && !containsNonWhitespace && !state.currentElementNode.childTextNodeIndex) {
-    return
-  }
-  if (state.currentElementNode?.name && IgnoreWhitespaceTags.has(state.currentElementNode.name)) {
     return
   }
 
@@ -362,41 +361,47 @@ function processClosingTag(
   const tagNameStart = i
   const chunkLength = htmlChunk.length
 
-  // Fast scan for end of tag name
+  //  Fast scan for end of tag name
+  let foundClose = false
   while (i < chunkLength) {
     const charCode = htmlChunk.charCodeAt(i)
-    if (isWhitespace(charCode) || charCode === GT_CHAR) {
+    if (charCode === GT_CHAR) {
+      foundClose = true
       break
     }
     i++
   }
-
-  const tagName = htmlChunk.substring(tagNameStart, i).toLowerCase()
-
-  // Skip any whitespace
-  while (i < chunkLength && isWhitespace(htmlChunk.charCodeAt(i))) {
-    i++
-  }
-
-  // Check for closing '>'
-  if (i >= chunkLength || htmlChunk.charCodeAt(i) !== GT_CHAR) {
-    // Incomplete closing tag
+  if (!foundClose) {
+    // Incomplete closing tag - process in next chunk
     return {
       complete: false,
-      newPosition: i,
-      remainingText: `</${tagName}`,
+      newPosition: position,
+      remainingText: htmlChunk.substring(position),
+    }
+  }
+  // try and recover from malformed HTML
+  const tagName = htmlChunk.substring(tagNameStart, i).toLowerCase()
+  const tagId = TagIdMap[tagName]
+
+  if (state.currentElementNode?.tagHandler?.isNonNesting && tagId !== state.currentElementNode.tagId) {
+    return {
+      complete: false,
+      newPosition: position,
+      remainingText: htmlChunk.substring(position),
     }
   }
 
   // need to do a while loop to find the parent node that we're closing as we may have malformed html
-  let parentNode = state.currentElementNode
-  while (parentNode && parentNode.name?.toLowerCase() !== tagName) {
-    // @ts-expect-error untyped
-    parentNode = parentNode.parentNode
+  let curr: ParentNode | null | undefined = state.currentElementNode // <span>
+  if (curr && curr.tagId !== tagId) {
+    while (curr && curr.tagId !== tagId) { // closing <h2>
+      closeNode(curr, state, handleEvent)
+      curr = curr.parentNode
+    }
   }
 
   // Process the closing tag
-  if (parentNode) {
+  if (curr) {
     // we need to close all of the parent nodes we walked
     closeNode(state.currentElementNode, state, handleEvent)
   }
@@ -417,28 +422,33 @@ function closeNode(node: ParentNode | Node | null, state: MdreamProcessingState,
   if (!node) {
     return
   }
-  if (node.name === 'a' && !node.childTextNodeIndex) {
+  if (node.tagId === TAG_A && !node.childTextNodeIndex) {
     // maybe emit a text node if we found no content
     const prefix = node.attributes?.title || node.attributes?.['aria-label'] || ''
-    node.childTextNodeIndex = 1
-    const textNode = {
-      type: TEXT_NODE,
-      value: prefix,
-      parentNode: node,
-      index: 0,
-      unsupported: node.unsupported,
-      excluded: node.minimal,
-      depth: node.depth + 1,
+    if (prefix) {
+      node.childTextNodeIndex = 1
+      const textNode = {
+        type: TEXT_NODE,
+        value: prefix,
+        parentNode: node,
+        index: 0,
+        unsupported: node.unsupported,
+        excluded: node.minimal,
+        depth: node.depth + 1,
+      }
+      // @ts-expect-error untyped
+      handleEvent({ type: NodeEventEnter, node: textNode })
+      for (const parent of traverseUpToFirstBlockNode(node)) {
+        parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
+      }
     }
-    // @ts-expect-error untyped
-    handleEvent({ type: NodeEventEnter, node: textNode })
-    for (const parent of traverseUpToFirstBlockNode(node)) {
-      parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
+    else {
+      // TODO maybe can remove the fragment
     }
   }
 
-  if (node.name) {
-    state.depthMap[node.name] = Math.max(0, (state.depthMap[node.name] || 0) - 1)
+  if (node.tagId) {
+    state.depthMap[node.tagId] = Math.max(0, (state.depthMap[node.tagId] || 0) - 1)
   }
 
   if (state.inUnsupportedNodeDepth === state.depth) {
@@ -526,6 +536,7 @@ function processCommentOrDoctype(htmlChunk: string, position: number): {
  */
 function processOpeningTag(
   tagName: string,
+  tagId: number,
   htmlChunk: string,
   i: number,
   state: MdreamProcessingState,
@@ -538,21 +549,24 @@ function processOpeningTag(
     skip?: boolean
   } {
   // Check if the current element is a non-nesting tag that needs closing
-  if (state.currentElementNode?.name && NON_NESTING_TAGS.has(state.currentElementNode.name)) {
+  if (state.currentElementNode?.tagHandler?.isNonNesting) {
     closeNode(state.currentElementNode, state, handleEvent)
   }
 
   // Fast increment depth tracking
-  const currentTagCount = state.depthMap[tagName] || 0
-  state.depthMap[tagName] = currentTagCount + 1
+  const currentTagCount = state.depthMap[tagId] || 0
+  state.depthMap[tagId] = currentTagCount + 1
   state.depth++
 
+  // Get tag handler for this tag
+  const tagHandler = tagHandlers[tagId]
+
   // Process attributes and tag properties
-  const result = processTagAttributes(htmlChunk, i, tagName)
+  const result = processTagAttributes(htmlChunk, i, tagHandler)
 
   if (!result.complete) {
     // Roll back depth changes
-    state.depthMap[tagName] = currentTagCount
+    state.depthMap[tagId] = currentTagCount
     state.depth--
 
     return {
@@ -566,8 +580,8 @@ function processOpeningTag(
   i = result.newPosition
 
   // Pre-compute flags
-  const isUnsupported = (!state.inUnsupportedNodeDepth && NON_SUPPORTED_NODES.has(tagName))// || result.attributes['aria-hidden'] === 'true'
-  const isMinimalTag = (state.isMinimalNodeDepth && state.depth >= state.isMinimalNodeDepth) || MINIMAL_EXCLUDE_TAGS.has(tagName)
+  const isUnsupported = (!state.inUnsupportedNodeDepth && tagHandler?.isNonSupported)// || result.attributes['aria-hidden'] === 'true'
+  const isMinimalTag = (state.isMinimalNodeDepth && state.depth >= state.isMinimalNodeDepth) || tagHandler?.isMinimalExclude
   if (isUnsupported && !state.inUnsupportedNodeDepth) {
     state.inUnsupportedNodeDepth = state.depth
   }
@@ -591,6 +605,8 @@ function processOpeningTag(
     unsupported: isUnsupported || !!state.inUnsupportedNodeDepth,
     minimal: isMinimalTag,
     index: currentWalkIndex,
+    tagId,
+    tagHandler,
   }
   state.lastTextNode = tag
 
@@ -621,7 +637,7 @@ function processOpeningTag(
 /**
  * Process tag attributes and determine if tag is self-closing
  */
-function processTagAttributes(htmlChunk: string, position: number, tagName: string): {
+function processTagAttributes(htmlChunk: string, position: number, tagHandler: Node['tagHandler']): {
   complete: boolean
   newPosition: number
   attributes: Record<string, string>
@@ -631,12 +647,13 @@ function processTagAttributes(htmlChunk: string, position: number, tagName: stri
   // For tags that use attributes, do full processing
   let i = position
   const chunkLength = htmlChunk.length
-  const selfClosing = VOID_TAGS.has(tagName)
+
+  const selfClosing = tagHandler?.isSelfClosing || false
   const attrStartPos = i
   let insideQuote = false
   let quoteChar = 0
 
-  const passAttrs = (attrStr: string) => !USES_ATTRIBUTES.has(tagName) ? EMPTY_ATTRIBUTES : parseAttributes(attrStr)
+  const passAttrs = (attrStr: string) => !(tagHandler?.usesAttributes) ? EMPTY_ATTRIBUTES : parseAttributes(attrStr)
 
   // Find the end of tag
   let prevChar = 0
@@ -810,29 +827,24 @@ export function processPartialHTMLToMarkdown(
   const strategy = state.options?.strategy
   const isMinimalFromFirstHeader = strategy === 'minimal-from-first-header'
   const isMinimal = strategy === 'minimal'
-  const fragments: string[] = []
-  function handleNodeEvent(event: NodeEvent) {
+  state.fragments = []
+  function handleEvent(event: NodeEvent) {
     // never attempt
     if (event.node.unsupported) {
       return
     }
 
     if (event.type === NodeEventEnter) {
-      const tagName = String(event.node.name)
       // Track when we enter the body tag
-      if (!state.enteredBody && tagName === 'body') {
+      if (!state.enteredBody && event.node.tagId === TAG_BODY) {
         state.enteredBody = true
       }
 
       // Check if this is a header tag inside body and we're processing an HTML document
-      if (isMinimalFromFirstHeader && !state.hasSeenHeader) {
-        const isHeaderTag = tagName.charCodeAt(0) === 104 // 'h'
-        if (isHeaderTag) {
-          // h1
-          state.hasSeenHeader = tagName.charCodeAt(1) === 49
-          event.node.minimal = false // make sure title is rendered
-          state.isMinimalNodeDepth = undefined
-        }
+      if (isMinimalFromFirstHeader && !state.hasSeenHeader && event.node.tagId === TAG_H1) {
+        state.hasSeenHeader = true
+        event.node.minimal = false
+        state.isMinimalNodeDepth = undefined
       }
     }
 
@@ -847,18 +859,18 @@ export function processPartialHTMLToMarkdown(
     // Fast path for text nodes
     if (event.node.type === TEXT_NODE) {
       // @ts-expect-error untyped
-      processHtmlEventToMarkdown(event, state, fragments)
+      processHtmlEventToMarkdown(event, state)
       return
     }
 
     // @ts-expect-error untyped
-    processHtmlEventToMarkdown(event, state, fragments)
+    processHtmlEventToMarkdown(event, state)
   }
   // Parse HTML into a DOM tree with events
   // @ts-expect-error untyped
-  const unprocessedHtml = parseHTML(partialHtml, state, handleNodeEvent)
+  const unprocessedHtml = parseHTML(partialHtml, state, handleEvent)
 
-  state.fragmentCount += fragments.length
+  state.fragmentCount += state.fragments.length
 
-  return { chunk: fragments.join(''), remainingHTML: unprocessedHtml }
+  return { chunk: state.fragments.join(''), remainingHTML: unprocessedHtml }
 }
