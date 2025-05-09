@@ -77,11 +77,11 @@ export function traverseUpToFirstBlockNode(node: Node) {
   let firstBlockParent = node
   const parentsToIncrement = [firstBlockParent]
   // find first block element
-  while (firstBlockParent?.name && firstBlockParent.tagHandler?.isInline) {
-    if (!firstBlockParent.parentNode) {
+  while (firstBlockParent.tagHandler?.isInline) {
+    if (!firstBlockParent.parent) {
       break
     }
-    firstBlockParent = firstBlockParent.parentNode
+    firstBlockParent = firstBlockParent.parent
     parentsToIncrement.push(firstBlockParent)
   }
   return parentsToIncrement

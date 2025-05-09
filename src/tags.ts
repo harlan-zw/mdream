@@ -354,7 +354,7 @@ export const tagHandlers: Record<number, TagHandler> = {
 
       // Calculate list nesting depth
       const depth = (node.depthMap[TAG_UL] || 0) + (node.depthMap[TAG_OL] || 0) - 1
-      const isOrdered = node.parentNode?.tagId === TAG_OL
+      const isOrdered = node.parent?.tagId === TAG_OL
       const indent = '  '.repeat(Math.max(0, depth))
       const marker = isOrdered ? `${node.index + 1}. ` : '- '
 

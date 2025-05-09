@@ -1,4 +1,4 @@
-import type { DepthMapArray, MdreamProcessingState, MdreamRuntimeState, Node, NodeEvent, ParentNode } from './types.ts'
+import type { MdreamProcessingState, MdreamRuntimeState, Node, NodeEvent, ParentNode } from './types.ts'
 import {
   ELEMENT_NODE,
   MAX_TAG_ID,
@@ -18,7 +18,6 @@ import {
   TAG_TABLE,
   TagIdMap,
   TEXT_NODE,
-  TRACK_DEPTH_MAP_KEYS,
 } from './const.ts'
 import { processHtmlEventToMarkdown } from './markdown.ts'
 import { tagHandlers } from './tags.ts'
@@ -233,9 +232,9 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState, handl
       const tagId = TagIdMap[tagName] || -1
       i2 = tagNameEnd
       // avoid tag opens inside of script tags
-      if (state.currentElementNode?.tagHandler?.isNonNesting) {
+      if (state.currentNode?.tagHandler?.isNonNesting) {
         // if current tag is a script, then we need to keep walking
-        if (tagId !== state.currentElementNode?.tagId) {
+        if (tagId !== state.currentNode?.tagId) {
           textBuffer += htmlChunk[i++]
           continue
         }
@@ -278,7 +277,7 @@ function processTextBuffer(textBuffer: string, state: MdreamProcessingState, han
   const containsWhitespace = state.textBufferContainsWhitespace
   state.textBufferContainsNonWhitespace = false
   state.textBufferContainsWhitespace = false
-  if (!state.currentElementNode || state.currentElementNode?.tagHandler?.excludesTextNodes) {
+  if (!state.currentNode || state.currentNode?.tagHandler?.excludesTextNodes) {
     return
   }
 
@@ -286,7 +285,7 @@ function processTextBuffer(textBuffer: string, state: MdreamProcessingState, han
   const inPreTag = state.depthMap[TAG_PRE] > 0
 
   // For non-pre tags, we want to preserve the text but collapse whitespace
-  if (!inPreTag && !containsNonWhitespace && !state.currentElementNode.childTextNodeIndex) {
+  if (!inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex) {
     return
   }
 
@@ -295,7 +294,7 @@ function processTextBuffer(textBuffer: string, state: MdreamProcessingState, han
   if (text.length === 0) {
     return
   }
-  const parentsToIncrement = traverseUpToFirstBlockNode(state.currentElementNode)
+  const parentsToIncrement = traverseUpToFirstBlockNode(state.currentNode)
   const firstBlockParent = parentsToIncrement[parentsToIncrement.length - 1]
 
   // Handle whitespace trimming
@@ -319,8 +318,8 @@ function processTextBuffer(textBuffer: string, state: MdreamProcessingState, han
   const textNode: Node = {
     type: TEXT_NODE,
     value: text,
-    parentNode: state.currentElementNode,
-    index: state.currentElementNode.currentWalkIndex!++,
+    parent: state.currentNode,
+    index: state.currentNode.currentWalkIndex!++,
     unsupported: state.inUnsupportedNodeDepth !== undefined,
     minimal: state.isMinimalNodeDepth !== undefined,
     depth: state.depth,
@@ -377,7 +376,7 @@ function processClosingTag(
   const tagName = htmlChunk.substring(tagNameStart, i).toLowerCase()
   const tagId = TagIdMap[tagName]
 
-  if (state.currentElementNode?.tagHandler?.isNonNesting && tagId !== state.currentElementNode.tagId) {
+  if (state.currentNode?.tagHandler?.isNonNesting && tagId !== state.currentNode.tagId) {
     return {
       complete: false,
       newPosition: position,
@@ -386,18 +385,18 @@ function processClosingTag(
   }
 
   // need to do a while loop to find the parent node that we're closing as we may have malformed html
-  let curr: ParentNode | null | undefined = state.currentElementNode // <span>
+  let curr: ParentNode | null | undefined = state.currentNode // <span>
   if (curr && curr.tagId !== tagId) {
     while (curr && curr.tagId !== tagId) { // closing <h2>
       closeNode(curr, state, handleEvent)
-      curr = curr.parentNode
+      curr = curr.parent
     }
   }
 
   // Process the closing tag
   if (curr) {
     // we need to close all of the parent nodes we walked
-    closeNode(state.currentElementNode, state, handleEvent)
+    closeNode(state.currentNode, state, handleEvent)
   }
 
   state.justClosedTag = true // Mark that we just processed a closing tag
@@ -424,7 +423,7 @@ function closeNode(node: ParentNode | Node | null, state: MdreamProcessingState,
       const textNode = {
         type: TEXT_NODE,
         value: prefix,
-        parentNode: node,
+        parent: node,
         index: 0,
         unsupported: node.unsupported,
         excluded: node.minimal,
@@ -455,7 +454,7 @@ function closeNode(node: ParentNode | Node | null, state: MdreamProcessingState,
 
   state.depth--
   handleEvent({ type: NodeEventExit, node })
-  state.currentElementNode = state.currentElementNode!.parentNode!
+  state.currentNode = state.currentNode!.parent!
   state.hasEncodedHtmlEntity = false
   state.justClosedTag = true
 }
@@ -543,8 +542,8 @@ function processOpeningTag(
     skip?: boolean
   } {
   // Check if the current element is a non-nesting tag that needs closing
-  if (state.currentElementNode?.tagHandler?.isNonNesting) {
-    closeNode(state.currentElementNode, state, handleEvent)
+  if (state.currentNode?.tagHandler?.isNonNesting) {
+    closeNode(state.currentNode, state, handleEvent)
   }
 
   // Get tag handler for this tag
@@ -579,17 +578,17 @@ function processOpeningTag(
     state.isMinimalNodeDepth = state.depth
   }
 
-  if (state.currentElementNode) {
-    state.currentElementNode.currentWalkIndex = state.currentElementNode.currentWalkIndex || 0
+  if (state.currentNode) {
+    state.currentNode.currentWalkIndex = state.currentNode.currentWalkIndex || 0
   }
   // Create the node with pre-computed values
-  const currentWalkIndex = state.currentElementNode ? state.currentElementNode.currentWalkIndex!++ : 0
+  const currentWalkIndex = state.currentNode ? state.currentNode.currentWalkIndex!++ : 0
 
   const tag: Node = {
     type: ELEMENT_NODE,
     name: tagName,
     attributes: result.attributes,
-    parentNode: state.currentElementNode,
+    parent: state.currentNode,
     depthMap: copyDepthMap(state.depthMap),
     depth: state.depth,
     unsupported: isUnsupported || !!state.inUnsupportedNodeDepth,
@@ -605,7 +604,7 @@ function processOpeningTag(
   // Directly set as parent node
   const parentNode = tag as ParentNode
   parentNode.currentWalkIndex = 0
-  state.currentElementNode = parentNode
+  state.currentNode = parentNode
   state.hasEncodedHtmlEntity = false
 
   if (result.selfClosing) {

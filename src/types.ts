@@ -41,7 +41,7 @@ export interface Node {
   attributes?: Record<string, string>
 
   /** Parent node reference */
-  parentNode?: ParentNode | null
+  parent?: ParentNode | null
 
   /** Current nesting depth in the DOM tree */
   depth: number
@@ -94,7 +94,7 @@ export interface MdreamProcessingState {
   depth: number
 
   /** Currently processing element node */
-  currentElementNode: ParentNode | null
+  currentNode: ParentNode | null
 
   /** Depth at which an unsupported node was encountered */
   inUnsupportedNodeDepth?: number

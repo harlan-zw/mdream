@@ -63,8 +63,8 @@ export function processHtmlEventToMarkdown(
   }
 
   // Trim trailing whitespace from the last text node
-  if (!state.lastNewLines && fragments.length && state.lastTextNode?.containsWhitespace && !!node.parentNode && typeof state.lastTextNode?.value === 'string') {
-    if (!node.parentNode.depthMap[TAG_PRE] || node.parentNode.tagId === TAG_PRE) {
+  if (!state.lastNewLines && fragments.length && state.lastTextNode?.containsWhitespace && !!node.parent && typeof state.lastTextNode?.value === 'string') {
+    if (!node.parent.depthMap[TAG_PRE] || node.parent.tagId === TAG_PRE) {
       fragments[fragments.length - 1] = lastFragment!.trimEnd()
       state.lastTextNode = undefined
     }
@@ -130,12 +130,12 @@ function calculateNewLineConfig(node: Node): readonly [number, number] {
   }
 
   // Adjust for inline elements
-  let currParent = node.parentNode
+  let currParent = node.parent
   while (currParent) {
     if (currParent.tagHandler?.collapsesInnerWhiteSpace) {
       return NO_SPACING
     }
-    currParent = currParent.parentNode
+    currParent = currParent.parent
   }
   if (node.tagHandler?.spacing) {
     return node.tagHandler?.spacing
