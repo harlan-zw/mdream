@@ -26,7 +26,7 @@ describe('streamHtmlToMarkdown', () => {
   })
 
   it('throws an error when null is passed as the HTML stream', async () => {
-    await expect(async() => {
+    await expect(async () => {
       const options = {}
       for await (const _ of streamHtmlToMarkdown(null, options)) {
         // no-op
@@ -192,7 +192,7 @@ describe('streamHtmlToMarkdown', () => {
       ]
     `)
   })
-  it('handles unclosed span tags in nested structures', async  () => {
+  it('handles unclosed span tags in nested structures', async () => {
     const htmlStream = new ReadableStream({
       start(controller) {
         controller.enqueue('<div><h3>Section with <span>unclosed span')

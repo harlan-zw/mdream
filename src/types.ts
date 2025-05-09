@@ -122,7 +122,7 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   /** Last new lines emitted */
   lastNewLines: number
 
-  /** Current count of fragments **/
+  /** Current count of fragments */
   fragmentCount: number
 
   /** Current line - may not be accurate, just used for non-zero */
