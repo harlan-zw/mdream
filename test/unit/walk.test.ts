@@ -12,7 +12,7 @@ describe('hTML walking', () => {
     const state: Partial<MdreamProcessingState> = {
       depthMap: new Uint8Array(MAX_TAG_ID),
       depth: 0,
-      currentElementNode: null,
+      currentNode: null,
     }
 
     function handleEvent(event: NodeEvent) {
@@ -47,7 +47,7 @@ describe('hTML walking', () => {
     const state: Partial<MdreamProcessingState> = {
       depthMap: new Uint8Array(MAX_TAG_ID),
       depth: 0,
-      currentElementNode: null,
+      currentNode: null,
     }
 
     function handleEvent(event: NodeEvent) {
@@ -84,7 +84,7 @@ describe('hTML walking', () => {
     const state: Partial<MdreamProcessingState> = {
       depthMap: new Uint8Array(MAX_TAG_ID),
       depth: 0,
-      currentElementNode: null,
+      currentNode: null,
     }
 
     function handleEvent(event: NodeEvent) {
