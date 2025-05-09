@@ -1,6 +1,6 @@
 import type { MdreamProcessingState, NodeEvent } from '../../src/types.js'
 import { describe, expect, it } from 'vitest'
-import { NodeEventEnter } from '../../src/const.js'
+import { MAX_TAG_ID, NodeEventEnter } from '../../src/const.js'
 import { syncHtmlToMarkdown } from '../../src/index.js'
 import { parseHTML } from '../../src/parser.js'
 
@@ -10,7 +10,7 @@ describe('hTML walking', () => {
     const depthLog: { tagName: string, depth: number, event: string }[] = []
 
     const state: Partial<MdreamProcessingState> = {
-      depthMap: {},
+      depthMap: new Uint8Array(MAX_TAG_ID),
       depth: 0,
       currentElementNode: null,
     }
@@ -45,7 +45,7 @@ describe('hTML walking', () => {
     const depthLog: { tagName: string, depth: number, event: string }[] = []
 
     const state: Partial<MdreamProcessingState> = {
-      depthMap: {},
+      depthMap: new Uint8Array(MAX_TAG_ID),
       depth: 0,
       currentElementNode: null,
     }
@@ -79,10 +79,10 @@ describe('hTML walking', () => {
 
   it('tracks depthMap correctly for multiple levels of nested elements', () => {
     const html = '<div><ul><li><a href="#">Link <strong>with bold</strong> text</a></li></ul></div>'
-    const depthMapLog: { tagName: string, depthMap: Record<number, number> }[] = []
+    const depthMapLog: { tagName: string, depthMap: Uint8Array }[] = []
 
     const state: Partial<MdreamProcessingState> = {
-      depthMap: {},
+      depthMap: new Uint8Array(MAX_TAG_ID),
       depth: 0,
       currentElementNode: null,
     }
@@ -93,7 +93,7 @@ describe('hTML walking', () => {
       if (event.type === NodeEventEnter && node.type === 1) { // ELEMENT_NODE enter
         depthMapLog.push({
           tagName: node.name || '',
-          depthMap: { ...node.depthMap }, // Copy to avoid reference issues in test
+          depthMap: new Uint8Array(node.depthMap), // Copy to avoid reference issues in test
         })
       }
     }
@@ -109,11 +109,21 @@ describe('hTML walking', () => {
     expect(depthMapLog[4].tagName).toBe('strong')
 
     // Each node should have a depthMap that includes itself and its ancestors
-    expect(depthMapLog[4].depthMap).toMatchObject({
-      // The exact tag IDs will depend on the TAG_MAP constants
-      // but the strong element should have entries for div, ul, li, a, and strong
-      // with counts >= 1
-    })
+    // Check that the values in the Uint8Array for the corresponding tag IDs
+    // are all greater than 0 for the expected elements
+    const depthMap = depthMapLog[4].depthMap
+    // Import these constants in a real implementation
+    const divId = 36 // TAG_DIV
+    const ulId = 24 // TAG_UL
+    const liId = 25 // TAG_LI
+    const aId = 26 // TAG_A
+    const strongId = 14 // TAG_STRONG
+
+    expect(depthMap[divId]).toBeGreaterThan(0)
+    expect(depthMap[ulId]).toBeGreaterThan(0)
+    expect(depthMap[liId]).toBeGreaterThan(0)
+    expect(depthMap[aId]).toBeGreaterThan(0)
+    expect(depthMap[strongId]).toBeGreaterThan(0)
   })
 
   it('handles complex nested elements with text nodes', () => {

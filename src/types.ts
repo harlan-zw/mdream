@@ -18,6 +18,13 @@ export const ELEMENT_NODE = 1
 export const TEXT_NODE = 3
 
 /**
+ * Type for the optimized depth map using Uint8Array
+ * This replaces the Record<number, number> with a fixed-size typed array
+ * for faster property access
+ */
+export type DepthMapArray = Uint8Array
+
+/**
  * Base DOM node interface
  */
 export interface Node {
@@ -39,8 +46,8 @@ export interface Node {
   /** Current nesting depth in the DOM tree */
   depth: number
 
-  /** Map of tag names to their nesting count */
-  depthMap: Required<MdreamRuntimeState>['depthMap']
+  /** Map of tag names to their nesting count (using Uint8Array for performance) */
+  depthMap: DepthMapArray
 
   /** Whether this node should be excluded from output */
   minimal: boolean
@@ -80,8 +87,8 @@ export interface ParentNode extends Node {
  * State interface for HTML parsing and processing
  */
 export interface MdreamProcessingState {
-  /** Map of tag names to their current nesting depth */
-  depthMap: Record<number, number>
+  /** Map of tag names to their current nesting depth (using Uint8Array for performance) */
+  depthMap: DepthMapArray
 
   /** Current overall nesting depth */
   depth: number

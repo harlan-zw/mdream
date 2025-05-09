@@ -235,6 +235,9 @@ export const TRACK_DEPTH_MAP_KEYS = [
   TAG_TH,
 ]
 
+// Maximum tag ID for creating the typed array (97 for TAG_RP + 1 for buffer)
+export const MAX_TAG_ID = 98
+
 // Pre-defined strings to avoid repeated allocations
 export const FRONTMATTER_START = '---'
 export const FRONTMATTER_END = '\n---'

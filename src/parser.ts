@@ -1,6 +1,7 @@
-import type { MdreamProcessingState, MdreamRuntimeState, Node, NodeEvent, ParentNode } from './types.ts'
+import type { DepthMapArray, MdreamProcessingState, MdreamRuntimeState, Node, NodeEvent, ParentNode } from './types.ts'
 import {
   ELEMENT_NODE,
+  MAX_TAG_ID,
   NodeEventEnter,
   NodeEventExit,
   TAG_A,
@@ -39,19 +40,12 @@ const TAB_CHAR = 9 // '\t'
 const NEWLINE_CHAR = 10 // '\n'
 const CARRIAGE_RETURN_CHAR = 13 // '\r'
 
-// Pre-allocate arrays to reduce allocations
+// Pre-allocate arrays and objects to reduce allocations
 const EMPTY_ATTRIBUTES: Record<string, string> = Object.freeze({})
 
-// Fast object copy for small objects like depthMap
+// Fast typed array copy for depthMap
 function copyDepthMap(depthMap: Node['depthMap']): Node['depthMap'] {
-  const copy: Node['depthMap'] = {}
-  for (let i = 0; i < TRACK_DEPTH_MAP_KEYS.length; i++) {
-    const key = TRACK_DEPTH_MAP_KEYS[i]
-    if (depthMap[key]) {
-      copy[key] = depthMap[key]
-    }
-  }
-  return copy
+  return new Uint8Array(depthMap)
 }
 
 /**
@@ -74,7 +68,7 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState, handl
   let textBuffer = '' // Buffer to accumulate text content
 
   // Initialize state
-  state.depthMap ??= {}
+  state.depthMap ??= new Uint8Array(MAX_TAG_ID) // Initialize using typed array
   state.depth ??= 0
   state.lastCharWasWhitespace ??= true // don't allow subsequent whitespace at start
   state.justClosedTag ??= false
@@ -448,7 +442,7 @@ function closeNode(node: ParentNode | Node | null, state: MdreamProcessingState,
   }
 
   if (node.tagId) {
-    state.depthMap[node.tagId] = Math.max(0, (state.depthMap[node.tagId] || 0) - 1)
+    state.depthMap[node.tagId] = Math.max(0, state.depthMap[node.tagId] - 1)
   }
 
   if (state.inUnsupportedNodeDepth === state.depth) {
@@ -553,11 +547,6 @@ function processOpeningTag(
     closeNode(state.currentElementNode, state, handleEvent)
   }
 
-  // Fast increment depth tracking
-  const currentTagCount = state.depthMap[tagId] || 0
-  state.depthMap[tagId] = currentTagCount + 1
-  state.depth++
-
   // Get tag handler for this tag
   const tagHandler = tagHandlers[tagId]
 
@@ -565,10 +554,6 @@ function processOpeningTag(
   const result = processTagAttributes(htmlChunk, i, tagHandler)
 
   if (!result.complete) {
-    // Roll back depth changes
-    state.depthMap[tagId] = currentTagCount
-    state.depth--
-
     return {
       complete: false,
       newPosition: i,
@@ -576,6 +561,11 @@ function processOpeningTag(
       selfClosing: false,
     }
   }
+
+  // Fast increment depth tracking with Uint8Array
+  const currentTagCount = state.depthMap[tagId]
+  state.depthMap[tagId] = currentTagCount + 1
+  state.depth++
 
   i = result.newPosition
 
@@ -823,6 +813,7 @@ export function processPartialHTMLToMarkdown(
   state: Partial<MdreamRuntimeState> = {},
 ): { chunk: string, remainingHTML: string } {
   state.fragmentCount = 0
+  state.depthMap ??= new Uint8Array(MAX_TAG_ID)
 
   const strategy = state.options?.strategy
   const isMinimalFromFirstHeader = strategy === 'minimal-from-first-header'
