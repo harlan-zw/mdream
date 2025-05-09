@@ -4,7 +4,6 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/mdream/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-
 > Universal HTML to Markdown streamer optimized for LLMs & Human readability
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
@@ -23,8 +22,8 @@
 
 - 🤖 LLM & Human Optimized: [Opinionated Markdown](#opinionated-markdown) output maximised for on-page content.
 - 🚀 Fast: Convert 1.4MB of HTML in [~65 ms*]() with streaming support.
-- ⚡ Tiny: 5kB gzip, zero dependencies
-- 🔍 Advanced Content Preservation: Full GitHub Markdown support including nested lists, tables, and code blocks.
+- ⚡ Tiny: 5kB gzip, zero dependencies.
+- 🔍 Optimized Markdown: Frontmatter, GitHub Flavored with nested markup support.
 - ⚙️ Run anywhere: CLI, edge workers, browsers, Node, etc.
 
 ## Why Mdream?
@@ -38,20 +37,24 @@ Perfect for: RAG systems, web scraping, content extraction, ChatGPT/Claude integ
 
 ## CLI Usage
 
-The Mdream CLI is designed to work exclusively with Unix pipes, providing full more flexibility in implementation
-and making it easy to integrate with other tools.
+The Mdream CLI is designed to work exclusively with Unix pipes, providing flexibility and freedom to integrate with other tools.
 
 **Pipe Site to Markdown**
 
+Fetches the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown) and converts it to Markdown whilst
+preserving the original links and images.
+
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream --origin https://en.wikipedia.org \
+ | npx mdream --origin https://en.wikipedia.org --filters minimal-from-first-header \
   | tee streaming.md
 ```
 
 _Tip: The `--origin` flag will fix relative image and links paths_
 
 **Local File to Markdown**
+
+Converts a local HTML file to a Markdown file, using `tee` to write the output to a file and display it in the terminal.
 
 ```bash
 cat index.html \
@@ -61,7 +64,6 @@ cat index.html \
 
 ### CLI Options
 
-- `--chunk-size <size>`: Set the chunk size for processing (default: 4096)
 - `-v, --verbose`: Enable verbose debug logging to stderr
 - `--help`: Display help information
 - `--version`: Display version information
@@ -107,15 +109,21 @@ fetch()
 
 ## Documentation
 
-### Opinionated Markdown
+### Filters: Opinionated Markdown
 
-Mdream supports parsing partial HTML content as well as full documents. When working with full documents, Mdream
-will attempt to create "clean" markdown.
+Most HTML to Markdown convertors produce a lot of noise. Mdream aims to filter out noise providing more right LLM content analysis and in turn a reduction in token usage.
 
-Clean markdown is considered the actual "content" of the page, we want to avoid all of the boilerplate
-around the content of the site such as the header, footer, asides, and extra nav links.
+A reduction in noise also makes it much easier for humans to read Markdown as well.
 
-This is due
+To solve the issue of noise, Mdream implements the concept of "strategies". A filters being logic
+
+While using the the filters `minimal`, `from-first:h1` is advised, you may find it's too restrictive for your use case. In that case, you can avoid any applying any strategies at all to
+parse the entire HTML document.
+
+| filters | Description |
+| -------- | ----------- |
+| `minimal` | This filters will parse the HTML document and extract the main content, ignoring all other content. It will also remove any boilerplate content such as headers, footers, and sidebars. This is useful for extracting the main content of a page without any boilerplate. |
+| `from-first:h1` | This filters will start parsing the HTML from the first header tag it finds. It will ignore all content before that header tag, including the `<head>` and `<body>` tags. This is useful for extracting the main content of a page without any boilerplate. |
 
 ## Credits
 

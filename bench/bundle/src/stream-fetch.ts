@@ -11,9 +11,7 @@ async function run() {
     const response = await fetch('https://en.wikipedia.org/wiki/List_of_chiropterans')
     // create a read stream for ../elon.html
     const write = createWriteStream(resolve(import.meta.dirname, '../dist/wiki.md'), { encoding: 'utf-8' })
-    let len = 0
     for await (const _ of streamHtmlToMarkdown(response.body)) {
-      len += _.length
       write.write(_)
     }
     write.close()

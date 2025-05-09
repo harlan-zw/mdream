@@ -71,7 +71,9 @@
         </div>
 
         <div class="flex-1 overflow-auto p-4">
-          <pre v-if="markdown" class="whitespace-pre-wrap font-mono text-sm bg-gray-50 p-4 rounded h-full">{{ markdown }}</pre>
+          <pre v-if="markdown" class="whitespace-pre-wrap font-mono text-sm bg-gray-50 p-4 rounded h-full">
+            <MDCRenderer :body="ast.body" :data="ast.data" />
+          </pre>
           <div v-else class="text-gray-500 italic h-full flex items-center justify-center">
             Enter a URL and click Convert to see the result
           </div>
@@ -89,6 +91,7 @@ const isLoading = ref(false);
 const error = ref('');
 const eventSource = ref(null);
 const copied = ref(false);
+const ast = ref({ body: '', data: {} });
 
 function cancelConversion() {
   if (eventSource.value) {
@@ -113,24 +116,39 @@ async function convertUrl() {
   try {
     // Create a new EventSource connection
     const encodedUrl = encodeURIComponent(url.value);
-    eventSource.value = new EventSource(`/api/convert?url=${encodedUrl}`);
+    // eventSource.value = new EventSource(`/api/sse?url=${encodedUrl}`);
+    // do fetching stream instead
+    const res = await fetch(`/api/stream?url=${encodedUrl}`)
 
-    // Handle incoming markdown chunks
-    eventSource.value.onmessage = (event) => {
-      markdown.value += event.data;
-    };
-
-    // Handle errors
-    eventSource.value.onerror = (err) => {
-      error.value = 'Error streaming content. Please try again.';
-      cancelConversion();
-    };
-
-    // Handle completion
-    eventSource.value.addEventListener('complete', () => {
-      isLoading.value = false;
-      cancelConversion();
-    });
+    // read res as stream
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      markdown.value += chunk;
+      ast.value = await parseMarkdown(markdown.value)
+    }
+    cancelConversion();
+    // // Handle incoming markdown chunks
+    // eventSource.value.onmessage = (event) => {
+    //   markdown.value += event.data;
+    //   console.log(event)
+    // };
+    //
+    // // Handle errors
+    // eventSource.value.onerror = (err) => {
+    //   console.log(arguments)
+    //   error.value = 'Error streaming content. Please try again.';
+    //   cancelConversion();
+    // };
+    //
+    // // Handle completion
+    // eventSource.value.addEventListener('complete', () => {
+    //   isLoading.value = false;
+    //   cancelConversion();
+    // });
   } catch (err) {
     error.value = err.message || 'Failed to start conversion';
     isLoading.value = false;

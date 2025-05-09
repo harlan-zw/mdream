@@ -14,9 +14,7 @@ async function run() {
     const write = createWriteStream(resolve(import.meta.dirname, '../dist/wiki.md'), { encoding: 'utf-8' })
     const read = createReadStream(resolve(import.meta.dirname, '../wiki.html'), { encoding: 'utf-8' })
     read.pipe(write)
-    let len = 0
     for await (const _ of streamHtmlToMarkdown(Readable.toWeb(read))) {
-      len += _.length
       write.write(_)
     }
     write.close()

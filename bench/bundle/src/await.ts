@@ -18,7 +18,6 @@ async function run() {
     logMemoryUsage('after await creation')
     await writeFile(resolve(import.meta.dirname, '../dist/wiki.md'), converted, { encoding: 'utf-8' })
   }
-
 }
 
 function logMemoryUsage(label) {

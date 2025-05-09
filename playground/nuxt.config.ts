@@ -8,5 +8,6 @@ export default defineNuxtConfig({
     '@nuxt/scripts',
     '@nuxt/fonts',
     '@nuxt/eslint',
+    '@nuxtjs/mdc',
   ],
 })
