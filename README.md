@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/mdream?color=yellow)](https://npmjs.com/package/mdream)
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
-[![license](https://img.shields.io/github/license/mdream/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
+[![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
 > Ultra Performant HTML to Markdown optimized for LLMs & Human readability
 
@@ -20,9 +20,10 @@
 
 ## Features
 
-- 🤖 LLM & Human Optimized: [Opinionated Markdown](#opinionated-markdown) output maximised for on-page content.
-- 🚀 Fast: Convert 1.4MB of HTML in [~50 ms*]() with streaming support.
+- 🤖 LLM Content Analysis: [~50% less tokens*]() when reading &lt;html&gt; (and improved accuracy).
+- 🚀 Fast: Convert 1.4MB of HTML in ~50ms with streaming support.
 - ⚡ Tiny: 5kB gzip, zero dependencies.
+- 🔌 Extensible: [Plugin system](#plugin-system) for customizing and extending functionality.
 - 🔍 Optimized Markdown: Frontmatter, GitHub Flavored with nested markup support.
 - ⚙️ Run anywhere: CLI, edge workers, browsers, Node, etc.
 
@@ -31,7 +32,7 @@
 Traditional HTML to Markdown converters were not built for LLMs or humans. They tend to be slow and bloated and produce output that's poorly suited for LLMs token usage or for
 human readability.
 
-Mdream is a ultra-performant, HTML to Markdown convertor built specifically for LLM Content Analysis & Humans Readibility. With zero dependencies, streaming built-in and opinionated output optimized for both human readability and AI processing.
+Mdream is an ultra-performant HTML to Markdown converter built specifically for LLM Content Analysis & Human Readability. With zero dependencies, streaming built-in and opinionated output optimized for both human readability and AI processing.
 
 Perfect for: RAG systems, web scraping, content extraction, ChatGPT/Claude integration, and large-scale document processing.
 
@@ -41,8 +42,7 @@ The Mdream CLI is designed to work exclusively with Unix pipes, providing flexib
 
 **Pipe Site to Markdown**
 
-Fetches the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown) and converts it to Markdown whilst
-preserving the original links and images.
+Fetches the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown) and converts it to Markdown preserving the original links and images.
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
@@ -50,7 +50,7 @@ curl -s https://en.wikipedia.org/wiki/Markdown \
   | tee streaming.md
 ```
 
-_Tip: The `--origin` flag will fix relative image and links paths_
+_Tip: The `--origin` flag will fix relative image and link paths_
 
 **Local File to Markdown**
 
@@ -64,6 +64,7 @@ cat index.html \
 
 ### CLI Options
 
+- `--origin <url>`: Base URL for resolving relative links and images
 - `-v, --verbose`: Enable verbose debug logging to stderr
 - `--help`: Display help information
 - `--version`: Display version information
@@ -104,26 +105,54 @@ console.log(markdown) // # Hello World
 ```ts
 import { streamHtmlToMarkdown } from 'mdream'
 
-fetch()
+// Using fetch with streaming
+const response = await fetch('https://example.com')
+const htmlStream = response.body
+const markdownGenerator = streamHtmlToMarkdown(htmlStream, {
+  origin: 'https://example.com',
+  filters: 'minimal-from-first-header'
+})
+
+// Process chunks as they arrive
+for await (const chunk of markdownGenerator) {
+  console.log(chunk)
+}
 ```
 
 ## Documentation
 
-### Filters: Opinionated Markdown
+### Plugin System
 
-Most HTML to Markdown convertors produce a lot of noise. Mdream aims to filter out noise providing more right LLM content analysis and in turn a reduction in token usage.
+Mdream now features a powerful plugin system that allows you to customize and extend the HTML-to-Markdown conversion process.
 
-A reduction in noise also makes it much easier for humans to read Markdown as well.
+```ts
+import { createPlugin, filterUnsupportedTags, syncHtmlToMarkdown, withTailwind } from 'mdream'
 
-To solve the issue of noise, Mdream implements the concept of "strategies". A filters being logic
+// Create a custom plugin
+const myPlugin = createPlugin({
+  name: 'my-plugin',
+  transformContent: (content, node) => {
+    if (node.type === 1 && node.name === 'div' && node.attributes?.role === 'alert') {
+      return `⚠️ ${content} ⚠️`
+    }
+    return content
+  }
+})
 
-While using the the filters `minimal`, `from-first:h1` is advised, you may find it's too restrictive for your use case. In that case, you can avoid any applying any strategies at all to
-parse the entire HTML document.
+// Use multiple plugins together
+const html = '<div role="alert" class="font-bold">Important message</div>'
+const markdown = syncHtmlToMarkdown(html, {
+  plugins: [
+    withTailwind(), // Apply Tailwind class processing
+    filterUnsupportedTags(), // Filter out unsupported tags
+    myPlugin // Apply custom transformations
+  ]
+})
 
-| filters | Description |
-| -------- | ----------- |
-| `minimal` | This filters will parse the HTML document and extract the main content, ignoring all other content. It will also remove any boilerplate content such as headers, footers, and sidebars. This is useful for extracting the main content of a page without any boilerplate. |
-| `from-first:h1` | This filters will start parsing the HTML from the first header tag it finds. It will ignore all content before that header tag, including the `<head>` and `<body>` tags. This is useful for extracting the main content of a page without any boilerplate. |
+console.log(markdown) // "⚠️ **Important message** ⚠️"
+```
+
+For more details, see the [plugin documentation](./docs/plugins.md).
 
 ## Credits
 
@@ -131,7 +160,7 @@ parse the entire HTML document.
 
 ## License
 
-Licensed under the [MIT license](https://github.com/mdream/mdream/blob/main/LICENSE.md).
+Licensed under the [MIT license](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md).
 
 <!-- Badges -->
 [npm-version-src]: https://img.shields.io/npm/v/mdream/latest.svg?style=flat&colorA=18181B&colorB=4C9BE0
@@ -140,5 +169,5 @@ Licensed under the [MIT license](https://github.com/mdream/mdream/blob/main/LICE
 [npm-downloads-src]: https://img.shields.io/npm/dm/mdream.svg?style=flat&colorA=18181B&colorB=4C9BE0
 [npm-downloads-href]: https://npmjs.com/package/mdream
 
-[license-src]: https://github.com/mdream/mdream/blob/main/LICENSE.mdhttps://img.shields.io/github/license/mdream/mdream.svg?style=flat&colorA=18181B&colorB=4C9BE0
-[license-href]:
+[license-src]: https://img.shields.io/github/license/harlan-zw/mdream.svg?style=flat&colorA=18181B&colorB=4C9BE0
+[license-href]: https://github.com/harlan-zw/mdream/blob/main/LICENSE.md
