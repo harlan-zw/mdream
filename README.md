@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-> Mdream is a JavaScript HTML parser, Markdown convertor, Content Extraction, Web Crawler and MCP all in one that's tiny and ultra performant.
+Mdream is an ultra-performant JavaScript HTML to LLM Optimized Markdown convertor. Mdream CLI is a crawler that supports entire websites and a MCP server.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
