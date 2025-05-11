@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-> Ultra Performant HTML to Markdown optimized for LLMs & Human readability
+> Mdream is a JavaScript HTML parser, Markdown convertor, Content Extraction, Web Crawler and MCP all in one that's tiny and ultra performant.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
@@ -20,84 +20,25 @@
 
 ## Features
 
-- 🤖 LLMs: HTML to [content extracted Markdown]() producing [~50% fewer tokens*]() (and improved accuracy).
-- 🚀 Fast: Convert 1.4MB of HTML in [~50ms*]() with advanced streaming support, including content-based buffering.
-- ⚡ Tiny Core: 5kB gzip, zero dependencies.
+**LLM Optimized Markdown**
+
+- 🧠 Content extraction for [~50% fewer tokens*]() and improved accuracy.
 - 🔍 Optimized Markdown: Frontmatter, GitHub Flavored with nested markup support, partial Tailwind support.
+
+**Ultra Performant**
+- 🚀 Convert 1.4MB of HTML in [~50ms*]() with advanced streaming support, including content-based buffering.
+- ⚡ 5kB gzip, zero dependencies.
+- Streaming support
+
+**Adaptable**
+
 - ⚙️ Run anywhere: CLI, edge workers, browsers, Node, etc.
 - 🔌 Extensible: [Plugin system](#plugin-system) for customizing and extending functionality.
 
-## Content-Based Streaming
+**CLI**
 
-MDream includes a content-based buffering system for streaming HTML to Markdown. This feature allows you to:
-
-- Buffer content until it reaches a certain density threshold
-- Prioritize content-heavy sections in your Markdown output
-- Optimize the streaming experience for LLMs and other consumers
-
-```ts
-import { streamHtmlToMarkdown } from 'mdream'
-
-// Stream HTML with content-based buffering
-for await (const chunk of streamHtmlToMarkdown(
-  htmlStream,
-  {}, // Regular options
-  { // Buffer options
-    // Only emit content when a section reaches this density score
-    minDensityScore: 5.0,
-    // Set a maximum buffer size (bytes) to prevent memory issues
-    maxBufferSize: 32768,
-    // Add debug markers to the output
-    debugMarkers: false
-  }
-)) {
-  console.log(chunk)
-}
-```
-
-This is particularly useful when streaming content to LLMs, as it ensures that high-value content is prioritized in the stream. By default, a simple density tracking plugin analyzes text density to determine which sections contain substantial content.
-
-### Custom Buffer Control Plugins
-
-The buffer control system is fully extensible through plugins. Any plugin can control the buffering behavior by implementing the `StreamBufferControl` interface:
-
-```ts
-import { createPlugin, streamHtmlToMarkdown } from 'mdream'
-
-// Create a custom plugin that implements StreamBufferControl
-const myBufferPlugin = createPlugin({
-  name: 'my-buffer-control',
-
-  // Plugin implementation...
-
-  // Return a streamBufferControl object in the finish hook
-  finish(state) {
-    return {
-      streamBufferControl: {
-        // Whether to continue buffering content
-        shouldBuffer: !foundImportantContent,
-        // Optional score metric (plugin-specific)
-        score: contentScore,
-        // Optional flag indicating relevant content found
-        hasRelevantContent: foundImportantContent,
-        // Optional minimum score needed
-        minRequiredScore: 5.0
-      }
-    }
-  }
-})
-
-// Use your custom buffer plugin with streaming
-for await (const chunk of streamHtmlToMarkdown(
-  htmlStream,
-  { plugins: [myBufferPlugin] },
-  { minDensityScore: 5.0 }
-)) {
-  console.log(chunk)
-}
-```
-
-See the full [custom buffer plugin example](./examples/custom-buffer-plugin.js) for a complete implementation.
+- integrates with crawlee to provide entire site markdown dumps
+- Run a MCP web server
 
 ## Why Mdream?
 
