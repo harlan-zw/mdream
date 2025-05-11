@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-Mdream is an ultra-performant JavaScript HTML to LLM Optimized Markdown convertor. Mdream CLI is a crawler that supports entire websites and a MCP server.
+Mdream is an ultra-performant JavaScript HTML to Markdown convertor optimized for LLMs. Use the CLI to convert entire sites to Markdown and run a self-hosted MCP server.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
