@@ -2,3 +2,10 @@ packages:
   - playground
 onlyBuiltDependencies:
   - esbuild
+  - '@parcel/watcher'
+  - better-sqlite3
+  - esbuild
+  - sharp
+  - vue-demi
+  - workerd
+  - maplibre-gl

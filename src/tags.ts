@@ -1,8 +1,6 @@
-import type { HandlerContext } from './types.ts'
+import type { HandlerContext, TagHandler } from './types.ts'
 import {
   BLOCKQUOTE_SPACING,
-  FRONTMATTER_END,
-  FRONTMATTER_START,
   LIST_ITEM_SPACING,
   MARKDOWN_CODE_BLOCK,
   MARKDOWN_EMPHASIS,
@@ -58,6 +56,7 @@ import {
   TAG_LEGEND,
   TAG_LI,
   TAG_LINK,
+  TAG_MAP,
   TAG_MARK,
   TAG_META,
   TAG_METER,
@@ -105,25 +104,7 @@ import {
   TAG_VIDEO,
   TAG_WBR,
   TAG_XMP,
-  TagIdMap,
 } from './const.ts'
-
-export interface TagHandler {
-  enter?: (context: HandlerContext) => string | undefined | void
-  exit?: (context: HandlerContext) => string | undefined | void
-  isSelfClosing?: boolean
-  isNonNesting?: boolean
-  isNonSupported?: boolean
-  usesAttributes?: boolean
-  collapsesInnerWhiteSpace?: boolean
-  isMinimalExclude?: boolean
-  isInline?: boolean
-
-  // Newline configuration: [enterNewlines, exitNewlines]
-  // Number of newlines to add before/after the tag
-  spacing?: readonly [number, number]
-  excludesTextNodes?: boolean
-}
 
 // Helper function to resolve URLs
 function resolveUrl(url: string, origin?: string): string {
@@ -191,12 +172,51 @@ function handleHeading(depth: number): TagHandler {
   }
 }
 
+const Strong: TagHandler = {
+  enter: ({ node }) => {
+    // we are already bold
+    if (node.depthMap[TAG_B] > 1) {
+      return ''
+    }
+    return MARKDOWN_STRONG
+  },
+  exit: ({ node }) => {
+    // we are already bold
+    if (node.depthMap[TAG_B] > 1) {
+      return ''
+    }
+    return MARKDOWN_STRONG
+  },
+  collapsesInnerWhiteSpace: true,
+  spacing: NO_SPACING,
+  isInline: true,
+}
+
+const Emphasis: TagHandler = {
+  enter: ({ node }) => {
+    // we are already italic
+    if (node.depthMap[TAG_I] > 1) {
+      return ''
+    }
+    return MARKDOWN_EMPHASIS
+  },
+  exit: ({ node }) => {
+    // we are already italic
+    if (node.depthMap[TAG_I] > 1) {
+      return ''
+    }
+    return MARKDOWN_EMPHASIS
+  },
+  collapsesInnerWhiteSpace: true,
+  spacing: NO_SPACING,
+  isInline: true,
+}
+
 // Tag handlers with metadata
 export const tagHandlers: Record<number, TagHandler> = {
   // Numeric tag constants
   [TAG_HEAD]: {
-    enter: () => FRONTMATTER_START,
-    exit: () => FRONTMATTER_END,
+    // No special handling for head - plugins will handle frontmatter
     spacing: NO_SPACING,
     collapsesInnerWhiteSpace: true,
   },
@@ -209,8 +229,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     exit: () => '</summary>\n\n',
   },
   [TAG_TITLE]: {
-    enter: () => '\ntitle: "',
-    exit: () => '"',
+    // No special handling for title - plugins will handle frontmatter
     collapsesInnerWhiteSpace: true,
     isNonNesting: true,
     spacing: NO_SPACING,
@@ -226,12 +245,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     isNonSupported: true,
   },
   [TAG_META]: {
-    enter: ({ node }) => {
-      const { name, content } = node.attributes || {}
-      if (name === 'description') {
-        return `\ndescription: "${content || ''}"`
-      }
-    },
+    // No special handling for meta - plugins will handle frontmatter
     collapsesInnerWhiteSpace: true,
     isSelfClosing: true,
     usesAttributes: true,
@@ -257,34 +271,10 @@ export const tagHandlers: Record<number, TagHandler> = {
     enter: () => MARKDOWN_HORIZONTAL_RULE,
     isSelfClosing: true,
   },
-  [TAG_STRONG]: {
-    enter: () => MARKDOWN_STRONG,
-    exit: () => MARKDOWN_STRONG,
-    collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
-    isInline: true,
-  },
-  [TAG_B]: {
-    enter: () => MARKDOWN_STRONG,
-    exit: () => MARKDOWN_STRONG,
-    collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
-    isInline: true,
-  },
-  [TAG_EM]: {
-    enter: () => MARKDOWN_EMPHASIS,
-    exit: () => MARKDOWN_EMPHASIS,
-    collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
-    isInline: true,
-  },
-  [TAG_I]: {
-    enter: () => MARKDOWN_EMPHASIS,
-    exit: () => MARKDOWN_EMPHASIS,
-    collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
-    isInline: true,
-  },
+  [TAG_STRONG]: Strong,
+  [TAG_B]: Strong,
+  [TAG_EM]: Emphasis,
+  [TAG_I]: Emphasis,
   [TAG_DEL]: {
     enter: () => MARKDOWN_STRIKETHROUGH,
     exit: () => MARKDOWN_STRIKETHROUGH,
@@ -508,7 +498,6 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_NAV]: {
-    isMinimalExclude: true,
   },
   [TAG_LABEL]: {
     collapsesInnerWhiteSpace: true,
@@ -550,11 +539,9 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_FOOTER]: {
-    isMinimalExclude: true,
     spacing: NO_SPACING,
   },
   [TAG_FORM]: {
-    isMinimalExclude: true,
     spacing: NO_SPACING,
     isNonSupported: true,
   },
@@ -655,7 +642,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     isNonNesting: true,
     spacing: NO_SPACING,
   },
-  [TagIdMap]: {
+  [TAG_MAP]: {
     isNonSupported: true,
     spacing: NO_SPACING,
   },
@@ -731,7 +718,6 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
   },
   [TAG_ASIDE]: {
-    isMinimalExclude: true,
     spacing: NO_SPACING,
   },
   [TAG_U]: {

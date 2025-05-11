@@ -47,3 +47,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `-v, --verbose`: Enables debug logging
 
 Always run tests after making changes to ensure backward compatibility.
+
+## Docs
+
+Please reference the following docs:
+
+- @docs/plugin-api.md
+- @docs/plugins.md
+- @docs/plugin-api.md

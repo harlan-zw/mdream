@@ -1,4 +1,4 @@
-import type { HandlerContext, MdreamRuntimeState, Node, NodeEvent } from './types.ts'
+import type { HandlerContext, MdreamRuntimeState, Node, NodeEvent, TextNode } from './types.ts'
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
@@ -9,6 +9,28 @@ import {
   TAG_PRE,
   TEXT_NODE,
 } from './const.ts'
+
+/**
+ * Process text node with plugin hooks
+ */
+function processTextNodeWithPlugins(node: TextNode, state: MdreamRuntimeState): { content: string, skip: boolean } | undefined {
+  if (!state.plugins?.length)
+    return undefined
+
+  for (const plugin of state.plugins) {
+    if (!plugin.processTextNode)
+      continue
+
+    const result = plugin.processTextNode(node, state)
+    if (result) {
+      if (result.skip)
+        return result
+      return { content: result.content, skip: false }
+    }
+  }
+
+  return undefined
+}
 
 /**
  * Process a node event and generate markdown
@@ -26,6 +48,22 @@ export function processHtmlEventToMarkdown(
     state.lastNewLines = 0
     if (node.value) {
       state.currentLine++
+
+      // Process text node with plugins
+      if (state.plugins?.length) {
+        const textNode = node as TextNode
+        const pluginResult = processTextNodeWithPlugins(textNode, state)
+
+        if (pluginResult) {
+          if (pluginResult.skip) {
+            return
+          }
+          node.value = pluginResult.content
+        }
+      }
+      // Legacy tailwind formatting is handled by the plugin now
+      // No need to add tailwindPrefix/Suffix here as the plugin already does it
+
       fragments.push(node.value)
     }
     state.lastTextNode = node
@@ -41,13 +79,28 @@ export function processHtmlEventToMarkdown(
   const output = []
   const lastFragment = fragments.length ? fragments[fragments.length - 1] : ''
 
+  // Run plugin hooks for node events
+  if (state.plugins?.length) {
+    const results = []
+    const fn = eventType === NodeEventEnter ? 'onNodeEnter' : 'onNodeExit'
+    for (const plugin of state.plugins) {
+      if (!plugin[fn])
+        continue
+      const result = plugin[fn](event, state)
+      if (result)
+        results.push(result)
+    }
+    output.push(...results)
+  }
+
+  // Tailwind attributes are now handled by the tailwind plugin
+
   // TODO find a solution
   // if (!node.parentNode?.depthMap.pre && !state.lastNewLines && node.parentNode?.childTextNodeIndex > 0) {
   //   // if we're closing an element which had text content, we need to add a space
   //   if (eventType === NodeEventEnter && node.parentNode && elementName === 'a') {
   //     if (lastFragment && lastFragment.at(-1) !== ' ') {
   //       output.push(' ')
-  //       console.log('adding space for node', node)
   //     }
   //   }
   // }

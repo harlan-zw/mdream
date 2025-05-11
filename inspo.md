@@ -12,3 +12,6 @@ JS
 Spec: https://github.github.com/gfm/
 
 compare: https://html-to-markdown.com/api/demo-convert
+
+other
+- https://github.com/unclecode/crawl4ai

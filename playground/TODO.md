@@ -1,0 +1,3 @@
+- new links should open in a new tab
+- document reactivitiy - should include useHead() reactivity
+- need runtime for typescript useHead({}) -> useHead(unhead, {})

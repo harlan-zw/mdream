@@ -212,7 +212,7 @@ describe('streamHtmlToMarkdown', () => {
     expect(result.join('')).toMatchInlineSnapshot(`
       "### Section with unclosed span
 
-      Paragraph with *emphasis* and another unclosed span
+      Paragraph with _emphasis_ and another unclosed span
 
       - List item with unclosed span
       - Another item"

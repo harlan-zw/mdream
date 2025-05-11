@@ -1,24 +1,19 @@
-# Nuxt dev/build outputs
-.output
-.data
-.nuxt
-.nitro
-.cache
-dist
-
-# Node dependencies
+.vscode
 node_modules
-
-# Logs
-logs
-*.log
-
-# Misc
-.DS_Store
-.fleet
+*.log*
+dist
+coverage
+.profile
 .idea
-
-# Local env files
+/integrations/nuxt/playground/.nuxt/
+samples
+.vercel
 .env
-.env.*
-!.env.example
+docs/.nuxt
+**/auto-imports.d.ts
+
+.data
+.output
+.nuxt
+
+.wrangler

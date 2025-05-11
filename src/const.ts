@@ -216,33 +216,12 @@ export const TagIdMap: Record<string, number> = {
   rp: TAG_RP,
 }
 
-export const TRACK_DEPTH_MAP_KEYS = [
-  TAG_PRE,
-  TAG_LI,
-  TAG_BLOCKQUOTE,
-  TAG_H1,
-  TAG_H2,
-  TAG_H3,
-  TAG_H4,
-  TAG_H5,
-  TAG_H6,
-  TAG_A,
-  TAG_CODE,
-  TAG_TABLE,
-  TAG_OL,
-  TAG_UL,
-  TAG_TD,
-  TAG_TH,
-]
-
 // Maximum tag ID for creating the typed array (97 for TAG_RP + 1 for buffer)
 export const MAX_TAG_ID = 98
 
 // Pre-defined strings to avoid repeated allocations
-export const FRONTMATTER_START = '---'
-export const FRONTMATTER_END = '\n---'
 export const MARKDOWN_STRONG = '**'
-export const MARKDOWN_EMPHASIS = '*'
+export const MARKDOWN_EMPHASIS = '_'
 export const MARKDOWN_STRIKETHROUGH = '~~'
 export const MARKDOWN_CODE_BLOCK = '```'
 export const MARKDOWN_INLINE_CODE = '`'

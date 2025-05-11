@@ -18,7 +18,7 @@ describe('combined Elements', () => {
     const markdown = syncHtmlToMarkdown(html)
     expect(markdown).toBe(
       '# Document Title\n\n'
-      + 'This is a **bold** and *important* paragraph with a [link](https://example.com).\n\n'
+      + 'This is a **bold** and _important_ paragraph with a [link](https://example.com).\n\n'
       + '- Item with `inline code`\n'
       + '- Item with [another link](https://example.org)\n\n'
       + '> A quote with an ![image](image.jpg) inside.\n\n'

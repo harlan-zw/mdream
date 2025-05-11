@@ -147,7 +147,7 @@ describe('hTML walking', () => {
     const markdown = syncHtmlToMarkdown(html)
 
     expect(markdown).toContain('# Title')
-    expect(markdown).toContain('Subtitle with *emphasis*')
+    expect(markdown).toContain('Subtitle with _emphasis_')
     expect(markdown).toContain('First paragraph')
     expect(markdown).toContain('> Quote text')
   })
@@ -158,7 +158,7 @@ describe('hTML walking', () => {
     const markdown = syncHtmlToMarkdown(html)
 
     // The parser should handle this gracefully, closing tags when parent closes
-    expect(markdown).toContain('Unclosed paragraph Unclosed span *Emphasis*')
+    expect(markdown).toContain('Unclosed paragraph Unclosed span _Emphasis_')
   })
 
   it('handles deeply nested unclosed tags correctly', () => {
@@ -205,7 +205,7 @@ describe('hTML walking', () => {
     const markdown = syncHtmlToMarkdown(html)
 
     expect(markdown).toContain('- Item 1')
-    expect(markdown).toContain('- Item 2 [*Important* link](#)')
+    expect(markdown).toContain('- Item 2 [_Important_ link](#)')
     expect(markdown).toContain('- Item 3')
   })
 })
