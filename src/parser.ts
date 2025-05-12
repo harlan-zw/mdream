@@ -424,7 +424,7 @@ function processClosingTag(
   }
   // try and recover from malformed HTML
   const tagName = htmlChunk.substring(tagNameStart, i).toLowerCase()
-  const tagId = TagIdMap[tagName]
+  const tagId = TagIdMap[tagName] || -1 // match only unsupported tags
 
   if (state.currentNode?.tagHandler?.isNonNesting && tagId !== state.currentNode.tagId) {
     return {
@@ -436,10 +436,12 @@ function processClosingTag(
 
   // need to do a while loop to find the parent node that we're closing as we may have malformed html
   let curr: ElementNode | null | undefined = state.currentNode // <span>
-  if (curr && curr.tagId !== tagId) {
-    while (curr && curr.tagId !== tagId) { // closing <h2>
+  if (curr) {
+    let match = curr.tagId !== tagId
+    while (curr && match) { // closing <h2>
       closeNode(curr, state, handleEvent)
       curr = curr.parent
+      match = curr?.tagId !== tagId
     }
   }
 
