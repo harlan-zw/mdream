@@ -96,6 +96,13 @@ export const TAG_BDO = 94
 export const TAG_RUBY = 95
 export const TAG_RT = 96
 export const TAG_RP = 97
+export const TAG_DD = 98
+export const TAG_DT = 99
+export const TAG_ADDRESS = 100
+export const TAG_DL = 101
+
+// Maximum tag ID for creating the typed array (97 for TAG_RP + 1 for buffer)
+export const MAX_TAG_ID = 102
 
 // HTML character entity mapping
 export const HTML_ENTITIES: Record<string, string> = {
@@ -214,10 +221,11 @@ export const TagIdMap: Record<string, number> = {
   ruby: TAG_RUBY,
   rt: TAG_RT,
   rp: TAG_RP,
+  dd: TAG_DD,
+  dt: TAG_DT,
+  dl: TAG_DL,
+  address: TAG_ADDRESS,
 }
-
-// Maximum tag ID for creating the typed array (97 for TAG_RP + 1 for buffer)
-export const MAX_TAG_ID = 98
 
 // Pre-defined strings to avoid repeated allocations
 export const MARKDOWN_STRONG = '**'

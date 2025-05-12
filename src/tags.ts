@@ -12,6 +12,7 @@ import {
   TABLE_ROW_SPACING,
   TAG_A,
   TAG_ABBR,
+  TAG_ADDRESS,
   TAG_AREA,
   TAG_ASIDE,
   TAG_AUDIO,
@@ -27,11 +28,14 @@ import {
   TAG_CITE,
   TAG_CODE,
   TAG_COL,
+  TAG_DD,
   TAG_DEL,
   TAG_DETAILS,
   TAG_DFN,
   TAG_DIALOG,
   TAG_DIV,
+  TAG_DL,
+  TAG_DT,
   TAG_EM,
   TAG_EMBED,
   TAG_FIELDSET,
@@ -786,5 +790,32 @@ export const tagHandlers: Record<number, TagHandler> = {
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
     isInline: true,
+  },
+
+  [TAG_ADDRESS]: {
+    enter: () => '<address>',
+    exit: () => '</address>',
+    spacing: NO_SPACING,
+  },
+
+  [TAG_DL]: {
+    spacing: NO_SPACING,
+    enter: () => '<dl>',
+    exit: () => '</dl>',
+  },
+
+  [TAG_DT]: {
+    // Definition term
+    enter: () => '<dt>',
+    exit: () => '</dt>',
+    collapsesInnerWhiteSpace: true,
+    spacing: [0, 1],
+  },
+
+  [TAG_DD]: {
+    // Definition term
+    enter: () => '<dd>',
+    exit: () => '</dd>',
+    spacing: [0, 1],
   },
 }
