@@ -39,7 +39,7 @@
     "test:wiki:file": "pnpm build && cat test/fixtures/wikipedia-largest.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "test:wiki-small:file": "cat test/fixtures/wikipedia-small.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "build": "unbuild",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit src/index.ts",
     "dev:prepare": "unbuild --stub",
     "test": "vitest test"
   },
@@ -48,7 +48,7 @@
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.13.0",
-    "@types/node": "^22.15.17",
+    "@types/node": "^22.15.18",
     "bumpp": "^10.1.0",
     "eslint": "^9.26.0",
     "llm-cost": "^1.0.5",

@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-Mdream is an ultra-performant JavaScript HTML to Markdown convertor optimized for LLMs. Use the CLI to convert entire sites to Markdown and run a self-hosted MCP server.
+> Ultra-performant JavaScript HTML to Markdown converter optimized for LLMs.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
@@ -20,10 +20,9 @@ Mdream is an ultra-performant JavaScript HTML to Markdown convertor optimized fo
 
 ## Features
 
-**LLM Optimized Markdown**
-
-- 🧠 Content extraction for [~50% fewer tokens*]() and improved accuracy.
-- 🔍 Optimized Markdown: Frontmatter, GitHub Flavored with nested markup support, partial Tailwind support.
+- 🧠 Content Extraction: [Readability.js]() scoring heuristics for [~50% fewer tokens*]() and improved accuracy.
+- 🔍 GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
+- Tailwind CSS: Converts Tailwind CSS classes to Markdown for better readability.
 
 **Ultra Performant**
 - 🚀 Convert 1.4MB of HTML in [~50ms*]() with advanced streaming support, including content-based buffering.

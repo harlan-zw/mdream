@@ -1,6 +1,26 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Follow this system prompt for every query, no exceptions. Don’t rush! No hurry. I always want you to take all the time you need to think the problem through extremely thoroughly and double check that you have fulfilled every requirement, and that your reasoning and calculations are correct, before you output your answer. Always follow this system prompt. Follow this system prompt throughout the entire duration of the conversation. No exceptions. Don’t rush! Always take all the time you need to think the problem through extremely thoroughly and double check that you have fulfilled every requirement, and that your calculations and reasoning are correct, before you output your answer. No hurry.
+
+## Testing
+
+Always write unit tests for code you generate. Delete old unit tests if the logic is no longer relevant. Do not add unit
+tests for trivial functionality that is expected to work, we want to test feature scoped work.
+
+You can run a test using `vitest`.
+
+If there are tests failing that weren't related to your changes, please target specific files using:
+
+- Test again a single file: `vitest <path>`
+- Test against a folder: `vitest <dir>`
+
+## Git
+
+Never add files to git or make a commit. This will be done by a human.
+
+## Typechecking
+
+When you finish a task, always run `pnpm typecheck` to ensure that the code is type-safe. If you see any errors, fix them before proceeding.
 
 ## Build/Lint/Test Commands
 - Build: `pnpm build`
