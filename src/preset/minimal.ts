@@ -1,4 +1,18 @@
 import type { HTMLToMarkdownOptions, Plugin } from '../types.ts'
+import {
+  TAG_ASIDE,
+  TAG_BUTTON,
+  TAG_EMBED,
+  TAG_FIELDSET,
+  TAG_FIGURE,
+  TAG_FOOTER,
+  TAG_FORM,
+  TAG_IFRAME,
+  TAG_INPUT,
+  TAG_OBJECT,
+  TAG_SELECT,
+  TAG_TEXTAREA,
+} from '../const.ts'
 import { filterPlugin } from '../plugins.ts'
 
 /**
@@ -14,10 +28,18 @@ export function withMinimalPreset(
   const plugins: Plugin[] = [
     filterPlugin({
       exclude: [
-        'nav',
-        'footer',
-        'aside',
-        'form',
+        TAG_FORM,
+        TAG_FIELDSET,
+        TAG_OBJECT,
+        TAG_EMBED,
+        TAG_FIGURE,
+        TAG_FOOTER,
+        TAG_ASIDE,
+        TAG_IFRAME,
+        TAG_INPUT,
+        TAG_TEXTAREA,
+        TAG_SELECT,
+        TAG_BUTTON,
       ],
     }),
   ]

@@ -16,9 +16,11 @@ async function run() {
   }
   const end = performance.now()
   const duration = end - start
+  // eslint-disable-next-line no-console
   console.log(`\n\nFetched and converted ${times} times in ${duration.toFixed(2)} ms`)
   // dump memory usage
   const memory = process.memoryUsage()
+  // eslint-disable-next-line no-console
   console.log(`Memory usage: ${Math.round(memory.rss / 1024 / 1024)} MB`)
 }
 

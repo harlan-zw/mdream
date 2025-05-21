@@ -11,7 +11,7 @@ async function main() {
     input: html,
     output: '',
   })
-
+  // eslint-disable-next-line no-console
   console.log(htmlResult)
 
   const markdown = readFileSync('bench/bundle/dist/wiki.md', 'utf-8')
@@ -20,10 +20,12 @@ async function main() {
     input: markdown,
     output: '',
   })
+  // eslint-disable-next-line no-console
   console.log(markdownResult)
 
   // do diff %
   const diff = (markdownResult.inputTokens - htmlResult.inputTokens) / htmlResult.inputTokens * 100
+  // eslint-disable-next-line no-console
   console.log(`Diff: ${diff.toFixed(2)}%`)
   // Output: { inputTokens: 4, outputTokens: 7, cost: 0.00054 }
 }

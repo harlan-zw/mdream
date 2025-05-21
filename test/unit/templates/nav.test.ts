@@ -1174,9 +1174,7 @@ describe('nav', () => {
                   </li>
                 </ul>
               </nav>`
-    const now = performance.now()
     const markdown = syncHtmlToMarkdown(html)
-    const end = performance.now()
     expect(markdown).toMatchInlineSnapshot(`
       "- Start your journey
         - [About GitHub and Git](/en/get-started/start-your-journey/about-github-and-git)

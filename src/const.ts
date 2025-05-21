@@ -1,4 +1,5 @@
 // Tag constants for performance optimization
+export const TAG_HTML = 0
 export const TAG_HEAD = 1
 export const TAG_DETAILS = 2
 export const TAG_SUMMARY = 3
@@ -100,9 +101,15 @@ export const TAG_DD = 98
 export const TAG_DT = 99
 export const TAG_ADDRESS = 100
 export const TAG_DL = 101
+export const TAG_FIGURE = 102
+export const TAG_OBJECT = 103
+export const TAG_MAIN = 104 // Main content area of a document
+export const TAG_HEADER = 105 // Document or section header
+export const TAG_FIGCAPTION = 106 // Caption for a figure
+export const TAG_CAPTION = 107 // Table caption
 
-// Maximum tag ID for creating the typed array (97 for TAG_RP + 1 for buffer)
-export const MAX_TAG_ID = 102
+// Maximum tag ID for creating the typed array (update to match the highest tag ID)
+export const MAX_TAG_ID = 108
 
 // HTML character entity mapping
 export const HTML_ENTITIES: Record<string, string> = {
@@ -124,6 +131,7 @@ export const NodeEventExit = 1
 
 // Map string tag names to numeric constants
 export const TagIdMap: Record<string, number> = {
+  html: TAG_HTML,
   head: TAG_HEAD,
   details: TAG_DETAILS,
   summary: TAG_SUMMARY,
@@ -225,6 +233,12 @@ export const TagIdMap: Record<string, number> = {
   dt: TAG_DT,
   dl: TAG_DL,
   address: TAG_ADDRESS,
+  figure: TAG_FIGURE,
+  object: TAG_OBJECT,
+  main: TAG_MAIN,
+  header: TAG_HEADER,
+  figcaption: TAG_FIGCAPTION,
+  caption: TAG_CAPTION,
 }
 
 // Pre-defined strings to avoid repeated allocations

@@ -1,4 +1,4 @@
-import type { ElementNode, MdreamProcessingState, MdreamRuntimeState, Node, NodeEvent, TextNode } from './types.ts'
+import type { ElementNode, MdreamProcessingState, MdreamRuntimeState, Node, NodeEvent, TextNode } from './types'
 import {
   ELEMENT_NODE,
   MAX_TAG_ID,
@@ -6,7 +6,6 @@ import {
   NodeEventExit,
   TAG_A,
   TAG_BLOCKQUOTE,
-  TAG_BODY,
   TAG_CODE,
   TAG_H1,
   TAG_H2,
@@ -18,10 +17,10 @@ import {
   TAG_TABLE,
   TagIdMap,
   TEXT_NODE,
-} from './const.ts'
-import { processHtmlEventToMarkdown } from './markdown.ts'
-import { tagHandlers } from './tags.ts'
-import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils.ts'
+} from './const'
+import { processHtmlEventToMarkdown } from './markdown'
+import { tagHandlers } from './tags'
+import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
 // Cache frequently used character codes
 const LT_CHAR = 60 // '<'
 const GT_CHAR = 62 // '>'
@@ -42,7 +41,7 @@ const CARRIAGE_RETURN_CHAR = 13 // '\r'
 const EMPTY_ATTRIBUTES: Record<string, string> = Object.freeze({})
 
 // Fast typed array copy for depthMap
-function copyDepthMap(depthMap: Node['depthMap']): Node['depthMap'] {
+function copyDepthMap(depthMap: ElementNode['depthMap']): ElementNode['depthMap'] {
   return new Uint8Array(depthMap)
 }
 
@@ -55,43 +54,6 @@ function isWhitespace(charCode: number): boolean {
     || charCode === TAB_CHAR
     || charCode === NEWLINE_CHAR
     || charCode === CARRIAGE_RETURN_CHAR
-}
-
-/**
- * Initialize plugin instances and add them to state
- */
-// Tag handlers are already imported from './tags.ts' at the top of the file
-
-function initializePlugins(state: MdreamRuntimeState): void {
-  // If plugins are already initialized or no plugins provided, exit
-  if (!state.options?.plugins?.length || state.plugins) {
-    return
-  }
-
-  // Initialize the plugins array (copy from options to avoid mutations)
-  state.plugins = [...state.options.plugins]
-
-  // Run init for each plugin
-  for (const plugin of state.plugins) {
-    if (plugin.init) {
-      plugin.init(state.options, tagHandlers)
-    }
-  }
-}
-
-/**
- * Run the beforeNodeProcess hook for all plugins
- */
-function runBeforeNodeProcessHooks(node: Node, state: MdreamRuntimeState): boolean {
-  if (!state.plugins?.length)
-    return true
-
-  for (const plugin of state.plugins) {
-    if (plugin.beforeNodeProcess && plugin.beforeNodeProcess(node, state) === false) {
-      return false
-    }
-  }
-  return true
 }
 
 /**
@@ -279,7 +241,7 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState, handl
         i = tagNameEnd
         break
       }
-      const tagId = TagIdMap[tagName] || -1
+      const tagId = TagIdMap[tagName] ?? -1
       i2 = tagNameEnd
       // avoid tag opens inside of script tags
       if (state.currentNode?.tagHandler?.isNonNesting) {
@@ -424,7 +386,7 @@ function processClosingTag(
   }
   // try and recover from malformed HTML
   const tagName = htmlChunk.substring(tagNameStart, i).toLowerCase()
-  const tagId = TagIdMap[tagName] || -1 // match only unsupported tags
+  const tagId = TagIdMap[tagName] ?? -1 // match only unsupported tags
 
   if (state.currentNode?.tagHandler?.isNonNesting && tagId !== state.currentNode.tagId) {
     return {
@@ -480,8 +442,8 @@ function closeNode(node: ElementNode | null, state: MdreamProcessingState, handl
         parent: node,
         index: 0,
         depth: node.depth + 1,
-      }
-      // @ts-expect-error untyped
+      } as TextNode
+
       handleEvent({ type: NodeEventEnter, node: textNode })
       for (const parent of traverseUpToFirstBlockNode(node)) {
         parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
@@ -626,7 +588,7 @@ function processOpeningTag(
   // Create the node with pre-computed values
   const currentWalkIndex = state.currentNode ? state.currentNode.currentWalkIndex!++ : 0
 
-  const tag: Node = {
+  const tag = {
     type: ELEMENT_NODE,
     name: tagName,
     attributes: result.attributes,
@@ -636,18 +598,18 @@ function processOpeningTag(
     index: currentWalkIndex,
     tagId,
     tagHandler,
-  }
+  } as ElementNode
   state.lastTextNode = tag
 
   // Run process attributes hooks for tag if it's an ElementNode
   if (state.options?.plugins) {
-    runProcessAttributesHooks(tag as ElementNode, state as MdreamRuntimeState)
+    runProcessAttributesHooks(tag, state as MdreamRuntimeState)
   }
 
   handleEvent({ type: NodeEventEnter, node: tag })
 
   // Directly set as parent node
-  const parentNode = tag as ElementNode
+  const parentNode = tag
   parentNode.currentWalkIndex = 0
   state.currentNode = parentNode
   state.hasEncodedHtmlEntity = false
@@ -857,57 +819,29 @@ export function processPartialHTMLToMarkdown(
   state: Partial<MdreamRuntimeState> = {},
 ): { chunk: string, remainingHTML: string } {
   state.fragmentCount = 0
+  state.currentMdPosition ??= 0
   state.depthMap ??= new Uint8Array(MAX_TAG_ID)
-
-  // Initialize plugins if available
-  initializePlugins(state as MdreamRuntimeState)
-
+  state.plugins = [...(state.options?.plugins || [])]
   state.fragments = []
   function handleEvent(event: NodeEvent) {
-    if (event.type === NodeEventEnter) {
-      // Track when we enter the body tag
-      if (!state.enteredBody && event.node.tagId === TAG_BODY) {
-        state.enteredBody = true
+    for (const plugin of state.plugins || []) {
+      const res = plugin.beforeNodeProcess?.(event, state)
+      if (typeof res === 'object' && res.skip) {
+        return
       }
     }
 
-    runBeforeNodeProcessHooks(event.node, state)
-
     // Fast path for text nodes
     if (event.node.type === TEXT_NODE) {
-      // @ts-expect-error untyped
       processHtmlEventToMarkdown(event, state)
       return
     }
 
-    // @ts-expect-error untyped
     processHtmlEventToMarkdown(event, state)
   }
   // Parse HTML into a DOM tree with events
   // @ts-expect-error untyped
   const unprocessedHtml = parseHTML(partialHtml, state, handleEvent)
-
   state.fragmentCount += state.fragments.length
-
-  // Run finish hooks for all plugins if there's no more unprocessed HTML
-  // This indicates we're done with the document
-  if (!unprocessedHtml && state.plugins?.length) {
-    const result: Record<string, any> = {}
-
-    for (const plugin of state.plugins) {
-      if (plugin.finish) {
-        const finishResult = plugin.finish(state as MdreamRuntimeState)
-        if (finishResult) {
-          Object.assign(result, finishResult)
-        }
-      }
-    }
-
-    if (Object.keys(result).length) {
-      // Apply finish results to state
-      Object.assign(state, result)
-    }
-  }
-
   return { chunk: state.fragments.join(''), remainingHTML: unprocessedHtml }
 }

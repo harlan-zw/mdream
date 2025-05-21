@@ -1,14 +1,15 @@
-import type { HandlerContext, MdreamRuntimeState, Node, NodeEvent, TextNode } from './types.ts'
+import type { ElementNode, HandlerContext, MdreamRuntimeState, NodeEvent, TextNode } from './types'
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
   NO_SPACING,
   NodeEventEnter,
+  NodeEventExit,
   TAG_BLOCKQUOTE,
   TAG_LI,
   TAG_PRE,
   TEXT_NODE,
-} from './const.ts'
+} from './const'
 
 /**
  * Process text node with plugin hooks
@@ -43,30 +44,41 @@ export function processHtmlEventToMarkdown(
   const totalFragments = fragments.length + state.fragmentCount
   const { type: eventType, node } = event
 
+  // On node enter, set the starting Markdown position
+  if (eventType === NodeEventEnter) {
+    node.mdStart = state.currentMdPosition
+  }
+
   // Handle text nodes
-  if (node.type === TEXT_NODE && eventType === NodeEventEnter && node.value) {
+  if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
+    const textNode = node as TextNode
     state.lastNewLines = 0
-    if (node.value) {
+    if (textNode.value) {
       state.currentLine++
 
       // Process text node with plugins
       if (state.plugins?.length) {
-        const textNode = node as TextNode
         const pluginResult = processTextNodeWithPlugins(textNode, state)
 
         if (pluginResult) {
           if (pluginResult.skip) {
             return
           }
-          node.value = pluginResult.content
+          textNode.value = pluginResult.content
         }
       }
       // Legacy tailwind formatting is handled by the plugin now
       // No need to add tailwindPrefix/Suffix here as the plugin already does it
 
-      fragments.push(node.value)
+      // Set mdLength for text nodes before adding to fragments
+      textNode.mdExit = textNode.value.length
+
+      // Update the running position counter
+      state.currentMdPosition += textNode.value.length
+
+      fragments.push(textNode.value)
     }
-    state.lastTextNode = node
+    state.lastTextNode = textNode
     return
   }
 
@@ -75,7 +87,7 @@ export function processHtmlEventToMarkdown(
   }
 
   // Handle element nodes
-  const context: HandlerContext = { node, state }
+  const context: HandlerContext = { node: node as ElementNode, state }
   const output = []
   const lastFragment = fragments.length ? fragments[fragments.length - 1] : ''
 
@@ -86,16 +98,16 @@ export function processHtmlEventToMarkdown(
     for (const plugin of state.plugins) {
       if (!plugin[fn])
         continue
-      const result = plugin[fn](event, state)
-      if (result)
+      const result = plugin[fn](event.node as ElementNode, state)
+      if (result) {
         results.push(result)
+      }
     }
     output.push(...results)
   }
 
   // Tailwind attributes are now handled by the tailwind plugin
 
-  // TODO find a solution
   // if (!node.parentNode?.depthMap.pre && !state.lastNewLines && node.parentNode?.childTextNodeIndex > 0) {
   //   // if we're closing an element which had text content, we need to add a space
   //   if (eventType === NodeEventEnter && node.parentNode && elementName === 'a') {
@@ -108,7 +120,7 @@ export function processHtmlEventToMarkdown(
   const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
   // Use the cached tag handler directly from the node
   const handler = node.tagHandler
-  if (handler?.[eventFn]) {
+  if (!output.length && handler?.[eventFn]) {
     const res = handler[eventFn](context)
     if (res) {
       output.push(res)
@@ -116,15 +128,46 @@ export function processHtmlEventToMarkdown(
   }
 
   // Trim trailing whitespace from the last text node
-  if (!state.lastNewLines && fragments.length && state.lastTextNode?.containsWhitespace && !!node.parent && typeof state.lastTextNode?.value === 'string') {
+  if (!state.lastNewLines && fragments.length && state.lastTextNode?.containsWhitespace && !!node.parent && 'value' in state.lastTextNode && typeof state.lastTextNode.value === 'string') {
     if (!node.parent.depthMap[TAG_PRE] || node.parent.tagId === TAG_PRE) {
-      fragments[fragments.length - 1] = lastFragment!.trimEnd()
+      const originalLength = lastFragment!.length
+      const trimmed = lastFragment!.trimEnd()
+      const trimmedChars = originalLength - trimmed.length
+
+      // Update the fragment with trimmed content
+      fragments[fragments.length - 1] = trimmed
+
+      // Update position counters to reflect the trimmed characters
+      if (trimmedChars > 0) {
+        const currentPosition = state.currentMdPosition
+        state.currentMdPosition -= trimmedChars
+
+        if (state.lastTextNode && 'mdExit' in state.lastTextNode) {
+          state.lastTextNode.mdExit -= trimmedChars
+        }
+
+        // Adjust all buffer markers if they exist
+        if (state.bufferMarkers?.length) {
+          for (let i = 0; i < state.bufferMarkers.length; i++) {
+            // If the marker is at or beyond the trim point, adjust it
+            // Markers exactly at the trim point should stay at the new position (after trim)
+            // Markers beyond the trim point should move back by the trimmed amount
+            if (state.bufferMarkers[i].position > currentPosition - trimmedChars) {
+              state.bufferMarkers[i].position = Math.max(
+                state.currentMdPosition,
+                state.bufferMarkers[i].position - trimmedChars,
+              )
+            }
+          }
+        }
+      }
+
       state.lastTextNode = undefined
     }
   }
 
   // Handle newlines
-  const newLineConfig = calculateNewLineConfig(node)
+  const newLineConfig = calculateNewLineConfig(node as ElementNode)
   let newLines = newLineConfig[eventType] || 0
 
   if (newLines > 0) {
@@ -140,6 +183,13 @@ export function processHtmlEventToMarkdown(
     }
     if (newLines > 0) {
       if (!totalFragments) {
+        // Calculate and add output length to position counter
+        let outputLength = 0
+        for (const fragment of output) {
+          outputLength += fragment.length
+        }
+        state.currentMdPosition += outputLength
+
         fragments.push(...output)
         return
       }
@@ -151,9 +201,13 @@ export function processHtmlEventToMarkdown(
       // Add newlines
       const newlinesStr = '\n'.repeat(newLines)
       // trim only whitespace
-      if (lastFragment.at(-1) === ' ') {
-        fragments[fragments.length - 1] = lastFragment.substring(0, lastFragment.length - 1)
+      if (lastFragment && typeof lastFragment === 'string' && lastFragment.length > 0) {
+        const lastChar = lastFragment.charAt(lastFragment.length - 1)
+        if (lastChar === ' ') {
+          fragments[fragments.length - 1] = lastFragment.substring(0, lastFragment.length - 1)
+        }
       }
+
       if (eventType === NodeEventEnter) {
         output.unshift(newlinesStr)
       }
@@ -166,13 +220,26 @@ export function processHtmlEventToMarkdown(
     state.lastNewLines = 0
   }
 
-  fragments.push(...output)
+  // Calculate total length of output fragments before adding to the main fragments
+  let outputLength = 0
+  for (const fragment of output) {
+    outputLength += fragment.length
+    fragments.push(fragment)
+  }
+
+  // Update running position counter
+  state.currentMdPosition += outputLength
+
+  // On node exit, calculate the Markdown length using the running position counter
+  if (eventType === NodeEventExit && node.mdStart !== undefined) {
+    node.mdExit = state.currentMdPosition - node.mdStart
+  }
 }
 
 /**
  * Calculate newline configuration based on tag handler spacing config
  */
-function calculateNewLineConfig(node: Node): readonly [number, number] {
+function calculateNewLineConfig(node: ElementNode): readonly [number, number] {
   const tagId = node.tagId
   const depthMap = node.depthMap
 

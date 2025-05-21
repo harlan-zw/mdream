@@ -1,4 +1,4 @@
-import type { ElementNode, MdreamRuntimeState, NodeEvent, TextNode } from '../types.ts'
+import type { ElementNode, TextNode } from '../types.ts'
 import { ELEMENT_NODE, TAG_HEAD, TAG_META, TAG_TITLE } from '../const.ts'
 import { createPlugin } from '../pluggable/plugin.ts'
 
@@ -9,8 +9,6 @@ export interface FrontmatterPluginOptions {
   metaFields?: string[]
   /** Custom formatter for frontmatter values */
   formatValue?: (name: string, value: string) => string
-  /** Whether the plugin is enabled */
-  enabled?: boolean
 }
 
 /**
@@ -18,20 +16,6 @@ export interface FrontmatterPluginOptions {
  * Extracts metadata from meta tags and title and generates YAML frontmatter
  */
 export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
-  // Create a disabled plugin that only prevents head content
-  if (options.enabled === false) {
-    return createPlugin({
-      processTextNode(node: TextNode): { content: string, skip: boolean } | undefined {
-        // Skip all head content
-        if (node.parent && (node.parent.tagId === TAG_HEAD || node.parent.tagId === TAG_TITLE || node.parent.tagId === TAG_META)) {
-          return { content: '', skip: true }
-        }
-        return undefined
-      },
-      // Handle HEAD elements entirely through processTextNode
-    })
-  }
-
   const additionalFields = options.additionalFields || {}
   const metaFields = new Set([
     'description',
@@ -46,9 +30,8 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
   ])
 
   // Metadata collection
-  const frontmatter: Record<string, string> = { ...additionalFields }
+  const frontmatter: Record<string, any> = { ...additionalFields, meta: {} }
   let inHead = false
-  let hasGeneratedFrontmatter = false
 
   // Format frontmatter value (handle quotes, etc.)
   const formatValue = options.formatValue || ((name: string, value: string) => {
@@ -59,40 +42,21 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
     if (value.includes('\n') || value.includes(':') || value.includes('#') || value.includes(' ')) {
       return `"${value}"`
     }
-
     return value
   })
 
   return createPlugin({
-    name: 'frontmatter',
-
-    init() {
-      // Reset state
-      Object.keys(frontmatter).forEach((key) => {
-        if (!additionalFields[key]) {
-          delete frontmatter[key]
-        }
-      })
-
-      inHead = false
-      hasGeneratedFrontmatter = false
-
-      return { frontmatterPlugin: true }
-    },
-
-    onNodeEnter(event: NodeEvent, state: MdreamRuntimeState): string | undefined {
-      const { node } = event
-
+    onNodeEnter(node): string | undefined {
       // Track when we enter the head section
-      if (node.type === ELEMENT_NODE && node.tagId === TAG_HEAD) {
+      if (node.tagId === TAG_HEAD) {
         inHead = true
-        return undefined // Don't output frontmatter markers yet
+        return
       }
 
       // Process title tag inside head
       if (inHead && node.type === ELEMENT_NODE && node.tagId === TAG_TITLE) {
         // Title will be processed in processTextNode
-        return undefined
+        return
       }
 
       // Process meta tags inside head
@@ -103,32 +67,21 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
         // Check for valid meta tags
         const metaName = property || name
         if (metaName && content && metaFields.has(metaName)) {
-          frontmatter[metaName] = formatValue(metaName, content)
+          frontmatter.meta[metaName.includes(':') ? `"${metaName}"` : metaName] = formatValue(metaName, content)
         }
 
         // Don't output anything for meta tags
         return undefined
       }
-
-      // Generate frontmatter when we encounter the first non-head element
-      if (!inHead && !hasGeneratedFrontmatter && Object.keys(frontmatter).length > 0) {
-        hasGeneratedFrontmatter = true
-        return generateFrontmatter()
-      }
-
-      return undefined
     },
 
-    onNodeExit(event: NodeEvent, state: MdreamRuntimeState): string | undefined {
-      const { node } = event
-
+    onNodeExit(node) {
       // Handle exiting the head tag
       if (node.type === ELEMENT_NODE && node.tagId === TAG_HEAD) {
         inHead = false
 
         // Generate frontmatter as we exit the head
         if (Object.keys(frontmatter).length > 0) {
-          hasGeneratedFrontmatter = true
           return generateFrontmatter()
         }
       }
@@ -136,10 +89,10 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
       return undefined
     },
 
-    processTextNode(node: TextNode): { content: string, skip: boolean } | undefined {
+    processTextNode(node: TextNode) {
       // Only process if we're in the head section
       if (!inHead) {
-        return undefined
+        return
       }
 
       // Handle text inside title tag
@@ -148,9 +101,6 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
         frontmatter.title = formatValue('title', node.value.trim())
         return { content: '', skip: true }
       }
-
-      // Skip other content in head
-      return { content: '', skip: true }
     },
   })
 
@@ -162,8 +112,11 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
       return ''
     }
 
-    // Build frontmatter content
-    const yaml = Object.entries(frontmatter)
+    // Process entries, handling 'meta' specially
+    let yamlLines: string[] = []
+
+    // Sort frontmatter keys to put title and description first
+    const entries = Object.entries(frontmatter)
       .sort(([a], [b]) => {
         // Put 'title' first, then 'description', then the rest alphabetically
         if (a === 'title')
@@ -176,9 +129,31 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
           return 1
         return a.localeCompare(b)
       })
-      .map(([key, value]) => `${key}: ${value}`)
-      .join('\n')
 
-    return `---\n${yaml}\n---\n\n`
+    // Process each entry
+    for (const [key, value] of entries) {
+      if (key === 'meta' && Object.keys(value as Record<string, string>).length > 0) {
+        // Add meta key
+        yamlLines.push('meta:')
+
+        // Sort meta entries alphabetically and add with indentation
+        const metaEntries = Object.entries(value as Record<string, string>)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([metaKey, metaValue]) => `  ${metaKey}: ${metaValue}`)
+
+        yamlLines.push(...metaEntries)
+      }
+      else if (key !== 'meta' || Object.keys(value as Record<string, string>).length > 0) {
+        // Add regular keys
+        yamlLines.push(`${key}: ${value}`)
+      }
+    }
+
+    // Remove meta if empty
+    if (Object.keys(frontmatter.meta).length === 0) {
+      yamlLines = yamlLines.filter(line => !line.startsWith('meta:'))
+    }
+
+    return `---\n${yamlLines.join('\n')}\n---\n\n`
   }
 }

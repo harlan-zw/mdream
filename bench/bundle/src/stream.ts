@@ -22,11 +22,13 @@ async function run() {
   }
   const end = performance.now()
   const duration = end - start
+  // eslint-disable-next-line no-console
   console.log(`\n\nFetched and converted ${times} times in ${duration.toFixed(2)} ms`)
 }
 
 function logMemoryUsage(label) {
   const memUsage = process.memoryUsage()
+  // eslint-disable-next-line no-console
   console.log(`Memory usage (${label}):
     RSS: ${Math.round(memUsage.rss / 1024 / 1024)} MB
     Heap Total: ${Math.round(memUsage.heapTotal / 1024 / 1024)} MB

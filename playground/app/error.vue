@@ -13,8 +13,6 @@ useSeoMeta({
   description: 'We are sorry but this page could not be found.',
 })
 const searchTerm = ref('')
-
-const recommendedLinks = ref()
 </script>
 
 <template>

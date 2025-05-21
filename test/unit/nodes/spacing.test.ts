@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../src'
+import { syncHtmlToMarkdown } from '../../../src'
 
 describe('spacing', () => {
   it('preserves new lines edge case', () => {

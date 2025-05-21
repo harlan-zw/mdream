@@ -18,6 +18,7 @@ async function run() {
   }
   const end = performance.now()
   const duration = end - start
+  // eslint-disable-next-line no-console
   console.log(`\n\nFetched and converted ${times} times in ${duration.toFixed(2)} ms`)
 }
 

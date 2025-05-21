@@ -32,19 +32,14 @@ export interface Plugin {
 
   /**
    * Process a node before it's handled by the parser
-   * @param node - The node to process
-   * @param state - The current runtime state
-   * @returns Boolean or PluginHookResult indicating whether to continue processing the node
    */
-  beforeNodeProcess?: (node: Node, state: MdreamRuntimeState) => boolean
+  beforeNodeProcess?: (event: NodeEvent, state: MdreamRuntimeState) => undefined | void | { skip: boolean }
 
   /**
    * Hook that runs when entering a node
-   * @param event - The node event
-   * @param state - The current runtime state
    * @returns String to add to the output, or PluginHookResult with content
    */
-  onNodeEnter?: (event: NodeEvent, state: MdreamRuntimeState) => string
+  onNodeEnter?: (node: ElementNode, state: MdreamRuntimeState) => string | undefined | void
 
   /**
    * Hook that runs when exiting a node
@@ -52,7 +47,7 @@ export interface Plugin {
    * @param state - The current runtime state
    * @returns String to add to the output, or PluginHookResult with content
    */
-  onNodeExit?: (event: NodeEvent, state: MdreamRuntimeState) => string
+  onNodeExit?: (node: ElementNode, state: MdreamRuntimeState) => string | undefined | void
 
   /**
    * Process attributes for a node
@@ -70,7 +65,7 @@ export interface Plugin {
   processTextNode?: (
     node: TextNode,
     state: MdreamRuntimeState
-  ) => { content: string, skip: boolean }
+  ) => undefined | void | { content: string, skip: boolean }
 
   // Removed transformContent hook - use processTextNode instead
 
@@ -108,6 +103,10 @@ export interface ElementNode extends Node {
   attributes: Record<string, string>
   /** Custom data added by plugins */
   context?: Record<string, any>
+  /** ID of the tag for fast handler lookup */
+  tagId?: number
+  /** Map of tag names to their nesting count (using Uint8Array for performance) */
+  depthMap: Uint8Array
 }
 
 export interface TextNode extends Node {
@@ -128,9 +127,6 @@ export interface Node {
   /** Current nesting depth in the DOM tree */
   depth: number
 
-  /** Map of tag names to their nesting count (using Uint8Array for performance) */
-  depthMap: Uint8Array
-
   /** Node exclusion and filtering now handled by plugins */
 
   /** Index of this node within its parent's children */
@@ -145,9 +141,6 @@ export interface Node {
   /** Whether node contains whitespace - used for whitespace optimization */
   containsWhitespace?: boolean
 
-  /** ID of the tag for fast handler lookup */
-  tagId?: number
-
   /** Cached reference to tag handler for performance */
   tagHandler?: TagHandler
 
@@ -156,6 +149,12 @@ export interface Node {
 
   /** Custom data added by plugins */
   context?: Record<string, any>
+
+  /** The starting position in the generated Markdown output */
+  mdStart?: number
+
+  /** The length of the generated Markdown for this node */
+  mdExit?: number
 }
 
 /**
@@ -195,17 +194,17 @@ export interface MdreamProcessingState {
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
 
-  /** Whether we've entered the body tag - used for minimal-from-first filtering */
-  enteredBody?: boolean
-
-  /** Whether we've seen a header tag - used for minimal-from-first-header filtering */
-  hasSeenHeader?: boolean
-
   /** Output fragments during processing */
   fragments?: string[]
 
   /** Plugin instances array for efficient iteration */
   plugins?: Plugin[]
+
+  /** Text buffer for accumulated text content - moved from local variable to state for position tracking */
+  textBuffer?: string
+
+  /** Configuration options for conversion */
+  options?: HTMLToMarkdownOptions
 }
 
 /**
@@ -214,16 +213,19 @@ export interface MdreamProcessingState {
  */
 export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   /** Number of newlines at end of most recent output */
-  lastNewLines: number
+  lastNewLines?: number
 
   /** Total fragments processed for tracking */
-  fragmentCount: number
+  fragmentCount?: number
 
   /** Current line count - primarily for non-zero checks */
-  currentLine: number
+  currentLine?: number
 
   /** Accumulated markdown output buffer */
-  buffer: string
+  buffer?: string
+
+  /** Current position in the Markdown output */
+  currentMdPosition?: number
 
   /** Configuration options for conversion */
   options?: HTMLToMarkdownOptions
@@ -235,6 +237,23 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
 
   /** Plugin instances array for efficient iteration */
   plugins?: Plugin[]
+
+  /**
+   * Markers for buffer pause/resume positions
+   * Used to control buffer pause/resume at specific positions in the output stream
+   * Each marker contains:
+   * - position: The position in the markdown output
+   * - pause: Whether to pause (true) or resume (false) the buffer at this position
+   */
+  bufferMarkers?: Array<{
+    position: number
+    pause: boolean
+  }>
+
+  /** Flag to track if buffering is paused */
+  isBufferPaused?: boolean
+
+  context?: Record<string, any>
 }
 
 type NodeEventEnter = 0

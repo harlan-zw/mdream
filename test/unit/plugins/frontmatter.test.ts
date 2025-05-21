@@ -23,7 +23,8 @@ describe('frontmatter plugin', () => {
 
     expect(markdown).toContain('---')
     expect(markdown).toContain('title: "Test Page Title"')
-    expect(markdown).toContain('description: "This is a test page description"')
+    expect(markdown).toContain('meta:')
+    expect(markdown).toContain('  description: "This is a test page description"')
     expect(markdown).toContain('---\n\n')
     expect(markdown).toContain('# Main Content')
     expect(markdown).toContain('This is the main content of the page.')
@@ -53,28 +54,6 @@ describe('frontmatter plugin', () => {
     expect(markdown).toContain('title: "Test Page"')
     expect(markdown).toContain('layout: post')
     expect(markdown).toContain('date: 2025-05-10')
-  })
-
-  it('can be disabled', () => {
-    const html = `
-      <html>
-        <head>
-          <title>Test Page</title>
-          <meta name="description" content="Description">
-        </head>
-        <body>
-          <p>Content</p>
-        </body>
-      </html>
-    `
-
-    const markdown = syncHtmlToMarkdown(html, {
-      plugins: [frontmatterPlugin({ enabled: false })],
-    })
-
-    // Should not contain frontmatter
-    expect(markdown).not.toContain('---\ntitle')
-    expect(markdown.trim()).toBe('Content')
   })
 
   it('correctly formats frontmatter values', () => {
@@ -120,10 +99,11 @@ describe('frontmatter plugin', () => {
       plugins: [frontmatterPlugin()],
     })
 
-    expect(markdown).toContain('og:title: "OG Title"')
-    expect(markdown).toContain('og:description: "OG Description"')
-    expect(markdown).toContain('twitter:title: "Twitter Title"')
-    expect(markdown).toContain('twitter:description: "Twitter Description"')
+    expect(markdown).toContain('meta:')
+    expect(markdown).toContain('"og:title": "OG Title"')
+    expect(markdown).toContain('"og:description": "OG Description"')
+    expect(markdown).toContain('"twitter:title": "Twitter Title"')
+    expect(markdown).toContain('"twitter:description": "Twitter Description"')
   })
 
   it('supports custom field formatters', () => {
@@ -174,7 +154,8 @@ describe('frontmatter plugin', () => {
       })],
     })
 
-    expect(markdown).toContain('custom-field: "Custom Value"')
-    expect(markdown).toContain('another-field: "Another Value"')
+    expect(markdown).toContain('meta:')
+    expect(markdown).toContain('  another-field: "Another Value"')
+    expect(markdown).toContain('  custom-field: "Custom Value"')
   })
 })

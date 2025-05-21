@@ -1,4 +1,4 @@
-import type { HandlerContext, TagHandler } from './types.ts'
+import type { HandlerContext, TagHandler } from './types'
 import {
   BLOCKQUOTE_SPACING,
   LIST_ITEM_SPACING,
@@ -108,7 +108,7 @@ import {
   TAG_VIDEO,
   TAG_WBR,
   TAG_XMP,
-} from './const.ts'
+} from './const'
 
 // Helper function to resolve URLs
 function resolveUrl(url: string, origin?: string): string {
@@ -332,13 +332,9 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
     isInline: true,
   },
-  [TAG_PRE]: {
-  },
   [TAG_UL]: {
     enter: ({ node }) => isInsideTableCell(node) ? '<ul>' : undefined,
     exit: ({ node }) => isInsideTableCell(node) ? '</ul>' : undefined,
-  },
-  [TAG_OL]: {
   },
   [TAG_LI]: {
     enter: ({ node }) => {
@@ -796,6 +792,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     enter: () => '<address>',
     exit: () => '</address>',
     spacing: NO_SPACING,
+    collapsesInnerWhiteSpace: true,
   },
 
   [TAG_DL]: {

@@ -97,22 +97,6 @@ async function convertUrl() {
     isLoading.value = false
   }
 }
-
-function copyToClipboard() {
-  if (!markdown.value)
-    return
-
-  navigator.clipboard.writeText(markdown.value)
-    .then(() => {
-      copied.value = true
-      setTimeout(() => {
-        copied.value = false
-      }, 2000)
-    })
-    .catch(() => {
-      error.value = 'Failed to copy to clipboard'
-    })
-}
 </script>
 
 <template>

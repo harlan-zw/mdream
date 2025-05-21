@@ -1,7 +1,8 @@
 import type { HTMLToMarkdownOptions } from './types.ts'
 import { Readable } from 'node:stream'
 import { cac } from 'cac'
-import { withMinimalPreset } from './preset/minimal.ts'
+import { frontmatterPlugin } from './plugins/frontmatter.ts'
+import { readabilityPlugin } from './plugins/readability.ts'
 import { streamHtmlToMarkdown } from './stream.ts'
 
 /**
@@ -14,12 +15,14 @@ interface CliOptions {
 
 async function streamingConvert(options: CliOptions = {}) {
   const outputStream = process.stdout
-  let conversionOptions: HTMLToMarkdownOptions = { origin: options.origin }
+  const conversionOptions: HTMLToMarkdownOptions = { origin: options.origin }
 
   // Apply the appropriate preset based on the filter option
-  if (options.filters === 'minimal') {
-    conversionOptions = withMinimalPreset(conversionOptions)
-  }
+  // conversionOptions = withMinimalPreset(conversionOptions)
+  conversionOptions.plugins = conversionOptions.plugins || []
+  conversionOptions.plugins!.push(readabilityPlugin())
+  // frontmatter
+  conversionOptions.plugins!.push(frontmatterPlugin())
 
   // Create a single markdown generator that processes the chunked HTML
   const markdownGenerator = streamHtmlToMarkdown(Readable.toWeb(process.stdin), conversionOptions)

@@ -57,14 +57,14 @@ describe('plugin System', () => {
     // Create a plugin that adds text at node enter/exit
     const hooksPlugin = createPlugin({
       name: 'hooks-plugin',
-      onNodeEnter: (event) => {
-        if (event.node.type === ELEMENT_NODE && event.node.name === 'h1') {
-          return '🔥 '
+      onNodeEnter: (node) => {
+        if (node.name === 'h1') {
+          return '# 🔥 '
         }
         return undefined
       },
-      onNodeExit: (event) => {
-        if (event.node.type === ELEMENT_NODE && event.node.name === 'h1') {
+      onNodeExit: (node) => {
+        if (node.name === 'h1') {
           return ' 🔥'
         }
         return undefined
@@ -74,14 +74,14 @@ describe('plugin System', () => {
     const input = '<h1>Hook test</h1>'
     const output = syncHtmlToMarkdown(input, { plugins: [hooksPlugin] })
 
-    expect(output).toBe('🔥 # Hook test 🔥')
+    expect(output).toBe('# 🔥 Hook test 🔥')
   })
 
   it('handles multiple plugins in sequence', () => {
     const firstPlugin = createPlugin({
       name: 'first-plugin',
-      onNodeEnter: (event) => {
-        if (event.node.type === ELEMENT_NODE && event.node.name === 'p') {
+      onNodeEnter: (node) => {
+        if (node.name === 'p') {
           return 'FIRST: '
         }
         return undefined
@@ -90,8 +90,8 @@ describe('plugin System', () => {
 
     const secondPlugin = createPlugin({
       name: 'second-plugin',
-      onNodeExit: (event) => {
-        if (event.node.type === ELEMENT_NODE && event.node.name === 'p') {
+      onNodeExit: (node) => {
+        if (node.name === 'p') {
           return ' :SECOND'
         }
         return undefined

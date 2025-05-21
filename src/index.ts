@@ -1,17 +1,21 @@
-import type { HTMLToMarkdownOptions, MdreamRuntimeState } from './types.ts'
-import { processPartialHTMLToMarkdown } from './parser.ts'
+import type { HTMLToMarkdownOptions, MdreamRuntimeState } from './types'
+import { processPartialHTMLToMarkdown } from './parser'
+import { applyBufferMarkers } from './utils'
 
 export function syncHtmlToMarkdown(
   html: string,
   options: HTMLToMarkdownOptions = {},
 ): string {
   // Initialize state
-  const state: Partial<MdreamRuntimeState> = {
+  const state: MdreamRuntimeState = {
     options,
   }
-  return processPartialHTMLToMarkdown(html, state).chunk.trimEnd()
+
+  // Process the HTML to markdown
+  const result = processPartialHTMLToMarkdown(html, state).chunk
+  return applyBufferMarkers(state, result).trimEnd()
 }
 
-export { streamHtmlToMarkdown } from './stream.ts'
+export { streamHtmlToMarkdown } from './stream'
 
-export type * from './types.ts'
+export type * from './types'

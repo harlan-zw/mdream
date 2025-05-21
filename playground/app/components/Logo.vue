@@ -1,34 +1,12 @@
 <script setup lang="ts">
 import { motion } from 'motion-v'
-
-const draw = {
-  hidden: { pathLength: 0, opacity: 0 },
-  visible: (i) => {
-    const delay = i * 0.3
-    return {
-      pathLength: 1,
-      opacity: 1,
-      transition: {
-        pathLength: { delay, type: 'spring', duration: 1.5, bounce: 0 },
-        opacity: { delay, duration: 0.01 },
-      },
-    }
-  },
-}
-
-const shape = {
-  strokeLinecap: 'round',
-  strokeLinejoin: 'round',
-  strokeWidth: 3,
-  fill: 'transparent',
-}
 </script>
 
 <template>
   <div class="flex items-center relative">
     <img src="/logo.png" alt="Logo" class="w-15 h-15 absolute -left-10 -top-3">
     <motion.svg
-      xmlns="http://www.w3.org/2000/svg"
+      v-bind="{ xmlns: 'http://www.w3.org/2000/svg' }"
       width="24"
       height="24"
       viewBox="0 0 24 24"
@@ -49,6 +27,7 @@ const shape = {
     </motion.svg>
     <motion.span
       v-for="(l, i) in 'Mdream'"
+      :key="i"
       :initial="{ opacity: 0, x: -5 + 1 * i }"
       :animate="{ opacity: 1, x: 0 + 1 }"
       :transition="{ delay: 0.8, duration: 0.3 + i * 0.1 }"

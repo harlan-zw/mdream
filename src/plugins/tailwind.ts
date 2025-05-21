@@ -1,7 +1,6 @@
-import type { ElementNode, Node, Plugin, TextNode } from '../types.ts'
+import type { ElementNode, Plugin, TextNode } from '../types.ts'
 import { ELEMENT_NODE } from '../const.ts'
 import { createPlugin } from '../pluggable/plugin.ts'
-import { tagHandlers } from '../tags.ts'
 
 /**
  * Type definition for Tailwind mapping
@@ -251,20 +250,6 @@ function processTailwindClasses(classes: string[]): TailwindNodeData {
  */
 export function tailwindPlugin(): Plugin {
   return createPlugin({
-    init(options) {
-      // Set all tag handlers to use attributes since they need to
-      // access the class attribute for Tailwind processing
-      for (const tagName in tagHandlers) {
-        if (Object.prototype.hasOwnProperty.call(tagHandlers, tagName)) {
-          if (!tagHandlers[tagName].usesAttributes) {
-            tagHandlers[tagName].usesAttributes = true
-          }
-        }
-      }
-
-      return { tailwind: true }
-    },
-
     // Process node attributes to extract Tailwind classes
     processAttributes(node: ElementNode): void {
       const classAttr = node.attributes?.class
@@ -316,18 +301,15 @@ export function tailwindPlugin(): Plugin {
     },
 
     // Filter out hidden elements
-    beforeNodeProcess(node: Node): boolean {
+    beforeNodeProcess({ node }) {
       if (node.type === ELEMENT_NODE) {
         const elementNode = node as ElementNode
-
         // Check if element should be hidden based on plugin data
         const tailwindData = elementNode.context?.tailwind
         if (tailwindData?.hidden) {
-          return false
+          return { skip: true }
         }
       }
-
-      return true
     },
   })
 }

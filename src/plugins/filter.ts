@@ -1,6 +1,7 @@
 import type { ElementNode, Plugin } from '../types.ts'
-import { ELEMENT_NODE, TEXT_NODE } from '../const.ts'
+import { NodeEventEnter, NodeEventExit } from '../const.ts'
 import { createPlugin } from '../pluggable/plugin.ts'
+import { ELEMENT_NODE } from '../types.ts'
 
 /**
  * CSS selector matching interface
@@ -19,7 +20,7 @@ class TagSelector implements SelectorMatcher {
   constructor(private tagName: string) {}
 
   matches(element: ElementNode): boolean {
-    return element.name?.toLowerCase() === this.tagName.toLowerCase()
+    return element.name === this.tagName
   }
 
   toString(): string {
@@ -82,8 +83,7 @@ class AttributeSelector implements SelectorMatcher {
 
   constructor(selector: string) {
     // Parse [attr], [attr=value], [attr^=value], etc.
-    const match = selector.match(/\[([^\]=~|^$*]+)(?:([=~|^$*]+)["']?([^"'\]]+)["']?)?\]/)
-
+    const match = selector.match(/\[([^=[\]~|^$*\s]+)(?:(=|~=|\|=|\^=|\$=|\*=)["']?([^"'\]]+)["']?)?\]/)
     if (match) {
       this.attrName = match[1]
       this.operator = match[2]
@@ -144,10 +144,6 @@ class CompoundSelector implements SelectorMatcher {
   matches(element: ElementNode): boolean {
     // All selectors must match
     return this.selectors.every(selector => selector.matches(element))
-  }
-
-  toString(): string {
-    return this.selectors.map(s => s.toString()).join('')
   }
 }
 
@@ -230,12 +226,6 @@ function parseSelector(selector: string): SelectorMatcher {
   return new CompoundSelector(selectorParts)
 }
 
-// Tracks whether we're starting element capture or not
-interface ElementCapture {
-  elementName: string
-  content: string
-}
-
 /**
  * Plugin that filters nodes based on CSS selectors.
  * Allows including or excluding nodes based on selectors.
@@ -249,267 +239,106 @@ interface ElementCapture {
  * withQuerySelectorPlugin({ exclude: ['nav', '#sidebar', '.footer'] })
  */
 export function filterPlugin(options: {
-  /** CSS selectors for elements to include (all others will be excluded) */
-  include?: string[]
-  /** CSS selectors for elements to exclude */
-  exclude?: string[]
-  /** Whether to also process the children of matching elements */
+  /** CSS selectors (or Tag Ids) for elements to include (all others will be excluded) */
+  include?: (string | number)[]
+  /** CSS selectors (or Tag Ids) for elements to exclude */
+  exclude?: (string | number)[]
+  /** Process children of matched elements (defaults to true) */
   processChildren?: boolean
 } = {}): Plugin {
   // Parse selectors
-  const includeSelectors = options.include?.map(parseSelector) || []
-  const excludeSelectors = options.exclude?.map(parseSelector) || []
-  const processChildren = options.processChildren !== false // Default to true
+  const includeSelectors = options.include?.map((selector) => {
+    if (typeof selector === 'string') {
+      return parseSelector(selector)
+    }
+    return { matches: (element: ElementNode) => element.tagId === selector }
+  }) || []
 
-  // Track element matching for content filtering
-  const capturedElements: Map<string, ElementCapture> = new Map()
-  const elementsToInclude: Set<string> = new Set()
-  const elementsToExclude: Set<string> = new Set()
-  const elementStack: string[] = []
-  let currentElementId = 0
+  const excludeSelectors = options.exclude?.map((selector) => {
+    if (typeof selector === 'string') {
+      return parseSelector(selector)
+    }
+    return { matches: (element: ElementNode) => element.tagId === selector }
+  }) || []
+
+  const hasInclude = includeSelectors.length > 0
+  const hasExclude = excludeSelectors.length > 0
+  const processChildren = options.processChildren !== false // Default to true
 
   return createPlugin({
     init() {
-      // Reset state
-      capturedElements.clear()
-      elementsToInclude.clear()
-      elementsToExclude.clear()
-      elementStack.length = 0
-      currentElementId = 0
-      return { querySelectorPlugin: true }
+      return {
+        // This flag helps differentiate between first node processing and subsequent ones
+        initialized: false,
+        // Stack of depths for included subtrees
+        includeDepths: [],
+        // Current exclude depth if in an excluded subtree
+        excludeDepth: undefined,
+      }
     },
 
-    onNodeEnter(event, state) {
-      const { node } = event
+    beforeNodeProcess({ node, type }, state) {
+      // Make sure context is initialized
+      state.context = state.context || {}
 
-      // We only care about element nodes for selector matching
-      if (node.type !== ELEMENT_NODE || !node.name) {
-        return
+      // Initialize plugin-specific context on first call
+      if (!state.context.initialized) {
+        state.context.includeDepths = []
+        state.context.excludeDepth = undefined
+        state.context.initialized = true
       }
 
-      const element = node as ElementNode
-      // Generate a unique ID for this element
-      const elementId = `el_${currentElementId++}`
-
-      // Add to the stack to track hierarchy
-      elementStack.push(elementId)
-
-      // Check if it should be excluded
-      if (excludeSelectors.length) {
-        const shouldExclude = excludeSelectors.some(selector => selector.matches(element))
-        if (shouldExclude) {
-          elementsToExclude.add(elementId)
-          return
-        }
+      // If in an excluded subtree, skip this node and its children
+      if (state.context.excludeDepth !== undefined && node.depth >= state.context.excludeDepth) {
+        return { skip: true }
       }
 
-      // Special handling for specific tags that need to be processed as units
-      // Links <a> and images <img> need special handling to ensure their attributes
-      // are included in the final output
-      const isSpecialTag = element.name === 'a' || element.name === 'img'
-
-      // Check if it should be included
-      if (includeSelectors.length) {
-        // For special tags like <a> and <img>, look for attribute filters that apply to them
-        // and force inclusion when matched
-        if (isSpecialTag) {
-          // Automatically include links with href or images with alt when those attributes are selected
-          const hasMatchingSelector = includeSelectors.some((selector) => {
-            // Only check if the selector is specific to this tag type
-            if ((element.name === 'a' && selector.toString().includes('[href]'))
-              || (element.name === 'img' && selector.toString().includes('[alt]'))) {
-              return selector.matches(element)
+      if (type === NodeEventEnter) {
+        // For element nodes, apply selector matching
+        if (node.type === ELEMENT_NODE) {
+          // Check exclude selectors first (they take precedence)
+          if (hasExclude) {
+            const shouldExclude = excludeSelectors.some(selector => selector.matches(node))
+            if (shouldExclude) {
+              state.context.excludeDepth = node.depth
+              return { skip: true }
             }
-            return false
-          })
+          }
 
-          if (hasMatchingSelector) {
-            elementsToInclude.add(elementId)
+          // Then handle include selectors
+          if (hasInclude) {
+            const shouldInclude = includeSelectors.some(selector => selector.matches(node))
 
-            // Ensure children (like text nodes) are processed too
-            for (let i = elementStack.length - 2; i >= 0; i--) {
-              const parentId = elementStack[i]
-              elementsToInclude.add(parentId)
-            }
-
-            // Special handling for link text nodes
-            if (element.name === 'a' && element.children) {
-              // Process all child nodes of links
-              for (const child of element.children) {
-                if (child.type === TEXT_NODE) {
-                  // Include all text nodes of the link
-                  elementsToInclude.add(`el_${currentElementId}`) // Reserve ID for text node
-                }
+            // If this node is included, track it
+            if (shouldInclude) {
+              // If we're not supposed to process children, don't add to includeDepths
+              if (processChildren) {
+                state.context.includeDepths.push(node.depth)
               }
             }
-          }
-        }
 
-        // Standard inclusion logic
-        const directlyIncluded = includeSelectors.some(selector => selector.matches(element))
-        if (directlyIncluded) {
-          elementsToInclude.add(elementId)
-        }
-        else if (processChildren && elementStack.length > 1) {
-          // Check if parent is included
-          const parentId = elementStack[elementStack.length - 2]
-          if (elementsToInclude.has(parentId)) {
-            elementsToInclude.add(elementId)
-          }
-        }
-      }
-      else {
-        // If no include selectors, default to including everything not excluded
-        elementsToInclude.add(elementId)
-      }
-
-      // Initialize capture for this element
-      capturedElements.set(elementId, {
-        elementName: element.name,
-        content: '',
-      })
-    },
-
-    // Track when we exit an element
-    onNodeExit(event, state) {
-      if (event.node.type !== ELEMENT_NODE) {
-        return
-      }
-
-      // Pop from stack
-      if (elementStack.length) {
-        elementStack.pop()
-      }
-    },
-
-    // Note: We now handle all content transformation through processTextNode
-
-    // Process text nodes (this is where we can filter by element)
-    processTextNode(node, state) {
-      // If no filtering, return as is
-      if (includeSelectors.length === 0 && excludeSelectors.length === 0) {
-        return undefined
-      }
-
-      // Get current element ID from stack
-      if (!elementStack.length) {
-        return undefined
-      }
-
-      // Process content based on selector rules
-      if (elementStack.length === 0 && node.type === TEXT_NODE) {
-        // Filter out any elements that don't match our criteria
-
-        // Regular HTML processing, append included content and filter excluded
-        if (includeSelectors.length === 0 && excludeSelectors.length === 0) {
-          // No filtering
-          return undefined
-        }
-
-        // Handle include and exclude rules
-        if (includeSelectors.length) {
-          // Only include content from elements that match include selectors
-          let includeContent = false
-          for (const elementId of elementsToInclude) {
-            // Skip elements that are specifically excluded
-            if (elementsToExclude.has(elementId)) {
-              continue
-            }
-            includeContent = true
-            break
-          }
-
-          if (!includeContent) {
-            return { content: '', skip: true } // Nothing matches include criteria
-          }
-        }
-        else {
-          // Only exclude content
-          // If nothing has been excluded, return as is
-          if (elementsToExclude.size === 0) {
-            return undefined
-          }
-        }
-      }
-
-      // Special handling for link and image text
-      if (node.parent?.name === 'a' || node.parent?.name === 'img') {
-        // Check if the parent element has the required attributes
-        const isLinkWithHref = node.parent.name === 'a' && node.parent.attributes?.href
-        const isImgWithAlt = node.parent.name === 'img' && node.parent.attributes?.alt
-
-        // Check if any of our selectors match these special elements
-        const specialSelectorMatches = includeSelectors.some((selector) => {
-          const selectorStr = selector.toString()
-          return (isLinkWithHref && selectorStr.includes('a[href]'))
-            || (isImgWithAlt && selectorStr.includes('img[alt]'))
-        })
-
-        // If we're targeting links with href or images with alt, always include their text
-        if (specialSelectorMatches) {
-          return undefined // Process normally
-        }
-      }
-
-      const currentElementId = elementStack[elementStack.length - 1]
-
-      // Check if current element or any parent is excluded
-      let isExcluded = false
-      for (let i = 0; i < elementStack.length; i++) {
-        if (elementsToExclude.has(elementStack[i])) {
-          isExcluded = true
-          break
-        }
-      }
-
-      if (isExcluded) {
-        return { content: '', skip: true }
-      }
-
-      // With include selectors, we need element or any parent to be included
-      if (includeSelectors.length) {
-        let included = false
-
-        // If we're not processing children, only direct matches count
-        if (!processChildren) {
-          // Only consider the current element - not parents
-          included = elementsToInclude.has(currentElementId)
-        }
-        else {
-          // Check the entire stack for included elements
-          for (let i = 0; i < elementStack.length; i++) {
-            if (elementsToInclude.has(elementStack[i])) {
-              included = true
-              break
+            // Skip if we're not in an included subtree and this node isn't included
+            const isInIncludedSubtree = state.context.includeDepths.length > 0
+            if (!isInIncludedSubtree && !shouldInclude) {
+              return { skip: true }
             }
           }
         }
+      }
+      else if (type === NodeEventExit && node.type === ELEMENT_NODE) {
+        // Handle exiting an excluded node
+        if (state.context.excludeDepth === node.depth) {
+          state.context.excludeDepth = undefined
+        }
 
-        if (!included) {
-          return { content: '', skip: true }
+        // Handle exiting an included node
+        if (state.context.includeDepths.length > 0) {
+          const lastDepth = state.context.includeDepths[state.context.includeDepths.length - 1]
+          if (lastDepth === node.depth) {
+            state.context.includeDepths.pop()
+          }
         }
       }
-
-      // Default: process normally
-      return undefined
-    },
-
-    // Process element attributes if needed
-    processAttributes(node, state) {
-      // Nothing to do here for now
-    },
-
-    // Check if we should process this node at all
-    beforeNodeProcess(node, state) {
-      return true // Always process, we'll filter in the text handling
     },
   })
-}
-
-// Extend the ElementNode type to include our internal node ID
-declare module '../types.ts' {
-  interface ElementNode {
-    /** Internal node ID for tracking selected nodes */
-    __nodeId?: number
-  }
 }
