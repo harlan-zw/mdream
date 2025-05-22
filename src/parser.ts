@@ -136,11 +136,6 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState, handl
           // replace with encoded pipe character
           textBuffer += '\\|'
         }
-        // if in header we need to encode #
-        else if (currentCharCode === 35 && (state.depthMap[TAG_H1] || state.depthMap[TAG_H2] || state.depthMap[TAG_H3] || state.depthMap[TAG_H4] || state.depthMap[TAG_H5] || state.depthMap[TAG_H6])) {
-          // replace with encoded #
-          textBuffer += '\\#'
-        }
         // if in code block we need to encode `
         else if (currentCharCode === 96 && (state.depthMap[TAG_CODE] || state.depthMap[TAG_PRE])) {
           // replace with encoded `

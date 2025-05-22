@@ -11,7 +11,7 @@ describe('links', () => {
   it('handles links with titles', () => {
     const html = '<a href="https://example.com" title="Example Site">Example</a>'
     const markdown = syncHtmlToMarkdown(html)
-    expect(markdown).toBe('[Example](https://example.com)')
+    expect(markdown).toBe('[Example](https://example.com "Example Site")')
   })
 
   it('handles links in paragraphs', () => {

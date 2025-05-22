@@ -24,7 +24,8 @@ describe('html-to-markdown parity', () => {
   </li>
 </ul>`)).toMatchInlineSnapshot(`
   "- Simple List
-  - Someone once said:> My Famous quoteby someone"
+  - Someone once said:
+    > My Famous quoteby someone"
 `)
     expect(syncHtmlToMarkdown(`
 <ol start="9">
@@ -100,7 +101,7 @@ describe('html-to-markdown parity', () => {
     expect(result).toContain('](/post)')
   })
   it('smart Escaping: Escapes special characters only when necessary, to avoid accidental Markdown rendering.', () => {
-    expect(syncHtmlToMarkdown(`<h2># Heading #</h2>`)).toBe('## \\# Heading \\#')
+    expect(syncHtmlToMarkdown(`<h2># Heading #</h2>`)).toBe('## # Heading #')
     expect(syncHtmlToMarkdown(`<p># Heading</p>`)).toBe('\# Heading')
     expect(syncHtmlToMarkdown(`<p>#hashtag</p>`)).toBe('#hashtag')
     expect(syncHtmlToMarkdown(`<p>- List Item</p>`)).toBe('\- List Item')

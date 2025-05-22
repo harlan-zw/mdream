@@ -310,7 +310,14 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_BLOCKQUOTE]: {
     enter: ({ node }) => {
       const depth = node.depthMap[TAG_BLOCKQUOTE] || 1
-      return '> '.repeat(depth)
+      let prefix = '> '.repeat(depth)
+
+      // Add indentation if inside a list item
+      if (node.depthMap[TAG_LI] > 0) {
+        prefix = `\n${'  '.repeat(node.depthMap[TAG_LI])}${prefix}`
+      }
+
+      return prefix
     },
     spacing: BLOCKQUOTE_SPACING,
   },
@@ -364,7 +371,12 @@ export const tagHandlers: Record<number, TagHandler> = {
         return ''
       }
       const href = resolveUrl(node.attributes?.href || '', state.options?.origin)
-      return `](${href})`
+      let title = node.attributes?.title
+      if (state.fragments[state.fragments.length - 1] === title) {
+        title = ''
+      }
+      // we want to check if the title doesn't match the text content
+      return title ? `](${href} "${title}")` : `](${href})`
     },
     collapsesInnerWhiteSpace: true,
     usesAttributes: true,
