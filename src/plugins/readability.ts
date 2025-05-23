@@ -1,4 +1,6 @@
-import type { ElementNode, TextNode } from '../types'
+import type { ElementNode, MdreamRuntimeState, TextNode } from '../types'
+import { closeBufferRegion, createBufferRegion } from '../buffer-region'
+
 import {
   TAG_A,
   TAG_ADDRESS,
@@ -64,9 +66,7 @@ import {
   TAG_UL,
   TAG_VIDEO,
 } from '../const'
-
 import { createPlugin } from '../pluggable/plugin'
-import { isBufferingPaused, pauseBuffering, resumeBuffering } from '../utils.ts'
 
 /***
  # Simplified HTML-to-Markdown Scoring System
@@ -321,32 +321,34 @@ function scoreClassAndId(node: ElementNode) {
   // Boost or penalize based on class/ID names
   if (node.attributes?.class) {
     const className = node.attributes.class as string
-    if (REGEXPS.negative.test(className)) {
-      // More strongly penalize navigation-related classes
-      if (/nav|menu|header|footer|sidebar/i.test(className)) {
-        scoreAdjustment -= 25
-      }
-      else {
-        scoreAdjustment -= 10 // -10 per scoring.md
-      }
+
+    // Check for specific strong negative patterns first
+    if (/nav|menu|header|footer|sidebar/i.test(className)) {
+      scoreAdjustment -= 25
     }
-    if (REGEXPS.positive.test(className)) {
+    // Then check for other negative patterns
+    else if (REGEXPS.negative.test(className)) {
+      scoreAdjustment -= 10 // -10 per scoring.md
+    }
+    // Only apply positive patterns if no negative patterns matched
+    else if (REGEXPS.positive.test(className)) {
       scoreAdjustment += 10 // +10 per scoring.md
     }
   }
 
   if (node.attributes?.id) {
     const id = node.attributes.id as string
-    if (REGEXPS.negative.test(id)) {
-      // More strongly penalize navigation-related IDs
-      if (/nav|menu|header|footer|sidebar/i.test(id)) {
-        scoreAdjustment -= 25
-      }
-      else {
-        scoreAdjustment -= 10 // -10 per scoring.md
-      }
+
+    // Check for specific strong negative patterns first
+    if (/nav|menu|header|footer|sidebar/i.test(id)) {
+      scoreAdjustment -= 25
     }
-    if (REGEXPS.positive.test(id)) {
+    // Then check for other negative patterns
+    else if (REGEXPS.negative.test(id)) {
+      scoreAdjustment -= 10 // -10 per scoring.md
+    }
+    // Only apply positive patterns if no negative patterns matched
+    else if (REGEXPS.positive.test(id)) {
       scoreAdjustment += 10 // +10 per scoring.md
     }
   }
@@ -355,50 +357,123 @@ function scoreClassAndId(node: ElementNode) {
 }
 
 /**
+ * Initialize buffer regions system if not already active
+ */
+function initializeBufferRegions(state: MdreamRuntimeState): void {
+  if (!state.bufferRegions) {
+    state.bufferRegions = []
+  }
+  if (!state.nodeRegionMap) {
+    state.nodeRegionMap = new WeakMap()
+  }
+  if (!state.regionContentBuffers) {
+    state.regionContentBuffers = new Map()
+  }
+  if (!state.formattingContext) {
+    state.formattingContext = new Map()
+  }
+}
+
+/**
+ * Check if content inclusion should be based on buffer regions
+ */
+function shouldUseBufferRegions(state: MdreamRuntimeState): boolean {
+  return !!(state.bufferRegions && state.nodeRegionMap)
+}
+
+/**
+ * Create an exclusion region for negative-scoring content
+ */
+function createExclusionRegion(node: ElementNode, state: MdreamRuntimeState): void {
+  initializeBufferRegions(state)
+  createBufferRegion(node, state, false) // false = exclude content
+}
+
+/**
+ * Create an inclusion region for positive-scoring content
+ */
+function createInclusionRegion(node: ElementNode, state: MdreamRuntimeState): void {
+  initializeBufferRegions(state)
+  createBufferRegion(node, state, true) // true = include content
+}
+
+/**
+ * Close the current buffer region for a node
+ */
+function closeNodeRegion(node: ElementNode, state: MdreamRuntimeState): void {
+  if (shouldUseBufferRegions(state)) {
+    closeBufferRegion(node, state)
+  }
+}
+
+/**
  * Creates a plugin that implements readability.js style heuristics for content quality assessment
- * Controls stream buffering based on content quality metrics
+ * Controls content inclusion/exclusion using buffer regions
  */
 export function readabilityPlugin() {
   let inHead = false
 
   return createPlugin({
     onNodeEnter(node, state) {
+      // Initialize buffer regions system on first use
+      initializeBufferRegions(state)
+
+      // Set default to include content unless explicitly excluded
+      state.defaultIncludeNodes = true
+
       if (inHead) {
         return
       }
+
       // Ensure the node has a context object
       if (!node.context) {
         node.context = {}
       }
+
       if (node.tagId === TAG_BODY || node.tagId === TAG_HTML) {
         return
       }
-      // allow <head> to be processed
+
+      // Allow <head> to be processed (always include head content)
       if (node.tagId === TAG_HEAD) {
-        resumeBuffering(node, state)
+        createInclusionRegion(node, state)
         inHead = true
         return
       }
+
       const tagScore = TagScores[node.tagId] ?? 0
       const classAndIdScore = scoreClassAndId(node)
 
       // Initialize metrics for this node
-      node.context.score = (!node.parent || node.parent.tagId === TAG_BODY ? -5 : 0) + tagScore + classAndIdScore
+      // Start with neutral score, only apply tag and class/id scoring
+      node.context.score = tagScore + classAndIdScore
       node.context.tagCount = 1
       node.context.linkTextLength = 0
       node.context.textLength = 0
 
-      // If node has a parent, inherit parent's relevant context
-      if (node.parent && node.parent.context) {
-        node.context.score += (node.parent.context.score || 0)
+      // Check for strong negative patterns that should override parent context
+      const hasStrongNegativePattern = (
+        (node.name && /nav|header|footer|aside/i.test(node.name))
+        || (node.attributes?.class && /nav|menu|header|footer|sidebar|hidden|copyright/i.test(node.attributes.class as string))
+        || (node.attributes?.id && /nav|menu|header|footer|sidebar|hidden|copyright/i.test(node.attributes.id as string))
+        || (node.attributes?.style && /display:\s*none|visibility:\s*hidden/i.test(node.attributes.style as string))
+        || (node.attributes && Object.keys(node.attributes).some(attr => attr.startsWith('aria-') && node.attributes![attr] === 'true' && /hidden|invisible/i.test(attr)))
+      )
+
+      if (hasStrongNegativePattern) {
+        // Strong negative patterns: exclude immediately without inheriting parent score
+        createExclusionRegion(node, state)
       }
-      // Check if buffer is currently paused by looking at the buffer markers
-      // Skip processing if buffer is not paused
-      // More aggressive pausing to match original test expectations
-      if (!isBufferingPaused(state) && node.context.score < 0) {
-        pauseBuffering(state, node)
-        console.log('pause buffering', node.name, node.tagId, node.context.score)
+      else {
+        // For all other nodes, don't create inclusion regions immediately
+        // Let content flow naturally and only exclude specific problematic content
+        // If node has a parent, inherit parent's relevant context
+        if (node.parent && node.parent.context) {
+          node.context.score += (node.parent.context.score || 0)
+        }
       }
+      // Negative scores (but > -15) wait for onNodeExit when text content might improve the score
+      // Negative scores (but > -10) wait for onNodeExit when text content might improve the score
     },
 
     processTextNode(node: TextNode) {
@@ -447,12 +522,12 @@ export function readabilityPlugin() {
       }
 
       if (node.tagId === TAG_HEAD) {
+        closeNodeRegion(node, state)
         inHead = false
         return
       }
 
       if (inHead) {
-
         return
       }
 
@@ -499,23 +574,27 @@ export function readabilityPlugin() {
           node.context.score *= (1 - (linkDensity * 0.75))
         }
       }
-      // Only resume if the node meets our quality criteria and we haven't found main content yet
-      if (isBufferingPaused(state) && node.context.score >= 0) {
-        if (node.tagHandler?.isInline) {
-          // add the score diff to the parent
-          const parent = node.parent
-          if (parent && parent.context) {
-            parent.context.score += node.context.score - parent.context.score
-          }
-        }
-        else {
-          // Add buffer marker to resume at this position
-          resumeBuffering(node, state)
+
+      // Only exclude content with low scores to reduce fragmentation
+      const finalScore = node.context.score
+
+      if (finalScore <= -10) {
+        // Exclude content with low scores to filter out poor quality content
+        if (!shouldUseBufferRegions(state) || !state.nodeRegionMap!.has(node)) {
+          createExclusionRegion(node, state)
         }
       }
-      else if (!isBufferingPaused(state) && node.context.score < 0) {
-        // Pause buffering for low-quality elements if we're not already paused
-        pauseBuffering(state, node)
+      // Don't create inclusion regions dynamically - let content flow naturally
+
+      // Close any buffer region for this node
+      closeNodeRegion(node, state)
+
+      // For inline elements, propagate score to parent
+      if (node.tagHandler?.isInline) {
+        const parent = node.parent
+        if (parent && parent.context) {
+          parent.context.score += finalScore - (parent.context.score || 0)
+        }
       }
     },
   })

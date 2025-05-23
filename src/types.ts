@@ -76,6 +76,34 @@ export interface Plugin {
    * @returns Optional data to be added to the state
    */
   finish?: (state: MdreamRuntimeState) => void | Record<string, any>
+
+  /**
+   * Handle chunk completion for streaming
+   */
+  onChunkComplete?: (state: MdreamRuntimeState) => void
+
+  /**
+   * Plugin priority for conflict resolution
+   * Higher numbers take precedence
+   */
+  priority?: number
+}
+
+/**
+ * Plugin creation options for controlling plugin behavior
+ */
+export interface PluginCreationOptions {
+  /**
+   * Order in which plugins are executed
+   * Lower numbers run first
+   */
+  order?: number
+
+  /**
+   * Priority for region conflict resolution
+   * Higher numbers take precedence over lower
+   */
+  priority?: number
 }
 
 export interface HTMLToMarkdownOptions {
@@ -89,6 +117,12 @@ export interface HTMLToMarkdownOptions {
    * Plugins to extend HTML to Markdown conversion
    */
   plugins?: Plugin[]
+
+  /**
+   * Maximum buffer size for streaming (in bytes)
+   * Default: 1MB
+   */
+  maxBufferSize?: number
 }
 
 // Standard DOM node types
@@ -155,6 +189,47 @@ export interface Node {
 
   /** The length of the generated Markdown for this node */
   mdExit?: number
+}
+
+/**
+ * Buffer region for tracking content inclusion/exclusion
+ */
+export interface BufferRegion {
+  /** Unique identifier */
+  id: string
+
+  /** Region node references */
+  startNode: ElementNode
+  endNode?: ElementNode
+
+  /** Inclusion state */
+  include: boolean
+
+  /** Region metadata */
+  depth: number
+  parentRegionId?: string
+
+  /** Region status for streaming */
+  isComplete?: boolean
+}
+
+/**
+ * Extended buffer region for streaming support
+ */
+export interface StreamingBufferRegion extends BufferRegion {
+  /** Track which chunks this region spans */
+  startChunkId: number
+  endChunkId?: number
+
+  /** Track if region is safe to flush during streaming */
+  canFlush: boolean
+
+  /** Content accumulation for this region */
+  accumulatedContent: string[]
+
+  /** Streaming state tracking */
+  isPartiallyProcessed: boolean
+  lastProcessedPosition: number
 }
 
 /**
@@ -238,22 +313,45 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   /** Plugin instances array for efficient iteration */
   plugins?: Plugin[]
 
-  /**
-   * Markers for buffer pause/resume positions
-   * Used to control buffer pause/resume at specific positions in the output stream
-   * Each marker contains:
-   * - position: The position in the markdown output
-   * - pause: Whether to pause (true) or resume (false) the buffer at this position
-   */
-  bufferMarkers?: Array<{
-    position: number
-    pause: boolean
-  }>
+  /** Global default inclusion state */
+  defaultIncludeNodes?: boolean
 
-  /** Flag to track if buffering is paused */
-  isBufferPaused?: boolean
+  /** Buffer regions for controlling content inclusion/exclusion */
+  bufferRegions?: BufferRegion[]
+
+  /** Map of nodes to their region IDs */
+  nodeRegionMap?: WeakMap<Node, string>
+
+  /** Content buffers for regions */
+  regionContentBuffers?: Map<string, string[]>
+
+  /** Preserve indentation/prefix state */
+  formattingContext?: Map<string, any>
 
   context?: Record<string, any>
+}
+
+/**
+ * Extended state for streaming operations
+ */
+export interface StreamingMdreamState extends MdreamRuntimeState {
+  /** Streaming-specific fields */
+  currentChunkId: number
+  lastFlushedChunkId: number
+  pendingOutput: string[]
+
+  /** Enhanced region tracking for streaming */
+  streamingRegions?: StreamingBufferRegion[]
+
+  /** Memory management (based on current system analysis) */
+  maxBufferedContent: number /** Default 1MB (current system unbounded) */
+  totalBufferedSize: number
+
+  /** Replace current fragment array system */
+  regionFragments?: Map<string, string[]> /** Per-region fragment collection */
+
+  /** Replace current buffer marker system */
+  /** NOTE: Will completely replace bufferMarkers, isBufferPaused, markdownBuffer */
 }
 
 type NodeEventEnter = 0
@@ -284,6 +382,11 @@ export interface HandlerContext {
 
   /** Runtime state */
   state: MdreamRuntimeState
+
+  /**
+   * Collect content for this node
+   */
+  collectContent?: (content: string) => void
 }
 
 /**
@@ -304,4 +407,10 @@ export interface TagHandler {
   // Number of newlines to add before/after the tag
   spacing?: readonly [number, number]
   excludesTextNodes?: boolean
+
+  /**
+   * Whether this tag supports content collection
+   * If true, the handler is responsible for collecting its content
+   */
+  collectsContent?: boolean
 }
