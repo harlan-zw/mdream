@@ -1,4 +1,5 @@
 import type { ElementNode, MdreamProcessingState, MdreamRuntimeState, Node, NodeEvent, TextNode } from './types'
+import { assembleBufferedContent } from './buffer-region'
 import {
   ELEMENT_NODE,
   MAX_TAG_ID,
@@ -320,6 +321,7 @@ function processTextBuffer(textBuffer: string, state: MdreamProcessingState, han
     type: TEXT_NODE,
     value: text,
     parent: state.currentNode,
+    regionId: state.currentNode?.regionId,
     index: state.currentNode.currentWalkIndex!++,
     depth: state.depth,
     containsWhitespace,
@@ -585,6 +587,7 @@ function processOpeningTag(
     depthMap: copyDepthMap(state.depthMap),
     depth: state.depth,
     index: currentWalkIndex,
+    regionId: state.currentNode?.regionId,
     tagId,
     tagHandler,
   } as ElementNode
@@ -807,14 +810,19 @@ export function processPartialHTMLToMarkdown(
   partialHtml: string,
   state: Partial<MdreamRuntimeState> = {},
 ): { chunk: string, remainingHTML: string } {
-  state.fragmentCount = 0
-  state.currentMdPosition ??= 0
   state.depthMap ??= new Uint8Array(MAX_TAG_ID)
   state.plugins = [...(state.options?.plugins || [])]
-  state.fragments = []
+  state.regionToggles ??= new Map()
+  state.regionContentBuffers ??= new Map()
+  state.regionToggles.set(0, true)
+  state.regionContentBuffers.set(0, [])
+
+  // At this point state has all required properties, so we can safely cast it
+  const fullState = state as MdreamRuntimeState
+
   function handleEvent(event: NodeEvent) {
-    for (const plugin of state.plugins || []) {
-      const res = plugin.beforeNodeProcess?.(event, state)
+    for (const plugin of fullState.plugins || []) {
+      const res = plugin.beforeNodeProcess?.(event, fullState)
       if (typeof res === 'object' && res.skip) {
         return
       }
@@ -822,15 +830,17 @@ export function processPartialHTMLToMarkdown(
 
     // Fast path for text nodes
     if (event.node.type === TEXT_NODE) {
-      processHtmlEventToMarkdown(event, state)
+      processHtmlEventToMarkdown(event, fullState)
       return
     }
 
-    processHtmlEventToMarkdown(event, state)
+    processHtmlEventToMarkdown(event, fullState)
   }
   // Parse HTML into a DOM tree with events
   // @ts-expect-error untyped
-  const unprocessedHtml = parseHTML(partialHtml, state, handleEvent)
-  state.fragmentCount += state.fragments.length
-  return { chunk: state.fragments.join(''), remainingHTML: unprocessedHtml }
+  const unprocessedHtml = parseHTML(partialHtml, fullState, handleEvent)
+
+  // Use buffer regions for all content assembly
+  const assembledContent = assembleBufferedContent(fullState)
+  return { chunk: assembledContent, remainingHTML: unprocessedHtml }
 }

@@ -241,18 +241,15 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_SCRIPT]: {
     excludesTextNodes: true,
     isNonNesting: true,
-    isNonSupported: true,
   },
   [TAG_STYLE]: {
     isNonNesting: true,
     excludesTextNodes: true,
-    isNonSupported: true,
   },
   [TAG_META]: {
     // No special handling for meta - plugins will handle frontmatter
     collapsesInnerWhiteSpace: true,
     isSelfClosing: true,
-    usesAttributes: true,
     spacing: NO_SPACING,
   },
   [TAG_BR]: {
@@ -335,7 +332,6 @@ export const tagHandlers: Record<number, TagHandler> = {
         : MARKDOWN_INLINE_CODE
     },
     collapsesInnerWhiteSpace: true,
-    usesAttributes: true,
     spacing: NO_SPACING,
     isInline: true,
   },
@@ -372,14 +368,14 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
       const href = resolveUrl(node.attributes?.href || '', state.options?.origin)
       let title = node.attributes?.title
-      if (state.fragments[state.fragments.length - 1] === title) {
+      // Check if title matches the last content to avoid duplication
+      const lastContent = state.lastContentCache
+      if (lastContent === title) {
         title = ''
       }
-      // we want to check if the title doesn't match the text content
       return title ? `](${href} "${title}")` : `](${href})`
     },
     collapsesInnerWhiteSpace: true,
-    usesAttributes: true,
     spacing: NO_SPACING,
     isInline: true,
   },
@@ -391,7 +387,6 @@ export const tagHandlers: Record<number, TagHandler> = {
     },
     collapsesInnerWhiteSpace: true,
     isSelfClosing: true,
-    usesAttributes: true,
     spacing: NO_SPACING,
     isInline: true,
   },
@@ -483,7 +478,6 @@ export const tagHandlers: Record<number, TagHandler> = {
       state.tableCurrentRowCells!++
     },
     collapsesInnerWhiteSpace: true,
-    usesAttributes: true,
     spacing: NO_SPACING,
   },
   [TAG_TD]: {
@@ -555,19 +549,16 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_FORM]: {
     spacing: NO_SPACING,
-    isNonSupported: true,
   },
   [TAG_LINK]: {
     isSelfClosing: true,
     spacing: NO_SPACING,
-    isNonSupported: true,
     collapsesInnerWhiteSpace: true,
     isInline: true,
   },
   [TAG_AREA]: {
     isSelfClosing: true,
     spacing: NO_SPACING,
-    isNonSupported: true,
     isInline: true,
   },
   [TAG_BASE]: {
@@ -586,7 +577,6 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_INPUT]: {
     isSelfClosing: true,
     spacing: NO_SPACING,
-    isNonSupported: true,
     isInline: true,
   },
   [TAG_KEYGEN]: {
@@ -612,66 +602,51 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_SVG]: {
-    isNonSupported: true,
     spacing: NO_SPACING,
   },
   [TAG_SELECT]: {
-    isNonSupported: true,
     spacing: NO_SPACING,
   },
   [TAG_TEXTAREA]: {
-    isNonSupported: true,
     isNonNesting: true,
     spacing: NO_SPACING,
   },
   [TAG_OPTION]: {
-    isNonSupported: true,
     isNonNesting: true,
     spacing: NO_SPACING,
   },
   [TAG_FIELDSET]: {
-    isNonSupported: true,
     spacing: NO_SPACING,
   },
   [TAG_LEGEND]: {
-    isNonSupported: true,
     spacing: NO_SPACING,
   },
   [TAG_AUDIO]: {
-    isNonSupported: true,
     spacing: NO_SPACING,
   },
   [TAG_VIDEO]: {
-    isNonSupported: true,
     spacing: NO_SPACING,
   },
   [TAG_CANVAS]: {
-    isNonSupported: true,
     spacing: NO_SPACING,
   },
   [TAG_IFRAME]: {
-    isNonSupported: true,
     isNonNesting: true,
     spacing: NO_SPACING,
   },
   [TAG_MAP]: {
-    isNonSupported: true,
     spacing: NO_SPACING,
   },
   [TAG_DIALOG]: {
-    isNonSupported: true,
     spacing: NO_SPACING,
   },
   [TAG_METER]: {
-    isNonSupported: true,
     spacing: NO_SPACING,
   },
   [TAG_PROGRESS]: {
-    isNonSupported: true,
     spacing: NO_SPACING,
   },
   [TAG_TEMPLATE]: {
-    isNonSupported: true,
     spacing: NO_SPACING,
   },
   [TAG_ABBR]: {
@@ -710,22 +685,18 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_NOSCRIPT]: {
-    isNonSupported: true,
     isNonNesting: true,
     spacing: NO_SPACING,
   },
   [TAG_NOFRAMES]: {
-    isNonSupported: true,
     isNonNesting: true,
     spacing: NO_SPACING,
   },
   [TAG_XMP]: {
-    isNonSupported: true,
     isNonNesting: true,
     spacing: NO_SPACING,
   },
   [TAG_PLAINTEXT]: {
-    isNonSupported: true,
     isNonNesting: true,
     spacing: NO_SPACING,
   },

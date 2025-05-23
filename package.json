@@ -51,8 +51,10 @@
     "@antfu/eslint-config": "^4.13.2",
     "@types/node": "^22.15.21",
     "bumpp": "^10.1.1",
+    "crawlee": "^3.13.5",
     "eslint": "^9.27.0",
     "llm-cost": "^1.0.5",
+    "playwright": "^1.52.0",
     "typescript": "5.8.3",
     "unbuild": "^3.5.0",
     "vitest": "^3.1.4"

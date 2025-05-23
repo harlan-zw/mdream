@@ -1,35 +1,7 @@
 /**
- * Shared context for plugin hooks
- */
-export interface PluginContext {
-  /**
-   * The node being processed
-   */
-  node: Node
-
-  /**
-   * The current runtime state
-   */
-  state: MdreamRuntimeState
-
-  /**
-   * The node event (for enter/exit hooks)
-   */
-  event?: NodeEvent
-}
-
-/**
  * Plugin interface for extending HTML to Markdown conversion
  */
 export interface Plugin {
-  /**
-   * Initialize the plugin with options
-   * @param options - The options to initialize the plugin with
-   * @param tagHandlers - The current tag handlers, which can be extended
-   * @returns Any data to be stored in the plugin instance
-   */
-  init?: (options?: Record<string, any>, tagHandlers?: Record<number, any>) => void | Record<string, any>
-
   /**
    * Process a node before it's handled by the parser
    */
@@ -66,27 +38,6 @@ export interface Plugin {
     node: TextNode,
     state: MdreamRuntimeState
   ) => undefined | void | { content: string, skip: boolean }
-
-  // Removed transformContent hook - use processTextNode instead
-
-  /**
-   * Hook that runs after the entire document is processed
-   * This is useful for plugins that need to analyze the complete document
-   * @param state - The final runtime state
-   * @returns Optional data to be added to the state
-   */
-  finish?: (state: MdreamRuntimeState) => void | Record<string, any>
-
-  /**
-   * Handle chunk completion for streaming
-   */
-  onChunkComplete?: (state: MdreamRuntimeState) => void
-
-  /**
-   * Plugin priority for conflict resolution
-   * Higher numbers take precedence
-   */
-  priority?: number
 }
 
 /**
@@ -117,12 +68,6 @@ export interface HTMLToMarkdownOptions {
    * Plugins to extend HTML to Markdown conversion
    */
   plugins?: Plugin[]
-
-  /**
-   * Maximum buffer size for streaming (in bytes)
-   * Default: 1MB
-   */
-  maxBufferSize?: number
 }
 
 // Standard DOM node types
@@ -184,11 +129,8 @@ export interface Node {
   /** Custom data added by plugins */
   context?: Record<string, any>
 
-  /** The starting position in the generated Markdown output */
-  mdStart?: number
-
-  /** The length of the generated Markdown for this node */
-  mdExit?: number
+  /** Region ID for buffer region tracking */
+  regionId?: number
 }
 
 /**
@@ -196,40 +138,10 @@ export interface Node {
  */
 export interface BufferRegion {
   /** Unique identifier */
-  id: string
-
-  /** Region node references */
-  startNode: ElementNode
-  endNode?: ElementNode
+  id: number
 
   /** Inclusion state */
   include: boolean
-
-  /** Region metadata */
-  depth: number
-  parentRegionId?: string
-
-  /** Region status for streaming */
-  isComplete?: boolean
-}
-
-/**
- * Extended buffer region for streaming support
- */
-export interface StreamingBufferRegion extends BufferRegion {
-  /** Track which chunks this region spans */
-  startChunkId: number
-  endChunkId?: number
-
-  /** Track if region is safe to flush during streaming */
-  canFlush: boolean
-
-  /** Content accumulation for this region */
-  accumulatedContent: string[]
-
-  /** Streaming state tracking */
-  isPartiallyProcessed: boolean
-  lastProcessedPosition: number
 }
 
 /**
@@ -269,14 +181,8 @@ export interface MdreamProcessingState {
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
 
-  /** Output fragments during processing */
-  fragments?: string[]
-
   /** Plugin instances array for efficient iteration */
   plugins?: Plugin[]
-
-  /** Text buffer for accumulated text content - moved from local variable to state for position tracking */
-  textBuffer?: string
 
   /** Configuration options for conversion */
   options?: HTMLToMarkdownOptions
@@ -290,18 +196,6 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   /** Number of newlines at end of most recent output */
   lastNewLines?: number
 
-  /** Total fragments processed for tracking */
-  fragmentCount?: number
-
-  /** Current line count - primarily for non-zero checks */
-  currentLine?: number
-
-  /** Accumulated markdown output buffer */
-  buffer?: string
-
-  /** Current position in the Markdown output */
-  currentMdPosition?: number
-
   /** Configuration options for conversion */
   options?: HTMLToMarkdownOptions
 
@@ -313,45 +207,16 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   /** Plugin instances array for efficient iteration */
   plugins?: Plugin[]
 
-  /** Global default inclusion state */
-  defaultIncludeNodes?: boolean
-
-  /** Buffer regions for controlling content inclusion/exclusion */
-  bufferRegions?: BufferRegion[]
-
-  /** Map of nodes to their region IDs */
-  nodeRegionMap?: WeakMap<Node, string>
+  /** Map of region IDs to buffer regions for O(1) lookups */
+  regionToggles: Map<number, boolean>
 
   /** Content buffers for regions */
-  regionContentBuffers?: Map<string, string[]>
+  regionContentBuffers: Map<number, string[]>
 
-  /** Preserve indentation/prefix state */
-  formattingContext?: Map<string, any>
+  /** Performance cache for last content to avoid iteration */
+  lastContentCache?: string
 
   context?: Record<string, any>
-}
-
-/**
- * Extended state for streaming operations
- */
-export interface StreamingMdreamState extends MdreamRuntimeState {
-  /** Streaming-specific fields */
-  currentChunkId: number
-  lastFlushedChunkId: number
-  pendingOutput: string[]
-
-  /** Enhanced region tracking for streaming */
-  streamingRegions?: StreamingBufferRegion[]
-
-  /** Memory management (based on current system analysis) */
-  maxBufferedContent: number /** Default 1MB (current system unbounded) */
-  totalBufferedSize: number
-
-  /** Replace current fragment array system */
-  regionFragments?: Map<string, string[]> /** Per-region fragment collection */
-
-  /** Replace current buffer marker system */
-  /** NOTE: Will completely replace bufferMarkers, isBufferPaused, markdownBuffer */
 }
 
 type NodeEventEnter = 0
@@ -382,11 +247,6 @@ export interface HandlerContext {
 
   /** Runtime state */
   state: MdreamRuntimeState
-
-  /**
-   * Collect content for this node
-   */
-  collectContent?: (content: string) => void
 }
 
 /**
@@ -398,8 +258,6 @@ export interface TagHandler {
   exit?: (context: HandlerContext) => string | undefined | void
   isSelfClosing?: boolean
   isNonNesting?: boolean
-  isNonSupported?: boolean
-  usesAttributes?: boolean
   collapsesInnerWhiteSpace?: boolean
   isInline?: boolean
 
@@ -407,10 +265,4 @@ export interface TagHandler {
   // Number of newlines to add before/after the tag
   spacing?: readonly [number, number]
   excludesTextNodes?: boolean
-
-  /**
-   * Whether this tag supports content collection
-   * If true, the handler is responsible for collecting its content
-   */
-  collectsContent?: boolean
 }

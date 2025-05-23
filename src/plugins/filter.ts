@@ -266,16 +266,6 @@ export function filterPlugin(options: {
   const processChildren = options.processChildren !== false // Default to true
 
   return createPlugin({
-    init() {
-      return {
-        // This flag helps differentiate between first node processing and subsequent ones
-        initialized: false,
-        // Stack of depths for included subtrees
-        includeDepths: [],
-        // Current exclude depth if in an excluded subtree
-        excludeDepth: undefined,
-      }
-    },
 
     beforeNodeProcess({ node, type }, state) {
       // Make sure context is initialized

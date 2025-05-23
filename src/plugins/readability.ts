@@ -1,5 +1,5 @@
-import type { ElementNode, MdreamRuntimeState, TextNode } from '../types'
-import { closeBufferRegion, createBufferRegion } from '../buffer-region'
+import type { ElementNode, TextNode } from '../types'
+import { createBufferRegion } from '../buffer-region'
 
 import {
   TAG_A,
@@ -357,56 +357,6 @@ function scoreClassAndId(node: ElementNode) {
 }
 
 /**
- * Initialize buffer regions system if not already active
- */
-function initializeBufferRegions(state: MdreamRuntimeState): void {
-  if (!state.bufferRegions) {
-    state.bufferRegions = []
-  }
-  if (!state.nodeRegionMap) {
-    state.nodeRegionMap = new WeakMap()
-  }
-  if (!state.regionContentBuffers) {
-    state.regionContentBuffers = new Map()
-  }
-  if (!state.formattingContext) {
-    state.formattingContext = new Map()
-  }
-}
-
-/**
- * Check if content inclusion should be based on buffer regions
- */
-function shouldUseBufferRegions(state: MdreamRuntimeState): boolean {
-  return !!(state.bufferRegions && state.nodeRegionMap)
-}
-
-/**
- * Create an exclusion region for negative-scoring content
- */
-function createExclusionRegion(node: ElementNode, state: MdreamRuntimeState): void {
-  initializeBufferRegions(state)
-  createBufferRegion(node, state, false) // false = exclude content
-}
-
-/**
- * Create an inclusion region for positive-scoring content
- */
-function createInclusionRegion(node: ElementNode, state: MdreamRuntimeState): void {
-  initializeBufferRegions(state)
-  createBufferRegion(node, state, true) // true = include content
-}
-
-/**
- * Close the current buffer region for a node
- */
-function closeNodeRegion(node: ElementNode, state: MdreamRuntimeState): void {
-  if (shouldUseBufferRegions(state)) {
-    closeBufferRegion(node, state)
-  }
-}
-
-/**
  * Creates a plugin that implements readability.js style heuristics for content quality assessment
  * Controls content inclusion/exclusion using buffer regions
  */
@@ -415,11 +365,7 @@ export function readabilityPlugin() {
 
   return createPlugin({
     onNodeEnter(node, state) {
-      // Initialize buffer regions system on first use
-      initializeBufferRegions(state)
-
       // Set default to include content unless explicitly excluded
-      state.defaultIncludeNodes = true
 
       if (inHead) {
         return
@@ -436,7 +382,7 @@ export function readabilityPlugin() {
 
       // Allow <head> to be processed (always include head content)
       if (node.tagId === TAG_HEAD) {
-        createInclusionRegion(node, state)
+        createBufferRegion(node, state, true)
         inHead = true
         return
       }
@@ -462,7 +408,7 @@ export function readabilityPlugin() {
 
       if (hasStrongNegativePattern) {
         // Strong negative patterns: exclude immediately without inheriting parent score
-        createExclusionRegion(node, state)
+        createBufferRegion(node, state, false)
       }
       else {
         // For all other nodes, don't create inclusion regions immediately
@@ -522,7 +468,7 @@ export function readabilityPlugin() {
       }
 
       if (node.tagId === TAG_HEAD) {
-        closeNodeRegion(node, state)
+        // closeBufferRegion(node, state)
         inHead = false
         return
       }
@@ -580,14 +526,12 @@ export function readabilityPlugin() {
 
       if (finalScore <= -10) {
         // Exclude content with low scores to filter out poor quality content
-        if (!shouldUseBufferRegions(state) || !state.nodeRegionMap!.has(node)) {
-          createExclusionRegion(node, state)
-        }
+        createBufferRegion(node, state, false)
       }
       // Don't create inclusion regions dynamically - let content flow naturally
 
       // Close any buffer region for this node
-      closeNodeRegion(node, state)
+      // closeBufferRegion(node, state)
 
       // For inline elements, propagate score to parent
       if (node.tagHandler?.isInline) {
