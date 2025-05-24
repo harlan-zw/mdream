@@ -1,8 +1,8 @@
-import { PlaywrightCrawler, Log } from 'crawlee';
-import {syncHtmlToMarkdown} from "../dist/index.mjs";
-import {writeFile} from "node:fs/promises";
-import {mkdirSync, existsSync} from "node:fs";
-
+import { existsSync, mkdirSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
+import { PlaywrightCrawler } from 'crawlee'
+import { syncHtmlToMarkdown } from '../dist/index.mjs'
+import { withMinimalPreset } from '../dist/preset/minimal.mjs'
 
 // CheerioCrawler crawls the web using HTTP requests
 // and parses HTML using the Cheerio library.
@@ -11,21 +11,21 @@ const crawler = new PlaywrightCrawler({
   async requestHandler({ page, request, log }) {
     await page.waitForLoadState('networkidle')
     const html = await page.innerHTML('html')
-    log.info('HTML length' , { url: request.loadedUrl, length: html.length })
+    log.info('HTML length', { url: request.loadedUrl, length: html.length })
     const now = new Date()
-    const md = syncHtmlToMarkdown(html)
+    const md = syncHtmlToMarkdown(html, withMinimalPreset())
     log.info('Processed html -> md in', { url: request.loadedUrl, time: new Date() - now })
     // mkdir
     if (!existsSync('./output')) {
-      mkdirSync('./output');
+      mkdirSync('./output')
     }
-    await writeFile(`./output/${request.loadedUrl.replace(/[^a-zA-Z0-9]/g, '-')}.md`, md, 'utf-8')
+    await writeFile(`./output/${request.loadedUrl.replace(/[^a-z0-9]/gi, '-')}.md`, md, 'utf-8')
     log.info('Processed URL', { url: request.loadedUrl })
   },
 
   // Let's limit our crawls to make our tests shorter and safer.
   maxRequestsPerCrawl: 50,
-});
+})
 
 // Add first URL to the queue and start the crawl.
 await crawler.run([
@@ -39,4 +39,4 @@ await crawler.run([
   'https://vercel.com/docs/getting-started-with-vercel',
   'https://stackoverflow.com/questions/tagged/javascript',
   'https://arxiv.org/list/cs.AI/recent',
-]);
+])
