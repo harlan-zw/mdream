@@ -216,6 +216,9 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   /** Performance cache for last content to avoid iteration */
   lastContentCache?: string
 
+  /** Reference to the last processed node */
+  lastNode?: Node
+
   context?: Record<string, any>
 }
 

@@ -101,13 +101,9 @@ describe('footer', () => {
     expect(markdown).toMatchInlineSnapshot(`
       "## Help and support
 
-
-
       ### Did you find what you needed?
 
-
-
-      YesNo
+      Yes No
 
       [Privacy policy](/en/site-policy/privacy-policies/github-privacy-statement)
 

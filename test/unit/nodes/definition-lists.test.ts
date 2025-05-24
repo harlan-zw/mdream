@@ -52,8 +52,7 @@ describe('definition lists', () => {
       <dd><dl><dt>HTML</dt>
       <dd>HyperText Markup Language</dd>
       <dt>CSS</dt>
-      <dd>Cascading Style Sheets</dd>
-      </dl></dd>
+      <dd>Cascading Style Sheets</dd></dl></dd>
       <dt>Runtime</dt>
       <dd>JavaScript</dd>
       </dl>"

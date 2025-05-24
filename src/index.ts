@@ -6,9 +6,9 @@ export function syncHtmlToMarkdown(
   options: HTMLToMarkdownOptions = {},
 ): string {
   // Initialize state
-  const state: MdreamRuntimeState = {
+  const state = {
     options,
-  }
+  } as MdreamRuntimeState
   const result = processPartialHTMLToMarkdown(html, state).chunk
   return result.trimEnd()
 }

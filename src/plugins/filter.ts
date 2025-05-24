@@ -1,7 +1,6 @@
-import type { ElementNode, Plugin } from '../types.ts'
-import { NodeEventEnter, NodeEventExit } from '../const.ts'
+import type { ElementNode, Plugin, TextNode } from '../types.ts'
+import { ELEMENT_NODE, TEXT_NODE } from '../const.ts'
 import { createPlugin } from '../pluggable/plugin.ts'
-import { ELEMENT_NODE } from '../types.ts'
 
 /**
  * CSS selector matching interface
@@ -64,7 +63,7 @@ class ClassSelector implements SelectorMatcher {
       return false
 
     // Check if the class is in the element's class list
-    const classes = element.attributes.class.split(/\s+/)
+    const classes = element.attributes.class.trim().split(' ').filter(Boolean)
     return classes.includes(this.className)
   }
 
@@ -83,7 +82,8 @@ class AttributeSelector implements SelectorMatcher {
 
   constructor(selector: string) {
     // Parse [attr], [attr=value], [attr^=value], etc.
-    const match = selector.match(/\[([^=[\]~|^$*\s]+)(?:(=|~=|\|=|\^=|\$=|\*=)["']?([^"'\]]+)["']?)?\]/)
+    const match = selector.match(/\[([^\]=~|^$*]+)(?:([=~|^$*]+)["']?([^"'\]]+)["']?)?\]/)
+
     if (match) {
       this.attrName = match[1]
       this.operator = match[2]
@@ -119,7 +119,7 @@ class AttributeSelector implements SelectorMatcher {
       case '*=': // Contains
         return value.includes(this.attrValue)
       case '~=': // Contains word
-        return value.split(/\s+/).includes(this.attrValue)
+        return value.trim().split(' ').filter(Boolean).includes(this.attrValue)
       case '|=': // Starts with prefix
         return value === this.attrValue || value.startsWith(`${this.attrValue}-`)
       default:
@@ -145,6 +145,10 @@ class CompoundSelector implements SelectorMatcher {
     // All selectors must match
     return this.selectors.every(selector => selector.matches(element))
   }
+
+  toString(): string {
+    return this.selectors.map(s => s.toString()).join('')
+  }
 }
 
 /**
@@ -167,19 +171,7 @@ function parseSelector(selector: string): SelectorMatcher {
   for (let i = 0; i < selector.length; i++) {
     const char = selector[i]
 
-    // Track if we're inside attribute brackets
-    if (char === '[')
-      inAttribute = true
-    if (char === ']')
-      inAttribute = false
-
-    // If we're inside attribute brackets, keep collecting
-    if (inAttribute) {
-      current += char
-      continue
-    }
-
-    // Handle selector type transitions
+    // Handle selector type transitions BEFORE setting inAttribute
     if ((char === '.' || char === '#' || char === '[') && current) {
       // Save the current selector and start a new one
       if (current[0] === '.') {
@@ -198,6 +190,17 @@ function parseSelector(selector: string): SelectorMatcher {
     }
     else {
       current += char
+    }
+
+    // Track if we're inside attribute brackets
+    if (char === '[')
+      inAttribute = true
+    if (char === ']')
+      inAttribute = false
+
+    // If we're inside attribute brackets, keep collecting (but skip the opening bracket)
+    if (inAttribute && char !== '[') {
+      continue
     }
   }
 
@@ -243,8 +246,9 @@ export function filterPlugin(options: {
   include?: (string | number)[]
   /** CSS selectors (or Tag Ids) for elements to exclude */
   exclude?: (string | number)[]
-  /** Process children of matched elements (defaults to true) */
+  /** Whether to also process the children of matching elements */
   processChildren?: boolean
+  keepAbsolute?: boolean
 } = {}): Plugin {
   // Parse selectors
   const includeSelectors = options.include?.map((selector) => {
@@ -253,82 +257,83 @@ export function filterPlugin(options: {
     }
     return { matches: (element: ElementNode) => element.tagId === selector }
   }) || []
-
   const excludeSelectors = options.exclude?.map((selector) => {
     if (typeof selector === 'string') {
       return parseSelector(selector)
     }
     return { matches: (element: ElementNode) => element.tagId === selector }
   }) || []
-
-  const hasInclude = includeSelectors.length > 0
-  const hasExclude = excludeSelectors.length > 0
   const processChildren = options.processChildren !== false // Default to true
 
+  // No need for complex state tracking since beforeNodeProcess handles everything
+
   return createPlugin({
+    // Handle include/exclude filtering for elements and text nodes
+    beforeNodeProcess(event) {
+      const { node } = event
 
-    beforeNodeProcess({ node, type }, state) {
-      // Make sure context is initialized
-      state.context = state.context || {}
-
-      // Initialize plugin-specific context on first call
-      if (!state.context.initialized) {
-        state.context.includeDepths = []
-        state.context.excludeDepth = undefined
-        state.context.initialized = true
+      // Handle text nodes - check if any ancestor is excluded
+      if (node.type === TEXT_NODE) {
+        const textNode = node as TextNode
+        let currentParent = textNode.parent as ElementNode | null
+        while (currentParent && excludeSelectors.length) {
+          const parentShouldExclude = excludeSelectors.some(selector => selector.matches(currentParent))
+          if (parentShouldExclude) {
+            return { skip: true }
+          }
+          currentParent = currentParent.parent
+        }
+        return
       }
 
-      // If in an excluded subtree, skip this node and its children
-      if (state.context.excludeDepth !== undefined && node.depth >= state.context.excludeDepth) {
+      // Handle element nodes
+      if (node.type !== ELEMENT_NODE || !node.name) {
+        return
+      }
+
+      const element = node as ElementNode
+
+      // Check if element should be excluded
+      if (excludeSelectors.length) {
+        if (element.attributes.style?.includes('absolute') || element.attributes.style?.includes('fixed')) {
+          return { skip: true }
+        }
+        const shouldExclude = excludeSelectors.some(selector => selector.matches(element))
+        if (shouldExclude) {
+          return { skip: true }
+        }
+      }
+
+      // Check if any parent element is excluded
+      let currentParent = element.parent
+      while (currentParent) {
+        if (excludeSelectors.length) {
+          const parentShouldExclude = excludeSelectors.some(selector => selector.matches(currentParent))
+          if (parentShouldExclude) {
+            return { skip: true }
+          }
+        }
+        currentParent = currentParent.parent
+      }
+
+      // Handle include filtering (only if include selectors are specified)
+      if (includeSelectors.length) {
+        // Check if this element or any ancestor matches include selectors
+        let currentElement = element as ElementNode | null
+        while (currentElement) {
+          const shouldInclude = includeSelectors.some(selector => selector.matches(currentElement))
+          if (shouldInclude) {
+            return // Include this element
+          }
+          if (!processChildren)
+            break // Don't check ancestors if not processing children
+          currentElement = currentElement.parent
+        }
+
+        // If we have include selectors but nothing matched, exclude this element
         return { skip: true }
       }
-
-      if (type === NodeEventEnter) {
-        // For element nodes, apply selector matching
-        if (node.type === ELEMENT_NODE) {
-          // Check exclude selectors first (they take precedence)
-          if (hasExclude) {
-            const shouldExclude = excludeSelectors.some(selector => selector.matches(node))
-            if (shouldExclude) {
-              state.context.excludeDepth = node.depth
-              return { skip: true }
-            }
-          }
-
-          // Then handle include selectors
-          if (hasInclude) {
-            const shouldInclude = includeSelectors.some(selector => selector.matches(node))
-
-            // If this node is included, track it
-            if (shouldInclude) {
-              // If we're not supposed to process children, don't add to includeDepths
-              if (processChildren) {
-                state.context.includeDepths.push(node.depth)
-              }
-            }
-
-            // Skip if we're not in an included subtree and this node isn't included
-            const isInIncludedSubtree = state.context.includeDepths.length > 0
-            if (!isInIncludedSubtree && !shouldInclude) {
-              return { skip: true }
-            }
-          }
-        }
-      }
-      else if (type === NodeEventExit && node.type === ELEMENT_NODE) {
-        // Handle exiting an excluded node
-        if (state.context.excludeDepth === node.depth) {
-          state.context.excludeDepth = undefined
-        }
-
-        // Handle exiting an included node
-        if (state.context.includeDepths.length > 0) {
-          const lastDepth = state.context.includeDepths[state.context.includeDepths.length - 1]
-          if (lastDepth === node.depth) {
-            state.context.includeDepths.pop()
-          }
-        }
-      }
     },
+
   })
 }

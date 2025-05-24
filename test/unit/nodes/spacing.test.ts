@@ -7,7 +7,7 @@ describe('spacing', () => {
     const markdown = syncHtmlToMarkdown(html)
     expect(markdown).toMatchInlineSnapshot(`"[Nuxt Concepts](/docs/guide/concepts) Read more in Nuxt Concepts."`)
   })
-  it.skip('spacing between block elements inside a', () => {
+  it('spacing between block elements inside a', () => {
     const html = `<a href="/docs/getting-started/introduction" class="group block px-6 py-8 rounded-lg border border-default hover:bg-elevated/50 focus-visible:outline-primary transition-colors"><!--[--><!--[--><!--[--><div class="inline-flex items-center rounded-full p-1.5 bg-elevated group-hover:bg-primary/10 ring ring-accented mb-4 group-hover:ring-primary/50 transition"><!--[--><span class="iconify i-lucide:info size-5 shrink-0 text-highlighted group-hover:text-primary transition-[color,translate] group-active:-translate-x-0.5" aria-hidden="true" style=""></span><!--]--></div><p class="font-medium text-[15px] text-highlighted mb-1 truncate"><!--[-->Introduction<!--]--></p><p class="text-sm text-muted line-clamp-2"><!--[-->Nuxt's goal is to make web development intuitive and performant with a great Developer Experience in mind.<!--]--></p><!--]--><!--]--><!--]--></a>`
     const markdown = syncHtmlToMarkdown(html)
     expect(markdown).toMatchInlineSnapshot(`"[Introduction Nuxt's goal is to make web development intuitive and performant with a great Developer Experience in mind.](/docs/getting-started/introduction)"`)
@@ -33,5 +33,11 @@ describe('spacing', () => {
     const html = `<div>Last updated on<!-- --> <!-- -->March 12, 2025</div>`
     const markdown = syncHtmlToMarkdown(html)
     expect(markdown).toMatchInlineSnapshot(`"Last updated on March 12, 2025"`)
+  })
+
+  it('adjacent links should have space between them', () => {
+    const html = '<div><a href="b">a</a><a href="a">b</a></div>'
+    const markdown = syncHtmlToMarkdown(html)
+    expect(markdown).toMatchInlineSnapshot(`"[a](b) [b](a)"`)
   })
 })

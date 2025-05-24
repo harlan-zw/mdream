@@ -85,7 +85,7 @@ export function assembleBufferedContent(
   const fragments: string[] = []
 
   // Then process all other regions (excluding frontmatter)
-  for (const [regionId, content] of state.regionContentBuffers) {
+  for (const [regionId, content] of Array.from(state.regionContentBuffers.entries())) {
     // Check if region should be included
     const include = state.regionToggles.get(regionId)
     if (include) {

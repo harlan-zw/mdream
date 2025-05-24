@@ -13,7 +13,7 @@ import {
   TAG_SELECT,
   TAG_TEXTAREA,
 } from '../const.ts'
-import { filterPlugin } from '../plugins.ts'
+import { filterPlugin, frontmatterPlugin, readabilityPlugin, tailwindPlugin } from '../plugins.ts'
 
 /**
  * Creates a configurable minimal preset with advanced options
@@ -22,10 +22,15 @@ import { filterPlugin } from '../plugins.ts'
  * @returns HTML to Markdown options with configured plugins
  */
 export function withMinimalPreset(
-  options: HTMLToMarkdownOptions & { fromFirstTag?: string } = {},
+  options: HTMLToMarkdownOptions = {},
 ): HTMLToMarkdownOptions {
   // Create plugins array with necessary plugins
   const plugins: Plugin[] = [
+    readabilityPlugin(),
+    frontmatterPlugin(),
+    tailwindPlugin(),
+    // First apply readability plugin to extract main content
+    // Then filter out unwanted tags
     filterPlugin({
       exclude: [
         TAG_FORM,
