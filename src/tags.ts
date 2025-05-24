@@ -685,7 +685,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_NOSCRIPT]: {
-    isNonNesting: true,
+    excludesTextNodes: true,
     spacing: NO_SPACING,
   },
   [TAG_NOFRAMES]: {
