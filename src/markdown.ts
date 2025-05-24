@@ -1,27 +1,4 @@
 import type { ElementNode, HandlerContext, MdreamRuntimeState, NodeEvent, TextNode } from './types'
-
-/**
- * Determines if spacing is needed between two characters
- */
-function needsSpacing(lastChar: string, firstChar: string): boolean {
-  const noSpaceLastChars = new Set(['\n', ' ', '[', '>', '_', '*', '`', '|', '#', '<', '('])
-  const noSpaceFirstChars = new Set([' ', '\n', '\t', '_', '*', '`', '|', '>', '#'])
-  
-  return !noSpaceLastChars.has(lastChar) && !noSpaceFirstChars.has(firstChar)
-}
-
-/**
- * Determines if spacing should be added before text content
- */
-function shouldAddSpacingBeforeText(lastChar: string, lastNode: any, textNode: TextNode): boolean {
-  return lastChar && 
-         lastChar !== '\n' && 
-         lastChar !== ' ' && 
-         lastChar !== '[' && 
-         lastChar !== '>' && 
-         !lastNode?.tagHandler?.isInline && 
-         textNode.value[0] !== ' '
-}
 import { collectNodeContent } from './buffer-region'
 import {
   DEFAULT_BLOCK_SPACING,
@@ -33,6 +10,29 @@ import {
   TAG_PRE,
   TEXT_NODE,
 } from './const'
+
+/**
+ * Determines if spacing is needed between two characters
+ */
+function needsSpacing(lastChar: string, firstChar: string): boolean {
+  const noSpaceLastChars = new Set(['\n', ' ', '[', '>', '_', '*', '`', '|', '#', '<', '('])
+  const noSpaceFirstChars = new Set([' ', '\n', '\t', '_', '*', '`', '|', '>', '#'])
+
+  return !noSpaceLastChars.has(lastChar) && !noSpaceFirstChars.has(firstChar)
+}
+
+/**
+ * Determines if spacing should be added before text content
+ */
+function shouldAddSpacingBeforeText(lastChar: string, lastNode: any, textNode: TextNode): boolean {
+  return lastChar
+    && lastChar !== '\n'
+    && lastChar !== ' '
+    && lastChar !== '['
+    && lastChar !== '>'
+    && !lastNode?.tagHandler?.isInline
+    && textNode.value[0] !== ' '
+}
 
 /**
  * Process text node with plugin hooks
@@ -97,12 +97,12 @@ export function processHtmlEventToMarkdown(
       if (textNode.value === ' ' && lastChar === '\n') {
         return
       }
-      
+
       // Add spacing before text if needed
       if (shouldAddSpacingBeforeText(lastChar, lastNode, textNode)) {
         textNode.value = ` ${textNode.value}`
       }
-      
+
       collectNodeContent(textNode, textNode.value, state)
     }
     state.lastTextNode = textNode

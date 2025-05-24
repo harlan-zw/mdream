@@ -193,7 +193,7 @@ import { createPlugin } from '../pluggable/plugin'
  - Tag score: +15
  - Class "main-content" matches positive pattern: +10
  - Total score: +25 → Include
-*/
+ */
 
 export interface ReadabilityOptions {
   /**
@@ -206,9 +206,9 @@ export interface ReadabilityOptions {
 // Regular expressions for scoring based on scoring.md
 const REGEXPS = {
   // Positive patterns that suggest high-quality content
-  positive: /article|body|content|entry|main|page|post|text|blog|story/i,
+  positive: /article|body|content|entry|main|page|post|text|blog|story|recipe|ingredient|instruction|description|docs?|documentation|guide|tutorial|reference|manual/i,
   // Negative patterns that suggest low-quality content
-  negative: /ad|banner|combx|comment|disqus|extra|foot|header|menu|meta|nav|promo|related|scroll|share|sidebar|sponsor|social|tags|widget|sitemap|copyright/i,
+  negative: /ad|banner|combx|comment|disqus|extra|foot|header|menu|meta|nav|promo|related|scroll|share|sidebar|sponsor|social|tags|widget|sitemap|copyright|login|register|subscribe|newsletter|signup|category|author|date|publish|cta|button|apply|trial|likes|views|metrics|stats|breadcrumb|pagination|filter|sort|search/i,
   // Used for counting commas to determine complexity
   commas: /,/g,
   // Used for analyzing paragraph endings
@@ -232,8 +232,8 @@ const TagScores = {
   [TAG_BLOCKQUOTE]: 5, // Quoted content, usually important
 
   // Code and pre-formatted content
-  [TAG_PRE]: 5, // Preformatted text/code, high value
-  [TAG_CODE]: 5, // Code content, high value
+  [TAG_PRE]: 8, // Preformatted text/code, high value for documentation
+  [TAG_CODE]: 6, // Code content, high value for documentation
 
   // Media elements
   [TAG_IMG]: 3, // Images are typically content
@@ -254,9 +254,9 @@ const TagScores = {
   [TAG_TD]: 0, // Table cell, neutral
 
   // List elements
-  [TAG_UL]: -1, // Slightly penalize lists as they're often navigation
-  [TAG_OL]: 0, // Ordered lists are more likely to be content
-  [TAG_LI]: -2, // Increase penalty for list items to avoid nav lists
+  [TAG_UL]: -8, // Higher penalty as lists are often navigation
+  [TAG_OL]: -5, // Ordered lists still often navigation
+  [TAG_LI]: -6, // Higher penalty for list items to avoid nav lists
   [TAG_DL]: 0, // Definition lists, neutral
   [TAG_DT]: 0, // Definition lists, neutral
   [TAG_DD]: 0, // Definition lists, neutral
@@ -270,10 +270,10 @@ const TagScores = {
   [TAG_H6]: 0, // Minor headers, neutral
 
   // Navigation and structural elements (negative)
-  [TAG_HEADER]: -15, // Page header, often not content
-  [TAG_FOOTER]: -15, // Footer, rarely content
-  [TAG_NAV]: -20, // Navigation, not content
-  [TAG_ASIDE]: -15, // Sidebar, usually not main content
+  [TAG_HEADER]: -15, // Page header, often not content but may contain article headers
+  [TAG_FOOTER]: -25, // Footer, rarely content
+  [TAG_NAV]: -30, // Navigation, not content
+  [TAG_ASIDE]: -25, // Sidebar, usually not main content
 
   // Form elements (negative)
   [TAG_FORM]: -8, // User input, not content
@@ -289,7 +289,7 @@ const TagScores = {
   [TAG_OBJECT]: -3, // Embedded content, often ads
 
   // Links
-  [TAG_A]: -3, // Link, more negative to avoid navigation-heavy areas
+  [TAG_A]: -8, // Higher penalty to avoid navigation-heavy areas
 
   // Text formatting
   [TAG_STRONG]: 1, // Emphasized text, slightly positive
@@ -323,16 +323,20 @@ function scoreClassAndId(node: ElementNode) {
     const className = node.attributes.class as string
 
     // Check for specific strong negative patterns first
-    if (/nav|menu|header|footer|sidebar/i.test(className)) {
-      scoreAdjustment -= 25
+    if (/nav|menu|header|footer|sidebar|ad-|advertisement|banner|promo|cta|button|apply|trial|engagement|sharing|likes|views|metrics|stats|breadcrumb|pagination|filter|sort|search/i.test(className)) {
+      scoreAdjustment -= 35
     }
     // Then check for other negative patterns
     else if (REGEXPS.negative.test(className)) {
-      scoreAdjustment -= 10 // -10 per scoring.md
+      scoreAdjustment -= 15 // Increased penalty
     }
     // Only apply positive patterns if no negative patterns matched
     else if (REGEXPS.positive.test(className)) {
       scoreAdjustment += 10 // +10 per scoring.md
+      // Special boost for documentation content
+      if (/docs?|documentation|guide|tutorial|reference|manual|article/i.test(className)) {
+        scoreAdjustment += 5 // Extra boost for docs
+      }
     }
   }
 
@@ -340,16 +344,20 @@ function scoreClassAndId(node: ElementNode) {
     const id = node.attributes.id as string
 
     // Check for specific strong negative patterns first
-    if (/nav|menu|header|footer|sidebar/i.test(id)) {
-      scoreAdjustment -= 25
+    if (/nav|menu|header|footer|sidebar|ad-|advertisement|banner|promo|cta|button|apply|trial|engagement|sharing|likes|views|metrics|stats|breadcrumb|pagination|filter|sort|search/i.test(id)) {
+      scoreAdjustment -= 35
     }
     // Then check for other negative patterns
     else if (REGEXPS.negative.test(id)) {
-      scoreAdjustment -= 10 // -10 per scoring.md
+      scoreAdjustment -= 15 // Increased penalty
     }
     // Only apply positive patterns if no negative patterns matched
     else if (REGEXPS.positive.test(id)) {
       scoreAdjustment += 10 // +10 per scoring.md
+      // Special boost for documentation content
+      if (/docs?|documentation|guide|tutorial|reference|manual|article/i.test(id)) {
+        scoreAdjustment += 5 // Extra boost for docs
+      }
     }
   }
 
@@ -399,9 +407,9 @@ export function readabilityPlugin() {
 
       // Check for strong negative patterns that should override parent context
       const hasStrongNegativePattern = (
-        (node.name && /nav|header|footer|aside/i.test(node.name))
-        || (node.attributes?.class && /nav|menu|header|footer|sidebar|hidden|copyright/i.test(node.attributes.class as string))
-        || (node.attributes?.id && /nav|menu|header|footer|sidebar|hidden|copyright/i.test(node.attributes.id as string))
+        (node.name && /nav|header|footer|aside|form|fieldset|button/i.test(node.name))
+        || (node.attributes?.class && /nav|menu|header|footer|sidebar|hidden|copyright|ad-|advertisement|banner|promo|related|comment|login|register|subscribe|newsletter|category|meta|tag|cta|button|apply|trial|engagement|sharing|likes|views|metrics|stats|breadcrumb|pagination|filter|sort|search/i.test(node.attributes.class as string))
+        || (node.attributes?.id && /nav|menu|header|footer|sidebar|hidden|copyright|ad-|advertisement|banner|promo|related|comment|login|register|subscribe|newsletter|category|meta|tag|cta|button|apply|trial|engagement|sharing|likes|views|metrics|stats|breadcrumb|pagination|filter|sort|search/i.test(node.attributes.id as string))
         || (node.attributes?.style && /display:\s*none|visibility:\s*hidden/i.test(node.attributes.style as string))
         || (node.attributes && Object.keys(node.attributes).some(attr => attr.startsWith('aria-') && node.attributes![attr] === 'true' && /hidden|invisible/i.test(attr)))
       )
@@ -501,31 +509,50 @@ export function readabilityPlugin() {
         const linkDensity = linkTextLength / textLength
 
         // Apply more aggressive link density penalty
-        if (linkDensity > 0.5) {
+        if (linkDensity > 0.4) {
           // For very high link density, apply severe penalty and mark as navigation-like
-          if (linkDensity > 0.7) {
-            node.context.score = node.context.score * 0.05 // 95% reduction
-            // If we have very high link density, mark as navigation-like content
-            if (linkTextLength > 100) {
+          if (linkDensity > 0.6) {
+            node.context.score = node.context.score * 0.02 // 98% reduction
+            // If we have high link density, mark as navigation-like content
+            if (linkTextLength > 50) {
               node.context.isHighLinkDensity = true
             }
           }
           else {
             // Scale score down based on link density
-            node.context.score *= (1 - linkDensity * 1.5) // More aggressive scaling
+            node.context.score *= (1 - linkDensity * 2.0) // Even more aggressive scaling
           }
         }
-        else if (linkDensity > 0.25) { // Lower threshold for moderate link density
+        else if (linkDensity > 0.2) { // Lower threshold for moderate link density
           // Even moderate link density should reduce score significantly
-          node.context.score *= (1 - (linkDensity * 0.75))
+          node.context.score *= (1 - (linkDensity * 1.0))
+        }
+      }
+
+      // Special penalty for elements with many links based on link density and text length
+      if (linkTextLength > 0 && textLength > 0) {
+        const linkRatio = linkTextLength / textLength
+        const hasDocumentationMarkers = (
+          (node.attributes?.class && /docs?|documentation|guide|tutorial|reference|manual|article|content/i.test(node.attributes.class as string))
+          || (node.attributes?.id && /docs?|documentation|guide|tutorial|reference|manual|article|content/i.test(node.attributes.id as string))
+          || (node.name && /main|article|section/i.test(node.name))
+        )
+
+        if (linkRatio > 0.3 && linkTextLength > 30 && !hasDocumentationMarkers) {
+          // This looks like navigation-heavy content (but not documentation with inline links)
+          node.context.score -= 10
         }
       }
 
       // Only exclude content with low scores to reduce fragmentation
       const finalScore = node.context.score
 
-      if (finalScore <= -10) {
-        // Exclude content with low scores to filter out poor quality content
+      if (finalScore <= -12) {
+        // More aggressive exclusion threshold to filter out navigation and low-quality content
+        createBufferRegion(node, state, false)
+      }
+      // Also exclude high link density content regardless of other scoring
+      else if (node.context.isHighLinkDensity || (linkTextLength > 50 && textLength > 0 && (linkTextLength / textLength) > 0.5)) {
         createBufferRegion(node, state, false)
       }
       // Don't create inclusion regions dynamically - let content flow naturally
