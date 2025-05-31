@@ -63,10 +63,86 @@ When you finish a task, always run `pnpm typecheck` to ensure that the code is t
 - `src/types.ts`: Core TypeScript interfaces for nodes, plugins, and state management
 
 ### Plugin System
-- `src/pluggable/plugin.ts`: Plugin creation utilities and base interfaces
-- `src/plugins/`: Built-in plugins (filter, extraction, tailwind, readability, etc.)
-- `src/libs/query-selector.ts`: CSS selector parsing logic shared across plugins
-- Plugin hooks: `beforeNodeProcess`, `onNodeEnter`, `onNodeExit`, `processTextNode`
+
+The plugin system allows you to customize HTML to Markdown conversion by hooking into the processing pipeline. Plugins can filter content, extract data, transform nodes, or add custom behavior.
+
+#### Plugin Hooks
+
+- `beforeNodeProcess`: Called before any node processing, can skip nodes
+- `onNodeEnter`: Called when entering an element node
+- `onNodeExit`: Called when exiting an element node  
+- `processTextNode`: Called for each text node
+- `processAttributes`: Called to process element attributes
+
+#### Creating a Plugin
+
+Use `createPlugin()` to create a plugin with type safety:
+
+```typescript
+import { createPlugin } from './pluggable/plugin.ts'
+
+export function myPlugin() {
+  return createPlugin({
+    onNodeEnter(element) {
+      if (element.tagName === 'custom-tag') {
+        return '**Custom content:** '
+      }
+    },
+    
+    processTextNode(textNode) {
+      // Transform text content
+      if (textNode.value.includes('TODO')) {
+        return { content: textNode.value.toUpperCase(), skip: false }
+      }
+    }
+  })
+}
+```
+
+#### Example: Header Extraction Plugin
+
+```typescript
+export function headerExtractPlugin() {
+  const headers: string[] = []
+  
+  return createPlugin({
+    onNodeEnter(element) {
+      if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(element.tagName)) {
+        // Will collect text in processTextNode
+      }
+    },
+    
+    processTextNode(textNode) {
+      const parent = textNode.parent
+      if (parent && parent.tagName?.match(/^h[1-6]$/)) {
+        headers.push(textNode.value.trim())
+      }
+    }
+  })
+}
+```
+
+#### Example: Content Filter Plugin
+
+```typescript
+export function adBlockPlugin() {
+  return createPlugin({
+    beforeNodeProcess(event) {
+      const { node } = event
+      
+      if (node.type === ELEMENT_NODE) {
+        const element = node as ElementNode
+        
+        // Skip ads and promotional content
+        if (element.attributes?.class?.includes('ad') || 
+            element.attributes?.id?.includes('promo')) {
+          return { skip: true }
+        }
+      }
+    }
+  })
+}
+```
 
 ### Key Concepts
 - **Node Types**: ElementNode (HTML elements) and TextNode (text content) with parent/child relationships
@@ -105,11 +181,3 @@ When you finish a task, always run `pnpm typecheck` to ensure that the code is t
 - Template tests for complex HTML structures (navigation, tables, etc.)
 - Always run tests after making changes to ensure backward compatibility
 
-## Plugin Development
-
-When creating new plugins:
-1. Use CSS selectors from `src/libs/query-selector.ts` for element matching
-2. Implement memory-efficient patterns (immediate callbacks vs. collecting data)
-3. Add comprehensive tests covering edge cases and real-world scenarios
-4. Follow existing plugin patterns in `src/plugins/` directory
-5. Export from `src/plugins.ts` for public API access

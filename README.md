@@ -110,7 +110,7 @@ import { htmlToMarkdown } from 'mdream'
 // Simple conversion
 const markdown = htmlToMarkdown('<h1>Hello World</h1>')
 console.log(markdown) // # Hello World
-````
+```
 
 **Convert from Fetch**
 
@@ -135,33 +135,69 @@ for await (const chunk of markdownGenerator) {
 
 ### Plugin System
 
-Mdream now features a powerful plugin system that allows you to customize and extend the HTML-to-Markdown conversion process.
+The plugin system allows you to customize HTML to Markdown conversion by hooking into the processing pipeline. Plugins can filter content, extract data, transform nodes, or add custom behavior.
+
+#### Plugin Hooks
+
+- `beforeNodeProcess`: Called before any node processing, can skip nodes
+- `onNodeEnter`: Called when entering an element node  
+- `onNodeExit`: Called when exiting an element node
+- `processTextNode`: Called for each text node
+- `processAttributes`: Called to process element attributes
+
+#### Creating a Plugin
+
+Use `createPlugin()` to create a plugin with type safety:
 
 ```ts
-import { createPlugin, filterUnsupportedTags, htmlToMarkdown, withTailwind } from 'mdream'
+import { htmlToMarkdown } from 'mdream'
+import { createPlugin } from 'mdream/plugins'
+import type { ElementNode, TextNode } from 'mdream'
 
-// Create a custom plugin
 const myPlugin = createPlugin({
-  name: 'my-plugin',
-  transformContent: (content, node) => {
-    if (node.type === 1 && node.name === 'div' && node.attributes?.role === 'alert') {
-      return `⚠️ ${content} ⚠️`
+  onNodeEnter(node: ElementNode): string | undefined {
+    if (node.name === 'h1') {
+      return '🔥 '
     }
-    return content
+  },
+  
+  processTextNode(textNode: TextNode): { content: string; skip: boolean } | undefined {
+    // Transform text content
+    if (textNode.parent?.attributes?.id === 'highlight') {
+      return { 
+        content: `**${textNode.value}**`, 
+        skip: false 
+      }
+    }
   }
 })
 
-// Use multiple plugins together
-const html = '<div role="alert" class="font-bold">Important message</div>'
-const markdown = htmlToMarkdown(html, {
-  plugins: [
-    withTailwind(), // Apply Tailwind class processing
-    filterUnsupportedTags(), // Filter out unsupported tags
-    myPlugin // Apply custom transformations
-  ]
-})
+// Use the plugin
+const html: string = '<div id="highlight">Important text</div>'
+const markdown: string = htmlToMarkdown(html, { plugins: [myPlugin] })
+```
 
-console.log(markdown) // "⚠️ **Important message** ⚠️"
+#### Example: Content Filter Plugin
+
+```ts
+import { ELEMENT_NODE } from 'mdream'
+import { createPlugin } from 'mdream/plugins'
+import type { NodeEvent, ElementNode } from 'mdream'
+
+const adBlockPlugin = createPlugin({
+  beforeNodeProcess(event: NodeEvent): { skip: boolean } | undefined {
+    const { node } = event
+    
+    if (node.type === ELEMENT_NODE && node.name === 'div') {
+      const element = node as ElementNode
+      // Skip ads and promotional content
+      if (element.attributes?.class?.includes('ad') || 
+          element.attributes?.id?.includes('promo')) {
+        return { skip: true }
+      }
+    }
+  }
+})
 ```
 
 #### Extraction Plugin
@@ -170,8 +206,9 @@ Extract specific elements and their content during HTML processing for data anal
 
 ```ts
 import { extractionPlugin, htmlToMarkdown } from 'mdream'
+import type { ExtractedElement } from 'mdream/plugins'
 
-const html = `
+const html: string = `
   <article>
     <h2>Getting Started</h2>
     <p>This is a tutorial about web scraping.</p>
@@ -181,10 +218,10 @@ const html = `
 
 // Extract elements using CSS selectors
 const plugin = extractionPlugin({
-  'h2': (element) => {
+  'h2': (element: ExtractedElement): void => {
     console.log('Heading:', element.textContent) // "Getting Started"
   },
-  'img[alt]': (element) => {
+  'img[alt]': (element: ExtractedElement): void => {
     console.log('Image:', element.attributes.src, element.attributes.alt)
     // "Image: /hero.jpg Hero image"
   }
@@ -194,8 +231,6 @@ htmlToMarkdown(html, { plugins: [plugin] })
 ```
 
 The extraction plugin provides memory-efficient element extraction with full text content and attributes, perfect for SEO analysis, content discovery, and data mining.
-
-For more details, see the [plugin documentation](./docs/plugins.md).
 
 ## Credits
 
