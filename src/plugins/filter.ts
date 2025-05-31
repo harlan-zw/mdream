@@ -287,7 +287,7 @@ export function filterPlugin(options: {
       }
 
       // Handle element nodes
-      if (node.type !== ELEMENT_NODE || !node.name) {
+      if (node.type !== ELEMENT_NODE) {
         return
       }
 

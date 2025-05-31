@@ -9,11 +9,12 @@ import {
   TAG_FORM,
   TAG_IFRAME,
   TAG_INPUT,
+  TAG_NAV,
   TAG_OBJECT,
   TAG_SELECT,
   TAG_TEXTAREA,
 } from '../const.ts'
-import { filterPlugin, frontmatterPlugin, readabilityPlugin, tailwindPlugin } from '../plugins.ts'
+import {filterPlugin, frontmatterPlugin, isolateMainPlugin, tailwindPlugin} from '../plugins.ts'
 
 /**
  * Creates a configurable minimal preset with advanced options
@@ -26,7 +27,7 @@ export function withMinimalPreset(
 ): HTMLToMarkdownOptions {
   // Create plugins array with necessary plugins
   const plugins: Plugin[] = [
-    readabilityPlugin(),
+    isolateMainPlugin(),
     frontmatterPlugin(),
     tailwindPlugin(),
     // First apply readability plugin to extract main content
@@ -45,6 +46,7 @@ export function withMinimalPreset(
         TAG_TEXTAREA,
         TAG_SELECT,
         TAG_BUTTON,
+        TAG_NAV,
       ],
     }),
   ]

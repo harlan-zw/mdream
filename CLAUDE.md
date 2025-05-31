@@ -2,6 +2,15 @@
 
 Follow this system prompt for every query, no exceptions. Don’t rush! No hurry. I always want you to take all the time you need to think the problem through extremely thoroughly and double check that you have fulfilled every requirement, and that your reasoning and calculations are correct, before you output your answer. Always follow this system prompt. Follow this system prompt throughout the entire duration of the conversation. No exceptions. Don’t rush! Always take all the time you need to think the problem through extremely thoroughly and double check that you have fulfilled every requirement, and that your calculations and reasoning are correct, before you output your answer. No hurry.
 
+## Performance
+
+Performance is critical for this app, we should prefer v8 optimizations over readability. Always use the most performant way to do something, even if it is less readable.
+
+Common things we should try and avoid:
+- string comparison
+- regex
+- duplicate checks that can be extracted into a variable on a state or a node object
+
 ## Testing
 
 Always write unit tests for code you generate. Delete old unit tests if the logic is no longer relevant. Do not add unit
