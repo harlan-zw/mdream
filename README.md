@@ -164,6 +164,37 @@ const markdown = syncHtmlToMarkdown(html, {
 console.log(markdown) // "⚠️ **Important message** ⚠️"
 ```
 
+#### Extraction Plugin
+
+Extract specific elements and their content during HTML processing for data analysis or content discovery:
+
+```ts
+import { extractionPlugin, syncHtmlToMarkdown } from 'mdream'
+
+const html = `
+  <article>
+    <h2>Getting Started</h2>
+    <p>This is a tutorial about web scraping.</p>
+    <img src="/hero.jpg" alt="Hero image" />
+  </article>
+`
+
+// Extract elements using CSS selectors
+const plugin = extractionPlugin({
+  'h2': (element) => {
+    console.log('Heading:', element.textContent) // "Getting Started"
+  },
+  'img[alt]': (element) => {
+    console.log('Image:', element.attributes.src, element.attributes.alt)
+    // "Image: /hero.jpg Hero image"
+  }
+})
+
+syncHtmlToMarkdown(html, { plugins: [plugin] })
+```
+
+The extraction plugin provides memory-efficient element extraction with full text content and attributes, perfect for SEO analysis, content discovery, and data mining.
+
 For more details, see the [plugin documentation](./docs/plugins.md).
 
 ## Credits
