@@ -44,7 +44,10 @@
 Traditional HTML to Markdown converters were not built for LLMs or humans. They tend to be slow and bloated and produce output that's poorly suited for LLMs token usage or for
 human readability.
 
-Mdream is an ultra-performant HTML to Markdown converter built specifically for LLM Content Analysis & Human Readability. With zero dependencies, streaming built-in and opinionated output optimized for both human readability and AI processing.
+Other LLM specific convertors focus on supporting _all_ document formats, resulting in larger bundles and lower quality Markdown output.
+
+Mdream is an ultra-performant HTML to Markdown converter built specifically for producing high-quality Markdown for LLMs as quickly as possible. It provides
+a powerful plugin system to customize the conversion process, allowing you to extract, transform, and filter content as needed.
 
 Perfect for: RAG systems, web scraping, content extraction, ChatGPT/Claude integration, and large-scale document processing.
 
