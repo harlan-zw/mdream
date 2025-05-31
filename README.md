@@ -49,8 +49,6 @@ Other LLM specific convertors focus on supporting _all_ document formats, result
 Mdream is an ultra-performant HTML to Markdown converter built specifically for producing high-quality Markdown for LLMs as quickly as possible. It provides
 a powerful plugin system to customize the conversion process, allowing you to extract, transform, and filter content as needed.
 
-Perfect for: RAG systems, web scraping, content extraction, ChatGPT/Claude integration, and large-scale document processing.
-
 ## CLI Usage
 
 The Mdream CLI is designed to work exclusively with Unix pipes, providing flexibility and freedom to integrate with other tools.
