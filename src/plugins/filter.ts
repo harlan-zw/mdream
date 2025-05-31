@@ -82,6 +82,7 @@ class AttributeSelector implements SelectorMatcher {
 
   constructor(selector: string) {
     // Parse [attr], [attr=value], [attr^=value], etc.
+    // eslint-disable-next-line regexp/no-super-linear-backtracking, regexp/no-misleading-capturing-group
     const match = selector.match(/\[([^\]=~|^$*]+)(?:([=~|^$*]+)["']?([^"'\]]+)["']?)?\]/)
 
     if (match) {

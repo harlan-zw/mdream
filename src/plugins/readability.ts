@@ -71,7 +71,7 @@ import { createPlugin } from '../pluggable/plugin'
 // Regular expressions for scoring based on scoring.md
 const REGEXPS = {
   // Positive patterns that suggest high-quality content
-  positive: /article|body|content|entry|main|page|post|text|blog|story|recipe|ingredient|instruction|description|docs?|documentation|guide|tutorial|reference|manual/i,
+  positive: /article|body|content|entry|main|page|post|text|blog|story|recipe|ingredient|instruction|description|docs?|guide|tutorial|reference|manual/i,
   // Negative patterns that suggest low-quality content
   negative: /ad|banner|combx|comment|disqus|extra|foot|header|menu|meta|nav|promo|related|scroll|share|sidebar|sponsor|social|tags|widget|sitemap|copyright|login|register|subscribe|newsletter|signup|category|author|date|publish|cta|button|apply|trial|likes|views|metrics|stats|breadcrumb|pagination|filter|sort|search/i,
   // Used for counting commas to determine complexity
@@ -199,7 +199,7 @@ function scoreClassAndId(node: ElementNode) {
     else if (REGEXPS.positive.test(className)) {
       scoreAdjustment += 10 // +10 per scoring.md
       // Special boost for documentation content
-      if (/docs?|documentation|guide|tutorial|reference|manual|article/i.test(className)) {
+      if (/docs?|guide|tutorial|reference|manual|article/i.test(className)) {
         scoreAdjustment += 5 // Extra boost for docs
       }
     }
@@ -220,7 +220,7 @@ function scoreClassAndId(node: ElementNode) {
     else if (REGEXPS.positive.test(id)) {
       scoreAdjustment += 10 // +10 per scoring.md
       // Special boost for documentation content
-      if (/docs?|documentation|guide|tutorial|reference|manual|article/i.test(id)) {
+      if (/docs?|guide|tutorial|reference|manual|article/i.test(id)) {
         scoreAdjustment += 5 // Extra boost for docs
       }
     }
@@ -398,8 +398,8 @@ export function readabilityPlugin() {
       if (linkTextLength > 0 && textLength > 0) {
         const linkRatio = linkTextLength / textLength
         const hasDocumentationMarkers = (
-          (node.attributes?.class && /docs?|documentation|guide|tutorial|reference|manual|article|content/i.test(node.attributes.class as string))
-          || (node.attributes?.id && /docs?|documentation|guide|tutorial|reference|manual|article|content/i.test(node.attributes.id as string))
+          (node.attributes?.class && /docs?|guide|tutorial|reference|manual|article|content/i.test(node.attributes.class as string))
+          || (node.attributes?.id && /docs?|guide|tutorial|reference|manual|article|content/i.test(node.attributes.id as string))
           || (node.name && /main|article|section/i.test(node.name))
         )
 

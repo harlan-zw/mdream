@@ -14,7 +14,7 @@ import {
   TAG_SELECT,
   TAG_TEXTAREA,
 } from '../const.ts'
-import {filterPlugin, frontmatterPlugin, isolateMainPlugin, tailwindPlugin} from '../plugins.ts'
+import { filterPlugin, frontmatterPlugin, isolateMainPlugin, tailwindPlugin } from '../plugins.ts'
 
 /**
  * Creates a configurable minimal preset with advanced options

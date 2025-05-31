@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { PlaywrightCrawler } from 'crawlee'
-import { syncHtmlToMarkdown } from '../dist/index.mjs'
-import { withMinimalPreset } from '../dist/preset/minimal.mjs'
+import { syncHtmlToMarkdown } from '../src/index'
+import { withMinimalPreset } from '../src/preset/minimal'
 
 // CheerioCrawler crawls the web using HTTP requests
 // and parses HTML using the Cheerio library.

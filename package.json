@@ -1,9 +1,9 @@
 {
   "name": "mdream",
   "type": "module",
-  "version": "4.3.0",
+  "version": "0.1.0",
   "packageManager": "pnpm@10.11.0",
-  "description": "Convert HTML to Markdown using ultrahtml",
+  "description": "Ultra-performant JavaScript HTML to Markdown converter optimized for LLMs.",
   "author": {
     "name": "Harlan Wilton",
     "email": "harlan@harlanzw.com",

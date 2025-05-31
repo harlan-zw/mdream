@@ -1,16 +1,5 @@
 import type { ElementNode, Plugin } from '../types.ts'
-import { ELEMENT_NODE, TEXT_NODE } from '../const.ts'
-import {
-  TAG_H1,
-  TAG_H2,
-  TAG_H3,
-  TAG_H4,
-  TAG_H5,
-  TAG_H6,
-  TAG_FOOTER,
-  TAG_MAIN,
-  TAG_HEADER
-} from '../const.ts'
+import { ELEMENT_NODE, TAG_FOOTER, TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6, TAG_HEADER, TAG_MAIN, TEXT_NODE } from '../const.ts'
 import { createPlugin } from '../pluggable/plugin.ts'
 
 /**
@@ -91,7 +80,7 @@ export function isolateMainPlugin(): Plugin {
           // Check if this heading is inside a <header> tag
           let current = element.parent
           let isInHeaderTag = false
-          
+
           while (current) {
             if (current.tagId === TAG_HEADER) {
               isInHeaderTag = true
@@ -99,7 +88,7 @@ export function isolateMainPlugin(): Plugin {
             }
             current = current.parent
           }
-          
+
           // Only use this heading if it's not in a header tag
           if (!isInHeaderTag) {
             firstHeaderElement = element
@@ -155,7 +144,7 @@ export function isolateMainPlugin(): Plugin {
         }
       }
 
-      return // Include this node
+      // Include this node
     },
   })
 }
