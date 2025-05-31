@@ -93,6 +93,12 @@ export function processHtmlEventToMarkdown(
           textNode.value = pluginResult.content
         }
       }
+
+      // Skip text nodes that are excluded from markdown output (e.g., script/style content)
+      if (textNode.excludedFromMarkdown) {
+        return
+      }
+
       // Skip leading spaces after newlines
       if (textNode.value === ' ' && lastChar === '\n') {
         return

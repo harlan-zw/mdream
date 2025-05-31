@@ -93,6 +93,8 @@ export interface TextNode extends Node {
   value: string
   /** Custom data added by plugins */
   context?: Record<string, any>
+  /** Whether this text node should be excluded from markdown output (for script/style elements) */
+  excludedFromMarkdown?: boolean
 }
 
 /**

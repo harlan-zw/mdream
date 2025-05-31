@@ -143,7 +143,7 @@ The plugin system allows you to customize HTML to Markdown conversion by hooking
 #### Plugin Hooks
 
 - `beforeNodeProcess`: Called before any node processing, can skip nodes
-- `onNodeEnter`: Called when entering an element node  
+- `onNodeEnter`: Called when entering an element node
 - `onNodeExit`: Called when exiting an element node
 - `processTextNode`: Called for each text node
 - `processAttributes`: Called to process element attributes
@@ -153,9 +153,9 @@ The plugin system allows you to customize HTML to Markdown conversion by hooking
 Use `createPlugin()` to create a plugin with type safety:
 
 ```ts
+import type { ElementNode, TextNode } from 'mdream'
 import { htmlToMarkdown } from 'mdream'
 import { createPlugin } from 'mdream/plugins'
-import type { ElementNode, TextNode } from 'mdream'
 
 const myPlugin = createPlugin({
   onNodeEnter(node: ElementNode): string | undefined {
@@ -163,13 +163,13 @@ const myPlugin = createPlugin({
       return '🔥 '
     }
   },
-  
-  processTextNode(textNode: TextNode): { content: string; skip: boolean } | undefined {
+
+  processTextNode(textNode: TextNode): { content: string, skip: boolean } | undefined {
     // Transform text content
     if (textNode.parent?.attributes?.id === 'highlight') {
-      return { 
-        content: `**${textNode.value}**`, 
-        skip: false 
+      return {
+        content: `**${textNode.value}**`,
+        skip: false
       }
     }
   }
@@ -183,19 +183,19 @@ const markdown: string = htmlToMarkdown(html, { plugins: [myPlugin] })
 #### Example: Content Filter Plugin
 
 ```ts
+import type { ElementNode, NodeEvent } from 'mdream'
 import { ELEMENT_NODE } from 'mdream'
 import { createPlugin } from 'mdream/plugins'
-import type { NodeEvent, ElementNode } from 'mdream'
 
 const adBlockPlugin = createPlugin({
   beforeNodeProcess(event: NodeEvent): { skip: boolean } | undefined {
     const { node } = event
-    
+
     if (node.type === ELEMENT_NODE && node.name === 'div') {
       const element = node as ElementNode
       // Skip ads and promotional content
-      if (element.attributes?.class?.includes('ad') || 
-          element.attributes?.id?.includes('promo')) {
+      if (element.attributes?.class?.includes('ad')
+        || element.attributes?.id?.includes('promo')) {
         return { skip: true }
       }
     }
@@ -208,8 +208,8 @@ const adBlockPlugin = createPlugin({
 Extract specific elements and their content during HTML processing for data analysis or content discovery:
 
 ```ts
-import { extractionPlugin, htmlToMarkdown } from 'mdream'
 import type { ExtractedElement } from 'mdream/plugins'
+import { extractionPlugin, htmlToMarkdown } from 'mdream'
 
 const html: string = `
   <article>

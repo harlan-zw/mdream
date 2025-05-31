@@ -70,7 +70,7 @@ The plugin system allows you to customize HTML to Markdown conversion by hooking
 
 - `beforeNodeProcess`: Called before any node processing, can skip nodes
 - `onNodeEnter`: Called when entering an element node
-- `onNodeExit`: Called when exiting an element node  
+- `onNodeExit`: Called when exiting an element node
 - `processTextNode`: Called for each text node
 - `processAttributes`: Called to process element attributes
 
@@ -88,7 +88,7 @@ export function myPlugin() {
         return '**Custom content:** '
       }
     },
-    
+
     processTextNode(textNode) {
       // Transform text content
       if (textNode.value.includes('TODO')) {
@@ -104,14 +104,14 @@ export function myPlugin() {
 ```typescript
 export function headerExtractPlugin() {
   const headers: string[] = []
-  
+
   return createPlugin({
     onNodeEnter(element) {
       if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(element.tagName)) {
         // Will collect text in processTextNode
       }
     },
-    
+
     processTextNode(textNode) {
       const parent = textNode.parent
       if (parent && parent.tagName?.match(/^h[1-6]$/)) {
@@ -129,13 +129,13 @@ export function adBlockPlugin() {
   return createPlugin({
     beforeNodeProcess(event) {
       const { node } = event
-      
+
       if (node.type === ELEMENT_NODE) {
         const element = node as ElementNode
-        
+
         // Skip ads and promotional content
-        if (element.attributes?.class?.includes('ad') || 
-            element.attributes?.id?.includes('promo')) {
+        if (element.attributes?.class?.includes('ad')
+          || element.attributes?.id?.includes('promo')) {
           return { skip: true }
         }
       }
@@ -180,4 +180,3 @@ export function adBlockPlugin() {
 - Real-world test fixtures in `test/fixtures/` (GitHub, Wikipedia HTML)
 - Template tests for complex HTML structures (navigation, tables, etc.)
 - Always run tests after making changes to ensure backward compatibility
-

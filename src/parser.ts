@@ -280,9 +280,12 @@ function processTextBuffer(textBuffer: string, state: MdreamProcessingState, han
   const containsWhitespace = state.textBufferContainsWhitespace
   state.textBufferContainsNonWhitespace = false
   state.textBufferContainsWhitespace = false
-  if (!state.currentNode || state.currentNode?.tagHandler?.excludesTextNodes) {
+  if (!state.currentNode) {
     return
   }
+
+  // // Check if this element excludes text nodes from markdown output
+  const excludesTextNodes = state.currentNode?.tagHandler?.excludesTextNodes
 
   // Check if parent is a <pre> tag to handle whitespace properly
   const inPreTag = state.depthMap[TAG_PRE] > 0
@@ -325,6 +328,7 @@ function processTextBuffer(textBuffer: string, state: MdreamProcessingState, han
     index: state.currentNode.currentWalkIndex!++,
     depth: state.depth,
     containsWhitespace,
+    excludedFromMarkdown: excludesTextNodes,
   }
 
   for (const parent of parentsToIncrement) {
