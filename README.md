@@ -99,16 +99,16 @@ pnpm add mdream
 ### Usage
 
 Mdream provides two utils for working with HTML, both will process content as a stream.
-- `syncHtmlToMarkdown`: Useful if you already have the entire HTML payload you want to convert.
+- `htmlToMarkdown`: Useful if you already have the entire HTML payload you want to convert.
 - `streamHtmlToMarkdown`: Best practice if you are fetching or reading from a local file.
 
 **Convert existing HTML**
 
 ```ts
-import { syncHtmlToMarkdown } from 'mdream'
+import { htmlToMarkdown } from 'mdream'
 
 // Simple conversion
-const markdown = syncHtmlToMarkdown('<h1>Hello World</h1>')
+const markdown = htmlToMarkdown('<h1>Hello World</h1>')
 console.log(markdown) // # Hello World
 ````
 
@@ -138,7 +138,7 @@ for await (const chunk of markdownGenerator) {
 Mdream now features a powerful plugin system that allows you to customize and extend the HTML-to-Markdown conversion process.
 
 ```ts
-import { createPlugin, filterUnsupportedTags, syncHtmlToMarkdown, withTailwind } from 'mdream'
+import { createPlugin, filterUnsupportedTags, htmlToMarkdown, withTailwind } from 'mdream'
 
 // Create a custom plugin
 const myPlugin = createPlugin({
@@ -153,7 +153,7 @@ const myPlugin = createPlugin({
 
 // Use multiple plugins together
 const html = '<div role="alert" class="font-bold">Important message</div>'
-const markdown = syncHtmlToMarkdown(html, {
+const markdown = htmlToMarkdown(html, {
   plugins: [
     withTailwind(), // Apply Tailwind class processing
     filterUnsupportedTags(), // Filter out unsupported tags
@@ -169,7 +169,7 @@ console.log(markdown) // "⚠️ **Important message** ⚠️"
 Extract specific elements and their content during HTML processing for data analysis or content discovery:
 
 ```ts
-import { extractionPlugin, syncHtmlToMarkdown } from 'mdream'
+import { extractionPlugin, htmlToMarkdown } from 'mdream'
 
 const html = `
   <article>
@@ -190,7 +190,7 @@ const plugin = extractionPlugin({
   }
 })
 
-syncHtmlToMarkdown(html, { plugins: [plugin] })
+htmlToMarkdown(html, { plugins: [plugin] })
 ```
 
 The extraction plugin provides memory-efficient element extraction with full text content and attributes, perfect for SEO analysis, content discovery, and data mining.

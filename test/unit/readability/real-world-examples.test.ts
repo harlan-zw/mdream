@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ReadableStream } from 'node:stream/web'
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../src'
 import { frontmatterPlugin } from '../../../src/plugins.ts'
 import { readabilityPlugin } from '../../../src/plugins/readability.ts'
 import { streamHtmlToMarkdown } from '../../../src/stream'
@@ -441,7 +441,7 @@ describe('readability Real-World Examples', () => {
     const wikiHtml = loadFixture('wikipedia-small.html')
 
     // Process with readability plugin
-    const result = syncHtmlToMarkdown(wikiHtml, {
+    const result = htmlToMarkdown(wikiHtml, {
       plugins: [readabilityPlugin({
         minDensityScore: 5.0,
         debugMarkers: true,
@@ -646,7 +646,7 @@ function calculateLinkDensity(element) {
     `
 
     // Process with readability plugin
-    const result = syncHtmlToMarkdown(technicalHtml, {
+    const result = htmlToMarkdown(technicalHtml, {
       plugins: [
         readabilityPlugin({
           minDensityScore: 5.0,
@@ -874,7 +874,7 @@ function calculateLinkDensity(element) {
     `
 
     // Process with readability plugin
-    const result = syncHtmlToMarkdown(multiLanguageHtml, {
+    const result = htmlToMarkdown(multiLanguageHtml, {
       plugins: [readabilityPlugin({
         minDensityScore: 5.0,
         debugMarkers: true,

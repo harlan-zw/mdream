@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../src'
 
 describe('nasa', () => {
   it('noscript iframe break', () => {
@@ -14,7 +14,7 @@ describe('nasa', () => {
 \theight="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 \t<div>hello world</div>
 `
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toMatchInlineSnapshot(`
       "Missions - NASA
 

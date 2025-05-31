@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src/index.js'
+import { htmlToMarkdown } from '../../../src/index.js'
 import { filterPlugin } from '../../../src/plugins'
 
 describe('not supported', () => {
@@ -18,7 +18,7 @@ describe('not supported', () => {
 <a rel="" class="f6 text-underline" target="_blank" href="/en/site-policy/privacy-policies/github-privacy-statement">Privacy policy</a>
 </form>
 </div>`
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({
           exclude: [
@@ -32,7 +32,7 @@ describe('not supported', () => {
   })
   it.skip('aria hidden', () => {
     const html = `<div class="float-left pr-4 mb-6 mb-xl-0 col-12 col-lg-6 col-xl-3"><a href="/docs/guide/concepts" tabindex="-1" aria-label="Nuxt Concepts" class="focus:outline-none"><!--[--><!--[--><span class="absolute inset-0" aria-hidden="true"></span><!--]--><!--]--></a><span class="iconify i-lucide:bookmark size-4 shrink-0 align-sub me-1.5 transition-colors text-highlighted" aria-hidden="true" style="">HIDDEN</span><!----><!--[--><!--[--> Read more in <span class="font-bold">Nuxt Concepts</span>. <!--]--><!--]--></div>`
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({
           exclude: [

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../src'
 import { readabilityPlugin } from '../../../src/plugins/readability'
 
 describe('readability plugin basic functionality', () => {
@@ -25,7 +25,7 @@ describe('readability plugin basic functionality', () => {
     `
 
     // Run with plugin
-    const result = syncHtmlToMarkdown(html, {
+    const result = htmlToMarkdown(html, {
       plugins: [
         readabilityPlugin(),
       ],
@@ -77,7 +77,7 @@ describe('readability plugin basic functionality', () => {
     `
 
     // Run with plugin
-    const result = syncHtmlToMarkdown(html, {
+    const result = htmlToMarkdown(html, {
       plugins: [
         readabilityPlugin(),
       ],
@@ -105,7 +105,7 @@ describe('readability plugin basic functionality', () => {
 </body>
     `
 
-    const result = syncHtmlToMarkdown(html, {
+    const result = htmlToMarkdown(html, {
       plugins: [
         readabilityPlugin(),
       ],
@@ -142,7 +142,7 @@ describe('readability plugin basic functionality', () => {
 </body>
     `
 
-    const result = syncHtmlToMarkdown(html, {
+    const result = htmlToMarkdown(html, {
       plugins: [
         readabilityPlugin(),
       ],
@@ -177,7 +177,7 @@ describe('readability plugin basic functionality', () => {
 </body>
     `
 
-    const result = syncHtmlToMarkdown(html, {
+    const result = htmlToMarkdown(html, {
       plugins: [
         readabilityPlugin(),
       ],

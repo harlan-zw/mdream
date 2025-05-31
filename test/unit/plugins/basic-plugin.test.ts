@@ -1,7 +1,7 @@
 import type { ElementNode, TextNode } from '../../../src/types.ts'
 import { describe, expect, it } from 'vitest'
 import { ELEMENT_NODE } from '../../../src/const.ts'
-import { syncHtmlToMarkdown } from '../../../src/index.ts'
+import { htmlToMarkdown } from '../../../src/index.ts'
 import { createPlugin } from '../../../src/plugins.ts'
 
 describe('plugin System', () => {
@@ -20,7 +20,7 @@ describe('plugin System', () => {
     })
 
     const input = '<div id="test">Test content</div>'
-    const output = syncHtmlToMarkdown(input, {
+    const output = htmlToMarkdown(input, {
       plugins: [testPlugin],
     })
 
@@ -46,7 +46,7 @@ describe('plugin System', () => {
     <div class="filtered" id="remove-me">This should be filtered out</div>
     <p>Regular paragraph</p>
     `
-    const output = syncHtmlToMarkdown(input, { plugins: [filterPlugin] })
+    const output = htmlToMarkdown(input, { plugins: [filterPlugin] })
 
     expect(output).toContain('Normal content')
     expect(output).not.toContain('remove-me')
@@ -72,7 +72,7 @@ describe('plugin System', () => {
     })
 
     const input = '<h1>Hook test</h1>'
-    const output = syncHtmlToMarkdown(input, { plugins: [hooksPlugin] })
+    const output = htmlToMarkdown(input, { plugins: [hooksPlugin] })
 
     expect(output).toBe('# 🔥 Hook test 🔥')
   })
@@ -99,7 +99,7 @@ describe('plugin System', () => {
     })
 
     const input = '<p>This is a test</p>'
-    const output = syncHtmlToMarkdown(input, { plugins: [firstPlugin, secondPlugin] })
+    const output = htmlToMarkdown(input, { plugins: [firstPlugin, secondPlugin] })
 
     expect(output).toContain('FIRST: ')
     expect(output).toContain('This is a test')

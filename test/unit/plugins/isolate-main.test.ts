@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src/index.ts'
+import { htmlToMarkdown } from '../../../src/index.ts'
 import { isolateMainPlugin } from '../../../src/plugins/isolate-main.ts'
 
 describe('isolateMainPlugin', () => {
@@ -21,7 +21,7 @@ describe('isolateMainPlugin', () => {
       </html>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 
@@ -58,7 +58,7 @@ describe('isolateMainPlugin', () => {
       </body>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 
@@ -97,7 +97,7 @@ describe('isolateMainPlugin', () => {
       </body>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 
@@ -127,7 +127,7 @@ describe('isolateMainPlugin', () => {
       </body>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 
@@ -156,7 +156,7 @@ describe('isolateMainPlugin', () => {
       </html>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 
@@ -185,7 +185,7 @@ describe('isolateMainPlugin', () => {
       </body>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 
@@ -220,7 +220,7 @@ describe('isolateMainPlugin', () => {
       </body>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 
@@ -244,7 +244,7 @@ describe('isolateMainPlugin', () => {
       </body>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 
@@ -265,7 +265,7 @@ describe('isolateMainPlugin', () => {
       </body>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 
@@ -288,7 +288,7 @@ describe('isolateMainPlugin', () => {
       </body>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 
@@ -312,7 +312,7 @@ describe('isolateMainPlugin', () => {
       </body>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 
@@ -352,7 +352,7 @@ describe('isolateMainPlugin', () => {
       </body>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 
@@ -379,7 +379,7 @@ describe('isolateMainPlugin', () => {
       </body>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 
@@ -402,7 +402,7 @@ describe('isolateMainPlugin', () => {
       </body>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [isolateMainPlugin()],
     })
 

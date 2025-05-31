@@ -36,8 +36,10 @@ When you finish a task, always run `pnpm typecheck` to ensure that the code is t
 - Test all: `pnpm test`
 - Test single file: `pnpm test path/to/test.ts`
 - Test with pattern: `pnpm test -t "test pattern"`
-- Test GitHub markdown: `pnpm test:github`
-- Development: `pnpm dev:prepare`
+- Test folder: `pnpm test test/unit/plugins/`
+- Development build (stub): `pnpm dev:prepare`
+- Live test with real sites: `pnpm test:github:live`, `pnpm test:wiki:file`
+- Benchmarking: `pnpm bench:stream`, `pnpm bench:string`
 
 ## Code Style Guidelines
 - Indentation: 2 spaces
@@ -52,11 +54,25 @@ When you finish a task, always run `pnpm typecheck` to ensure that the code is t
 - Follow ESLint config based on @antfu/eslint-config
 
 ## Project Architecture
-- Core modules:
-  - `parser.ts`: Handles HTML parsing into a DOM-like structure
-  - `markdown.ts`: Transforms DOM nodes to Markdown
-  - `htmlStreamAdapter.ts`: Manages HTML streaming conversion
-  - `index.ts`: Main entry point with primary API functions
+
+### Core Architecture
+- `src/index.ts`: Main entry point with `syncHtmlToMarkdown` and `streamHtmlToMarkdown` APIs
+- `src/parser.ts`: Manual HTML parsing into DOM-like structure for performance
+- `src/markdown.ts`: DOM node to Markdown transformation logic
+- `src/stream.ts`: Streaming HTML processing with content-based buffering
+- `src/types.ts`: Core TypeScript interfaces for nodes, plugins, and state management
+
+### Plugin System
+- `src/pluggable/plugin.ts`: Plugin creation utilities and base interfaces
+- `src/plugins/`: Built-in plugins (filter, extraction, tailwind, readability, etc.)
+- `src/libs/query-selector.ts`: CSS selector parsing logic shared across plugins
+- Plugin hooks: `beforeNodeProcess`, `onNodeEnter`, `onNodeExit`, `processTextNode`
+
+### Key Concepts
+- **Node Types**: ElementNode (HTML elements) and TextNode (text content) with parent/child relationships
+- **Streaming Architecture**: Processes HTML incrementally using buffer regions and optimal chunk boundaries
+- **Plugin Pipeline**: Each plugin can intercept and transform content at different processing stages
+- **Memory Efficiency**: Immediate processing and callback patterns to avoid collecting large data structures
 
 ## Technical Details
 - Parser: Manual HTML parsing for performance, doesn't use browser DOM
@@ -75,12 +91,25 @@ When you finish a task, always run `pnpm typecheck` to ensure that the code is t
   - `--chunk-size <size>`: Controls stream chunking (default: 4096)
   - `-v, --verbose`: Enables debug logging
 
-Always run tests after making changes to ensure backward compatibility.
+## CLI and Testing
 
-## Docs
+### CLI Usage
+- Processes HTML from stdin, outputs Markdown to stdout
+- Test with live sites: `curl -s https://example.com | node ./bin/mdream.mjs --origin https://example.com`
+- Key CLI options: `--origin <url>`, `-v/--verbose`, `--chunk-size <size>`
 
-Please reference the following docs:
+### Testing Strategy
+- Comprehensive test coverage in `test/unit/` and `test/integration/`
+- Plugin tests in `test/unit/plugins/` - always add tests for new plugins
+- Real-world test fixtures in `test/fixtures/` (GitHub, Wikipedia HTML)
+- Template tests for complex HTML structures (navigation, tables, etc.)
+- Always run tests after making changes to ensure backward compatibility
 
-- @docs/plugin-api.md
-- @docs/plugins.md
-- @docs/plugin-api.md
+## Plugin Development
+
+When creating new plugins:
+1. Use CSS selectors from `src/libs/query-selector.ts` for element matching
+2. Implement memory-efficient patterns (immediate callbacks vs. collecting data)
+3. Add comprehensive tests covering edge cases and real-world scenarios
+4. Follow existing plugin patterns in `src/plugins/` directory
+5. Export from `src/plugins.ts` for public API access

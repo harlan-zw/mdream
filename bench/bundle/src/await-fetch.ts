@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { syncHtmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../src'
 
 async function run() {
   // read times to run it from command line argument
@@ -12,7 +12,7 @@ async function run() {
     // create a read stream for ../elon.html
     // create a read stream for ../elon.html
     const html = await response.text()
-    await writeFile(resolve(import.meta.dirname, '../dist/wiki.md'), await syncHtmlToMarkdown(html), { encoding: 'utf-8' })
+    await writeFile(resolve(import.meta.dirname, '../dist/wiki.md'), await htmlToMarkdown(html), { encoding: 'utf-8' })
   }
   const end = performance.now()
   const duration = end - start

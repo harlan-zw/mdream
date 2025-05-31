@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src/index.js'
+import { htmlToMarkdown } from '../../../src/index.js'
 import { frontmatterPlugin } from '../../../src/plugins/frontmatter.js'
 
 describe('frontmatter plugin', () => {
@@ -17,7 +17,7 @@ describe('frontmatter plugin', () => {
       </html>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [frontmatterPlugin()],
     })
 
@@ -42,7 +42,7 @@ describe('frontmatter plugin', () => {
       </html>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [frontmatterPlugin({
         additionalFields: {
           layout: 'post',
@@ -70,7 +70,7 @@ describe('frontmatter plugin', () => {
       </html>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [frontmatterPlugin()],
     })
 
@@ -95,7 +95,7 @@ describe('frontmatter plugin', () => {
       </html>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [frontmatterPlugin()],
     })
 
@@ -119,7 +119,7 @@ describe('frontmatter plugin', () => {
       </html>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [frontmatterPlugin({
         formatValue: (name, value) => {
           if (name === 'keywords') {
@@ -148,7 +148,7 @@ describe('frontmatter plugin', () => {
       </html>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [frontmatterPlugin({
         metaFields: ['custom-field', 'another-field'],
       })],

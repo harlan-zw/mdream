@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../src'
 
 describe('recipes', () => {
   it('tables', () => {
@@ -25,7 +25,7 @@ describe('recipes', () => {
 </tbody>
 </table>
 </div>`
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toMatchInlineSnapshot(`
       "## Nutrition Facts (per serving)
 
@@ -52,7 +52,7 @@ describe('recipes', () => {
           foo
       </button>
     </div>`
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toMatchInlineSnapshot(`""`)
   })
 })

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../src'
 
 describe('definition lists', () => {
   it('converts address tags', () => {
-    const result = syncHtmlToMarkdown(`
+    const result = htmlToMarkdown(`
       <address>
         John Doe<br>
         123 Main St<br>
@@ -14,7 +14,7 @@ describe('definition lists', () => {
   })
 
   it('handles definition lists', () => {
-    const result = syncHtmlToMarkdown(`
+    const result = htmlToMarkdown(`
       <dl>
         <dt>HTML</dt>
         <dd>HyperText Markup Language</dd>
@@ -32,7 +32,7 @@ describe('definition lists', () => {
   })
 
   it('handles nested definition lists', () => {
-    const result = syncHtmlToMarkdown(`
+    const result = htmlToMarkdown(`
       <dl>
         <dt>Web Languages</dt>
         <dd>
@@ -60,7 +60,7 @@ describe('definition lists', () => {
   })
 
   it('handles complex definition list content', () => {
-    const result = syncHtmlToMarkdown(`
+    const result = htmlToMarkdown(`
       <dl>
         <dt>Term with <strong>formatting</strong></dt>
         <dd>Definition with <a href="https://example.com">link</a></dd>

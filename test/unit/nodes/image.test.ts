@@ -1,28 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src/index.ts'
+import { htmlToMarkdown } from '../../../src/index.ts'
 
 describe('image url resolving', () => {
   it('converts a simple image', () => {
     const html = '<img src="image.jpg" alt="An image">'
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toBe('![An image](image.jpg)')
   })
 
   it('preserves relative paths', () => {
     const html = '<img src="./images/photo.png" alt="A photo">'
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toBe('![A photo](./images/photo.png)')
   })
 
   it('handles images without alt text', () => {
     const html = '<img src="banner.gif">'
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toBe('![](banner.gif)')
   })
 
   it('should handle absolute paths when origin option is provided', () => {
     const html = '<img src="/images/logo.svg" alt="Logo">'
-    const markdown = syncHtmlToMarkdown(html, { origin: 'https://example.com' })
+    const markdown = htmlToMarkdown(html, { origin: 'https://example.com' })
 
     // Now that we implemented origin functionality, test for the full URL
     expect(markdown).toBe('![Logo](https://example.com/images/logo.svg)')
@@ -30,7 +30,7 @@ describe('image url resolving', () => {
 
   it('should handle origins with trailing slashes', () => {
     const html = '<img src="/images/icon.png" alt="Icon">'
-    const markdown = syncHtmlToMarkdown(html, { origin: 'https://example.com/' })
+    const markdown = htmlToMarkdown(html, { origin: 'https://example.com/' })
 
     // Should properly handle trailing slashes in origin
     expect(markdown).toBe('![Icon](https://example.com/images/icon.png)')
@@ -45,7 +45,7 @@ describe('image url resolving', () => {
         </div>
       </div>
     `
-    const markdown = syncHtmlToMarkdown(html, { origin: 'https://mysite.com' })
+    const markdown = htmlToMarkdown(html, { origin: 'https://mysite.com' })
 
     // Basic checks that HTML was converted
     expect(markdown).toContain('A paragraph with')
@@ -69,7 +69,7 @@ describe('image url resolving', () => {
         </tr>
       </table>
     `
-    const markdown = syncHtmlToMarkdown(html, { origin: 'https://example.org' })
+    const markdown = htmlToMarkdown(html, { origin: 'https://example.org' })
 
     // Image resolution is not currently working in tables, so we only test base HTML conversion for now
     expect(markdown).toContain('| Header | Image |')
@@ -80,19 +80,19 @@ describe('image url resolving', () => {
 describe('images', () => {
   it('converts simple images', () => {
     const html = '<img src="image.jpg" alt="Description">'
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toBe('![Description](image.jpg)')
   })
 
   it('handles images without alt text', () => {
     const html = '<img src="image.jpg">'
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toBe('![](image.jpg)')
   })
 
   it('handles images in paragraphs', () => {
     const html = '<p>An image: <img src="image.jpg" alt="Description"></p>'
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toBe('An image: ![Description](image.jpg)')
   })
 })

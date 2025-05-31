@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../src'
 import { frontmatterPlugin } from '../../../src/plugins/frontmatter.ts'
 import { readabilityPlugin } from '../../../src/plugins/readability'
 
 describe('readability edge cases', () => {
   // Helper function to process HTML with readability
   function processWithReadability(html: string) {
-    return syncHtmlToMarkdown(html, {
+    return htmlToMarkdown(html, {
       plugins: [
         readabilityPlugin(),
         frontmatterPlugin(),

@@ -1,4 +1,4 @@
-import { syncHtmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../src'
 
 const html = `<!DOCTYPE html>
 <!-- saved from url=(0039)https://en.wikipedia.org/wiki/Elon_Musk -->
@@ -3527,7 +3527,7 @@ function run() {
   // extend the timings
   for (let i = 0; i < times; i++) {
     // eslint-disable-next-line no-console
-    console.log((syncHtmlToMarkdown(html)).length)
+    console.log((htmlToMarkdown(html)).length)
   }
   const end = performance.now()
   const duration = end - start

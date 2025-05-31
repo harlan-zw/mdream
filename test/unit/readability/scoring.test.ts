@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../src'
 import { readabilityPlugin } from '../../../src/plugins/readability'
 
 describe('readability scoring system', () => {
@@ -50,7 +50,7 @@ describe('readability scoring system', () => {
     // Test positive scoring tags - they should all include content
     for (const testCase of positiveTagCases) {
       const html = createTestHTML(testCase)
-      const result = syncHtmlToMarkdown(html, {
+      const result = htmlToMarkdown(html, {
         plugins: [readabilityPlugin()],
       })
 
@@ -66,13 +66,13 @@ describe('readability scoring system', () => {
 
     // Test with 'article' tag (high score, +15)
     const articleHtml = createTestHTML({ tag: 'article', content: shorterContent })
-    const articleResult = syncHtmlToMarkdown(articleHtml, {
+    const articleResult = htmlToMarkdown(articleHtml, {
       plugins: [readabilityPlugin()],
     })
 
     // Test with 'div' tag (low score, +2)
     const divHtml = createTestHTML({ tag: 'div', content: shorterContent })
-    const divResult = syncHtmlToMarkdown(divHtml, {
+    const divResult = htmlToMarkdown(divHtml, {
       plugins: [readabilityPlugin()],
     })
 
@@ -98,7 +98,7 @@ describe('readability scoring system', () => {
 
     for (const testCase of negativeTagCases) {
       const html = createTestHTML(testCase)
-      const result = syncHtmlToMarkdown(html, {
+      const result = htmlToMarkdown(html, {
         plugins: [readabilityPlugin()],
       })
 
@@ -134,7 +134,7 @@ describe('readability scoring system', () => {
         content: highQualityContent,
       })
 
-      const result = syncHtmlToMarkdown(html, {
+      const result = htmlToMarkdown(html, {
         plugins: [readabilityPlugin()],
       })
 
@@ -159,7 +159,7 @@ describe('readability scoring system', () => {
       </html>
     `
 
-    const negativeClassResult = syncHtmlToMarkdown(negativeClassTest, {
+    const negativeClassResult = htmlToMarkdown(negativeClassTest, {
       plugins: [readabilityPlugin()],
     })
 
@@ -204,7 +204,7 @@ describe('readability scoring system', () => {
       </html>
     `
 
-    const result = syncHtmlToMarkdown(html, {
+    const result = htmlToMarkdown(html, {
       plugins: [readabilityPlugin()],
     })
 
@@ -244,11 +244,11 @@ describe('readability scoring system', () => {
       </html>
     `
 
-    const shortResult = syncHtmlToMarkdown(shortHtml, {
+    const shortResult = htmlToMarkdown(shortHtml, {
       plugins: [readabilityPlugin()],
     })
 
-    const longResult = syncHtmlToMarkdown(longHtml, {
+    const longResult = htmlToMarkdown(longHtml, {
       plugins: [readabilityPlugin()],
     })
 
@@ -289,7 +289,7 @@ describe('readability scoring system', () => {
       </html>
     `
 
-    const result = syncHtmlToMarkdown(html, {
+    const result = htmlToMarkdown(html, {
       plugins: [readabilityPlugin()],
     })
 
@@ -324,7 +324,7 @@ describe('readability scoring system', () => {
       </html>
     `
 
-    const result = syncHtmlToMarkdown(html, {
+    const result = htmlToMarkdown(html, {
       plugins: [readabilityPlugin()],
     })
 
@@ -356,11 +356,11 @@ describe('readability scoring system', () => {
       </html>
     `
 
-    const highDensityResult = syncHtmlToMarkdown(isolatedHighDensityHtml, {
+    const highDensityResult = htmlToMarkdown(isolatedHighDensityHtml, {
       plugins: [readabilityPlugin()],
     })
 
-    const lowDensityResult = syncHtmlToMarkdown(isolatedLowDensityHtml, {
+    const lowDensityResult = htmlToMarkdown(isolatedLowDensityHtml, {
       plugins: [readabilityPlugin()],
     })
 
@@ -445,7 +445,7 @@ describe('readability scoring system', () => {
       </html>
     `
 
-    const result = syncHtmlToMarkdown(complexHtml, {
+    const result = htmlToMarkdown(complexHtml, {
       plugins: [readabilityPlugin()],
     })
 

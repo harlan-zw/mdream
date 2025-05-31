@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src/index.ts'
+import { htmlToMarkdown } from '../../../src/index.ts'
 
 describe('code blocks', () => {
   it('escapes triple backticks within code blocks', () => {
@@ -14,7 +14,7 @@ function example() {
       </code></pre>
     `
 
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
 
     // The triple backticks should be escaped
     expect(markdown).toContain('\\`\\`\\`js')
@@ -35,7 +35,7 @@ function example() {
       </code></pre>
     `
 
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
 
     // Check formatting
     expect(markdown).toContain('Here\'s a code block:')
@@ -59,7 +59,7 @@ function example() {
       </code></pre>
     `
 
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
 
     // Check that newlines and whitespace are preserved
     expect(markdown).toMatch(/```[\s\S]*function example.*if \(true\).*```/s)
@@ -83,7 +83,7 @@ Line 2 after two blank lines
 
 Line 3 after one blank line</code></pre>`
 
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
 
     // Check that multiple consecutive newlines are preserved
     expect(markdown).toMatch(/```.*Line 1.*Line 2.*Line 3.*```/s)
@@ -100,7 +100,7 @@ Line 3 after one blank line</code></pre>`
 <span class="hljs-section">## A second-level heading</span>
 <span class="hljs-section">### A third-level heading</span>
 </code></pre>`
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
 
     // Check that newlines are preserved
     expect(markdown).toMatchInlineSnapshot(`
@@ -125,7 +125,7 @@ Text without newline above.
 </code></pre>`
 
     // The test is verifying that the newlines between headings are preserved exactly
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
 
     // This test verifies that newlines in markdown code blocks are preserved exactly
     // The key issue here is making sure that newlines between headings in markdown are maintained
@@ -158,19 +158,19 @@ Text without newline above.
   })
   it('converts inline code', () => {
     const html = '<p>Use the <code>print()</code> function</p>'
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toBe('Use the `print()` function')
   })
 
   it('converts code blocks without language', () => {
     const html = '<pre><code>function example() {\n  return true;\n}</code></pre>'
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toBe('```\nfunction example() {\n  return true;\n}\n```')
   })
 
   it('converts code blocks with language', () => {
     const html = '<pre><code class="language-javascript">const x = 1;</code></pre>'
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toBe('```javascript\nconst x = 1;\n```')
   })
 })

@@ -1,6 +1,6 @@
 import type { ExtractedElement } from '../../../src/plugins/extraction.ts'
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src/index.ts'
+import { htmlToMarkdown } from '../../../src/index.ts'
 import { extractionPlugin } from '../../../src/plugins/extraction.ts'
 
 describe('extraction plugin', () => {
@@ -23,7 +23,7 @@ describe('extraction plugin', () => {
       },
     })
 
-    syncHtmlToMarkdown(html, {
+    htmlToMarkdown(html, {
       plugins: [plugin],
     })
 
@@ -51,7 +51,7 @@ describe('extraction plugin', () => {
       },
     })
 
-    syncHtmlToMarkdown(html, {
+    htmlToMarkdown(html, {
       plugins: [plugin],
     })
 
@@ -80,7 +80,7 @@ describe('extraction plugin', () => {
       },
     })
 
-    syncHtmlToMarkdown(html, {
+    htmlToMarkdown(html, {
       plugins: [plugin],
     })
 
@@ -113,7 +113,7 @@ describe('extraction plugin', () => {
       },
     })
 
-    syncHtmlToMarkdown(html, {
+    htmlToMarkdown(html, {
       plugins: [plugin],
     })
 
@@ -158,7 +158,7 @@ describe('extraction plugin', () => {
       },
     })
 
-    syncHtmlToMarkdown(html, {
+    htmlToMarkdown(html, {
       plugins: [plugin],
     })
 
@@ -213,7 +213,7 @@ describe('extraction plugin', () => {
       'meta[name="description"]': element => results.metas.push(element),
     })
 
-    syncHtmlToMarkdown(html, {
+    htmlToMarkdown(html, {
       plugins: [plugin],
     })
 
@@ -262,7 +262,7 @@ describe('extraction plugin', () => {
       },
     })
 
-    syncHtmlToMarkdown(html, {
+    htmlToMarkdown(html, {
       plugins: [plugin],
     })
 
@@ -283,7 +283,7 @@ describe('extraction plugin', () => {
           <div class="empty"></div>
           <div class="whitespace">   </div>
           <div class="newlines">
-          
+
           </div>
           <div class="mixed">  Some text  </div>
         </body>
@@ -297,7 +297,7 @@ describe('extraction plugin', () => {
       },
     })
 
-    syncHtmlToMarkdown(html, {
+    htmlToMarkdown(html, {
       plugins: [plugin],
     })
 
@@ -356,7 +356,7 @@ describe('extraction plugin', () => {
       'script[type="application/ld+json"]': element => seoData.jsonLd.push(element),
     })
 
-    syncHtmlToMarkdown(html, {
+    htmlToMarkdown(html, {
       plugins: [plugin],
     })
 

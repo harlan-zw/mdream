@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { PlaywrightCrawler } from 'crawlee'
-import { syncHtmlToMarkdown } from '../src/index'
+import { htmlToMarkdown } from '../src/index'
 import { withMinimalPreset } from '../src/preset/minimal'
 
 // CheerioCrawler crawls the web using HTTP requests
@@ -13,7 +13,7 @@ const crawler = new PlaywrightCrawler({
     const html = await page.innerHTML('html')
     log.info('HTML length', { url: request.loadedUrl, length: html.length })
     const now = new Date()
-    const md = syncHtmlToMarkdown(html, withMinimalPreset({
+    const md = htmlToMarkdown(html, withMinimalPreset({
       origin: new URL(request.loadedUrl).origin,
     }))
     log.info('Processed html -> md in', { url: request.loadedUrl, time: new Date() - now })

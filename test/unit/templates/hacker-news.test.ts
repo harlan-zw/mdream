@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../src'
 
 const html = `<body data-new-gr-c-s-check-loaded="14.1233.0" data-gr-ext-installed=""><center><table id="hnmain" border="0" cellpadding="0" cellspacing="0" width="85%" bgcolor="#f6f6ef">
         <tbody><tr><td bgcolor="#ff6600"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="padding:2px"><tbody><tr><td style="width:18px;padding-right:4px"><a href="https://news.ycombinator.com"><img src="y18.svg" width="18" height="18" style="border:1px white solid; display:block"></a></td>
@@ -172,7 +172,7 @@ const html = `<body data-new-gr-c-s-check-loaded="14.1233.0" data-gr-ext-install
 
 describe('hacker news', () => {
   it('table', () => {
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toMatchInlineSnapshot(`
       "| <table><tr><td>[![](y18.svg)](https://news.ycombinator.com)</td><td>**[Hacker News](news)** [new](newest) \\| [past](front) \\| [comments](newcomments) \\| [ask](ask) \\| [show](show) \\| [jobs](jobs) \\| [submit](submit)</td><td>[login](login?goto=news)</td></tr></table> |
       | --- |

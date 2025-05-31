@@ -1,7 +1,7 @@
 import type { HTMLToMarkdownOptions, MdreamRuntimeState } from './types'
 import { processPartialHTMLToMarkdown } from './parser'
 
-export function syncHtmlToMarkdown(
+export function htmlToMarkdown(
   html: string,
   options: HTMLToMarkdownOptions = {},
 ): string {

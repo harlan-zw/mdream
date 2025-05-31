@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../src'
 import { readabilityPlugin } from '../../../src/plugins/readability'
 
 const html = `
@@ -125,7 +125,7 @@ describe('readability plugin basic functionality', () => {
   // Test a minimal HTML structure with nesting to verify parent node updates
   it.skip('should correctly track node state and propagate metrics to parent nodes', () => {
     // Run with plugin
-    const result = syncHtmlToMarkdown(html, {
+    const result = htmlToMarkdown(html, {
       plugins: [
         readabilityPlugin(),
       ],

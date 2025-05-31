@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { syncHtmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../src'
 
 async function run() {
   // read times to run it from command line argument
@@ -11,7 +11,7 @@ async function run() {
     const html = await readFile(resolve(import.meta.dirname, '../wiki.html'), { encoding: 'utf-8' })
     logMemoryUsage('before await creation')
     const start = performance.now()
-    const converted = syncHtmlToMarkdown(html)
+    const converted = htmlToMarkdown(html)
     const end = performance.now()
     const duration = end - start
     // eslint-disable-next-line no-console

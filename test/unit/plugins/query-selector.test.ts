@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src/index.js'
+import { htmlToMarkdown } from '../../../src/index.js'
 import { createPlugin } from '../../../src/pluggable/plugin.ts'
 import { filterPlugin } from '../../../src/plugins/filter.ts'
 
@@ -13,7 +13,7 @@ describe('querySelector plugin', () => {
       <aside>This aside should be excluded</aside>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({ include: ['h1', 'p'] }),
       ],
@@ -33,7 +33,7 @@ describe('querySelector plugin', () => {
       <nav>This nav should be excluded</nav>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({ exclude: ['aside', 'nav'] }),
       ],
@@ -54,7 +54,7 @@ describe('querySelector plugin', () => {
       <div id="content">This content div should be included</div>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({ include: ['#main', '#content'] }),
       ],
@@ -72,7 +72,7 @@ describe('querySelector plugin', () => {
       <div class="footer">This footer should be excluded</div>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({ exclude: ['.ad', '.sidebar', '.footer'] }),
       ],
@@ -92,7 +92,7 @@ describe('querySelector plugin', () => {
       <div class="sidebar" id="right">This sidebar should be excluded</div>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({ include: ['div#main.content'] }),
       ],
@@ -110,7 +110,7 @@ describe('querySelector plugin', () => {
       <img src="image.png" alt="Image">
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({ include: ['a[href]', 'img[alt]'] }),
       ],
@@ -130,7 +130,7 @@ describe('querySelector plugin', () => {
       <div data-type="footer">This footer should be excluded</div>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({ include: ['[data-type="header"]', '[data-type="content"]'] }),
       ],
@@ -159,7 +159,7 @@ describe('querySelector plugin', () => {
       </div>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({ include: ['#main'] }),
       ],
@@ -192,7 +192,7 @@ describe('querySelector plugin', () => {
       <div>More outside text</div>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({ include: ['article'] }),
       ],
@@ -222,7 +222,7 @@ describe('querySelector plugin', () => {
       <footer>Page footer</footer>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({ include: ['header', 'main'] }),
       ],
@@ -248,7 +248,7 @@ describe('querySelector plugin', () => {
       </div>
     `
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({
           include: ['article', 'h1', 'p'],
@@ -288,7 +288,7 @@ describe('querySelector plugin', () => {
       },
     })
 
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [
         filterPlugin({ exclude: ['aside'] }),
         codePlugin,

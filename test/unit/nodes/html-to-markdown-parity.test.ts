@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src/index.js'
+import { htmlToMarkdown } from '../../../src/index.js'
 
 describe('html-to-markdown parity', () => {
   it('bold & Italic: Supports bold and italic—even within single words.', () => {
-    expect(syncHtmlToMarkdown(`
+    expect(htmlToMarkdown(`
 <h4>
     <strong>Important</strong>
     Heading
 </h4>`)).toBe('#### **Important** Heading')
-    expect(syncHtmlToMarkdown('<p><strong>Bold and <em>italic</em></strong></p>')).toBe('**Bold and _italic_**')
-    expect(syncHtmlToMarkdown('<b><b>Incredibly</b> <b>Bold</b></b>')).toBe('**Incredibly Bold**')
+    expect(htmlToMarkdown('<p><strong>Bold and <em>italic</em></strong></p>')).toBe('**Bold and _italic_**')
+    expect(htmlToMarkdown('<b><b>Incredibly</b> <b>Bold</b></b>')).toBe('**Incredibly Bold**')
   })
   it('list: Handles ordered and unordered lists with full nesting support.', () => {
-    expect(syncHtmlToMarkdown(`
+    expect(htmlToMarkdown(`
 <ul>
   <li>Simple List</li>
   <li>
@@ -27,7 +27,7 @@ describe('html-to-markdown parity', () => {
   - Someone once said:
     > My Famous quoteby someone"
 `)
-    expect(syncHtmlToMarkdown(`
+    expect(htmlToMarkdown(`
 <ol start="9">
   <li>Nine</li>
   <li>Ten</li>
@@ -45,7 +45,7 @@ describe('html-to-markdown parity', () => {
 `)
   })
   it('blockquote: Blockquotes can include other elements, with seamless support for nested quotes.', () => {
-    expect(syncHtmlToMarkdown(`
+    expect(htmlToMarkdown(`
 <blockquote>
   <h2>Heading</h2>
   <ol>
@@ -62,7 +62,7 @@ describe('html-to-markdown parity', () => {
 `)
   })
   it ('inline Code & Code Block: Correctly handles backticks and multi-line code blocks, preserving code structure.', () => {
-    expect(syncHtmlToMarkdown(`
+    expect(htmlToMarkdown(`
 <p>
   Output a message: <br/>
   <code>console.log("hello")</code>
@@ -70,26 +70,26 @@ describe('html-to-markdown parity', () => {
 `)).toBe('Output a message:  `console.log("hello")`')
 
     // We need to pass the backtick testing for now
-    const result = syncHtmlToMarkdown(`<code>with \`\` backticks</code>`)
+    const result = htmlToMarkdown(`<code>with \`\` backticks</code>`)
     // We'll test that we get 'backticks' present, rather than specific format
     expect(result).toContain('backticks')
 
     // Also check the variable case
-    const varResult = syncHtmlToMarkdown(`<code>\`variable\`</code>`)
+    const varResult = htmlToMarkdown(`<code>\`variable\`</code>`)
     expect(varResult).toContain('variable')
   })
   it ('link & Image: Properly formats multi-line links, adding escapes for blank lines where needed.', () => {
-    expect(syncHtmlToMarkdown(`<img
+    expect(htmlToMarkdown(`<img
     alt="alt text"
     src="/image.png"
     />`)).toBe('![alt text](/image.png)')
 
-    expect(syncHtmlToMarkdown(`<a
+    expect(htmlToMarkdown(`<a
     href="/about.html"
     >About</a>`)).toBe('[About](/about.html)')
 
     // With the current implementation, spaces are included in the link text
-    const result = syncHtmlToMarkdown(`<a href="/post">
+    const result = htmlToMarkdown(`<a href="/post">
     Line 1 <br/>
     <strong>Line 2</strong> <br/>
     Line 3 <br/>
@@ -101,10 +101,10 @@ describe('html-to-markdown parity', () => {
     expect(result).toContain('](/post)')
   })
   it('smart Escaping: Escapes special characters only when necessary, to avoid accidental Markdown rendering.', () => {
-    expect(syncHtmlToMarkdown(`<h2># Heading #</h2>`)).toBe('## # Heading #')
-    expect(syncHtmlToMarkdown(`<p># Heading</p>`)).toBe('\# Heading')
-    expect(syncHtmlToMarkdown(`<p>#hashtag</p>`)).toBe('#hashtag')
-    expect(syncHtmlToMarkdown(`<p>- List Item</p>`)).toBe('\- List Item')
-    expect(syncHtmlToMarkdown(`<p>Just a - dash<p>`)).toBe('Just a - dash')
+    expect(htmlToMarkdown(`<h2># Heading #</h2>`)).toBe('## # Heading #')
+    expect(htmlToMarkdown(`<p># Heading</p>`)).toBe('\# Heading')
+    expect(htmlToMarkdown(`<p>#hashtag</p>`)).toBe('#hashtag')
+    expect(htmlToMarkdown(`<p>- List Item</p>`)).toBe('\- List Item')
+    expect(htmlToMarkdown(`<p>Just a - dash<p>`)).toBe('Just a - dash')
   })
 })

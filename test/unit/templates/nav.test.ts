@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../src'
 
 describe('nav', () => {
   it('github', () => {
@@ -1174,7 +1174,7 @@ describe('nav', () => {
                   </li>
                 </ul>
               </nav>`
-    const markdown = syncHtmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html)
     expect(markdown).toMatchInlineSnapshot(`
       "- Start your journey
         - [About GitHub and Git](/en/get-started/start-your-journey/about-github-and-git)

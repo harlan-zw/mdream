@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { syncHtmlToMarkdown } from '../../../src/index.ts'
+import { htmlToMarkdown } from '../../../src/index.ts'
 import { tailwindPlugin } from '../../../src/plugins.ts'
 
 describe('tailwind addon', () => {
   it('converts font-bold to markdown bold', () => {
     const html = '<p class="font-bold">This is bold text</p>'
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [tailwindPlugin()],
     })
     expect(markdown).toBe('**This is bold text**')
@@ -13,7 +13,7 @@ describe('tailwind addon', () => {
 
   it('converts font-semibold to markdown bold', () => {
     const html = '<p class="font-semibold">This is semibold text</p>'
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [tailwindPlugin()],
     })
 
@@ -22,7 +22,7 @@ describe('tailwind addon', () => {
 
   it('converts italic to markdown italic', () => {
     const html = '<p class="italic">This is italic text</p>'
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [tailwindPlugin()],
     })
 
@@ -31,7 +31,7 @@ describe('tailwind addon', () => {
 
   it('converts line-through to strikethrough', () => {
     const html = '<p class="line-through">This is strikethrough text</p>'
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [tailwindPlugin()],
     })
 
@@ -44,7 +44,7 @@ describe('tailwind addon', () => {
       <p class="hidden">This should be hidden</p>
       <p>More visible content</p>
     `
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [tailwindPlugin()],
     })
 
@@ -57,7 +57,7 @@ describe('tailwind addon', () => {
 
   it('combines multiple styles correctly', () => {
     const html = '<p class="font-bold italic">This is bold and italic</p>'
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [tailwindPlugin()],
     })
 
@@ -71,7 +71,7 @@ describe('tailwind addon', () => {
         <p class="italic">Italic paragraph</p>
       </div>
     `
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [tailwindPlugin()],
     })
 
@@ -80,7 +80,7 @@ describe('tailwind addon', () => {
 
   it('applies mobile-first responsive classes correctly', () => {
     const html = '<p class="font-normal md:font-bold lg:italic">Responsive text</p>'
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [tailwindPlugin()],
     })
 
@@ -92,7 +92,7 @@ describe('tailwind addon', () => {
 
   it('applies later breakpoints over earlier ones', () => {
     const html = '<p class="italic font-bold md:font-normal lg:font-bold">Multiple classes</p>'
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [tailwindPlugin()],
     })
 
@@ -106,7 +106,7 @@ describe('tailwind addon', () => {
       <p class="hidden md:block">Hidden on mobile, visible on md and up</p>
       <p class="block md:hidden">Visible on mobile, hidden on md and up</p>
     `
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [tailwindPlugin()],
     })
 
@@ -121,7 +121,7 @@ describe('tailwind addon', () => {
       <p class="absolute">This is absolutely positioned and should be hidden</p>
       <p>More regular content</p>
     `
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [tailwindPlugin()],
     })
 
@@ -138,7 +138,7 @@ describe('tailwind addon', () => {
       <p class="fixed">This is fixed positioned and should be hidden</p>
       <p>More regular content</p>
     `
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [tailwindPlugin()],
     })
 
@@ -155,7 +155,7 @@ describe('tailwind addon', () => {
       <p class="sticky">This is sticky positioned and should be hidden</p>
       <p>More regular content</p>
     `
-    const markdown = syncHtmlToMarkdown(html, {
+    const markdown = htmlToMarkdown(html, {
       plugins: [tailwindPlugin()],
     })
 
