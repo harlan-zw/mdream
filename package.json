@@ -42,17 +42,18 @@
     "build": "unbuild",
     "typecheck": "tsc --noEmit src/index.ts",
     "dev:prepare": "unbuild --stub",
-    "test": "vitest test"
+    "test": "vitest test",
+    "release": "pnpm build && bumpp && pnpm -r publish"
   },
   "dependencies": {
     "cac": "^6.7.14"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.13.2",
-    "@types/node": "^22.15.21",
+    "@types/node": "^22.15.29",
     "bumpp": "^10.1.1",
     "crawlee": "^3.13.5",
-    "eslint": "^9.27.0",
+    "eslint": "^9.28.0",
     "llm-cost": "^1.0.5",
     "playwright": "^1.52.0",
     "typescript": "5.8.3",
