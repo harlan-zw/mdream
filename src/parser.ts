@@ -31,6 +31,10 @@ const SPACE_CHAR = 32 // ' '
 const TAB_CHAR = 9 // '\t'
 const NEWLINE_CHAR = 10 // '\n'
 const CARRIAGE_RETURN_CHAR = 13 // '\r'
+const BACKTICK_CHAR = 96 // '`'
+const PIPE_CHAR = 124 // '|'
+const OPEN_BRACKET_CHAR = 91 // '['
+const CLOSE_BRACKET_CHAR = 93 // ']'
 
 // Pre-allocate arrays and objects to reduce allocations
 const EMPTY_ATTRIBUTES: Record<string, string> = Object.freeze({})
@@ -79,6 +83,7 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState, handl
   state.lastCharWasWhitespace ??= true // don't allow subsequent whitespace at start
   state.justClosedTag ??= false
   state.isFirstTextInElement ??= false
+  state.lastCharWasBackslash ??= false
 
   // Process chunk character by character
   let i = 0
@@ -121,39 +126,59 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState, handl
         }
         state.lastCharWasWhitespace = true
         state.textBufferContainsWhitespace = true
+        // Whitespace characters reset backslash state
+        state.lastCharWasBackslash = false
       }
       else {
         state.textBufferContainsNonWhitespace = true
         state.lastCharWasWhitespace = false
         state.justClosedTag = false
         // pipe character
-        if (currentCharCode === 124 && state.depthMap[TAG_TABLE]) {
+        if (currentCharCode === PIPE_CHAR && state.depthMap[TAG_TABLE]) {
           // replace with encoded pipe character
           textBuffer += '\\|'
         }
         // if in code block we need to encode `
-        else if (currentCharCode === 96 && (state.depthMap[TAG_CODE] || state.depthMap[TAG_PRE])) {
+        else if (currentCharCode === BACKTICK_CHAR && (state.depthMap[TAG_CODE] || state.depthMap[TAG_PRE])) {
           // replace with encoded `
           textBuffer += '\\`'
         }
         // link open
-        else if (currentCharCode === 91 && state.depthMap[TAG_A]) {
+        else if (currentCharCode === OPEN_BRACKET_CHAR && state.depthMap[TAG_A]) {
           // replace with encoded [
           textBuffer += '\\['
         }
         // link close
-        else if (currentCharCode === 93 && state.depthMap[TAG_A]) {
+        else if (currentCharCode === CLOSE_BRACKET_CHAR && state.depthMap[TAG_A]) {
           // replace with encoded ]
           textBuffer += '\\]'
         }
         // blockquote
-        else if (currentCharCode === 62 && state.depthMap[TAG_BLOCKQUOTE]) {
+        else if (currentCharCode === GT_CHAR && state.depthMap[TAG_BLOCKQUOTE]) {
           // replace with encoded >
           textBuffer += '\\>'
         }
         else {
           textBuffer += htmlChunk[i]
         }
+
+        // Track quote state for non-nesting tags (script/style) - inline for performance
+        if (state.currentNode?.tagHandler?.isNonNesting) {
+          // Handle backslash escaping using state flag
+          if (!state.lastCharWasBackslash) {
+            // Toggle quote states
+            if (currentCharCode === APOS_CHAR && !state.inDoubleQuote && !state.inBacktick) {
+              state.inSingleQuote = !state.inSingleQuote
+            } else if (currentCharCode === QUOTE_CHAR && !state.inSingleQuote && !state.inBacktick) {
+              state.inDoubleQuote = !state.inDoubleQuote
+            } else if (currentCharCode === BACKTICK_CHAR && !state.inSingleQuote && !state.inDoubleQuote) {
+              state.inBacktick = !state.inBacktick
+            }
+          }
+        }
+
+        // Update backslash state for next character
+        state.lastCharWasBackslash = currentCharCode === BACKSLASH_CHAR
       }
       i++
       continue
@@ -188,6 +213,15 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState, handl
     }
     // CLOSING TAG
     else if (nextCharCode === SLASH_CHAR) {
+      // Check if we're inside quotes within a non-nesting tag
+      const inQuotes = state.inSingleQuote || state.inDoubleQuote || state.inBacktick
+      if (state.currentNode?.tagHandler?.isNonNesting && inQuotes) {
+        // Inside quotes, treat this '<' as regular text and continue
+        textBuffer += htmlChunk[i]
+        i++
+        continue
+      }
+
       // Process any text content before this tag
       if (textBuffer.length > 0) {
         processTextBuffer(textBuffer, state, handleEvent)
@@ -307,7 +341,7 @@ function processTextBuffer(textBuffer: string, state: MdreamProcessingState, han
   if (containsWhitespace && !firstBlockParent?.childTextNodeIndex) {
     // Trim leading whitespace if this is the first text node after an opening tag
     let start = 0
-    while (start < text.length && (inPreTag ? (text.charCodeAt(start) === 10 || text.charCodeAt(start) === 13) : isWhitespace(text.charCodeAt(start)))) {
+    while (start < text.length && (inPreTag ? (text.charCodeAt(start) === NEWLINE_CHAR || text.charCodeAt(start) === CARRIAGE_RETURN_CHAR) : isWhitespace(text.charCodeAt(start)))) {
       start++
     }
     if (start > 0) {
@@ -405,7 +439,7 @@ function processClosingTag(
   // Process the closing tag
   if (curr) {
     // we need to close all of the parent nodes we walked
-    closeNode(state.currentNode, state, handleEvent)
+    closeNode(curr, state, handleEvent)
   }
 
   state.justClosedTag = true // Mark that we just processed a closing tag
@@ -451,6 +485,15 @@ function closeNode(node: ElementNode | null, state: MdreamProcessingState, handl
 
   if (node.tagId) {
     state.depthMap[node.tagId] = Math.max(0, state.depthMap[node.tagId] - 1)
+  }
+
+  // Clear non-nesting tag content tracking when closing non-nesting tags
+  if (node.tagHandler?.isNonNesting) {
+    // Reset quote state tracking
+    state.inSingleQuote = false
+    state.inDoubleQuote = false
+    state.inBacktick = false
+    state.lastCharWasBackslash = false
   }
 
   // Depth handling now managed by plugins
@@ -609,6 +652,15 @@ function processOpeningTag(
   parentNode.currentWalkIndex = 0
   state.currentNode = parentNode
   state.hasEncodedHtmlEntity = false
+
+  // Track content start position for non-nesting tags (script/style)
+  if (tagHandler?.isNonNesting && !result.selfClosing) {
+    // Initialize quote state tracking
+    state.inSingleQuote = false
+    state.inDoubleQuote = false
+    state.inBacktick = false
+    state.lastCharWasBackslash = false
+  }
 
   if (result.selfClosing) {
     closeNode(tag, state, handleEvent)

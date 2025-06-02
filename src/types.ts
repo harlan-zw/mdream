@@ -183,6 +183,14 @@ export interface MdreamProcessingState {
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
 
+  /** Quote state tracking for non-nesting tags - avoids backward scanning */
+  inSingleQuote?: boolean
+  inDoubleQuote?: boolean
+  inBacktick?: boolean
+
+  /** Backslash escaping state tracking - avoids checking previous character */
+  lastCharWasBackslash?: boolean
+
   /** Plugin instances array for efficient iteration */
   plugins?: Plugin[]
 
