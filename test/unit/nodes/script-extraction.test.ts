@@ -81,7 +81,7 @@ describe('script content extraction', () => {
 <p>Some content after the script</p>`
 
     const extractedScripts: Array<{ type?: string, id?: string, content: string }> = []
-    
+
     const scriptExtractionPlugin = createPlugin({
       onNodeEnter(element) {
         if (element.name === 'script') {
@@ -89,7 +89,7 @@ describe('script content extraction', () => {
           element.scriptData = { type: element.attributes?.type, id: element.attributes?.id, content: '' }
         }
       },
-      
+
       processTextNode(textNode) {
         // Check if we're inside a script tag (including excluded text nodes)
         if (textNode.parent?.name === 'script' && textNode.parent.scriptData) {
@@ -99,46 +99,46 @@ describe('script content extraction', () => {
           return { content: '', skip: true }
         }
       },
-      
+
       onNodeExit(element) {
         if (element.name === 'script' && element.scriptData) {
           extractedScripts.push({
             type: element.scriptData.type,
             id: element.scriptData.id,
-            content: element.scriptData.content.trim()
+            content: element.scriptData.content.trim(),
           })
         }
-      }
+      },
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [scriptExtractionPlugin]
+      plugins: [scriptExtractionPlugin],
     })
 
     // Should extract the script content
     expect(extractedScripts).toHaveLength(1)
     expect(extractedScripts[0].type).toBe('application/json')
     expect(extractedScripts[0].id).toBe('__NUXT_DATA__')
-    
+
     // Verify the JSON content can be parsed
     expect(() => JSON.parse(extractedScripts[0].content)).not.toThrow()
-    
+
     const parsedData = JSON.parse(extractedScripts[0].content)
     expect(Array.isArray(parsedData)).toBe(true)
     expect(parsedData.length).toBeGreaterThan(20) // Should have many elements
-    
+
     // Check that the JSON contains expected data structure
-    expect(parsedData[0]).toHaveProperty("state")
-    expect(parsedData[0]).toHaveProperty("once")
-    expect(parsedData[0]).toHaveProperty("_errors")
-    
+    expect(parsedData[0]).toHaveProperty('state')
+    expect(parsedData[0]).toHaveProperty('once')
+    expect(parsedData[0]).toHaveProperty('_errors')
+
     // Look for expected string values anywhere in the array
     const jsonString = JSON.stringify(parsedData)
-    expect(jsonString).toContain("system")
-    expect(jsonString).toContain("Nuxt SEO")
-    expect(jsonString).toContain("https://nuxtseo.com")
-    expect(jsonString).toContain("1747646786733")
-    
+    expect(jsonString).toContain('system')
+    expect(jsonString).toContain('Nuxt SEO')
+    expect(jsonString).toContain('https://nuxtseo.com')
+    expect(jsonString).toContain('1747646786733')
+
     // The markdown should only contain the content after the script
     expect(result.trim()).toBe('Some content after the script')
   })
@@ -157,32 +157,32 @@ describe('script content extraction', () => {
     <p>Page content</p>`
 
     const extractedScripts: Array<{ content: string }> = []
-    
+
     const scriptExtractionPlugin = createPlugin({
       onNodeEnter(element) {
         if (element.name === 'script') {
           element.scriptData = { content: '' }
         }
       },
-      
+
       processTextNode(textNode) {
         if (textNode.parent?.name === 'script' && textNode.parent.scriptData) {
           textNode.parent.scriptData.content += textNode.value
           return { content: '', skip: true }
         }
       },
-      
+
       onNodeExit(element) {
         if (element.name === 'script' && element.scriptData) {
           extractedScripts.push({
-            content: element.scriptData.content.trim()
+            content: element.scriptData.content.trim(),
           })
         }
-      }
+      },
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [scriptExtractionPlugin]
+      plugins: [scriptExtractionPlugin],
     })
 
     expect(extractedScripts).toHaveLength(1)
@@ -190,7 +190,7 @@ describe('script content extraction', () => {
     expect(extractedScripts[0].content).toContain('apiUrl: "https://api.example.com"')
     expect(extractedScripts[0].content).toContain('console.log')
     expect(extractedScripts[0].content).toContain('initApp();')
-    
+
     expect(result.trim()).toBe('Page content')
   })
 
@@ -208,44 +208,44 @@ describe('script content extraction', () => {
     <p>Content</p>`
 
     const extractedScripts: Array<{ content: string }> = []
-    
+
     const scriptExtractionPlugin = createPlugin({
       onNodeEnter(element) {
         if (element.name === 'script') {
           element.scriptData = { content: '' }
         }
       },
-      
+
       processTextNode(textNode) {
         if (textNode.parent?.name === 'script' && textNode.parent.scriptData) {
           textNode.parent.scriptData.content += textNode.value
           return { content: '', skip: true }
         }
       },
-      
+
       onNodeExit(element) {
         if (element.name === 'script' && element.scriptData) {
           extractedScripts.push({
-            content: element.scriptData.content.trim()
+            content: element.scriptData.content.trim(),
           })
         }
-      }
+      },
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [scriptExtractionPlugin]
+      plugins: [scriptExtractionPlugin],
     })
 
     expect(extractedScripts).toHaveLength(1)
-    
+
     // Verify the JSON content is properly extracted and can be parsed
     expect(() => JSON.parse(extractedScripts[0].content)).not.toThrow()
-    
+
     const parsedData = JSON.parse(extractedScripts[0].content)
     expect(parsedData.message).toBe('He said "Hello world" to everyone')
     expect(parsedData.template).toBe('<div>Some HTML content</div>')
     expect(parsedData.data.quotes).toBe('Mix of \'single\' and "double" quotes')
-    
+
     expect(result.trim()).toBe('Content')
   })
 })

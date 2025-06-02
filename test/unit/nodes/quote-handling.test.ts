@@ -8,7 +8,7 @@ describe('quote handling in script/style tags', () => {
       console.log(html);
     </script>
     <p>This should be rendered</p>`
-    
+
     const result = htmlToMarkdown(html)
     expect(result).toBe('This should be rendered')
   })
@@ -19,7 +19,7 @@ describe('quote handling in script/style tags', () => {
       console.log(html);
     </script>
     <p>This should be rendered</p>`
-    
+
     const result = htmlToMarkdown(html)
     expect(result).toBe('This should be rendered')
   })
@@ -30,7 +30,7 @@ describe('quote handling in script/style tags', () => {
       console.log(template);
     </script>
     <p>This should be rendered</p>`
-    
+
     const result = htmlToMarkdown(html)
     expect(result).toBe('This should be rendered')
   })
@@ -41,7 +41,7 @@ describe('quote handling in script/style tags', () => {
       console.log(html);
     </script>
     <p>This should be rendered</p>`
-    
+
     const result = htmlToMarkdown(html)
     expect(result).toBe('This should be rendered')
   })
@@ -51,7 +51,7 @@ describe('quote handling in script/style tags', () => {
       {"message": "He said \\"<script>alert('test')</script>\\" to me"}
     </script>
     <p>This should be rendered</p>`
-    
+
     const result = htmlToMarkdown(html)
     expect(result).toBe('This should be rendered')
   })
@@ -62,7 +62,7 @@ describe('quote handling in script/style tags', () => {
       console.log(message);
     </script>
     <p>This should be rendered</p>`
-    
+
     const result = htmlToMarkdown(html)
     expect(result).toBe('This should be rendered')
   })
@@ -73,7 +73,7 @@ describe('quote handling in script/style tags', () => {
       const inner = 'She replied "goodbye" back';
     </script>
     <p>This should be rendered</p>`
-    
+
     const result = htmlToMarkdown(html)
     expect(result).toBe('This should be rendered')
   })
@@ -84,7 +84,7 @@ describe('quote handling in script/style tags', () => {
       .other { color: red; }
     </style>
     <p>This should be rendered</p>`
-    
+
     const result = htmlToMarkdown(html)
     expect(result).toBe('This should be rendered')
   })
@@ -95,7 +95,7 @@ describe('quote handling in script/style tags', () => {
       const alsoempty = '';
     </script>
     <p>This should be rendered</p>`
-    
+
     const result = htmlToMarkdown(html)
     expect(result).toBe('This should be rendered')
   })
@@ -109,7 +109,7 @@ describe('quote handling in script/style tags', () => {
       \`;
     </script>
     <p>This should be rendered</p>`
-    
+
     const result = htmlToMarkdown(html)
     expect(result).toBe('This should be rendered')
   })
