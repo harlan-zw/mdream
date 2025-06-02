@@ -1,7 +1,7 @@
+import type { ExtractedElement } from '../../../src/plugins/extraction.ts'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown } from '../../../src/index.ts'
 import { extractionPlugin } from '../../../src/plugins/extraction.ts'
-import type { ExtractedElement } from '../../../src/plugins/extraction.ts'
 
 describe('script extraction using extractionPlugin', () => {
   it('should extract Nuxt JSON data script using extractionPlugin', () => {
@@ -82,13 +82,13 @@ describe('script extraction using extractionPlugin', () => {
 <p>Some content after the script</p>`
 
     const extractedJsonScripts: ExtractedElement[] = []
-    
+
     const plugin = extractionPlugin({
-      'script[type="application/json"]': (element) => extractedJsonScripts.push(element),
+      'script[type="application/json"]': element => extractedJsonScripts.push(element),
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [plugin]
+      plugins: [plugin],
     })
 
     // Should extract the JSON script
@@ -96,23 +96,23 @@ describe('script extraction using extractionPlugin', () => {
     expect(extractedJsonScripts[0].name).toBe('script')
     expect(extractedJsonScripts[0].attributes.type).toBe('application/json')
     expect(extractedJsonScripts[0].attributes.id).toBe('__NUXT_DATA__')
-    
+
     // The textContent should contain the JSON data
     expect(extractedJsonScripts[0].textContent.length).toBeGreaterThan(500)
-    
+
     // Verify the JSON can be parsed
     expect(() => JSON.parse(extractedJsonScripts[0].textContent)).not.toThrow()
-    
+
     const parsedData = JSON.parse(extractedJsonScripts[0].textContent)
     expect(Array.isArray(parsedData)).toBe(true)
     expect(parsedData.length).toBeGreaterThan(20)
-    
+
     // Check that specific content exists in the JSON
     const jsonString = JSON.stringify(parsedData)
     expect(jsonString).toContain('Nuxt SEO')
     expect(jsonString).toContain('https://nuxtseo.com')
     expect(jsonString).toContain('system')
-    
+
     // The markdown output should only contain the paragraph
     expect(result.trim()).toBe('Some content after the script')
   })
@@ -131,13 +131,13 @@ describe('script extraction using extractionPlugin', () => {
     <p>Page content</p>`
 
     const extractedScripts: ExtractedElement[] = []
-    
+
     const plugin = extractionPlugin({
-      'script': (element) => extractedScripts.push(element),
+      script: element => extractedScripts.push(element),
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [plugin]
+      plugins: [plugin],
     })
 
     expect(extractedScripts).toHaveLength(1)
@@ -146,7 +146,7 @@ describe('script extraction using extractionPlugin', () => {
     expect(extractedScripts[0].textContent).toContain('apiUrl: "https://api.example.com"')
     expect(extractedScripts[0].textContent).toContain('console.log')
     expect(extractedScripts[0].textContent).toContain('initApp();')
-    
+
     expect(result.trim()).toBe('Page content')
   })
 
@@ -165,27 +165,27 @@ describe('script extraction using extractionPlugin', () => {
     <p>Content</p>`
 
     const extractedScripts: ExtractedElement[] = []
-    
+
     const plugin = extractionPlugin({
-      'script[type="application/json"]': (element) => extractedScripts.push(element),
+      'script[type="application/json"]': element => extractedScripts.push(element),
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [plugin]
+      plugins: [plugin],
     })
 
     expect(extractedScripts).toHaveLength(1)
-    
+
     // Verify the JSON content is properly extracted and can be parsed
     expect(() => JSON.parse(extractedScripts[0].textContent)).not.toThrow()
-    
+
     const parsedData = JSON.parse(extractedScripts[0].textContent)
     expect(parsedData.message).toBe('He said "Hello world" to everyone')
     expect(parsedData.template).toBe('<div class="test">Content with \'quotes\' and "escaped quotes"</div>')
     expect(parsedData.data.quotes).toBe('Mix of \'single\' and "double" quotes')
     expect(parsedData.data.backticks).toBe('Template `strings` with ${variables}')
     expect(parsedData.data.url).toBe('https://example.com/path?param=\'value\'&other="test"')
-    
+
     expect(result.trim()).toBe('Content')
   })
 
@@ -200,30 +200,30 @@ describe('script extraction using extractionPlugin', () => {
 
     const jsonLdScripts: ExtractedElement[] = []
     const jsonScripts: ExtractedElement[] = []
-    
+
     const plugin = extractionPlugin({
-      'script[type="application/ld+json"]': (element) => jsonLdScripts.push(element),
-      'script[type="application/json"]': (element) => jsonScripts.push(element),
+      'script[type="application/ld+json"]': element => jsonLdScripts.push(element),
+      'script[type="application/json"]': element => jsonScripts.push(element),
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [plugin]
+      plugins: [plugin],
     })
 
     // Should categorize them correctly
     expect(jsonLdScripts).toHaveLength(1)
     expect(jsonScripts).toHaveLength(1)
-    
+
     // Verify content extraction works with complex quotes
     expect(jsonLdScripts[0].textContent).toContain('"@type": "WebPage"')
     expect(jsonScripts[0].textContent).toContain('"config": "value"')
     expect(jsonScripts[0].textContent).toContain('Mix of single and double quotes')
     expect(jsonScripts[0].attributes.id).toBe('data')
-    
+
     // Both should parse as valid JSON
     expect(() => JSON.parse(jsonLdScripts[0].textContent)).not.toThrow()
     expect(() => JSON.parse(jsonScripts[0].textContent)).not.toThrow()
-    
+
     expect(result.trim()).toBe('Content')
   })
 })
