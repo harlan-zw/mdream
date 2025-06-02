@@ -169,9 +169,11 @@ export function parseHTML(htmlChunk: string, state: MdreamProcessingState, handl
             // Toggle quote states
             if (currentCharCode === APOS_CHAR && !state.inDoubleQuote && !state.inBacktick) {
               state.inSingleQuote = !state.inSingleQuote
-            } else if (currentCharCode === QUOTE_CHAR && !state.inSingleQuote && !state.inBacktick) {
+            }
+            else if (currentCharCode === QUOTE_CHAR && !state.inSingleQuote && !state.inBacktick) {
               state.inDoubleQuote = !state.inDoubleQuote
-            } else if (currentCharCode === BACKTICK_CHAR && !state.inSingleQuote && !state.inDoubleQuote) {
+            }
+            else if (currentCharCode === BACKTICK_CHAR && !state.inSingleQuote && !state.inDoubleQuote) {
               state.inBacktick = !state.inBacktick
             }
           }
