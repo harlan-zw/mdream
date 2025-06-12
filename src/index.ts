@@ -15,4 +15,6 @@ export function htmlToMarkdown(
 
 export { streamHtmlToMarkdown } from './stream'
 
+export { TagIdMap } from './const'
+
 export type * from './types'
