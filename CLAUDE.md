@@ -106,20 +106,41 @@ export function headerExtractPlugin() {
   const headers: string[] = []
 
   return createPlugin({
-    onNodeEnter(element) {
+    onNodeEnter(element, state) {
       if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(element.tagName)) {
         // Will collect text in processTextNode
+        // Can access state.depth for nesting level information
       }
     },
 
-    processTextNode(textNode) {
+    processTextNode(textNode, state) {
       const parent = textNode.parent
       if (parent && parent.tagName?.match(/^h[1-6]$/)) {
         headers.push(textNode.value.trim())
+        // Access state.options or state.context for additional context
       }
     }
   })
 }
+```
+
+#### Example: Extraction Plugin
+
+The `extractionPlugin` provides a specialized way to extract elements using CSS selectors. All callbacks receive both the element and runtime state:
+
+```typescript
+import { extractionPlugin } from '../plugins/extraction.ts'
+
+const plugin = extractionPlugin({
+  'h2': (element, state) => {
+    console.log('Heading:', element.textContent)
+    console.log('Depth:', state.depth) // Current nesting depth
+  },
+  'img[alt]': (element, state) => {
+    console.log('Image:', element.attributes.src, element.attributes.alt)
+    console.log('Has options:', !!state.options) // Access to conversion options
+  }
+})
 ```
 
 #### Example: Content Filter Plugin

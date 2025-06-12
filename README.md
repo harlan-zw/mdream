@@ -206,7 +206,7 @@ const adBlockPlugin = createPlugin({
 Extract specific elements and their content during HTML processing for data analysis or content discovery:
 
 ```ts
-import type { ExtractedElement } from 'mdream/plugins'
+import type { ExtractedElement, MdreamRuntimeState } from 'mdream/plugins'
 import { extractionPlugin, htmlToMarkdown } from 'mdream'
 
 const html: string = `
@@ -219,12 +219,14 @@ const html: string = `
 
 // Extract elements using CSS selectors
 const plugin = extractionPlugin({
-  'h2': (element: ExtractedElement): void => {
+  'h2': (element: ExtractedElement, state: MdreamRuntimeState): void => {
     console.log('Heading:', element.textContent) // "Getting Started"
+    console.log('Depth:', state.depth) // Current nesting depth
   },
-  'img[alt]': (element: ExtractedElement): void => {
+  'img[alt]': (element: ExtractedElement, state: MdreamRuntimeState): void => {
     console.log('Image:', element.attributes.src, element.attributes.alt)
     // "Image: /hero.jpg Hero image"
+    console.log('Context:', state.options) // Access to conversion options
   }
 })
 

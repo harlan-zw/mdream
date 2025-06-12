@@ -1,4 +1,5 @@
 import type { ExtractedElement } from '../../../src/plugins/extraction.ts'
+import type { MdreamRuntimeState } from '../../../src/types.ts'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown } from '../../../src/index.ts'
 import { extractionPlugin } from '../../../src/plugins/extraction.ts'
@@ -18,7 +19,7 @@ describe('extraction plugin', () => {
 
     const extractedH2s: ExtractedElement[] = []
     const plugin = extractionPlugin({
-      h2: (element) => {
+      h2: (element, state) => {
         extractedH2s.push(element)
       },
     })
@@ -46,7 +47,7 @@ describe('extraction plugin', () => {
 
     const extractedContent: ExtractedElement[] = []
     const plugin = extractionPlugin({
-      '.content': (element) => {
+      '.content': (element, state) => {
         extractedContent.push(element)
       },
     })
@@ -75,7 +76,7 @@ describe('extraction plugin', () => {
 
     const extractedHeader: ExtractedElement[] = []
     const plugin = extractionPlugin({
-      '#header': (element) => {
+      '#header': (element, state) => {
         extractedHeader.push(element)
       },
     })
@@ -105,10 +106,10 @@ describe('extraction plugin', () => {
     const extractedTestComponents: ExtractedElement[] = []
 
     const plugin = extractionPlugin({
-      'img[alt]': (element) => {
+      'img[alt]': (element, state) => {
         extractedImages.push(element)
       },
-      '[data-testid]': (element) => {
+      '[data-testid]': (element, state) => {
         extractedTestComponents.push(element)
       },
     })
@@ -150,10 +151,10 @@ describe('extraction plugin', () => {
     const extractedParagraphs: ExtractedElement[] = []
 
     const plugin = extractionPlugin({
-      article: (element) => {
+      article: (element, state) => {
         extractedArticles.push(element)
       },
-      p: (element) => {
+      p: (element, state) => {
         extractedParagraphs.push(element)
       },
     })
@@ -205,12 +206,12 @@ describe('extraction plugin', () => {
     }
 
     const plugin = extractionPlugin({
-      'title': element => results.titles.push(element),
-      'h1': element => results.headings.push(element),
-      'h2': element => results.headings.push(element),
-      '.navigation': element => results.navigation.push(element),
-      'a': element => results.links.push(element),
-      'meta[name="description"]': element => results.metas.push(element),
+      'title': (element, state) => results.titles.push(element),
+      'h1': (element, state) => results.headings.push(element),
+      'h2': (element, state) => results.headings.push(element),
+      '.navigation': (element, state) => results.navigation.push(element),
+      'a': (element, state) => results.links.push(element),
+      'meta[name="description"]': (element, state) => results.metas.push(element),
     })
 
     htmlToMarkdown(html, {
@@ -254,10 +255,10 @@ describe('extraction plugin', () => {
     const extractedMainContent: ExtractedElement[] = []
 
     const plugin = extractionPlugin({
-      'div.card.featured': (element) => {
+      'div.card.featured': (element, state) => {
         extractedFeaturedCards.push(element)
       },
-      'section#main.content': (element) => {
+      'section#main.content': (element, state) => {
         extractedMainContent.push(element)
       },
     })
@@ -292,7 +293,7 @@ describe('extraction plugin', () => {
 
     const extractedDivs: ExtractedElement[] = []
     const plugin = extractionPlugin({
-      div: (element) => {
+      div: (element, state) => {
         extractedDivs.push(element)
       },
     })
@@ -345,15 +346,15 @@ describe('extraction plugin', () => {
     }
 
     const plugin = extractionPlugin({
-      'title': element => seoData.title.push(element),
-      'meta[name]': element => seoData.metas.push(element),
-      'meta[property]': element => seoData.metas.push(element),
-      'h1': element => seoData.headings.push(element),
-      'img': element => seoData.images.push(element),
-      'a[href]': element => seoData.links.push(element),
-      'script': element => seoData.scripts.push(element),
-      'style': element => seoData.styles.push(element),
-      'script[type="application/ld+json"]': element => seoData.jsonLd.push(element),
+      'title': (element, state) => seoData.title.push(element),
+      'meta[name]': (element, state) => seoData.metas.push(element),
+      'meta[property]': (element, state) => seoData.metas.push(element),
+      'h1': (element, state) => seoData.headings.push(element),
+      'img': (element, state) => seoData.images.push(element),
+      'a[href]': (element, state) => seoData.links.push(element),
+      'script': (element, state) => seoData.scripts.push(element),
+      'style': (element, state) => seoData.styles.push(element),
+      'script[type="application/ld+json"]': (element, state) => seoData.jsonLd.push(element),
     })
 
     htmlToMarkdown(html, {
@@ -403,5 +404,78 @@ describe('extraction plugin', () => {
     // Note: Style content might not be extracted as textContent in the parser
     // so we'll just verify the element exists and is the correct tag
     expect(seoData.styles[0].name).toBe('style')
+  })
+
+  it('should provide state context to extraction callbacks', () => {
+    const html = `
+      <html>
+        <body>
+          <article>
+            <h1>Article Title</h1>
+            <p>Paragraph content</p>
+          </article>
+          <nav>
+            <ul>
+              <li><a href="/page1">Page 1</a></li>
+              <li><a href="/page2">Page 2</a></li>
+            </ul>
+          </nav>
+        </body>
+      </html>
+    `
+
+    interface ExtractedWithContext {
+      element: ExtractedElement
+      depth: number
+      hasOptions: boolean
+      hasContext: boolean
+      currentNodeName: string | undefined
+    }
+
+    const extractedElements: ExtractedWithContext[] = []
+
+    const extractCallback = (element: ExtractedElement, state: MdreamRuntimeState) => {
+      extractedElements.push({
+        element,
+        depth: state.depth || 0,
+        hasOptions: !!state.options,
+        hasContext: !!state.context,
+        currentNodeName: state.currentNode?.name,
+      })
+    }
+
+    const plugin = extractionPlugin({
+      h1: extractCallback,
+      p: extractCallback,
+      a: extractCallback,
+    })
+
+    htmlToMarkdown(html, {
+      plugins: [plugin],
+    })
+
+    expect(extractedElements).toHaveLength(4) // 1 h1, 1 p, 2 a tags
+
+    // Verify state information is available
+    extractedElements.forEach((extracted) => {
+      expect(extracted.depth).toBeGreaterThan(0)
+      expect(extracted.hasOptions).toBe(true)
+      // Context might be undefined initially, but state should be passed
+    })
+
+    // Verify elements are extracted correctly
+    const h1Element = extractedElements.find(e => e.element.name === 'h1')
+    const pElement = extractedElements.find(e => e.element.name === 'p')
+    const aElements = extractedElements.filter(e => e.element.name === 'a')
+
+    expect(h1Element?.element.textContent).toBe('Article Title')
+    expect(pElement?.element.textContent).toBe('Paragraph content')
+    expect(aElements).toHaveLength(2)
+    expect(aElements[0].element.textContent).toBe('Page 1')
+    expect(aElements[1].element.textContent).toBe('Page 2')
+
+    // Verify attributes are available
+    expect(aElements[0].element.attributes.href).toBe('/page1')
+    expect(aElements[1].element.attributes.href).toBe('/page2')
   })
 })
