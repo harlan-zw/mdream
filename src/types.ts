@@ -279,3 +279,5 @@ export interface TagHandler {
   spacing?: readonly [number, number]
   excludesTextNodes?: boolean
 }
+
+export type { ExtractedElement } from './plugins/extraction.ts'
