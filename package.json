@@ -2,7 +2,7 @@
   "name": "mdream",
   "type": "module",
   "version": "0.2.6",
-  "packageManager": "pnpm@10.11.0",
+  "packageManager": "pnpm@10.12.3",
   "description": "Ultra-performant JavaScript HTML to Markdown converter optimized for LLMs.",
   "author": {
     "name": "Harlan Wilton",
@@ -49,16 +49,16 @@
     "cac": "^6.7.14"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^4.13.2",
-    "@types/node": "^22.15.29",
-    "bumpp": "^10.1.1",
-    "crawlee": "^3.13.5",
-    "eslint": "^9.28.0",
+    "@antfu/eslint-config": "^4.16.1",
+    "@types/node": "^22.15.33",
+    "bumpp": "^10.2.0",
+    "crawlee": "^3.13.8",
+    "eslint": "^9.29.0",
     "llm-cost": "^1.0.5",
-    "playwright": "^1.52.0",
+    "playwright": "^1.53.1",
     "typescript": "5.8.3",
     "unbuild": "^3.5.0",
-    "vitest": "^3.1.4"
+    "vitest": "^3.2.4"
   },
   "pnpm": {
     "overrides": {

@@ -13,8 +13,8 @@ export function htmlToMarkdown(
   return result.trimEnd()
 }
 
-export { streamHtmlToMarkdown } from './stream'
-
 export { TagIdMap } from './const'
+
+export { streamHtmlToMarkdown } from './stream'
 
 export type * from './types'
