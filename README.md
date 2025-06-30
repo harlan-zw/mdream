@@ -22,12 +22,10 @@
 
 - 🧠 Content Extraction: [Readability.js]() scoring heuristics for [~50% fewer tokens*]() and improved accuracy.
 - 🔍 GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
-- Tailwind CSS: Converts Tailwind CSS classes to Markdown for better readability.
 
 **Ultra Performant**
 - 🚀 Convert 1.4MB of HTML in [~50ms*]() with advanced streaming support, including content-based buffering.
 - ⚡ 5kB gzip, zero dependencies.
-- Streaming support
 
 **Adaptable**
 
