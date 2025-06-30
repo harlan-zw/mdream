@@ -847,14 +847,16 @@ export function parseAttributes(attrStr: string): Record<string, string> {
   }
 
   // Handle the last attribute if we're still processing it
-  if (name) {
-    if (state === QUOTED_VALUE || state === UNQUOTED_VALUE) {
+  if (state === QUOTED_VALUE || state === UNQUOTED_VALUE) {
+    if (name) {
       result[name] = attrStr.substring(valueStart, i)
     }
-    else if (state === NAME || state === AFTER_NAME || state === BEFORE_VALUE) {
-      nameEnd = nameEnd || i
-      name = name || attrStr.substring(nameStart, nameEnd).toLowerCase()
-      result[name] = ''
+  }
+  else if (state === NAME || state === AFTER_NAME || state === BEFORE_VALUE) {
+    nameEnd = nameEnd || i
+    const currentName = attrStr.substring(nameStart, nameEnd).toLowerCase()
+    if (currentName) {
+      result[currentName] = ''
     }
   }
 
