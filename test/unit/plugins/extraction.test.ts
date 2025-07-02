@@ -19,7 +19,7 @@ describe('extraction plugin', () => {
 
     const extractedH2s: ExtractedElement[] = []
     const plugin = extractionPlugin({
-      h2: (element, state) => {
+      h2: (element) => {
         extractedH2s.push(element)
       },
     })
@@ -47,7 +47,7 @@ describe('extraction plugin', () => {
 
     const extractedContent: ExtractedElement[] = []
     const plugin = extractionPlugin({
-      '.content': (element, state) => {
+      '.content': (element) => {
         extractedContent.push(element)
       },
     })
@@ -76,7 +76,7 @@ describe('extraction plugin', () => {
 
     const extractedHeader: ExtractedElement[] = []
     const plugin = extractionPlugin({
-      '#header': (element, state) => {
+      '#header': (element) => {
         extractedHeader.push(element)
       },
     })
@@ -106,10 +106,10 @@ describe('extraction plugin', () => {
     const extractedTestComponents: ExtractedElement[] = []
 
     const plugin = extractionPlugin({
-      'img[alt]': (element, state) => {
+      'img[alt]': (element) => {
         extractedImages.push(element)
       },
-      '[data-testid]': (element, state) => {
+      '[data-testid]': (element) => {
         extractedTestComponents.push(element)
       },
     })
@@ -151,10 +151,10 @@ describe('extraction plugin', () => {
     const extractedParagraphs: ExtractedElement[] = []
 
     const plugin = extractionPlugin({
-      article: (element, state) => {
+      article: (element) => {
         extractedArticles.push(element)
       },
-      p: (element, state) => {
+      p: (element) => {
         extractedParagraphs.push(element)
       },
     })
@@ -206,12 +206,12 @@ describe('extraction plugin', () => {
     }
 
     const plugin = extractionPlugin({
-      'title': (element, state) => results.titles.push(element),
-      'h1': (element, state) => results.headings.push(element),
-      'h2': (element, state) => results.headings.push(element),
-      '.navigation': (element, state) => results.navigation.push(element),
-      'a': (element, state) => results.links.push(element),
-      'meta[name="description"]': (element, state) => results.metas.push(element),
+      'title': element => results.titles.push(element),
+      'h1': element => results.headings.push(element),
+      'h2': element => results.headings.push(element),
+      '.navigation': element => results.navigation.push(element),
+      'a': element => results.links.push(element),
+      'meta[name="description"]': element => results.metas.push(element),
     })
 
     htmlToMarkdown(html, {
@@ -255,10 +255,10 @@ describe('extraction plugin', () => {
     const extractedMainContent: ExtractedElement[] = []
 
     const plugin = extractionPlugin({
-      'div.card.featured': (element, state) => {
+      'div.card.featured': (element) => {
         extractedFeaturedCards.push(element)
       },
-      'section#main.content': (element, state) => {
+      'section#main.content': (element) => {
         extractedMainContent.push(element)
       },
     })
@@ -293,7 +293,7 @@ describe('extraction plugin', () => {
 
     const extractedDivs: ExtractedElement[] = []
     const plugin = extractionPlugin({
-      div: (element, state) => {
+      div: (element) => {
         extractedDivs.push(element)
       },
     })
@@ -346,15 +346,15 @@ describe('extraction plugin', () => {
     }
 
     const plugin = extractionPlugin({
-      'title': (element, state) => seoData.title.push(element),
-      'meta[name]': (element, state) => seoData.metas.push(element),
-      'meta[property]': (element, state) => seoData.metas.push(element),
-      'h1': (element, state) => seoData.headings.push(element),
-      'img': (element, state) => seoData.images.push(element),
-      'a[href]': (element, state) => seoData.links.push(element),
-      'script': (element, state) => seoData.scripts.push(element),
-      'style': (element, state) => seoData.styles.push(element),
-      'script[type="application/ld+json"]': (element, state) => seoData.jsonLd.push(element),
+      'title': element => seoData.title.push(element),
+      'meta[name]': element => seoData.metas.push(element),
+      'meta[property]': element => seoData.metas.push(element),
+      'h1': element => seoData.headings.push(element),
+      'img': element => seoData.images.push(element),
+      'a[href]': element => seoData.links.push(element),
+      'script': element => seoData.scripts.push(element),
+      'style': element => seoData.styles.push(element),
+      'script[type="application/ld+json"]': element => seoData.jsonLd.push(element),
     })
 
     htmlToMarkdown(html, {

@@ -1,6 +1,6 @@
+import type { ParseState } from './parse'
 import type { ElementNode, HandlerContext, HTMLToMarkdownOptions, NodeEvent, TextNode } from './types'
 import { assembleBufferedContent, collectNodeContent } from './buffer-region'
-import { parseHtmlStream, type ParseState } from './parse'
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
@@ -14,6 +14,7 @@ import {
   TAG_TABLE,
   TEXT_NODE,
 } from './const'
+import { parseHtmlStream } from './parse'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -48,25 +49,25 @@ function needsSpacing(lastChar: string, firstChar: string, state?: MarkdownState
   if (lastChar === ' ' || lastChar === '\n' || lastChar === '\t') {
     return false
   }
-  
+
   // Don't add space if first char is a space or newline
   if (firstChar === ' ' || firstChar === '\n' || firstChar === '\t') {
     return false
   }
-  
+
   // Special cases where we don't want spacing
   const noSpaceAfter = new Set(['[', '(', '>', '*', '_', '`'])
   const noSpaceBefore = new Set([']', ')', '<', '.', ',', '!', '?', ':', ';', '*', '_', '`'])
-  
+
   // Special case: Allow spacing between pipe and HTML tags in table cells
   if (lastChar === '|' && firstChar === '<' && state && state.depthMap[TAG_TABLE] > 0) {
     return true
   }
-  
+
   if (noSpaceAfter.has(lastChar) || noSpaceBefore.has(firstChar)) {
     return false
   }
-  
+
   // For everything else, add spacing
   return true
 }
@@ -90,7 +91,6 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: any, textNode: T
 function calculateNewLineConfig(node: ElementNode): readonly [number, number] {
   const tagId = node.tagId
   const depthMap = node.depthMap
-
 
   // Adjust for list items and blockquotes
   if ((tagId !== TAG_LI && depthMap[TAG_LI] > 0)
@@ -122,11 +122,11 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
     regionContentBuffers: new Map(),
     depthMap: new Uint8Array(MAX_TAG_ID),
   }
-  
+
   // Initialize default region
   state.regionToggles.set(0, true)
   state.regionContentBuffers.set(0, [])
-  
+
   let lastYieldedLength = 0
 
   /**
@@ -136,13 +136,13 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
     const { type: eventType, node } = event
     const lastNode = state.lastNode
     state.lastNode = event.node as ElementNode | TextNode
-    
+
     // Update depth for plugin access
     state.depth = node.depth
     const buff = state.regionContentBuffers.get(node.regionId || 0) || []
     const lastBuffEntry = buff[buff.length - 1]
     const lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
-    
+
     // Get second last character
     let secondLastChar
     if (lastBuffEntry?.length > 1) {
@@ -218,9 +218,6 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
     const newLineConfig = calculateNewLineConfig(node as ElementNode)
     const configuredNewLines = newLineConfig[eventType] || 0
     const newLines = Math.max(0, configuredNewLines - lastNewLines)
-    
-    
-
 
     if (newLines > 0) {
       // If the region has no content, add the current content (without new lines)
@@ -260,13 +257,11 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
           // Don't trim before elements that have collapsesInnerWhiteSpace on enter
           // Also don't trim before block elements that have their own spacing configuration
           const shouldTrim = (!isInlineElement || eventType === NodeEventExit) && !isBlockElement && !(collapsesWhiteSpace && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter)
-          
+
           if (shouldTrim) {
             const originalLength = lastFragment.length
             const trimmed = lastFragment.trimEnd()
             const trimmedChars = originalLength - trimmed.length
-
-
 
             // Update the last content in buffer regions with trimmed content
             if (trimmedChars > 0) {
@@ -285,7 +280,7 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
     if (output[0]?.[0] && eventType === NodeEventEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
       collectNodeContent(node, ' ', state)
     }
-    
+
     // Add all output fragments
     for (const fragment of output) {
       collectNodeContent(node, fragment, state)
@@ -315,7 +310,7 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
         // Run plugin hooks
         if (event.node.type === ELEMENT_NODE) {
           const element = event.node as ElementNode
-          
+
           // Run processAttributes hook on element enter
           if (event.type === NodeEventEnter) {
             for (const plugin of state.options.plugins) {
@@ -324,7 +319,7 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
               }
             }
           }
-          
+
           // Collect plugin hook outputs
           const fn = event.type === NodeEventEnter ? 'onNodeEnter' : 'onNodeExit'
           const pluginOutputs: string[] = []
@@ -336,12 +331,13 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
               }
             }
           }
-          
+
           // Store plugin outputs on the element for processing in processEvent
           if (pluginOutputs.length > 0) {
             element.pluginOutput = (element.pluginOutput || []).concat(pluginOutputs)
           }
-        } else if (event.node.type === TEXT_NODE && event.type === NodeEventEnter) {
+        }
+        else if (event.node.type === TEXT_NODE && event.type === NodeEventEnter) {
           const textNode = event.node as TextNode
           for (const plugin of state.options.plugins) {
             if (plugin.processTextNode) {
@@ -388,7 +384,7 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
     const currentContent = fragments.join('').trimStart()
     const newContent = currentContent.slice(lastYieldedLength)
     lastYieldedLength = currentContent.length
-    
+
     return newContent
   }
 

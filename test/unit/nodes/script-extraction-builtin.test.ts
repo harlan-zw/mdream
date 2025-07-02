@@ -183,6 +183,7 @@ describe('script extraction using extractionPlugin', () => {
     expect(parsedData.message).toBe('He said "Hello world" to everyone')
     expect(parsedData.template).toBe('<div class="test">Content with \'quotes\' and "escaped quotes"</div>')
     expect(parsedData.data.quotes).toBe('Mix of \'single\' and "double" quotes')
+    // eslint-disable-next-line no-template-curly-in-string
     expect(parsedData.data.backticks).toBe('Template `strings` with ${variables}')
     expect(parsedData.data.url).toBe('https://example.com/path?param=\'value\'&other="test"')
 

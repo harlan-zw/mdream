@@ -1,6 +1,6 @@
 import type { NodeEvent } from '../../src/types.js'
 import { describe, expect, it } from 'vitest'
-import { MAX_TAG_ID, NodeEventEnter } from '../../src/const.js'
+import { NodeEventEnter } from '../../src/const.js'
 import { htmlToMarkdown } from '../../src/index.js'
 import { parseHtml } from '../../src/parse.js'
 

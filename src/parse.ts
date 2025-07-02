@@ -1,4 +1,4 @@
-import type { ElementNode, MdreamRuntimeState, Node, NodeEvent, Plugin, TextNode } from './types'
+import type { ElementNode, Node, NodeEvent, Plugin, TextNode } from './types'
 import {
   ELEMENT_NODE,
   MAX_TAG_ID,
@@ -187,7 +187,7 @@ function parseHtmlInternal(
         state.textBufferContainsNonWhitespace = true
         state.lastCharWasWhitespace = false
         state.justClosedTag = false
-        
+
         // Handle special characters that need escaping
         if (currentCharCode === PIPE_CHAR && state.depthMap[TAG_TABLE]) {
           textBuffer += '\\|'
@@ -294,16 +294,16 @@ function parseHtmlInternal(
         textBuffer += htmlChunk.substring(i)
         break
       }
-      
+
       const tagName = htmlChunk.substring(tagNameStart, tagNameEnd).toLowerCase()
       if (!tagName) {
         i = tagNameEnd
         break
       }
-      
+
       const tagId = TagIdMap[tagName] ?? -1
       i2 = tagNameEnd
-      
+
       if (state.currentNode?.tagHandler?.isNonNesting) {
         if (tagId !== state.currentNode?.tagId) {
           textBuffer += htmlChunk[i++]
@@ -315,7 +315,7 @@ function parseHtmlInternal(
         processTextBuffer(textBuffer, state, handleEvent)
         textBuffer = ''
       }
-      
+
       const result = processOpeningTag(tagName, tagId, htmlChunk, i2, state, handleEvent)
 
       if (result.skip) {
@@ -345,7 +345,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   const containsWhitespace = state.textBufferContainsWhitespace
   state.textBufferContainsNonWhitespace = false
   state.textBufferContainsWhitespace = false
-  
+
   if (!state.currentNode) {
     return
   }
@@ -361,7 +361,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   if (text.length === 0) {
     return
   }
-  
+
   const parentsToIncrement = traverseUpToFirstBlockNode(state.currentNode)
   const firstBlockParent = parentsToIncrement[parentsToIncrement.length - 1]
 
@@ -375,7 +375,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
       text = text.substring(start)
     }
   }
-  
+
   if (state.hasEncodedHtmlEntity) {
     text = decodeHTMLEntities(String(text))
     state.hasEncodedHtmlEntity = false
@@ -427,7 +427,7 @@ function processClosingTag(
     }
     i++
   }
-  
+
   if (!foundClose) {
     return {
       complete: false,
@@ -435,7 +435,7 @@ function processClosingTag(
       remainingText: htmlChunk.substring(position),
     }
   }
-  
+
   const tagName = htmlChunk.substring(tagNameStart, i).toLowerCase()
   const tagId = TagIdMap[tagName] ?? -1
 
@@ -478,7 +478,7 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
   if (!node) {
     return
   }
-  
+
   // Handle empty links
   if (node.tagId === TAG_A && !node.childTextNodeIndex) {
     const prefix = node.attributes?.title || node.attributes?.['aria-label'] || ''
@@ -623,7 +623,7 @@ function processOpeningTag(
   if (state.currentNode) {
     state.currentNode.currentWalkIndex = state.currentNode.currentWalkIndex || 0
   }
-  
+
   const currentWalkIndex = state.currentNode ? state.currentNode.currentWalkIndex!++ : 0
 
   const tag = {
@@ -638,7 +638,7 @@ function processOpeningTag(
     tagId,
     tagHandler,
   } as ElementNode
-  
+
   state.lastTextNode = tag
 
   // processAttributes hooks are handled at the processor level

@@ -1,5 +1,4 @@
 import type { HTMLToMarkdownOptions } from './types'
-import { parseHtml } from './parse'
 import { createMarkdownProcessor } from './markdown-processor'
 
 export function htmlToMarkdown(
@@ -7,17 +6,17 @@ export function htmlToMarkdown(
   options: HTMLToMarkdownOptions = {},
 ): string {
   const processor = createMarkdownProcessor(options)
-  
+
   // Use streaming approach to properly integrate plugins with processor state
   processor.processHtml(html)
-  
+
   return processor.getMarkdown()
 }
 
-export { parseHtml } from './parse'
-export { MarkdownProcessor } from './markdown-processor'
 export { TagIdMap } from './const'
-export { streamHtmlToMarkdown } from './stream'
+export { MarkdownProcessor } from './markdown-processor'
+export { parseHtml } from './parse'
 export { createPlugin } from './pluggable/plugin'
+export { streamHtmlToMarkdown } from './stream'
 
 export type * from './types'
