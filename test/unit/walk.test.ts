@@ -1,19 +1,13 @@
-import type { MdreamProcessingState, NodeEvent } from '../../src/types.js'
+import type { NodeEvent } from '../../src/types.js'
 import { describe, expect, it } from 'vitest'
 import { MAX_TAG_ID, NodeEventEnter } from '../../src/const.js'
 import { htmlToMarkdown } from '../../src/index.js'
-import { parseHTML } from '../../src/parser.js'
+import { parseHtml } from '../../src/parse.js'
 
 describe('hTML walking', () => {
   it('correctly tracks element depth in nested structures', () => {
     const html = '<div><p>Text in paragraph <span>inside span</span> more text</p></div>'
     const depthLog: { tagName: string, depth: number, event: string }[] = []
-
-    const state: Partial<MdreamProcessingState> = {
-      depthMap: new Uint8Array(MAX_TAG_ID),
-      depth: 0,
-      currentNode: null,
-    }
 
     function handleEvent(event: NodeEvent) {
       const node = event.node
@@ -28,7 +22,8 @@ describe('hTML walking', () => {
       }
     }
 
-    parseHTML(html, state as MdreamProcessingState, handleEvent)
+    const { events } = parseHtml(html)
+    events.forEach(handleEvent)
 
     expect(depthLog).toEqual([
       { tagName: 'div', depth: 1, event: 'enter' },
@@ -44,12 +39,6 @@ describe('hTML walking', () => {
     const html = '<div><p>Text with <img src="image.jpg" alt="image"> and <br> tags</p></div>'
     const depthLog: { tagName: string, depth: number, event: string }[] = []
 
-    const state: Partial<MdreamProcessingState> = {
-      depthMap: new Uint8Array(MAX_TAG_ID),
-      depth: 0,
-      currentNode: null,
-    }
-
     function handleEvent(event: NodeEvent) {
       const node = event.node
       const eventType = event.type === NodeEventEnter ? 'enter' : 'exit'
@@ -63,7 +52,8 @@ describe('hTML walking', () => {
       }
     }
 
-    parseHTML(html, state as MdreamProcessingState, handleEvent)
+    const { events } = parseHtml(html)
+    events.forEach(handleEvent)
 
     expect(depthLog).toEqual([
       { tagName: 'div', depth: 1, event: 'enter' },
@@ -81,12 +71,6 @@ describe('hTML walking', () => {
     const html = '<div><ul><li><a href="#">Link <strong>with bold</strong> text</a></li></ul></div>'
     const depthMapLog: { tagName: string, depthMap: Uint8Array }[] = []
 
-    const state: Partial<MdreamProcessingState> = {
-      depthMap: new Uint8Array(MAX_TAG_ID),
-      depth: 0,
-      currentNode: null,
-    }
-
     function handleEvent(event: NodeEvent) {
       const node = event.node
 
@@ -98,7 +82,8 @@ describe('hTML walking', () => {
       }
     }
 
-    parseHTML(html, state as MdreamProcessingState, handleEvent)
+    const { events } = parseHtml(html)
+    events.forEach(handleEvent)
 
     // Note: depthMap uses numeric tag IDs, so we check for the presence and values
     // rather than exact objects

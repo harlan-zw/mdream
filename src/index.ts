@@ -1,20 +1,23 @@
-import type { HTMLToMarkdownOptions, MdreamRuntimeState } from './types'
-import { processPartialHTMLToMarkdown } from './parser'
+import type { HTMLToMarkdownOptions } from './types'
+import { parseHtml } from './parse'
+import { createMarkdownProcessor } from './markdown-processor'
 
 export function htmlToMarkdown(
   html: string,
   options: HTMLToMarkdownOptions = {},
 ): string {
-  // Initialize state
-  const state = {
-    options,
-  } as MdreamRuntimeState
-  const result = processPartialHTMLToMarkdown(html, state).chunk
-  return result.trimEnd()
+  const processor = createMarkdownProcessor(options)
+  
+  // Use streaming approach to properly integrate plugins with processor state
+  processor.processHtml(html)
+  
+  return processor.getMarkdown()
 }
 
+export { parseHtml } from './parse'
+export { MarkdownProcessor } from './markdown-processor'
 export { TagIdMap } from './const'
-
 export { streamHtmlToMarkdown } from './stream'
+export { createPlugin } from './pluggable/plugin'
 
 export type * from './types'

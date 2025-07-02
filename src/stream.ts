@@ -1,6 +1,7 @@
 import type { ReadableStream } from 'node:stream/web'
-import type { HTMLToMarkdownOptions, MdreamRuntimeState } from './types'
-import { processPartialHTMLToMarkdown } from './parser'
+import type { HTMLToMarkdownOptions } from './types'
+import { parseHtmlStream, type ParseState } from './parse'
+import { createMarkdownProcessor } from './markdown-processor'
 
 /**
  * Creates a markdown stream from an HTML stream
@@ -18,9 +19,11 @@ export async function* streamHtmlToMarkdown(
   const decoder = new TextDecoder()
   const reader = htmlStream.getReader()
 
-  // Initialize state
-  const state: Partial<MdreamRuntimeState> = {
-    options,
+  const processor = createMarkdownProcessor(options)
+  const parseState: ParseState = {
+    depthMap: new Uint8Array(1024),
+    depth: 0,
+    plugins: options.plugins || [],
   }
 
   let remainingHtml = ''
@@ -35,13 +38,27 @@ export async function* streamHtmlToMarkdown(
 
       // Process the HTML chunk
       const htmlContent = `${remainingHtml}${typeof value === 'string' ? value : decoder.decode(value, { stream: true })}`
-      const result = processPartialHTMLToMarkdown(htmlContent, state)
+      
+      remainingHtml = parseHtmlStream(htmlContent, parseState, (event) => {
+        processor.processEvent(event)
+      })
 
-      if (result.chunk) {
-        yield result.chunk
+      const chunk = processor.getMarkdownChunk()
+      if (chunk) {
+        yield chunk
       }
+    }
+    // Process any remaining HTML and emit final chunk
+    if (remainingHtml) {
+      parseHtmlStream(remainingHtml, parseState, (event) => {
+        processor.processEvent(event)
+      })
+    }
 
-      remainingHtml = result.remainingHTML
+    // Emit any final content
+    const finalChunk = processor.getMarkdownChunk()
+    if (finalChunk) {
+      yield finalChunk
     }
   }
   finally {
