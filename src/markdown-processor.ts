@@ -11,6 +11,7 @@ import {
   TAG_BLOCKQUOTE,
   TAG_LI,
   TAG_PRE,
+  TAG_TABLE,
   TEXT_NODE,
 } from './const'
 
@@ -42,7 +43,7 @@ export interface MarkdownState {
 /**
  * Determines if spacing is needed between two characters
  */
-function needsSpacing(lastChar: string, firstChar: string): boolean {
+function needsSpacing(lastChar: string, firstChar: string, state?: MarkdownState): boolean {
   // Don't add space if last char is already a space or newline
   if (lastChar === ' ' || lastChar === '\n' || lastChar === '\t') {
     return false
@@ -56,6 +57,11 @@ function needsSpacing(lastChar: string, firstChar: string): boolean {
   // Special cases where we don't want spacing
   const noSpaceAfter = new Set(['[', '(', '>', '*', '_', '`'])
   const noSpaceBefore = new Set([']', ')', '<', '.', ',', '!', '?', ':', ';', '*', '_', '`'])
+  
+  // Special case: Allow spacing between pipe and HTML tags in table cells
+  if (lastChar === '|' && firstChar === '<' && state && state.depthMap[TAG_TABLE] > 0) {
+    return true
+  }
   
   if (noSpaceAfter.has(lastChar) || noSpaceBefore.has(firstChar)) {
     return false
@@ -276,7 +282,7 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
     }
 
     // Add spacing between inline elements if needed
-    if (output[0]?.[0] && eventType === NodeEventEnter && lastChar && needsSpacing(lastChar, output[0][0])) {
+    if (output[0]?.[0] && eventType === NodeEventEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
       collectNodeContent(node, ' ', state)
     }
     
