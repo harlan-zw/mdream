@@ -86,6 +86,8 @@ export interface ElementNode extends Node {
   tagId?: number
   /** Map of tag names to their nesting count (using Uint8Array for performance) */
   depthMap: Uint8Array
+  /** Plugin outputs collected during processing */
+  pluginOutput?: string[]
 }
 
 export interface TextNode extends Node {
@@ -280,4 +282,4 @@ export interface TagHandler {
   excludesTextNodes?: boolean
 }
 
-export type { ExtractedElement } from './plugins/extraction.ts'
+export type { ExtractedElement } from './plugins/extraction'

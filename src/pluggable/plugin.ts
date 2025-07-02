@@ -1,4 +1,4 @@
-import type { Plugin } from '../types.ts'
+import type { Plugin } from '../types'
 
 /**
  * Create a plugin that implements the Plugin interface with improved type inference
