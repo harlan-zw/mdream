@@ -20,11 +20,11 @@
 
 ## Features
 
-- 🧠 Content Extraction: [Readability.js]() scoring heuristics for [~50% fewer tokens*]() and improved accuracy.
+- 🧠 Content Extraction: [Minimal preset](./src/preset/minimal.ts) for ~50% fewer tokens and improved accuracy.
 - 🔍 GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
 
 **Ultra Performant**
-- 🚀 Convert 1.4MB of HTML in [~50ms*]() with advanced streaming support, including content-based buffering.
+- 🚀 Convert 1.4MB of HTML in ~50ms with advanced streaming support, including content-based buffering.
 - ⚡ 5kB gzip, zero dependencies.
 
 **Adaptable**
@@ -34,8 +34,8 @@
 
 **CLI**
 
-- integrates with crawlee to provide entire site markdown dumps
-- Run a MCP web server
+- Process HTML from stdin and output Markdown to stdout
+- Support for origin URL resolution and presets
 
 ## Why Mdream?
 
@@ -57,7 +57,7 @@ Fetches the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown) an
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream --origin https://en.wikipedia.org --filters minimal-from-first-header \
+ | npx mdream --origin https://en.wikipedia.org --preset minimal \
   | tee streaming.md
 ```
 
@@ -69,14 +69,14 @@ Converts a local HTML file to a Markdown file, using `tee` to write the output t
 
 ```bash
 cat index.html \
- | npx mdream \
+ | npx mdream --preset minimal \
   | tee streaming.md
 ```
 
 ### CLI Options
 
 - `--origin <url>`: Base URL for resolving relative links and images
-- `-v, --verbose`: Enable verbose debug logging to stderr
+- `--preset <preset>`: Conversion presets: minimal
 - `--help`: Display help information
 - `--version`: Display version information
 
@@ -97,7 +97,7 @@ pnpm add mdream
 
 ### Usage
 
-Mdream provides two utils for working with HTML, both will process content as a stream.
+Mdream provides two main functions for working with HTML:
 - `htmlToMarkdown`: Useful if you already have the entire HTML payload you want to convert.
 - `streamHtmlToMarkdown`: Best practice if you are fetching or reading from a local file.
 
@@ -120,8 +120,7 @@ import { streamHtmlToMarkdown } from 'mdream'
 const response = await fetch('https://example.com')
 const htmlStream = response.body
 const markdownGenerator = streamHtmlToMarkdown(htmlStream, {
-  origin: 'https://example.com',
-  filters: 'minimal-from-first-header'
+  origin: 'https://example.com'
 })
 
 // Process chunks as they arrive
@@ -130,11 +129,83 @@ for await (const chunk of markdownGenerator) {
 }
 ```
 
-## Documentation
+**Pure HTML Parser**
+
+If you only need to parse HTML into a DOM-like AST without converting to Markdown, use `parseHtml`:
+
+```ts
+import { parseHtml } from 'mdream'
+
+const html = '<div><h1>Title</h1><p>Content</p></div>'
+const { events, remainingHtml } = parseHtml(html)
+
+// Process the parsed events
+events.forEach(event => {
+  if (event.type === 'enter' && event.node.type === 'element') {
+    console.log('Entering element:', event.node.tagName)
+  }
+})
+```
+
+The `parseHtml` function provides:
+- **Pure AST parsing** - No markdown generation overhead
+- **DOM events** - Enter/exit events for each element and text node
+- **Plugin support** - Can apply plugins during parsing
+- **Streaming compatible** - Works with the same plugin system
+
+### Presets
+
+Presets are pre-configured combinations of plugins for common use cases.
+
+#### Minimal Preset
+
+The `minimal` preset optimizes for token reduction and cleaner output by removing non-essential content:
+
+```ts
+import { withMinimalPreset } from 'mdream/preset/minimal'
+
+const options = withMinimalPreset({
+  origin: 'https://example.com'
+})
+```
+
+**Plugins included:**
+- `isolateMainPlugin()` - Extracts main content area
+- `frontmatterPlugin()` - Generates YAML frontmatter from meta tags
+- `tailwindPlugin()` - Converts Tailwind classes to Markdown
+- `filterPlugin()` - Excludes forms, navigation, buttons, footers, and other non-content elements
+
+**CLI Usage:**
+```bash
+curl -s https://example.com | npx mdream --preset minimal --origin https://example.com
+```
 
 ### Plugin System
 
 The plugin system allows you to customize HTML to Markdown conversion by hooking into the processing pipeline. Plugins can filter content, extract data, transform nodes, or add custom behavior.
+
+#### Built-in Plugins
+
+Mdream includes several built-in plugins that can be used individually or combined:
+
+- **[`extractionPlugin`](./src/plugins/extraction.ts)**: Extract specific elements using CSS selectors for data analysis
+- **[`filterPlugin`](./src/plugins/filter.ts)**: Include or exclude elements based on CSS selectors or tag IDs
+- **[`frontmatterPlugin`](./src/plugins/frontmatter.ts)**: Generate YAML frontmatter from HTML head elements (title, meta tags)
+- **[`isolateMainPlugin`](./src/plugins/isolate-main.ts)**: Isolate main content using `<main>` elements or header-to-footer boundaries
+- **[`tailwindPlugin`](./src/plugins/tailwind.ts)**: Convert Tailwind CSS classes to Markdown formatting (bold, italic, etc.)
+- **[`readabilityPlugin`](./src/plugins/readability.ts)**: Content scoring and extraction (experimental)
+
+```ts
+import { filterPlugin, frontmatterPlugin, isolateMainPlugin } from 'mdream/plugins'
+
+const markdown = htmlToMarkdown(html, {
+  plugins: [
+    isolateMainPlugin(),
+    frontmatterPlugin(),
+    filterPlugin({ exclude: ['nav', '.sidebar', '#footer'] })
+  ]
+})
+```
 
 #### Plugin Hooks
 
@@ -204,7 +275,6 @@ const adBlockPlugin = createPlugin({
 Extract specific elements and their content during HTML processing for data analysis or content discovery:
 
 ```ts
-import type { ExtractedElement, MdreamRuntimeState } from 'mdream/plugins'
 import { extractionPlugin, htmlToMarkdown } from 'mdream'
 
 const html: string = `
