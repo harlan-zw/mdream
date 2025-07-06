@@ -1,8 +1,10 @@
 import type { HTMLToMarkdownOptions } from './types.ts'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { cac } from 'cac'
-import { frontmatterPlugin } from './plugins/frontmatter.ts'
-import { readabilityPlugin } from './plugins/readability.ts'
+import { withMinimalPreset } from './preset/minimal.ts'
 import { streamHtmlToMarkdown } from './stream.ts'
 
 /**
@@ -10,19 +12,17 @@ import { streamHtmlToMarkdown } from './stream.ts'
  */
 interface CliOptions {
   origin?: string
-  filters?: string
+  preset?: string
 }
 
 async function streamingConvert(options: CliOptions = {}) {
   const outputStream = process.stdout
-  const conversionOptions: HTMLToMarkdownOptions = { origin: options.origin }
+  let conversionOptions: HTMLToMarkdownOptions = { origin: options.origin }
 
-  // Apply the appropriate preset based on the filter option
-  // conversionOptions = withMinimalPreset(conversionOptions)
-  conversionOptions.plugins = conversionOptions.plugins || []
-  conversionOptions.plugins!.push(readabilityPlugin())
-  // frontmatter
-  conversionOptions.plugins!.push(frontmatterPlugin())
+  // Apply the appropriate preset based on the preset option
+  if (options.preset === 'minimal') {
+    conversionOptions = withMinimalPreset(conversionOptions)
+  }
 
   // Create a single markdown generator that processes the chunked HTML
   const markdownGenerator = streamHtmlToMarkdown(Readable.toWeb(process.stdin), conversionOptions)
@@ -35,6 +35,12 @@ async function streamingConvert(options: CliOptions = {}) {
   }
 }
 
+// Read version from package.json
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const packageJsonPath = join(__dirname, '..', 'package.json')
+const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
+const version = packageJson.version
+
 const cli = cac()
 
 cli.command('[options]', 'Convert HTML from stdin to Markdown on stdout')
@@ -46,5 +52,5 @@ cli.command('[options]', 'Convert HTML from stdin to Markdown on stdout')
 
 cli
   .help()
-  .version('1.0.0')
+  .version(version)
   .parse()
