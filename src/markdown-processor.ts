@@ -1,6 +1,6 @@
 import type { ParseState } from './parse'
-import type { ElementNode, HandlerContext, HTMLToMarkdownOptions, NodeEvent, TextNode } from './types'
-import { assembleBufferedContent, collectNodeContent } from './buffer-region'
+import type { ElementNode, HandlerContext, HTMLToMarkdownOptions, NodeEvent, PluginContext, TextNode } from './types'
+import { assembleBufferedContent, collectNodeContent } from './buffer-region.ts'
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
@@ -13,8 +13,9 @@ import {
   TAG_PRE,
   TAG_TABLE,
   TEXT_NODE,
-} from './const'
-import { parseHtmlStream } from './parse'
+} from './const.ts'
+import { parseHtmlStream } from './parse.ts'
+import { processPluginsForEvent } from './plugin-processor.ts'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -38,7 +39,7 @@ export interface MarkdownState {
   /** Current depth for plugin access */
   depth?: number
   /** Context for additional data */
-  context?: Record<string, any>
+  context?: PluginContext
 }
 
 /**
@@ -75,8 +76,8 @@ function needsSpacing(lastChar: string, firstChar: string, state?: MarkdownState
 /**
  * Determines if spacing should be added before text content
  */
-function shouldAddSpacingBeforeText(lastChar: string, lastNode: any, textNode: TextNode): boolean {
-  return lastChar
+function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | TextNode | undefined, textNode: TextNode): boolean {
+  return !!lastChar
     && lastChar !== '\n'
     && lastChar !== ' '
     && lastChar !== '['
@@ -298,64 +299,7 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
     }
 
     parseHtmlStream(html, parseState, (event) => {
-      // Process plugins with full state access
-      if (state.options?.plugins?.length) {
-        for (const plugin of state.options.plugins) {
-          const res = plugin.beforeNodeProcess?.(event, state)
-          if (typeof res === 'object' && res.skip) {
-            return
-          }
-        }
-
-        // Run plugin hooks
-        if (event.node.type === ELEMENT_NODE) {
-          const element = event.node as ElementNode
-
-          // Run processAttributes hook on element enter
-          if (event.type === NodeEventEnter) {
-            for (const plugin of state.options.plugins) {
-              if (plugin.processAttributes) {
-                plugin.processAttributes(element, state)
-              }
-            }
-          }
-
-          // Collect plugin hook outputs
-          const fn = event.type === NodeEventEnter ? 'onNodeEnter' : 'onNodeExit'
-          const pluginOutputs: string[] = []
-          for (const plugin of state.options.plugins) {
-            if (plugin[fn]) {
-              const result = plugin[fn]!(element, state)
-              if (result) {
-                pluginOutputs.push(result)
-              }
-            }
-          }
-
-          // Store plugin outputs on the element for processing in processEvent
-          if (pluginOutputs.length > 0) {
-            element.pluginOutput = (element.pluginOutput || []).concat(pluginOutputs)
-          }
-        }
-        else if (event.node.type === TEXT_NODE && event.type === NodeEventEnter) {
-          const textNode = event.node as TextNode
-          for (const plugin of state.options.plugins) {
-            if (plugin.processTextNode) {
-              const result = plugin.processTextNode(textNode, state)
-              if (result) {
-                if (result.skip) {
-                  return // Skip this text node
-                }
-                if (result.content) {
-                  textNode.value = result.content
-                }
-              }
-            }
-          }
-        }
-      }
-
-      processEvent(event)
+      processPluginsForEvent(event, state.options?.plugins, state, processEvent)
     })
   }
 
@@ -393,6 +337,7 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
     processHtml,
     getMarkdown,
     getMarkdownChunk,
+    state,
   }
 }
 

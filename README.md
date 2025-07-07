@@ -22,20 +22,10 @@
 
 - 🧠 Content Extraction: [Minimal preset](./src/preset/minimal.ts) for ~50% fewer tokens and improved accuracy.
 - 🔍 GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
-
-**Ultra Performant**
-- 🚀 Convert 1.4MB of HTML in ~50ms with advanced streaming support, including content-based buffering.
+- 🚀 Stream 1.4MB of HTML to markdown in ~50ms.
 - ⚡ 5kB gzip, zero dependencies.
-
-**Adaptable**
-
 - ⚙️ Run anywhere: CLI, edge workers, browsers, Node, etc.
 - 🔌 Extensible: [Plugin system](#plugin-system) for customizing and extending functionality.
-
-**CLI**
-
-- Process HTML from stdin and output Markdown to stdout
-- Support for origin URL resolution and presets
 
 ## Why Mdream?
 
@@ -140,7 +130,7 @@ const html = '<div><h1>Title</h1><p>Content</p></div>'
 const { events, remainingHtml } = parseHtml(html)
 
 // Process the parsed events
-events.forEach(event => {
+events.forEach((event) => {
   if (event.type === 'enter' && event.node.type === 'element') {
     console.log('Entering element:', event.node.tagName)
   }

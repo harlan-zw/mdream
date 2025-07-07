@@ -1,6 +1,6 @@
 import type { ElementNode, MdreamRuntimeState, Plugin } from '../types'
-import { parseSelector } from '../libs/query-selector'
-import { createPlugin } from '../pluggable/plugin'
+import { parseSelector } from '../libs/query-selector.ts'
+import { createPlugin } from '../pluggable/plugin.ts'
 
 export interface ExtractedElement extends ElementNode {
   textContent: string

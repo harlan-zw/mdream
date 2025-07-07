@@ -1,8 +1,9 @@
 import type { ReadableStream } from 'node:stream/web'
 import type { ParseState } from './parse'
 import type { HTMLToMarkdownOptions } from './types'
-import { createMarkdownProcessor } from './markdown-processor'
-import { parseHtmlStream } from './parse'
+import { createMarkdownProcessor } from './markdown-processor.ts'
+import { parseHtmlStream } from './parse.ts'
+import { processPluginsForEvent } from './plugin-processor.ts'
 
 /**
  * Creates a markdown stream from an HTML stream
@@ -41,7 +42,7 @@ export async function* streamHtmlToMarkdown(
       const htmlContent = `${remainingHtml}${typeof value === 'string' ? value : decoder.decode(value, { stream: true })}`
 
       remainingHtml = parseHtmlStream(htmlContent, parseState, (event) => {
-        processor.processEvent(event)
+        processPluginsForEvent(event, options.plugins, processor.state, processor.processEvent)
       })
 
       const chunk = processor.getMarkdownChunk()
@@ -52,7 +53,7 @@ export async function* streamHtmlToMarkdown(
     // Process any remaining HTML and emit final chunk
     if (remainingHtml) {
       parseHtmlStream(remainingHtml, parseState, (event) => {
-        processor.processEvent(event)
+        processPluginsForEvent(event, options.plugins, processor.state, processor.processEvent)
       })
     }
 

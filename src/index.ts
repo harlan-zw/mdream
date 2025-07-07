@@ -1,5 +1,5 @@
 import type { HTMLToMarkdownOptions } from './types'
-import { createMarkdownProcessor } from './markdown-processor'
+import { createMarkdownProcessor } from './markdown-processor.ts'
 
 export function htmlToMarkdown(
   html: string,

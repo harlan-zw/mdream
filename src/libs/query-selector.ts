@@ -11,142 +11,102 @@ export interface SelectorMatcher {
 }
 
 /**
- * Matches a simple tag selector (e.g., 'div', 'p', 'h1')
+ * Creates a tag selector matcher (e.g., 'div', 'p', 'h1')
  */
-class TagSelector implements SelectorMatcher {
-  constructor(private readonly tagName: string) {}
-
-  matches(element: ElementNode): boolean {
-    return element.name === this.tagName
-  }
-
-  toString(): string {
-    return this.tagName
+export function createTagSelector(tagName: string): SelectorMatcher {
+  return {
+    matches: (element: ElementNode) => element.name === tagName,
+    toString: () => tagName,
   }
 }
 
 /**
- * Matches an ID selector (e.g., '#main', '#content')
+ * Creates an ID selector matcher (e.g., '#main', '#content')
  */
-class IdSelector implements SelectorMatcher {
-  private readonly id: string
-
-  constructor(selector: string) {
-    // Remove the # prefix
-    this.id = selector.slice(1)
-  }
-
-  matches(element: ElementNode): boolean {
-    return element.attributes?.id === this.id
-  }
-
-  toString(): string {
-    return `#${this.id}`
+export function createIdSelector(selector: string): SelectorMatcher {
+  const id = selector.slice(1) // Remove the # prefix
+  return {
+    matches: (element: ElementNode) => element.attributes?.id === id,
+    toString: () => `#${id}`,
   }
 }
 
 /**
- * Matches a class selector (e.g., '.container', '.header')
+ * Creates a class selector matcher (e.g., '.container', '.header')
  */
-class ClassSelector implements SelectorMatcher {
-  private readonly className: string
-
-  constructor(selector: string) {
-    // Remove the . prefix
-    this.className = selector.slice(1)
-  }
-
-  matches(element: ElementNode): boolean {
-    if (!element.attributes?.class)
-      return false
-
-    // Check if the class is in the element's class list
-    const classes = element.attributes.class.trim().split(' ').filter(Boolean)
-    return classes.includes(this.className)
-  }
-
-  toString(): string {
-    return `.${this.className}`
-  }
-}
-
-/**
- * Matches an attribute selector (e.g., '[data-id]', '[href="https://example.com"]')
- */
-class AttributeSelector implements SelectorMatcher {
-  private readonly attrName: string
-  private readonly attrValue?: string
-  private readonly operator?: string
-
-  constructor(selector: string) {
-    // Parse [attr], [attr=value], [attr^=value], etc.
-    // eslint-disable-next-line regexp/no-super-linear-backtracking, regexp/no-misleading-capturing-group
-    const match = selector.match(/\[([^\]=~|^$*]+)(?:([=~|^$*]+)["']?([^"'\]]+)["']?)?\]/)
-
-    if (match) {
-      this.attrName = match[1]
-      this.operator = match[2]
-      this.attrValue = match[3]
-    }
-    else {
-      // Fallback to simple attribute existence check
-      this.attrName = selector.slice(1, -1)
-    }
-  }
-
-  matches(element: ElementNode): boolean {
-    // If the attribute doesn't exist, it's not a match
-    if (!(this.attrName in (element.attributes || {}))) {
-      return false
-    }
-
-    // If we're just checking for existence, we've already confirmed it exists
-    if (!this.operator || !this.attrValue) {
-      return true
-    }
-
-    const value = element.attributes[this.attrName]
-
-    // Handle different attribute selectors
-    switch (this.operator) {
-      case '=': // Exact match
-        return value === this.attrValue
-      case '^=': // Starts with
-        return value.startsWith(this.attrValue)
-      case '$=': // Ends with
-        return value.endsWith(this.attrValue)
-      case '*=': // Contains
-        return value.includes(this.attrValue)
-      case '~=': // Contains word
-        return value.trim().split(' ').filter(Boolean).includes(this.attrValue)
-      case '|=': // Starts with prefix
-        return value === this.attrValue || value.startsWith(`${this.attrValue}-`)
-      default:
+export function createClassSelector(selector: string): SelectorMatcher {
+  const className = selector.slice(1) // Remove the . prefix
+  return {
+    matches: (element: ElementNode) => {
+      if (!element.attributes?.class)
         return false
-    }
-  }
-
-  toString(): string {
-    if (!this.operator || !this.attrValue) {
-      return `[${this.attrName}]`
-    }
-    return `[${this.attrName}${this.operator}${this.attrValue}]`
+      const classes = element.attributes.class.trim().split(' ').filter(Boolean)
+      return classes.includes(className)
+    },
+    toString: () => `.${className}`,
   }
 }
 
 /**
- * Compound selector that combines multiple selectors (e.g., 'div.container', 'h1#title')
+ * Creates an attribute selector matcher (e.g., '[data-id]', '[href="https://example.com"]')
  */
-class CompoundSelector implements SelectorMatcher {
-  constructor(private readonly selectors: SelectorMatcher[]) {}
+export function createAttributeSelector(selector: string): SelectorMatcher {
+  // Parse [attr], [attr=value], [attr^=value], etc.
+  // eslint-disable-next-line regexp/no-super-linear-backtracking, regexp/no-misleading-capturing-group
+  const match = selector.match(/\[([^\]=~|^$*]+)(?:([=~|^$*]+)["']?([^"'\]]+)["']?)?\]/)
 
-  matches(element: ElementNode): boolean {
-    // All selectors must match
-    return this.selectors.every(selector => selector.matches(element))
+  const attrName = match ? match[1] : selector.slice(1, -1)
+  const operator = match?.[2]
+  const attrValue = match?.[3]
+
+  return {
+    matches: (element: ElementNode) => {
+      // If the attribute doesn't exist, it's not a match
+      if (!(attrName in (element.attributes || {}))) {
+        return false
+      }
+
+      // If we're just checking for existence, we've already confirmed it exists
+      if (!operator || !attrValue) {
+        return true
+      }
+
+      const value = element.attributes[attrName]
+
+      // Handle different attribute selectors
+      switch (operator) {
+        case '=': // Exact match
+          return value === attrValue
+        case '^=': // Starts with
+          return value.startsWith(attrValue)
+        case '$=': // Ends with
+          return value.endsWith(attrValue)
+        case '*=': // Contains
+          return value.includes(attrValue)
+        case '~=': // Contains word
+          return value.trim().split(' ').filter(Boolean).includes(attrValue)
+        case '|=': // Starts with prefix
+          return value === attrValue || value.startsWith(`${attrValue}-`)
+        default:
+          return false
+      }
+    },
+    toString: () => {
+      if (!operator || !attrValue) {
+        return `[${attrName}]`
+      }
+      return `[${attrName}${operator}${attrValue}]`
+    },
   }
+}
 
-  toString(): string {
-    return this.selectors.map(s => s.toString()).join('')
+/**
+ * Creates a compound selector that combines multiple selectors (e.g., 'div.container', 'h1#title')
+ */
+export function createCompoundSelector(selectors: SelectorMatcher[]): SelectorMatcher {
+  return {
+    matches: (element: ElementNode) => selectors.every(selector => selector.matches(element)),
+    toString: () => selectors.map(s => s.toString()).join(''),
   }
 }
 
@@ -174,16 +134,16 @@ export function parseSelector(selector: string): SelectorMatcher {
     if ((char === '.' || char === '#' || char === '[') && current) {
       // Save the current selector and start a new one
       if (current[0] === '.') {
-        selectorParts.push(new ClassSelector(current))
+        selectorParts.push(createClassSelector(current))
       }
       else if (current[0] === '#') {
-        selectorParts.push(new IdSelector(current))
+        selectorParts.push(createIdSelector(current))
       }
       else if (current[0] === '[') {
-        selectorParts.push(new AttributeSelector(current))
+        selectorParts.push(createAttributeSelector(current))
       }
       else {
-        selectorParts.push(new TagSelector(current))
+        selectorParts.push(createTagSelector(current))
       }
       current = char
     }
@@ -206,16 +166,16 @@ export function parseSelector(selector: string): SelectorMatcher {
   // Add the last selector
   if (current) {
     if (current[0] === '.') {
-      selectorParts.push(new ClassSelector(current))
+      selectorParts.push(createClassSelector(current))
     }
     else if (current[0] === '#') {
-      selectorParts.push(new IdSelector(current))
+      selectorParts.push(createIdSelector(current))
     }
     else if (current[0] === '[') {
-      selectorParts.push(new AttributeSelector(current))
+      selectorParts.push(createAttributeSelector(current))
     }
     else {
-      selectorParts.push(new TagSelector(current))
+      selectorParts.push(createTagSelector(current))
     }
   }
 
@@ -225,5 +185,5 @@ export function parseSelector(selector: string): SelectorMatcher {
   }
 
   // Otherwise, return a compound selector
-  return new CompoundSelector(selectorParts)
+  return createCompoundSelector(selectorParts)
 }

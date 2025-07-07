@@ -12,6 +12,12 @@ export interface FrontmatterPluginOptions {
   formatValue?: (name: string, value: string) => string
 }
 
+interface FrontmatterData {
+  title?: string
+  meta: Record<string, string>
+  [key: string]: string | Record<string, string> | undefined
+}
+
 /**
  * A plugin that manages frontmatter generation from HTML head elements
  * Extracts metadata from meta tags and title and generates YAML frontmatter
@@ -31,7 +37,7 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
   ])
 
   // Metadata collection
-  const frontmatter: Record<string, any> = { ...additionalFields, meta: {} }
+  const frontmatter: FrontmatterData = { ...additionalFields, meta: {} }
   let inHead = false
 
   // Format frontmatter value (handle quotes, etc.)
@@ -137,18 +143,18 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
 
     // Process each entry
     for (const [key, value] of entries) {
-      if (key === 'meta' && Object.keys(value as Record<string, string>).length > 0) {
+      if (key === 'meta' && typeof value === 'object' && value && Object.keys(value).length > 0) {
         // Add meta key
         yamlLines.push('meta:')
 
         // Sort meta entries alphabetically and add with indentation
-        const metaEntries = Object.entries(value as Record<string, string>)
+        const metaEntries = Object.entries(value)
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([metaKey, metaValue]) => `  ${metaKey}: ${metaValue}`)
 
         yamlLines.push(...metaEntries)
       }
-      else if (key !== 'meta' || Object.keys(value as Record<string, string>).length > 0) {
+      else if (key !== 'meta' && typeof value === 'string') {
         // Add regular keys
         yamlLines.push(`${key}: ${value}`)
       }

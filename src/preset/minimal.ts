@@ -27,10 +27,11 @@ export function withMinimalPreset(
 ): HTMLToMarkdownOptions {
   // Create plugins array with necessary plugins
   const plugins: Plugin[] = [
-    isolateMainPlugin(),
+    // First extract frontmatter from head section
     frontmatterPlugin(),
+    // Then isolate main content
+    isolateMainPlugin(),
     tailwindPlugin(),
-    // First apply readability plugin to extract main content
     // Then filter out unwanted tags
     filterPlugin({
       exclude: [

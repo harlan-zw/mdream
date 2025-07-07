@@ -1,5 +1,5 @@
 import type { ElementNode, TextNode } from '../types'
-import { createBufferRegion } from '../buffer-region'
+import { createBufferRegion } from '../buffer-region.ts'
 
 import {
   TAG_A,
@@ -65,8 +65,8 @@ import {
   TAG_TR,
   TAG_UL,
   TAG_VIDEO,
-} from '../const'
-import { createPlugin } from '../pluggable/plugin'
+} from '../const.ts'
+import { createPlugin } from '../pluggable/plugin.ts'
 
 // Regular expressions for scoring based on scoring.md
 const REGEXPS = {

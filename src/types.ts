@@ -32,12 +32,12 @@ export interface Plugin {
    * Process a text node before it's added to the output
    * @param node - The text node to process
    * @param state - The current runtime state
-   * @returns Legacy format or PluginHookResult with textContent and skipNode
+   * @returns Result with content and skip flag, or undefined for no transformation
    */
   processTextNode?: (
     node: TextNode,
     state: MdreamRuntimeState
-  ) => undefined | void | { content: string, skip: boolean }
+  ) => { content: string, skip: boolean } | undefined
 }
 
 /**
@@ -81,7 +81,7 @@ export interface ElementNode extends Node {
   /** HTML attributes (for ELEMENT_NODE) */
   attributes: Record<string, string>
   /** Custom data added by plugins */
-  context?: Record<string, any>
+  context?: PluginContext
   /** ID of the tag for fast handler lookup */
   tagId?: number
   /** Map of tag names to their nesting count (using Uint8Array for performance) */
@@ -94,7 +94,7 @@ export interface TextNode extends Node {
   /** Text content (for TEXT_NODE) */
   value: string
   /** Custom data added by plugins */
-  context?: Record<string, any>
+  context?: PluginContext
   /** Whether this text node should be excluded from markdown output (for script/style elements) */
   excludedFromMarkdown?: boolean
 }
@@ -131,7 +131,7 @@ export interface Node {
   parent?: ElementNode | null // parent will always be an element or null
 
   /** Custom data added by plugins */
-  context?: Record<string, any>
+  context?: PluginContext
 
   /** Region ID for buffer region tracking */
   regionId?: number
@@ -231,7 +231,7 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   /** Reference to the last processed node */
   lastNode?: Node
 
-  context?: Record<string, any>
+  context?: PluginContext
 }
 
 type NodeEventEnter = 0
@@ -283,3 +283,31 @@ export interface TagHandler {
 }
 
 export type { ExtractedElement } from './plugins/extraction'
+
+// Plugin-specific context interfaces
+export interface ReadabilityContext {
+  score?: number
+  tagCount?: number
+  linkTextLength?: number
+  textLength?: number
+  isHighLinkDensity?: boolean
+}
+
+export interface TailwindContext {
+  hidden?: boolean
+  prefix?: string
+  suffix?: string
+}
+
+export interface PluginContext {
+  // Readability plugin data
+  score?: number
+  tagCount?: number
+  linkTextLength?: number
+  textLength?: number
+  isHighLinkDensity?: boolean
+  // Tailwind plugin data
+  tailwind?: TailwindContext
+  // Allow additional plugin-specific data
+  [key: string]: unknown
+}

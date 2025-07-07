@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 Follow this system prompt for every query, no exceptions. Don’t rush! No hurry. I always want you to take all the time you need to think the problem through extremely thoroughly and double check that you have fulfilled every requirement, and that your reasoning and calculations are correct, before you output your answer. Always follow this system prompt. Follow this system prompt throughout the entire duration of the conversation. No exceptions. Don’t rush! Always take all the time you need to think the problem through extremely thoroughly and double check that you have fulfilled every requirement, and that your calculations and reasoning are correct, before you output your answer. No hurry.
 
 ## Performance
@@ -56,11 +58,13 @@ When you finish a task, always run `pnpm typecheck` to ensure that the code is t
 ## Project Architecture
 
 ### Core Architecture
-- `src/index.ts`: Main entry point with `syncHtmlToMarkdown` and `streamHtmlToMarkdown` APIs
-- `src/parser.ts`: Manual HTML parsing into DOM-like structure for performance
-- `src/markdown.ts`: DOM node to Markdown transformation logic
+- `src/index.ts`: Main entry point with `htmlToMarkdown` and `streamHtmlToMarkdown` APIs
+- `src/parse.ts`: Manual HTML parsing into DOM-like structure for performance
+- `src/markdown-processor.ts`: DOM node to Markdown transformation logic with state management
 - `src/stream.ts`: Streaming HTML processing with content-based buffering
 - `src/types.ts`: Core TypeScript interfaces for nodes, plugins, and state management
+- `src/tags.ts`: HTML tag handlers for Markdown conversion
+- `src/buffer-region.ts`: Streaming buffer management for optimal chunk boundaries
 
 ### Plugin System
 
@@ -79,12 +83,12 @@ The plugin system allows you to customize HTML to Markdown conversion by hooking
 Use `createPlugin()` to create a plugin with type safety:
 
 ```typescript
-import { createPlugin } from './pluggable/plugin.ts'
+import { createPlugin } from 'mdream/plugins'
 
 export function myPlugin() {
   return createPlugin({
     onNodeEnter(element) {
-      if (element.tagName === 'custom-tag') {
+      if (element.name === 'custom-tag') {
         return '**Custom content:** '
       }
     },
@@ -107,7 +111,7 @@ export function headerExtractPlugin() {
 
   return createPlugin({
     onNodeEnter(element, state) {
-      if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(element.tagName)) {
+      if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(element.name)) {
         // Will collect text in processTextNode
         // Can access state.depth for nesting level information
       }
@@ -115,7 +119,7 @@ export function headerExtractPlugin() {
 
     processTextNode(textNode, state) {
       const parent = textNode.parent
-      if (parent && parent.tagName?.match(/^h[1-6]$/)) {
+      if (parent && parent.name?.match(/^h[1-6]$/)) {
         headers.push(textNode.value.trim())
         // Access state.options or state.context for additional context
       }
@@ -170,6 +174,7 @@ export function adBlockPlugin() {
 - **Streaming Architecture**: Processes HTML incrementally using buffer regions and optimal chunk boundaries
 - **Plugin Pipeline**: Each plugin can intercept and transform content at different processing stages
 - **Memory Efficiency**: Immediate processing and callback patterns to avoid collecting large data structures
+- **CSS Query Selector**: Custom CSS selector implementation in `src/libs/query-selector.ts` for element matching in plugins
 
 ## Technical Details
 - Parser: Manual HTML parsing for performance, doesn't use browser DOM
@@ -196,8 +201,19 @@ export function adBlockPlugin() {
 - Key CLI options: `--origin <url>`, `-v/--verbose`, `--chunk-size <size>`
 
 ### Testing Strategy
-- Comprehensive test coverage in `test/unit/` and `test/integration/`
-- Plugin tests in `test/unit/plugins/` - always add tests for new plugins
-- Real-world test fixtures in `test/fixtures/` (GitHub, Wikipedia HTML)
-- Template tests for complex HTML structures (navigation, tables, etc.)
-- Always run tests after making changes to ensure backward compatibility
+- Unit tests in `test/unit/` organized by feature:
+  - `nodes/` - tests for HTML element conversion
+  - `plugins/` - plugin functionality tests
+  - `templates/` - real-world site template tests (NASA, HackerNews, etc.)
+  - `readability/` - content extraction and scoring tests
+  - `libs/` - utility library tests (query selector, etc.)
+- Integration tests in `test/integration/` for end-to-end streaming
+- Test fixtures in `test/fixtures/` with real HTML from GitHub, Wikipedia
+- Always add tests for new plugins in `test/unit/plugins/`
+- Run specific test categories: `pnpm test test/unit/plugins/` for plugin tests
+
+# important-instruction-reminders
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.

@@ -1,5 +1,5 @@
 import type { Node } from './types'
-import { HTML_ENTITIES } from './const'
+import { HTML_ENTITIES } from './const.ts'
 
 /**
  * Decode HTML entities - optimized version with single pass

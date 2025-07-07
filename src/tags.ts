@@ -108,7 +108,7 @@ import {
   TAG_VIDEO,
   TAG_WBR,
   TAG_XMP,
-} from './const'
+} from './const.ts'
 
 // Helper function to resolve URLs
 function resolveUrl(url: string, origin?: string): string {

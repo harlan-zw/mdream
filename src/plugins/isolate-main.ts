@@ -1,5 +1,5 @@
 import type { ElementNode, Plugin } from '../types.ts'
-import { ELEMENT_NODE, TAG_FOOTER, TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6, TAG_HEADER, TAG_MAIN, TEXT_NODE } from '../const.ts'
+import { ELEMENT_NODE, TAG_FOOTER, TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6, TAG_HEAD, TAG_HEADER, TAG_MAIN, TEXT_NODE } from '../const.ts'
 import { createPlugin } from '../pluggable/plugin.ts'
 
 /**
@@ -106,7 +106,22 @@ export function isolateMainPlugin(): Plugin {
         }
 
         // Skip content before header (when using heuristic)
+        // BUT allow head section to be processed by other plugins (e.g., frontmatter)
         if (!firstHeaderElement) {
+          // Allow head section and its children to be processed
+          if (element.tagId === TAG_HEAD) {
+            return // Let head be processed by other plugins
+          }
+
+          // Check if element is inside head section
+          let current = element.parent
+          while (current) {
+            if (current.tagId === TAG_HEAD) {
+              return // Let head children be processed by other plugins
+            }
+            current = current.parent
+          }
+
           return { skip: true }
         }
 
@@ -139,7 +154,17 @@ export function isolateMainPlugin(): Plugin {
         }
 
         // Otherwise use header-footer heuristic for text nodes
+        // BUT allow text nodes in head section to be processed
         if (!firstHeaderElement || afterFooter) {
+          // Check if text node is inside head section
+          let current = node.parent
+          while (current) {
+            if (current.tagId === TAG_HEAD) {
+              return // Let head text be processed by other plugins
+            }
+            current = current.parent
+          }
+
           return { skip: true }
         }
       }

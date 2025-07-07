@@ -11,9 +11,9 @@ import {
   TAG_TABLE,
   TagIdMap,
   TEXT_NODE,
-} from './const'
-import { tagHandlers } from './tags'
-import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
+} from './const.ts'
+import { tagHandlers } from './tags.ts'
+import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils.ts'
 
 // Cache frequently used character codes
 const LT_CHAR = 60 // '<'
