@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Documentation - mdream</title>
+    <meta name="description" content="Complete documentation for mdream HTML to Markdown converter">
+</head>
+<body>
+    <h1>Documentation</h1>
+    
+    <h2>Installation</h2>
+    <p>Install mdream globally using npm:</p>
+    <pre><code>npm install -g mdream</code></pre>
+
+    <h2>CLI Usage</h2>
+    <p>Generate llms.txt files from HTML:</p>
+    <pre><code>mdream llms "dist/**/*.html" --site-name "My Site" --description "Site description"</code></pre>
+
+    <h3>Options</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Option</th>
+                <th>Description</th>
+                <th>Default</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>--site-name</td>
+                <td>Name of the site</td>
+                <td>Required</td>
+            </tr>
+            <tr>
+                <td>--description</td>
+                <td>Site description</td>
+                <td>Required</td>
+            </tr>
+            <tr>
+                <td>--origin</td>
+                <td>Origin URL</td>
+                <td>Optional</td>
+            </tr>
+            <tr>
+                <td>--output</td>
+                <td>Output directory</td>
+                <td>.</td>
+            </tr>
+            <tr>
+                <td>--verbose</td>
+                <td>Enable verbose logging</td>
+                <td>false</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>Plugin System</h2>
+    <p>mdream supports a powerful plugin system for customizing the conversion process.</p>
+    
+    <h3>Creating a Plugin</h3>
+    <pre><code>import { createPlugin } from 'mdream/plugins'
+
+export function myPlugin() {
+  return createPlugin({
+    onNodeEnter(element) {
+      if (element.name === 'custom-tag') {
+        return '**Custom content:** '
+      }
+    }
+  })
+}</code></pre>
+
+    <h2>Performance</h2>
+    <p>mdream is optimized for performance with V8 optimizations and streaming support for large files.</p>
+</body>
+</html>

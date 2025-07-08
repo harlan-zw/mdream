@@ -1,0 +1,122 @@
+name: Test Action
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test_action:
+    name: Test mdream action
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Test action with basic glob
+        uses: ./
+        with:
+          glob: '.github/fixtures/**/*.html'
+          site-name: Test Site
+          description: Test site for mdream action
+          origin: 'https://example.com'
+          output: ./test-output
+          verbose: 'true'
+
+      - name: Verify outputs
+        run: |
+          echo "=== Generated files ==="
+          ls -la test-output/
+          echo ""
+          echo "=== llms.txt content ==="
+          if [ -f test-output/llms.txt ]; then
+            cat test-output/llms.txt
+          else
+            echo "llms.txt not found!"
+            exit 1
+          fi
+          echo ""
+          echo "=== llms-full.txt content (first 50 lines) ==="
+          if [ -f test-output/llms-full.txt ]; then
+            head -n 50 test-output/llms-full.txt
+          else
+            echo "llms-full.txt not found!"
+            exit 1
+          fi
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-action-output
+          path: test-output/
+
+  test_action_with_existing_files:
+    name: Test action with existing HTML files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Test action with existing test fixtures
+        uses: ./
+        with:
+          glob: 'packages/mdream/test/fixtures/**/*.html'
+          site-name: mdream Test Fixtures
+          description: Test fixtures from mdream test suite
+          origin: 'https://github.com/harlan-zw/mdream'
+          output: ./fixtures-output
+
+      - name: Verify fixture outputs
+        run: |
+          echo "=== Generated files from fixtures ==="
+          ls -la fixtures-output/
+          echo ""
+          echo "=== llms.txt content ==="
+          if [ -f fixtures-output/llms.txt ]; then
+            cat fixtures-output/llms.txt
+          else
+            echo "llms.txt not found!"
+            exit 1
+          fi
+
+      - name: Upload fixtures artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixtures-action-output
+          path: fixtures-output/

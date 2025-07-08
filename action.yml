@@ -1,0 +1,44 @@
+name: Mdream
+description: Generate llms.txt artifacts from your static site HTML output for LLM consumption
+author: harlan-zw
+branding:
+  icon: file-text
+  color: blue
+
+inputs:
+  glob:
+    description: 'Glob pattern to match HTML files (e.g., "dist/**/*.html")'
+    required: true
+  site-name:
+    description: Name of your site
+    required: true
+  description:
+    description: Description of your site content
+    required: true
+  origin:
+    description: 'Base URL of your site (e.g., "https://mysite.com")'
+    required: true
+  output:
+    description: Output directory for generated files
+    required: false
+    default: .
+  chunk-size:
+    description: Chunk size for streaming processing
+    required: false
+    default: '4096'
+  verbose:
+    description: Enable verbose logging
+    required: false
+    default: 'false'
+
+outputs:
+  llms-txt-path:
+    description: Path to the generated llms.txt file
+  llms-full-txt-path:
+    description: Path to the generated llms-full.txt file
+  markdown-files:
+    description: JSON array of generated markdown file paths
+
+runs:
+  using: node22
+  main: packages/action/dist/index.mjs

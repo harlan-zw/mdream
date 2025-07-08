@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Reference - mdream</title>
+    <meta name="description" content="API reference for mdream programmatic usage">
+</head>
+<body>
+    <h1>API Reference</h1>
+
+    <h2>Core Functions</h2>
+    
+    <h3>htmlToMarkdown(html, options)</h3>
+    <p>Convert HTML string to Markdown.</p>
+    <pre><code>import { htmlToMarkdown } from 'mdream'
+
+const markdown = htmlToMarkdown('&lt;h1&gt;Hello&lt;/h1&gt;', {
+  origin: 'https://example.com'
+})</code></pre>
+
+    <h3>streamHtmlToMarkdown(stream, options)</h3>
+    <p>Convert HTML stream to Markdown stream.</p>
+    <pre><code>import { streamHtmlToMarkdown } from 'mdream'
+
+const markdownStream = streamHtmlToMarkdown(htmlStream, {
+  chunkSize: 4096
+})</code></pre>
+
+    <h3>generateLlmsTxtArtifacts(options)</h3>
+    <p>Generate llms.txt artifacts from HTML files.</p>
+    <pre><code>import { generateLlmsTxtArtifacts } from 'mdream/llms-txt'
+
+const result = await generateLlmsTxtArtifacts({
+  patterns: 'dist/**/*.html',
+  siteName: 'My Site',
+  description: 'Site description',
+  generateFull: true
+})</code></pre>
+
+    <h2>Types</h2>
+    
+    <h3>ConversionOptions</h3>
+    <pre><code>interface ConversionOptions {
+  origin?: string
+  chunkSize?: number
+  plugins?: Plugin[]
+}</code></pre>
+
+    <h3>LlmsTxtOptions</h3>
+    <pre><code>interface LlmsTxtOptions {
+  patterns: string | string[]
+  siteName: string
+  description: string
+  origin?: string
+  output?: string
+  generateFull?: boolean
+}</code></pre>
+
+    <h2>Plugin Development</h2>
+    <p>See the <a href="./docs.html">documentation</a> for detailed plugin development guide.</p>
+</body>
+</html>
