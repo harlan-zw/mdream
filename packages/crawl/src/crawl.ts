@@ -272,10 +272,16 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
   if (results.some(r => r.success)) {
     const successfulResults = results.filter(r => r.success)
 
-    // Extract site name and description from first successful result
+    // Extract site name and description from home page if available, otherwise first successful result
     const firstUrl = new URL(withHttps(urls[0]))
-    const siteName = firstUrl.hostname
-    const description = successfulResults[0]?.metadata?.description
+    const homePageResult = successfulResults.find(r => {
+      const resultUrl = new URL(withHttps(r.url))
+      const homeUrl = new URL(withHttps(urls[0]))
+      return resultUrl.href === homeUrl.href
+    })
+    
+    const siteName = homePageResult?.metadata?.title || firstUrl.hostname
+    const description = homePageResult?.metadata?.description || successfulResults[0]?.metadata?.description
 
     // Generate llms.txt if requested
     if (generateLlmsTxt) {
