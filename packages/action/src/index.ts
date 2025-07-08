@@ -1,7 +1,7 @@
-import { existsSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { getInput, info, setFailed, setOutput } from '@actions/core'
-import { exec } from '@actions/exec'
+import { generateLlmsTxtArtifacts } from 'mdream'
 
 export async function main() {
   try {
@@ -14,52 +14,48 @@ export async function main() {
     const chunkSize = getInput('chunk-size') || '4096'
     const verbose = getInput('verbose') === 'true'
 
-    // Build the command
-    const cmd = 'npx'
-    const args = [
-      'mdream',
-      'llms',
-      glob,
-      '--site-name',
-      siteName,
-      '--description',
-      description,
-      '--origin',
-      origin,
-      '--output',
-      output,
-      '--chunk-size',
-      chunkSize,
-    ]
-
     if (verbose) {
-      args.push('--verbose')
+      info(`Processing glob pattern: ${glob}`)
+      info(`Site name: ${siteName}`)
+      info(`Description: ${description}`)
+      info(`Origin: ${origin}`)
+      info(`Output directory: ${output}`)
+      info(`Chunk size: ${chunkSize}`)
     }
 
-    // Execute the command
-    info(`Running: ${cmd} ${args.join(' ')}`)
-    await exec(cmd, args)
+    // Generate llms.txt artifacts using mdream API
+    const result = await generateLlmsTxtArtifacts({
+      patterns: glob,
+      siteName,
+      description,
+      origin,
+      generateFull: true,
+      generateMarkdown: true,
+    })
 
-    // Set outputs
+    // Ensure output directory exists
+    await mkdir(output, { recursive: true })
+
+    // Write llms.txt file
     const llmsTxtPath = join(output, 'llms.txt')
-    const llmsFullTxtPath = join(output, 'llms-full.txt')
+    await writeFile(llmsTxtPath, result.llmsTxt, 'utf-8')
+    setOutput('llms-txt-path', llmsTxtPath)
 
-    if (existsSync(llmsTxtPath)) {
-      setOutput('llms-txt-path', llmsTxtPath)
-    }
-
-    if (existsSync(llmsFullTxtPath)) {
+    // Write llms-full.txt file
+    if (result.llmsFullTxt) {
+      const llmsFullTxtPath = join(output, 'llms-full.txt')
+      await writeFile(llmsFullTxtPath, result.llmsFullTxt, 'utf-8')
       setOutput('llms-full-txt-path', llmsFullTxtPath)
     }
 
-    // Find generated markdown files
+    // Write individual markdown files
     const markdownFiles = []
-    if (existsSync(output)) {
-      const files = readdirSync(output)
-      for (const file of files) {
-        if (file.endsWith('.md') && file !== 'README.md') {
-          markdownFiles.push(join(output, file))
-        }
+    if (result.markdownFiles) {
+      for (const mdFile of result.markdownFiles) {
+        const fullPath = join(output, mdFile.path)
+        await mkdir(dirname(fullPath), { recursive: true })
+        await writeFile(fullPath, mdFile.content, 'utf-8')
+        markdownFiles.push(fullPath)
       }
     }
 
@@ -67,7 +63,15 @@ export async function main() {
       setOutput('markdown-files', JSON.stringify(markdownFiles))
     }
 
-    info('✅ llms.txt artifacts generated successfully')
+    info(`✅ Generated llms.txt artifacts successfully`)
+    info(`   - Processed ${result.processedFiles.length} files`)
+    info(`   - Created llms.txt (${result.llmsTxt.length} characters)`)
+    if (result.llmsFullTxt) {
+      info(`   - Created llms-full.txt (${result.llmsFullTxt.length} characters)`)
+    }
+    if (markdownFiles.length > 0) {
+      info(`   - Created ${markdownFiles.length} markdown files`)
+    }
   }
   catch (error) {
     setFailed(`Action failed with error: ${error instanceof Error ? error.message : String(error)}`)

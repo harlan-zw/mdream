@@ -16,10 +16,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: 24.x
 
       - name: Install pnpm
         uses: pnpm/action-setup@v2
