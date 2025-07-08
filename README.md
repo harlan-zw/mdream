@@ -119,7 +119,10 @@ cat index.html \
 
 ## GitHub Actions Integration
 
-Mdream provides a GitHub Action that processes HTML files using glob patterns to generate `llms.txt` artifacts in CI/CD workflows. Perfect for documentation sites and static content, it creates both condensed and comprehensive LLM-ready files that can be uploaded as artifacts or deployed with your site.
+Mdream provides a GitHub Action that processes HTML files using glob patterns to generate `llms.txt` artifacts in CI/CD workflows. 
+
+This is useful for prerendered sites, it creates both condensed and comprehensive LLM-ready files that can be uploaded as artifacts or deployed with your site
+whenever you make changes.
 
 ### Complete Workflow Example
 
