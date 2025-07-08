@@ -51,11 +51,11 @@ export function filterPlugin(options: {
         const textNode = node as TextNode
         let currentParent = textNode.parent as ElementNode | null
         while (currentParent && excludeSelectors.length) {
-          const parentShouldExclude = excludeSelectors.some(selector => selector.matches(currentParent))
+          const parentShouldExclude = excludeSelectors.some(selector => selector.matches(currentParent!))
           if (parentShouldExclude) {
             return { skip: true }
           }
-          currentParent = currentParent.parent
+          currentParent = currentParent.parent as ElementNode | null
         }
         return
       }
@@ -82,12 +82,12 @@ export function filterPlugin(options: {
       let currentParent = element.parent
       while (currentParent) {
         if (excludeSelectors.length) {
-          const parentShouldExclude = excludeSelectors.some(selector => selector.matches(currentParent))
+          const parentShouldExclude = excludeSelectors.some(selector => selector.matches(currentParent!))
           if (parentShouldExclude) {
             return { skip: true }
           }
         }
-        currentParent = currentParent.parent
+        currentParent = currentParent.parent as ElementNode | null
       }
 
       // Handle include filtering (only if include selectors are specified)
@@ -95,13 +95,13 @@ export function filterPlugin(options: {
         // Check if this element or any ancestor matches include selectors
         let currentElement = element as ElementNode | null
         while (currentElement) {
-          const shouldInclude = includeSelectors.some(selector => selector.matches(currentElement))
+          const shouldInclude = includeSelectors.some(selector => selector.matches(currentElement!))
           if (shouldInclude) {
             return // Include this element
           }
           if (!processChildren)
             break // Don't check ancestors if not processing children
-          currentElement = currentElement.parent
+          currentElement = currentElement.parent as ElementNode | null
         }
 
         // If we have include selectors but nothing matched, exclude this element

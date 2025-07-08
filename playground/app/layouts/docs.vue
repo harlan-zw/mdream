@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { motion } from 'motion-v'
-import { useCurrentDocPage } from '~/composables/data'
+import { useCurrentDocPage } from '../composables/data'
 
 const route = useRoute()
 

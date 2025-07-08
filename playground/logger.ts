@@ -3,7 +3,7 @@ import { colorize } from 'consola/utils'
 
 export const logger = createConsola({
   defaults: {
-    tag: 'unhead.unjs.io',
+    tag: 'playground',
   },
 })
 

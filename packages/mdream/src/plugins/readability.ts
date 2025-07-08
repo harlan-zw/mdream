@@ -260,7 +260,7 @@ export function readabilityPlugin() {
         return
       }
 
-      const tagScore = TagScores[node.tagId] ?? 0
+      const tagScore = node.tagId !== undefined ? (TagScores[node.tagId as keyof typeof TagScores] ?? 0) : 0
       const classAndIdScore = scoreClassAndId(node)
 
       // Initialize metrics for this node
@@ -288,7 +288,7 @@ export function readabilityPlugin() {
         // Let content flow naturally and only exclude specific problematic content
         // If node has a parent, inherit parent's relevant context
         if (node.parent && node.parent.context) {
-          node.context.score += (node.parent.context.score || 0)
+          node.context.score = (node.context.score || 0) + (node.parent.context.score || 0)
         }
       }
       // Negative scores (but > -15) wait for onNodeExit when text content might improve the score
@@ -297,7 +297,7 @@ export function readabilityPlugin() {
 
     processTextNode(node: TextNode) {
       if (!node.parent || inHead)
-        return
+        return undefined
 
       const textValue = node.value
       const len = textValue.length
@@ -326,8 +326,10 @@ export function readabilityPlugin() {
           parent.context.linkTextLength = (parent.context.linkTextLength || 0) + len
         }
 
-        parent = parent.parent
+        parent = parent.parent as ElementNode
       }
+
+      return undefined
     },
 
     onNodeExit(node, state) {
@@ -359,13 +361,13 @@ export function readabilityPlugin() {
       }
       // Apply text length bonuses according to scoring.md
       else if (textLength > 100) {
-        node.context.score += 3
+        node.context.score = (node.context.score || 0) + 3
       }
       else if (textLength >= 50) {
-        node.context.score += 2
+        node.context.score = (node.context.score || 0) + 2
       }
       else if (textLength >= 25) {
-        node.context.score += 1
+        node.context.score = (node.context.score || 0) + 1
       }
 
       // Calculate link density and apply multiplier if needed
@@ -377,7 +379,7 @@ export function readabilityPlugin() {
         if (linkDensity > 0.4) {
           // For very high link density, apply severe penalty and mark as navigation-like
           if (linkDensity > 0.6) {
-            node.context.score = node.context.score * 0.02 // 98% reduction
+            node.context.score = (node.context.score || 0) * 0.02 // 98% reduction
             // If we have high link density, mark as navigation-like content
             if (linkTextLength > 50) {
               node.context.isHighLinkDensity = true
@@ -385,12 +387,12 @@ export function readabilityPlugin() {
           }
           else {
             // Scale score down based on link density
-            node.context.score *= (1 - linkDensity * 2.0) // Even more aggressive scaling
+            node.context.score = (node.context.score || 0) * (1 - linkDensity * 2.0) // Even more aggressive scaling
           }
         }
         else if (linkDensity > 0.2) { // Lower threshold for moderate link density
           // Even moderate link density should reduce score significantly
-          node.context.score *= (1 - (linkDensity * 1.0))
+          node.context.score = (node.context.score || 0) * (1 - (linkDensity * 1.0))
         }
       }
 
@@ -405,12 +407,12 @@ export function readabilityPlugin() {
 
         if (linkRatio > 0.3 && linkTextLength > 30 && !hasDocumentationMarkers) {
           // This looks like navigation-heavy content (but not documentation with inline links)
-          node.context.score -= 10
+          node.context.score = (node.context.score || 0) - 10
         }
       }
 
       // Only exclude content with low scores to reduce fragmentation
-      const finalScore = node.context.score
+      const finalScore = node.context.score || 0
 
       if (finalScore <= -12) {
         // More aggressive exclusion threshold to filter out navigation and low-quality content
@@ -429,7 +431,7 @@ export function readabilityPlugin() {
       if (node.tagHandler?.isInline) {
         const parent = node.parent
         if (parent && parent.context) {
-          parent.context.score += finalScore - (parent.context.score || 0)
+          parent.context.score = (parent.context.score || 0) + finalScore
         }
       }
     },

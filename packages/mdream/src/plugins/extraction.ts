@@ -37,6 +37,8 @@ export function extractionPlugin(selectors: Record<string, (element: ExtractedEl
         }
         currentParent = currentParent.parent as ElementNode | null
       }
+      // Return undefined to indicate no transformation
+      return undefined
     },
 
     onNodeExit(element, state) {

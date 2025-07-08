@@ -56,7 +56,7 @@ export function isolateMainPlugin(): Plugin {
         // If we have a main element, only include nodes inside it
         if (mainElement) {
           // Check if this element is inside the main element
-          let current: ElementNode | null = element.parent
+          let current: ElementNode | null = element.parent as ElementNode | null
           let isInsideMain = element === mainElement
 
           while (current && !isInsideMain) {
@@ -64,7 +64,7 @@ export function isolateMainPlugin(): Plugin {
               isInsideMain = true
               break
             }
-            current = current.parent
+            current = current.parent as ElementNode | null
           }
 
           if (!isInsideMain) {
@@ -76,7 +76,7 @@ export function isolateMainPlugin(): Plugin {
 
         // Priority 2: Fallback to header-footer heuristic if no main element
         // Look for first header that's NOT inside a <header> tag
-        if (!firstHeaderElement && headerTagIds.has(element.tagId)) {
+        if (!firstHeaderElement && element.tagId !== undefined && headerTagIds.has(element.tagId)) {
           // Check if this heading is inside a <header> tag
           let current = element.parent
           let isInHeaderTag = false
@@ -86,7 +86,7 @@ export function isolateMainPlugin(): Plugin {
               isInHeaderTag = true
               break
             }
-            current = current.parent
+            current = current.parent as ElementNode | null
           }
 
           // Only use this heading if it's not in a header tag
@@ -119,7 +119,7 @@ export function isolateMainPlugin(): Plugin {
             if (current.tagId === TAG_HEAD) {
               return // Let head children be processed by other plugins
             }
-            current = current.parent
+            current = current.parent as ElementNode | null
           }
 
           return { skip: true }
@@ -143,7 +143,7 @@ export function isolateMainPlugin(): Plugin {
               isInsideMain = true
               break
             }
-            current = current.parent
+            current = current.parent as ElementNode | null
           }
 
           if (!isInsideMain) {
@@ -162,7 +162,7 @@ export function isolateMainPlugin(): Plugin {
             if (current.tagId === TAG_HEAD) {
               return // Let head text be processed by other plugins
             }
-            current = current.parent
+            current = current.parent as ElementNode | null
           }
 
           return { skip: true }
