@@ -1,7 +1,7 @@
 {
   "name": "mdream-crawl",
   "type": "module",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "packageManager": "pnpm@10.12.4",
   "description": "Multi-page website crawler that generates comprehensive llms.txt files by following internal links and processing entire websites using mdream HTML-to-Markdown conversion.",
   "author": {

@@ -1,7 +1,7 @@
 {
   "name": "mdream",
   "type": "module",
-  "version": "0.5.0",
+  "version": "0.5.2",
   "packageManager": "pnpm@10.12.4",
   "description": "Ultra-performant JavaScript HTML to Markdown converter optimized for LLMs.",
   "author": {
