@@ -117,9 +117,17 @@ cat index.html \
   | tee streaming.md
 ```
 
+### CLI Options
+
+- `--origin <url>`: Base URL for resolving relative links and images
+- `--preset <preset>`: Conversion presets: minimal
+- `--help`: Display help information
+- `--version`: Display version information
+
+
 ## GitHub Actions Integration
 
-Mdream provides a GitHub Action that processes HTML files using glob patterns to generate `llms.txt` artifacts in CI/CD workflows. 
+Mdream provides a GitHub Action that processes HTML files using glob patterns to generate `llms.txt` artifacts in CI/CD workflows.
 
 This is useful for prerendered sites, it creates both condensed and comprehensive LLM-ready files that can be uploaded as artifacts or deployed with your site
 whenever you make changes.
@@ -181,13 +189,6 @@ jobs:
 ```
 
 For all available options and advanced configuration, see the complete [action.yml](./action.yml) specification.
-
-### CLI Options
-
-- `--origin <url>`: Base URL for resolving relative links and images
-- `--preset <preset>`: Conversion presets: minimal
-- `--help`: Display help information
-- `--version`: Display version information
 
 ## API Usage
 
