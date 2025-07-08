@@ -1,0 +1,1 @@
+../packages/mdream/bin/mdream.mjs

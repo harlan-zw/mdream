@@ -73,6 +73,7 @@
     "test:attw": "attw --pack"
   },
   "dependencies": {
-    "cac": "^6.7.14"
+    "cac": "^6.7.14",
+    "tinyglobby": "^0.2.10"
   }
 }

@@ -283,15 +283,16 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
     const siteName = homePageResult?.metadata?.title || firstUrl.hostname
     const description = homePageResult?.metadata?.description || successfulResults[0]?.metadata?.description
 
-    // Generate llms.txt if requested
-    if (generateLlmsTxt) {
-      await generateLlmsTxtFile({
-        siteName,
-        description,
-        results: successfulResults,
-        outputPath: join(outputDir, 'llms.txt'),
-      })
-    }
+    // Generate llms.txt and llms-full.txt if requested
+    if (generateLlmsTxt || generateLlmsFullTxt) {
+      // Convert CrawlResult to ProcessedFile format
+      const processedFiles: ProcessedFile[] = successfulResults.map(result => ({
+        filePath: result.filePath,
+        title: result.title,
+        content: result.content,
+        url: result.url,
+        metadata: result.metadata,
+      }))
 
     // Generate llms-full.txt if requested
     if (generateLlmsFullTxt) {

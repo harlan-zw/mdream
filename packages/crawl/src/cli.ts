@@ -62,7 +62,7 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
   const globPatterns = urls.map(parseUrlPattern)
 
   // Set default output directory
-  const outputDir = './output'
+  const outputDir = '.'
 
   // Crawler configuration
   const crawlerOptions = await p.group(
@@ -102,11 +102,11 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
       outputFormats: () => p.multiselect({
         message: 'Select output formats:',
         options: [
-          { value: 'llms-txt', label: 'llms.txt (basic format)', hint: 'Recommended' },
-          { value: 'llms-full-txt', label: 'llms-full.txt (extended format)' },
-          { value: 'individual-md', label: 'Individual Markdown files' },
+          { value: 'llms.txt', label: 'llms.txt (basic format)', hint: 'Recommended' },
+          { value: 'llms-full.txt', label: 'llms-full.txt (extended format)' },
+          { value: 'markdown', label: 'Individual Markdown files' },
         ],
-        initialValues: ['llms-txt', 'llms-full-txt', 'individual-md'],
+        initialValues: ['llms.txt', 'llms-full.txt', 'markdown'],
       }),
     },
     {
@@ -132,9 +132,9 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
   // Show summary
   const outputFormats = advancedOptions.outputFormats.map((f) => {
     switch (f) {
-      case 'llms-txt': return 'llms.txt'
-      case 'llms-full-txt': return 'llms-full.txt'
-      case 'individual-md': return 'Individual MD files'
+      case 'llms.txt': return 'llms.txt'
+      case 'llms-full.txt': return 'llms-full.txt'
+      case 'markdown': return 'Individual MD files'
       default: return f
     }
   })
@@ -169,9 +169,9 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
     maxRequestsPerCrawl: Number.MAX_SAFE_INTEGER, // Unlimited pages
     followLinks: true, // Always follow links
     maxDepth: Number.parseInt(crawlerOptions.maxDepth),
-    generateLlmsTxt: advancedOptions.outputFormats.includes('llms-txt'),
-    generateLlmsFullTxt: advancedOptions.outputFormats.includes('llms-full-txt'),
-    generateIndividualMd: advancedOptions.outputFormats.includes('individual-md'),
+    generateLlmsTxt: advancedOptions.outputFormats.includes('llms.txt'),
+    generateLlmsFullTxt: advancedOptions.outputFormats.includes('llms-full.txt'),
+    generateIndividualMd: advancedOptions.outputFormats.includes('markdown'),
     origin: inferredOrigin,
     globPatterns,
   }
@@ -219,12 +219,13 @@ Usage:
 
 Options:
   -u, --url <url>              Website URL to crawl
-  -o, --output <dir>           Output directory (default: ./output)
+  -o, --output <dir>           Output directory (default: .)
   -d, --depth <number>         Crawl depth (default: 3)
   --driver <http|playwright>   Crawler driver (default: http)
-  --llms-txt                   Generate llms.txt file
-  --llms-full-txt             Generate llms-full.txt file
-  --individual-md             Generate individual MD files
+  --artifacts <list>           Comma-separated list of artifacts: llms.txt,llms-full.txt,markdown (default: all)
+  --origin <url>               Origin URL for resolving relative paths (overrides auto-detection)
+  --site-name <name>           Override site name (overrides auto-extracted title)
+  --description <desc>         Override site description (overrides auto-extracted description)
   --max-pages <number>        Maximum pages to crawl (default: unlimited)
   --crawl-delay <seconds>     Crawl delay in seconds
   --exclude <pattern>         Exclude URLs matching glob patterns (can be used multiple times)
@@ -234,8 +235,8 @@ Options:
 Note: Sitemap discovery and robots.txt checking are automatic
 
 Examples:
-  mdream-crawl -u harlanzw.com --llms-txt --individual-md
-  mdream-crawl --url https://docs.example.com --depth 2 --llms-full-txt
+  mdream-crawl -u harlanzw.com --artifacts "llms.txt,markdown"
+  mdream-crawl --url https://docs.example.com --depth 2 --artifacts "llms-full.txt"
   mdream-crawl -u example.com --exclude "*/admin/*" --exclude "*/api/*"
 `)
     process.exit(0)
@@ -267,10 +268,6 @@ Examples:
       }
     }
     return values
-  }
-
-  const hasFlag = (flag: string): boolean => {
-    return args.includes(flag) || args.includes(flag.replace('--', '-'))
   }
 
   // Get URL from -u/--url flag or first non-flag argument
@@ -349,22 +346,24 @@ Examples:
     }
   }
 
-  // Parse output formats
-  const outputFormats: string[] = []
-  if (hasFlag('--llms-txt'))
-    outputFormats.push('llms-txt')
-  if (hasFlag('--llms-full-txt'))
-    outputFormats.push('llms-full-txt')
-  if (hasFlag('--individual-md'))
-    outputFormats.push('individual-md')
+  // Parse artifacts
+  const artifactsStr = getArgValue('--artifacts')
+  const artifacts = artifactsStr ? artifactsStr.split(',').map(a => a.trim()) : ['llms.txt', 'llms-full.txt', 'markdown']
 
-  // Default to all formats if none specified
-  if (outputFormats.length === 0) {
-    outputFormats.push('llms-txt', 'llms-full-txt', 'individual-md')
+  // Validate artifacts
+  const validArtifacts = ['llms.txt', 'llms-full.txt', 'markdown']
+  for (const artifact of artifacts) {
+    if (!validArtifacts.includes(artifact)) {
+      p.log.error(`Error: Invalid artifact '${artifact}'. Valid options: ${validArtifacts.join(', ')}`)
+      process.exit(1)
+    }
   }
 
-  // Auto-infer origin URL from provided URL
+  // Get origin URL (allow override of auto-detection)
+  const originOverride = getArgValue('--origin')
   const inferredOrigin = (() => {
+    if (originOverride)
+      return originOverride
     try {
       const urlObj = new URL(withHttps(url))
       return `${urlObj.protocol}//${urlObj.host}`
@@ -374,18 +373,24 @@ Examples:
     }
   })()
 
+  // Get metadata overrides
+  const siteNameOverride = getArgValue('--site-name')
+  const descriptionOverride = getArgValue('--description')
+
   const patterns = [parseUrlPattern(url)]
 
   return {
     urls: [url],
-    outputDir: resolve(getArgValue('--output') || getArgValue('-o') || './output'),
+    outputDir: resolve(getArgValue('--output') || getArgValue('-o') || '.'),
     driver: (driver as 'http' | 'playwright') || 'http',
     maxRequestsPerCrawl: Number.parseInt(maxPagesStr || String(Number.MAX_SAFE_INTEGER)),
     followLinks: true,
     maxDepth: depth,
-    generateLlmsTxt: outputFormats.includes('llms-txt'),
-    generateLlmsFullTxt: outputFormats.includes('llms-full-txt'),
-    generateIndividualMd: outputFormats.includes('individual-md'),
+    generateLlmsTxt: artifacts.includes('llms.txt'),
+    generateLlmsFullTxt: artifacts.includes('llms-full.txt'),
+    generateIndividualMd: artifacts.includes('markdown'),
+    siteNameOverride,
+    descriptionOverride,
     origin: inferredOrigin,
     globPatterns: patterns,
     crawlDelay: crawlDelayStr ? Number.parseInt(crawlDelayStr) : undefined,
