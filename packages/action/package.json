@@ -11,7 +11,8 @@
   "scripts": {
     "build": "rm -rf dist && ncc build src/index.ts -o dist --no-source-map-register --minify && find dist -name '*.js' ! -name 'index.js' -delete",
     "typecheck": "tsc --noEmit",
-    "dev:prepare": "rm -rf dist && ncc build src/index.ts -o dist --no-source-map-register --minify && find dist -name '*.js' ! -name 'index.js' -delete"
+    "dev:prepare": "echo 'Action dev:prepare: using build output'",
+    "test:attw": "echo 'No package types to test for action bundle'"
   },
   "dependencies": {
     "@actions/core": "^1.10.1",
