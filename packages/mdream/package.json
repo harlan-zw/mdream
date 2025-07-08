@@ -46,7 +46,9 @@
   },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
-  "bin": "./bin/mdream.mjs",
+  "bin": {
+    "mdream": "./bin/mdream.mjs"
+  },
   "files": [
     "bin",
     "dist"

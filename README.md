@@ -22,7 +22,7 @@
 
 - 🧠 Optimized HTML To Markdown Conversion (~50% fewer tokens with [Minimal preset](./packages/mdream/src/preset/minimal.ts))
 - 🔍 Generates GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
-- 🕷️ Site Crawling: [Mdream Crawl](#mdream-crawler) generates `llms.txt` artifacts from entire websites.
+- 🕷️ Site Crawling: [Mdream Crawl](#mdream-crawler) generates [llms.txt](https://llmstxt.org/) artifacts from entire websites.
 - 🚀 Fast: Stream 1.4MB of HTML to markdown in ~50ms.
 - ⚡ Tiny: 5kB gzip, zero dependencies.
 - ⚙️ Run anywhere: CLI, edge workers, browsers, Node, etc.
