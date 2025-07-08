@@ -1,10 +1,10 @@
 {
   "name": "mdream-action",
   "type": "module",
-  "version": "1.0.0",
+  "version": "0.6.0",
   "description": "GitHub Action for mdream llms.txt generation",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "files": [
     "dist"
   ],
