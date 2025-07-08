@@ -20,10 +20,11 @@
 
 ## Features
 
-- 🧠 Content Extraction: [Minimal preset](./src/preset/minimal.ts) for ~50% fewer tokens and improved accuracy.
-- 🔍 GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
-- 🚀 Stream 1.4MB of HTML to markdown in ~50ms.
-- ⚡ 5kB gzip, zero dependencies.
+- 🧠 Optimized HTML To Markdown Conversion (~50% fewer tokens with [Minimal preset](./packages/mdream/src/preset/minimal.ts))
+- 🔍 Generates GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
+- 🕷️ Site Crawling: [Mdream Crawl](#mdream-crawler) generates `llms.txt` artifacts from entire websites.
+- 🚀 Fast: Stream 1.4MB of HTML to markdown in ~50ms.
+- ⚡ Tiny: 5kB gzip, zero dependencies.
 - ⚙️ Run anywhere: CLI, edge workers, browsers, Node, etc.
 - 🔌 Extensible: [Plugin system](#plugin-system) for customizing and extending functionality.
 
@@ -37,13 +38,13 @@ Other LLM specific convertors focus on supporting _all_ document formats, result
 Mdream produces high-quality Markdown for LLMs efficiently with no dependencies. The provided core
 has a plugin system to customize the conversion process, allowing you to parse, extract, transform, and filter as needed.
 
-Additionally, [Mdream Crawl](#mdream-cralwer) allows you to crawl entire sites and generate LLM artifacts like `llms.txt` files.
+Additionally, [Mdream Crawl](#mdream-crawler) allows you to crawl entire sites and generate LLM artifacts like `llms.txt` files.
 
 ### Mdream Packages
 
 Mdream is a HTML parser, Markdown Generator and site-wide crawler. To keep the core as small as possible, it is split into two packages:
 
-- [mdream-crawler](#mdream-cralwer): A site-wide crawler to generate `llms.txt` artifacts **full: heavy dependencies**.
+- [mdream-crawler](#mdream-crawler): A site-wide crawler to generate `llms.txt` artifacts **full: heavy dependencies**.
 - [mdream](#mdream): HTMl to Markdown convertor, can be used as a CLI for `stdin` conversion or as a package **minimal: no dependencies**.
 
 ## Mdream Crawler
@@ -72,7 +73,7 @@ npx mdream-crawl -h
 **Crawl Using Playwright**
 
 ```bash
-mdream-crawl -u example.com --driver playwright"
+mdream-crawl -u example.com --driver playwright
 ```
 
 **Exclude Specific Paths**
@@ -90,7 +91,7 @@ mdream-crawl -u https://large-site.com \
 
 ## Stdin CLI Usage
 
-Mdream is much more minimal that Mdream Crawl. It provides a CLI designed to work exclusively with Unix pipes,
+Mdream is much more minimal than Mdream Crawl. It provides a CLI designed to work exclusively with Unix pipes,
 providing flexibility and freedom to integrate with other tools.
 
 **Pipe Site to Markdown**
@@ -230,12 +231,12 @@ The plugin system allows you to customize HTML to Markdown conversion by hooking
 
 Mdream includes several built-in plugins that can be used individually or combined:
 
-- **[`extractionPlugin`](./src/plugins/extraction.ts)**: Extract specific elements using CSS selectors for data analysis
-- **[`filterPlugin`](./src/plugins/filter.ts)**: Include or exclude elements based on CSS selectors or tag IDs
-- **[`frontmatterPlugin`](./src/plugins/frontmatter.ts)**: Generate YAML frontmatter from HTML head elements (title, meta tags)
-- **[`isolateMainPlugin`](./src/plugins/isolate-main.ts)**: Isolate main content using `<main>` elements or header-to-footer boundaries
-- **[`tailwindPlugin`](./src/plugins/tailwind.ts)**: Convert Tailwind CSS classes to Markdown formatting (bold, italic, etc.)
-- **[`readabilityPlugin`](./src/plugins/readability.ts)**: Content scoring and extraction (experimental)
+- **[`extractionPlugin`](./packages/mdream/src/plugins/extraction.ts)**: Extract specific elements using CSS selectors for data analysis
+- **[`filterPlugin`](./packages/mdream/src/plugins/filter.ts)**: Include or exclude elements based on CSS selectors or tag IDs
+- **[`frontmatterPlugin`](./packages/mdream/src/plugins/frontmatter.ts)**: Generate YAML frontmatter from HTML head elements (title, meta tags)
+- **[`isolateMainPlugin`](./packages/mdream/src/plugins/isolate-main.ts)**: Isolate main content using `<main>` elements or header-to-footer boundaries
+- **[`tailwindPlugin`](./packages/mdream/src/plugins/tailwind.ts)**: Convert Tailwind CSS classes to Markdown formatting (bold, italic, etc.)
+- **[`readabilityPlugin`](./packages/mdream/src/plugins/readability.ts)**: Content scoring and extraction (experimental)
 
 ```ts
 import { filterPlugin, frontmatterPlugin, isolateMainPlugin } from 'mdream/plugins'
