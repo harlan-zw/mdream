@@ -27,17 +27,19 @@
 - ⚙️ Run anywhere: CLI, edge workers, browsers, Node, etc.
 - 🔌 Extensible: [Plugin system](#plugin-system) for customizing and extending functionality.
 
-## Why Mdream?
+## What is Mdream?
 
 Traditional HTML to Markdown converters were not built for LLMs or humans. They tend to be slow and bloated and produce output that's poorly suited for LLMs token usage or for
 human readability.
 
 Other LLM specific convertors focus on supporting _all_ document formats, resulting in larger bundles and lower quality Markdown output.
 
-Mdream is built specifically for producing high-quality Markdown for LLMs as quickly as possible. It provides
-a powerful plugin system to customize the conversion process, allowing you to extract, transform, and filter content as needed.
+Mdream produces high-quality Markdown for LLMs efficiently with no dependencies. The provided core
+has a plugin system to customize the conversion process, allowing you to parse, extract, transform, and filter as needed.
 
-## Using Mdream
+Additionally, [Mdream Crawl](#mdream-cralwer) allows you to crawl entire sites and generate LLM artifacts like `llms.txt` files.
+
+### Mdream Packages
 
 Mdream is a HTML parser, Markdown Generator and site-wide crawler. To keep the core as small as possible, it is split into two packages:
 
@@ -54,7 +56,7 @@ The `mdream-crawl` package crawls an entire site generating LLM artifacts using 
 
 ### Usage
 
-```bash
+```sh
 # Interactive
 npx mdream-crawl
 # Simple
@@ -70,49 +72,26 @@ npx mdream-crawl -h
 **Crawl Using Playwright**
 
 ```bash
-# Execute javascript for SPAs
 mdream-crawl -u example.com --driver playwright"
 ```
 
 **Exclude Specific Paths**
 
 ```bash
-# Exclude admin and API endpoints
 mdream-crawl -u example.com --exclude "/admin/*" --exclude "/api/*"
-```
-
-**Crawl Documentation Sites**
-```bash
-# Crawl documentation with comprehensive output
-mdream-crawl -u https://docs.framework.com \
-  --depth 3 \
-  --exclude "/api-reference/*" \
-  --exclude "**/*.json"
-```
-
-**Crawl Blog or News Sites**
-```bash
-# Focus on content, exclude navigation and admin
-mdream-crawl -u https://blog.example.com \
-  --depth 2 \
-  --exclude "/tag/*" \
-  --exclude "/category/*" \
-  --exclude "/admin/*" \
 ```
 
 **Large Site Crawling with Limits**
 ```bash
-# Controlled crawling with delays and limits
 mdream-crawl -u https://large-site.com \
   --max-pages 100 \
-  --crawl-delay 1 \
-  --depth 2 \
-  --driver playwright
+  --depth 2
 ```
 
 ## Stdin CLI Usage
 
-The Mdream CLI is designed to work exclusively with Unix pipes, providing flexibility and freedom to integrate with other tools.
+Mdream is much more minimal that Mdream Crawl. It provides a CLI designed to work exclusively with Unix pipes,
+providing flexibility and freedom to integrate with other tools.
 
 **Pipe Site to Markdown**
 
