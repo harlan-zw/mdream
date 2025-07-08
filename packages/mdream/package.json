@@ -1,0 +1,50 @@
+{
+  "name": "mdream",
+  "type": "module",
+  "version": "0.4.0",
+  "packageManager": "pnpm@10.12.4",
+  "description": "Ultra-performant JavaScript HTML to Markdown converter optimized for LLMs.",
+  "author": {
+    "name": "Harlan Wilton",
+    "email": "harlan@harlanzw.com",
+    "url": "https://harlanzw.com/"
+  },
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs"
+    },
+    "./cli": "./dist/cli.mjs",
+    "./plugins": "./dist/plugins.mjs",
+    "./preset/minimal": "./dist/preset/minimal.mjs"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "bin": "./bin/mdream.mjs",
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "scripts": {
+    "flame": "pnpm build && unbuild bench/bundle && clinic flame -- node bench/bundle/dist/string.mjs 10",
+    "bench:build": "pnpm build && unbuild bench/bundle",
+    "bench:stream": "pnpm build && unbuild bench/bundle && hyperfine --runs 100 'node bench/bundle/dist/stream.mjs' --warmup 3",
+    "bench:await": "pnpm build && unbuild bench/bundle && hyperfine --runs 100 'node bench/bundle/dist/await.mjs' --warmup 3",
+    "bench:string": "pnpm build && unbuild bench/bundle && hyperfine --runs 100 'node bench/bundle/dist/string.mjs' --warmup 3",
+    "ts": "node  --experimental-strip-types",
+    "test:live": "curl -s https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax | node ./bin/mdream.mjs --origin https://docs.github.com | tee test/github-markdown.md",
+    "test:images": "cat test/fixtures/test-origin.html | node ./bin/mdream.mjs --origin https://docs.github.com",
+    "test:github:live": "curl -s https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax | node ./bin/mdream.mjs --origin https://docs.github.com | tee test/github-markdown.md",
+    "test:github:file": "cat test/fixtures/github-markdown-complete.html | node ./bin/mdream.mjs --origin https://docs.github.com | tee test/github-markdown.md",
+    "test:wiki:file": "pnpm build && cat test/fixtures/wikipedia-largest.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
+    "test:wiki-small:file": "cat test/fixtures/wikipedia-small.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
+    "build": "obuild",
+    "typecheck": "tsc --noEmit",
+    "dev:prepare": "obuild --stub",
+    "test": "vitest test"
+  },
+  "dependencies": {
+    "cac": "^6.7.14"
+  }
+}
