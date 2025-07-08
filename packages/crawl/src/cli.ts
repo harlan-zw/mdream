@@ -4,6 +4,7 @@ import * as p from '@clack/prompts'
 import { withHttps } from 'ufo'
 import { crawlAndGenerate } from './crawl.ts'
 import { parseUrlPattern, validateGlobPattern } from './glob-utils.ts'
+import { ensurePlaywrightInstalled } from './playwright-utils.ts'
 
 async function interactiveCrawl(): Promise<CrawlOptions | null> {
   console.clear()
@@ -423,6 +424,15 @@ async function main() {
 
   if (!options) {
     process.exit(0)
+  }
+
+  // Check playwright installation if needed
+  if (options.driver === 'playwright') {
+    const playwrightInstalled = await ensurePlaywrightInstalled()
+    if (!playwrightInstalled) {
+      p.log.error('Cannot proceed without Playwright. Please install it manually or use the HTTP driver instead.')
+      process.exit(1)
+    }
   }
 
   const s = p.spinner()

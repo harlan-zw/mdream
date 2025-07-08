@@ -2,7 +2,7 @@ import type { CrawlOptions, CrawlResult } from './types.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { HttpCrawler, PlaywrightCrawler, purgeDefaultStorages, Sitemap } from 'crawlee'
+import { HttpCrawler, purgeDefaultStorages, Sitemap } from 'crawlee'
 import { htmlToMarkdown } from 'mdream'
 import { withMinimalPreset } from 'mdream/preset/minimal'
 import { withHttps } from 'ufo'
@@ -239,7 +239,7 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
   }
 
   // Create appropriate crawler with crawl delay if specified
-  let crawler: HttpCrawler<any> | PlaywrightCrawler
+  let crawler: HttpCrawler<any> | any // PlaywrightCrawler type will be determined at runtime
   const crawlerOptions: any = {
     requestHandler: createRequestHandler(driver),
     maxRequestsPerCrawl,
@@ -252,7 +252,9 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
   }
 
   if (driver === 'playwright') {
-    crawler = new PlaywrightCrawler(crawlerOptions)
+    // Import PlaywrightCrawler - installation check should happen in CLI layer
+    const { PlaywrightCrawler: PlaywrightCrawlerClass } = await import('crawlee')
+    crawler = new PlaywrightCrawlerClass(crawlerOptions)
   }
   else {
     crawler = new HttpCrawler(crawlerOptions)

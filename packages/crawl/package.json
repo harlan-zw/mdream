@@ -47,6 +47,14 @@
     "crawlee": "^3.13.9",
     "mdream": "workspace:*",
     "minimatch": "^10.0.3",
+    "nypm": "^0.4.0"
+  },
+  "peerDependencies": {
     "playwright": "^1.53.2"
+  },
+  "peerDependenciesMeta": {
+    "playwright": {
+      "optional": true
+    }
   }
 }
