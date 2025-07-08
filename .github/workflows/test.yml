@@ -34,7 +34,7 @@ jobs:
       - run: pnpm i
 
       - name: Prepare
-        run: pnpm dev:prepare
+        run: pnpm -r run dev:prepare
 
       - name: Build
         run: pnpm run build

@@ -43,8 +43,8 @@ Additionally, [Mdream Crawl](#mdream-cralwer) allows you to crawl entire sites a
 
 Mdream is a HTML parser, Markdown Generator and site-wide crawler. To keep the core as small as possible, it is split into two packages:
 
-- [mdream-crawler](#mdream-cralwer): Site-wide crawler to generate `llms.txt` artifacts.
-- [mdream](#mdream): HTMl to Markdown convertor, can be used as a CLI for `stdin` conversion or as a package.
+- [mdream-crawler](#mdream-cralwer): A site-wide crawler to generate `llms.txt` artifacts **full: heavy dependencies**.
+- [mdream](#mdream): HTMl to Markdown convertor, can be used as a CLI for `stdin` conversion or as a package **minimal: no dependencies**.
 
 ## Mdream Crawler
 
