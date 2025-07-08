@@ -12,19 +12,19 @@
   "license": "MIT",
   "exports": {
     ".": {
+      "types": "./dist/index.d.mts",
       "import": {
         "types": "./dist/index.d.mts",
         "default": "./dist/index.mjs"
       },
-      "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
     },
     "./cli": {
+      "types": "./dist/cli.d.mts",
       "import": {
         "types": "./dist/cli.d.mts",
         "default": "./dist/cli.mjs"
       },
-      "types": "./dist/cli.d.mts",
       "default": "./dist/cli.mjs"
     }
   },
@@ -42,13 +42,6 @@
     "test": "vitest test",
     "test:attw": "attw --pack"
   },
-  "dependencies": {
-    "@clack/prompts": "^0.11.0",
-    "crawlee": "^3.13.9",
-    "mdream": "workspace:*",
-    "minimatch": "^10.0.3",
-    "nypm": "^0.4.0"
-  },
   "peerDependencies": {
     "playwright": "^1.53.2"
   },
@@ -56,5 +49,12 @@
     "playwright": {
       "optional": true
     }
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.11.0",
+    "crawlee": "^3.13.9",
+    "mdream": "workspace:*",
+    "minimatch": "^10.0.3",
+    "nypm": "^0.6.0"
   }
 }

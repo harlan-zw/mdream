@@ -6,7 +6,8 @@ export async function checkPlaywrightInstallation(): Promise<boolean> {
     // Try to import playwright (full version needed for crawlee)
     await import('playwright')
     return true
-  } catch {
+  }
+  catch {
     return false
   }
 }
@@ -29,13 +30,15 @@ export async function promptPlaywrightInstall(): Promise<boolean> {
     await addDependency('playwright', { workspace: true })
     s.stop('Playwright installed successfully!')
     return true
-  } catch (error) {
+  }
+  catch {
     // Fallback: try without workspace flag
     try {
       await addDependency('playwright')
       s.stop('Playwright installed successfully!')
       return true
-    } catch (fallbackError) {
+    }
+    catch (fallbackError) {
       s.stop('Failed to install Playwright')
       p.log.error(`Installation failed: ${fallbackError}`)
       return false
@@ -45,13 +48,13 @@ export async function promptPlaywrightInstall(): Promise<boolean> {
 
 export async function ensurePlaywrightInstalled(): Promise<boolean> {
   const isInstalled = await checkPlaywrightInstallation()
-  
+
   if (isInstalled) {
     return true
   }
 
   p.log.warn('Playwright driver selected but Playwright is not installed.')
-  
+
   const installed = await promptPlaywrightInstall()
   if (!installed) {
     p.log.error('Cannot proceed with Playwright driver without Playwright installed.')
