@@ -75,7 +75,7 @@ it('should generate llms.txt from HTML files', async () => {
     patterns: join(testDir, '**/*.html'),
     siteName: 'Test Site',
     description: 'A test site for mdream',
-    baseUrl: 'https://example.com',
+    origin: 'https://example.com',
   })
 
   expect(result.processedFiles).toHaveLength(3)
@@ -100,7 +100,7 @@ it('should generate llms-full.txt when requested', async () => {
     patterns: join(testDir, '**/*.html'),
     siteName: 'Test Site',
     description: 'A test site for mdream',
-    baseUrl: 'https://example.com',
+    origin: 'https://example.com',
     generateFull: true,
   })
 

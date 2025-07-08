@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 const execAsync = promisify(exec)
 
 const testOutputDir = join(process.cwd(), 'test-output')
-const fixturesDir = join(process.cwd(), 'test/fixtures/llms-cli')
+const fixturesDir = join(process.cwd(), 'packages/mdream/test/fixtures/llms-cli')
 const mdreamBin = join(process.cwd(), 'bin/mdream.mjs')
 
 beforeEach(async () => {
@@ -47,17 +47,14 @@ it('should generate basic llms.txt from HTML files', async () => {
 })
 
 it('should generate llms-full.txt with complete content', async () => {
-  const outputPath = join(testOutputDir, 'llms.txt')
-  const fullPath = join(testOutputDir, 'llms-full.txt')
-
   const { stdout } = await execAsync(
-    `node "${mdreamBin}" llms "${fixturesDir}/**/*.html" --site-name "Test Site" --description "A test site" --output "${outputPath}" --artifacts "llms.txt,llms-full.txt"`,
+    `node "${mdreamBin}" llms "${fixturesDir}/**/*.html" --site-name "Test Site" --description "A test site" --output "${testOutputDir}" --artifacts "llms.txt,llms-full.txt"`,
   )
 
   // Since console.log statements were removed, we just check that the command succeeded
   expect(stdout).toBe('')
 
-  const fullContent = await readFile(fullPath, 'utf-8')
+  const fullContent = await readFile(join(testOutputDir, 'llms-full.txt'), 'utf-8')
 
   // Check structure
   expect(fullContent).toContain('# Test Site')
@@ -81,10 +78,8 @@ it('should generate llms-full.txt with complete content', async () => {
 })
 
 it('should generate individual markdown files', async () => {
-  const outputPath = join(testOutputDir, 'llms.txt')
-
   const { stdout } = await execAsync(
-    `node "${mdreamBin}" llms "${fixturesDir}/**/*.html" --site-name "Test Site" --output "${outputPath}" --artifacts "llms.txt,markdown"`,
+    `node "${mdreamBin}" llms "${fixturesDir}/**/*.html" --site-name "Test Site" --output "${testOutputDir}" --artifacts "llms.txt,markdown"`,
   )
 
   // Since console.log statements were removed, we just check that the command succeeded
@@ -114,17 +109,15 @@ it('should generate individual markdown files', async () => {
 })
 
 it('should work with glob patterns', async () => {
-  const outputPath = join(testOutputDir, 'llms.txt')
-
   // Test with specific pattern - only blog posts
   const { stdout } = await execAsync(
-    `node "${mdreamBin}" llms "${fixturesDir}/blog/*.html" --site-name "Blog Only" --output "${outputPath}"`,
+    `node "${mdreamBin}" llms "${fixturesDir}/blog/*.html" --site-name "Blog Only" --output "${testOutputDir}"`,
   )
 
   // Since console.log statements were removed, we just check that the command succeeded
   expect(stdout).toBe('')
 
-  const content = await readFile(outputPath, 'utf-8')
+  const content = await readFile(join(testOutputDir, 'llms.txt'), 'utf-8')
   expect(content).toContain('# Blog Only')
   expect(content).toContain('[First Blog Post - Test Site Blog]')
   expect(content).not.toContain('About Us')
@@ -132,29 +125,25 @@ it('should work with glob patterns', async () => {
 })
 
 it('should handle missing site name and description gracefully', async () => {
-  const outputPath = join(testOutputDir, 'llms.txt')
-
   const { stdout } = await execAsync(
-    `node "${mdreamBin}" llms "${fixturesDir}/index.html" --output "${outputPath}"`,
+    `node "${mdreamBin}" llms "${fixturesDir}/index.html" --output "${testOutputDir}"`,
   )
 
   // Since console.log statements were removed, we just check that the command succeeded
   expect(stdout).toBe('')
 
-  const content = await readFile(outputPath, 'utf-8')
+  const content = await readFile(join(testOutputDir, 'llms.txt'), 'utf-8')
   expect(content).toContain('# Site') // default site name
   expect(content).not.toContain('>') // no description block
   expect(content).toContain('## Pages')
 })
 
 it('should extract metadata from HTML properly', async () => {
-  const outputPath = join(testOutputDir, 'llms.txt')
-
   await execAsync(
-    `node "${mdreamBin}" llms "${fixturesDir}/blog/post1.html" --site-name "Blog Test" --origin "https://test.com" --output "${outputPath}"`,
+    `node "${mdreamBin}" llms "${fixturesDir}/blog/post1.html" --site-name "Blog Test" --origin "https://test.com" --output "${testOutputDir}"`,
   )
 
-  const content = await readFile(outputPath, 'utf-8')
+  const content = await readFile(join(testOutputDir, 'llms.txt'), 'utf-8')
 
   // Check that article metadata was extracted
   expect(content).toContain('[First Blog Post - Test Site Blog](https://test.com/post1)')
@@ -162,10 +151,8 @@ it('should extract metadata from HTML properly', async () => {
 })
 
 it('should handle origin parameter for relative paths', async () => {
-  const outputPath = join(testOutputDir, 'llms.txt')
-
   const { stdout } = await execAsync(
-    `node "${mdreamBin}" llms "${fixturesDir}/**/*.html" --site-name "Test Site" --origin "https://origin.com" --output "${outputPath}" --artifacts "llms.txt,markdown"`,
+    `node "${mdreamBin}" llms "${fixturesDir}/**/*.html" --site-name "Test Site" --origin "https://origin.com" --output "${testOutputDir}" --artifacts "llms.txt,markdown"`,
   )
 
   // Since console.log statements were removed, we just check that the command succeeded

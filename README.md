@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-> Ultra-performant JavaScript HTML to Markdown converter optimized for LLMs.
+> An ultra-performant HTML to Markdown converter, purpose-built for Large Language Models (LLMs) and generating `llms.txt` artifacts.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
@@ -24,8 +24,8 @@
 - 🔍 Generates GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
 - 🕷️ Site Crawling: [Mdream Crawl](#mdream-crawler) generates [llms.txt](https://llmstxt.org/) artifacts from entire websites.
 - 🚀 Fast: Stream 1.4MB of HTML to markdown in ~50ms.
-- ⚡ Tiny: 5kB gzip, zero dependencies.
-- ⚙️ Run anywhere: CLI, edge workers, browsers, Node, etc.
+- ⚡ Tiny: 5kB gzip, zero dependency core.
+- ⚙️ Run anywhere: CLI, [GitHub Actions](#github-actions-integration), edge workers, browsers, Node, etc.
 - 🔌 Extensible: [Plugin system](#plugin-system) for customizing and extending functionality.
 
 ## What is Mdream?
@@ -42,10 +42,11 @@ Additionally, [Mdream Crawl](#mdream-crawler) allows you to crawl entire sites a
 
 ### Mdream Packages
 
-Mdream is a HTML parser, Markdown Generator and site-wide crawler. To keep the core as small as possible, it is split into two packages:
+Mdream is a HTML parser, Markdown Generator and site-wide crawler. To keep the core as small as possible, it is split into three packages:
 
 - [mdream-crawler](#mdream-crawler): A site-wide crawler to generate `llms.txt` artifacts **full: heavy dependencies**.
 - [mdream](#mdream): HTMl to Markdown convertor, can be used as a CLI for `stdin` conversion or as a package **minimal: no dependencies**.
+- [mdream-action](#github-actions-integration): GitHub Action for generating `llms.txt` artifacts from your static site output **deployment: CI/CD integration**.
 
 ## Mdream Crawler
 
@@ -115,6 +116,68 @@ cat index.html \
  | npx mdream --preset minimal \
   | tee streaming.md
 ```
+
+## GitHub Actions Integration
+
+Mdream provides a GitHub Action that processes HTML files using glob patterns to generate `llms.txt` artifacts in CI/CD workflows. Perfect for documentation sites and static content, it creates both condensed and comprehensive LLM-ready files that can be uploaded as artifacts or deployed with your site.
+
+### Complete Workflow Example
+
+```yaml
+name: Generate LLMs.txt
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  generate-llms-txt:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build documentation
+        run: npm run build
+
+      - name: Generate llms.txt artifacts
+        uses: harlan-zw/mdream@main
+        with:
+          glob: 'dist/**/*.html'
+          site-name: 'My Documentation'
+          description: 'Comprehensive technical documentation and guides'
+          origin: 'https://mydocs.com'
+          output: 'dist'
+
+      - name: Upload llms.txt artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: llms-txt-artifacts
+          path: |
+            dist/llms.txt
+            dist/llms-full.txt
+            dist/md/
+
+      - name: Deploy to GitHub Pages (optional)
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+```
+
+For all available options and advanced configuration, see the complete [action.yml](./action.yml) specification.
 
 ### CLI Options
 

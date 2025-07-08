@@ -3,7 +3,7 @@
   "type": "module",
   "version": "0.5.2",
   "packageManager": "pnpm@10.12.4",
-  "description": "Multi-page website crawler that generates comprehensive llms.txt files by following internal links and processing entire websites using mdream HTML-to-Markdown conversion.",
+  "description": "Mdream Crawl generates comprehensive llms.txt artifacts from a single URL, using mdream to convert HTML to Markdown.",
   "author": {
     "name": "Harlan Wilton",
     "email": "harlan@harlanzw.com",
