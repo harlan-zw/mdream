@@ -12,13 +12,24 @@
   "license": "MIT",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
     },
-    "./cli": "./dist/cli.mjs"
+    "./cli": {
+      "import": {
+        "types": "./dist/cli.d.mts",
+        "default": "./dist/cli.mjs"
+      },
+      "types": "./dist/cli.d.mts",
+      "default": "./dist/cli.mjs"
+    }
   },
   "main": "./dist/index.mjs",
-  "types": "./dist/index.d.ts",
+  "types": "./dist/index.d.mts",
   "bin": "./bin/mdream-crawl.mjs",
   "files": [
     "bin",
@@ -28,7 +39,8 @@
     "build": "obuild",
     "typecheck": "tsc --noEmit",
     "dev:prepare": "obuild --stub",
-    "test": "vitest test"
+    "test": "vitest test",
+    "test:attw": "attw --pack"
   },
   "dependencies": {
     "@clack/prompts": "^0.11.0",

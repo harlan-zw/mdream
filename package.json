@@ -7,11 +7,13 @@
     "build": "pnpm run -r build",
     "typecheck": "pnpm run -r typecheck",
     "test": "vitest test",
-    "release": "pnpm build && bumpp package.json packages/*/package.json && pnpm -r publish"
+    "release": "pnpm build && bumpp package.json packages/*/package.json && pnpm -r publish",
+    "test:attw": "pnpm -r --parallel --filter=./packages/** run test:attw"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.16.2",
     "@types/node": "^24.0.10",
+    "@arethetypeswrong/cli": "^0.18.2",
     "bumpp": "^10.2.0",
     "crawlee": "^3.13.9",
     "eslint": "^9.30.1",
