@@ -1,20 +1,28 @@
 import type { CrawlOptions } from './types.ts'
-import { resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import * as p from '@clack/prompts'
 import { withHttps } from 'ufo'
 import { crawlAndGenerate } from './crawl.ts'
 import { parseUrlPattern, validateGlobPattern } from './glob-utils.ts'
 import { ensurePlaywrightInstalled } from './playwright-utils.ts'
 
+// Read version from package.json
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const packageJsonPath = join(__dirname, '..', 'package.json')
+const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
+const version = packageJson.version
+
 async function interactiveCrawl(): Promise<CrawlOptions | null> {
   console.clear()
 
-  p.intro('☁️  mdream-crawl - Multi-Page Website Crawler')
+  p.intro('☁️  mdream-crawl')
 
   // Get URLs
   const urlsInput = await p.text({
-    message: 'Enter starting URL for website crawling (supports glob patterns):',
-    placeholder: 'e.g. docs.example.com site.com/docs/**',
+    message: 'Enter starting URL for crawling (supports glob patterns):',
+    placeholder: 'e.g. docs.example.com, site.com/docs/**',
     validate: (value) => {
       if (!value)
         return 'Please enter at least one URL'
@@ -201,7 +209,7 @@ function parseCliArgs(): CrawlOptions | null {
 
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`
-mdream-crawl v0.3.0
+mdream-crawl v${version}
 
 Multi-page website crawler that generates comprehensive llms.txt files
 
@@ -234,7 +242,7 @@ Examples:
   }
 
   if (args.includes('--version')) {
-    console.log('mdream-crawl v0.3.0')
+    console.log(`mdream-crawl v${version}`)
     process.exit(0)
   }
 
