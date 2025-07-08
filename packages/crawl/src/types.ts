@@ -13,6 +13,8 @@ export interface CrawlOptions {
   globPatterns?: ParsedUrlPattern[]
   crawlDelay?: number
   exclude?: string[]
+  siteNameOverride?: string
+  descriptionOverride?: string
 }
 
 export interface ParsedUrlPattern {

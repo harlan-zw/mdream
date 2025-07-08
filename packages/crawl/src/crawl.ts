@@ -1,13 +1,13 @@
+import type { ProcessedFile } from 'mdream'
 import type { CrawlOptions, CrawlResult } from './types.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { HttpCrawler, purgeDefaultStorages, Sitemap } from 'crawlee'
-import { htmlToMarkdown } from 'mdream'
+import { generateLlmsTxtArtifacts, htmlToMarkdown } from 'mdream'
 import { withMinimalPreset } from 'mdream/preset/minimal'
 import { withHttps } from 'ufo'
 import { getStartingUrl, isUrlExcluded, matchesGlobPattern, parseUrlPattern } from './glob-utils.ts'
-import { generateLlmsFullTxt as generateLlmsFullTxtFile, generateLlmsTxt as generateLlmsTxtFile } from './llms-txt.ts'
 import { extractMetadata } from './metadata-extractor.ts'
 
 export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResult[]> {
@@ -25,6 +25,8 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
     globPatterns = [],
     crawlDelay,
     exclude = [],
+    siteNameOverride,
+    descriptionOverride,
   } = options
 
   const patterns = globPatterns.length > 0 ? globPatterns : urls.map(parseUrlPattern)
@@ -274,14 +276,14 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
 
     // Extract site name and description from home page if available, otherwise first successful result
     const firstUrl = new URL(withHttps(urls[0]))
-    const homePageResult = successfulResults.find(r => {
+    const homePageResult = successfulResults.find((r) => {
       const resultUrl = new URL(withHttps(r.url))
       const homeUrl = new URL(withHttps(urls[0]))
       return resultUrl.href === homeUrl.href
     })
-    
-    const siteName = homePageResult?.metadata?.title || firstUrl.hostname
-    const description = homePageResult?.metadata?.description || successfulResults[0]?.metadata?.description
+
+    const siteName = siteNameOverride || homePageResult?.metadata?.title || firstUrl.hostname
+    const description = descriptionOverride || homePageResult?.metadata?.description || successfulResults[0]?.metadata?.description
 
     // Generate llms.txt and llms-full.txt if requested
     if (generateLlmsTxt || generateLlmsFullTxt) {
@@ -294,14 +296,23 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
         metadata: result.metadata,
       }))
 
-    // Generate llms-full.txt if requested
-    if (generateLlmsFullTxt) {
-      await generateLlmsFullTxtFile({
+      const llmsResult = await generateLlmsTxtArtifacts({
+        files: processedFiles,
         siteName,
         description,
-        results: successfulResults,
-        outputPath: join(outputDir, 'llms-full.txt'),
+        origin: origin || firstUrl.origin,
+        generateFull: generateLlmsFullTxt,
       })
+
+      // Write llms.txt if requested
+      if (generateLlmsTxt) {
+        await writeFile(join(outputDir, 'llms.txt'), llmsResult.llmsTxt, 'utf-8')
+      }
+
+      // Write llms-full.txt if requested
+      if (generateLlmsFullTxt && llmsResult.llmsFullTxt) {
+        await writeFile(join(outputDir, 'llms-full.txt'), llmsResult.llmsFullTxt, 'utf-8')
+      }
     }
   }
 
