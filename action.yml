@@ -40,5 +40,5 @@ outputs:
     description: JSON array of generated markdown file paths
 
 runs:
-  using: node22
+  using: node20
   main: packages/action/dist/index.mjs

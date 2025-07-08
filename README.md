@@ -22,7 +22,7 @@
 
 - 🧠 Optimized HTML To Markdown Conversion (~50% fewer tokens with [Minimal preset](./packages/mdream/src/preset/minimal.ts))
 - 🔍 Generates GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
-- 🕷️ Site Crawling: [Mdream Crawl](#mdream-crawler) generates [llms.txt](https://llmstxt.org/) artifacts from entire websites.
+- 🕷️ Site Crawling: [Mdream Crawl](#mdream-crawl) generates [llms.txt](https://llmstxt.org/) artifacts from entire websites.
 - 🚀 Fast: Stream 1.4MB of HTML to markdown in ~50ms.
 - ⚡ Tiny: 5kB gzip, zero dependency core.
 - ⚙️ Run anywhere: CLI, [GitHub Actions](#github-actions-integration), edge workers, browsers, Node, etc.
@@ -38,17 +38,17 @@ Other LLM specific convertors focus on supporting _all_ document formats, result
 Mdream produces high-quality Markdown for LLMs efficiently with no dependencies. The provided core
 has a plugin system to customize the conversion process, allowing you to parse, extract, transform, and filter as needed.
 
-Additionally, [Mdream Crawl](#mdream-crawler) allows you to crawl entire sites and generate LLM artifacts like `llms.txt` files.
+Additionally, [Mdream Crawl](#mdream-crawl) allows you to crawl entire sites and generate LLM artifacts like `llms.txt` files.
 
 ### Mdream Packages
 
 Mdream is a HTML parser, Markdown Generator and site-wide crawler. To keep the core as small as possible, it is split into three packages:
 
-- [mdream-crawler](#mdream-crawler): A site-wide crawler to generate `llms.txt` artifacts **full: heavy dependencies**.
+- [mdream-crawl](#mdream-crawl): A site-wide crawler to generate `llms.txt` artifacts **full: heavy dependencies**.
 - [mdream](#mdream): HTMl to Markdown convertor, can be used as a CLI for `stdin` conversion or as a package **minimal: no dependencies**.
 - [mdream-action](#github-actions-integration): GitHub Action for generating `llms.txt` artifacts from your static site output **deployment: CI/CD integration**.
 
-## Mdream Crawler
+## Mdream Crawl
 
 The `mdream-crawl` package crawls an entire site generating LLM artifacts using `mdream` for Markdown conversion.
 
