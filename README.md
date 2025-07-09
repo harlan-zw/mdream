@@ -44,8 +44,8 @@ Additionally, [Mdream Crawl](#mdream-crawl) allows you to crawl entire sites and
 Mdream is a HTML parser, Markdown Generator and site-wide crawler. To keep the core as small as possible, it is split into three packages:
 
 - [mdream](#mdream): HTMl to Markdown convertor, can be used as a CLI for `stdin` conversion or as a package **minimal: no dependencies**.
-- [mdream-action](#github-actions-integration): GitHub Action for generating `llms.txt` artifacts from your static site output **deployment: CI/CD integration**.
 - [@mdream/crawl](#mdream-crawl): A site-wide crawler to generate `llms.txt` artifacts.
+- [@mdream/vite](#vite-integration): Vite plugin for on-demand HTML to Markdown conversion.
 - [@mdream/action](#github-actions-integration): GitHub Action for generating `llms.txt` artifacts from your static site output.
 
 ## Mdream Crawl

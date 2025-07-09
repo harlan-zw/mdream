@@ -1,6 +1,7 @@
 packages:
   - playground
   - packages/*
+  - examples/*
 onlyBuiltDependencies:
   - esbuild
   - '@parcel/watcher'
