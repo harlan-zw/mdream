@@ -96,13 +96,34 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
       for (const sitemapUrl of commonSitemaps) {
         try {
           const { urls: altUrls } = await Sitemap.load(sitemapUrl)
-          // Filter URLs through glob patterns and exclude patterns
-          const filteredUrls = altUrls.filter((url) => {
-            return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
-          })
-          if (filteredUrls.length > 0) {
+          
+          // Check if we have glob patterns to filter by
+          const hasGlobPatterns = patterns.some(p => p.isGlob)
+          
+          if (hasGlobPatterns) {
+            // Filter URLs through glob patterns and exclude patterns
+            const filteredUrls = altUrls.filter((url) => {
+              return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
+            })
+            
+            // Always use filtered URLs when glob patterns are provided, even if empty
             startingUrls = filteredUrls
+            progress.sitemap.found = altUrls.length
+            progress.sitemap.processed = filteredUrls.length
+            onProgress?.(progress)
             break
+          } else {
+            // No glob patterns - use all URLs except excluded ones
+            const filteredUrls = altUrls.filter((url) => {
+              return !isUrlExcluded(url, exclude)
+            })
+            if (filteredUrls.length > 0) {
+              startingUrls = filteredUrls
+              progress.sitemap.found = altUrls.length
+              progress.sitemap.processed = filteredUrls.length
+              onProgress?.(progress)
+              break
+            }
           }
         }
         catch {
