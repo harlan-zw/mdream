@@ -1,4 +1,5 @@
 import type { CrawlOptions } from './types.ts'
+import type { CrawlProgress } from './crawl.ts'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as p from '@clack/prompts'
@@ -398,7 +399,7 @@ Examples:
   const siteNameOverride = getArgValue('--site-name')
   const descriptionOverride = getArgValue('--description')
 
-  const patterns = [parseUrlPattern(url)]
+  const patterns = [parsed]
 
   return {
     urls: [url],
@@ -471,7 +472,39 @@ async function main() {
 
   const s = p.spinner()
   s.start('Starting crawl...')
-  const results = await crawlAndGenerate(options)
+  
+  const results = await crawlAndGenerate(options, (progress: CrawlProgress) => {
+    // Update spinner message based on current phase
+    if (progress.sitemap.status === 'discovering') {
+      s.message('Discovering sitemaps...')
+    } else if (progress.sitemap.status === 'processing') {
+      s.message(`Processing sitemap... Found ${progress.sitemap.found} URLs`)
+    } else if (progress.crawling.status === 'processing') {
+      const processedCount = progress.crawling.processed
+      const totalCount = progress.crawling.total
+      const currentUrl = progress.crawling.currentUrl
+      
+      if (currentUrl) {
+        const shortUrl = currentUrl.length > 60 ? `${currentUrl.substring(0, 57)}...` : currentUrl
+        // Show different format if total seems inaccurate (when following links discovers more)
+        if (processedCount > totalCount) {
+          s.message(`Crawling ${processedCount}: ${shortUrl}`)
+        } else {
+          s.message(`Crawling ${processedCount}/${totalCount}: ${shortUrl}`)
+        }
+      } else {
+        if (processedCount > totalCount) {
+          s.message(`Crawling... ${processedCount} pages`)
+        } else {
+          s.message(`Crawling... ${processedCount}/${totalCount} pages`)
+        }
+      }
+    } else if (progress.generation.status === 'generating') {
+      const current = progress.generation.current || 'Generating files'
+      s.message(current)
+    }
+  })
+  
   s.stop('Crawl completed!')
 
   const successful = results.filter(r => r.success).length

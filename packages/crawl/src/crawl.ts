@@ -10,7 +10,25 @@ import { withHttps } from 'ufo'
 import { getStartingUrl, isUrlExcluded, matchesGlobPattern, parseUrlPattern } from './glob-utils.ts'
 import { extractMetadata } from './metadata-extractor.ts'
 
-export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResult[]> {
+export interface CrawlProgress {
+  sitemap: {
+    status: 'discovering' | 'processing' | 'completed'
+    found: number
+    processed: number
+  }
+  crawling: {
+    status: 'starting' | 'processing' | 'completed'
+    total: number
+    processed: number
+    currentUrl?: string
+  }
+  generation: {
+    status: 'idle' | 'generating' | 'completed'
+    current?: string
+  }
+}
+
+export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (progress: CrawlProgress) => void): Promise<CrawlResult[]> {
   const {
     urls,
     outputDir: rawOutputDir,
@@ -42,9 +60,18 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
 
   let startingUrls = patterns.map(getStartingUrl)
 
+  // Initialize progress tracking
+  const progress: CrawlProgress = {
+    sitemap: { status: 'discovering', found: 0, processed: 0 },
+    crawling: { status: 'starting', total: 0, processed: 0 },
+    generation: { status: 'idle' }
+  }
+
   if (startingUrls.length > 0) {
     const baseUrl = new URL(startingUrls[0]).origin
     const homePageUrl = baseUrl
+
+    onProgress?.(progress)
 
     const robotsUrl = new URL('/robots.txt', baseUrl).toString()
     const robotsResponse = await fetch(robotsUrl)
@@ -52,20 +79,42 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
       const robotsContent = await robotsResponse.text()
       const sitemapMatches = robotsContent.match(/Sitemap:\s*(.*)/gi)
       if (sitemapMatches && sitemapMatches.length > 0) {
-        // console.log(`✓ Found ${sitemapMatches.length} sitemap(s) in robots.txt`)
+        progress.sitemap.found = sitemapMatches.length
+        progress.sitemap.status = 'processing'
+        onProgress?.(progress)
+        
         // Extract sitemap URLs from robots.txt and try using them
         const robotsSitemaps = sitemapMatches.map(match => match.replace(/Sitemap:\s*/i, '').trim())
 
         for (const sitemapUrl of robotsSitemaps) {
           try {
             const { urls: robotsUrls } = await Sitemap.load(sitemapUrl)
-            // Filter URLs through glob patterns and exclude patterns
-            const filteredUrls = robotsUrls.filter((url) => {
-              return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
-            })
-            if (filteredUrls.length > 0) {
+            
+            // Check if we have glob patterns to filter by
+            const hasGlobPatterns = patterns.some(p => p.isGlob)
+            
+            if (hasGlobPatterns) {
+              // Filter URLs through glob patterns and exclude patterns
+              const filteredUrls = robotsUrls.filter((url) => {
+                return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
+              })
+              
+              // Always use filtered URLs when glob patterns are provided, even if empty
               startingUrls = filteredUrls
+              progress.sitemap.processed = filteredUrls.length
+              onProgress?.(progress)
               break
+            } else {
+              // No glob patterns - use all URLs except excluded ones
+              const filteredUrls = robotsUrls.filter((url) => {
+                return !isUrlExcluded(url, exclude)
+              })
+              if (filteredUrls.length > 0) {
+                startingUrls = filteredUrls
+                progress.sitemap.processed = filteredUrls.length
+                onProgress?.(progress)
+                break
+              }
             }
           }
           catch {
@@ -77,12 +126,32 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
     }
     try {
       const { urls: sitemapUrls } = await Sitemap.load(`${baseUrl}/sitemap.xml`)
-      // Filter URLs through glob patterns and exclude patterns
-      const filteredUrls = sitemapUrls.filter((url) => {
-        return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
-      })
-      if (filteredUrls.length > 0) {
+      
+      // Check if we have glob patterns to filter by
+      const hasGlobPatterns = patterns.some(p => p.isGlob)
+      
+      if (hasGlobPatterns) {
+        // Filter URLs through glob patterns and exclude patterns
+        const filteredUrls = sitemapUrls.filter((url) => {
+          return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
+        })
+        
+        // Always use filtered URLs when glob patterns are provided, even if empty
         startingUrls = filteredUrls
+        progress.sitemap.found = sitemapUrls.length
+        progress.sitemap.processed = filteredUrls.length
+        onProgress?.(progress)
+      } else {
+        // No glob patterns - use all URLs except excluded ones
+        const filteredUrls = sitemapUrls.filter((url) => {
+          return !isUrlExcluded(url, exclude)
+        })
+        if (filteredUrls.length > 0) {
+          startingUrls = filteredUrls
+          progress.sitemap.found = sitemapUrls.length
+          progress.sitemap.processed = filteredUrls.length
+          onProgress?.(progress)
+        }
       }
     }
     catch {
@@ -133,10 +202,19 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
       }
     }
 
-    // Always include home page for link discovery, even if it doesn't match glob pattern
+    // Always include home page for metadata extraction (site name, description)
+    // even if it doesn't match glob pattern
     if (!startingUrls.includes(homePageUrl)) {
       startingUrls.unshift(homePageUrl)
     }
+
+    // Mark sitemap discovery as completed
+    progress.sitemap.status = 'completed'
+    
+    // Update crawling total with the actual number of URLs we'll process
+    // This gives a better estimate than just the initial requests count
+    progress.crawling.total = startingUrls.length
+    onProgress?.(progress)
   }
 
   // Ensure output directory exists
@@ -167,6 +245,14 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
   const createRequestHandler = (crawlerType: 'http' | 'playwright') => {
     return async ({ request, body, page, enqueueLinks }: any) => {
       const startTime = Date.now()
+
+      // Update progress with current URL
+      progress.crawling.currentUrl = request.loadedUrl
+      onProgress?.(progress)
+
+      // Determine home page URL for metadata extraction
+      const baseUrl = new URL(startingUrls[0]).origin
+      const homePageUrl = baseUrl
 
       let html: string
       let title: string
@@ -233,13 +319,16 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
 
       // const processingTime = Date.now() - startTime
 
-      // Only create results for URLs that match the glob pattern
-      if (shouldProcessMarkdown) {
+      // Always create results for home page (needed for metadata extraction)
+      // and for URLs that match the glob pattern
+      const isHomePage = request.loadedUrl === homePageUrl
+      
+      if (shouldProcessMarkdown || isHomePage) {
         const result: CrawlResult = {
           url: request.loadedUrl,
           title,
           content: md,
-          filePath: generateIndividualMd ? filePath : undefined,
+          filePath: generateIndividualMd && shouldProcessMarkdown ? filePath : undefined,
           timestamp: startTime,
           success: true,
           metadata,
@@ -247,6 +336,10 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
         }
 
         results.push(result)
+        
+        // Update progress with actual processed count
+        progress.crawling.processed = results.length
+        onProgress?.(progress)
       }
       // Follow links if enabled and within depth limit
       if (followLinks && (request.userData?.depth || 0) < maxDepth) {
@@ -304,10 +397,22 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
     userData: { depth: 0 },
   }))
 
+  // Initialize crawling progress with the final URL count after sitemap processing
+  progress.crawling.status = 'processing'
+  progress.crawling.total = startingUrls.length
+  onProgress?.(progress)
+
   await crawler.run(initialRequests)
+
+  // Mark crawling as completed
+  progress.crawling.status = 'completed'
+  onProgress?.(progress)
 
   // Generate output files if requested
   if (results.some(r => r.success)) {
+    progress.generation.status = 'generating'
+    onProgress?.(progress)
+
     const successfulResults = results.filter(r => r.success)
 
     // Extract site name and description from home page if available, otherwise first successful result
@@ -323,8 +428,14 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
 
     // Generate llms.txt and llms-full.txt if requested
     if (generateLlmsTxt || generateLlmsFullTxt) {
+      progress.generation.current = 'Generating llms.txt files'
+      onProgress?.(progress)
+
+      // Only include results that have actual content (exclude home page if it doesn't match glob pattern)
+      const contentResults = successfulResults.filter(result => result.content && result.content.trim().length > 0)
+
       // Convert CrawlResult to ProcessedFile format
-      const processedFiles: ProcessedFile[] = successfulResults.map(result => ({
+      const processedFiles: ProcessedFile[] = contentResults.map(result => ({
         filePath: result.filePath,
         title: result.title,
         content: result.content,
@@ -342,14 +453,21 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
 
       // Write llms.txt if requested
       if (generateLlmsTxt) {
+        progress.generation.current = 'Writing llms.txt'
+        onProgress?.(progress)
         await writeFile(join(outputDir, 'llms.txt'), llmsResult.llmsTxt, 'utf-8')
       }
 
       // Write llms-full.txt if requested
       if (generateLlmsFullTxt && llmsResult.llmsFullTxt) {
+        progress.generation.current = 'Writing llms-full.txt'
+        onProgress?.(progress)
         await writeFile(join(outputDir, 'llms-full.txt'), llmsResult.llmsFullTxt, 'utf-8')
       }
     }
+
+    progress.generation.status = 'completed'
+    onProgress?.(progress)
   }
 
   await purgeDefaultStorages()
