@@ -23,8 +23,8 @@ it('should generate basic llms.txt from HTML files', async () => {
     `node "${mdreamBin}" llms "${fixturesDir}/**/*.html" --site-name "Test Site" --description "A comprehensive test site" --origin "https://example.com" --output "${testOutputDir}"`,
   )
 
-  // Since console.log statements were removed, we just check that the command succeeded
-  expect(stdout).toBe('')
+  // Check that the command outputs a success message
+  expect(stdout).toContain('✅ Generated llms.txt artifacts in:')
 
   const content = await readFile(join(testOutputDir, 'llms.txt'), 'utf-8')
 
@@ -51,8 +51,8 @@ it('should generate llms-full.txt with complete content', async () => {
     `node "${mdreamBin}" llms "${fixturesDir}/**/*.html" --site-name "Test Site" --description "A test site" --output "${testOutputDir}" --artifacts "llms.txt,llms-full.txt"`,
   )
 
-  // Since console.log statements were removed, we just check that the command succeeded
-  expect(stdout).toBe('')
+  // Check that the command outputs a success message
+  expect(stdout).toContain('✅ Generated llms.txt artifacts in:')
 
   const fullContent = await readFile(join(testOutputDir, 'llms-full.txt'), 'utf-8')
 
@@ -82,10 +82,10 @@ it('should generate individual markdown files', async () => {
     `node "${mdreamBin}" llms "${fixturesDir}/**/*.html" --site-name "Test Site" --output "${testOutputDir}" --artifacts "llms.txt,markdown"`,
   )
 
-  // Since console.log statements were removed, we just check that the command succeeded
-  expect(stdout).toBe('')
-  // Since console.log statements were removed, we just check that the command succeeded
-  expect(stdout).toBe('')
+  // Check that the command outputs a success message
+  expect(stdout).toContain('✅ Generated llms.txt artifacts in:')
+  // Check that the command outputs a success message
+  expect(stdout).toContain('✅ Generated llms.txt artifacts in:')
 
   // Check individual markdown files were created
   const indexMd = await readFile(join(testOutputDir, 'md', 'index.md'), 'utf-8')
@@ -114,8 +114,8 @@ it('should work with glob patterns', async () => {
     `node "${mdreamBin}" llms "${fixturesDir}/blog/*.html" --site-name "Blog Only" --output "${testOutputDir}"`,
   )
 
-  // Since console.log statements were removed, we just check that the command succeeded
-  expect(stdout).toBe('')
+  // Check that the command outputs a success message
+  expect(stdout).toContain('✅ Generated llms.txt artifacts in:')
 
   const content = await readFile(join(testOutputDir, 'llms.txt'), 'utf-8')
   expect(content).toContain('# Blog Only')
@@ -129,8 +129,8 @@ it('should handle missing site name and description gracefully', async () => {
     `node "${mdreamBin}" llms "${fixturesDir}/index.html" --output "${testOutputDir}"`,
   )
 
-  // Since console.log statements were removed, we just check that the command succeeded
-  expect(stdout).toBe('')
+  // Check that the command outputs a success message
+  expect(stdout).toContain('✅ Generated llms.txt artifacts in:')
 
   const content = await readFile(join(testOutputDir, 'llms.txt'), 'utf-8')
   expect(content).toContain('# Site') // default site name
@@ -155,10 +155,10 @@ it('should handle origin parameter for relative paths', async () => {
     `node "${mdreamBin}" llms "${fixturesDir}/**/*.html" --site-name "Test Site" --origin "https://origin.com" --output "${testOutputDir}" --artifacts "llms.txt,markdown"`,
   )
 
-  // Since console.log statements were removed, we just check that the command succeeded
-  expect(stdout).toBe('')
-  // Since console.log statements were removed, we just check that the command succeeded
-  expect(stdout).toBe('')
+  // Check that the command outputs a success message
+  expect(stdout).toContain('✅ Generated llms.txt artifacts in:')
+  // Check that the command outputs a success message
+  expect(stdout).toContain('✅ Generated llms.txt artifacts in:')
 
   // The origin parameter should be used for processing relative URLs in the HTML
   const indexMd = await readFile(join(testOutputDir, 'md', 'index.md'), 'utf-8')
