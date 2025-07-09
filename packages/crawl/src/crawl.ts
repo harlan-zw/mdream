@@ -64,7 +64,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   const progress: CrawlProgress = {
     sitemap: { status: 'discovering', found: 0, processed: 0 },
     crawling: { status: 'starting', total: 0, processed: 0 },
-    generation: { status: 'idle' }
+    generation: { status: 'idle' },
   }
 
   if (startingUrls.length > 0) {
@@ -82,29 +82,30 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         progress.sitemap.found = sitemapMatches.length
         progress.sitemap.status = 'processing'
         onProgress?.(progress)
-        
+
         // Extract sitemap URLs from robots.txt and try using them
         const robotsSitemaps = sitemapMatches.map(match => match.replace(/Sitemap:\s*/i, '').trim())
 
         for (const sitemapUrl of robotsSitemaps) {
           try {
             const { urls: robotsUrls } = await Sitemap.load(sitemapUrl)
-            
+
             // Check if we have glob patterns to filter by
             const hasGlobPatterns = patterns.some(p => p.isGlob)
-            
+
             if (hasGlobPatterns) {
               // Filter URLs through glob patterns and exclude patterns
               const filteredUrls = robotsUrls.filter((url) => {
                 return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
               })
-              
+
               // Always use filtered URLs when glob patterns are provided, even if empty
               startingUrls = filteredUrls
               progress.sitemap.processed = filteredUrls.length
               onProgress?.(progress)
               break
-            } else {
+            }
+            else {
               // No glob patterns - use all URLs except excluded ones
               const filteredUrls = robotsUrls.filter((url) => {
                 return !isUrlExcluded(url, exclude)
@@ -126,22 +127,23 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     }
     try {
       const { urls: sitemapUrls } = await Sitemap.load(`${baseUrl}/sitemap.xml`)
-      
+
       // Check if we have glob patterns to filter by
       const hasGlobPatterns = patterns.some(p => p.isGlob)
-      
+
       if (hasGlobPatterns) {
         // Filter URLs through glob patterns and exclude patterns
         const filteredUrls = sitemapUrls.filter((url) => {
           return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
         })
-        
+
         // Always use filtered URLs when glob patterns are provided, even if empty
         startingUrls = filteredUrls
         progress.sitemap.found = sitemapUrls.length
         progress.sitemap.processed = filteredUrls.length
         onProgress?.(progress)
-      } else {
+      }
+      else {
         // No glob patterns - use all URLs except excluded ones
         const filteredUrls = sitemapUrls.filter((url) => {
           return !isUrlExcluded(url, exclude)
@@ -165,23 +167,24 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       for (const sitemapUrl of commonSitemaps) {
         try {
           const { urls: altUrls } = await Sitemap.load(sitemapUrl)
-          
+
           // Check if we have glob patterns to filter by
           const hasGlobPatterns = patterns.some(p => p.isGlob)
-          
+
           if (hasGlobPatterns) {
             // Filter URLs through glob patterns and exclude patterns
             const filteredUrls = altUrls.filter((url) => {
               return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
             })
-            
+
             // Always use filtered URLs when glob patterns are provided, even if empty
             startingUrls = filteredUrls
             progress.sitemap.found = altUrls.length
             progress.sitemap.processed = filteredUrls.length
             onProgress?.(progress)
             break
-          } else {
+          }
+          else {
             // No glob patterns - use all URLs except excluded ones
             const filteredUrls = altUrls.filter((url) => {
               return !isUrlExcluded(url, exclude)
@@ -210,7 +213,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
     // Mark sitemap discovery as completed
     progress.sitemap.status = 'completed'
-    
+
     // Update crawling total with the actual number of URLs we'll process
     // This gives a better estimate than just the initial requests count
     progress.crawling.total = startingUrls.length
@@ -322,7 +325,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       // Always create results for home page (needed for metadata extraction)
       // and for URLs that match the glob pattern
       const isHomePage = request.loadedUrl === homePageUrl
-      
+
       if (shouldProcessMarkdown || isHomePage) {
         const result: CrawlResult = {
           url: request.loadedUrl,
@@ -336,7 +339,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         }
 
         results.push(result)
-        
+
         // Update progress with actual processed count
         progress.crawling.processed = results.length
         onProgress?.(progress)

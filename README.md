@@ -25,7 +25,7 @@
 - 🕷️ Site Crawling: [Mdream Crawl](#mdream-crawl) generates [llms.txt](https://llmstxt.org/) artifacts from entire websites.
 - 🚀 Fast: Stream 1.4MB of HTML to markdown in ~50ms.
 - ⚡ Tiny: 5kB gzip, zero dependency core.
-- ⚙️ Run anywhere: CLI, [GitHub Actions](#github-actions-integration), edge workers, browsers, Node, etc.
+- ⚙️ Run anywhere: CLI, [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), edge workers, browsers, Node, etc.
 - 🔌 Extensible: [Plugin system](#plugin-system) for customizing and extending functionality.
 
 ## What is Mdream?
@@ -43,13 +43,14 @@ Additionally, [Mdream Crawl](#mdream-crawl) allows you to crawl entire sites and
 
 Mdream is a HTML parser, Markdown Generator and site-wide crawler. To keep the core as small as possible, it is split into three packages:
 
-- [mdream-crawl](#mdream-crawl): A site-wide crawler to generate `llms.txt` artifacts **full: heavy dependencies**.
 - [mdream](#mdream): HTMl to Markdown convertor, can be used as a CLI for `stdin` conversion or as a package **minimal: no dependencies**.
 - [mdream-action](#github-actions-integration): GitHub Action for generating `llms.txt` artifacts from your static site output **deployment: CI/CD integration**.
+- [@mdream/crawl](#mdream-crawl): A site-wide crawler to generate `llms.txt` artifacts.
+- [@mdream/action](#github-actions-integration): GitHub Action for generating `llms.txt` artifacts from your static site output.
 
 ## Mdream Crawl
 
-The `mdream-crawl` package crawls an entire site generating LLM artifacts using `mdream` for Markdown conversion.
+The `@mdream/crawl` package crawls an entire site generating LLM artifacts using `mdream` for Markdown conversion.
 
 - [llms.txt](https://llmstxt.org/): A consolidated text file optimized for LLM consumption.
 - [llms-full.txt](https://llmstxt.org/): An extended format with comprehensive metadata and full content.
@@ -59,13 +60,13 @@ The `mdream-crawl` package crawls an entire site generating LLM artifacts using 
 
 ```sh
 # Interactive
-npx mdream-crawl
+npx @mdream/crawl
 # Simple
-npx mdream-crawl https://harlanzw.com
+npx @mdream/crawl https://harlanzw.com
 # Glob patterns
-npx mdream-crawl "https://nuxt.com/docs/getting-started/**"
+npx @mdream/crawl "https://nuxt.com/docs/getting-started/**"
 # Get help
-npx mdream-crawl -h
+npx @mdream/crawl -h
 ```
 
 ### Examples
@@ -73,18 +74,18 @@ npx mdream-crawl -h
 **Crawl Using Playwright**
 
 ```bash
-mdream-crawl -u example.com --driver playwright
+@mdream/crawl -u example.com --driver playwright
 ```
 
 **Exclude Specific Paths**
 
 ```bash
-mdream-crawl -u example.com --exclude "/admin/*" --exclude "/api/*"
+@mdream/crawl -u example.com --exclude "/admin/*" --exclude "/api/*"
 ```
 
 **Large Site Crawling with Limits**
 ```bash
-mdream-crawl -u https://large-site.com \
+@mdream/crawl -u https://large-site.com \
   --max-pages 100 \
   --depth 2
 ```
@@ -187,6 +188,36 @@ jobs:
 ```
 
 For all available options and advanced configuration, see the complete [action.yml](./action.yml) specification.
+
+## Vite Integration
+
+Mdream provides a Vite plugin that enables on-demand HTML to Markdown conversion.
+
+- **Development Mode**: Access any HTML route with `.md` extension (e.g., `/about.html` → `/about.md`)
+- **Build-time Generation**: Automatically generates static markdown files alongside HTML files
+- **SSR Support**: Works with server-side rendering frameworks like Vue, React, etc.
+
+### Installation
+
+```bash
+npm install @mdream/vite
+```
+
+### Usage
+
+```ts
+import MdreamVite from '@mdream/vite'
+// vite.config.ts
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  plugins: [
+    MdreamVite()
+  ]
+})
+```
+
+For complete examples, see the [Vite examples](./examples/vite-ssr-vue) in this repository.
 
 ## API Usage
 

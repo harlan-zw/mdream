@@ -1,5 +1,5 @@
 {
-  "name": "mdream-action",
+  "name": "@mdream/action",
   "type": "module",
   "version": "0.6.1",
   "description": "GitHub Action for mdream llms.txt generation",

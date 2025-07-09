@@ -1,5 +1,5 @@
 {
-  "name": "mdream-crawl",
+  "name": "@mdream/crawl",
   "type": "module",
   "version": "0.6.1",
   "packageManager": "pnpm@10.12.4",
@@ -31,7 +31,7 @@
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "bin": {
-    "mdream-crawl": "./bin/mdream-crawl.mjs"
+    "@mdream/crawl": "./bin/mdream-crawl.mjs"
   },
   "files": [
     "bin",

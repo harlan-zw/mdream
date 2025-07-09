@@ -1,5 +1,5 @@
-import type { CrawlOptions } from './types.ts'
 import type { CrawlProgress } from './crawl.ts'
+import type { CrawlOptions } from './types.ts'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as p from '@clack/prompts'
@@ -18,7 +18,7 @@ const version = packageJson.version
 async function interactiveCrawl(): Promise<CrawlOptions | null> {
   console.clear()
 
-  p.intro('☁️  mdream-crawl')
+  p.intro('☁️  @mdream/crawl')
 
   // Get URLs
   const urlsInput = await p.text({
@@ -65,7 +65,7 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
   }
 
   const urls = urlsInput.split(',').map(url => url.trim())
-  
+
   let globPatterns
   try {
     globPatterns = urls.map(parseUrlPattern)
@@ -223,13 +223,13 @@ function parseCliArgs(): CrawlOptions | null {
 
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`
-mdream-crawl v${version}
+@mdream/crawl v${version}
 
 Multi-page website crawler that generates comprehensive llms.txt files
 
 Usage:
-  mdream-crawl [options] <url>             Crawl a website with CLI flags
-  mdream-crawl                             Start interactive mode
+  @mdream/crawl [options] <url>             Crawl a website with CLI flags
+  @mdream/crawl                             Start interactive mode
 
 Options:
   -u, --url <url>              Website URL to crawl
@@ -249,15 +249,15 @@ Options:
 Note: Sitemap discovery and robots.txt checking are automatic
 
 Examples:
-  mdream-crawl -u harlanzw.com --artifacts "llms.txt,markdown"
-  mdream-crawl --url https://docs.example.com --depth 2 --artifacts "llms-full.txt"
-  mdream-crawl -u example.com --exclude "*/admin/*" --exclude "*/api/*"
+  @mdream/crawl -u harlanzw.com --artifacts "llms.txt,markdown"
+  @mdream/crawl --url https://docs.example.com --depth 2 --artifacts "llms-full.txt"
+  @mdream/crawl -u example.com --exclude "*/admin/*" --exclude "*/api/*"
 `)
     process.exit(0)
   }
 
   if (args.includes('--version')) {
-    console.log(`mdream-crawl v${version}`)
+    console.log(`@mdream/crawl v${version}`)
     process.exit(0)
   }
 
@@ -472,39 +472,45 @@ async function main() {
 
   const s = p.spinner()
   s.start('Starting crawl...')
-  
+
   const results = await crawlAndGenerate(options, (progress: CrawlProgress) => {
     // Update spinner message based on current phase
     if (progress.sitemap.status === 'discovering') {
       s.message('Discovering sitemaps...')
-    } else if (progress.sitemap.status === 'processing') {
+    }
+    else if (progress.sitemap.status === 'processing') {
       s.message(`Processing sitemap... Found ${progress.sitemap.found} URLs`)
-    } else if (progress.crawling.status === 'processing') {
+    }
+    else if (progress.crawling.status === 'processing') {
       const processedCount = progress.crawling.processed
       const totalCount = progress.crawling.total
       const currentUrl = progress.crawling.currentUrl
-      
+
       if (currentUrl) {
         const shortUrl = currentUrl.length > 60 ? `${currentUrl.substring(0, 57)}...` : currentUrl
         // Show different format if total seems inaccurate (when following links discovers more)
         if (processedCount > totalCount) {
           s.message(`Crawling ${processedCount}: ${shortUrl}`)
-        } else {
+        }
+        else {
           s.message(`Crawling ${processedCount}/${totalCount}: ${shortUrl}`)
         }
-      } else {
+      }
+      else {
         if (processedCount > totalCount) {
           s.message(`Crawling... ${processedCount} pages`)
-        } else {
+        }
+        else {
           s.message(`Crawling... ${processedCount}/${totalCount} pages`)
         }
       }
-    } else if (progress.generation.status === 'generating') {
+    }
+    else if (progress.generation.status === 'generating') {
       const current = progress.generation.current || 'Generating files'
       s.message(current)
     }
   })
-  
+
   s.stop('Crawl completed!')
 
   const successful = results.filter(r => r.success).length

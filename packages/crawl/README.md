@@ -1,13 +1,13 @@
-# mdream-crawl
+# @mdream/crawl
 
 Multi-page website crawler that generates comprehensive llms.txt files by following internal links and processing entire websites using mdream HTML-to-Markdown conversion.
 
-> **Note**: For single-page HTML-to-Markdown conversion, use the [`mdream`](../mdream) binary instead. `mdream-crawl` is specifically designed for crawling entire websites with multiple pages.
+> **Note**: For single-page HTML-to-Markdown conversion, use the [`mdream`](../mdream) binary instead. `@mdream/crawl` is specifically designed for crawling entire websites with multiple pages.
 
 ## Installation
 
 ```bash
-npm install mdream-crawl
+npm install @mdream/crawl
 ```
 
 ## Usage
@@ -15,7 +15,7 @@ npm install mdream-crawl
 Simply run the command to start the interactive multi-page website crawler:
 
 ```bash
-npx mdream-crawl
+npx @mdream/crawl
 ```
 
 The crawler will automatically discover and follow internal links to crawl entire websites. The interactive interface provides:
@@ -28,10 +28,10 @@ The crawler will automatically discover and follow internal links to crawl entir
 
 ## Programmatic Usage
 
-You can also use mdream-crawl programmatically in your Node.js applications:
+You can also use @mdream/crawl programmatically in your Node.js applications:
 
 ```typescript
-import { crawlAndGenerate, generateLlmsTxt } from 'mdream-crawl'
+import { crawlAndGenerate, generateLlmsTxt } from '@mdream/crawl'
 
 // Crawl entire websites programmatically
 const results = await crawlAndGenerate({
