@@ -409,7 +409,7 @@ async function main() {
     options = cliOptions
 
     // Show non-interactive summary when using CLI args
-    p.intro('☁️  mdream-crawl - Multi-Page Website Crawler')
+    p.intro(`☁️  mdream v${version}`)
 
     const formats = []
     if (options.generateLlmsTxt)
