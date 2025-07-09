@@ -191,11 +191,12 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
   }
 }
 
-async function showCrawlResults(successful: number, failed: number, outputDir: string, generatedFiles: string[]) {
+async function showCrawlResults(successful: number, failed: number, outputDir: string, generatedFiles: string[], durationMinutes: number, remainingSeconds: number) {
   const messages = []
 
   if (successful > 0) {
-    messages.push(`✅ ${successful} pages processed successfully`)
+    const durationStr = durationMinutes > 0 ? `${durationMinutes}m ${remainingSeconds}s` : `${remainingSeconds}s`
+    messages.push(`✅ ${successful} pages processed in ${durationStr}`)
   }
 
   if (failed > 0) {
@@ -208,14 +209,7 @@ async function showCrawlResults(successful: number, failed: number, outputDir: s
 
   messages.push(`📁 Output: ${outputDir}`)
 
-  p.note(messages.join('\n'), 'Crawl Results')
-
-  if (successful > 0) {
-    p.outro('🎉 Crawling completed successfully!')
-  }
-  else {
-    p.outro('❌ Crawling failed - no pages processed')
-  }
+  p.note(messages.join('\n'), 'Completed: Results')
 }
 
 function parseCliArgs(): CrawlOptions | null {
@@ -473,6 +467,7 @@ async function main() {
   const s = p.spinner()
   s.start('Starting crawl...')
 
+  const startTime = Date.now()
   const results = await crawlAndGenerate(options, (progress: CrawlProgress) => {
     // Update spinner message based on current phase
     if (progress.sitemap.status === 'discovering') {
@@ -511,7 +506,13 @@ async function main() {
     }
   })
 
-  s.stop('Crawl completed!')
+  s.stop()
+
+  const endTime = Date.now()
+  const durationMs = endTime - startTime
+  const durationSeconds = Math.floor(durationMs / 1000)
+  const durationMinutes = Math.floor(durationSeconds / 60)
+  const remainingSeconds = durationSeconds % 60
 
   const successful = results.filter(r => r.success).length
   const failed = results.filter(r => !r.success).length
@@ -544,14 +545,15 @@ async function main() {
 
   // Only show interactive results for interactive mode
   if (!cliOptions) {
-    await showCrawlResults(successful, failed, options.outputDir, generatedFiles)
+    await showCrawlResults(successful, failed, options.outputDir, generatedFiles, durationMinutes, remainingSeconds)
   }
   else {
     // Simple output for CLI mode
     const messages = []
 
     if (successful > 0) {
-      messages.push(`✅ ${successful} pages processed`)
+      const durationStr = durationMinutes > 0 ? `${durationMinutes}m ${remainingSeconds}s` : `${remainingSeconds}s`
+      messages.push(`✅ ${successful} pages processed in ${durationStr}`)
     }
 
     if (failed > 0) {
@@ -564,13 +566,9 @@ async function main() {
 
     messages.push(`📁 Output: ${options.outputDir}`)
 
-    p.note(messages.join('\n'), 'Results')
+    p.note(messages.join('\n'), 'Completed: Results')
 
-    if (successful > 0) {
-      p.outro('🎉 Crawling completed!')
-    }
-    else {
-      p.outro('❌ Crawling failed - no pages processed')
+    if (successful === 0) {
       process.exit(1)
     }
   }
