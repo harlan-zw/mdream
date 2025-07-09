@@ -1,8 +1,9 @@
+import type { HttpCrawlerOptions, PlaywrightCrawlerOptions } from 'crawlee'
 import type { ProcessedFile } from 'mdream'
 import type { CrawlOptions, CrawlResult } from './types.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
-import { HttpCrawler, purgeDefaultStorages, Sitemap } from 'crawlee'
+import { HttpCrawler, PlaywrightCrawler, purgeDefaultStorages, Sitemap } from 'crawlee'
 import { generateLlmsTxtArtifacts, htmlToMarkdown } from 'mdream'
 import { withMinimalPreset } from 'mdream/preset/minimal'
 import { dirname, join, normalize, resolve } from 'pathe'
@@ -259,8 +260,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       onProgress?.(progress)
 
       // Determine home page URL for metadata extraction
-      const baseUrl = new URL(startingUrls[0]).origin
-      const homePageUrl = baseUrl
+      const homePageUrl = new URL(startingUrls[0]).origin
 
       let html: string
       let title: string
@@ -379,24 +379,29 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
   // Create appropriate crawler with crawl delay if specified
   let crawler: HttpCrawler<any> | any // PlaywrightCrawler type will be determined at runtime
-  const crawlerOptions: any = {
+  const crawlerOptions: PlaywrightCrawlerOptions | HttpCrawlerOptions = {
     requestHandler: createRequestHandler(driver),
+    errorHandler: async ({ request, response }: any, error: Error) => {
+      // Handle 4xx and 5xx status codes for HTTP crawler only (skip everything except timeouts)
+      if (response?.statusCode && response?.statusCode >= 400) {
+        request.noRetry = true
+      }
+    },
     maxRequestsPerCrawl,
     respectRobotsTxtFile: true,
   }
 
   // Add crawl delay if specified
   if (crawlDelay) {
-    crawlerOptions.requestHandlerTimeoutMillis = crawlDelay * 1000
+    crawlerOptions.requestHandlerTimeoutSecs = crawlDelay
   }
 
   if (driver === 'playwright') {
-    // Import PlaywrightCrawler - installation check should happen in CLI layer
-    const { PlaywrightCrawler: PlaywrightCrawlerClass } = await import('crawlee')
-    crawler = new PlaywrightCrawlerClass(crawlerOptions)
+    // PlaywrightCrawler - installation check should happen in CLI layer
+    crawler = new PlaywrightCrawler(crawlerOptions as PlaywrightCrawlerOptions)
   }
   else {
-    crawler = new HttpCrawler(crawlerOptions)
+    crawler = new HttpCrawler(crawlerOptions as HttpCrawlerOptions)
   }
 
   // Start crawling with initial URLs (use starting URLs for glob patterns)
