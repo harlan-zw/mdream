@@ -125,6 +125,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         }
       }
     }
+    let mainSitemapProcessed = false
     try {
       const { urls: sitemapUrls } = await Sitemap.load(`${baseUrl}/sitemap.xml`)
 
@@ -142,6 +143,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         progress.sitemap.found = sitemapUrls.length
         progress.sitemap.processed = filteredUrls.length
         onProgress?.(progress)
+        mainSitemapProcessed = true
       }
       else {
         // No glob patterns - use all URLs except excluded ones
@@ -153,16 +155,18 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
           progress.sitemap.found = sitemapUrls.length
           progress.sitemap.processed = filteredUrls.length
           onProgress?.(progress)
+          mainSitemapProcessed = true
         }
       }
     }
     catch {
-      // Main sitemap not found, try alternatives
-      const commonSitemaps = [
-        `${baseUrl}/sitemap_index.xml`,
-        `${baseUrl}/sitemaps.xml`,
-        `${baseUrl}/sitemap-index.xml`,
-      ]
+      // Main sitemap not found, try alternatives only if main sitemap wasn't processed
+      if (!mainSitemapProcessed) {
+        const commonSitemaps = [
+          `${baseUrl}/sitemap_index.xml`,
+          `${baseUrl}/sitemaps.xml`,
+          `${baseUrl}/sitemap-index.xml`,
+        ]
 
       for (const sitemapUrl of commonSitemaps) {
         try {
@@ -202,6 +206,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
           // Ignore sitemap load errors and try next one
           continue
         }
+      }
       }
     }
 
