@@ -56,8 +56,11 @@
     "@clack/prompts": "^0.11.0",
     "crawlee": "^3.13.9",
     "mdream": "workspace:*",
-    "minimatch": "^10.0.3",
     "nypm": "^0.6.0",
-    "pathe": "^2.0.3"
+    "pathe": "^2.0.3",
+    "picomatch": "^4.0.2"
+  },
+  "devDependencies": {
+    "@types/picomatch": "^4.0.0"
   }
 }

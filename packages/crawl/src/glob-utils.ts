@@ -1,4 +1,4 @@
-import { minimatch } from 'minimatch'
+import picomatch from 'picomatch'
 import { withHttps } from 'ufo'
 
 export interface ParsedUrlPattern {
@@ -64,7 +64,19 @@ export function matchesGlobPattern(url: string, parsedPattern: ParsedUrlPattern)
       return false
     }
 
-    return minimatch(urlPath, parsedPattern.pattern)
+    // Transform single asterisk at the end of pattern to match subdirectories
+    // e.g., /fieldtypes* becomes /fieldtypes{,/**} to match both the path and all subdirectories
+    let pattern = parsedPattern.pattern
+    if (pattern.endsWith('*') && !pattern.endsWith('**') && !pattern.endsWith('/*')) {
+      // Only transform if it's a trailing asterisk not preceded by a slash
+      // e.g., /fieldtypes* -> /fieldtypes{,/**}
+      // but leave /admin/* as is
+      const base = pattern.slice(0, -1)
+      // Use brace expansion to match both /fieldtypes and /fieldtypes/**
+      pattern = `{${base},${base}/**}`
+    }
+
+    return picomatch(pattern)(urlPath)
   }
   catch {
     return false
@@ -124,13 +136,13 @@ export function isUrlExcluded(url: string, excludePatterns: string[]): boolean {
         // For patterns like /admin/*, /api/*, we need to handle nested paths
         // Convert /api/* to /api/** to match subdirectories
         const adjustedPattern = pattern.endsWith('/*') ? pattern.replace('/*', '/**') : pattern
-        return minimatch(urlPath, adjustedPattern)
+        return picomatch(adjustedPattern)(urlPath)
       }
 
       // For patterns like *.pdf, */private/*, etc.
       // Try matching against both full path and without leading slash
-      return minimatch(urlPath, pattern)
-        || minimatch(urlPath.substring(1), pattern)
+      return picomatch(pattern)(urlPath)
+        || picomatch(pattern)(urlPath.substring(1))
     })
   }
   catch {
