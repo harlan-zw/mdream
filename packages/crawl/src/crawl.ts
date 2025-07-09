@@ -32,7 +32,13 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
   // Normalize and resolve the output directory
   const outputDir = resolve(normalize(rawOutputDir))
 
-  const patterns = globPatterns.length > 0 ? globPatterns : urls.map(parseUrlPattern)
+  let patterns
+  try {
+    patterns = globPatterns.length > 0 ? globPatterns : urls.map(parseUrlPattern)
+  }
+  catch (error) {
+    throw new Error(`Invalid URL pattern: ${error instanceof Error ? error.message : 'Unknown error'}`)
+  }
 
   let startingUrls = patterns.map(getStartingUrl)
 

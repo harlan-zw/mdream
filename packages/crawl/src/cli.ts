@@ -37,17 +37,22 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
         }
 
         // Parse the URL pattern
-        const parsed = parseUrlPattern(url)
+        try {
+          const parsed = parseUrlPattern(url)
 
-        // If it's not a glob, validate as regular URL
-        if (!parsed.isGlob) {
-          try {
-            // eslint-disable-next-line no-new
-            new URL(withHttps(url))
+          // If it's not a glob, validate as regular URL
+          if (!parsed.isGlob) {
+            try {
+              // eslint-disable-next-line no-new
+              new URL(withHttps(url))
+            }
+            catch {
+              return `Invalid URL: ${withHttps(url)}`
+            }
           }
-          catch {
-            return `Invalid URL: ${withHttps(url)}`
-          }
+        }
+        catch (error) {
+          return error instanceof Error ? error.message : 'Invalid URL pattern'
         }
       }
     },
@@ -59,7 +64,15 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
   }
 
   const urls = urlsInput.split(',').map(url => url.trim())
-  const globPatterns = urls.map(parseUrlPattern)
+  
+  let globPatterns
+  try {
+    globPatterns = urls.map(parseUrlPattern)
+  }
+  catch (error) {
+    p.cancel(error instanceof Error ? error.message : 'Invalid URL pattern')
+    return null
+  }
 
   // Set default output directory
   const outputDir = '.'
@@ -289,7 +302,15 @@ Examples:
     process.exit(1)
   }
 
-  const parsed = parseUrlPattern(url)
+  let parsed
+  try {
+    parsed = parseUrlPattern(url)
+  }
+  catch (error) {
+    p.log.error(`Error: ${error instanceof Error ? error.message : 'Invalid URL pattern'}`)
+    process.exit(1)
+  }
+
   if (!parsed.isGlob) {
     try {
       // eslint-disable-next-line no-new

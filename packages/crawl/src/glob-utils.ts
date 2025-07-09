@@ -24,7 +24,10 @@ export function parseUrlPattern(input: string): ParsedUrlPattern {
   }
 
   try {
-    const url = new URL(input.replace(/\*.*$/, ''))
+    // Ensure the input has a protocol for URL parsing
+    const urlWithProtocol = input.startsWith('http') ? input : `https://${input}`
+    const urlWithoutGlob = urlWithProtocol.replace(/\*.*$/, '')
+    const url = new URL(urlWithoutGlob)
     const baseUrl = `${url.protocol}//${url.host}`
 
     // Extract the pattern part (everything after the domain)
@@ -37,13 +40,9 @@ export function parseUrlPattern(input: string): ParsedUrlPattern {
       isGlob: true,
     }
   }
-  catch {
-    // If URL parsing fails, treat as non-glob
-    return {
-      baseUrl: input,
-      pattern: '',
-      isGlob: false,
-    }
+  catch (error) {
+    // Throw a clear error for invalid glob patterns instead of silently failing
+    throw new Error(`Invalid URL pattern: "${input}". Please provide a valid URL with glob patterns (e.g., "example.com/docs/*" or "https://example.com/api/**").`)
   }
 }
 
