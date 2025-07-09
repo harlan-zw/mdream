@@ -168,45 +168,45 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
           `${baseUrl}/sitemap-index.xml`,
         ]
 
-      for (const sitemapUrl of commonSitemaps) {
-        try {
-          const { urls: altUrls } = await Sitemap.load(sitemapUrl)
+        for (const sitemapUrl of commonSitemaps) {
+          try {
+            const { urls: altUrls } = await Sitemap.load(sitemapUrl)
 
-          // Check if we have glob patterns to filter by
-          const hasGlobPatterns = patterns.some(p => p.isGlob)
+            // Check if we have glob patterns to filter by
+            const hasGlobPatterns = patterns.some(p => p.isGlob)
 
-          if (hasGlobPatterns) {
+            if (hasGlobPatterns) {
             // Filter URLs through glob patterns and exclude patterns
-            const filteredUrls = altUrls.filter((url) => {
-              return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
-            })
+              const filteredUrls = altUrls.filter((url) => {
+                return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
+              })
 
-            // Always use filtered URLs when glob patterns are provided, even if empty
-            startingUrls = filteredUrls
-            progress.sitemap.found = altUrls.length
-            progress.sitemap.processed = filteredUrls.length
-            onProgress?.(progress)
-            break
-          }
-          else {
-            // No glob patterns - use all URLs except excluded ones
-            const filteredUrls = altUrls.filter((url) => {
-              return !isUrlExcluded(url, exclude)
-            })
-            if (filteredUrls.length > 0) {
+              // Always use filtered URLs when glob patterns are provided, even if empty
               startingUrls = filteredUrls
               progress.sitemap.found = altUrls.length
               progress.sitemap.processed = filteredUrls.length
               onProgress?.(progress)
               break
             }
+            else {
+            // No glob patterns - use all URLs except excluded ones
+              const filteredUrls = altUrls.filter((url) => {
+                return !isUrlExcluded(url, exclude)
+              })
+              if (filteredUrls.length > 0) {
+                startingUrls = filteredUrls
+                progress.sitemap.found = altUrls.length
+                progress.sitemap.processed = filteredUrls.length
+                onProgress?.(progress)
+                break
+              }
+            }
+          }
+          catch {
+          // Ignore sitemap load errors and try next one
+            continue
           }
         }
-        catch {
-          // Ignore sitemap load errors and try next one
-          continue
-        }
-      }
       }
     }
 

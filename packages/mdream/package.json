@@ -75,6 +75,6 @@
   "dependencies": {
     "cac": "^6.7.14",
     "pathe": "^2.0.3",
-    "tinyglobby": "^0.2.10"
+    "tinyglobby": "^0.2.14"
   }
 }
