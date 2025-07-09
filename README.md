@@ -193,9 +193,8 @@ For all available options and advanced configuration, see the complete [action.y
 
 Mdream provides a Vite plugin that enables on-demand HTML to Markdown conversion.
 
-- **Development Mode**: Access any HTML route with `.md` extension (e.g., `/about.html` → `/about.md`)
+- **Automatic Markdown**: Access any route with `.md` extension (e.g., `/about.html` → `/about.md`)
 - **Build-time Generation**: Automatically generates static markdown files alongside HTML files
-- **SSR Support**: Works with server-side rendering frameworks like Vue, React, etc.
 
 ### Installation
 
