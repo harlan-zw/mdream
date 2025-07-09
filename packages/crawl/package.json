@@ -57,6 +57,7 @@
     "crawlee": "^3.13.9",
     "mdream": "workspace:*",
     "minimatch": "^10.0.3",
-    "nypm": "^0.6.0"
+    "nypm": "^0.6.0",
+    "pathe": "^2.0.3"
   }
 }

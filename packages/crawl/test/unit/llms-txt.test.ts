@@ -31,8 +31,8 @@ it('generateLlmsTxtContent creates basic structure', () => {
   expect(content).toContain('# Example Site')
   expect(content).toContain('> This is a test site')
   expect(content).toContain('## Pages')
-  expect(content).toContain('- [Page 1](./md/page1.md): https://example.com/page1')
-  expect(content).toContain('- [Page 2](./md/page2.md): https://example.com/page2')
+  expect(content).toContain('- [Page 1](md/page1.md): https://example.com/page1')
+  expect(content).toContain('- [Page 2](md/page2.md): https://example.com/page2')
 })
 
 it('generateLlmsTxtContent works without description', () => {
@@ -55,7 +55,7 @@ it('generateLlmsTxtContent works without description', () => {
   expect(content).toContain('# Example Site')
   expect(content).not.toContain('>')
   expect(content).toContain('## Pages')
-  expect(content).toContain('- [Page 1](./md/page1.md): https://example.com/page1')
+  expect(content).toContain('- [Page 1](md/page1.md): https://example.com/page1')
 })
 
 it('generateLlmsTxtContent handles empty results', () => {

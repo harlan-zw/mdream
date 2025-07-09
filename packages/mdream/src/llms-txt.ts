@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { basename, dirname, relative } from 'node:path'
+import { basename, dirname, relative, sep } from 'pathe'
 import { glob } from 'tinyglobby'
 import { htmlToMarkdown } from './index.ts'
 import { extractionPlugin } from './plugins/extraction.ts'
@@ -94,6 +94,9 @@ function extractMetadata(html: string, url: string): ProcessedFile['metadata'] {
  */
 function pathToUrl(filePath: string, baseDir: string): string {
   let url = relative(baseDir, filePath)
+
+  // Convert Windows backslashes to forward slashes for URLs
+  url = url.split(sep).join('/')
 
   // Remove .html extension and convert to URL path
   if (url.endsWith('.html')) {
@@ -227,7 +230,10 @@ function generateMarkdownFilesContent(files: ProcessedFile[]): { path: string, c
   const markdownFiles: { path: string, content: string }[] = []
 
   for (const file of files) {
-    const mdPath = file.url === '/' ? 'md/index.md' : `md${file.url}.md`
+    // Convert URL to file path segments
+    const urlPath = file.url === '/' ? 'index' : file.url.replace(/^\//, '').replace(/\/$/, '')
+    // Use forward slashes for the path structure, they'll be converted to OS-specific separators when written
+    const mdPath = `md/${urlPath}.md`
     markdownFiles.push({
       path: mdPath,
       content: file.content,

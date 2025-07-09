@@ -81,6 +81,9 @@ importers:
       nypm:
         specifier: ^0.6.0
         version: 0.6.0
+      pathe:
+        specifier: ^2.0.3
+        version: 2.0.3
       playwright:
         specifier: ^1.53.2
         version: 1.53.2
@@ -90,6 +93,9 @@ importers:
       cac:
         specifier: ^6.7.14
         version: 6.7.14
+      pathe:
+        specifier: ^2.0.3
+        version: 2.0.3
       tinyglobby:
         specifier: ^0.2.10
         version: 0.2.14
@@ -13141,7 +13147,7 @@ snapshots:
     dependencies:
       '@vue/compiler-ssr': 3.5.17
       '@vue/shared': 3.5.17
-      vue: 3.5.17(typescript@5.6.3)
+      vue: 3.5.17(typescript@5.8.3)
 
   '@vue/shared@3.5.17': {}
 

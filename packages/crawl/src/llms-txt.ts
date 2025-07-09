@@ -1,6 +1,6 @@
 import type { LlmsTxtOptions } from './types.ts'
 import { writeFile } from 'node:fs/promises'
-import { basename } from 'node:path'
+import { basename, sep } from 'pathe'
 
 export async function generateLlmsTxt(options: LlmsTxtOptions): Promise<void> {
   const { siteName, description, results, outputPath } = options
@@ -28,11 +28,16 @@ export async function generateLlmsTxt(options: LlmsTxtOptions): Promise<void> {
       // If we have a local file path (meaning individual MD files were generated), link to it
       // Otherwise, link directly to the URL
       if (result.filePath) {
-        // Get relative path from output directory, removing 'md/' prefix
-        const relativePath = result.filePath.includes('/md/')
-          ? result.filePath.substring(result.filePath.indexOf('/md/') + 4)
+        // Get relative path from output directory
+        // Check if the path contains 'md' directory separator
+        const mdSeparator = `${sep}md${sep}`
+        const mdIndex = result.filePath.indexOf(mdSeparator)
+        const relativePath = mdIndex !== -1
+          ? result.filePath.substring(mdIndex + mdSeparator.length)
           : basename(result.filePath)
-        content += `- [${title}](./md/${relativePath}): ${result.url}\n`
+        // Always use forward slashes in markdown links
+        const linkPath = relativePath.split(sep).join('/')
+        content += `- [${title}](md/${linkPath}): ${result.url}\n`
       }
       else {
         // No local file, link directly to URL
@@ -72,11 +77,16 @@ export function generateLlmsTxtContent(options: Omit<LlmsTxtOptions, 'outputPath
       // If we have a local file path (meaning individual MD files were generated), link to it
       // Otherwise, link directly to the URL
       if (result.filePath) {
-        // Get relative path from output directory, removing 'md/' prefix
-        const relativePath = result.filePath.includes('/md/')
-          ? result.filePath.substring(result.filePath.indexOf('/md/') + 4)
+        // Get relative path from output directory
+        // Check if the path contains 'md' directory separator
+        const mdSeparator = `${sep}md${sep}`
+        const mdIndex = result.filePath.indexOf(mdSeparator)
+        const relativePath = mdIndex !== -1
+          ? result.filePath.substring(mdIndex + mdSeparator.length)
           : basename(result.filePath)
-        content += `- [${title}](./md/${relativePath}): ${result.url}\n`
+        // Always use forward slashes in markdown links
+        const linkPath = relativePath.split(sep).join('/')
+        content += `- [${title}](md/${linkPath}): ${result.url}\n`
       }
       else {
         // No local file, link directly to URL

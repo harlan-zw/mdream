@@ -2,10 +2,10 @@ import type { ProcessedFile } from 'mdream'
 import type { CrawlOptions, CrawlResult } from './types.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { HttpCrawler, purgeDefaultStorages, Sitemap } from 'crawlee'
 import { generateLlmsTxtArtifacts, htmlToMarkdown } from 'mdream'
 import { withMinimalPreset } from 'mdream/preset/minimal'
+import { dirname, join, normalize, resolve } from 'pathe'
 import { withHttps } from 'ufo'
 import { getStartingUrl, isUrlExcluded, matchesGlobPattern, parseUrlPattern } from './glob-utils.ts'
 import { extractMetadata } from './metadata-extractor.ts'
@@ -13,7 +13,7 @@ import { extractMetadata } from './metadata-extractor.ts'
 export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResult[]> {
   const {
     urls,
-    outputDir,
+    outputDir: rawOutputDir,
     maxRequestsPerCrawl = Number.MAX_SAFE_INTEGER,
     generateLlmsTxt = true,
     generateLlmsFullTxt = false,
@@ -28,6 +28,9 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
     siteNameOverride,
     descriptionOverride,
   } = options
+
+  // Normalize and resolve the output directory
+  const outputDir = resolve(normalize(rawOutputDir))
 
   const patterns = globPatterns.length > 0 ? globPatterns : urls.map(parseUrlPattern)
 
@@ -179,7 +182,12 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
         // Generate filename based on URL path
         const urlObj = new URL(request.loadedUrl)
         const urlPath = urlObj.pathname === '/' ? '/index' : urlObj.pathname
-        const safeFilename = `${urlPath.replace(/\/$/, '').replace(/[^\w\-/]/g, '-')}.md`
+        // Convert URL path to OS-safe path by replacing forward slashes
+        const pathSegments = urlPath.replace(/\/$/, '').split('/').filter(seg => seg.length > 0)
+        const safeSegments = pathSegments.map(seg => seg.replace(/[^\w\-]/g, '-'))
+        // Ensure we have a valid filename
+        const filename = safeSegments.length > 0 ? safeSegments.join('/') : 'index'
+        const safeFilename = normalize(`${filename}.md`)
 
         // Create full file path - always store in outputDir for result tracking
         filePath = join(outputDir, 'md', safeFilename)
@@ -187,8 +195,9 @@ export async function crawlAndGenerate(options: CrawlOptions): Promise<CrawlResu
         // Write markdown file only if individual MD files are requested
         if (generateIndividualMd) {
           // Ensure the directory exists
-          const fileDir = filePath.substring(0, filePath.lastIndexOf('/'))
-          if (!existsSync(fileDir)) {
+          const fileDir = dirname(filePath)
+          // Safety check: ensure directory path is not empty
+          if (fileDir && !existsSync(fileDir)) {
             mkdirSync(fileDir, { recursive: true })
           }
           await writeFile(filePath, md, 'utf-8')

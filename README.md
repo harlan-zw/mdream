@@ -35,8 +35,7 @@ human readability.
 
 Other LLM specific convertors focus on supporting _all_ document formats, resulting in larger bundles and lower quality Markdown output.
 
-Mdream produces high-quality Markdown for LLMs efficiently with no dependencies. The provided core
-has a plugin system to customize the conversion process, allowing you to parse, extract, transform, and filter as needed.
+Mdream produces high-quality Markdown for LLMs efficiently with no core dependencies. It includes a plugin system to customize the conversion process, allowing you to parse, extract, transform, and filter as needed.
 
 Additionally, [Mdream Crawl](#mdream-crawl) allows you to crawl entire sites and generate LLM artifacts like `llms.txt` files.
 
@@ -64,7 +63,7 @@ npx mdream-crawl
 # Simple
 npx mdream-crawl https://harlanzw.com
 # Glob patterns
-npx mdream-crawl https://nuxt.com/docs/getting-started/**
+npx mdream-crawl "https://nuxt.com/docs/getting-started/**"
 # Get help
 npx mdream-crawl -h
 ```
@@ -124,7 +123,6 @@ cat index.html \
 - `--help`: Display help information
 - `--version`: Display version information
 
-
 ## GitHub Actions Integration
 
 Mdream provides a GitHub Action that processes HTML files using glob patterns to generate `llms.txt` artifacts in CI/CD workflows.
@@ -146,7 +144,7 @@ on:
 jobs:
   generate-llms-txt:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -166,10 +164,10 @@ jobs:
         uses: harlan-zw/mdream@main
         with:
           glob: 'dist/**/*.html'
-          site-name: 'My Documentation'
-          description: 'Comprehensive technical documentation and guides'
+          site-name: My Documentation
+          description: Comprehensive technical documentation and guides
           origin: 'https://mydocs.com'
-          output: 'dist'
+          output: dist
 
       - name: Upload llms.txt artifacts
         uses: actions/upload-artifact@v4

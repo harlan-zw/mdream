@@ -37,8 +37,8 @@ it('should use home page title as site name when available', () => {
 
   expect(content).toContain('# Example Site - Official Homepage')
   expect(content).toContain('> This is the official homepage description')
-  expect(content).toContain('- [Example Site - Official Homepage](./md/index.md): https://example.com')
-  expect(content).toContain('- [About Us](./md/about.md): https://example.com/about')
+  expect(content).toContain('- [Example Site - Official Homepage](md/index.md): https://example.com')
+  expect(content).toContain('- [About Us](md/about.md): https://example.com/about')
 })
 
 it('should fallback to hostname when home page title is not available', () => {
