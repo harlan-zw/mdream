@@ -74,18 +74,18 @@ npx @mdream/crawl -h
 **Crawl Using Playwright**
 
 ```bash
-@mdream/crawl -u example.com --driver playwright
+npx @mdream/crawl -u example.com --driver playwright
 ```
 
 **Exclude Specific Paths**
 
 ```bash
-@mdream/crawl -u example.com --exclude "/admin/*" --exclude "/api/*"
+npx @mdream/crawl -u example.com --exclude "/admin/*" --exclude "/api/*"
 ```
 
 **Large Site Crawling with Limits**
 ```bash
-@mdream/crawl -u https://large-site.com \
+npx @mdream/crawl -u https://large-site.com \
   --max-pages 100 \
   --depth 2
 ```
