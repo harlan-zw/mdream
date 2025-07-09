@@ -1,7 +1,7 @@
 {
   "type": "module",
   "private": true,
-  "packageManager": "pnpm@10.12.4",
+  "packageManager": "pnpm@10.13.1",
   "license": "MIT",
   "scripts": {
     "build": "pnpm run -r build",
@@ -15,7 +15,7 @@
     "@arethetypeswrong/cli": "^0.18.2",
     "@types/node": "^24.0.12",
     "bumpp": "^10.2.0",
-    "crawlee": "^3.13.9",
+    "crawlee": "^3.13.10",
     "eslint": "^9.30.1",
     "llm-cost": "^1.0.5",
     "obuild": "^0.2.1",
@@ -29,6 +29,7 @@
     },
     "onlyBuiltDependencies": [
       "@parcel/watcher",
+      "@tailwindcss/oxide",
       "better-sqlite3",
       "esbuild",
       "maplibre-gl",

@@ -2,7 +2,6 @@
   "name": "@mdream/crawl",
   "type": "module",
   "version": "0.7.1",
-  "packageManager": "pnpm@10.12.4",
   "description": "Mdream Crawl generates comprehensive llms.txt artifacts from a single URL, using mdream to convert HTML to Markdown.",
   "author": {
     "name": "Harlan Wilton",
@@ -54,7 +53,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.11.0",
-    "crawlee": "^3.13.9",
+    "crawlee": "^3.13.10",
     "mdream": "workspace:*",
     "nypm": "^0.6.0",
     "pathe": "^2.0.3",

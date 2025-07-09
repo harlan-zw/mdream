@@ -2,7 +2,6 @@
   "name": "playground",
   "type": "module",
   "private": true,
-  "packageManager": "pnpm@10.12.4",
   "scripts": {
     "dev": "nuxi dev",
     "lint:docs": "markdownlint ./snippets && case-police 'snippets/**/*.md' *.md",

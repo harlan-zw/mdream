@@ -56,11 +56,11 @@ The plugin enables accessing any HTML path with a `.md` extension:
 
 ## Configuration Options
 
-```typescript
+```ts
 interface ViteHtmlToMarkdownOptions {
   /**
    * Glob patterns to include HTML files for processing
-   * @default ['**/*.html']
+   * @default ['**\/*.html']
    */
   include?: string[]
 
