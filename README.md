@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-> An ultra-performant HTML to Markdown converter, purpose-built for Large Language Models (LLMs) and generating `llms.txt` artifacts.
+> Ultra-performant HTML to Markdown Convertor Optimized for LLMs. Generate llms.txt artifacts using CLI, GitHub Actions, Vite Plugin and more.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
