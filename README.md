@@ -200,7 +200,7 @@ Mdream provides a Vite plugin that enables on-demand HTML to Markdown conversion
 ### Installation
 
 ```bash
-npm install @mdream/vite
+pnpm install @mdream/vite
 ```
 
 ### Usage
@@ -229,11 +229,7 @@ The Mdream Nuxt module features:
 ### Installation
 
 ```bash
-npm install @mdream/nuxt mdream
-# or
-pnpm add @mdream/nuxt mdream
-# or
-yarn add @mdream/nuxt mdream
+pnpm add @mdream/nuxt
 ```
 
 ### Usage
@@ -259,13 +255,6 @@ For more details and advanced configuration, see the [Nuxt Module README](./pack
 ### Installation
 
 ```bash
-# npm
-npm install mdream
-
-# yarn
-yarn add mdream
-
-# pnpm
 pnpm add mdream
 ```
 
@@ -399,13 +388,13 @@ import { htmlToMarkdown } from 'mdream'
 import { createPlugin } from 'mdream/plugins'
 
 const myPlugin = createPlugin({
-  onNodeEnter(node: ElementNode): string | undefined {
+  onNodeEnter(node: ElementNode){
     if (node.name === 'h1') {
       return '🔥 '
     }
   },
 
-  processTextNode(textNode: TextNode): { content: string, skip: boolean } | undefined {
+  processTextNode(textNode: TextNode) {
     // Transform text content
     if (textNode.parent?.attributes?.id === 'highlight') {
       return {
@@ -429,7 +418,7 @@ import { ELEMENT_NODE } from 'mdream'
 import { createPlugin } from 'mdream/plugins'
 
 const adBlockPlugin = createPlugin({
-  beforeNodeProcess(event: NodeEvent): { skip: boolean } | undefined {
+  beforeNodeProcess(event: NodeEvent) {
     const { node } = event
 
     if (node.type === ELEMENT_NODE && node.name === 'div') {
@@ -461,11 +450,11 @@ const html: string = `
 
 // Extract elements using CSS selectors
 const plugin = extractionPlugin({
-  'h2': (element: ExtractedElement, state: MdreamRuntimeState): void => {
+  'h2': (element: ExtractedElement, state: MdreamRuntimeState) => {
     console.log('Heading:', element.textContent) // "Getting Started"
     console.log('Depth:', state.depth) // Current nesting depth
   },
-  'img[alt]': (element: ExtractedElement, state: MdreamRuntimeState): void => {
+  'img[alt]': (element: ExtractedElement, state: MdreamRuntimeState) => {
     console.log('Image:', element.attributes.src, element.attributes.alt)
     // "Image: /hero.jpg Hero image"
     console.log('Context:', state.options) // Access to conversion options
