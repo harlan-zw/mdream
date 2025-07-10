@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-> Convert any site to clean markdown & llms.txt. Boost your sites AI discoverability or generate LLM context for a project you're working with.
+> Convert any site to clean markdown & llms.txt. Boost your site's AI discoverability or generate LLM context for a project you're working with.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
@@ -41,7 +41,7 @@ for your own sites or generate LLM context for any project you're working with.
 
 ### Mdream Packages
 
-Mdream is built to run anywhere for all projects and use cases ands available in the following packages:
+Mdream is built to run anywhere for all projects and use cases and is available in the following packages:
 
 | Package | Description                                                                                              |
 | ------- |----------------------------------------------------------------------------------------------------------|
