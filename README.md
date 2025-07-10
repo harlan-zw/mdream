@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-> Ultra-performant HTML to Markdown Convertor Optimized for LLMs. Generate llms.txt artifacts using CLI, GitHub Actions, Vite Plugin and more.
+> Convert any site to clean markdown & llms.txt. Boost your sites AI discoverability or generate LLM context for a project you're working with.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
@@ -20,10 +20,10 @@
 
 ## Features
 
-- 🧠 Optimized HTML To Markdown Conversion (~50% fewer tokens with [Minimal preset](./packages/mdream/src/preset/minimal.ts))
+- 🧠 Custom built HTML to Markdown Convertor Optimized for LLMs (~50% fewer tokens with [Minimal preset](./packages/mdream/src/preset/minimal.ts))
 - 🔍 Generates GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
 - 🕷️ Site Crawling: [Mdream Crawl](#mdream-crawl) generates [llms.txt](https://llmstxt.org/) artifacts from entire websites.
-- 🚀 Fast: Stream 1.4MB of HTML to markdown in ~50ms.
+- 🚀 Ultra Fast: Stream 1.4MB of HTML to markdown in ~50ms.
 - ⚡ Tiny: 5kB gzip, zero dependency core.
 - ⚙️ Run anywhere: CLI, [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), edge workers, browsers, Node, etc.
 - 🔌 Extensible: [Plugin system](#plugin-system) for customizing and extending functionality.
@@ -35,9 +35,10 @@ human readability.
 
 Other LLM specific convertors focus on supporting _all_ document formats, resulting in larger bundles and lower quality Markdown output.
 
-Mdream produces high-quality Markdown for LLMs efficiently with no core dependencies. It includes a plugin system to customize the conversion process, allowing you to parse, extract, transform, and filter as needed.
+Mdream core is a highly optimized primitive for producing Markdown from HTML that is minified for LLMs. 
 
-Additionally, [Mdream Crawl](#mdream-crawl) allows you to crawl entire sites and generate LLM artifacts like `llms.txt` files.
+Mdream ships several packages on top of this to generate LLM artifacts like `llms.txt`
+for your own sites or generate LLM context for any project you're working with.
 
 ### Mdream Packages
 
