@@ -41,13 +41,15 @@ Additionally, [Mdream Crawl](#mdream-crawl) allows you to crawl entire sites and
 
 ### Mdream Packages
 
-Mdream is built to run anywhere for all projects and use cases ands available in the following packages: 
+Mdream is built to run anywhere for all projects and use cases ands available in the following packages:
 
-- [mdream](#mdream): HTMl to Markdown convertor, can be used as a CLI for `stdin` conversion or as a package **minimal: no dependencies**.
-- [@mdream/crawl](#mdream-crawl): A site-wide crawler to generate `llms.txt` artifacts.
-- [@mdream/vite](#vite-integration): Vite plugin for automatic `.md` paths.
-- [@mdream/nuxt](#nuxt-integration): Nuxt module for automatic `.md` paths and `llms.txt` artifacts.
-- [@mdream/action](#github-actions-integration): GitHub Action for generating `llms.txt` artifacts from your static site output.
+| Package | Description |
+| ------- | ----------- |
+| <img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;"> [mdream](#installation) | HTML to Markdown converter with CLI for `stdin` conversion and package API. **Minimal: no dependencies** |
+| <img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;"> [@mdream/crawl](#mdreamcrawl) | Site-wide crawler to generate `llms.txt` artifacts from entire websites |
+| <img src="https://api.iconify.design/logos:vitejs.svg" width="16" height="16" style="vertical-align: middle;"> [@mdream/vite](#vite-integration) | Vite plugin for automatic `.md` paths in your build process |
+| <img src="https://api.iconify.design/logos:nuxt-icon.svg" width="16" height="16" style="vertical-align: middle;"> [@mdream/nuxt](#nuxt-integration) | Nuxt module for automatic `.md` paths and `llms.txt` artifacts generation |
+| <img src="https://api.iconify.design/logos:github-icon.svg" width="16" height="16" style="vertical-align: middle;"> [@mdream/action](#github-actions-integration) | GitHub Action for generating `llms.txt` artifacts from your static site output |
 
 ## Mdream Crawl
 
