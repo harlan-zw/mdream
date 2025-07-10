@@ -221,7 +221,7 @@ For more details and advanced configuration, see the [Vite README](./packages/vi
 
 ## Nuxt Integration
 
-Mdream provides a Nuxt module that enables seamless HTML to Markdown conversion for Nuxt 3 applications.
+The Mdream Nuxt module features:
 
 - **🚀 On-Demand Generation**: Access any route with `.md` extension (e.g., `/about` → `/about.md`)
 - **📄 LLMs.txt Generation**: Creates `llms.txt` and `llms-full.txt` artifacts during prerendering
@@ -248,7 +248,7 @@ export default defineNuxtConfig({
 })
 ```
 
-Done! Add the `.md` to any file path to access markdown.
+Done! Add the `.md` to any URL path to access the markdown.
 
 When statically generating your site with `nuxi generate` it will create `llms.txt` artifacts.
 
