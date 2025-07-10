@@ -225,8 +225,8 @@ For more details and advanced configuration, see the [Vite README](./packages/vi
 
 The Mdream Nuxt module features:
 
-- **🚀 On-Demand Generation**: Access any route with `.md` extension (e.g., `/about` → `/about.md`)
-- **📄 LLMs.txt Generation**: Creates `llms.txt` and `llms-full.txt` artifacts during prerendering
+- **On-Demand Generation**: Access any route with `.md` extension (e.g., `/about` → `/about.md`)
+- **LLMs.txt Generation**: Creates `llms.txt` and `llms-full.txt` artifacts during prerendering
 
 ### Installation
 
