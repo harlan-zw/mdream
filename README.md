@@ -20,12 +20,11 @@
 
 ## Features
 
-- 🧠 Custom built HTML to Markdown Convertor Optimized for LLMs (~50% fewer tokens with [Minimal preset](./packages/mdream/src/preset/minimal.ts))
-- 🔍 Generates GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
-- 🕷️ Site Crawling: [Mdream Crawl](#mdream-crawl) generates [llms.txt](https://llmstxt.org/) artifacts from entire websites.
+- 🧠 Custom built HTML to Markdown Convertor Optimized for LLMs (~50% fewer tokens)
+- 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
 - 🚀 Ultra Fast: Stream 1.4MB of HTML to markdown in ~50ms.
 - ⚡ Tiny: 5kB gzip, zero dependency core.
-- ⚙️ Run anywhere: CLI, [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), edge workers, browsers, Node, etc.
+- ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), edge workers, browsers, Node, etc.
 - 🔌 Extensible: [Plugin system](#plugin-system) for customizing and extending functionality.
 
 ## What is Mdream?
