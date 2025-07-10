@@ -1,0 +1,26 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+.nuxt
+.output
+
+# Logs
+*.log
+
+# IDE
+.idea
+.vscode
+
+# Testing
+coverage
+.nyc_output
+
+# Playground
+playground/.nuxt
+playground/.output
+playground/node_modules
+
+# OS
+.DS_Store

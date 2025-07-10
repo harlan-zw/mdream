@@ -45,7 +45,8 @@ Mdream is a HTML parser, Markdown Generator and site-wide crawler. To keep the c
 
 - [mdream](#mdream): HTMl to Markdown convertor, can be used as a CLI for `stdin` conversion or as a package **minimal: no dependencies**.
 - [@mdream/crawl](#mdream-crawl): A site-wide crawler to generate `llms.txt` artifacts.
-- [@mdream/vite](#vite-integration): Vite plugin for on-demand HTML to Markdown conversion.
+- [@mdream/vite](#vite-integration): Vite plugin for automatic `.md` paths.
+- [@mdream/nuxt](#nuxt-integration): Nuxt module for automatic `.md` paths and `llms.txt` artifacts.
 - [@mdream/action](#github-actions-integration): GitHub Action for generating `llms.txt` artifacts from your static site output.
 
 ## Mdream Crawl
@@ -199,7 +200,7 @@ Mdream provides a Vite plugin that enables on-demand HTML to Markdown conversion
 ### Installation
 
 ```bash
-npm install @mdream/vite
+pnpm install @mdream/vite
 ```
 
 ### Usage
@@ -216,20 +217,44 @@ export default defineConfig({
 })
 ```
 
-For complete examples, see the [Vite examples](./examples/vite-ssr-vue) in this repository.
+For more details and advanced configuration, see the [Vite README](./packages/vite/README.md).
+
+## Nuxt Integration
+
+The Mdream Nuxt module features:
+
+- **🚀 On-Demand Generation**: Access any route with `.md` extension (e.g., `/about` → `/about.md`)
+- **📄 LLMs.txt Generation**: Creates `llms.txt` and `llms-full.txt` artifacts during prerendering
+
+### Installation
+
+```bash
+pnpm add @mdream/nuxt
+```
+
+### Usage
+
+Add the module to your `nuxt.config.ts`:
+
+```ts
+export default defineNuxtConfig({
+  modules: [
+    '@mdream/nuxt'
+  ],
+})
+```
+
+Done! Add the `.md` to any URL path to access the markdown.
+
+When statically generating your site with `nuxi generate` it will create `llms.txt` artifacts.
+
+For more details and advanced configuration, see the [Nuxt Module README](./packages/nuxt/README.md).
 
 ## API Usage
 
 ### Installation
 
 ```bash
-# npm
-npm install mdream
-
-# yarn
-yarn add mdream
-
-# pnpm
 pnpm add mdream
 ```
 
@@ -363,13 +388,13 @@ import { htmlToMarkdown } from 'mdream'
 import { createPlugin } from 'mdream/plugins'
 
 const myPlugin = createPlugin({
-  onNodeEnter(node: ElementNode): string | undefined {
+  onNodeEnter(node: ElementNode){
     if (node.name === 'h1') {
       return '🔥 '
     }
   },
 
-  processTextNode(textNode: TextNode): { content: string, skip: boolean } | undefined {
+  processTextNode(textNode: TextNode) {
     // Transform text content
     if (textNode.parent?.attributes?.id === 'highlight') {
       return {
@@ -393,7 +418,7 @@ import { ELEMENT_NODE } from 'mdream'
 import { createPlugin } from 'mdream/plugins'
 
 const adBlockPlugin = createPlugin({
-  beforeNodeProcess(event: NodeEvent): { skip: boolean } | undefined {
+  beforeNodeProcess(event: NodeEvent) {
     const { node } = event
 
     if (node.type === ELEMENT_NODE && node.name === 'div') {
@@ -425,11 +450,11 @@ const html: string = `
 
 // Extract elements using CSS selectors
 const plugin = extractionPlugin({
-  'h2': (element: ExtractedElement, state: MdreamRuntimeState): void => {
+  'h2': (element: ExtractedElement, state: MdreamRuntimeState) => {
     console.log('Heading:', element.textContent) // "Getting Started"
     console.log('Depth:', state.depth) // Current nesting depth
   },
-  'img[alt]': (element: ExtractedElement, state: MdreamRuntimeState): void => {
+  'img[alt]': (element: ExtractedElement, state: MdreamRuntimeState) => {
     console.log('Image:', element.attributes.src, element.attributes.alt)
     // "Image: /hero.jpg Hero image"
     console.log('Context:', state.options) // Access to conversion options
