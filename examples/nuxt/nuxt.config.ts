@@ -1,7 +1,11 @@
+import MdreamNuxt from '../../packages/nuxt/src/module.ts'
+import { defineNuxtConfig } from 'nuxt/config'
+
 export default defineNuxtConfig({
-  modules: ['@mdream/nuxt'],
+  modules: [MdreamNuxt],
 
   // Site configuration for llms.txt generation
+  // @ts-expect-error untyped
   site: {
     name: '@mdream/nuxt Example',
     description: 'Example application demonstrating the @mdream/nuxt module for converting HTML pages to Markdown',
