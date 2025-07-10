@@ -66,8 +66,10 @@ interface ViteHtmlToMarkdownOptions {
 
   /**
    * Glob patterns to exclude from processing
-   * @default ['**/node_modules/**']
-   */
+   * @default ['*
+   */node_modules/**
+    ']
+                  */
   exclude?: string[]
 
   /**

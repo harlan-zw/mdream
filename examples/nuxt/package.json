@@ -1,0 +1,16 @@
+{
+  "name": "nuxtjs-mdream-example",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@mdream/nuxt": "workspace:*",
+    "nuxt": "^3.17.6"
+  }
+}

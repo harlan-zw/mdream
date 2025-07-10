@@ -1,0 +1,66 @@
+{
+  "name": "@mdream/nuxt",
+  "type": "module",
+  "version": "0.7.2",
+  "packageManager": "pnpm@10.13.1",
+  "description": "Nuxt module for converting HTML pages to Markdown using mdream",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/types.d.mts",
+      "import": "./dist/module.mjs"
+    }
+  },
+  "main": "./dist/module.mjs",
+  "types": "./dist/types.d.mts",
+  "typesVersions": {
+    "*": {
+      ".": [
+        "./dist/types.d.mts"
+      ]
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "nuxt-module-build build",
+    "dev": "nuxi dev playground",
+    "dev:build": "nuxi build playground",
+    "dev:prepare": "nuxt-module-build build --stub && nuxt-module-build prepare && nuxi prepare playground",
+    "prepare:fixtures": "nuxi prepare test/fixtures/basic",
+    "release": "pnpm build && bumpp && pnpm -r publish",
+    "test": "pnpm prepare:fixtures && vitest run",
+    "test:watch": "vitest watch",
+    "test:attw": "attw --pack",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "peerDependencies": {
+    "nuxt": "^3.0.0"
+  },
+  "dependencies": {
+    "@nuxt/kit": "^3.17.6",
+    "consola": "^3.4.2",
+    "defu": "^6.1.4",
+    "mdream": "workspace:*",
+    "nuxt-site-config": "^3.2.2",
+    "pathe": "^2.0.3"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^4.16.2",
+    "@arethetypeswrong/cli": "^0.18.2",
+    "@nuxt/devtools": "latest",
+    "@nuxt/module-builder": "^1.0.1",
+    "@nuxt/schema": "^3.17.6",
+    "@nuxt/test-utils": "^3.19.2",
+    "@types/node": "latest",
+    "bumpp": "^10.2.0",
+    "changelogen": "^0.6.2",
+    "eslint": "^9.30.1",
+    "nuxt": "^3.17.6",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

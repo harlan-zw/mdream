@@ -45,7 +45,8 @@ Mdream is a HTML parser, Markdown Generator and site-wide crawler. To keep the c
 
 - [mdream](#mdream): HTMl to Markdown convertor, can be used as a CLI for `stdin` conversion or as a package **minimal: no dependencies**.
 - [@mdream/crawl](#mdream-crawl): A site-wide crawler to generate `llms.txt` artifacts.
-- [@mdream/vite](#vite-integration): Vite plugin for on-demand HTML to Markdown conversion.
+- [@mdream/vite](#vite-integration): Vite plugin for automatic `.md` paths.
+- [@mdream/nuxt](#nuxt-integration): Nuxt module for automatic `.md` paths and `llms.txt` artifacts.
 - [@mdream/action](#github-actions-integration): GitHub Action for generating `llms.txt` artifacts from your static site output.
 
 ## Mdream Crawl
@@ -216,7 +217,42 @@ export default defineConfig({
 })
 ```
 
-For complete examples, see the [Vite examples](./examples/vite-ssr-vue) in this repository.
+For more details and advanced configuration, see the [Vite README](./packages/vite/README.md).
+
+## Nuxt Integration
+
+Mdream provides a Nuxt module that enables seamless HTML to Markdown conversion for Nuxt 3 applications.
+
+- **🚀 On-Demand Generation**: Access any route with `.md` extension (e.g., `/about` → `/about.md`)
+- **📄 LLMs.txt Generation**: Creates `llms.txt` and `llms-full.txt` artifacts during prerendering
+
+### Installation
+
+```bash
+npm install @mdream/nuxt mdream
+# or
+pnpm add @mdream/nuxt mdream
+# or
+yarn add @mdream/nuxt mdream
+```
+
+### Usage
+
+Add the module to your `nuxt.config.ts`:
+
+```ts
+export default defineNuxtConfig({
+  modules: [
+    '@mdream/nuxt'
+  ],
+})
+```
+
+Done! Add the `.md` to any file path to access markdown.
+
+When statically generating your site with `nuxi generate` it will create `llms.txt` artifacts.
+
+For more details and advanced configuration, see the [Nuxt Module README](./packages/nuxt/README.md).
 
 ## API Usage
 

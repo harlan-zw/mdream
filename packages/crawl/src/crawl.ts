@@ -381,7 +381,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   let crawler: HttpCrawler<any> | any // PlaywrightCrawler type will be determined at runtime
   const crawlerOptions: PlaywrightCrawlerOptions | HttpCrawlerOptions = {
     requestHandler: createRequestHandler(driver),
-    errorHandler: async ({ request, response }: any, error: Error) => {
+    errorHandler: async ({ request, response }: any) => {
       // Handle 4xx and 5xx status codes for HTTP crawler only (skip everything except timeouts)
       if (response?.statusCode && response?.statusCode >= 400) {
         request.noRetry = true

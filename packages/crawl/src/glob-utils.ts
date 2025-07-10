@@ -40,7 +40,7 @@ export function parseUrlPattern(input: string): ParsedUrlPattern {
       isGlob: true,
     }
   }
-  catch (error) {
+  catch {
     // Throw a clear error for invalid glob patterns instead of silently failing
     throw new Error(`Invalid URL pattern: "${input}". Please provide a valid URL with glob patterns (e.g., "example.com/docs/*" or "https://example.com/api/**").`)
   }
