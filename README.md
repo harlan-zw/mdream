@@ -45,11 +45,11 @@ Mdream is built to run anywhere for all projects and use cases ands available in
 
 | Package | Description |
 | ------- | ----------- |
-| <img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;">&nbsp;[mdream](#installation) | HTML to Markdown converter with CLI for `stdin` conversion and package API. **Minimal: no dependencies** |
-| <img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;">&nbsp;[@mdream/crawl](#mdreamcrawl) | Site-wide crawler to generate `llms.txt` artifacts from entire websites |
-| <img src="https://api.iconify.design/logos:vitejs.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;[@mdream/vite](#vite-integration) | Vite plugin for automatic `.md` paths in your build process |
-| <img src="https://api.iconify.design/logos:nuxt-icon.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;[@mdream/nuxt](#nuxt-integration) | Nuxt module for automatic `.md` paths and `llms.txt` artifacts generation |
-| <img src="https://api.iconify.design/logos:github-icon.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;[@mdream/action](#github-actions-integration) | GitHub Action for generating `llms.txt` artifacts from your static site output |
+| <nobr><img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;">&nbsp;[mdream](#installation)</nobr> | HTML to Markdown converter with CLI for `stdin` conversion and package API. **Minimal: no dependencies** |
+| <nobr><img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;">&nbsp;[@mdream/crawl](#mdreamcrawl)</nobr> | Site-wide crawler to generate `llms.txt` artifacts from entire websites |
+| <nobr><img src="https://api.iconify.design/logos:vitejs.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;[@mdream/vite](#vite-integration)</nobr> | Vite plugin for automatic `.md` paths in your build process |
+| <nobr><img src="https://api.iconify.design/logos:nuxt-icon.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;[@mdream/nuxt](#nuxt-integration)</nobr> | Nuxt module for automatic `.md` paths and `llms.txt` artifacts generation |
+| <nobr><img src="https://api.iconify.design/logos:github-icon.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;[@mdream/action](#github-actions-integration)</nobr> | GitHub Action for generating `llms.txt` artifacts from your static site output |
 
 ## Mdream Crawl
 
