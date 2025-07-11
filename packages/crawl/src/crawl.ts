@@ -259,6 +259,11 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       progress.crawling.currentUrl = request.loadedUrl
       onProgress?.(progress)
 
+      // Skip processing for non-2xx responses
+      if (response?.statusCode && (response.statusCode < 200 || response.statusCode >= 300)) {
+        return
+      }
+
       // Determine home page URL for metadata extraction
       const homePageUrl = new URL(startingUrls[0]).origin
 
