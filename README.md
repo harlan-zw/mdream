@@ -34,7 +34,7 @@ human readability.
 
 Other LLM specific convertors focus on supporting _all_ document formats, resulting in larger bundles and lower quality Markdown output.
 
-Mdream core is a highly optimized primitive for producing Markdown from HTML that is optimized for LLMs. 
+Mdream core is a highly optimized primitive for producing Markdown from HTML that is optimized for LLMs.
 
 Mdream ships several packages on top of this to generate LLM artifacts like `llms.txt`
 for your own sites or generate LLM context for any project you're working with.
@@ -390,7 +390,7 @@ import { htmlToMarkdown } from 'mdream'
 import { createPlugin } from 'mdream/plugins'
 
 const myPlugin = createPlugin({
-  onNodeEnter(node: ElementNode){
+  onNodeEnter(node: ElementNode) {
     if (node.name === 'h1') {
       return '🔥 '
     }

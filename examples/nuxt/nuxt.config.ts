@@ -1,5 +1,5 @@
-import MdreamNuxt from '../../packages/nuxt/src/module.ts'
 import { defineNuxtConfig } from 'nuxt/config'
+import MdreamNuxt from '../../packages/nuxt/src/module.ts'
 
 export default defineNuxtConfig({
   modules: [MdreamNuxt],

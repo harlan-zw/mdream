@@ -206,7 +206,7 @@ import { htmlToMarkdown } from 'mdream'
 import { createPlugin } from 'mdream/plugins'
 
 const myPlugin = createPlugin({
-  onNodeEnter(node: ElementNode){
+  onNodeEnter(node: ElementNode) {
     if (node.name === 'h1') {
       return '🔥 '
     }

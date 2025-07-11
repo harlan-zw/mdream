@@ -3,14 +3,14 @@ import type { ProcessedFile } from 'mdream'
 import type { CrawlOptions, CrawlResult } from './types.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
-import { HttpCrawler, PlaywrightCrawler, purgeDefaultStorages, log } from 'crawlee'
+import * as p from '@clack/prompts'
+import { HttpCrawler, log, PlaywrightCrawler, purgeDefaultStorages } from 'crawlee'
 import { generateLlmsTxtArtifacts, htmlToMarkdown } from 'mdream'
 import { withMinimalPreset } from 'mdream/preset/minimal'
 import { dirname, join, normalize, resolve } from 'pathe'
 import { withHttps } from 'ufo'
 import { getStartingUrl, isUrlExcluded, matchesGlobPattern, parseUrlPattern } from './glob-utils.ts'
 import { extractMetadata } from './metadata-extractor.ts'
-import * as p from '@clack/prompts'
 
 // Helper function to load sitemap with no retries using direct fetch
 async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> {
@@ -18,17 +18,19 @@ async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> 
   if (!response.ok) {
     throw new Error(`Sitemap not found: ${response.status}`)
   }
-  
+
   const xmlContent = await response.text()
-  
+
   // Parse XML content to extract URLs
   const urls: string[] = []
   const urlRegex = /<loc>(.*?)<\/loc>/g
   let match
-  while ((match = urlRegex.exec(xmlContent)) !== null) {
+  while (true) {
+    match = urlRegex.exec(xmlContent)
+    if (match === null) break
     urls.push(match[1])
   }
-  
+
   return urls
 }
 
@@ -76,7 +78,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   // Set crawlee log level based on verbose flag
   if (verbose) {
     log.setLevel(log.LEVELS.INFO)
-  } else {
+  }
+  else {
     log.setLevel(log.LEVELS.OFF)
   }
 
@@ -98,7 +101,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   }
 
   // Track sitemap discovery attempts
-  const sitemapAttempts: { url: string; success: boolean; error?: string }[] = []
+  const sitemapAttempts: { url: string, success: boolean, error?: string }[] = []
 
   if (startingUrls.length > 0) {
     const baseUrl = new URL(startingUrls[0]).origin
@@ -249,21 +252,24 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     // Log sitemap discovery results (only once after all attempts)
     const successfulSitemaps = sitemapAttempts.filter(a => a.success)
     const failedSitemaps = sitemapAttempts.filter(a => !a.success)
-    
+
     if (successfulSitemaps.length > 0) {
       // Found at least one sitemap
       const sitemapUrl = successfulSitemaps[0].url
       if (progress.sitemap.processed > 0) {
         p.note(`Found sitemap at ${sitemapUrl} with ${progress.sitemap.processed} URLs`, 'Sitemap Discovery')
-      } else {
+      }
+      else {
         p.note(`Found sitemap at ${sitemapUrl} but no URLs matched your search criteria`, 'Sitemap Discovery')
       }
-    } else if (failedSitemaps.length > 0) {
+    }
+    else if (failedSitemaps.length > 0) {
       // No sitemaps found, show consolidated message
       const firstAttempt = failedSitemaps[0]
       if (firstAttempt.error?.includes('404')) {
         p.note(`No sitemap found, using crawler to discover pages`, 'Sitemap Discovery')
-      } else {
+      }
+      else {
         p.note(`Could not access sitemap: ${firstAttempt.error}`, 'Sitemap Discovery')
       }
     }
@@ -394,7 +400,6 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       const normalizedUrl = request.loadedUrl.replace(/\/$/, '')
       const normalizedHomePageUrl = homePageUrl.replace(/\/$/, '')
       const isHomePage = normalizedUrl === normalizedHomePageUrl
-      
 
       if (shouldProcessMarkdown || isHomePage) {
         const result: CrawlResult = {
@@ -511,17 +516,18 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
       // Only include results that have actual content (exclude redirect pages)
       // Redirect pages typically only have frontmatter (---) or very minimal content
-      const contentResults = successfulResults.filter(result => {
-        if (!result.content) return false
+      const contentResults = successfulResults.filter((result) => {
+        if (!result.content)
+          return false
         const trimmedContent = result.content.trim()
         // Filter out pages that only have frontmatter or are too short
-        const contentWithoutFrontmatter = trimmedContent.replace(/^---\s*\n(.*\n)*?---\s*\n?/, '').trim()
+        const contentWithoutFrontmatter = trimmedContent.replace(/^---\s*\n(?:.*\n)*?---\s*/, '').trim()
         return contentWithoutFrontmatter.length > 10 // Must have at least some meaningful content
       })
 
       // Deduplicate results by URL (in case of redirects creating duplicates)
       const seenUrls = new Set<string>()
-      const deduplicatedResults = contentResults.filter(result => {
+      const deduplicatedResults = contentResults.filter((result) => {
         if (seenUrls.has(result.url)) {
           return false
         }

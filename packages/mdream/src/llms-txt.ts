@@ -182,16 +182,17 @@ function generateLlmsTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArt
     for (const file of files) {
       const desc = file.metadata?.description
       const descText = desc ? `: ${desc.substring(0, 100)}${desc.length > 100 ? '...' : ''}` : ''
-      
+
       // Use relative file paths for generated markdown files (from crawl), URLs for everything else
       if (file.filePath && options.outputDir && file.filePath.endsWith('.md')) {
         // Crawl context with generated markdown files - use relative file path
         const relativePath = relative(options.outputDir, file.filePath)
         content += `- [${file.title}](${relativePath})${descText}\n`
-      } else {
+      }
+      else {
         // CLI context or no markdown files - use URL
-        const url = file.url.startsWith('http://') || file.url.startsWith('https://') 
-          ? file.url 
+        const url = file.url.startsWith('http://') || file.url.startsWith('https://')
+          ? file.url
           : origin + file.url
         content += `- [${file.title}](${url})${descText}\n`
       }
@@ -225,15 +226,16 @@ function generateLlmsFullTxtContent(files: ProcessedFile[], options: Pick<LlmsTx
 
     for (const file of files) {
       // If file.url is already a full URL, use it directly; otherwise prepend origin
-      const url = file.url.startsWith('http://') || file.url.startsWith('https://') 
-        ? file.url 
+      const url = file.url.startsWith('http://') || file.url.startsWith('https://')
+        ? file.url
         : (origin ? origin + file.url : file.url)
       content += `## ${file.title}\n\n`
       content += `**URL:** ${url}\n`
       if (file.filePath && options.outputDir) {
         const relativePath = relative(options.outputDir, file.filePath)
         content += `**File:** ${relativePath}\n`
-      } else if (file.filePath) {
+      }
+      else if (file.filePath) {
         content += `**File:** ${file.filePath}\n`
       }
       content += `\n${file.content}\n\n---\n\n`
