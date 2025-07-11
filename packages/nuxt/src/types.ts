@@ -10,7 +10,12 @@ export interface ModuleOptions {
   /**
    * Options to pass to mdream htmlToMarkdown function
    */
-  mdreamOptions?: HTMLToMarkdownOptions
+  mdreamOptions?: HTMLToMarkdownOptions & {
+    /**
+     * Preset to apply to the htmlToMarkdown function
+     */
+    preset?: 'minimal'
+  }
 
   /**
    * Cache configuration
