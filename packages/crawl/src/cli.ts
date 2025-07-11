@@ -237,6 +237,7 @@ Options:
   --max-pages <number>        Maximum pages to crawl (default: unlimited)
   --crawl-delay <seconds>     Crawl delay in seconds
   --exclude <pattern>         Exclude URLs matching glob patterns (can be used multiple times)
+  -v, --verbose               Enable verbose logging
   -h, --help                  Show this help message
   --version                   Show version number
 
@@ -246,6 +247,7 @@ Examples:
   @mdream/crawl -u harlanzw.com --artifacts "llms.txt,markdown"
   @mdream/crawl --url https://docs.example.com --depth 2 --artifacts "llms-full.txt"
   @mdream/crawl -u example.com --exclude "*/admin/*" --exclude "*/api/*"
+  @mdream/crawl -u example.com --verbose
 `)
     process.exit(0)
   }
@@ -395,6 +397,9 @@ Examples:
 
   const patterns = [parsed]
 
+  // Check for verbose flag
+  const verbose = args.includes('--verbose') || args.includes('-v')
+
   return {
     urls: [url],
     outputDir: resolve(getArgValue('--output') || getArgValue('-o') || 'output'),
@@ -411,6 +416,7 @@ Examples:
     globPatterns: patterns,
     crawlDelay: crawlDelayStr ? Number.parseInt(crawlDelayStr) : undefined,
     exclude: excludePatterns.length > 0 ? excludePatterns : undefined,
+    verbose,
   }
 }
 
@@ -442,6 +448,7 @@ async function main() {
       `Depth: ${options.maxDepth}`,
       `Formats: ${formats.join(', ')}`,
       options.exclude && options.exclude.length > 0 && `Exclude: ${options.exclude.join(', ')}`,
+      options.verbose && `Verbose: Enabled`,
     ].filter(Boolean)
 
     p.note(summary.join('\n'), 'Configuration')
