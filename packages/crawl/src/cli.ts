@@ -122,6 +122,10 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
         ],
         initialValues: ['llms.txt', 'llms-full.txt', 'markdown'],
       }),
+      verbose: () => p.confirm({
+        message: 'Enable verbose logging?',
+        initialValue: false,
+      }),
     },
     {
       onCancel: () => {
