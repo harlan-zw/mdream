@@ -76,7 +76,7 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
   }
 
   // Set default output directory
-  const outputDir = '.'
+  const outputDir = 'output'
 
   // Crawler configuration
   const crawlerOptions = await p.group(
@@ -162,6 +162,7 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
     `Output formats: ${outputFormats.join(', ')}`,
     `Sitemap discovery: Automatic`,
     inferredOrigin && `Origin: ${inferredOrigin}`,
+    advancedOptions.verbose && `Verbose logging: Enabled`,
   ].filter(Boolean)
 
   p.note(summary.join('\n'), 'Crawl Configuration')
@@ -188,28 +189,23 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
     generateIndividualMd: advancedOptions.outputFormats.includes('markdown'),
     origin: inferredOrigin,
     globPatterns,
+    verbose: advancedOptions.verbose,
   }
 }
 
-async function showCrawlResults(successful: number, failed: number, outputDir: string, generatedFiles: string[], durationMinutes: number, remainingSeconds: number) {
+async function showCrawlResults(successful: number, failed: number, outputDir: string, generatedFiles: string[], durationSeconds: number) {
   const messages = []
 
-  if (successful > 0) {
-    const durationStr = durationMinutes > 0 ? `${durationMinutes}m ${remainingSeconds}s` : `${remainingSeconds}s`
-    messages.push(`✅ ${successful} pages processed in ${durationStr}`)
-  }
+  // Duration formatting with 1 decimal place
+  const durationStr = `${(durationSeconds).toFixed(1)}s`
 
-  if (failed > 0) {
-    messages.push(`❌ ${failed} pages failed`)
-  }
+  // Compact single line format
+  const stats = failed > 0 ? `${successful} pages, ${failed} failed` : `${successful} pages`
+  messages.push(`📄 ${stats} • ⏱️  ${durationStr}`)
+  messages.push(`📦 ${generatedFiles.join(', ')}`)
+  messages.push(`📁 ${outputDir}`)
 
-  if (generatedFiles.length > 0) {
-    messages.push(`📄 Generated: ${generatedFiles.join(', ')}`)
-  }
-
-  messages.push(`📁 Output: ${outputDir}`)
-
-  p.note(messages.join('\n'), 'Completed: Results')
+  p.note(messages.join('\n'), '✅ Complete')
 }
 
 function parseCliArgs(): CrawlOptions | null {
@@ -227,7 +223,7 @@ Usage:
 
 Options:
   -u, --url <url>              Website URL to crawl
-  -o, --output <dir>           Output directory (default: .)
+  -o, --output <dir>           Output directory (default: output)
   -d, --depth <number>         Crawl depth (default: 3)
   --driver <http|playwright>   Crawler driver (default: http)
   --artifacts <list>           Comma-separated list of artifacts: llms.txt,llms-full.txt,markdown (default: all)
@@ -517,9 +513,7 @@ async function main() {
 
   const endTime = Date.now()
   const durationMs = endTime - startTime
-  const durationSeconds = Math.floor(durationMs / 1000)
-  const durationMinutes = Math.floor(durationSeconds / 60)
-  const remainingSeconds = durationSeconds % 60
+  const durationSeconds = durationMs / 1000
 
   const successful = results.filter(r => r.success).length
   const failed = results.filter(r => !r.success).length
@@ -552,28 +546,11 @@ async function main() {
 
   // Only show interactive results for interactive mode
   if (!cliOptions) {
-    await showCrawlResults(successful, failed, options.outputDir, generatedFiles, durationMinutes, remainingSeconds)
+    await showCrawlResults(successful, failed, options.outputDir, generatedFiles, durationSeconds)
   }
   else {
-    // Simple output for CLI mode
-    const messages = []
-
-    if (successful > 0) {
-      const durationStr = durationMinutes > 0 ? `${durationMinutes}m ${remainingSeconds}s` : `${remainingSeconds}s`
-      messages.push(`✅ ${successful} pages processed in ${durationStr}`)
-    }
-
-    if (failed > 0) {
-      messages.push(`❌ ${failed} pages failed`)
-    }
-
-    if (generatedFiles.length > 0) {
-      messages.push(`📄 Generated: ${generatedFiles.join(', ')}`)
-    }
-
-    messages.push(`📁 Output: ${options.outputDir}`)
-
-    p.note(messages.join('\n'), 'Completed: Results')
+    // Use same format for CLI mode
+    await showCrawlResults(successful, failed, options.outputDir, generatedFiles, durationSeconds)
 
     if (successful === 0) {
       process.exit(1)

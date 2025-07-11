@@ -15,6 +15,7 @@ export interface CrawlOptions {
   exclude?: string[]
   siteNameOverride?: string
   descriptionOverride?: string
+  verbose?: boolean
 }
 
 export interface ParsedUrlPattern {

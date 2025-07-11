@@ -12,6 +12,7 @@ export interface LlmsTxtArtifactsOptions {
   origin?: string
   generateFull?: boolean
   generateMarkdown?: boolean
+  outputDir?: string
 }
 
 export interface ProcessedFile {
@@ -166,7 +167,7 @@ async function processHtmlFiles(patterns: string | string[], origin?: string): P
 /**
  * Generate llms.txt content
  */
-function generateLlmsTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArtifactsOptions, 'siteName' | 'description' | 'origin'>): string {
+function generateLlmsTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArtifactsOptions, 'siteName' | 'description' | 'origin' | 'outputDir'>): string {
   const { siteName = 'Site', description, origin = '' } = options
 
   let content = `# ${siteName}\n\n`
@@ -179,11 +180,21 @@ function generateLlmsTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArt
     content += `## Pages\n\n`
 
     for (const file of files) {
-      const url = origin + file.url
       const desc = file.metadata?.description
       const descText = desc ? `: ${desc.substring(0, 100)}${desc.length > 100 ? '...' : ''}` : ''
-
-      content += `- [${file.title}](${url})${descText}\n`
+      
+      // Use relative file paths for generated markdown files (from crawl), URLs for everything else
+      if (file.filePath && options.outputDir && file.filePath.endsWith('.md')) {
+        // Crawl context with generated markdown files - use relative file path
+        const relativePath = relative(options.outputDir, file.filePath)
+        content += `- [${file.title}](${relativePath})${descText}\n`
+      } else {
+        // CLI context or no markdown files - use URL
+        const url = file.url.startsWith('http://') || file.url.startsWith('https://') 
+          ? file.url 
+          : origin + file.url
+        content += `- [${file.title}](${url})${descText}\n`
+      }
     }
   }
 
@@ -193,7 +204,7 @@ function generateLlmsTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArt
 /**
  * Generate llms-full.txt content with complete page content
  */
-function generateLlmsFullTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArtifactsOptions, 'siteName' | 'description' | 'origin'>): string {
+function generateLlmsFullTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArtifactsOptions, 'siteName' | 'description' | 'origin' | 'outputDir'>): string {
   const { siteName = 'Site', description, origin = '' } = options
 
   let content = `# ${siteName}\n\n`
@@ -213,10 +224,19 @@ function generateLlmsFullTxtContent(files: ProcessedFile[], options: Pick<LlmsTx
     content += `\n---\n\n`
 
     for (const file of files) {
-      const url = origin ? origin + file.url : file.url
+      // If file.url is already a full URL, use it directly; otherwise prepend origin
+      const url = file.url.startsWith('http://') || file.url.startsWith('https://') 
+        ? file.url 
+        : (origin ? origin + file.url : file.url)
       content += `## ${file.title}\n\n`
-      content += `**URL:** ${url}\n\n`
-      content += `${file.content}\n\n---\n\n`
+      content += `**URL:** ${url}\n`
+      if (file.filePath && options.outputDir) {
+        const relativePath = relative(options.outputDir, file.filePath)
+        content += `**File:** ${relativePath}\n`
+      } else if (file.filePath) {
+        content += `**File:** ${file.filePath}\n`
+      }
+      content += `\n${file.content}\n\n---\n\n`
     }
   }
 
