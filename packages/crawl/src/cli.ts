@@ -397,7 +397,7 @@ Examples:
 
   return {
     urls: [url],
-    outputDir: resolve(getArgValue('--output') || getArgValue('-o') || '.'),
+    outputDir: resolve(getArgValue('--output') || getArgValue('-o') || 'output'),
     driver: (driver as 'http' | 'playwright') || 'http',
     maxRequestsPerCrawl: Number.parseInt(maxPagesStr || String(Number.MAX_SAFE_INTEGER)),
     followLinks: true,
