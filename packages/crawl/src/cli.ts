@@ -18,7 +18,7 @@ const version = packageJson.version
 async function interactiveCrawl(): Promise<CrawlOptions | null> {
   console.clear()
 
-  p.intro('☁️  @mdream/crawl')
+  p.intro(`☁️  @mdream/crawl v${version}`)
 
   // Get URLs
   const urlsInput = await p.text({
