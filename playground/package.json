@@ -23,7 +23,7 @@
     "@iconify-json/vscode-icons": "^1.2.23",
     "@inspira-ui/plugins": "^0.0.1",
     "@nuxt/content": "3.5.1",
-    "@nuxt/devtools": "2.4.0",
+    "@nuxt/devtools": "2.6.2",
     "@nuxt/fonts": "^0.11.4",
     "@nuxt/image": "^1.10.0",
     "@nuxt/scripts": "^0.11.9",
