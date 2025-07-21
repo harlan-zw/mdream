@@ -1,54 +1,57 @@
+import type { R2Client } from './r2-storage.ts'
 import type { LlmsRepository } from './repository.ts'
 import type { Artifact, CrawledPage, LlmsEntry, NewArtifact, NewCrawledPage, NewLlmsEntry } from './schema.ts'
 import type { CreateEntryOptions, DatabaseOptions } from './types.ts'
-import { mkdir } from 'node:fs/promises'
 import { mkdirSync } from 'node:fs'
-import Database from 'better-sqlite3'
+import { mkdir } from 'node:fs/promises'
 import { createClient } from '@libsql/client'
+import Database from 'better-sqlite3'
 import { desc, eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { drizzle as drizzleLibsql } from 'drizzle-orm/libsql'
 import { dirname, join } from 'pathe'
+import { createR2Client } from './r2-storage.ts'
 import { artifacts, crawledPages, llmsEntries } from './schema.ts'
-import { createR2Client, type R2Client } from './r2-storage.ts'
 
 export function createDrizzleLlmsRepository(options: DatabaseOptions = {}): LlmsRepository {
   const isProduction = options.production || process.env.NODE_ENV === 'production'
-  
+
   let sqlite: Database.Database | undefined
   let libsqlClient: ReturnType<typeof createClient> | undefined
   let db: ReturnType<typeof drizzle> | ReturnType<typeof drizzleLibsql>
   let r2Client: R2Client | undefined
-  
+
   // Initialize R2 client for production
   if (isProduction) {
     try {
       r2Client = createR2Client()
       console.log('R2 client initialized for production artifact storage')
-    } catch (error) {
+    }
+    catch (error) {
       console.warn('R2 client initialization failed, falling back to local storage:', error)
     }
   }
-  
+
   if (isProduction) {
     // Use libsql for production
     const url = options.databaseUrl || process.env.TURSO_DATABASE_URL || 'libsql://mdream-production-harlan-zw.aws-ap-northeast-1.turso.io'
     const authToken = options.authToken || process.env.TURSO_AUTH_TOKEN
-    
+
     if (!authToken) {
       throw new Error('TURSO_AUTH_TOKEN is required for production database')
     }
-    
+
     libsqlClient = createClient({
       url,
       authToken,
     })
-    
+
     db = drizzleLibsql(libsqlClient)
-  } else {
+  }
+  else {
     // Use better-sqlite3 for local development
     const dbPath = options.dbPath || join(process.cwd(), '.mdream', 'llms.db')
-    
+
     // Ensure directory exists before creating database
     mkdirSync(dirname(dbPath), { recursive: true })
 
@@ -61,8 +64,9 @@ export function createDrizzleLlmsRepository(options: DatabaseOptions = {}): Llms
   }
 
   function initializeSchema() {
-    if (!sqlite) return // Skip for production libsql
-    
+    if (!sqlite)
+      return // Skip for production libsql
+
     // Create tables using direct SQL for initial setup (local development only)
     sqlite.exec(`
       CREATE TABLE IF NOT EXISTS llms_entries (
@@ -185,12 +189,13 @@ export function createDrizzleLlmsRepository(options: DatabaseOptions = {}): Llms
       if (!r2Client) {
         return null
       }
-      
+
       try {
         const publicUrl = await r2Client.uploadArtifact(entryName, fileName, data)
         console.log(`Uploaded ${fileName} to R2: ${publicUrl}`)
         return publicUrl
-      } catch (error) {
+      }
+      catch (error) {
         console.error(`Failed to upload ${fileName} to R2:`, error)
         return null
       }
@@ -260,7 +265,7 @@ export function createDrizzleLlmsRepository(options: DatabaseOptions = {}): Llms
       checksum?: string,
     ): Promise<void> {
       let finalFilePath = filePath
-      
+
       // If R2 is available and we're in production, upload to R2
       if (r2Client && isProduction) {
         const entry = await this.getEntry(entryId)
@@ -272,7 +277,7 @@ export function createDrizzleLlmsRepository(options: DatabaseOptions = {}): Llms
           }
         }
       }
-      
+
       const artifact: NewArtifact = {
         entryId,
         type,
@@ -327,7 +332,7 @@ export function createDrizzleLlmsRepository(options: DatabaseOptions = {}): Llms
         libsqlClient.close()
       }
       // R2 client doesn't need explicit closing
-    }
+    },
   }
 }
 

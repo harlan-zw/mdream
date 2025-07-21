@@ -55,19 +55,20 @@ async function crawlUrl(options: CrawlOptions & { local?: boolean }) {
     const entryName = options.name || new URL(normalizedUrl).hostname.replace(/^www\./, '')
 
     // Check if entry already exists by URL (dedupe by URL, not name)
-    let existingEntry = await repository.getEntryByUrl(normalizedUrl)
+    const existingEntry = await repository.getEntryByUrl(normalizedUrl)
     let entry
-    
+
     if (existingEntry) {
       p.log.info(`Entry for URL "${normalizedUrl}" already exists (name: "${existingEntry.name}"), updating...`)
       entry = existingEntry
-      
+
       // Update entry with new options if provided
       if (options.description || options.depth || options.maxPages || options.exclude) {
         // Update logic could be added here if needed
         p.log.info('Using existing entry configuration')
       }
-    } else {
+    }
+    else {
       // Create database entry
       const createOptions: CreateEntryOptions = {
         name: entryName,
@@ -85,7 +86,7 @@ async function crawlUrl(options: CrawlOptions & { local?: boolean }) {
 
     // Always crawl
     await crawlEntry(repository, entry.id, options.output)
-    
+
     // Always generate llms.txt after crawling
     await generateLlmsTxtFromDb(repository)
   }
@@ -308,7 +309,7 @@ async function removeEntry(nameOrId: string, force: boolean = false) {
 
 async function main() {
   const args = process.argv.slice(2)
-  
+
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     p.intro('📚 mdream-db - LLMs.txt Database Management')
     console.log('Commands:')
@@ -329,14 +330,14 @@ async function main() {
     console.log('  --version, -v   Show version')
     return
   }
-  
+
   if (args.includes('--version') || args.includes('-v')) {
     console.log(`mdream-db v${version}`)
     return
   }
-  
+
   const [command, ...commandArgs] = args
-  
+
   try {
     switch (command) {
       case 'run': {
@@ -344,61 +345,66 @@ async function main() {
           p.log.error('URL is required for run command')
           process.exit(1)
         }
-        
+
         const [url] = commandArgs
-        
+
         // Parse command line options
         const options: CrawlOptions = { url }
-        
+
         // Parse flags
         for (let i = 1; i < commandArgs.length; i++) {
           const arg = commandArgs[i]
           if (arg === '--name' && i + 1 < commandArgs.length) {
             options.name = commandArgs[i + 1]
             i++
-          } else if (arg === '--description' && i + 1 < commandArgs.length) {
+          }
+          else if (arg === '--description' && i + 1 < commandArgs.length) {
             options.description = commandArgs[i + 1]
             i++
-          } else if (arg === '--depth' && i + 1 < commandArgs.length) {
+          }
+          else if (arg === '--depth' && i + 1 < commandArgs.length) {
             options.depth = Number.parseInt(commandArgs[i + 1])
             i++
-          } else if (arg === '--max-pages' && i + 1 < commandArgs.length) {
+          }
+          else if (arg === '--max-pages' && i + 1 < commandArgs.length) {
             options.maxPages = Number.parseInt(commandArgs[i + 1])
             i++
-          } else if (arg === '--output' && i + 1 < commandArgs.length) {
+          }
+          else if (arg === '--output' && i + 1 < commandArgs.length) {
             options.output = commandArgs[i + 1]
             i++
-          } else if (arg === '--local') {
+          }
+          else if (arg === '--local') {
             options.local = true
           }
         }
-        
+
         // No interactive prompts - use defaults for missing options
-        
+
         await crawlUrl(options)
         break
       }
-      
+
       case 'recrawl': {
         if (commandArgs.length === 0) {
           p.log.error('Entry ID or name is required for recrawl command')
           process.exit(1)
         }
-        
+
         const [idOrName] = commandArgs
         const entryId = Number.parseInt(idOrName)
-        
+
         if (Number.isNaN(entryId)) {
           // Try to find by name
           const repository = createRepositoryWithAutoDetection()
           try {
             const entry = await repository.getEntryByName(idOrName)
-            
+
             if (!entry) {
               p.log.error(`Entry "${idOrName}" not found`)
               process.exit(1)
             }
-            
+
             await crawlEntry(repository, entry.id)
             await generateLlmsTxtFromDb(repository)
           }
@@ -418,30 +424,30 @@ async function main() {
         }
         break
       }
-      
+
       case 'list': {
         await listEntries()
         break
       }
-      
+
       case 'generate': {
         const output = commandArgs[0]
         await generateLlmsTxt(output)
         break
       }
-      
+
       case 'remove': {
         if (commandArgs.length === 0) {
           p.log.error('Entry ID or name is required for remove command')
           process.exit(1)
         }
-        
+
         const [nameOrId] = commandArgs
         const force = commandArgs.includes('--force')
         await removeEntry(nameOrId, force)
         break
       }
-      
+
       default:
         p.log.error(`Unknown command: ${command}`)
         p.log.info('Use --help to see available commands')
@@ -453,7 +459,7 @@ async function main() {
       p.cancel('Operation cancelled')
       process.exit(0)
     }
-    
+
     p.log.error(`Error: ${error}`)
     process.exit(1)
   }

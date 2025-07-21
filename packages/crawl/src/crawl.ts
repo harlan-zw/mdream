@@ -27,7 +27,8 @@ async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> 
   let match
   while (true) {
     match = urlRegex.exec(xmlContent)
-    if (match === null) break
+    if (match === null)
+      break
     urls.push(match[1])
   }
 

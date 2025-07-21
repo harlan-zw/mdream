@@ -115,9 +115,9 @@ const repository = createRepository({ dbPath: './my-database.db' })
 
 // Production LibSQL database (using environment variables)
 // Automatically initializes R2 storage if credentials are available
-const prodRepository = createRepository({ 
+const prodRepository = createRepository({
   production: true,
-  authToken: process.env.TURSO_AUTH_TOKEN 
+  authToken: process.env.TURSO_AUTH_TOKEN
 })
 
 // Production LibSQL database (with explicit configuration)
@@ -162,8 +162,8 @@ repository.close()
 ```typescript
 import { createStorageRepository } from '@mdream/llms-db'
 
-const repository = createStorageRepository({ 
-  dbPath: './my-storage' 
+const repository = createStorageRepository({
+  dbPath: './my-storage'
 })
 
 // Same API as drizzle repository
@@ -217,7 +217,7 @@ repository.close()
    # Database Configuration
    TURSO_DATABASE_URL=libsql://your-database.turso.io
    TURSO_AUTH_TOKEN=your_actual_token_here
-   
+
    # R2 Storage Configuration (Production)
    R2_ACCESS_KEY_ID=your_access_key_id
    R2_SECRET_ACCESS_KEY=your_secret_access_key
@@ -231,7 +231,7 @@ repository.close()
    ```bash
    # Database operations
    node --env-file=.env ./dist/cli.mjs
-   
+
    # Drizzle commands
    pnpm db:generate  # Uses --env-file automatically
    pnpm db:migrate   # Uses --env-file automatically

@@ -1,8 +1,8 @@
 import type { ModuleOptions, ModuleRuntimeConfig } from './types.js'
+import { relative, resolve } from 'node:path'
 import { addServerHandler, addTypeTemplate, createResolver, defineNuxtModule } from '@nuxt/kit'
 import { defu } from 'defu'
 import { installNuxtSiteConfig } from 'nuxt-site-config/kit'
-import { relative, resolve } from 'node:path'
 import { name, version } from '../package.json'
 import { setupPrerenderHandler } from './prerender.js'
 
