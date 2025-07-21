@@ -1,7 +1,7 @@
 {
   "name": "mdream",
   "type": "module",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Ultra-performant HTML to Markdown Convertor Optimized for LLMs and llm.txt artifacts.",
   "author": {
     "name": "Harlan Wilton",
