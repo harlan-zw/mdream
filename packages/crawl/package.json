@@ -57,9 +57,9 @@
     "mdream": "workspace:*",
     "nypm": "^0.6.0",
     "pathe": "^2.0.3",
-    "picomatch": "^4.0.2"
+    "picomatch": "^4.0.3"
   },
   "devDependencies": {
-    "@types/picomatch": "^4.0.0"
+    "@types/picomatch": "^4.0.1"
   }
 }

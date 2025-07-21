@@ -10,6 +10,6 @@
   },
   "dependencies": {
     "@mdream/nuxt": "workspace:*",
-    "nuxt": "^3.17.6"
+    "nuxt": "^4.0.0"
   }
 }

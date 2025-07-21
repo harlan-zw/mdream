@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.mdream/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+.env

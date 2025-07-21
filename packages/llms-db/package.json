@@ -1,0 +1,49 @@
+{
+  "name": "@mdream/llms-db",
+  "type": "module",
+  "version": "0.1.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.mjs"
+    }
+  },
+  "bin": {
+    "mdream-db": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "unbuild",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:attw": "attw --pack .",
+    "run": "node --env-file=.env ./dist/cli.mjs run",
+    "db:generate": "node --env-file=.env drizzle-kit generate",
+    "db:migrate": "node --env-file=.env drizzle-kit migrate",
+    "db:studio": "node --env-file=.env drizzle-kit studio"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.848.0",
+    "@clack/prompts": "^0.11.0",
+    "@libsql/client": "^0.15.10",
+    "@mdream/crawl": "workspace:*",
+    "better-sqlite3": "^12.2.0",
+    "drizzle-orm": "^0.44.3",
+    "pathe": "^2.0.3",
+    "ufo": "^1.6.1",
+    "unstorage": "^1.16.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "drizzle-kit": "^0.31.4",
+    "typescript": "5.8.3",
+    "unbuild": "^3.5.0",
+    "vitest": "^3.2.4"
+  }
+}
