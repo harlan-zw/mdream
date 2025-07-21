@@ -12,7 +12,7 @@ export default defineNuxtModule<ModuleOptions>({
     version,
     configKey: 'mdream',
     compatibility: {
-      nuxt: '^3.0.0',
+      nuxt: '>=3.0.0',
     },
   },
   defaults: {
