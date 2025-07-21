@@ -16,7 +16,7 @@ const logger = consola.withTag('nuxt-mdream')
 function isIndexable(html: string): boolean {
   const robotsMatch = html.match(/<meta\s+name=["']robots["']\s+content=["']([^"']+)["']/i)
   if (robotsMatch) {
-    const content = robotsMatch[1].toLowerCase()
+    const content = String(robotsMatch[1]).toLowerCase()
     return !content.includes('noindex')
   }
   return true
@@ -53,7 +53,7 @@ export function setupPrerenderHandler(config: ModuleRuntimeConfig, nuxt: Nuxt = 
 
         // Extract title from HTML
         const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i)
-        const title = titleMatch ? titleMatch[1].trim() : route.route
+        const title = titleMatch ? String(titleMatch[1]).trim() : route.route
 
         // Store page data for llms.txt generation
         pages.push({

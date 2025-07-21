@@ -12,7 +12,7 @@ const logger = consola.withTag('nuxt-mdream')
 function isIndexable(html: string): boolean {
   const robotsMatch = html.match(/<meta\s+name=["']robots["']\s+content=["']([^"']+)["']/i)
   if (robotsMatch) {
-    const content = robotsMatch[1].toLowerCase()
+    const content = String(robotsMatch[1]).toLowerCase()
     return !content.includes('noindex')
   }
   return true // Default to indexable if no robots meta tag
@@ -107,7 +107,7 @@ export default defineEventHandler(async (event) => {
 
     // Extract title from HTML
     const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i)
-    const title = titleMatch ? titleMatch[1].trim() : htmlPath
+    const title = titleMatch ? String(titleMatch[1]).trim() : htmlPath
 
     // Convert to markdown
     const markdown = await convertHtmlToMarkdown(
