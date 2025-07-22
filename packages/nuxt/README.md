@@ -15,11 +15,11 @@ Mdream provides a Nuxt module that enables seamless HTML to Markdown conversion 
 ### Installation
 
 ```bash
-npm install @mdream/nuxt mdream
+npm install @mdream/nuxt
 # or
-pnpm add @mdream/nuxt mdream
+pnpm add @mdream/nuxt
 # or
-yarn add @mdream/nuxt mdream
+yarn add @mdream/nuxt
 ```
 
 ### Usage
