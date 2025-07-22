@@ -1,25 +1,16 @@
 import type { HTMLToMarkdownOptions } from 'mdream'
-import type { MdreamMarkdownContext, ModuleRuntimeConfig } from '../../../types.js'
+import type { MdreamMarkdownContext, ModuleRuntimeConfig } from '../../../types'
 import { consola } from 'consola'
 import { createError, defineEventHandler, getRequestURL, setHeader } from 'h3'
 import { htmlToMarkdown } from 'mdream'
+import { extractionPlugin } from 'mdream/plugins'
 import { withMinimalPreset } from 'mdream/preset/minimal'
 import { useNitroApp, useRuntimeConfig } from 'nitropack/runtime'
 
 const logger = consola.withTag('nuxt-mdream')
 
-// Check if HTML contains noindex robots meta tag
-function isIndexable(html: string): boolean {
-  const robotsMatch = html.match(/<meta\s+name=["']robots["']\s+content=["']([^"']+)["']/i)
-  if (robotsMatch) {
-    const content = String(robotsMatch[1]).toLowerCase()
-    return !content.includes('noindex')
-  }
-  return true // Default to indexable if no robots meta tag
-}
-
 // Convert HTML to Markdown
-async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRuntimeConfig, route: string, title: string) {
+async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRuntimeConfig, route: string) {
   let options: HTMLToMarkdownOptions = {
     origin: url,
     ...config.mdreamOptions,
@@ -30,7 +21,19 @@ async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRu
     options = withMinimalPreset(options)
   }
 
-  let markdown = htmlToMarkdown(html, options)
+  let title = ''
+  let markdown = htmlToMarkdown(html, {
+    ...options,
+    plugins: [
+      ...(options.plugins || []),
+      // Add any additional plugins here if needed
+      extractionPlugin({
+        title(html) {
+          title = html.textContent
+        },
+      }),
+    ],
+  })
 
   // Create hook context
   const context: MdreamMarkdownContext = {
@@ -38,20 +41,14 @@ async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRu
     markdown,
     route,
     title,
-    isPrerender: false,
+    isPrerender: Boolean(import.meta.prerender),
   }
 
   // Call Nitro runtime hook if available
-  try {
-    const nitroApp = useNitroApp()
-    if (nitroApp?.hooks) {
-      await nitroApp.hooks.callHook('mdream:markdown', context)
-      markdown = context.markdown // Use potentially modified markdown
-    }
-  }
-  catch (error) {
-    // Hooks might not be available in all contexts
-    logger.debug('Could not call mdream:markdown hook:', error)
+  const nitroApp = useNitroApp()
+  if (nitroApp?.hooks) {
+    await nitroApp.hooks.callHook('mdream:markdown', context)
+    markdown = context.markdown // Use potentially modified markdown
   }
 
   return markdown
@@ -80,13 +77,7 @@ export default defineEventHandler(async (event) => {
     const fullUrl = new URL(htmlPath, requestUrl.origin).toString()
 
     // Fetch the HTML page
-    const response = await fetch(fullUrl, {
-      headers: {
-        // Forward important headers
-        'user-agent': event.headers.get('user-agent') || '',
-        'accept-language': event.headers.get('accept-language') || '',
-      },
-    })
+    const response = await event.fetch(fullUrl)
 
     if (!response.ok) {
       throw createError({
@@ -97,30 +88,16 @@ export default defineEventHandler(async (event) => {
 
     const html = await response.text()
 
-    // Check if page is indexable
-    if (!isIndexable(html)) {
-      throw createError({
-        statusCode: 404,
-        statusMessage: 'Page not indexable',
-      })
-    }
-
-    // Extract title from HTML
-    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i)
-    const title = titleMatch ? String(titleMatch[1]).trim() : htmlPath
-
     // Convert to markdown
     const markdown = await convertHtmlToMarkdown(
       html,
       requestUrl.origin + htmlPath,
       config,
       htmlPath,
-      title,
     )
 
     // Set appropriate headers and return markdown
     setHeader(event, 'content-type', 'text/markdown; charset=utf-8')
-
     return markdown
   }
   catch (error: any) {
