@@ -1,16 +1,18 @@
-import type { HttpCrawlerOptions, PlaywrightCrawlerOptions } from 'crawlee'
+import type { PuppeteerPlugin } from '@crawlee/browser-pool'
+import type { HttpCrawlerOptions, PuppeteerCrawlerOptions } from 'crawlee'
 import type { ProcessedFile } from 'mdream'
 import type { CrawlOptions, CrawlResult } from './types.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import * as p from '@clack/prompts'
-import { HttpCrawler, log, PlaywrightCrawler, purgeDefaultStorages } from 'crawlee'
+import { HttpCrawler, log, PuppeteerCrawler, purgeDefaultStorages } from 'crawlee'
 import { generateLlmsTxtArtifacts, htmlToMarkdown } from 'mdream'
 import { withMinimalPreset } from 'mdream/preset/minimal'
 import { dirname, join, normalize, resolve } from 'pathe'
 import { withHttps } from 'ufo'
 import { getStartingUrl, isUrlExcluded, matchesGlobPattern, parseUrlPattern } from './glob-utils.ts'
 import { extractMetadata } from './metadata-extractor.ts'
+import { resolveChromeExecutable } from './puppeteer-utils.ts'
 
 // Helper function to load sitemap with no retries using direct fetch
 async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> {
@@ -315,7 +317,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   }
 
   // Create request handler that works for both crawlers
-  const createRequestHandler = (crawlerType: 'http' | 'playwright') => {
+  const createRequestHandler = (crawlerType: 'http' | 'puppeteer') => {
     return async ({ request, body, page, enqueueLinks, response }: any) => {
       const startTime = Date.now()
 
@@ -334,11 +336,10 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       let html: string
       let title: string
 
-      if (crawlerType === 'playwright') {
-        // Playwright crawler
-        await page.waitForLoadState('networkidle')
+      if (crawlerType === 'puppeteer') {
+        // Puppeteer crawler - page is already loaded when request handler is called
         title = await page.title()
-        html = await page.innerHTML('html')
+        html = await page.content()
       }
       else {
         // HTTP crawler
@@ -449,30 +450,64 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   }
 
   // Create appropriate crawler with crawl delay if specified
-  let crawler: HttpCrawler<any> | any // PlaywrightCrawler type will be determined at runtime
-  const crawlerOptions: PlaywrightCrawlerOptions | HttpCrawlerOptions = {
-    requestHandler: createRequestHandler(driver),
-    errorHandler: async ({ request, response }: any) => {
-      // Handle 4xx and 5xx status codes for HTTP crawler only (skip everything except timeouts)
-      if (response?.statusCode && response?.statusCode >= 400) {
-        request.noRetry = true
-      }
-    },
-    maxRequestsPerCrawl,
-    respectRobotsTxtFile: true,
-  }
+  let crawler: HttpCrawler<any> | any // PuppeteerCrawler type will be determined at runtime
 
-  // Add crawl delay if specified
-  if (crawlDelay) {
-    crawlerOptions.requestHandlerTimeoutSecs = crawlDelay
-  }
+  if (driver === 'puppeteer') {
+    const launchOptions: PuppeteerPlugin['launchOptions'] = {}
 
-  if (driver === 'playwright') {
-    // PlaywrightCrawler - installation check should happen in CLI layer
-    crawler = new PlaywrightCrawler(crawlerOptions as PlaywrightCrawlerOptions)
+    const chromePath = await resolveChromeExecutable({
+      useSystem: true,
+      useDownloadFallback: true,
+      downloadFallbackCacheDir: undefined,
+      downloadFallbackVersion: undefined,
+    })
+
+    if (chromePath) {
+      launchOptions.executablePath = chromePath
+    }
+
+    const puppeteerOptions: PuppeteerCrawlerOptions = {
+      requestHandler: createRequestHandler(driver),
+      errorHandler: async ({ request, response }: any) => {
+        // Handle 4xx and 5xx status codes for HTTP crawler only (skip everything except timeouts)
+        if (response?.statusCode && response?.statusCode >= 400) {
+          request.noRetry = true
+        }
+      },
+      maxRequestsPerCrawl,
+      respectRobotsTxtFile: true,
+      launchContext: {
+        launchOptions,
+      },
+    }
+
+    // Add crawl delay if specified
+    if (crawlDelay) {
+      puppeteerOptions.requestHandlerTimeoutSecs = crawlDelay
+    }
+
+    // PuppeteerCrawler will use the available puppeteer instance
+    crawler = new PuppeteerCrawler(puppeteerOptions)
   }
   else {
-    crawler = new HttpCrawler(crawlerOptions as HttpCrawlerOptions)
+    const httpOptions: HttpCrawlerOptions = {
+      requestHandler: createRequestHandler(driver),
+      errorHandler: async ({ request, response }: any) => {
+        // Handle 4xx and 5xx status codes for HTTP crawler only (skip everything except timeouts)
+        if (response?.statusCode && response?.statusCode >= 400) {
+          request.noRetry = true
+        }
+      },
+      maxRequestsPerCrawl,
+      respectRobotsTxtFile: true,
+    }
+
+    // Add crawl delay if specified
+    if (crawlDelay) {
+      httpOptions.requestHandlerTimeoutSecs = crawlDelay
+    }
+
+    crawler = new HttpCrawler(httpOptions)
   }
 
   // Start crawling with initial URLs (use starting URLs for glob patterns)

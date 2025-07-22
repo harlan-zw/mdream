@@ -44,20 +44,24 @@
     "test:attw": "attw --pack"
   },
   "peerDependencies": {
-    "playwright": "^1.53.2"
+    "puppeteer": "^23.0.0"
   },
   "peerDependenciesMeta": {
-    "playwright": {
+    "puppeteer": {
       "optional": true
     }
   },
   "dependencies": {
     "@clack/prompts": "^0.11.0",
+    "@puppeteer/browsers": "^2.10.6",
+    "chrome-launcher": "^1.2.0",
     "crawlee": "^3.13.10",
     "mdream": "workspace:*",
+    "mlly": "^1.7.4",
     "nypm": "^0.6.0",
     "pathe": "^2.0.3",
-    "picomatch": "^4.0.3"
+    "picomatch": "^4.0.3",
+    "puppeteer-core": "^24.14.0"
   },
   "devDependencies": {
     "@types/picomatch": "^4.0.1"

@@ -7,7 +7,6 @@ import { dirname, join, resolve } from 'pathe'
 import { withHttps } from 'ufo'
 import { crawlAndGenerate } from './crawl.ts'
 import { parseUrlPattern, validateGlobPattern } from './glob-utils.ts'
-import { ensurePlaywrightInstalled } from './playwright-utils.ts'
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -85,7 +84,7 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
         message: 'Select crawler driver:',
         options: [
           { value: 'http', label: 'HTTP Crawler (Fast, for static content)', hint: 'Recommended' },
-          { value: 'playwright', label: 'Playwright (Slower, supports JavaScript)' },
+          { value: 'puppeteer', label: 'Puppeteer (Slower, supports JavaScript)' },
         ],
         initialValue: 'http',
       }),
@@ -184,7 +183,7 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
   return {
     urls,
     outputDir: resolve(outputDir),
-    driver: crawlerOptions.driver as 'http' | 'playwright',
+    driver: crawlerOptions.driver as 'http' | 'puppeteer',
     maxRequestsPerCrawl: Number.MAX_SAFE_INTEGER, // Unlimited pages
     followLinks: true, // Always follow links
     maxDepth: Number.parseInt(crawlerOptions.maxDepth),
@@ -229,7 +228,7 @@ Options:
   -u, --url <url>              Website URL to crawl
   -o, --output <dir>           Output directory (default: output)
   -d, --depth <number>         Crawl depth (default: 3)
-  --driver <http|playwright>   Crawler driver (default: http)
+  --driver <http|puppeteer>   Crawler driver (default: http)
   --artifacts <list>           Comma-separated list of artifacts: llms.txt,llms-full.txt,markdown (default: all)
   --origin <url>               Origin URL for resolving relative paths (overrides auto-detection)
   --site-name <name>           Override site name (overrides auto-extracted title)
@@ -339,8 +338,8 @@ Examples:
 
   // Validate driver
   const driver = getArgValue('--driver')
-  if (driver && driver !== 'http' && driver !== 'playwright') {
-    p.log.error('Error: Driver must be either "http" or "playwright"')
+  if (driver && driver !== 'http' && driver !== 'puppeteer') {
+    p.log.error('Error: Driver must be either "http" or "puppeteer"')
     process.exit(1)
   }
 
@@ -403,7 +402,7 @@ Examples:
   return {
     urls: [url],
     outputDir: resolve(getArgValue('--output') || getArgValue('-o') || 'output'),
-    driver: (driver as 'http' | 'playwright') || 'http',
+    driver: (driver as 'http' | 'puppeteer') || 'http',
     maxRequestsPerCrawl: Number.parseInt(maxPagesStr || String(Number.MAX_SAFE_INTEGER)),
     followLinks: true,
     maxDepth: depth,
@@ -460,15 +459,6 @@ async function main() {
 
   if (!options) {
     process.exit(0)
-  }
-
-  // Check playwright installation if needed
-  if (options.driver === 'playwright') {
-    const playwrightInstalled = await ensurePlaywrightInstalled()
-    if (!playwrightInstalled) {
-      p.log.error('Cannot proceed without Playwright. Please install it manually or use the HTTP driver instead.')
-      process.exit(1)
-    }
   }
 
   const s = p.spinner()

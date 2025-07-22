@@ -7,7 +7,7 @@ export interface CrawlOptions {
   generateIndividualMd?: boolean
   origin?: string
   chunkSize?: number
-  driver?: 'http' | 'playwright'
+  driver?: 'http' | 'puppeteer'
   followLinks?: boolean
   maxDepth?: number
   globPatterns?: ParsedUrlPattern[]
