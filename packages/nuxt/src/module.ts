@@ -1,6 +1,6 @@
 import type { ModuleOptions, ModuleRuntimeConfig } from './types.js'
 import { relative, resolve } from 'node:path'
-import { addServerHandler, addTypeTemplate, createResolver, defineNuxtModule } from '@nuxt/kit'
+import { addPlugin, addServerHandler, addTypeTemplate, createResolver, defineNuxtModule } from '@nuxt/kit'
 import { defu } from 'defu'
 import { installNuxtSiteConfig } from 'nuxt-site-config/kit'
 import { name, version } from '../package.json'
@@ -95,6 +95,10 @@ export {}
       middleware: true,
       handler: resolver.resolve('./runtime/server/middleware/mdream'),
     })
+
+    if (nuxt.options.build) {
+      addPlugin({ mode: 'server', src: resolver.resolve('./runtime/nuxt/plugins/prerender') })
+    }
 
     // Setup prerendering hooks for static generation
     // @ts-expect-error untyped

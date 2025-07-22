@@ -1,13 +1,13 @@
 import type { Nuxt } from '@nuxt/schema'
 import type { ProcessedFile } from 'mdream'
-import type { Nitro } from 'nitropack'
+import type { Nitro, PrerenderRoute } from 'nitropack'
 import type { MdreamPage } from './runtime/types.js'
 import type { ModuleRuntimeConfig } from './types.js'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { useNuxt } from '@nuxt/kit'
 import { consola } from 'consola'
-import { generateLlmsTxtArtifacts, htmlToMarkdown } from 'mdream'
+import { generateLlmsTxtArtifacts } from 'mdream'
 import { useSiteConfig } from 'nuxt-site-config/kit'
 
 const logger = consola.withTag('nuxt-mdream')
@@ -28,49 +28,16 @@ export function setupPrerenderHandler(config: ModuleRuntimeConfig, nuxt: Nuxt = 
   nuxt.hooks.hook('nitro:init', async (nitro: Nitro) => {
     nitro.hooks.hook('prerender:generate', async (route: any) => {
       // Skip non-HTML files
-      if (!route.fileName?.endsWith('.html') || !route.contents) {
-        return
-      }
-
-      // Skip special routes
-      if (['/200.html', '/404.html'].includes(route.route)) {
-        return
-      }
-
-      const html = route.contents as string
-
-      // Check if page is indexable
-      if (!isIndexable(html)) {
-        return
-      }
-
-      try {
-        // Convert HTML to Markdown
-        const markdown = htmlToMarkdown(html, {
-          origin: route.route,
-          ...config.mdreamOptions,
-        })
-
-        // Extract title from HTML
-        const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i)
-        const title = titleMatch ? String(titleMatch[1]).trim() : route.route
-
+      if (route.fileName?.endsWith('.md')) {
+        const markdown = route.contents as string
+        const title = ''
         // Store page data for llms.txt generation
         pages.push({
           url: route.route,
-          title,
+          // match title based on frontmatter title:
+          title: title || String(markdown.match(/title:\s*(.+)/)?.[1]).replace(/"/g, '') || route.route,
           markdown,
         })
-
-        // Write markdown file
-        const mdPath = route.route === '/' ? '/index.md' : `${route.route}.md`
-        const outputPath = join(nitro.options.output.publicDir, mdPath)
-
-        await mkdir(dirname(outputPath), { recursive: true })
-        await writeFile(outputPath, markdown, 'utf-8')
-      }
-      catch (error) {
-        logger.warn(`Failed to convert ${route.route} to markdown:`, error)
       }
     })
 
@@ -79,46 +46,47 @@ export function setupPrerenderHandler(config: ModuleRuntimeConfig, nuxt: Nuxt = 
         return
       }
 
-      try {
-        // Convert MdreamPage to ProcessedFile format with .md URLs
-        const processedFiles: ProcessedFile[] = pages.map(page => ({
-          title: page.title,
-          content: page.markdown,
-          url: page.url === '/' ? '/index.md' : `${page.url}.md`,
-        }))
+      // Convert MdreamPage to ProcessedFile format with .md URLs
+      const processedFiles: ProcessedFile[] = pages.map(page => ({
+        title: page.title,
+        content: page.markdown,
+        url: page.url === '/' ? '/index.md' : `${page.url}.md`,
+      }))
 
-        // Try to access site config from Nitro context
-        const siteConfig = useSiteConfig()
-        // Generate llms.txt artifacts
-        const artifacts = await generateLlmsTxtArtifacts({
-          files: processedFiles,
-          generateFull: true,
-          siteName: siteConfig.name || siteConfig.url,
-          description: siteConfig.description,
-        })
+      // Try to access site config from Nitro context
+      const siteConfig = useSiteConfig()
+      // Generate llms.txt artifacts
+      const artifacts = await generateLlmsTxtArtifacts({
+        origin: siteConfig.url,
+        files: processedFiles,
+        generateFull: true,
+        siteName: siteConfig.name || siteConfig.url,
+        description: siteConfig.description,
+      })
+      logger.success(`Generated markdown for ${pages.length} pages`)
 
-        // Write llms.txt
-        if (artifacts.llmsTxt) {
-          const llmsTxtPath = join(nitro.options.output.publicDir, 'llms.txt')
-          await writeFile(llmsTxtPath, artifacts.llmsTxt, 'utf-8')
-        }
-
-        // Write llms-full.txt
-        if (artifacts.llmsFullTxt) {
-          const llmsFullTxtPath = join(nitro.options.output.publicDir, 'llms-full.txt')
-          await writeFile(llmsFullTxtPath, artifacts.llmsFullTxt, 'utf-8')
-        }
-
-        logger.success(`Generated markdown for ${pages.length} pages`)
-        if (artifacts.llmsTxt) {
-          logger.info('Generated llms.txt')
-        }
-        if (artifacts.llmsFullTxt) {
-          logger.info('Generated llms-full.txt')
-        }
+      // Write llms.txt
+      if (artifacts.llmsTxt) {
+        const llmsTxtPath = join(nitro.options.output.publicDir, 'llms.txt')
+        await writeFile(llmsTxtPath, artifacts.llmsTxt, 'utf-8')
+        nitro._prerenderedRoutes!.push({
+          route: '/llms.txt',
+          fileName: llmsTxtPath,
+          generateTimeMS: 0,
+        } satisfies PrerenderRoute)
+        logger.info('Generated llms.txt')
       }
-      catch (error) {
-        logger.error('Failed to generate llms.txt artifacts:', error)
+
+      // Write llms-full.txt
+      if (artifacts.llmsFullTxt) {
+        const llmsFullTxtPath = join(nitro.options.output.publicDir, 'llms-full.txt')
+        await writeFile(llmsFullTxtPath, artifacts.llmsFullTxt, 'utf-8')
+        nitro._prerenderedRoutes!.push({
+          route: '/llms-full.txt',
+          fileName: llmsFullTxtPath,
+          generateTimeMS: 0,
+        } satisfies PrerenderRoute)
+        logger.info('Generated llms-full.txt')
       }
     })
   })

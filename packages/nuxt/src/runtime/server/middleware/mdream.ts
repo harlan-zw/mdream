@@ -1,7 +1,8 @@
 import type { HTMLToMarkdownOptions } from 'mdream'
 import type { MdreamMarkdownContext, ModuleRuntimeConfig } from '../../../types'
+import { withSiteUrl } from '#site-config/server/composables/utils'
 import { consola } from 'consola'
-import { createError, defineEventHandler, getRequestURL, setHeader } from 'h3'
+import { createError, defineEventHandler, setHeader } from 'h3'
 import { htmlToMarkdown } from 'mdream'
 import { extractionPlugin } from 'mdream/plugins'
 import { withMinimalPreset } from 'mdream/preset/minimal'
@@ -55,70 +56,45 @@ async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRu
 }
 
 export default defineEventHandler(async (event) => {
-  const requestUrl = getRequestURL(event)
-  let htmlPath = requestUrl.pathname
+  let path = event.path
 
   // Early check: only process .md requests
-  if (!htmlPath.endsWith('.md')) {
+  if (!path.endsWith('.md')) {
     return
   }
 
   const config = useRuntimeConfig(event).mdream as ModuleRuntimeConfig
 
-  htmlPath = htmlPath.slice(0, -3) // Remove .md
+  path = path.slice(0, -3) // Remove .md
 
   // Special handling for index.md -> /
-  if (htmlPath === '/index') {
-    htmlPath = '/'
+  if (path === '/index') {
+    path = '/'
   }
 
+  let html: string
+
+  // Fetch the HTML page
   try {
-    // Construct the full URL for the HTML page
-    const fullUrl = new URL(htmlPath, requestUrl.origin).toString()
-
-    // Fetch the HTML page
-    const response = await event.fetch(fullUrl)
-
-    if (!response.ok) {
-      throw createError({
-        statusCode: response.status,
-        statusMessage: response.statusText,
-      })
-    }
-
-    const html = await response.text()
-
-    // Convert to markdown
-    const markdown = await convertHtmlToMarkdown(
-      html,
-      requestUrl.origin + htmlPath,
-      config,
-      htmlPath,
-    )
-
-    // Set appropriate headers and return markdown
-    setHeader(event, 'content-type', 'text/markdown; charset=utf-8')
-    return markdown
+    html = await globalThis.$fetch(path)
   }
-  catch (error: any) {
-    // If already a proper error, re-throw it
-    if (error.statusCode) {
-      throw error
-    }
-
-    // Handle fetch errors
-    if (error.status === 404) {
-      throw createError({
-        statusCode: 404,
-        statusMessage: 'Page not found',
-      })
-    }
-
-    // Log error and return generic error
-    logger.error('Failed to generate markdown for', htmlPath, error)
-    throw createError({
+  catch (e) {
+    logger.error(`Failed to fetch HTML for ${path}`, e)
+    return createError({
       statusCode: 500,
-      statusMessage: `Failed to generate markdown: ${error.message || 'Unknown error'}`,
+      statusMessage: 'Internal Server Error',
+      message: `Failed to fetch HTML for ${path}`,
     })
   }
+  // Convert to markdown
+  const markdown = await convertHtmlToMarkdown(
+    html,
+    withSiteUrl(event, path),
+    config,
+    path,
+  )
+
+  // Set appropriate headers and return markdown
+  setHeader(event, 'content-type', 'text/markdown; charset=utf-8')
+  return markdown
 })
