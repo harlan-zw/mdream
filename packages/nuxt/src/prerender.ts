@@ -1,8 +1,6 @@
-import type { Nuxt } from '@nuxt/schema'
 import type { ProcessedFile } from 'mdream'
 import type { Nitro, PrerenderRoute } from 'nitropack'
 import type { MdreamPage } from './runtime/types.js'
-import type { ModuleRuntimeConfig } from './types.js'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { useNuxt } from '@nuxt/kit'
@@ -12,17 +10,8 @@ import { useSiteConfig } from 'nuxt-site-config/kit'
 
 const logger = consola.withTag('nuxt-mdream')
 
-// Check if HTML contains noindex robots meta tag
-function isIndexable(html: string): boolean {
-  const robotsMatch = html.match(/<meta\s+name=["']robots["']\s+content=["']([^"']+)["']/i)
-  if (robotsMatch) {
-    const content = String(robotsMatch[1]).toLowerCase()
-    return !content.includes('noindex')
-  }
-  return true
-}
-
-export function setupPrerenderHandler(config: ModuleRuntimeConfig, nuxt: Nuxt = useNuxt()) {
+export function setupPrerenderHandler() {
+  const nuxt = useNuxt()
   const pages: MdreamPage[] = []
 
   nuxt.hooks.hook('nitro:init', async (nitro: Nitro) => {
@@ -30,12 +19,14 @@ export function setupPrerenderHandler(config: ModuleRuntimeConfig, nuxt: Nuxt = 
       // Skip non-HTML files
       if (route.fileName?.endsWith('.md')) {
         const markdown = route.contents as string
-        const title = ''
+        // Extract title from frontmatter
+        const titleMatch = markdown.match(/title:\s*(.+)/)
+        const extractedTitle = titleMatch?.[1]?.replace(/"/g, '') || route.route
+
         // Store page data for llms.txt generation
         pages.push({
           url: route.route,
-          // match title based on frontmatter title:
-          title: title || String(markdown.match(/title:\s*(.+)/)?.[1]).replace(/"/g, '') || route.route,
+          title: extractedTitle,
           markdown,
         })
       }

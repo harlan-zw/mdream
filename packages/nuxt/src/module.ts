@@ -104,7 +104,7 @@ export {}
     // @ts-expect-error untyped
     const isStatic = nuxt.options.nitro.static || nuxt.options._generate || false
     if (isStatic || nuxt.options.nitro.prerender?.routes?.length) {
-      setupPrerenderHandler(runtimeConfig, nuxt)
+      setupPrerenderHandler()
     }
   },
 })
