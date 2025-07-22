@@ -66,13 +66,15 @@ it('should generate llms-full.txt with complete content', async () => {
   expect(fullContent).toContain('- [About Us - Test Site](#about-us---test-site)')
 
   // Check full content is included
-  expect(fullContent).toContain('## Test Site - Welcome to Our Homepage')
-  expect(fullContent).toContain('**URL:** /')
-  expect(fullContent).toContain('Welcome to Test Site')
+  // Now using frontmatter format with title only in frontmatter
+  expect(fullContent).toContain('---')
+  expect(fullContent).toContain('title: Test Site - Welcome to Our Homepage')
+  expect(fullContent).toContain('url: /')
+  expect(fullContent).toContain('# Welcome to Test Site')
   expect(fullContent).toContain('Homepage Content')
 
   // Check blog post content
-  expect(fullContent).toContain('## First Blog Post - Test Site Blog')
+  expect(fullContent).toContain('title: First Blog Post - Test Site Blog')
   expect(fullContent).toContain('First Blog Post: Testing HTML to Markdown')
   expect(fullContent).toContain('function convertHtmlToMarkdown')
 })

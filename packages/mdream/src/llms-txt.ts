@@ -203,6 +203,48 @@ function generateLlmsTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArt
 }
 
 /**
+ * Parse frontmatter from markdown content
+ */
+function parseFrontmatter(content: string): { frontmatter: Record<string, any> | null, body: string } {
+  const frontmatterRegex = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/
+  const match = content.match(frontmatterRegex)
+
+  if (!match) {
+    return { frontmatter: null, body: content }
+  }
+
+  const frontmatterContent = match[1]
+  const body = match[2]
+
+  const frontmatter: Record<string, any> = {}
+  const lines = frontmatterContent.split('\n')
+
+  for (const line of lines) {
+    const colonIndex = line.indexOf(':')
+    if (colonIndex > 0) {
+      const key = line.substring(0, colonIndex).trim()
+      const value = line.substring(colonIndex + 1).trim()
+      frontmatter[key] = value
+    }
+  }
+
+  return { frontmatter, body }
+}
+
+/**
+ * Serialize frontmatter object to YAML-like format
+ */
+function serializeFrontmatter(data: Record<string, any>): string {
+  const lines: string[] = []
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined && value !== null) {
+      lines.push(`${key}: ${String(value)}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+/**
  * Generate llms-full.txt content with complete page content
  */
 function generateLlmsFullTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArtifactsOptions, 'siteName' | 'description' | 'origin' | 'outputDir'>): string {
@@ -229,16 +271,46 @@ function generateLlmsFullTxtContent(files: ProcessedFile[], options: Pick<LlmsTx
       const url = file.url.startsWith('http://') || file.url.startsWith('https://')
         ? file.url
         : (origin ? origin + file.url : file.url)
-      content += `## ${file.title}\n\n`
-      content += `**URL:** ${url}\n`
+
+      // Parse existing frontmatter from content
+      const { frontmatter, body } = parseFrontmatter(file.content)
+
+      // Prepare metadata to add
+      const metadata: Record<string, any> = {
+        title: file.title,
+        url,
+      }
+
       if (file.filePath && options.outputDir) {
-        const relativePath = relative(options.outputDir, file.filePath)
-        content += `**File:** ${relativePath}\n`
+        metadata.file = relative(options.outputDir, file.filePath)
       }
       else if (file.filePath) {
-        content += `**File:** ${file.filePath}\n`
+        metadata.file = file.filePath
       }
-      content += `\n${file.content}\n\n---\n\n`
+
+      // Add any additional metadata from the file
+      if (file.metadata) {
+        if (file.metadata.description)
+          metadata.description = file.metadata.description
+        if (file.metadata.keywords)
+          metadata.keywords = file.metadata.keywords
+        if (file.metadata.author)
+          metadata.author = file.metadata.author
+      }
+
+      // Always include frontmatter for uniform formatting
+      const mergedFrontmatter = frontmatter ? { ...frontmatter, ...metadata } : metadata
+      const frontmatterString = serializeFrontmatter(mergedFrontmatter)
+      let contentBody = frontmatter ? body : file.content
+
+      // Remove duplicate title from the beginning of content if it exists
+      const titleLine = contentBody.trim().split('\n')[0]
+      if (titleLine === file.title || titleLine === `# ${file.title}`) {
+        // Remove the first line (title) and any following empty lines
+        contentBody = contentBody.trim().split('\n').slice(1).join('\n').trimStart()
+      }
+
+      content += `---\n${frontmatterString}\n---\n\n${contentBody}\n\n---\n\n`
     }
   }
 
