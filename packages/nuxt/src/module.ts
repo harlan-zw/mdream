@@ -17,7 +17,9 @@ export default defineNuxtModule<ModuleOptions>({
   },
   defaults: {
     enabled: true,
-    mdreamOptions: {},
+    mdreamOptions: {
+      preset: 'minimal',
+    },
     cache: {
       maxAge: 3600, // 1 hour
       swr: true,
