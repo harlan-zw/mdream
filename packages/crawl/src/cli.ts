@@ -549,17 +549,8 @@ async function main() {
   }
 
   // Only show interactive results for interactive mode
-  if (!cliOptions) {
-    await showCrawlResults(successful, failed, options.outputDir, generatedFiles, durationSeconds)
-  }
-  else {
-    // Use same format for CLI mode
-    await showCrawlResults(successful, failed, options.outputDir, generatedFiles, durationSeconds)
-
-    if (successful === 0) {
-      process.exit(1)
-    }
-  }
+  await showCrawlResults(successful, failed, options.outputDir, generatedFiles, durationSeconds)
+  process.exit(0)
 }
 
 // Run the CLI
