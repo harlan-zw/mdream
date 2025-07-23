@@ -7,7 +7,7 @@ import { dirname, join, resolve } from 'pathe'
 import { withHttps } from 'ufo'
 import { crawlAndGenerate } from './crawl.ts'
 import { parseUrlPattern, validateGlobPattern } from './glob-utils.ts'
-import { ensurePlaywrightInstalled } from './playwright-utils.ts'
+import { ensurePlaywrightInstalled, isUseChromeSupported } from './playwright-utils.ts'
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -464,10 +464,19 @@ async function main() {
 
   // Check playwright installation if needed
   if (options.driver === 'playwright') {
-    const playwrightInstalled = await ensurePlaywrightInstalled()
-    if (!playwrightInstalled) {
-      p.log.error('Cannot proceed without Playwright. Please install it manually or use the HTTP driver instead.')
-      process.exit(1)
+    // Check Chrome support and configure if available
+    const chromeSupported = await isUseChromeSupported()
+    if (chromeSupported) {
+      options.useChrome = true
+      p.log.info('System Chrome detected and enabled.')
+    }
+    else {
+      const playwrightInstalled = await ensurePlaywrightInstalled()
+      if (!playwrightInstalled) {
+        p.log.error('Cannot proceed without Playwright. Please install it manually or use the HTTP driver instead.')
+        process.exit(1)
+      }
+      p.log.info('Using global playwright instance.')
     }
   }
 

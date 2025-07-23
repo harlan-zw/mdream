@@ -1,4 +1,5 @@
 import * as p from '@clack/prompts'
+import { PlaywrightCrawler } from 'crawlee'
 import { addDependency } from 'nypm'
 
 export async function checkPlaywrightInstallation(): Promise<boolean> {
@@ -55,4 +56,31 @@ export async function ensurePlaywrightInstalled(): Promise<boolean> {
   }
 
   return true
+}
+
+export async function isUseChromeSupported(): Promise<boolean> {
+  try {
+    // Create a minimal crawler instance with useChrome option
+    const crawler = new PlaywrightCrawler({
+      launchContext: {
+        useChrome: true,
+      },
+      requestHandler: async () => {
+        // Minimal no-op handler
+      },
+      maxRequestsPerCrawl: 1,
+    })
+    const page = await crawler.browserPool.newPage()
+    await page.evaluate(() => {
+      // Simple check to ensure page is functional
+      return window.navigator.userAgent
+    })
+    await page.close()
+    await crawler.browserPool.closeAllBrowsers()
+    crawler.stop()
+    return true
+  }
+  catch {
+  }
+  return false
 }

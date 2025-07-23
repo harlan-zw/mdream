@@ -8,6 +8,7 @@ export interface CrawlOptions {
   origin?: string
   chunkSize?: number
   driver?: 'http' | 'playwright'
+  useChrome?: boolean
   followLinks?: boolean
   maxDepth?: number
   globPatterns?: ParsedUrlPattern[]

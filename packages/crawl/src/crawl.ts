@@ -63,6 +63,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     generateIndividualMd = true,
     origin,
     driver = 'http',
+    useChrome,
     followLinks = false,
     maxDepth = 1,
     globPatterns = [],
@@ -469,7 +470,17 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
   if (driver === 'playwright') {
     // PlaywrightCrawler - installation check should happen in CLI layer
-    crawler = new PlaywrightCrawler(crawlerOptions as PlaywrightCrawlerOptions)
+    const playwrightOptions = crawlerOptions as PlaywrightCrawlerOptions
+
+    // Add useChrome option if specified
+    if (useChrome) {
+      playwrightOptions.launchContext = {
+        ...playwrightOptions.launchContext,
+        useChrome,
+      }
+    }
+
+    crawler = new PlaywrightCrawler(playwrightOptions)
   }
   else {
     crawler = new HttpCrawler(crawlerOptions as HttpCrawlerOptions)
