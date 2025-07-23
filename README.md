@@ -77,7 +77,11 @@ npx @mdream/crawl -h
 **Crawl Using Playwright**
 
 ```bash
-npx @mdream/crawl -u example.com --driver playwright
+npx -p playwright -p @mdream/crawl crawl -u example.com --driver playwright
+```
+
+```bash
+pnpm --package=playwright --package=@mdream/crawl dlx crawl example.com --driver playwright
 ```
 
 **Exclude Specific Paths**
