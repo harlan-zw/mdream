@@ -17,7 +17,7 @@
     "compression": "^1.8.1",
     "express": "^5.1.0",
     "sirv": "^3.0.1",
-    "vue": "^3.5.17",
+    "vue": "^3.5.18",
     "vue-router": "^4.5.1"
   },
   "devDependencies": {
