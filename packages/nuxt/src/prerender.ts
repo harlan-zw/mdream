@@ -41,7 +41,7 @@ export function setupPrerenderHandler() {
       const processedFiles: ProcessedFile[] = pages.map(page => ({
         title: page.title,
         content: page.markdown,
-        url: page.url === '/' ? '/index.md' : `${page.url}.md`,
+        url: page.url === '/' ? '/index.md' : page.url.endsWith('.md') ? page.url : `${page.url}.md`,
       }))
 
       // Try to access site config from Nitro context
