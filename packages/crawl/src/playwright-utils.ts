@@ -23,26 +23,19 @@ export async function promptPlaywrightInstall(): Promise<boolean> {
   }
 
   const s = p.spinner()
-  s.start('Installing Playwright...')
+  s.start('Installing Playwright globally...')
 
   try {
     // Try to add to workspace root to avoid workspace errors
-    await addDependency('playwright', { workspace: true })
+    await addDependency('playwright', { global: true })
     s.stop('Playwright installed successfully!')
     return true
   }
-  catch {
+  catch (fallbackError) {
     // Fallback: try without workspace flag
-    try {
-      await addDependency('playwright')
-      s.stop('Playwright installed successfully!')
-      return true
-    }
-    catch (fallbackError) {
-      s.stop('Failed to install Playwright')
-      p.log.error(`Installation failed: ${fallbackError}`)
-      return false
-    }
+    s.stop('Failed to install Playwright')
+    p.log.error(`Installation failed: ${fallbackError}`)
+    return false
   }
 }
 
