@@ -37,9 +37,6 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
-  "peerDependencies": {
-    "nuxt": "^3.0.0"
-  },
   "dependencies": {
     "@nuxt/kit": "^4.0.1",
     "consola": "^3.4.2",
