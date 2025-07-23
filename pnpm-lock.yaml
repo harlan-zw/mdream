@@ -158,6 +158,9 @@ importers:
       playwright:
         specifier: ^1.53.2
         version: 1.53.2
+      ufo:
+        specifier: ^1.6.1
+        version: 1.6.1
     devDependencies:
       '@types/picomatch':
         specifier: ^4.0.1
