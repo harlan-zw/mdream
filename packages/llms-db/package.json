@@ -19,7 +19,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "unbuild",
+    "build": "obuild",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:attw": "attw --pack .",
@@ -41,9 +41,6 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "drizzle-kit": "^0.31.4",
-    "typescript": "5.8.3",
-    "unbuild": "^3.5.0",
-    "vitest": "^3.2.4"
+    "drizzle-kit": "^0.31.4"
   }
 }

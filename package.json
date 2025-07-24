@@ -20,7 +20,6 @@
     "llm-cost": "^1.0.5",
     "obuild": "^0.2.1",
     "typescript": "5.8.3",
-    "unbuild": "^3.5.0",
     "vitest": "^3.2.4"
   },
   "pnpm": {
