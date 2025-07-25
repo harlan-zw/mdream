@@ -1,6 +1,7 @@
 import type { CrawlProgress } from './crawl.ts'
 import type { CrawlOptions } from './types.ts'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, unlinkSync } from 'node:fs'
+import { accessSync, constants, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as p from '@clack/prompts'
 import { dirname, join, resolve } from 'pathe'
@@ -14,6 +15,49 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const packageJsonPath = join(__dirname, '..', 'package.json')
 const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
 const version = packageJson.version
+
+function checkOutputDirectoryPermissions(outputDir: string): { success: boolean, error?: string } {
+  try {
+    // Try to create the directory if it doesn't exist
+    mkdirSync(outputDir, { recursive: true })
+    
+    // Check if we can write to the directory
+    accessSync(outputDir, constants.W_OK)
+    
+    // Try to create a test file to ensure we can actually write
+    const testFile = join(outputDir, '.mdream-test')
+    try {
+      writeFileSync(testFile, 'test')
+      unlinkSync(testFile)
+    }
+    catch (err) {
+      return {
+        success: false,
+        error: `Cannot write to output directory: ${err instanceof Error ? err.message : 'Unknown error'}`
+      }
+    }
+    
+    return { success: true }
+  }
+  catch (err) {
+    if (err instanceof Error) {
+      if (err.message.includes('EACCES')) {
+        return {
+          success: false,
+          error: `Permission denied: Cannot write to output directory '${outputDir}'. Please check permissions or run with appropriate privileges.`
+        }
+      }
+      return {
+        success: false,
+        error: `Failed to access output directory: ${err.message}`
+      }
+    }
+    return {
+      success: false,
+      error: 'Failed to access output directory'
+    }
+  }
+}
 
 async function interactiveCrawl(): Promise<CrawlOptions | null> {
   console.clear()
@@ -460,6 +504,16 @@ async function main() {
 
   if (!options) {
     process.exit(0)
+  }
+
+  // Check output directory permissions before proceeding
+  const permCheck = checkOutputDirectoryPermissions(options.outputDir)
+  if (!permCheck.success) {
+    p.log.error(permCheck.error!)
+    if (permCheck.error?.includes('Permission denied')) {
+      p.log.info('Tip: Try running with elevated privileges (e.g., sudo) or change the output directory permissions.')
+    }
+    process.exit(1)
   }
 
   // Check playwright installation if needed
