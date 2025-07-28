@@ -133,17 +133,6 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
         initialValue: 'http',
       }),
 
-      maxDepth: () => p.text({
-        message: 'Clicks to page (crawl depth):',
-        placeholder: '3',
-        defaultValue: '3',
-        validate: (value) => {
-          const num = Number.parseInt(value)
-          if (Number.isNaN(num) || num < 1 || num > 10) {
-            return 'Depth must be between 1 and 10'
-          }
-        },
-      }),
     },
     {
       onCancel: () => {
@@ -164,10 +153,6 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
           { value: 'markdown', label: 'Individual Markdown files' },
         ],
         initialValues: ['llms.txt', 'llms-full.txt', 'markdown'],
-      }),
-      verbose: () => p.confirm({
-        message: 'Enable verbose logging?',
-        initialValue: false,
       }),
     },
     {
@@ -205,24 +190,13 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
     `Output: ${outputDir}`,
     `Driver: ${crawlerOptions.driver}`,
     `Max pages: Unlimited`,
-    `Follow links: Yes (depth ${crawlerOptions.maxDepth})`,
+    `Follow links: Yes (depth 3)`,
     `Output formats: ${outputFormats.join(', ')}`,
     `Sitemap discovery: Automatic`,
     inferredOrigin && `Origin: ${inferredOrigin}`,
-    advancedOptions.verbose && `Verbose logging: Enabled`,
   ].filter(Boolean)
 
   p.note(summary.join('\n'), 'Crawl Configuration')
-
-  const shouldProceed = await p.confirm({
-    message: 'Start crawling?',
-    initialValue: true,
-  })
-
-  if (p.isCancel(shouldProceed) || !shouldProceed) {
-    p.cancel('Crawl cancelled.')
-    return null
-  }
 
   return {
     urls,
@@ -230,13 +204,13 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
     driver: crawlerOptions.driver as 'http' | 'playwright',
     maxRequestsPerCrawl: Number.MAX_SAFE_INTEGER, // Unlimited pages
     followLinks: true, // Always follow links
-    maxDepth: Number.parseInt(crawlerOptions.maxDepth),
     generateLlmsTxt: advancedOptions.outputFormats.includes('llms.txt'),
     generateLlmsFullTxt: advancedOptions.outputFormats.includes('llms-full.txt'),
     generateIndividualMd: advancedOptions.outputFormats.includes('markdown'),
     origin: inferredOrigin,
     globPatterns,
-    verbose: advancedOptions.verbose,
+    verbose: false,
+    maxDepth: 3,
   }
 }
 
