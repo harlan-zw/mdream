@@ -196,6 +196,7 @@ jobs:
     needs: publish-docker
     runs-on: ubuntu-latest
     if: success()
+    permissions: {}
     steps:
       - name: Notify release success
         run: |
