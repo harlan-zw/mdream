@@ -65,7 +65,6 @@ The Docker container is configured with `ENTRYPOINT` to act directly as the `mdr
 - `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright` - Browser location
 - `DISPLAY=:99` - Virtual display for headless browsing
 
-
 ## Output Files
 
 The crawler generates these artifacts in your output directory:

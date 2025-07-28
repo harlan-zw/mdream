@@ -4,12 +4,12 @@
   "version": "0.9.0",
   "exports": {
     ".": {
-      "import": "./dist/index.mjs",
-      "types": "./dist/index.d.mts"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     },
     "./cli": {
-      "import": "./dist/cli.mjs",
-      "types": "./dist/cli.d.mts"
+      "types": "./dist/cli.d.mts",
+      "import": "./dist/cli.mjs"
     }
   },
   "bin": {
