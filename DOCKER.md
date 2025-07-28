@@ -19,7 +19,7 @@ docker run harlanzw/mdream:latest --help
 
 - **Docker Hub**: `harlanzw/mdream:latest`, `harlanzw/mdream:v0.8.5`
 - **GitHub Container Registry**: `ghcr.io/harlan-zw/mdream:latest`
-- **Multi-platform**: Supports `linux/amd64` and `linux/arm64`
+- **Platform**: Supports `linux/amd64`
 
 ## Basic Usage
 

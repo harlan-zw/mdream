@@ -152,15 +152,6 @@ jobs:
           docker history ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} --no-trunc --format "table {{.CreatedBy}}\t{{.Size}}" | head -20 >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
-      - name: Update Docker Hub description
-        uses: peter-evans/dockerhub-description@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
-          short-description: '@mdream/crawl with Playwright Chrome for website crawling and llms.txt generation'
-          readme-filepath: ./DOCKER.md
-
       - name: Create release summary
         run: |
           echo "## 🐳 Docker Crawl Images Published" >> $GITHUB_STEP_SUMMARY
