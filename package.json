@@ -11,12 +11,12 @@
     "test:attw": "pnpm -r --parallel --filter=./packages/** run test:attw"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^4.18.0",
+    "@antfu/eslint-config": "^5.0.0",
     "@arethetypeswrong/cli": "^0.18.2",
     "@types/node": "^24.1.0",
     "bumpp": "^10.2.0",
-    "crawlee": "^3.13.10",
-    "eslint": "^9.31.0",
+    "crawlee": "^3.14.0",
+    "eslint": "^9.32.0",
     "llm-cost": "^1.0.5",
     "obuild": "^0.2.1",
     "typescript": "5.8.3",
