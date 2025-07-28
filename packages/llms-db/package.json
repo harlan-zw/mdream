@@ -1,7 +1,7 @@
 {
   "name": "@mdream/llms-db",
   "type": "module",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
