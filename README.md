@@ -24,7 +24,7 @@
 - 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
 - 🚀 Ultra Fast: Stream 1.4MB of HTML to markdown in ~50ms.
 - ⚡ Tiny: 5kB gzip, zero dependency core.
-- ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), edge workers, browsers, Node, etc.
+- ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [Docker](#docker-usage), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), & more.
 - 🔌 Extensible: [Plugin system](#plugin-system) for customizing and extending functionality.
 
 ## What is Mdream?
@@ -47,6 +47,7 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 | ------- |----------------------------------------------------------------------------------------------------------|
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;">&nbsp;mdream](#installation) | HTML to Markdown converter with CLI for `stdin` conversion and package API. **Minimal: no dependencies** |
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/crawl](#mdreamcrawl) | Site-wide crawler to generate `llms.txt` artifacts from entire websites                                  |
+| [<img src="https://api.iconify.design/logos:docker-icon.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;Docker](#docker) | Pre-built Docker image with Playwright Chrome for containerized website crawling                        |
 | [<img src="https://api.iconify.design/logos:vitejs.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/vite](#vite-integration) | Generate automatic `.md` for your own Vite sites                                                         |
 | [<img src="https://api.iconify.design/logos:nuxt-icon.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/nuxt](#nuxt-integration) | Generate automatic `.md` and `llms.txt` artifacts generation for Nuxt Sites                              |
 | [<img src="https://api.iconify.design/mdi:github.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/action](#github-actions-integration) | Generate `.md` and `llms.txt` artifacts from your static `.html` output                                  |
@@ -130,6 +131,27 @@ cat index.html \
 - `--preset <preset>`: Conversion presets: minimal
 - `--help`: Display help information
 - `--version`: Display version information
+
+## Docker
+
+Run `@mdream/crawl` with Playwright Chrome pre-installed for website crawling in containerized environments.
+
+```bash
+# Quick start
+docker run harlanzw/mdream:latest site.com/docs/**
+
+# Interactive mode
+docker run -it harlanzw/mdream:latest
+
+# Using Playwright for JavaScript sites
+docker run harlanzw/mdream:latest spa-site.com --driver playwright
+```
+
+**Available Images:**
+- `harlanzw/mdream:latest` - Latest stable release
+- `ghcr.io/harlan-zw/mdream:latest` - GitHub Container Registry
+
+See [DOCKER.md](./DOCKER.md) for complete usage, configuration, and building instructions.
 
 ## GitHub Actions Integration
 
