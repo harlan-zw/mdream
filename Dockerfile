@@ -7,22 +7,21 @@ WORKDIR /app
 
 # Skip Playwright browser download since they're pre-installed in the base image
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-ENV NODE_ENV=production
 
 # Install pnpm globally as root
 USER root
 RUN npm install -g pnpm@10.13.1
 
 # Copy only package files first for better caching
-COPY --chown=myuser:myuser package.json pnpm-lock.yaml tsconfig.json ./
+COPY --chown=myuser:myuser package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
 COPY --chown=myuser:myuser packages/mdream/package.json ./packages/mdream/
 COPY --chown=myuser:myuser packages/crawl/package.json ./packages/crawl/
 
 # Switch to myuser for dependency installation
 USER myuser
 
-# Install dependencies
-RUN pnpm install --frozen-lockfile
+# Install all dependencies including production dependencies
+RUN pnpm install --frozen-lockfile --prod=false
 
 # Copy source code after dependencies are installed
 COPY --chown=myuser:myuser packages/mdream/ ./packages/mdream/
@@ -31,6 +30,9 @@ COPY --chown=myuser:myuser packages/crawl/ ./packages/crawl/
 # Build the packages
 RUN cd packages/mdream && npx obuild && cd ../.. && \
     cd packages/crawl && npx obuild && cd ../..
+
+# Set production environment after build
+ENV NODE_ENV=production
 
 # Ensure the crawl script is executable
 USER root
