@@ -9,12 +9,9 @@ WORKDIR /app
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV NODE_ENV=production
 
-# Install pnpm globally as root with platform-specific handling
+# Install pnpm globally as root
 USER root
-RUN --mount=type=cache,target=/root/.npm \
-    npm install -g pnpm@10.13.1 || \
-    (curl -fsSL https://get.pnpm.io/install.sh | sh - && \
-     ln -s /root/.local/share/pnpm/pnpm /usr/local/bin/pnpm)
+RUN npm install -g pnpm@10.13.1
 
 # Copy only package files first for better caching
 COPY --chown=myuser:myuser package.json pnpm-lock.yaml tsconfig.json ./
