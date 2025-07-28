@@ -1,7 +1,6 @@
 import type { CrawlProgress } from './crawl.ts'
 import type { CrawlOptions } from './types.ts'
-import { readFileSync, writeFileSync, unlinkSync } from 'node:fs'
-import { accessSync, constants, mkdirSync } from 'node:fs'
+import { accessSync, constants, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as p from '@clack/prompts'
 import { dirname, join, resolve } from 'pathe'
@@ -20,10 +19,10 @@ function checkOutputDirectoryPermissions(outputDir: string): { success: boolean,
   try {
     // Try to create the directory if it doesn't exist
     mkdirSync(outputDir, { recursive: true })
-    
+
     // Check if we can write to the directory
     accessSync(outputDir, constants.W_OK)
-    
+
     // Try to create a test file to ensure we can actually write
     const testFile = join(outputDir, '.mdream-test')
     try {
@@ -33,10 +32,10 @@ function checkOutputDirectoryPermissions(outputDir: string): { success: boolean,
     catch (err) {
       return {
         success: false,
-        error: `Cannot write to output directory: ${err instanceof Error ? err.message : 'Unknown error'}`
+        error: `Cannot write to output directory: ${err instanceof Error ? err.message : 'Unknown error'}`,
       }
     }
-    
+
     return { success: true }
   }
   catch (err) {
@@ -44,17 +43,17 @@ function checkOutputDirectoryPermissions(outputDir: string): { success: boolean,
       if (err.message.includes('EACCES')) {
         return {
           success: false,
-          error: `Permission denied: Cannot write to output directory '${outputDir}'. Please check permissions or run with appropriate privileges.`
+          error: `Permission denied: Cannot write to output directory '${outputDir}'. Please check permissions or run with appropriate privileges.`,
         }
       }
       return {
         success: false,
-        error: `Failed to access output directory: ${err.message}`
+        error: `Failed to access output directory: ${err.message}`,
       }
     }
     return {
       success: false,
-      error: 'Failed to access output directory'
+      error: 'Failed to access output directory',
     }
   }
 }
