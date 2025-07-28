@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Build artifacts
+dist/
+*/dist/
+.output/
+
+# Development files
+.git/
+.github/
+*.log
+*.tmp
+.DS_Store
+
+# Test files
+test/
+coverage/
+*.test.*
+*.spec.*
+
+# Documentation
+README.md
+CHANGELOG.md
+docs/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment files
+.env*
+!.env.example
+
+# Cache directories
+.cache/
+.temp/
+.tmp/
