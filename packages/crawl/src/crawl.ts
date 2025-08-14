@@ -18,6 +18,22 @@ async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> 
   if (!response.ok) {
     throw new Error(`Sitemap not found: ${response.status}`)
   }
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+
+  try {
+    const response = await fetch(sitemapUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'mdream-crawler/1.0',
+      },
+    })
+    
+    clearTimeout(timeoutId)
+    
+    if (!response.ok) {
+      throw new Error(`Sitemap not found: ${response.status}`)
+    }
 
   const xmlContent = await response.text()
 
