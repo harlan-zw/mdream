@@ -540,14 +540,47 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   let crawler: HttpCrawler<any> | any // PlaywrightCrawler type will be determined at runtime
   const crawlerOptions: PlaywrightCrawlerOptions | HttpCrawlerOptions = {
     requestHandler: createRequestHandler(driver),
-    errorHandler: async ({ request, response }: any) => {
+    errorHandler: async ({ request, response, error }: any) => {
+      // Log the error for debugging if verbose mode is enabled
+      if (verbose) {
+        console.error(`[ERROR] URL: ${request.url}, Status: ${response?.statusCode || 'N/A'}, Error: ${error?.message || 'Unknown'}`)
+      }
+      
       // Handle 4xx and 5xx status codes for HTTP crawler only (skip everything except timeouts)
       if (response?.statusCode && response?.statusCode >= 400) {
         request.noRetry = true
+        
+        // Create a failed result for tracking
+        const result: CrawlResult = {
+          url: request.url,
+          title: '',
+          content: '',
+          timestamp: Date.now(),
+          success: false,
+          error: `HTTP ${response.statusCode}`,
+          metadata: { title: '', description: '', links: [] },
+          depth: request.userData?.depth || 0,
+        }
+        results.push(result)
+      } else if (error) {
+        // Handle other errors (network, timeout, etc.)
+        request.noRetry = true
+        
+        const result: CrawlResult = {
+          url: request.url,
+          title: '',
+          content: '',
+          timestamp: Date.now(),
+          success: false,
+          error: error.message || 'Unknown error',
+          metadata: { title: '', description: '', links: [] },
+          depth: request.userData?.depth || 0,
+        }
+        results.push(result)
       }
     },
     maxRequestsPerCrawl,
-    respectRobotsTxtFile: !skipSitemap,
+    respectRobotsTxtFile: false, // We handle robots.txt checking manually during sitemap discovery
   }
 
   // Add crawl delay if specified
@@ -584,7 +617,15 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   progress.crawling.total = startingUrls.length
   onProgress?.(progress)
 
-  await crawler.run(initialRequests)
+  try {
+    await crawler.run(initialRequests)
+  } catch (error) {
+    if (verbose) {
+      console.error(`[CRAWLER ERROR] ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error(`[CRAWLER ERROR] Stack trace:`, error instanceof Error ? error.stack : 'No stack trace')
+    }
+    throw error
+  }
 
   // Mark crawling as completed
   progress.crawling.status = 'completed'
