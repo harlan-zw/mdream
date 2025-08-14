@@ -75,6 +75,27 @@ npx @mdream/crawl -h
 
 ### Examples
 
+**Using with Claude Code**
+
+Mdream works seamlessly with Claude Code to analyze and understand websites:
+
+```bash
+# Crawl a website and analyze with Claude
+npx @mdream/crawl harlanzw.com
+cat output/llms-full.txt | claude -p "give me a one sentence summary of this website"
+
+# Analyze specific documentation sections
+npx @mdream/crawl "https://nuxt.com/docs/getting-started/**"
+cat output/llms-full.txt | claude -p "explain the key concepts in this documentation"
+
+# Extract specific information from a site
+npx @mdream/crawl example.com/blog
+cat output/llms.txt | claude -p "list all the blog post titles and their main topics"
+
+# Convert and analyze a single page
+curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream --origin https://en.wikipedia.org | claude -p "summarize the history of Markdown"
+```
+
 **Crawl Using Playwright**
 
 ```bash
