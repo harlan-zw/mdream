@@ -204,7 +204,8 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
 
   // Warn if using skip-sitemap with wildcard URLs in interactive mode
   if (advancedOptions.skipSitemap && globPatterns.some(p => p.isGlob)) {
-    p.log.warn('Warning: Using --skip-sitemap with glob URLs may not discover all matching pages.')  }
+    p.log.warn('Warning: Using --skip-sitemap with glob URLs may not discover all matching pages.')
+  }
 
   return {
     urls,

@@ -24,9 +24,9 @@ async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> 
         'User-Agent': 'mdream-crawler/1.0',
       },
     })
-    
+
     clearTimeout(timeoutId)
-    
+
     if (!response.ok) {
       throw new Error(`Sitemap not found: ${response.status}`)
     }
@@ -43,30 +43,32 @@ async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> 
         match = sitemapIndexRegex.exec(xmlContent)
         if (match === null)
           break
-        
+
         // Remove CDATA wrapper if present
         let url = match[1]
         if (url.startsWith('<![CDATA[') && url.endsWith(']]>')) {
           url = url.slice(9, -3)
         }
-        
+
         childSitemaps.push(url)
       }
-      
+
       // Recursively load all child sitemaps and combine their URLs
       const allUrls: string[] = []
       for (const childSitemapUrl of childSitemaps) {
         try {
           const childUrls = await loadSitemapWithoutRetries(childSitemapUrl)
           allUrls.push(...childUrls)
-        } catch (error) {
+        }
+        catch (error) {
           // Continue with other sitemaps if one fails
           console.warn(`Failed to load child sitemap ${childSitemapUrl}:`, error instanceof Error ? error.message : 'Unknown error')
         }
       }
-      
+
       return allUrls
-    } else {
+    }
+    else {
       // This is a regular sitemap - extract URLs
       const urls: string[] = []
       const urlRegex = /<url[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/url>/gs
@@ -75,19 +77,20 @@ async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> 
         match = urlRegex.exec(xmlContent)
         if (match === null)
           break
-        
+
         // Remove CDATA wrapper if present
         let url = match[1]
         if (url.startsWith('<![CDATA[') && url.endsWith(']]>')) {
           url = url.slice(9, -3)
         }
-        
+
         urls.push(url)
       }
 
       return urls
     }
-  } catch (error) {
+  }
+  catch (error) {
     clearTimeout(timeoutId)
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error('Sitemap request timed out after 10 seconds')
@@ -176,7 +179,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     const robotsUrl = new URL('/robots.txt', baseUrl).toString()
     const robotsController = new AbortController()
     const robotsTimeoutId = setTimeout(() => robotsController.abort(), 10000) // 10 second timeout
-    
+
     let robotsResponse
     try {
       robotsResponse = await fetch(robotsUrl, {
@@ -186,7 +189,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         },
       })
       clearTimeout(robotsTimeoutId)
-    } catch (error) {
+    }
+    catch (error) {
       clearTimeout(robotsTimeoutId)
       // If robots.txt fails, continue without it
       robotsResponse = null
@@ -545,11 +549,11 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       if (verbose) {
         console.error(`[ERROR] URL: ${request.url}, Status: ${response?.statusCode || 'N/A'}, Error: ${error?.message || 'Unknown'}`)
       }
-      
+
       // Handle 4xx and 5xx status codes for HTTP crawler only (skip everything except timeouts)
       if (response?.statusCode && response?.statusCode >= 400) {
         request.noRetry = true
-        
+
         // Create a failed result for tracking
         const result: CrawlResult = {
           url: request.url,
@@ -562,10 +566,11 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
           depth: request.userData?.depth || 0,
         }
         results.push(result)
-      } else if (error) {
+      }
+      else if (error) {
         // Handle other errors (network, timeout, etc.)
         request.noRetry = true
-        
+
         const result: CrawlResult = {
           url: request.url,
           title: '',
@@ -619,7 +624,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
   try {
     await crawler.run(initialRequests)
-  } catch (error) {
+  }
+  catch (error) {
     if (verbose) {
       console.error(`[CRAWLER ERROR] ${error instanceof Error ? error.message : 'Unknown error'}`)
       console.error(`[CRAWLER ERROR] Stack trace:`, error instanceof Error ? error.stack : 'No stack trace')
