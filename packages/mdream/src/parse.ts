@@ -295,7 +295,7 @@ function parseHtmlInternal(
         break
       }
 
-      const tagName = htmlChunk.substring(tagNameStart, tagNameEnd).toLowerCase()
+      const tagName = htmlChunk.substring(tagNameStart, tagNameEnd).toLowerCase() as keyof typeof TagIdMap
       if (!tagName) {
         i = tagNameEnd
         break
@@ -436,7 +436,7 @@ function processClosingTag(
     }
   }
 
-  const tagName = htmlChunk.substring(tagNameStart, i).toLowerCase()
+  const tagName = htmlChunk.substring(tagNameStart, i).toLowerCase() as keyof typeof TagIdMap
   const tagId = TagIdMap[tagName] ?? -1
 
   if (state.currentNode?.tagHandler?.isNonNesting && tagId !== state.currentNode.tagId) {
