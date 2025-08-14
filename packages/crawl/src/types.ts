@@ -17,6 +17,7 @@ export interface CrawlOptions {
   siteNameOverride?: string
   descriptionOverride?: string
   verbose?: boolean
+  skipSitemap?: boolean
 }
 
 export interface ParsedUrlPattern {

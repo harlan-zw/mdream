@@ -154,6 +154,10 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
         ],
         initialValues: ['llms.txt', 'llms-full.txt', 'markdown'],
       }),
+      skipSitemap: () => p.confirm({
+        message: 'Skip sitemap.xml and robots.txt discovery?',
+        initialValue: false,
+      }),
     },
     {
       onCancel: () => {
@@ -192,11 +196,15 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
     `Max pages: Unlimited`,
     `Follow links: Yes (depth 3)`,
     `Output formats: ${outputFormats.join(', ')}`,
-    `Sitemap discovery: Automatic`,
+    `Sitemap discovery: ${advancedOptions.skipSitemap ? 'Skipped' : 'Automatic'}`,
     inferredOrigin && `Origin: ${inferredOrigin}`,
   ].filter(Boolean)
 
   p.note(summary.join('\n'), 'Crawl Configuration')
+
+  // Warn if using skip-sitemap with wildcard URLs in interactive mode
+  if (advancedOptions.skipSitemap && globPatterns.some(p => p.isGlob)) {
+    p.log.warn('Warning: Using --skip-sitemap with glob URLs may not discover all matching pages.')  }
 
   return {
     urls,
@@ -211,6 +219,7 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
     globPatterns,
     verbose: false,
     maxDepth: 3,
+    skipSitemap: advancedOptions.skipSitemap,
   }
 }
 
@@ -254,17 +263,19 @@ Options:
   --max-pages <number>        Maximum pages to crawl (default: unlimited)
   --crawl-delay <seconds>     Crawl delay in seconds
   --exclude <pattern>         Exclude URLs matching glob patterns (can be used multiple times)
+  --skip-sitemap              Skip sitemap.xml and robots.txt discovery
   -v, --verbose               Enable verbose logging
   -h, --help                  Show this help message
   --version                   Show version number
 
-Note: Sitemap discovery and robots.txt checking are automatic
+Note: Sitemap discovery and robots.txt checking are automatic unless --skip-sitemap is used.
 
 Examples:
   @mdream/crawl -u harlanzw.com --artifacts "llms.txt,markdown"
   @mdream/crawl --url https://docs.example.com --depth 2 --artifacts "llms-full.txt"
   @mdream/crawl -u example.com --exclude "*/admin/*" --exclude "*/api/*"
   @mdream/crawl -u example.com --verbose
+  @mdream/crawl -u example.com --skip-sitemap
 `)
     process.exit(0)
   }
@@ -417,6 +428,14 @@ Examples:
   // Check for verbose flag
   const verbose = args.includes('--verbose') || args.includes('-v')
 
+  // Check for skip-sitemap flag
+  const skipSitemap = args.includes('--skip-sitemap')
+
+  // Warn if using skip-sitemap with wildcard URLs
+  if (skipSitemap && parsed.isGlob) {
+    p.log.warn('Warning: Using --skip-sitemap with glob URLs may not discover all matching pages.')
+  }
+
   return {
     urls: [url],
     outputDir: resolve(getArgValue('--output') || getArgValue('-o') || 'output'),
@@ -434,6 +453,7 @@ Examples:
     crawlDelay: crawlDelayStr ? Number.parseInt(crawlDelayStr) : undefined,
     exclude: excludePatterns.length > 0 ? excludePatterns : undefined,
     verbose,
+    skipSitemap,
   }
 }
 
@@ -465,6 +485,7 @@ async function main() {
       `Depth: ${options.maxDepth}`,
       `Formats: ${formats.join(', ')}`,
       options.exclude && options.exclude.length > 0 && `Exclude: ${options.exclude.join(', ')}`,
+      options.skipSitemap && `Skip sitemap: Yes`,
       options.verbose && `Verbose: Enabled`,
     ].filter(Boolean)
 

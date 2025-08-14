@@ -72,6 +72,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     siteNameOverride,
     descriptionOverride,
     verbose = false,
+    skipSitemap = false,
   } = options
 
   // Normalize and resolve the output directory
@@ -105,7 +106,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   // Track sitemap discovery attempts
   const sitemapAttempts: { url: string, success: boolean, error?: string }[] = []
 
-  if (startingUrls.length > 0) {
+  if (startingUrls.length > 0 && !skipSitemap) {
     const baseUrl = new URL(startingUrls[0]).origin
     const homePageUrl = baseUrl
 
@@ -290,6 +291,15 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     progress.crawling.total = startingUrls.length
     onProgress?.(progress)
   }
+  else if (skipSitemap && startingUrls.length > 0) {
+    // When skipping sitemap discovery, immediately mark as completed
+    progress.sitemap.status = 'completed'
+    progress.sitemap.found = 0
+    progress.sitemap.processed = 0
+    progress.crawling.total = startingUrls.length
+    onProgress?.(progress)
+    // Don't show any sitemap discovery box when skipping
+  }
 
   // Ensure output directory exists
   if (!existsSync(outputDir)) {
@@ -460,7 +470,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       }
     },
     maxRequestsPerCrawl,
-    respectRobotsTxtFile: true,
+    respectRobotsTxtFile: !skipSitemap,
   }
 
   // Add crawl delay if specified
