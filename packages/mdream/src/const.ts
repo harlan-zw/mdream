@@ -130,7 +130,7 @@ export const NodeEventEnter = 0
 export const NodeEventExit = 1
 
 // Map string tag names to numeric constants
-export const TagIdMap: Record<string, number> = {
+export const TagIdMap = {
   html: TAG_HTML,
   head: TAG_HEAD,
   details: TAG_DETAILS,
@@ -239,7 +239,7 @@ export const TagIdMap: Record<string, number> = {
   header: TAG_HEADER,
   figcaption: TAG_FIGCAPTION,
   caption: TAG_CAPTION,
-}
+} as const
 
 // Pre-defined strings to avoid repeated allocations
 export const MARKDOWN_STRONG = '**'
