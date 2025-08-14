@@ -29,12 +29,12 @@
     "db:studio": "node --env-file=.env drizzle-kit studio"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.850.0",
+    "@aws-sdk/client-s3": "^3.864.0",
     "@clack/prompts": "^0.11.0",
     "@libsql/client": "^0.15.10",
     "@mdream/crawl": "workspace:*",
     "better-sqlite3": "^12.2.0",
-    "drizzle-orm": "^0.44.3",
+    "drizzle-orm": "^0.44.4",
     "pathe": "^2.0.3",
     "ufo": "^1.6.1",
     "unstorage": "^1.16.1"

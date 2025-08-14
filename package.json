@@ -1,7 +1,7 @@
 {
   "type": "module",
   "private": true,
-  "packageManager": "pnpm@10.13.1",
+  "packageManager": "pnpm@10.14.0",
   "license": "MIT",
   "scripts": {
     "build": "pnpm run -r build",
@@ -11,12 +11,12 @@
     "test:attw": "pnpm -r --parallel --filter=./packages/** run test:attw"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^5.0.0",
+    "@antfu/eslint-config": "^5.2.1",
     "@arethetypeswrong/cli": "^0.18.2",
-    "@types/node": "^24.1.0",
-    "bumpp": "^10.2.0",
-    "crawlee": "^3.14.0",
-    "eslint": "^9.32.0",
+    "@types/node": "^24.2.1",
+    "bumpp": "^10.2.3",
+    "crawlee": "^3.14.1",
+    "eslint": "^9.33.0",
     "llm-cost": "^1.0.5",
     "obuild": "^0.2.1",
     "typescript": "5.8.3",
