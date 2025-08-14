@@ -478,4 +478,21 @@ describe('extraction plugin', () => {
     expect(aElements[0].element.attributes.href).toBe('/page1')
     expect(aElements[1].element.attributes.href).toBe('/page2')
   })
+
+  it ('link stylesheet crossorigin', async () => {
+    let link
+    htmlToMarkdown('<head><link rel="stylesheet" href="/_nuxt/entry.BqmaZWpx.css" crossorigin></head>', {
+      plugins: [
+        extractionPlugin({
+          link: (_link) => {
+            link = _link
+          }
+        })
+      ]
+    })
+    expect(link).toBeDefined()
+    expect(link.attributes.rel).toBe('stylesheet')
+    expect(link.attributes.href).toBe('/_nuxt/entry.BqmaZWpx.css')
+    expect(link.attributes.crossorigin).toBe('')
+  })
 })
