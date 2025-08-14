@@ -14,10 +14,6 @@ import { extractMetadata } from './metadata-extractor.ts'
 
 // Helper function to load sitemap with no retries using direct fetch
 async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> {
-  const response = await fetch(sitemapUrl)
-  if (!response.ok) {
-    throw new Error(`Sitemap not found: ${response.status}`)
-  }
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
 
@@ -35,20 +31,69 @@ async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> 
       throw new Error(`Sitemap not found: ${response.status}`)
     }
 
-  const xmlContent = await response.text()
+    const xmlContent = await response.text()
 
-  // Parse XML content to extract URLs
-  const urls: string[] = []
-  const urlRegex = /<loc>(.*?)<\/loc>/g
-  let match
-  while (true) {
-    match = urlRegex.exec(xmlContent)
-    if (match === null)
-      break
-    urls.push(match[1])
+    // Check if this is a sitemap index (contains <sitemapindex>)
+    if (xmlContent.includes('<sitemapindex')) {
+      // This is a sitemap index - recursively load all child sitemaps
+      const sitemapIndexRegex = /<sitemap[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/sitemap>/gs
+      const childSitemaps: string[] = []
+      let match
+      while (true) {
+        match = sitemapIndexRegex.exec(xmlContent)
+        if (match === null)
+          break
+        
+        // Remove CDATA wrapper if present
+        let url = match[1]
+        if (url.startsWith('<![CDATA[') && url.endsWith(']]>')) {
+          url = url.slice(9, -3)
+        }
+        
+        childSitemaps.push(url)
+      }
+      
+      // Recursively load all child sitemaps and combine their URLs
+      const allUrls: string[] = []
+      for (const childSitemapUrl of childSitemaps) {
+        try {
+          const childUrls = await loadSitemapWithoutRetries(childSitemapUrl)
+          allUrls.push(...childUrls)
+        } catch (error) {
+          // Continue with other sitemaps if one fails
+          console.warn(`Failed to load child sitemap ${childSitemapUrl}:`, error instanceof Error ? error.message : 'Unknown error')
+        }
+      }
+      
+      return allUrls
+    } else {
+      // This is a regular sitemap - extract URLs
+      const urls: string[] = []
+      const urlRegex = /<url[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/url>/gs
+      let match
+      while (true) {
+        match = urlRegex.exec(xmlContent)
+        if (match === null)
+          break
+        
+        // Remove CDATA wrapper if present
+        let url = match[1]
+        if (url.startsWith('<![CDATA[') && url.endsWith(']]>')) {
+          url = url.slice(9, -3)
+        }
+        
+        urls.push(url)
+      }
+
+      return urls
+    }
+  } catch (error) {
+    clearTimeout(timeoutId)
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Sitemap request timed out after 10 seconds')
+    }
+    throw error
   }
-
-  return urls
 }
 
 export interface CrawlProgress {
@@ -129,8 +174,24 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     onProgress?.(progress)
 
     const robotsUrl = new URL('/robots.txt', baseUrl).toString()
-    const robotsResponse = await fetch(robotsUrl)
-    if (robotsResponse.ok) {
+    const robotsController = new AbortController()
+    const robotsTimeoutId = setTimeout(() => robotsController.abort(), 10000) // 10 second timeout
+    
+    let robotsResponse
+    try {
+      robotsResponse = await fetch(robotsUrl, {
+        signal: robotsController.signal,
+        headers: {
+          'User-Agent': 'mdream-crawler/1.0',
+        },
+      })
+      clearTimeout(robotsTimeoutId)
+    } catch (error) {
+      clearTimeout(robotsTimeoutId)
+      // If robots.txt fails, continue without it
+      robotsResponse = null
+    }
+    if (robotsResponse?.ok) {
       const robotsContent = await robotsResponse.text()
       const sitemapMatches = robotsContent.match(/Sitemap:\s*(.*)/gi)
       if (sitemapMatches && sitemapMatches.length > 0) {
