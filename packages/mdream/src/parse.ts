@@ -777,7 +777,7 @@ export function parseAttributes(attrStr: string): Record<string, string> {
         if (!isSpace) {
           state = NAME
           nameStart = i
-          nameEnd = 0  // Reset nameEnd when starting a new attribute
+          nameEnd = 0 // Reset nameEnd when starting a new attribute
         }
         break
 
@@ -797,7 +797,7 @@ export function parseAttributes(attrStr: string): Record<string, string> {
           result[name] = ''
           state = NAME
           nameStart = i
-          nameEnd = 0  // Reset nameEnd when starting a new attribute
+          nameEnd = 0 // Reset nameEnd when starting a new attribute
         }
         break
 

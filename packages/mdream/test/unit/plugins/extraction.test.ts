@@ -486,9 +486,9 @@ describe('extraction plugin', () => {
         extractionPlugin({
           link: (_link) => {
             link = _link
-          }
-        })
-      ]
+          },
+        }),
+      ],
     })
     expect(link).toBeDefined()
     expect(link.attributes.rel).toBe('stylesheet')
