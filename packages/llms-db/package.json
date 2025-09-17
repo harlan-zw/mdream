@@ -26,18 +26,19 @@
     "run": "node --env-file=.env ./dist/cli.mjs run",
     "db:generate": "node --env-file=.env drizzle-kit generate",
     "db:migrate": "node --env-file=.env drizzle-kit migrate",
-    "db:studio": "node --env-file=.env drizzle-kit studio"
+    "db:studio": "node --env-file=.env drizzle-kit studio",
+    "prepack": "pnpm run build"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.864.0",
+    "@aws-sdk/client-s3": "^3.891.0",
     "@clack/prompts": "^0.11.0",
-    "@libsql/client": "^0.15.10",
+    "@libsql/client": "^0.15.15",
     "@mdream/crawl": "workspace:*",
     "better-sqlite3": "^12.2.0",
-    "drizzle-orm": "^0.44.4",
+    "drizzle-orm": "^0.44.5",
     "pathe": "^2.0.3",
     "ufo": "^1.6.1",
-    "unstorage": "^1.16.1"
+    "unstorage": "^1.17.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

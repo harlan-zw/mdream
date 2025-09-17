@@ -69,11 +69,12 @@
     "typecheck": "tsc --noEmit",
     "dev:prepare": "obuild --stub",
     "test": "vitest test",
-    "test:attw": "attw --pack"
+    "test:attw": "attw --pack",
+    "prepack": "pnpm run build"
   },
   "dependencies": {
     "cac": "^6.7.14",
     "pathe": "^2.0.3",
-    "tinyglobby": "^0.2.14"
+    "tinyglobby": "^0.2.15"
   }
 }
