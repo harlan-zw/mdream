@@ -5,6 +5,11 @@
   "packageManager": "pnpm@10.17.0",
   "description": "Nuxt module for converting HTML pages to Markdown using mdream",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harlan-zw/mdream",
+    "directory": "packages/nuxt"
+  },
   "exports": {
     ".": {
       "types": "./dist/types.d.mts",

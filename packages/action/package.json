@@ -3,6 +3,12 @@
   "type": "module",
   "version": "0.10.2",
   "description": "GitHub Action for mdream llms.txt generation",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harlan-zw/mdream",
+    "directory": "packages/action"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [

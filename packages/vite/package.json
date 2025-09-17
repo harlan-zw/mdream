@@ -9,6 +9,11 @@
     "url": "https://harlanzw.com/"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harlan-zw/mdream",
+    "directory": "packages/vite"
+  },
   "keywords": [
     "vite",
     "plugin",

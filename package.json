@@ -10,6 +10,10 @@
     "release": "pnpm build && bumpp --output=CHANGELOG.md packages/*/package.json",
     "test:attw": "pnpm -r --parallel --filter=./packages/** run test:attw"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harlan-zw/mdream"
+  },
   "devDependencies": {
     "@antfu/eslint-config": "^5.3.0",
     "@arethetypeswrong/cli": "^0.18.2",
