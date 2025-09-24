@@ -2,7 +2,7 @@
   "name": "@mdream/nuxt",
   "type": "module",
   "version": "0.10.3",
-  "packageManager": "pnpm@10.17.0",
+  "packageManager": "pnpm@10.17.1",
   "description": "Nuxt module for converting HTML pages to Markdown using mdream",
   "license": "MIT",
   "repository": {
@@ -48,11 +48,11 @@
     "consola": "^3.4.2",
     "defu": "^6.1.4",
     "mdream": "workspace:*",
-    "nuxt-site-config": "^3.2.8",
+    "nuxt-site-config": "^3.2.9",
     "pathe": "^2.0.3"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^5.3.0",
+    "@antfu/eslint-config": "^5.4.1",
     "@arethetypeswrong/cli": "^0.18.2",
     "@nuxt/devtools": "latest",
     "@nuxt/module-builder": "^1.0.2",
@@ -61,7 +61,7 @@
     "@types/node": "latest",
     "bumpp": "^10.2.3",
     "changelogen": "^0.6.2",
-    "eslint": "^9.35.0",
+    "eslint": "^9.36.0",
     "nuxt": "^4.1.2",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"

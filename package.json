@@ -1,8 +1,12 @@
 {
   "type": "module",
   "private": true,
-  "packageManager": "pnpm@10.17.0",
+  "packageManager": "pnpm@10.17.1",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harlan-zw/mdream"
+  },
   "scripts": {
     "build": "pnpm run -r build",
     "typecheck": "pnpm run -r typecheck",
@@ -10,17 +14,13 @@
     "release": "pnpm build && bumpp --output=CHANGELOG.md packages/*/package.json",
     "test:attw": "pnpm -r --parallel --filter=./packages/** run test:attw"
   },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/harlan-zw/mdream"
-  },
   "devDependencies": {
-    "@antfu/eslint-config": "^5.3.0",
+    "@antfu/eslint-config": "^5.4.1",
     "@arethetypeswrong/cli": "^0.18.2",
-    "@types/node": "^24.5.1",
+    "@types/node": "^24.5.2",
     "bumpp": "^10.2.3",
     "crawlee": "^3.15.0",
-    "eslint": "^9.35.0",
+    "eslint": "^9.36.0",
     "llm-cost": "^1.0.5",
     "obuild": "^0.2.1",
     "typescript": "5.9.2",
