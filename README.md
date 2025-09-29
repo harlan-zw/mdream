@@ -43,14 +43,14 @@ for your own sites or generate LLM context for any project you're working with.
 
 Mdream is built to run anywhere for all projects and use cases and is available in the following packages:
 
-| Package | Description                                                                                              |
-| ------- |----------------------------------------------------------------------------------------------------------|
-| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;">&nbsp;mdream](#installation) | HTML to Markdown converter with CLI for `stdin` conversion and package API. **Minimal: no dependencies** |
+| Package                                                                                                                                                                        | Description                                                                                              |
+|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
+| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;">&nbsp;mdream](#api-usage)          | HTML to Markdown converter with CLI for `stdin` conversion and package API. **Minimal: no dependencies** |
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/crawl](#mdreamcrawl) | Site-wide crawler to generate `llms.txt` artifacts from entire websites                                  |
-| [<img src="https://api.iconify.design/logos:docker-icon.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;Docker](#docker) | Pre-built Docker image with Playwright Chrome for containerized website crawling                        |
-| [<img src="https://api.iconify.design/logos:vitejs.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/vite](#vite-integration) | Generate automatic `.md` for your own Vite sites                                                         |
-| [<img src="https://api.iconify.design/logos:nuxt-icon.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/nuxt](#nuxt-integration) | Generate automatic `.md` and `llms.txt` artifacts generation for Nuxt Sites                              |
-| [<img src="https://api.iconify.design/mdi:github.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/action](#github-actions-integration) | Generate `.md` and `llms.txt` artifacts from your static `.html` output                                  |
+| [<img src="https://api.iconify.design/logos:docker-icon.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;Docker](#docker)                                     | Pre-built Docker image with Playwright Chrome for containerized website crawling                        |
+| [<img src="https://api.iconify.design/logos:vitejs.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/vite](#vite-integration)                          | Generate automatic `.md` for your own Vite sites                                                         |
+| [<img src="https://api.iconify.design/logos:nuxt-icon.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/nuxt](#nuxt-integration)                       | Generate automatic `.md` and `llms.txt` artifacts generation for Nuxt Sites                              |
+| [<img src="https://api.iconify.design/mdi:github.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/action](#github-actions-integration)                | Generate `.md` and `llms.txt` artifacts from your static `.html` output                                  |
 
 ## Mdream Crawl
 
