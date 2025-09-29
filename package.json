@@ -19,7 +19,7 @@
     "@arethetypeswrong/cli": "^0.18.2",
     "@types/node": "^24.5.2",
     "bumpp": "^10.2.3",
-    "crawlee": "^3.15.0",
+    "crawlee": "^3.15.1",
     "eslint": "^9.36.0",
     "llm-cost": "^1.0.5",
     "obuild": "^0.2.1",
