@@ -1,4 +1,4 @@
-import type { ProcessedFile } from 'mdream'
+import type { ProcessedFile } from 'mdream/llms-txt'
 import type { Nitro, PrerenderRoute } from 'nitropack'
 import type { MdreamPage } from './runtime/types.js'
 import { writeFile } from 'node:fs/promises'

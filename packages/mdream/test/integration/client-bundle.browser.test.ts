@@ -17,15 +17,6 @@ function renderMarkdown(markdown: string) {
   return container
 }
 
-// Helper function to render HTML input to DOM
-function renderHtmlInput(html: string) {
-  const inputContainer = document.createElement('div')
-  inputContainer.id = 'html-input'
-  inputContainer.innerHTML = html
-  document.body.appendChild(inputContainer)
-  return inputContainer
-}
-
 // Browser compatibility tests for mdream
 // These tests run in a real browser environment and test actual DOM output
 describe('mdream browser compatibility', () => {
