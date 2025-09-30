@@ -45,5 +45,8 @@ jobs:
       - name: Test package types
         run: pnpm run test:attw
 
+      - name: Browser Test Setup
+        run: pnpm exec playwright install
+
       - name: Test
         run: pnpm run test
