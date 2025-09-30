@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { getInput, info, setFailed, setOutput } from '@actions/core'
-import { generateLlmsTxtArtifacts } from 'mdream'
+import { generateLlmsTxtArtifacts } from 'mdream/llms-txt'
 
 export async function main() {
   try {

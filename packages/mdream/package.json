@@ -23,6 +23,14 @@
       },
       "default": "./dist/index.mjs"
     },
+    "./llms-txt": {
+      "types": "./dist/llms-txt.d.mts",
+      "import": {
+        "types": "./dist/llms-txt.d.mts",
+        "default": "./dist/llms-txt.mjs"
+      },
+      "default": "./dist/llms-txt.mjs"
+    },
     "./cli": {
       "types": "./dist/cli.d.mts",
       "import": {
@@ -77,6 +85,7 @@
     "typecheck": "tsc --noEmit",
     "dev:prepare": "obuild --stub",
     "test": "vitest test",
+    "test:browser": "vitest test --project=browser",
     "test:attw": "attw --pack",
     "prepack": "pnpm run build"
   },
