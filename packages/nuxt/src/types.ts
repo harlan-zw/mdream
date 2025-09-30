@@ -1,4 +1,5 @@
-import type { HTMLToMarkdownOptions, LlmsTxtArtifactsOptions } from 'mdream'
+import type { HTMLToMarkdownOptions } from 'mdream'
+import type { LlmsTxtArtifactsOptions } from 'mdream/llms-txt'
 
 export interface ModuleOptions {
   /**
