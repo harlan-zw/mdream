@@ -46,6 +46,7 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 | Package                                                                                                                                                                        | Description                                                                                              |
 |--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;">&nbsp;mdream](#api-usage)          | HTML to Markdown converter with CLI for `stdin` conversion and package API. **Minimal: no dependencies** |
+| [<img src="https://api.iconify.design/material-symbols:language.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;Browser CDN](#browser-cdn-usage)           | Use mdream directly in browsers via unpkg/jsDelivr without any build step                                |
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/crawl](#mdreamcrawl) | Site-wide crawler to generate `llms.txt` artifacts from entire websites                                  |
 | [<img src="https://api.iconify.design/logos:docker-icon.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;Docker](#docker)                                     | Pre-built Docker image with Playwright Chrome for containerized website crawling                        |
 | [<img src="https://api.iconify.design/logos:vitejs.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/vite](#vite-integration)                          | Generate automatic `.md` for your own Vite sites                                                         |
@@ -364,6 +365,33 @@ The `parseHtml` function provides:
 - **DOM events** - Enter/exit events for each element and text node
 - **Plugin support** - Can apply plugins during parsing
 - **Streaming compatible** - Works with the same plugin system
+
+## Browser CDN Usage
+
+For browser environments, you can use mdream directly via CDN without any build step:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://unpkg.com/mdream/dist/browser/browser.js"></script>
+</head>
+<body>
+  <script>
+    // Convert HTML to Markdown in the browser
+    const html = '<h1>Hello World</h1><p>This is a paragraph.</p>'
+    const markdown = window.mdream.htmlToMarkdown(html)
+    console.log(markdown) // # Hello World\n\nThis is a paragraph.
+  </script>
+</body>
+</html>
+```
+
+**CDN Options:**
+- **unpkg**: `https://unpkg.com/mdream/dist/browser/browser.js`
+- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/browser/browser.js`
+
+The browser build includes the core `htmlToMarkdown` function and is optimized for size (~5kB gzipped).
 
 ### Presets
 

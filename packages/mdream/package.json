@@ -57,6 +57,9 @@
     "bin",
     "dist"
   ],
+  "browser": "./dist/browser/browser.js",
+  "unpkg": "./dist/browser/browser.js",
+  "jsdelivr": "./dist/browser/browser.js",
   "scripts": {
     "flame": "pnpm build && unbuild bench/bundle && clinic flame -- node bench/bundle/dist/string.mjs 10",
     "bench:build": "pnpm build && unbuild bench/bundle",
