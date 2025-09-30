@@ -376,7 +376,7 @@ For browser environments, you can use mdream directly via CDN without any build 
 <!DOCTYPE html>
 <html>
 <head>
-  <script src="https://unpkg.com/mdream/dist/browser.js"></script>
+  <script src="https://unpkg.com/mdream/dist/iife.js"></script>
 </head>
 <body>
   <script>
@@ -390,8 +390,8 @@ For browser environments, you can use mdream directly via CDN without any build 
 ```
 
 **CDN Options:**
-- **unpkg**: `https://unpkg.com/mdream/dist/browser.js`
-- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/browser.js`
+- **unpkg**: `https://unpkg.com/mdream/dist/iife.js`
+- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/iife.js`
 
 The browser build includes the core `htmlToMarkdown` function and is optimized for size (44kB uncompressed, 10.3kB gzipped).
 

@@ -5,11 +5,11 @@ describe('mdream IIFE bundle static loading', () => {
   it('should load IIFE bundle from script src', async () => {
     // Try different paths that might work
     const possiblePaths = [
-      '/packages/mdream/dist/browser.js',
-      '../../dist/browser.js',
-      '/dist/browser.js',
-      './dist/browser.js',
-      '../../../dist/browser.js',
+      '/packages/mdream/dist/iife.js',
+      '../../dist/iife.js',
+      '/dist/iife.js',
+      './dist/iife.js',
+      '../../../dist/iife.js',
     ]
 
     let loaded = false
@@ -78,7 +78,7 @@ describe('mdream IIFE bundle static loading', () => {
         <h3 style="color: #1976D2; margin-top: 0;">🔧 IIFE Bundle Build Validation</h3>
         <p><strong>Status:</strong> Bundle build process verified ✅</p>
         <p><strong>Core API:</strong> Functionality tested ✅</p>
-        <p><strong>Expected Bundle Location:</strong> <code>dist/browser.js</code></p>
+        <p><strong>Expected Bundle Location:</strong> <code>dist/iife.js</code></p>
         <p><strong>Expected Global:</strong> <code>window.mdream.htmlToMarkdown</code></p>
         <div style="background: #fff; padding: 10px; border-radius: 4px; margin: 10px 0;">
           <strong>Test Result:</strong><br>
@@ -135,7 +135,7 @@ describe('mdream IIFE bundle static loading', () => {
     demoDiv.innerHTML = `
       <h3 style="color: #388E3C; margin-top: 0;">🌐 CDN Usage Demo</h3>
       <p><strong>Usage Pattern:</strong></p>
-      <pre style="background: #fff; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>&lt;script src="https://unpkg.com/mdream@latest/dist/browser.js"&gt;&lt;/script&gt;
+      <pre style="background: #fff; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>&lt;script src="https://unpkg.com/mdream@latest/dist/iife.js"&gt;&lt;/script&gt;
 &lt;script&gt;
   const markdown = window.mdream.htmlToMarkdown(html);
   console.log(markdown);

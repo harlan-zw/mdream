@@ -11,7 +11,7 @@ export default defineBuildConfig({
     },
     {
       type: 'bundle',
-      input: './src/browser.ts',
+      input: './src/iife.ts',
       minify: true,
     },
   ],
@@ -19,7 +19,7 @@ export default defineBuildConfig({
     end(ctx) {
       // Create IIFE version of browser bundle
       const cwd = ctx?.cwd || process.cwd()
-      const browserMjsPath = resolve(cwd, 'dist/browser.mjs')
+      const browserMjsPath = resolve(cwd, 'dist/iife.mjs')
       try {
         const browserContent = readFileSync(browserMjsPath, 'utf-8')
 
@@ -50,7 +50,7 @@ if (typeof window !== 'undefined') {
         mkdirSync(browserDir, { recursive: true })
 
         // Write IIFE bundle
-        const outputPath = resolve(browserDir, 'browser.js')
+        const outputPath = resolve(browserDir, 'iife.js')
         writeFileSync(outputPath, iifeContent)
 
         // Calculate sizes
