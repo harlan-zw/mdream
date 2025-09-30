@@ -1,5 +1,5 @@
 import type { HttpCrawlerOptions, PlaywrightCrawlerOptions } from 'crawlee'
-import type { ProcessedFile } from 'mdream'
+import type { ProcessedFile } from 'mdream/llms-txt'
 import type { CrawlOptions, CrawlResult } from './types.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
