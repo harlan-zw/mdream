@@ -119,6 +119,10 @@ function resolveUrl(url: string, origin?: string): string {
     return `https:${url}`
   }
 
+  if (url.startsWith('#')) {
+    return url
+  }
+
   if (origin) {
     if (url.startsWith('/') && origin) {
       // Remove trailing slash from origin if present

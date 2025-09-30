@@ -31,4 +31,68 @@ describe('links', () => {
     const markdown = htmlToMarkdown(html)
     expect(markdown).toMatchInlineSnapshot(`"## [New Project](#new-project)"`)
   })
+
+  it('handles same-document anchor links', () => {
+    const html = '<a href="#my-anchor">Jump to anchor</a>'
+    const markdown = htmlToMarkdown(html)
+    expect(markdown).toBe('[Jump to anchor](#my-anchor)')
+  })
+
+  it('handles same-document anchor links with origin', () => {
+    const html = '<a href="#my-anchor">Jump to anchor</a>'
+    const markdown = htmlToMarkdown(html, {
+      origin: 'https://mydomain.com',
+    })
+    expect(markdown).toBe('[Jump to anchor](#my-anchor)')
+  })
+
+  it('handles absolute URL with fragment', () => {
+    const html = '<a href="https://example.com/page#section">Link</a>'
+    const markdown = htmlToMarkdown(html)
+    expect(markdown).toBe('[Link](https://example.com/page#section)')
+  })
+
+  it('handles relative path with fragment', () => {
+    const html = '<a href="/page#section">Link</a>'
+    const markdown = htmlToMarkdown(html, {
+      origin: 'https://example.com',
+    })
+    expect(markdown).toBe('[Link](https://example.com/page#section)')
+  })
+
+  it('handles relative path with fragment without origin', () => {
+    const html = '<a href="/page#section">Link</a>'
+    const markdown = htmlToMarkdown(html)
+    expect(markdown).toBe('[Link](/page#section)')
+  })
+
+  it('handles empty fragment', () => {
+    const html = '<a href="#">Link</a>'
+    const markdown = htmlToMarkdown(html)
+    expect(markdown).toBe('[Link](#)')
+  })
+
+  it('handles fragment with special characters', () => {
+    const html = '<a href="#section-1_test">Link</a>'
+    const markdown = htmlToMarkdown(html)
+    expect(markdown).toBe('[Link](#section-1_test)')
+  })
+
+  it('handles protocol-relative URL with fragment', () => {
+    const html = '<a href="//example.com/page#section">Link</a>'
+    const markdown = htmlToMarkdown(html)
+    expect(markdown).toBe('[Link](https://example.com/page#section)')
+  })
+
+  it('handles anchor with title and fragment', () => {
+    const html = '<a href="#section" title="Go to section">Link</a>'
+    const markdown = htmlToMarkdown(html)
+    expect(markdown).toBe('[Link](#section "Go to section")')
+  })
+
+  it('handles multiple links with text in paragraph', () => {
+    const html = '<p><a href="#top">Top</a> and <a href="#bottom">Bottom</a></p>'
+    const markdown = htmlToMarkdown(html)
+    expect(markdown).toBe('[Top](#top) and [Bottom](#bottom)')
+  })
 })
