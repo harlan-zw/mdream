@@ -10,7 +10,7 @@
   "scripts": {
     "build": "pnpm run -r build",
     "typecheck": "pnpm run -r typecheck",
-    "test": "vitest test",
+    "test": "pnpm exec playwright install && vitest test",
     "release": "pnpm build && bumpp --output=CHANGELOG.md packages/*/package.json",
     "test:attw": "pnpm -r --parallel --filter=./packages/** run test:attw"
   },

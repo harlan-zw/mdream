@@ -28,11 +28,11 @@ export default defineBuildConfig({
         const iifeContent = `(function() {
 'use strict';
 
-${browserContent.replace(/^export \{[^}]+\};\s*$/m, '')}
+${browserContent.replace(/export\s*\{[^}]+\};\s*$/m, '')}
 
 // Expose mdream globally
 if (typeof window !== 'undefined') {
-  window.mdream = mdream;
+  window.mdream = fn;
 }
 
 })();`
