@@ -57,6 +57,8 @@
     }
   },
   "main": "./dist/index.mjs",
+  "unpkg": "./dist/browser.js",
+  "jsdelivr": "./dist/browser.js",
   "types": "./dist/index.d.mts",
   "bin": {
     "mdream": "./bin/mdream.mjs"
@@ -65,9 +67,7 @@
     "bin",
     "dist"
   ],
-  "browser": "./dist/browser/browser.js",
-  "unpkg": "./dist/browser/browser.js",
-  "jsdelivr": "./dist/browser/browser.js",
+  "browser": "./dist/browser.js",
   "scripts": {
     "flame": "pnpm build && unbuild bench/bundle && clinic flame -- node bench/bundle/dist/string.mjs 10",
     "bench:build": "pnpm build && unbuild bench/bundle",

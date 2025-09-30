@@ -1,7 +1,7 @@
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { gzipSync } from 'node:zlib'
 import { defineBuildConfig } from 'obuild/config'
-import { writeFileSync, mkdirSync, readFileSync, unlinkSync } from 'fs'
-import { resolve } from 'path'
-import { gzipSync } from 'zlib'
 
 export default defineBuildConfig({
   entries: [
@@ -12,7 +12,6 @@ export default defineBuildConfig({
     {
       type: 'bundle',
       input: './src/browser.ts',
-      name: 'browser',
       minify: true,
     },
   ],
@@ -41,12 +40,13 @@ if (typeof window !== 'undefined') {
         try {
           unlinkSync(browserMjsPath)
           unlinkSync(browserMjsPath.replace('.mjs', '.d.mts'))
-        } catch (error) {
+        }
+        catch (error) {
           // Files might not exist, continue
         }
 
         // Ensure directory exists
-        const browserDir = resolve(cwd, 'dist/browser')
+        const browserDir = resolve(cwd, 'dist')
         mkdirSync(browserDir, { recursive: true })
 
         // Write IIFE bundle
@@ -59,7 +59,8 @@ if (typeof window !== 'undefined') {
 
         console.log(`✅ Browser IIFE bundle created: ${outputPath}`)
         console.log(`Size: ${Math.round(uncompressedSize / 1024)}kB, ${Math.round(gzippedSize / 1024 * 10) / 10}kB gzipped`)
-      } catch (error) {
+      }
+      catch (error) {
         console.warn('Could not create IIFE bundle:', error.message)
       }
     },
