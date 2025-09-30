@@ -5,7 +5,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { useNuxt } from '@nuxt/kit'
 import { consola } from 'consola'
-import { generateLlmsTxtArtifacts } from 'mdream'
+import { generateLlmsTxtArtifacts } from 'mdream/llms-txt'
 import { useSiteConfig } from 'nuxt-site-config/kit'
 
 const logger = consola.withTag('nuxt-mdream')
