@@ -14,8 +14,6 @@ export function htmlToMarkdown(
 }
 
 export { TagIdMap } from './const'
-export { generateLlmsTxtArtifacts } from './llms-txt.ts'
-export type { LlmsTxtArtifactsOptions, LlmsTxtArtifactsResult, ProcessedFile } from './llms-txt.ts'
 export { MarkdownProcessor } from './markdown-processor'
 export { parseHtml } from './parse'
 export { createPlugin } from './pluggable/plugin'
