@@ -393,8 +393,6 @@ For browser environments, you can use mdream directly via CDN without any build 
 - **unpkg**: `https://unpkg.com/mdream/dist/iife.js`
 - **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/iife.js`
 
-The browser build includes the core `htmlToMarkdown` function and is optimized for size (44kB uncompressed, 10.3kB gzipped).
-
 ### Presets
 
 Presets are pre-configured combinations of plugins for common use cases.
