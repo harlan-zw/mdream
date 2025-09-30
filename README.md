@@ -393,7 +393,7 @@ For browser environments, you can use mdream directly via CDN without any build 
 - **unpkg**: `https://unpkg.com/mdream/dist/browser/browser.js`
 - **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/browser/browser.js`
 
-The browser build includes the core `htmlToMarkdown` function and is optimized for size (~5kB gzipped).
+The browser build includes the core `htmlToMarkdown` function and is optimized for size (44kB uncompressed, 10.3kB gzipped).
 
 ### Presets
 
