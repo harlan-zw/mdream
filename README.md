@@ -311,7 +311,7 @@ pnpm add mdream
 
 Mdream provides two main functions for working with HTML:
 - `htmlToMarkdown`: Useful if you already have the entire HTML payload you want to convert.
-- `streamHtmlToMarkdown`: Best practice if you are fetching or reading from a local file.
+- `streamHtmlToMarkdown`: Ideal for converting large HTML documents from a network request.
 
 **Convert existing HTML**
 
