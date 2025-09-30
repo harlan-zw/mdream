@@ -82,6 +82,33 @@ Mdream provides two main functions for working with HTML:
 - `htmlToMarkdown`: Useful if you already have the entire HTML payload you want to convert.
 - `streamHtmlToMarkdown`: Best practice if you are fetching or reading from a local file.
 
+## Browser CDN Usage
+
+For browser environments, you can use mdream directly via CDN without any build step:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://unpkg.com/mdream/dist/iife.js"></script>
+</head>
+<body>
+  <script>
+    // Convert HTML to Markdown in the browser
+    const html = '<h1>Hello World</h1><p>This is a paragraph.</p>'
+    const markdown = window.mdream.htmlToMarkdown(html)
+    console.log(markdown) // # Hello World\n\nThis is a paragraph.
+  </script>
+</body>
+</html>
+```
+
+**CDN Options:**
+- **unpkg**: `https://unpkg.com/mdream/dist/iife.js`
+- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/iife.js`
+
+The browser build includes the core `htmlToMarkdown` function and is optimized for size (44kB uncompressed, 10.3kB gzipped).
+
 **Convert existing HTML**
 
 ```ts
