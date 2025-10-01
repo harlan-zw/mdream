@@ -28,6 +28,11 @@
   "files": [
     "dist"
   ],
+  "build": {
+    "externals": [
+      "h3"
+    ]
+  },
   "scripts": {
     "build": "pnpm run dev:prepare && nuxt-module-build build",
     "dev": "nuxi dev playground",
