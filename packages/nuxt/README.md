@@ -95,6 +95,144 @@ When using `nuxt generate` or static hosting, the module automatically:
 
 These files are placed in the `public/` directory and served as static assets.
 
+## Server Hooks
+
+The module provides several hooks for integrating with other modules (e.g., `nuxt-ai-index`):
+
+### `'mdream:config'`{lang="ts"}
+
+**Type:** `(ctx: ConfigContext) => void | Promise<void>`{lang="ts"}
+
+```ts
+interface ConfigContext {
+  route: string
+  options: MdreamOptions
+  event: H3Event
+}
+```
+
+Modify the mdream options before HTML→Markdown conversion. This hook is called during runtime middleware processing, allowing you to dynamically adjust conversion behavior based on the request.
+
+```ts [server/plugins/mdream-config.ts]
+export default defineNitroPlugin((nitroApp) => {
+  nitroApp.hooks.hook('mdream:config', async (ctx) => {
+    // Apply readability preset for documentation routes
+    if (ctx.route.startsWith('/docs')) {
+      ctx.options.preset = 'readability'
+    }
+
+    // Add custom plugins dynamically
+    if (!ctx.options.plugins) {
+      ctx.options.plugins = []
+    }
+
+    // Filter out advertisements and cookie banners
+    ctx.options.plugins.push({
+      beforeNodeProcess(event) {
+        if (event.node.type === 1) { // ELEMENT_NODE
+          const element = event.node
+          const classList = element.attributes?.class?.split(' ') || []
+          if (classList.includes('advertisement') || classList.includes('cookie-banner')) {
+            return { skip: true }
+          }
+        }
+      }
+    })
+  })
+})
+```
+
+### `'mdream:markdown'`{lang="ts"}
+
+**Type:** `(ctx: MarkdownContext) => void | Promise<void>`{lang="ts"}
+
+```ts
+interface MarkdownContext {
+  html: string
+  markdown: string
+  route: string
+  title: string
+  description: string
+  isPrerender: boolean
+  event: H3Event
+}
+```
+
+Modify the generated markdown content after conversion. Use this hook for post-processing markdown, tracking conversions, or adding custom response headers.
+
+```ts [server/plugins/mdream-markdown.ts]
+export default defineNitroPlugin((nitroApp) => {
+  nitroApp.hooks.hook('mdream:markdown', async (ctx) => {
+    // Add footer to all markdown output
+    ctx.markdown += '\n\n---\n*Generated with mdream*'
+
+    // Track conversion for analytics
+    console.log(`Converted ${ctx.route} (${ctx.title})`)
+
+    // Add custom headers
+    setHeader(ctx.event, 'X-Markdown-Title', ctx.title)
+  })
+})
+```
+
+## Build Hooks
+
+### `'mdream:llms-txt:generate'`{lang="ts"}
+
+**Type:** `(payload: MdreamLlmsTxtGeneratePayload) => void | Promise<void>`{lang="ts"}
+
+```ts
+interface MdreamLlmsTxtGeneratePayload {
+  content: string
+  fullContent: string
+  pages: ProcessedFile[]
+}
+
+interface ProcessedFile {
+  filePath?: string
+  title: string
+  content: string
+  url: string
+  metadata?: {
+    title?: string
+    description?: string
+    keywords?: string
+    author?: string
+  }
+}
+```
+
+Modify the llms.txt content before it's written to disk. This hook is called once during prerendering after all routes have been processed. Uses a **mutable pattern** - modify the payload properties directly.
+
+```ts [nuxt.config.ts]
+export default defineNuxtConfig({
+  modules: ['@mdream/nuxt'],
+
+  hooks: {
+    'mdream:llms-txt:generate': async (payload) => {
+      // Access all processed pages
+      console.log(`Processing ${payload.pages.length} pages`)
+
+      // Add custom sections to llms.txt
+      payload.content += `
+
+## API Search
+
+Search available at /api/search with semantic search capabilities.
+`
+
+      // Add detailed API documentation to full content
+      payload.fullContent += `
+
+## Full API Documentation
+
+Detailed API documentation...
+`
+    }
+  }
+})
+```
+
 ## License
 
 [MIT License](./LICENSE)
