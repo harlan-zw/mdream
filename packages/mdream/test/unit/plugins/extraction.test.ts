@@ -1,5 +1,7 @@
 import type { ExtractedElement } from '../../../src/plugins/extraction.ts'
 import type { MdreamRuntimeState } from '../../../src/types.ts'
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown } from '../../../src/index.ts'
 import { extractionPlugin } from '../../../src/plugins/extraction.ts'
@@ -494,5 +496,32 @@ describe('extraction plugin', () => {
     expect(link.attributes.rel).toBe('stylesheet')
     expect(link.attributes.href).toBe('/_nuxt/entry.BqmaZWpx.css')
     expect(link.attributes.crossorigin).toBe('')
+  })
+
+  it('should extract title from nuxt-example.html fixture', async () => {
+    const fixtureHtml = fs.readFileSync(
+      path.join(__dirname, '../../fixtures/nuxt-example.html'),
+      'utf-8',
+    )
+
+    let title: string | undefined
+    let description: string | undefined
+    htmlToMarkdown(fixtureHtml, {
+      plugins: [
+        extractionPlugin({
+          title(el) {
+            title = el.textContent
+          },
+          'meta[name="description"]': (el) => {
+            description = el.attributes.content || ''
+          },
+        }),
+      ],
+    })
+
+    expect(title).toBeDefined()
+    expect(title).toBe('Features - MDream Conversion Capabilities')
+    expect(description).toBeDefined()
+    expect(description).toBe('Explore MDream\'s powerful features including streaming API, plugin system, custom tag handlers, and performance optimizations for HTML to Markdown conversion.')
   })
 })

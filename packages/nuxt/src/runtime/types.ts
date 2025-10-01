@@ -2,6 +2,8 @@ export interface MdreamPage {
   url: string
   title: string
   markdown: string
+  html?: string
+  description?: string
 }
 
 /**
@@ -16,6 +18,10 @@ export interface MdreamMarkdownContext {
   route: string
   /** The page title extracted from HTML */
   title: string
+  /** Page description extracted from meta tags or content */
+  description: string
   /** Whether this is during prerendering */
   isPrerender: boolean
+  /** The H3 event object for accessing request/response */
+  event: import('h3').H3Event
 }
