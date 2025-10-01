@@ -20,7 +20,7 @@ export function setupPrerenderHandler() {
       if (!route.fileName?.endsWith('.md')) {
         return
       }
-      const { markdown, title, description } = JSON.parse(route.contents) as {
+      const { markdown, title, description } = JSON.parse(route.contents || '{}') as {
         markdown: string
         title: string
         description: string
