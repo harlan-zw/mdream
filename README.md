@@ -23,7 +23,7 @@
 - 🧠 Custom built HTML to Markdown Convertor Optimized for LLMs (~50% fewer tokens)
 - 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
 - 🚀 Ultra Fast: Stream 1.4MB of HTML to markdown in ~50ms.
-- ⚡ Tiny: 5kB gzip, zero dependency core.
+- ⚡ Tiny: 6kB gzip, zero dependency core.
 - ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [Docker](#docker-usage), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), & more.
 - 🔌 Extensible: [Plugin system](#plugin-system) for customizing and extending functionality.
 
