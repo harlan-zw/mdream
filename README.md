@@ -244,39 +244,15 @@ For all available options and advanced configuration, see the complete [action.y
 
 ## Vite Integration
 
-Mdream provides a Vite plugin that enables on-demand HTML to Markdown conversion.
-
-- **Automatic Markdown**: Access any route with `.md` extension (e.g., `/about.html` → `/about.md`)
-- **Build-time Generation**: Automatically generates static markdown files alongside HTML files
-
 ### Installation
 
 ```bash
 pnpm install @mdream/vite
 ```
 
-### Usage
-
-```ts
-import MdreamVite from '@mdream/vite'
-// vite.config.ts
-import { defineConfig } from 'vite'
-
-export default defineConfig({
-  plugins: [
-    MdreamVite()
-  ]
-})
-```
-
-For more details and advanced configuration, see the [Vite README](./packages/vite/README.md).
+See the [Vite README](./packages/vite/README.md) for usage and configuration.
 
 ## Nuxt Integration
-
-The Mdream Nuxt module features:
-
-- **On-Demand Generation**: Access any route with `.md` extension (e.g., `/about` → `/about.md`)
-- **LLMs.txt Generation**: Creates `llms.txt` and `llms-full.txt` artifacts during prerendering
 
 ### Installation
 
@@ -284,23 +260,7 @@ The Mdream Nuxt module features:
 pnpm add @mdream/nuxt
 ```
 
-### Usage
-
-Add the module to your `nuxt.config.ts`:
-
-```ts
-export default defineNuxtConfig({
-  modules: [
-    '@mdream/nuxt'
-  ],
-})
-```
-
-Done! Add the `.md` to any URL path to access the markdown.
-
-When statically generating your site with `nuxi generate` it will create `llms.txt` artifacts.
-
-For more details and advanced configuration, see the [Nuxt Module README](./packages/nuxt/README.md).
+See the [Nuxt Module README](./packages/nuxt/README.md) for usage and configuration.
 
 ## Mdream Usage
 

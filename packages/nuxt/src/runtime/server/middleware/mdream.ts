@@ -3,13 +3,35 @@ import type { HTMLToMarkdownOptions } from 'mdream'
 import type { MdreamMarkdownContext, ModuleRuntimeConfig } from '../../../types'
 import { withSiteUrl } from '#site-config/server/composables/utils'
 import { consola } from 'consola'
-import { createError, defineEventHandler, setHeader } from 'h3'
+import { createError, defineEventHandler, getHeader, setHeader } from 'h3'
 import { htmlToMarkdown } from 'mdream'
 import { extractionPlugin } from 'mdream/plugins'
 import { withMinimalPreset } from 'mdream/preset/minimal'
 import { useNitroApp, useRuntimeConfig } from 'nitropack/runtime'
 
 const logger = consola.withTag('nuxt-mdream')
+
+// Detect if client prefers markdown based on Accept header
+// Clients like Claude Code, Bun, and other API clients typically don't include text/html
+function shouldServeMarkdown(event: H3Event): boolean {
+  const accept = getHeader(event, 'accept') || ''
+  const secFetchDest = getHeader(event, 'sec-fetch-dest') || ''
+
+  // Browsers send sec-fetch-dest header - if it's 'document', it's a browser navigation
+  // We should NOT serve markdown in that case
+  if (secFetchDest === 'document') {
+    return false
+  }
+
+  // Must NOT include text/html (excludes browsers)
+  if (accept.includes('text/html')) {
+    return false
+  }
+
+  // Must explicitly opt-in with either */* or text/markdown
+  // This catches API clients like Claude Code (axios with application/json, text/plain, */*)
+  return accept.includes('*/*') || accept.includes('text/markdown')
+}
 
 // Convert HTML to Markdown
 async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRuntimeConfig, route: string, event: H3Event) {
@@ -66,15 +88,21 @@ async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRu
 
 export default defineEventHandler(async (event) => {
   let path = event.path
+  const config = useRuntimeConfig(event).mdream as ModuleRuntimeConfig
 
-  // Early check: only process .md requests
-  if (!path.endsWith('.md')) {
+  // Check if we should serve markdown based on Accept header or .md extension
+  const hasMarkdownExtension = path.endsWith('.md')
+  const clientPrefersMarkdown = shouldServeMarkdown(event)
+
+  // Early exit: skip if not requesting .md and client doesn't prefer markdown
+  if (!hasMarkdownExtension && !clientPrefersMarkdown) {
     return
   }
 
-  const config = useRuntimeConfig(event).mdream as ModuleRuntimeConfig
-
-  path = path.slice(0, -3) // Remove .md
+  // Remove .md extension if present
+  if (hasMarkdownExtension) {
+    path = path.slice(0, -3)
+  }
 
   // Special handling for index.md -> /
   if (path === '/index') {
