@@ -1,20 +1,9 @@
 import type { Plugin, ViteDevServer } from 'vite'
-import { htmlToMarkdown } from 'mdream'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { viteHtmlToMarkdownPlugin } from '../../src/plugin.js'
 
-// Mock mdream
-vi.mock('mdream', () => ({
-  htmlToMarkdown: vi.fn((html: string) => `# Converted\n\n${html.replace(/<[^>]*>/g, '')}`),
-}))
-
-const mockHtmlToMarkdown = htmlToMarkdown as ReturnType<typeof vi.fn>
-
 describe('viteHtmlToMarkdownPlugin - Accept Header Detection', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockHtmlToMarkdown.mockClear()
-  })
+  vi.clearAllMocks()
 
   it('should serve markdown when Accept header contains */* but not text/html (Claude Code)', async () => {
     const plugin = viteHtmlToMarkdownPlugin({ verbose: false }) as Plugin & { configureServer: Function }
@@ -49,7 +38,7 @@ describe('viteHtmlToMarkdownPlugin - Accept Header Detection', () => {
     // Should convert to markdown
     expect(mockTransformRequest).toHaveBeenCalled()
     expect(mockRes.setHeader).toHaveBeenCalledWith('Content-Type', 'text/markdown; charset=utf-8')
-    expect(mockRes.end).toHaveBeenCalledWith('# Converted\n\nTest Page')
+    expect(mockRes.end).toHaveBeenCalledWith('# Test Page')
     expect(mockNext).not.toHaveBeenCalled()
   })
 
