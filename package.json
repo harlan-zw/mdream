@@ -17,7 +17,7 @@
   "devDependencies": {
     "@antfu/eslint-config": "^5.4.1",
     "@arethetypeswrong/cli": "^0.18.2",
-    "@types/node": "^24.6.0",
+    "@types/node": "^24.6.1",
     "@vitest/browser": "^3.2.4",
     "bumpp": "^10.2.3",
     "crawlee": "^3.15.1",

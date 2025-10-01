@@ -34,7 +34,7 @@
     ]
   },
   "scripts": {
-    "build": "pnpm run dev:prepare && nuxt-module-build build",
+    "build": "pnpm run dev:prepare && nuxt-module-build build && nuxt-module-build prepare",
     "dev": "nuxi dev playground",
     "dev:build": "nuxi build playground",
     "dev:prepare": "nuxt-module-build build --stub && nuxt-module-build prepare && nuxi prepare playground",
@@ -68,7 +68,7 @@
     "changelogen": "^0.6.2",
     "eslint": "^9.36.0",
     "nuxt": "^4.1.2",
-    "typescript": "^5.9.2",
+    "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }
 }
