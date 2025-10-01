@@ -72,7 +72,8 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     server: ViteDevServer | null = null,
     outDir?: string,
   ): Promise<MarkdownConversionResult> {
-    let basePath = url.slice(0, -3) // Remove .md extension
+    // Remove .md extension if present
+    let basePath = url.endsWith('.md') ? url.slice(0, -3) : url
 
     // Handle index.md -> / mapping
     if (basePath === '/index') {
@@ -156,18 +157,49 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     })
   }
 
+  // Detect if client prefers markdown based on Accept header
+  // Clients like Claude Code, Bun, and other API clients typically don't include text/html
+  function shouldServeMarkdown(acceptHeader?: string, secFetchDest?: string): boolean {
+    const accept = acceptHeader || ''
+
+    // Browsers send sec-fetch-dest header - if it's 'document', it's a browser navigation
+    // We should NOT serve markdown in that case
+    if (secFetchDest === 'document') {
+      return false
+    }
+
+    // Must NOT include text/html (excludes browsers)
+    if (accept.includes('text/html')) {
+      return false
+    }
+
+    // Must explicitly opt-in with either */* or text/markdown
+    // This catches API clients like Claude Code (axios with application/json, text/plain, */*)
+    return accept.includes('*/*') || accept.includes('text/markdown')
+  }
+
   return {
     name: 'vite-html-to-markdown',
 
-    // Development server integration - intercept .md requests
+    // Development server integration - intercept .md requests or Accept header markdown requests
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        if (!req.url?.endsWith('.md')) {
+        const hasMarkdownExtension = req.url?.endsWith('.md')
+        const clientPrefersMarkdown = shouldServeMarkdown(
+          req.headers.accept,
+          req.headers['sec-fetch-dest'] as string | undefined,
+        )
+
+        // Skip if not requesting .md and client doesn't prefer markdown
+        if (!hasMarkdownExtension && !clientPrefersMarkdown) {
           return next()
         }
 
+        // Use URL as-is if client prefers markdown via Accept header, otherwise remove .md
+        const url = hasMarkdownExtension ? req.url! : req.url!
+
         try {
-          const result = await handleMarkdownRequest(req.url, server)
+          const result = await handleMarkdownRequest(url, server)
 
           res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
           res.setHeader('Cache-Control', 'no-cache')
@@ -175,13 +207,13 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
           res.setHeader('X-Markdown-Cached', result.cached.toString())
 
           res.end(result.content)
-          log(`Served ${req.url} from ${result.source} (cached: ${result.cached})`)
+          log(`Served ${url} from ${result.source} (cached: ${result.cached})`)
         }
         catch (error) {
           const message = error instanceof Error ? error.message : String(error)
-          log(`Error serving ${req.url}: ${message}`)
+          log(`Error serving ${url}: ${message}`)
           res.statusCode = 404
-          res.end(`HTML content not found for ${req.url}`)
+          res.end(`HTML content not found for ${url}`)
         }
       })
     },
@@ -233,13 +265,23 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     // Preview server integration (for production preview)
     configurePreviewServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        if (!req.url?.endsWith('.md')) {
+        const hasMarkdownExtension = req.url?.endsWith('.md')
+        const clientPrefersMarkdown = shouldServeMarkdown(
+          req.headers.accept,
+          req.headers['sec-fetch-dest'] as string | undefined,
+        )
+
+        // Skip if not requesting .md and client doesn't prefer markdown
+        if (!hasMarkdownExtension && !clientPrefersMarkdown) {
           return next()
         }
 
+        // Use URL as-is if client prefers markdown via Accept header, otherwise remove .md
+        const url = hasMarkdownExtension ? req.url! : req.url!
+
         try {
           const outDir = server.config.build?.outDir || 'dist'
-          const result = await handleMarkdownRequest(req.url, null, outDir)
+          const result = await handleMarkdownRequest(url, null, outDir)
 
           res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
           res.setHeader('Cache-Control', 'public, max-age=3600')
@@ -247,13 +289,13 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
           res.setHeader('X-Markdown-Cached', result.cached.toString())
 
           res.end(result.content)
-          log(`Served ${req.url} from ${result.source} (cached: ${result.cached})`)
+          log(`Served ${url} from ${result.source} (cached: ${result.cached})`)
         }
         catch (error) {
           const message = error instanceof Error ? error.message : String(error)
-          log(`Error in preview server for ${req.url}: ${message}`)
+          log(`Error in preview server for ${url}: ${message}`)
           res.statusCode = 404
-          res.end(`HTML content not found for ${req.url}`)
+          res.end(`HTML content not found for ${url}`)
         }
       })
     },

@@ -5,24 +5,21 @@
 [![License][license-src]][license-href]
 [![Nuxt][nuxt-src]][nuxt-href]
 
-Nuxt module for converting HTML pages to Markdown using [mdream](https://github.com/unjs/mdream).
+Nuxt module for converting HTML pages to Markdown using [mdream](https://github.com/harlan-zw/mdream).
 
-Mdream provides a Nuxt module that enables seamless HTML to Markdown conversion for Nuxt 3 applications.
+## Features
 
 - **🚀 On-Demand Generation**: Access any route with `.md` extension (e.g., `/about` → `/about.md`)
+- **🤖 Smart Client Detection**: Automatically serves markdown to LLM bots based on Accept headers
 - **📄 LLMs.txt Generation**: Creates `llms.txt` and `llms-full.txt` artifacts during prerendering
 
-### Installation
+## Installation
 
 ```bash
-npm install @mdream/nuxt
-# or
 pnpm add @mdream/nuxt
-# or
-yarn add @mdream/nuxt
 ```
 
-### Usage
+## Usage
 
 Add the module to your `nuxt.config.ts`:
 
@@ -34,9 +31,21 @@ export default defineNuxtConfig({
 })
 ```
 
-Done! Add the `.md` to any file path to access markdown.
+Done! You can now:
 
-When statically generating your site with `nuxi generate` it will create `llms.txt` artifacts.
+1. **Add `.md` extension**: Access any route as markdown (e.g., `/about.md`)
+2. **LLM bots**: LLM bots automatically receive markdown responses based on Accept headers
+
+When statically generating your site with `nuxi generate` it will create `llms.txt` and `llms-full.txt` artifacts.
+
+### Smart Client Detection
+
+The module automatically detects LLM bots and serves markdown without requiring the `.md` extension:
+
+- ✅ **Serves markdown** when `Accept` header contains `*/*` or `text/markdown` (but not `text/html`)
+- ❌ **Serves HTML** to browsers (checks for `text/html` in Accept header or `sec-fetch-dest: document`)
+
+This means LLM bots automatically receive optimized markdown responses, reducing token usage by ~10x compared to HTML.
 
 ## Configuration
 
