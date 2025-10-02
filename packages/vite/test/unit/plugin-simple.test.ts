@@ -1,28 +1,11 @@
 import type { Plugin } from 'vite'
-import { htmlToMarkdown } from 'mdream'
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { viteHtmlToMarkdownPlugin } from '../../src/plugin.js'
 
-// Mock mdream
-vi.mock('mdream', () => ({
-  htmlToMarkdown: vi.fn((html: string) => `# Converted Markdown\n\n${html.replace(/<[^>]*>/g, '')}`),
-}))
-
-const mockHtmlToMarkdown = htmlToMarkdown as ReturnType<typeof vi.fn>
-
-// Mock fs
-vi.mock('node:fs', () => ({
-  default: {
-    existsSync: vi.fn(),
-    readFileSync: vi.fn(),
-  },
-}))
-
 describe('viteHtmlToMarkdownPlugin - Simple Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockHtmlToMarkdown.mockClear()
   })
 
   it('should create a plugin with correct name', () => {
@@ -58,11 +41,10 @@ describe('viteHtmlToMarkdownPlugin - Simple Tests', () => {
     plugin.generateBundle.call(mockThis, {}, mockBundle)
 
     // Should process HTML file and emit markdown
-    expect(mockHtmlToMarkdown).toHaveBeenCalledWith('<html><body><h1>Test</h1></body></html>', {})
     expect(mockEmitFile).toHaveBeenCalledWith({
       type: 'asset',
       fileName: 'test-md/test.md',
-      source: expect.stringContaining('# Converted Markdown'),
+      source: expect.stringContaining('# Test'),
     })
   })
 
@@ -86,7 +68,6 @@ describe('viteHtmlToMarkdownPlugin - Simple Tests', () => {
     plugin.generateBundle.call(mockThis, {}, mockBundle)
 
     // Should not process non-HTML files
-    expect(mockHtmlToMarkdown).not.toHaveBeenCalled()
     expect(mockEmitFile).not.toHaveBeenCalled()
   })
 })

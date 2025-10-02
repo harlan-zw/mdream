@@ -4,7 +4,7 @@ import type { Plugin } from 'vite'
 export interface ViteHtmlToMarkdownOptions {
   /**
    * Glob patterns to include HTML files for processing
-   * @default ['**\/*.html']
+   * @default ['*.html', '**\/*.html']
    */
   include?: string[]
 
@@ -32,19 +32,13 @@ export interface ViteHtmlToMarkdownOptions {
   mdreamOptions?: HTMLToMarkdownOptions
 
   /**
-   * Whether to preserve directory structure in output
-   * @default true
-   */
-  preserveStructure?: boolean
-
-  /**
    * Custom cache TTL in milliseconds for production
    * @default 3600000 (1 hour)
    */
   cacheTTL?: number
 
   /**
-   * Whether to log conversion activities
+   * Enable verbose logging for debugging
    * @default false
    */
   verbose?: boolean

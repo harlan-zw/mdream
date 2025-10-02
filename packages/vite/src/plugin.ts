@@ -1,18 +1,18 @@
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Plugin, ViteDevServer } from 'vite'
 import type { CacheEntry, MarkdownConversionResult, ViteHtmlToMarkdownOptions } from './types.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { htmlToMarkdown } from 'mdream'
 
-const DEFAULT_OPTIONS: Required<ViteHtmlToMarkdownOptions> = {
-  include: ['**/*.html'],
+const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>> & { mdreamOptions: {} } = {
+  include: ['*.html', '**/*.html'], // Include root level and nested
   exclude: ['**/node_modules/**'],
   outputDir: '', // Output in same directory as HTML files by default
   cacheEnabled: true,
   mdreamOptions: {},
-  preserveStructure: true,
   cacheTTL: 3600000, // 1 hour
-  verbose: true,
+  verbose: false,
 }
 
 export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions = {}): Plugin {
@@ -160,22 +160,68 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
   // Detect if client prefers markdown based on Accept header
   // Clients like Claude Code, Bun, and other API clients typically don't include text/html
   function shouldServeMarkdown(acceptHeader?: string, secFetchDest?: string): boolean {
-    const accept = acceptHeader || ''
-
     // Browsers send sec-fetch-dest header - if it's 'document', it's a browser navigation
     // We should NOT serve markdown in that case
     if (secFetchDest === 'document') {
       return false
     }
 
+    const accept = acceptHeader || ''
     // Must NOT include text/html (excludes browsers)
-    if (accept.includes('text/html')) {
+    const hasHtml = accept.includes('text/html')
+    if (hasHtml) {
       return false
     }
 
     // Must explicitly opt-in with either */* or text/markdown
     // This catches API clients like Claude Code (axios with application/json, text/plain, */*)
-    return accept.includes('*/*') || accept.includes('text/markdown')
+    const hasWildcard = accept.includes('*/*')
+    return hasWildcard || accept.includes('text/markdown')
+  }
+
+  function createMarkdownMiddleware(
+    getServer: () => ViteDevServer | null,
+    getOutDir: () => string | undefined,
+    cacheControl: string,
+  ) {
+    return async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
+      const path = new URL(req.url || '', 'http://localhost').pathname
+      const hasMarkdownExtension = path.endsWith('.md')
+      const clientPrefersMarkdown = shouldServeMarkdown(
+        req.headers.accept,
+        req.headers['sec-fetch-dest'] as string | undefined,
+      )
+
+      // never run on API routes, internal routes or explicit html requests
+      if (path.startsWith('/api') || path.startsWith('/_') || path.endsWith('.html')) {
+        return next()
+      }
+
+      // Skip if not requesting .md and client doesn't prefer markdown
+      if (!hasMarkdownExtension && !clientPrefersMarkdown) {
+        return next()
+      }
+
+      const url = req.url!
+
+      try {
+        const result = await handleMarkdownRequest(url, getServer(), getOutDir())
+
+        res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+        res.setHeader('Cache-Control', cacheControl)
+        res.setHeader('X-Markdown-Source', result.source)
+        res.setHeader('X-Markdown-Cached', result.cached.toString())
+
+        res.end(result.content)
+        log(`Served ${url} from ${result.source} (cached: ${result.cached})`)
+      }
+      catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        log(`Error serving ${url}: ${message}`)
+        res.statusCode = 404
+        res.end(`HTML content not found for ${url}`)
+      }
+    }
   }
 
   return {
@@ -183,46 +229,15 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
     // Development server integration - intercept .md requests or Accept header markdown requests
     configureServer(server) {
-      server.middlewares.use(async (req, res, next) => {
-        const hasMarkdownExtension = req.url?.endsWith('.md')
-        const clientPrefersMarkdown = shouldServeMarkdown(
-          req.headers.accept,
-          req.headers['sec-fetch-dest'] as string | undefined,
-        )
-
-        // Skip if not requesting .md and client doesn't prefer markdown
-        if (!hasMarkdownExtension && !clientPrefersMarkdown) {
-          return next()
-        }
-      if (path.startsWith('/api') || path.startsWith('/_') || path.endsWith('.html')) {
-        return next()
-      }
-
-        // Use URL as-is if client prefers markdown via Accept header, otherwise remove .md
-        const url = hasMarkdownExtension ? req.url! : req.url!
-
-        try {
-          const result = await handleMarkdownRequest(url, server)
-
-          res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
-          res.setHeader('Cache-Control', 'no-cache')
-          res.setHeader('X-Markdown-Source', result.source)
-          res.setHeader('X-Markdown-Cached', result.cached.toString())
-
-          res.end(result.content)
-          log(`Served ${url} from ${result.source} (cached: ${result.cached})`)
-        }
-        catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          log(`Error serving ${url}: ${message}`)
-          res.statusCode = 404
-          res.end(`HTML content not found for ${url}`)
-        }
-      })
+      server.middlewares.use(createMarkdownMiddleware(
+        () => server,
+        () => undefined,
+        'no-cache',
+      ))
     },
 
     // Build-time processing - generate static markdown files
-    generateBundle(outputOptions, bundle) {
+    generateBundle(_outputOptions, bundle) {
       const htmlFiles = Object.entries(bundle).filter(([fileName, file]) => {
         return (
           fileName.endsWith('.html')
@@ -232,7 +247,9 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
         )
       })
 
-      log(`Processing ${htmlFiles.length} HTML files for markdown generation`)
+      if (htmlFiles.length > 0) {
+        log(`Processing ${htmlFiles.length} HTML files for markdown generation`)
+      }
 
       for (const [fileName, htmlFile] of htmlFiles) {
         try {
@@ -243,11 +260,11 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
           const htmlContent = htmlFile.source as string
           const markdownContent = htmlToMarkdown(htmlContent, options.mdreamOptions)
 
-          // Generate corresponding .md filename
+          // Generate corresponding .md filename (preserving directory structure)
           const markdownFileName = fileName.replace('.html', '.md')
-          const outputPath = options.preserveStructure
+          const outputPath = options.outputDir
             ? `${options.outputDir}/${markdownFileName}`
-            : `${options.outputDir}/${path.basename(markdownFileName)}`
+            : markdownFileName
 
           // Emit markdown file to bundle
           this.emitFile({
@@ -267,40 +284,11 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
     // Preview server integration (for production preview)
     configurePreviewServer(server) {
-      server.middlewares.use(async (req, res, next) => {
-        const hasMarkdownExtension = req.url?.endsWith('.md')
-        const clientPrefersMarkdown = shouldServeMarkdown(
-          req.headers.accept,
-          req.headers['sec-fetch-dest'] as string | undefined,
-        )
-
-        // Skip if not requesting .md and client doesn't prefer markdown
-        if (!hasMarkdownExtension && !clientPrefersMarkdown) {
-          return next()
-        }
-
-        // Use URL as-is if client prefers markdown via Accept header, otherwise remove .md
-        const url = hasMarkdownExtension ? req.url! : req.url!
-
-        try {
-          const outDir = server.config.build?.outDir || 'dist'
-          const result = await handleMarkdownRequest(url, null, outDir)
-
-          res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
-          res.setHeader('Cache-Control', 'public, max-age=3600')
-          res.setHeader('X-Markdown-Source', result.source)
-          res.setHeader('X-Markdown-Cached', result.cached.toString())
-
-          res.end(result.content)
-          log(`Served ${url} from ${result.source} (cached: ${result.cached})`)
-        }
-        catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          log(`Error in preview server for ${url}: ${message}`)
-          res.statusCode = 404
-          res.end(`HTML content not found for ${url}`)
-        }
-      })
+      server.middlewares.use(createMarkdownMiddleware(
+        () => null,
+        () => server.config.build?.outDir || 'dist',
+        'public, max-age=3600',
+      ))
     },
   }
 }
