@@ -120,7 +120,7 @@ describe('viteHtmlToMarkdownPlugin - Accept Header Detection', () => {
     const mockReq = {
       url: '/test',
       headers: {
-        accept: 'application/json, text/plain, */*',
+        'accept': 'application/json, text/plain, */*',
         'sec-fetch-dest': 'document',
       },
     }

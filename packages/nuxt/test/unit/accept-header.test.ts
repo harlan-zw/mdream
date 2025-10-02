@@ -1,4 +1,3 @@
-import type { H3Event } from 'h3'
 import { describe, expect, it } from 'vitest'
 
 // Mock the shouldServeMarkdown function logic for testing
