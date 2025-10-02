@@ -90,6 +90,11 @@ export default defineEventHandler(async (event) => {
   let path = event.path
   const config = useRuntimeConfig(event).mdream as ModuleRuntimeConfig
 
+  // never run on API routes
+  if (path.startsWith('/api')) {
+    return
+  }
+
   // Check if we should serve markdown based on Accept header or .md extension
   const hasMarkdownExtension = path.endsWith('.md')
   const clientPrefersMarkdown = shouldServeMarkdown(event)
