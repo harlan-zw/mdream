@@ -118,15 +118,45 @@ export default defineEventHandler(async (event) => {
 
   // Fetch the HTML page
   try {
-    html = await globalThis.$fetch(path)
+    const response = await globalThis.$fetch.raw(path)
+
+    // Check if response is successful
+    if (!response.ok) {
+      if (hasMarkdownExtension) {
+        return createError({
+          statusCode: response.status,
+          statusMessage: response.statusText,
+          message: `Failed to fetch HTML for ${path}`,
+        })
+      }
+      return
+    }
+
+    // Check content-type is HTML
+    const contentType = response.headers.get('content-type') || ''
+    if (!contentType.includes('text/html')) {
+      if (hasMarkdownExtension) {
+        return createError({
+          statusCode: 415,
+          statusMessage: 'Unsupported Media Type',
+          message: `Expected text/html but got ${contentType} for ${path}`,
+        })
+      }
+      return
+    }
+
+    html = response._data
   }
   catch (e) {
     logger.error(`Failed to fetch HTML for ${path}`, e)
-    return createError({
-      statusCode: 500,
-      statusMessage: 'Internal Server Error',
-      message: `Failed to fetch HTML for ${path}`,
-    })
+    if (hasMarkdownExtension) {
+      return createError({
+        statusCode: 500,
+        statusMessage: 'Internal Server Error',
+        message: `Failed to fetch HTML for ${path}`,
+      })
+    }
+    return
   }
   // Convert to markdown
   const result = await convertHtmlToMarkdown(
