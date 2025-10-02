@@ -194,6 +194,9 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
         if (!hasMarkdownExtension && !clientPrefersMarkdown) {
           return next()
         }
+      if (path.startsWith('/api') || path.startsWith('/_') || path.endsWith('.html')) {
+        return next()
+      }
 
         // Use URL as-is if client prefers markdown via Accept header, otherwise remove .md
         const url = hasMarkdownExtension ? req.url! : req.url!
