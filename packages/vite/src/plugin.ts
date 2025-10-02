@@ -192,8 +192,19 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
         req.headers['sec-fetch-dest'] as string | undefined,
       )
 
-      // never run on API routes, internal routes or explicit html requests
-      if (path.startsWith('/api') || path.startsWith('/_') || path.endsWith('.html')) {
+      // never run on API routes or internal routes
+      if (path.startsWith('/api') || path.startsWith('/_') || path.startsWith('/@')) {
+        return next()
+      }
+
+      // Extract file extension from path (e.g., /file.js -> .js, /path/to/file.css -> .css)
+      const lastSegment = path.split('/').pop() || ''
+      const hasExtension = lastSegment.includes('.')
+      const extension = hasExtension ? lastSegment.substring(lastSegment.lastIndexOf('.')) : ''
+
+      // Only run on .md extension or no extension at all
+      // Skip all other file extensions (.js, .css, .html, .json, etc.)
+      if (hasExtension && extension !== '.md') {
         return next()
       }
 
