@@ -36,12 +36,12 @@
     "prepack": "pnpm run build"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.901.0",
+    "@aws-sdk/client-s3": "^3.908.0",
     "@clack/prompts": "^0.11.0",
     "@libsql/client": "^0.15.15",
     "@mdream/crawl": "workspace:*",
     "better-sqlite3": "^12.4.1",
-    "drizzle-orm": "^0.44.5",
+    "drizzle-orm": "^0.44.6",
     "pathe": "^2.0.3",
     "ufo": "^1.6.1",
     "unstorage": "^1.17.1"

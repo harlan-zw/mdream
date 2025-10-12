@@ -1,7 +1,7 @@
 {
   "type": "module",
   "private": true,
-  "packageManager": "pnpm@10.17.1",
+  "packageManager": "pnpm@10.18.2",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -17,15 +17,15 @@
   "devDependencies": {
     "@antfu/eslint-config": "^5.4.1",
     "@arethetypeswrong/cli": "^0.18.2",
-    "@types/node": "^24.6.2",
+    "@types/node": "^24.7.2",
     "@vitest/browser": "^3.2.4",
-    "bumpp": "^10.2.3",
+    "bumpp": "^10.3.1",
     "crawlee": "^3.15.1",
-    "eslint": "^9.36.0",
+    "eslint": "^9.37.0",
     "llm-cost": "^1.0.5",
     "obuild": "^0.2.1",
-    "playwright": "^1.55.1",
-    "typescript": "5.9.2",
+    "playwright": "^1.56.0",
+    "typescript": "5.9.3",
     "vitest": "^3.2.4"
   },
   "pnpm": {
