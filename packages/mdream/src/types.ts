@@ -311,3 +311,76 @@ export interface PluginContext {
   // Allow additional plugin-specific data
   [key: string]: unknown
 }
+
+/**
+ * Markdown chunk with content and metadata
+ * Compatible with LangChain Document structure
+ */
+export interface MarkdownChunk {
+  /** The markdown content of the chunk */
+  content: string
+  /** Metadata extracted during chunking */
+  metadata: {
+    /** Header hierarchy at this chunk position */
+    headers?: Record<string, string>
+    /** Code block language if chunk is/contains code */
+    code?: string
+    /** Line number range in original document */
+    loc?: {
+      lines: {
+        from: number
+        to: number
+      }
+    }
+  }
+}
+
+/**
+ * Options for HTML to Markdown chunking
+ * Extends HTMLToMarkdownOptions with chunking-specific settings
+ */
+export interface SplitterOptions extends HTMLToMarkdownOptions {
+  /**
+   * Header tag IDs to split on (TAG_H1, TAG_H2, etc.)
+   * @example [TAG_H1, TAG_H2]
+   * @default [TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6]
+   */
+  headersToSplitOn?: number[]
+
+  /**
+   * Return each line as individual chunk
+   * @default false
+   */
+  returnEachLine?: boolean
+
+  /**
+   * Strip headers from chunk content
+   * @default true
+   */
+  stripHeaders?: boolean
+
+  /**
+   * Maximum chunk size
+   * @default 1000
+   */
+  chunkSize?: number
+
+  /**
+   * Overlap between chunks for context preservation
+   * @default 200
+   */
+  chunkOverlap?: number
+
+  /**
+   * Function to measure chunk length (default: character count)
+   * Can be replaced with token counter for LLM applications
+   * @default (text) => text.length
+   */
+  lengthFunction?: (text: string) => number
+
+  /**
+   * Keep separators in the split chunks
+   * @default false
+   */
+  keepSeparator?: boolean
+}
