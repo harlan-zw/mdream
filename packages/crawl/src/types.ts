@@ -1,3 +1,11 @@
+export interface PageData {
+  url: string
+  html: string
+  title: string
+  metadata: PageMetadata
+  origin: string
+}
+
 export interface CrawlOptions {
   urls: string[]
   outputDir: string
@@ -18,6 +26,7 @@ export interface CrawlOptions {
   descriptionOverride?: string
   verbose?: boolean
   skipSitemap?: boolean
+  onPage?: (page: PageData) => Promise<void> | void
 }
 
 export interface ParsedUrlPattern {

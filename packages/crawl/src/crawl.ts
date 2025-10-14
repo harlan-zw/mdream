@@ -1,6 +1,6 @@
 import type { HttpCrawlerOptions, PlaywrightCrawlerOptions } from 'crawlee'
 import type { ProcessedFile } from 'mdream/llms-txt'
-import type { CrawlOptions, CrawlResult } from './types.ts'
+import type { CrawlOptions, CrawlResult, PageData } from './types.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import * as p from '@clack/prompts'
@@ -138,6 +138,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     descriptionOverride,
     verbose = false,
     skipSitemap = false,
+    onPage,
   } = options
 
   // Normalize and resolve the output directory
@@ -450,11 +451,27 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       // Check if this URL matches the glob pattern for markdown processing
       const shouldProcessMarkdown = shouldCrawlUrl(request.loadedUrl)
 
+      const pageOrigin = origin || new URL(request.loadedUrl).origin
+
+      // Call onPage callback if provided and this page should be processed
+      if (onPage && shouldProcessMarkdown) {
+        const pageData: PageData = {
+          url: request.loadedUrl,
+          html,
+          title,
+          metadata,
+          origin: pageOrigin,
+        }
+        await onPage(pageData)
+      }
+
       let md = ''
-      if (shouldProcessMarkdown) {
+      // Only generate markdown if not using onPage callback or if individual MD files are requested
+      // This avoids double-processing HTML when user handles it in onPage
+      if (shouldProcessMarkdown && (!onPage || generateIndividualMd)) {
         // Convert HTML to Markdown only for matching URLs
         md = htmlToMarkdown(html, withMinimalPreset({
-          origin: origin || new URL(request.loadedUrl).origin,
+          origin: pageOrigin,
         }))
       }
 
