@@ -54,6 +54,127 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 | [<img src="https://api.iconify.design/logos:nuxt-icon.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/nuxt](./packages/nuxt/README.md)                       | Generate automatic `.md` and `llms.txt` artifacts generation for Nuxt Sites                                                                                   |
 | [<img src="https://api.iconify.design/mdi:github.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/action](./packages/action/README.md)                | Generate `.md` and `llms.txt` artifacts from your static `.html` output                                                                                       |
 
+## Examples
+
+<details>
+<summary><b>🤖 Analyze Websites with AI Tools</b></summary>
+
+Feed website content directly to Claude or other AI tools:
+
+```bash
+# Analyze entire site with Claude
+npx @mdream/crawl harlanzw.com
+cat output/llms-full.txt | claude -p "summarize this website"
+
+# Analyze specific documentation
+npx @mdream/crawl "https://nuxt.com/docs/getting-started/**"
+cat output/llms-full.txt | claude -p "explain key concepts"
+
+# Convert single page
+curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream --origin https://en.wikipedia.org | claude -p "summarize"
+```
+</details>
+
+<details>
+<summary><b>🌐 Make Your Site AI-Discoverable</b></summary>
+
+Generate llms.txt to help AI tools understand your site:
+
+```bash
+# Static sites
+npx @mdream/crawl https://yoursite.com
+
+# JavaScript/SPA sites (React, Vue, Angular)
+npx -p playwright -p @mdream/crawl crawl https://spa-site.com --driver playwright
+```
+
+Outputs:
+- `output/llms.txt` - Optimized for LLM consumption
+- `output/llms-full.txt` - Complete content with metadata
+- `output/md/` - Individual markdown files per page
+</details>
+
+<details>
+<summary><b>🗄️ Build RAG Systems from Websites</b></summary>
+
+Crawl websites and generate embeddings for vector databases:
+
+```ts
+import { crawlAndGenerate } from '@mdream/crawl'
+import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
+import { withMinimalPreset } from 'mdream/preset/minimal'
+import { embed } from 'ai'
+
+const { createTransformersJS } = await import('@built-in-ai/transformers-js')
+const embeddingModel = createTransformersJS().textEmbeddingModel('Xenova/bge-base-en-v1.5')
+
+const embeddings = []
+
+await crawlAndGenerate({
+  urls: ['https://example.com'],
+  onPage: async ({ url, html, title, origin }) => {
+    const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+      chunkSize: 1000,
+      chunkOverlap: 200,
+      origin,
+    }))
+
+    for (const chunk of chunks) {
+      const { embedding } = await embed({ model: embeddingModel, value: chunk.content })
+      embeddings.push({ url, title, content: chunk.content, embedding })
+    }
+  },
+})
+
+// Save to vector database: await saveToVectorDB(embeddings)
+```
+</details>
+
+<details>
+<summary><b>✂️ Extract Specific Content from Pages</b></summary>
+
+Pull headers, images, or other elements during conversion:
+
+```ts
+import { htmlToMarkdown } from 'mdream'
+import { extractionPlugin } from 'mdream/plugins'
+
+const headers = []
+const images = []
+
+htmlToMarkdown(html, {
+  plugins: [
+    extractionPlugin({
+      'h1, h2, h3': (el) => headers.push(el.textContent),
+      'img[src]': (el) => images.push({ src: el.attributes.src, alt: el.attributes.alt })
+    })
+  ]
+})
+```
+</details>
+
+<details>
+<summary><b>⚡ Optimize Token Usage With Cleaner Content</b></summary>
+
+Remove ads, navigation, and unwanted elements to reduce token costs:
+
+```ts
+import { htmlToMarkdown, createPlugin, ELEMENT_NODE } from 'mdream'
+
+const cleanPlugin = createPlugin({
+  beforeNodeProcess({ node }) {
+    if (node.type === ELEMENT_NODE) {
+      const cls = node.attributes?.class || ''
+      if (cls.includes('ad') || cls.includes('nav') || node.name === 'script')
+        return { skip: true }
+    }
+  }
+})
+
+htmlToMarkdown(html, { plugins: [cleanPlugin] })
+```
+</details>
+
 ## Mdream Crawl
 
 > Need something that works in the browser or an edge runtime? Use [Mdream](#mdream-usage).
@@ -75,52 +196,6 @@ npx @mdream/crawl https://harlanzw.com
 npx @mdream/crawl "https://nuxt.com/docs/getting-started/**"
 # Get help
 npx @mdream/crawl -h
-```
-
-### Examples
-
-**Using with Claude Code**
-
-Mdream works seamlessly with Claude Code to analyze and understand websites:
-
-```bash
-# Crawl a website and analyze with Claude
-npx @mdream/crawl harlanzw.com
-cat output/llms-full.txt | claude -p "give me a one sentence summary of this website"
-
-# Analyze specific documentation sections
-npx @mdream/crawl "https://nuxt.com/docs/getting-started/**"
-cat output/llms-full.txt | claude -p "explain the key concepts in this documentation"
-
-# Extract specific information from a site
-npx @mdream/crawl example.com/blog
-cat output/llms.txt | claude -p "list all the blog post titles and their main topics"
-
-# Convert and analyze a single page
-curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream --origin https://en.wikipedia.org | claude -p "summarize the history of Markdown"
-```
-
-**Crawl Using Playwright**
-
-```bash
-npx -p playwright -p @mdream/crawl crawl -u example.com --driver playwright
-```
-
-```bash
-pnpm --package=playwright --package=@mdream/crawl dlx crawl example.com --driver playwright
-```
-
-**Exclude Specific Paths**
-
-```bash
-npx @mdream/crawl -u example.com --exclude "/admin/*" --exclude "/api/*"
-```
-
-**Large Site Crawling with Limits**
-```bash
-npx @mdream/crawl -u https://large-site.com \
-  --max-pages 100 \
-  --depth 2
 ```
 
 ## Stdin CLI Usage
