@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { TAG_H1, TAG_H2 } from '../../src/const'
 import { htmlToMarkdownSplitChunks } from '../../src/splitter'
+import { withMinimalPreset } from '../../src/preset/minimal'
 
 describe('htmlToMarkdownSplitChunks', () => {
   it('splits on h2 headers by default', () => {
@@ -866,6 +867,317 @@ with preserved   spacing</pre>
       })
 
       expect(chunks[0].content).toContain('Deeply nested content')
+    })
+  })
+
+  describe('withMinimalPreset integration', () => {
+    it('filters out navigation and footer content', () => {
+      const html = `
+        <nav>
+          <a href="/home">Home</a>
+          <a href="/about">About</a>
+        </nav>
+        <main>
+          <h1>Main Content</h1>
+          <p>This is the actual content</p>
+        </main>
+        <footer>
+          <p>Copyright 2024</p>
+        </footer>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+        headersToSplitOn: [TAG_H2],
+        stripHeaders: false,
+      }))
+
+      expect(chunks.length).toBeGreaterThan(0)
+      expect(chunks[0].content).toContain('Main Content')
+      expect(chunks[0].content).toContain('This is the actual content')
+      expect(chunks[0].content).not.toContain('Home')
+      expect(chunks[0].content).not.toContain('About')
+      expect(chunks[0].content).not.toContain('Copyright')
+    })
+
+    it('isolates main content from sidebar and aside', () => {
+      const html = `
+        <aside>Sidebar content</aside>
+        <main>
+          <h1>Article Title</h1>
+          <p>Article content here</p>
+        </main>
+        <aside>Another sidebar</aside>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+        headersToSplitOn: [TAG_H2],
+        stripHeaders: false,
+      }))
+
+      expect(chunks.length).toBeGreaterThan(0)
+      expect(chunks[0].content).toContain('Article Title')
+      expect(chunks[0].content).toContain('Article content')
+      expect(chunks[0].content).not.toContain('Sidebar content')
+      expect(chunks[0].content).not.toContain('Another sidebar')
+    })
+
+    it('filters out forms and interactive elements', () => {
+      const html = `
+        <main>
+          <h1>Sign Up</h1>
+          <p>Join our newsletter</p>
+          <form>
+            <input type="email" placeholder="Email">
+            <button>Submit</button>
+          </form>
+          <h2>More Content</h2>
+          <p>Additional information</p>
+        </main>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+        headersToSplitOn: [TAG_H2],
+        stripHeaders: false,
+      }))
+
+      expect(chunks.length).toBeGreaterThan(0)
+      expect(chunks[0].content).toContain('Sign Up')
+      expect(chunks[0].content).toContain('Join our newsletter')
+      expect(chunks[0].content).not.toContain('Email')
+      expect(chunks[0].content).not.toContain('Submit')
+    })
+
+    it('generates frontmatter from head section', () => {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Test Page Title</title>
+          <meta name="description" content="Test page description">
+          <meta property="og:image" content="https://example.com/image.png">
+        </head>
+        <body>
+          <main>
+            <h1>Main Heading</h1>
+            <p>Content here</p>
+          </main>
+        </body>
+        </html>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+        headersToSplitOn: [TAG_H2],
+        stripHeaders: false,
+      }))
+
+      expect(chunks.length).toBeGreaterThan(0)
+      expect(chunks[0].content).toContain('---')
+      expect(chunks[0].content).toContain('title:')
+      expect(chunks[0].content).toContain('Test Page Title')
+      expect(chunks[0].content).toContain('Main Heading')
+    })
+
+    it('handles tailwind classes without breaking content', () => {
+      const html = `
+        <main>
+          <h1 class="text-3xl font-bold">Heading with Tailwind</h1>
+          <p class="text-gray-600 mb-4">Paragraph with classes</p>
+          <div class="flex gap-4">
+            <span class="font-semibold">Bold text</span>
+          </div>
+        </main>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+        headersToSplitOn: [TAG_H2],
+        stripHeaders: false,
+      }))
+
+      expect(chunks.length).toBeGreaterThan(0)
+      expect(chunks[0].content).toContain('Heading with Tailwind')
+      expect(chunks[0].content).toContain('Paragraph with classes')
+      expect(chunks[0].content).toContain('**Bold text**')
+    })
+
+    it('combines minimal preset with custom plugins', () => {
+      const html = `
+        <nav>Skip this</nav>
+        <main>
+          <h1>Title</h1>
+          <h2>Section 1</h2>
+          <p>Content 1</p>
+          <h2>Section 2</h2>
+          <p>Content 2</p>
+        </main>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+        headersToSplitOn: [TAG_H2],
+        chunkSize: 100,
+        chunkOverlap: 20,
+      }))
+
+      expect(chunks.length).toBeGreaterThan(0)
+      expect(chunks[0].content).not.toContain('Skip this')
+      expect(chunks[0].metadata.headers?.h1).toBe('Title')
+    })
+
+    it('works with origin option for link resolution', () => {
+      const html = `
+        <main>
+          <h1>Article</h1>
+          <p>Check out <a href="/page">this page</a></p>
+          <img src="/image.png" alt="Test">
+        </main>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+        origin: 'https://example.com',
+        headersToSplitOn: [TAG_H2],
+      }))
+
+      expect(chunks.length).toBeGreaterThan(0)
+      expect(chunks[0].content).toContain('https://example.com/page')
+      expect(chunks[0].content).toContain('https://example.com/image.png')
+    })
+
+    it('preserves semantic content while filtering noise', () => {
+      const html = `
+        <header>
+          <nav>
+            <a href="/">Home</a>
+          </nav>
+        </header>
+        <main>
+          <article>
+            <h1>Important Article</h1>
+            <p>This is important content.</p>
+            <h2>Subsection</h2>
+            <p>More important information.</p>
+          </article>
+        </main>
+        <aside>Advertisement</aside>
+        <footer>© 2024</footer>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+        headersToSplitOn: [TAG_H2],
+        stripHeaders: false,
+      }))
+
+      expect(chunks.length).toBeGreaterThan(0)
+      expect(chunks[0].content).toContain('Important Article')
+      expect(chunks[0].content).toContain('This is important content')
+      expect(chunks[0].content).not.toContain('Home')
+      expect(chunks[0].content).not.toContain('Advertisement')
+      expect(chunks[0].content).not.toContain('©')
+    })
+
+    it('handles complex real-world HTML structure', () => {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Blog Post - Example Site</title>
+          <meta name="description" content="An example blog post">
+        </head>
+        <body>
+          <nav class="navbar">
+            <a href="/">Home</a>
+            <a href="/blog">Blog</a>
+          </nav>
+
+          <main class="container mx-auto px-4">
+            <article>
+              <h1 class="text-4xl font-bold mb-4">My Blog Post</h1>
+              <p class="text-gray-600">Published on Jan 1, 2024</p>
+
+              <h2 class="text-2xl mt-8">Introduction</h2>
+              <p>This is the introduction paragraph with some <strong>bold text</strong>.</p>
+
+              <h2 class="text-2xl mt-8">Main Content</h2>
+              <p>Here's the main content of the post.</p>
+              <pre><code class="language-javascript">const example = true;</code></pre>
+
+              <h2 class="text-2xl mt-8">Conclusion</h2>
+              <p>Final thoughts here.</p>
+            </article>
+          </main>
+
+          <aside class="sidebar">
+            <h3>Related Posts</h3>
+            <ul>
+              <li><a href="/post1">Post 1</a></li>
+            </ul>
+          </aside>
+
+          <footer class="bg-gray-800 text-white">
+            <p>© 2024 Example Site</p>
+          </footer>
+        </body>
+        </html>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+        headersToSplitOn: [TAG_H2],
+        origin: 'https://example.com',
+        stripHeaders: false,
+      }))
+
+      expect(chunks.length).toBe(3) // Split on each h2
+
+      // Check frontmatter in first chunk
+      expect(chunks[0].content).toContain('---')
+      expect(chunks[0].content).toContain('title:')
+
+      // Check headers
+      expect(chunks[0].metadata.headers?.h1).toBe('My Blog Post')
+      expect(chunks[0].metadata.headers?.h2).toBe('Introduction')
+      expect(chunks[1].metadata.headers?.h2).toBe('Main Content')
+      expect(chunks[2].metadata.headers?.h2).toBe('Conclusion')
+
+      // Check code metadata
+      expect(chunks[1].metadata.code).toBe('javascript')
+
+      // Check content filtering
+      expect(chunks.every(c => !c.content.includes('navbar'))).toBe(true)
+      expect(chunks.every(c => !c.content.includes('Related Posts'))).toBe(true)
+      expect(chunks.every(c => !c.content.includes('© 2024'))).toBe(true)
+
+      // Check content preservation
+      expect(chunks[0].content).toContain('Introduction')
+      expect(chunks[0].content).toContain('**bold text**')
+      expect(chunks[1].content).toContain('const example = true')
+    })
+
+    it('chunks large content with minimal preset filters', () => {
+      const longContent = 'Lorem ipsum dolor sit amet. '.repeat(100)
+      const html = `
+        <nav>Navigation</nav>
+        <main>
+          <h1>Article</h1>
+          <p>${longContent}</p>
+          <aside>Sidebar</aside>
+          <p>${longContent}</p>
+        </main>
+        <footer>Footer</footer>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+        chunkSize: 500,
+        chunkOverlap: 50,
+        headersToSplitOn: [],
+      }))
+
+      expect(chunks.length).toBeGreaterThan(1)
+
+      // All chunks should be filtered
+      for (const chunk of chunks) {
+        expect(chunk.content).not.toContain('Navigation')
+        expect(chunk.content).not.toContain('Sidebar')
+        expect(chunk.content).not.toContain('Footer')
+        expect(chunk.content).toContain('Lorem ipsum')
+      }
     })
   })
 })
