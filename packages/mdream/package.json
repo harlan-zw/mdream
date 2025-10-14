@@ -54,6 +54,14 @@
         "default": "./dist/preset/minimal.mjs"
       },
       "default": "./dist/preset/minimal.mjs"
+    },
+    "./splitter": {
+      "types": "./dist/splitter.d.mts",
+      "import": {
+        "types": "./dist/splitter.d.mts",
+        "default": "./dist/splitter.mjs"
+      },
+      "default": "./dist/splitter.mjs"
     }
   },
   "main": "./dist/index.mjs",
