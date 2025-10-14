@@ -70,6 +70,10 @@ cat output/llms-full.txt | claude -p "summarize this website"
 npx @mdream/crawl "https://nuxt.com/docs/getting-started/**"
 cat output/llms-full.txt | claude -p "explain key concepts"
 
+# Analyze JavaScript/SPA sites (React, Vue, Angular)
+npx -p playwright -p @mdream/crawl crawl https://spa-site.com --driver playwright
+cat output/llms-full.txt | claude -p "what features does this app have"
+
 # Convert single page
 curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream --origin https://en.wikipedia.org | claude -p "summarize"
 ```
