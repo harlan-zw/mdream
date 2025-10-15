@@ -1176,7 +1176,7 @@ with preserved   spacing</pre>
 
     it('applies correct overlap amount on size splits', () => {
       const word = 'test'
-      const content = (word + ' ').repeat(300) // ~1500 chars
+      const content = (`${word} `).repeat(300) // ~1500 chars
 
       const chunks = htmlToMarkdownSplitChunks(`<p>${content}</p>`, {
         chunkSize: 800,
