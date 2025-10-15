@@ -247,6 +247,23 @@ export function htmlToMarkdownSplitChunks(
           // Find last occurrence of separator before/at ideal position
           const idx = currentMd.lastIndexOf(sep, idealSplitPos)
           const candidateSplitPos = idx + sep.length
+
+          if (idx >= 0) {
+            // Check if we're inside a code block at this position
+            const beforeSplit = currentMd.slice(0, candidateSplitPos)
+            // Count occurrences of ``` without regex (better perf)
+            let backtickCount = 0
+            let pos = 0
+            while ((pos = beforeSplit.indexOf('```', pos)) !== -1) {
+              backtickCount++
+              pos += 3
+            }
+            // If odd number of backticks, we're inside a code block - skip
+            if (backtickCount % 2 === 1) {
+              continue
+            }
+          }
+
           // Only use separator if split position would be beyond our last split
           if (idx >= 0 && candidateSplitPos > lastSplitPosition) {
             splitPosition = candidateSplitPos
