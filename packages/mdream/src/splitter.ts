@@ -102,13 +102,18 @@ export function htmlToMarkdownSplitChunks(
   let currentHeaderText = ''
   let lineNumber = 1
   let lastChunkEndPosition = 0
+  let lastSplitPosition = 0 // Track where we last split to avoid re-splitting
 
-  function flushChunk() {
+  function flushChunk(endPosition?: number) {
     const currentMd = getCurrentMarkdown(processor.state)
-    const chunkContent = currentMd.slice(lastChunkEndPosition)
+    const chunkEnd = endPosition ?? currentMd.length
+    const chunkContent = currentMd.slice(lastChunkEndPosition, chunkEnd)
 
-    if (!chunkContent.trim())
+    if (!chunkContent.trim()) {
+      // Still update position to avoid infinite loop
+      lastChunkEndPosition = chunkEnd
       return
+    }
 
     const chunk: MarkdownChunk = {
       content: chunkContent.trimEnd(),
@@ -141,13 +146,18 @@ export function htmlToMarkdownSplitChunks(
     // Reset code language for next chunk
     currentChunkCodeLanguage = ''
 
-    // Handle overlap
+    // Track where we split (before applying overlap)
+    lastSplitPosition = chunkEnd
+
+    // Handle overlap - ensure we always advance by at least 1 char
     if (opts.chunkOverlap > 0) {
-      const overlapText = chunkContent.slice(-opts.chunkOverlap)
-      lastChunkEndPosition = currentMd.length - overlapText.length
+      // Cap overlap to (chunkContent.length - 1) to ensure forward progress
+      const maxOverlap = Math.max(0, chunkContent.length - 1)
+      const actualOverlap = Math.min(opts.chunkOverlap, maxOverlap)
+      lastChunkEndPosition = chunkEnd - actualOverlap
     }
     else {
-      lastChunkEndPosition = currentMd.length
+      lastChunkEndPosition = chunkEnd
     }
 
     lineNumber += (chunkContent.match(/\n/g) || []).length
@@ -226,7 +236,30 @@ export function htmlToMarkdownSplitChunks(
       const currentChunkSize = opts.lengthFunction(currentMd.slice(lastChunkEndPosition))
 
       if (currentChunkSize > opts.chunkSize) {
-        flushChunk()
+        // Find optimal split point using hierarchy of separators (like RecursiveCharacterTextSplitter)
+        const idealSplitPos = lastChunkEndPosition + opts.chunkSize
+
+        // Ordered by preference: paragraph > code block > line > word
+        const separators = ['\n\n', '```\n', '\n', ' ']
+        let splitPosition = -1
+
+        for (const sep of separators) {
+          // Find last occurrence of separator before/at ideal position
+          const idx = currentMd.lastIndexOf(sep, idealSplitPos)
+          const candidateSplitPos = idx + sep.length
+          // Only use separator if split position would be beyond our last split
+          if (idx >= 0 && candidateSplitPos > lastSplitPosition) {
+            splitPosition = candidateSplitPos
+            break
+          }
+        }
+
+        // If no separator found before ideal position, use current length (split now)
+        if (splitPosition === -1 || splitPosition <= lastChunkEndPosition) {
+          splitPosition = currentMd.length
+        }
+
+        flushChunk(splitPosition)
       }
     }
   })
@@ -275,7 +308,8 @@ export function htmlToMarkdownSplitChunks(
     }
   }
 
-  return chunks
+  // Filter out empty chunks (can happen after header stripping)
+  return chunks.filter(chunk => chunk.content.length > 0)
 }
 
 export type { MarkdownChunk, SplitterOptions } from './types'
