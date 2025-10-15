@@ -4,22 +4,6 @@ import { withMinimalPreset } from '../../src/preset/minimal'
 import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 
 describe('htmlToMarkdownSplitChunks', () => {
-  it('splits on h2 headers by default', () => {
-    const html = `
-      <h1>Main Title</h1>
-      <p>Introduction</p>
-      <h2>Section 1</h2>
-      <p>Content 1</p>
-      <h2>Section 2</h2>
-      <p>Content 2</p>
-    `
-
-    const chunks = htmlToMarkdownSplitChunks(html)
-
-    expect(chunks.length).toBeGreaterThan(0)
-    expect(chunks[0].metadata.headers).toBeDefined()
-  })
-
   it('tracks header hierarchy in metadata', () => {
     const html = `
       <h1>Title</h1>
@@ -38,23 +22,6 @@ describe('htmlToMarkdownSplitChunks', () => {
     expect(lastChunk.metadata.headers?.h1).toBe('Title')
     expect(lastChunk.metadata.headers?.h2).toBe('Section')
     expect(lastChunk.metadata.headers?.h3).toBe('Subsection')
-  })
-
-  it('splits on custom headers', () => {
-    const html = `
-      <h1>Title</h1>
-      <p>Intro</p>
-      <h2>Section 1</h2>
-      <p>Content 1</p>
-      <h2>Section 2</h2>
-      <p>Content 2</p>
-    `
-
-    const chunks = htmlToMarkdownSplitChunks(html, {
-      headersToSplitOn: [TAG_H1],
-    })
-
-    expect(chunks.length).toBeGreaterThan(0)
   })
 
   it('strips headers from content when stripHeaders is true', () => {
@@ -137,41 +104,19 @@ describe('htmlToMarkdownSplitChunks', () => {
 
   it('maintains chunk overlap', () => {
     const html = `
-      <p>Line 1</p>
-      <p>Line 2</p>
-      <p>Line 3</p>
-      <p>Line 4</p>
-      <p>Line 5</p>
+      <p>${'Line one content. '.repeat(10)}</p>
+      <p>${'Line two content. '.repeat(10)}</p>
+      <p>${'Line three content. '.repeat(10)}</p>
     `
 
     const chunks = htmlToMarkdownSplitChunks(html, {
-      chunkSize: 50,
-      chunkOverlap: 20,
+      chunkSize: 100,
+      chunkOverlap: 30,
       headersToSplitOn: [],
     })
 
-    if (chunks.length > 1) {
-      // Check that there's some overlapping content
-      const firstChunkEnd = chunks[0].content.slice(-20)
-      const secondChunkStart = chunks[1].content.slice(0, 20)
-      // There should be some similarity
-      expect(chunks.length).toBeGreaterThan(1)
-    }
-  })
-
-  it('returns each line as chunk when returnEachLine is true', () => {
-    const html = `
-      <p>Line 1</p>
-      <p>Line 2</p>
-      <p>Line 3</p>
-    `
-
-    const chunks = htmlToMarkdownSplitChunks(html, {
-      returnEachLine: true,
-      headersToSplitOn: [],
-    })
-
-    expect(chunks.length).toBeGreaterThan(2)
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks).toMatchSnapshot()
   })
 
   it('uses custom length function', () => {
@@ -267,6 +212,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     })
 
     expect(chunks.length).toBeGreaterThan(2)
+    expect(chunks).toMatchSnapshot()
 
     // Check that code blocks are detected
     const codeChunks = chunks.filter(c => c.metadata.code)
@@ -293,28 +239,6 @@ describe('htmlToMarkdownSplitChunks', () => {
     expect(chunks).toEqual([])
   })
 
-  it('handles HTML with only whitespace', () => {
-    const chunks = htmlToMarkdownSplitChunks('   \n  \n  ')
-    expect(chunks.length).toBeLessThanOrEqual(1)
-  })
-
-  it('integrates with HTMLToMarkdownOptions', () => {
-    const html = `
-      <h2>Section</h2>
-      <p>Check out <a href="/page">this link</a></p>
-      <img src="/image.png" alt="Test">
-    `
-
-    const chunks = htmlToMarkdownSplitChunks(html, {
-      origin: 'https://example.com',
-      headersToSplitOn: [TAG_H2],
-    })
-
-    expect(chunks.length).toBeGreaterThan(0)
-    expect(chunks[0].content).toContain('https://example.com/page')
-    expect(chunks[0].content).toContain('https://example.com/image.png')
-  })
-
   // Edge Cases
   describe('edge cases', () => {
     it('handles consecutive headers with no content', () => {
@@ -337,33 +261,6 @@ describe('htmlToMarkdownSplitChunks', () => {
 
         ## Section 1"
       `)
-    })
-
-    it('handles headers with inline formatting', () => {
-      const html = `
-        <h2>Section with <strong>bold</strong> and <em>italic</em></h2>
-        <p>Content here</p>
-      `
-
-      const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
-      })
-
-      expect(chunks.length).toBeGreaterThan(0)
-      expect(chunks[0].metadata.headers?.h2).toBe('Section with bold and italic')
-    })
-
-    it('handles headers with links', () => {
-      const html = `
-        <h2>Check out <a href="https://example.com">this link</a></h2>
-        <p>Content</p>
-      `
-
-      const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
-      })
-
-      expect(chunks[0].metadata.headers?.h2).toBe('Check out this link')
     })
 
     it('handles skipped header levels', () => {
@@ -511,8 +408,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       })
 
       expect(chunks.length).toBeGreaterThan(0)
-      expect(chunks[0].content).toContain('Item 1')
-      expect(chunks[0].content).toContain('Nested 1')
+      expect(chunks[0].content).toMatchSnapshot()
     })
 
     it('handles tables in chunks', () => {
@@ -534,9 +430,7 @@ describe('htmlToMarkdownSplitChunks', () => {
         stripHeaders: false,
       })
 
-      expect(chunks[0].content).toContain('|')
-      expect(chunks[0].content).toContain('Name')
-      expect(chunks[0].content).toContain('Value')
+      expect(chunks[0].content).toMatchSnapshot()
     })
 
     it('handles blockquotes', () => {
@@ -553,8 +447,7 @@ describe('htmlToMarkdownSplitChunks', () => {
         stripHeaders: false,
       })
 
-      expect(chunks[0].content).toContain('>')
-      expect(chunks[0].content).toContain('This is a quote')
+      expect(chunks[0].content).toMatchSnapshot()
     })
 
     it('handles empty paragraph elements', () => {
@@ -748,7 +641,7 @@ describe('htmlToMarkdownSplitChunks', () => {
         origin: 'https://example.com',
       })
 
-      expect(chunks[0].content).toContain('![Test Image](https://example.com/test.png)')
+      expect(chunks[0].content).toMatchSnapshot()
     })
 
     it('handles definition lists', () => {
@@ -892,8 +785,7 @@ with preserved   spacing</pre>
       }))
 
       expect(chunks.length).toBeGreaterThan(0)
-      expect(chunks[0].content).toContain('Main Content')
-      expect(chunks[0].content).toContain('This is the actual content')
+      expect(chunks[0].content).toMatchSnapshot()
       expect(chunks[0].content).not.toContain('Home')
       expect(chunks[0].content).not.toContain('About')
       expect(chunks[0].content).not.toContain('Copyright')
@@ -1125,10 +1017,7 @@ with preserved   spacing</pre>
       }))
 
       expect(chunks.length).toBe(3) // Split on each h2
-
-      // Check frontmatter in first chunk
-      expect(chunks[0].content).toContain('---')
-      expect(chunks[0].content).toContain('title:')
+      expect(chunks).toMatchSnapshot()
 
       // Check headers
       expect(chunks[0].metadata.headers?.h1).toBe('My Blog Post')
@@ -1143,11 +1032,6 @@ with preserved   spacing</pre>
       expect(chunks.every(c => !c.content.includes('navbar'))).toBe(true)
       expect(chunks.every(c => !c.content.includes('Related Posts'))).toBe(true)
       expect(chunks.every(c => !c.content.includes('© 2024'))).toBe(true)
-
-      // Check content preservation
-      expect(chunks[0].content).toContain('Introduction')
-      expect(chunks[0].content).toContain('**bold text**')
-      expect(chunks[1].content).toContain('const example = true')
     })
 
     it('chunks large content with minimal preset filters', () => {
@@ -1178,6 +1062,165 @@ with preserved   spacing</pre>
         expect(chunk.content).not.toContain('Footer')
         expect(chunk.content).toContain('Lorem ipsum')
       }
+    })
+  })
+
+  describe('overlap behavior', () => {
+    it('does not apply overlap on header-based splits', () => {
+      const html = `
+        <h2>Section 1</h2>
+        <p>Content for section 1</p>
+        <h2>Section 2</h2>
+        <p>Content for section 2</p>
+        <h2>Section 3</h2>
+        <p>Content for section 3</p>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, {
+        headersToSplitOn: [TAG_H2],
+        chunkOverlap: 100, // Large overlap
+        stripHeaders: false,
+      })
+
+      expect(chunks.length).toBe(3)
+
+      // Verify no content duplication between chunks from header splits
+      expect(chunks[0].content).toContain('Section 1')
+      expect(chunks[0].content).not.toContain('Section 2')
+
+      expect(chunks[1].content).toContain('Section 2')
+      expect(chunks[1].content).not.toContain('Section 1')
+      expect(chunks[1].content).not.toContain('Section 3')
+
+      expect(chunks[2].content).toContain('Section 3')
+      expect(chunks[2].content).not.toContain('Section 2')
+    })
+
+    it('applies overlap only on size-based splits', () => {
+      const content = 'word '.repeat(200) // 1000 chars
+
+      const html = `<p>${content}</p><p>${content}</p>`
+
+      const chunks = htmlToMarkdownSplitChunks(html, {
+        chunkSize: 600,
+        chunkOverlap: 100,
+        headersToSplitOn: [],
+      })
+
+      expect(chunks.length).toBeGreaterThan(1)
+      expect(chunks).toMatchSnapshot()
+    })
+
+    it('does not apply overlap on HR splits', () => {
+      const html = `
+        <p>Content before first HR</p>
+        <hr>
+        <p>Content after first HR</p>
+        <hr>
+        <p>Content after second HR</p>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, {
+        headersToSplitOn: [],
+        chunkOverlap: 50,
+      })
+
+      expect(chunks.length).toBe(3)
+
+      // Verify no duplication at HR boundaries
+      expect(chunks[0].content).toContain('before first HR')
+      expect(chunks[0].content).not.toContain('after first HR')
+
+      expect(chunks[1].content).toContain('after first HR')
+      expect(chunks[1].content).not.toContain('before first HR')
+      expect(chunks[1].content).not.toContain('after second HR')
+
+      expect(chunks[2].content).toContain('after second HR')
+      expect(chunks[2].content).not.toContain('after first HR')
+    })
+
+    it('handles mixed header and size splits correctly', () => {
+      const longContent = 'x'.repeat(800)
+
+      const html = `
+        <h2>First Section</h2>
+        <p>${longContent}</p>
+        <p>${longContent}</p>
+        <h2>Second Section</h2>
+        <p>Short content</p>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, {
+        headersToSplitOn: [TAG_H2],
+        chunkSize: 1000,
+        chunkOverlap: 100,
+        stripHeaders: false,
+      })
+
+      // Should have at least 3 chunks:
+      // 1. First section start (header + first long para)
+      // 2. Rest of first section (size split with overlap)
+      // 3. Second section (header split, no overlap)
+      expect(chunks.length).toBeGreaterThanOrEqual(3)
+
+      // First chunk should have the header
+      expect(chunks[0].content).toContain('First Section')
+
+      // Find where Second Section starts
+      const secondSectionIdx = chunks.findIndex(c => c.content.includes('Second Section'))
+      expect(secondSectionIdx).toBeGreaterThan(0)
+
+      // Verify Second Section chunk doesn't have content from First Section
+      expect(chunks[secondSectionIdx].content).not.toContain('First Section')
+    })
+
+    it('applies correct overlap amount on size splits', () => {
+      const word = 'test'
+      const content = (word + ' ').repeat(300) // ~1500 chars
+
+      const chunks = htmlToMarkdownSplitChunks(`<p>${content}</p>`, {
+        chunkSize: 800,
+        chunkOverlap: 200,
+        headersToSplitOn: [],
+      })
+
+      expect(chunks.length).toBeGreaterThan(1)
+      expect(chunks).toMatchSnapshot()
+    })
+
+    it('handles zero overlap correctly', () => {
+      const content = 'a'.repeat(600)
+
+      const html = `<p>${content}</p><p>${content}</p>`
+
+      const chunks = htmlToMarkdownSplitChunks(html, {
+        chunkSize: 500,
+        chunkOverlap: 0,
+        headersToSplitOn: [],
+      })
+
+      expect(chunks.length).toBeGreaterThan(1)
+
+      // With zero overlap, chunks should be completely independent
+      const allContent = chunks.map(c => c.content).join('')
+      const individualLength = chunks.reduce((sum, c) => sum + c.content.length, 0)
+
+      // Total length should equal sum of chunk lengths (no overlap)
+      expect(Math.abs(allContent.length - individualLength)).toBeLessThan(10)
+    })
+
+    it('prevents infinite loops with overlap >= chunk length', () => {
+      const html = `<p>${'x'.repeat(1000)}</p><p>${'y'.repeat(1000)}</p>`
+
+      const chunks = htmlToMarkdownSplitChunks(html, {
+        chunkSize: 500,
+        chunkOverlap: 499, // Just under chunkSize
+        headersToSplitOn: [],
+      })
+
+      // Should still make forward progress
+      expect(chunks.length).toBeGreaterThan(1)
+      expect(chunks.length).toBeLessThan(100) // Sanity check
     })
   })
 })

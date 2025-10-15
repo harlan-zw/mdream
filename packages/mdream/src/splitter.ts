@@ -104,7 +104,7 @@ export function htmlToMarkdownSplitChunks(
   let lastChunkEndPosition = 0
   let lastSplitPosition = 0 // Track where we last split to avoid re-splitting
 
-  function flushChunk(endPosition?: number) {
+  function flushChunk(endPosition?: number, applyOverlap = false) {
     const currentMd = getCurrentMarkdown(processor.state)
     const chunkEnd = endPosition ?? currentMd.length
     const chunkContent = currentMd.slice(lastChunkEndPosition, chunkEnd)
@@ -149,8 +149,8 @@ export function htmlToMarkdownSplitChunks(
     // Track where we split (before applying overlap)
     lastSplitPosition = chunkEnd
 
-    // Handle overlap - ensure we always advance by at least 1 char
-    if (opts.chunkOverlap > 0) {
+    // Handle overlap - only for size-based splits, not structural splits
+    if (applyOverlap && opts.chunkOverlap > 0) {
       // Cap overlap to (chunkContent.length - 1) to ensure forward progress
       const maxOverlap = Math.max(0, chunkContent.length - 1)
       const actualOverlap = Math.min(opts.chunkOverlap, maxOverlap)
@@ -276,7 +276,7 @@ export function htmlToMarkdownSplitChunks(
           splitPosition = currentMd.length
         }
 
-        flushChunk(splitPosition)
+        flushChunk(splitPosition, true)
       }
     }
   })
