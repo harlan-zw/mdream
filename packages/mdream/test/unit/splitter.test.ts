@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { TAG_H1, TAG_H2 } from '../../src/const'
-import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { withMinimalPreset } from '../../src/preset/minimal'
+import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 
 describe('htmlToMarkdownSplitChunks', () => {
   it('splits on h2 headers by default', () => {

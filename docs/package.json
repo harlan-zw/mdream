@@ -9,7 +9,7 @@
     "twoslash:verify": "nuxt-content-twoslash verify --content-dir snippets"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^5.4.1",
+    "@antfu/eslint-config": "^6.0.0",
     "@iconify-json/carbon": "^1.2.14",
     "@iconify-json/heroicons": "^1.2.3",
     "@iconify-json/logos": "^1.2.9",
@@ -20,13 +20,13 @@
     "@iconify-json/simple-icons": "^1.2.54",
     "@iconify-json/uil": "^1.2.3",
     "@iconify-json/unjs": "^1.2.3",
-    "@iconify-json/vscode-icons": "^1.2.31",
+    "@iconify-json/vscode-icons": "^1.2.32",
     "@inspira-ui/plugins": "^0.0.1",
     "@nuxt/content": "3.5.1",
     "@nuxt/devtools": "2.4.0",
     "@nuxt/fonts": "^0.11.4",
     "@nuxt/image": "^1.11.0",
-    "@nuxt/scripts": "^0.12.1",
+    "@nuxt/scripts": "^0.12.2",
     "@nuxt/ui-pro": "^3.3.6",
     "@nuxthub/core": "0.8.27",
     "@nuxtjs/mdc": "0.17.0",
@@ -59,6 +59,6 @@
     "tailwindcss-animate": "^1.0.7",
     "typescript": "5.8.3",
     "vitest": "^3.2.4",
-    "wrangler": "^4.42.2"
+    "wrangler": "^4.43.0"
   }
 }

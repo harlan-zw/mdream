@@ -105,9 +105,9 @@ Crawl websites and generate embeddings for vector databases:
 
 ```ts
 import { crawlAndGenerate } from '@mdream/crawl'
-import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
-import { withMinimalPreset } from 'mdream/preset/minimal'
 import { embed } from 'ai'
+import { withMinimalPreset } from 'mdream/preset/minimal'
+import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
 
 const { createTransformersJS } = await import('@built-in-ai/transformers-js')
 const embeddingModel = createTransformersJS().textEmbeddingModel('Xenova/bge-base-en-v1.5')
@@ -149,8 +149,8 @@ const images = []
 htmlToMarkdown(html, {
   plugins: [
     extractionPlugin({
-      'h1, h2, h3': (el) => headers.push(el.textContent),
-      'img[src]': (el) => images.push({ src: el.attributes.src, alt: el.attributes.alt })
+      'h1, h2, h3': el => headers.push(el.textContent),
+      'img[src]': el => images.push({ src: el.attributes.src, alt: el.attributes.alt })
     })
   ]
 })
@@ -163,7 +163,7 @@ htmlToMarkdown(html, {
 Remove ads, navigation, and unwanted elements to reduce token costs:
 
 ```ts
-import { htmlToMarkdown, createPlugin, ELEMENT_NODE } from 'mdream'
+import { createPlugin, ELEMENT_NODE, htmlToMarkdown } from 'mdream'
 
 const cleanPlugin = createPlugin({
   beforeNodeProcess({ node }) {
