@@ -40,9 +40,11 @@ When you finish a task, always run `pnpm typecheck` to ensure that the code is t
 - Test single file: `pnpm test path/to/test.ts`
 - Test with pattern: `pnpm test -t "test pattern"`
 - Test folder: `pnpm test test/unit/plugins/`
+- Test browser/Playwright: `pnpm test:browser` (in packages/mdream/)
 - Development build (stub): `pnpm dev:prepare` (in packages/mdream/)
 - Live test with real sites: `pnpm test:github:live`, `pnpm test:wiki:file` (in packages/mdream/)
-- Benchmarking: `pnpm bench:stream`, `pnpm bench:string` (in packages/mdream/)
+- Benchmarking: `pnpm bench:stream`, `pnpm bench:string`, `pnpm bench:await` (in packages/mdream/)
+- Performance profiling: `pnpm flame` (in packages/mdream/ - creates flame graph)
 - Typecheck all: `pnpm typecheck` (root - runs across all packages)
 
 ## Code Style Guidelines
@@ -192,7 +194,7 @@ export function adBlockPlugin() {
 
 ### Key Concepts
 - **Node Types**: ElementNode (HTML elements) and TextNode (text content) with parent/child relationships
-- **TAG_* Constants**: Integer IDs in `const.ts` for fast tag lookups without string comparison
+- **TAG_* Constants**: Integer IDs in `const.ts` for fast tag lookups without string comparison (101 constants defined for all standard HTML tags)
 - **Streaming Architecture**: Processes HTML incrementally using buffer regions and optimal chunk boundaries
 - **Plugin Pipeline**: Each plugin can intercept and transform content at different processing stages
 - **Memory Efficiency**: Immediate processing and callback patterns to avoid collecting large data structures
@@ -210,9 +212,20 @@ export function adBlockPlugin() {
 - Lists: Support for nested ordered/unordered lists with proper indentation
 - Blockquotes: Handles proper nesting and continuations
 
+## Module Exports & Entry Points
+
+The package provides multiple entry points for different use cases:
+
+- `mdream` - Main API (`htmlToMarkdown`, `streamHtmlToMarkdown`, `parseHtml`)
+- `mdream/plugins` - Plugin utilities (`createPlugin`, `extractionPlugin`, etc.)
+- `mdream/preset/minimal` - Preset configurations (`withMinimalPreset`)
+- `mdream/splitter` - Markdown text splitter (`htmlToMarkdownSplitChunks`)
+- `mdream/cli` - CLI entry point
+
 ## CLI and Testing
 
 ### CLI Usage (packages/mdream/)
+- Entry: `node ./bin/mdream.mjs` (also via `mdream` when installed globally)
 - Processes HTML from stdin, outputs Markdown to stdout
 - Test with live sites: `curl -s https://example.com | node ./bin/mdream.mjs --origin https://example.com`
 - Key CLI options: `--origin <url>`, `-v/--verbose`, `--chunk-size <size>`, `--preset minimal`
