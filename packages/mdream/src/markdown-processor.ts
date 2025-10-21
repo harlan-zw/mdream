@@ -9,8 +9,13 @@ import {
   NodeEventEnter,
   NodeEventExit,
   TAG_BLOCKQUOTE,
+  TAG_DIV,
+  TAG_H1,
+  TAG_H6,
   TAG_LI,
+  TAG_P,
   TAG_PRE,
+  TAG_SPAN,
   TAG_TABLE,
   TEXT_NODE,
 } from './const.ts'
@@ -100,9 +105,17 @@ function calculateNewLineConfig(node: ElementNode): readonly [number, number] {
   }
 
   // Adjust for inline elements
+  // Block elements preserve spacing even inside span elements (presentational containers)
+  // because spans shouldn't affect block-level semantics of their children
+  const isBlockElement = tagId !== undefined && ((tagId >= TAG_H1 && tagId <= TAG_H6) || tagId === TAG_P || tagId === TAG_DIV)
   let currParent = node.parent
   while (currParent) {
     if (currParent.tagHandler?.collapsesInnerWhiteSpace) {
+      // Exception: preserve block spacing when inside span (presentational wrapper)
+      if (isBlockElement && currParent.tagId === TAG_SPAN) {
+        currParent = currParent.parent
+        continue
+      }
       return NO_SPACING
     }
     currParent = currParent.parent

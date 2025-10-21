@@ -40,4 +40,14 @@ describe('spacing', () => {
     const markdown = htmlToMarkdown(html)
     expect(markdown).toMatchInlineSnapshot(`"[a](b) [b](a)"`)
   })
+
+  it('block elements inside inline elements should have proper spacing', () => {
+    const html = '<span><h4>Heading</h4><p>This is a paragraph with <strong>bold</strong> text.</p></span>'
+    const markdown = htmlToMarkdown(html)
+    expect(markdown).toMatchInlineSnapshot(`
+      "#### Heading
+
+      This is a paragraph with **bold** text."
+    `)
+  })
 })
