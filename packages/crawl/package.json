@@ -1,7 +1,7 @@
 {
   "name": "@mdream/crawl",
   "type": "module",
-  "version": "0.13.2",
+  "version": "0.13.3",
   "description": "Mdream Crawl generates comprehensive llms.txt artifacts from a single URL, using mdream to convert HTML to Markdown.",
   "author": {
     "name": "Harlan Wilton",
