@@ -478,7 +478,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       let filePath: string | undefined
 
       // Only generate files for URLs that match the glob pattern
-      if (shouldProcessMarkdown) {
+      if (shouldProcessMarkdown && generateIndividualMd) {
         // Generate filename based on URL path
         const urlObj = new URL(request.loadedUrl)
         const urlPath = urlObj.pathname === '/' ? '/index' : urlObj.pathname
@@ -492,16 +492,13 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         // Create full file path - store directly in outputDir to match public dir structure
         filePath = join(outputDir, safeFilename)
 
-        // Write markdown file only if individual MD files are requested
-        if (generateIndividualMd) {
-          // Ensure the directory exists
-          const fileDir = dirname(filePath)
-          // Safety check: ensure directory path is not empty
-          if (fileDir && !existsSync(fileDir)) {
-            mkdirSync(fileDir, { recursive: true })
-          }
-          await writeFile(filePath, md, 'utf-8')
+        // Ensure the directory exists
+        const fileDir = dirname(filePath)
+        // Safety check: ensure directory path is not empty
+        if (fileDir && !existsSync(fileDir)) {
+          mkdirSync(fileDir, { recursive: true })
         }
+        await writeFile(filePath, md, 'utf-8')
       }
 
       // const processingTime = Date.now() - startTime
