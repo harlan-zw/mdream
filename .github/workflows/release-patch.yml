@@ -39,6 +39,9 @@ jobs:
       - name: Bump Patch Version
         run: |
           pnpm exec bumpp --release patch --yes \
+            --commit "chore: release v%s" \
+            --tag \
+            --push \
             --output=CHANGELOG.md packages/*/package.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
