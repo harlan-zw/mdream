@@ -2,7 +2,7 @@
 
 Multi-page website crawler that generates comprehensive llms.txt files by following internal links and processing entire websites using mdream HTML-to-Markdown conversion.
 
-> **Note**: For single-page HTML-to-Markdown conversion, use the [`mdream`](../mdream) binary instead. `@mdream/crawl` is specifically designed for crawling entire websites with multiple pages.
+> **Note**: For single-page HTML-to-Markdown conversion without crawling, you can use the [`mdream`](../mdream) binary or use `@mdream/crawl` with the `--single-page` flag. `@mdream/crawl` is designed to support both multi-page website crawling and single-page conversion.
 
 ## Installation
 
@@ -18,7 +18,17 @@ Simply run the command to start the interactive multi-page website crawler:
 npx @mdream/crawl
 ```
 
-The crawler will automatically discover and follow internal links to crawl entire websites. The interactive interface provides:
+Or use CLI flags for quick single-page or multi-page crawling:
+
+```bash
+# Crawl a single page with Playwright (for JS sites)
+npx @mdream/crawl -u https://example.com --driver playwright --single-page
+
+# Crawl an entire website
+npx @mdream/crawl -u https://docs.example.com --depth 3
+```
+
+The crawler will automatically discover and follow internal links to crawl entire websites (unless `--single-page` is used). The interactive interface provides:
 - ✨ Beautiful prompts powered by Clack
 - 🎯 Step-by-step configuration guidance
 - ✅ Input validation and helpful hints
@@ -74,7 +84,8 @@ The crawler generates comprehensive output from entire websites:
 
 ## Features
 
-- ✅ **Multi-Page Website Crawling**: Designed specifically for crawling entire websites by following internal links
+- ✅ **Multi-Page Website Crawling**: Designed for crawling entire websites by following internal links
+- ✅ **Single-Page Mode**: Use `--single-page` flag to crawl just one page without following links
 - ✅ **Purely Interactive**: No complex command-line options to remember
 - ✅ **Dual Crawler Support**: Fast HTTP crawler (default) + Playwright for JavaScript-heavy sites
 - ✅ **Smart Link Discovery**: Uses mdream's extraction plugin to find and follow internal links
@@ -94,8 +105,9 @@ Perfect for:
 - 🏢 **Company Websites**: Generate comprehensive site overviews for LLM context
 - 📝 **Blogs**: Process entire blog archives with proper categorization
 - 🔗 **Multi-Page Resources**: Any website where you need all pages, not just one
+- 🌐 **JavaScript Sites**: Use `--driver playwright --single-page` to crawl single JS-heavy pages
 
-**Not suitable for**: Single-page conversions (use `mdream` binary instead)
+**Tip**: For single-page conversions, you can use `@mdream/crawl --single-page` or the [`mdream`](../mdream) binary directly.
 
 ## License
 
