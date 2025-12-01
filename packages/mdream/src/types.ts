@@ -36,7 +36,7 @@ export interface Plugin {
    */
   processTextNode?: (
     node: TextNode,
-    state: MdreamRuntimeState
+    state: MdreamRuntimeState,
   ) => { content: string, skip: boolean } | undefined
 }
 
