@@ -74,12 +74,12 @@ function getCurrentMarkdown(state: { regionContentBuffers: Map<number, string[]>
 
 /**
  * Convert HTML to Markdown and split into chunks in single pass
- * Chunks are created during HTML event processing
+ * Yields chunks during HTML event processing for better memory efficiency
  */
-export function htmlToMarkdownSplitChunks(
+export function* htmlToMarkdownSplitChunksStream(
   html: string,
   options: SplitterOptions = {},
-): MarkdownChunk[] {
+): Generator<MarkdownChunk, void, undefined> {
   const opts = createOptions(options)
 
   if (opts.chunkOverlap >= opts.chunkSize) {
@@ -93,7 +93,6 @@ export function htmlToMarkdownSplitChunks(
   })
 
   // Chunking state
-  const chunks: MarkdownChunk[] = []
   const headerHierarchy = new Map<number, string>()
   const seenSplitHeaders = new Set<number>()
   let currentChunkCodeLanguage = ''
@@ -102,15 +101,14 @@ export function htmlToMarkdownSplitChunks(
   let currentHeaderText = ''
   let lineNumber = 1
   let lastChunkEndPosition = 0
-  let lastSplitPosition = 0 // Track where we last split to avoid re-splitting
+  let lastSplitPosition = 0
 
-  function flushChunk(endPosition?: number, applyOverlap = false) {
+  function* flushChunk(endPosition?: number, applyOverlap = false): Generator<MarkdownChunk, void, undefined> {
     const currentMd = getCurrentMarkdown(processor.state)
     const chunkEnd = endPosition ?? currentMd.length
     const chunkContent = currentMd.slice(lastChunkEndPosition, chunkEnd)
 
     if (!chunkContent.trim()) {
-      // Still update position to avoid infinite loop
       lastChunkEndPosition = chunkEnd
       return
     }
@@ -127,7 +125,6 @@ export function htmlToMarkdownSplitChunks(
       },
     }
 
-    // Add headers
     if (headerHierarchy.size > 0) {
       chunk.metadata.headers = {}
       for (const [tagId, text] of headerHierarchy.entries()) {
@@ -136,22 +133,16 @@ export function htmlToMarkdownSplitChunks(
       }
     }
 
-    // Add code language
     if (currentChunkCodeLanguage) {
       chunk.metadata.code = currentChunkCodeLanguage
     }
 
-    chunks.push(chunk)
+    yield chunk
 
-    // Reset code language for next chunk
     currentChunkCodeLanguage = ''
-
-    // Track where we split (before applying overlap)
     lastSplitPosition = chunkEnd
 
-    // Handle overlap - only for size-based splits, not structural splits
     if (applyOverlap && opts.chunkOverlap > 0) {
-      // Cap overlap to (chunkContent.length - 1) to ensure forward progress
       const maxOverlap = Math.max(0, chunkContent.length - 1)
       const actualOverlap = Math.min(opts.chunkOverlap, maxOverlap)
       lastChunkEndPosition = chunkEnd - actualOverlap
@@ -163,34 +154,34 @@ export function htmlToMarkdownSplitChunks(
     lineNumber += (chunkContent.match(/\n/g) || []).length
   }
 
-  // Process HTML with event interception
   const parseState: ParseState = {
     depthMap: processor.state.depthMap,
     depth: 0,
     plugins: opts.plugins,
   }
 
+  const eventBuffer: NodeEvent[] = []
+
   parseHtmlStream(html, parseState, (event: NodeEvent) => {
+    eventBuffer.push(event)
+  })
+
+  for (const event of eventBuffer) {
     const { type: eventType, node } = event
 
-    // Track metadata before processing
     if (node.type === ELEMENT_NODE) {
       const element = node as ElementNode
       const tagId = element.tagId
 
-      // Track headers
       if (tagId && tagId >= TAG_H1 && tagId <= TAG_H6) {
         if (eventType === NodeEventEnter) {
           collectingHeaderText = true
           currentHeaderTagId = tagId
           currentHeaderText = ''
 
-          // Check if should split BEFORE processing this header
           if (shouldSplitOnHeader(tagId, opts)) {
-            // Only flush if we've seen this header level before (not the first occurrence)
             if (seenSplitHeaders.has(tagId)) {
-              flushChunk()
-              // Clear lower-level headers
+              yield* flushChunk()
               for (let i = tagId; i <= TAG_H6; i++) {
                 headerHierarchy.delete(i)
               }
@@ -205,7 +196,6 @@ export function htmlToMarkdownSplitChunks(
         }
       }
 
-      // Track code blocks
       if (tagId === TAG_CODE && element.depthMap[TAG_PRE] > 0) {
         if (eventType === NodeEventEnter) {
           const lang = getCodeLanguage(element)
@@ -215,74 +205,76 @@ export function htmlToMarkdownSplitChunks(
         }
       }
 
-      // Split on HR BEFORE processing it
       if (tagId === TAG_HR && eventType === NodeEventEnter) {
-        flushChunk()
+        yield* flushChunk()
       }
     }
 
-    // Collect header text
     if (collectingHeaderText && node.type === TEXT_NODE) {
       const textNode = node as TextNode
       currentHeaderText += textNode.value
     }
 
-    // Process event (generates markdown)
     processPluginsForEvent(event, opts.plugins, processor.state, processor.processEvent)
 
-    // Check size-based splitting AFTER processing
     if (!opts.returnEachLine) {
       const currentMd = getCurrentMarkdown(processor.state)
       const currentChunkSize = opts.lengthFunction(currentMd.slice(lastChunkEndPosition))
 
       if (currentChunkSize > opts.chunkSize) {
-        // Find optimal split point using hierarchy of separators (like RecursiveCharacterTextSplitter)
         const idealSplitPos = lastChunkEndPosition + opts.chunkSize
-
-        // Ordered by preference: paragraph > code block > line > word
         const separators = ['\n\n', '```\n', '\n', ' ']
         let splitPosition = -1
 
         for (const sep of separators) {
-          // Find last occurrence of separator before/at ideal position
           const idx = currentMd.lastIndexOf(sep, idealSplitPos)
           const candidateSplitPos = idx + sep.length
 
           if (idx >= 0) {
-            // Check if we're inside a code block at this position
             const beforeSplit = currentMd.slice(0, candidateSplitPos)
-            // Count occurrences of ``` without regex (better perf)
             let backtickCount = 0
             let pos = 0
             while ((pos = beforeSplit.indexOf('```', pos)) !== -1) {
               backtickCount++
               pos += 3
             }
-            // If odd number of backticks, we're inside a code block - skip
             if (backtickCount % 2 === 1) {
               continue
             }
           }
 
-          // Only use separator if split position would be beyond our last split
           if (idx >= 0 && candidateSplitPos > lastSplitPosition) {
             splitPosition = candidateSplitPos
             break
           }
         }
 
-        // If no separator found before ideal position, use current length (split now)
         if (splitPosition === -1 || splitPosition <= lastChunkEndPosition) {
           splitPosition = currentMd.length
         }
 
-        flushChunk(splitPosition, true)
+        yield* flushChunk(splitPosition, true)
       }
     }
-  })
+  }
 
-  // Flush final chunk
-  flushChunk()
+  yield* flushChunk()
+}
+
+/**
+ * Convert HTML to Markdown and split into chunks in single pass
+ * Chunks are created during HTML event processing
+ */
+export function htmlToMarkdownSplitChunks(
+  html: string,
+  options: SplitterOptions = {},
+): MarkdownChunk[] {
+  const opts = createOptions(options)
+  const chunks: MarkdownChunk[] = []
+
+  for (const chunk of htmlToMarkdownSplitChunksStream(html, options)) {
+    chunks.push(chunk)
+  }
 
   // Handle returnEachLine mode - split chunks into individual lines
   if (opts.returnEachLine && chunks.length > 0) {
@@ -325,7 +317,6 @@ export function htmlToMarkdownSplitChunks(
     }
   }
 
-  // Filter out empty chunks (can happen after header stripping)
   return chunks.filter(chunk => chunk.content.length > 0)
 }
 

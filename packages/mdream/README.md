@@ -311,6 +311,116 @@ htmlToMarkdown(html, { plugins: [plugin] })
 
 The extraction plugin provides memory-efficient element extraction with full text content and attributes, perfect for SEO analysis, content discovery, and data mining.
 
+## Markdown Splitting
+
+Split HTML into chunks during conversion for LLM context windows, vector databases, or document processing.
+
+### Basic Chunking
+
+```ts
+import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
+import { TAG_H2 } from 'mdream'
+
+const html = `
+  <h1>Documentation</h1>
+  <h2>Installation</h2>
+  <p>Install via npm...</p>
+  <h2>Usage</h2>
+  <p>Use it like this...</p>
+`
+
+const chunks = htmlToMarkdownSplitChunks(html, {
+  headersToSplitOn: [TAG_H2], // Split on h2 headers
+  chunkSize: 1000,            // Max chars per chunk
+  chunkOverlap: 200,          // Overlap for context
+  stripHeaders: true          // Remove headers from content
+})
+
+// Each chunk includes content and metadata
+chunks.forEach(chunk => {
+  console.log(chunk.content)
+  console.log(chunk.metadata.headers) // { h1: "Documentation", h2: "Installation" }
+  console.log(chunk.metadata.code)    // Language if chunk contains code
+  console.log(chunk.metadata.loc)     // Line numbers
+})
+```
+
+### Streaming Chunks (Memory Efficient)
+
+For large documents, use the generator version to process chunks one at a time:
+
+```ts
+import { htmlToMarkdownSplitChunksStream } from 'mdream/splitter'
+
+// Process chunks incrementally - lower memory usage
+for (const chunk of htmlToMarkdownSplitChunksStream(html, options)) {
+  await processChunk(chunk) // Handle each chunk as it's generated
+
+  // Can break early if you found what you need
+  if (foundTarget) break
+}
+```
+
+**Benefits of streaming:**
+- Lower memory usage - chunks aren't stored in an array
+- Early termination - stop processing when you find what you need
+- Better for large documents
+
+### Splitting Options
+
+```ts
+interface SplitterOptions {
+  // Structural splitting
+  headersToSplitOn?: number[]    // TAG_H1, TAG_H2, etc. Default: [TAG_H2-TAG_H6]
+
+  // Size-based splitting
+  chunkSize?: number              // Max chunk size. Default: 1000
+  chunkOverlap?: number           // Overlap between chunks. Default: 200
+  lengthFunction?: (text: string) => number  // Custom length (e.g., token count)
+
+  // Output formatting
+  stripHeaders?: boolean          // Remove headers from content. Default: true
+  returnEachLine?: boolean        // Split into individual lines. Default: false
+
+  // Standard options
+  origin?: string                 // Base URL for links/images
+  plugins?: Plugin[]              // Apply plugins during conversion
+}
+```
+
+### Chunk Metadata
+
+Each chunk includes rich metadata for context:
+
+```ts
+interface MarkdownChunk {
+  content: string
+  metadata: {
+    headers?: Record<string, string>  // Header hierarchy: { h1: "Title", h2: "Section" }
+    code?: string                     // Code block language if present
+    loc?: {                           // Line number range
+      lines: { from: number, to: number }
+    }
+  }
+}
+```
+
+### Use with Presets
+
+Combine splitting with presets for optimized output:
+
+```ts
+import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
+import { withMinimalPreset } from 'mdream/preset/minimal'
+import { TAG_H2 } from 'mdream'
+
+const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+  headersToSplitOn: [TAG_H2],
+  chunkSize: 500,
+  origin: 'https://example.com'
+}))
+```
+
 ## Credits
 
 - [ultrahtml](https://github.com/natemoo-re/ultrahtml): HTML parsing inspiration

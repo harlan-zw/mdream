@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { TAG_H1, TAG_H2 } from '../../src/const'
 import { withMinimalPreset } from '../../src/preset/minimal'
-import { htmlToMarkdownSplitChunks } from '../../src/splitter'
+import { htmlToMarkdownSplitChunks, htmlToMarkdownSplitChunksStream } from '../../src/splitter'
 
 describe('htmlToMarkdownSplitChunks', () => {
   it('tracks header hierarchy in metadata', () => {
@@ -1222,5 +1222,159 @@ with preserved   spacing</pre>
       expect(chunks.length).toBeGreaterThan(1)
       expect(chunks.length).toBeLessThan(100) // Sanity check
     })
+  })
+})
+
+describe('htmlToMarkdownSplitChunksStream', () => {
+  it('yields chunks one at a time', () => {
+    const html = `
+      <h2>Section 1</h2>
+      <p>Content 1</p>
+      <h2>Section 2</h2>
+      <p>Content 2</p>
+      <h2>Section 3</h2>
+      <p>Content 3</p>
+    `
+
+    const chunks = []
+    for (const chunk of htmlToMarkdownSplitChunksStream(html, {
+      headersToSplitOn: [TAG_H2],
+    })) {
+      chunks.push(chunk)
+    }
+
+    expect(chunks.length).toBe(3)
+    expect(chunks[0].metadata.headers?.h2).toBe('Section 1')
+    expect(chunks[1].metadata.headers?.h2).toBe('Section 2')
+    expect(chunks[2].metadata.headers?.h2).toBe('Section 3')
+  })
+
+  it('produces same results as array version', () => {
+    const html = `
+      <h1>Title</h1>
+      <h2>Section</h2>
+      <p>${'Content '.repeat(100)}</p>
+      <h2>Another Section</h2>
+      <pre><code class="language-javascript">const x = 1;</code></pre>
+    `
+
+    const arrayChunks = htmlToMarkdownSplitChunks(html, {
+      headersToSplitOn: [TAG_H2],
+      chunkSize: 500,
+      chunkOverlap: 50,
+    })
+
+    const streamChunks = []
+    for (const chunk of htmlToMarkdownSplitChunksStream(html, {
+      headersToSplitOn: [TAG_H2],
+      chunkSize: 500,
+      chunkOverlap: 50,
+    })) {
+      streamChunks.push(chunk)
+    }
+
+    expect(streamChunks).toEqual(arrayChunks)
+  })
+
+  it('allows early termination', () => {
+    const html = `
+      <h2>Section 1</h2>
+      <p>Content 1</p>
+      <h2>Section 2</h2>
+      <p>Content 2</p>
+      <h2>Section 3</h2>
+      <p>Content 3</p>
+    `
+
+    const chunks = []
+    for (const chunk of htmlToMarkdownSplitChunksStream(html, {
+      headersToSplitOn: [TAG_H2],
+    })) {
+      chunks.push(chunk)
+      if (chunks.length === 2) {
+        break
+      }
+    }
+
+    expect(chunks.length).toBe(2)
+    expect(chunks[0].metadata.headers?.h2).toBe('Section 1')
+    expect(chunks[1].metadata.headers?.h2).toBe('Section 2')
+  })
+
+  it('handles size-based splits in streaming mode', () => {
+    const html = `
+      <p>${'a'.repeat(1500)}</p>
+      <p>${'b'.repeat(1500)}</p>
+    `
+
+    const chunks = []
+    for (const chunk of htmlToMarkdownSplitChunksStream(html, {
+      chunkSize: 1000,
+      headersToSplitOn: [],
+    })) {
+      chunks.push(chunk)
+    }
+
+    expect(chunks.length).toBeGreaterThan(1)
+  })
+
+  it('yields chunks with code metadata', () => {
+    const html = `
+      <h2>Code Example</h2>
+      <pre><code class="language-typescript">type Foo = string;</code></pre>
+    `
+
+    const chunks = []
+    for (const chunk of htmlToMarkdownSplitChunksStream(html, {
+      headersToSplitOn: [TAG_H2],
+    })) {
+      chunks.push(chunk)
+    }
+
+    expect(chunks[0].metadata.code).toBe('typescript')
+  })
+
+  it('works with minimal preset', () => {
+    const html = `
+      <nav>Navigation</nav>
+      <main>
+        <h1>Article</h1>
+        <h2>Section 1</h2>
+        <p>Content here</p>
+      </main>
+      <footer>Footer</footer>
+    `
+
+    const chunks = []
+    for (const chunk of htmlToMarkdownSplitChunksStream(html, withMinimalPreset({
+      headersToSplitOn: [TAG_H2],
+    }))) {
+      chunks.push(chunk)
+    }
+
+    expect(chunks.length).toBeGreaterThan(0)
+    expect(chunks[0].content).not.toContain('Navigation')
+    expect(chunks[0].content).not.toContain('Footer')
+    expect(chunks[0].metadata.headers?.h1).toBe('Article')
+  })
+
+  it('throws error when chunkOverlap >= chunkSize', () => {
+    const html = '<p>Test</p>'
+
+    expect(() => {
+      const gen = htmlToMarkdownSplitChunksStream(html, {
+        chunkSize: 100,
+        chunkOverlap: 100,
+      })
+      gen.next()
+    }).toThrow('chunkOverlap must be less than chunkSize')
+  })
+
+  it('handles empty HTML', () => {
+    const chunks = []
+    for (const chunk of htmlToMarkdownSplitChunksStream('')) {
+      chunks.push(chunk)
+    }
+    expect(chunks).toEqual([])
   })
 })
