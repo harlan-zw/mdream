@@ -1,4 +1,4 @@
-import { page } from '@vitest/browser'
+import { page } from '@vitest/browser/context'
 import { describe, expect, it } from 'vitest'
 
 // Helper function to render markdown to DOM

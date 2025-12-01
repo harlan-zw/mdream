@@ -21,20 +21,7 @@ export default defineBuildConfig({
       const cwd = ctx?.cwd || process.cwd()
       const browserMjsPath = resolve(cwd, 'dist/iife.mjs')
       try {
-        const browserContent = readFileSync(browserMjsPath, 'utf-8')
-
-        // Create IIFE wrapper
-        const iifeContent = `(function() {
-'use strict';
-
-${browserContent.replace(/export\s*\{[^}]+\};\s*$/m, '')}
-
-// Expose mdream globally
-if (typeof window !== 'undefined') {
-  window.mdream = fn;
-}
-
-})();`
+        const iifeContent = readFileSync(browserMjsPath, 'utf-8').replace(/export\s*\{[^}]+\};\s*$/m, '')
 
         // Clean up browser ES module files (we only need the IIFE)
         try {

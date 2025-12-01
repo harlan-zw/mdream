@@ -19,9 +19,8 @@
     "@arethetypeswrong/cli": "^0.18.2",
     "@built-in-ai/transformers-js": "^0.3.3",
     "@types/node": "^24.10.1",
-    "@vitest/browser": "^4.0.14",
-    "@vitest/browser-playwright": "^4.0.14",
-    "ai": "^5.0.104",
+    "@vitest/browser": "^3.2.4",
+    "ai": "^5.0.105",
     "bumpp": "^10.3.2",
     "crawlee": "^3.15.3",
     "eslint": "^9.39.1",
@@ -29,11 +28,11 @@
     "obuild": "^0.4.3",
     "playwright": "^1.57.0",
     "typescript": "5.9.3",
-    "vitest": "^4.0.14"
+    "vitest": "^3.2.4"
   },
   "pnpm": {
     "overrides": {
-      "vite": "7.2.6"
+      "vite": "npm:rolldown-vite@latest"
     },
     "onlyBuiltDependencies": [
       "@parcel/watcher",

@@ -1,10 +1,6 @@
-import { playwright } from '@vitest/browser-playwright'
 import { defineConfig, defineProject } from 'vitest/config'
 
 export default defineConfig({
-  optimizeDeps: {
-    exclude: ['lightningcss'],
-  },
   test: {
     projects: [
       defineProject({
@@ -20,7 +16,7 @@ export default defineConfig({
           name: 'browser',
           browser: {
             enabled: true,
-            provider: playwright(),
+            provider: 'playwright',
             instances: [
               { browser: 'chromium' },
             ],
