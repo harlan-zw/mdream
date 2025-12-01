@@ -1,6 +1,9 @@
 import { defineConfig, defineProject } from 'vitest/config'
 
 export default defineConfig({
+  optimizeDeps: {
+    exclude: ['lightningcss'],
+  },
   test: {
     projects: [
       defineProject({
