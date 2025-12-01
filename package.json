@@ -33,7 +33,7 @@
   },
   "pnpm": {
     "overrides": {
-      "vite": "npm:rolldown-vite@latest"
+      "vite": "7.2.6"
     },
     "onlyBuiltDependencies": [
       "@parcel/watcher",
