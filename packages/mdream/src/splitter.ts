@@ -106,11 +106,26 @@ export function* htmlToMarkdownSplitChunksStream(
   function* flushChunk(endPosition?: number, applyOverlap = false): Generator<MarkdownChunk, void, undefined> {
     const currentMd = getCurrentMarkdown(processor.state)
     const chunkEnd = endPosition ?? currentMd.length
-    const chunkContent = currentMd.slice(lastChunkEndPosition, chunkEnd)
+    const originalChunkContent = currentMd.slice(lastChunkEndPosition, chunkEnd)
 
-    if (!chunkContent.trim()) {
+    if (!originalChunkContent.trim()) {
       lastChunkEndPosition = chunkEnd
       return
+    }
+
+    // Strip headers if requested
+    let chunkContent = originalChunkContent
+    if (opts.stripHeaders) {
+      chunkContent = chunkContent
+        .split('\n')
+        .filter(line => !line.match(/^#{1,6}\s+/))
+        .join('\n')
+        .trim()
+
+      if (!chunkContent) {
+        lastChunkEndPosition = chunkEnd
+        return
+      }
     }
 
     const chunk: MarkdownChunk = {
@@ -119,7 +134,7 @@ export function* htmlToMarkdownSplitChunksStream(
         loc: {
           lines: {
             from: lineNumber,
-            to: lineNumber + (chunkContent.match(/\n/g) || []).length,
+            to: lineNumber + (originalChunkContent.match(/\n/g) || []).length,
           },
         },
       },
@@ -143,7 +158,7 @@ export function* htmlToMarkdownSplitChunksStream(
     lastSplitPosition = chunkEnd
 
     if (applyOverlap && opts.chunkOverlap > 0) {
-      const maxOverlap = Math.max(0, chunkContent.length - 1)
+      const maxOverlap = Math.max(0, originalChunkContent.length - 1)
       const actualOverlap = Math.min(opts.chunkOverlap, maxOverlap)
       lastChunkEndPosition = chunkEnd - actualOverlap
     }
@@ -151,7 +166,7 @@ export function* htmlToMarkdownSplitChunksStream(
       lastChunkEndPosition = chunkEnd
     }
 
-    lineNumber += (chunkContent.match(/\n/g) || []).length
+    lineNumber += (originalChunkContent.match(/\n/g) || []).length
   }
 
   const parseState: ParseState = {
@@ -306,18 +321,7 @@ export function htmlToMarkdownSplitChunks(
     return lineChunks
   }
 
-  // Strip headers if requested
-  if (opts.stripHeaders) {
-    for (const chunk of chunks) {
-      chunk.content = chunk.content
-        .split('\n')
-        .filter(line => !line.match(/^#{1,6}\s+/))
-        .join('\n')
-        .trim()
-    }
-  }
-
-  return chunks.filter(chunk => chunk.content.length > 0)
+  return chunks
 }
 
 export type { MarkdownChunk, SplitterOptions } from './types'
