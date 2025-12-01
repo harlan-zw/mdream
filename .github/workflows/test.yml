@@ -46,7 +46,7 @@ jobs:
         run: pnpm run test:attw
 
       - name: Browser Test Setup
-        run: pnpm exec playwright install
+        run: pnpm exec playwright install --with-deps
 
       - name: Test
         run: pnpm run test
