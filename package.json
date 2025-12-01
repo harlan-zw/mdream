@@ -20,6 +20,7 @@
     "@built-in-ai/transformers-js": "^0.3.3",
     "@types/node": "^24.10.1",
     "@vitest/browser": "^4.0.14",
+    "@vitest/browser-playwright": "^4.0.14",
     "ai": "^5.0.104",
     "bumpp": "^10.3.2",
     "crawlee": "^3.15.3",

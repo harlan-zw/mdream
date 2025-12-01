@@ -13,7 +13,7 @@ importers:
     devDependencies:
       '@antfu/eslint-config':
         specifier: ^6.2.0
-        version: 6.2.0(@vue/compiler-sfc@3.5.25)(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))
+        version: 6.2.0(@vue/compiler-sfc@3.5.25)(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)(vitest@4.0.14)
       '@arethetypeswrong/cli':
         specifier: ^0.18.2
         version: 0.18.2
@@ -25,7 +25,10 @@ importers:
         version: 24.10.1
       '@vitest/browser':
         specifier: ^4.0.14
-        version: 4.0.14(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(yaml@2.8.2))(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))
+        version: 4.0.14(rolldown-vite@7.2.9(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(terser@5.44.1)(yaml@2.8.2))(vitest@4.0.14)
+      '@vitest/browser-playwright':
+        specifier: ^4.0.14
+        version: 4.0.14(playwright@1.57.0)(rolldown-vite@7.2.9(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(terser@5.44.1)(yaml@2.8.2))(vitest@4.0.14)
       ai:
         specifier: ^5.0.104
         version: 5.0.104(zod@4.1.13)
@@ -52,7 +55,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.0.14
-        version: 4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2)
+        version: 4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(@vitest/browser-playwright@4.0.14)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2)
 
   examples/nuxt:
     dependencies:
@@ -123,7 +126,7 @@ importers:
         version: rolldown-vite@7.2.9(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(terser@5.44.1)(yaml@2.8.2)
       vitest:
         specifier: ^4.0.14
-        version: 4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2)
+        version: 4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(@vitest/browser-playwright@4.0.14)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2)
 
   packages/action:
     dependencies:
@@ -247,7 +250,7 @@ importers:
     devDependencies:
       '@antfu/eslint-config':
         specifier: ^6.2.0
-        version: 6.2.0(@vue/compiler-sfc@3.5.25)(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))
+        version: 6.2.0(@vue/compiler-sfc@3.5.25)(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)(vitest@4.0.14)
       '@arethetypeswrong/cli':
         specifier: ^0.18.2
         version: 0.18.2
@@ -262,7 +265,7 @@ importers:
         version: 4.2.1
       '@nuxt/test-utils':
         specifier: ^3.20.1
-        version: 3.20.1(jsdom@26.1.0)(magicast@0.5.1)(playwright-core@1.57.0)(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))
+        version: 3.20.1(jsdom@26.1.0)(magicast@0.5.1)(playwright-core@1.57.0)(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(@vitest/browser-playwright@4.0.14)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))
       '@types/node':
         specifier: latest
         version: 24.10.1
@@ -3124,6 +3127,12 @@ packages:
     peerDependencies:
       vite: ^5.0.0 || ^6.0.0 || ^7.0.0
       vue: ^3.2.25
+
+  '@vitest/browser-playwright@4.0.14':
+    resolution: {integrity: sha512-rUvyz6wX6wDjcYzf/7fgXYfca2bAu0Axoq/v9LYdELzcBSS9UKjnZ7MaMY4UDP78HHHCdmdtceuSao1s51ON8A==}
+    peerDependencies:
+      playwright: '*'
+      vitest: 4.0.14
 
   '@vitest/browser@4.0.14':
     resolution: {integrity: sha512-vO0uqR8SnPTd8ykp14yaIuUyMZ9HEBYuoZrVdUp7RrEp76VEnkrX9fDkGnK0NyBdfWXB6cqp7BmqVekd8yKHFQ==}
@@ -7645,7 +7654,7 @@ snapshots:
 
   '@andrewbranch/untar.js@1.0.3': {}
 
-  '@antfu/eslint-config@6.2.0(@vue/compiler-sfc@3.5.25)(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))':
+  '@antfu/eslint-config@6.2.0(@vue/compiler-sfc@3.5.25)(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)(vitest@4.0.14)':
     dependencies:
       '@antfu/install-pkg': 1.1.0
       '@clack/prompts': 0.11.0
@@ -7654,7 +7663,7 @@ snapshots:
       '@stylistic/eslint-plugin': 5.6.1(eslint@9.39.1(jiti@2.6.1))
       '@typescript-eslint/eslint-plugin': 8.48.0(@typescript-eslint/parser@8.48.0(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)
       '@typescript-eslint/parser': 8.48.0(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)
-      '@vitest/eslint-plugin': 1.5.1(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))
+      '@vitest/eslint-plugin': 1.5.1(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)(vitest@4.0.14)
       ansis: 4.2.0
       cac: 6.7.14
       eslint: 9.39.1(jiti@2.6.1)
@@ -9489,7 +9498,7 @@ snapshots:
     transitivePeerDependencies:
       - magicast
 
-  '@nuxt/test-utils@3.20.1(jsdom@26.1.0)(magicast@0.5.1)(playwright-core@1.57.0)(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))':
+  '@nuxt/test-utils@3.20.1(jsdom@26.1.0)(magicast@0.5.1)(playwright-core@1.57.0)(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(@vitest/browser-playwright@4.0.14)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))':
     dependencies:
       '@nuxt/kit': 4.2.1(magicast@0.5.1)
       c12: 3.3.2(magicast@0.5.1)
@@ -9513,12 +9522,12 @@ snapshots:
       tinyexec: 1.0.2
       ufo: 1.6.1
       unplugin: 2.3.11
-      vitest-environment-nuxt: 1.0.1(jsdom@26.1.0)(magicast@0.5.1)(playwright-core@1.57.0)(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))
+      vitest-environment-nuxt: 1.0.1(jsdom@26.1.0)(magicast@0.5.1)(playwright-core@1.57.0)(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(@vitest/browser-playwright@4.0.14)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))
       vue: 3.5.25(typescript@5.9.3)
     optionalDependencies:
       jsdom: 26.1.0
       playwright-core: 1.57.0
-      vitest: 4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2)
+      vitest: 4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(@vitest/browser-playwright@4.0.14)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2)
     transitivePeerDependencies:
       - magicast
       - typescript
@@ -10834,16 +10843,29 @@ snapshots:
       vite: rolldown-vite@7.2.9(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(terser@5.44.1)(yaml@2.8.2)
       vue: 3.5.25(typescript@5.9.3)
 
-  '@vitest/browser@4.0.14(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(yaml@2.8.2))(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))':
+  '@vitest/browser-playwright@4.0.14(playwright@1.57.0)(rolldown-vite@7.2.9(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(terser@5.44.1)(yaml@2.8.2))(vitest@4.0.14)':
     dependencies:
-      '@vitest/mocker': 4.0.14(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(yaml@2.8.2))
+      '@vitest/browser': 4.0.14(rolldown-vite@7.2.9(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(terser@5.44.1)(yaml@2.8.2))(vitest@4.0.14)
+      '@vitest/mocker': 4.0.14(rolldown-vite@7.2.9(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(terser@5.44.1)(yaml@2.8.2))
+      playwright: 1.57.0
+      tinyrainbow: 3.0.3
+      vitest: 4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(@vitest/browser-playwright@4.0.14)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2)
+    transitivePeerDependencies:
+      - bufferutil
+      - msw
+      - utf-8-validate
+      - vite
+
+  '@vitest/browser@4.0.14(rolldown-vite@7.2.9(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(terser@5.44.1)(yaml@2.8.2))(vitest@4.0.14)':
+    dependencies:
+      '@vitest/mocker': 4.0.14(rolldown-vite@7.2.9(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(terser@5.44.1)(yaml@2.8.2))
       '@vitest/utils': 4.0.14
       magic-string: 0.30.21
       pixelmatch: 7.1.0
       pngjs: 7.0.0
       sirv: 3.0.2
       tinyrainbow: 3.0.3
-      vitest: 4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2)
+      vitest: 4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(@vitest/browser-playwright@4.0.14)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2)
       ws: 8.18.3
     transitivePeerDependencies:
       - bufferutil
@@ -10851,14 +10873,14 @@ snapshots:
       - utf-8-validate
       - vite
 
-  '@vitest/eslint-plugin@1.5.1(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))':
+  '@vitest/eslint-plugin@1.5.1(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)(vitest@4.0.14)':
     dependencies:
       '@typescript-eslint/scope-manager': 8.48.0
       '@typescript-eslint/utils': 8.48.0(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.3)
       eslint: 9.39.1(jiti@2.6.1)
     optionalDependencies:
       typescript: 5.9.3
-      vitest: 4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2)
+      vitest: 4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(@vitest/browser-playwright@4.0.14)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2)
     transitivePeerDependencies:
       - supports-color
 
@@ -10878,14 +10900,6 @@ snapshots:
       magic-string: 0.30.21
     optionalDependencies:
       vite: rolldown-vite@7.2.9(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(terser@5.44.1)(yaml@2.8.2)
-
-  '@vitest/mocker@4.0.14(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(yaml@2.8.2))':
-    dependencies:
-      '@vitest/spy': 4.0.14
-      estree-walker: 3.0.3
-      magic-string: 0.30.21
-    optionalDependencies:
-      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(yaml@2.8.2)
 
   '@vitest/pretty-format@4.0.14':
     dependencies:
@@ -15744,9 +15758,9 @@ snapshots:
       terser: 5.44.1
       yaml: 2.8.2
 
-  vitest-environment-nuxt@1.0.1(jsdom@26.1.0)(magicast@0.5.1)(playwright-core@1.57.0)(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2)):
+  vitest-environment-nuxt@1.0.1(jsdom@26.1.0)(magicast@0.5.1)(playwright-core@1.57.0)(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(@vitest/browser-playwright@4.0.14)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2)):
     dependencies:
-      '@nuxt/test-utils': 3.20.1(jsdom@26.1.0)(magicast@0.5.1)(playwright-core@1.57.0)(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))
+      '@nuxt/test-utils': 3.20.1(jsdom@26.1.0)(magicast@0.5.1)(playwright-core@1.57.0)(typescript@5.9.3)(vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(@vitest/browser-playwright@4.0.14)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2))
     transitivePeerDependencies:
       - '@cucumber/cucumber'
       - '@jest/globals'
@@ -15761,7 +15775,7 @@ snapshots:
       - typescript
       - vitest
 
-  vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2):
+  vitest@4.0.14(@opentelemetry/api@1.9.0)(@types/node@24.10.1)(@vitest/browser-playwright@4.0.14)(esbuild@0.25.12)(jiti@2.6.1)(jsdom@26.1.0)(terser@5.44.1)(yaml@2.8.2):
     dependencies:
       '@vitest/expect': 4.0.14
       '@vitest/mocker': 4.0.14(rolldown-vite@7.2.9(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(terser@5.44.1)(yaml@2.8.2))
@@ -15786,6 +15800,7 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
       '@types/node': 24.10.1
+      '@vitest/browser-playwright': 4.0.14(playwright@1.57.0)(rolldown-vite@7.2.9(@types/node@24.10.1)(esbuild@0.25.12)(jiti@2.6.1)(terser@5.44.1)(yaml@2.8.2))(vitest@4.0.14)
       jsdom: 26.1.0
     transitivePeerDependencies:
       - esbuild
