@@ -1,5 +1,5 @@
-import { defineConfig, defineProject } from 'vitest/config'
 import { playwright } from '@vitest/browser-playwright'
+import { defineConfig, defineProject } from 'vitest/config'
 
 export default defineConfig({
   test: {
