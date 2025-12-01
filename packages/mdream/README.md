@@ -318,8 +318,8 @@ Split HTML into chunks during conversion for LLM context windows, vector databas
 ### Basic Chunking
 
 ```ts
-import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
 import { TAG_H2 } from 'mdream'
+import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
 
 const html = `
   <h1>Documentation</h1>
@@ -331,17 +331,17 @@ const html = `
 
 const chunks = htmlToMarkdownSplitChunks(html, {
   headersToSplitOn: [TAG_H2], // Split on h2 headers
-  chunkSize: 1000,            // Max chars per chunk
-  chunkOverlap: 200,          // Overlap for context
-  stripHeaders: true          // Remove headers from content
+  chunkSize: 1000, // Max chars per chunk
+  chunkOverlap: 200, // Overlap for context
+  stripHeaders: true // Remove headers from content
 })
 
 // Each chunk includes content and metadata
-chunks.forEach(chunk => {
+chunks.forEach((chunk) => {
   console.log(chunk.content)
   console.log(chunk.metadata.headers) // { h1: "Documentation", h2: "Installation" }
-  console.log(chunk.metadata.code)    // Language if chunk contains code
-  console.log(chunk.metadata.loc)     // Line numbers
+  console.log(chunk.metadata.code) // Language if chunk contains code
+  console.log(chunk.metadata.loc) // Line numbers
 })
 ```
 
@@ -357,7 +357,8 @@ for (const chunk of htmlToMarkdownSplitChunksStream(html, options)) {
   await processChunk(chunk) // Handle each chunk as it's generated
 
   // Can break early if you found what you need
-  if (foundTarget) break
+  if (foundTarget)
+    break
 }
 ```
 
@@ -371,20 +372,20 @@ for (const chunk of htmlToMarkdownSplitChunksStream(html, options)) {
 ```ts
 interface SplitterOptions {
   // Structural splitting
-  headersToSplitOn?: number[]    // TAG_H1, TAG_H2, etc. Default: [TAG_H2-TAG_H6]
+  headersToSplitOn?: number[] // TAG_H1, TAG_H2, etc. Default: [TAG_H2-TAG_H6]
 
   // Size-based splitting
-  chunkSize?: number              // Max chunk size. Default: 1000
-  chunkOverlap?: number           // Overlap between chunks. Default: 200
-  lengthFunction?: (text: string) => number  // Custom length (e.g., token count)
+  chunkSize?: number // Max chunk size. Default: 1000
+  chunkOverlap?: number // Overlap between chunks. Default: 200
+  lengthFunction?: (text: string) => number // Custom length (e.g., token count)
 
   // Output formatting
-  stripHeaders?: boolean          // Remove headers from content. Default: true
-  returnEachLine?: boolean        // Split into individual lines. Default: false
+  stripHeaders?: boolean // Remove headers from content. Default: true
+  returnEachLine?: boolean // Split into individual lines. Default: false
 
   // Standard options
-  origin?: string                 // Base URL for links/images
-  plugins?: Plugin[]              // Apply plugins during conversion
+  origin?: string // Base URL for links/images
+  plugins?: Plugin[] // Apply plugins during conversion
 }
 ```
 
@@ -396,9 +397,9 @@ Each chunk includes rich metadata for context:
 interface MarkdownChunk {
   content: string
   metadata: {
-    headers?: Record<string, string>  // Header hierarchy: { h1: "Title", h2: "Section" }
-    code?: string                     // Code block language if present
-    loc?: {                           // Line number range
+    headers?: Record<string, string> // Header hierarchy: { h1: "Title", h2: "Section" }
+    code?: string // Code block language if present
+    loc?: { // Line number range
       lines: { from: number, to: number }
     }
   }
@@ -410,9 +411,9 @@ interface MarkdownChunk {
 Combine splitting with presets for optimized output:
 
 ```ts
-import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
-import { withMinimalPreset } from 'mdream/preset/minimal'
 import { TAG_H2 } from 'mdream'
+import { withMinimalPreset } from 'mdream/preset/minimal'
+import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
 
 const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
   headersToSplitOn: [TAG_H2],
