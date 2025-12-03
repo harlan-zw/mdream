@@ -350,6 +350,51 @@ console.log(chunks) // Array of text chunks
 
 See the [Text Splitter Documentation](./packages/mdream/docs/splitter.md) for complete usage and configuration.
 
+## Streaming llms.txt Generation
+
+Generate `llms.txt` and `llms-full.txt` files by streaming pages to disk without keeping full content in memory. Ideal for programmatic generation from crawlers or build systems.
+
+```ts
+import { createLlmsTxtStream } from 'mdream/llms-txt'
+
+const stream = createLlmsTxtStream({
+  siteName: 'My Docs',
+  description: 'Documentation site',
+  origin: 'https://example.com',
+  generateFull: true,
+  outputDir: './dist',
+})
+
+const writer = stream.getWriter()
+
+// Stream pages as they're processed
+await writer.write({
+  title: 'Home',
+  content: '# Welcome\n\nHome page content.',
+  url: '/',
+  metadata: { description: 'Welcome page' },
+})
+
+await writer.write({
+  title: 'About',
+  content: '# About\n\nAbout page content.',
+  url: '/about',
+})
+
+await writer.close()
+```
+
+**Options:**
+- `siteName` - Site name for header (default: 'Site')
+- `description` - Site description for header
+- `origin` - Base URL to prepend to relative URLs
+- `generateFull` - Generate llms-full.txt with complete content (default: false)
+- `outputDir` - Directory to write files (default: process.cwd())
+
+**Output:**
+- `llms.txt` - List of pages with titles and descriptions
+- `llms-full.txt` - Complete page content with frontmatter (if `generateFull: true`)
+
 ## Credits
 
 - [ultrahtml](https://github.com/natemoo-re/ultrahtml): HTML parsing inspiration
