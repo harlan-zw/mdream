@@ -22,7 +22,7 @@
 
 - 🧠 Custom built HTML to Markdown Convertor Optimized for LLMs (~50% fewer tokens)
 - 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
-- ✂️ LangChain compatible [Markdown Text Splitter](#text-splitter) for single-pass chunking.
+- ✂️ LangChain compatible [Markdown Text Splitter](./packages/mdream/README.md#markdown-splitting) for single-pass chunking.
 - 🚀 Ultra Fast: Stream 1.4MB of HTML to markdown in ~50ms.
 - ⚡ Tiny: 6kB gzip, zero dependency core.
 - ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [Docker](#docker-usage), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), & more.
@@ -329,71 +329,16 @@ const markdown = htmlToMarkdown('<h1>Hello World</h1>')
 console.log(markdown) // # Hello World
 ```
 
-See the [Mdream Package README](./packages/mdream/README.md) for complete documentation on API usage, streaming, presets, and the plugin system.
+**Core Functions:**
+- [htmlToMarkdown](./packages/mdream/README.md#api-usage) - Convert HTML to Markdown
+- [streamHtmlToMarkdown](./packages/mdream/README.md#api-usage) - Stream HTML to Markdown
+- [parseHtml](./packages/mdream/README.md#api-usage) - Parse HTML to AST
 
-## Text Splitter
-
-Mdream includes a [LangChain](https://python.langchain.com/api_reference/text_splitters/markdown/langchain_text_splitters.markdown.ExperimentalMarkdownSyntaxTextSplitter.html) compatible Markdown splitter that runs efficiently in single pass.
-
-This provides significant performance improvements over traditional multi-pass splitters and allows
-you to integrate with your custom Mdream plugins.
-
-```ts
-import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
-
-const chunks = await htmlToMarkdownSplitChunks('<h1>Hello World</h1><p>This is a paragraph.</p>', {
-  chunkSize: 1000,
-  chunkOverlap: 200,
-})
-console.log(chunks) // Array of text chunks
-```
-
-See the [Text Splitter Documentation](./packages/mdream/docs/splitter.md) for complete usage and configuration.
-
-## Streaming llms.txt Generation
-
-Generate `llms.txt` and `llms-full.txt` files by streaming pages to disk without keeping full content in memory. Ideal for programmatic generation from crawlers or build systems.
-
-```ts
-import { createLlmsTxtStream } from 'mdream/llms-txt'
-
-const stream = createLlmsTxtStream({
-  siteName: 'My Docs',
-  description: 'Documentation site',
-  origin: 'https://example.com',
-  generateFull: true,
-  outputDir: './dist',
-})
-
-const writer = stream.getWriter()
-
-// Stream pages as they're processed
-await writer.write({
-  title: 'Home',
-  content: '# Welcome\n\nHome page content.',
-  url: '/',
-  metadata: { description: 'Welcome page' },
-})
-
-await writer.write({
-  title: 'About',
-  content: '# About\n\nAbout page content.',
-  url: '/about',
-})
-
-await writer.close()
-```
-
-**Options:**
-- `siteName` - Site name for header (default: 'Site')
-- `description` - Site description for header
-- `origin` - Base URL to prepend to relative URLs
-- `generateFull` - Generate llms-full.txt with complete content (default: false)
-- `outputDir` - Directory to write files (default: process.cwd())
-
-**Output:**
-- `llms.txt` - List of pages with titles and descriptions
-- `llms-full.txt` - Complete page content with frontmatter (if `generateFull: true`)
+**Utilities:**
+- [Presets](./packages/mdream/README.md#presets) - Pre-configured plugin combinations
+- [Plugin System](./packages/mdream/README.md#plugin-system) - Customize conversion behavior
+- [Markdown Splitting](./packages/mdream/README.md#markdown-splitting) - Split HTML into chunks
+- [llms.txt Generation](./packages/mdream/README.md#llmstxt-generation) - Generate llms.txt artifacts
 
 ## Credits
 

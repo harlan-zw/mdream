@@ -5,6 +5,30 @@ import { glob } from 'tinyglobby'
 import { htmlToMarkdown } from './index.ts'
 import { extractionPlugin } from './plugins/extraction.ts'
 
+/**
+ * Link in llms.txt section
+ */
+export interface LlmsTxtLink {
+  /** The title of the link */
+  title: string
+  /** The description of the link */
+  description?: string
+  /** The href of the link */
+  href: string
+}
+
+/**
+ * Section in llms.txt
+ */
+export interface LlmsTxtSection {
+  /** The title of the section */
+  title: string
+  /** The description of the section (can be array for multiple paragraphs) */
+  description?: string | string[]
+  /** The links of the section */
+  links?: LlmsTxtLink[]
+}
+
 export interface LlmsTxtArtifactsOptions {
   patterns?: string | string[]
   files?: ProcessedFile[]
@@ -14,6 +38,10 @@ export interface LlmsTxtArtifactsOptions {
   generateFull?: boolean
   generateMarkdown?: boolean
   outputDir?: string
+  /** The sections to write before pages */
+  sections?: LlmsTxtSection[]
+  /** Notes to write at the end */
+  notes?: string | string[]
 }
 
 export interface ProcessedFile {
@@ -168,13 +196,19 @@ async function processHtmlFiles(patterns: string | string[], origin?: string): P
 /**
  * Generate llms.txt content
  */
-function generateLlmsTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArtifactsOptions, 'siteName' | 'description' | 'origin' | 'outputDir'>): string {
-  const { siteName = 'Site', description, origin = '' } = options
+function generateLlmsTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArtifactsOptions, 'siteName' | 'description' | 'origin' | 'outputDir' | 'sections' | 'notes'>): string {
+  const { siteName = 'Site', description, origin = '', sections, notes } = options
 
   let content = `# ${siteName}\n\n`
 
   if (description) {
     content += `> ${description}\n\n`
+  }
+
+  if (sections) {
+    for (const section of sections) {
+      content += formatSection(section)
+    }
   }
 
   if (files.length > 0) {
@@ -198,6 +232,10 @@ function generateLlmsTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArt
         content += `- [${file.title}](${url})${descText}\n`
       }
     }
+  }
+
+  if (notes) {
+    content += `\n${formatNotes(notes)}`
   }
 
   return content
@@ -248,13 +286,19 @@ function serializeFrontmatter(data: Record<string, any>): string {
 /**
  * Generate llms-full.txt content with complete page content
  */
-function generateLlmsFullTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArtifactsOptions, 'siteName' | 'description' | 'origin' | 'outputDir'>): string {
-  const { siteName = 'Site', description, origin = '' } = options
+function generateLlmsFullTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArtifactsOptions, 'siteName' | 'description' | 'origin' | 'outputDir' | 'sections' | 'notes'>): string {
+  const { siteName = 'Site', description, origin = '', sections, notes } = options
 
   let content = `# ${siteName}\n\n`
 
   if (description) {
     content += `> ${description}\n\n`
+  }
+
+  if (sections) {
+    for (const section of sections) {
+      content += formatSection(section)
+    }
   }
 
   if (files.length > 0) {
@@ -313,6 +357,10 @@ function generateLlmsFullTxtContent(files: ProcessedFile[], options: Pick<LlmsTx
 
       content += `---\n${frontmatterString}\n---\n\n${contentBody}\n\n---\n\n`
     }
+  }
+
+  if (notes) {
+    content += `\n${formatNotes(notes)}`
   }
 
   return content
@@ -378,6 +426,42 @@ export async function generateLlmsTxtArtifacts(options: LlmsTxtArtifactsOptions)
 }
 
 /**
+ * Format a section with title, description, and links
+ */
+function formatSection(section: LlmsTxtSection): string {
+  let content = `## ${section.title}\n\n`
+
+  if (section.description) {
+    const descriptions = Array.isArray(section.description) ? section.description : [section.description]
+    for (const desc of descriptions) {
+      content += `${desc}\n\n`
+    }
+  }
+
+  if (section.links?.length) {
+    for (const link of section.links) {
+      const desc = link.description ? `: ${link.description}` : ''
+      content += `- [${link.title}](${link.href})${desc}\n`
+    }
+    content += '\n'
+  }
+
+  return content
+}
+
+/**
+ * Format notes section
+ */
+function formatNotes(notes: string | string[]): string {
+  const noteLines = Array.isArray(notes) ? notes : [notes]
+  let content = ''
+  for (const note of noteLines) {
+    content += `${note}\n\n`
+  }
+  return content
+}
+
+/**
  * Options for creating an llms.txt stream
  */
 export interface CreateLlmsTxtStreamOptions extends Omit<LlmsTxtArtifactsOptions, 'patterns' | 'files' | 'outputDir' | 'generateMarkdown'> {
@@ -391,6 +475,10 @@ export interface CreateLlmsTxtStreamOptions extends Omit<LlmsTxtArtifactsOptions
   origin?: string
   /** Generate llms-full.txt with complete page content (defaults to false) */
   generateFull?: boolean
+  /** The sections to write before pages */
+  sections?: LlmsTxtSection[]
+  /** Notes to write at the end */
+  notes?: string | string[]
 }
 
 /**
@@ -407,6 +495,17 @@ export interface CreateLlmsTxtStreamOptions extends Omit<LlmsTxtArtifactsOptions
  *   origin: 'https://example.com',
  *   generateFull: true,
  *   outputDir: './dist',
+ *   sections: [
+ *     {
+ *       title: 'Getting Started',
+ *       description: 'Quick start guide',
+ *       links: [
+ *         { title: 'Installation', href: '/install', description: 'How to install' },
+ *         { title: 'Quick Start', href: '/quickstart' },
+ *       ],
+ *     },
+ *   ],
+ *   notes: ['Generated by mdream', 'Last updated: 2024'],
  * })
  *
  * const writer = stream.getWriter()
@@ -422,7 +521,7 @@ export interface CreateLlmsTxtStreamOptions extends Omit<LlmsTxtArtifactsOptions
  * @returns WritableStream that accepts ProcessedFile objects
  */
 export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): WritableStream<ProcessedFile> {
-  const { siteName = 'Site', description, origin = '', generateFull, outputDir = process.cwd() } = options
+  const { siteName = 'Site', description, origin = '', generateFull, outputDir = process.cwd(), sections, notes } = options
   let llmsTxtHandle: FileHandle | undefined
   let llmsFullTxtHandle: FileHandle | undefined
 
@@ -437,6 +536,14 @@ export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): W
       if (description) {
         header += `> ${description}\n\n`
       }
+
+      // Write sections if provided
+      if (sections) {
+        for (const section of sections) {
+          header += formatSection(section)
+        }
+      }
+
       header += `## Pages\n\n`
       await llmsTxtHandle.write(header)
 
@@ -447,6 +554,14 @@ export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): W
         if (description) {
           fullHeader += `> ${description}\n\n`
         }
+
+        // Write sections to full version too
+        if (sections) {
+          for (const section of sections) {
+            fullHeader += formatSection(section)
+          }
+        }
+
         await llmsFullTxtHandle.write(fullHeader)
       }
     },
@@ -510,6 +625,15 @@ export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): W
     },
 
     async close() {
+      // Write notes section if provided
+      if (notes) {
+        const notesContent = formatNotes(notes)
+        await llmsTxtHandle?.write(`\n${notesContent}`)
+        if (generateFull && llmsFullTxtHandle) {
+          await llmsFullTxtHandle.write(`\n${notesContent}`)
+        }
+      }
+
       await llmsTxtHandle?.close()
       await llmsFullTxtHandle?.close()
     },

@@ -224,6 +224,52 @@ it('should work with pre-processed files', async () => {
   expect(result.llmsFullTxt).toContain('# About')
 })
 
+it('should support sections and notes in generateLlmsTxtArtifacts', async () => {
+  const processedFiles = [
+    {
+      title: 'Home Page',
+      content: '# Welcome\n\nThis is the home page.',
+      url: '/',
+    },
+  ]
+
+  const result = await generateLlmsTxtArtifacts({
+    files: processedFiles,
+    siteName: 'Test Site',
+    sections: [
+      {
+        title: 'Quick Links',
+        description: 'Essential resources',
+        links: [
+          { title: 'Docs', href: '/docs', description: 'Documentation' },
+          { title: 'API', href: '/api' },
+        ],
+      },
+    ],
+    notes: ['Note line 1', 'Note line 2'],
+    generateFull: true,
+  })
+
+  // Check llms.txt
+  expect(result.llmsTxt).toContain('## Quick Links')
+  expect(result.llmsTxt).toContain('Essential resources')
+  expect(result.llmsTxt).toContain('[Docs](/docs): Documentation')
+  expect(result.llmsTxt).toContain('[API](/api)')
+  expect(result.llmsTxt).toContain('Note line 1')
+  expect(result.llmsTxt).toContain('Note line 2')
+
+  // Verify order: sections -> pages -> notes
+  const quickLinksIdx = result.llmsTxt.indexOf('## Quick Links')
+  const pagesIdx = result.llmsTxt.indexOf('## Pages')
+  const noteIdx = result.llmsTxt.indexOf('Note line 1')
+  expect(quickLinksIdx).toBeLessThan(pagesIdx)
+  expect(pagesIdx).toBeLessThan(noteIdx)
+
+  // Check llms-full.txt
+  expect(result.llmsFullTxt).toContain('## Quick Links')
+  expect(result.llmsFullTxt).toContain('Note line 1')
+})
+
 describe('llms-txt frontmatter handling', () => {
   it('should prepend metadata to existing frontmatter', async () => {
     const filesWithFrontmatter: ProcessedFile[] = [{
@@ -519,6 +565,119 @@ existingKey: existingValue
     // Verify file was created in the nested directory
     const llmsTxtContent = await readFile(join(nestedDir, 'llms.txt'), 'utf-8')
     expect(llmsTxtContent).toContain('[Page 1](/page1)')
+
+    await rm(streamTestDir, { recursive: true, force: true })
+  })
+
+  it('should write config sections before pages', async () => {
+    await mkdir(streamTestDir, { recursive: true })
+
+    const stream = createLlmsTxtStream({
+      siteName: 'Test Site',
+      description: 'A test site',
+      outputDir: streamTestDir,
+      sections: [
+        {
+          title: 'Getting Started',
+          description: 'Learn the basics',
+          links: [
+            { title: 'Installation', href: '/install', description: 'How to install' },
+            { title: 'Quick Start', href: '/quickstart' },
+          ],
+        },
+        {
+          title: 'API Reference',
+          description: ['Complete API documentation', 'For all public APIs'],
+          links: [
+            { title: 'Core API', href: '/api/core' },
+          ],
+        },
+      ],
+    })
+
+    const writer = stream.getWriter()
+    await writer.write({ title: 'Page 1', content: '# Page 1', url: '/page1' })
+    await writer.close()
+
+    const llmsTxtContent = await readFile(join(streamTestDir, 'llms.txt'), 'utf-8')
+
+    // Check sections are present and in order
+    expect(llmsTxtContent).toContain('## Getting Started')
+    expect(llmsTxtContent).toContain('Learn the basics')
+    expect(llmsTxtContent).toContain('[Installation](/install): How to install')
+    expect(llmsTxtContent).toContain('[Quick Start](/quickstart)')
+    expect(llmsTxtContent).toContain('## API Reference')
+    expect(llmsTxtContent).toContain('Complete API documentation')
+    expect(llmsTxtContent).toContain('For all public APIs')
+    expect(llmsTxtContent).toContain('[Core API](/api/core)')
+    expect(llmsTxtContent).toContain('## Pages')
+    expect(llmsTxtContent).toContain('[Page 1](/page1)')
+
+    // Verify sections come before pages
+    const gettingStartedIdx = llmsTxtContent.indexOf('## Getting Started')
+    const pagesIdx = llmsTxtContent.indexOf('## Pages')
+    const page1Idx = llmsTxtContent.indexOf('[Page 1]')
+    expect(gettingStartedIdx).toBeLessThan(pagesIdx)
+    expect(pagesIdx).toBeLessThan(page1Idx)
+
+    await rm(streamTestDir, { recursive: true, force: true })
+  })
+
+  it('should write notes at the end without title', async () => {
+    await mkdir(streamTestDir, { recursive: true })
+
+    const stream = createLlmsTxtStream({
+      siteName: 'Test Site',
+      outputDir: streamTestDir,
+      notes: ['This is a note', 'This is another note'],
+    })
+
+    const writer = stream.getWriter()
+    await writer.write({ title: 'Page 1', content: '# Page 1', url: '/page1' })
+    await writer.close()
+
+    const llmsTxtContent = await readFile(join(streamTestDir, 'llms.txt'), 'utf-8')
+
+    // Check notes are present
+    expect(llmsTxtContent).toContain('This is a note')
+    expect(llmsTxtContent).toContain('This is another note')
+
+    // Verify notes come after pages
+    const pagesIdx = llmsTxtContent.indexOf('[Page 1]')
+    const note1Idx = llmsTxtContent.indexOf('This is a note')
+    expect(pagesIdx).toBeLessThan(note1Idx)
+
+    // Verify no "## Notes" title
+    expect(llmsTxtContent).not.toContain('## Notes')
+
+    await rm(streamTestDir, { recursive: true, force: true })
+  })
+
+  it('should write config to llms-full.txt when generateFull is true', async () => {
+    await mkdir(streamTestDir, { recursive: true })
+
+    const stream = createLlmsTxtStream({
+      siteName: 'Test Site',
+      outputDir: streamTestDir,
+      generateFull: true,
+      sections: [
+        {
+          title: 'Resources',
+          links: [{ title: 'Docs', href: '/docs' }],
+        },
+      ],
+      notes: 'Footer note',
+    })
+
+    const writer = stream.getWriter()
+    await writer.write({ title: 'Page 1', content: '# Page 1', url: '/page1' })
+    await writer.close()
+
+    const llmsFullTxtContent = await readFile(join(streamTestDir, 'llms-full.txt'), 'utf-8')
+
+    expect(llmsFullTxtContent).toContain('## Resources')
+    expect(llmsFullTxtContent).toContain('[Docs](/docs)')
+    expect(llmsFullTxtContent).toContain('Footer note')
 
     await rm(streamTestDir, { recursive: true, force: true })
   })
