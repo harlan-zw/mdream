@@ -1,5 +1,6 @@
-import { readFile } from 'node:fs/promises'
-import { basename, dirname, relative, sep } from 'pathe'
+import type { FileHandle } from 'node:fs/promises'
+import { mkdir, open, readFile } from 'node:fs/promises'
+import { basename, dirname, join, relative, sep } from 'pathe'
 import { glob } from 'tinyglobby'
 import { htmlToMarkdown } from './index.ts'
 import { extractionPlugin } from './plugins/extraction.ts'
@@ -374,4 +375,148 @@ export async function generateLlmsTxtArtifacts(options: LlmsTxtArtifactsOptions)
     markdownFiles,
     processedFiles: files,
   }
+}
+
+/**
+ * Options for creating an llms.txt stream
+ */
+export interface CreateLlmsTxtStreamOptions extends Omit<LlmsTxtArtifactsOptions, 'patterns' | 'files' | 'outputDir' | 'generateMarkdown'> {
+  /** Directory to write files to (defaults to process.cwd()) */
+  outputDir?: string
+  /** Site name for the header (defaults to 'Site') */
+  siteName?: string
+  /** Site description for the header */
+  description?: string
+  /** Origin URL to prepend to relative URLs */
+  origin?: string
+  /** Generate llms-full.txt with complete page content (defaults to false) */
+  generateFull?: boolean
+}
+
+/**
+ * Create a WritableStream that generates llms.txt artifacts by streaming pages to disk
+ *
+ * Writes llms.txt (and optionally llms-full.txt) incrementally as pages are written,
+ * never keeping full content in memory. Creates outputDir recursively if needed.
+ *
+ * @example
+ * ```typescript
+ * const stream = createLlmsTxtStream({
+ *   siteName: 'My Docs',
+ *   description: 'Documentation site',
+ *   origin: 'https://example.com',
+ *   generateFull: true,
+ *   outputDir: './dist',
+ * })
+ *
+ * const writer = stream.getWriter()
+ * await writer.write({
+ *   title: 'Home',
+ *   content: '# Welcome\n\nHome page content.',
+ *   url: '/',
+ * })
+ * await writer.close()
+ * ```
+ *
+ * @param options - Configuration options
+ * @returns WritableStream that accepts ProcessedFile objects
+ */
+export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): WritableStream<ProcessedFile> {
+  const { siteName = 'Site', description, origin = '', generateFull, outputDir = process.cwd() } = options
+  let llmsTxtHandle: FileHandle | undefined
+  let llmsFullTxtHandle: FileHandle | undefined
+
+  return new WritableStream<ProcessedFile>({
+    async start() {
+      // Create output directory if it doesn't exist
+      await mkdir(outputDir, { recursive: true })
+
+      // Create and write headers to llms.txt
+      llmsTxtHandle = await open(join(outputDir, 'llms.txt'), 'w')
+      let header = `# ${siteName}\n\n`
+      if (description) {
+        header += `> ${description}\n\n`
+      }
+      header += `## Pages\n\n`
+      await llmsTxtHandle.write(header)
+
+      // Create and write headers to llms-full.txt if requested
+      if (generateFull) {
+        llmsFullTxtHandle = await open(join(outputDir, 'llms-full.txt'), 'w')
+        let fullHeader = `# ${siteName}\n\n`
+        if (description) {
+          fullHeader += `> ${description}\n\n`
+        }
+        await llmsFullTxtHandle.write(fullHeader)
+      }
+    },
+
+    async write(file) {
+      // Write to llms.txt
+      const desc = file.metadata?.description
+      const descText = desc ? `: ${desc.substring(0, 100)}${desc.length > 100 ? '...' : ''}` : ''
+
+      let chunk = ''
+      if (file.filePath && file.filePath.endsWith('.md')) {
+        const relativePath = relative(outputDir, file.filePath)
+        chunk = `- [${file.title}](${relativePath})${descText}\n`
+      }
+      else {
+        const url = file.url.startsWith('http://') || file.url.startsWith('https://')
+          ? file.url
+          : origin + file.url
+        chunk = `- [${file.title}](${url})${descText}\n`
+      }
+      await llmsTxtHandle?.write(chunk)
+
+      // Write to llms-full.txt
+      if (generateFull && llmsFullTxtHandle) {
+        const url = file.url.startsWith('http://') || file.url.startsWith('https://')
+          ? file.url
+          : (origin ? origin + file.url : file.url)
+
+        const { frontmatter, body } = parseFrontmatter(file.content)
+
+        const metadata: Record<string, any> = {
+          title: file.title,
+          url,
+        }
+
+        if (file.filePath) {
+          metadata.file = relative(outputDir, file.filePath)
+        }
+
+        if (file.metadata) {
+          if (file.metadata.description)
+            metadata.description = file.metadata.description
+          if (file.metadata.keywords)
+            metadata.keywords = file.metadata.keywords
+          if (file.metadata.author)
+            metadata.author = file.metadata.author
+        }
+
+        const mergedFrontmatter = frontmatter ? { ...frontmatter, ...metadata } : metadata
+        const frontmatterString = serializeFrontmatter(mergedFrontmatter)
+        let contentBody = frontmatter ? body : file.content
+
+        const titleLine = contentBody.trim().split('\n')[0]
+        if (titleLine === file.title || titleLine === `# ${file.title}`) {
+          contentBody = contentBody.trim().split('\n').slice(1).join('\n').trimStart()
+        }
+
+        const fullChunk = `---\n${frontmatterString}\n---\n\n${contentBody}\n\n---\n\n`
+        await llmsFullTxtHandle.write(fullChunk)
+      }
+    },
+
+    async close() {
+      await llmsTxtHandle?.close()
+      await llmsFullTxtHandle?.close()
+    },
+
+    async abort(reason) {
+      await llmsTxtHandle?.close()
+      await llmsFullTxtHandle?.close()
+    },
+  })
 }

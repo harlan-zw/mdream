@@ -1,9 +1,9 @@
 import type { ProcessedFile } from '../../src/llms-txt.ts'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { generateLlmsTxtArtifacts } from '../../src/llms-txt.ts'
+import { createLlmsTxtStream, generateLlmsTxtArtifacts } from '../../src/llms-txt.ts'
 
 const testDir = join(tmpdir(), 'mdream-llms-txt-test')
 
@@ -344,5 +344,182 @@ Content here`,
     // Original values that conflict should be overwritten
     expect(result.llmsFullTxt).not.toContain('title: Original Title')
     expect(result.llmsFullTxt).not.toContain('url: /old-url')
+  })
+})
+
+describe('createLlmsTxtStream', () => {
+  const streamTestDir = join(tmpdir(), 'mdream-stream-test')
+
+  it('should write llms.txt to file', async () => {
+    await mkdir(streamTestDir, { recursive: true })
+
+    const processedFiles: ProcessedFile[] = [
+      {
+        title: 'Home Page',
+        content: '# Welcome\n\nThis is the home page.',
+        url: '/',
+        metadata: {
+          description: 'Welcome to our site',
+        },
+      },
+      {
+        title: 'About Page',
+        content: '# About\n\nAbout our company.',
+        url: '/about',
+        metadata: {
+          description: 'Learn about us',
+        },
+      },
+    ]
+
+    const stream = createLlmsTxtStream({
+      siteName: 'Test Site',
+      description: 'A test site',
+      origin: 'https://example.com',
+      outputDir: streamTestDir,
+    })
+
+    const writer = stream.getWriter()
+    for (const page of processedFiles) {
+      await writer.write(page)
+    }
+    await writer.close()
+
+    const llmsTxtContent = await readFile(join(streamTestDir, 'llms.txt'), 'utf-8')
+
+    expect(llmsTxtContent).toContain('# Test Site')
+    expect(llmsTxtContent).toContain('> A test site')
+    expect(llmsTxtContent).toContain('## Pages')
+    expect(llmsTxtContent).toContain('[Home Page](https://example.com/)')
+    expect(llmsTxtContent).toContain('[About Page](https://example.com/about)')
+
+    await rm(streamTestDir, { recursive: true, force: true })
+  })
+
+  it('should write llms-full.txt to file when generateFull is true', async () => {
+    await mkdir(streamTestDir, { recursive: true })
+
+    const processedFiles: ProcessedFile[] = [
+      {
+        title: 'Test Page',
+        content: '# Content\n\nThis is the content.',
+        url: '/test',
+        metadata: {
+          description: 'A test page',
+        },
+      },
+    ]
+
+    const stream = createLlmsTxtStream({
+      siteName: 'Test Site',
+      origin: 'https://example.com',
+      generateFull: true,
+      outputDir: streamTestDir,
+    })
+
+    const writer = stream.getWriter()
+    for (const page of processedFiles) {
+      await writer.write(page)
+    }
+    await writer.close()
+
+    const llmsTxtContent = await readFile(join(streamTestDir, 'llms.txt'), 'utf-8')
+    const llmsFullTxtContent = await readFile(join(streamTestDir, 'llms-full.txt'), 'utf-8')
+
+    expect(llmsTxtContent).toContain('# Test Site')
+    expect(llmsFullTxtContent).toContain('# Test Site')
+    expect(llmsFullTxtContent).toContain('title: Test Page')
+    expect(llmsFullTxtContent).toContain('url: https://example.com/test')
+    expect(llmsFullTxtContent).toContain('description: A test page')
+    expect(llmsFullTxtContent).toContain('# Content')
+
+    await rm(streamTestDir, { recursive: true, force: true })
+  })
+
+  it('should handle files with frontmatter', async () => {
+    await mkdir(streamTestDir, { recursive: true })
+
+    const filesWithFrontmatter: ProcessedFile[] = [{
+      title: 'Test Page',
+      content: `---
+existingKey: existingValue
+---
+
+# Content`,
+      url: '/test',
+      metadata: {
+        description: 'A test page',
+      },
+    }]
+
+    const stream = createLlmsTxtStream({
+      siteName: 'Test Site',
+      origin: 'https://example.com',
+      generateFull: true,
+      outputDir: streamTestDir,
+    })
+
+    const writer = stream.getWriter()
+    for (const page of filesWithFrontmatter) {
+      await writer.write(page)
+    }
+    await writer.close()
+
+    const llmsFullTxtContent = await readFile(join(streamTestDir, 'llms-full.txt'), 'utf-8')
+
+    expect(llmsFullTxtContent).toContain('title: Test Page')
+    expect(llmsFullTxtContent).toContain('url: https://example.com/test')
+    expect(llmsFullTxtContent).toContain('existingKey: existingValue')
+    expect(llmsFullTxtContent).toContain('description: A test page')
+
+    await rm(streamTestDir, { recursive: true, force: true })
+  })
+
+  it('should write incrementally without buffering', async () => {
+    await mkdir(streamTestDir, { recursive: true })
+
+    const stream = createLlmsTxtStream({
+      siteName: 'Test Site',
+      outputDir: streamTestDir,
+    })
+
+    const writer = stream.getWriter()
+
+    await writer.write({ title: 'Page 1', content: '# Page 1', url: '/page1' })
+
+    // Read file immediately after first write to verify streaming
+    let llmsTxtContent = await readFile(join(streamTestDir, 'llms.txt'), 'utf-8')
+    expect(llmsTxtContent).toContain('[Page 1](/page1)')
+
+    await writer.write({ title: 'Page 2', content: '# Page 2', url: '/page2' })
+
+    llmsTxtContent = await readFile(join(streamTestDir, 'llms.txt'), 'utf-8')
+    expect(llmsTxtContent).toContain('[Page 2](/page2)')
+
+    await writer.close()
+
+    await rm(streamTestDir, { recursive: true, force: true })
+  })
+
+  it('should create output directory if it does not exist', async () => {
+    const nestedDir = join(streamTestDir, 'nested', 'output', 'dir')
+
+    // Ensure directory doesn't exist
+    await rm(streamTestDir, { recursive: true, force: true })
+
+    const stream = createLlmsTxtStream({
+      siteName: 'Test Site',
+      outputDir: nestedDir,
+    })
+
+    const writer = stream.getWriter()
+    await writer.write({ title: 'Page 1', content: '# Page 1', url: '/page1' })
+    await writer.close()
+
+    // Verify file was created in the nested directory
+    const llmsTxtContent = await readFile(join(nestedDir, 'llms.txt'), 'utf-8')
+    expect(llmsTxtContent).toContain('[Page 1](/page1)')
+
+    await rm(streamTestDir, { recursive: true, force: true })
   })
 })
