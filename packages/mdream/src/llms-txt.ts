@@ -1,6 +1,5 @@
-import { mkdir, open } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
-import { readFile } from 'node:fs/promises'
+import { mkdir, open, readFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, sep } from 'pathe'
 import { glob } from 'tinyglobby'
 import { htmlToMarkdown } from './index.ts'
