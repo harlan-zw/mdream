@@ -569,7 +569,7 @@ export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): W
     async write(file) {
       // Write to llms.txt
       const desc = file.metadata?.description
-      const descText = desc ? `: ${desc.substring(0, 100)}${desc.length > 100 ? '...' : ''}` : ''
+      const descText = desc ? `: ${desc.substring(0, 160)}${desc.length > 160 ? '...' : ''}` : ''
 
       let chunk = ''
       if (file.filePath && file.filePath.endsWith('.md')) {
