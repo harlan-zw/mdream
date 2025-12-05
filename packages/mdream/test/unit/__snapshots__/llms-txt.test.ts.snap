@@ -1,0 +1,36 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`createLlmsTxtStream > hierarchical sorting and blank lines > should correctly order real-world Nuxt SEO structure 1`] = `
+"# Nuxt SEO
+
+> Nuxt SEO is a collection of hand-crafted Nuxt Modules to help you rank higher in search engines.
+
+## LLM Resources
+
+- [Pages Minimal](https://nuxtseo.com/llms.toon): Page-level metadata in TOON format
+- [Page Chunks](https://nuxtseo.com/llms-full.toon): Individual content chunks in TOON format
+
+## Pages
+
+- [Nuxt SEO](/)
+- [Announcement](/announcement)
+- [Chat](/chat)
+- [Releases](/releases)
+
+- [Nuxt Link Checker](/docs/link-checker/getting-started/introduction)
+- [Install Nuxt SEO](/docs/nuxt-seo/getting-started/installation)
+- [What Is Nuxt SEO?](/docs/nuxt-seo/getting-started/introduction)
+- [Nuxt OG Image](/docs/og-image/getting-started/introduction)
+- [Nuxt Sitemap](/docs/sitemap/getting-started/introduction)
+
+- [Controlling Crawlers](/learn/controlling-crawlers)
+- [Launch & listen](/learn/launch-and-listen)
+- [Getting Indexed](/learn/launch-and-listen/going-live)
+- [Mastering Meta](/learn/mastering-meta)
+- [Routes & Rendering](/learn/routes-and-rendering)
+- [Trailing Slashes](/learn/routes-and-rendering/trailing-slashes)
+
+- [Pro](/pro)
+- [Pro Feedback](/pro/feedback)
+"
+`;

@@ -205,6 +205,10 @@ function generateLlmsTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArt
     content += `> ${description}\n\n`
   }
 
+  if (origin) {
+    content += `Canonical Origin: ${origin}\n\n`
+  }
+
   if (sections) {
     for (const section of sections) {
       content += formatSection(section)
@@ -228,7 +232,7 @@ function generateLlmsTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArt
         // CLI context or no markdown files - use URL
         const url = file.url.startsWith('http://') || file.url.startsWith('https://')
           ? file.url
-          : origin + file.url
+          : (origin ? origin + file.url : file.url)
         content += `- [${file.title}](${url})${descText}\n`
       }
     }
@@ -293,6 +297,10 @@ function generateLlmsFullTxtContent(files: ProcessedFile[], options: Pick<LlmsTx
 
   if (description) {
     content += `> ${description}\n\n`
+  }
+
+  if (origin) {
+    content += `Canonical Origin: ${origin}\n\n`
   }
 
   if (sections) {
@@ -520,21 +528,95 @@ export interface CreateLlmsTxtStreamOptions extends Omit<LlmsTxtArtifactsOptions
  * @param options - Configuration options
  * @returns WritableStream that accepts ProcessedFile objects
  */
+/**
+ * Get the group key for a URL (up to 2 segments deep)
+ */
+/**
+ * Sort pages by URL path in hierarchical order (directory tree structure)
+ * Groups by first segment, with root-level pages without nesting grouped together
+ */
+function sortPagesByPath(pages: { url: string, title: string, description?: string, filePath?: string }[]): typeof pages {
+  // Analyze which first segments have nested paths
+  const segmentHasNested = new Map<string, boolean>()
+  for (const page of pages) {
+    const segments = page.url.split('/').filter(Boolean)
+    const firstSegment = segments.length > 0 ? segments[0] : ''
+
+    if (!segmentHasNested.has(firstSegment)) {
+      segmentHasNested.set(firstSegment, false)
+    }
+
+    if (segments.length > 1) {
+      segmentHasNested.set(firstSegment, true)
+    }
+  }
+
+  return pages.sort((a, b) => {
+    const segmentsA = a.url.split('/').filter(Boolean)
+    const segmentsB = b.url.split('/').filter(Boolean)
+
+    const firstSegmentA = segmentsA.length > 0 ? segmentsA[0] : ''
+    const firstSegmentB = segmentsB.length > 0 ? segmentsB[0] : ''
+
+    // Determine group: root-level pages without nested paths are all in 'root' group
+    const isRootLevelA = segmentsA.length <= 1
+    const isRootLevelB = segmentsB.length <= 1
+    const hasNestedA = segmentHasNested.get(firstSegmentA)
+    const hasNestedB = segmentHasNested.get(firstSegmentB)
+
+    const groupKeyA = (isRootLevelA && !hasNestedA) ? '' : firstSegmentA
+    const groupKeyB = (isRootLevelB && !hasNestedB) ? '' : firstSegmentB
+
+    // Root group (empty string) comes first
+    if (groupKeyA === '' && groupKeyB !== '')
+      return -1
+    if (groupKeyA !== '' && groupKeyB === '')
+      return 1
+
+    // If in different groups, sort by group key
+    if (groupKeyA !== groupKeyB)
+      return groupKeyA.localeCompare(groupKeyB)
+
+    // Within same group, sort by full URL path
+    // Root (/) always comes first within root group
+    if (segmentsA.length === 0)
+      return -1
+    if (segmentsB.length === 0)
+      return 1
+
+    // Compare segment by segment
+    const minLen = Math.min(segmentsA.length, segmentsB.length)
+    for (let i = 0; i < minLen; i++) {
+      const cmp = segmentsA[i].localeCompare(segmentsB[i])
+      if (cmp !== 0)
+        return cmp
+    }
+
+    // If all compared segments are equal, shorter path comes first
+    return segmentsA.length - segmentsB.length
+  })
+}
+
 export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): WritableStream<ProcessedFile> {
   const { siteName = 'Site', description, origin = '', generateFull, outputDir = process.cwd(), sections, notes } = options
   let llmsTxtHandle: FileHandle | undefined
   let llmsFullTxtHandle: FileHandle | undefined
+  const bufferedPages: { url: string, title: string, description?: string, filePath?: string }[] = []
 
   return new WritableStream<ProcessedFile>({
     async start() {
       // Create output directory if it doesn't exist
       await mkdir(outputDir, { recursive: true })
 
-      // Create and write headers to llms.txt
+      // Create llms.txt but only write header sections
       llmsTxtHandle = await open(join(outputDir, 'llms.txt'), 'w')
       let header = `# ${siteName}\n\n`
       if (description) {
         header += `> ${description}\n\n`
+      }
+
+      if (origin) {
+        header += `Canonical Origin: ${origin}\n\n`
       }
 
       // Write sections if provided
@@ -544,7 +626,6 @@ export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): W
         }
       }
 
-      header += `## Pages\n\n`
       await llmsTxtHandle.write(header)
 
       // Create and write headers to llms-full.txt if requested
@@ -553,6 +634,10 @@ export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): W
         let fullHeader = `# ${siteName}\n\n`
         if (description) {
           fullHeader += `> ${description}\n\n`
+        }
+
+        if (origin) {
+          fullHeader += `Canonical Origin: ${origin}\n\n`
         }
 
         // Write sections to full version too
@@ -567,24 +652,16 @@ export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): W
     },
 
     async write(file) {
-      // Write to llms.txt
+      // Buffer page metadata for llms.txt (to sort later)
       const desc = file.metadata?.description
-      const descText = desc ? `: ${desc.substring(0, 160)}${desc.length > 160 ? '...' : ''}` : ''
+      bufferedPages.push({
+        url: file.url,
+        title: file.title,
+        description: desc,
+        filePath: file.filePath,
+      })
 
-      let chunk = ''
-      if (file.filePath && file.filePath.endsWith('.md')) {
-        const relativePath = relative(outputDir, file.filePath)
-        chunk = `- [${file.title}](${relativePath})${descText}\n`
-      }
-      else {
-        const url = file.url.startsWith('http://') || file.url.startsWith('https://')
-          ? file.url
-          : origin + file.url
-        chunk = `- [${file.title}](${url})${descText}\n`
-      }
-      await llmsTxtHandle?.write(chunk)
-
-      // Write to llms-full.txt
+      // Write to llms-full.txt immediately (streaming)
       if (generateFull && llmsFullTxtHandle) {
         const url = file.url.startsWith('http://') || file.url.startsWith('https://')
           ? file.url
@@ -625,6 +702,77 @@ export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): W
     },
 
     async close() {
+      // Sort buffered pages by path hierarchy and write to llms.txt
+      const sortedPages = sortPagesByPath(bufferedPages)
+
+      // Analyze which first segments have nested paths
+      const segmentHasNested = new Map<string, boolean>()
+      for (const page of sortedPages) {
+        const segments = page.url.split('/').filter(Boolean)
+        const firstSegment = segments.length > 0 ? segments[0] : ''
+
+        if (!segmentHasNested.has(firstSegment)) {
+          segmentHasNested.set(firstSegment, false)
+        }
+
+        // If this URL has more than one segment, or we've seen this segment before with different depth
+        if (segments.length > 1) {
+          segmentHasNested.set(firstSegment, true)
+        }
+      }
+
+      await llmsTxtHandle?.write(`## Pages\n\n`)
+
+      let currentGroup = ''
+      let segmentGroupIndex = 0
+      let urlsInCurrentGroup = 0
+
+      for (let i = 0; i < sortedPages.length; i++) {
+        const page = sortedPages[i]
+        const segments = page.url.split('/').filter(Boolean)
+        const firstSegment = segments.length > 0 ? segments[0] : ''
+
+        // Determine group: root-level pages without nested paths are all in 'root' group
+        const isRootLevel = segments.length <= 1
+        const hasNested = segmentHasNested.get(firstSegment)
+        const groupKey = (isRootLevel && !hasNested) ? '' : firstSegment
+
+        // Detect segment group change
+        if (groupKey !== currentGroup) {
+          // Add blank line after previous group based on rules
+          // Only add if we've written at least one URL
+          if (urlsInCurrentGroup > 0) {
+            const shouldAddBlankLine = segmentGroupIndex === 0 // Always after first group (index 0)
+              || (segmentGroupIndex >= 1 && segmentGroupIndex <= 2 && urlsInCurrentGroup > 1) // Groups 2-3 (index 1-2) if > 1 URL
+
+            if (shouldAddBlankLine) {
+              await llmsTxtHandle?.write('\n')
+            }
+          }
+
+          currentGroup = groupKey
+          segmentGroupIndex++
+          urlsInCurrentGroup = 0
+        }
+
+        urlsInCurrentGroup++
+
+        const descText = page.description ? `: ${page.description.substring(0, 160)}${page.description.length > 160 ? '...' : ''}` : ''
+
+        let chunk = ''
+        if (page.filePath && page.filePath.endsWith('.md')) {
+          const relativePath = relative(outputDir, page.filePath)
+          chunk = `- [${page.title}](${relativePath})${descText}\n`
+        }
+        else {
+          const url = page.url.startsWith('http://') || page.url.startsWith('https://')
+            ? page.url
+            : (origin ? origin + page.url : page.url)
+          chunk = `- [${page.title}](${url})${descText}\n`
+        }
+        await llmsTxtHandle?.write(chunk)
+      }
+
       // Write notes section if provided
       if (notes) {
         const notesContent = formatNotes(notes)
