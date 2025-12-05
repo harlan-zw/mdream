@@ -4,7 +4,7 @@ import type { CrawlOptions, CrawlResult, PageData } from './types.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import * as p from '@clack/prompts'
-import { HttpCrawler, log, PlaywrightCrawler, purgeDefaultStorages } from 'crawlee'
+import { EnqueueStrategy, HttpCrawler, log, PlaywrightCrawler, purgeDefaultStorages } from 'crawlee'
 import { htmlToMarkdown } from 'mdream'
 import { generateLlmsTxtArtifacts } from 'mdream/llms-txt'
 import { withMinimalPreset } from 'mdream/preset/minimal'
@@ -138,6 +138,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     descriptionOverride,
     verbose = false,
     skipSitemap = false,
+    allowSubdomains = false,
     onPage,
   } = options
 
@@ -219,7 +220,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
             if (hasGlobPatterns) {
               // Filter URLs through glob patterns and exclude patterns
               const filteredUrls = robotsUrls.filter((url) => {
-                return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
+                return !isUrlExcluded(url, exclude, allowSubdomains) && patterns.some(pattern => matchesGlobPattern(url, pattern, allowSubdomains))
               })
 
               // Always use filtered URLs when glob patterns are provided, even if empty
@@ -231,7 +232,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
             else {
               // No glob patterns - use all URLs except excluded ones
               const filteredUrls = robotsUrls.filter((url) => {
-                return !isUrlExcluded(url, exclude)
+                return !isUrlExcluded(url, exclude, allowSubdomains)
               })
               if (filteredUrls.length > 0) {
                 startingUrls = filteredUrls
@@ -259,7 +260,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       if (hasGlobPatterns) {
         // Filter URLs through glob patterns and exclude patterns
         const filteredUrls = sitemapUrls.filter((url) => {
-          return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
+          return !isUrlExcluded(url, exclude, allowSubdomains) && patterns.some(pattern => matchesGlobPattern(url, pattern, allowSubdomains))
         })
 
         // Always use filtered URLs when glob patterns are provided, even if empty
@@ -272,7 +273,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       else {
         // No glob patterns - use all URLs except excluded ones
         const filteredUrls = sitemapUrls.filter((url) => {
-          return !isUrlExcluded(url, exclude)
+          return !isUrlExcluded(url, exclude, allowSubdomains)
         })
         if (filteredUrls.length > 0) {
           startingUrls = filteredUrls
@@ -304,7 +305,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
             if (hasGlobPatterns) {
             // Filter URLs through glob patterns and exclude patterns
               const filteredUrls = altUrls.filter((url) => {
-                return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
+                return !isUrlExcluded(url, exclude, allowSubdomains) && patterns.some(pattern => matchesGlobPattern(url, pattern, allowSubdomains))
               })
 
               // Always use filtered URLs when glob patterns are provided, even if empty
@@ -317,7 +318,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
             else {
             // No glob patterns - use all URLs except excluded ones
               const filteredUrls = altUrls.filter((url) => {
-                return !isUrlExcluded(url, exclude)
+                return !isUrlExcluded(url, exclude, allowSubdomains)
               })
               if (filteredUrls.length > 0) {
                 startingUrls = filteredUrls
@@ -392,20 +393,37 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   const results: CrawlResult[] = []
   const processedUrls = new Set<string>()
 
+  // Helper function to extract root domain
+  const getRootDomain = (hostname: string): string => {
+    const parts = hostname.split('.')
+    return parts.length >= 2 ? parts.slice(-2).join('.') : hostname
+  }
+
   // Helper function to check if a URL should be crawled based on glob patterns and exclude patterns
   const shouldCrawlUrl = (url: string): boolean => {
     // First check if URL should be excluded
-    if (isUrlExcluded(url, exclude)) {
+    if (isUrlExcluded(url, exclude, allowSubdomains)) {
       return false
     }
 
-    // If no glob patterns, crawl everything from same domain
+    // If no glob patterns, check domain matching
     if (!patterns.some(p => p.isGlob)) {
+      if (allowSubdomains) {
+        try {
+          const urlObj = new URL(url)
+          const firstUrl = new URL(startingUrls[0])
+          const urlRootDomain = getRootDomain(urlObj.hostname)
+          const firstRootDomain = getRootDomain(firstUrl.hostname)
+          return urlRootDomain === firstRootDomain
+        } catch {
+          return false
+        }
+      }
       return true
     }
 
     // Check if URL matches any glob pattern
-    return patterns.some(pattern => matchesGlobPattern(url, pattern))
+    return patterns.some(pattern => matchesGlobPattern(url, pattern, allowSubdomains))
   }
 
   // Create request handler that works for both crawlers
@@ -441,7 +459,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       }
 
       // Extract metadata including links, title, description
-      const metadata = extractMetadata(html, request.loadedUrl)
+      const metadata = extractMetadata(html, request.loadedUrl, allowSubdomains)
 
       // Use extracted title if we don't have one
       if (!title) {
@@ -541,6 +559,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
           await enqueueLinks({
             urls: filteredLinks,
             userData: { depth: currentDepth },
+            strategy: allowSubdomains ? EnqueueStrategy.SameDomain : EnqueueStrategy.SameHostname,
           })
         }
         else {
