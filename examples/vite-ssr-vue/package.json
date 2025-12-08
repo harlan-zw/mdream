@@ -14,16 +14,16 @@
   },
   "dependencies": {
     "@mdream/vite": "workspace:*",
-    "compression": "^1.8.1",
-    "express": "^5.2.0",
-    "sirv": "^3.0.2",
-    "vue": "^3.5.25",
-    "vue-router": "^4.6.3"
+    "compression": "catalog:",
+    "express": "catalog:",
+    "sirv": "catalog:",
+    "vue": "catalog:",
+    "vue-router": "catalog:"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^6.0.2",
-    "cross-env": "^10.1.0",
-    "vite": "^7.2.6",
-    "vitest": "^4.0.14"
+    "@vitejs/plugin-vue": "catalog:",
+    "cross-env": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
   }
 }

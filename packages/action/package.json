@@ -22,12 +22,12 @@
     "prepack": "pnpm run build"
   },
   "dependencies": {
-    "@actions/core": "^1.11.1",
-    "@actions/exec": "^1.1.1",
+    "@actions/core": "catalog:",
+    "@actions/exec": "catalog:",
     "mdream": "workspace:*"
   },
   "devDependencies": {
-    "@vercel/ncc": "^0.38.4",
-    "typescript": "^5.9.3"
+    "@vercel/ncc": "catalog:",
+    "typescript": "catalog:"
   }
 }

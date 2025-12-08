@@ -10,6 +10,6 @@
   },
   "dependencies": {
     "@mdream/nuxt": "workspace:*",
-    "nuxt": "^4.2.1"
+    "nuxt": "catalog:"
   }
 }

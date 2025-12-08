@@ -54,7 +54,7 @@
     "mdream": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
-    "vite": "^7.2.6"
+    "@types/node": "catalog:",
+    "vite": "catalog:"
   }
 }

@@ -15,35 +15,19 @@
     "test:attw": "pnpm -r --parallel --filter=./packages/** run test:attw"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^6.3.0",
-    "@arethetypeswrong/cli": "^0.18.2",
-    "@built-in-ai/transformers-js": "^0.3.3",
-    "@types/node": "^24.10.1",
-    "@vitest/browser": "^3.2.4",
-    "ai": "^5.0.105",
-    "bumpp": "^10.3.2",
-    "crawlee": "^3.15.3",
-    "eslint": "^9.39.1",
-    "llm-cost": "^1.0.5",
-    "obuild": "^0.4.4",
-    "playwright": "^1.57.0",
-    "typescript": "5.9.3",
-    "vitest": "^3.2.4"
-  },
-  "pnpm": {
-    "overrides": {
-      "vite": "npm:rolldown-vite@latest"
-    },
-    "onlyBuiltDependencies": [
-      "@parcel/watcher",
-      "better-sqlite3",
-      "esbuild",
-      "maplibre-gl",
-      "onnxruntime-node",
-      "protobufjs",
-      "sharp",
-      "vue-demi",
-      "workerd"
-    ]
+    "@antfu/eslint-config": "catalog:",
+    "@arethetypeswrong/cli": "catalog:",
+    "@built-in-ai/transformers-js": "catalog:",
+    "@types/node": "catalog:",
+    "@vitest/browser": "catalog:",
+    "ai": "catalog:",
+    "bumpp": "catalog:",
+    "crawlee": "catalog:",
+    "eslint": "catalog:",
+    "llm-cost": "catalog:",
+    "obuild": "catalog:",
+    "playwright": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

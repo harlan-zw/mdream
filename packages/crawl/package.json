@@ -58,15 +58,15 @@
     }
   },
   "dependencies": {
-    "@clack/prompts": "^0.11.0",
-    "crawlee": "^3.15.3",
+    "@clack/prompts": "catalog:",
+    "crawlee": "catalog:",
     "mdream": "workspace:*",
-    "nypm": "^0.6.2",
-    "pathe": "^2.0.3",
-    "picomatch": "^4.0.3",
-    "ufo": "^1.6.1"
+    "nypm": "catalog:",
+    "pathe": "catalog:",
+    "picomatch": "catalog:",
+    "ufo": "catalog:"
   },
   "devDependencies": {
-    "@types/picomatch": "^4.0.2"
+    "@types/picomatch": "catalog:"
   }
 }
