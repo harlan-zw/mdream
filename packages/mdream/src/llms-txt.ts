@@ -529,13 +529,29 @@ export interface CreateLlmsTxtStreamOptions extends Omit<LlmsTxtArtifactsOptions
  * @returns WritableStream that accepts ProcessedFile objects
  */
 /**
- * Get the group key for a URL (up to 2 segments deep)
+ * Get group prefix for a URL (up to 2 segments)
  */
+function getGroupPrefix(url: string, depth: 1 | 2): string {
+  const segments = url.split('/').filter(Boolean)
+  if (segments.length === 0)
+    return '/'
+  if (depth === 1 || segments.length === 1)
+    return `/${segments[0]}`
+  return `/${segments[0]}/${segments[1]}`
+}
+
 /**
  * Sort pages by URL path in hierarchical order (directory tree structure)
- * Groups by first segment, with root-level pages without nesting grouped together
+ * Groups by up to 2 segments, with root-level pages without nesting grouped together
  */
 function sortPagesByPath(pages: { url: string, title: string, description?: string, filePath?: string }[]): typeof pages {
+  // Count URLs per 2-segment prefix
+  const twoSegmentCount = new Map<string, number>()
+  for (const page of pages) {
+    const prefix = getGroupPrefix(page.url, 2)
+    twoSegmentCount.set(prefix, (twoSegmentCount.get(prefix) || 0) + 1)
+  }
+
   // Analyze which first segments have nested paths
   const segmentHasNested = new Map<string, boolean>()
   for (const page of pages) {
@@ -558,14 +574,26 @@ function sortPagesByPath(pages: { url: string, title: string, description?: stri
     const firstSegmentA = segmentsA.length > 0 ? segmentsA[0] : ''
     const firstSegmentB = segmentsB.length > 0 ? segmentsB[0] : ''
 
-    // Determine group: root-level pages without nested paths are all in 'root' group
+    // Determine group key: try 2-segment prefix first
+    const twoSegPrefixA = getGroupPrefix(a.url, 2)
+    const twoSegPrefixB = getGroupPrefix(b.url, 2)
+    const twoSegCountA = twoSegmentCount.get(twoSegPrefixA) || 0
+    const twoSegCountB = twoSegmentCount.get(twoSegPrefixB) || 0
+
+    // Use 2-segment prefix if it has > 1 URL, otherwise fall back to 1-segment
+    let groupKeyA = twoSegCountA > 1 ? twoSegPrefixA : `/${firstSegmentA}`
+    let groupKeyB = twoSegCountB > 1 ? twoSegPrefixB : `/${firstSegmentB}`
+
+    // Root-level pages without nested paths go in root group
     const isRootLevelA = segmentsA.length <= 1
     const isRootLevelB = segmentsB.length <= 1
     const hasNestedA = segmentHasNested.get(firstSegmentA)
     const hasNestedB = segmentHasNested.get(firstSegmentB)
 
-    const groupKeyA = (isRootLevelA && !hasNestedA) ? '' : firstSegmentA
-    const groupKeyB = (isRootLevelB && !hasNestedB) ? '' : firstSegmentB
+    if (isRootLevelA && !hasNestedA)
+      groupKeyA = ''
+    if (isRootLevelB && !hasNestedB)
+      groupKeyB = ''
 
     // Root group (empty string) comes first
     if (groupKeyA === '' && groupKeyB !== '')
@@ -705,6 +733,13 @@ export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): W
       // Sort buffered pages by path hierarchy and write to llms.txt
       const sortedPages = sortPagesByPath(bufferedPages)
 
+      // Count URLs per 2-segment prefix
+      const twoSegmentCount = new Map<string, number>()
+      for (const page of sortedPages) {
+        const prefix = getGroupPrefix(page.url, 2)
+        twoSegmentCount.set(prefix, (twoSegmentCount.get(prefix) || 0) + 1)
+      }
+
       // Analyze which first segments have nested paths
       const segmentHasNested = new Map<string, boolean>()
       for (const page of sortedPages) {
@@ -715,7 +750,6 @@ export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): W
           segmentHasNested.set(firstSegment, false)
         }
 
-        // If this URL has more than one segment, or we've seen this segment before with different depth
         if (segments.length > 1) {
           segmentHasNested.set(firstSegment, true)
         }
@@ -732,10 +766,17 @@ export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): W
         const segments = page.url.split('/').filter(Boolean)
         const firstSegment = segments.length > 0 ? segments[0] : ''
 
-        // Determine group: root-level pages without nested paths are all in 'root' group
+        // Determine group key using same logic as sortPagesByPath
+        const twoSegPrefix = getGroupPrefix(page.url, 2)
+        const twoSegCount = twoSegmentCount.get(twoSegPrefix) || 0
+        let groupKey = twoSegCount > 1 ? twoSegPrefix : `/${firstSegment}`
+
+        // Root-level pages without nested paths go in root group
         const isRootLevel = segments.length <= 1
         const hasNested = segmentHasNested.get(firstSegment)
-        const groupKey = (isRootLevel && !hasNested) ? '' : firstSegment
+        if (isRootLevel && !hasNested) {
+          groupKey = ''
+        }
 
         // Detect segment group change
         if (groupKey !== currentGroup) {

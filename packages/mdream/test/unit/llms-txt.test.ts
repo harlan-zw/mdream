@@ -1027,24 +1027,14 @@ existingKey: existingValue
       expect(learnLaunchIdx).toBeLessThan(proIdx)
 
       // New grouping logic: root-level pages without nested paths are grouped together
-      // Group 0: /, /announcement, /chat, /releases (all root-level, no nested paths) - 4 URLs
-      // Group 1: /docs/* (has nested paths) - 5 URLs
-      // Group 2: /learn/* (has nested paths) - 6 URLs
-      // Group 3: /pro, /pro/feedback (has nested paths) - 2 URLs
+      // With 2-segment grouping:
+      // Group 0: /, /announcement, /chat, /releases (root-level, no nested paths) - 4 URLs
+      // Groups are created for 2-segment prefixes with > 1 URL
+      // Blank lines after groups 0-2 if > 1 URL
 
       // Verify blank line after group 0 (root level pages, 4 URLs)
       const afterReleases = lines[releasesIdx + 1]
       expect(afterReleases).toBe('')
-
-      // Verify NO blank line after group 1 (/docs, 5 URLs, not > 5)
-      const installSeoIdx = lines.findIndex(l => l.includes('[Install Nuxt SEO]'))
-      const afterDocs = lines[installSeoIdx + 1]
-      expect(afterDocs).not.toBe('')
-
-      // Verify blank line after group 2 (/learn, 6 URLs > 5)
-      const trailingSlashesIdx = lines.findIndex(l => l.includes('[Trailing Slashes]'))
-      const afterLearn = lines[trailingSlashesIdx + 1]
-      expect(afterLearn).toBe('')
 
       // Snapshot the full output
       expect(llmsTxtContent).toMatchSnapshot()

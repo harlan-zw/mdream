@@ -18,18 +18,18 @@ exports[`createLlmsTxtStream > hierarchical sorting and blank lines > should cor
 - [Releases](/releases)
 
 - [Nuxt Link Checker](/docs/link-checker/getting-started/introduction)
-- [Install Nuxt SEO](/docs/nuxt-seo/getting-started/installation)
-- [What Is Nuxt SEO?](/docs/nuxt-seo/getting-started/introduction)
 - [Nuxt OG Image](/docs/og-image/getting-started/introduction)
 - [Nuxt Sitemap](/docs/sitemap/getting-started/introduction)
 
+- [Install Nuxt SEO](/docs/nuxt-seo/getting-started/installation)
+- [What Is Nuxt SEO?](/docs/nuxt-seo/getting-started/introduction)
+
 - [Controlling Crawlers](/learn/controlling-crawlers)
+- [Mastering Meta](/learn/mastering-meta)
 - [Launch & listen](/learn/launch-and-listen)
 - [Getting Indexed](/learn/launch-and-listen/going-live)
-- [Mastering Meta](/learn/mastering-meta)
 - [Routes & Rendering](/learn/routes-and-rendering)
 - [Trailing Slashes](/learn/routes-and-rendering/trailing-slashes)
-
 - [Pro](/pro)
 - [Pro Feedback](/pro/feedback)
 "
