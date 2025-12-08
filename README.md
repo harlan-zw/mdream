@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-> Convert any site to clean markdown & llms.txt. Boost your site's AI discoverability or generate LLM context for a project you're working with.
+> The fastest markdown to HTML streamer built with JavaScript. Optimized for LLM input.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
