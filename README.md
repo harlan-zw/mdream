@@ -56,7 +56,58 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 | [<img src="https://api.iconify.design/logos:nuxt-icon.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/nuxt](./packages/nuxt/README.md)                       | Generate automatic `.md` and `llms.txt` artifacts generation for Nuxt Sites                                                                                   |
 | [<img src="https://api.iconify.design/mdi:github.svg" width="16" height="16" style="vertical-align: middle;">&nbsp;@mdream/action](./packages/action/README.md)                | Generate `.md` and `llms.txt` artifacts from your static `.html` output                                                                                       |
 
-## Examples
+## Mdream Usage
+
+### Installation
+
+```bash
+pnpm add mdream
+```
+
+### Basic Usage
+
+```ts
+import { htmlToMarkdown } from 'mdream'
+
+const markdown = htmlToMarkdown('<h1>Hello World</h1>')
+console.log(markdown) // # Hello World
+```
+
+**Core Functions:**
+- [htmlToMarkdown](./packages/mdream/README.md#api-usage) - Convert HTML to Markdown
+- [streamHtmlToMarkdown](./packages/mdream/README.md#api-usage) - Stream HTML to Markdown
+- [parseHtml](./packages/mdream/README.md#api-usage) - Parse HTML to AST
+
+**Utilities:**
+- [Presets](./packages/mdream/README.md#presets) - Pre-configured plugin combinations
+- [Plugin System](./packages/mdream/README.md#plugin-system) - Customize conversion behavior
+- [Markdown Splitting](./packages/mdream/README.md#markdown-splitting) - Split HTML into chunks
+- [llms.txt Generation](./packages/mdream/README.md#llmstxt-generation) - Generate llms.txt artifacts
+
+## Mdream Crawl
+
+> Need something that works in the browser or an edge runtime? Use [Mdream](#mdream-usage).
+
+The `@mdream/crawl` package crawls an entire site generating LLM artifacts using `mdream` for Markdown conversion.
+
+- [llms.txt](https://llmstxt.org/): A consolidated text file optimized for LLM consumption.
+- [llms-full.txt](https://llmstxt.org/): An extended format with comprehensive metadata and full content.
+- Individual Markdown Files: Each crawled page is saved as a separate Markdown file in the `md/` directory.
+
+### Usage
+
+```sh
+# Interactive
+npx @mdream/crawl
+# Simple
+npx @mdream/crawl https://harlanzw.com
+# Glob patterns
+npx @mdream/crawl "https://nuxt.com/docs/getting-started/**"
+# Get help
+npx @mdream/crawl -h
+```
+
+### Examples
 
 <details>
 <summary><b>🤖 Analyze Websites with AI Tools</b></summary>
@@ -181,29 +232,6 @@ htmlToMarkdown(html, { plugins: [cleanPlugin] })
 ```
 </details>
 
-## Mdream Crawl
-
-> Need something that works in the browser or an edge runtime? Use [Mdream](#mdream-usage).
-
-The `@mdream/crawl` package crawls an entire site generating LLM artifacts using `mdream` for Markdown conversion.
-
-- [llms.txt](https://llmstxt.org/): A consolidated text file optimized for LLM consumption.
-- [llms-full.txt](https://llmstxt.org/): An extended format with comprehensive metadata and full content.
-- Individual Markdown Files: Each crawled page is saved as a separate Markdown file in the `md/` directory.
-
-### Usage
-
-```sh
-# Interactive
-npx @mdream/crawl
-# Simple
-npx @mdream/crawl https://harlanzw.com
-# Glob patterns
-npx @mdream/crawl "https://nuxt.com/docs/getting-started/**"
-# Get help
-npx @mdream/crawl -h
-```
-
 ## Stdin CLI Usage
 
 Mdream is much more minimal than Mdream Crawl. It provides a CLI designed to work exclusively with Unix pipes,
@@ -313,34 +341,6 @@ For browser environments, you can use mdream directly via CDN without any build 
 **CDN Options:**
 - **unpkg**: `https://unpkg.com/mdream/dist/iife.js`
 - **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/iife.js`
-
-## Mdream Usage
-
-### Installation
-
-```bash
-pnpm add mdream
-```
-
-### Basic Usage
-
-```ts
-import { htmlToMarkdown } from 'mdream'
-
-const markdown = htmlToMarkdown('<h1>Hello World</h1>')
-console.log(markdown) // # Hello World
-```
-
-**Core Functions:**
-- [htmlToMarkdown](./packages/mdream/README.md#api-usage) - Convert HTML to Markdown
-- [streamHtmlToMarkdown](./packages/mdream/README.md#api-usage) - Stream HTML to Markdown
-- [parseHtml](./packages/mdream/README.md#api-usage) - Parse HTML to AST
-
-**Utilities:**
-- [Presets](./packages/mdream/README.md#presets) - Pre-configured plugin combinations
-- [Plugin System](./packages/mdream/README.md#plugin-system) - Customize conversion behavior
-- [Markdown Splitting](./packages/mdream/README.md#markdown-splitting) - Split HTML into chunks
-- [llms.txt Generation](./packages/mdream/README.md#llmstxt-generation) - Generate llms.txt artifacts
 
 ## Credits
 
