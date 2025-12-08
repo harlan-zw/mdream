@@ -30,6 +30,8 @@
 
 ## What is Mdream?
 
+A zero-dependency alternative to [Turndown](https://github.com/mixmark-io/turndown), [node-html-markdown](https://github.com/crosstype/node-html-markdown), and [html-to-markdown](https://github.com/JohannesKaufmann/html-to-markdown), built specifically for LLM input.
+
 Traditional HTML to Markdown converters were not built for LLMs or humans. They tend to be slow and bloated and produce output that's poorly suited for LLMs token usage or for
 human readability.
 
