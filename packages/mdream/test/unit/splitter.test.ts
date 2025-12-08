@@ -869,6 +869,79 @@ with preserved   spacing</pre>
       expect(chunks[0].content).toContain('Main Heading')
     })
 
+    it('skips frontmatter from content and adds to metadata with skipFrontmatter', () => {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Test Page</title>
+          <meta name="description" content="A test description">
+        </head>
+        <body>
+          <main>
+            <h1>Main Heading</h1>
+            <p>Content here</p>
+          </main>
+        </body>
+        </html>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, {
+        skipFrontmatter: true,
+        headersToSplitOn: [TAG_H2],
+        stripHeaders: false,
+      })
+
+      expect(chunks.length).toBeGreaterThan(0)
+      // content should not contain frontmatter
+      expect(chunks[0].content).not.toContain('---')
+      expect(chunks[0].content).toContain('Main Heading')
+      // metadata should have frontmatter
+      expect(chunks[0].metadata.frontmatter).toBeDefined()
+      expect(chunks[0].metadata.frontmatter?.title).toBe('Test Page')
+      expect(chunks[0].metadata.frontmatter?.meta).toBeDefined()
+    })
+
+    it('skips frontmatter with minimal preset and adds to metadata', () => {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Minimal Preset Page</title>
+          <meta name="description" content="Testing minimal preset">
+        </head>
+        <body>
+          <nav><a href="/">Home</a></nav>
+          <main>
+            <h1>Article Title</h1>
+            <p>Article content here</p>
+            <h2>Section One</h2>
+            <p>More content</p>
+          </main>
+          <footer>Copyright</footer>
+        </body>
+        </html>
+      `
+
+      const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+        skipFrontmatter: true,
+        headersToSplitOn: [TAG_H2],
+        stripHeaders: false,
+      }))
+
+      expect(chunks.length).toBeGreaterThan(0)
+      // content should not contain frontmatter
+      expect(chunks[0].content).not.toContain('---')
+      expect(chunks[0].content).not.toContain('title:')
+      // should still filter nav/footer
+      expect(chunks[0].content).not.toContain('Home')
+      expect(chunks[0].content).not.toContain('Copyright')
+      // metadata should have frontmatter
+      expect(chunks[0].metadata.frontmatter).toBeDefined()
+      expect(chunks[0].metadata.frontmatter?.title).toBe('Minimal Preset Page')
+      expect((chunks[0].metadata.frontmatter?.meta as Record<string, string>)?.description).toBe('Testing minimal preset')
+    })
+
     it('handles tailwind classes without breaking content', () => {
       const html = `
         <main>

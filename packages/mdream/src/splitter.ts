@@ -1,4 +1,5 @@
 import type { ParseState } from './parse'
+import type { FrontmatterData } from './plugins/frontmatter.ts'
 import type { ElementNode, MarkdownChunk, NodeEvent, SplitterOptions, TextNode } from './types'
 import {
   ELEMENT_NODE,
@@ -18,6 +19,7 @@ import {
 import { createMarkdownProcessor } from './markdown-processor.ts'
 import { parseHtmlStream } from './parse.ts'
 import { processPluginsForEvent } from './plugin-processor.ts'
+import { frontmatterPlugin } from './plugins/frontmatter.ts'
 
 const DEFAULT_HEADERS_TO_SPLIT_ON: number[] = [
   TAG_H2,
@@ -27,7 +29,16 @@ const DEFAULT_HEADERS_TO_SPLIT_ON: number[] = [
   TAG_H6,
 ]
 
-function createOptions(options: SplitterOptions) {
+function createOptions(options: SplitterOptions, onFrontmatter?: (data: FrontmatterData) => void) {
+  const skipFrontmatter = options.skipFrontmatter ?? false
+  let plugins = options.plugins ?? []
+
+  // when skipFrontmatter, add frontmatter plugin with inject:false if not present
+  if (skipFrontmatter) {
+    plugins = plugins.filter(p => (p as { _name?: string })._name !== 'frontmatter')
+    plugins = [frontmatterPlugin({ inject: false, onFrontmatter }), ...plugins]
+  }
+
   return {
     headersToSplitOn: options.headersToSplitOn ?? DEFAULT_HEADERS_TO_SPLIT_ON,
     returnEachLine: options.returnEachLine ?? false,
@@ -36,8 +47,9 @@ function createOptions(options: SplitterOptions) {
     chunkOverlap: options.chunkOverlap ?? 200,
     lengthFunction: options.lengthFunction ?? ((text: string) => text.length),
     keepSeparator: options.keepSeparator ?? false,
+    skipFrontmatter,
     origin: options.origin,
-    plugins: options.plugins ?? [],
+    plugins,
   }
 }
 
@@ -80,7 +92,11 @@ export function* htmlToMarkdownSplitChunksStream(
   html: string,
   options: SplitterOptions = {},
 ): Generator<MarkdownChunk, void, undefined> {
-  const opts = createOptions(options)
+  // Capture frontmatter via callback
+  let capturedFrontmatter: FrontmatterData | null = null
+  const opts = createOptions(options, (data) => {
+    capturedFrontmatter = data
+  })
 
   if (opts.chunkOverlap >= opts.chunkSize) {
     throw new Error('chunkOverlap must be less than chunkSize')
@@ -102,6 +118,7 @@ export function* htmlToMarkdownSplitChunksStream(
   let lineNumber = 1
   let lastChunkEndPosition = 0
   let lastSplitPosition = 0
+  let isFirstChunk = true
 
   function* flushChunk(endPosition?: number, applyOverlap = false): Generator<MarkdownChunk, void, undefined> {
     const currentMd = getCurrentMarkdown(processor.state)
@@ -151,6 +168,12 @@ export function* htmlToMarkdownSplitChunksStream(
     if (currentChunkCodeLanguage) {
       chunk.metadata.code = currentChunkCodeLanguage
     }
+
+    // Add frontmatter to first chunk
+    if (isFirstChunk && capturedFrontmatter) {
+      chunk.metadata.frontmatter = capturedFrontmatter
+    }
+    isFirstChunk = false
 
     yield chunk
 
