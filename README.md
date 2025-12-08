@@ -78,11 +78,7 @@ console.log(markdown) // # Hello World
 - [streamHtmlToMarkdown](./packages/mdream/README.md#api-usage) - Stream HTML to Markdown
 - [parseHtml](./packages/mdream/README.md#api-usage) - Parse HTML to AST
 
-**Utilities:**
-- [Presets](./packages/mdream/README.md#presets) - Pre-configured plugin combinations
-- [Plugin System](./packages/mdream/README.md#plugin-system) - Customize conversion behavior
-- [Markdown Splitting](./packages/mdream/README.md#markdown-splitting) - Split HTML into chunks
-- [llms.txt Generation](./packages/mdream/README.md#llmstxt-generation) - Generate llms.txt artifacts
+See the [API Usage](./packages/mdream/README.md#api-usage) section for complete details.
 
 ## Mdream Crawl
 
