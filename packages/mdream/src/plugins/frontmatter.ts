@@ -3,6 +3,12 @@ import { collectNodeContent } from '../buffer-region.ts'
 import { ELEMENT_NODE, TAG_HEAD, TAG_META, TAG_TITLE } from '../const.ts'
 import { createPlugin } from '../pluggable/plugin.ts'
 
+export interface FrontmatterData {
+  title?: string
+  meta: Record<string, string>
+  [key: string]: string | Record<string, string> | undefined
+}
+
 export interface FrontmatterPluginOptions {
   /** Additional frontmatter fields to include */
   additionalFields?: Record<string, string>
@@ -10,12 +16,10 @@ export interface FrontmatterPluginOptions {
   metaFields?: string[]
   /** Custom formatter for frontmatter values */
   formatValue?: (name: string, value: string) => string
-}
-
-interface FrontmatterData {
-  title?: string
-  meta: Record<string, string>
-  [key: string]: string | Record<string, string> | undefined
+  /** Inject frontmatter into markdown output @default true */
+  inject?: boolean
+  /** Callback when frontmatter is extracted */
+  onFrontmatter?: (data: FrontmatterData) => void
 }
 
 /**
@@ -36,48 +40,34 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
     ...(options.metaFields || []),
   ])
 
-  // Metadata collection
+  // Metadata collection - store raw values
   const frontmatter: FrontmatterData = { ...additionalFields, meta: {} }
   let inHead = false
 
-  // Format frontmatter value (handle quotes, etc.)
-  const formatValue = options.formatValue || ((name: string, value: string) => {
-    // Escape quotes in values
-    value = value.replace(/"/g, '\\"')
-
-    // Add quotes for values with special characters
-    if (value.includes('\n') || value.includes(':') || value.includes('#') || value.includes(' ')) {
-      return `"${value}"`
-    }
-    return value
+  // Format value for YAML output
+  const formatValue = options.formatValue || ((_name: string, value: string) => {
+    const escaped = value.replace(/"/g, '\\"')
+    if (escaped.includes('\n') || escaped.includes(':') || escaped.includes('#') || escaped.includes(' '))
+      return `"${escaped}"`
+    return escaped
   })
 
-  return createPlugin({
+  const plugin = createPlugin({
     onNodeEnter(node): string | undefined {
-      // Track when we enter the head section
       if (node.tagId === TAG_HEAD) {
         inHead = true
         return
       }
 
-      // Process title tag inside head
-      if (inHead && node.type === ELEMENT_NODE && node.tagId === TAG_TITLE) {
-        // Title will be processed in processTextNode
+      if (inHead && node.type === ELEMENT_NODE && node.tagId === TAG_TITLE)
         return
-      }
 
-      // Process meta tags inside head
       if (inHead && node.type === ELEMENT_NODE && node.tagId === TAG_META) {
         const elementNode = node as ElementNode
         const { name, property, content } = elementNode.attributes || {}
-
-        // Check for valid meta tags
         const metaName = property || name
-        if (metaName && content && metaFields.has(metaName)) {
-          frontmatter.meta[metaName.includes(':') ? `"${metaName}"` : metaName] = formatValue(metaName, content)
-        }
-
-        // Don't output anything for meta tags
+        if (metaName && content && metaFields.has(metaName))
+          frontmatter.meta[metaName] = content // store raw value
         return undefined
       }
     },
@@ -89,11 +79,16 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
 
         // Generate frontmatter as we exit the head
         if (Object.keys(frontmatter).length > 0) {
-          // Create frontmatter region and collect content instead of returning it
-          const frontmatterContent = generateFrontmatter()
+          // Call callback if provided
+          if (options.onFrontmatter) {
+            options.onFrontmatter(frontmatter)
+          }
 
-          // Create a virtual node for collecting frontmatter content
-          collectNodeContent({ type: 1, regionId: 0 } as Node, frontmatterContent, state)
+          // Only inject if inject !== false
+          if (options.inject !== false) {
+            const frontmatterContent = generateFrontmatter()
+            collectNodeContent({ type: 1, regionId: 0 } as Node, frontmatterContent, state)
+          }
         }
       }
 
@@ -101,35 +96,27 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
     },
 
     processTextNode(node: TextNode) {
-      // Only process if we're in the head section
-      if (!inHead) {
+      if (!inHead)
         return
-      }
 
-      // Handle text inside title tag
       const parent = node.parent
       if (parent && parent.tagId === TAG_TITLE && node.value) {
-        frontmatter.title = formatValue('title', node.value.trim())
+        frontmatter.title = node.value.trim() // store raw value
         return { content: '', skip: true }
       }
     },
-  })
+  });
 
-  /**
-   * Generate YAML frontmatter string from collected metadata
-   */
+  // Add name for identification
+  (plugin as { _name?: string })._name = 'frontmatter'
+
   function generateFrontmatter(): string {
-    if (Object.keys(frontmatter).length === 0) {
+    if (Object.keys(frontmatter).length === 0)
       return ''
-    }
 
-    // Process entries, handling 'meta' specially
     let yamlLines: string[] = []
-
-    // Sort frontmatter keys to put title and description first
     const entries = Object.entries(frontmatter)
       .sort(([a], [b]) => {
-        // Put 'title' first, then 'description', then the rest alphabetically
         if (a === 'title')
           return -1
         if (b === 'title')
@@ -141,30 +128,27 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
         return a.localeCompare(b)
       })
 
-    // Process each entry
     for (const [key, value] of entries) {
       if (key === 'meta' && typeof value === 'object' && value && Object.keys(value).length > 0) {
-        // Add meta key
         yamlLines.push('meta:')
-
-        // Sort meta entries alphabetically and add with indentation
         const metaEntries = Object.entries(value)
           .sort(([a], [b]) => a.localeCompare(b))
-          .map(([metaKey, metaValue]) => `  ${metaKey}: ${metaValue}`)
-
+          .map(([metaKey, metaValue]) => {
+            const fmtKey = metaKey.includes(':') ? `"${metaKey}"` : metaKey
+            return `  ${fmtKey}: ${formatValue(metaKey, metaValue)}`
+          })
         yamlLines.push(...metaEntries)
       }
       else if (key !== 'meta' && typeof value === 'string') {
-        // Add regular keys
-        yamlLines.push(`${key}: ${value}`)
+        yamlLines.push(`${key}: ${formatValue(key, value)}`)
       }
     }
 
-    // Remove meta if empty
-    if (Object.keys(frontmatter.meta).length === 0) {
+    if (Object.keys(frontmatter.meta).length === 0)
       yamlLines = yamlLines.filter(line => !line.startsWith('meta:'))
-    }
 
     return `---\n${yamlLines.join('\n')}\n---\n\n`
   }
+
+  return plugin
 }

@@ -332,6 +332,8 @@ export interface MarkdownChunk {
         to: number
       }
     }
+    /** Frontmatter extracted from document (only on first chunk when skipFrontmatter is true) */
+    frontmatter?: Record<string, unknown>
   }
 }
 
@@ -383,4 +385,10 @@ export interface SplitterOptions extends HTMLToMarkdownOptions {
    * @default false
    */
   keepSeparator?: boolean
+
+  /**
+   * Skip frontmatter from chunk content and add to metadata instead
+   * @default false
+   */
+  skipFrontmatter?: boolean
 }
