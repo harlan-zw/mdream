@@ -37,8 +37,17 @@ jobs:
         run: pnpm build
 
       - name: Bump Patch Version
+        # This step:
+        # 1. Bumps the patch version in all package.json files
+        # 2. Updates CHANGELOG.md
+        # 3. Commits the changes with message "chore: release v{version}"
+        # 4. Creates a git tag (e.g., v0.13.5)
+        # 5. Pushes the commit and tag, which triggers the release.yml workflow
         run: |
           pnpm exec bumpp --release patch --yes \
+            --commit "chore: release v%s" \
+            --tag \
+            --push \
             --output=CHANGELOG.md packages/*/package.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
