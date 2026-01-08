@@ -36,8 +36,6 @@
 | **420 KB** | 1.9ms | **6.6ms** | 14.0ms | 18.1ms |
 | **1.8 MB** | 21ms | **60ms** | 295ms | 28,600ms |
 
-**mdream is the fastest pure JavaScript HTML-to-Markdown converter.**
-
 See the [Benchmark methodology](./bench/README.md) for more details.
 
 ## What is Mdream?
