@@ -1,6 +1,5 @@
 import type { ParseState } from './parse'
 import type { ElementNode, HandlerContext, HTMLToMarkdownOptions, NodeEvent, PluginContext, TextNode } from './types'
-import { assembleBufferedContent, collectNodeContent } from './buffer-region.ts'
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
@@ -25,10 +24,8 @@ import { processPluginsForEvent } from './plugin-processor.ts'
 export interface MarkdownState {
   /** Configuration options for conversion */
   options?: HTMLToMarkdownOptions
-  /** Map of region IDs to buffer regions for O(1) lookups */
-  regionToggles: Map<number, boolean>
-  /** Content buffers for regions */
-  regionContentBuffers: Map<number, string[]>
+  /** Content buffer for markdown output */
+  buffer: string[]
   /** Performance cache for last content to avoid iteration */
   lastContentCache?: string
   /** Reference to the last processed node */
@@ -132,14 +129,9 @@ function calculateNewLineConfig(node: ElementNode): readonly [number, number] {
 export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
   const state: MarkdownState = {
     options,
-    regionToggles: new Map(),
-    regionContentBuffers: new Map(),
+    buffer: [],
     depthMap: new Uint8Array(MAX_TAG_ID),
   }
-
-  // Initialize default region
-  state.regionToggles.set(0, true)
-  state.regionContentBuffers.set(0, [])
 
   let lastYieldedLength = 0
 
@@ -153,7 +145,7 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
 
     // Update depth for plugin access
     state.depth = node.depth
-    const buff = state.regionContentBuffers.get(node.regionId || 0) || []
+    const buff = state.buffer
     const lastBuffEntry = buff[buff.length - 1]
     const lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
 
@@ -186,7 +178,8 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
           textNode.value = ` ${textNode.value}`
         }
 
-        collectNodeContent(textNode, textNode.value, state)
+        state.buffer.push(textNode.value)
+        state.lastContentCache = textNode.value
       }
       state.lastTextNode = textNode
       return
@@ -234,10 +227,13 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
     const newLines = Math.max(0, configuredNewLines - lastNewLines)
 
     if (newLines > 0) {
-      // If the region has no content, add the current content (without new lines)
+      // If the buffer has no content, add the current content (without new lines)
       if (!buff.length) {
         for (const fragment of output) {
-          collectNodeContent(node, fragment, state)
+          if (fragment) {
+            state.buffer.push(fragment)
+            state.lastContentCache = fragment
+          }
         }
         return
       }
@@ -292,12 +288,16 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
 
     // Add spacing between inline elements if needed
     if (output[0]?.[0] && eventType === NodeEventEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
-      collectNodeContent(node, ' ', state)
+      state.buffer.push(' ')
+      state.lastContentCache = ' '
     }
 
     // Add all output fragments
     for (const fragment of output) {
-      collectNodeContent(node, fragment, state)
+      if (fragment) {
+        state.buffer.push(fragment)
+        state.lastContentCache = fragment
+      }
     }
   }
 
@@ -320,28 +320,18 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
    * Get the final markdown output
    */
   function getMarkdown(): string {
-    const assembledContent = assembleBufferedContent(state)
-    return assembledContent.trimEnd()
+    const result = state.buffer.join('').trimStart()
+    state.buffer.length = 0
+    return result.trimEnd()
   }
 
   /**
    * Get new markdown content since the last call (for streaming)
    */
   function getMarkdownChunk(): string {
-    const fragments: string[] = []
-
-    // Process all regions without clearing them
-    for (const [regionId, content] of Array.from(state.regionContentBuffers.entries())) {
-      const include = state.regionToggles.get(regionId)
-      if (include) {
-        fragments.push(...content)
-      }
-    }
-
-    const currentContent = fragments.join('').trimStart()
+    const currentContent = state.buffer.join('').trimStart()
     const newContent = currentContent.slice(lastYieldedLength)
     lastYieldedLength = currentContent.length
-
     return newContent
   }
 

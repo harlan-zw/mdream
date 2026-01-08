@@ -132,20 +132,6 @@ export interface Node {
 
   /** Custom data added by plugins */
   context?: PluginContext
-
-  /** Region ID for buffer region tracking */
-  regionId?: number
-}
-
-/**
- * Buffer region for tracking content inclusion/exclusion
- */
-export interface BufferRegion {
-  /** Unique identifier */
-  id: number
-
-  /** Inclusion state */
-  include: boolean
 }
 
 /**
@@ -219,11 +205,8 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   /** Plugin instances array for efficient iteration */
   plugins?: Plugin[]
 
-  /** Map of region IDs to buffer regions for O(1) lookups */
-  regionToggles: Map<number, boolean>
-
-  /** Content buffers for regions */
-  regionContentBuffers: Map<number, string[]>
+  /** Content buffer for markdown output */
+  buffer: string[]
 
   /** Performance cache for last content to avoid iteration */
   lastContentCache?: string

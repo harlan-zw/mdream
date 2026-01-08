@@ -186,11 +186,10 @@ export function adBlockPlugin() {
 
 ### Built-in Plugins
 - `frontmatterPlugin()`: Extracts metadata from HTML `<head>` into YAML frontmatter
-- `isolateMainPlugin()`: Isolates main content area using semantic HTML and readability scoring
+- `isolateMainPlugin()`: Isolates main content area using semantic HTML
 - `tailwindPlugin()`: Converts Tailwind utility classes to semantic Markdown
 - `filterPlugin({ exclude: [...] })`: Filters out unwanted HTML elements by TAG_* constant
 - `extractionPlugin({ 'selector': callback })`: Extracts elements using CSS selectors during conversion
-- `readabilityPlugin()`: Scores and filters content based on readability metrics
 
 ### Key Concepts
 - **Node Types**: ElementNode (HTML elements) and TextNode (text content) with parent/child relationships
@@ -235,7 +234,6 @@ The package provides multiple entry points for different use cases:
   - `nodes/` - HTML element conversion tests
   - `plugins/` - plugin functionality tests
   - `templates/` - real-world site template tests (NASA, HackerNews, Wikipedia, etc.)
-  - `readability/` - content extraction and scoring tests
   - `libs/` - utility library tests (query selector, etc.)
   - `preset/` - preset configuration tests
 - Integration tests in `test/integration/` for end-to-end streaming

@@ -201,7 +201,6 @@ Mdream includes several built-in plugins that can be used individually or combin
 - **[`frontmatterPlugin`](./src/plugins/frontmatter.ts)**: Generate YAML frontmatter from HTML head elements (title, meta tags)
 - **[`isolateMainPlugin`](./src/plugins/isolate-main.ts)**: Isolate main content using `<main>` elements or header-to-footer boundaries
 - **[`tailwindPlugin`](./src/plugins/tailwind.ts)**: Convert Tailwind CSS classes to Markdown formatting (bold, italic, etc.)
-- **[`readabilityPlugin`](./src/plugins/readability.ts)**: Content scoring and extraction (experimental)
 
 ```ts
 import { filterPlugin, frontmatterPlugin, isolateMainPlugin } from 'mdream/plugins'
@@ -214,6 +213,26 @@ const markdown = htmlToMarkdown(html, {
   ]
 })
 ```
+
+### Content Extraction with Readability
+
+For advanced content extraction (article detection, boilerplate removal), use [@mozilla/readability](https://github.com/mozilla/readability) before mdream:
+
+```ts
+import { Readability } from '@mozilla/readability'
+import { JSDOM } from 'jsdom'
+import { htmlToMarkdown } from 'mdream'
+
+const dom = new JSDOM(html, { url: 'https://example.com' })
+const article = new Readability(dom.window.document).parse()
+
+if (article) {
+  const markdown = htmlToMarkdown(article.content)
+  // article.title, article.excerpt, article.byline also available
+}
+```
+
+This pipeline gives you battle-tested content extraction + fast markdown conversion.
 
 ### Plugin Hooks
 

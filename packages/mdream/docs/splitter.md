@@ -172,10 +172,10 @@ Default: `[]`
 Plugins to extend HTML to Markdown conversion. See [Plugin Documentation](./plugins.md).
 
 ```typescript
-import { readabilityPlugin } from 'mdream/plugins'
+import { filterPlugin } from 'mdream/plugins'
 
 const chunks = htmlToMarkdownSplitChunks(html, {
-  plugins: [readabilityPlugin()],
+  plugins: [filterPlugin({ exclude: ['nav', '.sidebar'] })],
 })
 ```
 
