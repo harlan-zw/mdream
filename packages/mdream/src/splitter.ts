@@ -248,10 +248,10 @@ export function* htmlToMarkdownSplitChunksStream(
           if (idx >= 0) {
             const beforeSplit = currentMd.slice(0, candidateSplitPos)
             let backtickCount = 0
-            let pos = 0
-            while ((pos = beforeSplit.indexOf('```', pos)) !== -1) {
+            let pos = beforeSplit.indexOf('```', 0)
+            while (pos !== -1) {
               backtickCount++
-              pos += 3
+              pos = beforeSplit.indexOf('```', pos + 3)
             }
             if (backtickCount % 2 === 1) {
               continue

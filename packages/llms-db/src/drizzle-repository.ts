@@ -25,6 +25,7 @@ export function createDrizzleLlmsRepository(options: DatabaseOptions = {}): Llms
   if (isProduction) {
     try {
       r2Client = createR2Client()
+      // eslint-disable-next-line no-console
       console.log('R2 client initialized for production artifact storage')
     }
     catch (error) {
@@ -112,7 +113,7 @@ export function createDrizzleLlmsRepository(options: DatabaseOptions = {}): Llms
         generated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
       );
 
-      CREATE TRIGGER IF NOT EXISTS update_llms_entries_updated_at 
+      CREATE TRIGGER IF NOT EXISTS update_llms_entries_updated_at
         AFTER UPDATE ON llms_entries
       BEGIN
         UPDATE llms_entries SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
@@ -192,6 +193,7 @@ export function createDrizzleLlmsRepository(options: DatabaseOptions = {}): Llms
 
       try {
         const publicUrl = await r2Client.uploadArtifact(entryName, fileName, data)
+        // eslint-disable-next-line no-console
         console.log(`Uploaded ${fileName} to R2: ${publicUrl}`)
         return publicUrl
       }

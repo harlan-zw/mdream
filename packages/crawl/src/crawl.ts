@@ -192,7 +192,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       })
       clearTimeout(robotsTimeoutId)
     }
-    catch (error) {
+    catch {
       clearTimeout(robotsTimeoutId)
       // If robots.txt fails, continue without it
       robotsResponse = null
@@ -682,7 +682,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
           return false
         const trimmedContent = result.content.trim()
         // Filter out pages that only have frontmatter or are too short
-        const contentWithoutFrontmatter = trimmedContent.replace(/^---\s*\n(?:.*\n)*?---\s*/, '').trim()
+        const contentWithoutFrontmatter = trimmedContent.replace(/^---[^\n]*\n[\s\S]*?\n---[^\n]*\n?/, '').trim()
         return contentWithoutFrontmatter.length > 10 // Must have at least some meaningful content
       })
 

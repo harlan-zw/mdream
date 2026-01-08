@@ -827,7 +827,7 @@ export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): W
       await llmsFullTxtHandle?.close()
     },
 
-    async abort(reason) {
+    async abort(_reason) {
       await llmsTxtHandle?.close()
       await llmsFullTxtHandle?.close()
     },

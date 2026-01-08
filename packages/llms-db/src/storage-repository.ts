@@ -258,7 +258,7 @@ export function createLlmsStorageRepository(options: DatabaseOptions = {}): Llms
       await this.addArtifact(entryId, type, filePath, fileSize, checksum)
     },
 
-    async uploadArtifactToR2(entryName: string, fileName: string, data: Buffer): Promise<string | null> {
+    async uploadArtifactToR2(_entryName: string, _fileName: string, _data: Buffer): Promise<string | null> {
       // Storage repository doesn't support R2 uploads
       console.warn('R2 upload not supported in storage repository')
       return null

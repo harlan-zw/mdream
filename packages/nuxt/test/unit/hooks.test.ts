@@ -47,7 +47,7 @@ describe('mdream hooks', () => {
     })
 
     it('should handle hook that does not modify content', () => {
-      const mockHook = vi.fn((payload: MdreamLlmsTxtGeneratePayload) => {
+      const mockHook = vi.fn((_payload: MdreamLlmsTxtGeneratePayload) => {
         // Hook does nothing
       })
 

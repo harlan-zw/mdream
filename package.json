@@ -1,7 +1,7 @@
 {
   "type": "module",
   "private": true,
-  "packageManager": "pnpm@10.24.0",
+  "packageManager": "pnpm@10.27.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "pnpm run -r build",
+    "lint": "eslint .",
     "typecheck": "pnpm run -r typecheck",
     "test": "pnpm exec playwright install && vitest test",
     "release": "pnpm build && bumpp --output=CHANGELOG.md packages/*/package.json",

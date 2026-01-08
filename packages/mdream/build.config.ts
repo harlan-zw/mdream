@@ -28,7 +28,7 @@ export default defineBuildConfig({
           unlinkSync(browserMjsPath)
           unlinkSync(browserMjsPath.replace('.mjs', '.d.mts'))
         }
-        catch (error) {
+        catch {
           // Files might not exist, continue
         }
 

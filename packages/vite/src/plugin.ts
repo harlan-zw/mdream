@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { htmlToMarkdown } from 'mdream'
 
-const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>> & { mdreamOptions: {} } = {
+const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>> & { mdreamOptions: Record<string, never> } = {
   include: ['*.html', '**/*.html'], // Include root level and nested
   exclude: ['**/node_modules/**'],
   outputDir: '', // Output in same directory as HTML files by default
@@ -21,6 +21,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
   function log(message: string) {
     if (options.verbose) {
+      // eslint-disable-next-line no-console
       console.log(`[vite-html-to-markdown] ${message}`)
     }
   }
