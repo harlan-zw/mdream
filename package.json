@@ -13,7 +13,8 @@
     "typecheck": "pnpm run -r typecheck",
     "test": "pnpm exec playwright install && vitest test",
     "release": "pnpm build && bumpp --output=CHANGELOG.md packages/*/package.json",
-    "test:attw": "pnpm -r --parallel --filter=./packages/** run test:attw"
+    "test:attw": "pnpm -r --parallel --filter=./packages/** run test:attw",
+    "bench": "vitest bench --config bench/vitest.config.ts"
   },
   "devDependencies": {
     "@antfu/eslint-config": "catalog:",
@@ -26,8 +27,11 @@
     "crawlee": "catalog:",
     "eslint": "catalog:",
     "llm-cost": "catalog:",
+    "node-html-markdown": "catalog:",
     "obuild": "catalog:",
     "playwright": "catalog:",
+    "turndown": "catalog:",
+    "turndown-plugin-gfm": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

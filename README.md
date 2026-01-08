@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-> The fastest markdown to HTML streamer built with JavaScript. Optimized for LLM input.
+> The fastest HTML to Markdown converter built with JavaScript. Optimized for LLM input.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
@@ -23,10 +23,22 @@
 - 🧠 Custom built HTML to Markdown Convertor Optimized for LLMs (~50% fewer tokens)
 - 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
 - ✂️ LangChain compatible [Markdown Text Splitter](./packages/mdream/README.md#markdown-splitting) for single-pass chunking.
-- 🚀 Ultra Fast: Stream 1.4MB of HTML to markdown in ~50ms.
+- 🚀 Ultra Fast: [3-5x faster](#benchmarks) than alternatives, converts 1.8MB HTML in ~58ms.
 - ⚡ Tiny: 6kB gzip, zero dependency core.
 - ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [Docker](#docker-usage), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), & more.
 - 🔌 Extensible: [Plugin system](#plugin-system) for customizing and extending functionality.
+
+## Benchmarks
+
+Converting real-world HTML documents to Markdown. Tested against [Turndown](https://github.com/mixmark-io/turndown) (with [GFM plugin](https://github.com/mixmark-io/turndown-plugin-gfm)) and [node-html-markdown](https://github.com/crosstype/node-html-markdown).
+
+| Input Size | mdream | Turndown | node-html-markdown |
+|------------|--------|----------|-------------------|
+| **166 KB** (Wikipedia) | **3.3ms** | 11.9ms (3.6x slower) | 12.6ms (3.8x slower) |
+| **420 KB** (GitHub Docs) | **6.5ms** | 13.9ms (2.2x slower) | 10ms (1.5x slower) |
+| **1.8 MB** (Wikipedia) | **58ms** | 279ms (4.8x slower) | 26,464ms (452x slower) |
+
+Run benchmarks yourself: `pnpm bench`
 
 ## What is Mdream?
 
