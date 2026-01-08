@@ -35,9 +35,13 @@ const nhm = new NodeHtmlMarkdown()
 const minimalOptions = withMinimalPreset()
 
 // Print fixture sizes
+// eslint-disable-next-line no-console
 console.log('\n📊 Fixture sizes:')
+// eslint-disable-next-line no-console
 console.log(`  wikipedia-largest.html: ${(wikiLarge.length / 1024).toFixed(0)} KB`)
+// eslint-disable-next-line no-console
 console.log(`  wikipedia-small.html: ${(wikiSmall.length / 1024).toFixed(0)} KB`)
+// eslint-disable-next-line no-console
 console.log(`  github-markdown-complete.html: ${(github.length / 1024).toFixed(0)} KB\n`)
 
 describe('small HTML (166 KB - Wikipedia)', () => {
