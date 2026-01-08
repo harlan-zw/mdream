@@ -18,12 +18,13 @@
     "bench:cli": "./bench/cli-compare.sh"
   },
   "devDependencies": {
-    "@kreuzberg/html-to-markdown-node": "catalog:",
     "@antfu/eslint-config": "catalog:",
     "@arethetypeswrong/cli": "catalog:",
     "@built-in-ai/transformers-js": "catalog:",
+    "@kreuzberg/html-to-markdown-node": "catalog:",
     "@types/node": "catalog:",
     "@vitest/browser": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
     "ai": "catalog:",
     "bumpp": "catalog:",
     "crawlee": "catalog:",
