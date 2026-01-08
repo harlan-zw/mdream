@@ -1,5 +1,4 @@
-import type { ElementNode, Node, TextNode } from '../types.ts'
-import { collectNodeContent } from '../buffer-region.ts'
+import type { ElementNode, TextNode } from '../types.ts'
 import { ELEMENT_NODE, TAG_HEAD, TAG_META, TAG_TITLE } from '../const.ts'
 import { createPlugin } from '../pluggable/plugin.ts'
 
@@ -89,11 +88,11 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
 
         // Generate frontmatter as we exit the head
         if (Object.keys(frontmatter).length > 0) {
-          // Create frontmatter region and collect content instead of returning it
           const frontmatterContent = generateFrontmatter()
-
-          // Create a virtual node for collecting frontmatter content
-          collectNodeContent({ type: 1, regionId: 0 } as Node, frontmatterContent, state)
+          if (frontmatterContent) {
+            state.buffer.push(frontmatterContent)
+            state.lastContentCache = frontmatterContent
+          }
         }
       }
 

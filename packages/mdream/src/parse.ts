@@ -386,7 +386,6 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     type: TEXT_NODE,
     value: text,
     parent: state.currentNode,
-    regionId: state.currentNode?.regionId,
     index: state.currentNode.currentWalkIndex!++,
     depth: state.depth,
     containsWhitespace,
@@ -634,7 +633,6 @@ function processOpeningTag(
     depthMap: copyDepthMap(state.depthMap),
     depth: state.depth,
     index: currentWalkIndex,
-    regionId: state.currentNode?.regionId,
     tagId,
     tagHandler,
   } as ElementNode

@@ -61,15 +61,8 @@ function shouldSplitOnHeader(tagId: number, options: ReturnType<typeof createOpt
 /**
  * Get current markdown content WITHOUT clearing buffers
  */
-function getCurrentMarkdown(state: { regionContentBuffers: Map<number, string[]>, regionToggles: Map<number, boolean> }): string {
-  const fragments: string[] = []
-  for (const [regionId, content] of state.regionContentBuffers.entries()) {
-    const include = state.regionToggles.get(regionId)
-    if (include) {
-      fragments.push(...content)
-    }
-  }
-  return fragments.join('').trimStart()
+function getCurrentMarkdown(state: { buffer: string[] }): string {
+  return state.buffer.join('').trimStart()
 }
 
 /**

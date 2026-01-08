@@ -177,16 +177,15 @@ export default defineConfig({
 
 ```javascript
 import { viteHtmlToMarkdownPlugin } from '@mdream/vite'
-import { readabilityPlugin } from 'mdream/plugins'
+import { filterPlugin, isolateMainPlugin } from 'mdream/plugins'
 
 export default defineConfig({
   plugins: [
     viteHtmlToMarkdownPlugin({
       mdreamOptions: {
         plugins: [
-          readabilityPlugin({
-            minScore: 0.7
-          })
+          isolateMainPlugin(),
+          filterPlugin({ exclude: ['nav', '.sidebar'] })
         ]
       }
     })
