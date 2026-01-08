@@ -27,6 +27,9 @@ catalogs:
     '@clack/prompts':
       specifier: ^0.11.0
       version: 0.11.0
+    '@kreuzberg/html-to-markdown-node':
+      specifier: ^2.20.0
+      version: 2.20.0
     '@libsql/client':
       specifier: ^0.17.0
       version: 0.17.0
@@ -182,6 +185,9 @@ importers:
       '@built-in-ai/transformers-js':
         specifier: 'catalog:'
         version: 1.1.1(@huggingface/transformers@3.8.0)(ai@6.0.19(zod@4.1.13))
+      '@kreuzberg/html-to-markdown-node':
+        specifier: 'catalog:'
+        version: 2.20.0
       '@types/node':
         specifier: 'catalog:'
         version: 25.0.3
@@ -1812,6 +1818,68 @@ packages:
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
 
+  '@kreuzberg/html-to-markdown-node-darwin-arm64@2.20.0':
+    resolution: {integrity: sha512-7OeoUXoxnG7RXE9qZEB2whSfdBIVKZMRChoAu99nhmiNILHE66wa7mho/4GSiXNHHFpDNOnAvvg8o6KPioI8ag==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@kreuzberg/html-to-markdown-node-darwin-x64@2.20.0':
+    resolution: {integrity: sha512-LjqKYXH/WRTf7kO1DCgDs3mW7FGeAxsuQHZNCQIRBEasMe5MEm8uuy2kFrVAc1gg+oGNVxd5KnkaGIFzz0iu3w==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@kreuzberg/html-to-markdown-node-linux-arm-gnueabihf@2.20.0':
+    resolution: {integrity: sha512-PphbuSRLpj7HwFkWyffJbZ/D14A0m1Qg5ZbZg77EoBGMI972JBRy9vSOt7Z/eyJicNoksi0kCPg3eCLyhIsDQA==}
+    engines: {node: '>= 10'}
+    cpu: [arm]
+    os: [linux]
+
+  '@kreuzberg/html-to-markdown-node-linux-arm64-gnu@2.20.0':
+    resolution: {integrity: sha512-w7X23ujdBARfRmT0Hvv4l1PdHLSTNZjArImFMpEAkGdPr5aqYNI1j9cdEnslpdNRZtAaPUfpvBI//4gpOMSaYQ==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@kreuzberg/html-to-markdown-node-linux-arm64-musl@2.20.0':
+    resolution: {integrity: sha512-eYbanxwmI8A7s/lGVX9efH3fIRTumvNQ/goNiRwNPlqHuZX3NKiBf/1aiOXjzPpeeNZ9riTZ2lKBWdkPeqGsNw==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@kreuzberg/html-to-markdown-node-linux-x64-gnu@2.20.0':
+    resolution: {integrity: sha512-5NNBzPddATKh7djPBTakh99kVEHqcdkRBdtSKaYfT5uDy4RKnh2ScXgQd5SdEMLYAoIEkY0ZwOGYStfqA2YpyA==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@kreuzberg/html-to-markdown-node-linux-x64-musl@2.20.0':
+    resolution: {integrity: sha512-vkUgpFJZIvlJp7iJN+J8oFXg+j7wtJq382eMXiStI9oodXTCbfbSl3+EUQDuc7MetZSs6B9A/PUmiQMduDsceQ==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  '@kreuzberg/html-to-markdown-node-win32-arm64-msvc@2.20.0':
+    resolution: {integrity: sha512-95m1WCWC3mcWF+tsPBCfJHMRA80S2sXf98Z/gOv0SFCoqnItH67f9eqV+3ov4fVbWTy2axcKhSAB2D47UgehWg==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@kreuzberg/html-to-markdown-node-win32-x64-msvc@2.20.0':
+    resolution: {integrity: sha512-y6bL89BYuOlyJB1wdUHBIW5ieSfcgEuDZKeUF4JzhwvH9d7k909imgkzo+Xcef4lZ6nEjoZfxybK4ZRcD6jBBg==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [win32]
+
+  '@kreuzberg/html-to-markdown-node@2.20.0':
+    resolution: {integrity: sha512-7bbR7oETnJegEklcXRe/oQ3lVfzrjCJJSl/eW9hfm27Hvj10yCY9oCTAflQ9M7WKtnfRu1Tty/Pj4ZrFMF8wLg==}
+    engines: {node: '>= 10'}
+
   '@kwsites/file-exists@1.1.1':
     resolution: {integrity: sha512-m9/5YGR18lIwxSFDwfE3oA7bWuq9kdau6ugN4H2rJeyhFQZcG9AgSHkQtSD15a8WvTgfz9aikZMrKPHvbpqFiw==}
 
@@ -2034,6 +2102,36 @@ packages:
     peerDependenciesMeta:
       rolldown:
         optional: true
+
+  '@octokit/auth-token@6.0.0':
+    resolution: {integrity: sha512-P4YJBPdPSpWTQ1NU4XYdvHvXJJDxM6YwpS0FZHRgP7YFkdVxsWcpWGy/NVqlAA7PcPCnMacXlRm1y2PFZRWL/w==}
+    engines: {node: '>= 20'}
+
+  '@octokit/core@7.0.6':
+    resolution: {integrity: sha512-DhGl4xMVFGVIyMwswXeyzdL4uXD5OGILGX5N8Y+f6W7LhC1Ze2poSNrkF/fedpVDHEEZ+PHFW0vL14I+mm8K3Q==}
+    engines: {node: '>= 20'}
+
+  '@octokit/endpoint@11.0.2':
+    resolution: {integrity: sha512-4zCpzP1fWc7QlqunZ5bSEjxc6yLAlRTnDwKtgXfcI/FxxGoqedDG8V2+xJ60bV2kODqcGB+nATdtap/XYq2NZQ==}
+    engines: {node: '>= 20'}
+
+  '@octokit/graphql@9.0.3':
+    resolution: {integrity: sha512-grAEuupr/C1rALFnXTv6ZQhFuL1D8G5y8CN04RgrO4FIPMrtm+mcZzFG7dcBm+nq+1ppNixu+Jd78aeJOYxlGA==}
+    engines: {node: '>= 20'}
+
+  '@octokit/openapi-types@27.0.0':
+    resolution: {integrity: sha512-whrdktVs1h6gtR+09+QsNk2+FO+49j6ga1c55YZudfEG+oKJVvJLQi3zkOm5JjiUXAagWK2tI2kTGKJ2Ys7MGA==}
+
+  '@octokit/request-error@7.1.0':
+    resolution: {integrity: sha512-KMQIfq5sOPpkQYajXHwnhjCC0slzCNScLHs9JafXc4RAJI+9f+jNDlBNaIMTvazOPLgb4BnlhGJOTbnN0wIjPw==}
+    engines: {node: '>= 20'}
+
+  '@octokit/request@10.0.7':
+    resolution: {integrity: sha512-v93h0i1yu4idj8qFPZwjehoJx4j3Ntn+JhXsdJrG9pYaX6j/XRz2RmasMUHtNgQD39nrv/VwTWSqK0RNXR8upA==}
+    engines: {node: '>= 20'}
+
+  '@octokit/types@16.0.0':
+    resolution: {integrity: sha512-sKq+9r1Mm4efXW1FCk7hFSeJo4QKreL/tTbR0rz/qx/r1Oa2VV83LTA/H/MuCOX7uCIJmQVRKBcbmWoySjAnSg==}
 
   '@opentelemetry/api@1.9.0':
     resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
@@ -4121,6 +4219,9 @@ packages:
     resolution: {integrity: sha512-OPz5aBThlyLFgxyhdwf/s2+8ab3OvT7AdTNvKHBwpXomIYeXqpUUuT8LrdtxZSsWJ4R4CU1un4XGh5Ez3nlTpw==}
     hasBin: true
 
+  before-after-hook@4.0.0:
+    resolution: {integrity: sha512-q6tR3RPqIB1pMiTRMFcZwuG5T8vwp+vUvEG0vuI6B+Rikh5BfPp2fQ82c925FOs+b0lcFQ8CFrL+KbilfZFhOQ==}
+
   better-sqlite3@12.5.0:
     resolution: {integrity: sha512-WwCZ/5Diz7rsF29o27o0Gcc1Du+l7Zsv7SYtVPG0X3G/uUI1LqdxrQI7c9Hs2FWpqXXERjW9hp6g3/tH7DlVKg==}
     engines: {node: 20.x || 22.x || 23.x || 24.x || 25.x}
@@ -5240,6 +5341,9 @@ packages:
   fake-indexeddb@6.2.5:
     resolution: {integrity: sha512-CGnyrvbhPlWYMngksqrSSUT1BAVP49dZocrHuK0SvtR0D5TMs5wP0o3j7jexDJW01KSadjBp1M/71o/KR3nD1w==}
     engines: {node: '>=18'}
+
+  fast-content-type-parse@3.0.0:
+    resolution: {integrity: sha512-ZvLdcY8P+N8mGQJahJV5G4U88CSvT1rP8ApL6uETe88MBXrBHAkZlSEySdUlyztF7ccb+Znos3TFqaepHxdhBg==}
 
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
@@ -7942,6 +8046,9 @@ packages:
   turndown@7.2.2:
     resolution: {integrity: sha512-1F7db8BiExOKxjSMU2b7if62D/XOyQyZbPKq/nUwopfgnHlqXHqQ0lvfUTeUIr1lZJzOPFn43dODyMSIfvWRKQ==}
 
+  typanion@3.14.0:
+    resolution: {integrity: sha512-ZW/lVMRabETuYCd9O9ZvMhAh8GslSqaUjxmK/JLPCh6l73CvLBiuXswj/+7LdnWOgYsQ130FqLzFz5aGT4I3Ug==}
+
   type-check@0.4.0:
     resolution: {integrity: sha512-XleUoc9uwGXqjWwXaUTZAmzMcFZ5858QA2vvx1Ur5xIcixXIP+8LnFDgRplU30us6teqdlskFfu+ae4K79Ooew==}
     engines: {node: '>= 0.8.0'}
@@ -8051,6 +8158,9 @@ packages:
   unist-util-visit@5.0.0:
     resolution: {integrity: sha512-MR04uvD+07cwl/yhVuVWAtw+3GOR/knlL55Nd/wAdblk27GCVt3lqpTivy/tkJcZoNPzTwS1Y+KMojlLDhoTzg==}
 
+  universal-user-agent@7.0.3:
+    resolution: {integrity: sha512-TmnEAEAsBJVZM/AADELsK76llnwcf9vMKuPz8JflO1frO8Lchitr0fNaN9d+Ap0BjKtqWqd/J17qeDnXh8CL2A==}
+
   universalify@2.0.1:
     resolution: {integrity: sha512-gptHNQghINnc/vTGIk0SOFGFNXw7JVrlRUtConJRlvaw6DuX0wO5Jeko9sWrMBhh+PsYAZ7oXAiOnf/UKogyiw==}
     engines: {node: '>= 10.0.0'}
@@ -8152,6 +8262,9 @@ packages:
 
   unwasm@0.3.11:
     resolution: {integrity: sha512-Vhp5gb1tusSQw5of/g3Q697srYgMXvwMgXMjcG4ZNga02fDX9coxJ9fAb0Ci38hM2Hv/U1FXRPGgjP2BYqhNoQ==}
+
+  up@1.0.2:
+    resolution: {integrity: sha512-PKVGUj7i1qMWSR83H3PZpw1h+21wAr1qxqF/8zgTVHS+sHTsu1zvepQDoDJN0Kv49quNJwWgAKDAK2xPy7jocg==}
 
   update-browserslist-db@1.1.4:
     resolution: {integrity: sha512-q0SPT4xyU84saUX+tomz1WLkxUbuaJnR1xWt17M7fJtEJigJeWUNGUqrauFXsHnqev9y9JTRGwk13tFBuKby4A==}
@@ -9759,7 +9872,6 @@ snapshots:
   '@emnapi/runtime@1.7.1':
     dependencies:
       tslib: 2.8.1
-    optional: true
 
   '@emnapi/wasi-threads@1.1.0':
     dependencies:
@@ -10262,6 +10374,50 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.5.5
 
   '@keyv/serialize@1.1.1': {}
+
+  '@kreuzberg/html-to-markdown-node-darwin-arm64@2.20.0':
+    optional: true
+
+  '@kreuzberg/html-to-markdown-node-darwin-x64@2.20.0':
+    optional: true
+
+  '@kreuzberg/html-to-markdown-node-linux-arm-gnueabihf@2.20.0':
+    optional: true
+
+  '@kreuzberg/html-to-markdown-node-linux-arm64-gnu@2.20.0':
+    optional: true
+
+  '@kreuzberg/html-to-markdown-node-linux-arm64-musl@2.20.0':
+    optional: true
+
+  '@kreuzberg/html-to-markdown-node-linux-x64-gnu@2.20.0':
+    optional: true
+
+  '@kreuzberg/html-to-markdown-node-linux-x64-musl@2.20.0':
+    optional: true
+
+  '@kreuzberg/html-to-markdown-node-win32-arm64-msvc@2.20.0':
+    optional: true
+
+  '@kreuzberg/html-to-markdown-node-win32-x64-msvc@2.20.0':
+    optional: true
+
+  '@kreuzberg/html-to-markdown-node@2.20.0':
+    dependencies:
+      '@emnapi/runtime': 1.7.1
+      '@octokit/core': 7.0.6
+      typanion: 3.14.0
+      up: 1.0.2
+    optionalDependencies:
+      '@kreuzberg/html-to-markdown-node-darwin-arm64': 2.20.0
+      '@kreuzberg/html-to-markdown-node-darwin-x64': 2.20.0
+      '@kreuzberg/html-to-markdown-node-linux-arm-gnueabihf': 2.20.0
+      '@kreuzberg/html-to-markdown-node-linux-arm64-gnu': 2.20.0
+      '@kreuzberg/html-to-markdown-node-linux-arm64-musl': 2.20.0
+      '@kreuzberg/html-to-markdown-node-linux-x64-gnu': 2.20.0
+      '@kreuzberg/html-to-markdown-node-linux-x64-musl': 2.20.0
+      '@kreuzberg/html-to-markdown-node-win32-arm64-msvc': 2.20.0
+      '@kreuzberg/html-to-markdown-node-win32-x64-msvc': 2.20.0
 
   '@kwsites/file-exists@1.1.1':
     dependencies:
@@ -11060,6 +11216,47 @@ snapshots:
       - vti
       - vue-tsc
       - yaml
+
+  '@octokit/auth-token@6.0.0': {}
+
+  '@octokit/core@7.0.6':
+    dependencies:
+      '@octokit/auth-token': 6.0.0
+      '@octokit/graphql': 9.0.3
+      '@octokit/request': 10.0.7
+      '@octokit/request-error': 7.1.0
+      '@octokit/types': 16.0.0
+      before-after-hook: 4.0.0
+      universal-user-agent: 7.0.3
+
+  '@octokit/endpoint@11.0.2':
+    dependencies:
+      '@octokit/types': 16.0.0
+      universal-user-agent: 7.0.3
+
+  '@octokit/graphql@9.0.3':
+    dependencies:
+      '@octokit/request': 10.0.7
+      '@octokit/types': 16.0.0
+      universal-user-agent: 7.0.3
+
+  '@octokit/openapi-types@27.0.0': {}
+
+  '@octokit/request-error@7.1.0':
+    dependencies:
+      '@octokit/types': 16.0.0
+
+  '@octokit/request@10.0.7':
+    dependencies:
+      '@octokit/endpoint': 11.0.2
+      '@octokit/request-error': 7.1.0
+      '@octokit/types': 16.0.0
+      fast-content-type-parse: 3.0.0
+      universal-user-agent: 7.0.3
+
+  '@octokit/types@16.0.0':
+    dependencies:
+      '@octokit/openapi-types': 27.0.0
 
   '@opentelemetry/api@1.9.0': {}
 
@@ -12958,6 +13155,8 @@ snapshots:
 
   baseline-browser-mapping@2.8.32: {}
 
+  before-after-hook@4.0.0: {}
+
   better-sqlite3@12.5.0:
     dependencies:
       bindings: 1.5.0
@@ -14225,6 +14424,8 @@ snapshots:
   exsolve@1.0.8: {}
 
   fake-indexeddb@6.2.5: {}
+
+  fast-content-type-parse@3.0.0: {}
 
   fast-deep-equal@3.1.3: {}
 
@@ -17574,6 +17775,8 @@ snapshots:
     dependencies:
       '@mixmark-io/domino': 2.2.0
 
+  typanion@3.14.0: {}
+
   type-check@0.4.0:
     dependencies:
       prelude-ls: 1.2.1
@@ -17709,6 +17912,8 @@ snapshots:
       unist-util-is: 6.0.1
       unist-util-visit-parents: 6.0.2
 
+  universal-user-agent@7.0.3: {}
+
   universalify@2.0.1: {}
 
   unpipe@1.0.0: {}
@@ -17792,6 +17997,8 @@ snapshots:
       pathe: 2.0.3
       pkg-types: 2.3.0
       unplugin: 2.3.11
+
+  up@1.0.2: {}
 
   update-browserslist-db@1.1.4(browserslist@4.28.0):
     dependencies:

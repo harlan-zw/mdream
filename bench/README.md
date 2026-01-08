@@ -4,11 +4,12 @@ This document describes how mdream benchmarks are conducted to ensure transparen
 
 ## Libraries Compared
 
-| Library | Version | Notes |
-|---------|---------|-------|
-| [mdream](https://github.com/harlan-zw/mdream) | latest | Base `htmlToMarkdown()` with no plugins |
-| [turndown](https://github.com/mixmark-io/turndown) | ^7.2.0 | With [GFM plugin](https://github.com/mixmark-io/turndown-plugin-gfm) (GitHub Flavored Markdown: tables, strikethrough, task lists) |
-| [node-html-markdown](https://github.com/crosstype/node-html-markdown) | ^1.3.0 | Default settings |
+| Library | Version | Language | Notes |
+|---------|---------|----------|-------|
+| [mdream](https://github.com/harlan-zw/mdream) | latest | JavaScript | Base `htmlToMarkdown()` with no plugins |
+| [html-to-markdown](https://github.com/nickmass/html2md-rs) | ^2.20.0 | Rust (native) | Via `@kreuzberg/html-to-markdown-node` napi-rs bindings |
+| [turndown](https://github.com/mixmark-io/turndown) | ^7.2.0 | JavaScript | With [GFM plugin](https://github.com/mixmark-io/turndown-plugin-gfm) (tables, strikethrough, task lists) |
+| [node-html-markdown](https://github.com/crosstype/node-html-markdown) | ^1.3.0 | JavaScript | Default settings |
 
 ### Why These Libraries?
 
@@ -117,11 +118,16 @@ pnpm bench
 
 ### Performance Scaling
 
-| Input Size | mdream | vs Turndown | vs node-html-markdown |
-|------------|--------|-------------|----------------------|
-| 166 KB | 3.3ms | 3.6x faster | 3.8x faster |
-| 420 KB | 6.5ms | 2.2x faster | 1.5x faster |
-| 1.8 MB | 58ms | 4.8x faster | 452x faster |
+| Input Size | Rust (native) | mdream | Turndown | node-html-markdown |
+|------------|---------------|--------|----------|-------------------|
+| 166 KB | 1.4ms | 4.3ms | 11.7ms | 13.3ms |
+| 420 KB | 1.9ms | 6.4ms | 13.7ms | 9.9ms |
+| 1.8 MB | 20ms | 60ms | 275ms | 27,000ms |
+
+**Key findings:**
+- Rust native is ~3x faster than mdream (expected for native code)
+- mdream is 3-4x faster than Turndown (fastest pure JS)
+- node-html-markdown has O(n²) complexity issues on large files
 
 ### Why mdream is Faster
 
@@ -165,6 +171,74 @@ curl -s "https://docs.github.com/en/get-started/writing-on-github/getting-starte
 
 # Wikipedia large
 curl -s "https://en.wikipedia.org/wiki/Elon_Musk" > packages/mdream/test/fixtures/wikipedia-largest.html
+```
+
+## Cross-Language CLI Benchmark
+
+Separate from the JavaScript benchmark, we also compare CLI performance against Go and Rust alternatives using [hyperfine](https://github.com/sharkdp/hyperfine).
+
+### Tools Compared
+
+| Tool | Language | Install |
+|------|----------|---------|
+| mdream | Node.js | `npm i -g mdream` |
+| [html-to-markdown](https://github.com/nickmass/html2md-rs) | Rust | `cargo install html-to-markdown-cli` |
+| [html2md](https://github.com/JohannesKaufmann/html-to-markdown) | Go | `go install github.com/JohannesKaufmann/html-to-markdown/v2/cmd/html2md@latest` |
+
+### CLI Results
+
+```
+Small HTML (166 KB)
+  html-to-markdown (Rust)    2.9 ms
+  mdream (Bun)              37.0 ms   (13x slower)
+  mdream (Node.js)          49.1 ms   (17x slower)
+
+Medium HTML (420 KB)
+  html-to-markdown (Rust)    3.3 ms
+  mdream (Bun)              47.0 ms   (14x slower)
+  mdream (Node.js)          76.3 ms   (23x slower)
+
+Large HTML (1.8 MB)
+  html-to-markdown (Rust)   30.1 ms
+  mdream (Bun)             130.2 ms   (4.3x slower)
+  mdream (Node.js)         138.9 ms   (4.6x slower)
+```
+
+### Understanding CLI Results
+
+**Important:** CLI benchmarks include process startup overhead:
+- **Node.js startup**: ~40ms baseline before any code runs
+- **Bun startup**: ~30ms (faster than Node)
+- **Rust startup**: ~1-2ms (compiled binary)
+
+For the **large file** where startup is less significant:
+- Rust actual conversion: ~28ms
+- mdream actual conversion: ~58ms (from JS benchmark)
+- **Real conversion gap: ~2x**, not 4.6x
+
+**Bun vs Node.js:**
+- Small files: Bun 25% faster (startup matters more)
+- Large files: Similar (~6% faster)
+
+### When to Use What
+
+| Use Case | Recommendation |
+|----------|----------------|
+| **JavaScript/Browser apps** | mdream (native, no FFI overhead) |
+| **CLI pipelines (speed critical)** | Rust html-to-markdown (fastest) |
+| **CLI pipelines (JS ecosystem)** | mdream + Bun (25% faster than Node) |
+| **Streaming large files** | mdream (streaming support) |
+| **LLM-optimized output** | mdream (minimal preset, token reduction) |
+
+### Running CLI Benchmarks
+
+```bash
+# Install alternatives first
+cargo install html-to-markdown-cli
+# go install github.com/JohannesKaufmann/html-to-markdown/v2/cmd/html2md@latest
+
+# Run benchmark
+pnpm bench:cli
 ```
 
 ## Questions or Concerns?

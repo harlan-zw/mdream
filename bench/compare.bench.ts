@@ -6,11 +6,13 @@
  * - mdream: base htmlToMarkdown() with no plugins
  * - turndown: default settings with GFM tables/strikethrough
  * - node-html-markdown: default settings
+ * - html-to-markdown-node: Rust with native Node bindings (napi-rs)
  *
  * Run: pnpm bench
  */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { convert as rustConvert } from '@kreuzberg/html-to-markdown-node'
 import { NodeHtmlMarkdown } from 'node-html-markdown'
 import TurndownService from 'turndown'
 import { gfm } from 'turndown-plugin-gfm'
@@ -49,6 +51,10 @@ describe('small HTML (166 KB - Wikipedia)', () => {
     htmlToMarkdown(wikiSmall)
   })
 
+  bench('html-to-markdown (rust)', () => {
+    rustConvert(wikiSmall)
+  })
+
   bench('turndown (gfm)', () => {
     turndown.turndown(wikiSmall)
   })
@@ -63,6 +69,10 @@ describe('medium HTML (420 KB - GitHub Docs)', () => {
     htmlToMarkdown(github)
   })
 
+  bench('html-to-markdown (rust)', () => {
+    rustConvert(github)
+  })
+
   bench('turndown (gfm)', () => {
     turndown.turndown(github)
   })
@@ -75,6 +85,10 @@ describe('medium HTML (420 KB - GitHub Docs)', () => {
 describe('large HTML (1.8 MB - Wikipedia)', () => {
   bench('mdream', () => {
     htmlToMarkdown(wikiLarge)
+  })
+
+  bench('html-to-markdown (rust)', () => {
+    rustConvert(wikiLarge)
   })
 
   bench('turndown (gfm)', () => {

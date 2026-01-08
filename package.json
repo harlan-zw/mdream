@@ -14,9 +14,11 @@
     "test": "pnpm exec playwright install && vitest test",
     "release": "pnpm build && bumpp --output=CHANGELOG.md packages/*/package.json",
     "test:attw": "pnpm -r --parallel --filter=./packages/** run test:attw",
-    "bench": "vitest bench --config bench/vitest.config.ts"
+    "bench": "vitest bench --config bench/vitest.config.ts",
+    "bench:cli": "./bench/cli-compare.sh"
   },
   "devDependencies": {
+    "@kreuzberg/html-to-markdown-node": "catalog:",
     "@antfu/eslint-config": "catalog:",
     "@arethetypeswrong/cli": "catalog:",
     "@built-in-ai/transformers-js": "catalog:",
