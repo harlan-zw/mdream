@@ -432,6 +432,9 @@ Examples:
   // Check for skip-sitemap flag
   const skipSitemap = args.includes('--skip-sitemap')
 
+  // Check for allow-subdomains flag
+  const allowSubdomains = args.includes('--allow-subdomains')
+
   // Warn if using skip-sitemap with wildcard URLs
   if (skipSitemap && parsed.isGlob) {
     p.log.warn('Warning: Using --skip-sitemap with glob URLs may not discover all matching pages.')
@@ -455,6 +458,7 @@ Examples:
     exclude: excludePatterns.length > 0 ? excludePatterns : undefined,
     verbose,
     skipSitemap,
+    allowSubdomains,
   }
 }
 
