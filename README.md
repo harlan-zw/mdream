@@ -74,6 +74,12 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 pnpm add mdream
 ```
 
+> [!TIP]
+> Generate an Agent Skill for this package using [skilld](https://github.com/harlan-zw/skilld):
+> ```bash
+> npx skilld add mdream
+> ```
+
 ### Basic Usage
 
 ```ts
