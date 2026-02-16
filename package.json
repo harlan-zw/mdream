@@ -13,7 +13,7 @@
     "typecheck": "pnpm run -r typecheck",
     "test": "pnpm exec playwright install && vitest test",
     "release": "pnpm build && bumpp --output=CHANGELOG.md packages/*/package.json",
-    "test:attw": "pnpm -r --parallel --filter=./packages/** run test:attw",
+    "test:attw": "pnpm -r --parallel --filter './packages/**' run test:attw",
     "bench": "vitest bench --config bench/vitest.config.ts",
     "bench:cli": "./bench/cli-compare.sh"
   },
