@@ -15,7 +15,7 @@ export interface Plugin {
 
   /**
    * Hook that runs when exiting a node
-   * @param event - The node event
+   * @param node - The node event
    * @param state - The current runtime state
    * @returns String to add to the output, or PluginHookResult with content
    */

@@ -1,70 +1,72 @@
 shellEmulator: true
-
 trustPolicy: no-downgrade
 
 packages:
   - playground
   - packages/*
   - examples/*
+
 overrides:
   vite: npm:rolldown-vite@latest
+
 catalog:
-  '@actions/core': ^2.0.1
-  '@actions/exec': ^2.0.0
-  '@antfu/eslint-config': ^6.7.3
+  '@actions/core': ^3.0.0
+  '@actions/exec': ^3.0.0
+  '@antfu/eslint-config': ^7.4.3
   '@arethetypeswrong/cli': ^0.18.2
-  '@aws-sdk/client-s3': ^3.965.0
-  '@built-in-ai/transformers-js': ^1.1.1
-  '@clack/prompts': ^0.11.0
-  '@kreuzberg/html-to-markdown-node': ^2.20.0
+  '@aws-sdk/client-s3': ^3.990.0
+  '@built-in-ai/transformers-js': ^1.1.2
+  '@clack/prompts': ^1.0.1
+  '@kreuzberg/html-to-markdown-node': ^2.25.0
   '@libsql/client': ^0.17.0
   '@nuxt/devtools': 2.4.0
-  '@nuxt/kit': ^4.2.2
+  '@nuxt/kit': ^4.3.1
   '@nuxt/module-builder': ^1.0.2
-  '@nuxt/schema': ^4.2.2
-  '@nuxt/test-utils': ^3.23.0
+  '@nuxt/schema': ^4.3.1
+  '@nuxt/test-utils': ^4.0.0
   '@types/better-sqlite3': ^7.6.13
   '@types/express': ^5.0.6
-  '@types/node': ^25.0.3
+  '@types/node': ^25.2.3
   '@types/picomatch': ^4.0.2
   '@vercel/ncc': ^0.38.4
-  '@vitejs/plugin-vue': ^6.0.3
-  '@vitest/browser': ^4.0.16
-  '@vitest/browser-playwright': ^4.0.16
-  ai: ^6.0.20
-  better-sqlite3: ^12.5.0
-  bumpp: ^10.3.2
+  '@vitejs/plugin-vue': ^6.0.4
+  '@vitest/browser': ^4.0.18
+  '@vitest/browser-playwright': ^4.0.18
+  ai: ^6.0.86
+  better-sqlite3: ^12.6.2
+  bumpp: ^10.4.1
   cac: ^6.7.14
   changelogen: ^0.6.2
   compression: ^1.8.1
   consola: ^3.4.2
-  crawlee: ^3.15.3
+  crawlee: ^3.16.0
   cross-env: ^10.1.0
   defu: ^6.1.4
-  drizzle-kit: ^0.31.8
+  drizzle-kit: ^0.31.9
   drizzle-orm: ^0.45.1
-  eslint: ^9.39.2
+  eslint: ^10.0.0
   express: ^5.2.1
   llm-cost: ^1.0.5
   node-html-markdown: ^2.0.0
-  nuxt: ^4.2.2
-  nuxt-site-config: ^3.2.17
-  nypm: ^0.6.2
-  obuild: ^0.4.14
+  nuxt: ^4.3.1
+  nuxt-site-config: ^3.2.19
+  nypm: ^0.6.5
+  obuild: ^0.4.27
   pathe: ^2.0.3
   picomatch: ^4.0.3
-  playwright: ^1.57.0
+  playwright: ^1.58.2
   sirv: ^3.0.2
   tinyglobby: ^0.2.15
   turndown: ^7.2.2
   turndown-plugin-gfm: ^1.0.2
   typescript: ^5.9.3
-  ufo: ^1.6.2
-  unstorage: ^1.17.3
+  ufo: ^1.6.3
+  unstorage: ^1.17.4
   vite: ^7.3.1
-  vitest: ^4.0.16
-  vue: ^3.5.26
-  vue-router: ^4.6.4
+  vitest: ^4.0.18
+  vue: ^3.5.28
+  vue-router: ^5.0.2
+
 onlyBuiltDependencies:
   - esbuild
   - '@parcel/watcher'

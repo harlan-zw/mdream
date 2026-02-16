@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src/index.js'
+import { htmlToMarkdown, streamHtmlToMarkdown } from '../../../src/index.js'
 
 describe('tables', () => {
   it('converts basic tables with headers', () => {
@@ -149,6 +149,33 @@ describe('tables', () => {
       + '| Value 1 | Value 2 | Value 3 |',
     )
   })
+  it('handles large tables without stack overflow', async () => {
+    const cols = 10
+    const rows = 5000
+    const headerCells = Array.from({ length: cols }, (_, i) => `<th>Col ${i}</th>`).join('')
+    const row = `<tr>${Array.from({ length: cols }, (_, i) => `<td>Cell ${i}</td>`).join('')}</tr>`
+    const html = `<table><thead><tr>${headerCells}</tr></thead><tbody>${row.repeat(rows)}</tbody></table>`
+
+    // sync
+    const md = htmlToMarkdown(html)
+    const lines = md.split('\n')
+    // header + separator + rows
+    expect(lines.length).toBe(rows + 2)
+
+    // streaming
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(html))
+        controller.close()
+      },
+    })
+    let streamed = ''
+    for await (const chunk of streamHtmlToMarkdown(stream)) {
+      streamed += chunk
+    }
+    expect(streamed.trim()).toBe(md)
+  })
+
   it('github advanced example', () => {
     const html = `
       <table><thead><tr><th scope="col">Style</th><th scope="col">Syntax</th><th scope="col">Keyboard shortcut</th><th scope="col">Example</th><th scope="col">Output</th></tr></thead><tbody><tr><td>Bold</td><td><code>** **</code> or <code>__ __</code></td><td><kbd>Command</kbd>+<kbd>B</kbd> (Mac) or <kbd>Ctrl</kbd>+<kbd>B</kbd> (Windows/Linux)</td><td><code>**This is bold text**</code></td><td><strong>This is bold text</strong></td></tr><tr><td>Italic</td><td><code>* *</code> or <code>_ _</code> &emsp;&emsp;&emsp;&emsp;</td><td><kbd>Command</kbd>+<kbd>I</kbd> (Mac) or <kbd>Ctrl</kbd>+<kbd>I</kbd> (Windows/Linux)</td><td><code>_This text is italicized_</code></td><td><em>This text is italicized</em></td></tr><tr><td>Strikethrough</td><td><code>~~ ~~</code> or <code>~ ~</code></td><td>None</td><td><code>~~This was mistaken text~~</code></td><td><del>This was mistaken text</del></td></tr><tr><td>Bold and nested italic</td><td><code>** **</code> and <code>_ _</code></td><td>None</td><td><code>**This text is _extremely_ important**</code></td><td><strong>This text is <em>extremely</em> important</strong></td></tr><tr><td>All bold and italic</td><td><code>*** ***</code></td><td>None</td><td><code>***All this text is important***</code></td><td><em><strong>All this text is important</strong></em></td></tr><tr><td>Subscript</td><td><code>&lt;sub&gt; &lt;/sub&gt;</code></td><td>None</td><td><code>This is a &lt;sub&gt;subscript&lt;/<wbr>sub&gt; text</code></td><td>This is a <sub>subscript</sub> text</td></tr><tr><td>Superscript</td><td><code>&lt;sup&gt; &lt;/sup&gt;</code></td><td>None</td><td><code>This is a &lt;sup&gt;superscript&lt;/<wbr>sup&gt; text</code></td><td>This is a <sup>superscript</sup> text</td></tr><tr><td>Underline</td><td><code>&lt;ins&gt; &lt;/ins&gt;</code></td><td>None</td><td><code>This is an &lt;ins&gt;underlined&lt;/<wbr>ins&gt; text</code></td><td>This is an <ins>underlined</ins> text</td></tr></tbody></table>`
