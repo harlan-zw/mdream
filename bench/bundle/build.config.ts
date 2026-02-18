@@ -11,6 +11,7 @@ export default defineBuildConfig({
     'src/stream',
     'src/stream-fetch',
     'src/string',
+    'src/cli-bench',
   ],
   outDir: 'dist',
   failOnWarn: false,

@@ -17,8 +17,27 @@ import { NodeHtmlMarkdown } from 'node-html-markdown'
 import TurndownService from 'turndown'
 import { gfm } from 'turndown-plugin-gfm'
 import { bench, describe } from 'vitest'
-import { htmlToMarkdown } from '../packages/mdream/src'
+import { htmlToMarkdown, streamHtmlToMarkdown } from '../packages/mdream/src'
 import { withMinimalPreset } from '../packages/mdream/src/preset/minimal'
+
+function stringToStream(str: string): ReadableStream<string> {
+  return new ReadableStream({
+    start(controller) {
+      // simulate realistic chunking (~16KB chunks)
+      const chunkSize = 16384
+      for (let i = 0; i < str.length; i += chunkSize) {
+        controller.enqueue(str.slice(i, i + chunkSize))
+      }
+      controller.close()
+    },
+  })
+}
+
+async function consumeStream(html: string) {
+  const stream = streamHtmlToMarkdown(stringToStream(html))
+  // eslint-disable-next-line no-empty,@typescript-eslint/no-unused-vars
+  for await (const _ of stream) {}
+}
 
 // Load test fixtures
 const wikiLarge = readFileSync(resolve(import.meta.dirname, '../packages/mdream/test/fixtures/wikipedia-largest.html'), 'utf-8')
@@ -51,7 +70,7 @@ describe('small HTML (166 KB - Wikipedia)', () => {
     htmlToMarkdown(wikiSmall)
   })
 
-  bench('html-to-markdown (rust)', () => {
+  bench('html-to-markdown (Rust)', () => {
     rustConvert(wikiSmall)
   })
 
@@ -69,7 +88,7 @@ describe('medium HTML (420 KB - GitHub Docs)', () => {
     htmlToMarkdown(github)
   })
 
-  bench('html-to-markdown (rust)', () => {
+  bench('html-to-markdown (Rust)', () => {
     rustConvert(github)
   })
 
@@ -87,7 +106,7 @@ describe('large HTML (1.8 MB - Wikipedia)', () => {
     htmlToMarkdown(wikiLarge)
   })
 
-  bench('html-to-markdown (rust)', () => {
+  bench('html-to-markdown (Rust)', () => {
     rustConvert(wikiLarge)
   })
 
@@ -97,6 +116,26 @@ describe('large HTML (1.8 MB - Wikipedia)', () => {
 
   bench('node-html-markdown', () => {
     nhm.translate(wikiLarge)
+  })
+})
+
+describe('streaming vs string - small HTML (166 KB)', () => {
+  bench('mdream (string)', () => {
+    htmlToMarkdown(wikiSmall)
+  })
+
+  bench('mdream (stream)', async () => {
+    await consumeStream(wikiSmall)
+  })
+})
+
+describe('streaming vs string - large HTML (1.8 MB)', () => {
+  bench('mdream (string)', () => {
+    htmlToMarkdown(wikiLarge)
+  })
+
+  bench('mdream (stream)', async () => {
+    await consumeStream(wikiLarge)
   })
 })
 

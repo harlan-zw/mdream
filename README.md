@@ -30,11 +30,12 @@
 
 ## Benchmarks
 
-| Input Size | Rust (native) | mdream | Turndown | node-html-markdown |
-|------------|---------------|--------|----------|-------------------|
+| Input Size | html-to-markdown (Rust) | mdream | Turndown | node-html-markdown |
+|------------|-------------------------|--------|----------|-------------------|
 | **160 KB** | 1.4ms | **3.2ms** | 11.7ms | 15.0ms |
 | **420 KB** | 1.9ms | **6.6ms** | 14.0ms | 18.1ms |
 | **1.8 MB** | 21ms | **60ms** | 295ms | 28,600ms |
+| **1.8 MB (stream)** | — | **139ms** | — | — |
 
 See the [Benchmark methodology](./bench/README.md) for more details.
 

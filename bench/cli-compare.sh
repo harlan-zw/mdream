@@ -18,6 +18,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 FIXTURES_DIR="$ROOT_DIR/packages/mdream/test/fixtures"
 MDREAM_CLI="$ROOT_DIR/packages/mdream/bin/mdream.mjs"
+MDREAM_BUNDLE_CLI="$SCRIPT_DIR/bundle/dist/cli-bench.mjs"
+MDREAM_BIN="$SCRIPT_DIR/bundle/dist/mdream-bin"
 
 # Colors
 RED='\033[0;31m'
@@ -46,7 +48,9 @@ if ! command -v node &> /dev/null; then
 fi
 echo -e "${GREEN}✓ node $(node --version)${NC}"
 
+HAS_BUN=false
 if command -v bun &> /dev/null; then
+    HAS_BUN=true
     echo -e "${GREEN}✓ bun $(bun --version)${NC}"
 else
     echo -e "${YELLOW}○ bun not found (optional, faster startup)${NC}"
@@ -74,6 +78,24 @@ fi
 
 echo ""
 
+# Build bundle for benchmarking
+echo ""
+echo "Building mdream benchmark bundle..."
+(cd "$ROOT_DIR/packages/mdream" && pnpm build > /dev/null 2>&1)
+(cd "$ROOT_DIR/packages/mdream" && unbuild bench/bundle > /dev/null 2>&1)
+
+# Compile Bun binary if available
+HAS_BUN_BIN=false
+if [ "$HAS_BUN" = true ]; then
+    echo "Compiling Bun binary..."
+    if bun build --compile "$MDREAM_BUNDLE_CLI" --outfile "$MDREAM_BIN" > /dev/null 2>&1; then
+        HAS_BUN_BIN=true
+        echo -e "${GREEN}✓ Bun binary compiled${NC}"
+    else
+        echo -e "${YELLOW}○ Bun binary compilation failed, skipping${NC}"
+    fi
+fi
+
 # Build commands array
 declare -a COMMANDS
 declare -a NAMES
@@ -82,10 +104,16 @@ declare -a NAMES
 COMMANDS+=("cat {file} | node $MDREAM_CLI")
 NAMES+=("mdream (Node.js)")
 
-# mdream (Bun) - if available
-if command -v bun &> /dev/null; then
+# mdream (Bun runtime) - if available
+if [ "$HAS_BUN" = true ]; then
     COMMANDS+=("cat {file} | bun $MDREAM_CLI")
     NAMES+=("mdream (Bun)")
+fi
+
+# mdream (Bun compiled binary) - if compiled successfully
+if [ "$HAS_BUN_BIN" = true ]; then
+    COMMANDS+=("cat {file} | $MDREAM_BIN")
+    NAMES+=("mdream (Bun binary)")
 fi
 
 # Go html2md

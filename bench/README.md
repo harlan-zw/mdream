@@ -64,7 +64,7 @@ nhm.translate(html)
 ### What We're NOT Comparing
 
 - **mdream's LLM preset**: The `withMinimalPreset()` adds content filtering, frontmatter extraction, and main content isolation. This does extra work that competitors don't do, so it's benchmarked separately.
-- **Streaming performance**: mdream supports streaming; competitors don't. Not a fair comparison.
+- **Streaming performance**: mdream supports streaming; competitors don't. Streaming is benchmarked as a mdream-only comparison (stream vs string) to show overhead.
 - **Output quality**: This benchmark measures speed only, not output quality or token efficiency.
 
 ## Benchmark Tooling
@@ -118,8 +118,8 @@ pnpm bench
 
 ### Performance Scaling
 
-| Input Size | Rust (native) | mdream | Turndown | node-html-markdown |
-|------------|---------------|--------|----------|-------------------|
+| Input Size | html-to-markdown (Rust) | mdream | Turndown | node-html-markdown |
+|------------|-------------------------|--------|----------|-------------------|
 | 166 KB | 1.4ms | 4.3ms | 11.7ms | 13.3ms |
 | 420 KB | 1.9ms | 6.4ms | 13.7ms | 9.9ms |
 | 1.8 MB | 20ms | 60ms | 275ms | 27,000ms |
@@ -182,6 +182,7 @@ Separate from the JavaScript benchmark, we also compare CLI performance against 
 | Tool | Language | Install |
 |------|----------|---------|
 | mdream | Node.js | `npm i -g mdream` |
+| mdream (Bun binary) | JS → compiled | `bun build --compile` (auto-built by benchmark) |
 | [html-to-markdown](https://github.com/nickmass/html2md-rs) | Rust | `cargo install html-to-markdown-cli` |
 | [html2md](https://github.com/JohannesKaufmann/html-to-markdown) | Go | `go install github.com/JohannesKaufmann/html-to-markdown/v2/cmd/html2md@latest` |
 
@@ -208,8 +209,11 @@ Large HTML (1.8 MB)
 
 **Important:** CLI benchmarks include process startup overhead:
 - **Node.js startup**: ~40ms baseline before any code runs
-- **Bun startup**: ~30ms (faster than Node)
+- **Bun runtime startup**: ~30ms (faster than Node)
+- **Bun compiled binary**: ~5-10ms (eliminates most JS runtime overhead)
 - **Rust startup**: ~1-2ms (compiled binary)
+
+The Bun compiled binary (`bun build --compile`) provides the fairest comparison against Rust/Go by eliminating JS runtime startup overhead. The benchmark script automatically compiles this binary when Bun is available.
 
 For the **large file** where startup is less significant:
 - Rust actual conversion: ~28ms
@@ -219,6 +223,7 @@ For the **large file** where startup is less significant:
 **Bun vs Node.js:**
 - Small files: Bun 25% faster (startup matters more)
 - Large files: Similar (~6% faster)
+- Bun binary: Closest to actual conversion speed (minimal startup)
 
 ### When to Use What
 
@@ -226,7 +231,7 @@ For the **large file** where startup is less significant:
 |----------|----------------|
 | **JavaScript/Browser apps** | mdream (native, no FFI overhead) |
 | **CLI pipelines (speed critical)** | Rust html-to-markdown (fastest) |
-| **CLI pipelines (JS ecosystem)** | mdream + Bun (25% faster than Node) |
+| **CLI pipelines (JS ecosystem)** | mdream Bun binary (near-native startup) |
 | **Streaming large files** | mdream (streaming support) |
 | **LLM-optimized output** | mdream (minimal preset, token reduction) |
 
