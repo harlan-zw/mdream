@@ -35,8 +35,9 @@ function stringToStream(str: string): ReadableStream<string> {
 
 async function consumeStream(html: string) {
   const stream = streamHtmlToMarkdown(stringToStream(html))
-  // eslint-disable-next-line no-empty,@typescript-eslint/no-unused-vars
-  for await (const _ of stream) {}
+  for await (const _ of stream) {
+    // Consume stream without doing anything with the output
+  }
 }
 
 // Load test fixtures
