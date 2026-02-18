@@ -26,6 +26,7 @@ export interface CrawlOptions {
   descriptionOverride?: string
   verbose?: boolean
   skipSitemap?: boolean
+  allowSubdomains?: boolean
   onPage?: (page: PageData) => Promise<void> | void
 }
 
