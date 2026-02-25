@@ -132,7 +132,10 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
         ],
         initialValue: 'http',
       }),
-
+      singlePage: () => p.confirm({
+        message: 'Crawl only the specified page (no link following)?',
+        initialValue: false,
+      }),
     },
     {
       onCancel: () => {
@@ -193,10 +196,10 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
     `URLs: ${urls.join(', ')}`,
     `Output: ${outputDir}`,
     `Driver: ${crawlerOptions.driver}`,
-    `Max pages: Unlimited`,
-    `Follow links: Yes (depth 3)`,
+    `Max pages: ${crawlerOptions.singlePage ? '1' : 'Unlimited'}`,
+    `Follow links: ${crawlerOptions.singlePage ? 'No (single page mode)' : 'Yes (depth 3)'}`,
     `Output formats: ${outputFormats.join(', ')}`,
-    `Sitemap discovery: ${advancedOptions.skipSitemap ? 'Skipped' : 'Automatic'}`,
+    `Sitemap discovery: ${advancedOptions.skipSitemap || crawlerOptions.singlePage ? 'Skipped' : 'Automatic'}`,
     inferredOrigin && `Origin: ${inferredOrigin}`,
   ].filter(Boolean)
 
@@ -212,15 +215,15 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
     outputDir: resolve(outputDir),
     driver: crawlerOptions.driver as 'http' | 'playwright',
     maxRequestsPerCrawl: Number.MAX_SAFE_INTEGER, // Unlimited pages
-    followLinks: true, // Always follow links
+    followLinks: !crawlerOptions.singlePage,
     generateLlmsTxt: advancedOptions.outputFormats.includes('llms.txt'),
     generateLlmsFullTxt: advancedOptions.outputFormats.includes('llms-full.txt'),
     generateIndividualMd: advancedOptions.outputFormats.includes('markdown'),
     origin: inferredOrigin,
     globPatterns,
     verbose: false,
-    maxDepth: 3,
-    skipSitemap: advancedOptions.skipSitemap,
+    maxDepth: crawlerOptions.singlePage ? 0 : 3,
+    skipSitemap: advancedOptions.skipSitemap || crawlerOptions.singlePage,
   }
 }
 
@@ -265,6 +268,7 @@ Options:
   --crawl-delay <seconds>     Crawl delay in seconds
   --exclude <pattern>         Exclude URLs matching glob patterns (can be used multiple times)
   --skip-sitemap              Skip sitemap.xml and robots.txt discovery
+  --single-page               Crawl only the specified URL without following links
   -v, --verbose               Enable verbose logging
   -h, --help                  Show this help message
   --version                   Show version number
@@ -277,6 +281,7 @@ Examples:
   @mdream/crawl -u example.com --exclude "*/admin/*" --exclude "*/api/*"
   @mdream/crawl -u example.com --verbose
   @mdream/crawl -u example.com --skip-sitemap
+  @mdream/crawl -u example.com --driver playwright --single-page
 `)
     process.exit(0)
   }
@@ -432,6 +437,9 @@ Examples:
   // Check for skip-sitemap flag
   const skipSitemap = args.includes('--skip-sitemap')
 
+  // Check for single-page flag
+  const singlePage = args.includes('--single-page')
+
   // Warn if using skip-sitemap with wildcard URLs
   if (skipSitemap && parsed.isGlob) {
     p.log.warn('Warning: Using --skip-sitemap with glob URLs may not discover all matching pages.')
@@ -442,8 +450,8 @@ Examples:
     outputDir: resolve(getArgValue('--output') || getArgValue('-o') || 'output'),
     driver: (driver as 'http' | 'playwright') || 'http',
     maxRequestsPerCrawl: Number.parseInt(maxPagesStr || String(Number.MAX_SAFE_INTEGER)),
-    followLinks: true,
-    maxDepth: depth,
+    followLinks: !singlePage,
+    maxDepth: singlePage ? 0 : depth,
     generateLlmsTxt: artifacts.includes('llms.txt'),
     generateLlmsFullTxt: artifacts.includes('llms-full.txt'),
     generateIndividualMd: artifacts.includes('markdown'),
@@ -454,7 +462,7 @@ Examples:
     crawlDelay: crawlDelayStr ? Number.parseInt(crawlDelayStr) : undefined,
     exclude: excludePatterns.length > 0 ? excludePatterns : undefined,
     verbose,
-    skipSitemap,
+    skipSitemap: skipSitemap || singlePage,
   }
 }
 
@@ -484,6 +492,7 @@ async function main() {
       `Output: ${options.outputDir}`,
       `Driver: ${options.driver}`,
       `Depth: ${options.maxDepth}`,
+      `Follow links: ${options.followLinks ? 'Yes' : 'No'}`,
       `Formats: ${formats.join(', ')}`,
       options.exclude && options.exclude.length > 0 && `Exclude: ${options.exclude.join(', ')}`,
       options.skipSitemap && `Skip sitemap: Yes`,
