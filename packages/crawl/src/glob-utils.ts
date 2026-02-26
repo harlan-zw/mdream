@@ -154,6 +154,13 @@ export function isUrlExcluded(url: string, excludePatterns: string[]): boolean {
 }
 
 /**
+ * Check if a string is valid sitemap XML content (not an HTML page or other non-sitemap response)
+ */
+export function isValidSitemapXml(content: string): boolean {
+  return content.includes('<urlset') || content.includes('<sitemapindex')
+}
+
+/**
  * Validate glob pattern syntax
  */
 export function validateGlobPattern(pattern: string): string | undefined {
