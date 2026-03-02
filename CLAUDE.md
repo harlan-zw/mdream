@@ -241,7 +241,7 @@ The package provides multiple entry points for different use cases:
 - Always add tests for new plugins in `test/unit/plugins/`
 - Run specific test categories: `pnpm test test/unit/plugins/`
 
-# important-instruction-reminders
+## Important Instruction Reminders
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
 ALWAYS prefer editing an existing file to creating a new one.

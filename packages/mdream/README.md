@@ -545,12 +545,3 @@ Custom notes
 
 Licensed under the [MIT license](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md).
 
-<!-- Badges -->
-[npm-version-src]: https://img.shields.io/npm/v/mdream/latest.svg?style=flat&colorA=18181B&colorB=4C9BE0
-[npm-version-href]: https://npmjs.com/package/mdream
-
-[npm-downloads-src]: https://img.shields.io/npm/dm/mdream.svg?style=flat&colorA=18181B&colorB=4C9BE0
-[npm-downloads-href]: https://npmjs.com/package/mdream
-
-[license-src]: https://img.shields.io/github/license/harlan-zw/mdream.svg?style=flat&colorA=18181B&colorB=4C9BE0
-[license-href]: https://github.com/harlan-zw/mdream/blob/main/LICENSE.md

@@ -101,7 +101,7 @@ pnpm bench
 
 ### Expected Output
 
-```
+```text
  ✓ bench/compare.bench.ts > small HTML (166 KB - Wikipedia)
      name                hz      min      max     mean      p75      p99    rme  samples
    · mdream           304.53   2.98ms   5.15ms   3.28ms   3.36ms   4.82ms  ±1.5%     153
@@ -188,7 +188,7 @@ Separate from the JavaScript benchmark, we also compare CLI performance against 
 
 ### CLI Results
 
-```
+```text
 Small HTML (166 KB)
   html-to-markdown (Rust)    2.9 ms
   mdream (Bun)              37.0 ms   (13x slower)
