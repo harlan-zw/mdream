@@ -39,6 +39,8 @@ import {
   TAG_EM,
   TAG_EMBED,
   TAG_FIELDSET,
+  TAG_FIGCAPTION,
+  TAG_FIGURE,
   TAG_FOOTER,
   TAG_FORM,
   TAG_H1,
@@ -801,5 +803,15 @@ export const tagHandlers: Record<number, TagHandler> = {
     enter: () => '<dd>',
     exit: () => '</dd>',
     spacing: [0, 1],
+  },
+
+  [TAG_FIGURE]: {},
+
+  [TAG_FIGCAPTION]: {
+    enter: () => MARKDOWN_EMPHASIS,
+    exit: () => MARKDOWN_EMPHASIS,
+    collapsesInnerWhiteSpace: true,
+    spacing: NO_SPACING,
+    isInline: true,
   },
 }
