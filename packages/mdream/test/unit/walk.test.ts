@@ -1,8 +1,8 @@
 import type { NodeEvent } from '../../src/types.js'
+import { NodeEventEnter } from '@mdream/engine-js'
 import { describe, expect, it } from 'vitest'
-import { NodeEventEnter } from '../../src/const.js'
+import { parseHtml } from '../../../engine-js/src/parse.ts'
 import { htmlToMarkdown } from '../../src/index.js'
-import { parseHtml } from '../../src/parse.js'
 
 describe('hTML walking', () => {
   it('correctly tracks element depth in nested structures', () => {

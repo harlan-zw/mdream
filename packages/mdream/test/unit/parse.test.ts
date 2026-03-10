@@ -1,7 +1,7 @@
 import type { ElementNode, Node, TextNode } from '../../src/types'
+import { ELEMENT_NODE, NodeEventEnter, NodeEventExit, TEXT_NODE } from '@mdream/engine-js'
 import { describe, expect, it } from 'vitest'
-import { ELEMENT_NODE, NodeEventEnter, NodeEventExit, TEXT_NODE } from '../../src/const'
-import { parseHtml } from '../../src/parse'
+import { parseHtml } from '../../../engine-js/src/parse.ts'
 
 // Type guards for better type safety
 function isElementNode(node: Node): node is ElementNode {

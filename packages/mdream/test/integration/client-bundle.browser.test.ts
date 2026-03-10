@@ -23,10 +23,11 @@ describe('mdream browser compatibility', () => {
   it('should convert HTML to markdown and display correctly in DOM', async () => {
     // Dynamically import mdream to test actual module loading in browser
     const { htmlToMarkdown } = await import('../../src/index.ts')
+    const { createJavaScriptEngine } = await import('@mdream/engine-js')
 
     // Test basic HTML to Markdown conversion
     const simpleHtml = '<p>Hello <strong>world</strong>!</p>'
-    const result = htmlToMarkdown(simpleHtml)
+    const result = htmlToMarkdown(simpleHtml, { engine: createJavaScriptEngine() })
 
     // Render to DOM and verify
     renderMarkdown(result)
@@ -47,7 +48,7 @@ describe('mdream browser compatibility', () => {
       </div>
     `
 
-    const complexResult = htmlToMarkdown(complexHtml)
+    const complexResult = htmlToMarkdown(complexHtml, { engine: createJavaScriptEngine() })
     renderMarkdown(complexResult)
 
     // Verify all elements are properly converted and displayed
@@ -69,7 +70,7 @@ describe('mdream browser compatibility', () => {
     document.body.appendChild(statusDiv)
 
     // Test core functionality availability
-    const coreApis = ['htmlToMarkdown', 'parseHtml', 'MarkdownProcessor', 'createPlugin']
+    const coreApis = ['htmlToMarkdown', 'parseHtml', 'createMarkdownProcessor', 'createPlugin']
     const coreResults = coreApis.map(api => `✓ ${api}: ${api in mdreamModule ? 'available' : 'missing'}`)
 
     // Test Node.js API exclusion
@@ -90,10 +91,11 @@ describe('mdream browser compatibility', () => {
 
   it('should handle browser environment edge cases in DOM', async () => {
     const { htmlToMarkdown } = await import('../../src/index.ts')
+    const { createJavaScriptEngine } = await import('@mdream/engine-js')
 
     // Test with special characters and entities
     const entityHtml = '<p>Test &amp; HTML entities like &lt;script&gt; and &quot;quotes&quot;</p>'
-    const entityResult = htmlToMarkdown(entityHtml)
+    const entityResult = htmlToMarkdown(entityHtml, { engine: createJavaScriptEngine() })
 
     renderMarkdown(entityResult)
     await expect.element(page.getByText('Test & HTML entities')).toBeInTheDocument()
@@ -102,7 +104,7 @@ describe('mdream browser compatibility', () => {
 
     // Test with malformed HTML (browser tolerant)
     const malformedHtml = '<p>Unclosed paragraph<div>Mixed content<span>nested</span></div>'
-    const malformedResult = htmlToMarkdown(malformedHtml)
+    const malformedResult = htmlToMarkdown(malformedHtml, { engine: createJavaScriptEngine() })
 
     renderMarkdown(malformedResult)
     await expect.element(page.getByText('Unclosed paragraph')).toBeInTheDocument()
@@ -112,6 +114,7 @@ describe('mdream browser compatibility', () => {
 
   it('should work with plugins in browser environment', async () => {
     const { htmlToMarkdown, createPlugin } = await import('../../src/index.ts')
+    const { createJavaScriptEngine } = await import('@mdream/engine-js')
 
     // Create a simple plugin that transforms certain elements
     const testPlugin = createPlugin({
@@ -129,7 +132,8 @@ describe('mdream browser compatibility', () => {
 
     const htmlWithMark = '<p>This is <mark>highlighted text</mark> in a paragraph.</p>'
     const result = htmlToMarkdown(htmlWithMark, {
-      plugins: [testPlugin],
+      engine: createJavaScriptEngine(),
+      transforms: [testPlugin],
     })
 
     renderMarkdown(result)
@@ -138,6 +142,7 @@ describe('mdream browser compatibility', () => {
 
   it('should handle interactive HTML-to-Markdown conversion', async () => {
     const { htmlToMarkdown } = await import('../../src/index.ts')
+    const { createJavaScriptEngine } = await import('@mdream/engine-js')
 
     // Create an interactive demo in the DOM
     document.body.innerHTML = `
@@ -174,7 +179,7 @@ describe('mdream browser compatibility', () => {
 
     convertBtn.addEventListener('click', () => {
       const html = htmlInput.value
-      const markdown = htmlToMarkdown(html)
+      const markdown = htmlToMarkdown(html, { engine: createJavaScriptEngine() })
       markdownOutput.textContent = markdown
     })
 

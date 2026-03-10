@@ -36,7 +36,7 @@ declare module 'nitropack/types' {
   interface NitroRuntimeHooks {
     'mdream:negotiate': (context: import('${typesPath}').MdreamNegotiateContext) => void | Promise<void>
     'mdream:markdown': (context: import('${typesPath}').MdreamMarkdownContext) => void | Promise<void>
-    'mdream:config': (config: import('mdream').HTMLToMarkdownOptions) => void | Promise<void>
+    'mdream:config': (config: import('mdream').MdreamOptions) => void | Promise<void>
   }
 }
 
@@ -44,7 +44,7 @@ declare module 'nitropack' {
   interface NitroRuntimeHooks {
     'mdream:negotiate': (context: import('${typesPath}').MdreamNegotiateContext) => void | Promise<void>
     'mdream:markdown': (context: import('${typesPath}').MdreamMarkdownContext) => void | Promise<void>
-    'mdream:config': (config: import('mdream').HTMLToMarkdownOptions) => void | Promise<void>
+    'mdream:config': (config: import('mdream').MdreamOptions) => void | Promise<void>
   }
 }
 

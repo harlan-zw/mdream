@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-> ☁️ The fastest HTML to markdown convertor built with JavaScript. Optimized for LLMs and supports streaming.
+> ☁️ The fastest HTML to markdown convertor built with JavaScript and Rust. Optimized for LLMs and supports streaming.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
@@ -23,19 +23,30 @@
 - 🧠 Custom built HTML to Markdown Convertor Optimized for LLMs (~50% fewer tokens)
 - 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
 - ✂️ LangChain compatible [Markdown Text Splitter](./packages/mdream/README.md#markdown-splitting) for single-pass chunking.
-- 🚀 Ultra Fast: [Fastest pure JS](#benchmarks) - 3x faster than Turndown, converts 1.8MB HTML in ~60ms.
+- 🚀 Ultra Fast: [Fastest pure JS & native rust](#benchmarks) - 3x faster than Turndown, converts 1.8MB HTML in ~48ms (JS) and ~7ms (Rust).
 - ⚡ Tiny: 6kB gzip, zero dependency core.
 - ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [Docker](#docker), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), & more.
 - 🔌 Extensible: Plugin system for customizing and extending functionality.
 
 ## Benchmarks
 
-| Input Size | html-to-markdown (Rust) | mdream | Turndown | node-html-markdown |
-|------------|-------------------------|--------|----------|-------------------|
-| **160 KB** | 🦀 1.4ms | 🏆 **3.2ms** | 11.7ms *(3.7x)* | 15.0ms *(4.7x)* |
-| **420 KB** | 🦀 1.9ms | 🏆 **6.6ms** | 14.0ms *(2.1x)* | 18.1ms *(2.7x)* |
-| **1.8 MB** | 🦀 21ms | 🏆 **60ms** | 295ms *(4.9x)* | 💀 28,600ms *(477x)* |
-| **1.8 MB (stream)** | ❌ | 🏆 **139ms** | ❌ | ❌ |
+**NAPI (Node.js bindings):**
+
+| Input Size | mdream (rust) | mdream (js) | html-to-markdown (rust) | Turndown (js) | node-html-markdown (js) |
+|------------|---------------|-------------|-------------------------|---------------|-------------------------|
+| **160 KB** | 🏆 **0.65ms** | 2.83ms | 🦀 4.30ms | 12.4ms *(19.1x)* | 15.8ms *(24.3x)* |
+| **420 KB** | 🏆 **1.98ms** | 5.25ms | 🦀 9.40ms | 19.3ms *(9.7x)* | 23.9ms *(12.1x)* |
+| **1.8 MB** | 🏆 **6.82ms** | 47.9ms | 🦀 81.0ms | 260ms *(38.1x)* | 💀 25,518ms *(3740x)* |
+| **160 KB (stream)**| 🏆 **1.97ms** | 3.51ms | ❌ | ❌ | ❌ |
+| **1.8 MB (stream)**| 🏆 **22.9ms** | 127ms | ❌ | ❌ | ❌ |
+
+**Native Rust (no Node.js overhead):**
+
+| Input Size | mdream | [htmd](https://crates.io/crates/htmd) | [html2md](https://crates.io/crates/html2md) | [html2md-rs](https://crates.io/crates/html2md-rs) | [mdka](https://crates.io/crates/mdka) | [html_to_markdown](https://crates.io/crates/html_to_markdown) | [fast_html2md](https://crates.io/crates/fast_html2md) |
+|------------|--------|------|---------|-----------|------|-----------------|-------------|
+| **166 KB** | 🏆 **1.17ms** | 3.12ms *(2.7x)* | 3.33ms *(2.9x)* | 💀 panicked | 2.70ms *(2.3x)* | 2.05ms *(1.8x)* | 2.32ms *(2.2x)* |
+| **420 KB** | 🏆 **1.75ms** | 4.01ms *(2.3x)* | 4.81ms *(2.8x)* | 1.59ms *(0.9x)* | 3.40ms *(1.9x)* | 2.48ms *(1.4x)* | 1.78ms *(1.0x)* |
+| **1.8 MB** | 🏆 **3.57ms** | 29.3ms *(8.2x)* | 💀 >30s | 47.8ms *(13.4x)* | 33.7ms *(9.4x)* | 20.0ms *(5.6x)* | 27.3ms *(4.0x)* |
 
 See the [Benchmark methodology](./bench/README.md) for more details.
 
@@ -84,10 +95,17 @@ pnpm add mdream
 ### Basic Usage
 
 ```ts
+import { createRustEngine } from '@mdream/engine-rust'
 import { htmlToMarkdown } from 'mdream'
 
+// Uses the default JavaScript engine
 const markdown = htmlToMarkdown('<h1>Hello World</h1>')
 console.log(markdown) // # Hello World
+
+// Or use the ultra-fast Rust engine
+const perfMarkdown = htmlToMarkdown('<h1>Hello World</h1>', {
+  engine: createRustEngine()
+})
 ```
 
 **Core Functions:**

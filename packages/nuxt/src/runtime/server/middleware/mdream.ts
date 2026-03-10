@@ -1,8 +1,9 @@
 import type { H3Event } from 'h3'
-import type { HTMLToMarkdownOptions } from 'mdream'
+import type { MdreamOptions } from 'mdream'
 import type { ModuleRuntimeConfig } from '../../../types'
 import type { MdreamMarkdownContext, MdreamNegotiateContext } from '../../types'
 import { withSiteUrl } from '#site-config/server/composables/utils'
+import { createJavaScriptEngine } from '@mdream/engine-js'
 import { consola } from 'consola'
 import { createError, defineEventHandler, getHeader, setHeader } from 'h3'
 import { htmlToMarkdown } from 'mdream'
@@ -37,21 +38,19 @@ async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRu
     },
   })
 
-  let options: HTMLToMarkdownOptions = {
+  let options: MdreamOptions = {
     origin: url,
+    engine: createJavaScriptEngine(),
     ...config.mdreamOptions,
-  }
+  } as MdreamOptions
 
   // Apply preset if specified
   if (config.mdreamOptions?.preset === 'minimal') {
     options = withMinimalPreset(options)
-    // Manually insert extraction plugin at the beginning, before all preset plugins
-    options.plugins = [extractPlugin, ...(options.plugins || [])]
   }
-  else {
-    // For non-preset mode, just add extraction plugin to existing plugins
-    options.plugins = [extractPlugin, ...(options.plugins || [])]
-  }
+
+  // Add extraction plugin as a transform (JS-engine-only)
+  options.transforms = [extractPlugin, ...(options.transforms || [])]
 
   await nitroApp.hooks.callHook('mdream:config', options)
   let markdown = htmlToMarkdown(html, options)

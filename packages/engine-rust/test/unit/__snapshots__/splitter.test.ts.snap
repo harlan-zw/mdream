@@ -1,0 +1,374 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`htmlToMarkdownSplitChunks > edge cases > handles blockquotes 1`] = `
+"## Quotes
+
+> This is a quote Multiple paragraphs"
+`;
+
+exports[`htmlToMarkdownSplitChunks > edge cases > handles images in content 1`] = `
+"Check this out:
+
+![Test Image](https://example.com/test.png)
+
+Nice!"
+`;
+
+exports[`htmlToMarkdownSplitChunks > edge cases > handles nested lists with headers 1`] = `
+"- Item 1
+  - Nested 1
+  - Nested 2
+- Item 2"
+`;
+
+exports[`htmlToMarkdownSplitChunks > edge cases > handles tables in chunks 1`] = `
+"## Data Table
+
+| Name | Value |
+| --- | --- |
+| A | 1 |
+| B | 2 |"
+`;
+
+exports[`htmlToMarkdownSplitChunks > handles complex HTML with multiple features 1`] = `
+[
+  {
+    "content": "Introduction text
+
+
+Install via npm:
+
+\`\`\`bash
+npm install mdream
+\`\`\`",
+    "metadata": {
+      "code": "bash",
+      "headers": {
+        "h1": "Documentation",
+        "h2": "Installation",
+      },
+      "loc": {
+        "lines": {
+          "from": 1,
+          "to": 13,
+        },
+      },
+    },
+  },
+  {
+    "content": "Basic example:
+
+\`\`\`javascript
+        import { htmlToMarkdown } from 'mdream'
+        const md = htmlToMarkdown(html)
+\`\`\`",
+    "metadata": {
+      "code": "javascript",
+      "headers": {
+        "h1": "Documentation",
+        "h2": "Usage",
+      },
+      "loc": {
+        "lines": {
+          "from": 13,
+          "to": 22,
+        },
+      },
+    },
+  },
+  {
+    "content": "---",
+    "metadata": {
+      "headers": {
+        "h1": "Documentation",
+        "h2": "Usage",
+      },
+      "loc": {
+        "lines": {
+          "from": 22,
+          "to": 24,
+        },
+      },
+    },
+  },
+  {
+    "content": "More advanced features",
+    "metadata": {
+      "headers": {
+        "h1": "Documentation",
+        "h2": "Advanced",
+      },
+      "loc": {
+        "lines": {
+          "from": 24,
+          "to": 28,
+        },
+      },
+    },
+  },
+]
+`;
+
+exports[`htmlToMarkdownSplitChunks > maintains chunk overlap 1`] = `
+[
+  {
+    "content": "Line one content. Line one content. Line one content. Line one content. Line one content. Line one",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 1,
+          "to": 1,
+        },
+      },
+    },
+  },
+  {
+    "content": "t. Line one content. Line one content. Line one content. Line one content. Line one content. Line",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 1,
+          "to": 1,
+        },
+      },
+    },
+  },
+  {
+    "content": "ntent. Line one content. Line one content.",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 1,
+          "to": 3,
+        },
+      },
+    },
+  },
+  {
+    "content": "e content. Line one content.
+
+Line two content. Line two content. Line two content. Line two",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 3,
+          "to": 5,
+        },
+      },
+    },
+  },
+  {
+    "content": "t. Line two content. Line two content. Line two content. Line two content. Line two content. Line",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 5,
+          "to": 5,
+        },
+      },
+    },
+  },
+  {
+    "content": "ntent. Line two content. Line two content. Line two content. Line two content.",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 5,
+          "to": 7,
+        },
+      },
+    },
+  },
+  {
+    "content": "o content. Line two content.
+
+Line three content. Line three content. Line three content. Line three",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 7,
+          "to": 9,
+        },
+      },
+    },
+  },
+  {
+    "content": "ine three content. Line three content. Line three content. Line three content. Line three content. Line three content. Line three content. Line three content.",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 9,
+          "to": 11,
+        },
+      },
+    },
+  },
+]
+`;
+
+exports[`htmlToMarkdownSplitChunks > overlap behavior > applies correct overlap amount on size splits 1`] = `
+[
+  {
+    "content": "test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 1,
+          "to": 1,
+        },
+      },
+    },
+  },
+  {
+    "content": "test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 1,
+          "to": 1,
+        },
+      },
+    },
+  },
+  {
+    "content": "test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 1,
+          "to": 3,
+        },
+      },
+    },
+  },
+]
+`;
+
+exports[`htmlToMarkdownSplitChunks > overlap behavior > applies overlap only on size-based splits 1`] = `
+[
+  {
+    "content": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 1,
+          "to": 1,
+        },
+      },
+    },
+  },
+  {
+    "content": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 1,
+          "to": 3,
+        },
+      },
+    },
+  },
+  {
+    "content": "ord word word word word word word word word word word word word word word word word word word word
+
+word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 3,
+          "to": 5,
+        },
+      },
+    },
+  },
+  {
+    "content": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 5,
+          "to": 7,
+        },
+      },
+    },
+  },
+]
+`;
+
+exports[`htmlToMarkdownSplitChunks > withMinimalPreset integration > filters out navigation and footer content 1`] = `
+"# Main Content
+
+This is the actual content"
+`;
+
+exports[`htmlToMarkdownSplitChunks > withMinimalPreset integration > handles complex real-world HTML structure 1`] = `
+[
+  {
+    "content": "---
+title: "Blog Post - Example Site"
+meta:
+  description: "An example blog post"
+---
+
+# **My Blog Post**
+
+Published on Jan 1, 2024
+
+## Introduction
+
+This is the introduction paragraph with some **bold text**.",
+    "metadata": {
+      "headers": {
+        "h1": "My Blog Post",
+        "h2": "Introduction",
+      },
+      "loc": {
+        "lines": {
+          "from": 1,
+          "to": 15,
+        },
+      },
+    },
+  },
+  {
+    "content": "## Main Content
+
+Here's the main content of the post.
+
+\`\`\`javascript
+const example = true;
+\`\`\`",
+    "metadata": {
+      "code": "javascript",
+      "headers": {
+        "h1": "My Blog Post",
+        "h2": "Main Content",
+      },
+      "loc": {
+        "lines": {
+          "from": 15,
+          "to": 23,
+        },
+      },
+    },
+  },
+  {
+    "content": "## Conclusion
+
+Final thoughts here.",
+    "metadata": {
+      "headers": {
+        "h1": "My Blog Post",
+        "h2": "Conclusion",
+        "h3": "Related Posts",
+      },
+      "loc": {
+        "lines": {
+          "from": 23,
+          "to": 27,
+        },
+      },
+    },
+  },
+]
+`;

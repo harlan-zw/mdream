@@ -60,7 +60,7 @@ export function extractMetadata(html: string, url: string): PageMetadata {
 
   // Process HTML to extract metadata
   htmlToMarkdown(html, {
-    plugins: [extractionPluginInstance],
+    transforms: [extractionPluginInstance],
     origin: new URL(url).origin,
   })
 

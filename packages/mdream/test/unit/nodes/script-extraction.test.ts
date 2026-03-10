@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown } from '../../../src/index.ts'
-import { createPlugin } from '../../../src/pluggable/plugin.ts'
+import { createPlugin } from '../../../src/plugins'
 
 describe('script content extraction', () => {
   it('should extract JSON content from Nuxt data script', () => {
@@ -112,7 +112,7 @@ describe('script content extraction', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [scriptExtractionPlugin],
+      transforms: [scriptExtractionPlugin],
     })
 
     // Should extract the script content
@@ -182,7 +182,7 @@ describe('script content extraction', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [scriptExtractionPlugin],
+      transforms: [scriptExtractionPlugin],
     })
 
     expect(extractedScripts).toHaveLength(1)
@@ -233,7 +233,7 @@ describe('script content extraction', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [scriptExtractionPlugin],
+      transforms: [scriptExtractionPlugin],
     })
 
     expect(extractedScripts).toHaveLength(1)

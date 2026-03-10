@@ -60,3 +60,8 @@ storage
 .fixtures
 
 **/.claude/settings.local.json
+
+# Skilld references (recreated by `skilld install`)
+.skilld
+bench/rust-compare/target/
+bench/rust-compare/Cargo.lock

@@ -83,7 +83,7 @@ describe('withMinimalPreset', () => {
       },
     }
 
-    const options = withMinimalPreset({ plugins: [customPlugin] })
+    const options = withMinimalPreset({ transforms: [customPlugin] })
     const markdown = htmlToMarkdown('<h1>Test</h1>', options)
     expect(customPluginCalled).toBe(true)
     expect(markdown).toContain('Test')

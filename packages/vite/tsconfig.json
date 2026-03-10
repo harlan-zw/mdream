@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "allowImportingTsExtensions": false,
     "baseUrl": ".",
     "paths": {
       "mdream": ["../mdream/src/index.ts"],

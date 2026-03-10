@@ -1,22 +1,56 @@
-import type { HTMLToMarkdownOptions } from './types'
-import { createMarkdownProcessor } from './markdown-processor.ts'
+import type { MarkdownEngine } from '@mdream/engine-js'
+import type { MdreamOptions } from './types.js'
+import { createJavaScriptEngine } from '@mdream/engine-js'
+
+let defaultEngine: MarkdownEngine | undefined
+
+function getDefaultEngine(): MarkdownEngine {
+  if (!defaultEngine) {
+    defaultEngine = createJavaScriptEngine()
+  }
+  return defaultEngine
+}
 
 export function htmlToMarkdown(
   html: string,
-  options: HTMLToMarkdownOptions = {},
+  options: MdreamOptions = {},
 ): string {
-  const processor = createMarkdownProcessor(options)
-
-  // Use streaming approach to properly integrate plugins with processor state
-  processor.processHtml(html)
-
-  return processor.getMarkdown()
+  // Transforms require the JS engine — create one with transforms baked in
+  if (options.transforms?.length) {
+    return createJavaScriptEngine(options.transforms).htmlToMarkdown(html, options)
+  }
+  const engine = options.engine || getDefaultEngine()
+  return engine.htmlToMarkdown(html, options)
 }
 
-export { TagIdMap } from './const'
-export { MarkdownProcessor } from './markdown-processor'
-export { parseHtml } from './parse'
-export { createPlugin } from './pluggable/plugin'
+export function streamHtmlToMarkdown(
+  htmlStream: ReadableStream<Uint8Array | string> | null,
+  options: MdreamOptions = {},
+): AsyncIterable<string> {
+  if (options.transforms?.length) {
+    return createJavaScriptEngine(options.transforms).streamHtmlToMarkdown(htmlStream, options)
+  }
+  const engine = options.engine || getDefaultEngine()
+  return engine.streamHtmlToMarkdown(htmlStream, options)
+}
 
-export { streamHtmlToMarkdown } from './stream'
-export type * from './types'
+export { createEngine, createRustEngine } from './engine.js'
+export type { MdreamOptions } from './types.js'
+
+// Engine factories
+export { createJavaScriptEngine } from '@mdream/engine-js'
+
+// Types
+export type {
+  ElementNode,
+  EngineOptions,
+  MarkdownChunk,
+  MarkdownEngine,
+  Node,
+  NodeEvent,
+  Plugin,
+  PluginConfig,
+  PluginContext,
+  SplitterOptions,
+  TextNode,
+} from '@mdream/engine-js'

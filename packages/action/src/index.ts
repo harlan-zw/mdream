@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { getInput, info, setFailed, setOutput } from '@actions/core'
 import { generateLlmsTxtArtifacts } from 'mdream/llms-txt'
+import { createJavaScriptEngine } from '@mdream/engine-js'
 
 export async function main() {
   try {
@@ -31,6 +32,7 @@ export async function main() {
       origin,
       generateFull: true,
       generateMarkdown: true,
+      engine: (await createJavaScriptEngine()),
     })
 
     // Ensure output directory exists

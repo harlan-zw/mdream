@@ -1,6 +1,6 @@
 import { ReadableStream } from 'node:stream/web'
 import { describe, expect, it, vi } from 'vitest'
-import { streamHtmlToMarkdown } from '../../../src/stream'
+import { streamHtmlToMarkdown } from '../../../src/index'
 
 const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/

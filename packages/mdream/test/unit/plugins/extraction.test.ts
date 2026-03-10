@@ -1,10 +1,9 @@
 import type { ExtractedElement } from '../../../src/plugins/extraction.ts'
-import type { MdreamRuntimeState } from '../../../src/types.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown } from '../../../src/index.ts'
-import { extractionPlugin } from '../../../src/plugins/extraction.ts'
+import { extractionPlugin } from '../../../src/plugins'
 
 describe('extraction plugin', () => {
   it('should extract elements by tag selector', () => {
@@ -27,7 +26,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      plugins: [plugin],
+      transforms: [plugin],
     })
 
     expect(extractedH2s).toHaveLength(2)
@@ -55,7 +54,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      plugins: [plugin],
+      transforms: [plugin],
     })
 
     expect(extractedContent).toHaveLength(2)
@@ -84,7 +83,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      plugins: [plugin],
+      transforms: [plugin],
     })
 
     expect(extractedHeader).toHaveLength(1)
@@ -117,7 +116,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      plugins: [plugin],
+      transforms: [plugin],
     })
 
     expect(extractedImages).toHaveLength(2)
@@ -162,7 +161,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      plugins: [plugin],
+      transforms: [plugin],
     })
 
     expect(extractedArticles).toHaveLength(1)
@@ -217,7 +216,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      plugins: [plugin],
+      transforms: [plugin],
     })
 
     expect(results.titles).toHaveLength(1)
@@ -266,7 +265,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      plugins: [plugin],
+      transforms: [plugin],
     })
 
     expect(extractedFeaturedCards).toHaveLength(1)
@@ -301,7 +300,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      plugins: [plugin],
+      transforms: [plugin],
     })
 
     expect(extractedDivs).toHaveLength(4)
@@ -360,7 +359,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      plugins: [plugin],
+      transforms: [plugin],
     })
 
     // Verify title
@@ -436,7 +435,7 @@ describe('extraction plugin', () => {
 
     const extractedElements: ExtractedWithContext[] = []
 
-    const extractCallback = (element: ExtractedElement, state: MdreamRuntimeState) => {
+    const extractCallback = (element: ExtractedElement, state: { depth?: number, options?: unknown, context?: unknown, currentNode?: { name: string } }) => {
       extractedElements.push({
         element,
         depth: state.depth || 0,
@@ -453,7 +452,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      plugins: [plugin],
+      transforms: [plugin],
     })
 
     expect(extractedElements).toHaveLength(4) // 1 h1, 1 p, 2 a tags
@@ -484,7 +483,7 @@ describe('extraction plugin', () => {
   it ('link stylesheet crossorigin', async () => {
     let link
     htmlToMarkdown('<head><link rel="stylesheet" href="/_nuxt/entry.BqmaZWpx.css" crossorigin></head>', {
-      plugins: [
+      transforms: [
         extractionPlugin({
           link: (_link) => {
             link = _link
@@ -507,7 +506,7 @@ describe('extraction plugin', () => {
     let title: string | undefined
     let description: string | undefined
     htmlToMarkdown(fixtureHtml, {
-      plugins: [
+      transforms: [
         extractionPlugin({
           title(el) {
             title = el.textContent

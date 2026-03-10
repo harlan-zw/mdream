@@ -1,13 +1,14 @@
-import type { HTMLToMarkdownOptions } from './types.ts'
+import type { MdreamOptions } from './types.js'
 import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { cac } from 'cac'
 import { dirname, join, resolve } from 'pathe'
-import { generateLlmsTxtArtifacts } from './llms-txt.ts'
-import { withMinimalPreset } from './preset/minimal.ts'
-import { streamHtmlToMarkdown } from './stream.ts'
+import { createEngine } from './engine.js'
+import { streamHtmlToMarkdown } from './index.js'
+import { generateLlmsTxtArtifacts } from './llms-txt.js'
+import { withMinimalPreset } from './preset/minimal.js'
 
 /**
  * CLI options interface
@@ -15,6 +16,7 @@ import { streamHtmlToMarkdown } from './stream.ts'
 interface CliOptions {
   origin?: string
   preset?: string
+  engine?: 'rust' | 'js'
 }
 
 /**
@@ -27,19 +29,26 @@ interface LlmsOptions {
   output: string
   artifacts?: string
   origin?: string
+  engine?: 'rust' | 'js'
 }
 
 async function streamingConvert(options: CliOptions = {}) {
   const outputStream = process.stdout
-  let conversionOptions: HTMLToMarkdownOptions = { origin: options.origin }
+  let conversionOptions: MdreamOptions = {
+    origin: options.origin,
+    engine: await createEngine(options.engine || 'rust'),
+  }
 
   // Apply the appropriate preset based on the preset option
   if (options.preset === 'minimal') {
-    conversionOptions = withMinimalPreset(conversionOptions)
+    conversionOptions = {
+      ...withMinimalPreset(conversionOptions),
+      engine: conversionOptions.engine,
+    }
   }
 
   // Create a single markdown generator that processes the chunked HTML
-  const markdownGenerator = streamHtmlToMarkdown(Readable.toWeb(process.stdin), conversionOptions)
+  const markdownGenerator = streamHtmlToMarkdown(Readable.toWeb(process.stdin) as any, conversionOptions)
 
   // Process the markdown output with optional delay
   for await (const markdownChunk of markdownGenerator) {
@@ -64,6 +73,7 @@ async function generateLlms(patterns: string[], options: LlmsOptions) {
       origin: options.origin,
       generateFull: artifacts.includes('llms-full.txt'),
       generateMarkdown: artifacts.includes('markdown'),
+      engine: await createEngine(options.engine || 'rust'),
     })
 
     // Ensure output directory exists
@@ -108,6 +118,7 @@ const cli = cac()
 cli.command('[options]', 'Convert HTML from stdin to Markdown on stdout')
   .option('--origin <url>', 'Origin URL for resolving relative image paths')
   .option('--preset <preset>', 'Conversion presets: minimal')
+  .option('--engine <engine>', 'Markdown engine to use (rust or js)', { default: 'rust' })
   .action(async (_, opts) => {
     await streamingConvert(opts)
   })
@@ -118,6 +129,7 @@ cli.command('llms <patterns...>', 'Generate llms.txt artifacts from HTML files')
   .option('--origin <url>', 'Origin URL for resolving relative paths and generating absolute URLs')
   .option('-o, --output <dir>', 'Output directory for generated files', { default: process.cwd() })
   .option('--artifacts <list>', 'Comma-separated list of artifacts to generate: llms.txt,llms-full.txt,markdown', { default: 'llms.txt,llms-full.txt,markdown' })
+  .option('--engine <engine>', 'Markdown engine to use (rust or js)', { default: 'rust' })
   .action(async (patterns: string[], opts) => {
     await generateLlms(patterns, { patterns, ...opts })
   })

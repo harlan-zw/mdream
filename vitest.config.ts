@@ -8,7 +8,7 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
-          include: ['./packages/mdream/test/unit/**/*.test.ts', './packages/mdream/test/integration/**/*.test.ts', './packages/vite/test/unit/**/*.test.ts', './packages/crawl/test/unit/**/*.test.ts'],
+          include: ['./packages/engine-rust/test/**/*.test.ts', './packages/engine-js/test/unit/**/*.test.ts', './packages/engine-js/test/integration/**/*.test.ts', './packages/mdream/test/unit/**/*.test.ts', './packages/mdream/test/integration/**/*.test.ts', './packages/vite/test/unit/**/*.test.ts', './packages/crawl/test/unit/**/*.test.ts'],
           exclude: ['**/*.browser.test.ts'],
         },
       }),

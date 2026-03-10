@@ -1,0 +1,39 @@
+{
+  "name": "@mdream/engine-js",
+  "type": "module",
+  "version": "0.17.0",
+  "description": "Native JavaScript AST processing engine for mdream.",
+  "author": {
+    "name": "Harlan Wilton",
+    "email": "harlan@harlanzw.com",
+    "url": "https://harlanzw.com/"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harlan-zw/mdream",
+    "directory": "packages/engine-js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "default": "./dist/index.mjs"
+    }
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "obuild",
+    "typecheck": "tsc --noEmit",
+    "dev:prepare": "obuild --stub",
+    "prepack": "pnpm run build"
+  },
+  "dependencies": {}
+}

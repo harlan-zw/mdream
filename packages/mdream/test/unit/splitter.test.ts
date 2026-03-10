@@ -1,5 +1,5 @@
+import { TAG_H1, TAG_H2 } from '@mdream/engine-js'
 import { describe, expect, it } from 'vitest'
-import { TAG_H1, TAG_H2 } from '../../src/const'
 import { withMinimalPreset } from '../../src/preset/minimal'
 import { htmlToMarkdownSplitChunks, htmlToMarkdownSplitChunksStream } from '../../src/splitter'
 

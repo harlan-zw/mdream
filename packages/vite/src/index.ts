@@ -1,6 +1,6 @@
 // Default export for convenience
-import { viteHtmlToMarkdownPlugin } from './plugin.ts'
+import { viteHtmlToMarkdownPlugin } from './plugin.js'
 
 export { viteHtmlToMarkdownPlugin } from './plugin.js'
-export type * from './types.ts'
+export type * from './types.js'
 export default viteHtmlToMarkdownPlugin

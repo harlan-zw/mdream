@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown } from '../../../src'
-import { filterPlugin } from '../../../src/plugins'
+import { engines, resolveEngine } from '../../utils/engines.ts'
 
-describe('footer', () => {
-  it('github', () => {
+describe.each(engines)('footer %s', ({ engine }: any) => {
+  it('github', async () => {
     const html = ` <footer data-container="footer">
         <section class="container-xl mt-lg-8 mt-6 px-3 px-md-6 no-print mx-auto"><h2 class="f3">Help and support</h2>
           <div class="container-xl mx-auto py-6 py-lg-6 clearfix border-top border-color-secondary">
@@ -97,51 +97,18 @@ describe('footer', () => {
           </button>
         </div>
       </footer>`
-    const markdown = htmlToMarkdown(html)
-    expect(markdown).toMatchInlineSnapshot(`
-      "## Help and support
-
-      ### Did you find what you needed?
-
-      Yes No
-
-      [Privacy policy](/en/site-policy/privacy-policies/github-privacy-statement)
-
-      ### Help us make these docs great!
-
-      All GitHub docs are open source. See something that's wrong or unclear? Submit a pull request.
-
-      [Make a contribution](https://github.com/github/docs/blob/main/content/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax.md)
-
-      [Learn how to contribute](/contributing)
-
-      ### Still need help?
-
-      [Ask the GitHub community](https://github.com/orgs/community/discussions)
-
-      [Contact support](https://support.github.com)
-
-      ## Legal
-
-      - © 2025 GitHub, Inc.
-      - [Terms](/en/site-policy/github-terms/github-terms-of-service)
-      - [Privacy](/en/site-policy/privacy-policies/github-privacy-statement)
-      - [Status](https://www.githubstatus.com/)
-      - [Pricing](https://github.com/pricing)
-      - [Expert services](https://services.github.com)
-      - [Blog](https://github.blog)"
-    `)
+    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
+    expect(markdown).toMatchSnapshot()
   })
-  it('nuxt', () => {
+  it('nuxt', async () => {
     const html = `<!DOCTYPE><html><body><h1>foo bar</h1><div><div><footer><div class="py-8 lg:py-12 border-b border-default"><!--[--><div class="w-full max-w-(--ui-container) mx-auto px-4 sm:px-6 lg:px-8"><!--[--><nav class="xl:grid xl:grid-cols-3 xl:gap-8"><!----><div class="flex flex-col lg:grid grid-flow-col auto-cols-fr gap-8 xl:col-span-2"><!--[--><!--[--><div><h3 class="text-sm font-semibold">Community</h3><ul class="mt-6 space-y-4"><!--[--><li class="relative"><!--[--><!--[--><a href="https://nuxters.nuxt.com" rel="noopener noreferrer" target="_blank" class="group text-sm flex items-center gap-1.5 focus-visible:outline-primary text-muted hover:text-default transition-colors"><!--[--><!--[--><!--[--><!----><!--]--><span class="truncate"><!--[-->Nuxters<!--]--><span class="iconify i-lucide:arrow-up-right size-3 absolute top-0 text-dimmed inline-block" aria-hidden="true" style=""></span></span><!--[--><!--]--><!--]--><!--]--></a><!--]--><!--]--></li><li class="relative"><!--[--><a href="/team" class="group text-sm flex items-center gap-1.5 focus-visible:outline-primary text-muted hover:text-default transition-colors"><!--[--><!--[--><!--[--><!----><!--]--><span class="truncate"><!--[-->Team<!--]--><!----></span><!--[--><!--]--><!--]--><!--]--></a><!--]--></li><li class="relative"><!--[--><a href="/design-kit" class="group text-sm flex items-center gap-1.5 focus-visible:outline-primary text-muted hover:text-default transition-colors"><!--[--><!--[--><!--[--><!----><!--]--><span class="truncate"><!--[-->Design Kit<!--]--><!----></span><!--[--><!--]--><!--]--><!--]--></a><!--]--></li><!--]--></ul></div><div><h3 class="text-sm font-semibold">Products</h3><ul class="mt-6 space-y-4"><!--[--><li class="relative"><!--[--><!--[--><a href="https://ui.nuxt.com/pro?utm_source=nuxt-website&amp;utm_medium=footer" rel="noopener noreferrer" target="_blank" class="group text-sm flex items-center gap-1.5 focus-visible:outline-primary text-muted hover:text-default transition-colors"><!--[--><!--[--><!--[--><!----><!--]--><span class="truncate"><!--[-->Nuxt UI Pro<!--]--><span class="iconify i-lucide:arrow-up-right size-3 absolute top-0 text-dimmed inline-block" aria-hidden="true" style=""></span></span><!--[--><!--]--><!--]--><!--]--></a><!--]--><!--]--></li><li class="relative"><!--[--><!--[--><a href="https://content.nuxt.com/studio/?utm_source=nuxt-website&amp;utm_medium=footer" rel="noopener noreferrer" target="_blank" class="group text-sm flex items-center gap-1.5 focus-visible:outline-primary text-muted hover:text-default transition-colors"><!--[--><!--[--><!--[--><!----><!--]--><span class="truncate"><!--[-->Nuxt Studio<!--]--><span class="iconify i-lucide:arrow-up-right size-3 absolute top-0 text-dimmed inline-block" aria-hidden="true" style=""></span></span><!--[--><!--]--><!--]--><!--]--></a><!--]--><!--]--></li><li class="relative"><!--[--><!--[--><a href="https://hub.nuxt.com/?utm_source=nuxt-website&amp;utm_medium=footer" rel="noopener noreferrer" target="_blank" class="group text-sm flex items-center gap-1.5 focus-visible:outline-primary text-muted hover:text-default transition-colors"><!--[--><!--[--><!--[--><!----><!--]--><span class="truncate"><!--[-->NuxtHub<!--]--><span class="iconify i-lucide:arrow-up-right size-3 absolute top-0 text-dimmed inline-block" aria-hidden="true" style=""></span></span><!--[--><!--]--><!--]--><!--]--></a><!--]--><!--]--></li><!--]--></ul></div><div><h3 class="text-sm font-semibold">Enterprise</h3><ul class="mt-6 space-y-4"><!--[--><li class="relative"><!--[--><a href="/enterprise/support" class="group text-sm flex items-center gap-1.5 focus-visible:outline-primary text-muted hover:text-default transition-colors"><!--[--><!--[--><!--[--><!----><!--]--><span class="truncate"><!--[-->Support<!--]--><!----></span><!--[--><!--]--><!--]--><!--]--></a><!--]--></li><li class="relative"><!--[--><a href="/enterprise/agencies" class="group text-sm flex items-center gap-1.5 focus-visible:outline-primary text-muted hover:text-default transition-colors"><!--[--><!--[--><!--[--><!----><!--]--><span class="truncate"><!--[-->Agencies<!--]--><!----></span><!--[--><!--]--><!--]--><!--]--></a><!--]--></li><li class="relative"><!--[--><a href="/enterprise/sponsors" class="group text-sm flex items-center gap-1.5 focus-visible:outline-primary text-muted hover:text-default transition-colors"><!--[--><!--[--><!--[--><!----><!--]--><span class="truncate"><!--[-->Sponsors<!--]--><!----></span><!--[--><!--]--><!--]--><!--]--></a><!--]--></li><!--]--></ul></div><!--]--><!--]--></div><div class="mt-10 xl:mt-0"><!--[--><form id="v-0-4"><!--[--><div class="text-sm"><div class=""><div class="flex content-center items-center justify-between"><label for="v-0-5" class="block text-default font-semibold"><!--[--><!--[-->Subscribe to our newsletter<!--]--><!--]--></label><!----></div><p id="v-0-5-description" class="text-muted"><!--[-->Stay updated on new releases and features, guides, and community updates.<!--]--></p></div><div class="relative mt-3"><!--[--><div class="relative inline-flex items-center max-w-sm w-full"><input id="v-0-5" type="email" value="" name="email" placeholder="you@domain.com" class="w-full rounded-md border-0 placeholder:text-dimmed focus:outline-none disabled:cursor-not-allowed disabled:opacity-75 transition-colors px-3 py-2 text-sm gap-2 text-highlighted bg-default ring ring-inset ring-accented focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary pe-10" required="" autocomplete="off" aria-describedby="v-0-5-description" aria-invalid="false"><!--[--><!--]--><!----><div data-lastpass-icon-root="" style="position: relative !important; height: 0px !important; width: 0px !important; float: left !important;"></div><span class="absolute inset-y-0 end-0 flex items-center pe-3"><!--[--><!--[--><!--[--><button type="submit" class="rounded-md font-medium inline-flex items-center disabled:cursor-not-allowed aria-disabled:cursor-not-allowed disabled:opacity-75 aria-disabled:opacity-75 transition-colors px-2 py-1 text-xs gap-1 text-inverted bg-inverted hover:bg-inverted/90 disabled:bg-inverted aria-disabled:bg-inverted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-inverted"><!--[--><!--[--><!----><!--]--><!--[--><span class="truncate">Subscribe</span><!--]--><!--[--><!----><!--]--><!--]--></button><!--]--><!--]--><!--]--></span></div><!--]--><!----></div></div><!--]--></form><!--]--></div></nav><!--]--></div><!--]--></div><div class="w-full max-w-(--ui-container) mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-4 lg:flex lg:items-center lg:justify-between lg:gap-x-3"><!--[--><div class="lg:flex-1 flex items-center justify-center lg:justify-end gap-x-1.5 lg:order-3"><!--[--><!--[--><!--[--><a href="https://go.nuxt.com/x" rel="noopener noreferrer" target="_blank" class="rounded-md font-medium inline-flex items-center disabled:cursor-not-allowed aria-disabled:cursor-not-allowed disabled:opacity-75 aria-disabled:opacity-75 transition-colors px-2.5 py-1.5 text-sm gap-1.5 text-default hover:bg-elevated focus:outline-none focus-visible:bg-elevated hover:disabled:bg-transparent dark:hover:disabled:bg-transparent hover:aria-disabled:bg-transparent dark:hover:aria-disabled:bg-transparent"><!--[--><!--[--><span class="iconify i-simple-icons:x shrink-0 size-5" aria-hidden="true" style=""></span><!--]--><!--[--><span class="sr-only">Nuxt on X</span><!--]--><!--[--><!----><!--]--><!--]--></a><!--]--><!--]--><!--[--><!--[--><a href="https://go.nuxt.com/bluesky" rel="noopener noreferrer" target="_blank" class="rounded-md font-medium inline-flex items-center disabled:cursor-not-allowed aria-disabled:cursor-not-allowed disabled:opacity-75 aria-disabled:opacity-75 transition-colors px-2.5 py-1.5 text-sm gap-1.5 text-default hover:bg-elevated focus:outline-none focus-visible:bg-elevated hover:disabled:bg-transparent dark:hover:disabled:bg-transparent hover:aria-disabled:bg-transparent dark:hover:aria-disabled:bg-transparent"><!--[--><!--[--><span class="iconify i-simple-icons:bluesky shrink-0 size-5" aria-hidden="true" style=""></span><!--]--><!--[--><span class="sr-only">Nuxt on BlueSky</span><!--]--><!--[--><!----><!--]--><!--]--></a><!--]--><!--]--><!--[--><!--[--><a href="https://go.nuxt.com/linkedin" rel="noopener noreferrer" target="_blank" class="rounded-md font-medium inline-flex items-center disabled:cursor-not-allowed aria-disabled:cursor-not-allowed disabled:opacity-75 aria-disabled:opacity-75 transition-colors px-2.5 py-1.5 text-sm gap-1.5 text-default hover:bg-elevated focus:outline-none focus-visible:bg-elevated hover:disabled:bg-transparent dark:hover:disabled:bg-transparent hover:aria-disabled:bg-transparent dark:hover:aria-disabled:bg-transparent"><!--[--><!--[--><span class="iconify i-simple-icons:linkedin shrink-0 size-5" aria-hidden="true" style=""></span><!--]--><!--[--><span class="sr-only">Nuxt on LinkedIn</span><!--]--><!--[--><!----><!--]--><!--]--></a><!--]--><!--]--><!--[--><!--[--><a href="https://go.nuxt.com/discord" rel="noopener noreferrer" target="_blank" class="rounded-md font-medium inline-flex items-center disabled:cursor-not-allowed aria-disabled:cursor-not-allowed disabled:opacity-75 aria-disabled:opacity-75 transition-colors px-2.5 py-1.5 text-sm gap-1.5 text-default hover:bg-elevated focus:outline-none focus-visible:bg-elevated hover:disabled:bg-transparent dark:hover:disabled:bg-transparent hover:aria-disabled:bg-transparent dark:hover:aria-disabled:bg-transparent"><!--[--><!--[--><span class="iconify i-simple-icons:discord shrink-0 size-5" aria-hidden="true" style=""></span><!--]--><!--[--><span class="sr-only">Nuxt on Discord</span><!--]--><!--[--><!----><!--]--><!--]--></a><!--]--><!--]--><!--[--><!--[--><a href="https://go.nuxt.com/github" rel="noopener noreferrer" target="_blank" class="rounded-md font-medium inline-flex items-center disabled:cursor-not-allowed aria-disabled:cursor-not-allowed disabled:opacity-75 aria-disabled:opacity-75 transition-colors px-2.5 py-1.5 text-sm gap-1.5 text-default hover:bg-elevated focus:outline-none focus-visible:bg-elevated hover:disabled:bg-transparent dark:hover:disabled:bg-transparent hover:aria-disabled:bg-transparent dark:hover:aria-disabled:bg-transparent"><!--[--><!--[--><span class="iconify i-simple-icons:github shrink-0 size-5" aria-hidden="true" style=""></span><!--]--><!--[--><span class="sr-only">Nuxt on GitHub</span><!--]--><!--[--><!----><!--]--><!--]--></a><!--]--><!--]--><!--]--></div><div class="mt-3 lg:mt-0 lg:order-2 flex items-center justify-center"><!--[--><!--]--></div><div class="flex items-center justify-center lg:justify-start lg:flex-1 gap-x-1.5 mt-3 lg:mt-0 lg:order-1"><!--[--><p class="text-muted text-sm"> Copyright © 2016-2025 Nuxt - <a href="https://go.nuxt.com/license" rel="noopener noreferrer" target="_blank" class="hover:underline"> MIT License </a></p><!--]--></div><!--]--></div><!----></footer></div><span>foo</span></span></div></body></html>`
     const markdown = htmlToMarkdown(html, {
-      plugins: [
-        filterPlugin({
-          exclude: [
-            'footer',
-          ],
-        }),
-      ],
+      engine: await resolveEngine(engine),
+      plugins: { filter: {
+        exclude: [
+          'footer',
+        ],
+      } },
     })
     expect(markdown).toContain('# foo bar')
     expect(markdown).toContain('foo')

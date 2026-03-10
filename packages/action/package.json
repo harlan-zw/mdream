@@ -24,6 +24,7 @@
   "dependencies": {
     "@actions/core": "catalog:",
     "@actions/exec": "catalog:",
+    "@mdream/engine-js": "workspace:*",
     "mdream": "workspace:*"
   },
   "devDependencies": {

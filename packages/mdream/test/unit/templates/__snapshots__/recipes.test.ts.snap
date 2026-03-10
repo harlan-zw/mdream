@@ -1,0 +1,21 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`recipes 'JavaScript Engine' > tables 1`] = `
+"## Nutrition Facts (per serving)
+
+| 366 | Calories |
+| --- | --- |
+| 7g | Fat |
+| 68g | Carbs |
+| 9g | Protein |"
+`;
+
+exports[`recipes 'Rust Engine' > tables 1`] = `
+"## Nutrition Facts (per serving)
+
+| 366 | Calories |
+| --- | --- |
+| 7g | Fat |
+| 68g | Carbs |
+| 9g | Protein |"
+`;

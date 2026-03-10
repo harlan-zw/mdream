@@ -49,6 +49,7 @@
     "prepack": "pnpm run build"
   },
   "dependencies": {
+    "@mdream/engine-js": "workspace:*",
     "@nuxt/kit": "catalog:",
     "consola": "catalog:",
     "defu": "catalog:",

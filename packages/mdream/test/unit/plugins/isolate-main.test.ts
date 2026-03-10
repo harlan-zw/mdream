@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown } from '../../../src/index.ts'
-import { isolateMainPlugin } from '../../../src/plugins/isolate-main.ts'
 
 describe('isolateMainPlugin', () => {
   it('prioritizes explicit main element over header heuristic', () => {
@@ -22,7 +21,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     // Should include content inside main
@@ -59,7 +58,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     expect(markdown).toContain('# Article Header')
@@ -98,7 +97,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     // Should fall back to header heuristic since main is too deep
@@ -128,7 +127,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     expect(markdown).toContain('# First Main Title')
@@ -157,7 +156,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     // Should include main content
@@ -186,7 +185,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     expect(markdown).toContain('### Starting with H3')
@@ -221,7 +220,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     expect(markdown).toContain('# Main Title')
@@ -245,7 +244,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     expect(markdown).toContain('# Article Title')
@@ -266,7 +265,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     // Since no header is found, everything before should be excluded
@@ -289,7 +288,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     expect(markdown).toContain('## First Header')
@@ -313,7 +312,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     expect(markdown).toContain('# Main Title')
@@ -353,7 +352,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     expect(markdown).toContain('# Article Title')
@@ -380,7 +379,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     expect(markdown).toContain('# Main Title')
@@ -403,7 +402,7 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
     })
 
     expect(markdown).toContain('# Title')

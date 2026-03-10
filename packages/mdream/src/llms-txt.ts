@@ -1,9 +1,9 @@
 import type { FileHandle } from 'node:fs/promises'
 import { mkdir, open, readFile } from 'node:fs/promises'
+import { createJavaScriptEngine, extractionPlugin } from '@mdream/engine-js'
 import { basename, dirname, join, relative, sep } from 'pathe'
 import { glob } from 'tinyglobby'
-import { htmlToMarkdown } from './index.ts'
-import { extractionPlugin } from './plugins/extraction.ts'
+import { htmlToMarkdown } from './index.js'
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/
 const ANCHOR_INVALID_CHARS_RE = /[^a-z0-9]/g
@@ -47,6 +47,8 @@ export interface LlmsTxtArtifactsOptions {
   sections?: LlmsTxtSection[]
   /** Notes to write at the end */
   notes?: string | string[]
+  /** Custom Markdown engine to use */
+  engine?: import('@mdream/engine-js').MarkdownEngine
 }
 
 export interface ProcessedFile {
@@ -79,32 +81,32 @@ function extractMetadata(html: string, url: string): ProcessedFile['metadata'] {
   let author = ''
 
   const extractionPluginInstance = extractionPlugin({
-    'title': (element) => {
+    'title': (element: any) => {
       if (!title && element.textContent) {
         title = element.textContent.trim()
       }
     },
-    'meta[name="description"]': (element) => {
+    'meta[name="description"]': (element: any) => {
       if (!description && element.attributes?.content) {
         description = element.attributes.content.trim()
       }
     },
-    'meta[property="og:description"]': (element) => {
+    'meta[property="og:description"]': (element: any) => {
       if (!description && element.attributes?.content) {
         description = element.attributes.content.trim()
       }
     },
-    'meta[name="keywords"]': (element) => {
+    'meta[name="keywords"]': (element: any) => {
       if (!keywords && element.attributes?.content) {
         keywords = element.attributes.content.trim()
       }
     },
-    'meta[name="author"]': (element) => {
+    'meta[name="author"]': (element: any) => {
       if (!author && element.attributes?.content) {
         author = element.attributes.content.trim()
       }
     },
-    'meta[property="og:title"]': (element) => {
+    'meta[property="og:title"]': (element: any) => {
       if (!title && element.attributes?.content) {
         title = element.attributes.content.trim()
       }
@@ -112,8 +114,9 @@ function extractMetadata(html: string, url: string): ProcessedFile['metadata'] {
   })
 
   htmlToMarkdown(html, {
-    plugins: [extractionPluginInstance],
+    transforms: [extractionPluginInstance],
     origin: url,
+    engine: createJavaScriptEngine(),
   })
 
   return {
@@ -159,7 +162,8 @@ function pathToUrl(filePath: string, baseDir: string): string {
 /**
  * Process HTML files from glob patterns
  */
-async function processHtmlFiles(patterns: string | string[], origin?: string): Promise<ProcessedFile[]> {
+async function processHtmlFiles(patterns: string | string[], options: Pick<LlmsTxtArtifactsOptions, 'origin' | 'engine'>): Promise<ProcessedFile[]> {
+  const engine = options.engine || createJavaScriptEngine()
   const allPatterns = Array.isArray(patterns) ? patterns : [patterns]
   const allFiles: string[] = []
 
@@ -178,8 +182,8 @@ async function processHtmlFiles(patterns: string | string[], origin?: string): P
   for (const filePath of uniqueFiles) {
     try {
       const html = await readFile(filePath, 'utf-8')
-      const metadata = extractMetadata(html, origin || filePath)
-      const content = htmlToMarkdown(html, { origin })
+      const metadata = extractMetadata(html, options.origin || filePath)
+      const content = htmlToMarkdown(html, { origin: options.origin, engine })
       const url = pathToUrl(filePath, baseDir)
 
       results.push({
@@ -408,7 +412,7 @@ export async function generateLlmsTxtArtifacts(options: LlmsTxtArtifactsOptions)
     files = options.files
   }
   else if (options.patterns) {
-    files = await processHtmlFiles(options.patterns, options.origin)
+    files = await processHtmlFiles(options.patterns, options)
   }
   else {
     throw new Error('Either patterns or files must be provided')
@@ -629,7 +633,7 @@ function sortPagesByPath(pages: { url: string, title: string, description?: stri
   })
 }
 
-export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions = {}): WritableStream<ProcessedFile> {
+export function createLlmsTxtStream(options: CreateLlmsTxtStreamOptions): WritableStream<ProcessedFile> {
   const { siteName = 'Site', description, origin = '', generateFull, outputDir = process.cwd(), sections, notes } = options
   let llmsTxtHandle: FileHandle | undefined
   let llmsFullTxtHandle: FileHandle | undefined

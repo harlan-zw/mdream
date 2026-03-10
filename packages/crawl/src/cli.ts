@@ -1,13 +1,13 @@
-import type { CrawlProgress } from './crawl.ts'
-import type { CrawlOptions } from './types.ts'
+import type { CrawlProgress } from './crawl.js'
+import type { CrawlOptions } from './types.js'
 import { accessSync, constants, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as p from '@clack/prompts'
 import { dirname, join, resolve } from 'pathe'
 import { withHttps } from 'ufo'
-import { crawlAndGenerate } from './crawl.ts'
-import { parseUrlPattern, validateGlobPattern } from './glob-utils.ts'
-import { ensurePlaywrightInstalled, isUseChromeSupported } from './playwright-utils.ts'
+import { crawlAndGenerate } from './crawl.js'
+import { parseUrlPattern, validateGlobPattern } from './glob-utils.js'
+import { ensurePlaywrightInstalled, isUseChromeSupported } from './playwright-utils.js'
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url))

@@ -1,8 +1,10 @@
+import type { MarkdownEngine, MdreamOptions } from 'mdream'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Plugin, ViteDevServer } from 'vite'
 import type { CacheEntry, MarkdownConversionResult, ViteHtmlToMarkdownOptions } from './types.js'
 import fs from 'node:fs'
 import path from 'node:path'
+import { createJavaScriptEngine } from '@mdream/engine-js'
 import { htmlToMarkdown } from 'mdream'
 import { shouldServeMarkdown } from 'mdream/negotiate'
 
@@ -11,7 +13,7 @@ const GLOB_DOUBLE_STAR_RE = /\*\*/g
 const GLOB_STAR_RE = /\*/g
 const GLOB_QUESTION_RE = /\?/g
 
-const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>> & { mdreamOptions: Record<string, never> } = {
+const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>> & { mdreamOptions: Partial<MdreamOptions> } = {
   include: ['*.html', '**/*.html'], // Include root level and nested
   exclude: ['**/node_modules/**'],
   outputDir: '', // Output in same directory as HTML files by default
@@ -23,6 +25,11 @@ const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>
 
 export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions = {}): Plugin {
   const options = { ...DEFAULT_OPTIONS, ...userOptions }
+  const defaultEngine = createJavaScriptEngine()
+  const mdreamOptions: { engine: MarkdownEngine } & Partial<MdreamOptions> = {
+    ...options.mdreamOptions,
+    engine: (options.mdreamOptions as any)?.engine ?? defaultEngine,
+  }
   const markdownCache = new Map<string, CacheEntry>()
 
   function log(message: string) {
@@ -65,7 +72,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
   async function convertHtmlToMarkdown(htmlContent: string, source: string): Promise<string> {
     try {
-      const markdownContent = htmlToMarkdown(htmlContent, options.mdreamOptions)
+      const markdownContent = htmlToMarkdown(htmlContent, mdreamOptions)
       log(`Converted ${source} to markdown (${markdownContent.length} chars)`)
       return markdownContent
     }
@@ -254,7 +261,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
             continue
           }
           const htmlContent = htmlFile.source as string
-          const markdownContent = htmlToMarkdown(htmlContent, options.mdreamOptions)
+          const markdownContent = htmlToMarkdown(htmlContent, mdreamOptions)
 
           // Generate corresponding .md filename (preserving directory structure)
           const markdownFileName = fileName.replace('.html', '.md')

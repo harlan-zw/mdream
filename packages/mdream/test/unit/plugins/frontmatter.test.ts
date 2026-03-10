@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown } from '../../../src/index.js'
-import { frontmatterPlugin } from '../../../src/plugins/frontmatter.js'
 
 describe('frontmatter plugin', () => {
   it('extracts title and description from head', () => {
@@ -18,7 +17,7 @@ describe('frontmatter plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [frontmatterPlugin()],
+      plugins: { frontmatter: true },
     })
 
     expect(markdown).toContain('---')
@@ -43,12 +42,12 @@ describe('frontmatter plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [frontmatterPlugin({
+      plugins: { frontmatter: {
         additionalFields: {
           layout: 'post',
           date: '2025-05-10',
         },
-      })],
+      } },
     })
 
     expect(markdown).toContain('title: "Test Page"')
@@ -71,7 +70,7 @@ describe('frontmatter plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [frontmatterPlugin()],
+      plugins: { frontmatter: true },
     })
 
     expect(markdown).toContain('title: "Title with \\"quotes\\""')
@@ -96,7 +95,7 @@ describe('frontmatter plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [frontmatterPlugin()],
+      plugins: { frontmatter: true },
     })
 
     expect(markdown).toContain('meta:')
@@ -120,7 +119,7 @@ describe('frontmatter plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [frontmatterPlugin({
+      plugins: { frontmatter: {
         formatValue: (name, value) => {
           if (name === 'keywords') {
             // Format as an array
@@ -128,7 +127,7 @@ describe('frontmatter plugin', () => {
           }
           return `"${value}"`
         },
-      })],
+      } },
     })
 
     expect(markdown).toContain('keywords: ["key1", "key2", "key3"]')
@@ -149,9 +148,7 @@ describe('frontmatter plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [frontmatterPlugin({
-        metaFields: ['custom-field', 'another-field'],
-      })],
+      plugins: { frontmatter: { metaFields: ['custom-field', 'another-field'] } },
     })
 
     expect(markdown).toContain('meta:')

@@ -70,6 +70,14 @@
         "default": "./dist/splitter.mjs"
       },
       "default": "./dist/splitter.mjs"
+    },
+    "./parse": {
+      "types": "./dist/parse.d.mts",
+      "import": {
+        "types": "./dist/parse.d.mts",
+        "default": "./dist/parse.mjs"
+      },
+      "default": "./dist/parse.mjs"
     }
   },
   "main": "./dist/index.mjs",
@@ -106,8 +114,12 @@
     "prepack": "pnpm run build"
   },
   "dependencies": {
+    "@mdream/engine-js": "workspace:*",
     "cac": "catalog:",
     "pathe": "catalog:",
     "tinyglobby": "catalog:"
+  },
+  "optionalDependencies": {
+    "@mdream/engine-rust": "workspace:*"
   }
 }

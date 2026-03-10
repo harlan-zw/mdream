@@ -1,6 +1,2 @@
-export { createPlugin } from './pluggable/plugin.ts'
-export { extractionPlugin } from './plugins/extraction.ts'
-export { filterPlugin } from './plugins/filter.ts'
-export { frontmatterPlugin } from './plugins/frontmatter.ts'
-export { isolateMainPlugin } from './plugins/isolate-main.ts'
-export { tailwindPlugin } from './plugins/tailwind.ts'
+export { createPlugin, extractionPlugin, filterPlugin, frontmatterPlugin, isolateMainPlugin, tailwindPlugin } from '@mdream/engine-js'
+export type { ExtractedElement } from '@mdream/engine-js'
