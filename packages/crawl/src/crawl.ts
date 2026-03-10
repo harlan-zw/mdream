@@ -466,9 +466,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       }
 
       let md = ''
-      // Only generate markdown if not using onPage callback or if individual MD files are requested
-      // This avoids double-processing HTML when user handles it in onPage
-      if (shouldProcessMarkdown && (!onPage || generateIndividualMd)) {
+      if (shouldProcessMarkdown) {
         // Convert HTML to Markdown only for matching URLs
         md = htmlToMarkdown(html, withMinimalPreset({
           origin: pageOrigin,

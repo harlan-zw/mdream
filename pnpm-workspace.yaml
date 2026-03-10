@@ -12,12 +12,12 @@ overrides:
 catalog:
   '@actions/core': ^3.0.0
   '@actions/exec': ^3.0.0
-  '@antfu/eslint-config': ^7.6.1
+  '@antfu/eslint-config': ^7.7.0
   '@arethetypeswrong/cli': ^0.18.2
-  '@aws-sdk/client-s3': ^3.1000.0
+  '@aws-sdk/client-s3': ^3.1005.0
   '@built-in-ai/transformers-js': ^1.1.2
-  '@clack/prompts': ^1.0.1
-  '@kreuzberg/html-to-markdown-node': ^2.27.2
+  '@clack/prompts': ^1.1.0
+  '@kreuzberg/html-to-markdown-node': ^2.28.2
   '@libsql/client': ^0.17.0
   '@nuxt/devtools': 2.4.0
   '@nuxt/kit': ^4.3.1
@@ -26,13 +26,13 @@ catalog:
   '@nuxt/test-utils': ^4.0.0
   '@types/better-sqlite3': ^7.6.13
   '@types/express': ^5.0.6
-  '@types/node': ^25.3.3
+  '@types/node': ^25.4.0
   '@types/picomatch': ^4.0.2
   '@vercel/ncc': ^0.38.4
   '@vitejs/plugin-vue': ^6.0.4
   '@vitest/browser': ^4.0.18
   '@vitest/browser-playwright': ^4.0.18
-  ai: ^6.0.105
+  ai: ^6.0.116
   better-sqlite3: ^12.6.2
   bumpp: ^10.4.1
   cac: ^7.0.0
@@ -44,14 +44,14 @@ catalog:
   defu: ^6.1.4
   drizzle-kit: ^0.31.9
   drizzle-orm: ^0.45.1
-  eslint: ^10.0.2
+  eslint: ^10.0.3
   express: ^5.2.1
   llm-cost: ^1.0.5
   node-html-markdown: ^2.0.0
   nuxt: ^4.3.1
   nuxt-site-config: ^3.2.21
   nypm: ^0.6.5
-  obuild: ^0.4.31
+  obuild: ^0.4.32
   pathe: ^2.0.3
   picomatch: ^4.0.3
   playwright: ^1.58.2
@@ -64,7 +64,7 @@ catalog:
   unstorage: ^1.17.4
   vite: ^7.3.1
   vitest: ^4.0.18
-  vue: ^3.5.29
+  vue: ^3.5.30
   vue-router: ^5.0.3
 
 onlyBuiltDependencies:
