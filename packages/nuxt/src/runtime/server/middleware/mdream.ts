@@ -1,6 +1,6 @@
 import type { H3Event } from 'h3'
 import type { HTMLToMarkdownOptions } from 'mdream'
-import type { MdreamMarkdownContext, ModuleRuntimeConfig } from '../../../types'
+import type { MdreamMarkdownContext, MdreamNegotiateContext, ModuleRuntimeConfig } from '../../../types'
 import { withSiteUrl } from '#site-config/server/composables/utils'
 import { consola } from 'consola'
 import { createError, defineEventHandler, getHeader, setHeader } from 'h3'
@@ -94,10 +94,13 @@ export default defineEventHandler(async (event) => {
 
   // Check if we should serve markdown based on Accept header or .md extension
   const hasMarkdownExtension = path.endsWith('.md')
-  const clientPrefersMarkdown = shouldServeMarkdown(event)
   let clientPrefersMarkdown = shouldServeMarkdown(event)
 
   // Allow users to override the negotiate decision via hook
+  const nitroApp = useNitroApp()
+  const negotiateContext: MdreamNegotiateContext = { event, shouldServe: clientPrefersMarkdown }
+  await nitroApp.hooks.callHook('mdream:negotiate', negotiateContext)
+  clientPrefersMarkdown = negotiateContext.shouldServe
 
   // Early exit: skip if not requesting .md and client doesn't prefer markdown
   if (!hasMarkdownExtension && !clientPrefersMarkdown) {

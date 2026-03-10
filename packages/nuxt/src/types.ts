@@ -94,6 +94,27 @@ export interface MdreamMarkdownContext {
 }
 
 /**
+ * Hook context for content negotiation override (Nitro runtime hook)
+ *
+ * This hook is called on every request to determine whether to serve markdown.
+ * You can override the default Accept header negotiation logic.
+ *
+ * @example Always serve markdown for a specific user-agent
+ * nitroApp.hooks.hook('mdream:negotiate', (context) => {
+ *   const ua = getHeader(context.event, 'user-agent') || ''
+ *   if (ua.includes('MyBot')) {
+ *     context.shouldServe = true
+ *   }
+ * })
+ */
+export interface MdreamNegotiateContext {
+  /** The H3 event object for accessing request headers */
+  event: H3Event
+  /** Whether markdown should be served - modify this to override */
+  shouldServe: boolean
+}
+
+/**
  * Hook payload for mdream:llms-txt
  * Called after mdream has generated llms.txt, before writing to disk
  *
