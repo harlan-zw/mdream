@@ -1,6 +1,9 @@
 import picomatch from 'picomatch'
 import { withHttps } from 'ufo'
 
+const GLOB_STRIP_TAIL_RE = /\*.*$/
+const GLOB_CHAR_RE = /[*?[]/
+
 export interface ParsedUrlPattern {
   baseUrl: string
   pattern: string
@@ -26,7 +29,7 @@ export function parseUrlPattern(input: string): ParsedUrlPattern {
   try {
     // Ensure the input has a protocol for URL parsing
     const urlWithProtocol = input.startsWith('http') ? input : `https://${input}`
-    const urlWithoutGlob = urlWithProtocol.replace(/\*.*$/, '')
+    const urlWithoutGlob = urlWithProtocol.replace(GLOB_STRIP_TAIL_RE, '')
     const url = new URL(urlWithoutGlob)
     const baseUrl = `${url.protocol}//${url.host}`
 
@@ -94,7 +97,7 @@ export function getStartingUrl(parsedPattern: ParsedUrlPattern): string {
 
   // For glob patterns, start at the base URL or go up to the first non-glob directory
   const pattern = parsedPattern.pattern
-  const firstGlobIndex = pattern.search(/[*?[]/)
+  const firstGlobIndex = pattern.search(GLOB_CHAR_RE)
 
   if (firstGlobIndex === -1) {
     return withHttps(parsedPattern.baseUrl + pattern)

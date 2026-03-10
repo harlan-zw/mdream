@@ -146,7 +146,7 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
     // Update depth for plugin access
     state.depth = node.depth
     const buff = state.buffer
-    const lastBuffEntry = buff[buff.length - 1]
+    const lastBuffEntry = buff.at(-1)!
     const lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
 
     // Get second last character
@@ -242,7 +242,7 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
       const newlinesStr = '\n'.repeat(newLines)
       // Trim only whitespace
       if (lastChar === ' ' && buff?.length) {
-        buff[buff.length - 1] = buff[buff.length - 1].substring(0, buff[buff.length - 1].length - 1)
+        buff[buff.length - 1] = buff.at(-1)!.substring(0, buff.at(-1)!.length - 1)
       }
 
       if (eventType === NodeEventEnter) {
@@ -275,7 +275,7 @@ export function createMarkdownProcessor(options: HTMLToMarkdownOptions = {}) {
 
             // Update the last content in buffer regions with trimmed content
             if (trimmedChars > 0) {
-              if (buff?.length && buff[buff.length - 1] === lastFragment) {
+              if (buff?.length && buff.at(-1) === lastFragment) {
                 buff[buff.length - 1] = trimmed
               }
             }

@@ -363,7 +363,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   }
 
   const parentsToIncrement = traverseUpToFirstBlockNode(state.currentNode)
-  const firstBlockParent = parentsToIncrement[parentsToIncrement.length - 1]
+  const firstBlockParent = parentsToIncrement.at(-1)
 
   // Handle whitespace trimming
   if (containsWhitespace && !firstBlockParent?.childTextNodeIndex) {

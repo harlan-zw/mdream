@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown } from '../../../src/index.ts'
 
+const RE_CODE_BLOCK_WITH_FUNCTION = /```[\s\S]*function example.*if \(true\).*```/s
+const RE_IF_TRUE_BLOCK = /^if \(true\) \{$/
+const RE_CODE_BLOCK_WITH_LINES = /```.*Line 1.*Line 2.*Line 3.*```/s
+
 describe('code blocks', () => {
   it('escapes triple backticks within code blocks', () => {
     const html = `
@@ -62,13 +66,13 @@ function example() {
     const markdown = htmlToMarkdown(html)
 
     // Check that newlines and whitespace are preserved
-    expect(markdown).toMatch(/```[\s\S]*function example.*if \(true\).*```/s)
+    expect(markdown).toMatch(RE_CODE_BLOCK_WITH_FUNCTION)
 
     // Verify that there's a blank line between the indentation comment and the if statement
     const lines = markdown.split('\n')
     const indentationLineIndex = lines.findIndex(line => line.includes('// And this indentation'))
     expect(lines[indentationLineIndex + 1].trim()).toEqual('')
-    expect(lines[indentationLineIndex + 2].trim()).toMatch(/^if \(true\) \{$/)
+    expect(lines[indentationLineIndex + 2].trim()).toMatch(RE_IF_TRUE_BLOCK)
 
     // Verify indentation is preserved
     expect(markdown).toContain('  // Has exactly')
@@ -86,7 +90,7 @@ Line 3 after one blank line</code></pre>`
     const markdown = htmlToMarkdown(html)
 
     // Check that multiple consecutive newlines are preserved
-    expect(markdown).toMatch(/```.*Line 1.*Line 2.*Line 3.*```/s)
+    expect(markdown).toMatch(RE_CODE_BLOCK_WITH_LINES)
 
     // Verify that double newlines are preserved
     expect(markdown).toContain('Line 1\n\n\nLine 2')

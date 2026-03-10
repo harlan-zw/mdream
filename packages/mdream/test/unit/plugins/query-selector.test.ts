@@ -3,6 +3,8 @@ import { htmlToMarkdown } from '../../../src/index.js'
 import { createPlugin } from '../../../src/pluggable/plugin.ts'
 import { filterPlugin } from '../../../src/plugins/filter.ts'
 
+const RE_WHITESPACE = /\s+/
+
 describe('querySelector plugin', () => {
   // Basic tests for including elements
   it('includes specified elements by tag when provided with include option', () => {
@@ -281,7 +283,7 @@ describe('querySelector plugin', () => {
       name: 'code-plugin',
       onNodeEnter: (node) => {
         if (node.type === 1 && node.name === 'code' && node.attributes?.class?.includes('language-')) {
-          const lang = node.attributes.class.split('language-')[1].split(/\s+/)[0]
+          const lang = node.attributes.class.split('language-')[1].split(RE_WHITESPACE)[0]
           return `**CodePlugin: ${lang}**\n`
         }
         return undefined

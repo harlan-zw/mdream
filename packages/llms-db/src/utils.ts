@@ -1,3 +1,8 @@
+const TRAILING_SLASH_RE = /\/$/
+const WWW_PREFIX_RE = /^www\./
+const SPECIAL_CHARS_RE = /[^\w\s-]/g
+const WHITESPACE_RE = /\s+/g
+
 export function validateUrl(url: string): boolean {
   try {
     const urlObj = new URL(url)
@@ -12,7 +17,7 @@ export function normalizeUrl(url: string): string {
   try {
     const urlObj = new URL(url)
     // Remove trailing slash and normalize
-    return urlObj.href.replace(/\/$/, '')
+    return urlObj.href.replace(TRAILING_SLASH_RE, '')
   }
   catch {
     throw new Error(`Invalid URL: ${url}`)
@@ -22,7 +27,7 @@ export function normalizeUrl(url: string): string {
 export function extractDomain(url: string): string {
   try {
     const urlObj = new URL(url)
-    return urlObj.hostname.replace(/^www\./, '')
+    return urlObj.hostname.replace(WWW_PREFIX_RE, '')
   }
   catch {
     throw new Error(`Invalid URL: ${url}`)
@@ -44,7 +49,7 @@ export function formatFileSize(bytes: number): string {
 
 export function sanitizeFilename(name: string): string {
   return name
-    .replace(/[^\w\s-]/g, '') // Remove special characters
-    .replace(/\s+/g, '-') // Replace spaces with hyphens
+    .replace(SPECIAL_CHARS_RE, '') // Remove special characters
+    .replace(WHITESPACE_RE, '-') // Replace spaces with hyphens
     .toLowerCase()
 }

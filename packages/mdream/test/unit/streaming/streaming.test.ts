@@ -2,6 +2,9 @@ import { ReadableStream } from 'node:stream/web'
 import { describe, expect, it, vi } from 'vitest'
 import { streamHtmlToMarkdown } from '../../../src/stream'
 
+const RE_BOLD_TEXT = /\*\*bold text\*\*/
+const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
+
 describe('hTML to Markdown Streaming', () => {
   describe('basic Stream Functionality', () => {
     it('converts a valid HTML stream to markdown chunks', async () => {
@@ -157,7 +160,7 @@ describe('hTML to Markdown Streaming', () => {
       expect(combinedResult).toContain('First paragraph with')
       expect(combinedResult).toContain('bold text')
       expect(combinedResult).toContain('Second paragraph')
-      expect(combinedResult).toMatch(/\*\*bold text\*\*/)
+      expect(combinedResult).toMatch(RE_BOLD_TEXT)
     })
 
     it('handles HTML with attributes split across chunks', async () => {
@@ -177,7 +180,7 @@ describe('hTML to Markdown Streaming', () => {
 
       const combinedResult = result.join('')
       expect(combinedResult).toContain('Link text')
-      expect(combinedResult).toMatch(/\[Link text\]\(https:\/\/example\.com\)/)
+      expect(combinedResult).toMatch(RE_LINK_WITH_URL)
     })
 
     it('processes complex HTML structures with multiple levels', async () => {

@@ -58,7 +58,7 @@ export function processPluginsForEvent(
 
       // Store plugin outputs on the element for processing
       if (pluginOutputs.length > 0) {
-        element.pluginOutput = (element.pluginOutput || []).concat(pluginOutputs)
+        element.pluginOutput = [...element.pluginOutput || [], ...pluginOutputs]
       }
     }
     else if (event.node.type === TEXT_NODE && event.type === NodeEventEnter) {

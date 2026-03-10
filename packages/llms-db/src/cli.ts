@@ -11,6 +11,8 @@ import { createArchive } from './archive.ts'
 import { createRepository } from './drizzle-repository.ts'
 import { normalizeUrl, validateUrl } from './utils.ts'
 
+const WWW_PREFIX_RE = /^www\./
+
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // Centralized repository creation with production detection
@@ -52,7 +54,7 @@ async function crawlUrl(options: CrawlOptions & { local?: boolean }) {
     const normalizedUrl = normalizeUrl(urlWithProtocol)
 
     // Auto-generate name if not provided
-    const entryName = options.name || new URL(normalizedUrl).hostname.replace(/^www\./, '')
+    const entryName = options.name || new URL(normalizedUrl).hostname.replace(WWW_PREFIX_RE, '')
 
     // Check if entry already exists by URL (dedupe by URL, not name)
     const existingEntry = await repository.getEntryByUrl(normalizedUrl)

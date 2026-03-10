@@ -6,6 +6,11 @@ import path from 'node:path'
 import { htmlToMarkdown } from 'mdream'
 import { shouldServeMarkdown } from 'mdream/negotiate'
 
+const GLOB_DOT_RE = /\./g
+const GLOB_DOUBLE_STAR_RE = /\*\*/g
+const GLOB_STAR_RE = /\*/g
+const GLOB_QUESTION_RE = /\?/g
+
 const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>> & { mdreamOptions: Record<string, never> } = {
   include: ['*.html', '**/*.html'], // Include root level and nested
   exclude: ['**/node_modules/**'],
@@ -149,10 +154,10 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     return patterns.some((pattern) => {
       // Simple glob pattern matching - convert to regex
       const regexPattern = pattern
-        .replace(/\./g, '\\.') // Escape literal dots first
-        .replace(/\*\*/g, '.*') // ** matches anything including /
-        .replace(/\*/g, '[^/]*') // * matches filename chars except /
-        .replace(/\?/g, '.') // ? matches any single char
+        .replace(GLOB_DOT_RE, '\\.') // Escape literal dots first
+        .replace(GLOB_DOUBLE_STAR_RE, '.*') // ** matches anything including /
+        .replace(GLOB_STAR_RE, '[^/]*') // * matches filename chars except /
+        .replace(GLOB_QUESTION_RE, '.') // ? matches any single char
 
       const regex = new RegExp(`^${regexPattern}$`)
       return regex.test(fileName)

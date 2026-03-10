@@ -2,6 +2,8 @@ import type { ElementNode, TextNode } from '../types.ts'
 import { ELEMENT_NODE, TAG_HEAD, TAG_META, TAG_TITLE } from '../const.ts'
 import { createPlugin } from '../pluggable/plugin.ts'
 
+const DOUBLE_QUOTE_RE = /"/g
+
 export interface FrontmatterPluginOptions {
   /** Additional frontmatter fields to include */
   additionalFields?: Record<string, string>
@@ -42,7 +44,7 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
   // Format frontmatter value (handle quotes, etc.)
   const formatValue = options.formatValue || ((name: string, value: string) => {
     // Escape quotes in values
-    value = value.replace(/"/g, '\\"')
+    value = value.replace(DOUBLE_QUOTE_RE, '\\"')
 
     // Add quotes for values with special characters
     if (value.includes('\n') || value.includes(':') || value.includes('#') || value.includes(' ')) {

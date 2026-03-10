@@ -5,6 +5,11 @@ import { glob } from 'tinyglobby'
 import { htmlToMarkdown } from './index.ts'
 import { extractionPlugin } from './plugins/extraction.ts'
 
+const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/
+const ANCHOR_INVALID_CHARS_RE = /[^a-z0-9]/g
+const LEADING_SLASH_RE = /^\//
+const TRAILING_SLASH_RE = /\/$/
+
 /**
  * Link in llms.txt section
  */
@@ -249,8 +254,7 @@ function generateLlmsTxtContent(files: ProcessedFile[], options: Pick<LlmsTxtArt
  * Parse frontmatter from markdown content
  */
 function parseFrontmatter(content: string): { frontmatter: Record<string, any> | null, body: string } {
-  const frontmatterRegex = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/
-  const match = content.match(frontmatterRegex)
+  const match = content.match(FRONTMATTER_RE)
 
   if (!match) {
     return { frontmatter: null, body: content }
@@ -313,7 +317,7 @@ function generateLlmsFullTxtContent(files: ProcessedFile[], options: Pick<LlmsTx
     content += `## Table of Contents\n\n`
 
     for (const file of files) {
-      const anchor = file.title.toLowerCase().replace(/[^a-z0-9]/g, '-')
+      const anchor = file.title.toLowerCase().replace(ANCHOR_INVALID_CHARS_RE, '-')
       content += `- [${file.title}](#${anchor})\n`
     }
 
@@ -382,7 +386,7 @@ function generateMarkdownFilesContent(files: ProcessedFile[]): { path: string, c
 
   for (const file of files) {
     // Convert URL to file path segments
-    const urlPath = file.url === '/' ? 'index' : file.url.replace(/^\//, '').replace(/\/$/, '')
+    const urlPath = file.url === '/' ? 'index' : file.url.replace(LEADING_SLASH_RE, '').replace(TRAILING_SLASH_RE, '')
     // Use forward slashes for the path structure, they'll be converted to OS-specific separators when written
     const mdPath = `md/${urlPath}.md`
     markdownFiles.push({

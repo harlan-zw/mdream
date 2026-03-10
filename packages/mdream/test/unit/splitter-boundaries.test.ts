@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 
+const RE_ENDS_WITH_PERIOD = /\.$/
+const RE_WHITESPACE = /\s+/
+const RE_STARTS_WITH_WORD = /^\w+/
+const RE_ENDS_WITH_WORD = /\w+$/
+const RE_BACKTICKS = /```/g
+const RE_NOT_STARTS_WITH_WORD_HASH_DASH = /^[^\w#-]/
+const RE_COMPLETE_LIST_ITEM = /^- .+/
+
 /**
  * Tests for RecursiveCharacterTextSplitter-style boundary detection
  * Hierarchy (most to least preferred):
@@ -32,7 +40,7 @@ describe('splitter boundary detection', () => {
         if (chunk.content.includes('paragraph')) {
           const trimmed = chunk.content.trim()
           // Should be complete sentences/paragraphs
-          expect(trimmed).toMatch(/\.$/)
+          expect(trimmed).toMatch(RE_ENDS_WITH_PERIOD)
         }
       }
     })
@@ -74,7 +82,7 @@ describe('splitter boundary detection', () => {
       // Should split at line breaks (between list items) not mid-word
       expect(chunks.length).toBeGreaterThan(1)
       for (const chunk of chunks) {
-        const words = chunk.content.trim().split(/\s+/)
+        const words = chunk.content.trim().split(RE_WHITESPACE)
         // No partial words at end of chunk
         expect(words.every(w => w.length > 0)).toBe(true)
       }
@@ -97,7 +105,7 @@ describe('splitter boundary detection', () => {
         for (const chunk of chunks) {
           const trimmed = chunk.content.trim()
           // Check that we don't have partial words (except the long word itself)
-          const words = trimmed.split(/\s+/)
+          const words = trimmed.split(RE_WHITESPACE)
           for (const word of words) {
             // Each word should either be complete or be the long word
             if (!word.includes(longWord)) {
@@ -123,8 +131,8 @@ describe('splitter boundary detection', () => {
       for (const chunk of chunks) {
         const trimmed = chunk.content.trim()
         // Should not start or end with partial words
-        expect(trimmed).toMatch(/^\w+/)
-        expect(trimmed).toMatch(/\w+$/)
+        expect(trimmed).toMatch(RE_STARTS_WITH_WORD)
+        expect(trimmed).toMatch(RE_ENDS_WITH_WORD)
       }
     })
   })
@@ -149,7 +157,7 @@ code line 3</code></pre>
       const codeChunk = chunks.find(c => c.content.includes('```'))
       if (codeChunk) {
         // Code block should be complete (have closing backticks)
-        const backtickCount = (codeChunk.content.match(/```/g) || []).length
+        const backtickCount = (codeChunk.content.match(RE_BACKTICKS) || []).length
         expect(backtickCount % 2).toBe(0) // Even number (opening and closing)
       }
     })
@@ -238,7 +246,7 @@ Word7 Word8 Word9</div>
           // Each line should be complete (not cut off mid-line if newline available)
           for (const line of lines) {
             if (line.trim()) {
-              expect(line.trim().split(/\s+/).length).toBeGreaterThan(0)
+              expect(line.trim().split(RE_WHITESPACE).length).toBeGreaterThan(0)
             }
           }
         }
@@ -291,7 +299,7 @@ Word7 Word8 Word9</div>
         const trimmed = chunk.content.trim()
         if (trimmed && !trimmed.startsWith('#')) {
           // Should not start with punctuation (unless it's a heading)
-          expect(trimmed).not.toMatch(/^[^\w#-]/)
+          expect(trimmed).not.toMatch(RE_NOT_STARTS_WITH_WORD_HASH_DASH)
         }
       }
     })
@@ -320,7 +328,7 @@ Word7 Word8 Word9</div>
           for (const line of lines) {
             if (line.includes('- ')) {
               // List item line should be complete
-              expect(line.trim()).toMatch(/^- .+/)
+              expect(line.trim()).toMatch(RE_COMPLETE_LIST_ITEM)
             }
           }
         }

@@ -48,7 +48,7 @@ export function parseAcceptHeader(accept: string): AcceptEntry[] {
  * Uses Accept header quality weights and position ordering:
  * - If text/markdown or text/plain has higher quality than text/html → markdown
  * - If same quality, earlier position in Accept header wins
- * - Bare *​/​* does NOT trigger markdown (prevents breaking OG crawlers)
+ * - Bare wildcard does NOT trigger markdown (prevents breaking OG crawlers)
  * - sec-fetch-dest: document always returns false (browser navigation)
  *
  * @param acceptHeader - The HTTP Accept header value

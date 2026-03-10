@@ -2,6 +2,8 @@ import type { LlmsTxtOptions } from './types.ts'
 import { writeFile } from 'node:fs/promises'
 import { basename, sep } from 'pathe'
 
+const ANCHOR_UNSAFE_CHARS_RE = /[^a-z0-9]/g
+
 export async function generateLlmsTxt(options: LlmsTxtOptions): Promise<void> {
   const { siteName, description, results, outputPath } = options
 
@@ -123,7 +125,7 @@ export async function generateLlmsFullTxt(options: LlmsTxtOptions): Promise<void
       catch {
         title = result.title || result.url
       }
-      const anchor = title.toLowerCase().replace(/[^a-z0-9]/g, '-')
+      const anchor = title.toLowerCase().replace(ANCHOR_UNSAFE_CHARS_RE, '-')
       content += `- [${title}](#${anchor})\n`
     }
 

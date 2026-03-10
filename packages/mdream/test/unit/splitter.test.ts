@@ -3,6 +3,8 @@ import { TAG_H1, TAG_H2 } from '../../src/const'
 import { withMinimalPreset } from '../../src/preset/minimal'
 import { htmlToMarkdownSplitChunks, htmlToMarkdownSplitChunksStream } from '../../src/splitter'
 
+const RE_WHITESPACE = /\s+/
+
 describe('htmlToMarkdownSplitChunks', () => {
   it('tracks header hierarchy in metadata', () => {
     const html = `
@@ -17,7 +19,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     })
 
     expect(chunks.length).toBeGreaterThan(0)
-    const lastChunk = chunks[chunks.length - 1]
+    const lastChunk = chunks.at(-1)
     expect(lastChunk.metadata.headers).toBeDefined()
     expect(lastChunk.metadata.headers?.h1).toBe('Title')
     expect(lastChunk.metadata.headers?.h2).toBe('Section')
@@ -125,7 +127,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       <p>${'word '.repeat(100)}</p>
     `
 
-    const wordCountFn = (text: string) => text.split(/\s+/).length
+    const wordCountFn = (text: string) => text.split(RE_WHITESPACE).length
 
     const chunks = htmlToMarkdownSplitChunks(html, {
       chunkSize: 50, // 50 words
@@ -180,7 +182,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     expect(firstChunk.metadata.headers?.h2).toBe('Level 2A')
 
     // Last chunk should have h1 and h2B
-    const lastChunk = chunks[chunks.length - 1]
+    const lastChunk = chunks.at(-1)
     expect(lastChunk.metadata.headers?.h1).toBe('Level 1')
     expect(lastChunk.metadata.headers?.h2).toBe('Level 2B')
   })
@@ -297,7 +299,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       })
 
       expect(chunks.length).toBeGreaterThan(0)
-      const lastChunk = chunks[chunks.length - 1]
+      const lastChunk = chunks.at(-1)
       expect(lastChunk.metadata.headers?.h1).toBe('Going back to h1')
       expect(lastChunk.metadata.headers?.h2).toBe('Then h2')
     })
@@ -622,7 +624,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       })
 
       // Should have h1, h2, and both h3s in metadata
-      const chunk = chunks[chunks.length - 1]
+      const chunk = chunks.at(-1)
       expect(chunk.metadata.headers?.h1).toBe('Title')
       expect(chunk.metadata.headers?.h2).toBe('Section')
       expect(chunk.metadata.headers?.h3).toBe('Subsection B')

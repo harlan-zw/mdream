@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest'
 
+const GLOB_DOT_RE = /\./g
+const GLOB_DOUBLE_STAR_RE = /\*\*/g
+const GLOB_STAR_RE = /\*/g
+const GLOB_QUESTION_RE = /\?/g
+
 // Helper function extracted from plugin for direct testing
 function matchesPattern(fileName: string, patterns: string[]): boolean {
   return patterns.some((pattern) => {
     const regexPattern = pattern
-      .replace(/\./g, '\\.') // Escape literal dots first
-      .replace(/\*\*/g, '.*') // ** matches anything including /
-      .replace(/\*/g, '[^/]*') // * matches filename chars except /
-      .replace(/\?/g, '.') // ? matches any single char
+      .replace(GLOB_DOT_RE, '\\.') // Escape literal dots first
+      .replace(GLOB_DOUBLE_STAR_RE, '.*') // ** matches anything including /
+      .replace(GLOB_STAR_RE, '[^/]*') // * matches filename chars except /
+      .replace(GLOB_QUESTION_RE, '.') // ? matches any single char
 
     const regex = new RegExp(`^${regexPattern}$`)
     return regex.test(fileName)

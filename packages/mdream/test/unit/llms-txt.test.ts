@@ -7,6 +7,14 @@ import { createLlmsTxtStream, generateLlmsTxtArtifacts } from '../../src/llms-tx
 
 const testDir = join(tmpdir(), 'mdream-llms-txt-test')
 
+const RE_ABOUT_THEN_API_CORE = /\[About\].*\n\n.*\[API Core\]/s
+const RE_DOCS2_THEN_LEARN1_WITH_BLANK = /\[Docs 2\].*\n\n.*\[Learn 1\]/s
+const RE_DOCS1_THEN_LEARN1_WITH_BLANK = /\[Docs 1\].*\n\n.*\[Learn 1\]/s
+const RE_DOCS1_THEN_LEARN1_NO_BLANK = /\[Docs 1\].*\n- \[Learn 1\]/s
+const RE_DOCS2_THEN_LEARN1_NO_BLANK = /\[Docs 2\].*\n- \[Learn 1\]/s
+const RE_GUIDE6_THEN_LEARN1_WITH_BLANK = /\[Guide 6\].*\n\n.*\[Learn 1\]/s
+const RE_GUIDE6_THEN_LEARN1_NO_BLANK = /\[Guide 6\].*\n- \[Learn 1\]/s
+
 // Helper to create test HTML files
 async function createTestFiles() {
   await mkdir(testDir, { recursive: true })
@@ -751,7 +759,7 @@ existingKey: existingValue
       // With new grouping: /about is root-level without nesting, so grouped with /
       // Blank line after root group (/, /about) before /api group
       // Expected: /, /about, [blank], /api/core
-      expect(llmsTxtContent).toMatch(/\[About\].*\n\n.*\[API Core\]/s)
+      expect(llmsTxtContent).toMatch(RE_ABOUT_THEN_API_CORE)
 
       await rm(streamTestDir, { recursive: true, force: true })
     })
@@ -780,7 +788,7 @@ existingKey: existingValue
       const llmsTxtContent = await readFile(join(streamTestDir, 'llms.txt'), 'utf-8')
 
       // Should have blank line after /docs group (2 URLs > 1)
-      expect(llmsTxtContent).toMatch(/\[Docs 2\].*\n\n.*\[Learn 1\]/s)
+      expect(llmsTxtContent).toMatch(RE_DOCS2_THEN_LEARN1_WITH_BLANK)
 
       await rm(streamTestDir, { recursive: true, force: true })
     })
@@ -808,8 +816,8 @@ existingKey: existingValue
       const llmsTxtContent = await readFile(join(streamTestDir, 'llms.txt'), 'utf-8')
 
       // Should NOT have blank line after /docs group (only 1 URL)
-      expect(llmsTxtContent).not.toMatch(/\[Docs 1\].*\n\n.*\[Learn 1\]/s)
-      expect(llmsTxtContent).toMatch(/\[Docs 1\].*\n- \[Learn 1\]/s)
+      expect(llmsTxtContent).not.toMatch(RE_DOCS1_THEN_LEARN1_WITH_BLANK)
+      expect(llmsTxtContent).toMatch(RE_DOCS1_THEN_LEARN1_NO_BLANK)
 
       await rm(streamTestDir, { recursive: true, force: true })
     })
@@ -842,8 +850,8 @@ existingKey: existingValue
       const llmsTxtContent = await readFile(join(streamTestDir, 'llms.txt'), 'utf-8')
 
       // Should NOT have blank line after /docs group (group 3, even with multiple URLs)
-      expect(llmsTxtContent).not.toMatch(/\[Docs 2\].*\n\n.*\[Learn 1\]/s)
-      expect(llmsTxtContent).toMatch(/\[Docs 2\].*\n- \[Learn 1\]/s)
+      expect(llmsTxtContent).not.toMatch(RE_DOCS2_THEN_LEARN1_WITH_BLANK)
+      expect(llmsTxtContent).toMatch(RE_DOCS2_THEN_LEARN1_NO_BLANK)
 
       await rm(streamTestDir, { recursive: true, force: true })
     })
@@ -879,8 +887,8 @@ existingKey: existingValue
       const llmsTxtContent = await readFile(join(streamTestDir, 'llms.txt'), 'utf-8')
 
       // Should NOT have blank line after /guide group (group 4, even with 6 URLs)
-      expect(llmsTxtContent).not.toMatch(/\[Guide 6\].*\n\n.*\[Learn 1\]/s)
-      expect(llmsTxtContent).toMatch(/\[Guide 6\].*\n- \[Learn 1\]/s)
+      expect(llmsTxtContent).not.toMatch(RE_GUIDE6_THEN_LEARN1_WITH_BLANK)
+      expect(llmsTxtContent).toMatch(RE_GUIDE6_THEN_LEARN1_NO_BLANK)
 
       await rm(streamTestDir, { recursive: true, force: true })
     })

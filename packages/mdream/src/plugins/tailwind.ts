@@ -81,7 +81,7 @@ function sortByBreakpoint(classes: string[]): string[] {
     '2xl:': 5,
   }
 
-  return [...classes].sort((a, b) => {
+  return classes.toSorted((a, b) => {
     const aBreakpoint = extractBaseClass(a).breakpoint
     const bBreakpoint = extractBaseClass(b).breakpoint
     return breakpointOrder[aBreakpoint] - breakpointOrder[bBreakpoint]

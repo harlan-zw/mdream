@@ -19,6 +19,9 @@ import { createMarkdownProcessor } from './markdown-processor.ts'
 import { parseHtmlStream } from './parse.ts'
 import { processPluginsForEvent } from './plugin-processor.ts'
 
+const MARKDOWN_HEADER_LINE_RE = /^#{1,6}\s+/
+const NEWLINE_RE = /\n/g
+
 const DEFAULT_HEADERS_TO_SPLIT_ON: number[] = [
   TAG_H2,
   TAG_H3,
@@ -111,7 +114,7 @@ export function* htmlToMarkdownSplitChunksStream(
     if (opts.stripHeaders) {
       chunkContent = chunkContent
         .split('\n')
-        .filter(line => !line.match(/^#{1,6}\s+/))
+        .filter(line => !MARKDOWN_HEADER_LINE_RE.test(line))
         .join('\n')
         .trim()
 
@@ -127,7 +130,7 @@ export function* htmlToMarkdownSplitChunksStream(
         loc: {
           lines: {
             from: lineNumber,
-            to: lineNumber + (originalChunkContent.match(/\n/g) || []).length,
+            to: lineNumber + (originalChunkContent.match(NEWLINE_RE) || []).length,
           },
         },
       },
@@ -159,7 +162,7 @@ export function* htmlToMarkdownSplitChunksStream(
       lastChunkEndPosition = chunkEnd
     }
 
-    lineNumber += (originalChunkContent.match(/\n/g) || []).length
+    lineNumber += (originalChunkContent.match(NEWLINE_RE) || []).length
   }
 
   const parseState: ParseState = {

@@ -13,6 +13,14 @@ import { withHttps } from 'ufo'
 import { getStartingUrl, isUrlExcluded, matchesGlobPattern, parseUrlPattern } from './glob-utils.ts'
 import { extractMetadata } from './metadata-extractor.ts'
 
+const SITEMAP_INDEX_LOC_RE = /<sitemap[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/sitemap>/gs
+const SITEMAP_URL_LOC_RE = /<url[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/url>/gs
+const ROBOTS_SITEMAP_RE = /Sitemap:\s*(.*)/gi
+const ROBOTS_SITEMAP_PREFIX_RE = /Sitemap:\s*/i
+const URL_TRAILING_SLASH_RE = /\/$/
+const URL_PATH_UNSAFE_CHARS_RE = /[^\w\-]/g
+const FRONTMATTER_BLOCK_RE = /^---[^\n]*\n[\s\S]*?\n---[^\n]*\n?/
+
 // Helper function to load sitemap with no retries using direct fetch
 async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> {
   const controller = new AbortController()
@@ -37,11 +45,11 @@ async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> 
     // Check if this is a sitemap index (contains <sitemapindex>)
     if (xmlContent.includes('<sitemapindex')) {
       // This is a sitemap index - recursively load all child sitemaps
-      const sitemapIndexRegex = /<sitemap[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/sitemap>/gs
+      SITEMAP_INDEX_LOC_RE.lastIndex = 0
       const childSitemaps: string[] = []
       let match
       while (true) {
-        match = sitemapIndexRegex.exec(xmlContent)
+        match = SITEMAP_INDEX_LOC_RE.exec(xmlContent)
         if (match === null)
           break
 
@@ -72,10 +80,10 @@ async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> 
     else {
       // This is a regular sitemap - extract URLs
       const urls: string[] = []
-      const urlRegex = /<url[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/url>/gs
+      SITEMAP_URL_LOC_RE.lastIndex = 0
       let match
       while (true) {
-        match = urlRegex.exec(xmlContent)
+        match = SITEMAP_URL_LOC_RE.exec(xmlContent)
         if (match === null)
           break
 
@@ -199,14 +207,14 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     }
     if (robotsResponse?.ok) {
       const robotsContent = await robotsResponse.text()
-      const sitemapMatches = robotsContent.match(/Sitemap:\s*(.*)/gi)
+      const sitemapMatches = robotsContent.match(ROBOTS_SITEMAP_RE)
       if (sitemapMatches && sitemapMatches.length > 0) {
         progress.sitemap.found = sitemapMatches.length
         progress.sitemap.status = 'processing'
         onProgress?.(progress)
 
         // Extract sitemap URLs from robots.txt and try using them
-        const robotsSitemaps = sitemapMatches.map(match => match.replace(/Sitemap:\s*/i, '').trim())
+        const robotsSitemaps = sitemapMatches.map(match => match.replace(ROBOTS_SITEMAP_PREFIX_RE, '').trim())
 
         for (const sitemapUrl of robotsSitemaps) {
           try {
@@ -481,8 +489,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         const urlObj = new URL(request.loadedUrl)
         const urlPath = urlObj.pathname === '/' ? '/index' : urlObj.pathname
         // Convert URL path to OS-safe path by replacing forward slashes
-        const pathSegments = urlPath.replace(/\/$/, '').split('/').filter(seg => seg.length > 0)
-        const safeSegments = pathSegments.map(seg => seg.replace(/[^\w\-]/g, '-'))
+        const pathSegments = urlPath.replace(URL_TRAILING_SLASH_RE, '').split('/').filter(seg => seg.length > 0)
+        const safeSegments = pathSegments.map(seg => seg.replace(URL_PATH_UNSAFE_CHARS_RE, '-'))
         // Ensure we have a valid filename
         const filename = safeSegments.length > 0 ? safeSegments.join('/') : 'index'
         const safeFilename = normalize(`${filename}.md`)
@@ -503,8 +511,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
       // Always create results for home page (needed for metadata extraction)
       // and for URLs that match the glob pattern
-      const normalizedUrl = request.loadedUrl.replace(/\/$/, '')
-      const normalizedHomePageUrl = homePageUrl.replace(/\/$/, '')
+      const normalizedUrl = request.loadedUrl.replace(URL_TRAILING_SLASH_RE, '')
+      const normalizedHomePageUrl = homePageUrl.replace(URL_TRAILING_SLASH_RE, '')
       const isHomePage = normalizedUrl === normalizedHomePageUrl
 
       if (shouldProcessMarkdown || isHomePage) {
@@ -680,7 +688,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
           return false
         const trimmedContent = result.content.trim()
         // Filter out pages that only have frontmatter or are too short
-        const contentWithoutFrontmatter = trimmedContent.replace(/^---[^\n]*\n[\s\S]*?\n---[^\n]*\n?/, '').trim()
+        const contentWithoutFrontmatter = trimmedContent.replace(FRONTMATTER_BLOCK_RE, '').trim()
         return contentWithoutFrontmatter.length > 10 // Must have at least some meaningful content
       })
 

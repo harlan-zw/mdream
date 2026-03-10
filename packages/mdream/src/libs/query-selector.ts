@@ -47,13 +47,15 @@ export function createClassSelector(selector: string): SelectorMatcher {
   }
 }
 
+// eslint-disable-next-line regexp/no-super-linear-backtracking, regexp/no-misleading-capturing-group
+const ATTR_SELECTOR_RE = /\[([^\]=~|^$*]+)(?:([=~|^$*]+)["']?([^"'\]]+)["']?)?\]/
+
 /**
  * Creates an attribute selector matcher (e.g., '[data-id]', '[href="https://example.com"]')
  */
 export function createAttributeSelector(selector: string): SelectorMatcher {
   // Parse [attr], [attr=value], [attr^=value], etc.
-  // eslint-disable-next-line regexp/no-super-linear-backtracking, regexp/no-misleading-capturing-group
-  const match = selector.match(/\[([^\]=~|^$*]+)(?:([=~|^$*]+)["']?([^"'\]]+)["']?)?\]/)
+  const match = selector.match(ATTR_SELECTOR_RE)
 
   const attrName = match ? match[1] : selector.slice(1, -1)
   const operator = match?.[2]

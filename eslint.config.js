@@ -14,6 +14,11 @@ export default antfu({
     'vue/no-empty-pattern': 'off',
   },
 }, {
+  files: ['**/*.md/**'],
+  rules: {
+    'e18e/prefer-static-regex': 'off',
+  },
+}, {
   files: ['**/test/**/*.ts', '**/test/**/*.js'],
   rules: {
     'ts/no-unsafe-function-type': 'off',

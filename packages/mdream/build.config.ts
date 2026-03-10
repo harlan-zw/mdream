@@ -3,6 +3,8 @@ import { resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { defineBuildConfig } from 'obuild/config'
 
+const EXPORT_STMT_RE = /export\s*\{[^}]+\};\s*$/m
+
 export default defineBuildConfig({
   entries: [
     {
@@ -21,7 +23,7 @@ export default defineBuildConfig({
       const cwd = ctx?.cwd || process.cwd()
       const browserMjsPath = resolve(cwd, 'dist/iife.mjs')
       try {
-        const iifeContent = readFileSync(browserMjsPath, 'utf-8').replace(/export\s*\{[^}]+\};\s*$/m, '')
+        const iifeContent = readFileSync(browserMjsPath, 'utf-8').replace(EXPORT_STMT_RE, '')
 
         // Clean up browser ES module files (we only need the IIFE)
         try {
