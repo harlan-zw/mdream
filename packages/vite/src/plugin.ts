@@ -4,6 +4,7 @@ import type { CacheEntry, MarkdownConversionResult, ViteHtmlToMarkdownOptions } 
 import fs from 'node:fs'
 import path from 'node:path'
 import { htmlToMarkdown } from 'mdream'
+import { shouldServeMarkdown } from 'mdream/negotiate'
 
 const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>> & { mdreamOptions: Record<string, never> } = {
   include: ['*.html', '**/*.html'], // Include root level and nested
@@ -156,28 +157,6 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
       const regex = new RegExp(`^${regexPattern}$`)
       return regex.test(fileName)
     })
-  }
-
-  // Detect if client prefers markdown based on Accept header
-  // Clients like Claude Code, Bun, and other API clients typically don't include text/html
-  function shouldServeMarkdown(acceptHeader?: string, secFetchDest?: string): boolean {
-    // Browsers send sec-fetch-dest header - if it's 'document', it's a browser navigation
-    // We should NOT serve markdown in that case
-    if (secFetchDest === 'document') {
-      return false
-    }
-
-    const accept = acceptHeader || ''
-    // Must NOT include text/html (excludes browsers)
-    const hasHtml = accept.includes('text/html')
-    if (hasHtml) {
-      return false
-    }
-
-    // Must explicitly opt-in with either */* or text/markdown
-    // This catches API clients like Claude Code (axios with application/json, text/plain, */*)
-    const hasWildcard = accept.includes('*/*')
-    return hasWildcard || accept.includes('text/markdown')
   }
 
   function createMarkdownMiddleware(

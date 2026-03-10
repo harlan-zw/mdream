@@ -39,6 +39,14 @@
       },
       "default": "./dist/cli.mjs"
     },
+    "./negotiate": {
+      "types": "./dist/negotiate.d.mts",
+      "import": {
+        "types": "./dist/negotiate.d.mts",
+        "default": "./dist/negotiate.mjs"
+      },
+      "default": "./dist/negotiate.mjs"
+    },
     "./plugins": {
       "types": "./dist/plugins.d.mts",
       "import": {

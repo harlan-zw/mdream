@@ -5,32 +5,18 @@ import { withSiteUrl } from '#site-config/server/composables/utils'
 import { consola } from 'consola'
 import { createError, defineEventHandler, getHeader, setHeader } from 'h3'
 import { htmlToMarkdown } from 'mdream'
+import { shouldServeMarkdown as _shouldServeMarkdown } from 'mdream/negotiate'
 import { extractionPlugin } from 'mdream/plugins'
 import { withMinimalPreset } from 'mdream/preset/minimal'
 import { useNitroApp, useRuntimeConfig } from 'nitropack/runtime'
 
 const logger = consola.withTag('nuxt-mdream')
 
-// Detect if client prefers markdown based on Accept header
-// Clients like Claude Code, Bun, and other API clients typically don't include text/html
 function shouldServeMarkdown(event: H3Event): boolean {
-  const accept = getHeader(event, 'accept') || ''
-  const secFetchDest = getHeader(event, 'sec-fetch-dest') || ''
-
-  // Browsers send sec-fetch-dest header - if it's 'document', it's a browser navigation
-  // We should NOT serve markdown in that case
-  if (secFetchDest === 'document') {
-    return false
-  }
-
-  // Must NOT include text/html (excludes browsers)
-  if (accept.includes('text/html')) {
-    return false
-  }
-
-  // Must explicitly opt-in with either */* or text/markdown
-  // This catches API clients like Claude Code (axios with application/json, text/plain, */*)
-  return accept.includes('*/*') || accept.includes('text/markdown')
+  return _shouldServeMarkdown(
+    getHeader(event, 'accept'),
+    getHeader(event, 'sec-fetch-dest'),
+  )
 }
 
 // Convert HTML to Markdown
@@ -109,6 +95,9 @@ export default defineEventHandler(async (event) => {
   // Check if we should serve markdown based on Accept header or .md extension
   const hasMarkdownExtension = path.endsWith('.md')
   const clientPrefersMarkdown = shouldServeMarkdown(event)
+  let clientPrefersMarkdown = shouldServeMarkdown(event)
+
+  // Allow users to override the negotiate decision via hook
 
   // Early exit: skip if not requesting .md and client doesn't prefer markdown
   if (!hasMarkdownExtension && !clientPrefersMarkdown) {

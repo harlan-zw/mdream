@@ -1,68 +1,93 @@
+import { parseAcceptHeader, shouldServeMarkdown } from 'mdream/negotiate'
 import { describe, expect, it } from 'vitest'
 
-// Mock the shouldServeMarkdown function logic for testing
-function shouldServeMarkdown(accept: string, secFetchDest?: string): boolean {
-  // Browsers send sec-fetch-dest header - if it's 'document', it's a browser navigation
-  if (secFetchDest === 'document') {
-    return false
-  }
-
-  // Must NOT include text/html (excludes browsers)
-  if (accept.includes('text/html')) {
-    return false
-  }
-
-  // Must explicitly opt-in with either */* or text/markdown
-  return accept.includes('*/*') || accept.includes('text/markdown')
-}
-
-describe('accept header detection', () => {
-  it('should serve markdown when Accept header lacks text/html (Claude Code)', () => {
-    const accept = 'application/json, text/plain, */*'
-    expect(shouldServeMarkdown(accept)).toBe(true)
+describe('parseAcceptHeader', () => {
+  it('should parse simple types', () => {
+    const entries = parseAcceptHeader('text/html, text/plain')
+    expect(entries).toEqual([
+      { type: 'text/html', q: 1, position: 0 },
+      { type: 'text/plain', q: 1, position: 1 },
+    ])
   })
 
-  it('should serve markdown when Accept explicitly requests text/markdown', () => {
-    const accept = 'text/markdown'
-    expect(shouldServeMarkdown(accept)).toBe(true)
+  it('should parse quality weights', () => {
+    const entries = parseAcceptHeader('text/markdown, text/html;q=0.9, */*;q=0.1')
+    expect(entries).toEqual([
+      { type: 'text/markdown', q: 1, position: 0 },
+      { type: 'text/html', q: 0.9, position: 1 },
+      { type: '*/*', q: 0.1, position: 2 },
+    ])
   })
 
-  it('should NOT serve markdown when Accept has only application/json (no */* or text/markdown)', () => {
-    const accept = 'application/json'
-    expect(shouldServeMarkdown(accept)).toBe(false)
+  it('should return empty array for empty string', () => {
+    expect(parseAcceptHeader('')).toEqual([])
+  })
+})
+
+describe('shouldServeMarkdown', () => {
+  // Real-world client scenarios from the issue
+
+  it('openClaw: text/markdown preferred over text/html', () => {
+    expect(shouldServeMarkdown('text/markdown, text/html;q=0.9, */*;q=0.1')).toBe(true)
   })
 
-  it('should NOT serve markdown when Accept header includes text/html (browser)', () => {
-    const accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-    expect(shouldServeMarkdown(accept)).toBe(false)
+  it('claude Code: text/markdown before text/html (same q)', () => {
+    expect(shouldServeMarkdown('text/markdown, text/html, */*')).toBe(true)
   })
 
-  it('should NOT serve markdown when sec-fetch-dest is document (browser)', () => {
-    const accept = 'application/json, text/plain, */*'
-    const secFetchDest = 'document'
-    expect(shouldServeMarkdown(accept, secFetchDest)).toBe(false)
+  it('codex: text/plain only', () => {
+    expect(shouldServeMarkdown('text/plain')).toBe(true)
   })
 
-  it('should serve markdown when sec-fetch-dest is empty (API client)', () => {
-    const accept = 'application/json, text/plain, */*'
-    const secFetchDest = ''
-    expect(shouldServeMarkdown(accept, secFetchDest)).toBe(true)
+  it('claude Code (axios): application/json, text/plain, */*', () => {
+    expect(shouldServeMarkdown('application/json, text/plain, */*')).toBe(true)
   })
 
-  it('should NOT serve markdown when Accept is empty', () => {
-    const accept = ''
-    expect(shouldServeMarkdown(accept)).toBe(false)
+  it('explicit text/markdown only', () => {
+    expect(shouldServeMarkdown('text/markdown')).toBe(true)
   })
 
-  it('should serve markdown for axios default headers (like Bun/Claude Code)', () => {
-    // Axios default Accept header
-    const accept = 'application/json, text/plain, */*'
-    expect(shouldServeMarkdown(accept)).toBe(true)
+  // Browser / crawler scenarios that must NOT serve markdown
+
+  it('browser: standard Accept header', () => {
+    expect(shouldServeMarkdown('text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8')).toBe(false)
   })
 
-  it('should NOT serve markdown when both text/html and sec-fetch-dest present', () => {
-    const accept = 'text/html,application/xhtml+xml,application/xml;q=0.9'
-    const secFetchDest = 'document'
-    expect(shouldServeMarkdown(accept, secFetchDest)).toBe(false)
+  it('browser: sec-fetch-dest document', () => {
+    expect(shouldServeMarkdown('application/json, text/plain, */*', 'document')).toBe(false)
+  })
+
+  it('facebook/LinkedIn OG crawler: */* only', () => {
+    expect(shouldServeMarkdown('*/*')).toBe(false)
+  })
+
+  it('gemini (bare */*): should not serve markdown', () => {
+    expect(shouldServeMarkdown('*/*')).toBe(false)
+  })
+
+  it('empty Accept header', () => {
+    expect(shouldServeMarkdown('')).toBe(false)
+  })
+
+  it('application/json only (no markdown types)', () => {
+    expect(shouldServeMarkdown('application/json')).toBe(false)
+  })
+
+  // Edge cases: text/html preferred over markdown types
+
+  it('text/html before text/plain (same q) → HTML wins', () => {
+    expect(shouldServeMarkdown('text/html, text/plain')).toBe(false)
+  })
+
+  it('text/html higher q than text/markdown', () => {
+    expect(shouldServeMarkdown('text/markdown;q=0.5, text/html;q=0.9')).toBe(false)
+  })
+
+  it('text/plain with higher q than text/html → markdown', () => {
+    expect(shouldServeMarkdown('text/html;q=0.5, text/plain;q=0.9')).toBe(true)
+  })
+
+  it('sec-fetch-dest: document overrides even markdown-preferring Accept', () => {
+    expect(shouldServeMarkdown('text/markdown', 'document')).toBe(false)
   })
 })

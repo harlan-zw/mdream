@@ -245,7 +245,7 @@ describe('viteHtmlToMarkdownPlugin - Route Filtering', () => {
 
     const mockReq = {
       url: '/about',
-      headers: { accept: '*/*' },
+      headers: { accept: 'text/markdown, text/html, */*' },
     }
     const mockRes = {
       setHeader: vi.fn(),
