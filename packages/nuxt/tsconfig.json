@@ -1,3 +1,23 @@
 {
-  "extends": "./.nuxt/tsconfig.json"
+  "extends": "./.nuxt/tsconfig.json",
+  "exclude": [
+    "../../bench/**",
+    "../../docs/**",
+    "../../examples/**",
+    "../../packages/mdream/**",
+    "../../packages/mdream-rust/**",
+    "../../packages/crawl/**",
+    "../../packages/vite/**",
+    "../../packages/action/**",
+    "../../packages/llms-db/**",
+    "../../../bench/**",
+    "../../../docs/**",
+    "../../../examples/**",
+    "../../../packages/mdream/**",
+    "../../../packages/mdream-rust/**",
+    "../../../packages/crawl/**",
+    "../../../packages/vite/**",
+    "../../../packages/action/**",
+    "../../../packages/llms-db/**"
+  ]
 }

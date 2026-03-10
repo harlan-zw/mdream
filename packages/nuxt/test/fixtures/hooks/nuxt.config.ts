@@ -14,7 +14,7 @@ export default defineNuxtConfig({
   },
   hooks: {
     // Note: Hook types are auto-generated in .nuxt/module/nuxt-mdream.d.ts
-    // Test mdream:llms-txt:generate hook
+    // @ts-expect-error hook type generated at build time
     'mdream:llms-txt:generate': (payload: MdreamLlmsTxtGeneratePayload) => {
       console.log('[Hook] mdream:llms-txt:generate called')
       console.log('[Hook] Pages count:', payload.pages.length)

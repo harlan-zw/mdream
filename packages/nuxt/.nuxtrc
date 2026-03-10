@@ -1,4 +1,4 @@
-imports.autoImport=false
+imports.autoImport=true
 typescript.includeWorkspace=true
 modules[]=@mdream/nuxt
 modules[]=nuxt-site-config
