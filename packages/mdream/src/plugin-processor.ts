@@ -19,11 +19,16 @@ export function processPluginsForEvent(
 ): boolean {
   // Process plugins with full state access
   if (plugins?.length) {
+    let shouldSkip = false
     for (const plugin of plugins) {
       const res = plugin.beforeNodeProcess?.(event, state)
-      if (typeof res === 'object' && res.skip) {
-        return true // Skip this event
+      if (typeof res === 'object') {
+        // Last plugin wins - allows overriding skip decisions
+        shouldSkip = res.skip
       }
+    }
+    if (shouldSkip) {
+      return true // Skip this event
     }
 
     // Run plugin hooks
