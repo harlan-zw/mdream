@@ -43,7 +43,7 @@
     "test": "pnpm prepare:fixtures && vitest run",
     "test:watch": "vitest watch",
     "test:attw": "echo 'ok'",
-    "typecheck": "echo 'ok'",
+    "typecheck": "nuxt typecheck",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "prepack": "pnpm run build"

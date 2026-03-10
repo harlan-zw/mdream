@@ -1,6 +1,7 @@
 import type { H3Event } from 'h3'
 import type { HTMLToMarkdownOptions } from 'mdream'
-import type { MdreamMarkdownContext, MdreamNegotiateContext, ModuleRuntimeConfig } from '../../../types'
+import type { ModuleRuntimeConfig } from '../../../types'
+import type { MdreamMarkdownContext, MdreamNegotiateContext } from '../../types'
 import { withSiteUrl } from '#site-config/server/composables/utils'
 import { consola } from 'consola'
 import { createError, defineEventHandler, getHeader, setHeader } from 'h3'
@@ -66,7 +67,6 @@ async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRu
     event,
   }
 
-  // Call Nitro runtime hook if available
   await nitroApp.hooks.callHook('mdream:markdown', context)
   markdown = context.markdown // Use potentially modified markdown
   return { markdown, title, description }
@@ -148,7 +148,7 @@ export default defineEventHandler(async (event) => {
       return
     }
 
-    html = response._data
+    html = response._data as string
   }
   catch (e) {
     logger.error(`Failed to fetch HTML for ${path}`, e)

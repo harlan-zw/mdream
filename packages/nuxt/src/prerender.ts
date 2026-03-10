@@ -66,6 +66,7 @@ export function setupPrerenderHandler() {
         pages,
       }
 
+      // @ts-expect-error hook type augmented in generated .nuxt/types/nuxt-mdream.d.ts
       await nuxt.hooks.callHook('mdream:llms-txt', hookPayload)
 
       // Use the potentially modified content from the hook
