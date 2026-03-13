@@ -20,6 +20,3 @@ path = "src/bin.rs"
 [[bench]]
 name = "convert_bench"
 harness = false
-
-[dev-dependencies]
-pretty_assertions = "1.4.1"

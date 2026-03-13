@@ -25,6 +25,14 @@
         "default": "./dist/index.mjs"
       },
       "default": "./dist/index.mjs"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.mts",
+      "import": {
+        "types": "./dist/worker.d.mts",
+        "default": "./dist/worker.mjs"
+      },
+      "default": "./dist/worker.mjs"
     }
   },
   "main": "./dist/index.mjs",

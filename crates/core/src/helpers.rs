@@ -194,7 +194,7 @@ pub(crate) fn process_tag_attributes(html_chunk: &str, position: usize, tag_hand
     (false, i, Attributes::new(), false)
 }
 
-pub fn parse_attributes(attr_str: &str) -> Attributes {
+pub(crate) fn parse_attributes(attr_str: &str) -> Attributes {
     let mut result = Attributes::with_capacity(4);
     if attr_str.is_empty() {
         return result;
@@ -313,7 +313,7 @@ pub fn parse_attributes(attr_str: &str) -> Attributes {
 
 // ── CSS Selector parsing ──
 
-pub fn parse_css_selector(selector: &str) -> ParsedSelector {
+pub(crate) fn parse_css_selector(selector: &str) -> ParsedSelector {
     let selector = selector.trim();
     let mut parts: Vec<ParsedSelector> = Vec::new();
     let mut current = String::new();
@@ -380,7 +380,7 @@ fn parse_attr_selector(s: &str) -> ParsedSelector {
     ParsedSelector::Attribute { name: inner.to_string(), operator: None, value: None }
 }
 
-pub fn matches_selector(tag: &ElementNode, selector: &ParsedSelector) -> bool {
+pub(crate) fn matches_selector(tag: &ElementNode, selector: &ParsedSelector) -> bool {
     match selector {
         ParsedSelector::Tag(name) => tag.name() == name,
         ParsedSelector::Class(class_name) => {

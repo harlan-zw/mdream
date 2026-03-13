@@ -1,10 +1,10 @@
 #![deny(clippy::all)]
 
 pub mod consts;
-pub mod convert;
-pub mod helpers;
+pub(crate) mod convert;
+pub(crate) mod helpers;
 pub mod splitter;
-pub mod tags;
+pub(crate) mod tags;
 pub mod types;
 
 use convert::ConvertState;

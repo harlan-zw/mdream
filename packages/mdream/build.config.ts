@@ -13,5 +13,6 @@ export default defineBuildConfig({
     { type: 'bundle', input: './src/index.ts', rolldown },
     { type: 'bundle', input: './src/browser.ts', rolldown: rolldownWasm },
     { type: 'bundle', input: './src/edge.ts', rolldown: rolldownWasm },
+    { type: 'bundle', input: './src/worker.ts' },
   ],
 })
