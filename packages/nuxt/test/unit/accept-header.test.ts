@@ -1,4 +1,4 @@
-import { parseAcceptHeader, shouldServeMarkdown } from 'mdream/negotiate'
+import { parseAcceptHeader, shouldServeMarkdown } from '@mdream/js/negotiate'
 import { describe, expect, it } from 'vitest'
 
 describe('parseAcceptHeader', () => {

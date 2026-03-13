@@ -5,7 +5,6 @@ export default antfu({
     '**/.mdream/**',
     '**/examples/**',
     'docs/**',
-    'packages/engine-rust/**',
     'debug_test.ts',
     'rewrite-imports.mjs',
   ],

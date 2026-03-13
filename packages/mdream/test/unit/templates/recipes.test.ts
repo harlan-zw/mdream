@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src'
-import { engines, resolveEngine } from '../../utils/engines'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('recipes $name', (engineConfig) => {
   it('tables', async () => {
@@ -27,7 +26,7 @@ describe.each(engines)('recipes $name', (engineConfig) => {
 </table>
 </div>`
     const engine = await resolveEngine(engineConfig.engine)
-    const markdown = htmlToMarkdown(html, { engine })
+    const markdown = htmlToMarkdown(html, { engine }).markdown
     expect(markdown).toMatchSnapshot()
   })
   it.skip('malformed', async () => {
@@ -47,7 +46,7 @@ describe.each(engines)('recipes $name', (engineConfig) => {
       </button>
     </div>`
     const engine = await resolveEngine(engineConfig.engine)
-    const markdown = htmlToMarkdown(html, { engine })
+    const markdown = htmlToMarkdown(html, { engine }).markdown
     expect(markdown).toMatchSnapshot()
   })
 })

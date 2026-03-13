@@ -30,6 +30,7 @@
     "crawlee": "catalog:",
     "eslint": "catalog:",
     "llm-cost": "catalog:",
+    "miniflare": "^4.20260310.0",
     "node-html-markdown": "catalog:",
     "obuild": "catalog:",
     "playwright": "catalog:",

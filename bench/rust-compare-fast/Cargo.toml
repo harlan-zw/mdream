@@ -1,0 +1,17 @@
+[package]
+name = "rust-compare-fast"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rust-compare-fast"
+path = "src/main.rs"
+
+[dependencies]
+mdream = { path = "../../crates/core" }
+html2md = { version = "0.0", package = "fast_html2md" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"

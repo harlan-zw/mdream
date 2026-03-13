@@ -1,15 +1,13 @@
-import type { ElementNode } from '../../../src/types.ts'
-import { ELEMENT_NODE } from '@mdream/engine-js'
+import type { ElementNode } from '@mdream/js'
+import { ELEMENT_NODE, htmlToMarkdown, withMinimalPreset } from '@mdream/js'
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src/index.ts'
-import { withMinimalPreset } from '../../../src/preset/minimal.ts'
 
 describe('plugin skip override', () => {
   it('user plugin runs before filter in minimal preset', () => {
     const seen: string[] = []
     const html = '<html><body><main><figure><img src="x.jpg" alt="test"></figure></main></body></html>'
     const options = withMinimalPreset({
-      transforms: [{
+      hooks: [{
         beforeNodeProcess(event) {
           if (event.node.type === ELEMENT_NODE) {
             seen.push((event.node as ElementNode).name)
@@ -17,13 +15,13 @@ describe('plugin skip override', () => {
         },
       }],
     })
-    htmlToMarkdown(html, options)
+    htmlToMarkdown(html, options).markdown
     expect(seen).toContain('figure')
   })
 
   it('figure is not excluded in minimal preset', () => {
     const html = '<html><body><main><figure><img src="photo.jpg" alt="test"><figcaption>Caption</figcaption></figure></main></body></html>'
-    const markdown = htmlToMarkdown(html, withMinimalPreset())
+    const markdown = htmlToMarkdown(html, withMinimalPreset()).markdown
     expect(markdown).toContain('![test](photo.jpg)')
     expect(markdown).toContain('_Caption_')
   })
@@ -32,7 +30,7 @@ describe('plugin skip override', () => {
     const figures: string[] = []
     const html = '<html><body><main><figure><img src="photo.jpg" alt="test"></figure></main></body></html>'
     const options = withMinimalPreset({
-      transforms: [{
+      hooks: [{
         onNodeEnter(node) {
           if (node.name === 'figure') {
             figures.push(node.name)
@@ -40,7 +38,7 @@ describe('plugin skip override', () => {
         },
       }],
     })
-    htmlToMarkdown(html, options)
+    htmlToMarkdown(html, options).markdown
     expect(figures).toContain('figure')
   })
 })

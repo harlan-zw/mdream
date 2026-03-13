@@ -1,14 +1,17 @@
 import { defineBuildConfig } from 'obuild/config'
 
+const rolldown = {
+  external: [/\.\.\/napi\//],
+}
+
+const rolldownWasm = {
+  external: [/\.\.\/wasm\//],
+}
+
 export default defineBuildConfig({
   entries: [
-    { type: 'bundle', input: './src/index.ts' },
-    { type: 'bundle', input: './src/cli.ts' },
-    { type: 'bundle', input: './src/llms-txt.ts' },
-    { type: 'bundle', input: './src/negotiate.ts' },
-    { type: 'bundle', input: './src/plugins.ts' },
-    { type: 'bundle', input: './src/preset/minimal.ts' },
-    { type: 'bundle', input: './src/splitter.ts' },
-    { type: 'bundle', input: './src/parse.ts' },
+    { type: 'bundle', input: './src/index.ts', rolldown },
+    { type: 'bundle', input: './src/browser.ts', rolldown: rolldownWasm },
+    { type: 'bundle', input: './src/edge.ts', rolldown: rolldownWasm },
   ],
 })

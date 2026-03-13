@@ -1,0 +1,21 @@
+{
+  "name": "@mdream/engine-rust-linux-arm64-gnu",
+  "version": "0.17.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/harlan-zw/mdream.git",
+    "directory": "crates/node/npm/linux-arm64-gnu"
+  },
+  "os": ["linux"],
+  "cpu": ["arm64"],
+  "main": "engine-rust.linux-arm64-gnu.node",
+  "files": ["engine-rust.linux-arm64-gnu.node"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">= 22.0.0"
+  },
+  "libc": ["glibc"]
+}

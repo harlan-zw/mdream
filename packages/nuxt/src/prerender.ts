@@ -1,11 +1,11 @@
-import type { ProcessedFile } from 'mdream/llms-txt'
+import type { ProcessedFile } from '@mdream/llms-txt'
 import type { Nitro, PrerenderRoute } from 'nitropack'
 import type { MdreamLlmsTxtGeneratePayload } from './types.js'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { generateLlmsTxtArtifacts } from '@mdream/llms-txt'
 import { useNuxt } from '@nuxt/kit'
 import { consola } from 'consola'
-import { generateLlmsTxtArtifacts } from 'mdream/llms-txt'
 import { useSiteConfig } from 'nuxt-site-config/kit'
 
 const logger = consola.withTag('nuxt-mdream')

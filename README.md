@@ -34,11 +34,8 @@
 
 | Input Size | mdream (rust) | mdream (js) | html-to-markdown (rust) | Turndown (js) | node-html-markdown (js) |
 |------------|---------------|-------------|-------------------------|---------------|-------------------------|
-| **160 KB** | 🏆 **0.65ms** | 2.83ms | 🦀 4.30ms | 12.4ms *(19.1x)* | 15.8ms *(24.3x)* |
-| **420 KB** | 🏆 **1.98ms** | 5.25ms | 🦀 9.40ms | 19.3ms *(9.7x)* | 23.9ms *(12.1x)* |
-| **1.8 MB** | 🏆 **6.82ms** | 47.9ms | 🦀 81.0ms | 260ms *(38.1x)* | 💀 25,518ms *(3740x)* |
-| **160 KB (stream)**| 🏆 **1.97ms** | 3.51ms | ❌ | ❌ | ❌ |
-| **1.8 MB (stream)**| 🏆 **22.9ms** | 127ms | ❌ | ❌ | ❌ |
+| **166 KB** | 🏆 **0.94ms** | 2.90ms *(3.1x)* | 🦀 4.12ms *(4.4x)* | 12.9ms *(13.7x)* | 17.5ms *(18.5x)* |
+| **420 KB** | 🏆 **1.68ms** | 5.66ms *(3.4x)* | 🦀 7.89ms *(4.7x)* | 15.2ms *(9.0x)* | 19.9ms *(11.9x)* |
 
 **Native Rust (no Node.js overhead):**
 
@@ -72,11 +69,13 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 |--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;mdream](./packages/mdream/README.md)       | HTML to Markdown converter, use anywhere: browser, edge runtime, node, etc. Includes CLI for `stdin` conversion and package API. **Minimal: no dependencies** |
 | [<img src="https://api.iconify.design/material-symbols:language.svg" width="16" height="16" style="vertical-align: middle;" alt="browser icon">&nbsp;Browser CDN](#browser-cdn-usage)           | Use mdream directly in browsers via unpkg/jsDelivr without any build step                                |
+| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;@mdream/llms-txt](./packages/llms-txt/README.md) | Engine-agnostic `llms.txt` artifact generation from pre-converted markdown                                                                                    |
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;@mdream/crawl](./packages/crawl/README.md) | Site-wide crawler to generate `llms.txt` artifacts from entire websites                                                                                       |
 | [<img src="https://api.iconify.design/logos:docker-icon.svg" width="16" height="16" style="vertical-align: middle;" alt="docker icon">&nbsp;Docker](./DOCKER.md)                                     | Pre-built Docker image with Playwright Chrome for containerized website crawling                                                                              |
 | [<img src="https://api.iconify.design/logos:vitejs.svg" width="16" height="16" style="vertical-align: middle;" alt="vite icon">&nbsp;@mdream/vite](./packages/vite/README.md)                          | Generate automatic `.md` for your own Vite sites                                                                                                              |
 | [<img src="https://api.iconify.design/logos:nuxt-icon.svg" width="16" height="16" style="vertical-align: middle;" alt="nuxt icon">&nbsp;@mdream/nuxt](./packages/nuxt/README.md)                       | Generate automatic `.md` and `llms.txt` artifacts generation for Nuxt Sites                                                                                   |
 | [<img src="https://api.iconify.design/mdi:github.svg" width="16" height="16" style="vertical-align: middle;" alt="github icon">&nbsp;@mdream/action](./packages/action/README.md)                | Generate `.md` and `llms.txt` artifacts from your static `.html` output                                                                                       |
+| [<img src="https://api.iconify.design/logos:rust.svg" width="16" height="16" style="vertical-align: middle;" alt="rust icon">&nbsp;mdream (crate)](./crates/core/README.md)                | Native Rust crate with CLI. Zero dependencies, streaming support. Available on [crates.io](https://crates.io/crates/mdream)                                                                                       |
 
 ## Mdream Usage
 
@@ -95,17 +94,15 @@ pnpm add mdream
 ### Basic Usage
 
 ```ts
-import { createRustEngine } from '@mdream/engine-rust'
 import { htmlToMarkdown } from 'mdream'
 
 // Uses the default JavaScript engine
 const markdown = htmlToMarkdown('<h1>Hello World</h1>')
 console.log(markdown) // # Hello World
 
-// Or use the ultra-fast Rust engine
-const perfMarkdown = htmlToMarkdown('<h1>Hello World</h1>', {
-  engine: createRustEngine()
-})
+// Install @mdream/engine-rust for automatic ~3-4x speedup
+// pnpm add @mdream/engine-rust
+// mdream auto-detects and uses the Rust engine when installed
 ```
 
 **Core Functions:**

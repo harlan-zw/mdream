@@ -1,0 +1,240 @@
+name: Release Native
+
+permissions:
+  contents: write
+  id-token: write
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            use_napi_cross: true
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            use_napi_cross: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            use_napi_cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            use_napi_cross: true
+          - target: armv7-unknown-linux-gnueabihf
+            os: ubuntu-latest
+            use_napi_cross: true
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-unknown-freebsd
+            os: ubuntu-latest
+            use_cross: true
+          - target: aarch64-linux-android
+            os: ubuntu-latest
+          - target: armv7-linux-androideabi
+            os: ubuntu-latest
+          - target: wasm32-wasip1-threads
+            os: ubuntu-latest
+
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install cross
+        if: matrix.use_cross
+        uses: taiki-e/install-action@cross
+
+      - name: Setup Android NDK linkers
+        if: contains(matrix.target, 'android')
+        run: |
+          echo "ANDROID_NDK=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+          if [[ "${{ matrix.target }}" == "aarch64-linux-android" ]]; then
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang" >> $GITHUB_ENV
+          elif [[ "${{ matrix.target }}" == "armv7-linux-androideabi" ]]; then
+            echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang" >> $GITHUB_ENV
+          fi
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Build native module (cross)
+        if: matrix.use_cross
+        working-directory: crates/node
+        run: pnpm exec napi build --platform --release --esm --target ${{ matrix.target }} --cross-compile
+
+      - name: Build native module (napi-cross)
+        if: matrix.use_napi_cross
+        working-directory: crates/node
+        run: pnpm exec napi build --platform --release --esm --target ${{ matrix.target }} --use-napi-cross
+
+      - name: Build native module
+        if: ${{ !matrix.use_cross && !matrix.use_napi_cross }}
+        working-directory: crates/node
+        run: pnpm exec napi build --platform --release --esm --target ${{ matrix.target }}
+
+      - name: Move artifacts
+        working-directory: crates/node
+        run: node ./scripts/move-artifacts.mjs
+        if: ${{ !startsWith(matrix.target, 'wasm') }}
+
+      - name: Optimize WASM with wasm-opt
+        if: startsWith(matrix.target, 'wasm')
+        working-directory: crates/node
+        run: |
+          npm install -g binaryen
+          wasm-opt -Oz engine-rust.wasm -o engine-rust.wasm
+          node ./scripts/move-artifacts.mjs
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.target }}
+          path: |
+            crates/node/npm/**/*.node
+            crates/node/npm/**/*.wasm
+            crates/node/npm/**/*.js
+            crates/node/npm/**/*.cjs
+            crates/node/npm/**/*.mjs
+          if-no-files-found: error
+
+  build-wasm-edge:
+    name: Build WASM Edge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM edge module
+        working-directory: crates/edge
+        run: wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-edge
+          path: packages/mdream/wasm/
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    needs: [build, build-wasm-edge]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Move native bindings to platform packages
+        run: |
+          for dir in artifacts/bindings-*/crates/node/npm/*/; do
+            platform=$(basename "$dir")
+            cp -v "$dir"* "crates/node/npm/$platform/" 2>/dev/null || true
+          done
+
+      - name: Move WASM edge artifacts
+        run: |
+          mkdir -p packages/mdream/wasm
+          cp -v artifacts/wasm-edge/* packages/mdream/wasm/
+
+      - name: Generate NAPI index.js and index.d.ts
+        working-directory: crates/node
+        run: pnpm exec napi artifacts
+
+      - name: Copy NAPI entry files to distribution package
+        run: |
+          mkdir -p packages/mdream/napi
+          cp crates/node/index.js packages/mdream/napi/index.mjs
+          cp crates/node/index.d.ts packages/mdream/napi/index.d.ts
+          cp crates/node/index.d.ts packages/mdream/napi/index.d.mts
+
+      - name: Publish platform packages
+        run: |
+          for pkg in crates/node/npm/*/; do
+            if [ -f "$pkg/package.json" ]; then
+              cd "$pkg"
+              npm publish --access public || true
+              cd -
+            fi
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish mdream (with native bindings)
+        working-directory: packages/mdream
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

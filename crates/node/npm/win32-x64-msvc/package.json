@@ -1,0 +1,20 @@
+{
+  "name": "@mdream/engine-rust-win32-x64-msvc",
+  "version": "0.17.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/harlan-zw/mdream.git",
+    "directory": "crates/node/npm/win32-x64-msvc"
+  },
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "main": "engine-rust.win32-x64-msvc.node",
+  "files": ["engine-rust.win32-x64-msvc.node"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">= 22.0.0"
+  }
+}

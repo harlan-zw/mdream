@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src'
-import { engines, resolveEngine } from '../../utils/engines'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('nasa $name', (engineConfig) => {
   it('noscript iframe break', async () => {
@@ -16,7 +15,7 @@ describe.each(engines)('nasa $name', (engineConfig) => {
 \t<div>hello world</div>
 `
     const engine = await resolveEngine(engineConfig.engine)
-    const markdown = htmlToMarkdown(html, { engine })
+    const markdown = htmlToMarkdown(html, { engine }).markdown
     expect(markdown).toMatchSnapshot()
   })
 })

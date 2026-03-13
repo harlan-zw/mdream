@@ -6,7 +6,8 @@ This document describes how mdream benchmarks are conducted to ensure transparen
 
 | Library | Version | Language | Notes |
 |---------|---------|----------|-------|
-| [mdream](https://github.com/harlan-zw/mdream) | latest | JavaScript | Base `htmlToMarkdown()` with no plugins |
+| [mdream (JS)](https://github.com/harlan-zw/mdream) | latest | JavaScript | Base `htmlToMarkdown()` with the default JS engine |
+| [mdream (Rust)](https://github.com/harlan-zw/mdream) | latest | Rust | Base `htmlToMarkdown()` with the new fast native Rust engine |
 | [html-to-markdown](https://github.com/nickmass/html2md-rs) | 2.20.0 | Rust (native) | Via `@kreuzberg/html-to-markdown-node` napi-rs bindings |
 | [turndown](https://github.com/mixmark-io/turndown) | 7.2.2 | JavaScript | With [GFM plugin](https://github.com/mixmark-io/turndown-plugin-gfm) (tables, strikethrough, task lists) |
 | [node-html-markdown](https://github.com/crosstype/node-html-markdown) | 2.0.0 | JavaScript | Default settings |
@@ -118,15 +119,15 @@ pnpm bench
 
 ### Performance Scaling
 
-| Input Size | html-to-markdown (Rust) | mdream | Turndown | node-html-markdown |
-|------------|-------------------------|--------|----------|-------------------|
-| 166 KB | 1.4ms | 4.3ms | 11.7ms | 13.3ms |
-| 420 KB | 1.9ms | 6.4ms | 13.7ms | 9.9ms |
-| 1.8 MB | 20ms | 60ms | 275ms | 27,000ms |
+| Input Size | mdream (rust) | mdream (js) | html-to-markdown (rust) | Turndown (js) | node-html-markdown (js) |
+|------------|---------------|-------------|-------------------------|---------------|-------------------------|
+| **166 KB** | 🏆 **0.87ms** | 3.04ms | 🦀 1.68ms | 15.0ms *(17.2x)* | 21.1ms *(24.3x)* |
+| **420 KB** | 🏆 **1.42ms** | 5.89ms | 🦀 2.62ms | 19.3ms *(13.6x)* | 23.9ms *(16.8x)* |
+| **1.8 MB** | 🏆 **9.84ms** | 48.8ms | 🦀 20.7ms | 347.7ms *(35.3x)* | 💀 34,219ms *(3478x)* |
 
 **Key findings:**
-- Rust native is ~3x faster than mdream (expected for native code)
-- mdream is 3-4x faster than Turndown (fastest pure JS)
+- mdream (rust) is the fastest HTML to markdown converter, 2x faster than the next best Rust crate on large inputs
+- mdream (js) is 3-7x faster than Turndown (fastest pure JS competitor)
 - node-html-markdown has O(n²) complexity issues on large files
 
 ### Why mdream is Faster
@@ -171,6 +172,45 @@ curl -s "https://docs.github.com/en/get-started/writing-on-github/getting-starte
 
 # Wikipedia large
 curl -s "https://en.wikipedia.org/wiki/Elon_Musk" > packages/mdream/test/fixtures/wikipedia-largest.html
+```
+
+## Native Rust Benchmark
+
+Separate from the JavaScript benchmark, we compare mdream's Rust engine against other Rust HTML-to-Markdown crates using release-optimized builds with LTO.
+
+### Crates Compared
+
+| Crate | Version | Notes |
+|-------|---------|-------|
+| [mdream (engine-rust)](https://github.com/harlan-zw/mdream) | latest | Custom zero-alloc parser |
+| [htmd](https://crates.io/crates/htmd) | 0.1 | |
+| [html2md](https://crates.io/crates/html2md) | 0.2 | Extremely slow on large inputs |
+| [html2md-rs](https://crates.io/crates/html2md-rs) | 0.10 | Panics on some inputs |
+| [mdka](https://crates.io/crates/mdka) | 1.5 | |
+| [html_to_markdown](https://crates.io/crates/html_to_markdown) | 0.1 | kreuzberg crate |
+| [fast_html2md](https://crates.io/crates/fast_html2md) | 0.0 | Isolated in separate crate (lib name conflicts with html2md) |
+
+### Results
+
+| Input Size | mdream | htmd | html2md | html2md-rs | mdka | html_to_markdown | fast_html2md |
+|------------|--------|------|---------|------------|------|------------------|--------------|
+| **166 KB** | 🏆 **0.87ms** | 2.10ms *(2.4x)* | 2.71ms *(3.1x)* | 💀 panicked | 2.65ms *(3.0x)* | 1.68ms *(1.9x)* | 1.37ms *(1.6x)* |
+| **420 KB** | 🏆 **1.42ms** | 3.62ms *(2.6x)* | 4.52ms *(3.2x)* | 1.55ms *(1.1x)* | 3.53ms *(2.5x)* | 2.62ms *(1.9x)* | 1.16ms *(0.8x)* |
+| **1.8 MB** | 🏆 **9.84ms** | 34.3ms *(3.5x)* | 💀 >30s | 34.7ms *(3.5x)* | 34.0ms *(3.5x)* | 20.7ms *(2.1x)* | 16.5ms *(1.7x)* |
+
+**Key findings:**
+- mdream is fastest on large inputs (2-3.5x faster than all competitors)
+- On medium inputs, fast_html2md and html2md-rs are competitive but both degrade at scale
+- html2md and html2md-rs have reliability issues (>30s timeouts, panics on valid HTML)
+
+### Running Native Rust Benchmarks
+
+```bash
+# Main benchmark (6 crates)
+cd bench/rust-compare && cargo run --release
+
+# fast_html2md (isolated due to lib name conflict)
+cd bench/rust-compare-fast && cargo run --release
 ```
 
 ## Cross-Language CLI Benchmark

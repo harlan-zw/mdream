@@ -1,15 +1,11 @@
 import type { H3Event } from 'h3'
 import type { MdreamOptions } from 'mdream'
-import type { ModuleRuntimeConfig } from '../../../types'
-import type { MdreamMarkdownContext, MdreamNegotiateContext } from '../../types'
+import type { MdreamMarkdownContext, MdreamNegotiateContext, ModuleRuntimeConfig } from '../../types.js'
 import { withSiteUrl } from '#site-config/server/composables/utils'
-import { createJavaScriptEngine } from '@mdream/engine-js'
+import { shouldServeMarkdown as _shouldServeMarkdown } from '@mdream/js/negotiate'
 import { consola } from 'consola'
 import { createError, defineEventHandler, getHeader, setHeader } from 'h3'
 import { htmlToMarkdown } from 'mdream'
-import { shouldServeMarkdown as _shouldServeMarkdown } from 'mdream/negotiate'
-import { extractionPlugin } from 'mdream/plugins'
-import { withMinimalPreset } from 'mdream/preset/minimal'
 import { useNitroApp, useRuntimeConfig } from 'nitropack/runtime'
 
 const logger = consola.withTag('nuxt-mdream')
@@ -28,32 +24,19 @@ async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRu
   let title = ''
   let description = ''
 
-  // Create extraction plugin first - must run before isolateMainPlugin
-  const extractPlugin = extractionPlugin({
-    title(el) {
-      title = el.textContent
-    },
-    'meta[name="description"]': (el) => {
-      description = el.attributes.content || ''
-    },
-  })
-
   let options: MdreamOptions = {
     origin: url,
-    engine: createJavaScriptEngine(),
     ...config.mdreamOptions,
   } as MdreamOptions
 
-  // Apply preset if specified
-  if (config.mdreamOptions?.preset === 'minimal') {
-    options = withMinimalPreset(options)
+  // Add declarative extraction for title/description
+  options.extraction = {
+    'title': (el) => { title = el.textContent },
+    'meta[name="description"]': (el) => { description = el.attributes.content || '' },
   }
 
-  // Add extraction plugin as a transform (JS-engine-only)
-  options.transforms = [extractPlugin, ...(options.transforms || [])]
-
   await nitroApp.hooks.callHook('mdream:config', options)
-  let markdown = htmlToMarkdown(html, options)
+  let markdown = htmlToMarkdown(html, options).markdown
 
   // Create hook context for mdream:markdown (Nitro hook)
   const context: MdreamMarkdownContext = {

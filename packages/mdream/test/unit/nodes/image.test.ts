@@ -1,42 +1,48 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src/index.ts'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
-describe('image url resolving', () => {
-  it('converts a simple image', () => {
+describe.each(engines)('image url resolving $name', (engineConfig) => {
+  it('converts a simple image', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = '<img src="image.jpg" alt="An image">'
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
     expect(markdown).toBe('![An image](image.jpg)')
   })
 
-  it('preserves relative paths', () => {
+  it('preserves relative paths', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = '<img src="./images/photo.png" alt="A photo">'
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
     expect(markdown).toBe('![A photo](./images/photo.png)')
   })
 
-  it('handles images without alt text', () => {
+  it('handles images without alt text', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = '<img src="banner.gif">'
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
     expect(markdown).toBe('![](banner.gif)')
   })
 
-  it('should handle absolute paths when origin option is provided', () => {
+  it('should handle absolute paths when origin option is provided', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = '<img src="/images/logo.svg" alt="Logo">'
-    const markdown = htmlToMarkdown(html, { origin: 'https://example.com' })
+    const markdown = htmlToMarkdown(html, { origin: 'https://example.com', engine }).markdown
 
     // Now that we implemented origin functionality, test for the full URL
     expect(markdown).toBe('![Logo](https://example.com/images/logo.svg)')
   })
 
-  it('should handle origins with trailing slashes', () => {
+  it('should handle origins with trailing slashes', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = '<img src="/images/icon.png" alt="Icon">'
-    const markdown = htmlToMarkdown(html, { origin: 'https://example.com/' })
+    const markdown = htmlToMarkdown(html, { origin: 'https://example.com/', engine }).markdown
 
     // Should properly handle trailing slashes in origin
     expect(markdown).toBe('![Icon](https://example.com/images/icon.png)')
   })
 
-  it('handles images in complex HTML', () => {
+  it('handles images in complex HTML', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <div>
         <p>A paragraph with <img src="/image1.jpg" alt="Inline image"> in the middle.</p>
@@ -45,7 +51,7 @@ describe('image url resolving', () => {
         </div>
       </div>
     `
-    const markdown = htmlToMarkdown(html, { origin: 'https://mysite.com' })
+    const markdown = htmlToMarkdown(html, { origin: 'https://mysite.com', engine }).markdown
 
     // Basic checks that HTML was converted
     expect(markdown).toContain('A paragraph with')
@@ -56,7 +62,8 @@ describe('image url resolving', () => {
     // expect(markdown).toContain('![Inline image](https://mysite.com/image1.jpg)')
   })
 
-  it('handles images in table cells', () => {
+  it('handles images in table cells', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <table>
         <tr>
@@ -69,7 +76,7 @@ describe('image url resolving', () => {
         </tr>
       </table>
     `
-    const markdown = htmlToMarkdown(html, { origin: 'https://example.org' })
+    const markdown = htmlToMarkdown(html, { origin: 'https://example.org', engine }).markdown
 
     // Image resolution is not currently working in tables, so we only test base HTML conversion for now
     expect(markdown).toContain('| Header | Image |')
@@ -77,22 +84,25 @@ describe('image url resolving', () => {
   })
 })
 
-describe('images', () => {
-  it('converts simple images', () => {
+describe.each(engines)('images $name', (engineConfig) => {
+  it('converts simple images', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = '<img src="image.jpg" alt="Description">'
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
     expect(markdown).toBe('![Description](image.jpg)')
   })
 
-  it('handles images without alt text', () => {
+  it('handles images without alt text', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = '<img src="image.jpg">'
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
     expect(markdown).toBe('![](image.jpg)')
   })
 
-  it('handles images in paragraphs', () => {
+  it('handles images in paragraphs', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>An image: <img src="image.jpg" alt="Description"></p>'
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
     expect(markdown).toBe('An image: ![Description](image.jpg)')
   })
 })

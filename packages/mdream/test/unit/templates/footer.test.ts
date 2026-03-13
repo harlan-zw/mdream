@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src'
-import { engines, resolveEngine } from '../../utils/engines.ts'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines.ts'
 
 describe.each(engines)('footer %s', ({ engine }: any) => {
   it('github', async () => {
@@ -97,7 +96,7 @@ describe.each(engines)('footer %s', ({ engine }: any) => {
           </button>
         </div>
       </footer>`
-    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
+    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) }).markdown
     expect(markdown).toMatchSnapshot()
   })
   it('nuxt', async () => {
@@ -109,7 +108,7 @@ describe.each(engines)('footer %s', ({ engine }: any) => {
           'footer',
         ],
       } },
-    })
+    }).markdown
     expect(markdown).toContain('# foo bar')
     expect(markdown).toContain('foo')
   })

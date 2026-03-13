@@ -1,13 +1,14 @@
 import { ReadableStream } from 'node:stream/web'
 import { describe, expect, it, vi } from 'vitest'
-import { streamHtmlToMarkdown } from '../../../src/index'
+import { engines, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
 
 const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
 
-describe('hTML to Markdown Streaming', () => {
+describe.each(engines)('hTML to Markdown Streaming $name', (engineConfig) => {
   describe('basic Stream Functionality', () => {
     it('converts a valid HTML stream to markdown chunks', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
       const htmlStream = new ReadableStream({
         start(controller) {
           controller.enqueue('<h1>Title</h1>')
@@ -17,7 +18,7 @@ describe('hTML to Markdown Streaming', () => {
       })
 
       const result: string[] = []
-      for await (const chunk of streamHtmlToMarkdown(htmlStream)) {
+      for await (const chunk of streamHtmlToMarkdown(htmlStream, { engine })) {
         result.push(chunk)
       }
 
@@ -33,14 +34,16 @@ describe('hTML to Markdown Streaming', () => {
     })
 
     it('throws an error when null is passed as the HTML stream', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
       await expect(async () => {
-        for await (const _ of streamHtmlToMarkdown(null)) {
+        for await (const _ of streamHtmlToMarkdown(null, { engine })) {
           // no-op
         }
       }).rejects.toThrow('Invalid HTML stream provided')
     })
 
     it('handles an empty HTML stream gracefully', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
       const htmlStream = new ReadableStream({
         start(controller) {
           controller.close()
@@ -48,7 +51,7 @@ describe('hTML to Markdown Streaming', () => {
       })
 
       const result: string[] = []
-      for await (const chunk of streamHtmlToMarkdown(htmlStream)) {
+      for await (const chunk of streamHtmlToMarkdown(htmlStream, { engine })) {
         result.push(chunk)
       }
 
@@ -56,13 +59,14 @@ describe('hTML to Markdown Streaming', () => {
     })
 
     it('releases the reader lock after processing', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
       const mockReader = {
         read: vi.fn().mockResolvedValue({ done: true, value: null }),
         releaseLock: vi.fn(),
       }
       const htmlStream = { getReader: () => mockReader } as any
 
-      for await (const _ of streamHtmlToMarkdown(htmlStream)) {
+      for await (const _ of streamHtmlToMarkdown(htmlStream, { engine })) {
         // no-op
       }
 
@@ -70,6 +74,7 @@ describe('hTML to Markdown Streaming', () => {
     })
 
     it('correctly handles binary content', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
       // Create an HTML stream with binary data
       const encoder = new TextEncoder()
       const part1 = encoder.encode('<h1>Encoded')
@@ -85,7 +90,7 @@ describe('hTML to Markdown Streaming', () => {
 
       // Collect results
       const result: string[] = []
-      for await (const chunk of streamHtmlToMarkdown(htmlStream)) {
+      for await (const chunk of streamHtmlToMarkdown(htmlStream, { engine })) {
         result.push(chunk)
       }
 
@@ -97,6 +102,7 @@ describe('hTML to Markdown Streaming', () => {
 
   describe('partial Chunks and Streaming', () => {
     it('processes partial HTML chunks correctly', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
       const htmlStream = new ReadableStream({
         start(controller) {
           controller.enqueue('<h1>Title')
@@ -107,7 +113,7 @@ describe('hTML to Markdown Streaming', () => {
       })
 
       const result: string[] = []
-      for await (const chunk of streamHtmlToMarkdown(htmlStream)) {
+      for await (const chunk of streamHtmlToMarkdown(htmlStream, { engine })) {
         result.push(chunk)
       }
 
@@ -121,6 +127,7 @@ describe('hTML to Markdown Streaming', () => {
     })
 
     it('handles HTML tags split across multiple chunks', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
       const htmlStream = new ReadableStream({
         start(controller) {
           controller.enqueue('<h1>Title')
@@ -131,7 +138,7 @@ describe('hTML to Markdown Streaming', () => {
       })
 
       const result: string[] = []
-      for await (const chunk of streamHtmlToMarkdown(htmlStream)) {
+      for await (const chunk of streamHtmlToMarkdown(htmlStream, { engine })) {
         result.push(chunk)
       }
 
@@ -141,6 +148,7 @@ describe('hTML to Markdown Streaming', () => {
     })
 
     it('processes nested HTML elements split across chunks correctly', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
       const htmlStream = new ReadableStream({
         start(controller) {
           controller.enqueue('<div><p>First ')
@@ -152,7 +160,7 @@ describe('hTML to Markdown Streaming', () => {
       })
 
       const result: string[] = []
-      for await (const chunk of streamHtmlToMarkdown(htmlStream)) {
+      for await (const chunk of streamHtmlToMarkdown(htmlStream, { engine })) {
         result.push(chunk)
       }
 
@@ -164,6 +172,7 @@ describe('hTML to Markdown Streaming', () => {
     })
 
     it('handles HTML with attributes split across chunks', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
       const htmlStream = new ReadableStream({
         start(controller) {
           controller.enqueue('<a href="https://')
@@ -174,7 +183,7 @@ describe('hTML to Markdown Streaming', () => {
       })
 
       const result: string[] = []
-      for await (const chunk of streamHtmlToMarkdown(htmlStream)) {
+      for await (const chunk of streamHtmlToMarkdown(htmlStream, { engine })) {
         result.push(chunk)
       }
 
@@ -184,6 +193,7 @@ describe('hTML to Markdown Streaming', () => {
     })
 
     it('processes complex HTML structures with multiple levels', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
       const htmlStream = new ReadableStream({
         start(controller) {
           controller.enqueue('<div><h2>Section')
@@ -196,7 +206,7 @@ describe('hTML to Markdown Streaming', () => {
       })
 
       const result: string[] = []
-      for await (const chunk of streamHtmlToMarkdown(htmlStream)) {
+      for await (const chunk of streamHtmlToMarkdown(htmlStream, { engine })) {
         result.push(chunk)
       }
 
@@ -214,6 +224,7 @@ describe('hTML to Markdown Streaming', () => {
     })
 
     it('handles unclosed span tags in nested structures', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
       const htmlStream = new ReadableStream({
         start(controller) {
           controller.enqueue('<div><h3>Section with <span>unclosed span')
@@ -225,7 +236,7 @@ describe('hTML to Markdown Streaming', () => {
       })
 
       const result: string[] = []
-      for await (const chunk of streamHtmlToMarkdown(htmlStream)) {
+      for await (const chunk of streamHtmlToMarkdown(htmlStream, { engine })) {
         result.push(chunk)
       }
 
@@ -247,6 +258,7 @@ describe('hTML to Markdown Streaming', () => {
 
   describe('buffer Control', () => {
     it('handles buffering and release of content', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
       const htmlStream = new ReadableStream({
         start(controller) {
           controller.enqueue('<header><nav><ul><li><a href="#">Home</a></li></ul></nav></header>')
@@ -257,7 +269,7 @@ describe('hTML to Markdown Streaming', () => {
       })
 
       const result: string[] = []
-      for await (const chunk of streamHtmlToMarkdown(htmlStream)) {
+      for await (const chunk of streamHtmlToMarkdown(htmlStream, { engine })) {
         result.push(chunk)
       }
 

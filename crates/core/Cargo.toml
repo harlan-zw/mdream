@@ -1,0 +1,21 @@
+[package]
+name = "mdream"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Fastest HTML-to-Markdown converter. Zero dependencies, streaming support."
+license.workspace = true
+repository.workspace = true
+homepage = "https://github.com/harlan-zw/mdream"
+documentation = "https://docs.rs/mdream"
+readme = "README.md"
+keywords = ["html", "markdown", "converter", "parser", "streaming"]
+categories = ["parser-implementations", "text-processing", "command-line-utilities", "web-programming"]
+exclude = ["tests/", "benches/"]
+
+[[bin]]
+name = "mdream"
+path = "src/bin.rs"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"

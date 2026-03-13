@@ -1,2 +1,2 @@
 #!/usr/bin/env node
-import('../dist/cli.mjs')
+import('@mdream/cli')

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 const html = `<body data-new-gr-c-s-check-loaded="14.1233.0" data-gr-ext-installed=""><center><table id="hnmain" border="0" cellpadding="0" cellspacing="0" width="85%" bgcolor="#f6f6ef">
         <tbody><tr><td bgcolor="#ff6600"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="padding:2px"><tbody><tr><td style="width:18px;padding-right:4px"><a href="https://news.ycombinator.com"><img src="y18.svg" width="18" height="18" style="border:1px white solid; display:block"></a></td>
@@ -170,11 +170,9 @@ const html = `<body data-new-gr-c-s-check-loaded="14.1233.0" data-gr-ext-install
 
 </body>`
 
-import { engines, resolveEngine } from '../../utils/engines'
-
 describe.each(engines)('hacker news %s', ({ name, engine }) => {
   it('table', async () => {
-    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
+    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) }).markdown
     expect(markdown).toMatchSnapshot()
   })
 })

@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream'
-import { streamHtmlToMarkdown } from '../../../src'
+import { streamHtmlToMarkdown } from '../../../packages/mdream/src'
 
 async function run() {
   for await (const chunk of streamHtmlToMarkdown(Readable.toWeb(process.stdin))) {

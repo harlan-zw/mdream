@@ -54,10 +54,3 @@ export interface CrawlResult {
   metadata?: PageMetadata
   depth?: number
 }
-
-export interface LlmsTxtOptions {
-  siteName: string
-  description?: string
-  results: CrawlResult[]
-  outputPath: string
-}

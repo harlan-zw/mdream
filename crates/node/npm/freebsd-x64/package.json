@@ -1,0 +1,20 @@
+{
+  "name": "@mdream/engine-rust-freebsd-x64",
+  "version": "0.17.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/harlan-zw/mdream.git",
+    "directory": "crates/node/npm/freebsd-x64"
+  },
+  "os": ["freebsd"],
+  "cpu": ["x64"],
+  "main": "engine-rust.freebsd-x64.node",
+  "files": ["engine-rust.freebsd-x64.node"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">= 22.0.0"
+  }
+}

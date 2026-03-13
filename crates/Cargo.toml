@@ -1,0 +1,15 @@
+[workspace]
+members = ["core", "node", "edge"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+rust-version = "1.80"
+repository = "https://github.com/harlan-zw/mdream"
+
+[profile.release]
+lto = true
+strip = "symbols"
+codegen-units = 1
+panic = "abort"

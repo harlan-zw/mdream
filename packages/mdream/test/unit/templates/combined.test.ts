@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src'
-import { engines, resolveEngine } from '../../utils/engines.ts'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines.ts'
 
-describe.each(engines)('combined Elements %s', ({ engine } : any) => {
+describe.each(engines)('combined Elements %s', ({ engine }: any) => {
   it('handles complex content with multiple element types', async () => {
     const html = `
       <h1>Document Title</h1>
@@ -16,7 +15,7 @@ describe.each(engines)('combined Elements %s', ({ engine } : any) => {
       </blockquote>
       <pre><code class="language-js">console.log("Hello world!");</code></pre>
     `
-    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
+    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) }).markdown
     expect(markdown).toBe(
       '# Document Title\n\n'
       + 'This is a **bold** and _important_ paragraph with a [link](https://example.com).\n\n'

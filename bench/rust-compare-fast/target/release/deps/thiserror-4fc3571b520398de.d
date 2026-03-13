@@ -1,0 +1,14 @@
+/home/harlan/pkg/mdream/bench/rust-compare-fast/target/release/deps/thiserror-4fc3571b520398de.d: /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /home/harlan/pkg/mdream/bench/rust-compare-fast/target/release/build/thiserror-fb3fa66bec1705d9/out/private.rs
+
+/home/harlan/pkg/mdream/bench/rust-compare-fast/target/release/deps/libthiserror-4fc3571b520398de.rlib: /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /home/harlan/pkg/mdream/bench/rust-compare-fast/target/release/build/thiserror-fb3fa66bec1705d9/out/private.rs
+
+/home/harlan/pkg/mdream/bench/rust-compare-fast/target/release/deps/libthiserror-4fc3571b520398de.rmeta: /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /home/harlan/pkg/mdream/bench/rust-compare-fast/target/release/build/thiserror-fb3fa66bec1705d9/out/private.rs
+
+/home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs:
+/home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs:
+/home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs:
+/home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs:
+/home/harlan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs:
+/home/harlan/pkg/mdream/bench/rust-compare-fast/target/release/build/thiserror-fb3fa66bec1705d9/out/private.rs:
+
+# env-dep:OUT_DIR=/home/harlan/pkg/mdream/bench/rust-compare-fast/target/release/build/thiserror-fb3fa66bec1705d9/out

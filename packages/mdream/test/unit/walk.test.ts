@@ -1,7 +1,7 @@
-import type { NodeEvent } from '../../src/types.js'
-import { NodeEventEnter } from '@mdream/engine-js'
+import type { NodeEvent } from '@mdream/js'
+import { NodeEventEnter } from '@mdream/js'
 import { describe, expect, it } from 'vitest'
-import { parseHtml } from '../../../engine-js/src/parse.ts'
+import { parseHtml } from '../../../js/src/parse.ts'
 import { htmlToMarkdown } from '../../src/index.js'
 
 describe('hTML walking', () => {
@@ -129,7 +129,7 @@ describe('hTML walking', () => {
 
     // Rather than tracking every node event, let's verify the markdown output
     // which indirectly confirms that walking and depth tracking worked properly
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html).markdown
 
     expect(markdown).toContain('# Title')
     expect(markdown).toContain('Subtitle with _emphasis_')
@@ -140,7 +140,7 @@ describe('hTML walking', () => {
   it('handles malformed HTML by attempting to maintain proper nesting', () => {
     // Unclosed tags and improperly nested elements
     const html = '<div><p>Unclosed paragraph <span>Unclosed span <em>Emphasis</div>'
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html).markdown
 
     // The parser should handle this gracefully, closing tags when parent closes
     expect(markdown).toContain('Unclosed paragraph Unclosed span _Emphasis_')
@@ -148,7 +148,7 @@ describe('hTML walking', () => {
 
   it('handles deeply nested unclosed tags correctly', () => {
     const html = '<div><ul><li>First item <strong>with bold<ul><li>Nested unclosed item</div>'
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html).markdown
 
     // The parser should close all unclosed tags when the div closes
     expect(markdown).toContain('- First item **with bold')
@@ -163,7 +163,7 @@ describe('hTML walking', () => {
       <h2>Subtitle</h2>
       <ul><li>List item 1<li>List item 2</ul>
     `
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html).markdown
 
     // The parser should handle both the valid and invalid parts
     expect(markdown).toContain('# Title')
@@ -187,7 +187,7 @@ describe('hTML walking', () => {
       </div>
     `
 
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html).markdown
 
     expect(markdown).toContain('- Item 1')
     expect(markdown).toContain('- Item 2 [_Important_ link](#)')

@@ -1,7 +1,6 @@
-import { TAG_H1, TAG_H2 } from '@mdream/engine-js'
+import { TAG_H1, TAG_H2, withMinimalPreset } from '@mdream/js'
+import { htmlToMarkdownSplitChunks, htmlToMarkdownSplitChunksStream } from '@mdream/js/splitter'
 import { describe, expect, it } from 'vitest'
-import { withMinimalPreset } from '../../src/preset/minimal'
-import { htmlToMarkdownSplitChunks, htmlToMarkdownSplitChunksStream } from '../../src/splitter'
 
 const RE_WHITESPACE = /\s+/
 

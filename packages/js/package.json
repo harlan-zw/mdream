@@ -1,0 +1,86 @@
+{
+  "name": "@mdream/js",
+  "type": "module",
+  "version": "0.17.0",
+  "description": "JavaScript HTML-to-Markdown engine for mdream. Escape hatch for hooks and edge runtimes.",
+  "author": {
+    "name": "Harlan Wilton",
+    "email": "harlan@harlanzw.com",
+    "url": "https://harlanzw.com/"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harlan-zw/mdream",
+    "directory": "packages/js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "default": "./dist/index.mjs"
+    },
+    "./negotiate": {
+      "types": "./dist/negotiate.d.mts",
+      "import": {
+        "types": "./dist/negotiate.d.mts",
+        "default": "./dist/negotiate.mjs"
+      },
+      "default": "./dist/negotiate.mjs"
+    },
+    "./plugins": {
+      "types": "./dist/plugins.d.mts",
+      "import": {
+        "types": "./dist/plugins.d.mts",
+        "default": "./dist/plugins.mjs"
+      },
+      "default": "./dist/plugins.mjs"
+    },
+    "./preset/minimal": {
+      "types": "./dist/preset/minimal.d.mts",
+      "import": {
+        "types": "./dist/preset/minimal.d.mts",
+        "default": "./dist/preset/minimal.mjs"
+      },
+      "default": "./dist/preset/minimal.mjs"
+    },
+    "./splitter": {
+      "types": "./dist/splitter.d.mts",
+      "import": {
+        "types": "./dist/splitter.d.mts",
+        "default": "./dist/splitter.mjs"
+      },
+      "default": "./dist/splitter.mjs"
+    },
+    "./parse": {
+      "types": "./dist/parse.d.mts",
+      "import": {
+        "types": "./dist/parse.d.mts",
+        "default": "./dist/parse.mjs"
+      },
+      "default": "./dist/parse.mjs"
+    }
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "bin": {
+    "mdream-js": "./bin/mdream.mjs"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "scripts": {
+    "build": "obuild",
+    "typecheck": "tsc --noEmit",
+    "dev:prepare": "obuild --stub",
+    "prepack": "pnpm run build"
+  },
+  "dependencies": {
+    "cac": "catalog:",
+    "pathe": "catalog:"
+  }
+}

@@ -1,7 +1,7 @@
-import type { ExtractedElement } from '../../../src/plugins/extraction.ts'
+import type { ExtractedElement } from 'mdream'
+import { htmlToMarkdown } from '@mdream/js'
+import { extractionPlugin } from '@mdream/js/plugins'
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src/index.ts'
-import { extractionPlugin } from '../../../src/plugins'
 
 describe('script extraction using extractionPlugin', () => {
   it('should extract Nuxt JSON data script using extractionPlugin', () => {
@@ -88,8 +88,8 @@ describe('script extraction using extractionPlugin', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      transforms: [plugin],
-    })
+      hooks: [plugin],
+    }).markdown
 
     // Should extract the JSON script
     expect(extractedJsonScripts).toHaveLength(1)
@@ -137,8 +137,8 @@ describe('script extraction using extractionPlugin', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      transforms: [plugin],
-    })
+      hooks: [plugin],
+    }).markdown
 
     expect(extractedScripts).toHaveLength(1)
     expect(extractedScripts[0].name).toBe('script')
@@ -171,8 +171,8 @@ describe('script extraction using extractionPlugin', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      transforms: [plugin],
-    })
+      hooks: [plugin],
+    }).markdown
 
     expect(extractedScripts).toHaveLength(1)
 
@@ -208,8 +208,8 @@ describe('script extraction using extractionPlugin', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      transforms: [plugin],
-    })
+      hooks: [plugin],
+    }).markdown
 
     // Should categorize them correctly
     expect(jsonLdScripts).toHaveLength(1)

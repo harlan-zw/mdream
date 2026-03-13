@@ -5,19 +5,16 @@
     "../../docs/**",
     "../../examples/**",
     "../../packages/mdream/**",
-    "../../packages/engine-rust/**",
     "../../packages/crawl/**",
     "../../packages/vite/**",
     "../../packages/action/**",
-    "../../packages/llms-db/**",
+    "../../crates/**",
     "../../../bench/**",
     "../../../docs/**",
     "../../../examples/**",
     "../../../packages/mdream/**",
-    "../../../packages/engine-rust/**",
     "../../../packages/crawl/**",
     "../../../packages/vite/**",
-    "../../../packages/action/**",
-    "../../../packages/llms-db/**"
+    "../../../packages/action/**"
   ]
 }

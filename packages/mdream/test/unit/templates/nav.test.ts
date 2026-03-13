@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src'
-import { engines, resolveEngine } from '../../utils/engines'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('nav %s', (engine) => {
   it('github', async () => {
@@ -1176,7 +1175,7 @@ describe.each(engines)('nav %s', (engine) => {
                 </ul>
               </nav>`
     const resolvedEngine = await resolveEngine(engine.engine)
-    const markdown = htmlToMarkdown(html, { engine: resolvedEngine })
+    const markdown = htmlToMarkdown(html, { engine: resolvedEngine }).markdown
     expect(markdown).toMatchSnapshot()
   })
 })

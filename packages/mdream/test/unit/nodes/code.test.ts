@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src/index.ts'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 const RE_CODE_BLOCK_WITH_FUNCTION = /```[\s\S]*function example.*if \(true\).*```/s
 const RE_IF_TRUE_BLOCK = /^if \(true\) \{$/
 const RE_CODE_BLOCK_WITH_LINES = /```.*Line 1.*Line 2.*Line 3.*```/s
 
-describe('code blocks', () => {
-  it('escapes triple backticks within code blocks', () => {
+describe.each(engines)('code blocks $name', (engineConfig) => {
+  it('escapes triple backticks within code blocks', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <pre><code>
 function example() {
@@ -18,7 +19,7 @@ function example() {
       </code></pre>
     `
 
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
 
     // The triple backticks should be escaped
     expect(markdown).toContain('\\`\\`\\`js')
@@ -27,7 +28,8 @@ function example() {
     expect(markdown).not.toContain('```js')
   })
 
-  it('handles nested code blocks properly', () => {
+  it('handles nested code blocks properly', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <p>Here's a code block:</p>
       <pre><code class="language-javascript">
@@ -39,7 +41,7 @@ function example() {
       </code></pre>
     `
 
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
 
     // Check formatting
     expect(markdown).toContain('Here\'s a code block:')
@@ -49,7 +51,8 @@ function example() {
     expect(markdown).toContain('\\`\\`\\`python')
   })
 
-  it('preserves newlines within pre tags', () => {
+  it('preserves newlines within pre tags', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <pre><code>
 function example() {
@@ -63,7 +66,7 @@ function example() {
       </code></pre>
     `
 
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
 
     // Check that newlines and whitespace are preserved
     expect(markdown).toMatch(RE_CODE_BLOCK_WITH_FUNCTION)
@@ -79,7 +82,8 @@ function example() {
     expect(markdown).toContain('    return 42;')
   })
 
-  it('preserves multiple newlines within pre tags', () => {
+  it('preserves multiple newlines within pre tags', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `<pre><code>Line 1
 
 
@@ -87,7 +91,7 @@ Line 2 after two blank lines
 
 Line 3 after one blank line</code></pre>`
 
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
 
     // Check that multiple consecutive newlines are preserved
     expect(markdown).toMatch(RE_CODE_BLOCK_WITH_LINES)
@@ -99,24 +103,20 @@ Line 3 after one blank line</code></pre>`
     expect(markdown).toContain('blank lines\n\nLine 3')
   })
 
-  it('simple code block markdown preserve new lines', () => {
+  it('simple code block markdown preserve new lines', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `  <pre><code class="hljs language-markdown"><span class="hljs-section"># A first-level heading</span>
 <span class="hljs-section">## A second-level heading</span>
 <span class="hljs-section">### A third-level heading</span>
 </code></pre>`
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
 
     // Check that newlines are preserved
-    expect(markdown).toMatchInlineSnapshot(`
-      "\`\`\`markdown
-      # A first-level heading
-      ## A second-level heading
-      ### A third-level heading
-      \`\`\`"
-    `)
+    expect(markdown).toBe('```markdown\n# A first-level heading\n## A second-level heading\n### A third-level heading\n```')
   })
 
-  it('preserves new lines md code block', () => {
+  it('preserves new lines md code block', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     // We need to test that newlines between headings and regular text are preserved properly
     const html = `<pre><code class="hljs language-markdown"><span class="hljs-section"># Heading with newline</span>
 
@@ -129,7 +129,7 @@ Text without newline above.
 </code></pre>`
 
     // The test is verifying that the newlines between headings are preserved exactly
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
 
     // This test verifies that newlines in markdown code blocks are preserved exactly
     // The key issue here is making sure that newlines between headings in markdown are maintained
@@ -144,37 +144,29 @@ Text without newline above.
     // Make assertions about the content to verify formatting is preserved
     expect(headingLine).toBeDefined()
     expect(textBeforeSecondHeading).toBeDefined()
-    expect(markdown).toMatchInlineSnapshot(`
-      "\`\`\`markdown
-      # Heading with newline
-
-      ## Subheading with newline
-
-      Some text with newlines around it.
-
-      ## Another subheading
-      Text without newline above.
-      \`\`\`"
-    `)
+    expect(markdown).toBe('```markdown\n# Heading with newline\n\n## Subheading with newline\n\nSome text with newlines around it.\n\n## Another subheading\nText without newline above.\n```')
 
     // Check for format-specific elements like newlines around headings
     expect(markdown).toContain('# Heading with newline\n\n## Subheading with newline')
   })
-  it('converts inline code', () => {
+  it('converts inline code', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>Use the <code>print()</code> function</p>'
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
     expect(markdown).toBe('Use the `print()` function')
   })
 
-  it('converts code blocks without language', () => {
+  it('converts code blocks without language', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = '<pre><code>function example() {\n  return true;\n}</code></pre>'
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
     expect(markdown).toBe('```\nfunction example() {\n  return true;\n}\n```')
   })
 
-  it('converts code blocks with language', () => {
+  it('converts code blocks with language', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = '<pre><code class="language-javascript">const x = 1;</code></pre>'
-    const markdown = htmlToMarkdown(html)
+    const markdown = htmlToMarkdown(html, { engine }).markdown
     expect(markdown).toBe('```javascript\nconst x = 1;\n```')
   })
 })

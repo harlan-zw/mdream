@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src/index.js'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
-describe('not supported', () => {
-  it('inner forms', () => {
+describe.each(engines)('not supported $name', (engineConfig) => {
+  it('inner forms', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `<div class="float-left pr-4 mb-6 mb-xl-0 col-12 col-lg-6 col-xl-3">
 <form class="f5" data-testid="survey-form" aria-live="polite">
 <h3 id="survey-title" class="f4 mb-3">Did you find what you needed?</h3>
@@ -24,10 +25,12 @@ describe('not supported', () => {
           'form',
         ],
       } },
-    })
-    expect(markdown).toMatchInlineSnapshot(`""`)
+      engine,
+    }).markdown
+    expect(markdown).toBe('')
   })
-  it.skip('aria hidden', () => {
+  it.skip('aria hidden', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `<div class="float-left pr-4 mb-6 mb-xl-0 col-12 col-lg-6 col-xl-3"><a href="/docs/guide/concepts" tabindex="-1" aria-label="Nuxt Concepts" class="focus:outline-none"><!--[--><!--[--><span class="absolute inset-0" aria-hidden="true"></span><!--]--><!--]--></a><span class="iconify i-lucide:bookmark size-4 shrink-0 align-sub me-1.5 transition-colors text-highlighted" aria-hidden="true" style="">HIDDEN</span><!----><!--[--><!--[--> Read more in <span class="font-bold">Nuxt Concepts</span>. <!--]--><!--]--></div>`
     const markdown = htmlToMarkdown(html, {
       plugins: { filter: {
@@ -36,7 +39,8 @@ describe('not supported', () => {
           'form',
         ],
       } },
-    })
+      engine,
+    }).markdown
     expect(markdown).toBe('[Nuxt Concepts](/docs/guide/concepts) Read more in Nuxt Concepts.')
   })
 })

@@ -1,6 +1,6 @@
+import { htmlToMarkdown } from '@mdream/js'
+import { createPlugin } from '@mdream/js/plugins'
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src/index.ts'
-import { createPlugin } from '../../../src/plugins'
 
 describe('script content extraction', () => {
   it('should extract JSON content from Nuxt data script', () => {
@@ -112,8 +112,8 @@ describe('script content extraction', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      transforms: [scriptExtractionPlugin],
-    })
+      hooks: [scriptExtractionPlugin],
+    }).markdown
 
     // Should extract the script content
     expect(extractedScripts).toHaveLength(1)
@@ -182,8 +182,8 @@ describe('script content extraction', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      transforms: [scriptExtractionPlugin],
-    })
+      hooks: [scriptExtractionPlugin],
+    }).markdown
 
     expect(extractedScripts).toHaveLength(1)
     expect(extractedScripts[0].content).toContain('function initApp()')
@@ -233,8 +233,8 @@ describe('script content extraction', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      transforms: [scriptExtractionPlugin],
-    })
+      hooks: [scriptExtractionPlugin],
+    }).markdown
 
     expect(extractedScripts).toHaveLength(1)
 

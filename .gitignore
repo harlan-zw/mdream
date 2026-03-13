@@ -65,3 +65,11 @@ storage
 .skilld
 bench/rust-compare/target/
 bench/rust-compare/Cargo.lock
+bench/rust-compare-fast/target/
+bench/rust-compare-fast/Cargo.lock
+*.node
+packages/mdream/napi/
+crates/*/target/
+crates/target/
+crates/edge/pkg/
+crates/edge/pkg-bundler/

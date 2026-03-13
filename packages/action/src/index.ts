@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { getInput, info, setFailed, setOutput } from '@actions/core'
-import { generateLlmsTxtArtifacts } from 'mdream/llms-txt'
-import { createJavaScriptEngine } from '@mdream/engine-js'
+import { generateLlmsTxtArtifacts, processHtmlFiles } from '@mdream/llms-txt'
+import { htmlToMarkdown } from 'mdream'
 
 export async function main() {
   try {
@@ -24,15 +24,50 @@ export async function main() {
       info(`Chunk size: ${chunkSize}`)
     }
 
-    // Generate llms.txt artifacts using mdream API
+    // Process HTML files into markdown using mdream engine
+    const files = await processHtmlFiles(glob, (html, url) => {
+      let title = ''
+      let metaDescription = ''
+      // Extract metadata
+      htmlToMarkdown(html, {
+        origin: url,
+        extraction: {
+          'title': (el) => {
+            if (!title)
+              title = el.textContent
+          },
+          'meta[name="description"]': (el) => {
+            if (!metaDescription)
+              metaDescription = el.attributes.content || ''
+          },
+          'meta[property="og:description"]': (el) => {
+            if (!metaDescription)
+              metaDescription = el.attributes.content || ''
+          },
+          'meta[property="og:title"]': (el) => {
+            if (!title)
+              title = el.attributes.content || ''
+          },
+        },
+      })
+      const markdown = htmlToMarkdown(html, { origin: url }).markdown
+      return {
+        markdown,
+        metadata: {
+          title: title.trim() || undefined,
+          description: metaDescription.trim() || undefined,
+        },
+      }
+    }, { origin })
+
+    // Generate llms.txt artifacts
     const result = await generateLlmsTxtArtifacts({
-      patterns: glob,
+      files,
       siteName,
       description,
       origin,
       generateFull: true,
       generateMarkdown: true,
-      engine: (await createJavaScriptEngine()),
     })
 
     // Ensure output directory exists

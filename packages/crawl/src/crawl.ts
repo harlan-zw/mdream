@@ -1,15 +1,12 @@
+import type { ProcessedFile } from '@mdream/llms-txt'
 import type { HttpCrawlerOptions, PlaywrightCrawlerOptions } from 'crawlee'
-import type { MdreamOptions } from 'mdream'
-import type { ProcessedFile } from 'mdream/llms-txt'
 import type { CrawlOptions, CrawlResult, PageData } from './types.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import * as p from '@clack/prompts'
-import { createJavaScriptEngine } from '@mdream/engine-js'
+import { generateLlmsTxtArtifacts } from '@mdream/llms-txt'
 import { HttpCrawler, log, PlaywrightCrawler, purgeDefaultStorages } from 'crawlee'
 import { htmlToMarkdown } from 'mdream'
-import { generateLlmsTxtArtifacts } from 'mdream/llms-txt'
-import { withMinimalPreset } from 'mdream/preset/minimal'
 import { dirname, join, normalize, resolve } from 'pathe'
 import { withHttps } from 'ufo'
 import { getStartingUrl, isUrlExcluded, matchesGlobPattern, parseUrlPattern } from './glob-utils.js'
@@ -450,7 +447,6 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         title = '' // Will be extracted from HTML
       }
 
-      const engine = createJavaScriptEngine()
       // Extract metadata including links, title, description
       const metadata = extractMetadata(html, request.loadedUrl)
 
@@ -479,10 +475,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       let md = ''
       if (shouldProcessMarkdown) {
         // Convert HTML to Markdown only for matching URLs
-        md = htmlToMarkdown(html, withMinimalPreset({
-          origin: pageOrigin,
-          engine,
-        } satisfies MdreamOptions))
+        md = htmlToMarkdown(html, { origin: pageOrigin }).markdown
       }
 
       let filePath: string | undefined
@@ -722,7 +715,6 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         origin: origin || firstUrl.origin,
         generateFull: generateLlmsFullTxt,
         outputDir,
-        engine: createJavaScriptEngine(),
       })
 
       // Write llms.txt if requested

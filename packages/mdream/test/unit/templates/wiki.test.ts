@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src'
-import { engines, resolveEngine } from '../../utils/engines.ts'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines.ts'
 
-describe.each(engines)('tables %s', ({ engine, name } : any) => {
+describe.each(engines)('tables %s', ({ engine, name }: any) => {
   it('headings', async () => {
     const html = `<div class="mw-heading mw-heading2"><h2 id="Conventions">Conventions</h2><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=List_of_chiropterans&amp;action=edit&amp;section=1" title="Edit section: Conventions"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>`
-    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
+    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) }).markdown
     expect(markdown).toMatchSnapshot()
   })
   it('wikipedia', async () => {
@@ -236,7 +235,7 @@ describe.each(engines)('tables %s', ({ engine, name } : any) => {
 <td style="text-align:left;"><i>Size range</i>: 3&nbsp;cm (1&nbsp;in) long, plus 1&nbsp;cm (0.4&nbsp;in) tail (Amazonian sac-winged bat) to 6&nbsp;cm (2&nbsp;in) long, plus 3&nbsp;cm (1&nbsp;in) tail (greater sac-winged bat)<sup id="cite_ref-EmballonuridaeSize_6-11" class="reference"><a href="#cite_note-EmballonuridaeSize-6"><span class="cite-bracket">[</span>6<span class="cite-bracket">]</span></a></sup><br><br><i>Habitats</i>: Caves and forest<sup id="cite_ref-SaccopteryxHabitat_18-0" class="reference"><a href="#cite_note-SaccopteryxHabitat-18"><span class="cite-bracket">[</span>18<span class="cite-bracket">]</span></a></sup>
 </td></tr></tbody></table>`
 
-    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
+    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) }).markdown
     expect(markdown).toMatchSnapshot()
   })
   it('breaking test', async () => {
@@ -260,7 +259,7 @@ describe.each(engines)('tables %s', ({ engine, name } : any) => {
 \t<button class="vector-pinnable-header-toggle-button vector-pinnable-header-unpin-button" data-event-name="pinnable-header.vector-main-menu.unpin">hide</button>
 </div>
 `
-    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
+    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) }).markdown
     expect(markdown).toMatchSnapshot()
   })
 })
