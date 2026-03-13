@@ -11,12 +11,12 @@ const ESC_LINK: u8 = 4;        // bracket escape inside <a>
 const ESC_BLOCKQUOTE: u8 = 8;  // > escape inside <blockquote>
 
 /// Tracked element during extraction — maps stack depth to accumulator
-struct TrackedExtraction {
-    selector: String,
-    stack_depth: usize,
-    text_content: String,
-    tag_name: String,
-    attributes: Vec<(String, String)>,
+pub(crate) struct TrackedExtraction {
+    pub(crate) selector: String,
+    pub(crate) stack_depth: usize,
+    pub(crate) text_content: String,
+    pub(crate) tag_name: String,
+    pub(crate) attributes: Vec<(String, String)>,
 }
 
 pub struct ParseState {
@@ -269,7 +269,7 @@ pub fn matches_selector(tag: &ElementNode, selector: &ParsedSelector) -> bool {
 /// Whitespace check optimized for the hot character loop.
 /// Uses a 33-bit bitmap: space(32), CR(13), LF(10), TAB(9).
 #[inline(always)]
-fn is_whitespace(c: u8) -> bool {
+pub(crate) fn is_whitespace(c: u8) -> bool {
     if c > 32 { return false; }
     // Bitmap: bit 9 (tab), bit 10 (LF), bit 13 (CR), bit 32 (space)
     const MASK: u64 = (1u64 << 9) | (1u64 << 10) | (1u64 << 13) | (1u64 << 32);
@@ -277,7 +277,7 @@ fn is_whitespace(c: u8) -> bool {
 }
 
 #[inline]
-fn decode_html_entities(text: &str) -> Cow<'_, str> {
+pub(crate) fn decode_html_entities(text: &str) -> Cow<'_, str> {
     // Fast path: no ampersand means no entities to decode
     if !text.as_bytes().contains(&b'&') {
         return Cow::Borrowed(text);
@@ -600,13 +600,13 @@ where
     text_buffer
 }
 
-struct CommentResult {
-    complete: bool,
-    new_position: usize,
-    remaining_text: String,
+pub(crate) struct CommentResult {
+    pub(crate) complete: bool,
+    pub(crate) new_position: usize,
+    pub(crate) remaining_text: String,
 }
 
-fn process_comment_or_doctype(html_chunk: &str, position: usize) -> CommentResult {
+pub(crate) fn process_comment_or_doctype(html_chunk: &str, position: usize) -> CommentResult {
     let mut i = position;
     let bytes = html_chunk.as_bytes();
     let chunk_length = bytes.len();
@@ -813,7 +813,7 @@ fn extract_base_class(class: &str) -> (&str, &str) {
     (class, "")
 }
 
-fn process_tailwind_classes(classes_attr: &str) -> (Option<String>, Option<String>, bool) {
+pub(crate) fn process_tailwind_classes(classes_attr: &str) -> (Option<String>, Option<String>, bool) {
     let mut classes: Vec<&str> = classes_attr.split_whitespace().collect();
     let bp_weight = |bp| match bp {
         "" => 0,
@@ -881,7 +881,7 @@ fn process_tailwind_classes(classes_attr: &str) -> (Option<String>, Option<Strin
     )
 }
 
-fn fix_redundant_delimiters(content: &str) -> String {
+pub(crate) fn fix_redundant_delimiters(content: &str) -> String {
     let mut c = content.replace("****", "**");
     c = c.replace("~~~~", "~~");
     if c.contains("***") && c.split("***").count() > 3 {
@@ -1204,7 +1204,7 @@ where
     }
 }
 
-fn process_tag_attributes(html_chunk: &str, position: usize, tag_handler: Option<&crate::types::TagHandler>, skip_attrs: bool) -> (bool, usize, Attributes, bool) {
+pub(crate) fn process_tag_attributes(html_chunk: &str, position: usize, tag_handler: Option<&crate::types::TagHandler>, skip_attrs: bool) -> (bool, usize, Attributes, bool) {
     let mut i = position;
     let bytes = html_chunk.as_bytes();
     let chunk_length = bytes.len();

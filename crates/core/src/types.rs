@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 /// Compact attribute storage using Vec for small-N linear scan.
@@ -91,10 +90,11 @@ impl ElementNode {
     /// Get the tag name. For built-in tags, derives from tag_id. For custom tags, uses custom_name.
     #[inline]
     pub fn name(&self) -> &str {
-        if let Some(id) = self.tag_id {
-            crate::consts::TAG_NAMES[id as usize]
-        } else if let Some(ref n) = self.custom_name {
+        // Custom name takes priority (e.g. custom tags with alias_tag_id)
+        if let Some(ref n) = self.custom_name {
             n.as_str()
+        } else if let Some(id) = self.tag_id {
+            crate::consts::TAG_NAMES[id as usize]
         } else {
             ""
         }
@@ -118,17 +118,7 @@ pub enum NodeEvent<'a> {
     Frontmatter(String),
 }
 
-pub struct HandlerContext<'a, 'b> {
-    pub node: &'a ElementNode,
-    pub ancestors: &'b [ElementNode],
-    pub options: &'a crate::types::HTMLToMarkdownOptions,
-    pub last_content_cache: Option<&'a str>,
-    pub depth_map: &'a [u8; crate::consts::MAX_TAG_ID],
-}
-
 pub struct TagHandler {
-    pub enter: Option<fn(&HandlerContext) -> Option<Cow<'static, str>>>,
-    pub exit: Option<fn(&HandlerContext) -> Option<Cow<'static, str>>>,
     pub is_self_closing: bool,
     pub is_non_nesting: bool,
     pub collapses_inner_white_space: bool,

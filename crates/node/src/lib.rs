@@ -162,7 +162,7 @@ pub struct ParseResultNapi {
 
 fn element_to_napi(elem: &mdream::types::ElementNode) -> ElementNodeNapi {
     ElementNodeNapi {
-        name: elem.name.to_string(),
+        name: elem.name().to_string(),
         attributes: elem.attributes.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         depth: elem.depth as u32,
         index: elem.index as u32,
