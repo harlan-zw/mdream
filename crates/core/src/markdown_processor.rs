@@ -384,7 +384,7 @@ impl MarkdownProcessor {
     }
 
     #[inline]
-    fn calculate_new_line_config(&self, node: &ElementNode, ancestors: &[ElementNode], depth_map: &[u8; MAX_TAG_ID]) -> [u8; 2] {
+    fn calculate_new_line_config(&self, node: &ElementNode, _ancestors: &[ElementNode], depth_map: &[u8; MAX_TAG_ID]) -> [u8; 2] {
         if (node.tag_id != Some(TAG_LI) && depth_map[TAG_LI as usize] > 0)
             || (node.tag_id != Some(TAG_BLOCKQUOTE) && depth_map[TAG_BLOCKQUOTE as usize] > 0) {
             return NO_SPACING;

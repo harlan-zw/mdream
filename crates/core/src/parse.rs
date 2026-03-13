@@ -1211,15 +1211,14 @@ fn process_tag_attributes(html_chunk: &str, position: usize, tag_handler: Option
 
     let self_closing = tag_handler.map_or(false, |h| h.is_self_closing);
     let mut inside_quote = false;
-    let mut quote_char = 0;
-    let mut prev_char = 0;
+    let mut quote_char: u8 = 0;
     let attr_start_pos = i;
 
     while i < chunk_length {
         let c = bytes[i];
 
         if inside_quote {
-            if c == quote_char && prev_char != BACKSLASH_CHAR {
+            if c == quote_char {
                 inside_quote = false;
             }
             i += 1;
@@ -1244,7 +1243,6 @@ fn process_tag_attributes(html_chunk: &str, position: usize, tag_handler: Option
         }
 
         i += 1;
-        prev_char = c;
     }
 
     (false, i, Attributes::new(), false)
