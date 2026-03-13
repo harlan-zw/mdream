@@ -50,6 +50,11 @@ impl Attributes {
     }
 
     #[inline]
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    #[inline]
     pub fn iter(&self) -> std::slice::Iter<'_, (String, String)> {
         self.inner.iter()
     }
@@ -101,23 +106,7 @@ impl ElementNode {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct TextNode {
-    pub value: String,
-    pub depth: usize,
-    pub index: usize,
-    pub excluded_from_markdown: bool,
-    pub contains_whitespace: bool,
-}
-
-#[derive(Debug, Clone)]
-pub enum NodeEvent<'a> {
-    EnterElement(&'a ElementNode),
-    ExitElement(&'a ElementNode),
-    EnterText(&'a TextNode),
-    Frontmatter(String),
-}
-
+#[derive(Clone, Copy)]
 pub struct TagHandler {
     pub is_self_closing: bool,
     pub is_non_nesting: bool,

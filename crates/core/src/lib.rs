@@ -2,7 +2,7 @@
 
 pub mod consts;
 pub mod convert;
-pub mod parse;
+pub mod helpers;
 pub mod splitter;
 pub mod tags;
 pub mod types;

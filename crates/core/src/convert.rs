@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::consts::*;
 use crate::tags::get_tag_handler;
 use crate::types::{ElementNode, ExtractedElement, HTMLToMarkdownOptions, ParsedSelector, TailwindData};
-use crate::parse::{
+use crate::helpers::{
     is_whitespace, decode_html_entities, process_comment_or_doctype,
     process_tag_attributes, parse_css_selector, matches_selector,
     process_tailwind_classes, fix_redundant_delimiters, TrackedExtraction,
@@ -42,6 +42,7 @@ pub struct ConvertState {
     collapse_span_depth: u8,
     first_block_parent_index: Option<usize>,
     pub stack: Vec<ElementNode>,
+    node_pool: Vec<ElementNode>,
 
     // Plugin flags
     has_plugins: bool,
@@ -109,6 +110,7 @@ impl ConvertState {
             collapse_span_depth: 0,
             first_block_parent_index: None,
             stack: Vec::with_capacity(32),
+            node_pool: Vec::with_capacity(32),
 
             has_plugins: false,
             has_tailwind: false,
@@ -282,7 +284,7 @@ impl ConvertState {
                 if result.complete {
                     i = result.new_position;
                 } else {
-                    text_buffer.push_str(&result.remaining_text);
+                    text_buffer.push_str(&chunk[result.remaining_start..]);
                     break;
                 }
             } else if next == SLASH_CHAR {
@@ -300,7 +302,7 @@ impl ConvertState {
                 if result.complete {
                     i = result.new_position;
                 } else {
-                    text_buffer.push_str(&result.remaining_text);
+                    text_buffer.push_str(&chunk[result.remaining_start..]);
                     break;
                 }
             } else {
@@ -1101,15 +1103,34 @@ impl ConvertState {
             (false, false, false, false, None)
         };
 
-        let mut tag = ElementNode {
-            custom_name, attributes, tag_id,
-            depth: self.depth, index: current_walk_index,
-            current_walk_index: 0, child_text_node_index: 0,
-            contains_whitespace: false, excluded_from_markdown: false,
-            tailwind: None,
-            is_inline: h_inline, excludes_text_nodes: h_excludes,
-            is_non_nesting: h_non_nesting, collapses_inner_white_space: h_collapses,
-            spacing: h_spacing,
+        let mut tag = if let Some(mut pooled) = self.node_pool.pop() {
+            pooled.custom_name = custom_name;
+            pooled.attributes = attributes;
+            pooled.tag_id = tag_id;
+            pooled.depth = self.depth;
+            pooled.index = current_walk_index;
+            pooled.current_walk_index = 0;
+            pooled.child_text_node_index = 0;
+            pooled.contains_whitespace = false;
+            pooled.excluded_from_markdown = false;
+            pooled.tailwind = None;
+            pooled.is_inline = h_inline;
+            pooled.excludes_text_nodes = h_excludes;
+            pooled.is_non_nesting = h_non_nesting;
+            pooled.collapses_inner_white_space = h_collapses;
+            pooled.spacing = h_spacing;
+            pooled
+        } else {
+            ElementNode {
+                custom_name, attributes, tag_id,
+                depth: self.depth, index: current_walk_index,
+                current_walk_index: 0, child_text_node_index: 0,
+                contains_whitespace: false, excluded_from_markdown: false,
+                tailwind: None,
+                is_inline: h_inline, excludes_text_nodes: h_excludes,
+                is_non_nesting: h_non_nesting, collapses_inner_white_space: h_collapses,
+                spacing: h_spacing,
+            }
         };
 
         let mut skip_node = false;
@@ -1329,6 +1350,7 @@ impl ConvertState {
                 let modified_node2 = self.stack.pop().unwrap();
                 // Emit exit
                 self.emit_exit_element(&modified_node2);
+                self.recycle_node(modified_node2);
                 if let Some(id) = node_tag_id {
                     self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
                     self.update_escape_ctx_on_close(id);
@@ -1344,12 +1366,16 @@ impl ConvertState {
         // Inline emit exit (no callback!)
         self.emit_exit_element(&node);
 
-        if let Some(id) = node.tag_id {
+        let node_tag_id = node.tag_id;
+        let node_is_non_nesting = node.is_non_nesting;
+        self.recycle_node(node);
+
+        if let Some(id) = node_tag_id {
             self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
             self.update_escape_ctx_on_close(id);
         }
 
-        if node.is_non_nesting {
+        if node_is_non_nesting {
             self.in_single_quote = false;
             self.in_double_quote = false;
             self.in_backtick = false;
@@ -1377,7 +1403,7 @@ impl ConvertState {
         if !found_close {
             return CloseTagResult {
                 complete: false, new_position: position,
-                remaining_text: html_chunk[position..].to_string(),
+                remaining_start: position,
             };
         }
 
@@ -1393,7 +1419,7 @@ impl ConvertState {
             if curr.is_non_nesting && curr.tag_id != tag_id {
                 return CloseTagResult {
                     complete: false, new_position: position,
-                    remaining_text: html_chunk[position..].to_string(),
+                    remaining_start: position,
                 };
             }
         }
@@ -1410,12 +1436,21 @@ impl ConvertState {
         }
 
         self.just_closed_tag = true;
-        CloseTagResult { complete: true, new_position: i + 1, remaining_text: String::new() }
+        CloseTagResult { complete: true, new_position: i + 1, remaining_start: 0 }
     }
 
     // ========================================================================
     // Utility methods
     // ========================================================================
+
+    /// Recycle a node into the pool, preserving its Attributes Vec allocation.
+    #[inline]
+    fn recycle_node(&mut self, mut node: ElementNode) {
+        node.attributes.clear();
+        node.custom_name = None;
+        node.tailwind = None;
+        self.node_pool.push(node);
+    }
 
     #[inline]
     fn update_escape_ctx_on_close(&mut self, id: u8) {
@@ -1473,20 +1508,19 @@ impl ConvertState {
     }
 
     #[inline]
-    fn resolve_url(url: &str, origin: Option<&str>) -> String {
-        if url.is_empty() { return url.to_string(); }
-        if url.starts_with("//") { return format!("https:{}", url); }
-        if url.starts_with('#') { return url.to_string(); }
+    fn resolve_url<'a>(url: &'a str, origin: Option<&str>) -> Cow<'a, str> {
+        if url.is_empty() || url.starts_with('#') { return Cow::Borrowed(url); }
+        if url.starts_with("//") { return Cow::Owned(format!("https:{}", url)); }
         if let Some(orig) = origin {
             if url.starts_with('/') {
-                return format!("{}{}", orig.trim_end_matches('/'), url);
+                return Cow::Owned(format!("{}{}", orig.trim_end_matches('/'), url));
             }
-            if url.starts_with("./") { return format!("{}/{}", orig, &url[2..]); }
+            if url.starts_with("./") { return Cow::Owned(format!("{}/{}", orig, &url[2..])); }
             if !url.starts_with("http") {
-                return format!("{}/{}", orig, url.strip_prefix('/').unwrap_or(url));
+                return Cow::Owned(format!("{}/{}", orig, url.strip_prefix('/').unwrap_or(url)));
             }
         }
-        url.to_string()
+        Cow::Borrowed(url)
     }
 
     #[inline]
@@ -1535,5 +1569,6 @@ struct OpeningTagResult {
 struct CloseTagResult {
     complete: bool,
     new_position: usize,
-    remaining_text: String,
+    /// Start offset into html_chunk for remaining text (only meaningful when !complete)
+    remaining_start: usize,
 }
