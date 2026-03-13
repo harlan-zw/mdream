@@ -3,7 +3,9 @@
 exports[`htmlToMarkdownSplitChunks > edge cases > handles blockquotes 1`] = `
 "## Quotes
 
-> This is a quote Multiple paragraphs"
+> This is a quote
+>
+> Multiple paragraphs"
 `;
 
 exports[`htmlToMarkdownSplitChunks > edge cases > handles images in content 1`] = `

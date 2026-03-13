@@ -58,7 +58,9 @@ describe('html-to-markdown parity', () => {
     </blockquote>
 </blockquote>`)).toMatchInlineSnapshot(`
   "> ## Heading 1. List 2. List
-  > > Another Quote by someone"
+  > > Another Quote
+  > >
+  > > by someone"
 `)
   })
   it ('inline Code & Code Block: Correctly handles backticks and multi-line code blocks, preserving code structure.', () => {
