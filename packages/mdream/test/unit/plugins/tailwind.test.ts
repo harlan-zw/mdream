@@ -165,4 +165,59 @@ describe('tailwind addon', () => {
     expect(markdown).toContain('Regular content')
     expect(markdown).toContain('More regular content')
   })
+
+  it('hides child elements inside a fixed parent', () => {
+    const html = `
+      <div>
+        <div class="fixed">
+          <h5>Sidebar Title</h5>
+          <ul><li><a href="/">Link</a></li></ul>
+        </div>
+        <p>Visible content</p>
+      </div>
+    `
+    const markdown = htmlToMarkdown(html, {
+      plugins: [tailwindPlugin()],
+    })
+
+    expect(markdown).not.toContain('Sidebar Title')
+    expect(markdown).not.toContain('Link')
+    expect(markdown).toContain('Visible content')
+  })
+
+  it('hides deeply nested elements inside a hidden parent', () => {
+    const html = `
+      <div>
+        <div class="hidden">
+          <div>
+            <p>Deeply nested hidden text</p>
+          </div>
+        </div>
+        <p>Visible text</p>
+      </div>
+    `
+    const markdown = htmlToMarkdown(html, {
+      plugins: [tailwindPlugin()],
+    })
+
+    expect(markdown).not.toContain('Deeply nested hidden text')
+    expect(markdown).toContain('Visible text')
+  })
+
+  it('hides text nodes inside a fixed parent', () => {
+    const html = `
+      <div>
+        <div class="absolute">
+          <span>Hidden span text</span>
+        </div>
+        <p>Normal content</p>
+      </div>
+    `
+    const markdown = htmlToMarkdown(html, {
+      plugins: [tailwindPlugin()],
+    })
+
+    expect(markdown).not.toContain('Hidden span text')
+    expect(markdown).toContain('Normal content')
+  })
 })

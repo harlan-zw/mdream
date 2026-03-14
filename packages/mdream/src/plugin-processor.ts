@@ -19,6 +19,18 @@ export function processPluginsForEvent(
 ): boolean {
   // Process plugins with full state access
   if (plugins?.length) {
+    // Run processAttributes BEFORE beforeNodeProcess so that
+    // ancestor context (e.g. tailwind hidden state) is available
+    // when descendant nodes check their ancestors in beforeNodeProcess.
+    if (event.node.type === ELEMENT_NODE && event.type === NodeEventEnter) {
+      const element = event.node as ElementNode
+      for (const plugin of plugins) {
+        if (plugin.processAttributes) {
+          plugin.processAttributes(element, state)
+        }
+      }
+    }
+
     let shouldSkip = false
     for (const plugin of plugins) {
       const res = plugin.beforeNodeProcess?.(event, state)
@@ -34,15 +46,6 @@ export function processPluginsForEvent(
     // Run plugin hooks
     if (event.node.type === ELEMENT_NODE) {
       const element = event.node as ElementNode
-
-      // Run processAttributes hook on element enter
-      if (event.type === NodeEventEnter) {
-        for (const plugin of plugins) {
-          if (plugin.processAttributes) {
-            plugin.processAttributes(element, state)
-          }
-        }
-      }
 
       // Collect plugin hook outputs
       const fn = event.type === NodeEventEnter ? 'onNodeEnter' : 'onNodeExit'

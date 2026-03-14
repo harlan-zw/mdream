@@ -308,13 +308,18 @@ export function tailwindPlugin(): Plugin {
       return { content, skip: false }
     },
 
-    // Filter out hidden elements
+    // Filter out hidden elements (including descendants of hidden ancestors)
     beforeNodeProcess({ node }) {
+      let parent = node.parent as ElementNode | null
+      while (parent) {
+        if (parent.context?.tailwind?.hidden) {
+          return { skip: true }
+        }
+        parent = parent.parent as ElementNode | null
+      }
       if (node.type === ELEMENT_NODE) {
         const elementNode = node as ElementNode
-        // Check if element should be hidden based on plugin data
-        const tailwindData = elementNode.context?.tailwind
-        if (tailwindData?.hidden) {
+        if (elementNode.context?.tailwind?.hidden) {
           return { skip: true }
         }
       }
