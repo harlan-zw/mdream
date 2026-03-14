@@ -625,6 +625,18 @@ impl ConvertState {
             TAG_SUB => Some(Cow::Borrowed("<sub>")),
             TAG_SUP => Some(Cow::Borrowed("<sup>")),
             TAG_INS => Some(Cow::Borrowed("<ins>")),
+            TAG_P => {
+                let bq_depth = self.depth_map[TAG_BLOCKQUOTE as usize];
+                if bq_depth > 0 {
+                    let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
+                    // Only add separator if there's preceding text content (not the first <p> in the blockquote)
+                    if last_char != 0 && last_char != b'\n' && last_char != b' ' && last_char != b'>' {
+                        let prefix = "> ".repeat(bq_depth as usize);
+                        return Some(Cow::Owned(format!("\n{}\n{}", prefix.trim_end(), prefix)));
+                    }
+                }
+                None
+            }
             TAG_BLOCKQUOTE => {
                 let depth = std::cmp::max(1, self.depth_map[TAG_BLOCKQUOTE as usize]);
                 let mut prefix = "> ".repeat(depth as usize);

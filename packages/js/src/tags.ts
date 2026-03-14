@@ -512,7 +512,20 @@ export const tagHandlers: Record<number, TagHandler> = {
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
   },
-  [TAG_P]: {},
+  [TAG_P]: {
+    enter: ({ node, state }) => {
+      const bqDepth = node.depthMap[TAG_BLOCKQUOTE] || 0
+      if (bqDepth > 0) {
+        const lastEntry = state.buffer.at(-1)
+        const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
+        // Only add separator if there's preceding text content (not the first <p> in the blockquote)
+        if (lastChar && lastChar !== '\n' && lastChar !== ' ' && lastChar !== '>') {
+          const prefix = '> '.repeat(bqDepth)
+          return `\n${prefix.trimEnd()}\n${prefix}`
+        }
+      }
+    },
+  },
   [TAG_DIV]: {},
   [TAG_SPAN]: {
     collapsesInnerWhiteSpace: true,

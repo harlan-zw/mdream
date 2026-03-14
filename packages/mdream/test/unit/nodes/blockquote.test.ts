@@ -20,7 +20,7 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<blockquote><p>First paragraph</p><p>Second paragraph</p></blockquote>'
     const markdown = htmlToMarkdown(html, { engine }).markdown
-    expect(markdown).toBe('> First paragraph Second paragraph')
+    expect(markdown).toBe('> First paragraph\n>\n> Second paragraph')
   })
 
   it('handles complex nested blockquotes', async () => {

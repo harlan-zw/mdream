@@ -187,6 +187,14 @@ fn nested_blockquotes() {
 }
 
 #[test]
+fn blockquote_with_paragraphs() {
+    assert_eq!(
+        convert("<blockquote><p>First paragraph</p><p>Second paragraph</p></blockquote>"),
+        "> First paragraph\n>\n> Second paragraph"
+    );
+}
+
+#[test]
 fn blockquote_with_image() {
     assert_eq!(
         convert(r#"<blockquote>Quote with <img src="image.jpg" alt="image"></blockquote>"#),

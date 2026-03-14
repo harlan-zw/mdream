@@ -50,7 +50,7 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
       <p>Another Quote</p>
       <p>by someone</p>
     </blockquote>
-</blockquote>`, { engine }).markdown).toBe('> ## Heading 1. List 2. List\n> > Another Quote by someone')
+</blockquote>`, { engine }).markdown).toBe('> ## Heading 1. List 2. List\n> > Another Quote\n> >\n> > by someone')
   })
   it('inline Code & Code Block: Correctly handles backticks and multi-line code blocks, preserving code structure.', async () => {
     const engine = await resolveEngine(engineConfig.engine)
