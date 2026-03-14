@@ -1,66 +1,58 @@
 use std::time::Instant;
 
-fn main() {
-    let html = std::fs::read_to_string("tests/fixtures/wikipedia-small.html")
-        .expect("fixture not found — run from crates/core/");
+fn bench(label: &str, html: &str, opts: mdream::types::HTMLToMarkdownOptions, iterations: u32) -> f64 {
     let size_kb = html.len() as f64 / 1024.0;
-
-    // Warm up
-    for _ in 0..5 {
-        let _ = mdream::html_to_markdown(&html, mdream::types::HTMLToMarkdownOptions::default());
+    for _ in 0..50 {
+        let _ = mdream::html_to_markdown(html, opts.clone());
     }
-
-    // Benchmark single-file
-    let iterations = 100;
-    let start = Instant::now();
-    for _ in 0..iterations {
-        let _ = mdream::html_to_markdown(&html, mdream::types::HTMLToMarkdownOptions::default());
-    }
-    let elapsed = start.elapsed();
-    let per_iter = elapsed / iterations;
-    println!("wikipedia-small ({:.1} KB)", size_kb);
-    println!("  {iterations} iterations: {:.2?} total, {:.2?}/iter", elapsed, per_iter);
-    println!("  throughput: {:.1} MB/s", (size_kb / 1024.0) / per_iter.as_secs_f64());
-
-    // Benchmark with 10x repeated content (~1.6MB)
-    let big_html = html.repeat(10);
-    let big_kb = big_html.len() as f64 / 1024.0;
-    // Warm up
+    let mut best = f64::MAX;
     for _ in 0..3 {
-        let _ = mdream::html_to_markdown(&big_html, mdream::types::HTMLToMarkdownOptions::default());
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let _ = mdream::html_to_markdown(html, opts.clone());
+        }
+        let us = start.elapsed().as_micros() as f64 / iterations as f64;
+        if us < best { best = us; }
     }
-    let iterations = 20;
-    let start = Instant::now();
-    for _ in 0..iterations {
-        let _ = mdream::html_to_markdown(&big_html, mdream::types::HTMLToMarkdownOptions::default());
-    }
-    let elapsed = start.elapsed();
-    let per_iter = elapsed / iterations;
-    println!("\nwikipedia-10x ({:.1} KB)", big_kb);
-    println!("  {iterations} iterations: {:.2?} total, {:.2?}/iter", elapsed, per_iter);
-    println!("  throughput: {:.1} MB/s", (big_kb / 1024.0) / per_iter.as_secs_f64());
+    let ms = best / 1000.0;
+    let throughput = (size_kb / 1024.0) / (best / 1_000_000.0);
+    println!("  {label:<40} {:.2}ms  ({:.0} MB/s)", ms, throughput);
+    best
+}
 
-    // Streaming benchmark
-    let chunk_size = 8192;
-    let chunks: Vec<&str> = big_html.as_bytes().chunks(chunk_size)
-        .map(|c| std::str::from_utf8(c).unwrap_or(""))
-        .collect();
-    // Warm up
-    for _ in 0..3 {
-        let mut stream = mdream::MarkdownStreamProcessor::new(mdream::types::HTMLToMarkdownOptions::default());
-        for chunk in &chunks { stream.process_chunk(chunk); }
-        stream.finish();
+fn clean_all() -> mdream::types::CleanConfig {
+    mdream::types::CleanConfig {
+        urls: true, fragments: true, empty_links: true, blank_lines: false,
+        redundant_links: true, self_link_headings: true, empty_images: true, empty_link_text: true,
     }
-    let iterations = 20;
-    let start = Instant::now();
-    for _ in 0..iterations {
-        let mut stream = mdream::MarkdownStreamProcessor::new(mdream::types::HTMLToMarkdownOptions::default());
-        for chunk in &chunks { stream.process_chunk(chunk); }
-        stream.finish();
+}
+
+fn main() {
+    let iters = 200;
+
+    let fixtures: Vec<(&str, String)> = vec![
+        ("nuxt (3 KB)", std::fs::read_to_string("tests/fixtures/nuxt-example.html").unwrap()),
+        ("vuejs-docs (110 KB)", std::fs::read_to_string("tests/fixtures/vuejs-docs.html").unwrap()),
+        ("wikipedia (162 KB)", std::fs::read_to_string("tests/fixtures/wikipedia-small.html").unwrap()),
+        ("mdn-array (230 KB)", std::fs::read_to_string("tests/fixtures/mdn-array.html").unwrap()),
+        ("react-learn (259 KB)", std::fs::read_to_string("tests/fixtures/react-learn.html").unwrap()),
+        ("github-docs (420 KB)", std::fs::read_to_string("tests/fixtures/github-markdown-complete.html").unwrap()),
+        ("wikipedia-10x (1.6 MB)", std::fs::read_to_string("tests/fixtures/wikipedia-small.html").unwrap().repeat(10)),
+    ];
+
+    let default_opts = mdream::types::HTMLToMarkdownOptions::default();
+    let clean_opts = mdream::types::HTMLToMarkdownOptions { clean: Some(clean_all()), ..Default::default() };
+
+    println!("Best of 3 runs, {} iterations each\n", iters);
+    println!("  {:40} {:>10}  {:>10}  {:>8}", "fixture", "default", "clean:true", "overhead");
+    println!("  {:40} {:>10}  {:>10}  {:>8}", "-------", "-------", "----------", "--------");
+
+    for (label, html) in &fixtures {
+        let d = bench(&format!("{} default", label), html, default_opts.clone(), iters);
+        let c = bench(&format!("{} clean", label), html, clean_opts.clone(), iters);
+        let overhead = ((c - d) / d) * 100.0;
+        // Reprint as table row
+        println!("  {:40} {:>7.2}ms  {:>7.2}ms  {:>+6.1}%\n",
+            label, d / 1000.0, c / 1000.0, overhead);
     }
-    let elapsed = start.elapsed();
-    let per_iter = elapsed / iterations;
-    println!("\nstreaming wikipedia-10x ({:.1} KB, {}B chunks)", big_kb, chunk_size);
-    println!("  {iterations} iterations: {:.2?} total, {:.2?}/iter", elapsed, per_iter);
-    println!("  throughput: {:.1} MB/s", (big_kb / 1024.0) / per_iter.as_secs_f64());
 }

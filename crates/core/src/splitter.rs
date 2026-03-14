@@ -1,6 +1,5 @@
-use std::collections::HashMap;
 
-use crate::consts::{TAG_H1, TAG_H2, TAG_H6};
+use crate::consts::{TAG_H1, TAG_H2};
 use crate::types::HTMLToMarkdownOptions;
 
 /// Options for splitting markdown into chunks.
@@ -38,7 +37,7 @@ pub struct MarkdownChunk {
 /// Metadata for a markdown chunk.
 pub struct ChunkMetadata {
     /// Header hierarchy at this chunk position (e.g. "h1" -> "Title").
-    pub headers: Option<HashMap<String, String>>,
+    pub headers: Option<Vec<(String, String)>>,
     /// Code block language if chunk contains code.
     pub code: Option<String>,
     /// Line number range in the original document.
@@ -180,7 +179,7 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
     }
 
     // State
-    let mut header_hierarchy: HashMap<u8, String> = HashMap::new();
+    let mut header_hierarchy: Vec<(u8, String)> = Vec::new();
     let mut seen_split_headers: u8 = 0; // bitfield: bit (tag_id - TAG_H1)
     let mut current_chunk_code_language = String::new();
     let mut in_code_block = false;
@@ -195,7 +194,7 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
                        last_split_position: &mut usize,
                        line_number: &mut usize,
                        current_chunk_code_language: &mut String,
-                       header_hierarchy: &HashMap<u8, String>,
+                       header_hierarchy: &Vec<(u8, String)>,
                        end_position: usize,
                        apply_overlap: bool,
                        strip_headers: bool,
@@ -237,10 +236,10 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
         };
 
         if !header_hierarchy.is_empty() {
-            let mut headers = HashMap::new();
-            for (&tag_id, text) in header_hierarchy.iter() {
+            let mut headers = Vec::new();
+            for &(tag_id, ref text) in header_hierarchy.iter() {
                 let level = tag_id - TAG_H1 + 1;
-                headers.insert(format!("h{}", level), text.clone());
+                headers.push((format!("h{}", level), text.clone()));
             }
             metadata.headers = Some(headers);
         }
@@ -309,13 +308,15 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
                             line_pos, false, opts.strip_headers, opts.chunk_overlap,
                         );
                         // Clear hierarchy at this level and below
-                        for j in tag_id..=TAG_H6 {
-                            header_hierarchy.remove(&j);
-                        }
+                        header_hierarchy.retain(|(k, _)| *k < tag_id);
                     }
                     seen_split_headers |= bit;
                 }
-                header_hierarchy.insert(tag_id, stripped_text);
+                if let Some(entry) = header_hierarchy.iter_mut().find(|(k, _)| *k == tag_id) {
+                    entry.1 = stripped_text;
+                } else {
+                    header_hierarchy.push((tag_id, stripped_text));
+                }
             }
 
             // HR detection

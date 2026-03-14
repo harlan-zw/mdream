@@ -29,21 +29,21 @@ pub fn html_to_markdown_result(html: &str, options: HTMLToMarkdownOptions) -> Md
     };
 
     let frontmatter = if state.has_frontmatter {
-        let mut map = std::collections::HashMap::new();
+        let mut entries: Vec<(String, String)> = Vec::new();
         if let Some(title) = &state.frontmatter_title {
-            map.insert("title".to_string(), title.clone());
+            entries.push(("title".to_string(), title.clone()));
         }
         for (k, v) in &state.frontmatter_meta {
-            map.insert(k.clone(), v.clone());
+            entries.push((k.clone(), v.clone()));
         }
         if let Some(add) = state.options.plugins.as_ref()
             .and_then(|p| p.frontmatter.as_ref())
             .and_then(|f| f.additional_fields.as_ref()) {
             for (k, v) in add {
-                map.insert(k.clone(), v.clone());
+                entries.push((k.clone(), v.clone()));
             }
         }
-        if map.is_empty() { None } else { Some(map) }
+        if entries.is_empty() { None } else { Some(entries) }
     } else {
         None
     };

@@ -9,7 +9,8 @@ rust-version = "1.80"
 repository = "https://github.com/harlan-zw/mdream"
 
 [profile.release]
+opt-level = "z"
 lto = true
-strip = "symbols"
+strip = true
 codegen-units = 1
 panic = "abort"

@@ -1,6 +1,25 @@
 import type { HtmlToMarkdownOptions, PluginOptions, TagOverrideNapi } from '../napi/index.js'
 import { htmlToMarkdown as _htmlToMarkdown, MarkdownStream as _MarkdownStream } from '../napi/index.mjs'
 
+export interface CleanOptions {
+  /** Strip tracking query parameters (utm_*, fbclid, gclid, etc.) from URLs */
+  urls?: boolean
+  /** Strip fragment-only links that don't match any heading in the output */
+  fragments?: boolean
+  /** Strip links with meaningless hrefs (#, javascript:void(0)) → plain text */
+  emptyLinks?: boolean
+  /** Collapse 3+ consecutive blank lines to 2 */
+  blankLines?: boolean
+  /** Strip links where text equals URL: [https://x.com](https://x.com) → https://x.com */
+  redundantLinks?: boolean
+  /** Strip self-referencing heading anchors: ## [Title](#title) → ## Title */
+  selfLinkHeadings?: boolean
+  /** Strip images with no alt text (decorative/tracking pixels) */
+  emptyImages?: boolean
+  /** Drop links that produce no visible text: [](url) → nothing */
+  emptyLinkText?: boolean
+}
+
 export interface ExtractedElement {
   selector: string
   tagName: string
@@ -27,8 +46,16 @@ export interface TagOverride {
 export interface MdreamOptions {
   /** Origin URL for resolving relative image paths and internal links. */
   origin?: string
-  /** Strip tracking query parameters (utm_*, fbclid, gclid, etc.) from URLs. Default: false */
+  /**
+   * @deprecated Use `clean: { urls: true }` or `clean: true` instead.
+   */
   cleanUrls?: boolean
+  /**
+   * Clean up the markdown output. Pass `true` for all cleanup or an object
+   * to enable specific features. `clean.urls` is handled during conversion;
+   * other options are post-processing steps (sync API only).
+   */
+  clean?: boolean | CleanOptions
   /** Enable minimal preset (frontmatter, isolateMain, tailwind, filter). Default: false */
   minimal?: boolean
   /** Extract frontmatter from HTML head. Default when minimal: true */
@@ -46,6 +73,22 @@ export interface MdreamOptions {
 }
 
 const MINIMAL_FILTER_EXCLUDE = ['form', 'fieldset', 'object', 'embed', 'footer', 'aside', 'iframe', 'input', 'textarea', 'select', 'button', 'nav']
+
+const CLEAN_ALL: CleanOptions = { urls: true, fragments: true, emptyLinks: true, redundantLinks: true, selfLinkHeadings: true, emptyImages: true, emptyLinkText: true }
+
+function resolveCleanConfig(options: Partial<MdreamOptions>, minimal: boolean): { cleanUrls: boolean, clean?: CleanOptions } {
+  let cleanOpt = options.clean
+  // Default clean: true when minimal is on, unless explicitly set to false
+  if (cleanOpt === undefined && minimal)
+    cleanOpt = true
+  if (!cleanOpt)
+    return { cleanUrls: options.cleanUrls || false }
+  const resolved = cleanOpt === true ? CLEAN_ALL : cleanOpt
+  return {
+    cleanUrls: options.cleanUrls || resolved.urls || false,
+    clean: resolved,
+  }
+}
 
 function resolveOptions(options: Partial<MdreamOptions>): { napiOpts: HtmlToMarkdownOptions, extractionHandlers?: Record<string, (el: ExtractedElement) => void> } {
   const minimal = options.minimal === true
@@ -87,8 +130,10 @@ function resolveOptions(options: Partial<MdreamOptions>): { napiOpts: HtmlToMark
     plugins.tagOverrides = overrides
   }
 
+  const { cleanUrls, clean } = resolveCleanConfig(options, minimal)
+
   return {
-    napiOpts: { origin: options.origin, cleanUrls: options.cleanUrls, plugins },
+    napiOpts: { origin: options.origin, cleanUrls, clean, plugins },
     extractionHandlers,
   }
 }

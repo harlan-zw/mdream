@@ -100,13 +100,17 @@ fn decode_html_entities_alloc(text: &str) -> String {
                 i = start;
             }
         }
-        // Safe: we're iterating bytes but need to handle multi-byte UTF-8
-        let b = bytes[i];
-        if b < 0x80 {
-            result.push(b as char);
+        // Batch copy plain ASCII bytes until next & or non-ASCII
+        let start = i;
+        while i < len && bytes[i] != b'&' && bytes[i] < 0x80 {
             i += 1;
-        } else {
-            // Multi-byte UTF-8 char - find char boundary
+        }
+        if i > start {
+            result.push_str(&text[start..i]);
+        }
+        if i >= len { break; }
+        // Handle non-ASCII multi-byte UTF-8 char
+        if bytes[i] >= 0x80 {
             let ch = text[i..].chars().next().unwrap();
             result.push(ch);
             i += ch.len_utf8();

@@ -780,3 +780,212 @@ fn clean_urls_images() {
         "![Photo](https://cdn.example.com/img.png)"
     );
 }
+
+// ── Clean mode ──
+
+fn convert_with_clean(html: &str, clean: mdream::types::CleanConfig) -> String {
+    html_to_markdown(html, HTMLToMarkdownOptions {
+        clean: Some(clean),
+        ..Default::default()
+    })
+}
+
+fn clean_all() -> mdream::types::CleanConfig {
+    mdream::types::CleanConfig {
+        urls: true,
+        fragments: true,
+        empty_links: true,
+        blank_lines: false,
+        redundant_links: true,
+        self_link_headings: true,
+        empty_images: true,
+        empty_link_text: true,
+    }
+}
+
+#[test]
+fn clean_strips_empty_hash_link() {
+    assert_eq!(
+        convert_with_clean(r##"<a href="#">Link</a>"##, clean_all()),
+        "Link"
+    );
+}
+
+#[test]
+fn clean_strips_javascript_link() {
+    assert_eq!(
+        convert_with_clean(r#"<a href="javascript:void(0)">Click</a>"#, clean_all()),
+        "Click"
+    );
+}
+
+#[test]
+fn clean_strips_broken_fragment() {
+    assert_eq!(
+        convert_with_clean(r##"<a href="#nonexistent">Link</a>"##, clean_all()),
+        "Link"
+    );
+}
+
+#[test]
+fn clean_keeps_valid_fragment() {
+    assert_eq!(
+        convert_with_clean(r##"<h2>My Section</h2><a href="#my-section">Link</a>"##, clean_all()),
+        "## My Section\n\n[Link](#my-section)"
+    );
+}
+
+#[test]
+fn clean_keeps_valid_strips_broken() {
+    assert_eq!(
+        convert_with_clean(
+            r##"<h2>Introduction</h2><p><a href="#introduction">Intro</a> and <a href="#missing">Missing</a></p>"##,
+            clean_all()
+        ),
+        "## Introduction\n\n[Intro](#introduction) and Missing"
+    );
+}
+
+#[test]
+fn clean_preserves_absolute_url_fragments() {
+    assert_eq!(
+        convert_with_clean(r##"<a href="https://example.com/page#section">Link</a>"##, clean_all()),
+        "[Link](https://example.com/page#section)"
+    );
+}
+
+#[test]
+fn clean_self_referencing_heading_link() {
+    assert_eq!(
+        convert_with_clean(r##"<h2><a href="#new-project">New Project</a></h2>"##, clean_all()),
+        "## New Project"
+    );
+}
+
+#[test]
+fn clean_collapses_blank_lines() {
+    let md = convert_with_clean(r#"<p>First</p><br><br><br><br><br><p>Second</p>"#, clean_all());
+    assert!(!md.contains("\n\n\n"), "Should not have 3+ consecutive newlines");
+    assert!(md.contains("First"));
+    assert!(md.contains("Second"));
+}
+
+#[test]
+fn clean_heading_with_formatting() {
+    assert_eq!(
+        convert_with_clean(r##"<h2><strong>Bold</strong> Heading</h2><a href="#bold-heading">Link</a>"##, clean_all()),
+        "## **Bold** Heading\n\n[Link](#bold-heading)"
+    );
+}
+
+#[test]
+fn clean_disabled_by_default() {
+    assert_eq!(
+        convert(r##"<a href="#my-anchor">Jump</a>"##),
+        "[Jump](#my-anchor)"
+    );
+}
+
+// ── redundantLinks ──
+
+#[test]
+fn clean_redundant_link_stripped() {
+    assert_eq!(
+        convert_with_clean(r#"<a href="https://example.com">https://example.com</a>"#, clean_all()),
+        "https://example.com"
+    );
+}
+
+#[test]
+fn clean_redundant_link_with_origin() {
+    assert_eq!(
+        convert_with_clean(r#"<a href="https://example.com/page">https://example.com/page</a>"#, clean_all()),
+        "https://example.com/page"
+    );
+}
+
+#[test]
+fn clean_non_redundant_link_kept() {
+    assert_eq!(
+        convert_with_clean(r#"<a href="https://example.com">Example</a>"#, clean_all()),
+        "[Example](https://example.com)"
+    );
+}
+
+// ── selfLinkHeadings ──
+
+#[test]
+fn clean_self_link_heading_stripped() {
+    assert_eq!(
+        convert_with_clean(r##"<h2><a href="#my-section">My Section</a></h2>"##, clean_all()),
+        "## My Section"
+    );
+}
+
+#[test]
+fn clean_self_link_heading_keeps_external() {
+    assert_eq!(
+        convert_with_clean(r#"<h2><a href="https://example.com">My Section</a></h2>"#, clean_all()),
+        "## [My Section](https://example.com)"
+    );
+}
+
+#[test]
+fn clean_self_link_heading_non_heading_kept() {
+    assert_eq!(
+        convert_with_clean(r##"<p><a href="#section">Section</a></p>"##, clean_all()),
+        "Section"  // fragment stripped by clean.fragments since no matching heading
+    );
+}
+
+// ── emptyImages ──
+
+#[test]
+fn clean_empty_image_stripped() {
+    assert_eq!(
+        convert_with_clean(r#"<img src="icon.svg" alt="" />"#, clean_all()),
+        ""
+    );
+}
+
+#[test]
+fn clean_image_with_alt_kept() {
+    assert_eq!(
+        convert_with_clean(r#"<img src="photo.jpg" alt="A photo" />"#, clean_all()),
+        "![A photo](photo.jpg)"
+    );
+}
+
+#[test]
+fn clean_image_no_alt_attr_stripped() {
+    assert_eq!(
+        convert_with_clean(r#"<img src="spacer.gif" />"#, clean_all()),
+        ""
+    );
+}
+
+// ── emptyLinkText ──
+
+#[test]
+fn clean_empty_link_text_dropped() {
+    assert_eq!(
+        convert_with_clean(r#"<a href="/page"><svg></svg></a>"#, clean_all()),
+        ""
+    );
+}
+
+#[test]
+fn clean_empty_link_text_with_content_kept() {
+    assert_eq!(
+        convert_with_clean(r#"<a href="/page">Click here</a>"#, clean_all()),
+        "[Click here](/page)"
+    );
+}
+
+#[test]
+fn clean_empty_link_text_whitespace_only_dropped() {
+    assert_eq!(
+        convert_with_clean(r#"<a href="/page">  </a>"#, clean_all()),
+        ""
+    );
+}

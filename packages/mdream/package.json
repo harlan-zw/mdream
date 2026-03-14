@@ -62,7 +62,7 @@
     "test:wiki-small:file": "cat test/fixtures/wikipedia-small.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "build": "obuild",
     "build:native": "cd ../../crates/node && napi build --platform --release",
-    "build:edge": "cd ../../crates/edge && wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge",
+    "build:edge": "cd ../../crates/edge && wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge && wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --strip-producers ../../packages/mdream/wasm/mdream_edge_bg.wasm -o ../../packages/mdream/wasm/mdream_edge_bg.wasm",
     "typecheck": "tsc --noEmit",
     "dev:prepare": "obuild --stub",
     "test": "vitest test",

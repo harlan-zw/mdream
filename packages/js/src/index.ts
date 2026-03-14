@@ -1,4 +1,5 @@
 import type { EngineOptions, MdreamOptions, MdreamResult, PipelineTransform, TransformPlugin } from './types'
+import { applyClean, resolveClean } from './clean'
 import { createMarkdownProcessor } from './markdown-processor'
 import { resolvePlugins } from './resolve-plugins'
 import { streamHtmlToMarkdown as _streamHtmlToMarkdown } from './stream'
@@ -52,6 +53,8 @@ export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {
   const result = convert(html, options, hooks)
   if (pipeline?.length)
     result.markdown = applyAfterConvert(result.markdown, pipeline)
+  if (options.clean)
+    result.markdown = applyClean(result.markdown, resolveClean(options.clean))
   return result
 }
 
@@ -117,6 +120,7 @@ export { withMinimalPreset } from './preset/minimal'
 export type { MdreamOptions } from './types'
 export type {
   BuiltinPlugins,
+  CleanOptions,
   ElementNode,
   EngineOptions,
   ExtractedElement,

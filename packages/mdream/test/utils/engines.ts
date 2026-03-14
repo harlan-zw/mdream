@@ -154,7 +154,10 @@ function toFlatOptions(options?: EngineOptions): Partial<RustMdreamOptions> {
 }
 
 function rustHtmlToMarkdown(html: string, options?: EngineOptions): MdreamResult {
-  return _rustHtmlToMarkdown(html, toFlatOptions(options))
+  const flat = toFlatOptions(options)
+  if (options?.clean)
+    (flat as any).clean = options.clean
+  return _rustHtmlToMarkdown(html, flat)
 }
 function rustStreamHtmlToMarkdown(htmlStream: ReadableStream<Uint8Array | string> | null, options?: EngineOptions): AsyncIterable<string> {
   return _rustStreamHtmlToMarkdown(htmlStream, toFlatOptions(options))

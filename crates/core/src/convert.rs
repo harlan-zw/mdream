@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
 use crate::consts::*;
 use crate::tags::get_tag_handler;
 use crate::types::{ElementNode, ExtractedElement, HTMLToMarkdownOptions, ParsedSelector, TailwindData};
@@ -16,6 +15,14 @@ const ESC_LINK: u8 = 4;
 const ESC_BLOCKQUOTE: u8 = 8;
 
 static HEADING_PREFIXES: [&str; 6] = ["# ", "## ", "### ", "#### ", "##### ", "###### "];
+
+// Clean mode bitmask flags
+const CLEAN_EMPTY_LINKS: u8 = 1;
+const CLEAN_FRAGMENTS: u8 = 2;
+const CLEAN_REDUNDANT_LINKS: u8 = 4;
+const CLEAN_SELF_LINK_HEADINGS: u8 = 8;
+const CLEAN_EMPTY_IMAGES: u8 = 16;
+const CLEAN_EMPTY_LINK_TEXT: u8 = 32;
 
 /// Known tracking query parameter prefixes to strip when clean_urls is enabled.
 const TRACKING_PREFIXES: [&str; 6] = ["utm_", "fbclid", "gclid", "mc_eid", "msclkid", "oly_"];
@@ -82,6 +89,66 @@ fn strip_tracking_params_owned(url: String) -> String {
     }
 }
 
+/// GFM-style slug from heading text: lowercase, collapse whitespace/- → -, strip non-alnum except -_
+fn slugify_heading(text: &str) -> String {
+    // Strip inline markdown formatting from heading text
+    // Remove [text](url) → text, strip *_`~
+    let mut cleaned = String::with_capacity(text.len());
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i < len {
+        if bytes[i] == b'[' {
+            // Look for ](url) pattern
+            if let Some(close) = text[i+1..].find(']') {
+                let close_abs = i + 1 + close;
+                if close_abs + 1 < len && bytes[close_abs + 1] == b'(' {
+                    if let Some(paren_close) = text[close_abs+2..].find(')') {
+                        // Extract link text only
+                        cleaned.push_str(&text[i+1..close_abs]);
+                        i = close_abs + 2 + paren_close + 1;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+        } else if bytes[i] == b'*' || bytes[i] == b'_' || bytes[i] == b'`' || bytes[i] == b'~' {
+            i += 1;
+        } else {
+            cleaned.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+
+    let trimmed = cleaned.trim();
+    let mut slug = String::with_capacity(trimmed.len());
+    let mut last_was_dash = false;
+    for c in trimmed.bytes() {
+        if c >= b'a' && c <= b'z' {
+            slug.push(c as char);
+            last_was_dash = false;
+        } else if c >= b'A' && c <= b'Z' {
+            slug.push((c + 32) as char);
+            last_was_dash = false;
+        } else if c >= b'0' && c <= b'9' {
+            slug.push(c as char);
+            last_was_dash = false;
+        } else if c == b'_' {
+            slug.push('_');
+            last_was_dash = false;
+        } else if c == b' ' || c == b'\t' || c == b'-' {
+            if !last_was_dash && !slug.is_empty() {
+                slug.push('-');
+                last_was_dash = true;
+            }
+        }
+    }
+    if last_was_dash {
+        slug.pop();
+    }
+    slug
+}
+
 /// Unified single-pass HTML-to-Markdown converter.
 /// Merges parser state and markdown output state to eliminate callback overhead,
 /// duplicate state tracking, and enable full inlining of tag handler logic.
@@ -126,7 +193,7 @@ pub struct ConvertState {
 
     frontmatter_in_head: bool,
     pub frontmatter_title: Option<String>,
-    pub frontmatter_meta: HashMap<String, String>,
+    pub frontmatter_meta: Vec<(String, String)>,
 
     extraction_parsed_selectors: Vec<(String, ParsedSelector)>,
     extraction_tracked: Vec<TrackedExtraction>,
@@ -151,6 +218,22 @@ pub struct ConvertState {
 
     // Streaming
     last_yielded_length: usize,
+
+    // Clean mode — bitmask for zero-cost when disabled
+    clean_flags: u8,
+    /// Set when current TAG_A has a meaningless href and should be rendered as plain text
+    skip_current_link: bool,
+    /// Buffer position of the `[` character written for TAG_A enter
+    link_bracket_pos: usize,
+    /// Heading slugs collected during conversion for fragment validation
+    heading_slugs: Vec<String>,
+    /// Fragment link locations: (bracket_start, link_end)
+    /// Fragment slug is derived from buffer at fixup time
+    fragment_links: Vec<(usize, usize)>,
+    /// Whether we're inside a heading (for slug collection)
+    in_heading: bool,
+    /// Buffer position at heading start (for extracting heading text)
+    heading_buffer_start: usize,
 }
 
 impl ConvertState {
@@ -192,7 +275,7 @@ impl ConvertState {
 
             frontmatter_in_head: false,
             frontmatter_title: None,
-            frontmatter_meta: HashMap::new(),
+            frontmatter_meta: Vec::new(),
 
             extraction_parsed_selectors: Vec::new(),
             extraction_tracked: Vec::new(),
@@ -214,7 +297,32 @@ impl ConvertState {
             has_last_text_node: false,
             last_node_is_inline: false,
             last_yielded_length: 0,
+
+            clean_flags: 0,
+            skip_current_link: false,
+            link_bracket_pos: 0,
+            heading_slugs: Vec::new(),
+            fragment_links: Vec::new(),
+            in_heading: false,
+            heading_buffer_start: 0,
         };
+        // Resolve clean config into bitmask
+        let effective_clean_urls;
+        if let Some(ref clean) = s.options.clean {
+            effective_clean_urls = clean.urls || s.options.clean_urls;
+            let mut flags = 0u8;
+            if clean.empty_links { flags |= CLEAN_EMPTY_LINKS; }
+            if clean.fragments { flags |= CLEAN_FRAGMENTS; }
+            if clean.redundant_links { flags |= CLEAN_REDUNDANT_LINKS; }
+            if clean.self_link_headings { flags |= CLEAN_SELF_LINK_HEADINGS; }
+            if clean.empty_images { flags |= CLEAN_EMPTY_IMAGES; }
+            if clean.empty_link_text { flags |= CLEAN_EMPTY_LINK_TEXT; }
+            s.clean_flags = flags;
+        } else {
+            effective_clean_urls = s.options.clean_urls;
+        }
+        s.options.clean_urls = effective_clean_urls;
+
         if let Some(plugins) = &s.options.plugins {
             s.has_plugins = true;
             s.has_tailwind = plugins.tailwind.is_some();
@@ -259,6 +367,26 @@ impl ConvertState {
             let cc = bytes[i];
 
             if cc != LT_CHAR {
+                // FAST PATH: batch contiguous plain ASCII text (>32, <128, not & or <)
+                // Skip when: in escape context, non-nesting mode, or pre tag
+                if cc > 32 && cc < 0x80 && cc != AMPERSAND_CHAR
+                   && self.escape_ctx == 0 && !self.in_non_nesting && !self.in_pre {
+                    let start = i;
+                    i += 1;
+                    while i < chunk_length {
+                        let c = bytes[i];
+                        if c <= 32 || c >= 0x80 || c == LT_CHAR || c == AMPERSAND_CHAR {
+                            break;
+                        }
+                        i += 1;
+                    }
+                    text_buffer.push_str(&chunk[start..i]);
+                    self.text_buffer_contains_non_whitespace = true;
+                    self.last_char_was_whitespace = false;
+                    self.just_closed_tag = false;
+                    continue;
+                }
+
                 if cc == AMPERSAND_CHAR {
                     self.has_encoded_html_entity = true;
                 }
@@ -396,14 +524,12 @@ impl ConvertState {
                     Cow::Borrowed(tag_name_raw)
                 };
 
-                let tag_id = {
-                    let id = crate::consts::get_tag_id(&tag_name);
-                    if id.is_some() { id } else {
-                        self.options.plugins.as_ref()
-                            .and_then(|p| p.tag_overrides.as_ref())
-                            .and_then(|ovs| ovs.get(tag_name.as_ref()))
-                            .and_then(|ov| ov.alias_tag_id)
-                    }
+                let builtin_tag_id = crate::consts::get_tag_id(&tag_name);
+                let tag_id = if builtin_tag_id.is_some() { builtin_tag_id } else {
+                    self.options.plugins.as_ref()
+                        .and_then(|p| p.tag_overrides.as_ref())
+                        .and_then(|ovs| ovs.iter().find(|(k, _)| k == tag_name.as_ref()).map(|(_, v)| v))
+                        .and_then(|ov| ov.alias_tag_id)
                 };
                 i2 = tag_name_end;
 
@@ -428,7 +554,7 @@ impl ConvertState {
                     text_buffer.clear();
                 }
 
-                let result = self.process_opening_tag(&tag_name, tag_id, chunk, i2);
+                let result = self.process_opening_tag(&tag_name, tag_id, builtin_tag_id.is_some(), chunk, i2);
                 if result.skip {
                     i = result.new_position;
                 } else if result.complete {
@@ -482,7 +608,7 @@ impl ConvertState {
             let override_config = if self.has_tag_overrides {
                 self.options.plugins.as_ref()
                     .and_then(|p| p.tag_overrides.as_ref())
-                    .and_then(|ovs| ovs.get(node.name()))
+                    .and_then(|ovs| ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v))
             } else { None };
 
             is_inline = override_config.and_then(|ov| ov.is_inline).unwrap_or(node.is_inline);
@@ -498,7 +624,13 @@ impl ConvertState {
                 } else if tag_id == Some(TAG_TR) {
                     self.table_current_row_cells = 0;
                 } else if tag_id == Some(TAG_TH) {
-                    let align = node.attributes.get("align").map(|s| s.to_lowercase());
+                    let align = node.attributes.get("align").map(|s| {
+                        let mut buf = String::with_capacity(s.len());
+                        for b in s.bytes() {
+                            buf.push(if b >= b'A' && b <= b'Z' { (b + 32) as char } else { b as char });
+                        }
+                        buf
+                    });
                     if let Some(align) = align {
                         self.table_column_alignments.push(align);
                     } else if self.table_column_alignments.len() <= self.table_current_row_cells {
@@ -524,7 +656,47 @@ impl ConvertState {
         let new_line_config = self.calculate_new_line_config(tag_id, node_spacing);
         let configured_new_lines = new_line_config[0];
 
+        // Clean mode — single guard for all clean checks
+        if self.clean_flags != 0 {
+            if let Some(id) = tag_id {
+                if id == TAG_A {
+                    // emptyLinks: skip href="#" or "javascript:"
+                    if self.clean_flags & CLEAN_EMPTY_LINKS != 0 {
+                        let node = &self.stack[self.stack.len() - 1];
+                        if let Some(href) = node.attributes.get("href") {
+                            if href == "#" || href.starts_with("javascript:") {
+                                self.skip_current_link = true;
+                                self.last_node_is_inline = is_inline;
+                                return;
+                            }
+                        }
+                        self.skip_current_link = false;
+                    }
+                    // Record buffer position BEFORE write_output emits `[`
+                    // so we can find and remove it later if needed
+                    self.link_bracket_pos = self.buffer.len();
+                } else if id == TAG_IMG && self.clean_flags & CLEAN_EMPTY_IMAGES != 0 {
+                    let node = &self.stack[self.stack.len() - 1];
+                    let alt = node.attributes.get("alt").map(|s| s.as_str()).unwrap_or("");
+                    if alt.is_empty() {
+                        self.last_node_is_inline = is_inline;
+                        return;
+                    }
+                }
+            }
+        }
+
         self.write_output(true, is_inline, configured_new_lines, output.as_deref());
+
+        // Clean: track heading start for slug collection
+        if self.clean_flags & CLEAN_FRAGMENTS != 0 {
+            if let Some(id) = tag_id {
+                if id >= TAG_H1 && id <= TAG_H6 && self.depth_map[TAG_A as usize] == 0 {
+                    self.in_heading = true;
+                    self.heading_buffer_start = self.buffer.len();
+                }
+            }
+        }
     }
 
     /// Emit markdown for exiting an element (node already popped from stack).
@@ -541,7 +713,7 @@ impl ConvertState {
         let override_config = if self.has_tag_overrides {
             self.options.plugins.as_ref()
                 .and_then(|p| p.tag_overrides.as_ref())
-                .and_then(|ovs| ovs.get(node.name()))
+                .and_then(|ovs| ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v))
         } else { None };
 
         let is_inline = override_config.and_then(|ov| ov.is_inline).unwrap_or(node.is_inline);
@@ -608,7 +780,95 @@ impl ConvertState {
             output.as_deref()
         };
 
+        // Clean mode exit — single guard
+        if self.clean_flags != 0 && tag_id == Some(TAG_A) {
+            // emptyLinks: skip exit for skipped links
+            if self.skip_current_link {
+                self.skip_current_link = false;
+                self.last_node_is_inline = is_inline;
+                return;
+            }
+
+            // Find actual [ position: scan from recorded pos (write_output may have inserted newlines before it)
+            let bracket_pos = {
+                let mut pos = self.link_bracket_pos;
+                let buf = self.buffer.as_bytes();
+                while pos < buf.len() && buf[pos] != b'[' { pos += 1; }
+                pos
+            };
+            let text_start = bracket_pos + 1;
+            let text_end = self.buffer.len();
+            let link_text = if text_start <= text_end { &self.buffer[text_start..text_end] } else { "" };
+
+            // emptyLinkText: [](url) → drop entirely
+            if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
+                self.buffer.truncate(bracket_pos);
+                self.last_node_is_inline = is_inline;
+                return;
+            }
+
+            // selfLinkHeadings: ## [Title](#slug) → ## Title
+            if self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 {
+                let in_heading = (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0);
+                if in_heading {
+                    if let Some(href) = node.attributes.get("href") {
+                        if href.starts_with('#') {
+                            // Remove [ and keep text only
+                            let text = link_text.to_string();
+                            self.buffer.truncate(bracket_pos);
+                            self.buffer.push_str(&text);
+                            self.last_content_cache_len = text.len();
+                            self.last_node_is_inline = is_inline;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // redundantLinks: [url](url) → url
+            if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0 {
+                if let Some(href) = node.attributes.get("href") {
+                    let resolved = Self::resolve_url(href, self.options.origin.as_deref(), self.options.clean_urls);
+                    if link_text == resolved.as_ref() {
+                        let text = link_text.to_string();
+                        self.buffer.truncate(bracket_pos);
+                        self.buffer.push_str(&text);
+                        self.last_content_cache_len = text.len();
+                        self.last_node_is_inline = is_inline;
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Collect heading slug before writing exit output
+        if self.in_heading {
+            if let Some(id) = tag_id {
+                if id >= TAG_H1 && id <= TAG_H6 {
+                    let heading_text = &self.buffer[self.heading_buffer_start..];
+                    let slug = slugify_heading(heading_text);
+                    if !slug.is_empty() {
+                        self.heading_slugs.push(slug);
+                    }
+                    self.in_heading = false;
+                }
+            }
+        }
+
         self.write_output(false, is_inline, configured_new_lines, effective);
+
+        // Record fragment link position for deferred fixup (no String alloc)
+        if self.clean_flags & CLEAN_FRAGMENTS != 0 && tag_id == Some(TAG_A) {
+            if let Some(href) = node.attributes.get("href") {
+                if href.starts_with('#') && href.len() > 1 {
+                    // Find actual [ position from recorded hint
+                    let mut bp = self.link_bracket_pos;
+                    let buf = self.buffer.as_bytes();
+                    while bp < buf.len() && buf[bp] != b'[' { bp += 1; }
+                    self.fragment_links.push((bp, self.buffer.len()));
+                }
+            }
+        }
     }
 
     /// Emit markdown for a text node (no TextNode allocation).
@@ -714,7 +974,11 @@ impl ConvertState {
             TAG_CODE => {
                 if self.depth_map[TAG_PRE as usize] > 0 {
                     let lang = Self::get_language_from_class(node.attributes.get("class"));
-                    Some(Cow::Owned(format!("{}{}\n", MARKDOWN_CODE_BLOCK, lang)))
+                    if lang.is_empty() {
+                        Some(Cow::Borrowed("```\n"))
+                    } else {
+                        Some(Cow::Owned(format!("```{}\n", lang)))
+                    }
                 } else {
                     Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
                 }
@@ -1029,7 +1293,7 @@ impl ConvertState {
                 let name = TAG_NAMES[id as usize];
                 if let Some(sp) = self.options.plugins.as_ref()
                     .and_then(|p| p.tag_overrides.as_ref())
-                    .and_then(|ovs| ovs.get(name))
+                    .and_then(|ovs| ovs.iter().find(|(k, _)| k == name).map(|(_, v)| v))
                     .and_then(|ov| ov.spacing) {
                     return sp;
                 }
@@ -1143,7 +1407,7 @@ impl ConvertState {
         }
     }
 
-    fn process_opening_tag(&mut self, tag_name: &str, tag_id: Option<u8>, html_chunk: &str, position: usize) -> OpeningTagResult {
+    fn process_opening_tag(&mut self, tag_name: &str, tag_id: Option<u8>, is_builtin: bool, html_chunk: &str, position: usize) -> OpeningTagResult {
         let tag_handler = tag_id.and_then(get_tag_handler);
         let needs_attrs = tag_handler.map_or(false, |h| h.needs_attributes)
             || self.has_tailwind || self.has_filter || self.has_extraction
@@ -1170,8 +1434,6 @@ impl ConvertState {
         self.depth += 1;
 
         let current_walk_index = self.stack.last().map(|n| n.current_walk_index).unwrap_or(0);
-        // Set custom_name for non-builtin tags (even if they have an alias_tag_id from overrides)
-        let is_builtin = crate::consts::get_tag_id(tag_name).is_some();
         let custom_name = if is_builtin { None } else { Some(tag_name.to_string()) };
 
         let (h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) = if let Some(h) = tag_handler {
@@ -1301,7 +1563,13 @@ impl ConvertState {
                                 .and_then(|f| f.meta_fields.as_ref())
                                 .map_or(false, |allowed| allowed.iter().any(|a| a == n_str)),
                         };
-                        if is_allowed { self.frontmatter_meta.insert(n.clone(), c.clone()); }
+                        if is_allowed {
+                            if let Some(entry) = self.frontmatter_meta.iter_mut().find(|(k, _)| k == n) {
+                                entry.1 = c.clone();
+                            } else {
+                                self.frontmatter_meta.push((n.clone(), c.clone()));
+                            }
+                        }
                     }
                 }
             }
@@ -1558,11 +1826,11 @@ impl ConvertState {
 
         if let Some(f) = f_opts {
             if let Some(add) = &f.additional_fields {
-                let mut keys: Vec<_> = add.keys().collect();
-                keys.sort();
-                for key in keys {
+                let mut sorted: Vec<_> = add.iter().collect();
+                sorted.sort_by(|(a, _), (b, _)| a.cmp(b));
+                for (key, val) in sorted {
                     if key != "title" && key != "description" {
-                        yaml_out.push(format!("{}: {}", key, format_val(add.get(key).unwrap())));
+                        yaml_out.push(format!("{}: {}", key, format_val(val)));
                     }
                 }
             }
@@ -1570,11 +1838,10 @@ impl ConvertState {
 
         if !self.frontmatter_meta.is_empty() {
             yaml_out.push("meta:".to_string());
-            let mut meta_keys: Vec<_> = self.frontmatter_meta.keys().collect();
-            meta_keys.sort();
-            for key in meta_keys {
+            self.frontmatter_meta.sort_by(|(a, _), (b, _)| a.cmp(b));
+            for (key, val) in &self.frontmatter_meta {
                 let k_fmt = if key.contains(':') { format!("\"{}\"", key) } else { key.clone() };
-                yaml_out.push(format!("  {}: {}", k_fmt, format_val(self.frontmatter_meta.get(key).unwrap())));
+                yaml_out.push(format!("  {}: {}", k_fmt, format_val(val)));
             }
         }
 
@@ -1615,15 +1882,15 @@ impl ConvertState {
     }
 
     #[inline]
-    fn get_language_from_class(class_name: Option<&String>) -> String {
+    fn get_language_from_class<'a>(class_name: Option<&'a String>) -> &'a str {
         if let Some(class) = class_name {
             for part in class.split_whitespace() {
                 if let Some(lang) = part.strip_prefix("language-") {
-                    return lang.trim().to_string();
+                    return lang.trim();
                 }
             }
         }
-        String::new()
+        ""
     }
 
     // ========================================================================
@@ -1635,6 +1902,57 @@ impl ConvertState {
         self.buffer.truncate(trimmed_end_len);
         let start = self.buffer.len() - self.buffer.trim_start().len();
         if start > 0 { self.buffer.drain(..start); }
+
+        // Apply clean.fragments using recorded positions
+        // Build new string copying segments, replacing broken links with text only
+        if self.clean_flags & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
+            let trim_offset = start;
+            let mut result = String::with_capacity(self.buffer.len());
+            let mut cursor = 0usize;
+
+            for &(bracket_start, link_end) in &self.fragment_links {
+                let adj_start = bracket_start.saturating_sub(trim_offset);
+                let adj_end = link_end.saturating_sub(trim_offset);
+                if adj_end > self.buffer.len() || adj_start >= adj_end { continue; }
+
+                // Extract fragment from buffer: [text](#fragment) → find ](#
+                let range = &self.buffer[adj_start..adj_end];
+                let is_valid = if let Some(hash_pos) = range.find("](#") {
+                    let frag_start = hash_pos + 3; // skip ](#
+                    let frag_end = range.len().saturating_sub(1); // skip trailing )
+                    if frag_start < frag_end {
+                        let fragment = &range[frag_start..frag_end];
+                        !self.heading_slugs.is_empty() && self.heading_slugs.iter().any(|s| s == fragment)
+                    } else {
+                        false
+                    }
+                } else {
+                    true // not a fragment link pattern, keep as-is
+                };
+
+                if is_valid {
+                    continue; // keep original, will be copied by cursor
+                }
+
+                // Copy everything before this link
+                if cursor < adj_start {
+                    result.push_str(&self.buffer[cursor..adj_start]);
+                }
+                // Extract and copy just the text (between [ and ])
+                if let Some(close_bracket) = range.find("](#") {
+                    result.push_str(&self.buffer[adj_start + 1..adj_start + close_bracket]);
+                }
+                cursor = adj_end;
+            }
+
+            // Only rebuild if we actually replaced something
+            if cursor > 0 {
+                if cursor < self.buffer.len() {
+                    result.push_str(&self.buffer[cursor..]);
+                }
+                self.buffer = result;
+            }
+        }
         std::mem::take(&mut self.buffer)
     }
 

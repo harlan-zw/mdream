@@ -20,30 +20,66 @@
 
 ## Features
 
-- 🧠 Custom built HTML to Markdown Convertor Optimized for LLMs (~50% fewer tokens)
-- 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
-- 🚀 Ultra Fast: [Fastest pure JS & native rust](#benchmarks) - 4x faster than Turndown, converts 1.8MB HTML in ~58ms (JS) and ~10ms (Rust).
+- 🧠 #1 Token Optimizer: [Up to 2x fewer tokens](#token-reduction) than Turndown, node-html-markdown, and html-to-markdown. 70-99% fewer tokens than raw HTML.
+- 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support. Clean mode strips broken links, empty images, redundant anchors.
+- 🚀 #1 Fastest: [Fastest pure JS & native rust](#benchmarks) - 7x faster than Turndown, converts 1.8MB HTML in ~61ms (JS) and ~9ms (Rust).
 - 🌊 Streamable: Process HTML incrementally with `streamHtmlToMarkdown()` for large documents and real-time pipelines.
-- ⚡ Tiny: 6kB gzip, zero dependency core.
+- ⚡ Tiny: 10kB gzip JS core, 45kB gzip with Rust WASM engine. Zero dependencies.
 - ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [Docker](#docker), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), & more.
 
 ## Benchmarks
+
+### Speed
 
 **NAPI (Node.js bindings):**
 
 | Input Size | mdream (rust) | mdream (js) | html-to-markdown (NAPI) | Turndown (js) | node-html-markdown (js) |
 |------------|---------------|-------------|-------------------------|---------------|-------------------------|
-| **166 KB** | 🏆 **0.87ms** | 3.32ms *(3.8x)* | 3.85ms *(4.4x)* | 11.57ms *(13.3x)* | 14.25ms *(16.4x)* |
-| **420 KB** | 🏆 **1.56ms** | 6.32ms *(4.1x)* | 7.45ms *(4.8x)* | 13.55ms *(8.7x)* | 16.76ms *(10.8x)* |
-| **1.8 MB** | 🏆 **9.78ms** | 58.1ms *(5.9x)* | 81.1ms *(8.3x)* | 261.1ms *(26.7x)* | 💀 23,789ms *(2431x)* |
+| **166 KB** | 🏆 **0.61ms** | 3.47ms *(5.7x)* | 4.13ms *(6.8x)* | 12.54ms *(20.5x)* | 15.98ms *(26.1x)* |
+| **420 KB** | 🏆 **1.15ms** | 6.58ms *(5.7x)* | 7.94ms *(6.9x)* | 14.12ms *(12.3x)* | 18.06ms *(15.7x)* |
+| **1.8 MB** | 🏆 **8.85ms** | 61.1ms *(6.9x)* | 118.8ms *(13.4x)* | 395.2ms *(44.6x)* | 💀 27,029ms *(3053x)* |
 
 **Native Rust (no Node.js overhead):**
 
 | Input Size | mdream | [htmd](https://crates.io/crates/htmd) | [html2md](https://crates.io/crates/html2md) | [html2md-rs](https://crates.io/crates/html2md-rs) | [mdka](https://crates.io/crates/mdka) | [html_to_markdown](https://crates.io/crates/html_to_markdown) | [fast_html2md](https://crates.io/crates/fast_html2md) |
 |------------|--------|------|---------|-----------|------|-----------------|-------------|
-| **166 KB** | 🏆 **0.43ms** | 2.08ms *(4.8x)* | 2.64ms *(6.2x)* | 💀 panicked | 2.61ms *(6.1x)* | 1.63ms *(3.8x)* | 1.34ms *(3.3x)* |
-| **420 KB** | 🏆 **0.81ms** | 3.45ms *(4.2x)* | 4.09ms *(5.0x)* | 1.52ms *(1.9x)* | 3.25ms *(4.0x)* | 2.45ms *(3.0x)* | 1.13ms *(1.5x)* |
-| **1.8 MB** | 🏆 **5.03ms** | 27.7ms *(5.5x)* | 💀 >30s | 28.9ms *(5.7x)* | 30.8ms *(6.1x)* | 18.6ms *(3.7x)* | 16.6ms *(3.2x)* |
+| **166 KB** | 🏆 **0.43ms** | 2.07ms *(4.9x)* | 2.68ms *(6.3x)* | 💀 panicked | 2.71ms *(6.4x)* | 1.66ms *(3.9x)* | 1.34ms *(3.3x)* |
+| **420 KB** | 🏆 **0.75ms** | 3.26ms *(4.3x)* | 4.07ms *(5.4x)* | 1.49ms *(2.0x)* | 3.33ms *(4.5x)* | 2.44ms *(3.3x)* | 1.14ms *(1.5x)* |
+| **1.8 MB** | 🏆 **5.22ms** | 28.4ms *(5.4x)* | 💀 >30s | 33.2ms *(6.4x)* | 34.6ms *(6.6x)* | 19.6ms *(3.8x)* | 16.2ms *(3.1x)* |
+
+### Token Reduction
+
+With `minimal: true` (which enables [`clean`](#clean-mode) by default), mdream produces significantly fewer tokens than competing libraries by isolating main content, filtering noise elements, and cleaning up link/image artifacts.
+
+**Wikipedia (162 KB, 21,039 HTML tokens):**
+
+| Library | Tokens | vs HTML |
+|---------|--------|---------|
+| mdream (`minimal: true`) | 🏆 **6,101** | **-71%** |
+| mdream (default) | 7,673 | -64% |
+| html-to-markdown (Rust) | 7,906 | -62% |
+| node-html-markdown | 10,176 | -52% |
+| Turndown | 10,435 | -50% |
+
+**GitHub Docs (420 KB, 62,434 HTML tokens):**
+
+| Library | Tokens | vs HTML |
+|---------|--------|---------|
+| mdream (`minimal: true`) | 🏆 **5,006** | **-92%** |
+| mdream (default) | 8,256 | -87% |
+| node-html-markdown | 8,758 | -86% |
+| html-to-markdown (Rust) | 9,056 | -85% |
+| Turndown | 43,983 | -30% |
+
+**Wikipedia large (1.8 MB, 193,759 HTML tokens):**
+
+| Library | Tokens | vs HTML |
+|---------|--------|---------|
+| mdream (`minimal: true`) | 🏆 **152,425** | **-21%** |
+| mdream (default) | 163,885 | -15% |
+| html-to-markdown (Rust) | 182,634 | -6% |
+| Turndown | 195,978 | +1% |
+| node-html-markdown | 283,136 | +46% |
 
 See the [Benchmark methodology](./bench/README.md) for more details.
 
@@ -239,26 +275,52 @@ htmlToMarkdown(html, {
 </details>
 
 <details>
-<summary><b>⚡ Optimize Token Usage With Cleaner Content</b></summary>
+<summary><b>⚡ Optimize Token Usage With Clean Mode</b></summary>
 
-Remove ads, navigation, and unwanted elements to reduce token costs:
+Use `clean: true` (enabled by default with `minimal: true`) to automatically reduce token costs:
 
 ```ts
-import { createPlugin, ELEMENT_NODE, htmlToMarkdown } from 'mdream'
+import { htmlToMarkdown } from 'mdream'
 
-const cleanPlugin = createPlugin({
-  beforeNodeProcess({ node }) {
-    if (node.type === ELEMENT_NODE) {
-      const cls = node.attributes?.class || ''
-      if (cls.includes('ad') || cls.includes('nav') || node.name === 'script')
-        return { skip: true }
-    }
+// All clean features enabled
+htmlToMarkdown(html, { clean: true })
+
+// Or selective features
+htmlToMarkdown(html, {
+  clean: {
+    emptyLinks: true, // Strip #, javascript: links
+    emptyLinkText: true, // Drop [](url) links with no text
+    emptyImages: true, // Strip ![](url) with no alt text
+    redundantLinks: true, // [url](url) → url
+    selfLinkHeadings: true, // ## [Title](#title) → ## Title
+    fragments: true, // Strip broken #anchor links
+    urls: true, // Strip utm_*, fbclid tracking params
   }
 })
-
-htmlToMarkdown(html, { plugins: [cleanPlugin] })
 ```
 </details>
+
+## Clean Mode
+
+The `clean` option removes common HTML-to-markdown noise. It's enabled by default with `minimal: true` and can be used independently.
+
+| Feature | Description |
+|---------|-------------|
+| `emptyLinks` | Strip links with `#` or `javascript:` hrefs |
+| `emptyLinkText` | Drop links that produce no visible text (icon-only, SVG-only) |
+| `emptyImages` | Strip images with no alt text (tracking pixels, spacers) |
+| `redundantLinks` | `[https://x.com](https://x.com)` → `https://x.com` |
+| `selfLinkHeadings` | `## [Title](#title)` → `## Title` |
+| `fragments` | Strip `[text](#broken)` links with no matching heading |
+| `urls` | Strip tracking query params (utm_*, fbclid, gclid, etc.) |
+
+```ts
+// minimal: true enables clean by default
+htmlToMarkdown(html, { minimal: true })
+
+// Disable clean with minimal
+htmlToMarkdown(html, { minimal: true, clean: false })
+```
 
 ## Stdin CLI Usage
 

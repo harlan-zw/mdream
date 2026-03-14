@@ -77,19 +77,49 @@ pub struct MdreamNapiResult {
 }
 
 #[napi(object)]
+pub struct CleanOptionsNapi {
+    pub urls: Option<bool>,
+    pub fragments: Option<bool>,
+    #[napi(js_name = "emptyLinks")]
+    pub empty_links: Option<bool>,
+    #[napi(js_name = "blankLines")]
+    pub blank_lines: Option<bool>,
+    #[napi(js_name = "redundantLinks")]
+    pub redundant_links: Option<bool>,
+    #[napi(js_name = "selfLinkHeadings")]
+    pub self_link_headings: Option<bool>,
+    #[napi(js_name = "emptyImages")]
+    pub empty_images: Option<bool>,
+    #[napi(js_name = "emptyLinkText")]
+    pub empty_link_text: Option<bool>,
+}
+
+#[napi(object)]
 pub struct HtmlToMarkdownOptions {
     pub origin: Option<String>,
     #[napi(js_name = "cleanUrls")]
     pub clean_urls: Option<bool>,
+    pub clean: Option<CleanOptionsNapi>,
     pub plugins: Option<PluginOptions>,
 }
 
 // ── Type conversion (NAPI → core) ──
 
 fn to_core_opts(options: Option<HtmlToMarkdownOptions>) -> mdream::types::HTMLToMarkdownOptions {
+    let clean = options.as_ref().and_then(|o| o.clean.as_ref()).map(|c| mdream::types::CleanConfig {
+        urls: c.urls.unwrap_or(false),
+        fragments: c.fragments.unwrap_or(false),
+        empty_links: c.empty_links.unwrap_or(false),
+        blank_lines: c.blank_lines.unwrap_or(false),
+        redundant_links: c.redundant_links.unwrap_or(false),
+        self_link_headings: c.self_link_headings.unwrap_or(false),
+        empty_images: c.empty_images.unwrap_or(false),
+        empty_link_text: c.empty_link_text.unwrap_or(false),
+    });
     mdream::types::HTMLToMarkdownOptions {
         origin: options.as_ref().and_then(|o| o.origin.clone()),
         clean_urls: options.as_ref().and_then(|o| o.clean_urls).unwrap_or(false),
+        clean,
         plugins: options.and_then(|o| {
             o.plugins.map(|p| mdream::types::PluginConfig {
                 filter: p.filter.map(|f| mdream::types::FilterConfig {
@@ -99,7 +129,7 @@ fn to_core_opts(options: Option<HtmlToMarkdownOptions>) -> mdream::types::HTMLTo
                 }),
                 isolate_main: p.isolate_main.and_then(|v| if v { Some(mdream::types::IsolateMainConfig {}) } else { None }),
                 frontmatter: p.frontmatter.map(|f| mdream::types::FrontmatterConfig {
-                    additional_fields: f.additional_fields,
+                    additional_fields: f.additional_fields.map(|m| m.into_iter().collect()),
                     meta_fields: f.meta_fields,
                 }),
                 tailwind: p.tailwind.and_then(|v| if v { Some(mdream::types::TailwindConfig {}) } else { None }),
@@ -142,7 +172,7 @@ pub fn html_to_markdown(html: String, options: Option<HtmlToMarkdownOptions>) ->
                 attributes: e.attributes.into_iter().collect(),
             }).collect()
         }),
-        frontmatter: result.frontmatter,
+        frontmatter: result.frontmatter.map(|v| v.into_iter().collect()),
     })
 }
 
@@ -162,7 +192,7 @@ pub fn html_to_markdown_bytes(html: &[u8], options: Option<HtmlToMarkdownOptions
                 attributes: e.attributes.into_iter().collect(),
             }).collect()
         }),
-        frontmatter: result.frontmatter,
+        frontmatter: result.frontmatter.map(|v| v.into_iter().collect()),
     })
 }
 
@@ -255,7 +285,7 @@ fn chunk_to_napi(chunk: mdream::splitter::MarkdownChunk) -> MarkdownChunkNapi {
     MarkdownChunkNapi {
         content: chunk.content,
         metadata: ChunkMetadataNapi {
-            headers: chunk.metadata.headers,
+            headers: chunk.metadata.headers.map(|v| v.into_iter().collect()),
             code: chunk.metadata.code,
             loc: chunk.metadata.loc.map(|loc| ChunkLocNapi {
                 from: loc.from as u32,

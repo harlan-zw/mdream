@@ -75,6 +75,11 @@ export interface BuiltinPlugins {
   frontmatter?: boolean | {
     additionalFields?: Record<string, string>
     metaFields?: string[]
+    /**
+     * Custom formatter for frontmatter YAML values.
+     * Works with both engines — JS applies inline, Rust applies post-conversion.
+     */
+    formatValue?: (name: string, value: string) => string
   }
   /** Isolate main content area */
   isolateMain?: boolean
@@ -82,8 +87,9 @@ export interface BuiltinPlugins {
   tailwind?: boolean
   /**
    * Extract elements matching CSS selectors during conversion.
-   * Callbacks are called with collected results after conversion completes.
-   * Results are also returned in `MdreamResult.extracted`.
+   * Each key is a CSS selector; the handler is called for every match.
+   * Works with both JS and Rust engines — JS calls handlers inline,
+   * Rust collects results then calls handlers after conversion.
    */
   extraction?: Record<string, (element: ExtractedElement) => void>
   /**
@@ -99,25 +105,6 @@ export interface BuiltinPlugins {
  * Shared engine options that work with both JS and Rust engines.
  * This is the contract that `MarkdownEngine` methods accept.
  */
-export interface CleanOptions {
-  /** Strip tracking query parameters (utm_*, fbclid, gclid, etc.) from URLs */
-  urls?: boolean
-  /** Strip fragment-only links that don't match any heading in the output */
-  fragments?: boolean
-  /** Strip links with meaningless hrefs (#, javascript:void(0)) → plain text */
-  emptyLinks?: boolean
-  /** Collapse 3+ consecutive blank lines to 2 */
-  blankLines?: boolean
-  /** Strip links where text equals URL: [https://x.com](https://x.com) → https://x.com */
-  redundantLinks?: boolean
-  /** Strip self-referencing heading anchors: ## [Title](#title) → ## Title */
-  selfLinkHeadings?: boolean
-  /** Strip images with no alt text (decorative/tracking pixels) */
-  emptyImages?: boolean
-  /** Drop links that produce no visible text: [](url) → nothing */
-  emptyLinkText?: boolean
-}
-
 export interface EngineOptions {
   /**
    * Origin URL for resolving relative image paths and internal links.
@@ -128,13 +115,6 @@ export interface EngineOptions {
    * Declarative built-in plugin config. Works with both JS and Rust engines.
    */
   plugins?: BuiltinPlugins
-
-  /**
-   * Clean up the markdown output. Pass `true` for all cleanup or an object
-   * to enable specific features. Operates as a post-processing step on the
-   * final markdown (sync API only for `fragments`).
-   */
-  clean?: boolean | CleanOptions
 }
 
 // Standard DOM node types
@@ -384,23 +364,6 @@ export interface ExtractedElement {
   textContent: string
   /** HTML attributes of the element */
   attributes: Record<string, string>
-}
-
-/**
- * Top-level options for the mdream JS pipeline.
- * Extends the shared `EngineOptions` with pipeline-level concerns.
- */
-export interface MdreamOptions extends EngineOptions {
-  /**
-   * Pipeline transforms for pre/post processing.
-   */
-  pipeline?: PipelineTransform[]
-
-  /**
-   * Imperative hook-based transform plugins.
-   * When provided, a new JS engine is created with these hooks.
-   */
-  hooks?: TransformPlugin[]
 }
 
 /**

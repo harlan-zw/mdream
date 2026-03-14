@@ -1,118 +1,180 @@
-use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
-use serde::Deserialize;
 
-// ── Serde types for JS interop ──
+// ── Manual JsValue helpers (replaces serde) ──
 
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct FilterOptions {
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    process_children: Option<bool>,
+fn get_prop(obj: &JsValue, key: &str) -> JsValue {
+    js_sys::Reflect::get(obj, &JsValue::from_str(key)).unwrap_or(JsValue::UNDEFINED)
 }
 
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct FrontmatterOptions {
-    additional_fields: Option<HashMap<String, String>>,
-    meta_fields: Option<Vec<String>>,
+fn as_string(v: &JsValue) -> Option<String> {
+    v.as_string()
 }
 
-#[derive(Deserialize, Default)]
-struct ExtractionOptions {
-    selectors: Vec<String>,
+fn as_bool(v: &JsValue) -> Option<bool> {
+    v.as_bool()
 }
 
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct TagOverride {
-    enter: Option<String>,
-    exit: Option<String>,
-    spacing: Option<Vec<u8>>,
-    is_inline: Option<bool>,
-    is_self_closing: Option<bool>,
-    collapses_inner_white_space: Option<bool>,
-    alias: Option<String>,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct PluginOptions {
-    filter: Option<FilterOptions>,
-    isolate_main: Option<bool>,
-    frontmatter: Option<FrontmatterOptions>,
-    tailwind: Option<bool>,
-    extraction: Option<ExtractionOptions>,
-    tag_overrides: Option<HashMap<String, TagOverride>>,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct HtmlToMarkdownOptions {
-    origin: Option<String>,
-    clean_urls: Option<bool>,
-    plugins: Option<PluginOptions>,
-}
-
-// ── Type conversion ──
-
-fn to_core_opts(options: HtmlToMarkdownOptions) -> mdream::types::HTMLToMarkdownOptions {
-    mdream::types::HTMLToMarkdownOptions {
-        origin: options.origin,
-        clean_urls: options.clean_urls.unwrap_or(false),
-        plugins: options.plugins.map(|p| mdream::types::PluginConfig {
-            filter: p.filter.map(|f| mdream::types::FilterConfig {
-                include: f.include,
-                exclude: f.exclude,
-                process_children: f.process_children,
-            }),
-            isolate_main: p.isolate_main.and_then(|v| if v { Some(mdream::types::IsolateMainConfig {}) } else { None }),
-            frontmatter: p.frontmatter.map(|f| mdream::types::FrontmatterConfig {
-                additional_fields: f.additional_fields,
-                meta_fields: f.meta_fields,
-            }),
-            tailwind: p.tailwind.and_then(|v| if v { Some(mdream::types::TailwindConfig {}) } else { None }),
-            extraction: p.extraction.map(|e| mdream::types::ExtractionConfig {
-                selectors: e.selectors,
-            }),
-            tag_overrides: p.tag_overrides.map(|overrides| {
-                overrides.into_iter().map(|(tag_name, ov)| {
-                    let alias_tag_id = ov.alias.as_ref().and_then(|a| mdream::consts::get_tag_id(a));
-                    let config = mdream::types::TagOverrideConfig {
-                        enter: ov.enter,
-                        exit: ov.exit,
-                        spacing: ov.spacing.and_then(|s| if s.len() >= 2 { Some([s[0], s[1]]) } else { None }),
-                        is_inline: ov.is_inline,
-                        is_self_closing: ov.is_self_closing,
-                        collapses_inner_white_space: ov.collapses_inner_white_space,
-                        alias_tag_id,
-                    };
-                    (tag_name, config)
-                }).collect()
-            }),
-        }),
+fn as_string_vec(v: &JsValue) -> Option<Vec<String>> {
+    let arr = js_sys::Array::from(v);
+    if arr.length() == 0 && !js_sys::Array::is_array(v) {
+        return None;
     }
+    let mut out = Vec::with_capacity(arr.length() as usize);
+    for i in 0..arr.length() {
+        if let Some(s) = arr.get(i).as_string() {
+            out.push(s);
+        }
+    }
+    Some(out)
 }
 
-fn parse_options(options: JsValue) -> HtmlToMarkdownOptions {
+fn as_u8_vec(v: &JsValue) -> Option<Vec<u8>> {
+    let arr = js_sys::Array::from(v);
+    if arr.length() == 0 && !js_sys::Array::is_array(v) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(arr.length() as usize);
+    for i in 0..arr.length() {
+        if let Some(n) = arr.get(i).as_f64() {
+            out.push(n as u8);
+        }
+    }
+    Some(out)
+}
+
+fn js_object_entries(v: &JsValue) -> Option<Vec<(String, JsValue)>> {
+    if v.is_undefined() || v.is_null() {
+        return None;
+    }
+    let entries = js_sys::Object::entries(&js_sys::Object::from(v.clone()));
+    let mut out = Vec::with_capacity(entries.length() as usize);
+    for i in 0..entries.length() {
+        let pair = js_sys::Array::from(&entries.get(i));
+        if let Some(key) = pair.get(0).as_string() {
+            out.push((key, pair.get(1)));
+        }
+    }
+    Some(out)
+}
+
+fn js_string_vec(v: &JsValue) -> Option<Vec<(String, String)>> {
+    let entries = js_object_entries(v)?;
+    let mut out = Vec::with_capacity(entries.len());
+    for (k, v) in entries {
+        if let Some(s) = v.as_string() {
+            out.push((k, s));
+        }
+    }
+    Some(out)
+}
+
+// ── Options parsing ──
+
+fn parse_options(options: &JsValue) -> mdream::types::HTMLToMarkdownOptions {
     if options.is_undefined() || options.is_null() {
-        return HtmlToMarkdownOptions::default();
+        return mdream::types::HTMLToMarkdownOptions::default();
     }
-    serde_wasm_bindgen::from_value(options).unwrap_or_default()
+
+    let origin = as_string(&get_prop(options, "origin"));
+    let clean_urls = as_bool(&get_prop(options, "cleanUrls")).unwrap_or(false);
+
+    let plugins_val = get_prop(options, "plugins");
+    let plugins = if plugins_val.is_undefined() || plugins_val.is_null() {
+        None
+    } else {
+        Some(parse_plugins(&plugins_val))
+    };
+
+    mdream::types::HTMLToMarkdownOptions {
+        origin,
+        clean_urls,
+        clean: None,
+        plugins,
+    }
+}
+
+fn parse_plugins(p: &JsValue) -> mdream::types::PluginConfig {
+    let filter_val = get_prop(p, "filter");
+    let filter = if filter_val.is_undefined() || filter_val.is_null() {
+        None
+    } else {
+        Some(mdream::types::FilterConfig {
+            include: as_string_vec(&get_prop(&filter_val, "include")),
+            exclude: as_string_vec(&get_prop(&filter_val, "exclude")),
+            process_children: as_bool(&get_prop(&filter_val, "processChildren")),
+        })
+    };
+
+    let isolate_val = get_prop(p, "isolateMain");
+    let isolate_main = as_bool(&isolate_val)
+        .and_then(|v| if v { Some(mdream::types::IsolateMainConfig {}) } else { None });
+
+    let fm_val = get_prop(p, "frontmatter");
+    let frontmatter = if fm_val.is_undefined() || fm_val.is_null() {
+        None
+    } else {
+        Some(mdream::types::FrontmatterConfig {
+            additional_fields: js_string_vec(&get_prop(&fm_val, "additionalFields")),
+            meta_fields: as_string_vec(&get_prop(&fm_val, "metaFields")),
+        })
+    };
+
+    let tailwind = as_bool(&get_prop(p, "tailwind"))
+        .and_then(|v| if v { Some(mdream::types::TailwindConfig {}) } else { None });
+
+    let ext_val = get_prop(p, "extraction");
+    let extraction = if ext_val.is_undefined() || ext_val.is_null() {
+        None
+    } else {
+        as_string_vec(&get_prop(&ext_val, "selectors")).map(|selectors| {
+            mdream::types::ExtractionConfig { selectors }
+        })
+    };
+
+    let overrides_val = get_prop(p, "tagOverrides");
+    let tag_overrides = if overrides_val.is_undefined() || overrides_val.is_null() {
+        None
+    } else {
+        js_object_entries(&overrides_val).map(|entries| {
+            entries.into_iter().map(|(tag_name, ov)| {
+                let alias = as_string(&get_prop(&ov, "alias"));
+                let alias_tag_id = alias.as_ref().and_then(|a| mdream::consts::get_tag_id(a));
+                let spacing_vec = as_u8_vec(&get_prop(&ov, "spacing"));
+                let config = mdream::types::TagOverrideConfig {
+                    enter: as_string(&get_prop(&ov, "enter")),
+                    exit: as_string(&get_prop(&ov, "exit")),
+                    spacing: spacing_vec.and_then(|s| if s.len() >= 2 { Some([s[0], s[1]]) } else { None }),
+                    is_inline: as_bool(&get_prop(&ov, "isInline")),
+                    is_self_closing: as_bool(&get_prop(&ov, "isSelfClosing")),
+                    collapses_inner_white_space: as_bool(&get_prop(&ov, "collapsesInnerWhiteSpace")),
+                    alias_tag_id,
+                };
+                (tag_name, config)
+            }).collect()
+        })
+    };
+
+    mdream::types::PluginConfig {
+        filter,
+        isolate_main,
+        frontmatter,
+        tailwind,
+        extraction,
+        tag_overrides,
+    }
 }
 
 // ── WASM exports ──
 
 #[wasm_bindgen(js_name = "htmlToMarkdown")]
 pub fn html_to_markdown(html: &str, options: JsValue) -> String {
-    let opts = to_core_opts(parse_options(options));
+    let opts = parse_options(&options);
     mdream::html_to_markdown(html, opts)
 }
 
 #[wasm_bindgen(js_name = "htmlToMarkdownResult")]
 pub fn html_to_markdown_result(html: &str, options: JsValue) -> JsValue {
-    let opts = to_core_opts(parse_options(options));
+    let opts = parse_options(&options);
     let result = mdream::html_to_markdown_result(html, opts);
 
     let obj = js_sys::Object::new();
@@ -155,7 +217,7 @@ pub struct MarkdownStream {
 impl MarkdownStream {
     #[wasm_bindgen(constructor)]
     pub fn new(options: JsValue) -> Self {
-        let opts = to_core_opts(parse_options(options));
+        let opts = parse_options(&options);
         Self {
             inner: mdream::MarkdownStreamProcessor::new(opts),
         }

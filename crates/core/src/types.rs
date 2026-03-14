@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 /// Compact attribute storage using Vec for small-N linear scan.
 /// Most HTML elements have 0-4 attributes; linear scan on Vec beats HashMap hashing.
 #[derive(Debug, Clone, Default)]
@@ -134,7 +132,7 @@ pub struct IsolateMainConfig {
 
 #[derive(Debug, Clone, Default)]
 pub struct FrontmatterConfig {
-    pub additional_fields: Option<HashMap<String, String>>,
+    pub additional_fields: Option<Vec<(String, String)>>,
     pub meta_fields: Option<Vec<String>>,
 }
 
@@ -185,13 +183,34 @@ pub struct PluginConfig {
     pub frontmatter: Option<FrontmatterConfig>,
     pub tailwind: Option<TailwindConfig>,
     pub extraction: Option<ExtractionConfig>,
-    pub tag_overrides: Option<HashMap<String, TagOverrideConfig>>,
+    pub tag_overrides: Option<Vec<(String, TagOverrideConfig)>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CleanConfig {
+    /// Strip tracking query parameters from URLs (handled during URL resolution)
+    pub urls: bool,
+    /// Strip fragment-only links that don't match any heading slug
+    pub fragments: bool,
+    /// Strip links with meaningless hrefs (#, javascript:) → plain text
+    pub empty_links: bool,
+    /// Collapse 3+ consecutive blank lines to 2
+    pub blank_lines: bool,
+    /// Strip links where text == URL: [https://x.com](https://x.com) → https://x.com
+    pub redundant_links: bool,
+    /// Strip self-referencing heading anchors: ## [Title](#title) → ## Title
+    pub self_link_headings: bool,
+    /// Strip images with no alt text: ![](url) → nothing
+    pub empty_images: bool,
+    /// Drop links that produce no visible text: [](url) → nothing
+    pub empty_link_text: bool,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct HTMLToMarkdownOptions {
     pub origin: Option<String>,
     pub clean_urls: bool,
+    pub clean: Option<CleanConfig>,
     pub plugins: Option<PluginConfig>,
 }
 
@@ -199,5 +218,5 @@ pub struct HTMLToMarkdownOptions {
 pub struct MdreamResult {
     pub markdown: String,
     pub extracted: Option<Vec<ExtractedElement>>,
-    pub frontmatter: Option<HashMap<String, String>>,
+    pub frontmatter: Option<Vec<(String, String)>>,
 }

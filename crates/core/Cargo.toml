@@ -20,3 +20,11 @@ path = "src/bin.rs"
 [[bench]]
 name = "convert_bench"
 harness = false
+
+[[bench]]
+name = "token_cost"
+harness = false
+
+[[bench]]
+name = "diff_output"
+harness = false

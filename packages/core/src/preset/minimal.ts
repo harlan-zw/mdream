@@ -22,8 +22,6 @@ export function withMinimalPreset<T extends EngineOptions>(
   options: T = {} as T,
 ): T {
   return {
-    // Default clean: true unless explicitly overridden
-    clean: options.clean !== undefined ? options.clean : true,
     ...options,
     plugins: {
       frontmatter: true,
