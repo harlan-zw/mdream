@@ -22,28 +22,28 @@
 
 - 🧠 Custom built HTML to Markdown Convertor Optimized for LLMs (~50% fewer tokens)
 - 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
-- ✂️ LangChain compatible [Markdown Text Splitter](./packages/mdream/README.md#markdown-splitting) for single-pass chunking.
-- 🚀 Ultra Fast: [Fastest pure JS & native rust](#benchmarks) - 3x faster than Turndown, converts 1.8MB HTML in ~48ms (JS) and ~7ms (Rust).
+- 🚀 Ultra Fast: [Fastest pure JS & native rust](#benchmarks) - 4x faster than Turndown, converts 1.8MB HTML in ~58ms (JS) and ~10ms (Rust).
+- 🌊 Streamable: Process HTML incrementally with `streamHtmlToMarkdown()` for large documents and real-time pipelines.
 - ⚡ Tiny: 6kB gzip, zero dependency core.
 - ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [Docker](#docker), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), & more.
-- 🔌 Extensible: Plugin system for customizing and extending functionality.
 
 ## Benchmarks
 
 **NAPI (Node.js bindings):**
 
-| Input Size | mdream (rust) | mdream (js) | html-to-markdown (rust) | Turndown (js) | node-html-markdown (js) |
+| Input Size | mdream (rust) | mdream (js) | html-to-markdown (NAPI) | Turndown (js) | node-html-markdown (js) |
 |------------|---------------|-------------|-------------------------|---------------|-------------------------|
-| **166 KB** | 🏆 **0.94ms** | 2.90ms *(3.1x)* | 🦀 4.12ms *(4.4x)* | 12.9ms *(13.7x)* | 17.5ms *(18.5x)* |
-| **420 KB** | 🏆 **1.68ms** | 5.66ms *(3.4x)* | 🦀 7.89ms *(4.7x)* | 15.2ms *(9.0x)* | 19.9ms *(11.9x)* |
+| **166 KB** | 🏆 **0.87ms** | 3.32ms *(3.8x)* | 3.85ms *(4.4x)* | 11.57ms *(13.3x)* | 14.25ms *(16.4x)* |
+| **420 KB** | 🏆 **1.56ms** | 6.32ms *(4.1x)* | 7.45ms *(4.8x)* | 13.55ms *(8.7x)* | 16.76ms *(10.8x)* |
+| **1.8 MB** | 🏆 **9.78ms** | 58.1ms *(5.9x)* | 81.1ms *(8.3x)* | 261.1ms *(26.7x)* | 💀 23,789ms *(2431x)* |
 
 **Native Rust (no Node.js overhead):**
 
 | Input Size | mdream | [htmd](https://crates.io/crates/htmd) | [html2md](https://crates.io/crates/html2md) | [html2md-rs](https://crates.io/crates/html2md-rs) | [mdka](https://crates.io/crates/mdka) | [html_to_markdown](https://crates.io/crates/html_to_markdown) | [fast_html2md](https://crates.io/crates/fast_html2md) |
 |------------|--------|------|---------|-----------|------|-----------------|-------------|
-| **166 KB** | 🏆 **1.17ms** | 3.12ms *(2.7x)* | 3.33ms *(2.9x)* | 💀 panicked | 2.70ms *(2.3x)* | 2.05ms *(1.8x)* | 2.32ms *(2.2x)* |
-| **420 KB** | 🏆 **1.75ms** | 4.01ms *(2.3x)* | 4.81ms *(2.8x)* | 1.59ms *(0.9x)* | 3.40ms *(1.9x)* | 2.48ms *(1.4x)* | 1.78ms *(1.0x)* |
-| **1.8 MB** | 🏆 **3.57ms** | 29.3ms *(8.2x)* | 💀 >30s | 47.8ms *(13.4x)* | 33.7ms *(9.4x)* | 20.0ms *(5.6x)* | 27.3ms *(4.0x)* |
+| **166 KB** | 🏆 **0.43ms** | 2.08ms *(4.8x)* | 2.64ms *(6.2x)* | 💀 panicked | 2.61ms *(6.1x)* | 1.63ms *(3.8x)* | 1.34ms *(3.3x)* |
+| **420 KB** | 🏆 **0.81ms** | 3.45ms *(4.2x)* | 4.09ms *(5.0x)* | 1.52ms *(1.9x)* | 3.25ms *(4.0x)* | 2.45ms *(3.0x)* | 1.13ms *(1.5x)* |
+| **1.8 MB** | 🏆 **5.03ms** | 27.7ms *(5.5x)* | 💀 >30s | 28.9ms *(5.7x)* | 30.8ms *(6.1x)* | 18.6ms *(3.7x)* | 16.6ms *(3.2x)* |
 
 See the [Benchmark methodology](./bench/README.md) for more details.
 
