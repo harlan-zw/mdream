@@ -9,7 +9,7 @@ rust-version = "1.80"
 repository = "https://github.com/harlan-zw/mdream"
 
 [profile.release]
-opt-level = "z"
+opt-level = 3
 lto = true
 strip = true
 codegen-units = 1
