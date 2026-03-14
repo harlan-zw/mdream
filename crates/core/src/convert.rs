@@ -16,6 +16,11 @@ const ESC_BLOCKQUOTE: u8 = 8;
 
 static HEADING_PREFIXES: [&str; 6] = ["# ", "## ", "### ", "#### ", "##### ", "###### "];
 
+/// Pre-computed blockquote prefixes for depths 1-6 (avoids `"> ".repeat()`)
+static BQ_PREFIXES: [&str; 7] = ["", "> ", "> > ", "> > > ", "> > > > ", "> > > > > ", "> > > > > > "];
+/// Pre-computed unordered list item prefixes for indent depths 0-5
+static UL_PREFIXES: [&str; 6] = ["- ", "  - ", "    - ", "      - ", "        - ", "          - "];
+
 // Clean mode bitmask flags
 const CLEAN_EMPTY_LINKS: u8 = 1;
 const CLEAN_FRAGMENTS: u8 = 2;
@@ -38,9 +43,27 @@ fn is_tracking_param(key: &str) -> bool {
     false
 }
 
-/// Strip tracking query parameters from a URL string (borrows).
-fn strip_tracking_params(url: &str) -> String {
-    strip_tracking_params_owned(url.to_string())
+/// Strip tracking query parameters from a URL string.
+/// Returns Cow::Borrowed if no tracking params found, avoiding allocation.
+fn strip_tracking_params(url: &str) -> Cow<'_, str> {
+    let qmark = match url.find('?') {
+        Some(i) => i,
+        None => return Cow::Borrowed(url),
+    };
+    let query_start = qmark + 1;
+    let query_end = url[query_start..].find('#').map_or(url.len(), |i| query_start + i);
+    let query = &url[query_start..query_end];
+
+    // Fast check: does any param match a tracking prefix?
+    let has_tracking = query.split('&').any(|param| {
+        let key = param.find('=').map_or(param, |i| &param[..i]);
+        is_tracking_param(key)
+    });
+    if !has_tracking {
+        return Cow::Borrowed(url);
+    }
+
+    Cow::Owned(strip_tracking_params_owned(url.to_string()))
 }
 
 /// Strip tracking query parameters from an already-owned URL string.
@@ -209,7 +232,8 @@ pub struct ConvertState {
     last_content_cache_len: usize,
     table_rendered_table: bool,
     table_current_row_cells: usize,
-    table_column_alignments: Vec<String>,
+    // 0=none, 1=left, 2=center, 3=right
+    table_column_alignments: Vec<u8>,
     last_text_node_contains_whitespace: bool,
     last_text_node_depth: usize,
     last_text_node_index: usize,
@@ -591,7 +615,6 @@ impl ConvertState {
         let is_inline: bool;
         let node_spacing: Option<[u8; 2]>;
         let output: Option<Cow<'static, str>>;
-        let has_handler: bool;
         {
             let (ancestors, last) = self.stack.split_at(stack_len - 1);
             let node = &last[0];
@@ -602,7 +625,6 @@ impl ConvertState {
             }
 
             tag_id = node.tag_id;
-            has_handler = tag_id.and_then(get_tag_handler).is_some();
 
             // Check override is_inline
             let override_config = if self.has_tag_overrides {
@@ -614,8 +636,8 @@ impl ConvertState {
             is_inline = override_config.and_then(|ov| ov.is_inline).unwrap_or(node.is_inline);
             node_spacing = node.spacing;
 
-            // Table state reads
-            if has_handler {
+            // Table state reads (tag_id.is_some() is sufficient — all table tags have handlers)
+            if tag_id.is_some() {
                 if tag_id == Some(TAG_TABLE) {
                     if self.depth_map[TAG_TABLE as usize] <= 1 {
                         self.table_rendered_table = false;
@@ -624,17 +646,16 @@ impl ConvertState {
                 } else if tag_id == Some(TAG_TR) {
                     self.table_current_row_cells = 0;
                 } else if tag_id == Some(TAG_TH) {
-                    let align = node.attributes.get("align").map(|s| {
-                        let mut buf = String::with_capacity(s.len());
-                        for b in s.bytes() {
-                            buf.push(if b >= b'A' && b <= b'Z' { (b + 32) as char } else { b as char });
+                    let align_val = node.attributes.get("align").map_or(0u8, |s| {
+                        match s.as_bytes().first().copied().unwrap_or(0) | 0x20 {
+                            b'l' => 1, // left
+                            b'c' => 2, // center
+                            b'r' => 3, // right
+                            _ => 0,
                         }
-                        buf
                     });
-                    if let Some(align) = align {
-                        self.table_column_alignments.push(align);
-                    } else if self.table_column_alignments.len() <= self.table_current_row_cells {
-                        self.table_column_alignments.push(String::new());
+                    if align_val != 0 || self.table_column_alignments.len() <= self.table_current_row_cells {
+                        self.table_column_alignments.push(align_val);
                     }
                 }
             }
@@ -745,12 +766,12 @@ impl ConvertState {
                     let mut sep = String::with_capacity(col_count * 7 + 5);
                     sep.push_str(" |\n|");
                     for i in 0..col_count {
-                        let align = self.table_column_alignments.get(i).map(|s| s.as_str()).unwrap_or("");
+                        let align = self.table_column_alignments.get(i).copied().unwrap_or(0);
                         sep.push(' ');
                         sep.push_str(match align {
-                            "left" => ":---",
-                            "center" => ":---:",
-                            "right" => "---:",
+                            1 => ":---",
+                            2 => ":---:",
+                            3 => "---:",
                             _ => "---",
                         });
                         sep.push_str(" |");
@@ -951,25 +972,32 @@ impl ConvertState {
             TAG_SUP => Some(Cow::Borrowed("<sup>")),
             TAG_INS => Some(Cow::Borrowed("<ins>")),
             TAG_P => {
-                let bq_depth = self.depth_map[TAG_BLOCKQUOTE as usize];
+                let bq_depth = self.depth_map[TAG_BLOCKQUOTE as usize] as usize;
                 if bq_depth > 0 {
                     let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
-                    // Only add separator if there's preceding text content (not the first <p> in the blockquote)
                     if last_char != 0 && last_char != b'\n' && last_char != b' ' && last_char != b'>' {
-                        let prefix = "> ".repeat(bq_depth as usize);
+                        let prefix = if bq_depth < BQ_PREFIXES.len() { BQ_PREFIXES[bq_depth] } else { &"> ".repeat(bq_depth) };
                         return Some(Cow::Owned(format!("\n{}\n{}", prefix.trim_end(), prefix)));
                     }
                 }
                 None
             }
             TAG_BLOCKQUOTE => {
-                let depth = std::cmp::max(1, self.depth_map[TAG_BLOCKQUOTE as usize]);
-                let mut prefix = "> ".repeat(depth as usize);
-                if self.depth_map[TAG_LI as usize] > 0 {
-                    let indent = "  ".repeat(self.depth_map[TAG_LI as usize] as usize);
-                    prefix = format!("\n{}{}", indent, prefix);
+                let depth = std::cmp::max(1, self.depth_map[TAG_BLOCKQUOTE as usize]) as usize;
+                if self.depth_map[TAG_LI as usize] == 0 && depth < BQ_PREFIXES.len() {
+                    Some(Cow::Borrowed(BQ_PREFIXES[depth]))
+                } else {
+                    let mut prefix = if depth < BQ_PREFIXES.len() {
+                        BQ_PREFIXES[depth].to_string()
+                    } else {
+                        "> ".repeat(depth)
+                    };
+                    if self.depth_map[TAG_LI as usize] > 0 {
+                        let indent = "  ".repeat(self.depth_map[TAG_LI as usize] as usize);
+                        prefix = format!("\n{}{}", indent, prefix);
+                    }
+                    Some(Cow::Owned(prefix))
                 }
-                Some(Cow::Owned(prefix))
             }
             TAG_CODE => {
                 if self.depth_map[TAG_PRE as usize] > 0 {
@@ -997,15 +1025,19 @@ impl ConvertState {
                 let ol_depth = self.depth_map[TAG_OL as usize];
                 let depth = if ul_depth + ol_depth > 0 { (ul_depth + ol_depth - 1) as usize } else { 0 };
                 let is_ordered = ol_depth > 0 && _ancestors.last().map(|p| p.tag_id == Some(TAG_OL)).unwrap_or(false);
-                let mut s = String::with_capacity(depth * 2 + 6);
-                for _ in 0..depth { s.push_str("  "); }
-                if is_ordered {
-                    use std::fmt::Write;
-                    let _ = write!(s, "{}. ", node.index + 1);
+                if !is_ordered && depth < UL_PREFIXES.len() {
+                    Some(Cow::Borrowed(UL_PREFIXES[depth]))
                 } else {
-                    s.push_str("- ");
+                    let mut s = String::with_capacity(depth * 2 + 6);
+                    for _ in 0..depth { s.push_str("  "); }
+                    if is_ordered {
+                        use std::fmt::Write;
+                        let _ = write!(s, "{}. ", node.index + 1);
+                    } else {
+                        s.push_str("- ");
+                    }
+                    Some(Cow::Owned(s))
                 }
-                Some(Cow::Owned(s))
             }
             TAG_A => {
                 if node.attributes.contains_key("href") { Some(Cow::Borrowed("[")) } else { None }
@@ -1014,7 +1046,15 @@ impl ConvertState {
                 let alt = node.attributes.get("alt").map(|s| s.as_str()).unwrap_or("");
                 let src = node.attributes.get("src").map(|s| s.as_str()).unwrap_or("");
                 let resolved_src = Self::resolve_url(src, self.options.origin.as_deref(), self.options.clean_urls);
-                Some(Cow::Owned(format!("![{}]({})", alt, resolved_src)))
+                {
+                    let mut s = String::with_capacity(alt.len() + resolved_src.len() + 5);
+                    s.push_str("![");
+                    s.push_str(alt);
+                    s.push_str("](");
+                    s.push_str(&resolved_src);
+                    s.push(')');
+                    Some(Cow::Owned(s))
+                }
             }
             TAG_TABLE => {
                 if self.depth_map[TAG_TD as usize] > 0 { Some(Cow::Borrowed("<table>")) } else { None }
@@ -1106,9 +1146,19 @@ impl ConvertState {
                         if cache == title { title = ""; }
                     }
                     if !title.is_empty() {
-                        Some(Cow::Owned(format!("]({} \"{}\")", resolved, title)))
+                        let mut s = String::with_capacity(resolved.len() + title.len() + 6);
+                        s.push_str("](");
+                        s.push_str(&resolved);
+                        s.push_str(" \"");
+                        s.push_str(title);
+                        s.push_str("\")");
+                        Some(Cow::Owned(s))
                     } else {
-                        Some(Cow::Owned(format!("]({})", resolved)))
+                        let mut s = String::with_capacity(resolved.len() + 3);
+                        s.push_str("](");
+                        s.push_str(&resolved);
+                        s.push(')');
+                        Some(Cow::Owned(s))
                     }
                 } else {
                     Some(Cow::Borrowed(""))
@@ -1875,7 +1925,7 @@ impl ConvertState {
             }
         }
         if needs_clean {
-            Cow::Owned(strip_tracking_params(url))
+            strip_tracking_params(url)
         } else {
             Cow::Borrowed(url)
         }

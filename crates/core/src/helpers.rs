@@ -100,6 +100,12 @@ fn decode_html_entities_alloc(text: &str) -> String {
                 i = start;
             }
         }
+        // If bytes[i] == b'&' here, no entity matched above — push literal &
+        if bytes[i] == b'&' {
+            result.push('&');
+            i += 1;
+            continue;
+        }
         // Batch copy plain ASCII bytes until next & or non-ASCII
         let start = i;
         while i < len && bytes[i] != b'&' && bytes[i] < 0x80 {
