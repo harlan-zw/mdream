@@ -6,6 +6,7 @@ fn main() -> io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let mut origin: Option<String> = None;
     let mut verbose = false;
+    let mut clean_urls = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -17,6 +18,7 @@ fn main() -> io::Result<()> {
                 }
             }
             "--verbose" | "-v" => verbose = true,
+            "--clean-urls" => clean_urls = true,
             "--help" | "-h" => {
                 eprintln!("Usage: mdream [OPTIONS]");
                 eprintln!("  Reads HTML from stdin, outputs Markdown to stdout");
@@ -24,6 +26,7 @@ fn main() -> io::Result<()> {
                 eprintln!("Options:");
                 eprintln!("  -o, --origin <URL>  Base URL for resolving relative links");
                 eprintln!("  -v, --verbose       Print conversion stats to stderr");
+                eprintln!("  --clean-urls        Strip tracking query params (utm_*, fbclid, etc.)");
                 eprintln!("  -h, --help          Show this help");
                 return Ok(());
             }
@@ -44,6 +47,7 @@ fn main() -> io::Result<()> {
 
     let options = HTMLToMarkdownOptions {
         origin,
+        clean_urls,
         ..Default::default()
     };
 

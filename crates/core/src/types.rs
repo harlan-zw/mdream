@@ -191,6 +191,7 @@ pub struct PluginConfig {
 #[derive(Debug, Clone, Default)]
 pub struct HTMLToMarkdownOptions {
     pub origin: Option<String>,
+    pub clean_urls: bool,
     pub plugins: Option<PluginConfig>,
 }
 

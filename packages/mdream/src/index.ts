@@ -27,6 +27,8 @@ export interface TagOverride {
 export interface MdreamOptions {
   /** Origin URL for resolving relative image paths and internal links. */
   origin?: string
+  /** Strip tracking query parameters (utm_*, fbclid, gclid, etc.) from URLs. Default: false */
+  cleanUrls?: boolean
   /** Enable minimal preset (frontmatter, isolateMain, tailwind, filter). Default: false */
   minimal?: boolean
   /** Extract frontmatter from HTML head. Default when minimal: true */
@@ -86,7 +88,7 @@ function resolveOptions(options: Partial<MdreamOptions>): { napiOpts: HtmlToMark
   }
 
   return {
-    napiOpts: { origin: options.origin, plugins },
+    napiOpts: { origin: options.origin, cleanUrls: options.cleanUrls, plugins },
     extractionHandlers,
   }
 }

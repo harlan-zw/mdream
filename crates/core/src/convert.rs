@@ -17,6 +17,71 @@ const ESC_BLOCKQUOTE: u8 = 8;
 
 static HEADING_PREFIXES: [&str; 6] = ["# ", "## ", "### ", "#### ", "##### ", "###### "];
 
+/// Known tracking query parameter prefixes to strip when clean_urls is enabled.
+const TRACKING_PREFIXES: [&str; 6] = ["utm_", "fbclid", "gclid", "mc_eid", "msclkid", "oly_"];
+
+/// Check if a query parameter key is a tracking parameter.
+#[inline]
+fn is_tracking_param(key: &str) -> bool {
+    for prefix in &TRACKING_PREFIXES {
+        if key.starts_with(prefix) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Strip tracking query parameters from a URL string (borrows).
+fn strip_tracking_params(url: &str) -> String {
+    strip_tracking_params_owned(url.to_string())
+}
+
+/// Strip tracking query parameters from an already-owned URL string.
+fn strip_tracking_params_owned(url: String) -> String {
+    let qmark = match url.find('?') {
+        Some(i) => i,
+        None => return url,
+    };
+    let (base, rest) = url.split_at(qmark);
+    let query = &rest[1..]; // skip '?'
+
+    // Split off fragment if present
+    let (query, fragment) = match query.find('#') {
+        Some(i) => (&query[..i], &query[i..]),
+        None => {
+            // Also check base for fragment before query (rare but possible in malformed URLs)
+            (query, "")
+        }
+    };
+
+    let mut kept = String::new();
+    for param in query.split('&') {
+        let key = match param.find('=') {
+            Some(i) => &param[..i],
+            None => param,
+        };
+        if !is_tracking_param(key) {
+            if !kept.is_empty() {
+                kept.push('&');
+            }
+            kept.push_str(param);
+        }
+    }
+
+    if kept.is_empty() {
+        // All params stripped — return base + fragment
+        let mut result = base.to_string();
+        result.push_str(fragment);
+        result
+    } else {
+        let mut result = base.to_string();
+        result.push('?');
+        result.push_str(&kept);
+        result.push_str(fragment);
+        result
+    }
+}
+
 /// Unified single-pass HTML-to-Markdown converter.
 /// Merges parser state and markdown output state to eliminate callback overhead,
 /// duplicate state tracking, and enable full inlining of tag handler logic.
@@ -684,7 +749,7 @@ impl ConvertState {
             TAG_IMG => {
                 let alt = node.attributes.get("alt").map(|s| s.as_str()).unwrap_or("");
                 let src = node.attributes.get("src").map(|s| s.as_str()).unwrap_or("");
-                let resolved_src = Self::resolve_url(src, self.options.origin.as_deref());
+                let resolved_src = Self::resolve_url(src, self.options.origin.as_deref(), self.options.clean_urls);
                 Some(Cow::Owned(format!("![{}]({})", alt, resolved_src)))
             }
             TAG_TABLE => {
@@ -768,7 +833,7 @@ impl ConvertState {
             }
             TAG_A => {
                 if let Some(href) = node.attributes.get("href") {
-                    let resolved = Self::resolve_url(href, self.options.origin.as_deref());
+                    let resolved = Self::resolve_url(href, self.options.origin.as_deref(), self.options.clean_urls);
                     let mut title = node.attributes.get("title").map(|s| s.as_str()).unwrap_or("");
                     if self.last_content_cache_len > 0 {
                         let buf_len = self.buffer.len();
@@ -1520,19 +1585,33 @@ impl ConvertState {
     }
 
     #[inline]
-    fn resolve_url<'a>(url: &'a str, origin: Option<&str>) -> Cow<'a, str> {
+    fn resolve_url<'a>(url: &'a str, origin: Option<&str>, clean: bool) -> Cow<'a, str> {
         if url.is_empty() || url.starts_with('#') { return Cow::Borrowed(url); }
-        if url.starts_with("//") { return Cow::Owned(format!("https:{}", url)); }
+        // Fast path: check if cleaning needed before any allocation
+        let needs_clean = clean && url.as_bytes().contains(&b'?');
+        if url.starts_with("//") {
+            let resolved = format!("https:{}", url);
+            return Cow::Owned(if needs_clean { strip_tracking_params_owned(resolved) } else { resolved });
+        }
         if let Some(orig) = origin {
             if url.starts_with('/') {
-                return Cow::Owned(format!("{}{}", orig.trim_end_matches('/'), url));
+                let resolved = format!("{}{}", orig.trim_end_matches('/'), url);
+                return Cow::Owned(if needs_clean { strip_tracking_params_owned(resolved) } else { resolved });
             }
-            if url.starts_with("./") { return Cow::Owned(format!("{}/{}", orig, &url[2..])); }
+            if url.starts_with("./") {
+                let resolved = format!("{}/{}", orig, &url[2..]);
+                return Cow::Owned(if needs_clean { strip_tracking_params_owned(resolved) } else { resolved });
+            }
             if !url.starts_with("http") {
-                return Cow::Owned(format!("{}/{}", orig, url.strip_prefix('/').unwrap_or(url)));
+                let resolved = format!("{}/{}", orig, url.strip_prefix('/').unwrap_or(url));
+                return Cow::Owned(if needs_clean { strip_tracking_params_owned(resolved) } else { resolved });
             }
         }
-        Cow::Borrowed(url)
+        if needs_clean {
+            Cow::Owned(strip_tracking_params(url))
+        } else {
+            Cow::Borrowed(url)
+        }
     }
 
     #[inline]

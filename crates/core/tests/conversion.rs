@@ -683,3 +683,100 @@ fn tag_override_spacing() {
     // With spacing [0,0], divs should not add newlines
     assert!(!md.contains("\n\n"));
 }
+
+// ── Clean URLs ──
+
+fn convert_clean(html: &str) -> String {
+    html_to_markdown(html, HTMLToMarkdownOptions {
+        clean_urls: true,
+        ..Default::default()
+    })
+}
+
+fn convert_clean_with_origin(html: &str, origin: &str) -> String {
+    html_to_markdown(html, HTMLToMarkdownOptions {
+        origin: Some(origin.to_string()),
+        clean_urls: true,
+        ..Default::default()
+    })
+}
+
+#[test]
+fn clean_urls_strips_utm_params() {
+    assert_eq!(
+        convert_clean(r#"<a href="https://example.com?utm_source=twitter&utm_medium=social">Link</a>"#),
+        "[Link](https://example.com)"
+    );
+}
+
+#[test]
+fn clean_urls_strips_fbclid() {
+    assert_eq!(
+        convert_clean(r#"<a href="https://example.com/page?fbclid=abc123">Link</a>"#),
+        "[Link](https://example.com/page)"
+    );
+}
+
+#[test]
+fn clean_urls_strips_gclid() {
+    assert_eq!(
+        convert_clean(r#"<a href="https://example.com/page?gclid=xyz">Link</a>"#),
+        "[Link](https://example.com/page)"
+    );
+}
+
+#[test]
+fn clean_urls_preserves_non_tracking_params() {
+    assert_eq!(
+        convert_clean(r#"<a href="https://example.com/search?q=rust&page=2">Link</a>"#),
+        "[Link](https://example.com/search?q=rust&page=2)"
+    );
+}
+
+#[test]
+fn clean_urls_mixed_params() {
+    assert_eq!(
+        convert_clean(r#"<a href="https://example.com/page?id=5&utm_source=newsletter&ref=home">Link</a>"#),
+        "[Link](https://example.com/page?id=5&ref=home)"
+    );
+}
+
+#[test]
+fn clean_urls_preserves_fragment() {
+    assert_eq!(
+        convert_clean(r#"<a href="https://example.com/page?utm_source=x#section">Link</a>"#),
+        "[Link](https://example.com/page#section)"
+    );
+}
+
+#[test]
+fn clean_urls_no_params_unchanged() {
+    assert_eq!(
+        convert_clean(r#"<a href="https://example.com/page">Link</a>"#),
+        "[Link](https://example.com/page)"
+    );
+}
+
+#[test]
+fn clean_urls_disabled_by_default() {
+    assert_eq!(
+        convert(r#"<a href="https://example.com?utm_source=foo">Link</a>"#),
+        "[Link](https://example.com?utm_source=foo)"
+    );
+}
+
+#[test]
+fn clean_urls_with_origin() {
+    assert_eq!(
+        convert_clean_with_origin(r#"<a href="/page?utm_campaign=test&id=1">Link</a>"#, "https://example.com"),
+        "[Link](https://example.com/page?id=1)"
+    );
+}
+
+#[test]
+fn clean_urls_images() {
+    assert_eq!(
+        convert_clean(r#"<img src="https://cdn.example.com/img.png?utm_source=site" alt="Photo">"#),
+        "![Photo](https://cdn.example.com/img.png)"
+    );
+}

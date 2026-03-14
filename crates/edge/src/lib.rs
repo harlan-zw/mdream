@@ -48,8 +48,10 @@ struct PluginOptions {
 }
 
 #[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 struct HtmlToMarkdownOptions {
     origin: Option<String>,
+    clean_urls: Option<bool>,
     plugins: Option<PluginOptions>,
 }
 
@@ -58,6 +60,7 @@ struct HtmlToMarkdownOptions {
 fn to_core_opts(options: HtmlToMarkdownOptions) -> mdream::types::HTMLToMarkdownOptions {
     mdream::types::HTMLToMarkdownOptions {
         origin: options.origin,
+        clean_urls: options.clean_urls.unwrap_or(false),
         plugins: options.plugins.map(|p| mdream::types::PluginConfig {
             filter: p.filter.map(|f| mdream::types::FilterConfig {
                 include: f.include,

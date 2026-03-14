@@ -79,6 +79,8 @@ pub struct MdreamNapiResult {
 #[napi(object)]
 pub struct HtmlToMarkdownOptions {
     pub origin: Option<String>,
+    #[napi(js_name = "cleanUrls")]
+    pub clean_urls: Option<bool>,
     pub plugins: Option<PluginOptions>,
 }
 
@@ -87,6 +89,7 @@ pub struct HtmlToMarkdownOptions {
 fn to_core_opts(options: Option<HtmlToMarkdownOptions>) -> mdream::types::HTMLToMarkdownOptions {
     mdream::types::HTMLToMarkdownOptions {
         origin: options.as_ref().and_then(|o| o.origin.clone()),
+        clean_urls: options.as_ref().and_then(|o| o.clean_urls).unwrap_or(false),
         plugins: options.and_then(|o| {
             o.plugins.map(|p| mdream::types::PluginConfig {
                 filter: p.filter.map(|f| mdream::types::FilterConfig {
