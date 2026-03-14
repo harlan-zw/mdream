@@ -4,7 +4,6 @@ export default antfu({
   ignores: [
     '**/.mdream/**',
     '**/examples/**',
-    'docs/**',
     'debug_test.ts',
     'rewrite-imports.mjs',
   ],

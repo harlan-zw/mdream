@@ -2,7 +2,6 @@ shellEmulator: true
 trustPolicy: no-downgrade
 
 packages:
-  - playground
   - packages/*
   - crates/node
   - crates/node/npm/*
