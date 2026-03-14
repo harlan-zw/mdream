@@ -2,7 +2,24 @@ import type { PageMetadata } from './types.ts'
 import { htmlToMarkdown } from 'mdream'
 import { extractionPlugin } from 'mdream/plugins'
 
-export function extractMetadata(html: string, url: string): PageMetadata {
+/**
+ * Extract root domain from hostname
+ */
+function getRootDomain(hostname: string): string {
+  const parts = hostname.split('.')
+  // For standard domains, take last 2 parts (domain + TLD)
+  // This handles cases like example.com, info.example.com
+  return parts.length >= 2 ? parts.slice(-2).join('.') : hostname
+}
+
+/**
+ * Check if two hostnames share the same root domain
+ */
+function isSameRootDomain(hostname1: string, hostname2: string): boolean {
+  return getRootDomain(hostname1) === getRootDomain(hostname2)
+}
+
+export function extractMetadata(html: string, url: string, allowSubdomains: boolean = false): PageMetadata {
   const links: string[] = []
   let title = ''
   let description = ''
@@ -73,6 +90,12 @@ export function extractMetadata(html: string, url: string): PageMetadata {
       try {
         const linkUrl = new URL(link)
         const baseUrl = new URL(url)
+        
+        if (allowSubdomains) {
+          // Include links from same root domain (including subdomains)
+          return isSameRootDomain(linkUrl.hostname, baseUrl.hostname)
+        }
+        
         // Only include links from same domain by default
         return linkUrl.hostname === baseUrl.hostname
       }

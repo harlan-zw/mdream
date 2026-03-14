@@ -11,6 +11,14 @@ export interface ParsedUrlPattern {
 }
 
 /**
+ * Extract root domain from hostname (e.g., "runoom.com" from "info.runoom.com")
+ */
+function getRootDomain(hostname: string): string {
+  const parts = hostname.split('.')
+  return parts.length >= 2 ? parts.slice(-2).join('.') : hostname
+}
+
+/**
  * Parse a URL that may contain glob patterns
  * Example: https://nuxtseo.com/docs/** -> { baseUrl: "https://nuxtseo.com", pattern: "/docs/**", isGlob: true }
  */
@@ -52,7 +60,7 @@ export function parseUrlPattern(input: string): ParsedUrlPattern {
 /**
  * Check if a URL matches a glob pattern
  */
-export function matchesGlobPattern(url: string, parsedPattern: ParsedUrlPattern): boolean {
+export function matchesGlobPattern(url: string, parsedPattern: ParsedUrlPattern, allowSubdomains: boolean = false): boolean {
   if (!parsedPattern.isGlob) {
     return true // No pattern means match everything
   }
@@ -61,10 +69,22 @@ export function matchesGlobPattern(url: string, parsedPattern: ParsedUrlPattern)
     const urlObj = new URL(url)
     const urlPath = urlObj.pathname + urlObj.search + urlObj.hash
 
-    // Only match URLs from the same base domain
-    const urlBase = `${urlObj.protocol}//${urlObj.host}`
-    if (urlBase !== parsedPattern.baseUrl) {
-      return false
+    // Check domain matching
+    if (allowSubdomains) {
+      // Check if URLs share the same root domain
+      const patternUrl = new URL(parsedPattern.baseUrl)
+      const urlRootDomain = getRootDomain(urlObj.hostname)
+      const patternRootDomain = getRootDomain(patternUrl.hostname)
+      
+      if (urlRootDomain !== patternRootDomain) {
+        return false
+      }
+    } else {
+      // Only match URLs from the same base domain
+      const urlBase = `${urlObj.protocol}//${urlObj.host}`
+      if (urlBase !== parsedPattern.baseUrl) {
+        return false
+      }
     }
 
     // Transform single asterisk at the end of pattern to match subdirectories
@@ -114,7 +134,7 @@ export function getStartingUrl(parsedPattern: ParsedUrlPattern): string {
 /**
  * Check if a URL should be excluded based on exclude patterns
  */
-export function isUrlExcluded(url: string, excludePatterns: string[]): boolean {
+export function isUrlExcluded(url: string, excludePatterns: string[], allowSubdomains: boolean = false): boolean {
   if (!excludePatterns || excludePatterns.length === 0) {
     return false
   }
@@ -129,7 +149,7 @@ export function isUrlExcluded(url: string, excludePatterns: string[]): boolean {
       if (pattern.includes('://')) {
         const parsedPattern = parseUrlPattern(pattern)
         if (parsedPattern.isGlob) {
-          return matchesGlobPattern(url, parsedPattern)
+          return matchesGlobPattern(url, parsedPattern, allowSubdomains)
         }
         return url === pattern
       }
