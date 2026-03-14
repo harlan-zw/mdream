@@ -196,6 +196,8 @@ pub struct ConvertState {
     collapse_non_span_depth: u8,
     collapse_span_depth: u8,
     first_block_parent_index: Option<usize>,
+    block_parent_indices: Vec<usize>,
+    parse_text_buffer: String,
     pub stack: Vec<ElementNode>,
     node_pool: Vec<ElementNode>,
 
@@ -281,6 +283,8 @@ impl ConvertState {
             collapse_non_span_depth: 0,
             collapse_span_depth: 0,
             first_block_parent_index: None,
+            block_parent_indices: Vec::with_capacity(16),
+            parse_text_buffer: String::new(),
             stack: Vec::with_capacity(32),
             node_pool: Vec::with_capacity(32),
 
@@ -382,7 +386,12 @@ impl ConvertState {
     // ========================================================================
 
     pub fn process_html(&mut self, chunk: &str) -> String {
-        let mut text_buffer = String::with_capacity(256);
+        // Reuse text_buffer allocation from previous call if available
+        let mut text_buffer = std::mem::take(&mut self.parse_text_buffer);
+        text_buffer.clear();
+        if text_buffer.capacity() == 0 {
+            text_buffer.reserve(256);
+        }
         let bytes = chunk.as_bytes();
         let chunk_length = bytes.len();
         let mut i = 0;
@@ -391,6 +400,18 @@ impl ConvertState {
             let cc = bytes[i];
 
             if cc != LT_CHAR {
+                // TURBO SKIP: for non-nesting tags that exclude text (script, style, noscript)
+                // Skip all content until next '<' — no text processing, no quote tracking needed
+                if self.in_non_nesting {
+                    if let Some(parent) = self.stack.last() {
+                        if parent.excludes_text_nodes {
+                            i += 1;
+                            while i < chunk_length && bytes[i] != LT_CHAR { i += 1; }
+                            continue;
+                        }
+                    }
+                }
+
                 // FAST PATH: batch contiguous plain ASCII text (>32, <128, not & or <)
                 // Skip when: in escape context, non-nesting mode, or pre tag
                 if cc > 32 && cc < 0x80 && cc != AMPERSAND_CHAR
@@ -597,7 +618,13 @@ impl ConvertState {
             }
         }
 
-        text_buffer
+        // If text_buffer is empty (common for non-streaming), save allocation for reuse
+        if text_buffer.is_empty() {
+            self.parse_text_buffer = text_buffer;
+            String::new()
+        } else {
+            text_buffer
+        }
     }
 
     // ========================================================================
@@ -953,7 +980,10 @@ impl ConvertState {
             TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6 => {
                 let depth = (tag_id - TAG_H1) as usize;
                 if self.depth_map[TAG_A as usize] > 0 {
-                    Some(Cow::Owned(format!("<h{}>", depth + 1)))
+                    {
+                        static H_OPEN: [&str; 6] = ["<h1>", "<h2>", "<h3>", "<h4>", "<h5>", "<h6>"];
+                        Some(Cow::Borrowed(H_OPEN[depth]))
+                    }
                 } else {
                     Some(Cow::Borrowed(HEADING_PREFIXES[depth]))
                 }
@@ -977,7 +1007,13 @@ impl ConvertState {
                     let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
                     if last_char != 0 && last_char != b'\n' && last_char != b' ' && last_char != b'>' {
                         let prefix = if bq_depth < BQ_PREFIXES.len() { BQ_PREFIXES[bq_depth] } else { &"> ".repeat(bq_depth) };
-                        return Some(Cow::Owned(format!("\n{}\n{}", prefix.trim_end(), prefix)));
+                        let trimmed = prefix.trim_end();
+                        let mut s = String::with_capacity(1 + trimmed.len() + 1 + prefix.len());
+                        s.push('\n');
+                        s.push_str(trimmed);
+                        s.push('\n');
+                        s.push_str(prefix);
+                        return Some(Cow::Owned(s));
                     }
                 }
                 None
@@ -1005,7 +1041,13 @@ impl ConvertState {
                     if lang.is_empty() {
                         Some(Cow::Borrowed("```\n"))
                     } else {
-                        Some(Cow::Owned(format!("```{}\n", lang)))
+                        {
+                            let mut s = String::with_capacity(4 + lang.len());
+                            s.push_str("```");
+                            s.push_str(lang);
+                            s.push('\n');
+                            Some(Cow::Owned(s))
+                        }
                     }
                 } else {
                     Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
@@ -1104,7 +1146,10 @@ impl ConvertState {
             TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6 => {
                 let depth = (tag_id - TAG_H1 + 1) as usize;
                 if self.depth_map[TAG_A as usize] > 0 {
-                    Some(Cow::Owned(format!("</h{}>", depth)))
+                    {
+                        static H_CLOSE: [&str; 6] = ["</h1>", "</h2>", "</h3>", "</h4>", "</h5>", "</h6>"];
+                        Some(Cow::Borrowed(H_CLOSE[depth - 1]))
+                    }
                 } else { None }
             }
             TAG_STRONG | TAG_B => {
@@ -1634,7 +1679,11 @@ impl ConvertState {
 
         if let Some(last) = self.stack.last_mut() { last.current_walk_index += 1; }
 
-        if !tag.is_inline { self.first_block_parent_index = Some(self.stack.len()); }
+        if !tag.is_inline {
+            let idx = self.stack.len();
+            self.first_block_parent_index = Some(idx);
+            self.block_parent_indices.push(idx);
+        }
 
         self.stack.push(tag);
 
@@ -1703,13 +1752,9 @@ impl ConvertState {
         let node = self.stack.pop().unwrap();
 
         if self.first_block_parent_index == Some(popping_index) {
-            self.first_block_parent_index = None;
-            for (idx, n) in self.stack.iter().enumerate().rev() {
-                if !n.is_inline { self.first_block_parent_index = Some(idx); break; }
-            }
-            if self.first_block_parent_index.is_none() && !self.stack.is_empty() {
-                self.first_block_parent_index = Some(0);
-            }
+            self.block_parent_indices.pop();
+            self.first_block_parent_index = self.block_parent_indices.last().copied()
+                .or_else(|| if self.stack.is_empty() { None } else { Some(0) });
         }
 
         if node.collapses_inner_white_space && !node.excluded_from_markdown {
@@ -1907,20 +1952,33 @@ impl ConvertState {
         // Fast path: check if cleaning needed before any allocation
         let needs_clean = clean && url.as_bytes().contains(&b'?');
         if url.starts_with("//") {
-            let resolved = format!("https:{}", url);
+            let mut resolved = String::with_capacity(6 + url.len());
+            resolved.push_str("https:");
+            resolved.push_str(url);
             return Cow::Owned(if needs_clean { strip_tracking_params_owned(resolved) } else { resolved });
         }
         if let Some(orig) = origin {
             if url.starts_with('/') {
-                let resolved = format!("{}{}", orig.trim_end_matches('/'), url);
+                let trimmed = orig.trim_end_matches('/');
+                let mut resolved = String::with_capacity(trimmed.len() + url.len());
+                resolved.push_str(trimmed);
+                resolved.push_str(url);
                 return Cow::Owned(if needs_clean { strip_tracking_params_owned(resolved) } else { resolved });
             }
             if url.starts_with("./") {
-                let resolved = format!("{}/{}", orig, &url[2..]);
+                let suffix = &url[2..];
+                let mut resolved = String::with_capacity(orig.len() + 1 + suffix.len());
+                resolved.push_str(orig);
+                resolved.push('/');
+                resolved.push_str(suffix);
                 return Cow::Owned(if needs_clean { strip_tracking_params_owned(resolved) } else { resolved });
             }
             if !url.starts_with("http") {
-                let resolved = format!("{}/{}", orig, url.strip_prefix('/').unwrap_or(url));
+                let suffix = url.strip_prefix('/').unwrap_or(url);
+                let mut resolved = String::with_capacity(orig.len() + 1 + suffix.len());
+                resolved.push_str(orig);
+                resolved.push('/');
+                resolved.push_str(suffix);
                 return Cow::Owned(if needs_clean { strip_tracking_params_owned(resolved) } else { resolved });
             }
         }
