@@ -14,10 +14,10 @@ describe('blockquotes', () => {
     expect(markdown).toBe('> Outer quote\n> > Inner quote')
   })
 
-  it.skip('handles blockquotes with paragraphs', () => {
+  it('handles blockquotes with paragraphs', () => {
     const html = '<blockquote><p>First paragraph</p><p>Second paragraph</p></blockquote>'
     const markdown = htmlToMarkdown(html)
-    expect(markdown).toBe('> First paragraph\n> Second paragraph')
+    expect(markdown).toBe('> First paragraph\n>\n> Second paragraph')
   })
 
   it('handles complex nested blockquotes', () => {
