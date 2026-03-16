@@ -1,0 +1,7 @@
+name = "mdream-edge-test"
+main = "src/index.ts"
+compatibility_date = "2025-03-14"
+
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]

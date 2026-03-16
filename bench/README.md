@@ -143,6 +143,7 @@ pnpm bench
 7. **Node pooling**: Reuses element allocations instead of repeated heap alloc/dealloc
 8. **Zero-copy where possible**: Cow<str> for URLs, entity decoding, tag names
 9. **Compiled with `opt-level = 3`**: Maximum speed optimization with LTO
+10. **Profile-Guided Optimization (PGO)**: ~20% additional throughput from LLVM branch prediction, inlining, and code layout tuned to real HTML workloads
 
 ### Why node-html-markdown Degrades on Large Files
 
@@ -166,15 +167,16 @@ Separate from the JavaScript benchmark, we compare mdream's Rust engine against 
 
 ### Results
 
-| Input Size | mdream | htmd | html2md | html2md-rs | mdka | html_to_markdown | fast_html2md |
-|------------|--------|------|---------|------------|------|------------------|--------------|
-| **166 KB** | 🏆 **0.33ms** | 2.07ms *(6.3x)* | 2.68ms *(8.1x)* | 💀 panicked | 2.71ms *(8.2x)* | 1.66ms *(5.0x)* | 1.41ms *(4.3x)* |
-| **420 KB** | 🏆 **0.42ms** | 3.26ms *(7.8x)* | 4.07ms *(9.7x)* | 1.49ms *(3.5x)* | 3.33ms *(7.9x)* | 2.44ms *(5.8x)* | 1.20ms *(2.9x)* |
-| **1.8 MB** | 🏆 **4.73ms** | 28.4ms *(6.0x)* | 💀 >30s | 33.2ms *(7.0x)* | 34.6ms *(7.3x)* | 19.6ms *(4.1x)* | 18.2ms *(3.8x)* |
+| Input Size | mdream | htmd | html2md | html2md-rs | mdka | html_to_markdown |
+|------------|--------|------|---------|------------|------|------------------|
+| **166 KB** | 🏆 **0.29ms** | 1.63ms *(5.6x)* | 2.12ms *(7.3x)* | 💀 panicked | 2.22ms *(7.7x)* | 1.27ms *(4.4x)* |
+| **420 KB** | 🏆 **0.32ms** | 2.65ms *(8.3x)* | 3.31ms *(10.3x)* | 1.39ms *(4.3x)* | 2.94ms *(9.2x)* | 1.88ms *(5.9x)* |
+| **1.8 MB** | 🏆 **3.84ms** | 21.9ms *(5.7x)* | 💀 >30s | 27.9ms *(7.3x)* | 26.6ms *(6.9x)* | 14.1ms *(3.7x)* |
+
+> mdream numbers use [PGO (Profile-Guided Optimization)](../crates/build-pgo.sh) for ~20% additional throughput over standard release builds.
 
 **Key findings:**
-- mdream is fastest across all input sizes (3-10x faster than all competitors)
-- On medium inputs, fast_html2md is closest but still 2.9x slower
+- mdream is fastest across all input sizes (5-14x faster than all competitors)
 - html2md and html2md-rs have reliability issues (>30s timeouts, panics on valid HTML)
 
 ### Running Native Rust Benchmarks

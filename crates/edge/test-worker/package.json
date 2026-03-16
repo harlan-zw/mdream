@@ -1,0 +1,13 @@
+{
+  "name": "mdream-edge-worker-test",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

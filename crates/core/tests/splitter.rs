@@ -29,9 +29,9 @@ fn tracks_header_hierarchy() {
     // Last chunk should have h2 metadata
     let last = chunks.last().unwrap();
     let headers = last.metadata.headers.as_ref().unwrap();
-    assert_eq!(headers.get("h2"), Some(&"Another Parent".to_string()));
+    assert_eq!(headers.iter().find(|(k, _)| k == "h2").map(|(_, v)| v.as_str()), Some("Another Parent"));
     // Should NOT have h3 from previous section
-    assert!(!headers.contains_key("h3"));
+    assert!(!headers.iter().any(|(k, _)| k == "h3"));
 }
 
 #[test]
@@ -64,8 +64,8 @@ fn clears_child_headers_on_parent_split() {
     let chunks = split_markdown(md, &opts);
     let last = chunks.last().unwrap();
     let headers = last.metadata.headers.as_ref().unwrap();
-    assert_eq!(headers.get("h2"), Some(&"Sec 2".to_string()));
-    assert!(!headers.contains_key("h3"));
+    assert_eq!(headers.iter().find(|(k, _)| k == "h2").map(|(_, v)| v.as_str()), Some("Sec 2"));
+    assert!(!headers.iter().any(|(k, _)| k == "h3"));
 }
 
 // ── strip_headers ──
@@ -275,7 +275,7 @@ fn return_each_line_preserves_headers_metadata() {
     let chunks = split_markdown(md, &opts);
     for chunk in &chunks {
         let headers = chunk.metadata.headers.as_ref().unwrap();
-        assert_eq!(headers.get("h2"), Some(&"Section".to_string()));
+        assert_eq!(headers.iter().find(|(k, _)| k == "h2").map(|(_, v)| v.as_str()), Some("Section"));
     }
 }
 

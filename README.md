@@ -21,8 +21,8 @@
 ## Features
 
 - 🧠 #1 Token Optimizer: [Up to 2x fewer tokens](#token-reduction) than Turndown, node-html-markdown, and html-to-markdown. 70-99% fewer tokens than raw HTML.
+- 🚀 #1 Fastest: [Fastest pure JS & native rust](#benchmarks) - 35x faster than Turndown, converts 1.8MB HTML in ~62ms (JS) and ~3.9ms (Rust with PGO).
 - 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support. Clean mode strips broken links, empty images, redundant anchors.
-- 🚀 #1 Fastest: [Fastest pure JS & native rust](#benchmarks) - 35x faster than Turndown, converts 1.8MB HTML in ~62ms (JS) and ~8ms (Rust).
 - 🌊 Streamable: Process HTML incrementally with `streamHtmlToMarkdown()` for large documents and real-time pipelines.
 - ⚡ Tiny: 10kB gzip JS core, 60kB gzip with Rust WASM engine. Zero dependencies.
 - ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [Docker](#docker), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), & more.
@@ -41,11 +41,11 @@
 
 **Native Rust (no Node.js overhead):**
 
-| Input Size | mdream | [htmd](https://crates.io/crates/htmd) | [html2md](https://crates.io/crates/html2md) | [html2md-rs](https://crates.io/crates/html2md-rs) | [mdka](https://crates.io/crates/mdka) | [html_to_markdown](https://crates.io/crates/html_to_markdown) | [fast_html2md](https://crates.io/crates/fast_html2md) |
-|------------|--------|------|---------|-----------|------|-----------------|-------------|
-| **166 KB** | 🏆 **0.33ms** | 2.07ms *(6.3x)* | 2.68ms *(8.1x)* | 💀 panicked | 2.71ms *(8.2x)* | 1.66ms *(5.0x)* | 1.41ms *(4.3x)* |
-| **420 KB** | 🏆 **0.42ms** | 3.26ms *(7.8x)* | 4.07ms *(9.7x)* | 1.49ms *(3.5x)* | 3.33ms *(7.9x)* | 2.44ms *(5.8x)* | 1.20ms *(2.9x)* |
-| **1.8 MB** | 🏆 **4.73ms** | 28.4ms *(6.0x)* | 💀 >30s | 33.2ms *(7.0x)* | 34.6ms *(7.3x)* | 19.6ms *(4.1x)* | 18.2ms *(3.8x)* |
+| Input Size | mdream | [htmd](https://crates.io/crates/htmd) | [html2md](https://crates.io/crates/html2md) | [html2md-rs](https://crates.io/crates/html2md-rs) | [mdka](https://crates.io/crates/mdka) | [html_to_markdown](https://crates.io/crates/html_to_markdown) |
+|------------|--------|------|---------|-----------|------|-----------------|
+| **166 KB** | 🏆 **0.29ms** | 1.63ms *(5.6x)* | 2.12ms *(7.3x)* | 💀 panicked | 2.22ms *(7.7x)* | 1.27ms *(4.4x)* |
+| **420 KB** | 🏆 **0.32ms** | 2.65ms *(8.3x)* | 3.31ms *(10.3x)* | 1.39ms *(4.3x)* | 2.94ms *(9.2x)* | 1.88ms *(5.9x)* |
+| **1.8 MB** | 🏆 **3.84ms** | 21.9ms *(5.7x)* | 💀 >30s | 27.9ms *(7.3x)* | 26.6ms *(6.9x)* | 14.1ms *(3.7x)* |
 
 ### Token Reduction
 

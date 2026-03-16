@@ -43,7 +43,7 @@ pub fn html_to_markdown_result(html: &str, options: HTMLToMarkdownOptions) -> Md
                 entries.push((k.clone(), v.clone()));
             }
         }
-        if entries.is_empty() { None } else { Some(entries) }
+        Some(entries)
     } else {
         None
     };

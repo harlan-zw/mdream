@@ -73,3 +73,4 @@ crates/*/target/
 crates/target/
 crates/edge/pkg/
 crates/edge/pkg-bundler/
+crates/edge/test-worker/wasm/

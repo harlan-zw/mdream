@@ -635,8 +635,7 @@ fn filter_exclude_by_compound_selector() {
 
 #[test]
 fn tag_override_enter_exit() {
-    let mut overrides = std::collections::HashMap::new();
-    overrides.insert("custom-tag".to_string(), TagOverrideConfig {
+    let overrides = vec![("custom-tag".to_string(), TagOverrideConfig {
         enter: Some("<<".to_string()),
         exit: Some(">>".to_string()),
         spacing: Some([0, 0]),
@@ -644,7 +643,7 @@ fn tag_override_enter_exit() {
         is_self_closing: None,
         collapses_inner_white_space: None,
         alias_tag_id: Some(mdream::consts::TAG_SPAN),
-    });
+    })];
     let md = html_to_markdown(
         "<custom-tag>Hello</custom-tag>",
         HTMLToMarkdownOptions {
@@ -660,8 +659,7 @@ fn tag_override_enter_exit() {
 
 #[test]
 fn tag_override_spacing() {
-    let mut overrides = std::collections::HashMap::new();
-    overrides.insert("div".to_string(), TagOverrideConfig {
+    let overrides = vec![("div".to_string(), TagOverrideConfig {
         enter: None,
         exit: None,
         spacing: Some([0, 0]),
@@ -669,7 +667,7 @@ fn tag_override_spacing() {
         is_self_closing: None,
         collapses_inner_white_space: None,
         alias_tag_id: None,
-    });
+    })];
     let md = html_to_markdown(
         "<div>A</div><div>B</div>",
         HTMLToMarkdownOptions {

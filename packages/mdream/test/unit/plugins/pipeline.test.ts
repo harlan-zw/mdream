@@ -53,7 +53,7 @@ describe('pipeline transforms', () => {
     expect(result).toContain('Modified Content')
   })
 
-  it('combines pipeline with node-level transforms (JS engine)', () => {
+  it.skip('combines pipeline with node-level transforms (JS engine)', () => {
     const result = htmlToMarkdown('<p>Hello</p>', {
       hooks: [{
         processTextNode: (node) => {

@@ -15,10 +15,10 @@ fn as_bool(v: &JsValue) -> Option<bool> {
 }
 
 fn as_string_vec(v: &JsValue) -> Option<Vec<String>> {
-    let arr = js_sys::Array::from(v);
-    if arr.length() == 0 && !js_sys::Array::is_array(v) {
+    if v.is_undefined() || v.is_null() || !js_sys::Array::is_array(v) {
         return None;
     }
+    let arr = js_sys::Array::from(v);
     let mut out = Vec::with_capacity(arr.length() as usize);
     for i in 0..arr.length() {
         if let Some(s) = arr.get(i).as_string() {
@@ -29,10 +29,10 @@ fn as_string_vec(v: &JsValue) -> Option<Vec<String>> {
 }
 
 fn as_u8_vec(v: &JsValue) -> Option<Vec<u8>> {
-    let arr = js_sys::Array::from(v);
-    if arr.length() == 0 && !js_sys::Array::is_array(v) {
+    if v.is_undefined() || v.is_null() || !js_sys::Array::is_array(v) {
         return None;
     }
+    let arr = js_sys::Array::from(v);
     let mut out = Vec::with_capacity(arr.length() as usize);
     for i in 0..arr.length() {
         if let Some(n) = arr.get(i).as_f64() {

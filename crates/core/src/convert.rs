@@ -821,13 +821,6 @@ impl ConvertState {
         let new_line_config = self.calculate_new_line_config(tag_id, node_spacing);
         let configured_new_lines = new_line_config[1];
 
-        // Get effective output
-        let effective: Option<&str> = if let Some(ref sep) = table_separator {
-            Some(sep.as_str())
-        } else {
-            output.as_deref()
-        };
-
         // Clean mode exit — single guard
         if self.clean_flags != 0 && tag_id == Some(TAG_A) {
             // emptyLinks: skip exit for skipped links
@@ -861,11 +854,14 @@ impl ConvertState {
                 if in_heading {
                     if let Some(href) = node.attributes.get("href") {
                         if href.starts_with('#') {
-                            // Remove [ and keep text only
-                            let text = link_text.to_string();
-                            self.buffer.truncate(bracket_pos);
-                            self.buffer.push_str(&text);
-                            self.last_content_cache_len = text.len();
+                            // Remove [ and keep text only — use truncate+copy without intermediate String
+                            let text_len = text_end - text_start;
+                            unsafe {
+                                let buf = self.buffer.as_mut_vec();
+                                std::ptr::copy(buf.as_ptr().add(text_start), buf.as_mut_ptr().add(bracket_pos), text_len);
+                                buf.set_len(bracket_pos + text_len);
+                            }
+                            self.last_content_cache_len = text_len;
                             self.last_node_is_inline = is_inline;
                             return;
                         }
@@ -878,10 +874,14 @@ impl ConvertState {
                 if let Some(href) = node.attributes.get("href") {
                     let resolved = Self::resolve_url(href, self.options.origin.as_deref(), self.options.clean_urls);
                     if link_text == resolved.as_ref() {
-                        let text = link_text.to_string();
-                        self.buffer.truncate(bracket_pos);
-                        self.buffer.push_str(&text);
-                        self.last_content_cache_len = text.len();
+                        // Remove [ and keep text only — use truncate+copy without intermediate String
+                        let text_len = text_end - text_start;
+                        unsafe {
+                            let buf = self.buffer.as_mut_vec();
+                            std::ptr::copy(buf.as_ptr().add(text_start), buf.as_mut_ptr().add(bracket_pos), text_len);
+                            buf.set_len(bracket_pos + text_len);
+                        }
+                        self.last_content_cache_len = text_len;
                         self.last_node_is_inline = is_inline;
                         return;
                     }
@@ -902,6 +902,52 @@ impl ConvertState {
                 }
             }
         }
+
+        // TAG_A exit: write ](url) directly to buffer — zero allocation
+        if !has_override && tag_id == Some(TAG_A) && table_separator.is_none() {
+            // Handle whitespace trimming (write_output with None)
+            self.write_output(false, is_inline, configured_new_lines, None);
+            // Write link close directly
+            if let Some(href) = node.attributes.get("href") {
+                let resolved = Self::resolve_url(href, self.options.origin.as_deref(), self.options.clean_urls);
+                let mut title = node.attributes.get("title").map(|s| s.as_str()).unwrap_or("");
+                if !title.is_empty() && self.last_content_cache_len > 0 {
+                    let buf_len = self.buffer.len();
+                    let start = buf_len.saturating_sub(self.last_content_cache_len);
+                    let cache = &self.buffer[start..];
+                    if cache == title { title = ""; }
+                }
+                self.buffer.push_str("](");
+                self.buffer.push_str(&resolved);
+                if !title.is_empty() {
+                    self.buffer.push_str(" \"");
+                    self.buffer.push_str(title);
+                    self.buffer.push('"');
+                }
+                self.buffer.push(')');
+                self.last_content_cache_len = self.buffer.len(); // will be recalculated
+            }
+            // Record fragment link position for deferred fixup
+            if self.clean_flags & CLEAN_FRAGMENTS != 0 {
+                if let Some(href) = node.attributes.get("href") {
+                    if href.starts_with('#') && href.len() > 1 {
+                        let mut bp = self.link_bracket_pos;
+                        let buf = self.buffer.as_bytes();
+                        while bp < buf.len() && buf[bp] != b'[' { bp += 1; }
+                        self.fragment_links.push((bp, self.buffer.len()));
+                    }
+                }
+            }
+            self.last_node_is_inline = is_inline;
+            return;
+        }
+
+        // Get effective output
+        let effective: Option<&str> = if let Some(ref sep) = table_separator {
+            Some(sep.as_str())
+        } else {
+            output.as_deref()
+        };
 
         self.write_output(false, is_inline, configured_new_lines, effective);
 
@@ -1124,7 +1170,8 @@ impl ConvertState {
             TAG_MARK => Some(Cow::Borrowed("<mark>")),
             TAG_Q => Some(Cow::Borrowed("\"")),
             TAG_U => Some(Cow::Borrowed("<u>")),
-            TAG_CITE | TAG_FIGCAPTION => Some(Cow::Borrowed("*")),
+            TAG_CITE => Some(Cow::Borrowed("*")),
+            TAG_FIGCAPTION => Some(Cow::Borrowed(MARKDOWN_EMPHASIS)),
             TAG_DFN => Some(Cow::Borrowed("**")),
             TAG_ADDRESS => Some(Cow::Borrowed("<address>")),
             TAG_DL => Some(Cow::Borrowed("<dl>")),
@@ -1236,7 +1283,8 @@ impl ConvertState {
             TAG_MARK => Some(Cow::Borrowed("</mark>")),
             TAG_Q => Some(Cow::Borrowed("\"")),
             TAG_U => Some(Cow::Borrowed("</u>")),
-            TAG_CITE | TAG_FIGCAPTION => Some(Cow::Borrowed("*")),
+            TAG_CITE => Some(Cow::Borrowed("*")),
+            TAG_FIGCAPTION => Some(Cow::Borrowed(MARKDOWN_EMPHASIS)),
             TAG_DFN => Some(Cow::Borrowed("**")),
             TAG_ADDRESS => Some(Cow::Borrowed("</address>")),
             TAG_DL => Some(Cow::Borrowed("</dl>")),
@@ -1440,7 +1488,9 @@ impl ConvertState {
         let first_block_child_text_count = first_block_parent_index.map(|idx| self.stack[idx].child_text_node_index).unwrap_or(0);
 
         let mut text = std::mem::take(text_buffer);
-        if contains_whitespace && first_block_child_text_count == 0 {
+        let is_first_text_in_block = first_block_child_text_count == 0
+            && (first_block_parent_index.is_some() || self.buffer.is_empty() || self.buffer.as_bytes().last() == Some(&b'\n'));
+        if contains_whitespace && is_first_text_in_block {
             let mut start = 0;
             let bytes = text.as_bytes();
             while start < bytes.len() && (if in_pre_tag { bytes[start] == NEWLINE_CHAR || bytes[start] == CARRIAGE_RETURN_CHAR } else { is_whitespace(bytes[start]) }) {
@@ -1865,13 +1915,18 @@ impl ConvertState {
         }
 
         if self.stack.last().is_some() {
-            let mut pop_count = 0;
-            for j in (0..self.stack.len()).rev() {
-                pop_count += 1;
-                if self.stack[j].tag_id == tag_id { break; }
-            }
-            for _ in 0..pop_count {
-                if !self.stack.is_empty() { self.close_node(); }
+            // Fast path: top of stack matches (well-formed HTML)
+            if self.stack.last().unwrap().tag_id == tag_id {
+                self.close_node();
+            } else {
+                let mut pop_count = 0;
+                for j in (0..self.stack.len()).rev() {
+                    pop_count += 1;
+                    if self.stack[j].tag_id == tag_id { break; }
+                }
+                for _ in 0..pop_count {
+                    if !self.stack.is_empty() { self.close_node(); }
+                }
             }
         }
 

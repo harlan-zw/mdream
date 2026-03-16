@@ -43,6 +43,13 @@ export interface TagOverride {
   alias?: string
 }
 
+export interface PipelineTransform {
+  /** Transform HTML before it reaches the engine */
+  beforeParse?: (html: string) => string
+  /** Transform markdown after the engine produces it */
+  afterConvert?: (markdown: string) => string
+}
+
 export interface MdreamOptions {
   /** Origin URL for resolving relative image paths and internal links. */
   origin?: string
@@ -70,6 +77,17 @@ export interface MdreamOptions {
   extraction?: Record<string, (element: ExtractedElement) => void>
   /** Tag overrides. String values act as aliases */
   tagOverrides?: Record<string, TagOverride | string>
+  /** Pipeline transforms applied before/after the engine */
+  pipeline?: PipelineTransform[]
+  /** Nested plugin config (alternative to top-level options) */
+  plugins?: {
+    frontmatter?: boolean | { additionalFields?: Record<string, string>, metaFields?: string[] }
+    isolateMain?: boolean
+    tailwind?: boolean
+    filter?: { include?: string[], exclude?: string[], processChildren?: boolean }
+  }
+  /** JS-engine hooks (ignored in Rust engine) */
+  hooks?: unknown[]
 }
 
 const MINIMAL_FILTER_EXCLUDE = ['form', 'fieldset', 'object', 'embed', 'footer', 'aside', 'iframe', 'input', 'textarea', 'select', 'button', 'nav']
@@ -94,24 +112,31 @@ function resolveOptions(options: Partial<MdreamOptions>): { napiOpts: HtmlToMark
   const minimal = options.minimal === true
   const plugins: PluginOptions = {}
 
+  // Support nested plugins config
+  const p = options.plugins
+  const frontmatterOpt = options.frontmatter ?? (p?.frontmatter)
+  const isolateMainOpt = options.isolateMain ?? (p?.isolateMain)
+  const tailwindOpt = options.tailwind ?? (p?.tailwind)
+  const filterOpt = options.filter ?? (p?.filter)
+
   if (minimal) {
-    if (options.frontmatter !== false)
-      plugins.frontmatter = typeof options.frontmatter === 'object' ? options.frontmatter : {}
-    if (options.isolateMain !== false)
+    if (frontmatterOpt !== false)
+      plugins.frontmatter = typeof frontmatterOpt === 'object' ? frontmatterOpt : {}
+    if (isolateMainOpt !== false)
       plugins.isolateMain = true
-    if (options.tailwind !== false)
+    if (tailwindOpt !== false)
       plugins.tailwind = true
-    plugins.filter = options.filter || { exclude: MINIMAL_FILTER_EXCLUDE }
+    plugins.filter = filterOpt || { exclude: MINIMAL_FILTER_EXCLUDE }
   }
   else {
-    if (options.frontmatter)
-      plugins.frontmatter = typeof options.frontmatter === 'object' ? options.frontmatter : {}
-    if (options.isolateMain)
+    if (frontmatterOpt)
+      plugins.frontmatter = typeof frontmatterOpt === 'object' ? frontmatterOpt : {}
+    if (isolateMainOpt)
       plugins.isolateMain = true
-    if (options.tailwind)
+    if (tailwindOpt)
       plugins.tailwind = true
-    if (options.filter)
-      plugins.filter = options.filter
+    if (filterOpt)
+      plugins.filter = filterOpt
   }
 
   let extractionHandlers: Record<string, (el: ExtractedElement) => void> | undefined
@@ -138,10 +163,33 @@ function resolveOptions(options: Partial<MdreamOptions>): { napiOpts: HtmlToMark
   }
 }
 
+function applyBeforeParse(html: string, pipeline: PipelineTransform[]): string {
+  for (let i = 0; i < pipeline.length; i++) {
+    const t = pipeline[i]!.beforeParse
+    if (t)
+      html = t(html)
+  }
+  return html
+}
+
+function applyAfterConvert(md: string, pipeline: PipelineTransform[]): string {
+  for (let i = 0; i < pipeline.length; i++) {
+    const t = pipeline[i]!.afterConvert
+    if (t)
+      md = t(md)
+  }
+  return md
+}
+
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): MdreamResult {
   const { napiOpts, extractionHandlers } = resolveOptions(options)
+  const pipeline = options.pipeline
+  if (pipeline?.length)
+    html = applyBeforeParse(html, pipeline)
   const napiResult = _htmlToMarkdown(html, napiOpts)
   const result: MdreamResult = { markdown: napiResult.markdown }
+  if (pipeline?.length)
+    result.markdown = applyAfterConvert(result.markdown, pipeline)
   if (napiResult.frontmatter)
     result.frontmatter = napiResult.frontmatter
   if (napiResult.extracted?.length) {
@@ -161,6 +209,9 @@ export async function* streamHtmlToMarkdown(
   if (!htmlStream)
     throw new Error('Invalid HTML stream provided')
   const { napiOpts } = resolveOptions(options)
+  const pipeline = options.pipeline
+  const hasBeforeParse = pipeline?.some(t => t.beforeParse)
+  const hasAfterConvert = pipeline?.some(t => t.afterConvert)
   const stream = new _MarkdownStream(napiOpts)
   const reader = htmlStream.getReader()
   try {
@@ -168,15 +219,18 @@ export async function* streamHtmlToMarkdown(
       const { done, value } = await reader.read()
       if (done)
         break
-      const processed = typeof value === 'string'
-        ? stream.processChunk(value)
-        : stream.processChunkBytes(value)
-      if (processed)
-        yield processed
+      let chunk = typeof value === 'string' ? value : new TextDecoder().decode(value)
+      if (hasBeforeParse)
+        chunk = applyBeforeParse(chunk, pipeline!)
+      const processed = stream.processChunk(chunk)
+      if (processed) {
+        yield hasAfterConvert ? applyAfterConvert(processed, pipeline!) : processed
+      }
     }
     const final_ = stream.finish()
-    if (final_)
-      yield final_
+    if (final_) {
+      yield hasAfterConvert ? applyAfterConvert(final_, pipeline!) : final_
+    }
   }
   finally {
     reader.releaseLock()
