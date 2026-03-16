@@ -6,7 +6,7 @@ describe.each(engines)('figure $name', (engineConfig) => {
   it('converts figure with image and figcaption', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<figure><img src="photo.jpg" alt="A photo"><figcaption>Photo caption</figcaption></figure>'
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toContain('![A photo](photo.jpg)')
     expect(markdown).toContain('_Photo caption_')
   })
@@ -14,14 +14,14 @@ describe.each(engines)('figure $name', (engineConfig) => {
   it('converts figure with only an image', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<figure><img src="photo.jpg" alt="A photo"></figure>'
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('![A photo](photo.jpg)')
   })
 
   it('preserves figure content with minimal preset', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<html><body><main><figure><img src="photo.jpg" alt="A photo"><figcaption>Caption</figcaption></figure></main></body></html>'
-    const markdown = htmlToMarkdown(html, { ...withMinimalPreset(), engine }).markdown
+    const markdown = htmlToMarkdown(html, { ...withMinimalPreset(), engine })
     expect(markdown).toContain('![A photo](photo.jpg)')
     expect(markdown).toContain('_Caption_')
   })

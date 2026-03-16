@@ -1,11 +1,11 @@
-import type { EngineOptions, ExtractedElement, TransformPlugin } from './types'
+import type { EngineOptions, FrontmatterConfig, TransformPlugin } from './types'
 import { extractionCollectorPlugin, filterPlugin, frontmatterPlugin, isolateMainPlugin, tailwindPlugin } from './plugins'
 
 export interface ResolvedPlugins {
   plugins: TransformPlugin[]
-  getExtracted?: () => ExtractedElement[]
   callExtractionHandlers?: () => void
   getFrontmatter?: () => Record<string, string> | undefined
+  frontmatterCallback?: (fm: Record<string, string>) => void
 }
 
 /**
@@ -14,16 +14,22 @@ export interface ResolvedPlugins {
  */
 export function resolvePlugins(options: EngineOptions, hooks?: TransformPlugin[]): ResolvedPlugins {
   const plugins: TransformPlugin[] = []
-  let getExtracted: (() => ExtractedElement[]) | undefined
   let callExtractionHandlers: (() => void) | undefined
   let getFrontmatter: (() => Record<string, string> | undefined) | undefined
+  let frontmatterCallback: ((fm: Record<string, string>) => void) | undefined
   const config = options.plugins
 
   if (config) {
     if (config.frontmatter) {
-      const fmPlugin = frontmatterPlugin(
-        config.frontmatter === true ? {} : config.frontmatter,
-      )
+      let fmConfig: FrontmatterConfig = {}
+      if (typeof config.frontmatter === 'function') {
+        frontmatterCallback = config.frontmatter
+      }
+      else if (typeof config.frontmatter === 'object') {
+        fmConfig = config.frontmatter
+        frontmatterCallback = config.frontmatter.onExtract
+      }
+      const fmPlugin = frontmatterPlugin(fmConfig)
       plugins.push(fmPlugin)
       getFrontmatter = (fmPlugin as any).getFrontmatter
     }
@@ -39,7 +45,6 @@ export function resolvePlugins(options: EngineOptions, hooks?: TransformPlugin[]
     if (config.extraction) {
       const collector = extractionCollectorPlugin(config.extraction)
       plugins.push(collector.plugin)
-      getExtracted = collector.getResults
       callExtractionHandlers = collector.callHandlers
     }
   }
@@ -48,5 +53,5 @@ export function resolvePlugins(options: EngineOptions, hooks?: TransformPlugin[]
     plugins.push(...hooks)
   }
 
-  return { plugins, getExtracted, callExtractionHandlers, getFrontmatter }
+  return { plugins, callExtractionHandlers, getFrontmatter, frontmatterCallback }
 }

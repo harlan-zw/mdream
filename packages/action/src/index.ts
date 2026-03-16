@@ -50,7 +50,7 @@ export async function main() {
           },
         },
       })
-      const markdown = htmlToMarkdown(html, { origin: url }).markdown
+      const markdown = htmlToMarkdown(html, { origin: url })
       return {
         markdown,
         metadata: {

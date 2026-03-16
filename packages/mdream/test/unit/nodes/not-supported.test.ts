@@ -26,7 +26,7 @@ describe.each(engines)('not supported $name', (engineConfig) => {
         ],
       } },
       engine,
-    }).markdown
+    })
     expect(markdown).toBe('')
   })
   it.skip('aria hidden', async () => {
@@ -40,7 +40,7 @@ describe.each(engines)('not supported $name', (engineConfig) => {
         ],
       } },
       engine,
-    }).markdown
+    })
     expect(markdown).toBe('[Nuxt Concepts](/docs/guide/concepts) Read more in Nuxt Concepts.')
   })
 })

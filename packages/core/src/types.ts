@@ -36,28 +36,21 @@ export interface TransformPlugin {
 }
 
 /**
- * Pipeline transforms that run before/after engine conversion.
- * Works with both JavaScript and Rust engines since they operate
- * outside the engine boundary (HTML pre-processing / Markdown post-processing).
+ * Frontmatter configuration options.
  */
-export interface PipelineTransform {
-  /** Transform HTML before it reaches the engine */
-  beforeParse?: (html: string) => string
-  /** Transform markdown after the engine produces it */
-  afterConvert?: (markdown: string) => string
-}
-
-/**
- * Declarative tag override configuration.
- * When a string value is provided, it acts as an alias (e.g. `{ "x-heading": "h2" }`).
- */
-export interface TagOverride {
-  enter?: string
-  exit?: string
-  spacing?: [number, number]
-  isInline?: boolean
-  isSelfClosing?: boolean
-  collapsesInnerWhiteSpace?: boolean
+export interface FrontmatterConfig {
+  additionalFields?: Record<string, string>
+  metaFields?: string[]
+  /**
+   * Custom formatter for frontmatter YAML values.
+   * Works with both engines.
+   */
+  formatValue?: (name: string, value: string) => string
+  /**
+   * Callback to receive structured frontmatter data.
+   * Called after conversion with the extracted key-value pairs.
+   */
+  onExtract?: (frontmatter: Record<string, string>) => void
 }
 
 /**
@@ -71,16 +64,13 @@ export interface BuiltinPlugins {
     exclude?: (string | number)[]
     processChildren?: boolean
   }
-  /** Extract frontmatter from HTML head */
-  frontmatter?: boolean | {
-    additionalFields?: Record<string, string>
-    metaFields?: string[]
-    /**
-     * Custom formatter for frontmatter YAML values.
-     * Works with both engines — JS applies inline, Rust applies post-conversion.
-     */
-    formatValue?: (name: string, value: string) => string
-  }
+  /**
+   * Extract frontmatter from HTML head.
+   * - `true`: enable with defaults
+   * - `(fm) => void`: enable and receive structured data via callback
+   * - `FrontmatterConfig`: enable with config options and optional callback
+   */
+  frontmatter?: boolean | ((frontmatter: Record<string, string>) => void) | FrontmatterConfig
   /** Isolate main content area */
   isolateMain?: boolean
   /** Convert Tailwind utility classes to markdown formatting */
@@ -88,17 +78,8 @@ export interface BuiltinPlugins {
   /**
    * Extract elements matching CSS selectors during conversion.
    * Each key is a CSS selector; the handler is called for every match.
-   * Works with both JS and Rust engines — JS calls handlers inline,
-   * Rust collects results then calls handlers after conversion.
    */
   extraction?: Record<string, (element: ExtractedElement) => void>
-  /**
-   * Declarative tag overrides for customizing tag behavior.
-   * String values act as aliases (e.g. `{ "x-heading": "h2" }` makes `<x-heading>` behave like `<h2>`).
-   * Object values override specific handler properties.
-   * Works with both JS and Rust engines.
-   */
-  tagOverrides?: Record<string, TagOverride | string>
 }
 
 /**
@@ -337,19 +318,6 @@ export interface PluginContext {
   tailwind?: TailwindContext
   // Allow additional plugin-specific data
   [key: string]: unknown
-}
-
-/**
- * Structured result from HTML to Markdown conversion.
- * Contains the markdown output plus optional metadata from plugins.
- */
-export interface MdreamResult {
-  /** The converted markdown string */
-  markdown: string
-  /** Structured frontmatter data (when frontmatter plugin is enabled) */
-  frontmatter?: Record<string, string>
-  /** Elements matched by extraction selectors */
-  extracted?: ExtractedElement[]
 }
 
 /**

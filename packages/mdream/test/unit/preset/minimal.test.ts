@@ -19,8 +19,8 @@ describe('withMinimalPreset cross-engine parity', () => {
     ]
     for (const html of cases) {
       const opts = withMinimalPreset()
-      const jsResult = htmlToMarkdown(html, { ...opts, engine: js }).markdown
-      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust }).markdown
+      const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
+      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
       expect(rustResult, `Parity mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -38,8 +38,8 @@ describe('withMinimalPreset cross-engine parity', () => {
     ]
     for (const html of cases) {
       const opts = withMinimalPreset()
-      const jsResult = htmlToMarkdown(html, { ...opts, engine: js }).markdown
-      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust }).markdown
+      const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
+      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
       expect(rustResult, `Filter parity mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -48,8 +48,8 @@ describe('withMinimalPreset cross-engine parity', () => {
     const [js, rust] = await bothEngines()
     const html = `<html><head><title>My Page</title><meta name="description" content="A page about things" /><meta name="author" content="Alice" /></head><body><h1>Content</h1><p>Text</p></body></html>`
     const opts = withMinimalPreset()
-    const jsResult = htmlToMarkdown(html, { ...opts, engine: js }).markdown
-    const rustResult = htmlToMarkdown(html, { ...opts, engine: rust }).markdown
+    const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
+    const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
     expect(rustResult).toBe(jsResult)
   })
 
@@ -62,8 +62,8 @@ describe('withMinimalPreset cross-engine parity', () => {
     ]
     for (const html of cases) {
       const opts = withMinimalPreset()
-      const jsResult = htmlToMarkdown(html, { ...opts, engine: js }).markdown
-      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust }).markdown
+      const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
+      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
       expect(rustResult, `IsolateMain parity mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -78,8 +78,8 @@ describe('withMinimalPreset cross-engine parity', () => {
     ]
     for (const html of cases) {
       const opts = withMinimalPreset()
-      const jsResult = htmlToMarkdown(html, { ...opts, engine: js }).markdown
-      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust }).markdown
+      const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
+      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
       expect(rustResult, `Tailwind parity mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -104,8 +104,8 @@ describe('withMinimalPreset cross-engine parity', () => {
       </body>
     </html>`
     const opts = withMinimalPreset()
-    const jsResult = htmlToMarkdown(html, { ...opts, engine: js }).markdown
-    const rustResult = htmlToMarkdown(html, { ...opts, engine: rust }).markdown
+    const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
+    const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
     expect(rustResult).toBe(jsResult)
   })
 })
@@ -115,7 +115,7 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<h1>Hello World</h1><p>This is a paragraph.</p>'
     const options = withMinimalPreset()
-    const markdown = htmlToMarkdown(html, { ...options, engine }).markdown
+    const markdown = htmlToMarkdown(html, { ...options, engine })
     expect(markdown).toBe('# Hello World\n\nThis is a paragraph.')
   })
 
@@ -132,7 +132,7 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
       <footer>Footer</footer>
     `
     const options = withMinimalPreset()
-    const markdown = htmlToMarkdown(html, { ...options, engine }).markdown
+    const markdown = htmlToMarkdown(html, { ...options, engine })
     expect(markdown).not.toContain('Submit')
     expect(markdown).not.toContain('Navigation')
     expect(markdown).not.toContain('Footer')
@@ -145,7 +145,7 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
     // Test filtering functionality
     const html = `<h1>Title</h1><form><button>Submit</button></form><p>Content</p>`
     const options = withMinimalPreset()
-    const markdown = htmlToMarkdown(html, { ...options, engine }).markdown
+    const markdown = htmlToMarkdown(html, { ...options, engine })
 
     // Should filter out form elements
     expect(markdown).not.toContain('Submit')
@@ -167,7 +167,7 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
       </html>
     `
     const options = withMinimalPreset()
-    const markdown = htmlToMarkdown(html, { ...options, engine }).markdown
+    const markdown = htmlToMarkdown(html, { ...options, engine })
 
     expect(markdown).toContain('---')
     expect(markdown).toContain('title: "Test Page"')
@@ -179,7 +179,7 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<header>Header</header><h1>Main Title</h1><p>Content</p><footer>Footer</footer>`
     const options = withMinimalPreset()
-    const markdown = htmlToMarkdown(html, { ...options, engine }).markdown
+    const markdown = htmlToMarkdown(html, { ...options, engine })
 
     expect(markdown).toContain('Main Title')
     expect(markdown).toContain('Content')
@@ -200,7 +200,7 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
     }
 
     const options = withMinimalPreset({ hooks: [customPlugin] })
-    const markdown = jsHtmlToMarkdown('<h1>Test</h1>', options).markdown
+    const markdown = jsHtmlToMarkdown('<h1>Test</h1>', options)
     expect(customPluginCalled).toBe(true)
     expect(markdown).toContain('Test')
   })

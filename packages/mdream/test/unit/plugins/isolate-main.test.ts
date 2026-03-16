@@ -24,7 +24,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     // Should include content inside main
     expect(markdown).toContain('# Article Title')
@@ -63,7 +63,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('# Article Header')
     expect(markdown).toContain('Article subtitle')
@@ -104,7 +104,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     // Should fall back to header heuristic since main is too deep
     expect(markdown).toContain('# Header Title')
@@ -136,7 +136,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('# First Main Title')
     expect(markdown).toContain('First main content')
@@ -167,7 +167,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     // Should include main content
     expect(markdown).toContain('# Main Article Title')
@@ -198,7 +198,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('### Starting with H3')
     expect(markdown).toContain('Main content paragraph')
@@ -235,7 +235,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('# Main Title')
     expect(markdown).toContain('Content before deep footer')
@@ -261,7 +261,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('# Article Title')
     expect(markdown).toContain('Main content paragraph 1')
@@ -284,7 +284,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     // Since no header is found, everything before should be excluded
     expect(markdown).not.toContain('Navigation content')
@@ -309,7 +309,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('## First Header')
     expect(markdown).toContain('Content after first header')
@@ -335,7 +335,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('# Main Title')
     expect(markdown).toContain('Main content')
@@ -377,7 +377,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('# Article Title')
     expect(markdown).toContain('Article paragraph 1')
@@ -406,7 +406,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('# Main Title')
     expect(markdown).toContain('Text after header')
@@ -431,7 +431,7 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { isolateMain: true },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('# Title')
     expect(markdown).not.toContain('Before')

@@ -26,7 +26,7 @@ describe.each(engines)('recipes $name', (engineConfig) => {
 </table>
 </div>`
     const engine = await resolveEngine(engineConfig.engine)
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toMatchSnapshot()
   })
   it.skip('malformed', async () => {
@@ -46,7 +46,7 @@ describe.each(engines)('recipes $name', (engineConfig) => {
       </button>
     </div>`
     const engine = await resolveEngine(engineConfig.engine)
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toMatchSnapshot()
   })
 })

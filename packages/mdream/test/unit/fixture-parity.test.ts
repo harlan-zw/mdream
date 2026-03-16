@@ -37,7 +37,7 @@ for (const { name: engineName, engine: engineThunk } of engines) {
 
         it('string conversion produces meaningful output', async () => {
           const engine = await resolveEngine(engineThunk)
-          const md = engine.htmlToMarkdown(html).markdown
+          const md = engine.htmlToMarkdown(html)
           expect(md.length).toBeGreaterThan(minOutputKB * 1024)
         })
 
@@ -49,7 +49,7 @@ for (const { name: engineName, engine: engineThunk } of engines) {
 
         it('string and streaming output match', async () => {
           const engine = await resolveEngine(engineThunk)
-          const stringResult = engine.htmlToMarkdown(html).markdown
+          const stringResult = engine.htmlToMarkdown(html)
           const streamResult = await collectStream(engine.streamHtmlToMarkdown(stringToStream(html)))
           // Streaming may produce trailing whitespace from final flush
           expect(streamResult.trimEnd()).toBe(stringResult.trimEnd())
@@ -67,8 +67,8 @@ describe('cross-engine parity', () => {
         resolveEngine(engines[0].engine),
         resolveEngine(engines[1].engine),
       ])
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown
+      const jsResult = jsEngine.htmlToMarkdown(html)
+      const rustResult = rustEngine.htmlToMarkdown(html)
       // Both engines should produce non-empty output
       expect(jsResult.length).toBeGreaterThan(0)
       expect(rustResult.length).toBeGreaterThan(0)
@@ -84,8 +84,8 @@ describe('cross-engine parity', () => {
         resolveEngine(engines[0].engine),
         resolveEngine(engines[1].engine),
       ])
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown
+      const jsResult = jsEngine.htmlToMarkdown(html)
+      const rustResult = rustEngine.htmlToMarkdown(html)
       const headingRegex = /^#{1,6} .+$/gm
       const jsHeadings = jsResult.match(headingRegex) || []
       const rustHeadings = rustResult.match(headingRegex) || []
@@ -104,8 +104,8 @@ describe('cross-engine parity', () => {
         resolveEngine(engines[0].engine),
         resolveEngine(engines[1].engine),
       ])
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown
+      const jsResult = jsEngine.htmlToMarkdown(html)
+      const rustResult = rustEngine.htmlToMarkdown(html)
       const linkRegex = /\[([^\]]*)\]\([^)]+\)/g
       const jsLinks = jsResult.match(linkRegex) || []
       const rustLinks = rustResult.match(linkRegex) || []
@@ -129,8 +129,8 @@ describe('cross-engine parity', () => {
       '<h2>Title</h2><p>Paragraph with <a href="/path">relative link</a>.</p>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -153,8 +153,8 @@ describe('cross-engine parity', () => {
       '<a href="/link"><h2>Heading inside link</h2></a>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Heading mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -187,8 +187,8 @@ describe('cross-engine parity', () => {
       '<p><strong>bold and <em>italic</em></strong></p>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Inline mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -210,8 +210,8 @@ describe('cross-engine parity', () => {
       '<a href="https://example.com/path?q=1&amp;r=2">encoded url</a>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Link mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -228,8 +228,8 @@ describe('cross-engine parity', () => {
       '<p>Text with <img src="/inline.png" alt="inline" /> image.</p>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Image mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -249,8 +249,8 @@ describe('cross-engine parity', () => {
       '<ul><li>item with <a href="/link">link</a></li></ul>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `List mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -268,8 +268,8 @@ describe('cross-engine parity', () => {
       '<table><tr><th>Header</th></tr><tr><td>pipe | in cell</td></tr></table>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Table mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -287,8 +287,8 @@ describe('cross-engine parity', () => {
       '<blockquote><strong>bold</strong> quote</blockquote>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Blockquote mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -306,8 +306,8 @@ describe('cross-engine parity', () => {
       '<pre><code>multi\nline\ncode</code></pre>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Code mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -323,8 +323,8 @@ describe('cross-engine parity', () => {
       '<hr>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `HR mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -339,8 +339,8 @@ describe('cross-engine parity', () => {
       '<dl><dt>First</dt><dd>Def 1</dd><dt>Second</dt><dd>Def 2</dd></dl>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `DL mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -354,8 +354,8 @@ describe('cross-engine parity', () => {
       '<details><summary>Click me</summary><p>Hidden content</p></details>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Details mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -370,8 +370,8 @@ describe('cross-engine parity', () => {
       '<figure><figcaption>Just a caption</figcaption></figure>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Figcaption mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -388,8 +388,8 @@ describe('cross-engine parity', () => {
       '<a href="https://example.com/&#x2F;escaped">hex entity</a>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Entity attr mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -410,8 +410,8 @@ describe('cross-engine parity', () => {
       '<address><p>123 Main St</p></address>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Mixed mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -430,8 +430,8 @@ describe('cross-engine parity', () => {
       '<p><strong>bold</strong> normal <em>italic</em></p>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Whitespace mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -447,8 +447,8 @@ describe('cross-engine parity', () => {
       '<blockquote>text with > char</blockquote>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Escape mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -468,8 +468,8 @@ describe('cross-engine parity', () => {
       '<p><mark>marked <a href="/x">link</a></mark></p>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Nested inline mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -486,8 +486,8 @@ describe('cross-engine parity', () => {
       '<table><tr><th>Multi<br>line</th></tr><tr><td>cell</td></tr></table>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Complex table mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -505,8 +505,8 @@ describe('cross-engine parity', () => {
       '<div><h2>Title</h2><div><ul><li>in div</li></ul></div></div>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Nesting mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -525,8 +525,8 @@ describe('cross-engine parity', () => {
       '<img src="/a.png" alt="image"><p>after</p>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Self-closing mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -545,8 +545,8 @@ describe('cross-engine parity', () => {
       '<div><span><h2>heading in span in div</h2></span></div>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Wrapper mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -566,8 +566,8 @@ describe('cross-engine parity', () => {
       '<nav><a href="/a">A</a> <a href="/b">B</a></nav>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Semantic HTML mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -585,8 +585,8 @@ describe('cross-engine parity', () => {
       '<iframe src="/frame.html">no iframes</iframe>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Media mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -606,8 +606,8 @@ describe('cross-engine parity', () => {
       '<p>&copy; &reg; &trade;</p>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Entity content mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -626,8 +626,8 @@ describe('cross-engine parity', () => {
       '<p></p><p></p>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Malformed mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -643,8 +643,8 @@ describe('cross-engine parity', () => {
       '<p>before</p><noscript>no js</noscript><p>after</p>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Script/style mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -663,8 +663,8 @@ describe('cross-engine parity', () => {
       '<a href="//cdn.example.com/file">protocol-relative</a>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html, options).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html, options).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html, options).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html, options).trimEnd()
       expect(rustResult, `Origin mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -685,8 +685,8 @@ describe('cross-engine parity', () => {
       '<ul><li><a href="#a"><div><span>1</span><span>Hierarchy</span></div></a><button>Toggle</button><ul><li><a href="#b"><div><span>1.1</span><span>Zoology</span></div></a><ul></ul></li><li><a href="#c"><div><span>1.2</span><span>Botany</span></div></a><ul></ul></li></ul></li><li><a href="#d"><div><span>2</span><span>History</span></div></a></li></ul>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Nested empty list mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -705,8 +705,8 @@ describe('cross-engine parity', () => {
       '<a href="#section"><div><span>1</span><span>Section Name</span></div></a>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
       expect(rustResult, `Link structure mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -730,8 +730,8 @@ describe('cross-engine parity', () => {
       '<x-heading>Title</x-heading><p>Content</p>',
     ]
     for (const html of cases) {
-      const jsResult = jsEngine.htmlToMarkdown(html, options).markdown.trimEnd()
-      const rustResult = rustEngine.htmlToMarkdown(html, options).markdown.trimEnd()
+      const jsResult = jsEngine.htmlToMarkdown(html, options).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html, options).trimEnd()
       expect(rustResult, `Tag override mismatch for: ${html}`).toBe(jsResult)
     }
   })

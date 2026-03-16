@@ -113,7 +113,7 @@ describe('script content extraction', () => {
 
     const result = htmlToMarkdown(html, {
       hooks: [scriptExtractionPlugin],
-    }).markdown
+    })
 
     // Should extract the script content
     expect(extractedScripts).toHaveLength(1)
@@ -183,7 +183,7 @@ describe('script content extraction', () => {
 
     const result = htmlToMarkdown(html, {
       hooks: [scriptExtractionPlugin],
-    }).markdown
+    })
 
     expect(extractedScripts).toHaveLength(1)
     expect(extractedScripts[0].content).toContain('function initApp()')
@@ -234,7 +234,7 @@ describe('script content extraction', () => {
 
     const result = htmlToMarkdown(html, {
       hooks: [scriptExtractionPlugin],
-    }).markdown
+    })
 
     expect(extractedScripts).toHaveLength(1)
 

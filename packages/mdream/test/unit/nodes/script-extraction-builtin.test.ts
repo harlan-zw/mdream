@@ -89,7 +89,7 @@ describe('script extraction using extractionPlugin', () => {
 
     const result = htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     // Should extract the JSON script
     expect(extractedJsonScripts).toHaveLength(1)
@@ -138,7 +138,7 @@ describe('script extraction using extractionPlugin', () => {
 
     const result = htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     expect(extractedScripts).toHaveLength(1)
     expect(extractedScripts[0].name).toBe('script')
@@ -172,7 +172,7 @@ describe('script extraction using extractionPlugin', () => {
 
     const result = htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     expect(extractedScripts).toHaveLength(1)
 
@@ -209,7 +209,7 @@ describe('script extraction using extractionPlugin', () => {
 
     const result = htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     // Should categorize them correctly
     expect(jsonLdScripts).toHaveLength(1)

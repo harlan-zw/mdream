@@ -10,7 +10,7 @@ describe.each(engines)('quote handling in script/style tags $name', (engineConfi
     </script>
     <p>This should be rendered</p>`
 
-    const result = htmlToMarkdown(html, { engine }).markdown
+    const result = htmlToMarkdown(html, { engine })
     expect(result).toBe('This should be rendered')
   })
 
@@ -22,7 +22,7 @@ describe.each(engines)('quote handling in script/style tags $name', (engineConfi
     </script>
     <p>This should be rendered</p>`
 
-    const result = htmlToMarkdown(html, { engine }).markdown
+    const result = htmlToMarkdown(html, { engine })
     expect(result).toBe('This should be rendered')
   })
 
@@ -34,7 +34,7 @@ describe.each(engines)('quote handling in script/style tags $name', (engineConfi
     </script>
     <p>This should be rendered</p>`
 
-    const result = htmlToMarkdown(html, { engine }).markdown
+    const result = htmlToMarkdown(html, { engine })
     expect(result).toBe('This should be rendered')
   })
 
@@ -46,7 +46,7 @@ describe.each(engines)('quote handling in script/style tags $name', (engineConfi
     </script>
     <p>This should be rendered</p>`
 
-    const result = htmlToMarkdown(html, { engine }).markdown
+    const result = htmlToMarkdown(html, { engine })
     expect(result).toBe('This should be rendered')
   })
 
@@ -57,7 +57,7 @@ describe.each(engines)('quote handling in script/style tags $name', (engineConfi
     </script>
     <p>This should be rendered</p>`
 
-    const result = htmlToMarkdown(html, { engine }).markdown
+    const result = htmlToMarkdown(html, { engine })
     expect(result).toBe('This should be rendered')
   })
 
@@ -69,7 +69,7 @@ describe.each(engines)('quote handling in script/style tags $name', (engineConfi
     </script>
     <p>This should be rendered</p>`
 
-    const result = htmlToMarkdown(html, { engine }).markdown
+    const result = htmlToMarkdown(html, { engine })
     expect(result).toBe('This should be rendered')
   })
 
@@ -81,7 +81,7 @@ describe.each(engines)('quote handling in script/style tags $name', (engineConfi
     </script>
     <p>This should be rendered</p>`
 
-    const result = htmlToMarkdown(html, { engine }).markdown
+    const result = htmlToMarkdown(html, { engine })
     expect(result).toBe('This should be rendered')
   })
 
@@ -93,7 +93,7 @@ describe.each(engines)('quote handling in script/style tags $name', (engineConfi
     </style>
     <p>This should be rendered</p>`
 
-    const result = htmlToMarkdown(html, { engine }).markdown
+    const result = htmlToMarkdown(html, { engine })
     expect(result).toBe('This should be rendered')
   })
 
@@ -105,7 +105,7 @@ describe.each(engines)('quote handling in script/style tags $name', (engineConfi
     </script>
     <p>This should be rendered</p>`
 
-    const result = htmlToMarkdown(html, { engine }).markdown
+    const result = htmlToMarkdown(html, { engine })
     expect(result).toBe('This should be rendered')
   })
 
@@ -120,7 +120,7 @@ describe.each(engines)('quote handling in script/style tags $name', (engineConfi
     </script>
     <p>This should be rendered</p>`
 
-    const result = htmlToMarkdown(html, { engine }).markdown
+    const result = htmlToMarkdown(html, { engine })
     expect(result).toBe('This should be rendered')
   })
 })

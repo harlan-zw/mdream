@@ -15,7 +15,7 @@ describe.each(engines)('combined Elements %s', ({ engine }: any) => {
       </blockquote>
       <pre><code class="language-js">console.log("Hello world!");</code></pre>
     `
-    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) }).markdown
+    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
     expect(markdown).toBe(
       '# Document Title\n\n'
       + 'This is a **bold** and _important_ paragraph with a [link](https://example.com).\n\n'

@@ -26,7 +26,7 @@ describe('mdream browser compatibility', () => {
 
     // Test basic HTML to Markdown conversion
     const simpleHtml = '<p>Hello <strong>world</strong>!</p>'
-    const result = htmlToMarkdown(simpleHtml).markdown
+    const result = htmlToMarkdown(simpleHtml)
 
     // Render to DOM and verify
     renderMarkdown(result)
@@ -47,7 +47,7 @@ describe('mdream browser compatibility', () => {
       </div>
     `
 
-    const complexResult = htmlToMarkdown(complexHtml).markdown
+    const complexResult = htmlToMarkdown(complexHtml)
     renderMarkdown(complexResult)
 
     // Verify all elements are properly converted and displayed
@@ -93,7 +93,7 @@ describe('mdream browser compatibility', () => {
 
     // Test with special characters and entities
     const entityHtml = '<p>Test &amp; HTML entities like &lt;script&gt; and &quot;quotes&quot;</p>'
-    const entityResult = htmlToMarkdown(entityHtml).markdown
+    const entityResult = htmlToMarkdown(entityHtml)
 
     renderMarkdown(entityResult)
     await expect.element(page.getByText('Test & HTML entities')).toBeInTheDocument()
@@ -102,7 +102,7 @@ describe('mdream browser compatibility', () => {
 
     // Test with malformed HTML (browser tolerant)
     const malformedHtml = '<p>Unclosed paragraph<div>Mixed content<span>nested</span></div>'
-    const malformedResult = htmlToMarkdown(malformedHtml).markdown
+    const malformedResult = htmlToMarkdown(malformedHtml)
 
     renderMarkdown(malformedResult)
     await expect.element(page.getByText('Unclosed paragraph')).toBeInTheDocument()
@@ -132,7 +132,7 @@ describe('mdream browser compatibility', () => {
     const htmlWithMark = '<p>This is <mark>highlighted text</mark> in a paragraph.</p>'
     const result = htmlToMarkdown(htmlWithMark, {
       hooks: [testPlugin],
-    }).markdown
+    })
 
     renderMarkdown(result)
     await expect.element(page.getByText('This is ==highlighted text== in a paragraph.')).toBeInTheDocument()
@@ -176,7 +176,7 @@ describe('mdream browser compatibility', () => {
 
     convertBtn.addEventListener('click', () => {
       const html = htmlInput.value
-      const markdown = htmlToMarkdown(html).markdown
+      const markdown = htmlToMarkdown(html)
       markdownOutput.textContent = markdown
     })
 

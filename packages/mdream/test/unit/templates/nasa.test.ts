@@ -15,7 +15,7 @@ describe.each(engines)('nasa $name', (engineConfig) => {
 \t<div>hello world</div>
 `
     const engine = await resolveEngine(engineConfig.engine)
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toMatchSnapshot()
   })
 })

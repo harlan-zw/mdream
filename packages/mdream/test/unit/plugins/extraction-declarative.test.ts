@@ -10,7 +10,7 @@ describe.each(engines)('declarative extraction (plugins.extraction) $name', (eng
     const html = `<html><body><h1>Main Title</h1><h2>Section 1</h2><h2>Section 2</h2><p>Content</p></body></html>`
     const collected: ExtractedElement[] = []
 
-    const result = htmlToMarkdown(html, {
+    htmlToMarkdown(html, {
       plugins: {
         extraction: {
           h2: el => collected.push(el),
@@ -24,7 +24,6 @@ describe.each(engines)('declarative extraction (plugins.extraction) $name', (eng
     expect(collected[0].tagName).toBe('h2')
     expect(collected[0].textContent).toBe('Section 1')
     expect(collected[1].textContent).toBe('Section 2')
-    expect(result.extracted).toHaveLength(2)
   })
 
   it('extracts elements by class selector', async () => {
@@ -188,11 +187,11 @@ describe.each(engines)('declarative extraction (plugins.extraction) $name', (eng
     expect(pText).toBe('Text with bold and italic.')
   })
 
-  it('returns empty extracted when no matches', async () => {
+  it('calls no handlers when no matches', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const collected: ExtractedElement[] = []
 
-    const result = htmlToMarkdown(`<html><body><p>Hello</p></body></html>`, {
+    htmlToMarkdown(`<html><body><p>Hello</p></body></html>`, {
       plugins: {
         extraction: {
           h1: el => collected.push(el),
@@ -202,21 +201,13 @@ describe.each(engines)('declarative extraction (plugins.extraction) $name', (eng
     })
 
     expect(collected).toHaveLength(0)
-    // Rust engine returns undefined instead of [] when no matches
-    expect(result.extracted?.length ?? 0).toBe(0)
-  })
-
-  it('does not populate extracted when no extraction config', async () => {
-    const engine = await resolveEngine(engineConfig.engine)
-    const result = htmlToMarkdown(`<html><body><p>Hello</p></body></html>`, { engine })
-    expect(result.extracted).toBeUndefined()
   })
 
   it('still produces correct markdown alongside extraction', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const collected: ExtractedElement[] = []
 
-    const result = htmlToMarkdown(`<html><body><h1>Title</h1><p>Content</p></body></html>`, {
+    const markdown = htmlToMarkdown(`<html><body><h1>Title</h1><p>Content</p></body></html>`, {
       plugins: {
         extraction: {
           h1: el => collected.push(el),
@@ -225,8 +216,8 @@ describe.each(engines)('declarative extraction (plugins.extraction) $name', (eng
       engine,
     })
 
-    expect(result.markdown).toContain('# Title')
-    expect(result.markdown).toContain('Content')
+    expect(markdown).toContain('# Title')
+    expect(markdown).toContain('Content')
     expect(collected).toHaveLength(1)
   })
 

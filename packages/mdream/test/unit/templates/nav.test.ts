@@ -1175,7 +1175,7 @@ describe.each(engines)('nav %s', (engine) => {
                 </ul>
               </nav>`
     const resolvedEngine = await resolveEngine(engine.engine)
-    const markdown = htmlToMarkdown(html, { engine: resolvedEngine }).markdown
+    const markdown = htmlToMarkdown(html, { engine: resolvedEngine })
     expect(markdown).toMatchSnapshot()
   })
 })

@@ -7,7 +7,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
     expect(markdown).toBe('**This is bold text**')
   })
 
@@ -16,7 +16,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     expect(markdown).toBe('**This is semibold text**')
   })
@@ -26,7 +26,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     expect(markdown).toBe('*This is italic text*')
   })
@@ -36,7 +36,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     expect(markdown).toBe('~~This is strikethrough text~~')
   })
@@ -50,7 +50,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     // Check that the hidden text is not present
     expect(markdown).not.toContain('This should be hidden')
@@ -64,7 +64,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     expect(markdown).toBe('***This is bold and italic***')
   })
@@ -79,7 +79,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     expect(markdown.trim()).toBe('Regular text with **bold** word\n\n*Italic paragraph*')
   })
@@ -89,7 +89,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     // The lg:italic should override md:font-bold, but for now, we'll
     // just check that it applies some form of formatting and contains the text
@@ -102,7 +102,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     // lg:font-bold should win over md:font-normal, and italic should still apply
     expect(markdown).toBe('***Multiple classes***')
@@ -117,7 +117,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     // Just check basic functionality since mobile-first is complex
     expect(markdown).toContain('Always visible')
@@ -133,7 +133,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     // Check that the absolutely positioned text is not present
     expect(markdown).not.toContain('This is absolutely positioned and should be hidden')
@@ -151,7 +151,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     // Check that the fixed positioned text is not present
     expect(markdown).not.toContain('This is fixed positioned and should be hidden')
@@ -169,7 +169,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     // Check that the sticky positioned text is not present
     expect(markdown).not.toContain('This is sticky positioned and should be hidden')
@@ -191,7 +191,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     expect(markdown).not.toContain('Sidebar Title')
     expect(markdown).not.toContain('Link')
@@ -212,7 +212,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     expect(markdown).not.toContain('Deeply nested hidden text')
     expect(markdown).toContain('Visible text')
@@ -230,7 +230,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { tailwind: true },
-    }).markdown
+    })
 
     expect(markdown).not.toContain('Hidden span text')
     expect(markdown).toContain('Normal content')

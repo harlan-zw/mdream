@@ -27,10 +27,11 @@ export interface ExtractedElement {
   attributes: Record<string, string>
 }
 
-export interface MdreamResult {
-  markdown: string
-  extracted?: ExtractedElement[]
-  frontmatter?: Record<string, string>
+export interface FrontmatterConfig {
+  additionalFields?: Record<string, string>
+  metaFields?: string[]
+  /** Callback to receive structured frontmatter data after conversion */
+  onExtract?: (frontmatter: Record<string, string>) => void
 }
 
 export interface TagOverride {
@@ -41,13 +42,6 @@ export interface TagOverride {
   isSelfClosing?: boolean
   collapsesInnerWhiteSpace?: boolean
   alias?: string
-}
-
-export interface PipelineTransform {
-  /** Transform HTML before it reaches the engine */
-  beforeParse?: (html: string) => string
-  /** Transform markdown after the engine produces it */
-  afterConvert?: (markdown: string) => string
 }
 
 export interface MdreamOptions {
@@ -65,8 +59,13 @@ export interface MdreamOptions {
   clean?: boolean | CleanOptions
   /** Enable minimal preset (frontmatter, isolateMain, tailwind, filter). Default: false */
   minimal?: boolean
-  /** Extract frontmatter from HTML head. Default when minimal: true */
-  frontmatter?: boolean | { additionalFields?: Record<string, string>, metaFields?: string[] }
+  /**
+   * Extract frontmatter from HTML head.
+   * - `true`: enable with defaults
+   * - `(fm) => void`: enable and receive structured data via callback
+   * - `FrontmatterConfig`: enable with config options and optional callback
+   */
+  frontmatter?: boolean | ((frontmatter: Record<string, string>) => void) | FrontmatterConfig
   /** Isolate main content area. Default when minimal: true */
   isolateMain?: boolean
   /** Convert Tailwind utility classes. Default when minimal: true */
@@ -77,17 +76,6 @@ export interface MdreamOptions {
   extraction?: Record<string, (element: ExtractedElement) => void>
   /** Tag overrides. String values act as aliases */
   tagOverrides?: Record<string, TagOverride | string>
-  /** Pipeline transforms applied before/after the engine */
-  pipeline?: PipelineTransform[]
-  /** Nested plugin config (alternative to top-level options) */
-  plugins?: {
-    frontmatter?: boolean | { additionalFields?: Record<string, string>, metaFields?: string[] }
-    isolateMain?: boolean
-    tailwind?: boolean
-    filter?: { include?: string[], exclude?: string[], processChildren?: boolean }
-  }
-  /** JS-engine hooks (ignored in Rust engine) */
-  hooks?: unknown[]
 }
 
 const MINIMAL_FILTER_EXCLUDE = ['form', 'fieldset', 'object', 'embed', 'footer', 'aside', 'iframe', 'input', 'textarea', 'select', 'button', 'nav']
@@ -108,20 +96,37 @@ function resolveCleanConfig(options: Partial<MdreamOptions>, minimal: boolean): 
   }
 }
 
-function resolveOptions(options: Partial<MdreamOptions>): { napiOpts: HtmlToMarkdownOptions, extractionHandlers?: Record<string, (el: ExtractedElement) => void> } {
+interface ResolvedOptions {
+  napiOpts: HtmlToMarkdownOptions
+  extractionHandlers?: Record<string, (el: ExtractedElement) => void>
+  frontmatterCallback?: (fm: Record<string, string>) => void
+}
+
+function resolveOptions(options: Partial<MdreamOptions>): ResolvedOptions {
   const minimal = options.minimal === true
   const plugins: PluginOptions = {}
 
-  // Support nested plugins config
-  const p = options.plugins
-  const frontmatterOpt = options.frontmatter ?? (p?.frontmatter)
-  const isolateMainOpt = options.isolateMain ?? (p?.isolateMain)
-  const tailwindOpt = options.tailwind ?? (p?.tailwind)
-  const filterOpt = options.filter ?? (p?.filter)
+  const frontmatterOpt = options.frontmatter
+  const isolateMainOpt = options.isolateMain
+  const tailwindOpt = options.tailwind
+  const filterOpt = options.filter
+
+  let frontmatterCallback: ((fm: Record<string, string>) => void) | undefined
 
   if (minimal) {
-    if (frontmatterOpt !== false)
-      plugins.frontmatter = typeof frontmatterOpt === 'object' ? frontmatterOpt : {}
+    if (frontmatterOpt !== false) {
+      if (typeof frontmatterOpt === 'function') {
+        frontmatterCallback = frontmatterOpt
+        plugins.frontmatter = {}
+      }
+      else if (typeof frontmatterOpt === 'object') {
+        frontmatterCallback = frontmatterOpt.onExtract
+        plugins.frontmatter = frontmatterOpt
+      }
+      else {
+        plugins.frontmatter = {}
+      }
+    }
     if (isolateMainOpt !== false)
       plugins.isolateMain = true
     if (tailwindOpt !== false)
@@ -129,8 +134,19 @@ function resolveOptions(options: Partial<MdreamOptions>): { napiOpts: HtmlToMark
     plugins.filter = filterOpt || { exclude: MINIMAL_FILTER_EXCLUDE }
   }
   else {
-    if (frontmatterOpt)
-      plugins.frontmatter = typeof frontmatterOpt === 'object' ? frontmatterOpt : {}
+    if (frontmatterOpt) {
+      if (typeof frontmatterOpt === 'function') {
+        frontmatterCallback = frontmatterOpt
+        plugins.frontmatter = {}
+      }
+      else if (typeof frontmatterOpt === 'object') {
+        frontmatterCallback = frontmatterOpt.onExtract
+        plugins.frontmatter = frontmatterOpt
+      }
+      else {
+        plugins.frontmatter = {}
+      }
+    }
     if (isolateMainOpt)
       plugins.isolateMain = true
     if (tailwindOpt)
@@ -160,46 +176,20 @@ function resolveOptions(options: Partial<MdreamOptions>): { napiOpts: HtmlToMark
   return {
     napiOpts: { origin: options.origin, cleanUrls, clean, plugins },
     extractionHandlers,
+    frontmatterCallback,
   }
 }
 
-function applyBeforeParse(html: string, pipeline: PipelineTransform[]): string {
-  for (let i = 0; i < pipeline.length; i++) {
-    const t = pipeline[i]!.beforeParse
-    if (t)
-      html = t(html)
-  }
-  return html
-}
-
-function applyAfterConvert(md: string, pipeline: PipelineTransform[]): string {
-  for (let i = 0; i < pipeline.length; i++) {
-    const t = pipeline[i]!.afterConvert
-    if (t)
-      md = t(md)
-  }
-  return md
-}
-
-export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): MdreamResult {
-  const { napiOpts, extractionHandlers } = resolveOptions(options)
-  const pipeline = options.pipeline
-  if (pipeline?.length)
-    html = applyBeforeParse(html, pipeline)
+export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
+  const { napiOpts, extractionHandlers, frontmatterCallback } = resolveOptions(options)
   const napiResult = _htmlToMarkdown(html, napiOpts)
-  const result: MdreamResult = { markdown: napiResult.markdown }
-  if (pipeline?.length)
-    result.markdown = applyAfterConvert(result.markdown, pipeline)
-  if (napiResult.frontmatter)
-    result.frontmatter = napiResult.frontmatter
-  if (napiResult.extracted?.length) {
-    result.extracted = napiResult.extracted
-    if (extractionHandlers) {
-      for (const el of napiResult.extracted)
-        extractionHandlers[el.selector]?.(el)
-    }
+  if (napiResult.frontmatter && frontmatterCallback)
+    frontmatterCallback(napiResult.frontmatter)
+  if (napiResult.extracted?.length && extractionHandlers) {
+    for (const el of napiResult.extracted)
+      extractionHandlers[el.selector]?.(el)
   }
-  return result
+  return napiResult.markdown
 }
 
 export async function* streamHtmlToMarkdown(
@@ -209,9 +199,6 @@ export async function* streamHtmlToMarkdown(
   if (!htmlStream)
     throw new Error('Invalid HTML stream provided')
   const { napiOpts } = resolveOptions(options)
-  const pipeline = options.pipeline
-  const hasBeforeParse = pipeline?.some(t => t.beforeParse)
-  const hasAfterConvert = pipeline?.some(t => t.afterConvert)
   const stream = new _MarkdownStream(napiOpts)
   const reader = htmlStream.getReader()
   try {
@@ -219,18 +206,14 @@ export async function* streamHtmlToMarkdown(
       const { done, value } = await reader.read()
       if (done)
         break
-      let chunk = typeof value === 'string' ? value : new TextDecoder().decode(value)
-      if (hasBeforeParse)
-        chunk = applyBeforeParse(chunk, pipeline!)
+      const chunk = typeof value === 'string' ? value : new TextDecoder().decode(value)
       const processed = stream.processChunk(chunk)
-      if (processed) {
-        yield hasAfterConvert ? applyAfterConvert(processed, pipeline!) : processed
-      }
+      if (processed)
+        yield processed
     }
     const final_ = stream.finish()
-    if (final_) {
-      yield hasAfterConvert ? applyAfterConvert(final_, pipeline!) : final_
-    }
+    if (final_)
+      yield final_
   }
   finally {
     reader.releaseLock()

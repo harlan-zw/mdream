@@ -36,7 +36,7 @@ async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRu
   }
 
   await nitroApp.hooks.callHook('mdream:config', options)
-  let markdown = htmlToMarkdown(html, options).markdown
+  let markdown = htmlToMarkdown(html, options)
 
   // Create hook context for mdream:markdown (Nitro hook)
   const context: MdreamMarkdownContext = {

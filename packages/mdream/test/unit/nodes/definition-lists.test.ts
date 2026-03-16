@@ -10,7 +10,7 @@ describe.each(engines)('definition lists $name', (engineConfig) => {
         123 Main St<br>
         Anytown, CA 12345
       </address>
-    `, { engine }).markdown
+    `, { engine })
     expect(result).toBe('<address>John Doe 123 Main St Anytown, CA 12345 </address>')
   })
 
@@ -23,7 +23,7 @@ describe.each(engines)('definition lists $name', (engineConfig) => {
         <dt>CSS</dt>
         <dd>Cascading Style Sheets</dd>
       </dl>
-    `, { engine }).markdown
+    `, { engine })
     expect(result).toBe('<dl><dt>HTML</dt>\n<dd>HyperText Markup Language</dd>\n<dt>CSS</dt>\n<dd>Cascading Style Sheets</dd>\n</dl>')
   })
 
@@ -43,7 +43,7 @@ describe.each(engines)('definition lists $name', (engineConfig) => {
         <dt>Runtime</dt>
         <dd>JavaScript</dd>
       </dl>
-    `, { engine }).markdown
+    `, { engine })
     expect(result).toBe('<dl><dt>Web Languages</dt>\n<dd><dl><dt>HTML</dt>\n<dd>HyperText Markup Language</dd>\n<dt>CSS</dt>\n<dd>Cascading Style Sheets</dd></dl></dd>\n<dt>Runtime</dt>\n<dd>JavaScript</dd>\n</dl>')
   })
 
@@ -61,7 +61,7 @@ describe.each(engines)('definition lists $name', (engineConfig) => {
           </ul>
         </dd>
       </dl>
-    `, { engine }).markdown
+    `, { engine })
     expect(result).toBe('<dl><dt>Term with **formatting**</dt>\n<dd>Definition with [link](https://example.com)</dd>\n<dt>Another Term</dt>\n<dd>\n\nParagraph in definition\n\n- List item in definition\n\n</dd></dl>')
   })
 })

@@ -172,7 +172,7 @@ const html = `<body data-new-gr-c-s-check-loaded="14.1233.0" data-gr-ext-install
 
 describe.each(engines)('hacker news %s', ({ name, engine }) => {
   it('table', async () => {
-    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) }).markdown
+    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
     expect(markdown).toMatchSnapshot()
   })
 })

@@ -19,7 +19,7 @@ function example() {
       </code></pre>
     `
 
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
 
     // The triple backticks should be escaped
     expect(markdown).toContain('\\`\\`\\`js')
@@ -41,7 +41,7 @@ function example() {
       </code></pre>
     `
 
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
 
     // Check formatting
     expect(markdown).toContain('Here\'s a code block:')
@@ -66,7 +66,7 @@ function example() {
       </code></pre>
     `
 
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
 
     // Check that newlines and whitespace are preserved
     expect(markdown).toMatch(RE_CODE_BLOCK_WITH_FUNCTION)
@@ -91,7 +91,7 @@ Line 2 after two blank lines
 
 Line 3 after one blank line</code></pre>`
 
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
 
     // Check that multiple consecutive newlines are preserved
     expect(markdown).toMatch(RE_CODE_BLOCK_WITH_LINES)
@@ -109,7 +109,7 @@ Line 3 after one blank line</code></pre>`
 <span class="hljs-section">## A second-level heading</span>
 <span class="hljs-section">### A third-level heading</span>
 </code></pre>`
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
 
     // Check that newlines are preserved
     expect(markdown).toBe('```markdown\n# A first-level heading\n## A second-level heading\n### A third-level heading\n```')
@@ -129,7 +129,7 @@ Text without newline above.
 </code></pre>`
 
     // The test is verifying that the newlines between headings are preserved exactly
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
 
     // This test verifies that newlines in markdown code blocks are preserved exactly
     // The key issue here is making sure that newlines between headings in markdown are maintained
@@ -152,21 +152,21 @@ Text without newline above.
   it('converts inline code', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>Use the <code>print()</code> function</p>'
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('Use the `print()` function')
   })
 
   it('converts code blocks without language', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<pre><code>function example() {\n  return true;\n}</code></pre>'
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('```\nfunction example() {\n  return true;\n}\n```')
   })
 
   it('converts code blocks with language', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<pre><code class="language-javascript">const x = 1;</code></pre>'
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('```javascript\nconst x = 1;\n```')
   })
 })

@@ -15,13 +15,13 @@ describe('plugin skip override', () => {
         },
       }],
     })
-    htmlToMarkdown(html, options).markdown
+    htmlToMarkdown(html, options)
     expect(seen).toContain('figure')
   })
 
   it('figure is not excluded in minimal preset', () => {
     const html = '<html><body><main><figure><img src="photo.jpg" alt="test"><figcaption>Caption</figcaption></figure></main></body></html>'
-    const markdown = htmlToMarkdown(html, withMinimalPreset()).markdown
+    const markdown = htmlToMarkdown(html, withMinimalPreset())
     expect(markdown).toContain('![test](photo.jpg)')
     expect(markdown).toContain('_Caption_')
   })
@@ -38,7 +38,7 @@ describe('plugin skip override', () => {
         },
       }],
     })
-    htmlToMarkdown(html, options).markdown
+    htmlToMarkdown(html, options)
     expect(figures).toContain('figure')
   })
 })

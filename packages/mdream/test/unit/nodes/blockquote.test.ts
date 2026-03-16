@@ -5,28 +5,28 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
   it('converts blockquotes', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<blockquote>This is a quote</blockquote>'
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('> This is a quote')
   })
 
   it('handles nested blockquotes', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<blockquote>Outer quote<blockquote>Inner quote</blockquote></blockquote>'
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('> Outer quote\n> > Inner quote')
   })
 
   it('handles blockquotes with paragraphs', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<blockquote><p>First paragraph</p><p>Second paragraph</p></blockquote>'
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('> First paragraph\n>\n> Second paragraph')
   })
 
   it('handles complex nested blockquotes', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<blockquote><p>Outer paragraph</p><blockquote><p>Inner paragraph</p></blockquote></blockquote>'
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
 
     expect(markdown).toBe('> Outer paragraph\n> > Inner paragraph')
   })
@@ -34,7 +34,7 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
   it('handles blockquotes with images', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<blockquote>This is a quote with an <img src="image.jpg" alt="image"></blockquote>'
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('> This is a quote with an ![image](image.jpg)')
   })
 })

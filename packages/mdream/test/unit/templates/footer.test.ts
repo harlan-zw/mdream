@@ -96,7 +96,7 @@ describe.each(engines)('footer %s', ({ engine }: any) => {
           </button>
         </div>
       </footer>`
-    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) }).markdown
+    const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
     expect(markdown).toMatchSnapshot()
   })
   it('nuxt', async () => {
@@ -108,7 +108,7 @@ describe.each(engines)('footer %s', ({ engine }: any) => {
           'footer',
         ],
       } },
-    }).markdown
+    })
     expect(markdown).toContain('# foo bar')
     expect(markdown).toContain('foo')
   })

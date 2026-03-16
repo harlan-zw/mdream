@@ -1,16 +1,12 @@
-import type { HtmlToMarkdownOptions, MdreamNapiResult } from '../napi/index.js'
+import type { HtmlToMarkdownOptions } from '../napi/index.js'
 import { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream, initSync } from '../wasm/mdream_edge.js'
 import wasmModule from '../wasm/mdream_edge_bg.wasm'
 
 initSync({ module: wasmModule })
 
-export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): MdreamNapiResult {
+export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): string {
   const result = _htmlToMarkdownResult(html, options || {})
-  return {
-    markdown: result.markdown || '',
-    extracted: result.extracted || null,
-    frontmatter: result.frontmatter || null,
-  }
+  return result.markdown || ''
 }
 
 export class MarkdownStream {

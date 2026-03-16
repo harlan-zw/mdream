@@ -1,18 +1,18 @@
-import type { MdreamOptions, MdreamResult } from './index.js'
+import type { MdreamOptions } from './index.js'
 
 type WorkerMessage
   = | { id: number, type: 'convert', html: string, options?: Partial<MdreamOptions> }
     | { type: 'init', wasmUrl: string }
 
 type WorkerResponse
-  = | { id: number, type: 'result', data: MdreamResult }
+  = | { id: number, type: 'result', data: string }
     | { id: number, type: 'error', message: string }
     | { type: 'ready' }
 
 let _worker: Worker | null = null
 let _ready: Promise<void> | null = null
 let _idCounter = 0
-const _pending = new Map<number, { resolve: (v: MdreamResult) => void, reject: (e: Error) => void }>()
+const _pending = new Map<number, { resolve: (v: string) => void, reject: (e: Error) => void }>()
 
 function getWorkerBlob(wasmUrl: string): Blob {
   const code = `
@@ -39,11 +39,7 @@ self.onmessage = function(e) {
     }
     try {
       const result = htmlToMarkdownResult(msg.html, msg.options || {});
-      self.postMessage({ id: msg.id, type: 'result', data: {
-        markdown: result.markdown || '',
-        extracted: result.extracted || undefined,
-        frontmatter: result.frontmatter || undefined,
-      }});
+      self.postMessage({ id: msg.id, type: 'result', data: result.markdown || '' });
     } catch (err) {
       self.postMessage({ id: msg.id, type: 'error', message: err.message });
     }
@@ -102,13 +98,13 @@ export function initWorker(wasmUrl: string): Promise<void> {
  * Convert HTML to markdown using the web worker.
  * Call initWorker() first.
  */
-export function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): Promise<MdreamResult> {
+export function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): Promise<string> {
   if (!_worker || !_ready)
     return Promise.reject(new Error('Call initWorker() before htmlToMarkdown()'))
 
   return _ready.then(() => {
     const id = _idCounter++
-    return new Promise<MdreamResult>((resolve, reject) => {
+    return new Promise<string>((resolve, reject) => {
       _pending.set(id, { resolve, reject })
       _worker!.postMessage({ id, type: 'convert', html, options } satisfies WorkerMessage)
     })

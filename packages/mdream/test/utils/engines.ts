@@ -1,4 +1,4 @@
-import type { EngineOptions, MdreamOptions, MdreamResult } from '@mdream/js'
+import type { EngineOptions, MdreamOptions } from '@mdream/js'
 import type { MdreamOptions as RustMdreamOptions } from '../../src'
 import { htmlToMarkdown as jsHtmlToMarkdown, streamHtmlToMarkdown as jsStreamHtmlToMarkdown } from '@mdream/js'
 import { htmlToMarkdown as _rustHtmlToMarkdown, streamHtmlToMarkdown as _rustStreamHtmlToMarkdown } from '../../src'
@@ -153,7 +153,7 @@ function toFlatOptions(options?: EngineOptions): Partial<RustMdreamOptions> {
   return flat
 }
 
-function rustHtmlToMarkdown(html: string, options?: EngineOptions): MdreamResult {
+function rustHtmlToMarkdown(html: string, options?: EngineOptions): string {
   const flat = toFlatOptions(options)
   if (options?.clean)
     (flat as any).clean = options.clean
@@ -168,7 +168,7 @@ function rustStreamHtmlToMarkdown(htmlStream: ReadableStream<Uint8Array | string
  * Mirrors the old MarkdownEngine shape so existing tests work unchanged.
  */
 interface TestEngine {
-  htmlToMarkdown: (html: string, options?: EngineOptions) => MdreamResult
+  htmlToMarkdown: (html: string, options?: EngineOptions) => string
   streamHtmlToMarkdown: (htmlStream: ReadableStream<Uint8Array | string> | null, options?: EngineOptions) => AsyncIterable<string>
 }
 
@@ -196,7 +196,7 @@ export async function resolveEngine(engine: TestEngine): Promise<TestEngine> {
 /**
  * Test helper — same signature tests already use: `htmlToMarkdown(html, { engine, ...opts })`
  */
-export function htmlToMarkdown(html: string, options: { engine?: TestEngine } & Partial<MdreamOptions> = {}): MdreamResult {
+export function htmlToMarkdown(html: string, options: { engine?: TestEngine } & Partial<MdreamOptions> = {}): string {
   const { engine, ...rest } = options
   if (!engine)
     throw new Error('engine required in test htmlToMarkdown')

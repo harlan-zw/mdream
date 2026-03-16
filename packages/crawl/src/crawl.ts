@@ -481,7 +481,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       let md = ''
       if (shouldProcessMarkdown) {
         // Convert HTML to Markdown only for matching URLs
-        md = htmlToMarkdown(html, { origin: pageOrigin }).markdown
+        md = htmlToMarkdown(html, { origin: pageOrigin })
       }
 
       let filePath: string | undefined

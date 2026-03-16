@@ -5,7 +5,7 @@ describe.each(engines)('horizontal Rules $name', (engineConfig) => {
   it('converts hr elements', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>Above</p><hr><p>Below</p>'
-    const markdown = htmlToMarkdown(html, { engine }).markdown
+    const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('Above\n\n---\n\nBelow')
   })
 })

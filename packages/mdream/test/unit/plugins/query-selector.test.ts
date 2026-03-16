@@ -18,7 +18,7 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { filter: { include: ['h1', 'p'] } },
-    }).markdown
+    })
 
     // Check that h1 and p elements are included
     expect(markdown).toContain('# This heading should be included')
@@ -37,7 +37,7 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { filter: { exclude: ['aside', 'nav'] } },
-    }).markdown
+    })
 
     expect(markdown).toContain('This should be included')
     expect(markdown).toContain('# This heading should be included')
@@ -57,7 +57,7 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { filter: { include: ['#main', '#content'] } },
-    }).markdown
+    })
 
     expect(markdown).toContain('This main div should be included')
     expect(markdown).toContain('This content div should be included')
@@ -74,7 +74,7 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { filter: { exclude: ['.ad', '.sidebar', '.footer'] } },
-    }).markdown
+    })
 
     expect(markdown).toContain('This should be included')
     expect(markdown).not.toContain('This ad should be excluded')
@@ -93,7 +93,7 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { filter: { include: ['div#main.content'] } },
-    }).markdown
+    })
 
     expect(markdown).toContain('This main content div should be included')
   })
@@ -110,7 +110,7 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { filter: { include: ['a[href]', 'img[alt]'] } },
-    }).markdown
+    })
 
     // Verify that link content is included
     expect(markdown).toContain('This link should be included')
@@ -129,7 +129,7 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { filter: { include: ['[data-type="header"]', '[data-type="content"]'] } },
-    }).markdown
+    })
 
     expect(markdown).toContain('This header should be included')
     expect(markdown).toContain('This content should be included')
@@ -157,7 +157,7 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { filter: { include: ['#main'] } },
-    }).markdown
+    })
 
     // Should include main and all its children
     expect(markdown).toContain('# Main Heading')
@@ -189,7 +189,7 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { filter: { include: ['article'] } },
-    }).markdown
+    })
 
     // Should include the article and all its descendants
     expect(markdown).toContain('# Article Title')
@@ -218,7 +218,7 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     const markdown = htmlToMarkdown(html, {
       engine: await resolveEngine(engine),
       plugins: { filter: { include: ['header', 'main'] } },
-    }).markdown
+    })
 
     // Should include header and main with their contents
     expect(markdown).toContain('# Page Header')
@@ -247,7 +247,7 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
         exclude: ['aside'],
         processChildren: false,
       } },
-    }).markdown
+    })
 
     // Only specified elements should be included,
     // even if they're children of included elements
@@ -283,7 +283,7 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     const markdown = jsHtmlToMarkdown(html, {
       plugins: { filter: { exclude: ['aside'] } },
       hooks: [codePlugin],
-    }).markdown
+    })
 
     expect(markdown).toContain('# Main Heading')
     expect(markdown).toContain('**CodePlugin: js**')

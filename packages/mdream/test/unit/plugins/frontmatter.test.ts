@@ -20,7 +20,7 @@ describe.each(engines)('frontmatter plugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { frontmatter: true },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('---')
     expect(markdown).toContain('title: "Test Page Title"')
@@ -52,7 +52,7 @@ describe.each(engines)('frontmatter plugin $name', (engineConfig) => {
         },
       } },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('title: "Test Page"')
     expect(markdown).toContain('layout: post')
@@ -77,7 +77,7 @@ describe.each(engines)('frontmatter plugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { frontmatter: true },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('title: "Title with \\"quotes\\""')
     expect(markdown).toContain('keywords: "key1, key2, key3"')
@@ -104,7 +104,7 @@ describe.each(engines)('frontmatter plugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { frontmatter: true },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('meta:')
     expect(markdown).toContain('"og:title": "OG Title"')
@@ -113,7 +113,7 @@ describe.each(engines)('frontmatter plugin $name', (engineConfig) => {
     expect(markdown).toContain('"twitter:description": "Twitter Description"')
   })
 
-  it('returns structured frontmatter data on result', async () => {
+  it('receives structured frontmatter via callback', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <html>
@@ -126,18 +126,19 @@ describe.each(engines)('frontmatter plugin $name', (engineConfig) => {
       </html>
     `
 
-    const result = htmlToMarkdown(html, {
-      plugins: { frontmatter: true },
+    let frontmatter: Record<string, string> | undefined
+    htmlToMarkdown(html, {
+      plugins: { frontmatter: (fm) => { frontmatter = fm } },
       engine,
     })
 
-    expect(result.frontmatter).toBeDefined()
-    expect(result.frontmatter!.title).toBe('My Page')
-    expect(result.frontmatter!.description).toBe('A test page')
-    expect(result.frontmatter!.author).toBe('Jane')
+    expect(frontmatter).toBeDefined()
+    expect(frontmatter!.title).toBe('My Page')
+    expect(frontmatter!.description).toBe('A test page')
+    expect(frontmatter!.author).toBe('Jane')
   })
 
-  it('returns structured frontmatter with additional fields', async () => {
+  it('receives structured frontmatter via onExtract with config', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <html>
@@ -146,19 +147,21 @@ describe.each(engines)('frontmatter plugin $name', (engineConfig) => {
       </html>
     `
 
-    const result = htmlToMarkdown(html, {
+    let frontmatter: Record<string, string> | undefined
+    htmlToMarkdown(html, {
       plugins: {
         frontmatter: {
           additionalFields: { layout: 'post', category: 'blog' },
+          onExtract: (fm) => { frontmatter = fm },
         },
       },
       engine,
     })
 
-    expect(result.frontmatter).toBeDefined()
-    expect(result.frontmatter!.title).toBe('Page')
-    expect(result.frontmatter!.layout).toBe('post')
-    expect(result.frontmatter!.category).toBe('blog')
+    expect(frontmatter).toBeDefined()
+    expect(frontmatter!.title).toBe('Page')
+    expect(frontmatter!.layout).toBe('post')
+    expect(frontmatter!.category).toBe('blog')
   })
 
   it('supports custom meta fields', async () => {
@@ -179,7 +182,7 @@ describe.each(engines)('frontmatter plugin $name', (engineConfig) => {
     const markdown = htmlToMarkdown(html, {
       plugins: { frontmatter: { metaFields: ['custom-field', 'another-field'] } },
       engine,
-    }).markdown
+    })
 
     expect(markdown).toContain('meta:')
     expect(markdown).toContain('  another-field: "Another Value"')

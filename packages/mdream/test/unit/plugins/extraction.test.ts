@@ -27,7 +27,7 @@ describe('extraction plugin', () => {
 
     htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     expect(extractedH2s).toHaveLength(2)
     expect(extractedH2s[0].name).toBe('h2')
@@ -55,7 +55,7 @@ describe('extraction plugin', () => {
 
     htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     expect(extractedContent).toHaveLength(2)
     expect(extractedContent[0].textContent).toBe('Main content here')
@@ -84,7 +84,7 @@ describe('extraction plugin', () => {
 
     htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     expect(extractedHeader).toHaveLength(1)
     expect(extractedHeader[0].textContent).toBe('Header content')
@@ -117,7 +117,7 @@ describe('extraction plugin', () => {
 
     htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     expect(extractedImages).toHaveLength(2)
     expect(extractedImages[0].attributes.src).toBe('image1.jpg')
@@ -162,7 +162,7 @@ describe('extraction plugin', () => {
 
     htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     expect(extractedArticles).toHaveLength(1)
     const articleText = extractedArticles[0].textContent
@@ -217,7 +217,7 @@ describe('extraction plugin', () => {
 
     htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     expect(results.titles).toHaveLength(1)
     expect(results.titles[0].textContent).toBe('Page Title')
@@ -266,7 +266,7 @@ describe('extraction plugin', () => {
 
     htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     expect(extractedFeaturedCards).toHaveLength(1)
     expect(extractedFeaturedCards[0].textContent).toBe('Featured Card')
@@ -301,7 +301,7 @@ describe('extraction plugin', () => {
 
     htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     expect(extractedDivs).toHaveLength(4)
     expect(extractedDivs[0].textContent).toBe('') // empty
@@ -360,7 +360,7 @@ describe('extraction plugin', () => {
 
     htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     // Verify title
     expect(seoData.title).toHaveLength(1)
@@ -453,7 +453,7 @@ describe('extraction plugin', () => {
 
     htmlToMarkdown(html, {
       hooks: [plugin],
-    }).markdown
+    })
 
     expect(extractedElements).toHaveLength(4) // 1 h1, 1 p, 2 a tags
 
@@ -490,7 +490,7 @@ describe('extraction plugin', () => {
           },
         }),
       ],
-    }).markdown
+    })
     expect(link).toBeDefined()
     expect(link.attributes.rel).toBe('stylesheet')
     expect(link.attributes.href).toBe('/_nuxt/entry.BqmaZWpx.css')
@@ -516,7 +516,7 @@ describe('extraction plugin', () => {
           },
         }),
       ],
-    }).markdown
+    })
 
     expect(title).toBeDefined()
     expect(title).toBe('Features - MDream Conversion Capabilities')
