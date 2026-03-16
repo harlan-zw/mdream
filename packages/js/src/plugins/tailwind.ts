@@ -264,22 +264,30 @@ export function tailwindPlugin(): TransformPlugin {
   return createPlugin({
     // Process node attributes to extract Tailwind classes
     processAttributes(node: ElementNode): void {
-      const classAttr = node.attributes?.class
+      const parentHidden = (node.parent as ElementNode | undefined)?.context?.tailwind?.hidden
 
-      if (!classAttr) {
+      const classAttr = node.attributes?.class
+      if (!classAttr && !parentHidden) {
         return
       }
 
-      // Split on whitespace and filter out empty strings
-      const classes = classAttr.trim().split(' ').filter(Boolean)
-      const { prefix, suffix, hidden } = processTailwindClasses(classes)
+      let prefix = ''
+      let suffix = ''
+      let hidden = false
+      if (classAttr) {
+        const classes = classAttr.trim().split(' ').filter(Boolean)
+        const result = processTailwindClasses(classes)
+        prefix = result.prefix
+        suffix = result.suffix
+        hidden = result.hidden
+      }
 
       // Store the processed Tailwind information in the node's plugin data
       node.context = node.context || {}
       node.context.tailwind = {
         prefix,
         suffix,
-        hidden,
+        hidden: hidden || !!parentHidden,
       }
     },
 
@@ -312,15 +320,8 @@ export function tailwindPlugin(): TransformPlugin {
       return { content, skip: false }
     },
 
-    // Filter out hidden elements (including descendants of hidden ancestors)
+    // Filter out hidden elements
     beforeNodeProcess({ node }) {
-      let parent = node.parent as ElementNode | null
-      while (parent) {
-        if (parent.context?.tailwind?.hidden) {
-          return { skip: true }
-        }
-        parent = parent.parent as ElementNode | null
-      }
       if (node.type === ELEMENT_NODE) {
         const elementNode = node as ElementNode
         if (elementNode.context?.tailwind?.hidden) {

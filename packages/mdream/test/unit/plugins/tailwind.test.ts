@@ -178,7 +178,7 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
     expect(markdown).toContain('More regular content')
   })
 
-  it('hides child elements inside a fixed parent', () => {
+  it('hides child elements inside a fixed parent', async () => {
     const html = `
       <div>
         <div class="fixed">
@@ -189,15 +189,16 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
       </div>
     `
     const markdown = htmlToMarkdown(html, {
-      plugins: [tailwindPlugin()],
-    })
+      engine: await resolveEngine(engine),
+      plugins: { tailwind: true },
+    }).markdown
 
     expect(markdown).not.toContain('Sidebar Title')
     expect(markdown).not.toContain('Link')
     expect(markdown).toContain('Visible content')
   })
 
-  it('hides deeply nested elements inside a hidden parent', () => {
+  it('hides deeply nested elements inside a hidden parent', async () => {
     const html = `
       <div>
         <div class="hidden">
@@ -209,14 +210,15 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
       </div>
     `
     const markdown = htmlToMarkdown(html, {
-      plugins: [tailwindPlugin()],
-    })
+      engine: await resolveEngine(engine),
+      plugins: { tailwind: true },
+    }).markdown
 
     expect(markdown).not.toContain('Deeply nested hidden text')
     expect(markdown).toContain('Visible text')
   })
 
-  it('hides text nodes inside a fixed parent', () => {
+  it('hides text nodes inside a fixed parent', async () => {
     const html = `
       <div>
         <div class="absolute">
@@ -226,8 +228,9 @@ describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
       </div>
     `
     const markdown = htmlToMarkdown(html, {
-      plugins: [tailwindPlugin()],
-    })
+      engine: await resolveEngine(engine),
+      plugins: { tailwind: true },
+    }).markdown
 
     expect(markdown).not.toContain('Hidden span text')
     expect(markdown).toContain('Normal content')

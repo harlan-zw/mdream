@@ -1622,12 +1622,20 @@ impl ConvertState {
 
         if self.has_plugins {
             if self.has_tailwind {
+                let parent_hidden = self.stack.last()
+                    .and_then(|p| p.tailwind.as_ref())
+                    .is_some_and(|tw| tw.hidden);
+
                 if let Some(class_attr) = tag.attributes.get("class") {
                     let (prefix, suffix, hidden) = process_tailwind_classes(class_attr);
+                    let hidden = hidden || parent_hidden;
                     if prefix.is_some() || suffix.is_some() || hidden {
                         tag.tailwind = Some(Box::new(TailwindData { prefix, suffix, hidden }));
                         if hidden { skip_node = true; }
                     }
+                } else if parent_hidden {
+                    tag.tailwind = Some(Box::new(TailwindData { prefix: None, suffix: None, hidden: true }));
+                    skip_node = true;
                 }
             }
 
