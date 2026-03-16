@@ -36,6 +36,19 @@ export interface TransformPlugin {
 }
 
 /**
+ * Declarative tag override configuration.
+ * When a string value is provided, it acts as an alias (e.g. `{ "x-heading": "h2" }`).
+ */
+export interface TagOverride {
+  enter?: string
+  exit?: string
+  spacing?: [number, number]
+  isInline?: boolean
+  isSelfClosing?: boolean
+  collapsesInnerWhiteSpace?: boolean
+}
+
+/**
  * Frontmatter configuration options.
  */
 export interface FrontmatterConfig {
@@ -80,6 +93,12 @@ export interface BuiltinPlugins {
    * Each key is a CSS selector; the handler is called for every match.
    */
   extraction?: Record<string, (element: ExtractedElement) => void>
+  /**
+   * Declarative tag overrides for customizing tag behavior.
+   * String values act as aliases (e.g. `{ "x-heading": "h2" }` makes `<x-heading>` behave like `<h2>`).
+   * Object values override specific handler properties.
+   */
+  tagOverrides?: Record<string, TagOverride | string>
 }
 
 /**
