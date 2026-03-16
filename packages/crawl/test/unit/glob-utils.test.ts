@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isUrlExcluded } from '../../src/glob-utils.ts'
+import { isUrlExcluded, isValidSitemapXml } from '../../src/glob-utils.ts'
 
 describe('isUrlExcluded', () => {
   it('returns false when no exclude patterns provided', () => {
@@ -58,5 +58,23 @@ describe('isUrlExcluded', () => {
     expect(isUrlExcluded('https://example.com/admin/users/123', excludePatterns)).toBe(true)
     expect(isUrlExcluded('https://example.com/admin/settings/profile', excludePatterns)).toBe(true)
     expect(isUrlExcluded('https://example.com/public/page', excludePatterns)).toBe(false)
+  })
+})
+
+describe('isValidSitemapXml', () => {
+  it('accepts valid sitemap with urlset', () => {
+    expect(isValidSitemapXml('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://example.com/</loc></url></urlset>')).toBe(true)
+  })
+
+  it('accepts valid sitemap index', () => {
+    expect(isValidSitemapXml('<?xml version="1.0"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>https://example.com/sitemap1.xml</loc></sitemap></sitemapindex>')).toBe(true)
+  })
+
+  it('rejects HTML pages (e.g. from redirect)', () => {
+    expect(isValidSitemapXml('<!DOCTYPE html><html><head><title>Product Page</title></head><body></body></html>')).toBe(false)
+  })
+
+  it('rejects empty content', () => {
+    expect(isValidSitemapXml('')).toBe(false)
   })
 })

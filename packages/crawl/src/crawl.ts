@@ -10,7 +10,7 @@ import { generateLlmsTxtArtifacts } from 'mdream/llms-txt'
 import { withMinimalPreset } from 'mdream/preset/minimal'
 import { dirname, join, normalize, resolve } from 'pathe'
 import { withHttps } from 'ufo'
-import { getStartingUrl, isUrlExcluded, matchesGlobPattern, parseUrlPattern } from './glob-utils.ts'
+import { getStartingUrl, isUrlExcluded, isValidSitemapXml, matchesGlobPattern, parseUrlPattern } from './glob-utils.ts'
 import { extractMetadata } from './metadata-extractor.ts'
 
 const SITEMAP_INDEX_LOC_RE = /<sitemap[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/sitemap>/gs
@@ -41,6 +41,12 @@ async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> 
     }
 
     const xmlContent = await response.text()
+
+    // Validate that the response is actually a sitemap XML, not an HTML page
+    // (e.g., when a server redirects sitemap.xml to another HTML page)
+    if (!isValidSitemapXml(xmlContent)) {
+      throw new Error('Response is not a valid sitemap XML')
+    }
 
     // Check if this is a sitemap index (contains <sitemapindex>)
     if (xmlContent.includes('<sitemapindex')) {
