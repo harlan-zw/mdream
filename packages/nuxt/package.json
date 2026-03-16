@@ -14,6 +14,10 @@
     ".": {
       "types": "./dist/types.d.mts",
       "import": "./dist/module.mjs"
+    },
+    "./runtime/types": {
+      "types": "./dist/runtime/types.d.ts",
+      "import": "./dist/runtime/types.js"
     }
   },
   "main": "./dist/module.mjs",

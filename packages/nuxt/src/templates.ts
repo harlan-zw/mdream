@@ -1,6 +1,6 @@
 import { addTypeTemplate } from '@nuxt/kit'
 
-const typesPath = '@mdream/nuxt'
+const typesPath = '@mdream/nuxt/runtime/types'
 
 export function registerTypeTemplates() {
   addTypeTemplate({
