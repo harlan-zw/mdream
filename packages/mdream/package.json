@@ -70,9 +70,7 @@
     "test:attw": "attw --pack",
     "prepack": "pnpm run build"
   },
-  "dependencies": {
-    "@mdream/cli": "workspace:*"
-  },
+  "dependencies": {},
   "optionalDependencies": {
     "@mdream/engine-rust-android-arm-eabi": "workspace:*",
     "@mdream/engine-rust-android-arm64": "workspace:*",
