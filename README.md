@@ -21,31 +21,11 @@
 ## Features
 
 - 🧠 #1 Token Optimizer: [Up to 2x fewer tokens](#benchmarks) than Turndown, node-html-markdown, and html-to-markdown. 70-99% fewer tokens than raw HTML.
-- 🚀 #1 Fastest: [Fastest pure JS & native rust](#benchmarks) - 35x faster than Turndown, converts 1.8MB HTML in ~62ms (JS) and ~3.9ms (Rust with PGO).
+- 🚀 #1 Fastest: [Fastest pure JS & native rust](#benchmarks) - 35x faster than Turndown, converts 1.8MB HTML in ~62ms (JS) and ~3.9ms (Rust).
 - 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support. Clean mode strips broken links, empty images, redundant anchors.
 - 🌊 Streamable: Process HTML incrementally with `streamHtmlToMarkdown()` for large documents and real-time pipelines.
 - ⚡ Tiny: 10kB gzip JS core, 60kB gzip with Rust WASM engine. Zero dependencies.
 - ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [Docker](#docker), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), & more.
-
-## Benchmarks
-
-Converts 1.8MB HTML in **7.83ms** (Rust NAPI) or **62ms** (pure JS). Up to 35x faster than [Turndown](https://github.com/mixmark-io/turndown), 3500x faster than [node-html-markdown](https://github.com/crosstype/node-html-markdown) on large files.
-
-| Input | mdream (rust) | mdream (js) | Turndown | node-html-markdown |
-|-------|---------------|-------------|----------|---------------------|
-| 166 KB | **0.60ms** | 3.36ms | 11.91ms | 15.35ms |
-| 420 KB | **1.26ms** | 7.79ms | 14.01ms | 17.23ms |
-| 1.8 MB | **7.83ms** | 62.2ms | 276.0ms | 27,381ms |
-
-With `minimal: true`, mdream produces up to **92% fewer tokens** than raw HTML and up to **2x fewer tokens** than competing libraries.
-
-| Page (HTML tokens) | mdream minimal | Turndown | node-html-markdown |
-|---------------------|----------------|----------|---------------------|
-| Wikipedia (21K) | **6,101** (-71%) | 10,435 (-50%) | 10,176 (-52%) |
-| GitHub Docs (62K) | **5,006** (-92%) | 43,983 (-30%) | 8,758 (-86%) |
-| Wikipedia XL (194K) | **152,425** (-21%) | 195,978 (+1%) | 283,136 (+46%) |
-
-Benchmarks run on real-world HTML using [Vitest bench](https://vitest.dev/guide/features.html#benchmarking). See [full methodology, Rust crate comparisons, and reproduction steps](./bench/README.md).
 
 ## What is Mdream?
 
@@ -357,6 +337,26 @@ Use mdream directly via CDN with no build step. Call `init()` once to load the W
 **CDN Options:**
 - **unpkg**: `https://unpkg.com/mdream/dist/iife.js`
 - **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/iife.js`
+
+## Benchmarks
+
+Converts 1.8MB HTML in **7.83ms** (Rust NAPI) or **62ms** (pure JS). Up to 35x faster than [Turndown](https://github.com/mixmark-io/turndown), 3500x faster than [node-html-markdown](https://github.com/crosstype/node-html-markdown) on large files.
+
+| Input | mdream (rust) | mdream (js) | Turndown | node-html-markdown |
+|-------|---------------|-------------|----------|---------------------|
+| 166 KB | **0.60ms** | 3.36ms | 11.91ms | 15.35ms |
+| 420 KB | **1.26ms** | 7.79ms | 14.01ms | 17.23ms |
+| 1.8 MB | **7.83ms** | 62.2ms | 276.0ms | 27,381ms |
+
+With `minimal: true`, mdream produces up to **92% fewer tokens** than raw HTML and up to **2x fewer tokens** than competing libraries.
+
+| Page (HTML tokens) | mdream minimal | Turndown | node-html-markdown |
+|---------------------|----------------|----------|---------------------|
+| Wikipedia (21K) | **6,101** (-71%) | 10,435 (-50%) | 10,176 (-52%) |
+| GitHub Docs (62K) | **5,006** (-92%) | 43,983 (-30%) | 8,758 (-86%) |
+| Wikipedia XL (194K) | **152,425** (-21%) | 195,978 (+1%) | 283,136 (+46%) |
+
+Benchmarks run on real-world HTML using [Vitest bench](https://vitest.dev/guide/features.html#benchmarking). See [full methodology, Rust crate comparisons, and reproduction steps](./bench/README.md).
 
 ## Credits
 
