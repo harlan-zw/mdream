@@ -20,7 +20,7 @@
 
 ## Features
 
-- 🧠 #1 Token Optimizer: [Up to 2x fewer tokens](#token-reduction) than Turndown, node-html-markdown, and html-to-markdown. 70-99% fewer tokens than raw HTML.
+- 🧠 #1 Token Optimizer: [Up to 2x fewer tokens](#benchmarks) than Turndown, node-html-markdown, and html-to-markdown. 70-99% fewer tokens than raw HTML.
 - 🚀 #1 Fastest: [Fastest pure JS & native rust](#benchmarks) - 35x faster than Turndown, converts 1.8MB HTML in ~62ms (JS) and ~3.9ms (Rust with PGO).
 - 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support. Clean mode strips broken links, empty images, redundant anchors.
 - 🌊 Streamable: Process HTML incrementally with `streamHtmlToMarkdown()` for large documents and real-time pipelines.
@@ -29,59 +29,23 @@
 
 ## Benchmarks
 
-### Speed
+Converts 1.8MB HTML in **7.83ms** (Rust NAPI) or **62ms** (pure JS). Up to 35x faster than [Turndown](https://github.com/mixmark-io/turndown), 3500x faster than [node-html-markdown](https://github.com/crosstype/node-html-markdown) on large files.
 
-**NAPI (Node.js bindings):**
+| Input | mdream (rust) | mdream (js) | Turndown | node-html-markdown |
+|-------|---------------|-------------|----------|---------------------|
+| 166 KB | **0.60ms** | 3.36ms | 11.91ms | 15.35ms |
+| 420 KB | **1.26ms** | 7.79ms | 14.01ms | 17.23ms |
+| 1.8 MB | **7.83ms** | 62.2ms | 276.0ms | 27,381ms |
 
-| Input Size | mdream (rust) | mdream (js) | html-to-markdown (NAPI) | Turndown (js) | node-html-markdown (js) |
-|------------|---------------|-------------|-------------------------|---------------|-------------------------|
-| **166 KB** | 🏆 **0.60ms** | 3.36ms *(5.6x)* | 4.00ms *(6.6x)* | 11.91ms *(19.7x)* | 15.35ms *(25.4x)* |
-| **420 KB** | 🏆 **1.26ms** | 7.79ms *(6.2x)* | 8.21ms *(6.5x)* | 14.01ms *(11.1x)* | 17.23ms *(13.6x)* |
-| **1.8 MB** | 🏆 **7.83ms** | 62.2ms *(7.9x)* | 85.1ms *(10.9x)* | 276.0ms *(35.2x)* | 💀 27,381ms *(3496x)* |
+With `minimal: true`, mdream produces up to **92% fewer tokens** than raw HTML and up to **2x fewer tokens** than competing libraries.
 
-**Native Rust (no Node.js overhead):**
+| Page (HTML tokens) | mdream minimal | Turndown | node-html-markdown |
+|---------------------|----------------|----------|---------------------|
+| Wikipedia (21K) | **6,101** (-71%) | 10,435 (-50%) | 10,176 (-52%) |
+| GitHub Docs (62K) | **5,006** (-92%) | 43,983 (-30%) | 8,758 (-86%) |
+| Wikipedia XL (194K) | **152,425** (-21%) | 195,978 (+1%) | 283,136 (+46%) |
 
-| Input Size | mdream | [htmd](https://crates.io/crates/htmd) | [html2md](https://crates.io/crates/html2md) | [html2md-rs](https://crates.io/crates/html2md-rs) | [mdka](https://crates.io/crates/mdka) | [html_to_markdown](https://crates.io/crates/html_to_markdown) |
-|------------|--------|------|---------|-----------|------|-----------------|
-| **166 KB** | 🏆 **0.29ms** | 1.63ms *(5.6x)* | 2.12ms *(7.3x)* | 💀 panicked | 2.22ms *(7.7x)* | 1.27ms *(4.4x)* |
-| **420 KB** | 🏆 **0.32ms** | 2.65ms *(8.3x)* | 3.31ms *(10.3x)* | 1.39ms *(4.3x)* | 2.94ms *(9.2x)* | 1.88ms *(5.9x)* |
-| **1.8 MB** | 🏆 **3.84ms** | 21.9ms *(5.7x)* | 💀 >30s | 27.9ms *(7.3x)* | 26.6ms *(6.9x)* | 14.1ms *(3.7x)* |
-
-### Token Reduction
-
-With `minimal: true` (which enables [`clean`](#clean-mode) by default), mdream produces significantly fewer tokens than competing libraries by isolating main content, filtering noise elements, and cleaning up link/image artifacts.
-
-**Wikipedia (162 KB, 21,039 HTML tokens):**
-
-| Library | Tokens | vs HTML |
-|---------|--------|---------|
-| mdream (`minimal: true`) | 🏆 **6,101** | **-71%** |
-| mdream (default) | 7,673 | -64% |
-| html-to-markdown (Rust) | 7,906 | -62% |
-| node-html-markdown | 10,176 | -52% |
-| Turndown | 10,435 | -50% |
-
-**GitHub Docs (420 KB, 62,434 HTML tokens):**
-
-| Library | Tokens | vs HTML |
-|---------|--------|---------|
-| mdream (`minimal: true`) | 🏆 **5,006** | **-92%** |
-| mdream (default) | 8,256 | -87% |
-| node-html-markdown | 8,758 | -86% |
-| html-to-markdown (Rust) | 9,056 | -85% |
-| Turndown | 43,983 | -30% |
-
-**Wikipedia large (1.8 MB, 193,759 HTML tokens):**
-
-| Library | Tokens | vs HTML |
-|---------|--------|---------|
-| mdream (`minimal: true`) | 🏆 **152,425** | **-21%** |
-| mdream (default) | 163,885 | -15% |
-| html-to-markdown (Rust) | 182,634 | -6% |
-| Turndown | 195,978 | +1% |
-| node-html-markdown | 283,136 | +46% |
-
-See the [Benchmark methodology](./bench/README.md) for more details.
+Benchmarks run on real-world HTML using [Vitest bench](https://vitest.dev/guide/features.html#benchmarking). See [full methodology, Rust crate comparisons, and reproduction steps](./bench/README.md).
 
 ## What is Mdream?
 
@@ -217,9 +181,9 @@ Crawl websites and generate embeddings for vector databases:
 
 ```ts
 import { crawlAndGenerate } from '@mdream/crawl'
+import { withMinimalPreset } from '@mdream/js/preset/minimal'
+import { htmlToMarkdownSplitChunks } from '@mdream/js/splitter'
 import { embed } from 'ai'
-import { withMinimalPreset } from 'mdream/preset/minimal'
-import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
 
 const { createTransformersJS } = await import('@built-in-ai/transformers-js')
 const embeddingModel = createTransformersJS().textEmbeddingModel('Xenova/bge-base-en-v1.5')
@@ -253,18 +217,15 @@ Pull headers, images, or other elements during conversion:
 
 ```ts
 import { htmlToMarkdown } from 'mdream'
-import { extractionPlugin } from 'mdream/plugins'
 
 const headers = []
 const images = []
 
 htmlToMarkdown(html, {
-  plugins: [
-    extractionPlugin({
-      'h1, h2, h3': el => headers.push(el.textContent),
-      'img[src]': el => images.push({ src: el.attributes.src, alt: el.attributes.alt })
-    })
-  ]
+  extraction: {
+    'h1, h2, h3': el => headers.push(el.textContent),
+    'img[src]': el => images.push({ src: el.attributes.src, alt: el.attributes.alt }),
+  },
 })
 ```
 </details>
@@ -294,28 +255,6 @@ htmlToMarkdown(html, {
 })
 ```
 </details>
-
-## Clean Mode
-
-The `clean` option removes common HTML-to-markdown noise. It's enabled by default with `minimal: true` and can be used independently.
-
-| Feature | Description |
-|---------|-------------|
-| `emptyLinks` | Strip links with `#` or `javascript:` hrefs |
-| `emptyLinkText` | Drop links that produce no visible text (icon-only, SVG-only) |
-| `emptyImages` | Strip images with no alt text (tracking pixels, spacers) |
-| `redundantLinks` | `[https://x.com](https://x.com)` → `https://x.com` |
-| `selfLinkHeadings` | `## [Title](#title)` → `## Title` |
-| `fragments` | Strip `[text](#broken)` links with no matching heading |
-| `urls` | Strip tracking query params (utm_*, fbclid, gclid, etc.) |
-
-```ts
-// minimal: true enables clean by default
-htmlToMarkdown(html, { minimal: true })
-
-// Disable clean with minimal
-htmlToMarkdown(html, { minimal: true, clean: false })
-```
 
 ## Stdin CLI Usage
 
@@ -404,23 +343,15 @@ See the [Nuxt Module README](./packages/nuxt/README.md) for usage and configurat
 
 ## Browser CDN Usage
 
-For browser environments, you can use mdream directly via CDN without any build step:
+Use mdream directly via CDN with no build step. Call `init()` once to load the WASM binary, then use `htmlToMarkdown()` synchronously:
 
 ```html
-<!DOCTYPE html>
-<html>
-<head>
-  <script src="https://unpkg.com/mdream/dist/iife.js"></script>
-</head>
-<body>
-  <script>
-    // Convert HTML to Markdown in the browser
-    const html = '<h1>Hello World</h1><p>This is a paragraph.</p>'
-    const markdown = window.mdream.htmlToMarkdown(html)
-    console.log(markdown) // # Hello World\n\nThis is a paragraph.
-  </script>
-</body>
-</html>
+<script src="https://unpkg.com/mdream/dist/iife.js"></script>
+<script>
+  await window.mdream.init()
+  const markdown = window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
+  console.log(markdown) // # Hello\n\nWorld
+</script>
 ```
 
 **CDN Options:**
