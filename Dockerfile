@@ -15,6 +15,7 @@ RUN npm install -g pnpm@10.32.1
 # Copy only package files first for better caching
 COPY --chown=myuser:myuser package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
 COPY --chown=myuser:myuser packages/mdream/package.json ./packages/mdream/
+COPY --chown=myuser:myuser packages/js/package.json ./packages/js/
 COPY --chown=myuser:myuser packages/crawl/package.json ./packages/crawl/
 
 # Switch to myuser for dependency installation
@@ -25,10 +26,12 @@ RUN pnpm install --frozen-lockfile --prod=false
 
 # Copy source code after dependencies are installed
 COPY --chown=myuser:myuser packages/mdream/ ./packages/mdream/
+COPY --chown=myuser:myuser packages/js/ ./packages/js/
 COPY --chown=myuser:myuser packages/crawl/ ./packages/crawl/
 
 # Build the packages
 RUN cd packages/mdream && npx obuild && cd ../.. && \
+    cd packages/js && npx obuild && cd ../.. && \
     cd packages/crawl && npx obuild && cd ../..
 
 # Set production environment after build

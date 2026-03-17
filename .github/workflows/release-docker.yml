@@ -1,11 +1,7 @@
 name: Release Docker Images
 
 on:
-  release:
-    types: [published]
-  push:
-    tags:
-      - 'v*'
+  workflow_call:
   workflow_dispatch:
     inputs:
       tag:
@@ -28,6 +24,42 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Setup napi native bindings for Docker build context
+        run: |
+          mkdir -p packages/mdream/napi
+
+          # Copy the linux-x64-gnu native binding (Docker target platform)
+          BINDING_DIR="artifacts/bindings-x86_64-unknown-linux-gnu"
+          if [ -d "$BINDING_DIR" ]; then
+            find "$BINDING_DIR" -name "*.node" -exec cp -v {} packages/mdream/napi/ \;
+          fi
+
+          # Generate napi index files using the artifacts
+          # Copy the NAPI entry files
+          if [ -d "artifacts/bindings-x86_64-unknown-linux-gnu" ]; then
+            # Install deps to generate napi index
+            npm install -g pnpm@10.32.1
+            pnpm install
+            # Move all platform artifacts for napi artifacts command
+            for dir in artifacts/bindings-*/crates/node/npm/*/; do
+              platform=$(basename "$dir")
+              mkdir -p "crates/node/npm/$platform"
+              cp -v "$dir"* "crates/node/npm/$platform/" 2>/dev/null || true
+            done
+            cd crates/node && pnpm exec napi artifacts && cd ../..
+            cp crates/node/index.js packages/mdream/napi/index.mjs
+            cp crates/node/index.d.ts packages/mdream/napi/index.d.ts
+            cp crates/node/index.d.ts packages/mdream/napi/index.d.mts
+          fi
+
+          echo "=== napi directory contents ==="
+          ls -la packages/mdream/napi/
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -105,7 +137,7 @@ jobs:
 
       - name: Test published images
         run: |
-          echo "🧪 Testing published Docker crawl images..."
+          echo "Testing published Docker crawl images..."
 
           # Wait for images to be available
           sleep 30
@@ -113,25 +145,25 @@ jobs:
           # Test Docker Hub image with help (default ENTRYPOINT behavior)
           echo "Testing Docker Hub image help..."
           timeout 60 docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} --help > /dev/null
-          echo "✅ Docker Hub image help works!"
+          echo "Docker Hub image help works!"
 
           # Test GitHub Container Registry image
           echo "Testing GHCR image help..."
           timeout 60 docker run --rm ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} --help > /dev/null
-          echo "✅ GHCR image works!"
+          echo "GHCR image works!"
 
           # Test version command (direct to ENTRYPOINT)
           echo "Testing version command..."
           timeout 60 docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} --version > /dev/null
-          echo "✅ Version command works!"
+          echo "Version command works!"
 
           # Test that container runs without arguments (should show help)
           echo "Testing container without arguments..."
           OUTPUT=$(timeout 60 docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} 2>&1 || true)
           if [[ "$OUTPUT" == *"@mdream/crawl"* ]]; then
-            echo "✅ Container shows help when run without arguments!"
+            echo "Container shows help when run without arguments!"
           else
-            echo "❌ Container should show help when run without arguments"
+            echo "Container should show help when run without arguments"
             echo "Output was: $OUTPUT"
             exit 1
           fi
@@ -139,11 +171,11 @@ jobs:
           # Test with a URL argument to ensure ENTRYPOINT works correctly
           echo "Testing with URL argument (should show error for demo URL)..."
           OUTPUT=$(timeout 60 docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} --url https://httpbin.org/delay/30 --max-pages 1 2>&1 || true)
-          echo "✅ Container accepts arguments correctly via ENTRYPOINT!"
+          echo "Container accepts arguments correctly via ENTRYPOINT!"
 
       - name: Report image sizes
         run: |
-          echo "## 📦 Image Size Report" >> $GITHUB_STEP_SUMMARY
+          echo "## Image Size Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Get and display image sizes
@@ -164,7 +196,7 @@ jobs:
 
       - name: Create release summary
         run: |
-          echo "## 🐳 Docker Crawl Images Published" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker Crawl Images Published" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**@mdream/crawl with Playwright Chrome pre-installed**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -200,7 +232,7 @@ jobs:
     steps:
       - name: Notify release success
         run: |
-          echo "🎉 Docker images for ${{ github.event.release.tag_name || github.ref_name }} published successfully!"
+          echo "Docker images for ${{ github.event.release.tag_name || github.ref_name }} published successfully!"
           echo "Images are available at:"
           echo "- Docker Hub: ${{ secrets.DOCKERHUB_USERNAME }}/mdream"
           echo "- GHCR: ghcr.io/${{ github.repository_owner }}/mdream"
