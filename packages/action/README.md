@@ -28,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install dependencies
         run: npm ci
@@ -37,7 +37,7 @@ jobs:
         run: npm run build
 
       - name: Generate llms.txt artifacts
-        uses: harlan-zw/mdream@main
+        uses: harlan-zw/mdream@v1
         with:
           glob: 'dist/**/*.html'
           site-name: My Documentation

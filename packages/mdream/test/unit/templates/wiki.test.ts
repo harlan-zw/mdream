@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines.ts'
 
-describe.each(engines)('tables %s', ({ engine, name }: any) => {
+describe.each(engines)('tables %s', ({ engine, name: _name }: any) => {
   it('headings', async () => {
     const html = `<div class="mw-heading mw-heading2"><h2 id="Conventions">Conventions</h2><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=List_of_chiropterans&amp;action=edit&amp;section=1" title="Edit section: Conventions"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>`
     const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })

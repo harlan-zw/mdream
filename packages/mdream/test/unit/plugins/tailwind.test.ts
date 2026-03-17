@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines.ts'
 
-describe.each(engines)('tailwind addon %s', ({ name, engine }) => {
+describe.each(engines)('tailwind addon %s', ({ name: _name, engine }) => {
   it('converts font-bold to markdown bold', async () => {
     const html = '<p class="font-bold">This is bold text</p>'
     const markdown = htmlToMarkdown(html, {

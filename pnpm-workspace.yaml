@@ -1,4 +1,5 @@
 shellEmulator: true
+
 trustPolicy: no-downgrade
 
 packages:
@@ -14,80 +15,62 @@ overrides:
 catalog:
   '@actions/core': ^3.0.0
   '@actions/exec': ^3.0.0
-  '@antfu/eslint-config': ^7.7.0
+  '@antfu/eslint-config': ^7.7.3
   '@arethetypeswrong/cli': ^0.18.2
-  '@aws-sdk/client-s3': ^3.1005.0
   '@built-in-ai/transformers-js': ^1.1.2
   '@clack/prompts': ^1.1.0
-  '@cloudflare/vitest-pool-workers': ^0.13.0
-  '@emnapi/core': ^1.8.1
-  '@emnapi/runtime': ^1.8.1
-  '@emnapi/wasi-threads': ^1.1.0
+  '@cloudflare/vitest-pool-workers': ^0.13.1
+  '@emnapi/core': ^1.9.0
+  '@emnapi/runtime': ^1.9.0
+  '@emnapi/wasi-threads': ^1.2.0
   '@kreuzberg/html-to-markdown-node': ^2.28.2
-  '@libsql/client': ^0.17.0
-  '@napi-rs/cli': ^3.2.0
+  '@napi-rs/cli': ^3.5.1
   '@napi-rs/wasm-runtime': ^1.1.1
   '@nuxt/devtools': 2.4.0
-  '@nuxt/kit': ^4.3.1
+  '@nuxt/kit': ^4.4.2
   '@nuxt/module-builder': ^1.0.2
-  '@nuxt/schema': ^4.3.1
+  '@nuxt/schema': ^4.4.2
   '@nuxt/test-utils': ^4.0.0
-  '@oxc-node/core': ^0.0.35
-  '@taplo/cli': ^0.7.0
   '@tybys/wasm-util': ^0.10.1
-  '@types/better-sqlite3': ^7.6.13
-  '@types/express': ^5.0.6
-  '@types/node': ^25.4.0
+  '@types/node': ^25.5.0
   '@types/picomatch': ^4.0.2
   '@vercel/ncc': ^0.38.4
-  '@vitejs/plugin-vue': ^6.0.4
+  '@vitejs/plugin-vue': ^6.0.5
   '@vitest/browser': ^4.1.0
   '@vitest/browser-playwright': ^4.1.0
   ai: ^6.0.116
-  ava: ^7.0.0
-  better-sqlite3: ^12.6.2
-  bumpp: ^10.4.1
+  bumpp: ^11.0.1
   cac: ^7.0.0
-  chalk: ^5.6.2
   changelogen: ^0.6.2
   compression: ^1.8.1
   consola: ^3.4.2
   crawlee: ^3.16.0
   cross-env: ^10.1.0
   defu: ^6.1.4
-  drizzle-kit: ^0.31.9
-  drizzle-orm: ^0.45.1
   eslint: ^10.0.3
   express: ^5.2.1
-  husky: ^9.1.7
-  lint-staged: ^16.1.6
   llm-cost: ^1.0.5
-  miniflare: ^4.20260310.0
+  miniflare: ^4.20260312.1
   node-html-markdown: ^2.0.0
-  npm-run-all2: ^8.0.4
-  nuxt: ^4.3.1
+  nuxt: ^4.4.2
   nuxt-site-config: ^3.2.21
   nypm: ^0.6.5
   obuild: ^0.4.32
-  oxlint: ^1.14.0
   pathe: ^2.0.3
   picomatch: ^4.0.3
   playwright: ^1.58.2
-  prettier: ^3.6.2
   sirv: ^3.0.2
-  tinybench: ^6.0.0
   tinyglobby: ^0.2.15
   tslib: ^2.8.1
   turndown: ^7.2.2
   turndown-plugin-gfm: ^1.0.2
   typescript: ^5.9.3
   ufo: ^1.6.3
-  unstorage: ^1.17.4
-  vite: ^7.3.1
+  vite: ^8.0.0
   vitest: ^4.1.0
   vue: ^3.5.30
   vue-router: ^5.0.3
-  wrangler: ^4.18.0
+  wrangler: ^4.74.0
 
 onlyBuiltDependencies:
   - esbuild

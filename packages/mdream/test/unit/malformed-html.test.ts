@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../utils/engines'
 
-describe.each(engines)('malformed html %s', ({ name, engine }) => {
+describe.each(engines)('malformed html %s', ({ name: _name, engine }) => {
   describe.skip('correctly tracks element depth in nested structures', () => {
     it('handles incorrectly nested tags that overlap', async () => {
       const html = '<p><strong>Bold text <em>Bold and italic</strong> just italic</em></p>'

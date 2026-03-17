@@ -271,7 +271,10 @@ export function cleanSelfLinkHeadings(md: string): string {
     if (i === 0 || md.charCodeAt(i - 1) === 10) {
       let hashes = 0
       let j = i
-      while (j < len && md.charCodeAt(j) === 35 /* # */) { hashes++; j++ }
+      while (j < len && md.charCodeAt(j) === 35 /* # */) {
+        hashes++
+        j++
+      }
       if (hashes >= 1 && hashes <= 6 && j < len && md.charCodeAt(j) === 32) {
         j++ // skip space
         // Check if next char is [ (a link)

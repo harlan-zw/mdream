@@ -4,6 +4,7 @@ import { createPlugin } from '../pluggable/plugin'
 
 const BACKSLASH_RE = /\\/g
 const DOUBLE_QUOTE_RE = /"/g
+const ESCAPED_DOUBLE_QUOTE_RE = /\\"/g
 
 export interface FrontmatterPluginOptions {
   /** Additional frontmatter fields to include */
@@ -54,7 +55,7 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
       // Strip quotes that formatValue adds
       const raw = frontmatter.title
       result.title = raw.startsWith('"') && raw.endsWith('"')
-        ? raw.slice(1, -1).replace(/\\"/g, '"')
+        ? raw.slice(1, -1).replace(ESCAPED_DOUBLE_QUOTE_RE, '"')
         : raw
     }
     for (const [k, v] of Object.entries(frontmatter.meta)) {
@@ -62,7 +63,7 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
       const cleanKey = k.startsWith('"') && k.endsWith('"') ? k.slice(1, -1) : k
       // Strip wrapping quotes from value
       const cleanVal = typeof v === 'string' && v.startsWith('"') && v.endsWith('"')
-        ? v.slice(1, -1).replace(/\\"/g, '"')
+        ? v.slice(1, -1).replace(ESCAPED_DOUBLE_QUOTE_RE, '"')
         : String(v)
       result[cleanKey] = cleanVal
     }

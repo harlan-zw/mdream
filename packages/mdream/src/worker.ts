@@ -13,10 +13,11 @@ let _worker: Worker | null = null
 let _ready: Promise<void> | null = null
 let _idCounter = 0
 const _pending = new Map<number, { resolve: (v: string) => void, reject: (e: Error) => void }>()
+const WASM_RE = /\.wasm$/
 
 function getWorkerBlob(wasmUrl: string): Blob {
   const code = `
-import init, { htmlToMarkdownResult } from '${wasmUrl.replace(/\.wasm$/, '.js')}';
+import init, { htmlToMarkdownResult } from '${wasmUrl.replace(WASM_RE, '.js')}';
 
 let ready = false;
 

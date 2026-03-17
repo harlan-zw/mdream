@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * Token usage comparison across HTML-to-Markdown libraries.
  * Compares raw output size and approximate token count.
@@ -17,11 +18,17 @@ function countTokens(text: string): number {
   for (let i = 0; i < text.length; i++) {
     const c = text.charCodeAt(i)
     if (c === 32 || c === 10 || c === 9 || c === 13) {
-      if (inWord) { tokens++; inWord = false }
+      if (inWord) {
+        tokens++
+        inWord = false
+      }
     }
     else if (c === 91 || c === 93 || c === 40 || c === 41 || c === 35
       || c === 42 || c === 124 || c === 45 || c === 33 || c === 58) {
-      if (inWord) { tokens++; inWord = false }
+      if (inWord) {
+        tokens++
+        inWord = false
+      }
       tokens++
     }
     else {

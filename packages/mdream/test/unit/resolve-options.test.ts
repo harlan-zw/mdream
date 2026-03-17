@@ -69,7 +69,6 @@ describe('htmlToMarkdown resolve options', () => {
     const { streamHtmlToMarkdown } = await import('../../src')
     const gen = streamHtmlToMarkdown(null as any)
     await expect(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of gen) { /* noop */ }
     }).rejects.toThrow('Invalid HTML stream')
   })

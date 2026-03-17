@@ -190,7 +190,6 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
   it('should merge with existing plugins', async () => {
     if (engineConfig.name === 'Rust Engine')
       return // hooks not supported in Rust
-    const engine = await resolveEngine(engineConfig.engine)
     let customPluginCalled = false
     const customPlugin = {
       onNodeEnter: () => {

@@ -3,6 +3,8 @@ import { resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { defineBuildConfig } from 'obuild/config'
 
+const EXPORT_RE = /export\s*\{[^}]+\};\s*$/m
+
 const rolldown = {
   external: [/\.\.\/napi\//],
 }
@@ -32,10 +34,14 @@ export default defineBuildConfig({
       const iifeMjsPath = resolve(cwd, 'dist/iife.mjs')
       try {
         const content = readFileSync(iifeMjsPath, 'utf-8')
-        const iifeContent = `(function(){\n'use strict';\n${content.replace(/export\s*\{[^}]+\};\s*$/m, '')}\n})();`
-        try { unlinkSync(iifeMjsPath) }
+        const iifeContent = `(function(){\n'use strict';\n${content.replace(EXPORT_RE, '')}\n})();`
+        try {
+          unlinkSync(iifeMjsPath)
+        }
         catch {}
-        try { unlinkSync(iifeMjsPath.replace('.mjs', '.d.mts')) }
+        try {
+          unlinkSync(iifeMjsPath.replace('.mjs', '.d.mts'))
+        }
         catch {}
         const outputPath = resolve(cwd, 'dist/iife.js')
         mkdirSync(resolve(cwd, 'dist'), { recursive: true })

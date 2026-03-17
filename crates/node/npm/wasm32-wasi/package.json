@@ -1,7 +1,9 @@
 {
   "name": "@mdream/engine-rust-wasm32-wasi",
   "version": "0.17.0",
-  "cpu": ["wasm32"],
+  "cpu": [
+    "wasm32"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
