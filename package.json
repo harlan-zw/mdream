@@ -13,7 +13,7 @@
     "typecheck": "pnpm run -r typecheck",
     "test": "pnpm exec playwright install && vitest test",
     "release": "pnpm build && bumpp --all --output=CHANGELOG.md --execute=\"node scripts/sync-cargo-version.mjs\" packages/*/package.json",
-    "release:beta": "pnpm build && bumpp --all --release premajor --preid beta --output=CHANGELOG.md --execute=\"node scripts/sync-cargo-version.mjs\" packages/*/package.json",
+    "release:beta": "pnpm build && bumpp --all --release prerelease --preid beta --output=CHANGELOG.md --execute=\"node scripts/sync-cargo-version.mjs\" packages/*/package.json",
     "test:attw": "pnpm -r --parallel --filter './packages/**' run test:attw",
     "bench": "vitest bench --config bench/vitest.config.ts",
     "bench:cli": "./bench/cli-compare.sh"
