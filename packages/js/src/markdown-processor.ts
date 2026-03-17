@@ -346,6 +346,14 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     const currentContent = state.buffer.join('').trimStart()
     const newContent = currentContent.slice(lastYieldedLength)
     lastYieldedLength = currentContent.length
+    // Consolidate buffer into a single entry to prevent retroactive
+    // whitespace trimming from modifying already-yielded content.
+    // The trim logic uses identity checks (buff.at(-1) === lastFragment),
+    // so a consolidated string won't match individual fragment references.
+    if (state.buffer.length > 1) {
+      state.buffer.length = 0
+      state.buffer.push(currentContent)
+    }
     return newContent
   }
 
