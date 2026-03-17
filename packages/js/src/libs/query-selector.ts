@@ -47,19 +47,54 @@ export function createClassSelector(selector: string): SelectorMatcher {
   }
 }
 
-// eslint-disable-next-line regexp/no-misleading-capturing-group
-const ATTR_SELECTOR_RE = /\[([^\]=~|^$*]+)(?:([=~|^$*]{1,2})["']?([^"'\]]+)["']?)?\]/
+/**
+ * Parses attribute selectors like [attr], [attr=value], [attr^="value"]
+ * Uses a manual parser to avoid polynomial regex backtracking (CodeQL ReDoS).
+ */
+function parseAttributeSelector(selector: string): { attr: string, op?: string, value?: string } | null {
+  if (selector.charCodeAt(0) !== 91 /* [ */)
+    return null
+  const end = selector.indexOf(']', 1)
+  if (end === -1)
+    return null
+  const inner = selector.slice(1, end)
+
+  // Find operator position
+  let opIdx = -1
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner.charCodeAt(i)
+    if (c === 61 /* = */ || c === 126 /* ~ */ || c === 124 /* | */ || c === 94 /* ^ */ || c === 36 /* $ */ || c === 42 /* * */) {
+      opIdx = i
+      break
+    }
+  }
+
+  if (opIdx === -1)
+    return { attr: inner }
+
+  const attr = inner.slice(0, opIdx)
+  // Operator is 1 or 2 chars (e.g. "=", "^=", "~=")
+  let opEnd = opIdx + 1
+  if (opEnd < inner.length && inner.charCodeAt(opEnd) === 61)
+    opEnd++
+  const op = inner.slice(opIdx, opEnd)
+  // Strip quotes from value
+  let value = inner.slice(opEnd)
+  if ((value.charCodeAt(0) === 34 || value.charCodeAt(0) === 39) && value.charCodeAt(value.length - 1) === value.charCodeAt(0))
+    value = value.slice(1, -1)
+
+  return { attr, op, value }
+}
 
 /**
  * Creates an attribute selector matcher (e.g., '[data-id]', '[href="https://example.com"]')
  */
 export function createAttributeSelector(selector: string): SelectorMatcher {
-  // Parse [attr], [attr=value], [attr^=value], etc.
-  const match = selector.match(ATTR_SELECTOR_RE)
+  const parsed = parseAttributeSelector(selector)
 
-  const attrName = match ? match[1]! : selector.slice(1, -1)
-  const operator = match?.[2]
-  const attrValue = match?.[3]
+  const attrName = parsed ? parsed.attr : selector.slice(1, -1)
+  const operator = parsed?.op
+  const attrValue = parsed?.value
 
   return {
     matches: (element: ElementNode) => {

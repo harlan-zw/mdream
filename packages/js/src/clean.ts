@@ -207,7 +207,7 @@ export function cleanEmptyLinks(md: string): string {
       const link = parseLink(md, i)
       if (link) {
         const url = link.url
-        if (url === '#' || url.startsWith('javascript:')) {
+        if (url === '#' || url.startsWith('javascript:') || url.startsWith('data:') || url.startsWith('vbscript:')) {
           result += link.text
           i = link.end
           continue
