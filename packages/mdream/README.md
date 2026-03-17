@@ -84,18 +84,16 @@ Mdream provides two main functions for working with HTML:
 
 ### Engines
 
-Mdream supports two rendering engines, allowing you to optimize for your environment:
-- **JavaScript Engine** (default): Zero-dependencies, works everywhere (browser, edge, Node).
-- **Rust Engine**: Native performance, ~3-4x faster, optimized for Node.js servers handling large workloads.
+Mdream includes two rendering engines, automatically selecting the best one for your environment:
+- **Rust Engine** (default in Node.js): Native NAPI performance, ~3-4x faster. Bundled as optional dependencies.
+- **JavaScript Engine** (default in browser/edge): Zero-dependencies, works everywhere.
 
 ```ts
-import { createRustEngine } from '@mdream/engine-rust'
 import { htmlToMarkdown } from 'mdream'
 
-// Use the Rust engine for maximum performance
-const markdown = htmlToMarkdown('<h1>Hello World</h1>', {
-  engine: createRustEngine()
-})
+// Rust NAPI engine used automatically in Node.js
+// JS engine used in browser/edge runtimes
+const markdown = htmlToMarkdown('<h1>Hello World</h1>')
 ```
 
 ## Browser CDN Usage
@@ -204,31 +202,40 @@ const options = withMinimalPreset({
 curl -s https://example.com | npx mdream --preset minimal --origin https://example.com
 ```
 
-## Plugin System
+## Declarative Options (Rust Engine)
 
-The plugin system allows you to customize HTML to Markdown conversion by hooking into the processing pipeline. Plugins can filter content, extract data, transform nodes, or add custom behavior.
-
-### Built-in Plugins
-
-Mdream includes several built-in plugins that can be used individually or combined:
-
-- **[`extractionPlugin`](./src/plugins/extraction.ts)**: Extract specific elements using CSS selectors for data analysis
-- **[`filterPlugin`](./src/plugins/filter.ts)**: Include or exclude elements based on CSS selectors or tag IDs
-- **[`frontmatterPlugin`](./src/plugins/frontmatter.ts)**: Generate YAML frontmatter from HTML head elements (title, meta tags)
-- **[`isolateMainPlugin`](./src/plugins/isolate-main.ts)**: Isolate main content using `<main>` elements or header-to-footer boundaries
-- **[`tailwindPlugin`](./src/plugins/tailwind.ts)**: Convert Tailwind CSS classes to Markdown formatting (bold, italic, etc.)
+The default Rust engine uses declarative configuration:
 
 ```ts
-import { filterPlugin, frontmatterPlugin, isolateMainPlugin } from 'mdream/plugins'
+import { htmlToMarkdown } from 'mdream'
 
 const markdown = htmlToMarkdown(html, {
-  plugins: [
-    isolateMainPlugin(),
-    frontmatterPlugin(),
-    filterPlugin({ exclude: ['nav', '.sidebar', '#footer'] })
-  ]
+  origin: 'https://example.com',
+  minimal: true, // enables frontmatter, isolateMain, tailwind, filter
+  clean: true, // enable all post-processing cleanup
+  frontmatter: fm => console.log(fm), // callback for extracted frontmatter
+  filter: { exclude: ['nav', '.sidebar'] },
+  extraction: {
+    'h2': el => console.log('Heading:', el.textContent),
+    'img[alt]': el => console.log('Image:', el.attributes.src),
+  },
+  tagOverrides: { 'custom-tag': { alias: 'div' } },
 })
 ```
+
+### Available Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `origin` | `string` | Base URL for resolving relative links/images |
+| `minimal` | `boolean` | Enable minimal preset (frontmatter, isolateMain, tailwind, filter) |
+| `clean` | `boolean \| CleanOptions` | Post-processing cleanup (`true` for all, or pick specific) |
+| `frontmatter` | `boolean \| (fm) => void \| FrontmatterConfig` | Extract frontmatter from HTML head |
+| `isolateMain` | `boolean` | Isolate main content area |
+| `tailwind` | `boolean` | Convert Tailwind classes to Markdown |
+| `filter` | `{ include?, exclude?, processChildren? }` | Filter elements by CSS selectors |
+| `extraction` | `Record<string, (el) => void>` | Extract elements matching CSS selectors |
+| `tagOverrides` | `Record<string, TagOverride \| string>` | Override tag rendering behavior |
 
 ### Content Extraction with Readability
 
@@ -250,6 +257,29 @@ if (article) {
 
 This pipeline gives you battle-tested content extraction + fast markdown conversion.
 
+## Hook-Based Plugins (JS Engine)
+
+For custom hook-based plugins, use `@mdream/js`:
+
+```ts
+import { htmlToMarkdown } from '@mdream/js'
+import { createPlugin } from '@mdream/js/plugins'
+
+const myPlugin = createPlugin({
+  onNodeEnter(node) {
+    if (node.name === 'h1')
+      return '** '
+  },
+  processTextNode(textNode) {
+    if (textNode.parent?.attributes?.id === 'highlight') {
+      return { content: `**${textNode.value}**`, skip: false }
+    }
+  }
+})
+
+const markdown = htmlToMarkdown(html, { plugins: [myPlugin] })
+```
+
 ### Plugin Hooks
 
 - `beforeNodeProcess`: Called before any node processing, can skip nodes
@@ -257,94 +287,6 @@ This pipeline gives you battle-tested content extraction + fast markdown convers
 - `onNodeExit`: Called when exiting an element node
 - `processTextNode`: Called for each text node
 - `processAttributes`: Called to process element attributes
-
-### Creating a Plugin
-
-Use `createPlugin()` to create a plugin with type safety:
-
-```ts
-import type { ElementNode, TextNode } from 'mdream'
-import { htmlToMarkdown } from 'mdream'
-import { createPlugin } from 'mdream/plugins'
-
-const myPlugin = createPlugin({
-  onNodeEnter(node: ElementNode) {
-    if (node.name === 'h1') {
-      return '🔥 '
-    }
-  },
-
-  processTextNode(textNode: TextNode) {
-    // Transform text content
-    if (textNode.parent?.attributes?.id === 'highlight') {
-      return {
-        content: `**${textNode.value}**`,
-        skip: false
-      }
-    }
-  }
-})
-
-// Use the plugin
-const html: string = '<div id="highlight">Important text</div>'
-const markdown: string = htmlToMarkdown(html, { plugins: [myPlugin] })
-```
-
-### Example: Content Filter Plugin
-
-```ts
-import type { ElementNode, NodeEvent } from 'mdream'
-import { ELEMENT_NODE } from 'mdream'
-import { createPlugin } from 'mdream/plugins'
-
-const adBlockPlugin = createPlugin({
-  beforeNodeProcess(event: NodeEvent) {
-    const { node } = event
-
-    if (node.type === ELEMENT_NODE && node.name === 'div') {
-      const element = node as ElementNode
-      // Skip ads and promotional content
-      if (element.attributes?.class?.includes('ad')
-        || element.attributes?.id?.includes('promo')) {
-        return { skip: true }
-      }
-    }
-  }
-})
-```
-
-### Extraction Plugin
-
-Extract specific elements and their content during HTML processing for data analysis or content discovery:
-
-```ts
-import { extractionPlugin, htmlToMarkdown } from 'mdream'
-
-const html: string = `
-  <article>
-    <h2>Getting Started</h2>
-    <p>This is a tutorial about web scraping.</p>
-    <img src="/hero.jpg" alt="Hero image" />
-  </article>
-`
-
-// Extract elements using CSS selectors
-const plugin = extractionPlugin({
-  'h2': (element: ExtractedElement, state: MdreamRuntimeState) => {
-    console.log('Heading:', element.textContent) // "Getting Started"
-    console.log('Depth:', state.depth) // Current nesting depth
-  },
-  'img[alt]': (element: ExtractedElement, state: MdreamRuntimeState) => {
-    console.log('Image:', element.attributes.src, element.attributes.alt)
-    // "Image: /hero.jpg Hero image"
-    console.log('Context:', state.options) // Access to conversion options
-  }
-})
-
-htmlToMarkdown(html, { plugins: [plugin] })
-```
-
-The extraction plugin provides memory-efficient element extraction with full text content and attributes, perfect for SEO analysis, content discovery, and data mining.
 
 ## Markdown Splitting
 
@@ -459,21 +401,17 @@ const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
 
 ## llms.txt Generation
 
-For llms.txt artifact generation, use the standalone [`@mdream/llms-txt`](../llms-txt) package. It is engine-agnostic and accepts pre-converted markdown.
+For llms.txt artifact generation, use `@mdream/js/llms-txt`. It accepts pre-converted markdown and generates `llms.txt` and `llms-full.txt` artifacts.
 
 ```ts
-import { generateLlmsTxtArtifacts, processHtmlFiles } from '@mdream/llms-txt'
+import { generateLlmsTxtArtifacts } from '@mdream/js/llms-txt'
 import { htmlToMarkdown } from 'mdream'
 
-// Process HTML files with your own converter
-const files = await processHtmlFiles('**/*.html', (html, url) => {
-  const { markdown } = htmlToMarkdown(html, { origin: url })
-  return { markdown }
-}, { origin: 'https://example.com' })
-
-// Generate artifacts
 const result = await generateLlmsTxtArtifacts({
-  files,
+  files: [
+    { title: 'Home', url: '/', content: htmlToMarkdown(homeHtml) },
+    { title: 'About', url: '/about', content: htmlToMarkdown(aboutHtml) },
+  ],
   siteName: 'My Site',
   origin: 'https://example.com',
   generateFull: true,
@@ -482,8 +420,6 @@ const result = await generateLlmsTxtArtifacts({
 console.log(result.llmsTxt) // llms.txt content
 console.log(result.llmsFullTxt) // llms-full.txt content
 ```
-
-See the [`@mdream/llms-txt` README](../llms-txt/README.md) for full API docs including streaming, sections, and notes.
 
 ## Credits
 

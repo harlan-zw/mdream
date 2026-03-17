@@ -69,7 +69,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
   async function convertHtmlToMarkdown(htmlContent: string, source: string): Promise<string> {
     try {
-      const { markdown: markdownContent } = htmlToMarkdown(htmlContent, mdreamOptions)
+      const markdownContent = htmlToMarkdown(htmlContent, mdreamOptions)
       log(`Converted ${source} to markdown (${markdownContent.length} chars)`)
       return markdownContent
     }
@@ -258,7 +258,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
             continue
           }
           const htmlContent = htmlFile.source as string
-          const { markdown: markdownContent } = htmlToMarkdown(htmlContent, mdreamOptions)
+          const markdownContent = htmlToMarkdown(htmlContent, mdreamOptions)
 
           // Generate corresponding .md filename (preserving directory structure)
           const markdownFileName = fileName.replace('.html', '.md')

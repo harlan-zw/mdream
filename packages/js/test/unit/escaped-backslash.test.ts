@@ -16,7 +16,7 @@ describe('escaped backslash in script tags', () => {
       '</body></html>',
     ].join('')
 
-    const md = htmlToMarkdown(html).markdown
+    const md = htmlToMarkdown(html)
     expect(md).toContain('# Hello World')
     expect(md).toContain('This content must not be lost')
   })
@@ -30,7 +30,7 @@ describe('escaped backslash in script tags', () => {
       '</body></html>',
     ].join('')
 
-    const md = htmlToMarkdown(html).markdown
+    const md = htmlToMarkdown(html)
     expect(md).toContain('Visible content')
   })
 
@@ -45,7 +45,7 @@ describe('escaped backslash in script tags', () => {
       '</body></html>',
     ].join('')
 
-    const md = htmlToMarkdown(html).markdown
+    const md = htmlToMarkdown(html)
     expect(md).toContain('After script')
   })
 })

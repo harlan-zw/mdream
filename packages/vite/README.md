@@ -34,13 +34,11 @@ export default defineConfig({
   plugins: [
     viteHtmlToMarkdownPlugin({
       // Optional configuration
-      include: ['**/*.html'],
+      include: ['*.html', '**/*.html'],
       exclude: ['**/node_modules/**'],
-      outputDir: 'markdown',
       cacheEnabled: true,
       mdreamOptions: {
-        // mdream configuration options
-        plugins: []
+        minimal: true, // frontmatter, isolateMain, tailwind, filter
       }
     })
   ]
@@ -70,21 +68,19 @@ This means LLM bots automatically receive optimized markdown responses, reducing
 interface ViteHtmlToMarkdownOptions {
   /**
    * Glob patterns to include HTML files for processing
-   * @default ['**\/*.html']
+   * @default ['*.html', '**\/*.html']
    */
   include?: string[]
 
   /**
    * Glob patterns to exclude from processing
-   * @default ['*
-   */node_modules/**
-    ']
-                  */
+   * @default ['**\/node_modules\/**']
+   */
   exclude?: string[]
 
   /**
    * Output directory for generated markdown files
-   * @default 'markdown'
+   * @default '' (same directory as HTML files)
    */
   outputDir?: string
 
@@ -97,13 +93,7 @@ interface ViteHtmlToMarkdownOptions {
   /**
    * Options to pass to mdream's htmlToMarkdown function
    */
-  mdreamOptions?: HtmlToMarkdownOptions
-
-  /**
-   * Whether to preserve directory structure in output
-   * @default true
-   */
-  preserveStructure?: boolean
+  mdreamOptions?: Partial<MdreamOptions>
 
   /**
    * Custom cache TTL in milliseconds for production
@@ -112,7 +102,7 @@ interface ViteHtmlToMarkdownOptions {
   cacheTTL?: number
 
   /**
-   * Whether to log conversion activities
+   * Enable verbose logging for debugging
    * @default false
    */
   verbose?: boolean
@@ -161,12 +151,10 @@ export default defineConfig({
     viteHtmlToMarkdownPlugin({
       include: ['pages/**/*.html', 'docs/**/*.html'],
       exclude: ['**/admin/**', '**/private/**'],
-      outputDir: 'public/markdown',
       verbose: true,
       mdreamOptions: {
-        plugins: [
-          // Custom mdream plugins
-        ]
+        minimal: true,
+        origin: 'https://example.com',
       }
     })
   ]
@@ -177,16 +165,14 @@ export default defineConfig({
 
 ```javascript
 import { viteHtmlToMarkdownPlugin } from '@mdream/vite'
-import { filterPlugin, isolateMainPlugin } from 'mdream/plugins'
 
 export default defineConfig({
   plugins: [
     viteHtmlToMarkdownPlugin({
       mdreamOptions: {
-        plugins: [
-          isolateMainPlugin(),
-          filterPlugin({ exclude: ['nav', '.sidebar'] })
-        ]
+        minimal: true, // enables frontmatter, isolateMain, tailwind, filter
+        origin: 'https://example.com',
+        clean: true, // enable all post-processing cleanup
       }
     })
   ]

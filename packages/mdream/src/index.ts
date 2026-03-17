@@ -48,10 +48,6 @@ export interface MdreamOptions {
   /** Origin URL for resolving relative image paths and internal links. */
   origin?: string
   /**
-   * @deprecated Use `clean: { urls: true }` or `clean: true` instead.
-   */
-  cleanUrls?: boolean
-  /**
    * Clean up the markdown output. Pass `true` for all cleanup or an object
    * to enable specific features. `clean.urls` is handled during conversion;
    * other options are post-processing steps (sync API only).
@@ -78,20 +74,20 @@ export interface MdreamOptions {
   tagOverrides?: Record<string, TagOverride | string>
 }
 
-const MINIMAL_FILTER_EXCLUDE = ['form', 'fieldset', 'object', 'embed', 'footer', 'aside', 'iframe', 'input', 'textarea', 'select', 'button', 'nav']
+const MINIMAL_FILTER_EXCLUDE = ['form', 'fieldset', 'object', 'embed', 'footer', 'aside', 'iframe', 'input', 'textarea', 'select', 'button', 'nav'] as const
+const MINIMAL_FILTER_DEFAULT = { exclude: MINIMAL_FILTER_EXCLUDE as unknown as string[] }
 
 const CLEAN_ALL: CleanOptions = { urls: true, fragments: true, emptyLinks: true, redundantLinks: true, selfLinkHeadings: true, emptyImages: true, emptyLinkText: true }
 
 function resolveCleanConfig(options: Partial<MdreamOptions>, minimal: boolean): { cleanUrls: boolean, clean?: CleanOptions } {
   let cleanOpt = options.clean
-  // Default clean: true when minimal is on, unless explicitly set to false
   if (cleanOpt === undefined && minimal)
     cleanOpt = true
   if (!cleanOpt)
-    return { cleanUrls: options.cleanUrls || false }
+    return { cleanUrls: false }
   const resolved = cleanOpt === true ? CLEAN_ALL : cleanOpt
   return {
-    cleanUrls: options.cleanUrls || resolved.urls || false,
+    cleanUrls: resolved.urls || false,
     clean: resolved,
   }
 }
@@ -102,58 +98,33 @@ interface ResolvedOptions {
   frontmatterCallback?: (fm: Record<string, string>) => void
 }
 
+function resolveFrontmatter(opt: MdreamOptions['frontmatter']): { config?: object, callback?: (fm: Record<string, string>) => void } {
+  if (typeof opt === 'function')
+    return { config: {}, callback: opt }
+  if (typeof opt === 'object')
+    return { config: opt, callback: opt.onExtract }
+  return { config: {} }
+}
+
 function resolveOptions(options: Partial<MdreamOptions>): ResolvedOptions {
   const minimal = options.minimal === true
   const plugins: PluginOptions = {}
-
-  const frontmatterOpt = options.frontmatter
-  const isolateMainOpt = options.isolateMain
-  const tailwindOpt = options.tailwind
-  const filterOpt = options.filter
-
   let frontmatterCallback: ((fm: Record<string, string>) => void) | undefined
 
-  if (minimal) {
-    if (frontmatterOpt !== false) {
-      if (typeof frontmatterOpt === 'function') {
-        frontmatterCallback = frontmatterOpt
-        plugins.frontmatter = {}
-      }
-      else if (typeof frontmatterOpt === 'object') {
-        frontmatterCallback = frontmatterOpt.onExtract
-        plugins.frontmatter = frontmatterOpt
-      }
-      else {
-        plugins.frontmatter = {}
-      }
-    }
-    if (isolateMainOpt !== false)
-      plugins.isolateMain = true
-    if (tailwindOpt !== false)
-      plugins.tailwind = true
-    plugins.filter = filterOpt || { exclude: MINIMAL_FILTER_EXCLUDE }
+  const enableFm = minimal ? options.frontmatter !== false : !!options.frontmatter
+  if (enableFm) {
+    const fm = resolveFrontmatter(options.frontmatter)
+    plugins.frontmatter = fm.config
+    frontmatterCallback = fm.callback
   }
-  else {
-    if (frontmatterOpt) {
-      if (typeof frontmatterOpt === 'function') {
-        frontmatterCallback = frontmatterOpt
-        plugins.frontmatter = {}
-      }
-      else if (typeof frontmatterOpt === 'object') {
-        frontmatterCallback = frontmatterOpt.onExtract
-        plugins.frontmatter = frontmatterOpt
-      }
-      else {
-        plugins.frontmatter = {}
-      }
-    }
-    if (isolateMainOpt)
-      plugins.isolateMain = true
-    if (tailwindOpt)
-      plugins.tailwind = true
-    if (filterOpt)
-      plugins.filter = filterOpt
-  }
+  if (minimal ? options.isolateMain !== false : options.isolateMain)
+    plugins.isolateMain = true
+  if (minimal ? options.tailwind !== false : options.tailwind)
+    plugins.tailwind = true
+  if (minimal)
+    plugins.filter = options.filter || MINIMAL_FILTER_DEFAULT
+  else if (options.filter)
+    plugins.filter = options.filter
 
   let extractionHandlers: Record<string, (el: ExtractedElement) => void> | undefined
   if (options.extraction) {
@@ -209,12 +180,13 @@ export async function* streamHtmlToMarkdown(
   const { napiOpts } = resolveOptions(options)
   const stream = new _MarkdownStream(napiOpts)
   const reader = htmlStream.getReader()
+  const decoder = new TextDecoder()
   try {
     while (true) {
       const { done, value } = await reader.read()
       if (done)
         break
-      const chunk = typeof value === 'string' ? value : new TextDecoder().decode(value)
+      const chunk = typeof value === 'string' ? value : decoder.decode(value)
       const processed = stream.processChunk(chunk)
       if (processed)
         yield processed

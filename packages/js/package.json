@@ -62,6 +62,14 @@
         "default": "./dist/parse.mjs"
       },
       "default": "./dist/parse.mjs"
+    },
+    "./llms-txt": {
+      "types": "./dist/llms-txt.d.mts",
+      "import": {
+        "types": "./dist/llms-txt.d.mts",
+        "default": "./dist/llms-txt.mjs"
+      },
+      "default": "./dist/llms-txt.mjs"
     }
   },
   "main": "./dist/index.mjs",

@@ -58,5 +58,5 @@ export interface MdreamLlmsTxtGeneratePayload {
   /** Current llms-full.txt content - modify this directly */
   fullContent: string
   /** All routes with their metadata (read-only) */
-  pages: import('@mdream/llms-txt').ProcessedFile[]
+  pages: import('@mdream/js/llms-txt').ProcessedFile[]
 }

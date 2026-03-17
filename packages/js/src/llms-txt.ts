@@ -1,7 +1,6 @@
 import type { FileHandle } from 'node:fs/promises'
-import { mkdir, open, readFile } from 'node:fs/promises'
-import { basename, dirname, join, relative, sep } from 'pathe'
-import { glob } from 'tinyglobby'
+import { mkdir, open } from 'node:fs/promises'
+import { join, relative } from 'pathe'
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/
 const ANCHOR_INVALID_CHARS_RE = /[^a-z0-9]/g
@@ -64,95 +63,6 @@ export interface LlmsTxtArtifactsResult {
   llmsFullTxt?: string
   markdownFiles?: { path: string, content: string }[]
   processedFiles: ProcessedFile[]
-}
-
-/**
- * Callback that converts an HTML string into markdown + metadata.
- * Used by `processHtmlFiles` to stay engine-agnostic.
- */
-export type HtmlFileConverter = (html: string, url: string) => {
-  markdown: string
-  metadata?: ProcessedFile['metadata']
-}
-
-/**
- * Convert file path to URL path
- */
-function pathToUrl(filePath: string, baseDir: string): string {
-  let url = relative(baseDir, filePath)
-
-  // Convert Windows backslashes to forward slashes for URLs
-  url = url.split(sep).join('/')
-
-  // Remove .html extension and convert to URL path
-  if (url.endsWith('.html')) {
-    url = url.slice(0, -5)
-  }
-
-  // Convert index files to directory paths
-  if (url.endsWith('/index')) {
-    url = url.slice(0, -6)
-  }
-
-  // Handle root index file
-  if (url === 'index') {
-    return '/'
-  }
-
-  // Ensure leading slash
-  if (!url.startsWith('/')) {
-    url = `/${url}`
-  }
-
-  return url
-}
-
-/**
- * Process HTML files from glob patterns using a provided converter.
- * The converter handles HTML→Markdown conversion and metadata extraction,
- * keeping this package engine-agnostic.
- */
-export async function processHtmlFiles(
-  patterns: string | string[],
-  converter: HtmlFileConverter,
-  options?: { origin?: string },
-): Promise<ProcessedFile[]> {
-  const allPatterns = Array.isArray(patterns) ? patterns : [patterns]
-  const allFiles: string[] = []
-
-  for (const pattern of allPatterns) {
-    const files = await glob(pattern)
-    allFiles.push(...files)
-  }
-
-  // Remove duplicates
-  const uniqueFiles = [...new Set(allFiles)]
-  const results: ProcessedFile[] = []
-
-  // Find common base directory
-  const baseDir = uniqueFiles.length > 0 ? dirname(uniqueFiles[0]!) : '.'
-
-  for (const filePath of uniqueFiles) {
-    try {
-      const html = await readFile(filePath, 'utf-8')
-      const url = options?.origin || filePath
-      const { markdown, metadata } = converter(html, url)
-      const urlPath = pathToUrl(filePath, baseDir)
-
-      results.push({
-        filePath,
-        title: metadata?.title || basename(filePath, '.html'),
-        content: markdown,
-        url: urlPath,
-        metadata,
-      })
-    }
-    catch (error) {
-      console.error(`Error processing ${filePath}:`, error)
-    }
-  }
-
-  return results
 }
 
 /**

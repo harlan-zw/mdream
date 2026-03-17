@@ -46,7 +46,7 @@ const results = await crawlAndGenerate({
 })
 ```
 
-> **Note**: llms.txt artifact generation is handled by [`@mdream/llms-txt`](../llms-txt). The crawl package uses it internally when `generateLlmsTxt: true`.
+> **Note**: llms.txt artifact generation is handled by [`@mdream/js/llms-txt`](../js). The crawl package uses it internally when `generateLlmsTxt: true`.
 
 ## Output
 

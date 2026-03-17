@@ -54,7 +54,6 @@
   },
   "dependencies": {
     "@mdream/js": "workspace:*",
-    "@mdream/llms-txt": "workspace:*",
     "@nuxt/kit": "catalog:",
     "consola": "catalog:",
     "defu": "catalog:",

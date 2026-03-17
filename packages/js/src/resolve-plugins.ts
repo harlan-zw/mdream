@@ -8,6 +8,14 @@ export interface ResolvedPlugins {
   frontmatterCallback?: (fm: Record<string, string>) => void
 }
 
+function resolveFrontmatterOpt(opt: NonNullable<EngineOptions['plugins']>['frontmatter']): { config: FrontmatterConfig, callback?: (fm: Record<string, string>) => void } {
+  if (typeof opt === 'function')
+    return { config: {}, callback: opt }
+  if (typeof opt === 'object')
+    return { config: opt, callback: opt.onExtract }
+  return { config: {} }
+}
+
 /**
  * Resolves declarative BuiltinPlugins config into a flat TransformPlugin array.
  * Optionally appends imperative transform plugins.
@@ -21,17 +29,11 @@ export function resolvePlugins(options: EngineOptions, hooks?: TransformPlugin[]
 
   if (config) {
     if (config.frontmatter) {
-      let fmConfig: FrontmatterConfig = {}
-      if (typeof config.frontmatter === 'function') {
-        frontmatterCallback = config.frontmatter
-      }
-      else if (typeof config.frontmatter === 'object') {
-        fmConfig = config.frontmatter
-        frontmatterCallback = config.frontmatter.onExtract
-      }
-      const fmPlugin = frontmatterPlugin(fmConfig)
+      const fm = resolveFrontmatterOpt(config.frontmatter)
+      const fmPlugin = frontmatterPlugin(fm.config)
       plugins.push(fmPlugin)
       getFrontmatter = (fmPlugin as any).getFrontmatter
+      frontmatterCallback = fm.callback
     }
     if (config.isolateMain) {
       plugins.push(isolateMainPlugin())
