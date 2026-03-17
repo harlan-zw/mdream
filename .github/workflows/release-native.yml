@@ -128,7 +128,7 @@ jobs:
         if: startsWith(matrix.target, 'wasm')
         working-directory: crates/node
         run: |
-          wasm-opt -Oz rust.wasm -o rust.wasm
+          wasm-opt -Oz --enable-bulk-memory --enable-threads --enable-mutable-globals --enable-sign-ext rust.wasm -o rust.wasm
           node ./scripts/move-artifacts.mjs
 
       - name: Upload artifact
