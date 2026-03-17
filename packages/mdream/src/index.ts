@@ -181,6 +181,14 @@ function resolveOptions(options: Partial<MdreamOptions>): ResolvedOptions {
 }
 
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
+  if (Array.isArray((options as any).plugins)) {
+    throw new TypeError(
+      'Custom hook plugins require @mdream/js. '
+      + 'Pass declarative config (e.g. { frontmatter: true }) to the Rust engine, '
+      + 'or import { htmlToMarkdown } from \'@mdream/js\' for hook-based plugins. '
+      + 'See https://mdream.dev/v1-migration#custom-plugins',
+    )
+  }
   const { napiOpts, extractionHandlers, frontmatterCallback } = resolveOptions(options)
   const napiResult = _htmlToMarkdown(html, napiOpts)
   if (napiResult.frontmatter && frontmatterCallback)
