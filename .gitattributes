@@ -1,0 +1,3 @@
+# Ensure consistent line endings for test fixtures across all platforms
+*.html text eol=lf
+*.md text eol=lf
