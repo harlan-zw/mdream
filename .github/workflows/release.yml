@@ -47,19 +47,17 @@ jobs:
         with:
           path: artifacts
 
-      - name: Move native bindings to platform packages
+      - name: Flatten native artifacts for napi
         run: |
-          for dir in artifacts/bindings-*/crates/node/npm/*/; do
-            platform=$(basename "$dir")
-            cp -v "$dir"* "crates/node/npm/$platform/" 2>/dev/null || true
-          done
+          mkdir -p crates/node/artifacts
+          find artifacts/bindings-* -type f \( -name '*.node' -o -name '*.wasm' -o -name '*.js' -o -name '*.cjs' -o -name '*.mjs' \) -exec cp -v {} crates/node/artifacts/ \;
 
       - name: Move WASM edge artifacts
         run: |
           mkdir -p packages/mdream/wasm
           cp -v artifacts/wasm-edge/* packages/mdream/wasm/
 
-      - name: Generate NAPI index.js and index.d.ts
+      - name: Generate NAPI index.js and move to npm dirs
         working-directory: crates/node
         run: pnpm exec napi artifacts
 

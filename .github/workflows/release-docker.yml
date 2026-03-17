@@ -30,33 +30,35 @@ jobs:
         with:
           path: artifacts
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Setup napi native bindings for Docker build context
         run: |
-          mkdir -p packages/mdream/napi
+          mkdir -p crates/node/artifacts packages/mdream/napi
 
-          # Copy the linux-x64-gnu native binding (Docker target platform)
-          BINDING_DIR="artifacts/bindings-x86_64-unknown-linux-gnu"
-          if [ -d "$BINDING_DIR" ]; then
-            find "$BINDING_DIR" -name "*.node" -exec cp -v {} packages/mdream/napi/ \;
-          fi
+          # Flatten all .node/.wasm files into crates/node/artifacts for napi artifacts
+          find artifacts/bindings-* -type f \( -name '*.node' -o -name '*.wasm' -o -name '*.js' -o -name '*.cjs' -o -name '*.mjs' \) -exec cp -v {} crates/node/artifacts/ \;
 
-          # Generate napi index files using the artifacts
-          # Copy the NAPI entry files
-          if [ -d "artifacts/bindings-x86_64-unknown-linux-gnu" ]; then
-            # Install deps to generate napi index
-            npm install -g pnpm@10.32.1
-            pnpm install
-            # Move all platform artifacts for napi artifacts command
-            for dir in artifacts/bindings-*/crates/node/npm/*/; do
-              platform=$(basename "$dir")
-              mkdir -p "crates/node/npm/$platform"
-              cp -v "$dir"* "crates/node/npm/$platform/" 2>/dev/null || true
-            done
-            cd crates/node && pnpm exec napi artifacts && cd ../..
-            cp crates/node/index.js packages/mdream/napi/index.mjs
-            cp crates/node/index.d.ts packages/mdream/napi/index.d.ts
-            cp crates/node/index.d.ts packages/mdream/napi/index.d.mts
-          fi
+          # Generate napi index.js/index.d.ts and move bindings to npm subdirs
+          cd crates/node && pnpm exec napi artifacts && cd ../..
+
+          # Copy NAPI entry files to distribution package
+          cp crates/node/index.js packages/mdream/napi/index.mjs
+          cp crates/node/index.d.ts packages/mdream/napi/index.d.ts
+          cp crates/node/index.d.ts packages/mdream/napi/index.d.mts
+
+          # Copy linux-x64-gnu binding for Docker build
+          find artifacts/bindings-x86_64-unknown-linux-gnu -name "*.node" -exec cp -v {} packages/mdream/napi/ \;
 
           echo "=== napi directory contents ==="
           ls -la packages/mdream/napi/
