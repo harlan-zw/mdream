@@ -29,17 +29,9 @@
 
 ## What is Mdream?
 
-A zero-dependency alternative to [Turndown](https://github.com/mixmark-io/turndown), [node-html-markdown](https://github.com/crosstype/node-html-markdown), and [html-to-markdown](https://github.com/JohannesKaufmann/html-to-markdown), built specifically for LLM input.
+A zero-dependency, LLM-optimized HTML to Markdown converter. Faster and leaner than [Turndown](https://github.com/mixmark-io/turndown), [node-html-markdown](https://github.com/crosstype/node-html-markdown), and [html-to-markdown](https://github.com/JohannesKaufmann/html-to-markdown), with output tuned for token efficiency and readability.
 
-Traditional HTML to Markdown converters were not built for LLMs or humans. They tend to be slow and bloated and produce output that's poorly suited for LLMs token usage or for
-human readability.
-
-Other LLM specific convertors focus on supporting _all_ document formats, resulting in larger bundles and lower quality Markdown output.
-
-Mdream core is a highly optimized primitive for producing Markdown from HTML that is optimized for LLMs.
-
-Mdream ships several packages on top of this to generate LLM artifacts like `llms.txt`
-for your own sites or generate LLM context for any project you're working with.
+On top of the core converter, Mdream ships packages to generate LLM artifacts like `llms.txt` for your own sites or produce LLM context for any project.
 
 ### Mdream Packages
 
