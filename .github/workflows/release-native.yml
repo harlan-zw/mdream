@@ -106,7 +106,7 @@ jobs:
       - name: Build native module (wasm)
         if: startsWith(matrix.target, 'wasm')
         working-directory: crates/node
-        run: pnpm exec napi build --release --target ${{ matrix.target }}
+        run: pnpm exec napi build --target ${{ matrix.target }} --profile wasm
 
       - name: Build native module
         if: ${{ !matrix.use_zigbuild && !matrix.use_napi_cross && !startsWith(matrix.target, 'wasm') }}
@@ -128,7 +128,7 @@ jobs:
         if: startsWith(matrix.target, 'wasm')
         working-directory: crates/node
         run: |
-          wasm-opt -Oz --enable-bulk-memory --enable-threads --enable-mutable-globals --enable-sign-ext rust.wasm -o rust.wasm
+          wasm-opt -Oz --all-features --converge --low-memory-unused rust.wasm -o rust.wasm
           node ./scripts/move-artifacts.mjs
 
       - name: Upload artifact

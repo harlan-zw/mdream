@@ -57,7 +57,7 @@
     "build": "pnpm run build:platform && pnpm run build:wasm",
     "build:platform": "napi build --platform --release --esm",
     "postbuild:platform": "node ./scripts/move-artifacts.mjs",
-    "build:wasm": "napi build --release --target wasm32-wasip1-threads",
+    "build:wasm": "napi build --target wasm32-wasip1-threads --profile wasm",
     "postbuild:wasm": "node ./scripts/move-artifacts.mjs",
     "build:edge": "cargo build --release --target wasm32-unknown-unknown -p mdream-edge --manifest-path ../Cargo.toml && wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge ../edge",
     "build:debug": "napi build --platform --esm",
