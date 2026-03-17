@@ -7,7 +7,7 @@ Multi-page website crawler that generates comprehensive llms.txt files by follow
 ## Installation
 
 ```bash
-npm install @mdream/crawl
+npm install @mdream/crawl@beta
 ```
 
 ## Usage
@@ -15,7 +15,7 @@ npm install @mdream/crawl
 Simply run the command to start the interactive multi-page website crawler:
 
 ```bash
-npx @mdream/crawl
+npx @mdream/crawl@beta
 ```
 
 The crawler will automatically discover and follow internal links to crawl entire websites. The interactive interface provides:

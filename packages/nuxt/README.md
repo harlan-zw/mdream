@@ -16,7 +16,7 @@ Nuxt module for converting HTML pages to Markdown using [mdream](https://github.
 ## Installation
 
 ```bash
-pnpm add @mdream/nuxt
+pnpm add @mdream/nuxt@beta
 ```
 
 ## Usage

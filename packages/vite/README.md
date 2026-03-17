@@ -19,7 +19,7 @@ Vite plugin for HTML to Markdown conversion with on-demand generation support.
 ## Installation
 
 ```bash
-pnpm add @mdream/vite
+pnpm add @mdream/vite@beta
 ```
 
 ## Usage

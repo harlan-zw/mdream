@@ -54,7 +54,7 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 ### Installation
 
 ```bash
-pnpm add mdream
+pnpm add mdream@beta
 ```
 
 > [!TIP]
@@ -93,13 +93,13 @@ The `@mdream/crawl` package crawls an entire site generating LLM artifacts using
 
 ```sh
 # Interactive
-npx @mdream/crawl
+npx @mdream/crawl@beta
 # Simple
-npx @mdream/crawl https://harlanzw.com
+npx @mdream/crawl@beta https://harlanzw.com
 # Glob patterns
-npx @mdream/crawl "https://nuxt.com/docs/getting-started/**"
+npx @mdream/crawl@beta "https://nuxt.com/docs/getting-started/**"
 # Get help
-npx @mdream/crawl -h
+npx @mdream/crawl@beta -h
 ```
 
 ### Examples
@@ -111,19 +111,19 @@ Feed website content directly to Claude or other AI tools:
 
 ```bash
 # Analyze entire site with Claude
-npx @mdream/crawl harlanzw.com
+npx @mdream/crawl@beta harlanzw.com
 cat output/llms-full.txt | claude -p "summarize this website"
 
 # Analyze specific documentation
-npx @mdream/crawl "https://nuxt.com/docs/getting-started/**"
+npx @mdream/crawl@beta "https://nuxt.com/docs/getting-started/**"
 cat output/llms-full.txt | claude -p "explain key concepts"
 
 # Analyze JavaScript/SPA sites (React, Vue, Angular)
-npx -p playwright -p @mdream/crawl crawl https://spa-site.com --driver playwright
+npx -p playwright -p @mdream/crawl@beta crawl https://spa-site.com --driver playwright
 cat output/llms-full.txt | claude -p "what features does this app have"
 
 # Convert single page
-curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream --origin https://en.wikipedia.org | claude -p "summarize"
+curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream@beta --origin https://en.wikipedia.org | claude -p "summarize"
 ```
 </details>
 
@@ -134,10 +134,10 @@ Generate llms.txt to help AI tools understand your site:
 
 ```bash
 # Static sites
-npx @mdream/crawl https://yoursite.com
+npx @mdream/crawl@beta https://yoursite.com
 
 # JavaScript/SPA sites (React, Vue, Angular)
-npx -p playwright -p @mdream/crawl crawl https://spa-site.com --driver playwright
+npx -p playwright -p @mdream/crawl@beta crawl https://spa-site.com --driver playwright
 ```
 
 Outputs:
@@ -239,7 +239,7 @@ Fetches the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown) an
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream --origin https://en.wikipedia.org --preset minimal \
+ | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
   | tee streaming.md
 ```
 
@@ -251,7 +251,7 @@ Converts a local HTML file to a Markdown file, using `tee` to write the output t
 
 ```bash
 cat index.html \
- | npx mdream --preset minimal \
+ | npx mdream@beta --preset minimal \
   | tee streaming.md
 ```
 
@@ -288,7 +288,7 @@ See [DOCKER.md](./DOCKER.md) for complete usage, configuration, and building ins
 ### Installation
 
 ```bash
-pnpm add @mdream/action
+pnpm add @mdream/action@beta
 ```
 
 See the [GitHub Actions README](./packages/action/README.md) for usage and configuration.
@@ -298,7 +298,7 @@ See the [GitHub Actions README](./packages/action/README.md) for usage and confi
 ### Installation
 
 ```bash
-pnpm install @mdream/vite
+pnpm install @mdream/vite@beta
 ```
 
 See the [Vite README](./packages/vite/README.md) for usage and configuration.
@@ -308,7 +308,7 @@ See the [Vite README](./packages/vite/README.md) for usage and configuration.
 ### Installation
 
 ```bash
-pnpm add @mdream/nuxt
+pnpm add @mdream/nuxt@beta
 ```
 
 See the [Nuxt Module README](./packages/nuxt/README.md) for usage and configuration.

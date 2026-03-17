@@ -39,7 +39,7 @@ Mdream produces high-quality Markdown for LLMs efficiently with no core dependen
 ## Installation
 
 ```bash
-pnpm add mdream
+pnpm add mdream@beta
 ```
 
 ## CLI Usage
@@ -53,7 +53,7 @@ Fetches the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown) an
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream --origin https://en.wikipedia.org --preset minimal \
+ | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
   | tee streaming.md
 ```
 
@@ -65,7 +65,7 @@ Converts a local HTML file to a Markdown file, using `tee` to write the output t
 
 ```bash
 cat index.html \
- | npx mdream --preset minimal \
+ | npx mdream@beta --preset minimal \
   | tee streaming.md
 ```
 
@@ -205,7 +205,7 @@ const markdown = htmlToMarkdown(html, {
 
 **CLI Usage:**
 ```bash
-curl -s https://example.com | npx mdream --preset minimal --origin https://example.com
+curl -s https://example.com | npx mdream@beta --preset minimal --origin https://example.com
 ```
 
 ## Declarative Options

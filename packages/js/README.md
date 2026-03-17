@@ -13,7 +13,7 @@ This package consolidates functionality previously split across `@mdream/core`, 
 ## Installation
 
 ```bash
-pnpm add @mdream/js
+pnpm add @mdream/js@beta
 ```
 
 ## Entry Points
