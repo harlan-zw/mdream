@@ -20,12 +20,12 @@
 
 ## Features
 
-- 🧠 Optimized HTML To Markdown Conversion (~50% fewer tokens with [Minimal preset](./src/preset/minimal.ts))
+- 🧠 Optimized HTML To Markdown Conversion (~50% fewer tokens with Minimal preset)
 - 🔍 Generates GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
-- 🚀 Fast: Stream 1.4MB of HTML to markdown in ~50ms.
+- 🚀 Fast: Convert 1.8MB of HTML to markdown in ~8ms (Rust), ~62ms (JS). Up to 7.9x speedup.
 - ⚡ Tiny: 10kB gzip JS core, 45kB gzip with Rust WASM engine. Zero dependencies.
 - ⚙️ Run anywhere: CLI, edge workers, browsers, Node, etc.
-- 🔌 Extensible: [Plugin system](#plugin-system) for customizing and extending functionality.
+- 🔌 Extensible: Declarative plugin config for both engines, hook-based plugins via `@mdream/js`.
 
 ## What is Mdream?
 
@@ -85,8 +85,8 @@ Mdream provides two main functions for working with HTML:
 ### Engines
 
 Mdream includes two rendering engines, automatically selecting the best one for your environment:
-- **Rust Engine** (default in Node.js): Native NAPI performance, ~3-4x faster. Bundled as optional dependencies.
-- **JavaScript Engine** (default in browser/edge): Zero-dependencies, works everywhere.
+- **Rust Engine** (default in Node.js): Native NAPI performance, 5.6-7.9x faster. WASM build for edge/browser runtimes.
+- **JavaScript Engine** (`@mdream/js`): Zero-dependencies, supports custom hook-based plugins.
 
 ```ts
 import { htmlToMarkdown } from 'mdream'
@@ -96,32 +96,39 @@ import { htmlToMarkdown } from 'mdream'
 const markdown = htmlToMarkdown('<h1>Hello World</h1>')
 ```
 
-## Browser CDN Usage
+## Browser & Edge Usage
 
-For browser environments, you can use mdream directly via CDN without any build step:
+For browser environments and edge runtimes (Cloudflare Workers, Vercel Edge), mdream compiles to WebAssembly. Export conditions (`workerd`, `edge-light`, `browser`) select the correct build automatically, or use `mdream/worker` directly:
+
+```ts
+import { htmlToMarkdown } from 'mdream/worker'
+
+const markdown = await htmlToMarkdown('<h1>Hello World</h1>')
+```
+
+### Browser CDN Usage
+
+Use mdream directly via CDN with no build step. The IIFE bundle uses the Rust WASM engine. Call `init()` once to load the WASM binary, then use `htmlToMarkdown()` synchronously.
 
 ```html
-<!DOCTYPE html>
-<html>
-<head>
-  <script src="https://unpkg.com/mdream/dist/iife.js"></script>
-</head>
-<body>
-  <script>
-    // Convert HTML to Markdown in the browser
-    const html = '<h1>Hello World</h1><p>This is a paragraph.</p>'
-    const markdown = window.mdream.htmlToMarkdown(html)
-    console.log(markdown) // # Hello World\n\nThis is a paragraph.
-  </script>
-</body>
-</html>
+<script src="https://unpkg.com/mdream/dist/iife.js"></script>
+<script>
+  // init() fetches the .wasm file from the same CDN path automatically
+  await window.mdream.init()
+  const markdown = window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
+  console.log(markdown) // # Hello\n\nWorld
+</script>
+```
+
+You can also pass a custom WASM URL or `ArrayBuffer` to `init()`:
+
+```js
+await window.mdream.init('https://cdn.example.com/mdream_edge_bg.wasm')
 ```
 
 **CDN Options:**
 - **unpkg**: `https://unpkg.com/mdream/dist/iife.js`
 - **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/iife.js`
-
-The browser build includes the core `htmlToMarkdown` function and is optimized for size (44kB uncompressed, 10.3kB gzipped).
 
 **Convert existing HTML**
 
@@ -151,12 +158,12 @@ for await (const chunk of markdownGenerator) {
 }
 ```
 
-**Pure HTML Parser**
+**Pure HTML Parser (JS Engine)**
 
-If you only need to parse HTML into a DOM-like AST without converting to Markdown, use `parseHtml`:
+If you only need to parse HTML into a DOM-like AST without converting to Markdown, use `parseHtml` from the JS engine:
 
 ```ts
-import { parseHtml } from 'mdream'
+import { parseHtml } from '@mdream/js'
 
 const html = '<div><h1>Title</h1><p>Content</p></div>'
 const { events, remainingHtml } = parseHtml(html)
@@ -177,34 +184,33 @@ The `parseHtml` function provides:
 
 ## Presets
 
-Presets are pre-configured combinations of plugins for common use cases.
-
 ### Minimal Preset
 
 The `minimal` preset optimizes for token reduction and cleaner output by removing non-essential content:
 
 ```ts
-import { withMinimalPreset } from 'mdream/preset/minimal'
+import { htmlToMarkdown } from 'mdream'
 
-const options = withMinimalPreset({
-  origin: 'https://example.com'
+const markdown = htmlToMarkdown(html, {
+  origin: 'https://example.com',
+  minimal: true,
 })
 ```
 
-**Plugins included:**
-- `isolateMainPlugin()` - Extracts main content area
-- `frontmatterPlugin()` - Generates YAML frontmatter from meta tags
-- `tailwindPlugin()` - Converts Tailwind classes to Markdown
-- `filterPlugin()` - Excludes forms, navigation, buttons, footers, and other non-content elements
+**Enables:**
+- `isolateMain` - Extracts main content area
+- `frontmatter` - Generates YAML frontmatter from meta tags
+- `tailwind` - Converts Tailwind classes to Markdown
+- `filter` - Excludes forms, navigation, buttons, footers, and other non-content elements
 
 **CLI Usage:**
 ```bash
 curl -s https://example.com | npx mdream --preset minimal --origin https://example.com
 ```
 
-## Declarative Options (Rust Engine)
+## Declarative Options
 
-The default Rust engine uses declarative configuration:
+Both engines accept the same declarative configuration:
 
 ```ts
 import { htmlToMarkdown } from 'mdream'
@@ -277,7 +283,7 @@ const myPlugin = createPlugin({
   }
 })
 
-const markdown = htmlToMarkdown(html, { plugins: [myPlugin] })
+const markdown = htmlToMarkdown(html, { hooks: [myPlugin] })
 ```
 
 ### Plugin Hooks
@@ -295,8 +301,8 @@ Split HTML into chunks during conversion for LLM context windows, vector databas
 ### Basic Chunking
 
 ```ts
-import { TAG_H2 } from 'mdream'
-import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
+import { TAG_H2 } from '@mdream/js'
+import { htmlToMarkdownSplitChunks } from '@mdream/js/splitter'
 
 const html = `
   <h1>Documentation</h1>
@@ -327,7 +333,7 @@ chunks.forEach((chunk) => {
 For large documents, use the generator version to process chunks one at a time:
 
 ```ts
-import { htmlToMarkdownSplitChunksStream } from 'mdream/splitter'
+import { htmlToMarkdownSplitChunksStream } from '@mdream/js/splitter'
 
 // Process chunks incrementally - lower memory usage
 for (const chunk of htmlToMarkdownSplitChunksStream(html, options)) {
@@ -362,7 +368,7 @@ interface SplitterOptions {
 
   // Standard options
   origin?: string // Base URL for links/images
-  plugins?: Plugin[] // Apply plugins during conversion
+  hooks?: TransformPlugin[] // Apply hook-based plugins during conversion (@mdream/js only)
 }
 ```
 
@@ -388,9 +394,9 @@ interface MarkdownChunk {
 Combine splitting with presets for optimized output:
 
 ```ts
-import { TAG_H2 } from 'mdream'
-import { withMinimalPreset } from 'mdream/preset/minimal'
-import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
+import { TAG_H2 } from '@mdream/js'
+import { withMinimalPreset } from '@mdream/js/preset/minimal'
+import { htmlToMarkdownSplitChunks } from '@mdream/js/splitter'
 
 const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
   headersToSplitOn: [TAG_H2],
@@ -401,10 +407,10 @@ const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
 
 ## llms.txt Generation
 
-For llms.txt artifact generation, use `@mdream/js/llms-txt`. It accepts pre-converted markdown and generates `llms.txt` and `llms-full.txt` artifacts.
+For llms.txt artifact generation, use `@mdream/llms-txt`. It accepts pre-converted markdown and generates `llms.txt` and `llms-full.txt` artifacts.
 
 ```ts
-import { generateLlmsTxtArtifacts } from '@mdream/js/llms-txt'
+import { generateLlmsTxtArtifacts } from '@mdream/llms-txt'
 import { htmlToMarkdown } from 'mdream'
 
 const result = await generateLlmsTxtArtifacts({
