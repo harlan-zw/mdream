@@ -1,6 +1,6 @@
 {
   "name": "@mdream/rust-android-arm-eabi",
-  "version": "%s",
+  "version": "1.0.0-beta.1",
   "license": "MIT",
   "repository": {
     "type": "git",
