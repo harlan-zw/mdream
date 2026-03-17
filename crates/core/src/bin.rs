@@ -1,5 +1,5 @@
 use std::io::{self, Read, Write};
-use mdream::html_to_markdown;
+use mdream::MarkdownStreamProcessor;
 use mdream::types::HTMLToMarkdownOptions;
 
 fn main() -> io::Result<()> {
@@ -38,25 +38,45 @@ fn main() -> io::Result<()> {
         i += 1;
     }
 
-    let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
-
-    if verbose {
-        eprintln!("Input: {} bytes", input.len());
-    }
-
     let options = HTMLToMarkdownOptions {
         origin,
         clean_urls,
         ..Default::default()
     };
 
-    let markdown = html_to_markdown(&input, options);
+    let mut processor = MarkdownStreamProcessor::new(options);
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    let mut buf = [0u8; 8192];
+    let mut total_in: usize = 0;
+    let mut total_out: usize = 0;
 
-    if verbose {
-        eprintln!("Output: {} bytes", markdown.len());
+    loop {
+        let n = stdin.lock().read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        total_in += n;
+        let chunk = std::str::from_utf8(&buf[..n]).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let md = processor.process_chunk(chunk);
+        if !md.is_empty() {
+            total_out += md.len();
+            out.write_all(md.as_bytes())?;
+            out.flush()?;
+        }
     }
 
-    io::stdout().write_all(markdown.as_bytes())?;
+    let remaining = processor.finish();
+    if !remaining.is_empty() {
+        total_out += remaining.len();
+        out.write_all(remaining.as_bytes())?;
+    }
+
+    if verbose {
+        eprintln!("Input: {} bytes", total_in);
+        eprintln!("Output: {} bytes", total_out);
+    }
+
     Ok(())
 }
