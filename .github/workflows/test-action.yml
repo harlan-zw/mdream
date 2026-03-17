@@ -80,7 +80,7 @@ jobs:
           fi
 
       - name: Upload test artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: test-action-output
           path: test-output/
@@ -148,7 +148,7 @@ jobs:
           fi
 
       - name: Upload fixtures artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: fixtures-action-output
           path: fixtures-output/

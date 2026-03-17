@@ -106,7 +106,7 @@ jobs:
       - name: Build native module (wasm)
         if: startsWith(matrix.target, 'wasm')
         working-directory: crates/node
-        run: pnpm exec napi build --platform --release --target ${{ matrix.target }}
+        run: pnpm exec napi build --release --target ${{ matrix.target }}
 
       - name: Build native module
         if: ${{ !matrix.use_zigbuild && !matrix.use_napi_cross && !startsWith(matrix.target, 'wasm') }}
@@ -132,7 +132,7 @@ jobs:
           node ./scripts/move-artifacts.mjs
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: bindings-${{ matrix.target }}
           path: |
@@ -180,7 +180,7 @@ jobs:
         run: wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: wasm-edge
           path: packages/mdream/wasm/
