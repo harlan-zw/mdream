@@ -8,6 +8,7 @@ const version = rootPkg.version
 const cargoFiles = [
   'crates/core/Cargo.toml',
   'crates/node/Cargo.toml',
+  'crates/edge/Cargo.toml',
 ]
 
 for (const file of cargoFiles) {
