@@ -1,13 +1,13 @@
+import { htmlToMarkdown as jsHtmlToMarkdown } from '@mdream/js'
+import { createPlugin } from '@mdream/js/plugins'
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src/index.js'
-import { createPlugin } from '../../../src/pluggable/plugin.ts'
-import { filterPlugin } from '../../../src/plugins/filter.ts'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines.ts'
 
 const RE_WHITESPACE = /\s+/
 
-describe('querySelector plugin', () => {
+describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
   // Basic tests for including elements
-  it('includes specified elements by tag when provided with include option', () => {
+  it('includes specified elements by tag when provided with include option', async () => {
     const html = `
       <div>This should be excluded</div>
       <h1>This heading should be included</h1>
@@ -16,9 +16,8 @@ describe('querySelector plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [
-        filterPlugin({ include: ['h1', 'p'] }),
-      ],
+      engine: await resolveEngine(engine),
+      plugins: { filter: { include: ['h1', 'p'] } },
     })
 
     // Check that h1 and p elements are included
@@ -26,7 +25,7 @@ describe('querySelector plugin', () => {
     expect(markdown).toContain('This paragraph should be included')
   })
 
-  it('excludes specified elements by tag', () => {
+  it('excludes specified elements by tag', async () => {
     const html = `
       <div>This should be included</div>
       <h1>This heading should be included</h1>
@@ -36,9 +35,8 @@ describe('querySelector plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [
-        filterPlugin({ exclude: ['aside', 'nav'] }),
-      ],
+      engine: await resolveEngine(engine),
+      plugins: { filter: { exclude: ['aside', 'nav'] } },
     })
 
     expect(markdown).toContain('This should be included')
@@ -49,7 +47,7 @@ describe('querySelector plugin', () => {
   })
 
   // Tests for including/excluding by ID and class
-  it('includes elements by ID selector', () => {
+  it('includes elements by ID selector', async () => {
     const html = `
       <div>This should be excluded</div>
       <div id="main">This main div should be included</div>
@@ -57,16 +55,15 @@ describe('querySelector plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [
-        filterPlugin({ include: ['#main', '#content'] }),
-      ],
+      engine: await resolveEngine(engine),
+      plugins: { filter: { include: ['#main', '#content'] } },
     })
 
     expect(markdown).toContain('This main div should be included')
     expect(markdown).toContain('This content div should be included')
   })
 
-  it('excludes elements by class selector', () => {
+  it('excludes elements by class selector', async () => {
     const html = `
       <div>This should be included</div>
       <div class="ad">This ad should be excluded</div>
@@ -75,9 +72,8 @@ describe('querySelector plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [
-        filterPlugin({ exclude: ['.ad', '.sidebar', '.footer'] }),
-      ],
+      engine: await resolveEngine(engine),
+      plugins: { filter: { exclude: ['.ad', '.sidebar', '.footer'] } },
     })
 
     expect(markdown).toContain('This should be included')
@@ -87,7 +83,7 @@ describe('querySelector plugin', () => {
   })
 
   // Tests for compound selectors
-  it('handles compound selectors', () => {
+  it('handles compound selectors', async () => {
     const html = `
       <div class="content">This plain content div should be excluded</div>
       <div id="main" class="content">This main content div should be included</div>
@@ -95,16 +91,15 @@ describe('querySelector plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [
-        filterPlugin({ include: ['div#main.content'] }),
-      ],
+      engine: await resolveEngine(engine),
+      plugins: { filter: { include: ['div#main.content'] } },
     })
 
     expect(markdown).toContain('This main content div should be included')
   })
 
   // Tests for attribute selectors
-  it('handles attribute selectors', () => {
+  it('handles attribute selectors', async () => {
     const html = `
       <p>This should be excluded</p>
       <a href="https://example.com">This link should be included</a>
@@ -113,9 +108,8 @@ describe('querySelector plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [
-        filterPlugin({ include: ['a[href]', 'img[alt]'] }),
-      ],
+      engine: await resolveEngine(engine),
+      plugins: { filter: { include: ['a[href]', 'img[alt]'] } },
     })
 
     // Verify that link content is included
@@ -124,7 +118,7 @@ describe('querySelector plugin', () => {
     expect(markdown).toContain('(https://example.com)')
   })
 
-  it('handles attribute value selectors', () => {
+  it('handles attribute value selectors', async () => {
     const html = `
       <div data-type="header">This header should be included</div>
       <div data-type="content">This content should be included</div>
@@ -133,9 +127,8 @@ describe('querySelector plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [
-        filterPlugin({ include: ['[data-type="header"]', '[data-type="content"]'] }),
-      ],
+      engine: await resolveEngine(engine),
+      plugins: { filter: { include: ['[data-type="header"]', '[data-type="content"]'] } },
     })
 
     expect(markdown).toContain('This header should be included')
@@ -143,7 +136,7 @@ describe('querySelector plugin', () => {
   })
 
   // Tests for child processing
-  it('processes children of selected elements by default', () => {
+  it('processes children of selected elements by default', async () => {
     const html = `
       <div>
         <div id="main">
@@ -162,9 +155,8 @@ describe('querySelector plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [
-        filterPlugin({ include: ['#main'] }),
-      ],
+      engine: await resolveEngine(engine),
+      plugins: { filter: { include: ['#main'] } },
     })
 
     // Should include main and all its children
@@ -175,7 +167,7 @@ describe('querySelector plugin', () => {
   })
 
   // Test for whitelist behavior - correctly include all children of included element
-  it('properly includes all children of whitelisted elements', () => {
+  it('properly includes all children of whitelisted elements', async () => {
     const html = `
       <div>Outside text</div>
       <article>
@@ -195,9 +187,8 @@ describe('querySelector plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [
-        filterPlugin({ include: ['article'] }),
-      ],
+      engine: await resolveEngine(engine),
+      plugins: { filter: { include: ['article'] } },
     })
 
     // Should include the article and all its descendants
@@ -211,7 +202,7 @@ describe('querySelector plugin', () => {
   })
 
   // Test for combining multiple include selectors
-  it('combines multiple include selectors correctly', () => {
+  it('combines multiple include selectors correctly', async () => {
     const html = `
       <div>Regular div</div>
       <header>
@@ -225,9 +216,8 @@ describe('querySelector plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [
-        filterPlugin({ include: ['header', 'main'] }),
-      ],
+      engine: await resolveEngine(engine),
+      plugins: { filter: { include: ['header', 'main'] } },
     })
 
     // Should include header and main with their contents
@@ -236,7 +226,7 @@ describe('querySelector plugin', () => {
     expect(markdown).toContain('Main content')
   })
 
-  it('can be configured to not process children', () => {
+  it('can be configured to not process children', async () => {
     const html = `
       <div>
         <article>
@@ -251,13 +241,12 @@ describe('querySelector plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [
-        filterPlugin({
-          include: ['article', 'h1', 'p'],
-          exclude: ['aside'],
-          processChildren: false,
-        }),
-      ],
+      engine: await resolveEngine(engine),
+      plugins: { filter: {
+        include: ['article', 'h1', 'p'],
+        exclude: ['aside'],
+        processChildren: false,
+      } },
     })
 
     // Only specified elements should be included,
@@ -268,8 +257,9 @@ describe('querySelector plugin', () => {
     expect(markdown).not.toContain('Aside paragraph')
   })
 
-  // Tests for combining with other plugins
-  it('can be combined with other plugins', () => {
+  it('can be combined with other plugins', async () => {
+    if (name === 'Rust Engine')
+      return // JS functions cannot run over Rust boundary
     const html = `
       <div>
         <h1>Main Heading</h1>
@@ -281,7 +271,7 @@ describe('querySelector plugin', () => {
     // We're using an imaginary code plugin just for this test
     const codePlugin = createPlugin({
       name: 'code-plugin',
-      onNodeEnter: (node) => {
+      onNodeEnter: (node: any) => {
         if (node.type === 1 && node.name === 'code' && node.attributes?.class?.includes('language-')) {
           const lang = node.attributes.class.split('language-')[1].split(RE_WHITESPACE)[0]
           return `**CodePlugin: ${lang}**\n`
@@ -290,11 +280,9 @@ describe('querySelector plugin', () => {
       },
     })
 
-    const markdown = htmlToMarkdown(html, {
-      plugins: [
-        filterPlugin({ exclude: ['aside'] }),
-        codePlugin,
-      ],
+    const markdown = jsHtmlToMarkdown(html, {
+      plugins: { filter: { exclude: ['aside'] } },
+      hooks: [codePlugin],
     })
 
     expect(markdown).toContain('# Main Heading')

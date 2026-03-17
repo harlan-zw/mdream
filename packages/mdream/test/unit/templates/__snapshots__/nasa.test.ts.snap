@@ -1,0 +1,13 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`nasa 'JavaScript Engine' > noscript iframe break 1`] = `
+"Missions - NASA
+
+hello world"
+`;
+
+exports[`nasa 'Rust Engine' > noscript iframe break 1`] = `
+"Missions - NASA
+
+hello world"
+`;

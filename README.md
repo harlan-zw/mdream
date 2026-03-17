@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-> ☁️ The fastest HTML to markdown convertor built with JavaScript. Optimized for LLMs and supports streaming.
+> ☁️ The fastest HTML to markdown convertor built with JavaScript and Rust. Optimized for LLMs and supports streaming.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
@@ -20,24 +20,32 @@
 
 ## Features
 
-- 🧠 Custom built HTML to Markdown Convertor Optimized for LLMs (~50% fewer tokens)
-- 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
-- ✂️ LangChain compatible [Markdown Text Splitter](./packages/mdream/README.md#markdown-splitting) for single-pass chunking.
-- 🚀 Ultra Fast: [Fastest pure JS](#benchmarks) - 3x faster than Turndown, converts 1.8MB HTML in ~60ms.
-- ⚡ Tiny: 6kB gzip, zero dependency core.
+- 🧠 #1 Token Optimizer: [Up to 2x fewer tokens](#benchmarks) than Turndown, node-html-markdown, and html-to-markdown. 70-99% fewer tokens than raw HTML.
+- 🚀 #1 Fastest: [Fastest pure JS & native rust](#benchmarks) - 35x faster than Turndown, converts 1.8MB HTML in ~62ms (JS) and ~3.9ms (Rust with PGO).
+- 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support. Clean mode strips broken links, empty images, redundant anchors.
+- 🌊 Streamable: Process HTML incrementally with `streamHtmlToMarkdown()` for large documents and real-time pipelines.
+- ⚡ Tiny: 10kB gzip JS core, 60kB gzip with Rust WASM engine. Zero dependencies.
 - ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [Docker](#docker), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), & more.
-- 🔌 Extensible: Plugin system for customizing and extending functionality.
 
 ## Benchmarks
 
-| Input Size | html-to-markdown (Rust) | mdream | Turndown | node-html-markdown |
-|------------|-------------------------|--------|----------|-------------------|
-| **160 KB** | 🦀 1.4ms | 🏆 **3.2ms** | 11.7ms *(3.7x)* | 15.0ms *(4.7x)* |
-| **420 KB** | 🦀 1.9ms | 🏆 **6.6ms** | 14.0ms *(2.1x)* | 18.1ms *(2.7x)* |
-| **1.8 MB** | 🦀 21ms | 🏆 **60ms** | 295ms *(4.9x)* | 💀 28,600ms *(477x)* |
-| **1.8 MB (stream)** | ❌ | 🏆 **139ms** | ❌ | ❌ |
+Converts 1.8MB HTML in **7.83ms** (Rust NAPI) or **62ms** (pure JS). Up to 35x faster than [Turndown](https://github.com/mixmark-io/turndown), 3500x faster than [node-html-markdown](https://github.com/crosstype/node-html-markdown) on large files.
 
-See the [Benchmark methodology](./bench/README.md) for more details.
+| Input | mdream (rust) | mdream (js) | Turndown | node-html-markdown |
+|-------|---------------|-------------|----------|---------------------|
+| 166 KB | **0.60ms** | 3.36ms | 11.91ms | 15.35ms |
+| 420 KB | **1.26ms** | 7.79ms | 14.01ms | 17.23ms |
+| 1.8 MB | **7.83ms** | 62.2ms | 276.0ms | 27,381ms |
+
+With `minimal: true`, mdream produces up to **92% fewer tokens** than raw HTML and up to **2x fewer tokens** than competing libraries.
+
+| Page (HTML tokens) | mdream minimal | Turndown | node-html-markdown |
+|---------------------|----------------|----------|---------------------|
+| Wikipedia (21K) | **6,101** (-71%) | 10,435 (-50%) | 10,176 (-52%) |
+| GitHub Docs (62K) | **5,006** (-92%) | 43,983 (-30%) | 8,758 (-86%) |
+| Wikipedia XL (194K) | **152,425** (-21%) | 195,978 (+1%) | 283,136 (+46%) |
+
+Benchmarks run on real-world HTML using [Vitest bench](https://vitest.dev/guide/features.html#benchmarking). See [full methodology, Rust crate comparisons, and reproduction steps](./bench/README.md).
 
 ## What is Mdream?
 
@@ -59,13 +67,15 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 
 | Package                                                                                                                                                                        | Description                                                                                                                                                   |
 |--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;mdream](./packages/mdream/README.md)       | HTML to Markdown converter, use anywhere: browser, edge runtime, node, etc. Includes CLI for `stdin` conversion and package API. **Minimal: no dependencies** |
+| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;mdream](./packages/mdream/README.md)       | Rust NAPI engine + WASM for edge. Performance-first, declarative config. Includes CLI. |
 | [<img src="https://api.iconify.design/material-symbols:language.svg" width="16" height="16" style="vertical-align: middle;" alt="browser icon">&nbsp;Browser CDN](#browser-cdn-usage)           | Use mdream directly in browsers via unpkg/jsDelivr without any build step                                |
+| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;@mdream/js](./packages/js/README.md)       | Pure JS engine. Full hook access, zero native deps. Subpaths: `/plugins`, `/splitter`, `/parse`, `/llms-txt`, `/negotiate`. |
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;@mdream/crawl](./packages/crawl/README.md) | Site-wide crawler to generate `llms.txt` artifacts from entire websites                                                                                       |
 | [<img src="https://api.iconify.design/logos:docker-icon.svg" width="16" height="16" style="vertical-align: middle;" alt="docker icon">&nbsp;Docker](./DOCKER.md)                                     | Pre-built Docker image with Playwright Chrome for containerized website crawling                                                                              |
 | [<img src="https://api.iconify.design/logos:vitejs.svg" width="16" height="16" style="vertical-align: middle;" alt="vite icon">&nbsp;@mdream/vite](./packages/vite/README.md)                          | Generate automatic `.md` for your own Vite sites                                                                                                              |
 | [<img src="https://api.iconify.design/logos:nuxt-icon.svg" width="16" height="16" style="vertical-align: middle;" alt="nuxt icon">&nbsp;@mdream/nuxt](./packages/nuxt/README.md)                       | Generate automatic `.md` and `llms.txt` artifacts generation for Nuxt Sites                                                                                   |
 | [<img src="https://api.iconify.design/mdi:github.svg" width="16" height="16" style="vertical-align: middle;" alt="github icon">&nbsp;@mdream/action](./packages/action/README.md)                | Generate `.md` and `llms.txt` artifacts from your static `.html` output                                                                                       |
+| [<img src="https://api.iconify.design/logos:rust.svg" width="16" height="16" style="vertical-align: middle;" alt="rust icon">&nbsp;mdream (crate)](./crates/core/README.md)                | Native Rust crate with CLI. Zero dependencies, streaming support. Available on [crates.io](https://crates.io/crates/mdream)                                                                                       |
 
 ## Mdream Usage
 
@@ -86,6 +96,7 @@ pnpm add mdream
 ```ts
 import { htmlToMarkdown } from 'mdream'
 
+// Rust NAPI engine in Node.js, WASM in edge/browser runtimes
 const markdown = htmlToMarkdown('<h1>Hello World</h1>')
 console.log(markdown) // # Hello World
 ```
@@ -93,7 +104,6 @@ console.log(markdown) // # Hello World
 **Core Functions:**
 - [htmlToMarkdown](./packages/mdream/README.md#api-usage) - Convert HTML to Markdown
 - [streamHtmlToMarkdown](./packages/mdream/README.md#api-usage) - Stream HTML to Markdown
-- [parseHtml](./packages/mdream/README.md#api-usage) - Parse HTML to AST
 
 See the [API Usage](./packages/mdream/README.md#api-usage) section for complete details.
 
@@ -171,9 +181,9 @@ Crawl websites and generate embeddings for vector databases:
 
 ```ts
 import { crawlAndGenerate } from '@mdream/crawl'
+import { withMinimalPreset } from '@mdream/js/preset/minimal'
+import { htmlToMarkdownSplitChunks } from '@mdream/js/splitter'
 import { embed } from 'ai'
-import { withMinimalPreset } from 'mdream/preset/minimal'
-import { htmlToMarkdownSplitChunks } from 'mdream/splitter'
 
 const { createTransformersJS } = await import('@built-in-ai/transformers-js')
 const embeddingModel = createTransformersJS().textEmbeddingModel('Xenova/bge-base-en-v1.5')
@@ -207,41 +217,42 @@ Pull headers, images, or other elements during conversion:
 
 ```ts
 import { htmlToMarkdown } from 'mdream'
-import { extractionPlugin } from 'mdream/plugins'
 
 const headers = []
 const images = []
 
 htmlToMarkdown(html, {
-  plugins: [
-    extractionPlugin({
-      'h1, h2, h3': el => headers.push(el.textContent),
-      'img[src]': el => images.push({ src: el.attributes.src, alt: el.attributes.alt })
-    })
-  ]
+  extraction: {
+    'h1, h2, h3': el => headers.push(el.textContent),
+    'img[src]': el => images.push({ src: el.attributes.src, alt: el.attributes.alt }),
+  },
 })
 ```
 </details>
 
 <details>
-<summary><b>⚡ Optimize Token Usage With Cleaner Content</b></summary>
+<summary><b>⚡ Optimize Token Usage With Clean Mode</b></summary>
 
-Remove ads, navigation, and unwanted elements to reduce token costs:
+Use `clean: true` (enabled by default with `minimal: true`) to automatically reduce token costs:
 
 ```ts
-import { createPlugin, ELEMENT_NODE, htmlToMarkdown } from 'mdream'
+import { htmlToMarkdown } from 'mdream'
 
-const cleanPlugin = createPlugin({
-  beforeNodeProcess({ node }) {
-    if (node.type === ELEMENT_NODE) {
-      const cls = node.attributes?.class || ''
-      if (cls.includes('ad') || cls.includes('nav') || node.name === 'script')
-        return { skip: true }
-    }
+// All clean features enabled
+htmlToMarkdown(html, { clean: true })
+
+// Or selective features
+htmlToMarkdown(html, {
+  clean: {
+    emptyLinks: true, // Strip #, javascript: links
+    emptyLinkText: true, // Drop [](url) links with no text
+    emptyImages: true, // Strip ![](url) with no alt text
+    redundantLinks: true, // [url](url) → url
+    selfLinkHeadings: true, // ## [Title](#title) → ## Title
+    fragments: true, // Strip broken #anchor links
+    urls: true, // Strip utm_*, fbclid tracking params
   }
 })
-
-htmlToMarkdown(html, { plugins: [cleanPlugin] })
 ```
 </details>
 
@@ -332,23 +343,15 @@ See the [Nuxt Module README](./packages/nuxt/README.md) for usage and configurat
 
 ## Browser CDN Usage
 
-For browser environments, you can use mdream directly via CDN without any build step:
+Use mdream directly via CDN with no build step. Call `init()` once to load the WASM binary, then use `htmlToMarkdown()` synchronously:
 
 ```html
-<!DOCTYPE html>
-<html>
-<head>
-  <script src="https://unpkg.com/mdream/dist/iife.js"></script>
-</head>
-<body>
-  <script>
-    // Convert HTML to Markdown in the browser
-    const html = '<h1>Hello World</h1><p>This is a paragraph.</p>'
-    const markdown = window.mdream.htmlToMarkdown(html)
-    console.log(markdown) // # Hello World\n\nThis is a paragraph.
-  </script>
-</body>
-</html>
+<script src="https://unpkg.com/mdream/dist/iife.js"></script>
+<script>
+  await window.mdream.init()
+  const markdown = window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
+  console.log(markdown) // # Hello\n\nWorld
+</script>
 ```
 
 **CDN Options:**

@@ -110,43 +110,47 @@ The module provides several hooks for integrating with other modules (e.g., `nux
 
 ### `'mdream:config'`{lang="ts"}
 
-**Type:** `(ctx: ConfigContext) => void | Promise<void>`{lang="ts"}
+**Type:** `(options: MdreamOptions) => void | Promise<void>`{lang="ts"}
 
-```ts
-interface ConfigContext {
-  route: string
-  options: MdreamOptions
-  event: H3Event
-}
-```
-
-Modify the mdream options before HTML→Markdown conversion. This hook is called during runtime middleware processing, allowing you to dynamically adjust conversion behavior based on the request.
+Modify the mdream options before HTML→Markdown conversion. The hook receives the `MdreamOptions` object directly. Mutate it to adjust conversion behavior.
 
 ```ts [server/plugins/mdream-config.ts]
 export default defineNitroPlugin((nitroApp) => {
-  nitroApp.hooks.hook('mdream:config', async (ctx) => {
-    // Apply readability preset for documentation routes
-    if (ctx.route.startsWith('/docs')) {
-      ctx.options.preset = 'readability'
+  nitroApp.hooks.hook('mdream:config', async (options) => {
+    // Filter out unwanted elements
+    options.filter = { exclude: ['nav', 'footer'] }
+
+    // Set origin for absolute URLs
+    options.origin = 'https://example.com'
+  })
+})
+```
+
+### `'mdream:negotiate'`{lang="ts"}
+
+**Type:** `(ctx: MdreamNegotiateContext) => void | Promise<void>`{lang="ts"}
+
+```ts
+interface MdreamNegotiateContext {
+  event: H3Event
+  shouldServe: boolean
+}
+```
+
+Override the content negotiation decision. Called before serving markdown to determine whether the client should receive markdown or HTML. Mutate `shouldServe` to force or block markdown serving.
+
+```ts [server/plugins/mdream-negotiate.ts]
+export default defineNitroPlugin((nitroApp) => {
+  nitroApp.hooks.hook('mdream:negotiate', async (ctx) => {
+    // Force markdown for requests with custom header
+    if (getHeader(ctx.event, 'x-force-markdown')) {
+      ctx.shouldServe = true
     }
 
-    // Add custom plugins dynamically
-    if (!ctx.options.plugins) {
-      ctx.options.plugins = []
+    // Block markdown for specific routes
+    if (getRequestURL(ctx.event).pathname.startsWith('/admin')) {
+      ctx.shouldServe = false
     }
-
-    // Filter out advertisements and cookie banners
-    ctx.options.plugins.push({
-      beforeNodeProcess(event) {
-        if (event.node.type === 1) { // ELEMENT_NODE
-          const element = event.node
-          const classList = element.attributes?.class?.split(' ') || []
-          if (classList.includes('advertisement') || classList.includes('cookie-banner')) {
-            return { skip: true }
-          }
-        }
-      }
-    })
   })
 })
 ```

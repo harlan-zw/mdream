@@ -24,7 +24,9 @@
   "dependencies": {
     "@actions/core": "catalog:",
     "@actions/exec": "catalog:",
-    "mdream": "workspace:*"
+    "@mdream/js": "workspace:*",
+    "mdream": "workspace:*",
+    "tinyglobby": "catalog:"
   },
   "devDependencies": {
     "@vercel/ncc": "catalog:",

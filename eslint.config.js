@@ -4,7 +4,10 @@ export default antfu({
   ignores: [
     '**/.mdream/**',
     '**/examples/**',
-    'docs/**',
+    '**/crates/node/**',
+    '**/packages/mdream/wasm/**',
+    'debug_test.ts',
+    'rewrite-imports.mjs',
   ],
   rules: {
     'no-use-before-define': 'off',

@@ -17,59 +17,22 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
+      "workerd": "./dist/edge.mjs",
+      "edge-light": "./dist/edge.mjs",
+      "browser": "./dist/browser.mjs",
       "import": {
         "types": "./dist/index.d.mts",
         "default": "./dist/index.mjs"
       },
       "default": "./dist/index.mjs"
     },
-    "./llms-txt": {
-      "types": "./dist/llms-txt.d.mts",
+    "./worker": {
+      "types": "./dist/worker.d.mts",
       "import": {
-        "types": "./dist/llms-txt.d.mts",
-        "default": "./dist/llms-txt.mjs"
+        "types": "./dist/worker.d.mts",
+        "default": "./dist/worker.mjs"
       },
-      "default": "./dist/llms-txt.mjs"
-    },
-    "./cli": {
-      "types": "./dist/cli.d.mts",
-      "import": {
-        "types": "./dist/cli.d.mts",
-        "default": "./dist/cli.mjs"
-      },
-      "default": "./dist/cli.mjs"
-    },
-    "./negotiate": {
-      "types": "./dist/negotiate.d.mts",
-      "import": {
-        "types": "./dist/negotiate.d.mts",
-        "default": "./dist/negotiate.mjs"
-      },
-      "default": "./dist/negotiate.mjs"
-    },
-    "./plugins": {
-      "types": "./dist/plugins.d.mts",
-      "import": {
-        "types": "./dist/plugins.d.mts",
-        "default": "./dist/plugins.mjs"
-      },
-      "default": "./dist/plugins.mjs"
-    },
-    "./preset/minimal": {
-      "types": "./dist/preset/minimal.d.mts",
-      "import": {
-        "types": "./dist/preset/minimal.d.mts",
-        "default": "./dist/preset/minimal.mjs"
-      },
-      "default": "./dist/preset/minimal.mjs"
-    },
-    "./splitter": {
-      "types": "./dist/splitter.d.mts",
-      "import": {
-        "types": "./dist/splitter.d.mts",
-        "default": "./dist/splitter.mjs"
-      },
-      "default": "./dist/splitter.mjs"
+      "default": "./dist/worker.mjs"
     }
   },
   "main": "./dist/index.mjs",
@@ -81,9 +44,11 @@
   },
   "files": [
     "bin",
-    "dist"
+    "dist",
+    "napi/",
+    "wasm/"
   ],
-  "browser": "./dist/iife.js",
+  "browser": "./dist/browser.mjs",
   "scripts": {
     "flame": "pnpm build && unbuild bench/bundle && clinic flame -- node bench/bundle/dist/string.mjs 10",
     "bench:build": "pnpm build && unbuild bench/bundle",
@@ -98,6 +63,8 @@
     "test:wiki:file": "pnpm build && cat test/fixtures/wikipedia-largest.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "test:wiki-small:file": "cat test/fixtures/wikipedia-small.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "build": "obuild",
+    "build:native": "cd ../../crates/node && napi build --platform --release",
+    "build:edge": "cd ../../crates/edge && wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge && wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --strip-producers ../../packages/mdream/wasm/mdream_edge_bg.wasm -o ../../packages/mdream/wasm/mdream_edge_bg.wasm",
     "typecheck": "tsc --noEmit",
     "dev:prepare": "obuild --stub",
     "test": "vitest test",
@@ -105,9 +72,23 @@
     "test:attw": "attw --pack",
     "prepack": "pnpm run build"
   },
-  "dependencies": {
-    "cac": "catalog:",
-    "pathe": "catalog:",
-    "tinyglobby": "catalog:"
+  "dependencies": {},
+  "optionalDependencies": {
+    "@mdream/engine-rust-android-arm-eabi": "workspace:*",
+    "@mdream/engine-rust-android-arm64": "workspace:*",
+    "@mdream/engine-rust-darwin-arm64": "workspace:*",
+    "@mdream/engine-rust-darwin-x64": "workspace:*",
+    "@mdream/engine-rust-freebsd-x64": "workspace:*",
+    "@mdream/engine-rust-linux-arm-gnueabihf": "workspace:*",
+    "@mdream/engine-rust-linux-arm64-gnu": "workspace:*",
+    "@mdream/engine-rust-linux-arm64-musl": "workspace:*",
+    "@mdream/engine-rust-linux-x64-gnu": "workspace:*",
+    "@mdream/engine-rust-linux-x64-musl": "workspace:*",
+    "@mdream/engine-rust-wasm32-wasi": "workspace:*",
+    "@mdream/engine-rust-win32-arm64-msvc": "workspace:*",
+    "@mdream/engine-rust-win32-x64-msvc": "workspace:*"
+  },
+  "devDependencies": {
+    "@mdream/js": "workspace:*"
   }
 }

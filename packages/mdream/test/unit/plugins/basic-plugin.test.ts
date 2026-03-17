@@ -1,8 +1,6 @@
-import type { ElementNode, TextNode } from '../../../src/types.ts'
+import type { ElementNode, TextNode } from '@mdream/js'
+import { createPlugin, ELEMENT_NODE, htmlToMarkdown } from '@mdream/js'
 import { describe, expect, it } from 'vitest'
-import { ELEMENT_NODE } from '../../../src/const.ts'
-import { htmlToMarkdown } from '../../../src/index.ts'
-import { createPlugin } from '../../../src/plugins.ts'
 
 describe('plugin System', () => {
   it('basic plugin works and processes attributes', () => {
@@ -21,7 +19,7 @@ describe('plugin System', () => {
 
     const input = '<div id="test">Test content</div>'
     const output = htmlToMarkdown(input, {
-      plugins: [testPlugin],
+      hooks: [testPlugin],
     })
 
     expect(output).toContain('[PROCESSED]')
@@ -46,7 +44,7 @@ describe('plugin System', () => {
     <div class="filtered" id="remove-me">This should be filtered out</div>
     <p>Regular paragraph</p>
     `
-    const output = htmlToMarkdown(input, { plugins: [filterPlugin] })
+    const output = htmlToMarkdown(input, { hooks: [filterPlugin] })
 
     expect(output).toContain('Normal content')
     expect(output).not.toContain('remove-me')
@@ -72,7 +70,7 @@ describe('plugin System', () => {
     })
 
     const input = '<h1>Hook test</h1>'
-    const output = htmlToMarkdown(input, { plugins: [hooksPlugin] })
+    const output = htmlToMarkdown(input, { hooks: [hooksPlugin] })
 
     expect(output).toBe('# 🔥 Hook test 🔥')
   })
@@ -99,7 +97,7 @@ describe('plugin System', () => {
     })
 
     const input = '<p>This is a test</p>'
-    const output = htmlToMarkdown(input, { plugins: [firstPlugin, secondPlugin] })
+    const output = htmlToMarkdown(input, { hooks: [firstPlugin, secondPlugin] })
 
     expect(output).toContain('FIRST: ')
     expect(output).toContain('This is a test')

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
-describe('pretty', () => {
-  it.skip('subsequent a', () => {
+describe.each(engines)('pretty $name', (engineConfig) => {
+  it.skip('subsequent a', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `<div><a href="b">a</a><a href="a">b</a></div>`
-    const markdown = htmlToMarkdown(html)
-    expect(markdown).toMatchInlineSnapshot(`"[a](b) [b](a)"`)
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('[a](b) [b](a)')
   })
 })

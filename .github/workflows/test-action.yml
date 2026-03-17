@@ -20,14 +20,30 @@ jobs:
         uses: pnpm/action-setup@v4
 
       - name: Set node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
-          node-version: latest
+          node-version: 24
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1-threads,wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
       - name: Install dependencies
         run: pnpm install
+
+      - name: Build edge WASM
+        working-directory: crates/node
+        run: pnpm run build:edge
 
       - name: Build packages
         run: pnpm build
@@ -83,12 +99,28 @@ jobs:
       - name: Set node
         uses: actions/setup-node@v6
         with:
-          node-version: latest
+          node-version: 24
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1-threads,wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
       - name: Install dependencies
         run: pnpm install
+
+      - name: Build edge WASM
+        working-directory: crates/node
+        run: pnpm run build:edge
 
       - name: Build packages
         run: pnpm build

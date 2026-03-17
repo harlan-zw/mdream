@@ -59,6 +59,7 @@
   },
   "dependencies": {
     "@clack/prompts": "catalog:",
+    "@mdream/js": "workspace:*",
     "crawlee": "catalog:",
     "mdream": "workspace:*",
     "nypm": "catalog:",

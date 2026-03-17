@@ -1,4 +1,4 @@
-import type { HTMLToMarkdownOptions } from 'mdream'
+import type { MdreamOptions } from 'mdream'
 import type { Plugin } from 'vite'
 
 export interface ViteHtmlToMarkdownOptions {
@@ -29,7 +29,7 @@ export interface ViteHtmlToMarkdownOptions {
   /**
    * Options to pass to mdream's htmlToMarkdown function
    */
-  mdreamOptions?: HTMLToMarkdownOptions
+  mdreamOptions?: Partial<MdreamOptions>
 
   /**
    * Custom cache TTL in milliseconds for production

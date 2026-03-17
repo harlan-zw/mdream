@@ -1,14 +1,11 @@
 import type { H3Event } from 'h3'
-import type { HTMLToMarkdownOptions } from 'mdream'
-import type { ModuleRuntimeConfig } from '../../../types'
-import type { MdreamMarkdownContext, MdreamNegotiateContext } from '../../types'
+import type { MdreamOptions } from 'mdream'
+import type { MdreamMarkdownContext, MdreamNegotiateContext, ModuleRuntimeConfig } from '../../types.js'
 import { withSiteUrl } from '#site-config/server/composables/utils'
+import { shouldServeMarkdown as _shouldServeMarkdown } from '@mdream/js/negotiate'
 import { consola } from 'consola'
 import { createError, defineEventHandler, getHeader, setHeader } from 'h3'
 import { htmlToMarkdown } from 'mdream'
-import { shouldServeMarkdown as _shouldServeMarkdown } from 'mdream/negotiate'
-import { extractionPlugin } from 'mdream/plugins'
-import { withMinimalPreset } from 'mdream/preset/minimal'
 import { useNitroApp, useRuntimeConfig } from 'nitropack/runtime'
 
 const logger = consola.withTag('nuxt-mdream')
@@ -27,30 +24,15 @@ async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRu
   let title = ''
   let description = ''
 
-  // Create extraction plugin first - must run before isolateMainPlugin
-  const extractPlugin = extractionPlugin({
-    title(el) {
-      title = el.textContent
-    },
-    'meta[name="description"]': (el) => {
-      description = el.attributes.content || ''
-    },
-  })
-
-  let options: HTMLToMarkdownOptions = {
+  const options: MdreamOptions = {
     origin: url,
     ...config.mdreamOptions,
-  }
+  } as MdreamOptions
 
-  // Apply preset if specified
-  if (config.mdreamOptions?.preset === 'minimal') {
-    options = withMinimalPreset(options)
-    // Manually insert extraction plugin at the beginning, before all preset plugins
-    options.plugins = [extractPlugin, ...(options.plugins || [])]
-  }
-  else {
-    // For non-preset mode, just add extraction plugin to existing plugins
-    options.plugins = [extractPlugin, ...(options.plugins || [])]
+  // Add declarative extraction for title/description
+  options.extraction = {
+    'title': (el) => { title = el.textContent },
+    'meta[name="description"]': (el) => { description = el.attributes.content || '' },
   }
 
   await nitroApp.hooks.callHook('mdream:config', options)

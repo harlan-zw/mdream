@@ -5,7 +5,8 @@
     "paths": {
       "mdream": ["../mdream/src/index.ts"],
       "mdream/*": ["../mdream/src/*"]
-    }
+    },
+    "allowImportingTsExtensions": false
   },
   "include": [
     "src/**/*"

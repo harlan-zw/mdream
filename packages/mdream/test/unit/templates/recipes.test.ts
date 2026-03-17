@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
-describe('recipes', () => {
-  it('tables', () => {
+describe.each(engines)('recipes $name', (engineConfig) => {
+  it('tables', async () => {
     const html = `<h2 class="mm-recipes-nutrition-facts-summary__heading text-headline-300" colspan="2">Nutrition Facts <span class="mm-recipes-nutrition-facts-summary__heading-aside text-body-100">(per serving)</h2>
 <table class="mm-recipes-nutrition-facts-summary__table">
 <tbody class="mm-recipes-nutrition-facts-summary__table-body">
@@ -25,18 +25,11 @@ describe('recipes', () => {
 </tbody>
 </table>
 </div>`
-    const markdown = htmlToMarkdown(html)
-    expect(markdown).toMatchInlineSnapshot(`
-      "## Nutrition Facts (per serving)
-
-      | 366 | Calories |
-      | --- | --- |
-      | 7g | Fat |
-      | 68g | Carbs |
-      | 9g | Protein |"
-    `)
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toMatchSnapshot()
   })
-  it.skip('malformed', () => {
+  it.skip('malformed', async () => {
     const html = `<div class="mntl-header__menu-button-container">
       <button class="mntl-header__menu-button" aria-label="Main menu for Allrecipes">
         <div class="mntl-header__menu-button-inner">
@@ -52,7 +45,8 @@ describe('recipes', () => {
           foo
       </button>
     </div>`
-    const markdown = htmlToMarkdown(html)
-    expect(markdown).toMatchInlineSnapshot(`""`)
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toMatchSnapshot()
   })
 })

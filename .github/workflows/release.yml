@@ -23,7 +23,7 @@ jobs:
       - name: Set node
         uses: actions/setup-node@v6
         with:
-          node-version: latest
+          node-version: 24
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
 
@@ -37,4 +37,6 @@ jobs:
       - name: Install Dependencies
         run: pnpm i
 
-      - run: pnpm publish -r --access public --no-git-checks
+      - run: pnpm publish -r --access public --no-git-checks --filter '!@mdream/engine-rust-*'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

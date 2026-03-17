@@ -1,0 +1,21 @@
+[package]
+name = "rust-compare"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rust-compare"
+path = "src/main.rs"
+
+[dependencies]
+mdream = { path = "../../crates/core" }
+htmd = "0.1"
+html2md = "0.2"
+html2md-rs = "0.10"
+mdka = "1.5"
+html_to_markdown = "0.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"

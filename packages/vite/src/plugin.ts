@@ -1,17 +1,19 @@
+import type { MdreamOptions } from 'mdream'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Plugin, ViteDevServer } from 'vite'
 import type { CacheEntry, MarkdownConversionResult, ViteHtmlToMarkdownOptions } from './types.js'
 import fs from 'node:fs'
 import path from 'node:path'
+import { shouldServeMarkdown } from '@mdream/js/negotiate'
 import { htmlToMarkdown } from 'mdream'
-import { shouldServeMarkdown } from 'mdream/negotiate'
 
+const GLOB_BACKSLASH_RE = /\\/g
 const GLOB_DOT_RE = /\./g
 const GLOB_DOUBLE_STAR_RE = /\*\*/g
 const GLOB_STAR_RE = /\*/g
 const GLOB_QUESTION_RE = /\?/g
 
-const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>> & { mdreamOptions: Record<string, never> } = {
+const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>> & { mdreamOptions: Partial<MdreamOptions> } = {
   include: ['*.html', '**/*.html'], // Include root level and nested
   exclude: ['**/node_modules/**'],
   outputDir: '', // Output in same directory as HTML files by default
@@ -23,6 +25,9 @@ const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>
 
 export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions = {}): Plugin {
   const options = { ...DEFAULT_OPTIONS, ...userOptions }
+  const mdreamOptions: Partial<MdreamOptions> = {
+    ...options.mdreamOptions,
+  }
   const markdownCache = new Map<string, CacheEntry>()
 
   function log(message: string) {
@@ -65,7 +70,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
   async function convertHtmlToMarkdown(htmlContent: string, source: string): Promise<string> {
     try {
-      const markdownContent = htmlToMarkdown(htmlContent, options.mdreamOptions)
+      const markdownContent = htmlToMarkdown(htmlContent, mdreamOptions)
       log(`Converted ${source} to markdown (${markdownContent.length} chars)`)
       return markdownContent
     }
@@ -154,7 +159,8 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     return patterns.some((pattern) => {
       // Simple glob pattern matching - convert to regex
       const regexPattern = pattern
-        .replace(GLOB_DOT_RE, '\\.') // Escape literal dots first
+        .replace(GLOB_BACKSLASH_RE, '\\\\') // Escape backslashes first
+        .replace(GLOB_DOT_RE, '\\.') // Escape literal dots
         .replace(GLOB_DOUBLE_STAR_RE, '.*') // ** matches anything including /
         .replace(GLOB_STAR_RE, '[^/]*') // * matches filename chars except /
         .replace(GLOB_QUESTION_RE, '.') // ? matches any single char
@@ -254,7 +260,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
             continue
           }
           const htmlContent = htmlFile.source as string
-          const markdownContent = htmlToMarkdown(htmlContent, options.mdreamOptions)
+          const markdownContent = htmlToMarkdown(htmlContent, mdreamOptions)
 
           // Generate corresponding .md filename (preserving directory structure)
           const markdownFileName = fileName.replace('.html', '.md')

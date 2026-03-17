@@ -1,6 +1,6 @@
-import type { HTMLToMarkdownOptions } from 'mdream'
+import type { MdreamOptions } from 'mdream'
 
-export type { MdreamLlmsTxtGeneratePayload, MdreamMarkdownContext, MdreamNegotiateContext } from './runtime/types.js'
+export type { MdreamLlmsTxtGeneratePayload, MdreamMarkdownContext, MdreamNegotiateContext, ModuleRuntimeConfig } from './runtime/types.js'
 
 export interface ModuleOptions {
   /**
@@ -12,7 +12,7 @@ export interface ModuleOptions {
   /**
    * Options to pass to mdream htmlToMarkdown function
    */
-  mdreamOptions?: HTMLToMarkdownOptions & {
+  mdreamOptions?: Partial<MdreamOptions> & {
     /**
      * Preset to apply to the htmlToMarkdown function
      */
@@ -34,10 +34,4 @@ export interface ModuleOptions {
      */
     swr?: boolean
   }
-}
-
-export interface ModuleRuntimeConfig {
-  enabled: boolean
-  mdreamOptions: ModuleOptions['mdreamOptions']
-  cache: Required<NonNullable<ModuleOptions['cache']>>
 }

@@ -1,7 +1,7 @@
-import type { ElementNode, Node, TextNode } from '../../src/types'
+import type { ElementNode, Node, TextNode } from '@mdream/js'
+import { ELEMENT_NODE, NodeEventEnter, NodeEventExit, TEXT_NODE } from '@mdream/js'
 import { describe, expect, it } from 'vitest'
-import { ELEMENT_NODE, NodeEventEnter, NodeEventExit, TEXT_NODE } from '../../src/const'
-import { parseHtml } from '../../src/parse'
+import { parseHtml } from '../../../js/src/parse.ts'
 
 // Type guards for better type safety
 function isElementNode(node: Node): node is ElementNode {

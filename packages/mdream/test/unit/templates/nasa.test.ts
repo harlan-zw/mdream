@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
-describe('nasa', () => {
-  it('noscript iframe break', () => {
+describe.each(engines)('nasa $name', (engineConfig) => {
+  it('noscript iframe break', async () => {
     const html = `
 <!doctype html>
 <html lang="en-US" prefix="og: https://ogp.me/ns#">
@@ -14,11 +14,8 @@ describe('nasa', () => {
 \theight="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 \t<div>hello world</div>
 `
-    const markdown = htmlToMarkdown(html)
-    expect(markdown).toMatchInlineSnapshot(`
-      "Missions - NASA
-
-      hello world"
-    `)
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toMatchSnapshot()
   })
 })

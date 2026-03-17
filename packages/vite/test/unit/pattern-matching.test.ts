@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+const GLOB_BACKSLASH_RE = /\\/g
 const GLOB_DOT_RE = /\./g
 const GLOB_DOUBLE_STAR_RE = /\*\*/g
 const GLOB_STAR_RE = /\*/g
@@ -9,7 +10,8 @@ const GLOB_QUESTION_RE = /\?/g
 function matchesPattern(fileName: string, patterns: string[]): boolean {
   return patterns.some((pattern) => {
     const regexPattern = pattern
-      .replace(GLOB_DOT_RE, '\\.') // Escape literal dots first
+      .replace(GLOB_BACKSLASH_RE, '\\\\') // Escape backslashes first
+      .replace(GLOB_DOT_RE, '\\.') // Escape literal dots
       .replace(GLOB_DOUBLE_STAR_RE, '.*') // ** matches anything including /
       .replace(GLOB_STAR_RE, '[^/]*') // * matches filename chars except /
       .replace(GLOB_QUESTION_RE, '.') // ? matches any single char

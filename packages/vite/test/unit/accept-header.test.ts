@@ -1,4 +1,4 @@
-import { shouldServeMarkdown } from 'mdream/negotiate'
+import { shouldServeMarkdown } from '@mdream/js/negotiate'
 import { describe, expect, it } from 'vitest'
 
 describe('shouldServeMarkdown - Content Negotiation', () => {

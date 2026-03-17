@@ -1,0 +1,20 @@
+[package]
+name = "mdream-node"
+version = "0.1.0"
+
+edition.workspace = true
+
+description = "NAPI bindings for mdream. Thin wrapper exposing the Rust engine to Node.js."
+
+license.workspace = true
+
+[lib]
+crate-type = [ "cdylib" ]
+
+[dependencies]
+napi = { version = "3.0.0", default-features = false, features = [ "napi9" ] }
+napi-derive = "3.0.0"
+mdream = { path = "../core" }
+
+[build-dependencies]
+napi-build = "2"

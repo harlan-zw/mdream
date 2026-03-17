@@ -1,7 +1,7 @@
-import type { ExtractedElement } from '../../../src/plugins/extraction.ts'
+import type { ExtractedElement } from 'mdream'
+import { htmlToMarkdown } from '@mdream/js'
+import { extractionPlugin } from '@mdream/js/plugins'
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src/index.ts'
-import { extractionPlugin } from '../../../src/plugins/extraction.ts'
 
 describe('script extraction using extractionPlugin', () => {
   it('should extract Nuxt JSON data script using extractionPlugin', () => {
@@ -88,7 +88,7 @@ describe('script extraction using extractionPlugin', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [plugin],
+      hooks: [plugin],
     })
 
     // Should extract the JSON script
@@ -137,7 +137,7 @@ describe('script extraction using extractionPlugin', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [plugin],
+      hooks: [plugin],
     })
 
     expect(extractedScripts).toHaveLength(1)
@@ -171,7 +171,7 @@ describe('script extraction using extractionPlugin', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [plugin],
+      hooks: [plugin],
     })
 
     expect(extractedScripts).toHaveLength(1)
@@ -208,7 +208,7 @@ describe('script extraction using extractionPlugin', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      plugins: [plugin],
+      hooks: [plugin],
     })
 
     // Should categorize them correctly

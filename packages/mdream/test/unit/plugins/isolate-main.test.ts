@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src/index.ts'
-import { isolateMainPlugin } from '../../../src/plugins/isolate-main.ts'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
-describe('isolateMainPlugin', () => {
-  it('prioritizes explicit main element over header heuristic', () => {
+describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
+  it('prioritizes explicit main element over header heuristic', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <html>
         <body>
@@ -22,7 +22,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     // Should include content inside main
@@ -37,7 +38,8 @@ describe('isolateMainPlugin', () => {
     expect(markdown).not.toContain('Related articles')
   })
 
-  it('handles main element with nested content correctly', () => {
+  it('handles main element with nested content correctly', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <body>
         <header>Site header (excluded)</header>
@@ -59,7 +61,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     expect(markdown).toContain('# Article Header')
@@ -71,7 +74,8 @@ describe('isolateMainPlugin', () => {
     expect(markdown).not.toContain('Site footer')
   })
 
-  it('ignores main element if deeper than 5 levels', () => {
+  it('ignores main element if deeper than 5 levels', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <body>
         <nav>Before content (excluded)</nav>
@@ -98,7 +102,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     // Should fall back to header heuristic since main is too deep
@@ -110,7 +115,8 @@ describe('isolateMainPlugin', () => {
     expect(markdown).not.toContain('Footer')
   })
 
-  it('handles multiple main elements - uses the first one within depth limit', () => {
+  it('handles multiple main elements - uses the first one within depth limit', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <body>
         <nav>Before (excluded)</nav>
@@ -128,7 +134,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     expect(markdown).toContain('# First Main Title')
@@ -140,7 +147,8 @@ describe('isolateMainPlugin', () => {
     expect(markdown).not.toContain('Footer')
   })
 
-  it('isolates content between first header and footer', () => {
+  it('isolates content between first header and footer', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <html>
         <body>
@@ -157,7 +165,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     // Should include main content
@@ -175,7 +184,8 @@ describe('isolateMainPlugin', () => {
     expect(markdown).not.toContain('Related articles')
   })
 
-  it('works with different header levels', () => {
+  it('works with different header levels', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <body>
         <div>Before content (excluded)</div>
@@ -186,7 +196,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     expect(markdown).toContain('### Starting with H3')
@@ -195,7 +206,8 @@ describe('isolateMainPlugin', () => {
     expect(markdown).not.toContain('Footer')
   })
 
-  it('excludes footer only if within 5 node depth', () => {
+  it('excludes footer only if within 5 node depth', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <body>
         <nav>Before (excluded)</nav>
@@ -221,7 +233,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     expect(markdown).toContain('# Main Title')
@@ -233,7 +246,8 @@ describe('isolateMainPlugin', () => {
     expect(markdown).not.toContain('After shallow footer')
   })
 
-  it('handles case with no footer found', () => {
+  it('handles case with no footer found', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <body>
         <nav>Navigation (excluded)</nav>
@@ -245,7 +259,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     expect(markdown).toContain('# Article Title')
@@ -255,7 +270,8 @@ describe('isolateMainPlugin', () => {
     expect(markdown).not.toContain('Navigation')
   })
 
-  it('handles case with no header found', () => {
+  it('handles case with no header found', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <body>
         <nav>Navigation content</nav>
@@ -266,7 +282,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     // Since no header is found, everything before should be excluded
@@ -276,7 +293,8 @@ describe('isolateMainPlugin', () => {
     expect(markdown).not.toContain('Footer content')
   })
 
-  it('handles multiple headers - uses only the first one', () => {
+  it('handles multiple headers - uses only the first one', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <body>
         <nav>Before first header (excluded)</nav>
@@ -289,7 +307,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     expect(markdown).toContain('## First Header')
@@ -300,7 +319,8 @@ describe('isolateMainPlugin', () => {
     expect(markdown).not.toContain('Footer')
   })
 
-  it('handles multiple footers - uses only the first eligible one', () => {
+  it('handles multiple footers - uses only the first eligible one', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <body>
         <nav>Before (excluded)</nav>
@@ -313,7 +333,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     expect(markdown).toContain('# Main Title')
@@ -324,7 +345,8 @@ describe('isolateMainPlugin', () => {
     expect(markdown).not.toContain('Second footer')
   })
 
-  it('handles nested content structure correctly', () => {
+  it('handles nested content structure correctly', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <body>
         <header class="site-header">
@@ -353,7 +375,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     expect(markdown).toContain('# Article Title')
@@ -366,7 +389,8 @@ describe('isolateMainPlugin', () => {
     expect(markdown).not.toContain('Copyright notice')
   })
 
-  it('preserves text nodes correctly', () => {
+  it('preserves text nodes correctly', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <body>
         Text before header (excluded)
@@ -380,7 +404,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     expect(markdown).toContain('# Main Title')
@@ -392,7 +417,8 @@ describe('isolateMainPlugin', () => {
     expect(markdown).not.toContain('Text after footer')
   })
 
-  it('handles edge case with footer as direct sibling of header', () => {
+  it('handles edge case with footer as direct sibling of header', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <body>
         <nav>Before (excluded)</nav>
@@ -403,7 +429,8 @@ describe('isolateMainPlugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [isolateMainPlugin()],
+      plugins: { isolateMain: true },
+      engine,
     })
 
     expect(markdown).toContain('# Title')

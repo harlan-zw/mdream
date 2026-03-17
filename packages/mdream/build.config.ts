@@ -3,54 +3,54 @@ import { resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { defineBuildConfig } from 'obuild/config'
 
-const EXPORT_STMT_RE = /export\s*\{[^}]+\};\s*$/m
+const EXPORT_RE = /export\s*\{[^}]+\};\s*$/m
+
+const rolldown = {
+  external: [/\.\.\/napi\//],
+}
+
+const rolldownWasm = {
+  external: [/\.\.\/wasm\//, /\.\.\/napi\//],
+}
 
 export default defineBuildConfig({
   entries: [
-    {
-      type: 'bundle',
-      input: ['./src/index.ts', './src/cli.ts', './src/llms-txt.ts', './src/negotiate.ts', './src/plugins.ts', './src/preset/minimal.ts', './src/splitter.ts'],
-    },
+    { type: 'bundle', input: './src/index.ts', rolldown },
+    { type: 'bundle', input: './src/browser.ts', rolldown: rolldownWasm },
+    { type: 'bundle', input: './src/edge.ts', rolldown: rolldownWasm },
+    { type: 'bundle', input: './src/worker.ts' },
     {
       type: 'bundle',
       input: './src/iife.ts',
       minify: true,
+      rolldown: {
+        external: [/\.\.\/napi\//],
+      },
     },
   ],
   hooks: {
     end(ctx) {
-      // Create IIFE version of browser bundle
       const cwd = ctx?.cwd || process.cwd()
-      const browserMjsPath = resolve(cwd, 'dist/iife.mjs')
+      const iifeMjsPath = resolve(cwd, 'dist/iife.mjs')
       try {
-        const iifeContent = readFileSync(browserMjsPath, 'utf-8').replace(EXPORT_STMT_RE, '')
-
-        // Clean up browser ES module files (we only need the IIFE)
+        const content = readFileSync(iifeMjsPath, 'utf-8')
+        const iifeContent = `(function(){\n'use strict';\n${content.replace(EXPORT_RE, '')}\n})();`
         try {
-          unlinkSync(browserMjsPath)
-          unlinkSync(browserMjsPath.replace('.mjs', '.d.mts'))
+          unlinkSync(iifeMjsPath)
         }
-        catch {
-          // Files might not exist, continue
+        catch {}
+        try {
+          unlinkSync(iifeMjsPath.replace('.mjs', '.d.mts'))
         }
-
-        // Ensure directory exists
-        const browserDir = resolve(cwd, 'dist')
-        mkdirSync(browserDir, { recursive: true })
-
-        // Write IIFE bundle
-        const outputPath = resolve(browserDir, 'iife.js')
+        catch {}
+        const outputPath = resolve(cwd, 'dist/iife.js')
+        mkdirSync(resolve(cwd, 'dist'), { recursive: true })
         writeFileSync(outputPath, iifeContent)
-
-        // Calculate sizes
-        const uncompressedSize = iifeContent.length
-        const gzippedSize = gzipSync(iifeContent).length
-
-        console.log(`✅ Browser IIFE bundle created: ${outputPath}`)
-        console.log(`Size: ${Math.round(uncompressedSize / 1024)}kB, ${Math.round(gzippedSize / 1024 * 10) / 10}kB gzipped`)
+        const gzSize = gzipSync(iifeContent).length
+        console.log(`Browser IIFE bundle: ${outputPath} (${Math.round(iifeContent.length / 1024)}kB, ${Math.round(gzSize / 1024 * 10) / 10}kB gzip)`)
       }
-      catch (error) {
-        console.warn('Could not create IIFE bundle:', error.message)
+      catch (e: any) {
+        console.warn('Could not create IIFE bundle:', e.message)
       }
     },
   },

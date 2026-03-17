@@ -1,15 +1,13 @@
-import type { ElementNode } from '../../../src/types.ts'
+import type { ElementNode } from '@mdream/js'
+import { ELEMENT_NODE, htmlToMarkdown, withMinimalPreset } from '@mdream/js'
 import { describe, expect, it } from 'vitest'
-import { ELEMENT_NODE } from '../../../src/const.ts'
-import { htmlToMarkdown } from '../../../src/index.ts'
-import { withMinimalPreset } from '../../../src/preset/minimal.ts'
 
 describe('plugin skip override', () => {
   it('user plugin runs before filter in minimal preset', () => {
     const seen: string[] = []
     const html = '<html><body><main><figure><img src="x.jpg" alt="test"></figure></main></body></html>'
     const options = withMinimalPreset({
-      plugins: [{
+      hooks: [{
         beforeNodeProcess(event) {
           if (event.node.type === ELEMENT_NODE) {
             seen.push((event.node as ElementNode).name)
@@ -32,7 +30,7 @@ describe('plugin skip override', () => {
     const figures: string[] = []
     const html = '<html><body><main><figure><img src="photo.jpg" alt="test"></figure></main></body></html>'
     const options = withMinimalPreset({
-      plugins: [{
+      hooks: [{
         onNodeEnter(node) {
           if (node.name === 'figure') {
             figures.push(node.name)

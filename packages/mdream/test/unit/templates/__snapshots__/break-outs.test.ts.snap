@@ -1,0 +1,9 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`break-outs { name: 'JavaScript Engine', engine: { htmlToMarkdown: [Function htmlToMarkdown], streamHtmlToMarkdown: [Function streamHtmlToMarkdown] } } > script block 1`] = `""`;
+
+exports[`break-outs { name: 'JavaScript Engine', engine: { htmlToMarkdown: [Function htmlToMarkdown], streamHtmlToMarkdown: [Function streamHtmlToMarkdown] } } > style block 1`] = `""`;
+
+exports[`break-outs { name: 'Rust Engine', engine: { htmlToMarkdown: [Function rustHtmlToMarkdown], streamHtmlToMarkdown: [Function rustStreamHtmlToMarkdown] } } > script block 1`] = `""`;
+
+exports[`break-outs { name: 'Rust Engine', engine: { htmlToMarkdown: [Function rustHtmlToMarkdown], streamHtmlToMarkdown: [Function rustStreamHtmlToMarkdown] } } > style block 1`] = `""`;

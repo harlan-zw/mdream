@@ -1,0 +1,76 @@
+{
+  "name": "@mdream/engine-rust-build",
+  "version": "0.17.0",
+  "private": true,
+  "description": "Native Rust HTML-to-Markdown engine for mdream, built with NAPI-RS.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harlan-zw/mdream",
+    "directory": "crates/node"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.d.ts",
+    "index.js"
+  ],
+  "napi": {
+    "binaryName": "engine-rust",
+    "packageName": "@mdream/engine-rust",
+    "targets": [
+      "x86_64-pc-windows-msvc",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-gnu",
+      "armv7-unknown-linux-gnueabihf",
+      "aarch64-apple-darwin",
+      "aarch64-linux-android",
+      "x86_64-unknown-freebsd",
+      "aarch64-unknown-linux-musl",
+      "aarch64-pc-windows-msvc",
+      "armv7-linux-androideabi",
+      "wasm32-wasip1-threads"
+    ],
+    "wasm": {
+      "initialMemory": 1024,
+      "browser": {
+        "fs": true
+      }
+    }
+  },
+  "engines": {
+    "node": ">= 22.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "pnpm run build:platform && pnpm run build:wasm",
+    "build:platform": "napi build --platform --release --esm",
+    "postbuild:platform": "node ./scripts/move-artifacts.mjs",
+    "build:wasm": "napi build --release --target wasm32-wasip1-threads",
+    "postbuild:wasm": "node ./scripts/move-artifacts.mjs",
+    "build:edge": "cargo build --release --target wasm32-unknown-unknown -p mdream-edge --manifest-path ../Cargo.toml && wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge ../edge",
+    "build:debug": "napi build --platform --esm",
+    "dev": "cargo watch --quiet --shell 'npm run build'",
+    "prepublishOnly": "napi prepublish -t npm",
+    "version": "napi version"
+  },
+  "devDependencies": {
+    "@emnapi/core": "catalog:",
+    "@emnapi/runtime": "catalog:",
+    "@napi-rs/cli": "catalog:",
+    "@napi-rs/wasm-runtime": "catalog:",
+    "@tybys/wasm-util": "catalog:",
+    "typescript": "catalog:"
+  }
+}

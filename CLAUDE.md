@@ -63,11 +63,11 @@ When you finish a task, always run `pnpm typecheck` to ensure that the code is t
 
 This is a pnpm monorepo with multiple packages:
 - `packages/mdream`: Core HTML to Markdown converter (zero dependencies)
+- `packages/llms-txt`: Engine-agnostic llms.txt artifact generation (no mdream dependency)
 - `packages/crawl`: Site-wide crawler for llms.txt generation
 - `packages/vite`: Vite plugin integration
 - `packages/nuxt`: Nuxt module integration
 - `packages/action`: GitHub Actions integration
-- `packages/llms-db`: LLM cost database utilities
 
 ### Core Architecture (packages/mdream/src/)
 - `index.ts`: Main entry point with `htmlToMarkdown` and `streamHtmlToMarkdown` APIs
@@ -246,3 +246,8 @@ Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
 ALWAYS prefer editing an existing file to creating a new one.
 NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
+
+<!-- skilld -->
+Before modifying code, evaluate each installed skill against the current task.
+For each skill, determine YES/NO relevance and invoke all YES skills before proceeding.
+<!-- /skilld -->

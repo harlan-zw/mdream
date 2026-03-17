@@ -1,5 +1,5 @@
+import { htmlToMarkdownSplitChunks } from '@mdream/js/splitter'
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 
 const RE_ENDS_WITH_PERIOD = /\.$/
 const RE_WHITESPACE = /\s+/

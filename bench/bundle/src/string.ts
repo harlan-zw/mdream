@@ -1,4 +1,4 @@
-import { htmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../packages/mdream/src'
 
 const html = `<!DOCTYPE html>
 <!-- saved from url=(0039)https://en.wikipedia.org/wiki/Elon_Musk -->
@@ -3527,7 +3527,7 @@ function run() {
   // extend the timings
   for (let i = 0; i < times; i++) {
     // eslint-disable-next-line no-console
-    console.log((htmlToMarkdown(html)).length)
+    console.log((htmlToMarkdown(html)).markdown.length)
   }
   const end = performance.now()
   const duration = end - start

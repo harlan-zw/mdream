@@ -22,7 +22,7 @@ function renderMarkdown(markdown: string) {
 describe('mdream browser compatibility', () => {
   it('should convert HTML to markdown and display correctly in DOM', async () => {
     // Dynamically import mdream to test actual module loading in browser
-    const { htmlToMarkdown } = await import('../../src/index.ts')
+    const { htmlToMarkdown } = await import('@mdream/js')
 
     // Test basic HTML to Markdown conversion
     const simpleHtml = '<p>Hello <strong>world</strong>!</p>'
@@ -61,7 +61,7 @@ describe('mdream browser compatibility', () => {
 
   it('should not include Node.js APIs in browser environment', async () => {
     // Verify that Node.js specific functionality is not available
-    const mdreamModule = await import('../../src/index.ts')
+    const mdreamModule = await import('@mdream/js')
 
     // Create a status display in DOM
     const statusDiv = document.createElement('div')
@@ -69,7 +69,7 @@ describe('mdream browser compatibility', () => {
     document.body.appendChild(statusDiv)
 
     // Test core functionality availability
-    const coreApis = ['htmlToMarkdown', 'parseHtml', 'MarkdownProcessor', 'createPlugin']
+    const coreApis = ['htmlToMarkdown', 'parseHtml', 'createMarkdownProcessor', 'createPlugin']
     const coreResults = coreApis.map(api => `✓ ${api}: ${api in mdreamModule ? 'available' : 'missing'}`)
 
     // Test Node.js API exclusion
@@ -89,7 +89,7 @@ describe('mdream browser compatibility', () => {
   })
 
   it('should handle browser environment edge cases in DOM', async () => {
-    const { htmlToMarkdown } = await import('../../src/index.ts')
+    const { htmlToMarkdown } = await import('@mdream/js')
 
     // Test with special characters and entities
     const entityHtml = '<p>Test &amp; HTML entities like &lt;script&gt; and &quot;quotes&quot;</p>'
@@ -111,7 +111,9 @@ describe('mdream browser compatibility', () => {
   })
 
   it('should work with plugins in browser environment', async () => {
-    const { htmlToMarkdown, createPlugin } = await import('../../src/index.ts')
+    const { htmlToMarkdown } = await import('@mdream/js')
+
+    const { createPlugin } = await import('@mdream/js')
 
     // Create a simple plugin that transforms certain elements
     const testPlugin = createPlugin({
@@ -129,7 +131,7 @@ describe('mdream browser compatibility', () => {
 
     const htmlWithMark = '<p>This is <mark>highlighted text</mark> in a paragraph.</p>'
     const result = htmlToMarkdown(htmlWithMark, {
-      plugins: [testPlugin],
+      hooks: [testPlugin],
     })
 
     renderMarkdown(result)
@@ -137,7 +139,7 @@ describe('mdream browser compatibility', () => {
   })
 
   it('should handle interactive HTML-to-Markdown conversion', async () => {
-    const { htmlToMarkdown } = await import('../../src/index.ts')
+    const { htmlToMarkdown } = await import('@mdream/js')
 
     // Create an interactive demo in the DOM
     document.body.innerHTML = `

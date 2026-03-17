@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Use Crawlee's official Node.js 20 image with Playwright Chrome pre-installed
-FROM apify/actor-node-playwright-chrome:20
+FROM apify/actor-node-playwright-chrome:24
 
 # Set working directory
 WORKDIR /app
@@ -10,7 +10,7 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 # Install pnpm globally as root
 USER root
-RUN npm install -g pnpm@10.13.1
+RUN npm install -g pnpm@10.32.1
 
 # Copy only package files first for better caching
 COPY --chown=myuser:myuser package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./

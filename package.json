@@ -1,7 +1,7 @@
 {
   "type": "module",
   "private": true,
-  "packageManager": "pnpm@10.32.0",
+  "packageManager": "pnpm@10.32.1",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -30,6 +30,7 @@
     "crawlee": "catalog:",
     "eslint": "catalog:",
     "llm-cost": "catalog:",
+    "miniflare": "catalog:",
     "node-html-markdown": "catalog:",
     "obuild": "catalog:",
     "playwright": "catalog:",

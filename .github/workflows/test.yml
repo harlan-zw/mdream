@@ -15,21 +15,144 @@ on:
       - main
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  # ── Rust unit tests across OSes ──
+  rust-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    name: Rust Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Run cargo tests
+        working-directory: crates
+        run: cargo test --workspace --exclude mdream-edge
+
+  # ── WASM compilation check ──
+  wasm-compile:
+    name: WASM Compile Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Check edge crate compiles to WASM
+        working-directory: crates
+        run: cargo build -p mdream-edge --target wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Full wasm-pack build
+        working-directory: crates/edge
+        run: wasm-pack build --target web --out-dir /tmp/wasm-test --out-name mdream_edge
+
+  # ── WASM browser tests (wasm-bindgen-test in headless Chrome) ──
+  wasm-browser-test:
+    name: WASM Browser Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Run WASM tests in headless Chrome
+        working-directory: crates/edge
+        run: wasm-pack test --headless --chrome
+
+  # ── Cloudflare Workers runtime test ──
+  wasm-workers-test:
+    name: Cloudflare Workers Test
+    runs-on: ubuntu-latest
+    needs: wasm-compile
     steps:
       - uses: actions/checkout@v6
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
 
-      - name: Use Node.js 24.x
+      - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24.x
+          node-version: 24
+          cache: pnpm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM for Workers
+        working-directory: crates/edge
+        run: wasm-pack build --target web --out-dir test-worker/wasm --out-name mdream_edge
+
+      - run: pnpm install
+
+      - name: Run Workers tests
+        working-directory: crates/edge/test-worker
+        run: pnpm test
+
+  # ── Node.js integration tests across OSes ──
+  node-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    name: Node Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
           registry-url: https://registry.npmjs.org/
           cache: pnpm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
 
       - run: pnpm i
 
@@ -40,12 +163,14 @@ jobs:
         run: pnpm run build
 
       - name: Lint
+        if: matrix.os == 'ubuntu-latest'
         run: pnpm run lint
 
       - name: Typecheck
         run: pnpm run typecheck
 
       - name: Test package types
+        if: matrix.os == 'ubuntu-latest'
         run: pnpm run test:attw
 
       - name: Browser Test Setup

@@ -31,7 +31,7 @@ The crawler will automatically discover and follow internal links to crawl entir
 You can also use @mdream/crawl programmatically in your Node.js applications:
 
 ```typescript
-import { crawlAndGenerate, generateLlmsTxt } from '@mdream/crawl'
+import { crawlAndGenerate } from '@mdream/crawl'
 
 // Crawl entire websites programmatically
 const results = await crawlAndGenerate({
@@ -44,15 +44,9 @@ const results = await crawlAndGenerate({
   driver: 'http', // or 'playwright' for JS-heavy sites
   verbose: true
 })
-
-// Generate llms.txt manually from existing results
-await generateLlmsTxt({
-  siteName: 'Example Site',
-  description: 'Documentation for Example Site',
-  results: crawlResults,
-  outputPath: './output/llms.txt'
-})
 ```
+
+> **Note**: llms.txt artifact generation is handled by [`@mdream/js/llms-txt`](../js). The crawl package uses it internally when `generateLlmsTxt: true`.
 
 ## Output
 

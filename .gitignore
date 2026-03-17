@@ -60,3 +60,18 @@ storage
 .fixtures
 
 **/.claude/settings.local.json
+
+# Skilld references (recreated by `skilld install`)
+.skilld
+bench/rust-compare/target/
+bench/rust-compare/Cargo.lock
+bench/rust-compare-fast/target/
+bench/rust-compare-fast/Cargo.lock
+*.node
+packages/mdream/napi/
+crates/*/target/
+crates/target/
+crates/edge/pkg/
+crates/edge/pkg-bundler/
+crates/edge/test-worker/wasm/
+perf.data

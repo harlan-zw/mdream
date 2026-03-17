@@ -1,4 +1,4 @@
-import { htmlToMarkdown } from '../../../src'
+import { htmlToMarkdown } from '../../../packages/mdream/src'
 
 function run() {
   // Full usage with all core features
@@ -17,7 +17,7 @@ function run() {
 <img src="image.jpg" alt="Image description">
 <p>Another paragraph.</p>
   `
-  const markdown = htmlToMarkdown(html)
+  const { markdown } = htmlToMarkdown(html)
 
   process.stdout.write(markdown)
 }

@@ -81,14 +81,14 @@ echo ""
 # Build bundle for benchmarking
 echo ""
 echo "Building mdream benchmark bundle..."
-(cd "$ROOT_DIR/packages/mdream" && pnpm build > /dev/null 2>&1)
-(cd "$ROOT_DIR/packages/mdream" && unbuild bench/bundle > /dev/null 2>&1)
+(cd "$ROOT_DIR/packages/mdream" && pnpm build)
+(cd "$ROOT_DIR" && npx unbuild bench/bundle)
 
 # Compile Bun binary if available
 HAS_BUN_BIN=false
 if [ "$HAS_BUN" = true ]; then
     echo "Compiling Bun binary..."
-    if bun build --compile "$MDREAM_BUNDLE_CLI" --outfile "$MDREAM_BIN" > /dev/null 2>&1; then
+    if bun build --compile "$MDREAM_BUNDLE_CLI" --outfile "$MDREAM_BIN"; then
         HAS_BUN_BIN=true
         echo -e "${GREEN}✓ Bun binary compiled${NC}"
     else
@@ -114,6 +114,13 @@ fi
 if [ "$HAS_BUN_BIN" = true ]; then
     COMMANDS+=("cat {file} | $MDREAM_BIN")
     NAMES+=("mdream (Bun binary)")
+fi
+
+# engine-rust (Native Rust compiled binary)
+MDREAM_RUST_BIN="$ROOT_DIR/bench/rust-compare-fast/target/release/engine-rust"
+if [ -f "$MDREAM_RUST_BIN" ]; then
+    COMMANDS+=("cat {file} | $MDREAM_RUST_BIN")
+    NAMES+=("engine-rust (Native binary)")
 fi
 
 # Go html2md
