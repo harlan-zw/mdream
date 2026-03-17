@@ -1,16 +1,15 @@
 /target
 Cargo.lock
 
-# Generated NAPI artifacts
+# Generated NAPI binary artifacts
 *.node
 *.wasm
-index.d.ts
-index.js
 browser.js
 rust.wasi-browser.js
 rust.wasi.cjs
 wasi-worker-browser.mjs
 wasi-worker.mjs
+artifacts/
 
 # OS
 .DS_Store

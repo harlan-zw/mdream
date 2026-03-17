@@ -26,7 +26,10 @@ const platformDir = 'crates/node/npm'
 const platformFiles = readdirSync(platformDir)
   .map(d => `${platformDir}/${d}/package.json`)
   .filter((f) => {
-    try { readFileSync(f); return true }
+    try {
+      readFileSync(f)
+      return true
+    }
     catch { return false }
   })
 

@@ -51,6 +51,11 @@ jobs:
         run: |
           mkdir -p crates/node/artifacts
           find artifacts/bindings-* -type f \( -name '*.node' -o -name '*.wasm' -o -name '*.js' -o -name '*.cjs' -o -name '*.mjs' \) -exec cp -v {} crates/node/artifacts/ \;
+          # napi artifacts expects wasm glue files in the working directory, not just in artifacts/
+          cp crates/node/artifacts/rust.wasi.cjs crates/node/ 2>/dev/null || true
+          cp crates/node/artifacts/rust.wasi-browser.js crates/node/ 2>/dev/null || true
+          cp crates/node/artifacts/wasi-worker.mjs crates/node/ 2>/dev/null || true
+          cp crates/node/artifacts/wasi-worker-browser.mjs crates/node/ 2>/dev/null || true
 
       - name: Move WASM edge artifacts
         run: |
