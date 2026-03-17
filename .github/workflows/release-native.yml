@@ -17,33 +17,32 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
             use_napi_cross: true
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            use_napi_cross: true
+            os: ubuntu-24.04
+            use_zigbuild: true
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            use_napi_cross: true
+            os: ubuntu-24.04-arm
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-            use_napi_cross: true
+            os: ubuntu-24.04
+            use_zigbuild: true
           - target: armv7-unknown-linux-gnueabihf
-            os: ubuntu-latest
+            os: ubuntu-24.04
             use_napi_cross: true
           - target: x86_64-pc-windows-msvc
             os: windows-latest
           - target: aarch64-pc-windows-msvc
             os: windows-latest
           - target: x86_64-unknown-freebsd
-            os: ubuntu-latest
-            use_cross: true
+            os: ubuntu-24.04
+            use_zigbuild: true
           - target: aarch64-linux-android
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - target: armv7-linux-androideabi
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - target: wasm32-wasip1-threads
-            os: ubuntu-latest
+            os: ubuntu-24.04
 
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
@@ -61,11 +60,19 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
-      - name: Install cross
-        if: matrix.use_cross
-        uses: taiki-e/install-action@cross
+      - name: Install zig
+        if: matrix.use_zigbuild
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Install cargo-zigbuild
+        if: matrix.use_zigbuild
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
 
       - name: Setup Android NDK linkers
         if: contains(matrix.target, 'android')
@@ -86,18 +93,23 @@ jobs:
         with:
           workspaces: crates -> target
 
-      - name: Build native module (cross)
-        if: matrix.use_cross
+      - name: Build native module (zigbuild)
+        if: matrix.use_zigbuild
         working-directory: crates/node
-        run: pnpm exec napi build --platform --release --esm --target ${{ matrix.target }} --cross-compile
+        run: pnpm exec napi build --platform --release --esm --target ${{ matrix.target }} -x
 
       - name: Build native module (napi-cross)
         if: matrix.use_napi_cross
         working-directory: crates/node
         run: pnpm exec napi build --platform --release --esm --target ${{ matrix.target }} --use-napi-cross
 
+      - name: Build native module (wasm)
+        if: startsWith(matrix.target, 'wasm')
+        working-directory: crates/node
+        run: pnpm exec napi build --platform --release --target ${{ matrix.target }}
+
       - name: Build native module
-        if: ${{ !matrix.use_cross && !matrix.use_napi_cross }}
+        if: ${{ !matrix.use_zigbuild && !matrix.use_napi_cross && !startsWith(matrix.target, 'wasm') }}
         working-directory: crates/node
         run: pnpm exec napi build --platform --release --esm --target ${{ matrix.target }}
 
@@ -106,11 +118,16 @@ jobs:
         run: node ./scripts/move-artifacts.mjs
         if: ${{ !startsWith(matrix.target, 'wasm') }}
 
+      - name: Install wasm-opt
+        if: startsWith(matrix.target, 'wasm')
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-opt
+
       - name: Optimize WASM with wasm-opt
         if: startsWith(matrix.target, 'wasm')
         working-directory: crates/node
         run: |
-          npm install -g binaryen
           wasm-opt -Oz rust.wasm -o rust.wasm
           node ./scripts/move-artifacts.mjs
 
@@ -128,7 +145,7 @@ jobs:
 
   build-wasm-edge:
     name: Build WASM Edge
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
 
@@ -142,7 +159,7 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -154,7 +171,9 @@ jobs:
           workspaces: crates -> target
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
 
       - name: Build WASM edge module
         working-directory: crates/edge

@@ -3,6 +3,7 @@ name: Release
 permissions:
   contents: write
   id-token: write
+  packages: write
 
 on:
   push:
@@ -89,3 +90,11 @@ jobs:
 
       - name: Publish all other packages
         run: pnpm publish -r --access public --no-git-checks --provenance --filter '!@mdream/rust-*' ${{ steps.dist-tag.outputs.tag }}
+
+  docker:
+    needs: [native]
+    uses: ./.github/workflows/release-docker.yml
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
