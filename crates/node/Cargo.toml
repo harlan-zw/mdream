@@ -1,6 +1,6 @@
 [package]
 name = "mdream-node"
-version = "0.1.0"
+version = "%s"
 
 edition.workspace = true
 

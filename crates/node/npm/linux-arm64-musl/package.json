@@ -1,21 +1,29 @@
 {
   "name": "@mdream/rust-linux-arm64-musl",
-  "version": "0.17.0",
+  "version": "%s",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/harlan-zw/mdream.git",
     "directory": "crates/node/npm/linux-arm64-musl"
   },
-  "os": ["linux"],
-  "cpu": ["arm64"],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
   "main": "rust.linux-arm64-musl.node",
-  "files": ["rust.linux-arm64-musl.node"],
+  "files": [
+    "rust.linux-arm64-musl.node"
+  ],
   "publishConfig": {
     "access": "public"
   },
   "engines": {
     "node": ">= 22.0.0"
   },
-  "libc": ["musl"]
+  "libc": [
+    "musl"
+  ]
 }

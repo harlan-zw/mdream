@@ -1,16 +1,22 @@
 {
   "name": "@mdream/rust-android-arm64",
-  "version": "0.17.0",
+  "version": "%s",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/harlan-zw/mdream.git",
     "directory": "crates/node/npm/android-arm64"
   },
-  "os": ["android"],
-  "cpu": ["arm64"],
+  "os": [
+    "android"
+  ],
+  "cpu": [
+    "arm64"
+  ],
   "main": "rust.android-arm64.node",
-  "files": ["rust.android-arm64.node"],
+  "files": [
+    "rust.android-arm64.node"
+  ],
   "publishConfig": {
     "access": "public"
   },

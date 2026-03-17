@@ -1,11 +1,9 @@
 import { execSync } from 'node:child_process'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 
-const version = process.argv[2]
-if (!version) {
-  console.error('Usage: node sync-cargo-version.mjs <version>')
-  process.exit(1)
-}
+// Read version from root package.json (already bumped by bumpp)
+const rootPkg = JSON.parse(readFileSync('packages/mdream/package.json', 'utf8'))
+const version = rootPkg.version
 
 const cargoFiles = [
   'crates/core/Cargo.toml',

@@ -1,16 +1,22 @@
 {
   "name": "@mdream/rust-linux-arm-gnueabihf",
-  "version": "0.17.0",
+  "version": "%s",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/harlan-zw/mdream.git",
     "directory": "crates/node/npm/linux-arm-gnueabihf"
   },
-  "os": ["linux"],
-  "cpu": ["arm"],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm"
+  ],
   "main": "rust.linux-arm-gnueabihf.node",
-  "files": ["rust.linux-arm-gnueabihf.node"],
+  "files": [
+    "rust.linux-arm-gnueabihf.node"
+  ],
   "publishConfig": {
     "access": "public"
   },

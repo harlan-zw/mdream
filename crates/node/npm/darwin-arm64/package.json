@@ -1,16 +1,22 @@
 {
   "name": "@mdream/rust-darwin-arm64",
-  "version": "0.17.0",
+  "version": "%s",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/harlan-zw/mdream.git",
     "directory": "crates/node/npm/darwin-arm64"
   },
-  "os": ["darwin"],
-  "cpu": ["arm64"],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
   "main": "rust.darwin-arm64.node",
-  "files": ["rust.darwin-arm64.node"],
+  "files": [
+    "rust.darwin-arm64.node"
+  ],
   "publishConfig": {
     "access": "public"
   },

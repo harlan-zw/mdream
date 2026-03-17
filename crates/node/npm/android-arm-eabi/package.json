@@ -1,16 +1,22 @@
 {
   "name": "@mdream/rust-android-arm-eabi",
-  "version": "0.17.0",
+  "version": "%s",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/harlan-zw/mdream.git",
     "directory": "crates/node/npm/android-arm-eabi"
   },
-  "os": ["android"],
-  "cpu": ["arm"],
+  "os": [
+    "android"
+  ],
+  "cpu": [
+    "arm"
+  ],
   "main": "rust.android-arm-eabi.node",
-  "files": ["rust.android-arm-eabi.node"],
+  "files": [
+    "rust.android-arm-eabi.node"
+  ],
   "publishConfig": {
     "access": "public"
   },
