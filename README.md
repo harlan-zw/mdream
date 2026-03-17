@@ -103,9 +103,9 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 
 | Package                                                                                                                                                                        | Description                                                                                                                                                   |
 |--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;mdream](./packages/mdream/README.md)       | HTML to Markdown converter, use anywhere: browser, edge runtime, node, etc. Includes CLI for `stdin` conversion and package API. **Minimal: no dependencies** |
+| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;mdream](./packages/mdream/README.md)       | Rust NAPI engine + WASM for edge. Performance-first, declarative config. Includes CLI. |
 | [<img src="https://api.iconify.design/material-symbols:language.svg" width="16" height="16" style="vertical-align: middle;" alt="browser icon">&nbsp;Browser CDN](#browser-cdn-usage)           | Use mdream directly in browsers via unpkg/jsDelivr without any build step                                |
-| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;@mdream/js](./packages/js/README.md)       | JavaScript engine with hooks, streaming, plugins, splitter, and `llms.txt` artifact generation                                                                |
+| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;@mdream/js](./packages/js/README.md)       | Pure JS engine. Full hook access, zero native deps. Subpaths: `/plugins`, `/splitter`, `/parse`, `/llms-txt`, `/negotiate`. |
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;@mdream/crawl](./packages/crawl/README.md) | Site-wide crawler to generate `llms.txt` artifacts from entire websites                                                                                       |
 | [<img src="https://api.iconify.design/logos:docker-icon.svg" width="16" height="16" style="vertical-align: middle;" alt="docker icon">&nbsp;Docker](./DOCKER.md)                                     | Pre-built Docker image with Playwright Chrome for containerized website crawling                                                                              |
 | [<img src="https://api.iconify.design/logos:vitejs.svg" width="16" height="16" style="vertical-align: middle;" alt="vite icon">&nbsp;@mdream/vite](./packages/vite/README.md)                          | Generate automatic `.md` for your own Vite sites                                                                                                              |
@@ -132,8 +132,7 @@ pnpm add mdream
 ```ts
 import { htmlToMarkdown } from 'mdream'
 
-// Rust NAPI engine used automatically in Node.js (~3-4x faster)
-// Falls back to JS engine in browser/edge runtimes
+// Rust NAPI engine in Node.js, WASM in edge/browser runtimes
 const markdown = htmlToMarkdown('<h1>Hello World</h1>')
 console.log(markdown) // # Hello World
 ```
@@ -141,7 +140,6 @@ console.log(markdown) // # Hello World
 **Core Functions:**
 - [htmlToMarkdown](./packages/mdream/README.md#api-usage) - Convert HTML to Markdown
 - [streamHtmlToMarkdown](./packages/mdream/README.md#api-usage) - Stream HTML to Markdown
-- [parseHtml](./packages/mdream/README.md#api-usage) - Parse HTML to AST
 
 See the [API Usage](./packages/mdream/README.md#api-usage) section for complete details.
 

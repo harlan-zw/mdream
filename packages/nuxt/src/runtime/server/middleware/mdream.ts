@@ -24,7 +24,7 @@ async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRu
   let title = ''
   let description = ''
 
-  let options: MdreamOptions = {
+  const options: MdreamOptions = {
     origin: url,
     ...config.mdreamOptions,
   } as MdreamOptions

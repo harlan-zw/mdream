@@ -2,6 +2,7 @@ import type { ElementNode, TextNode } from '../types'
 import { ELEMENT_NODE, TAG_HEAD, TAG_META, TAG_TITLE } from '../const'
 import { createPlugin } from '../pluggable/plugin'
 
+const BACKSLASH_RE = /\\/g
 const DOUBLE_QUOTE_RE = /"/g
 
 export interface FrontmatterPluginOptions {
@@ -40,7 +41,7 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
   let inHead = false
 
   function formatValue(_name: string, value: string) {
-    value = value.replace(DOUBLE_QUOTE_RE, '\\"')
+    value = value.replace(BACKSLASH_RE, '\\\\').replace(DOUBLE_QUOTE_RE, '\\"')
     if (value.includes('\n') || value.includes(':') || value.includes('#') || value.includes(' ')) {
       return `"${value}"`
     }

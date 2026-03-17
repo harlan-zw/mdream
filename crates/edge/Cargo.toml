@@ -1,15 +1,18 @@
 [package]
 name = "mdream-edge"
 version = "0.1.0"
+
 edition.workspace = true
+
 description = "WebAssembly edge runtime bindings for mdream HTML-to-Markdown converter"
+
 license.workspace = true
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false # wasm-pack's bundled wasm-opt is too old; run wasm-opt manually post-build
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = [ "cdylib" ]
 
 [dependencies]
 mdream = { path = "../core" }

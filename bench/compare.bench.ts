@@ -19,7 +19,7 @@ import { gfm } from 'turndown-plugin-gfm'
 import { bench, describe } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../packages/js/src'
 import { withMinimalPreset } from '../packages/js/src/preset/minimal'
-import { htmlToMarkdown as mdreamRust, streamHtmlToMarkdown as mdreamRustStream__ } from '../packages/mdream/src'
+import { htmlToMarkdown as mdreamRust } from '../packages/mdream/src'
 
 function stringToStream(str: string): ReadableStream<string> {
   return new ReadableStream({

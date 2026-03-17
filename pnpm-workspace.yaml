@@ -62,6 +62,7 @@ catalog:
   husky: ^9.1.7
   lint-staged: ^16.1.6
   llm-cost: ^1.0.5
+  miniflare: ^4.20260310.0
   node-html-markdown: ^2.0.0
   npm-run-all2: ^8.0.4
   nuxt: ^4.3.1

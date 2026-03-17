@@ -7,6 +7,7 @@ import path from 'node:path'
 import { shouldServeMarkdown } from '@mdream/js/negotiate'
 import { htmlToMarkdown } from 'mdream'
 
+const GLOB_BACKSLASH_RE = /\\/g
 const GLOB_DOT_RE = /\./g
 const GLOB_DOUBLE_STAR_RE = /\*\*/g
 const GLOB_STAR_RE = /\*/g
@@ -158,7 +159,8 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     return patterns.some((pattern) => {
       // Simple glob pattern matching - convert to regex
       const regexPattern = pattern
-        .replace(GLOB_DOT_RE, '\\.') // Escape literal dots first
+        .replace(GLOB_BACKSLASH_RE, '\\\\') // Escape backslashes first
+        .replace(GLOB_DOT_RE, '\\.') // Escape literal dots
         .replace(GLOB_DOUBLE_STAR_RE, '.*') // ** matches anything including /
         .replace(GLOB_STAR_RE, '[^/]*') // * matches filename chars except /
         .replace(GLOB_QUESTION_RE, '.') // ? matches any single char

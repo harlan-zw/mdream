@@ -47,8 +47,8 @@ export function createClassSelector(selector: string): SelectorMatcher {
   }
 }
 
-// eslint-disable-next-line regexp/no-super-linear-backtracking, regexp/no-misleading-capturing-group
-const ATTR_SELECTOR_RE = /\[([^\]=~|^$*]+)(?:([=~|^$*]+)["']?([^"'\]]+)["']?)?\]/
+// eslint-disable-next-line regexp/no-misleading-capturing-group
+const ATTR_SELECTOR_RE = /\[([^\]=~|^$*]+)(?:([=~|^$*]{1,2})["']?([^"'\]]+)["']?)?\]/
 
 /**
  * Creates an attribute selector matcher (e.g., '[data-id]', '[href="https://example.com"]')
