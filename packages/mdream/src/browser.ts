@@ -1,7 +1,7 @@
 import type { HtmlToMarkdownOptions, MdreamNapiResult } from '../napi/index.js'
 import init, { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream } from '../wasm/mdream_edge.js'
 
-let _initPromise: Promise<unknown> | null = null
+let _initPromise: Promise<unknown>
 
 function ensureInit(): Promise<unknown> {
   if (!_initPromise) {

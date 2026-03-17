@@ -150,16 +150,25 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasip1-threads
+          targets: wasm32-wasip1-threads,wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: crates -> target
 
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
       - run: pnpm i
 
       - name: Prepare
         run: pnpm -r run dev:prepare
+
+      - name: Build WASM edge
+        run: wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge
+        working-directory: crates/edge
 
       - name: Build
         run: pnpm run build
