@@ -74,19 +74,19 @@
   },
   "dependencies": {},
   "optionalDependencies": {
-    "@mdream/engine-rust-android-arm-eabi": "workspace:*",
-    "@mdream/engine-rust-android-arm64": "workspace:*",
-    "@mdream/engine-rust-darwin-arm64": "workspace:*",
-    "@mdream/engine-rust-darwin-x64": "workspace:*",
-    "@mdream/engine-rust-freebsd-x64": "workspace:*",
-    "@mdream/engine-rust-linux-arm-gnueabihf": "workspace:*",
-    "@mdream/engine-rust-linux-arm64-gnu": "workspace:*",
-    "@mdream/engine-rust-linux-arm64-musl": "workspace:*",
-    "@mdream/engine-rust-linux-x64-gnu": "workspace:*",
-    "@mdream/engine-rust-linux-x64-musl": "workspace:*",
-    "@mdream/engine-rust-wasm32-wasi": "workspace:*",
-    "@mdream/engine-rust-win32-arm64-msvc": "workspace:*",
-    "@mdream/engine-rust-win32-x64-msvc": "workspace:*"
+    "@mdream/rust-android-arm-eabi": "workspace:*",
+    "@mdream/rust-android-arm64": "workspace:*",
+    "@mdream/rust-darwin-arm64": "workspace:*",
+    "@mdream/rust-darwin-x64": "workspace:*",
+    "@mdream/rust-freebsd-x64": "workspace:*",
+    "@mdream/rust-linux-arm-gnueabihf": "workspace:*",
+    "@mdream/rust-linux-arm64-gnu": "workspace:*",
+    "@mdream/rust-linux-arm64-musl": "workspace:*",
+    "@mdream/rust-linux-x64-gnu": "workspace:*",
+    "@mdream/rust-linux-x64-musl": "workspace:*",
+    "@mdream/rust-wasm32-wasi": "workspace:*",
+    "@mdream/rust-win32-arm64-msvc": "workspace:*",
+    "@mdream/rust-win32-x64-msvc": "workspace:*"
   },
   "devDependencies": {
     "@mdream/js": "workspace:*"

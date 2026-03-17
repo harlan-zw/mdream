@@ -1,5 +1,5 @@
 {
-  "name": "@mdream/engine-rust-linux-arm64-gnu",
+  "name": "@mdream/rust-linux-arm64-gnu",
   "version": "0.17.0",
   "license": "MIT",
   "repository": {
@@ -9,8 +9,8 @@
   },
   "os": ["linux"],
   "cpu": ["arm64"],
-  "main": "engine-rust.linux-arm64-gnu.node",
-  "files": ["engine-rust.linux-arm64-gnu.node"],
+  "main": "rust.linux-arm64-gnu.node",
+  "files": ["rust.linux-arm64-gnu.node"],
   "publishConfig": {
     "access": "public"
   },

@@ -1,5 +1,5 @@
 {
-  "name": "@mdream/engine-rust-linux-x64-musl",
+  "name": "@mdream/rust-linux-x64-musl",
   "version": "0.17.0",
   "license": "MIT",
   "repository": {
@@ -9,8 +9,8 @@
   },
   "os": ["linux"],
   "cpu": ["x64"],
-  "main": "engine-rust.linux-x64-musl.node",
-  "files": ["engine-rust.linux-x64-musl.node"],
+  "main": "rust.linux-x64-musl.node",
+  "files": ["rust.linux-x64-musl.node"],
   "publishConfig": {
     "access": "public"
   },

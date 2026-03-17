@@ -1,5 +1,5 @@
 {
-  "name": "@mdream/engine-rust-win32-arm64-msvc",
+  "name": "@mdream/rust-win32-arm64-msvc",
   "version": "0.17.0",
   "license": "MIT",
   "repository": {
@@ -9,8 +9,8 @@
   },
   "os": ["win32"],
   "cpu": ["arm64"],
-  "main": "engine-rust.win32-arm64-msvc.node",
-  "files": ["engine-rust.win32-arm64-msvc.node"],
+  "main": "rust.win32-arm64-msvc.node",
+  "files": ["rust.win32-arm64-msvc.node"],
   "publishConfig": {
     "access": "public"
   },

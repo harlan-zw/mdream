@@ -37,6 +37,16 @@ jobs:
       - name: Install Dependencies
         run: pnpm i
 
-      - run: pnpm publish -r --access public --no-git-checks --filter '!@mdream/engine-rust-*'
+      - name: Determine npm dist-tag
+        id: dist-tag
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          if [[ "$VERSION" == *"-"* ]]; then
+            echo "tag=--tag beta" >> $GITHUB_OUTPUT
+          else
+            echo "tag=" >> $GITHUB_OUTPUT
+          fi
+
+      - run: pnpm publish -r --access public --no-git-checks --filter '!@mdream/rust-*' ${{ steps.dist-tag.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

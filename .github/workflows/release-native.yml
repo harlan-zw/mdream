@@ -117,7 +117,7 @@ jobs:
         working-directory: crates/node
         run: |
           npm install -g binaryen
-          wasm-opt -Oz engine-rust.wasm -o engine-rust.wasm
+          wasm-opt -Oz rust.wasm -o rust.wasm
           node ./scripts/move-artifacts.mjs
 
       - name: Upload artifact
@@ -221,12 +221,22 @@ jobs:
           cp crates/node/index.d.ts packages/mdream/napi/index.d.ts
           cp crates/node/index.d.ts packages/mdream/napi/index.d.mts
 
+      - name: Determine npm dist-tag
+        id: dist-tag
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          if [[ "$VERSION" == *"-"* ]]; then
+            echo "tag=--tag beta" >> $GITHUB_OUTPUT
+          else
+            echo "tag=" >> $GITHUB_OUTPUT
+          fi
+
       - name: Publish platform packages
         run: |
           for pkg in crates/node/npm/*/; do
             if [ -f "$pkg/package.json" ]; then
               cd "$pkg"
-              npm publish --access public || true
+              npm publish --access public ${{ steps.dist-tag.outputs.tag }} || true
               cd -
             fi
           done
@@ -235,6 +245,6 @@ jobs:
 
       - name: Publish mdream (with native bindings)
         working-directory: packages/mdream
-        run: npm publish --access public
+        run: npm publish --access public ${{ steps.dist-tag.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

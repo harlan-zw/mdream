@@ -1,5 +1,5 @@
 {
-  "name": "@mdream/engine-rust-freebsd-x64",
+  "name": "@mdream/rust-freebsd-x64",
   "version": "0.17.0",
   "license": "MIT",
   "repository": {
@@ -9,8 +9,8 @@
   },
   "os": ["freebsd"],
   "cpu": ["x64"],
-  "main": "engine-rust.freebsd-x64.node",
-  "files": ["engine-rust.freebsd-x64.node"],
+  "main": "rust.freebsd-x64.node",
+  "files": ["rust.freebsd-x64.node"],
   "publishConfig": {
     "access": "public"
   },

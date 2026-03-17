@@ -1,5 +1,5 @@
 {
-  "name": "@mdream/engine-rust-build",
+  "name": "@mdream/rust-build",
   "version": "0.17.0",
   "private": true,
   "description": "Native Rust HTML-to-Markdown engine for mdream, built with NAPI-RS.",
@@ -22,8 +22,8 @@
     "index.js"
   ],
   "napi": {
-    "binaryName": "engine-rust",
-    "packageName": "@mdream/engine-rust",
+    "binaryName": "rust",
+    "packageName": "@mdream/rust",
     "targets": [
       "x86_64-pc-windows-msvc",
       "x86_64-apple-darwin",

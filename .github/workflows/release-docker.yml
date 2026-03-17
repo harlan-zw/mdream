@@ -61,6 +61,16 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building version: $VERSION"
 
+      - name: Check if prerelease
+        id: prerelease
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          if [[ "$VERSION" == *"-"* ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -69,11 +79,11 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
             ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ steps.prerelease.outputs.is_prerelease == 'false' }}
             type=raw,value=${{ steps.version.outputs.version }}
             type=semver,pattern={{version}},value=v${{ steps.version.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=v${{ steps.version.outputs.version }}
-            type=semver,pattern={{major}},value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ steps.version.outputs.version }},enable=${{ steps.prerelease.outputs.is_prerelease == 'false' }}
+            type=semver,pattern={{major}},value=v${{ steps.version.outputs.version }},enable=${{ steps.prerelease.outputs.is_prerelease == 'false' }}
           labels: |
             org.opencontainers.image.title=mdream
             org.opencontainers.image.description=Ultra-performant HTML to Markdown converter optimized for LLMs with Playwright Chrome

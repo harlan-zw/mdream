@@ -8,8 +8,8 @@ const mdreamDir = path.resolve(root, '../../packages/mdream')
 
 // Move napi platform artifacts into sub packages
 for (const file of await fs.readdir(root)) {
-  if (file.startsWith('engine-rust.') && file.endsWith('.node')) {
-    const target = file.replace('engine-rust.', '').replace('.node', '')
+  if (file.startsWith('rust.') && file.endsWith('.node')) {
+    const target = file.replace('rust.', '').replace('.node', '')
     await fs.cp(
       path.join(root, file),
       path.join(root, 'npm', target, file),
@@ -49,10 +49,10 @@ for (const file of napiBindings) {
 
 // Move napi wasm artifacts into sub package
 const wasmArtifacts = {
-  'engine-rust.debug.wasm': 'engine-rust.wasm32-wasi.debug.wasm',
-  'engine-rust.wasm': 'engine-rust.wasm32-wasi.wasm',
-  'engine-rust.wasi-browser.js': 'engine-rust.wasi-browser.js',
-  'engine-rust.wasi.cjs': 'engine-rust.wasi.cjs',
+  'rust.debug.wasm': 'rust.wasm32-wasi.debug.wasm',
+  'rust.wasm': 'rust.wasm32-wasi.wasm',
+  'rust.wasi-browser.js': 'rust.wasi-browser.js',
+  'rust.wasi.cjs': 'rust.wasi.cjs',
   'wasi-worker-browser.mjs': 'wasi-worker-browser.mjs',
   'wasi-worker.mjs': 'wasi-worker.mjs',
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@mdream/engine-rust-android-arm-eabi",
+  "name": "@mdream/rust-android-arm-eabi",
   "version": "0.17.0",
   "license": "MIT",
   "repository": {
@@ -9,8 +9,8 @@
   },
   "os": ["android"],
   "cpu": ["arm"],
-  "main": "engine-rust.android-arm-eabi.node",
-  "files": ["engine-rust.android-arm-eabi.node"],
+  "main": "rust.android-arm-eabi.node",
+  "files": ["rust.android-arm-eabi.node"],
   "publishConfig": {
     "access": "public"
   },

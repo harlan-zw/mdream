@@ -1,5 +1,5 @@
 {
-  "name": "@mdream/engine-rust-android-arm64",
+  "name": "@mdream/rust-android-arm64",
   "version": "0.17.0",
   "license": "MIT",
   "repository": {
@@ -9,8 +9,8 @@
   },
   "os": ["android"],
   "cpu": ["arm64"],
-  "main": "engine-rust.android-arm64.node",
-  "files": ["engine-rust.android-arm64.node"],
+  "main": "rust.android-arm64.node",
+  "files": ["rust.android-arm64.node"],
   "publishConfig": {
     "access": "public"
   },

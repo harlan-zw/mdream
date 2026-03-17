@@ -1,5 +1,5 @@
 {
-  "name": "@mdream/engine-rust-linux-arm-gnueabihf",
+  "name": "@mdream/rust-linux-arm-gnueabihf",
   "version": "0.17.0",
   "license": "MIT",
   "repository": {
@@ -9,8 +9,8 @@
   },
   "os": ["linux"],
   "cpu": ["arm"],
-  "main": "engine-rust.linux-arm-gnueabihf.node",
-  "files": ["engine-rust.linux-arm-gnueabihf.node"],
+  "main": "rust.linux-arm-gnueabihf.node",
+  "files": ["rust.linux-arm-gnueabihf.node"],
   "publishConfig": {
     "access": "public"
   },

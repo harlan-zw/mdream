@@ -1,5 +1,5 @@
 {
-  "name": "@mdream/engine-rust-wasm32-wasi",
+  "name": "@mdream/rust-wasm32-wasi",
   "version": "0.17.0",
   "cpu": [
     "wasm32"
@@ -10,11 +10,11 @@
     "url": "git+https://github.com/harlan-zw/mdream.git",
     "directory": "crates/node"
   },
-  "main": "engine-rust.wasi.cjs",
+  "main": "rust.wasi.cjs",
   "files": [
-    "engine-rust.wasi-browser.js",
-    "engine-rust.wasi.cjs",
-    "engine-rust.wasm32-wasi.wasm",
+    "rust.wasi-browser.js",
+    "rust.wasi.cjs",
+    "rust.wasm32-wasi.wasm",
     "wasi-worker-browser.mjs",
     "wasi-worker.mjs"
   ],
@@ -24,7 +24,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "browser": "engine-rust.wasi-browser.js",
+  "browser": "rust.wasi-browser.js",
   "dependencies": {
     "@emnapi/core": "catalog:",
     "@emnapi/runtime": "catalog:",

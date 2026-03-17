@@ -7,8 +7,8 @@ Cargo.lock
 index.d.ts
 index.js
 browser.js
-engine-rust.wasi-browser.js
-engine-rust.wasi.cjs
+rust.wasi-browser.js
+rust.wasi.cjs
 wasi-worker-browser.mjs
 wasi-worker.mjs
 
