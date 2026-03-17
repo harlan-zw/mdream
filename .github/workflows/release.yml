@@ -10,8 +10,12 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  native:
+    uses: ./.github/workflows/release-native.yml
+
+  publish:
     runs-on: ubuntu-latest
+    needs: [native]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -37,6 +41,34 @@ jobs:
       - name: Install Dependencies
         run: pnpm i
 
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Move native bindings to platform packages
+        run: |
+          for dir in artifacts/bindings-*/crates/node/npm/*/; do
+            platform=$(basename "$dir")
+            cp -v "$dir"* "crates/node/npm/$platform/" 2>/dev/null || true
+          done
+
+      - name: Move WASM edge artifacts
+        run: |
+          mkdir -p packages/mdream/wasm
+          cp -v artifacts/wasm-edge/* packages/mdream/wasm/
+
+      - name: Generate NAPI index.js and index.d.ts
+        working-directory: crates/node
+        run: pnpm exec napi artifacts
+
+      - name: Copy NAPI entry files to distribution package
+        run: |
+          mkdir -p packages/mdream/napi
+          cp crates/node/index.js packages/mdream/napi/index.mjs
+          cp crates/node/index.d.ts packages/mdream/napi/index.d.ts
+          cp crates/node/index.d.ts packages/mdream/napi/index.d.mts
+
       - name: Determine npm dist-tag
         id: dist-tag
         run: |
@@ -47,6 +79,13 @@ jobs:
             echo "tag=" >> $GITHUB_OUTPUT
           fi
 
-      - run: pnpm publish -r --access public --no-git-checks --filter '!@mdream/rust-*' ${{ steps.dist-tag.outputs.tag }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish platform packages
+        run: |
+          for pkg in crates/node/npm/*/; do
+            if [ -f "$pkg/package.json" ]; then
+              pnpm publish --access public --no-git-checks --provenance ${{ steps.dist-tag.outputs.tag }} --filter "$(node -p "require('./$pkg/package.json').name")" || true
+            fi
+          done
+
+      - name: Publish all other packages
+        run: pnpm publish -r --access public --no-git-checks --provenance --filter '!@mdream/rust-*' ${{ steps.dist-tag.outputs.tag }}
