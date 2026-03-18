@@ -117,7 +117,7 @@ fn decode_html_entities_alloc(text: &str) -> String {
         if i >= len { break; }
         // Handle non-ASCII multi-byte UTF-8 char
         if bytes[i] >= 0x80 {
-            let ch = text[i..].chars().next().unwrap();
+            let Some(ch) = text[i..].chars().next() else { break; };
             result.push(ch);
             i += ch.len_utf8();
         }
@@ -361,7 +361,7 @@ pub(crate) fn parse_css_selector(selector: &str) -> ParsedSelector {
     }
 
     if parts.len() == 1 {
-        parts.into_iter().next().unwrap()
+        parts.into_iter().next().unwrap_or(ParsedSelector::Tag(String::new()))
     } else {
         ParsedSelector::Compound(parts)
     }

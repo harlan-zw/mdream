@@ -460,9 +460,10 @@ impl ConvertState {
                         if cc < 0x80 {
                             text_buffer.push(cc as char);
                         } else {
-                            let ch = chunk[i..].chars().next().unwrap();
+                            if let Some(ch) = chunk[i..].chars().next() {
                             text_buffer.push(ch);
                             i += ch.len_utf8();
+                            } else { i += 1; }
                             self.last_char_was_backslash = false;
                             continue;
                         }
@@ -478,8 +479,7 @@ impl ConvertState {
                         text_buffer.push_str("\\>");
                     } else if cc < 0x80 {
                         text_buffer.push(cc as char);
-                    } else {
-                        let ch = chunk[i..].chars().next().unwrap();
+                    } else if let Some(ch) = chunk[i..].chars().next() {
                         text_buffer.push(ch);
                         i += ch.len_utf8();
                         self.last_char_was_backslash = false;
@@ -552,11 +552,13 @@ impl ConvertState {
                     }
                     i2 += 1;
                 }
-                if tag_name_end.is_none() {
-                    text_buffer.push_str(&chunk[i..]);
-                    break;
-                }
-                let tag_name_end = tag_name_end.unwrap();
+                let tag_name_end = match tag_name_end {
+                    Some(v) => v,
+                    None => {
+                        text_buffer.push_str(&chunk[i..]);
+                        break;
+                    }
+                };
                 let tag_name_raw = &chunk[tag_name_start..tag_name_end];
                 if tag_name_raw.is_empty() { break; }
                 let tag_name: Cow<str> = if tag_name_raw.bytes().any(|b| b.is_ascii_uppercase()) {
@@ -1354,29 +1356,30 @@ impl ConvertState {
                 for _ in 0..new_lines { self.buffer.push('\n'); }
             }
         } else {
-            if self.last_text_node_contains_whitespace && !self.stack.is_empty() {
-                let parent = self.stack.last().unwrap();
-                if self.depth_map[TAG_PRE as usize] == 0 || parent.tag_id == Some(TAG_PRE) {
-                    let h_is_inline = is_inline;
-                    let collapses = parent.collapses_inner_white_space;
-                    let has_spacing = parent.spacing.is_some();
-                    // For exit, the node was already popped, so use the is_inline param
-                    let is_block = !h_is_inline && !collapses && configured_new_lines > 0;
-                    let should_trim = !(is_block || (h_is_inline && is_enter) || (is_enter && collapses) || (is_enter && has_spacing));
+            if let Some(parent) = self.stack.last() {
+                if self.last_text_node_contains_whitespace {
+                    if self.depth_map[TAG_PRE as usize] == 0 || parent.tag_id == Some(TAG_PRE) {
+                        let h_is_inline = is_inline;
+                        let collapses = parent.collapses_inner_white_space;
+                        let has_spacing = parent.spacing.is_some();
+                        // For exit, the node was already popped, so use the is_inline param
+                        let is_block = !h_is_inline && !collapses && configured_new_lines > 0;
+                        let should_trim = (!h_is_inline || !is_enter) && !is_block && !(collapses && is_enter) && !(has_spacing && is_enter);
 
-                    if should_trim && self.last_content_cache_len > 0 {
-                        let cache_len = self.last_content_cache_len;
-                        let buf_len = self.buffer.len();
-                        if cache_len <= buf_len {
-                            let frag = &self.buffer[buf_len - cache_len..];
-                            let trimmed_len = frag.trim_end().len();
-                            if trimmed_len < cache_len {
-                                self.buffer.truncate(buf_len - cache_len + trimmed_len);
+                        if should_trim && self.last_content_cache_len > 0 {
+                            let cache_len = self.last_content_cache_len;
+                            let buf_len = self.buffer.len();
+                            if cache_len <= buf_len {
+                                let frag = &self.buffer[buf_len - cache_len..];
+                                let trimmed_len = frag.trim_end().len();
+                                if trimmed_len < cache_len {
+                                    self.buffer.truncate(buf_len - cache_len + trimmed_len);
+                                }
                             }
                         }
+                        self.last_text_node_contains_whitespace = false;
+                        self.has_last_text_node = false;
                     }
-                    self.last_text_node_contains_whitespace = false;
-                    self.has_last_text_node = false;
                 }
             }
 
@@ -1461,9 +1464,10 @@ impl ConvertState {
         self.text_buffer_contains_non_whitespace = false;
         self.text_buffer_contains_whitespace = false;
 
-        if self.stack.is_empty() { return; }
-
-        let parent = self.stack.last().unwrap();
+        let parent = match self.stack.last() {
+            Some(p) => p,
+            None => return,
+        };
         let mut excludes_text_nodes = parent.excludes_text_nodes || parent.excluded_from_markdown;
 
         if self.has_isolate_main {
@@ -1576,7 +1580,7 @@ impl ConvertState {
         if let Some(id) = tag_id {
             debug_assert!((id as usize) < MAX_TAG_ID, "tag_id {id} exceeds MAX_TAG_ID {MAX_TAG_ID}");
             if (id as usize) < MAX_TAG_ID {
-                self.depth_map[id as usize] += 1;
+                self.depth_map[id as usize] = self.depth_map[id as usize].saturating_add(1);
             }
             match id {
                 TAG_TABLE => self.escape_ctx |= ESC_TABLE,
@@ -1759,18 +1763,19 @@ impl ConvertState {
 
         // Extraction
         if !self.extraction_parsed_selectors.is_empty() {
-            let element = self.stack.last().unwrap();
-            let stack_depth = self.stack.len();
-            for (selector, parsed) in &self.extraction_parsed_selectors {
-                if matches_selector(element, parsed) {
-                    let attrs: Vec<(String, String)> = element.attributes.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-                    self.extraction_tracked.push(TrackedExtraction {
-                        selector: selector.clone(),
-                        stack_depth,
-                        text_content: String::new(),
-                        tag_name: element.name().to_string(),
-                        attributes: attrs,
-                    });
+            if let Some(element) = self.stack.last() {
+                let stack_depth = self.stack.len();
+                for (selector, parsed) in &self.extraction_parsed_selectors {
+                    if matches_selector(element, parsed) {
+                        let attrs: Vec<(String, String)> = element.attributes.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                        self.extraction_tracked.push(TrackedExtraction {
+                            selector: selector.clone(),
+                            stack_depth,
+                            text_content: String::new(),
+                            tag_name: element.name().to_string(),
+                            attributes: attrs,
+                        });
+                    }
                 }
             }
         }
@@ -1819,7 +1824,11 @@ impl ConvertState {
         }
 
         let popping_index = self.stack.len() - 1;
-        let node = self.stack.pop().unwrap();
+        // Guard already checked above, but avoid panic on edge cases
+        let node = match self.stack.pop() {
+            Some(n) => n,
+            None => return,
+        };
 
         if self.first_block_parent_index == Some(popping_index) {
             self.block_parent_indices.pop();
@@ -1859,7 +1868,7 @@ impl ConvertState {
                 // Emit synthetic text
                 self.emit_text(&prefix, false, text_depth, 0);
                 for prev in self.stack.iter_mut() { prev.child_text_node_index += 1; }
-                let modified_node2 = self.stack.pop().unwrap();
+                let Some(modified_node2) = self.stack.pop() else { return; };
                 // Emit exit
                 self.emit_exit_element(&modified_node2);
                 self.recycle_node(modified_node2);
@@ -1942,9 +1951,9 @@ impl ConvertState {
             }
         }
 
-        if self.stack.last().is_some() {
+        if let Some(top) = self.stack.last() {
             // Fast path: top of stack matches (well-formed HTML)
-            if self.stack.last().unwrap().tag_id == tag_id {
+            if top.tag_id == tag_id {
                 self.close_node();
             } else {
                 let mut pop_count = 0;
