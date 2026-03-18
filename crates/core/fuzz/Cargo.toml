@@ -1,0 +1,45 @@
+[package]
+name = "mdream-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+[dependencies.mdream]
+path = ".."
+
+[[bin]]
+name = "fuzz_html_to_markdown"
+path = "fuzz_targets/fuzz_html_to_markdown.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_streaming"
+path = "fuzz_targets/fuzz_streaming.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_splitter"
+path = "fuzz_targets/fuzz_splitter.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_options"
+path = "fuzz_targets/fuzz_options.rs"
+test = false
+doc = false
+bench = false

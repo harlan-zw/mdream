@@ -846,7 +846,8 @@ impl ConvertState {
                 return;
             }
             let text_start = bracket_pos + 1;
-            let link_text = &self.buffer[text_start..buf_len];
+            let link_text = if text_start <= buf_len && self.buffer.is_char_boundary(text_start) { &self.buffer[text_start..buf_len] } else { "" };
+            let text_len = buf_len.saturating_sub(text_start);
 
             // emptyLinkText: [](url) → drop entirely
             if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
@@ -860,13 +861,9 @@ impl ConvertState {
                 let in_heading = (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0);
                 if in_heading {
                     if let Some(href) = node.attributes.get("href") {
-                        if href.starts_with('#') {
+                        if href.starts_with('#') && text_len > 0 {
                             // Remove [ and keep text only — use truncate+copy without intermediate String
-                            // text_start = bracket_pos + 1, guaranteed <= buf_len by guard above
-                            let text_len = buf_len - text_start;
-                            let new_len = buf_len - 1;
-                            debug_assert!(text_start + text_len <= buf_len && new_len <= buf_len,
-                                "ptr::copy bounds violation in selfLinkHeadings: text_start={text_start} text_len={text_len} bracket_pos={bracket_pos} buf_len={buf_len}");
+                            let new_len = bracket_pos + text_len;
                             unsafe {
                                 let buf = self.buffer.as_mut_vec();
                                 std::ptr::copy(buf.as_ptr().add(text_start), buf.as_mut_ptr().add(bracket_pos), text_len);
@@ -884,13 +881,9 @@ impl ConvertState {
             if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0 {
                 if let Some(href) = node.attributes.get("href") {
                     let resolved = Self::resolve_url(href, self.options.origin.as_deref(), self.options.clean_urls);
-                    if link_text == resolved.as_ref() {
+                    if link_text == resolved.as_ref() && text_len > 0 {
                         // Remove [ and keep text only — use truncate+copy without intermediate String
-                        // text_start = bracket_pos + 1, guaranteed <= buf_len by guard above
-                        let text_len = buf_len - text_start;
-                        let new_len = buf_len - 1;
-                        debug_assert!(text_start + text_len <= buf_len && new_len <= buf_len,
-                            "ptr::copy bounds violation in redundantLinks: text_start={text_start} text_len={text_len} bracket_pos={bracket_pos} buf_len={buf_len}");
+                        let new_len = bracket_pos + text_len;
                         unsafe {
                             let buf = self.buffer.as_mut_vec();
                             std::ptr::copy(buf.as_ptr().add(text_start), buf.as_mut_ptr().add(bracket_pos), text_len);
@@ -929,8 +922,10 @@ impl ConvertState {
                 if !title.is_empty() && self.last_content_cache_len > 0 {
                     let buf_len = self.buffer.len();
                     let start = buf_len.saturating_sub(self.last_content_cache_len);
-                    let cache = &self.buffer[start..];
-                    if cache == title { title = ""; }
+                    if self.buffer.is_char_boundary(start) {
+                        let cache = &self.buffer[start..];
+                        if cache == title { title = ""; }
+                    }
                 }
                 self.buffer.push_str("](");
                 self.buffer.push_str(&resolved);
@@ -1124,9 +1119,9 @@ impl ConvertState {
                 if self.depth_map[TAG_TD as usize] > 0 {
                     return Some(Cow::Borrowed("<li>"));
                 }
-                let ul_depth = self.depth_map[TAG_UL as usize];
-                let ol_depth = self.depth_map[TAG_OL as usize];
-                let depth = if ul_depth + ol_depth > 0 { (ul_depth + ol_depth - 1) as usize } else { 0 };
+                let ul_depth = self.depth_map[TAG_UL as usize] as usize;
+                let ol_depth = self.depth_map[TAG_OL as usize] as usize;
+                let depth = if ul_depth + ol_depth > 0 { ul_depth + ol_depth - 1 } else { 0 };
                 let is_ordered = ol_depth > 0 && _ancestors.last().map(|p| p.tag_id == Some(TAG_OL)).unwrap_or(false);
                 if !is_ordered && depth < UL_PREFIXES.len() {
                     Some(Cow::Borrowed(UL_PREFIXES[depth]))
@@ -1249,8 +1244,10 @@ impl ConvertState {
                     if self.last_content_cache_len > 0 {
                         let buf_len = self.buffer.len();
                         let start = buf_len.saturating_sub(self.last_content_cache_len);
-                        let cache = &self.buffer[start..];
-                        if cache == title { title = ""; }
+                        if self.buffer.is_char_boundary(start) {
+                            let cache = &self.buffer[start..];
+                            if cache == title { title = ""; }
+                        }
                     }
                     if !title.is_empty() {
                         let mut s = String::with_capacity(resolved.len() + title.len() + 6);
@@ -1376,11 +1373,12 @@ impl ConvertState {
                         if should_trim && self.last_content_cache_len > 0 {
                             let cache_len = self.last_content_cache_len;
                             let buf_len = self.buffer.len();
-                            if cache_len <= buf_len {
-                                let frag = &self.buffer[buf_len - cache_len..];
+                            let start = buf_len.saturating_sub(cache_len);
+                            if cache_len <= buf_len && self.buffer.is_char_boundary(start) {
+                                let frag = &self.buffer[start..];
                                 let trimmed_len = frag.trim_end().len();
                                 if trimmed_len < cache_len {
-                                    self.buffer.truncate(buf_len - cache_len + trimmed_len);
+                                    self.buffer.truncate(start + trimmed_len);
                                 }
                             }
                         }
@@ -1751,8 +1749,8 @@ impl ConvertState {
         tag.excluded_from_markdown = filter_excluded;
 
         if tag.collapses_inner_white_space && !filter_excluded {
-            if tag.tag_id == Some(TAG_SPAN) { self.collapse_span_depth += 1; }
-            else { self.collapse_non_span_depth += 1; }
+            if tag.tag_id == Some(TAG_SPAN) { self.collapse_span_depth = self.collapse_span_depth.saturating_add(1); }
+            else { self.collapse_non_span_depth = self.collapse_non_span_depth.saturating_add(1); }
         }
 
         if let Some(last) = self.stack.last_mut() { last.current_walk_index += 1; }
@@ -1841,8 +1839,8 @@ impl ConvertState {
         }
 
         if node.collapses_inner_white_space && !node.excluded_from_markdown {
-            if node.tag_id == Some(TAG_SPAN) { self.collapse_span_depth -= 1; }
-            else { self.collapse_non_span_depth -= 1; }
+            if node.tag_id == Some(TAG_SPAN) { self.collapse_span_depth = self.collapse_span_depth.saturating_sub(1); }
+            else { self.collapse_non_span_depth = self.collapse_non_span_depth.saturating_sub(1); }
         }
 
         if self.has_isolate_main {
@@ -2160,8 +2158,13 @@ impl ConvertState {
 
     pub fn get_markdown_chunk(&mut self) -> String {
         let current_content = self.buffer.trim_start();
+        let content_len = current_content.len();
+        if self.last_yielded_length >= content_len {
+            self.last_yielded_length = content_len;
+            return String::new();
+        }
         let new_content = current_content[self.last_yielded_length..].to_string();
-        self.last_yielded_length = current_content.len();
+        self.last_yielded_length = content_len;
         new_content
     }
 }

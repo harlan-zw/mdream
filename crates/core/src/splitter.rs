@@ -200,7 +200,7 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
                        strip_headers: bool,
                        chunk_overlap: usize| {
         let end_position = end_position.min(markdown.len());
-        let start = (*last_chunk_end_position).min(markdown.len());
+        let start = (*last_chunk_end_position).min(end_position);
         let original_chunk_content = &markdown[start..end_position];
 
         if original_chunk_content.trim().is_empty() {
@@ -260,7 +260,12 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
             let content_len = original_chunk_content.len();
             let max_overlap = if content_len > 1 { content_len - 1 } else { 0 };
             let actual_overlap = chunk_overlap.min(max_overlap);
-            *last_chunk_end_position = end_position - actual_overlap;
+            let mut overlap_pos = end_position - actual_overlap;
+            // Snap to char boundary
+            while overlap_pos < markdown.len() && !markdown.is_char_boundary(overlap_pos) {
+                overlap_pos += 1;
+            }
+            *last_chunk_end_position = overlap_pos;
         } else {
             *last_chunk_end_position = end_position;
         }
@@ -345,8 +350,11 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
                 let mut split_position: isize = -1;
 
                 for sep in &separators {
-                    // rfind from ideal_split_pos
-                    let search_end = ideal_split_pos.min(current_md.len());
+                    // rfind from ideal_split_pos, snapped to a char boundary
+                    let mut search_end = ideal_split_pos.min(current_md.len());
+                    while search_end < current_md.len() && !current_md.is_char_boundary(search_end) {
+                        search_end += 1;
+                    }
                     let search_region = &current_md[..search_end];
                     if let Some(idx) = search_region.rfind(sep) {
                         let candidate_split_pos = idx + sep.len();

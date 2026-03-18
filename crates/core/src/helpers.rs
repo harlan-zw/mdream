@@ -340,10 +340,12 @@ pub(crate) fn parse_css_selector(selector: &str) -> ParsedSelector {
             continue;
         }
         if ch == ']' {
-            current.push(ch);
-            in_attr = false;
-            parts.push(parse_attr_selector(&current));
-            current.clear();
+            if in_attr {
+                current.push(ch);
+                in_attr = false;
+                parts.push(parse_attr_selector(&current));
+                current.clear();
+            }
             continue;
         }
         if in_attr {
@@ -378,6 +380,9 @@ fn parse_simple_selector(s: &str) -> ParsedSelector {
 }
 
 fn parse_attr_selector(s: &str) -> ParsedSelector {
+    if s.len() < 2 {
+        return ParsedSelector::Tag(s.to_string());
+    }
     let inner = &s[1..s.len() - 1];
     let operators = ["^=", "$=", "*=", "~=", "|=", "="];
     for op in &operators {
