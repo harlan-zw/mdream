@@ -516,11 +516,32 @@ impl ConvertState {
                     break;
                 }
             } else if next == SLASH_CHAR {
-                let in_quotes = self.in_single_quote || self.in_double_quote || self.in_backtick;
-                if self.in_non_nesting && in_quotes {
-                    text_buffer.push(cc as char);
-                    i += 1;
-                    continue;
+                if self.in_non_nesting {
+                    let in_quotes = self.in_single_quote || self.in_double_quote || self.in_backtick;
+                    if in_quotes {
+                        text_buffer.push(cc as char);
+                        i += 1;
+                        continue;
+                    }
+                    // Peek at closing tag name to check if it matches the non-nesting tag
+                    let peek_start = i + 2;
+                    let mut peek_end = peek_start;
+                    while peek_end < chunk_length {
+                        let c = bytes[peek_end];
+                        if c == GT_CHAR || is_whitespace(c) { break; }
+                        peek_end += 1;
+                    }
+                    let peek_name = &chunk[peek_start..peek_end];
+                    let peek_tag_id = if peek_name.bytes().any(|b| b.is_ascii_uppercase()) {
+                        crate::consts::get_tag_id(&peek_name.to_ascii_lowercase())
+                    } else {
+                        crate::consts::get_tag_id(peek_name)
+                    };
+                    if self.stack.last().map_or(true, |curr| curr.tag_id != peek_tag_id) {
+                        text_buffer.push(bytes[i] as char);
+                        i += 1;
+                        continue;
+                    }
                 }
                 if !text_buffer.is_empty() {
                     self.process_text_buffer(&mut text_buffer);
@@ -551,7 +572,7 @@ impl ConvertState {
                     break;
                 };
                 let tag_name_raw = &chunk[tag_name_start..tag_name_end];
-                if tag_name_raw.is_empty() { break; }
+
                 let tag_name: Cow<str> = if tag_name_raw.bytes().any(|b| b.is_ascii_uppercase()) {
                     Cow::Owned(tag_name_raw.to_ascii_lowercase())
                 } else {
@@ -567,20 +588,21 @@ impl ConvertState {
                 };
                 i2 = tag_name_end;
 
-                let in_quotes = self.in_single_quote || self.in_double_quote || self.in_backtick;
                 if self.in_non_nesting {
-                    if in_quotes {
+                    if tag_name_raw.is_empty() || {
+                        let in_quotes = self.in_single_quote || self.in_double_quote || self.in_backtick;
+                        in_quotes || self.stack.last().map_or(false, |curr| curr.tag_id != tag_id)
+                    } {
                         text_buffer.push(bytes[i] as char);
                         i += 1;
                         continue;
                     }
-                    if let Some(curr) = self.stack.last() {
-                        if curr.tag_id != tag_id {
-                            text_buffer.push(bytes[i] as char);
-                            i += 1;
-                            continue;
-                        }
-                    }
+                }
+
+                if tag_name_raw.is_empty() {
+                    text_buffer.push(bytes[i] as char);
+                    i += 1;
+                    continue;
                 }
 
                 if !text_buffer.is_empty() {
