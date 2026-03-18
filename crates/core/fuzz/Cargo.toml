@@ -6,15 +6,15 @@ edition = "2021"
 
 [workspace]
 
-[package.metadata]
-cargo-fuzz = true
-
 [dependencies]
 libfuzzer-sys = "0.4"
-arbitrary = { version = "1", features = ["derive"] }
+arbitrary = { version = "1", features = [ "derive" ] }
 
 [dependencies.mdream]
 path = ".."
+
+[package.metadata]
+cargo-fuzz = true
 
 [[bin]]
 name = "fuzz_html_to_markdown"

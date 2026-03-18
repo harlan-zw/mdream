@@ -99,14 +99,16 @@ const markdown = htmlToMarkdown('<h1>Hello World</h1><p>Some content.</p>')
 
 Converts an HTML `ReadableStream` to Markdown incrementally. Returns an `AsyncIterable<string>` that yields Markdown chunks as they are processed.
 
+
 ```ts
 import { streamHtmlToMarkdown } from 'mdream'
 
-async function* streamHtmlToMarkdown(
+function streamHtmlToMarkdown(
   htmlStream: ReadableStream<Uint8Array | string> | null,
   options?: Partial<MdreamOptions>,
 ): AsyncIterable<string>
 ```
+
 
 **Example:**
 
