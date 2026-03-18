@@ -321,10 +321,12 @@ pub(crate) fn parse_css_selector(selector: &str) -> ParsedSelector {
             continue;
         }
         if ch == ']' {
-            current.push(ch);
-            in_attr = false;
-            parts.push(parse_attr_selector(&current));
-            current.clear();
+            if in_attr {
+                current.push(ch);
+                in_attr = false;
+                parts.push(parse_attr_selector(&current));
+                current.clear();
+            }
             continue;
         }
         if in_attr {
@@ -359,13 +361,16 @@ fn parse_simple_selector(s: &str) -> ParsedSelector {
 }
 
 fn parse_attr_selector(s: &str) -> ParsedSelector {
+    if s.len() < 2 {
+        return ParsedSelector::Tag(s.to_string());
+    }
     let inner = &s[1..s.len() - 1];
     let operators = ["^=", "$=", "*=", "~=", "|=", "="];
     for op in &operators {
         if let Some(pos) = inner.find(op) {
             let name = inner[..pos].to_string();
             let val = inner[pos + op.len()..].trim_matches(|c| c == '"' || c == '\'').to_string();
-            return ParsedSelector::Attribute { name, operator: Some(op.to_string()), value: Some(val) };
+            return ParsedSelector::Attribute { name, operator: Some((*op).to_string()), value: Some(val) };
         }
     }
     ParsedSelector::Attribute { name: inner.to_string(), operator: None, value: None }
@@ -393,7 +398,7 @@ pub(crate) fn matches_selector(tag: &ElementNode, selector: &ParsedSelector) -> 
                         (Some("$="), Some(v)) => attr_val.ends_with(v),
                         (Some("*="), Some(v)) => attr_val.contains(v),
                         (Some("~="), Some(v)) => attr_val.split_whitespace().any(|w| w == v),
-                        (Some("|="), Some(v)) => attr_val == v || attr_val.starts_with(&format!("{}-", v)),
+                        (Some("|="), Some(v)) => attr_val == v || attr_val.starts_with(&format!("{v}-")),
                         _ => false,
                     }
                 }

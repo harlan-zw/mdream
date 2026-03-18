@@ -24,3 +24,31 @@ export class MarkdownStream {
     return this._inner.finish()
   }
 }
+
+export async function* streamHtmlToMarkdown(
+  htmlStream: ReadableStream<Uint8Array | string> | null,
+  options?: HtmlToMarkdownOptions,
+): AsyncIterable<string> {
+  if (!htmlStream)
+    throw new Error('Invalid HTML stream provided')
+  const stream = new _MarkdownStream(options || {})
+  const reader = htmlStream.getReader()
+  const decoder = new TextDecoder()
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done)
+        break
+      const chunk = typeof value === 'string' ? value : decoder.decode(value)
+      const processed = stream.processChunk(chunk)
+      if (processed)
+        yield processed
+    }
+    const final_ = stream.finish()
+    if (final_)
+      yield final_
+  }
+  finally {
+    reader.releaseLock()
+  }
+}

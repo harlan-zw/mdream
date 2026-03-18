@@ -7,82 +7,101 @@
 
 Nuxt module for converting HTML pages to Markdown using [mdream](https://github.com/harlan-zw/mdream).
 
-## Features
+## Setup
 
-- **🚀 On-Demand Generation**: Access any route with `.md` extension (e.g., `/about` → `/about.md`)
-- **🤖 Smart Client Detection**: Automatically serves markdown to LLM bots based on Accept headers
-- **📄 LLMs.txt Generation**: Creates `llms.txt` and `llms-full.txt` artifacts during prerendering
-
-## Installation
+### Installation
 
 ```bash
-pnpm add @mdream/nuxt@beta
+pnpm add @mdream/nuxt
 ```
 
-## Usage
+Requires Nuxt 3.0.0 or later.
 
-Add the module to your `nuxt.config.ts`:
+### Module Registration
 
 ```ts
 export default defineNuxtConfig({
-  modules: [
-    '@mdream/nuxt'
-  ],
+  modules: ['@mdream/nuxt'],
 })
 ```
 
-Done! You can now:
-
-1. **Add `.md` extension**: Access any route as markdown (e.g., `/about.md`)
-2. **LLM bots**: LLM bots automatically receive markdown responses based on Accept headers
-
-When statically generating your site with `nuxi generate` it will create `llms.txt` and `llms-full.txt` artifacts.
-
-### Smart Client Detection
-
-The module automatically detects LLM bots and serves markdown without requiring the `.md` extension:
-
-- ✅ **Serves markdown** when `Accept` header contains `*/*` or `text/markdown` (but not `text/html`)
-- ❌ **Serves HTML** to browsers (checks for `text/html` in Accept header or `sec-fetch-dest: document`)
-
-This means LLM bots automatically receive optimized markdown responses, reducing token usage by ~10x compared to HTML.
+Once registered, every route is available as markdown by appending `.md` to the path (e.g., `/about.md`). LLM bots automatically receive markdown responses without the `.md` extension.
 
 ## Configuration
 
-Configure the module in your `nuxt.config.ts`:
+All options are configured under the `mdream` key in `nuxt.config.ts`:
 
 ```ts
 export default defineNuxtConfig({
   modules: ['@mdream/nuxt'],
 
   mdream: {
-    // Enable/disable the module
     enabled: true,
-
-    // Pass options to mdream
     mdreamOptions: {
-      // mdream conversion options
+      preset: 'minimal',
+      origin: 'https://example.com',
+      clean: true,
+      frontmatter: true,
+      isolateMain: true,
+      tailwind: true,
+      filter: { exclude: ['nav', 'footer'] },
     },
-
-    // Cache configuration (production only)
     cache: {
-      maxAge: 3600, // 1 hour
-      swr: true // Stale-while-revalidate
-    }
-  }
+      maxAge: 3600,
+      swr: true,
+    },
+  },
 })
 ```
 
-### Options
+### Module Options
 
-- `enabled` (boolean): Enable or disable the module. Default: `true`
-- `mdreamOptions` (object): Options passed to mdream's `htmlToMarkdown` function
-- `cache.maxAge` (number): Cache duration in seconds. Default: `3600` (1 hour)
-- `cache.swr` (boolean): Enable stale-while-revalidate. Default: `true`
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable or disable the module entirely. |
+| `mdreamOptions` | `Partial<MdreamOptions> & { preset?: 'minimal' }` | `{ preset: 'minimal' }` | Options passed to `htmlToMarkdown`. See below. |
+| `cache.maxAge` | `number` | `3600` | Cache duration in seconds (production only). |
+| `cache.swr` | `boolean` | `true` | Enable stale-while-revalidate caching (production only). |
 
-## Robot Meta Tag Support
+### mdreamOptions
 
-The module respects the `robots` meta tag. Pages with `noindex` will return a 404 error when accessed as markdown:
+These are passed directly to `htmlToMarkdown` from the `mdream` package.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `preset` | `'minimal'` | `'minimal'` | Apply the minimal preset (enables frontmatter, isolateMain, tailwind, and filter). |
+| `origin` | `string` | Site URL from `nuxt-site-config` | Origin URL for resolving relative image paths and internal links. |
+| `clean` | `boolean \| CleanOptions` | `undefined` | Clean up markdown output. Pass `true` for all cleanup or an object for specific features. |
+| `frontmatter` | `boolean \| function \| FrontmatterConfig` | `undefined` | Extract frontmatter from the HTML `<head>`. |
+| `isolateMain` | `boolean` | `undefined` | Isolate the main content area using semantic HTML. |
+| `tailwind` | `boolean` | `undefined` | Convert Tailwind utility classes to semantic markdown. |
+| `filter` | `{ include?: string[], exclude?: string[], processChildren?: boolean }` | `undefined` | Filter elements by tag name. |
+| `extraction` | `Record<string, (element) => void>` | `undefined` | Extract elements matching CSS selectors during conversion. |
+| `tagOverrides` | `Record<string, TagOverride \| string>` | `undefined` | Override how specific HTML tags are converted. |
+
+## Usage
+
+### Content Negotiation
+
+The middleware uses content negotiation to decide whether to serve markdown or HTML:
+
+- Serves markdown when the `Accept` header contains `*/*` or `text/markdown` (but not `text/html`).
+- Serves HTML when the `Accept` header contains `text/html` or `sec-fetch-dest` is `document`.
+
+Standard browsers always receive HTML. LLM bots and API clients that do not explicitly request HTML receive markdown.
+
+#### Excluded Paths
+
+The middleware skips these paths:
+
+- Routes starting with `/api`
+- Routes starting with `/_`
+- Routes starting with `/@`
+- Routes with file extensions other than `.md` (e.g., `.js`, `.css`, `.json`)
+
+### Robot Meta Tag Support
+
+Pages with a `noindex` robots meta tag return a 404 when accessed as markdown:
 
 ```vue
 <script setup>
@@ -94,41 +113,41 @@ useHead({
 </script>
 ```
 
-## Static Generation
+### Static Generation
 
-When using `nuxt generate` or static hosting, the module automatically:
+When using `nuxt generate` or when `nitro.prerender.routes` is configured, the module automatically:
 
-1. Generates `.md` files for all pages
-2. Creates `llms.txt` with page listings
-3. Creates `llms-full.txt` with full content
+1. Generates `.md` files alongside HTML for all prerendered pages.
+2. Creates `llms.txt` with a page listing (uses site name and description from `nuxt-site-config`).
+3. Creates `llms-full.txt` with the full markdown content of all pages.
 
-These files are placed in the `public/` directory and served as static assets.
+These files are written to the Nitro public output directory and served as static assets.
 
-## Server Hooks
+## Hooks
 
-The module provides several hooks for integrating with other modules (e.g., `nuxt-ai-index`):
+Three Nitro runtime hooks (available in server plugins) and one Nuxt build hook (available in `nuxt.config.ts`).
 
-### `'mdream:config'`{lang="ts"}
+### `mdream:config` (Nitro)
 
-**Type:** `(options: MdreamOptions) => void | Promise<void>`{lang="ts"}
+**Type:** `(options: MdreamOptions) => void | Promise<void>`
 
-Modify the mdream options before HTML→Markdown conversion. The hook receives the `MdreamOptions` object directly. Mutate it to adjust conversion behavior.
+Modify mdream options before HTML-to-Markdown conversion. Mutate the received object directly.
 
-```ts [server/plugins/mdream-config.ts]
+```ts
+// server/plugins/mdream-config.ts
 export default defineNitroPlugin((nitroApp) => {
   nitroApp.hooks.hook('mdream:config', async (options) => {
-    // Filter out unwanted elements
-    options.filter = { exclude: ['nav', 'footer'] }
-
-    // Set origin for absolute URLs
+    options.filter = { exclude: ['nav', 'footer', 'aside'] }
     options.origin = 'https://example.com'
   })
 })
 ```
 
-### `'mdream:negotiate'`{lang="ts"}
+### `mdream:negotiate` (Nitro)
 
-**Type:** `(ctx: MdreamNegotiateContext) => void | Promise<void>`{lang="ts"}
+**Type:** `(ctx: MdreamNegotiateContext) => void | Promise<void>`
+
+Override the content negotiation decision.
 
 ```ts
 interface MdreamNegotiateContext {
@@ -137,17 +156,15 @@ interface MdreamNegotiateContext {
 }
 ```
 
-Override the content negotiation decision. Called before serving markdown to determine whether the client should receive markdown or HTML. Mutate `shouldServe` to force or block markdown serving.
+```ts
+// server/plugins/mdream-negotiate.ts
+import { getHeader, getRequestURL } from 'h3'
 
-```ts [server/plugins/mdream-negotiate.ts]
 export default defineNitroPlugin((nitroApp) => {
   nitroApp.hooks.hook('mdream:negotiate', async (ctx) => {
-    // Force markdown for requests with custom header
     if (getHeader(ctx.event, 'x-force-markdown')) {
       ctx.shouldServe = true
     }
-
-    // Block markdown for specific routes
     if (getRequestURL(ctx.event).pathname.startsWith('/admin')) {
       ctx.shouldServe = false
     }
@@ -155,12 +172,14 @@ export default defineNitroPlugin((nitroApp) => {
 })
 ```
 
-### `'mdream:markdown'`{lang="ts"}
+### `mdream:markdown` (Nitro)
 
-**Type:** `(ctx: MarkdownContext) => void | Promise<void>`{lang="ts"}
+**Type:** `(ctx: MdreamMarkdownContext) => void | Promise<void>`
+
+Modify the generated markdown after conversion.
 
 ```ts
-interface MarkdownContext {
+interface MdreamMarkdownContext {
   html: string
   markdown: string
   route: string
@@ -171,34 +190,29 @@ interface MarkdownContext {
 }
 ```
 
-Modify the generated markdown content after conversion. Use this hook for post-processing markdown, tracking conversions, or adding custom response headers.
+```ts
+// server/plugins/mdream-markdown.ts
+import { setHeader } from 'h3'
 
-```ts [server/plugins/mdream-markdown.ts]
 export default defineNitroPlugin((nitroApp) => {
   nitroApp.hooks.hook('mdream:markdown', async (ctx) => {
-    // Add footer to all markdown output
-    ctx.markdown += '\n\n---\n*Generated with mdream*'
-
-    // Track conversion for analytics
-    console.log(`Converted ${ctx.route} (${ctx.title})`)
-
-    // Add custom headers
+    ctx.markdown += '\n\n---\nGenerated with mdream'
     setHeader(ctx.event, 'X-Markdown-Title', ctx.title)
   })
 })
 ```
 
-## Build Hooks
+### `mdream:llms-txt` (Nuxt Build)
 
-### `'mdream:llms-txt:generate'`{lang="ts"}
+**Type:** `(payload: MdreamLlmsTxtGeneratePayload) => void | Promise<void>`
 
-**Type:** `(payload: MdreamLlmsTxtGeneratePayload) => void | Promise<void>`{lang="ts"}
+Modify `llms.txt` and `llms-full.txt` content before they are written to disk. Called once during prerendering after all routes have been processed. Mutate the payload properties directly.
 
 ```ts
 interface MdreamLlmsTxtGeneratePayload {
-  content: string
-  fullContent: string
-  pages: ProcessedFile[]
+  content: string // llms.txt content
+  fullContent: string // llms-full.txt content
+  pages: ProcessedFile[] // All processed pages (read-only)
 }
 
 interface ProcessedFile {
@@ -215,50 +229,47 @@ interface ProcessedFile {
 }
 ```
 
-Modify the llms.txt content before it's written to disk. This hook is called once during prerendering after all routes have been processed. Uses a **mutable pattern** - modify the payload properties directly.
-
-```ts [nuxt.config.ts]
+```ts
+// nuxt.config.ts
 export default defineNuxtConfig({
   modules: ['@mdream/nuxt'],
 
   hooks: {
-    'mdream:llms-txt:generate': async (payload) => {
-      // Access all processed pages
-      console.log(`Processing ${payload.pages.length} pages`)
-
-      // Add custom sections to llms.txt
-      payload.content += `
-
-## API Search
-
-Search available at /api/search with semantic search capabilities.
-`
-
-      // Add detailed API documentation to full content
-      payload.fullContent += `
-
-## Full API Documentation
-
-Detailed API documentation...
-`
-    }
-  }
+    'mdream:llms-txt': async (payload) => {
+      payload.content += `\n\n## API\n\nSearch available at /api/search\n`
+      payload.fullContent += `\n\n## API Documentation\n\nDetailed docs here...\n`
+    },
+  },
 })
 ```
+
+## API Reference
+
+### Type Augmentation
+
+The module generates type declarations for all hooks. TypeScript support works automatically in `nuxt.config.ts` and in Nitro plugins.
+
+Augmented modules:
+
+- `@nuxt/schema`: `RuntimeConfig.mdream` and `NuxtHooks['mdream:llms-txt']`
+- `nitropack` / `nitropack/types`: `NitroRuntimeHooks` for `mdream:config`, `mdream:negotiate`, and `mdream:markdown`
+
+### Exports
+
+| Entry Point | Contents |
+|-------------|----------|
+| `@mdream/nuxt` | The Nuxt module itself |
+| `@mdream/nuxt/runtime/types` | `MdreamMarkdownContext`, `MdreamNegotiateContext`, `MdreamLlmsTxtGeneratePayload`, `ModuleRuntimeConfig` |
 
 ## License
 
 [MIT License](./LICENSE)
 
-<!-- Badges -->
 [npm-version-src]: https://img.shields.io/npm/v/@mdream/nuxt/latest.svg?style=flat&colorA=020420&colorB=00DC82
 [npm-version-href]: https://npmjs.com/package/@mdream/nuxt
-
 [npm-downloads-src]: https://img.shields.io/npm/dm/@mdream/nuxt.svg?style=flat&colorA=020420&colorB=00DC82
 [npm-downloads-href]: https://npm.chart.dev/@mdream/nuxt
-
 [license-src]: https://img.shields.io/npm/l/@mdream/nuxt.svg?style=flat&colorA=020420&colorB=00DC82
 [license-href]: https://npmjs.com/package/@mdream/nuxt
-
 [nuxt-src]: https://img.shields.io/badge/Nuxt-020420?logo=nuxt.js
 [nuxt-href]: https://nuxt.com

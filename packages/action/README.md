@@ -1,12 +1,37 @@
 # @mdream/action
 
-GitHub Action for generating `llms.txt` artifacts from HTML files.
+GitHub Action that processes prerendered HTML files into `llms.txt` artifacts for CI/CD workflows.
 
-This action processes HTML files using glob patterns to generate LLM-ready artifacts in CI/CD workflows. Useful for prerendered sites, it creates both condensed and comprehensive LLM-ready files that can be uploaded as artifacts or deployed with your site whenever you make changes.
+## Setup
+
+Add the action to any workflow step after your site build completes. Requires Node.js to be available in the runner environment.
+
+```yaml
+- uses: harlan-zw/mdream@v1
+  with:
+    glob: 'dist/**/*.html'
+    site-name: My Documentation
+    description: Technical documentation and guides
+    origin: 'https://mydocs.com'
+```
 
 ## Usage
 
-### Complete Workflow Example
+### Basic
+
+```yaml
+- name: Generate llms.txt artifacts
+  uses: harlan-zw/mdream@v1
+  with:
+    glob: 'dist/**/*.html'
+    site-name: My Documentation
+    description: Technical documentation and guides
+    origin: 'https://mydocs.com'
+```
+
+Generates `llms.txt`, `llms-full.txt`, and a `md/` directory in the current working directory.
+
+### Full Workflow
 
 ```yaml
 name: Generate LLMs.txt
@@ -37,11 +62,12 @@ jobs:
         run: npm run build
 
       - name: Generate llms.txt artifacts
+        id: llms
         uses: harlan-zw/mdream@v1
         with:
           glob: 'dist/**/*.html'
           site-name: My Documentation
-          description: Comprehensive technical documentation and guides
+          description: Technical documentation and guides
           origin: 'https://mydocs.com'
           output: dist
 
@@ -54,7 +80,7 @@ jobs:
             dist/llms-full.txt
             dist/md/
 
-      - name: Deploy to GitHub Pages (optional)
+      - name: Deploy to GitHub Pages
         if: github.ref == 'refs/heads/main'
         uses: peaceiris/actions-gh-pages@v3
         with:
@@ -62,9 +88,92 @@ jobs:
           publish_dir: ./dist
 ```
 
-## Inputs
+### Using Outputs
 
-See [action.yml](../../action.yml) for all available options and advanced configuration.
+Reference the action outputs in subsequent steps:
+
+```yaml
+- name: Generate llms.txt artifacts
+  id: llms
+  uses: harlan-zw/mdream@v1
+  with:
+    glob: 'dist/**/*.html'
+    site-name: My Docs
+    description: My documentation site
+    origin: 'https://mydocs.com'
+    output: dist
+
+- name: Print generated file paths
+  run: |
+    echo "llms.txt: ${{ steps.llms.outputs.llms-txt-path }}"
+    echo "llms-full.txt: ${{ steps.llms.outputs.llms-full-txt-path }}"
+    echo "Markdown files: ${{ steps.llms.outputs.markdown-files }}"
+```
+
+### Verbose Logging
+
+```yaml
+- name: Generate llms.txt artifacts
+  uses: harlan-zw/mdream@v1
+  with:
+    glob: 'dist/**/*.html'
+    site-name: My Docs
+    description: My documentation site
+    origin: 'https://mydocs.com'
+    verbose: 'true'
+```
+
+## API Reference
+
+### Inputs
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `glob` | Yes | | Glob pattern to match HTML files (e.g., `dist/**/*.html`). |
+| `site-name` | Yes | | Name of your site. Used as the heading in generated files. |
+| `description` | Yes | | Description of your site content. Rendered as a blockquote below the site name. |
+| `origin` | Yes | | Base URL of your site (e.g., `https://mysite.com`). Used to construct full page URLs. |
+| `output` | No | `.` | Output directory for generated files. Created recursively if it does not exist. |
+| `chunk-size` | No | `4096` | Chunk size for streaming processing. |
+| `verbose` | No | `false` | Enable verbose logging. Prints configuration values to the action log. |
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `llms-txt-path` | Path to the generated `llms.txt` file. |
+| `llms-full-txt-path` | Path to the generated `llms-full.txt` file. |
+| `markdown-files` | JSON array of paths to all generated individual Markdown files. |
+
+### Generated Files
+
+| File | Description |
+|------|-------------|
+| `llms.txt` | Index listing all pages with titles, URLs, and descriptions. |
+| `llms-full.txt` | Full Markdown content of every page with YAML frontmatter and a table of contents. |
+| `md/<path>.md` | Individual Markdown files mirroring the site URL hierarchy. |
+
+### URL Path Resolution
+
+HTML file paths are converted to URL paths automatically:
+
+| File Path | Resolved URL |
+|-----------|-------------|
+| `dist/index.html` | `/` |
+| `dist/about.html` | `/about` |
+| `dist/docs/getting-started.html` | `/docs/getting-started` |
+| `dist/blog/2024/post.html` | `/blog/2024/post` |
+
+The `.html` extension is stripped. `index.html` files resolve to their parent directory path. The `origin` input is prepended to construct full URLs in the output.
+
+### Metadata Extraction
+
+Metadata is extracted from each HTML file in the following priority order:
+
+**Title:** `<title>` tag, then `<meta property="og:title">`.
+**Description:** `<meta name="description">`, then `<meta property="og:description">`.
+
+Descriptions are truncated to 100 characters in the `llms.txt` listing. Full metadata is embedded as YAML frontmatter in `llms-full.txt`.
 
 ## License
 

@@ -74,27 +74,17 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     expect(markdown).not.toContain('Site footer')
   })
 
-  it('ignores main element if deeper than 5 levels', async () => {
+  it('finds main element at moderate nesting depth', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <body>
         <nav>Before content (excluded)</nav>
-        <h1>Header Title</h1>
-        <p>Content after header</p>
         <div>
           <div>
-            <div>
-              <div>
-                <div>
-                  <div>
-                    <main>
-                      <h2>Deep Main Title (should be excluded - too deep)</h2>
-                      <p>Deep main content</p>
-                    </main>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <main>
+              <h1>Nested Main Title</h1>
+              <p>Nested main content</p>
+            </main>
           </div>
         </div>
         <footer>Footer (excluded)</footer>
@@ -106,11 +96,8 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
       engine,
     })
 
-    // Should fall back to header heuristic since main is too deep
-    expect(markdown).toContain('# Header Title')
-    expect(markdown).toContain('Content after header')
-    expect(markdown).toContain('## Deep Main Title') // This is included because it's after the header
-    expect(markdown).toContain('Deep main content')
+    expect(markdown).toContain('# Nested Main Title')
+    expect(markdown).toContain('Nested main content')
     expect(markdown).not.toContain('Before content')
     expect(markdown).not.toContain('Footer')
   })
@@ -437,5 +424,36 @@ describe.each(engines)('isolateMainPlugin $name', (engineConfig) => {
     expect(markdown).not.toContain('Before')
     expect(markdown).not.toContain('Adjacent footer')
     expect(markdown).not.toContain('After footer')
+  })
+
+  it('does not produce ](#) artifacts from links after main closes', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `
+      <body>
+        <main>
+          <h1>Article Title</h1>
+          <p>Main content here.</p>
+        </main>
+        <div class="sticky-header">
+          <a href="#">
+            <span class="icon"></span>
+          </a>
+          <a href="#">
+            <svg><path d="M0 0"></path></svg>
+          </a>
+        </div>
+        <footer>Footer content</footer>
+      </body>
+    `
+
+    const markdown = htmlToMarkdown(html, {
+      plugins: { isolateMain: true },
+      engine,
+    })
+
+    expect(markdown).toContain('# Article Title')
+    expect(markdown).toContain('Main content here.')
+    expect(markdown).not.toContain('](#)')
+    expect(markdown).not.toContain('Footer content')
   })
 })

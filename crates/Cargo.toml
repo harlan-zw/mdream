@@ -4,6 +4,7 @@ members = [
   "node",
   "edge"
 ]
+exclude = [ "core/fuzz" ]
 resolver = "2"
 
 [workspace.package]

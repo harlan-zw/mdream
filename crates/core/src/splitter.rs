@@ -204,7 +204,7 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
                        strip_headers: bool,
                        chunk_overlap: usize| {
         let end_position = end_position.min(markdown.len());
-        let start = (*last_chunk_end_position).min(markdown.len());
+        let start = (*last_chunk_end_position).min(end_position);
         let original_chunk_content = &markdown[start..end_position];
 
         if original_chunk_content.trim().is_empty() {
@@ -241,9 +241,9 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
 
         if !header_hierarchy.is_empty() {
             let mut headers = Vec::new();
-            for &(tag_id, ref text) in header_hierarchy.iter() {
+            for &(tag_id, ref text) in header_hierarchy {
                 let level = tag_id - TAG_H1 + 1;
-                headers.push((format!("h{}", level), text.clone()));
+                headers.push((format!("h{level}"), text.clone()));
             }
             metadata.headers = Some(headers);
         }
@@ -264,7 +264,12 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
             let content_len = original_chunk_content.len();
             let max_overlap = content_len.saturating_sub(1);
             let actual_overlap = chunk_overlap.min(max_overlap);
-            *last_chunk_end_position = end_position - actual_overlap;
+            let mut overlap_pos = end_position - actual_overlap;
+            // Snap to char boundary
+            while overlap_pos < markdown.len() && !markdown.is_char_boundary(overlap_pos) {
+                overlap_pos += 1;
+            }
+            *last_chunk_end_position = overlap_pos;
         } else {
             *last_chunk_end_position = end_position;
         }
@@ -280,23 +285,23 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
 
         // Code block tracking
         if let Some(rest) = line.strip_prefix("```") {
-            if !in_code_block {
+            if in_code_block {
+                in_code_block = false;
+            } else {
                 in_code_block = true;
                 let lang = rest.trim();
                 if !lang.is_empty() && current_chunk_code_language.is_empty() {
                     current_chunk_code_language = lang.to_string();
                 }
-            } else {
-                in_code_block = false;
             }
         }
 
         if !in_code_block && !line.starts_with("```") {
             // Header detection
-            let header_match = if !is_frontmatter {
-                detect_header(line)
-            } else {
+            let header_match = if is_frontmatter {
                 None
+            } else {
+                detect_header(line)
             };
 
             if let Some((level, header_text)) = header_match {
@@ -345,8 +350,11 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
                 let mut split_position: isize = -1;
 
                 for sep in &separators {
-                    // rfind from ideal_split_pos
-                    let search_end = ideal_split_pos.min(current_md.len());
+                    // rfind from ideal_split_pos, snapped to a char boundary
+                    let mut search_end = ideal_split_pos.min(current_md.len());
+                    while search_end < current_md.len() && !current_md.is_char_boundary(search_end) {
+                        search_end += 1;
+                    }
                     let search_region = &current_md[..search_end];
                     if let Some(idx) = search_region.rfind(sep) {
                         let candidate_split_pos = idx + sep.len();

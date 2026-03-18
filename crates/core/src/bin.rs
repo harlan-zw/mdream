@@ -31,7 +31,7 @@ fn main() -> io::Result<()> {
                 return Ok(());
             }
             other => {
-                eprintln!("Unknown option: {}", other);
+                eprintln!("Unknown option: {other}");
                 std::process::exit(1);
             }
         }
@@ -74,8 +74,8 @@ fn main() -> io::Result<()> {
     }
 
     if verbose {
-        eprintln!("Input: {} bytes", total_in);
-        eprintln!("Output: {} bytes", total_out);
+        eprintln!("Input: {total_in} bytes");
+        eprintln!("Output: {total_out} bytes");
     }
 
     Ok(())
