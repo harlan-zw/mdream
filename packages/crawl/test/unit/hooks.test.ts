@@ -118,7 +118,9 @@ describe('hooks', () => {
       const hooks = createHooks<CrawlHooks>()
 
       // Simulate what crawl.ts does with onPage
-      const onPage = (page: PageData) => { pages.push(page.url) }
+      const onPage = (page: PageData) => {
+        pages.push(page.url)
+      }
       hooks.hook('crawl:page', onPage)
 
       const page: PageData = {
