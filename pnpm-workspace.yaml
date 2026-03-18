@@ -56,6 +56,7 @@ catalog:
   nuxt-site-config: ^3.2.21
   nypm: ^0.6.5
   obuild: ^0.4.32
+  ofetch: ^1.5.1
   pathe: ^2.0.3
   picomatch: ^4.0.3
   playwright: ^1.58.2

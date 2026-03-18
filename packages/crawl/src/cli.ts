@@ -7,7 +7,8 @@ import { dirname, join, resolve } from 'pathe'
 import { withHttps } from 'ufo'
 import { crawlAndGenerate } from './crawl.js'
 import { parseUrlPattern, validateGlobPattern } from './glob-utils.js'
-import { ensurePlaywrightInstalled, isUseChromeSupported } from './playwright-utils.js'
+// playwright-utils is dynamically imported only when Playwright driver is used
+// to avoid requiring crawlee for HTTP-only users
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -224,15 +225,21 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
   }
 }
 
-async function showCrawlResults(successful: number, failed: number, outputDir: string, generatedFiles: string[], durationSeconds: number) {
+interface LatencyStats { total: number, min: number, max: number, count: number }
+
+async function showCrawlResults(successful: number, failed: number, outputDir: string, generatedFiles: string[], durationSeconds: number, latency?: LatencyStats) {
   const messages = []
+  const durationStr = `${durationSeconds.toFixed(1)}s`
 
-  // Duration formatting with 1 decimal place
-  const durationStr = `${(durationSeconds).toFixed(1)}s`
-
-  // Compact single line format
-  const stats = failed > 0 ? `${successful} pages, ${failed} failed` : `${successful} pages`
-  messages.push(`📄 ${stats} • ⏱️  ${durationStr}`)
+  messages.push(`📄 ${successful} pages \u00B7 ⏱️  ${durationStr}`)
+  if (failed > 0)
+    messages.push(`⚠️  ${failed} failed`)
+  if (latency && latency.count > 0) {
+    const avg = Math.round(latency.total / latency.count)
+    const min = latency.min === Infinity ? 0 : Math.round(latency.min)
+    const max = Math.round(latency.max)
+    messages.push(`🏓 avg ${avg}ms \u00B7 min ${min}ms \u00B7 max ${max}ms`)
+  }
   messages.push(`📦 ${generatedFiles.join(', ')}`)
   messages.push(`📁 ${outputDir}`)
 
@@ -511,8 +518,18 @@ async function main() {
     process.exit(1)
   }
 
-  // Check playwright installation if needed
+  // Check playwright + crawlee installation if needed
   if (options.driver === 'playwright') {
+    // Crawlee is required for Playwright driver
+    try {
+      await import('crawlee')
+    }
+    catch {
+      p.log.error('The Playwright driver requires crawlee. Install it with: npm install crawlee')
+      process.exit(1)
+    }
+
+    const { ensurePlaywrightInstalled, isUseChromeSupported } = await import('./playwright-utils.js')
     // Check Chrome support and configure if available
     const chromeSupported = await isUseChromeSupported()
     if (chromeSupported) {
@@ -530,44 +547,42 @@ async function main() {
   }
 
   const s = p.spinner()
-  s.start('Starting crawl...')
+  s.start('Discovering sitemaps')
 
   const startTime = Date.now()
+  let crawlStartTime = 0
+  let lastProgress: CrawlProgress | undefined
   const results = await crawlAndGenerate(options, (progress: CrawlProgress) => {
-    // Update spinner message based on current phase
+    lastProgress = progress
     if (progress.sitemap.status === 'discovering') {
-      s.message('Discovering sitemaps...')
+      s.message('Discovering sitemaps')
     }
     else if (progress.sitemap.status === 'processing') {
       s.message(`Processing sitemap... Found ${progress.sitemap.found} URLs`)
     }
     else if (progress.crawling.status === 'processing') {
-      const processedCount = progress.crawling.processed
-      const totalCount = progress.crawling.total
-      const currentUrl = progress.crawling.currentUrl
+      if (!crawlStartTime)
+        crawlStartTime = Date.now()
 
-      if (currentUrl) {
-        const shortUrl = currentUrl.length > 60 ? `${currentUrl.substring(0, 57)}...` : currentUrl
-        // Show different format if total seems inaccurate (when following links discovers more)
-        if (processedCount > totalCount) {
-          s.message(`Crawling ${processedCount}: ${shortUrl}`)
-        }
-        else {
-          s.message(`Crawling ${processedCount}/${totalCount}: ${shortUrl}`)
-        }
-      }
-      else {
-        if (processedCount > totalCount) {
-          s.message(`Crawling... ${processedCount} pages`)
-        }
-        else {
-          s.message(`Crawling... ${processedCount}/${totalCount} pages`)
-        }
-      }
+      const processed = progress.crawling.processed
+      const total = progress.crawling.total
+      const failed = progress.crawling.failed
+      const elapsed = (Date.now() - crawlStartTime) / 1000
+      const rate = elapsed > 0.1 ? Math.round(processed / elapsed) : 0
+
+      let msg = processed > total
+        ? `Crawling ${processed} pages`
+        : `Crawling ${processed}/${total}`
+
+      if (rate > 0)
+        msg += ` \u00B7 ${rate}/s`
+      if (failed > 0)
+        msg += ` \u00B7 ${failed} failed`
+
+      s.message(msg)
     }
     else if (progress.generation.status === 'generating') {
-      const current = progress.generation.current || 'Generating files'
-      s.message(current)
+      s.message(progress.generation.current || 'Generating files')
     }
   })
 
@@ -607,7 +622,7 @@ async function main() {
   }
 
   // Only show interactive results for interactive mode
-  await showCrawlResults(successful, failed, options.outputDir, generatedFiles, durationSeconds)
+  await showCrawlResults(successful, failed, options.outputDir, generatedFiles, durationSeconds, lastProgress?.crawling.latency)
   process.exit(0)
 }
 

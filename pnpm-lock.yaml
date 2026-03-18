@@ -135,6 +135,9 @@ catalogs:
     obuild:
       specifier: ^0.4.32
       version: 0.4.32
+    ofetch:
+      specifier: ^1.5.1
+      version: 1.5.1
     pathe:
       specifier: ^2.0.3
       version: 2.0.3
@@ -401,7 +404,7 @@ importers:
         specifier: workspace:*
         version: link:../js
       crawlee:
-        specifier: 'catalog:'
+        specifier: ^3.16.0
         version: 3.16.0(@types/node@25.5.0)(playwright@1.58.2)
       mdream:
         specifier: workspace:*
@@ -409,6 +412,9 @@ importers:
       nypm:
         specifier: 'catalog:'
         version: 0.6.5
+      ofetch:
+        specifier: 'catalog:'
+        version: 1.5.1
       pathe:
         specifier: 'catalog:'
         version: 2.0.3

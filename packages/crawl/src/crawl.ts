@@ -1,116 +1,80 @@
 import type { ProcessedFile } from '@mdream/js/llms-txt'
-import type { HttpCrawlerOptions, PlaywrightCrawlerOptions } from 'crawlee'
-import type { CrawlOptions, CrawlResult, PageData } from './types.ts'
-import { existsSync, mkdirSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import type { PlaywrightCrawlerOptions } from 'crawlee'
+import type { CrawlOptions, CrawlResult, PageData, PageMetadata } from './types.ts'
+import { mkdirSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
 import * as p from '@clack/prompts'
 import { generateLlmsTxtArtifacts } from '@mdream/js/llms-txt'
-import { HttpCrawler, log, PlaywrightCrawler, purgeDefaultStorages } from 'crawlee'
 import { htmlToMarkdown } from 'mdream'
+import { ofetch } from 'ofetch'
 import { dirname, join, normalize, resolve } from 'pathe'
 import { withHttps } from 'ufo'
 import { getStartingUrl, isUrlExcluded, isValidSitemapXml, matchesGlobPattern, parseUrlPattern } from './glob-utils.js'
-import { extractMetadata } from './metadata-extractor.js'
 
 const SITEMAP_INDEX_LOC_RE = /<sitemap[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/sitemap>/gs
 const SITEMAP_URL_LOC_RE = /<url[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/url>/gs
 const ROBOTS_SITEMAP_RE = /Sitemap:\s*(.*)/gi
 const ROBOTS_SITEMAP_PREFIX_RE = /Sitemap:\s*/i
+const ROBOTS_CRAWL_DELAY_RE = /Crawl-delay:\s*(\d+(?:\.\d+)?)/i
 const URL_TRAILING_SLASH_RE = /\/$/
 const URL_PATH_UNSAFE_CHARS_RE = /[^\w\-]/g
 const FRONTMATTER_BLOCK_RE = /^---[^\n]*\n[\s\S]*?\n---[^\n]*\n?/
 
-// Helper function to load sitemap with no retries using direct fetch
-async function loadSitemapWithoutRetries(sitemapUrl: string): Promise<string[]> {
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+const FETCH_HEADERS = { 'User-Agent': 'mdream-crawler/1.0', 'Accept': 'text/html,application/xhtml+xml,text/markdown' }
+const DEFAULT_CONCURRENCY = 20
 
-  try {
-    const response = await fetch(sitemapUrl, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'mdream-crawler/1.0',
-      },
-    })
+function extractCdataUrl(url: string): string {
+  if (url.startsWith('<![CDATA[') && url.endsWith(']]>'))
+    return url.slice(9, -3)
+  return url
+}
 
-    clearTimeout(timeoutId)
+async function loadSitemap(sitemapUrl: string): Promise<string[]> {
+  const xmlContent = await ofetch(sitemapUrl, {
+    headers: FETCH_HEADERS,
+    timeout: 10000,
+    responseType: 'text' as const,
+    retry: 0,
+  })
 
-    if (!response.ok) {
-      throw new Error(`Sitemap not found: ${response.status}`)
+  if (!isValidSitemapXml(xmlContent))
+    throw new Error('Response is not a valid sitemap XML')
+
+  // Sitemap index: load all child sitemaps in parallel
+  if (xmlContent.includes('<sitemapindex')) {
+    SITEMAP_INDEX_LOC_RE.lastIndex = 0
+    const childSitemaps: string[] = []
+    let match
+    while (true) {
+      match = SITEMAP_INDEX_LOC_RE.exec(xmlContent)
+      if (match === null)
+        break
+      childSitemaps.push(extractCdataUrl(match[1]))
     }
 
-    const xmlContent = await response.text()
+    const childResults = await Promise.allSettled(
+      childSitemaps.map(url => loadSitemap(url)),
+    )
 
-    // Validate that the response is actually a sitemap XML, not an HTML page
-    // (e.g., when a server redirects sitemap.xml to another HTML page)
-    if (!isValidSitemapXml(xmlContent)) {
-      throw new Error('Response is not a valid sitemap XML')
+    const allUrls: string[] = []
+    for (const result of childResults) {
+      if (result.status === 'fulfilled')
+        allUrls.push(...result.value)
     }
-
-    // Check if this is a sitemap index (contains <sitemapindex>)
-    if (xmlContent.includes('<sitemapindex')) {
-      // This is a sitemap index - recursively load all child sitemaps
-      SITEMAP_INDEX_LOC_RE.lastIndex = 0
-      const childSitemaps: string[] = []
-      let match
-      while (true) {
-        match = SITEMAP_INDEX_LOC_RE.exec(xmlContent)
-        if (match === null)
-          break
-
-        // Remove CDATA wrapper if present
-        let url = match[1]
-        if (url.startsWith('<![CDATA[') && url.endsWith(']]>')) {
-          url = url.slice(9, -3)
-        }
-
-        childSitemaps.push(url)
-      }
-
-      // Recursively load all child sitemaps and combine their URLs
-      const allUrls: string[] = []
-      for (const childSitemapUrl of childSitemaps) {
-        try {
-          const childUrls = await loadSitemapWithoutRetries(childSitemapUrl)
-          allUrls.push(...childUrls)
-        }
-        catch (error) {
-          // Continue with other sitemaps if one fails
-          console.warn(`Failed to load child sitemap ${childSitemapUrl}:`, error instanceof Error ? error.message : 'Unknown error')
-        }
-      }
-
-      return allUrls
-    }
-    else {
-      // This is a regular sitemap - extract URLs
-      const urls: string[] = []
-      SITEMAP_URL_LOC_RE.lastIndex = 0
-      let match
-      while (true) {
-        match = SITEMAP_URL_LOC_RE.exec(xmlContent)
-        if (match === null)
-          break
-
-        // Remove CDATA wrapper if present
-        let url = match[1]
-        if (url.startsWith('<![CDATA[') && url.endsWith(']]>')) {
-          url = url.slice(9, -3)
-        }
-
-        urls.push(url)
-      }
-
-      return urls
-    }
+    return allUrls
   }
-  catch (error) {
-    clearTimeout(timeoutId)
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Sitemap request timed out after 10 seconds')
-    }
-    throw error
+
+  // Regular sitemap: extract URLs
+  const urls: string[] = []
+  SITEMAP_URL_LOC_RE.lastIndex = 0
+  let match
+  while (true) {
+    match = SITEMAP_URL_LOC_RE.exec(xmlContent)
+    if (match === null)
+      break
+    urls.push(extractCdataUrl(match[1]))
   }
+  return urls
 }
 
 export interface CrawlProgress {
@@ -123,12 +87,109 @@ export interface CrawlProgress {
     status: 'starting' | 'processing' | 'completed'
     total: number
     processed: number
+    failed: number
     currentUrl?: string
+    /** Page fetch latency stats in ms */
+    latency: { total: number, min: number, max: number, count: number }
   }
   generation: {
     status: 'idle' | 'generating' | 'completed'
     current?: string
   }
+}
+
+// Metadata extraction merged into htmlToMarkdown call
+function extractMetadataInline(parsedUrl: URL): {
+  extraction: Record<string, (el: { textContent: string, attributes: Record<string, string> }) => void>
+  getMetadata: () => PageMetadata
+} {
+  const links = new Set<string>()
+  let title = ''
+  let description = ''
+  let keywords = ''
+  let author = ''
+  const url = parsedUrl.href
+  const originPrefix = `${parsedUrl.origin}/`
+
+  const extraction: Record<string, (el: { textContent: string, attributes: Record<string, string> }) => void> = {
+    'a[href]': (el) => {
+      const href = el.attributes.href
+      if (href) {
+        try {
+          const absoluteUrl = new URL(href, url).href
+          // Same-domain check via origin prefix (avoids parsing URL again)
+          if (absoluteUrl.startsWith(originPrefix) || absoluteUrl === parsedUrl.origin)
+            links.add(absoluteUrl)
+        }
+        catch {}
+      }
+    },
+    'title': (el) => {
+      if (!title)
+        title = el.textContent
+    },
+    'meta[name="description"]': (el) => {
+      if (!description)
+        description = el.attributes.content || ''
+    },
+    'meta[property="og:description"]': (el) => {
+      if (!description)
+        description = el.attributes.content || ''
+    },
+    'meta[name="keywords"]': (el) => {
+      if (!keywords)
+        keywords = el.attributes.content || ''
+    },
+    'meta[name="author"]': (el) => {
+      if (!author)
+        author = el.attributes.content || ''
+    },
+    'meta[property="og:title"]': (el) => {
+      if (!title)
+        title = el.attributes.content || ''
+    },
+  }
+
+  return {
+    extraction,
+    getMetadata: () => ({
+      title: title.trim() || parsedUrl.pathname,
+      description: description.trim() || undefined,
+      keywords: keywords.trim() || undefined,
+      author: author.trim() || undefined,
+      links: [...links],
+    }),
+  }
+}
+
+function filterSitemapUrls(
+  sitemapUrls: string[],
+  hasGlobPatterns: boolean,
+  exclude: string[],
+  allPatterns: ReturnType<typeof parseUrlPattern>[],
+): string[] {
+  if (hasGlobPatterns) {
+    return sitemapUrls.filter(url =>
+      !isUrlExcluded(url, exclude) && allPatterns.some(pattern => matchesGlobPattern(url, pattern)),
+    )
+  }
+  return sitemapUrls.filter(url => !isUrlExcluded(url, exclude))
+}
+
+// Simple concurrency pool for HTTP fetching
+async function runConcurrent<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let idx = 0
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (idx < items.length) {
+      const i = idx++
+      await fn(items[i])
+    }
+  })
+  await Promise.all(workers)
 }
 
 export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (progress: CrawlProgress) => void): Promise<CrawlResult[]> {
@@ -145,7 +206,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     followLinks = false,
     maxDepth = 1,
     globPatterns = [],
-    crawlDelay,
+    crawlDelay: userCrawlDelay,
     exclude = [],
     siteNameOverride,
     descriptionOverride,
@@ -154,16 +215,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     onPage,
   } = options
 
-  // Normalize and resolve the output directory
   const outputDir = resolve(normalize(rawOutputDir))
-
-  // Set crawlee log level based on verbose flag
-  if (verbose) {
-    log.setLevel(log.LEVELS.INFO)
-  }
-  else {
-    log.setLevel(log.LEVELS.OFF)
-  }
+  let crawlDelay = userCrawlDelay
 
   let patterns
   try {
@@ -174,15 +227,14 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   }
 
   let startingUrls = patterns.map(getStartingUrl)
+  const hasGlobPatterns = patterns.some(p => p.isGlob)
 
-  // Initialize progress tracking
   const progress: CrawlProgress = {
     sitemap: { status: 'discovering', found: 0, processed: 0 },
-    crawling: { status: 'starting', total: 0, processed: 0 },
+    crawling: { status: 'starting', total: 0, processed: 0, failed: 0, latency: { total: 0, min: Infinity, max: 0, count: 0 } },
     generation: { status: 'idle' },
   }
 
-  // Track sitemap discovery attempts
   const sitemapAttempts: { url: string, success: boolean, error?: string }[] = []
 
   if (startingUrls.length > 0 && !skipSitemap) {
@@ -191,67 +243,55 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
     onProgress?.(progress)
 
-    const robotsUrl = new URL('/robots.txt', baseUrl).toString()
-    const robotsController = new AbortController()
-    const robotsTimeoutId = setTimeout(() => robotsController.abort(), 10000) // 10 second timeout
-
-    let robotsResponse
+    // Fetch robots.txt
+    let robotsContent: string | null = null
     try {
-      robotsResponse = await fetch(robotsUrl, {
-        signal: robotsController.signal,
-        headers: {
-          'User-Agent': 'mdream-crawler/1.0',
-        },
+      robotsContent = await ofetch(`${baseUrl}/robots.txt`, {
+        headers: FETCH_HEADERS,
+        timeout: 10000,
+        responseType: 'text' as const,
+        retry: 0,
       })
-      clearTimeout(robotsTimeoutId)
     }
-    catch {
-      clearTimeout(robotsTimeoutId)
-      // If robots.txt fails, continue without it
-      robotsResponse = null
+    catch {}
+
+    // Extract Crawl-delay from robots.txt if user hasn't set one
+    if (robotsContent && !crawlDelay) {
+      const crawlDelayMatch = robotsContent.match(ROBOTS_CRAWL_DELAY_RE)
+      if (crawlDelayMatch) {
+        crawlDelay = Number.parseFloat(crawlDelayMatch[1])
+        if (verbose)
+          console.log(`[ROBOTS] Crawl-delay: ${crawlDelay}s`)
+      }
     }
-    if (robotsResponse?.ok) {
-      const robotsContent = await robotsResponse.text()
+
+    if (robotsContent) {
       const sitemapMatches = robotsContent.match(ROBOTS_SITEMAP_RE)
       if (sitemapMatches && sitemapMatches.length > 0) {
         progress.sitemap.found = sitemapMatches.length
         progress.sitemap.status = 'processing'
         onProgress?.(progress)
 
-        // Extract sitemap URLs from robots.txt and try using them
         const robotsSitemaps = sitemapMatches.map(match => match.replace(ROBOTS_SITEMAP_PREFIX_RE, '').trim())
 
         for (const sitemapUrl of robotsSitemaps) {
           try {
-            const robotsUrls = await loadSitemapWithoutRetries(sitemapUrl)
+            const robotsUrls = await loadSitemap(sitemapUrl)
             sitemapAttempts.push({ url: sitemapUrl, success: true })
 
-            // Check if we have glob patterns to filter by
-            const hasGlobPatterns = patterns.some(p => p.isGlob)
+            const filteredUrls = filterSitemapUrls(robotsUrls, hasGlobPatterns, exclude, patterns)
 
             if (hasGlobPatterns) {
-              // Filter URLs through glob patterns and exclude patterns
-              const filteredUrls = robotsUrls.filter((url) => {
-                return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
-              })
-
-              // Always use filtered URLs when glob patterns are provided, even if empty
               startingUrls = filteredUrls
               progress.sitemap.processed = filteredUrls.length
               onProgress?.(progress)
               break
             }
-            else {
-              // No glob patterns - use all URLs except excluded ones
-              const filteredUrls = robotsUrls.filter((url) => {
-                return !isUrlExcluded(url, exclude)
-              })
-              if (filteredUrls.length > 0) {
-                startingUrls = filteredUrls
-                progress.sitemap.processed = filteredUrls.length
-                onProgress?.(progress)
-                break
-              }
+            else if (filteredUrls.length > 0) {
+              startingUrls = filteredUrls
+              progress.sitemap.processed = filteredUrls.length
+              onProgress?.(progress)
+              break
             }
           }
           catch (error) {
@@ -260,45 +300,32 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         }
       }
     }
+
     let mainSitemapProcessed = false
     const mainSitemapUrl = `${baseUrl}/sitemap.xml`
     try {
-      const sitemapUrls = await loadSitemapWithoutRetries(mainSitemapUrl)
+      const sitemapUrls = await loadSitemap(mainSitemapUrl)
       sitemapAttempts.push({ url: mainSitemapUrl, success: true })
 
-      // Check if we have glob patterns to filter by
-      const hasGlobPatterns = patterns.some(p => p.isGlob)
+      const filteredUrls = filterSitemapUrls(sitemapUrls, hasGlobPatterns, exclude, patterns)
 
       if (hasGlobPatterns) {
-        // Filter URLs through glob patterns and exclude patterns
-        const filteredUrls = sitemapUrls.filter((url) => {
-          return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
-        })
-
-        // Always use filtered URLs when glob patterns are provided, even if empty
         startingUrls = filteredUrls
         progress.sitemap.found = sitemapUrls.length
         progress.sitemap.processed = filteredUrls.length
         onProgress?.(progress)
         mainSitemapProcessed = true
       }
-      else {
-        // No glob patterns - use all URLs except excluded ones
-        const filteredUrls = sitemapUrls.filter((url) => {
-          return !isUrlExcluded(url, exclude)
-        })
-        if (filteredUrls.length > 0) {
-          startingUrls = filteredUrls
-          progress.sitemap.found = sitemapUrls.length
-          progress.sitemap.processed = filteredUrls.length
-          onProgress?.(progress)
-          mainSitemapProcessed = true
-        }
+      else if (filteredUrls.length > 0) {
+        startingUrls = filteredUrls
+        progress.sitemap.found = sitemapUrls.length
+        progress.sitemap.processed = filteredUrls.length
+        onProgress?.(progress)
+        mainSitemapProcessed = true
       }
     }
     catch (error) {
       sitemapAttempts.push({ url: mainSitemapUrl, success: false, error: error instanceof Error ? error.message : 'Unknown error' })
-      // Main sitemap not found, try alternatives only if main sitemap wasn't processed
       if (!mainSitemapProcessed) {
         const commonSitemaps = [
           `${baseUrl}/sitemap_index.xml`,
@@ -308,37 +335,24 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
         for (const sitemapUrl of commonSitemaps) {
           try {
-            const altUrls = await loadSitemapWithoutRetries(sitemapUrl)
+            const altUrls = await loadSitemap(sitemapUrl)
             sitemapAttempts.push({ url: sitemapUrl, success: true })
 
-            // Check if we have glob patterns to filter by
-            const hasGlobPatterns = patterns.some(p => p.isGlob)
+            const filteredUrls = filterSitemapUrls(altUrls, hasGlobPatterns, exclude, patterns)
 
             if (hasGlobPatterns) {
-            // Filter URLs through glob patterns and exclude patterns
-              const filteredUrls = altUrls.filter((url) => {
-                return !isUrlExcluded(url, exclude) && patterns.some(pattern => matchesGlobPattern(url, pattern))
-              })
-
-              // Always use filtered URLs when glob patterns are provided, even if empty
               startingUrls = filteredUrls
               progress.sitemap.found = altUrls.length
               progress.sitemap.processed = filteredUrls.length
               onProgress?.(progress)
               break
             }
-            else {
-            // No glob patterns - use all URLs except excluded ones
-              const filteredUrls = altUrls.filter((url) => {
-                return !isUrlExcluded(url, exclude)
-              })
-              if (filteredUrls.length > 0) {
-                startingUrls = filteredUrls
-                progress.sitemap.found = altUrls.length
-                progress.sitemap.processed = filteredUrls.length
-                onProgress?.(progress)
-                break
-              }
+            else if (filteredUrls.length > 0) {
+              startingUrls = filteredUrls
+              progress.sitemap.found = altUrls.length
+              progress.sitemap.processed = filteredUrls.length
+              onProgress?.(progress)
+              break
             }
           }
           catch (error) {
@@ -348,313 +362,293 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       }
     }
 
-    // Log sitemap discovery results (only once after all attempts)
+    // Log sitemap discovery results
     const successfulSitemaps = sitemapAttempts.filter(a => a.success)
     const failedSitemaps = sitemapAttempts.filter(a => !a.success)
 
     if (successfulSitemaps.length > 0) {
-      // Found at least one sitemap
       const sitemapUrl = successfulSitemaps[0].url
-      if (progress.sitemap.processed > 0) {
+      if (progress.sitemap.processed > 0)
         p.note(`Found sitemap at ${sitemapUrl} with ${progress.sitemap.processed} URLs`, 'Sitemap Discovery')
-      }
-      else {
+      else
         p.note(`Found sitemap at ${sitemapUrl} but no URLs matched your search criteria`, 'Sitemap Discovery')
-      }
     }
     else if (failedSitemaps.length > 0) {
-      // No sitemaps found, show consolidated message
       const firstAttempt = failedSitemaps[0]
-      if (firstAttempt.error?.includes('404')) {
+      if (firstAttempt.error?.includes('404'))
         p.note(`No sitemap found, using crawler to discover pages`, 'Sitemap Discovery')
-      }
-      else {
+      else
         p.note(`Could not access sitemap: ${firstAttempt.error}`, 'Sitemap Discovery')
-      }
     }
 
-    // Always include home page for metadata extraction (site name, description)
-    // even if it doesn't match glob pattern
-    if (!startingUrls.includes(homePageUrl)) {
+    // Always include home page for metadata extraction
+    if (!startingUrls.includes(homePageUrl))
       startingUrls.unshift(homePageUrl)
-    }
 
-    // Mark sitemap discovery as completed
     progress.sitemap.status = 'completed'
-
-    // Update crawling total with the actual number of URLs we'll process
-    // This gives a better estimate than just the initial requests count
     progress.crawling.total = startingUrls.length
     onProgress?.(progress)
   }
   else if (skipSitemap && startingUrls.length > 0) {
-    // When skipping sitemap discovery, immediately mark as completed
     progress.sitemap.status = 'completed'
     progress.sitemap.found = 0
     progress.sitemap.processed = 0
     progress.crawling.total = startingUrls.length
     onProgress?.(progress)
-    // Don't show any sitemap discovery box when skipping
   }
 
   // Ensure output directory exists
-  if (!existsSync(outputDir)) {
-    mkdirSync(outputDir, { recursive: true })
-  }
+  mkdirSync(outputDir, { recursive: true })
 
   const results: CrawlResult[] = []
   const processedUrls = new Set<string>()
 
-  // Helper function to check if a URL should be crawled based on glob patterns and exclude patterns
   const shouldCrawlUrl = (url: string): boolean => {
-    // First check if URL should be excluded
-    if (isUrlExcluded(url, exclude)) {
+    if (isUrlExcluded(url, exclude))
       return false
-    }
-
-    // If no glob patterns, crawl everything from same domain
-    if (!patterns.some(p => p.isGlob)) {
+    if (!hasGlobPatterns)
       return true
-    }
-
-    // Check if URL matches any glob pattern
     return patterns.some(pattern => matchesGlobPattern(url, pattern))
   }
 
-  // Create request handler that works for both crawlers
-  const createRequestHandler = (crawlerType: 'http' | 'playwright') => {
-    return async ({ request, body, page, enqueueLinks, response }: any) => {
-      const startTime = Date.now()
+  const recordLatency = (ms: number) => {
+    const lat = progress.crawling.latency
+    lat.total += ms
+    lat.count++
+    if (ms < lat.min)
+      lat.min = ms
+    if (ms > lat.max)
+      lat.max = ms
+  }
 
-      // Update progress with current URL
-      progress.crawling.currentUrl = request.loadedUrl
+  // Pre-compute home page URL once
+  const homePageUrl = startingUrls.length > 0 ? new URL(startingUrls[0]).origin : ''
+  const normalizedHomePageUrl = homePageUrl.replace(URL_TRAILING_SLASH_RE, '')
+
+  // Track created directories to avoid redundant mkdir calls
+  const createdDirs = new Set<string>()
+
+  // Pre-compute shared origin if provided (avoids per-page URL parsing)
+  const sharedOrigin = origin || ''
+
+  // Process a single page (shared between HTTP and Playwright paths)
+  const processPage = async (url: string, content: string, initialTitle: string, depth: number, isMarkdown = false) => {
+    const parsedUrl = new URL(url)
+    const shouldProcessMarkdown = shouldCrawlUrl(url)
+    const pageOrigin = sharedOrigin || parsedUrl.origin
+
+    let md: string
+    let metadata: PageMetadata
+    if (isMarkdown) {
+      // Content is already markdown, skip conversion
+      md = content
+      metadata = { title: initialTitle || parsedUrl.pathname, links: [] }
+    }
+    else {
+      // Single htmlToMarkdown call with merged extraction
+      const { extraction, getMetadata } = extractMetadataInline(parsedUrl)
+      md = htmlToMarkdown(content, { origin: pageOrigin, extraction })
+      metadata = getMetadata()
+    }
+    const title = initialTitle || metadata.title
+
+    // Call onPage callback if provided
+    if (onPage && shouldProcessMarkdown) {
+      const pageData: PageData = {
+        url,
+        html: isMarkdown ? '' : content,
+        title,
+        metadata,
+        origin: pageOrigin,
+      }
+      await onPage(pageData)
+    }
+
+    let filePath: string | undefined
+
+    if (shouldProcessMarkdown && generateIndividualMd) {
+      const urlPath = parsedUrl.pathname === '/' ? '/index' : parsedUrl.pathname
+      const pathSegments = urlPath.replace(URL_TRAILING_SLASH_RE, '').split('/').filter(seg => seg.length > 0)
+      const safeSegments = pathSegments.map(seg => seg.replace(URL_PATH_UNSAFE_CHARS_RE, '-'))
+      const filename = safeSegments.length > 0 ? safeSegments.join('/') : 'index'
+      const safeFilename = normalize(`${filename}.md`)
+
+      filePath = join(outputDir, safeFilename)
+
+      const fileDir = dirname(filePath)
+      if (fileDir && !createdDirs.has(fileDir)) {
+        await mkdir(fileDir, { recursive: true })
+        createdDirs.add(fileDir)
+      }
+      await writeFile(filePath, md, 'utf-8')
+    }
+
+    const isHomePage = parsedUrl.pathname === '/' && parsedUrl.origin === normalizedHomePageUrl
+
+    if (shouldProcessMarkdown || isHomePage) {
+      const result: CrawlResult = {
+        url,
+        title,
+        content: md,
+        filePath: shouldProcessMarkdown ? filePath : undefined,
+        timestamp: Date.now(),
+        success: true,
+        metadata,
+        depth,
+      }
+      results.push(result)
+
+      progress.crawling.processed = results.length
       onProgress?.(progress)
+    }
 
-      // Skip processing for non-2xx responses
-      if (response?.statusCode && (response.statusCode < 200 || response.statusCode >= 300)) {
-        return
-      }
-
-      // Determine home page URL for metadata extraction
-      const homePageUrl = new URL(startingUrls[0]).origin
-
-      let html: string
-      let title: string
-
-      if (crawlerType === 'playwright') {
-        // Playwright crawler
-        await page.waitForLoadState('networkidle')
-        title = await page.title()
-        html = await page.innerHTML('html')
-      }
-      else {
-        // HTTP crawler
-        html = typeof body === 'string' ? body : body.toString()
-        title = '' // Will be extracted from HTML
-      }
-
-      // Extract metadata including links, title, description
-      const metadata = extractMetadata(html, request.loadedUrl)
-
-      // Use extracted title if we don't have one
-      if (!title) {
-        title = metadata.title
-      }
-
-      // Check if this URL matches the glob pattern for markdown processing
-      const shouldProcessMarkdown = shouldCrawlUrl(request.loadedUrl)
-
-      const pageOrigin = origin || new URL(request.loadedUrl).origin
-
-      // Call onPage callback if provided and this page should be processed
-      if (onPage && shouldProcessMarkdown) {
-        const pageData: PageData = {
-          url: request.loadedUrl,
-          html,
-          title,
-          metadata,
-          origin: pageOrigin,
-        }
-        await onPage(pageData)
-      }
-
-      let md = ''
-      if (shouldProcessMarkdown) {
-        // Convert HTML to Markdown only for matching URLs
-        md = htmlToMarkdown(html, { origin: pageOrigin })
-      }
-
-      let filePath: string | undefined
-
-      // Only generate files for URLs that match the glob pattern
-      if (shouldProcessMarkdown && generateIndividualMd) {
-        // Generate filename based on URL path
-        const urlObj = new URL(request.loadedUrl)
-        const urlPath = urlObj.pathname === '/' ? '/index' : urlObj.pathname
-        // Convert URL path to OS-safe path by replacing forward slashes
-        const pathSegments = urlPath.replace(URL_TRAILING_SLASH_RE, '').split('/').filter(seg => seg.length > 0)
-        const safeSegments = pathSegments.map(seg => seg.replace(URL_PATH_UNSAFE_CHARS_RE, '-'))
-        // Ensure we have a valid filename
-        const filename = safeSegments.length > 0 ? safeSegments.join('/') : 'index'
-        const safeFilename = normalize(`${filename}.md`)
-
-        // Create full file path - store directly in outputDir to match public dir structure
-        filePath = join(outputDir, safeFilename)
-
-        // Ensure the directory exists
-        const fileDir = dirname(filePath)
-        // Safety check: ensure directory path is not empty
-        if (fileDir && !existsSync(fileDir)) {
-          mkdirSync(fileDir, { recursive: true })
-        }
-        await writeFile(filePath, md, 'utf-8')
-      }
-
-      // const processingTime = Date.now() - startTime
-
-      // Always create results for home page (needed for metadata extraction)
-      // and for URLs that match the glob pattern
-      const normalizedUrl = request.loadedUrl.replace(URL_TRAILING_SLASH_RE, '')
-      const normalizedHomePageUrl = homePageUrl.replace(URL_TRAILING_SLASH_RE, '')
-      const isHomePage = normalizedUrl === normalizedHomePageUrl
-
-      if (shouldProcessMarkdown || isHomePage) {
-        const result: CrawlResult = {
-          url: request.loadedUrl,
-          title,
-          content: md,
-          filePath: shouldProcessMarkdown ? filePath : undefined,
-          timestamp: startTime,
-          success: true,
-          metadata,
-          depth: request.userData?.depth || 0,
-        }
-
-        results.push(result)
-
-        // Update progress with actual processed count
-        progress.crawling.processed = results.length
-        onProgress?.(progress)
-      }
-      // Follow links if enabled and within depth limit
-      if (followLinks && (request.userData?.depth || 0) < maxDepth) {
-        const currentDepth = (request.userData?.depth || 0) + 1
-
-        // Filter links based on glob patterns and exclude patterns
-        const filteredLinks = metadata.links.filter((link) => {
-          return shouldCrawlUrl(link)
-        })
-
-        if (enqueueLinks) {
-          // Use crawler's built-in link following for Playwright
-          await enqueueLinks({
-            urls: filteredLinks,
-            userData: { depth: currentDepth },
-          })
-        }
-        else {
-          // Manual link following for HTTP crawler
-          for (const link of filteredLinks) {
-            if (!processedUrls.has(link)) {
-              processedUrls.add(link)
-            }
-          }
-        }
+    // Follow links if enabled and within depth limit
+    if (followLinks && depth < maxDepth) {
+      const filteredLinks = metadata.links.filter(link => shouldCrawlUrl(link))
+      for (const link of filteredLinks) {
+        processedUrls.add(link)
       }
     }
   }
 
-  // Create appropriate crawler with crawl delay if specified
-  let crawler: HttpCrawler<any> | any // PlaywrightCrawler type will be determined at runtime
-  const crawlerOptions: PlaywrightCrawlerOptions | HttpCrawlerOptions = {
-    requestHandler: createRequestHandler(driver),
-    errorHandler: async ({ request, response, error }: any) => {
-      // Log the error for debugging if verbose mode is enabled
-      if (verbose) {
-        console.error(`[ERROR] URL: ${request.url}, Status: ${response?.statusCode || 'N/A'}, Error: ${error?.message || 'Unknown'}`)
-      }
+  // Limit URLs to maxRequestsPerCrawl
+  const urlsToProcess = startingUrls.slice(0, maxRequestsPerCrawl)
 
-      // Handle 4xx and 5xx status codes for HTTP crawler only (skip everything except timeouts)
-      if (response?.statusCode && response?.statusCode >= 400) {
-        request.noRetry = true
-
-        // Create a failed result for tracking
-        const result: CrawlResult = {
-          url: request.url,
-          title: '',
-          content: '',
-          timestamp: Date.now(),
-          success: false,
-          error: `HTTP ${response.statusCode}`,
-          metadata: { title: '', description: '', links: [] },
-          depth: request.userData?.depth || 0,
-        }
-        results.push(result)
-      }
-      else if (error) {
-        // Handle other errors (network, timeout, etc.)
-        request.noRetry = true
-
-        const result: CrawlResult = {
-          url: request.url,
-          title: '',
-          content: '',
-          timestamp: Date.now(),
-          success: false,
-          error: error.message || 'Unknown error',
-          metadata: { title: '', description: '', links: [] },
-          depth: request.userData?.depth || 0,
-        }
-        results.push(result)
-      }
-    },
-    maxRequestsPerCrawl,
-    respectRobotsTxtFile: false, // We handle robots.txt checking manually during sitemap discovery
-  }
-
-  // Add crawl delay if specified
-  if (crawlDelay) {
-    crawlerOptions.requestHandlerTimeoutSecs = crawlDelay
-  }
+  progress.crawling.status = 'processing'
+  progress.crawling.total = urlsToProcess.length
+  onProgress?.(progress)
 
   if (driver === 'playwright') {
-    // PlaywrightCrawler - installation check should happen in CLI layer
-    const playwrightOptions = crawlerOptions as PlaywrightCrawlerOptions
+    // Playwright path: keep using Crawlee for browser pool management
+    const { log, PlaywrightCrawler, purgeDefaultStorages } = await import('crawlee')
 
-    // Add useChrome option if specified
+    if (verbose)
+      log.setLevel(log.LEVELS.INFO)
+    else
+      log.setLevel(log.LEVELS.OFF)
+
+    const crawlerOptions: PlaywrightCrawlerOptions = {
+      requestHandler: async ({ request, page }) => {
+        progress.crawling.currentUrl = request.loadedUrl
+        onProgress?.(progress)
+
+        const fetchStart = Date.now()
+        await page.waitForLoadState('networkidle')
+        const title = await page.title()
+        const html = await page.innerHTML('html')
+        recordLatency(Date.now() - fetchStart)
+
+        await processPage(request.loadedUrl, html, title, request.userData?.depth || 0)
+      },
+      errorHandler: async ({ request, response, error }: any) => {
+        if (verbose)
+          console.error(`[ERROR] URL: ${request.url}, Status: ${response?.statusCode || 'N/A'}, Error: ${error?.message || 'Unknown'}`)
+
+        request.noRetry = true
+        progress.crawling.failed++
+        results.push({
+          url: request.url,
+          title: '',
+          content: '',
+          timestamp: Date.now(),
+          success: false,
+          error: response?.statusCode ? `HTTP ${response.statusCode}` : (error?.message || 'Unknown error'),
+          metadata: { title: '', description: '', links: [] },
+          depth: request.userData?.depth || 0,
+        })
+      },
+      maxRequestsPerCrawl,
+      respectRobotsTxtFile: false,
+    }
+
+    if (crawlDelay)
+      crawlerOptions.requestHandlerTimeoutSecs = crawlDelay
+
     if (useChrome) {
-      playwrightOptions.launchContext = {
-        ...playwrightOptions.launchContext,
+      crawlerOptions.launchContext = {
+        ...crawlerOptions.launchContext,
         useChrome,
       }
     }
 
-    crawler = new PlaywrightCrawler(playwrightOptions)
+    const crawler = new PlaywrightCrawler(crawlerOptions)
+
+    const initialRequests = urlsToProcess.map(url => ({
+      url,
+      userData: { depth: 0 },
+    }))
+
+    try {
+      await crawler.run(initialRequests)
+    }
+    catch (error) {
+      if (verbose) {
+        console.error(`[CRAWLER ERROR] ${error instanceof Error ? error.message : 'Unknown error'}`)
+        console.error(`[CRAWLER ERROR] Stack trace:`, error instanceof Error ? error.stack : 'No stack trace')
+      }
+      throw error
+    }
+
+    await purgeDefaultStorages()
   }
   else {
-    crawler = new HttpCrawler(crawlerOptions as HttpCrawlerOptions)
-  }
+    // HTTP path: simple ofetch + concurrency pool (no Crawlee overhead)
+    await runConcurrent(urlsToProcess, DEFAULT_CONCURRENCY, async (url) => {
+      progress.crawling.currentUrl = url
+      onProgress?.(progress)
 
-  // Start crawling with initial URLs (use starting URLs for glob patterns)
-  const initialRequests = startingUrls.map(url => ({
-    url,
-    userData: { depth: 0 },
-  }))
+      // Apply crawl delay if specified (from user or robots.txt Crawl-delay)
+      if (crawlDelay) {
+        const delay = crawlDelay
+        await new Promise(resolve => setTimeout(resolve, delay * 1000))
+      }
 
-  // Initialize crawling progress with the final URL count after sitemap processing
-  progress.crawling.status = 'processing'
-  progress.crawling.total = startingUrls.length
-  onProgress?.(progress)
+      try {
+        const fetchStart = Date.now()
+        const response = await ofetch.raw(url, {
+          headers: FETCH_HEADERS,
+          responseType: 'text' as const,
+          retry: 2,
+          retryDelay: 500,
+          timeout: 10000,
+          onResponseError({ response }) {
+            // Handle 429 Too Many Requests: respect Retry-After header
+            if (response.status === 429) {
+              const retryAfter = response.headers.get('retry-after')
+              const delaySec = retryAfter ? (Number.parseInt(retryAfter) || 1) : 2
+              // Set crawlDelay for subsequent requests
+              if (!crawlDelay || delaySec > crawlDelay)
+                crawlDelay = delaySec
+            }
+          },
+        })
+        recordLatency(Date.now() - fetchStart)
 
-  try {
-    await crawler.run(initialRequests)
-  }
-  catch (error) {
-    if (verbose) {
-      console.error(`[CRAWLER ERROR] ${error instanceof Error ? error.message : 'Unknown error'}`)
-      console.error(`[CRAWLER ERROR] Stack trace:`, error instanceof Error ? error.stack : 'No stack trace')
-    }
-    throw error
+        const body = response._data ?? ''
+        const contentType = response.headers.get('content-type') || ''
+        const isMarkdown = contentType.includes('text/markdown') || contentType.includes('text/x-markdown')
+        await processPage(url, body, '', 0, isMarkdown)
+      }
+      catch (error) {
+        if (verbose)
+          console.error(`[ERROR] URL: ${url}, Error: ${error instanceof Error ? error.message : 'Unknown'}`)
+
+        progress.crawling.failed++
+        results.push({
+          url,
+          title: '',
+          content: '',
+          timestamp: Date.now(),
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          metadata: { title: '', description: '', links: [] },
+          depth: 0,
+        })
+
+        progress.crawling.processed = results.length
+        onProgress?.(progress)
+      }
+    })
   }
 
   // Mark crawling as completed
@@ -668,44 +662,36 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
     const successfulResults = results.filter(r => r.success)
 
-    // Extract site name and description from home page if available, otherwise first successful result
     const firstUrl = new URL(withHttps(urls[0]))
-    const origin = firstUrl.origin
+    const originUrl = firstUrl.origin
     const homePageResult = successfulResults.find((r) => {
       const resultUrl = new URL(withHttps(r.url))
-      return resultUrl.href === origin || resultUrl.href === `${origin}/`
+      return resultUrl.href === originUrl || resultUrl.href === `${originUrl}/`
     })
 
     const siteName = siteNameOverride || homePageResult?.metadata?.title || homePageResult?.title || firstUrl.hostname
     const description = descriptionOverride || homePageResult?.metadata?.description || successfulResults[0]?.metadata?.description
 
-    // Generate llms.txt and llms-full.txt if requested
     if (generateLlmsTxt || generateLlmsFullTxt) {
       progress.generation.current = 'Generating llms.txt files'
       onProgress?.(progress)
 
-      // Only include results that have actual content (exclude redirect pages)
-      // Redirect pages typically only have frontmatter (---) or very minimal content
       const contentResults = successfulResults.filter((result) => {
         if (!result.content)
           return false
         const trimmedContent = result.content.trim()
-        // Filter out pages that only have frontmatter or are too short
         const contentWithoutFrontmatter = trimmedContent.replace(FRONTMATTER_BLOCK_RE, '').trim()
-        return contentWithoutFrontmatter.length > 10 // Must have at least some meaningful content
+        return contentWithoutFrontmatter.length > 10
       })
 
-      // Deduplicate results by URL (in case of redirects creating duplicates)
       const seenUrls = new Set<string>()
       const deduplicatedResults = contentResults.filter((result) => {
-        if (seenUrls.has(result.url)) {
+        if (seenUrls.has(result.url))
           return false
-        }
         seenUrls.add(result.url)
         return true
       })
 
-      // Convert CrawlResult to ProcessedFile format
       const processedFiles: ProcessedFile[] = deduplicatedResults.map(result => ({
         filePath: result.filePath,
         title: result.title,
@@ -718,19 +704,17 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         files: processedFiles,
         siteName,
         description,
-        origin: origin || firstUrl.origin,
+        origin: originUrl || firstUrl.origin,
         generateFull: generateLlmsFullTxt,
         outputDir,
       })
 
-      // Write llms.txt if requested
       if (generateLlmsTxt) {
         progress.generation.current = 'Writing llms.txt'
         onProgress?.(progress)
         await writeFile(join(outputDir, 'llms.txt'), llmsResult.llmsTxt, 'utf-8')
       }
 
-      // Write llms-full.txt if requested
       if (generateLlmsFullTxt && llmsResult.llmsFullTxt) {
         progress.generation.current = 'Writing llms-full.txt'
         onProgress?.(progress)
@@ -742,6 +726,5 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     onProgress?.(progress)
   }
 
-  await purgeDefaultStorages()
   return results
 }

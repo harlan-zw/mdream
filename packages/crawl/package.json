@@ -50,9 +50,13 @@
     "prepack": "pnpm run build"
   },
   "peerDependencies": {
+    "crawlee": "^3.16.0",
     "playwright": "^1.53.2"
   },
   "peerDependenciesMeta": {
+    "crawlee": {
+      "optional": true
+    },
     "playwright": {
       "optional": true
     }
@@ -60,9 +64,9 @@
   "dependencies": {
     "@clack/prompts": "catalog:",
     "@mdream/js": "workspace:*",
-    "crawlee": "catalog:",
     "mdream": "workspace:*",
     "nypm": "catalog:",
+    "ofetch": "catalog:",
     "pathe": "catalog:",
     "picomatch": "catalog:",
     "ufo": "catalog:"

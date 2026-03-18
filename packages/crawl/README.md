@@ -46,6 +46,16 @@ const results = await crawlAndGenerate({
 })
 ```
 
+### Playwright Driver
+
+The default HTTP driver works for most sites. For JavaScript-heavy sites that require a browser, install the optional dependencies:
+
+```bash
+npm install crawlee playwright
+```
+
+Then use `--driver playwright` or `driver: 'playwright'` in the API.
+
 > **Note**: llms.txt artifact generation is handled by [`@mdream/js/llms-txt`](../js). The crawl package uses it internally when `generateLlmsTxt: true`.
 
 ## Output
@@ -70,7 +80,7 @@ The crawler generates comprehensive output from entire websites:
 
 - ✅ **Multi-Page Website Crawling**: Designed specifically for crawling entire websites by following internal links
 - ✅ **Purely Interactive**: No complex command-line options to remember
-- ✅ **Dual Crawler Support**: Fast HTTP crawler (default) + Playwright for JavaScript-heavy sites
+- ✅ **Dual Crawler Support**: Fast HTTP crawler (default) + Playwright for JavaScript-heavy sites (requires `crawlee` and `playwright`)
 - ✅ **Smart Link Discovery**: Uses mdream's extraction plugin to find and follow internal links
 - ✅ **Rich Metadata Extraction**: Extracts titles, descriptions, keywords, and author info from all pages
 - ✅ **Comprehensive llms.txt Generation**: Creates complete site documentation files
