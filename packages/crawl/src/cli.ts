@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import * as p from '@clack/prompts'
 import { dirname, join, resolve } from 'pathe'
 import { withHttps } from 'ufo'
+import { loadMdreamConfig } from './config.js'
 import { crawlAndGenerate } from './crawl.js'
 import { parseUrlPattern, validateGlobPattern } from './glob-utils.js'
 // playwright-utils is dynamically imported only when Playwright driver is used
@@ -477,11 +478,28 @@ async function main() {
   // Try to parse CLI arguments first
   const cliOptions = parseCliArgs()
 
+  // Load config file (mdream.config.ts)
+  const fileConfig = await loadMdreamConfig()
+
   let options: CrawlOptions | null
 
   if (cliOptions) {
-    // Use CLI arguments - validation already done in parseCliArgs
-    options = cliOptions
+    // Merge: CLI args override config file, arrays concatenate
+    const configExclude = fileConfig.exclude || []
+    const cliExclude = cliOptions.exclude || []
+    options = {
+      ...cliOptions,
+      driver: cliOptions.driver || fileConfig.driver || 'http',
+      maxDepth: cliOptions.maxDepth ?? fileConfig.maxDepth,
+      crawlDelay: cliOptions.crawlDelay ?? fileConfig.crawlDelay,
+      skipSitemap: cliOptions.skipSitemap || fileConfig.skipSitemap || false,
+      allowSubdomains: cliOptions.allowSubdomains || fileConfig.allowSubdomains || false,
+      verbose: cliOptions.verbose || fileConfig.verbose || false,
+      exclude: configExclude.length > 0 || cliExclude.length > 0
+        ? [...configExclude, ...cliExclude]
+        : undefined,
+      hooks: fileConfig.hooks,
+    }
 
     // Show non-interactive summary when using CLI args
     p.intro(`☁️  mdream v${version}`)

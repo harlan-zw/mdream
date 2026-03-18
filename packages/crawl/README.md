@@ -135,7 +135,8 @@ const results = await crawlAndGenerate({
 | `useChrome` | `boolean` | `false` | Use system Chrome instead of Playwright's bundled browser (Playwright driver only) |
 | `chunkSize` | `number` | | Chunk size passed to mdream for markdown conversion |
 | `verbose` | `boolean` | `false` | Enable verbose error logging |
-| `onPage` | `(page: PageData) => Promise<void> \| void` | | Callback invoked for each successfully crawled page |
+| `hooks` | `Partial<CrawlHooks>` | | Hook functions for the crawl pipeline (see [Hooks](#hooks)) |
+| `onPage` | `(page: PageData) => Promise<void> \| void` | | **Deprecated.** Use `hooks['crawl:page']` instead. Still works for backwards compatibility |
 
 ### `CrawlResult`
 
@@ -258,6 +259,132 @@ await crawlAndGenerate({
   urls: ['https://example.com/pricing', 'https://example.com/about'],
   outputDir: './output',
   maxDepth: 0,
+})
+```
+
+## Config File
+
+Create a `mdream.config.ts` (or `.js`, `.mjs`) in your project root to set defaults and register hooks. Loaded via [c12](https://github.com/unjs/c12).
+
+```typescript
+import { defineConfig } from '@mdream/crawl'
+
+export default defineConfig({
+  exclude: ['*/admin/*', '*/internal/*'],
+  driver: 'http',
+  maxDepth: 3,
+  hooks: {
+    'crawl:page': (page) => {
+      // Strip branding from all page titles
+      page.title = page.title.replace(/ \| My Brand$/, '')
+    },
+  },
+})
+```
+
+CLI arguments override config file values. Array options like `exclude` are concatenated (config + CLI).
+
+### Config Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `exclude` | `string[]` | Glob patterns for URLs to exclude |
+| `driver` | `'http' \| 'playwright'` | Crawler driver |
+| `maxDepth` | `number` | Maximum crawl depth |
+| `maxPages` | `number` | Maximum pages to crawl |
+| `crawlDelay` | `number` | Delay between requests (seconds) |
+| `skipSitemap` | `boolean` | Skip sitemap discovery |
+| `allowSubdomains` | `boolean` | Crawl across subdomains |
+| `verbose` | `boolean` | Enable verbose logging |
+| `artifacts` | `string[]` | Output formats: `llms.txt`, `llms-full.txt`, `markdown` |
+| `hooks` | `object` | Hook functions (see below) |
+
+## Hooks
+
+Four hooks let you intercept and transform data at each stage of the crawl pipeline. Hooks receive mutable objects. Mutate in-place to transform output.
+
+### `crawl:url`
+
+Called before fetching a URL. Set `ctx.skip = true` to skip it entirely (saves the network request).
+
+```typescript
+defineConfig({
+  hooks: {
+    'crawl:url': (ctx) => {
+      // Skip large asset pages
+      if (ctx.url.includes('/assets/') || ctx.url.includes('/downloads/'))
+        ctx.skip = true
+    },
+  },
+})
+```
+
+### `crawl:page`
+
+Called after HTML-to-Markdown conversion, before storage. Mutate `page.title` or other fields. This replaces the `onPage` callback (which still works for backwards compatibility).
+
+```typescript
+defineConfig({
+  hooks: {
+    'crawl:page': (page) => {
+      // page.url, page.html, page.title, page.metadata, page.origin
+      page.title = page.title.replace(/ - Docs$/, '')
+    },
+  },
+})
+```
+
+### `crawl:content`
+
+Called before markdown is written to disk. Transform the final output content or change the file path.
+
+```typescript
+defineConfig({
+  hooks: {
+    'crawl:content': (ctx) => {
+      // ctx.url, ctx.title, ctx.content, ctx.filePath
+      ctx.content = ctx.content.replace(/CONFIDENTIAL/g, '[REDACTED]')
+      ctx.filePath = ctx.filePath.replace('.md', '.mdx')
+    },
+  },
+})
+```
+
+### `crawl:done`
+
+Called after all pages are crawled, before `llms.txt` generation. Filter or reorder results.
+
+```typescript
+defineConfig({
+  hooks: {
+    'crawl:done': (ctx) => {
+      // Remove short pages from the final output
+      const filtered = ctx.results.filter(r => r.content.length > 100)
+      ctx.results.length = 0
+      ctx.results.push(...filtered)
+    },
+  },
+})
+```
+
+### Programmatic Hooks
+
+Hooks can also be passed directly to `crawlAndGenerate`:
+
+```typescript
+import { crawlAndGenerate } from '@mdream/crawl'
+
+await crawlAndGenerate({
+  urls: ['https://example.com'],
+  outputDir: './output',
+  hooks: {
+    'crawl:page': (page) => {
+      page.title = page.title.replace(/ \| Brand$/, '')
+    },
+    'crawl:done': (ctx) => {
+      ctx.results.sort((a, b) => a.url.localeCompare(b.url))
+    },
+  },
 })
 ```
 
