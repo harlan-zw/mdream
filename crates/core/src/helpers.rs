@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use crate::consts::*;
+use crate::entities::lookup_named_entity;
 use crate::types::{Attributes, ElementNode, ParsedSelector};
 
 /// Tracked element during extraction — maps stack depth to accumulator
@@ -38,42 +39,6 @@ fn decode_html_entities_alloc(text: &str) -> String {
 
     while i < len {
         if bytes[i] == b'&' {
-            // Try known entities (all ASCII, so byte comparison is safe)
-            if i + 4 <= len && &bytes[i..i + 4] == b"&lt;" {
-                result.push('<');
-                i += 4;
-                continue;
-            }
-            if i + 4 <= len && &bytes[i..i + 4] == b"&gt;" {
-                result.push('>');
-                i += 4;
-                continue;
-            }
-            if i + 5 <= len && &bytes[i..i + 5] == b"&amp;" {
-                result.push('&');
-                i += 5;
-                continue;
-            }
-            if i + 6 <= len && &bytes[i..i + 6] == b"&quot;" {
-                result.push('"');
-                i += 6;
-                continue;
-            }
-            if i + 5 <= len && &bytes[i..i + 5] == b"&#39;" {
-                result.push('\'');
-                i += 5;
-                continue;
-            }
-            if i + 6 <= len && &bytes[i..i + 6] == b"&apos;" {
-                result.push('\'');
-                i += 6;
-                continue;
-            }
-            if i + 6 <= len && &bytes[i..i + 6] == b"&nbsp;" {
-                result.push(' ');
-                i += 6;
-                continue;
-            }
             // Numeric character references: &#NNN; or &#xHHH;
             if i + 2 < len && bytes[i + 1] == b'#' {
                 let start = i;
@@ -83,14 +48,17 @@ fn decode_html_entities_alloc(text: &str) -> String {
                     i += 1;
                 }
                 let num_start = i;
-                while i < len && bytes[i] != b';' {
+                // Cap digit scan: 7 hex digits (U+10FFFF) or 8 decimal (max codepoint)
+                let max_digits = if is_hex { 7 } else { 8 };
+                let scan_limit = len.min(num_start + max_digits + 1);
+                while i < scan_limit && bytes[i] != b';' {
                     i += 1;
                 }
-                if i < len && bytes[i] == b';' {
+                if i < len && bytes[i] == b';' && i > num_start {
                     let num_str = &text[num_start..i];
                     let base = if is_hex { 16 } else { 10 };
                     if let Ok(code_point) = u32::from_str_radix(num_str, base) {
-                        if let Some(c) = std::char::from_u32(code_point) {
+                        if let Some(c) = char::from_u32(code_point) {
                             result.push(c);
                             i += 1;
                             continue;
@@ -98,15 +66,28 @@ fn decode_html_entities_alloc(text: &str) -> String {
                     }
                 }
                 i = start;
+            } else {
+                // Named entity: scan forward up to 33 bytes for ';'
+                let mut semi = i + 1;
+                let scan_end = len.min(i + 34);
+                while semi < scan_end && bytes[semi] != b';' {
+                    semi += 1;
+                }
+                if semi < len && bytes[semi] == b';' && semi > i + 1 {
+                    let name = &bytes[i + 1..semi];
+                    if let Some(c) = lookup_named_entity(name) {
+                        result.push(c);
+                        i = semi + 1;
+                        continue;
+                    }
+                }
             }
-        }
-        // If bytes[i] == b'&' here, no entity matched above — push literal &
-        if bytes[i] == b'&' {
+            // No entity matched — push literal '&'
             result.push('&');
             i += 1;
             continue;
         }
-        // Batch copy plain ASCII bytes until next & or non-ASCII
+        // Batch copy plain ASCII bytes until next '&' or non-ASCII
         let start = i;
         while i < len && bytes[i] != b'&' && bytes[i] < 0x80 {
             i += 1;

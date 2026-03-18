@@ -987,3 +987,71 @@ fn clean_empty_link_text_whitespace_only_dropped() {
         ""
     );
 }
+
+// ── HTML Entity Decoding ──
+
+#[test]
+fn named_entities_common() {
+    assert_eq!(convert("<p>&mdash;</p>"), "\u{2014}");
+    assert_eq!(convert("<p>&ndash;</p>"), "\u{2013}");
+    assert_eq!(convert("<p>&copy;</p>"), "\u{00A9}");
+    assert_eq!(convert("<p>&hellip;</p>"), "\u{2026}");
+    assert_eq!(convert("<p>&laquo;</p>"), "\u{00AB}");
+    assert_eq!(convert("<p>&raquo;</p>"), "\u{00BB}");
+    assert_eq!(convert("<p>&trade;</p>"), "\u{2122}");
+    assert_eq!(convert("<p>&euro;</p>"), "\u{20AC}");
+}
+
+#[test]
+fn named_entities_accented() {
+    assert_eq!(convert("<p>&eacute;</p>"), "\u{00E9}");
+    assert_eq!(convert("<p>&Eacute;</p>"), "\u{00C9}");
+    assert_eq!(convert("<p>&uuml;</p>"), "\u{00FC}");
+    assert_eq!(convert("<p>&ntilde;</p>"), "\u{00F1}");
+    assert_eq!(convert("<p>&ccedil;</p>"), "\u{00E7}");
+    assert_eq!(convert("<p>&szlig;</p>"), "\u{00DF}");
+}
+
+#[test]
+fn named_entities_xml_defaults() {
+    assert_eq!(convert("<p>&lt;</p>"), "<");
+    assert_eq!(convert("<p>&gt;</p>"), ">");
+    assert_eq!(convert("<p>&amp;</p>"), "&");
+    assert_eq!(convert("<p>&quot;</p>"), "\"");
+    assert_eq!(convert("<p>&apos;</p>"), "'");
+}
+
+#[test]
+fn named_entities_greek() {
+    assert_eq!(convert("<p>&alpha;&beta;&gamma;</p>"), "\u{03B1}\u{03B2}\u{03B3}");
+    assert_eq!(convert("<p>&Omega;</p>"), "\u{03A9}");
+}
+
+#[test]
+fn numeric_entities_decimal_and_hex() {
+    assert_eq!(convert("<p>&#169;</p>"), "\u{00A9}");
+    assert_eq!(convert("<p>&#x00A9;</p>"), "\u{00A9}");
+    assert_eq!(convert("<p>&#8212;</p>"), "\u{2014}");
+    assert_eq!(convert("<p>&#x2014;</p>"), "\u{2014}");
+}
+
+#[test]
+fn numeric_entities_digit_cap() {
+    // Unbounded digit sequences should not scan forever
+    assert_eq!(convert("<p>&#99999999999;</p>"), "&#99999999999;");
+    assert_eq!(convert("<p>&#xFFFFFFFFF;</p>"), "&#xFFFFFFFFF;");
+}
+
+#[test]
+fn unknown_entities_pass_through() {
+    assert_eq!(convert("<p>&nonexistent;</p>"), "&nonexistent;");
+    assert_eq!(convert("<p>&;</p>"), "&;");
+}
+
+#[test]
+fn mixed_entities_in_text() {
+    assert_eq!(
+        convert("<p>Caf&eacute; &amp; cr&egrave;me &mdash; parfait</p>"),
+        "Caf\u{00E9} & cr\u{00E8}me \u{2014} parfait"
+    );
+}

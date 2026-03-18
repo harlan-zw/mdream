@@ -1,5 +1,6 @@
 pub mod consts;
 pub(crate) mod convert;
+pub(crate) mod entities;
 pub(crate) mod helpers;
 pub mod splitter;
 pub(crate) mod tags;
