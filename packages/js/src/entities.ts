@@ -1,5 +1,5 @@
 // HTML named character references
-// Covers HTML 4 entities + common HTML5 additions (252 entries)
+// Covers HTML 4 entities + common HTML5 additions (245 entries)
 // Source: https://html.spec.whatwg.org/entities.json
 export const HTML_ENTITIES: Record<string, string> = {
   '&aacute;': 'á',
