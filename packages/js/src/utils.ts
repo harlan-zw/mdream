@@ -1,71 +1,61 @@
 import type { Node } from './types'
-import { HTML_ENTITIES } from './const'
+import { HTML_ENTITIES } from './entities'
 
 /**
- * Decode HTML entities - optimized version with single pass
+ * Decode HTML entities - single pass with O(1) named entity lookup
  */
 export function decodeHTMLEntities(text: string): string {
   let result = ''
   let i = 0
+  const len = text.length
 
-  while (i < text.length) {
-    if (text[i] === '&') {
-      // Check for named entity
-      let match = false
-
-      for (const [entity, replacement] of Object.entries(HTML_ENTITIES)) {
-        if (text.startsWith(entity, i)) {
-          result += replacement
-          i += entity.length
-          match = true
-          break
-        }
-      }
-
-      if (match)
-        continue
-
-      // Check for numeric entity
-      if (i + 2 < text.length && text[i + 1] === '#') {
+  while (i < len) {
+    if (text.charCodeAt(i) === 38) { // '&'
+      // Numeric entity (&#NNN; or &#xHHH;)
+      if (i + 2 < len && text.charCodeAt(i + 1) === 35) { // '#'
         const start = i
-        i += 2 // Skip &# prefix
+        i += 2
 
-        // Handle hex entities
-        const isHex = text[i] === 'x' || text[i] === 'X'
+        const isHex = text.charCodeAt(i) === 120 || text.charCodeAt(i) === 88 // 'x' or 'X'
         if (isHex)
           i++
 
         const numStart = i
+        // Cap digit scan: 7 hex digits covers U+10FFFF, 8 decimal digits covers 10FFFF
+        const maxDigits = i + (isHex ? 7 : 8)
 
-        // Find the end of the numeric entity
-        while (i < text.length && text[i] !== ';') {
+        while (i < len && i < maxDigits && text.charCodeAt(i) !== 59) // ';'
           i++
-        }
 
-        if (i < text.length && text[i] === ';') {
-          const numStr = text.substring(numStart, i)
-          const base = isHex ? 16 : 10
-
-          // Parse the number and convert to character if valid
-          try {
-            const codePoint = Number.parseInt(numStr, base)
-            if (!Number.isNaN(codePoint)) {
-              result += String.fromCodePoint(codePoint)
-              i++ // Skip the semicolon
-              continue
-            }
-          }
-          catch {
-            // If parsing fails, treat as plain text
+        if (i < len && text.charCodeAt(i) === 59) {
+          const codePoint = Number.parseInt(text.substring(numStart, i), isHex ? 16 : 10)
+          if (codePoint >= 0 && codePoint <= 0x10FFFF && !Number.isNaN(codePoint)) {
+            result += String.fromCodePoint(codePoint)
+            i++
+            continue
           }
         }
 
-        // If we get here, it wasn't a valid entity, reset and treat as text
         i = start
+      }
+      else {
+        // Named entity: scan ahead to ';' (max 32 chars covers all HTML entity names)
+        const maxEnd = i + 33 < len ? i + 33 : len
+        let j = i + 1
+        while (j < maxEnd && text.charCodeAt(j) !== 59) // ';'
+          j++
+
+        if (j < maxEnd && text.charCodeAt(j) === 59) {
+          const replacement = HTML_ENTITIES[text.substring(i, j + 1)]
+          if (replacement !== undefined) {
+            result += replacement
+            i = j + 1
+            continue
+          }
+        }
       }
     }
 
-    // Regular character
     result += text[i]
     i++
   }
