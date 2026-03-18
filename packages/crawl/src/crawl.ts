@@ -581,8 +581,17 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       await crawler.run(initialRequests)
     }
     catch (error) {
+      const msg = error instanceof Error ? error.message : ''
+      // wmic.exe was removed in Windows 11; older crawlee versions spawn it for memory monitoring
+      if (msg.includes('wmic') || msg.includes('ENOENT')) {
+        throw new Error(
+          `Crawlee failed to spawn a system process (${msg}). `
+          + 'On Windows 11+, wmic.exe is no longer available. '
+          + 'Upgrade crawlee to >=3.16.0 or use the HTTP driver instead (--driver http).',
+        )
+      }
       if (verbose) {
-        console.error(`[CRAWLER ERROR] ${error instanceof Error ? error.message : 'Unknown error'}`)
+        console.error(`[CRAWLER ERROR] ${msg || 'Unknown error'}`)
         console.error(`[CRAWLER ERROR] Stack trace:`, error instanceof Error ? error.stack : 'No stack trace')
       }
       throw error

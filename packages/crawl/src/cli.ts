@@ -628,6 +628,17 @@ async function main() {
 
 // Run the CLI
 main().catch((error) => {
-  p.log.error(`Unexpected error: ${error}`)
+  const msg = error instanceof Error ? error.message : String(error)
+  // Surface a clear hint when the error is the Windows wmic.exe removal
+  if (msg.includes('wmic') || (msg.includes('ENOENT') && process.platform === 'win32')) {
+    p.log.error(
+      'Crawlee failed because wmic.exe is not available on this system. '
+      + 'Windows 11 removed wmic.exe, which older crawlee versions depend on for memory monitoring.\n'
+      + 'Fix: upgrade crawlee to >=3.16.0 or switch to the HTTP driver (--driver http).',
+    )
+  }
+  else {
+    p.log.error(`Unexpected error: ${msg}`)
+  }
   process.exit(1)
 })
