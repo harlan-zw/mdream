@@ -49,6 +49,7 @@ npx @mdream/crawl -u https://docs.example.com
 | `--crawl-delay <seconds>` | | Delay between requests in seconds | from `robots.txt` or none |
 | `--exclude <pattern>` | | Exclude URLs matching glob patterns (repeatable) | none |
 | `--skip-sitemap` | | Skip `sitemap.xml` and `robots.txt` discovery | `false` |
+| `--allow-subdomains` | | Crawl across subdomains of the same root domain | `false` |
 | `--verbose` | `-v` | Enable verbose logging | `false` |
 | `--help` | `-h` | Show help message | |
 | `--version` | | Show version number | |
@@ -73,6 +74,9 @@ npx @mdream/crawl -u example.com --driver playwright
 
 # Skip sitemap discovery with verbose output
 npx @mdream/crawl -u example.com --skip-sitemap --verbose
+
+# Crawl across subdomains (docs.example.com, blog.example.com, etc.)
+npx @mdream/crawl -u example.com --allow-subdomains
 
 # Override site metadata
 npx @mdream/crawl -u example.com --site-name "My Company" --description "Company documentation"
@@ -127,6 +131,7 @@ const results = await crawlAndGenerate({
 | `exclude` | `string[]` | `[]` | Glob patterns for URLs to exclude |
 | `crawlDelay` | `number` | from `robots.txt` | Delay between requests in seconds |
 | `skipSitemap` | `boolean` | `false` | Skip `sitemap.xml` and `robots.txt` discovery |
+| `allowSubdomains` | `boolean` | `false` | Crawl across subdomains of the same root domain (e.g. `docs.example.com` + `blog.example.com`). Output files are namespaced by hostname to avoid collisions |
 | `useChrome` | `boolean` | `false` | Use system Chrome instead of Playwright's bundled browser (Playwright driver only) |
 | `chunkSize` | `number` | | Chunk size passed to mdream for markdown conversion |
 | `verbose` | `boolean` | `false` | Enable verbose error logging |
@@ -227,6 +232,18 @@ await crawlAndGenerate({
   urls: ['https://example.com/docs/**'],
   outputDir: './docs-output',
   exclude: ['/docs/deprecated/*', '/docs/internal/*'],
+  followLinks: true,
+  maxDepth: 2,
+})
+```
+
+#### Crawling across subdomains
+
+```typescript
+await crawlAndGenerate({
+  urls: ['https://example.com'],
+  outputDir: './output',
+  allowSubdomains: true, // Will also crawl docs.example.com, blog.example.com, etc.
   followLinks: true,
   maxDepth: 2,
 })

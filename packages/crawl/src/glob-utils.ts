@@ -1,4 +1,5 @@
 import picomatch from 'picomatch'
+import { getDomain } from 'tldts'
 import { withHttps } from 'ufo'
 
 function stripGlobTail(s: string): string {
@@ -6,6 +7,15 @@ function stripGlobTail(s: string): string {
   return idx === -1 ? s : s.slice(0, idx)
 }
 const GLOB_CHAR_RE = /[*?[]/
+
+/**
+ * Extract the registrable domain from a hostname using the public suffix list.
+ * Handles multi-part TLDs (.co.uk, .github.io, etc.) correctly.
+ * Returns the hostname unchanged for IPs or when parsing fails.
+ */
+export function getRegistrableDomain(hostname: string): string {
+  return getDomain(hostname, { allowPrivateDomains: true }) || hostname
+}
 
 export interface ParsedUrlPattern {
   baseUrl: string
@@ -55,7 +65,7 @@ export function parseUrlPattern(input: string): ParsedUrlPattern {
 /**
  * Check if a URL matches a glob pattern
  */
-export function matchesGlobPattern(url: string, parsedPattern: ParsedUrlPattern): boolean {
+export function matchesGlobPattern(url: string, parsedPattern: ParsedUrlPattern, allowSubdomains = false): boolean {
   if (!parsedPattern.isGlob) {
     return true // No pattern means match everything
   }
@@ -64,10 +74,17 @@ export function matchesGlobPattern(url: string, parsedPattern: ParsedUrlPattern)
     const urlObj = new URL(url)
     const urlPath = urlObj.pathname + urlObj.search + urlObj.hash
 
-    // Only match URLs from the same base domain
-    const urlBase = `${urlObj.protocol}//${urlObj.host}`
-    if (urlBase !== parsedPattern.baseUrl) {
-      return false
+    if (allowSubdomains) {
+      // Match URLs sharing the same registrable domain
+      const patternUrl = new URL(parsedPattern.baseUrl)
+      if (getRegistrableDomain(urlObj.hostname) !== getRegistrableDomain(patternUrl.hostname))
+        return false
+    }
+    else {
+      // Only match URLs from the same base domain
+      const urlBase = `${urlObj.protocol}//${urlObj.host}`
+      if (urlBase !== parsedPattern.baseUrl)
+        return false
     }
 
     // Transform single asterisk at the end of pattern to match subdirectories
@@ -117,7 +134,7 @@ export function getStartingUrl(parsedPattern: ParsedUrlPattern): string {
 /**
  * Check if a URL should be excluded based on exclude patterns
  */
-export function isUrlExcluded(url: string, excludePatterns: string[]): boolean {
+export function isUrlExcluded(url: string, excludePatterns: string[], allowSubdomains = false): boolean {
   if (!excludePatterns || excludePatterns.length === 0) {
     return false
   }
@@ -132,7 +149,7 @@ export function isUrlExcluded(url: string, excludePatterns: string[]): boolean {
       if (pattern.includes('://')) {
         const parsedPattern = parseUrlPattern(pattern)
         if (parsedPattern.isGlob) {
-          return matchesGlobPattern(url, parsedPattern)
+          return matchesGlobPattern(url, parsedPattern, allowSubdomains)
         }
         return url === pattern
       }
