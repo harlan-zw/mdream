@@ -1,5 +1,3 @@
-#![deny(clippy::all)]
-
 pub mod consts;
 pub(crate) mod convert;
 pub(crate) mod helpers;
@@ -17,7 +15,7 @@ pub fn html_to_markdown(html: &str, options: HTMLToMarkdownOptions) -> String {
 
 /// Convert HTML to Markdown with full results (extraction, frontmatter).
 pub fn html_to_markdown_result(html: &str, options: HTMLToMarkdownOptions) -> MdreamResult {
-    let capacity = (html.len() / 3).min(256 * 1024).max(1024);
+    let capacity = (html.len() / 3).clamp(1024, 256 * 1024);
     let mut state = ConvertState::new(options, capacity);
     state.process_html(html);
 

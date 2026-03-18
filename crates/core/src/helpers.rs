@@ -165,7 +165,7 @@ pub(crate) fn process_tag_attributes(html_chunk: &str, position: usize, tag_hand
     let bytes = html_chunk.as_bytes();
     let chunk_length = bytes.len();
 
-    let self_closing = tag_handler.map_or(false, |h| h.is_self_closing);
+    let self_closing = tag_handler.is_some_and(|h| h.is_self_closing);
     let mut inside_quote = false;
     let mut quote_char: u8 = 0;
     let attr_start_pos = i;
@@ -370,10 +370,10 @@ pub(crate) fn parse_css_selector(selector: &str) -> ParsedSelector {
 }
 
 fn parse_simple_selector(s: &str) -> ParsedSelector {
-    if s.starts_with('.') {
-        ParsedSelector::Class(s[1..].to_string())
-    } else if s.starts_with('#') {
-        ParsedSelector::Id(s[1..].to_string())
+    if let Some(class) = s.strip_prefix('.') {
+        ParsedSelector::Class(class.to_string())
+    } else if let Some(id) = s.strip_prefix('#') {
+        ParsedSelector::Id(id.to_string())
     } else {
         ParsedSelector::Tag(s.to_string())
     }
@@ -399,12 +399,12 @@ pub(crate) fn matches_selector(tag: &ElementNode, selector: &ParsedSelector) -> 
     match selector {
         ParsedSelector::Tag(name) => tag.name() == name,
         ParsedSelector::Class(class_name) => {
-            tag.attributes.get("class").map_or(false, |c| {
+            tag.attributes.get("class").is_some_and(|c| {
                 c.split_whitespace().any(|cls| cls == class_name)
             })
         }
         ParsedSelector::Id(id) => {
-            tag.attributes.get("id").map_or(false, |v| v == id)
+            tag.attributes.get("id").is_some_and(|v| v == id)
         }
         ParsedSelector::Attribute { name, operator, value } => {
             match tag.attributes.get(name.as_str()) {
@@ -435,8 +435,8 @@ pub(crate) fn matches_selector(tag: &ElementNode, selector: &ParsedSelector) -> 
 fn extract_base_class(class: &str) -> (&str, &str) {
     let breakpoints = ["sm:", "md:", "lg:", "xl:", "2xl:"];
     for bp in breakpoints {
-        if class.starts_with(bp) {
-            return (&class[bp.len()..], bp);
+        if let Some(rest) = class.strip_prefix(bp) {
+            return (rest, bp);
         }
     }
     (class, "")
