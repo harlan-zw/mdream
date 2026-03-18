@@ -987,3 +987,36 @@ fn clean_empty_link_text_whitespace_only_dropped() {
         ""
     );
 }
+
+// ── Isolate Main ──
+
+fn convert_with_isolate_main(html: &str) -> String {
+    html_to_markdown(html, HTMLToMarkdownOptions {
+        plugins: Some(PluginConfig {
+            isolate_main: Some(mdream::types::IsolateMainConfig {}),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+}
+
+#[test]
+fn isolate_main_excludes_links_after_main_closes() {
+    let html = r##"<body><main><h1>Title</h1><p>Content</p></main><div><a href="#">icon</a></div><footer>Footer</footer></body>"##;
+    let result = convert_with_isolate_main(html);
+    assert!(result.contains("# Title"));
+    assert!(result.contains("Content"));
+    assert!(!result.contains("](#)"));
+    assert!(!result.contains("icon"));
+    assert!(!result.contains("Footer"));
+}
+
+#[test]
+fn isolate_main_finds_deeply_nested_main() {
+    let html = r#"<body><nav>Nav</nav><div><div><div><div><div><div><div><div><div><div><main><h1>Deep Title</h1><p>Deep content</p></main></div></div></div></div></div></div></div></div></div></div><footer>Footer</footer></body>"#;
+    let result = convert_with_isolate_main(html);
+    assert!(result.contains("# Deep Title"));
+    assert!(result.contains("Deep content"));
+    assert!(!result.contains("Nav"));
+    assert!(!result.contains("Footer"));
+}
