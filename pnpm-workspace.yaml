@@ -19,7 +19,7 @@ catalog:
   '@arethetypeswrong/cli': ^0.18.2
   '@built-in-ai/transformers-js': ^1.1.2
   '@clack/prompts': ^1.1.0
-  '@cloudflare/vitest-pool-workers': ^0.13.1
+  '@cloudflare/vitest-pool-workers': ^0.13.2
   '@emnapi/core': ^1.9.0
   '@emnapi/runtime': ^1.9.0
   '@emnapi/wasi-threads': ^1.2.0
@@ -50,7 +50,7 @@ catalog:
   eslint: ^10.0.3
   express: ^5.2.1
   llm-cost: ^1.0.5
-  miniflare: ^4.20260312.1
+  miniflare: ^4.20260317.0
   node-html-markdown: ^2.0.0
   nuxt: ^4.4.2
   nuxt-site-config: ^3.2.21
@@ -71,7 +71,7 @@ catalog:
   vitest: ^4.1.0
   vue: ^3.5.30
   vue-router: ^5.0.3
-  wrangler: ^4.74.0
+  wrangler: ^4.75.0
 
 onlyBuiltDependencies:
   - esbuild
