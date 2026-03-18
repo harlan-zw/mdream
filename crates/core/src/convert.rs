@@ -855,18 +855,20 @@ impl ConvertState {
                     if let Some(href) = node.attributes.get("href") {
                         if href.starts_with('#') {
                             // Remove [ and keep text only — use truncate+copy without intermediate String
-                            let text_len = text_end - text_start;
-                            let new_len = bracket_pos + text_len;
-                            debug_assert!(text_start + text_len <= self.buffer.len() && new_len <= self.buffer.len(),
-                                "ptr::copy bounds violation in selfLinkHeadings: text_start={text_start} text_len={text_len} bracket_pos={bracket_pos} buf_len={}", self.buffer.len());
-                            if text_start + text_len <= self.buffer.len() && new_len <= self.buffer.len() {
+                            let buf_len = self.buffer.len();
+                            if let Some(text_len) = buf_len.checked_sub(text_start) {
+                                // new_len = bracket_pos + text_len = bracket_pos + (buf_len - text_start)
+                                // Since text_start = bracket_pos + 1 and text_start <= buf_len, new_len = buf_len - 1
+                                let new_len = buf_len - 1;
+                                debug_assert!(text_start + text_len <= buf_len && new_len <= buf_len,
+                                    "ptr::copy bounds violation in selfLinkHeadings: text_start={text_start} text_len={text_len} bracket_pos={bracket_pos} buf_len={buf_len}");
                                 unsafe {
                                     let buf = self.buffer.as_mut_vec();
                                     std::ptr::copy(buf.as_ptr().add(text_start), buf.as_mut_ptr().add(bracket_pos), text_len);
                                     buf.set_len(new_len);
                                 }
+                                self.last_content_cache_len = text_len;
                             }
-                            self.last_content_cache_len = text_len;
                             self.last_node_is_inline = is_inline;
                             return;
                         }
@@ -880,18 +882,18 @@ impl ConvertState {
                     let resolved = Self::resolve_url(href, self.options.origin.as_deref(), self.options.clean_urls);
                     if link_text == resolved.as_ref() {
                         // Remove [ and keep text only — use truncate+copy without intermediate String
-                        let text_len = text_end - text_start;
-                        let new_len = bracket_pos + text_len;
-                        debug_assert!(text_start + text_len <= self.buffer.len() && new_len <= self.buffer.len(),
-                            "ptr::copy bounds violation in redundantLinks: text_start={text_start} text_len={text_len} bracket_pos={bracket_pos} buf_len={}", self.buffer.len());
-                        if text_start + text_len <= self.buffer.len() && new_len <= self.buffer.len() {
+                        let buf_len = self.buffer.len();
+                        if let Some(text_len) = buf_len.checked_sub(text_start) {
+                            let new_len = buf_len - 1;
+                            debug_assert!(text_start + text_len <= buf_len && new_len <= buf_len,
+                                "ptr::copy bounds violation in redundantLinks: text_start={text_start} text_len={text_len} bracket_pos={bracket_pos} buf_len={buf_len}");
                             unsafe {
                                 let buf = self.buffer.as_mut_vec();
                                 std::ptr::copy(buf.as_ptr().add(text_start), buf.as_mut_ptr().add(bracket_pos), text_len);
                                 buf.set_len(new_len);
                             }
+                            self.last_content_cache_len = text_len;
                         }
-                        self.last_content_cache_len = text_len;
                         self.last_node_is_inline = is_inline;
                         return;
                     }
