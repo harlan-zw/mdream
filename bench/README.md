@@ -105,11 +105,11 @@ pnpm bench
 ```text
  ✓ bench/compare.bench.ts > small HTML (166 KB - Wikipedia)
      name                      hz      min      max     mean      p75      p99    rme  samples
-   · mdream                 297.31   3.16ms   4.74ms   3.36ms   3.42ms   4.44ms  ±1.01%    149
-   · mdream-rust           1654.49   0.57ms   1.09ms   0.60ms   0.60ms   0.96ms  ±0.65%    828
-   · html-to-markdown       249.74   3.85ms   6.37ms   4.00ms   4.03ms   4.73ms  ±1.14%    125
-   · turndown (gfm)          83.93   9.98ms  18.53ms  11.91ms  13.20ms  18.53ms  ±4.91%     42
-   · node-html-markdown      65.16  14.00ms  18.29ms  15.35ms  16.11ms  18.29ms  ±2.15%     33
+   · mdream                 306.58   3.00ms   4.55ms   3.26ms   3.35ms   4.23ms  ±1.15%    154
+   · mdream-rust           1924.47   0.49ms   0.93ms   0.52ms   0.52ms   0.66ms  ±0.40%    963
+   · html-to-markdown       253.82   3.79ms   4.86ms   3.94ms   3.96ms   4.65ms  ±0.77%    127
+   · turndown (gfm)          88.82   9.62ms  19.03ms  11.26ms  12.29ms  19.03ms  ±4.78%     45
+   · node-html-markdown      69.86  13.58ms  15.63ms  14.31ms  14.75ms  15.63ms  ±1.51%     35
 ```
 
 **Reading the results:**
@@ -123,12 +123,12 @@ pnpm bench
 
 | Input Size | mdream (rust) | mdream (js) | html-to-markdown (rust) | Turndown (js) | node-html-markdown (js) |
 |------------|---------------|-------------|-------------------------|---------------|-------------------------|
-| **166 KB** | 🏆 **0.60ms** | 3.36ms | 4.00ms *(6.6x)* | 11.91ms *(19.7x)* | 15.35ms *(25.4x)* |
-| **420 KB** | 🏆 **1.26ms** | 7.79ms | 8.21ms *(6.5x)* | 14.01ms *(11.1x)* | 17.23ms *(13.6x)* |
-| **1.8 MB** | 🏆 **7.83ms** | 62.2ms | 85.1ms *(10.9x)* | 276.0ms *(35.2x)* | 💀 27,381ms *(3496x)* |
+| **166 KB** | 🏆 **0.52ms** | 3.26ms | 3.94ms *(7.6x)* | 11.26ms *(21.7x)* | 14.31ms *(27.5x)* |
+| **420 KB** | 🏆 **0.76ms** | 6.38ms | 7.48ms *(9.8x)* | 13.63ms *(17.9x)* | 17.11ms *(22.5x)* |
+| **1.8 MB** | 🏆 **7.14ms** | 57.2ms | 82.9ms *(11.6x)* | 264.3ms *(37.0x)* | 💀 26,072ms *(3652x)* |
 
 **Key findings:**
-- mdream (rust) is the fastest HTML to markdown converter, 6-11x faster than the next best Rust NAPI binding
+- mdream (rust) is the fastest HTML to markdown converter, 8-12x faster than the next best Rust NAPI binding
 - mdream (js) is 2-4x faster than Turndown (fastest pure JS competitor)
 - node-html-markdown has O(n²) complexity issues on large files
 
@@ -169,14 +169,12 @@ Separate from the JavaScript benchmark, we compare mdream's Rust engine against 
 
 | Input Size | mdream | htmd | html2md | html2md-rs | mdka | html_to_markdown |
 |------------|--------|------|---------|------------|------|------------------|
-| **166 KB** | 🏆 **0.29ms** | 1.63ms *(5.6x)* | 2.12ms *(7.3x)* | 💀 panicked | 2.22ms *(7.7x)* | 1.27ms *(4.4x)* |
-| **420 KB** | 🏆 **0.32ms** | 2.65ms *(8.3x)* | 3.31ms *(10.3x)* | 1.39ms *(4.3x)* | 2.94ms *(9.2x)* | 1.88ms *(5.9x)* |
-| **1.8 MB** | 🏆 **3.84ms** | 21.9ms *(5.7x)* | 💀 >30s | 27.9ms *(7.3x)* | 26.6ms *(6.9x)* | 14.1ms *(3.7x)* |
-
-> mdream numbers use [PGO (Profile-Guided Optimization)](../crates/build-pgo.sh) for ~20% additional throughput over standard release builds.
+| **166 KB** | 🏆 **0.34ms** | 2.13ms *(6.3x)* | 2.71ms *(8.0x)* | 💀 panicked | 2.65ms *(7.8x)* | 1.72ms *(5.1x)* |
+| **420 KB** | 🏆 **0.41ms** | 3.50ms *(8.6x)* | 4.25ms *(10.4x)* | 1.54ms *(3.8x)* | 3.56ms *(8.7x)* | 2.72ms *(6.7x)* |
+| **1.8 MB** | 🏆 **5.20ms** | 34.4ms *(6.6x)* | 💀 >30s | 35.5ms *(6.8x)* | 37.6ms *(7.2x)* | 28.5ms *(5.5x)* |
 
 **Key findings:**
-- mdream is fastest across all input sizes (5-14x faster than all competitors)
+- mdream is fastest across all input sizes (4-10x faster than all competitors)
 - html2md and html2md-rs have reliability issues (>30s timeouts, panics on valid HTML)
 
 ### Running Native Rust Benchmarks

@@ -21,7 +21,7 @@
 ## Features
 
 - 🧠 #1 Token Optimizer: [Up to 2x fewer tokens](#benchmarks) than [Turndown](https://github.com/mixmark-io/turndown), node-html-markdown, and html-to-markdown. 70-99% fewer tokens than raw HTML.
-- 🚀 #1 Fastest: [Fastest pure JS & native rust](#benchmarks) - Up to 35x faster than Turndown, converts 1.8MB HTML in ~62ms (JS) and ~3.9ms (Rust).
+- 🚀 #1 Fastest: [Fastest pure JS & native rust](#benchmarks) - Up to 37x faster than Turndown, converts 1.8MB HTML in ~57ms (JS) and ~7.1ms (Rust).
 - 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
 - 🌊 Streamable: Memory efficient streaming for large documents and real-time pipelines.
 - ⚡ Tiny: 10kB gzip JS core, 60kB gzip with Rust WASM engine. Zero dependencies.
@@ -53,7 +53,7 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 
 
 <details>
-<summary><b>🤖 Pipe Site to Markdown</b></summary>
+<summary><b>📥 URL to Markdown</b></summary>
 
 Fetches the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown) and converts it to Markdown preserving the original links and images.
 
@@ -65,10 +65,18 @@ curl -s https://en.wikipedia.org/wiki/Markdown \
 
 _Tip: The `--origin` flag will fix relative image and link paths_
 
+Want to make it look nice? Use [glow](https://github.com/charmbracelet/glow).
+
+```bash
+curl -s https://en.wikipedia.org/wiki/Markdown \
+ | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
+   | glow
+```
+
 </details>
 
 <details>
-<summary><b>🤖 Local File to Markdown</b></summary>
+<summary><b>📄 Local HTML to Markdown</b></summary>
 
 Converts a local HTML file to a Markdown file, using `tee` to write the output to a file and display it in the terminal.
 
@@ -78,28 +86,38 @@ cat index.html \
   | tee streaming.md
 ```
 
+Want to make it look nice? Use [glow](https://github.com/charmbracelet/glow).
+
+```bash
+cat index.html \
+ | npx mdream@beta --preset minimal \
+  | glow
+```
+
 </details>
 
 <details>
-<summary><b>🤖 Analyze Websites with AI Tools</b></summary>
+<summary><b>🧠 Feed Any Website to an LLM</b></summary>
 
-Feed website content directly to Claude or other AI tools:
+Pipe web content straight into Claude, GPT, or any LLM CLI:
 
 ```bash
-# Analyze entire site with Claude
-npx @mdream/crawl@beta harlanzw.com
-cat output/llms-full.txt | claude -p "summarize this website"
+# Single page → Claude
+curl -s https://react.dev/learn | npx mdream@beta --origin https://react.dev --preset minimal \
+  | claude -p "explain the key concepts on this page"
 
-# Analyze specific documentation
+# Crawl entire docs → summarize
 npx @mdream/crawl@beta "https://nuxt.com/docs/getting-started/**"
-cat output/llms-full.txt | claude -p "explain key concepts"
+cat output/llms-full.txt | claude -p "write a getting started guide from these docs"
 
-# Analyze JavaScript/SPA sites (React, Vue, Angular)
-npx -p playwright -p @mdream/crawl@beta crawl https://spa-site.com --driver playwright
+# Compare two frameworks
+diff <(curl -s https://vuejs.org/guide/introduction | npx mdream@beta --preset minimal) \
+     <(curl -s https://react.dev/learn | npx mdream@beta --preset minimal) \
+  | claude -p "compare these two frameworks based on their intro docs"
+
+# JavaScript/SPA sites (React, Vue, Angular)
+npx @mdream/crawl@beta https://spa-site.com --driver playwright
 cat output/llms-full.txt | claude -p "what features does this app have"
-
-# Convert single page
-curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream@beta --origin https://en.wikipedia.org | claude -p "summarize"
 ```
 </details>
 
@@ -336,13 +354,13 @@ Use mdream directly via CDN with no build step. Call `init()` once to load the W
 
 ## Benchmarks
 
-Converts 1.8MB HTML in **7.83ms** (Rust NAPI) or **62ms** (pure JS). Up to 35x faster than [Turndown](https://github.com/mixmark-io/turndown), 3500x faster than [node-html-markdown](https://github.com/crosstype/node-html-markdown) on large files.
+Converts 1.8MB HTML in **7.14ms** (Rust NAPI) or **57ms** (pure JS). Up to 37x faster than [Turndown](https://github.com/mixmark-io/turndown), 3650x faster than [node-html-markdown](https://github.com/crosstype/node-html-markdown) on large files.
 
 | Input | mdream (rust) | mdream (js) | Turndown | node-html-markdown |
 |-------|---------------|-------------|----------|---------------------|
-| 166 KB | **0.60ms** | 3.36ms | 11.91ms | 15.35ms |
-| 420 KB | **1.26ms** | 7.79ms | 14.01ms | 17.23ms |
-| 1.8 MB | **7.83ms** | 62.2ms | 276.0ms | 27,381ms |
+| 166 KB | **0.52ms** | 3.26ms | 11.26ms | 14.31ms |
+| 420 KB | **0.76ms** | 6.38ms | 13.63ms | 17.11ms |
+| 1.8 MB | **7.14ms** | 57.2ms | 264.3ms | 26,072ms |
 
 With `minimal: true`, mdream produces up to **92% fewer tokens** than raw HTML and up to **2x fewer tokens** than competing libraries.
 
