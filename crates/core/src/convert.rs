@@ -46,10 +46,7 @@ fn is_tracking_param(key: &str) -> bool {
 /// Strip tracking query parameters from a URL string.
 /// Returns Cow::Borrowed if no tracking params found, avoiding allocation.
 fn strip_tracking_params(url: &str) -> Cow<'_, str> {
-    let qmark = match url.find('?') {
-        Some(i) => i,
-        None => return Cow::Borrowed(url),
-    };
+    let Some(qmark) = url.find('?') else { return Cow::Borrowed(url) };
     let query_start = qmark + 1;
     let query_end = url[query_start..].find('#').map_or(url.len(), |i| query_start + i);
     let query = &url[query_start..query_end];
@@ -68,10 +65,7 @@ fn strip_tracking_params(url: &str) -> Cow<'_, str> {
 
 /// Strip tracking query parameters from an already-owned URL string.
 fn strip_tracking_params_owned(url: String) -> String {
-    let qmark = match url.find('?') {
-        Some(i) => i,
-        None => return url,
-    };
+    let Some(qmark) = url.find('?') else { return url };
     let (base, rest) = url.split_at(qmark);
     let query = &rest[1..]; // skip '?'
 
@@ -552,12 +546,9 @@ impl ConvertState {
                     }
                     i2 += 1;
                 }
-                let tag_name_end = match tag_name_end {
-                    Some(v) => v,
-                    None => {
-                        text_buffer.push_str(&chunk[i..]);
-                        break;
-                    }
+                let Some(tag_name_end) = tag_name_end else {
+                    text_buffer.push_str(&chunk[i..]);
+                    break;
                 };
                 let tag_name_raw = &chunk[tag_name_start..tag_name_end];
                 if tag_name_raw.is_empty() { break; }
@@ -723,7 +714,7 @@ impl ConvertState {
                     self.link_bracket_pos = self.buffer.len();
                 } else if id == TAG_IMG && self.clean_flags & CLEAN_EMPTY_IMAGES != 0 {
                     let node = &self.stack[self.stack.len() - 1];
-                    let alt = node.attributes.get("alt").map(|s| s.as_str()).unwrap_or("");
+                    let alt = node.attributes.get("alt").map_or("", String::as_str);
                     if alt.is_empty() {
                         self.last_node_is_inline = is_inline;
                         return;
@@ -917,7 +908,7 @@ impl ConvertState {
             // Write link close directly
             if let Some(href) = node.attributes.get("href") {
                 let resolved = Self::resolve_url(href, self.options.origin.as_deref(), self.options.clean_urls);
-                let mut title = node.attributes.get("title").map(|s| s.as_str()).unwrap_or("");
+                let mut title = node.attributes.get("title").map_or("", String::as_str);
                 if !title.is_empty() && self.last_content_cache_len > 0 {
                     let buf_len = self.buffer.len();
                     let start = buf_len.saturating_sub(self.last_content_cache_len);
@@ -1082,7 +1073,7 @@ impl ConvertState {
                     };
                     if self.depth_map[TAG_LI as usize] > 0 {
                         let indent = "  ".repeat(self.depth_map[TAG_LI as usize] as usize);
-                        prefix = format!("\n{}{}", indent, prefix);
+                        prefix = format!("\n{indent}{prefix}");
                     }
                     Some(Cow::Owned(prefix))
                 }
@@ -1118,7 +1109,7 @@ impl ConvertState {
                 let ul_depth = self.depth_map[TAG_UL as usize] as usize;
                 let ol_depth = self.depth_map[TAG_OL as usize] as usize;
                 let depth = if ul_depth + ol_depth > 0 { ul_depth + ol_depth - 1 } else { 0 };
-                let is_ordered = ol_depth > 0 && _ancestors.last().map(|p| p.tag_id == Some(TAG_OL)).unwrap_or(false);
+                let is_ordered = ol_depth > 0 && _ancestors.last().is_some_and(|p| p.tag_id == Some(TAG_OL));
                 if !is_ordered && depth < UL_PREFIXES.len() {
                     Some(Cow::Borrowed(UL_PREFIXES[depth]))
                 } else {
@@ -1137,8 +1128,8 @@ impl ConvertState {
                 if node.attributes.contains_key("href") { Some(Cow::Borrowed("[")) } else { None }
             }
             TAG_IMG => {
-                let alt = node.attributes.get("alt").map(|s| s.as_str()).unwrap_or("");
-                let src = node.attributes.get("src").map(|s| s.as_str()).unwrap_or("");
+                let alt = node.attributes.get("alt").map_or("", String::as_str);
+                let src = node.attributes.get("src").map_or("", String::as_str);
                 let resolved_src = Self::resolve_url(src, self.options.origin.as_deref(), self.options.clean_urls);
                 {
                     let mut s = String::with_capacity(alt.len() + resolved_src.len() + 5);
@@ -1233,7 +1224,7 @@ impl ConvertState {
             TAG_A => {
                 if let Some(href) = node.attributes.get("href") {
                     let resolved = Self::resolve_url(href, self.options.origin.as_deref(), self.options.clean_urls);
-                    let mut title = node.attributes.get("title").map(|s| s.as_str()).unwrap_or("");
+                    let mut title = node.attributes.get("title").map_or("", String::as_str);
                     if self.last_content_cache_len > 0 {
                         let buf_len = self.buffer.len();
                         let start = buf_len.saturating_sub(self.last_content_cache_len);
@@ -1242,19 +1233,19 @@ impl ConvertState {
                             if cache == title { title = ""; }
                         }
                     }
-                    if !title.is_empty() {
+                    if title.is_empty() {
+                        let mut s = String::with_capacity(resolved.len() + 3);
+                        s.push_str("](");
+                        s.push_str(&resolved);
+                        s.push(')');
+                        Some(Cow::Owned(s))
+                    } else {
                         let mut s = String::with_capacity(resolved.len() + title.len() + 6);
                         s.push_str("](");
                         s.push_str(&resolved);
                         s.push_str(" \"");
                         s.push_str(title);
                         s.push_str("\")");
-                        Some(Cow::Owned(s))
-                    } else {
-                        let mut s = String::with_capacity(resolved.len() + 3);
-                        s.push_str("](");
-                        s.push_str(&resolved);
-                        s.push(')');
                         Some(Cow::Owned(s))
                     }
                 } else {
@@ -1354,30 +1345,29 @@ impl ConvertState {
             }
         } else {
             if let Some(parent) = self.stack.last() {
-                if self.last_text_node_contains_whitespace {
-                    if self.depth_map[TAG_PRE as usize] == 0 || parent.tag_id == Some(TAG_PRE) {
-                        let h_is_inline = is_inline;
-                        let collapses = parent.collapses_inner_white_space;
-                        let has_spacing = parent.spacing.is_some();
-                        // For exit, the node was already popped, so use the is_inline param
-                        let is_block = !h_is_inline && !collapses && configured_new_lines > 0;
-                        let should_trim = (!h_is_inline || !is_enter) && !is_block && !(collapses && is_enter) && !(has_spacing && is_enter);
+                if self.last_text_node_contains_whitespace
+                    && (self.depth_map[TAG_PRE as usize] == 0 || parent.tag_id == Some(TAG_PRE)) {
+                    let h_is_inline = is_inline;
+                    let collapses = parent.collapses_inner_white_space;
+                    let has_spacing = parent.spacing.is_some();
+                    // For exit, the node was already popped, so use the is_inline param
+                    let is_block = !h_is_inline && !collapses && configured_new_lines > 0;
+                    let should_trim = !(is_block || h_is_inline && is_enter || is_enter && collapses) && !(has_spacing && is_enter);
 
-                        if should_trim && self.last_content_cache_len > 0 {
-                            let cache_len = self.last_content_cache_len;
-                            let buf_len = self.buffer.len();
-                            let start = buf_len.saturating_sub(cache_len);
-                            if cache_len <= buf_len && self.buffer.is_char_boundary(start) {
-                                let frag = &self.buffer[start..];
-                                let trimmed_len = frag.trim_end().len();
-                                if trimmed_len < cache_len {
-                                    self.buffer.truncate(start + trimmed_len);
-                                }
+                    if should_trim && self.last_content_cache_len > 0 {
+                        let cache_len = self.last_content_cache_len;
+                        let buf_len = self.buffer.len();
+                        let start = buf_len.saturating_sub(cache_len);
+                        if cache_len <= buf_len && self.buffer.is_char_boundary(start) {
+                            let frag = &self.buffer[start..];
+                            let trimmed_len = frag.trim_end().len();
+                            if trimmed_len < cache_len {
+                                self.buffer.truncate(start + trimmed_len);
                             }
                         }
-                        self.last_text_node_contains_whitespace = false;
-                        self.has_last_text_node = false;
                     }
+                    self.last_text_node_contains_whitespace = false;
+                    self.has_last_text_node = false;
                 }
             }
 
@@ -1426,10 +1416,8 @@ impl ConvertState {
                 || (id != TAG_BLOCKQUOTE && self.depth_map[TAG_BLOCKQUOTE as usize] > 0) {
                 return NO_SPACING;
             }
-        } else {
-            if self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0 {
-                return NO_SPACING;
-            }
+        } else if self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0 {
+            return NO_SPACING;
         }
         if self.collapse_non_span_depth > 0 { return NO_SPACING; }
         if self.collapse_span_depth > 0 {
@@ -1462,10 +1450,7 @@ impl ConvertState {
         self.text_buffer_contains_non_whitespace = false;
         self.text_buffer_contains_whitespace = false;
 
-        let parent = match self.stack.last() {
-            Some(p) => p,
-            None => return,
-        };
+        let Some(parent) = self.stack.last() else { return };
         let mut excludes_text_nodes = parent.excludes_text_nodes || parent.excluded_from_markdown;
 
         if self.has_isolate_main {
@@ -1488,13 +1473,13 @@ impl ConvertState {
         }
 
         let in_pre_tag = self.in_pre;
-        let child_text_node_index = self.stack.last().map(|n| n.child_text_node_index).unwrap_or(0);
+        let child_text_node_index = self.stack.last().map_or(0, |n| n.child_text_node_index);
 
         if !in_pre_tag && !contains_non_whitespace && child_text_node_index == 0 { return; }
         if text_buffer.is_empty() { return; }
 
         let first_block_parent_index = self.first_block_parent_index;
-        let first_block_child_text_count = first_block_parent_index.map(|idx| self.stack[idx].child_text_node_index).unwrap_or(0);
+        let first_block_child_text_count = first_block_parent_index.map_or(0, |idx| self.stack[idx].child_text_node_index);
 
         let mut text = std::mem::take(text_buffer);
         let is_first_text_in_block = first_block_child_text_count == 0
@@ -1543,7 +1528,7 @@ impl ConvertState {
 
         if !excludes_text_nodes {
             let depth = self.depth;
-            let index = self.stack.last().map(|n| n.current_walk_index).unwrap_or(0);
+            let index = self.stack.last().map_or(0, |n| n.current_walk_index);
             self.emit_text(&text, contains_whitespace, depth, index);
         }
 
@@ -1590,7 +1575,7 @@ impl ConvertState {
         }
         self.depth += 1;
 
-        let current_walk_index = self.stack.last().map(|n| n.current_walk_index).unwrap_or(0);
+        let current_walk_index = self.stack.last().map_or(0, |n| n.current_walk_index);
         let custom_name = if is_builtin { None } else { Some(tag_name.to_string()) };
 
         let (h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) = if let Some(h) = tag_handler {
@@ -1661,7 +1646,7 @@ impl ConvertState {
                     }
                 }
                 if !skip_node {
-                    for parent in self.stack.iter() {
+                    for parent in &self.stack {
                         for (_, parsed) in &self.filter_exclude_parsed {
                             if matches_selector(parent, parsed) { skip_node = true; filter_excluded = true; break; }
                         }
@@ -1674,7 +1659,7 @@ impl ConvertState {
                         if matches_selector(&tag, parsed) { match_found = true; break; }
                     }
                     if !match_found && self.filter_process_children {
-                        for parent in self.stack.iter() {
+                        for parent in &self.stack {
                             for (_, parsed) in &self.filter_include_parsed {
                                 if matches_selector(parent, parsed) { match_found = true; break; }
                             }
@@ -1732,7 +1717,7 @@ impl ConvertState {
                         };
                         if is_allowed {
                             if let Some(entry) = self.frontmatter_meta.iter_mut().find(|(k, _)| k == n) {
-                                entry.1 = c.clone();
+                                entry.1.clone_from(c);
                             } else {
                                 self.frontmatter_meta.push((n.clone(), c.clone()));
                             }
@@ -1823,10 +1808,7 @@ impl ConvertState {
 
         let popping_index = self.stack.len() - 1;
         // Guard already checked above, but avoid panic on edge cases
-        let node = match self.stack.pop() {
-            Some(n) => n,
-            None => return,
-        };
+        let Some(node) = self.stack.pop() else { return };
 
         if self.first_block_parent_index == Some(popping_index) {
             self.block_parent_indices.pop();
@@ -1865,7 +1847,7 @@ impl ConvertState {
                 self.stack.push(modified_node);
                 // Emit synthetic text
                 self.emit_text(&prefix, false, text_depth, 0);
-                for prev in self.stack.iter_mut() { prev.child_text_node_index += 1; }
+                for prev in &mut self.stack { prev.child_text_node_index += 1; }
                 let Some(modified_node2) = self.stack.pop() else { return; };
                 // Emit exit
                 self.emit_exit_element(&modified_node2);
@@ -1998,9 +1980,9 @@ impl ConvertState {
         let f_opts = self.options.plugins.as_ref().and_then(|p| p.frontmatter.as_ref());
 
         let format_val = |val: &str| -> String {
-            let v = val.replace("\"", "\\\"");
+            let v = val.replace('"', "\\\"");
             if v.contains('\n') || v.contains(':') || v.contains('#') || v.contains(' ') {
-                format!("\"{}\"", v)
+                format!("\"{v}\"")
             } else { v }
         };
 
@@ -2025,7 +2007,7 @@ impl ConvertState {
             yaml_out.push("meta:".to_string());
             self.frontmatter_meta.sort_by(|(a, _), (b, _)| a.cmp(b));
             for (key, val) in &self.frontmatter_meta {
-                let k_fmt = if key.contains(':') { format!("\"{}\"", key) } else { key.clone() };
+                let k_fmt = if key.contains(':') { format!("\"{key}\"") } else { key.clone() };
                 yaml_out.push(format!("  {}: {}", k_fmt, format_val(val)));
             }
         }

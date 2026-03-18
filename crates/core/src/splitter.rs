@@ -241,9 +241,9 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
 
         if !header_hierarchy.is_empty() {
             let mut headers = Vec::new();
-            for &(tag_id, ref text) in header_hierarchy.iter() {
+            for &(tag_id, ref text) in header_hierarchy {
                 let level = tag_id - TAG_H1 + 1;
-                headers.push((format!("h{}", level), text.clone()));
+                headers.push((format!("h{level}"), text.clone()));
             }
             metadata.headers = Some(headers);
         }
@@ -285,23 +285,23 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
 
         // Code block tracking
         if let Some(rest) = line.strip_prefix("```") {
-            if !in_code_block {
+            if in_code_block {
+                in_code_block = false;
+            } else {
                 in_code_block = true;
                 let lang = rest.trim();
                 if !lang.is_empty() && current_chunk_code_language.is_empty() {
                     current_chunk_code_language = lang.to_string();
                 }
-            } else {
-                in_code_block = false;
             }
         }
 
         if !in_code_block && !line.starts_with("```") {
             // Header detection
-            let header_match = if !is_frontmatter {
-                detect_header(line)
-            } else {
+            let header_match = if is_frontmatter {
                 None
+            } else {
+                detect_header(line)
             };
 
             if let Some((level, header_text)) = header_match {

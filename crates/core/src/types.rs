@@ -153,7 +153,7 @@ pub enum ParsedSelector {
     Class(String),
     Id(String),
     Attribute { name: String, operator: Option<String>, value: Option<String> },
-    Compound(Vec<ParsedSelector>),
+    Compound(Vec<Self>),
 }
 
 /// Result element from extraction
