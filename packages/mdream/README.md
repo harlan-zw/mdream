@@ -99,14 +99,16 @@ const markdown = htmlToMarkdown('<h1>Hello World</h1><p>Some content.</p>')
 
 Converts an HTML `ReadableStream` to Markdown incrementally. Returns an `AsyncIterable<string>` that yields Markdown chunks as they are processed.
 
+
 ```ts
 import { streamHtmlToMarkdown } from 'mdream'
 
-async function* streamHtmlToMarkdown(
+function streamHtmlToMarkdown(
   htmlStream: ReadableStream<Uint8Array | string> | null,
   options?: Partial<MdreamOptions>,
 ): AsyncIterable<string>
 ```
+
 
 **Example:**
 
@@ -834,13 +836,19 @@ The CLI reads HTML from stdin and writes Markdown to stdout. It uses the streami
 
 ### Edge / Cloudflare Workers
 
-For edge runtimes (Cloudflare Workers, Vercel Edge), `mdream` automatically selects the WASM build via export conditions (`workerd`, `edge-light`):
+For edge runtimes (Cloudflare Workers, Vercel Edge), `mdream` automatically selects the WASM build via export conditions (`workerd`, `edge-light`). Both `htmlToMarkdown` and `streamHtmlToMarkdown` are available:
 
 ```ts
-import { htmlToMarkdown } from 'mdream'
+import { htmlToMarkdown, streamHtmlToMarkdown } from 'mdream'
 
 // WASM engine auto-selected via export conditions
 const markdown = htmlToMarkdown('<h1>Hello World</h1>')
+
+// Streaming works the same as Node.js
+const response = await fetch('https://example.com')
+for await (const chunk of streamHtmlToMarkdown(response.body)) {
+  // process chunk
+}
 ```
 
 You can also import the edge entry point directly:

@@ -98,7 +98,7 @@ Declarative configuration for built-in plugins. Works with both the JavaScript a
 | `frontmatter` | `boolean \| ((fm: Record<string, string>) => void) \| FrontmatterConfig` | `undefined` | Extract metadata from HTML `<head>` into YAML frontmatter. Pass `true` for defaults, a callback to receive structured data, or a config object. |
 | `isolateMain` | `boolean` | `undefined` | Isolate main content area. Prioritizes `<main>` elements, then falls back to header-to-footer heuristic. |
 | `tailwind` | `boolean` | `undefined` | Convert Tailwind utility classes (bold, italic, hidden, etc.) to semantic Markdown formatting. |
-| `filter` | `{ include?, exclude?, processChildren? }` | `undefined` | Filter elements by CSS selectors, tag names, or TAG_* constants (see [Filter Plugin](#filterplugin)). |
+| `filter` | `{ include?, exclude?, processChildren? }` | `undefined` | Filter elements by CSS selectors, tag names, or TAG_* constants (see [Filter Plugin](#filterpluginoptions)). |
 | `extraction` | `Record<string, (element: ExtractedElement) => void>` | `undefined` | Extract elements matching CSS selectors during conversion. Each key is a CSS selector; the handler is called for every match. |
 | `tagOverrides` | `Record<string, TagOverride \| string>` | `undefined` | Declarative tag overrides. String values act as aliases (e.g., `{ "x-heading": "h2" }`). Object values override specific handler properties. |
 

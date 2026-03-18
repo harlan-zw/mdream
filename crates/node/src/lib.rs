@@ -228,6 +228,7 @@ impl MarkdownStream {
     }
 
     #[napi]
+    #[allow(clippy::needless_pass_by_value)]
     pub fn process_chunk(&mut self, chunk: String) -> String {
         self.inner.process_chunk(&chunk)
     }
@@ -292,12 +293,13 @@ fn to_core_splitter_opts(options: Option<SplitterOptionsNapi>) -> Result<mdream:
                 .unwrap_or(defaults.headers_to_split_on),
             return_each_line: opts.return_each_line.unwrap_or(defaults.return_each_line),
             strip_headers: opts.strip_headers.unwrap_or(defaults.strip_headers),
-            chunk_size: opts.chunk_size.map(|v| v as usize).unwrap_or(defaults.chunk_size),
-            chunk_overlap: opts.chunk_overlap.map(|v| v as usize).unwrap_or(defaults.chunk_overlap),
+            chunk_size: opts.chunk_size.map_or(defaults.chunk_size, |v| v as usize),
+            chunk_overlap: opts.chunk_overlap.map_or(defaults.chunk_overlap, |v| v as usize),
         }),
     }
 }
 
+#[allow(clippy::cast_possible_truncation)]
 fn chunk_to_napi(chunk: mdream::splitter::MarkdownChunk) -> MarkdownChunkNapi {
     MarkdownChunkNapi {
         content: chunk.content,
