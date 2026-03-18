@@ -156,13 +156,10 @@ fn to_core_opts(options: Option<HtmlToMarkdownOptions>) -> mdream::types::HTMLTo
     }
 }
 
-// ── NAPI exports ──
+// ── Helpers ──
 
-#[napi(js_name = "htmlToMarkdown")]
-pub fn html_to_markdown(html: String, options: Option<HtmlToMarkdownOptions>) -> Result<MdreamNapiResult> {
-    let opts = to_core_opts(options);
-    let result = mdream::html_to_markdown_result(&html, opts);
-    Ok(MdreamNapiResult {
+fn result_to_napi(result: mdream::types::MdreamResult) -> MdreamNapiResult {
+    MdreamNapiResult {
         markdown: result.markdown,
         extracted: result.extracted.map(|elems| {
             elems.into_iter().map(|e| ExtractedElementNapi {
@@ -173,6 +170,33 @@ pub fn html_to_markdown(html: String, options: Option<HtmlToMarkdownOptions>) ->
             }).collect()
         }),
         frontmatter: result.frontmatter.map(|v| v.into_iter().collect()),
+    }
+}
+
+fn catch_panic<F: FnOnce() -> Result<T> + std::panic::UnwindSafe, T>(f: F) -> Result<T> {
+    match std::panic::catch_unwind(f) {
+        Ok(r) => r,
+        Err(e) => {
+            let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                format!("mdream internal error: {s}")
+            } else if let Some(s) = e.downcast_ref::<String>() {
+                format!("mdream internal error: {s}")
+            } else {
+                "mdream internal error: unknown panic".to_string()
+            };
+            Err(napi::Error::new(napi::Status::GenericFailure, msg))
+        }
+    }
+}
+
+// ── NAPI exports ──
+
+#[napi(js_name = "htmlToMarkdown")]
+pub fn html_to_markdown(html: String, options: Option<HtmlToMarkdownOptions>) -> Result<MdreamNapiResult> {
+    catch_panic(move || {
+        let opts = to_core_opts(options);
+        let result = mdream::html_to_markdown_result(&html, opts);
+        Ok(result_to_napi(result))
     })
 }
 
@@ -180,19 +204,11 @@ pub fn html_to_markdown(html: String, options: Option<HtmlToMarkdownOptions>) ->
 pub fn html_to_markdown_bytes(html: &[u8], options: Option<HtmlToMarkdownOptions>) -> Result<MdreamNapiResult> {
     let text = std::str::from_utf8(html)
         .map_err(|e| napi::Error::new(napi::Status::InvalidArg, format!("Invalid UTF-8: {e}")))?;
-    let opts = to_core_opts(options);
-    let result = mdream::html_to_markdown_result(text, opts);
-    Ok(MdreamNapiResult {
-        markdown: result.markdown,
-        extracted: result.extracted.map(|elems| {
-            elems.into_iter().map(|e| ExtractedElementNapi {
-                selector: e.selector,
-                tag_name: e.tag_name,
-                text_content: e.text_content,
-                attributes: e.attributes.into_iter().collect(),
-            }).collect()
-        }),
-        frontmatter: result.frontmatter.map(|v| v.into_iter().collect()),
+    let text = text.to_string();
+    catch_panic(move || {
+        let opts = to_core_opts(options);
+        let result = mdream::html_to_markdown_result(&text, opts);
+        Ok(result_to_napi(result))
     })
 }
 
@@ -297,9 +313,11 @@ fn chunk_to_napi(chunk: mdream::splitter::MarkdownChunk) -> MarkdownChunkNapi {
 
 #[napi(js_name = "splitMarkdown")]
 pub fn split_markdown(markdown: String, options: Option<SplitterOptionsNapi>) -> Result<Vec<MarkdownChunkNapi>> {
-    let opts = to_core_splitter_opts(options);
-    let chunks = mdream::splitter::split_markdown(&markdown, &opts);
-    Ok(chunks.into_iter().map(chunk_to_napi).collect())
+    catch_panic(move || {
+        let opts = to_core_splitter_opts(options);
+        let chunks = mdream::splitter::split_markdown(&markdown, &opts);
+        Ok(chunks.into_iter().map(chunk_to_napi).collect())
+    })
 }
 
 #[napi(js_name = "htmlToMarkdownChunks")]
@@ -308,8 +326,10 @@ pub fn html_to_markdown_chunks(
     options: Option<HtmlToMarkdownOptions>,
     splitter_options: Option<SplitterOptionsNapi>,
 ) -> Result<Vec<MarkdownChunkNapi>> {
-    let md_opts = to_core_opts(options);
-    let split_opts = to_core_splitter_opts(splitter_options);
-    let chunks = mdream::splitter::html_to_markdown_chunks(&html, md_opts, &split_opts);
-    Ok(chunks.into_iter().map(chunk_to_napi).collect())
+    catch_panic(move || {
+        let md_opts = to_core_opts(options);
+        let split_opts = to_core_splitter_opts(splitter_options);
+        let chunks = mdream::splitter::html_to_markdown_chunks(&html, md_opts, &split_opts);
+        Ok(chunks.into_iter().map(chunk_to_napi).collect())
+    })
 }
