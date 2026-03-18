@@ -418,8 +418,12 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   // Pre-compute allowed registrable domains from all starting URLs
   const allowedRegistrableDomains = allowSubdomains
     ? new Set(startingUrls.map((u) => {
-        try { return getRegistrableDomain(new URL(u).hostname) }
-        catch { return '' }
+        try {
+          return getRegistrableDomain(new URL(u).hostname)
+        }
+        catch {
+          return ''
+        }
       }).filter(Boolean))
     : undefined
 
@@ -428,8 +432,12 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       return false
     if (!hasGlobPatterns) {
       if (allowedRegistrableDomains) {
-        try { return allowedRegistrableDomains.has(getRegistrableDomain(new URL(url).hostname)) }
-        catch { return false }
+        try {
+          return allowedRegistrableDomains.has(getRegistrableDomain(new URL(url).hostname))
+        }
+        catch {
+          return false
+        }
       }
       return true
     }
