@@ -273,6 +273,7 @@ Options:
   --crawl-delay <seconds>     Crawl delay in seconds
   --exclude <pattern>         Exclude URLs matching glob patterns (can be used multiple times)
   --skip-sitemap              Skip sitemap.xml and robots.txt discovery
+  --allow-subdomains          Crawl across subdomains of the same root domain
   -v, --verbose               Enable verbose logging
   -h, --help                  Show this help message
   --version                   Show version number
@@ -442,6 +443,9 @@ Examples:
   // Check for skip-sitemap flag
   const skipSitemap = args.includes('--skip-sitemap')
 
+  // Check for allow-subdomains flag
+  const allowSubdomains = args.includes('--allow-subdomains')
+
   // Warn if using skip-sitemap with wildcard URLs
   if (skipSitemap && parsed.isGlob) {
     p.log.warn('Warning: Using --skip-sitemap with glob URLs may not discover all matching pages.')
@@ -465,6 +469,7 @@ Examples:
     exclude: excludePatterns.length > 0 ? excludePatterns : undefined,
     verbose,
     skipSitemap,
+    allowSubdomains,
   }
 }
 
@@ -497,6 +502,7 @@ async function main() {
       `Formats: ${formats.join(', ')}`,
       options.exclude && options.exclude.length > 0 && `Exclude: ${options.exclude.join(', ')}`,
       options.skipSitemap && `Skip sitemap: Yes`,
+      options.allowSubdomains && `Allow subdomains: Yes`,
       options.verbose && `Verbose: Enabled`,
     ].filter(Boolean)
 

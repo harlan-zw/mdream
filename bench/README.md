@@ -105,11 +105,11 @@ pnpm bench
 ```text
  ✓ bench/compare.bench.ts > small HTML (166 KB - Wikipedia)
      name                      hz      min      max     mean      p75      p99    rme  samples
-   · mdream                 306.58   3.00ms   4.55ms   3.26ms   3.35ms   4.23ms  ±1.15%    154
-   · mdream-rust           1924.47   0.49ms   0.93ms   0.52ms   0.52ms   0.66ms  ±0.40%    963
-   · html-to-markdown       253.82   3.79ms   4.86ms   3.94ms   3.96ms   4.65ms  ±0.77%    127
-   · turndown (gfm)          88.82   9.62ms  19.03ms  11.26ms  12.29ms  19.03ms  ±4.78%     45
-   · node-html-markdown      69.86  13.58ms  15.63ms  14.31ms  14.75ms  15.63ms  ±1.51%     35
+   · mdream                 309.82   3.04ms   4.62ms   3.23ms   3.29ms   3.95ms  ±0.92%    155
+   · mdream-rust           1935.22   0.49ms   1.08ms   0.52ms   0.52ms   0.71ms  ±0.46%    968
+   · html-to-markdown       252.22   3.85ms   4.24ms   3.96ms   4.01ms   4.21ms  ±0.36%    127
+   · turndown (gfm)          77.29  10.53ms  20.96ms  12.94ms  14.18ms  20.96ms  ±5.07%     39
+   · node-html-markdown      62.24  14.70ms  18.66ms  16.07ms  16.34ms  18.66ms  ±1.81%     32
 ```
 
 **Reading the results:**
@@ -123,9 +123,9 @@ pnpm bench
 
 | Input Size | mdream (rust) | mdream (js) | html-to-markdown (rust) | Turndown (js) | node-html-markdown (js) |
 |------------|---------------|-------------|-------------------------|---------------|-------------------------|
-| **166 KB** | 🏆 **0.52ms** | 3.26ms | 3.94ms *(7.6x)* | 11.26ms *(21.7x)* | 14.31ms *(27.5x)* |
-| **420 KB** | 🏆 **0.76ms** | 6.38ms | 7.48ms *(9.8x)* | 13.63ms *(17.9x)* | 17.11ms *(22.5x)* |
-| **1.8 MB** | 🏆 **7.14ms** | 57.2ms | 82.9ms *(11.6x)* | 264.3ms *(37.0x)* | 💀 26,072ms *(3652x)* |
+| **166 KB** | 🏆 **0.52ms** | 3.23ms | 3.96ms *(7.6x)* | 12.94ms *(24.9x)* | 16.07ms *(30.9x)* |
+| **420 KB** | 🏆 **0.76ms** | 6.82ms | 7.44ms *(9.8x)* | 13.41ms *(17.6x)* | 17.09ms *(22.5x)* |
+| **1.8 MB** | 🏆 **7.10ms** | 56.5ms | 85.3ms *(12.0x)* | 270.4ms *(38.1x)* | 💀 26,002ms *(3662x)* |
 
 **Key findings:**
 - mdream (rust) is the fastest HTML to markdown converter, 8-12x faster than the next best Rust NAPI binding

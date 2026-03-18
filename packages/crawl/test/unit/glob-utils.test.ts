@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isUrlExcluded, isValidSitemapXml } from '../../src/glob-utils.ts'
+import { getRegistrableDomain, isUrlExcluded, isValidSitemapXml, matchesGlobPattern, parseUrlPattern } from '../../src/glob-utils.ts'
 
 describe('isUrlExcluded', () => {
   it('returns false when no exclude patterns provided', () => {
@@ -58,6 +58,63 @@ describe('isUrlExcluded', () => {
     expect(isUrlExcluded('https://example.com/admin/users/123', excludePatterns)).toBe(true)
     expect(isUrlExcluded('https://example.com/admin/settings/profile', excludePatterns)).toBe(true)
     expect(isUrlExcluded('https://example.com/public/page', excludePatterns)).toBe(false)
+  })
+})
+
+describe('getRegistrableDomain', () => {
+  it('returns hostname for simple domains', () => {
+    expect(getRegistrableDomain('example.com')).toBe('example.com')
+  })
+
+  it('extracts registrable domain from subdomains', () => {
+    expect(getRegistrableDomain('info.example.com')).toBe('example.com')
+    expect(getRegistrableDomain('docs.api.example.com')).toBe('example.com')
+  })
+
+  it('handles multi-part TLDs correctly', () => {
+    expect(getRegistrableDomain('example.co.uk')).toBe('example.co.uk')
+    expect(getRegistrableDomain('info.example.co.uk')).toBe('example.co.uk')
+    expect(getRegistrableDomain('example.com.au')).toBe('example.com.au')
+    expect(getRegistrableDomain('blog.example.com.au')).toBe('example.com.au')
+  })
+
+  it('treats github.io subdomains as separate sites', () => {
+    expect(getRegistrableDomain('foo.github.io')).toBe('foo.github.io')
+    expect(getRegistrableDomain('bar.github.io')).toBe('bar.github.io')
+    expect(getRegistrableDomain('foo.github.io')).not.toBe(getRegistrableDomain('bar.github.io'))
+  })
+
+  it('handles IP addresses without collapsing', () => {
+    expect(getRegistrableDomain('10.0.0.1')).toBe('10.0.0.1')
+    expect(getRegistrableDomain('192.168.0.1')).toBe('192.168.0.1')
+    expect(getRegistrableDomain('10.0.0.1')).not.toBe(getRegistrableDomain('192.168.0.1'))
+  })
+
+  it('returns single-label hostnames as-is', () => {
+    expect(getRegistrableDomain('localhost')).toBe('localhost')
+  })
+})
+
+describe('matchesGlobPattern with allowSubdomains', () => {
+  it('matches URLs from same registrable domain when allowSubdomains is true', () => {
+    const pattern = parseUrlPattern('https://example.com/docs/**')
+    expect(matchesGlobPattern('https://sub.example.com/docs/page', pattern, true)).toBe(true)
+    expect(matchesGlobPattern('https://example.com/docs/page', pattern, true)).toBe(true)
+  })
+
+  it('rejects URLs from different registrable domains', () => {
+    const pattern = parseUrlPattern('https://example.com/docs/**')
+    expect(matchesGlobPattern('https://other.com/docs/page', pattern, true)).toBe(false)
+  })
+
+  it('still rejects cross-domain without allowSubdomains', () => {
+    const pattern = parseUrlPattern('https://example.com/docs/**')
+    expect(matchesGlobPattern('https://sub.example.com/docs/page', pattern, false)).toBe(false)
+  })
+
+  it('does not match across github.io sites', () => {
+    const pattern = parseUrlPattern('https://foo.github.io/docs/**')
+    expect(matchesGlobPattern('https://bar.github.io/docs/page', pattern, true)).toBe(false)
   })
 })
 

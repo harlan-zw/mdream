@@ -21,7 +21,7 @@
 ## Features
 
 - 🧠 #1 Token Optimizer: [Up to 2x fewer tokens](#benchmarks) than [Turndown](https://github.com/mixmark-io/turndown), node-html-markdown, and html-to-markdown. 70-99% fewer tokens than raw HTML.
-- 🚀 #1 Fastest: [Fastest pure JS & native rust](#benchmarks) - Up to 37x faster than Turndown, converts 1.8MB HTML in ~57ms (JS) and ~7.1ms (Rust).
+- 🚀 #1 Fastest: [Fastest pure JS & native rust](#benchmarks) - Up to 38x faster than Turndown, converts 1.8MB HTML in ~56ms (JS) and ~7.1ms (Rust).
 - 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
 - 🌊 Streamable: Memory efficient streaming for large documents and real-time pipelines.
 - ⚡ Tiny: 10kB gzip JS core, 60kB gzip with Rust WASM engine. Zero dependencies.
@@ -354,13 +354,13 @@ Use mdream directly via CDN with no build step. Call `init()` once to load the W
 
 ## Benchmarks
 
-Converts 1.8MB HTML in **7.14ms** (Rust NAPI) or **57ms** (pure JS). Up to 37x faster than [Turndown](https://github.com/mixmark-io/turndown), 3650x faster than [node-html-markdown](https://github.com/crosstype/node-html-markdown) on large files.
+Converts 1.8MB HTML in **7.10ms** (Rust NAPI) or **56ms** (pure JS). Up to 38x faster than [Turndown](https://github.com/mixmark-io/turndown), 3660x faster than [node-html-markdown](https://github.com/crosstype/node-html-markdown) on large files.
 
 | Input | mdream (rust) | mdream (js) | Turndown | node-html-markdown |
 |-------|---------------|-------------|----------|---------------------|
-| 166 KB | **0.52ms** | 3.26ms | 11.26ms | 14.31ms |
-| 420 KB | **0.76ms** | 6.38ms | 13.63ms | 17.11ms |
-| 1.8 MB | **7.14ms** | 57.2ms | 264.3ms | 26,072ms |
+| 166 KB | **0.52ms** | 3.23ms | 12.94ms | 16.07ms |
+| 420 KB | **0.76ms** | 6.82ms | 13.41ms | 17.09ms |
+| 1.8 MB | **7.10ms** | 56.5ms | 270.4ms | 26,002ms |
 
 With `minimal: true`, mdream produces up to **92% fewer tokens** than raw HTML and up to **2x fewer tokens** than competing libraries.
 

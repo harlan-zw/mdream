@@ -7,7 +7,43 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  pgo-profile:
+    name: Collect PGO Profile
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Build instrumented binary
+        working-directory: crates
+        run: RUSTFLAGS="-Cprofile-generate=${{ runner.temp }}/pgo" cargo build --release --manifest-path core/Cargo.toml
+
+      - name: Run profiling workload
+        working-directory: crates
+        run: RUSTFLAGS="-Cprofile-generate=${{ runner.temp }}/pgo" cargo bench --bench convert_bench --manifest-path core/Cargo.toml >/dev/null 2>&1
+
+      - name: Merge profiles
+        run: |
+          LLVM_PROFDATA="$(find "$(rustc --print sysroot)" -name 'llvm-profdata*' -type f | head -1)"
+          "$LLVM_PROFDATA" merge -o "${{ runner.temp }}/merged.profdata" "${{ runner.temp }}/pgo"
+
+      - name: Upload PGO profile
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: pgo-profile
+          path: ${{ runner.temp }}/merged.profdata
+          if-no-files-found: error
+
   build:
+    needs: pgo-profile
     strategy:
       fail-fast: false
       matrix:
@@ -92,6 +128,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: crates -> target
+
+      - name: Download PGO profile
+        if: ${{ !startsWith(matrix.target, 'wasm') }}
+        uses: actions/download-artifact@v4
+        with:
+          name: pgo-profile
+          path: ${{ runner.temp }}/pgo
+
+      - name: Set PGO RUSTFLAGS
+        if: ${{ !startsWith(matrix.target, 'wasm') }}
+        run: echo "RUSTFLAGS=-Cprofile-use=${{ runner.temp }}/pgo/merged.profdata" >> $GITHUB_ENV
 
       - name: Build native module (zigbuild)
         if: matrix.use_zigbuild
