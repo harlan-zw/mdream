@@ -1,10 +1,11 @@
 import type { ProcessedFile } from '@mdream/js/llms-txt'
 import type { PlaywrightCrawlerOptions } from 'crawlee'
-import type { CrawlOptions, CrawlResult, PageData, PageMetadata } from './types.ts'
+import type { CrawlHooks, CrawlOptions, CrawlResult, PageData, PageMetadata } from './types.ts'
 import { mkdirSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import * as p from '@clack/prompts'
 import { generateLlmsTxtArtifacts } from '@mdream/js/llms-txt'
+import { createHooks } from 'hookable'
 import { htmlToMarkdown } from 'mdream'
 import { ofetch } from 'ofetch'
 import { dirname, join, normalize, resolve } from 'pathe'
@@ -222,8 +223,17 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     verbose = false,
     skipSitemap = false,
     allowSubdomains = false,
+    hooks: hooksConfig,
     onPage,
   } = options
+
+  // Set up hooks
+  const hooks = createHooks<CrawlHooks>()
+  if (hooksConfig)
+    hooks.addHooks(hooksConfig)
+  // Backwards compat: convert onPage to crawl:page hook
+  if (onPage)
+    hooks.hook('crawl:page', onPage)
 
   // Single-page mode: maxDepth 0 means just process the given URLs directly
   const singlePageMode = maxDepth === 0
@@ -483,10 +493,10 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       md = htmlToMarkdown(content, { origin: pageOrigin, extraction })
       metadata = getMetadata()
     }
-    const title = initialTitle || metadata.title
+    let title = initialTitle || metadata.title
 
-    // Call onPage callback if provided
-    if (onPage && shouldProcessMarkdown) {
+    // Call crawl:page hook
+    if (shouldProcessMarkdown) {
       const pageData: PageData = {
         url,
         html: isMarkdown ? '' : content,
@@ -494,7 +504,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         metadata,
         origin: pageOrigin,
       }
-      await onPage(pageData)
+      await hooks.callHook('crawl:page', pageData)
+      title = pageData.title
     }
 
     let filePath: string | undefined
@@ -509,6 +520,12 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       const safeFilename = normalize(`${filename}.md`)
 
       filePath = join(outputDir, safeFilename)
+
+      // Call crawl:content hook before writing
+      const contentCtx = { url, title, content: md, filePath }
+      await hooks.callHook('crawl:content', contentCtx)
+      md = contentCtx.content
+      filePath = contentCtx.filePath
 
       const fileDir = dirname(filePath)
       if (fileDir && !createdDirs.has(fileDir)) {
@@ -566,6 +583,12 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       requestHandler: async ({ request, page }) => {
         progress.crawling.currentUrl = request.loadedUrl
         onProgress?.(progress)
+
+        // crawl:url hook: allow skipping before fetch
+        const urlCtx = { url: request.loadedUrl, skip: false }
+        await hooks.callHook('crawl:url', urlCtx)
+        if (urlCtx.skip)
+          return
 
         const fetchStart = Date.now()
         await page.waitForLoadState('networkidle')
@@ -647,6 +670,12 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         await new Promise(resolve => setTimeout(resolve, delay * 1000))
       }
 
+      // crawl:url hook: allow skipping before fetch
+      const urlCtx = { url, skip: false }
+      await hooks.callHook('crawl:url', urlCtx)
+      if (urlCtx.skip)
+        return
+
       try {
         const fetchStart = Date.now()
         const response = await ofetch.raw(url, {
@@ -698,6 +727,9 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   // Mark crawling as completed
   progress.crawling.status = 'completed'
   onProgress?.(progress)
+
+  // crawl:done hook: allow filtering/reordering results before generation
+  await hooks.callHook('crawl:done', { results })
 
   // Generate output files if requested
   if (results.some(r => r.success)) {

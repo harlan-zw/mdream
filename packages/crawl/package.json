@@ -64,12 +64,14 @@
   "dependencies": {
     "@clack/prompts": "catalog:",
     "@mdream/js": "workspace:*",
+    "c12": "catalog:",
+    "hookable": "catalog:",
     "mdream": "workspace:*",
     "nypm": "catalog:",
     "ofetch": "catalog:",
     "pathe": "catalog:",
     "picomatch": "catalog:",
-    "tldts": "^7.0.26",
+    "tldts": "catalog:",
     "ufo": "catalog:"
   },
   "devDependencies": {

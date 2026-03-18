@@ -6,6 +6,13 @@ export interface PageData {
   origin: string
 }
 
+export interface CrawlHooks {
+  'crawl:url': (ctx: { url: string, skip: boolean }) => void | Promise<void>
+  'crawl:page': (page: PageData) => void | Promise<void>
+  'crawl:content': (ctx: { url: string, title: string, content: string, filePath: string }) => void | Promise<void>
+  'crawl:done': (ctx: { results: CrawlResult[] }) => void | Promise<void>
+}
+
 export interface CrawlOptions {
   urls: string[]
   outputDir: string
@@ -27,7 +34,25 @@ export interface CrawlOptions {
   verbose?: boolean
   skipSitemap?: boolean
   allowSubdomains?: boolean
+  hooks?: Partial<{ [K in keyof CrawlHooks]: CrawlHooks[K] | CrawlHooks[K][] }>
   onPage?: (page: PageData) => Promise<void> | void
+}
+
+export interface MdreamCrawlConfig {
+  exclude?: string[]
+  driver?: 'http' | 'playwright'
+  maxDepth?: number
+  maxPages?: number
+  crawlDelay?: number
+  skipSitemap?: boolean
+  allowSubdomains?: boolean
+  verbose?: boolean
+  artifacts?: ('llms.txt' | 'llms-full.txt' | 'markdown')[]
+  hooks?: Partial<{ [K in keyof CrawlHooks]: CrawlHooks[K] | CrawlHooks[K][] }>
+}
+
+export function defineConfig(config: MdreamCrawlConfig): MdreamCrawlConfig {
+  return config
 }
 
 export interface ParsedUrlPattern {
