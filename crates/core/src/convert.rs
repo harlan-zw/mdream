@@ -1586,7 +1586,7 @@ impl ConvertState {
         if let Some(id) = tag_id {
             debug_assert!((id as usize) < MAX_TAG_ID, "tag_id {id} exceeds MAX_TAG_ID {MAX_TAG_ID}");
             if (id as usize) < MAX_TAG_ID {
-                self.depth_map[id as usize] += 1;
+                self.depth_map[id as usize] = self.depth_map[id as usize].saturating_add(1);
             }
             match id {
                 TAG_TABLE => self.escape_ctx |= ESC_TABLE,
