@@ -111,17 +111,6 @@ export const TAG_CAPTION = 107 // Table caption
 // Maximum tag ID for creating the typed array (update to match the highest tag ID)
 export const MAX_TAG_ID = 108
 
-// HTML character entity mapping
-export const HTML_ENTITIES: Record<string, string> = {
-  '&amp;': '&',
-  '&lt;': '<',
-  '&gt;': '>',
-  '&quot;': '"',
-  '&#39;': '\'',
-  '&apos;': '\'', // Added missing &apos; entity
-  '&nbsp;': ' ',
-}
-
 // Node type constants
 export const ELEMENT_NODE = 1
 export const TEXT_NODE = 2
