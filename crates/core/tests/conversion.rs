@@ -1088,3 +1088,75 @@ fn isolate_main_finds_deeply_nested_main() {
     assert!(!result.contains("Nav"));
     assert!(!result.contains("Footer"));
 }
+
+// ── Script non-nesting: less-than operator ──
+
+#[test]
+fn script_less_than_space_does_not_break_body() {
+    let result = convert("<head><script>var x = 1 < 2;</script></head><body><p>Hello</p></body>");
+    assert!(result.contains("Hello"));
+}
+
+#[test]
+fn script_for_loop_comparison_does_not_break_body() {
+    let result = convert("<head><script>for(var i=0; i < arr.length; i++){}</script></head><body><p>Content</p></body>");
+    assert!(result.contains("Content"));
+}
+
+#[test]
+fn script_identifier_comparison_does_not_break_body() {
+    let result = convert("<head><script>if (a < b) { c(); }</script></head><body><p>Visible</p></body>");
+    assert!(result.contains("Visible"));
+}
+
+#[test]
+fn script_multiple_less_than_operators() {
+    let result = convert("<head><script>var x = 1 < 2; var y = 3 < 4; var z = a < b;</script></head><body><p>After</p></body>");
+    assert!(result.contains("After"));
+}
+
+#[test]
+fn script_closing_tag_inside_string_does_not_break_body() {
+    let result = convert(r#"<head><script>document.write("</div>");</script></head><body><p>Hello</p></body>"#);
+    assert!(result.contains("Hello"));
+}
+
+#[test]
+fn script_shopify_for_loop_pattern() {
+    let html = r#"<head><script>(function() {
+  var urls = ["https:\/\/example.com\/x.js"];
+  for (var i = 0; i < urls.length; i++) {
+    var s = document.createElement('script');
+    s.src = urls[i];
+    var x = document.getElementsByTagName('script')[0];
+    x.parentNode.insertBefore(s, x);
+  }
+})();</script></head><body><p>Shopify Content</p></body>"#;
+    let result = convert(html);
+    assert!(result.contains("Shopify Content"));
+}
+
+#[test]
+fn script_multiple_inline_scripts_in_head() {
+    let html = r#"<head>
+<script>var x = 1 < 2;</script>
+<script>var y = a < b;</script>
+<script>for(var i=0;i<10;i++){}</script>
+</head><body><h1>Title</h1><p>Body text</p></body>"#;
+    let result = convert(html);
+    assert!(result.contains("Title"));
+    assert!(result.contains("Body text"));
+}
+
+#[test]
+fn script_in_body_with_less_than() {
+    let result = convert("<body><p>Before</p><script>var x = 1 < 2;</script><p>After</p></body>");
+    assert!(result.contains("Before"));
+    assert!(result.contains("After"));
+}
+
+#[test]
+fn style_tag_with_angle_bracket_selector() {
+    let result = convert("<head><style>div > p { color: red; }</style></head><body><p>Styled</p></body>");
+    assert!(result.contains("Styled"));
+}

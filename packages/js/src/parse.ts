@@ -257,11 +257,27 @@ function parseHtmlInternal(
     }
     // CLOSING TAG
     else if (nextCharCode === SLASH_CHAR) {
-      const inQuotes = state.inSingleQuote || state.inDoubleQuote || state.inBacktick
-      if (state.currentNode?.tagHandler?.isNonNesting && inQuotes) {
-        textBuffer += htmlChunk[i]
-        i++
-        continue
+      if (state.currentNode?.tagHandler?.isNonNesting) {
+        const inQuotes = state.inSingleQuote || state.inDoubleQuote || state.inBacktick
+        if (inQuotes) {
+          textBuffer += htmlChunk[i]
+          i++
+          continue
+        }
+        // Peek at the closing tag name to check if it matches the non-nesting tag
+        let peekEnd = i + 2
+        while (peekEnd < chunkLength) {
+          const c = htmlChunk.charCodeAt(peekEnd)
+          if (c === GT_CHAR || isWhitespace(c))
+            break
+          peekEnd++
+        }
+        const peekTagName = htmlChunk.substring(i + 2, peekEnd).toLowerCase() as keyof typeof TagIdMap
+        const peekTagId = TagIdMap[peekTagName] ?? -1
+        if (peekTagId !== state.currentNode.tagId) {
+          textBuffer += htmlChunk[i++]
+          continue
+        }
       }
 
       if (textBuffer.length > 0) {
@@ -298,19 +314,20 @@ function parseHtmlInternal(
       }
 
       const tagName = htmlChunk.substring(tagNameStart, tagNameEnd).toLowerCase() as keyof typeof TagIdMap
-      if (!tagName) {
-        i = tagNameEnd
-        break
-      }
 
       const tagId = TagIdMap[tagName] ?? -1
       i2 = tagNameEnd
 
       if (state.currentNode?.tagHandler?.isNonNesting) {
-        if (tagId !== state.currentNode?.tagId) {
+        if (!tagName || tagId !== state.currentNode?.tagId) {
           textBuffer += htmlChunk[i++]
           continue
         }
+      }
+
+      if (!tagName) {
+        textBuffer += htmlChunk[i++]
+        continue
       }
 
       if (textBuffer.length > 0) {
