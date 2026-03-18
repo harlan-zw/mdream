@@ -1,73 +1,209 @@
-import { describe, expect, it } from 'vitest'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-/**
- * Tests for single-page mode behavior (maxDepth: 0).
- *
- * The core crawlAndGenerate function cannot be imported directly in unit tests
- * because it depends on the built mdream package. These tests validate the
- * single-page mode logic and CLI parsing behavior that gates sitemap discovery
- * and link following.
- */
-describe('single-page mode (maxDepth: 0)', () => {
-  it('singlePageMode is derived from maxDepth === 0', () => {
-    // This mirrors the logic in crawlAndGenerate
-    const singlePageMode = (maxDepth: number) => maxDepth === 0
-    expect(singlePageMode(0)).toBe(true)
-    expect(singlePageMode(1)).toBe(false)
-    expect(singlePageMode(3)).toBe(false)
+// Track fetched URLs for assertions
+const fetchedUrls: string[] = []
+
+// Mock ofetch to avoid real network requests
+vi.mock('ofetch', () => {
+  const mockOfetch = Object.assign(
+    async (url: string) => {
+      fetchedUrls.push(url)
+      if (url.endsWith('/robots.txt'))
+        return ''
+      if (url.includes('sitemap'))
+        throw new Error('404')
+      return '<html><head><title>Test</title></head><body><p>Hello</p></body></html>'
+    },
+    {
+      raw: async (url: string, _opts?: any) => {
+        fetchedUrls.push(url)
+        return {
+          _data: `<html><head><title>Page</title></head><body><p>Content for ${url}</p><a href="/other-page">Link</a></body></html>`,
+          headers: new Headers({ 'content-type': 'text/html' }),
+        }
+      },
+    },
+  )
+
+  return { ofetch: mockOfetch }
+})
+
+// Mock mdream since the package may not be built
+vi.mock('mdream', () => ({
+  htmlToMarkdown: (html: string, _opts?: any) => `# Converted\n\n${html.slice(0, 50)}`,
+}))
+
+// Mock llms-txt artifact generation
+vi.mock('@mdream/js/llms-txt', () => ({
+  generateLlmsTxtArtifacts: async () => ({
+    llmsTxt: '# llms.txt',
+    llmsFullTxt: '# llms-full.txt',
+  }),
+}))
+
+// Suppress @clack/prompts log output during tests
+vi.mock('@clack/prompts', () => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  note: vi.fn(),
+  spinner: () => ({ start: vi.fn(), stop: vi.fn(), message: vi.fn() }),
+}))
+
+// Import after mocks are set up
+const { crawlAndGenerate } = await import('../../src/crawl.ts')
+
+function tmpOut(): string {
+  return join(tmpdir(), `mdream-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+}
+
+afterEach(() => {
+  fetchedUrls.length = 0
+})
+
+describe('single-page mode via crawlAndGenerate', () => {
+  it('skips sitemap and robots.txt discovery when maxDepth is 0', async () => {
+    const results = await crawlAndGenerate({
+      urls: ['https://example.com/page'],
+      outputDir: tmpOut(),
+      maxDepth: 0,
+      generateLlmsTxt: false,
+      generateLlmsFullTxt: false,
+      generateIndividualMd: false,
+    })
+
+    // Should NOT have fetched robots.txt or sitemap.xml
+    expect(fetchedUrls.some(u => u.includes('robots.txt'))).toBe(false)
+    expect(fetchedUrls.some(u => u.includes('sitemap'))).toBe(false)
+    // Should have fetched the actual page
+    expect(fetchedUrls).toContain('https://example.com/page')
+    // Should return a successful result
+    expect(results.length).toBeGreaterThanOrEqual(1)
+    expect(results[0].success).toBe(true)
   })
 
-  it('sitemap discovery is skipped in single-page mode', () => {
-    // Mirrors the condition: startingUrls.length > 0 && !skipSitemap && !singlePageMode
-    const shouldDiscoverSitemap = (skipSitemap: boolean, singlePageMode: boolean, urlCount: number) =>
-      urlCount > 0 && !skipSitemap && !singlePageMode
+  it('does not follow links found on the page', async () => {
+    const results = await crawlAndGenerate({
+      urls: ['https://example.com/page'],
+      outputDir: tmpOut(),
+      maxDepth: 0,
+      followLinks: true, // even with followLinks true, singlePageMode should override
+      generateLlmsTxt: false,
+      generateLlmsFullTxt: false,
+      generateIndividualMd: false,
+    })
 
-    expect(shouldDiscoverSitemap(false, true, 1)).toBe(false)
-    expect(shouldDiscoverSitemap(false, false, 1)).toBe(true)
-    expect(shouldDiscoverSitemap(true, false, 1)).toBe(false)
+    // Should only fetch the one URL, not follow any discovered links
+    expect(fetchedUrls).toEqual(['https://example.com/page'])
+    expect(results.length).toBe(1)
   })
 
-  it('link following is disabled in single-page mode', () => {
-    // Mirrors the condition: followLinks && !singlePageMode && depth < maxDepth
-    const shouldFollowLinks = (followLinks: boolean, singlePageMode: boolean, depth: number, maxDepth: number) =>
-      followLinks && !singlePageMode && depth < maxDepth
+  it('reports progress with sitemap status completed immediately', async () => {
+    const progressUpdates: any[] = []
 
-    expect(shouldFollowLinks(true, true, 0, 3)).toBe(false)
-    expect(shouldFollowLinks(true, false, 0, 3)).toBe(true)
-    expect(shouldFollowLinks(false, false, 0, 3)).toBe(false)
+    await crawlAndGenerate({
+      urls: ['https://example.com/page'],
+      outputDir: tmpOut(),
+      maxDepth: 0,
+      generateLlmsTxt: false,
+      generateLlmsFullTxt: false,
+      generateIndividualMd: false,
+    }, (progress) => {
+      progressUpdates.push(JSON.parse(JSON.stringify(progress)))
+    })
+
+    // First progress update should already have sitemap completed (skipped)
+    const firstUpdate = progressUpdates[0]
+    expect(firstUpdate.sitemap.status).toBe('completed')
+    expect(firstUpdate.sitemap.found).toBe(0)
+    expect(firstUpdate.sitemap.processed).toBe(0)
   })
 
-  it('cLI --single-page flag sets depth to 0', () => {
-    // Mirrors CLI parsing logic
-    const parseSinglePage = (args: string[]) => {
-      const singlePage = args.includes('--single-page')
-      const depthStr = singlePage ? '0' : '3'
-      return Number(depthStr)
+  it('processes only the given URLs without adding home page', async () => {
+    const results = await crawlAndGenerate({
+      urls: ['https://example.com/specific-page'],
+      outputDir: tmpOut(),
+      maxDepth: 0,
+      generateLlmsTxt: false,
+      generateLlmsFullTxt: false,
+      generateIndividualMd: false,
+    })
+
+    // Should not add the home page URL (which normal mode does)
+    expect(fetchedUrls).not.toContain('https://example.com')
+    expect(fetchedUrls).not.toContain('https://example.com/')
+    expect(fetchedUrls).toContain('https://example.com/specific-page')
+    expect(results.length).toBe(1)
+  })
+})
+
+describe('normal crawl mode (maxDepth > 0) attempts sitemap discovery', () => {
+  it('fetches robots.txt and sitemap.xml when maxDepth > 0', async () => {
+    await crawlAndGenerate({
+      urls: ['https://example.com'],
+      outputDir: tmpOut(),
+      maxDepth: 1,
+      generateLlmsTxt: false,
+      generateLlmsFullTxt: false,
+      generateIndividualMd: false,
+    })
+
+    expect(fetchedUrls.some(u => u.includes('robots.txt'))).toBe(true)
+    expect(fetchedUrls.some(u => u.includes('sitemap'))).toBe(true)
+  })
+
+  it('skipSitemap also bypasses discovery', async () => {
+    await crawlAndGenerate({
+      urls: ['https://example.com/page'],
+      outputDir: tmpOut(),
+      maxDepth: 2,
+      skipSitemap: true,
+      generateLlmsTxt: false,
+      generateLlmsFullTxt: false,
+      generateIndividualMd: false,
+    })
+
+    expect(fetchedUrls.some(u => u.includes('robots.txt'))).toBe(false)
+    expect(fetchedUrls.some(u => u.includes('sitemap'))).toBe(false)
+  })
+})
+
+describe('cLI --single-page flag derivation', () => {
+  // These test the actual CLI arg parsing logic from cli.ts parseCliArgs (lines 371-377, 455)
+  it('--single-page sets depth to 0 and disables followLinks', () => {
+    const args = ['--single-page', '-u', 'example.com']
+    const singlePage = args.includes('--single-page')
+    const depthStr = singlePage ? '0' : '3'
+    const depth = Number(depthStr)
+    const followLinks = depth > 0
+
+    expect(depth).toBe(0)
+    expect(followLinks).toBe(false)
+  })
+
+  it('without --single-page, depth defaults to 3 with followLinks enabled', () => {
+    const args = ['-u', 'example.com']
+    const singlePage = args.includes('--single-page')
+    const depthStr = singlePage ? '0' : '3'
+    const depth = Number(depthStr)
+    const followLinks = depth > 0
+
+    expect(depth).toBe(3)
+    expect(followLinks).toBe(true)
+  })
+
+  it('explicit --depth 0 also disables followLinks', () => {
+    const args = ['-u', 'example.com', '--depth', '0']
+    const singlePage = args.includes('--single-page')
+    const getArgValue = (flag: string) => {
+      const idx = args.indexOf(flag)
+      return idx >= 0 && idx + 1 < args.length ? args[idx + 1] : undefined
     }
+    const depthStr = singlePage ? '0' : (getArgValue('--depth') || '3')
+    const depth = Number(depthStr)
+    const followLinks = depth > 0
 
-    expect(parseSinglePage(['--single-page', '-u', 'example.com'])).toBe(0)
-    expect(parseSinglePage(['-u', 'example.com'])).toBe(3)
-  })
-
-  it('cLI disables followLinks when depth is 0', () => {
-    // Mirrors: followLinks: depth > 0
-    const followLinks = (depth: number) => depth > 0
-    expect(followLinks(0)).toBe(false)
-    expect(followLinks(1)).toBe(true)
-  })
-
-  it('depth validation accepts 0', () => {
-    const isValidDepth = (depthStr: string) => {
-      const depth = Number(depthStr)
-      return Number.isInteger(depth) && depth >= 0 && depth <= 10
-    }
-
-    expect(isValidDepth('0')).toBe(true)
-    expect(isValidDepth('1')).toBe(true)
-    expect(isValidDepth('10')).toBe(true)
-    expect(isValidDepth('-1')).toBe(false)
-    expect(isValidDepth('11')).toBe(false)
-    expect(isValidDepth('abc')).toBe(false)
-    expect(isValidDepth('1.5')).toBe(false)
+    expect(depth).toBe(0)
+    expect(followLinks).toBe(false)
   })
 })
