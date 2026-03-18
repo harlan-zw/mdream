@@ -1054,6 +1054,8 @@ fn mixed_entities_in_text() {
         convert("<p>Caf&eacute; &amp; cr&egrave;me &mdash; parfait</p>"),
         "Caf\u{00E9} & cr\u{00E8}me \u{2014} parfait"
     );
+}
+
 // ── Isolate Main ──
 
 fn convert_with_isolate_main(html: &str) -> String {
