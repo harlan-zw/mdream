@@ -260,7 +260,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       const crawlDelayMatch = robotsContent.match(ROBOTS_CRAWL_DELAY_RE)
       if (crawlDelayMatch) {
         crawlDelay = Number.parseFloat(crawlDelayMatch[1])
-          p.log(`[ROBOTS] Crawl-delay: ${crawlDelay}s`)
+        p.log.info(`[ROBOTS] Crawl-delay: ${crawlDelay}s`)
       }
     }
 
