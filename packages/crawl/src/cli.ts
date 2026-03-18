@@ -370,9 +370,9 @@ Examples:
   // Validate depth (--single-page is alias for --depth 0)
   const singlePage = args.includes('--single-page')
   const depthStr = singlePage ? '0' : (getArgValue('--depth') || getArgValue('-d') || '3')
-  const depth = Number.parseInt(depthStr)
-  if (Number.isNaN(depth) || depth < 0 || depth > 10) {
-    p.log.error('Error: Depth must be between 0 and 10')
+  const depth = Number(depthStr)
+  if (!Number.isInteger(depth) || depth < 0 || depth > 10) {
+    p.log.error('Error: Depth must be an integer between 0 and 10')
     process.exit(1)
   }
 
