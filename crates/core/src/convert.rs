@@ -856,10 +856,15 @@ impl ConvertState {
                         if href.starts_with('#') {
                             // Remove [ and keep text only — use truncate+copy without intermediate String
                             let text_len = text_end - text_start;
-                            unsafe {
-                                let buf = self.buffer.as_mut_vec();
-                                std::ptr::copy(buf.as_ptr().add(text_start), buf.as_mut_ptr().add(bracket_pos), text_len);
-                                buf.set_len(bracket_pos + text_len);
+                            let new_len = bracket_pos + text_len;
+                            debug_assert!(text_start + text_len <= self.buffer.len() && new_len <= self.buffer.len(),
+                                "ptr::copy bounds violation in selfLinkHeadings: text_start={text_start} text_len={text_len} bracket_pos={bracket_pos} buf_len={}", self.buffer.len());
+                            if text_start + text_len <= self.buffer.len() && new_len <= self.buffer.len() {
+                                unsafe {
+                                    let buf = self.buffer.as_mut_vec();
+                                    std::ptr::copy(buf.as_ptr().add(text_start), buf.as_mut_ptr().add(bracket_pos), text_len);
+                                    buf.set_len(new_len);
+                                }
                             }
                             self.last_content_cache_len = text_len;
                             self.last_node_is_inline = is_inline;
@@ -876,10 +881,15 @@ impl ConvertState {
                     if link_text == resolved.as_ref() {
                         // Remove [ and keep text only — use truncate+copy without intermediate String
                         let text_len = text_end - text_start;
-                        unsafe {
-                            let buf = self.buffer.as_mut_vec();
-                            std::ptr::copy(buf.as_ptr().add(text_start), buf.as_mut_ptr().add(bracket_pos), text_len);
-                            buf.set_len(bracket_pos + text_len);
+                        let new_len = bracket_pos + text_len;
+                        debug_assert!(text_start + text_len <= self.buffer.len() && new_len <= self.buffer.len(),
+                            "ptr::copy bounds violation in redundantLinks: text_start={text_start} text_len={text_len} bracket_pos={bracket_pos} buf_len={}", self.buffer.len());
+                        if text_start + text_len <= self.buffer.len() && new_len <= self.buffer.len() {
+                            unsafe {
+                                let buf = self.buffer.as_mut_vec();
+                                std::ptr::copy(buf.as_ptr().add(text_start), buf.as_mut_ptr().add(bracket_pos), text_len);
+                                buf.set_len(new_len);
+                            }
                         }
                         self.last_content_cache_len = text_len;
                         self.last_node_is_inline = is_inline;
@@ -1567,7 +1577,10 @@ impl ConvertState {
         }
 
         if let Some(id) = tag_id {
-            self.depth_map[id as usize] += 1;
+            debug_assert!((id as usize) < MAX_TAG_ID, "tag_id {id} exceeds MAX_TAG_ID {MAX_TAG_ID}");
+            if (id as usize) < MAX_TAG_ID {
+                self.depth_map[id as usize] += 1;
+            }
             match id {
                 TAG_TABLE => self.escape_ctx |= ESC_TABLE,
                 TAG_CODE | TAG_PRE => { self.escape_ctx |= ESC_CODE_PRE; if id == TAG_PRE { self.in_pre = true; } }
@@ -1850,7 +1863,10 @@ impl ConvertState {
                 self.emit_exit_element(&modified_node2);
                 self.recycle_node(modified_node2);
                 if let Some(id) = node_tag_id {
-                    self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
+                    debug_assert!((id as usize) < MAX_TAG_ID, "tag_id {id} exceeds MAX_TAG_ID {MAX_TAG_ID}");
+                    if (id as usize) < MAX_TAG_ID {
+                        self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
+                    }
                     self.update_escape_ctx_on_close(id);
                 }
                 self.depth -= 1;
@@ -1869,7 +1885,10 @@ impl ConvertState {
         self.recycle_node(node);
 
         if let Some(id) = node_tag_id {
-            self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
+            debug_assert!((id as usize) < MAX_TAG_ID, "tag_id {id} exceeds MAX_TAG_ID {MAX_TAG_ID}");
+            if (id as usize) < MAX_TAG_ID {
+                self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
+            }
             self.update_escape_ctx_on_close(id);
         }
 
