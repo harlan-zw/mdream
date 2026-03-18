@@ -1567,7 +1567,7 @@ impl ConvertState {
         }
 
         if let Some(id) = tag_id {
-            self.depth_map[id as usize] += 1;
+            self.depth_map[id as usize] = self.depth_map[id as usize].saturating_add(1);
             match id {
                 TAG_TABLE => self.escape_ctx |= ESC_TABLE,
                 TAG_CODE | TAG_PRE => { self.escape_ctx |= ESC_CODE_PRE; if id == TAG_PRE { self.in_pre = true; } }
