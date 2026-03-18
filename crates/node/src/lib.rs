@@ -265,19 +265,20 @@ pub struct SplitterOptionsNapi {
     pub chunk_overlap: Option<u32>,
 }
 
-fn to_core_splitter_opts(options: Option<SplitterOptionsNapi>) -> mdream::splitter::SplitterOptions {
+fn to_core_splitter_opts(options: Option<SplitterOptionsNapi>) -> Result<mdream::splitter::SplitterOptions> {
     let defaults = mdream::splitter::SplitterOptions::default();
     match options {
-        None => defaults,
-        Some(opts) => mdream::splitter::SplitterOptions {
+        None => Ok(defaults),
+        Some(opts) => Ok(mdream::splitter::SplitterOptions {
             headers_to_split_on: opts.headers_to_split_on
-                .map(|v| v.into_iter().map(|x| x as u8).collect())
+                .map(|v| v.into_iter().map(|x| u8::try_from(x).map_err(|_| napi::Error::new(napi::Status::InvalidArg, format!("headersToSplitOn value {x} exceeds u8 range (0-255)")))).collect::<Result<Vec<u8>>>())
+                .transpose()?
                 .unwrap_or(defaults.headers_to_split_on),
             return_each_line: opts.return_each_line.unwrap_or(defaults.return_each_line),
             strip_headers: opts.strip_headers.unwrap_or(defaults.strip_headers),
             chunk_size: opts.chunk_size.map(|v| v as usize).unwrap_or(defaults.chunk_size),
             chunk_overlap: opts.chunk_overlap.map(|v| v as usize).unwrap_or(defaults.chunk_overlap),
-        },
+        }),
     }
 }
 
@@ -297,7 +298,7 @@ fn chunk_to_napi(chunk: mdream::splitter::MarkdownChunk) -> MarkdownChunkNapi {
 
 #[napi(js_name = "splitMarkdown")]
 pub fn split_markdown(markdown: String, options: Option<SplitterOptionsNapi>) -> Result<Vec<MarkdownChunkNapi>> {
-    let opts = to_core_splitter_opts(options);
+    let opts = to_core_splitter_opts(options)?;
     let chunks = mdream::splitter::split_markdown(&markdown, &opts);
     Ok(chunks.into_iter().map(chunk_to_napi).collect())
 }
@@ -309,7 +310,7 @@ pub fn html_to_markdown_chunks(
     splitter_options: Option<SplitterOptionsNapi>,
 ) -> Result<Vec<MarkdownChunkNapi>> {
     let md_opts = to_core_opts(options);
-    let split_opts = to_core_splitter_opts(splitter_options);
+    let split_opts = to_core_splitter_opts(splitter_options)?;
     let chunks = mdream::splitter::html_to_markdown_chunks(&html, md_opts, &split_opts);
     Ok(chunks.into_iter().map(chunk_to_napi).collect())
 }
