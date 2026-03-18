@@ -69,6 +69,7 @@
     "ofetch": "catalog:",
     "pathe": "catalog:",
     "picomatch": "catalog:",
+    "tldts": "^7.0.26",
     "ufo": "catalog:"
   },
   "devDependencies": {
