@@ -262,7 +262,8 @@ Usage:
 Options:
   -u, --url <url>              Website URL to crawl
   -o, --output <dir>           Output directory (default: output)
-  -d, --depth <number>         Crawl depth (default: 3)
+  -d, --depth <number>         Crawl depth, 0 for single page (default: 3)
+  --single-page                Only process the given URL(s), no crawling (alias for --depth 0)
   --driver <http|playwright>   Crawler driver (default: http)
   --artifacts <list>           Comma-separated list of artifacts: llms.txt,llms-full.txt,markdown (default: all)
   --origin <url>               Origin URL for resolving relative paths (overrides auto-detection)
@@ -284,6 +285,7 @@ Examples:
   @mdream/crawl -u example.com --exclude "*/admin/*" --exclude "*/api/*"
   @mdream/crawl -u example.com --verbose
   @mdream/crawl -u example.com --skip-sitemap
+  @mdream/crawl -u example.com --driver playwright --single-page
 `)
     process.exit(0)
   }
@@ -365,11 +367,12 @@ Examples:
     }
   }
 
-  // Validate depth
-  const depthStr = getArgValue('--depth') || getArgValue('-d') || '3'
+  // Validate depth (--single-page is alias for --depth 0)
+  const singlePage = args.includes('--single-page')
+  const depthStr = singlePage ? '0' : (getArgValue('--depth') || getArgValue('-d') || '3')
   const depth = Number.parseInt(depthStr)
-  if (Number.isNaN(depth) || depth < 1 || depth > 10) {
-    p.log.error('Error: Depth must be between 1 and 10')
+  if (Number.isNaN(depth) || depth < 0 || depth > 10) {
+    p.log.error('Error: Depth must be between 0 and 10')
     process.exit(1)
   }
 
@@ -449,7 +452,7 @@ Examples:
     outputDir: resolve(getArgValue('--output') || getArgValue('-o') || 'output'),
     driver: (driver as 'http' | 'playwright') || 'http',
     maxRequestsPerCrawl: Number.parseInt(maxPagesStr || String(Number.MAX_SAFE_INTEGER)),
-    followLinks: true,
+    followLinks: depth > 0,
     maxDepth: depth,
     generateLlmsTxt: artifacts.includes('llms.txt'),
     generateLlmsFullTxt: artifacts.includes('llms-full.txt'),
