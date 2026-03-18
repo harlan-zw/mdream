@@ -588,15 +588,15 @@ impl ConvertState {
                 };
                 i2 = tag_name_end;
 
-                if self.in_non_nesting {
-                    if tag_name_raw.is_empty() || {
+                if self.in_non_nesting
+                    && (tag_name_raw.is_empty() || {
                         let in_quotes = self.in_single_quote || self.in_double_quote || self.in_backtick;
-                        in_quotes || self.stack.last().map_or(false, |curr| curr.tag_id != tag_id)
-                    } {
-                        text_buffer.push(bytes[i] as char);
-                        i += 1;
-                        continue;
-                    }
+                        in_quotes || self.stack.last().is_some_and(|curr| curr.tag_id != tag_id)
+                    })
+                {
+                    text_buffer.push(bytes[i] as char);
+                    i += 1;
+                    continue;
                 }
 
                 if tag_name_raw.is_empty() {
