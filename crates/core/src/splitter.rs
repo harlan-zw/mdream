@@ -80,6 +80,10 @@ fn strip_markdown_formatting(text: &str) -> String {
         result.push(b);
         i += 1;
     }
+    // SAFETY: result contains only bytes copied from a valid UTF-8 &str with
+    // single-byte ASCII formatting characters (*, _, `) removed. Removing
+    // single-byte ASCII from valid UTF-8 always yields valid UTF-8.
+    #[allow(unsafe_code)]
     let s = unsafe { String::from_utf8_unchecked(result) };
     let trimmed = s.trim();
     trimmed.to_string()
@@ -170,8 +174,8 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
     // Detect frontmatter block
     let mut frontmatter_end_idx: isize = -1;
     if !lines.is_empty() && lines[0].trim() == "---" {
-        for i in 1..line_count {
-            if lines[i].trim() == "---" {
+        for (i, line) in lines.iter().enumerate().skip(1) {
+            if line.trim() == "---" {
                 frontmatter_end_idx = i as isize;
                 break;
             }
@@ -258,7 +262,7 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
 
         if apply_overlap && chunk_overlap > 0 {
             let content_len = original_chunk_content.len();
-            let max_overlap = if content_len > 1 { content_len - 1 } else { 0 };
+            let max_overlap = content_len.saturating_sub(1);
             let actual_overlap = chunk_overlap.min(max_overlap);
             *last_chunk_end_position = end_position - actual_overlap;
         } else {
@@ -275,10 +279,10 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
             && (i == 0 || i == frontmatter_end_idx as usize);
 
         // Code block tracking
-        if line.starts_with("```") {
+        if let Some(rest) = line.strip_prefix("```") {
             if !in_code_block {
                 in_code_block = true;
-                let lang = line[3..].trim();
+                let lang = rest.trim();
                 if !lang.is_empty() && current_chunk_code_language.is_empty() {
                     current_chunk_code_language = lang.to_string();
                 }
@@ -332,11 +336,7 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
         // Size-based splitting
         if !opts.return_each_line {
             let line_end = (line_pos + line.len() + 1).min(markdown.len());
-            let current_chunk_size = if line_end > last_chunk_end_position {
-                line_end - last_chunk_end_position
-            } else {
-                0
-            };
+            let current_chunk_size = line_end.saturating_sub(last_chunk_end_position);
 
             if current_chunk_size > opts.chunk_size {
                 let ideal_split_pos = last_chunk_end_position + opts.chunk_size;

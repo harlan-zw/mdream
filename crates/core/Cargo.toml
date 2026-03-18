@@ -33,6 +33,9 @@ exclude = [
   "benches/"
 ]
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "mdream"
 path = "src/bin.rs"
