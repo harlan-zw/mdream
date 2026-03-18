@@ -1728,7 +1728,7 @@ impl ConvertState {
         }
 
         tag.excluded_from_markdown = filter_excluded
-            || (skip_node && !(self.has_isolate_main && !self.isolate_main_found));
+            || (skip_node && (!self.has_isolate_main || self.isolate_main_found));
 
         if tag.collapses_inner_white_space && !filter_excluded {
             if tag.tag_id == Some(TAG_SPAN) { self.collapse_span_depth = self.collapse_span_depth.saturating_add(1); }
