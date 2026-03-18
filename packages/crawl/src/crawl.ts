@@ -215,6 +215,9 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     onPage,
   } = options
 
+  // Single-page mode: maxDepth 0 means just process the given URLs directly
+  const singlePageMode = maxDepth === 0
+
   const outputDir = resolve(normalize(rawOutputDir))
   let crawlDelay = userCrawlDelay
 
@@ -237,7 +240,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
   const sitemapAttempts: { url: string, success: boolean, error?: string }[] = []
 
-  if (startingUrls.length > 0 && !skipSitemap) {
+  if (startingUrls.length > 0 && !skipSitemap && !singlePageMode) {
     const baseUrl = new URL(startingUrls[0]).origin
     const homePageUrl = baseUrl
 
@@ -388,7 +391,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     progress.crawling.total = startingUrls.length
     onProgress?.(progress)
   }
-  else if (skipSitemap && startingUrls.length > 0) {
+  else if ((skipSitemap || singlePageMode) && startingUrls.length > 0) {
     progress.sitemap.status = 'completed'
     progress.sitemap.found = 0
     progress.sitemap.processed = 0
@@ -501,8 +504,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       onProgress?.(progress)
     }
 
-    // Follow links if enabled and within depth limit
-    if (followLinks && depth < maxDepth) {
+    // Follow links if enabled and within depth limit (disabled in single-page mode)
+    if (followLinks && !singlePageMode && depth < maxDepth) {
       const filteredLinks = metadata.links.filter(link => shouldCrawlUrl(link))
       for (const link of filteredLinks) {
         processedUrls.add(link)
@@ -581,8 +584,17 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       await crawler.run(initialRequests)
     }
     catch (error) {
+      const msg = error instanceof Error ? error.message : ''
+      // wmic.exe was removed in Windows 11; older crawlee versions spawn it for memory monitoring
+      if (msg.includes('wmic') || msg.includes('ENOENT')) {
+        throw new Error(
+          `Crawlee failed to spawn a system process (${msg}). `
+          + 'On Windows 11+, wmic.exe is no longer available. '
+          + 'Upgrade crawlee to >=3.16.0 or use the HTTP driver instead (--driver http).',
+        )
+      }
       if (verbose) {
-        console.error(`[CRAWLER ERROR] ${error instanceof Error ? error.message : 'Unknown error'}`)
+        console.error(`[CRAWLER ERROR] ${msg || 'Unknown error'}`)
         console.error(`[CRAWLER ERROR] Stack trace:`, error instanceof Error ? error.stack : 'No stack trace')
       }
       throw error
