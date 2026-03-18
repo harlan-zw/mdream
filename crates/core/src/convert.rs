@@ -147,23 +147,21 @@ fn slugify_heading(text: &str) -> String {
     let mut slug = String::with_capacity(trimmed.len());
     let mut last_was_dash = false;
     for c in trimmed.bytes() {
-        if c >= b'a' && c <= b'z' {
+        if c.is_ascii_lowercase() {
             slug.push(c as char);
             last_was_dash = false;
-        } else if c >= b'A' && c <= b'Z' {
+        } else if c.is_ascii_uppercase() {
             slug.push((c + 32) as char);
             last_was_dash = false;
-        } else if c >= b'0' && c <= b'9' {
+        } else if c.is_ascii_digit() {
             slug.push(c as char);
             last_was_dash = false;
         } else if c == b'_' {
             slug.push('_');
             last_was_dash = false;
-        } else if c == b' ' || c == b'\t' || c == b'-' {
-            if !last_was_dash && !slug.is_empty() {
-                slug.push('-');
-                last_was_dash = true;
-            }
+        } else if (c == b' ' || c == b'\t' || c == b'-') && !last_was_dash && !slug.is_empty() {
+            slug.push('-');
+            last_was_dash = true;
         }
     }
     if last_was_dash {
@@ -488,15 +486,13 @@ impl ConvertState {
                         continue;
                     }
 
-                    if self.in_non_nesting {
-                        if !self.last_char_was_backslash {
-                            if cc == APOS_CHAR && !self.in_double_quote && !self.in_backtick {
-                                self.in_single_quote = !self.in_single_quote;
-                            } else if cc == QUOTE_CHAR && !self.in_single_quote && !self.in_backtick {
-                                self.in_double_quote = !self.in_double_quote;
-                            } else if cc == BACKTICK_CHAR && !self.in_single_quote && !self.in_double_quote {
-                                self.in_backtick = !self.in_backtick;
-                            }
+                    if self.in_non_nesting && !self.last_char_was_backslash {
+                        if cc == APOS_CHAR && !self.in_double_quote && !self.in_backtick {
+                            self.in_single_quote = !self.in_single_quote;
+                        } else if cc == QUOTE_CHAR && !self.in_single_quote && !self.in_backtick {
+                            self.in_double_quote = !self.in_double_quote;
+                        } else if cc == BACKTICK_CHAR && !self.in_single_quote && !self.in_double_quote {
+                            self.in_backtick = !self.in_backtick;
                         }
                     }
                     self.last_char_was_backslash = cc == BACKSLASH_CHAR && !self.last_char_was_backslash;
@@ -739,7 +735,7 @@ impl ConvertState {
         // Clean: track heading start for slug collection
         if self.clean_flags & CLEAN_FRAGMENTS != 0 {
             if let Some(id) = tag_id {
-                if id >= TAG_H1 && id <= TAG_H6 && self.depth_map[TAG_A as usize] == 0 {
+                if (TAG_H1..=TAG_H6).contains(&id) && self.depth_map[TAG_A as usize] == 0 {
                     self.in_heading = true;
                     self.heading_buffer_start = self.buffer.len();
                 }
@@ -767,10 +763,8 @@ impl ConvertState {
         let is_inline = override_config.and_then(|ov| ov.is_inline).unwrap_or(node.is_inline);
 
         // Table cell count (exit)
-        if tag_id == Some(TAG_TH) || tag_id == Some(TAG_TD) {
-            if self.depth_map[TAG_TABLE as usize] <= 1 {
-                self.table_current_row_cells += 1;
-            }
+        if (tag_id == Some(TAG_TH) || tag_id == Some(TAG_TD)) && self.depth_map[TAG_TABLE as usize] <= 1 {
+            self.table_current_row_cells += 1;
         }
 
         let mut output: Option<Cow<'static, str>> = None;
@@ -856,6 +850,11 @@ impl ConvertState {
                         if href.starts_with('#') {
                             // Remove [ and keep text only — use truncate+copy without intermediate String
                             let text_len = text_end - text_start;
+                            // SAFETY: bracket_pos < text_start < text_end are all within buffer bounds
+                            // (derived from buffer length checks above). We copy the link text backwards
+                            // over the "[" bracket, then truncate. The buffer contains valid UTF-8
+                            // because we only move complete character sequences from the original content.
+                            #[allow(unsafe_code)]
                             unsafe {
                                 let buf = self.buffer.as_mut_vec();
                                 std::ptr::copy(buf.as_ptr().add(text_start), buf.as_mut_ptr().add(bracket_pos), text_len);
@@ -876,6 +875,9 @@ impl ConvertState {
                     if link_text == resolved.as_ref() {
                         // Remove [ and keep text only — use truncate+copy without intermediate String
                         let text_len = text_end - text_start;
+                        // SAFETY: same invariants as the self-link heading case above. bracket_pos,
+                        // text_start, text_end are within buffer bounds and we preserve valid UTF-8.
+                        #[allow(unsafe_code)]
                         unsafe {
                             let buf = self.buffer.as_mut_vec();
                             std::ptr::copy(buf.as_ptr().add(text_start), buf.as_mut_ptr().add(bracket_pos), text_len);
@@ -892,7 +894,7 @@ impl ConvertState {
         // Collect heading slug before writing exit output
         if self.in_heading {
             if let Some(id) = tag_id {
-                if id >= TAG_H1 && id <= TAG_H6 {
+                if (TAG_H1..=TAG_H6).contains(&id) {
                     let heading_text = &self.buffer[self.heading_buffer_start..];
                     let slug = slugify_heading(heading_text);
                     if !slug.is_empty() {
@@ -1013,10 +1015,7 @@ impl ConvertState {
 
     #[inline]
     fn get_enter_output(&self, node: &ElementNode, _ancestors: &[ElementNode]) -> Option<Cow<'static, str>> {
-        let tag_id = match node.tag_id {
-            Some(id) => id,
-            None => return None,
-        };
+        let tag_id = node.tag_id?;
         match tag_id {
             TAG_DETAILS => Some(Cow::Borrowed("<details>")),
             TAG_SUMMARY => Some(Cow::Borrowed("<summary>")),
@@ -1183,10 +1182,7 @@ impl ConvertState {
 
     #[inline]
     fn get_exit_output(&self, node: &ElementNode) -> Option<Cow<'static, str>> {
-        let tag_id = match node.tag_id {
-            Some(id) => id,
-            None => return None,
-        };
+        let tag_id = node.tag_id?;
         match tag_id {
             TAG_DETAILS => Some(Cow::Borrowed("</details>\n\n")),
             TAG_SUMMARY => Some(Cow::Borrowed("</summary>\n\n")),
@@ -1356,7 +1352,7 @@ impl ConvertState {
                     let has_spacing = parent.spacing.is_some();
                     // For exit, the node was already popped, so use the is_inline param
                     let is_block = !h_is_inline && !collapses && configured_new_lines > 0;
-                    let should_trim = (!h_is_inline || !is_enter) && !is_block && !(collapses && is_enter) && !(has_spacing && is_enter);
+                    let should_trim = !(is_block || (h_is_inline && is_enter) || (is_enter && collapses) || (is_enter && has_spacing));
 
                     if should_trim && self.last_content_cache_len > 0 {
                         let cache_len = self.last_content_cache_len;
@@ -1426,7 +1422,7 @@ impl ConvertState {
         }
         if self.collapse_non_span_depth > 0 { return NO_SPACING; }
         if self.collapse_span_depth > 0 {
-            let is_block = tag_id.map_or(false, |id| (id >= TAG_H1 && id <= TAG_H6) || id == TAG_P || id == TAG_DIV);
+            let is_block = tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id) || id == TAG_P || id == TAG_DIV);
             if !is_block { return NO_SPACING; }
         }
         if self.has_tag_overrides {
@@ -1470,12 +1466,13 @@ impl ConvertState {
             }
         }
 
-        if self.has_frontmatter {
-            if self.frontmatter_in_head && self.stack.last().map_or(false, |p| p.tag_id == Some(TAG_TITLE)) {
-                let val = text_buffer.trim().to_string();
-                if !val.is_empty() { self.frontmatter_title = Some(val); }
-                return;
-            }
+        if self.has_frontmatter
+            && self.frontmatter_in_head
+            && self.stack.last().is_some_and(|p| p.tag_id == Some(TAG_TITLE))
+        {
+            let val = text_buffer.trim().to_string();
+            if !val.is_empty() { self.frontmatter_title = Some(val); }
+            return;
         }
 
         let in_pre_tag = self.in_pre;
@@ -1554,7 +1551,7 @@ impl ConvertState {
 
     fn process_opening_tag(&mut self, tag_name: &str, tag_id: Option<u8>, is_builtin: bool, html_chunk: &str, position: usize) -> OpeningTagResult {
         let tag_handler = tag_id.and_then(get_tag_handler);
-        let needs_attrs = tag_handler.map_or(false, |h| h.needs_attributes)
+        let needs_attrs = tag_handler.is_some_and(|h| h.needs_attributes)
             || self.has_tailwind || self.has_filter || self.has_extraction
             || self.has_tag_overrides || self.has_frontmatter;
         let (complete, new_position, attributes, self_closing) = process_tag_attributes(html_chunk, position, tag_handler, !needs_attrs);
@@ -1679,18 +1676,20 @@ impl ConvertState {
                 if self.isolate_main_found {
                     if self.isolate_main_closed { skip_node = true; }
                 } else {
-                    let is_header = tag_id.map_or(false, |id| id >= TAG_H1 && id <= TAG_H6);
-                    if self.isolate_first_header_depth.is_none() && is_header {
-                        if self.depth_map[TAG_HEADER as usize] == 0 {
-                            self.isolate_first_header_depth = Some(self.depth);
-                        }
+                    let is_header = tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id));
+                    if self.isolate_first_header_depth.is_none()
+                        && is_header
+                        && self.depth_map[TAG_HEADER as usize] == 0
+                    {
+                        self.isolate_first_header_depth = Some(self.depth);
                     }
                     if let Some(header_depth) = self.isolate_first_header_depth {
-                        if !self.isolate_after_footer && tag_id == Some(TAG_FOOTER) {
-                            if self.depth.saturating_sub(header_depth) <= 5 {
-                                self.isolate_after_footer = true;
-                                skip_node = true;
-                            }
+                        if !self.isolate_after_footer
+                            && tag_id == Some(TAG_FOOTER)
+                            && self.depth.saturating_sub(header_depth) <= 5
+                        {
+                            self.isolate_after_footer = true;
+                            skip_node = true;
                         }
                     }
                     if self.isolate_first_header_depth.is_none() {
@@ -1714,7 +1713,7 @@ impl ConvertState {
                             _ => self.options.plugins.as_ref()
                                 .and_then(|p| p.frontmatter.as_ref())
                                 .and_then(|f| f.meta_fields.as_ref())
-                                .map_or(false, |allowed| allowed.iter().any(|a| a == n_str)),
+                                .is_some_and(|allowed| allowed.iter().any(|a| a == n_str)),
                         };
                         if is_allowed {
                             if let Some(entry) = self.frontmatter_meta.iter_mut().find(|(k, _)| k == n) {
@@ -1770,7 +1769,7 @@ impl ConvertState {
 
         self.has_encoded_html_entity = false;
 
-        if self.stack.last().map_or(false, |n| n.is_non_nesting) && !self_closing {
+        if self.stack.last().is_some_and(|n| n.is_non_nesting) && !self_closing {
             self.in_non_nesting = true;
             self.in_single_quote = false;
             self.in_double_quote = false;
@@ -1812,7 +1811,7 @@ impl ConvertState {
         if self.first_block_parent_index == Some(popping_index) {
             self.block_parent_indices.pop();
             self.first_block_parent_index = self.block_parent_indices.last().copied()
-                .or_else(|| if self.stack.is_empty() { None } else { Some(0) });
+                .or(if self.stack.is_empty() { None } else { Some(0) });
         }
 
         if node.collapses_inner_white_space && !node.excluded_from_markdown {
@@ -1820,10 +1819,12 @@ impl ConvertState {
             else { self.collapse_non_span_depth -= 1; }
         }
 
-        if self.has_isolate_main {
-            if node.tag_id == Some(TAG_MAIN) && self.isolate_main_found && !self.isolate_main_closed {
-                self.isolate_main_closed = true;
-            }
+        if self.has_isolate_main
+            && node.tag_id == Some(TAG_MAIN)
+            && self.isolate_main_found
+            && !self.isolate_main_closed
+        {
+            self.isolate_main_closed = true;
         }
 
         // Frontmatter generation on HEAD close
@@ -1856,7 +1857,7 @@ impl ConvertState {
                 self.depth -= 1;
                 self.has_encoded_html_entity = false;
                 self.just_closed_tag = true;
-                self.in_non_nesting = self.stack.last().map_or(false, |n| n.is_non_nesting);
+                self.in_non_nesting = self.stack.last().is_some_and(|n| n.is_non_nesting);
                 return;
             }
         }
@@ -1880,7 +1881,7 @@ impl ConvertState {
             self.last_char_was_backslash = false;
         }
 
-        self.in_non_nesting = self.stack.last().map_or(false, |n| n.is_non_nesting);
+        self.in_non_nesting = self.stack.last().is_some_and(|n| n.is_non_nesting);
         self.depth -= 1;
         self.has_encoded_html_entity = false;
         self.just_closed_tag = true;
@@ -2028,8 +2029,7 @@ impl ConvertState {
                 resolved.push_str(url);
                 return Cow::Owned(if needs_clean { strip_tracking_params_owned(resolved) } else { resolved });
             }
-            if url.starts_with("./") {
-                let suffix = &url[2..];
+            if let Some(suffix) = url.strip_prefix("./") {
                 let mut resolved = String::with_capacity(orig.len() + 1 + suffix.len());
                 resolved.push_str(orig);
                 resolved.push('/');
@@ -2053,7 +2053,7 @@ impl ConvertState {
     }
 
     #[inline]
-    fn get_language_from_class<'a>(class_name: Option<&'a String>) -> &'a str {
+    fn get_language_from_class(class_name: Option<&String>) -> &str {
         if let Some(class) = class_name {
             for part in class.split_whitespace() {
                 if let Some(lang) = part.strip_prefix("language-") {

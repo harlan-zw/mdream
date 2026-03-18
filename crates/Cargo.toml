@@ -12,6 +12,37 @@ license = "MIT"
 rust-version = "1.80"
 repository = "https://github.com/harlan-zw/mdream"
 
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Performance: project prefers manual control in hot paths
+too_many_lines = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+inline_always = "allow"
+# Style: allow patterns that conflict with project conventions
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+redundant_pub_crate = "allow"
+option_if_let_else = "allow"
+struct_excessive_bools = "allow"
+items_after_statements = "allow"
+doc_markdown = "allow"
+wildcard_imports = "allow"
+match_same_arms = "allow"
+similar_names = "allow"
+used_underscore_binding = "allow"
+iter_without_into_iter = "allow"
+naive_bytecount = "allow"
+branches_sharing_code = "allow"
+missing_const_for_fn = "allow"
+
 [profile.release]
 opt-level = 3
 lto = true

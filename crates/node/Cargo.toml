@@ -16,5 +16,8 @@ napi = { version = "3.0.0", default-features = false, features = [ "napi9" ] }
 napi-derive = "3.0.0"
 mdream = { path = "../core" }
 
+[lints]
+workspace = true
+
 [build-dependencies]
 napi-build = "2"
