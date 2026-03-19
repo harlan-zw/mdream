@@ -42,7 +42,6 @@ catalog:
   changelogen: ^0.6.2
   compression: ^1.8.1
   consola: ^3.4.2
-  crawlee: ^3.16.0
   cross-env: ^10.1.0
   defu: ^6.1.4
   eslint: ^10.0.3
