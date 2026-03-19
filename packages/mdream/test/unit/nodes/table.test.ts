@@ -183,6 +183,45 @@ describe.each(engines)('tables $name', (engineConfig) => {
     expect(streamed.trim()).toBe(md)
   })
 
+  it('handles lists inside th cells as HTML passthrough', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `
+      <table>
+        <tr>
+          <th><ul><li>A</li><li>B</li></ul></th>
+          <th>Normal</th>
+        </tr>
+        <tr>
+          <td>Value</td>
+          <td>Text</td>
+        </tr>
+      </table>
+    `
+    const markdown = htmlToMarkdown(html, { engine })
+    // list inside th should render as HTML, not as markdown list markers
+    expect(markdown).toContain('<ul>')
+    expect(markdown).toContain('<li>')
+    expect(markdown).not.toMatch(/^- A/m)
+  })
+
+  it('handles br inside th cells', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `
+      <table>
+        <tr>
+          <th>Line 1<br>Line 2</th>
+          <th>Header</th>
+        </tr>
+        <tr>
+          <td>Value</td>
+          <td>Data</td>
+        </tr>
+      </table>
+    `
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toContain('Line 1<br>Line 2')
+  })
+
   it('github advanced example', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `
