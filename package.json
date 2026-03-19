@@ -35,9 +35,14 @@
     "node-html-markdown": "catalog:",
     "obuild": "catalog:",
     "playwright": "catalog:",
+    "rehype-parse": "catalog:",
+    "rehype-remark": "catalog:",
+    "remark-gfm": "catalog:",
+    "remark-stringify": "catalog:",
     "turndown": "catalog:",
     "turndown-plugin-gfm": "catalog:",
     "typescript": "catalog:",
+    "unified": "catalog:",
     "vitest": "catalog:"
   }
 }

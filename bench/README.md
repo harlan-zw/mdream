@@ -11,15 +11,17 @@ This document describes how mdream benchmarks are conducted to ensure transparen
 | [html-to-markdown](https://github.com/nickmass/html2md-rs) | 2.20.0 | Rust (native) | Via `@kreuzberg/html-to-markdown-node` napi-rs bindings |
 | [turndown](https://github.com/mixmark-io/turndown) | 7.2.2 | JavaScript | With [GFM plugin](https://github.com/mixmark-io/turndown-plugin-gfm) (tables, strikethrough, task lists) |
 | [node-html-markdown](https://github.com/crosstype/node-html-markdown) | 2.0.0 | JavaScript | Default settings |
+| [rehype-remark](https://github.com/rehypejs/rehype-remark) | 10.0.1 | JavaScript | unified ecosystem (rehype-parse + rehype-remark + remark-stringify) |
 
 ### Why These Libraries?
 
 These are the most popular JavaScript HTML-to-Markdown converters:
 - **Turndown**: Industry standard, used by many projects including Obsidian
 - **node-html-markdown**: Marketed as a faster alternative to Turndown
+- **rehype-remark**: Part of the unified ecosystem (~4.6M weekly downloads), AST-based transformation
 
 We excluded:
-- **html-to-markdown** (Go library): Not JavaScript, different runtime
+- **html-to-markdown** (Go library): Not JavaScript, different runtime. Compared separately in [CLI benchmarks](./cli-compare.sh)
 - **Readability + Turndown**: Different use case (article extraction)
 
 ## Test Fixtures
@@ -60,12 +62,20 @@ turndown.turndown(html)
 // node-html-markdown: Default settings
 const nhm = new NodeHtmlMarkdown()
 nhm.translate(html)
+
+// rehype-remark: unified ecosystem pipeline with GFM
+const processor = unified()
+  .use(rehypeParse)
+  .use(rehypeRemark)
+  .use(remarkGfm)
+  .use(remarkStringify)
+await processor.process(html)
 ```
 
 ### What We're NOT Comparing
 
 - **mdream's LLM preset**: The `withMinimalPreset()` adds content filtering, frontmatter extraction, and main content isolation. This does extra work that competitors don't do, so it's benchmarked separately.
-- **Streaming performance**: mdream supports streaming; competitors don't. Streaming is benchmarked as a mdream-only comparison (stream vs string) to show overhead.
+- **Streaming performance**: mdream is the only JS converter with streaming support. In Go, [JohannesKaufmann/html-to-markdown](https://github.com/JohannesKaufmann/html-to-markdown) supports streaming via `io.Reader`. Streaming is benchmarked as a mdream-only comparison (stream vs string) to show overhead.
 - **Output quality**: This benchmark measures speed only, not output quality or token efficiency.
 
 ## Benchmark Tooling
@@ -119,18 +129,31 @@ pnpm bench
 
 ## Results Interpretation
 
-### Performance Scaling
+### JavaScript Performance
 
-| Input Size | mdream (rust) | mdream (js) | html-to-markdown (rust) | Turndown (js) | node-html-markdown (js) |
-|------------|---------------|-------------|-------------------------|---------------|-------------------------|
-| **166 KB** | 🏆 **0.52ms** | 3.26ms | 3.94ms *(7.6x)* | 11.26ms *(21.7x)* | 14.31ms *(27.5x)* |
-| **420 KB** | 🏆 **0.76ms** | 6.38ms | 7.48ms *(9.8x)* | 13.63ms *(17.9x)* | 17.11ms *(22.5x)* |
-| **1.8 MB** | 🏆 **7.14ms** | 57.2ms | 82.9ms *(11.6x)* | 264.3ms *(37.0x)* | 💀 26,072ms *(3652x)* |
+Apples-to-apples comparison of pure JavaScript converters.
+
+| Input Size | mdream | Turndown | node-html-markdown | rehype-remark |
+|------------|--------|----------|---------------------|---------------|
+| **166 KB** | 🏆 **3.26ms** | 11.26ms *(3.5x)* | 14.31ms *(4.4x)* | 35.19ms *(10.8x)* |
+| **420 KB** | 🏆 **6.38ms** | 13.63ms *(2.1x)* | 17.11ms *(2.7x)* | 62.10ms *(9.7x)* |
+| **1.8 MB** | 🏆 **57.2ms** | 264.3ms *(4.6x)* | 💀 26,072ms *(456x)* | 826.7ms *(14.5x)* |
+
+### Rust NAPI Performance
+
+For Node.js apps using native bindings via N-API.
+
+| Input Size | mdream (rust) | html-to-markdown (rust) |
+|------------|---------------|-------------------------|
+| **166 KB** | 🏆 **0.52ms** | 3.94ms *(7.6x)* |
+| **420 KB** | 🏆 **0.76ms** | 7.48ms *(9.8x)* |
+| **1.8 MB** | 🏆 **7.14ms** | 82.9ms *(11.6x)* |
 
 **Key findings:**
-- mdream (rust) is the fastest HTML to markdown converter, 8-12x faster than the next best Rust NAPI binding
-- mdream (js) is 2-4x faster than Turndown (fastest pure JS competitor)
-- node-html-markdown has O(n²) complexity issues on large files
+- mdream (js) is 2-4x faster than Turndown, the fastest pure JS competitor
+- rehype-remark (unified ecosystem) is 10-14x slower than mdream despite being one of the most downloaded packages (~4.6M weekly npm downloads)
+- mdream (rust NAPI) is 8-12x faster than the next best Rust NAPI binding
+- node-html-markdown has O(n^2) complexity issues on large files
 
 ### Why mdream is Faster
 

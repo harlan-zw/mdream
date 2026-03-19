@@ -6,6 +6,7 @@
  * - mdream: base htmlToMarkdown() with no plugins
  * - turndown: default settings with GFM tables/strikethrough
  * - node-html-markdown: default settings
+ * - rehype-remark: unified ecosystem (rehype-parse + rehype-remark + remark-stringify)
  * - html-to-markdown-node: Rust with native Node bindings (napi-rs)
  *
  * Run: pnpm bench
@@ -14,8 +15,13 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { convert as rustConvert } from '@kreuzberg/html-to-markdown-node'
 import { NodeHtmlMarkdown } from 'node-html-markdown'
+import rehypeParse from 'rehype-parse'
+import rehypeRemark from 'rehype-remark'
+import remarkGfm from 'remark-gfm'
+import remarkStringify from 'remark-stringify'
 import TurndownService from 'turndown'
 import { gfm } from 'turndown-plugin-gfm'
+import { unified } from 'unified'
 import { bench, describe } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../packages/js/src'
 import { withMinimalPreset } from '../packages/js/src/preset/minimal'
@@ -57,6 +63,13 @@ turndown.use(gfm)
 // node-html-markdown default instance
 const nhm = new NodeHtmlMarkdown()
 
+// rehype-remark (unified ecosystem) with GFM for tables/strikethrough
+const rehypeRemarkProcessor = unified()
+  .use(rehypeParse)
+  .use(rehypeRemark)
+  .use(remarkGfm)
+  .use(remarkStringify)
+
 // Pre-compute minimal preset options (reused across calls)
 const minimalOptions = withMinimalPreset()
 
@@ -90,6 +103,10 @@ describe('small HTML (166 KB - Wikipedia)', () => {
   bench('node-html-markdown', () => {
     nhm.translate(wikiSmall)
   })
+
+  bench('rehype-remark', async () => {
+    await rehypeRemarkProcessor.process(wikiSmall)
+  })
 })
 
 describe('medium HTML (420 KB - GitHub Docs)', () => {
@@ -112,6 +129,10 @@ describe('medium HTML (420 KB - GitHub Docs)', () => {
   bench('node-html-markdown', () => {
     nhm.translate(github)
   })
+
+  bench('rehype-remark', async () => {
+    await rehypeRemarkProcessor.process(github)
+  })
 })
 
 describe('large HTML (1.8 MB - Wikipedia)', () => {
@@ -133,6 +154,10 @@ describe('large HTML (1.8 MB - Wikipedia)', () => {
 
   bench('node-html-markdown', () => {
     nhm.translate(wikiLarge)
+  })
+
+  bench('rehype-remark', async () => {
+    await rehypeRemarkProcessor.process(wikiLarge)
   })
 })
 
