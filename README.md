@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 
-> ☁️ The fastest HTML to markdown convertor built with JavaScript and Rust. Optimized for LLMs and supports streaming.
+> ☁️ The fastest HTML to markdown converter on GitHub. Optimized for LLMs and supports streaming.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
@@ -21,7 +21,7 @@
 ## Features
 
 - 🧠 #1 Token Optimizer: [Up to 2x fewer tokens](#benchmarks) than [Turndown](https://github.com/mixmark-io/turndown), node-html-markdown, and html-to-markdown. 70-99% fewer tokens than raw HTML.
-- 🚀 #1 Fastest: [Fastest pure JS & native rust](#benchmarks) - Up to 37x faster than Turndown, converts 1.8MB HTML in ~57ms (JS) and ~7.1ms (Rust).
+- 🚀 #1 Fastest: [Fastest pure JS & native Rust](#benchmarks) converter. Up to 37x faster than Turndown (Rust NAPI vs JS), 4.6x, 5x faster than htmd (Rust vs Rust). Converts 1.8MB HTML in ~5.2ms (Rust).
 - 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
 - 🌊 Streamable: Memory efficient streaming for large documents and real-time pipelines.
 - ⚡ Tiny: 10kB gzip JS core, 60kB gzip with Rust WASM engine. Zero dependencies.
@@ -354,13 +354,53 @@ Use mdream directly via CDN with no build step. Call `init()` once to load the W
 
 ## Benchmarks
 
-Converts 1.8MB HTML in **7.14ms** (Rust NAPI) or **57ms** (pure JS). Up to 37x faster than [Turndown](https://github.com/mixmark-io/turndown), 3650x faster than [node-html-markdown](https://github.com/crosstype/node-html-markdown) on large files.
+### JavaScript (Node.js)
 
-| Input | mdream (rust) | mdream (js) | Turndown | node-html-markdown |
-|-------|---------------|-------------|----------|---------------------|
-| 166 KB | **0.52ms** | 3.26ms | 11.26ms | 14.31ms |
-| 420 KB | **0.76ms** | 6.38ms | 13.63ms | 17.11ms |
-| 1.8 MB | **7.14ms** | 57.2ms | 264.3ms | 26,072ms |
+Pure JS comparison. mdream uses no plugins, Turndown uses GFM plugin for equivalent table/strikethrough support.
+
+| Input | mdream | Turndown | node-html-markdown | rehype-remark |
+|-------|--------|----------|---------------------|---------------|
+| 166 KB | **3.26ms** | 11.26ms *(3.5x)* | 14.31ms *(4.4x)* | 35.19ms *(10.8x)* |
+| 420 KB | **6.38ms** | 13.63ms *(2.1x)* | 17.11ms *(2.7x)* | 62.10ms *(9.7x)* |
+| 1.8 MB | **57.2ms** | 264.3ms *(4.6x)* | 26,072ms *(456x)* | 826.7ms *(14.5x)* |
+
+### Rust (native, release + LTO)
+
+All crates compiled with `opt-level=3`, LTO, and single codegen unit.
+
+| Input | mdream | htmd | html2md | html2md-rs | mdka | html_to_markdown |
+|-------|--------|------|---------|------------|------|------------------|
+| 166 KB | **0.34ms** | 2.13ms *(6.3x)* | 2.71ms *(8.0x)* | panicked | 2.65ms *(7.8x)* | 1.72ms *(5.1x)* |
+| 420 KB | **0.41ms** | 3.50ms *(8.6x)* | 4.25ms *(10.4x)* | 1.54ms *(3.8x)* | 3.56ms *(8.7x)* | 2.72ms *(6.7x)* |
+| 1.8 MB | **5.20ms** | 34.4ms *(6.6x)* | >30s | 35.5ms *(6.8x)* | 37.6ms *(7.2x)* | 28.5ms *(5.5x)* |
+
+### Rust NAPI (Node.js bindings)
+
+For Node.js apps that need native speed. Includes N-API overhead.
+
+| Input | mdream (rust) | html-to-markdown (rust) |
+|-------|---------------|-------------------------|
+| 166 KB | **0.52ms** | 3.94ms *(7.6x)* |
+| 420 KB | **0.76ms** | 7.48ms *(9.8x)* |
+| 1.8 MB | **7.14ms** | 82.9ms *(11.6x)* |
+
+### CLI (cross-language, includes process startup)
+
+End-to-end `cat file | tool > /dev/null` via [hyperfine](https://github.com/sharkdp/hyperfine). Includes process startup overhead (~20ms for Node.js, ~1ms for Go/Rust).
+
+| Input | mdream (Rust) | mdream (Node.js) | html2markdown (Go) |
+|-------|---------------|-------------------|---------------------|
+| 166 KB | **1.4ms** | 26.9ms | 4.9ms |
+| 420 KB | **2.1ms** | 24.3ms | 5.6ms |
+| 1.8 MB | **10.1ms** | 34.8ms | 75.2ms *(7.5x)* |
+
+mdream's Rust CLI is 2.6-7.5x faster than Go [html2markdown](https://github.com/JohannesKaufmann/html-to-markdown). On the 1.8MB file, even the Node.js CLI (with ~20ms startup tax) beats Go by 2.2x. For raw conversion speed without startup overhead, see the JS and Rust tables above.
+
+### Streaming
+
+mdream is the only JavaScript HTML-to-markdown converter with streaming support. In the Go ecosystem, [JohannesKaufmann/html-to-markdown](https://github.com/JohannesKaufmann/html-to-markdown) supports streaming via `io.Reader`. No other JS, Rust, or Python converter supports streaming HTML input.
+
+### Token Efficiency
 
 With `minimal: true`, mdream produces up to **92% fewer tokens** than raw HTML and up to **2x fewer tokens** than competing libraries.
 
@@ -370,7 +410,7 @@ With `minimal: true`, mdream produces up to **92% fewer tokens** than raw HTML a
 | GitHub Docs (62K) | **5,006** (-92%) | 43,983 (-30%) | 8,758 (-86%) |
 | Wikipedia XL (194K) | **152,425** (-21%) | 195,978 (+1%) | 283,136 (+46%) |
 
-Benchmarks run on real-world HTML using [Vitest bench](https://vitest.dev/guide/features.html#benchmarking). See [full methodology, Rust crate comparisons, and reproduction steps](./bench/README.md).
+Benchmarks run on real-world HTML using [Vitest bench](https://vitest.dev/guide/features.html#benchmarking). See [full methodology and reproduction steps](./bench/README.md).
 
 ## Credits
 
