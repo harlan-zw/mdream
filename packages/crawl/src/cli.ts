@@ -3,7 +3,7 @@ import type { CrawlOptions } from './types.js'
 import { accessSync, constants, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as p from '@clack/prompts'
-import { dirname, join, resolve } from 'pathe'
+import { dirname, join, relative, resolve } from 'pathe'
 import { withHttps } from 'ufo'
 import { loadMdreamConfig } from './config.js'
 import { crawlAndGenerate } from './crawl.js'
@@ -193,7 +193,7 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
 
   const summary = [
     `URLs: ${urls.join(', ')}`,
-    `Output: ${outputDir}`,
+    `Output: ${relative(process.cwd(), outputDir) || outputDir}`,
     `Driver: ${crawlerOptions.driver}`,
     `Max pages: Unlimited`,
     `Follow links: Yes (depth 3)`,
@@ -229,22 +229,20 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
 interface LatencyStats { total: number, min: number, max: number, count: number }
 
 async function showCrawlResults(successful: number, failed: number, outputDir: string, generatedFiles: string[], durationSeconds: number, latency?: LatencyStats) {
-  const messages = []
   const durationStr = `${durationSeconds.toFixed(1)}s`
 
-  messages.push(`📄 ${successful} pages \u00B7 ⏱️  ${durationStr}`)
+  let line = `${successful} pages in ${durationStr}`
   if (failed > 0)
-    messages.push(`⚠️  ${failed} failed`)
+    line += ` (${failed} failed)`
   if (latency && latency.count > 0) {
     const avg = Math.round(latency.total / latency.count)
     const min = latency.min === Infinity ? 0 : Math.round(latency.min)
     const max = Math.round(latency.max)
-    messages.push(`🏓 avg ${avg}ms \u00B7 min ${min}ms \u00B7 max ${max}ms`)
+    line += ` \u00B7 HTTP Latency: avg ${avg}ms, min ${min}ms, max ${max}ms`
   }
-  messages.push(`📦 ${generatedFiles.join(', ')}`)
-  messages.push(`📁 ${outputDir}`)
 
-  p.note(messages.join('\n'), '✅ Complete')
+  p.log.success(line)
+  p.log.info(`${generatedFiles.join(', ')} \u2192 ${relative(process.cwd(), outputDir) || '.'}`)
 }
 
 function parseCliArgs(): CrawlOptions | null {
@@ -514,9 +512,8 @@ async function main() {
 
     const summary = [
       `URL: ${options.urls.join(', ')}`,
-      `Output: ${options.outputDir}`,
-      `Driver: ${options.driver}`,
-      `Depth: ${options.maxDepth}`,
+      `Output: ${relative(process.cwd(), options.outputDir) || '.'}`,
+      `Driver: ${options.driver} \u00B7 Depth: ${options.maxDepth}`,
       `Formats: ${formats.join(', ')}`,
       options.exclude && options.exclude.length > 0 && `Exclude: ${options.exclude.join(', ')}`,
       options.skipSitemap && `Skip sitemap: Yes`,

@@ -21,6 +21,44 @@ const URL_TRAILING_SLASH_RE = /\/$/
 const URL_PATH_UNSAFE_CHARS_RE = /[^\w\-]/g
 const FRONTMATTER_BLOCK_RE = /^---[^\n]*\n[\s\S]*?\n---[^\n]*\n?/
 
+// Known tracking / session query params to strip during URL normalization
+const TRACKING_PARAMS = new Set([
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'utm_id',
+  'fbclid',
+  'gclid',
+  'gclsrc',
+  'dclid',
+  'gbraid',
+  'wbraid',
+  'msclkid',
+  'twclid',
+  'li_fat_id',
+  'mc_cid',
+  'mc_eid',
+  'ref',
+  'source',
+  'sessionid',
+  'session_id',
+  'sid',
+  '_ga',
+  '_gl',
+  '_hsenc',
+  '_hsmi',
+  '_openstat',
+  'yclid',
+  'ymclid',
+  'spm',
+  'scm',
+])
+
+// Max unique query-param variants per pathname before we stop queuing new variants
+const MAX_QUERY_VARIANTS_PER_PATH = 5
+
 const FETCH_HEADERS = { 'User-Agent': 'mdream-crawler/1.0', 'Accept': 'text/html,application/xhtml+xml,text/markdown' }
 const DEFAULT_CONCURRENCY = 20
 
@@ -46,6 +84,20 @@ function extractCdataUrl(url: string): string {
   if (url.startsWith('<![CDATA[') && url.endsWith(']]>'))
     return url.slice(9, -3)
   return url
+}
+
+/** Strip tracking params, fragments, and trailing slashes from a URL */
+export function normalizeUrl(resolved: URL): string {
+  resolved.hash = ''
+  // Strip known tracking params
+  const params = resolved.searchParams
+  for (const key of [...params.keys()]) {
+    if (TRACKING_PARAMS.has(key))
+      params.delete(key)
+  }
+  // Sort remaining params for consistent dedup
+  params.sort()
+  return resolved.href.replace(URL_TRAILING_SLASH_RE, '') || resolved.href
 }
 
 async function loadSitemap(sitemapUrl: string): Promise<string[]> {
@@ -136,16 +188,13 @@ function extractMetadataInline(parsedUrl: URL, allowedDomains?: Set<string>): {
       if (href) {
         try {
           const resolved = new URL(href, url)
-          // Strip fragments and trailing slashes for dedup
-          resolved.hash = ''
-          const absoluteUrl = resolved.href.replace(URL_TRAILING_SLASH_RE, '') || resolved.href
+          const absoluteUrl = normalizeUrl(resolved)
           if (allowedDomains) {
             const domain = getRegistrableDomain(resolved.hostname)
             if (domain && allowedDomains.has(domain))
               links.add(absoluteUrl)
           }
           else {
-            // Same-domain check via origin prefix (avoids parsing URL again)
             if (absoluteUrl.startsWith(originPrefix) || absoluteUrl === parsedUrl.origin)
               links.add(absoluteUrl)
           }
@@ -279,6 +328,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   }
 
   const sitemapAttempts: { url: string, success: boolean, error?: string }[] = []
+  let sitemapProvidedUrls = false
 
   if (startingUrls.length > 0 && !skipSitemap && !singlePageMode) {
     const baseUrl = new URL(startingUrls[0]).origin
@@ -408,19 +458,15 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     const successfulSitemaps = sitemapAttempts.filter(a => a.success)
     const failedSitemaps = sitemapAttempts.filter(a => !a.success)
 
-    if (successfulSitemaps.length > 0) {
-      const sitemapUrl = successfulSitemaps[0].url
-      if (progress.sitemap.processed > 0)
-        p.note(`Found sitemap at ${sitemapUrl} with ${progress.sitemap.processed} URLs`, 'Sitemap Discovery')
-      else
-        p.note(`Found sitemap at ${sitemapUrl} but no URLs matched your search criteria`, 'Sitemap Discovery')
+    if (successfulSitemaps.length > 0 && progress.sitemap.processed > 0) {
+      sitemapProvidedUrls = true
+      p.log.info(`Sitemap: ${progress.sitemap.processed} URLs from ${successfulSitemaps[0].url}`)
+    }
+    else if (successfulSitemaps.length > 0) {
+      p.log.info(`Sitemap: found but no URLs matched filters`)
     }
     else if (failedSitemaps.length > 0) {
-      const firstAttempt = failedSitemaps[0]
-      if (firstAttempt.error?.includes('404'))
-        p.note(`No sitemap found, using crawler to discover pages`, 'Sitemap Discovery')
-      else
-        p.note(`Could not access sitemap: ${firstAttempt.error}`, 'Sitemap Discovery')
+      p.log.info(`Sitemap: not found, discovering pages via crawler`)
     }
 
     // Always include home page for metadata extraction
@@ -517,6 +563,9 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   // Queue for BFS link following
   const pendingUrls: { url: string, depth: number }[] = []
 
+  // Per-pathname query variant counter to prevent infinite param loops
+  const queryVariantCounts = new Map<string, number>()
+
   // Process a single page (shared between HTTP and Playwright paths)
   const processPage = async (url: string, content: string, initialTitle: string, depth: number, isMarkdown = false) => {
     const parsedUrl = new URL(url)
@@ -597,14 +646,23 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       onProgress?.(progress)
     }
 
-    // Follow links if enabled and within depth limit (disabled in single-page mode)
-    if (followLinks && !singlePageMode && depth < maxDepth) {
+    // Follow links if enabled, within depth limit, and sitemap didn't already define the crawl surface
+    if (followLinks && !singlePageMode && !sitemapProvidedUrls && depth < maxDepth) {
       const filteredLinks = metadata.links.filter(link => shouldCrawlUrl(link) && isContentUrl(link))
       for (const link of filteredLinks) {
-        if (!processedUrls.has(link)) {
-          processedUrls.add(link)
-          pendingUrls.push({ url: link, depth: depth + 1 })
+        if (processedUrls.has(link))
+          continue
+        // Per-pathname query variant cap to prevent infinite param loops
+        const linkUrl = new URL(link)
+        if (linkUrl.search) {
+          const pathname = linkUrl.pathname
+          const count = queryVariantCounts.get(pathname) || 0
+          if (count >= MAX_QUERY_VARIANTS_PER_PATH)
+            continue
+          queryVariantCounts.set(pathname, count + 1)
         }
+        processedUrls.add(link)
+        pendingUrls.push({ url: link, depth: depth + 1 })
       }
     }
   }
