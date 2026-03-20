@@ -243,6 +243,83 @@ export default defineNuxtConfig({
 })
 ```
 
+## Programmatic Usage
+
+The module auto-imports `htmlToMarkdown` and `streamHtmlToMarkdown` for server routes, and the `useHtmlToMarkdown` composable for client components. Both inherit your module's `mdreamOptions` as defaults.
+
+### Server Routes
+
+`htmlToMarkdown` and `streamHtmlToMarkdown` are auto-imported in all server routes. They wrap the `mdream` package with your module config pre-applied.
+
+```ts
+// server/api/convert.post.ts
+export default defineEventHandler(async (event) => {
+  const { html } = await readBody(event)
+  // Uses module's mdreamOptions as defaults
+  return htmlToMarkdown(html)
+})
+```
+
+Per-call options merge over module defaults:
+
+```ts
+// server/api/convert-custom.post.ts
+export default defineEventHandler(async (event) => {
+  const { html } = await readBody(event)
+  return htmlToMarkdown(html, { origin: 'https://other.com', clean: true })
+})
+```
+
+Streaming is also available:
+
+```ts
+// server/api/stream.post.ts
+export default defineEventHandler(async (event) => {
+  const stream = getRequestWebStream(event)
+  const chunks = []
+  for await (const chunk of streamHtmlToMarkdown(stream)) {
+    chunks.push(chunk)
+  }
+  return chunks.join('')
+})
+```
+
+### Client Composable
+
+`useHtmlToMarkdown` provides a reactive wrapper for client-side conversion (uses the WASM build automatically). The first argument accepts a string, a ref, or a getter. When the source changes, the markdown is re-converted automatically.
+
+```vue
+<script setup>
+const html = ref('<h1>Hello</h1>')
+const { markdown, pending, error } = useHtmlToMarkdown(html)
+</script>
+
+<template>
+  <pre v-if="!pending">{{ markdown }}</pre>
+</template>
+```
+
+On-demand conversion:
+
+```vue
+<script setup>
+const { markdown, pending, convert } = useHtmlToMarkdown()
+
+async function onPaste(html: string) {
+  await convert(html, { origin: 'https://example.com' })
+}
+</script>
+```
+
+The composable returns:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `markdown` | `Ref<string>` | The converted markdown output |
+| `pending` | `Ref<boolean>` | Whether a conversion is in progress |
+| `error` | `ShallowRef<Error \| null>` | Error from the last conversion, if any |
+| `convert` | `(html?: string, options?: Partial<MdreamOptions>) => Promise<string>` | Trigger a conversion manually |
+
 ## API Reference
 
 ### Type Augmentation
@@ -260,6 +337,19 @@ Augmented modules:
 |-------------|----------|
 | `@mdream/nuxt` | The Nuxt module itself |
 | `@mdream/nuxt/runtime/types` | `MdreamMarkdownContext`, `MdreamNegotiateContext`, `MdreamLlmsTxtGeneratePayload`, `ModuleRuntimeConfig` |
+
+### Auto-imported Server Utils
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `htmlToMarkdown` | `(html: string, options?: Partial<MdreamOptions>) => string` | Convert HTML to markdown (sync, NAPI) |
+| `streamHtmlToMarkdown` | `(stream: ReadableStream, options?: Partial<MdreamOptions>) => AsyncIterable<string>` | Stream HTML to markdown |
+
+### Auto-imported Composables
+
+| Composable | Description |
+|------------|-------------|
+| `useHtmlToMarkdown` | Reactive HTML to markdown conversion (uses WASM on client) |
 
 ## License
 

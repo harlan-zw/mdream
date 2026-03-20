@@ -8,6 +8,7 @@ packages:
   - crates/node/npm/*
   - crates/edge/test-worker
   - examples/*
+  - '!examples/nextjs'
 
 overrides:
   vite: npm:rolldown-vite@latest
