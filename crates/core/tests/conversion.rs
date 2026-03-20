@@ -1160,3 +1160,18 @@ fn style_tag_with_angle_bracket_selector() {
     let result = convert("<head><style>div > p { color: red; }</style></head><body><p>Styled</p></body>");
     assert!(result.contains("Styled"));
 }
+
+#[test]
+fn script_with_inline_svg_containing_script_tag_reference() {
+    // Script content that mentions <script> in a JS comment or string should not
+    // corrupt the tag stack. The parser must only exit non-nesting mode on the
+    // matching closing tag (</script>), ignoring opening tags like <script> in text.
+    let html = r#"<head><script>
+    // load <script> in <head> via nuxt.config.ts
+    var icon = '<svg width="48" height="48"><path d="M12 9v4" stroke-width="2" stroke-linecap="round"/></svg>';
+    for (var i = 0; i < buttons.length; i++) { }
+    </script></head><body><main><h1>Title</h1><p>Body content here</p></main></body>"#;
+    let result = convert(html);
+    assert!(result.contains("Title"), "Title missing from output: {}", result);
+    assert!(result.contains("Body content here"), "Body content missing from output: {}", result);
+}

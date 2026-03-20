@@ -562,6 +562,19 @@ impl ConvertState {
                 }
             } else {
                 // Opening tag
+                // For non-nesting tags that exclude text nodes (script, style),
+                // skip ALL opening tags — only the matching closing tag should exit the mode.
+                // Without this, text like `<script>` in JS comments/strings gets misinterpreted
+                // as a real nested tag, corrupting the tag stack.
+                if self.in_non_nesting {
+                    if let Some(parent) = self.stack.last() {
+                        if parent.excludes_text_nodes {
+                            text_buffer.push(cc as char);
+                            i += 1;
+                            continue;
+                        }
+                    }
+                }
                 let mut i2 = i + 1;
                 let tag_name_start = i2;
                 let mut tag_name_end = None;
