@@ -6,6 +6,8 @@ import { name, version } from '../package.json'
 import { setupPrerenderHandler } from './prerender.js'
 import { registerTypeTemplates } from './templates.js'
 
+const mdreamRe = /^(?:mdream(?:\/|$)|@mdream\/rust-)/
+
 export default defineNuxtModule<ModuleOptions>({
   meta: {
     name,
@@ -67,7 +69,6 @@ export default defineNuxtModule<ModuleOptions>({
         return
       }
       nitroConfig.rollupConfig = nitroConfig.rollupConfig || {}
-      const mdreamRe = /^(?:mdream(?:\/|$)|@mdream\/rust-)/
       const existing = nitroConfig.rollupConfig.external
       if (Array.isArray(existing)) {
         existing.push(mdreamRe)
