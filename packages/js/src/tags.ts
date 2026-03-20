@@ -154,7 +154,7 @@ function resolveUrl(url: string, origin?: string): string {
 
 // Helper function to check if we're inside a table cell
 function isInsideTableCell(node: HandlerContext['node']): boolean {
-  return (node.depthMap[TAG_TD] || 0) > 0
+  return (node.depthMap[TAG_TD] || 0) > 0 || (node.depthMap[TAG_TH] || 0) > 0
 }
 
 // Helper function to get language from code class attribute

@@ -255,6 +255,12 @@ pub struct ConvertState {
 }
 
 impl ConvertState {
+    /// Check if we're inside a table cell (either `<td>` or `<th>`).
+    #[inline]
+    fn in_table_cell(&self) -> bool {
+        self.depth_map[TAG_TD as usize] > 0 || self.depth_map[TAG_TH as usize] > 0
+    }
+
     pub fn new(options: HTMLToMarkdownOptions, capacity: usize) -> Self {
         let mut s = Self {
             depth_map: [0; MAX_TAG_ID],
@@ -556,6 +562,19 @@ impl ConvertState {
                 }
             } else {
                 // Opening tag
+                // For non-nesting tags that exclude text nodes (script, style),
+                // skip ALL opening tags — only the matching closing tag should exit the mode.
+                // Without this, text like `<script>` in JS comments/strings gets misinterpreted
+                // as a real nested tag, corrupting the tag stack.
+                if self.in_non_nesting {
+                    if let Some(parent) = self.stack.last() {
+                        if parent.excludes_text_nodes {
+                            text_buffer.push(cc as char);
+                            i += 1;
+                            continue;
+                        }
+                    }
+                }
                 let mut i2 = i + 1;
                 let tag_name_start = i2;
                 let mut tag_name_end = None;
@@ -1040,7 +1059,7 @@ impl ConvertState {
             TAG_DETAILS => Some(Cow::Borrowed("<details>")),
             TAG_SUMMARY => Some(Cow::Borrowed("<summary>")),
             TAG_BR => {
-                if self.depth_map[TAG_TD as usize] > 0 { Some(Cow::Borrowed("<br>")) } else { None }
+                if self.in_table_cell() { Some(Cow::Borrowed("<br>")) } else { None }
             }
             TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6 => {
                 let depth = (tag_id - TAG_H1) as usize;
@@ -1119,13 +1138,13 @@ impl ConvertState {
                 }
             }
             TAG_UL => {
-                if self.depth_map[TAG_TD as usize] > 0 { Some(Cow::Borrowed("<ul>")) } else { None }
+                if self.in_table_cell() { Some(Cow::Borrowed("<ul>")) } else { None }
             }
             TAG_OL => {
-                if self.depth_map[TAG_TD as usize] > 0 { Some(Cow::Borrowed("<ol>")) } else { None }
+                if self.in_table_cell() { Some(Cow::Borrowed("<ol>")) } else { None }
             }
             TAG_LI => {
-                if self.depth_map[TAG_TD as usize] > 0 {
+                if self.in_table_cell() {
                     return Some(Cow::Borrowed("<li>"));
                 }
                 let ul_depth = self.depth_map[TAG_UL as usize] as usize;
@@ -1164,13 +1183,13 @@ impl ConvertState {
                 }
             }
             TAG_TABLE => {
-                if self.depth_map[TAG_TD as usize] > 0 { Some(Cow::Borrowed("<table>")) } else { None }
+                if self.in_table_cell() { Some(Cow::Borrowed("<table>")) } else { None }
             }
             TAG_THEAD => {
-                if self.depth_map[TAG_TD as usize] > 0 { Some(Cow::Borrowed("<thead>")) } else { None }
+                if self.in_table_cell() { Some(Cow::Borrowed("<thead>")) } else { None }
             }
             TAG_TR => {
-                if self.depth_map[TAG_TD as usize] > 0 { Some(Cow::Borrowed("<tr>")) }
+                if self.in_table_cell() { Some(Cow::Borrowed("<tr>")) }
                 else { Some(Cow::Borrowed("| ")) }
             }
             TAG_TH => {
@@ -1235,13 +1254,13 @@ impl ConvertState {
                 }
             }
             TAG_UL => {
-                if self.depth_map[TAG_TD as usize] > 0 { Some(Cow::Borrowed("</ul>")) } else { None }
+                if self.in_table_cell() { Some(Cow::Borrowed("</ul>")) } else { None }
             }
             TAG_OL => {
-                if self.depth_map[TAG_TD as usize] > 0 { Some(Cow::Borrowed("</ol>")) } else { None }
+                if self.in_table_cell() { Some(Cow::Borrowed("</ol>")) } else { None }
             }
             TAG_LI => {
-                if self.depth_map[TAG_TD as usize] > 0 { Some(Cow::Borrowed("</li>")) } else { None }
+                if self.in_table_cell() { Some(Cow::Borrowed("</li>")) } else { None }
             }
             TAG_A => {
                 if let Some(href) = node.attributes.get("href") {
@@ -1275,13 +1294,13 @@ impl ConvertState {
                 }
             }
             TAG_TABLE => {
-                if self.depth_map[TAG_TD as usize] > 0 { Some(Cow::Borrowed("</table>")) } else { None }
+                if self.in_table_cell() { Some(Cow::Borrowed("</table>")) } else { None }
             }
             TAG_THEAD => {
-                if self.depth_map[TAG_TD as usize] > 0 { Some(Cow::Borrowed("</thead>")) } else { None }
+                if self.in_table_cell() { Some(Cow::Borrowed("</thead>")) } else { None }
             }
             TAG_TR => {
-                if self.depth_map[TAG_TD as usize] > 0 || self.depth_map[TAG_TABLE as usize] > 1 {
+                if self.in_table_cell() || self.depth_map[TAG_TABLE as usize] > 1 {
                     Some(Cow::Borrowed("</tr>"))
                 } else {
                     Some(Cow::Borrowed(" |"))
