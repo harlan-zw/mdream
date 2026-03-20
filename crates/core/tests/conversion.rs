@@ -1,5 +1,5 @@
 use mdream::{html_to_markdown, html_to_markdown_result, MarkdownStreamProcessor};
-use mdream::types::{HTMLToMarkdownOptions, PluginConfig, ExtractionConfig, FilterConfig, TagOverrideConfig};
+use mdream::types::{HTMLToMarkdownOptions, PluginConfig, ExtractionConfig, FilterConfig, TagOverrideConfig, IsolateMainConfig};
 
 fn convert(html: &str) -> String {
     html_to_markdown(html, HTMLToMarkdownOptions::default())
@@ -629,6 +629,30 @@ fn filter_exclude_by_compound_selector() {
     );
     assert!(md.contains("Keep"));
     assert!(!md.contains("Remove"));
+}
+
+#[test]
+fn filter_exclude_empty_link_title_in_footer() {
+    // Regression: <a title="Twitter"> inside excluded <footer> leaked "Twitter" into output
+    // because empty-link title synthesis didn't check excluded_from_markdown
+    let html = r#"<html><body>
+<main><h1>Hello</h1><p>Content</p></main>
+<footer><a href="https://x.com" title="Twitter"><div class="icon"></div></a></footer>
+</body></html>"#;
+    let md = html_to_markdown(
+        html,
+        HTMLToMarkdownOptions {
+            plugins: Some(PluginConfig {
+                filter: Some(FilterConfig { exclude: Some(vec!["footer".to_string()]), ..Default::default() }),
+                isolate_main: Some(IsolateMainConfig::default()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    );
+    assert!(md.contains("Hello"));
+    assert!(md.contains("Content"));
+    assert!(!md.contains("Twitter"), "title attribute from excluded footer should not leak. Got:\n{md}");
 }
 
 // ── Tag Overrides ──
