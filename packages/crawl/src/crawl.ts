@@ -24,6 +24,24 @@ const FRONTMATTER_BLOCK_RE = /^---[^\n]*\n[\s\S]*?\n---[^\n]*\n?/
 const FETCH_HEADERS = { 'User-Agent': 'mdream-crawler/1.0', 'Accept': 'text/html,application/xhtml+xml,text/markdown' }
 const DEFAULT_CONCURRENCY = 20
 
+// Common non-content paths to skip during link following
+const IGNORED_PATH_PREFIXES = [
+  '/cdn-cgi/',
+  '/_next/',
+  '/_nuxt/',
+  '/__',
+  '/wp-admin/',
+  '/wp-json/',
+  '/wp-includes/',
+  '/wp-content/uploads/',
+  '/api/',
+  '/assets/',
+  '/static/',
+]
+
+// Extensions that are known to return HTML content (or no extension = likely a route)
+const HTML_EXTENSIONS_RE = /\.(html?|php|aspx?|jsp)$/i
+
 function extractCdataUrl(url: string): string {
   if (url.startsWith('<![CDATA[') && url.endsWith(']]>'))
     return url.slice(9, -3)
@@ -118,7 +136,9 @@ function extractMetadataInline(parsedUrl: URL, allowedDomains?: Set<string>): {
       if (href) {
         try {
           const resolved = new URL(href, url)
-          const absoluteUrl = resolved.href
+          // Strip fragments and trailing slashes for dedup
+          resolved.hash = ''
+          const absoluteUrl = resolved.href.replace(URL_TRAILING_SLASH_RE, '') || resolved.href
           if (allowedDomains) {
             const domain = getRegistrableDomain(resolved.hostname)
             if (domain && allowedDomains.has(domain))
@@ -437,6 +457,26 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       }).filter(Boolean))
     : undefined
 
+  const isContentUrl = (url: string): boolean => {
+    try {
+      const pathname = new URL(url).pathname
+      // Skip known non-content path prefixes
+      for (let i = 0; i < IGNORED_PATH_PREFIXES.length; i++) {
+        if (pathname.startsWith(IGNORED_PATH_PREFIXES[i]))
+          return false
+      }
+      // Allow extensionless paths (routes) and known HTML extensions, skip everything else
+      const lastDot = pathname.lastIndexOf('.')
+      if (lastDot > pathname.lastIndexOf('/')) {
+        return HTML_EXTENSIONS_RE.test(pathname)
+      }
+      return true
+    }
+    catch {
+      return false
+    }
+  }
+
   const shouldCrawlUrl = (url: string): boolean => {
     if (isUrlExcluded(url, exclude, allowSubdomains))
       return false
@@ -556,15 +596,27 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
     // Follow links if enabled and within depth limit (disabled in single-page mode)
     if (followLinks && !singlePageMode && depth < maxDepth) {
-      const filteredLinks = metadata.links.filter(link => shouldCrawlUrl(link))
+      const filteredLinks = metadata.links.filter(link => shouldCrawlUrl(link) && isContentUrl(link))
       for (const link of filteredLinks) {
-        processedUrls.add(link)
+        if (!processedUrls.has(link)) {
+          processedUrls.add(link)
+          pendingUrls.push({ url: link, depth: depth + 1 })
+        }
       }
     }
   }
 
+  // Queue for BFS link following
+  const pendingUrls: { url: string, depth: number }[] = []
+
   // Limit URLs to maxRequestsPerCrawl
   const urlsToProcess = startingUrls.slice(0, maxRequestsPerCrawl)
+
+  // Mark starting URLs as processed to avoid re-crawling (normalize for dedup)
+  for (const url of urlsToProcess)
+    processedUrls.add(url.replace(URL_TRAILING_SLASH_RE, '') || url)
+
+  let totalProcessed = 0
 
   progress.crawling.status = 'processing'
   progress.crawling.total = urlsToProcess.length
@@ -636,8 +688,27 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       userData: { depth: 0 },
     }))
 
+    // Include discovered links in the initial run so Crawlee processes them via its queue
+    const allRequests = [...initialRequests]
+    // We can't add requests mid-run easily, so we'll rely on the HTTP path for BFS.
+    // For Playwright, process initial + any pending discovered during run in waves.
+
     try {
-      await crawler.run(initialRequests)
+      await crawler.run(allRequests)
+
+      // BFS: process discovered links in waves
+      totalProcessed += urlsToProcess.length
+      while (pendingUrls.length > 0 && totalProcessed < maxRequestsPerCrawl) {
+        const batch = pendingUrls.splice(0, maxRequestsPerCrawl - totalProcessed)
+        progress.crawling.total += batch.length
+        onProgress?.(progress)
+        const batchRequests = batch.map(item => ({
+          url: item.url,
+          userData: { depth: item.depth },
+        }))
+        await crawler.run(batchRequests)
+        totalProcessed += batch.length
+      }
     }
     catch (error) {
       const msg = error instanceof Error ? error.message : ''
@@ -660,7 +731,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   }
   else {
     // HTTP path: simple ofetch + concurrency pool (no Crawlee overhead)
-    await runConcurrent(urlsToProcess, DEFAULT_CONCURRENCY, async (url) => {
+    const fetchPage = async (url: string, depth: number) => {
       progress.crawling.currentUrl = url
       onProgress?.(progress)
 
@@ -699,8 +770,12 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
         const body = response._data ?? ''
         const contentType = response.headers.get('content-type') || ''
+        const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml')
         const isMarkdown = contentType.includes('text/markdown') || contentType.includes('text/x-markdown')
-        await processPage(url, body, '', 0, isMarkdown)
+        // Skip non-HTML/non-Markdown responses
+        if (!isHtml && !isMarkdown)
+          return
+        await processPage(url, body, '', depth, isMarkdown)
       }
       catch (error) {
         if (verbose)
@@ -715,13 +790,26 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
           success: false,
           error: error instanceof Error ? error.message : 'Unknown error',
           metadata: { title: '', description: '', links: [] },
-          depth: 0,
+          depth,
         })
 
         progress.crawling.processed = results.length
         onProgress?.(progress)
       }
-    })
+    }
+
+    // Initial wave: process starting URLs
+    await runConcurrent(urlsToProcess, DEFAULT_CONCURRENCY, url => fetchPage(url, 0))
+    totalProcessed += urlsToProcess.length
+
+    // BFS: process discovered links in waves until maxDepth or maxRequests
+    while (pendingUrls.length > 0 && totalProcessed < maxRequestsPerCrawl) {
+      const batch = pendingUrls.splice(0, maxRequestsPerCrawl - totalProcessed)
+      progress.crawling.total += batch.length
+      onProgress?.(progress)
+      await runConcurrent(batch, DEFAULT_CONCURRENCY, item => fetchPage(item.url, item.depth))
+      totalProcessed += batch.length
+    }
   }
 
   // Mark crawling as completed
