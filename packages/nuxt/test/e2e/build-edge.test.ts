@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { setup, useTestContext } from '@nuxt/test-utils/e2e'
+import { setup } from '@nuxt/test-utils/e2e'
 import { describe, expect, it } from 'vitest'
 
 // Tests that mdream uses the WASM build for edge presets instead of the NAPI binding.
