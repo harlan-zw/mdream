@@ -1864,8 +1864,8 @@ impl ConvertState {
             self.generate_frontmatter_yaml();
         }
 
-        // Special: empty links
-        if node.tag_id == Some(TAG_A) && node.child_text_node_index == 0 {
+        // Special: empty links — synthesize text from title/aria-label
+        if node.tag_id == Some(TAG_A) && node.child_text_node_index == 0 && !node.excluded_from_markdown {
             let prefix = node.attributes.get("title").or_else(|| node.attributes.get("aria-label")).cloned().unwrap_or_default();
             if !prefix.is_empty() {
                 let node_depth = node.depth;
