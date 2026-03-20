@@ -177,10 +177,6 @@ pub struct ConvertState {
     text_buffer_contains_non_whitespace: bool,
     just_closed_tag: bool,
     is_first_text_in_element: bool,
-    in_single_quote: bool,
-    in_double_quote: bool,
-    in_backtick: bool,
-    last_char_was_backslash: bool,
     in_non_nesting: bool,
     escape_ctx: u8,
     in_pre: bool,
@@ -271,10 +267,6 @@ impl ConvertState {
             text_buffer_contains_non_whitespace: false,
             just_closed_tag: false,
             is_first_text_in_element: false,
-            in_single_quote: false,
-            in_double_quote: false,
-            in_backtick: false,
-            last_char_was_backslash: false,
             in_non_nesting: false,
             escape_ctx: 0,
             in_pre: false,
@@ -398,18 +390,6 @@ impl ConvertState {
             let cc = bytes[i];
 
             if cc != LT_CHAR {
-                // TURBO SKIP: for non-nesting tags that exclude text (script, style, noscript)
-                // Skip all content until next '<' — no text processing, no quote tracking needed
-                if self.in_non_nesting {
-                    if let Some(parent) = self.stack.last() {
-                        if parent.excludes_text_nodes {
-                            i += 1;
-                            while i < chunk_length && bytes[i] != LT_CHAR { i += 1; }
-                            continue;
-                        }
-                    }
-                }
-
                 // FAST PATH: batch contiguous plain ASCII text (>32, <128, not & or <)
                 // Skip when: in escape context, non-nesting mode, or pre tag
                 if cc > 32 && cc < 0x80 && cc != AMPERSAND_CHAR
@@ -450,7 +430,7 @@ impl ConvertState {
                     }
                     self.last_char_was_whitespace = true;
                     self.text_buffer_contains_whitespace = true;
-                    self.last_char_was_backslash = false;
+
                 } else {
                     self.text_buffer_contains_non_whitespace = true;
                     self.last_char_was_whitespace = false;
@@ -464,7 +444,7 @@ impl ConvertState {
                             text_buffer.push(ch);
                             i += ch.len_utf8();
                             } else { i += 1; }
-                            self.last_char_was_backslash = false;
+        
                             continue;
                         }
                     } else if cc == PIPE_CHAR && (self.escape_ctx & ESC_TABLE) != 0 {
@@ -482,20 +462,10 @@ impl ConvertState {
                     } else if let Some(ch) = chunk[i..].chars().next() {
                         text_buffer.push(ch);
                         i += ch.len_utf8();
-                        self.last_char_was_backslash = false;
+    
                         continue;
                     }
 
-                    if self.in_non_nesting && !self.last_char_was_backslash {
-                        if cc == APOS_CHAR && !self.in_double_quote && !self.in_backtick {
-                            self.in_single_quote = !self.in_single_quote;
-                        } else if cc == QUOTE_CHAR && !self.in_single_quote && !self.in_backtick {
-                            self.in_double_quote = !self.in_double_quote;
-                        } else if cc == BACKTICK_CHAR && !self.in_single_quote && !self.in_double_quote {
-                            self.in_backtick = !self.in_backtick;
-                        }
-                    }
-                    self.last_char_was_backslash = cc == BACKSLASH_CHAR && !self.last_char_was_backslash;
                 }
                 i += 1;
                 continue;
@@ -505,6 +475,46 @@ impl ConvertState {
             if i + 1 >= chunk_length {
                 text_buffer.push(cc as char);
                 break;
+            }
+
+            // Non-nesting guard: inside script/style/title/textarea, only the
+            // matching closing tag exits. All other '<' patterns (comments,
+            // non-matching closing tags, opening tags) are treated as literal text.
+            if self.in_non_nesting {
+                let next = bytes[i + 1];
+                if next == SLASH_CHAR {
+                    let peek_start = i + 2;
+                    let mut peek_end = peek_start;
+                    while peek_end < chunk_length {
+                        let c = bytes[peek_end];
+                        if c == GT_CHAR || is_whitespace(c) { break; }
+                        peek_end += 1;
+                    }
+                    let peek_name = &chunk[peek_start..peek_end];
+                    let peek_tag_id = if peek_name.bytes().any(|b| b.is_ascii_uppercase()) {
+                        crate::consts::get_tag_id(&peek_name.to_ascii_lowercase())
+                    } else {
+                        crate::consts::get_tag_id(peek_name)
+                    };
+                    if self.stack.last().is_some_and(|curr| curr.tag_id == peek_tag_id) {
+                        // Matching closing tag: fall through to normal closing tag processing
+                        if !text_buffer.is_empty() {
+                            self.process_text_buffer(&mut text_buffer);
+                            text_buffer.clear();
+                        }
+                        let result = self.process_closing_tag(chunk, i);
+                        if result.complete {
+                            i = result.new_position;
+                        } else {
+                            text_buffer.push_str(&chunk[result.remaining_start..]);
+                            break;
+                        }
+                        continue;
+                    }
+                }
+                // Not a matching closing tag: treat '<' as literal text
+                i += 1;
+                continue;
             }
 
             let next = bytes[i + 1];
@@ -522,33 +532,6 @@ impl ConvertState {
                     break;
                 }
             } else if next == SLASH_CHAR {
-                if self.in_non_nesting {
-                    let in_quotes = self.in_single_quote || self.in_double_quote || self.in_backtick;
-                    if in_quotes {
-                        text_buffer.push(cc as char);
-                        i += 1;
-                        continue;
-                    }
-                    // Peek at closing tag name to check if it matches the non-nesting tag
-                    let peek_start = i + 2;
-                    let mut peek_end = peek_start;
-                    while peek_end < chunk_length {
-                        let c = bytes[peek_end];
-                        if c == GT_CHAR || is_whitespace(c) { break; }
-                        peek_end += 1;
-                    }
-                    let peek_name = &chunk[peek_start..peek_end];
-                    let peek_tag_id = if peek_name.bytes().any(|b| b.is_ascii_uppercase()) {
-                        crate::consts::get_tag_id(&peek_name.to_ascii_lowercase())
-                    } else {
-                        crate::consts::get_tag_id(peek_name)
-                    };
-                    if self.stack.last().map_or(true, |curr| curr.tag_id != peek_tag_id) {
-                        text_buffer.push(bytes[i] as char);
-                        i += 1;
-                        continue;
-                    }
-                }
                 if !text_buffer.is_empty() {
                     self.process_text_buffer(&mut text_buffer);
                     text_buffer.clear();
@@ -561,20 +544,6 @@ impl ConvertState {
                     break;
                 }
             } else {
-                // Opening tag
-                // For non-nesting tags that exclude text nodes (script, style),
-                // skip ALL opening tags — only the matching closing tag should exit the mode.
-                // Without this, text like `<script>` in JS comments/strings gets misinterpreted
-                // as a real nested tag, corrupting the tag stack.
-                if self.in_non_nesting {
-                    if let Some(parent) = self.stack.last() {
-                        if parent.excludes_text_nodes {
-                            text_buffer.push(cc as char);
-                            i += 1;
-                            continue;
-                        }
-                    }
-                }
                 let mut i2 = i + 1;
                 let tag_name_start = i2;
                 let mut tag_name_end = None;
@@ -606,17 +575,6 @@ impl ConvertState {
                         .and_then(|ov| ov.alias_tag_id)
                 };
                 i2 = tag_name_end;
-
-                if self.in_non_nesting
-                    && (tag_name_raw.is_empty() || {
-                        let in_quotes = self.in_single_quote || self.in_double_quote || self.in_backtick;
-                        in_quotes || self.stack.last().is_some_and(|curr| curr.tag_id != tag_id)
-                    })
-                {
-                    text_buffer.push(bytes[i] as char);
-                    i += 1;
-                    continue;
-                }
 
                 if tag_name_raw.is_empty() {
                     text_buffer.push(bytes[i] as char);
@@ -1814,10 +1772,6 @@ impl ConvertState {
 
         if self.stack.last().is_some_and(|n| n.is_non_nesting) && !self_closing {
             self.in_non_nesting = true;
-            self.in_single_quote = false;
-            self.in_double_quote = false;
-            self.in_backtick = false;
-            self.last_char_was_backslash = false;
         }
 
         if !self_closing { self.just_closed_tag = false; }
@@ -1913,7 +1867,6 @@ impl ConvertState {
         self.emit_exit_element(&node);
 
         let node_tag_id = node.tag_id;
-        let node_is_non_nesting = node.is_non_nesting;
         self.recycle_node(node);
 
         if let Some(id) = node_tag_id {
@@ -1922,13 +1875,6 @@ impl ConvertState {
                 self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
             }
             self.update_escape_ctx_on_close(id);
-        }
-
-        if node_is_non_nesting {
-            self.in_single_quote = false;
-            self.in_double_quote = false;
-            self.in_backtick = false;
-            self.last_char_was_backslash = false;
         }
 
         self.in_non_nesting = self.stack.last().is_some_and(|n| n.is_non_nesting);

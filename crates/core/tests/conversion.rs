@@ -1199,3 +1199,73 @@ fn script_with_inline_svg_containing_script_tag_reference() {
     assert!(result.contains("Title"), "Title missing from output: {}", result);
     assert!(result.contains("Body content here"), "Body content missing from output: {}", result);
 }
+
+// ── Script non-nesting: edge cases ──
+
+#[test]
+fn script_html_comment_inside_script_does_not_eat_content() {
+    // <!-- --> inside <script> should NOT trigger comment processing
+    let html = r#"<head><script>
+    <!-- old browser hiding
+    var x = 1;
+    // -->
+    </script></head><body><p>Visible</p></body>"#;
+    let result = convert(html);
+    assert!(result.contains("Visible"), "HTML comment inside script ate body content: {}", result);
+}
+
+#[test]
+fn script_html_comment_like_string_does_not_eat_content() {
+    // String containing <!-- should not eat subsequent content
+    let html = r#"<head><script>var x = "<!--"; var y = "-->";</script></head><body><p>After</p></body>"#;
+    let result = convert(html);
+    assert!(result.contains("After"), "Comment-like string in script ate body content: {}", result);
+}
+
+#[test]
+fn script_nested_template_literal() {
+    // Nested template literals break simple toggle tracking
+    let html = r#"<head><script>var x = `outer ${`inner`} end`;</script></head><body><p>Content</p></body>"#;
+    let result = convert(html);
+    assert!(result.contains("Content"), "Nested template literal broke parsing: {}", result);
+}
+
+#[test]
+fn script_escaped_closing_tag_in_string() {
+    // Properly escaped </script> in JS (as web developers should write it)
+    let html = r#"<head><script>var x = '<\/script>';</script></head><body><p>Escaped</p></body>"#;
+    let result = convert(html);
+    assert!(result.contains("Escaped"), "Escaped closing tag broke parsing: {}", result);
+}
+
+#[test]
+fn script_with_cdata_like_content() {
+    let html = r#"<head><script>//<![CDATA[
+    var x = 1 < 2;
+    //]]></script></head><body><p>CDATA</p></body>"#;
+    let result = convert(html);
+    assert!(result.contains("CDATA"), "CDATA-like content in script broke parsing: {}", result);
+}
+
+#[test]
+fn multiple_scripts_interleaved_with_content() {
+    let html = r#"<body>
+    <p>Before</p>
+    <script>var a = 1 < 2;</script>
+    <p>Middle</p>
+    <script>var b = "<!-- not a comment -->";</script>
+    <p>After</p>
+    </body>"#;
+    let result = convert(html);
+    assert!(result.contains("Before"), "Missing Before: {}", result);
+    assert!(result.contains("Middle"), "Missing Middle: {}", result);
+    assert!(result.contains("After"), "Missing After: {}", result);
+}
+
+#[test]
+fn script_with_less_than_followed_by_exclamation() {
+    // <! inside script should not trigger comment/doctype processing
+    let html = r#"<head><script>if (x <! y) { z(); }</script></head><body><p>Bang</p></body>"#;
+    let result = convert(html);
+    assert!(result.contains("Bang"), "<! operator in script broke parsing: {}", result);
+}
