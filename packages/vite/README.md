@@ -198,10 +198,42 @@ The middleware sets the following headers on Markdown responses:
 | `X-Markdown-Source` | `dev`, `preview`, or `build` | Which mode generated the response |
 | `X-Markdown-Cached` | `true` or `false` | Whether the response was served from cache |
 
+### Programmatic Usage
+
+The package re-exports `htmlToMarkdown` and `streamHtmlToMarkdown` from `mdream`, so you can use them directly without adding `mdream` as a separate dependency:
+
+```ts
+import { htmlToMarkdown } from '@mdream/vite'
+
+const markdown = htmlToMarkdown('<h1>Hello</h1>', {
+  origin: 'https://example.com',
+  clean: true,
+})
+```
+
+Streaming conversion:
+
+```ts
+import { streamHtmlToMarkdown } from '@mdream/vite'
+
+for await (const chunk of streamHtmlToMarkdown(htmlStream)) {
+  process.stdout.write(chunk)
+}
+```
+
+### Exported Functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `viteHtmlToMarkdownPlugin` | `(options?: ViteHtmlToMarkdownOptions) => Plugin` | Vite plugin for automatic HTML to markdown conversion |
+| `htmlToMarkdown` | `(html: string, options?: Partial<MdreamOptions>) => string` | Convert an HTML string to markdown |
+| `streamHtmlToMarkdown` | `(stream: ReadableStream, options?: Partial<MdreamOptions>) => AsyncIterable<string>` | Stream HTML to markdown |
+
 ### Exported Types
 
 The package exports the following TypeScript types from `@mdream/vite`:
 
+- `MdreamOptions`: Options for `htmlToMarkdown` and `streamHtmlToMarkdown`.
 - `ViteHtmlToMarkdownOptions`: Plugin configuration options.
 - `CacheEntry`: Internal cache entry shape (`content`, `timestamp`, `ttl`).
 - `MarkdownConversionResult`: Result object with `content`, `cached`, and `source` fields.
