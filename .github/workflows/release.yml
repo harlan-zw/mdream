@@ -14,12 +14,6 @@ jobs:
   native:
     uses: ./.github/workflows/release-native.yml
 
-  binaries:
-    needs: [publish]
-    uses: ./.github/workflows/release-binaries.yml
-    permissions:
-      contents: write
-
   publish:
     runs-on: ubuntu-latest
     needs: [native]
