@@ -40,7 +40,7 @@ const IGNORED_PATH_PREFIXES = [
 ]
 
 // Extensions that are known to return HTML content (or no extension = likely a route)
-const HTML_EXTENSIONS_RE = /\.(html?|php|aspx?|jsp)$/i
+const HTML_EXTENSIONS_RE = /\.(?:html?|php|aspx?|jsp)$/i
 
 function extractCdataUrl(url: string): string {
   if (url.startsWith('<![CDATA[') && url.endsWith(']]>'))
@@ -514,6 +514,9 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   // Pre-compute shared origin if provided (avoids per-page URL parsing)
   const sharedOrigin = origin || ''
 
+  // Queue for BFS link following
+  const pendingUrls: { url: string, depth: number }[] = []
+
   // Process a single page (shared between HTTP and Playwright paths)
   const processPage = async (url: string, content: string, initialTitle: string, depth: number, isMarkdown = false) => {
     const parsedUrl = new URL(url)
@@ -605,9 +608,6 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       }
     }
   }
-
-  // Queue for BFS link following
-  const pendingUrls: { url: string, depth: number }[] = []
 
   // Limit URLs to maxRequestsPerCrawl
   const urlsToProcess = startingUrls.slice(0, maxRequestsPerCrawl)

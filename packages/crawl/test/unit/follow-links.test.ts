@@ -161,7 +161,7 @@ describe('follow links (BFS crawling)', () => {
   })
 
   it('respects maxRequestsPerCrawl limit across BFS waves', async () => {
-    const results = await crawlAndGenerate({
+    await crawlAndGenerate({
       urls: ['https://example.com'],
       outputDir: tmpOut(),
       maxDepth: 3,
