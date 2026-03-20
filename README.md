@@ -6,6 +6,9 @@
 
 > ☁️ The fastest HTML to markdown converter on GitHub. Optimized for LLMs and supports streaming.
 
+> [!TIP]
+> 🎉 **Mdream v1 is here!** Read the [v1 release notes](https://github.com/harlan-zw/mdream/releases/tag/v1.0.0).
+
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
 <p align="center">
