@@ -60,6 +60,10 @@ export default defineNuxtModule<ModuleOptions>({
     nuxt.hook('nitro:config', (nitroConfig) => {
       const preset = (nitroConfig.preset || '').toString()
       if (edgePresets.has(preset)) {
+        // Enable experimental.wasm so Nitro's unwasm plugin handles .wasm imports
+        // from the mdream edge entry point (dist/edge.mjs → wasm/mdream_edge_bg.wasm)
+        nitroConfig.experimental = nitroConfig.experimental || {}
+        nitroConfig.experimental.wasm = true
         return
       }
       nitroConfig.rollupConfig = nitroConfig.rollupConfig || {}
