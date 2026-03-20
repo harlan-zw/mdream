@@ -237,6 +237,29 @@ pnpm add mdream@beta
 > npx skilld add mdream
 > ```
 
+### Bundler Compatibility
+
+The `mdream` package uses native Node.js bindings (NAPI-RS) which cannot be statically bundled. If your bundler fails to resolve `mdream`, mark it as external:
+
+**Next.js / Turbopack:**
+```js
+// next.config.js
+const nextConfig = {
+  serverExternalPackages: ['mdream'],
+}
+```
+
+**Webpack / other bundlers:**
+```js
+externals: ['mdream']
+```
+
+> [!TIP]
+> [`@mdream/js`](https://github.com/harlan-zw/mdream/tree/main/packages/js) has zero native dependencies and works with all bundlers without configuration.
+
+> [!TIP]
+> Using Vite? [`@mdream/vite`](https://github.com/harlan-zw/mdream/tree/main/packages/vite) handles this automatically.
+
 ### Basic Usage
 
 ```ts
