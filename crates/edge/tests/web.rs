@@ -97,7 +97,7 @@ fn streaming() {
     let chunk1 = stream.process_chunk("<h1>He");
     let chunk2 = stream.process_chunk("llo</h1><p>World</p>");
     let final_chunk = stream.finish();
-    let full = format!("{}{}{}", chunk1, chunk2, final_chunk);
+    let full = format!("{chunk1}{chunk2}{final_chunk}");
     assert!(full.contains("# Hello"));
     assert!(full.contains("World"));
 }
@@ -106,7 +106,7 @@ fn streaming() {
 fn large_document() {
     let mut html = String::with_capacity(10000);
     for i in 0..100 {
-        html.push_str(&format!("<p>Paragraph {} with some content.</p>", i));
+        html.push_str(&format!("<p>Paragraph {i} with some content.</p>"));
     }
     let result = convert(&html);
     assert!(result.contains("Paragraph 0"));

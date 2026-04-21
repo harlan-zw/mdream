@@ -57,13 +57,12 @@ fn decode_html_entities_alloc(text: &str) -> String {
                 if i < len && bytes[i] == b';' && i > num_start {
                     let num_str = &text[num_start..i];
                     let base = if is_hex { 16 } else { 10 };
-                    if let Ok(code_point) = u32::from_str_radix(num_str, base) {
-                        if let Some(c) = char::from_u32(code_point) {
+                    if let Ok(code_point) = u32::from_str_radix(num_str, base)
+                        && let Some(c) = char::from_u32(code_point) {
                             result.push(c);
                             i += 1;
                             continue;
                         }
-                    }
                 }
                 i = start;
             } else {

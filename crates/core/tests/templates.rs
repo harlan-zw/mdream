@@ -148,10 +148,10 @@ mod edge_cases {
 
     #[test]
     fn table_conversion() {
-        let html = r#"<table>
+        let html = r"<table>
             <thead><tr><th>Name</th><th>Value</th></tr></thead>
             <tbody><tr><td>A</td><td>1</td></tr><tr><td>B</td><td>2</td></tr></tbody>
-        </table>"#;
+        </table>";
         let md = convert(html);
         assert!(md.contains('|'));
         assert!(md.contains("Name"));

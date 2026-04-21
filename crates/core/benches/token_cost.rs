@@ -56,14 +56,7 @@ fn analyze(label: &str, html: &str) {
     let html_reduction = ((html_tokens as f64 - minimal_clean_tokens as f64) / html_tokens as f64) * 100.0;
     let default_reduction = ((default_tokens as f64 - minimal_clean_tokens as f64) / default_tokens as f64) * 100.0;
 
-    println!("| {:28} | {:>8.0} KB | {:>8} | {:>8} | {:>8} | {:>5.0}% | {:>5.0}% |",
-        label,
-        html_kb,
-        html_tokens,
-        default_tokens,
-        minimal_clean_tokens,
-        html_reduction,
-        default_reduction,
+    println!("| {label:28} | {html_kb:>8.0} KB | {html_tokens:>8} | {default_tokens:>8} | {minimal_clean_tokens:>8} | {html_reduction:>5.0}% | {default_reduction:>5.0}% |",
     );
 }
 

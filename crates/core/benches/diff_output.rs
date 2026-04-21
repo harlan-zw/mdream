@@ -25,7 +25,7 @@ fn make_opts(clean: bool) -> mdream::types::HTMLToMarkdownOptions {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let fixture = args.get(1).map(|s| s.as_str()).unwrap_or("tests/fixtures/vuejs-docs.html");
+    let fixture = args.get(1).map_or("tests/fixtures/vuejs-docs.html", std::string::String::as_str);
 
     let html = std::fs::read_to_string(fixture).expect("fixture not found");
 

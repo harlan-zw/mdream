@@ -81,7 +81,7 @@ fn anchor_link_with_origin_stays_relative() {
 #[test]
 fn protocol_relative_url() {
     assert_eq!(
-        convert(r##"<a href="//example.com/page#section">Link</a>"##),
+        convert(r#"<a href="//example.com/page#section">Link</a>"#),
         "[Link](https://example.com/page#section)"
     );
 }
@@ -89,7 +89,7 @@ fn protocol_relative_url() {
 #[test]
 fn relative_path_with_origin() {
     assert_eq!(
-        convert_with_origin(r##"<a href="/page#section">Link</a>"##, "https://example.com"),
+        convert_with_origin(r#"<a href="/page#section">Link</a>"#, "https://example.com"),
         "[Link](https://example.com/page#section)"
     );
 }
@@ -97,7 +97,7 @@ fn relative_path_with_origin() {
 #[test]
 fn relative_path_without_origin() {
     assert_eq!(
-        convert(r##"<a href="/page#section">Link</a>"##),
+        convert(r#"<a href="/page#section">Link</a>"#),
         "[Link](/page#section)"
     );
 }
@@ -444,13 +444,13 @@ fn streaming_empty() {
 fn large_table() {
     let mut html = String::from("<table><tr>");
     for i in 0..10 {
-        html.push_str(&format!("<th>Col{}</th>", i));
+        html.push_str(&format!("<th>Col{i}</th>"));
     }
     html.push_str("</tr>");
     for _ in 0..100 {
         html.push_str("<tr>");
         for i in 0..10 {
-            html.push_str(&format!("<td>Val{}</td>", i));
+            html.push_str(&format!("<td>Val{i}</td>"));
         }
         html.push_str("</tr>");
     }
@@ -871,7 +871,7 @@ fn clean_keeps_valid_strips_broken() {
 #[test]
 fn clean_preserves_absolute_url_fragments() {
     assert_eq!(
-        convert_with_clean(r##"<a href="https://example.com/page#section">Link</a>"##, clean_all()),
+        convert_with_clean(r#"<a href="https://example.com/page#section">Link</a>"#, clean_all()),
         "[Link](https://example.com/page#section)"
     );
 }
@@ -886,7 +886,7 @@ fn clean_self_referencing_heading_link() {
 
 #[test]
 fn clean_collapses_blank_lines() {
-    let md = convert_with_clean(r#"<p>First</p><br><br><br><br><br><p>Second</p>"#, clean_all());
+    let md = convert_with_clean(r"<p>First</p><br><br><br><br><br><p>Second</p>", clean_all());
     assert!(!md.contains("\n\n\n"), "Should not have 3+ consecutive newlines");
     assert!(md.contains("First"));
     assert!(md.contains("Second"));
@@ -1105,7 +1105,7 @@ fn isolate_main_excludes_links_after_main_closes() {
 
 #[test]
 fn isolate_main_finds_deeply_nested_main() {
-    let html = r#"<body><nav>Nav</nav><div><div><div><div><div><div><div><div><div><div><main><h1>Deep Title</h1><p>Deep content</p></main></div></div></div></div></div></div></div></div></div></div><footer>Footer</footer></body>"#;
+    let html = r"<body><nav>Nav</nav><div><div><div><div><div><div><div><div><div><div><main><h1>Deep Title</h1><p>Deep content</p></main></div></div></div></div></div></div></div></div></div></div><footer>Footer</footer></body>";
     let result = convert_with_isolate_main(html);
     assert!(result.contains("# Deep Title"));
     assert!(result.contains("Deep content"));
@@ -1162,11 +1162,11 @@ fn script_shopify_for_loop_pattern() {
 
 #[test]
 fn script_multiple_inline_scripts_in_head() {
-    let html = r#"<head>
+    let html = r"<head>
 <script>var x = 1 < 2;</script>
 <script>var y = a < b;</script>
 <script>for(var i=0;i<10;i++){}</script>
-</head><body><h1>Title</h1><p>Body text</p></body>"#;
+</head><body><h1>Title</h1><p>Body text</p></body>";
     let result = convert(html);
     assert!(result.contains("Title"));
     assert!(result.contains("Body text"));
@@ -1196,8 +1196,8 @@ fn script_with_inline_svg_containing_script_tag_reference() {
     for (var i = 0; i < buttons.length; i++) { }
     </script></head><body><main><h1>Title</h1><p>Body content here</p></main></body>"#;
     let result = convert(html);
-    assert!(result.contains("Title"), "Title missing from output: {}", result);
-    assert!(result.contains("Body content here"), "Body content missing from output: {}", result);
+    assert!(result.contains("Title"), "Title missing from output: {result}");
+    assert!(result.contains("Body content here"), "Body content missing from output: {result}");
 }
 
 // ── Script non-nesting: edge cases ──
@@ -1205,13 +1205,13 @@ fn script_with_inline_svg_containing_script_tag_reference() {
 #[test]
 fn script_html_comment_inside_script_does_not_eat_content() {
     // <!-- --> inside <script> should NOT trigger comment processing
-    let html = r#"<head><script>
+    let html = r"<head><script>
     <!-- old browser hiding
     var x = 1;
     // -->
-    </script></head><body><p>Visible</p></body>"#;
+    </script></head><body><p>Visible</p></body>";
     let result = convert(html);
-    assert!(result.contains("Visible"), "HTML comment inside script ate body content: {}", result);
+    assert!(result.contains("Visible"), "HTML comment inside script ate body content: {result}");
 }
 
 #[test]
@@ -1219,32 +1219,32 @@ fn script_html_comment_like_string_does_not_eat_content() {
     // String containing <!-- should not eat subsequent content
     let html = r#"<head><script>var x = "<!--"; var y = "-->";</script></head><body><p>After</p></body>"#;
     let result = convert(html);
-    assert!(result.contains("After"), "Comment-like string in script ate body content: {}", result);
+    assert!(result.contains("After"), "Comment-like string in script ate body content: {result}");
 }
 
 #[test]
 fn script_nested_template_literal() {
     // Nested template literals break simple toggle tracking
-    let html = r#"<head><script>var x = `outer ${`inner`} end`;</script></head><body><p>Content</p></body>"#;
+    let html = r"<head><script>var x = `outer ${`inner`} end`;</script></head><body><p>Content</p></body>";
     let result = convert(html);
-    assert!(result.contains("Content"), "Nested template literal broke parsing: {}", result);
+    assert!(result.contains("Content"), "Nested template literal broke parsing: {result}");
 }
 
 #[test]
 fn script_escaped_closing_tag_in_string() {
     // Properly escaped </script> in JS (as web developers should write it)
-    let html = r#"<head><script>var x = '<\/script>';</script></head><body><p>Escaped</p></body>"#;
+    let html = r"<head><script>var x = '<\/script>';</script></head><body><p>Escaped</p></body>";
     let result = convert(html);
-    assert!(result.contains("Escaped"), "Escaped closing tag broke parsing: {}", result);
+    assert!(result.contains("Escaped"), "Escaped closing tag broke parsing: {result}");
 }
 
 #[test]
 fn script_with_cdata_like_content() {
-    let html = r#"<head><script>//<![CDATA[
+    let html = r"<head><script>//<![CDATA[
     var x = 1 < 2;
-    //]]></script></head><body><p>CDATA</p></body>"#;
+    //]]></script></head><body><p>CDATA</p></body>";
     let result = convert(html);
-    assert!(result.contains("CDATA"), "CDATA-like content in script broke parsing: {}", result);
+    assert!(result.contains("CDATA"), "CDATA-like content in script broke parsing: {result}");
 }
 
 #[test]
@@ -1257,15 +1257,15 @@ fn multiple_scripts_interleaved_with_content() {
     <p>After</p>
     </body>"#;
     let result = convert(html);
-    assert!(result.contains("Before"), "Missing Before: {}", result);
-    assert!(result.contains("Middle"), "Missing Middle: {}", result);
-    assert!(result.contains("After"), "Missing After: {}", result);
+    assert!(result.contains("Before"), "Missing Before: {result}");
+    assert!(result.contains("Middle"), "Missing Middle: {result}");
+    assert!(result.contains("After"), "Missing After: {result}");
 }
 
 #[test]
 fn script_with_less_than_followed_by_exclamation() {
     // <! inside script should not trigger comment/doctype processing
-    let html = r#"<head><script>if (x <! y) { z(); }</script></head><body><p>Bang</p></body>"#;
+    let html = r"<head><script>if (x <! y) { z(); }</script></head><body><p>Bang</p></body>";
     let result = convert(html);
-    assert!(result.contains("Bang"), "<! operator in script broke parsing: {}", result);
+    assert!(result.contains("Bang"), "<! operator in script broke parsing: {result}");
 }

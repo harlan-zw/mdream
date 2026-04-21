@@ -119,14 +119,13 @@ fn slugify_heading(text: &str) -> String {
             // Look for ](url) pattern
             if let Some(close) = text[i+1..].find(']') {
                 let close_abs = i + 1 + close;
-                if close_abs + 1 < len && bytes[close_abs + 1] == b'(' {
-                    if let Some(paren_close) = text[close_abs+2..].find(')') {
+                if close_abs + 1 < len && bytes[close_abs + 1] == b'('
+                    && let Some(paren_close) = text[close_abs+2..].find(')') {
                         // Extract link text only
                         cleaned.push_str(&text[i+1..close_abs]);
                         i = close_abs + 2 + paren_close + 1;
                         continue;
                     }
-                }
             }
             i += 1;
         } else if bytes[i] == b'*' || bytes[i] == b'_' || bytes[i] == b'`' || bytes[i] == b'~' {
@@ -693,19 +692,18 @@ impl ConvertState {
         let configured_new_lines = new_line_config[0];
 
         // Clean mode — single guard for all clean checks
-        if self.clean_flags != 0 {
-            if let Some(id) = tag_id {
+        if self.clean_flags != 0
+            && let Some(id) = tag_id {
                 if id == TAG_A {
                     // emptyLinks: skip href="#" or "javascript:"
                     if self.clean_flags & CLEAN_EMPTY_LINKS != 0 {
                         let node = &self.stack[self.stack.len() - 1];
-                        if let Some(href) = node.attributes.get("href") {
-                            if href == "#" || href.starts_with("javascript:") {
+                        if let Some(href) = node.attributes.get("href")
+                            && (href == "#" || href.starts_with("javascript:")) {
                                 self.skip_current_link = true;
                                 self.last_node_is_inline = is_inline;
                                 return;
                             }
-                        }
                         self.skip_current_link = false;
                     }
                     // Record buffer position BEFORE write_output emits `[`
@@ -720,19 +718,16 @@ impl ConvertState {
                     }
                 }
             }
-        }
 
         self.write_output(true, is_inline, configured_new_lines, output.as_deref());
 
         // Clean: track heading start for slug collection
-        if self.clean_flags & CLEAN_FRAGMENTS != 0 {
-            if let Some(id) = tag_id {
-                if (TAG_H1..=TAG_H6).contains(&id) && self.depth_map[TAG_A as usize] == 0 {
+        if self.clean_flags & CLEAN_FRAGMENTS != 0
+            && let Some(id) = tag_id
+                && (TAG_H1..=TAG_H6).contains(&id) && self.depth_map[TAG_A as usize] == 0 {
                     self.in_heading = true;
                     self.heading_buffer_start = self.buffer.len();
                 }
-            }
-        }
     }
 
     /// Emit markdown for exiting an element (node already popped from stack).
@@ -843,9 +838,9 @@ impl ConvertState {
             // selfLinkHeadings: ## [Title](#slug) → ## Title
             if self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 {
                 let in_heading = (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0);
-                if in_heading {
-                    if let Some(href) = node.attributes.get("href") {
-                        if href.starts_with('#') && text_len > 0 {
+                if in_heading
+                    && let Some(href) = node.attributes.get("href")
+                        && href.starts_with('#') && text_len > 0 {
                             // Remove [ and keep text only — use truncate+copy without intermediate String
                             let new_len = bracket_pos + text_len;
                             // SAFETY: bracket_pos < text_start are within buffer bounds (guarded above).
@@ -860,13 +855,11 @@ impl ConvertState {
                             self.last_node_is_inline = is_inline;
                             return;
                         }
-                    }
-                }
             }
 
             // redundantLinks: [url](url) → url
-            if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0 {
-                if let Some(href) = node.attributes.get("href") {
+            if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0
+                && let Some(href) = node.attributes.get("href") {
                     let resolved = Self::resolve_url(href, self.options.origin.as_deref(), self.options.clean_urls);
                     if link_text == resolved.as_ref() && text_len > 0 {
                         // Remove [ and keep text only — use truncate+copy without intermediate String
@@ -883,13 +876,12 @@ impl ConvertState {
                         return;
                     }
                 }
-            }
         }
 
         // Collect heading slug before writing exit output
-        if self.in_heading {
-            if let Some(id) = tag_id {
-                if (TAG_H1..=TAG_H6).contains(&id) {
+        if self.in_heading
+            && let Some(id) = tag_id
+                && (TAG_H1..=TAG_H6).contains(&id) {
                     let heading_text = &self.buffer[self.heading_buffer_start..];
                     let slug = slugify_heading(heading_text);
                     if !slug.is_empty() {
@@ -897,8 +889,6 @@ impl ConvertState {
                     }
                     self.in_heading = false;
                 }
-            }
-        }
 
         // TAG_A exit: write ](url) directly to buffer — zero allocation
         if !has_override && tag_id == Some(TAG_A) && table_separator.is_none() {
@@ -927,16 +917,14 @@ impl ConvertState {
                 self.last_content_cache_len = self.buffer.len(); // will be recalculated
             }
             // Record fragment link position for deferred fixup
-            if self.clean_flags & CLEAN_FRAGMENTS != 0 {
-                if let Some(href) = node.attributes.get("href") {
-                    if href.starts_with('#') && href.len() > 1 {
+            if self.clean_flags & CLEAN_FRAGMENTS != 0
+                && let Some(href) = node.attributes.get("href")
+                    && href.starts_with('#') && href.len() > 1 {
                         let mut bp = self.link_bracket_pos;
                         let buf = self.buffer.as_bytes();
                         while bp < buf.len() && buf[bp] != b'[' { bp += 1; }
                         self.fragment_links.push((bp, self.buffer.len()));
                     }
-                }
-            }
             self.last_node_is_inline = is_inline;
             return;
         }
@@ -951,17 +939,15 @@ impl ConvertState {
         self.write_output(false, is_inline, configured_new_lines, effective);
 
         // Record fragment link position for deferred fixup (no String alloc)
-        if self.clean_flags & CLEAN_FRAGMENTS != 0 && tag_id == Some(TAG_A) {
-            if let Some(href) = node.attributes.get("href") {
-                if href.starts_with('#') && href.len() > 1 {
+        if self.clean_flags & CLEAN_FRAGMENTS != 0 && tag_id == Some(TAG_A)
+            && let Some(href) = node.attributes.get("href")
+                && href.starts_with('#') && href.len() > 1 {
                     // Find actual [ position from recorded hint
                     let mut bp = self.link_bracket_pos;
                     let buf = self.buffer.as_bytes();
                     while bp < buf.len() && buf[bp] != b'[' { bp += 1; }
                     self.fragment_links.push((bp, self.buffer.len()));
                 }
-            }
-        }
     }
 
     /// Emit markdown for a text node (no TextNode allocation).
@@ -1417,8 +1403,8 @@ impl ConvertState {
                 for _ in 0..new_lines { self.buffer.push('\n'); }
             }
         } else {
-            if let Some(parent) = self.stack.last() {
-                if self.last_text_node_contains_whitespace
+            if let Some(parent) = self.stack.last()
+                && self.last_text_node_contains_whitespace
                     && (self.depth_map[TAG_PRE as usize] == 0 || parent.tag_id == Some(TAG_PRE)) {
                     let h_is_inline = is_inline;
                     let collapses = parent.collapses_inner_white_space;
@@ -1442,7 +1428,6 @@ impl ConvertState {
                     self.last_text_node_contains_whitespace = false;
                     self.has_last_text_node = false;
                 }
-            }
 
             if is_enter && !output_str.is_empty() && last_char != 0 && self.needs_spacing(last_char, output_str.as_bytes()[0]) {
                 self.buffer.push(' ');
@@ -1573,9 +1558,9 @@ impl ConvertState {
             self.has_encoded_html_entity = false;
         }
 
-        if self.has_tailwind {
-            if let Some(parent) = self.stack.last() {
-                if let Some(tw) = &parent.tailwind {
+        if self.has_tailwind
+            && let Some(parent) = self.stack.last()
+                && let Some(tw) = &parent.tailwind {
                     if tw.hidden {
                         excludes_text_nodes = true;
                     } else if !excludes_text_nodes {
@@ -1587,8 +1572,6 @@ impl ConvertState {
                         if modified { text = fix_redundant_delimiters(&new_text); }
                     }
                 }
-            }
-        }
 
         if !self.extraction_tracked.is_empty() {
             let current_depth = self.stack.len();
@@ -1710,9 +1693,8 @@ impl ConvertState {
             }
 
             if self.has_filter {
-                if let Some(style) = tag.attributes.get("style") {
-                    if style.contains("absolute") || style.contains("fixed") { skip_node = true; }
-                }
+                if let Some(style) = tag.attributes.get("style")
+                    && (style.contains("absolute") || style.contains("fixed")) { skip_node = true; }
                 if !skip_node {
                     for (_, parsed) in &self.filter_exclude_parsed {
                         if matches_selector(&tag, parsed) { skip_node = true; filter_excluded = true; break; }
@@ -1756,15 +1738,14 @@ impl ConvertState {
                     {
                         self.isolate_first_header_depth = Some(self.depth);
                     }
-                    if let Some(header_depth) = self.isolate_first_header_depth {
-                        if !self.isolate_after_footer
+                    if let Some(header_depth) = self.isolate_first_header_depth
+                        && !self.isolate_after_footer
                             && tag_id == Some(TAG_FOOTER)
                             && self.depth.saturating_sub(header_depth) <= 5
                         {
                             self.isolate_after_footer = true;
                             skip_node = true;
                         }
-                    }
                     if self.isolate_first_header_depth.is_none() {
                         if tag_id != Some(TAG_HEAD) && self.depth_map[TAG_HEAD as usize] == 0 { skip_node = true; }
                     } else if self.isolate_after_footer {
@@ -1819,8 +1800,8 @@ impl ConvertState {
         self.stack.push(tag);
 
         // Extraction
-        if !self.extraction_parsed_selectors.is_empty() {
-            if let Some(element) = self.stack.last() {
+        if !self.extraction_parsed_selectors.is_empty()
+            && let Some(element) = self.stack.last() {
                 let stack_depth = self.stack.len();
                 for (selector, parsed) in &self.extraction_parsed_selectors {
                     if matches_selector(element, parsed) {
@@ -1835,7 +1816,6 @@ impl ConvertState {
                     }
                 }
             }
-        }
 
         // Inline emit (no callback!)
         if !skip_node {
@@ -1984,14 +1964,13 @@ impl ConvertState {
         };
         let tag_id = crate::consts::get_tag_id(&tag_name);
 
-        if let Some(curr) = self.stack.last() {
-            if curr.is_non_nesting && curr.tag_id != tag_id {
+        if let Some(curr) = self.stack.last()
+            && curr.is_non_nesting && curr.tag_id != tag_id {
                 return CloseTagResult {
                     complete: false, new_position: position,
                     remaining_start: position,
                 };
             }
-        }
 
         if let Some(top) = self.stack.last() {
             // Fast path: top of stack matches (well-formed HTML)
@@ -2056,8 +2035,8 @@ impl ConvertState {
             yaml_out.push(format!("title: {}", format_val(t)));
         }
 
-        if let Some(f) = f_opts {
-            if let Some(add) = &f.additional_fields {
+        if let Some(f) = f_opts
+            && let Some(add) = &f.additional_fields {
                 let mut sorted: Vec<_> = add.iter().collect();
                 sorted.sort_by(|(a, _), (b, _)| a.cmp(b));
                 for (key, val) in sorted {
@@ -2066,7 +2045,6 @@ impl ConvertState {
                     }
                 }
             }
-        }
 
         if !self.frontmatter_meta.is_empty() {
             yaml_out.push("meta:".to_string());

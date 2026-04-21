@@ -170,7 +170,7 @@ fn splits_on_hr_underscores() {
 #[test]
 fn splits_large_content_by_size() {
     let paragraph = "Lorem ipsum dolor sit amet. ".repeat(100);
-    let md = format!("## Section\n{}\n", paragraph);
+    let md = format!("## Section\n{paragraph}\n");
     let opts = SplitterOptions {
         chunk_size: 200,
         chunk_overlap: 50,
@@ -201,7 +201,7 @@ fn separator_priority_prefers_double_newline() {
 #[test]
 fn overlap_only_on_size_splits() {
     let paragraph = "Word ".repeat(300);
-    let md = format!("{}\n", paragraph);
+    let md = format!("{paragraph}\n");
     let opts = SplitterOptions {
         chunk_size: 200,
         chunk_overlap: 50,

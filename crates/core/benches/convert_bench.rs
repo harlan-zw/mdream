@@ -11,12 +11,12 @@ fn bench(label: &str, html: &str, opts: mdream::types::HTMLToMarkdownOptions, it
         for _ in 0..iterations {
             let _ = mdream::html_to_markdown(html, opts.clone());
         }
-        let us = start.elapsed().as_micros() as f64 / iterations as f64;
+        let us = start.elapsed().as_micros() as f64 / f64::from(iterations);
         if us < best { best = us; }
     }
     let ms = best / 1000.0;
     let throughput = (size_kb / 1024.0) / (best / 1_000_000.0);
-    println!("  {label:<40} {:.2}ms  ({:.0} MB/s)", ms, throughput);
+    println!("  {label:<40} {ms:.2}ms  ({throughput:.0} MB/s)");
     best
 }
 
@@ -43,13 +43,13 @@ fn main() {
     let default_opts = mdream::types::HTMLToMarkdownOptions::default();
     let clean_opts = mdream::types::HTMLToMarkdownOptions { clean: Some(clean_all()), ..Default::default() };
 
-    println!("Best of 3 runs, {} iterations each\n", iters);
+    println!("Best of 3 runs, {iters} iterations each\n");
     println!("  {:40} {:>10}  {:>10}  {:>8}", "fixture", "default", "clean:true", "overhead");
     println!("  {:40} {:>10}  {:>10}  {:>8}", "-------", "-------", "----------", "--------");
 
     for (label, html) in &fixtures {
-        let d = bench(&format!("{} default", label), html, default_opts.clone(), iters);
-        let c = bench(&format!("{} clean", label), html, clean_opts.clone(), iters);
+        let d = bench(&format!("{label} default"), html, default_opts.clone(), iters);
+        let c = bench(&format!("{label} clean"), html, clean_opts.clone(), iters);
         let overhead = ((c - d) / d) * 100.0;
         // Reprint as table row
         println!("  {:40} {:>7.2}ms  {:>7.2}ms  {:>+6.1}%\n",
