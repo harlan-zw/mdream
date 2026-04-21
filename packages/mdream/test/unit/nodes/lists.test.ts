@@ -24,10 +24,12 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it('handles nested ordered lists', async () => {
+    // Nested ordered lists need 3-space continuation indent (length of the
+    // outer "1. " marker) so CommonMark recognizes the inner list as nested.
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ol><li>Level 1<ol><li>Level 1.1</li></ol></li><li>Level 2</li></ol>'
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('1. Level 1\n  1. Level 1.1\n2. Level 2')
+    expect(markdown).toBe('1. Level 1\n   1. Level 1.1\n2. Level 2')
   })
 
   it('handles mixed nested lists', async () => {
@@ -46,12 +48,13 @@ describe.each(engines)('lists $name', (engineConfig) => {
 
   // https://github.com/harlan-zw/mdream/issues/73
   it('code block inside ordered list item', async () => {
+    // Ordered-list continuation uses 3-space indent (marker "1. " is 3 cols).
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<ol><li><p>text</p><pre><code class="language-bash"># comment
 echo test
 </code></pre><p>text</p></li></ol>`
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('1. text\n\n  ```bash\n  # comment\n  echo test\n  ```\n\n  text')
+    expect(markdown).toBe('1. text\n\n   ```bash\n   # comment\n   echo test\n   ```\n\n   text')
   })
 
   it('code block inside unordered list item', async () => {
@@ -76,16 +79,19 @@ echo test
 
 line2</code></pre></li></ol>`
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('1. x\n\n  ```\n  line1\n\n  line2\n  ```')
+    expect(markdown).toBe('1. x\n\n   ```\n   line1\n\n   line2\n   ```')
   })
 
   it('code block with pre-indented content inside list item preserves existing indentation', async () => {
+    // The list-item indent is prepended on top of any in-source indentation so
+    // every line stays inside the item's content column. Here "  return 1;"
+    // becomes "     return 1;" (3 list + 2 source).
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<ol><li><p>x</p><pre><code>function() {
   return 1;
 }</code></pre></li></ol>`
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('1. x\n\n  ```\n  function() {\n  return 1;\n  }\n  ```')
+    expect(markdown).toBe('1. x\n\n   ```\n   function() {\n     return 1;\n   }\n   ```')
   })
 
   it('self closing tags in lists', async () => {

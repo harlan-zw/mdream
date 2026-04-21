@@ -19,7 +19,6 @@ static HEADING_PREFIXES: [&str; 6] = ["# ", "## ", "### ", "#### ", "##### ", "#
 /// Pre-computed blockquote prefixes for depths 1-6 (avoids `"> ".repeat()`)
 static BQ_PREFIXES: [&str; 7] = ["", "> ", "> > ", "> > > ", "> > > > ", "> > > > > ", "> > > > > > "];
 /// Pre-computed unordered list item prefixes for indent depths 0-5
-static UL_PREFIXES: [&str; 6] = ["- ", "  - ", "    - ", "      - ", "        - ", "          - "];
 
 // Clean mode bitmask flags
 const CLEAN_EMPTY_LINKS: u8 = 1;
@@ -247,6 +246,16 @@ pub struct ConvertState {
     in_heading: bool,
     /// Buffer position at heading start (for extracting heading text)
     heading_buffer_start: usize,
+
+    /// Cumulative indent string for list-item continuation content. Grows by
+    /// each ancestor `<li>`'s marker width (`"- "` = 2, `"N. "` = digits(N)+2),
+    /// so code blocks, paragraphs, and nested blocks inside a list item land
+    /// in the content column that CommonMark requires. Pushed on `<li>` enter,
+    /// popped on `<li>` close.
+    list_indent: String,
+    /// Per-`<li>` contribution width stack, parallel to `list_indent`. Used to
+    /// truncate the correct number of bytes on close without re-walking ancestors.
+    list_indent_widths: Vec<u8>,
 }
 
 impl ConvertState {
@@ -322,6 +331,9 @@ impl ConvertState {
             fragment_links: Vec::new(),
             in_heading: false,
             heading_buffer_start: 0,
+
+            list_indent: String::new(),
+            list_indent_widths: Vec::with_capacity(8),
         };
         // Resolve clean config into bitmask
         let effective_clean_urls;
@@ -968,24 +980,24 @@ impl ConvertState {
             return;
         }
 
-        // Indent code block content inside a list item so the fenced block stays
-        // within the list item's content column. Skip indent for blank lines and
-        // lines that already begin with whitespace — preserves the original
-        // indentation structure from the HTML and matches the JS engine.
+        // Indent code block content inside a list item so every line starts at
+        // the list item's content column. CommonMark closes the list item when
+        // a line is indented less than that column, so we prepend list_indent
+        // on top of any existing in-source indentation. Blank lines are left
+        // alone so they stay blank.
         let li_depth = self.depth_map[TAG_LI as usize] as usize;
         let indented_storage;
         let text = if self.depth_map[TAG_PRE as usize] > 0 && li_depth > 0
             && (text.contains('\n') || last_char == b'\n') {
-            let indent = "  ".repeat(li_depth);
+            let indent = self.list_indent.as_str();
             let mut out = String::with_capacity(text.len() + indent.len() * 2);
             let bytes = text.as_bytes();
             // Prepend indent for the first line when the buffer ended with a
-            // newline (code fence opener) and this text doesn't already start
-            // with leading whitespace.
+            // newline (code fence opener). Blank first line stays blank.
             if last_char == b'\n' {
                 let first = bytes.first().copied().unwrap_or(0);
-                if first != b' ' && first != b'\t' && first != b'\n' {
-                    out.push_str(&indent);
+                if first != b'\n' && first != 0 {
+                    out.push_str(indent);
                 }
             }
             let mut prev = 0usize;
@@ -993,11 +1005,8 @@ impl ConvertState {
                 if b == b'\n' {
                     out.push_str(&text[prev..=i]);
                     let next = i + 1;
-                    if next < bytes.len() {
-                        let c = bytes[next];
-                        if c != b' ' && c != b'\t' && c != b'\n' {
-                            out.push_str(&indent);
-                        }
+                    if next < bytes.len() && bytes[next] != b'\n' {
+                        out.push_str(indent);
                     }
                     prev = next;
                 }
@@ -1104,8 +1113,7 @@ impl ConvertState {
                         "> ".repeat(depth)
                     };
                     if self.depth_map[TAG_LI as usize] > 0 {
-                        let indent = "  ".repeat(self.depth_map[TAG_LI as usize] as usize);
-                        prefix = format!("\n{indent}{prefix}");
+                        prefix = format!("\n{}{}", self.list_indent, prefix);
                     }
                     Some(Cow::Owned(prefix))
                 }
@@ -1115,14 +1123,14 @@ impl ConvertState {
                     let lang = Self::get_language_from_class(node.attributes.get("class"));
                     let li_depth = self.depth_map[TAG_LI as usize] as usize;
                     if li_depth > 0 {
-                        let indent = "  ".repeat(li_depth);
+                        let indent = self.list_indent.as_str();
                         let mut s = String::with_capacity(2 + indent.len() * 2 + 4 + lang.len() + 1);
                         s.push_str("\n\n");
-                        s.push_str(&indent);
+                        s.push_str(indent);
                         s.push_str("```");
                         s.push_str(lang);
                         s.push('\n');
-                        s.push_str(&indent);
+                        s.push_str(indent);
                         Some(Cow::Owned(s))
                     } else if lang.is_empty() {
                         Some(Cow::Borrowed("```\n"))
@@ -1154,23 +1162,21 @@ impl ConvertState {
                 if self.in_table_cell() {
                     return Some(Cow::Borrowed("<li>"));
                 }
-                let ul_depth = self.depth_map[TAG_UL as usize] as usize;
-                let ol_depth = self.depth_map[TAG_OL as usize] as usize;
-                let depth = if ul_depth + ol_depth > 0 { ul_depth + ol_depth - 1 } else { 0 };
-                let is_ordered = ol_depth > 0 && _ancestors.last().is_some_and(|p| p.tag_id == Some(TAG_OL));
-                if !is_ordered && depth < UL_PREFIXES.len() {
-                    Some(Cow::Borrowed(UL_PREFIXES[depth]))
+                // Parent determines marker: <ol> → "N. " (digits of N + 2
+                // columns), else "- " (2 columns). The indent emitted here is
+                // the parent's accumulated list_indent — this LI's own marker
+                // contribution is pushed onto list_indent AFTER this output
+                // is written to the buffer.
+                let is_ordered = _ancestors.last().is_some_and(|p| p.tag_id == Some(TAG_OL));
+                let mut s = String::with_capacity(self.list_indent.len() + 6);
+                s.push_str(&self.list_indent);
+                if is_ordered {
+                    use std::fmt::Write;
+                    let _ = write!(s, "{}. ", node.index + 1);
                 } else {
-                    let mut s = String::with_capacity(depth * 2 + 6);
-                    for _ in 0..depth { s.push_str("  "); }
-                    if is_ordered {
-                        use std::fmt::Write;
-                        let _ = write!(s, "{}. ", node.index + 1);
-                    } else {
-                        s.push_str("- ");
-                    }
-                    Some(Cow::Owned(s))
+                    s.push_str("- ");
                 }
+                Some(Cow::Owned(s))
             }
             TAG_A => {
                 if node.attributes.contains_key("href") { Some(Cow::Borrowed("[")) } else { None }
@@ -1257,12 +1263,12 @@ impl ConvertState {
                 if self.depth_map[TAG_PRE as usize] > 0 {
                     let li_depth = self.depth_map[TAG_LI as usize] as usize;
                     if li_depth > 0 {
-                        let indent = "  ".repeat(li_depth);
+                        let indent = self.list_indent.as_str();
                         let mut s = String::with_capacity(1 + indent.len() * 2 + 5);
                         s.push('\n');
-                        s.push_str(&indent);
+                        s.push_str(indent);
                         s.push_str("```\n\n");
-                        s.push_str(&indent);
+                        s.push_str(indent);
                         Some(Cow::Owned(s))
                     } else {
                         Some(Cow::Borrowed("\n```"))
@@ -1822,6 +1828,28 @@ impl ConvertState {
             self.emit_enter_element();
         }
 
+        // After the LI prefix is emitted, push this LI's marker-width worth of
+        // spaces to list_indent so subsequent continuation content (code blocks,
+        // paragraphs, nested blocks) lands in the correct content column. The
+        // width depends on the marker: "- " = 2, "N. " = digits(N) + 2.
+        if !skip_node && tag_id == Some(TAG_LI) && !self.in_table_cell()
+            && let Some(li) = self.stack.last()
+        {
+            let stack_len = self.stack.len();
+            let parent_is_ordered = stack_len >= 2
+                && self.stack[stack_len - 2].tag_id == Some(TAG_OL);
+            let width: usize = if parent_is_ordered {
+                let n = li.index + 1;
+                let digits = if n < 10 { 1 } else if n < 100 { 2 } else if n < 1000 { 3 }
+                    else if n < 10_000 { 4 } else { (n as f64).log10() as usize + 1 };
+                digits + 2
+            } else {
+                2
+            };
+            self.list_indent_widths.push(width.min(u8::MAX as usize) as u8);
+            for _ in 0..width { self.list_indent.push(' '); }
+        }
+
         self.has_encoded_html_entity = false;
 
         if self.stack.last().is_some_and(|n| n.is_non_nesting) && !self_closing {
@@ -1908,6 +1936,12 @@ impl ConvertState {
                         self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
                     }
                     self.update_escape_ctx_on_close(id);
+                    if id == TAG_LI
+                        && let Some(w) = self.list_indent_widths.pop()
+                    {
+                        let new_len = self.list_indent.len().saturating_sub(w as usize);
+                        self.list_indent.truncate(new_len);
+                    }
                 }
                 self.depth -= 1;
                 self.has_encoded_html_entity = false;
@@ -1929,6 +1963,12 @@ impl ConvertState {
                 self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
             }
             self.update_escape_ctx_on_close(id);
+            if id == TAG_LI
+                && let Some(w) = self.list_indent_widths.pop()
+            {
+                let new_len = self.list_indent.len().saturating_sub(w as usize);
+                self.list_indent.truncate(new_len);
+            }
         }
 
         self.in_non_nesting = self.stack.last().is_some_and(|n| n.is_non_nesting);

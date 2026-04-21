@@ -316,14 +316,14 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_BLOCKQUOTE]: {
-    enter: ({ node }) => {
+    enter: ({ node, state }) => {
       const depth = node.depthMap[TAG_BLOCKQUOTE] || 1
       let prefix = '> '.repeat(depth)
 
       // Add indentation if inside a list item
       const liDepth = node.depthMap[TAG_LI] || 0
       if (liDepth > 0) {
-        prefix = `\n${'  '.repeat(liDepth)}${prefix}`
+        prefix = `\n${state.listIndent}${prefix}`
       }
 
       return prefix
@@ -336,7 +336,7 @@ export const tagHandlers: Record<number, TagHandler> = {
         const language = getLanguageFromClass(node.attributes?.class)
         const liDepth = node.depthMap[TAG_LI] || 0
         if (liDepth > 0) {
-          const indent = '  '.repeat(liDepth)
+          const indent = state.listIndent
           return `\n\n${indent}${MARKDOWN_CODE_BLOCK}${language}\n`
         }
         return `${MARKDOWN_CODE_BLOCK}${language}\n`
@@ -352,11 +352,11 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
       return MARKDOWN_INLINE_CODE
     },
-    exit: ({ node }) => {
+    exit: ({ node, state }) => {
       if ((node.depthMap[TAG_PRE] || 0) > 0) {
         const liDepth = node.depthMap[TAG_LI] || 0
         if (liDepth > 0) {
-          const indent = '  '.repeat(liDepth)
+          const indent = state.listIndent
           return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
         }
         return `\n${MARKDOWN_CODE_BLOCK}`
@@ -376,18 +376,18 @@ export const tagHandlers: Record<number, TagHandler> = {
     exit: ({ node }) => isInsideTableCell(node) ? '</ol>' : undefined,
   },
   [TAG_LI]: {
-    enter: ({ node }) => {
+    enter: ({ node, state }) => {
       if (isInsideTableCell(node)) {
         return '<li>'
       }
 
-      // Calculate list nesting depth
-      const depth = (node.depthMap[TAG_UL] || 0) + (node.depthMap[TAG_OL] || 0) - 1
+      // Parent determines marker: "N. " if <ol>, else "- ". The emitted indent
+      // is the parent's accumulated listIndent — this <li>'s own marker width
+      // is pushed onto state.listIndent after the enter output is written
+      // (see markdown-processor.ts).
       const isOrdered = node.parent?.tagId === TAG_OL
-      const indent = '  '.repeat(Math.max(0, depth))
       const marker = isOrdered ? `${node.index + 1}. ` : '- '
-
-      return `${indent}${marker}`
+      return `${state.listIndent}${marker}`
     },
     exit: ({ node }) => isInsideTableCell(node) ? '</li>' : undefined,
     spacing: LIST_ITEM_SPACING,

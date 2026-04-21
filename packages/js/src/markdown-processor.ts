@@ -12,10 +12,13 @@ import {
   TAG_H1,
   TAG_H6,
   TAG_LI,
+  TAG_OL,
   TAG_P,
   TAG_PRE,
   TAG_SPAN,
   TAG_TABLE,
+  TAG_TD,
+  TAG_TH,
   TEXT_NODE,
 } from './const'
 import { parseHtmlStream } from './parse'
@@ -42,6 +45,38 @@ export interface MarkdownState {
   depth?: number
   /** Context for additional data */
   context?: PluginContext
+  /**
+   * Cumulative indent for list-item continuation. Grows by each ancestor
+   * `<li>`'s marker width (`"- "` = 2, `"N. "` = digits(N) + 2) so code blocks
+   * and continuation paragraphs land in the content column CommonMark requires.
+   * Pushed on `<li>` enter, popped on `<li>` exit.
+   */
+  listIndent: string
+  /** Per-`<li>` contribution widths, parallel stack to listIndent. */
+  listIndentWidths: number[]
+}
+
+/**
+ * Maintain the list-item indent stack. On `<li>` enter, push this item's
+ * marker-width of spaces so subsequent continuation content (code blocks,
+ * paragraphs, nested lists) lands in the correct column. On exit, pop.
+ * Skip when the list item is rendered as literal `<li>` inside a table cell.
+ */
+function updateListIndent(state: MarkdownState, element: ElementNode, eventType: number): void {
+  if (element.tagId !== TAG_LI)
+    return
+  if ((state.depthMap[TAG_TD] || 0) > 0 || (state.depthMap[TAG_TH] || 0) > 0)
+    return
+  if (eventType === NodeEventEnter) {
+    const isOrdered = element.parent?.tagId === TAG_OL
+    const width = isOrdered ? String(element.index + 1).length + 2 : 2
+    state.listIndentWidths.push(width)
+    state.listIndent += ' '.repeat(width)
+  }
+  else if (eventType === NodeEventExit) {
+    const width = state.listIndentWidths.pop() ?? 0
+    state.listIndent = state.listIndent.slice(0, state.listIndent.length - width)
+  }
 }
 
 /**
@@ -141,6 +176,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     options,
     buffer: [],
     depthMap: new Uint8Array(MAX_TAG_ID),
+    listIndent: '',
+    listIndentWidths: [],
   }
 
   let lastYieldedLength = 0
@@ -196,12 +233,15 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         // that start at column 0 — preserves any existing indentation in the
         // HTML source and stays safe for text nodes that span stream chunks.
         if ((state.depthMap[TAG_PRE] || 0) > 0 && (state.depthMap[TAG_LI] || 0) > 0) {
-          const indent = '  '.repeat(state.depthMap[TAG_LI]!)
-          let value = textNode.value.replace(/\n(?=[^ \t\n])/g, `\n${indent}`)
+          const indent = state.listIndent
+          // Prepend list_indent on every non-blank line — CommonMark closes
+          // the list item if any line is indented less than the content column,
+          // so we add on top of any in-source indentation rather than skipping
+          // lines that already start with whitespace.
+          let value = textNode.value.replace(/\n(?!\n|$)/g, `\n${indent}`)
           // Prepend indent for first line if the previous buffer ended with a
-          // newline (code fence opener) and the text doesn't already start with
-          // leading whitespace.
-          if (lastChar === '\n' && value[0] && value[0] !== ' ' && value[0] !== '\t' && value[0] !== '\n') {
+          // newline (code fence opener). Blank first line stays blank.
+          if (lastChar === '\n' && value[0] && value[0] !== '\n') {
             value = indent + value
           }
           textNode.value = value
@@ -264,6 +304,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
             state.lastContentCache = fragment
           }
         }
+        updateListIndent(state, element, eventType)
         return
       }
 
@@ -328,6 +369,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         state.lastContentCache = fragment
       }
     }
+
+    updateListIndent(state, element, eventType)
   }
 
   /**
