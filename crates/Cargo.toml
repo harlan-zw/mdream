@@ -8,9 +8,9 @@ exclude = [ "core/fuzz" ]
 resolver = "2"
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
 license = "MIT"
-rust-version = "1.80"
+rust-version = "1.95"
 repository = "https://github.com/harlan-zw/mdream"
 
 [workspace.lints.rust]

@@ -2,13 +2,13 @@
 name = "mdream-fuzz"
 version = "0.0.0"
 publish = false
-edition = "2021"
+edition = "2024"
 
 [workspace]
 
 [dependencies]
-libfuzzer-sys = "0.4"
-arbitrary = { version = "1", features = [ "derive" ] }
+libfuzzer-sys = "0.4.12"
+arbitrary = { version = "1.4.2", features = [ "derive" ] }
 
 [dependencies.mdream]
 path = ".."

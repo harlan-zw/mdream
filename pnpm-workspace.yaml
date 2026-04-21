@@ -10,6 +10,7 @@ packages:
   - '!examples/nextjs'
 
 overrides:
+  emnapi: ^1.10.0
   vite: npm:rolldown-vite@latest
 catalog:
   '@actions/core': ^3.0.0
