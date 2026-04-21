@@ -185,6 +185,7 @@ pub(crate) fn process_tag_attributes(html_chunk: &str, position: usize, tag_hand
     (false, i, Attributes::new(), false)
 }
 
+#[allow(clippy::collapsible_match)]
 pub(crate) fn parse_attributes(attr_str: &str) -> Attributes {
     let mut result = Attributes::with_capacity(4);
     if attr_str.is_empty() {

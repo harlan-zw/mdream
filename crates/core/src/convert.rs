@@ -2009,11 +2009,14 @@ impl ConvertState {
     #[inline]
     fn update_escape_ctx_on_close(&mut self, id: u8) {
         match id {
-            TAG_TABLE => { if self.depth_map[id as usize] == 0 { self.escape_ctx &= !ESC_TABLE; } }
-            TAG_CODE => { if self.depth_map[TAG_CODE as usize] == 0 && self.depth_map[TAG_PRE as usize] == 0 { self.escape_ctx &= !ESC_CODE_PRE; } }
-            TAG_PRE => { if self.depth_map[TAG_PRE as usize] == 0 { self.in_pre = false; if self.depth_map[TAG_CODE as usize] == 0 { self.escape_ctx &= !ESC_CODE_PRE; } } }
-            TAG_A => { if self.depth_map[id as usize] == 0 { self.escape_ctx &= !ESC_LINK; } }
-            TAG_BLOCKQUOTE => { if self.depth_map[id as usize] == 0 { self.escape_ctx &= !ESC_BLOCKQUOTE; } }
+            TAG_TABLE if self.depth_map[id as usize] == 0 => self.escape_ctx &= !ESC_TABLE,
+            TAG_CODE if self.depth_map[TAG_CODE as usize] == 0 && self.depth_map[TAG_PRE as usize] == 0 => self.escape_ctx &= !ESC_CODE_PRE,
+            TAG_PRE if self.depth_map[TAG_PRE as usize] == 0 => {
+                self.in_pre = false;
+                if self.depth_map[TAG_CODE as usize] == 0 { self.escape_ctx &= !ESC_CODE_PRE; }
+            }
+            TAG_A if self.depth_map[id as usize] == 0 => self.escape_ctx &= !ESC_LINK,
+            TAG_BLOCKQUOTE if self.depth_map[id as usize] == 0 => self.escape_ctx &= !ESC_BLOCKQUOTE,
             _ => {}
         }
     }
