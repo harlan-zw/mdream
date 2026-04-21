@@ -983,20 +983,40 @@ impl ConvertState {
         }
 
         // Indent code block content inside a list item so the fenced block stays
-        // within the list item's content column.
+        // within the list item's content column. Skip indent for blank lines and
+        // lines that already begin with whitespace — preserves the original
+        // indentation structure from the HTML and matches the JS engine.
         let li_depth = self.depth_map[TAG_LI as usize] as usize;
         let indented_storage;
-        let text = if self.depth_map[TAG_PRE as usize] > 0 && li_depth > 0 && text.contains('\n') {
+        let text = if self.depth_map[TAG_PRE as usize] > 0 && li_depth > 0
+            && (text.contains('\n') || last_char == b'\n') {
             let indent = "  ".repeat(li_depth);
-            let trimmed = text.trim_end_matches('\n');
-            let mut out = String::with_capacity(trimmed.len() + indent.len() * 2);
-            for (i, line) in trimmed.split('\n').enumerate() {
-                if i > 0 {
-                    out.push('\n');
+            let mut out = String::with_capacity(text.len() + indent.len() * 2);
+            let bytes = text.as_bytes();
+            // Prepend indent for the first line when the buffer ended with a
+            // newline (code fence opener) and this text doesn't already start
+            // with leading whitespace.
+            if last_char == b'\n' {
+                let first = bytes.first().copied().unwrap_or(0);
+                if first != b' ' && first != b'\t' && first != b'\n' {
                     out.push_str(&indent);
                 }
-                out.push_str(line);
             }
+            let mut prev = 0usize;
+            for (i, &b) in bytes.iter().enumerate() {
+                if b == b'\n' {
+                    out.push_str(&text[prev..=i]);
+                    let next = i + 1;
+                    if next < bytes.len() {
+                        let c = bytes[next];
+                        if c != b' ' && c != b'\t' && c != b'\n' {
+                            out.push_str(&indent);
+                        }
+                    }
+                    prev = next;
+                }
+            }
+            out.push_str(&text[prev..]);
             indented_storage = out;
             indented_storage.as_str()
         } else {

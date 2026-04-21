@@ -70,6 +70,24 @@ echo test
     expect(markdown).toBe('1. text `# comment` text')
   })
 
+  it('code block with blank lines inside list item preserves them', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<ol><li><p>x</p><pre><code>line1
+
+line2</code></pre></li></ol>`
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('1. x\n\n  ```\n  line1\n\n  line2\n  ```')
+  })
+
+  it('code block with pre-indented content inside list item preserves existing indentation', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<ol><li><p>x</p><pre><code>function() {
+  return 1;
+}</code></pre></li></ol>`
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('1. x\n\n  ```\n  function() {\n  return 1;\n  }\n  ```')
+  })
+
   it('self closing tags in lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<ul class="hds-term-items"></li>
