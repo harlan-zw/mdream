@@ -275,6 +275,16 @@ fn inline_code_inside_strong_inside_list_no_leading_space() {
     );
 }
 
+#[test]
+fn inline_code_inside_span_inside_list_keeps_separator_space() {
+    // <span> is a non-delimiter wrapper: the separator space must still be
+    // inserted between preceding text and the backtick.
+    assert_eq!(
+        convert("<ul><li>prefix<span><code>x</code></span></li></ul>"),
+        "- prefix `x`"
+    );
+}
+
 // ── Tables ──
 
 #[test]

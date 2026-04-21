@@ -96,6 +96,13 @@ line2</code></pre></li></ol>`
     expect(markdown).toBe('- **`text`**')
   })
 
+  it('inline code inside non-delimiter wrapper inside list item keeps separator space', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li>prefix<span><code>x</code></span></li></ul>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- prefix `x`')
+  })
+
   it('self closing tags in lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<ul class="hds-term-items"></li>

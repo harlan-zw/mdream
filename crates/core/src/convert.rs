@@ -1133,11 +1133,18 @@ impl ConvertState {
                         s.push('\n');
                         Some(Cow::Owned(s))
                     }
-                } else if self.depth_map[TAG_LI as usize] > 0
-                    && _ancestors.last().is_some_and(|p| p.tag_id == Some(TAG_LI))
-                {
+                } else if self.depth_map[TAG_LI as usize] > 0 {
+                    // Inline code inside a list item: collapse the paragraph
+                    // boundary with a separator space, but not when the buffer
+                    // ends with an opening emphasis delimiter (`*` or `_`),
+                    // otherwise the space would break the pairing.
                     let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
-                    if last_char != 0 && last_char != b' ' && last_char != b'\n' {
+                    if last_char != 0
+                        && last_char != b' '
+                        && last_char != b'\n'
+                        && last_char != b'*'
+                        && last_char != b'_'
+                    {
                         Some(Cow::Borrowed(" `"))
                     } else {
                         Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
