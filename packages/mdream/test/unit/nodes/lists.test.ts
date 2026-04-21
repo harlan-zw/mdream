@@ -96,6 +96,15 @@ line2</code></pre></li></ol>`
     expect(markdown).toBe('- **`text`**')
   })
 
+  it('adjacent inline code spans in list item separated with a space', async () => {
+    // Without a separator, ` `a``b` ` parses as a single code span containing
+    // literal ``a``b``. A space keeps them as two distinct spans.
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<li><code>a</code><code>b</code></li>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- `a` `b`')
+  })
+
   it('inline code inside non-delimiter wrapper inside list item keeps separator space', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li>prefix<span><code>x</code></span></li></ul>'

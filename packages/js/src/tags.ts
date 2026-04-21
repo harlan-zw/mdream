@@ -345,14 +345,16 @@ export const tagHandlers: Record<number, TagHandler> = {
       // separator space when following text, but not when the buffer just
       // emitted a wrapper opener where a leading space would break the
       // pairing or leak into the wrapper content. Covers emphasis (`*`, `_`),
-      // strikethrough (`~`), link text (`[`), HTML passthrough (`>`),
-      // adjacent inline code (`` ` ``), and whitespace.
+      // strikethrough (`~`), link text (`[`), HTML passthrough (`>`), and
+      // whitespace. A trailing backtick does NOT suppress: two adjacent
+      // `<code>` elements must be separated with a space so CommonMark parses
+      // them as two code spans rather than merging into one.
       if ((node.depthMap[TAG_LI] || 0) > 0) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
         if (lastChar && lastChar !== ' ' && lastChar !== '\n' && lastChar !== '\t'
           && lastChar !== '*' && lastChar !== '_' && lastChar !== '~'
-          && lastChar !== '[' && lastChar !== '>' && lastChar !== '`') {
+          && lastChar !== '[' && lastChar !== '>') {
           return ` ${MARKDOWN_INLINE_CODE}`
         }
       }

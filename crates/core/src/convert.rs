@@ -1140,12 +1140,16 @@ impl ConvertState {
                     // a leading space would break the pairing or leak into the
                     // wrapper content. Covers emphasis (`*`, `_`),
                     // strikethrough (`~`), link text (`[`), HTML passthrough
-                    // (`>`), adjacent inline code (`` ` ``), and whitespace.
+                    // (`>`), and whitespace. A trailing backtick does NOT
+                    // suppress: two adjacent `<code>` elements must be
+                    // separated with a space so CommonMark parses them as two
+                    // code spans rather than merging into one (` `a``b` ` →
+                    // single span with literal content ``a``b``).
                     let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
                     if last_char != 0
                         && !matches!(
                             last_char,
-                            b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>' | b'`'
+                            b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
                         )
                     {
                         Some(Cow::Borrowed(" `"))
