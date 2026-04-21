@@ -238,6 +238,43 @@ fn mixed_nested_lists() {
     );
 }
 
+// https://github.com/harlan-zw/mdream/issues/77
+#[test]
+fn loose_ordered_list_items_separated_by_blank_line() {
+    let html = r#"
+<ol>
+<li>
+<p>text</p>
+<pre><code>text</code></pre>
+<p>text</p>
+</li>
+<li>
+<p>text</p>
+</li>
+</ol>
+"#;
+    let expected = r#"
+1. text
+
+  ```
+  text
+  ```
+
+  text
+2. text
+"#;
+    assert_eq!(convert(html), expected.trim());
+}
+
+// https://github.com/harlan-zw/mdream/issues/76
+#[test]
+fn inline_code_inside_strong_inside_list_no_leading_space() {
+    assert_eq!(
+        convert("<ul><li><strong><code>text</code></strong></li></ul>"),
+        "- **`text`**"
+    );
+}
+
 // ── Tables ──
 
 #[test]

@@ -1133,7 +1133,9 @@ impl ConvertState {
                         s.push('\n');
                         Some(Cow::Owned(s))
                     }
-                } else if self.depth_map[TAG_LI as usize] > 0 {
+                } else if self.depth_map[TAG_LI as usize] > 0
+                    && _ancestors.last().is_some_and(|p| p.tag_id == Some(TAG_LI))
+                {
                     let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
                     if last_char != 0 && last_char != b' ' && last_char != b'\n' {
                         Some(Cow::Borrowed(" `"))

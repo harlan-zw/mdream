@@ -341,9 +341,12 @@ export const tagHandlers: Record<number, TagHandler> = {
         }
         return `${MARKDOWN_CODE_BLOCK}${language}\n`
       }
-      // Inline code: inside a list item, the usual paragraph boundary is
-      // collapsed, so manually insert a separator space when following content.
-      if ((node.depthMap[TAG_LI] || 0) > 0) {
+      // Inline code directly inside a list item (not nested in inline formatting
+      // like <strong>/<em>): collapse the paragraph boundary with a separator
+      // space when following content. When nested inside inline formatting, the
+      // buffer ends with an opening delimiter (e.g. `**`) and a space would
+      // break it, so emit just the backtick.
+      if ((node.depthMap[TAG_LI] || 0) > 0 && node.parent?.tagId === TAG_LI) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
         if (lastChar && lastChar !== ' ' && lastChar !== '\n') {

@@ -88,6 +88,14 @@ line2</code></pre></li></ol>`
     expect(markdown).toBe('1. x\n\n  ```\n  function() {\n  return 1;\n  }\n  ```')
   })
 
+  // https://github.com/harlan-zw/mdream/issues/76
+  it('inline code inside inline formatting inside list item has no leading space', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li><strong><code>text</code></strong></li></ul>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- **`text`**')
+  })
+
   it('self closing tags in lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<ul class="hds-term-items"></li>
