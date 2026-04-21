@@ -1135,15 +1135,18 @@ impl ConvertState {
                     }
                 } else if self.depth_map[TAG_LI as usize] > 0 {
                     // Inline code inside a list item: collapse the paragraph
-                    // boundary with a separator space, but not when the buffer
-                    // ends with an opening emphasis delimiter (`*` or `_`),
-                    // otherwise the space would break the pairing.
+                    // boundary with a separator space when following text, but
+                    // not when the buffer just emitted a wrapper opener where
+                    // a leading space would break the pairing or leak into the
+                    // wrapper content. Covers emphasis (`*`, `_`),
+                    // strikethrough (`~`), link text (`[`), HTML passthrough
+                    // (`>`), adjacent inline code (`` ` ``), and whitespace.
                     let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
                     if last_char != 0
-                        && last_char != b' '
-                        && last_char != b'\n'
-                        && last_char != b'*'
-                        && last_char != b'_'
+                        && !matches!(
+                            last_char,
+                            b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>' | b'`'
+                        )
                     {
                         Some(Cow::Borrowed(" `"))
                     } else {

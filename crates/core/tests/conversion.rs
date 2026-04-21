@@ -285,6 +285,25 @@ fn inline_code_inside_span_inside_list_keeps_separator_space() {
     );
 }
 
+#[test]
+fn inline_code_inside_wrappers_inside_list_no_stray_space() {
+    // No leading space should be injected when the wrapper opener is the last
+    // thing emitted — otherwise pairing breaks for strikethrough and link
+    // text, and the space leaks into HTML passthrough content.
+    assert_eq!(
+        convert("<ul><li><del><code>x</code></del></li></ul>"),
+        "- ~~`x`~~"
+    );
+    assert_eq!(
+        convert("<ul><li><a href=\"#\"><code>x</code></a></li></ul>"),
+        "- [`x`](#)"
+    );
+    assert_eq!(
+        convert("<ul><li><mark><code>x</code></mark></li></ul>"),
+        "- <mark>`x`</mark>"
+    );
+}
+
 // ── Tables ──
 
 #[test]

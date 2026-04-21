@@ -103,6 +103,27 @@ line2</code></pre></li></ol>`
     expect(markdown).toBe('- prefix `x`')
   })
 
+  it('inline code inside strikethrough wrapper inside list item has no leading space', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li><del><code>x</code></del></li></ul>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- ~~`x`~~')
+  })
+
+  it('inline code inside link inside list item has no leading space', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li><a href="#"><code>x</code></a></li></ul>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- [`x`](#)')
+  })
+
+  it('inline code inside html-passthrough wrapper inside list item has no leading space', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li><mark><code>x</code></mark></li></ul>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- <mark>`x`</mark>')
+  })
+
   it('self closing tags in lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<ul class="hds-term-items"></li>

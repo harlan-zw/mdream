@@ -342,15 +342,17 @@ export const tagHandlers: Record<number, TagHandler> = {
         return `${MARKDOWN_CODE_BLOCK}${language}\n`
       }
       // Inline code inside a list item: collapse the paragraph boundary with a
-      // separator space when following content. When nested directly inside
-      // inline formatting like <strong>/<em>, the buffer ends with an opening
-      // delimiter (`*` or `_`) and a space would break the pairing, so emit
-      // just the backtick in that case.
+      // separator space when following text, but not when the buffer just
+      // emitted a wrapper opener where a leading space would break the
+      // pairing or leak into the wrapper content. Covers emphasis (`*`, `_`),
+      // strikethrough (`~`), link text (`[`), HTML passthrough (`>`),
+      // adjacent inline code (`` ` ``), and whitespace.
       if ((node.depthMap[TAG_LI] || 0) > 0) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
-        if (lastChar && lastChar !== ' ' && lastChar !== '\n'
-          && lastChar !== '*' && lastChar !== '_') {
+        if (lastChar && lastChar !== ' ' && lastChar !== '\n' && lastChar !== '\t'
+          && lastChar !== '*' && lastChar !== '_' && lastChar !== '~'
+          && lastChar !== '[' && lastChar !== '>' && lastChar !== '`') {
           return ` ${MARKDOWN_INLINE_CODE}`
         }
       }
