@@ -982,6 +982,27 @@ impl ConvertState {
             return;
         }
 
+        // Indent code block content inside a list item so the fenced block stays
+        // within the list item's content column.
+        let li_depth = self.depth_map[TAG_LI as usize] as usize;
+        let indented_storage;
+        let text = if self.depth_map[TAG_PRE as usize] > 0 && li_depth > 0 && text.contains('\n') {
+            let indent = "  ".repeat(li_depth);
+            let trimmed = text.trim_end_matches('\n');
+            let mut out = String::with_capacity(trimmed.len() + indent.len() * 2);
+            for (i, line) in trimmed.split('\n').enumerate() {
+                if i > 0 {
+                    out.push('\n');
+                    out.push_str(&indent);
+                }
+                out.push_str(line);
+            }
+            indented_storage = out;
+            indented_storage.as_str()
+        } else {
+            text
+        };
+
         if self.should_add_spacing_before_text(last_char, text) {
             self.buffer.push(' ');
             self.last_content_cache_len = text.len() + 1;
@@ -1058,6 +1079,12 @@ impl ConvertState {
                         return Some(Cow::Owned(s));
                     }
                 }
+                if self.depth_map[TAG_LI as usize] > 0 {
+                    let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
+                    if last_char != 0 && last_char != b' ' && last_char != b'\n' {
+                        return Some(Cow::Borrowed(" "));
+                    }
+                }
                 None
             }
             TAG_BLOCKQUOTE => {
@@ -1080,16 +1107,32 @@ impl ConvertState {
             TAG_CODE => {
                 if self.depth_map[TAG_PRE as usize] > 0 {
                     let lang = Self::get_language_from_class(node.attributes.get("class"));
-                    if lang.is_empty() {
+                    let li_depth = self.depth_map[TAG_LI as usize] as usize;
+                    if li_depth > 0 {
+                        let indent = "  ".repeat(li_depth);
+                        let mut s = String::with_capacity(2 + indent.len() * 2 + 4 + lang.len() + 1);
+                        s.push_str("\n\n");
+                        s.push_str(&indent);
+                        s.push_str("```");
+                        s.push_str(lang);
+                        s.push('\n');
+                        s.push_str(&indent);
+                        Some(Cow::Owned(s))
+                    } else if lang.is_empty() {
                         Some(Cow::Borrowed("```\n"))
                     } else {
-                        {
-                            let mut s = String::with_capacity(4 + lang.len());
-                            s.push_str("```");
-                            s.push_str(lang);
-                            s.push('\n');
-                            Some(Cow::Owned(s))
-                        }
+                        let mut s = String::with_capacity(4 + lang.len());
+                        s.push_str("```");
+                        s.push_str(lang);
+                        s.push('\n');
+                        Some(Cow::Owned(s))
+                    }
+                } else if self.depth_map[TAG_LI as usize] > 0 {
+                    let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
+                    if last_char != 0 && last_char != b' ' && last_char != b'\n' {
+                        Some(Cow::Borrowed(" `"))
+                    } else {
+                        Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
                     }
                 } else {
                     Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
@@ -1206,7 +1249,18 @@ impl ConvertState {
             TAG_INS => Some(Cow::Borrowed("</ins>")),
             TAG_CODE => {
                 if self.depth_map[TAG_PRE as usize] > 0 {
-                    Some(Cow::Borrowed("\n```"))
+                    let li_depth = self.depth_map[TAG_LI as usize] as usize;
+                    if li_depth > 0 {
+                        let indent = "  ".repeat(li_depth);
+                        let mut s = String::with_capacity(1 + indent.len() * 2 + 5);
+                        s.push('\n');
+                        s.push_str(&indent);
+                        s.push_str("```\n\n");
+                        s.push_str(&indent);
+                        Some(Cow::Owned(s))
+                    } else {
+                        Some(Cow::Borrowed("\n```"))
+                    }
                 } else {
                     Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
                 }

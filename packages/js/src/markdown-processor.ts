@@ -191,6 +191,22 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           textNode.value = ` ${textNode.value}`
         }
 
+        // Indent code block content when inside a list item so the fenced block
+        // stays within the list item's content column. Only add indent to lines
+        // that start at column 0 — preserves any existing indentation in the
+        // HTML source and stays safe for text nodes that span stream chunks.
+        if ((state.depthMap[TAG_PRE] || 0) > 0 && (state.depthMap[TAG_LI] || 0) > 0) {
+          const indent = '  '.repeat(state.depthMap[TAG_LI]!)
+          let value = textNode.value.replace(/\n(?=[^ \t\n])/g, `\n${indent}`)
+          // Prepend indent for first line if the previous buffer ended with a
+          // newline (code fence opener) and the text doesn't already start with
+          // leading whitespace.
+          if (lastChar === '\n' && value[0] && value[0] !== ' ' && value[0] !== '\t' && value[0] !== '\n') {
+            value = indent + value
+          }
+          textNode.value = value
+        }
+
         state.buffer.push(textNode.value)
         state.lastContentCache = textNode.value
       }
