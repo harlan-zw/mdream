@@ -331,17 +331,37 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: BLOCKQUOTE_SPACING,
   },
   [TAG_CODE]: {
-    enter: ({ node }) => {
+    enter: ({ node, state }) => {
       if ((node.depthMap[TAG_PRE] || 0) > 0) {
         const language = getLanguageFromClass(node.attributes?.class)
+        const liDepth = node.depthMap[TAG_LI] || 0
+        if (liDepth > 0) {
+          const indent = '  '.repeat(liDepth)
+          return `\n\n${indent}${MARKDOWN_CODE_BLOCK}${language}\n`
+        }
         return `${MARKDOWN_CODE_BLOCK}${language}\n`
+      }
+      // Inline code: inside a list item, the usual paragraph boundary is
+      // collapsed, so manually insert a separator space when following content.
+      if ((node.depthMap[TAG_LI] || 0) > 0) {
+        const lastEntry = state.buffer.at(-1)
+        const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
+        if (lastChar && lastChar !== ' ' && lastChar !== '\n') {
+          return ` ${MARKDOWN_INLINE_CODE}`
+        }
       }
       return MARKDOWN_INLINE_CODE
     },
     exit: ({ node }) => {
-      return (node.depthMap[TAG_PRE] || 0) > 0
-        ? `\n${MARKDOWN_CODE_BLOCK}`
-        : MARKDOWN_INLINE_CODE
+      if ((node.depthMap[TAG_PRE] || 0) > 0) {
+        const liDepth = node.depthMap[TAG_LI] || 0
+        if (liDepth > 0) {
+          const indent = '  '.repeat(liDepth)
+          return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
+        }
+        return `\n${MARKDOWN_CODE_BLOCK}`
+      }
+      return MARKDOWN_INLINE_CODE
     },
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
@@ -522,6 +542,15 @@ export const tagHandlers: Record<number, TagHandler> = {
         if (lastChar && lastChar !== '\n' && lastChar !== ' ' && lastChar !== '>') {
           const prefix = '> '.repeat(bqDepth)
           return `\n${prefix.trimEnd()}\n${prefix}`
+        }
+      }
+      // Inside a list item, paragraphs are collapsed inline. Insert a space so
+      // sibling text/inline-code doesn't run into adjacent content.
+      if ((node.depthMap[TAG_LI] || 0) > 0) {
+        const lastEntry = state.buffer.at(-1)
+        const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
+        if (lastChar && lastChar !== ' ' && lastChar !== '\n') {
+          return ' '
         }
       }
     },

@@ -26,7 +26,7 @@ export async function* streamHtmlToMarkdown(
 
   const processor = createMarkdownProcessor(options, resolvedPlugins, tagOverrideHandlers)
   const parseState: ParseState = {
-    depthMap: new Uint8Array(1024),
+    depthMap: processor.state.depthMap,
     depth: 0,
     resolvedPlugins,
     tagOverrideHandlers,

@@ -44,6 +44,50 @@ describe.each(engines)('lists $name', (engineConfig) => {
     expect(markdown).toBe('- [Get started](/en/get-started)/\n- [Writing on GitHub](/en/get-started/writing-on-github)/\n- [Start writing on GitHub](/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github)/\n- [Basic formatting syntax](/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax)')
   })
 
+  // https://github.com/harlan-zw/mdream/issues/73
+  it('code block inside ordered list item', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<ol><li><p>text</p><pre><code class="language-bash"># comment
+echo test
+</code></pre><p>text</p></li></ol>`
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('1. text\n\n  ```bash\n  # comment\n  echo test\n  ```\n\n  text')
+  })
+
+  it('code block inside unordered list item', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<ul><li><p>text</p><pre><code class="language-bash"># comment
+echo test
+</code></pre><p>text</p></li></ul>`
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- text\n\n  ```bash\n  # comment\n  echo test\n  ```\n\n  text')
+  })
+
+  it('inline code between paragraphs inside list item has spacing', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ol><li><p>text</p><code># comment</code><p>text</p></li></ol>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('1. text `# comment` text')
+  })
+
+  it('code block with blank lines inside list item preserves them', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<ol><li><p>x</p><pre><code>line1
+
+line2</code></pre></li></ol>`
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('1. x\n\n  ```\n  line1\n\n  line2\n  ```')
+  })
+
+  it('code block with pre-indented content inside list item preserves existing indentation', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<ol><li><p>x</p><pre><code>function() {
+  return 1;
+}</code></pre></li></ol>`
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('1. x\n\n  ```\n  function() {\n  return 1;\n  }\n  ```')
+  })
+
   it('self closing tags in lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<ul class="hds-term-items"></li>

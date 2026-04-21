@@ -982,6 +982,47 @@ impl ConvertState {
             return;
         }
 
+        // Indent code block content inside a list item so the fenced block stays
+        // within the list item's content column. Skip indent for blank lines and
+        // lines that already begin with whitespace — preserves the original
+        // indentation structure from the HTML and matches the JS engine.
+        let li_depth = self.depth_map[TAG_LI as usize] as usize;
+        let indented_storage;
+        let text = if self.depth_map[TAG_PRE as usize] > 0 && li_depth > 0
+            && (text.contains('\n') || last_char == b'\n') {
+            let indent = "  ".repeat(li_depth);
+            let mut out = String::with_capacity(text.len() + indent.len() * 2);
+            let bytes = text.as_bytes();
+            // Prepend indent for the first line when the buffer ended with a
+            // newline (code fence opener) and this text doesn't already start
+            // with leading whitespace.
+            if last_char == b'\n' {
+                let first = bytes.first().copied().unwrap_or(0);
+                if first != b' ' && first != b'\t' && first != b'\n' {
+                    out.push_str(&indent);
+                }
+            }
+            let mut prev = 0usize;
+            for (i, &b) in bytes.iter().enumerate() {
+                if b == b'\n' {
+                    out.push_str(&text[prev..=i]);
+                    let next = i + 1;
+                    if next < bytes.len() {
+                        let c = bytes[next];
+                        if c != b' ' && c != b'\t' && c != b'\n' {
+                            out.push_str(&indent);
+                        }
+                    }
+                    prev = next;
+                }
+            }
+            out.push_str(&text[prev..]);
+            indented_storage = out;
+            indented_storage.as_str()
+        } else {
+            text
+        };
+
         if self.should_add_spacing_before_text(last_char, text) {
             self.buffer.push(' ');
             self.last_content_cache_len = text.len() + 1;
@@ -1058,6 +1099,12 @@ impl ConvertState {
                         return Some(Cow::Owned(s));
                     }
                 }
+                if self.depth_map[TAG_LI as usize] > 0 {
+                    let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
+                    if last_char != 0 && last_char != b' ' && last_char != b'\n' {
+                        return Some(Cow::Borrowed(" "));
+                    }
+                }
                 None
             }
             TAG_BLOCKQUOTE => {
@@ -1080,16 +1127,32 @@ impl ConvertState {
             TAG_CODE => {
                 if self.depth_map[TAG_PRE as usize] > 0 {
                     let lang = Self::get_language_from_class(node.attributes.get("class"));
-                    if lang.is_empty() {
+                    let li_depth = self.depth_map[TAG_LI as usize] as usize;
+                    if li_depth > 0 {
+                        let indent = "  ".repeat(li_depth);
+                        let mut s = String::with_capacity(2 + indent.len() * 2 + 4 + lang.len() + 1);
+                        s.push_str("\n\n");
+                        s.push_str(&indent);
+                        s.push_str("```");
+                        s.push_str(lang);
+                        s.push('\n');
+                        s.push_str(&indent);
+                        Some(Cow::Owned(s))
+                    } else if lang.is_empty() {
                         Some(Cow::Borrowed("```\n"))
                     } else {
-                        {
-                            let mut s = String::with_capacity(4 + lang.len());
-                            s.push_str("```");
-                            s.push_str(lang);
-                            s.push('\n');
-                            Some(Cow::Owned(s))
-                        }
+                        let mut s = String::with_capacity(4 + lang.len());
+                        s.push_str("```");
+                        s.push_str(lang);
+                        s.push('\n');
+                        Some(Cow::Owned(s))
+                    }
+                } else if self.depth_map[TAG_LI as usize] > 0 {
+                    let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
+                    if last_char != 0 && last_char != b' ' && last_char != b'\n' {
+                        Some(Cow::Borrowed(" `"))
+                    } else {
+                        Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
                     }
                 } else {
                     Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
@@ -1206,7 +1269,18 @@ impl ConvertState {
             TAG_INS => Some(Cow::Borrowed("</ins>")),
             TAG_CODE => {
                 if self.depth_map[TAG_PRE as usize] > 0 {
-                    Some(Cow::Borrowed("\n```"))
+                    let li_depth = self.depth_map[TAG_LI as usize] as usize;
+                    if li_depth > 0 {
+                        let indent = "  ".repeat(li_depth);
+                        let mut s = String::with_capacity(1 + indent.len() * 2 + 5);
+                        s.push('\n');
+                        s.push_str(&indent);
+                        s.push_str("```\n\n");
+                        s.push_str(&indent);
+                        Some(Cow::Owned(s))
+                    } else {
+                        Some(Cow::Borrowed("\n```"))
+                    }
                 } else {
                     Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
                 }
@@ -1955,11 +2029,14 @@ impl ConvertState {
     #[inline]
     fn update_escape_ctx_on_close(&mut self, id: u8) {
         match id {
-            TAG_TABLE => { if self.depth_map[id as usize] == 0 { self.escape_ctx &= !ESC_TABLE; } }
-            TAG_CODE => { if self.depth_map[TAG_CODE as usize] == 0 && self.depth_map[TAG_PRE as usize] == 0 { self.escape_ctx &= !ESC_CODE_PRE; } }
-            TAG_PRE => { if self.depth_map[TAG_PRE as usize] == 0 { self.in_pre = false; if self.depth_map[TAG_CODE as usize] == 0 { self.escape_ctx &= !ESC_CODE_PRE; } } }
-            TAG_A => { if self.depth_map[id as usize] == 0 { self.escape_ctx &= !ESC_LINK; } }
-            TAG_BLOCKQUOTE => { if self.depth_map[id as usize] == 0 { self.escape_ctx &= !ESC_BLOCKQUOTE; } }
+            TAG_TABLE if self.depth_map[id as usize] == 0 => self.escape_ctx &= !ESC_TABLE,
+            TAG_CODE if self.depth_map[TAG_CODE as usize] == 0 && self.depth_map[TAG_PRE as usize] == 0 => self.escape_ctx &= !ESC_CODE_PRE,
+            TAG_PRE if self.depth_map[TAG_PRE as usize] == 0 => {
+                self.in_pre = false;
+                if self.depth_map[TAG_CODE as usize] == 0 { self.escape_ctx &= !ESC_CODE_PRE; }
+            }
+            TAG_A if self.depth_map[id as usize] == 0 => self.escape_ctx &= !ESC_LINK,
+            TAG_BLOCKQUOTE if self.depth_map[id as usize] == 0 => self.escape_ctx &= !ESC_BLOCKQUOTE,
             _ => {}
         }
     }
