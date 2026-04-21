@@ -103,6 +103,13 @@ line2</code></pre></li></ol>`
     expect(markdown).toBe('- prefix `x`')
   })
 
+  it('inline code after existing whitespace does not duplicate separator', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li>prefix <span><code>x</code></span></li></ul>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- prefix `x`')
+  })
+
   it('inline code inside strikethrough wrapper inside list item has no leading space', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li><del><code>x</code></del></li></ul>'

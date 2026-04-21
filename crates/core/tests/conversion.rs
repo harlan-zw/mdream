@@ -286,6 +286,16 @@ fn inline_code_inside_span_inside_list_keeps_separator_space() {
 }
 
 #[test]
+fn inline_code_after_whitespace_in_list_item_does_not_duplicate_separator() {
+    // Trailing space in the buffer must not stack with an extra separator
+    // space, otherwise we'd produce `prefix  `x``.
+    assert_eq!(
+        convert("<ul><li>prefix <span><code>x</code></span></li></ul>"),
+        "- prefix `x`"
+    );
+}
+
+#[test]
 fn inline_code_inside_wrappers_inside_list_no_stray_space() {
     // No leading space should be injected when the wrapper opener is the last
     // thing emitted — otherwise pairing breaks for strikethrough and link
