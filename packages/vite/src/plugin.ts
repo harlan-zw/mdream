@@ -13,6 +13,38 @@ const GLOB_DOUBLE_STAR_RE = /\*\*/g
 const GLOB_STAR_RE = /\*/g
 const GLOB_QUESTION_RE = /\?/g
 
+/**
+ * Merge the given tokens into the response's `Vary` header, preserving any
+ * existing tokens and avoiding duplicates.
+ */
+function mergeVary(res: ServerResponse, tokens: string) {
+  const existing = res.getHeader('Vary')
+  const set = new Set<string>()
+  if (existing) {
+    for (const token of String(existing).split(',')) {
+      const trimmed = token.trim()
+      if (trimmed)
+        set.add(trimmed.toLowerCase())
+    }
+  }
+  const merged: string[] = []
+  if (existing) {
+    for (const token of String(existing).split(',')) {
+      const trimmed = token.trim()
+      if (trimmed)
+        merged.push(trimmed)
+    }
+  }
+  for (const token of tokens.split(',')) {
+    const trimmed = token.trim()
+    if (trimmed && !set.has(trimmed.toLowerCase())) {
+      merged.push(trimmed)
+      set.add(trimmed.toLowerCase())
+    }
+  }
+  res.setHeader('Vary', merged.join(', '))
+}
+
 const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>> & { mdreamOptions: Partial<MdreamOptions> } = {
   include: ['*.html', '**/*.html'], // Include root level and nested
   exclude: ['**/node_modules/**'],
@@ -200,10 +232,14 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
         return next()
       }
 
+      // This path participates in negotiation (markdown vs html), so every
+      // response from here on must advertise Vary so caches don't collapse
+      // them together. Merge to preserve any Vary set upstream.
+      mergeVary(res, 'Accept, Sec-Fetch-Dest')
+
       // Reject when Accept listed nothing we can serve (RFC 7231 §6.5.6).
       if (!hasMarkdownExtension && !clientPrefersMarkdown && negotiation === 'not-acceptable') {
         res.statusCode = 406
-        res.setHeader('Vary', 'Accept, Sec-Fetch-Dest')
         res.setHeader('Content-Type', 'text/plain; charset=utf-8')
         res.end('Not Acceptable: this resource can be served as text/html or text/markdown.')
         return
@@ -220,7 +256,6 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
         const result = await handleMarkdownRequest(url, getServer(), getOutDir())
 
         res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
-        res.setHeader('Vary', 'Accept, Sec-Fetch-Dest')
         res.setHeader('Cache-Control', cacheControl)
         res.setHeader('X-Markdown-Source', result.source)
         res.setHeader('X-Markdown-Cached', result.cached.toString())

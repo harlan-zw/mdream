@@ -187,6 +187,22 @@ describe('negotiateContent', () => {
     expect(negotiateContent('text/html;q=0, application/json;q=0')).toBe('not-acceptable')
   })
 
+  it('does not let wildcard resurrect explicitly rejected types', () => {
+    // text/html was rejected, so */* can only satisfy markdown.
+    expect(negotiateContent('text/html;q=0, */*;q=1, text/markdown;q=0.5')).toBe('markdown')
+    // text/markdown was rejected, so */* can only satisfy html.
+    expect(negotiateContent('text/markdown;q=0, */*;q=1, text/html;q=0.5')).toBe('html')
+    // Both explicitly rejected; wildcard can't resurrect either -> default html.
+    expect(negotiateContent('text/markdown;q=0, text/html;q=0, */*;q=1')).toBe('html')
+  })
+
+  it('normalizes media types case-insensitively', () => {
+    expect(negotiateContent('Text/Markdown')).toBe('markdown')
+    expect(negotiateContent('TEXT/HTML')).toBe('html')
+    expect(negotiateContent('Text/Markdown;Q=1')).toBe('markdown')
+    expect(negotiateContent('Application/XHTML+XML')).toBe('html')
+  })
+
   it('accepts application/xhtml+xml as html-capable', () => {
     expect(negotiateContent('application/xhtml+xml')).toBe('html')
   })

@@ -90,18 +90,12 @@ export default defineEventHandler(async (event) => {
   await nitroApp.hooks.callHook('mdream:negotiate', negotiateContext)
   clientPrefersMarkdown = negotiateContext.shouldServe
 
-  // Strict 406 only when we negotiate (no .md extension, no hook override
-  // asking for markdown, and Accept listed nothing we can serve).
-  if (!hasMarkdownExtension && !clientPrefersMarkdown && negotiation === 'not-acceptable') {
-    return createError({
-      statusCode: 406,
-      statusMessage: 'Not Acceptable',
-      message: 'This resource can be served as text/html or text/markdown.',
-    })
-  }
-
-  // Early exit: skip if not requesting .md and client doesn't prefer markdown
-  if (!hasMarkdownExtension && !clientPrefersMarkdown) {
+  // Early exit: skip if not requesting .md and client doesn't prefer markdown.
+  // We defer the 406 decision until after fetching downstream, because this
+  // middleware runs for every extensionless route and we can't 406 a JSON-only
+  // endpoint like /health just because Accept didn't list text/*.
+  const wantsNotAcceptable = !hasMarkdownExtension && !clientPrefersMarkdown && negotiation === 'not-acceptable'
+  if (!hasMarkdownExtension && !clientPrefersMarkdown && !wantsNotAcceptable) {
     return
   }
 
@@ -143,7 +137,18 @@ export default defineEventHandler(async (event) => {
           message: `Expected text/html but got ${contentType} for ${path}`,
         })
       }
+      // Not an HTML route, fall through so the non-HTML response is served
       return
+    }
+
+    // We now know the route serves HTML. If the client's Accept header listed
+    // nothing we can serve, this is a genuine 406.
+    if (wantsNotAcceptable) {
+      return createError({
+        statusCode: 406,
+        statusMessage: 'Not Acceptable',
+        message: 'This resource can be served as text/html or text/markdown.',
+      })
     }
 
     html = response._data as string
