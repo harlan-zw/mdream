@@ -301,6 +301,64 @@ fn loose_ordered_list_with_code_block_renders_as_commonmark_loose_list() {
     );
 }
 
+// https://github.com/harlan-zw/mdream/issues/76
+#[test]
+fn inline_code_inside_strong_inside_list_no_leading_space() {
+    assert_eq!(
+        convert("<ul><li><strong><code>text</code></strong></li></ul>"),
+        "- **`text`**"
+    );
+}
+
+#[test]
+fn adjacent_inline_code_in_list_separated_to_avoid_merging() {
+    // Without a separator, ` `a``b` ` parses as a single code span with
+    // literal content ``a``b``. A space keeps them as two distinct spans.
+    assert_eq!(
+        convert("<li><code>a</code><code>b</code></li>"),
+        "- `a` `b`"
+    );
+}
+
+#[test]
+fn inline_code_inside_span_inside_list_keeps_separator_space() {
+    // <span> is a non-delimiter wrapper: the separator space must still be
+    // inserted between preceding text and the backtick.
+    assert_eq!(
+        convert("<ul><li>prefix<span><code>x</code></span></li></ul>"),
+        "- prefix `x`"
+    );
+}
+
+#[test]
+fn inline_code_after_whitespace_in_list_item_does_not_duplicate_separator() {
+    // Trailing space in the buffer must not stack with an extra separator
+    // space, otherwise we'd produce `prefix  `x``.
+    assert_eq!(
+        convert("<ul><li>prefix <span><code>x</code></span></li></ul>"),
+        "- prefix `x`"
+    );
+}
+
+#[test]
+fn inline_code_inside_wrappers_inside_list_no_stray_space() {
+    // No leading space should be injected when the wrapper opener is the last
+    // thing emitted, otherwise pairing breaks for strikethrough and link
+    // text, and the space leaks into HTML passthrough content.
+    assert_eq!(
+        convert("<ul><li><del><code>x</code></del></li></ul>"),
+        "- ~~`x`~~"
+    );
+    assert_eq!(
+        convert("<ul><li><a href=\"#\"><code>x</code></a></li></ul>"),
+        "- [`x`](#)"
+    );
+    assert_eq!(
+        convert("<ul><li><mark><code>x</code></mark></li></ul>"),
+        "- <mark>`x`</mark>"
+    );
+}
+
 // ── Tables ──
 
 #[test]
