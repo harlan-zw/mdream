@@ -15,33 +15,28 @@ const GLOB_QUESTION_RE = /\?/g
 
 /**
  * Merge the given tokens into the response's `Vary` header, preserving any
- * existing tokens and avoiding duplicates.
+ * existing tokens and avoiding case-insensitive duplicates.
  */
 function mergeVary(res: ServerResponse, tokens: string) {
-  const existing = res.getHeader('Vary')
-  const set = new Set<string>()
-  if (existing) {
-    for (const token of String(existing).split(',')) {
-      const trimmed = token.trim()
-      if (trimmed)
-        set.add(trimmed.toLowerCase())
-    }
-  }
+  const existing = res.getHeader?.('Vary')
   const merged: string[] = []
+  const seen = new Set<string>()
+  const add = (raw: string) => {
+    const t = raw.trim()
+    if (!t)
+      return
+    const k = t.toLowerCase()
+    if (seen.has(k))
+      return
+    seen.add(k)
+    merged.push(t)
+  }
   if (existing) {
-    for (const token of String(existing).split(',')) {
-      const trimmed = token.trim()
-      if (trimmed)
-        merged.push(trimmed)
-    }
+    for (const token of String(existing).split(','))
+      add(token)
   }
-  for (const token of tokens.split(',')) {
-    const trimmed = token.trim()
-    if (trimmed && !set.has(trimmed.toLowerCase())) {
-      merged.push(trimmed)
-      set.add(trimmed.toLowerCase())
-    }
-  }
+  for (const token of tokens.split(','))
+    add(token)
   res.setHeader('Vary', merged.join(', '))
 }
 
@@ -237,16 +232,13 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
       // them together. Merge to preserve any Vary set upstream.
       mergeVary(res, 'Accept, Sec-Fetch-Dest')
 
-      // Reject when Accept listed nothing we can serve (RFC 7231 §6.5.6).
-      if (!hasMarkdownExtension && !clientPrefersMarkdown && negotiation === 'not-acceptable') {
-        res.statusCode = 406
-        res.setHeader('Content-Type', 'text/plain; charset=utf-8')
-        res.end('Not Acceptable: this resource can be served as text/html or text/markdown.')
-        return
-      }
+      const wantsNotAcceptable = !hasMarkdownExtension && !clientPrefersMarkdown && negotiation === 'not-acceptable'
 
-      // Skip if not requesting .md and client doesn't prefer markdown
-      if (!hasMarkdownExtension && !clientPrefersMarkdown) {
+      // Skip if not requesting .md and client doesn't prefer markdown and
+      // Accept isn't strictly unsatisfiable. For the not-acceptable case we
+      // still proceed, but only to confirm the route is one we serve before
+      // returning 406 (so non-HTML endpoints fall through to next()).
+      if (!hasMarkdownExtension && !clientPrefersMarkdown && !wantsNotAcceptable) {
         return next()
       }
 
@@ -254,6 +246,15 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
       try {
         const result = await handleMarkdownRequest(url, getServer(), getOutDir())
+
+        // Route is one we serve; if the client's Accept left us nothing to
+        // return, this is now a genuine 406.
+        if (wantsNotAcceptable) {
+          res.statusCode = 406
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+          res.end('Not Acceptable: this resource can be served as text/html or text/markdown.')
+          return
+        }
 
         res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
         res.setHeader('Cache-Control', cacheControl)
@@ -264,6 +265,11 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
         log(`Served ${url} from ${result.source} (cached: ${result.cached})`)
       }
       catch (error) {
+        // Route has no HTML representation. For not-acceptable requests we
+        // never owned the route, so hand back to the next middleware.
+        if (wantsNotAcceptable) {
+          return next()
+        }
         const message = error instanceof Error ? error.message : String(error)
         log(`Error serving ${url}: ${message}`)
         res.statusCode = 404

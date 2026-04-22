@@ -164,6 +164,11 @@ export function negotiateContent(acceptHeader?: string, secFetchDest?: string): 
     bestHtmlPos = bestWildcardPos
   }
 
+  // Both concrete types were explicitly rejected (q=0) and only a wildcard
+  // remained. The wildcard satisfied `sawAcceptable`, but we literally cannot
+  // serve anything the client didn't veto, so 406 is the honest answer.
+  if (bestMdPos === -1 && bestHtmlPos === -1)
+    return 'not-acceptable'
   if (bestMdPos === -1)
     return 'html'
   if (bestHtmlPos === -1)
