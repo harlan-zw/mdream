@@ -18,7 +18,6 @@ static HEADING_PREFIXES: [&str; 6] = ["# ", "## ", "### ", "#### ", "##### ", "#
 
 /// Pre-computed blockquote prefixes for depths 1-6 (avoids `"> ".repeat()`)
 static BQ_PREFIXES: [&str; 7] = ["", "> ", "> > ", "> > > ", "> > > > ", "> > > > > ", "> > > > > > "];
-/// Pre-computed unordered list item prefixes for indent depths 0-5
 
 // Clean mode bitmask flags
 const CLEAN_EMPTY_LINKS: u8 = 1;
@@ -1848,21 +1847,28 @@ impl ConvertState {
         // spaces to list_indent so subsequent continuation content (code blocks,
         // paragraphs, nested blocks) lands in the correct content column. The
         // width depends on the marker: "- " = 2, "N. " = digits(N) + 2.
-        if !skip_node && tag_id == Some(TAG_LI) && !self.in_table_cell()
+        // Push for every LI open so close_node can pop unconditionally; width 0
+        // when skipped or in a table cell keeps the stack balanced without
+        // affecting the indent string.
+        if tag_id == Some(TAG_LI)
             && let Some(li) = self.stack.last()
         {
-            let stack_len = self.stack.len();
-            let parent_is_ordered = stack_len >= 2
-                && self.stack[stack_len - 2].tag_id == Some(TAG_OL);
-            let width: usize = if parent_is_ordered {
-                let n = li.index + 1;
-                let digits = if n < 10 { 1 } else if n < 100 { 2 } else if n < 1000 { 3 }
-                    else if n < 10_000 { 4 } else { (n as f64).log10() as usize + 1 };
-                digits + 2
+            let width: usize = if !skip_node && !self.in_table_cell() {
+                let stack_len = self.stack.len();
+                let parent_is_ordered = stack_len >= 2
+                    && self.stack[stack_len - 2].tag_id == Some(TAG_OL);
+                if parent_is_ordered {
+                    let n = li.index + 1;
+                    // n >= 1 so ilog10 never panics; +1 converts floor(log10) to digit count.
+                    let digits = (n.ilog10() + 1) as usize;
+                    digits + 2
+                } else {
+                    2
+                }
             } else {
-                2
+                0
             };
-            self.list_indent_widths.push(width.min(u8::MAX as usize) as u8);
+            self.list_indent_widths.push(u8::try_from(width).unwrap_or(u8::MAX));
             for _ in 0..width { self.list_indent.push(' '); }
         }
 
