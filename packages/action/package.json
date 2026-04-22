@@ -1,7 +1,7 @@
 {
   "name": "@mdream/action",
   "type": "module",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "GitHub Action for mdream llms.txt generation",
   "license": "MIT",
   "repository": {
