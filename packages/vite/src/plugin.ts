@@ -4,7 +4,7 @@ import type { Plugin, ViteDevServer } from 'vite'
 import type { CacheEntry, MarkdownConversionResult, ViteHtmlToMarkdownOptions } from './types.js'
 import fs from 'node:fs'
 import path from 'node:path'
-import { shouldServeMarkdown } from '@mdream/js/negotiate'
+import { negotiateContent } from '@mdream/js/negotiate'
 import { htmlToMarkdown } from 'mdream'
 
 const GLOB_BACKSLASH_RE = /\\/g
@@ -12,6 +12,33 @@ const GLOB_DOT_RE = /\./g
 const GLOB_DOUBLE_STAR_RE = /\*\*/g
 const GLOB_STAR_RE = /\*/g
 const GLOB_QUESTION_RE = /\?/g
+
+/**
+ * Merge the given tokens into the response's `Vary` header, preserving any
+ * existing tokens and avoiding case-insensitive duplicates.
+ */
+function mergeVary(res: ServerResponse, tokens: string) {
+  const existing = res.getHeader?.('Vary')
+  const merged: string[] = []
+  const seen = new Set<string>()
+  const add = (raw: string) => {
+    const t = raw.trim()
+    if (!t)
+      return
+    const k = t.toLowerCase()
+    if (seen.has(k))
+      return
+    seen.add(k)
+    merged.push(t)
+  }
+  if (existing) {
+    for (const token of String(existing).split(','))
+      add(token)
+  }
+  for (const token of tokens.split(','))
+    add(token)
+  res.setHeader('Vary', merged.join(', '))
+}
 
 const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>> & { mdreamOptions: Partial<MdreamOptions> } = {
   include: ['*.html', '**/*.html'], // Include root level and nested
@@ -178,10 +205,11 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     return async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
       const path = new URL(req.url || '', 'http://localhost').pathname
       const hasMarkdownExtension = path.endsWith('.md')
-      const clientPrefersMarkdown = shouldServeMarkdown(
+      const negotiation = negotiateContent(
         req.headers.accept,
         req.headers['sec-fetch-dest'] as string | undefined,
       )
+      const clientPrefersMarkdown = negotiation === 'markdown'
 
       // never run on API routes or internal routes
       if (path.startsWith('/api') || path.startsWith('/_') || path.startsWith('/@')) {
@@ -199,8 +227,18 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
         return next()
       }
 
-      // Skip if not requesting .md and client doesn't prefer markdown
-      if (!hasMarkdownExtension && !clientPrefersMarkdown) {
+      // This path participates in negotiation (markdown vs html), so every
+      // response from here on must advertise Vary so caches don't collapse
+      // them together. Merge to preserve any Vary set upstream.
+      mergeVary(res, 'Accept, Sec-Fetch-Dest')
+
+      const wantsNotAcceptable = !hasMarkdownExtension && !clientPrefersMarkdown && negotiation === 'not-acceptable'
+
+      // Skip if not requesting .md and client doesn't prefer markdown and
+      // Accept isn't strictly unsatisfiable. For the not-acceptable case we
+      // still proceed, but only to confirm the route is one we serve before
+      // returning 406 (so non-HTML endpoints fall through to next()).
+      if (!hasMarkdownExtension && !clientPrefersMarkdown && !wantsNotAcceptable) {
         return next()
       }
 
@@ -208,6 +246,15 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
       try {
         const result = await handleMarkdownRequest(url, getServer(), getOutDir())
+
+        // Route is one we serve; if the client's Accept left us nothing to
+        // return, this is now a genuine 406.
+        if (wantsNotAcceptable) {
+          res.statusCode = 406
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+          res.end('Not Acceptable: this resource can be served as text/html or text/markdown.')
+          return
+        }
 
         res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
         res.setHeader('Cache-Control', cacheControl)
@@ -218,6 +265,11 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
         log(`Served ${url} from ${result.source} (cached: ${result.cached})`)
       }
       catch (error) {
+        // Route has no HTML representation. For not-acceptable requests we
+        // never owned the route, so hand back to the next middleware.
+        if (wantsNotAcceptable) {
+          return next()
+        }
         const message = error instanceof Error ? error.message : String(error)
         log(`Error serving ${url}: ${message}`)
         res.statusCode = 404

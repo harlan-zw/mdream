@@ -2,16 +2,16 @@ import type { H3Event } from 'h3'
 import type { MdreamOptions } from 'mdream'
 import type { MdreamMarkdownContext, MdreamNegotiateContext, ModuleRuntimeConfig } from '../../types.js'
 import { withSiteUrl } from '#site-config/server/composables/utils'
-import { shouldServeMarkdown as _shouldServeMarkdown } from '@mdream/js/negotiate'
+import { negotiateContent } from '@mdream/js/negotiate'
 import { consola } from 'consola'
-import { createError, defineEventHandler, getHeader, setHeader } from 'h3'
+import { appendHeader, createError, defineEventHandler, getHeader, setHeader } from 'h3'
 import { htmlToMarkdown } from 'mdream'
 import { useNitroApp, useRuntimeConfig } from 'nitropack/runtime'
 
 const logger = consola.withTag('nuxt-mdream')
 
-function shouldServeMarkdown(event: H3Event): boolean {
-  return _shouldServeMarkdown(
+function negotiate(event: H3Event) {
+  return negotiateContent(
     getHeader(event, 'accept'),
     getHeader(event, 'sec-fetch-dest'),
   )
@@ -76,7 +76,13 @@ export default defineEventHandler(async (event) => {
 
   // Check if we should serve markdown based on Accept header or .md extension
   const hasMarkdownExtension = path.endsWith('.md')
-  let clientPrefersMarkdown = shouldServeMarkdown(event)
+  const negotiation = negotiate(event)
+
+  // Advertise that the response varies by these request headers so caches
+  // don't collapse markdown and html responses together.
+  appendHeader(event, 'Vary', 'Accept, Sec-Fetch-Dest')
+
+  let clientPrefersMarkdown = negotiation === 'markdown'
 
   // Allow users to override the negotiate decision via hook
   const nitroApp = useNitroApp()
@@ -84,8 +90,12 @@ export default defineEventHandler(async (event) => {
   await nitroApp.hooks.callHook('mdream:negotiate', negotiateContext)
   clientPrefersMarkdown = negotiateContext.shouldServe
 
-  // Early exit: skip if not requesting .md and client doesn't prefer markdown
-  if (!hasMarkdownExtension && !clientPrefersMarkdown) {
+  // Early exit: skip if not requesting .md and client doesn't prefer markdown.
+  // We defer the 406 decision until after fetching downstream, because this
+  // middleware runs for every extensionless route and we can't 406 a JSON-only
+  // endpoint like /health just because Accept didn't list text/*.
+  const wantsNotAcceptable = !hasMarkdownExtension && !clientPrefersMarkdown && negotiation === 'not-acceptable'
+  if (!hasMarkdownExtension && !clientPrefersMarkdown && !wantsNotAcceptable) {
     return
   }
 
@@ -127,7 +137,18 @@ export default defineEventHandler(async (event) => {
           message: `Expected text/html but got ${contentType} for ${path}`,
         })
       }
+      // Not an HTML route, fall through so the non-HTML response is served
       return
+    }
+
+    // We now know the route serves HTML. If the client's Accept header listed
+    // nothing we can serve, this is a genuine 406.
+    if (wantsNotAcceptable) {
+      return createError({
+        statusCode: 406,
+        statusMessage: 'Not Acceptable',
+        message: 'This resource can be served as text/html or text/markdown.',
+      })
     }
 
     html = response._data as string
