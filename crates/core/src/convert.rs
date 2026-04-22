@@ -1134,8 +1134,24 @@ impl ConvertState {
                         Some(Cow::Owned(s))
                     }
                 } else if self.depth_map[TAG_LI as usize] > 0 {
+                    // Inline code inside a list item: collapse the paragraph
+                    // boundary with a separator space when following text, but
+                    // not when the buffer just emitted a wrapper opener where
+                    // a leading space would break the pairing or leak into the
+                    // wrapper content. Covers emphasis (`*`, `_`),
+                    // strikethrough (`~`), link text (`[`), HTML passthrough
+                    // (`>`), and whitespace. A trailing backtick does NOT
+                    // suppress: two adjacent `<code>` elements must be
+                    // separated with a space so CommonMark parses them as two
+                    // code spans rather than merging into one (` `a``b` ` →
+                    // single span with literal content ``a``b``).
                     let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
-                    if last_char != 0 && last_char != b' ' && last_char != b'\n' {
+                    if last_char != 0
+                        && !matches!(
+                            last_char,
+                            b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
+                        )
+                    {
                         Some(Cow::Borrowed(" `"))
                     } else {
                         Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))

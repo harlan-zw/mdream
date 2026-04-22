@@ -88,6 +88,58 @@ line2</code></pre></li></ol>`
     expect(markdown).toBe('1. x\n\n  ```\n  function() {\n  return 1;\n  }\n  ```')
   })
 
+  // https://github.com/harlan-zw/mdream/issues/76
+  it('inline code inside inline formatting inside list item has no leading space', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li><strong><code>text</code></strong></li></ul>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- **`text`**')
+  })
+
+  it('adjacent inline code spans in list item separated with a space', async () => {
+    // Without a separator, ` `a``b` ` parses as a single code span containing
+    // literal ``a``b``. A space keeps them as two distinct spans.
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<li><code>a</code><code>b</code></li>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- `a` `b`')
+  })
+
+  it('inline code inside non-delimiter wrapper inside list item keeps separator space', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li>prefix<span><code>x</code></span></li></ul>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- prefix `x`')
+  })
+
+  it('inline code after existing whitespace does not duplicate separator', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li>prefix <span><code>x</code></span></li></ul>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- prefix `x`')
+  })
+
+  it('inline code inside strikethrough wrapper inside list item has no leading space', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li><del><code>x</code></del></li></ul>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- ~~`x`~~')
+  })
+
+  it('inline code inside link inside list item has no leading space', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li><a href="#"><code>x</code></a></li></ul>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- [`x`](#)')
+  })
+
+  it('inline code inside html-passthrough wrapper inside list item has no leading space', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li><mark><code>x</code></mark></li></ul>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toBe('- <mark>`x`</mark>')
+  })
+
   it('self closing tags in lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<ul class="hds-term-items"></li>
