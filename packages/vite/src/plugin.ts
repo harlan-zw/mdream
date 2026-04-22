@@ -4,7 +4,7 @@ import type { Plugin, ViteDevServer } from 'vite'
 import type { CacheEntry, MarkdownConversionResult, ViteHtmlToMarkdownOptions } from './types.js'
 import fs from 'node:fs'
 import path from 'node:path'
-import { shouldServeMarkdown } from '@mdream/js/negotiate'
+import { negotiateContent } from '@mdream/js/negotiate'
 import { htmlToMarkdown } from 'mdream'
 
 const GLOB_BACKSLASH_RE = /\\/g
@@ -178,10 +178,11 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     return async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
       const path = new URL(req.url || '', 'http://localhost').pathname
       const hasMarkdownExtension = path.endsWith('.md')
-      const clientPrefersMarkdown = shouldServeMarkdown(
+      const negotiation = negotiateContent(
         req.headers.accept,
         req.headers['sec-fetch-dest'] as string | undefined,
       )
+      const clientPrefersMarkdown = negotiation === 'markdown'
 
       // never run on API routes or internal routes
       if (path.startsWith('/api') || path.startsWith('/_') || path.startsWith('/@')) {
@@ -199,6 +200,15 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
         return next()
       }
 
+      // Reject when Accept listed nothing we can serve (RFC 7231 §6.5.6).
+      if (!hasMarkdownExtension && !clientPrefersMarkdown && negotiation === 'not-acceptable') {
+        res.statusCode = 406
+        res.setHeader('Vary', 'Accept, Sec-Fetch-Dest')
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+        res.end('Not Acceptable: this resource can be served as text/html or text/markdown.')
+        return
+      }
+
       // Skip if not requesting .md and client doesn't prefer markdown
       if (!hasMarkdownExtension && !clientPrefersMarkdown) {
         return next()
@@ -210,6 +220,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
         const result = await handleMarkdownRequest(url, getServer(), getOutDir())
 
         res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+        res.setHeader('Vary', 'Accept, Sec-Fetch-Dest')
         res.setHeader('Cache-Control', cacheControl)
         res.setHeader('X-Markdown-Source', result.source)
         res.setHeader('X-Markdown-Cached', result.cached.toString())

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseAcceptHeader, shouldServeMarkdown } from '../../src/negotiate'
+import { negotiateContent, parseAcceptHeader, shouldServeMarkdown } from '../../src/negotiate'
 
 describe('parseAcceptHeader', () => {
   it('returns empty array for empty string', () => {
@@ -133,5 +133,66 @@ describe('shouldServeMarkdown', () => {
 
   it('allows markdown when sec-fetch-dest is undefined', () => {
     expect(shouldServeMarkdown('text/markdown', undefined)).toBe(true)
+  })
+})
+
+describe('negotiateContent', () => {
+  it('returns html for sec-fetch-dest: document regardless of Accept', () => {
+    expect(negotiateContent('text/markdown', 'document')).toBe('html')
+    expect(negotiateContent('*/*', 'document')).toBe('html')
+  })
+
+  it('returns html for missing Accept header', () => {
+    expect(negotiateContent()).toBe('html')
+    expect(negotiateContent('')).toBe('html')
+  })
+
+  it('returns html for standard browser Accept header', () => {
+    expect(negotiateContent('text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8')).toBe('html')
+  })
+
+  it('returns html for bare wildcard', () => {
+    expect(negotiateContent('*/*')).toBe('html')
+  })
+
+  it('returns markdown for text/markdown only', () => {
+    expect(negotiateContent('text/markdown')).toBe('markdown')
+  })
+
+  it('returns markdown when text/markdown beats text/html by quality', () => {
+    expect(negotiateContent('text/markdown, text/html;q=0.9, */*;q=0.1')).toBe('markdown')
+  })
+
+  it('returns html when text/html beats text/markdown by quality', () => {
+    expect(negotiateContent('text/markdown;q=0.5, text/html;q=1.0')).toBe('html')
+  })
+
+  it('returns markdown when text/plain has higher q than text/html', () => {
+    expect(negotiateContent('text/html;q=0.5, text/plain;q=0.9')).toBe('markdown')
+  })
+
+  it('returns not-acceptable when Accept lists only unsupported types', () => {
+    expect(negotiateContent('application/x-content-negotiation-probe')).toBe('not-acceptable')
+    expect(negotiateContent('application/json')).toBe('not-acceptable')
+    expect(negotiateContent('application/pdf, application/json')).toBe('not-acceptable')
+  })
+
+  it('returns html when wildcard is present alongside unsupported types', () => {
+    expect(negotiateContent('application/json, */*')).toBe('html')
+  })
+
+  it('treats q=0 as rejection', () => {
+    expect(negotiateContent('text/html;q=0, text/markdown')).toBe('markdown')
+    expect(negotiateContent('text/markdown;q=0, text/html')).toBe('html')
+    expect(negotiateContent('text/html;q=0, application/json;q=0')).toBe('not-acceptable')
+  })
+
+  it('accepts application/xhtml+xml as html-capable', () => {
+    expect(negotiateContent('application/xhtml+xml')).toBe('html')
+  })
+
+  it('respects text/* wildcard as html fallback', () => {
+    expect(negotiateContent('text/*')).toBe('html')
+    expect(negotiateContent('text/markdown, text/*')).toBe('markdown')
   })
 })

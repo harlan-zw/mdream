@@ -2,16 +2,16 @@ import type { H3Event } from 'h3'
 import type { MdreamOptions } from 'mdream'
 import type { MdreamMarkdownContext, MdreamNegotiateContext, ModuleRuntimeConfig } from '../../types.js'
 import { withSiteUrl } from '#site-config/server/composables/utils'
-import { shouldServeMarkdown as _shouldServeMarkdown } from '@mdream/js/negotiate'
+import { negotiateContent } from '@mdream/js/negotiate'
 import { consola } from 'consola'
-import { createError, defineEventHandler, getHeader, setHeader } from 'h3'
+import { appendHeader, createError, defineEventHandler, getHeader, setHeader } from 'h3'
 import { htmlToMarkdown } from 'mdream'
 import { useNitroApp, useRuntimeConfig } from 'nitropack/runtime'
 
 const logger = consola.withTag('nuxt-mdream')
 
-function shouldServeMarkdown(event: H3Event): boolean {
-  return _shouldServeMarkdown(
+function negotiate(event: H3Event) {
+  return negotiateContent(
     getHeader(event, 'accept'),
     getHeader(event, 'sec-fetch-dest'),
   )
@@ -76,13 +76,29 @@ export default defineEventHandler(async (event) => {
 
   // Check if we should serve markdown based on Accept header or .md extension
   const hasMarkdownExtension = path.endsWith('.md')
-  let clientPrefersMarkdown = shouldServeMarkdown(event)
+  const negotiation = negotiate(event)
+
+  // Advertise that the response varies by these request headers so caches
+  // don't collapse markdown and html responses together.
+  appendHeader(event, 'Vary', 'Accept, Sec-Fetch-Dest')
+
+  let clientPrefersMarkdown = negotiation === 'markdown'
 
   // Allow users to override the negotiate decision via hook
   const nitroApp = useNitroApp()
   const negotiateContext: MdreamNegotiateContext = { event, shouldServe: clientPrefersMarkdown }
   await nitroApp.hooks.callHook('mdream:negotiate', negotiateContext)
   clientPrefersMarkdown = negotiateContext.shouldServe
+
+  // Strict 406 only when we negotiate (no .md extension, no hook override
+  // asking for markdown, and Accept listed nothing we can serve).
+  if (!hasMarkdownExtension && !clientPrefersMarkdown && negotiation === 'not-acceptable') {
+    return createError({
+      statusCode: 406,
+      statusMessage: 'Not Acceptable',
+      message: 'This resource can be served as text/html or text/markdown.',
+    })
+  }
 
   // Early exit: skip if not requesting .md and client doesn't prefer markdown
   if (!hasMarkdownExtension && !clientPrefersMarkdown) {
