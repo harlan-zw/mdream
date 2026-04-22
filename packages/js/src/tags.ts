@@ -552,13 +552,11 @@ export const tagHandlers: Record<number, TagHandler> = {
           return `\n${prefix.trimEnd()}\n${prefix}`
         }
       }
-      // Inside a list item, paragraphs are collapsed inline. Insert a space so
-      // sibling text/inline-code doesn't run into adjacent content.
       if ((node.depthMap[TAG_LI] || 0) > 0) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
         if (lastChar && lastChar !== ' ' && lastChar !== '\n') {
-          return ' '
+          return `\n\n${state.listIndent}`
         }
       }
     },

@@ -70,7 +70,7 @@ echo test
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ol><li><p>text</p><code># comment</code><p>text</p></li></ol>'
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('1. text `# comment` text')
+    expect(markdown).toBe('1. text `# comment`\n\n   text')
   })
 
   it('code block with blank lines inside list item preserves them', async () => {
