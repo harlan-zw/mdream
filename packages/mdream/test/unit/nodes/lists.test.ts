@@ -73,6 +73,16 @@ echo test
     expect(markdown).toBe('1. text `# comment`\n\n   text')
   })
 
+  it('multiple paragraphs in list item inside table cell stay inline', async () => {
+    // Lists inside table cells are preserved as raw HTML, so paragraph breaks
+    // must not inject blank markdown lines that would split the table row.
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<table><tr><td><ul><li><p>a</p><p>b</p></li></ul></td></tr></table>'
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown).toContain('<ul><li>')
+    expect(markdown).not.toContain('\n\n')
+  })
+
   it('code block with blank lines inside list item preserves them', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<ol><li><p>x</p><pre><code>line1

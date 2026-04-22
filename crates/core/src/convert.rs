@@ -1093,7 +1093,7 @@ impl ConvertState {
                         return Some(Cow::Owned(s));
                     }
                 }
-                if self.depth_map[TAG_LI as usize] > 0 {
+                if self.depth_map[TAG_LI as usize] > 0 && !self.in_table_cell() {
                     let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
                     if last_char != 0 && last_char != b' ' && last_char != b'\n' {
                         let indent = self.list_indent.as_str();

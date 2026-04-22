@@ -326,6 +326,22 @@ fn multiple_paragraphs_in_unordered_list_item_form_loose_list() {
     assert_eq!(convert(html), "- a\n\n  b");
 }
 
+#[test]
+fn multiple_paragraphs_in_list_item_inside_table_cell_stay_inline() {
+    // Lists inside table cells are preserved as raw HTML, so paragraph breaks
+    // must not inject blank markdown lines that would split the table row.
+    let html = "<table><tr><td><ul><li><p>a</p><p>b</p></li></ul></td></tr></table>";
+    let out = convert(html);
+    assert!(
+        out.contains("<ul><li>"),
+        "expected raw list HTML in table cell, got: {out}"
+    );
+    assert!(
+        !out.contains("\n\n"),
+        "expected no blank lines inside table cell, got: {out}"
+    );
+}
+
 // https://github.com/harlan-zw/mdream/issues/76
 #[test]
 fn inline_code_inside_strong_inside_list_no_leading_space() {

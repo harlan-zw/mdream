@@ -552,7 +552,7 @@ export const tagHandlers: Record<number, TagHandler> = {
           return `\n${prefix.trimEnd()}\n${prefix}`
         }
       }
-      if ((node.depthMap[TAG_LI] || 0) > 0) {
+      if ((node.depthMap[TAG_LI] || 0) > 0 && !isInsideTableCell(node)) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
         if (lastChar && lastChar !== ' ' && lastChar !== '\n') {
