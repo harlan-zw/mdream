@@ -1093,10 +1093,14 @@ impl ConvertState {
                         return Some(Cow::Owned(s));
                     }
                 }
-                if self.depth_map[TAG_LI as usize] > 0 {
+                if self.depth_map[TAG_LI as usize] > 0 && !self.in_table_cell() {
                     let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
                     if last_char != 0 && last_char != b' ' && last_char != b'\n' {
-                        return Some(Cow::Borrowed(" "));
+                        let indent = self.list_indent.as_str();
+                        let mut s = String::with_capacity(2 + indent.len());
+                        s.push_str("\n\n");
+                        s.push_str(indent);
+                        return Some(Cow::Owned(s));
                     }
                 }
                 None
