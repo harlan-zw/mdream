@@ -224,9 +224,12 @@ fn nested_unordered_list() {
 
 #[test]
 fn nested_ordered_list() {
+    // Nested ordered lists require 3-space continuation indent (length of
+    // the outer "1. " marker) so CommonMark parses the inner list as nested
+    // rather than as peer items of the outer.
     assert_eq!(
         convert("<ol><li>Level 1<ol><li>Level 1.1</li></ol></li><li>Level 2</li></ol>"),
-        "1. Level 1\n  1. Level 1.1\n2. Level 2"
+        "1. Level 1\n   1. Level 1.1\n2. Level 2"
     );
 }
 
@@ -238,9 +241,48 @@ fn mixed_nested_lists() {
     );
 }
 
+#[test]
+fn ordered_list_with_code_block_uses_marker_width_indent() {
+    // Ordered list continuation must be indented by the marker width
+    // (3 columns for "1. ") so the fenced code block parses as part of the
+    // list item. 2-space indent would dump the code block outside the list.
+    let html = "<ol><li><p>x</p><pre><code>y</code></pre><p>z</p></li></ol>";
+    assert_eq!(
+        convert(html),
+        "1. x\n\n   ```\n   y\n   ```\n\n   z"
+    );
+}
+
+#[test]
+fn ordered_list_double_digit_marker_uses_wider_indent() {
+    // Once the marker reaches 2 digits ("10. " = 4 columns), continuation
+    // indent must widen to match.
+    let html = "<ol>\
+        <li>a</li><li>b</li><li>c</li><li>d</li><li>e</li>\
+        <li>f</li><li>g</li><li>h</li><li>i</li>\
+        <li>j<ol><li>nested</li></ol></li></ol>";
+    let md = convert(html);
+    assert!(md.ends_with("10. j\n    1. nested"),
+        "expected 4-space indent before nested item, got: {md:?}");
+}
+
+#[test]
+fn nested_ul_inside_ol_uses_ordered_parent_indent() {
+    // <ol><li><ul><li>inner</li></ul></li></ol>: the inner "- " must be
+    // indented by the outer "1. " width (3), not 2.
+    let html = "<ol><li>outer<ul><li>inner</li></ul></li></ol>";
+    assert_eq!(
+        convert(html),
+        "1. outer\n   - inner"
+    );
+}
+
 // https://github.com/harlan-zw/mdream/issues/77
 #[test]
-fn loose_ordered_list_items_separated_by_blank_line() {
+fn loose_ordered_list_with_code_block_renders_as_commonmark_loose_list() {
+    // The user's reproducer from issue #77. With 3-space indent the markdown
+    // renders in CommonMark as a 2-item list with nested code block; with the
+    // old 2-space indent the code block fell outside the list entirely.
     let html = r#"
 <ol>
 <li>
@@ -253,17 +295,10 @@ fn loose_ordered_list_items_separated_by_blank_line() {
 </li>
 </ol>
 "#;
-    let expected = r#"
-1. text
-
-  ```
-  text
-  ```
-
-  text
-2. text
-"#;
-    assert_eq!(convert(html), expected.trim());
+    assert_eq!(
+        convert(html),
+        "1. text\n\n   ```\n   text\n   ```\n\n   text\n2. text"
+    );
 }
 
 // https://github.com/harlan-zw/mdream/issues/76
@@ -308,7 +343,7 @@ fn inline_code_after_whitespace_in_list_item_does_not_duplicate_separator() {
 #[test]
 fn inline_code_inside_wrappers_inside_list_no_stray_space() {
     // No leading space should be injected when the wrapper opener is the last
-    // thing emitted — otherwise pairing breaks for strikethrough and link
+    // thing emitted, otherwise pairing breaks for strikethrough and link
     // text, and the space leaks into HTML passthrough content.
     assert_eq!(
         convert("<ul><li><del><code>x</code></del></li></ul>"),

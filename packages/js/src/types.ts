@@ -282,6 +282,14 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   lastNode?: Node
 
   context?: PluginContext
+
+  /**
+   * Cumulative indent for list-item continuation. Grows by each ancestor
+   * `<li>`'s marker width (`"- "` = 2, `"N. "` = digits(N) + 2) so continuation
+   * content lands in the CommonMark content column. Managed by the processor.
+   */
+  listIndent?: string
+  listIndentWidths?: number[]
 }
 
 type NodeEventEnter = 0
