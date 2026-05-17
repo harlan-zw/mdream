@@ -1,8 +1,5 @@
 import type { HtmlToMarkdownOptions } from '../napi/index.js'
-import { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream, initSync } from '../wasm/mdream_edge.js'
-import wasmModule from '../wasm/mdream_edge_bg.wasm'
-
-initSync({ module: wasmModule })
+import { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream } from '../wasm-bundler/mdream_edge.js'
 
 export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): string {
   const result = _htmlToMarkdownResult(html, options || {})

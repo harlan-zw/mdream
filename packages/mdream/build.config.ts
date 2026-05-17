@@ -15,7 +15,7 @@ const rolldown = {
 }
 
 const rolldownWasm = {
-  external: [/\.\.\/wasm\//, /\.\.\/napi\//],
+  external: [/\.\.\/wasm\//, /\.\.\/wasm-bundler\//, /\.\.\/napi\//],
 }
 
 export default defineBuildConfig({
