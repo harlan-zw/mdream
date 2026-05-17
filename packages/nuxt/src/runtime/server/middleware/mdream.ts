@@ -1,12 +1,12 @@
 import type { H3Event } from 'h3'
 import type { MdreamOptions } from 'mdream'
 import type { MdreamMarkdownContext, MdreamNegotiateContext, ModuleRuntimeConfig } from '../../types.js'
-import { withSiteUrl } from '#site-config/server/composables/utils'
 import { negotiateContent } from '@mdream/js/negotiate'
 import { consola } from 'consola'
 import { appendHeader, createError, defineEventHandler, getHeader, setHeader } from 'h3'
 import { htmlToMarkdown } from 'mdream'
 import { useNitroApp, useRuntimeConfig } from 'nitropack/runtime'
+import { withSiteUrl } from '#site-config/server/composables/utils'
 
 const logger = consola.withTag('nuxt-mdream')
 
