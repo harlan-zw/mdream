@@ -177,11 +177,15 @@ jobs:
 
       - name: Build WASM edge module
         working-directory: crates/edge
-        run: wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge
+        run: |
+          wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge
+          wasm-pack build --target bundler --out-dir ../../packages/mdream/wasm-bundler --out-name mdream_edge
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4.6.2
         with:
           name: wasm-edge
-          path: packages/mdream/wasm/
+          path: |
+            packages/mdream/wasm/
+            packages/mdream/wasm-bundler/
           if-no-files-found: error

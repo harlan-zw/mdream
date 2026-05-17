@@ -185,8 +185,10 @@ jobs:
       - name: Prepare
         run: pnpm -r run dev:prepare
 
-      - name: Build WASM edge
-        run: wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge
+      - name: Build WASM web & bundler
+        run: |
+          wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge
+          wasm-pack build --target bundler --out-dir ../../packages/mdream/wasm-bundler --out-name mdream_edge
         working-directory: crates/edge
 
       - name: Build

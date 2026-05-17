@@ -60,7 +60,9 @@ jobs:
       - name: Move WASM edge artifacts
         run: |
           mkdir -p packages/mdream/wasm
-          cp -v artifacts/wasm-edge/* packages/mdream/wasm/
+          mkdir -p packages/mdream/wasm-bundler
+          cp -v artifacts/wasm-edge/wasm/* packages/mdream/wasm/
+          cp -v artifacts/wasm-edge/wasm-bundler/* packages/mdream/wasm-bundler/
 
       - name: Generate NAPI index.js and move to npm dirs
         working-directory: crates/node
