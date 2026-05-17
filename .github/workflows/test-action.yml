@@ -41,9 +41,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build edge WASM
-        working-directory: crates/node
-        run: pnpm run build:edge
+      - name: Build WASM web & bundler
+        working-directory: crates/edge
+        run: |
+          wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge
+          wasm-pack build --target bundler --out-dir ../../packages/mdream/wasm-bundler --out-name mdream_edge
 
       - name: Build packages
         run: pnpm build
@@ -118,9 +120,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build edge WASM
-        working-directory: crates/node
-        run: pnpm run build:edge
+      - name: Build WASM web & bundler
+        working-directory: crates/edge
+        run: |
+          wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge
+          wasm-pack build --target bundler --out-dir ../../packages/mdream/wasm-bundler --out-name mdream_edge
 
       - name: Build packages
         run: pnpm build
