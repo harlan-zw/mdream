@@ -54,6 +54,11 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 
 ### What can Mdream do?
 
+Pipe any HTML into `mdream` to get clean, LLM-ready Markdown:
+
+```bash
+curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream --preset minimal
+```
 
 <details>
 <summary><b>📥 URL to Markdown</b></summary>
