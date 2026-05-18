@@ -1661,7 +1661,15 @@ impl ConvertState {
 
         let (h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) = if let Some(h) = tag_handler {
             (h.is_inline, h.excludes_text_nodes, h.is_non_nesting, h.collapses_inner_white_space, h.spacing)
+        } else if tag_id.is_none() {
+            // Truly unknown tag (not in dictionary, no override): treat as inline
+            // with zero spacing so it doesn't fragment the surrounding paragraph.
+            // `<p>before <ex>foo</ex> after</p>` becomes `before foo after`. Users
+            // opt custom elements into block semantics via `tagOverrides`.
+            (true, false, false, false, Some(NO_SPACING))
         } else {
+            // Built-in tag without a dedicated handler (e.g. caption, span fallback):
+            // keep previous block-default behaviour.
             (false, false, false, false, None)
         };
 
@@ -2028,7 +2036,16 @@ impl ConvertState {
         } else {
             Cow::Borrowed(tag_name_raw)
         };
-        let tag_id = crate::consts::get_tag_id(&tag_name);
+        let builtin_tag_id = crate::consts::get_tag_id(&tag_name);
+        // Closing tag may target an aliased custom element (e.g. </ex> where
+        // tagOverrides: { ex: 'em' } opened a TAG_EM node). Resolve the alias
+        // here so the close matches the open.
+        let tag_id = if builtin_tag_id.is_some() { builtin_tag_id } else {
+            self.options.plugins.as_ref()
+                .and_then(|p| p.tag_overrides.as_ref())
+                .and_then(|ovs| ovs.iter().find(|(k, _)| k == tag_name.as_ref()).map(|(_, v)| v))
+                .and_then(|ov| ov.alias_tag_id)
+        };
 
         if let Some(curr) = self.stack.last()
             && curr.is_non_nesting && curr.tag_id != tag_id {
@@ -2038,15 +2055,25 @@ impl ConvertState {
                 };
             }
 
+        // For aliased close (`</ex>` with ex→em), match the open node by both
+        // tag_id and custom_name so we close the specific aliased element rather
+        // than an unrelated built-in <em> on the stack.
+        let close_name: &str = tag_name.as_ref();
+        let needs_name_match = builtin_tag_id.is_none() && tag_id.is_some();
+        let matches = |node: &ElementNode| -> bool {
+            if node.tag_id != tag_id { return false; }
+            if !needs_name_match { return true; }
+            node.custom_name.as_deref() == Some(close_name)
+        };
+
         if let Some(top) = self.stack.last() {
-            // Fast path: top of stack matches (well-formed HTML)
-            if top.tag_id == tag_id {
+            if matches(top) {
                 self.close_node();
             } else {
                 let mut pop_count = 0;
                 for j in (0..self.stack.len()).rev() {
                     pop_count += 1;
-                    if self.stack[j].tag_id == tag_id { break; }
+                    if matches(&self.stack[j]) { break; }
                 }
                 for _ in 0..pop_count {
                     if !self.stack.is_empty() { self.close_node(); }

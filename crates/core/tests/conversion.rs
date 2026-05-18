@@ -1431,3 +1431,70 @@ fn script_with_less_than_followed_by_exclamation() {
     let result = convert(html);
     assert!(result.contains("Bang"), "<! operator in script broke parsing: {result}");
 }
+
+// Issue #84: tag matching was previously dispatched on (first byte, length) only,
+// so unknown tags like `<ex>` collided with built-ins (TAG_EM) and got rendered
+// as emphasis. These tests pin the behaviour: unknown tags pass through as plain
+// text content, leaving users to opt them into rendering via `tagOverrides`.
+
+#[test]
+fn unknown_two_letter_tag_does_not_collide_with_em() {
+    assert_eq!(convert("<ex>foo</ex>"), "foo");
+}
+
+#[test]
+fn unknown_tags_do_not_collide_with_builtins() {
+    // Each input shares a (first_byte, length) signature with a built-in tag.
+    // Strict matching should keep the literal text only.
+    assert_eq!(convert("<fxxm>foo</fxxm>"), "foo"); // would have aliased to FORM
+    assert_eq!(convert("<ix>foo</ix>"), "foo");    // would have aliased to I
+    assert_eq!(convert("<kxd>foo</kxd>"), "foo");  // would have aliased to KBD
+    assert_eq!(convert("<hxxxxx>foo</hxxxxx>"), "foo"); // would have aliased to HEADER
+    assert_eq!(convert("<ifxxxx>foo</ifxxxx>"), "foo"); // would have aliased to IFRAME
+}
+
+#[test]
+fn custom_web_component_tag_is_inert_by_default() {
+    // Web components and other custom elements are not built-ins. They should
+    // simply emit their text content rather than picking up unrelated formatting.
+    assert_eq!(convert("<my-widget>hello</my-widget>"), "hello");
+}
+
+#[test]
+fn unknown_inline_tag_does_not_fragment_paragraph() {
+    // Unknown tags default to inline so they don't insert block breaks around
+    // their content. Regression guard: this previously emitted
+    // "before\n\nfoo\n\n after" because unknown tags inherited block-default
+    // spacing.
+    assert_eq!(
+        convert("<p>before <ex>foo</ex> after</p>"),
+        "before foo after"
+    );
+}
+
+#[test]
+fn tag_override_alias_preserves_trailing_siblings() {
+    // A string-shorthand tagOverride (`ex` aliased to `em`) used to drop every
+    // sibling emitted after `</ex>` because the closing-tag lookup did not
+    // resolve the alias, so the unmatched close popped the entire stack.
+    let html = "<p>before <ex>foo</ex> after</p>";
+    let opts = HTMLToMarkdownOptions {
+        plugins: Some(PluginConfig {
+            tag_overrides: Some(vec![(
+                "ex".to_string(),
+                TagOverrideConfig {
+                    enter: None,
+                    exit: None,
+                    spacing: None,
+                    is_inline: None,
+                    is_self_closing: None,
+                    collapses_inner_white_space: None,
+                    alias_tag_id: mdream::consts::get_tag_id("em"),
+                },
+            )]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, opts), "before _foo_ after");
+}

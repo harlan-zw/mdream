@@ -261,8 +261,17 @@ pub const PIPE_CHAR: u8 = 124; // '|'
 pub const OPEN_BRACKET_CHAR: u8 = 91; // '['
 pub const CLOSE_BRACKET_CHAR: u8 = 93; // ']'
 
-/// Fast tag name to ID lookup using first-byte dispatch + length checks.
-/// Avoids string comparison overhead for common tags.
+/// Fast, strict tag name to ID lookup.
+///
+/// Dispatches on (first byte, length) for fast rejection, then verifies the
+/// remaining bytes inline so that unknown tags (e.g. `<ex>`, `<fxxm>`, custom
+/// elements) never collide with built-ins sharing the same (first-byte, length)
+/// signature. Single-character arms need no extra check — the length and first
+/// byte together uniquely identify the string. Multi-character arms compare the
+/// tail bytes via slice equality, which the compiler lowers to a small fixed
+/// memcmp (typically a single word load + compare).
+/// Returns `None` for any tag not in the built-in set; callers can opt those
+/// tags into a rendering via `tagOverrides`.
 #[inline]
 pub fn get_tag_id(name: &str) -> Option<u8> {
     let bytes = name.as_bytes();
@@ -270,146 +279,112 @@ pub fn get_tag_id(name: &str) -> Option<u8> {
     if len == 0 || len > 10 {
         return None;
     }
-    // Dispatch on first byte and length for fast rejection
+    // Each arm reads tail bytes directly: `&bytes[1..]` against a fixed-length
+    // byte literal. The length is constrained by the match pattern, so the
+    // comparison is a single fixed-size memcmp.
     match (bytes[0], len) {
+        // 1-char tags: first byte + length uniquely identifies the string.
         (b'a', 1) => Some(TAG_A),
-        (b'a', 4) if bytes[1] == b'b' => Some(TAG_ABBR), // abbr
-        (b'a', 4) if bytes[1] == b'r' => Some(TAG_AREA), // area
-        (b'a', 5) if bytes[1] == b's' => Some(TAG_ASIDE), // aside
-        (b'a', 5) if bytes[1] == b'u' => Some(TAG_AUDIO), // audio
-        (b'a', 7) if bytes[1] == b'r' => Some(TAG_ARTICLE),
-        (b'a', 7) if bytes[1] == b'd' => Some(TAG_ADDRESS),
-        (b'a', _) => None,
         (b'b', 1) => Some(TAG_B),
+        (b'i', 1) => Some(TAG_I),
+        (b'p', 1) => Some(TAG_P),
+        (b'q', 1) => Some(TAG_Q),
+        (b'u', 1) => Some(TAG_U),
+        // 2-char tags: verify byte 1 only.
         (b'b', 2) if bytes[1] == b'r' => Some(TAG_BR),
-        (b'b', 3) if bytes[1] == b'd' => Some(TAG_BDO),
-        (b'b', 4) if bytes[1] == b'a' => Some(TAG_BASE),
-        (b'b', 4) if bytes[1] == b'o' => Some(TAG_BODY),
-        (b'b', 6) if bytes[1] == b'u' => Some(TAG_BUTTON),
-        (b'b', 10) => Some(TAG_BLOCKQUOTE),
-        (b'b', _) => None,
-        (b'c', 3) if bytes[1] == b'o' => Some(TAG_COL),
-        (b'c', 4) if bytes[1] == b'i' => Some(TAG_CITE),
-        (b'c', 4) if bytes[1] == b'o' => Some(TAG_CODE),
-        (b'c', 6) if bytes[1] == b'a' => Some(TAG_CANVAS),
-        (b'c', 6) if bytes[1] == b'e' => Some(TAG_CENTER),
-        (b'c', 7) => Some(TAG_CAPTION),
-        (b'c', _) => None,
-        (b'd', 2) if bytes[1] == b'd' => Some(TAG_DD),
-        (b'd', 2) if bytes[1] == b'l' => Some(TAG_DL),
-        (b'd', 2) if bytes[1] == b't' => Some(TAG_DT),
-        (b'd', 3) if bytes[1] == b'e' => Some(TAG_DEL),
-        (b'd', 3) if bytes[1] == b'f' => Some(TAG_DFN),
-        (b'd', 3) if bytes[1] == b'i' => Some(TAG_DIV),
-        (b'd', 6) if bytes[1] == b'i' => Some(TAG_DIALOG),
-        (b'd', 7) => Some(TAG_DETAILS),
-        (b'd', _) => None,
-        (b'e', 2) => Some(TAG_EM),
-        (b'e', 5) => Some(TAG_EMBED),
-        (b'e', _) => None,
-        (b'f', 4) => Some(TAG_FORM),
-        (b'f', 6) if bytes[2] == b'o' => Some(TAG_FOOTER),
-        (b'f', 6) if bytes[2] == b'g' => Some(TAG_FIGURE),
-        (b'f', 8) if bytes[1] == b'i' => {
-            match name {
-                "fieldset" => Some(TAG_FIELDSET),
-                _ => None,
-            }
-        }
-        (b'f', 10) => Some(TAG_FIGCAPTION),
-        (b'f', _) => None,
-        (b'h', 2) if bytes[1] == b'r' => Some(TAG_HR),
+        (b'd', 2) => match bytes[1] { b'd' => Some(TAG_DD), b'l' => Some(TAG_DL), b't' => Some(TAG_DT), _ => None },
+        (b'e', 2) if bytes[1] == b'm' => Some(TAG_EM),
         (b'h', 2) => match bytes[1] {
+            b'r' => Some(TAG_HR),
             b'1' => Some(TAG_H1), b'2' => Some(TAG_H2), b'3' => Some(TAG_H3),
             b'4' => Some(TAG_H4), b'5' => Some(TAG_H5), b'6' => Some(TAG_H6),
             _ => None,
         },
-        (b'h', 4) if bytes[1] == b'e' => Some(TAG_HEAD),
-        (b'h', 4) if bytes[1] == b't' => Some(TAG_HTML),
-        (b'h', 6) => Some(TAG_HEADER),
-        (b'h', _) => None,
-        (b'i', 1) => Some(TAG_I),
-        (b'i', 3) if bytes[1] == b'm' => Some(TAG_IMG),
-        (b'i', 3) if bytes[1] == b'n' => Some(TAG_INS),
-        (b'i', 5) => Some(TAG_INPUT),
-        (b'i', 6) => Some(TAG_IFRAME),
-        (b'i', _) => None,
-        (b'k', 3) => Some(TAG_KBD),
-        (b'k', 6) => Some(TAG_KEYGEN),
-        (b'k', _) => None,
-        (b'l', 2) => Some(TAG_LI),
-        (b'l', 4) if bytes[1] == b'i' => Some(TAG_LINK),
-        (b'l', 5) => Some(TAG_LABEL),
-        (b'l', 6) => Some(TAG_LEGEND),
-        (b'l', _) => None,
-        (b'm', 3) if bytes[1] == b'a' => {
-            match name { "map" => Some(TAG_MAP), _ => None }
-        }
-        (b'm', 4) if bytes[1] == b'a' => {
-            match name { "main" => Some(TAG_MAIN), "mark" => Some(TAG_MARK), _ => None }
-        }
-        (b'm', 4) if bytes[1] == b'e' => Some(TAG_META),
-        (b'm', 5) => Some(TAG_METER),
-        (b'm', _) => None,
-        (b'n', 3) => Some(TAG_NAV),
-        (b'n', 8) if bytes[2] == b's' => Some(TAG_NOSCRIPT),
-        (b'n', 8) if bytes[2] == b'f' => Some(TAG_NOFRAMES),
-        (b'n', _) => None,
+        (b'l', 2) if bytes[1] == b'i' => Some(TAG_LI),
         (b'o', 2) if bytes[1] == b'l' => Some(TAG_OL),
-        (b'o', 6) if bytes[1] == b'b' => Some(TAG_OBJECT),
-        (b'o', 6) if bytes[1] == b'p' => Some(TAG_OPTION),
-        (b'o', _) => None,
-        (b'p', 1) => Some(TAG_P),
-        (b'p', 3) => Some(TAG_PRE),
-        (b'p', 4) => Some(TAG_PATH),
-        (b'p', 5) if bytes[1] == b'a' => Some(TAG_PARAM),
-        (b'p', 8) if bytes[1] == b'r' => Some(TAG_PROGRESS),
-        (b'p', 9) => Some(TAG_PLAINTEXT),
-        (b'p', _) => None,
-        (b'q', 1) => Some(TAG_Q),
-        (b'q', _) => None,
-        (b'r', 2) if bytes[1] == b'p' => Some(TAG_RP),
-        (b'r', 2) if bytes[1] == b't' => Some(TAG_RT),
-        (b'r', 4) => Some(TAG_RUBY),
-        (b'r', _) => None,
-        (b's', 3) if bytes[1] == b'u' => {
-            match bytes[2] { b'b' => Some(TAG_SUB), b'p' => Some(TAG_SUP), _ => None }
-        }
-        (b's', 3) if bytes[1] == b'v' => Some(TAG_SVG),
-        (b's', 4) if bytes[1] == b'a' => Some(TAG_SAMP),
-        (b's', 4) if bytes[1] == b'p' => Some(TAG_SPAN),
-        (b's', 5) if bytes[1] == b't' => Some(TAG_STYLE),
-        (b's', 5) if bytes[1] == b'm' => Some(TAG_SMALL),
-        (b's', 6) if bytes[1] == b'c' => Some(TAG_SCRIPT),
-        (b's', 6) if bytes[1] == b'e' => Some(TAG_SELECT),
-        (b's', 6) if bytes[1] == b'o' => Some(TAG_SOURCE),
-        (b's', 6) if bytes[1] == b't' => Some(TAG_STRONG),
-        (b's', 7) if bytes[1] == b'e' => Some(TAG_SECTION),
-        (b's', 7) if bytes[1] == b'u' => Some(TAG_SUMMARY),
-        (b's', _) => None,
-        (b't', 2) if bytes[1] == b'r' => Some(TAG_TR),
-        (b't', 2) if bytes[1] == b'd' => Some(TAG_TD),
-        (b't', 2) if bytes[1] == b'h' => Some(TAG_TH),
-        (b't', 4) if bytes[1] == b'i' => Some(TAG_TIME),
-        (b't', 5) if bytes[1] == b'a' => Some(TAG_TABLE),
-        (b't', 5) if bytes[1] == b'b' => Some(TAG_TBODY),
-        (b't', 5) if bytes[1] == b'f' => Some(TAG_TFOOT),
-        (b't', 5) if bytes[1] == b'i' => Some(TAG_TITLE),
-        (b't', 5) if bytes[1] == b'r' => Some(TAG_TRACK),
-        (b't', 5) if bytes[1] == b'h' => Some(TAG_THEAD),
-        (b't', 8) if bytes[1] == b'e' => {
-            match name { "template" => Some(TAG_TEMPLATE), "textarea" => Some(TAG_TEXTAREA), _ => None }
-        }
-        (b't', _) => None,
-        (b'u', 1) => Some(TAG_U),
-        (b'u', 2) => Some(TAG_UL),
-        (b'u', _) => None,
-        (b'v', 3) if bytes[1] == b'a' => Some(TAG_VAR),
-        (b'v', 5) => Some(TAG_VIDEO),
-        (b'v', _) => None,
-        (b'w', 3) => Some(TAG_WBR),
-        (b'w', _) => None,
-        (b'x', 3) => Some(TAG_XMP),
+        (b'r', 2) => match bytes[1] { b'p' => Some(TAG_RP), b't' => Some(TAG_RT), _ => None },
+        (b't', 2) => match bytes[1] { b'r' => Some(TAG_TR), b'd' => Some(TAG_TD), b'h' => Some(TAG_TH), _ => None },
+        (b'u', 2) if bytes[1] == b'l' => Some(TAG_UL),
+        // 3-char tags: verify bytes 1-2.
+        (b'b', 3) if &bytes[1..] == b"do" => Some(TAG_BDO),
+        (b'c', 3) if &bytes[1..] == b"ol" => Some(TAG_COL),
+        (b'd', 3) => match &bytes[1..] {
+            b"el" => Some(TAG_DEL), b"fn" => Some(TAG_DFN), b"iv" => Some(TAG_DIV), _ => None
+        },
+        (b'i', 3) => match &bytes[1..] { b"mg" => Some(TAG_IMG), b"ns" => Some(TAG_INS), _ => None },
+        (b'k', 3) if &bytes[1..] == b"bd" => Some(TAG_KBD),
+        (b'm', 3) if &bytes[1..] == b"ap" => Some(TAG_MAP),
+        (b'n', 3) if &bytes[1..] == b"av" => Some(TAG_NAV),
+        (b'p', 3) if &bytes[1..] == b"re" => Some(TAG_PRE),
+        (b's', 3) => match &bytes[1..] {
+            b"ub" => Some(TAG_SUB), b"up" => Some(TAG_SUP), b"vg" => Some(TAG_SVG), _ => None
+        },
+        (b'v', 3) if &bytes[1..] == b"ar" => Some(TAG_VAR),
+        (b'w', 3) if &bytes[1..] == b"br" => Some(TAG_WBR),
+        (b'x', 3) if &bytes[1..] == b"mp" => Some(TAG_XMP),
+        // 4-char tags.
+        (b'a', 4) => match &bytes[1..] { b"bbr" => Some(TAG_ABBR), b"rea" => Some(TAG_AREA), _ => None },
+        (b'b', 4) => match &bytes[1..] { b"ase" => Some(TAG_BASE), b"ody" => Some(TAG_BODY), _ => None },
+        (b'c', 4) => match &bytes[1..] { b"ite" => Some(TAG_CITE), b"ode" => Some(TAG_CODE), _ => None },
+        (b'f', 4) if &bytes[1..] == b"orm" => Some(TAG_FORM),
+        (b'h', 4) => match &bytes[1..] { b"ead" => Some(TAG_HEAD), b"tml" => Some(TAG_HTML), _ => None },
+        (b'l', 4) if &bytes[1..] == b"ink" => Some(TAG_LINK),
+        (b'm', 4) => match &bytes[1..] {
+            b"ain" => Some(TAG_MAIN), b"ark" => Some(TAG_MARK), b"eta" => Some(TAG_META), _ => None
+        },
+        (b'p', 4) if &bytes[1..] == b"ath" => Some(TAG_PATH),
+        (b'r', 4) if &bytes[1..] == b"uby" => Some(TAG_RUBY),
+        (b's', 4) => match &bytes[1..] { b"amp" => Some(TAG_SAMP), b"pan" => Some(TAG_SPAN), _ => None },
+        (b't', 4) if &bytes[1..] == b"ime" => Some(TAG_TIME),
+        // 5-char tags.
+        (b'a', 5) => match &bytes[1..] { b"side" => Some(TAG_ASIDE), b"udio" => Some(TAG_AUDIO), _ => None },
+        (b'e', 5) if &bytes[1..] == b"mbed" => Some(TAG_EMBED),
+        (b'i', 5) if &bytes[1..] == b"nput" => Some(TAG_INPUT),
+        (b'l', 5) if &bytes[1..] == b"abel" => Some(TAG_LABEL),
+        (b'm', 5) if &bytes[1..] == b"eter" => Some(TAG_METER),
+        (b'p', 5) if &bytes[1..] == b"aram" => Some(TAG_PARAM),
+        (b's', 5) => match &bytes[1..] { b"tyle" => Some(TAG_STYLE), b"mall" => Some(TAG_SMALL), _ => None },
+        (b't', 5) => match &bytes[1..] {
+            b"able" => Some(TAG_TABLE),
+            b"body" => Some(TAG_TBODY),
+            b"foot" => Some(TAG_TFOOT),
+            b"itle" => Some(TAG_TITLE),
+            b"rack" => Some(TAG_TRACK),
+            b"head" => Some(TAG_THEAD),
+            _ => None,
+        },
+        (b'v', 5) if &bytes[1..] == b"ideo" => Some(TAG_VIDEO),
+        // 6-char tags.
+        (b'b', 6) if &bytes[1..] == b"utton" => Some(TAG_BUTTON),
+        (b'c', 6) => match &bytes[1..] { b"anvas" => Some(TAG_CANVAS), b"enter" => Some(TAG_CENTER), _ => None },
+        (b'd', 6) if &bytes[1..] == b"ialog" => Some(TAG_DIALOG),
+        (b'f', 6) => match &bytes[1..] { b"ooter" => Some(TAG_FOOTER), b"igure" => Some(TAG_FIGURE), _ => None },
+        (b'h', 6) if &bytes[1..] == b"eader" => Some(TAG_HEADER),
+        (b'i', 6) if &bytes[1..] == b"frame" => Some(TAG_IFRAME),
+        (b'k', 6) if &bytes[1..] == b"eygen" => Some(TAG_KEYGEN),
+        (b'l', 6) if &bytes[1..] == b"egend" => Some(TAG_LEGEND),
+        (b'o', 6) => match &bytes[1..] { b"bject" => Some(TAG_OBJECT), b"ption" => Some(TAG_OPTION), _ => None },
+        (b's', 6) => match &bytes[1..] {
+            b"cript" => Some(TAG_SCRIPT),
+            b"elect" => Some(TAG_SELECT),
+            b"ource" => Some(TAG_SOURCE),
+            b"trong" => Some(TAG_STRONG),
+            _ => None,
+        },
+        // 7-char tags.
+        (b'a', 7) => match &bytes[1..] { b"rticle" => Some(TAG_ARTICLE), b"ddress" => Some(TAG_ADDRESS), _ => None },
+        (b'c', 7) if &bytes[1..] == b"aption" => Some(TAG_CAPTION),
+        (b'd', 7) if &bytes[1..] == b"etails" => Some(TAG_DETAILS),
+        (b's', 7) => match &bytes[1..] { b"ection" => Some(TAG_SECTION), b"ummary" => Some(TAG_SUMMARY), _ => None },
+        // 8-char tags.
+        (b'f', 8) if &bytes[1..] == b"ieldset" => Some(TAG_FIELDSET),
+        (b'n', 8) => match &bytes[1..] { b"oscript" => Some(TAG_NOSCRIPT), b"oframes" => Some(TAG_NOFRAMES), _ => None },
+        (b'p', 8) if &bytes[1..] == b"rogress" => Some(TAG_PROGRESS),
+        (b't', 8) => match &bytes[1..] { b"emplate" => Some(TAG_TEMPLATE), b"extarea" => Some(TAG_TEXTAREA), _ => None },
+        // 9-char and 10-char tags.
+        (b'p', 9) if &bytes[1..] == b"laintext" => Some(TAG_PLAINTEXT),
+        (b'b', 10) if &bytes[1..] == b"lockquote" => Some(TAG_BLOCKQUOTE),
+        (b'f', 10) if &bytes[1..] == b"igcaption" => Some(TAG_FIGCAPTION),
         _ => None,
     }
 }

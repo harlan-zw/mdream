@@ -302,6 +302,13 @@ interface FrontmatterConfig {
 
 Override how specific HTML tags are rendered in Markdown. String values act as aliases.
 
+> **Unknown tags pass through as plain text.** Tag matching is strict: only the standard HTML tags ship with built-in Markdown semantics. Custom elements (`<my-widget>`), web components, and any non-standard tag emit their text content verbatim, with the surrounding tag dropped. To render a custom tag with Markdown semantics, alias it with `tagOverrides`:
+>
+> ```ts
+> htmlToMarkdown('<my-em>hi</my-em>', { tagOverrides: { 'my-em': 'em' } })
+> // → "_hi_"
+> ```
+
 ```ts
 interface TagOverride {
   /** Markdown string to insert when entering this tag */
