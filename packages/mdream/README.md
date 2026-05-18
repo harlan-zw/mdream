@@ -345,6 +345,20 @@ const markdown = htmlToMarkdown(html, {
 })
 ```
 
+**Output is GitHub Flavored Markdown.** Mdream emits a fixed GFM dialect tuned for LLM input: ATX headings (`#`), fenced code blocks (` ``` `), `-` bullets, `_` emphasis, `**` strong, `---` horizontal rules, inline links. These are not configurable. For simple delimiter swaps you can use `tagOverrides`:
+
+```ts
+htmlToMarkdown(html, {
+  tagOverrides: {
+    em: { enter: '*', exit: '*', isInline: true }, // _x_  →  *x*
+    strong: { enter: '__', exit: '__', isInline: true }, // **x** →  __x__
+    hr: { enter: '* * *', exit: '' }, // ---  →  * * *
+  },
+})
+```
+
+Structural style differences (setext headings, indented code blocks, reference-style links, `~~~` fences, dynamic list markers) are out of scope. If you need turndown-style configurability, use [turndown](https://github.com/mixmark-io/turndown). If you have a use case for these in mdream, please open an issue.
+
 ### FilterOptions
 
 ```ts
