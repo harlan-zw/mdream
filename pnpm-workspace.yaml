@@ -26,9 +26,9 @@ catalog:
   '@napi-rs/cli': ^3.6.2
   '@napi-rs/wasm-runtime': ^1.1.4
   '@nuxt/devtools': 2.4.0
-  '@nuxt/kit': ^4.4.5
+  '@nuxt/kit': ^4.4.6
   '@nuxt/module-builder': ^1.0.2
-  '@nuxt/schema': ^4.4.5
+  '@nuxt/schema': ^4.4.6
   '@nuxt/test-utils': ^4.0.3
   '@tybys/wasm-util': ^0.10.2
   '@types/node': ^25.8.0
@@ -49,7 +49,7 @@ catalog:
   express: ^5.2.1
   hookable: ^6.1.1
   knip: ^6.14.1
-  nuxt: ^4.4.5
+  nuxt: ^4.4.6
   nuxt-site-config: ^4.0.8
   nypm: ^0.6.6
   obuild: ^0.4.35
