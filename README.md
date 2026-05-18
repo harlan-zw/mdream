@@ -62,7 +62,7 @@ Fetches the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown) an
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
+ | npx mdream --origin https://en.wikipedia.org --preset minimal \
   | tee streaming.md
 ```
 
@@ -72,7 +72,7 @@ Want to make it look nice? Use [glow](https://github.com/charmbracelet/glow).
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
+ | npx mdream --origin https://en.wikipedia.org --preset minimal \
    | glow
 ```
 
@@ -85,7 +85,7 @@ Converts a local HTML file to a Markdown file, using `tee` to write the output t
 
 ```bash
 cat index.html \
- | npx mdream@beta --preset minimal \
+ | npx mdream --preset minimal \
   | tee streaming.md
 ```
 
@@ -93,7 +93,7 @@ Want to make it look nice? Use [glow](https://github.com/charmbracelet/glow).
 
 ```bash
 cat index.html \
- | npx mdream@beta --preset minimal \
+ | npx mdream --preset minimal \
   | glow
 ```
 
@@ -106,7 +106,7 @@ Pipe web content straight into Claude, GPT, or any LLM CLI:
 
 ```bash
 # Single page → Claude
-curl -s https://react.dev/learn | npx mdream@beta --origin https://react.dev --preset minimal \
+curl -s https://react.dev/learn | npx mdream --origin https://react.dev --preset minimal \
   | claude -p "explain the key concepts on this page"
 
 # Crawl entire docs → summarize
@@ -114,8 +114,8 @@ npx @mdream/crawl@beta "https://nuxt.com/docs/getting-started/**"
 cat output/llms-full.txt | claude -p "write a getting started guide from these docs"
 
 # Compare two frameworks
-diff <(curl -s https://vuejs.org/guide/introduction | npx mdream@beta --preset minimal) \
-     <(curl -s https://react.dev/learn | npx mdream@beta --preset minimal) \
+diff <(curl -s https://vuejs.org/guide/introduction | npx mdream --preset minimal) \
+     <(curl -s https://react.dev/learn | npx mdream --preset minimal) \
   | claude -p "compare these two frameworks based on their intro docs"
 
 # JavaScript/SPA sites (React, Vue, Angular)
@@ -231,7 +231,7 @@ htmlToMarkdown(html, {
 ### Installation
 
 ```bash
-pnpm add mdream@beta
+pnpm add mdream
 ```
 
 > [!TIP]
