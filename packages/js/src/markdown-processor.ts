@@ -165,6 +165,13 @@ function calculateNewLineConfig(node: ElementNode): readonly [number, number] {
   if (node.tagHandler?.spacing) {
     return node.tagHandler?.spacing
   }
+  // Truly unknown tags (no dictionary entry) default to inline zero spacing so
+  // they don't fragment surrounding paragraphs. Built-in tags without a handler
+  // (e.g. caption) keep block-default. Applies whether or not an override
+  // handler is attached — overrides set isInline but inherit zero spacing.
+  if (tagId === -1) {
+    return NO_SPACING
+  }
   return DEFAULT_BLOCK_SPACING
 }
 

@@ -302,6 +302,13 @@ interface FrontmatterConfig {
 
 Override how specific HTML tags are rendered in Markdown. String values act as aliases.
 
+> **Unknown tags pass through as plain text.** Tag matching is strict: only the standard HTML tags ship with built-in Markdown semantics. Custom elements (`<my-widget>`), web components, and any non-standard tag emit their text content verbatim, with the surrounding tag dropped. To render a custom tag with Markdown semantics, alias it with `tagOverrides`:
+>
+> ```ts
+> htmlToMarkdown('<my-em>hi</my-em>', { tagOverrides: { 'my-em': 'em' } })
+> // → "_hi_"
+> ```
+
 ```ts
 interface TagOverride {
   /** Markdown string to insert when entering this tag */
@@ -337,6 +344,20 @@ const markdown = htmlToMarkdown(html, {
   },
 })
 ```
+
+**Output is GitHub Flavored Markdown.** Mdream emits a fixed GFM dialect tuned for LLM input: ATX headings (`#`), fenced code blocks (` ``` `), `-` bullets, `_` emphasis, `**` strong, `---` horizontal rules, inline links. These are not configurable. For simple delimiter swaps you can use `tagOverrides`:
+
+```ts
+htmlToMarkdown(html, {
+  tagOverrides: {
+    em: { enter: '*', exit: '*', isInline: true }, // _x_  →  *x*
+    strong: { enter: '__', exit: '__', isInline: true }, // **x** →  __x__
+    hr: { enter: '* * *', exit: '' }, // ---  →  * * *
+  },
+})
+```
+
+Structural style differences (setext headings, indented code blocks, reference-style links, `~~~` fences, dynamic list markers) are out of scope. If you need turndown-style configurability, use [turndown](https://github.com/mixmark-io/turndown). If you have a use case for these in mdream, please open an issue.
 
 ### FilterOptions
 
