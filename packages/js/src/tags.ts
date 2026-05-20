@@ -441,8 +441,9 @@ export const tagHandlers: Record<number, TagHandler> = {
         // Sum the link-text length while scanning back for `[`, so the
         // slice/join allocation only happens when the text could equal href.
         let textLen = 0
-        while (i >= 0 && buf[i] !== '[') {
-          textLen += buf[i].length
+        let entry: string | undefined
+        while (i >= 0 && (entry = buf[i]) !== '[') {
+          textLen += entry!.length
           i--
         }
         if (i >= 0 && textLen === href.length && buf.slice(i + 1).join('') === href) {
