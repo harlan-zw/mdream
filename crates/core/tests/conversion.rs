@@ -110,6 +110,70 @@ fn multiple_links_in_paragraph() {
     );
 }
 
+#[test]
+fn autolink_collapses_when_text_equals_href() {
+    assert_eq!(
+        convert(r#"<a href="https://example.com">https://example.com</a>"#),
+        "<https://example.com>"
+    );
+}
+
+#[test]
+fn autolink_collapses_mailto() {
+    assert_eq!(
+        convert(r#"<a href="mailto:hi@example.com">mailto:hi@example.com</a>"#),
+        "<mailto:hi@example.com>"
+    );
+}
+
+#[test]
+fn autolink_in_paragraph() {
+    assert_eq!(
+        convert(r#"<p>Visit <a href="https://example.com">https://example.com</a> now.</p>"#),
+        "Visit <https://example.com> now."
+    );
+}
+
+#[test]
+fn autolink_collapses_ftp_urls() {
+    assert_eq!(
+        convert(r#"<a href="ftp://files.example.com">ftp://files.example.com</a>"#),
+        "<ftp://files.example.com>"
+    );
+}
+
+#[test]
+fn autolink_not_collapsed_with_whitespace_in_href() {
+    assert_eq!(
+        convert(r#"<a href="https://example.com/a b">https://example.com/a b</a>"#),
+        "[https://example.com/a b](https://example.com/a b)"
+    );
+}
+
+#[test]
+fn autolink_not_collapsed_when_text_differs() {
+    assert_eq!(
+        convert(r#"<a href="https://example.com">Example</a>"#),
+        "[Example](https://example.com)"
+    );
+}
+
+#[test]
+fn autolink_not_collapsed_with_title() {
+    assert_eq!(
+        convert(r#"<a href="https://example.com" title="Site">https://example.com</a>"#),
+        r#"[https://example.com](https://example.com "Site")"#
+    );
+}
+
+#[test]
+fn autolink_not_collapsed_for_relative_href() {
+    assert_eq!(
+        convert(r#"<a href="/page">/page</a>"#),
+        "[/page](/page)"
+    );
+}
+
 // ── Images ──
 
 #[test]
