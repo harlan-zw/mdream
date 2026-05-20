@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1
+# mdream:core — native Rust HTML-to-Markdown converter.
+# Reads HTML from stdin, writes Markdown to stdout. No Node runtime.
+
+FROM rust:alpine AS builder
+
+# musl-dev provides the C runtime headers some build scripts expect.
+RUN apk add --no-cache musl-dev
+
+WORKDIR /build
+COPY crates/ ./crates/
+
+# rust:alpine targets x86_64-unknown-linux-musl by default, so this produces
+# a statically linked binary that runs on `scratch` with no dependencies.
+WORKDIR /build/crates
+RUN cargo build --release -p mdream --bin mdream
+
+FROM scratch
+COPY --from=builder /build/crates/target/release/mdream /mdream
+ENTRYPOINT ["/mdream"]
