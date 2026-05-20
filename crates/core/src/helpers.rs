@@ -234,11 +234,9 @@ pub(crate) fn parse_attributes(attr_str: &str) -> Attributes {
                     state = BEFORE_VALUE;
                 } else if !is_space {
                     let raw = &attr_str[name_start_saved..name_end_saved];
-                    let name = if raw.bytes().any(|b| b.is_ascii_uppercase()) {
-                        raw.to_ascii_lowercase()
-                    } else {
-                        raw.to_string()
-                    };
+                    // Single-pass lowercase: the result is owned either way,
+                    // so the uppercase pre-scan would only add a redundant pass.
+                    let name = raw.to_ascii_lowercase();
                     result.insert(name, String::new());
                     state = NAME;
                     name_start = i;
@@ -259,11 +257,9 @@ pub(crate) fn parse_attributes(attr_str: &str) -> Attributes {
             QUOTED_VALUE => {
                 if char_code == quote_char {
                     let raw = &attr_str[name_start_saved..name_end_saved];
-                    let name = if raw.bytes().any(|b| b.is_ascii_uppercase()) {
-                        raw.to_ascii_lowercase()
-                    } else {
-                        raw.to_string()
-                    };
+                    // Single-pass lowercase: the result is owned either way,
+                    // so the uppercase pre-scan would only add a redundant pass.
+                    let name = raw.to_ascii_lowercase();
                     result.insert(name, decode_html_entities(&attr_str[value_start..i]).into_owned());
                     state = WHITESPACE;
                 }
@@ -271,11 +267,9 @@ pub(crate) fn parse_attributes(attr_str: &str) -> Attributes {
             UNQUOTED_VALUE => {
                 if is_space {
                     let raw = &attr_str[name_start_saved..name_end_saved];
-                    let name = if raw.bytes().any(|b| b.is_ascii_uppercase()) {
-                        raw.to_ascii_lowercase()
-                    } else {
-                        raw.to_string()
-                    };
+                    // Single-pass lowercase: the result is owned either way,
+                    // so the uppercase pre-scan would only add a redundant pass.
+                    let name = raw.to_ascii_lowercase();
                     result.insert(name, decode_html_entities(&attr_str[value_start..i]).into_owned());
                     state = WHITESPACE;
                 }
@@ -287,15 +281,15 @@ pub(crate) fn parse_attributes(attr_str: &str) -> Attributes {
 
     if state == NAME {
         let raw = &attr_str[name_start..];
-        let lc = if raw.bytes().any(|b| b.is_ascii_uppercase()) { raw.to_ascii_lowercase() } else { raw.to_string() };
+        let lc = raw.to_ascii_lowercase();
         result.insert(lc, String::new());
     } else if state == UNQUOTED_VALUE {
         let raw = &attr_str[name_start_saved..name_end_saved];
-        let name = if raw.bytes().any(|b| b.is_ascii_uppercase()) { raw.to_ascii_lowercase() } else { raw.to_string() };
+        let name = raw.to_ascii_lowercase();
         result.insert(name, decode_html_entities(&attr_str[value_start..]).into_owned());
     } else if state == AFTER_NAME {
         let raw = &attr_str[name_start_saved..name_end_saved];
-        let name = if raw.bytes().any(|b| b.is_ascii_uppercase()) { raw.to_ascii_lowercase() } else { raw.to_string() };
+        let name = raw.to_ascii_lowercase();
         result.insert(name, String::new());
     }
 

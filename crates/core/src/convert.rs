@@ -501,11 +501,7 @@ impl ConvertState {
                         peek_end += 1;
                     }
                     let peek_name = &chunk[peek_start..peek_end];
-                    let peek_tag_id = if peek_name.bytes().any(|b| b.is_ascii_uppercase()) {
-                        crate::consts::get_tag_id(&peek_name.to_ascii_lowercase())
-                    } else {
-                        crate::consts::get_tag_id(peek_name)
-                    };
+                    let peek_tag_id = crate::consts::get_tag_id_ci_bytes(peek_name.as_bytes());
                     if self.stack.last().is_some_and(|curr| curr.tag_id == peek_tag_id) {
                         // Matching closing tag: fall through to normal closing tag processing
                         if !text_buffer.is_empty() {
@@ -571,13 +567,17 @@ impl ConvertState {
                 };
                 let tag_name_raw = &chunk[tag_name_start..tag_name_end];
 
-                let tag_name: Cow<str> = if tag_name_raw.bytes().any(|b| b.is_ascii_uppercase()) {
+                // CI lookup first: built-in tags (the common case) skip the
+                // lowercase allocation entirely. Only fall back to a Cow when
+                // the override path actually needs the lowercased name.
+                let builtin_tag_id = crate::consts::get_tag_id_ci_bytes(tag_name_raw.as_bytes());
+                let tag_name: Cow<str> = if builtin_tag_id.is_some() {
+                    Cow::Borrowed(tag_name_raw)
+                } else if tag_name_raw.bytes().any(|b| b.is_ascii_uppercase()) {
                     Cow::Owned(tag_name_raw.to_ascii_lowercase())
                 } else {
                     Cow::Borrowed(tag_name_raw)
                 };
-
-                let builtin_tag_id = crate::consts::get_tag_id(&tag_name);
                 let tag_id = if builtin_tag_id.is_some() { builtin_tag_id } else {
                     self.options.plugins.as_ref()
                         .and_then(|p| p.tag_overrides.as_ref())
@@ -2031,12 +2031,14 @@ impl ConvertState {
         }
 
         let tag_name_raw = &html_chunk[tag_name_start..i];
-        let tag_name: Cow<str> = if tag_name_raw.bytes().any(|b| b.is_ascii_uppercase()) {
+        let builtin_tag_id = crate::consts::get_tag_id_ci_bytes(tag_name_raw.as_bytes());
+        let tag_name: Cow<str> = if builtin_tag_id.is_some() {
+            Cow::Borrowed(tag_name_raw)
+        } else if tag_name_raw.bytes().any(|b| b.is_ascii_uppercase()) {
             Cow::Owned(tag_name_raw.to_ascii_lowercase())
         } else {
             Cow::Borrowed(tag_name_raw)
         };
-        let builtin_tag_id = crate::consts::get_tag_id(&tag_name);
         // Closing tag may target an aliased custom element (e.g. </ex> where
         // tagOverrides: { ex: 'em' } opened a TAG_EM node). Resolve the alias
         // here so the close matches the open.
