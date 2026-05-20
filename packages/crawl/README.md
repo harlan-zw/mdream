@@ -301,7 +301,7 @@ CLI arguments override config file values. Array options like `exclude` are conc
 
 ## Hooks
 
-Four hooks let you intercept and transform data at each stage of the crawl pipeline. Hooks receive mutable objects. Mutate in-place to transform output.
+Six hooks let you intercept and transform data at each stage of the crawl pipeline. Hooks receive mutable objects. Mutate in-place to transform output.
 
 ### `crawl:url`
 
@@ -314,6 +314,21 @@ defineConfig({
       // Skip large asset pages
       if (ctx.url.includes('/assets/') || ctx.url.includes('/downloads/'))
         ctx.skip = true
+    },
+  },
+})
+```
+
+### `crawl:html`
+
+Called after fetching, before HTML-to-Markdown conversion. Mutate `ctx.html` to transform the raw HTML (strip elements, inject content) before mdream processes it. Not called when the fetched content is already markdown.
+
+```typescript
+defineConfig({
+  hooks: {
+    'crawl:html': (ctx) => {
+      // ctx.url, ctx.html, ctx.origin
+      ctx.html = ctx.html.replace(/<header[\s\S]*?<\/header>/, '')
     },
   },
 })

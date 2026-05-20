@@ -580,6 +580,11 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       metadata = { title: initialTitle || parsedUrl.pathname, links: [] }
     }
     else {
+      // Allow hooks to mutate the raw HTML before conversion
+      const htmlCtx = { url, html: content, origin: pageOrigin }
+      await hooks.callHook('crawl:html', htmlCtx)
+      content = htmlCtx.html
+
       // Single htmlToMarkdown call with merged extraction
       const { extraction, getMetadata } = extractMetadataInline(parsedUrl, allowedRegistrableDomains)
       md = htmlToMarkdown(content, { origin: pageOrigin, extraction })
