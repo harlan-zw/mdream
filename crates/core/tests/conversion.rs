@@ -33,6 +33,15 @@ fn mismatched_case_open_close() {
     assert_eq!(convert("<H2>Heading</h2>"), "## Heading");
 }
 
+#[test]
+fn non_nesting_tags_case_insensitive_close() {
+    // The peek-ahead close-tag match must be case-insensitive too.
+    assert_eq!(
+        convert("<head><SCRIPT>var x = 1 < 2;</SCRIPT></head><body><p>ok</p></body>"),
+        "ok"
+    );
+}
+
 // ── Headings ──
 
 #[test]
