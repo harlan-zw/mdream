@@ -8,6 +8,7 @@ export interface PageData {
 
 export interface CrawlHooks {
   'crawl:url': (ctx: { url: string, skip: boolean }) => void | Promise<void>
+  'crawl:html': (ctx: { url: string, html: string, origin: string }) => void | Promise<void>
   'crawl:page': (page: PageData) => void | Promise<void>
   'crawl:content': (ctx: { url: string, title: string, content: string, filePath: string }) => void | Promise<void>
   'crawl:done': (ctx: { results: CrawlResult[] }) => void | Promise<void>
