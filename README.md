@@ -45,7 +45,7 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;mdream](./packages/mdream/README.md) | Rust NAPI engine + WASM for edge. Performance-first, declarative config. Includes CLI. |
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;@mdream/js](./packages/js/README.md) | Pure JS engine. Full hook access, zero native deps. Subpaths: `/plugins`, `/splitter`, `/parse`, `/llms-txt`, `/negotiate`. |
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">@mdream/crawl](./packages/crawl/README.md) | Site-wide crawler to generate `llms.txt` artifacts from entire websites                                                                                       |
-| [<img src="https://api.iconify.design/logos:docker-icon.svg" width="16" height="16" style="vertical-align: middle;" alt="docker icon">&nbsp;Docker](./DOCKER.md)                                         | Pre-built Docker image with Playwright Chrome for containerized website crawling                                                                              |
+| [<img src="https://api.iconify.design/logos:docker-icon.svg" width="16" height="16" style="vertical-align: middle;" alt="docker icon">&nbsp;Docker](./DOCKER.md)                                         | Pre-built Docker images: a tiny `core` HTML-to-Markdown converter and a `crawl` image with Playwright Chrome                                                                              |
 | [<img src="https://api.iconify.design/logos:vitejs.svg" width="16" height="16" style="vertical-align: middle;" alt="vite icon">&nbsp;@mdream/vite](./packages/vite/README.md)                            | Generate automatic `.md` for your own Vite sites                                                                                                              |
 | [<img src="https://api.iconify.design/logos:nuxt-icon.svg" width="16" height="16" style="vertical-align: middle;" alt="nuxt icon">&nbsp;@mdream/nuxt](./packages/nuxt/README.md)                         | Generate automatic `.md` and `llms.txt` artifacts generation for Nuxt Sites                                                                                   |
 | [<img src="https://api.iconify.design/mdi:github.svg" width="16" height="16" style="vertical-align: middle;" alt="github icon">&nbsp;@mdream/action](./packages/action/README.md)                        | Generate `.md` and `llms.txt` artifacts from your static `.html` output                                                                                       |
@@ -317,22 +317,21 @@ npx @mdream/crawl@beta -h
 
 ## Docker
 
-Run `@mdream/crawl` with Playwright Chrome pre-installed for website crawling in containerized environments.
+Two images for two jobs:
 
 ```bash
-# Quick start
-docker run harlanzw/mdream:latest site.com/docs/**
+# core — convert HTML to Markdown (native Rust binary, ~600KB, no Node)
+curl -s https://example.com | docker run -i --rm harlanzw/mdream:core --origin https://example.com
 
-# Interactive mode
-docker run -it harlanzw/mdream:latest
-
-# Using Playwright for JavaScript sites
-docker run harlanzw/mdream:latest spa-site.com --driver playwright
+# crawl — crawl a site / generate llms.txt (Playwright Chrome included)
+docker run harlanzw/mdream:crawl site.com/docs/**
+docker run harlanzw/mdream:crawl spa-site.com --driver playwright
 ```
 
-**Available Images:**
-- `harlanzw/mdream:latest` - Latest stable release
-- `ghcr.io/harlan-zw/mdream:latest` - GitHub Container Registry
+**Available Images** (Docker Hub `harlanzw/mdream`, also on `ghcr.io/harlan-zw/mdream`):
+- `:core` - native Rust HTML-to-Markdown converter (stdin → stdout)
+- `:crawl` - site crawler with Playwright Chrome
+- `:latest` - back-compat alias of `:crawl`
 
 See [DOCKER.md](./DOCKER.md) for complete usage, configuration, and building instructions.
 
