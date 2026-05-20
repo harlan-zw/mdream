@@ -6,8 +6,8 @@ trustPolicy: no-downgrade
 # Both are long-standing, widely-audited packages (chokidar by paulmillr,
 # semver by npm); the flag is a known false positive.
 trustPolicyExclude:
-  - 'chokidar@4.0.3'
-  - 'semver@6.3.1'
+  - chokidar@4.0.3
+  - semver@6.3.1
 
 packages:
   - packages/*
