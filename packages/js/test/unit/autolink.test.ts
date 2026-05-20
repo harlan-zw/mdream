@@ -31,4 +31,9 @@ describe('gfm autolink shorthand', () => {
     expect(htmlToMarkdown('<a href="/page">/page</a>'))
       .toBe('[/page](/page)')
   })
+
+  it('clean mode strips the autolink to bare text via redundantLinks', () => {
+    expect(htmlToMarkdown('<a href="https://example.com">https://example.com</a>', { clean: true }))
+      .toBe('https://example.com')
+  })
 })
