@@ -88,14 +88,18 @@ jobs:
 
       - name: Extract version from tag
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_REF: ${{ github.ref }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION=${{ github.event.inputs.tag }}
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-          elif [[ "${{ github.event_name }}" == "release" ]]; then
-            VERSION=${{ github.event.release.tag_name }}
-            VERSION=${VERSION#v}
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            VERSION="$INPUT_TAG"
+          elif [[ "$GH_REF" == refs/tags/* ]]; then
+            VERSION="${GH_REF#refs/tags/v}"
+          elif [[ "$EVENT_NAME" == "release" ]]; then
+            VERSION="${RELEASE_TAG#v}"
           else
             VERSION=latest
           fi
@@ -104,8 +108,9 @@ jobs:
 
       - name: Check if prerelease
         id: prerelease
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION=${{ steps.version.outputs.version }}
           if [[ "$VERSION" == *"-"* ]]; then
             echo "is_prerelease=true" >> $GITHUB_OUTPUT
           else
@@ -206,14 +211,18 @@ jobs:
 
       - name: Extract version from tag
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_REF: ${{ github.ref }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION=${{ github.event.inputs.tag }}
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-          elif [[ "${{ github.event_name }}" == "release" ]]; then
-            VERSION=${{ github.event.release.tag_name }}
-            VERSION=${VERSION#v}
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            VERSION="$INPUT_TAG"
+          elif [[ "$GH_REF" == refs/tags/* ]]; then
+            VERSION="${GH_REF#refs/tags/v}"
+          elif [[ "$EVENT_NAME" == "release" ]]; then
+            VERSION="${RELEASE_TAG#v}"
           else
             VERSION=latest
           fi
@@ -279,7 +288,9 @@ jobs:
     permissions: {}
     steps:
       - name: Notify release success
+        env:
+          RELEASE_REF: ${{ github.event.release.tag_name || github.ref_name }}
         run: |
-          echo "Docker images for ${{ github.event.release.tag_name || github.ref_name }} published successfully!"
+          echo "Docker images for $RELEASE_REF published successfully!"
           echo "- crawl: ${{ secrets.DOCKERHUB_USERNAME }}/mdream:crawl (and :latest)"
           echo "- core:  ${{ secrets.DOCKERHUB_USERNAME }}/mdream:core"

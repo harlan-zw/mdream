@@ -17,4 +17,6 @@ RUN cargo build --release -p mdream --bin mdream
 
 FROM scratch
 COPY --from=builder /build/crates/target/release/mdream /mdream
+# Run as a non-root UID/GID; the binary only needs stdin/stdout.
+USER 65532:65532
 ENTRYPOINT ["/mdream"]

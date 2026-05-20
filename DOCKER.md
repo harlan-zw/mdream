@@ -139,15 +139,14 @@ The crawler generates these artifacts in your output directory:
 
 ## Building Locally
 
+The `core` image builds entirely from `crates/` source, so it works from a clean checkout:
+
 ```bash
-# core image
 docker build -f Dockerfile.core -t mdream-core .
 echo '<h1>Hello</h1>' | docker run -i --rm mdream-core
-
-# crawl image
-docker build -f Dockerfile.crawl -t mdream-crawl .
-docker run mdream-crawl https://example.com
 ```
+
+The `crawl` image expects the `mdream` napi native bindings to already exist at `packages/mdream/napi/`. CI generates these in the `Setup napi native bindings` step of `.github/workflows/release-docker.yml` before running `docker build`; a clean local checkout will not have them. Reproduce that step locally, or just let CI build the image.
 
 ## Tags
 
