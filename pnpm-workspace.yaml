@@ -31,7 +31,7 @@ catalog:
   '@nuxt/schema': ^4.4.6
   '@nuxt/test-utils': ^4.0.3
   '@tybys/wasm-util': ^0.10.2
-  '@types/node': ^25.8.0
+  '@types/node': ^25.9.0
   '@types/picomatch': ^4.0.3
   '@vercel/ncc': ^0.38.4
   '@vitejs/plugin-vue': ^6.0.7
