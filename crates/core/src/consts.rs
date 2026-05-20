@@ -272,11 +272,51 @@ pub const CLOSE_BRACKET_CHAR: u8 = 93; // ']'
 /// memcmp (typically a single word load + compare).
 /// Returns `None` for any tag not in the built-in set; callers can opt those
 /// tags into a rendering via `tagOverrides`.
+/// Longest built-in HTML tag name (`blockquote`, `figcaption`); also the size
+/// of the stack buffer used for the case-insensitive lookup.
+const MAX_BUILTIN_TAG_LEN: usize = 10;
+
 #[inline]
 pub fn get_tag_id(name: &str) -> Option<u8> {
-    let bytes = name.as_bytes();
+    get_tag_id_bytes(name.as_bytes())
+}
+
+/// Case-insensitive built-in tag lookup over raw bytes.
+///
+/// Lowercases ASCII into a stack-allocated `MAX_BUILTIN_TAG_LEN` buffer, avoiding the heap
+/// allocation `name.to_ascii_lowercase()` would incur when the input contains
+/// uppercase bytes. Returns `None` for any tag not in the built-in set.
+#[inline]
+pub fn get_tag_id_ci_bytes(name: &[u8]) -> Option<u8> {
+    let len = name.len();
+    if len == 0 || len > MAX_BUILTIN_TAG_LEN {
+        return None;
+    }
+    // Fast path: already-lowercase (the HTML5 common case) dispatches directly
+    // without copying. Only fall through to the stack-buffer lowercase when an
+    // uppercase byte is actually present.
+    let mut has_upper = false;
+    let mut i = 0;
+    while i < len {
+        if name[i].is_ascii_uppercase() { has_upper = true; break; }
+        i += 1;
+    }
+    if !has_upper {
+        return get_tag_id_bytes(name);
+    }
+    let mut buf = [0u8; MAX_BUILTIN_TAG_LEN];
+    let mut j = 0;
+    while j < len {
+        buf[j] = name[j].to_ascii_lowercase();
+        j += 1;
+    }
+    get_tag_id_bytes(&buf[..len])
+}
+
+#[inline]
+fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
     let len = bytes.len();
-    if len == 0 || len > 10 {
+    if len == 0 || len > MAX_BUILTIN_TAG_LEN {
         return None;
     }
     // Each arm reads tail bytes directly: `&bytes[1..]` against a fixed-length

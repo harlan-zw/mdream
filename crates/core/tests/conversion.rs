@@ -12,6 +12,36 @@ fn convert_with_origin(html: &str, origin: &str) -> String {
     })
 }
 
+// ── Case-insensitive tag names ──
+
+#[test]
+fn uppercase_tag_names() {
+    assert_eq!(convert("<H1>Title</H1>"), "# Title");
+    assert_eq!(convert("<DIV><P>Hello</P></DIV>"), "Hello");
+    assert_eq!(convert("<STRONG>bold</STRONG>"), "**bold**");
+}
+
+#[test]
+fn mixed_case_tag_names() {
+    assert_eq!(convert("<Strong>bold</Strong>"), "**bold**");
+    assert_eq!(convert("<eM>italic</Em>"), "_italic_");
+}
+
+#[test]
+fn mismatched_case_open_close() {
+    assert_eq!(convert("<p>text</P>"), "text");
+    assert_eq!(convert("<H2>Heading</h2>"), "## Heading");
+}
+
+#[test]
+fn non_nesting_tags_case_insensitive_close() {
+    // The peek-ahead close-tag match must be case-insensitive too.
+    assert_eq!(
+        convert("<head><SCRIPT>var x = 1 < 2;</SCRIPT></head><body><p>ok</p></body>"),
+        "ok"
+    );
+}
+
 // ── Headings ──
 
 #[test]
