@@ -583,6 +583,9 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       // Allow hooks to mutate the raw HTML before conversion
       const htmlCtx = { url, html: content, origin: pageOrigin }
       await hooks.callHook('crawl:html', htmlCtx)
+      if (typeof htmlCtx.html !== 'string') {
+        throw new TypeError(`crawl:html hook must leave ctx.html as a string (${url})`)
+      }
       content = htmlCtx.html
 
       // Single htmlToMarkdown call with merged extraction
