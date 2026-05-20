@@ -943,12 +943,12 @@ impl ConvertState {
                 // bare absolute URI (http(s)://, ftp://, mailto:), emit `<href>`
                 // instead of the verbose `[href](href)`. link_bracket_pos points
                 // directly at the `[` byte (set in emit_enter_element), so this
-                // is an O(1) check.
+                // is an O(1) check. `[` is single-byte UTF-8, so `bp + 1` is
+                // always a char boundary once `buf_bytes[bp]` is confirmed `[`.
                 if title.is_empty() && is_autolink_uri(&resolved) {
                     let bp = self.link_bracket_pos;
                     let buf_bytes = self.buffer.as_bytes();
                     if bp < buf_bytes.len() && buf_bytes[bp] == b'['
-                        && self.buffer.is_char_boundary(bp + 1)
                         && &self.buffer[bp + 1..] == resolved.as_ref() {
                         self.buffer.truncate(bp);
                         self.buffer.push('<');

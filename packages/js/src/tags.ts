@@ -438,11 +438,14 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (!title && isAutolinkUri(href)) {
         const buf = state.buffer
         let i = buf.length - 1
+        // Sum the link-text length while scanning back for `[`, so the
+        // slice/join allocation only happens when the text could equal href.
+        let textLen = 0
         while (i >= 0 && buf[i] !== '[') {
+          textLen += buf[i].length
           i--
         }
-        const inner = i >= 0 ? buf.slice(i + 1).join('') : ''
-        if (i >= 0 && inner === href) {
+        if (i >= 0 && textLen === href.length && buf.slice(i + 1).join('') === href) {
           buf.length = i
           const auto = `<${href}>`
           buf.push(auto)
