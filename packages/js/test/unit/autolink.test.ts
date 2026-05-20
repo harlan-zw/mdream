@@ -17,6 +17,16 @@ describe('gfm autolink shorthand', () => {
       .toBe('Visit <https://example.com> now.')
   })
 
+  it('collapses ftp links', () => {
+    expect(htmlToMarkdown('<a href="ftp://files.example.com">ftp://files.example.com</a>'))
+      .toBe('<ftp://files.example.com>')
+  })
+
+  it('does not collapse hrefs containing whitespace', () => {
+    expect(htmlToMarkdown('<a href="https://example.com/a b">https://example.com/a b</a>'))
+      .toBe('[https://example.com/a b](https://example.com/a b)')
+  })
+
   it('keeps verbose link when text differs from href', () => {
     expect(htmlToMarkdown('<a href="https://example.com">Example</a>'))
       .toBe('[Example](https://example.com)')

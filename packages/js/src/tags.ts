@@ -438,11 +438,10 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (!title && isAutolinkUri(href)) {
         const buf = state.buffer
         let i = buf.length - 1
-        let inner = ''
         while (i >= 0 && buf[i] !== '[') {
-          inner = buf[i] + inner
           i--
         }
+        const inner = i >= 0 ? buf.slice(i + 1).join('') : ''
         if (i >= 0 && inner === href) {
           buf.length = i
           const auto = `<${href}>`
