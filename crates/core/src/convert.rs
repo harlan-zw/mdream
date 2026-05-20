@@ -30,6 +30,19 @@ const CLEAN_EMPTY_LINK_TEXT: u8 = 32;
 /// Known tracking query parameter prefixes to strip when clean_urls is enabled.
 const TRACKING_PREFIXES: [&str; 6] = ["utm_", "fbclid", "gclid", "mc_eid", "msclkid", "oly_"];
 
+/// Whether `s` looks like a bare absolute URI suitable for GFM autolink
+/// shorthand (`<http://…>`). Conservative: only common web/mail schemes,
+/// no whitespace or angle brackets that would break the autolink syntax.
+#[inline]
+fn is_autolink_uri(s: &str) -> bool {
+    let has_scheme = s.starts_with("http://")
+        || s.starts_with("https://")
+        || s.starts_with("ftp://")
+        || s.starts_with("mailto:");
+    if !has_scheme { return false; }
+    !s.bytes().any(|b| b == b' ' || b == b'<' || b == b'>' || b == b'\n' || b == b'\r' || b == b'\t')
+}
+
 /// Check if a query parameter key is a tracking parameter.
 #[inline]
 fn is_tracking_param(key: &str) -> bool {
@@ -717,9 +730,6 @@ impl ConvertState {
                             }
                         self.skip_current_link = false;
                     }
-                    // Record buffer position BEFORE write_output emits `[`
-                    // so we can find and remove it later if needed
-                    self.link_bracket_pos = self.buffer.len();
                 } else if id == TAG_IMG && self.clean_flags & CLEAN_EMPTY_IMAGES != 0 {
                     let node = &self.stack[self.stack.len() - 1];
                     let alt = node.attributes.get("alt").map_or("", String::as_str);
@@ -731,6 +741,18 @@ impl ConvertState {
             }
 
         self.write_output(true, is_inline, configured_new_lines, output.as_deref());
+
+        // After write_output, the emitted `[` (if any) is the last byte of the
+        // buffer. Stash that exact position so emit_exit_element can find the
+        // bracket in O(1) instead of scanning forward.
+        if tag_id == Some(TAG_A) {
+            let buf_len = self.buffer.len();
+            self.link_bracket_pos = if buf_len > 0 && self.buffer.as_bytes()[buf_len - 1] == b'[' {
+                buf_len - 1
+            } else {
+                buf_len
+            };
+        }
 
         // Clean: track heading start for slug collection
         if self.clean_flags & CLEAN_FRAGMENTS != 0
@@ -917,6 +939,26 @@ impl ConvertState {
                         if cache == title { title = ""; }
                     }
                 }
+                // GFM autolink shorthand: when href equals text content and is a
+                // bare absolute URI (http(s)://, ftp://, mailto:), emit `<href>`
+                // instead of the verbose `[href](href)`. link_bracket_pos points
+                // directly at the `[` byte (set in emit_enter_element), so this
+                // is an O(1) check.
+                if title.is_empty() && is_autolink_uri(&resolved) {
+                    let bp = self.link_bracket_pos;
+                    let buf_bytes = self.buffer.as_bytes();
+                    if bp < buf_bytes.len() && buf_bytes[bp] == b'['
+                        && self.buffer.is_char_boundary(bp + 1)
+                        && &self.buffer[bp + 1..] == resolved.as_ref() {
+                        self.buffer.truncate(bp);
+                        self.buffer.push('<');
+                        self.buffer.push_str(&resolved);
+                        self.buffer.push('>');
+                        self.last_content_cache_len = self.buffer.len();
+                        self.last_node_is_inline = is_inline;
+                        return;
+                    }
+                }
                 self.buffer.push_str("](");
                 self.buffer.push_str(&resolved);
                 if !title.is_empty() {
@@ -931,10 +973,8 @@ impl ConvertState {
             if self.clean_flags & CLEAN_FRAGMENTS != 0
                 && let Some(href) = node.attributes.get("href")
                     && href.starts_with('#') && href.len() > 1 {
-                        let mut bp = self.link_bracket_pos;
-                        let buf = self.buffer.as_bytes();
-                        while bp < buf.len() && buf[bp] != b'[' { bp += 1; }
-                        self.fragment_links.push((bp, self.buffer.len()));
+                        // link_bracket_pos now points exactly at `[` (set in emit_enter_element).
+                        self.fragment_links.push((self.link_bracket_pos, self.buffer.len()));
                     }
             self.last_node_is_inline = is_inline;
             return;
@@ -953,11 +993,7 @@ impl ConvertState {
         if self.clean_flags & CLEAN_FRAGMENTS != 0 && tag_id == Some(TAG_A)
             && let Some(href) = node.attributes.get("href")
                 && href.starts_with('#') && href.len() > 1 {
-                    // Find actual [ position from recorded hint
-                    let mut bp = self.link_bracket_pos;
-                    let buf = self.buffer.as_bytes();
-                    while bp < buf.len() && buf[bp] != b'[' { bp += 1; }
-                    self.fragment_links.push((bp, self.buffer.len()));
+                    self.fragment_links.push((self.link_bracket_pos, self.buffer.len()));
                 }
     }
 

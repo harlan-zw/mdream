@@ -152,6 +152,21 @@ function resolveUrl(url: string, origin?: string): string {
   return url
 }
 
+// GFM autolink shorthand: only inline-syntax-safe absolute URIs are eligible
+// for `<url>` rendering. Conservative scheme list matches the Rust core.
+function isAutolinkUri(s: string): boolean {
+  if (!(s.startsWith('http://') || s.startsWith('https://')
+    || s.startsWith('ftp://') || s.startsWith('mailto:'))) {
+    return false
+  }
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c === 32 || c === 60 || c === 62 || c === 10 || c === 13 || c === 9)
+      return false
+  }
+  return true
+}
+
 // Helper function to check if we're inside a table cell
 function isInsideTableCell(node: HandlerContext['node']): boolean {
   return (node.depthMap[TAG_TD] || 0) > 0 || (node.depthMap[TAG_TH] || 0) > 0
@@ -416,6 +431,25 @@ export const tagHandlers: Record<number, TagHandler> = {
       const lastContent = state.lastContentCache
       if (lastContent === title) {
         title = ''
+      }
+      // GFM autolink shorthand: when the link text equals href and href is a
+      // bare absolute URI, emit `<href>` instead of `[href](href)`. Mirrors
+      // the Rust core (crates/core/src/convert.rs).
+      if (!title && isAutolinkUri(href)) {
+        const buf = state.buffer
+        let i = buf.length - 1
+        let inner = ''
+        while (i >= 0 && buf[i] !== '[') {
+          inner = buf[i] + inner
+          i--
+        }
+        if (i >= 0 && inner === href) {
+          buf.length = i
+          const auto = `<${href}>`
+          buf.push(auto)
+          state.lastContentCache = auto
+          return ''
+        }
       }
       return title ? `](${href} "${title}")` : `](${href})`
     },
