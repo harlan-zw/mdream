@@ -1,6 +1,13 @@
 shellEmulator: true
 
 trustPolicy: no-downgrade
+# These versions predate npm provenance/trusted-publishing, while their newer
+# releases publish with it, so no-downgrade flags them as trust downgrades.
+# Both are long-standing, widely-audited packages (chokidar by paulmillr,
+# semver by npm); the flag is a known false positive.
+trustPolicyExclude:
+  - 'chokidar@4.0.3'
+  - 'semver@6.3.1'
 
 packages:
   - packages/*
