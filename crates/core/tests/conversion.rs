@@ -1675,3 +1675,30 @@ fn script_closing_tag_inside_string_does_not_close() {
     let style = "<style>.a::before{content:\"</style>\"}</style><p>visible</p>";
     assert_eq!(convert(style), "visible");
 }
+
+#[test]
+fn streaming_top_level_text_with_tag_override() {
+    // Top-level text before an overridden inline tag must survive chunk
+    // boundaries through the streaming path too (issue #93).
+    let chunks = ["foo <su", "p>bar</sup>"];
+    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+        plugins: Some(PluginConfig {
+            tag_overrides: Some(vec![(
+                "sup".to_string(),
+                TagOverrideConfig {
+                    enter: Some("^".into()),
+                    exit: Some("^".into()),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let mut result = String::new();
+    for chunk in &chunks {
+        result.push_str(&stream.process_chunk(chunk));
+    }
+    result.push_str(&stream.finish());
+    assert_eq!(result.trim(), "foo ^bar^");
+}
