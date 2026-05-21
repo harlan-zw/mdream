@@ -61,7 +61,9 @@ impl ConvertState {
             .and_then(|p| p.frontmatter.as_ref())
             .and_then(|f| f.additional_fields.as_ref()) {
             for (k, v) in add {
-                entries.push((k.clone(), v.clone()));
+                if k != "title" && k != "description" {
+                    entries.push((k.clone(), v.clone()));
+                }
             }
         }
         Some(entries)

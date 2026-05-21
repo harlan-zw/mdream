@@ -406,6 +406,10 @@ impl ConvertState {
                     }
                 }
                 // Not a matching closing tag: treat '<' as literal text
+                text_buffer.push('<');
+                self.text_buffer_contains_non_whitespace = true;
+                self.last_char_was_whitespace = false;
+                self.just_closed_tag = false;
                 i += 1;
                 continue;
             }

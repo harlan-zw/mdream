@@ -4,6 +4,9 @@ use crate::types::{ElementNode, ParsedSelector};
 
 pub(crate) fn parse_css_selector(selector: &str) -> ParsedSelector {
     let selector = selector.trim();
+    if selector.is_empty() {
+        return ParsedSelector::Tag(String::new());
+    }
     let mut parts: Vec<ParsedSelector> = Vec::new();
     let mut current = String::new();
     let mut in_attr = false;
@@ -41,7 +44,9 @@ pub(crate) fn parse_css_selector(selector: &str) -> ParsedSelector {
         parts.push(parse_simple_selector(&current));
     }
 
-    if parts.len() == 1 {
+    if parts.is_empty() {
+        ParsedSelector::Tag(String::new())
+    } else if parts.len() == 1 {
         parts.into_iter().next().unwrap_or(ParsedSelector::Tag(String::new()))
     } else {
         ParsedSelector::Compound(parts)
@@ -66,8 +71,11 @@ fn parse_attr_selector(s: &str) -> ParsedSelector {
     let operators = ["^=", "$=", "*=", "~=", "|=", "="];
     for op in &operators {
         if let Some(pos) = inner.find(op) {
-            let name = inner[..pos].to_string();
-            let val = inner[pos + op.len()..].trim_matches(|c| c == '"' || c == '\'').to_string();
+            let name = inner[..pos].trim().to_string();
+            let val = inner[pos + op.len()..]
+                .trim()
+                .trim_matches(|c| c == '"' || c == '\'')
+                .to_string();
             return ParsedSelector::Attribute { name, operator: Some((*op).to_string()), value: Some(val) };
         }
     }
@@ -159,6 +167,28 @@ mod tests {
         match parse_css_selector("div.card[data-x]") {
             ParsedSelector::Compound(parts) => assert_eq!(parts.len(), 3),
             _ => panic!("expected compound selector"),
+        }
+    }
+
+    #[test]
+    fn empty_selector_is_not_a_match_all() {
+        // whitespace-only / empty selector must not become Compound([]) (matches everything)
+        for sel in ["", "   "] {
+            match parse_css_selector(sel) {
+                ParsedSelector::Tag(t) => assert!(t.is_empty()),
+                _ => panic!("empty selector should be an empty Tag, not Compound([])"),
+            }
+        }
+    }
+
+    #[test]
+    fn attribute_selector_trims_name_and_value() {
+        match parse_css_selector("[data-x = \"v\"]") {
+            ParsedSelector::Attribute { name, value, .. } => {
+                assert_eq!(name, "data-x");
+                assert_eq!(value.as_deref(), Some("v"));
+            }
+            _ => panic!("expected attribute selector"),
         }
     }
 }

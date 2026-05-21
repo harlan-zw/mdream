@@ -28,6 +28,7 @@ impl ConvertState {
         {
             let val = text_buffer.trim().to_string();
             if !val.is_empty() { self.frontmatter_title = Some(val); }
+            text_buffer.clear();
             return;
         }
 
@@ -506,7 +507,7 @@ impl ConvertState {
             };
         }
 
-        let tag_name_raw = &html_chunk[tag_name_start..i];
+        let tag_name_raw = html_chunk[tag_name_start..i].trim();
         let builtin_tag_id = crate::consts::get_tag_id_ci_bytes(tag_name_raw.as_bytes());
         let tag_name: Cow<str> = if builtin_tag_id.is_some() {
             Cow::Borrowed(tag_name_raw)

@@ -36,7 +36,7 @@ impl ConvertState {
             } else { None };
 
             is_inline = override_config.and_then(|ov| ov.is_inline).unwrap_or(node.is_inline);
-            node_spacing = node.spacing;
+            node_spacing = override_config.and_then(|ov| ov.spacing).or(node.spacing);
 
             // Table state reads (tag_id.is_some() is sufficient — all table tags have handlers)
             if tag_id.is_some() {
@@ -202,8 +202,9 @@ impl ConvertState {
         let new_line_config = self.calculate_new_line_config(tag_id, node_spacing);
         let configured_new_lines = new_line_config[1];
 
-        // Clean mode exit — single guard
-        if self.clean_flags != 0 && tag_id == Some(TAG_A) {
+        // Clean mode exit — single guard. Skipped for overridden anchors,
+        // whose custom exit output isn't the default `[…](…)` shape.
+        if self.clean_flags != 0 && tag_id == Some(TAG_A) && !has_override {
             // emptyLinks: skip exit for skipped links
             if self.skip_current_link {
                 self.skip_current_link = false;

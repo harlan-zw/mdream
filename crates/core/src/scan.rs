@@ -9,8 +9,8 @@ use crate::entities::decode_html_entities;
 #[inline(always)]
 pub(crate) fn is_whitespace(c: u8) -> bool {
     if c > 32 { return false; }
-    // Bitmap: bit 9 (tab), bit 10 (LF), bit 13 (CR), bit 32 (space)
-    const MASK: u64 = (1u64 << 9) | (1u64 << 10) | (1u64 << 13) | (1u64 << 32);
+    // Bitmap: bit 9 (tab), bit 10 (LF), bit 12 (FF), bit 13 (CR), bit 32 (space)
+    const MASK: u64 = (1u64 << 9) | (1u64 << 10) | (1u64 << 12) | (1u64 << 13) | (1u64 << 32);
     (MASK >> c) & 1 == 1
 }
 
@@ -196,7 +196,7 @@ pub(crate) fn parse_attributes(attr_str: &str) -> Attributes {
         let raw = &attr_str[name_start_saved..name_end_saved];
         let name = raw.to_ascii_lowercase();
         result.insert(name, decode_html_entities(&attr_str[value_start..]).into_owned());
-    } else if state == AFTER_NAME {
+    } else if state == AFTER_NAME || state == BEFORE_VALUE {
         let raw = &attr_str[name_start_saved..name_end_saved];
         let name = raw.to_ascii_lowercase();
         result.insert(name, String::new());
@@ -239,6 +239,19 @@ mod tests {
     fn attribute_names_lowercased_values_decoded() {
         let a = parse_attributes("DATA-X='a &amp; b'");
         assert_eq!(a.get("data-x").map(String::as_str), Some("a & b"));
+    }
+
+    #[test]
+    fn form_feed_is_whitespace() {
+        assert!(is_whitespace(0x0C));
+    }
+
+    #[test]
+    fn valueless_equals_attribute_kept_as_empty() {
+        // `<a href=>` — attribute ends in `name=`, must survive as empty value
+        let a = parse_attributes("href=");
+        assert!(a.contains_key("href"));
+        assert_eq!(a.get("href").map(String::as_str), Some(""));
     }
 
     #[test]

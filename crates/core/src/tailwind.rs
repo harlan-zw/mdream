@@ -36,8 +36,10 @@ pub(crate) fn process_tailwind_classes(classes_attr: &str) -> (Option<String>, O
 
     for cls in classes {
         let base = extract_base_class(cls).0;
-        if base.contains("italic") {
+        if base == "italic" {
             emphasis = Some(("*", "*"));
+        } else if base == "not-italic" {
+            emphasis = None;
         } else if base == "font-bold" || base == "font-semibold" || base == "font-black" || base == "font-extrabold" || base == "font-medium" || base == "bold" {
             weight = Some(("**", "**"));
         } else if base.contains("font-") {
@@ -137,5 +139,13 @@ mod tests {
         assert!(p.is_none());
         assert!(s.is_none());
         assert!(!hidden);
+    }
+
+    #[test]
+    fn not_italic_does_not_emphasise() {
+        // `not-italic` must not match like `italic`
+        let (p, s, _) = process_tailwind_classes("not-italic");
+        assert!(p.is_none());
+        assert!(s.is_none());
     }
 }

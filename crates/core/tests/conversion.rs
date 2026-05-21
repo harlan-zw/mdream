@@ -1,5 +1,5 @@
 use mdream::{html_to_markdown, html_to_markdown_result, MarkdownStreamProcessor};
-use mdream::types::{HTMLToMarkdownOptions, PluginConfig, ExtractionConfig, FilterConfig, TagOverrideConfig, IsolateMainConfig};
+use mdream::types::{HTMLToMarkdownOptions, PluginConfig, ExtractionConfig, FilterConfig, FrontmatterConfig, TagOverrideConfig, IsolateMainConfig};
 
 fn convert(html: &str) -> String {
     html_to_markdown(html, HTMLToMarkdownOptions::default())
@@ -1591,4 +1591,36 @@ fn tag_override_alias_preserves_trailing_siblings() {
         ..Default::default()
     };
     assert_eq!(html_to_markdown(html, opts), "before _foo_ after");
+}
+// ── Regression: CodeRabbit-found pre-existing bugs (PR #95) ──
+
+#[test]
+fn closing_tag_with_trailing_whitespace_still_closes() {
+    // `</strong  >` must resolve as `strong` and close the node
+    assert_eq!(convert("<strong>bold</strong  >"), "**bold**");
+    assert_eq!(convert("<div><p>x</p></div   >"), "x");
+}
+
+#[test]
+fn frontmatter_accessor_drops_reserved_additional_fields() {
+    let result = html_to_markdown_result(
+        "<html><head><title>Real Title</title></head><body><p>x</p></body></html>",
+        HTMLToMarkdownOptions {
+            plugins: Some(PluginConfig {
+                frontmatter: Some(FrontmatterConfig {
+                    additional_fields: Some(vec![
+                        ("title".to_string(), "Dupe".to_string()),
+                        ("custom".to_string(), "kept".to_string()),
+                    ]),
+                    meta_fields: None,
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    );
+    let fm = result.frontmatter.unwrap();
+    // reserved `title` from additional_fields is filtered out — no duplicate
+    assert_eq!(fm.iter().filter(|(k, _)| k == "title").count(), 1);
+    assert!(fm.iter().any(|(k, v)| k == "custom" && v == "kept"));
 }

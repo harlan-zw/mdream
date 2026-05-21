@@ -155,6 +155,15 @@ pub(crate) fn slugify_heading(text: &str) -> String {
 #[inline]
 pub(crate) fn resolve_url<'a>(url: &'a str, origin: Option<&str>, clean: bool) -> Cow<'a, str> {
     if url.is_empty() || url.starts_with('#') { return Cow::Borrowed(url); }
+
+    // Explicit scheme (mailto:, ftp://, https://, …): never join against origin.
+    let has_scheme = url.find(':').is_some_and(|i| {
+        i > 0 && url[..i].bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.'))
+    });
+    if has_scheme {
+        return if clean { strip_tracking_params(url) } else { Cow::Borrowed(url) };
+    }
+
     // Fast path: check if cleaning needed before any allocation
     let needs_clean = clean && url.as_bytes().contains(&b'?');
     if url.starts_with("//") {
@@ -164,10 +173,10 @@ pub(crate) fn resolve_url<'a>(url: &'a str, origin: Option<&str>, clean: bool) -
         return Cow::Owned(if needs_clean { strip_tracking_params_owned(resolved) } else { resolved });
     }
     if let Some(orig) = origin {
+        let orig = orig.trim_end_matches('/');
         if url.starts_with('/') {
-            let trimmed = orig.trim_end_matches('/');
-            let mut resolved = String::with_capacity(trimmed.len() + url.len());
-            resolved.push_str(trimmed);
+            let mut resolved = String::with_capacity(orig.len() + url.len());
+            resolved.push_str(orig);
             resolved.push_str(url);
             return Cow::Owned(if needs_clean { strip_tracking_params_owned(resolved) } else { resolved });
         }
@@ -303,6 +312,22 @@ mod tests {
         assert_eq!(slugify_heading("a -- b"), "a-b");
         // strip punctuation
         assert_eq!(slugify_heading("What's New?!"), "whats-new");
+    }
+
+    #[test]
+    fn scheme_urls_never_joined_to_origin() {
+        // explicit schemes must pass through untouched, not get origin-prefixed
+        assert_eq!(resolve_url("mailto:a@b.com", Some("https://x.com"), false), "mailto:a@b.com");
+        assert_eq!(resolve_url("ftp://h/f", Some("https://x.com"), false), "ftp://h/f");
+        assert_eq!(resolve_url("tel:123", Some("https://x.com"), true), "tel:123");
+    }
+
+    #[test]
+    fn relative_join_no_double_slash() {
+        // trailing slash on origin must not produce `//`
+        assert_eq!(resolve_url("./sub", Some("https://x.com/"), false), "https://x.com/sub");
+        assert_eq!(resolve_url("/p", Some("https://x.com/"), false), "https://x.com/p");
+        assert_eq!(resolve_url("page", Some("https://x.com/"), false), "https://x.com/page");
     }
 
     #[test]
