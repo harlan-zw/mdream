@@ -1,10 +1,13 @@
 pub mod consts;
 pub(crate) mod convert;
 pub(crate) mod entities;
-pub(crate) mod helpers;
+pub(crate) mod scan;
+pub(crate) mod selector;
 pub mod splitter;
 pub(crate) mod tags;
+pub(crate) mod tailwind;
 pub mod types;
+pub(crate) mod url;
 
 use convert::ConvertState;
 use types::{HTMLToMarkdownOptions, MdreamResult};
@@ -27,25 +30,7 @@ pub fn html_to_markdown_result(html: &str, options: HTMLToMarkdownOptions) -> Md
         None
     };
 
-    let frontmatter = if state.has_frontmatter {
-        let mut entries: Vec<(String, String)> = Vec::new();
-        if let Some(title) = &state.frontmatter_title {
-            entries.push(("title".to_string(), title.clone()));
-        }
-        for (k, v) in &state.frontmatter_meta {
-            entries.push((k.clone(), v.clone()));
-        }
-        if let Some(add) = state.options.plugins.as_ref()
-            .and_then(|p| p.frontmatter.as_ref())
-            .and_then(|f| f.additional_fields.as_ref()) {
-            for (k, v) in add {
-                entries.push((k.clone(), v.clone()));
-            }
-        }
-        Some(entries)
-    } else {
-        None
-    };
+    let frontmatter = state.frontmatter();
 
     MdreamResult {
         markdown: state.get_markdown(),

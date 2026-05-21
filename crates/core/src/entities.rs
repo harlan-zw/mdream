@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 // HTML named character references — HTML4 + common HTML5 (245 entries)
 // Mirrors packages/js/src/entities.ts for parity between JS and Rust engines.
 // Source: https://html.spec.whatwg.org/entities.json
@@ -260,4 +261,87 @@ pub(crate) fn lookup_named_entity(name: &[u8]) -> Option<char> {
         b"Zeta" => Some('\u{0396}'),
         _ => None,
     }
+}
+
+#[inline]
+pub(crate) fn decode_html_entities(text: &str) -> Cow<'_, str> {
+    // Fast path: no ampersand means no entities to decode
+    if !text.as_bytes().contains(&b'&') {
+        return Cow::Borrowed(text);
+    }
+    Cow::Owned(decode_html_entities_alloc(text))
+}
+
+fn decode_html_entities_alloc(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    let mut result = String::with_capacity(len);
+    let mut i = 0;
+
+    while i < len {
+        if bytes[i] == b'&' {
+            // Numeric character references: &#NNN; or &#xHHH;
+            if i + 2 < len && bytes[i + 1] == b'#' {
+                let start = i;
+                i += 2;
+                let is_hex = i < len && (bytes[i] == b'x' || bytes[i] == b'X');
+                if is_hex {
+                    i += 1;
+                }
+                let num_start = i;
+                // Cap digit scan: 7 hex digits (U+10FFFF) or 8 decimal (max codepoint)
+                let max_digits = if is_hex { 7 } else { 8 };
+                let scan_limit = len.min(num_start + max_digits + 1);
+                while i < scan_limit && bytes[i] != b';' {
+                    i += 1;
+                }
+                if i < len && bytes[i] == b';' && i > num_start {
+                    let num_str = &text[num_start..i];
+                    let base = if is_hex { 16 } else { 10 };
+                    if let Ok(code_point) = u32::from_str_radix(num_str, base)
+                        && let Some(c) = char::from_u32(code_point) {
+                            result.push(c);
+                            i += 1;
+                            continue;
+                        }
+                }
+                i = start;
+            } else {
+                // Named entity: scan forward up to 33 bytes for ';'
+                let mut semi = i + 1;
+                let scan_end = len.min(i + 34);
+                while semi < scan_end && bytes[semi] != b';' {
+                    semi += 1;
+                }
+                if semi < len && bytes[semi] == b';' && semi > i + 1 {
+                    let name = &bytes[i + 1..semi];
+                    if let Some(c) = lookup_named_entity(name) {
+                        result.push(c);
+                        i = semi + 1;
+                        continue;
+                    }
+                }
+            }
+            // No entity matched — push literal '&'
+            result.push('&');
+            i += 1;
+            continue;
+        }
+        // Batch copy plain ASCII bytes until next '&' or non-ASCII
+        let start = i;
+        while i < len && bytes[i] != b'&' && bytes[i] < 0x80 {
+            i += 1;
+        }
+        if i > start {
+            result.push_str(&text[start..i]);
+        }
+        if i >= len { break; }
+        // Handle non-ASCII multi-byte UTF-8 char
+        if bytes[i] >= 0x80 {
+            let Some(ch) = text[i..].chars().next() else { break; };
+            result.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    result
 }
