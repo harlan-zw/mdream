@@ -1626,3 +1626,37 @@ fn frontmatter_accessor_drops_reserved_additional_fields() {
     assert!(fm.iter().any(|(k, v)| k == "title" && v == "Real Title"));
     assert!(fm.iter().any(|(k, v)| k == "custom" && v == "kept"));
 }
+
+
+#[test]
+fn top_level_text_node_is_not_dropped() {
+    // Top-level (root) text nodes with no element parent were dropped because
+    // process_text_buffer bailed on an empty stack, and trailing text at EOF
+    // was never flushed (issue #93).
+    assert_eq!(convert("foo bar"), "foo bar");
+    assert_eq!(convert("foo <em>bar</em>"), "foo _bar_");
+    assert_eq!(convert("foo <span>bar</span> baz"), "foo bar baz");
+}
+
+#[test]
+fn tag_override_works_for_top_level_inline_tag() {
+    // sup/sub overrides must work whether the tag is nested in a block or
+    // sits at the top level of the input (issue #93).
+    for input in ["<p>foo <sup>bar</sup></p>", "foo <sup>bar</sup>"] {
+        let opts = HTMLToMarkdownOptions {
+            plugins: Some(PluginConfig {
+                tag_overrides: Some(vec![(
+                    "sup".to_string(),
+                    TagOverrideConfig {
+                        enter: Some("^".into()),
+                        exit: Some("^".into()),
+                        ..Default::default()
+                    },
+                )]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(html_to_markdown(input, opts), "foo ^bar^", "for input: {input:?}");
+    }
+}

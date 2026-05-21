@@ -9,8 +9,11 @@ impl ConvertState {
         self.text_buffer_contains_non_whitespace = false;
         self.text_buffer_contains_whitespace = false;
 
-        let Some(parent) = self.stack.last() else { return };
-        let mut excludes_text_nodes = parent.excludes_text_nodes || parent.excluded_from_markdown;
+        // No parent element means this is a top-level (root) text node, e.g. the
+        // leading `foo ` in the fragment `foo <sup>bar</sup>`. Such text must
+        // still be emitted rather than dropped (issue #93).
+        let mut excludes_text_nodes = self.stack.last()
+            .is_some_and(|parent| parent.excludes_text_nodes || parent.excluded_from_markdown);
 
         if self.has_isolate_main {
             if self.isolate_main_found {

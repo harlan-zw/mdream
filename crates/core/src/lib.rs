@@ -10,7 +10,18 @@ pub mod types;
 pub(crate) mod url;
 
 use convert::ConvertState;
-use types::{HTMLToMarkdownOptions, MdreamResult};
+
+// Re-export the public option/config types at the crate root so `use mdream::*`
+// pulls in everything needed to call `html_to_markdown` without reaching into
+// the `types` module.
+pub use types::{
+    CleanConfig, ExtractionConfig, FilterConfig, FrontmatterConfig, HTMLToMarkdownOptions,
+    IsolateMainConfig, MdreamResult, PluginConfig, TagOverrideConfig, TailwindConfig,
+};
+
+// Re-export `get_tag_id` so callers can resolve tag names to IDs (for
+// `TagOverrideConfig::alias_tag_id`) without reaching into `consts` directly.
+pub use consts::get_tag_id;
 
 /// Convert HTML to Markdown in a single pass.
 pub fn html_to_markdown(html: &str, options: HTMLToMarkdownOptions) -> String {
@@ -21,7 +32,12 @@ pub fn html_to_markdown(html: &str, options: HTMLToMarkdownOptions) -> String {
 pub fn html_to_markdown_result(html: &str, options: HTMLToMarkdownOptions) -> MdreamResult {
     let capacity = (html.len() / 3).clamp(1024, 256 * 1024);
     let mut state = ConvertState::new(options, capacity);
-    state.process_html(html);
+    let mut trailing = state.process_html(html);
+    // Flush any trailing top-level text left unprocessed at EOF, e.g. the
+    // `bar` in the fragment `foo <sup>x</sup> bar` (issue #93).
+    if !trailing.is_empty() {
+        state.process_text_buffer(&mut trailing);
+    }
 
     let extracted = if state.has_extraction {
         let results = std::mem::take(&mut state.extraction_results);
@@ -69,7 +85,10 @@ impl MarkdownStreamProcessor {
     pub fn finish(&mut self) -> String {
         if !self.buffer.is_empty() {
             let chunk = std::mem::take(&mut self.buffer);
-            self.state.process_html(&chunk);
+            let mut trailing = self.state.process_html(&chunk);
+            if !trailing.is_empty() {
+                self.state.process_text_buffer(&mut trailing);
+            }
         }
         self.state.get_markdown_chunk()
     }
