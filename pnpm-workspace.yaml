@@ -19,6 +19,10 @@ packages:
 
 overrides:
   emnapi: ^1.10.0
+  # fflate 0.8.3 emits a trailing empty Gunzip chunk that breaks
+  # @arethetypeswrong/cli 0.18.2 tarball extraction (attw --pack crashes
+  # with "Cannot read properties of undefined (reading 'filename')").
+  fflate: 0.8.2
   vite: npm:rolldown-vite@latest
 catalog:
   '@actions/core': ^3.0.1
