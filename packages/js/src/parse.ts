@@ -239,8 +239,38 @@ function parseHtmlInternal(
 
     const nextCharCode = htmlChunk.charCodeAt(i + 1)
 
-    // COMMENT or DOCTYPE
+    // COMMENT, DOCTYPE or CDATA
     if (nextCharCode === EXCLAMATION_CHAR) {
+      // Discriminate on the third char: '[' is a CDATA section, anything else
+      // is a comment/doctype. Only the rare '[' case pays for the string work.
+      if (htmlChunk.charCodeAt(i + 2) === OPEN_BRACKET_CHAR) {
+        // CDATA is dropped by default but can be surfaced via
+        // tagOverrides['#cdata-section']. Handle it before the generic
+        // comment/doctype scan, which would otherwise stop at the first `>`
+        // inside `]]>` and discard the content.
+        if (htmlChunk.startsWith('<![CDATA[', i)) {
+          const end = htmlChunk.indexOf(']]>', i + 9)
+          if (end === -1) {
+            // Unterminated CDATA: re-parse from '<' in the next chunk.
+            textBuffer += htmlChunk.substring(i)
+            break
+          }
+          if (textBuffer.length > 0) {
+            processTextBuffer(textBuffer, state, handleEvent)
+            textBuffer = ''
+          }
+          processCdataSection(htmlChunk.substring(i + 9, end), state, handleEvent)
+          i = end + 3
+          continue
+        }
+        if (chunkLength - i < 9 && '<![CDATA['.startsWith(htmlChunk.substring(i))) {
+          // Chunk boundary fell inside the `<![CDATA[` opener.
+          textBuffer += htmlChunk.substring(i)
+          break
+        }
+        // '[' but not a CDATA opener (e.g. `<![if IE]>`): fall through.
+      }
+
       if (textBuffer.length > 0) {
         processTextBuffer(textBuffer, state, handleEvent)
         textBuffer = ''
@@ -595,6 +625,50 @@ function processCommentOrDoctype(htmlChunk: string, position: number): {
       remainingText: htmlChunk.substring(position, i),
     }
   }
+}
+
+/**
+ * Handle a CDATA section's inner content.
+ *
+ * CDATA is discarded by default (matching the HTML spec, where `<![CDATA[`
+ * outside foreign content is a bogus comment). Callers opt in by registering a
+ * `#cdata-section` entry in `tagOverrides`; the leading `#` makes the pseudo-tag
+ * impossible to collide with a real HTML element name. When an override exists
+ * the content is emitted as a synthetic `#cdata-section` element whose rendering
+ * follows the override handler.
+ */
+function processCdataSection(
+  content: string,
+  state: ParseState,
+  handleEvent: (event: NodeEvent) => void,
+): void {
+  if (!state.tagOverrideHandlers?.has('#cdata-section')) {
+    return
+  }
+
+  const open = processOpeningTag('#cdata-section', -1, '>', 0, state, handleEvent)
+  if (!open.complete || open.selfClosing) {
+    return
+  }
+
+  const node = state.currentNode!
+  if (content.length > 0 && !node.tagHandler?.excludesTextNodes) {
+    const textNode: TextNode = {
+      type: TEXT_NODE,
+      value: content,
+      parent: node,
+      index: node.currentWalkIndex!++,
+      depth: state.depth,
+      containsWhitespace: false,
+    }
+    for (const parent of traverseUpToFirstBlockNode(node)) {
+      parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
+    }
+    handleEvent({ type: NodeEventEnter, node: textNode })
+    state.lastTextNode = textNode
+  }
+
+  closeNode(state.currentNode ?? null, state, handleEvent)
 }
 
 /**

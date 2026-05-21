@@ -1504,6 +1504,62 @@ fn script_with_cdata_like_content() {
 }
 
 #[test]
+fn cdata_dropped_by_default() {
+    // CDATA sections are discarded unless opted into via tagOverrides.
+    let md = convert("before <![CDATA[secret payload]]> after");
+    assert!(!md.contains("secret payload"), "CDATA leaked into output: {md}");
+}
+
+#[test]
+fn cdata_emitted_via_tag_override() {
+    let overrides = vec![("#cdata-section".to_string(), TagOverrideConfig {
+        enter: None,
+        exit: None,
+        spacing: None,
+        is_inline: None,
+        is_self_closing: None,
+        collapses_inner_white_space: None,
+        alias_tag_id: Some(mdream::consts::TAG_PRE),
+    })];
+    let md = html_to_markdown(
+        "<body>before <pre><code><![CDATA[\none two\nthree four\n]]></code></pre> after</body>",
+        HTMLToMarkdownOptions {
+            plugins: Some(PluginConfig {
+                tag_overrides: Some(overrides),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    );
+    assert!(md.contains("one two"), "CDATA content missing: {md}");
+    assert!(md.contains("three four"), "CDATA content missing: {md}");
+}
+
+#[test]
+fn cdata_emitted_via_enter_exit_override() {
+    let overrides = vec![("#cdata-section".to_string(), TagOverrideConfig {
+        enter: Some("[".to_string()),
+        exit: Some("]".to_string()),
+        spacing: Some([0, 0]),
+        is_inline: Some(true),
+        is_self_closing: None,
+        collapses_inner_white_space: None,
+        alias_tag_id: None,
+    })];
+    let md = html_to_markdown(
+        "<body>a<![CDATA[hidden]]>b</body>",
+        HTMLToMarkdownOptions {
+            plugins: Some(PluginConfig {
+                tag_overrides: Some(overrides),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    );
+    assert_eq!(md, "a[hidden]b");
+}
+
+#[test]
 fn multiple_scripts_interleaved_with_content() {
     let html = r#"<body>
     <p>Before</p>

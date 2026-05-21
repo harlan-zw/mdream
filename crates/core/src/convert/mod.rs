@@ -417,6 +417,37 @@ impl ConvertState {
             let next = bytes[i + 1];
 
             if next == EXCLAMATION_CHAR {
+                // Discriminate on the third byte: '-' is a comment, '[' a CDATA
+                // section, anything else a doctype/bogus declaration. Only the
+                // rare '[' case pays for the `<![CDATA[` string work; comments
+                // and doctypes (the common cases) cost a single byte compare.
+                if bytes.get(i + 2) == Some(&b'[') {
+                    let remaining = &chunk[i..];
+                    // CDATA is dropped by default but can be surfaced via
+                    // tagOverrides["#cdata-section"]. Handle it before the
+                    // generic comment/doctype scan, which would otherwise stop
+                    // at the first `>` inside `]]>` and discard the content.
+                    if let Some(after_open) = remaining.strip_prefix("<![CDATA[") {
+                        if let Some(rel) = after_open.find("]]>") {
+                            if !text_buffer.is_empty() {
+                                self.process_text_buffer(&mut text_buffer);
+                                text_buffer.clear();
+                            }
+                            self.process_cdata_section(&after_open[..rel]);
+                            i += "<![CDATA[".len() + rel + 3;
+                            continue;
+                        }
+                        // Unterminated CDATA: re-parse from '<' in the next chunk.
+                        text_buffer.push_str(remaining);
+                        break;
+                    }
+                    if remaining.len() < "<![CDATA[".len() && "<![CDATA[".starts_with(remaining) {
+                        // Chunk boundary fell inside the `<![CDATA[` opener.
+                        text_buffer.push_str(remaining);
+                        break;
+                    }
+                    // '[' but not a CDATA opener: fall through to doctype scan.
+                }
                 if !text_buffer.is_empty() {
                     self.process_text_buffer(&mut text_buffer);
                     text_buffer.clear();
