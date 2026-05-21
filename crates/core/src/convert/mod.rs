@@ -66,6 +66,13 @@ pub struct ConvertState {
     just_closed_tag: bool,
     is_first_text_in_element: bool,
     in_non_nesting: bool,
+    /// True while inside a quote-aware rawtext element (`<script>`/`<style>`),
+    /// where a `</script>` inside a JS/CSS string literal must not close the tag.
+    in_rawtext_quote_aware: bool,
+    /// Quote char (`"`, `'`, or backtick) currently open inside rawtext, or 0.
+    rawtext_quote: u8,
+    /// True when the previous rawtext char was an unescaped backslash.
+    rawtext_escaped: bool,
     escape_ctx: u8,
     in_pre: bool,
     /// Unified collapse depth counter (replaces separate counters in ParseState + MarkdownState)
@@ -166,6 +173,9 @@ impl ConvertState {
             just_closed_tag: false,
             is_first_text_in_element: false,
             in_non_nesting: false,
+            in_rawtext_quote_aware: false,
+            rawtext_quote: 0,
+            rawtext_escaped: false,
             escape_ctx: 0,
             in_pre: false,
             collapse_non_span_depth: 0,
@@ -286,6 +296,22 @@ impl ConvertState {
         while i < chunk_length {
             let cc = bytes[i];
 
+            // Track JS/CSS string literals inside <script>/<style> so a
+            // `</script>` appearing inside a string does not close the tag.
+            if self.in_rawtext_quote_aware {
+                if self.rawtext_escaped {
+                    self.rawtext_escaped = false;
+                } else if self.rawtext_quote != 0 {
+                    if cc == BACKSLASH_CHAR {
+                        self.rawtext_escaped = true;
+                    } else if cc == self.rawtext_quote {
+                        self.rawtext_quote = 0;
+                    }
+                } else if cc == QUOTE_CHAR || cc == APOS_CHAR || cc == BACKTICK_CHAR {
+                    self.rawtext_quote = cc;
+                }
+            }
+
             if cc != LT_CHAR {
                 // FAST PATH: batch contiguous plain ASCII text (>32, <128, not & or <)
                 // Skip when: in escape context, non-nesting mode, or pre tag
@@ -379,7 +405,8 @@ impl ConvertState {
             // non-matching closing tags, opening tags) are treated as literal text.
             if self.in_non_nesting {
                 let next = bytes[i + 1];
-                if next == SLASH_CHAR {
+                // A `</...>` inside an open JS/CSS string literal is literal text.
+                if next == SLASH_CHAR && self.rawtext_quote == 0 {
                     let peek_start = i + 2;
                     let mut peek_end = peek_start;
                     while peek_end < chunk_length {

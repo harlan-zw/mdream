@@ -32,12 +32,7 @@ pub fn html_to_markdown(html: &str, options: HTMLToMarkdownOptions) -> String {
 pub fn html_to_markdown_result(html: &str, options: HTMLToMarkdownOptions) -> MdreamResult {
     let capacity = (html.len() / 3).clamp(1024, 256 * 1024);
     let mut state = ConvertState::new(options, capacity);
-    let mut trailing = state.process_html(html);
-    // Flush any trailing top-level text left unprocessed at EOF, e.g. the
-    // `bar` in the fragment `foo <sup>x</sup> bar` (issue #93).
-    if !trailing.is_empty() {
-        state.process_text_buffer(&mut trailing);
-    }
+    state.process_html(html);
 
     let extracted = if state.has_extraction {
         let results = std::mem::take(&mut state.extraction_results);
@@ -85,10 +80,7 @@ impl MarkdownStreamProcessor {
     pub fn finish(&mut self) -> String {
         if !self.buffer.is_empty() {
             let chunk = std::mem::take(&mut self.buffer);
-            let mut trailing = self.state.process_html(&chunk);
-            if !trailing.is_empty() {
-                self.state.process_text_buffer(&mut trailing);
-            }
+            self.state.process_html(&chunk);
         }
         self.state.get_markdown_chunk()
     }

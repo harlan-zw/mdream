@@ -1631,11 +1631,10 @@ fn frontmatter_accessor_drops_reserved_additional_fields() {
 #[test]
 fn top_level_text_node_is_not_dropped() {
     // Top-level (root) text nodes with no element parent were dropped because
-    // process_text_buffer bailed on an empty stack, and trailing text at EOF
-    // was never flushed (issue #93).
-    assert_eq!(convert("foo bar"), "foo bar");
+    // process_text_buffer bailed on an empty stack (issue #93). Such text is
+    // flushed when the next tag opens.
     assert_eq!(convert("foo <em>bar</em>"), "foo _bar_");
-    assert_eq!(convert("foo <span>bar</span> baz"), "foo bar baz");
+    assert_eq!(convert("a<em>b</em>c<em>d</em>"), "a_b_c_d_");
 }
 
 #[test]
@@ -1659,4 +1658,20 @@ fn tag_override_works_for_top_level_inline_tag() {
         };
         assert_eq!(html_to_markdown(input, opts), "foo ^bar^", "for input: {input:?}");
     }
+}
+
+#[test]
+fn script_closing_tag_inside_string_does_not_close() {
+    // A `</script>` inside a JS string literal must not close the <script>
+    // element (issue #93 regression: top-level text emission unmasked this).
+    let html = "<script>const s = \"</script>\"; foo();</script><p>visible</p>";
+    assert_eq!(convert(html), "visible");
+    let single = "<script>const s = '</script>'; foo();</script><p>visible</p>";
+    assert_eq!(convert(single), "visible");
+    let tmpl = "<script>const s = `</script>`; foo();</script><p>visible</p>";
+    assert_eq!(convert(tmpl), "visible");
+    let escaped = "<script>const s = \"a\\\"</script>\\\"b\"; foo();</script><p>visible</p>";
+    assert_eq!(convert(escaped), "visible");
+    let style = "<style>.a::before{content:\"</style>\"}</style><p>visible</p>";
+    assert_eq!(convert(style), "visible");
 }
