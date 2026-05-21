@@ -204,3 +204,52 @@ pub(crate) fn parse_attributes(attr_str: &str) -> Attributes {
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn whitespace_detection() {
+        for c in [b' ', b'\t', b'\n', b'\r'] {
+            assert!(is_whitespace(c));
+        }
+        for c in [b'a', b'0', b'-', 0u8] {
+            assert!(!is_whitespace(c));
+        }
+    }
+
+    #[test]
+    fn parses_quoted_and_unquoted_attributes() {
+        let a = parse_attributes("href=\"/x\" id=main");
+        assert_eq!(a.get("href").map(String::as_str), Some("/x"));
+        assert_eq!(a.get("id").map(String::as_str), Some("main"));
+    }
+
+    #[test]
+    fn parses_valueless_and_empty_attributes() {
+        let a = parse_attributes("disabled checked");
+        assert!(a.contains_key("disabled"));
+        assert!(a.contains_key("checked"));
+        let empty = parse_attributes("");
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn attribute_names_lowercased_values_decoded() {
+        let a = parse_attributes("DATA-X='a &amp; b'");
+        assert_eq!(a.get("data-x").map(String::as_str), Some("a & b"));
+    }
+
+    #[test]
+    fn process_tag_attributes_finds_close() {
+        // "<a href=\"x\">" — scan from after the tag name
+        let html = "a href=\"x\">rest";
+        let (complete, new_pos, attrs, self_closing) =
+            process_tag_attributes(html, 1, None, false);
+        assert!(complete);
+        assert!(!self_closing);
+        assert_eq!(&html[new_pos..], "rest");
+        assert_eq!(attrs.get("href").map(String::as_str), Some("x"));
+    }
+}

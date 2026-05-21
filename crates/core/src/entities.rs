@@ -345,3 +345,34 @@ fn decode_html_entities_alloc(text: &str) -> String {
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_ampersand_borrows() {
+        assert!(matches!(decode_html_entities("plain text"), Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn decodes_named_entities() {
+        assert_eq!(decode_html_entities("a &amp; b"), "a & b");
+        assert_eq!(decode_html_entities("&lt;tag&gt;"), "<tag>");
+        assert_eq!(decode_html_entities("&quot;q&quot;"), "\"q\"");
+    }
+
+    #[test]
+    fn decodes_numeric_references() {
+        assert_eq!(decode_html_entities("&#65;"), "A");
+        assert_eq!(decode_html_entities("&#x41;"), "A");
+        assert_eq!(decode_html_entities("&#X41;"), "A");
+    }
+
+    #[test]
+    fn unknown_entity_kept_literal() {
+        assert_eq!(decode_html_entities("&notanentity;"), "&notanentity;");
+        // bare ampersand is preserved
+        assert_eq!(decode_html_entities("a & b"), "a & b");
+    }
+}
