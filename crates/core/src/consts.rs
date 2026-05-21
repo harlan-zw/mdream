@@ -261,17 +261,6 @@ pub const PIPE_CHAR: u8 = 124; // '|'
 pub const OPEN_BRACKET_CHAR: u8 = 91; // '['
 pub const CLOSE_BRACKET_CHAR: u8 = 93; // ']'
 
-/// Fast, strict tag name to ID lookup.
-///
-/// Dispatches on (first byte, length) for fast rejection, then verifies the
-/// remaining bytes inline so that unknown tags (e.g. `<ex>`, `<fxxm>`, custom
-/// elements) never collide with built-ins sharing the same (first-byte, length)
-/// signature. Single-character arms need no extra check — the length and first
-/// byte together uniquely identify the string. Multi-character arms compare the
-/// tail bytes via slice equality, which the compiler lowers to a small fixed
-/// memcmp (typically a single word load + compare).
-/// Returns `None` for any tag not in the built-in set; callers can opt those
-/// tags into a rendering via `tagOverrides`.
 /// Longest built-in HTML tag name (`blockquote`, `figcaption`); also the size
 /// of the stack buffer used for the case-insensitive lookup.
 const MAX_BUILTIN_TAG_LEN: usize = 10;
@@ -292,139 +281,132 @@ pub fn get_tag_id_ci_bytes(name: &[u8]) -> Option<u8> {
     if len == 0 || len > MAX_BUILTIN_TAG_LEN {
         return None;
     }
-    // Fast path: already-lowercase (the HTML5 common case) dispatches directly
-    // without copying. Only fall through to the stack-buffer lowercase when an
-    // uppercase byte is actually present.
-    let mut has_upper = false;
+    let mut buf = [0u8; MAX_BUILTIN_TAG_LEN];
     let mut i = 0;
     while i < len {
-        if name[i].is_ascii_uppercase() { has_upper = true; break; }
+        buf[i] = name[i].to_ascii_lowercase();
         i += 1;
-    }
-    if !has_upper {
-        return get_tag_id_bytes(name);
-    }
-    let mut buf = [0u8; MAX_BUILTIN_TAG_LEN];
-    let mut j = 0;
-    while j < len {
-        buf[j] = name[j].to_ascii_lowercase();
-        j += 1;
     }
     get_tag_id_bytes(&buf[..len])
 }
 
+/// Strict, case-sensitive tag name to ID lookup.
+///
+/// Matches the lowercase tag-name bytes directly against built-in byte-string
+/// literals; the compiler lowers this to a length + first-byte decision tree
+/// with fixed-size `memcmp` leaves. Returns `None` for any tag not in the
+/// built-in set; callers can opt those tags into a rendering via `tagOverrides`.
 #[inline]
 fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
-    let len = bytes.len();
-    if len == 0 || len > MAX_BUILTIN_TAG_LEN {
-        return None;
-    }
-    // Each arm reads tail bytes directly: `&bytes[1..]` against a fixed-length
-    // byte literal. The length is constrained by the match pattern, so the
-    // comparison is a single fixed-size memcmp.
-    match (bytes[0], len) {
-        // 1-char tags: first byte + length uniquely identifies the string.
-        (b'a', 1) => Some(TAG_A),
-        (b'b', 1) => Some(TAG_B),
-        (b'i', 1) => Some(TAG_I),
-        (b'p', 1) => Some(TAG_P),
-        (b'q', 1) => Some(TAG_Q),
-        (b'u', 1) => Some(TAG_U),
-        // 2-char tags: verify byte 1 only.
-        (b'b', 2) if bytes[1] == b'r' => Some(TAG_BR),
-        (b'd', 2) => match bytes[1] { b'd' => Some(TAG_DD), b'l' => Some(TAG_DL), b't' => Some(TAG_DT), _ => None },
-        (b'e', 2) if bytes[1] == b'm' => Some(TAG_EM),
-        (b'h', 2) => match bytes[1] {
-            b'r' => Some(TAG_HR),
-            b'1' => Some(TAG_H1), b'2' => Some(TAG_H2), b'3' => Some(TAG_H3),
-            b'4' => Some(TAG_H4), b'5' => Some(TAG_H5), b'6' => Some(TAG_H6),
-            _ => None,
-        },
-        (b'l', 2) if bytes[1] == b'i' => Some(TAG_LI),
-        (b'o', 2) if bytes[1] == b'l' => Some(TAG_OL),
-        (b'r', 2) => match bytes[1] { b'p' => Some(TAG_RP), b't' => Some(TAG_RT), _ => None },
-        (b't', 2) => match bytes[1] { b'r' => Some(TAG_TR), b'd' => Some(TAG_TD), b'h' => Some(TAG_TH), _ => None },
-        (b'u', 2) if bytes[1] == b'l' => Some(TAG_UL),
-        // 3-char tags: verify bytes 1-2.
-        (b'b', 3) if &bytes[1..] == b"do" => Some(TAG_BDO),
-        (b'c', 3) if &bytes[1..] == b"ol" => Some(TAG_COL),
-        (b'd', 3) => match &bytes[1..] {
-            b"el" => Some(TAG_DEL), b"fn" => Some(TAG_DFN), b"iv" => Some(TAG_DIV), _ => None
-        },
-        (b'i', 3) => match &bytes[1..] { b"mg" => Some(TAG_IMG), b"ns" => Some(TAG_INS), _ => None },
-        (b'k', 3) if &bytes[1..] == b"bd" => Some(TAG_KBD),
-        (b'm', 3) if &bytes[1..] == b"ap" => Some(TAG_MAP),
-        (b'n', 3) if &bytes[1..] == b"av" => Some(TAG_NAV),
-        (b'p', 3) if &bytes[1..] == b"re" => Some(TAG_PRE),
-        (b's', 3) => match &bytes[1..] {
-            b"ub" => Some(TAG_SUB), b"up" => Some(TAG_SUP), b"vg" => Some(TAG_SVG), _ => None
-        },
-        (b'v', 3) if &bytes[1..] == b"ar" => Some(TAG_VAR),
-        (b'w', 3) if &bytes[1..] == b"br" => Some(TAG_WBR),
-        (b'x', 3) if &bytes[1..] == b"mp" => Some(TAG_XMP),
-        // 4-char tags.
-        (b'a', 4) => match &bytes[1..] { b"bbr" => Some(TAG_ABBR), b"rea" => Some(TAG_AREA), _ => None },
-        (b'b', 4) => match &bytes[1..] { b"ase" => Some(TAG_BASE), b"ody" => Some(TAG_BODY), _ => None },
-        (b'c', 4) => match &bytes[1..] { b"ite" => Some(TAG_CITE), b"ode" => Some(TAG_CODE), _ => None },
-        (b'f', 4) if &bytes[1..] == b"orm" => Some(TAG_FORM),
-        (b'h', 4) => match &bytes[1..] { b"ead" => Some(TAG_HEAD), b"tml" => Some(TAG_HTML), _ => None },
-        (b'l', 4) if &bytes[1..] == b"ink" => Some(TAG_LINK),
-        (b'm', 4) => match &bytes[1..] {
-            b"ain" => Some(TAG_MAIN), b"ark" => Some(TAG_MARK), b"eta" => Some(TAG_META), _ => None
-        },
-        (b'p', 4) if &bytes[1..] == b"ath" => Some(TAG_PATH),
-        (b'r', 4) if &bytes[1..] == b"uby" => Some(TAG_RUBY),
-        (b's', 4) => match &bytes[1..] { b"amp" => Some(TAG_SAMP), b"pan" => Some(TAG_SPAN), _ => None },
-        (b't', 4) if &bytes[1..] == b"ime" => Some(TAG_TIME),
-        // 5-char tags.
-        (b'a', 5) => match &bytes[1..] { b"side" => Some(TAG_ASIDE), b"udio" => Some(TAG_AUDIO), _ => None },
-        (b'e', 5) if &bytes[1..] == b"mbed" => Some(TAG_EMBED),
-        (b'i', 5) if &bytes[1..] == b"nput" => Some(TAG_INPUT),
-        (b'l', 5) if &bytes[1..] == b"abel" => Some(TAG_LABEL),
-        (b'm', 5) if &bytes[1..] == b"eter" => Some(TAG_METER),
-        (b'p', 5) if &bytes[1..] == b"aram" => Some(TAG_PARAM),
-        (b's', 5) => match &bytes[1..] { b"tyle" => Some(TAG_STYLE), b"mall" => Some(TAG_SMALL), _ => None },
-        (b't', 5) => match &bytes[1..] {
-            b"able" => Some(TAG_TABLE),
-            b"body" => Some(TAG_TBODY),
-            b"foot" => Some(TAG_TFOOT),
-            b"itle" => Some(TAG_TITLE),
-            b"rack" => Some(TAG_TRACK),
-            b"head" => Some(TAG_THEAD),
-            _ => None,
-        },
-        (b'v', 5) if &bytes[1..] == b"ideo" => Some(TAG_VIDEO),
-        // 6-char tags.
-        (b'b', 6) if &bytes[1..] == b"utton" => Some(TAG_BUTTON),
-        (b'c', 6) => match &bytes[1..] { b"anvas" => Some(TAG_CANVAS), b"enter" => Some(TAG_CENTER), _ => None },
-        (b'd', 6) if &bytes[1..] == b"ialog" => Some(TAG_DIALOG),
-        (b'f', 6) => match &bytes[1..] { b"ooter" => Some(TAG_FOOTER), b"igure" => Some(TAG_FIGURE), _ => None },
-        (b'h', 6) if &bytes[1..] == b"eader" => Some(TAG_HEADER),
-        (b'i', 6) if &bytes[1..] == b"frame" => Some(TAG_IFRAME),
-        (b'k', 6) if &bytes[1..] == b"eygen" => Some(TAG_KEYGEN),
-        (b'l', 6) if &bytes[1..] == b"egend" => Some(TAG_LEGEND),
-        (b'o', 6) => match &bytes[1..] { b"bject" => Some(TAG_OBJECT), b"ption" => Some(TAG_OPTION), _ => None },
-        (b's', 6) => match &bytes[1..] {
-            b"cript" => Some(TAG_SCRIPT),
-            b"elect" => Some(TAG_SELECT),
-            b"ource" => Some(TAG_SOURCE),
-            b"trong" => Some(TAG_STRONG),
-            _ => None,
-        },
-        // 7-char tags.
-        (b'a', 7) => match &bytes[1..] { b"rticle" => Some(TAG_ARTICLE), b"ddress" => Some(TAG_ADDRESS), _ => None },
-        (b'c', 7) if &bytes[1..] == b"aption" => Some(TAG_CAPTION),
-        (b'd', 7) if &bytes[1..] == b"etails" => Some(TAG_DETAILS),
-        (b's', 7) => match &bytes[1..] { b"ection" => Some(TAG_SECTION), b"ummary" => Some(TAG_SUMMARY), _ => None },
-        // 8-char tags.
-        (b'f', 8) if &bytes[1..] == b"ieldset" => Some(TAG_FIELDSET),
-        (b'n', 8) => match &bytes[1..] { b"oscript" => Some(TAG_NOSCRIPT), b"oframes" => Some(TAG_NOFRAMES), _ => None },
-        (b'p', 8) if &bytes[1..] == b"rogress" => Some(TAG_PROGRESS),
-        (b't', 8) => match &bytes[1..] { b"emplate" => Some(TAG_TEMPLATE), b"extarea" => Some(TAG_TEXTAREA), _ => None },
-        // 9-char and 10-char tags.
-        (b'p', 9) if &bytes[1..] == b"laintext" => Some(TAG_PLAINTEXT),
-        (b'b', 10) if &bytes[1..] == b"lockquote" => Some(TAG_BLOCKQUOTE),
-        (b'f', 10) if &bytes[1..] == b"igcaption" => Some(TAG_FIGCAPTION),
-        _ => None,
-    }
+    Some(match bytes {
+        b"figcaption" => TAG_FIGCAPTION,
+        b"blockquote" => TAG_BLOCKQUOTE,
+        b"plaintext" => TAG_PLAINTEXT,
+        b"textarea" => TAG_TEXTAREA,
+        b"template" => TAG_TEMPLATE,
+        b"progress" => TAG_PROGRESS,
+        b"noscript" => TAG_NOSCRIPT,
+        b"noframes" => TAG_NOFRAMES,
+        b"fieldset" => TAG_FIELDSET,
+        b"summary" => TAG_SUMMARY,
+        b"section" => TAG_SECTION,
+        b"details" => TAG_DETAILS,
+        b"caption" => TAG_CAPTION,
+        b"article" => TAG_ARTICLE,
+        b"address" => TAG_ADDRESS,
+        b"strong" => TAG_STRONG,
+        b"source" => TAG_SOURCE,
+        b"select" => TAG_SELECT,
+        b"script" => TAG_SCRIPT,
+        b"option" => TAG_OPTION,
+        b"object" => TAG_OBJECT,
+        b"legend" => TAG_LEGEND,
+        b"keygen" => TAG_KEYGEN,
+        b"iframe" => TAG_IFRAME,
+        b"header" => TAG_HEADER,
+        b"footer" => TAG_FOOTER,
+        b"figure" => TAG_FIGURE,
+        b"dialog" => TAG_DIALOG,
+        b"center" => TAG_CENTER,
+        b"canvas" => TAG_CANVAS,
+        b"button" => TAG_BUTTON,
+        b"video" => TAG_VIDEO,
+        b"track" => TAG_TRACK,
+        b"title" => TAG_TITLE,
+        b"thead" => TAG_THEAD,
+        b"tfoot" => TAG_TFOOT,
+        b"tbody" => TAG_TBODY,
+        b"table" => TAG_TABLE,
+        b"style" => TAG_STYLE,
+        b"small" => TAG_SMALL,
+        b"param" => TAG_PARAM,
+        b"meter" => TAG_METER,
+        b"label" => TAG_LABEL,
+        b"input" => TAG_INPUT,
+        b"embed" => TAG_EMBED,
+        b"audio" => TAG_AUDIO,
+        b"aside" => TAG_ASIDE,
+        b"time" => TAG_TIME,
+        b"span" => TAG_SPAN,
+        b"samp" => TAG_SAMP,
+        b"ruby" => TAG_RUBY,
+        b"path" => TAG_PATH,
+        b"meta" => TAG_META,
+        b"mark" => TAG_MARK,
+        b"main" => TAG_MAIN,
+        b"link" => TAG_LINK,
+        b"html" => TAG_HTML,
+        b"head" => TAG_HEAD,
+        b"form" => TAG_FORM,
+        b"code" => TAG_CODE,
+        b"cite" => TAG_CITE,
+        b"body" => TAG_BODY,
+        b"base" => TAG_BASE,
+        b"area" => TAG_AREA,
+        b"abbr" => TAG_ABBR,
+        b"xmp" => TAG_XMP,
+        b"wbr" => TAG_WBR,
+        b"var" => TAG_VAR,
+        b"svg" => TAG_SVG,
+        b"sup" => TAG_SUP,
+        b"sub" => TAG_SUB,
+        b"pre" => TAG_PRE,
+        b"nav" => TAG_NAV,
+        b"map" => TAG_MAP,
+        b"kbd" => TAG_KBD,
+        b"ins" => TAG_INS,
+        b"img" => TAG_IMG,
+        b"div" => TAG_DIV,
+        b"dfn" => TAG_DFN,
+        b"del" => TAG_DEL,
+        b"col" => TAG_COL,
+        b"bdo" => TAG_BDO,
+        b"ul" => TAG_UL,
+        b"tr" => TAG_TR,
+        b"th" => TAG_TH,
+        b"td" => TAG_TD,
+        b"rt" => TAG_RT,
+        b"rp" => TAG_RP,
+        b"ol" => TAG_OL,
+        b"li" => TAG_LI,
+        b"hr" => TAG_HR,
+        b"h6" => TAG_H6,
+        b"h5" => TAG_H5,
+        b"h4" => TAG_H4,
+        b"h3" => TAG_H3,
+        b"h2" => TAG_H2,
+        b"h1" => TAG_H1,
+        b"em" => TAG_EM,
+        b"dt" => TAG_DT,
+        b"dl" => TAG_DL,
+        b"dd" => TAG_DD,
+        b"br" => TAG_BR,
+        b"u" => TAG_U,
+        b"q" => TAG_Q,
+        b"p" => TAG_P,
+        b"i" => TAG_I,
+        b"b" => TAG_B,
+        b"a" => TAG_A,
+        _ => return None,
+    })
 }
