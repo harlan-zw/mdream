@@ -338,6 +338,12 @@ export interface TagHandler {
   // Number of newlines to add before/after the tag
   spacing?: readonly [number, number]
   excludesTextNodes?: boolean
+  /**
+   * When true, the `enter` string is emitted verbatim without synthesizing a
+   * separating space before it. Set for user-supplied tagOverride enter
+   * strings so markers like `^`/`~` attach to adjacent content (issue #93).
+   */
+  literalEnter?: boolean
 }
 
 // Plugin-specific context interfaces
