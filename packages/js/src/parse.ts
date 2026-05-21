@@ -318,11 +318,11 @@ function parseHtmlInternal(
       const tagId = TagIdMap[tagName] ?? -1
       i2 = tagNameEnd
 
+      // Inside a non-nesting element (script/style/title/textarea) no opening
+      // tag is a real element; a nested `<script>` is literal text (issue #93).
       if (state.currentNode?.tagHandler?.isNonNesting) {
-        if (!tagName || tagId !== state.currentNode?.tagId) {
-          textBuffer += htmlChunk[i++]
-          continue
-        }
+        textBuffer += htmlChunk[i++]
+        continue
       }
 
       if (!tagName) {
@@ -353,6 +353,15 @@ function parseHtmlInternal(
     }
   }
 
+  // Rawtext string-literal state is not carried across chunks. Inside
+  // <script>/<style> the body is never committed until the close tag, so a
+  // chunk boundary always leaves the whole body as leftover that is re-scanned
+  // from the element start, where no string literal is open (issue #93).
+  state.inSingleQuote = false
+  state.inDoubleQuote = false
+  state.inBacktick = false
+  state.lastCharWasBackslash = false
+
   return textBuffer
 }
 
@@ -365,7 +374,31 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   state.textBufferContainsNonWhitespace = false
   state.textBufferContainsWhitespace = false
 
+  // Top-level text node with no element parent, e.g. the leading `foo ` in the
+  // fragment `foo <sup>bar</sup>`. Emit it rather than dropping it (issue #93).
   if (!state.currentNode) {
+    if (!containsNonWhitespace) {
+      return
+    }
+    let rootText = textBuffer
+    if (rootText.length === 0) {
+      return
+    }
+    if (state.hasEncodedHtmlEntity) {
+      rootText = decodeHTMLEntities(String(rootText))
+      state.hasEncodedHtmlEntity = false
+    }
+    const rootTextNode: TextNode = {
+      type: TEXT_NODE,
+      value: rootText,
+      parent: null,
+      index: 0,
+      depth: state.depth,
+      containsWhitespace,
+      excludedFromMarkdown: false,
+    }
+    handleEvent({ type: NodeEventEnter, node: rootTextNode })
+    state.lastTextNode = rootTextNode
     return
   }
 

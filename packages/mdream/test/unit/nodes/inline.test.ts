@@ -37,3 +37,21 @@ describe.each(engines)('text Formatting $name', (engineConfig) => {
     expect(markdown).toBe('This is **_bold and italic_** text')
   })
 })
+
+// Top-level text nodes (no block ancestor) used to be dropped (issue #93).
+describe.each(engines)('top-level inline text $name', (engineConfig) => {
+  it('keeps text before a top-level inline tag', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('foo <em>bar</em>', { engine })).toBe('foo _bar_')
+  })
+
+  it('keeps text between top-level inline tags', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<strong>a</strong> and <em>b</em>', { engine })).toBe('**a** and _b_')
+  })
+
+  it('keeps text between repeated top-level inline tags', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('a<strong>b</strong>c<strong>d</strong>', { engine })).toBe('a**b**c**d**')
+  })
+})

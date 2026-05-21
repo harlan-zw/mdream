@@ -9,8 +9,11 @@ impl ConvertState {
         self.text_buffer_contains_non_whitespace = false;
         self.text_buffer_contains_whitespace = false;
 
-        let Some(parent) = self.stack.last() else { return };
-        let mut excludes_text_nodes = parent.excludes_text_nodes || parent.excluded_from_markdown;
+        // No parent element means this is a top-level (root) text node, e.g. the
+        // leading `foo ` in the fragment `foo <sup>bar</sup>`. Such text must
+        // still be emitted rather than dropped (issue #93).
+        let mut excludes_text_nodes = self.stack.last()
+            .is_some_and(|parent| parent.excludes_text_nodes || parent.excluded_from_markdown);
 
         if self.has_isolate_main {
             if self.isolate_main_found {
@@ -365,6 +368,11 @@ impl ConvertState {
 
         if self.stack.last().is_some_and(|n| n.is_non_nesting) && !self_closing {
             self.in_non_nesting = true;
+            // <script>/<style> are quote-aware: a `</script>` inside a JS/CSS
+            // string literal must not close the element (issue #93 regression).
+            self.in_rawtext_quote_aware = matches!(tag_id, Some(TAG_SCRIPT | TAG_STYLE));
+            self.rawtext_quote = 0;
+            self.rawtext_escaped = false;
         }
 
         if !self_closing { self.just_closed_tag = false; }
@@ -458,6 +466,7 @@ impl ConvertState {
                 self.has_encoded_html_entity = false;
                 self.just_closed_tag = true;
                 self.in_non_nesting = self.stack.last().is_some_and(|n| n.is_non_nesting);
+                self.reset_rawtext_quote_state();
                 return;
             }
         }
@@ -483,9 +492,20 @@ impl ConvertState {
         }
 
         self.in_non_nesting = self.stack.last().is_some_and(|n| n.is_non_nesting);
+        self.reset_rawtext_quote_state();
         self.depth -= 1;
         self.has_encoded_html_entity = false;
         self.just_closed_tag = true;
+    }
+
+    /// Clear quote-aware rawtext tracking once no longer inside `<script>`/`<style>`.
+    #[inline]
+    fn reset_rawtext_quote_state(&mut self) {
+        if !self.in_non_nesting {
+            self.in_rawtext_quote_aware = false;
+            self.rawtext_quote = 0;
+            self.rawtext_escaped = false;
+        }
     }
 
     pub(crate) fn process_closing_tag(&mut self, html_chunk: &str, position: usize) -> CloseTagResult {
