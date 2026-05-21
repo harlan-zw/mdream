@@ -156,14 +156,6 @@ pub(crate) fn slugify_heading(text: &str) -> String {
 pub(crate) fn resolve_url<'a>(url: &'a str, origin: Option<&str>, clean: bool) -> Cow<'a, str> {
     if url.is_empty() || url.starts_with('#') { return Cow::Borrowed(url); }
 
-    // Explicit scheme (mailto:, ftp://, https://, …): never join against origin.
-    let has_scheme = url.find(':').is_some_and(|i| {
-        i > 0 && url[..i].bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.'))
-    });
-    if has_scheme {
-        return if clean { strip_tracking_params(url) } else { Cow::Borrowed(url) };
-    }
-
     // Fast path: check if cleaning needed before any allocation
     let needs_clean = clean && url.as_bytes().contains(&b'?');
     if url.starts_with("//") {
@@ -187,7 +179,14 @@ pub(crate) fn resolve_url<'a>(url: &'a str, origin: Option<&str>, clean: bool) -
             resolved.push_str(suffix);
             return Cow::Owned(if needs_clean { strip_tracking_params_owned(resolved) } else { resolved });
         }
-        if !url.starts_with("http") {
+        // A url with an explicit scheme (`mailto:`, `ftp:`, `https:`, …) is
+        // absolute — only scheme-less urls are joined against the origin.
+        // Checked here rather than up-front so the common relative/`/`-prefixed
+        // paths never pay for the scan.
+        let has_scheme = url.find(':').is_some_and(|ci| {
+            ci > 0 && url[..ci].bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.'))
+        });
+        if !has_scheme {
             let suffix = url.strip_prefix('/').unwrap_or(url);
             let mut resolved = String::with_capacity(orig.len() + 1 + suffix.len());
             resolved.push_str(orig);
