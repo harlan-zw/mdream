@@ -580,10 +580,13 @@ impl ConvertState {
             }
         }
 
-        // Persist rawtext literal tracking for the next streaming chunk.
-        self.rawtext_quote = rt_quote;
-        self.rawtext_escaped = rt_escaped;
-        let _ = rt_aware;
+        // Rawtext string-literal state is intentionally NOT persisted across
+        // chunks. While inside <script>/<style> the body is never committed
+        // until the close tag, so a chunk boundary always leaves the whole
+        // body as leftover that is re-scanned from the element start, where
+        // the quote state is 0. `in_rawtext_quote_aware` does persist (via
+        // self) because the element itself stays open across the boundary.
+        let _ = (rt_quote, rt_escaped, rt_aware);
 
         // If text_buffer is empty (common for non-streaming), save allocation for reuse
         if text_buffer.is_empty() {

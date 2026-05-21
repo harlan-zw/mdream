@@ -1702,3 +1702,25 @@ fn streaming_top_level_text_with_tag_override() {
     result.push_str(&stream.finish());
     assert_eq!(result.trim(), "foo ^bar^");
 }
+
+#[test]
+fn streaming_script_close_in_string_across_chunks() {
+    // A `</script>` inside a JS string, split across a chunk boundary, must
+    // not close the element; quote state has to persist between chunks.
+    let chunks = ["<script>var s = \"</scr", "ipt> still string\"; run();</script><p>ok</p>"];
+    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut out = String::new();
+    for c in &chunks {
+        out.push_str(&stream.process_chunk(c));
+    }
+    out.push_str(&stream.finish());
+    assert_eq!(out.trim(), "ok");
+}
+
+#[test]
+fn script_string_with_multibyte_content_does_not_close_early() {
+    // The rawtext bulk scanner slices the chunk; multibyte bytes inside a
+    // script string must not break slicing or close detection.
+    let html = "<script>var s = \"héllo – </script> wörld\"; run();</script><p>ok</p>";
+    assert_eq!(convert(html), "ok");
+}

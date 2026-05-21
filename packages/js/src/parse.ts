@@ -353,6 +353,15 @@ function parseHtmlInternal(
     }
   }
 
+  // Rawtext string-literal state is not carried across chunks. Inside
+  // <script>/<style> the body is never committed until the close tag, so a
+  // chunk boundary always leaves the whole body as leftover that is re-scanned
+  // from the element start, where no string literal is open (issue #93).
+  state.inSingleQuote = false
+  state.inDoubleQuote = false
+  state.inBacktick = false
+  state.lastCharWasBackslash = false
+
   return textBuffer
 }
 
