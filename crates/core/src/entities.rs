@@ -272,6 +272,28 @@ pub(crate) fn decode_html_entities(text: &str) -> Cow<'_, str> {
     Cow::Owned(decode_html_entities_alloc(text))
 }
 
+/// Resolve a numeric character reference value per the HTML standard:
+/// C1 controls (0x80–0x9F) remap through the Windows-1252 legacy table,
+/// and NUL / surrogates / out-of-range values decode to U+FFFD.
+fn decode_numeric_ref(code: u32) -> char {
+    // Windows-1252 replacements for 0x80–0x9F (unmapped slots keep their value).
+    const WIN1252: [u32; 32] = [
+        0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+        0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+        0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+        0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
+    ];
+    let cp = if (0x80..=0x9F).contains(&code) {
+        WIN1252[(code - 0x80) as usize]
+    } else {
+        code
+    };
+    if cp == 0 || cp > 0x0010_FFFF || (0xD800..=0xDFFF).contains(&cp) {
+        return '\u{FFFD}';
+    }
+    char::from_u32(cp).unwrap_or('\u{FFFD}')
+}
+
 fn decode_html_entities_alloc(text: &str) -> String {
     let bytes = text.as_bytes();
     let len = bytes.len();
@@ -298,12 +320,11 @@ fn decode_html_entities_alloc(text: &str) -> String {
                 if i < len && bytes[i] == b';' && i > num_start {
                     let num_str = &text[num_start..i];
                     let base = if is_hex { 16 } else { 10 };
-                    if let Ok(code_point) = u32::from_str_radix(num_str, base)
-                        && let Some(c) = char::from_u32(code_point) {
-                            result.push(c);
-                            i += 1;
-                            continue;
-                        }
+                    if let Ok(code_point) = u32::from_str_radix(num_str, base) {
+                        result.push(decode_numeric_ref(code_point));
+                        i += 1;
+                        continue;
+                    }
                 }
                 i = start;
             } else {
@@ -367,6 +388,17 @@ mod tests {
         assert_eq!(decode_html_entities("&#65;"), "A");
         assert_eq!(decode_html_entities("&#x41;"), "A");
         assert_eq!(decode_html_entities("&#X41;"), "A");
+    }
+
+    #[test]
+    fn numeric_references_follow_html_rules() {
+        // C1 controls (0x80–0x9F) remap through Windows-1252
+        assert_eq!(decode_html_entities("&#x80;"), "\u{20AC}"); // €
+        assert_eq!(decode_html_entities("&#x99;"), "\u{2122}"); // ™
+        // NUL, surrogates, and out-of-range values decode to U+FFFD
+        assert_eq!(decode_html_entities("&#0;"), "\u{FFFD}");
+        assert_eq!(decode_html_entities("&#xD800;"), "\u{FFFD}");
+        assert_eq!(decode_html_entities("&#x110000;"), "\u{FFFD}");
     }
 
     #[test]
