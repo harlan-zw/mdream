@@ -88,8 +88,8 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
     const markdown = htmlToMarkdown('<p>E = mc<sup>2</sup> and H<sub>2</sub>O</p>', {
       plugins: {
         tagOverrides: {
-          sup: { enter: '^', exit: '^', isInline: true, spacing: [0, 0] },
-          sub: { enter: '~', exit: '~', isInline: true, spacing: [0, 0] },
+          sup: { enter: '^', exit: '^' },
+          sub: { enter: '~', exit: '~' },
         },
       },
       engine,
