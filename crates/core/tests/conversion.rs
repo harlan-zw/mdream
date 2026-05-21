@@ -1620,7 +1620,9 @@ fn frontmatter_accessor_drops_reserved_additional_fields() {
         },
     );
     let fm = result.frontmatter.unwrap();
-    // reserved `title` from additional_fields is filtered out — no duplicate
+    // reserved `title` from additional_fields is filtered out — no duplicate,
+    // and the real <title> value wins (not overwritten by additional_fields)
     assert_eq!(fm.iter().filter(|(k, _)| k == "title").count(), 1);
+    assert!(fm.iter().any(|(k, v)| k == "title" && v == "Real Title"));
     assert!(fm.iter().any(|(k, v)| k == "custom" && v == "kept"));
 }
