@@ -653,6 +653,9 @@ impl ConvertState {
         let is_inline: bool;
         let node_spacing: Option<[u8; 2]>;
         let output: Option<Cow<'static, str>>;
+        // True when `output` is a user-supplied override enter string — emit it
+        // verbatim without synthesizing a separating space (issue #93).
+        let enter_is_literal: bool;
         {
             let (ancestors, last) = self.stack.split_at(stack_len - 1);
             let node = &last[0];
@@ -701,11 +704,14 @@ impl ConvertState {
             // Check override enter string
             output = if let Some(ov) = override_config {
                 if let Some(ref s) = ov.enter {
+                    enter_is_literal = true;
                     Some(Cow::Owned(s.clone()))
                 } else {
+                    enter_is_literal = false;
                     self.get_enter_output(node, ancestors)
                 }
             } else {
+                enter_is_literal = false;
                 self.get_enter_output(node, ancestors)
             };
         }
@@ -740,7 +746,7 @@ impl ConvertState {
                 }
             }
 
-        self.write_output(true, is_inline, configured_new_lines, output.as_deref());
+        self.write_output(true, is_inline, configured_new_lines, output.as_deref(), enter_is_literal);
 
         // After write_output, the emitted `[` (if any) is the last byte of the
         // buffer. Stash that exact position so emit_exit_element can find the
@@ -926,7 +932,7 @@ impl ConvertState {
         // TAG_A exit: write ](url) directly to buffer — zero allocation
         if !has_override && tag_id == Some(TAG_A) && table_separator.is_none() {
             // Handle whitespace trimming (write_output with None)
-            self.write_output(false, is_inline, configured_new_lines, None);
+            self.write_output(false, is_inline, configured_new_lines, None, false);
             // Write link close directly
             if let Some(href) = node.attributes.get("href") {
                 let resolved = Self::resolve_url(href, self.options.origin.as_deref(), self.options.clean_urls);
@@ -987,7 +993,7 @@ impl ConvertState {
             output.as_deref()
         };
 
-        self.write_output(false, is_inline, configured_new_lines, effective);
+        self.write_output(false, is_inline, configured_new_lines, effective, false);
 
         // Record fragment link position for deferred fixup (no String alloc)
         if self.clean_flags & CLEAN_FRAGMENTS != 0 && tag_id == Some(TAG_A)
@@ -1415,7 +1421,7 @@ impl ConvertState {
     // ========================================================================
 
     #[inline]
-    fn write_output(&mut self, is_enter: bool, is_inline: bool, configured_new_lines: u8, output: Option<&str>) {
+    fn write_output(&mut self, is_enter: bool, is_inline: bool, configured_new_lines: u8, output: Option<&str>, literal: bool) {
         let output_str = output.unwrap_or("");
 
         // Fast path: no newlines, no output, no whitespace state to manage
@@ -1490,7 +1496,7 @@ impl ConvertState {
                     self.has_last_text_node = false;
                 }
 
-            if is_enter && !output_str.is_empty() && last_char != 0 && self.needs_spacing(last_char, output_str.as_bytes()[0]) {
+            if is_enter && !literal && !output_str.is_empty() && last_char != 0 && self.needs_spacing(last_char, output_str.as_bytes()[0]) {
                 self.buffer.push(' ');
                 self.last_content_cache_len = 1;
             }

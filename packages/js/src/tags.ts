@@ -954,6 +954,7 @@ export function buildTagOverrideHandlers(overrides: Record<string, TagOverride |
       if (override.enter !== undefined) {
         const enterStr = override.enter
         handler.enter = () => enterStr
+        handler.literalEnter = true
       }
       if (override.exit !== undefined) {
         const exitStr = override.exit

@@ -364,7 +364,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     }
 
     // Add spacing between inline elements if needed
-    if (output[0]?.[0] && eventType === NodeEventEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
+    if (output[0]?.[0] && eventType === NodeEventEnter && !node.tagHandler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
       state.buffer.push(' ')
       state.lastContentCache = ' '
     }
