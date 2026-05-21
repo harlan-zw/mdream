@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 // HTML named character references — HTML4 + common HTML5 (245 entries)
 // Mirrors packages/js/src/entities.ts for parity between JS and Rust engines.
 // Source: https://html.spec.whatwg.org/entities.json
@@ -259,5 +260,151 @@ pub(crate) fn lookup_named_entity(name: &[u8]) -> Option<char> {
         b"zeta" => Some('\u{03B6}'),
         b"Zeta" => Some('\u{0396}'),
         _ => None,
+    }
+}
+
+#[inline]
+pub(crate) fn decode_html_entities(text: &str) -> Cow<'_, str> {
+    // Fast path: no ampersand means no entities to decode
+    if !text.as_bytes().contains(&b'&') {
+        return Cow::Borrowed(text);
+    }
+    Cow::Owned(decode_html_entities_alloc(text))
+}
+
+/// Resolve a numeric character reference value per the HTML standard:
+/// C1 controls (0x80–0x9F) remap through the Windows-1252 legacy table,
+/// and NUL / surrogates / out-of-range values decode to U+FFFD.
+fn decode_numeric_ref(code: u32) -> char {
+    // Windows-1252 replacements for 0x80–0x9F (unmapped slots keep their value).
+    const WIN1252: [u32; 32] = [
+        0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+        0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+        0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+        0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
+    ];
+    let cp = if (0x80..=0x9F).contains(&code) {
+        WIN1252[(code - 0x80) as usize]
+    } else {
+        code
+    };
+    if cp == 0 || cp > 0x0010_FFFF || (0xD800..=0xDFFF).contains(&cp) {
+        return '\u{FFFD}';
+    }
+    char::from_u32(cp).unwrap_or('\u{FFFD}')
+}
+
+fn decode_html_entities_alloc(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    let mut result = String::with_capacity(len);
+    let mut i = 0;
+
+    while i < len {
+        if bytes[i] == b'&' {
+            // Numeric character references: &#NNN; or &#xHHH;
+            if i + 2 < len && bytes[i + 1] == b'#' {
+                let start = i;
+                i += 2;
+                let is_hex = i < len && (bytes[i] == b'x' || bytes[i] == b'X');
+                if is_hex {
+                    i += 1;
+                }
+                let num_start = i;
+                // Cap digit scan: 7 hex digits (U+10FFFF) or 8 decimal (max codepoint)
+                let max_digits = if is_hex { 7 } else { 8 };
+                let scan_limit = len.min(num_start + max_digits + 1);
+                while i < scan_limit && bytes[i] != b';' {
+                    i += 1;
+                }
+                if i < len && bytes[i] == b';' && i > num_start {
+                    let num_str = &text[num_start..i];
+                    let base = if is_hex { 16 } else { 10 };
+                    if let Ok(code_point) = u32::from_str_radix(num_str, base) {
+                        result.push(decode_numeric_ref(code_point));
+                        i += 1;
+                        continue;
+                    }
+                }
+                i = start;
+            } else {
+                // Named entity: scan forward up to 33 bytes for ';'
+                let mut semi = i + 1;
+                let scan_end = len.min(i + 34);
+                while semi < scan_end && bytes[semi] != b';' {
+                    semi += 1;
+                }
+                if semi < len && bytes[semi] == b';' && semi > i + 1 {
+                    let name = &bytes[i + 1..semi];
+                    if let Some(c) = lookup_named_entity(name) {
+                        result.push(c);
+                        i = semi + 1;
+                        continue;
+                    }
+                }
+            }
+            // No entity matched — push literal '&'
+            result.push('&');
+            i += 1;
+            continue;
+        }
+        // Batch copy plain ASCII bytes until next '&' or non-ASCII
+        let start = i;
+        while i < len && bytes[i] != b'&' && bytes[i] < 0x80 {
+            i += 1;
+        }
+        if i > start {
+            result.push_str(&text[start..i]);
+        }
+        if i >= len { break; }
+        // Handle non-ASCII multi-byte UTF-8 char
+        if bytes[i] >= 0x80 {
+            let Some(ch) = text[i..].chars().next() else { break; };
+            result.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_ampersand_borrows() {
+        assert!(matches!(decode_html_entities("plain text"), Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn decodes_named_entities() {
+        assert_eq!(decode_html_entities("a &amp; b"), "a & b");
+        assert_eq!(decode_html_entities("&lt;tag&gt;"), "<tag>");
+        assert_eq!(decode_html_entities("&quot;q&quot;"), "\"q\"");
+    }
+
+    #[test]
+    fn decodes_numeric_references() {
+        assert_eq!(decode_html_entities("&#65;"), "A");
+        assert_eq!(decode_html_entities("&#x41;"), "A");
+        assert_eq!(decode_html_entities("&#X41;"), "A");
+    }
+
+    #[test]
+    fn numeric_references_follow_html_rules() {
+        // C1 controls (0x80–0x9F) remap through Windows-1252
+        assert_eq!(decode_html_entities("&#x80;"), "\u{20AC}"); // €
+        assert_eq!(decode_html_entities("&#x99;"), "\u{2122}"); // ™
+        // NUL, surrogates, and out-of-range values decode to U+FFFD
+        assert_eq!(decode_html_entities("&#0;"), "\u{FFFD}");
+        assert_eq!(decode_html_entities("&#xD800;"), "\u{FFFD}");
+        assert_eq!(decode_html_entities("&#x110000;"), "\u{FFFD}");
+    }
+
+    #[test]
+    fn unknown_entity_kept_literal() {
+        assert_eq!(decode_html_entities("&notanentity;"), "&notanentity;");
+        // bare ampersand is preserved
+        assert_eq!(decode_html_entities("a & b"), "a & b");
     }
 }
