@@ -412,9 +412,15 @@ impl PluginConfig {
     /// ```
     #[must_use]
     pub fn with_tag_override(mut self, tag: impl Into<String>, config: TagOverrideConfig) -> Self {
-        self.tag_overrides
-            .get_or_insert_with(Vec::new)
-            .push((tag.into(), config));
+        // Keys are matched case-sensitively against lowercase tag names during
+        // conversion, so normalize and upsert rather than blindly appending.
+        let tag = tag.into().to_ascii_lowercase();
+        let overrides = self.tag_overrides.get_or_insert_with(Vec::new);
+        if let Some((_, existing)) = overrides.iter_mut().find(|(t, _)| *t == tag) {
+            *existing = config;
+        } else {
+            overrides.push((tag, config));
+        }
         self
     }
 }
