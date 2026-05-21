@@ -293,24 +293,15 @@ impl ConvertState {
         let chunk_length = bytes.len();
         let mut i = 0;
 
+        // Rawtext (<script>/<style>) string-literal tracking kept in locals so
+        // the hot scan loop touches registers, not struct memory. Synced back
+        // to `self` around tag transitions and at chunk end (issue #93).
+        let mut rt_aware = self.in_rawtext_quote_aware;
+        let mut rt_quote = self.rawtext_quote;
+        let mut rt_escaped = self.rawtext_escaped;
+
         while i < chunk_length {
             let cc = bytes[i];
-
-            // Track JS/CSS string literals inside <script>/<style> so a
-            // `</script>` appearing inside a string does not close the tag.
-            if self.in_rawtext_quote_aware {
-                if self.rawtext_escaped {
-                    self.rawtext_escaped = false;
-                } else if self.rawtext_quote != 0 {
-                    if cc == BACKSLASH_CHAR {
-                        self.rawtext_escaped = true;
-                    } else if cc == self.rawtext_quote {
-                        self.rawtext_quote = 0;
-                    }
-                } else if cc == QUOTE_CHAR || cc == APOS_CHAR || cc == BACKTICK_CHAR {
-                    self.rawtext_quote = cc;
-                }
-            }
 
             if cc != LT_CHAR {
                 // FAST PATH: batch contiguous plain ASCII text (>32, <128, not & or <)
@@ -325,6 +316,51 @@ impl ConvertState {
                             break;
                         }
                         i += 1;
+                    }
+                    text_buffer.push_str(&chunk[start..i]);
+                    self.text_buffer_contains_non_whitespace = true;
+                    self.last_char_was_whitespace = false;
+                    self.just_closed_tag = false;
+                    continue;
+                }
+
+                // Rawtext (<script>/<style>) content. Its text is excluded
+                // from output, so bulk-scan it here instead of routing every
+                // byte through the general path, while tracking JS/CSS string
+                // literals so a `</script>` inside a string stays literal text
+                // (issue #93). The fast path above never fires in non-nesting
+                // mode, so all script/style bytes reach this branch.
+                if rt_aware {
+                    let start = i;
+                    if rt_quote == 0 {
+                        // Outside a string: only '<' (a potential close tag)
+                        // and a quote opener are interesting.
+                        while i < chunk_length {
+                            let c = bytes[i];
+                            if c == LT_CHAR {
+                                break;
+                            }
+                            i += 1;
+                            if c == QUOTE_CHAR || c == APOS_CHAR || c == BACKTICK_CHAR {
+                                rt_quote = c;
+                                break;
+                            }
+                        }
+                    } else {
+                        // Inside a string: '<' is content; scan to the closing
+                        // quote, honouring backslash escapes.
+                        while i < chunk_length {
+                            let c = bytes[i];
+                            i += 1;
+                            if rt_escaped {
+                                rt_escaped = false;
+                            } else if c == BACKSLASH_CHAR {
+                                rt_escaped = true;
+                            } else if c == rt_quote {
+                                rt_quote = 0;
+                                break;
+                            }
+                        }
                     }
                     text_buffer.push_str(&chunk[start..i]);
                     self.text_buffer_contains_non_whitespace = true;
@@ -406,7 +442,7 @@ impl ConvertState {
             if self.in_non_nesting {
                 let next = bytes[i + 1];
                 // A `</...>` inside an open JS/CSS string literal is literal text.
-                if next == SLASH_CHAR && self.rawtext_quote == 0 {
+                if next == SLASH_CHAR && rt_quote == 0 {
                     let peek_start = i + 2;
                     let mut peek_end = peek_start;
                     while peek_end < chunk_length {
@@ -423,6 +459,9 @@ impl ConvertState {
                             text_buffer.clear();
                         }
                         let result = self.process_closing_tag(chunk, i);
+                        rt_aware = self.in_rawtext_quote_aware;
+                        rt_quote = self.rawtext_quote;
+                        rt_escaped = self.rawtext_escaped;
                         if result.complete {
                             i = result.new_position;
                         } else {
@@ -461,6 +500,9 @@ impl ConvertState {
                     text_buffer.clear();
                 }
                 let result = self.process_closing_tag(chunk, i);
+                rt_aware = self.in_rawtext_quote_aware;
+                rt_quote = self.rawtext_quote;
+                rt_escaped = self.rawtext_escaped;
                 if result.complete {
                     i = result.new_position;
                 } else {
@@ -531,8 +573,17 @@ impl ConvertState {
                     text_buffer.push_str(&chunk[i..]);
                     break;
                 }
+                // Opening/self-closing a tag may toggle rawtext mode.
+                rt_aware = self.in_rawtext_quote_aware;
+                rt_quote = self.rawtext_quote;
+                rt_escaped = self.rawtext_escaped;
             }
         }
+
+        // Persist rawtext literal tracking for the next streaming chunk.
+        self.rawtext_quote = rt_quote;
+        self.rawtext_escaped = rt_escaped;
+        let _ = rt_aware;
 
         // If text_buffer is empty (common for non-streaming), save allocation for reuse
         if text_buffer.is_empty() {
