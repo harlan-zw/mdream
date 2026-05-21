@@ -83,6 +83,20 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
     expect(markdown).toBe('_text_')
   })
 
+  it('converts sup/sub to extended markdown syntax (issue #93)', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<p>E = mc<sup>2</sup> and H<sub>2</sub>O</p>', {
+      plugins: {
+        tagOverrides: {
+          sup: { enter: '^', exit: '^', isInline: true, spacing: [0, 0] },
+          sub: { enter: '~', exit: '~', isInline: true, spacing: [0, 0] },
+        },
+      },
+      engine,
+    })
+    expect(markdown).toBe('E = mc^2^ and H~2~O')
+  })
+
   it('works alongside extraction without interference', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const extracted: string[] = []
