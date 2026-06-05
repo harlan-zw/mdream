@@ -10,7 +10,18 @@ pub mod types;
 pub(crate) mod url;
 
 use convert::ConvertState;
-use types::{HTMLToMarkdownOptions, MdreamResult};
+
+// Re-export the public option/config types at the crate root so `use mdream::*`
+// pulls in everything needed to call `html_to_markdown` without reaching into
+// the `types` module.
+pub use types::{
+    CleanConfig, ExtractionConfig, FilterConfig, FrontmatterConfig, HTMLToMarkdownOptions,
+    IsolateMainConfig, MdreamResult, PluginConfig, TagOverrideConfig, TailwindConfig,
+};
+
+// Re-export `get_tag_id` so callers can resolve tag names to IDs (for
+// `TagOverrideConfig::alias_tag_id`) without reaching into `consts` directly.
+pub use consts::get_tag_id;
 
 /// Convert HTML to Markdown in a single pass.
 pub fn html_to_markdown(html: &str, options: HTMLToMarkdownOptions) -> String {

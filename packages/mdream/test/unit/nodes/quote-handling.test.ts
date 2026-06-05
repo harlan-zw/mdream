@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
+import { engines, htmlToMarkdown, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
+
+function chunkedStream(chunks: string[]): ReadableStream<string> {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks)
+        controller.enqueue(chunk)
+      controller.close()
+    },
+  })
+}
+
+async function collect(stream: AsyncIterable<string>): Promise<string> {
+  let out = ''
+  for await (const chunk of stream)
+    out += chunk
+  return out
+}
 
 describe.each(engines)('quote handling in script/style tags $name', (engineConfig) => {
   it('should not close script tag when closing tag is inside double quotes', async () => {
@@ -122,5 +139,15 @@ describe.each(engines)('quote handling in script/style tags $name', (engineConfi
 
     const result = htmlToMarkdown(html, { engine })
     expect(result).toBe('This should be rendered')
+  })
+
+  it('keeps string-literal state correct when a script close splits across chunks', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    // A `</script>` inside a JS string, split across a chunk boundary, must
+    // not close the element; string-literal state must not corrupt when the
+    // leftover is re-scanned (issue #93 streaming regression).
+    const chunks = ['<script>var s = "</scr', 'ipt> still string"; run();</script><p>visible</p>']
+    const result = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { engine }))
+    expect(result.trim()).toBe('visible')
   })
 })

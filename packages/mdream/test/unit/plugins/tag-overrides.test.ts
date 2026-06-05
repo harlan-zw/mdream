@@ -97,6 +97,21 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
     expect(markdown).toBe('E = mc^2^ and H~2~O')
   })
 
+  it('overrides a top-level inline tag with no block ancestor (issue #93)', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    // The reported regression: the override worked inside a block but not
+    // when the tag sat at the top level of the input.
+    const markdown = htmlToMarkdown('foo <sup>bar</sup>', {
+      plugins: {
+        tagOverrides: {
+          sup: { enter: '^', exit: '^' },
+        },
+      },
+      engine,
+    })
+    expect(markdown).toBe('foo ^bar^')
+  })
+
   it('works alongside extraction without interference', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const extracted: string[] = []
