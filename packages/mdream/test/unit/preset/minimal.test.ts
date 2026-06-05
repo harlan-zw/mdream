@@ -44,6 +44,45 @@ describe('withMinimalPreset cross-engine parity', () => {
     }
   })
 
+  it('strips hidden content (display:none / visibility:hidden / hidden attr)', async () => {
+    const [js, rust] = await bothEngines()
+    // Each hidden wrapper must disappear entirely; surrounding content stays.
+    const hidden = [
+      '<main><p>a</p><div style="display:none">H</div><p>b</p></main>',
+      '<main><p>a</p><div style="display: none">H</div><p>b</p></main>',
+      '<main><p>a</p><div style="visibility:hidden">H</div><p>b</p></main>',
+      '<main><p>a</p><div hidden>H</div><p>b</p></main>',
+      // Hidden ancestor hides the whole subtree, not just the styled node.
+      '<main><p>a</p><div style="display:none"><section><p>H</p></section></div><p>b</p></main>',
+      '<main><p>a</p><div style="position:absolute"><p>H</p></div><p>b</p></main>',
+    ]
+    for (const html of hidden) {
+      const opts = withMinimalPreset()
+      const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
+      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
+      expect(rustResult, `Hidden parity mismatch for: ${html}`).toBe(jsResult)
+      expect(jsResult, `Hidden content leaked for: ${html}`).toBe('a\n\nb')
+    }
+  })
+
+  it('keeps visible content and hidden="until-found"', async () => {
+    const [js, rust] = await bothEngines()
+    const cases: [string, string][] = [
+      ['<main><p>a</p><div>VISIBLE</div><p>b</p></main>', 'a\n\nVISIBLE\n\nb'],
+      ['<main><p>a</p><div hidden="until-found">KEEP</div><p>b</p></main>', 'a\n\nKEEP\n\nb'],
+      // Unrelated CSS keywords must not false-match the hidden check.
+      ['<main><p>a</p><div style="background-attachment:fixed">KEEP</div><p>b</p></main>', 'a\n\nKEEP\n\nb'],
+      ['<main><p>a</p><div style="display:flex;gap:4px">KEEP</div><p>b</p></main>', 'a\n\nKEEP\n\nb'],
+    ]
+    for (const [html, expected] of cases) {
+      const opts = withMinimalPreset()
+      const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
+      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
+      expect(rustResult).toBe(jsResult)
+      expect(jsResult).toBe(expected)
+    }
+  })
+
   it('frontmatter produces identical output', async () => {
     const [js, rust] = await bothEngines()
     const html = `<html><head><title>My Page</title><meta name="description" content="A page about things" /><meta name="author" content="Alice" /></head><body><h1>Content</h1><p>Text</p></body></html>`

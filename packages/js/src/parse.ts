@@ -8,6 +8,8 @@ import {
   TAG_BLOCKQUOTE,
   TAG_CODE,
   TAG_PRE,
+  TAG_SCRIPT,
+  TAG_STYLE,
   TAG_TABLE,
   TagIdMap,
   TEXT_NODE,
@@ -67,6 +69,13 @@ export interface ParseState {
   inSingleQuote?: boolean
   inDoubleQuote?: boolean
   inBacktick?: boolean
+  /**
+   * Whether the current non-nesting tag is quote-aware rawtext (script/style only).
+   * For these, a `</script>`/`</style>` inside a JS/CSS string literal must not close
+   * the tag. Other non-nesting tags (template, textarea, ...) hold literal HTML/text
+   * where apostrophes are not string delimiters, so their closing tag always wins.
+   */
+  inRawTextQuoteAware?: boolean
   /** Backslash escaping state tracking - avoids checking previous character */
   lastCharWasBackslash?: boolean
   /** Resolved plugin instances for event processing */
@@ -210,8 +219,8 @@ function parseHtmlInternal(
           textBuffer += htmlChunk[i]
         }
 
-        // Track quote state for non-nesting tags
-        if (state.currentNode?.tagHandler?.isNonNesting) {
+        // Track quote state for quote-aware rawtext tags (script/style only)
+        if (state.inRawTextQuoteAware) {
           if (!state.lastCharWasBackslash) {
             if (currentCharCode === APOS_CHAR && !state.inDoubleQuote && !state.inBacktick) {
               state.inSingleQuote = !state.inSingleQuote
@@ -288,7 +297,7 @@ function parseHtmlInternal(
     // CLOSING TAG
     else if (nextCharCode === SLASH_CHAR) {
       if (state.currentNode?.tagHandler?.isNonNesting) {
-        const inQuotes = state.inSingleQuote || state.inDoubleQuote || state.inBacktick
+        const inQuotes = state.inRawTextQuoteAware && (state.inSingleQuote || state.inDoubleQuote || state.inBacktick)
         if (inQuotes) {
           textBuffer += htmlChunk[i]
           i++
@@ -391,6 +400,10 @@ function parseHtmlInternal(
   state.inDoubleQuote = false
   state.inBacktick = false
   state.lastCharWasBackslash = false
+  // NB: inRawTextQuoteAware is intentionally not reset here. The non-nesting body
+  // is re-scanned from the element start on the next chunk while currentNode is
+  // still the script/style element, so quote-awareness must persist across the
+  // chunk boundary (issue #93).
 
   return textBuffer
 }
@@ -590,6 +603,7 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
     state.inDoubleQuote = false
     state.inBacktick = false
     state.lastCharWasBackslash = false
+    state.inRawTextQuoteAware = false
   }
 
   state.depth--
@@ -783,6 +797,8 @@ function processOpeningTag(
     state.inDoubleQuote = false
     state.inBacktick = false
     state.lastCharWasBackslash = false
+    // Only script/style hold quote-aware rawtext (JS/CSS string literals).
+    state.inRawTextQuoteAware = tag.tagId === TAG_SCRIPT || tag.tagId === TAG_STYLE
   }
 
   if (result.selfClosing) {

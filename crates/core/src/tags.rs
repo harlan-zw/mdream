@@ -172,7 +172,9 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
     t[TAG_DIALOG as usize] = Some(BLOCK_NO_SPACING);
     t[TAG_METER as usize] = Some(BLOCK_NO_SPACING);
     t[TAG_PROGRESS as usize] = Some(BLOCK_NO_SPACING);
-    t[TAG_TEMPLATE as usize] = Some(BLOCK_NO_SPACING);
+    // <template> content is inert (browsers never render it). Treat the whole
+    // body as raw text and exclude it from output, mirroring script/style.
+    t[TAG_TEMPLATE as usize] = Some(TagHandler { is_non_nesting: true, excludes_text_nodes: true, spacing: Some(NO_SPACING), ..NONE });
 
     // Non-nesting elements
     t[TAG_TEXTAREA as usize] = Some(NON_NESTING_NO_SPACING);
@@ -183,6 +185,9 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
     t[TAG_PLAINTEXT as usize] = Some(NON_NESTING_NO_SPACING);
 
     t[TAG_NOSCRIPT as usize] = Some(TagHandler { excludes_text_nodes: true, spacing: Some(NO_SPACING), ..NONE });
+    // <datalist> holds <option> autocomplete data browsers never render; treat
+    // the whole body as inert and drop it, mirroring <template>.
+    t[TAG_DATALIST as usize] = Some(TagHandler { is_non_nesting: true, excludes_text_nodes: true, spacing: Some(NO_SPACING), ..NONE });
 
     t
 };

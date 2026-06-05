@@ -1,3 +1,5 @@
 export { crawlAndGenerate } from './crawl.js'
+export { createClackLogger, resolveLogger, silentLogger } from './logger.js'
+export type { CrawlLogger, CrawlSpinner } from './logger.js'
 export { defineConfig } from './types.js'
 export type { CrawlHooks, CrawlOptions, CrawlResult, MdreamCrawlConfig, PageData } from './types.js'
