@@ -1,3 +1,5 @@
+import type { CrawlLogger } from './logger.ts'
+
 export interface PageData {
   url: string
   html: string
@@ -35,6 +37,17 @@ export interface CrawlOptions {
   verbose?: boolean
   skipSitemap?: boolean
   allowSubdomains?: boolean
+  /**
+   * Suppress all diagnostic/progress logging. Use when stdout must stay clean,
+   * e.g. an MCP server that only emits JSON-RPC (issue #100). Ignored when an
+   * explicit `logger` is provided.
+   */
+  silent?: boolean
+  /**
+   * Custom sink for diagnostic/progress messages. Route logs anywhere (e.g.
+   * stderr) instead of the default `@clack/prompts` stdout output.
+   */
+  logger?: CrawlLogger
   hooks?: Partial<{ [K in keyof CrawlHooks]: CrawlHooks[K] | CrawlHooks[K][] }>
   onPage?: (page: PageData) => Promise<void> | void
 }
@@ -48,6 +61,8 @@ export interface MdreamCrawlConfig {
   skipSitemap?: boolean
   allowSubdomains?: boolean
   verbose?: boolean
+  /** Suppress all diagnostic/progress logging (issue #100). */
+  silent?: boolean
   artifacts?: ('llms.txt' | 'llms-full.txt' | 'markdown')[]
   hooks?: Partial<{ [K in keyof CrawlHooks]: CrawlHooks[K] | CrawlHooks[K][] }>
 }

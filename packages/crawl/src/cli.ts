@@ -1,4 +1,5 @@
 import type { CrawlProgress } from './crawl.js'
+import type { CrawlLogger } from './logger.js'
 import type { CrawlOptions } from './types.js'
 import { accessSync, constants, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -8,6 +9,12 @@ import { withHttps } from 'ufo'
 import { loadMdreamConfig } from './config.js'
 import { crawlAndGenerate } from './crawl.js'
 import { parseUrlPattern, validateGlobPattern } from './glob-utils.js'
+import { resolveLogger } from './logger.js'
+
+/** Detect the quiet flag from raw argv (used before options are fully parsed). */
+function isSilentArgv(args: string[]): boolean {
+  return args.includes('--silent') || args.includes('--quiet') || args.includes('-q')
+}
 // playwright-utils is dynamically imported only when Playwright driver is used
 // to avoid requiring crawlee for HTTP-only users
 
@@ -228,7 +235,7 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
 
 interface LatencyStats { total: number, min: number, max: number, count: number }
 
-async function showCrawlResults(successful: number, failed: number, outputDir: string, generatedFiles: string[], durationSeconds: number, latency?: LatencyStats) {
+async function showCrawlResults(logger: CrawlLogger, successful: number, failed: number, outputDir: string, generatedFiles: string[], durationSeconds: number, latency?: LatencyStats) {
   const durationStr = `${durationSeconds.toFixed(1)}s`
 
   let line = `${successful} pages in ${durationStr}`
@@ -241,12 +248,14 @@ async function showCrawlResults(successful: number, failed: number, outputDir: s
     line += ` \u00B7 HTTP Latency: avg ${avg}ms, min ${min}ms, max ${max}ms`
   }
 
-  p.log.success(line)
-  p.log.info(`${generatedFiles.join(', ')} \u2192 ${relative(process.cwd(), outputDir) || '.'}`)
+  logger.success(line)
+  logger.info(`${generatedFiles.join(', ')} \u2192 ${relative(process.cwd(), outputDir) || '.'}`)
 }
 
 function parseCliArgs(): CrawlOptions | null {
   const args = process.argv.slice(2)
+  const silent = isSilentArgv(args)
+  const logger = resolveLogger({ silent })
 
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`
@@ -274,6 +283,7 @@ Options:
   --skip-sitemap              Skip sitemap.xml and robots.txt discovery
   --allow-subdomains          Crawl across subdomains of the same root domain
   -v, --verbose               Enable verbose logging
+  -q, --quiet, --silent       Suppress all logs (clean stdout for JSON-RPC/MCP)
   -h, --help                  Show this help message
   --version                   Show version number
 
@@ -325,15 +335,15 @@ Examples:
 
   // If arguments were provided but no URL, this is an error
   if (!url) {
-    p.log.error('Error: URL is required when using CLI arguments')
-    p.log.info('Use --help for usage information or run without arguments for interactive mode')
+    logger.error('Error: URL is required when using CLI arguments')
+    logger.info('Use --help for usage information or run without arguments for interactive mode')
     process.exit(1)
   }
 
   // Validate URL pattern
   const globError = validateGlobPattern(url)
   if (globError) {
-    p.log.error(`Error: ${globError}`)
+    logger.error(`Error: ${globError}`)
     process.exit(1)
   }
 
@@ -342,7 +352,7 @@ Examples:
     parsed = parseUrlPattern(url)
   }
   catch (error) {
-    p.log.error(`Error: ${error instanceof Error ? error.message : 'Invalid URL pattern'}`)
+    logger.error(`Error: ${error instanceof Error ? error.message : 'Invalid URL pattern'}`)
     process.exit(1)
   }
 
@@ -352,7 +362,7 @@ Examples:
       new URL(withHttps(url))
     }
     catch {
-      p.log.error(`Error: Invalid URL: ${withHttps(url)}`)
+      logger.error(`Error: Invalid URL: ${withHttps(url)}`)
       process.exit(1)
     }
   }
@@ -362,7 +372,7 @@ Examples:
   for (const pattern of excludePatterns) {
     const excludeError = validateGlobPattern(pattern)
     if (excludeError) {
-      p.log.error(`Error in exclude pattern: ${excludeError}`)
+      logger.error(`Error in exclude pattern: ${excludeError}`)
       process.exit(1)
     }
   }
@@ -372,14 +382,14 @@ Examples:
   const depthStr = singlePage ? '0' : (getArgValue('--depth') || getArgValue('-d') || '3')
   const depth = Number(depthStr)
   if (!Number.isInteger(depth) || depth < 0 || depth > 10) {
-    p.log.error('Error: Depth must be an integer between 0 and 10')
+    logger.error('Error: Depth must be an integer between 0 and 10')
     process.exit(1)
   }
 
   // Validate driver
   const driver = getArgValue('--driver')
   if (driver && driver !== 'http' && driver !== 'playwright') {
-    p.log.error('Error: Driver must be either "http" or "playwright"')
+    logger.error('Error: Driver must be either "http" or "playwright"')
     process.exit(1)
   }
 
@@ -388,7 +398,7 @@ Examples:
   if (maxPagesStr) {
     const maxPages = Number.parseInt(maxPagesStr)
     if (Number.isNaN(maxPages) || maxPages < 1) {
-      p.log.error('Error: Max pages must be a positive number')
+      logger.error('Error: Max pages must be a positive number')
       process.exit(1)
     }
   }
@@ -398,7 +408,7 @@ Examples:
   if (crawlDelayStr) {
     const crawlDelay = Number.parseInt(crawlDelayStr)
     if (Number.isNaN(crawlDelay) || crawlDelay < 0) {
-      p.log.error('Error: Crawl delay must be a non-negative number')
+      logger.error('Error: Crawl delay must be a non-negative number')
       process.exit(1)
     }
   }
@@ -411,7 +421,7 @@ Examples:
   const validArtifacts = ['llms.txt', 'llms-full.txt', 'markdown']
   for (const artifact of artifacts) {
     if (!validArtifacts.includes(artifact)) {
-      p.log.error(`Error: Invalid artifact '${artifact}'. Valid options: ${validArtifacts.join(', ')}`)
+      logger.error(`Error: Invalid artifact '${artifact}'. Valid options: ${validArtifacts.join(', ')}`)
       process.exit(1)
     }
   }
@@ -447,7 +457,7 @@ Examples:
 
   // Warn if using skip-sitemap with wildcard URLs
   if (skipSitemap && parsed.isGlob) {
-    p.log.warn('Warning: Using --skip-sitemap with glob URLs may not discover all matching pages.')
+    logger.warn('Warning: Using --skip-sitemap with glob URLs may not discover all matching pages.')
   }
 
   return {
@@ -469,6 +479,7 @@ Examples:
     verbose,
     skipSitemap,
     allowSubdomains,
+    silent,
   }
 }
 
@@ -478,6 +489,12 @@ async function main() {
 
   // Load config file (mdream.config.ts)
   const fileConfig = await loadMdreamConfig()
+
+  // Single logging seam for the whole CLI run. Resolved from the CLI flag or
+  // config so a quiet run keeps stdout clean (issue #100). Interactive mode is
+  // never silent.
+  const silent = (cliOptions?.silent ?? false) || (fileConfig.silent ?? false)
+  const logger = resolveLogger({ silent })
 
   let options: CrawlOptions | null
 
@@ -493,6 +510,7 @@ async function main() {
       skipSitemap: cliOptions.skipSitemap || fileConfig.skipSitemap || false,
       allowSubdomains: cliOptions.allowSubdomains || fileConfig.allowSubdomains || false,
       verbose: cliOptions.verbose || fileConfig.verbose || false,
+      silent,
       exclude: configExclude.length > 0 || cliExclude.length > 0
         ? [...configExclude, ...cliExclude]
         : undefined,
@@ -500,7 +518,7 @@ async function main() {
     }
 
     // Show non-interactive summary when using CLI args
-    p.intro(`☁️  mdream v${version}`)
+    logger.intro(`☁️  mdream v${version}`)
 
     const formats = []
     if (options.generateLlmsTxt)
@@ -521,7 +539,7 @@ async function main() {
       options.verbose && `Verbose: Enabled`,
     ].filter(Boolean)
 
-    p.note(summary.join('\n'), 'Configuration')
+    logger.note(summary.join('\n'), 'Configuration')
   }
   else {
     // Fall back to interactive mode
@@ -535,9 +553,9 @@ async function main() {
   // Check output directory permissions before proceeding
   const permCheck = checkOutputDirectoryPermissions(options.outputDir)
   if (!permCheck.success) {
-    p.log.error(permCheck.error!)
+    logger.error(permCheck.error!)
     if (permCheck.error?.includes('Permission denied')) {
-      p.log.info('Tip: Try running with elevated privileges (e.g., sudo) or change the output directory permissions.')
+      logger.info('Tip: Try running with elevated privileges (e.g., sudo) or change the output directory permissions.')
     }
     process.exit(1)
   }
@@ -549,7 +567,7 @@ async function main() {
       await import('crawlee')
     }
     catch {
-      p.log.error('The Playwright driver requires crawlee. Install it with: npm install crawlee')
+      logger.error('The Playwright driver requires crawlee. Install it with: npm install crawlee')
       process.exit(1)
     }
 
@@ -558,19 +576,19 @@ async function main() {
     const chromeSupported = await isUseChromeSupported()
     if (chromeSupported) {
       options.useChrome = true
-      p.log.info('System Chrome detected and enabled.')
+      logger.info('System Chrome detected and enabled.')
     }
     else {
-      const playwrightInstalled = await ensurePlaywrightInstalled()
+      const playwrightInstalled = await ensurePlaywrightInstalled(logger)
       if (!playwrightInstalled) {
-        p.log.error('Cannot proceed without Playwright. Please install it manually or use the HTTP driver instead.')
+        logger.error('Cannot proceed without Playwright. Please install it manually or use the HTTP driver instead.')
         process.exit(1)
       }
-      p.log.info('Using global playwright instance.')
+      logger.info('Using global playwright instance.')
     }
   }
 
-  const s = p.spinner()
+  const s = logger.spinner()
   s.start('Discovering sitemaps')
 
   const startTime = Date.now()
@@ -622,9 +640,9 @@ async function main() {
 
   // Show failed results details if any
   if (failed > 0 && cliOptions) {
-    p.log.error('Failed URLs:')
+    logger.error('Failed URLs:')
     failedResults.forEach((result) => {
-      p.log.error(`  ${result.url}: ${result.error || 'Unknown error'}`)
+      logger.error(`  ${result.url}: ${result.error || 'Unknown error'}`)
     })
   }
   else if (failed > 0) {
@@ -646,23 +664,25 @@ async function main() {
   }
 
   // Only show interactive results for interactive mode
-  await showCrawlResults(successful, failed, options.outputDir, generatedFiles, durationSeconds, lastProgress?.crawling.latency)
+  await showCrawlResults(logger, successful, failed, options.outputDir, generatedFiles, durationSeconds, lastProgress?.crawling.latency)
   process.exit(0)
 }
 
 // Run the CLI
 main().catch((error) => {
+  // Resolve the logger from raw argv since this runs outside main's scope.
+  const logger = resolveLogger({ silent: isSilentArgv(process.argv.slice(2)) })
   const msg = error instanceof Error ? error.message : String(error)
   // Surface a clear hint when the error is the Windows wmic.exe removal
   if (msg.includes('wmic') || (msg.includes('ENOENT') && process.platform === 'win32')) {
-    p.log.error(
+    logger.error(
       'Crawlee failed because wmic.exe is not available on this system. '
       + 'Windows 11 removed wmic.exe, which older crawlee versions depend on for memory monitoring.\n'
       + 'Fix: upgrade crawlee to >=3.16.0 or switch to the HTTP driver (--driver http).',
     )
   }
   else {
-    p.log.error(`Unexpected error: ${msg}`)
+    logger.error(`Unexpected error: ${msg}`)
   }
   process.exit(1)
 })

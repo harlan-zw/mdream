@@ -3,7 +3,6 @@ import type { PlaywrightCrawlerOptions } from 'crawlee'
 import type { CrawlHooks, CrawlOptions, CrawlResult, PageData, PageMetadata } from './types.ts'
 import { mkdirSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
-import * as p from '@clack/prompts'
 import { generateLlmsTxtArtifacts } from '@mdream/js/llms-txt'
 import { createHooks } from 'hookable'
 import { htmlToMarkdown } from 'mdream'
@@ -11,6 +10,7 @@ import { ofetch } from 'ofetch'
 import { dirname, join, normalize, resolve } from 'pathe'
 import { withHttps } from 'ufo'
 import { getRegistrableDomain, getStartingUrl, isUrlExcluded, isValidSitemapXml, matchesGlobPattern, parseUrlPattern } from './glob-utils.js'
+import { resolveLogger } from './logger.js'
 
 const SITEMAP_INDEX_LOC_RE = /<sitemap[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/sitemap>/gs
 const SITEMAP_URL_LOC_RE = /<url[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/url>/gs
@@ -296,6 +296,9 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     onPage,
   } = options
 
+  // Single seam for all diagnostic/progress output (issue #100).
+  const logger = resolveLogger(options)
+
   // Set up hooks
   const hooks = createHooks<CrawlHooks>()
   if (hooksConfig)
@@ -353,7 +356,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       const crawlDelayMatch = robotsContent.match(ROBOTS_CRAWL_DELAY_RE)
       if (crawlDelayMatch) {
         crawlDelay = Number.parseFloat(crawlDelayMatch[1])
-        p.log.info(`[ROBOTS] Crawl-delay: ${crawlDelay}s`)
+        logger.info(`[ROBOTS] Crawl-delay: ${crawlDelay}s`)
       }
     }
 
@@ -460,13 +463,13 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
     if (successfulSitemaps.length > 0 && progress.sitemap.processed > 0) {
       sitemapProvidedUrls = true
-      p.log.info(`Sitemap: ${progress.sitemap.processed} URLs from ${successfulSitemaps[0].url}`)
+      logger.info(`Sitemap: ${progress.sitemap.processed} URLs from ${successfulSitemaps[0].url}`)
     }
     else if (successfulSitemaps.length > 0) {
-      p.log.info(`Sitemap: found but no URLs matched filters`)
+      logger.info(`Sitemap: found but no URLs matched filters`)
     }
     else if (failedSitemaps.length > 0) {
-      p.log.info(`Sitemap: not found, discovering pages via crawler`)
+      logger.info(`Sitemap: not found, discovering pages via crawler`)
     }
 
     // Always include home page for metadata extraction
