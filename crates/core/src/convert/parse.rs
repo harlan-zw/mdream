@@ -7,14 +7,13 @@ use super::*;
 /// or the `hidden` attribute (except `hidden="until-found"`). Allocation-free;
 /// matches the common spaced and unspaced inline-style forms.
 fn is_hidden(node: &ElementNode) -> bool {
-    if let Some(style) = node.attributes.get("style") {
-        if style.contains("absolute")
+    if let Some(style) = node.attributes.get("style")
+        && (style.contains("absolute")
             || style.contains("fixed")
             || style.contains("display:none") || style.contains("display: none")
-            || style.contains("visibility:hidden") || style.contains("visibility: hidden")
-        {
-            return true;
-        }
+            || style.contains("visibility:hidden") || style.contains("visibility: hidden"))
+    {
+        return true;
     }
     matches!(node.attributes.get("hidden"), Some(v) if v != "until-found")
 }
