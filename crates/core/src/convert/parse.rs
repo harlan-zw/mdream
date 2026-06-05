@@ -183,7 +183,6 @@ impl ConvertState {
             pooled.child_text_node_index = 0;
             pooled.contains_whitespace = false;
             pooled.excluded_from_markdown = false;
-            pooled.hidden = false;
             pooled.tailwind = None;
             pooled.is_inline = h_inline;
             pooled.excludes_text_nodes = h_excludes;
@@ -197,7 +196,6 @@ impl ConvertState {
                 depth: self.depth, index: current_walk_index,
                 current_walk_index: 0, child_text_node_index: 0,
                 contains_whitespace: false, excluded_from_markdown: false,
-                hidden: false,
                 tailwind: None,
                 is_inline: h_inline, excludes_text_nodes: h_excludes,
                 is_non_nesting: h_non_nesting, collapses_inner_white_space: h_collapses,
@@ -229,10 +227,17 @@ impl ConvertState {
 
             if self.has_filter {
                 // Hidden elements (and their subtrees) are dropped — browsers never
-                // render them. Hidden-ness propagates O(1) from the parent's flag, so
-                // is_hidden() runs once per element instead of once per ancestor.
-                tag.hidden = self.stack.last().is_some_and(|p| p.hidden) || is_hidden(&tag);
-                if tag.hidden { skip_node = true; filter_excluded = true; }
+                // render them. `hidden_since_depth` records the shallowest open hidden
+                // element, so once inside a hidden subtree we skip O(1) without calling
+                // is_hidden() again. Cleared in close_node at the matching depth.
+                if self.hidden_since_depth.is_some() {
+                    skip_node = true;
+                    filter_excluded = true;
+                } else if is_hidden(&tag) {
+                    skip_node = true;
+                    filter_excluded = true;
+                    self.hidden_since_depth = Some(self.depth);
+                }
                 if !skip_node {
                     for (_, parsed) in &self.filter_exclude_parsed {
                         if matches_selector(&tag, parsed) { skip_node = true; filter_excluded = true; break; }
@@ -431,6 +436,11 @@ impl ConvertState {
         let popping_index = self.stack.len() - 1;
         // Guard already checked above, but avoid panic on edge cases
         let Some(node) = self.stack.pop() else { return };
+
+        // Leaving the element that opened the current hidden subtree (filter).
+        if self.hidden_since_depth == Some(node.depth) {
+            self.hidden_since_depth = None;
+        }
 
         if self.first_block_parent_index == Some(popping_index) {
             self.block_parent_indices.pop();

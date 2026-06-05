@@ -81,9 +81,6 @@ pub struct ElementNode {
     pub tag_id: Option<u8>,
     pub contains_whitespace: bool,
     pub excluded_from_markdown: bool,
-    /// Filter: this element (or an ancestor) is visually hidden. Propagated O(1)
-    /// from the parent so hidden-ness isn't re-walked up the stack per node.
-    pub hidden: bool,
     /// Cached from tag handler - avoids repeated get_tag_handler lookups
     pub is_inline: bool,
     pub excludes_text_nodes: bool,
