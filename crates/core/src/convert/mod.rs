@@ -483,6 +483,33 @@ impl ConvertState {
             let next = bytes[i + 1];
 
             if next == EXCLAMATION_CHAR {
+                let remaining = &chunk[i..];
+                // CDATA is dropped by default but can be surfaced via
+                // tagOverrides["#cdata-section"]. Handle it before the generic
+                // comment/doctype scan, which would otherwise stop at the first
+                // `>` inside `]]>` and discard the content. We already matched
+                // `<!`, so only the `[CDATA[` tail is checked; `strip_prefix`
+                // short-circuits on the third byte for the common comment and
+                // doctype cases.
+                if let Some(after_open) = chunk[i + 2..].strip_prefix("[CDATA[") {
+                    if let Some(rel) = after_open.find("]]>") {
+                        if !text_buffer.is_empty() {
+                            self.process_text_buffer(&mut text_buffer);
+                            text_buffer.clear();
+                        }
+                        self.process_cdata_section(&after_open[..rel]);
+                        i += "<![CDATA[".len() + rel + 3;
+                        continue;
+                    }
+                    // Unterminated CDATA: re-parse from '<' in the next chunk.
+                    text_buffer.push_str(remaining);
+                    break;
+                }
+                if remaining.len() < "<![CDATA[".len() && "<![CDATA[".starts_with(remaining) {
+                    // Chunk boundary fell inside the `<![CDATA[` opener.
+                    text_buffer.push_str(remaining);
+                    break;
+                }
                 if !text_buffer.is_empty() {
                     self.process_text_buffer(&mut text_buffer);
                     text_buffer.clear();

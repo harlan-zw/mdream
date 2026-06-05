@@ -584,6 +584,44 @@ impl ConvertState {
         CloseTagResult { complete: true, new_position: i + 1, remaining_start: 0 }
     }
 
+    /// Handle a CDATA section's inner content.
+    ///
+    /// CDATA is discarded by default (matching the HTML spec, where `<![CDATA[`
+    /// outside foreign content is a bogus comment). Callers opt in by registering
+    /// a `#cdata-section` entry in `tagOverrides`; the leading `#` makes the
+    /// pseudo-tag impossible to collide with a real HTML element name. When an
+    /// override exists the content is emitted as a synthetic `#cdata-section`
+    /// element whose rendering follows the override (alias tag and/or
+    /// enter/exit strings).
+    pub(crate) fn process_cdata_section(&mut self, content: &str) {
+        if !self.has_tag_overrides { return; }
+        let Some(tag_id) = self.options.plugins.as_ref()
+            .and_then(|p| p.tag_overrides.as_ref())
+            .and_then(|ovs| ovs.iter().find(|(k, _)| k == "#cdata-section"))
+            .map(|(_, ov)| ov.alias_tag_id)
+        else { return };
+
+        let result = self.process_opening_tag("#cdata-section", tag_id, false, ">", 0);
+        if !result.complete { return; }
+
+        if !result.self_closing && !content.is_empty() {
+            let excluded = self.stack.last()
+                .is_some_and(|n| n.excluded_from_markdown || n.excludes_text_nodes);
+            if !excluded {
+                let depth = self.depth;
+                let index = self.stack.last().map_or(0, |n| n.current_walk_index);
+                self.emit_text(content, false, depth, index);
+            }
+            if let Some(parent) = self.stack.last_mut() {
+                parent.current_walk_index += 1;
+                parent.child_text_node_index += 1;
+            }
+        }
+        if !result.self_closing {
+            self.close_node();
+        }
+    }
+
     /// Recycle a node into the pool, preserving its Attributes Vec allocation.
     #[inline]
     pub(crate) fn recycle_node(&mut self, mut node: ElementNode) {

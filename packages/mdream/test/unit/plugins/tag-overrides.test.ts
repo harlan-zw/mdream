@@ -130,6 +130,38 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
     expect(extracted).toEqual(['italic'])
   })
 
+  it('drops CDATA sections by default', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<p>before<![CDATA[secret payload]]>after</p>', {
+      engine,
+    })
+    expect(markdown).not.toContain('secret payload')
+    expect(markdown).toContain('before')
+    expect(markdown).toContain('after')
+  })
+
+  it('emits CDATA content via #cdata-section enter/exit override', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<p>a<![CDATA[hidden]]>b</p>', {
+      plugins: {
+        tagOverrides: {
+          '#cdata-section': { enter: '[', exit: ']', isInline: true, spacing: [0, 0] },
+        },
+      },
+      engine,
+    })
+    expect(markdown).toBe('a[hidden]b')
+  })
+
+  it('does not treat <![ conditional comments as CDATA', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<p>x<![if !IE]>y<![endif]>z</p>', {
+      engine,
+    })
+    expect(markdown).toContain('x')
+    expect(markdown).toContain('z')
+  })
+
   it('works alongside filter without interference', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const markdown = htmlToMarkdown('<div><nav>skip</nav><p><strong>keep</strong></p></div>', {
