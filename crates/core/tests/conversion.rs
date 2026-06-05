@@ -639,6 +639,35 @@ fn strips_datalist() {
 }
 
 #[test]
+fn strips_template_text() {
+    // <template> content is inert and must never leak into output (issue #101).
+    assert_eq!(
+        convert("<p>Visible</p><template>Hidden keyword stuffing text</template><p>After</p>"),
+        "Visible\n\nAfter"
+    );
+}
+
+#[test]
+fn strips_template_nested_elements() {
+    assert_eq!(
+        convert("<p>Visible</p><template><p>Nested hidden</p><span>more</span></template><p>After</p>"),
+        "Visible\n\nAfter"
+    );
+}
+
+#[test]
+fn template_with_quotes_closes_correctly() {
+    assert_eq!(
+        convert("<p>A</p><template>It's a \"quoted\" keyword</template><p>B</p>"),
+        "A\n\nB"
+    );
+    assert_eq!(
+        convert("<p>A</p><template><a href=\"x\">it's</a></template><p>B</p>"),
+        "A\n\nB"
+    );
+}
+
+#[test]
 fn escaped_backslash_in_script() {
     let html = r#"<script>var x = "a]\\\\\\\\b";</script><p>Visible content</p>"#;
     let result = convert(html);
