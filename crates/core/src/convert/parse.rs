@@ -179,6 +179,7 @@ impl ConvertState {
             pooled.child_text_node_index = 0;
             pooled.contains_whitespace = false;
             pooled.excluded_from_markdown = false;
+            pooled.hidden = false;
             pooled.tailwind = None;
             pooled.is_inline = h_inline;
             pooled.excludes_text_nodes = h_excludes;
@@ -192,6 +193,7 @@ impl ConvertState {
                 depth: self.depth, index: current_walk_index,
                 current_walk_index: 0, child_text_node_index: 0,
                 contains_whitespace: false, excluded_from_markdown: false,
+                hidden: false,
                 tailwind: None,
                 is_inline: h_inline, excludes_text_nodes: h_excludes,
                 is_non_nesting: h_non_nesting, collapses_inner_white_space: h_collapses,
@@ -223,9 +225,10 @@ impl ConvertState {
 
             if self.has_filter {
                 // Hidden elements (and their subtrees) are dropped — browsers never
-                // render them. filter_excluded makes the exclusion unconditional so
-                // descendants inherit it via the ancestor walk below (issue #100 follow-up).
-                if is_hidden(&tag) { skip_node = true; filter_excluded = true; }
+                // render them. Hidden-ness propagates O(1) from the parent's flag, so
+                // is_hidden() runs once per element instead of once per ancestor.
+                tag.hidden = self.stack.last().is_some_and(|p| p.hidden) || is_hidden(&tag);
+                if tag.hidden { skip_node = true; filter_excluded = true; }
                 if !skip_node {
                     for (_, parsed) in &self.filter_exclude_parsed {
                         if matches_selector(&tag, parsed) { skip_node = true; filter_excluded = true; break; }
@@ -233,7 +236,6 @@ impl ConvertState {
                 }
                 if !skip_node {
                     for parent in &self.stack {
-                        if is_hidden(parent) { skip_node = true; filter_excluded = true; break; }
                         for (_, parsed) in &self.filter_exclude_parsed {
                             if matches_selector(parent, parsed) { skip_node = true; filter_excluded = true; break; }
                         }

@@ -64,7 +64,10 @@ export function filterPlugin(options: {
   const excludeSelectors = options.exclude?.map(selector => compileSelector(selector)) || []
   const processChildren = options.processChildren !== false // Default to true
 
-  // No need for complex state tracking since beforeNodeProcess handles everything
+  // Tracks elements whose subtree is hidden. Hidden-ness propagates O(1) from
+  // the parent (set on enter, before children), so isHidden() runs once per
+  // element instead of being re-evaluated for every ancestor of every node.
+  const hiddenNodes = new WeakSet<ElementNode>()
 
   return createPlugin({
     // Handle include/exclude filtering for elements and text nodes
@@ -74,10 +77,14 @@ export function filterPlugin(options: {
       // Handle text nodes - skip if any ancestor is excluded or hidden
       if (node.type === TEXT_NODE) {
         const textNode = node as TextNode
-        let currentParent = textNode.parent as ElementNode | null
-        while (currentParent) {
-          if (isHidden(currentParent)
-            || (excludeSelectors.length && excludeSelectors.some(selector => selector.matches(currentParent!)))) {
+        const parent = textNode.parent as ElementNode | null
+        // Hidden propagates to the immediate parent, so one lookup covers all ancestors.
+        if (parent && hiddenNodes.has(parent)) {
+          return { skip: true }
+        }
+        let currentParent = parent
+        while (currentParent && excludeSelectors.length) {
+          if (excludeSelectors.some(selector => selector.matches(currentParent!))) {
             return { skip: true }
           }
           currentParent = currentParent.parent as ElementNode | null
@@ -92,8 +99,11 @@ export function filterPlugin(options: {
 
       const element = node as ElementNode
 
-      // Drop hidden elements (and, via the ancestor walk below, their subtrees).
-      if (isHidden(element)) {
+      // Drop hidden elements and their subtrees. Inherit the parent's hidden flag
+      // (O(1)); only run the style/attr scan when not already inside a hidden subtree.
+      const parentHidden = element.parent ? hiddenNodes.has(element.parent as ElementNode) : false
+      if (parentHidden || isHidden(element)) {
+        hiddenNodes.add(element)
         return { skip: true }
       }
       // Check if element should be excluded
@@ -101,11 +111,10 @@ export function filterPlugin(options: {
         return { skip: true }
       }
 
-      // Check if any parent element is excluded or hidden
+      // Check if any parent element is excluded by selector
       let currentParent = element.parent
-      while (currentParent) {
-        if (isHidden(currentParent)
-          || (excludeSelectors.length && excludeSelectors.some(selector => selector.matches(currentParent!)))) {
+      while (currentParent && excludeSelectors.length) {
+        if (excludeSelectors.some(selector => selector.matches(currentParent!))) {
           return { skip: true }
         }
         currentParent = currentParent.parent as ElementNode | null
