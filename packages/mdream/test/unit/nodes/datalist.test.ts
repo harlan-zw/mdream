@@ -16,9 +16,9 @@ describe.each(engines)('datalist tag handling $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine })).toBe('a\n\nb')
   })
 
-  it('still renders the associated input', async () => {
+  it('drops the datalist of an input[list] pairing, keeping the rest', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    const html = '<p>before</p><datalist><option>x</option></datalist><p>after</p>'
-    expect(htmlToMarkdown(html, { engine })).toBe('before\n\nafter')
+    const html = '<label>Browser</label><input list="b"><datalist id="b"><option>Chrome</option><option>Firefox</option></datalist><p>done</p>'
+    expect(htmlToMarkdown(html, { engine })).toBe('Browser\n\ndone')
   })
 })
