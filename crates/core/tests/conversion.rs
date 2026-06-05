@@ -626,6 +626,63 @@ fn strips_style() {
 }
 
 #[test]
+fn bare_pre_becomes_code_block() {
+    // A <pre> without a <code> child becomes a fenced code block (issue #97).
+    assert_eq!(convert("<pre>const x = 1</pre>"), "```\nconst x = 1\n```");
+    assert_eq!(
+        convert("<pre>line1\nline2\n  indented</pre>"),
+        "```\nline1\nline2\n  indented\n```"
+    );
+}
+
+#[test]
+fn bare_pre_reads_language_from_class() {
+    assert_eq!(
+        convert("<pre class=\"language-js\">const x = 1</pre>"),
+        "```js\nconst x = 1\n```"
+    );
+}
+
+#[test]
+fn pre_code_block_unchanged() {
+    // The existing <pre><code> path is untouched.
+    assert_eq!(convert("<pre><code>const x = 1</code></pre>"), "```\nconst x = 1\n```");
+    assert_eq!(
+        convert("<pre><code class=\"language-js\">const x = 1</code></pre>"),
+        "```js\nconst x = 1\n```"
+    );
+}
+
+#[test]
+fn empty_and_whitespace_pre_emit_no_fence() {
+    assert_eq!(convert("<pre></pre>"), "");
+    assert_eq!(convert("<pre>   \n  </pre>"), "");
+    assert_eq!(convert("<p>a</p><pre></pre><p>b</p>"), "a\n\nb");
+}
+
+#[test]
+fn pre_with_text_and_code_child_single_fence() {
+    // Mixed text + <code> must not double-fence.
+    assert_eq!(
+        convert("<pre>text<code>codepart</code>more</pre>"),
+        "```\ntextcodepartmore\n```"
+    );
+    // Whitespace around a sole <code> child keeps the <code> as fence owner.
+    assert_eq!(
+        convert("<pre> <code>spaced code</code> </pre>"),
+        "```\nspaced code\n```"
+    );
+}
+
+#[test]
+fn bare_pre_in_list_item_is_indented() {
+    assert_eq!(
+        convert("<ul><li>item<pre>code\nblock</pre></li></ul>"),
+        "- item\n\n  ```\n  code\n  block\n  ```"
+    );
+}
+
+#[test]
 fn escaped_backslash_in_script() {
     let html = r#"<script>var x = "a]\\\\\\\\b";</script><p>Visible content</p>"#;
     let result = convert(html);

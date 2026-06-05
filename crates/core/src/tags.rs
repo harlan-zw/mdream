@@ -106,7 +106,9 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
     t[TAG_HEADER as usize] = Some(BLOCK);
     t[TAG_MAIN as usize] = Some(BLOCK);
     t[TAG_FIGURE as usize] = Some(BLOCK);
-    t[TAG_PRE as usize] = Some(BLOCK);
+    // needs_attributes so a bare <pre class="language-x"> can resolve its fence
+    // language for the deferred code block (issue #97).
+    t[TAG_PRE as usize] = Some(TagHandler { needs_attributes: true, ..NONE });
 
     // Inline elements
     t[TAG_SPAN as usize] = Some(INLINE_COLLAPSE);

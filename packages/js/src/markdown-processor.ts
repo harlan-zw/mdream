@@ -3,11 +3,13 @@ import type { ElementNode, EngineOptions, HandlerContext, NodeEvent, PluginConte
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
+  MARKDOWN_CODE_BLOCK,
   MAX_TAG_ID,
   NO_SPACING,
   NodeEventEnter,
   NodeEventExit,
   TAG_BLOCKQUOTE,
+  TAG_CODE,
   TAG_DIV,
   TAG_H1,
   TAG_H6,
@@ -54,6 +56,17 @@ export interface MarkdownState {
   listIndent: string
   /** Per-`<li>` contribution widths, parallel stack to listIndent. */
   listIndentWidths: number[]
+  /**
+   * <pre> fenced-code deferral (issue #97). A bare <pre> (no <code> child)
+   * becomes a fenced code block, but the opening fence is deferred until the
+   * first non-whitespace content so empty/whitespace-only blocks emit nothing.
+   * `preFencePending`: inside a <pre> whose fence is not yet decided.
+   * `preFenceLang`: language resolved from the <pre>'s own class.
+   * `preOwnFence`: the <pre> opened its own fence (so a nested <code> must not).
+   */
+  preFencePending?: boolean
+  preFenceLang?: string
+  preOwnFence?: boolean
 }
 
 /**
@@ -176,6 +189,38 @@ function calculateNewLineConfig(node: ElementNode): readonly [number, number] {
 }
 
 /**
+ * Whether a string contains any non-whitespace character (space, tab, CR, LF).
+ * Used to decide if a <pre>'s content warrants opening a fenced code block.
+ */
+function hasNonWhitespace(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i)
+    if (c !== 32 && c !== 9 && c !== 10 && c !== 13) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Emit a bare <pre>'s opening code fence (issue #97). Mirrors the <code>-in-<pre>
+ * enter formatting in tags.ts: indented and newline-padded inside a list item,
+ * otherwise a plain ```lang opener. Marks the <pre> as owning the fence so a
+ * nested <code> does not double up and the <pre> exit emits the closing fence.
+ */
+function flushPreFence(state: MarkdownState): void {
+  state.preFencePending = false
+  state.preOwnFence = true
+  const lang = state.preFenceLang || ''
+  const liDepth = state.depthMap[TAG_LI] || 0
+  const fence = liDepth > 0
+    ? `\n\n${state.listIndent}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
+    : `${MARKDOWN_CODE_BLOCK}${lang}\n`
+  state.buffer.push(fence)
+  state.lastContentCache = fence
+}
+
+/**
  * Creates a markdown processor that consumes DOM events and generates markdown
  */
 export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlugins: TransformPlugin[] = [], tagOverrideHandlers?: Map<string, TagHandler>) {
@@ -200,6 +245,27 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // Update depth for plugin access
     state.depth = node.depth
     const buff = state.buffer
+
+    // Deferred <pre> code fence (issue #97). A bare <pre> opens its fence right
+    // before its first non-whitespace child so empty/whitespace-only blocks emit
+    // nothing. A direct <code> child keeps fence ownership (handled in tags.ts).
+    // Runs before lastChar is read so the fence is reflected in spacing checks.
+    if (state.preFencePending && eventType === NodeEventEnter) {
+      if (node.type === ELEMENT_NODE) {
+        const el = node as ElementNode
+        if (el.tagId === TAG_CODE && el.parent?.tagId === TAG_PRE) {
+          // <pre><code>…</code></pre>: let the <code> handler emit the fence.
+          state.preFencePending = false
+        }
+        else if (el.tagId !== TAG_PRE) {
+          flushPreFence(state)
+        }
+      }
+      else if (node.type === TEXT_NODE && hasNonWhitespace((node as TextNode).value)) {
+        flushPreFence(state)
+      }
+    }
+
     const lastBuffEntry = buff.at(-1)!
     const lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
 

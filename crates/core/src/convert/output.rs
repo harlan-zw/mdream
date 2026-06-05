@@ -9,6 +9,27 @@ impl ConvertState {
         let stack_len = self.stack.len();
         if stack_len == 0 { return; }
 
+        // Deferred <pre> code fence (issue #97): open a bare <pre>'s fence right
+        // before its first non-whitespace child. A direct <code> child keeps
+        // fence ownership; a deeper/other first child opens the <pre>'s own fence.
+        if self.pre_fence_pending {
+            let tid = self.stack[stack_len - 1].tag_id;
+            if tid == Some(TAG_CODE)
+                && stack_len >= 2 && self.stack[stack_len - 2].tag_id == Some(TAG_PRE) {
+                self.pre_fence_pending = false;
+            } else if tid != Some(TAG_PRE) {
+                self.flush_pre_fence();
+            }
+        }
+        // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
+        // language) is emitted lazily above for the no-<code> case.
+        if self.stack[stack_len - 1].tag_id == Some(TAG_PRE) {
+            let lang = Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class")).to_string();
+            self.pre_fence_pending = true;
+            self.pre_own_fence = false;
+            self.pre_fence_lang = lang;
+        }
+
         // Phase 1: read from node + compute output (borrows self.stack immutably)
         let tag_id: Option<u8>;
         let is_inline: bool;
@@ -357,6 +378,12 @@ impl ConvertState {
 
         self.write_output(false, is_inline, configured_new_lines, effective, false);
 
+        // Reset <pre> fence deferral once the element closes (issue #97).
+        if tag_id == Some(TAG_PRE) {
+            self.pre_fence_pending = false;
+            self.pre_own_fence = false;
+        }
+
         // Record fragment link position for deferred fixup (no String alloc)
         if self.clean_flags & CLEAN_FRAGMENTS != 0 && tag_id == Some(TAG_A)
             && let Some(href) = node.attributes.get("href")
@@ -367,8 +394,33 @@ impl ConvertState {
 
     /// Emit markdown for a text node (no TextNode allocation).
     #[inline]
+    /// Emit a bare <pre>'s opening code fence (issue #97). Mirrors the
+    /// <code>-in-<pre> enter formatting: indented and newline-padded inside a
+    /// list item, otherwise a plain ```lang opener. Marks the <pre> as owning
+    /// the fence so a nested <code> does not double up and the <pre> exit emits
+    /// the matching closing fence.
+    fn flush_pre_fence(&mut self) {
+        self.pre_fence_pending = false;
+        self.pre_own_fence = true;
+        let li_depth = self.depth_map[TAG_LI as usize];
+        let fence = if li_depth > 0 {
+            format!("\n\n{0}```{1}\n{0}", self.list_indent, self.pre_fence_lang)
+        } else {
+            format!("```{}\n", self.pre_fence_lang)
+        };
+        self.last_content_cache_len = fence.len();
+        self.buffer.push_str(&fence);
+        self.last_node_is_inline = false;
+    }
+
     pub(crate) fn emit_text(&mut self, text: &str, contains_whitespace: bool, depth: usize, index: usize) {
         if text.is_empty() { return; }
+
+        // Open a deferred <pre> fence before its first non-whitespace text.
+        if self.pre_fence_pending
+            && text.as_bytes().iter().any(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r') {
+            self.flush_pre_fence();
+        }
 
         let buf_bytes = self.buffer.as_bytes();
         let buf_len = buf_bytes.len();
@@ -523,6 +575,11 @@ impl ConvertState {
             }
             TAG_CODE => {
                 if self.depth_map[TAG_PRE as usize] > 0 {
+                    // The enclosing <pre> already opened its own fence (mixed
+                    // text + <code> children); don't emit a nested fence.
+                    if self.pre_own_fence {
+                        return None;
+                    }
                     let lang = Self::get_language_from_class(node.attributes.get("class"));
                     let li_depth = self.depth_map[TAG_LI as usize] as usize;
                     if li_depth > 0 {
@@ -680,6 +737,10 @@ impl ConvertState {
             TAG_INS => Some(Cow::Borrowed("</ins>")),
             TAG_CODE => {
                 if self.depth_map[TAG_PRE as usize] > 0 {
+                    // The enclosing <pre> owns the fence; this <code> opened none.
+                    if self.pre_own_fence {
+                        return None;
+                    }
                     let li_depth = self.depth_map[TAG_LI as usize] as usize;
                     if li_depth > 0 {
                         let indent = self.list_indent.as_str();
@@ -694,6 +755,26 @@ impl ConvertState {
                     }
                 } else {
                     Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
+                }
+            }
+            // Bare <pre> (no <code> child) closing fence (issue #97). Only emitted
+            // when the <pre> opened its own fence; otherwise a <code> child or an
+            // empty/whitespace-only <pre> means there is nothing to close.
+            TAG_PRE => {
+                if !self.pre_own_fence {
+                    return None;
+                }
+                let li_depth = self.depth_map[TAG_LI as usize] as usize;
+                if li_depth > 0 {
+                    let indent = self.list_indent.as_str();
+                    let mut s = String::with_capacity(1 + indent.len() * 2 + 5);
+                    s.push('\n');
+                    s.push_str(indent);
+                    s.push_str("```\n\n");
+                    s.push_str(indent);
+                    Some(Cow::Owned(s))
+                } else {
+                    Some(Cow::Borrowed("\n```"))
                 }
             }
             TAG_UL => {
