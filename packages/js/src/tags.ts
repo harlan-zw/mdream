@@ -29,6 +29,7 @@ import {
   TAG_CITE,
   TAG_CODE,
   TAG_COL,
+  TAG_DATALIST,
   TAG_DD,
   TAG_DEL,
   TAG_DETAILS,
@@ -793,6 +794,13 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_NOSCRIPT]: {
+    excludesTextNodes: true,
+    spacing: NO_SPACING,
+  },
+  [TAG_DATALIST]: {
+    // <datalist> holds <option> autocomplete data that browsers never render.
+    // Treat the whole body as inert and drop it, mirroring <template>.
+    isNonNesting: true,
     excludesTextNodes: true,
     spacing: NO_SPACING,
   },

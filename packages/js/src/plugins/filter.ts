@@ -22,6 +22,23 @@ function compileSelector(selector: string | number): SelectorMatcher {
 }
 
 /**
+ * Whether an element is visually hidden, so the filter drops it and its subtree:
+ * inline display:none / visibility:hidden / position:absolute|fixed, or the
+ * `hidden` attribute (except hidden="until-found"). Browsers never render these,
+ * so neither should the Markdown.
+ */
+function isHidden(element: ElementNode): boolean {
+  const style = element.attributes?.style
+  if (style && (style.includes('absolute') || style.includes('fixed')
+    || style.includes('display:none') || style.includes('display: none')
+    || style.includes('visibility:hidden') || style.includes('visibility: hidden'))) {
+    return true
+  }
+  const hidden = element.attributes?.hidden
+  return hidden !== undefined && hidden !== 'until-found'
+}
+
+/**
  * Plugin that filters nodes based on CSS selectors.
  * Allows including or excluding nodes based on selectors.
  *
@@ -54,13 +71,13 @@ export function filterPlugin(options: {
     beforeNodeProcess(event: any) {
       const { node } = event
 
-      // Handle text nodes - check if any ancestor is excluded
+      // Handle text nodes - skip if any ancestor is excluded or hidden
       if (node.type === TEXT_NODE) {
         const textNode = node as TextNode
         let currentParent = textNode.parent as ElementNode | null
-        while (currentParent && excludeSelectors.length) {
-          const parentShouldExclude = excludeSelectors.some(selector => selector.matches(currentParent!))
-          if (parentShouldExclude) {
+        while (currentParent) {
+          if (isHidden(currentParent)
+            || (excludeSelectors.length && excludeSelectors.some(selector => selector.matches(currentParent!)))) {
             return { skip: true }
           }
           currentParent = currentParent.parent as ElementNode | null
@@ -75,25 +92,21 @@ export function filterPlugin(options: {
 
       const element = node as ElementNode
 
+      // Drop hidden elements (and, via the ancestor walk below, their subtrees).
+      if (isHidden(element)) {
+        return { skip: true }
+      }
       // Check if element should be excluded
-      if (excludeSelectors.length) {
-        if (element.attributes.style?.includes('absolute') || element.attributes.style?.includes('fixed')) {
-          return { skip: true }
-        }
-        const shouldExclude = excludeSelectors.some(selector => selector.matches(element))
-        if (shouldExclude) {
-          return { skip: true }
-        }
+      if (excludeSelectors.length && excludeSelectors.some(selector => selector.matches(element))) {
+        return { skip: true }
       }
 
-      // Check if any parent element is excluded
+      // Check if any parent element is excluded or hidden
       let currentParent = element.parent
       while (currentParent) {
-        if (excludeSelectors.length) {
-          const parentShouldExclude = excludeSelectors.some(selector => selector.matches(currentParent!))
-          if (parentShouldExclude) {
-            return { skip: true }
-          }
+        if (isHidden(currentParent)
+          || (excludeSelectors.length && excludeSelectors.some(selector => selector.matches(currentParent!)))) {
+          return { skip: true }
         }
         currentParent = currentParent.parent as ElementNode | null
       }

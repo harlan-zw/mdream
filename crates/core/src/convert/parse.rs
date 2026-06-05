@@ -2,6 +2,23 @@
 
 use super::*;
 
+/// Whether an element is visually hidden, so the filter should drop it and its
+/// subtree: inline `display:none` / `visibility:hidden` / `position:absolute|fixed`,
+/// or the `hidden` attribute (except `hidden="until-found"`). Allocation-free;
+/// matches the common spaced and unspaced inline-style forms.
+fn is_hidden(node: &ElementNode) -> bool {
+    if let Some(style) = node.attributes.get("style") {
+        if style.contains("absolute")
+            || style.contains("fixed")
+            || style.contains("display:none") || style.contains("display: none")
+            || style.contains("visibility:hidden") || style.contains("visibility: hidden")
+        {
+            return true;
+        }
+    }
+    matches!(node.attributes.get("hidden"), Some(v) if v != "until-found")
+}
+
 impl ConvertState {
     pub(crate) fn process_text_buffer(&mut self, text_buffer: &mut String) {
         let contains_non_whitespace = self.text_buffer_contains_non_whitespace;
@@ -206,8 +223,10 @@ impl ConvertState {
             }
 
             if self.has_filter {
-                if let Some(style) = tag.attributes.get("style")
-                    && (style.contains("absolute") || style.contains("fixed")) { skip_node = true; }
+                // Hidden elements (and their subtrees) are dropped — browsers never
+                // render them. filter_excluded makes the exclusion unconditional so
+                // descendants inherit it via the ancestor walk below (issue #100 follow-up).
+                if is_hidden(&tag) { skip_node = true; filter_excluded = true; }
                 if !skip_node {
                     for (_, parsed) in &self.filter_exclude_parsed {
                         if matches_selector(&tag, parsed) { skip_node = true; filter_excluded = true; break; }
@@ -215,6 +234,7 @@ impl ConvertState {
                 }
                 if !skip_node {
                     for parent in &self.stack {
+                        if is_hidden(parent) { skip_node = true; filter_excluded = true; break; }
                         for (_, parsed) in &self.filter_exclude_parsed {
                             if matches_selector(parent, parsed) { skip_node = true; filter_excluded = true; break; }
                         }
