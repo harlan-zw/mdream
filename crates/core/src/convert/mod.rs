@@ -75,6 +75,10 @@ pub struct ConvertState {
     rawtext_escaped: bool,
     escape_ctx: u8,
     in_pre: bool,
+    /// Filter: depth of the shallowest currently-open visually-hidden element, or
+    /// None. Lets the parser skip a hidden subtree in O(1) without re-checking
+    /// styles per node, and keeps this state off the public `ElementNode`.
+    hidden_since_depth: Option<usize>,
     /// Unified collapse depth counter (replaces separate counters in ParseState + MarkdownState)
     collapse_non_span_depth: u8,
     collapse_span_depth: u8,
@@ -178,6 +182,7 @@ impl ConvertState {
             rawtext_escaped: false,
             escape_ctx: 0,
             in_pre: false,
+            hidden_since_depth: None,
             collapse_non_span_depth: 0,
             collapse_span_depth: 0,
             first_block_parent_index: None,
