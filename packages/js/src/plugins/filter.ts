@@ -26,12 +26,18 @@ function compileSelector(selector: string | number): SelectorMatcher {
  * inline display:none / visibility:hidden / position:absolute|fixed, or the
  * `hidden` attribute (except hidden="until-found"). Browsers never render these,
  * so neither should the Markdown.
+ *
+ * Matches the actual `display:`/`visibility:`/`position:` declaration (not bare
+ * keywords like `fixed`, which would false-match e.g. `background-attachment:fixed`)
+ * and both unspaced and `: `-spaced forms. Allocation-free to keep the hot path
+ * cheap; uppercased properties (rare in inline styles) are not handled.
  */
 function isHidden(element: ElementNode): boolean {
   const style = element.attributes?.style
-  if (style && (style.includes('absolute') || style.includes('fixed')
-    || style.includes('display:none') || style.includes('display: none')
-    || style.includes('visibility:hidden') || style.includes('visibility: hidden'))) {
+  if (style && (style.includes('display:none') || style.includes('display: none')
+    || style.includes('visibility:hidden') || style.includes('visibility: hidden')
+    || style.includes('position:absolute') || style.includes('position: absolute')
+    || style.includes('position:fixed') || style.includes('position: fixed'))) {
     return true
   }
   const hidden = element.attributes?.hidden

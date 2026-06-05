@@ -70,6 +70,9 @@ describe('withMinimalPreset cross-engine parity', () => {
     const cases: [string, string][] = [
       ['<main><p>a</p><div>VISIBLE</div><p>b</p></main>', 'a\n\nVISIBLE\n\nb'],
       ['<main><p>a</p><div hidden="until-found">KEEP</div><p>b</p></main>', 'a\n\nKEEP\n\nb'],
+      // Unrelated CSS keywords must not false-match the hidden check.
+      ['<main><p>a</p><div style="background-attachment:fixed">KEEP</div><p>b</p></main>', 'a\n\nKEEP\n\nb'],
+      ['<main><p>a</p><div style="display:flex;gap:4px">KEEP</div><p>b</p></main>', 'a\n\nKEEP\n\nb'],
     ]
     for (const [html, expected] of cases) {
       const opts = withMinimalPreset()

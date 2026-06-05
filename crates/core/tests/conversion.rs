@@ -794,6 +794,10 @@ fn filter_strips_hidden_content_and_subtree() {
     // Visible content and revealable hidden="until-found" are kept.
     assert_eq!(convert_with_filter("<p>a</p><div>V</div><p>b</p>"), "a\n\nV\n\nb");
     assert_eq!(convert_with_filter("<p>a</p><div hidden=\"until-found\">K</div><p>b</p>"), "a\n\nK\n\nb");
+    // Unrelated CSS keywords must not false-match (background-attachment:fixed
+    // contains "fixed"; transition contains "absolute" only via other props).
+    assert_eq!(convert_with_filter("<p>a</p><div style=\"background-attachment:fixed\">V</div><p>b</p>"), "a\n\nV\n\nb");
+    assert_eq!(convert_with_filter("<p>a</p><div style=\"display:flex\">V</div><p>b</p>"), "a\n\nV\n\nb");
 }
 
 #[test]

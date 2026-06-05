@@ -4,14 +4,18 @@ use super::*;
 
 /// Whether an element is visually hidden, so the filter should drop it and its
 /// subtree: inline `display:none` / `visibility:hidden` / `position:absolute|fixed`,
-/// or the `hidden` attribute (except `hidden="until-found"`). Allocation-free;
-/// matches the common spaced and unspaced inline-style forms.
+/// or the `hidden` attribute (except `hidden="until-found"`).
+///
+/// Matches the actual `display:`/`visibility:`/`position:` declaration (not bare
+/// keywords like `fixed`, which would false-match e.g. `background-attachment:fixed`)
+/// and both unspaced and `: `-spaced forms. Allocation-free; uppercased
+/// properties (rare in inline styles) are not handled.
 fn is_hidden(node: &ElementNode) -> bool {
     if let Some(style) = node.attributes.get("style")
-        && (style.contains("absolute")
-            || style.contains("fixed")
-            || style.contains("display:none") || style.contains("display: none")
-            || style.contains("visibility:hidden") || style.contains("visibility: hidden"))
+        && (style.contains("display:none") || style.contains("display: none")
+            || style.contains("visibility:hidden") || style.contains("visibility: hidden")
+            || style.contains("position:absolute") || style.contains("position: absolute")
+            || style.contains("position:fixed") || style.contains("position: fixed"))
     {
         return true;
     }
