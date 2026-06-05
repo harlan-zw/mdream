@@ -22,6 +22,31 @@ function compileSelector(selector: string | number): SelectorMatcher {
 }
 
 /**
+ * Whether an element is visually hidden, so the filter drops it and its subtree:
+ * inline display:none / visibility:hidden / position:absolute|fixed, or the
+ * `hidden` attribute (except hidden="until-found"). Browsers never render these,
+ * so neither should the Markdown.
+ *
+ * Matches the actual `display:`/`visibility:`/`position:` declaration (not bare
+ * keywords like `fixed`, which would false-match e.g. `background-attachment:fixed`)
+ * and both unspaced and `: `-spaced forms. Allocation-free to keep the hot path
+ * cheap; uppercased properties (rare in inline styles) are not handled.
+ */
+function isHidden(element: ElementNode): boolean {
+  const style = element.attributes?.style
+  if (style && (style.includes('display:none') || style.includes('display: none')
+    || style.includes('visibility:hidden') || style.includes('visibility: hidden')
+    || style.includes('position:absolute') || style.includes('position: absolute')
+    || style.includes('position:fixed') || style.includes('position: fixed'))) {
+    return true
+  }
+  // The `hidden` attribute hides the element unless it's the revealable
+  // `until-found` state (an enumerated keyword, so ASCII case-insensitive).
+  const hidden = element.attributes?.hidden
+  return hidden !== undefined && hidden.toLowerCase() !== 'until-found'
+}
+
+/**
  * Plugin that filters nodes based on CSS selectors.
  * Allows including or excluding nodes based on selectors.
  *
@@ -47,20 +72,27 @@ export function filterPlugin(options: {
   const excludeSelectors = options.exclude?.map(selector => compileSelector(selector)) || []
   const processChildren = options.processChildren !== false // Default to true
 
-  // No need for complex state tracking since beforeNodeProcess handles everything
+  // Tracks elements whose subtree is hidden. Hidden-ness propagates O(1) from
+  // the parent (set on enter, before children), so isHidden() runs once per
+  // element instead of being re-evaluated for every ancestor of every node.
+  const hiddenNodes = new WeakSet<ElementNode>()
 
   return createPlugin({
     // Handle include/exclude filtering for elements and text nodes
     beforeNodeProcess(event: any) {
       const { node } = event
 
-      // Handle text nodes - check if any ancestor is excluded
+      // Handle text nodes - skip if any ancestor is excluded or hidden
       if (node.type === TEXT_NODE) {
         const textNode = node as TextNode
-        let currentParent = textNode.parent as ElementNode | null
+        const parent = textNode.parent as ElementNode | null
+        // Hidden propagates to the immediate parent, so one lookup covers all ancestors.
+        if (parent && hiddenNodes.has(parent)) {
+          return { skip: true }
+        }
+        let currentParent = parent
         while (currentParent && excludeSelectors.length) {
-          const parentShouldExclude = excludeSelectors.some(selector => selector.matches(currentParent!))
-          if (parentShouldExclude) {
+          if (excludeSelectors.some(selector => selector.matches(currentParent!))) {
             return { skip: true }
           }
           currentParent = currentParent.parent as ElementNode | null
@@ -75,25 +107,23 @@ export function filterPlugin(options: {
 
       const element = node as ElementNode
 
+      // Drop hidden elements and their subtrees. Inherit the parent's hidden flag
+      // (O(1)); only run the style/attr scan when not already inside a hidden subtree.
+      const parentHidden = element.parent ? hiddenNodes.has(element.parent as ElementNode) : false
+      if (parentHidden || isHidden(element)) {
+        hiddenNodes.add(element)
+        return { skip: true }
+      }
       // Check if element should be excluded
-      if (excludeSelectors.length) {
-        if (element.attributes.style?.includes('absolute') || element.attributes.style?.includes('fixed')) {
-          return { skip: true }
-        }
-        const shouldExclude = excludeSelectors.some(selector => selector.matches(element))
-        if (shouldExclude) {
-          return { skip: true }
-        }
+      if (excludeSelectors.length && excludeSelectors.some(selector => selector.matches(element))) {
+        return { skip: true }
       }
 
-      // Check if any parent element is excluded
+      // Check if any parent element is excluded by selector
       let currentParent = element.parent
-      while (currentParent) {
-        if (excludeSelectors.length) {
-          const parentShouldExclude = excludeSelectors.some(selector => selector.matches(currentParent!))
-          if (parentShouldExclude) {
-            return { skip: true }
-          }
+      while (currentParent && excludeSelectors.length) {
+        if (excludeSelectors.some(selector => selector.matches(currentParent!))) {
+          return { skip: true }
         }
         currentParent = currentParent.parent as ElementNode | null
       }

@@ -626,6 +626,19 @@ fn strips_style() {
 }
 
 #[test]
+fn strips_datalist() {
+    // <datalist> options are inert autocomplete data, never rendered.
+    assert_eq!(
+        convert("<p>Before</p><datalist><option value=\"V\">Hidden</option></datalist><p>After</p>"),
+        "Before\n\nAfter"
+    );
+    assert_eq!(
+        convert("<p>Before</p><datalist><option>One</option><option>Two</option></datalist><p>After</p>"),
+        "Before\n\nAfter"
+    );
+}
+
+#[test]
 fn strips_template_text() {
     // <template> content is inert and must never leak into output (issue #101).
     assert_eq!(
@@ -779,6 +792,44 @@ fn kbd_tag() {
 }
 
 // ── Extraction ──
+
+fn convert_with_filter(html: &str) -> String {
+    // Any filter config activates the filter plugin (and its hidden-content stripping).
+    html_to_markdown(html, HTMLToMarkdownOptions {
+        plugins: Some(PluginConfig {
+            filter: Some(FilterConfig::exclude(&["nav"])),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+}
+
+#[test]
+fn filter_strips_hidden_content_and_subtree() {
+    // display:none / visibility:hidden / position:absolute and the hidden attribute
+    // drop the element and its whole subtree; hidden="until-found" stays.
+    assert_eq!(convert_with_filter("<p>a</p><div style=\"display:none\">H</div><p>b</p>"), "a\n\nb");
+    assert_eq!(convert_with_filter("<p>a</p><div style=\"display: none\">H</div><p>b</p>"), "a\n\nb");
+    assert_eq!(convert_with_filter("<p>a</p><div style=\"visibility:hidden\">H</div><p>b</p>"), "a\n\nb");
+    assert_eq!(convert_with_filter("<p>a</p><div hidden>H</div><p>b</p>"), "a\n\nb");
+    assert_eq!(
+        convert_with_filter("<p>a</p><div style=\"display:none\"><section><p>H</p></section></div><p>b</p>"),
+        "a\n\nb"
+    );
+    assert_eq!(
+        convert_with_filter("<p>a</p><div style=\"position:absolute\"><p>H</p></div><p>b</p>"),
+        "a\n\nb"
+    );
+    // Visible content and revealable hidden="until-found" are kept.
+    assert_eq!(convert_with_filter("<p>a</p><div>V</div><p>b</p>"), "a\n\nV\n\nb");
+    assert_eq!(convert_with_filter("<p>a</p><div hidden=\"until-found\">K</div><p>b</p>"), "a\n\nK\n\nb");
+    // until-found is an enumerated keyword: case-insensitive, so still kept.
+    assert_eq!(convert_with_filter("<p>a</p><div hidden=\"UNTIL-FOUND\">K</div><p>b</p>"), "a\n\nK\n\nb");
+    // Unrelated CSS keywords must not false-match (background-attachment:fixed
+    // contains "fixed"; transition contains "absolute" only via other props).
+    assert_eq!(convert_with_filter("<p>a</p><div style=\"background-attachment:fixed\">V</div><p>b</p>"), "a\n\nV\n\nb");
+    assert_eq!(convert_with_filter("<p>a</p><div style=\"display:flex\">V</div><p>b</p>"), "a\n\nV\n\nb");
+}
 
 #[test]
 fn extraction_by_tag() {

@@ -2,6 +2,28 @@
 
 use super::*;
 
+/// Whether an element is visually hidden, so the filter should drop it and its
+/// subtree: inline `display:none` / `visibility:hidden` / `position:absolute|fixed`,
+/// or the `hidden` attribute (except `hidden="until-found"`).
+///
+/// Matches the actual `display:`/`visibility:`/`position:` declaration (not bare
+/// keywords like `fixed`, which would false-match e.g. `background-attachment:fixed`)
+/// and both unspaced and `: `-spaced forms. Allocation-free; uppercased
+/// properties (rare in inline styles) are not handled.
+fn is_hidden(node: &ElementNode) -> bool {
+    if let Some(style) = node.attributes.get("style")
+        && (style.contains("display:none") || style.contains("display: none")
+            || style.contains("visibility:hidden") || style.contains("visibility: hidden")
+            || style.contains("position:absolute") || style.contains("position: absolute")
+            || style.contains("position:fixed") || style.contains("position: fixed"))
+    {
+        return true;
+    }
+    // The `hidden` attribute hides the element unless it's the revealable
+    // `until-found` state (an enumerated keyword, so ASCII case-insensitive).
+    matches!(node.attributes.get("hidden"), Some(v) if !v.eq_ignore_ascii_case("until-found"))
+}
+
 impl ConvertState {
     pub(crate) fn process_text_buffer(&mut self, text_buffer: &mut String) {
         let contains_non_whitespace = self.text_buffer_contains_non_whitespace;
@@ -206,8 +228,18 @@ impl ConvertState {
             }
 
             if self.has_filter {
-                if let Some(style) = tag.attributes.get("style")
-                    && (style.contains("absolute") || style.contains("fixed")) { skip_node = true; }
+                // Hidden elements (and their subtrees) are dropped — browsers never
+                // render them. `hidden_since_depth` records the shallowest open hidden
+                // element, so once inside a hidden subtree we skip O(1) without calling
+                // is_hidden() again. Cleared in close_node at the matching depth.
+                if self.hidden_since_depth.is_some() {
+                    skip_node = true;
+                    filter_excluded = true;
+                } else if is_hidden(&tag) {
+                    skip_node = true;
+                    filter_excluded = true;
+                    self.hidden_since_depth = Some(self.depth);
+                }
                 if !skip_node {
                     for (_, parsed) in &self.filter_exclude_parsed {
                         if matches_selector(&tag, parsed) { skip_node = true; filter_excluded = true; break; }
@@ -406,6 +438,11 @@ impl ConvertState {
         let popping_index = self.stack.len() - 1;
         // Guard already checked above, but avoid panic on edge cases
         let Some(node) = self.stack.pop() else { return };
+
+        // Leaving the element that opened the current hidden subtree (filter).
+        if self.hidden_since_depth == Some(node.depth) {
+            self.hidden_since_depth = None;
+        }
 
         if self.first_block_parent_index == Some(popping_index) {
             self.block_parent_indices.pop();
