@@ -15,6 +15,11 @@ import { resolveLogger } from './logger.js'
 function isSilentArgv(args: string[]): boolean {
   return args.includes('--silent') || args.includes('--quiet') || args.includes('-q')
 }
+
+// The run-wide logger. Seeded from argv so the top-level error handler can
+// report even before config loads, then upgraded by main() once config-driven
+// silent is known (a `silent: true` in mdream.config must also mute crashes).
+let runLogger = resolveLogger({ silent: isSilentArgv(process.argv.slice(2)) })
 // playwright-utils is dynamically imported only when Playwright driver is used
 // to avoid requiring crawlee for HTTP-only users
 
@@ -495,6 +500,9 @@ async function main() {
   // never silent.
   const silent = (cliOptions?.silent ?? false) || (fileConfig.silent ?? false)
   const logger = resolveLogger({ silent })
+  // Upgrade the run-wide logger now that config-driven silent is resolved, so an
+  // unhandled error below is muted too when silent is set via config (not argv).
+  runLogger = logger
 
   let options: CrawlOptions | null
 
@@ -670,8 +678,9 @@ async function main() {
 
 // Run the CLI
 main().catch((error) => {
-  // Resolve the logger from raw argv since this runs outside main's scope.
-  const logger = resolveLogger({ silent: isSilentArgv(process.argv.slice(2)) })
+  // runLogger honors config-driven silent once main() has resolved it, and
+  // falls back to the argv-seeded logger if main throws before that point.
+  const logger = runLogger
   const msg = error instanceof Error ? error.message : String(error)
   // Surface a clear hint when the error is the Windows wmic.exe removal
   if (msg.includes('wmic') || (msg.includes('ENOENT') && process.platform === 'win32')) {

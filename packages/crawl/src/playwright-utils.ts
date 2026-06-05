@@ -38,7 +38,8 @@ export async function promptPlaywrightInstall(logger: CrawlLogger = createClackL
   catch (fallbackError) {
     // Fallback: try without workspace flag
     s.stop('Failed to install Playwright')
-    logger.error(`Installation failed: ${fallbackError}`)
+    const reason = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+    logger.error(`Installation failed: ${reason}`)
     return false
   }
 }
