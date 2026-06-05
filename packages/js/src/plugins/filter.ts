@@ -40,8 +40,10 @@ function isHidden(element: ElementNode): boolean {
     || style.includes('position:fixed') || style.includes('position: fixed'))) {
     return true
   }
+  // The `hidden` attribute hides the element unless it's the revealable
+  // `until-found` state (an enumerated keyword, so ASCII case-insensitive).
   const hidden = element.attributes?.hidden
-  return hidden !== undefined && hidden !== 'until-found'
+  return hidden !== undefined && hidden.toLowerCase() !== 'until-found'
 }
 
 /**

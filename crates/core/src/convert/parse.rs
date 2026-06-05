@@ -19,7 +19,9 @@ fn is_hidden(node: &ElementNode) -> bool {
     {
         return true;
     }
-    matches!(node.attributes.get("hidden"), Some(v) if v != "until-found")
+    // The `hidden` attribute hides the element unless it's the revealable
+    // `until-found` state (an enumerated keyword, so ASCII case-insensitive).
+    matches!(node.attributes.get("hidden"), Some(v) if !v.eq_ignore_ascii_case("until-found"))
 }
 
 impl ConvertState {
