@@ -646,6 +646,9 @@ function processCdataSection(
     return
   }
 
+  // The `'>'` htmlChunk is a deliberate dummy: processTagAttributes hits the
+  // `>` at position 0 and exits immediately, so the synthetic tag has no
+  // attributes to parse. Mirrors the Rust engine's synthetic-tag handling.
   const open = processOpeningTag('#cdata-section', -1, '>', 0, state, handleEvent)
   if (!open.complete || open.selfClosing) {
     return
