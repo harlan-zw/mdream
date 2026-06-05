@@ -11,9 +11,11 @@ import { crawlAndGenerate } from './crawl.js'
 import { parseUrlPattern, validateGlobPattern } from './glob-utils.js'
 import { resolveLogger } from './logger.js'
 
+const QUIET_FLAGS = new Set(['--silent', '--quiet', '-q'])
+
 /** Detect the quiet flag from raw argv (used before options are fully parsed). */
 function isSilentArgv(args: string[]): boolean {
-  return args.includes('--silent') || args.includes('--quiet') || args.includes('-q')
+  return args.some(arg => QUIET_FLAGS.has(arg))
 }
 
 // The run-wide logger. Seeded from argv so the top-level error handler can
