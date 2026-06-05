@@ -755,6 +755,10 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
   },
   [TAG_TEMPLATE]: {
+    // <template> content is inert (browsers never render it). Treat the whole
+    // body as raw text and exclude it from output, mirroring script/style.
+    isNonNesting: true,
+    excludesTextNodes: true,
     spacing: NO_SPACING,
   },
   [TAG_ABBR]: {
