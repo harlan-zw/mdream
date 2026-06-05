@@ -291,6 +291,14 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           return
         }
 
+        // A <pre> whose fence is still pending has only seen whitespace so far
+        // (non-whitespace would have opened the fence in the hook above). Drop
+        // that whitespace so an empty/whitespace-only <pre> emits nothing and
+        // never leaks between surrounding blocks (issue #97).
+        if (state.preFencePending) {
+          return
+        }
+
         // Skip leading spaces after newlines
         if (textNode.value === ' ' && lastChar === '\n') {
           return

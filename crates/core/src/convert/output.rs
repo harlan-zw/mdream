@@ -421,6 +421,12 @@ impl ConvertState {
             && text.as_bytes().iter().any(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r') {
             self.flush_pre_fence();
         }
+        // Still pending means this <pre> has only seen whitespace so far; drop it
+        // so an empty/whitespace-only <pre> emits nothing and never leaks between
+        // surrounding blocks (issue #97).
+        if self.pre_fence_pending {
+            return;
+        }
 
         let buf_bytes = self.buffer.as_bytes();
         let buf_len = buf_bytes.len();

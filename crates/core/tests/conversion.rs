@@ -658,6 +658,8 @@ fn empty_and_whitespace_pre_emit_no_fence() {
     assert_eq!(convert("<pre></pre>"), "");
     assert_eq!(convert("<pre>   \n  </pre>"), "");
     assert_eq!(convert("<p>a</p><pre></pre><p>b</p>"), "a\n\nb");
+    // A whitespace-only <pre> must not leak its whitespace between blocks.
+    assert_eq!(convert("<p>a</p><pre>   \n  </pre><p>b</p>"), "a\n\nb");
 }
 
 #[test]

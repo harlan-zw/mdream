@@ -51,6 +51,11 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
     expect(htmlToMarkdown('<pre>   \n  </pre>', { engine })).toBe('')
   })
 
+  it('does not leak a whitespace-only <pre> between surrounding blocks', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p>a</p><pre>   \n  </pre><p>b</p>', { engine })).toBe('a\n\nb')
+  })
+
   it('does not double-fence a <pre> with both text and a <code> child', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<pre>text<code>codepart</code>more</pre>', { engine })).toBe('```\ntextcodepartmore\n```')
