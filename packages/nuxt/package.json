@@ -1,7 +1,7 @@
 {
   "name": "@mdream/nuxt",
   "type": "module",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "packageManager": "pnpm@11.5.2",
   "description": "Nuxt module for converting HTML pages to Markdown using mdream",
   "license": "MIT",
