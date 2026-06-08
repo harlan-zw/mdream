@@ -42,7 +42,7 @@ catalog:
   '@nuxt/schema': ^4.4.7
   '@nuxt/test-utils': ^4.0.3
   '@tybys/wasm-util': ^0.10.2
-  '@types/node': ^25.9.1
+  '@types/node': ^25.9.2
   '@types/picomatch': ^4.0.3
   '@vercel/ncc': ^0.38.4
   '@vitejs/plugin-vue': ^6.0.7
@@ -59,7 +59,7 @@ catalog:
   eslint: ^10.4.1
   express: ^5.2.1
   hookable: ^6.1.1
-  knip: ^6.15.0
+  knip: ^6.16.1
   nuxt: ^4.4.7
   nuxt-site-config: ^4.0.8
   nypm: ^0.6.6
