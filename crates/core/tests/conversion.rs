@@ -629,7 +629,7 @@ fn strips_style() {
 fn strips_datalist() {
     // <datalist> options are inert autocomplete data, never rendered.
     assert_eq!(
-        convert("<p>Before</p><datalist><option value=\"V\">Hidden</option></datalist><p>After</p>"),
+        convert(r#"<p>Before</p><datalist><option value="V">Hidden</option></datalist><p>After</p>"#),
         "Before\n\nAfter"
     );
     assert_eq!(
@@ -658,14 +658,74 @@ fn strips_template_nested_elements() {
 #[test]
 fn template_with_quotes_closes_correctly() {
     assert_eq!(
-        convert("<p>A</p><template>It's a \"quoted\" keyword</template><p>B</p>"),
+        convert(r#"<p>A</p><template>It's a "quoted" keyword</template><p>B</p>"#),
         "A\n\nB"
     );
     assert_eq!(
-        convert("<p>A</p><template><a href=\"x\">it's</a></template><p>B</p>"),
+        convert(r#"<p>A</p><template><a href="x">it's</a></template><p>B</p>"#),
         "A\n\nB"
     );
 }
+
+#[test]
+fn bare_pre_becomes_code_block() {
+    // A <pre> without a <code> child becomes a fenced code block (issue #97).
+    assert_eq!(convert("<pre>const x = 1</pre>"), "```\nconst x = 1\n```");
+    assert_eq!(
+        convert("<pre>line1\nline2\n  indented</pre>"),
+        "```\nline1\nline2\n  indented\n```"
+    );
+}
+
+#[test]
+fn bare_pre_reads_language_from_class() {
+    assert_eq!(
+        convert(r#"<pre class="language-js">const x = 1</pre>"#),
+        "```js\nconst x = 1\n```"
+    );
+}
+
+#[test]
+fn pre_code_block_unchanged() {
+    // The existing <pre><code> path is untouched.
+    assert_eq!(convert("<pre><code>const x = 1</code></pre>"), "```\nconst x = 1\n```");
+    assert_eq!(
+        convert(r#"<pre><code class="language-js">const x = 1</code></pre>"#),
+        "```js\nconst x = 1\n```"
+    );
+}
+
+#[test]
+fn empty_and_whitespace_pre_emit_no_fence() {
+    assert_eq!(convert("<pre></pre>"), "");
+    assert_eq!(convert("<pre>   \n  </pre>"), "");
+    assert_eq!(convert("<p>a</p><pre></pre><p>b</p>"), "a\n\nb");
+    // A whitespace-only <pre> must not leak its whitespace between blocks.
+    assert_eq!(convert("<p>a</p><pre>   \n  </pre><p>b</p>"), "a\n\nb");
+}
+
+#[test]
+fn pre_with_text_and_code_child_single_fence() {
+    // Mixed text + <code> must not double-fence.
+    assert_eq!(
+        convert("<pre>text<code>codepart</code>more</pre>"),
+        "```\ntextcodepartmore\n```"
+    );
+    // Whitespace around a sole <code> child keeps the <code> as fence owner.
+    assert_eq!(
+        convert("<pre> <code>spaced code</code> </pre>"),
+        "```\nspaced code\n```"
+    );
+}
+
+#[test]
+fn bare_pre_in_list_item_is_indented() {
+    assert_eq!(
+        convert("<ul><li>item<pre>code\nblock</pre></li></ul>"),
+        "- item\n\n  ```\n  code\n  block\n  ```"
+    );
+}
+
 
 #[test]
 fn escaped_backslash_in_script() {

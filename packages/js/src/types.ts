@@ -290,6 +290,13 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
    */
   listIndent?: string
   listIndentWidths?: number[]
+
+  /**
+   * <pre> fenced-code deferral (issue #97). See MarkdownState for semantics.
+   */
+  preFencePending?: boolean
+  preFenceLang?: string
+  preOwnFence?: boolean
 }
 
 type NodeEventEnter = 0

@@ -157,6 +157,17 @@ pub struct ConvertState {
     /// Per-`<li>` contribution width stack, parallel to `list_indent`. Used to
     /// truncate the correct number of bytes on close without re-walking ancestors.
     list_indent_widths: Vec<u8>,
+
+    /// `<pre>` fenced-code deferral (issue #97). A bare `<pre>` (no `<code>`
+    /// child) becomes a fenced code block, but the opening fence is deferred
+    /// until the first non-whitespace child so empty/whitespace-only blocks emit
+    /// nothing. `pre_fence_pending`: inside a `<pre>` whose fence is undecided.
+    /// `pre_fence_lang`: language resolved from the `<pre>`'s own class.
+    /// `pre_own_fence`: the `<pre>` opened its own fence (so a nested `<code>`
+    /// must not, and the `<pre>` exit emits the closing fence).
+    pre_fence_pending: bool,
+    pre_fence_lang: String,
+    pre_own_fence: bool,
 }
 
 impl ConvertState {
@@ -239,6 +250,10 @@ impl ConvertState {
 
             list_indent: String::new(),
             list_indent_widths: Vec::with_capacity(8),
+
+            pre_fence_pending: false,
+            pre_fence_lang: String::new(),
+            pre_own_fence: false,
         };
         // Resolve clean config into bitmask
         let effective_clean_urls;

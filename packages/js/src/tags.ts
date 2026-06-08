@@ -346,9 +346,43 @@ export const tagHandlers: Record<number, TagHandler> = {
     },
     spacing: BLOCKQUOTE_SPACING,
   },
+  // A bare <pre> (no <code> child) becomes a fenced code block (issue #97).
+  // The opening fence is deferred to the first non-whitespace child by the
+  // processor (flushPreFence) so empty/whitespace-only blocks emit nothing and a
+  // <pre><code> keeps its existing fence. Only the closing fence lives here.
+  [TAG_PRE]: {
+    enter: ({ node, state }) => {
+      state.preFencePending = true
+      state.preOwnFence = false
+      state.preFenceLang = getLanguageFromClass(node.attributes?.class)
+    },
+    exit: ({ node, state }) => {
+      const ownFence = state.preOwnFence
+      state.preFencePending = false
+      state.preOwnFence = false
+      // No own fence means a <code> child emitted it, or the <pre> had no
+      // non-whitespace content (empty block stripped) — nothing to close.
+      if (!ownFence) {
+        return undefined
+      }
+      const liDepth = node.depthMap[TAG_LI] || 0
+      if (liDepth > 0) {
+        const indent = state.listIndent
+        return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
+      }
+      return `\n${MARKDOWN_CODE_BLOCK}`
+    },
+  },
   [TAG_CODE]: {
     enter: ({ node, state }) => {
       if ((node.depthMap[TAG_PRE] || 0) > 0) {
+        // The enclosing <pre> already opened its own fence (e.g. <pre> with
+        // mixed text and <code> children); don't emit a nested fence.
+        if (state.preOwnFence) {
+          return undefined
+        }
+        // This <code> owns the <pre>'s fence; cancel the deferred pre fence.
+        state.preFencePending = false
         const language = getLanguageFromClass(node.attributes?.class)
         const liDepth = node.depthMap[TAG_LI] || 0
         if (liDepth > 0) {
@@ -378,6 +412,10 @@ export const tagHandlers: Record<number, TagHandler> = {
     },
     exit: ({ node, state }) => {
       if ((node.depthMap[TAG_PRE] || 0) > 0) {
+        // The enclosing <pre> owns the fence; this <code> emitted no opener.
+        if (state.preOwnFence) {
+          return undefined
+        }
         const liDepth = node.depthMap[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent
