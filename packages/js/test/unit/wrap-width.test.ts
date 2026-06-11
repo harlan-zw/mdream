@@ -41,7 +41,7 @@ describe('wrap width (issue #106)', () => {
     for (const line of wrap('<blockquote><p>The quick brown fox jumps over the lazy dog and runs further still each day.</p></blockquote>', 40).split('\n'))
       expect(line.startsWith('> ')).toBe(true)
     const list = wrap('<ul><li>The quick brown fox jumps over the lazy dog repeatedly without ever getting tired</li></ul>', 40).split('\n')
-    expect(list[0].startsWith('- ')).toBe(true)
+    expect(list[0]!.startsWith('- ')).toBe(true)
     for (const line of list.slice(1))
       expect(line.startsWith('  ')).toBe(true)
   })

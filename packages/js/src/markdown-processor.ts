@@ -171,7 +171,7 @@ function canWrapHere(depthMap: Uint8Array): boolean {
 function currentColumn(buffer: string[]): number {
   let col = 0
   for (let i = buffer.length - 1; i >= 0; i--) {
-    const s = buffer[i]
+    const s = buffer[i]!
     const nl = s.lastIndexOf('\n')
     if (nl >= 0) {
       return col + [...s.slice(nl + 1)].length
