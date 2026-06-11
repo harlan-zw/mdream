@@ -2019,3 +2019,35 @@ fn wrap_works_across_streaming_chunks() {
     out.push_str(&stream.finish());
     assert_eq!(out.trim_end(), oneshot);
 }
+
+#[test]
+fn wrap_nested_blockquote_in_list_keeps_structure() {
+    // Continuation prefix must follow the real nesting order: a blockquote
+    // inside a list item indents (list) then quotes (`  > `), keeping the
+    // quoted content within the list item's column.
+    let out = convert_wrapped(
+        "<ul><li><blockquote><p>The quick brown fox jumps over the lazy dog every day</p></blockquote></li></ul>",
+        30,
+    );
+    for line in out.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        // Every quoted line stays inside the list item: indent before the `>`.
+        assert!(line.starts_with("- ") || line.starts_with("  > "), "wrong nesting prefix: {line:?}");
+    }
+}
+
+#[test]
+fn wrap_nested_list_in_blockquote_keeps_structure() {
+    // A list inside a blockquote quotes first, then indents (`>   `).
+    let out = convert_wrapped(
+        "<blockquote><ul><li>The quick brown fox jumps over the lazy dog every day</li></ul></blockquote>",
+        30,
+    );
+    let mut lines = out.lines();
+    assert!(lines.next().unwrap().starts_with("> - "));
+    for line in lines {
+        assert!(line.starts_with(">   "), "list continuation left the blockquote: {line:?}");
+    }
+}

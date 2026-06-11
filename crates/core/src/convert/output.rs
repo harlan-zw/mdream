@@ -527,21 +527,29 @@ impl ConvertState {
     }
 
     /// Continuation prefix re-emitted at the start of each wrapped line so the
-    /// wrapped text stays inside its block context (blockquote markers and/or
-    /// list-item indentation).
+    /// wrapped text stays inside its block context. Built by walking the open
+    /// ancestor stack outermost-first so blockquote markers (`> `) and list-item
+    /// indentation interleave in the real nesting order: `<li><blockquote>` →
+    /// `  > `, `<blockquote><li>` → `>   `. A flat "all quotes then all indent"
+    /// prefix would corrupt the Markdown structure of nested blocks.
     fn wrap_continuation_prefix(&self) -> String {
-        let bq = self.depth_map[TAG_BLOCKQUOTE as usize] as usize;
         let mut p = String::new();
-        if bq > 0 {
-            if bq < BQ_PREFIXES.len() {
-                p.push_str(BQ_PREFIXES[bq]);
-            } else {
-                for _ in 0..bq {
-                    p.push_str("> ");
+        let mut li_idx = 0usize;
+        for node in &self.stack {
+            match node.tag_id {
+                Some(TAG_BLOCKQUOTE) => p.push_str("> "),
+                Some(TAG_LI) => {
+                    // Each open <li> contributes its marker-width of spaces, in
+                    // the same order they were pushed onto list_indent_widths.
+                    let w = self.list_indent_widths.get(li_idx).copied().unwrap_or(2) as usize;
+                    for _ in 0..w {
+                        p.push(' ');
+                    }
+                    li_idx += 1;
                 }
+                _ => {}
             }
         }
-        p.push_str(&self.list_indent);
         p
     }
 

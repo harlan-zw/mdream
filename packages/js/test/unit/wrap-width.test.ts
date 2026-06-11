@@ -46,6 +46,24 @@ describe('wrap width (issue #106)', () => {
       expect(line.startsWith('  ')).toBe(true)
   })
 
+  it('keeps nested blockquote-in-list structure when wrapping', () => {
+    // Continuation prefix must follow real nesting order: indent (list) then
+    // quote (`  > `), keeping quoted content inside the list item.
+    const out = wrap('<ul><li><blockquote><p>The quick brown fox jumps over the lazy dog every day</p></blockquote></li></ul>', 30)
+    for (const line of out.split('\n')) {
+      if (line.trim() === '')
+        continue
+      expect(line.startsWith('- ') || line.startsWith('  > ')).toBe(true)
+    }
+  })
+
+  it('keeps nested list-in-blockquote structure when wrapping', () => {
+    const lines = wrap('<blockquote><ul><li>The quick brown fox jumps over the lazy dog every day</li></ul></blockquote>', 30).split('\n')
+    expect(lines[0]!.startsWith('> - ')).toBe(true)
+    for (const line of lines.slice(1))
+      expect(line.startsWith('>   ')).toBe(true)
+  })
+
   it('wraps identically across streaming chunks', async () => {
     const html = '<p>The quick brown fox jumps over the lazy dog and then keeps on running well past the edge of the field.</p>'
     const oneshot = wrap(html, 40)
