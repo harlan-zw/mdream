@@ -85,11 +85,14 @@ fn parse_options(options: &JsValue) -> mdream::types::HTMLToMarkdownOptions {
         Some(parse_plugins(&plugins_val))
     };
 
+    let wrap_width = get_prop(options, "wrapWidth").as_f64().map(|n| n as usize);
+
     mdream::types::HTMLToMarkdownOptions {
         origin,
         clean_urls,
         clean: None,
         plugins,
+        wrap_width,
     }
 }
 
