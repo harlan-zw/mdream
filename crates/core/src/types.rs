@@ -507,6 +507,12 @@ pub struct HTMLToMarkdownOptions {
     pub clean: Option<CleanConfig>,
     /// Plugin configuration (filters, frontmatter, extraction, tag overrides, …).
     pub plugins: Option<PluginConfig>,
+    /// Hard-wrap prose at this many characters, breaking on word boundaries.
+    ///
+    /// Applied inline during conversion (no extra pass), so it is zero-cost when
+    /// unset. `Some(0)` and `None` both disable wrapping. Code (`<pre>`/`<code>`),
+    /// tables, and headings are never wrapped.
+    pub wrap_width: Option<usize>,
 }
 
 impl HTMLToMarkdownOptions {
@@ -560,6 +566,19 @@ impl HTMLToMarkdownOptions {
     #[must_use]
     pub fn with_plugins(mut self, plugins: PluginConfig) -> Self {
         self.plugins = Some(plugins);
+        self
+    }
+
+    /// Hard-wrap prose at `width` characters on word boundaries.
+    ///
+    /// ```rust
+    /// use mdream::HTMLToMarkdownOptions;
+    ///
+    /// let opts = HTMLToMarkdownOptions::default().with_wrap_width(80);
+    /// ```
+    #[must_use]
+    pub fn with_wrap_width(mut self, width: usize) -> Self {
+        self.wrap_width = Some(width);
         self
     }
 }

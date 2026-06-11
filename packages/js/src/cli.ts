@@ -11,11 +11,13 @@ import { withMinimalPreset } from './preset/minimal'
 interface CliOptions {
   origin?: string
   preset?: string
+  wrapWidth?: number
 }
 
 async function streamingConvert(options: CliOptions = {}) {
   let conversionOptions: Partial<MdreamOptions> = {
     origin: options.origin,
+    wrapWidth: options.wrapWidth ? Number(options.wrapWidth) || undefined : undefined,
   }
 
   if (options.preset === 'minimal') {
@@ -40,6 +42,7 @@ const cli = cac()
 cli.command('[options]', 'Convert HTML from stdin to Markdown on stdout (JS engine)')
   .option('--origin <url>', 'Origin URL for resolving relative image paths')
   .option('--preset <preset>', 'Conversion presets: minimal')
+  .option('--wrap-width <n>', 'Hard-wrap prose at <n> characters on word boundaries')
   .action(async (_, opts) => {
     await streamingConvert(opts)
   })

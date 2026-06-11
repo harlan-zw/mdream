@@ -147,6 +147,103 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
 }
 
 /**
+ * Whether prose at the current position may be hard-wrapped. Code blocks
+ * (`<pre>`/`<code>`), table cells, and headings are emitted verbatim so wrapping
+ * never corrupts fences, table rows, or heading lines. Parity with the Rust
+ * engine's `can_wrap_here`.
+ */
+function canWrapHere(depthMap: Uint8Array): boolean {
+  if (depthMap[TAG_PRE] || depthMap[TAG_CODE] || depthMap[TAG_TD] || depthMap[TAG_TH]) {
+    return false
+  }
+  for (let h = TAG_H1; h <= TAG_H6; h++) {
+    if (depthMap[h])
+      return false
+  }
+  return true
+}
+
+/**
+ * Character count (code points) of the current unterminated output line, i.e.
+ * since the last newline across the buffer chunks. Includes any block prefix
+ * (`> `, list indent) already written for the line.
+ */
+function currentColumn(buffer: string[]): number {
+  let col = 0
+  for (let i = buffer.length - 1; i >= 0; i--) {
+    const s = buffer[i]
+    const nl = s.lastIndexOf('\n')
+    if (nl >= 0) {
+      return col + [...s.slice(nl + 1)].length
+    }
+    col += [...s].length
+  }
+  return col
+}
+
+/**
+ * Continuation prefix re-emitted at the start of each wrapped line so wrapped
+ * text stays inside its block context (blockquote markers + list indentation).
+ */
+function wrapContinuationPrefix(state: MarkdownState): string {
+  let p = ''
+  const bq = state.depthMap[TAG_BLOCKQUOTE] || 0
+  for (let i = 0; i < bq; i++) {
+    p += '> '
+  }
+  p += state.listIndent
+  return p
+}
+
+/**
+ * Hard-wrap `value` on spaces so no output line exceeds `width` code points.
+ * Words are never split, so an oversized token (e.g. a URL) overflows rather
+ * than breaking, and a break only ever replaces an inter-word space. `value`
+ * already carries any significant leading/trailing space (added upstream), so
+ * those boundary spaces are preserved. Parity with the Rust `push_text_wrapped`.
+ */
+function wrapText(value: string, col: number, width: number, prefix: string): string {
+  const leading = value.charCodeAt(0) === 32
+  const trailing = value.charCodeAt(value.length - 1) === 32
+  const prefixLen = [...prefix].length
+  let out = ''
+  let first = true
+  let i = 0
+  const len = value.length
+  while (i < len) {
+    // Manual split on single spaces to avoid an intermediate array allocation.
+    let next = value.indexOf(' ', i)
+    if (next === -1)
+      next = len
+    if (next > i) {
+      const word = value.slice(i, next)
+      const wordLen = [...word].length
+      const needSpace = first ? leading : true
+      if (needSpace && col > prefixLen && col + 1 + wordLen > width) {
+        out += `\n${prefix}`
+        col = prefixLen
+      }
+      else if (needSpace) {
+        out += ' '
+        col += 1
+      }
+      out += word
+      col += wordLen
+      first = false
+    }
+    i = next + 1
+  }
+  if (trailing && out !== '' && !out.endsWith(' ') && !out.endsWith('\n')) {
+    out += ' '
+  }
+  // Whitespace-only value collapses to a single separator space.
+  if (out === '' && (leading || trailing)) {
+    out = ' '
+  }
+  return out
+}
+
+/**
  * Calculate newline configuration based on tag handler spacing config
  */
 function calculateNewLineConfig(node: ElementNode): readonly [number, number] {
@@ -328,8 +425,16 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           textNode.value = value
         }
 
-        state.buffer.push(textNode.value)
-        state.lastContentCache = textNode.value
+        const wrapWidth = state.options?.wrapWidth
+        if (wrapWidth && canWrapHere(state.depthMap)) {
+          const wrapped = wrapText(textNode.value, currentColumn(state.buffer), wrapWidth, wrapContinuationPrefix(state))
+          state.buffer.push(wrapped)
+          state.lastContentCache = wrapped
+        }
+        else {
+          state.buffer.push(textNode.value)
+          state.lastContentCache = textNode.value
+        }
       }
       state.lastTextNode = textNode
       return

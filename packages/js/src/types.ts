@@ -136,6 +136,14 @@ export interface EngineOptions {
    * final markdown (sync API only for `fragments`).
    */
   clean?: boolean | CleanOptions
+
+  /**
+   * Hard-wrap prose at this many characters, breaking on word boundaries.
+   * Applied inline during conversion (zero-cost when unset). Code blocks
+   * (`<pre>`/`<code>`), tables, and headings are never wrapped. `0` disables
+   * wrapping.
+   */
+  wrapWidth?: number
 }
 
 // Standard DOM node types
