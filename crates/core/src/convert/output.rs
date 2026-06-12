@@ -479,7 +479,9 @@ impl ConvertState {
             text
         };
 
-        if self.should_add_spacing_before_text(last_char, text) {
+        if self.wrap_width != 0 && self.can_wrap_here() {
+            self.push_text_wrapped(text, last_char);
+        } else if self.should_add_spacing_before_text(last_char, text) {
             self.buffer.push(' ');
             self.last_content_cache_len = text.len() + 1;
             self.buffer.push_str(text);
@@ -493,6 +495,110 @@ impl ConvertState {
         self.last_text_node_depth = depth;
         self.last_text_node_index = index;
         self.last_node_is_inline = false;
+    }
+
+    /// Whether prose at the current position may be hard-wrapped. Code blocks
+    /// (`<pre>`/`<code>`), table cells, and headings are emitted verbatim so
+    /// wrapping never corrupts fences, table rows, or heading lines.
+    #[inline]
+    fn can_wrap_here(&self) -> bool {
+        self.depth_map[TAG_PRE as usize] == 0
+            && self.depth_map[TAG_CODE as usize] == 0
+            && !self.in_table_cell()
+            && self.depth_map[TAG_H1 as usize] == 0
+            && self.depth_map[TAG_H2 as usize] == 0
+            && self.depth_map[TAG_H3 as usize] == 0
+            && self.depth_map[TAG_H4 as usize] == 0
+            && self.depth_map[TAG_H5 as usize] == 0
+            && self.depth_map[TAG_H6 as usize] == 0
+    }
+
+    /// Character count of the current (unterminated) buffer line, i.e. since the
+    /// last `\n`. This is the live output column, including any block prefix
+    /// (`> `, list indent) already written for the line.
+    #[inline]
+    fn current_column(&self) -> usize {
+        let bytes = self.buffer.as_bytes();
+        let mut i = bytes.len();
+        while i > 0 && bytes[i - 1] != b'\n' {
+            i -= 1;
+        }
+        self.buffer[i..].chars().count()
+    }
+
+    /// Continuation prefix re-emitted at the start of each wrapped line so the
+    /// wrapped text stays inside its block context. Built by walking the open
+    /// ancestor stack outermost-first so blockquote markers (`> `) and list-item
+    /// indentation interleave in the real nesting order: `<li><blockquote>` →
+    /// `  > `, `<blockquote><li>` → `>   `. A flat "all quotes then all indent"
+    /// prefix would corrupt the Markdown structure of nested blocks.
+    fn wrap_continuation_prefix(&self) -> String {
+        let mut p = String::new();
+        let mut li_idx = 0usize;
+        for node in &self.stack {
+            match node.tag_id {
+                Some(TAG_BLOCKQUOTE) => p.push_str("> "),
+                Some(TAG_LI) => {
+                    // Each open <li> contributes its marker-width of spaces, in
+                    // the same order they were pushed onto list_indent_widths.
+                    let w = self.list_indent_widths.get(li_idx).copied().unwrap_or(2) as usize;
+                    for _ in 0..w {
+                        p.push(' ');
+                    }
+                    li_idx += 1;
+                }
+                _ => {}
+            }
+        }
+        p
+    }
+
+    /// Push `text` into the buffer, hard-wrapping on spaces so no output line
+    /// exceeds `self.wrap_width` characters. Words are never split, so a single
+    /// token longer than the width (e.g. a URL) overflows rather than breaking.
+    /// A break only ever replaces an inter-word space, so words joined across
+    /// inline boundaries (e.g. `foo**bar**`) stay intact.
+    fn push_text_wrapped(&mut self, text: &str, last_char: u8) {
+        let width = self.wrap_width;
+        // A leading/trailing space in `text` is significant inter-word separation
+        // across an inline boundary (e.g. `… </a> now`); the non-wrap path keeps
+        // it by pushing `text` verbatim, so preserve it here too. `split(' ')`
+        // would otherwise discard it as an empty segment.
+        let leading_space = text.starts_with(' ');
+        let trailing_space = text.ends_with(' ');
+        let first_needs_space = leading_space || self.should_add_spacing_before_text(last_char, text);
+        let prefix = self.wrap_continuation_prefix();
+        let prefix_len = prefix.chars().count();
+        let buf_start = self.buffer.len();
+        let mut col = self.current_column();
+        let mut first = true;
+
+        for word in text.split(' ') {
+            if word.is_empty() {
+                continue;
+            }
+            let word_len = word.chars().count();
+            let need_space = if first { first_needs_space } else { true };
+
+            if need_space && col > prefix_len && col + 1 + word_len > width {
+                self.buffer.push('\n');
+                self.buffer.push_str(&prefix);
+                col = prefix_len;
+            } else if need_space {
+                self.buffer.push(' ');
+                col += 1;
+            }
+            self.buffer.push_str(word);
+            col += word_len;
+            first = false;
+        }
+
+        // Preserve a trailing separator space (unless we emitted nothing or the
+        // line already ends in whitespace) so the next inline run stays separated.
+        if trailing_space && !matches!(self.buffer.as_bytes().last(), Some(b' ' | b'\n') | None) {
+            self.buffer.push(' ');
+        }
+        self.last_content_cache_len = self.buffer.len() - buf_start;
     }
 
     /// Emit frontmatter content.

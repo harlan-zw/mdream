@@ -132,6 +132,10 @@ pub struct ConvertState {
     // Streaming
     last_yielded_length: usize,
 
+    /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
+    /// hot path — a single integer compare). Code/tables/headings are exempt.
+    wrap_width: usize,
+
     // Clean mode — bitmask for zero-cost when disabled
     clean_flags: u8,
     /// Set when current TAG_A has a meaningless href and should be rendered as plain text
@@ -178,6 +182,8 @@ impl ConvertState {
     }
 
     pub fn new(options: HTMLToMarkdownOptions, capacity: usize) -> Self {
+        // Read wrap width before `options` is moved into the struct below.
+        let options_wrap_width = options.wrap_width.unwrap_or(0);
         let mut s = Self {
             depth_map: [0; MAX_TAG_ID],
             depth: 0,
@@ -240,6 +246,7 @@ impl ConvertState {
             last_node_is_inline: false,
             last_yielded_length: 0,
 
+            wrap_width: options_wrap_width,
             clean_flags: 0,
             skip_current_link: false,
             link_bracket_pos: 0,

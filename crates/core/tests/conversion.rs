@@ -1920,3 +1920,134 @@ fn script_string_with_multibyte_content_does_not_close_early() {
     let html = "<script>var s = \"héllo – </script> wörld\"; run();</script><p>ok</p>";
     assert_eq!(convert(html), "ok");
 }
+
+// ── Wrap width (issue #106) ──
+
+fn convert_wrapped(html: &str, width: usize) -> String {
+    html_to_markdown(html, HTMLToMarkdownOptions::default().with_wrap_width(width))
+}
+
+#[test]
+fn wrap_disabled_by_default_is_byte_identical() {
+    let html = "<p>The quick brown fox jumps over the lazy dog and then keeps on running well past the edge.</p>";
+    assert_eq!(convert(html), html_to_markdown(html, HTMLToMarkdownOptions::default()));
+    // Some(0) is also a no-op.
+    assert_eq!(convert(html), convert_wrapped(html, 0));
+}
+
+#[test]
+fn wrap_breaks_prose_on_word_boundaries() {
+    let out = convert_wrapped(
+        "<p>The quick brown fox jumps over the lazy dog and then keeps on running well past the edge.</p>",
+        40,
+    );
+    assert_eq!(
+        out,
+        "The quick brown fox jumps over the lazy\ndog and then keeps on running well past\nthe edge.",
+    );
+    for line in out.lines() {
+        assert!(line.chars().count() <= 40, "line exceeds width: {line:?}");
+    }
+}
+
+#[test]
+fn wrap_preserves_inline_spacing() {
+    // Boundary spaces around inline elements must survive wrapping.
+    assert_eq!(
+        convert_wrapped("<p>see <em>this</em> word and more words after the emphasis here please now</p>", 40),
+        "see _this_ word and more words after the\nemphasis here please now",
+    );
+}
+
+#[test]
+fn wrap_never_splits_a_long_token() {
+    let out = convert_wrapped(
+        "<p>A superlongunbreakabletokenthatislongerthanthewrapwidthsoitoverflows end.</p>",
+        40,
+    );
+    // The oversized word lands alone on its own line, intact.
+    assert!(out.contains("superlongunbreakabletokenthatislongerthanthewrapwidthsoitoverflows"));
+}
+
+#[test]
+fn wrap_skips_code_tables_and_headings() {
+    // Fenced code is emitted verbatim.
+    let code = convert_wrapped(
+        "<pre><code>the quick brown fox jumps over the lazy dog and keeps going forever no wrap here</code></pre>",
+        40,
+    );
+    assert!(code.contains("the quick brown fox jumps over the lazy dog and keeps going forever no wrap here"));
+    // Headings are not wrapped.
+    let heading = convert_wrapped("<h1>The quick brown fox jumps over the lazy dog and never stops</h1>", 40);
+    assert_eq!(heading, "# The quick brown fox jumps over the lazy dog and never stops");
+    // Table rows are not wrapped (would corrupt the row).
+    let table = convert_wrapped("<table><tr><th>The quick brown fox jumps over the lazy dog header</th></tr></table>", 40);
+    assert_eq!(table.lines().next().unwrap(), "| The quick brown fox jumps over the lazy dog header |");
+}
+
+#[test]
+fn wrap_indents_blockquote_and_list_continuations() {
+    let bq = convert_wrapped(
+        "<blockquote><p>The quick brown fox jumps over the lazy dog and runs further still each day.</p></blockquote>",
+        40,
+    );
+    for line in bq.lines() {
+        assert!(line.starts_with("> "), "blockquote continuation lost prefix: {line:?}");
+    }
+    let list = convert_wrapped(
+        "<ul><li>The quick brown fox jumps over the lazy dog repeatedly without ever getting tired</li></ul>",
+        40,
+    );
+    let mut lines = list.lines();
+    assert!(lines.next().unwrap().starts_with("- "));
+    for line in lines {
+        assert!(line.starts_with("  "), "list continuation lost indent: {line:?}");
+    }
+}
+
+#[test]
+fn wrap_works_across_streaming_chunks() {
+    // A single long paragraph split mid-word across chunks must still wrap
+    // identically to the one-shot conversion (no double spaces, correct breaks).
+    let html = "<p>The quick brown fox jumps over the lazy dog and then keeps on running well past the edge of the field.</p>";
+    let oneshot = convert_wrapped(html, 40);
+    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default().with_wrap_width(40));
+    let mut out = String::new();
+    let mid = html.len() / 2;
+    out.push_str(&stream.process_chunk(&html[..mid]));
+    out.push_str(&stream.process_chunk(&html[mid..]));
+    out.push_str(&stream.finish());
+    assert_eq!(out.trim_end(), oneshot);
+}
+
+#[test]
+fn wrap_nested_blockquote_in_list_keeps_structure() {
+    // Continuation prefix must follow the real nesting order: a blockquote
+    // inside a list item indents (list) then quotes (`  > `), keeping the
+    // quoted content within the list item's column.
+    let out = convert_wrapped(
+        "<ul><li><blockquote><p>The quick brown fox jumps over the lazy dog every day</p></blockquote></li></ul>",
+        30,
+    );
+    for line in out.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        // Every quoted line stays inside the list item: indent before the `>`.
+        assert!(line.starts_with("- ") || line.starts_with("  > "), "wrong nesting prefix: {line:?}");
+    }
+}
+
+#[test]
+fn wrap_nested_list_in_blockquote_keeps_structure() {
+    // A list inside a blockquote quotes first, then indents (`>   `).
+    let out = convert_wrapped(
+        "<blockquote><ul><li>The quick brown fox jumps over the lazy dog every day</li></ul></blockquote>",
+        30,
+    );
+    let mut lines = out.lines();
+    assert!(lines.next().unwrap().starts_with("> - "));
+    for line in lines {
+        assert!(line.starts_with(">   "), "list continuation left the blockquote: {line:?}");
+    }
+}

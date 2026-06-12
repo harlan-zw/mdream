@@ -72,6 +72,12 @@ export interface MdreamOptions {
   extraction?: Record<string, (element: ExtractedElement) => void>
   /** Tag overrides. String values act as aliases */
   tagOverrides?: Record<string, TagOverride | string>
+  /**
+   * Hard-wrap prose at this many characters, breaking on word boundaries.
+   * Applied inline during conversion (zero-cost when unset). Code blocks,
+   * tables, and headings are never wrapped. `0` disables wrapping.
+   */
+  wrapWidth?: number
 }
 
 const MINIMAL_FILTER_EXCLUDE = ['form', 'fieldset', 'object', 'embed', 'footer', 'aside', 'iframe', 'input', 'textarea', 'select', 'button', 'nav'] as const
@@ -145,7 +151,7 @@ function resolveOptions(options: Partial<MdreamOptions>): ResolvedOptions {
   const { cleanUrls, clean } = resolveCleanConfig(options, minimal)
 
   return {
-    napiOpts: { origin: options.origin, cleanUrls, clean, plugins },
+    napiOpts: { origin: options.origin, cleanUrls, clean, plugins, wrapWidth: options.wrapWidth },
     extractionHandlers,
     frontmatterCallback,
   }
