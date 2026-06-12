@@ -213,6 +213,13 @@ interface MdreamOptions {
 
   /** Override tag rendering behavior. String values act as aliases. */
   tagOverrides?: Record<string, TagOverride | string>
+
+  /**
+   * Hard-wrap prose at this many characters, breaking on word boundaries.
+   * Applied inline during conversion (zero-cost when unset). Code blocks,
+   * tables, and headings are never wrapped. `0` (or unset) disables wrapping.
+   */
+  wrapWidth?: number
 }
 ```
 
@@ -230,6 +237,13 @@ interface EngineOptions {
   origin?: string
   clean?: boolean | CleanOptions
   plugins?: BuiltinPlugins
+
+  /**
+   * Hard-wrap prose at this many characters, breaking on word boundaries.
+   * Code blocks, tables, and headings are never wrapped. `0` (or unset)
+   * disables wrapping.
+   */
+  wrapWidth?: number
 }
 
 interface BuiltinPlugins {
@@ -872,6 +886,7 @@ cat index.html \
 |--------|-------------|
 | `--origin <url>` | Base URL for resolving relative links and images |
 | `--preset minimal` | Enable the minimal preset |
+| `--wrap-width <n>` | Hard-wrap prose at `n` characters (code, tables, and headings are never wrapped) |
 | `-h`, `--help` | Display help information |
 
 The CLI reads HTML from stdin and writes Markdown to stdout. It uses the streaming API internally.
