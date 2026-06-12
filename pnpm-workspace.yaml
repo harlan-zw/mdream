@@ -18,7 +18,7 @@ packages:
   - '!examples/nextjs'
 
 overrides:
-  emnapi: ^1.10.0
+  emnapi: ^1.11.0
   # fflate 0.8.3 emits a trailing empty Gunzip chunk that breaks
   # @arethetypeswrong/cli 0.18.2 tarball extraction (attw --pack crashes
   # with "Cannot read properties of undefined (reading 'filename')").
@@ -30,21 +30,21 @@ catalog:
   '@antfu/eslint-config': ^9.0.0
   '@arethetypeswrong/cli': ^0.18.3
   '@clack/prompts': ^1.5.1
-  '@cloudflare/vitest-pool-workers': ^0.16.13
-  '@emnapi/core': ^1.10.0
-  '@emnapi/runtime': ^1.10.0
-  '@emnapi/wasi-threads': ^1.2.1
-  '@napi-rs/cli': ^3.7.0
-  '@napi-rs/wasm-runtime': ^1.1.4
+  '@cloudflare/vitest-pool-workers': ^0.16.14
+  '@emnapi/core': ^1.11.0
+  '@emnapi/runtime': ^1.11.0
+  '@emnapi/wasi-threads': ^2.0.0
+  '@napi-rs/cli': ^3.7.1
+  '@napi-rs/wasm-runtime': ^1.1.5
   '@nuxt/devtools': 2.4.0
-  '@nuxt/kit': ^4.4.7
+  '@nuxt/kit': ^4.4.8
   '@nuxt/module-builder': ^1.0.2
-  '@nuxt/schema': ^4.4.7
+  '@nuxt/schema': ^4.4.8
   '@nuxt/test-utils': ^4.0.3
   '@tybys/wasm-util': ^0.10.2
-  '@types/node': ^25.9.2
+  '@types/node': ^25.9.3
   '@types/picomatch': ^4.0.3
-  '@vercel/ncc': ^0.38.4
+  '@vercel/ncc': ^0.44.0
   '@vitejs/plugin-vue': ^6.0.7
   '@vitest/browser': ^4.1.8
   '@vitest/browser-playwright': ^4.1.8
@@ -60,7 +60,7 @@ catalog:
   express: ^5.2.1
   hookable: ^6.1.1
   knip: ^6.16.1
-  nuxt: ^4.4.7
+  nuxt: ^4.4.8
   nuxt-site-config: ^4.0.8
   nypm: ^0.6.6
   obuild: ^0.4.36
@@ -78,7 +78,7 @@ catalog:
   vitest: ^4.1.8
   vue: ^3.5.35
   vue-router: ^5.1.0
-  wrangler: ^4.98.0
+  wrangler: ^4.99.0
 
 catalogs:
   bench:
