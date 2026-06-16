@@ -767,20 +767,6 @@ function processOpeningTag(
     closeNode(state.currentNode, state, handleEvent)
   }
 
-  // Browser recovery: a non-head start tag while <head> is still open means the
-  // page never closed its head (no </head>/<body>). Auto-close head (and anything
-  // wrongly opened inside it) so body content is parsed as flow content with
-  // normal block spacing, instead of inheriting head's whitespace collapsing.
-  if ((state.depthMap[TAG_HEAD] || 0) > 0 && !HEAD_CONTENT_TAGS.has(tagId)) {
-    while (state.currentNode && state.currentNode.tagId !== TAG_HEAD) {
-      closeNode(state.currentNode, state, handleEvent)
-    }
-    const headNode = state.currentNode
-    if (headNode && headNode.tagId === TAG_HEAD) {
-      closeNode(headNode, state, handleEvent)
-    }
-  }
-
   const tagHandler = state.tagOverrideHandlers?.get(tagName) ?? tagHandlers[tagId]
   const result = processTagAttributes(htmlChunk, i, tagHandler)
 
@@ -790,6 +776,22 @@ function processOpeningTag(
       newPosition: i,
       remainingText: `<${tagName}${result.attrBuffer}`,
       selfClosing: false,
+    }
+  }
+
+  // Browser recovery: a non-head start tag while <head> is still open means the
+  // page never closed its head (no </head>/<body>). Auto-close head (and anything
+  // wrongly opened inside it) so body content is parsed as flow content with
+  // normal block spacing, instead of inheriting head's whitespace collapsing.
+  // Runs only after the tag is confirmed complete so incomplete/chunk-split start
+  // tags do not mutate parser state or emit a premature head close.
+  if ((state.depthMap[TAG_HEAD] || 0) > 0 && !HEAD_CONTENT_TAGS.has(tagId)) {
+    while (state.currentNode && state.currentNode.tagId !== TAG_HEAD) {
+      closeNode(state.currentNode, state, handleEvent)
+    }
+    const headNode = state.currentNode
+    if (headNode && headNode.tagId === TAG_HEAD) {
+      closeNode(headNode, state, handleEvent)
     }
   }
 
