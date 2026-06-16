@@ -710,6 +710,28 @@ impl ConvertState {
         std::mem::take(&mut self.buffer)
     }
 
+    /// Commit end-of-input state: flush trailing buffered text and close any
+    /// elements left open. The streaming parser keeps trailing text and unclosed
+    /// elements pending because a later chunk might continue them; at true EOF
+    /// they must be committed so trailing content is not dropped (e.g. a document
+    /// that ends mid-paragraph like `<p>a<p>b`, or any unclosed fragment).
+    ///
+    /// `leftover` is the residual returned by the final `process_html`. Pure
+    /// trailing text (no leading `<`) is emitted; a residual that is an
+    /// incomplete start tag (leading `<`) is dropped, matching the browser
+    /// tokenizer's EOF-in-tag behaviour. The text-buffer flags set while the
+    /// trailing text was scanned persist on `self`, so `process_text_buffer`
+    /// commits it exactly as if the next tag had triggered the flush.
+    pub fn finalize(&mut self, leftover: &str) {
+        if !leftover.is_empty() && leftover.as_bytes()[0] != LT_CHAR {
+            let mut buf = leftover.to_string();
+            self.process_text_buffer(&mut buf);
+        }
+        while !self.stack.is_empty() {
+            self.close_node();
+        }
+    }
+
     pub fn get_markdown_chunk(&mut self) -> String {
         let current_content = self.buffer.trim_start();
         let content_len = current_content.len();

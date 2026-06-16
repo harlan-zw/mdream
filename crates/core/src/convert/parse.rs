@@ -16,6 +16,135 @@ fn is_head_content_tag(tag_id: Option<u8>) -> bool {
     )
 }
 
+/// Start tags that cannot appear inside a `<p>` and therefore imply its end
+/// (HTML §13.1.2.4 optional tags + the "in body" insertion mode, where these
+/// tags first close an open `<p>` in button scope). Block containers, headings,
+/// lists, tables, and the list-item/definition tags all close an open `<p>`.
+///
+/// A compile-time `[bool; MAX_TAG_ID]` table, not a `match`: this is evaluated
+/// for every start tag opened while a `<p>` is on the stack (most inline tags in
+/// prose), so the hot path is a single indexed load, matching the table-driven
+/// style of `TAG_HANDLERS` and `depth_map`.
+const CLOSES_P: [bool; MAX_TAG_ID] = {
+    let mut t = [false; MAX_TAG_ID];
+    t[TAG_DIV as usize] = true;
+    t[TAG_P as usize] = true;
+    t[TAG_UL as usize] = true;
+    t[TAG_OL as usize] = true;
+    t[TAG_DL as usize] = true;
+    t[TAG_LI as usize] = true;
+    t[TAG_DD as usize] = true;
+    t[TAG_DT as usize] = true;
+    t[TAG_TABLE as usize] = true;
+    t[TAG_H1 as usize] = true;
+    t[TAG_H2 as usize] = true;
+    t[TAG_H3 as usize] = true;
+    t[TAG_H4 as usize] = true;
+    t[TAG_H5 as usize] = true;
+    t[TAG_H6 as usize] = true;
+    t[TAG_BLOCKQUOTE as usize] = true;
+    t[TAG_SECTION as usize] = true;
+    t[TAG_ARTICLE as usize] = true;
+    t[TAG_HEADER as usize] = true;
+    t[TAG_FOOTER as usize] = true;
+    t[TAG_NAV as usize] = true;
+    t[TAG_ASIDE as usize] = true;
+    t[TAG_PRE as usize] = true;
+    t[TAG_HR as usize] = true;
+    t[TAG_FORM as usize] = true;
+    t[TAG_FIELDSET as usize] = true;
+    t[TAG_FIGURE as usize] = true;
+    t[TAG_FIGCAPTION as usize] = true;
+    t[TAG_ADDRESS as usize] = true;
+    t[TAG_MAIN as usize] = true;
+    t[TAG_CENTER as usize] = true;
+    t[TAG_DETAILS as usize] = true;
+    t[TAG_SUMMARY as usize] = true;
+    t[TAG_DIALOG as usize] = true;
+    t
+};
+
+/// Start tags that can trigger any implied-end-tag recovery branch below. The
+/// common inline tags (`code`, `em`, `span`, ...) otherwise skip the whole
+/// recovery dispatch instead of loading unrelated depth counters and matching
+/// through recovery-only cases on every start tag.
+const NEEDS_IMPLIED_END_RECOVERY: [bool; MAX_TAG_ID] = {
+    let mut t = CLOSES_P;
+    t[TAG_A as usize] = true;
+    t[TAG_TD as usize] = true;
+    t[TAG_TH as usize] = true;
+    t[TAG_TR as usize] = true;
+    t[TAG_THEAD as usize] = true;
+    t[TAG_TBODY as usize] = true;
+    t[TAG_TFOOT as usize] = true;
+    t
+};
+
+#[inline]
+fn closes_p(tag_id: u8) -> bool {
+    CLOSES_P[tag_id as usize]
+}
+
+#[inline]
+fn needs_implied_end_recovery(tag_id: u8) -> bool {
+    (tag_id as usize) < MAX_TAG_ID && NEEDS_IMPLIED_END_RECOVERY[tag_id as usize]
+}
+
+/// "Button scope" terminators for closing a `<p>`: scanning up the open stack
+/// stops here so a `<p>` outside a table cell is never closed from inside one.
+/// `UL`/`OL`/`DL`/`LI` are added (a deviation from the bare spec list) to keep
+/// scans short; a `<p>` is always closed before any of these can become its
+/// ancestor, so they never hide a closable `<p>`.
+fn is_p_scope_boundary(tag_id: u8) -> bool {
+    matches!(
+        tag_id,
+        TAG_BUTTON | TAG_TD | TAG_TH | TAG_CAPTION | TAG_TABLE | TAG_TEMPLATE | TAG_HTML
+            | TAG_UL | TAG_OL | TAG_DL | TAG_LI
+    )
+}
+
+/// "List item scope" terminators for closing a `<li>`: a new `<li>` closes the
+/// previous one only within the same list, never across a nested list or table.
+fn is_li_scope_boundary(tag_id: u8) -> bool {
+    matches!(
+        tag_id,
+        TAG_UL | TAG_OL | TAG_TABLE | TAG_TD | TAG_TH | TAG_CAPTION | TAG_TEMPLATE | TAG_HTML
+    )
+}
+
+/// Scope terminators for closing a `<dt>`/`<dd>`: each closes the other within
+/// the same `<dl>`, never crossing into a nested list or table.
+fn is_dl_scope_boundary(tag_id: u8) -> bool {
+    matches!(
+        tag_id,
+        TAG_DL | TAG_UL | TAG_OL | TAG_LI | TAG_TABLE | TAG_TD | TAG_TH | TAG_CAPTION | TAG_TEMPLATE | TAG_HTML
+    )
+}
+
+/// "Table cell scope" terminators: a new `<td>`/`<th>` closes the current cell
+/// (and any inline content left open inside it), stopping at the row/section.
+fn is_cell_scope_boundary(tag_id: u8) -> bool {
+    matches!(
+        tag_id,
+        TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT | TAG_TABLE | TAG_CAPTION | TAG_TEMPLATE | TAG_HTML
+    )
+}
+
+/// Block-level terminators for closing an `<a>`: a nested `<a>` closes the open
+/// one (HTML forbids nested anchors — the adoption agency closes the outer),
+/// but only within the same block so a stray open `<a>` in another block is left
+/// alone. Closing intervening inline formatting matches the spec's reconstruction.
+fn is_a_scope_boundary(tag_id: u8) -> bool {
+    matches!(
+        tag_id,
+        TAG_P | TAG_DIV | TAG_LI | TAG_UL | TAG_OL | TAG_DL | TAG_DD | TAG_DT
+            | TAG_TABLE | TAG_TD | TAG_TH | TAG_TR | TAG_CAPTION | TAG_BLOCKQUOTE
+            | TAG_SECTION | TAG_ARTICLE | TAG_HEADER | TAG_FOOTER | TAG_NAV | TAG_ASIDE
+            | TAG_MAIN | TAG_FORM | TAG_FIELDSET | TAG_FIGURE | TAG_BUTTON
+            | TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6 | TAG_TEMPLATE | TAG_HTML
+    )
+}
+
 /// Whether an element is visually hidden, so the filter should drop it and its
 /// subtree: inline `display:none` / `visibility:hidden` / `position:absolute|fixed`,
 /// or the `hidden` attribute (except `hidden="until-found"`).
@@ -143,6 +272,40 @@ impl ConvertState {
         }
     }
 
+    /// Close open nodes from the top of the stack up to and including the nearest
+    /// node matching `target`, but only if it is found before `boundary` (in which
+    /// case nothing is closed). Implements implied end tags for `<p>`, `<li>`, and
+    /// `<dt>`/`<dd>`: the intervening unmatched nodes (inline formatting, unknown
+    /// elements) are closed along the way, mirroring the spec's "generate implied
+    /// end tags" step.
+    fn close_implied_to(&mut self, target: fn(u8) -> bool, boundary: fn(u8) -> bool) {
+        let mut close_count = 0usize;
+        let mut found = false;
+        for node in self.stack.iter().rev() {
+            match node.tag_id {
+                Some(id) if target(id) => { close_count += 1; found = true; break; }
+                Some(id) if boundary(id) => break,
+                _ => close_count += 1,
+            }
+        }
+        if found {
+            for _ in 0..close_count { self.close_node(); }
+        }
+    }
+
+    /// Close open table-internal nodes (cells, rows, sections) from the top while
+    /// they match `closeable`, stopping at the first node that does not (e.g. the
+    /// enclosing `<table>`). Implements implied end tags for `<tr>` (closes an open
+    /// cell + row) and `<thead>`/`<tbody>`/`<tfoot>` (closes cell + row + section).
+    fn close_table_context(&mut self, closeable: fn(u8) -> bool) {
+        while let Some(top) = self.stack.last() {
+            match top.tag_id {
+                Some(id) if closeable(id) => self.close_node(),
+                _ => break,
+            }
+        }
+    }
+
     pub(crate) fn process_opening_tag(&mut self, tag_name: &str, tag_id: Option<u8>, is_builtin: bool, html_chunk: &str, position: usize) -> OpeningTagResult {
         let tag_handler = tag_id.and_then(get_tag_handler);
         let needs_attrs = tag_handler.is_some_and(|h| h.needs_attributes)
@@ -167,6 +330,71 @@ impl ConvertState {
             }
             if self.stack.last().is_some_and(|n| n.tag_id == Some(TAG_HEAD)) {
                 self.close_node();
+            }
+        }
+
+        // Browser recovery: implied end tags (HTML §13.1.2.4 optional tags +
+        // tree-construction). Common malformed-but-valid markup omits end tags
+        // (`<p>a<p>b`, `<li>a<li>b`, `<td>a<td>b`, `<dt>t<dd>d`); auto-close the
+        // open element so the new sibling is not wrongly nested. Runs after the
+        // tag is confirmed complete (above) so a chunk-split start tag never
+        // mutates parser state or emits a premature close.
+        if let Some(id) = tag_id
+            && needs_implied_end_recovery(id) {
+            match id {
+                // A nested <a> closes the open one (anchors cannot nest), so the
+                // markdown is two adjacent links rather than invalid nested `[..]`.
+                TAG_A if self.depth_map[TAG_A as usize] > 0 => {
+                    self.close_implied_to(|t| t == TAG_A, is_a_scope_boundary);
+                }
+                TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT
+                    if self.depth_map[TAG_TABLE as usize] > 0 =>
+                {
+                    match id {
+                        TAG_TD | TAG_TH
+                            if self.depth_map[TAG_TD as usize] > 0 || self.depth_map[TAG_TH as usize] > 0 =>
+                        {
+                            self.close_implied_to(|t| t == TAG_TD || t == TAG_TH, is_cell_scope_boundary);
+                        }
+                        TAG_TR if self.depth_map[TAG_TR as usize] > 0 => {
+                            self.close_table_context(|t| matches!(t, TAG_TD | TAG_TH | TAG_TR));
+                        }
+                        TAG_THEAD | TAG_TBODY | TAG_TFOOT => {
+                            self.close_table_context(|t| {
+                                matches!(t, TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT | TAG_CAPTION)
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+                TAG_A | TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT => {}
+                _ => {
+                    if self.depth_map[TAG_P as usize] > 0 {
+                        debug_assert!(closes_p(id));
+                        self.close_implied_to(|t| t == TAG_P, is_p_scope_boundary);
+                    }
+                    match id {
+                        // A heading start closes an open heading (they cannot nest); only
+                        // when one is the current node, matching the spec's "if the current
+                        // node is an h1–h6 element, pop it" step.
+                        TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6
+                            if self.stack.last().is_some_and(|n| {
+                                matches!(n.tag_id, Some(TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6))
+                            }) =>
+                        {
+                            self.close_node();
+                        }
+                        TAG_LI if self.depth_map[TAG_LI as usize] > 0 => {
+                            self.close_implied_to(|t| t == TAG_LI, is_li_scope_boundary);
+                        }
+                        TAG_DT | TAG_DD
+                            if self.depth_map[TAG_DT as usize] > 0 || self.depth_map[TAG_DD as usize] > 0 =>
+                        {
+                            self.close_implied_to(|t| t == TAG_DT || t == TAG_DD, is_dl_scope_boundary);
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
 

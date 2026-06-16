@@ -1,7 +1,7 @@
 import type { ParseState } from './parse'
-import type { EngineOptions, TagHandler, TransformPlugin } from './types'
+import type { EngineOptions, NodeEvent, TagHandler, TransformPlugin } from './types'
 import { createMarkdownProcessor } from './markdown-processor'
-import { parseHtmlStream } from './parse'
+import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
 
 /**
@@ -54,12 +54,15 @@ export async function* streamHtmlToMarkdown(
         yield chunk
       }
     }
-    // Process any remaining HTML and emit final chunk
-    if (remainingHtml) {
-      parseHtmlStream(remainingHtml, parseState, (event) => {
-        processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)
-      })
+    // Process any remaining HTML, then commit trailing text and close any
+    // elements left open at end of input.
+    const handleEvent = (event: NodeEvent): void => {
+      processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)
     }
+    const leftover = remainingHtml
+      ? parseHtmlStream(remainingHtml, parseState, handleEvent)
+      : ''
+    finalizeParse(leftover, parseState, handleEvent)
 
     // Emit any final content
     const finalChunk = processor.getMarkdownChunk()
