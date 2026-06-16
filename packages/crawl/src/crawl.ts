@@ -9,6 +9,7 @@ import { htmlToMarkdown } from 'mdream'
 import { ofetch } from 'ofetch'
 import { dirname, join, normalize, resolve } from 'pathe'
 import { withHttps } from 'ufo'
+import { stripBoilerplateFromCorpus } from './boilerplate.js'
 import { getRegistrableDomain, getStartingUrl, isUrlExcluded, isValidSitemapXml, matchesGlobPattern, parseUrlPattern } from './glob-utils.js'
 import { resolveLogger } from './logger.js'
 
@@ -292,6 +293,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     verbose = false,
     skipSitemap = false,
     allowSubdomains = false,
+    stripBoilerplate = true,
+    boilerplateThreshold,
     hooks: hooksConfig,
     onPage,
   } = options
@@ -620,19 +623,9 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       const safeFilename = normalize(`${filename}.md`)
 
       filePath = join(outputDir, safeFilename)
-
-      // Call crawl:content hook before writing
-      const contentCtx = { url, title, content: md, filePath }
-      await hooks.callHook('crawl:content', contentCtx)
-      md = contentCtx.content
-      filePath = contentCtx.filePath
-
-      const fileDir = dirname(filePath)
-      if (fileDir && !createdDirs.has(fileDir)) {
-        await mkdir(fileDir, { recursive: true })
-        createdDirs.add(fileDir)
-      }
-      await writeFile(filePath, md, 'utf-8')
+      // The crawl:content hook and the file write are deferred until after the
+      // crawl completes (see the generation block below), so cross-page
+      // boilerplate can be stripped from the whole corpus before serialization.
     }
 
     const isHomePage = parsedUrl.pathname === '/' && parsedUrl.origin === normalizedHomePageUrl
@@ -891,6 +884,41 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     onProgress?.(progress)
 
     const successfulResults = results.filter(r => r.success)
+
+    // Strip repeated site chrome from the corpus before anything is serialized.
+    // This is a post-processing pass over the generated markdown: spans that repeat
+    // across pages are detected and removed. Needs a corpus, so single-page crawls
+    // are left as-is. result.content is mutated in place so both the per-page .md
+    // files and the llms-full.txt page sections use the cleaned content. The
+    // llms.txt link index is unaffected (it is built from metadata, not content).
+    if (stripBoilerplate && !singlePageMode) {
+      const cleaned = stripBoilerplateFromCorpus(
+        successfulResults.map(r => r.content),
+        boilerplateThreshold !== undefined ? { threshold: boilerplateThreshold } : {},
+      )
+      for (let i = 0; i < successfulResults.length; i++)
+        successfulResults[i].content = cleaned[i]
+    }
+
+    // Write per-page markdown now that content is finalized. The crawl:content
+    // hook fires here (deferred from processPage) so it sees the stripped content.
+    if (generateIndividualMd) {
+      for (const result of successfulResults) {
+        if (!result.filePath)
+          continue
+        const contentCtx = { url: result.url, title: result.title, content: result.content, filePath: result.filePath }
+        await hooks.callHook('crawl:content', contentCtx)
+        result.content = contentCtx.content
+        result.filePath = contentCtx.filePath
+
+        const fileDir = dirname(result.filePath)
+        if (fileDir && !createdDirs.has(fileDir)) {
+          await mkdir(fileDir, { recursive: true })
+          createdDirs.add(fileDir)
+        }
+        await writeFile(result.filePath, result.content, 'utf-8')
+      }
+    }
 
     const firstUrl = new URL(withHttps(urls[0]))
     const originUrl = firstUrl.origin

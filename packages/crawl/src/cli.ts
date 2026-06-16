@@ -289,6 +289,8 @@ Options:
   --exclude <pattern>         Exclude URLs matching glob patterns (can be used multiple times)
   --skip-sitemap              Skip sitemap.xml and robots.txt discovery
   --allow-subdomains          Crawl across subdomains of the same root domain
+  --keep-boilerplate          Keep repeated site chrome (nav/footer) in per-page output (default: stripped)
+  --boilerplate-threshold <n> Fraction of pages a block must repeat in to count as chrome (0-1, default: 0.6)
   -v, --verbose               Enable verbose logging
   -q, --quiet, --silent       Suppress all logs (clean stdout for JSON-RPC/MCP)
   -h, --help                  Show this help message
@@ -462,6 +464,21 @@ Examples:
   // Check for allow-subdomains flag
   const allowSubdomains = args.includes('--allow-subdomains')
 
+  // Boilerplate stripping is on by default; --keep-boilerplate opts out. Left
+  // undefined unless explicitly opted out, so a config-file value can still apply.
+  const stripBoilerplate = args.includes('--keep-boilerplate') ? false : undefined
+
+  // Validate boilerplate threshold
+  const boilerplateThresholdStr = getArgValue('--boilerplate-threshold')
+  let boilerplateThreshold: number | undefined
+  if (boilerplateThresholdStr !== undefined) {
+    boilerplateThreshold = Number(boilerplateThresholdStr)
+    if (Number.isNaN(boilerplateThreshold) || boilerplateThreshold <= 0 || boilerplateThreshold > 1) {
+      logger.error('Error: Boilerplate threshold must be a number between 0 (exclusive) and 1')
+      process.exit(1)
+    }
+  }
+
   // Warn if using skip-sitemap with wildcard URLs
   if (skipSitemap && parsed.isGlob) {
     logger.warn('Warning: Using --skip-sitemap with glob URLs may not discover all matching pages.')
@@ -486,6 +503,8 @@ Examples:
     verbose,
     skipSitemap,
     allowSubdomains,
+    stripBoilerplate,
+    boilerplateThreshold,
     silent,
   }
 }
@@ -519,6 +538,8 @@ async function main() {
       crawlDelay: cliOptions.crawlDelay ?? fileConfig.crawlDelay,
       skipSitemap: cliOptions.skipSitemap || fileConfig.skipSitemap || false,
       allowSubdomains: cliOptions.allowSubdomains || fileConfig.allowSubdomains || false,
+      stripBoilerplate: cliOptions.stripBoilerplate ?? fileConfig.stripBoilerplate ?? true,
+      boilerplateThreshold: cliOptions.boilerplateThreshold ?? fileConfig.boilerplateThreshold,
       verbose: cliOptions.verbose || fileConfig.verbose || false,
       silent,
       exclude: configExclude.length > 0 || cliExclude.length > 0
