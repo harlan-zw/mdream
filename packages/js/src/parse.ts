@@ -771,12 +771,13 @@ function processOpeningTag(
   // page never closed its head (no </head>/<body>). Auto-close head (and anything
   // wrongly opened inside it) so body content is parsed as flow content with
   // normal block spacing, instead of inheriting head's whitespace collapsing.
-  if (state.depthMap[TAG_HEAD] > 0 && !HEAD_CONTENT_TAGS.has(tagId)) {
+  if ((state.depthMap[TAG_HEAD] || 0) > 0 && !HEAD_CONTENT_TAGS.has(tagId)) {
     while (state.currentNode && state.currentNode.tagId !== TAG_HEAD) {
       closeNode(state.currentNode, state, handleEvent)
     }
-    if (state.currentNode?.tagId === TAG_HEAD) {
-      closeNode(state.currentNode, state, handleEvent)
+    const headNode = state.currentNode
+    if (headNode && headNode.tagId === TAG_HEAD) {
+      closeNode(headNode, state, handleEvent)
     }
   }
 
