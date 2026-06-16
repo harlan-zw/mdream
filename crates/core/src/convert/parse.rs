@@ -20,16 +20,54 @@ fn is_head_content_tag(tag_id: Option<u8>) -> bool {
 /// (HTML §13.1.2.4 optional tags + the "in body" insertion mode, where these
 /// tags first close an open `<p>` in button scope). Block containers, headings,
 /// lists, tables, and the list-item/definition tags all close an open `<p>`.
+///
+/// A compile-time `[bool; MAX_TAG_ID]` table, not a `match`: this is evaluated
+/// for every start tag opened while a `<p>` is on the stack (most inline tags in
+/// prose), so the hot path is a single indexed load, matching the table-driven
+/// style of `TAG_HANDLERS` and `depth_map`.
+static CLOSES_P: [bool; MAX_TAG_ID] = {
+    let mut t = [false; MAX_TAG_ID];
+    t[TAG_DIV as usize] = true;
+    t[TAG_P as usize] = true;
+    t[TAG_UL as usize] = true;
+    t[TAG_OL as usize] = true;
+    t[TAG_DL as usize] = true;
+    t[TAG_LI as usize] = true;
+    t[TAG_DD as usize] = true;
+    t[TAG_DT as usize] = true;
+    t[TAG_TABLE as usize] = true;
+    t[TAG_H1 as usize] = true;
+    t[TAG_H2 as usize] = true;
+    t[TAG_H3 as usize] = true;
+    t[TAG_H4 as usize] = true;
+    t[TAG_H5 as usize] = true;
+    t[TAG_H6 as usize] = true;
+    t[TAG_BLOCKQUOTE as usize] = true;
+    t[TAG_SECTION as usize] = true;
+    t[TAG_ARTICLE as usize] = true;
+    t[TAG_HEADER as usize] = true;
+    t[TAG_FOOTER as usize] = true;
+    t[TAG_NAV as usize] = true;
+    t[TAG_ASIDE as usize] = true;
+    t[TAG_PRE as usize] = true;
+    t[TAG_HR as usize] = true;
+    t[TAG_FORM as usize] = true;
+    t[TAG_FIELDSET as usize] = true;
+    t[TAG_FIGURE as usize] = true;
+    t[TAG_FIGCAPTION as usize] = true;
+    t[TAG_ADDRESS as usize] = true;
+    t[TAG_MAIN as usize] = true;
+    t[TAG_CENTER as usize] = true;
+    t[TAG_DETAILS as usize] = true;
+    t[TAG_SUMMARY as usize] = true;
+    t[TAG_DIALOG as usize] = true;
+    t
+};
+
+#[inline]
 fn closes_p(tag_id: u8) -> bool {
-    matches!(
-        tag_id,
-        TAG_DIV | TAG_P | TAG_UL | TAG_OL | TAG_DL | TAG_LI | TAG_DD | TAG_DT
-            | TAG_TABLE | TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6
-            | TAG_BLOCKQUOTE | TAG_SECTION | TAG_ARTICLE | TAG_HEADER | TAG_FOOTER
-            | TAG_NAV | TAG_ASIDE | TAG_PRE | TAG_HR | TAG_FORM | TAG_FIELDSET
-            | TAG_FIGURE | TAG_FIGCAPTION | TAG_ADDRESS | TAG_MAIN | TAG_CENTER
-            | TAG_DETAILS | TAG_SUMMARY | TAG_DIALOG
-    )
+    // tag_id is always a real built-in id (< MAX_TAG_ID) at the call site.
+    (tag_id as usize) < MAX_TAG_ID && CLOSES_P[tag_id as usize]
 }
 
 /// "Button scope" terminators for closing a `<p>`: scanning up the open stack

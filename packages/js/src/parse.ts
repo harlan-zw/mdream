@@ -105,42 +105,52 @@ const HEAD_CONTENT_TAGS = new Set<number>([
 // Mirrors the Rust engine's `parse.rs`. Start tags that cannot appear inside a
 // `<p>` imply its end; block containers, headings, lists, tables, and the
 // list-item/definition tags all close an open `<p>`.
-const CLOSES_P = new Set<number>([
-  TAG_DIV,
-  TAG_P,
-  TAG_UL,
-  TAG_OL,
-  TAG_DL,
-  TAG_LI,
-  TAG_DD,
-  TAG_DT,
-  TAG_TABLE,
-  TAG_H1,
-  TAG_H2,
-  TAG_H3,
-  TAG_H4,
-  TAG_H5,
-  TAG_H6,
-  TAG_BLOCKQUOTE,
-  TAG_SECTION,
-  TAG_ARTICLE,
-  TAG_HEADER,
-  TAG_FOOTER,
-  TAG_NAV,
-  TAG_ASIDE,
-  TAG_PRE,
-  TAG_HR,
-  TAG_FORM,
-  TAG_FIELDSET,
-  TAG_FIGURE,
-  TAG_FIGCAPTION,
-  TAG_ADDRESS,
-  TAG_MAIN,
-  TAG_CENTER,
-  TAG_DETAILS,
-  TAG_SUMMARY,
-  TAG_DIALOG,
-])
+//
+// A typed-array lookup, not a Set: this is checked for every start tag opened
+// while a `<p>` is on the stack (most inline tags in prose), so the hot path is
+// a single indexed load rather than a Set hash.
+const CLOSES_P: Uint8Array = (() => {
+  const t = new Uint8Array(MAX_TAG_ID)
+  const ids = [
+    TAG_DIV,
+    TAG_P,
+    TAG_UL,
+    TAG_OL,
+    TAG_DL,
+    TAG_LI,
+    TAG_DD,
+    TAG_DT,
+    TAG_TABLE,
+    TAG_H1,
+    TAG_H2,
+    TAG_H3,
+    TAG_H4,
+    TAG_H5,
+    TAG_H6,
+    TAG_BLOCKQUOTE,
+    TAG_SECTION,
+    TAG_ARTICLE,
+    TAG_HEADER,
+    TAG_FOOTER,
+    TAG_NAV,
+    TAG_ASIDE,
+    TAG_PRE,
+    TAG_HR,
+    TAG_FORM,
+    TAG_FIELDSET,
+    TAG_FIGURE,
+    TAG_FIGCAPTION,
+    TAG_ADDRESS,
+    TAG_MAIN,
+    TAG_CENTER,
+    TAG_DETAILS,
+    TAG_SUMMARY,
+    TAG_DIALOG,
+  ]
+  for (const id of ids)
+    t[id] = 1
+  return t
+})()
 
 // "Button scope" terminators for closing a `<p>`. `UL`/`OL`/`DL`/`LI` are added
 // (a deviation from the bare spec list) to keep scans short; a `<p>` is always
@@ -1032,7 +1042,7 @@ function processOpeningTag(
   // element so the new sibling is not wrongly nested. Runs after the tag is
   // confirmed complete (above) so a chunk-split start tag never mutates parser
   // state or emits a premature close.
-  if ((state.depthMap[TAG_P] || 0) > 0 && CLOSES_P.has(tagId)) {
+  if ((state.depthMap[TAG_P] || 0) > 0 && tagId >= 0 && tagId < MAX_TAG_ID && CLOSES_P[tagId] === 1) {
     closeImpliedTo(state, SINGLE_P, P_SCOPE_BOUNDARY, handleEvent)
   }
   if (tagId === TAG_LI) {
