@@ -152,6 +152,17 @@ const CLOSES_P: Uint8Array = (() => {
   return t
 })()
 
+// Start tags that can trigger any implied-end-tag recovery branch. The common
+// inline tags (`code`, `em`, `span`, ...) otherwise run the whole dispatch just
+// to prove they need no recovery, so gating on a single indexed load lets them
+// skip it entirely. Mirrors the Rust engine's `NEEDS_IMPLIED_END_RECOVERY`.
+const NEEDS_IMPLIED_END_RECOVERY: Uint8Array = (() => {
+  const t = CLOSES_P.slice()
+  for (const id of [TAG_A, TAG_TD, TAG_TH, TAG_TR, TAG_THEAD, TAG_TBODY, TAG_TFOOT])
+    t[id] = 1
+  return t
+})()
+
 // "Button scope" terminators for closing a `<p>`. `UL`/`OL`/`DL`/`LI` are added
 // (a deviation from the bare spec list) to keep scans short; a `<p>` is always
 // closed before any of these can become its ancestor.
@@ -1084,48 +1095,58 @@ function processOpeningTag(
   // element so the new sibling is not wrongly nested. Runs after the tag is
   // confirmed complete (above) so a chunk-split start tag never mutates parser
   // state or emits a premature close.
-  if ((state.depthMap[TAG_P] || 0) > 0 && tagId >= 0 && tagId < MAX_TAG_ID && CLOSES_P[tagId] === 1) {
-    closeImpliedTo(state, SINGLE_P, P_SCOPE_BOUNDARY, handleEvent)
-  }
-  if (tagId === TAG_A) {
-    // A nested <a> closes the open one (anchors cannot nest), so the markdown is
-    // two adjacent links rather than invalid nested `[..]`.
-    if ((state.depthMap[TAG_A] || 0) > 0) {
-      closeImpliedTo(state, SINGLE_A, A_SCOPE_BOUNDARY, handleEvent)
-    }
-  }
-  else if (HEADINGS.has(tagId)) {
-    // A heading start closes an open heading (they cannot nest); only when one is
-    // the current node, matching the spec's "if the current node is an h1–h6
-    // element, pop it" step.
-    const top = state.currentNode
-    if (top && top.tagId !== undefined && HEADINGS.has(top.tagId)) {
-      closeNode(top, state, handleEvent)
-    }
-  }
-  else if (tagId === TAG_LI) {
-    if ((state.depthMap[TAG_LI] || 0) > 0) {
-      closeImpliedTo(state, SINGLE_LI, LI_SCOPE_BOUNDARY, handleEvent)
-    }
-  }
-  else if (tagId === TAG_DT || tagId === TAG_DD) {
-    if ((state.depthMap[TAG_DT] || 0) > 0 || (state.depthMap[TAG_DD] || 0) > 0) {
-      closeImpliedTo(state, DT_DD, DL_SCOPE_BOUNDARY, handleEvent)
-    }
-  }
-  else if ((state.depthMap[TAG_TABLE] || 0) > 0) {
-    if (tagId === TAG_TD || tagId === TAG_TH) {
-      if ((state.depthMap[TAG_TD] || 0) > 0 || (state.depthMap[TAG_TH] || 0) > 0) {
-        closeImpliedTo(state, TD_TH, CELL_SCOPE_BOUNDARY, handleEvent)
+  if (tagId >= 0 && tagId < MAX_TAG_ID && NEEDS_IMPLIED_END_RECOVERY[tagId] === 1) {
+    if (tagId === TAG_A) {
+      // A nested <a> closes the open one (anchors cannot nest), so the markdown is
+      // two adjacent links rather than invalid nested `[..]`. <a> never closes <p>.
+      if ((state.depthMap[TAG_A] || 0) > 0) {
+        closeImpliedTo(state, SINGLE_A, A_SCOPE_BOUNDARY, handleEvent)
       }
     }
-    else if (tagId === TAG_TR) {
-      if ((state.depthMap[TAG_TR] || 0) > 0) {
-        closeTableContext(state, TR_CELLS, handleEvent)
+    else if (tagId === TAG_TD || tagId === TAG_TH || tagId === TAG_TR
+      || tagId === TAG_THEAD || tagId === TAG_TBODY || tagId === TAG_TFOOT) {
+      // Table cells/rows/sections close earlier ones; they never close <p>.
+      if ((state.depthMap[TAG_TABLE] || 0) > 0) {
+        if (tagId === TAG_TD || tagId === TAG_TH) {
+          if ((state.depthMap[TAG_TD] || 0) > 0 || (state.depthMap[TAG_TH] || 0) > 0) {
+            closeImpliedTo(state, TD_TH, CELL_SCOPE_BOUNDARY, handleEvent)
+          }
+        }
+        else if (tagId === TAG_TR) {
+          if ((state.depthMap[TAG_TR] || 0) > 0) {
+            closeTableContext(state, TR_CELLS, handleEvent)
+          }
+        }
+        else {
+          closeTableContext(state, SECTION_CELLS, handleEvent)
+        }
       }
     }
-    else if (tagId === TAG_THEAD || tagId === TAG_TBODY || tagId === TAG_TFOOT) {
-      closeTableContext(state, SECTION_CELLS, handleEvent)
+    else {
+      // Remaining recovery tags are all in CLOSES_P, so they close an open <p>
+      // first, then any heading/list-item implied end.
+      if ((state.depthMap[TAG_P] || 0) > 0) {
+        closeImpliedTo(state, SINGLE_P, P_SCOPE_BOUNDARY, handleEvent)
+      }
+      if (HEADINGS.has(tagId)) {
+        // A heading start closes an open heading (they cannot nest); only when one
+        // is the current node, matching the spec's "if the current node is an
+        // h1–h6 element, pop it" step.
+        const top = state.currentNode
+        if (top && top.tagId !== undefined && HEADINGS.has(top.tagId)) {
+          closeNode(top, state, handleEvent)
+        }
+      }
+      else if (tagId === TAG_LI) {
+        if ((state.depthMap[TAG_LI] || 0) > 0) {
+          closeImpliedTo(state, SINGLE_LI, LI_SCOPE_BOUNDARY, handleEvent)
+        }
+      }
+      else if (tagId === TAG_DT || tagId === TAG_DD) {
+        if ((state.depthMap[TAG_DT] || 0) > 0 || (state.depthMap[TAG_DD] || 0) > 0) {
+          closeImpliedTo(state, DT_DD, DL_SCOPE_BOUNDARY, handleEvent)
+        }
+      }
     }
   }
 

@@ -25,7 +25,7 @@ fn is_head_content_tag(tag_id: Option<u8>) -> bool {
 /// for every start tag opened while a `<p>` is on the stack (most inline tags in
 /// prose), so the hot path is a single indexed load, matching the table-driven
 /// style of `TAG_HANDLERS` and `depth_map`.
-static CLOSES_P: [bool; MAX_TAG_ID] = {
+const CLOSES_P: [bool; MAX_TAG_ID] = {
     let mut t = [false; MAX_TAG_ID];
     t[TAG_DIV as usize] = true;
     t[TAG_P as usize] = true;
@@ -64,10 +64,30 @@ static CLOSES_P: [bool; MAX_TAG_ID] = {
     t
 };
 
+/// Start tags that can trigger any implied-end-tag recovery branch below. The
+/// common inline tags (`code`, `em`, `span`, ...) otherwise skip the whole
+/// recovery dispatch instead of loading unrelated depth counters and matching
+/// through recovery-only cases on every start tag.
+const NEEDS_IMPLIED_END_RECOVERY: [bool; MAX_TAG_ID] = {
+    let mut t = CLOSES_P;
+    t[TAG_A as usize] = true;
+    t[TAG_TD as usize] = true;
+    t[TAG_TH as usize] = true;
+    t[TAG_TR as usize] = true;
+    t[TAG_THEAD as usize] = true;
+    t[TAG_TBODY as usize] = true;
+    t[TAG_TFOOT as usize] = true;
+    t
+};
+
 #[inline]
 fn closes_p(tag_id: u8) -> bool {
-    // tag_id is always a real built-in id (< MAX_TAG_ID) at the call site.
-    (tag_id as usize) < MAX_TAG_ID && CLOSES_P[tag_id as usize]
+    CLOSES_P[tag_id as usize]
+}
+
+#[inline]
+fn needs_implied_end_recovery(tag_id: u8) -> bool {
+    (tag_id as usize) < MAX_TAG_ID && NEEDS_IMPLIED_END_RECOVERY[tag_id as usize]
 }
 
 /// "Button scope" terminators for closing a `<p>`: scanning up the open stack
@@ -319,33 +339,13 @@ impl ConvertState {
         // open element so the new sibling is not wrongly nested. Runs after the
         // tag is confirmed complete (above) so a chunk-split start tag never
         // mutates parser state or emits a premature close.
-        if let Some(id) = tag_id {
-            if self.depth_map[TAG_P as usize] > 0 && closes_p(id) {
-                self.close_implied_to(|t| t == TAG_P, is_p_scope_boundary);
-            }
+        if let Some(id) = tag_id
+            && needs_implied_end_recovery(id) {
             match id {
                 // A nested <a> closes the open one (anchors cannot nest), so the
                 // markdown is two adjacent links rather than invalid nested `[..]`.
                 TAG_A if self.depth_map[TAG_A as usize] > 0 => {
                     self.close_implied_to(|t| t == TAG_A, is_a_scope_boundary);
-                }
-                // A heading start closes an open heading (they cannot nest); only
-                // when one is the current node, matching the spec's "if the current
-                // node is an h1–h6 element, pop it" step.
-                TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6
-                    if self.stack.last().is_some_and(|n| {
-                        matches!(n.tag_id, Some(TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6))
-                    }) =>
-                {
-                    self.close_node();
-                }
-                TAG_LI if self.depth_map[TAG_LI as usize] > 0 => {
-                    self.close_implied_to(|t| t == TAG_LI, is_li_scope_boundary);
-                }
-                TAG_DT | TAG_DD
-                    if self.depth_map[TAG_DT as usize] > 0 || self.depth_map[TAG_DD as usize] > 0 =>
-                {
-                    self.close_implied_to(|t| t == TAG_DT || t == TAG_DD, is_dl_scope_boundary);
                 }
                 TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT
                     if self.depth_map[TAG_TABLE as usize] > 0 =>
@@ -367,7 +367,34 @@ impl ConvertState {
                         _ => {}
                     }
                 }
-                _ => {}
+                TAG_A | TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT => {}
+                _ => {
+                    if self.depth_map[TAG_P as usize] > 0 {
+                        debug_assert!(closes_p(id));
+                        self.close_implied_to(|t| t == TAG_P, is_p_scope_boundary);
+                    }
+                    match id {
+                        // A heading start closes an open heading (they cannot nest); only
+                        // when one is the current node, matching the spec's "if the current
+                        // node is an h1–h6 element, pop it" step.
+                        TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6
+                            if self.stack.last().is_some_and(|n| {
+                                matches!(n.tag_id, Some(TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6))
+                            }) =>
+                        {
+                            self.close_node();
+                        }
+                        TAG_LI if self.depth_map[TAG_LI as usize] > 0 => {
+                            self.close_implied_to(|t| t == TAG_LI, is_li_scope_boundary);
+                        }
+                        TAG_DT | TAG_DD
+                            if self.depth_map[TAG_DT as usize] > 0 || self.depth_map[TAG_DD as usize] > 0 =>
+                        {
+                            self.close_implied_to(|t| t == TAG_DT || t == TAG_DD, is_dl_scope_boundary);
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
 
