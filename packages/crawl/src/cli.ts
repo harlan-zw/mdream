@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import * as p from '@clack/prompts'
 import { dirname, join, relative, resolve } from 'pathe'
 import { withHttps } from 'ufo'
+import { DEFAULT_BOILERPLATE_THRESHOLD } from './boilerplate.js'
 import { loadMdreamConfig } from './config.js'
 import { crawlAndGenerate } from './crawl.js'
 import { parseUrlPattern, validateGlobPattern } from './glob-utils.js'
@@ -290,7 +291,7 @@ Options:
   --skip-sitemap              Skip sitemap.xml and robots.txt discovery
   --allow-subdomains          Crawl across subdomains of the same root domain
   --keep-boilerplate          Keep repeated site chrome (nav/footer) in per-page output (default: stripped)
-  --boilerplate-threshold <n> Fraction of pages a block must repeat in to count as chrome (0-1, default: 0.6)
+  --boilerplate-threshold <n> Fraction of pages a block must repeat in to count as chrome (0-1, default: ${DEFAULT_BOILERPLATE_THRESHOLD})
   -v, --verbose               Enable verbose logging
   -q, --quiet, --silent       Suppress all logs (clean stdout for JSON-RPC/MCP)
   -h, --help                  Show this help message

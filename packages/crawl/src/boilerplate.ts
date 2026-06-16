@@ -25,25 +25,39 @@
  * removed: a span has to recur across most of the site and be long to qualify.
  */
 
+// Single source of truth for the detection defaults. Re-exported and referenced
+// (e.g. in the crawl CLI help) so the documented values cannot drift from the
+// behaviour.
+/** Fraction of documents a shingle must appear in to count as chrome (0..1). */
+export const DEFAULT_BOILERPLATE_THRESHOLD = 0.5
+/** Minimum number of documents before detection runs at all. */
+export const DEFAULT_BOILERPLATE_MIN_DOCS = 3
+/** Number of consecutive tokens per shingle. */
+export const DEFAULT_BOILERPLATE_SHINGLE_SIZE = 6
+/** Minimum length (in tokens) of a covered run before it is removed. */
+export const DEFAULT_BOILERPLATE_MIN_RUN = 12
+
 export interface BoilerplateOptions {
   /**
    * Fraction of documents a shingle must appear in to count as chrome (0..1).
-   * Higher = stricter. Default 0.5.
+   * Higher = stricter. Defaults to `DEFAULT_BOILERPLATE_THRESHOLD` (0.5).
    */
   threshold?: number
   /**
-   * Minimum number of documents before detection runs at all. Default 3.
+   * Minimum number of documents before detection runs at all.
+   * Defaults to `DEFAULT_BOILERPLATE_MIN_DOCS` (3).
    */
   minDocs?: number
   /**
    * Number of consecutive tokens per shingle. Smaller catches shorter repeated
    * spans but risks matching common phrases; larger is more conservative.
-   * Default 6.
+   * Defaults to `DEFAULT_BOILERPLATE_SHINGLE_SIZE` (6).
    */
   shingleSize?: number
   /**
    * Minimum length (in tokens) of a covered run before it is removed. Stops short
-   * incidental matches inside unique prose from being nibbled away. Default 12.
+   * incidental matches inside unique prose from being nibbled away.
+   * Defaults to `DEFAULT_BOILERPLATE_MIN_RUN` (12).
    */
   minRun?: number
 }
@@ -205,10 +219,10 @@ function stripDoc(md: string, doc: TokenizedDoc, chrome: Set<number>, k: number,
  * detected chrome, or detection skipped) are returned byte-for-byte as given.
  */
 export function stripBoilerplateFromCorpus(contents: string[], options: BoilerplateOptions = {}): string[] {
-  const threshold = options.threshold ?? 0.5
-  const minDocs = options.minDocs ?? 3
-  const k = Math.max(2, options.shingleSize ?? 6)
-  const minRun = Math.max(k, options.minRun ?? 12)
+  const threshold = options.threshold ?? DEFAULT_BOILERPLATE_THRESHOLD
+  const minDocs = options.minDocs ?? DEFAULT_BOILERPLATE_MIN_DOCS
+  const k = Math.max(2, options.shingleSize ?? DEFAULT_BOILERPLATE_SHINGLE_SIZE)
+  const minRun = Math.max(k, options.minRun ?? DEFAULT_BOILERPLATE_MIN_RUN)
 
   if (contents.length < minDocs)
     return contents.slice()

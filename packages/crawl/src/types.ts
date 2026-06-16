@@ -49,7 +49,7 @@ export interface CrawlOptions {
   stripBoilerplate?: boolean
   /**
    * Fraction of crawled pages a block must appear in to count as chrome (0..1).
-   * Higher is stricter. Defaults to 0.6.
+   * Higher is stricter. Defaults to `DEFAULT_BOILERPLATE_THRESHOLD` (0.5).
    */
   boilerplateThreshold?: number
   /**
@@ -77,7 +77,7 @@ export interface MdreamCrawlConfig {
   allowSubdomains?: boolean
   /** Strip repeated site chrome from per-page output. Defaults to true. */
   stripBoilerplate?: boolean
-  /** Fraction of pages a block must repeat in to count as chrome (0..1). Defaults to 0.6. */
+  /** Fraction of pages a block must repeat in to count as chrome (0..1). Defaults to 0.5. */
   boilerplateThreshold?: number
   verbose?: boolean
   /** Suppress all diagnostic/progress logging (issue #100). */
