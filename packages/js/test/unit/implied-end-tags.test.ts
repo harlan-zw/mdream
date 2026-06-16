@@ -102,6 +102,32 @@ describe('definition list implied end tags', () => {
   })
 })
 
+describe('nested anchors', () => {
+  it('closes the open <a> when another opens', () => {
+    // Regression: nested <a> produced invalid nested markdown `[one [two](/2)](/1)`.
+    expect(htmlToMarkdown('<a href=/1>one<a href=/2>two</a>')).toBe('[one](/1) [two](/2)')
+    expect(htmlToMarkdown('<a href=/1>one<b>bold<a href=/2>two</a>')).toBe('[one**bold**](/1) [two](/2)')
+  })
+
+  it('leaves well-formed and cross-block anchors unchanged', () => {
+    expect(htmlToMarkdown('<a href=/1>one</a><a href=/2>two</a>')).toBe('[one](/1) [two](/2)')
+    expect(htmlToMarkdown('<div><a href=/1>one</div><a href=/2>two</a>')).toBe('[one](/1)\n\n[two](/2)')
+  })
+})
+
+describe('headings', () => {
+  it('closes an open heading when another opens', () => {
+    // Regression: `<h1>a<h2>b` rendered "# a ## b" on one invalid line.
+    expect(htmlToMarkdown('<h1>a<h2>b</h2>')).toBe('# a\n\n## b')
+    expect(htmlToMarkdown('<h2>a<h2>b')).toBe('## a\n\n## b')
+  })
+
+  it('leaves well-formed headings unchanged', () => {
+    expect(htmlToMarkdown('<h1>a</h1><h2>b</h2>')).toBe('# a\n\n## b')
+    expect(htmlToMarkdown('<h1><em>a</em></h1>')).toBe('# _a_')
+  })
+})
+
 describe('trailing content at EOF', () => {
   it('does not drop trailing text', () => {
     expect(htmlToMarkdown('<p>hello')).toBe('hello')

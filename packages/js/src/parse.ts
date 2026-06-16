@@ -209,9 +209,51 @@ const CELL_SCOPE_BOUNDARY = new Set<number>([
   TAG_HTML,
 ])
 
+// Block-level terminators for closing an `<a>`: a nested `<a>` closes the open
+// one (anchors cannot nest), but only within the same block.
+const A_SCOPE_BOUNDARY = new Set<number>([
+  TAG_P,
+  TAG_DIV,
+  TAG_LI,
+  TAG_UL,
+  TAG_OL,
+  TAG_DL,
+  TAG_DD,
+  TAG_DT,
+  TAG_TABLE,
+  TAG_TD,
+  TAG_TH,
+  TAG_TR,
+  TAG_CAPTION,
+  TAG_BLOCKQUOTE,
+  TAG_SECTION,
+  TAG_ARTICLE,
+  TAG_HEADER,
+  TAG_FOOTER,
+  TAG_NAV,
+  TAG_ASIDE,
+  TAG_MAIN,
+  TAG_FORM,
+  TAG_FIELDSET,
+  TAG_FIGURE,
+  TAG_BUTTON,
+  TAG_H1,
+  TAG_H2,
+  TAG_H3,
+  TAG_H4,
+  TAG_H5,
+  TAG_H6,
+  TAG_TEMPLATE,
+  TAG_HTML,
+])
+
+// Headings (h1–h6) for the "a heading start closes an open heading" check.
+const HEADINGS = new Set<number>([TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6])
+
 // Implied-end-tag targets and table-context closeable sets.
 const SINGLE_P = new Set<number>([TAG_P])
 const SINGLE_LI = new Set<number>([TAG_LI])
+const SINGLE_A = new Set<number>([TAG_A])
 const DT_DD = new Set<number>([TAG_DT, TAG_DD])
 const TD_TH = new Set<number>([TAG_TD, TAG_TH])
 const TR_CELLS = new Set<number>([TAG_TD, TAG_TH, TAG_TR])
@@ -1045,7 +1087,23 @@ function processOpeningTag(
   if ((state.depthMap[TAG_P] || 0) > 0 && tagId >= 0 && tagId < MAX_TAG_ID && CLOSES_P[tagId] === 1) {
     closeImpliedTo(state, SINGLE_P, P_SCOPE_BOUNDARY, handleEvent)
   }
-  if (tagId === TAG_LI) {
+  if (tagId === TAG_A) {
+    // A nested <a> closes the open one (anchors cannot nest), so the markdown is
+    // two adjacent links rather than invalid nested `[..]`.
+    if ((state.depthMap[TAG_A] || 0) > 0) {
+      closeImpliedTo(state, SINGLE_A, A_SCOPE_BOUNDARY, handleEvent)
+    }
+  }
+  else if (HEADINGS.has(tagId)) {
+    // A heading start closes an open heading (they cannot nest); only when one is
+    // the current node, matching the spec's "if the current node is an h1–h6
+    // element, pop it" step.
+    const top = state.currentNode
+    if (top && top.tagId !== undefined && HEADINGS.has(top.tagId)) {
+      closeNode(top, state, handleEvent)
+    }
+  }
+  else if (tagId === TAG_LI) {
     if ((state.depthMap[TAG_LI] || 0) > 0) {
       closeImpliedTo(state, SINGLE_LI, LI_SCOPE_BOUNDARY, handleEvent)
     }

@@ -110,6 +110,21 @@ fn is_cell_scope_boundary(tag_id: u8) -> bool {
     )
 }
 
+/// Block-level terminators for closing an `<a>`: a nested `<a>` closes the open
+/// one (HTML forbids nested anchors — the adoption agency closes the outer),
+/// but only within the same block so a stray open `<a>` in another block is left
+/// alone. Closing intervening inline formatting matches the spec's reconstruction.
+fn is_a_scope_boundary(tag_id: u8) -> bool {
+    matches!(
+        tag_id,
+        TAG_P | TAG_DIV | TAG_LI | TAG_UL | TAG_OL | TAG_DL | TAG_DD | TAG_DT
+            | TAG_TABLE | TAG_TD | TAG_TH | TAG_TR | TAG_CAPTION | TAG_BLOCKQUOTE
+            | TAG_SECTION | TAG_ARTICLE | TAG_HEADER | TAG_FOOTER | TAG_NAV | TAG_ASIDE
+            | TAG_MAIN | TAG_FORM | TAG_FIELDSET | TAG_FIGURE | TAG_BUTTON
+            | TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6 | TAG_TEMPLATE | TAG_HTML
+    )
+}
+
 /// Whether an element is visually hidden, so the filter should drop it and its
 /// subtree: inline `display:none` / `visibility:hidden` / `position:absolute|fixed`,
 /// or the `hidden` attribute (except `hidden="until-found"`).
@@ -309,6 +324,21 @@ impl ConvertState {
                 self.close_implied_to(|t| t == TAG_P, is_p_scope_boundary);
             }
             match id {
+                // A nested <a> closes the open one (anchors cannot nest), so the
+                // markdown is two adjacent links rather than invalid nested `[..]`.
+                TAG_A if self.depth_map[TAG_A as usize] > 0 => {
+                    self.close_implied_to(|t| t == TAG_A, is_a_scope_boundary);
+                }
+                // A heading start closes an open heading (they cannot nest); only
+                // when one is the current node, matching the spec's "if the current
+                // node is an h1–h6 element, pop it" step.
+                TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6
+                    if self.stack.last().is_some_and(|n| {
+                        matches!(n.tag_id, Some(TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6))
+                    }) =>
+                {
+                    self.close_node();
+                }
                 TAG_LI if self.depth_map[TAG_LI as usize] > 0 => {
                     self.close_implied_to(|t| t == TAG_LI, is_li_scope_boundary);
                 }

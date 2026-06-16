@@ -136,6 +136,38 @@ fn malformed_definition_list_matches_well_formed() {
     );
 }
 
+// ── nested anchors ──
+
+#[test]
+fn nested_anchor_closes_the_open_one() {
+    // Regression: nested <a> produced invalid nested markdown `[one [two](/2)](/1)`.
+    assert_eq!(convert("<a href=/1>one<a href=/2>two</a>"), "[one](/1) [two](/2)");
+    // Intervening inline formatting is closed along with the anchor.
+    assert_eq!(convert("<a href=/1>one<b>bold<a href=/2>two</a>"), "[one**bold**](/1) [two](/2)");
+}
+
+#[test]
+fn well_formed_and_cross_block_anchors_unchanged() {
+    assert_eq!(convert("<a href=/1>one</a><a href=/2>two</a>"), "[one](/1) [two](/2)");
+    // A closed anchor in another block is not affected.
+    assert_eq!(convert("<div><a href=/1>one</div><a href=/2>two</a>"), "[one](/1)\n\n[two](/2)");
+}
+
+// ── headings ──
+
+#[test]
+fn heading_closes_open_heading() {
+    // Regression: `<h1>a<h2>b` rendered "# a ## b" on one invalid line.
+    assert_eq!(convert("<h1>a<h2>b</h2>"), "# a\n\n## b");
+    assert_eq!(convert("<h2>a<h2>b"), "## a\n\n## b");
+}
+
+#[test]
+fn well_formed_headings_unchanged() {
+    assert_eq!(convert("<h1>a</h1><h2>b</h2>"), "# a\n\n## b");
+    assert_eq!(convert("<h1><em>a</em></h1>"), "# _a_");
+}
+
 // ── trailing content at EOF ──
 
 #[test]
