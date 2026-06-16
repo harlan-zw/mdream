@@ -118,8 +118,14 @@ describe('streaming: recovery runs only after a complete start tag', () => {
       [['<table><tr><td>a<t', 'd>b<tr><td>c<td>d</table>'], '<table><tr><td>a<td>b<tr><td>c<td>d</table>'],
       [['<dl><dt>Coffee<d', 'd>Hot drink</dl>'], '<dl><dt>Coffee<dd>Hot drink</dl>'],
     ] as [string[], string][]) {
-      const streamed = (await streamConvert(chunks)).trim()
-      expect(streamed).toBe(htmlToMarkdown(whole))
+      const streamedSplit = await streamConvert(chunks)
+      const streamedWhole = await streamConvert([whole])
+      // Exact (no trim): splitting the trigger tag across chunks must not change
+      // a single byte of the streamed output — catches boundary regressions.
+      expect(streamedSplit).toBe(streamedWhole)
+      // Content matches the batch conversion (streaming keeps the trailing
+      // newlines that the one-shot getMarkdown trims).
+      expect(streamedSplit.trim()).toBe(htmlToMarkdown(whole))
     }
   })
 })
