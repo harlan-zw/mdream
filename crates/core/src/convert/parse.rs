@@ -5,11 +5,14 @@ use super::*;
 /// Tags valid inside `<head>` per the HTML parser's "in head" insertion mode.
 /// Any other start tag implies the end of `<head>` and the start of the body, so
 /// an unclosed head is auto-closed when one appears. Unknown tags (`None`) are
-/// treated as body content, matching the spec's "anything else" rule.
+/// treated as body content, matching the spec's "anything else" rule. `<head>` is
+/// deliberately excluded: a second/nested head must close the first rather than
+/// stack, so malformed `<head><head>...<p>` does not trap body flow under an
+/// outer head.
 fn is_head_content_tag(tag_id: Option<u8>) -> bool {
     matches!(
         tag_id,
-        Some(TAG_HEAD | TAG_TITLE | TAG_META | TAG_LINK | TAG_BASE | TAG_STYLE | TAG_SCRIPT | TAG_NOSCRIPT | TAG_TEMPLATE)
+        Some(TAG_TITLE | TAG_META | TAG_LINK | TAG_BASE | TAG_STYLE | TAG_SCRIPT | TAG_NOSCRIPT | TAG_TEMPLATE)
     )
 }
 

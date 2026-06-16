@@ -22,3 +22,11 @@ fn head_metadata_stays_in_head_until_flow_content() {
     let html = "<head><title>t</title><link rel=\"x\"><style>a{}</style><p>body text</p>";
     assert_eq!(convert(html), "t\n\nbody text");
 }
+
+#[test]
+fn duplicated_head_does_not_keep_body_in_head_context() {
+    // A second <head> closes the first (head is not head-content), so the trailing
+    // <p> is body flow rather than collapsed head content.
+    let html = "<head><head><title>t</title><p>body text</p>";
+    assert_eq!(convert(html), "t\n\nbody text");
+}

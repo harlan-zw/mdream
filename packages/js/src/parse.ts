@@ -47,9 +47,10 @@ const CLOSE_BRACKET_CHAR = 93 // ']'
 // Tags that are valid inside <head>. Per the HTML parser's "in head" insertion
 // mode, any start tag NOT in this set implies the end of <head> and the start of
 // the body, so we auto-close an unclosed <head> when one appears (browser
-// recovery for malformed pages that never emit </head> or <body>).
+// recovery for malformed pages that never emit </head> or <body>). TAG_HEAD is
+// deliberately excluded: a second/nested <head> must close the first rather than
+// stack, so malformed `<head><head>...<p>` does not trap body flow under head.
 const HEAD_CONTENT_TAGS = new Set<number>([
-  TAG_HEAD,
   TAG_TITLE,
   TAG_META,
   TAG_LINK,
