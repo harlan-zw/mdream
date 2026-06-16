@@ -5,12 +5,19 @@ import {
   NodeEventEnter,
   NodeEventExit,
   TAG_A,
+  TAG_BASE,
   TAG_BLOCKQUOTE,
   TAG_CODE,
+  TAG_HEAD,
+  TAG_LINK,
+  TAG_META,
+  TAG_NOSCRIPT,
   TAG_PRE,
   TAG_SCRIPT,
   TAG_STYLE,
   TAG_TABLE,
+  TAG_TEMPLATE,
+  TAG_TITLE,
   TagIdMap,
   TEXT_NODE,
 } from './const'
@@ -36,6 +43,23 @@ const BACKTICK_CHAR = 96 // '`'
 const PIPE_CHAR = 124 // '|'
 const OPEN_BRACKET_CHAR = 91 // '['
 const CLOSE_BRACKET_CHAR = 93 // ']'
+
+// Tags that are valid inside <head>. Per the HTML parser's "in head" insertion
+// mode, any start tag NOT in this set implies the end of <head> and the start of
+// the body, so we auto-close an unclosed <head> when one appears (browser
+// recovery for malformed pages that never emit </head> or <body>). TAG_HEAD is
+// deliberately excluded: a second/nested <head> must close the first rather than
+// stack, so malformed `<head><head>...<p>` does not trap body flow under head.
+const HEAD_CONTENT_TAGS = new Set<number>([
+  TAG_TITLE,
+  TAG_META,
+  TAG_LINK,
+  TAG_BASE,
+  TAG_STYLE,
+  TAG_SCRIPT,
+  TAG_NOSCRIPT,
+  TAG_TEMPLATE,
+])
 
 // Pre-allocate arrays and objects to reduce allocations
 const EMPTY_ATTRIBUTES: Record<string, string> = Object.freeze({})
@@ -752,6 +776,22 @@ function processOpeningTag(
       newPosition: i,
       remainingText: `<${tagName}${result.attrBuffer}`,
       selfClosing: false,
+    }
+  }
+
+  // Browser recovery: a non-head start tag while <head> is still open means the
+  // page never closed its head (no </head>/<body>). Auto-close head (and anything
+  // wrongly opened inside it) so body content is parsed as flow content with
+  // normal block spacing, instead of inheriting head's whitespace collapsing.
+  // Runs only after the tag is confirmed complete so incomplete/chunk-split start
+  // tags do not mutate parser state or emit a premature head close.
+  if ((state.depthMap[TAG_HEAD] || 0) > 0 && !HEAD_CONTENT_TAGS.has(tagId)) {
+    while (state.currentNode && state.currentNode.tagId !== TAG_HEAD) {
+      closeNode(state.currentNode, state, handleEvent)
+    }
+    const headNode = state.currentNode
+    if (headNode && headNode.tagId === TAG_HEAD) {
+      closeNode(headNode, state, handleEvent)
     }
   }
 
