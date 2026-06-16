@@ -32,7 +32,8 @@ pub fn html_to_markdown(html: &str, options: HTMLToMarkdownOptions) -> String {
 pub fn html_to_markdown_result(html: &str, options: HTMLToMarkdownOptions) -> MdreamResult {
     let capacity = (html.len() / 3).clamp(1024, 256 * 1024);
     let mut state = ConvertState::new(options, capacity);
-    state.process_html(html);
+    let leftover = state.process_html(html);
+    state.finalize(&leftover);
 
     let extracted = if state.has_extraction {
         let results = std::mem::take(&mut state.extraction_results);
@@ -78,10 +79,13 @@ impl MarkdownStreamProcessor {
     }
 
     pub fn finish(&mut self) -> String {
-        if !self.buffer.is_empty() {
+        let leftover = if self.buffer.is_empty() {
+            String::new()
+        } else {
             let chunk = std::mem::take(&mut self.buffer);
-            self.state.process_html(&chunk);
-        }
+            self.state.process_html(&chunk)
+        };
+        self.state.finalize(&leftover);
         self.state.get_markdown_chunk()
     }
 }

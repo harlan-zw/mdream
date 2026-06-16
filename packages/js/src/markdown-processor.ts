@@ -23,7 +23,7 @@ import {
   TAG_TH,
   TEXT_NODE,
 } from './const'
-import { parseHtmlStream } from './parse'
+import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
 
 export interface MarkdownState {
@@ -589,9 +589,12 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       tagOverrideHandlers,
     }
 
-    parseHtmlStream(html, parseState, (event) => {
+    const handleEvent = (event: NodeEvent): void => {
       processPluginsForEvent(event, resolvedPlugins, state, processEvent)
-    })
+    }
+    const leftover = parseHtmlStream(html, parseState, handleEvent)
+    // Commit trailing text and close unclosed elements at end of input.
+    finalizeParse(leftover, parseState, handleEvent)
   }
 
   /**

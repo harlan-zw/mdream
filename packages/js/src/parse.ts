@@ -5,19 +5,59 @@ import {
   NodeEventEnter,
   NodeEventExit,
   TAG_A,
+  TAG_ADDRESS,
+  TAG_ARTICLE,
+  TAG_ASIDE,
   TAG_BASE,
   TAG_BLOCKQUOTE,
+  TAG_BUTTON,
+  TAG_CAPTION,
+  TAG_CENTER,
   TAG_CODE,
+  TAG_DD,
+  TAG_DETAILS,
+  TAG_DIALOG,
+  TAG_DIV,
+  TAG_DL,
+  TAG_DT,
+  TAG_FIELDSET,
+  TAG_FIGCAPTION,
+  TAG_FIGURE,
+  TAG_FOOTER,
+  TAG_FORM,
+  TAG_H1,
+  TAG_H2,
+  TAG_H3,
+  TAG_H4,
+  TAG_H5,
+  TAG_H6,
   TAG_HEAD,
+  TAG_HEADER,
+  TAG_HR,
+  TAG_HTML,
+  TAG_LI,
   TAG_LINK,
+  TAG_MAIN,
   TAG_META,
+  TAG_NAV,
   TAG_NOSCRIPT,
+  TAG_OL,
+  TAG_P,
   TAG_PRE,
   TAG_SCRIPT,
+  TAG_SECTION,
   TAG_STYLE,
+  TAG_SUMMARY,
   TAG_TABLE,
+  TAG_TBODY,
+  TAG_TD,
   TAG_TEMPLATE,
+  TAG_TFOOT,
+  TAG_TH,
+  TAG_THEAD,
   TAG_TITLE,
+  TAG_TR,
+  TAG_UL,
   TagIdMap,
   TEXT_NODE,
 } from './const'
@@ -60,6 +100,197 @@ const HEAD_CONTENT_TAGS = new Set<number>([
   TAG_NOSCRIPT,
   TAG_TEMPLATE,
 ])
+
+// Implied end tags (HTML §13.1.2.4 optional tags + "in body" insertion mode).
+// Mirrors the Rust engine's `parse.rs`. Start tags that cannot appear inside a
+// `<p>` imply its end; block containers, headings, lists, tables, and the
+// list-item/definition tags all close an open `<p>`.
+const CLOSES_P = new Set<number>([
+  TAG_DIV,
+  TAG_P,
+  TAG_UL,
+  TAG_OL,
+  TAG_DL,
+  TAG_LI,
+  TAG_DD,
+  TAG_DT,
+  TAG_TABLE,
+  TAG_H1,
+  TAG_H2,
+  TAG_H3,
+  TAG_H4,
+  TAG_H5,
+  TAG_H6,
+  TAG_BLOCKQUOTE,
+  TAG_SECTION,
+  TAG_ARTICLE,
+  TAG_HEADER,
+  TAG_FOOTER,
+  TAG_NAV,
+  TAG_ASIDE,
+  TAG_PRE,
+  TAG_HR,
+  TAG_FORM,
+  TAG_FIELDSET,
+  TAG_FIGURE,
+  TAG_FIGCAPTION,
+  TAG_ADDRESS,
+  TAG_MAIN,
+  TAG_CENTER,
+  TAG_DETAILS,
+  TAG_SUMMARY,
+  TAG_DIALOG,
+])
+
+// "Button scope" terminators for closing a `<p>`. `UL`/`OL`/`DL`/`LI` are added
+// (a deviation from the bare spec list) to keep scans short; a `<p>` is always
+// closed before any of these can become its ancestor.
+const P_SCOPE_BOUNDARY = new Set<number>([
+  TAG_BUTTON,
+  TAG_TD,
+  TAG_TH,
+  TAG_CAPTION,
+  TAG_TABLE,
+  TAG_TEMPLATE,
+  TAG_HTML,
+  TAG_UL,
+  TAG_OL,
+  TAG_DL,
+  TAG_LI,
+])
+
+// "List item scope": a new `<li>` closes the previous one only within the same
+// list, never across a nested list or table.
+const LI_SCOPE_BOUNDARY = new Set<number>([
+  TAG_UL,
+  TAG_OL,
+  TAG_TABLE,
+  TAG_TD,
+  TAG_TH,
+  TAG_CAPTION,
+  TAG_TEMPLATE,
+  TAG_HTML,
+])
+
+// Scope for `<dt>`/`<dd>`: each closes the other within the same `<dl>`.
+const DL_SCOPE_BOUNDARY = new Set<number>([
+  TAG_DL,
+  TAG_UL,
+  TAG_OL,
+  TAG_LI,
+  TAG_TABLE,
+  TAG_TD,
+  TAG_TH,
+  TAG_CAPTION,
+  TAG_TEMPLATE,
+  TAG_HTML,
+])
+
+// "Table cell scope": a new `<td>`/`<th>` closes the current cell, stopping at
+// the row/section.
+const CELL_SCOPE_BOUNDARY = new Set<number>([
+  TAG_TR,
+  TAG_THEAD,
+  TAG_TBODY,
+  TAG_TFOOT,
+  TAG_TABLE,
+  TAG_CAPTION,
+  TAG_TEMPLATE,
+  TAG_HTML,
+])
+
+// Implied-end-tag targets and table-context closeable sets.
+const SINGLE_P = new Set<number>([TAG_P])
+const SINGLE_LI = new Set<number>([TAG_LI])
+const DT_DD = new Set<number>([TAG_DT, TAG_DD])
+const TD_TH = new Set<number>([TAG_TD, TAG_TH])
+const TR_CELLS = new Set<number>([TAG_TD, TAG_TH, TAG_TR])
+const SECTION_CELLS = new Set<number>([TAG_TD, TAG_TH, TAG_TR, TAG_THEAD, TAG_TBODY, TAG_TFOOT, TAG_CAPTION])
+
+/**
+ * Close open nodes from `currentNode` up to and including the nearest node whose
+ * tagId is in `target`, but only if it is found before a `boundary` node (in
+ * which case nothing is closed). The intervening unmatched nodes (inline
+ * formatting, unknown elements) are closed along the way, mirroring the spec's
+ * "generate implied end tags" step.
+ */
+function closeImpliedTo(
+  state: ParseState,
+  target: Set<number>,
+  boundary: Set<number>,
+  handleEvent: (event: NodeEvent) => void,
+): void {
+  let found = false
+  for (let node = state.currentNode; node; node = node.parent) {
+    const id = node.tagId
+    if (id !== undefined && target.has(id)) {
+      found = true
+      break
+    }
+    if (id !== undefined && boundary.has(id)) {
+      break
+    }
+  }
+  if (!found) {
+    return
+  }
+  // closeNode always closes the current top and walks to its parent, so close
+  // from the top until the matched node has itself been closed.
+  while (state.currentNode) {
+    const id = state.currentNode.tagId
+    const isTarget = id !== undefined && target.has(id)
+    closeNode(state.currentNode, state, handleEvent)
+    if (isTarget) {
+      break
+    }
+  }
+}
+
+/**
+ * Close open table-internal nodes (cells, rows, sections) from the top while
+ * their tagId is in `closeable`, stopping at the first node that is not (e.g.
+ * the enclosing `<table>`). Implements implied end tags for `<tr>` and the
+ * table section elements.
+ */
+function closeTableContext(
+  state: ParseState,
+  closeable: Set<number>,
+  handleEvent: (event: NodeEvent) => void,
+): void {
+  while (state.currentNode) {
+    const id = state.currentNode.tagId
+    if (id === undefined || !closeable.has(id)) {
+      break
+    }
+    closeNode(state.currentNode, state, handleEvent)
+  }
+}
+
+/**
+ * Commit end-of-input state: flush trailing buffered text and close any open
+ * elements. The streaming parser keeps trailing text and unclosed elements
+ * pending (a later chunk might continue them); at true EOF they must be
+ * committed so trailing content is not dropped (e.g. `<p>a<p>b`).
+ *
+ * `leftover` is the residual returned by the final `parseHtmlStream`. Pure
+ * trailing text (no leading `<`) is emitted; a residual that is an incomplete
+ * start tag (leading `<`) is dropped, matching the browser tokenizer's
+ * EOF-in-tag behaviour. The text-buffer flags set while the trailing text was
+ * scanned persist on `state`, so `processTextBuffer` commits it as if the next
+ * tag had triggered the flush.
+ */
+export function finalizeParse(
+  leftover: string,
+  state: ParseState,
+  handleEvent: (event: NodeEvent) => void,
+): void {
+  if (leftover.length > 0 && leftover.charCodeAt(0) !== LT_CHAR) {
+    processTextBuffer(leftover, state, handleEvent)
+  }
+  while (state.currentNode) {
+    closeNode(state.currentNode, state, handleEvent)
+  }
+}
 
 // Pre-allocate arrays and objects to reduce allocations
 const EMPTY_ATTRIBUTES: Record<string, string> = Object.freeze({})
@@ -792,6 +1023,41 @@ function processOpeningTag(
     const headNode = state.currentNode
     if (headNode && headNode.tagId === TAG_HEAD) {
       closeNode(headNode, state, handleEvent)
+    }
+  }
+
+  // Browser recovery: implied end tags (HTML §13.1.2.4 optional tags +
+  // tree-construction). Common malformed-but-valid markup omits end tags
+  // (`<p>a<p>b`, `<li>a<li>b`, `<td>a<td>b`, `<dt>t<dd>d`); auto-close the open
+  // element so the new sibling is not wrongly nested. Runs after the tag is
+  // confirmed complete (above) so a chunk-split start tag never mutates parser
+  // state or emits a premature close.
+  if ((state.depthMap[TAG_P] || 0) > 0 && CLOSES_P.has(tagId)) {
+    closeImpliedTo(state, SINGLE_P, P_SCOPE_BOUNDARY, handleEvent)
+  }
+  if (tagId === TAG_LI) {
+    if ((state.depthMap[TAG_LI] || 0) > 0) {
+      closeImpliedTo(state, SINGLE_LI, LI_SCOPE_BOUNDARY, handleEvent)
+    }
+  }
+  else if (tagId === TAG_DT || tagId === TAG_DD) {
+    if ((state.depthMap[TAG_DT] || 0) > 0 || (state.depthMap[TAG_DD] || 0) > 0) {
+      closeImpliedTo(state, DT_DD, DL_SCOPE_BOUNDARY, handleEvent)
+    }
+  }
+  else if ((state.depthMap[TAG_TABLE] || 0) > 0) {
+    if (tagId === TAG_TD || tagId === TAG_TH) {
+      if ((state.depthMap[TAG_TD] || 0) > 0 || (state.depthMap[TAG_TH] || 0) > 0) {
+        closeImpliedTo(state, TD_TH, CELL_SCOPE_BOUNDARY, handleEvent)
+      }
+    }
+    else if (tagId === TAG_TR) {
+      if ((state.depthMap[TAG_TR] || 0) > 0) {
+        closeTableContext(state, TR_CELLS, handleEvent)
+      }
+    }
+    else if (tagId === TAG_THEAD || tagId === TAG_TBODY || tagId === TAG_TFOOT) {
+      closeTableContext(state, SECTION_CELLS, handleEvent)
     }
   }
 
