@@ -5,12 +5,19 @@ import {
   NodeEventEnter,
   NodeEventExit,
   TAG_A,
+  TAG_BASE,
   TAG_BLOCKQUOTE,
   TAG_CODE,
+  TAG_HEAD,
+  TAG_LINK,
+  TAG_META,
+  TAG_NOSCRIPT,
   TAG_PRE,
   TAG_SCRIPT,
   TAG_STYLE,
   TAG_TABLE,
+  TAG_TEMPLATE,
+  TAG_TITLE,
   TagIdMap,
   TEXT_NODE,
 } from './const'
@@ -36,6 +43,22 @@ const BACKTICK_CHAR = 96 // '`'
 const PIPE_CHAR = 124 // '|'
 const OPEN_BRACKET_CHAR = 91 // '['
 const CLOSE_BRACKET_CHAR = 93 // ']'
+
+// Tags that are valid inside <head>. Per the HTML parser's "in head" insertion
+// mode, any start tag NOT in this set implies the end of <head> and the start of
+// the body, so we auto-close an unclosed <head> when one appears (browser
+// recovery for malformed pages that never emit </head> or <body>).
+const HEAD_CONTENT_TAGS = new Set<number>([
+  TAG_HEAD,
+  TAG_TITLE,
+  TAG_META,
+  TAG_LINK,
+  TAG_BASE,
+  TAG_STYLE,
+  TAG_SCRIPT,
+  TAG_NOSCRIPT,
+  TAG_TEMPLATE,
+])
 
 // Pre-allocate arrays and objects to reduce allocations
 const EMPTY_ATTRIBUTES: Record<string, string> = Object.freeze({})
@@ -741,6 +764,19 @@ function processOpeningTag(
   // Check if current element needs closing
   if (state.currentNode?.tagHandler?.isNonNesting) {
     closeNode(state.currentNode, state, handleEvent)
+  }
+
+  // Browser recovery: a non-head start tag while <head> is still open means the
+  // page never closed its head (no </head>/<body>). Auto-close head (and anything
+  // wrongly opened inside it) so body content is parsed as flow content with
+  // normal block spacing, instead of inheriting head's whitespace collapsing.
+  if (state.depthMap[TAG_HEAD] > 0 && !HEAD_CONTENT_TAGS.has(tagId)) {
+    while (state.currentNode && state.currentNode.tagId !== TAG_HEAD) {
+      closeNode(state.currentNode, state, handleEvent)
+    }
+    if (state.currentNode?.tagId === TAG_HEAD) {
+      closeNode(state.currentNode, state, handleEvent)
+    }
   }
 
   const tagHandler = state.tagOverrideHandlers?.get(tagName) ?? tagHandlers[tagId]

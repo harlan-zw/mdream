@@ -2,6 +2,17 @@
 
 use super::*;
 
+/// Tags valid inside `<head>` per the HTML parser's "in head" insertion mode.
+/// Any other start tag implies the end of `<head>` and the start of the body, so
+/// an unclosed head is auto-closed when one appears. Unknown tags (`None`) are
+/// treated as body content, matching the spec's "anything else" rule.
+fn is_head_content_tag(tag_id: Option<u8>) -> bool {
+    matches!(
+        tag_id,
+        Some(TAG_HEAD | TAG_TITLE | TAG_META | TAG_LINK | TAG_BASE | TAG_STYLE | TAG_SCRIPT | TAG_NOSCRIPT | TAG_TEMPLATE)
+    )
+}
+
 /// Whether an element is visually hidden, so the filter should drop it and its
 /// subtree: inline `display:none` / `visibility:hidden` / `position:absolute|fixed`,
 /// or the `hidden` attribute (except `hidden="until-found"`).
@@ -141,6 +152,19 @@ impl ConvertState {
                 complete: false, new_position: position,
                 self_closing: false, skip: false,
             };
+        }
+
+        // Browser recovery: a non-head start tag while <head> is still open means the
+        // page never closed its head (no </head>/<body>). Auto-close head (and anything
+        // wrongly opened inside it) so body content parses as flow content with normal
+        // block spacing instead of inheriting head's whitespace collapsing.
+        if self.depth_map[TAG_HEAD as usize] > 0 && !is_head_content_tag(tag_id) {
+            while self.stack.last().is_some_and(|n| n.tag_id != Some(TAG_HEAD)) {
+                self.close_node();
+            }
+            if self.stack.last().is_some_and(|n| n.tag_id == Some(TAG_HEAD)) {
+                self.close_node();
+            }
         }
 
         if let Some(id) = tag_id {
