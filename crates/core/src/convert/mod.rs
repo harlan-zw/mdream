@@ -396,64 +396,13 @@ impl ConvertState {
                     continue;
                 }
 
-                if cc == AMPERSAND_CHAR {
-                    self.has_encoded_html_entity = true;
-                }
-
-                if is_whitespace(cc) {
-                    if self.just_closed_tag {
-                        self.just_closed_tag = false;
-                        self.last_char_was_whitespace = false;
-                    }
-                    if !self.in_pre && self.last_char_was_whitespace {
-                        i += 1;
-                        continue;
-                    }
-                    if self.in_pre {
-                        text_buffer.push(cc as char);
-                    } else if cc == SPACE_CHAR || !self.last_char_was_whitespace {
-                        text_buffer.push(' ');
-                    }
-                    self.last_char_was_whitespace = true;
-                    self.text_buffer_contains_whitespace = true;
-
+                let end = if cc < 0x80 {
+                    i + 1
                 } else {
-                    self.text_buffer_contains_non_whitespace = true;
-                    self.last_char_was_whitespace = false;
-                    self.just_closed_tag = false;
-
-                    if self.escape_ctx == 0 {
-                        if cc < 0x80 {
-                            text_buffer.push(cc as char);
-                        } else {
-                            if let Some(ch) = chunk[i..].chars().next() {
-                            text_buffer.push(ch);
-                            i += ch.len_utf8();
-                            } else { i += 1; }
-        
-                            continue;
-                        }
-                    } else if cc == PIPE_CHAR && (self.escape_ctx & ESC_TABLE) != 0 {
-                        text_buffer.push_str("\\|");
-                    } else if cc == BACKTICK_CHAR && (self.escape_ctx & ESC_CODE_PRE) != 0 {
-                        text_buffer.push_str("\\`");
-                    } else if cc == OPEN_BRACKET_CHAR && (self.escape_ctx & ESC_LINK) != 0 {
-                        text_buffer.push_str("\\[");
-                    } else if cc == CLOSE_BRACKET_CHAR && (self.escape_ctx & ESC_LINK) != 0 {
-                        text_buffer.push_str("\\]");
-                    } else if cc == GT_CHAR && (self.escape_ctx & ESC_BLOCKQUOTE) != 0 {
-                        text_buffer.push_str("\\>");
-                    } else if cc < 0x80 {
-                        text_buffer.push(cc as char);
-                    } else if let Some(ch) = chunk[i..].chars().next() {
-                        text_buffer.push(ch);
-                        i += ch.len_utf8();
-    
-                        continue;
-                    }
-
-                }
-                i += 1;
+                    i + chunk[i..].chars().next().map_or(1, char::len_utf8)
+                };
+                self.append_text_content(&chunk[i..end], &mut text_buffer);
+                i = end;
                 continue;
             }
 
@@ -511,20 +460,24 @@ impl ConvertState {
 
             if next == EXCLAMATION_CHAR {
                 let remaining = &chunk[i..];
-                // CDATA is dropped by default but can be surfaced via
-                // tagOverrides["#cdata-section"]. Handle it before the generic
-                // comment/doctype scan, which would otherwise stop at the first
-                // `>` inside `]]>` and discard the content. We already matched
-                // `<!`, so only the `[CDATA[` tail is checked; `strip_prefix`
-                // short-circuits on the third byte for the common comment and
-                // doctype cases.
+                // CDATA markup is omitted by default, while its inner text is
+                // emitted. Handle it before the generic comment/doctype scan,
+                // which would otherwise stop at the first `>` inside `]]>` and
+                // discard the content. We already matched `<!`, so only the
+                // `[CDATA[` tail is checked; `strip_prefix` short-circuits on
+                // the third byte for the common comment and doctype cases.
                 if let Some(after_open) = chunk[i + 2..].strip_prefix("[CDATA[") {
                     if let Some(rel) = after_open.find("]]>") {
-                        if !text_buffer.is_empty() {
-                            self.process_text_buffer(&mut text_buffer);
-                            text_buffer.clear();
+                        let content = &after_open[..rel];
+                        if self.has_cdata_section_override() {
+                            if !text_buffer.is_empty() {
+                                self.process_text_buffer(&mut text_buffer);
+                                text_buffer.clear();
+                            }
+                            self.process_cdata_section(content);
+                        } else {
+                            self.append_text_content(content, &mut text_buffer);
                         }
-                        self.process_cdata_section(&after_open[..rel]);
                         i += "<![CDATA[".len() + rel + 3;
                         continue;
                     }

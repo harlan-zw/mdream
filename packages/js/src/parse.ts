@@ -479,82 +479,12 @@ function parseHtmlInternal(
 
     // If not starting a tag, add to text buffer and continue
     if (currentCharCode !== LT_CHAR) {
-      if (currentCharCode === AMPERSAND_CHAR) {
-        state.hasEncodedHtmlEntity = true
-      }
-
-      // Whitespace handling optimization
-      if (isWhitespace(currentCharCode)) {
-        const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
-
-        // Handle space after a tag
-        if (state.justClosedTag) {
-          state.justClosedTag = false
-          state.lastCharWasWhitespace = false
-        }
-
-        // Skip if last character was whitespace and we're not in a pre tag
-        if (!inPreTag && state.lastCharWasWhitespace) {
-          i++
-          continue
-        }
-
-        // Preserve original whitespace in pre tags
-        if (inPreTag) {
-          textBuffer += htmlChunk[i]
-        }
-        else {
-          if (currentCharCode === SPACE_CHAR || !state.lastCharWasWhitespace) {
-            textBuffer += ' '
-          }
-        }
-        state.lastCharWasWhitespace = true
-        state.textBufferContainsWhitespace = true
-        state.lastCharWasBackslash = false
-      }
-      else {
-        state.textBufferContainsNonWhitespace = true
-        state.lastCharWasWhitespace = false
-        state.justClosedTag = false
-
-        // Handle special characters that need escaping
-        if (currentCharCode === PIPE_CHAR && state.depthMap[TAG_TABLE]) {
-          textBuffer += '\\|'
-        }
-        else if (currentCharCode === BACKTICK_CHAR && (state.depthMap[TAG_CODE] || state.depthMap[TAG_PRE])) {
-          textBuffer += '\\`'
-        }
-        else if (currentCharCode === OPEN_BRACKET_CHAR && state.depthMap[TAG_A]) {
-          textBuffer += '\\['
-        }
-        else if (currentCharCode === CLOSE_BRACKET_CHAR && state.depthMap[TAG_A]) {
-          textBuffer += '\\]'
-        }
-        else if (currentCharCode === GT_CHAR && state.depthMap[TAG_BLOCKQUOTE]) {
-          textBuffer += '\\>'
-        }
-        else {
-          textBuffer += htmlChunk[i]
-        }
-
-        // Track quote state for quote-aware rawtext tags (script/style only)
-        if (state.inRawTextQuoteAware) {
-          if (!state.lastCharWasBackslash) {
-            if (currentCharCode === APOS_CHAR && !state.inDoubleQuote && !state.inBacktick) {
-              state.inSingleQuote = !state.inSingleQuote
-            }
-            else if (currentCharCode === QUOTE_CHAR && !state.inSingleQuote && !state.inBacktick) {
-              state.inDoubleQuote = !state.inDoubleQuote
-            }
-            else if (currentCharCode === BACKTICK_CHAR && !state.inSingleQuote && !state.inDoubleQuote) {
-              state.inBacktick = !state.inBacktick
-            }
-          }
-        }
-
-        state.lastCharWasBackslash = currentCharCode === BACKSLASH_CHAR && !state.lastCharWasBackslash
-      }
+      const textStart = i
       i++
+      while (i < chunkLength && htmlChunk.charCodeAt(i) !== LT_CHAR) {
+        i++
+      }
+      textBuffer += serializeTextContent(htmlChunk, state, textStart, i)
       continue
     }
 
@@ -571,10 +501,9 @@ function parseHtmlInternal(
       // Discriminate on the third char: '[' is a CDATA section, anything else
       // is a comment/doctype. Only the rare '[' case pays for the string work.
       if (htmlChunk.charCodeAt(i + 2) === OPEN_BRACKET_CHAR) {
-        // CDATA is dropped by default but can be surfaced via
-        // tagOverrides['#cdata-section']. Handle it before the generic
-        // comment/doctype scan, which would otherwise stop at the first `>`
-        // inside `]]>` and discard the content.
+        // CDATA markup is omitted by default, while its inner text is emitted.
+        // Handle it before the generic comment/doctype scan, which would
+        // otherwise stop at the first `>` inside `]]>` and discard the content.
         if (htmlChunk.startsWith('<![CDATA[', i)) {
           const end = htmlChunk.indexOf(']]>', i + 9)
           if (end === -1) {
@@ -582,11 +511,17 @@ function parseHtmlInternal(
             textBuffer += htmlChunk.substring(i)
             break
           }
-          if (textBuffer.length > 0) {
-            processTextBuffer(textBuffer, state, handleEvent)
-            textBuffer = ''
+          const content = htmlChunk.substring(i + 9, end)
+          if (state.tagOverrideHandlers?.has('#cdata-section')) {
+            if (textBuffer.length > 0) {
+              processTextBuffer(textBuffer, state, handleEvent)
+              textBuffer = ''
+            }
+            processCdataSection(content, state, handleEvent)
           }
-          processCdataSection(htmlChunk.substring(i + 9, end), state, handleEvent)
+          else {
+            textBuffer += serializeTextContent(content, state)
+          }
           i = end + 3
           continue
         }
@@ -617,7 +552,7 @@ function parseHtmlInternal(
       if (state.currentNode?.tagHandler?.isNonNesting) {
         const inQuotes = state.inRawTextQuoteAware && (state.inSingleQuote || state.inDoubleQuote || state.inBacktick)
         if (inQuotes) {
-          textBuffer += htmlChunk[i]
+          textBuffer += serializeTextContent(htmlChunk, state, i, i + 1)
           i++
           continue
         }
@@ -632,7 +567,8 @@ function parseHtmlInternal(
         const peekTagName = htmlChunk.substring(i + 2, peekEnd).toLowerCase() as keyof typeof TagIdMap
         const peekTagId = TagIdMap[peekTagName] ?? -1
         if (peekTagId !== state.currentNode.tagId) {
-          textBuffer += htmlChunk[i++]
+          textBuffer += serializeTextContent(htmlChunk, state, i, i + 1)
+          i++
           continue
         }
       }
@@ -678,12 +614,14 @@ function parseHtmlInternal(
       // Inside a non-nesting element (script/style/title/textarea) no opening
       // tag is a real element; a nested `<script>` is literal text (issue #93).
       if (state.currentNode?.tagHandler?.isNonNesting) {
-        textBuffer += htmlChunk[i++]
+        textBuffer += serializeTextContent(htmlChunk, state, i, i + 1)
+        i++
         continue
       }
 
       if (!tagName) {
-        textBuffer += htmlChunk[i++]
+        textBuffer += serializeTextContent(htmlChunk, state, i, i + 1)
+        i++
         continue
       }
 
@@ -695,7 +633,8 @@ function parseHtmlInternal(
       const result = processOpeningTag(tagName, tagId, htmlChunk, i2, state, handleEvent)
 
       if (result.skip) {
-        textBuffer += htmlChunk[i++]
+        textBuffer += serializeTextContent(htmlChunk, state, i, i + 1)
+        i++
       }
       else if (result.complete) {
         i = result.newPosition
@@ -995,12 +934,10 @@ function processCommentOrDoctype(htmlChunk: string, position: number): {
 /**
  * Handle a CDATA section's inner content.
  *
- * CDATA is discarded by default (matching the HTML spec, where `<![CDATA[`
- * outside foreign content is a bogus comment). Callers opt in by registering a
- * `#cdata-section` entry in `tagOverrides`; the leading `#` makes the pseudo-tag
- * impossible to collide with a real HTML element name. When an override exists
- * the content is emitted as a synthetic `#cdata-section` element whose rendering
- * follows the override handler.
+ * CDATA markup is omitted by default while the inner content is emitted as text.
+ * Callers can register a `#cdata-section` entry in `tagOverrides` to render a
+ * synthetic pseudo-element instead; the leading `#` makes it impossible to
+ * collide with a real HTML element name.
  */
 function processCdataSection(
   content: string,
@@ -1037,6 +974,101 @@ function processCdataSection(
   }
 
   closeNode(state.currentNode ?? null, state, handleEvent)
+}
+
+/**
+ * Append already-classified text into the pending text buffer.
+ *
+ * This applies the normal whitespace, entity, rawtext quote, and markdown
+ * escaping rules, but does not parse `<` as markup. The main scanner passes
+ * text ranges; CDATA passes its inner content so only the delimiters are
+ * omitted.
+ */
+function serializeTextContent(
+  content: string,
+  state: ParseState,
+  start = 0,
+  end = content.length,
+): string {
+  let textBuffer = ''
+  const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
+  const inCodeOrPre = !!(state.depthMap[TAG_CODE] || state.depthMap[TAG_PRE])
+  const inLink = !!state.depthMap[TAG_A]
+  const inTable = !!state.depthMap[TAG_TABLE]
+  const inBlockquote = !!state.depthMap[TAG_BLOCKQUOTE]
+
+  for (let i = start; i < end; i++) {
+    const currentCharCode = content.charCodeAt(i)
+
+    if (currentCharCode === AMPERSAND_CHAR) {
+      state.hasEncodedHtmlEntity = true
+    }
+
+    if (isWhitespace(currentCharCode)) {
+      if (state.justClosedTag) {
+        state.justClosedTag = false
+        state.lastCharWasWhitespace = false
+      }
+
+      if (!inPreTag && state.lastCharWasWhitespace) {
+        continue
+      }
+
+      if (inPreTag) {
+        textBuffer += content[i]
+      }
+      else if (currentCharCode === SPACE_CHAR || !state.lastCharWasWhitespace) {
+        textBuffer += ' '
+      }
+
+      state.lastCharWasWhitespace = true
+      state.textBufferContainsWhitespace = true
+      state.lastCharWasBackslash = false
+      continue
+    }
+
+    state.textBufferContainsNonWhitespace = true
+    state.lastCharWasWhitespace = false
+    state.justClosedTag = false
+
+    if (currentCharCode === PIPE_CHAR && inTable) {
+      textBuffer += '\\|'
+    }
+    else if (currentCharCode === BACKTICK_CHAR && inCodeOrPre) {
+      textBuffer += '\\`'
+    }
+    else if (currentCharCode === OPEN_BRACKET_CHAR && inLink) {
+      textBuffer += '\\['
+    }
+    else if (currentCharCode === CLOSE_BRACKET_CHAR && inLink) {
+      textBuffer += '\\]'
+    }
+    else if (currentCharCode === GT_CHAR && inBlockquote) {
+      textBuffer += '\\>'
+    }
+    else {
+      textBuffer += content[i]
+    }
+
+    // Track quote state for quote-aware rawtext tags (script/style only)
+    if (state.inRawTextQuoteAware) {
+      if (!state.lastCharWasBackslash) {
+        if (currentCharCode === APOS_CHAR && !state.inDoubleQuote && !state.inBacktick) {
+          state.inSingleQuote = !state.inSingleQuote
+        }
+        else if (currentCharCode === QUOTE_CHAR && !state.inSingleQuote && !state.inBacktick) {
+          state.inDoubleQuote = !state.inDoubleQuote
+        }
+        else if (currentCharCode === BACKTICK_CHAR && !state.inSingleQuote && !state.inDoubleQuote) {
+          state.inBacktick = !state.inBacktick
+        }
+      }
+    }
+
+    state.lastCharWasBackslash = currentCharCode === BACKSLASH_CHAR && !state.lastCharWasBackslash
+  }
+
+  return textBuffer
 }
 
 /**
