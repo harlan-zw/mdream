@@ -130,14 +130,22 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
     expect(extracted).toEqual(['italic'])
   })
 
-  it('drops CDATA sections by default', async () => {
+  it('emits CDATA content without markup by default', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const markdown = htmlToMarkdown('<p>before<![CDATA[secret payload]]>after</p>', {
       engine,
     })
-    expect(markdown).not.toContain('secret payload')
-    expect(markdown).toContain('before')
-    expect(markdown).toContain('after')
+    expect(markdown).toBe('beforesecret payloadafter')
+    expect(markdown).not.toContain('<![CDATA[')
+    expect(markdown).not.toContain(']]>')
+  })
+
+  it('sends CDATA content through the text pipeline by default', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<p>a &amp; <![CDATA[b &amp; c]]></p>', {
+      engine,
+    })
+    expect(markdown).toBe('a & b & c')
   })
 
   it('emits CDATA content via #cdata-section enter/exit override', async () => {
