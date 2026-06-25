@@ -10,6 +10,10 @@
     "url": "https://github.com/harlan-zw/mdream",
     "directory": "packages/nuxt"
   },
+  "homepage": "https://github.com/harlan-zw/mdream/tree/main/packages/nuxt#readme",
+  "bugs": {
+    "url": "https://github.com/harlan-zw/mdream/issues"
+  },
   "exports": {
     ".": {
       "types": "./dist/types.d.mts",
