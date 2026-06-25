@@ -18,8 +18,11 @@ interface CliOptions {
 
 async function streamingConvert(options: CliOptions = {}) {
   const format = options.text ? 'text' : options.format
-  if (format && format !== 'markdown' && format !== 'text')
-    throw new Error(`Unknown format: ${format}`)
+  if (format && format !== 'markdown' && format !== 'text') {
+    process.stderr.write(`Unknown format: ${format}\n`)
+    process.exitCode = 1
+    return
+  }
 
   let conversionOptions: Partial<MdreamOptions> = {
     origin: options.origin,

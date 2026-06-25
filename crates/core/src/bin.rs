@@ -31,6 +31,9 @@ fn main() -> io::Result<()> {
                             std::process::exit(1);
                         }
                     };
+                } else {
+                    eprintln!("--format requires a value: markdown or text");
+                    std::process::exit(1);
                 }
             }
             "--text" => format = OutputFormat::Text,

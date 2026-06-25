@@ -17,8 +17,12 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === '--wrap-width' && args[i + 1]) {
     wrapWidth = Number.parseInt(args[++i], 10) || undefined
   }
-  else if (args[i] === '--format' && args[i + 1]) {
+  else if (args[i] === '--format') {
     const value = args[++i]
+    if (!value) {
+      process.stderr.write('--format requires a value: markdown or text\n')
+      process.exit(1)
+    }
     if (value !== 'markdown' && value !== 'text') {
       process.stderr.write(`Unknown format: ${value}\n`)
       process.exit(1)
