@@ -122,7 +122,7 @@ fn to_core_opts(options: Option<HtmlToMarkdownOptions>) -> mdream::types::HTMLTo
         origin: options.as_ref().and_then(|o| o.origin.clone()),
         clean_urls: options.as_ref().and_then(|o| o.clean_urls).unwrap_or(false),
         clean,
-        wrap_width: options.as_ref().and_then(|o| o.wrap_width).map(|w| w as usize),
+        wrap_width: options.as_ref().and_then(|o| o.wrap_width).map_or(0, |w| w as usize),
         plugins: options.and_then(|o| {
             o.plugins.map(|p| mdream::types::PluginConfig {
                 filter: p.filter.map(|f| mdream::types::FilterConfig {
