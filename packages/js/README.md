@@ -27,6 +27,7 @@ yarn add @mdream/js@beta
 | `@mdream/js/negotiate` | HTTP content negotiation: `shouldServeMarkdown`, `parseAcceptHeader` |
 | `@mdream/js/parse` | Low-level HTML parser: `parseHtml`, `parseHtmlStream` |
 | `@mdream/js/splitter` | Single-pass markdown splitter: `htmlToMarkdownSplitChunks`, `htmlToMarkdownSplitChunksStream` |
+| `@mdream/js/text` | Lean plain text conversion: `htmlToText`, `streamHtmlToText` |
 | `@mdream/js/llms-txt` | llms.txt artifact generation: `generateLlmsTxtArtifacts`, `createLlmsTxtStream` |
 
 ## API Reference
@@ -81,6 +82,52 @@ for await (const chunk of stream) {
 
 **Returns:** `AsyncIterable<string>`
 
+### `htmlToText(html, options?)`
+
+Converts HTML to plain text through the lean text-only entry point. This entry
+does not import Markdown tag handlers or built-in Markdown plugins, so browser
+bundles can tree-shake more aggressively when only plain text is needed.
+
+Use `htmlToMarkdown(html, { format: 'text' })` when you need the main converter
+surface with plugins, hooks, or cross-engine parity.
+
+```typescript
+import { htmlToText } from '@mdream/js/text'
+
+const text = htmlToText('<h1>Hello</h1><p><strong>World</strong></p>')
+// Hello\n\nWorld
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `html` | `string` | The HTML string to convert |
+| `options` | `TextOptions` | Optional text conversion configuration |
+
+**Returns:** `string`
+
+### `streamHtmlToText(htmlStream, options?)`
+
+Streams HTML to plain text through the lean text-only entry point.
+
+```typescript
+import { streamHtmlToText } from '@mdream/js/text'
+
+for await (const chunk of streamHtmlToText(response.body)) {
+  process.stdout.write(chunk)
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `htmlStream` | `ReadableStream<Uint8Array \| string> \| null` | A web `ReadableStream` of HTML content |
+| `options` | `TextOptions` | Optional text conversion configuration |
+
+**Returns:** `AsyncIterable<string>`
+
 ---
 
 ## Options
@@ -95,6 +142,14 @@ for await (const chunk of stream) {
 | `hooks` | `TransformPlugin[]` | `undefined` | Imperative hook-based transform plugins for custom behavior (see [Plugins](#plugins)) |
 | `wrapWidth` | `number` | `undefined` | Hard-wrap prose at this many characters on word boundaries |
 | `format` | `'markdown' \| 'text'` | `'markdown'` | Output Markdown or plain text with Markdown/HTML markup omitted |
+
+### `TextOptions`
+
+Options for the lean `@mdream/js/text` entry point.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `wrapWidth` | `number` | `undefined` | Hard-wrap prose at this many characters on word boundaries |
 
 ### `BuiltinPlugins`
 

@@ -1,4 +1,4 @@
-import type { ParseState } from './parse'
+import type { ParseState } from './parse-core'
 import type { ElementNode, EngineOptions, HandlerContext, NodeEvent, PluginContext, TagHandler, TextNode, TransformPlugin } from './types'
 import {
   DEFAULT_BLOCK_SPACING,
@@ -26,8 +26,9 @@ import {
   TAG_TH,
   TEXT_NODE,
 } from './const'
-import { finalizeParse, parseHtmlStream } from './parse'
+import { finalizeParse, parseHtmlStream } from './parse-core'
 import { processPluginsForEvent } from './plugin-processor'
+import { tagHandlers } from './tags'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -624,6 +625,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       depth: 0,
       resolvedPlugins,
       tagOverrideHandlers,
+      tagHandlers,
       plainText: state.plainText,
     }
 
