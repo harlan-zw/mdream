@@ -1931,7 +1931,7 @@ fn convert_wrapped(html: &str, width: usize) -> String {
 fn wrap_disabled_by_default_is_byte_identical() {
     let html = "<p>The quick brown fox jumps over the lazy dog and then keeps on running well past the edge.</p>";
     assert_eq!(convert(html), html_to_markdown(html, HTMLToMarkdownOptions::default()));
-    // Some(0) is also a no-op.
+    // A configured width of 0 is also a no-op.
     assert_eq!(convert(html), convert_wrapped(html, 0));
 }
 
