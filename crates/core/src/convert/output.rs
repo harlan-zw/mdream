@@ -838,7 +838,7 @@ impl ConvertState {
     #[inline]
     pub(crate) fn get_exit_output(&self, node: &ElementNode) -> Option<Cow<'static, str>> {
         if self.plain_text {
-            return self.get_text_exit_output(node);
+            return Self::get_text_exit_output(node);
         }
 
         let tag_id = node.tag_id?;
@@ -1024,7 +1024,7 @@ impl ConvertState {
     }
 
     #[inline]
-    fn get_text_exit_output(&self, node: &ElementNode) -> Option<Cow<'static, str>> {
+    fn get_text_exit_output(node: &ElementNode) -> Option<Cow<'static, str>> {
         let tag_id = node.tag_id?;
         match tag_id {
             TAG_Q => Some(Cow::Borrowed("\"")),
