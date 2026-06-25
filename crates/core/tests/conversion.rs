@@ -1504,10 +1504,17 @@ fn script_with_cdata_like_content() {
 }
 
 #[test]
-fn cdata_dropped_by_default() {
-    // CDATA sections are discarded unless opted into via tagOverrides.
-    let md = convert("before <![CDATA[secret payload]]> after");
-    assert!(!md.contains("secret payload"), "CDATA leaked into output: {md}");
+fn cdata_omits_markup_by_default() {
+    let md = convert("<body><p>before<![CDATA[secret payload]]>after</p></body>");
+    assert_eq!(md, "beforesecret payloadafter");
+    assert!(!md.contains("<![CDATA["), "CDATA opener leaked into output: {md}");
+    assert!(!md.contains("]]>"), "CDATA closer leaked into output: {md}");
+}
+
+#[test]
+fn cdata_omits_markup_in_code_block_by_default() {
+    let md = convert("<body><pre><code><![CDATA[\none two\nthree four\n]]></code></pre></body>");
+    assert_eq!(md, "```\none two\nthree four\n```");
 }
 
 #[test]

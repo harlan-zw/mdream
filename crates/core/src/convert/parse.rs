@@ -586,15 +586,11 @@ impl ConvertState {
 
     /// Handle a CDATA section's inner content.
     ///
-    /// CDATA is discarded by default (matching the HTML spec, where `<![CDATA[`
-    /// outside foreign content is a bogus comment). Callers opt in by registering
-    /// a `#cdata-section` entry in `tagOverrides`; the leading `#` makes the
-    /// pseudo-tag impossible to collide with a real HTML element name. When an
-    /// override exists the content is emitted as a synthetic `#cdata-section`
-    /// element whose rendering follows the override (alias tag and/or
-    /// enter/exit strings).
+    /// CDATA markup is omitted by default while the inner content is emitted as
+    /// text. Callers can register a `#cdata-section` entry in `tagOverrides` to
+    /// render a synthetic pseudo-element instead; the leading `#` makes it
+    /// impossible to collide with a real HTML element name.
     pub(crate) fn process_cdata_section(&mut self, content: &str) {
-        if !self.has_tag_overrides { return; }
         let Some(tag_id) = self.options.plugins.as_ref()
             .and_then(|p| p.tag_overrides.as_ref())
             .and_then(|ovs| ovs.iter().find(|(k, _)| k == "#cdata-section"))
@@ -619,6 +615,68 @@ impl ConvertState {
         }
         if !result.self_closing {
             self.close_node();
+        }
+    }
+
+    pub(crate) fn has_cdata_section_override(&self) -> bool {
+        self.options.plugins.as_ref()
+            .and_then(|p| p.tag_overrides.as_ref())
+            .is_some_and(|ovs| ovs.iter().any(|(k, _)| k == "#cdata-section"))
+    }
+
+    pub(crate) fn append_cdata_text_content(&mut self, content: &str, text_buffer: &mut String) {
+        let bytes = content.as_bytes();
+        let mut i = 0;
+
+        while i < bytes.len() {
+            let cc = bytes[i];
+
+            if is_whitespace(cc) {
+                if self.just_closed_tag {
+                    self.just_closed_tag = false;
+                    self.last_char_was_whitespace = false;
+                }
+
+                if !self.in_pre && self.last_char_was_whitespace {
+                    i += 1;
+                    continue;
+                }
+
+                if self.in_pre {
+                    text_buffer.push(cc as char);
+                } else if cc == SPACE_CHAR || !self.last_char_was_whitespace {
+                    text_buffer.push(' ');
+                }
+
+                self.last_char_was_whitespace = true;
+                self.text_buffer_contains_whitespace = true;
+                i += 1;
+                continue;
+            }
+
+            self.text_buffer_contains_non_whitespace = true;
+            self.last_char_was_whitespace = false;
+            self.just_closed_tag = false;
+
+            if cc == PIPE_CHAR && (self.escape_ctx & ESC_TABLE) != 0 {
+                text_buffer.push_str("\\|");
+            } else if cc == BACKTICK_CHAR && (self.escape_ctx & ESC_CODE_PRE) != 0 {
+                text_buffer.push_str("\\`");
+            } else if cc == OPEN_BRACKET_CHAR && (self.escape_ctx & ESC_LINK) != 0 {
+                text_buffer.push_str("\\[");
+            } else if cc == CLOSE_BRACKET_CHAR && (self.escape_ctx & ESC_LINK) != 0 {
+                text_buffer.push_str("\\]");
+            } else if cc == GT_CHAR && (self.escape_ctx & ESC_BLOCKQUOTE) != 0 {
+                text_buffer.push_str("\\>");
+            } else if cc < 0x80 {
+                text_buffer.push(cc as char);
+            } else if let Some(ch) = content[i..].chars().next() {
+                text_buffer.push(ch);
+                i += ch.len_utf8();
+                continue;
+            }
+
+            i += 1;
         }
     }
 

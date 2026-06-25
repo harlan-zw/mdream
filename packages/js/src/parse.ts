@@ -244,10 +244,9 @@ function parseHtmlInternal(
       // Discriminate on the third char: '[' is a CDATA section, anything else
       // is a comment/doctype. Only the rare '[' case pays for the string work.
       if (htmlChunk.charCodeAt(i + 2) === OPEN_BRACKET_CHAR) {
-        // CDATA is dropped by default but can be surfaced via
-        // tagOverrides['#cdata-section']. Handle it before the generic
-        // comment/doctype scan, which would otherwise stop at the first `>`
-        // inside `]]>` and discard the content.
+        // CDATA markup is omitted by default, while its inner text is emitted.
+        // Handle it before the generic comment/doctype scan, which would
+        // otherwise stop at the first `>` inside `]]>` and discard the content.
         if (htmlChunk.startsWith('<![CDATA[', i)) {
           const end = htmlChunk.indexOf(']]>', i + 9)
           if (end === -1) {
@@ -255,11 +254,17 @@ function parseHtmlInternal(
             textBuffer += htmlChunk.substring(i)
             break
           }
-          if (textBuffer.length > 0) {
-            processTextBuffer(textBuffer, state, handleEvent)
-            textBuffer = ''
+          const content = htmlChunk.substring(i + 9, end)
+          if (state.tagOverrideHandlers?.has('#cdata-section')) {
+            if (textBuffer.length > 0) {
+              processTextBuffer(textBuffer, state, handleEvent)
+              textBuffer = ''
+            }
+            processCdataSection(content, state, handleEvent)
           }
-          processCdataSection(htmlChunk.substring(i + 9, end), state, handleEvent)
+          else {
+            textBuffer += serializeCdataTextContent(content, state)
+          }
           i = end + 3
           continue
         }
@@ -663,12 +668,10 @@ function processCommentOrDoctype(htmlChunk: string, position: number): {
 /**
  * Handle a CDATA section's inner content.
  *
- * CDATA is discarded by default (matching the HTML spec, where `<![CDATA[`
- * outside foreign content is a bogus comment). Callers opt in by registering a
- * `#cdata-section` entry in `tagOverrides`; the leading `#` makes the pseudo-tag
- * impossible to collide with a real HTML element name. When an override exists
- * the content is emitted as a synthetic `#cdata-section` element whose rendering
- * follows the override handler.
+ * CDATA markup is omitted by default while the inner content is emitted as text.
+ * Callers can register a `#cdata-section` entry in `tagOverrides` to render a
+ * synthetic pseudo-element instead; the leading `#` makes it impossible to
+ * collide with a real HTML element name.
  */
 function processCdataSection(
   content: string,
@@ -705,6 +708,67 @@ function processCdataSection(
   }
 
   closeNode(state.currentNode ?? null, state, handleEvent)
+}
+
+function serializeCdataTextContent(
+  content: string,
+  state: ParseState,
+): string {
+  let textBuffer = ''
+
+  for (let i = 0; i < content.length; i++) {
+    const currentCharCode = content.charCodeAt(i)
+
+    if (isWhitespace(currentCharCode)) {
+      const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
+
+      if (state.justClosedTag) {
+        state.justClosedTag = false
+        state.lastCharWasWhitespace = false
+      }
+
+      if (!inPreTag && state.lastCharWasWhitespace) {
+        continue
+      }
+
+      if (inPreTag) {
+        textBuffer += content[i]
+      }
+      else if (currentCharCode === SPACE_CHAR || !state.lastCharWasWhitespace) {
+        textBuffer += ' '
+      }
+
+      state.lastCharWasWhitespace = true
+      state.textBufferContainsWhitespace = true
+      state.lastCharWasBackslash = false
+      continue
+    }
+
+    state.textBufferContainsNonWhitespace = true
+    state.lastCharWasWhitespace = false
+    state.justClosedTag = false
+
+    if (currentCharCode === PIPE_CHAR && state.depthMap[TAG_TABLE]) {
+      textBuffer += '\\|'
+    }
+    else if (currentCharCode === BACKTICK_CHAR && (state.depthMap[TAG_CODE] || state.depthMap[TAG_PRE])) {
+      textBuffer += '\\`'
+    }
+    else if (currentCharCode === OPEN_BRACKET_CHAR && state.depthMap[TAG_A]) {
+      textBuffer += '\\['
+    }
+    else if (currentCharCode === CLOSE_BRACKET_CHAR && state.depthMap[TAG_A]) {
+      textBuffer += '\\]'
+    }
+    else if (currentCharCode === GT_CHAR && state.depthMap[TAG_BLOCKQUOTE]) {
+      textBuffer += '\\>'
+    }
+    else {
+      textBuffer += content[i]
+    }
+  }
+
+  return textBuffer
 }
 
 /**
