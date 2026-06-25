@@ -78,6 +78,11 @@ export interface MdreamOptions {
    * tables, and headings are never wrapped. `0` disables wrapping.
    */
   wrapWidth?: number
+  /**
+   * Output format. Defaults to `markdown`; use `text` to omit Markdown/HTML
+   * markup while preserving readable text and block spacing.
+   */
+  format?: 'markdown' | 'text'
 }
 
 const MINIMAL_FILTER_EXCLUDE = ['form', 'fieldset', 'object', 'embed', 'footer', 'aside', 'iframe', 'input', 'textarea', 'select', 'button', 'nav'] as const
@@ -151,7 +156,7 @@ function resolveOptions(options: Partial<MdreamOptions>): ResolvedOptions {
   const { cleanUrls, clean } = resolveCleanConfig(options, minimal)
 
   return {
-    napiOpts: { origin: options.origin, cleanUrls, clean, plugins, wrapWidth: options.wrapWidth },
+    napiOpts: { origin: options.origin, cleanUrls, clean, plugins, wrapWidth: options.wrapWidth, format: options.format },
     extractionHandlers,
     frontmatterCallback,
   }

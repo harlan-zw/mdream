@@ -89,6 +89,10 @@ fn parse_options(options: &JsValue) -> mdream::types::HTMLToMarkdownOptions {
         .as_f64()
         .filter(|n| n.is_finite() && *n >= 0.0)
         .map(|n| n as usize);
+    let format = match as_string(&get_prop(options, "format")).as_deref() {
+        Some("text") => mdream::types::OutputFormat::Text,
+        _ => mdream::types::OutputFormat::Markdown,
+    };
 
     mdream::types::HTMLToMarkdownOptions {
         origin,
@@ -96,6 +100,7 @@ fn parse_options(options: &JsValue) -> mdream::types::HTMLToMarkdownOptions {
         clean: None,
         plugins,
         wrap_width,
+        format,
     }
 }
 

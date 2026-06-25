@@ -400,6 +400,8 @@ export interface ParseState {
   resolvedPlugins?: TransformPlugin[]
   /** Tag override handlers built from declarative tagOverrides config */
   tagOverrideHandlers?: Map<string, TagHandler>
+  /** Whether emitted text should skip Markdown-only escaping */
+  plainText?: boolean
 }
 
 export interface ParseResult {
@@ -518,19 +520,19 @@ function parseHtmlInternal(
         state.justClosedTag = false
 
         // Handle special characters that need escaping
-        if (currentCharCode === PIPE_CHAR && state.depthMap[TAG_TABLE]) {
+        if (!state.plainText && currentCharCode === PIPE_CHAR && state.depthMap[TAG_TABLE]) {
           textBuffer += '\\|'
         }
-        else if (currentCharCode === BACKTICK_CHAR && (state.depthMap[TAG_CODE] || state.depthMap[TAG_PRE])) {
+        else if (!state.plainText && currentCharCode === BACKTICK_CHAR && (state.depthMap[TAG_CODE] || state.depthMap[TAG_PRE])) {
           textBuffer += '\\`'
         }
-        else if (currentCharCode === OPEN_BRACKET_CHAR && state.depthMap[TAG_A]) {
+        else if (!state.plainText && currentCharCode === OPEN_BRACKET_CHAR && state.depthMap[TAG_A]) {
           textBuffer += '\\['
         }
-        else if (currentCharCode === CLOSE_BRACKET_CHAR && state.depthMap[TAG_A]) {
+        else if (!state.plainText && currentCharCode === CLOSE_BRACKET_CHAR && state.depthMap[TAG_A]) {
           textBuffer += '\\]'
         }
-        else if (currentCharCode === GT_CHAR && state.depthMap[TAG_BLOCKQUOTE]) {
+        else if (!state.plainText && currentCharCode === GT_CHAR && state.depthMap[TAG_BLOCKQUOTE]) {
           textBuffer += '\\>'
         }
         else {

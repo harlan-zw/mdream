@@ -103,6 +103,8 @@ pub struct HtmlToMarkdownOptions {
     pub plugins: Option<PluginOptions>,
     #[napi(js_name = "wrapWidth")]
     pub wrap_width: Option<u32>,
+    #[napi(ts_type = "\"markdown\" | \"text\"")]
+    pub format: Option<String>,
 }
 
 // ── Type conversion (NAPI → core) ──
@@ -118,11 +120,17 @@ fn to_core_opts(options: Option<HtmlToMarkdownOptions>) -> mdream::types::HTMLTo
         empty_images: c.empty_images.unwrap_or(false),
         empty_link_text: c.empty_link_text.unwrap_or(false),
     });
+    let format = match options.as_ref().and_then(|o| o.format.as_deref()) {
+        Some("text") => mdream::types::OutputFormat::Text,
+        _ => mdream::types::OutputFormat::Markdown,
+    };
+
     mdream::types::HTMLToMarkdownOptions {
         origin: options.as_ref().and_then(|o| o.origin.clone()),
         clean_urls: options.as_ref().and_then(|o| o.clean_urls).unwrap_or(false),
         clean,
         wrap_width: options.as_ref().and_then(|o| o.wrap_width).map(|w| w as usize),
+        format,
         plugins: options.and_then(|o| {
             o.plugins.map(|p| mdream::types::PluginConfig {
                 filter: p.filter.map(|f| mdream::types::FilterConfig {

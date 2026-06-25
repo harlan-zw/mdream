@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use crate::consts::*;
 use crate::tags::get_tag_handler;
-use crate::types::{ElementNode, ExtractedElement, HTMLToMarkdownOptions, ParsedSelector, TailwindData};
+use crate::types::{ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, ParsedSelector, TailwindData};
 use crate::entities::decode_html_entities;
 use crate::scan::{is_whitespace, process_comment_or_doctype, process_tag_attributes};
 use crate::selector::{matches_selector, parse_css_selector};
@@ -135,6 +135,7 @@ pub struct ConvertState {
     /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
     /// hot path — a single integer compare). Code/tables/headings are exempt.
     wrap_width: usize,
+    plain_text: bool,
 
     // Clean mode — bitmask for zero-cost when disabled
     clean_flags: u8,
@@ -184,6 +185,7 @@ impl ConvertState {
     pub fn new(options: HTMLToMarkdownOptions, capacity: usize) -> Self {
         // Read wrap width before `options` is moved into the struct below.
         let options_wrap_width = options.wrap_width.unwrap_or(0);
+        let plain_text = options.format == OutputFormat::Text;
         let mut s = Self {
             depth_map: [0; MAX_TAG_ID],
             depth: 0,
@@ -247,6 +249,7 @@ impl ConvertState {
             last_yielded_length: 0,
 
             wrap_width: options_wrap_width,
+            plain_text,
             clean_flags: 0,
             skip_current_link: false,
             link_bracket_pos: 0,

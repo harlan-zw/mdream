@@ -30,6 +30,7 @@ export async function* streamHtmlToMarkdown(
     depth: 0,
     resolvedPlugins,
     tagOverrideHandlers,
+    plainText: processor.state.plainText,
   }
 
   let remainingHtml = ''
