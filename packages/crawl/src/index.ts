@@ -1,3 +1,5 @@
+export type { BoilerplateOptions } from './boilerplate.js'
+export { stripBoilerplateFromCorpus } from './boilerplate.js'
 export { crawlAndGenerate } from './crawl.js'
 export { createClackLogger, resolveLogger, silentLogger } from './logger.js'
 export type { CrawlLogger, CrawlSpinner } from './logger.js'

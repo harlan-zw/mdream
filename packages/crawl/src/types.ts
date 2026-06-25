@@ -38,6 +38,21 @@ export interface CrawlOptions {
   skipSitemap?: boolean
   allowSubdomains?: boolean
   /**
+   * Strip repeated site chrome (top nav, footer, newsletter walls) from per-page
+   * markdown and llms-full.txt page sections. Implemented as a post-processing
+   * pass over the generated markdown: blocks that repeat across the corpus are
+   * detected by frequency and removed only from the wrapping (leading/trailing)
+   * run of each page, so a page's main content is preserved. Does not affect the
+   * llms.txt link index. Defaults to true. Needs a corpus (>= 3 pages) to run, so
+   * single-page crawls are left unchanged.
+   */
+  stripBoilerplate?: boolean
+  /**
+   * Fraction of crawled pages a block must appear in to count as chrome (0..1).
+   * Higher is stricter. Defaults to `DEFAULT_BOILERPLATE_THRESHOLD` (0.5).
+   */
+  boilerplateThreshold?: number
+  /**
    * Suppress all diagnostic/progress logging. Use when stdout must stay clean,
    * e.g. an MCP server that only emits JSON-RPC (issue #100). Ignored when an
    * explicit `logger` is provided.
@@ -60,6 +75,10 @@ export interface MdreamCrawlConfig {
   crawlDelay?: number
   skipSitemap?: boolean
   allowSubdomains?: boolean
+  /** Strip repeated site chrome from per-page output. Defaults to true. */
+  stripBoilerplate?: boolean
+  /** Fraction of pages a block must repeat in to count as chrome (0..1). Defaults to 0.5. */
+  boilerplateThreshold?: number
   verbose?: boolean
   /** Suppress all diagnostic/progress logging (issue #100). */
   silent?: boolean
