@@ -27,10 +27,10 @@ overrides:
 catalog:
   '@actions/core': ^3.0.1
   '@actions/exec': ^3.0.0
-  '@antfu/eslint-config': ^9.0.0
-  '@arethetypeswrong/cli': ^0.18.3
-  '@clack/prompts': ^1.5.1
-  '@cloudflare/vitest-pool-workers': ^0.16.15
+  '@antfu/eslint-config': ^9.1.0
+  '@arethetypeswrong/cli': ^0.18.4
+  '@clack/prompts': ^1.6.0
+  '@cloudflare/vitest-pool-workers': ^0.16.19
   '@emnapi/core': ^1.11.1
   '@emnapi/runtime': ^1.11.1
   '@emnapi/wasi-threads': ^2.0.0
@@ -41,13 +41,13 @@ catalog:
   '@nuxt/module-builder': ^1.0.2
   '@nuxt/schema': ^4.4.8
   '@nuxt/test-utils': ^4.0.3
-  '@tybys/wasm-util': ^0.10.2
-  '@types/node': ^25.9.3
+  '@tybys/wasm-util': ^0.10.3
+  '@types/node': ^26.0.0
   '@types/picomatch': ^4.0.3
   '@vercel/ncc': ^0.44.0
   '@vitejs/plugin-vue': ^6.0.7
-  '@vitest/browser': ^4.1.8
-  '@vitest/browser-playwright': ^4.1.8
+  '@vitest/browser': ^4.1.9
+  '@vitest/browser-playwright': ^4.1.9
   bumpp: ^11.1.0
   c12: ^3.3.4
   cac: ^7.0.0
@@ -59,30 +59,30 @@ catalog:
   eslint: ^10.5.0
   express: ^5.2.1
   hookable: ^6.1.1
-  knip: ^6.16.1
+  knip: ^6.18.0
   nuxt: ^4.4.8
   nuxt-site-config: ^4.1.0
   nypm: ^0.6.7
-  obuild: ^0.4.36
+  obuild: ^0.4.37
   ofetch: ^1.5.1
   pathe: ^2.0.3
   picomatch: ^4.0.4
-  playwright: ^1.60.0
+  playwright: ^1.61.1
   sirv: ^3.0.2
   tinyglobby: ^0.2.17
-  tldts: ^7.4.2
+  tldts: ^7.4.4
   tslib: ^2.8.1
   typescript: ^6.0.3
   ufo: ^1.6.4
-  vite: ^8.0.16
-  vitest: ^4.1.8
+  vite: ^8.1.0
+  vitest: ^4.1.9
   vue: ^3.5.38
   vue-router: ^5.1.0
-  wrangler: ^4.100.0
+  wrangler: ^4.104.0
 
 catalogs:
   bench:
-    '@kreuzberg/html-to-markdown-node': ^3.6.6
+    '@kreuzberg/html-to-markdown-node': ^3.7.2
     node-html-markdown: ^2.0.0
     rehype-parse: ^9.0.1
     rehype-remark: ^10.0.1
