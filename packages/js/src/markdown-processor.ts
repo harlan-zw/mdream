@@ -1,4 +1,4 @@
-import type { ParseState } from './parse'
+import type { ParseState } from './parse-core'
 import type { ElementNode, EngineOptions, HandlerContext, NodeEvent, PluginContext, TagHandler, TextNode, TransformPlugin } from './types'
 import {
   DEFAULT_BLOCK_SPACING,
@@ -9,22 +9,26 @@ import {
   NodeEventEnter,
   NodeEventExit,
   TAG_BLOCKQUOTE,
+  TAG_BR,
   TAG_CODE,
   TAG_DIV,
   TAG_H1,
   TAG_H6,
+  TAG_IMG,
   TAG_LI,
   TAG_OL,
   TAG_P,
   TAG_PRE,
+  TAG_Q,
   TAG_SPAN,
   TAG_TABLE,
   TAG_TD,
   TAG_TH,
   TEXT_NODE,
 } from './const'
-import { finalizeParse, parseHtmlStream } from './parse'
+import { finalizeParse, parseHtmlStream } from './parse-core'
 import { processPluginsForEvent } from './plugin-processor'
+import { tagHandlers } from './tags'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -67,6 +71,8 @@ export interface MarkdownState {
   preFencePending?: boolean
   preFenceLang?: string
   preOwnFence?: boolean
+  /** Whether output should omit Markdown/HTML markup */
+  plainText?: boolean
 }
 
 /**
@@ -82,7 +88,7 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
     return
   if (eventType === NodeEventEnter) {
     const isOrdered = element.parent?.tagId === TAG_OL
-    const width = isOrdered ? String(element.index + 1).length + 2 : 2
+    const width = state.plainText ? 0 : (isOrdered ? String(element.index + 1).length + 2 : 2)
     state.listIndentWidths.push(width)
     state.listIndent += ' '.repeat(width)
   }
@@ -127,7 +133,7 @@ function needsSpacing(lastChar: string, firstChar: string, state?: MarkdownState
  * Determines if spacing should be added before text content
  */
 function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | TextNode | undefined, textNode: TextNode): boolean {
-  if (!lastChar || lastChar === '\n' || lastChar === ' ' || lastChar === '[' || lastChar === '>') {
+  if (!lastChar || lastChar === '\n' || lastChar === ' ' || lastChar === '\t' || lastChar === '[' || lastChar === '>') {
     return false
   }
   if (lastNode?.tagHandler?.isInline) {
@@ -325,6 +331,11 @@ function hasNonWhitespace(value: string): boolean {
  * nested <code> does not double up and the <pre> exit emits the closing fence.
  */
 function flushPreFence(state: MarkdownState): void {
+  if (state.plainText) {
+    state.preFencePending = false
+    state.preOwnFence = false
+    return
+  }
   state.preFencePending = false
   state.preOwnFence = true
   const lang = state.preFenceLang || ''
@@ -334,6 +345,30 @@ function flushPreFence(state: MarkdownState): void {
     : `${MARKDOWN_CODE_BLOCK}${lang}\n`
   state.buffer.push(fence)
   state.lastContentCache = fence
+}
+
+function getPlainTextOutput(node: ElementNode, eventType: number, state: MarkdownState): string | undefined {
+  const tagId = node.tagId
+  if (eventType === NodeEventEnter) {
+    if (tagId === TAG_BR)
+      return '\n'
+    if (tagId === TAG_P && ((node.depthMap[TAG_BLOCKQUOTE] || 0) > 0 || ((node.depthMap[TAG_LI] || 0) > 0 && !(node.depthMap[TAG_TD] || 0) && !(node.depthMap[TAG_TH] || 0)))) {
+      const lastEntry = state.buffer.at(-1)
+      const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
+      if (lastChar && lastChar !== ' ' && lastChar !== '\n')
+        return '\n\n'
+    }
+    if (tagId === TAG_TD || tagId === TAG_TH)
+      return (node.depthMap[TAG_TABLE] || 0) > 1 || node.index === 0 ? '' : '\t'
+    if (tagId === TAG_IMG)
+      return node.attributes?.alt || undefined
+    if (tagId === TAG_Q)
+      return '"'
+    return undefined
+  }
+  if (tagId === TAG_Q)
+    return '"'
+  return undefined
 }
 
 /**
@@ -346,6 +381,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     depthMap: new Uint8Array(MAX_TAG_ID),
     listIndent: '',
     listIndentWidths: [],
+    plainText: options.format === 'text',
   }
 
   let lastYieldedLength = 0
@@ -366,7 +402,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // before its first non-whitespace child so empty/whitespace-only blocks emit
     // nothing. A direct <code> child keeps fence ownership (handled in tags.ts).
     // Runs before lastChar is read so the fence is reflected in spacing checks.
-    if (state.preFencePending && eventType === NodeEventEnter) {
+    if (!state.plainText && state.preFencePending && eventType === NodeEventEnter) {
       if (node.type === ELEMENT_NODE) {
         const el = node as ElementNode
         if (el.tagId === TAG_CODE && el.parent?.tagId === TAG_PRE) {
@@ -489,7 +525,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
     const handler = node.tagHandler
     if (!output.length && handler?.[eventFn]) {
-      const res = handler[eventFn](context)
+      const res = state.plainText
+        ? getPlainTextOutput(element, eventType, state)
+        : handler[eventFn](context)
       if (res) {
         output.push(res)
       }
@@ -587,6 +625,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       depth: 0,
       resolvedPlugins,
       tagOverrideHandlers,
+      tagHandlers,
+      plainText: state.plainText,
     }
 
     const handleEvent = (event: NodeEvent): void => {

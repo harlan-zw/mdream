@@ -513,6 +513,9 @@ pub struct HTMLToMarkdownOptions {
     /// unset. `Some(0)` and `None` both disable wrapping. Code (`<pre>`/`<code>`),
     /// tables, and headings are never wrapped.
     pub wrap_width: Option<usize>,
+    /// Output format. Defaults to Markdown; `Text` omits Markdown/HTML markup
+    /// while preserving readable text and block spacing.
+    pub format: OutputFormat,
 }
 
 impl HTMLToMarkdownOptions {
@@ -581,6 +584,19 @@ impl HTMLToMarkdownOptions {
         self.wrap_width = Some(width);
         self
     }
+
+    /// Render readable plain text instead of Markdown.
+    ///
+    /// ```rust
+    /// use mdream::{HTMLToMarkdownOptions, OutputFormat};
+    ///
+    /// let opts = HTMLToMarkdownOptions::default().with_format(OutputFormat::Text);
+    /// ```
+    #[must_use]
+    pub fn with_format(mut self, format: OutputFormat) -> Self {
+        self.format = format;
+        self
+    }
 }
 
 /// Result from html_to_markdown conversion with extraction/frontmatter data
@@ -588,4 +604,14 @@ pub struct MdreamResult {
     pub markdown: String,
     pub extracted: Option<Vec<ExtractedElement>>,
     pub frontmatter: Option<Vec<(String, String)>>,
+}
+
+/// Output format for conversion.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OutputFormat {
+    /// Markdown output (default).
+    #[default]
+    Markdown,
+    /// Plain text output with Markdown/HTML syntax omitted.
+    Text,
 }

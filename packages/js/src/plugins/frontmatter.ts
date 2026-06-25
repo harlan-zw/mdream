@@ -110,6 +110,8 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
       // Handle exiting the head tag
       if (node.type === ELEMENT_NODE && node.tagId === TAG_HEAD) {
         inHead = false
+        if (state.options?.format === 'text')
+          return undefined
 
         // Generate frontmatter as we exit the head
         if (Object.keys(frontmatter).length > 0) {

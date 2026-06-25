@@ -12,12 +12,22 @@ interface CliOptions {
   origin?: string
   preset?: string
   wrapWidth?: number
+  format?: 'markdown' | 'text'
+  text?: boolean
 }
 
 async function streamingConvert(options: CliOptions = {}) {
+  const format = options.text ? 'text' : options.format
+  if (format && format !== 'markdown' && format !== 'text') {
+    process.stderr.write(`Unknown format: ${format}\n`)
+    process.exitCode = 1
+    return
+  }
+
   let conversionOptions: Partial<MdreamOptions> = {
     origin: options.origin,
     wrapWidth: options.wrapWidth ? Number(options.wrapWidth) || undefined : undefined,
+    format,
   }
 
   if (options.preset === 'minimal') {
@@ -43,6 +53,8 @@ cli.command('[options]', 'Convert HTML from stdin to Markdown on stdout (JS engi
   .option('--origin <url>', 'Origin URL for resolving relative image paths')
   .option('--preset <preset>', 'Conversion presets: minimal')
   .option('--wrap-width <n>', 'Hard-wrap prose at <n> characters on word boundaries')
+  .option('--format <format>', 'Output format: markdown, text')
+  .option('--text', 'Alias for --format text')
   .action(async (_, opts) => {
     await streamingConvert(opts)
   })

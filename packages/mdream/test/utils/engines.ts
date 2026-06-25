@@ -134,7 +134,12 @@ function convertFilterForRust(filter: any): RustMdreamOptions['filter'] {
 
 // Convert EngineOptions (plugins-based) to flat RustMdreamOptions
 function toFlatOptions(options?: EngineOptions): Partial<RustMdreamOptions> {
-  const flat: Partial<RustMdreamOptions> = { minimal: false, origin: options?.origin }
+  const flat: Partial<RustMdreamOptions> = {
+    minimal: false,
+    origin: options?.origin,
+    wrapWidth: options?.wrapWidth,
+    format: options?.format,
+  }
   const p = options?.plugins
   if (p) {
     if (p.frontmatter != null)

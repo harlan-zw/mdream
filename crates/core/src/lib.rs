@@ -16,7 +16,7 @@ use convert::ConvertState;
 // the `types` module.
 pub use types::{
     CleanConfig, ExtractionConfig, FilterConfig, FrontmatterConfig, HTMLToMarkdownOptions,
-    IsolateMainConfig, MdreamResult, PluginConfig, TagOverrideConfig, TailwindConfig,
+    IsolateMainConfig, MdreamResult, OutputFormat, PluginConfig, TagOverrideConfig, TailwindConfig,
 };
 
 // Re-export `get_tag_id` so callers can resolve tag names to IDs (for

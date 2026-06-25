@@ -404,10 +404,17 @@ impl ConvertState {
                 self.depth_map[id as usize] = self.depth_map[id as usize].saturating_add(1);
             }
             match id {
-                TAG_TABLE => self.escape_ctx |= ESC_TABLE,
-                TAG_CODE | TAG_PRE => { self.escape_ctx |= ESC_CODE_PRE; if id == TAG_PRE { self.in_pre = true; } }
-                TAG_A => self.escape_ctx |= ESC_LINK,
-                TAG_BLOCKQUOTE => self.escape_ctx |= ESC_BLOCKQUOTE,
+                TAG_TABLE if !self.plain_text => self.escape_ctx |= ESC_TABLE,
+                TAG_CODE | TAG_PRE => {
+                    if !self.plain_text {
+                        self.escape_ctx |= ESC_CODE_PRE;
+                    }
+                    if id == TAG_PRE {
+                        self.in_pre = true;
+                    }
+                }
+                TAG_A if !self.plain_text => self.escape_ctx |= ESC_LINK,
+                TAG_BLOCKQUOTE if !self.plain_text => self.escape_ctx |= ESC_BLOCKQUOTE,
                 _ => {}
             }
         }
@@ -470,7 +477,11 @@ impl ConvertState {
                     .is_some_and(|tw| tw.hidden);
 
                 if let Some(class_attr) = tag.attributes.get("class") {
-                    let (prefix, suffix, hidden) = process_tailwind_classes(class_attr);
+                    let (mut prefix, mut suffix, hidden) = process_tailwind_classes(class_attr);
+                    if self.plain_text {
+                        prefix = None;
+                        suffix = None;
+                    }
                     let hidden = hidden || parent_hidden;
                     if prefix.is_some() || suffix.is_some() || hidden {
                         tag.tailwind = Some(Box::new(TailwindData { prefix, suffix, hidden }));
@@ -632,7 +643,7 @@ impl ConvertState {
         if tag_id == Some(TAG_LI)
             && let Some(li) = self.stack.last()
         {
-            let width: usize = if !skip_node && !self.in_table_cell() {
+            let width: usize = if !skip_node && !self.in_table_cell() && !self.plain_text {
                 let stack_len = self.stack.len();
                 let parent_is_ordered = stack_len >= 2
                     && self.stack[stack_len - 2].tag_id == Some(TAG_OL);
@@ -927,7 +938,9 @@ impl ConvertState {
     pub(crate) fn update_escape_ctx_on_close(&mut self, id: u8) {
         match id {
             TAG_TABLE if self.depth_map[id as usize] == 0 => self.escape_ctx &= !ESC_TABLE,
-            TAG_CODE if self.depth_map[TAG_CODE as usize] == 0 && self.depth_map[TAG_PRE as usize] == 0 => self.escape_ctx &= !ESC_CODE_PRE,
+            TAG_CODE if self.depth_map[TAG_CODE as usize] == 0 && self.depth_map[TAG_PRE as usize] == 0 => {
+                self.escape_ctx &= !ESC_CODE_PRE;
+            }
             TAG_PRE if self.depth_map[TAG_PRE as usize] == 0 => {
                 self.in_pre = false;
                 if self.depth_map[TAG_CODE as usize] == 0 { self.escape_ctx &= !ESC_CODE_PRE; }

@@ -1,5 +1,5 @@
 use mdream::{html_to_markdown, html_to_markdown_result, MarkdownStreamProcessor};
-use mdream::types::{HTMLToMarkdownOptions, PluginConfig, ExtractionConfig, FilterConfig, FrontmatterConfig, TagOverrideConfig, IsolateMainConfig};
+use mdream::types::{HTMLToMarkdownOptions, PluginConfig, ExtractionConfig, FilterConfig, FrontmatterConfig, TagOverrideConfig, IsolateMainConfig, OutputFormat};
 
 fn convert(html: &str) -> String {
     html_to_markdown(html, HTMLToMarkdownOptions::default())
@@ -10,6 +10,31 @@ fn convert_with_origin(html: &str, origin: &str) -> String {
         origin: Some(origin.to_string()),
         ..Default::default()
     })
+}
+
+fn convert_text(html: &str) -> String {
+    html_to_markdown(html, HTMLToMarkdownOptions {
+        format: OutputFormat::Text,
+        ..Default::default()
+    })
+}
+
+// ── Plain text output ──
+
+#[test]
+fn plain_text_output_omits_markdown_markup() {
+    assert_eq!(
+        convert_text(r#"<h1>Hello <em>World</em></h1><p>Visit <a href="https://example.com">Example</a> and <strong>read</strong>.</p><ul><li>One</li><li>Two</li></ul>"#),
+        "Hello World\n\nVisit Example and read.\n\nOne\nTwo"
+    );
+}
+
+#[test]
+fn plain_text_output_preserves_readable_separators() {
+    assert_eq!(
+        convert_text(r#"<p>Line<br>Break</p><table><tr><th>Name</th><th>Role</th></tr><tr><td>Ada</td><td>Admin</td></tr></table><p><img src="/x.png" alt="Diagram"></p>"#),
+        "Line\nBreak\n\nName\tRole\nAda\tAdmin\n\nDiagram"
+    );
 }
 
 // ── Case-insensitive tag names ──

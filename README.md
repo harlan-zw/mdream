@@ -43,7 +43,7 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 | Package                                                                                                                                                                                                  | Description                                                                                                                                                   |
 |----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;mdream](./packages/mdream/README.md) | Rust NAPI engine + WASM for edge. Performance-first, declarative config. Includes CLI. |
-| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;@mdream/js](./packages/js/README.md) | Pure JS engine. Full hook access, zero native deps. Subpaths: `/plugins`, `/splitter`, `/parse`, `/llms-txt`, `/negotiate`. |
+| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;@mdream/js](./packages/js/README.md) | Pure JS engine. Full hook access, zero native deps. Subpaths: `/plugins`, `/splitter`, `/text`, `/parse`, `/llms-txt`, `/negotiate`. |
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">@mdream/crawl](./packages/crawl/README.md) | Site-wide crawler to generate `llms.txt` artifacts from entire websites                                                                                       |
 | [<img src="https://api.iconify.design/logos:docker-icon.svg" width="16" height="16" style="vertical-align: middle;" alt="docker icon">&nbsp;Docker](./DOCKER.md)                                         | Pre-built Docker images: a tiny `core` HTML-to-Markdown converter and a `crawl` image with Playwright Chrome                                                                              |
 | [<img src="https://api.iconify.design/logos:vitejs.svg" width="16" height="16" style="vertical-align: middle;" alt="vite icon">&nbsp;@mdream/vite](./packages/vite/README.md)                            | Generate automatic `.md` for your own Vite sites                                                                                                              |
@@ -275,6 +275,11 @@ import { htmlToMarkdown } from 'mdream'
 // Rust NAPI engine in Node.js, WASM in edge/browser runtimes
 const markdown = htmlToMarkdown('<h1>Hello World</h1>')
 console.log(markdown) // # Hello World
+
+const text = htmlToMarkdown('<h1>Hello <strong>World</strong></h1>', {
+  format: 'text',
+})
+console.log(text) // Hello World
 ```
 
 ```ts
@@ -448,4 +453,3 @@ Benchmarks run on real-world HTML using [Vitest bench](https://vitest.dev/guide/
 ## License
 
 Licensed under the [MIT license](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md).
-

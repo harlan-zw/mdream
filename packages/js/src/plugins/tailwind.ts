@@ -292,7 +292,7 @@ export function tailwindPlugin(): TransformPlugin {
     },
 
     // Process text nodes to apply Tailwind formatting
-    processTextNode(node: TextNode) {
+    processTextNode(node: TextNode, state) {
       // Get parent node
       const parentNode = node.parent as ElementNode | undefined
       if (!parentNode || (parentNode.type !== ELEMENT_NODE)) {
@@ -309,8 +309,8 @@ export function tailwindPlugin(): TransformPlugin {
       let content = node.value
 
       // Apply Tailwind prefix/suffix
-      const prefix = tailwindData?.prefix || ''
-      const suffix = tailwindData?.suffix || ''
+      const prefix = state.options?.format === 'text' ? '' : (tailwindData?.prefix || '')
+      const suffix = state.options?.format === 'text' ? '' : (tailwindData?.suffix || '')
 
       if (prefix || suffix) {
         content = prefix + content + suffix
