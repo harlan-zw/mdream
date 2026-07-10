@@ -144,6 +144,48 @@ describe('worker entry', () => {
     }
   })
 
+  it('forwards structured-cloneable options (no frontmatter onExtract function)', async () => {
+    const workers: FakeWorker[] = []
+    class FakeWorker {
+      onmessage: ((e: { data: any }) => void) | null = null
+      onerror: ((e: any) => void) | null = null
+      posted: any[] = []
+      constructor() {
+        workers.push(this)
+        queueMicrotask(() => this.onmessage?.({ data: { type: 'ready' } }))
+      }
+
+      postMessage(msg: any) {
+        // Mirror the real Worker: reject non-cloneable payloads (functions).
+        structuredClone(msg)
+        this.posted.push(msg)
+        if (msg.type === 'convert')
+          queueMicrotask(() => this.onmessage?.({ data: { id: msg.id, type: 'result', data: 'MD' } }))
+      }
+
+      terminate() {}
+    }
+    vi.stubGlobal('Worker', FakeWorker as any)
+    const restoreUrl = stubObjectUrl()
+
+    const worker = await import('../../src/worker.ts')
+    try {
+      await worker.initWorker('http://x/mdream_edge_bg.wasm')
+      // A frontmatter config carrying an onExtract callback must not crash the boundary.
+      const md = await worker.htmlToMarkdown('<main>x</main>', { frontmatter: { metaFields: ['description'], onExtract: () => {} } })
+      expect(md).toBe('MD')
+
+      const convertMsg = workers[0].posted.find(m => m.type === 'convert')
+      expect(convertMsg.options.plugins.frontmatter).toEqual({ metaFields: ['description'] })
+      expect(convertMsg.options.plugins.frontmatter.onExtract).toBeUndefined()
+    }
+    finally {
+      worker.terminateWorker()
+      restoreUrl()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('rejects hook (array) plugins after init', async () => {
     const workers: FakeWorker[] = []
     class FakeWorker {

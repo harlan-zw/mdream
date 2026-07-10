@@ -106,8 +106,14 @@ export interface ResolvedOptions {
 function resolveFrontmatter(opt: MdreamOptions['frontmatter']): { config?: object, callback?: (fm: Record<string, string>) => void } {
   if (typeof opt === 'function')
     return { config: {}, callback: opt }
-  if (typeof opt === 'object')
-    return { config: opt, callback: opt.onExtract }
+  if (typeof opt === 'object') {
+    // Split the callback out of the serializable config, mirroring the
+    // extraction path. Leaving `onExtract` in `config` would flow a function
+    // into `plugins.frontmatter` → `napiOpts` and throw DataCloneError when the
+    // worker path structured-clones the options across `postMessage`.
+    const { onExtract, ...config } = opt
+    return { config, callback: onExtract }
+  }
   return { config: {} }
 }
 
