@@ -1,7 +1,9 @@
-import type { MdreamOptions } from './index.js'
+import type { HtmlToMarkdownOptions } from '../napi/index.js'
+import type { MdreamOptions } from './resolve-options.js'
+import { assertNoHookPlugins, resolveOptions } from './resolve-options.js'
 
 type WorkerMessage
-  = | { id: number, type: 'convert', html: string, options?: Partial<MdreamOptions> }
+  = | { id: number, type: 'convert', html: string, options?: HtmlToMarkdownOptions }
     | { type: 'init', wasmUrl: string }
 
 type WorkerResponse
@@ -98,16 +100,25 @@ export function initWorker(wasmUrl: string): Promise<void> {
 /**
  * Convert HTML to markdown using the web worker.
  * Call initWorker() first.
+ *
+ * User options are normalized to the engine's `plugins` shape on the main
+ * thread (functions such as `extraction`/`frontmatter` callbacks cannot cross
+ * the worker boundary, so only declarative config is forwarded).
  */
-export function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): Promise<string> {
+export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): Promise<string> {
   if (!_worker || !_ready)
     return Promise.reject(new Error('Call initWorker() before htmlToMarkdown()'))
 
   return _ready.then(() => {
+    // Normalize here so a guard throw surfaces as a rejected promise. Only the
+    // serializable `napiOpts` crosses the worker boundary — extraction/frontmatter
+    // callbacks can't be structured-cloned, so they aren't forwarded.
+    assertNoHookPlugins(options)
+    const napiOpts: HtmlToMarkdownOptions = resolveOptions(options).napiOpts
     const id = _idCounter++
     return new Promise<string>((resolve, reject) => {
       _pending.set(id, { resolve, reject })
-      _worker!.postMessage({ id, type: 'convert', html, options } satisfies WorkerMessage)
+      _worker!.postMessage({ id, type: 'convert', html, options: napiOpts } satisfies WorkerMessage)
     })
   })
 }

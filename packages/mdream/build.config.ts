@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
+import { transformSync } from 'esbuild'
 import { defineBuildConfig } from 'obuild/config'
 
 const STRIP_EXPORT_NAMED_RE = /export \{ initSync.*\n?/g
@@ -9,6 +10,20 @@ const STRIP_EXPORT_FN_RE = /export function /g
 const STRIP_EXPORT_ASYNC_FN_RE = /export async function /g
 const STRIP_WBG_INIT_RE = /async function __wbg_init\b[\s\S]+?^\}/m
 const STRIP_WBG_LOAD_RE = /async function __wbg_load\b[\s\S]+?^\}/m
+const STRIP_ESM_EXPORT_RE = /^export /gm
+
+/**
+ * Transpile the shared option-normalizer to plain JS and strip its ESM
+ * `export`s so it can be inlined into the self-contained IIFE bundle. Keeping a
+ * single source of truth (src/resolve-options.ts) means the browser global
+ * honours the same `minimal`/`isolateMain`/`filter` normalization as the Node
+ * and edge builds instead of drifting behind a hand-copied version.
+ */
+function inlineResolveOptions(cwd: string): string {
+  const source = readFileSync(resolve(cwd, 'src/resolve-options.ts'), 'utf-8')
+  const { code } = transformSync(source, { loader: 'ts', format: 'esm' })
+  return code.replace(STRIP_ESM_EXPORT_RE, '')
+}
 
 const rolldown = {
   external: [/\.\.\/napi\//],
@@ -58,8 +73,18 @@ function _decodeBase64(s){var e=atob(s),n=e.length,a=new Uint8Array(n);for(var i
 ${bindingsCode}
 // Auto-init with inlined WASM
 initSync({module:_decodeBase64(_wasmBase64)});
+// Shared user-option → engine normalization (src/resolve-options.ts)
+${inlineResolveOptions(cwd)}
 // Public API
-function htmlToMarkdown(html,options){return htmlToMarkdownResult(html,options||{})}
+function htmlToMarkdown(html,options){
+  options=options||{};
+  assertNoHookPlugins(options);
+  var resolved=resolveOptions(options);
+  var result=htmlToMarkdownResult(html,resolved.napiOpts);
+  if(result.frontmatter&&resolved.frontmatterCallback)resolved.frontmatterCallback(result.frontmatter);
+  if(result.extracted&&result.extracted.length&&resolved.extractionHandlers){for(var i=0;i<result.extracted.length;i++){var el=result.extracted[i];var h=resolved.extractionHandlers[el.selector];if(h)h(el)}}
+  return result;
+}
 if(typeof window!=='undefined'){window.mdream={htmlToMarkdown:htmlToMarkdown}}
 })();`
 

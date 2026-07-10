@@ -1,16 +1,26 @@
-import type { HtmlToMarkdownOptions } from '../napi/index.js'
+import type { MdreamOptions } from './resolve-options.js'
 import { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream } from '../wasm-bundler/mdream_edge.js'
+import { assertNoHookPlugins, resolveOptions } from './resolve-options.js'
 
-export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): string {
-  const result = _htmlToMarkdownResult(html, options || {})
+export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
+  assertNoHookPlugins(options)
+  const { napiOpts, extractionHandlers, frontmatterCallback } = resolveOptions(options)
+  const result = _htmlToMarkdownResult(html, napiOpts)
+  if (result.frontmatter && frontmatterCallback)
+    frontmatterCallback(result.frontmatter)
+  if (result.extracted?.length && extractionHandlers) {
+    for (const el of result.extracted)
+      extractionHandlers[el.selector]?.(el)
+  }
   return result.markdown || ''
 }
 
 export class MarkdownStream {
   private _inner: _MarkdownStream
 
-  constructor(options?: HtmlToMarkdownOptions) {
-    this._inner = new _MarkdownStream(options || {})
+  constructor(options: Partial<MdreamOptions> = {}) {
+    assertNoHookPlugins(options)
+    this._inner = new _MarkdownStream(resolveOptions(options).napiOpts)
   }
 
   processChunk(chunk: string): string {
@@ -24,11 +34,11 @@ export class MarkdownStream {
 
 export async function* streamHtmlToMarkdown(
   htmlStream: ReadableStream<Uint8Array | string> | null,
-  options?: HtmlToMarkdownOptions,
+  options: Partial<MdreamOptions> = {},
 ): AsyncIterable<string> {
   if (!htmlStream)
     throw new Error('Invalid HTML stream provided')
-  const stream = new _MarkdownStream(options || {})
+  const stream = new MarkdownStream(options)
   const reader = htmlStream.getReader()
   const decoder = new TextDecoder()
   try {

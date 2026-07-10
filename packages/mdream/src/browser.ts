@@ -1,5 +1,7 @@
-import type { HtmlToMarkdownOptions, MdreamNapiResult } from '../napi/index.js'
+import type { MdreamNapiResult } from '../napi/index.js'
+import type { MdreamOptions } from './resolve-options.js'
 import init, { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream } from '../wasm/mdream_edge.js'
+import { assertNoHookPlugins, resolveOptions } from './resolve-options.js'
 
 let _initPromise: Promise<unknown>
 
@@ -13,12 +15,21 @@ function ensureInit(): Promise<unknown> {
 // Eagerly start WASM initialization
 ensureInit()
 
-export async function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): Promise<MdreamNapiResult> {
+export async function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): Promise<MdreamNapiResult> {
   await ensureInit()
-  return _htmlToMarkdownResult(html, options || {})
+  assertNoHookPlugins(options)
+  const { napiOpts, extractionHandlers, frontmatterCallback } = resolveOptions(options)
+  const result = _htmlToMarkdownResult(html, napiOpts)
+  if (result.frontmatter && frontmatterCallback)
+    frontmatterCallback(result.frontmatter)
+  if (result.extracted?.length && extractionHandlers) {
+    for (const el of result.extracted)
+      extractionHandlers[el.selector]?.(el)
+  }
+  return result
 }
 
-export async function createMarkdownStream(options?: HtmlToMarkdownOptions): Promise<MarkdownStream> {
+export async function createMarkdownStream(options: Partial<MdreamOptions> = {}): Promise<MarkdownStream> {
   await ensureInit()
   return new MarkdownStream(options)
 }
@@ -26,8 +37,9 @@ export async function createMarkdownStream(options?: HtmlToMarkdownOptions): Pro
 export class MarkdownStream {
   private _inner: _MarkdownStream
 
-  constructor(options?: HtmlToMarkdownOptions) {
-    this._inner = new _MarkdownStream(options || {})
+  constructor(options: Partial<MdreamOptions> = {}) {
+    assertNoHookPlugins(options)
+    this._inner = new _MarkdownStream(resolveOptions(options).napiOpts)
   }
 
   processChunk(chunk: string): string {
@@ -41,12 +53,12 @@ export class MarkdownStream {
 
 export async function* streamHtmlToMarkdown(
   htmlStream: ReadableStream<Uint8Array | string> | null,
-  options?: HtmlToMarkdownOptions,
+  options: Partial<MdreamOptions> = {},
 ): AsyncIterable<string> {
   if (!htmlStream)
     throw new Error('Invalid HTML stream provided')
   await ensureInit()
-  const stream = new _MarkdownStream(options || {})
+  const stream = new MarkdownStream(options)
   const reader = htmlStream.getReader()
   const decoder = new TextDecoder()
   try {

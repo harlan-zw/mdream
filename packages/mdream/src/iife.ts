@@ -1,5 +1,7 @@
-import type { HtmlToMarkdownOptions, MdreamNapiResult } from '../napi/index.js'
+import type { MdreamNapiResult } from '../napi/index.js'
+import type { MdreamOptions } from './resolve-options.js'
 import { htmlToMarkdownResult as _htmlToMarkdownResult, initSync } from '../wasm/mdream_edge.js'
+import { assertNoHookPlugins, resolveOptions } from './resolve-options.js'
 
 declare global {
   interface Window {
@@ -33,10 +35,19 @@ export async function init(wasmSource?: string | URL | ArrayBuffer): Promise<voi
   _ready = true
 }
 
-export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): MdreamNapiResult {
+export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): MdreamNapiResult {
   if (!_ready)
     throw new Error('mdream: call await mdream.init() before htmlToMarkdown()')
-  return _htmlToMarkdownResult(html, options || {})
+  assertNoHookPlugins(options)
+  const { napiOpts, extractionHandlers, frontmatterCallback } = resolveOptions(options)
+  const result = _htmlToMarkdownResult(html, napiOpts)
+  if (result.frontmatter && frontmatterCallback)
+    frontmatterCallback(result.frontmatter)
+  if (result.extracted?.length && extractionHandlers) {
+    for (const el of result.extracted)
+      extractionHandlers[el.selector]?.(el)
+  }
+  return result
 }
 
 const mdream = { htmlToMarkdown, init }
