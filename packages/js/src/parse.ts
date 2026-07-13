@@ -78,6 +78,7 @@ const DASH_CHAR = 45 // '-'
 const SPACE_CHAR = 32 // ' '
 const TAB_CHAR = 9 // '\t'
 const NEWLINE_CHAR = 10 // '\n'
+const FORM_FEED_CHAR = 12 // '\f'
 const CARRIAGE_RETURN_CHAR = 13 // '\r'
 const BACKTICK_CHAR = 96 // '`'
 const PIPE_CHAR = 124 // '|'
@@ -421,7 +422,21 @@ function isWhitespace(charCode: number): boolean {
   return charCode === SPACE_CHAR
     || charCode === TAB_CHAR
     || charCode === NEWLINE_CHAR
+    || charCode === FORM_FEED_CHAR
     || charCode === CARRIAGE_RETURN_CHAR
+}
+
+function effectiveTagId(tagName: string, fallbackTagId: number, state: ParseState): number {
+  return state.tagOverrideHandlers?.get(tagName)?.aliasTagId ?? fallbackTagId
+}
+
+function matchesClosingTag(node: ElementNode, tagName: string, tagId: number, closingIsAlias: boolean): boolean {
+  if (node.tagId !== tagId)
+    return false
+  if (tagId === -1)
+    return node.name === tagName
+  const nodeIsAlias = node.tagHandler?.aliasTagId !== undefined
+  return node.name === tagName || (!nodeIsAlias && !closingIsAlias)
 }
 
 /**
@@ -632,8 +647,9 @@ function parseHtmlInternal(
           peekEnd++
         }
         const peekTagName = htmlChunk.substring(i + 2, peekEnd).toLowerCase() as keyof typeof TagIdMap
-        const peekTagId = TagIdMap[peekTagName] ?? -1
-        if (peekTagId !== state.currentNode.tagId) {
+        const peekHandler = state.tagOverrideHandlers?.get(peekTagName)
+        const peekTagId = effectiveTagId(peekTagName, TagIdMap[peekTagName] ?? -1, state)
+        if (!matchesClosingTag(state.currentNode, peekTagName, peekTagId, peekHandler?.aliasTagId !== undefined)) {
           textBuffer += htmlChunk[i++]
           continue
         }
@@ -674,7 +690,7 @@ function parseHtmlInternal(
 
       const tagName = htmlChunk.substring(tagNameStart, tagNameEnd).toLowerCase() as keyof typeof TagIdMap
 
-      const tagId = TagIdMap[tagName] ?? -1
+      const tagId = effectiveTagId(tagName, TagIdMap[tagName] ?? -1, state)
       i2 = tagNameEnd
 
       // Inside a non-nesting element (script/style/title/textarea) no opening
@@ -724,6 +740,12 @@ function parseHtmlInternal(
   // is re-scanned from the element start on the next chunk while currentNode is
   // still the script/style element, so quote-awareness must persist across the
   // chunk boundary (issue #93).
+
+  // Trailing text is returned and re-scanned with the next stream chunk. A
+  // leading whitespace character in that buffer was accepted from a
+  // non-whitespace state, so restore that state before the re-scan.
+  if (textBuffer.length > 0 && isWhitespace(textBuffer.charCodeAt(0)))
+    state.lastCharWasWhitespace = false
 
   return textBuffer
 }
@@ -831,14 +853,31 @@ function processClosingTag(
   let i = position + 2 // Skip past '</'
   const tagNameStart = i
   const chunkLength = htmlChunk.length
+  let tagNameEnd = -1
+  let quoteChar = 0
 
   let foundClose = false
   while (i < chunkLength) {
     const charCode = htmlChunk.charCodeAt(i)
+    if (tagNameEnd !== -1) {
+      if (quoteChar) {
+        if (charCode === quoteChar)
+          quoteChar = 0
+        i++
+        continue
+      }
+      if (charCode === QUOTE_CHAR || charCode === APOS_CHAR) {
+        quoteChar = charCode
+        i++
+        continue
+      }
+    }
     if (charCode === GT_CHAR) {
       foundClose = true
       break
     }
+    if (tagNameEnd === -1 && isWhitespace(charCode))
+      tagNameEnd = i
     i++
   }
 
@@ -850,10 +889,12 @@ function processClosingTag(
     }
   }
 
-  const tagName = htmlChunk.substring(tagNameStart, i).toLowerCase() as keyof typeof TagIdMap
-  const tagId = TagIdMap[tagName] ?? -1
+  const tagName = htmlChunk.substring(tagNameStart, tagNameEnd === -1 ? i : tagNameEnd).toLowerCase() as keyof typeof TagIdMap
+  const tagHandler = state.tagOverrideHandlers?.get(tagName)
+  const tagId = effectiveTagId(tagName, TagIdMap[tagName] ?? -1, state)
+  const closingIsAlias = tagHandler?.aliasTagId !== undefined
 
-  if (state.currentNode?.tagHandler?.isNonNesting && tagId !== state.currentNode.tagId) {
+  if (state.currentNode?.tagHandler?.isNonNesting && !matchesClosingTag(state.currentNode, tagName, tagId, closingIsAlias)) {
     return {
       complete: false,
       newPosition: position,
@@ -863,16 +904,12 @@ function processClosingTag(
 
   // Find matching parent node
   let curr: ElementNode | null | undefined = state.currentNode
-  if (curr) {
-    let match = curr.tagId !== tagId
-    while (curr && match) {
-      closeNode(curr, state, handleEvent)
-      curr = curr.parent
-      match = curr?.tagId !== tagId
-    }
-  }
+  while (curr && !matchesClosingTag(curr, tagName, tagId, closingIsAlias))
+    curr = curr.parent
 
   if (curr) {
+    while (state.currentNode && state.currentNode !== curr)
+      closeNode(state.currentNode, state, handleEvent)
     closeNode(curr, state, handleEvent)
   }
 
@@ -913,8 +950,9 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
     }
   }
 
-  if (node.tagId) {
-    state.depthMap[node.tagId] = Math.max(0, (state.depthMap[node.tagId] || 0) - 1)
+  const tagId = node.tagId
+  if (tagId !== undefined && tagId >= 0 && tagId < MAX_TAG_ID) {
+    state.depthMap[tagId] = Math.max(0, (state.depthMap[tagId] || 0) - 1)
   }
 
   // Clear non-nesting tag state
@@ -1058,6 +1096,8 @@ function processOpeningTag(
   selfClosing: boolean
   skip?: boolean
 } {
+  tagId = effectiveTagId(tagName, tagId, state)
+
   // Check if current element needs closing
   if (state.currentNode?.tagHandler?.isNonNesting) {
     closeNode(state.currentNode, state, handleEvent)
@@ -1152,9 +1192,9 @@ function processOpeningTag(
     }
   }
 
-  // Track global tag occurrence for uniqueness
-  const currentTagCount = (result.attributes && result.attributes.id) ? undefined : (state.depthMap[tagId] || 0)
-  state.depthMap[tagId] = (currentTagCount || 0) + 1
+  // Track the current nesting depth for built-in tags.
+  if (tagId >= 0 && tagId < MAX_TAG_ID)
+    state.depthMap[tagId] = (state.depthMap[tagId] || 0) + 1
   state.depth++
 
   i = result.newPosition

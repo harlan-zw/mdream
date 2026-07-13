@@ -367,6 +367,11 @@ export interface TagHandler {
    * strings so markers like `^`/`~` attach to adjacent content (issue #93).
    */
   literalEnter?: boolean
+  /**
+   * Built-in tag id used by declarative string aliases.
+   * @internal
+   */
+  aliasTagId?: number
 }
 
 // Plugin-specific context interfaces

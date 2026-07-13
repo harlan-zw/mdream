@@ -61,11 +61,10 @@ fn main() -> io::Result<()> {
     let options = HTMLToMarkdownOptions {
         origin,
         clean_urls,
-        format,
         ..Default::default()
     };
 
-    let mut processor = MarkdownStreamProcessor::new(options);
+    let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut out = stdout.lock();

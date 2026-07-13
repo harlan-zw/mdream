@@ -1,4 +1,4 @@
-use mdream::{html_to_markdown, html_to_markdown_result, MarkdownStreamProcessor};
+use mdream::{html_to_markdown, html_to_markdown_result, html_to_text, MarkdownStreamProcessor};
 use mdream::types::{HTMLToMarkdownOptions, PluginConfig, ExtractionConfig, FilterConfig, FrontmatterConfig, TagOverrideConfig, IsolateMainConfig, OutputFormat};
 
 fn convert(html: &str) -> String {
@@ -13,10 +13,7 @@ fn convert_with_origin(html: &str, origin: &str) -> String {
 }
 
 fn convert_text(html: &str) -> String {
-    html_to_markdown(html, HTMLToMarkdownOptions {
-        format: OutputFormat::Text,
-        ..Default::default()
-    })
+    html_to_text(html, HTMLToMarkdownOptions::default())
 }
 
 // ── Plain text output ──
@@ -35,6 +32,34 @@ fn plain_text_output_preserves_readable_separators() {
         convert_text(r#"<p>Line<br>Break</p><table><tr><th>Name</th><th>Role</th></tr><tr><td>Ada</td><td>Admin</td></tr></table><p><img src="/x.png" alt="Diagram"></p>"#),
         "Line\nBreak\n\nName\tRole\nAda\tAdmin\n\nDiagram"
     );
+}
+
+#[test]
+fn plain_text_pre_preserves_content_without_synthetic_formatting() {
+    assert_eq!(convert_text("<pre>  first line\nsecond line</pre>"), "  first line\nsecond line");
+    assert_eq!(convert_text("  <p>ordinary text</p>"), "ordinary text");
+
+    assert_eq!(
+        convert_text("<ul><li>Before<pre>  first line\nsecond line</pre>After</li></ul><blockquote>Quote<pre>code</pre>Done</blockquote>"),
+        "Before\n  first line\nsecond line\nAfter\n\nQuote\ncode\nDone"
+    );
+}
+
+#[test]
+fn plain_text_streaming_matches_every_split() {
+    let html = "  <h1>A heading that must not wrap</h1><p>Alpha  beta</p><pre>  first line\nsecond line</pre><p>Omega</p>";
+    let expected = html_to_text(html, HTMLToMarkdownOptions::default().with_wrap_width(8));
+
+    for split in 0..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new_with_format(
+            HTMLToMarkdownOptions::default().with_wrap_width(8),
+            OutputFormat::Text,
+        );
+        let mut actual = stream.process_chunk(&html[..split]);
+        actual.push_str(&stream.process_chunk(&html[split..]));
+        actual.push_str(&stream.finish());
+        assert_eq!(actual.trim_end(), expected, "split at byte {split}");
+    }
 }
 
 // ── Case-insensitive tag names ──

@@ -270,13 +270,18 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
 /**
  * Calculate newline configuration based on tag handler spacing config
  */
-function calculateNewLineConfig(node: ElementNode): readonly [number, number] {
+function calculateNewLineConfig(node: ElementNode, plainText: boolean): readonly [number, number] {
   const tagId = node.tagId
   const depthMap = node.depthMap
 
   // Adjust for list items and blockquotes
   if ((tagId !== TAG_LI && (depthMap[TAG_LI] || 0) > 0)
     || (tagId !== TAG_BLOCKQUOTE && (depthMap[TAG_BLOCKQUOTE] || 0) > 0)) {
+    // Markdown suppresses nested block spacing because the surrounding list or
+    // quote handler owns its prefixes. Plain text has no such prefixes, so a
+    // nested <pre> still needs a line boundary around its literal contents.
+    if (plainText && tagId === TAG_PRE)
+      return [1, 1]
     return NO_SPACING
   }
 
@@ -347,6 +352,13 @@ function flushPreFence(state: MarkdownState): void {
 }
 
 function getPlainTextOutput(node: ElementNode, eventType: number, state: MarkdownState): string | undefined {
+  const override = state.options?.plugins?.tagOverrides?.[node.name]
+  if (override && typeof override !== 'string') {
+    const explicitOutput = eventType === NodeEventEnter ? override.enter : override.exit
+    if (explicitOutput !== undefined)
+      return explicitOutput
+  }
+
   const tagId = node.tagId
   if (eventType === NodeEventEnter) {
     if (tagId === TAG_BR)
@@ -384,6 +396,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   }
 
   let lastYieldedLength = 0
+  let preserveLeadingWhitespace = false
 
   /**
    * Process a DOM event and generate markdown
@@ -450,13 +463,16 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           return
         }
 
+        if (state.plainText && state.depthMap[TAG_PRE] && state.buffer.length === 0)
+          preserveLeadingWhitespace = true
+
         // Skip leading spaces after newlines
         if (textNode.value === ' ' && lastChar === '\n') {
           return
         }
 
         // Add spacing before text if needed
-        if (shouldAddSpacingBeforeText(lastChar, lastNode, textNode)) {
+        if (!(state.plainText && state.depthMap[TAG_PRE]) && shouldAddSpacingBeforeText(lastChar, lastNode, textNode)) {
           textNode.value = ` ${textNode.value}`
         }
 
@@ -533,7 +549,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     }
 
     // Handle newlines
-    const newLineConfig = calculateNewLineConfig(node as ElementNode)
+    const newLineConfig = calculateNewLineConfig(node as ElementNode, state.plainText === true)
     const configuredNewLines = newLineConfig[eventType] || 0
     const newLines = Math.max(0, configuredNewLines - lastNewLines)
 
@@ -639,8 +655,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
    * Get the final markdown output
    */
   function getMarkdown(): string {
-    const result = state.buffer.join('').trimStart()
+    const content = state.buffer.join('')
+    const result = state.plainText && preserveLeadingWhitespace ? content : content.trimStart()
     state.buffer.length = 0
+    preserveLeadingWhitespace = false
     return result.trimEnd()
   }
 
@@ -648,7 +666,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
    * Get new markdown content since the last call (for streaming)
    */
   function getMarkdownChunk(): string {
-    const currentContent = state.buffer.join('').trimStart()
+    const content = state.buffer.join('')
+    const currentContent = state.plainText && preserveLeadingWhitespace ? content : content.trimStart()
     const newContent = currentContent.slice(lastYieldedLength)
     lastYieldedLength = currentContent.length
     // Consolidate buffer into a single entry to prevent retroactive

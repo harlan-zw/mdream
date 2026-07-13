@@ -434,6 +434,10 @@ impl ConvertState {
             return;
         }
 
+        if self.plain_text && self.depth_map[TAG_PRE as usize] > 0 && self.buffer.is_empty() {
+            self.preserve_leading_whitespace = true;
+        }
+
         let buf_bytes = self.buffer.as_bytes();
         let buf_len = buf_bytes.len();
         let last_char = if buf_len > 0 { buf_bytes[buf_len - 1] } else { 0 };
@@ -454,7 +458,7 @@ impl ConvertState {
         // alone so they stay blank.
         let li_depth = self.depth_map[TAG_LI as usize] as usize;
         let indented_storage;
-        let text = if self.depth_map[TAG_PRE as usize] > 0 && li_depth > 0
+        let text = if !self.plain_text && self.depth_map[TAG_PRE as usize] > 0 && li_depth > 0
             && (text.contains('\n') || last_char == b'\n') {
             let indent = self.list_indent.as_str();
             let mut out = String::with_capacity(text.len() + indent.len() * 2);
@@ -487,7 +491,8 @@ impl ConvertState {
 
         if self.wrap_width != 0 && self.can_wrap_here() {
             self.push_text_wrapped(text, last_char);
-        } else if self.should_add_spacing_before_text(last_char, text) {
+        } else if !(self.plain_text && self.depth_map[TAG_PRE as usize] > 0)
+            && self.should_add_spacing_before_text(last_char, text) {
             self.buffer.push(' ');
             self.last_content_cache_len = text.len() + 1;
             self.buffer.push_str(text);
@@ -511,13 +516,12 @@ impl ConvertState {
         self.depth_map[TAG_PRE as usize] == 0
             && self.depth_map[TAG_CODE as usize] == 0
             && !self.in_table_cell()
-            && (self.plain_text
-                || (self.depth_map[TAG_H1 as usize] == 0
-                    && self.depth_map[TAG_H2 as usize] == 0
-                    && self.depth_map[TAG_H3 as usize] == 0
-                    && self.depth_map[TAG_H4 as usize] == 0
-                    && self.depth_map[TAG_H5 as usize] == 0
-                    && self.depth_map[TAG_H6 as usize] == 0))
+            && self.depth_map[TAG_H1 as usize] == 0
+            && self.depth_map[TAG_H2 as usize] == 0
+            && self.depth_map[TAG_H3 as usize] == 0
+            && self.depth_map[TAG_H4 as usize] == 0
+            && self.depth_map[TAG_H5 as usize] == 0
+            && self.depth_map[TAG_H6 as usize] == 0
     }
 
     /// Character count of the current (unterminated) buffer line, i.e. since the
@@ -1144,6 +1148,10 @@ impl ConvertState {
 
     #[inline]
     pub(crate) fn calculate_new_line_config(&self, tag_id: Option<u8>, node_spacing: Option<[u8; 2]>) -> [u8; 2] {
+        if self.plain_text && tag_id == Some(TAG_PRE)
+            && (self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0) {
+            return [1, 1];
+        }
         if let Some(id) = tag_id {
             if (id != TAG_LI && self.depth_map[TAG_LI as usize] > 0)
                 || (id != TAG_BLOCKQUOTE && self.depth_map[TAG_BLOCKQUOTE as usize] > 0) {

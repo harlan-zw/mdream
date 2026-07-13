@@ -44,7 +44,10 @@ export async function* streamHtmlToMarkdown(
       }
 
       // Process the HTML chunk
-      const htmlContent = `${remainingHtml}${typeof value === 'string' ? value : decoder.decode(value, { stream: true })}`
+      const decoded = typeof value === 'string'
+        ? decoder.decode() + value
+        : decoder.decode(value, { stream: true })
+      const htmlContent = `${remainingHtml}${decoded}`
 
       remainingHtml = parseHtmlStream(htmlContent, parseState, (event) => {
         processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)
@@ -60,8 +63,10 @@ export async function* streamHtmlToMarkdown(
     const handleEvent = (event: NodeEvent): void => {
       processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)
     }
-    const leftover = remainingHtml
-      ? parseHtmlStream(remainingHtml, parseState, handleEvent)
+    const decoderTail = decoder.decode()
+    const finalHtml = remainingHtml + decoderTail
+    const leftover = finalHtml
+      ? parseHtmlStream(finalHtml, parseState, handleEvent)
       : ''
     finalizeParse(leftover, parseState, handleEvent)
 
@@ -72,10 +77,6 @@ export async function* streamHtmlToMarkdown(
     }
   }
   finally {
-    // Ensure proper cleanup
-    if (remainingHtml) {
-      decoder.decode(new Uint8Array(0), { stream: false })
-    }
     reader.releaseLock()
   }
 }

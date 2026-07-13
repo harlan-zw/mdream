@@ -70,9 +70,9 @@ fn js_string_vec(v: &JsValue) -> Option<Vec<(String, String)>> {
 
 // ── Options parsing ──
 
-fn parse_options(options: &JsValue) -> mdream::types::HTMLToMarkdownOptions {
+fn parse_options(options: &JsValue) -> (mdream::types::HTMLToMarkdownOptions, mdream::types::OutputFormat) {
     if options.is_undefined() || options.is_null() {
-        return mdream::types::HTMLToMarkdownOptions::default();
+        return (mdream::types::HTMLToMarkdownOptions::default(), mdream::types::OutputFormat::Markdown);
     }
 
     let origin = as_string(&get_prop(options, "origin"));
@@ -94,14 +94,14 @@ fn parse_options(options: &JsValue) -> mdream::types::HTMLToMarkdownOptions {
         _ => mdream::types::OutputFormat::Markdown,
     };
 
-    mdream::types::HTMLToMarkdownOptions {
+    let core_options = mdream::types::HTMLToMarkdownOptions {
         origin,
         clean_urls,
         clean: None,
         plugins,
         wrap_width,
-        format,
-    }
+    };
+    (core_options, format)
 }
 
 fn parse_plugins(p: &JsValue) -> mdream::types::PluginConfig {
@@ -179,14 +179,14 @@ fn parse_plugins(p: &JsValue) -> mdream::types::PluginConfig {
 
 #[wasm_bindgen(js_name = "htmlToMarkdown")]
 pub fn html_to_markdown(html: &str, options: JsValue) -> String {
-    let opts = parse_options(&options);
-    mdream::html_to_markdown(html, opts)
+    let (opts, format) = parse_options(&options);
+    mdream::html_to_format(html, opts, format)
 }
 
 #[wasm_bindgen(js_name = "htmlToMarkdownResult")]
 pub fn html_to_markdown_result(html: &str, options: JsValue) -> JsValue {
-    let opts = parse_options(&options);
-    let result = mdream::html_to_markdown_result(html, opts);
+    let (opts, format) = parse_options(&options);
+    let result = mdream::html_to_format_result(html, opts, format);
 
     let obj = js_sys::Object::new();
     js_sys::Reflect::set(&obj, &"markdown".into(), &result.markdown.into()).unwrap_or_default();
@@ -228,9 +228,9 @@ pub struct MarkdownStream {
 impl MarkdownStream {
     #[wasm_bindgen(constructor)]
     pub fn new(options: JsValue) -> Self {
-        let opts = parse_options(&options);
+        let (opts, format) = parse_options(&options);
         Self {
-            inner: mdream::MarkdownStreamProcessor::new(opts),
+            inner: mdream::MarkdownStreamProcessor::new_with_format(opts, format),
         }
     }
 

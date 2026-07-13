@@ -1,6 +1,6 @@
 
 use crate::consts::{TAG_H1, TAG_H2};
-use crate::types::HTMLToMarkdownOptions;
+use crate::types::{HTMLToMarkdownOptions, OutputFormat};
 
 /// Options for splitting markdown into chunks.
 pub struct SplitterOptions {
@@ -427,6 +427,16 @@ pub fn html_to_markdown_chunks(
     md_opts: HTMLToMarkdownOptions,
     split_opts: &SplitterOptions,
 ) -> Vec<MarkdownChunk> {
-    let markdown = crate::html_to_markdown(html, md_opts);
-    split_markdown(&markdown, split_opts)
+    html_to_format_chunks(html, md_opts, split_opts, OutputFormat::Markdown)
+}
+
+/// Convert HTML to the requested output format and split it into chunks in one call.
+pub fn html_to_format_chunks(
+    html: &str,
+    md_opts: HTMLToMarkdownOptions,
+    split_opts: &SplitterOptions,
+    format: OutputFormat,
+) -> Vec<MarkdownChunk> {
+    let output = crate::html_to_format(html, md_opts, format);
+    split_markdown(&output, split_opts)
 }

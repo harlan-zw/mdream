@@ -513,9 +513,6 @@ pub struct HTMLToMarkdownOptions {
     /// unset. `Some(0)` and `None` both disable wrapping. Code (`<pre>`/`<code>`),
     /// tables, and headings are never wrapped.
     pub wrap_width: Option<usize>,
-    /// Output format. Defaults to Markdown; `Text` omits Markdown/HTML markup
-    /// while preserving readable text and block spacing.
-    pub format: OutputFormat,
 }
 
 impl HTMLToMarkdownOptions {
@@ -582,19 +579,6 @@ impl HTMLToMarkdownOptions {
     #[must_use]
     pub fn with_wrap_width(mut self, width: usize) -> Self {
         self.wrap_width = Some(width);
-        self
-    }
-
-    /// Render readable plain text instead of Markdown.
-    ///
-    /// ```rust
-    /// use mdream::{HTMLToMarkdownOptions, OutputFormat};
-    ///
-    /// let opts = HTMLToMarkdownOptions::default().with_format(OutputFormat::Text);
-    /// ```
-    #[must_use]
-    pub fn with_format(mut self, format: OutputFormat) -> Self {
-        self.format = format;
         self
     }
 }
