@@ -56,24 +56,27 @@ export function resolveOptions(options: ResolvableOptions): ResolvedOptions {
   const plugins: PluginOptions = options.plugins ? { ...options.plugins } : {}
   let frontmatterCallback: ((fm: Record<string, string>) => void) | undefined
 
-  const enableFm = minimal ? options.frontmatter !== false : !!options.frontmatter
+  const frontmatterDisabled = options.frontmatter === false
+  const enableFm = minimal ? !frontmatterDisabled : !!options.frontmatter
   if (enableFm) {
     const fm = resolveFrontmatter(options.frontmatter)
     plugins.frontmatter = fm.config
     frontmatterCallback = fm.callback
   }
-  else if (options.frontmatter === false) {
+  else if (frontmatterDisabled) {
     delete plugins.frontmatter
   }
 
-  if (minimal ? options.isolateMain !== false : options.isolateMain)
+  const isolateMainDisabled = options.isolateMain === false
+  if (minimal ? !isolateMainDisabled : options.isolateMain)
     plugins.isolateMain = true
-  else if (options.isolateMain === false)
+  else if (isolateMainDisabled)
     delete plugins.isolateMain
 
-  if (minimal ? options.tailwind !== false : options.tailwind)
+  const tailwindDisabled = options.tailwind === false
+  if (minimal ? !tailwindDisabled : options.tailwind)
     plugins.tailwind = true
-  else if (options.tailwind === false)
+  else if (tailwindDisabled)
     delete plugins.tailwind
 
   if (minimal)

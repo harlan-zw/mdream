@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { htmlToMarkdown } from '../../src'
+import { resolveOptions } from '../../src/resolve-options'
 
 describe('htmlToMarkdown resolve options', () => {
   it('throws TypeError when plugins array is passed', () => {
@@ -17,6 +18,18 @@ describe('htmlToMarkdown resolve options', () => {
       filter: { exclude: ['nav', 'footer'] },
     })
     expect(md).toBe('---\ntitle: "Edge Options"\n---\n\n# Real Content\n\nEmpty link')
+  })
+
+  it('minimal preserves explicit plugin opt-outs', () => {
+    const { napiOpts } = resolveOptions({
+      minimal: true,
+      frontmatter: false,
+      isolateMain: false,
+      tailwind: false,
+    })
+    expect(napiOpts.plugins).not.toHaveProperty('frontmatter')
+    expect(napiOpts.plugins).not.toHaveProperty('isolateMain')
+    expect(napiOpts.plugins).not.toHaveProperty('tailwind')
   })
 
   it('clean: true enables all cleanup', () => {
