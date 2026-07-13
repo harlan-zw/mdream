@@ -68,6 +68,22 @@ fn js_string_vec(v: &JsValue) -> Option<Vec<(String, String)>> {
     Some(out)
 }
 
+fn parse_clean(v: &JsValue) -> Option<mdream::types::CleanConfig> {
+    if v.is_undefined() || v.is_null() {
+        return None;
+    }
+    Some(mdream::types::CleanConfig {
+        urls: as_bool(&get_prop(v, "urls")).unwrap_or(false),
+        fragments: as_bool(&get_prop(v, "fragments")).unwrap_or(false),
+        empty_links: as_bool(&get_prop(v, "emptyLinks")).unwrap_or(false),
+        blank_lines: as_bool(&get_prop(v, "blankLines")).unwrap_or(false),
+        redundant_links: as_bool(&get_prop(v, "redundantLinks")).unwrap_or(false),
+        self_link_headings: as_bool(&get_prop(v, "selfLinkHeadings")).unwrap_or(false),
+        empty_images: as_bool(&get_prop(v, "emptyImages")).unwrap_or(false),
+        empty_link_text: as_bool(&get_prop(v, "emptyLinkText")).unwrap_or(false),
+    })
+}
+
 // ── Options parsing ──
 
 fn parse_options(options: &JsValue) -> mdream::types::HTMLToMarkdownOptions {
@@ -77,6 +93,7 @@ fn parse_options(options: &JsValue) -> mdream::types::HTMLToMarkdownOptions {
 
     let origin = as_string(&get_prop(options, "origin"));
     let clean_urls = as_bool(&get_prop(options, "cleanUrls")).unwrap_or(false);
+    let clean = parse_clean(&get_prop(options, "clean"));
 
     let plugins_val = get_prop(options, "plugins");
     let plugins = if plugins_val.is_undefined() || plugins_val.is_null() {
@@ -93,7 +110,7 @@ fn parse_options(options: &JsValue) -> mdream::types::HTMLToMarkdownOptions {
     mdream::types::HTMLToMarkdownOptions {
         origin,
         clean_urls,
-        clean: None,
+        clean,
         plugins,
         wrap_width,
     }

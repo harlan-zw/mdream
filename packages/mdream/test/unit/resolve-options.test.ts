@@ -10,13 +10,13 @@ describe('htmlToMarkdown resolve options', () => {
   })
 
   it('minimal enables frontmatter, isolateMain, tailwind, filter', () => {
-    const html = `<html><head><title>Test</title></head><body><main><nav>nav</nav><h1>Hello</h1><p>World</p></main></body></html>`
-    const md = htmlToMarkdown(html, { minimal: true })
-    expect(md).toContain('---')
-    expect(md).toContain('title:')
-    expect(md).toContain('# Hello')
-    expect(md).toContain('World')
-    expect(md).not.toContain('nav')
+    const html = '<!DOCTYPE html><html><head><title>Edge Options</title></head><body><div>Outside chrome</div><main><nav>Inside nav</nav><h1>Real Content</h1><p><a href="#">Empty link</a></p></main><footer>Footer junk</footer></body></html>'
+    const md = htmlToMarkdown(html, {
+      minimal: true,
+      isolateMain: true,
+      filter: { exclude: ['nav', 'footer'] },
+    })
+    expect(md).toBe('---\ntitle: "Edge Options"\n---\n\n# Real Content\n\nEmpty link')
   })
 
   it('clean: true enables all cleanup', () => {
