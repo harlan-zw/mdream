@@ -931,6 +931,16 @@ for await (const chunk of streamHtmlToMarkdown(response.body)) {
 }
 ```
 
+If your toolchain doesn't resolve the export conditions, the raw wasm-bindgen build (web target) is exposed at `mdream/wasm` for manual initialization:
+
+```ts
+import init, { htmlToMarkdown } from 'mdream/wasm'
+import wasmModule from 'mdream/wasm/mdream_edge_bg.wasm'
+
+await init({ module_or_path: wasmModule })
+const markdown = htmlToMarkdown('<h1>Hello</h1>', {})
+```
+
 You can also import the edge entry point directly:
 
 ```ts

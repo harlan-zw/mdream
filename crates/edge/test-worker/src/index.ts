@@ -1,3 +1,4 @@
+import { htmlToMarkdown as pkgHtmlToMarkdown, streamHtmlToMarkdown as pkgStreamHtmlToMarkdown } from 'mdream'
 import init, { htmlToMarkdown, htmlToMarkdownResult, MarkdownStream } from '../wasm/mdream_edge.js'
 // @ts-expect-error wasm module import
 import wasmModule from '../wasm/mdream_edge_bg.wasm'
@@ -16,6 +17,22 @@ export default {
     await ensureInit()
 
     const url = new URL(request.url)
+
+    // Regression for #119: the `mdream` package resolves the `workerd` export
+    // condition and must work without manual wasm init.
+    if (url.pathname === '/pkg/convert' && request.method === 'POST') {
+      const html = await request.text()
+      const md = pkgHtmlToMarkdown(html)
+      return new Response(md, { headers: { 'content-type': 'text/plain' } })
+    }
+
+    if (url.pathname === '/pkg/stream' && request.method === 'POST') {
+      let md = ''
+      for await (const chunk of pkgStreamHtmlToMarkdown(request.body)) {
+        md += chunk
+      }
+      return new Response(md, { headers: { 'content-type': 'text/plain' } })
+    }
 
     if (url.pathname === '/convert' && request.method === 'POST') {
       const html = await request.text()
