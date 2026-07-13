@@ -8,10 +8,12 @@
     "url": "https://github.com/harlan-zw/mdream"
   },
   "scripts": {
+    "bundle-size:sync": "pnpm test:bundle-size && node bench/bundle/analyze.ts && node bench/bundle/update.ts",
     "build": "pnpm run -r build",
     "lint": "eslint .",
     "typecheck": "pnpm run -r typecheck",
     "test": "pnpm exec playwright install && vitest test",
+    "test:bundle-size": "pnpm --filter @mdream/js build && obuild --dir bench/bundle",
     "release": "pnpm build && bumpp --all --output=CHANGELOG.md --execute=\"node scripts/sync-cargo-version.mjs\" packages/*/package.json",
     "release:beta": "pnpm build && bumpp --all --release prerelease --preid beta --output=CHANGELOG.md --execute=\"node scripts/sync-cargo-version.mjs\" packages/*/package.json",
     "test:attw": "pnpm -r --parallel --filter './packages/**' run test:attw",
@@ -23,6 +25,7 @@
     "@antfu/eslint-config": "catalog:",
     "@arethetypeswrong/cli": "catalog:",
     "@kreuzberg/html-to-markdown-node": "catalog:bench",
+    "@mdream/js": "workspace:*",
     "@types/node": "catalog:",
     "@vitest/browser": "catalog:",
     "@vitest/browser-playwright": "catalog:",
@@ -31,6 +34,7 @@
     "knip": "catalog:",
     "node-html-markdown": "catalog:bench",
     "obuild": "catalog:",
+    "pathe": "catalog:",
     "playwright": "catalog:",
     "rehype-parse": "catalog:bench",
     "rehype-remark": "catalog:bench",
