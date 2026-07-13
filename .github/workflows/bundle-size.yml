@@ -1,0 +1,88 @@
+name: Bundle Size Analysis
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  analyze-bundle-size:
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53 # v6.0.1
+
+      - name: Use Node.js 24.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          cache: pnpm
+
+      - name: Build base branch bundles
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          pr_sha=$(git rev-parse HEAD)
+          trap 'git checkout --detach "$pr_sha"' EXIT
+
+          git checkout --detach "$BASE_SHA"
+          rm -rf /tmp/base-dist
+          mkdir -p /tmp/base-dist
+
+          if node -e "const pkg = require('./package.json'); process.exit(pkg.scripts?.['test:bundle-size'] ? 0 : 1)"; then
+            pnpm install --frozen-lockfile
+            pnpm test:bundle-size
+            cp -R bench/bundle/dist/. /tmp/base-dist/
+          else
+            echo "The base commit predates the bundle-size harness; bundles will be reported as new."
+          fi
+
+          git checkout --detach "$pr_sha"
+          trap - EXIT
+
+      - name: Build pull request bundles
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test:bundle-size
+
+      - name: Resolve baseline label
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          short_sha=$(git rev-parse --short "$BASE_SHA")
+          date=$(git show -s --format=%cs "$BASE_SHA")
+          echo "BASE_LABEL=$BASE_REF @ $short_sha · $date" >> "$GITHUB_ENV"
+
+      - name: Generate bundle report
+        id: analyze
+        env:
+          BASE_DIST: /tmp/base-dist
+        run: |
+          output=$(node bench/bundle/analyze.ts)
+          echo "$output"
+          echo "$output" >> "$GITHUB_STEP_SUMMARY"
+          echo "result<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$output" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Post comment on pull request
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: marocchino/sticky-pull-request-comment@70d2764d1a7d5d9560b100cbea0077fc8f633987 # v3
+        with:
+          header: Bundle Size Analysis
+          message: ${{ steps.analyze.outputs.result }}

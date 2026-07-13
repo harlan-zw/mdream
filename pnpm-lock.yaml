@@ -215,6 +215,9 @@ importers:
       '@kreuzberg/html-to-markdown-node':
         specifier: catalog:bench
         version: 3.7.2
+      '@mdream/js':
+        specifier: workspace:*
+        version: link:packages/js
       '@types/node':
         specifier: 'catalog:'
         version: 26.1.1
@@ -239,6 +242,9 @@ importers:
       obuild:
         specifier: 'catalog:'
         version: 0.4.38(chokidar@5.0.0)(dotenv@17.4.2)(giget@3.2.0)(jiti@2.7.0)(magicast@0.5.3)(oxc-resolver@11.21.3)(typescript@6.0.3)(vue-tsc@3.3.7(typescript@6.0.3))
+      pathe:
+        specifier: 'catalog:'
+        version: 2.0.3
       playwright:
         specifier: 'catalog:'
         version: 1.61.1
