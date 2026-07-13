@@ -34,6 +34,16 @@ export default defineBuildConfig({
   hooks: {
     end(ctx) {
       const cwd = ctx?.cwd || process.cwd()
+
+      // wasm-pack emits a catch-all .gitignore in its out dirs; pnpm/npm pack
+      // respect nested .gitignore files, which would strip wasm/ from the tarball
+      for (const stray of ['wasm/.gitignore', 'wasm-bundler/.gitignore']) {
+        try {
+          unlinkSync(resolve(cwd, stray))
+        }
+        catch {}
+      }
+
       const iifeMjsPath = resolve(cwd, 'dist/iife.mjs')
       try {
         const wasmBindingsJs = readFileSync(resolve(cwd, 'wasm/mdream_edge.js'), 'utf-8')

@@ -72,6 +72,8 @@
     "bumpp": "catalog:",
     "changelogen": "catalog:",
     "eslint": "catalog:",
-    "nuxt": "catalog:"
+    "nuxt": "catalog:",
+    "typescript": "catalog:",
+    "vue-tsc": "catalog:"
   }
 }
