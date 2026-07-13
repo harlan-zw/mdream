@@ -143,6 +143,10 @@ jobs:
 
       - run: pnpm install
 
+      - name: Build NAPI bindings (bundling mdream's node entry needs napi/)
+        working-directory: crates/node
+        run: pnpm build:platform
+
       - name: Build mdream package
         working-directory: packages/mdream
         run: pnpm build
