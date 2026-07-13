@@ -1,6 +1,29 @@
 import { SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 
+describe('mdream package export in Workers runtime (#119)', () => {
+  it('converts HTML via the workerd export condition', async () => {
+    const res = await SELF.fetch('http://localhost/pkg/convert', {
+      method: 'POST',
+      body: '<h1>Hello</h1><p>World</p>',
+    })
+    const md = await res.text()
+    expect(md).toContain('# Hello')
+    expect(md).toContain('World')
+  })
+
+  it('streams HTML via the workerd export condition', async () => {
+    const res = await SELF.fetch('http://localhost/pkg/stream', {
+      method: 'POST',
+      body: '<h1>Stream</h1><ul><li>One</li><li>Two</li></ul>',
+    })
+    const md = await res.text()
+    expect(md).toContain('# Stream')
+    expect(md).toContain('- One')
+    expect(md).toContain('- Two')
+  })
+})
+
 describe('mdream WASM in Workers runtime', () => {
   it('converts basic HTML to Markdown', async () => {
     const res = await SELF.fetch('http://localhost/convert', {

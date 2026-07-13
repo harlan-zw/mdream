@@ -1,5 +1,10 @@
 import type { HtmlToMarkdownOptions } from '../napi/index.js'
-import { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream } from '../wasm-bundler/mdream_edge.js'
+import { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream, initSync } from '../wasm/mdream_edge.js'
+import wasmModule from '../wasm/mdream_edge_bg.wasm'
+
+// Edge runtimes (workerd, edge-light) resolve `.wasm` imports to a compiled
+// WebAssembly.Module that must be instantiated manually (#119).
+initSync({ module: wasmModule })
 
 export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): string {
   const result = _htmlToMarkdownResult(html, options || {})

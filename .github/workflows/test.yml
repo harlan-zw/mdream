@@ -137,9 +137,15 @@ jobs:
 
       - name: Build WASM for Workers
         working-directory: crates/edge
-        run: wasm-pack build --target web --out-dir test-worker/wasm --out-name mdream_edge
+        run: |
+          wasm-pack build --target web --out-dir test-worker/wasm --out-name mdream_edge
+          wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge
 
       - run: pnpm install
+
+      - name: Build mdream package
+        working-directory: packages/mdream
+        run: pnpm build
 
       - name: Run Workers tests
         working-directory: crates/edge/test-worker
