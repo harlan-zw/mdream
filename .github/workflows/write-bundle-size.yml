@@ -28,11 +28,28 @@ jobs:
           node-version: 24.x
           cache: pnpm
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: crates -> target
+
+      - name: Install wasm-pack and wasm-opt
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: wasm-pack,wasm-opt
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build bundles
-        run: pnpm test:bundle-size
+        run: |
+          pnpm test:bundle-size
+          pnpm test:bundle-size:rust
 
       - name: Update stats
         run: node bench/bundle/update.ts
