@@ -1,9 +1,8 @@
-import type { ParseState } from './parse-core'
+import type { ParseState } from './parse'
 import type { EngineOptions, NodeEvent, TagHandler, TransformPlugin } from './types'
 import { createMarkdownProcessor } from './markdown-processor'
-import { finalizeParse, parseHtmlStream } from './parse-core'
+import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
-import { tagHandlers } from './tags'
 
 /**
  * Creates a markdown stream from an HTML stream
@@ -31,7 +30,6 @@ export async function* streamHtmlToMarkdown(
     depth: 0,
     resolvedPlugins,
     tagOverrideHandlers,
-    tagHandlers,
     plainText: processor.state.plainText,
   }
 

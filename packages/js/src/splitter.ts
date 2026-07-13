@@ -1,4 +1,4 @@
-import type { ParseState } from './parse-core'
+import type { ParseState } from './parse'
 import type { ElementNode, MarkdownChunk, NodeEvent, SplitterOptions, TextNode } from './types'
 import {
   ELEMENT_NODE,
@@ -16,10 +16,9 @@ import {
   TEXT_NODE,
 } from './const'
 import { createMarkdownProcessor } from './markdown-processor'
-import { parseHtmlStream } from './parse-core'
+import { parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
 import { resolvePlugins } from './resolve-plugins'
-import { tagHandlers } from './tags'
 
 const MARKDOWN_HEADER_LINE_RE = /^#{1,6}\s+/
 const NEWLINE_RE = /\n/g
@@ -170,7 +169,6 @@ export function* htmlToMarkdownSplitChunksStream(
     depthMap: processor.state.depthMap,
     depth: 0,
     resolvedPlugins: opts.resolvedPlugins,
-    tagHandlers,
   }
 
   const eventBuffer: NodeEvent[] = []
