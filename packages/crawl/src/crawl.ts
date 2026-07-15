@@ -87,6 +87,28 @@ function extractCdataUrl(url: string): string {
   return url
 }
 
+/**
+ * Decode the 5 XML predefined entities that the sitemap spec requires inside
+ * `<loc>` (https://www.sitemaps.org/protocol.html#escaping). Without this, URLs
+ * with query strings (`?a=1&amp;b=2`) are extracted with a literal `&amp;`.
+ * `&amp;` is decoded last so an already-single `&` isn't double-processed.
+ */
+function decodeXmlEntities(value: string): string {
+  if (!value.includes('&'))
+    return value
+  return value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, '\'')
+    .replace(/&amp;/g, '&')
+}
+
+/** Extract, un-CDATA and entity-decode a `<loc>` value in one step. */
+function cleanLoc(raw: string): string {
+  return decodeXmlEntities(extractCdataUrl(raw.trim()))
+}
+
 /** Strip tracking params, fragments, and trailing slashes from a URL */
 export function normalizeUrl(resolved: URL): string {
   resolved.hash = ''
@@ -101,7 +123,13 @@ export function normalizeUrl(resolved: URL): string {
   return resolved.href.replace(URL_TRAILING_SLASH_RE, '') || resolved.href
 }
 
-async function loadSitemap(sitemapUrl: string): Promise<string[]> {
+async function loadSitemap(sitemapUrl: string, visited: Set<string> = new Set()): Promise<string[]> {
+  // Cycle guard: a sitemap index that references itself (directly or via a
+  // child) would otherwise recurse forever.
+  if (visited.has(sitemapUrl))
+    return []
+  visited.add(sitemapUrl)
+
   const xmlContent = await ofetch(sitemapUrl, {
     headers: FETCH_HEADERS,
     timeout: 10000,
@@ -121,11 +149,11 @@ async function loadSitemap(sitemapUrl: string): Promise<string[]> {
       match = SITEMAP_INDEX_LOC_RE.exec(xmlContent)
       if (match === null)
         break
-      childSitemaps.push(extractCdataUrl(match[1]))
+      childSitemaps.push(cleanLoc(match[1]))
     }
 
     const childResults = await Promise.allSettled(
-      childSitemaps.map(url => loadSitemap(url)),
+      childSitemaps.map(url => loadSitemap(url, visited)),
     )
 
     const allUrls: string[] = []
@@ -144,7 +172,7 @@ async function loadSitemap(sitemapUrl: string): Promise<string[]> {
     match = SITEMAP_URL_LOC_RE.exec(xmlContent)
     if (match === null)
       break
-    urls.push(extractCdataUrl(match[1]))
+    urls.push(cleanLoc(match[1]))
   }
   return urls
 }
@@ -292,6 +320,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     descriptionOverride,
     verbose = false,
     skipSitemap = false,
+    sitemapUrls: explicitSitemapUrls,
     allowSubdomains = false,
     stripBoilerplate = true,
     boilerplateThreshold,
@@ -339,10 +368,13 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   if (startingUrls.length > 0 && !skipSitemap && !singlePageMode) {
     const baseUrl = new URL(startingUrls[0]).origin
     const homePageUrl = baseUrl
+    const hasExplicitSitemaps = !!explicitSitemapUrls && explicitSitemapUrls.length > 0
 
     onProgress?.(progress)
 
-    // Fetch robots.txt
+    // robots.txt is still fetched even with an explicit sitemap override, since
+    // it also carries the Crawl-delay directive. Its Sitemap: entries only feed
+    // discovery when the user hasn't pinned a location.
     let robotsContent: string | null = null
     try {
       robotsContent = await ofetch(`${baseUrl}/robots.txt`, {
@@ -363,99 +395,81 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       }
     }
 
-    if (robotsContent) {
-      const sitemapMatches = robotsContent.match(ROBOTS_SITEMAP_RE)
-      if (sitemapMatches && sitemapMatches.length > 0) {
-        progress.sitemap.found = sitemapMatches.length
-        progress.sitemap.status = 'processing'
-        onProgress?.(progress)
-
-        const robotsSitemaps = sitemapMatches.map(match => match.replace(ROBOTS_SITEMAP_PREFIX_RE, '').trim())
-
-        for (const sitemapUrl of robotsSitemaps) {
-          try {
-            const robotsUrls = await loadSitemap(sitemapUrl)
-            sitemapAttempts.push({ url: sitemapUrl, success: true })
-
-            const filteredUrls = filterSitemapUrls(robotsUrls, hasGlobPatterns, exclude, patterns, allowSubdomains)
-
-            if (hasGlobPatterns) {
-              startingUrls = filteredUrls
-              progress.sitemap.processed = filteredUrls.length
-              onProgress?.(progress)
-              break
-            }
-            else if (filteredUrls.length > 0) {
-              startingUrls = filteredUrls
-              progress.sitemap.processed = filteredUrls.length
-              onProgress?.(progress)
-              break
-            }
-          }
-          catch (error) {
-            sitemapAttempts.push({ url: sitemapUrl, success: false, error: error instanceof Error ? error.message : 'Unknown error' })
-          }
+    // Assemble the ordered list of sitemap URLs to try. An explicit override
+    // replaces discovery entirely; otherwise robots.txt Sitemap: entries take
+    // priority (authoritative) and well-known paths are the fallback.
+    const candidateSitemaps: string[] = []
+    if (hasExplicitSitemaps) {
+      candidateSitemaps.push(...explicitSitemapUrls)
+    }
+    else {
+      if (robotsContent) {
+        const sitemapMatches = robotsContent.match(ROBOTS_SITEMAP_RE)
+        if (sitemapMatches) {
+          for (const m of sitemapMatches)
+            candidateSitemaps.push(m.replace(ROBOTS_SITEMAP_PREFIX_RE, '').trim())
         }
       }
+      candidateSitemaps.push(
+        `${baseUrl}/sitemap.xml`,
+        `${baseUrl}/sitemap_index.xml`,
+        `${baseUrl}/sitemaps.xml`,
+        `${baseUrl}/sitemap-index.xml`,
+      )
     }
 
-    let mainSitemapProcessed = false
-    const mainSitemapUrl = `${baseUrl}/sitemap.xml`
-    try {
-      const sitemapUrls = await loadSitemap(mainSitemapUrl)
-      sitemapAttempts.push({ url: mainSitemapUrl, success: true })
+    if (candidateSitemaps.length > 0) {
+      progress.sitemap.status = 'processing'
+      progress.sitemap.found = candidateSitemaps.length
+      onProgress?.(progress)
+    }
 
-      const filteredUrls = filterSitemapUrls(sitemapUrls, hasGlobPatterns, exclude, patterns, allowSubdomains)
-
-      if (hasGlobPatterns) {
-        startingUrls = filteredUrls
-        progress.sitemap.found = sitemapUrls.length
-        progress.sitemap.processed = filteredUrls.length
-        onProgress?.(progress)
-        mainSitemapProcessed = true
+    if (hasExplicitSitemaps) {
+      // Multiple explicit sitemaps are treated as parts of one crawl surface:
+      // load them all and merge, rather than stopping at the first match.
+      const merged: string[] = []
+      for (const sitemapUrl of candidateSitemaps) {
+        try {
+          merged.push(...await loadSitemap(sitemapUrl))
+          sitemapAttempts.push({ url: sitemapUrl, success: true })
+        }
+        catch (error) {
+          sitemapAttempts.push({ url: sitemapUrl, success: false, error: error instanceof Error ? error.message : 'Unknown error' })
+        }
       }
-      else if (filteredUrls.length > 0) {
+      const dedupedUrls = merged.length > 0 ? [...new Set(merged)] : merged
+      const filteredUrls = filterSitemapUrls(dedupedUrls, hasGlobPatterns, exclude, patterns, allowSubdomains)
+      if (hasGlobPatterns || filteredUrls.length > 0) {
         startingUrls = filteredUrls
-        progress.sitemap.found = sitemapUrls.length
+        progress.sitemap.found = dedupedUrls.length
         progress.sitemap.processed = filteredUrls.length
         onProgress?.(progress)
-        mainSitemapProcessed = true
       }
     }
-    catch (error) {
-      sitemapAttempts.push({ url: mainSitemapUrl, success: false, error: error instanceof Error ? error.message : 'Unknown error' })
-      if (!mainSitemapProcessed) {
-        const commonSitemaps = [
-          `${baseUrl}/sitemap_index.xml`,
-          `${baseUrl}/sitemaps.xml`,
-          `${baseUrl}/sitemap-index.xml`,
-        ]
+    else {
+      // Auto-discovery: try candidates in priority order, stop at the first that
+      // yields usable URLs (or any success in glob mode, where an empty result
+      // still defines the crawl surface).
+      const seenCandidates = new Set<string>()
+      for (const sitemapUrl of candidateSitemaps) {
+        if (seenCandidates.has(sitemapUrl))
+          continue
+        seenCandidates.add(sitemapUrl)
+        try {
+          const foundUrls = await loadSitemap(sitemapUrl)
+          sitemapAttempts.push({ url: sitemapUrl, success: true })
 
-        for (const sitemapUrl of commonSitemaps) {
-          try {
-            const altUrls = await loadSitemap(sitemapUrl)
-            sitemapAttempts.push({ url: sitemapUrl, success: true })
-
-            const filteredUrls = filterSitemapUrls(altUrls, hasGlobPatterns, exclude, patterns, allowSubdomains)
-
-            if (hasGlobPatterns) {
-              startingUrls = filteredUrls
-              progress.sitemap.found = altUrls.length
-              progress.sitemap.processed = filteredUrls.length
-              onProgress?.(progress)
-              break
-            }
-            else if (filteredUrls.length > 0) {
-              startingUrls = filteredUrls
-              progress.sitemap.found = altUrls.length
-              progress.sitemap.processed = filteredUrls.length
-              onProgress?.(progress)
-              break
-            }
+          const filteredUrls = filterSitemapUrls(foundUrls, hasGlobPatterns, exclude, patterns, allowSubdomains)
+          if (hasGlobPatterns || filteredUrls.length > 0) {
+            startingUrls = filteredUrls
+            progress.sitemap.found = foundUrls.length
+            progress.sitemap.processed = filteredUrls.length
+            onProgress?.(progress)
+            break
           }
-          catch (error) {
-            sitemapAttempts.push({ url: sitemapUrl, success: false, error: error instanceof Error ? error.message : 'Unknown error' })
-          }
+        }
+        catch (error) {
+          sitemapAttempts.push({ url: sitemapUrl, success: false, error: error instanceof Error ? error.message : 'Unknown error' })
         }
       }
     }

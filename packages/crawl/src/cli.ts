@@ -289,6 +289,7 @@ Options:
   --crawl-delay <seconds>     Crawl delay in seconds
   --exclude <pattern>         Exclude URLs matching glob patterns (can be used multiple times)
   --skip-sitemap              Skip sitemap.xml and robots.txt discovery
+  --sitemap <url>             Use an explicit sitemap URL instead of auto-discovery (repeatable for multi-part sitemaps)
   --allow-subdomains          Crawl across subdomains of the same root domain
   --keep-boilerplate          Keep repeated site chrome (nav/footer) in per-page output (default: stripped)
   --boilerplate-threshold <n> Fraction of pages a block must repeat in to count as chrome (0-1, default: ${DEFAULT_BOILERPLATE_THRESHOLD})
@@ -305,6 +306,7 @@ Examples:
   @mdream/crawl -u example.com --exclude "*/admin/*" --exclude "*/api/*"
   @mdream/crawl -u example.com --verbose
   @mdream/crawl -u example.com --skip-sitemap
+  @mdream/crawl -u example.com --sitemap https://example.com/custom/sitemap.xml
   @mdream/crawl -u example.com --driver playwright --single-page
 `)
     process.exit(0)
@@ -462,6 +464,19 @@ Examples:
   // Check for skip-sitemap flag
   const skipSitemap = args.includes('--skip-sitemap')
 
+  // Explicit sitemap override(s). Repeatable; each is normalized to https.
+  const sitemapUrls = getArgValues('--sitemap').map(u => withHttps(u))
+  for (const sitemapUrl of sitemapUrls) {
+    try {
+      // eslint-disable-next-line no-new
+      new URL(sitemapUrl)
+    }
+    catch {
+      logger.error(`Error: Invalid sitemap URL: ${sitemapUrl}`)
+      process.exit(1)
+    }
+  }
+
   // Check for allow-subdomains flag
   const allowSubdomains = args.includes('--allow-subdomains')
 
@@ -503,6 +518,7 @@ Examples:
     exclude: excludePatterns.length > 0 ? excludePatterns : undefined,
     verbose,
     skipSitemap,
+    sitemapUrls: sitemapUrls.length > 0 ? sitemapUrls : undefined,
     allowSubdomains,
     stripBoilerplate,
     boilerplateThreshold,
@@ -538,6 +554,10 @@ async function main() {
       maxDepth: cliOptions.maxDepth ?? fileConfig.maxDepth,
       crawlDelay: cliOptions.crawlDelay ?? fileConfig.crawlDelay,
       skipSitemap: cliOptions.skipSitemap || fileConfig.skipSitemap || false,
+      sitemapUrls: cliOptions.sitemapUrls
+        ?? (fileConfig.sitemap
+          ? (Array.isArray(fileConfig.sitemap) ? fileConfig.sitemap : [fileConfig.sitemap])
+          : undefined),
       allowSubdomains: cliOptions.allowSubdomains || fileConfig.allowSubdomains || false,
       stripBoilerplate: cliOptions.stripBoilerplate ?? fileConfig.stripBoilerplate ?? true,
       boilerplateThreshold: cliOptions.boilerplateThreshold ?? fileConfig.boilerplateThreshold,
@@ -567,6 +587,7 @@ async function main() {
       `Formats: ${formats.join(', ')}`,
       options.exclude && options.exclude.length > 0 && `Exclude: ${options.exclude.join(', ')}`,
       options.skipSitemap && `Skip sitemap: Yes`,
+      options.sitemapUrls && options.sitemapUrls.length > 0 && `Sitemap: ${options.sitemapUrls.join(', ')}`,
       options.allowSubdomains && `Allow subdomains: Yes`,
       options.verbose && `Verbose: Enabled`,
     ].filter(Boolean)
