@@ -14,7 +14,7 @@
     "typecheck": "pnpm run -r typecheck",
     "test": "pnpm exec playwright install && vitest test",
     "test:bundle-size": "pnpm --filter @mdream/js build && obuild --dir bench/bundle",
-    "test:bundle-size:rust": "wasm-pack build crates/edge --target web --out-dir ../../bench/bundle/dist/rust --out-name mdream_edge && wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --strip-producers bench/bundle/dist/rust/mdream_edge_bg.wasm -o bench/bundle/dist/rust/mdream_edge_bg.wasm",
+    "test:bundle-size:rust": "node scripts/build-wasm-edge.mjs --target web --out-dir bench/bundle/dist/rust",
     "release": "pnpm build && bumpp --all --output=CHANGELOG.md --execute=\"node scripts/sync-cargo-version.mjs\" packages/*/package.json",
     "release:beta": "pnpm build && bumpp --all --release prerelease --preid beta --output=CHANGELOG.md --execute=\"node scripts/sync-cargo-version.mjs\" packages/*/package.json",
     "test:attw": "pnpm -r --parallel --filter './packages/**' run test:attw",
