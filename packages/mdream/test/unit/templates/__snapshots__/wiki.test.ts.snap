@@ -5,9 +5,7 @@ exports[`tables { name: 'JavaScript Engine', engine: { htmlToMarkdown: [Function
 
 Main menu
 
-move to sidebar
-
-hide"
+move to sidebar hide"
 `;
 
 exports[`tables { name: 'JavaScript Engine', engine: { htmlToMarkdown: [Function htmlToMarkdown], streamHtmlToMarkdown: [Function streamHtmlToMarkdown] } } > headings 1`] = `
@@ -40,9 +38,7 @@ exports[`tables { name: 'Rust Engine', engine: { htmlToMarkdown: [Function rustH
 
 Main menu
 
-move to sidebar
-
-hide"
+move to sidebar hide"
 `;
 
 exports[`tables { name: 'Rust Engine', engine: { htmlToMarkdown: [Function rustHtmlToMarkdown], streamHtmlToMarkdown: [Function rustStreamHtmlToMarkdown] } } > headings 1`] = `

@@ -2016,6 +2016,15 @@ fn unknown_inline_tag_does_not_fragment_paragraph() {
 }
 
 #[test]
+fn adjacent_buttons_stay_inline() {
+    // <button> is inline but previously inherited block-default spacing, so it
+    // injected a paragraph break that stranded trailing text/punctuation and
+    // split adjacent buttons across lines. Regression guard for issue #133.
+    assert_eq!(convert("<button>One</button><button>Two</button>"), "OneTwo");
+    assert_eq!(convert("<p>Click <button>Go</button>!</p>"), "Click Go!");
+}
+
+#[test]
 fn tag_override_alias_preserves_trailing_siblings() {
   // A string-shorthand tagOverride (`ex` aliased to `em`) used to drop every
   // sibling emitted after `</ex>` because the closing-tag lookup did not

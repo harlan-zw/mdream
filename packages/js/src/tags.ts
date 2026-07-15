@@ -693,6 +693,7 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_BUTTON]: {
     collapsesInnerWhiteSpace: true,
+    spacing: NO_SPACING,
     isInline: true,
   },
   [TAG_BODY]: { spacing: NO_SPACING },
