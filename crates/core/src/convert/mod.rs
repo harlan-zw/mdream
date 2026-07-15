@@ -824,11 +824,10 @@ impl ConvertState {
     let stable_len =
       if self.last_text_node_contains_whitespace && self.depth_map[TAG_PRE as usize] == 0 {
         current_content.trim_end_matches(' ').len()
-      } else {
-        current_content.len()
-      };
+    } else {
+      current_content.len()
+    };
     if self.last_yielded_length >= stable_len {
-      self.last_yielded_length = stable_len;
       return String::new();
     }
     let new_content = current_content[self.last_yielded_length..stable_len].to_string();
