@@ -18,7 +18,7 @@ packages:
   - '!examples/nextjs'
 
 overrides:
-  emnapi: ^1.11.1
+  emnapi: ^1.11.2
   # fflate 0.8.3 emits a trailing empty Gunzip chunk that breaks
   # @arethetypeswrong/cli 0.18.2 tarball extraction (attw --pack crashes
   # with "Cannot read properties of undefined (reading 'filename')").
@@ -28,26 +28,26 @@ catalog:
   '@actions/core': ^3.0.1
   '@actions/exec': ^3.0.0
   '@antfu/eslint-config': ^9.1.0
-  '@arethetypeswrong/cli': ^0.18.4
-  '@clack/prompts': ^1.6.0
-  '@cloudflare/vitest-pool-workers': ^0.16.19
-  '@emnapi/core': ^1.11.1
-  '@emnapi/runtime': ^1.11.1
+  '@arethetypeswrong/cli': ^0.18.5
+  '@clack/prompts': ^1.7.0
+  '@cloudflare/vitest-pool-workers': ^0.18.4
+  '@emnapi/core': ^1.11.2
+  '@emnapi/runtime': ^1.11.2
   '@emnapi/wasi-threads': ^2.0.0
   '@napi-rs/cli': ^3.7.2
-  '@napi-rs/wasm-runtime': ^1.1.5
+  '@napi-rs/wasm-runtime': ^1.1.6
   '@nuxt/devtools': 2.4.0
   '@nuxt/kit': ^4.4.8
   '@nuxt/module-builder': ^1.0.2
   '@nuxt/schema': ^4.4.8
   '@nuxt/test-utils': ^4.0.3
   '@tybys/wasm-util': ^0.10.3
-  '@types/node': ^26.0.0
+  '@types/node': ^26.1.1
   '@types/picomatch': ^4.0.3
-  '@vercel/ncc': ^0.44.0
+  '@vercel/ncc': ^0.44.1
   '@vitejs/plugin-vue': ^6.0.7
-  '@vitest/browser': ^4.1.9
-  '@vitest/browser-playwright': ^4.1.9
+  '@vitest/browser': ^4.1.10
+  '@vitest/browser-playwright': ^4.1.10
   bumpp: ^11.1.0
   c12: ^3.3.4
   cac: ^7.0.0
@@ -56,28 +56,29 @@ catalog:
   consola: ^3.4.2
   cross-env: ^10.1.0
   defu: ^6.1.7
-  eslint: ^10.5.0
+  eslint: ^10.7.0
   express: ^5.2.1
   hookable: ^6.1.1
-  knip: ^6.18.0
+  knip: ^6.26.0
   nuxt: ^4.4.8
-  nuxt-site-config: ^4.1.0
-  nypm: ^0.6.7
-  obuild: ^0.4.37
+  nuxt-site-config: ^4.1.1
+  nypm: ^0.6.8
+  obuild: ^0.4.38
   ofetch: ^1.5.1
   pathe: ^2.0.3
-  picomatch: ^4.0.4
+  picomatch: ^4.0.5
   playwright: ^1.61.1
   sirv: ^3.0.2
   tinyglobby: ^0.2.17
-  tldts: ^7.4.4
+  tldts: ^7.4.8
   tslib: ^2.8.1
   typescript: ^6.0.3
   ufo: ^1.6.4
   vite: ^8.1.0
-  vitest: ^4.1.9
-  vue: ^3.5.38
+  vitest: ^4.1.10
+  vue: ^3.5.39
   vue-router: ^5.1.0
+  vue-tsc: ^3.3.7
   wrangler: ^4.104.0
 
 catalogs:

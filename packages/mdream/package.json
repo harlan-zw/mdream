@@ -33,7 +33,12 @@
         "default": "./dist/worker.mjs"
       },
       "default": "./dist/worker.mjs"
-    }
+    },
+    "./wasm": {
+      "types": "./wasm/mdream_edge.d.ts",
+      "default": "./wasm/mdream_edge.js"
+    },
+    "./wasm/*": "./wasm/*"
   },
   "main": "./dist/index.mjs",
   "unpkg": "./dist/iife.js",
