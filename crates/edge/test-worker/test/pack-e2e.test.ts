@@ -38,9 +38,18 @@ describe('mdream npm tarball in wrangler dev (#119)', () => {
     writeFileSync(join(tmp, 'src/index.mjs'), `
 import { htmlToMarkdown, streamHtmlToMarkdown } from 'mdream'
 
+const isolationOptions = {
+  minimal: true,
+  isolateMain: true,
+  filter: { exclude: ['nav', 'footer'] },
+}
+
 export default {
   async fetch(request) {
     const url = new URL(request.url)
+    if (url.pathname === '/options' && request.method === 'POST') {
+      return new Response(htmlToMarkdown(await request.text(), isolationOptions))
+    }
     if (url.pathname === '/stream' && request.method === 'POST') {
       let md = ''
       for await (const chunk of streamHtmlToMarkdown(request.body)) {
@@ -81,6 +90,13 @@ export default {
       expect(md).toContain('# Stream')
       expect(md).toContain('- One')
       expect(md).toContain('- Two')
+
+      const optionsHtml = '<!DOCTYPE html><html><head><title>Edge Options</title></head><body><div>Outside chrome</div><main><nav>Inside nav</nav><h1>Real Content</h1><p><a href="#">Empty link</a></p></main><footer>Footer junk</footer></body></html>'
+      const optionsRes = await worker.fetch('/options', {
+        method: 'POST',
+        body: optionsHtml,
+      })
+      expect(await optionsRes.text()).toBe('---\ntitle: "Edge Options"\n---\n\n# Real Content\n\nEmpty link')
     }
     finally {
       await worker.stop()

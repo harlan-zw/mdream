@@ -484,8 +484,8 @@ impl CleanConfig {
 
 /// Options for [`crate::html_to_markdown`] and [`crate::html_to_markdown_result`].
 ///
-/// All fields are optional; zero-cost when unset. Use struct update syntax to
-/// set only the options you need:
+/// Options are disabled by default. Use struct update syntax to set only the
+/// options you need:
 ///
 /// ```rust
 /// use mdream::{HTMLToMarkdownOptions, CleanConfig};
@@ -510,9 +510,9 @@ pub struct HTMLToMarkdownOptions {
     /// Hard-wrap prose at this many characters, breaking on word boundaries.
     ///
     /// Applied inline during conversion (no extra pass), so it is zero-cost when
-    /// unset. `Some(0)` and `None` both disable wrapping. Code (`<pre>`/`<code>`),
-    /// tables, and headings are never wrapped.
-    pub wrap_width: Option<usize>,
+    /// set to `0`. Code (`<pre>`/`<code>`), tables, and headings are never
+    /// wrapped.
+    pub wrap_width: usize,
 }
 
 impl HTMLToMarkdownOptions {
@@ -578,7 +578,7 @@ impl HTMLToMarkdownOptions {
     /// ```
     #[must_use]
     pub fn with_wrap_width(mut self, width: usize) -> Self {
-        self.wrap_width = Some(width);
+        self.wrap_width = width;
         self
     }
 }

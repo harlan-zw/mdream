@@ -1,17 +1,20 @@
 {
   "type": "module",
   "private": true,
-  "packageManager": "pnpm@11.12.0",
+  "packageManager": "pnpm@11.11.0",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/harlan-zw/mdream"
   },
   "scripts": {
+    "bundle-size:sync": "pnpm test:bundle-size && pnpm test:bundle-size:rust && node bench/bundle/analyze.ts && node bench/bundle/update.ts",
     "build": "pnpm run -r build",
     "lint": "eslint .",
     "typecheck": "pnpm run -r typecheck",
     "test": "pnpm exec playwright install && vitest test",
+    "test:bundle-size": "pnpm --filter @mdream/js build && obuild --dir bench/bundle",
+    "test:bundle-size:rust": "wasm-pack build crates/edge --target web --out-dir ../../bench/bundle/dist/rust --out-name mdream_edge && wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --strip-producers bench/bundle/dist/rust/mdream_edge_bg.wasm -o bench/bundle/dist/rust/mdream_edge_bg.wasm",
     "release": "pnpm build && bumpp --all --output=CHANGELOG.md --execute=\"node scripts/sync-cargo-version.mjs\" packages/*/package.json",
     "release:beta": "pnpm build && bumpp --all --release prerelease --preid beta --output=CHANGELOG.md --execute=\"node scripts/sync-cargo-version.mjs\" packages/*/package.json",
     "test:attw": "pnpm -r --parallel --filter './packages/**' run test:attw",
@@ -23,6 +26,7 @@
     "@antfu/eslint-config": "catalog:",
     "@arethetypeswrong/cli": "catalog:",
     "@kreuzberg/html-to-markdown-node": "catalog:bench",
+    "@mdream/js": "workspace:*",
     "@types/node": "catalog:",
     "@vitest/browser": "catalog:",
     "@vitest/browser-playwright": "catalog:",
@@ -31,6 +35,7 @@
     "knip": "catalog:",
     "node-html-markdown": "catalog:bench",
     "obuild": "catalog:",
+    "pathe": "catalog:",
     "playwright": "catalog:",
     "rehype-parse": "catalog:bench",
     "rehype-remark": "catalog:bench",
