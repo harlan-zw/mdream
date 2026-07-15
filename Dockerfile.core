@@ -13,7 +13,7 @@ COPY crates/ ./crates/
 # rust:alpine targets x86_64-unknown-linux-musl by default, so this produces
 # a statically linked binary that runs on `scratch` with no dependencies.
 WORKDIR /build/crates
-RUN cargo build --release -p mdream --bin mdream
+RUN cargo build --release --locked -p mdream --bin mdream
 
 FROM scratch
 COPY --from=builder /build/crates/target/release/mdream /mdream
