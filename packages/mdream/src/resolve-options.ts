@@ -17,17 +17,18 @@ const MINIMAL_FILTER_DEFAULT = { exclude: MINIMAL_FILTER_EXCLUDE as unknown as s
 const CLEAN_ALL: CleanOptions = { urls: true, fragments: true, emptyLinks: true, redundantLinks: true, selfLinkHeadings: true, emptyImages: true, emptyLinkText: true }
 
 function resolveCleanConfig(options: ResolvableOptions, minimal: boolean): { cleanUrls: boolean, clean?: CleanOptions } {
+  const cleanUrls = options.cleanUrls === true
   let cleanOpt = options.clean
   if (cleanOpt === undefined) {
     if (!minimal)
-      return { cleanUrls: options.cleanUrls === true }
+      return { cleanUrls }
     cleanOpt = true
   }
   if (!cleanOpt)
-    return { cleanUrls: options.cleanUrls === true }
+    return { cleanUrls }
   const resolved = cleanOpt === true ? CLEAN_ALL : cleanOpt
   return {
-    cleanUrls: options.cleanUrls === true || resolved.urls === true,
+    cleanUrls: cleanUrls || resolved.urls === true,
     clean: resolved,
   }
 }
@@ -84,16 +85,18 @@ export function resolveOptions(options: ResolvableOptions): ResolvedOptions {
   else if (options.filter)
     plugins.filter = options.filter
 
+  const extraction = options.extraction
   let extractionHandlers: Record<string, (el: ExtractedElement) => void> | undefined
-  if (options.extraction) {
-    plugins.extraction = { selectors: Object.keys(options.extraction) }
-    extractionHandlers = options.extraction
+  if (extraction) {
+    plugins.extraction = { selectors: Object.keys(extraction) }
+    extractionHandlers = extraction
   }
 
-  if (options.tagOverrides) {
+  const tagOverrides = options.tagOverrides
+  if (tagOverrides) {
     const overrides: Record<string, TagOverrideNapi> = {}
-    for (const tag in options.tagOverrides) {
-      const value = options.tagOverrides[tag]
+    for (const tag in tagOverrides) {
+      const value = tagOverrides[tag]
       if (value)
         overrides[tag] = typeof value === 'string' ? { alias: value } : value
     }
