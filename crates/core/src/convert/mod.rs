@@ -144,6 +144,11 @@ pub struct ConvertState {
   last_text_node_index: usize,
   has_last_text_node: bool,
   last_node_is_inline: bool,
+  /// A collapsed trailing space trimmed from the end of an inline element.
+  /// It stays deferred until later visible inline content appears so Markdown
+  /// delimiters close before the separator and streaming output has no
+  /// speculative trailing whitespace.
+  pending_inline_whitespace: bool,
 
   // Streaming
   last_yielded_length: usize,
@@ -263,6 +268,7 @@ impl ConvertState {
       last_text_node_index: 0,
       has_last_text_node: false,
       last_node_is_inline: false,
+      pending_inline_whitespace: false,
       last_yielded_length: 0,
 
       wrap_width: options_wrap_width,
@@ -812,13 +818,21 @@ impl ConvertState {
     } else {
       self.buffer.trim_start()
     };
-    let content_len = current_content.len();
-    if self.last_yielded_length >= content_len {
-      self.last_yielded_length = content_len;
+    // A trailing whitespace-bearing text node may still be trimmed when a
+    // closing inline tag arrives in a later chunk. Keep that mutable suffix
+    // buffered so already-yielded offsets never point into text we rewrite.
+    let stable_len =
+      if self.last_text_node_contains_whitespace && self.depth_map[TAG_PRE as usize] == 0 {
+        current_content.trim_end_matches(' ').len()
+      } else {
+        current_content.len()
+      };
+    if self.last_yielded_length >= stable_len {
+      self.last_yielded_length = stable_len;
       return String::new();
     }
-    let new_content = current_content[self.last_yielded_length..].to_string();
-    self.last_yielded_length = content_len;
+    let new_content = current_content[self.last_yielded_length..stable_len].to_string();
+    self.last_yielded_length = stable_len;
     new_content
   }
 }

@@ -299,6 +299,27 @@ fn bold() {
 }
 
 #[test]
+fn trailing_whitespace_inside_inline_moves_after_delimiter() {
+  let html = "<div><strong><a href='http://xxx.yyy/'>abc</a> </strong>def</div>";
+  let expected = "**[abc](http://xxx.yyy/)** def";
+  assert_eq!(convert(html), expected);
+  assert_eq!(convert("<p><em>abc </em>def</p>"), "_abc_ def");
+  assert_eq!(
+    convert("<p><strong><em>abc </em></strong>def</p>"),
+    "**_abc_** def"
+  );
+  assert_eq!(convert("<strong>abc </strong>"), "**abc**");
+
+  for split in 0..=html.len() {
+    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut actual = stream.process_chunk(&html[..split]);
+    actual.push_str(&stream.process_chunk(&html[split..]));
+    actual.push_str(&stream.finish());
+    assert_eq!(actual.trim_end(), expected, "split at byte {split}");
+  }
+}
+
+#[test]
 fn italic() {
   assert_eq!(convert("<em>italic</em>"), "_italic_");
   assert_eq!(convert("<i>italic</i>"), "_italic_");
