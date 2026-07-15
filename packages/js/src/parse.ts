@@ -588,10 +588,11 @@ function parseHtmlInternal(
       // Discriminate on the third char: '[' is a CDATA section, anything else
       // is a comment/doctype. Only the rare '[' case pays for the string work.
       if (htmlChunk.charCodeAt(i + 2) === OPEN_BRACKET_CHAR) {
-        // CDATA is dropped by default but can be surfaced via
-        // tagOverrides['#cdata-section']. Handle it before the generic
-        // comment/doctype scan, which would otherwise stop at the first `>`
-        // inside `]]>` and discard the content.
+        // CDATA delimiters are omitted; the inner content is emitted through
+        // the normal text pipeline (serializeTextContent), or as a synthetic
+        // element when tagOverrides['#cdata-section'] is registered. Handle it
+        // before the generic comment/doctype scan, which would otherwise stop
+        // at the first `>` inside `]]>` and discard the content.
         if (htmlChunk.startsWith('<![CDATA[', i)) {
           const end = htmlChunk.indexOf(']]>', i + 9)
           if (end === -1) {
@@ -599,11 +600,17 @@ function parseHtmlInternal(
             textBuffer += htmlChunk.substring(i)
             break
           }
-          if (textBuffer.length > 0) {
-            processTextBuffer(textBuffer, state, handleEvent)
-            textBuffer = ''
+          const content = htmlChunk.substring(i + 9, end)
+          if (state.tagOverrideHandlers?.has('#cdata-section')) {
+            if (textBuffer.length > 0) {
+              processTextBuffer(textBuffer, state, handleEvent)
+              textBuffer = ''
+            }
+            processCdataSection(content, state, handleEvent)
           }
-          processCdataSection(htmlChunk.substring(i + 9, end), state, handleEvent)
+          else {
+            textBuffer += serializeTextContent(content, state)
+          }
           i = end + 3
           continue
         }
@@ -1033,14 +1040,99 @@ function processCommentOrDoctype(htmlChunk: string, position: number): {
 }
 
 /**
- * Handle a CDATA section's inner content.
+ * Append CDATA inner content into the pending text buffer.
  *
- * CDATA is discarded by default (matching the HTML spec, where `<![CDATA[`
- * outside foreign content is a bogus comment). Callers opt in by registering a
- * `#cdata-section` entry in `tagOverrides`; the leading `#` makes the pseudo-tag
- * impossible to collide with a real HTML element name. When an override exists
- * the content is emitted as a synthetic `#cdata-section` element whose rendering
- * follows the override handler.
+ * Runs the same per-character whitespace, entity, rawtext-quote, and markdown
+ * escaping rules as the main text scanner, but treats `<` as literal text. Only
+ * the `<![CDATA[` / `]]>` delimiters are omitted; the content is otherwise
+ * indistinguishable from surrounding text (issue #98). Kept separate from the
+ * main scan loop so that hot path stays a tight inline loop.
+ */
+function serializeTextContent(content: string, state: ParseState): string {
+  let textBuffer = ''
+  const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
+  const inCodeOrPre = !!(state.depthMap[TAG_CODE] || state.depthMap[TAG_PRE])
+  const inLink = !!state.depthMap[TAG_A]
+  const inTable = !!state.depthMap[TAG_TABLE]
+  const inBlockquote = !!state.depthMap[TAG_BLOCKQUOTE]
+
+  for (let i = 0; i < content.length; i++) {
+    const currentCharCode = content.charCodeAt(i)
+
+    if (currentCharCode === AMPERSAND_CHAR) {
+      state.hasEncodedHtmlEntity = true
+    }
+
+    if (isWhitespace(currentCharCode)) {
+      if (state.justClosedTag) {
+        state.justClosedTag = false
+        state.lastCharWasWhitespace = false
+      }
+      if (!inPreTag && state.lastCharWasWhitespace) {
+        continue
+      }
+      if (inPreTag) {
+        textBuffer += content[i]
+      }
+      else if (currentCharCode === SPACE_CHAR || !state.lastCharWasWhitespace) {
+        textBuffer += ' '
+      }
+      state.lastCharWasWhitespace = true
+      state.textBufferContainsWhitespace = true
+      state.lastCharWasBackslash = false
+      continue
+    }
+
+    state.textBufferContainsNonWhitespace = true
+    state.lastCharWasWhitespace = false
+    state.justClosedTag = false
+
+    if (currentCharCode === PIPE_CHAR && inTable) {
+      textBuffer += '\\|'
+    }
+    else if (currentCharCode === BACKTICK_CHAR && inCodeOrPre) {
+      textBuffer += '\\`'
+    }
+    else if (currentCharCode === OPEN_BRACKET_CHAR && inLink) {
+      textBuffer += '\\['
+    }
+    else if (currentCharCode === CLOSE_BRACKET_CHAR && inLink) {
+      textBuffer += '\\]'
+    }
+    else if (currentCharCode === GT_CHAR && inBlockquote) {
+      textBuffer += '\\>'
+    }
+    else {
+      textBuffer += content[i]
+    }
+
+    // Track quote state for quote-aware rawtext tags (script/style only)
+    if (state.inRawTextQuoteAware && !state.lastCharWasBackslash) {
+      if (currentCharCode === APOS_CHAR && !state.inDoubleQuote && !state.inBacktick) {
+        state.inSingleQuote = !state.inSingleQuote
+      }
+      else if (currentCharCode === QUOTE_CHAR && !state.inSingleQuote && !state.inBacktick) {
+        state.inDoubleQuote = !state.inDoubleQuote
+      }
+      else if (currentCharCode === BACKTICK_CHAR && !state.inSingleQuote && !state.inDoubleQuote) {
+        state.inBacktick = !state.inBacktick
+      }
+    }
+
+    state.lastCharWasBackslash = currentCharCode === BACKSLASH_CHAR && !state.lastCharWasBackslash
+  }
+
+  return textBuffer
+}
+
+/**
+ * Handle a CDATA section's inner content when a `#cdata-section` override is
+ * registered.
+ *
+ * The content is emitted as a synthetic `#cdata-section` element whose rendering
+ * follows the override handler; the leading `#` makes the pseudo-tag impossible
+ * to collide with a real HTML element name. Without an override the caller omits
+ * the delimiters and routes the content through `serializeTextContent` instead.
  */
 function processCdataSection(
   content: string,

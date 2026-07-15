@@ -516,20 +516,26 @@ impl ConvertState {
 
             if next == EXCLAMATION_CHAR {
                 let remaining = &chunk[i..];
-                // CDATA is dropped by default but can be surfaced via
-                // tagOverrides["#cdata-section"]. Handle it before the generic
-                // comment/doctype scan, which would otherwise stop at the first
-                // `>` inside `]]>` and discard the content. We already matched
-                // `<!`, so only the `[CDATA[` tail is checked; `strip_prefix`
-                // short-circuits on the third byte for the common comment and
-                // doctype cases.
+                // CDATA delimiters are omitted; the inner content is emitted
+                // through the normal text pipeline (`append_text_content`), or
+                // as a synthetic element when tagOverrides["#cdata-section"] is
+                // registered. Handle it before the generic comment/doctype scan,
+                // which would otherwise stop at the first `>` inside `]]>` and
+                // discard the content. We already matched `<!`, so only the
+                // `[CDATA[` tail is checked; `strip_prefix` short-circuits on the
+                // third byte for the common comment and doctype cases.
                 if let Some(after_open) = chunk[i + 2..].strip_prefix("[CDATA[") {
                     if let Some(rel) = after_open.find("]]>") {
-                        if !text_buffer.is_empty() {
-                            self.process_text_buffer(&mut text_buffer);
-                            text_buffer.clear();
+                        let content = &after_open[..rel];
+                        if self.has_cdata_section_override() {
+                            if !text_buffer.is_empty() {
+                                self.process_text_buffer(&mut text_buffer);
+                                text_buffer.clear();
+                            }
+                            self.process_cdata_section(content);
+                        } else {
+                            self.append_text_content(content, &mut text_buffer);
                         }
-                        self.process_cdata_section(&after_open[..rel]);
                         i += "<![CDATA[".len() + rel + 3;
                         continue;
                     }

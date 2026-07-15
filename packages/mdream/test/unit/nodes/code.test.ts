@@ -170,13 +170,13 @@ Text without newline above.
     expect(markdown).toBe('```javascript\nconst x = 1;\n```')
   })
 
-  // Regression guard for issue #98: a CDATA section inside <pre><code> must be
-  // dropped by default (no tagOverrides), leaving the code block intact rather
-  // than leaking the content or breaking the surrounding markup.
-  it('drops CDATA sections inside code blocks by default (issue #98)', async () => {
+  // Regression guard for issue #98: a CDATA section inside <pre><code> keeps
+  // its content by default (no tagOverrides), omitting only the delimiters so
+  // the code block renders the payload verbatim.
+  it('emits CDATA content inside code blocks without markup by default (issue #98)', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<pre><code><![CDATA[\none two\nthree four\n]]></code></pre>'
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('```\n\n```')
+    expect(markdown).toBe('```\none two\nthree four\n```')
   })
 })

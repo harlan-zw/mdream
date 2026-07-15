@@ -1694,10 +1694,35 @@ fn script_with_cdata_like_content() {
 }
 
 #[test]
-fn cdata_dropped_by_default() {
-    // CDATA sections are discarded unless opted into via tagOverrides.
-    let md = convert("before <![CDATA[secret payload]]> after");
-    assert!(!md.contains("secret payload"), "CDATA leaked into output: {md}");
+fn cdata_omits_markup_by_default() {
+    // Only the <![CDATA[ / ]]> delimiters are omitted; the content flows through
+    // the normal text pipeline (issue #98).
+    let md = convert("<body><p>before<![CDATA[secret payload]]>after</p></body>");
+    assert_eq!(md, "beforesecret payloadafter");
+    assert!(!md.contains("<![CDATA["), "CDATA opener leaked: {md}");
+    assert!(!md.contains("]]>"), "CDATA closer leaked: {md}");
+}
+
+#[test]
+fn cdata_preserves_surrounding_whitespace() {
+    // Real whitespace between text and a CDATA section survives; the content is
+    // not glued to its neighbours.
+    let md = convert("<body><p>a &amp; <![CDATA[b &amp; c]]></p></body>");
+    assert_eq!(md, "a & b & c");
+}
+
+#[test]
+fn cdata_treats_angle_brackets_as_text() {
+    // `<` inside CDATA is literal, never parsed as markup.
+    let md = convert("<body><p><![CDATA[1 < 2 <b>x</b>]]></p></body>");
+    assert_eq!(md, "1 < 2 <b>x</b>");
+}
+
+#[test]
+fn cdata_omits_markup_in_code_block_by_default() {
+    // Issue #98: a CDATA-wrapped code block keeps its content and newlines.
+    let md = convert("<body><pre><code><![CDATA[\none two\nthree four\n]]></code></pre></body>");
+    assert_eq!(md, "```\none two\nthree four\n```");
 }
 
 #[test]
