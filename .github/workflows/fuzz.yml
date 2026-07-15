@@ -1,0 +1,49 @@
+name: Fuzz
+
+on:
+  schedule:
+    # Weekly smoke run; the parser is hand-rolled so keep fuzz coverage alive.
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_html_to_markdown
+          - fuzz_options
+          - fuzz_splitter
+          - fuzz_streaming
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/core/fuzz -> target
+
+      - name: Run fuzzer
+        working-directory: crates/core
+        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=300
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: crates/core/fuzz/artifacts/
+          if-no-files-found: ignore

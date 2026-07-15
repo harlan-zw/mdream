@@ -13,10 +13,14 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
-  # ── Rust clippy lint check ──
+  # ── Rust lint (fmt + clippy, host and wasm targets) ──
   rust-lint:
-    name: Rust Clippy
+    name: Rust Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -25,14 +29,41 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+          targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: crates -> target
 
+      # pedantic/nursery stay warn-only in CI so new lints on fresh stable
+      # releases can't break unrelated builds; they still surface locally.
       - name: Run clippy
         working-directory: crates
-        run: cargo clippy --workspace --exclude mdream-edge -- -D warnings
+        run: cargo clippy --workspace --exclude mdream-edge --locked -- -D warnings -A clippy::pedantic -A clippy::nursery
+
+      - name: Run clippy (edge, wasm target)
+        working-directory: crates
+        run: cargo clippy -p mdream-edge --target wasm32-unknown-unknown --locked -- -D warnings -A clippy::pedantic -A clippy::nursery
+
+  # ── MSRV check (keep in sync with rust-version in crates/Cargo.toml) ──
+  rust-msrv:
+    name: Rust MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install MSRV Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Check workspace builds on MSRV
+        working-directory: crates
+        run: cargo check --workspace --locked
 
   # ── Rust unit tests (all OSes on main, Linux-only on PRs) ──
   rust-test:
@@ -76,12 +107,13 @@ jobs:
         working-directory: crates
         run: cargo build -p mdream-edge --target wasm32-unknown-unknown
 
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Install wasm-pack and wasm-opt
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack,wasm-opt
 
-      - name: Full wasm-pack build
-        working-directory: crates/edge
-        run: wasm-pack build --target web --out-dir /tmp/wasm-test --out-name mdream_edge
+      - name: Full edge WASM build
+        run: node scripts/build-wasm-edge.mjs --target web --out-dir /tmp/wasm-test
 
   # ── WASM browser tests (wasm-bindgen-test in headless Chrome) ──
   wasm-browser-test:
@@ -100,7 +132,9 @@ jobs:
           workspaces: crates -> target
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
 
       - name: Run WASM tests in headless Chrome
         working-directory: crates/edge
@@ -132,14 +166,15 @@ jobs:
         with:
           workspaces: crates -> target
 
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Install wasm-pack and wasm-opt
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack,wasm-opt
 
       - name: Build WASM for Workers
-        working-directory: crates/edge
         run: |
-          wasm-pack build --target web --out-dir test-worker/wasm --out-name mdream_edge
-          wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge
+          node scripts/build-wasm-edge.mjs --target web --out-dir crates/edge/test-worker/wasm
+          node scripts/build-wasm-edge.mjs --target web --out-dir packages/mdream/wasm
 
       - run: pnpm install
 
@@ -169,7 +204,7 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Use Node.js 22
+      - name: Use Node.js 24
         uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -185,10 +220,10 @@ jobs:
         with:
           workspaces: crates -> target
 
-      - name: Install wasm-pack
+      - name: Install wasm-pack and wasm-opt
         uses: taiki-e/install-action@v2
         with:
-          tool: wasm-pack
+          tool: wasm-pack,wasm-opt
 
       - run: pnpm i
 
@@ -197,9 +232,8 @@ jobs:
 
       - name: Build WASM web & bundler
         run: |
-          wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge
-          wasm-pack build --target bundler --out-dir ../../packages/mdream/wasm-bundler --out-name mdream_edge
-        working-directory: crates/edge
+          node scripts/build-wasm-edge.mjs --target web --out-dir packages/mdream/wasm
+          node scripts/build-wasm-edge.mjs --target bundler --out-dir packages/mdream/wasm-bundler
 
       - name: Build
         run: pnpm run build
