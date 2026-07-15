@@ -436,8 +436,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         if (state.pendingInlineWhitespace) {
           if (!textNode.value.trim())
             return
-          const pendingLastChar = buff.at(-1)?.at(-1) || ''
-          if (pendingLastChar && !' \n\t\r'.includes(pendingLastChar) && !' \n\t\r'.includes(textNode.value[0] || ''))
+          if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || ''))
             textNode.value = ` ${textNode.value}`
           state.pendingInlineWhitespace = false
         }
@@ -540,8 +539,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           state.pendingInlineWhitespace = false
         }
         else if (firstOutput) {
-          const pendingLastChar = buff.at(-1)?.at(-1) || ''
-          if (pendingLastChar && !' \n\t\r'.includes(pendingLastChar) && !' \n\t\r'.includes(firstOutput))
+          if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput))
             state.buffer.push(' ')
           state.pendingInlineWhitespace = false
         }
@@ -667,8 +665,12 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   function getMarkdownChunk(): string {
     const content = state.buffer.join('')
     const currentContent = state.plainText && preserveLeadingWhitespace ? content : content.trimStart()
+    const hasMutableTrailingSpace = state.lastTextNode?.containsWhitespace
+      && !state.depthMap[TAG_PRE]
+      && currentContent.endsWith(' ')
+
     let stableLength = currentContent.length
-    if (state.lastTextNode?.containsWhitespace && !state.depthMap[TAG_PRE] && currentContent.endsWith(' ')) {
+    if (hasMutableTrailingSpace) {
       while (stableLength > 0 && currentContent[stableLength - 1] === ' ')
         stableLength--
     }
@@ -678,9 +680,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // whitespace trimming from modifying already-yielded content.
     // The trim logic uses identity checks (buff.at(-1) === lastFragment),
     // so a consolidated string won't match individual fragment references.
-    const hasMutableTrailingSpace = state.lastTextNode?.containsWhitespace
-      && !state.depthMap[TAG_PRE]
-      && currentContent.endsWith(' ')
     if (state.buffer.length > 1 && !hasMutableTrailingSpace) {
       state.buffer.length = 0
       state.buffer.push(currentContent)
