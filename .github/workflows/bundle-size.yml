@@ -32,6 +32,21 @@ jobs:
           node-version: 24.x
           cache: pnpm
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: crates -> target
+
+      - name: Install wasm-pack and wasm-opt
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: wasm-pack,wasm-opt
+
       - name: Build base branch bundles
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -46,6 +61,11 @@ jobs:
           if node -e "const pkg = require('./package.json'); process.exit(pkg.scripts?.['test:bundle-size'] ? 0 : 1)"; then
             pnpm install --frozen-lockfile
             pnpm test:bundle-size
+            if node -e "const pkg = require('./package.json'); process.exit(pkg.scripts?.['test:bundle-size:rust'] ? 0 : 1)"; then
+              pnpm test:bundle-size:rust
+            else
+              echo "The base commit predates the Rust bundle-size harness; the WASM bundle will be reported as new."
+            fi
             cp -R bench/bundle/dist/. /tmp/base-dist/
           else
             echo "The base commit predates the bundle-size harness; bundles will be reported as new."
@@ -58,6 +78,7 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm test:bundle-size
+          pnpm test:bundle-size:rust
 
       - name: Resolve baseline label
         env:
