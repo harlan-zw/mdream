@@ -49,6 +49,7 @@ npx @mdream/crawl -u https://docs.example.com
 | `--crawl-delay <seconds>` | | Delay between requests in seconds | from `robots.txt` or none |
 | `--exclude <pattern>` | | Exclude URLs matching glob patterns (repeatable) | none |
 | `--skip-sitemap` | | Skip `sitemap.xml` and `robots.txt` discovery | `false` |
+| `--sitemap <url>` | | Use an explicit sitemap URL instead of auto-discovery (repeatable for multi-part sitemaps) | auto-discovered |
 | `--allow-subdomains` | | Crawl across subdomains of the same root domain | `false` |
 | `--verbose` | `-v` | Enable verbose logging | `false` |
 | `--help` | `-h` | Show help message | |
@@ -131,6 +132,7 @@ const results = await crawlAndGenerate({
 | `exclude` | `string[]` | `[]` | Glob patterns for URLs to exclude |
 | `crawlDelay` | `number` | from `robots.txt` | Delay between requests in seconds |
 | `skipSitemap` | `boolean` | `false` | Skip `sitemap.xml` and `robots.txt` discovery |
+| `sitemapUrls` | `string[]` | auto-discovered | Explicit sitemap URL(s) to use instead of auto-discovery. Supports non-standard locations and multiple parts (all loaded and merged). Ignored when `skipSitemap` is set |
 | `allowSubdomains` | `boolean` | `false` | Crawl across subdomains of the same root domain (e.g. `docs.example.com` + `blog.example.com`). Output files are namespaced by hostname to avoid collisions |
 | `useChrome` | `boolean` | `false` | Use system Chrome instead of Playwright's bundled browser (Playwright driver only) |
 | `chunkSize` | `number` | | Chunk size passed to mdream for markdown conversion |
@@ -294,6 +296,7 @@ CLI arguments override config file values. Array options like `exclude` are conc
 | `maxPages` | `number` | Maximum pages to crawl |
 | `crawlDelay` | `number` | Delay between requests (seconds) |
 | `skipSitemap` | `boolean` | Skip sitemap discovery |
+| `sitemap` | `string \| string[]` | Explicit sitemap URL(s) to use instead of auto-discovery |
 | `allowSubdomains` | `boolean` | Crawl across subdomains |
 | `verbose` | `boolean` | Enable verbose logging |
 | `artifacts` | `string[]` | Output formats: `llms.txt`, `llms-full.txt`, `markdown` |
@@ -437,15 +440,46 @@ Waits for `networkidle` before extracting content. Automatically detects and use
 By default, the crawler performs sitemap discovery before crawling:
 
 1. Fetches `robots.txt` to find `Sitemap:` directives and `Crawl-delay` values
-2. Loads sitemaps referenced in `robots.txt`
+2. Loads sitemaps referenced in `robots.txt` (authoritative, tried first)
 3. Falls back to `/sitemap.xml`
 4. Tries common alternatives: `/sitemap_index.xml`, `/sitemaps.xml`, `/sitemap-index.xml`
-5. Supports sitemap index files (recursively loads child sitemaps)
+5. Supports sitemap index files (recursively loads child sitemaps, with cycle protection)
 6. Filters discovered URLs against glob patterns and exclusion rules
+
+The first candidate that yields matching URLs wins, so a `robots.txt` sitemap is never overwritten by a well-known fallback. `<loc>` values are CDATA-unwrapped and XML-entity-decoded (`&amp;` → `&`).
 
 The home page is always included for metadata extraction (site name, description).
 
 Disable with `--skip-sitemap` or `skipSitemap: true`.
+
+### Overriding the sitemap location
+
+When a site keeps its sitemap at a non-standard URL, or splits it across several links, pin the location(s) explicitly instead of relying on discovery:
+
+```bash
+# Single non-standard location
+npx @mdream/crawl -u example.com --sitemap https://example.com/custom/sitemap.xml
+
+# Multiple parts (repeatable), all loaded and merged
+npx @mdream/crawl -u example.com \
+  --sitemap https://example.com/sitemap-posts.xml \
+  --sitemap https://example.com/sitemap-pages.xml
+```
+
+Or in `mdream.config.ts`:
+
+```ts
+import { defineConfig } from '@mdream/crawl'
+
+export default defineConfig({
+  sitemap: [
+    'https://example.com/sitemap-posts.xml',
+    'https://example.com/sitemap-pages.xml',
+  ],
+})
+```
+
+An explicit sitemap replaces auto-discovery entirely (`robots.txt` is still read for `Crawl-delay`).
 
 ## Output Formats
 

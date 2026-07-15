@@ -36,6 +36,12 @@ export interface CrawlOptions {
   descriptionOverride?: string
   verbose?: boolean
   skipSitemap?: boolean
+  /**
+   * Explicit sitemap URL(s) to use instead of auto-discovery (robots.txt +
+   * well-known paths). Accepts non-standard locations and multiple parts, which
+   * are all loaded and merged. Ignored when `skipSitemap` is set.
+   */
+  sitemapUrls?: string[]
   allowSubdomains?: boolean
   /**
    * Strip repeated site chrome (top nav, footer, newsletter walls) from per-page
@@ -74,6 +80,8 @@ export interface MdreamCrawlConfig {
   maxPages?: number
   crawlDelay?: number
   skipSitemap?: boolean
+  /** Explicit sitemap URL(s) to use instead of auto-discovery. Supports non-standard locations and multiple parts. */
+  sitemap?: string | string[]
   allowSubdomains?: boolean
   /** Strip repeated site chrome from per-page output. Defaults to true. */
   stripBoilerplate?: boolean
