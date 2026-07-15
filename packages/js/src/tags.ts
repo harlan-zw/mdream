@@ -175,12 +175,13 @@ function isInsideTableCell(node: HandlerContext['node']): boolean {
 }
 
 function isInsideRawHtmlBlock(node: HandlerContext['node']): boolean {
-  return Boolean(node.depthMap[TAG_DETAILS]
-    || node.depthMap[TAG_SUMMARY]
-    || node.depthMap[TAG_ADDRESS]
-    || node.depthMap[TAG_DL]
-    || node.depthMap[TAG_DT]
-    || node.depthMap[TAG_DD])
+  const depthMap = node.depthMap
+  return Boolean(depthMap[TAG_DETAILS]
+    || depthMap[TAG_SUMMARY]
+    || depthMap[TAG_ADDRESS]
+    || depthMap[TAG_DL]
+    || depthMap[TAG_DT]
+    || depthMap[TAG_DD])
 }
 
 function hardBreak(buffer: string[], prefix: string): string {
@@ -306,20 +307,21 @@ export const tagHandlers: Record<number, TagHandler> = {
     enter: ({ node, state }) => {
       // A Markdown hard break would terminate a table row/ATX heading or be
       // ignored inside a raw HTML block, so preserve the inline HTML there.
+      const depthMap = node.depthMap
       if (isInsideTableCell(node) || isInsideRawHtmlBlock(node)
-        || node.depthMap[TAG_H1]
-        || node.depthMap[TAG_H2]
-        || node.depthMap[TAG_H3]
-        || node.depthMap[TAG_H4]
-        || node.depthMap[TAG_H5]
-        || node.depthMap[TAG_H6]) {
+        || depthMap[TAG_H1]
+        || depthMap[TAG_H2]
+        || depthMap[TAG_H3]
+        || depthMap[TAG_H4]
+        || depthMap[TAG_H5]
+        || depthMap[TAG_H6]) {
         return '<br>'
       }
 
       const prefix = continuationPrefix(node, state.listIndentWidths || [])
       // Inside a fenced block, the literal newline is already meaningful and
       // trailing spaces would become part of the code.
-      return node.depthMap[TAG_PRE] ? `\n${prefix}` : hardBreak(state.buffer, prefix)
+      return depthMap[TAG_PRE] ? `\n${prefix}` : hardBreak(state.buffer, prefix)
     },
     isSelfClosing: true,
     spacing: NO_SPACING,
