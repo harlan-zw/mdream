@@ -59,7 +59,7 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
   Output a message: <br/>
   <code>console.log("hello")</code>
 </p>
-`, { engine })).toBe('Output a message:  `console.log("hello")`')
+`, { engine })).toBe('Output a message:  \n`console.log("hello")`')
 
     // We need to pass the backtick testing for now
     const result = htmlToMarkdown(`<code>with \`\` backticks</code>`, { engine })
