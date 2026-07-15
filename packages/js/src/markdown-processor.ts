@@ -41,6 +41,8 @@ export interface MarkdownState {
   lastNode?: ElementNode | TextNode
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: TextNode
+  /** Deferred separator trimmed from the end of an inline element */
+  pendingInlineWhitespace?: boolean
   /** Table processing state - specialized for Markdown tables */
   tableRenderedTable?: boolean
   tableCurrentRowCells?: number
@@ -431,6 +433,14 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           return
         }
 
+        if (state.pendingInlineWhitespace) {
+          if (!textNode.value.trim())
+            return
+          if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || ''))
+            textNode.value = ` ${textNode.value}`
+          state.pendingInlineWhitespace = false
+        }
+
         if (state.plainText && state.depthMap[TAG_PRE] && state.buffer.length === 0)
           preserveLeadingWhitespace = true
 
@@ -520,6 +530,24 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     const newLineConfig = calculateNewLineConfig(node as ElementNode, state.plainText === true)
     const configuredNewLines = newLineConfig[eventType] || 0
     const newLines = Math.max(0, configuredNewLines - lastNewLines)
+    const isInlineElement = node.tagHandler?.isInline === true
+
+    if (state.pendingInlineWhitespace) {
+      const firstOutput = output[0]?.[0] || ''
+      if (eventType === NodeEventEnter) {
+        if (!isInlineElement || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
+          state.pendingInlineWhitespace = false
+        }
+        else if (firstOutput) {
+          if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput))
+            state.buffer.push(' ')
+          state.pendingInlineWhitespace = false
+        }
+      }
+      else if (!isInlineElement || newLines > 0) {
+        state.pendingInlineWhitespace = false
+      }
+    }
 
     if (newLines > 0) {
       // If the buffer has no content, add the current content (without new lines)
@@ -552,11 +580,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       // Only trim whitespace in specific cases where it's safe
       // Don't trim if we're about to add inline content that needs spacing
       // Don't trim before block elements that need their own spacing
-      if (lastFragment && state.lastTextNode?.containsWhitespace && !!node.parent && 'value' in state.lastTextNode && typeof state.lastTextNode.value === 'string') {
-        if (!node.parent.depthMap[TAG_PRE] || node.parent.tagId === TAG_PRE) {
+      if (lastFragment && state.lastTextNode?.containsWhitespace && (!!node.parent || isInlineElement) && 'value' in state.lastTextNode && typeof state.lastTextNode.value === 'string') {
+        if (!node.parent?.depthMap[TAG_PRE] || node.parent?.tagId === TAG_PRE) {
           // Only trim if the next element is not an inline element that needs spacing
           // or if we're at the end of a block
-          const isInlineElement = node.tagHandler?.isInline
           const collapsesWhiteSpace = node.tagHandler?.collapsesInnerWhiteSpace
           const hasSpacing = node.tagHandler?.spacing && Array.isArray(node.tagHandler.spacing)
           const isBlockElement = !isInlineElement && !collapsesWhiteSpace && configuredNewLines > 0
@@ -574,6 +601,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
               if (buff?.length && buff.at(-1) === lastFragment) {
                 buff[buff.length - 1] = trimmed
               }
+              if (eventType === NodeEventExit && isInlineElement)
+                state.pendingInlineWhitespace = true
             }
           }
 
@@ -636,13 +665,22 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   function getMarkdownChunk(): string {
     const content = state.buffer.join('')
     const currentContent = state.plainText && preserveLeadingWhitespace ? content : content.trimStart()
-    const newContent = currentContent.slice(lastYieldedLength)
-    lastYieldedLength = currentContent.length
+    const hasMutableTrailingSpace = state.lastTextNode?.containsWhitespace
+      && !state.depthMap[TAG_PRE]
+      && currentContent.endsWith(' ')
+
+    let stableLength = currentContent.length
+    if (hasMutableTrailingSpace) {
+      while (stableLength > 0 && currentContent[stableLength - 1] === ' ')
+        stableLength--
+    }
+    const newContent = currentContent.slice(lastYieldedLength, stableLength)
+    lastYieldedLength = stableLength
     // Consolidate buffer into a single entry to prevent retroactive
     // whitespace trimming from modifying already-yielded content.
     // The trim logic uses identity checks (buff.at(-1) === lastFragment),
     // so a consolidated string won't match individual fragment references.
-    if (state.buffer.length > 1) {
+    if (state.buffer.length > 1 && !hasMutableTrailingSpace) {
       state.buffer.length = 0
       state.buffer.push(currentContent)
     }

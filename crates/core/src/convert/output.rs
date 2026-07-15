@@ -506,6 +506,18 @@ impl ConvertState {
       return;
     }
 
+    if self.pending_inline_whitespace {
+      if text.as_bytes().iter().all(|&b| is_whitespace(b)) {
+        return;
+      }
+      let last = self.buffer.as_bytes().last().copied();
+      let first = text.as_bytes()[0];
+      if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
+        self.buffer.push(' ');
+      }
+      self.pending_inline_whitespace = false;
+    }
+
     // Open a deferred <pre> fence before its first non-whitespace text.
     if self.pre_fence_pending
       && text
@@ -1294,6 +1306,24 @@ impl ConvertState {
   ) {
     let output_str = output.unwrap_or("");
 
+    // A separator trimmed from inside a previously closed inline element must
+    // sit outside its Markdown delimiter. Resolve it only when later visible
+    // inline output begins; block boundaries and line breaks subsume it.
+    if self.pending_inline_whitespace && is_enter {
+      let first_output = output_str.as_bytes().first().copied();
+      if !is_inline || configured_new_lines > 0 || matches!(first_output, Some(b'\n' | b'\r')) {
+        self.pending_inline_whitespace = false;
+      } else if let Some(first) = first_output {
+        let last = self.buffer.as_bytes().last().copied();
+        if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
+          self.buffer.push(' ');
+        }
+        self.pending_inline_whitespace = false;
+      }
+    } else if self.pending_inline_whitespace && (!is_inline || configured_new_lines > 0) {
+      self.pending_inline_whitespace = false;
+    }
+
     // Fast path: no newlines, no output, no whitespace state to manage
     if configured_new_lines == 0
       && output_str.is_empty()
@@ -1359,13 +1389,23 @@ impl ConvertState {
         }
       }
     } else {
-      if let Some(parent) = self.stack.last()
-        && self.last_text_node_contains_whitespace
-        && (self.depth_map[TAG_PRE as usize] == 0 || parent.tag_id == Some(TAG_PRE))
+      if self.last_text_node_contains_whitespace
+        && (is_inline || !self.stack.is_empty())
+        && (self.depth_map[TAG_PRE as usize] == 0
+          || self
+            .stack
+            .last()
+            .is_some_and(|parent| parent.tag_id == Some(TAG_PRE)))
       {
         let h_is_inline = is_inline;
-        let collapses = parent.collapses_inner_white_space;
-        let has_spacing = parent.spacing.is_some();
+        let collapses = self
+          .stack
+          .last()
+          .is_some_and(|parent| parent.collapses_inner_white_space);
+        let has_spacing = self
+          .stack
+          .last()
+          .is_some_and(|parent| parent.spacing.is_some());
         // For exit, the node was already popped, so use the is_inline param
         let is_block = !h_is_inline && !collapses && configured_new_lines > 0;
         let should_trim = !(is_block || h_is_inline && is_enter || is_enter && collapses)
@@ -1380,6 +1420,9 @@ impl ConvertState {
             let trimmed_len = frag.trim_end().len();
             if trimmed_len < cache_len {
               self.buffer.truncate(start + trimmed_len);
+              if !is_enter && is_inline {
+                self.pending_inline_whitespace = true;
+              }
             }
           }
         }
