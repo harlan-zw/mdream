@@ -11,7 +11,7 @@ describe.each(engines)('definition lists $name', (engineConfig) => {
         Anytown, CA 12345
       </address>
     `, { engine })
-    expect(result).toBe('<address>John Doe 123 Main St Anytown, CA 12345 </address>')
+    expect(result).toBe('<address>John Doe<br> 123 Main St<br> Anytown, CA 12345 </address>')
   })
 
   it('handles definition lists', async () => {

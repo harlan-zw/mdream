@@ -2206,6 +2206,44 @@ fn wrap_preserves_inline_spacing() {
   );
 }
 
+// ── HTML hard breaks (issue #128) ──
+
+#[test]
+fn br_preserves_a_hard_break_with_and_without_wrapping() {
+  let html = "<div>abc def ghi jkl mno<br/>111 222 333 444 555 666 777 888 999 000 abc</div>";
+
+  assert_eq!(
+    convert(html),
+    "abc def ghi jkl mno  \n111 222 333 444 555 666 777 888 999 000 abc"
+  );
+  assert_eq!(
+    convert_wrapped(html, 40),
+    "abc def ghi jkl mno  \n111 222 333 444 555 666 777 888 999 000\nabc"
+  );
+  assert_eq!(convert("<p>first <br>second</p>"), "first  \nsecond");
+}
+
+#[test]
+fn br_keeps_nested_block_continuation_prefixes() {
+  assert_eq!(
+    convert("<ul><li>first<br>second</li></ul>"),
+    "- first  \n  second"
+  );
+  assert_eq!(
+    convert("<blockquote><p>first<br>second</p></blockquote>"),
+    "> first  \n> second"
+  );
+  assert_eq!(
+    convert("<address>first<br>second</address>"),
+    "<address>first<br>second</address>"
+  );
+  assert_eq!(convert("<h1>first<br>second</h1>"), "# first<br>second");
+  assert_eq!(
+    convert("<pre>first<br>second</pre>"),
+    "```\nfirst\nsecond\n```"
+  );
+}
+
 #[test]
 fn wrap_never_splits_a_long_token() {
   let out = convert_wrapped(
