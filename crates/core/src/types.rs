@@ -589,3 +589,13 @@ pub struct MdreamResult {
     pub extracted: Option<Vec<ExtractedElement>>,
     pub frontmatter: Option<Vec<(String, String)>>,
 }
+
+/// Output format for conversion.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OutputFormat {
+    /// Markdown output (default).
+    #[default]
+    Markdown,
+    /// Plain text output with Markdown/HTML syntax omitted.
+    Text,
+}

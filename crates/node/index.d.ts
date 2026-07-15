@@ -63,6 +63,7 @@ export interface HtmlToMarkdownOptions {
   clean?: CleanOptionsNapi
   plugins?: PluginOptions
   wrapWidth?: number
+  format?: "markdown" | "text"
 }
 
 export interface MarkdownChunkNapi {

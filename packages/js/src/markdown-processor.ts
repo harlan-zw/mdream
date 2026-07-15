@@ -9,14 +9,17 @@ import {
   NodeEventEnter,
   NodeEventExit,
   TAG_BLOCKQUOTE,
+  TAG_BR,
   TAG_CODE,
   TAG_DIV,
   TAG_H1,
   TAG_H6,
+  TAG_IMG,
   TAG_LI,
   TAG_OL,
   TAG_P,
   TAG_PRE,
+  TAG_Q,
   TAG_SPAN,
   TAG_TABLE,
   TAG_TD,
@@ -67,6 +70,8 @@ export interface MarkdownState {
   preFencePending?: boolean
   preFenceLang?: string
   preOwnFence?: boolean
+  /** Whether output should omit Markdown/HTML markup */
+  plainText?: boolean
 }
 
 /**
@@ -82,7 +87,7 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
     return
   if (eventType === NodeEventEnter) {
     const isOrdered = element.parent?.tagId === TAG_OL
-    const width = isOrdered ? String(element.index + 1).length + 2 : 2
+    const width = state.plainText ? 0 : (isOrdered ? String(element.index + 1).length + 2 : 2)
     state.listIndentWidths.push(width)
     state.listIndent += ' '.repeat(width)
   }
@@ -127,7 +132,7 @@ function needsSpacing(lastChar: string, firstChar: string, state?: MarkdownState
  * Determines if spacing should be added before text content
  */
 function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | TextNode | undefined, textNode: TextNode): boolean {
-  if (!lastChar || lastChar === '\n' || lastChar === ' ' || lastChar === '[' || lastChar === '>') {
+  if (!lastChar || lastChar === '\n' || lastChar === ' ' || lastChar === '\t' || lastChar === '[' || lastChar === '>') {
     return false
   }
   if (lastNode?.tagHandler?.isInline) {
@@ -265,13 +270,18 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
 /**
  * Calculate newline configuration based on tag handler spacing config
  */
-function calculateNewLineConfig(node: ElementNode): readonly [number, number] {
+function calculateNewLineConfig(node: ElementNode, plainText: boolean): readonly [number, number] {
   const tagId = node.tagId
   const depthMap = node.depthMap
 
   // Adjust for list items and blockquotes
   if ((tagId !== TAG_LI && (depthMap[TAG_LI] || 0) > 0)
     || (tagId !== TAG_BLOCKQUOTE && (depthMap[TAG_BLOCKQUOTE] || 0) > 0)) {
+    // Markdown suppresses nested block spacing because the surrounding list or
+    // quote handler owns its prefixes. Plain text has no such prefixes, so a
+    // nested <pre> still needs a line boundary around its literal contents.
+    if (plainText && tagId === TAG_PRE)
+      return [1, 1]
     return NO_SPACING
   }
 
@@ -325,6 +335,11 @@ function hasNonWhitespace(value: string): boolean {
  * nested <code> does not double up and the <pre> exit emits the closing fence.
  */
 function flushPreFence(state: MarkdownState): void {
+  if (state.plainText) {
+    state.preFencePending = false
+    state.preOwnFence = false
+    return
+  }
   state.preFencePending = false
   state.preOwnFence = true
   const lang = state.preFenceLang || ''
@@ -334,6 +349,37 @@ function flushPreFence(state: MarkdownState): void {
     : `${MARKDOWN_CODE_BLOCK}${lang}\n`
   state.buffer.push(fence)
   state.lastContentCache = fence
+}
+
+function getPlainTextOutput(node: ElementNode, eventType: number, state: MarkdownState): string | undefined {
+  const override = state.options?.plugins?.tagOverrides?.[node.name]
+  if (override && typeof override !== 'string') {
+    const explicitOutput = eventType === NodeEventEnter ? override.enter : override.exit
+    if (explicitOutput !== undefined)
+      return explicitOutput
+  }
+
+  const tagId = node.tagId
+  if (eventType === NodeEventEnter) {
+    if (tagId === TAG_BR)
+      return '\n'
+    if (tagId === TAG_P && ((node.depthMap[TAG_BLOCKQUOTE] || 0) > 0 || ((node.depthMap[TAG_LI] || 0) > 0 && !(node.depthMap[TAG_TD] || 0) && !(node.depthMap[TAG_TH] || 0)))) {
+      const lastEntry = state.buffer.at(-1)
+      const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
+      if (lastChar && lastChar !== ' ' && lastChar !== '\n')
+        return '\n\n'
+    }
+    if (tagId === TAG_TD || tagId === TAG_TH)
+      return (node.depthMap[TAG_TABLE] || 0) > 1 || node.index === 0 ? '' : '\t'
+    if (tagId === TAG_IMG)
+      return node.attributes?.alt || undefined
+    if (tagId === TAG_Q)
+      return '"'
+    return undefined
+  }
+  if (tagId === TAG_Q)
+    return '"'
+  return undefined
 }
 
 /**
@@ -346,9 +392,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     depthMap: new Uint8Array(MAX_TAG_ID),
     listIndent: '',
     listIndentWidths: [],
+    plainText: options.format === 'text',
   }
 
   let lastYieldedLength = 0
+  let preserveLeadingWhitespace = false
 
   /**
    * Process a DOM event and generate markdown
@@ -366,7 +414,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // before its first non-whitespace child so empty/whitespace-only blocks emit
     // nothing. A direct <code> child keeps fence ownership (handled in tags.ts).
     // Runs before lastChar is read so the fence is reflected in spacing checks.
-    if (state.preFencePending && eventType === NodeEventEnter) {
+    if (!state.plainText && state.preFencePending && eventType === NodeEventEnter) {
       if (node.type === ELEMENT_NODE) {
         const el = node as ElementNode
         if (el.tagId === TAG_CODE && el.parent?.tagId === TAG_PRE) {
@@ -415,13 +463,16 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           return
         }
 
+        if (state.plainText && state.depthMap[TAG_PRE] && state.buffer.length === 0)
+          preserveLeadingWhitespace = true
+
         // Skip leading spaces after newlines
         if (textNode.value === ' ' && lastChar === '\n') {
           return
         }
 
         // Add spacing before text if needed
-        if (shouldAddSpacingBeforeText(lastChar, lastNode, textNode)) {
+        if (!(state.plainText && state.depthMap[TAG_PRE]) && shouldAddSpacingBeforeText(lastChar, lastNode, textNode)) {
           textNode.value = ` ${textNode.value}`
         }
 
@@ -489,14 +540,16 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
     const handler = node.tagHandler
     if (!output.length && handler?.[eventFn]) {
-      const res = handler[eventFn](context)
+      const res = state.plainText
+        ? getPlainTextOutput(element, eventType, state)
+        : handler[eventFn](context)
       if (res) {
         output.push(res)
       }
     }
 
     // Handle newlines
-    const newLineConfig = calculateNewLineConfig(node as ElementNode)
+    const newLineConfig = calculateNewLineConfig(node as ElementNode, state.plainText === true)
     const configuredNewLines = newLineConfig[eventType] || 0
     const newLines = Math.max(0, configuredNewLines - lastNewLines)
 
@@ -587,6 +640,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       depth: 0,
       resolvedPlugins,
       tagOverrideHandlers,
+      plainText: state.plainText,
     }
 
     const handleEvent = (event: NodeEvent): void => {
@@ -601,8 +655,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
    * Get the final markdown output
    */
   function getMarkdown(): string {
-    const result = state.buffer.join('').trimStart()
+    const content = state.buffer.join('')
+    const result = state.plainText && preserveLeadingWhitespace ? content : content.trimStart()
     state.buffer.length = 0
+    preserveLeadingWhitespace = false
     return result.trimEnd()
   }
 
@@ -610,7 +666,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
    * Get new markdown content since the last call (for streaming)
    */
   function getMarkdownChunk(): string {
-    const currentContent = state.buffer.join('').trimStart()
+    const content = state.buffer.join('')
+    const currentContent = state.plainText && preserveLeadingWhitespace ? content : content.trimStart()
     const newContent = currentContent.slice(lastYieldedLength)
     lastYieldedLength = currentContent.length
     // Consolidate buffer into a single entry to prevent retroactive

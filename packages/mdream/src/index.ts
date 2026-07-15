@@ -78,6 +78,11 @@ export interface MdreamOptions {
    * tables, and headings are never wrapped. `0` disables wrapping.
    */
   wrapWidth?: number
+  /**
+   * Output format. Defaults to `markdown`; use `text` to omit Markdown/HTML
+   * markup while preserving readable text and block spacing.
+   */
+  format?: 'markdown' | 'text'
 }
 
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
@@ -107,8 +112,16 @@ export async function* streamHtmlToMarkdown(
       const { done, value } = await reader.read()
       if (done)
         break
-      const chunk = typeof value === 'string' ? value : decoder.decode(value)
+      const chunk = typeof value === 'string'
+        ? decoder.decode() + value
+        : decoder.decode(value, { stream: true })
       const processed = stream.processChunk(chunk)
+      if (processed)
+        yield processed
+    }
+    const decoderTail = decoder.decode()
+    if (decoderTail) {
+      const processed = stream.processChunk(decoderTail)
       if (processed)
         yield processed
     }

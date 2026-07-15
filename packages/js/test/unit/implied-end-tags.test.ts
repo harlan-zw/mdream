@@ -1,5 +1,8 @@
+import type { ElementNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { ELEMENT_NODE, TAG_BLOCKQUOTE } from '../../src/const'
+import { htmlToMarkdown, NodeEventEnter, streamHtmlToMarkdown } from '../../src/index'
+import { parseHtml } from '../../src/parse'
 
 // Browser recovery: implied end tags (HTML §13.1.2.4 optional tags +
 // tree-construction). Malformed-but-valid markup that omits end tags must
@@ -133,6 +136,48 @@ describe('trailing content at EOF', () => {
     expect(htmlToMarkdown('<p>hello')).toBe('hello')
     expect(htmlToMarkdown('hello')).toBe('hello')
     expect(htmlToMarkdown('<b>bold')).toBe('**bold**')
+  })
+})
+
+describe('explicit end tags', () => {
+  it('accepts trailing whitespace before the closing bracket', () => {
+    expect(htmlToMarkdown('<script>hidden</script\n><p>shown</p>')).toBe('shown')
+    expect(htmlToMarkdown('<script>hidden</script\f><p>shown</p>')).toBe('shown')
+    expect(htmlToMarkdown('<blockquote><p>one</p ><p>two</p></blockquote>'))
+      .toBe('> one\n>\n> two')
+  })
+
+  it('ignores a closing bracket inside a quoted end-tag attribute', () => {
+    expect(htmlToMarkdown('<script>hidden</script x=">"><p>shown</p>')).toBe('shown')
+  })
+
+  it('accepts a whitespace-padded end tag across stream chunks', async () => {
+    expect((await streamConvert(['<script>hidden</script\n', '><p>shown</p>'])).trimEnd())
+      .toBe('shown')
+    expect((await streamConvert(['<script>hidden</script\f', '><p>shown</p>'])).trimEnd())
+      .toBe('shown')
+    expect((await streamConvert(['<script>hidden</script x="', '>"><p>shown</p>'])).trimEnd())
+      .toBe('shown')
+  })
+})
+
+describe('tag nesting depth', () => {
+  it('does not reset same-tag depth for elements with an id', () => {
+    const depths = parseHtml('<blockquote><blockquote id="nested">text</blockquote></blockquote>')
+      .events
+      .filter(event => event.type === NodeEventEnter && event.node.type === ELEMENT_NODE && (event.node as ElementNode).name === 'blockquote')
+      .map(event => (event.node as ElementNode).depthMap[TAG_BLOCKQUOTE])
+
+    expect(depths).toEqual([1, 2])
+    expect(htmlToMarkdown('<blockquote><blockquote id="nested">text</blockquote></blockquote>'))
+      .toBe('>\n> > text')
+  })
+
+  it('matches distinct custom elements by name', () => {
+    const inline = (enter: string, exit: string) => ({ enter, exit, spacing: [0, 0] as [number, number], isInline: true })
+    const plugins = { tagOverrides: { 'x-a': inline('[', ']'), 'x-b': inline('(', ')') } }
+    expect(htmlToMarkdown('<x-a><x-b>X</x-a>Y</x-b>', { plugins }))
+      .toBe('[(X)]Y')
   })
 })
 

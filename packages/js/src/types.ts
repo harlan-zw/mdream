@@ -144,6 +144,12 @@ export interface EngineOptions {
    * wrapping.
    */
   wrapWidth?: number
+
+  /**
+   * Output format. Defaults to `markdown`; use `text` to omit Markdown/HTML
+   * markup while preserving readable text and block spacing.
+   */
+  format?: 'markdown' | 'text'
 }
 
 // Standard DOM node types
@@ -305,6 +311,8 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   preFencePending?: boolean
   preFenceLang?: string
   preOwnFence?: boolean
+  /** Whether output should omit Markdown/HTML markup */
+  plainText?: boolean
 }
 
 type NodeEventEnter = 0
@@ -359,6 +367,11 @@ export interface TagHandler {
    * strings so markers like `^`/`~` attach to adjacent content (issue #93).
    */
   literalEnter?: boolean
+  /**
+   * Built-in tag id used by declarative string aliases.
+   * @internal
+   */
+  aliasTagId?: number
 }
 
 // Plugin-specific context interfaces

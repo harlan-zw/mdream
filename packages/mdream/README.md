@@ -116,6 +116,11 @@ const markdown = htmlToMarkdown('<h1>Hello World</h1><p>Some content.</p>')
 // # Hello World
 //
 // Some content.
+
+const text = htmlToMarkdown('<h1>Hello <strong>World</strong></h1>', {
+  format: 'text',
+})
+// Hello World
 ```
 
 ### `streamHtmlToMarkdown()`
@@ -220,6 +225,9 @@ interface MdreamOptions {
    * tables, and headings are never wrapped. `0` (or unset) disables wrapping.
    */
   wrapWidth?: number
+
+  /** Output Markdown or plain text. Default: 'markdown' */
+  format?: 'markdown' | 'text'
 }
 ```
 
@@ -244,6 +252,9 @@ interface EngineOptions {
    * disables wrapping.
    */
   wrapWidth?: number
+
+  /** Output Markdown or plain text. Default: 'markdown' */
+  format?: 'markdown' | 'text'
 }
 
 interface BuiltinPlugins {
@@ -880,6 +891,14 @@ cat index.html \
   | tee output.md
 ```
 
+**Plain text output:**
+
+```bash
+cat index.html \
+  | npx mdream --format text \
+  | tee output.txt
+```
+
 ### CLI Options
 
 | Option | Description |
@@ -887,9 +906,11 @@ cat index.html \
 | `--origin <url>` | Base URL for resolving relative links and images |
 | `--preset minimal` | Enable the minimal preset |
 | `--wrap-width <n>` | Hard-wrap prose at `n` characters (code, tables, and headings are never wrapped) |
+| `--format <format>` | Output format: `markdown`, `text` |
+| `--text` | Alias for `--format text` |
 | `-h`, `--help` | Display help information |
 
-The CLI reads HTML from stdin and writes Markdown to stdout. It uses the streaming API internally.
+The CLI reads HTML from stdin and writes Markdown or plain text to stdout. It uses the streaming API internally.
 
 ## Browser and Edge Usage
 

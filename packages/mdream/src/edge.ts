@@ -52,8 +52,16 @@ export async function* streamHtmlToMarkdown(
       const { done, value } = await reader.read()
       if (done)
         break
-      const chunk = typeof value === 'string' ? value : decoder.decode(value)
+      const chunk = typeof value === 'string'
+        ? decoder.decode() + value
+        : decoder.decode(value, { stream: true })
       const processed = stream.processChunk(chunk)
+      if (processed)
+        yield processed
+    }
+    const decoderTail = decoder.decode()
+    if (decoderTail) {
+      const processed = stream.processChunk(decoderTail)
       if (processed)
         yield processed
     }

@@ -4,6 +4,10 @@ use super::*;
 
 impl ConvertState {
     pub(crate) fn generate_frontmatter_yaml(&mut self) {
+        if self.plain_text {
+            return;
+        }
+
         let f_opts = self.options.plugins.as_ref().and_then(|p| p.frontmatter.as_ref());
 
         let format_val = |val: &str| -> String {

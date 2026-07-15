@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use crate::consts::*;
 use crate::tags::get_tag_handler;
-use crate::types::{ElementNode, ExtractedElement, HTMLToMarkdownOptions, ParsedSelector, TailwindData};
+use crate::types::{ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, ParsedSelector, TailwindData};
 use crate::entities::decode_html_entities;
 use crate::scan::{is_whitespace, process_comment_or_doctype, process_tag_attributes};
 use crate::selector::{matches_selector, parse_css_selector};
@@ -135,6 +135,8 @@ pub struct ConvertState {
     /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
     /// hot path — a single integer compare). Code/tables/headings are exempt.
     wrap_width: usize,
+    plain_text: bool,
+    preserve_leading_whitespace: bool,
 
     // Clean mode — bitmask for zero-cost when disabled
     clean_flags: u8,
@@ -181,9 +183,10 @@ impl ConvertState {
         self.depth_map[TAG_TD as usize] > 0 || self.depth_map[TAG_TH as usize] > 0
     }
 
-    pub fn new(options: HTMLToMarkdownOptions, capacity: usize) -> Self {
+    pub fn new(options: HTMLToMarkdownOptions, capacity: usize, format: OutputFormat) -> Self {
         // Read wrap width before `options` is moved into the struct below.
         let options_wrap_width = options.wrap_width;
+        let plain_text = format == OutputFormat::Text;
         let mut s = Self {
             depth_map: [0; MAX_TAG_ID],
             depth: 0,
@@ -247,6 +250,8 @@ impl ConvertState {
             last_yielded_length: 0,
 
             wrap_width: options_wrap_width,
+            plain_text,
+            preserve_leading_whitespace: false,
             clean_flags: 0,
             skip_current_link: false,
             link_bracket_pos: 0,
@@ -647,6 +652,9 @@ impl ConvertState {
             self.parse_text_buffer = text_buffer;
             String::new()
         } else {
+            if text_buffer.as_bytes().first().is_some_and(|&c| is_whitespace(c)) {
+                self.last_char_was_whitespace = false;
+            }
             text_buffer
         }
     }
@@ -654,7 +662,7 @@ impl ConvertState {
     pub fn get_markdown(&mut self) -> String {
         let trimmed_end_len = self.buffer.trim_end().len();
         self.buffer.truncate(trimmed_end_len);
-        let start = self.buffer.len() - self.buffer.trim_start().len();
+        let start = if self.preserve_leading_whitespace { 0 } else { self.buffer.len() - self.buffer.trim_start().len() };
         if start > 0 { self.buffer.drain(..start); }
 
         // Apply clean.fragments using recorded positions
@@ -733,7 +741,7 @@ impl ConvertState {
     }
 
     pub fn get_markdown_chunk(&mut self) -> String {
-        let current_content = self.buffer.trim_start();
+        let current_content = if self.preserve_leading_whitespace { self.buffer.as_str() } else { self.buffer.trim_start() };
         let content_len = current_content.len();
         if self.last_yielded_length >= content_len {
             self.last_yielded_length = content_len;

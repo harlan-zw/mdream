@@ -991,7 +991,7 @@ export function buildTagOverrideHandlers(overrides: Record<string, TagOverride |
       if (targetId !== undefined) {
         const baseHandler = tagHandlers[targetId]
         if (baseHandler) {
-          result.set(tagName, { ...baseHandler })
+          result.set(tagName, { ...baseHandler, aliasTagId: targetId })
         }
       }
     }

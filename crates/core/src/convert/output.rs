@@ -12,7 +12,7 @@ impl ConvertState {
         // Deferred <pre> code fence (issue #97): open a bare <pre>'s fence right
         // before its first non-whitespace child. A direct <code> child keeps
         // fence ownership; a deeper/other first child opens the <pre>'s own fence.
-        if self.pre_fence_pending {
+        if !self.plain_text && self.pre_fence_pending {
             let tid = self.stack[stack_len - 1].tag_id;
             if tid == Some(TAG_CODE)
                 && stack_len >= 2 && self.stack[stack_len - 2].tag_id == Some(TAG_PRE) {
@@ -23,7 +23,7 @@ impl ConvertState {
         }
         // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
         // language) is emitted lazily above for the no-<code> case.
-        if self.stack[stack_len - 1].tag_id == Some(TAG_PRE) {
+        if !self.plain_text && self.stack[stack_len - 1].tag_id == Some(TAG_PRE) {
             let lang = Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class")).to_string();
             self.pre_fence_pending = true;
             self.pre_own_fence = false;
@@ -188,7 +188,7 @@ impl ConvertState {
 
         if !has_override {
             // Special case: TR table separator
-            if tag_id == Some(TAG_TR) {
+            if tag_id == Some(TAG_TR) && !self.plain_text {
                 if !self.table_rendered_table && self.depth_map[TAG_TABLE as usize] <= 1 {
                     self.table_rendered_table = true;
                     let col_count = self.table_current_row_cells.max(self.table_column_alignments.len());
@@ -225,7 +225,7 @@ impl ConvertState {
 
         // Clean mode exit — single guard. Skipped for overridden anchors,
         // whose custom exit output isn't the default `[…](…)` shape.
-        if self.clean_flags != 0 && tag_id == Some(TAG_A) && !has_override {
+        if !self.plain_text && self.clean_flags != 0 && tag_id == Some(TAG_A) && !has_override {
             // emptyLinks: skip exit for skipped links
             if self.skip_current_link {
                 self.skip_current_link = false;
@@ -313,7 +313,7 @@ impl ConvertState {
                 }
 
         // TAG_A exit: write ](url) directly to buffer — zero allocation
-        if !has_override && tag_id == Some(TAG_A) && table_separator.is_none() {
+        if !self.plain_text && !has_override && tag_id == Some(TAG_A) && table_separator.is_none() {
             // Handle whitespace trimming (write_output with None)
             self.write_output(false, is_inline, configured_new_lines, None, false);
             // Write link close directly
@@ -385,7 +385,7 @@ impl ConvertState {
         }
 
         // Record fragment link position for deferred fixup (no String alloc)
-        if self.clean_flags & CLEAN_FRAGMENTS != 0 && tag_id == Some(TAG_A)
+        if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 && tag_id == Some(TAG_A)
             && let Some(href) = node.attributes.get("href")
                 && href.starts_with('#') && href.len() > 1 {
                     self.fragment_links.push((self.link_bracket_pos, self.buffer.len()));
@@ -400,6 +400,12 @@ impl ConvertState {
     /// the fence so a nested <code> does not double up and the <pre> exit emits
     /// the matching closing fence.
     fn flush_pre_fence(&mut self) {
+        if self.plain_text {
+            self.pre_fence_pending = false;
+            self.pre_own_fence = false;
+            return;
+        }
+
         self.pre_fence_pending = false;
         self.pre_own_fence = true;
         let li_depth = self.depth_map[TAG_LI as usize];
@@ -428,6 +434,10 @@ impl ConvertState {
             return;
         }
 
+        if self.plain_text && self.depth_map[TAG_PRE as usize] > 0 && self.buffer.is_empty() {
+            self.preserve_leading_whitespace = true;
+        }
+
         let buf_bytes = self.buffer.as_bytes();
         let buf_len = buf_bytes.len();
         let last_char = if buf_len > 0 { buf_bytes[buf_len - 1] } else { 0 };
@@ -448,7 +458,7 @@ impl ConvertState {
         // alone so they stay blank.
         let li_depth = self.depth_map[TAG_LI as usize] as usize;
         let indented_storage;
-        let text = if self.depth_map[TAG_PRE as usize] > 0 && li_depth > 0
+        let text = if !self.plain_text && self.depth_map[TAG_PRE as usize] > 0 && li_depth > 0
             && (text.contains('\n') || last_char == b'\n') {
             let indent = self.list_indent.as_str();
             let mut out = String::with_capacity(text.len() + indent.len() * 2);
@@ -481,7 +491,8 @@ impl ConvertState {
 
         if self.wrap_width != 0 && self.can_wrap_here() {
             self.push_text_wrapped(text, last_char);
-        } else if self.should_add_spacing_before_text(last_char, text) {
+        } else if !(self.plain_text && self.depth_map[TAG_PRE as usize] > 0)
+            && self.should_add_spacing_before_text(last_char, text) {
             self.buffer.push(' ');
             self.last_content_cache_len = text.len() + 1;
             self.buffer.push_str(text);
@@ -533,6 +544,10 @@ impl ConvertState {
     /// `  > `, `<blockquote><li>` → `>   `. A flat "all quotes then all indent"
     /// prefix would corrupt the Markdown structure of nested blocks.
     fn wrap_continuation_prefix(&self) -> String {
+        if self.plain_text {
+            return String::new();
+        }
+
         let mut p = String::new();
         let mut li_idx = 0usize;
         for node in &self.stack {
@@ -611,6 +626,10 @@ impl ConvertState {
 
     #[inline]
     pub(crate) fn get_enter_output(&self, node: &ElementNode, _ancestors: &[ElementNode]) -> Option<Cow<'static, str>> {
+        if self.plain_text {
+            return self.get_text_enter_output(node);
+        }
+
         let tag_id = node.tag_id?;
         match tag_id {
             TAG_DETAILS => Some(Cow::Borrowed("<details>")),
@@ -822,6 +841,10 @@ impl ConvertState {
 
     #[inline]
     pub(crate) fn get_exit_output(&self, node: &ElementNode) -> Option<Cow<'static, str>> {
+        if self.plain_text {
+            return Self::get_text_exit_output(node);
+        }
+
         let tag_id = node.tag_id?;
         match tag_id {
             TAG_DETAILS => Some(Cow::Borrowed("</details>\n\n")),
@@ -968,6 +991,52 @@ impl ConvertState {
     }
 
     #[inline]
+    fn get_text_enter_output(&self, node: &ElementNode) -> Option<Cow<'static, str>> {
+        let tag_id = node.tag_id?;
+        match tag_id {
+            TAG_BR => Some(Cow::Borrowed("\n")),
+            TAG_P => {
+                if self.depth_map[TAG_BLOCKQUOTE as usize] > 0
+                    || (self.depth_map[TAG_LI as usize] > 0 && !self.in_table_cell()) {
+                    let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
+                    if last_char != 0 && last_char != b' ' && last_char != b'\n' {
+                        return Some(Cow::Borrowed("\n\n"));
+                    }
+                }
+                None
+            }
+            TAG_TD | TAG_TH => {
+                if self.depth_map[TAG_TABLE as usize] > 1 {
+                    None
+                } else if node.index == 0 {
+                    Some(Cow::Borrowed(""))
+                } else {
+                    Some(Cow::Borrowed("\t"))
+                }
+            }
+            TAG_IMG => {
+                let alt = node.attributes.get("alt").map_or("", String::as_str);
+                if alt.is_empty() {
+                    None
+                } else {
+                    Some(Cow::Owned(alt.to_string()))
+                }
+            }
+            TAG_Q => Some(Cow::Borrowed("\"")),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    fn get_text_exit_output(node: &ElementNode) -> Option<Cow<'static, str>> {
+        let tag_id = node.tag_id?;
+        match tag_id {
+            TAG_Q => Some(Cow::Borrowed("\"")),
+            _ => None,
+        }
+    }
+
+    #[inline]
     pub(crate) fn write_output(&mut self, is_enter: bool, is_inline: bool, configured_new_lines: u8, output: Option<&str>, literal: bool) {
         let output_str = output.unwrap_or("");
 
@@ -1069,7 +1138,7 @@ impl ConvertState {
 
     #[inline]
     pub(crate) fn should_add_spacing_before_text(&self, last_byte: u8, text: &str) -> bool {
-        if last_byte == 0 || last_byte == b'\n' || last_byte == b' ' || last_byte == b'[' || last_byte == b'>' { return false; }
+        if last_byte == 0 || last_byte == b'\n' || last_byte == b' ' || last_byte == b'\t' || last_byte == b'[' || last_byte == b'>' { return false; }
         if self.last_node_is_inline { return false; }
         let first_byte = text.as_bytes()[0];
         if first_byte == b' ' { return false; }
@@ -1079,6 +1148,10 @@ impl ConvertState {
 
     #[inline]
     pub(crate) fn calculate_new_line_config(&self, tag_id: Option<u8>, node_spacing: Option<[u8; 2]>) -> [u8; 2] {
+        if self.plain_text && tag_id == Some(TAG_PRE)
+            && (self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0) {
+            return [1, 1];
+        }
         if let Some(id) = tag_id {
             if (id != TAG_LI && self.depth_map[TAG_LI as usize] > 0)
                 || (id != TAG_BLOCKQUOTE && self.depth_map[TAG_BLOCKQUOTE as usize] > 0) {

@@ -275,6 +275,11 @@ import { htmlToMarkdown } from 'mdream'
 // Rust NAPI engine in Node.js, WASM in edge/browser runtimes
 const markdown = htmlToMarkdown('<h1>Hello World</h1>')
 console.log(markdown) // # Hello World
+
+const text = htmlToMarkdown('<h1>Hello <strong>World</strong></h1>', {
+  format: 'text',
+})
+console.log(text) // Hello World
 ```
 
 ```ts
@@ -448,4 +453,3 @@ Benchmarks run on real-world HTML using [Vitest bench](https://vitest.dev/guide/
 ## License
 
 Licensed under the [MIT license](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md).
-

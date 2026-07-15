@@ -1,12 +1,13 @@
 use std::io::{self, Read, Write};
 use mdream::MarkdownStreamProcessor;
-use mdream::types::HTMLToMarkdownOptions;
+use mdream::types::{HTMLToMarkdownOptions, OutputFormat};
 
 fn main() -> io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let mut origin: Option<String> = None;
     let mut verbose = false;
     let mut clean_urls = false;
+    let mut format = OutputFormat::Markdown;
 
     let mut i = 1;
     while i < args.len() {
@@ -19,14 +20,33 @@ fn main() -> io::Result<()> {
             }
             "--verbose" | "-v" => verbose = true,
             "--clean-urls" => clean_urls = true,
+            "--format" => {
+                i += 1;
+                if i < args.len() {
+                    format = match args[i].as_str() {
+                        "markdown" => OutputFormat::Markdown,
+                        "text" => OutputFormat::Text,
+                        other => {
+                            eprintln!("Unknown format: {other}");
+                            std::process::exit(1);
+                        }
+                    };
+                } else {
+                    eprintln!("--format requires a value: markdown or text");
+                    std::process::exit(1);
+                }
+            }
+            "--text" => format = OutputFormat::Text,
             "--help" | "-h" => {
                 eprintln!("Usage: mdream [OPTIONS]");
-                eprintln!("  Reads HTML from stdin, outputs Markdown to stdout");
+                eprintln!("  Reads HTML from stdin, outputs Markdown or plain text to stdout");
                 eprintln!();
                 eprintln!("Options:");
                 eprintln!("  -o, --origin <URL>  Base URL for resolving relative links");
                 eprintln!("  -v, --verbose       Print conversion stats to stderr");
                 eprintln!("  --clean-urls        Strip tracking query params (utm_*, fbclid, etc.)");
+                eprintln!("  --format <format>   Output format: markdown, text");
+                eprintln!("  --text              Alias for --format text");
                 eprintln!("  -h, --help          Show this help");
                 return Ok(());
             }
@@ -44,7 +64,7 @@ fn main() -> io::Result<()> {
         ..Default::default()
     };
 
-    let mut processor = MarkdownStreamProcessor::new(options);
+    let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut out = stdout.lock();
