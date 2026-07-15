@@ -1,5 +1,34 @@
-import type { Node } from './types'
+import type { ElementNode, Node } from './types'
+import { TAG_BLOCKQUOTE, TAG_LI } from './const'
 import { HTML_ENTITIES } from './entities'
+
+/**
+ * Build the Markdown prefix needed to keep a continued line inside its open
+ * blockquotes and list items. Ancestors are emitted outermost-first so mixed
+ * nesting retains its real structure.
+ */
+export function continuationPrefix(node: Pick<Node, 'parent'>, listIndentWidths: readonly number[]): string {
+  const chain: ElementNode[] = []
+  let current = node.parent
+  while (current) {
+    chain.push(current)
+    current = current.parent
+  }
+
+  let prefix = ''
+  let listIndex = 0
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const tagId = chain[i]!.tagId
+    if (tagId === TAG_BLOCKQUOTE) {
+      prefix += '> '
+    }
+    else if (tagId === TAG_LI) {
+      prefix += ' '.repeat(listIndentWidths[listIndex] ?? 2)
+      listIndex++
+    }
+  }
+  return prefix
+}
 
 /**
  * Decode HTML entities - single pass with O(1) named entity lookup

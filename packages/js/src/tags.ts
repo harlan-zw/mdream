@@ -117,6 +117,7 @@ import {
   TAG_XMP,
   TagIdMap,
 } from './const'
+import { continuationPrefix } from './utils'
 
 // Helper function to resolve URLs
 function resolveUrl(url: string, origin?: string): string {
@@ -171,6 +172,29 @@ function isAutolinkUri(s: string): boolean {
 // Helper function to check if we're inside a table cell
 function isInsideTableCell(node: HandlerContext['node']): boolean {
   return (node.depthMap[TAG_TD] || 0) > 0 || (node.depthMap[TAG_TH] || 0) > 0
+}
+
+function isInsideRawHtmlBlock(node: HandlerContext['node']): boolean {
+  const depthMap = node.depthMap
+  return Boolean(depthMap[TAG_DETAILS]
+    || depthMap[TAG_SUMMARY]
+    || depthMap[TAG_ADDRESS]
+    || depthMap[TAG_DL]
+    || depthMap[TAG_DT]
+    || depthMap[TAG_DD])
+}
+
+function hardBreak(buffer: string[], prefix: string): string {
+  let spacesNeeded = 2
+  for (let i = buffer.length - 1; i >= 0 && spacesNeeded > 0; i--) {
+    const fragment = buffer[i]!
+    for (let j = fragment.length - 1; j >= 0 && spacesNeeded > 0; j--) {
+      if (fragment.charCodeAt(j) !== 32)
+        return `${' '.repeat(spacesNeeded)}\n${prefix}`
+      spacesNeeded--
+    }
+  }
+  return `${' '.repeat(spacesNeeded)}\n${prefix}`
 }
 
 // Helper function to get language from code class attribute
@@ -280,9 +304,24 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
   },
   [TAG_BR]: {
-    enter: ({ node }) => {
-      // Keep <br> inside table cells
-      return isInsideTableCell(node) ? '<br>' : undefined
+    enter: ({ node, state }) => {
+      // A Markdown hard break would terminate a table row/ATX heading or be
+      // ignored inside a raw HTML block, so preserve the inline HTML there.
+      const depthMap = node.depthMap
+      if (isInsideTableCell(node) || isInsideRawHtmlBlock(node)
+        || depthMap[TAG_H1]
+        || depthMap[TAG_H2]
+        || depthMap[TAG_H3]
+        || depthMap[TAG_H4]
+        || depthMap[TAG_H5]
+        || depthMap[TAG_H6]) {
+        return '<br>'
+      }
+
+      const prefix = continuationPrefix(node, state.listIndentWidths || [])
+      // Inside a fenced block, the literal newline is already meaningful and
+      // trailing spaces would become part of the code.
+      return depthMap[TAG_PRE] ? `\n${prefix}` : hardBreak(state.buffer, prefix)
     },
     isSelfClosing: true,
     spacing: NO_SPACING,
