@@ -183,7 +183,7 @@ impl ConvertState {
 
     pub fn new(options: HTMLToMarkdownOptions, capacity: usize) -> Self {
         // Read wrap width before `options` is moved into the struct below.
-        let options_wrap_width = options.wrap_width.unwrap_or(0);
+        let options_wrap_width = options.wrap_width;
         let mut s = Self {
             depth_map: [0; MAX_TAG_ID],
             depth: 0,

@@ -104,8 +104,8 @@ fn parse_options(options: &JsValue) -> mdream::types::HTMLToMarkdownOptions {
 
     let wrap_width = get_prop(options, "wrapWidth")
         .as_f64()
-        .filter(|n| n.is_finite() && *n >= 0.0)
-        .map(|n| n as usize);
+        .filter(|n| n.is_finite() && *n >= 0.0 && *n <= usize::MAX as f64)
+        .map_or(0, |n| n as usize);
 
     mdream::types::HTMLToMarkdownOptions {
         origin,
