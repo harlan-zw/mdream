@@ -28,6 +28,7 @@ import {
 } from './const'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
+import { continuationPrefix } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -184,39 +185,6 @@ function currentColumn(buffer: string[]): number {
     col += [...s].length
   }
   return col
-}
-
-/**
- * Continuation prefix re-emitted at the start of each wrapped line so wrapped
- * text stays inside its block context. Built by walking the node's open
- * ancestors outermost-first so blockquote markers (`> `) and list-item
- * indentation interleave in the real nesting order: `<li><blockquote>` → `  > `,
- * `<blockquote><li>` → `>   `. A flat "all quotes then all indent" prefix would
- * corrupt the Markdown structure of nested blocks.
- */
-function wrapContinuationPrefix(state: MarkdownState, node: TextNode): string {
-  const chain: ElementNode[] = []
-  let cur = node.parent
-  while (cur) {
-    chain.push(cur)
-    cur = cur.parent
-  }
-  let p = ''
-  // chain is innermost-first; consume list widths from the end so the outermost
-  // <li> maps to listIndentWidths[0], matching the push order.
-  let liIdx = 0
-  for (let i = chain.length - 1; i >= 0; i--) {
-    const tagId = chain[i]!.tagId
-    if (tagId === TAG_BLOCKQUOTE) {
-      p += '> '
-    }
-    else if (tagId === TAG_LI) {
-      const w = state.listIndentWidths[liIdx] ?? 2
-      p += ' '.repeat(w)
-      liIdx++
-    }
-  }
-  return p
 }
 
 /**
@@ -497,7 +465,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
         const wrapWidth = state.options?.wrapWidth
         if (wrapWidth && canWrapHere(state.depthMap)) {
-          const wrapped = wrapText(textNode.value, currentColumn(state.buffer), wrapWidth, wrapContinuationPrefix(state, textNode))
+          const wrapped = wrapText(textNode.value, currentColumn(state.buffer), wrapWidth, continuationPrefix(textNode, state.listIndentWidths))
           state.buffer.push(wrapped)
           state.lastContentCache = wrapped
         }

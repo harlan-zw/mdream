@@ -624,12 +624,27 @@ impl ConvertState {
     self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
       && !self.in_table_cell()
-      && self.depth_map[TAG_H1 as usize] == 0
-      && self.depth_map[TAG_H2 as usize] == 0
-      && self.depth_map[TAG_H3 as usize] == 0
-      && self.depth_map[TAG_H4 as usize] == 0
-      && self.depth_map[TAG_H5 as usize] == 0
-      && self.depth_map[TAG_H6 as usize] == 0
+      && !self.in_heading()
+  }
+
+  #[inline]
+  fn in_heading(&self) -> bool {
+    self.depth_map[TAG_H1 as usize] > 0
+      || self.depth_map[TAG_H2 as usize] > 0
+      || self.depth_map[TAG_H3 as usize] > 0
+      || self.depth_map[TAG_H4 as usize] > 0
+      || self.depth_map[TAG_H5 as usize] > 0
+      || self.depth_map[TAG_H6 as usize] > 0
+  }
+
+  #[inline]
+  fn in_raw_html_block(&self) -> bool {
+    self.depth_map[TAG_DETAILS as usize] > 0
+      || self.depth_map[TAG_SUMMARY as usize] > 0
+      || self.depth_map[TAG_ADDRESS as usize] > 0
+      || self.depth_map[TAG_DL as usize] > 0
+      || self.depth_map[TAG_DT as usize] > 0
+      || self.depth_map[TAG_DD as usize] > 0
   }
 
   /// Character count of the current (unterminated) buffer line, i.e. since the
@@ -645,13 +660,13 @@ impl ConvertState {
     self.buffer[i..].chars().count()
   }
 
-  /// Continuation prefix re-emitted at the start of each wrapped line so the
-  /// wrapped text stays inside its block context. Built by walking the open
+  /// Continuation prefix re-emitted at the start of each continued line so the
+  /// content stays inside its block context. Built by walking the open
   /// ancestor stack outermost-first so blockquote markers (`> `) and list-item
   /// indentation interleave in the real nesting order: `<li><blockquote>` →
   /// `  > `, `<blockquote><li>` → `>   `. A flat "all quotes then all indent"
   /// prefix would corrupt the Markdown structure of nested blocks.
-  fn wrap_continuation_prefix(&self) -> String {
+  fn continuation_prefix(&self) -> String {
     if self.plain_text {
       return String::new();
     }
@@ -676,6 +691,24 @@ impl ConvertState {
     p
   }
 
+  /// Emit the canonical Markdown hard-break marker, accounting for source
+  /// whitespace already at the end of the current line.
+  fn hard_break(&self, prefix: &str) -> Cow<'static, str> {
+    let bytes = self.buffer.as_bytes();
+    let marker = if bytes.ends_with(b"  ") {
+      "\n"
+    } else if bytes.ends_with(b" ") {
+      " \n"
+    } else {
+      "  \n"
+    };
+    if prefix.is_empty() {
+      Cow::Borrowed(marker)
+    } else {
+      Cow::Owned(format!("{marker}{prefix}"))
+    }
+  }
+
   /// Push `text` into the buffer, hard-wrapping on spaces so no output line
   /// exceeds `self.wrap_width` characters. Words are never split, so a single
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
@@ -690,7 +723,7 @@ impl ConvertState {
     let leading_space = text.starts_with(' ');
     let trailing_space = text.ends_with(' ');
     let first_needs_space = leading_space || self.should_add_spacing_before_text(last_char, text);
-    let prefix = self.wrap_continuation_prefix();
+    let prefix = self.continuation_prefix();
     let prefix_len = prefix.chars().count();
     let buf_start = self.buffer.len();
     let mut col = self.current_column();
@@ -747,10 +780,19 @@ impl ConvertState {
       TAG_DETAILS => Some(Cow::Borrowed("<details>")),
       TAG_SUMMARY => Some(Cow::Borrowed("<summary>")),
       TAG_BR => {
-        if self.in_table_cell() {
+        if self.in_table_cell() || self.in_heading() || self.in_raw_html_block() {
           Some(Cow::Borrowed("<br>"))
         } else {
-          None
+          let prefix = self.continuation_prefix();
+          if self.depth_map[TAG_PRE as usize] > 0 {
+            if prefix.is_empty() {
+              Some(Cow::Borrowed("\n"))
+            } else {
+              Some(Cow::Owned(format!("\n{prefix}")))
+            }
+          } else {
+            Some(self.hard_break(&prefix))
+          }
         }
       }
       TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6 => {
