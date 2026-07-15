@@ -87,26 +87,38 @@ function extractCdataUrl(url: string): string {
   return url
 }
 
+const XML_ENTITIES: Record<string, string> = {
+  '&lt;': '<',
+  '&gt;': '>',
+  '&quot;': '"',
+  '&apos;': '\'',
+  '&amp;': '&',
+}
+const XML_ENTITY_RE = /&(?:lt|gt|quot|apos|amp);/g
+
 /**
  * Decode the 5 XML predefined entities that the sitemap spec requires inside
  * `<loc>` (https://www.sitemaps.org/protocol.html#escaping). Without this, URLs
  * with query strings (`?a=1&amp;b=2`) are extracted with a literal `&amp;`.
- * `&amp;` is decoded last so an already-single `&` isn't double-processed.
+ * Single left-to-right pass, so `&amp;lt;` decodes to a literal `&` plus `lt;`
+ * rather than being re-scanned into `<`.
  */
 function decodeXmlEntities(value: string): string {
   if (!value.includes('&'))
     return value
-  return value
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, '\'')
-    .replace(/&amp;/g, '&')
+  return value.replace(XML_ENTITY_RE, m => XML_ENTITIES[m])
 }
 
-/** Extract, un-CDATA and entity-decode a `<loc>` value in one step. */
+/**
+ * Normalize a `<loc>` value. Entities inside CDATA are literal text per the XML
+ * spec, so a CDATA-wrapped URL is only unwrapped; everything else is
+ * entity-decoded.
+ */
 function cleanLoc(raw: string): string {
-  return decodeXmlEntities(extractCdataUrl(raw.trim()))
+  const value = raw.trim()
+  if (value.startsWith('<![CDATA[') && value.endsWith(']]>'))
+    return extractCdataUrl(value)
+  return decodeXmlEntities(value)
 }
 
 /** Strip tracking params, fragments, and trailing slashes from a URL */
@@ -477,6 +489,13 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     // Log sitemap discovery results
     const successfulSitemaps = sitemapAttempts.filter(a => a.success)
     const failedSitemaps = sitemapAttempts.filter(a => !a.success)
+
+    // Explicit sitemaps jointly define the crawl surface, so a failed part means
+    // the crawl is incomplete. Auto-discovery failures are expected (we probe
+    // several well-known paths), so they stay quiet.
+    if (hasExplicitSitemaps && failedSitemaps.length > 0) {
+      logger.warn(`Sitemap: ${failedSitemaps.length} explicit sitemap(s) failed to load; crawl may be incomplete: ${failedSitemaps.map(a => `${a.url} (${a.error})`).join(', ')}`)
+    }
 
     if (successfulSitemaps.length > 0 && progress.sitemap.processed > 0) {
       sitemapProvidedUrls = true

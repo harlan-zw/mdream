@@ -466,6 +466,13 @@ Examples:
 
   // Explicit sitemap override(s). Repeatable; each is normalized to https.
   const sitemapUrls = getArgValues('--sitemap').map(u => withHttps(u))
+  // getArgValues drops a --sitemap with no following value; catch that so a
+  // typo can't silently fall through to auto-discovery.
+  const sitemapFlagCount = args.filter(a => a === '--sitemap' || a === '-sitemap').length
+  if (sitemapFlagCount > sitemapUrls.length) {
+    logger.error('Error: --sitemap requires a URL value')
+    process.exit(1)
+  }
   for (const sitemapUrl of sitemapUrls) {
     try {
       // eslint-disable-next-line no-new

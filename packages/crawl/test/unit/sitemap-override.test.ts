@@ -57,6 +57,13 @@ ${locs.map(l => `  <url><loc>${l}</loc></url>`).join('\n')}
 </urlset>`
 }
 
+function sitemapindex(...locs: string[]): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${locs.map(l => `  <sitemap><loc>${l}</loc></sitemap>`).join('\n')}
+</sitemapindex>`
+}
+
 afterEach(() => {
   fetchedUrls.length = 0
   for (const key of Object.keys(sitemapRegistry))
@@ -145,5 +152,49 @@ describe('sitemap override (#116)', () => {
     const successPaths = results.filter(r => r.success).map(r => new URL(r.url).pathname)
     expect(successPaths).toContain('/from-robots')
     expect(successPaths).not.toContain('/from-default')
+  })
+
+  it('terminates on a cyclic sitemap index and merges child URLs', async () => {
+    // A indexes B (+ child-a), B indexes A (+ child-b). The A->B->A cycle must be
+    // broken by the visited guard while both leaf urlsets are still collected.
+    sitemapRegistry['https://example.com/sitemap-a.xml'] = sitemapindex(
+      'https://example.com/child-a.xml',
+      'https://example.com/sitemap-b.xml',
+    )
+    sitemapRegistry['https://example.com/sitemap-b.xml'] = sitemapindex(
+      'https://example.com/child-b.xml',
+      'https://example.com/sitemap-a.xml',
+    )
+    sitemapRegistry['https://example.com/child-a.xml'] = urlset('https://example.com/a-page')
+    sitemapRegistry['https://example.com/child-b.xml'] = urlset('https://example.com/b-page')
+
+    const results = await crawlAndGenerate({
+      ...baseOpts,
+      urls: ['https://example.com'],
+      outputDir: tmpOut(),
+      sitemapUrls: ['https://example.com/sitemap-a.xml'],
+    })
+
+    const successPaths = results.filter(r => r.success).map(r => new URL(r.url).pathname)
+    expect(successPaths).toContain('/a-page')
+    expect(successPaths).toContain('/b-page')
+    // Each sitemap fetched at most once despite the cycle.
+    expect(fetchedUrls.filter(u => u === 'https://example.com/sitemap-a.xml').length).toBe(1)
+    expect(fetchedUrls.filter(u => u === 'https://example.com/sitemap-b.xml').length).toBe(1)
+  })
+
+  it('keeps entity text literal inside CDATA (no decode)', async () => {
+    // Inside CDATA the URL is literal text, so &amp; must survive verbatim.
+    sitemapRegistry['https://example.com/sitemap.xml'] = urlset(
+      '<![CDATA[https://example.com/path?a=1&amp;b=2]]>',
+    )
+
+    await crawlAndGenerate({
+      ...baseOpts,
+      urls: ['https://example.com'],
+      outputDir: tmpOut(),
+    })
+
+    expect(fetchedUrls).toContain('https://example.com/path?a=1&amp;b=2')
   })
 })
