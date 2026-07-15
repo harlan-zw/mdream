@@ -1,5 +1,6 @@
 [package]
 name = "mdream-edge"
+
 version.workspace = true
 
 edition.workspace = true
