@@ -748,10 +748,12 @@ function parseHtmlInternal(
 
       const rawTagName = htmlChunk.substring(tagNameStart, tagNameEnd)
       let tagName = rawTagName as keyof typeof TagIdMap
-      if (TagIdMap[tagName] === undefined)
+      const rawTagId = TagIdMap[tagName]
+      if (typeof rawTagId !== 'number')
         tagName = normalizeTagName(rawTagName)
 
-      const tagId = effectiveTagId(tagName, TagIdMap[tagName] ?? -1, state)
+      const mappedTagId = TagIdMap[tagName]
+      const tagId = effectiveTagId(tagName, typeof mappedTagId === 'number' ? mappedTagId : -1, state)
       i2 = tagNameEnd
 
       // Inside a non-nesting element (script/style/title/textarea) no opening
@@ -951,10 +953,12 @@ function processClosingTag(
 
   const rawTagName = htmlChunk.substring(tagNameStart, tagNameEnd === -1 ? i : tagNameEnd)
   let tagName = rawTagName as keyof typeof TagIdMap
-  if (TagIdMap[tagName] === undefined)
+  const rawTagId = TagIdMap[tagName]
+  if (typeof rawTagId !== 'number')
     tagName = normalizeTagName(rawTagName)
   const tagHandler = state.tagOverrideHandlers?.get(tagName)
-  const tagId = effectiveTagId(tagName, TagIdMap[tagName] ?? -1, state)
+  const mappedTagId = TagIdMap[tagName]
+  const tagId = effectiveTagId(tagName, typeof mappedTagId === 'number' ? mappedTagId : -1, state)
   const closingIsAlias = tagHandler?.aliasTagId !== undefined
 
   if (state.currentNode?.tagHandler?.isNonNesting && !matchesClosingTag(state.currentNode, tagName, tagId, closingIsAlias)) {

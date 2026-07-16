@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { ELEMENT_NODE, NodeEventEnter } from '../../src/const'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { parseHtml } from '../../src/parse'
 
 describe('package entry points', () => {
   it('keeps the full conversion names at the package root', () => {
@@ -11,5 +13,13 @@ describe('package entry points', () => {
     expect(htmlToMarkdown('<nav>hidden</nav><p>shown</p>', {
       plugins: { filter: { exclude: ['nav'] } },
     })).toBe('shown')
+  })
+
+  it('treats prototype-named elements as unknown tags', () => {
+    const html = '<toString>one</toString><constructor>two</constructor>'
+    const elements = parseHtml(html).events.filter(event => event.type === NodeEventEnter && event.node.type === ELEMENT_NODE)
+
+    expect(elements.map(event => event.node.tagId)).toEqual([-1, -1])
+    expect(htmlToMarkdown(html)).toBe('one two')
   })
 })

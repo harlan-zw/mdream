@@ -100,6 +100,10 @@ export function filterPlugin(options: {
 
       const element = node as ElementNode
 
+      if (skippedSubtrees.has(element)) {
+        return { skip: true }
+      }
+
       // Drop hidden elements and their subtrees. Inherit the parent's hidden flag
       // (O(1)); only run the style/attr scan when not already inside a hidden subtree.
       const parentSkipped = element.parent ? skippedSubtrees.has(element.parent as ElementNode) : false
