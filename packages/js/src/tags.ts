@@ -170,12 +170,13 @@ function isAutolinkUri(s: string): boolean {
 }
 
 // Helper function to check if we're inside a table cell
-function isInsideTableCell(node: HandlerContext['node']): boolean {
-  return (node.depthMap[TAG_TD] || 0) > 0 || (node.depthMap[TAG_TH] || 0) > 0
+function isInsideTableCell(state: HandlerContext['state']): boolean {
+  const depthMap = state.depthMap!
+  return (depthMap[TAG_TD] || 0) > 0 || (depthMap[TAG_TH] || 0) > 0
 }
 
-function isInsideRawHtmlBlock(node: HandlerContext['node']): boolean {
-  const depthMap = node.depthMap
+function isInsideRawHtmlBlock(state: HandlerContext['state']): boolean {
+  const depthMap = state.depthMap!
   return Boolean(depthMap[TAG_DETAILS]
     || depthMap[TAG_SUMMARY]
     || depthMap[TAG_ADDRESS]
@@ -212,14 +213,14 @@ function getLanguageFromClass(className: string | undefined): string {
 
 function handleHeading(depth: number): TagHandler {
   return {
-    enter: ({ node }) => {
-      if ((node.depthMap[TAG_A] || 0) > 0) {
+    enter: ({ state }) => {
+      if ((state.depthMap?.[TAG_A] || 0) > 0) {
         return `<h${depth}>`
       }
       return `${'#'.repeat(depth)} `
     },
-    exit: ({ node }) => {
-      if ((node.depthMap[TAG_A] || 0) > 0) {
+    exit: ({ state }) => {
+      if ((state.depthMap?.[TAG_A] || 0) > 0) {
         return `</h${depth}>`
       }
     },
@@ -228,16 +229,16 @@ function handleHeading(depth: number): TagHandler {
 }
 
 const Strong: TagHandler = {
-  enter: ({ node }) => {
+  enter: ({ state }) => {
     // we are already bold
-    if ((node?.depthMap?.[TAG_B] || 0) > 1) {
+    if ((state.depthMap?.[TAG_B] || 0) > 1) {
       return ''
     }
     return MARKDOWN_STRONG
   },
-  exit: ({ node }) => {
+  exit: ({ node, state }) => {
     // we are already bold
-    if ((node?.depthMap?.[TAG_B] || 0) > 1) {
+    if ((state.depthMap?.[TAG_B] || 0) + (node.tagId === TAG_B ? 1 : 0) > 1) {
       return ''
     }
     return MARKDOWN_STRONG
@@ -248,16 +249,16 @@ const Strong: TagHandler = {
 }
 
 const Emphasis: TagHandler = {
-  enter: ({ node }) => {
+  enter: ({ state }) => {
     // we are already italic
-    if ((node?.depthMap?.[TAG_I] || 0) > 1) {
+    if ((state.depthMap?.[TAG_I] || 0) > 1) {
       return ''
     }
     return MARKDOWN_EMPHASIS
   },
-  exit: ({ node }) => {
+  exit: ({ node, state }) => {
     // we are already italic
-    if ((node?.depthMap?.[TAG_I] || 0) > 1) {
+    if ((state.depthMap?.[TAG_I] || 0) + (node.tagId === TAG_I ? 1 : 0) > 1) {
       return ''
     }
     return MARKDOWN_EMPHASIS
@@ -307,8 +308,8 @@ export const tagHandlers: Record<number, TagHandler> = {
     enter: ({ node, state }) => {
       // A Markdown hard break would terminate a table row/ATX heading or be
       // ignored inside a raw HTML block, so preserve the inline HTML there.
-      const depthMap = node.depthMap
-      if (isInsideTableCell(node) || isInsideRawHtmlBlock(node)
+      const depthMap = state.depthMap!
+      if (isInsideTableCell(state) || isInsideRawHtmlBlock(state)
         || depthMap[TAG_H1]
         || depthMap[TAG_H2]
         || depthMap[TAG_H3]
@@ -371,12 +372,12 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_BLOCKQUOTE]: {
-    enter: ({ node, state }) => {
-      const depth = node.depthMap[TAG_BLOCKQUOTE] || 1
+    enter: ({ state }) => {
+      const depth = state.depthMap?.[TAG_BLOCKQUOTE] || 1
       let prefix = '> '.repeat(depth)
 
       // Add indentation if inside a list item
-      const liDepth = node.depthMap[TAG_LI] || 0
+      const liDepth = state.depthMap?.[TAG_LI] || 0
       if (liDepth > 0) {
         prefix = `\n${state.listIndent}${prefix}`
       }
@@ -395,7 +396,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       state.preOwnFence = false
       state.preFenceLang = getLanguageFromClass(node.attributes?.class)
     },
-    exit: ({ node, state }) => {
+    exit: ({ state }) => {
       const ownFence = state.preOwnFence
       state.preFencePending = false
       state.preOwnFence = false
@@ -404,7 +405,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (!ownFence) {
         return undefined
       }
-      const liDepth = node.depthMap[TAG_LI] || 0
+      const liDepth = state.depthMap?.[TAG_LI] || 0
       if (liDepth > 0) {
         const indent = state.listIndent
         return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
@@ -414,7 +415,7 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_CODE]: {
     enter: ({ node, state }) => {
-      if ((node.depthMap[TAG_PRE] || 0) > 0) {
+      if ((state.depthMap?.[TAG_PRE] || 0) > 0) {
         // The enclosing <pre> already opened its own fence (e.g. <pre> with
         // mixed text and <code> children); don't emit a nested fence.
         if (state.preOwnFence) {
@@ -423,7 +424,7 @@ export const tagHandlers: Record<number, TagHandler> = {
         // This <code> owns the <pre>'s fence; cancel the deferred pre fence.
         state.preFencePending = false
         const language = getLanguageFromClass(node.attributes?.class)
-        const liDepth = node.depthMap[TAG_LI] || 0
+        const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent
           return `\n\n${indent}${MARKDOWN_CODE_BLOCK}${language}\n`
@@ -438,7 +439,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       // whitespace. A trailing backtick does NOT suppress: two adjacent
       // `<code>` elements must be separated with a space so CommonMark parses
       // them as two code spans rather than merging into one.
-      if ((node.depthMap[TAG_LI] || 0) > 0) {
+      if ((state.depthMap?.[TAG_LI] || 0) > 0) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
         if (lastChar && lastChar !== ' ' && lastChar !== '\n' && lastChar !== '\t'
@@ -449,13 +450,13 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
       return MARKDOWN_INLINE_CODE
     },
-    exit: ({ node, state }) => {
-      if ((node.depthMap[TAG_PRE] || 0) > 0) {
+    exit: ({ state }) => {
+      if ((state.depthMap?.[TAG_PRE] || 0) > 0) {
         // The enclosing <pre> owns the fence; this <code> emitted no opener.
         if (state.preOwnFence) {
           return undefined
         }
-        const liDepth = node.depthMap[TAG_LI] || 0
+        const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent
           return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
@@ -469,16 +470,16 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_UL]: {
-    enter: ({ node }) => isInsideTableCell(node) ? '<ul>' : undefined,
-    exit: ({ node }) => isInsideTableCell(node) ? '</ul>' : undefined,
+    enter: ({ state }) => isInsideTableCell(state) ? '<ul>' : undefined,
+    exit: ({ state }) => isInsideTableCell(state) ? '</ul>' : undefined,
   },
   [TAG_OL]: {
-    enter: ({ node }) => isInsideTableCell(node) ? '<ol>' : undefined,
-    exit: ({ node }) => isInsideTableCell(node) ? '</ol>' : undefined,
+    enter: ({ state }) => isInsideTableCell(state) ? '<ol>' : undefined,
+    exit: ({ state }) => isInsideTableCell(state) ? '</ol>' : undefined,
   },
   [TAG_LI]: {
     enter: ({ node, state }) => {
-      if (isInsideTableCell(node)) {
+      if (isInsideTableCell(state)) {
         return '<li>'
       }
 
@@ -490,7 +491,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       const marker = isOrdered ? `${node.index + 1}. ` : '- '
       return `${state.listIndent}${marker}`
     },
-    exit: ({ node }) => isInsideTableCell(node) ? '</li>' : undefined,
+    exit: ({ state }) => isInsideTableCell(state) ? '</li>' : undefined,
     spacing: LIST_ITEM_SPACING,
   },
   [TAG_A]: {
@@ -552,38 +553,38 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_TABLE]: {
-    enter: ({ node, state }) => {
-      if (isInsideTableCell(node)) {
+    enter: ({ state }) => {
+      if (isInsideTableCell(state)) {
         return '<table>'
       }
-      if ((node.depthMap[TAG_TABLE] || 0) <= 1) {
+      if ((state.depthMap?.[TAG_TABLE] || 0) <= 1) {
         state.tableRenderedTable = false
       }
       // Initialize table state
       state.tableColumnAlignments = []
     },
-    exit: ({ node }) => isInsideTableCell(node) ? '</table>' : undefined,
+    exit: ({ state }) => isInsideTableCell(state) ? '</table>' : undefined,
   },
   [TAG_THEAD]: {
-    enter: ({ node }) => {
-      if (isInsideTableCell(node)) {
+    enter: ({ state }) => {
+      if (isInsideTableCell(state)) {
         return '<thead>'
       }
     },
-    exit: ({ node }) => isInsideTableCell(node) ? '</thead>' : undefined,
+    exit: ({ state }) => isInsideTableCell(state) ? '</thead>' : undefined,
     spacing: TABLE_ROW_SPACING,
     excludesTextNodes: true,
   },
   [TAG_TR]: {
-    enter: ({ node, state }) => {
-      if (isInsideTableCell(node)) {
+    enter: ({ state }) => {
+      if (isInsideTableCell(state)) {
         return '<tr>'
       }
       state.tableCurrentRowCells = 0
       return '| '
     },
-    exit: ({ node, state }) => {
-      if (isInsideTableCell(node) || (node.depthMap[TAG_TABLE] || 0) > 1) {
+    exit: ({ state }) => {
+      if (isInsideTableCell(state) || (state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '</tr>'
       }
 
@@ -617,7 +618,7 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_TH]: {
     enter: ({ node, state }) => {
-      if ((node.depthMap[TAG_TABLE] || 0) > 1) {
+      if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '<th>'
       }
 
@@ -632,8 +633,8 @@ export const tagHandlers: Record<number, TagHandler> = {
 
       return node.index === 0 ? '' : ' | '
     },
-    exit: ({ node, state }) => {
-      if ((node.depthMap[TAG_TABLE] || 0) > 1) {
+    exit: ({ state }) => {
+      if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '</th>'
       }
       state.tableCurrentRowCells!++
@@ -642,14 +643,14 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
   },
   [TAG_TD]: {
-    enter: ({ node }) => {
-      if ((node.depthMap[TAG_TABLE] || 0) > 1) {
+    enter: ({ node, state }) => {
+      if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '<td>'
       }
       return node.index === 0 ? '' : ' | '
     },
-    exit: ({ node, state }) => {
-      if ((node.depthMap[TAG_TABLE] || 0) > 1) {
+    exit: ({ state }) => {
+      if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '</td>'
       }
       state.tableCurrentRowCells!++
@@ -658,8 +659,8 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
   },
   [TAG_P]: {
-    enter: ({ node, state }) => {
-      const bqDepth = node.depthMap[TAG_BLOCKQUOTE] || 0
+    enter: ({ state }) => {
+      const bqDepth = state.depthMap?.[TAG_BLOCKQUOTE] || 0
       if (bqDepth > 0) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
@@ -669,7 +670,7 @@ export const tagHandlers: Record<number, TagHandler> = {
           return `\n${prefix.trimEnd()}\n${prefix}`
         }
       }
-      if ((node.depthMap[TAG_LI] || 0) > 0 && !isInsideTableCell(node)) {
+      if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
         if (lastChar && lastChar !== ' ' && lastChar !== '\n') {
@@ -699,13 +700,13 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_BODY]: { spacing: NO_SPACING },
   [TAG_CENTER]: {
     // if in table cell we preserve
-    enter: ({ node }) => {
-      if ((node.depthMap[TAG_TABLE] || 0) > 1) {
+    enter: ({ state }) => {
+      if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '<center>'
       }
     },
-    exit: ({ node }) => {
-      if ((node.depthMap[TAG_TABLE] || 0) > 1) {
+    exit: ({ state }) => {
+      if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '</center>'
       }
     },
