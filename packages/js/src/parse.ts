@@ -343,21 +343,22 @@ function closeSelectTo(
   state: ParseState,
   targetId: number,
   handleEvent: (event: NodeEvent) => void,
-): void {
+): boolean {
   let target: ElementNode | null | undefined
   for (let node = state.currentNode; node; node = node.parent) {
     if (node.tagId === targetId) {
       target = node
       break
     }
-    if (node.tagId === TAG_SELECT)
+    if (node.tagId === TAG_SELECT || node.tagId === TAG_TEMPLATE)
       break
   }
   if (!target)
-    return
+    return false
   while (state.currentNode && state.currentNode !== target)
     closeNode(state.currentNode, state, handleEvent)
   closeNode(target, state, handleEvent)
+  return true
 }
 
 /**
@@ -972,7 +973,7 @@ function processClosingTag(
       foundClose = true
       break
     }
-    if (tagNameEnd === -1 && isWhitespace(charCode))
+    if (tagNameEnd === -1 && (isWhitespace(charCode) || charCode === SLASH_CHAR))
       tagNameEnd = i
     i++
   }
@@ -1251,13 +1252,14 @@ function processOpeningTag(
     if (tagId === TAG_SELECT && (state.depthMap[TAG_SELECT] || 0) > 0) {
       // In the "in select" insertion mode a nested <select> acts as the end
       // of the open select; the incoming start tag itself is ignored.
-      closeSelectTo(state, TAG_SELECT, handleEvent)
-      return {
-        complete: true,
-        newPosition: result.newPosition,
-        remainingText: '',
-        selfClosing: false,
-        skip: true,
+      if (closeSelectTo(state, TAG_SELECT, handleEvent)) {
+        return {
+          complete: true,
+          newPosition: result.newPosition,
+          remainingText: '',
+          selfClosing: false,
+          skip: true,
+        }
       }
     }
     else if (tagId === TAG_OPTION) {

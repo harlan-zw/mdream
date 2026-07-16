@@ -1,7 +1,7 @@
 import type { ElementNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
-import { ELEMENT_NODE, NodeEventEnter, TAG_OPTGROUP, TAG_OPTION, TAG_P, TAG_SELECT } from '../../src/const'
-import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { ELEMENT_NODE, TAG_OPTGROUP, TAG_OPTION, TAG_P, TAG_SELECT, TAG_TEMPLATE } from '../../src/const'
+import { htmlToMarkdown, NodeEventEnter, streamHtmlToMarkdown } from '../../src/index'
 import { parseHtml } from '../../src/parse'
 
 async function streamConvert(chunks: string[]): Promise<string> {
@@ -59,6 +59,16 @@ describe('select option tree construction', () => {
   it('treats a nested select start tag as the end of the open select', () => {
     expect(htmlToMarkdown('<select><option>one<select><option>two</select><p>after</p>'))
       .toBe('one two\n\nafter')
+  })
+
+  it('does not recover through a template boundary', () => {
+    const html = '<select><option>outer<template><option>hidden</template><option>after</select>'
+    expect(htmlToMarkdown(html)).toBe('outer after')
+
+    const nestedSelect = enteredElements('<select><option>outer<template><select><option>hidden</select></template><option>after</select>')
+      .filter(node => node.tagId === TAG_SELECT)
+    expect(nestedSelect).toHaveLength(2)
+    expect(nestedSelect[1]?.parent?.tagId).toBe(TAG_TEMPLATE)
   })
 })
 

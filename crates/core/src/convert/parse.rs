@@ -421,7 +421,7 @@ impl ConvertState {
   /// Close the nearest select-related `target_id`. Option/optgroup scans stop
   /// at their owning `<select>`; a select scan includes the select itself. This
   /// only runs for recovery tags, leaving the common path as one table lookup.
-  fn close_select_to(&mut self, target_id: u8) {
+  fn close_select_to(&mut self, target_id: u8) -> bool {
     let mut target_index = None;
     for i in (0..self.stack.len()).rev() {
       match self.stack[i].tag_id {
@@ -430,6 +430,7 @@ impl ConvertState {
           break;
         }
         Some(TAG_SELECT) if target_id != TAG_SELECT => break,
+        Some(TAG_TEMPLATE) => break,
         _ => {}
       }
     }
@@ -437,6 +438,9 @@ impl ConvertState {
       while self.stack.len() > index {
         self.close_node();
       }
+      true
+    } else {
+      false
     }
   }
 
@@ -504,13 +508,14 @@ impl ConvertState {
         // In the "in select" insertion mode a nested <select> acts as the end
         // of the open select; the incoming start tag itself is ignored.
         TAG_SELECT if self.depth_map[TAG_SELECT as usize] > 0 => {
-          self.close_select_to(TAG_SELECT);
-          return OpeningTagResult {
-            complete: true,
-            new_position,
-            self_closing: false,
-            skip: true,
-          };
+          if self.close_select_to(TAG_SELECT) {
+            return OpeningTagResult {
+              complete: true,
+              new_position,
+              self_closing: false,
+              skip: true,
+            };
+          }
         }
         TAG_OPTION => {
           if self.depth_map[TAG_SELECT as usize] > 0 {
