@@ -236,11 +236,7 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   t[TAG_DFN as usize] = Some(INLINE_COLLAPSE);
   t[TAG_FIGCAPTION as usize] = Some(INLINE_COLLAPSE);
 
-  t[TAG_BUTTON as usize] = Some(TagHandler {
-    collapses_inner_white_space: true,
-    is_inline: true,
-    ..NONE
-  });
+  t[TAG_BUTTON as usize] = Some(INLINE_COLLAPSE);
 
   // Block no-spacing
   t[TAG_BODY as usize] = Some(BLOCK_NO_SPACING);
