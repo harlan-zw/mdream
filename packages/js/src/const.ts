@@ -234,11 +234,6 @@ export const TagIdMap = {
   optgroup: TAG_OPTGROUP,
 } as const
 
-// Reverse map: tag ID → tag name (for cross-engine filter conversion)
-export const TagNameMap: Record<number, string> = /* @__PURE__ */ Object.fromEntries(
-  Object.entries(TagIdMap).map(([name, id]) => [id, name]),
-)
-
 // Pre-defined strings to avoid repeated allocations
 export const MARKDOWN_STRONG = '**'
 export const MARKDOWN_EMPHASIS = '_'

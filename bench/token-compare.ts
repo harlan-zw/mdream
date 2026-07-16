@@ -9,7 +9,7 @@ import { convert as rustConvert } from '@kreuzberg/html-to-markdown-node'
 import { NodeHtmlMarkdown } from 'node-html-markdown'
 import TurndownService from 'turndown'
 import { gfm } from 'turndown-plugin-gfm'
-import { htmlToMarkdown } from '../packages/js/src'
+import { htmlToMarkdown } from '../packages/js/src/index'
 import { htmlToMarkdown as mdreamRust } from '../packages/mdream/src'
 
 function countTokens(text: string): number {

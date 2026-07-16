@@ -285,6 +285,12 @@ pub fn get_tag_id_ci_bytes(name: &[u8]) -> Option<u8> {
   if len == 0 || len > MAX_BUILTIN_TAG_LEN {
     return None;
   }
+  // Nearly all real-world HTML already uses lowercase tag names. Avoid copying
+  // and lowercasing the common case; retain the stack-buffer fallback for valid
+  // mixed/uppercase HTML.
+  if let Some(id) = get_tag_id_bytes(name) {
+    return Some(id);
+  }
   let mut buf = [0u8; MAX_BUILTIN_TAG_LEN];
   let mut i = 0;
   while i < len {

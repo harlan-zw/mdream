@@ -389,6 +389,60 @@ export function finalizeParse(
 // Pre-allocate arrays and objects to reduce allocations
 const EMPTY_ATTRIBUTES: Record<string, string> = Object.freeze({})
 
+/** Parser-owned element node with an on-demand public depth snapshot. */
+class ParsedElementNode implements ElementNode {
+  readonly type = ELEMENT_NODE
+  name: string
+  attributes: Record<string, string>
+  parent: ElementNode | null | undefined
+  depth: number
+  index: number
+  tagId: number
+  tagHandler: TagHandler | undefined
+  currentWalkIndex?: number
+  childTextNodeIndex?: number
+  containsWhitespace?: boolean
+  pluginOutput?: string[]
+  context?: ElementNode['context']
+  private cachedDepthMap?: Uint8Array
+
+  constructor(
+    name: string,
+    attributes: Record<string, string>,
+    parent: ElementNode | null | undefined,
+    depth: number,
+    index: number,
+    tagId: number,
+    tagHandler: TagHandler | undefined,
+  ) {
+    this.name = name
+    this.attributes = attributes
+    this.parent = parent
+    this.depth = depth
+    this.index = index
+    this.tagId = tagId
+    this.tagHandler = tagHandler
+  }
+
+  get depthMap(): Uint8Array {
+    if (this.cachedDepthMap)
+      return this.cachedDepthMap
+
+    const depthMap = new Uint8Array(MAX_TAG_ID)
+    if (this.tagId >= 0 && this.tagId < MAX_TAG_ID)
+      depthMap[this.tagId] = 1
+    let node = this.parent
+    while (node) {
+      const tagId = node.tagId
+      if (tagId !== undefined && tagId >= 0 && tagId < MAX_TAG_ID)
+        depthMap[tagId] = (depthMap[tagId] || 0) + 1
+      node = node.parent
+    }
+    this.cachedDepthMap = depthMap
+    return depthMap
+  }
+}
+
 export interface ParseOptions {
   resolvedPlugins?: TransformPlugin[]
 }
@@ -440,11 +494,6 @@ export interface ParseResult {
   remainingHtml: string
 }
 
-// Fast typed array copy for depthMap
-function copyDepthMap(depthMap: ElementNode['depthMap']): ElementNode['depthMap'] {
-  return new Uint8Array(depthMap)
-}
-
 /**
  * Fast whitespace check using direct character code comparison
  */
@@ -454,6 +503,15 @@ function isWhitespace(charCode: number): boolean {
     || charCode === NEWLINE_CHAR
     || charCode === FORM_FEED_CHAR
     || charCode === CARRIAGE_RETURN_CHAR
+}
+
+function normalizeTagName(tagName: string): keyof typeof TagIdMap {
+  for (let i = 0; i < tagName.length; i++) {
+    const code = tagName.charCodeAt(i)
+    if (code >= 65 && code <= 90)
+      return tagName.toLowerCase() as keyof typeof TagIdMap
+  }
+  return tagName as keyof typeof TagIdMap
 }
 
 function effectiveTagId(tagName: string, fallbackTagId: number, state: ParseState): number {
@@ -676,7 +734,7 @@ function parseHtmlInternal(
             break
           peekEnd++
         }
-        const peekTagName = htmlChunk.substring(i + 2, peekEnd).toLowerCase() as keyof typeof TagIdMap
+        const peekTagName = normalizeTagName(htmlChunk.substring(i + 2, peekEnd))
         const peekHandler = state.tagOverrideHandlers?.get(peekTagName)
         const peekTagId = effectiveTagId(peekTagName, TagIdMap[peekTagName] ?? -1, state)
         if (!matchesClosingTag(state.currentNode, peekTagName, peekTagId, peekHandler?.aliasTagId !== undefined)) {
@@ -718,9 +776,14 @@ function parseHtmlInternal(
         break
       }
 
-      const tagName = htmlChunk.substring(tagNameStart, tagNameEnd).toLowerCase() as keyof typeof TagIdMap
+      const rawTagName = htmlChunk.substring(tagNameStart, tagNameEnd)
+      let tagName = rawTagName as keyof typeof TagIdMap
+      const rawTagId = TagIdMap[tagName]
+      if (typeof rawTagId !== 'number')
+        tagName = normalizeTagName(rawTagName)
 
-      const tagId = effectiveTagId(tagName, TagIdMap[tagName] ?? -1, state)
+      const mappedTagId = TagIdMap[tagName]
+      const tagId = effectiveTagId(tagName, typeof mappedTagId === 'number' ? mappedTagId : -1, state)
       i2 = tagNameEnd
 
       // Inside a non-nesting element (script/style/title/textarea) no opening
@@ -921,9 +984,14 @@ function processClosingTag(
     }
   }
 
-  const tagName = htmlChunk.substring(tagNameStart, tagNameEnd === -1 ? i : tagNameEnd).toLowerCase() as keyof typeof TagIdMap
+  const rawTagName = htmlChunk.substring(tagNameStart, tagNameEnd === -1 ? i : tagNameEnd)
+  let tagName = rawTagName as keyof typeof TagIdMap
+  const rawTagId = TagIdMap[tagName]
+  if (typeof rawTagId !== 'number')
+    tagName = normalizeTagName(rawTagName)
   const tagHandler = state.tagOverrideHandlers?.get(tagName)
-  const tagId = effectiveTagId(tagName, TagIdMap[tagName] ?? -1, state)
+  const mappedTagId = TagIdMap[tagName]
+  const tagId = effectiveTagId(tagName, typeof mappedTagId === 'number' ? mappedTagId : -1, state)
   const closingIsAlias = tagHandler?.aliasTagId !== undefined
 
   if (state.currentNode?.tagHandler?.isNonNesting && !matchesClosingTag(state.currentNode, tagName, tagId, closingIsAlias)) {
@@ -1273,17 +1341,15 @@ function processOpeningTag(
 
   const currentWalkIndex = state.currentNode ? state.currentNode.currentWalkIndex!++ : 0
 
-  const tag = {
-    type: ELEMENT_NODE,
-    name: tagName,
-    attributes: result.attributes,
-    parent: state.currentNode,
-    depthMap: copyDepthMap(state.depthMap),
-    depth: state.depth,
-    index: currentWalkIndex,
+  const tag = new ParsedElementNode(
+    tagName,
+    result.attributes,
+    state.currentNode,
+    state.depth,
+    currentWalkIndex,
     tagId,
     tagHandler,
-  } as ElementNode
+  )
 
   // Keep the common element shape unchanged: only inert template nodes and
   // their descendants receive this optional field.
@@ -1344,6 +1410,7 @@ function processTagAttributes(htmlChunk: string, position: number, tagHandler: N
   const attrStartPos = i
   let insideQuote = false
   let quoteChar = 0
+  let hasAttributeContent = false
 
   let prevChar = 0
   while (i < chunkLength) {
@@ -1359,27 +1426,31 @@ function processTagAttributes(htmlChunk: string, position: number, tagHandler: N
     else if (c === QUOTE_CHAR || c === APOS_CHAR) {
       insideQuote = true
       quoteChar = c
+      hasAttributeContent = true
     }
     else if (c === SLASH_CHAR && i + 1 < chunkLength
       && htmlChunk.charCodeAt(i + 1) === GT_CHAR) {
-      const attrStr = htmlChunk.substring(attrStartPos, i).trim()
+      const attrStr = hasAttributeContent ? htmlChunk.substring(attrStartPos, i).trim() : ''
       return {
         complete: true,
         newPosition: i + 2,
-        attributes: parseAttributes(attrStr),
+        attributes: hasAttributeContent ? parseAttributes(attrStr) : EMPTY_ATTRIBUTES,
         selfClosing: true,
         attrBuffer: attrStr,
       }
     }
     else if (c === GT_CHAR) {
-      const attrStr = htmlChunk.substring(attrStartPos, i).trim()
+      const attrStr = hasAttributeContent ? htmlChunk.substring(attrStartPos, i).trim() : ''
       return {
         complete: true,
         newPosition: i + 1,
-        attributes: parseAttributes(attrStr),
+        attributes: hasAttributeContent ? parseAttributes(attrStr) : EMPTY_ATTRIBUTES,
         selfClosing,
         attrBuffer: attrStr,
       }
+    }
+    else if (!isWhitespace(c)) {
+      hasAttributeContent = true
     }
 
     i++
