@@ -447,7 +447,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         // Whitespace runs can be split by tags/comments into separate text
         // events. Collapse a separator that follows existing whitespace just
         // as CSS white-space processing would.
-        if (textNode.value === ' ' && lastChar && ' \n\t\r'.includes(lastChar)) {
+        if (textNode.value === ' ' && (lastChar === ' ' || lastChar === '\n' || lastChar === '\t' || lastChar === '\r')) {
           return
         }
 
