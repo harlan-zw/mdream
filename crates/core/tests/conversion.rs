@@ -2211,6 +2211,28 @@ fn streaming_script_data_double_escaped_matches_every_split() {
 }
 
 #[test]
+fn script_data_scanner_preserves_extraction_text() {
+  let script_text = "<!--<script>const payload = \"value\";</script>-->";
+  let html = format!("<script>{script_text}</script><p>BODY</p>");
+  let result = html_to_markdown_result(
+    &html,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        extraction: Some(ExtractionConfig {
+          selectors: vec!["script".to_string()],
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+
+  assert_eq!(result.markdown, "BODY");
+  let extracted = result.extracted.unwrap();
+  assert_eq!(extracted[0].text_content, script_text);
+}
+
+#[test]
 fn streaming_top_level_text_with_tag_override() {
   // Top-level text before an overridden inline tag must survive chunk
   // boundaries through the streaming path too (issue #93).

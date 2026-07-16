@@ -76,37 +76,54 @@ const SCRIPT_DATA_DOUBLE_ESCAPED: u8 = 4;
 const SCRIPT_DATA_DOUBLE_ESCAPED_DASH: u8 = 5;
 const SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH: u8 = 6;
 
-#[inline(always)]
-fn has_script_name_at(bytes: &[u8], start: usize) -> bool {
-  start + 6 <= bytes.len()
-    && bytes[start] | 32 == b's'
-    && bytes[start + 1] | 32 == b'c'
-    && bytes[start + 2] | 32 == b'r'
-    && bytes[start + 3] | 32 == b'i'
-    && bytes[start + 4] | 32 == b'p'
-    && bytes[start + 5] | 32 == b't'
+#[derive(Clone, Copy)]
+enum ScriptSequenceEnd {
+  Match(usize),
+  NoMatch,
+  Incomplete,
+}
+
+enum ScriptScanBoundary {
+  Close(usize),
+  Pending(usize),
+  Complete,
+}
+
+struct ScriptScanResult {
+  boundary: ScriptScanBoundary,
+  state: u8,
 }
 
 #[inline(always)]
-fn script_sequence_end(bytes: &[u8], name_start: usize) -> Option<usize> {
+fn script_sequence_end(bytes: &[u8], name_start: usize) -> ScriptSequenceEnd {
+  const SCRIPT_NAME: &[u8; 6] = b"script";
+  for (offset, expected) in SCRIPT_NAME.iter().enumerate() {
+    let index = name_start + offset;
+    if index >= bytes.len() {
+      return ScriptSequenceEnd::Incomplete;
+    }
+    if bytes[index] | 32 != *expected {
+      return ScriptSequenceEnd::NoMatch;
+    }
+  }
   let delimiter_index = name_start + 6;
-  if !has_script_name_at(bytes, name_start) || delimiter_index >= bytes.len() {
-    return None;
+  if delimiter_index >= bytes.len() {
+    return ScriptSequenceEnd::Incomplete;
   }
   let delimiter = bytes[delimiter_index];
   if delimiter == GT_CHAR || delimiter == SLASH_CHAR || is_whitespace(delimiter) {
-    Some(delimiter_index + 1)
+    ScriptSequenceEnd::Match(delimiter_index + 1)
   } else {
-    None
+    ScriptSequenceEnd::NoMatch
   }
 }
 
 /// Find the first script end tag that the HTML tokenizer would emit.
 ///
-/// Streaming retains an unfinished script body and rescans it from the start,
-/// so the seven boundary-relevant states stay local and allocation-free.
-fn find_script_end_tag(bytes: &[u8], start: usize) -> Option<usize> {
-  let mut state = SCRIPT_DATA;
+/// Only an incomplete `<...` boundary candidate is returned to the streaming
+/// caller. All completed script data advances the persisted tokenizer state.
+fn find_script_end_tag(bytes: &[u8], start: usize, initial_state: u8) -> ScriptScanResult {
+  let mut state = initial_state;
   let mut i = start;
 
   while i < bytes.len() {
@@ -127,36 +144,92 @@ fn find_script_end_tag(bytes: &[u8], start: usize) -> Option<usize> {
 
     if state == SCRIPT_DATA {
       if c == LT_CHAR {
-        if i + 1 < bytes.len()
-          && bytes[i + 1] == SLASH_CHAR
-          && script_sequence_end(bytes, i + 2).is_some()
-        {
-          return Some(i);
+        if i + 1 == bytes.len() {
+          return ScriptScanResult {
+            boundary: ScriptScanBoundary::Pending(i),
+            state,
+          };
         }
-        if i + 3 < bytes.len()
-          && bytes[i + 1] == EXCLAMATION_CHAR
-          && bytes[i + 2] == b'-'
-          && bytes[i + 3] == b'-'
-        {
-          state = SCRIPT_DATA_ESCAPED;
-          i += 4;
-          continue;
+        if bytes[i + 1] == SLASH_CHAR {
+          match script_sequence_end(bytes, i + 2) {
+            ScriptSequenceEnd::Match(_) => {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Close(i),
+                state,
+              };
+            }
+            ScriptSequenceEnd::Incomplete => {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Pending(i),
+                state,
+              };
+            }
+            ScriptSequenceEnd::NoMatch => {}
+          }
+        }
+        if bytes[i + 1] == EXCLAMATION_CHAR {
+          if i + 2 == bytes.len() {
+            return ScriptScanResult {
+              boundary: ScriptScanBoundary::Pending(i),
+              state,
+            };
+          }
+          if bytes[i + 2] == b'-' {
+            if i + 3 == bytes.len() {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Pending(i),
+                state,
+              };
+            }
+            if bytes[i + 3] == b'-' {
+              state = SCRIPT_DATA_ESCAPED;
+              i += 4;
+              continue;
+            }
+          }
         }
       }
     } else if state == SCRIPT_DATA_ESCAPED {
       if c == b'-' {
         state = SCRIPT_DATA_ESCAPED_DASH;
       } else if c == LT_CHAR {
-        if i + 1 < bytes.len()
-          && bytes[i + 1] == SLASH_CHAR
-          && script_sequence_end(bytes, i + 2).is_some()
-        {
-          return Some(i);
+        if i + 1 == bytes.len() {
+          return ScriptScanResult {
+            boundary: ScriptScanBoundary::Pending(i),
+            state,
+          };
         }
-        if let Some(sequence_end) = script_sequence_end(bytes, i + 1) {
-          state = SCRIPT_DATA_DOUBLE_ESCAPED;
-          i = sequence_end;
-          continue;
+        if bytes[i + 1] == SLASH_CHAR {
+          match script_sequence_end(bytes, i + 2) {
+            ScriptSequenceEnd::Match(_) => {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Close(i),
+                state,
+              };
+            }
+            ScriptSequenceEnd::Incomplete => {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Pending(i),
+                state,
+              };
+            }
+            ScriptSequenceEnd::NoMatch => {}
+          }
+        } else {
+          match script_sequence_end(bytes, i + 1) {
+            ScriptSequenceEnd::Match(sequence_end) => {
+              state = SCRIPT_DATA_DOUBLE_ESCAPED;
+              i = sequence_end;
+              continue;
+            }
+            ScriptSequenceEnd::Incomplete => {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Pending(i),
+                state,
+              };
+            }
+            ScriptSequenceEnd::NoMatch => {}
+          }
         }
       }
     } else if state == SCRIPT_DATA_ESCAPED_DASH {
@@ -164,16 +237,36 @@ fn find_script_end_tag(bytes: &[u8], start: usize) -> Option<usize> {
       if c == b'-' {
         state = SCRIPT_DATA_ESCAPED_DASH_DASH;
       } else if c == LT_CHAR {
-        if i + 1 < bytes.len()
-          && bytes[i + 1] == SLASH_CHAR
-          && script_sequence_end(bytes, i + 2).is_some()
-        {
-          return Some(i);
+        if i + 1 == bytes.len() {
+          return ScriptScanResult {
+            boundary: ScriptScanBoundary::Pending(i),
+            state,
+          };
         }
-        if let Some(sequence_end) = script_sequence_end(bytes, i + 1) {
-          state = SCRIPT_DATA_DOUBLE_ESCAPED;
-          i = sequence_end;
-          continue;
+        let sequence = if bytes[i + 1] == SLASH_CHAR {
+          script_sequence_end(bytes, i + 2)
+        } else {
+          script_sequence_end(bytes, i + 1)
+        };
+        match sequence {
+          ScriptSequenceEnd::Match(sequence_end) => {
+            if bytes[i + 1] == SLASH_CHAR {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Close(i),
+                state,
+              };
+            }
+            state = SCRIPT_DATA_DOUBLE_ESCAPED;
+            i = sequence_end;
+            continue;
+          }
+          ScriptSequenceEnd::Incomplete => {
+            return ScriptScanResult {
+              boundary: ScriptScanBoundary::Pending(i),
+              state,
+            };
+          }
+          ScriptSequenceEnd::NoMatch => {}
         }
       }
     } else if state == SCRIPT_DATA_ESCAPED_DASH_DASH {
@@ -182,63 +275,131 @@ fn find_script_end_tag(bytes: &[u8], start: usize) -> Option<usize> {
       } else if c != b'-' {
         state = SCRIPT_DATA_ESCAPED;
         if c == LT_CHAR {
-          if i + 1 < bytes.len()
-            && bytes[i + 1] == SLASH_CHAR
-            && script_sequence_end(bytes, i + 2).is_some()
-          {
-            return Some(i);
+          if i + 1 == bytes.len() {
+            return ScriptScanResult {
+              boundary: ScriptScanBoundary::Pending(i),
+              state,
+            };
           }
-          if let Some(sequence_end) = script_sequence_end(bytes, i + 1) {
-            state = SCRIPT_DATA_DOUBLE_ESCAPED;
-            i = sequence_end;
-            continue;
+          let sequence = if bytes[i + 1] == SLASH_CHAR {
+            script_sequence_end(bytes, i + 2)
+          } else {
+            script_sequence_end(bytes, i + 1)
+          };
+          match sequence {
+            ScriptSequenceEnd::Match(sequence_end) => {
+              if bytes[i + 1] == SLASH_CHAR {
+                return ScriptScanResult {
+                  boundary: ScriptScanBoundary::Close(i),
+                  state,
+                };
+              }
+              state = SCRIPT_DATA_DOUBLE_ESCAPED;
+              i = sequence_end;
+              continue;
+            }
+            ScriptSequenceEnd::Incomplete => {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Pending(i),
+                state,
+              };
+            }
+            ScriptSequenceEnd::NoMatch => {}
           }
         }
       }
     } else if state == SCRIPT_DATA_DOUBLE_ESCAPED {
       if c == b'-' {
         state = SCRIPT_DATA_DOUBLE_ESCAPED_DASH;
-      } else if c == LT_CHAR
-        && i + 1 < bytes.len()
-        && bytes[i + 1] == SLASH_CHAR
-        && let Some(sequence_end) = script_sequence_end(bytes, i + 2)
-      {
-        state = SCRIPT_DATA_ESCAPED;
-        i = sequence_end;
-        continue;
+      } else if c == LT_CHAR {
+        if i + 1 == bytes.len() {
+          return ScriptScanResult {
+            boundary: ScriptScanBoundary::Pending(i),
+            state,
+          };
+        }
+        if bytes[i + 1] == SLASH_CHAR {
+          match script_sequence_end(bytes, i + 2) {
+            ScriptSequenceEnd::Match(sequence_end) => {
+              state = SCRIPT_DATA_ESCAPED;
+              i = sequence_end;
+              continue;
+            }
+            ScriptSequenceEnd::Incomplete => {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Pending(i),
+                state,
+              };
+            }
+            ScriptSequenceEnd::NoMatch => {}
+          }
+        }
       }
     } else if state == SCRIPT_DATA_DOUBLE_ESCAPED_DASH {
       state = SCRIPT_DATA_DOUBLE_ESCAPED;
       if c == b'-' {
         state = SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH;
-      } else if c == LT_CHAR
-        && i + 1 < bytes.len()
-        && bytes[i + 1] == SLASH_CHAR
-        && let Some(sequence_end) = script_sequence_end(bytes, i + 2)
-      {
-        state = SCRIPT_DATA_ESCAPED;
-        i = sequence_end;
-        continue;
+      } else if c == LT_CHAR {
+        if i + 1 == bytes.len() {
+          return ScriptScanResult {
+            boundary: ScriptScanBoundary::Pending(i),
+            state,
+          };
+        }
+        if bytes[i + 1] == SLASH_CHAR {
+          match script_sequence_end(bytes, i + 2) {
+            ScriptSequenceEnd::Match(sequence_end) => {
+              state = SCRIPT_DATA_ESCAPED;
+              i = sequence_end;
+              continue;
+            }
+            ScriptSequenceEnd::Incomplete => {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Pending(i),
+                state,
+              };
+            }
+            ScriptSequenceEnd::NoMatch => {}
+          }
+        }
       }
     } else if c == GT_CHAR {
       state = SCRIPT_DATA;
     } else if c != b'-' {
       state = SCRIPT_DATA_DOUBLE_ESCAPED;
-      if c == LT_CHAR
-        && i + 1 < bytes.len()
-        && bytes[i + 1] == SLASH_CHAR
-        && let Some(sequence_end) = script_sequence_end(bytes, i + 2)
-      {
-        state = SCRIPT_DATA_ESCAPED;
-        i = sequence_end;
-        continue;
+      if c == LT_CHAR {
+        if i + 1 == bytes.len() {
+          return ScriptScanResult {
+            boundary: ScriptScanBoundary::Pending(i),
+            state,
+          };
+        }
+        if bytes[i + 1] == SLASH_CHAR {
+          match script_sequence_end(bytes, i + 2) {
+            ScriptSequenceEnd::Match(sequence_end) => {
+              state = SCRIPT_DATA_ESCAPED;
+              i = sequence_end;
+              continue;
+            }
+            ScriptSequenceEnd::Incomplete => {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Pending(i),
+                state,
+              };
+            }
+            ScriptSequenceEnd::NoMatch => {}
+          }
+        }
       }
     }
 
     i += 1;
   }
 
-  None
+  ScriptScanResult {
+    boundary: ScriptScanBoundary::Complete,
+    state,
+  }
 }
 
 /// Unified single-pass HTML-to-Markdown converter.
@@ -255,6 +416,7 @@ pub struct ConvertState {
   just_closed_tag: bool,
   is_first_text_in_element: bool,
   in_non_nesting: bool,
+  script_data_state: u8,
   escape_ctx: u8,
   in_pre: bool,
   /// Filter: depth of the shallowest currently-open visually-hidden element, or
@@ -267,6 +429,7 @@ pub struct ConvertState {
   first_block_parent_index: Option<usize>,
   block_parent_indices: Vec<usize>,
   parse_text_buffer: String,
+  script_text_buffer: String,
   pub stack: Vec<ElementNode>,
   node_pool: Vec<ElementNode>,
 
@@ -384,6 +547,7 @@ impl ConvertState {
       just_closed_tag: false,
       is_first_text_in_element: false,
       in_non_nesting: false,
+      script_data_state: SCRIPT_DATA,
       escape_ctx: 0,
       in_pre: false,
       hidden_since_depth: None,
@@ -392,6 +556,7 @@ impl ConvertState {
       first_block_parent_index: None,
       block_parent_indices: Vec::with_capacity(16),
       parse_text_buffer: String::new(),
+      script_text_buffer: String::new(),
       stack: Vec::with_capacity(32),
       node_pool: Vec::with_capacity(32),
 
@@ -515,6 +680,26 @@ impl ConvertState {
     s
   }
 
+  #[inline]
+  fn push_script_text(&mut self, text: &str) {
+    if text.is_empty() {
+      return;
+    }
+    self.script_text_buffer.push_str(text);
+    self.text_buffer_contains_non_whitespace = true;
+    self.last_char_was_whitespace = false;
+    self.just_closed_tag = false;
+  }
+
+  fn flush_script_text(&mut self) {
+    if self.script_text_buffer.is_empty() {
+      return;
+    }
+    let mut script_text = std::mem::take(&mut self.script_text_buffer);
+    self.process_text_buffer(&mut script_text);
+    self.script_text_buffer = script_text;
+  }
+
   pub fn process_html(&mut self, chunk: &str) -> String {
     // Reuse text_buffer allocation from previous call if available
     let mut text_buffer = std::mem::take(&mut self.parse_text_buffer);
@@ -532,19 +717,24 @@ impl ConvertState {
         .last()
         .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none())
       {
-        let Some(close_index) = find_script_end_tag(bytes, i) else {
-          text_buffer.push_str(&chunk[i..]);
-          self.text_buffer_contains_non_whitespace = true;
-          self.last_char_was_whitespace = false;
-          self.just_closed_tag = false;
-          break;
-        };
-        if close_index > i {
-          text_buffer.push_str(&chunk[i..close_index]);
-          self.text_buffer_contains_non_whitespace = true;
-          self.last_char_was_whitespace = false;
-          self.just_closed_tag = false;
-          i = close_index;
+        let scan = find_script_end_tag(bytes, i, self.script_data_state);
+        self.script_data_state = scan.state;
+        match scan.boundary {
+          ScriptScanBoundary::Close(close_index) => {
+            self.push_script_text(&chunk[i..close_index]);
+            self.flush_script_text();
+            self.script_data_state = SCRIPT_DATA;
+            i = close_index;
+          }
+          ScriptScanBoundary::Pending(pending_start) => {
+            self.push_script_text(&chunk[i..pending_start]);
+            text_buffer.push_str(&chunk[pending_start..]);
+            break;
+          }
+          ScriptScanBoundary::Complete => {
+            self.push_script_text(&chunk[i..]);
+            break;
+          }
         }
       }
 
@@ -934,7 +1124,15 @@ impl ConvertState {
   /// trailing text was scanned persist on `self`, so `process_text_buffer`
   /// commits it exactly as if the next tag had triggered the flush.
   pub fn finalize(&mut self, leftover: &str) {
-    if !leftover.is_empty() && leftover.as_bytes()[0] != LT_CHAR {
+    let in_script = self
+      .stack
+      .last()
+      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none());
+    if in_script {
+      self.push_script_text(leftover);
+      self.flush_script_text();
+      self.script_data_state = SCRIPT_DATA;
+    } else if !leftover.is_empty() && leftover.as_bytes()[0] != LT_CHAR {
       let mut buf = leftover.to_string();
       self.process_text_buffer(&mut buf);
     }
