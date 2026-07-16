@@ -273,7 +273,15 @@ impl ConvertState {
     let in_pre_tag = self.in_pre;
     let child_text_node_index = self.stack.last().map_or(0, |n| n.child_text_node_index);
 
-    if !in_pre_tag && !contains_non_whitespace && child_text_node_index == 0 {
+    // Whitespace-only text before an element's first child is indentation and
+    // can be dropped. At the fragment root it can instead separate adjacent
+    // inline siblings, so emit it and let the output layer trim or absorb it at
+    // leading/trailing and block boundaries.
+    if !in_pre_tag
+      && !contains_non_whitespace
+      && child_text_node_index == 0
+      && !self.stack.is_empty()
+    {
       return;
     }
     if text_buffer.is_empty() {

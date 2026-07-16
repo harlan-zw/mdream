@@ -546,7 +546,10 @@ impl ConvertState {
       0
     };
 
-    if text.len() == 1 && text.as_bytes()[0] == b' ' && last_char == b'\n' {
+    if text.len() == 1
+      && text.as_bytes()[0] == b' '
+      && matches!(last_char, b' ' | b'\n' | b'\t' | b'\r')
+    {
       self.last_text_node_contains_whitespace = contains_whitespace;
       self.has_last_text_node = true;
       self.last_text_node_depth = depth;
@@ -1369,6 +1372,10 @@ impl ConvertState {
       if last_char == b' ' && !self.buffer.is_empty() {
         let trimmed_len = self.buffer.trim_end_matches(' ').len();
         self.buffer.truncate(trimmed_len);
+        // This source whitespace was consumed by the block boundary; do not
+        // let its state leak into a later inline event and trim that output.
+        self.last_text_node_contains_whitespace = false;
+        self.has_last_text_node = false;
       }
 
       if is_enter {

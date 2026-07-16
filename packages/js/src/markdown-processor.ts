@@ -444,8 +444,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         if (state.plainText && state.depthMap[TAG_PRE] && state.buffer.length === 0)
           preserveLeadingWhitespace = true
 
-        // Skip leading spaces after newlines
-        if (textNode.value === ' ' && lastChar === '\n') {
+        // Whitespace runs can be split by tags/comments into separate text
+        // events. Collapse a separator that follows existing whitespace just
+        // as CSS white-space processing would.
+        if (textNode.value === ' ' && (lastChar === ' ' || lastChar === '\n' || lastChar === '\t' || lastChar === '\r')) {
           return
         }
 
@@ -567,6 +569,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       // Trim only whitespace
       if (lastChar === ' ' && buff?.length) {
         buff[buff.length - 1] = buff.at(-1)!.substring(0, buff.at(-1)!.length - 1)
+        // This source whitespace was consumed by the block boundary; do not
+        // let its state leak into a later inline event and trim that output.
+        state.lastTextNode = undefined
       }
 
       if (eventType === NodeEventEnter) {
