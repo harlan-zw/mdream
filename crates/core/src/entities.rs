@@ -4,7 +4,7 @@ use std::borrow::Cow;
 mod generated;
 
 use generated::{
-  MAX_ENTITY_NAME_LENGTH, MAX_LEGACY_ENTITY_NAME_LENGTH, is_legacy_named_entity,
+  MAX_ENTITY_NAME_LENGTH, MAX_LEGACY_ENTITY_NAME_LENGTH, lookup_legacy_named_entity,
   lookup_named_entity,
 };
 
@@ -129,17 +129,14 @@ fn decode_html_entities_alloc(text: &str, in_attribute: bool) -> String {
     let mut decoded_legacy = false;
     while legacy_end > name_start {
       let name = &bytes[name_start..legacy_end];
-      if is_legacy_named_entity(name) {
+      if let Some(replacement) = lookup_legacy_named_entity(name) {
         let next = bytes.get(legacy_end).copied();
         let ambiguous_attribute =
           in_attribute && next.is_some_and(|byte| byte == b'=' || is_ascii_alphanumeric(byte));
         if !ambiguous_attribute {
-          // The generated canonical table contains every legacy name.
-          if let Some(replacement) = lookup_named_entity(name) {
-            result.push_str(replacement);
-            i = legacy_end;
-            decoded_legacy = true;
-          }
+          result.push_str(replacement);
+          i = legacy_end;
+          decoded_legacy = true;
         }
         break;
       }

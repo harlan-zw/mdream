@@ -3,565 +3,83 @@
 
 pub(super) const MAX_ENTITY_NAME_LENGTH: usize = 31;
 pub(super) const MAX_LEGACY_ENTITY_NAME_LENGTH: usize = 6;
+const LEGACY_FLAG: u16 = 0x8000;
+
+#[rustfmt::skip]
+const ENTITY_OFFSETS: [u16; 442] = [
+  0x8000, 0x8009, 0x800F, 0x8019, 0x8022, 0x002C, 0x8035, 0x803E, 0x8048, 0x0050, 0x8058, 0x8060,
+  0x006A, 0x0075, 0x0082, 0x0089, 0x0098, 0x00A8, 0x00C2, 0x00D6, 0x00E4, 0x0108, 0x0113, 0x011B,
+  0x0124, 0x0138, 0x014B, 0x015F, 0x0166, 0x0173, 0x0187, 0x019B, 0x01B4, 0x01C9, 0x01DB, 0x01E9,
+  0x81F7, 0x81FE, 0x8208, 0x8211, 0x021B, 0x0227, 0x0232, 0x8239, 0x0241, 0x024C, 0x8257, 0x025C,
+  0x0265, 0x0276, 0x827C, 0x8286, 0x028F, 0x8297, 0x02A1, 0x02A8, 0x02B4, 0x02C1, 0x82C9, 0x02D1,
+  0x82DA, 0x02DF, 0x02E9, 0x02FE, 0x030C, 0x031C, 0x032A, 0x033D, 0x034B, 0x035E, 0x0364, 0x036E,
+  0x0382, 0x0391, 0x039E, 0x03B2, 0x83C3, 0x03CD, 0x03D3, 0x83DC, 0x83E6, 0x83EF, 0x03F9, 0x0402,
+  0x040D, 0x0426, 0x8439, 0x8443, 0x844D, 0x0455, 0x0461, 0x046E, 0x0475, 0x047B, 0x0488, 0x0492,
+  0x049E, 0x04AF, 0x84B6, 0x84BD, 0x04C4, 0x04CB, 0x04DE, 0x04E6, 0x04ED, 0x0503, 0x0512, 0x0523,
+  0x0532, 0x0541, 0x054B, 0x055E, 0x0571, 0x0585, 0x0596, 0x059F, 0x05A8, 0x05B8, 0x05C5, 0x05CD,
+  0x05DA, 0x85EC, 0x05F5, 0x05FF, 0x0605, 0x060C, 0x061A, 0x0623, 0x0635, 0x0643, 0x064D, 0x0660,
+  0x866F, 0x8679, 0x8682, 0x068C, 0x0697, 0x06A3, 0x06AD, 0x06B9, 0x06C1, 0x86CC, 0x06D4, 0x06E3,
+  0x86E9, 0x06F3, 0x06FB, 0x8703, 0x870D, 0x8716, 0x871F, 0x8728, 0x0732, 0x073E, 0x0748, 0x8751,
+  0x0757, 0x075F, 0x0767, 0x0771, 0x077A, 0x0781, 0x0788, 0x8793, 0x079C, 0x07A2, 0x87AC, 0x87B6,
+  0x07BE, 0x07C8, 0x07D0, 0x07D8, 0x87E3, 0x07ED, 0x07F4, 0x07FD, 0x0808, 0x8810, 0x881A, 0x8823,
+  0x082B, 0x0838, 0x083F, 0x0847, 0x0853, 0x085D, 0x086A, 0x0872, 0x087A, 0x0883, 0x888C, 0x0894,
+  0x089E, 0x88A6, 0x08B0, 0x08B9, 0x08C4, 0x08CD, 0x88D9, 0x08E0, 0x08E9, 0x08F9, 0x0903, 0x090A,
+  0x8911, 0x091B, 0x0924, 0x8932, 0x893C, 0x8945, 0x094F, 0x0959, 0x0966, 0x0971, 0x097A, 0x0983,
+  0x098B, 0x0996, 0x099F, 0x09A9, 0x89B0, 0x89B7, 0x09BF, 0x09C8, 0x09CF, 0x09D9, 0x09E2, 0x09EA,
+  0x89F5, 0x89FF, 0x8A09, 0x0A13, 0x0A1D, 0x0A26, 0x0A2D, 0x0A35, 0x8A3D, 0x0A42, 0x0A4B, 0x0A53,
+  0x0A5C, 0x0A67, 0x0A75, 0x8A80, 0x8A8A, 0x8A93, 0x0A9C, 0x8AA4, 0x0AAE, 0x0AB8, 0x0AC5, 0x0ACC,
+  0x0AD6, 0x0ADE, 0x8AE6, 0x0AF0, 0x0AF9, 0x8B03, 0x0B0B, 0x0B14, 0x0B1D, 0x0B27, 0x0B30, 0x8B3B,
+  0x0B44, 0x0B4D, 0x0B56, 0x0B5F, 0x0B69, 0x0B70, 0x0B7A, 0x0B85, 0x0B8C, 0x0B9A, 0x0BAD, 0x0BB5,
+  0x0BC0, 0x0BCB, 0x0BD4, 0x0BDC, 0x0BE8, 0x0BEF, 0x0BF7, 0x0C02, 0x0C09, 0x0C13, 0x8C1E, 0x8C23,
+  0x0C2B, 0x8C35, 0x0C3E, 0x8C47, 0x0C51, 0x0C5B, 0x0C64, 0x0C6A, 0x8C74, 0x0C7C, 0x0C86, 0x0C8D,
+  0x0C94, 0x8C9C, 0x0CA3, 0x0CAD, 0x0CB9, 0x8CC2, 0x0CCC, 0x0CD2, 0x8CD8, 0x8CE2, 0x0CEB, 0x8CF4,
+  0x0CFE, 0x0D05, 0x0D0F, 0x0D18, 0x0D23, 0x0D2D, 0x8D34, 0x8D3C, 0x8D44, 0x8D4E, 0x0D58, 0x8D63,
+  0x8D6B, 0x0D73, 0x0D7C, 0x0D85, 0x0D8E, 0x0D99, 0x0DA2, 0x0DA9, 0x0DAF, 0x0DB6, 0x8DBD, 0x0DC7,
+  0x8DCD, 0x0DD6, 0x0DE0, 0x0DE9, 0x0DF2, 0x0DFD, 0x0E04, 0x8E0C, 0x0E13, 0x0E1C, 0x0E26, 0x0E2F,
+  0x8E3A, 0x0E43, 0x0E4C, 0x0E55, 0x0E5E, 0x0E68, 0x0E6F, 0x0E79, 0x0E84, 0x0E8D, 0x8E9A, 0x0EA1,
+  0x0EAC, 0x0EB3, 0x0EC2, 0x0ECA, 0x0ED1, 0x0EDC, 0x0EE3, 0x0EED, 0x0EF8, 0x0F02, 0x0F0C, 0x8F15,
+  0x0F1D, 0x8F24, 0x0F2B, 0x0F34, 0x0F3E, 0x0F48, 0x0F50, 0x0F5A, 0x0F60, 0x0F6B, 0x0F79, 0x0F83,
+  0x0F8C, 0x0F94, 0x0F9D, 0x0FA8, 0x0FB5, 0x0FBD, 0x8FC5, 0x8FCD, 0x8FD5, 0x0FDD, 0x0FE6, 0x0FF1,
+  0x8FFE, 0x1007, 0x100E, 0x1019, 0x1027, 0x1030, 0x103C, 0x1046, 0x1056, 0x1063, 0x106E, 0x1078,
+  0x9083, 0x108C, 0x9095, 0x109E, 0x10A8, 0x90B1, 0x10BB, 0x90C4, 0x90CD, 0x90D7, 0x10DE, 0x10EA,
+  0x10F2, 0x10FB, 0x9106, 0x110E, 0x111D, 0x1126, 0x1134, 0x1140, 0x114C, 0x1154, 0x115D, 0x1164,
+  0x116E, 0x1178, 0x1183, 0x118A, 0x9190, 0x919A, 0x91A1, 0x11A9, 0x11B1, 0x11B9,
+];
+
+#[rustfmt::skip]
+const ENTITY_DATA: &[u8] = b"\x05AElig\x02\xC3\x86\x03AMP\x01&\x06Aacute\x02\xC3\x81\x05Acirc\x02\xC3\x82\x06Agrave\x02\xC3\x80\x05Alpha\x02\xCE\x91\x05Aring\x02\xC3\x85\x06Atilde\x02\xC3\x83\x04Auml\x02\xC3\x84\x04Beta\x02\xCE\x92\x04COPY\x02\xC2\xA9\x06Ccedil\x02\xC3\x87\x07Cedilla\x02\xC2\xB8\x09CenterDot\x02\xC2\xB7\x03Chi\x02\xCE\xA7\x0ACirclePlus\x03\xE2\x8A\x95\x0BCircleTimes\x03\xE2\x8A\x97\x15CloseCurlyDoubleQuote\x03\xE2\x80\x9D\x0FCloseCurlyQuote\x03\xE2\x80\x99\x09Congruent\x03\xE2\x89\xA1\x1FCounterClockwiseContourIntegral\x03\xE2\x88\xB3\x06Dagger\x03\xE2\x80\xA1\x03Del\x03\xE2\x88\x87\x05Delta\x02\xCE\x94\x10DiacriticalAcute\x02\xC2\xB4\x10DiacriticalGrave\x01`\x10DiacriticalTilde\x02\xCB\x9C\x03Dot\x02\xC2\xA8\x09DoubleDot\x02\xC2\xA8\x0FDoubleDownArrow\x03\xE2\x87\x93\x0FDoubleLeftArrow\x03\xE2\x87\x90\x14DoubleLeftRightArrow\x03\xE2\x87\x94\x10DoubleRightArrow\x03\xE2\x87\x92\x0DDoubleUpArrow\x03\xE2\x87\x91\x09DownArrow\x03\xE2\x86\x93\x09Downarrow\x03\xE2\x87\x93\x03ETH\x02\xC3\x90\x06Eacute\x02\xC3\x89\x05Ecirc\x02\xC3\x8A\x06Egrave\x02\xC3\x88\x07Element\x03\xE2\x88\x88\x07Epsilon\x02\xCE\x95\x03Eta\x02\xCE\x97\x04Euml\x02\xC3\x8B\x06Exists\x03\xE2\x88\x83\x06ForAll\x03\xE2\x88\x80\x02GT\x01>\x05Gamma\x02\xCE\x93\x0CGreaterEqual\x03\xE2\x89\xA5\x03Hat\x01^\x06Iacute\x02\xC3\x8D\x05Icirc\x02\xC3\x8E\x03Ifr\x03\xE2\x84\x91\x06Igrave\x02\xC3\x8C\x02Im\x03\xE2\x84\x91\x07Implies\x03\xE2\x87\x92\x08Integral\x03\xE2\x88\xAB\x04Iota\x02\xCE\x99\x04Iuml\x02\xC3\x8F\x05Kappa\x02\xCE\x9A\x02LT\x01<\x06Lambda\x02\xCE\x9B\x10LeftAngleBracket\x03\xE2\x9F\xA8\x09LeftArrow\x03\xE2\x86\x90\x0BLeftCeiling\x03\xE2\x8C\x88\x09LeftFloor\x03\xE2\x8C\x8A\x0ELeftRightArrow\x03\xE2\x86\x94\x09Leftarrow\x03\xE2\x87\x90\x0ELeftrightarrow\x03\xE2\x87\x94\x02Mu\x02\xCE\x9C\x07NewLine\x01\x0A\x10NonBreakingSpace\x02\xC2\xA0\x0ANotElement\x03\xE2\x88\x89\x08NotEqual\x03\xE2\x89\xA0\x0DNotEqualTilde\x05\xE2\x89\x82\xCC\xB8\x09NotSubset\x06\xE2\x8A\x82\xE2\x83\x92\x06Ntilde\x02\xC3\x91\x02Nu\x02\xCE\x9D\x05OElig\x02\xC5\x92\x06Oacute\x02\xC3\x93\x05Ocirc\x02\xC3\x94\x06Ograve\x02\xC3\x92\x05Omega\x02\xCE\xA9\x07Omicron\x02\xCE\x9F\x14OpenCurlyDoubleQuote\x03\xE2\x80\x9C\x0EOpenCurlyQuote\x03\xE2\x80\x98\x06Oslash\x02\xC3\x98\x06Otilde\x02\xC3\x95\x04Ouml\x02\xC3\x96\x07OverBar\x03\xE2\x80\xBE\x08PartialD\x03\xE2\x88\x82\x03Phi\x02\xCE\xA6\x02Pi\x02\xCE\xA0\x09PlusMinus\x02\xC2\xB1\x05Prime\x03\xE2\x80\xB3\x07Product\x03\xE2\x88\x8F\x0CProportional\x03\xE2\x88\x9D\x03Psi\x02\xCE\xA8\x04QUOT\x01\"\x03REG\x02\xC2\xAE\x02Re\x03\xE2\x84\x9C\x0EReverseElement\x03\xE2\x88\x8B\x03Rfr\x03\xE2\x84\x9C\x03Rho\x02\xCE\xA1\x11RightAngleBracket\x03\xE2\x9F\xA9\x0ARightArrow\x03\xE2\x86\x92\x0CRightCeiling\x03\xE2\x8C\x89\x0ARightFloor\x03\xE2\x8C\x8B\x0ARightarrow\x03\xE2\x87\x92\x06Scaron\x02\xC5\xA0\x0EShortDownArrow\x03\xE2\x86\x93\x0EShortLeftArrow\x03\xE2\x86\x90\x0FShortRightArrow\x03\xE2\x86\x92\x0CShortUpArrow\x03\xE2\x86\x91\x05Sigma\x02\xCE\xA3\x04Sqrt\x03\xE2\x88\x9A\x0BSubsetEqual\x03\xE2\x8A\x86\x08SuchThat\x03\xE2\x88\x8B\x03Sum\x03\xE2\x88\x91\x08Superset\x03\xE2\x8A\x83\x0DSupersetEqual\x03\xE2\x8A\x87\x05THORN\x02\xC3\x9E\x05TRADE\x03\xE2\x84\xA2\x03Tab\x01\x09\x03Tau\x02\xCE\xA4\x09Therefore\x03\xE2\x88\xB4\x05Theta\x02\xCE\x98\x0AThickSpace\x06\xE2\x81\x9F\xE2\x80\x8A\x09ThinSpace\x03\xE2\x80\x89\x05Tilde\x03\xE2\x88\xBC\x0ETildeFullEqual\x03\xE2\x89\x85\x0ATildeTilde\x03\xE2\x89\x88\x06Uacute\x02\xC3\x9A\x05Ucirc\x02\xC3\x9B\x06Ugrave\x02\xC3\x99\x08UnderBar\x01_\x07UpArrow\x03\xE2\x86\x91\x05UpTee\x03\xE2\x8A\xA5\x07Uparrow\x03\xE2\x87\x91\x04Upsi\x02\xCF\x92\x07Upsilon\x02\xCE\xA5\x04Uuml\x02\xC3\x9C\x0CVerticalLine\x01|\x02Xi\x02\xCE\x9E\x06Yacute\x02\xC3\x9D\x04Yuml\x02\xC5\xB8\x04Zeta\x02\xCE\x96\x06aacute\x02\xC3\xA1\x05acirc\x02\xC3\xA2\x05acute\x02\xC2\xB4\x05aelig\x02\xC3\xA6\x06agrave\x02\xC3\xA0\x07alefsym\x03\xE2\x84\xB5\x05aleph\x03\xE2\x84\xB5\x05alpha\x02\xCE\xB1\x03amp\x01&\x03and\x03\xE2\x88\xA7\x03ang\x03\xE2\x88\xA0\x05angle\x03\xE2\x88\xA0\x05angst\x02\xC3\x85\x02ap\x03\xE2\x89\x88\x04apos\x01'\x06approx\x03\xE2\x89\x88\x05aring\x02\xC3\xA5\x03ast\x01*\x05asymp\x03\xE2\x89\x88\x06atilde\x02\xC3\xA3\x04auml\x02\xC3\xA4\x05bdquo\x03\xE2\x80\x9E\x04beta\x02\xCE\xB2\x03bot\x03\xE2\x8A\xA5\x06bottom\x03\xE2\x8A\xA5\x06brvbar\x02\xC2\xA6\x04bsol\x01\\\x04bull\x03\xE2\x80\xA2\x06bullet\x03\xE2\x80\xA2\x03cap\x03\xE2\x88\xA9\x06ccedil\x02\xC3\xA7\x05cedil\x02\xC2\xB8\x04cent\x02\xC2\xA2\x09centerdot\x02\xC2\xB7\x03chi\x02\xCF\x87\x04circ\x02\xCB\x86\x08circledR\x02\xC2\xAE\x05clubs\x03\xE2\x99\xA3\x08clubsuit\x03\xE2\x99\xA3\x05colon\x01:\x05comma\x01,\x06commat\x01@\x04cong\x03\xE2\x89\x85\x04copy\x02\xC2\xA9\x05crarr\x03\xE2\x86\xB5\x03cup\x03\xE2\x88\xAA\x06curren\x02\xC2\xA4\x04dArr\x03\xE2\x87\x93\x06dagger\x03\xE2\x80\xA0\x04darr\x03\xE2\x86\x93\x07ddagger\x03\xE2\x80\xA1\x03deg\x02\xC2\xB0\x05delta\x02\xCE\xB4\x0Bdiamondsuit\x03\xE2\x99\xA6\x05diams\x03\xE2\x99\xA6\x03die\x02\xC2\xA8\x03div\x02\xC3\xB7\x06divide\x02\xC3\xB7\x06dollar\x01$\x09downarrow\x03\xE2\x86\x93\x06eacute\x02\xC3\xA9\x05ecirc\x02\xC3\xAA\x06egrave\x02\xC3\xA8\x05empty\x03\xE2\x88\x85\x08emptyset\x03\xE2\x88\x85\x06emptyv\x03\xE2\x88\x85\x04emsp\x03\xE2\x80\x83\x04ensp\x03\xE2\x80\x82\x04epsi\x02\xCE\xB5\x07epsilon\x02\xCE\xB5\x06equals\x01=\x05equiv\x03\xE2\x89\xA1\x03eta\x02\xCE\xB7\x03eth\x02\xC3\xB0\x04euml\x02\xC3\xAB\x04euro\x03\xE2\x82\xAC\x04excl\x01!\x05exist\x03\xE2\x88\x83\x05fjlig\x02fj\x04fnof\x02\xC6\x92\x06forall\x03\xE2\x88\x80\x06frac12\x02\xC2\xBD\x06frac14\x02\xC2\xBC\x06frac34\x02\xC2\xBE\x05frasl\x03\xE2\x81\x84\x05gamma\x02\xCE\xB3\x02ge\x03\xE2\x89\xA5\x03geq\x03\xE2\x89\xA5\x05grave\x01`\x02gt\x01>\x04hArr\x03\xE2\x87\x94\x04half\x02\xC2\xBD\x04harr\x03\xE2\x86\x94\x06hearts\x03\xE2\x99\xA5\x09heartsuit\x03\xE2\x99\xA5\x06hellip\x03\xE2\x80\xA6\x06iacute\x02\xC3\xAD\x05icirc\x02\xC3\xAE\x05iexcl\x02\xC2\xA1\x03iff\x03\xE2\x87\x94\x06igrave\x02\xC3\xAC\x05image\x03\xE2\x84\x91\x08imagpart\x03\xE2\x84\x91\x02in\x03\xE2\x88\x88\x05infin\x03\xE2\x88\x9E\x03int\x03\xE2\x88\xAB\x04iota\x02\xCE\xB9\x06iquest\x02\xC2\xBF\x04isin\x03\xE2\x88\x88\x05isinv\x03\xE2\x88\x88\x04iuml\x02\xC3\xAF\x05kappa\x02\xCE\xBA\x04lArr\x03\xE2\x87\x90\x06lambda\x02\xCE\xBB\x04lang\x03\xE2\x9F\xA8\x06langle\x03\xE2\x9F\xA8\x05laquo\x02\xC2\xAB\x04larr\x03\xE2\x86\x90\x06lbrace\x01{\x06lbrack\x01[\x05lceil\x03\xE2\x8C\x88\x04lcub\x01{\x05ldquo\x03\xE2\x80\x9C\x06ldquor\x03\xE2\x80\x9E\x02le\x03\xE2\x89\xA4\x09leftarrow\x03\xE2\x86\x90\x0Eleftrightarrow\x03\xE2\x86\x94\x03leq\x03\xE2\x89\xA4\x06lfloor\x03\xE2\x8C\x8A\x06lowast\x03\xE2\x88\x97\x06lowbar\x01_\x03loz\x03\xE2\x97\x8A\x07lozenge\x03\xE2\x97\x8A\x04lpar\x01(\x03lrm\x03\xE2\x80\x8E\x06lsaquo\x03\xE2\x80\xB9\x04lsqb\x01[\x05lsquo\x03\xE2\x80\x98\x06lsquor\x03\xE2\x80\x9A\x02lt\x01<\x04macr\x02\xC2\xAF\x05mdash\x03\xE2\x80\x94\x05micro\x02\xC2\xB5\x06midast\x01*\x06middot\x02\xC2\xB7\x05minus\x03\xE2\x88\x92\x04mldr\x03\xE2\x80\xA6\x02mu\x02\xCE\xBC\x05nabla\x03\xE2\x88\x87\x04nbsp\x02\xC2\xA0\x05ndash\x03\xE2\x80\x93\x02ne\x03\xE2\x89\xA0\x02ni\x03\xE2\x88\x8B\x03niv\x03\xE2\x88\x8B\x03not\x02\xC2\xAC\x05notin\x03\xE2\x88\x89\x07notinva\x03\xE2\x88\x89\x04nsub\x03\xE2\x8A\x84\x06ntilde\x02\xC3\xB1\x02nu\x02\xCE\xBD\x03num\x01#\x06oacute\x02\xC3\xB3\x05ocirc\x02\xC3\xB4\x05oelig\x02\xC5\x93\x06ograve\x02\xC3\xB2\x03ohm\x02\xCE\xA9\x05oline\x03\xE2\x80\xBE\x05omega\x02\xCF\x89\x07omicron\x02\xCE\xBF\x05oplus\x03\xE2\x8A\x95\x02or\x03\xE2\x88\xA8\x04ordf\x02\xC2\xAA\x04ordm\x02\xC2\xBA\x06oslash\x02\xC3\xB8\x06otilde\x02\xC3\xB5\x06otimes\x03\xE2\x8A\x97\x04ouml\x02\xC3\xB6\x04para\x02\xC2\xB6\x04part\x03\xE2\x88\x82\x06percnt\x01%\x06period\x01.\x06permil\x03\xE2\x80\xB0\x04perp\x03\xE2\x8A\xA5\x03phi\x02\xCF\x86\x02pi\x02\xCF\x80\x03piv\x02\xCF\x96\x04plus\x01+\x06plusmn\x02\xC2\xB1\x02pm\x02\xC2\xB1\x05pound\x02\xC2\xA3\x05prime\x03\xE2\x80\xB2\x04prod\x03\xE2\x88\x8F\x04prop\x03\xE2\x88\x9D\x06propto\x03\xE2\x88\x9D\x03psi\x02\xCF\x88\x05quest\x01?\x04quot\x01\"\x04rArr\x03\xE2\x87\x92\x05radic\x03\xE2\x88\x9A\x04rang\x03\xE2\x9F\xA9\x06rangle\x03\xE2\x9F\xA9\x05raquo\x02\xC2\xBB\x04rarr\x03\xE2\x86\x92\x06rbrace\x01}\x06rbrack\x01]\x05rceil\x03\xE2\x8C\x89\x04rcub\x01}\x05rdquo\x03\xE2\x80\x9D\x06rdquor\x03\xE2\x80\x9D\x04real\x03\xE2\x84\x9C\x08realpart\x03\xE2\x84\x9C\x03reg\x02\xC2\xAE\x06rfloor\x03\xE2\x8C\x8B\x03rho\x02\xCF\x81\x0Arightarrow\x03\xE2\x86\x92\x03rlm\x03\xE2\x80\x8F\x04rpar\x01)\x06rsaquo\x03\xE2\x80\xBA\x04rsqb\x01]\x05rsquo\x03\xE2\x80\x99\x06rsquor\x03\xE2\x80\x99\x05sbquo\x03\xE2\x80\x9A\x06scaron\x02\xC5\xA1\x04sdot\x03\xE2\x8B\x85\x04sect\x02\xC2\xA7\x04semi\x01;\x03shy\x02\xC2\xAD\x05sigma\x02\xCF\x83\x06sigmaf\x02\xCF\x82\x06sigmav\x02\xCF\x82\x03sim\x03\xE2\x88\xBC\x05slarr\x03\xE2\x86\x90\x03sol\x01/\x06spades\x03\xE2\x99\xA0\x09spadesuit\x03\xE2\x99\xA0\x05srarr\x03\xE2\x86\x92\x05strns\x02\xC2\xAF\x03sub\x03\xE2\x8A\x82\x04sube\x03\xE2\x8A\x86\x06subset\x03\xE2\x8A\x82\x08subseteq\x03\xE2\x8A\x86\x03sum\x03\xE2\x88\x91\x03sup\x03\xE2\x8A\x83\x04sup1\x02\xC2\xB9\x04sup2\x02\xC2\xB2\x04sup3\x02\xC2\xB3\x04supe\x03\xE2\x8A\x87\x06supset\x03\xE2\x8A\x83\x08supseteq\x03\xE2\x8A\x87\x05szlig\x02\xC3\x9F\x03tau\x02\xCF\x84\x06there4\x03\xE2\x88\xB4\x09therefore\x03\xE2\x88\xB4\x05theta\x02\xCE\xB8\x08thetasym\x02\xCF\x91\x06thetav\x02\xCF\x91\x0Bthickapprox\x03\xE2\x89\x88\x08thicksim\x03\xE2\x88\xBC\x06thinsp\x03\xE2\x80\x89\x05thkap\x03\xE2\x89\x88\x06thksim\x03\xE2\x88\xBC\x05thorn\x02\xC3\xBE\x05tilde\x02\xCB\x9C\x05times\x02\xC3\x97\x05trade\x03\xE2\x84\xA2\x04uArr\x03\xE2\x87\x91\x06uacute\x02\xC3\xBA\x04uarr\x03\xE2\x86\x91\x05ucirc\x02\xC3\xBB\x06ugrave\x02\xC3\xB9\x03uml\x02\xC2\xA8\x07uparrow\x03\xE2\x86\x91\x04upsi\x02\xCF\x85\x05upsih\x02\xCF\x92\x07upsilon\x02\xCF\x85\x04uuml\x02\xC3\xBC\x0Avarnothing\x03\xE2\x88\x85\x05varpi\x02\xCF\x96\x09varpropto\x03\xE2\x88\x9D\x08varsigma\x02\xCF\x82\x08vartheta\x02\xCF\x91\x03vee\x03\xE2\x88\xA8\x06verbar\x01|\x04vert\x01|\x05vprop\x03\xE2\x88\x9D\x05wedge\x03\xE2\x88\xA7\x06weierp\x03\xE2\x84\x98\x02wp\x03\xE2\x84\x98\x02xi\x02\xCE\xBE\x06yacute\x02\xC3\xBD\x03yen\x02\xC2\xA5\x04yuml\x02\xC3\xBF\x04zeta\x02\xCE\xB6\x03zwj\x03\xE2\x80\x8D\x04zwnj\x03\xE2\x80\x8C";
+
+#[inline]
+fn lookup_entity(name: &[u8]) -> Option<(&'static str, bool)> {
+  let mut low = 0;
+  let mut high = ENTITY_OFFSETS.len();
+  while low < high {
+    let middle = low + (high - low) / 2;
+    let encoded_offset = ENTITY_OFFSETS[middle];
+    let offset = usize::from(encoded_offset & !LEGACY_FLAG);
+    let entry_name_start = offset + 1;
+    let entry_name_end = entry_name_start + usize::from(ENTITY_DATA[offset]);
+    match name.cmp(&ENTITY_DATA[entry_name_start..entry_name_end]) {
+      std::cmp::Ordering::Less => high = middle,
+      std::cmp::Ordering::Greater => low = middle + 1,
+      std::cmp::Ordering::Equal => {
+        let value_start = entry_name_end + 1;
+        let value_end = value_start + usize::from(ENTITY_DATA[entry_name_end]);
+        let value = std::str::from_utf8(&ENTITY_DATA[value_start..value_end]).ok()?;
+        return Some((value, encoded_offset & LEGACY_FLAG != 0));
+      }
+    }
+  }
+  None
+}
 
 #[inline]
 pub(super) fn lookup_named_entity(name: &[u8]) -> Option<&'static str> {
-  match name {
-    b"AElig" => Some("\u{C6}"),
-    b"AMP" => Some("&"),
-    b"Aacute" => Some("\u{C1}"),
-    b"Acirc" => Some("\u{C2}"),
-    b"Agrave" => Some("\u{C0}"),
-    b"Alpha" => Some("\u{391}"),
-    b"Aring" => Some("\u{C5}"),
-    b"Atilde" => Some("\u{C3}"),
-    b"Auml" => Some("\u{C4}"),
-    b"Beta" => Some("\u{392}"),
-    b"COPY" => Some("\u{A9}"),
-    b"Ccedil" => Some("\u{C7}"),
-    b"Cedilla" => Some("\u{B8}"),
-    b"CenterDot" => Some("\u{B7}"),
-    b"Chi" => Some("\u{3A7}"),
-    b"CirclePlus" => Some("\u{2295}"),
-    b"CircleTimes" => Some("\u{2297}"),
-    b"CloseCurlyDoubleQuote" => Some("\u{201D}"),
-    b"CloseCurlyQuote" => Some("\u{2019}"),
-    b"Congruent" => Some("\u{2261}"),
-    b"CounterClockwiseContourIntegral" => Some("\u{2233}"),
-    b"Dagger" => Some("\u{2021}"),
-    b"Del" => Some("\u{2207}"),
-    b"Delta" => Some("\u{394}"),
-    b"DiacriticalAcute" => Some("\u{B4}"),
-    b"DiacriticalGrave" => Some("`"),
-    b"DiacriticalTilde" => Some("\u{2DC}"),
-    b"Dot" => Some("\u{A8}"),
-    b"DoubleDot" => Some("\u{A8}"),
-    b"DoubleDownArrow" => Some("\u{21D3}"),
-    b"DoubleLeftArrow" => Some("\u{21D0}"),
-    b"DoubleLeftRightArrow" => Some("\u{21D4}"),
-    b"DoubleRightArrow" => Some("\u{21D2}"),
-    b"DoubleUpArrow" => Some("\u{21D1}"),
-    b"DownArrow" => Some("\u{2193}"),
-    b"Downarrow" => Some("\u{21D3}"),
-    b"ETH" => Some("\u{D0}"),
-    b"Eacute" => Some("\u{C9}"),
-    b"Ecirc" => Some("\u{CA}"),
-    b"Egrave" => Some("\u{C8}"),
-    b"Element" => Some("\u{2208}"),
-    b"Epsilon" => Some("\u{395}"),
-    b"Eta" => Some("\u{397}"),
-    b"Euml" => Some("\u{CB}"),
-    b"Exists" => Some("\u{2203}"),
-    b"ForAll" => Some("\u{2200}"),
-    b"GT" => Some(">"),
-    b"Gamma" => Some("\u{393}"),
-    b"GreaterEqual" => Some("\u{2265}"),
-    b"Hat" => Some("^"),
-    b"Iacute" => Some("\u{CD}"),
-    b"Icirc" => Some("\u{CE}"),
-    b"Ifr" => Some("\u{2111}"),
-    b"Igrave" => Some("\u{CC}"),
-    b"Im" => Some("\u{2111}"),
-    b"Implies" => Some("\u{21D2}"),
-    b"Integral" => Some("\u{222B}"),
-    b"Iota" => Some("\u{399}"),
-    b"Iuml" => Some("\u{CF}"),
-    b"Kappa" => Some("\u{39A}"),
-    b"LT" => Some("<"),
-    b"Lambda" => Some("\u{39B}"),
-    b"LeftAngleBracket" => Some("\u{27E8}"),
-    b"LeftArrow" => Some("\u{2190}"),
-    b"LeftCeiling" => Some("\u{2308}"),
-    b"LeftFloor" => Some("\u{230A}"),
-    b"LeftRightArrow" => Some("\u{2194}"),
-    b"Leftarrow" => Some("\u{21D0}"),
-    b"Leftrightarrow" => Some("\u{21D4}"),
-    b"Mu" => Some("\u{39C}"),
-    b"NewLine" => Some("\u{A}"),
-    b"NonBreakingSpace" => Some("\u{A0}"),
-    b"NotElement" => Some("\u{2209}"),
-    b"NotEqual" => Some("\u{2260}"),
-    b"NotEqualTilde" => Some("\u{2242}\u{338}"),
-    b"NotSubset" => Some("\u{2282}\u{20D2}"),
-    b"Ntilde" => Some("\u{D1}"),
-    b"Nu" => Some("\u{39D}"),
-    b"OElig" => Some("\u{152}"),
-    b"Oacute" => Some("\u{D3}"),
-    b"Ocirc" => Some("\u{D4}"),
-    b"Ograve" => Some("\u{D2}"),
-    b"Omega" => Some("\u{3A9}"),
-    b"Omicron" => Some("\u{39F}"),
-    b"OpenCurlyDoubleQuote" => Some("\u{201C}"),
-    b"OpenCurlyQuote" => Some("\u{2018}"),
-    b"Oslash" => Some("\u{D8}"),
-    b"Otilde" => Some("\u{D5}"),
-    b"Ouml" => Some("\u{D6}"),
-    b"OverBar" => Some("\u{203E}"),
-    b"PartialD" => Some("\u{2202}"),
-    b"Phi" => Some("\u{3A6}"),
-    b"Pi" => Some("\u{3A0}"),
-    b"PlusMinus" => Some("\u{B1}"),
-    b"Prime" => Some("\u{2033}"),
-    b"Product" => Some("\u{220F}"),
-    b"Proportional" => Some("\u{221D}"),
-    b"Psi" => Some("\u{3A8}"),
-    b"QUOT" => Some("\""),
-    b"REG" => Some("\u{AE}"),
-    b"Re" => Some("\u{211C}"),
-    b"ReverseElement" => Some("\u{220B}"),
-    b"Rfr" => Some("\u{211C}"),
-    b"Rho" => Some("\u{3A1}"),
-    b"RightAngleBracket" => Some("\u{27E9}"),
-    b"RightArrow" => Some("\u{2192}"),
-    b"RightCeiling" => Some("\u{2309}"),
-    b"RightFloor" => Some("\u{230B}"),
-    b"Rightarrow" => Some("\u{21D2}"),
-    b"Scaron" => Some("\u{160}"),
-    b"ShortDownArrow" => Some("\u{2193}"),
-    b"ShortLeftArrow" => Some("\u{2190}"),
-    b"ShortRightArrow" => Some("\u{2192}"),
-    b"ShortUpArrow" => Some("\u{2191}"),
-    b"Sigma" => Some("\u{3A3}"),
-    b"Sqrt" => Some("\u{221A}"),
-    b"SubsetEqual" => Some("\u{2286}"),
-    b"SuchThat" => Some("\u{220B}"),
-    b"Sum" => Some("\u{2211}"),
-    b"Superset" => Some("\u{2283}"),
-    b"SupersetEqual" => Some("\u{2287}"),
-    b"THORN" => Some("\u{DE}"),
-    b"TRADE" => Some("\u{2122}"),
-    b"Tab" => Some("\u{9}"),
-    b"Tau" => Some("\u{3A4}"),
-    b"Therefore" => Some("\u{2234}"),
-    b"Theta" => Some("\u{398}"),
-    b"ThickSpace" => Some("\u{205F}\u{200A}"),
-    b"ThinSpace" => Some("\u{2009}"),
-    b"Tilde" => Some("\u{223C}"),
-    b"TildeFullEqual" => Some("\u{2245}"),
-    b"TildeTilde" => Some("\u{2248}"),
-    b"Uacute" => Some("\u{DA}"),
-    b"Ucirc" => Some("\u{DB}"),
-    b"Ugrave" => Some("\u{D9}"),
-    b"UnderBar" => Some("_"),
-    b"UpArrow" => Some("\u{2191}"),
-    b"UpTee" => Some("\u{22A5}"),
-    b"Uparrow" => Some("\u{21D1}"),
-    b"Upsi" => Some("\u{3D2}"),
-    b"Upsilon" => Some("\u{3A5}"),
-    b"Uuml" => Some("\u{DC}"),
-    b"VerticalLine" => Some("|"),
-    b"Xi" => Some("\u{39E}"),
-    b"Yacute" => Some("\u{DD}"),
-    b"Yuml" => Some("\u{178}"),
-    b"Zeta" => Some("\u{396}"),
-    b"aacute" => Some("\u{E1}"),
-    b"acirc" => Some("\u{E2}"),
-    b"acute" => Some("\u{B4}"),
-    b"aelig" => Some("\u{E6}"),
-    b"agrave" => Some("\u{E0}"),
-    b"alefsym" => Some("\u{2135}"),
-    b"aleph" => Some("\u{2135}"),
-    b"alpha" => Some("\u{3B1}"),
-    b"amp" => Some("&"),
-    b"and" => Some("\u{2227}"),
-    b"ang" => Some("\u{2220}"),
-    b"angle" => Some("\u{2220}"),
-    b"angst" => Some("\u{C5}"),
-    b"ap" => Some("\u{2248}"),
-    b"apos" => Some("'"),
-    b"approx" => Some("\u{2248}"),
-    b"aring" => Some("\u{E5}"),
-    b"ast" => Some("*"),
-    b"asymp" => Some("\u{2248}"),
-    b"atilde" => Some("\u{E3}"),
-    b"auml" => Some("\u{E4}"),
-    b"bdquo" => Some("\u{201E}"),
-    b"beta" => Some("\u{3B2}"),
-    b"bot" => Some("\u{22A5}"),
-    b"bottom" => Some("\u{22A5}"),
-    b"brvbar" => Some("\u{A6}"),
-    b"bsol" => Some("\\"),
-    b"bull" => Some("\u{2022}"),
-    b"bullet" => Some("\u{2022}"),
-    b"cap" => Some("\u{2229}"),
-    b"ccedil" => Some("\u{E7}"),
-    b"cedil" => Some("\u{B8}"),
-    b"cent" => Some("\u{A2}"),
-    b"centerdot" => Some("\u{B7}"),
-    b"chi" => Some("\u{3C7}"),
-    b"circ" => Some("\u{2C6}"),
-    b"circledR" => Some("\u{AE}"),
-    b"clubs" => Some("\u{2663}"),
-    b"clubsuit" => Some("\u{2663}"),
-    b"colon" => Some(":"),
-    b"comma" => Some(","),
-    b"commat" => Some("@"),
-    b"cong" => Some("\u{2245}"),
-    b"copy" => Some("\u{A9}"),
-    b"crarr" => Some("\u{21B5}"),
-    b"cup" => Some("\u{222A}"),
-    b"curren" => Some("\u{A4}"),
-    b"dArr" => Some("\u{21D3}"),
-    b"dagger" => Some("\u{2020}"),
-    b"darr" => Some("\u{2193}"),
-    b"ddagger" => Some("\u{2021}"),
-    b"deg" => Some("\u{B0}"),
-    b"delta" => Some("\u{3B4}"),
-    b"diamondsuit" => Some("\u{2666}"),
-    b"diams" => Some("\u{2666}"),
-    b"die" => Some("\u{A8}"),
-    b"div" => Some("\u{F7}"),
-    b"divide" => Some("\u{F7}"),
-    b"dollar" => Some("$"),
-    b"downarrow" => Some("\u{2193}"),
-    b"eacute" => Some("\u{E9}"),
-    b"ecirc" => Some("\u{EA}"),
-    b"egrave" => Some("\u{E8}"),
-    b"empty" => Some("\u{2205}"),
-    b"emptyset" => Some("\u{2205}"),
-    b"emptyv" => Some("\u{2205}"),
-    b"emsp" => Some("\u{2003}"),
-    b"ensp" => Some("\u{2002}"),
-    b"epsi" => Some("\u{3B5}"),
-    b"epsilon" => Some("\u{3B5}"),
-    b"equals" => Some("="),
-    b"equiv" => Some("\u{2261}"),
-    b"eta" => Some("\u{3B7}"),
-    b"eth" => Some("\u{F0}"),
-    b"euml" => Some("\u{EB}"),
-    b"euro" => Some("\u{20AC}"),
-    b"excl" => Some("!"),
-    b"exist" => Some("\u{2203}"),
-    b"fjlig" => Some("fj"),
-    b"fnof" => Some("\u{192}"),
-    b"forall" => Some("\u{2200}"),
-    b"frac12" => Some("\u{BD}"),
-    b"frac14" => Some("\u{BC}"),
-    b"frac34" => Some("\u{BE}"),
-    b"frasl" => Some("\u{2044}"),
-    b"gamma" => Some("\u{3B3}"),
-    b"ge" => Some("\u{2265}"),
-    b"geq" => Some("\u{2265}"),
-    b"grave" => Some("`"),
-    b"gt" => Some(">"),
-    b"hArr" => Some("\u{21D4}"),
-    b"half" => Some("\u{BD}"),
-    b"harr" => Some("\u{2194}"),
-    b"hearts" => Some("\u{2665}"),
-    b"heartsuit" => Some("\u{2665}"),
-    b"hellip" => Some("\u{2026}"),
-    b"iacute" => Some("\u{ED}"),
-    b"icirc" => Some("\u{EE}"),
-    b"iexcl" => Some("\u{A1}"),
-    b"iff" => Some("\u{21D4}"),
-    b"igrave" => Some("\u{EC}"),
-    b"image" => Some("\u{2111}"),
-    b"imagpart" => Some("\u{2111}"),
-    b"in" => Some("\u{2208}"),
-    b"infin" => Some("\u{221E}"),
-    b"int" => Some("\u{222B}"),
-    b"iota" => Some("\u{3B9}"),
-    b"iquest" => Some("\u{BF}"),
-    b"isin" => Some("\u{2208}"),
-    b"isinv" => Some("\u{2208}"),
-    b"iuml" => Some("\u{EF}"),
-    b"kappa" => Some("\u{3BA}"),
-    b"lArr" => Some("\u{21D0}"),
-    b"lambda" => Some("\u{3BB}"),
-    b"lang" => Some("\u{27E8}"),
-    b"langle" => Some("\u{27E8}"),
-    b"laquo" => Some("\u{AB}"),
-    b"larr" => Some("\u{2190}"),
-    b"lbrace" => Some("{"),
-    b"lbrack" => Some("["),
-    b"lceil" => Some("\u{2308}"),
-    b"lcub" => Some("{"),
-    b"ldquo" => Some("\u{201C}"),
-    b"ldquor" => Some("\u{201E}"),
-    b"le" => Some("\u{2264}"),
-    b"leftarrow" => Some("\u{2190}"),
-    b"leftrightarrow" => Some("\u{2194}"),
-    b"leq" => Some("\u{2264}"),
-    b"lfloor" => Some("\u{230A}"),
-    b"lowast" => Some("\u{2217}"),
-    b"lowbar" => Some("_"),
-    b"loz" => Some("\u{25CA}"),
-    b"lozenge" => Some("\u{25CA}"),
-    b"lpar" => Some("("),
-    b"lrm" => Some("\u{200E}"),
-    b"lsaquo" => Some("\u{2039}"),
-    b"lsqb" => Some("["),
-    b"lsquo" => Some("\u{2018}"),
-    b"lsquor" => Some("\u{201A}"),
-    b"lt" => Some("<"),
-    b"macr" => Some("\u{AF}"),
-    b"mdash" => Some("\u{2014}"),
-    b"micro" => Some("\u{B5}"),
-    b"midast" => Some("*"),
-    b"middot" => Some("\u{B7}"),
-    b"minus" => Some("\u{2212}"),
-    b"mldr" => Some("\u{2026}"),
-    b"mu" => Some("\u{3BC}"),
-    b"nabla" => Some("\u{2207}"),
-    b"nbsp" => Some("\u{A0}"),
-    b"ndash" => Some("\u{2013}"),
-    b"ne" => Some("\u{2260}"),
-    b"ni" => Some("\u{220B}"),
-    b"niv" => Some("\u{220B}"),
-    b"not" => Some("\u{AC}"),
-    b"notin" => Some("\u{2209}"),
-    b"notinva" => Some("\u{2209}"),
-    b"nsub" => Some("\u{2284}"),
-    b"ntilde" => Some("\u{F1}"),
-    b"nu" => Some("\u{3BD}"),
-    b"num" => Some("#"),
-    b"oacute" => Some("\u{F3}"),
-    b"ocirc" => Some("\u{F4}"),
-    b"oelig" => Some("\u{153}"),
-    b"ograve" => Some("\u{F2}"),
-    b"ohm" => Some("\u{3A9}"),
-    b"oline" => Some("\u{203E}"),
-    b"omega" => Some("\u{3C9}"),
-    b"omicron" => Some("\u{3BF}"),
-    b"oplus" => Some("\u{2295}"),
-    b"or" => Some("\u{2228}"),
-    b"ordf" => Some("\u{AA}"),
-    b"ordm" => Some("\u{BA}"),
-    b"oslash" => Some("\u{F8}"),
-    b"otilde" => Some("\u{F5}"),
-    b"otimes" => Some("\u{2297}"),
-    b"ouml" => Some("\u{F6}"),
-    b"para" => Some("\u{B6}"),
-    b"part" => Some("\u{2202}"),
-    b"percnt" => Some("%"),
-    b"period" => Some("."),
-    b"permil" => Some("\u{2030}"),
-    b"perp" => Some("\u{22A5}"),
-    b"phi" => Some("\u{3C6}"),
-    b"pi" => Some("\u{3C0}"),
-    b"piv" => Some("\u{3D6}"),
-    b"plus" => Some("+"),
-    b"plusmn" => Some("\u{B1}"),
-    b"pm" => Some("\u{B1}"),
-    b"pound" => Some("\u{A3}"),
-    b"prime" => Some("\u{2032}"),
-    b"prod" => Some("\u{220F}"),
-    b"prop" => Some("\u{221D}"),
-    b"propto" => Some("\u{221D}"),
-    b"psi" => Some("\u{3C8}"),
-    b"quest" => Some("?"),
-    b"quot" => Some("\""),
-    b"rArr" => Some("\u{21D2}"),
-    b"radic" => Some("\u{221A}"),
-    b"rang" => Some("\u{27E9}"),
-    b"rangle" => Some("\u{27E9}"),
-    b"raquo" => Some("\u{BB}"),
-    b"rarr" => Some("\u{2192}"),
-    b"rbrace" => Some("}"),
-    b"rbrack" => Some("]"),
-    b"rceil" => Some("\u{2309}"),
-    b"rcub" => Some("}"),
-    b"rdquo" => Some("\u{201D}"),
-    b"rdquor" => Some("\u{201D}"),
-    b"real" => Some("\u{211C}"),
-    b"realpart" => Some("\u{211C}"),
-    b"reg" => Some("\u{AE}"),
-    b"rfloor" => Some("\u{230B}"),
-    b"rho" => Some("\u{3C1}"),
-    b"rightarrow" => Some("\u{2192}"),
-    b"rlm" => Some("\u{200F}"),
-    b"rpar" => Some(")"),
-    b"rsaquo" => Some("\u{203A}"),
-    b"rsqb" => Some("]"),
-    b"rsquo" => Some("\u{2019}"),
-    b"rsquor" => Some("\u{2019}"),
-    b"sbquo" => Some("\u{201A}"),
-    b"scaron" => Some("\u{161}"),
-    b"sdot" => Some("\u{22C5}"),
-    b"sect" => Some("\u{A7}"),
-    b"semi" => Some(";"),
-    b"shy" => Some("\u{AD}"),
-    b"sigma" => Some("\u{3C3}"),
-    b"sigmaf" => Some("\u{3C2}"),
-    b"sigmav" => Some("\u{3C2}"),
-    b"sim" => Some("\u{223C}"),
-    b"slarr" => Some("\u{2190}"),
-    b"sol" => Some("/"),
-    b"spades" => Some("\u{2660}"),
-    b"spadesuit" => Some("\u{2660}"),
-    b"srarr" => Some("\u{2192}"),
-    b"strns" => Some("\u{AF}"),
-    b"sub" => Some("\u{2282}"),
-    b"sube" => Some("\u{2286}"),
-    b"subset" => Some("\u{2282}"),
-    b"subseteq" => Some("\u{2286}"),
-    b"sum" => Some("\u{2211}"),
-    b"sup" => Some("\u{2283}"),
-    b"sup1" => Some("\u{B9}"),
-    b"sup2" => Some("\u{B2}"),
-    b"sup3" => Some("\u{B3}"),
-    b"supe" => Some("\u{2287}"),
-    b"supset" => Some("\u{2283}"),
-    b"supseteq" => Some("\u{2287}"),
-    b"szlig" => Some("\u{DF}"),
-    b"tau" => Some("\u{3C4}"),
-    b"there4" => Some("\u{2234}"),
-    b"therefore" => Some("\u{2234}"),
-    b"theta" => Some("\u{3B8}"),
-    b"thetasym" => Some("\u{3D1}"),
-    b"thetav" => Some("\u{3D1}"),
-    b"thickapprox" => Some("\u{2248}"),
-    b"thicksim" => Some("\u{223C}"),
-    b"thinsp" => Some("\u{2009}"),
-    b"thkap" => Some("\u{2248}"),
-    b"thksim" => Some("\u{223C}"),
-    b"thorn" => Some("\u{FE}"),
-    b"tilde" => Some("\u{2DC}"),
-    b"times" => Some("\u{D7}"),
-    b"trade" => Some("\u{2122}"),
-    b"uArr" => Some("\u{21D1}"),
-    b"uacute" => Some("\u{FA}"),
-    b"uarr" => Some("\u{2191}"),
-    b"ucirc" => Some("\u{FB}"),
-    b"ugrave" => Some("\u{F9}"),
-    b"uml" => Some("\u{A8}"),
-    b"uparrow" => Some("\u{2191}"),
-    b"upsi" => Some("\u{3C5}"),
-    b"upsih" => Some("\u{3D2}"),
-    b"upsilon" => Some("\u{3C5}"),
-    b"uuml" => Some("\u{FC}"),
-    b"varnothing" => Some("\u{2205}"),
-    b"varpi" => Some("\u{3D6}"),
-    b"varpropto" => Some("\u{221D}"),
-    b"varsigma" => Some("\u{3C2}"),
-    b"vartheta" => Some("\u{3D1}"),
-    b"vee" => Some("\u{2228}"),
-    b"verbar" => Some("|"),
-    b"vert" => Some("|"),
-    b"vprop" => Some("\u{221D}"),
-    b"wedge" => Some("\u{2227}"),
-    b"weierp" => Some("\u{2118}"),
-    b"wp" => Some("\u{2118}"),
-    b"xi" => Some("\u{3BE}"),
-    b"yacute" => Some("\u{FD}"),
-    b"yen" => Some("\u{A5}"),
-    b"yuml" => Some("\u{FF}"),
-    b"zeta" => Some("\u{3B6}"),
-    b"zwj" => Some("\u{200D}"),
-    b"zwnj" => Some("\u{200C}"),
-    _ => None,
-  }
+  lookup_entity(name).map(|(value, _)| value)
 }
 
-#[rustfmt::skip]
 #[inline]
-pub(super) fn is_legacy_named_entity(name: &[u8]) -> bool {
-  matches!(name,
-    b"AElig" |
-    b"AMP" |
-    b"Aacute" |
-    b"Acirc" |
-    b"Agrave" |
-    b"Aring" |
-    b"Atilde" |
-    b"Auml" |
-    b"COPY" |
-    b"Ccedil" |
-    b"ETH" |
-    b"Eacute" |
-    b"Ecirc" |
-    b"Egrave" |
-    b"Euml" |
-    b"GT" |
-    b"Iacute" |
-    b"Icirc" |
-    b"Igrave" |
-    b"Iuml" |
-    b"LT" |
-    b"Ntilde" |
-    b"Oacute" |
-    b"Ocirc" |
-    b"Ograve" |
-    b"Oslash" |
-    b"Otilde" |
-    b"Ouml" |
-    b"QUOT" |
-    b"REG" |
-    b"THORN" |
-    b"Uacute" |
-    b"Ucirc" |
-    b"Ugrave" |
-    b"Uuml" |
-    b"Yacute" |
-    b"aacute" |
-    b"acirc" |
-    b"acute" |
-    b"aelig" |
-    b"agrave" |
-    b"amp" |
-    b"aring" |
-    b"atilde" |
-    b"auml" |
-    b"brvbar" |
-    b"ccedil" |
-    b"cedil" |
-    b"cent" |
-    b"copy" |
-    b"curren" |
-    b"deg" |
-    b"divide" |
-    b"eacute" |
-    b"ecirc" |
-    b"egrave" |
-    b"eth" |
-    b"euml" |
-    b"frac12" |
-    b"frac14" |
-    b"frac34" |
-    b"gt" |
-    b"iacute" |
-    b"icirc" |
-    b"iexcl" |
-    b"igrave" |
-    b"iquest" |
-    b"iuml" |
-    b"laquo" |
-    b"lt" |
-    b"macr" |
-    b"micro" |
-    b"middot" |
-    b"nbsp" |
-    b"not" |
-    b"ntilde" |
-    b"oacute" |
-    b"ocirc" |
-    b"ograve" |
-    b"ordf" |
-    b"ordm" |
-    b"oslash" |
-    b"otilde" |
-    b"ouml" |
-    b"para" |
-    b"plusmn" |
-    b"pound" |
-    b"quot" |
-    b"raquo" |
-    b"reg" |
-    b"sect" |
-    b"shy" |
-    b"sup1" |
-    b"sup2" |
-    b"sup3" |
-    b"szlig" |
-    b"thorn" |
-    b"times" |
-    b"uacute" |
-    b"ucirc" |
-    b"ugrave" |
-    b"uml" |
-    b"uuml" |
-    b"yacute" |
-    b"yen" |
-    b"yuml"
-  )
+pub(super) fn lookup_legacy_named_entity(name: &[u8]) -> Option<&'static str> {
+  let (value, legacy) = lookup_entity(name)?;
+  legacy.then_some(value)
 }
