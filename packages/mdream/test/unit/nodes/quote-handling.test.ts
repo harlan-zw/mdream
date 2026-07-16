@@ -43,6 +43,21 @@ describe.each(engines)('script/style rawtext closing tags $name', (engineConfig)
     expect(result).toBe('BODY')
   })
 
+  it('keeps escaped script end tags inside rawtext', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = [
+      '<script>',
+      'const multiline = `',
+      '<script>alert(\'nested\')<\\/script>',
+      '`',
+      '</script>',
+      '<p>AFTER</p>',
+    ].join('\n')
+
+    const result = htmlToMarkdown(html, { engine })
+    expect(result).toBe('AFTER')
+  })
+
   it('closes rawtext when the matching end tag spans stream chunks', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const chunks = ['<script>var s = "</scr', 'ipt><p>BODY</p>']
