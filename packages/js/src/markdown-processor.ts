@@ -1,5 +1,5 @@
 import type { ParseState } from './parse'
-import type { ElementNode, EngineOptions, HandlerContext, NodeEvent, PluginContext, TagHandler, TextNode, TransformPlugin } from './types'
+import type { ElementNode, EngineOptions, NodeEvent, PluginContext, TagHandler, TextNode, TransformPlugin } from './types'
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
@@ -8,6 +8,7 @@ import {
   NO_SPACING,
   NodeEventEnter,
   NodeEventExit,
+  TAG_A,
   TAG_BLOCKQUOTE,
   TAG_BR,
   TAG_CODE,
@@ -240,9 +241,8 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
 /**
  * Calculate newline configuration based on tag handler spacing config
  */
-function calculateNewLineConfig(node: ElementNode, plainText: boolean): readonly [number, number] {
+function calculateNewLineConfig(node: ElementNode, depthMap: Uint8Array, plainText: boolean): readonly [number, number] {
   const tagId = node.tagId
-  const depthMap = node.depthMap
 
   // Adjust for list items and blockquotes
   if ((tagId !== TAG_LI && (depthMap[TAG_LI] || 0) > 0)
@@ -330,17 +330,18 @@ function getPlainTextOutput(node: ElementNode, eventType: number, state: Markdow
   }
 
   const tagId = node.tagId
+  const depthMap = state.depthMap
   if (eventType === NodeEventEnter) {
     if (tagId === TAG_BR)
       return '\n'
-    if (tagId === TAG_P && ((node.depthMap[TAG_BLOCKQUOTE] || 0) > 0 || ((node.depthMap[TAG_LI] || 0) > 0 && !(node.depthMap[TAG_TD] || 0) && !(node.depthMap[TAG_TH] || 0)))) {
+    if (tagId === TAG_P && ((depthMap[TAG_BLOCKQUOTE] || 0) > 0 || ((depthMap[TAG_LI] || 0) > 0 && !(depthMap[TAG_TD] || 0) && !(depthMap[TAG_TH] || 0)))) {
       const lastEntry = state.buffer.at(-1)
       const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
       if (lastChar && lastChar !== ' ' && lastChar !== '\n')
         return '\n\n'
     }
     if (tagId === TAG_TD || tagId === TAG_TH)
-      return (node.depthMap[TAG_TABLE] || 0) > 1 || node.index === 0 ? '' : '\t'
+      return (depthMap[TAG_TABLE] || 0) > 1 || node.index === 0 ? '' : '\t'
     if (tagId === TAG_IMG)
       return node.attributes?.alt || undefined
     if (tagId === TAG_Q)
@@ -366,6 +367,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   }
 
   let lastYieldedLength = 0
+  let hasYieldedContent = false
   let preserveLeadingWhitespace = false
 
   /**
@@ -494,16 +496,14 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       return
     }
 
-    // Handle element nodes
-    const context: HandlerContext = { node: node as ElementNode, state }
-    const output = []
-
-    // Add plugin outputs first
+    // Keep the common no-output path allocation-free. Most structural and
+    // unknown elements only affect spacing, so allocating an empty array for
+    // every enter/exit event adds pure GC pressure.
+    let output: string[] | undefined
     const element = node as ElementNode
     if (element.pluginOutput?.length) {
-      output.push(...element.pluginOutput)
-      // Clear plugin outputs after using them
-      element.pluginOutput = []
+      output = element.pluginOutput
+      element.pluginOutput = undefined
     }
 
     // Get last content from buffer regions
@@ -519,23 +519,22 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
     const handler = node.tagHandler
-    if (!output.length && handler?.[eventFn]) {
+    if (!output && handler?.[eventFn]) {
       const res = state.plainText
         ? getPlainTextOutput(element, eventType, state)
-        : handler[eventFn](context)
-      if (res) {
-        output.push(res)
-      }
+        : handler[eventFn]({ node: element, state })
+      if (res)
+        output = [res]
     }
 
     // Handle newlines
-    const newLineConfig = calculateNewLineConfig(node as ElementNode, state.plainText === true)
+    const newLineConfig = calculateNewLineConfig(node as ElementNode, state.depthMap, state.plainText === true)
     const configuredNewLines = newLineConfig[eventType] || 0
     const newLines = Math.max(0, configuredNewLines - lastNewLines)
     const isInlineElement = node.tagHandler?.isInline === true
 
     if (state.pendingInlineWhitespace) {
-      const firstOutput = output[0]?.[0] || ''
+      const firstOutput = output?.[0]?.[0] || ''
       if (eventType === NodeEventEnter) {
         if (!isInlineElement || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
           state.pendingInlineWhitespace = false
@@ -554,10 +553,12 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     if (newLines > 0) {
       // If the buffer has no content, add the current content (without new lines)
       if (!buff.length) {
-        for (const fragment of output) {
-          if (fragment) {
-            state.buffer.push(fragment)
-            state.lastContentCache = fragment
+        if (output) {
+          for (const fragment of output) {
+            if (fragment) {
+              state.buffer.push(fragment)
+              state.lastContentCache = fragment
+            }
           }
         }
         updateListIndent(state, element, eventType)
@@ -575,10 +576,16 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
 
       if (eventType === NodeEventEnter) {
-        output.unshift(newlinesStr)
+        if (output)
+          output.unshift(newlinesStr)
+        else
+          output = [newlinesStr]
       }
       else {
-        output.push(newlinesStr)
+        if (output)
+          output.push(newlinesStr)
+        else
+          output = [newlinesStr]
       }
     }
     else {
@@ -586,7 +593,16 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       // Don't trim if we're about to add inline content that needs spacing
       // Don't trim before block elements that need their own spacing
       if (lastFragment && state.lastTextNode?.containsWhitespace && (!!node.parent || isInlineElement) && 'value' in state.lastTextNode && typeof state.lastTextNode.value === 'string') {
-        if (!node.parent?.depthMap[TAG_PRE] || node.parent?.tagId === TAG_PRE) {
+        let parent = node.parent
+        let parentInPre = false
+        while (parent) {
+          if (parent.tagId === TAG_PRE) {
+            parentInPre = true
+            break
+          }
+          parent = parent.parent
+        }
+        if (!parentInPre || node.parent?.tagId === TAG_PRE) {
           // Only trim if the next element is not an inline element that needs spacing
           // or if we're at the end of a block
           const collapsesWhiteSpace = node.tagHandler?.collapsesInnerWhiteSpace
@@ -617,16 +633,18 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     }
 
     // Add spacing between inline elements if needed
-    if (output[0]?.[0] && eventType === NodeEventEnter && !node.tagHandler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
+    if (output?.[0]?.[0] && eventType === NodeEventEnter && !node.tagHandler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
       state.buffer.push(' ')
       state.lastContentCache = ' '
     }
 
     // Add all output fragments
-    for (const fragment of output) {
-      if (fragment) {
-        state.buffer.push(fragment)
-        state.lastContentCache = fragment
+    if (output) {
+      for (const fragment of output) {
+        if (fragment) {
+          state.buffer.push(fragment)
+          state.lastContentCache = fragment
+        }
       }
     }
 
@@ -645,9 +663,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       plainText: state.plainText,
     }
 
-    const handleEvent = (event: NodeEvent): void => {
-      processPluginsForEvent(event, resolvedPlugins, state, processEvent)
-    }
+    const handleEvent: (event: NodeEvent) => void = resolvedPlugins.length
+      ? event => processPluginsForEvent(event, resolvedPlugins, state, processEvent)
+      : processEvent
     const leftover = parseHtmlStream(html, parseState, handleEvent)
     // Commit trailing text and close unclosed elements at end of input.
     finalizeParse(leftover, parseState, handleEvent)
@@ -669,7 +687,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
    */
   function getMarkdownChunk(): string {
     const content = state.buffer.join('')
-    const currentContent = state.plainText && preserveLeadingWhitespace ? content : content.trimStart()
+    const currentContent = hasYieldedContent || (state.plainText && preserveLeadingWhitespace)
+      ? content
+      : content.trimStart()
     const hasMutableTrailingSpace = state.lastTextNode?.containsWhitespace
       && !state.depthMap[TAG_PRE]
       && currentContent.endsWith(' ')
@@ -681,11 +701,24 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     }
     const newContent = currentContent.slice(lastYieldedLength, stableLength)
     lastYieldedLength = stableLength
-    // Consolidate buffer into a single entry to prevent retroactive
-    // whitespace trimming from modifying already-yielded content.
-    // The trim logic uses identity checks (buff.at(-1) === lastFragment),
-    // so a consolidated string won't match individual fragment references.
-    if (state.buffer.length > 1 && !hasMutableTrailingSpace) {
+    if (newContent)
+      hasYieldedContent = true
+
+    // Keep only enough emitted context for spacing/newline decisions, plus any
+    // trailing spaces that are still mutable. This prevents every stream chunk
+    // from joining and slicing the entire cumulative output. Plugin, wrapping,
+    // and open-link paths retain the full buffer because they can inspect or
+    // rewrite earlier content.
+    if (!hasMutableTrailingSpace && !resolvedPlugins.length && !options.wrapWidth && !state.depthMap[TAG_A]) {
+      const tailStart = Math.max(0, stableLength - 2)
+      const emittedTail = currentContent.slice(tailStart, stableLength)
+      const mutableTail = currentContent.slice(stableLength)
+      state.buffer.length = 0
+      if (emittedTail || mutableTail)
+        state.buffer.push(emittedTail + mutableTail)
+      lastYieldedLength = emittedTail.length
+    }
+    else if (state.buffer.length > 1 && !hasMutableTrailingSpace) {
       state.buffer.length = 0
       state.buffer.push(currentContent)
     }

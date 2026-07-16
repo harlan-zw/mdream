@@ -23,7 +23,7 @@ import TurndownService from 'turndown'
 import { gfm } from 'turndown-plugin-gfm'
 import { unified } from 'unified'
 import { bench, describe } from 'vitest'
-import { htmlToMarkdown, streamHtmlToMarkdown } from '../packages/js/src'
+import { htmlToMarkdown, streamHtmlToMarkdown } from '../packages/js/src/index'
 import { withMinimalPreset } from '../packages/js/src/preset/minimal'
 import { htmlToMarkdown as mdreamRust, streamHtmlToMarkdown as mdreamRustStream_ } from '../packages/mdream/src'
 
