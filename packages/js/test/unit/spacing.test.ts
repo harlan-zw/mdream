@@ -16,6 +16,14 @@ async function streamConvert(chunks: string[]): Promise<string> {
 }
 
 describe('inline whitespace', () => {
+  it('preserves whitespace between root-level inline siblings', () => {
+    expect(htmlToMarkdown('<span>One</span> <span>Two</span>')).toBe('One Two')
+    expect(htmlToMarkdown('<strong>One</strong>\n<strong>Two</strong>')).toBe('**One** **Two**')
+    expect(htmlToMarkdown('<span>One</span> </bogus> <span>Two</span>')).toBe('One Two')
+    expect(htmlToMarkdown('  <span>One</span>  ')).toBe('One')
+    expect(htmlToMarkdown('<div>One</div> <div>Two</div>')).toBe('One\n\nTwo')
+  })
+
   it('moves trailing whitespace outside inline delimiters', () => {
     expect(htmlToMarkdown('<div><strong><a href="http://xxx.yyy/">abc</a> </strong>def</div>'))
       .toBe('**[abc](http://xxx.yyy/)** def')

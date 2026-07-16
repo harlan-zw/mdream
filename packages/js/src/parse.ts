@@ -759,12 +759,11 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   state.textBufferContainsNonWhitespace = false
   state.textBufferContainsWhitespace = false
 
-  // Top-level text node with no element parent, e.g. the leading `foo ` in the
-  // fragment `foo <sup>bar</sup>`. Emit it rather than dropping it (issue #93).
+  // Top-level text has no element parent. Preserve whitespace-only nodes here:
+  // they are meaningful separators between root-level inline siblings. The
+  // output layer trims leading/trailing whitespace and absorbs it at block
+  // boundaries, so only visible inline separators survive (issue #93).
   if (!state.currentNode) {
-    if (!containsNonWhitespace) {
-      return
-    }
     let rootText = textBuffer
     if (rootText.length === 0) {
       return

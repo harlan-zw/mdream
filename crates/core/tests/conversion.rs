@@ -2017,11 +2017,49 @@ fn unknown_inline_tag_does_not_fragment_paragraph() {
 
 #[test]
 fn adjacent_buttons_stay_inline() {
-    // <button> is inline but previously inherited block-default spacing, so it
-    // injected a paragraph break that stranded trailing text/punctuation and
-    // split adjacent buttons across lines. Regression guard for issue #133.
-    assert_eq!(convert("<button>One</button><button>Two</button>"), "OneTwo");
-    assert_eq!(convert("<p>Click <button>Go</button>!</p>"), "Click Go!");
+  // <button> is inline but previously inherited block-default spacing, so it
+  // injected a paragraph break that stranded trailing text/punctuation and
+  // split adjacent buttons across lines. Regression guard for issue #133.
+  assert_eq!(
+    convert("<button>One</button><button>Two</button>"),
+    "OneTwo"
+  );
+  assert_eq!(
+    convert("<button>One</button> <button>Two</button>"),
+    "One Two"
+  );
+  assert_eq!(convert("<p>Click <button>Go</button>!</p>"), "Click Go!");
+}
+
+#[test]
+fn root_inline_sibling_whitespace_is_preserved() {
+  assert_eq!(convert("<span>One</span> <span>Two</span>"), "One Two");
+  assert_eq!(
+    convert("<strong>One</strong>\n<strong>Two</strong>"),
+    "**One** **Two**"
+  );
+  assert_eq!(
+    convert("<span>One</span> </bogus> <span>Two</span>"),
+    "One Two"
+  );
+  assert_eq!(convert("  <span>One</span>  "), "One");
+  assert_eq!(convert("<div>One</div> <div>Two</div>"), "One\n\nTwo");
+  assert_eq!(
+    convert("<ul></li>\n<li><input /> Active</li>\n<li><input /> Future</li>"),
+    "- Active\n- Future"
+  );
+}
+
+#[test]
+fn root_inline_sibling_whitespace_streams_consistently() {
+  let html = "<button>One</button> <button>Two</button>";
+  for split in 0..=html.len() {
+    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut actual = stream.process_chunk(&html[..split]);
+    actual.push_str(&stream.process_chunk(&html[split..]));
+    actual.push_str(&stream.finish());
+    assert_eq!(actual.trim_end(), "One Two", "split at byte {split}");
+  }
 }
 
 #[test]
