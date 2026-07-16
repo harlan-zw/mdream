@@ -1,3 +1,4 @@
+import type { ElementNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { ELEMENT_NODE, NodeEventEnter } from '../../src/const'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
@@ -17,9 +18,13 @@ describe('package entry points', () => {
 
   it('treats prototype-named elements as unknown tags', () => {
     const html = '<toString>one</toString><constructor>two</constructor>'
-    const elements = parseHtml(html).events.filter(event => event.type === NodeEventEnter && event.node.type === ELEMENT_NODE)
+    const tagIds = parseHtml(html).events.flatMap((event) => {
+      if (event.type !== NodeEventEnter || event.node.type !== ELEMENT_NODE)
+        return []
+      return [(event.node as ElementNode).tagId]
+    })
 
-    expect(elements.map(event => event.node.tagId)).toEqual([-1, -1])
+    expect(tagIds).toEqual([-1, -1])
     expect(htmlToMarkdown(html)).toBe('one two')
   })
 })
