@@ -118,10 +118,10 @@ pub(crate) fn process_tag_attributes(
 
 #[allow(clippy::collapsible_match)]
 pub(crate) fn parse_attributes(attr_str: &str) -> Attributes {
-  let mut result = Attributes::with_capacity(4);
   if attr_str.is_empty() {
-    return result;
+    return Attributes::new();
   }
+  let mut result = Attributes::with_capacity(4);
 
   let bytes = attr_str.as_bytes();
   let len = bytes.len();
