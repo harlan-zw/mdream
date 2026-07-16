@@ -74,6 +74,58 @@ describe.each(engines)('script/style rawtext closing tags $name', (engineConfig)
     expect(result).toBe('BODY')
   })
 
+  it('ignores end tags that only exit double-escaped script data', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const cases = [
+      '<script><!--<script></script>--></script><p>BODY</p>',
+      '<script><!--<ScRiPt></sCrIpT>--></script><p>BODY</p>',
+      '<script><!--<script>--></script><p>BODY</p>',
+      '<script><!--<script></scrip>--></script><p>BODY</p>',
+      '<script><!--<script></script-->--></script><p>BODY</p>',
+    ]
+
+    for (const html of cases)
+      expect(htmlToMarkdown(html, { engine })).toBe('BODY')
+  })
+
+  it('closes script from escaped data', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<script><!-- </script><p>BODY</p>'
+
+    expect(htmlToMarkdown(html, { engine })).toBe('BODY')
+  })
+
+  it('only enters double-escaped data for the script name', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const cases = [
+      '<script><!--<scriptx></script>--></script><p>BODY</p>',
+      '<script><!--<scrip></script>--></script><p>BODY</p>',
+      '<script><!--<script</script>--></script><p>BODY</p>',
+      '<script><!--<script><script></script></script>--></script><p>BODY</p>',
+    ]
+
+    for (const html of cases)
+      expect(htmlToMarkdown(html, { engine })).toBe('-->\n\nBODY')
+  })
+
+  it('keeps double-escaped script data open through EOF', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<script><!--<script></script>--><p>BODY</p>'
+
+    expect(htmlToMarkdown(html, { engine })).toBe('')
+  })
+
+  it('matches double-escaped script data across every stream split', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<script><!--<script></script>--></script><p>BODY</p>'
+
+    for (let split = 1; split < html.length; split++) {
+      const chunks = [html.slice(0, split), html.slice(split)]
+      const result = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { engine }))
+      expect(result.trim()).toBe('BODY')
+    }
+  })
+
   it('closes rawtext when the matching end tag spans stream chunks', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const chunks = ['<script>var s = "</scr', 'ipt><p>BODY</p>']

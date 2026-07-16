@@ -85,6 +85,14 @@ const PIPE_CHAR = 124 // '|'
 const OPEN_BRACKET_CHAR = 91 // '['
 const CLOSE_BRACKET_CHAR = 93 // ']'
 
+const SCRIPT_DATA = 0
+const SCRIPT_DATA_ESCAPED = 1
+const SCRIPT_DATA_ESCAPED_DASH = 2
+const SCRIPT_DATA_ESCAPED_DASH_DASH = 3
+const SCRIPT_DATA_DOUBLE_ESCAPED = 4
+const SCRIPT_DATA_DOUBLE_ESCAPED_DASH = 5
+const SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH = 6
+
 // Tags that are valid inside <head>. Per the HTML parser's "in head" insertion
 // mode, any start tag NOT in this set implies the end of <head> and the start of
 // the body, so we auto-close an unclosed <head> when one appears (browser
@@ -413,6 +421,154 @@ function isWhitespace(charCode: number): boolean {
     || charCode === CARRIAGE_RETURN_CHAR
 }
 
+function hasScriptNameAt(html: string, start: number): boolean {
+  return start + 6 <= html.length
+    && (html.charCodeAt(start) | 32) === 115
+    && (html.charCodeAt(start + 1) | 32) === 99
+    && (html.charCodeAt(start + 2) | 32) === 114
+    && (html.charCodeAt(start + 3) | 32) === 105
+    && (html.charCodeAt(start + 4) | 32) === 112
+    && (html.charCodeAt(start + 5) | 32) === 116
+}
+
+function scriptSequenceEnd(html: string, nameStart: number): number {
+  const delimiterIndex = nameStart + 6
+  if (!hasScriptNameAt(html, nameStart) || delimiterIndex >= html.length)
+    return -1
+  const delimiter = html.charCodeAt(delimiterIndex)
+  return delimiter === GT_CHAR || delimiter === SLASH_CHAR || isWhitespace(delimiter)
+    ? delimiterIndex + 1
+    : -1
+}
+
+function isScriptElement(node: ElementNode): boolean {
+  return node.tagId === TAG_SCRIPT
+    && node.name.length === 6
+    && hasScriptNameAt(node.name, 0)
+}
+
+/**
+ * Find the first script end tag that the HTML tokenizer would emit.
+ * Script bodies are rescanned from their start when a stream chunk is
+ * incomplete, so the seven boundary-relevant states stay local and allocation-free.
+ */
+function findScriptEndTag(html: string, start: number): number {
+  let state = SCRIPT_DATA
+  let i = start
+
+  while (i < html.length) {
+    const charCode = html.charCodeAt(i)
+
+    if (state === SCRIPT_DATA) {
+      if (charCode === LT_CHAR) {
+        if (html.charCodeAt(i + 1) === SLASH_CHAR && scriptSequenceEnd(html, i + 2) !== -1)
+          return i
+        if (html.charCodeAt(i + 1) === EXCLAMATION_CHAR
+          && html.charCodeAt(i + 2) === DASH_CHAR
+          && html.charCodeAt(i + 3) === DASH_CHAR) {
+          state = SCRIPT_DATA_ESCAPED
+          i += 4
+          continue
+        }
+      }
+    }
+    else if (state === SCRIPT_DATA_ESCAPED) {
+      if (charCode === DASH_CHAR) {
+        state = SCRIPT_DATA_ESCAPED_DASH
+      }
+      else if (charCode === LT_CHAR) {
+        if (html.charCodeAt(i + 1) === SLASH_CHAR && scriptSequenceEnd(html, i + 2) !== -1)
+          return i
+        const sequenceEnd = scriptSequenceEnd(html, i + 1)
+        if (sequenceEnd !== -1) {
+          state = SCRIPT_DATA_DOUBLE_ESCAPED
+          i = sequenceEnd
+          continue
+        }
+      }
+    }
+    else if (state === SCRIPT_DATA_ESCAPED_DASH) {
+      state = SCRIPT_DATA_ESCAPED
+      if (charCode === DASH_CHAR) {
+        state = SCRIPT_DATA_ESCAPED_DASH_DASH
+      }
+      else if (charCode === LT_CHAR) {
+        if (html.charCodeAt(i + 1) === SLASH_CHAR && scriptSequenceEnd(html, i + 2) !== -1)
+          return i
+        const sequenceEnd = scriptSequenceEnd(html, i + 1)
+        if (sequenceEnd !== -1) {
+          state = SCRIPT_DATA_DOUBLE_ESCAPED
+          i = sequenceEnd
+          continue
+        }
+      }
+    }
+    else if (state === SCRIPT_DATA_ESCAPED_DASH_DASH) {
+      if (charCode === GT_CHAR) {
+        state = SCRIPT_DATA
+      }
+      else if (charCode !== DASH_CHAR) {
+        state = SCRIPT_DATA_ESCAPED
+        if (charCode === LT_CHAR) {
+          if (html.charCodeAt(i + 1) === SLASH_CHAR && scriptSequenceEnd(html, i + 2) !== -1)
+            return i
+          const sequenceEnd = scriptSequenceEnd(html, i + 1)
+          if (sequenceEnd !== -1) {
+            state = SCRIPT_DATA_DOUBLE_ESCAPED
+            i = sequenceEnd
+            continue
+          }
+        }
+      }
+    }
+    else if (state === SCRIPT_DATA_DOUBLE_ESCAPED) {
+      if (charCode === DASH_CHAR) {
+        state = SCRIPT_DATA_DOUBLE_ESCAPED_DASH
+      }
+      else if (charCode === LT_CHAR && html.charCodeAt(i + 1) === SLASH_CHAR) {
+        const sequenceEnd = scriptSequenceEnd(html, i + 2)
+        if (sequenceEnd !== -1) {
+          state = SCRIPT_DATA_ESCAPED
+          i = sequenceEnd
+          continue
+        }
+      }
+    }
+    else if (state === SCRIPT_DATA_DOUBLE_ESCAPED_DASH) {
+      state = SCRIPT_DATA_DOUBLE_ESCAPED
+      if (charCode === DASH_CHAR) {
+        state = SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH
+      }
+      else if (charCode === LT_CHAR && html.charCodeAt(i + 1) === SLASH_CHAR) {
+        const sequenceEnd = scriptSequenceEnd(html, i + 2)
+        if (sequenceEnd !== -1) {
+          state = SCRIPT_DATA_ESCAPED
+          i = sequenceEnd
+          continue
+        }
+      }
+    }
+    else if (charCode === GT_CHAR) {
+      state = SCRIPT_DATA
+    }
+    else if (charCode !== DASH_CHAR) {
+      state = SCRIPT_DATA_DOUBLE_ESCAPED
+      if (charCode === LT_CHAR && html.charCodeAt(i + 1) === SLASH_CHAR) {
+        const sequenceEnd = scriptSequenceEnd(html, i + 2)
+        if (sequenceEnd !== -1) {
+          state = SCRIPT_DATA_ESCAPED
+          i = sequenceEnd
+          continue
+        }
+      }
+    }
+
+    i++
+  }
+
+  return -1
+}
+
 function effectiveTagId(tagName: string, fallbackTagId: number, state: ParseState): number {
   return state.tagOverrideHandlers?.get(tagName)?.aliasTagId ?? fallbackTagId
 }
@@ -477,6 +633,24 @@ function parseHtmlInternal(
   const chunkLength = htmlChunk.length
 
   while (i < chunkLength) {
+    if (state.currentNode && isScriptElement(state.currentNode)) {
+      const closeIndex = findScriptEndTag(htmlChunk, i)
+      if (closeIndex === -1) {
+        textBuffer += htmlChunk.substring(i)
+        state.textBufferContainsNonWhitespace = true
+        state.lastCharWasWhitespace = false
+        state.justClosedTag = false
+        break
+      }
+      if (closeIndex > i) {
+        textBuffer += htmlChunk.substring(i, closeIndex)
+        state.textBufferContainsNonWhitespace = true
+        state.lastCharWasWhitespace = false
+        state.justClosedTag = false
+        i = closeIndex
+      }
+    }
+
     const currentCharCode = htmlChunk.charCodeAt(i)
 
     // If not starting a tag, add to text buffer and continue

@@ -68,6 +68,179 @@ const CLEAN_SELF_LINK_HEADINGS: u8 = 8;
 const CLEAN_EMPTY_IMAGES: u8 = 16;
 const CLEAN_EMPTY_LINK_TEXT: u8 = 32;
 
+const SCRIPT_DATA: u8 = 0;
+const SCRIPT_DATA_ESCAPED: u8 = 1;
+const SCRIPT_DATA_ESCAPED_DASH: u8 = 2;
+const SCRIPT_DATA_ESCAPED_DASH_DASH: u8 = 3;
+const SCRIPT_DATA_DOUBLE_ESCAPED: u8 = 4;
+const SCRIPT_DATA_DOUBLE_ESCAPED_DASH: u8 = 5;
+const SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH: u8 = 6;
+
+#[inline(always)]
+fn has_script_name_at(bytes: &[u8], start: usize) -> bool {
+  start + 6 <= bytes.len()
+    && bytes[start] | 32 == b's'
+    && bytes[start + 1] | 32 == b'c'
+    && bytes[start + 2] | 32 == b'r'
+    && bytes[start + 3] | 32 == b'i'
+    && bytes[start + 4] | 32 == b'p'
+    && bytes[start + 5] | 32 == b't'
+}
+
+#[inline(always)]
+fn script_sequence_end(bytes: &[u8], name_start: usize) -> Option<usize> {
+  let delimiter_index = name_start + 6;
+  if !has_script_name_at(bytes, name_start) || delimiter_index >= bytes.len() {
+    return None;
+  }
+  let delimiter = bytes[delimiter_index];
+  if delimiter == GT_CHAR || delimiter == SLASH_CHAR || is_whitespace(delimiter) {
+    Some(delimiter_index + 1)
+  } else {
+    None
+  }
+}
+
+/// Find the first script end tag that the HTML tokenizer would emit.
+///
+/// Streaming retains an unfinished script body and rescans it from the start,
+/// so the seven boundary-relevant states stay local and allocation-free.
+fn find_script_end_tag(bytes: &[u8], start: usize) -> Option<usize> {
+  let mut state = SCRIPT_DATA;
+  let mut i = start;
+
+  while i < bytes.len() {
+    if state == SCRIPT_DATA {
+      while i < bytes.len() && bytes[i] != LT_CHAR {
+        i += 1;
+      }
+    } else if state == SCRIPT_DATA_ESCAPED || state == SCRIPT_DATA_DOUBLE_ESCAPED {
+      while i < bytes.len() && bytes[i] != LT_CHAR && bytes[i] != b'-' {
+        i += 1;
+      }
+    }
+    if i == bytes.len() {
+      break;
+    }
+
+    let c = bytes[i];
+
+    if state == SCRIPT_DATA {
+      if c == LT_CHAR {
+        if i + 1 < bytes.len()
+          && bytes[i + 1] == SLASH_CHAR
+          && script_sequence_end(bytes, i + 2).is_some()
+        {
+          return Some(i);
+        }
+        if i + 3 < bytes.len()
+          && bytes[i + 1] == EXCLAMATION_CHAR
+          && bytes[i + 2] == b'-'
+          && bytes[i + 3] == b'-'
+        {
+          state = SCRIPT_DATA_ESCAPED;
+          i += 4;
+          continue;
+        }
+      }
+    } else if state == SCRIPT_DATA_ESCAPED {
+      if c == b'-' {
+        state = SCRIPT_DATA_ESCAPED_DASH;
+      } else if c == LT_CHAR {
+        if i + 1 < bytes.len()
+          && bytes[i + 1] == SLASH_CHAR
+          && script_sequence_end(bytes, i + 2).is_some()
+        {
+          return Some(i);
+        }
+        if let Some(sequence_end) = script_sequence_end(bytes, i + 1) {
+          state = SCRIPT_DATA_DOUBLE_ESCAPED;
+          i = sequence_end;
+          continue;
+        }
+      }
+    } else if state == SCRIPT_DATA_ESCAPED_DASH {
+      state = SCRIPT_DATA_ESCAPED;
+      if c == b'-' {
+        state = SCRIPT_DATA_ESCAPED_DASH_DASH;
+      } else if c == LT_CHAR {
+        if i + 1 < bytes.len()
+          && bytes[i + 1] == SLASH_CHAR
+          && script_sequence_end(bytes, i + 2).is_some()
+        {
+          return Some(i);
+        }
+        if let Some(sequence_end) = script_sequence_end(bytes, i + 1) {
+          state = SCRIPT_DATA_DOUBLE_ESCAPED;
+          i = sequence_end;
+          continue;
+        }
+      }
+    } else if state == SCRIPT_DATA_ESCAPED_DASH_DASH {
+      if c == GT_CHAR {
+        state = SCRIPT_DATA;
+      } else if c != b'-' {
+        state = SCRIPT_DATA_ESCAPED;
+        if c == LT_CHAR {
+          if i + 1 < bytes.len()
+            && bytes[i + 1] == SLASH_CHAR
+            && script_sequence_end(bytes, i + 2).is_some()
+          {
+            return Some(i);
+          }
+          if let Some(sequence_end) = script_sequence_end(bytes, i + 1) {
+            state = SCRIPT_DATA_DOUBLE_ESCAPED;
+            i = sequence_end;
+            continue;
+          }
+        }
+      }
+    } else if state == SCRIPT_DATA_DOUBLE_ESCAPED {
+      if c == b'-' {
+        state = SCRIPT_DATA_DOUBLE_ESCAPED_DASH;
+      } else if c == LT_CHAR
+        && i + 1 < bytes.len()
+        && bytes[i + 1] == SLASH_CHAR
+        && let Some(sequence_end) = script_sequence_end(bytes, i + 2)
+      {
+        state = SCRIPT_DATA_ESCAPED;
+        i = sequence_end;
+        continue;
+      }
+    } else if state == SCRIPT_DATA_DOUBLE_ESCAPED_DASH {
+      state = SCRIPT_DATA_DOUBLE_ESCAPED;
+      if c == b'-' {
+        state = SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH;
+      } else if c == LT_CHAR
+        && i + 1 < bytes.len()
+        && bytes[i + 1] == SLASH_CHAR
+        && let Some(sequence_end) = script_sequence_end(bytes, i + 2)
+      {
+        state = SCRIPT_DATA_ESCAPED;
+        i = sequence_end;
+        continue;
+      }
+    } else if c == GT_CHAR {
+      state = SCRIPT_DATA;
+    } else if c != b'-' {
+      state = SCRIPT_DATA_DOUBLE_ESCAPED;
+      if c == LT_CHAR
+        && i + 1 < bytes.len()
+        && bytes[i + 1] == SLASH_CHAR
+        && let Some(sequence_end) = script_sequence_end(bytes, i + 2)
+      {
+        state = SCRIPT_DATA_ESCAPED;
+        i = sequence_end;
+        continue;
+      }
+    }
+
+    i += 1;
+  }
+
+  None
+}
+
 /// Unified single-pass HTML-to-Markdown converter.
 /// Merges parser state and markdown output state to eliminate callback overhead,
 /// duplicate state tracking, and enable full inlining of tag handler logic.
@@ -354,6 +527,27 @@ impl ConvertState {
     let mut i = 0;
 
     while i < chunk_length {
+      if self
+        .stack
+        .last()
+        .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none())
+      {
+        let Some(close_index) = find_script_end_tag(bytes, i) else {
+          text_buffer.push_str(&chunk[i..]);
+          self.text_buffer_contains_non_whitespace = true;
+          self.last_char_was_whitespace = false;
+          self.just_closed_tag = false;
+          break;
+        };
+        if close_index > i {
+          text_buffer.push_str(&chunk[i..close_index]);
+          self.text_buffer_contains_non_whitespace = true;
+          self.last_char_was_whitespace = false;
+          self.just_closed_tag = false;
+          i = close_index;
+        }
+      }
+
       let cc = bytes[i];
 
       if cc != LT_CHAR {
