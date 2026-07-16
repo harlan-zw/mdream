@@ -252,18 +252,6 @@ export interface MdreamProcessingState {
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
 
-  /** @deprecated Ignored because rawtext closing tags are not quote-aware. */
-  inSingleQuote?: boolean
-
-  /** @deprecated Ignored because rawtext closing tags are not quote-aware. */
-  inDoubleQuote?: boolean
-
-  /** @deprecated Ignored because rawtext closing tags are not quote-aware. */
-  inBacktick?: boolean
-
-  /** @deprecated Ignored because rawtext closing tags are not quote-aware. */
-  lastCharWasBackslash?: boolean
-
   /** Resolved plugin instances for efficient iteration */
   resolvedPlugins?: TransformPlugin[]
 

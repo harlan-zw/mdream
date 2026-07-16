@@ -384,16 +384,6 @@ export interface ParseState {
   isFirstTextInElement?: boolean
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
-  /** @deprecated Ignored because rawtext closing tags are not quote-aware. */
-  inSingleQuote?: boolean
-  /** @deprecated Ignored because rawtext closing tags are not quote-aware. */
-  inDoubleQuote?: boolean
-  /** @deprecated Ignored because rawtext closing tags are not quote-aware. */
-  inBacktick?: boolean
-  /** @deprecated Ignored because rawtext closing tags are not quote-aware. */
-  inRawTextQuoteAware?: boolean
-  /** @deprecated Ignored because rawtext closing tags are not quote-aware. */
-  lastCharWasBackslash?: boolean
   /** Resolved plugin instances for event processing */
   resolvedPlugins?: TransformPlugin[]
   /** Tag override handlers built from declarative tagOverrides config */
