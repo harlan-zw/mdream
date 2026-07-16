@@ -75,7 +75,7 @@ export function filterPlugin(options: {
   // Tracks elements whose subtree is hidden. Hidden-ness propagates O(1) from
   // the parent (set on enter, before children), so isHidden() runs once per
   // element instead of being re-evaluated for every ancestor of every node.
-  const hiddenNodes = new WeakSet<ElementNode>()
+  const skippedSubtrees = new WeakSet<ElementNode>()
 
   return createPlugin({
     // Handle include/exclude filtering for elements and text nodes
@@ -87,15 +87,8 @@ export function filterPlugin(options: {
         const textNode = node as TextNode
         const parent = textNode.parent as ElementNode | null
         // Hidden propagates to the immediate parent, so one lookup covers all ancestors.
-        if (parent && hiddenNodes.has(parent)) {
+        if (parent && skippedSubtrees.has(parent)) {
           return { skip: true }
-        }
-        let currentParent = parent
-        while (currentParent && excludeSelectors.length) {
-          if (excludeSelectors.some(selector => selector.matches(currentParent!))) {
-            return { skip: true }
-          }
-          currentParent = currentParent.parent as ElementNode | null
         }
         return
       }
@@ -107,25 +100,21 @@ export function filterPlugin(options: {
 
       const element = node as ElementNode
 
+      if (skippedSubtrees.has(element)) {
+        return { skip: true }
+      }
+
       // Drop hidden elements and their subtrees. Inherit the parent's hidden flag
       // (O(1)); only run the style/attr scan when not already inside a hidden subtree.
-      const parentHidden = element.parent ? hiddenNodes.has(element.parent as ElementNode) : false
-      if (parentHidden || isHidden(element)) {
-        hiddenNodes.add(element)
+      const parentSkipped = element.parent ? skippedSubtrees.has(element.parent as ElementNode) : false
+      if (parentSkipped || isHidden(element)) {
+        skippedSubtrees.add(element)
         return { skip: true }
       }
       // Check if element should be excluded
       if (excludeSelectors.length && excludeSelectors.some(selector => selector.matches(element))) {
+        skippedSubtrees.add(element)
         return { skip: true }
-      }
-
-      // Check if any parent element is excluded by selector
-      let currentParent = element.parent
-      while (currentParent && excludeSelectors.length) {
-        if (excludeSelectors.some(selector => selector.matches(currentParent!))) {
-          return { skip: true }
-        }
-        currentParent = currentParent.parent as ElementNode | null
       }
 
       // Handle include filtering (only if include selectors are specified)
