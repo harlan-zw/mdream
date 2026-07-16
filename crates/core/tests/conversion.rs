@@ -2170,6 +2170,7 @@ fn script_and_style_closing_tags_are_not_quote_aware() {
     convert("<style>.a::before{content:\"</style><p>BODY</p>"),
     "BODY"
   );
+  assert_eq!(convert("<script>x</script/><p>BODY</p>"), "BODY");
 }
 
 #[test]

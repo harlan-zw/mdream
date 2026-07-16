@@ -66,6 +66,14 @@ describe.each(engines)('script/style rawtext closing tags $name', (engineConfig)
     expect(result).toBe('AFTER')
   })
 
+  it('accepts a slash delimiter on rawtext end tags', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<script>x</script/><p>BODY</p>'
+
+    const result = htmlToMarkdown(html, { engine })
+    expect(result).toBe('BODY')
+  })
+
   it('closes rawtext when the matching end tag spans stream chunks', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const chunks = ['<script>var s = "</scr', 'ipt><p>BODY</p>']

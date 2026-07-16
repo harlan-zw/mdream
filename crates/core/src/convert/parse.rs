@@ -1057,10 +1057,15 @@ impl ConvertState {
     let chunk_length = bytes.len();
 
     let mut found_close = false;
+    let mut tag_name_end = None;
     while i < chunk_length {
-      if bytes[i] == GT_CHAR {
+      let c = bytes[i];
+      if c == GT_CHAR {
         found_close = true;
         break;
+      }
+      if tag_name_end.is_none() && (c == SLASH_CHAR || is_whitespace(c)) {
+        tag_name_end = Some(i);
       }
       i += 1;
     }
@@ -1073,7 +1078,7 @@ impl ConvertState {
       };
     }
 
-    let tag_name_raw = html_chunk[tag_name_start..i].trim();
+    let tag_name_raw = html_chunk[tag_name_start..tag_name_end.unwrap_or(i)].trim();
     let builtin_tag_id = crate::consts::get_tag_id_ci_bytes(tag_name_raw.as_bytes());
     let tag_name: Cow<str> = if builtin_tag_id.is_some() {
       Cow::Borrowed(tag_name_raw)

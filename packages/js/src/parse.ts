@@ -603,7 +603,7 @@ function parseHtmlInternal(
         let peekEnd = i + 2
         while (peekEnd < chunkLength) {
           const c = htmlChunk.charCodeAt(peekEnd)
-          if (c === GT_CHAR || isWhitespace(c))
+          if (c === GT_CHAR || c === SLASH_CHAR || isWhitespace(c))
             break
           peekEnd++
         }
@@ -823,7 +823,7 @@ function processClosingTag(
       foundClose = true
       break
     }
-    if (tagNameEnd === -1 && isWhitespace(charCode))
+    if (tagNameEnd === -1 && (isWhitespace(charCode) || charCode === SLASH_CHAR))
       tagNameEnd = i
     i++
   }

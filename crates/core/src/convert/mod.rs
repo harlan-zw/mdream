@@ -477,7 +477,7 @@ impl ConvertState {
           let mut peek_end = peek_start;
           while peek_end < chunk_length {
             let c = bytes[peek_end];
-            if c == GT_CHAR || is_whitespace(c) {
+            if c == GT_CHAR || c == SLASH_CHAR || is_whitespace(c) {
               break;
             }
             peek_end += 1;
