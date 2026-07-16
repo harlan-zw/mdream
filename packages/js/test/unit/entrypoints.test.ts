@@ -1,13 +1,19 @@
 import type { ElementNode } from '../../src/types'
+import { htmlToMarkdown, streamHtmlToMarkdown } from '@mdream/js'
+import { htmlToMarkdown as htmlToMarkdownCore, streamHtmlToMarkdown as streamHtmlToMarkdownCore } from '@mdream/js/core'
 import { describe, expect, it } from 'vitest'
 import { ELEMENT_NODE, NodeEventEnter } from '../../src/const'
-import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { parseHtml } from '../../src/parse'
 
 describe('package entry points', () => {
   it('keeps the full conversion names at the package root', () => {
     expect(htmlToMarkdown).toBeTypeOf('function')
     expect(streamHtmlToMarkdown).toBeTypeOf('function')
+  })
+
+  it('exposes the tree-shakable conversion names from the core subpath', () => {
+    expect(htmlToMarkdownCore).toBeTypeOf('function')
+    expect(streamHtmlToMarkdownCore).toBeTypeOf('function')
   })
 
   it('retains declarative plugin behavior at the package root', () => {
