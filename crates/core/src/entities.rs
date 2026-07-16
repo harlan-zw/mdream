@@ -115,12 +115,14 @@ fn decode_html_entities_alloc(text: &str, in_attribute: bool) -> String {
       name_end += 1;
     }
 
-    if name_end > name_start && name_end < len && bytes[name_end] == b';' {
-      if let Some(replacement) = lookup_named_entity(&bytes[name_start..name_end]) {
-        result.push_str(replacement);
-        i = name_end + 1;
-        continue;
-      }
+    if name_end > name_start
+      && name_end < len
+      && bytes[name_end] == b';'
+      && let Some(replacement) = lookup_named_entity(&bytes[name_start..name_end])
+    {
+      result.push_str(replacement);
+      i = name_end + 1;
+      continue;
     }
 
     let mut legacy_end = name_end.min(name_start + MAX_LEGACY_ENTITY_NAME_LENGTH);

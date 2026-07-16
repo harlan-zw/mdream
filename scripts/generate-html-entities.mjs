@@ -41,6 +41,22 @@ function singleQuoted(value) {
     .replaceAll('\u2029', '\\u2029')}'`
 }
 
+function rustString(value) {
+  let result = '"'
+  for (const character of value) {
+    const codePoint = character.codePointAt(0)
+    if (character === '\\')
+      result += '\\\\'
+    else if (character === '"')
+      result += '\\"'
+    else if (codePoint >= 0x20 && codePoint <= 0x7E)
+      result += character
+    else
+      result += `\\u{${codePoint.toString(16).toUpperCase()}}`
+  }
+  return `${result}"`
+}
+
 const response = await fetch(SPEC_URL)
 if (!response.ok)
   throw new Error(`Failed to fetch ${SPEC_URL}: ${response.status}`)
@@ -91,7 +107,7 @@ pub(super) const MAX_LEGACY_ENTITY_NAME_LENGTH: usize = ${Math.max(...[...legacy
 #[inline]
 pub(super) fn lookup_named_entity(name: &[u8]) -> Option<&'static str> {
   match name {
-${selected.map(([name, value]) => `    b${JSON.stringify(name)} => Some(${JSON.stringify(value)}),`).join('\n')}
+${selected.map(([name, value]) => `    b${JSON.stringify(name)} => Some(${rustString(value)}),`).join('\n')}
     _ => None,
   }
 }
