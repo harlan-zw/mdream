@@ -86,6 +86,9 @@ const NEEDS_IMPLIED_END_RECOVERY: [bool; MAX_TAG_ID] = {
   t[TAG_THEAD as usize] = true;
   t[TAG_TBODY as usize] = true;
   t[TAG_TFOOT as usize] = true;
+  t[TAG_OPTION as usize] = true;
+  t[TAG_OPTGROUP as usize] = true;
+  t[TAG_SELECT as usize] = true;
   t
 };
 
@@ -257,6 +260,7 @@ impl ConvertState {
 
     if self.has_frontmatter
       && self.frontmatter_in_head
+      && !excludes_text_nodes
       && self
         .stack
         .last()
@@ -414,6 +418,28 @@ impl ConvertState {
     }
   }
 
+  /// Close the nearest select-related `target_id`. Option/optgroup scans stop
+  /// at their owning `<select>`; a select scan includes the select itself. This
+  /// only runs for recovery tags, leaving the common path as one table lookup.
+  fn close_select_to(&mut self, target_id: u8) {
+    let mut target_index = None;
+    for i in (0..self.stack.len()).rev() {
+      match self.stack[i].tag_id {
+        Some(id) if id == target_id => {
+          target_index = Some(i);
+          break;
+        }
+        Some(TAG_SELECT) if target_id != TAG_SELECT => break,
+        _ => {}
+      }
+    }
+    if let Some(index) = target_index {
+      while self.stack.len() > index {
+        self.close_node();
+      }
+    }
+  }
+
   pub(crate) fn process_opening_tag(
     &mut self,
     tag_name: &str,
@@ -445,7 +471,10 @@ impl ConvertState {
     // page never closed its head (no </head>/<body>). Auto-close head (and anything
     // wrongly opened inside it) so body content parses as flow content with normal
     // block spacing instead of inheriting head's whitespace collapsing.
-    if self.depth_map[TAG_HEAD as usize] > 0 && !is_head_content_tag(tag_id) {
+    if self.depth_map[TAG_HEAD as usize] > 0
+      && self.depth_map[TAG_TEMPLATE as usize] == 0
+      && !is_head_content_tag(tag_id)
+    {
       while self
         .stack
         .last()
@@ -472,6 +501,32 @@ impl ConvertState {
       && needs_implied_end_recovery(id)
     {
       match id {
+        // In the "in select" insertion mode a nested <select> acts as the end
+        // of the open select; the incoming start tag itself is ignored.
+        TAG_SELECT if self.depth_map[TAG_SELECT as usize] > 0 => {
+          self.close_select_to(TAG_SELECT);
+          return OpeningTagResult {
+            complete: true,
+            new_position,
+            self_closing: false,
+            skip: true,
+          };
+        }
+        TAG_OPTION => {
+          if self.depth_map[TAG_SELECT as usize] > 0 {
+            self.close_select_to(TAG_OPTION);
+          } else if self
+            .stack
+            .last()
+            .is_some_and(|node| node.tag_id == Some(TAG_OPTION))
+          {
+            self.close_node();
+          }
+        }
+        TAG_OPTGROUP if self.depth_map[TAG_SELECT as usize] > 0 => {
+          self.close_select_to(TAG_OPTION);
+          self.close_select_to(TAG_OPTGROUP);
+        }
         // A nested <a> closes the open one (anchors cannot nest), so the
         // markdown is two adjacent links rather than invalid nested `[..]`.
         TAG_A if self.depth_map[TAG_A as usize] > 0 => {
@@ -500,7 +555,8 @@ impl ConvertState {
             _ => {}
           }
         }
-        TAG_A | TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT => {}
+        TAG_A | TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT | TAG_OPTGROUP
+        | TAG_SELECT => {}
         _ => {
           if self.depth_map[TAG_P as usize] > 0 {
             debug_assert!(closes_p(id));
@@ -626,6 +682,7 @@ impl ConvertState {
 
     let mut skip_node = false;
     let mut filter_excluded = false;
+    let in_template = self.depth_map[TAG_TEMPLATE as usize] > 0;
 
     if self.has_plugins {
       if self.has_tailwind {
@@ -726,7 +783,7 @@ impl ConvertState {
         }
       }
 
-      if self.has_isolate_main {
+      if self.has_isolate_main && !in_template {
         let is_main = tag_id == Some(TAG_MAIN);
         if !self.isolate_main_found && is_main && self.depth <= 50 {
           self.isolate_main_found = true;
@@ -761,7 +818,7 @@ impl ConvertState {
         }
       }
 
-      if self.has_frontmatter {
+      if self.has_frontmatter && !in_template {
         if tag_id == Some(TAG_HEAD) {
           self.frontmatter_in_head = true;
         } else if self.frontmatter_in_head && tag_id == Some(TAG_META) {
@@ -801,10 +858,11 @@ impl ConvertState {
       }
     }
 
-    tag.excluded_from_markdown =
-      filter_excluded || (skip_node && (!self.has_isolate_main || self.isolate_main_found));
+    tag.excluded_from_markdown = in_template
+      || filter_excluded
+      || (skip_node && (!self.has_isolate_main || self.isolate_main_found));
 
-    if tag.collapses_inner_white_space && !filter_excluded {
+    if tag.collapses_inner_white_space && !tag.excluded_from_markdown {
       if tag.tag_id == Some(TAG_SPAN) {
         self.collapse_span_depth = self.collapse_span_depth.saturating_add(1);
       } else {
@@ -959,6 +1017,7 @@ impl ConvertState {
 
     if self.has_isolate_main
       && node.tag_id == Some(TAG_MAIN)
+      && !node.excluded_from_markdown
       && self.isolate_main_found
       && !self.isolate_main_closed
     {
@@ -966,7 +1025,11 @@ impl ConvertState {
     }
 
     // Frontmatter generation on HEAD close
-    if self.has_frontmatter && node.tag_id == Some(TAG_HEAD) && self.frontmatter_in_head {
+    if self.has_frontmatter
+      && node.tag_id == Some(TAG_HEAD)
+      && !node.excluded_from_markdown
+      && self.frontmatter_in_head
+    {
       self.frontmatter_in_head = false;
       self.generate_frontmatter_yaml();
     }
@@ -1073,9 +1136,25 @@ impl ConvertState {
     let bytes = html_chunk.as_bytes();
     let chunk_length = bytes.len();
 
+    let mut tag_name_end = chunk_length;
+    let mut quote = 0;
     let mut found_close = false;
     while i < chunk_length {
-      if bytes[i] == GT_CHAR {
+      let c = bytes[i];
+      if tag_name_end == chunk_length && (is_whitespace(c) || c == SLASH_CHAR || c == GT_CHAR) {
+        tag_name_end = i;
+      }
+
+      // End-tag attributes are a parse error, but the tokenizer still consumes
+      // them. In particular, a `>` inside a quoted value does not complete the
+      // token, which matters when the malformed tag spans stream chunks.
+      if quote != 0 {
+        if c == quote {
+          quote = 0;
+        }
+      } else if tag_name_end != chunk_length && (c == QUOTE_CHAR || c == APOS_CHAR) {
+        quote = c;
+      } else if c == GT_CHAR {
         found_close = true;
         break;
       }
@@ -1090,7 +1169,9 @@ impl ConvertState {
       };
     }
 
-    let tag_name_raw = html_chunk[tag_name_start..i].trim();
+    // Only the initial name participates in matching. Whitespace, a trailing
+    // solidus, and parse-error attributes belong to the rest of the end tag.
+    let tag_name_raw = &html_chunk[tag_name_start..tag_name_end];
     let builtin_tag_id = crate::consts::get_tag_id_ci_bytes(tag_name_raw.as_bytes());
     let tag_name: Cow<str> = if builtin_tag_id.is_some() {
       Cow::Borrowed(tag_name_raw)
@@ -1130,11 +1211,11 @@ impl ConvertState {
       };
     }
 
-    // For aliased close (`</ex>` with ex→em), match the open node by both
-    // tag_id and custom_name so we close the specific aliased element rather
-    // than an unrelated built-in <em> on the stack.
+    // Non-built-in names must match the open node's custom name as well as its
+    // resolved tag id. This keeps `</other>` from closing an unknown custom
+    // element and keeps aliased `</ex>` from closing an unrelated built-in.
     let close_name: &str = tag_name.as_ref();
-    let needs_name_match = builtin_tag_id.is_none() && tag_id.is_some();
+    let needs_name_match = builtin_tag_id.is_none();
     let matches = |node: &ElementNode| -> bool {
       if node.tag_id != tag_id {
         return false;
@@ -1145,25 +1226,42 @@ impl ConvertState {
       node.custom_name.as_deref() == Some(close_name)
     };
 
+    let mut matched = false;
     if let Some(top) = self.stack.last() {
       if matches(top) {
+        matched = true;
         self.close_node();
       } else {
         let mut pop_count = 0;
+        let mut found_match = false;
         for j in (0..self.stack.len()).rev() {
+          // Template contents have their own tree-construction scope. An end
+          // tag inside them cannot close an element in the outer document.
+          if tag_id != Some(TAG_TEMPLATE) && self.stack[j].tag_id == Some(TAG_TEMPLATE) {
+            break;
+          }
           pop_count += 1;
           if matches(&self.stack[j]) {
+            found_match = true;
             break;
           }
         }
-        for _ in 0..pop_count {
-          if !self.stack.is_empty() {
+        if found_match {
+          matched = true;
+          for _ in 0..pop_count {
             self.close_node();
           }
         }
       }
     }
 
+    if !matched {
+      // The ignored token does not create a semantic boundary between the
+      // text nodes on either side. Avoid the output layer's conservative
+      // separator for adjacent, independently flushed text nodes.
+      self.last_node_is_inline = true;
+    }
+    // Keep the scanner's whitespace state aligned after consuming a tag token.
     self.just_closed_tag = true;
     CloseTagResult {
       complete: true,

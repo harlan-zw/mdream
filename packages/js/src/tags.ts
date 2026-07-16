@@ -74,6 +74,7 @@ import {
   TAG_NOFRAMES,
   TAG_NOSCRIPT,
   TAG_OL,
+  TAG_OPTGROUP,
   TAG_OPTION,
   TAG_P,
   TAG_PARAM,
@@ -799,7 +800,9 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
   },
   [TAG_OPTION]: {
-    isNonNesting: true,
+    spacing: NO_SPACING,
+  },
+  [TAG_OPTGROUP]: {
     spacing: NO_SPACING,
   },
   [TAG_FIELDSET]: {
@@ -834,9 +837,8 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
   },
   [TAG_TEMPLATE]: {
-    // <template> content is inert (browsers never render it). Treat the whole
-    // body as raw text and exclude it from output, mirroring script/style.
-    isNonNesting: true,
+    // <template> content is parsed (including nested templates) but remains
+    // inert, so its subtree is excluded from Markdown by the parser/processor.
     excludesTextNodes: true,
     spacing: NO_SPACING,
   },

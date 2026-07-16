@@ -1,7 +1,7 @@
 //! Low-level HTML scanning primitives: whitespace, comments, tag attributes.
 
 use crate::consts::*;
-use crate::entities::decode_html_entities;
+use crate::entities::decode_html_attribute_entities;
 use crate::types::Attributes;
 
 /// Whitespace check optimized for the hot character loop.
@@ -198,7 +198,7 @@ pub(crate) fn parse_attributes(attr_str: &str) -> Attributes {
           let name = raw.to_ascii_lowercase();
           result.insert(
             name,
-            decode_html_entities(&attr_str[value_start..i]).into_owned(),
+            decode_html_attribute_entities(&attr_str[value_start..i]).into_owned(),
           );
           state = WHITESPACE;
         }
@@ -211,7 +211,7 @@ pub(crate) fn parse_attributes(attr_str: &str) -> Attributes {
           let name = raw.to_ascii_lowercase();
           result.insert(
             name,
-            decode_html_entities(&attr_str[value_start..i]).into_owned(),
+            decode_html_attribute_entities(&attr_str[value_start..i]).into_owned(),
           );
           state = WHITESPACE;
         }
@@ -230,7 +230,7 @@ pub(crate) fn parse_attributes(attr_str: &str) -> Attributes {
     let name = raw.to_ascii_lowercase();
     result.insert(
       name,
-      decode_html_entities(&attr_str[value_start..]).into_owned(),
+      decode_html_attribute_entities(&attr_str[value_start..]).into_owned(),
     );
   } else if state == AFTER_NAME || state == BEFORE_VALUE {
     let raw = &attr_str[name_start_saved..name_end_saved];
@@ -275,6 +275,15 @@ mod tests {
   fn attribute_names_lowercased_values_decoded() {
     let a = parse_attributes("DATA-X='a &amp; b'");
     assert_eq!(a.get("data-x").map(String::as_str), Some("a & b"));
+  }
+
+  #[test]
+  fn attribute_entities_follow_ambiguous_ampersand_rules() {
+    let a = parse_attributes("title='&copycat &copy=1 &copy! &copy;cat'");
+    assert_eq!(
+      a.get("title").map(String::as_str),
+      Some("&copycat &copy=1 ©! ©cat")
+    );
   }
 
   #[test]

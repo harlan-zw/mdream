@@ -11,6 +11,13 @@ impl ConvertState {
       return;
     }
 
+    // Excluded nodes (including parsed template descendants) must return before
+    // deferred <pre> handling so an inert subtree cannot mutate output state.
+    if self.stack[stack_len - 1].excluded_from_markdown {
+      self.last_node_is_inline = self.stack[stack_len - 1].is_inline;
+      return;
+    }
+
     // Deferred <pre> code fence (issue #97): open a bare <pre>'s fence right
     // before its first non-whitespace child. A direct <code> child keeps
     // fence ownership; a deeper/other first child opens the <pre>'s own fence.
@@ -46,11 +53,6 @@ impl ConvertState {
     {
       let (ancestors, last) = self.stack.split_at(stack_len - 1);
       let node = &last[0];
-
-      if node.excluded_from_markdown {
-        self.last_node_is_inline = node.is_inline;
-        return;
-      }
 
       tag_id = node.tag_id;
 

@@ -373,11 +373,20 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
    */
   function processEvent(event: NodeEvent): void {
     const { type: eventType, node } = event
-    const lastNode = state.lastNode
-    state.lastNode = event.node as ElementNode | TextNode
-
     // Update depth for plugin access
     state.depth = node.depth
+
+    // Template nodes are parsed and exposed to plugins/extraction, but are
+    // inert for output. Exclusion is copied to element descendants at open;
+    // text checks only its immediate parent, never the ancestor chain.
+    const inTemplate = node.type === ELEMENT_NODE
+      ? node.excludedFromMarkdown
+      : node.parent?.excludedFromMarkdown
+    if (inTemplate)
+      return
+
+    const lastNode = state.lastNode
+    state.lastNode = event.node as ElementNode | TextNode
     const buff = state.buffer
 
     // Deferred <pre> code fence (issue #97). A bare <pre> opens its fence right

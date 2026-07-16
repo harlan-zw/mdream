@@ -108,9 +108,10 @@ export const TAG_HEADER = 105 // Document or section header
 export const TAG_FIGCAPTION = 106 // Caption for a figure
 export const TAG_CAPTION = 107 // Table caption
 export const TAG_DATALIST = 108 // Inert: <option> children are autocomplete data, never rendered
+export const TAG_OPTGROUP = 109
 
 // Maximum tag ID for creating the typed array (update to match the highest tag ID)
-export const MAX_TAG_ID = 109
+export const MAX_TAG_ID = 110
 
 // Node type constants
 export const ELEMENT_NODE = 1
@@ -230,6 +231,7 @@ export const TagIdMap = {
   figcaption: TAG_FIGCAPTION,
   caption: TAG_CAPTION,
   datalist: TAG_DATALIST,
+  optgroup: TAG_OPTGROUP,
 } as const
 
 // Reverse map: tag ID → tag name (for cross-engine filter conversion)

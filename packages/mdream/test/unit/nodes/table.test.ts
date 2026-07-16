@@ -231,7 +231,7 @@ describe.each(engines)('tables $name', (engineConfig) => {
       '| Style | Syntax | Keyboard shortcut | Example | Output |\n'
       + '| --- | --- | --- | --- | --- |\n'
       + '| Bold | `** **` or `__ __` | `Command`+`B` (Mac) or `Ctrl`+`B` (Windows/Linux) | `**This is bold text**` | **This is bold text** |\n'
-      + '| Italic | `* *` or `_ _` &emsp;&emsp;&emsp;&emsp; | `Command`+`I` (Mac) or `Ctrl`+`I` (Windows/Linux) | `_This text is italicized_` | _This text is italicized_ |\n'
+      + '| Italic | `* *` or `_ _` | `Command`+`I` (Mac) or `Ctrl`+`I` (Windows/Linux) | `_This text is italicized_` | _This text is italicized_ |\n'
       + '| Strikethrough | `~~ ~~` or `~ ~` | None | `~~This was mistaken text~~` | ~~This was mistaken text~~ |\n'
       + '| Bold and nested italic | `** **` and `_ _` | None | `**This text is _extremely_ important**` | **This text is _extremely_ important** |\n'
       + '| All bold and italic | `*** ***` | None | `***All this text is important***` | _**All this text is important**_ |\n'
