@@ -2160,19 +2160,16 @@ fn tag_override_works_for_top_level_inline_tag() {
 }
 
 #[test]
-fn script_closing_tag_inside_string_does_not_close() {
-  // A `</script>` inside a JS string literal must not close the <script>
-  // element (issue #93 regression: top-level text emission unmasked this).
-  let html = "<script>const s = \"</script>\"; foo();</script><p>visible</p>";
-  assert_eq!(convert(html), "visible");
-  let single = "<script>const s = '</script>'; foo();</script><p>visible</p>";
-  assert_eq!(convert(single), "visible");
-  let tmpl = "<script>const s = `</script>`; foo();</script><p>visible</p>";
-  assert_eq!(convert(tmpl), "visible");
-  let escaped = "<script>const s = \"a\\\"</script>\\\"b\"; foo();</script><p>visible</p>";
-  assert_eq!(convert(escaped), "visible");
-  let style = "<style>.a::before{content:\"</style>\"}</style><p>visible</p>";
-  assert_eq!(convert(style), "visible");
+fn script_and_style_closing_tags_are_not_quote_aware() {
+  assert_eq!(convert("<style>/* it's */ a{}</style><p>BODY</p>"), "BODY");
+  assert_eq!(
+    convert("<script>var s=\"</script>\"<p>BODY</p>"),
+    "\"\n\nBODY"
+  );
+  assert_eq!(
+    convert("<style>.a::before{content:\"</style><p>BODY</p>"),
+    "BODY"
+  );
 }
 
 #[test]
@@ -2204,26 +2201,19 @@ fn streaming_top_level_text_with_tag_override() {
 
 #[test]
 fn streaming_script_close_in_string_across_chunks() {
-  // A `</script>` inside a JS string, split across a chunk boundary, must
-  // not close the element; quote state has to persist between chunks.
-  let chunks = [
-    "<script>var s = \"</scr",
-    "ipt> still string\"; run();</script><p>ok</p>",
-  ];
+  let chunks = ["<script>var s = \"</scr", "ipt><p>BODY</p>"];
   let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
   let mut out = String::new();
   for c in &chunks {
     out.push_str(&stream.process_chunk(c));
   }
   out.push_str(&stream.finish());
-  assert_eq!(out.trim(), "ok");
+  assert_eq!(out.trim(), "BODY");
 }
 
 #[test]
-fn script_string_with_multibyte_content_does_not_close_early() {
-  // The rawtext bulk scanner slices the chunk; multibyte bytes inside a
-  // script string must not break slicing or close detection.
-  let html = "<script>var s = \"héllo – </script> wörld\"; run();</script><p>ok</p>";
+fn script_rawtext_with_multibyte_content_closes() {
+  let html = "<script>var s = \"héllo – wörld\";</script><p>ok</p>";
   assert_eq!(convert(html), "ok");
 }
 
