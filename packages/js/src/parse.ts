@@ -402,6 +402,7 @@ class ParsedElementNode implements ElementNode {
   currentWalkIndex?: number
   childTextNodeIndex?: number
   containsWhitespace?: boolean
+  declare excludedFromMarkdown?: boolean
   pluginOutput?: string[]
   context?: ElementNode['context']
   private cachedDepthMap?: Uint8Array
