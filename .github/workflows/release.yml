@@ -83,6 +83,12 @@ jobs:
           cp crates/node/index.d.ts packages/mdream/napi/index.d.ts
           cp crates/node/index.d.ts packages/mdream/napi/index.d.mts
 
+      - name: Build publishable packages
+        # Build before the idempotent publish checks: a resumed release may
+        # skip @mdream/js and mdream, but @mdream/action still needs their
+        # generated declarations when ncc bundles the action.
+        run: pnpm --filter './packages/**' run build
+
       - name: Determine npm dist-tag
         id: dist-tag
         env:
