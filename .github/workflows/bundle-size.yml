@@ -80,6 +80,23 @@ jobs:
           pnpm test:bundle-size
           pnpm test:bundle-size:rust
 
+      - name: Run performance benchmarks
+        run: |
+          # base and PR run back-to-back on the same runner so machine variance
+          # cancels; both runs use the PR's harness and fixture against the
+          # respective built bundles. Pinned semi-space keeps allocation
+          # measurement deterministic (see bench/perf-ci.mjs).
+          NODE_FLAGS="--expose-gc --min-semi-space-size=256 --max-semi-space-size=256"
+          if [ -f /tmp/base-dist/core/fixtures/core.mjs ]; then
+            MDREAM_PERF_DIST=/tmp/base-dist node $NODE_FLAGS bench/perf-ci.mjs > /tmp/base-perf.json \
+              || { echo "::warning::base perf run failed; perf deltas will be reported as new"; echo '{}' > /tmp/base-perf.json; }
+          else
+            echo "The base commit predates the perf harness; benchmarks will be reported as new."
+            echo '{}' > /tmp/base-perf.json
+          fi
+          node $NODE_FLAGS bench/perf-ci.mjs > /tmp/pr-perf.json \
+            || { echo "::warning::PR perf run failed; the perf section will be omitted"; echo '{}' > /tmp/pr-perf.json; }
+
       - name: Resolve baseline label
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -93,6 +110,8 @@ jobs:
         id: analyze
         env:
           BASE_DIST: /tmp/base-dist
+          BASE_PERF: /tmp/base-perf.json
+          PR_PERF: /tmp/pr-perf.json
         run: |
           output=$(node bench/bundle/analyze.ts)
           echo "$output"
