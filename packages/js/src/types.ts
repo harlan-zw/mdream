@@ -253,12 +253,13 @@ export interface MdreamProcessingState {
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
 
-  /** Quote state tracking for non-nesting tags - avoids backward scanning */
+  /** @deprecated No longer read or written. Retained for source compatibility. */
   inSingleQuote?: boolean
+  /** @deprecated No longer read or written. Retained for source compatibility. */
   inDoubleQuote?: boolean
+  /** @deprecated No longer read or written. Retained for source compatibility. */
   inBacktick?: boolean
-
-  /** Backslash escaping state tracking - avoids checking previous character */
+  /** @deprecated No longer read or written. Retained for source compatibility. */
   lastCharWasBackslash?: boolean
 
   /** Resolved plugin instances for efficient iteration */
