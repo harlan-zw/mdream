@@ -100,6 +100,14 @@ impl MarkdownStreamProcessor {
     }
   }
 
+  /// Like `new`, but with draining disabled (drain-transparency test only).
+  #[cfg(test)]
+  pub(crate) fn new_drain_disabled(options: HTMLToMarkdownOptions) -> Self {
+    let mut me = Self::new(options);
+    me.state.disable_drain = true;
+    me
+  }
+
   pub fn process_chunk(&mut self, chunk: &str) -> String {
     if self.buffer.is_empty() {
       self.buffer = self.state.process_html(chunk);
@@ -120,5 +128,81 @@ impl MarkdownStreamProcessor {
     };
     self.state.finalize(&leftover);
     self.state.get_markdown_chunk()
+  }
+}
+
+#[cfg(test)]
+mod drain_equiv {
+  //! Draining must be byte-transparent: same streamed output with it on or off,
+  //! for any input at any chunk size. The corpus includes the rewrite-after-yield
+  //! constructs (autolink text==url, self-link headings, redundant `[url](url)`)
+  //! that diverge from one-shot but must stay drain-invariant.
+
+  use super::MarkdownStreamProcessor;
+  use super::types::{CleanConfig, HTMLToMarkdownOptions};
+
+  const CORPUS: &[&str] = &[
+    // Breadth: chunk-invariant cases.
+    "<h1>Title</h1><p>Para one.</p><p>Para <strong>two</strong>.</p>",
+    "<ul><li>a</li><li>b<ul><li>b1</li><li>b2</li></ul></li></ul>",
+    r#"<p>See <a href="https://example.com">Example</a> and <a href="https://x.io">the X site</a>.</p>"#,
+    "<blockquote><p>quote</p><blockquote><p>nested</p></blockquote></blockquote><p>after</p>",
+    "<pre><code>let x = 1;\nlet y = 2;</code></pre><p>done</p>",
+    "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>",
+    r#"<h2>Section</h2><p>text with a <a href="/rel">relative</a> link</p>"#,
+    // Rewrite-after-yield constructs.
+    r#"<p>Visit <a href="https://x.io">https://x.io</a> today.</p>"#,
+    r##"<h2><a href="#section">Section</a></h2><p>body</p>"##,
+    r#"<p>link <a href="https://example.com">https://example.com</a> end</p>"#,
+  ];
+
+  fn stream(html: &str, chunk: usize, opts: HTMLToMarkdownOptions, disable_drain: bool) -> String {
+    let mut p = if disable_drain {
+      MarkdownStreamProcessor::new_drain_disabled(opts)
+    } else {
+      MarkdownStreamProcessor::new(opts)
+    };
+    let mut out = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    out.push_str(&p.finish());
+    out
+  }
+
+  fn safe_clean() -> CleanConfig {
+    // Everything except `fragments`, which needs the whole buffer (drain gated off).
+    CleanConfig {
+      urls: true,
+      fragments: false,
+      empty_links: true,
+      blank_lines: true,
+      redundant_links: true,
+      self_link_headings: true,
+      empty_images: true,
+      empty_link_text: true,
+    }
+  }
+
+  #[test]
+  fn drain_is_byte_transparent() {
+    for &html in CORPUS {
+      for opts in [
+        HTMLToMarkdownOptions::default(),
+        HTMLToMarkdownOptions {
+          clean: Some(safe_clean()),
+          ..Default::default()
+        },
+      ] {
+        for chunk in [1usize, 3, 7, 64, html.len().max(1)] {
+          let drained = stream(html, chunk, opts.clone(), false);
+          let undrained = stream(html, chunk, opts.clone(), true);
+          assert_eq!(
+            drained, undrained,
+            "drain changed output: chunk={chunk} html={html:?}"
+          );
+        }
+      }
+    }
   }
 }

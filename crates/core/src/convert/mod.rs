@@ -322,6 +322,8 @@ pub struct ConvertState {
 
   // Streaming
   last_yielded_length: usize,
+  /// Test-only: disables draining to prove it never alters streamed bytes.
+  pub(crate) disable_drain: bool,
 
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
   /// hot path — a single integer compare). Code/tables/headings are exempt.
@@ -439,6 +441,7 @@ impl ConvertState {
       last_node_is_inline: false,
       pending_inline_whitespace: false,
       last_yielded_length: 0,
+      disable_drain: false,
 
       wrap_width: options_wrap_width,
       plain_text,
@@ -1000,26 +1003,65 @@ impl ConvertState {
   }
 
   pub fn get_markdown_chunk(&mut self) -> String {
-    let current_content = if self.preserve_leading_whitespace {
-      self.buffer.as_str()
-    } else {
-      self.buffer.trim_start()
-    };
+    let buf_len = self.buffer.len();
     // A trailing whitespace-bearing text node may still be trimmed when a
-    // closing inline tag arrives in a later chunk. Keep that mutable suffix
-    // buffered so already-yielded offsets never point into text we rewrite.
-    let stable_len =
+    // closing inline tag arrives in a later chunk. Hold that mutable suffix back.
+    let stable_end =
       if self.last_text_node_contains_whitespace && self.depth_map[TAG_PRE as usize] == 0 {
-        current_content.trim_end_matches(' ').len()
+        self.buffer.trim_end_matches(' ').len()
+      } else {
+        buf_len
+      };
+    let leading = if self.preserve_leading_whitespace {
+      0
     } else {
-      current_content.len()
+      buf_len - self.buffer.trim_start().len()
     };
-    if self.last_yielded_length >= stable_len {
+    // `last_yielded_length` is an absolute buffer offset (see drain below).
+    let start = self.last_yielded_length.max(leading);
+    if start >= stable_end {
       return String::new();
     }
-    let new_content = current_content[self.last_yielded_length..stable_len].to_string();
-    self.last_yielded_length = stable_len;
+    let new_content = self.buffer[start..stable_end].to_string();
+    self.last_yielded_length = stable_end;
+    self.drain_streamed_prefix();
     new_content
+  }
+
+  /// Free already-yielded output so streaming memory stays O(window), not
+  /// O(document). Skipped when a whole-document feature (fragment cleaning,
+  /// frontmatter, extraction) still needs the full buffer.
+  ///
+  /// Must never change the emitted bytes. In-buffer rewrites reach back at most
+  /// to `link_bracket_pos` (open `<a>`) or `buffer.len() - last_content_cache_len`;
+  /// the window below never frees past either, and offsets are rebased on
+  /// removal. Rewrites of already-yielded bytes can't be un-sent by any
+  /// streaming API and diverge from one-shot regardless of drain. The
+  /// `disable_drain` equivalence test guards this without enumerating rewrites.
+  fn drain_streamed_prefix(&mut self) {
+    if self.disable_drain {
+      return;
+    }
+    if self.clean_flags & CLEAN_FRAGMENTS != 0 || self.has_frontmatter || self.has_extraction {
+      return;
+    }
+    // Keep the tail a late rewrite may still touch, and never drop the `[` of an
+    // open link (its close can rewrite from that offset).
+    let mut drain_end = self.last_yielded_length.min(
+      self
+        .buffer
+        .len()
+        .saturating_sub(self.last_content_cache_len),
+    );
+    if self.depth_map[TAG_A as usize] > 0 {
+      drain_end = drain_end.min(self.link_bracket_pos);
+    }
+    if drain_end == 0 {
+      return;
+    }
+    self.buffer.drain(..drain_end);
+    self.last_yielded_length -= drain_end;
+    self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);
   }
 }
 
