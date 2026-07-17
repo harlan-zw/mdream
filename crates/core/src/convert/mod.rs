@@ -541,6 +541,33 @@ impl ConvertState {
     self.script_text_buffer = script_text;
   }
 
+  fn process_script_chunk(
+    &mut self,
+    chunk: &str,
+    start: usize,
+    text_buffer: &mut String,
+  ) -> Option<usize> {
+    let scan = find_script_end_tag(chunk.as_bytes(), start, self.script_data_state);
+    self.script_data_state = scan.state;
+    match scan.boundary {
+      ScriptScanBoundary::Close(close_index) => {
+        self.push_script_text(&chunk[start..close_index]);
+        self.flush_script_text();
+        self.script_data_state = SCRIPT_DATA;
+        Some(close_index)
+      }
+      ScriptScanBoundary::Pending(pending_start) => {
+        self.push_script_text(&chunk[start..pending_start]);
+        text_buffer.push_str(&chunk[pending_start..]);
+        None
+      }
+      ScriptScanBoundary::Complete => {
+        self.push_script_text(&chunk[start..]);
+        None
+      }
+    }
+  }
+
   pub fn process_html(&mut self, chunk: &str) -> String {
     // Reuse text_buffer allocation from previous call if available
     let mut text_buffer = std::mem::take(&mut self.parse_text_buffer);
@@ -552,33 +579,17 @@ impl ConvertState {
     let chunk_length = bytes.len();
     let mut i = 0;
 
-    while i < chunk_length {
-      if self
-        .stack
-        .last()
-        .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none())
-      {
-        let scan = find_script_end_tag(bytes, i, self.script_data_state);
-        self.script_data_state = scan.state;
-        match scan.boundary {
-          ScriptScanBoundary::Close(close_index) => {
-            self.push_script_text(&chunk[i..close_index]);
-            self.flush_script_text();
-            self.script_data_state = SCRIPT_DATA;
-            i = close_index;
-          }
-          ScriptScanBoundary::Pending(pending_start) => {
-            self.push_script_text(&chunk[i..pending_start]);
-            text_buffer.push_str(&chunk[pending_start..]);
-            break;
-          }
-          ScriptScanBoundary::Complete => {
-            self.push_script_text(&chunk[i..]);
-            break;
-          }
-        }
-      }
+    if self
+      .stack
+      .last()
+      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none())
+    {
+      i = self
+        .process_script_chunk(chunk, i, &mut text_buffer)
+        .unwrap_or(chunk_length);
+    }
 
+    while i < chunk_length {
       let cc = bytes[i];
 
       if cc != LT_CHAR {
@@ -860,6 +871,12 @@ impl ConvertState {
             self.just_closed_tag = true;
           } else {
             self.is_first_text_in_element = true;
+            if builtin_tag_id == Some(TAG_SCRIPT) {
+              let Some(close_index) = self.process_script_chunk(chunk, i, &mut text_buffer) else {
+                break;
+              };
+              i = close_index;
+            }
           }
         } else {
           // Include full tag from '<' for re-parsing in next chunk
