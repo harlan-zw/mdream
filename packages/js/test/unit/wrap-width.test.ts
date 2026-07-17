@@ -23,28 +23,28 @@ describe('wrap width (issue #106)', () => {
       .toBe('see _this_ word and more words after the\nemphasis here please now')
   })
 
-  it('preserves br as a hard break with and without wrapping (issue #128)', () => {
+  it('preserves br as a line break with and without wrapping (issue #128)', () => {
     const html = '<div>abc def ghi jkl mno<br/>111 222 333 444 555 666 777 888 999 000 abc</div>'
 
     expect(htmlToMarkdown(html))
-      .toBe('abc def ghi jkl mno  \n111 222 333 444 555 666 777 888 999 000 abc')
+      .toBe('abc def ghi jkl mno\n111 222 333 444 555 666 777 888 999 000 abc')
     expect(wrap(html, 40))
-      .toBe('abc def ghi jkl mno  \n111 222 333 444 555 666 777 888 999 000\nabc')
+      .toBe('abc def ghi jkl mno\n111 222 333 444 555 666 777 888 999 000\nabc')
     expect(htmlToMarkdown('<p>first <br>second</p>'))
-      .toBe('first  \nsecond')
+      .toBe('first\nsecond')
   })
 
   it('keeps nested block continuation prefixes after br', () => {
     expect(htmlToMarkdown('<ul><li>first<br>second</li></ul>'))
-      .toBe('- first  \n  second')
+      .toBe('- first\n  second')
     expect(htmlToMarkdown('<blockquote><p>first<br>second</p></blockquote>'))
-      .toBe('> first  \n> second')
+      .toBe('> first\n> second')
     expect(htmlToMarkdown('<address>first<br>second</address>'))
       .toBe('<address>first<br>second</address>')
     expect(htmlToMarkdown('<h1>first<br>second</h1>'))
       .toBe('# first<br>second')
-    expect(htmlToMarkdown('<pre>first<br>second</pre>'))
-      .toBe('```\nfirst\nsecond\n```')
+    expect(htmlToMarkdown('<pre>first  <br>second</pre>'))
+      .toBe('```\nfirst  \nsecond\n```')
   })
 
   it('never splits an oversized token', () => {

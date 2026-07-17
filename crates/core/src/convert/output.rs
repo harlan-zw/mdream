@@ -46,7 +46,7 @@ impl ConvertState {
     let tag_id: Option<u8>;
     let is_inline: bool;
     let node_spacing: Option<[u8; 2]>;
-    let output: Option<Cow<'static, str>>;
+    let mut output: Option<Cow<'static, str>>;
     // True when `output` is a user-supplied override enter string — emit it
     // verbatim without synthesizing a separating space (issue #93).
     let enter_is_literal: bool;
@@ -141,6 +141,22 @@ impl ConvertState {
           self.last_node_is_inline = is_inline;
           return;
         }
+      }
+    }
+
+    // Whitespace immediately before <br> has no visual effect in HTML. Let the
+    // explicit line boundary subsume it so the output has no trailing spaces.
+    if tag_id == Some(TAG_BR)
+      && !enter_is_literal
+      && self.depth_map[TAG_PRE as usize] == 0
+      && output
+        .as_deref()
+        .is_some_and(|value| value.starts_with('\n'))
+    {
+      let trimmed_len = self.buffer.trim_end_matches(' ').len();
+      self.buffer.truncate(trimmed_len);
+      if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
+        output = None;
       }
     }
 
@@ -696,24 +712,6 @@ impl ConvertState {
     p
   }
 
-  /// Emit the canonical Markdown hard-break marker, accounting for source
-  /// whitespace already at the end of the current line.
-  fn hard_break(&self, prefix: &str) -> Cow<'static, str> {
-    let bytes = self.buffer.as_bytes();
-    let marker = if bytes.ends_with(b"  ") {
-      "\n"
-    } else if bytes.ends_with(b" ") {
-      " \n"
-    } else {
-      "  \n"
-    };
-    if prefix.is_empty() {
-      Cow::Borrowed(marker)
-    } else {
-      Cow::Owned(format!("{marker}{prefix}"))
-    }
-  }
-
   /// Push `text` into the buffer, hard-wrapping on spaces so no output line
   /// exceeds `self.wrap_width` characters. Words are never split, so a single
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
@@ -789,14 +787,10 @@ impl ConvertState {
           Some(Cow::Borrowed("<br>"))
         } else {
           let prefix = self.continuation_prefix();
-          if self.depth_map[TAG_PRE as usize] > 0 {
-            if prefix.is_empty() {
-              Some(Cow::Borrowed("\n"))
-            } else {
-              Some(Cow::Owned(format!("\n{prefix}")))
-            }
+          if prefix.is_empty() {
+            Some(Cow::Borrowed("\n"))
           } else {
-            Some(self.hard_break(&prefix))
+            Some(Cow::Owned(format!("\n{prefix}")))
           }
         }
       }
