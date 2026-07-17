@@ -40,5 +40,6 @@ describe('html character references', () => {
   it('does not scan malformed references through a later semicolon', () => {
     expect(decodeHTMLEntities('&bogus &#65;')).toBe('&bogus A')
     expect(decodeHTMLEntities('&#nope; &#xnope;')).toBe('&#nope; &#xnope;')
+    expect(decodeHTMLEntities('&toString; &valueOf;')).toBe('&toString; &valueOf;')
   })
 })

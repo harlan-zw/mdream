@@ -111,7 +111,8 @@ export function decodeHTMLEntities(text: string, inAttribute = false): string {
 
     if (nameEnd > nameStart && text.charCodeAt(nameEnd) === 59) {
       const name = text.slice(nameStart, nameEnd)
-      const replacement = HTML_ENTITIES[name] ?? HTML_ENTITIES[`$${name}`]
+      const direct = HTML_ENTITIES[name]
+      const replacement = typeof direct === 'string' ? direct : HTML_ENTITIES[`$${name}`]
       if (replacement !== undefined) {
         result += replacement
         i = nameEnd + 1
@@ -124,7 +125,7 @@ export function decodeHTMLEntities(text: string, inAttribute = false): string {
     while (legacyEnd > nameStart) {
       const name = text.slice(nameStart, legacyEnd)
       const replacement = HTML_ENTITIES[name]
-      if (replacement !== undefined) {
+      if (typeof replacement === 'string') {
         const next = text.charCodeAt(legacyEnd)
         if (replacement !== undefined && !(inAttribute && (next === 61 || isAsciiAlphaNumeric(next)))) {
           result += replacement
