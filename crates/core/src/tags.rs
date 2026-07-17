@@ -280,6 +280,8 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   // Media/interactive (block no-spacing)
   t[TAG_SVG as usize] = Some(BLOCK_NO_SPACING);
   t[TAG_SELECT as usize] = Some(BLOCK_NO_SPACING);
+  t[TAG_OPTION as usize] = Some(BLOCK_NO_SPACING);
+  t[TAG_OPTGROUP as usize] = Some(BLOCK_NO_SPACING);
   t[TAG_FIELDSET as usize] = Some(BLOCK_NO_SPACING);
   t[TAG_LEGEND as usize] = Some(BLOCK_NO_SPACING);
   t[TAG_AUDIO as usize] = Some(BLOCK_NO_SPACING);
@@ -289,10 +291,9 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   t[TAG_DIALOG as usize] = Some(BLOCK_NO_SPACING);
   t[TAG_METER as usize] = Some(BLOCK_NO_SPACING);
   t[TAG_PROGRESS as usize] = Some(BLOCK_NO_SPACING);
-  // <template> content is inert (browsers never render it). Treat the whole
-  // body as raw text and exclude it from output, mirroring script/style.
+  // <template> content is parsed (including nested templates) but remains
+  // inert, so its subtree is excluded from Markdown by the converter.
   t[TAG_TEMPLATE as usize] = Some(TagHandler {
-    is_non_nesting: true,
     excludes_text_nodes: true,
     spacing: Some(NO_SPACING),
     ..NONE
@@ -300,7 +301,6 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
 
   // Non-nesting elements
   t[TAG_TEXTAREA as usize] = Some(NON_NESTING_NO_SPACING);
-  t[TAG_OPTION as usize] = Some(NON_NESTING_NO_SPACING);
   t[TAG_IFRAME as usize] = Some(NON_NESTING_NO_SPACING);
   t[TAG_NOFRAMES as usize] = Some(NON_NESTING_NO_SPACING);
   t[TAG_XMP as usize] = Some(NON_NESTING_NO_SPACING);

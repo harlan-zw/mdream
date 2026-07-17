@@ -82,6 +82,7 @@ describe.each(engines)('script/style rawtext closing tags $name', (engineConfig)
       '<script><!--<script>--></script><p>BODY</p>',
       '<script><!--<script></scrip>--></script><p>BODY</p>',
       '<script><!--<script></script-->--></script><p>BODY</p>',
+      '<script><!--><script></script><p>BODY</p>',
     ]
 
     for (const html of cases)
@@ -117,18 +118,30 @@ describe.each(engines)('script/style rawtext closing tags $name', (engineConfig)
 
   it('matches double-escaped script data across every stream split', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    const html = '<script><!--<script></script>--></script><p>BODY</p>'
+    const cases = [
+      '<script><!--<script></script>--></script><p>BODY</p>',
+      '<script><!--><script></script><p>BODY</p>',
+    ]
 
-    for (let split = 1; split < html.length; split++) {
-      const chunks = [html.slice(0, split), html.slice(split)]
-      const result = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { engine }))
-      expect(result.trim()).toBe('BODY')
+    for (const html of cases) {
+      for (let split = 1; split < html.length; split++) {
+        const chunks = [html.slice(0, split), html.slice(split)]
+        const result = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { engine }))
+        expect(result.trim()).toBe('BODY')
+      }
     }
   })
 
   it('closes rawtext when the matching end tag spans stream chunks', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const chunks = ['<script>var s = "</scr', 'ipt><p>BODY</p>']
+    const result = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { engine }))
+    expect(result.trim()).toBe('BODY')
+  })
+
+  it('consumes quoted parse-error attributes on a streamed rawtext end tag', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const chunks = ['<script>x</script data-x=">', '"><p>BODY</p>']
     const result = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { engine }))
     expect(result.trim()).toBe('BODY')
   })

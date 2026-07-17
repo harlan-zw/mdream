@@ -142,159 +142,69 @@ fn find_script_end_tag(bytes: &[u8], start: usize, initial_state: u8) -> ScriptS
 
     let c = bytes[i];
 
-    if state == SCRIPT_DATA {
-      if c == LT_CHAR {
-        if i + 1 == bytes.len() {
-          return ScriptScanResult {
-            boundary: ScriptScanBoundary::Pending(i),
-            state,
-          };
-        }
-        if bytes[i + 1] == SLASH_CHAR {
-          match script_sequence_end(bytes, i + 2) {
-            ScriptSequenceEnd::Match(_) => {
-              return ScriptScanResult {
-                boundary: ScriptScanBoundary::Close(i),
-                state,
-              };
-            }
-            ScriptSequenceEnd::Incomplete => {
-              return ScriptScanResult {
-                boundary: ScriptScanBoundary::Pending(i),
-                state,
-              };
-            }
-            ScriptSequenceEnd::NoMatch => {}
-          }
-        }
-        if bytes[i + 1] == EXCLAMATION_CHAR {
-          if i + 2 == bytes.len() {
-            return ScriptScanResult {
-              boundary: ScriptScanBoundary::Pending(i),
-              state,
-            };
-          }
-          if bytes[i + 2] == b'-' {
-            if i + 3 == bytes.len() {
-              return ScriptScanResult {
-                boundary: ScriptScanBoundary::Pending(i),
-                state,
-              };
-            }
-            if bytes[i + 3] == b'-' {
-              state = SCRIPT_DATA_ESCAPED;
-              i += 4;
-              continue;
-            }
-          }
-        }
-      }
-    } else if state == SCRIPT_DATA_ESCAPED {
-      if c == b'-' {
-        state = SCRIPT_DATA_ESCAPED_DASH;
-      } else if c == LT_CHAR {
-        if i + 1 == bytes.len() {
-          return ScriptScanResult {
-            boundary: ScriptScanBoundary::Pending(i),
-            state,
-          };
-        }
-        if bytes[i + 1] == SLASH_CHAR {
-          match script_sequence_end(bytes, i + 2) {
-            ScriptSequenceEnd::Match(_) => {
-              return ScriptScanResult {
-                boundary: ScriptScanBoundary::Close(i),
-                state,
-              };
-            }
-            ScriptSequenceEnd::Incomplete => {
-              return ScriptScanResult {
-                boundary: ScriptScanBoundary::Pending(i),
-                state,
-              };
-            }
-            ScriptSequenceEnd::NoMatch => {}
-          }
-        } else {
-          match script_sequence_end(bytes, i + 1) {
-            ScriptSequenceEnd::Match(sequence_end) => {
-              state = SCRIPT_DATA_DOUBLE_ESCAPED;
-              i = sequence_end;
-              continue;
-            }
-            ScriptSequenceEnd::Incomplete => {
-              return ScriptScanResult {
-                boundary: ScriptScanBoundary::Pending(i),
-                state,
-              };
-            }
-            ScriptSequenceEnd::NoMatch => {}
-          }
-        }
-      }
-    } else if state == SCRIPT_DATA_ESCAPED_DASH {
-      state = SCRIPT_DATA_ESCAPED;
-      if c == b'-' {
-        state = SCRIPT_DATA_ESCAPED_DASH_DASH;
-      } else if c == LT_CHAR {
-        if i + 1 == bytes.len() {
-          return ScriptScanResult {
-            boundary: ScriptScanBoundary::Pending(i),
-            state,
-          };
-        }
-        let sequence = if bytes[i + 1] == SLASH_CHAR {
-          script_sequence_end(bytes, i + 2)
-        } else {
-          script_sequence_end(bytes, i + 1)
+    if c == LT_CHAR {
+      if i + 1 == bytes.len() {
+        return ScriptScanResult {
+          boundary: ScriptScanBoundary::Pending(i),
+          state,
         };
-        match sequence {
-          ScriptSequenceEnd::Match(sequence_end) => {
-            if bytes[i + 1] == SLASH_CHAR {
+      }
+
+      let next = bytes[i + 1];
+      if state == SCRIPT_DATA {
+        if next == SLASH_CHAR {
+          match script_sequence_end(bytes, i + 2) {
+            ScriptSequenceEnd::Match(_) => {
               return ScriptScanResult {
                 boundary: ScriptScanBoundary::Close(i),
                 state,
               };
             }
-            state = SCRIPT_DATA_DOUBLE_ESCAPED;
-            i = sequence_end;
+            ScriptSequenceEnd::Incomplete => {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Pending(i),
+                state,
+              };
+            }
+            ScriptSequenceEnd::NoMatch => {}
+          }
+        } else if next == EXCLAMATION_CHAR {
+          let available = (bytes.len() - i).min(4);
+          if b"<!--"[..available] == bytes[i..i + available] {
+            if available < 4 {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Pending(i),
+                state,
+              };
+            }
+            state = SCRIPT_DATA_ESCAPED_DASH_DASH;
+            i += 4;
             continue;
           }
-          ScriptSequenceEnd::Incomplete => {
-            return ScriptScanResult {
-              boundary: ScriptScanBoundary::Pending(i),
-              state,
-            };
-          }
-          ScriptSequenceEnd::NoMatch => {}
         }
-      }
-    } else if state == SCRIPT_DATA_ESCAPED_DASH_DASH {
-      if c == GT_CHAR {
-        state = SCRIPT_DATA;
-      } else if c != b'-' {
-        state = SCRIPT_DATA_ESCAPED;
-        if c == LT_CHAR {
-          if i + 1 == bytes.len() {
-            return ScriptScanResult {
-              boundary: ScriptScanBoundary::Pending(i),
-              state,
-            };
-          }
-          let sequence = if bytes[i + 1] == SLASH_CHAR {
-            script_sequence_end(bytes, i + 2)
-          } else {
-            script_sequence_end(bytes, i + 1)
-          };
-          match sequence {
+      } else {
+        let escaped = state < SCRIPT_DATA_DOUBLE_ESCAPED;
+        state = if escaped {
+          SCRIPT_DATA_ESCAPED
+        } else {
+          SCRIPT_DATA_DOUBLE_ESCAPED
+        };
+        let is_end_tag = next == SLASH_CHAR;
+
+        if is_end_tag || escaped {
+          match script_sequence_end(bytes, i + if is_end_tag { 2 } else { 1 }) {
             ScriptSequenceEnd::Match(sequence_end) => {
-              if bytes[i + 1] == SLASH_CHAR {
-                return ScriptScanResult {
-                  boundary: ScriptScanBoundary::Close(i),
-                  state,
-                };
+              if is_end_tag {
+                if escaped {
+                  return ScriptScanResult {
+                    boundary: ScriptScanBoundary::Close(i),
+                    state,
+                  };
+                }
+                state = SCRIPT_DATA_ESCAPED;
+              } else {
+                state = SCRIPT_DATA_DOUBLE_ESCAPED;
               }
-              state = SCRIPT_DATA_DOUBLE_ESCAPED;
               i = sequence_end;
               continue;
             }
@@ -308,89 +218,20 @@ fn find_script_end_tag(bytes: &[u8], start: usize, initial_state: u8) -> ScriptS
           }
         }
       }
-    } else if state == SCRIPT_DATA_DOUBLE_ESCAPED {
-      if c == b'-' {
-        state = SCRIPT_DATA_DOUBLE_ESCAPED_DASH;
-      } else if c == LT_CHAR {
-        if i + 1 == bytes.len() {
-          return ScriptScanResult {
-            boundary: ScriptScanBoundary::Pending(i),
-            state,
-          };
-        }
-        if bytes[i + 1] == SLASH_CHAR {
-          match script_sequence_end(bytes, i + 2) {
-            ScriptSequenceEnd::Match(sequence_end) => {
-              state = SCRIPT_DATA_ESCAPED;
-              i = sequence_end;
-              continue;
-            }
-            ScriptSequenceEnd::Incomplete => {
-              return ScriptScanResult {
-                boundary: ScriptScanBoundary::Pending(i),
-                state,
-              };
-            }
-            ScriptSequenceEnd::NoMatch => {}
-          }
-        }
-      }
-    } else if state == SCRIPT_DATA_DOUBLE_ESCAPED_DASH {
-      state = SCRIPT_DATA_DOUBLE_ESCAPED;
-      if c == b'-' {
-        state = SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH;
-      } else if c == LT_CHAR {
-        if i + 1 == bytes.len() {
-          return ScriptScanResult {
-            boundary: ScriptScanBoundary::Pending(i),
-            state,
-          };
-        }
-        if bytes[i + 1] == SLASH_CHAR {
-          match script_sequence_end(bytes, i + 2) {
-            ScriptSequenceEnd::Match(sequence_end) => {
-              state = SCRIPT_DATA_ESCAPED;
-              i = sequence_end;
-              continue;
-            }
-            ScriptSequenceEnd::Incomplete => {
-              return ScriptScanResult {
-                boundary: ScriptScanBoundary::Pending(i),
-                state,
-              };
-            }
-            ScriptSequenceEnd::NoMatch => {}
-          }
-        }
-      }
-    } else if c == GT_CHAR {
-      state = SCRIPT_DATA;
-    } else if c != b'-' {
-      state = SCRIPT_DATA_DOUBLE_ESCAPED;
-      if c == LT_CHAR {
-        if i + 1 == bytes.len() {
-          return ScriptScanResult {
-            boundary: ScriptScanBoundary::Pending(i),
-            state,
-          };
-        }
-        if bytes[i + 1] == SLASH_CHAR {
-          match script_sequence_end(bytes, i + 2) {
-            ScriptSequenceEnd::Match(sequence_end) => {
-              state = SCRIPT_DATA_ESCAPED;
-              i = sequence_end;
-              continue;
-            }
-            ScriptSequenceEnd::Incomplete => {
-              return ScriptScanResult {
-                boundary: ScriptScanBoundary::Pending(i),
-                state,
-              };
-            }
-            ScriptSequenceEnd::NoMatch => {}
-          }
-        }
-      }
+    } else {
+      state = match state {
+        SCRIPT_DATA_ESCAPED if c == b'-' => SCRIPT_DATA_ESCAPED_DASH,
+        SCRIPT_DATA_ESCAPED_DASH if c == b'-' => SCRIPT_DATA_ESCAPED_DASH_DASH,
+        SCRIPT_DATA_ESCAPED_DASH => SCRIPT_DATA_ESCAPED,
+        SCRIPT_DATA_ESCAPED_DASH_DASH if c == GT_CHAR => SCRIPT_DATA,
+        SCRIPT_DATA_ESCAPED_DASH_DASH if c != b'-' => SCRIPT_DATA_ESCAPED,
+        SCRIPT_DATA_DOUBLE_ESCAPED if c == b'-' => SCRIPT_DATA_DOUBLE_ESCAPED_DASH,
+        SCRIPT_DATA_DOUBLE_ESCAPED_DASH if c == b'-' => SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH,
+        SCRIPT_DATA_DOUBLE_ESCAPED_DASH => SCRIPT_DATA_DOUBLE_ESCAPED,
+        SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH if c == GT_CHAR => SCRIPT_DATA,
+        SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH if c != b'-' => SCRIPT_DATA_DOUBLE_ESCAPED,
+        _ => state,
+      };
     }
 
     i += 1;

@@ -56,8 +56,8 @@ describe('named HTML entities (JS engine)', () => {
     expect(jsHtmlToMarkdown('<p>&nonexistent;</p>')).toBe('&nonexistent;')
   })
 
-  it('caps numeric entity digit scan', () => {
+  it('replaces overflowing numeric entities', () => {
     expect(jsHtmlToMarkdown('<p>&#x10FFFF;</p>')).toBe('\u{10FFFF}')
-    expect(jsHtmlToMarkdown('<p>&#99999999999;</p>')).toBe('&#99999999999;')
+    expect(jsHtmlToMarkdown('<p>&#99999999999;</p>')).toBe('\uFFFD')
   })
 })

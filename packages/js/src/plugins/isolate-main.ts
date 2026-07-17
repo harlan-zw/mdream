@@ -43,6 +43,11 @@ export function isolateMainPlugin(): TransformPlugin {
     beforeNodeProcess(event: any) {
       const { node } = event
 
+      // Parsed template contents are available to hooks/extraction but cannot
+      // define the rendered document's main-content boundary.
+      if (node.excludedFromMarkdown || node.parent?.excludedFromMarkdown)
+        return
+
       // Handle element nodes
       if (node.type === ELEMENT_NODE) {
         const element = node as ElementNode

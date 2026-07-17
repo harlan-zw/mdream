@@ -80,6 +80,30 @@ jobs:
           pnpm test:bundle-size
           pnpm test:bundle-size:rust
 
+      - name: Run performance benchmarks
+        run: |
+          # base and PR run back-to-back on the same runner so machine variance
+          # cancels; both runs use the PR's harness and fixture against the
+          # respective built bundles. Pinned semi-space keeps allocation
+          # measurement deterministic (see bench/perf-ci.mjs). The extra
+          # --no-opt --alloc-only run carries the gated memory signal: with the
+          # JIT off, escape-analysis inlining luck can't move the number.
+          NODE_FLAGS="--expose-gc --min-semi-space-size=256 --max-semi-space-size=256"
+          if [ -f /tmp/base-dist/core/fixtures/core.mjs ]; then
+            MDREAM_PERF_DIST=/tmp/base-dist node $NODE_FLAGS bench/perf-ci.mjs > /tmp/base-perf.json \
+              || { echo "::warning::base perf run failed; perf deltas will be reported as new"; echo '{}' > /tmp/base-perf.json; }
+            MDREAM_PERF_DIST=/tmp/base-dist node --no-opt $NODE_FLAGS bench/perf-ci.mjs --alloc-only > /tmp/base-alloc.json \
+              || { echo "::warning::base alloc run failed; alloc deltas will be reported as new"; echo '{}' > /tmp/base-alloc.json; }
+          else
+            echo "The base commit predates the perf harness; benchmarks will be reported as new."
+            echo '{}' > /tmp/base-perf.json
+            echo '{}' > /tmp/base-alloc.json
+          fi
+          node $NODE_FLAGS bench/perf-ci.mjs > /tmp/pr-perf.json \
+            || { echo "::warning::PR perf run failed; the perf section will be omitted"; echo '{}' > /tmp/pr-perf.json; }
+          node --no-opt $NODE_FLAGS bench/perf-ci.mjs --alloc-only > /tmp/pr-alloc.json \
+            || { echo "::warning::PR alloc run failed; gated alloc rows will be missing"; echo '{}' > /tmp/pr-alloc.json; }
+
       - name: Resolve baseline label
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -93,6 +117,8 @@ jobs:
         id: analyze
         env:
           BASE_DIST: /tmp/base-dist
+          BASE_PERF: /tmp/base-perf.json,/tmp/base-alloc.json
+          PR_PERF: /tmp/pr-perf.json,/tmp/pr-alloc.json
         run: |
           output=$(node bench/bundle/analyze.ts)
           echo "$output"

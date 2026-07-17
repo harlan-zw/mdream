@@ -42,10 +42,13 @@ import {
   TAG_NAV,
   TAG_NOSCRIPT,
   TAG_OL,
+  TAG_OPTGROUP,
+  TAG_OPTION,
   TAG_P,
   TAG_PRE,
   TAG_SCRIPT,
   TAG_SECTION,
+  TAG_SELECT,
   TAG_STYLE,
   TAG_SUMMARY,
   TAG_TABLE,
@@ -170,7 +173,7 @@ const CLOSES_P: Uint8Array = (() => {
 // skip it entirely. Mirrors the Rust engine's `NEEDS_IMPLIED_END_RECOVERY`.
 const NEEDS_IMPLIED_END_RECOVERY: Uint8Array = (() => {
   const t = CLOSES_P.slice()
-  for (const id of [TAG_A, TAG_TD, TAG_TH, TAG_TR, TAG_THEAD, TAG_TBODY, TAG_TFOOT])
+  for (const id of [TAG_A, TAG_TD, TAG_TH, TAG_TR, TAG_THEAD, TAG_TBODY, TAG_TFOOT, TAG_OPTION, TAG_OPTGROUP, TAG_SELECT])
     t[id] = 1
   return t
 })()
@@ -342,6 +345,34 @@ function closeTableContext(
 }
 
 /**
+ * Close the nearest select-related `targetId`. Option/optgroup scans stop at
+ * their owning `<select>`; a select scan includes the select itself. The helper
+ * only runs for select recovery tags, keeping the common start-tag hot path to
+ * one typed-array lookup and avoiding another scope Set in the bundle.
+ */
+function closeSelectTo(
+  state: ParseState,
+  targetId: number,
+  handleEvent: (event: NodeEvent) => void,
+): boolean {
+  let target: ElementNode | null | undefined
+  for (let node = state.currentNode; node; node = node.parent) {
+    if (node.tagId === targetId) {
+      target = node
+      break
+    }
+    if (node.tagId === TAG_SELECT || node.tagId === TAG_TEMPLATE)
+      break
+  }
+  if (!target)
+    return false
+  while (state.currentNode && state.currentNode !== target)
+    closeNode(state.currentNode, state, handleEvent)
+  closeNode(target, state, handleEvent)
+  return true
+}
+
+/**
  * Commit end-of-input state: flush trailing buffered text and close any open
  * elements. The streaming parser keeps trailing text and unclosed elements
  * pending (a later chunk might continue them); at true EOF they must be
@@ -393,6 +424,7 @@ class ParsedElementNode implements ElementNode {
   currentWalkIndex?: number
   childTextNodeIndex?: number
   containsWhitespace?: boolean
+  declare excludedFromMarkdown?: boolean
   pluginOutput?: string[]
   context?: ElementNode['context']
   private cachedDepthMap?: Uint8Array
@@ -463,6 +495,16 @@ export interface ParseState {
   scriptTextChunks?: string[]
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
+  /** @deprecated No longer read or written. Retained for source compatibility. */
+  inSingleQuote?: boolean
+  /** @deprecated No longer read or written. Retained for source compatibility. */
+  inDoubleQuote?: boolean
+  /** @deprecated No longer read or written. Retained for source compatibility. */
+  inBacktick?: boolean
+  /** @deprecated Rawtext parsing is no longer quote-aware. Retained for source compatibility. */
+  inRawTextQuoteAware?: boolean
+  /** @deprecated No longer read or written. Retained for source compatibility. */
+  lastCharWasBackslash?: boolean
   /** Resolved plugin instances for event processing */
   resolvedPlugins?: TransformPlugin[]
   /** Tag override handlers built from declarative tagOverrides config */
@@ -487,41 +529,15 @@ function isWhitespace(charCode: number): boolean {
     || charCode === CARRIAGE_RETURN_CHAR
 }
 
-function hasScriptNameAt(html: string, start: number): boolean {
-  return start + 6 <= html.length
-    && (html.charCodeAt(start) | 32) === 115
-    && (html.charCodeAt(start + 1) | 32) === 99
-    && (html.charCodeAt(start + 2) | 32) === 114
-    && (html.charCodeAt(start + 3) | 32) === 105
-    && (html.charCodeAt(start + 4) | 32) === 112
-    && (html.charCodeAt(start + 5) | 32) === 116
-}
-
 function scriptSequenceEnd(html: string, nameStart: number): number {
-  if (nameStart >= html.length)
-    return SCRIPT_SEQUENCE_INCOMPLETE
-  if ((html.charCodeAt(nameStart) | 32) !== 115)
-    return SCRIPT_SEQUENCE_NO_MATCH
-  if (nameStart + 1 >= html.length)
-    return SCRIPT_SEQUENCE_INCOMPLETE
-  if ((html.charCodeAt(nameStart + 1) | 32) !== 99)
-    return SCRIPT_SEQUENCE_NO_MATCH
-  if (nameStart + 2 >= html.length)
-    return SCRIPT_SEQUENCE_INCOMPLETE
-  if ((html.charCodeAt(nameStart + 2) | 32) !== 114)
-    return SCRIPT_SEQUENCE_NO_MATCH
-  if (nameStart + 3 >= html.length)
-    return SCRIPT_SEQUENCE_INCOMPLETE
-  if ((html.charCodeAt(nameStart + 3) | 32) !== 105)
-    return SCRIPT_SEQUENCE_NO_MATCH
-  if (nameStart + 4 >= html.length)
-    return SCRIPT_SEQUENCE_INCOMPLETE
-  if ((html.charCodeAt(nameStart + 4) | 32) !== 112)
-    return SCRIPT_SEQUENCE_NO_MATCH
-  if (nameStart + 5 >= html.length)
-    return SCRIPT_SEQUENCE_INCOMPLETE
-  if ((html.charCodeAt(nameStart + 5) | 32) !== 116)
-    return SCRIPT_SEQUENCE_NO_MATCH
+  const name = 'script'
+  for (let offset = 0; offset < name.length; offset++) {
+    const index = nameStart + offset
+    if (index >= html.length)
+      return SCRIPT_SEQUENCE_INCOMPLETE
+    if ((html.charCodeAt(index) | 32) !== name.charCodeAt(offset))
+      return SCRIPT_SEQUENCE_NO_MATCH
+  }
   const delimiterIndex = nameStart + 6
   if (delimiterIndex >= html.length)
     return SCRIPT_SEQUENCE_INCOMPLETE
@@ -532,9 +548,7 @@ function scriptSequenceEnd(html: string, nameStart: number): number {
 }
 
 function isScriptElement(node: ElementNode): boolean {
-  return node.tagId === TAG_SCRIPT
-    && node.name.length === 6
-    && hasScriptNameAt(node.name, 0)
+  return node.tagId === TAG_SCRIPT && node.name === 'script'
 }
 
 function scriptScanResult(parseState: ParseState, scriptState: number, result: number): number {
@@ -554,94 +568,47 @@ function findScriptEndTag(html: string, start: number, parseState: ParseState): 
   while (i < html.length) {
     const charCode = html.charCodeAt(i)
 
-    if (state === SCRIPT_DATA) {
-      if (charCode === LT_CHAR) {
-        if (i + 1 === html.length)
-          return scriptScanResult(parseState, state, -i - 2)
-        if (html.charCodeAt(i + 1) === SLASH_CHAR) {
+    if (charCode === LT_CHAR) {
+      if (i + 1 === html.length)
+        return scriptScanResult(parseState, state, -i - 2)
+
+      const next = html.charCodeAt(i + 1)
+      if (state === SCRIPT_DATA) {
+        if (next === SLASH_CHAR) {
           const sequenceEnd = scriptSequenceEnd(html, i + 2)
           if (sequenceEnd >= 0)
             return scriptScanResult(parseState, state, i)
           if (sequenceEnd === SCRIPT_SEQUENCE_INCOMPLETE)
             return scriptScanResult(parseState, state, -i - 2)
         }
-        if (html.charCodeAt(i + 1) === EXCLAMATION_CHAR) {
-          if (i + 2 === html.length)
-            return scriptScanResult(parseState, state, -i - 2)
-          if (html.charCodeAt(i + 2) === DASH_CHAR) {
-            if (i + 3 === html.length)
+        else if (next === EXCLAMATION_CHAR) {
+          const marker = '<!--'
+          const available = Math.min(html.length - i, marker.length)
+          if (html.startsWith(marker.substring(0, available), i)) {
+            if (available < marker.length)
               return scriptScanResult(parseState, state, -i - 2)
-            if (html.charCodeAt(i + 3) === DASH_CHAR) {
-              state = SCRIPT_DATA_ESCAPED
-              i += 4
-              continue
-            }
-          }
-        }
-      }
-    }
-    else if (state === SCRIPT_DATA_ESCAPED) {
-      if (charCode === DASH_CHAR) {
-        state = SCRIPT_DATA_ESCAPED_DASH
-      }
-      else if (charCode === LT_CHAR) {
-        if (i + 1 === html.length)
-          return scriptScanResult(parseState, state, -i - 2)
-        if (html.charCodeAt(i + 1) === SLASH_CHAR) {
-          const sequenceEnd = scriptSequenceEnd(html, i + 2)
-          if (sequenceEnd >= 0)
-            return scriptScanResult(parseState, state, i)
-          if (sequenceEnd === SCRIPT_SEQUENCE_INCOMPLETE)
-            return scriptScanResult(parseState, state, -i - 2)
-        }
-        else {
-          const sequenceEnd = scriptSequenceEnd(html, i + 1)
-          if (sequenceEnd >= 0) {
-            state = SCRIPT_DATA_DOUBLE_ESCAPED
-            i = sequenceEnd
+            state = SCRIPT_DATA_ESCAPED_DASH_DASH
+            i += marker.length
             continue
           }
-          if (sequenceEnd === SCRIPT_SEQUENCE_INCOMPLETE)
-            return scriptScanResult(parseState, state, -i - 2)
         }
       }
-    }
-    else if (state === SCRIPT_DATA_ESCAPED_DASH) {
-      state = SCRIPT_DATA_ESCAPED
-      if (charCode === DASH_CHAR) {
-        state = SCRIPT_DATA_ESCAPED_DASH_DASH
-      }
-      else if (charCode === LT_CHAR) {
-        if (i + 1 === html.length)
-          return scriptScanResult(parseState, state, -i - 2)
-        const isEndTag = html.charCodeAt(i + 1) === SLASH_CHAR
-        const sequenceEnd = scriptSequenceEnd(html, i + (isEndTag ? 2 : 1))
-        if (sequenceEnd >= 0) {
-          if (isEndTag)
-            return scriptScanResult(parseState, state, i)
-          state = SCRIPT_DATA_DOUBLE_ESCAPED
-          i = sequenceEnd
-          continue
-        }
-        if (sequenceEnd === SCRIPT_SEQUENCE_INCOMPLETE)
-          return scriptScanResult(parseState, state, -i - 2)
-      }
-    }
-    else if (state === SCRIPT_DATA_ESCAPED_DASH_DASH) {
-      if (charCode === GT_CHAR) {
-        state = SCRIPT_DATA
-      }
-      else if (charCode !== DASH_CHAR) {
-        state = SCRIPT_DATA_ESCAPED
-        if (charCode === LT_CHAR) {
-          if (i + 1 === html.length)
-            return scriptScanResult(parseState, state, -i - 2)
-          const isEndTag = html.charCodeAt(i + 1) === SLASH_CHAR
+      else {
+        const escaped = state < SCRIPT_DATA_DOUBLE_ESCAPED
+        state = escaped ? SCRIPT_DATA_ESCAPED : SCRIPT_DATA_DOUBLE_ESCAPED
+        const isEndTag = next === SLASH_CHAR
+
+        if (isEndTag || escaped) {
           const sequenceEnd = scriptSequenceEnd(html, i + (isEndTag ? 2 : 1))
           if (sequenceEnd >= 0) {
-            if (isEndTag)
-              return scriptScanResult(parseState, state, i)
-            state = SCRIPT_DATA_DOUBLE_ESCAPED
+            if (isEndTag) {
+              if (escaped)
+                return scriptScanResult(parseState, state, i)
+              state = SCRIPT_DATA_ESCAPED
+            }
+            else {
+              state = SCRIPT_DATA_DOUBLE_ESCAPED
+            }
             i = sequenceEnd
             continue
           }
@@ -650,64 +617,21 @@ function findScriptEndTag(html: string, start: number, parseState: ParseState): 
         }
       }
     }
-    else if (state === SCRIPT_DATA_DOUBLE_ESCAPED) {
-      if (charCode === DASH_CHAR) {
-        state = SCRIPT_DATA_DOUBLE_ESCAPED_DASH
-      }
-      else if (charCode === LT_CHAR) {
-        if (i + 1 === html.length)
-          return scriptScanResult(parseState, state, -i - 2)
-        if (html.charCodeAt(i + 1) === SLASH_CHAR) {
-          const sequenceEnd = scriptSequenceEnd(html, i + 2)
-          if (sequenceEnd >= 0) {
-            state = SCRIPT_DATA_ESCAPED
-            i = sequenceEnd
-            continue
-          }
-          if (sequenceEnd === SCRIPT_SEQUENCE_INCOMPLETE)
-            return scriptScanResult(parseState, state, -i - 2)
-        }
-      }
+    else if (charCode === DASH_CHAR) {
+      if (state === SCRIPT_DATA_ESCAPED || state === SCRIPT_DATA_ESCAPED_DASH)
+        state++
+      else if (state === SCRIPT_DATA_DOUBLE_ESCAPED || state === SCRIPT_DATA_DOUBLE_ESCAPED_DASH)
+        state++
     }
-    else if (state === SCRIPT_DATA_DOUBLE_ESCAPED_DASH) {
-      state = SCRIPT_DATA_DOUBLE_ESCAPED
-      if (charCode === DASH_CHAR) {
-        state = SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH
-      }
-      else if (charCode === LT_CHAR) {
-        if (i + 1 === html.length)
-          return scriptScanResult(parseState, state, -i - 2)
-        if (html.charCodeAt(i + 1) === SLASH_CHAR) {
-          const sequenceEnd = scriptSequenceEnd(html, i + 2)
-          if (sequenceEnd >= 0) {
-            state = SCRIPT_DATA_ESCAPED
-            i = sequenceEnd
-            continue
-          }
-          if (sequenceEnd === SCRIPT_SEQUENCE_INCOMPLETE)
-            return scriptScanResult(parseState, state, -i - 2)
-        }
-      }
+    else if (state === SCRIPT_DATA_ESCAPED_DASH || state === SCRIPT_DATA_ESCAPED_DASH_DASH) {
+      state = charCode === GT_CHAR && state === SCRIPT_DATA_ESCAPED_DASH_DASH
+        ? SCRIPT_DATA
+        : SCRIPT_DATA_ESCAPED
     }
-    else if (charCode === GT_CHAR) {
-      state = SCRIPT_DATA
-    }
-    else if (charCode !== DASH_CHAR) {
-      state = SCRIPT_DATA_DOUBLE_ESCAPED
-      if (charCode === LT_CHAR) {
-        if (i + 1 === html.length)
-          return scriptScanResult(parseState, state, -i - 2)
-        if (html.charCodeAt(i + 1) === SLASH_CHAR) {
-          const sequenceEnd = scriptSequenceEnd(html, i + 2)
-          if (sequenceEnd >= 0) {
-            state = SCRIPT_DATA_ESCAPED
-            i = sequenceEnd
-            continue
-          }
-          if (sequenceEnd === SCRIPT_SEQUENCE_INCOMPLETE)
-            return scriptScanResult(parseState, state, -i - 2)
-        }
-      }
+    else if (state === SCRIPT_DATA_DOUBLE_ESCAPED_DASH || state === SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH) {
+      state = charCode === GT_CHAR && state === SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH
+        ? SCRIPT_DATA
+        : SCRIPT_DATA_DOUBLE_ESCAPED
     }
 
     i++
@@ -1024,7 +948,7 @@ function parseHtmlInternal(
       const result = processOpeningTag(tagName, tagId, htmlChunk, i2, state, handleEvent)
 
       if (result.skip) {
-        textBuffer += htmlChunk[i++]
+        i = result.newPosition
       }
       else if (result.complete) {
         i = result.newPosition
@@ -1084,7 +1008,10 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     return
   }
 
+  // Template exclusion is copied to descendants when they open, so text can
+  // inherit it from its immediate parent without walking the ancestor chain.
   const excludesTextNodes = state.currentNode?.tagHandler?.excludesTextNodes
+    || state.currentNode?.excludedFromMarkdown
   const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
 
   if (!inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex) {
@@ -1204,10 +1131,17 @@ function processClosingTag(
     }
   }
 
-  // Find matching parent node
+  // Find a matching parent node. A template is a scope boundary: an end tag in
+  // its inert contents must never pop an element from the outer document.
+  const stopAtTemplate = tagId !== TAG_TEMPLATE && (state.depthMap[TAG_TEMPLATE] || 0) > 0
   let curr: ElementNode | null | undefined = state.currentNode
-  while (curr && !matchesClosingTag(curr, tagName, tagId, closingIsAlias))
+  while (curr && !matchesClosingTag(curr, tagName, tagId, closingIsAlias)) {
+    if (stopAtTemplate && curr.tagId === TAG_TEMPLATE) {
+      curr = null
+      break
+    }
     curr = curr.parent
+  }
 
   if (curr) {
     while (state.currentNode && state.currentNode !== curr)
@@ -1414,7 +1348,9 @@ function processOpeningTag(
   // normal block spacing, instead of inheriting head's whitespace collapsing.
   // Runs only after the tag is confirmed complete so incomplete/chunk-split start
   // tags do not mutate parser state or emit a premature head close.
-  if ((state.depthMap[TAG_HEAD] || 0) > 0 && !HEAD_CONTENT_TAGS.has(tagId)) {
+  if ((state.depthMap[TAG_HEAD] || 0) > 0
+    && (state.depthMap[TAG_TEMPLATE] || 0) === 0
+    && !HEAD_CONTENT_TAGS.has(tagId)) {
     while (state.currentNode && state.currentNode.tagId !== TAG_HEAD) {
       closeNode(state.currentNode, state, handleEvent)
     }
@@ -1431,7 +1367,35 @@ function processOpeningTag(
   // confirmed complete (above) so a chunk-split start tag never mutates parser
   // state or emits a premature close.
   if (tagId >= 0 && tagId < MAX_TAG_ID && NEEDS_IMPLIED_END_RECOVERY[tagId] === 1) {
-    if (tagId === TAG_A) {
+    if (tagId === TAG_SELECT && (state.depthMap[TAG_SELECT] || 0) > 0) {
+      // In the "in select" insertion mode a nested <select> acts as the end
+      // of the open select; the incoming start tag itself is ignored.
+      if (closeSelectTo(state, TAG_SELECT, handleEvent)) {
+        return {
+          complete: true,
+          newPosition: result.newPosition,
+          remainingText: '',
+          selfClosing: false,
+          skip: true,
+        }
+      }
+    }
+    else if (tagId === TAG_OPTION) {
+      if ((state.depthMap[TAG_SELECT] || 0) > 0) {
+        closeSelectTo(state, TAG_OPTION, handleEvent)
+      }
+      else if (state.currentNode?.tagId === TAG_OPTION) {
+        // The in-body rule also pops an option when it is the current node.
+        closeNode(state.currentNode, state, handleEvent)
+      }
+    }
+    else if (tagId === TAG_OPTGROUP && (state.depthMap[TAG_SELECT] || 0) > 0) {
+      // An optgroup start first closes a current option, then the previous
+      // optgroup, making both optional end tags observable as siblings.
+      closeSelectTo(state, TAG_OPTION, handleEvent)
+      closeSelectTo(state, TAG_OPTGROUP, handleEvent)
+    }
+    else if (tagId === TAG_A) {
       // A nested <a> closes the open one (anchors cannot nest), so the markdown is
       // two adjacent links rather than invalid nested `[..]`. <a> never closes <p>.
       if ((state.depthMap[TAG_A] || 0) > 0) {
@@ -1507,6 +1471,11 @@ function processOpeningTag(
     tagId,
     tagHandler,
   )
+
+  // Keep the common element shape unchanged: only inert template nodes and
+  // their descendants receive this optional field.
+  if (tagId === TAG_TEMPLATE || state.currentNode?.excludedFromMarkdown)
+    tag.excludedFromMarkdown = true
 
   state.lastTextNode = tag
 
@@ -1685,7 +1654,7 @@ export function parseAttributes(attrStr: string): Record<string, string> {
         }
         else if (charCode === quoteChar) {
           const raw = attrStr.substring(valueStart, i)
-          result[name] = raw.includes('&') ? decodeHTMLEntities(raw) : raw
+          result[name] = raw.includes('&') ? decodeHTMLEntities(raw, true) : raw
           state = WHITESPACE
         }
         break
@@ -1693,7 +1662,7 @@ export function parseAttributes(attrStr: string): Record<string, string> {
       case UNQUOTED_VALUE:
         if (isSpace || charCode === GT_CHAR) {
           const raw = attrStr.substring(valueStart, i)
-          result[name] = raw.includes('&') ? decodeHTMLEntities(raw) : raw
+          result[name] = raw.includes('&') ? decodeHTMLEntities(raw, true) : raw
           state = WHITESPACE
         }
         break
@@ -1706,7 +1675,7 @@ export function parseAttributes(attrStr: string): Record<string, string> {
   if (state === QUOTED_VALUE || state === UNQUOTED_VALUE) {
     if (name) {
       const raw = attrStr.substring(valueStart, i)
-      result[name] = raw.includes('&') ? decodeHTMLEntities(raw) : raw
+      result[name] = raw.includes('&') ? decodeHTMLEntities(raw, true) : raw
     }
   }
   else if (state === NAME || state === AFTER_NAME || state === BEFORE_VALUE) {

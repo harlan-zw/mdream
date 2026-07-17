@@ -1665,9 +1665,9 @@ fn numeric_entities_decimal_and_hex() {
 
 #[test]
 fn numeric_entities_digit_cap() {
-  // Unbounded digit sequences should not scan forever
-  assert_eq!(convert("<p>&#99999999999;</p>"), "&#99999999999;");
-  assert_eq!(convert("<p>&#xFFFFFFFFF;</p>"), "&#xFFFFFFFFF;");
+  // Consume the full digit run, saturating out-of-range values to U+FFFD.
+  assert_eq!(convert("<p>&#99999999999;</p>"), "\u{FFFD}");
+  assert_eq!(convert("<p>&#xFFFFFFFFF;</p>"), "\u{FFFD}");
 }
 
 #[test]
@@ -2181,6 +2181,7 @@ fn script_data_escaped_and_double_escaped_end_tags() {
     "<script><!--<script>--></script><p>BODY</p>",
     "<script><!--<script></scrip>--></script><p>BODY</p>",
     "<script><!--<script></script-->--></script><p>BODY</p>",
+    "<script><!--><script></script><p>BODY</p>",
     "<script><!-- </script><p>BODY</p>",
   ] {
     assert_eq!(convert(html), "BODY", "for input: {html:?}");
@@ -2199,14 +2200,17 @@ fn script_data_escaped_and_double_escaped_end_tags() {
 
 #[test]
 fn streaming_script_data_double_escaped_matches_every_split() {
-  let html = "<script><!--<script></script>--></script><p>BODY</p>";
-
-  for split in 1..html.len() {
-    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
-    let mut out = stream.process_chunk(&html[..split]);
-    out.push_str(&stream.process_chunk(&html[split..]));
-    out.push_str(&stream.finish());
-    assert_eq!(out.trim(), "BODY", "split at byte {split}");
+  for html in [
+    "<script><!--<script></script>--></script><p>BODY</p>",
+    "<script><!--><script></script><p>BODY</p>",
+  ] {
+    for split in 1..html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let mut out = stream.process_chunk(&html[..split]);
+      out.push_str(&stream.process_chunk(&html[split..]));
+      out.push_str(&stream.finish());
+      assert_eq!(out.trim(), "BODY", "input {html:?}, split at byte {split}");
+    }
   }
 }
 
