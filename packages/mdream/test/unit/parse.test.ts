@@ -13,6 +13,10 @@ function isTextNode(node: Node): node is TextNode {
 }
 
 describe('parseHtml', () => {
+  it('returns buffered data from an unclosed script', () => {
+    expect(parseHtml('<script>payload</scr').remainingHtml).toBe('payload</scr')
+  })
+
   it('should parse simple HTML elements', () => {
     const html = '<div>Hello</div>'
     const result = parseHtml(html)

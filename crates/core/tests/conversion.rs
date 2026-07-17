@@ -2174,6 +2174,69 @@ fn script_and_style_closing_tags_are_not_quote_aware() {
 }
 
 #[test]
+fn script_data_escaped_and_double_escaped_end_tags() {
+  for html in [
+    "<script><!--<script></script>--></script><p>BODY</p>",
+    "<script><!--<ScRiPt></sCrIpT>--></script><p>BODY</p>",
+    "<script><!--<script>--></script><p>BODY</p>",
+    "<script><!--<script></scrip>--></script><p>BODY</p>",
+    "<script><!--<script></script-->--></script><p>BODY</p>",
+    "<script><!--><script></script><p>BODY</p>",
+    "<script><!-- </script><p>BODY</p>",
+  ] {
+    assert_eq!(convert(html), "BODY", "for input: {html:?}");
+  }
+
+  for html in [
+    "<script><!--<scriptx></script>--></script><p>BODY</p>",
+    "<script><!--<scrip></script>--></script><p>BODY</p>",
+    "<script><!--<script</script>--></script><p>BODY</p>",
+    "<script><!--<script><script></script></script>--></script><p>BODY</p>",
+  ] {
+    assert_eq!(convert(html), "-->\n\nBODY", "for input: {html:?}");
+  }
+  assert_eq!(convert("<script><!--<script></script>--><p>BODY</p>"), "");
+}
+
+#[test]
+fn streaming_script_data_double_escaped_matches_every_split() {
+  for html in [
+    "<script><!--<script></script>--></script><p>BODY</p>",
+    "<script><!--><script></script><p>BODY</p>",
+  ] {
+    for split in 1..html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let mut out = stream.process_chunk(&html[..split]);
+      out.push_str(&stream.process_chunk(&html[split..]));
+      out.push_str(&stream.finish());
+      assert_eq!(out.trim(), "BODY", "input {html:?}, split at byte {split}");
+    }
+  }
+}
+
+#[test]
+fn script_data_scanner_preserves_extraction_text() {
+  let script_text = "<!--<script>const payload = \"value\";</script>-->";
+  let html = format!("<script>{script_text}</script><p>BODY</p>");
+  let result = html_to_markdown_result(
+    &html,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        extraction: Some(ExtractionConfig {
+          selectors: vec!["script".to_string()],
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+
+  assert_eq!(result.markdown, "BODY");
+  let extracted = result.extracted.unwrap();
+  assert_eq!(extracted[0].text_content, script_text);
+}
+
+#[test]
 fn streaming_top_level_text_with_tag_override() {
   // Top-level text before an overridden inline tag must survive chunk
   // boundaries through the streaming path too (issue #93).

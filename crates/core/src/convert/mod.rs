@@ -68,6 +68,181 @@ const CLEAN_SELF_LINK_HEADINGS: u8 = 8;
 const CLEAN_EMPTY_IMAGES: u8 = 16;
 const CLEAN_EMPTY_LINK_TEXT: u8 = 32;
 
+const SCRIPT_DATA: u8 = 0;
+const SCRIPT_DATA_ESCAPED: u8 = 1;
+const SCRIPT_DATA_ESCAPED_DASH: u8 = 2;
+const SCRIPT_DATA_ESCAPED_DASH_DASH: u8 = 3;
+const SCRIPT_DATA_DOUBLE_ESCAPED: u8 = 4;
+const SCRIPT_DATA_DOUBLE_ESCAPED_DASH: u8 = 5;
+const SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH: u8 = 6;
+
+#[derive(Clone, Copy)]
+enum ScriptSequenceEnd {
+  Match(usize),
+  NoMatch,
+  Incomplete,
+}
+
+enum ScriptScanBoundary {
+  Close(usize),
+  Pending(usize),
+  Complete,
+}
+
+struct ScriptScanResult {
+  boundary: ScriptScanBoundary,
+  state: u8,
+}
+
+#[inline(always)]
+fn script_sequence_end(bytes: &[u8], name_start: usize) -> ScriptSequenceEnd {
+  const SCRIPT_NAME: &[u8; 6] = b"script";
+  for (offset, expected) in SCRIPT_NAME.iter().enumerate() {
+    let index = name_start + offset;
+    if index >= bytes.len() {
+      return ScriptSequenceEnd::Incomplete;
+    }
+    if bytes[index] | 32 != *expected {
+      return ScriptSequenceEnd::NoMatch;
+    }
+  }
+  let delimiter_index = name_start + 6;
+  if delimiter_index >= bytes.len() {
+    return ScriptSequenceEnd::Incomplete;
+  }
+  let delimiter = bytes[delimiter_index];
+  if delimiter == GT_CHAR || delimiter == SLASH_CHAR || is_whitespace(delimiter) {
+    ScriptSequenceEnd::Match(delimiter_index + 1)
+  } else {
+    ScriptSequenceEnd::NoMatch
+  }
+}
+
+/// Find the first script end tag that the HTML tokenizer would emit.
+///
+/// Only an incomplete `<...` boundary candidate is returned to the streaming
+/// caller. All completed script data advances the persisted tokenizer state.
+fn find_script_end_tag(bytes: &[u8], start: usize, initial_state: u8) -> ScriptScanResult {
+  let mut state = initial_state;
+  let mut i = start;
+
+  while i < bytes.len() {
+    if state == SCRIPT_DATA {
+      while i < bytes.len() && bytes[i] != LT_CHAR {
+        i += 1;
+      }
+    } else if state == SCRIPT_DATA_ESCAPED || state == SCRIPT_DATA_DOUBLE_ESCAPED {
+      while i < bytes.len() && bytes[i] != LT_CHAR && bytes[i] != b'-' {
+        i += 1;
+      }
+    }
+    if i == bytes.len() {
+      break;
+    }
+
+    let c = bytes[i];
+
+    if c == LT_CHAR {
+      if i + 1 == bytes.len() {
+        return ScriptScanResult {
+          boundary: ScriptScanBoundary::Pending(i),
+          state,
+        };
+      }
+
+      let next = bytes[i + 1];
+      if state == SCRIPT_DATA {
+        if next == SLASH_CHAR {
+          match script_sequence_end(bytes, i + 2) {
+            ScriptSequenceEnd::Match(_) => {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Close(i),
+                state,
+              };
+            }
+            ScriptSequenceEnd::Incomplete => {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Pending(i),
+                state,
+              };
+            }
+            ScriptSequenceEnd::NoMatch => {}
+          }
+        } else if next == EXCLAMATION_CHAR {
+          let available = (bytes.len() - i).min(4);
+          if b"<!--"[..available] == bytes[i..i + available] {
+            if available < 4 {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Pending(i),
+                state,
+              };
+            }
+            state = SCRIPT_DATA_ESCAPED_DASH_DASH;
+            i += 4;
+            continue;
+          }
+        }
+      } else {
+        let escaped = state < SCRIPT_DATA_DOUBLE_ESCAPED;
+        state = if escaped {
+          SCRIPT_DATA_ESCAPED
+        } else {
+          SCRIPT_DATA_DOUBLE_ESCAPED
+        };
+        let is_end_tag = next == SLASH_CHAR;
+
+        if is_end_tag || escaped {
+          match script_sequence_end(bytes, i + if is_end_tag { 2 } else { 1 }) {
+            ScriptSequenceEnd::Match(sequence_end) => {
+              if is_end_tag {
+                if escaped {
+                  return ScriptScanResult {
+                    boundary: ScriptScanBoundary::Close(i),
+                    state,
+                  };
+                }
+                state = SCRIPT_DATA_ESCAPED;
+              } else {
+                state = SCRIPT_DATA_DOUBLE_ESCAPED;
+              }
+              i = sequence_end;
+              continue;
+            }
+            ScriptSequenceEnd::Incomplete => {
+              return ScriptScanResult {
+                boundary: ScriptScanBoundary::Pending(i),
+                state,
+              };
+            }
+            ScriptSequenceEnd::NoMatch => {}
+          }
+        }
+      }
+    } else {
+      state = match state {
+        SCRIPT_DATA_ESCAPED if c == b'-' => SCRIPT_DATA_ESCAPED_DASH,
+        SCRIPT_DATA_ESCAPED_DASH if c == b'-' => SCRIPT_DATA_ESCAPED_DASH_DASH,
+        SCRIPT_DATA_ESCAPED_DASH => SCRIPT_DATA_ESCAPED,
+        SCRIPT_DATA_ESCAPED_DASH_DASH if c == GT_CHAR => SCRIPT_DATA,
+        SCRIPT_DATA_ESCAPED_DASH_DASH if c != b'-' => SCRIPT_DATA_ESCAPED,
+        SCRIPT_DATA_DOUBLE_ESCAPED if c == b'-' => SCRIPT_DATA_DOUBLE_ESCAPED_DASH,
+        SCRIPT_DATA_DOUBLE_ESCAPED_DASH if c == b'-' => SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH,
+        SCRIPT_DATA_DOUBLE_ESCAPED_DASH => SCRIPT_DATA_DOUBLE_ESCAPED,
+        SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH if c == GT_CHAR => SCRIPT_DATA,
+        SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH if c != b'-' => SCRIPT_DATA_DOUBLE_ESCAPED,
+        _ => state,
+      };
+    }
+
+    i += 1;
+  }
+
+  ScriptScanResult {
+    boundary: ScriptScanBoundary::Complete,
+    state,
+  }
+}
+
 /// Unified single-pass HTML-to-Markdown converter.
 /// Merges parser state and markdown output state to eliminate callback overhead,
 /// duplicate state tracking, and enable full inlining of tag handler logic.
@@ -82,6 +257,7 @@ pub struct ConvertState {
   just_closed_tag: bool,
   is_first_text_in_element: bool,
   in_non_nesting: bool,
+  script_data_state: u8,
   escape_ctx: u8,
   in_pre: bool,
   /// Filter: depth of the shallowest currently-open visually-hidden element, or
@@ -94,6 +270,7 @@ pub struct ConvertState {
   first_block_parent_index: Option<usize>,
   block_parent_indices: Vec<usize>,
   parse_text_buffer: String,
+  script_text_buffer: String,
   pub stack: Vec<ElementNode>,
   node_pool: Vec<ElementNode>,
 
@@ -211,6 +388,7 @@ impl ConvertState {
       just_closed_tag: false,
       is_first_text_in_element: false,
       in_non_nesting: false,
+      script_data_state: SCRIPT_DATA,
       escape_ctx: 0,
       in_pre: false,
       hidden_since_depth: None,
@@ -219,6 +397,7 @@ impl ConvertState {
       first_block_parent_index: None,
       block_parent_indices: Vec::with_capacity(16),
       parse_text_buffer: String::new(),
+      script_text_buffer: String::new(),
       stack: Vec::with_capacity(32),
       node_pool: Vec::with_capacity(32),
 
@@ -342,6 +521,53 @@ impl ConvertState {
     s
   }
 
+  #[inline]
+  fn push_script_text(&mut self, text: &str) {
+    if text.is_empty() {
+      return;
+    }
+    self.script_text_buffer.push_str(text);
+    self.text_buffer_contains_non_whitespace = true;
+    self.last_char_was_whitespace = false;
+    self.just_closed_tag = false;
+  }
+
+  fn flush_script_text(&mut self) {
+    if self.script_text_buffer.is_empty() {
+      return;
+    }
+    let mut script_text = std::mem::take(&mut self.script_text_buffer);
+    self.process_text_buffer(&mut script_text);
+    self.script_text_buffer = script_text;
+  }
+
+  fn process_script_chunk(
+    &mut self,
+    chunk: &str,
+    start: usize,
+    text_buffer: &mut String,
+  ) -> Option<usize> {
+    let scan = find_script_end_tag(chunk.as_bytes(), start, self.script_data_state);
+    self.script_data_state = scan.state;
+    match scan.boundary {
+      ScriptScanBoundary::Close(close_index) => {
+        self.push_script_text(&chunk[start..close_index]);
+        self.flush_script_text();
+        self.script_data_state = SCRIPT_DATA;
+        Some(close_index)
+      }
+      ScriptScanBoundary::Pending(pending_start) => {
+        self.push_script_text(&chunk[start..pending_start]);
+        text_buffer.push_str(&chunk[pending_start..]);
+        None
+      }
+      ScriptScanBoundary::Complete => {
+        self.push_script_text(&chunk[start..]);
+        None
+      }
+    }
+  }
+
   pub fn process_html(&mut self, chunk: &str) -> String {
     // Reuse text_buffer allocation from previous call if available
     let mut text_buffer = std::mem::take(&mut self.parse_text_buffer);
@@ -352,6 +578,16 @@ impl ConvertState {
     let bytes = chunk.as_bytes();
     let chunk_length = bytes.len();
     let mut i = 0;
+
+    if self
+      .stack
+      .last()
+      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none())
+    {
+      i = self
+        .process_script_chunk(chunk, i, &mut text_buffer)
+        .unwrap_or(chunk_length);
+    }
 
     while i < chunk_length {
       let cc = bytes[i];
@@ -635,6 +871,12 @@ impl ConvertState {
             self.just_closed_tag = true;
           } else {
             self.is_first_text_in_element = true;
+            if builtin_tag_id == Some(TAG_SCRIPT) {
+              let Some(close_index) = self.process_script_chunk(chunk, i, &mut text_buffer) else {
+                break;
+              };
+              i = close_index;
+            }
           }
         } else {
           // Include full tag from '<' for re-parsing in next chunk
@@ -740,7 +982,15 @@ impl ConvertState {
   /// trailing text was scanned persist on `self`, so `process_text_buffer`
   /// commits it exactly as if the next tag had triggered the flush.
   pub fn finalize(&mut self, leftover: &str) {
-    if !leftover.is_empty() && leftover.as_bytes()[0] != LT_CHAR {
+    let in_script = self
+      .stack
+      .last()
+      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none());
+    if in_script {
+      self.push_script_text(leftover);
+      self.flush_script_text();
+      self.script_data_state = SCRIPT_DATA;
+    } else if !leftover.is_empty() && leftover.as_bytes()[0] != LT_CHAR {
       let mut buf = leftover.to_string();
       self.process_text_buffer(&mut buf);
     }
