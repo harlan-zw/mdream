@@ -32,6 +32,9 @@ export async function* streamHtmlToMarkdown(
     tagOverrideHandlers,
     plainText: processor.state.plainText,
   }
+  const handleEvent: (event: NodeEvent) => void = resolvedPlugins.length
+    ? event => processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)
+    : processor.processEvent
 
   let remainingHtml = ''
 
@@ -49,9 +52,7 @@ export async function* streamHtmlToMarkdown(
         : decoder.decode(value, { stream: true })
       const htmlContent = `${remainingHtml}${decoded}`
 
-      remainingHtml = parseHtmlStream(htmlContent, parseState, (event) => {
-        processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)
-      })
+      remainingHtml = parseHtmlStream(htmlContent, parseState, handleEvent)
 
       const chunk = processor.getMarkdownChunk()
       if (chunk) {
@@ -60,9 +61,6 @@ export async function* streamHtmlToMarkdown(
     }
     // Process any remaining HTML, then commit trailing text and close any
     // elements left open at end of input.
-    const handleEvent = (event: NodeEvent): void => {
-      processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)
-    }
     const decoderTail = decoder.decode()
     const finalHtml = remainingHtml + decoderTail
     const leftover = finalHtml
