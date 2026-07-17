@@ -80,4 +80,11 @@ describe.each(engines)('script/style rawtext closing tags $name', (engineConfig)
     const result = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { engine }))
     expect(result.trim()).toBe('BODY')
   })
+
+  it('consumes quoted parse-error attributes on a streamed rawtext end tag', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const chunks = ['<script>x</script data-x=">', '"><p>BODY</p>']
+    const result = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { engine }))
+    expect(result.trim()).toBe('BODY')
+  })
 })

@@ -1665,9 +1665,9 @@ fn numeric_entities_decimal_and_hex() {
 
 #[test]
 fn numeric_entities_digit_cap() {
-  // Unbounded digit sequences should not scan forever
-  assert_eq!(convert("<p>&#99999999999;</p>"), "&#99999999999;");
-  assert_eq!(convert("<p>&#xFFFFFFFFF;</p>"), "&#xFFFFFFFFF;");
+  // Consume the full digit run, saturating out-of-range values to U+FFFD.
+  assert_eq!(convert("<p>&#99999999999;</p>"), "\u{FFFD}");
+  assert_eq!(convert("<p>&#xFFFFFFFFF;</p>"), "\u{FFFD}");
 }
 
 #[test]

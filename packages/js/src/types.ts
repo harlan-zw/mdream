@@ -176,8 +176,6 @@ export interface TextNode extends Node {
   value: string
   /** Custom data added by plugins */
   context?: PluginContext
-  /** Whether this text node should be excluded from markdown output (for script/style elements) */
-  excludedFromMarkdown?: boolean
 }
 
 /**
@@ -204,6 +202,9 @@ export interface Node {
 
   /** Whether node contains whitespace - used for whitespace optimization */
   containsWhitespace?: boolean
+
+  /** Whether this node belongs to an inert subtree and should not render */
+  excludedFromMarkdown?: boolean
 
   /** Cached reference to tag handler for performance */
   tagHandler?: TagHandler
