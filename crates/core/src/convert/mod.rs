@@ -82,13 +82,6 @@ pub struct ConvertState {
   just_closed_tag: bool,
   is_first_text_in_element: bool,
   in_non_nesting: bool,
-  /// True while inside a quote-aware rawtext element (`<script>`/`<style>`),
-  /// where a `</script>` inside a JS/CSS string literal must not close the tag.
-  in_rawtext_quote_aware: bool,
-  /// Quote char (`"`, `'`, or backtick) currently open inside rawtext, or 0.
-  rawtext_quote: u8,
-  /// True when the previous rawtext char was an unescaped backslash.
-  rawtext_escaped: bool,
   escape_ctx: u8,
   in_pre: bool,
   /// Filter: depth of the shallowest currently-open visually-hidden element, or
@@ -218,9 +211,6 @@ impl ConvertState {
       just_closed_tag: false,
       is_first_text_in_element: false,
       in_non_nesting: false,
-      in_rawtext_quote_aware: false,
-      rawtext_quote: 0,
-      rawtext_escaped: false,
       escape_ctx: 0,
       in_pre: false,
       hidden_since_depth: None,
@@ -363,13 +353,6 @@ impl ConvertState {
     let chunk_length = bytes.len();
     let mut i = 0;
 
-    // Rawtext (<script>/<style>) string-literal tracking kept in locals so
-    // the hot scan loop touches registers, not struct memory. Synced back
-    // to `self` around tag transitions and at chunk end (issue #93).
-    let mut rt_aware = self.in_rawtext_quote_aware;
-    let mut rt_quote = self.rawtext_quote;
-    let mut rt_escaped = self.rawtext_escaped;
-
     while i < chunk_length {
       let cc = bytes[i];
 
@@ -399,43 +382,16 @@ impl ConvertState {
           continue;
         }
 
-        // Rawtext (<script>/<style>) content. Its text is excluded
-        // from output, so bulk-scan it here instead of routing every
-        // byte through the general path, while tracking JS/CSS string
-        // literals so a `</script>` inside a string stays literal text
-        // (issue #93). The fast path above never fires in non-nesting
-        // mode, so all script/style bytes reach this branch.
-        if rt_aware {
+        // Script/style rawtext is excluded from output. Scan directly to the
+        // next potential tag instead of routing every byte through the general
+        // text path. Quotes are ordinary rawtext bytes; HTML closes these
+        // elements at the first matching end tag (issue #132).
+        if self.in_non_nesting
+          && (self.depth_map[TAG_SCRIPT as usize] > 0 || self.depth_map[TAG_STYLE as usize] > 0)
+        {
           let start = i;
-          if rt_quote == 0 {
-            // Outside a string: only '<' (a potential close tag)
-            // and a quote opener are interesting.
-            while i < chunk_length {
-              let c = bytes[i];
-              if c == LT_CHAR {
-                break;
-              }
-              i += 1;
-              if c == QUOTE_CHAR || c == APOS_CHAR || c == BACKTICK_CHAR {
-                rt_quote = c;
-                break;
-              }
-            }
-          } else {
-            // Inside a string: '<' is content; scan to the closing
-            // quote, honouring backslash escapes.
-            while i < chunk_length {
-              let c = bytes[i];
-              i += 1;
-              if rt_escaped {
-                rt_escaped = false;
-              } else if c == BACKSLASH_CHAR {
-                rt_escaped = true;
-              } else if c == rt_quote {
-                rt_quote = 0;
-                break;
-              }
-            }
+          while i < chunk_length && bytes[i] != LT_CHAR {
+            i += 1;
           }
           text_buffer.push_str(&chunk[start..i]);
           self.text_buffer_contains_non_whitespace = true;
@@ -516,13 +472,12 @@ impl ConvertState {
       // non-matching closing tags, opening tags) are treated as literal text.
       if self.in_non_nesting {
         let next = bytes[i + 1];
-        // A `</...>` inside an open JS/CSS string literal is literal text.
-        if next == SLASH_CHAR && rt_quote == 0 {
+        if next == SLASH_CHAR {
           let peek_start = i + 2;
           let mut peek_end = peek_start;
           while peek_end < chunk_length {
             let c = bytes[peek_end];
-            if c == GT_CHAR || is_whitespace(c) {
+            if c == GT_CHAR || c == SLASH_CHAR || is_whitespace(c) {
               break;
             }
             peek_end += 1;
@@ -540,9 +495,6 @@ impl ConvertState {
               text_buffer.clear();
             }
             let result = self.process_closing_tag(chunk, i);
-            rt_aware = self.in_rawtext_quote_aware;
-            rt_quote = self.rawtext_quote;
-            rt_escaped = self.rawtext_escaped;
             if result.complete {
               i = result.new_position;
             } else {
@@ -608,9 +560,6 @@ impl ConvertState {
           text_buffer.clear();
         }
         let result = self.process_closing_tag(chunk, i);
-        rt_aware = self.in_rawtext_quote_aware;
-        rt_quote = self.rawtext_quote;
-        rt_escaped = self.rawtext_escaped;
         if result.complete {
           i = result.new_position;
         } else {
@@ -692,20 +641,8 @@ impl ConvertState {
           text_buffer.push_str(&chunk[i..]);
           break;
         }
-        // Opening/self-closing a tag may toggle rawtext mode.
-        rt_aware = self.in_rawtext_quote_aware;
-        rt_quote = self.rawtext_quote;
-        rt_escaped = self.rawtext_escaped;
       }
     }
-
-    // Rawtext string-literal state is intentionally NOT persisted across
-    // chunks. While inside <script>/<style> the body is never committed
-    // until the close tag, so a chunk boundary always leaves the whole
-    // body as leftover that is re-scanned from the element start, where
-    // the quote state is 0. `in_rawtext_quote_aware` does persist (via
-    // self) because the element itself stays open across the boundary.
-    let _ = (rt_quote, rt_escaped, rt_aware);
 
     // If text_buffer is empty (common for non-streaming), save allocation for reuse
     if text_buffer.is_empty() {

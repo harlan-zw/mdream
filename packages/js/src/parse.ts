@@ -438,18 +438,15 @@ export interface ParseState {
   isFirstTextInElement?: boolean
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
-  /** Quote state tracking for non-nesting tags - avoids backward scanning */
+  /** @deprecated No longer read or written. Retained for source compatibility. */
   inSingleQuote?: boolean
+  /** @deprecated No longer read or written. Retained for source compatibility. */
   inDoubleQuote?: boolean
+  /** @deprecated No longer read or written. Retained for source compatibility. */
   inBacktick?: boolean
-  /**
-   * Whether the current non-nesting tag is quote-aware rawtext (script/style only).
-   * For these, a `</script>`/`</style>` inside a JS/CSS string literal must not close
-   * the tag. Other non-nesting tags (template, textarea, ...) hold literal HTML/text
-   * where apostrophes are not string delimiters, so their closing tag always wins.
-   */
+  /** @deprecated Rawtext parsing is no longer quote-aware. Retained for source compatibility. */
   inRawTextQuoteAware?: boolean
-  /** Backslash escaping state tracking - avoids checking previous character */
+  /** @deprecated No longer read or written. Retained for source compatibility. */
   lastCharWasBackslash?: boolean
   /** Resolved plugin instances for event processing */
   resolvedPlugins?: TransformPlugin[]
@@ -543,8 +540,6 @@ function parseHtmlInternal(
   state.lastCharWasWhitespace ??= true
   state.justClosedTag ??= false
   state.isFirstTextInElement ??= false
-  state.lastCharWasBackslash ??= false
-
   // Process chunk character by character
   let i = 0
   const chunkLength = htmlChunk.length
@@ -585,7 +580,6 @@ function parseHtmlInternal(
         }
         state.lastCharWasWhitespace = true
         state.textBufferContainsWhitespace = true
-        state.lastCharWasBackslash = false
       }
       else {
         state.textBufferContainsNonWhitespace = true
@@ -611,23 +605,6 @@ function parseHtmlInternal(
         else {
           textBuffer += htmlChunk[i]
         }
-
-        // Track quote state for quote-aware rawtext tags (script/style only)
-        if (state.inRawTextQuoteAware) {
-          if (!state.lastCharWasBackslash) {
-            if (currentCharCode === APOS_CHAR && !state.inDoubleQuote && !state.inBacktick) {
-              state.inSingleQuote = !state.inSingleQuote
-            }
-            else if (currentCharCode === QUOTE_CHAR && !state.inSingleQuote && !state.inBacktick) {
-              state.inDoubleQuote = !state.inDoubleQuote
-            }
-            else if (currentCharCode === BACKTICK_CHAR && !state.inSingleQuote && !state.inDoubleQuote) {
-              state.inBacktick = !state.inBacktick
-            }
-          }
-        }
-
-        state.lastCharWasBackslash = currentCharCode === BACKSLASH_CHAR && !state.lastCharWasBackslash
       }
       i++
       continue
@@ -690,17 +667,11 @@ function parseHtmlInternal(
     // CLOSING TAG
     else if (nextCharCode === SLASH_CHAR) {
       if (state.currentNode?.tagHandler?.isNonNesting) {
-        const inQuotes = state.inRawTextQuoteAware && (state.inSingleQuote || state.inDoubleQuote || state.inBacktick)
-        if (inQuotes) {
-          textBuffer += htmlChunk[i]
-          i++
-          continue
-        }
         // Peek at the closing tag name to check if it matches the non-nesting tag
         let peekEnd = i + 2
         while (peekEnd < chunkLength) {
           const c = htmlChunk.charCodeAt(peekEnd)
-          if (c === GT_CHAR || isWhitespace(c))
+          if (c === GT_CHAR || c === SLASH_CHAR || isWhitespace(c))
             break
           peekEnd++
         }
@@ -790,19 +761,6 @@ function parseHtmlInternal(
       }
     }
   }
-
-  // Rawtext string-literal state is not carried across chunks. Inside
-  // <script>/<style> the body is never committed until the close tag, so a
-  // chunk boundary always leaves the whole body as leftover that is re-scanned
-  // from the element start, where no string literal is open (issue #93).
-  state.inSingleQuote = false
-  state.inDoubleQuote = false
-  state.inBacktick = false
-  state.lastCharWasBackslash = false
-  // NB: inRawTextQuoteAware is intentionally not reset here. The non-nesting body
-  // is re-scanned from the element start on the next chunk while currentNode is
-  // still the script/style element, so quote-awareness must persist across the
-  // chunk boundary (issue #93).
 
   // Trailing text is returned and re-scanned with the next stream chunk. A
   // leading whitespace character in that buffer was accepted from a
@@ -938,7 +896,7 @@ function processClosingTag(
       foundClose = true
       break
     }
-    if (tagNameEnd === -1 && isWhitespace(charCode))
+    if (tagNameEnd === -1 && (isWhitespace(charCode) || charCode === SLASH_CHAR))
       tagNameEnd = i
     i++
   }
@@ -1020,15 +978,6 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
   const tagId = node.tagId
   if (tagId !== undefined && tagId >= 0 && tagId < MAX_TAG_ID) {
     state.depthMap[tagId] = Math.max(0, (state.depthMap[tagId] || 0) - 1)
-  }
-
-  // Clear non-nesting tag state
-  if (node.tagHandler?.isNonNesting) {
-    state.inSingleQuote = false
-    state.inDoubleQuote = false
-    state.inBacktick = false
-    state.lastCharWasBackslash = false
-    state.inRawTextQuoteAware = false
   }
 
   state.depth--
@@ -1292,16 +1241,6 @@ function processOpeningTag(
   parentNode.currentWalkIndex = 0
   state.currentNode = parentNode
   state.hasEncodedHtmlEntity = false
-
-  // Track content for non-nesting tags
-  if (tagHandler?.isNonNesting && !result.selfClosing) {
-    state.inSingleQuote = false
-    state.inDoubleQuote = false
-    state.inBacktick = false
-    state.lastCharWasBackslash = false
-    // Only script/style hold quote-aware rawtext (JS/CSS string literals).
-    state.inRawTextQuoteAware = tag.tagId === TAG_SCRIPT || tag.tagId === TAG_STYLE
-  }
 
   if (result.selfClosing) {
     closeNode(tag, state, handleEvent)
