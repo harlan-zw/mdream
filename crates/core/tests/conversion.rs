@@ -2328,32 +2328,32 @@ fn wrap_preserves_inline_spacing() {
   );
 }
 
-// ── HTML hard breaks (issue #128) ──
+// ── HTML line breaks (issue #128) ──
 
 #[test]
-fn br_preserves_a_hard_break_with_and_without_wrapping() {
+fn br_preserves_a_line_break_with_and_without_wrapping() {
   let html = "<div>abc def ghi jkl mno<br/>111 222 333 444 555 666 777 888 999 000 abc</div>";
 
   assert_eq!(
     convert(html),
-    "abc def ghi jkl mno  \n111 222 333 444 555 666 777 888 999 000 abc"
+    "abc def ghi jkl mno\n111 222 333 444 555 666 777 888 999 000 abc"
   );
   assert_eq!(
     convert_wrapped(html, 40),
-    "abc def ghi jkl mno  \n111 222 333 444 555 666 777 888 999 000\nabc"
+    "abc def ghi jkl mno\n111 222 333 444 555 666 777 888 999 000\nabc"
   );
-  assert_eq!(convert("<p>first <br>second</p>"), "first  \nsecond");
+  assert_eq!(convert("<p>first <br>second</p>"), "first\nsecond");
 }
 
 #[test]
 fn br_keeps_nested_block_continuation_prefixes() {
   assert_eq!(
     convert("<ul><li>first<br>second</li></ul>"),
-    "- first  \n  second"
+    "- first\n  second"
   );
   assert_eq!(
     convert("<blockquote><p>first<br>second</p></blockquote>"),
-    "> first  \n> second"
+    "> first\n> second"
   );
   assert_eq!(
     convert("<address>first<br>second</address>"),

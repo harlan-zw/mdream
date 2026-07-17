@@ -186,19 +186,6 @@ function isInsideRawHtmlBlock(state: HandlerContext['state']): boolean {
     || depthMap[TAG_DD])
 }
 
-function hardBreak(buffer: string[], prefix: string): string {
-  let spacesNeeded = 2
-  for (let i = buffer.length - 1; i >= 0 && spacesNeeded > 0; i--) {
-    const fragment = buffer[i]!
-    for (let j = fragment.length - 1; j >= 0 && spacesNeeded > 0; j--) {
-      if (fragment.charCodeAt(j) !== 32)
-        return `${' '.repeat(spacesNeeded)}\n${prefix}`
-      spacesNeeded--
-    }
-  }
-  return `${' '.repeat(spacesNeeded)}\n${prefix}`
-}
-
 // Helper function to get language from code class attribute
 function getLanguageFromClass(className: string | undefined): string {
   if (!className)
@@ -307,8 +294,8 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_BR]: {
     enter: ({ node, state }) => {
-      // A Markdown hard break would terminate a table row/ATX heading or be
-      // ignored inside a raw HTML block, so preserve the inline HTML there.
+      // A literal newline would terminate a table row/ATX heading or collapse
+      // inside a raw HTML block, so preserve the inline HTML there.
       const depthMap = state.depthMap!
       if (isInsideTableCell(state) || isInsideRawHtmlBlock(state)
         || depthMap[TAG_H1]
@@ -321,9 +308,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
 
       const prefix = continuationPrefix(node, state.listIndentWidths || [])
-      // Inside a fenced block, the literal newline is already meaningful and
-      // trailing spaces would become part of the code.
-      return depthMap[TAG_PRE] ? `\n${prefix}` : hardBreak(state.buffer, prefix)
+      return `\n${prefix}`
     },
     isSelfClosing: true,
     spacing: NO_SPACING,
