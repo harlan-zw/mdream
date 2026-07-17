@@ -252,6 +252,15 @@ export interface MdreamProcessingState {
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
 
+  /** @deprecated No longer read or written. Retained for source compatibility. */
+  inSingleQuote?: boolean
+  /** @deprecated No longer read or written. Retained for source compatibility. */
+  inDoubleQuote?: boolean
+  /** @deprecated No longer read or written. Retained for source compatibility. */
+  inBacktick?: boolean
+  /** @deprecated No longer read or written. Retained for source compatibility. */
+  lastCharWasBackslash?: boolean
+
   /** Resolved plugin instances for efficient iteration */
   resolvedPlugins?: TransformPlugin[]
 
