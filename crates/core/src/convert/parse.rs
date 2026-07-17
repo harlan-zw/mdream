@@ -471,6 +471,21 @@ impl ConvertState {
       };
     }
 
+    // Beyond max_depth: flatten instead of growing the stack. Track non-void
+    // opens by tag id (end tags match by identity below); void tags await no
+    // close. Text still flows; only the tag's own output is skipped.
+    if !self.suppressed.is_empty() || self.stack.len() >= self.max_depth {
+      if !self_closing {
+        self.suppressed.push(tag_id);
+      }
+      return OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing: false,
+        skip: true,
+      };
+    }
+
     // Browser recovery: a non-head start tag while <head> is still open means the
     // page never closed its head (no </head>/<body>). Auto-close head (and anything
     // wrongly opened inside it) so body content parses as flow content with normal
@@ -1187,6 +1202,41 @@ impl ConvertState {
         })
         .and_then(|ov| ov.alias_tag_id)
     };
+
+    // Match end tags against the suppressed stack by identity: pop-until-match
+    // (absorbs implied-end siblings); else if it targets a real element drain
+    // suppression and fall through to the normal matcher; else ignore the stray.
+    if !self.suppressed.is_empty() {
+      if let Some(pos) = self.suppressed.iter().rposition(|t| *t == tag_id) {
+        self.suppressed.truncate(pos);
+        self.just_closed_tag = true;
+        return CloseTagResult {
+          complete: true,
+          new_position: i + 1,
+          remaining_start: 0,
+        };
+      }
+      let targets_real = if builtin_tag_id.is_some() {
+        matches!(tag_id, Some(id) if (id as usize) < MAX_TAG_ID && self.depth_map[id as usize] > 0)
+      } else {
+        // Custom tags have no depth_map slot; scan the real stack by name.
+        let close_name: &str = tag_name.as_ref();
+        self
+          .stack
+          .iter()
+          .any(|n| n.tag_id == tag_id && n.custom_name.as_deref() == Some(close_name))
+      };
+      if targets_real {
+        self.suppressed.clear();
+      } else {
+        self.just_closed_tag = true;
+        return CloseTagResult {
+          complete: true,
+          new_position: i + 1,
+          remaining_start: 0,
+        };
+      }
+    }
 
     if let Some(curr) = self.stack.last()
       && curr.is_non_nesting

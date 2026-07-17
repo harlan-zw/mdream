@@ -269,6 +269,11 @@ pub struct ConvertState {
   collapse_span_depth: u8,
   first_block_parent_index: Option<usize>,
   block_parent_indices: Vec<usize>,
+  /// Maximum element nesting depth (`usize::MAX` = unlimited).
+  max_depth: usize,
+  /// Tag ids open beyond `max_depth` (flattened, not on `stack`; `None` = custom).
+  /// End tags match by identity, not a count, so unbalanced markup can't desync it.
+  suppressed: Vec<Option<u8>>,
   parse_text_buffer: String,
   script_text_buffer: String,
   pub stack: Vec<ElementNode>,
@@ -375,8 +380,9 @@ impl ConvertState {
   }
 
   pub fn new(options: HTMLToMarkdownOptions, capacity: usize, format: OutputFormat) -> Self {
-    // Read wrap width before `options` is moved into the struct below.
+    // Read fields before `options` is moved into the struct below.
     let options_wrap_width = options.wrap_width;
+    let options_max_depth = options.max_depth.unwrap_or(usize::MAX);
     let plain_text = format == OutputFormat::Text;
     let mut s = Self {
       depth_map: [0; MAX_TAG_ID],
@@ -396,6 +402,8 @@ impl ConvertState {
       collapse_span_depth: 0,
       first_block_parent_index: None,
       block_parent_indices: Vec::with_capacity(16),
+      max_depth: options_max_depth,
+      suppressed: Vec::new(),
       parse_text_buffer: String::new(),
       script_text_buffer: String::new(),
       stack: Vec::with_capacity(32),

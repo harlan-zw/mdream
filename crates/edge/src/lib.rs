@@ -114,6 +114,10 @@ fn parse_options(
     .as_f64()
     .filter(|n| n.is_finite() && *n >= 0.0 && *n <= usize::MAX as f64)
     .map_or(0, |n| n as usize);
+  let max_depth = get_prop(options, "maxDepth")
+    .as_f64()
+    .filter(|n| n.is_finite() && *n >= 0.0 && *n <= usize::MAX as f64)
+    .map(|n| n as usize);
   let format = match as_string(&get_prop(options, "format")).as_deref() {
     Some("text") => mdream::types::OutputFormat::Text,
     _ => mdream::types::OutputFormat::Markdown,
@@ -125,6 +129,7 @@ fn parse_options(
     clean,
     plugins,
     wrap_width,
+    max_depth,
   };
   (core_options, format)
 }

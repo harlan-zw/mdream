@@ -519,6 +519,9 @@ pub struct HTMLToMarkdownOptions {
   /// set to `0`. Code (`<pre>`/`<code>`), tables, and headings are never
   /// wrapped.
   pub wrap_width: usize,
+  /// Maximum element nesting depth; deeper elements are flattened (content still
+  /// renders) to bound memory on pathological nesting. `None` means unlimited.
+  pub max_depth: Option<usize>,
 }
 
 impl HTMLToMarkdownOptions {
@@ -532,6 +535,13 @@ impl HTMLToMarkdownOptions {
   #[must_use]
   pub fn with_origin(mut self, origin: impl Into<String>) -> Self {
     self.origin = Some(origin.into());
+    self
+  }
+
+  /// Cap element nesting depth; deeper elements are flattened.
+  #[must_use]
+  pub fn with_max_depth(mut self, max_depth: usize) -> Self {
+    self.max_depth = Some(max_depth);
     self
   }
 

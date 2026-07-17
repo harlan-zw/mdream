@@ -103,6 +103,9 @@ pub struct HtmlToMarkdownOptions {
   pub plugins: Option<PluginOptions>,
   #[napi(js_name = "wrapWidth")]
   pub wrap_width: Option<u32>,
+  /// Maximum element nesting depth; deeper elements are flattened. Unlimited if omitted.
+  #[napi(js_name = "maxDepth")]
+  pub max_depth: Option<u32>,
   #[napi(ts_type = "\"markdown\" | \"text\"")]
   pub format: Option<String>,
 }
@@ -132,6 +135,12 @@ fn to_core_opts(
     Some("text") => mdream::types::OutputFormat::Text,
     _ => mdream::types::OutputFormat::Markdown,
   };
+
+  // Read before `options` is moved into the `plugins` field below.
+  let max_depth = options
+    .as_ref()
+    .and_then(|o| o.max_depth)
+    .map(|d| d as usize);
 
   let core_options = mdream::types::HTMLToMarkdownOptions {
     origin: options.as_ref().and_then(|o| o.origin.clone()),
@@ -198,6 +207,7 @@ fn to_core_opts(
         }),
       })
     }),
+    max_depth,
   };
   (core_options, format)
 }
