@@ -7,6 +7,15 @@
 //  - allocated bytes per convert (near-deterministic; surfaces marginal gains that
 //    noisy timing hides). For the Rust build the memory signal is peak WASM linear
 //    memory instead, which is exactly deterministic.
+//
+// Allocation is measured in TWO modes because TurboFan's escape analysis can
+// eliminate several MiB per convert, and whether it kicks in depends on inlining
+// heuristics that flip with unrelated code-size changes, minifier output, node
+// minor and CPU arch (PR #137 false-alarmed +5.8% from exactly this):
+//  - default run: JIT-optimized alloc, what shipped users see — informational only
+//  - --alloc-only run (workflow adds --no-opt): what the code semantically
+//    allocates, deterministic to ~0.03% — this is the gated memory signal
+//
 // It imports the built bundle dist on purpose (measures shipped output). Point
 // MDREAM_PERF_DIST at another dist dir (e.g. the base branch build) to measure it
 // with this same harness and fixture.
@@ -98,7 +107,9 @@ async function bench(id, name, fn, timeOpts) {
   const alloc = await measureAlloc(fn)
   return [
     ...times,
-    { id: `${id}-alloc`, name: `${name} allocated`, kind: 'alloc', value: alloc.value },
+    // JIT-optimized allocation reflects shipped behavior but sits on escape-analysis
+    // cliffs (see header); the --alloc-only no-opt run carries the gated signal
+    { id: `${id}-alloc-jit`, name: `${name} allocated (JIT)`, kind: 'alloc', value: alloc.value, informational: true },
   ]
 }
 
@@ -151,16 +162,30 @@ async function main() {
     return total
   }
 
-  const result = {
-    benches: [
-      ...await bench('core-wiki', 'JS htmlToMarkdown · wiki (1.8 MB)', () => convert(html)),
-      ...await bench('minimal-wiki', 'JS minimal preset · wiki', () => convertMinimal(html), { reps: 12, runs: 1 }),
-      ...await bench('stream-wiki', 'JS stream drain · wiki', drainStream),
-      ...await rustBenches(),
-    ],
+  const JS_BENCHES = [
+    ['core-wiki', 'JS htmlToMarkdown · wiki (1.8 MB)', () => convert(html), undefined],
+    ['minimal-wiki', 'JS minimal preset · wiki', () => convertMinimal(html), { reps: 12, runs: 1 }],
+    ['stream-wiki', 'JS stream drain · wiki', drainStream, undefined],
+  ]
+
+  // gated memory signal: run under --no-opt so escape analysis can't make the
+  // number depend on inlining luck; measures what the code semantically allocates
+  if (process.argv.includes('--alloc-only')) {
+    const benches = []
+    for (const [id, name, fn] of JS_BENCHES) {
+      const alloc = await measureAlloc(fn)
+      benches.push({ id: `${id}-alloc`, name: `${name} allocated`, kind: 'alloc', value: alloc.value })
+    }
+    process.stdout.write(`${JSON.stringify({ benches })}\n`)
+    return
   }
 
-  process.stdout.write(`${JSON.stringify(result)}\n`)
+  const benches = []
+  for (const [id, name, fn, timeOpts] of JS_BENCHES)
+    benches.push(...await bench(id, name, fn, timeOpts))
+  benches.push(...await rustBenches())
+
+  process.stdout.write(`${JSON.stringify({ benches })}\n`)
 }
 
 main()

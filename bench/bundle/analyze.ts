@@ -6,10 +6,19 @@ import { renderPerfReport } from './perf-report.ts'
 // Combined size + perf comment for the PR. Bundle data comes from the dist dirs
 // (BASE_DIST for the base baseline); perf comes from JSON the workflow produced by
 // running bench/perf-ci.mjs against the base and PR bundles (BASE_PERF / PR_PERF).
+// Each env var may hold a comma-separated list of JSON files (the timed run and the
+// no-opt alloc run); their benches are merged into one set.
 const sections: string[] = [renderBundleReport(collectBundleData())]
 
-function readPerf(path?: string) {
-  return path && fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, 'utf8')) : null
+function readPerf(paths?: string) {
+  if (!paths)
+    return null
+  const benches = paths.split(',').flatMap((path) => {
+    if (!path || !fs.existsSync(path))
+      return []
+    return JSON.parse(fs.readFileSync(path, 'utf8'))?.benches ?? []
+  })
+  return benches.length ? { benches } : null
 }
 
 // guard on benches: a perf run that failed writes `{}`, which must skip the section, not crash
