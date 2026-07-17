@@ -2,6 +2,11 @@ name: Release Docker Images
 
 on:
   workflow_call:
+    inputs:
+      tag:
+        description: Release tag to build
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       tag:
@@ -91,10 +96,10 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           GH_REF: ${{ github.ref }}
-          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_TAG: ${{ inputs.tag }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+          if [[ -n "$INPUT_TAG" ]]; then
             VERSION="$INPUT_TAG"
           elif [[ "$GH_REF" == refs/tags/* ]]; then
             VERSION="${GH_REF#refs/tags/v}"
@@ -103,7 +108,8 @@ jobs:
           else
             VERSION=latest
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building version: $VERSION"
 
       - name: Check if prerelease
@@ -112,9 +118,9 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           if [[ "$VERSION" == *"-"* ]]; then
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
           else
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Extract metadata
@@ -157,8 +163,8 @@ jobs:
       - name: Test published crawl image
         run: |
           echo "Testing published crawl image..."
-          sleep 30
           IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:crawl
+          docker pull "$IMAGE"
 
           echo "Testing --help..."
           timeout 60 docker run --rm "$IMAGE" --help > /dev/null
@@ -176,10 +182,12 @@ jobs:
           fi
 
       - name: Report crawl image size
+        env:
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:crawl
         run: |
-          echo "## Crawl Image Size" >> $GITHUB_STEP_SUMMARY
-          SIZE=$(docker inspect ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:crawl --format='{{.Size}}' | numfmt --to=iec-i --suffix=B)
-          echo "- \`${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:crawl\` — **$SIZE**" >> $GITHUB_STEP_SUMMARY
+          echo "## Crawl Image Size" >> "$GITHUB_STEP_SUMMARY"
+          SIZE=$(docker inspect "$IMAGE" --format='{{.Size}}' | numfmt --to=iec-i --suffix=B)
+          echo "- \`$IMAGE\` — **$SIZE**" >> "$GITHUB_STEP_SUMMARY"
 
   # ── core image: native Rust HTML-to-Markdown converter ──
   publish-core:
@@ -214,10 +222,10 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           GH_REF: ${{ github.ref }}
-          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_TAG: ${{ inputs.tag }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+          if [[ -n "$INPUT_TAG" ]]; then
             VERSION="$INPUT_TAG"
           elif [[ "$GH_REF" == refs/tags/* ]]; then
             VERSION="${GH_REF#refs/tags/v}"
@@ -226,7 +234,8 @@ jobs:
           else
             VERSION=latest
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building version: $VERSION"
 
       - name: Extract metadata
@@ -260,8 +269,8 @@ jobs:
       - name: Test published core image
         run: |
           echo "Testing published core image..."
-          sleep 30
           IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:core
+          docker pull "$IMAGE"
 
           echo "Testing --help..."
           timeout 60 docker run --rm "$IMAGE" --help > /dev/null
@@ -276,10 +285,12 @@ jobs:
           fi
 
       - name: Report core image size
+        env:
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:core
         run: |
-          echo "## Core Image Size" >> $GITHUB_STEP_SUMMARY
-          SIZE=$(docker inspect ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:core --format='{{.Size}}' | numfmt --to=iec-i --suffix=B)
-          echo "- \`${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:core\` — **$SIZE**" >> $GITHUB_STEP_SUMMARY
+          echo "## Core Image Size" >> "$GITHUB_STEP_SUMMARY"
+          SIZE=$(docker inspect "$IMAGE" --format='{{.Size}}' | numfmt --to=iec-i --suffix=B)
+          echo "- \`$IMAGE\` — **$SIZE**" >> "$GITHUB_STEP_SUMMARY"
 
   notify-success:
     needs: [publish-crawl, publish-core]
