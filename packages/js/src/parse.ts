@@ -392,13 +392,10 @@ export function finalizeParse(
 ): void {
   if (state.currentNode && isScriptElement(state.currentNode)) {
     pushScriptTextChunk(state, leftover)
-    const scriptChunks = state.scriptTextChunks
-    if (scriptChunks?.length) {
-      const scriptText = scriptChunks.length === 1 ? scriptChunks[0]! : scriptChunks.join('')
+    const scriptText = takeScriptText(state)
+    if (scriptText) {
       processTextBuffer(scriptText, state, handleEvent)
-      scriptChunks.length = 0
     }
-    state.scriptDataState = SCRIPT_DATA
   }
   else if (leftover.length > 0 && leftover.charCodeAt(0) !== LT_CHAR) {
     processTextBuffer(leftover, state, handleEvent)
@@ -650,6 +647,31 @@ function pushScriptTextChunk(state: ParseState, text: string): void {
   state.justClosedTag = false
 }
 
+function scanScriptChunk(html: string, start: number, state: ParseState): number {
+  const result = findScriptEndTag(html, start, state)
+  if (result === SCRIPT_SCAN_COMPLETE) {
+    pushScriptTextChunk(state, html.substring(start))
+  }
+  else if (result <= SCRIPT_SEQUENCE_INCOMPLETE) {
+    pushScriptTextChunk(state, html.substring(start, -result - 2))
+  }
+  else {
+    pushScriptTextChunk(state, html.substring(start, result))
+  }
+  return result
+}
+
+function takeScriptText(state: ParseState): string {
+  const chunks = state.scriptTextChunks
+  const text = chunks?.length
+    ? (chunks.length === 1 ? chunks[0]! : chunks.join(''))
+    : ''
+  if (chunks)
+    chunks.length = 0
+  state.scriptDataState = SCRIPT_DATA
+  return text
+}
+
 function normalizeTagName(tagName: string): keyof typeof TagIdMap {
   for (let i = 0; i < tagName.length; i++) {
     const code = tagName.charCodeAt(i)
@@ -684,9 +706,11 @@ export function parseHtml(html: string, options: ParseOptions = {}): ParseResult
     resolvedPlugins: options.resolvedPlugins || [],
   }
 
-  const remainingHtml = parseHtmlInternal(html, state, (event) => {
+  let remainingHtml = parseHtmlInternal(html, state, (event) => {
     events.push(event)
   })
+  if (state.scriptTextChunks?.length)
+    remainingHtml = `${takeScriptText(state)}${remainingHtml}`
 
   return { events, remainingHtml }
 }
@@ -722,30 +746,15 @@ function parseHtmlInternal(
   // Process chunk character by character
   let i = 0
   const chunkLength = htmlChunk.length
+  if (state.currentNode && isScriptElement(state.currentNode)) {
+    const scanResult = scanScriptChunk(htmlChunk, i, state)
+    if (scanResult < 0)
+      return scanResult <= SCRIPT_SEQUENCE_INCOMPLETE ? htmlChunk.substring(-scanResult - 2) : ''
+    textBuffer = takeScriptText(state)
+    i = scanResult
+  }
 
   while (i < chunkLength) {
-    if (state.currentNode && isScriptElement(state.currentNode)) {
-      const scanResult = findScriptEndTag(htmlChunk, i, state)
-      if (scanResult === SCRIPT_SCAN_COMPLETE) {
-        pushScriptTextChunk(state, htmlChunk.substring(i))
-        break
-      }
-      if (scanResult <= SCRIPT_SEQUENCE_INCOMPLETE) {
-        const pendingStart = -scanResult - 2
-        pushScriptTextChunk(state, htmlChunk.substring(i, pendingStart))
-        textBuffer += htmlChunk.substring(pendingStart)
-        break
-      }
-      pushScriptTextChunk(state, htmlChunk.substring(i, scanResult))
-      const scriptChunks = state.scriptTextChunks
-      if (scriptChunks?.length) {
-        textBuffer += scriptChunks.length === 1 ? scriptChunks[0]! : scriptChunks.join('')
-        scriptChunks.length = 0
-      }
-      state.scriptDataState = SCRIPT_DATA
-      i = scanResult
-    }
-
     const currentCharCode = htmlChunk.charCodeAt(i)
 
     // If not starting a tag, add to text buffer and continue
@@ -954,6 +963,17 @@ function parseHtmlInternal(
         i = result.newPosition
         if (!result.selfClosing) {
           state.isFirstTextInElement = true
+          if (tagId === TAG_SCRIPT && tagName === 'script') {
+            const scanResult = scanScriptChunk(htmlChunk, i, state)
+            if (scanResult < 0) {
+              textBuffer = scanResult <= SCRIPT_SEQUENCE_INCOMPLETE
+                ? htmlChunk.substring(-scanResult - 2)
+                : ''
+              break
+            }
+            textBuffer = takeScriptText(state)
+            i = scanResult
+          }
         }
       }
       else {
