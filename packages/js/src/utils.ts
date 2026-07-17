@@ -2,7 +2,6 @@ import type { ElementNode, Node } from './types'
 import { TAG_BLOCKQUOTE, TAG_LI } from './const'
 import {
   HTML_ENTITIES,
-  LEGACY_ENTITY_NAMES,
   MAX_ENTITY_NAME_LENGTH,
   MAX_LEGACY_ENTITY_NAME_LENGTH,
 } from './entities'
@@ -49,7 +48,7 @@ function numericReplacement(codePoint: number): string {
   if (codePoint === 0 || codePoint > 0x10FFFF || (codePoint >= 0xD800 && codePoint <= 0xDFFF))
     return '\uFFFD'
   if (codePoint >= 0x80 && codePoint <= 0x9F)
-    codePoint = C1_REPLACEMENTS.charCodeAt(codePoint - 0x80)
+    return C1_REPLACEMENTS[codePoint - 0x80]!
   return String.fromCodePoint(codePoint)
 }
 
@@ -89,9 +88,7 @@ export function decodeHTMLEntities(text: string, inAttribute = false): string {
           digit = code - 87
         if (digit < 0)
           break
-        codePoint = codePoint > 0x10FFFF
-          ? 0x110000
-          : codePoint * (isHex ? 16 : 10) + digit
+        codePoint = codePoint * (isHex ? 16 : 10) + digit
         end++
       }
 
@@ -104,9 +101,8 @@ export function decodeHTMLEntities(text: string, inAttribute = false): string {
       }
     }
 
-    // Canonical named references require their semicolon. If no canonical
-    // name matches, walk back over the small legacy set to find the longest
-    // permitted semicolonless prefix (for example, `&notit;` -> `¬it;`).
+    // Canonical-only table keys carry a `$` prefix. Unprefixed keys are the
+    // small legacy set that may omit semicolons (`&notit;` -> `¬it;`).
     const nameStart = i + 1
     let nameEnd = nameStart
     const scanEnd = Math.min(len, nameStart + MAX_ENTITY_NAME_LENGTH)
@@ -114,7 +110,8 @@ export function decodeHTMLEntities(text: string, inAttribute = false): string {
       nameEnd++
 
     if (nameEnd > nameStart && text.charCodeAt(nameEnd) === 59) {
-      const replacement = HTML_ENTITIES[text.slice(nameStart, nameEnd)]
+      const name = text.slice(nameStart, nameEnd)
+      const replacement = HTML_ENTITIES[name] ?? HTML_ENTITIES[`$${name}`]
       if (replacement !== undefined) {
         result += replacement
         i = nameEnd + 1
@@ -126,8 +123,8 @@ export function decodeHTMLEntities(text: string, inAttribute = false): string {
     let decodedLegacy = false
     while (legacyEnd > nameStart) {
       const name = text.slice(nameStart, legacyEnd)
-      if (LEGACY_ENTITY_NAMES.includes(`|${name}|`)) {
-        const replacement = HTML_ENTITIES[name]
+      const replacement = HTML_ENTITIES[name]
+      if (replacement !== undefined) {
         const next = text.charCodeAt(legacyEnd)
         if (replacement !== undefined && !(inAttribute && (next === 61 || isAsciiAlphaNumeric(next)))) {
           result += replacement

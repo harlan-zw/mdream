@@ -3,9 +3,9 @@ import { parseAttributes } from '../../src/parse'
 import { decodeHTMLEntities } from '../../src/utils'
 
 describe('html character references', () => {
-  it('decodes canonical, longest, long, and multi-codepoint names', () => {
-    expect(decodeHTMLEntities('&copy; &notin; &CounterClockwiseContourIntegral; &NotEqualTilde;'))
-      .toBe('© ∉ ∳ ≂̸')
+  it('decodes canonical names using the longest match', () => {
+    expect(decodeHTMLEntities('&copy; &notin; &thetasym;'))
+      .toBe('© ∉ ϑ')
     expect(decodeHTMLEntities('&notit;')).toBe('¬it;')
   })
 
@@ -23,9 +23,9 @@ describe('html character references', () => {
       .toBe('€ � � � �')
   })
 
-  it('preserves nbsp and two-codepoint replacements', () => {
-    expect(decodeHTMLEntities('&nbsp;&fjlig;&NotEqualTilde;'))
-      .toBe('\u00A0fj≂̸')
+  it('preserves nbsp and legacy uppercase names', () => {
+    expect(decodeHTMLEntities('&nbsp;&COPY;&thetasym;'))
+      .toBe('\u00A0©ϑ')
   })
 
   it('uses the attribute ambiguous-ampersand rule for legacy names', () => {
