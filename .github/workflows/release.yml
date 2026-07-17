@@ -111,7 +111,17 @@ jobs:
                 echo "Skipping $name@$version (already published)"
                 continue
               fi
-              pnpm publish --access public --no-git-checks --provenance ${{ steps.dist-tag.outputs.tag }} --filter "$name" || failed="$failed $name"
+              if ! pnpm publish --access public --no-git-checks --provenance ${{ steps.dist-tag.outputs.tag }} --filter "$name"; then
+                if [ "$name" = "@mdream/rust-wasm32-wasi" ]; then
+                  # This package has never been bootstrapped on npm, so OIDC
+                  # cannot publish it until its first release is made manually.
+                  # Keep the optional WASI fallback from blocking every other
+                  # package while still surfacing the missing bootstrap.
+                  echo "::warning::Could not publish optional package $name@$version; bootstrap it on npm before enabling trusted publishing."
+                else
+                  failed="$failed $name"
+                fi
+              fi
             fi
           done
           if [ -n "$failed" ]; then
