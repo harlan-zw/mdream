@@ -226,6 +226,12 @@ interface MdreamOptions {
    */
   wrapWidth?: number
 
+  /**
+   * Cap parser element nesting. Deeper elements are flattened while visible
+   * text is preserved. Unset means unlimited.
+   */
+  maxDepth?: number
+
   /** Output Markdown or plain text. Default: 'markdown' */
   format?: 'markdown' | 'text'
 }

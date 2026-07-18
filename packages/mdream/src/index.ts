@@ -79,6 +79,11 @@ export interface MdreamOptions {
    */
   wrapWidth?: number
   /**
+   * Maximum element nesting depth. Deeper elements are flattened while their
+   * visible text is preserved. Omit to allow unlimited nesting.
+   */
+  maxDepth?: number
+  /**
    * Output format. Defaults to `markdown`; use `text` to omit Markdown/HTML
    * markup while preserving readable text and block spacing.
    */

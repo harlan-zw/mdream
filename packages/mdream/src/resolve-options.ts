@@ -106,7 +106,15 @@ export function resolveOptions(options: ResolvableOptions): ResolvedOptions {
   const { cleanUrls, clean } = resolveCleanConfig(options, minimal)
 
   return {
-    napiOpts: { origin: options.origin, cleanUrls, clean, plugins, wrapWidth: options.wrapWidth, format: options.format },
+    napiOpts: {
+      origin: options.origin,
+      cleanUrls,
+      clean,
+      plugins,
+      wrapWidth: options.wrapWidth,
+      maxDepth: options.maxDepth,
+      format: options.format,
+    },
     extractionHandlers,
     frontmatterCallback,
   }

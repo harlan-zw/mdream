@@ -292,3 +292,21 @@ impl MarkdownStream {
     self.inner.finish()
   }
 }
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod tests {
+  use super::*;
+  use wasm_bindgen_test::*;
+
+  wasm_bindgen_test_configure!(run_in_browser);
+
+  #[wasm_bindgen_test]
+  fn max_depth_is_read_from_js_options() {
+    let options = js_sys::Object::new();
+    js_sys::Reflect::set(&options, &"maxDepth".into(), &1.into()).unwrap();
+    assert_eq!(
+      html_to_markdown("<div><strong>deep</strong></div>", options.into()),
+      "deep"
+    );
+  }
+}

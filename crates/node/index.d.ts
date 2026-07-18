@@ -63,6 +63,8 @@ export interface HtmlToMarkdownOptions {
   clean?: CleanOptionsNapi
   plugins?: PluginOptions
   wrapWidth?: number
+  /** Maximum element nesting depth; deeper elements are flattened. Unlimited if omitted. */
+  maxDepth?: number
   format?: "markdown" | "text"
 }
 

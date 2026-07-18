@@ -242,7 +242,8 @@ impl ConvertState {
     let mut excludes_text_nodes = self
       .stack
       .last()
-      .is_some_and(|parent| parent.excludes_text_nodes || parent.excluded_from_markdown);
+      .is_some_and(|parent| parent.excludes_text_nodes || parent.excluded_from_markdown)
+      || self.suppressed_excludes_text_depth > 0;
 
     if self.has_isolate_main {
       if self.isolate_main_found {
@@ -471,26 +472,12 @@ impl ConvertState {
       };
     }
 
-    // Beyond max_depth: flatten instead of growing the stack. Track non-void
-    // opens by tag id (end tags match by identity below); void tags await no
-    // close. Text still flows; only the tag's own output is skipped.
-    if !self.suppressed.is_empty() || self.stack.len() >= self.max_depth {
-      if !self_closing {
-        self.suppressed.push(tag_id);
-      }
-      return OpeningTagResult {
-        complete: true,
-        new_position,
-        self_closing: false,
-        skip: true,
-      };
-    }
-
     // Browser recovery: a non-head start tag while <head> is still open means the
     // page never closed its head (no </head>/<body>). Auto-close head (and anything
     // wrongly opened inside it) so body content parses as flow content with normal
     // block spacing instead of inheriting head's whitespace collapsing.
-    if self.depth_map[TAG_HEAD as usize] > 0
+    if self.suppressed.is_empty()
+      && self.depth_map[TAG_HEAD as usize] > 0
       && self.depth_map[TAG_TEMPLATE as usize] == 0
       && !is_head_content_tag(tag_id)
     {
@@ -516,7 +503,8 @@ impl ConvertState {
     // open element so the new sibling is not wrongly nested. Runs after the
     // tag is confirmed complete (above) so a chunk-split start tag never
     // mutates parser state or emits a premature close.
-    if let Some(id) = tag_id
+    if self.suppressed.is_empty()
+      && let Some(id) = tag_id
       && needs_implied_end_recovery(id)
     {
       match id {
@@ -608,6 +596,32 @@ impl ConvertState {
           }
         }
       }
+    }
+
+    // Beyond max_depth: flatten instead of growing the real element stack.
+    // Recovery runs first when the virtual stack has no already-suppressed
+    // entries, so implied siblings at the limit remain siblings rather than
+    // being flattened as children.
+    if !self.suppressed.is_empty() || self.stack.len() >= self.max_depth {
+      if !self_closing {
+        let custom_name_id = if is_builtin {
+          0
+        } else {
+          self.intern_suppressed_custom_name(tag_name)
+        };
+        self.push_suppressed(SuppressedTag::new(
+          tag_id,
+          custom_name_id,
+          tag_handler.is_some_and(|handler| handler.excludes_text_nodes),
+          tag_handler.is_some_and(|handler| handler.is_non_nesting),
+        ));
+      }
+      return OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing,
+        skip: true,
+      };
     }
 
     if let Some(id) = tag_id {
@@ -1207,8 +1221,19 @@ impl ConvertState {
     // (absorbs implied-end siblings); else if it targets a real element drain
     // suppression and fall through to the normal matcher; else ignore the stray.
     if !self.suppressed.is_empty() {
-      if let Some(pos) = self.suppressed.iter().rposition(|t| *t == tag_id) {
-        self.suppressed.truncate(pos);
+      let custom_name_id = if builtin_tag_id.is_some() {
+        0
+      } else {
+        self.suppressed_custom_name_id(tag_name.as_ref())
+      };
+      let is_builtin = builtin_tag_id.is_some();
+      if self.has_suppressed_match(tag_id, custom_name_id, is_builtin)
+        && let Some(pos) = self
+          .suppressed
+          .iter()
+          .rposition(|tag| tag.matches(tag_id, custom_name_id, is_builtin))
+      {
+        self.truncate_suppressed(pos);
         self.just_closed_tag = true;
         return CloseTagResult {
           complete: true,
@@ -1227,7 +1252,7 @@ impl ConvertState {
           .any(|n| n.tag_id == tag_id && n.custom_name.as_deref() == Some(close_name))
       };
       if targets_real {
-        self.suppressed.clear();
+        self.clear_suppressed();
       } else {
         self.just_closed_tag = true;
         return CloseTagResult {
@@ -1341,7 +1366,8 @@ impl ConvertState {
       let excluded = self
         .stack
         .last()
-        .is_some_and(|n| n.excluded_from_markdown || n.excludes_text_nodes);
+        .is_some_and(|n| n.excluded_from_markdown || n.excludes_text_nodes)
+        || self.suppressed_excludes_text_depth > 0;
       if !excluded {
         let depth = self.depth;
         let index = self.stack.last().map_or(0, |n| n.current_walk_index);
@@ -1353,7 +1379,11 @@ impl ConvertState {
       }
     }
     if !result.self_closing {
-      self.close_node();
+      if result.skip {
+        self.pop_suppressed();
+      } else {
+        self.close_node();
+      }
     }
   }
 

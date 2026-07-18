@@ -1,5 +1,5 @@
-use mdream::html_to_markdown;
 use mdream::types::HTMLToMarkdownOptions;
+use mdream::{MarkdownStreamProcessor, html_to_markdown};
 
 fn opts(max_depth: usize) -> HTMLToMarkdownOptions {
   HTMLToMarkdownOptions {
@@ -45,6 +45,12 @@ fn unclosed_nesting_bomb_does_not_panic() {
   assert!(out.contains("tail"), "got tail? len={}", out.len());
 }
 
+#[test]
+fn stray_close_bomb_past_cap_keeps_linear_lookup() {
+  let html = format!("{}{}tail", "<div>".repeat(20_000), "</span>".repeat(20_000));
+  assert_eq!(html_to_markdown(&html, opts(8)), "tail");
+}
+
 // The cases below cover markup where opens/closes beyond the cap don't balance
 // 1:1 — a naive counter desyncs and swallows real (<= cap) end tags. Identity
 // matching keeps the real tree intact, so the trailing paragraph stays top-level.
@@ -87,4 +93,52 @@ fn distinct_custom_elements_past_cap_keep_outer_structure() {
   // flattened output, but the real (<= cap) tree — and `after` — stays intact.
   let html = "<div><div><my-foo>a</my-foo><my-bar>b</my-bar></div></div><p>after</p>";
   assert_eq!(html_to_markdown(html, opts(2)).trim(), "a b\n\nafter");
+}
+
+#[test]
+fn implied_end_recovery_at_limit_keeps_siblings_real() {
+  let html = "<p>one<p>two";
+  assert_eq!(
+    html_to_markdown(html, opts(1)),
+    html_to_markdown(html, HTMLToMarkdownOptions::default())
+  );
+}
+
+#[test]
+fn head_recovery_at_limit_keeps_body_content() {
+  let html = "<head><title>title</title><p>body</p>";
+  assert_eq!(
+    html_to_markdown(html, opts(1)),
+    html_to_markdown(html, HTMLToMarkdownOptions::default())
+  );
+}
+
+#[test]
+fn custom_close_does_not_match_a_different_suppressed_custom_tag() {
+  let html = "<x-real><x-inner>inside</x-real><strong>after</strong>";
+  assert_eq!(
+    html_to_markdown(html, opts(1)),
+    html_to_markdown(html, HTMLToMarkdownOptions::default())
+  );
+}
+
+#[test]
+fn excluded_raw_text_stays_hidden_past_cap() {
+  let html = "<div><script>const leak = '<b>hidden</b>';</script><p>shown</p></div>";
+  assert_eq!(html_to_markdown(html, opts(1)), "shown");
+}
+
+#[test]
+fn excluded_elements_stay_hidden_past_cap() {
+  let html = "<div><style>.hidden { display: block }</style><template><b>hidden</b></template><noscript>hidden</noscript><p>shown</p></div>";
+  assert_eq!(html_to_markdown(html, opts(1)), "shown");
+}
+
+#[test]
+fn streaming_excluded_raw_text_stays_hidden_past_cap() {
+  let mut stream = MarkdownStreamProcessor::new(opts(1));
+  let mut out = stream.process_chunk("<div><script>const leak = '<b>hidden</b>';</scr");
+  out.push_str(&stream.process_chunk("ipt><p>shown</p></div>"));
+  out.push_str(&stream.finish());
+  assert_eq!(out.trim_end(), "shown");
 }
