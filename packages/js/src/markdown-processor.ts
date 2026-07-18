@@ -12,8 +12,10 @@ import {
   TAG_B,
   TAG_BLOCKQUOTE,
   TAG_BR,
+  TAG_CITE,
   TAG_CODE,
   TAG_DEL,
+  TAG_DFN,
   TAG_DIV,
   TAG_EM,
   TAG_FIGCAPTION,
@@ -21,16 +23,19 @@ import {
   TAG_H6,
   TAG_I,
   TAG_IMG,
+  TAG_KBD,
   TAG_LI,
   TAG_OL,
   TAG_P,
   TAG_PRE,
   TAG_Q,
+  TAG_SAMP,
   TAG_SPAN,
   TAG_STRONG,
   TAG_TABLE,
   TAG_TD,
   TAG_TH,
+  TAG_VAR,
   TEXT_NODE,
 } from './const'
 import { finalizeParse, parseHtmlStream } from './parse'
@@ -80,21 +85,29 @@ export interface MarkdownState {
   preFencePending?: boolean
   preFenceLang?: string
   preOwnFence?: boolean
-  /** Open inline-emphasis enter markers, packed as (buffer fragment index << 2 | kind); lets the exit drop empty pairs. */
-  emphasisOpen: number[]
-  emphasisOpenCount: number
+  /** Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind); lets the exit drop empty pairs. */
+  openMarkers: number[]
+  openMarkerCount: number
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
 }
 
-// Emphasis kind per tag id (-1 = not emphasis); indexed like depthMap for O(1) lookup on every enter.
-const EMPHASIS_TYPE = new Int8Array(MAX_TAG_ID).fill(-1)
-EMPHASIS_TYPE[TAG_STRONG] = 0
-EMPHASIS_TYPE[TAG_B] = 0
-EMPHASIS_TYPE[TAG_EM] = 1
-EMPHASIS_TYPE[TAG_I] = 1
-EMPHASIS_TYPE[TAG_DEL] = 2
-EMPHASIS_TYPE[TAG_FIGCAPTION] = 3
+// Marker kind per tag id for inline tags that wrap content in a symmetric
+// delimiter (-1 = none); indexed like depthMap for O(1) lookup on every enter.
+const INLINE_MARKER_TYPE = new Int8Array(MAX_TAG_ID).fill(-1)
+INLINE_MARKER_TYPE[TAG_STRONG] = 0 // **
+INLINE_MARKER_TYPE[TAG_B] = 0 // **
+INLINE_MARKER_TYPE[TAG_DFN] = 0 // **
+INLINE_MARKER_TYPE[TAG_EM] = 1 // _
+INLINE_MARKER_TYPE[TAG_I] = 1 // _
+INLINE_MARKER_TYPE[TAG_FIGCAPTION] = 1 // _
+INLINE_MARKER_TYPE[TAG_DEL] = 2 // ~~
+INLINE_MARKER_TYPE[TAG_CITE] = 3 // *
+INLINE_MARKER_TYPE[TAG_KBD] = 4 // `
+INLINE_MARKER_TYPE[TAG_CODE] = 4 // `
+INLINE_MARKER_TYPE[TAG_SAMP] = 4 // `
+INLINE_MARKER_TYPE[TAG_VAR] = 4 // `
+INLINE_MARKER_TYPE[TAG_Q] = 5 // "
 
 /**
  * Maintain the list-item indent stack. On `<li>` enter, push this item's
@@ -381,8 +394,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     depthMap: new Uint8Array(MAX_TAG_ID),
     listIndent: '',
     listIndentWidths: [],
-    emphasisOpen: [],
-    emphasisOpenCount: 0,
+    openMarkers: [],
+    openMarkerCount: 0,
     plainText: options.format === 'text',
   }
 
@@ -517,8 +530,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           state.lastContentCache = textNode.value
         }
 
-        if (state.emphasisOpenCount && hasNonWhitespace(textNode.value)) {
-          state.emphasisOpenCount = 0
+        if (state.openMarkerCount && hasNonWhitespace(textNode.value)) {
+          state.openMarkerCount = 0
         }
       }
       state.lastTextNode = textNode
@@ -552,6 +565,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
     const handler = node.tagHandler
+    const isInlineElement = handler?.isInline === true
     let handlerOutput: string | undefined
     if (!output && handler?.[eventFn]) {
       const res = state.plainText
@@ -563,33 +577,35 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
     }
 
-    // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
-    if (handlerOutput !== undefined && eventType === NodeEventExit && state.emphasisOpenCount && !handler?.literalExit) {
-      const emType = EMPHASIS_TYPE[element.tagId!]!
-      if (emType >= 0) {
-        const packed = state.emphasisOpen[--state.emphasisOpenCount]!
-        const idx = packed >> 2
-        const openType = packed & 3
-        if (openType === emType && idx < buff.length && buff[idx] === handlerOutput) {
-          let onlyWhitespace = true
-          for (let i = idx + 1; i < buff.length; i++) {
-            const frag = buff[i]!
-            if (frag && hasNonWhitespace(frag)) {
-              onlyWhitespace = false
-              break
+    if (eventType === NodeEventExit && state.openMarkerCount) {
+      // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
+      if (handlerOutput !== undefined && !handler?.literalExit) {
+        const markerType = INLINE_MARKER_TYPE[element.tagId!]!
+        if (markerType >= 0) {
+          const packed = state.openMarkers[--state.openMarkerCount]!
+          const idx = packed >> 3
+          const openType = packed & 7
+          if (openType === markerType && idx < buff.length && buff[idx] === handlerOutput) {
+            let onlyWhitespace = true
+            for (let i = idx + 1; i < buff.length; i++) {
+              const frag = buff[i]!
+              if (frag && hasNonWhitespace(frag)) {
+                onlyWhitespace = false
+                break
+              }
             }
-          }
-          if (onlyWhitespace) {
-            buff.length = idx
-            state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
-            return
+            if (onlyWhitespace) {
+              buff.length = idx
+              state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
+              return
+            }
           }
         }
       }
-    }
-    // Clear emphasis open markers when leaving an inline context
-    if (state.emphasisOpenCount && eventType === NodeEventExit && handler?.isInline !== true) {
-      state.emphasisOpenCount = 0
+      // Clear open inline markers when leaving an inline context
+      if (!isInlineElement) {
+        state.openMarkerCount = 0
+      }
     }
 
     // A <br> can introduce one blank line, but never needs 3+ consecutive
@@ -604,7 +620,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     const newLineConfig = calculateNewLineConfig(node as ElementNode, state.depthMap, state.plainText === true)
     const configuredNewLines = newLineConfig[eventType] || 0
     const newLines = Math.max(0, configuredNewLines - lastNewLines)
-    const isInlineElement = node.tagHandler?.isInline === true
 
     if (state.pendingInlineWhitespace) {
       const firstOutput = output?.[0]?.[0] || ''
@@ -722,14 +737,14 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
     }
 
-    // Track emphasis open markers for empty pair detection
+    // Track open inline markers for empty pair detection
     if (handlerOutput !== undefined && eventType === NodeEventEnter && isInlineElement) {
-      const emType = EMPHASIS_TYPE[element.tagId!]!
-      if (!handler?.literalEnter && emType >= 0 && buff[buff.length - 1] === handlerOutput) {
-        state.emphasisOpen[state.emphasisOpenCount++] = (buff.length - 1) << 2 | emType
+      const markerType = INLINE_MARKER_TYPE[element.tagId!]!
+      if (!handler?.literalEnter && markerType >= 0 && buff[buff.length - 1] === handlerOutput) {
+        state.openMarkers[state.openMarkerCount++] = (buff.length - 1) << 3 | markerType
       }
-      else if (state.emphasisOpenCount && hasNonWhitespace(handlerOutput)) {
-        state.emphasisOpenCount = 0
+      else if (state.openMarkerCount && hasNonWhitespace(handlerOutput)) {
+        state.openMarkerCount = 0
       }
     }
 
@@ -785,11 +800,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         stableLength--
     }
 
-    // An open emphasis marker may still be dropped if its element closes empty in a later chunk;
+    // An open inline marker may still be dropped if its element closes empty in a later chunk;
     // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
-    const emphasisHeld = state.emphasisOpenCount > 0
-    if (emphasisHeld) {
-      const openFragment = state.emphasisOpen[0]! >> 2
+    const markerHeld = state.openMarkerCount > 0
+    if (markerHeld) {
+      const openFragment = state.openMarkers[0]! >> 3
       let markerPos = 0
       for (let i = 0; i < openFragment; i++)
         markerPos += state.buffer[i]!.length
@@ -811,18 +826,20 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // from joining and slicing the entire cumulative output. Plugin, wrapping,
     // and open-link paths retain the full buffer because they can inspect or
     // rewrite earlier content.
-    if (!emphasisHeld && !hasMutableTrailingSpace && !resolvedPlugins.length && !options.wrapWidth && !state.depthMap[TAG_A]) {
-      const tailStart = Math.max(0, stableLength - 2)
-      const emittedTail = currentContent.slice(tailStart, stableLength)
-      const mutableTail = currentContent.slice(stableLength)
-      state.buffer.length = 0
-      if (emittedTail || mutableTail)
-        state.buffer.push(emittedTail + mutableTail)
-      lastYieldedLength = emittedTail.length
-    }
-    else if (!emphasisHeld && state.buffer.length > 1 && !hasMutableTrailingSpace) {
-      state.buffer.length = 0
-      state.buffer.push(currentContent)
+    if (!markerHeld && !hasMutableTrailingSpace) {
+      if (!resolvedPlugins.length && !options.wrapWidth && !state.depthMap[TAG_A]) {
+        const tailStart = Math.max(0, stableLength - 2)
+        const emittedTail = currentContent.slice(tailStart, stableLength)
+        const mutableTail = currentContent.slice(stableLength)
+        state.buffer.length = 0
+        if (emittedTail || mutableTail)
+          state.buffer.push(emittedTail + mutableTail)
+        lastYieldedLength = emittedTail.length
+      }
+      else if (state.buffer.length > 1) {
+        state.buffer.length = 0
+        state.buffer.push(currentContent)
+      }
     }
     return newContent
   }

@@ -4,12 +4,16 @@ use super::*;
 
 impl ConvertState {
   #[inline]
-  fn emphasis_type(tag_id: u8) -> Option<u8> {
+  fn inline_marker_type(tag_id: u8) -> Option<u8> {
+    // The kind is the delimiter identity: one value per distinct delimiter
+    // string, so tags sharing a delimiter share a kind.
     match tag_id {
-      TAG_STRONG | TAG_B => Some(0),
-      TAG_EM | TAG_I => Some(1),
-      TAG_DEL => Some(2),
-      TAG_FIGCAPTION => Some(3),
+      TAG_STRONG | TAG_B | TAG_DFN => Some(0), // **
+      TAG_EM | TAG_I | TAG_FIGCAPTION => Some(1), // _
+      TAG_DEL => Some(2),                      // ~~
+      TAG_CITE => Some(3),                     // *
+      TAG_KBD | TAG_CODE | TAG_SAMP | TAG_VAR => Some(4), // `
+      TAG_Q => Some(5),                        // "
       _ => None,
     }
   }
@@ -193,20 +197,20 @@ impl ConvertState {
 
     if !enter_is_literal
       && let Some(id) = tag_id
-      && let Some(emphasis_type) = Self::emphasis_type(id)
+      && let Some(inline_marker_type) = Self::inline_marker_type(id)
       && let Some(marker) = output.as_deref()
       && !marker.is_empty()
       && self.buffer.ends_with(marker)
     {
       self
-        .emphasis_open
-        .push((emphasis_type, self.buffer.len() - marker.len()));
-    } else if !self.emphasis_open.is_empty()
+        .open_markers
+        .push((inline_marker_type, self.buffer.len() - marker.len()));
+    } else if !self.open_markers.is_empty()
       && output
         .as_deref()
         .is_some_and(|o| o.as_bytes().iter().any(|&b| !is_whitespace(b)))
     {
-      self.emphasis_open.clear();
+      self.open_markers.clear();
     }
 
     // Clean: track heading start for slug collection
@@ -489,15 +493,15 @@ impl ConvertState {
     // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
     if !has_override
       && let Some(id) = tag_id
-      && let Some(emphasis_type) = Self::emphasis_type(id)
+      && let Some(inline_marker_type) = Self::inline_marker_type(id)
       && let Some(marker) = output.as_deref()
       && !marker.is_empty()
-      && let Some((open_type, pos)) = self.emphasis_open.pop()
+      && let Some((open_type, pos)) = self.open_markers.pop()
     {
       let end = pos + marker.len();
 
       // Marker bytes are ASCII, so the byte match keeps `buffer[end..]` on a char boundary.
-      if open_type == emphasis_type
+      if open_type == inline_marker_type
         && end <= self.buffer.len()
         && self.buffer.as_bytes()[pos..end] == *marker.as_bytes()
         && self.buffer[end..].trim().is_empty()
@@ -508,8 +512,8 @@ impl ConvertState {
       }
     }
 
-    if !is_inline && !self.emphasis_open.is_empty() {
-      self.emphasis_open.clear();
+    if !is_inline && !self.open_markers.is_empty() {
+      self.open_markers.clear();
     }
 
     // Get effective output
@@ -685,8 +689,8 @@ impl ConvertState {
       self.buffer.push_str(text);
     }
 
-    if !self.emphasis_open.is_empty() && text.as_bytes().iter().any(|&b| !is_whitespace(b)) {
-      self.emphasis_open.clear();
+    if !self.open_markers.is_empty() && text.as_bytes().iter().any(|&b| !is_whitespace(b)) {
+      self.open_markers.clear();
     }
 
     self.last_text_node_contains_whitespace = contains_whitespace;

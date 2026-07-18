@@ -125,6 +125,29 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
     expect(htmlToMarkdown('<figure><figcaption></figcaption></figure>', { engine })).toBe('')
   })
 
+  it('drops stray markers for other empty symmetric inline tags', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p>a<cite></cite>b</p>', { engine })).toBe('ab')
+    expect(htmlToMarkdown('<p>a<dfn></dfn>b</p>', { engine })).toBe('ab')
+    expect(htmlToMarkdown('<p>a<kbd></kbd>b</p>', { engine })).toBe('ab')
+    expect(htmlToMarkdown('<p>a<code></code>b</p>', { engine })).toBe('ab')
+    expect(htmlToMarkdown('<p>a<samp></samp>b</p>', { engine })).toBe('ab')
+    expect(htmlToMarkdown('<p>a<var></var>b</p>', { engine })).toBe('ab')
+    // <q> drops its quote markers but keeps its surrounding spacing, like <del>.
+    expect(htmlToMarkdown('<p>a<q></q>b</p>', { engine })).toBe('a b')
+  })
+
+  it('keeps non-empty markers for other symmetric inline tags', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p>a<cite>x</cite>b</p>', { engine })).toBe('a*x*b')
+    expect(htmlToMarkdown('<p>a<dfn>x</dfn>b</p>', { engine })).toBe('a**x**b')
+    expect(htmlToMarkdown('<p>a<code>x</code>b</p>', { engine })).toBe('a`x`b')
+    expect(htmlToMarkdown('<p>a<kbd>x</kbd>b</p>', { engine })).toBe('a`x`b')
+    expect(htmlToMarkdown('<p>a<samp>x</samp>b</p>', { engine })).toBe('a`x`b')
+    expect(htmlToMarkdown('<p>a<var>x</var>b</p>', { engine })).toBe('a`x`b')
+    expect(htmlToMarkdown('<p>a<q>x</q>b</p>', { engine })).toBe('a "x"b')
+  })
+
   it('keeps non-empty emphasis untouched', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<p><b>hi</b></p>', { engine })).toBe('**hi**')
