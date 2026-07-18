@@ -239,11 +239,12 @@ impl ConvertState {
     // No parent element means this is a top-level (root) text node, e.g. the
     // leading `foo ` in the fragment `foo <sup>bar</sup>`. Such text must
     // still be emitted rather than dropped (issue #93).
-    let mut excludes_text_nodes = self
-      .stack
-      .last()
-      .is_some_and(|parent| parent.excludes_text_nodes || parent.excluded_from_markdown)
-      || self.suppressed_excludes_text_depth > 0;
+    let suppressed_reincludes =
+      self.suppressed_filter_include_depth > 0 || self.suppressed_isolate_main_depth > 0;
+    let mut excludes_text_nodes = self.stack.last().is_some_and(|parent| {
+      parent.excludes_text_nodes || (parent.excluded_from_markdown && !suppressed_reincludes)
+    }) || self.suppressed_excludes_text_depth > 0
+      || self.hidden_since_depth.is_some();
 
     if self.has_isolate_main {
       if self.isolate_main_found {
@@ -262,10 +263,14 @@ impl ConvertState {
     if self.has_frontmatter
       && self.frontmatter_in_head
       && !excludes_text_nodes
-      && self
-        .stack
+      && (self
+        .suppressed
         .last()
-        .is_some_and(|p| p.tag_id == Some(TAG_TITLE))
+        .is_some_and(|tag| tag.tag_id == Some(TAG_TITLE))
+        || self
+          .stack
+          .last()
+          .is_some_and(|parent| parent.tag_id == Some(TAG_TITLE)))
     {
       let val = text_buffer.trim().to_string();
       if !val.is_empty() {
@@ -445,6 +450,48 @@ impl ConvertState {
     }
   }
 
+  fn process_frontmatter_opening(&mut self, tag: &ElementNode, in_template: bool) {
+    if !self.has_frontmatter || in_template {
+      return;
+    }
+    if tag.tag_id == Some(TAG_HEAD) {
+      self.frontmatter_in_head = true;
+    } else if self.frontmatter_in_head && tag.tag_id == Some(TAG_META) {
+      let name = tag
+        .attributes
+        .get("name")
+        .or_else(|| tag.attributes.get("property"));
+      let content = tag.attributes.get("content");
+      if let (Some(n), Some(c)) = (name, content) {
+        let n_str = n.as_str();
+        let is_allowed = match n_str {
+          "description"
+          | "keywords"
+          | "author"
+          | "date"
+          | "og:title"
+          | "og:description"
+          | "twitter:title"
+          | "twitter:description" => true,
+          _ => self
+            .options
+            .plugins
+            .as_ref()
+            .and_then(|p| p.frontmatter.as_ref())
+            .and_then(|f| f.meta_fields.as_ref())
+            .is_some_and(|allowed| allowed.iter().any(|a| a == n_str)),
+        };
+        if is_allowed {
+          if let Some(entry) = self.frontmatter_meta.iter_mut().find(|(k, _)| k == n) {
+            entry.1.clone_from(c);
+          } else {
+            self.frontmatter_meta.push((n.clone(), c.clone()));
+          }
+        }
+      }
+    }
+  }
+
   pub(crate) fn process_opening_tag(
     &mut self,
     tag_name: &str,
@@ -603,18 +650,168 @@ impl ConvertState {
     // entries, so implied siblings at the limit remain siblings rather than
     // being flattened as children.
     if !self.suppressed.is_empty() || self.stack.len() >= self.max_depth {
-      if !self_closing {
-        let custom_name_id = if is_builtin {
-          0
+      let virtual_depth = self.depth + self.suppressed.len() + 1;
+      let custom_name = if is_builtin {
+        None
+      } else {
+        Some(tag_name.to_string())
+      };
+      let (h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) =
+        if let Some(handler) = tag_handler {
+          (
+            handler.is_inline,
+            handler.excludes_text_nodes,
+            handler.is_non_nesting,
+            handler.collapses_inner_white_space,
+            handler.spacing,
+          )
+        } else if tag_id.is_none() {
+          (true, false, false, false, Some(NO_SPACING))
         } else {
-          self.intern_suppressed_custom_name(tag_name)
+          (false, false, false, false, None)
         };
-        self.push_suppressed(SuppressedTag::new(
-          tag_id,
-          custom_name_id,
-          tag_handler.is_some_and(|handler| handler.excludes_text_nodes),
-          tag_handler.is_some_and(|handler| handler.is_non_nesting),
-        ));
+      let probe = ElementNode {
+        custom_name,
+        attributes,
+        tag_id,
+        depth: virtual_depth,
+        index: 0,
+        current_walk_index: 0,
+        child_text_node_index: 0,
+        contains_whitespace: false,
+        excluded_from_markdown: false,
+        tailwind: None,
+        is_inline: h_inline,
+        excludes_text_nodes: h_excludes,
+        is_non_nesting: h_non_nesting,
+        collapses_inner_white_space: h_collapses,
+        spacing: h_spacing,
+      };
+
+      let in_template = tag_id == Some(TAG_TEMPLATE)
+        || self.depth_map[TAG_TEMPLATE as usize] > 0
+        || self.suppressed_depth_map[TAG_TEMPLATE as usize] > 0;
+      let mut skip_node = false;
+      let mut filter_excluded = false;
+      let mut filter_include_match = false;
+      let mut tailwind_hidden = false;
+
+      if self.has_tailwind {
+        let parent_hidden = self.suppressed_excludes_text_depth > 0
+          || self
+            .stack
+            .last()
+            .and_then(|parent| parent.tailwind.as_ref())
+            .is_some_and(|tailwind| tailwind.hidden);
+        tailwind_hidden = probe
+          .attributes
+          .get("class")
+          .is_some_and(|class| process_tailwind_classes(class).2)
+          || parent_hidden;
+        skip_node |= tailwind_hidden;
+      }
+
+      if self.has_filter {
+        if self.hidden_since_depth.is_some() || is_hidden(&probe) {
+          skip_node = true;
+          filter_excluded = true;
+        }
+        if !skip_node {
+          filter_excluded = self
+            .filter_exclude_parsed
+            .iter()
+            .any(|(_, parsed)| matches_selector(&probe, parsed))
+            || self.stack.iter().any(|parent| {
+              self
+                .filter_exclude_parsed
+                .iter()
+                .any(|(_, parsed)| matches_selector(parent, parsed))
+            });
+          skip_node |= filter_excluded;
+        }
+        if !skip_node && !self.filter_include_parsed.is_empty() {
+          filter_include_match = self
+            .filter_include_parsed
+            .iter()
+            .any(|(_, parsed)| matches_selector(&probe, parsed));
+          let mut match_found = filter_include_match;
+          if !match_found && self.filter_process_children {
+            match_found = self.suppressed_filter_include_depth > 0
+              || self.stack.iter().any(|parent| {
+                self
+                  .filter_include_parsed
+                  .iter()
+                  .any(|(_, parsed)| matches_selector(parent, parsed))
+              });
+          }
+          if !match_found {
+            skip_node = true;
+            filter_excluded = true;
+          }
+        }
+      }
+
+      let mut isolate_main = false;
+      if self.has_isolate_main && !in_template {
+        let is_main = tag_id == Some(TAG_MAIN);
+        if !self.isolate_main_found && is_main && virtual_depth <= 50 {
+          self.isolate_main_found = true;
+        }
+        if self.isolate_main_found {
+          if self.isolate_main_closed {
+            skip_node = true;
+          }
+        } else {
+          let is_header = tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id));
+          if self.isolate_first_header_depth.is_none()
+            && is_header
+            && self.depth_map[TAG_HEADER as usize] == 0
+            && self.suppressed_depth_map[TAG_HEADER as usize] == 0
+          {
+            self.isolate_first_header_depth = Some(virtual_depth);
+          }
+          if let Some(header_depth) = self.isolate_first_header_depth
+            && !self.isolate_after_footer
+            && tag_id == Some(TAG_FOOTER)
+            && virtual_depth.saturating_sub(header_depth) <= 5
+          {
+            self.isolate_after_footer = true;
+            skip_node = true;
+          }
+          if self.isolate_first_header_depth.is_none() {
+            let head_is_open = self.depth_map[TAG_HEAD as usize] > 0
+              || self.suppressed_depth_map[TAG_HEAD as usize] > 0;
+            if tag_id != Some(TAG_HEAD) && !head_is_open {
+              skip_node = true;
+            }
+          } else if self.isolate_after_footer {
+            skip_node = true;
+          }
+        }
+        isolate_main =
+          is_main && self.isolate_main_found && !self.isolate_main_closed && !skip_node;
+      }
+
+      self.process_frontmatter_opening(&probe, in_template);
+      let excluded_from_markdown = in_template
+        || tailwind_hidden
+        || filter_excluded
+        || (skip_node && (!self.has_isolate_main || self.isolate_main_found));
+      let custom_name_id = if is_builtin || self_closing {
+        0
+      } else {
+        self.intern_suppressed_custom_name(tag_name)
+      };
+      self.push_suppressed(SuppressedTag::new(
+        tag_id,
+        custom_name_id,
+        h_excludes || excluded_from_markdown,
+        h_non_nesting,
+        filter_include_match,
+        isolate_main,
+      ));
+      if self_closing {
+        self.pop_suppressed();
       }
       return OpeningTagResult {
         complete: true,
@@ -852,44 +1049,7 @@ impl ConvertState {
         }
       }
 
-      if self.has_frontmatter && !in_template {
-        if tag_id == Some(TAG_HEAD) {
-          self.frontmatter_in_head = true;
-        } else if self.frontmatter_in_head && tag_id == Some(TAG_META) {
-          let name = tag
-            .attributes
-            .get("name")
-            .or_else(|| tag.attributes.get("property"));
-          let content = tag.attributes.get("content");
-          if let (Some(n), Some(c)) = (name, content) {
-            let n_str = n.as_str();
-            let is_allowed = match n_str {
-              "description"
-              | "keywords"
-              | "author"
-              | "date"
-              | "og:title"
-              | "og:description"
-              | "twitter:title"
-              | "twitter:description" => true,
-              _ => self
-                .options
-                .plugins
-                .as_ref()
-                .and_then(|p| p.frontmatter.as_ref())
-                .and_then(|f| f.meta_fields.as_ref())
-                .is_some_and(|allowed| allowed.iter().any(|a| a == n_str)),
-            };
-            if is_allowed {
-              if let Some(entry) = self.frontmatter_meta.iter_mut().find(|(k, _)| k == n) {
-                entry.1.clone_from(c);
-              } else {
-                self.frontmatter_meta.push((n.clone(), c.clone()));
-              }
-            }
-          }
-        }
-      }
+      self.process_frontmatter_opening(&tag, in_template);
     }
 
     tag.excluded_from_markdown = in_template

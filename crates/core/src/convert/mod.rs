@@ -26,6 +26,8 @@ pub(crate) struct TrackedExtraction {
 
 const SUPPRESSED_EXCLUDES_TEXT: u8 = 1;
 const SUPPRESSED_NON_NESTING: u8 = 2;
+const SUPPRESSED_FILTER_INCLUDE: u8 = 4;
+const SUPPRESSED_ISOLATE_MAIN: u8 = 8;
 
 /// Compact identity and parser flags for an element flattened past `max_depth`.
 /// Custom names are interned on `ConvertState`, keeping each stack entry small.
@@ -43,6 +45,8 @@ impl SuppressedTag {
     custom_name_id: u32,
     excludes_text_nodes: bool,
     is_non_nesting: bool,
+    filter_include_match: bool,
+    isolate_main: bool,
   ) -> Self {
     let mut flags = 0;
     if excludes_text_nodes {
@@ -50,6 +54,12 @@ impl SuppressedTag {
     }
     if is_non_nesting {
       flags |= SUPPRESSED_NON_NESTING;
+    }
+    if filter_include_match {
+      flags |= SUPPRESSED_FILTER_INCLUDE;
+    }
+    if isolate_main {
+      flags |= SUPPRESSED_ISOLATE_MAIN;
     }
     Self {
       custom_name_id,
@@ -71,6 +81,16 @@ impl SuppressedTag {
   #[inline]
   fn is_non_nesting(self) -> bool {
     self.flags & SUPPRESSED_NON_NESTING != 0
+  }
+
+  #[inline]
+  fn is_filter_include(self) -> bool {
+    self.flags & SUPPRESSED_FILTER_INCLUDE != 0
+  }
+
+  #[inline]
+  fn is_isolate_main(self) -> bool {
+    self.flags & SUPPRESSED_ISOLATE_MAIN != 0
   }
 
   #[inline]
@@ -334,6 +354,8 @@ pub struct ConvertState {
   suppressed_custom_active: Vec<usize>,
   suppressed_depth_map: [usize; MAX_TAG_ID],
   suppressed_excludes_text_depth: usize,
+  suppressed_filter_include_depth: usize,
+  suppressed_isolate_main_depth: usize,
   parse_text_buffer: String,
   script_text_buffer: String,
   pub stack: Vec<ElementNode>,
@@ -472,6 +494,12 @@ impl ConvertState {
     if tag.excludes_text_nodes() {
       self.suppressed_excludes_text_depth = self.suppressed_excludes_text_depth.saturating_add(1);
     }
+    if tag.is_filter_include() {
+      self.suppressed_filter_include_depth = self.suppressed_filter_include_depth.saturating_add(1);
+    }
+    if tag.is_isolate_main() {
+      self.suppressed_isolate_main_depth = self.suppressed_isolate_main_depth.saturating_add(1);
+    }
     if tag.is_non_nesting() {
       self.in_non_nesting = true;
     }
@@ -479,6 +507,8 @@ impl ConvertState {
   }
 
   fn truncate_suppressed(&mut self, len: usize) {
+    let mut closes_isolate_main = false;
+    let mut closes_frontmatter_head = false;
     for tag in &self.suppressed[len..] {
       if let Some(id) = tag.tag_id {
         self.suppressed_depth_map[id as usize] =
@@ -494,6 +524,15 @@ impl ConvertState {
       if tag.excludes_text_nodes() {
         self.suppressed_excludes_text_depth = self.suppressed_excludes_text_depth.saturating_sub(1);
       }
+      if tag.is_filter_include() {
+        self.suppressed_filter_include_depth =
+          self.suppressed_filter_include_depth.saturating_sub(1);
+      }
+      if tag.is_isolate_main() {
+        self.suppressed_isolate_main_depth = self.suppressed_isolate_main_depth.saturating_sub(1);
+      }
+      closes_isolate_main |= tag.is_isolate_main();
+      closes_frontmatter_head |= tag.tag_id == Some(TAG_HEAD);
     }
     self.suppressed.truncate(len);
     if self.suppressed.is_empty() {
@@ -505,6 +544,13 @@ impl ConvertState {
       .last()
       .is_some_and(|tag| tag.is_non_nesting())
       || self.stack.last().is_some_and(|node| node.is_non_nesting);
+    if closes_isolate_main && self.isolate_main_found && !self.isolate_main_closed {
+      self.isolate_main_closed = true;
+    }
+    if closes_frontmatter_head && self.has_frontmatter && self.frontmatter_in_head {
+      self.frontmatter_in_head = false;
+      self.generate_frontmatter_yaml();
+    }
   }
 
   fn clear_suppressed(&mut self) {
@@ -568,6 +614,8 @@ impl ConvertState {
       suppressed_custom_active: Vec::new(),
       suppressed_depth_map: [0; MAX_TAG_ID],
       suppressed_excludes_text_depth: 0,
+      suppressed_filter_include_depth: 0,
+      suppressed_isolate_main_depth: 0,
       parse_text_buffer: String::new(),
       script_text_buffer: String::new(),
       stack: Vec::with_capacity(32),

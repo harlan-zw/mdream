@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src'
+import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index.js'
 
 async function collect(stream: AsyncIterable<string>): Promise<string> {
   let output = ''

@@ -1,9 +1,24 @@
-use mdream::types::HTMLToMarkdownOptions;
+use mdream::types::{FilterConfig, HTMLToMarkdownOptions, PluginConfig, TailwindConfig};
 use mdream::{MarkdownStreamProcessor, html_to_markdown};
 
 fn opts(max_depth: usize) -> HTMLToMarkdownOptions {
   HTMLToMarkdownOptions {
     max_depth: Some(max_depth),
+    ..Default::default()
+  }
+}
+
+fn opts_with_plugins(max_depth: usize, plugins: PluginConfig) -> HTMLToMarkdownOptions {
+  HTMLToMarkdownOptions {
+    max_depth: Some(max_depth),
+    plugins: Some(plugins),
+    ..Default::default()
+  }
+}
+
+fn default_with_plugins(plugins: PluginConfig) -> HTMLToMarkdownOptions {
+  HTMLToMarkdownOptions {
+    plugins: Some(plugins),
     ..Default::default()
   }
 }
@@ -132,6 +147,66 @@ fn excluded_raw_text_stays_hidden_past_cap() {
 fn excluded_elements_stay_hidden_past_cap() {
   let html = "<div><style>.hidden { display: block }</style><template><b>hidden</b></template><noscript>hidden</noscript><p>shown</p></div>";
   assert_eq!(html_to_markdown(html, opts(1)), "shown");
+}
+
+#[test]
+fn filter_exclusions_stay_hidden_past_cap() {
+  let html =
+    "<div><span class=secret>class secret</span><span hidden>hidden attr</span><p>shown</p></div>";
+  let plugins = PluginConfig {
+    filter: Some(FilterConfig::exclude(&[".secret"])),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown(html, opts_with_plugins(1, plugins)),
+    "shown"
+  );
+}
+
+#[test]
+fn filter_include_context_survives_suppression() {
+  let html = "<div><section class=keep><strong>inside</strong></section><p>outside</p></div>";
+  let plugins = PluginConfig {
+    filter: Some(FilterConfig::include(&[".keep"])),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown(html, opts_with_plugins(1, plugins)),
+    "inside"
+  );
+}
+
+#[test]
+fn tailwind_hidden_stays_hidden_past_cap() {
+  let html = "<div><span class=hidden>hidden</span><p>shown</p></div>";
+  let plugins = PluginConfig {
+    tailwind: Some(TailwindConfig),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown(html, opts_with_plugins(1, plugins)),
+    "shown"
+  );
+}
+
+#[test]
+fn isolate_main_state_survives_suppression() {
+  let html = "<div><main><p>inside</p></main><p>outside</p></div>";
+  let plugins = PluginConfig::isolate_main();
+  assert_eq!(
+    html_to_markdown(html, opts_with_plugins(1, plugins.clone())),
+    html_to_markdown(html, default_with_plugins(plugins))
+  );
+}
+
+#[test]
+fn frontmatter_state_survives_suppression() {
+  let html = "<head><title>Title</title><meta name=description content=Summary></head><p>body</p>";
+  let plugins = PluginConfig::frontmatter();
+  assert_eq!(
+    html_to_markdown(html, opts_with_plugins(0, plugins.clone())),
+    html_to_markdown(html, default_with_plugins(plugins))
+  );
 }
 
 #[test]
