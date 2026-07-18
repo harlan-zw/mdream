@@ -335,6 +335,8 @@ pub struct ConvertState {
   skip_current_link: bool,
   /// Buffer position of the `[` character written for TAG_A enter
   link_bracket_pos: usize,
+  /// Open inline-emphasis enter markers as (kind, buffer position); lets the exit drop empty pairs.
+  emphasis_open: Vec<(u8, usize)>,
   /// Heading slugs collected during conversion for fragment validation
   heading_slugs: Vec<String>,
   /// Fragment link locations: (bracket_start, link_end)
@@ -446,6 +448,7 @@ impl ConvertState {
       clean_flags: 0,
       skip_current_link: false,
       link_bracket_pos: 0,
+      emphasis_open: Vec::with_capacity(4),
       heading_slugs: Vec::new(),
       fragment_links: Vec::new(),
       in_heading: false,
@@ -1008,12 +1011,21 @@ impl ConvertState {
     // A trailing whitespace-bearing text node may still be trimmed when a
     // closing inline tag arrives in a later chunk. Keep that mutable suffix
     // buffered so already-yielded offsets never point into text we rewrite.
-    let stable_len =
+    let mut stable_len =
       if self.last_text_node_contains_whitespace && self.depth_map[TAG_PRE as usize] == 0 {
         current_content.trim_end_matches(' ').len()
     } else {
       current_content.len()
     };
+    // An open emphasis marker may still be dropped if its element closes empty in a later chunk;
+    // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
+    if let Some(&(_, p)) = self.emphasis_open.first() {
+      let trim_offset = self.buffer.len() - current_content.len();
+      let adj = p.saturating_sub(trim_offset);
+      if adj < stable_len {
+        stable_len = adj;
+      }
+    }
     if self.last_yielded_length >= stable_len {
       return String::new();
     }

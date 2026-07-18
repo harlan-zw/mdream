@@ -3,6 +3,17 @@
 use super::*;
 
 impl ConvertState {
+  #[inline]
+  fn emphasis_type(tag_id: u8) -> Option<u8> {
+    match tag_id {
+      TAG_STRONG | TAG_B => Some(0),
+      TAG_EM | TAG_I => Some(1),
+      TAG_DEL => Some(2),
+      TAG_FIGCAPTION => Some(3),
+      _ => None,
+    }
+  }
+
   /// Emit markdown for entering the element currently on top of self.stack.
   #[inline]
   pub(crate) fn emit_enter_element(&mut self) {
@@ -178,6 +189,24 @@ impl ConvertState {
       } else {
         buf_len
       };
+    }
+
+    if !enter_is_literal
+      && let Some(id) = tag_id
+      && let Some(emphasis_type) = Self::emphasis_type(id)
+      && let Some(marker) = output.as_deref()
+      && !marker.is_empty()
+      && self.buffer.ends_with(marker)
+    {
+      self
+        .emphasis_open
+        .push((emphasis_type, self.buffer.len() - marker.len()));
+    } else if !self.emphasis_open.is_empty()
+      && output
+        .as_deref()
+        .is_some_and(|o| o.as_bytes().iter().any(|&b| !is_whitespace(b)))
+    {
+      self.emphasis_open.clear();
     }
 
     // Clean: track heading start for slug collection
@@ -457,6 +486,32 @@ impl ConvertState {
       return;
     }
 
+    // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
+    if !has_override
+      && let Some(id) = tag_id
+      && let Some(emphasis_type) = Self::emphasis_type(id)
+      && let Some(marker) = output.as_deref()
+      && !marker.is_empty()
+      && let Some((open_type, pos)) = self.emphasis_open.pop()
+    {
+      let end = pos + marker.len();
+
+      // Marker bytes are ASCII, so the byte match keeps `buffer[end..]` on a char boundary.
+      if open_type == emphasis_type
+        && end <= self.buffer.len()
+        && self.buffer.as_bytes()[pos..end] == *marker.as_bytes()
+        && self.buffer[end..].trim().is_empty()
+      {
+        self.buffer.truncate(pos);
+        self.last_node_is_inline = is_inline;
+        return;
+      }
+    }
+
+    if !is_inline && !self.emphasis_open.is_empty() {
+      self.emphasis_open.clear();
+    }
+
     // Get effective output
     let effective: Option<&str> = if let Some(ref sep) = table_separator {
       Some(sep.as_str())
@@ -628,6 +683,10 @@ impl ConvertState {
     } else {
       self.last_content_cache_len = text.len();
       self.buffer.push_str(text);
+    }
+
+    if !self.emphasis_open.is_empty() && text.as_bytes().iter().any(|&b| !is_whitespace(b)) {
+      self.emphasis_open.clear();
     }
 
     self.last_text_node_contains_whitespace = contains_whitespace;

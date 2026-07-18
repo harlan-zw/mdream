@@ -355,6 +355,133 @@ fn nested_italic_collapses() {
   assert_eq!(convert("<i><i>text</i></i>"), "_text_");
 }
 
+// ── Empty inline emphasis ──
+
+#[test]
+fn empty_emphasis_emits_no_markers() {
+  assert_eq!(convert("<p><b></b>x</p>"), "x");
+  assert_eq!(convert("<p><strong></strong>x</p>"), "x");
+  assert_eq!(convert("<p><i></i>x</p>"), "x");
+  assert_eq!(convert("<p><em></em>x</p>"), "x");
+  assert_eq!(convert("<p><del></del>x</p>"), "x");
+}
+
+#[test]
+fn whitespace_only_emphasis_emits_no_markers() {
+  assert_eq!(convert("<p><strong> </strong>x</p>"), "x");
+  assert_eq!(convert("<p>a <em>\n</em>b</p>"), "a b");
+}
+
+#[test]
+fn empty_icon_i_before_text_is_dropped() {
+  assert_eq!(
+    convert("<p><i class=\"rc-scout__logo\"></i>You might also like the Recurse Center</p>"),
+    "You might also like the Recurse Center"
+  );
+}
+
+#[test]
+fn empty_emphasis_inside_heading_and_list_item() {
+  assert_eq!(convert("<h2><i class=\"icon\"></i>Title</h2>"), "## Title");
+  assert_eq!(convert("<ul><li><b></b>x</li></ul>"), "- x");
+}
+
+#[test]
+fn nested_empty_emphasis_fully_dropped() {
+  assert_eq!(convert("<p><b><i></i></b>x</p>"), "x");
+  assert_eq!(convert("<p><b><b></b></b>x</p>"), "x");
+  assert_eq!(convert("<p><b><i><del></del></i></b>x</p>"), "x");
+  assert_eq!(convert("<p><b><i></i><i></i></b>x</p>"), "x");
+  assert_eq!(convert("<p><del><del></del></del>x</p>"), "x");
+  assert_eq!(convert("<p><strong><b></b></strong>x</p>"), "x");
+  assert_eq!(convert("<p><strong><em><b></b></em></strong>x</p>"), "x");
+}
+
+#[test]
+fn empty_figcaption_emits_no_markers() {
+  assert_eq!(convert("<figure><figcaption></figcaption></figure>"), "");
+}
+
+#[test]
+fn non_empty_emphasis_unchanged_by_empty_drop() {
+  assert_eq!(convert("<p><b>hi</b></p>"), "**hi**");
+  assert_eq!(convert("<p><b><em>x</em></b></p>"), "**_x_**");
+  assert_eq!(convert("<p><b><img src=\"x.png\" alt=\"y\"></b></p>"), "**![y](x.png)**");
+  // A nested empty pair after real content still drops, without dropping the
+  // outer marker that content already made permanent.
+  assert_eq!(convert("<p><b>x<i></i></b></p>"), "**x**");
+  assert_eq!(convert("<p><b>x<i></i><i></i></b></p>"), "**x**");
+  assert_eq!(convert("<p><del>a<b></b>b</del></p>"), "~~ab~~");
+}
+
+#[test]
+fn literal_marker_text_at_emphasis_tail_not_mistaken_for_empty() {
+  // The buffer ends with the literal text "**" when the element closes;
+  // the recorded marker position must prevent a false drop.
+  assert_eq!(convert("<p><b>x<span>**</span></b></p>"), "**x****");
+}
+
+#[test]
+fn open_emphasis_yields_content_before_close() {
+  // The <span> boundary flushes the text node while <b> is still open; once
+  // content lands the marker can't be dropped, so the stream must release it.
+  let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let first = stream.process_chunk("<p><b>hello world<span>");
+  assert!(
+    first.contains("hello world"),
+    "content held until close: {first:?}"
+  );
+  let mut full = first;
+  full.push_str(&stream.process_chunk("more</span></b></p>"));
+  full.push_str(&stream.finish());
+  assert_eq!(full.trim_end(), "**hello worldmore**");
+}
+
+#[test]
+fn open_emphasis_yields_element_content_before_close() {
+  // Non-text output (an image) inside open emphasis must also release the marker,
+  // or streaming holds the element's content buffered until the emphasis closes.
+  let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let first = stream.process_chunk("<p><b><img src=\"x.png\" alt=\"y\"><span>");
+  assert!(
+    first.contains("![y](x.png)"),
+    "image held until close: {first:?}"
+  );
+  let mut full = first;
+  full.push_str(&stream.process_chunk("more</span></b></p>"));
+  full.push_str(&stream.finish());
+  assert_eq!(full.trim_end(), "**![y](x.png)more**");
+}
+
+#[test]
+fn tag_override_emphasis_marker_not_dropped_when_empty() {
+  // A declarative override that emits an emphasis marker opts out of empty-pair
+  // cleanup: the override's markers are literal and must survive an empty element.
+  let overrides = vec![(
+    "b".to_string(),
+    TagOverrideConfig {
+      enter: Some("**".to_string()),
+      exit: Some("**".to_string()),
+      spacing: None,
+      is_inline: Some(true),
+      is_self_closing: None,
+      collapses_inner_white_space: None,
+      alias_tag_id: None,
+    },
+  )];
+  let md = html_to_markdown(
+    "<p><b></b>x</p>",
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert_eq!(md, "****x");
+}
+
 // ── Blockquotes ──
 
 #[test]
