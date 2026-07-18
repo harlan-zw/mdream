@@ -189,6 +189,7 @@ mod drain_equiv {
     for &html in CORPUS {
       for opts in [
         HTMLToMarkdownOptions::default(),
+        HTMLToMarkdownOptions::default().with_wrap_width(12),
         HTMLToMarkdownOptions {
           clean: Some(safe_clean()),
           ..Default::default()
@@ -204,5 +205,25 @@ mod drain_equiv {
         }
       }
     }
+  }
+
+  #[test]
+  fn closing_a_skipped_link_releases_the_yielded_prefix() {
+    let options = HTMLToMarkdownOptions {
+      clean: Some(safe_clean()),
+      ..Default::default()
+    };
+    let mut processor = MarkdownStreamProcessor::new(options);
+
+    for _ in 0..10_000 {
+      let _ = processor.process_chunk(r##"<a href="#">x<span></span>"##);
+      let _ = processor.process_chunk("</a>");
+    }
+
+    assert!(
+      processor.state.buffer.len() < 1024,
+      "yielded skipped links accumulated {} buffered bytes",
+      processor.state.buffer.len()
+    );
   }
 }

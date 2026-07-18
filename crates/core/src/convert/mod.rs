@@ -322,7 +322,15 @@ pub struct ConvertState {
 
   // Streaming
   last_yielded_length: usize,
+  /// Whether any non-leading output has already been returned to the caller.
+  /// Once streaming starts, whitespace at the front of a drained buffer is
+  /// content, not document-leading whitespace.
+  has_streamed_output: bool,
+  /// Output column immediately before `buffer[0]`. Draining may remove the
+  /// beginning of the current line, but wrapping still needs its full column.
+  buffer_start_column: usize,
   /// Test-only: disables draining to prove it never alters streamed bytes.
+  #[cfg(test)]
   pub(crate) disable_drain: bool,
 
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
@@ -441,6 +449,9 @@ impl ConvertState {
       last_node_is_inline: false,
       pending_inline_whitespace: false,
       last_yielded_length: 0,
+      has_streamed_output: false,
+      buffer_start_column: 0,
+      #[cfg(test)]
       disable_drain: false,
 
       wrap_width: options_wrap_width,
@@ -1012,7 +1023,7 @@ impl ConvertState {
       } else {
         buf_len
       };
-    let leading = if self.preserve_leading_whitespace {
+    let leading = if self.preserve_leading_whitespace || self.has_streamed_output {
       0
     } else {
       buf_len - self.buffer.trim_start().len()
@@ -1020,9 +1031,11 @@ impl ConvertState {
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let start = self.last_yielded_length.max(leading);
     if start >= stable_end {
+      self.drain_streamed_prefix();
       return String::new();
     }
     let new_content = self.buffer[start..stable_end].to_string();
+    self.has_streamed_output = true;
     self.last_yielded_length = stable_end;
     self.drain_streamed_prefix();
     new_content
@@ -1039,6 +1052,7 @@ impl ConvertState {
   /// streaming API and diverge from one-shot regardless of drain. The
   /// `disable_drain` equivalence test guards this without enumerating rewrites.
   fn drain_streamed_prefix(&mut self) {
+    #[cfg(test)]
     if self.disable_drain {
       return;
     }
@@ -1047,17 +1061,31 @@ impl ConvertState {
     }
     // Keep the tail a late rewrite may still touch, and never drop the `[` of an
     // open link (its close can rewrite from that offset).
-    let mut drain_end = self.last_yielded_length.min(
-      self
-        .buffer
-        .len()
-        .saturating_sub(self.last_content_cache_len),
-    );
+    // Formatting also inspects the last two bytes to count existing newlines.
+    // Keep both, moving to a UTF-8 boundary if the tail starts in a code point.
+    let mut retained_tail_start = self
+      .buffer
+      .len()
+      .saturating_sub(self.last_content_cache_len.max(2));
+    while !self.buffer.is_char_boundary(retained_tail_start) {
+      retained_tail_start -= 1;
+    }
+    let mut drain_end = self.last_yielded_length.min(retained_tail_start);
     if self.depth_map[TAG_A as usize] > 0 {
       drain_end = drain_end.min(self.link_bracket_pos);
     }
     if drain_end == 0 {
       return;
+    }
+    if self.wrap_width != 0 {
+      let drained = &self.buffer[..drain_end];
+      self.buffer_start_column = if let Some(last_newline) = drained.rfind('\n') {
+        drained[last_newline + 1..].chars().count()
+      } else {
+        self
+          .buffer_start_column
+          .saturating_add(drained.chars().count())
+      };
     }
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;

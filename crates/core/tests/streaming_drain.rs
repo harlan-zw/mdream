@@ -97,6 +97,65 @@ fn streamed_output_matches_one_shot() {
 }
 
 #[test]
+fn streaming_wrap_preserves_the_full_current_column() {
+  let html = "<p>alpha <span>beta</span> <span>gamma</span> delta</p>";
+  let options = HTMLToMarkdownOptions::default().with_wrap_width(12);
+  let expected = html_to_markdown(html, options.clone());
+  let mut processor = MarkdownStreamProcessor::new(options);
+
+  let mut actual = processor.process_chunk("<p>alpha <span>beta</span>");
+  actual.push_str(&processor.process_chunk(" <span>gamma</span>"));
+  actual.push_str(&processor.process_chunk(" delta</p>"));
+  actual.push_str(&processor.finish());
+
+  assert_eq!(actual.trim(), expected.trim());
+}
+
+#[test]
+fn streaming_retains_two_newlines_of_block_context() {
+  let html = concat!(
+    "<div><h5>Family Pteropodidae</h5><span>[<a href=\"/edit\">edit</a>]</span></div>",
+    "<link rel=\"stylesheet\"><div role=\"note\" class=\"hatnote navigation-not-searchable\">",
+    "Main article: <a href=\"/list\">List</a></div><p>Members</p>"
+  );
+  let expected = html_to_markdown(html, HTMLToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+
+  let mut actual = processor.process_chunk(concat!(
+    "<div><h5>Family Pteropodidae</h5><span>[<a href=\"/edit\">edit</a>]</span></div>",
+    "<link rel=\"stylesheet\"><div role=\"note\" class=\"hatnote navig"
+  ));
+  actual.push_str(&processor.process_chunk(concat!(
+    "ation-not-searchable\">Main article: <a href=\"/list\">List</a></div>",
+    "<p>Members</p>"
+  )));
+  actual.push_str(&processor.finish());
+
+  assert_eq!(actual.trim(), expected.trim());
+}
+
+#[test]
+fn streaming_only_trims_whitespace_at_the_document_start() {
+  let html = concat!(
+    "<table><tr><td>Miller<br><br><small><div><div><div>One species</div></div>",
+    "<ul><li><i>M. gigas</i> (<a href=\"/ghost\">Ghost bat</a>)</li></ul>",
+    "</div></small>\n </td><td>Northern Australia</td></tr></table>"
+  );
+  let expected = html_to_markdown(html, HTMLToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+
+  let mut actual = processor.process_chunk(concat!(
+    "<table><tr><td>Miller<br><br><small><div><div><div>One species</div></div>",
+    "<ul><li><i>M. gigas</i> (<a href=\"/ghost\">Ghost bat</a>)</li></ul>",
+    "</div></small>\n </td>"
+  ));
+  actual.push_str(&processor.process_chunk("<td>Northern Australia</td></tr></table>"));
+  actual.push_str(&processor.finish());
+
+  assert_eq!(actual.trim(), expected.trim());
+}
+
+#[test]
 fn streaming_memory_is_bounded_not_document_sized() {
   // Blockquote line-prefixing amplifies ~130x; without draining the emitted
   // Markdown would all pile up in the converter's buffer.
@@ -111,14 +170,16 @@ fn streaming_memory_is_bounded_not_document_sized() {
   let mut p = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
   let mut total_out: u64 = 0;
 
-  LIVE.store(0, Ordering::Relaxed);
-  PEAK.store(0, Ordering::Relaxed);
+  // Keep LIVE as the allocator's true process-wide total. Resetting it here
+  // would make later deallocations for pre-existing allocations underflow.
+  let baseline = LIVE.load(Ordering::Relaxed);
+  PEAK.store(baseline, Ordering::Relaxed);
   for c in html.as_bytes().chunks(8 * 1024) {
     let out = p.process_chunk(std::str::from_utf8(c).unwrap());
     total_out += out.len() as u64; // wire would send + drop this
   }
   total_out += p.finish().len() as u64;
-  let peak = PEAK.load(Ordering::Relaxed) as u64;
+  let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline) as u64;
 
   // Amplification really happened...
   assert!(
