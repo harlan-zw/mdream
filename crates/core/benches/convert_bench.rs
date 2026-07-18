@@ -27,6 +27,58 @@ fn bench(
   best
 }
 
+/// Split `s` into ~`target`-byte pieces on code-point boundaries, like a wire feed.
+fn utf8_chunks(s: &str, target: usize) -> Vec<&str> {
+  let mut out = Vec::new();
+  let mut start = 0;
+  while start < s.len() {
+    let mut end = (start + target).min(s.len());
+    while end < s.len() && !s.is_char_boundary(end) {
+      end += 1;
+    }
+    out.push(&s[start..end]);
+    start = end;
+  }
+  out
+}
+
+/// Stream `html` in `chunk`-sized pieces, discarding output like the wire.
+fn run_stream(html: &str, opts: mdream::types::HTMLToMarkdownOptions, chunk: usize) -> usize {
+  let mut p = mdream::MarkdownStreamProcessor::new(opts);
+  let mut produced = 0usize;
+  for piece in utf8_chunks(html, chunk) {
+    produced += p.process_chunk(piece).len();
+  }
+  produced + p.finish().len()
+}
+
+fn bench_stream(
+  label: &str,
+  html: &str,
+  opts: mdream::types::HTMLToMarkdownOptions,
+  chunk: usize,
+  iterations: u32,
+) {
+  let size_kb = html.len() as f64 / 1024.0;
+  for _ in 0..20 {
+    let _ = run_stream(html, opts.clone(), chunk);
+  }
+  let mut best = f64::MAX;
+  for _ in 0..3 {
+    let start = Instant::now();
+    for _ in 0..iterations {
+      let _ = run_stream(html, opts.clone(), chunk);
+    }
+    let us = start.elapsed().as_micros() as f64 / f64::from(iterations);
+    if us < best {
+      best = us;
+    }
+  }
+  let ms = best / 1000.0;
+  let throughput = (size_kb / 1024.0) / (best / 1_000_000.0);
+  println!("  {label:<40} {ms:>7.2}ms  ({throughput:.0} MB/s)");
+}
+
 fn clean_all() -> mdream::types::CleanConfig {
   mdream::types::CleanConfig {
     urls: true,
@@ -109,5 +161,34 @@ fn main() {
       c / 1000.0,
       overhead
     );
+  }
+
+  // Streaming must not regress one-shot throughput. Draining is off when
+  // `fragments` cleaning is on, so the clean set here omits it.
+  let stream_clean_opts = mdream::types::HTMLToMarkdownOptions {
+    clean: Some(mdream::types::CleanConfig {
+      fragments: false,
+      ..clean_all()
+    }),
+    ..Default::default()
+  };
+  println!("Streaming (chunked feed, output discarded like the wire)\n");
+  for (label, html) in &fixtures {
+    for &chunk in &[8 * 1024usize, 64 * 1024] {
+      bench_stream(
+        &format!("{label} default @ {}KB", chunk / 1024),
+        html,
+        default_opts.clone(),
+        chunk,
+        iters,
+      );
+      bench_stream(
+        &format!("{label} clean @ {}KB", chunk / 1024),
+        html,
+        stream_clean_opts.clone(),
+        chunk,
+        iters,
+      );
+    }
   }
 }
