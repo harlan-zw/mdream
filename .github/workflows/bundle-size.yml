@@ -11,7 +11,6 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   analyze-bundle-size:
@@ -27,7 +26,7 @@ jobs:
         uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53 # v6.0.1
 
       - name: Use Node.js 24.x
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24.x
           cache: pnpm
@@ -114,22 +113,24 @@ jobs:
           echo "BASE_LABEL=$BASE_REF @ $short_sha · $date" >> "$GITHUB_ENV"
 
       - name: Generate bundle report
-        id: analyze
         env:
           BASE_DIST: /tmp/base-dist
           BASE_PERF: /tmp/base-perf.json,/tmp/base-alloc.json
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_PERF: /tmp/pr-perf.json,/tmp/pr-alloc.json
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPORT_DIR: ${{ runner.temp }}/bundle-size-report
         run: |
-          output=$(node bench/bundle/analyze.ts)
-          echo "$output"
-          echo "$output" >> "$GITHUB_STEP_SUMMARY"
-          echo "result<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$output" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          mkdir -p "$REPORT_DIR"
+          node bench/bundle/analyze.ts | tee "$REPORT_DIR/report.md"
+          cat "$REPORT_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$PR_NUMBER" > "$REPORT_DIR/pr-number.txt"
+          printf '%s\n' "$HEAD_SHA" > "$REPORT_DIR/head-sha.txt"
 
-      - name: Post comment on pull request
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@70d2764d1a7d5d9560b100cbea0077fc8f633987 # v3
+      - name: Upload bundle report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          header: Bundle Size Analysis
-          message: ${{ steps.analyze.outputs.result }}
+          name: bundle-size-report
+          path: ${{ runner.temp }}/bundle-size-report
+          if-no-files-found: error
+          retention-days: 1
