@@ -324,7 +324,9 @@ function calculateNewLineConfig(node: ElementNode, depthMap: Uint8Array, plainTe
 }
 
 /** Return the full continuation prefix when the node has a blockquote ancestor. */
-function blockquoteContinuationPrefix(node: ElementNode | TextNode, listIndentWidths: readonly number[]): string | undefined {
+function blockquoteContinuationPrefix(node: ElementNode | TextNode, listIndentWidths: readonly number[], blockquoteDepth: number): string | undefined {
+  if (!blockquoteDepth)
+    return undefined
   let parent = node.parent
   while (parent) {
     if (parent.tagId === TAG_BLOCKQUOTE)
@@ -480,7 +482,7 @@ function flushPreFence(state: MarkdownState, node: ElementNode | TextNode): void
   state.preOwnFence = true
   const lang = state.preFenceLang || ''
   const liDepth = state.depthMap[TAG_LI] || 0
-  const quotePrefix = blockquoteContinuationPrefix(node, state.listIndentWidths)
+  const quotePrefix = blockquoteContinuationPrefix(node, state.listIndentWidths, state.depthMap[TAG_BLOCKQUOTE] || 0)
   const fence = liDepth > 0 && !quotePrefix
     ? `\n\n${state.listIndent}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
     : `${MARKDOWN_CODE_BLOCK}${lang}\n`
@@ -588,10 +590,12 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // the end of the quote. It separates siblings, but must not survive after
     // the blockquote itself closes.
     if (!state.plainText && node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_BLOCKQUOTE) {
-      const content = state.buffer.join('')
-      const blankStart = trailingQuotedBlankStart(content, state.quotedBlankPrefix)
+      const prefix = state.quotedBlankPrefix
+      const tail = prefix ? bufferTail(state.buffer, prefix.length + 1) : ''
+      const blankStart = trailingQuotedBlankStart(tail, prefix)
       if (blankStart >= 0) {
-        removeBufferEnd(state.buffer, content.length - blankStart)
+        removeBufferEnd(state.buffer, tail.length - blankStart)
+        state.lastContentCache = undefined
         state.quotedBlankPrefix = undefined
       }
     }
@@ -656,7 +660,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         // stays within the list item's content column. Only add indent to lines
         // that start at column 0 — preserves any existing indentation in the
         // HTML source and stays safe for text nodes that span stream chunks.
-        const quotePrefix = blockquoteContinuationPrefix(textNode, state.listIndentWidths)
+        const quotePrefix = blockquoteContinuationPrefix(textNode, state.listIndentWidths, state.depthMap[TAG_BLOCKQUOTE] || 0)
         if (!quotePrefix && (state.depthMap[TAG_PRE] || 0) > 0 && (state.depthMap[TAG_LI] || 0) > 0) {
           const indent = state.listIndent
           // Prepend list_indent on every non-blank line — CommonMark closes
@@ -724,7 +728,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // Get last content from buffer regions
     const lastFragment = state.lastContentCache
 
-    const quotePrefix = blockquoteContinuationPrefix(element, state.listIndentWidths)
+    const quotePrefix = blockquoteContinuationPrefix(element, state.listIndentWidths, state.depthMap[TAG_BLOCKQUOTE] || 0)
     const lastNewLines = trailingNewLineCount(buff, quotePrefix)
 
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'

@@ -1523,7 +1523,11 @@ impl ConvertState {
     } else {
       &self.stack[..]
     };
-    let (context_prefix, in_blockquote) = self.continuation_prefix_for(context_nodes);
+    let (context_prefix, in_blockquote) = if self.depth_map[TAG_BLOCKQUOTE as usize] == 0 {
+      (String::new(), false)
+    } else {
+      self.continuation_prefix_for(context_nodes)
+    };
     let prefix_output = in_blockquote && !literal && !(is_enter && tag_id == Some(TAG_BLOCKQUOTE));
 
     // A separator trimmed from inside a previously closed inline element must
