@@ -39,7 +39,10 @@ describe('element depth limit', () => {
   })
 
   it('stops consuming streamed chunks after reaching the limit', async () => {
-    const chunks = ['<p>before</p>', ...Array.from({ length: 10_000 }).fill('<div>'), 'discarded']
+    const chunks = ['<p>before</p>']
+    for (let i = 0; i < 10_000; i++)
+      chunks.push('<div>')
+    chunks.push('discarded')
     expect((await streamConvert(chunks)).trimEnd()).toBe('before')
   })
 
