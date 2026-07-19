@@ -345,6 +345,8 @@ pub struct ConvertState {
   skip_current_link: bool,
   /// Buffer position of the `[` character written for TAG_A enter
   link_bracket_pos: usize,
+  /// Open inline markers as (kind, output start, content start); lets the exit drop empty pairs.
+  open_markers: Vec<(u8, usize, usize)>,
   /// Heading slugs collected during conversion for fragment validation
   heading_slugs: Vec<String>,
   /// Fragment link locations: (bracket_start, link_end)
@@ -460,6 +462,7 @@ impl ConvertState {
       clean_flags: 0,
       skip_current_link: false,
       link_bracket_pos: 0,
+      open_markers: Vec::new(),
       heading_slugs: Vec::new(),
       fragment_links: Vec::new(),
       in_heading: false,
@@ -1017,7 +1020,7 @@ impl ConvertState {
     let buf_len = self.buffer.len();
     // A trailing whitespace-bearing text node may still be trimmed when a
     // closing inline tag arrives in a later chunk. Hold that mutable suffix back.
-    let stable_end =
+    let mut stable_end =
       if self.last_text_node_contains_whitespace && self.depth_map[TAG_PRE as usize] == 0 {
         self.buffer.trim_end_matches(' ').len()
       } else {
@@ -1028,6 +1031,11 @@ impl ConvertState {
     } else {
       buf_len - self.buffer.trim_start().len()
     };
+    // An open inline marker may still be dropped if its element closes empty in a later chunk;
+    // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
+    if let Some(&(_, p, _)) = self.open_markers.first() {
+      stable_end = stable_end.min(p);
+    }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let start = self.last_yielded_length.max(leading);
     if start >= stable_end {
@@ -1074,6 +1082,9 @@ impl ConvertState {
     if self.depth_map[TAG_A as usize] > 0 {
       drain_end = drain_end.min(self.link_bracket_pos);
     }
+    if let Some(&(_, output_start, _)) = self.open_markers.first() {
+      drain_end = drain_end.min(output_start);
+    }
     if drain_end == 0 {
       return;
     }
@@ -1090,6 +1101,10 @@ impl ConvertState {
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
     self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);
+    for (_, output_start, content_start) in &mut self.open_markers {
+      *output_start -= drain_end;
+      *content_start -= drain_end;
+    }
   }
 }
 
