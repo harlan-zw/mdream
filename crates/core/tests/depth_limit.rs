@@ -1,4 +1,6 @@
-use mdream::{HTMLToMarkdownOptions, MarkdownStreamProcessor, html_to_markdown};
+use mdream::{
+  HTMLToMarkdownOptions, MarkdownStreamProcessor, PluginConfig, TagOverrideConfig, html_to_markdown,
+};
 
 const LIMIT: usize = 512;
 
@@ -60,4 +62,27 @@ fn content_hidden_at_the_limit_cannot_leak() {
     html_to_markdown(&html, HTMLToMarkdownOptions::default()),
     ""
   );
+}
+
+#[test]
+fn skipped_cdata_override_does_not_emit_or_pop_its_parent() {
+  let html = format!(
+    "{}<![CDATA[hidden]]><p>discarded</p>",
+    "<div>".repeat(LIMIT),
+  );
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "#cdata-section".to_string(),
+        TagOverrideConfig {
+          enter: Some("[".to_string()),
+          exit: Some("]".to_string()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(&html, options), "");
 }

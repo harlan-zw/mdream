@@ -1298,7 +1298,7 @@ impl ConvertState {
     };
 
     let result = self.process_opening_tag("#cdata-section", tag_id, false, ">", 0);
-    if !result.complete {
+    if !result.complete || result.skip {
       return;
     }
 
