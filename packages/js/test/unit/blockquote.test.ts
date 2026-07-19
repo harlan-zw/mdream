@@ -35,6 +35,7 @@ describe('blockquotes', () => {
     ['<blockquote><pre><code>a\nb</code></pre></blockquote>', '> ```\n> a\n> b\n> ```'],
     ['<blockquote><ul><li>one<ul><li>sub</li></ul></li></ul></blockquote>', '> - one\n>   - sub'],
     ['<ul><li><blockquote><ul><li>x</li><li>y</li></ul></blockquote></li></ul>', '- \n  > - x\n  > - y'],
+    ['<ul><li>intro<blockquote>quote</blockquote><span>credit</span></li></ul>', '- intro\n  > quote\n  credit'],
   ])('preserves block structure for %s', (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)
   })
@@ -42,6 +43,13 @@ describe('blockquotes', () => {
   it('preserves quoted block structure across every stream split', async () => {
     const html = '<blockquote><p>intro</p><ul><li>one<ul><li>sub</li></ul></li><li>two</li></ul><table><tr><td>a</td></tr></table>tail</blockquote>'
     const expected = htmlToMarkdown(html)
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert(html, split), `split at byte ${split}`).toBe(expected)
+  })
+
+  it('keeps content after a quoted list block inside the list across every stream split', async () => {
+    const html = '<ul><li>intro<blockquote>quote</blockquote><span>credit</span></li></ul>'
+    const expected = '- intro\n  > quote\n  credit'
     for (let split = 0; split <= html.length; split++)
       expect(await streamConvert(html, split), `split at byte ${split}`).toBe(expected)
   })

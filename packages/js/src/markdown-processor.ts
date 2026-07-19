@@ -671,6 +671,19 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           }
           textNode.value = value
         }
+        else if (!state.plainText
+          && !quotePrefix
+          && !(state.depthMap[TAG_PRE] || 0)
+          && (state.depthMap[TAG_LI] || 0) > 0
+          && lastChar === '\n'
+          && textNode.value[0]
+          && textNode.value[0] !== '\n') {
+          // A blockquote closes with a line break. If inline content follows
+          // inside the same list item, restore the list content column only
+          // when that content arrives so streaming never emits speculative
+          // trailing indentation for a blockquote at the end of an item.
+          textNode.value = state.listIndent + textNode.value
+        }
 
         const wrapWidth = state.options?.wrapWidth
         if (wrapWidth && canWrapHere(state.depthMap)) {

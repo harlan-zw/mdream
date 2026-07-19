@@ -723,6 +723,26 @@ impl ConvertState {
       text
     };
 
+    let list_continuation_storage;
+    let text = if !self.plain_text
+      && self.depth_map[TAG_PRE as usize] == 0
+      && li_depth > 0
+      && !in_blockquote
+      && last_char == b'\n'
+      && text.as_bytes().first().is_some_and(|&b| b != b'\n')
+    {
+      // A blockquote closes with a line break. Restore the list content
+      // column only when following content arrives so streaming never emits
+      // speculative trailing indentation at the end of a list item.
+      let mut out = String::with_capacity(self.list_indent.len() + text.len());
+      out.push_str(&self.list_indent);
+      out.push_str(text);
+      list_continuation_storage = out;
+      list_continuation_storage.as_str()
+    } else {
+      text
+    };
+
     if self.wrap_width != 0 && self.can_wrap_here() {
       self.push_text_wrapped(text, last_char);
     } else if !(self.plain_text && self.depth_map[TAG_PRE as usize] > 0)

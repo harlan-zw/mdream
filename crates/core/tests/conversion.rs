@@ -630,6 +630,10 @@ fn blockquote_preserves_descendant_block_structure() {
       "<ul><li><blockquote><ul><li>x</li><li>y</li></ul></blockquote></li></ul>",
       "- \n  > - x\n  > - y",
     ),
+    (
+      "<ul><li>intro<blockquote>quote</blockquote><span>credit</span></li></ul>",
+      "- intro\n  > quote\n  credit",
+    ),
   ];
 
   for (html, expected) in cases {
@@ -641,6 +645,20 @@ fn blockquote_preserves_descendant_block_structure() {
 fn blockquote_structure_matches_across_every_stream_split() {
   let html = "<blockquote><p>intro</p><ul><li>one<ul><li>sub</li></ul></li><li>two</li></ul><table><tr><td>a</td></tr></table>tail</blockquote>";
   let expected = convert(html);
+
+  for split in 0..=html.len() {
+    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut actual = stream.process_chunk(&html[..split]);
+    actual.push_str(&stream.process_chunk(&html[split..]));
+    actual.push_str(&stream.finish());
+    assert_eq!(actual.trim_end(), expected, "split at byte {split}");
+  }
+}
+
+#[test]
+fn blockquote_following_list_content_matches_across_every_stream_split() {
+  let html = "<ul><li>intro<blockquote>quote</blockquote><span>credit</span></li></ul>";
+  let expected = "- intro\n  > quote\n  credit";
 
   for split in 0..=html.len() {
     let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());

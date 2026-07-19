@@ -24,7 +24,7 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
     </blockquote>
     <span>by someone</span>
   </li>
-</ul>`, { engine })).toBe('- Simple List\n- Someone once said:\n  > My Famous quoteby someone')
+</ul>`, { engine })).toBe('- Simple List\n- Someone once said:\n  > My Famous quote\n  by someone')
     expect(htmlToMarkdown(`
 <ol start="9">
   <li>Nine</li>
@@ -50,7 +50,7 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
       <p>Another Quote</p>
       <p>by someone</p>
     </blockquote>
-</blockquote>`, { engine })).toBe('> ## Heading 1. List 2. List\n> > Another Quote\n> >\n> > by someone')
+</blockquote>`, { engine })).toBe('> ## Heading\n>\n> 1. List\n> 2. List\n> > Another Quote\n> >\n> > by someone')
   })
   it('inline Code & Code Block: Correctly handles backticks and multi-line code blocks, preserving code structure.', async () => {
     const engine = await resolveEngine(engineConfig.engine)
