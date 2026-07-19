@@ -761,7 +761,12 @@ impl ConvertState {
     while i > 0 && bytes[i - 1] != b'\n' {
       i -= 1;
     }
-    self.buffer[i..].chars().count()
+    let buffered_column = self.buffer[i..].chars().count();
+    if i == 0 {
+      self.buffer_start_column.saturating_add(buffered_column)
+    } else {
+      buffered_column
+    }
   }
 
   /// Continuation prefix re-emitted at the start of each continued line so the
