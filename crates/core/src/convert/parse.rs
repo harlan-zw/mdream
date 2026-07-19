@@ -2,6 +2,11 @@
 
 use super::*;
 
+// Firefox and Chromium flatten DOM trees beyond this practical depth. Stop
+// conversion at the same boundary instead of growing the parser stack without
+// limit. Output produced before the boundary remains available to the caller.
+const MAX_ELEMENT_DEPTH: usize = 512;
+
 /// Tags valid inside `<head>` per the HTML parser's "in head" insertion mode.
 /// Any other start tag implies the end of `<head>` and the start of the body, so
 /// an unclosed head is auto-closed when one appears. Unknown tags (`None`) are
@@ -593,6 +598,16 @@ impl ConvertState {
           }
         }
       }
+    }
+
+    if !self_closing && self.stack.len() >= MAX_ELEMENT_DEPTH {
+      self.depth_limit_reached = true;
+      return OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing: false,
+        skip: true,
+      };
     }
 
     if let Some(id) = tag_id {
