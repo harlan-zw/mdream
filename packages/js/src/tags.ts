@@ -1037,6 +1037,7 @@ export function buildTagOverrideHandlers(overrides: Record<string, TagOverride |
       if (override.exit !== undefined) {
         const exitStr = override.exit
         handler.exit = () => exitStr
+        handler.literalExit = true
       }
       if (override.spacing !== undefined) {
         handler.spacing = override.spacing

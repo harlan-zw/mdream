@@ -3,6 +3,21 @@
 use super::*;
 
 impl ConvertState {
+  #[inline]
+  fn inline_marker_type(tag_id: u8) -> Option<u8> {
+    // The kind is the delimiter identity: one value per distinct delimiter
+    // string, so tags sharing a delimiter share a kind.
+    match tag_id {
+      TAG_STRONG | TAG_B | TAG_DFN => Some(0),
+      TAG_EM | TAG_I | TAG_FIGCAPTION => Some(1),
+      TAG_DEL => Some(2),
+      TAG_CITE => Some(3),
+      TAG_KBD | TAG_CODE | TAG_SAMP | TAG_VAR => Some(4),
+      TAG_Q => Some(5),
+      _ => None,
+    }
+  }
+
   /// Emit markdown for entering the element currently on top of self.stack.
   #[inline]
   pub(crate) fn emit_enter_element(&mut self) {
@@ -178,6 +193,32 @@ impl ConvertState {
       } else {
         buf_len
       };
+    }
+
+    if !enter_is_literal
+      && let Some(id) = tag_id
+      && (id != TAG_CODE || self.depth_map[TAG_PRE as usize] == 0)
+      && let Some(inline_marker_type) = Self::inline_marker_type(id)
+      && let Some(emitted) = output.as_deref()
+      && !emitted.is_empty()
+    {
+      self.open_markers.push((
+        inline_marker_type,
+        self.buffer.len() - emitted.len(),
+        self.buffer.len(),
+      ));
+    } else if !self.open_markers.is_empty()
+      && output
+        .as_deref()
+        .is_some_and(|o| o.as_bytes().iter().any(|&b| !is_whitespace(b)))
+    {
+      self.open_markers.clear();
+    }
+
+    // A block boundary makes an enclosing inline marker permanent even when
+    // the block has not emitted content yet. Release streamed output promptly.
+    if tag_id.is_some() && !is_inline && !self.open_markers.is_empty() {
+      self.open_markers.clear();
     }
 
     // Clean: track heading start for slug collection
@@ -457,6 +498,44 @@ impl ConvertState {
       return;
     }
 
+    // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
+    if !has_override
+      && let Some(id) = tag_id
+      && (id != TAG_CODE || self.depth_map[TAG_PRE as usize] == 0)
+      && let Some(inline_marker_type) = Self::inline_marker_type(id)
+      && output.as_deref().is_some_and(|emitted| !emitted.is_empty())
+      && let Some((open_type, output_start, content_start)) = self.open_markers.pop()
+    {
+      if open_type == inline_marker_type
+        && content_start <= self.buffer.len()
+        && self.buffer.as_bytes()[content_start..]
+          .iter()
+          .all(|&b| is_whitespace(b))
+      {
+        // `output_start` includes a separator owned by the opener (inline
+        // code in a list can emit " `"), but excludes normal surrounding
+        // spacing synthesized by write_output.
+        self.buffer.truncate(output_start);
+        self.last_content_cache_len = 0;
+        self.last_node_is_inline = is_inline;
+        return;
+      }
+
+      // A mismatched or externally modified opener cannot be dropped. Its
+      // output makes every enclosing marker non-empty, so release them all.
+      self.open_markers.clear();
+    }
+
+    if !self.open_markers.is_empty()
+      && (has_override
+        || (tag_id.is_some() && !is_inline)
+        || output
+          .as_deref()
+          .is_some_and(|o| o.as_bytes().iter().any(|&b| !is_whitespace(b))))
+    {
+      self.open_markers.clear();
+    }
+
     // Get effective output
     let effective: Option<&str> = if let Some(ref sep) = table_separator {
       Some(sep.as_str())
@@ -630,6 +709,10 @@ impl ConvertState {
       self.buffer.push_str(text);
     }
 
+    if !self.open_markers.is_empty() && text.as_bytes().iter().any(|&b| !is_whitespace(b)) {
+      self.open_markers.clear();
+    }
+
     self.last_text_node_contains_whitespace = contains_whitespace;
     self.has_last_text_node = true;
     self.last_text_node_depth = depth;
@@ -678,7 +761,12 @@ impl ConvertState {
     while i > 0 && bytes[i - 1] != b'\n' {
       i -= 1;
     }
-    self.buffer[i..].chars().count()
+    let buffered_column = self.buffer[i..].chars().count();
+    if i == 0 {
+      self.buffer_start_column.saturating_add(buffered_column)
+    } else {
+      buffered_column
+    }
   }
 
   /// Continuation prefix re-emitted at the start of each continued line so the

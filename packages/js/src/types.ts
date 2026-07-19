@@ -369,6 +369,8 @@ export interface TagHandler {
    * strings so markers like `^`/`~` attach to adjacent content (issue #93).
    */
   literalEnter?: boolean
+  /** When true, the `exit` string is a user-supplied tagOverride, exempt from empty-pair cleanup. */
+  literalExit?: boolean
   /**
    * Built-in tag id used by declarative string aliases.
    * @internal
