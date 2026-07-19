@@ -557,6 +557,132 @@ fn blockquote_with_image() {
   );
 }
 
+// https://github.com/harlan-zw/mdream/issues/146
+#[test]
+fn blockquote_preserves_descendant_block_structure() {
+  let cases = [
+    (
+      "<blockquote><ul><li>one</li><li>two</li></ul></blockquote>",
+      "> - one\n> - two",
+    ),
+    (
+      "<blockquote><ol><li>one</li><li>two</li></ol></blockquote>",
+      "> 1. one\n> 2. two",
+    ),
+    (
+      "<blockquote><p>intro</p><ul><li>one</li></ul></blockquote>",
+      "> intro\n>\n> - one",
+    ),
+    (
+      "<blockquote>text<h2>H</h2></blockquote>",
+      "> text\n>\n> ## H",
+    ),
+    ("<blockquote>a<hr>b</blockquote>", "> a\n>\n> ---\n> b"),
+    (
+      "<blockquote><div>a</div><div>b</div></blockquote>",
+      "> a\n>\n> b",
+    ),
+    (
+      "<blockquote>lead<table><tr><td>a</td></tr></table>tail</blockquote>",
+      "> lead\n>\n> | a |\n> | --- |\n>\n> tail",
+    ),
+    (
+      "<blockquote>lead<section>x</section>tail</blockquote>",
+      "> lead\n>\n> x\n> tail",
+    ),
+    (
+      "<blockquote>lead<article>x</article>tail</blockquote>",
+      "> lead\n>\n> x\n> tail",
+    ),
+    (
+      "<blockquote>lead<nav>x</nav>tail</blockquote>",
+      "> lead\n>\n> x\n> tail",
+    ),
+    (
+      "<blockquote>lead<figure>x</figure>tail</blockquote>",
+      "> lead\n>\n> x\n> tail",
+    ),
+    (
+      "<blockquote><p>literal &gt;</p></blockquote>",
+      "> literal >",
+    ),
+    (
+      "<blockquote><table><tr><td>a</td></tr></table></blockquote>",
+      "> | a |\n> | --- |",
+    ),
+    (
+      "<blockquote>literal &gt; <h2>H</h2></blockquote>",
+      "> literal >\n>\n> ## H",
+    ),
+    (
+      "<blockquote><p>intro</p><p>&gt;</p></blockquote>",
+      "> intro\n>\n> >",
+    ),
+    (
+      "<blockquote><pre><code>a\nb</code></pre></blockquote>",
+      "> ```\n> a\n> b\n> ```",
+    ),
+    (
+      "<blockquote><ul><li>one<ul><li>sub</li></ul></li></ul></blockquote>",
+      "> - one\n>   - sub",
+    ),
+    (
+      "<ul><li><blockquote><ul><li>x</li><li>y</li></ul></blockquote></li></ul>",
+      "- \n  > - x\n  > - y",
+    ),
+  ];
+
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "input: {html}");
+  }
+}
+
+#[test]
+fn blockquote_structure_matches_across_every_stream_split() {
+  let html = "<blockquote><p>intro</p><ul><li>one<ul><li>sub</li></ul></li><li>two</li></ul><table><tr><td>a</td></tr></table>tail</blockquote>";
+  let expected = convert(html);
+
+  for split in 0..=html.len() {
+    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut actual = stream.process_chunk(&html[..split]);
+    actual.push_str(&stream.process_chunk(&html[split..]));
+    actual.push_str(&stream.finish());
+    assert_eq!(actual.trim_end(), expected, "split at byte {split}");
+  }
+}
+
+#[test]
+fn blockquote_trailing_marker_is_never_streamed_speculatively() {
+  let cases = [
+    (
+      "<blockquote><p>literal &gt;</p></blockquote>",
+      "> literal >",
+    ),
+    (
+      "<blockquote><table><tr><td>a</td></tr></table></blockquote>",
+      "> | a |\n> | --- |",
+    ),
+    (
+      "<blockquote>literal &gt; <h2>H</h2></blockquote>",
+      "> literal >\n>\n> ## H",
+    ),
+    (
+      "<blockquote><p>intro</p><p>&gt;</p></blockquote>",
+      "> intro\n>\n> >",
+    ),
+  ];
+
+  for (html, expected) in cases {
+    for split in 0..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let mut actual = stream.process_chunk(&html[..split]);
+      actual.push_str(&stream.process_chunk(&html[split..]));
+      actual.push_str(&stream.finish());
+      assert_eq!(actual.trim_end(), expected, "split at byte {split}: {html}");
+    }
+  }
+}
+
 // ── Lists ──
 
 #[test]

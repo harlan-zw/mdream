@@ -49,17 +49,6 @@ const ESC_BLOCKQUOTE: u8 = 8;
 
 static HEADING_PREFIXES: [&str; 6] = ["# ", "## ", "### ", "#### ", "##### ", "###### "];
 
-/// Pre-computed blockquote prefixes for depths 1-6 (avoids `"> ".repeat()`)
-static BQ_PREFIXES: [&str; 7] = [
-  "",
-  "> ",
-  "> > ",
-  "> > > ",
-  "> > > > ",
-  "> > > > > ",
-  "> > > > > > ",
-];
-
 // Clean mode bitmask flags
 const CLEAN_EMPTY_LINKS: u8 = 1;
 const CLEAN_FRAGMENTS: u8 = 2;
@@ -320,6 +309,8 @@ pub struct ConvertState {
   /// delimiters close before the separator and streaming output has no
   /// speculative trailing whitespace.
   pending_inline_whitespace: bool,
+  /// Exact marker for a trailing quoted blank line withheld from streaming.
+  quoted_blank_prefix: Option<String>,
 
   // Streaming
   last_yielded_length: usize,
@@ -452,6 +443,7 @@ impl ConvertState {
       has_last_text_node: false,
       last_node_is_inline: false,
       pending_inline_whitespace: false,
+      quoted_blank_prefix: None,
       last_yielded_length: 0,
       has_streamed_output: false,
       buffer_start_column: 0,
@@ -1040,6 +1032,10 @@ impl ConvertState {
     // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
     if let Some(&(_, p, _)) = self.open_markers.first() {
       stable_end = stable_end.min(p);
+    }
+    let quoted_blank_start = self.trailing_quoted_blank_start();
+    if let Some(start) = quoted_blank_start {
+      stable_end = stable_end.min(start);
     }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let start = self.last_yielded_length.max(leading);

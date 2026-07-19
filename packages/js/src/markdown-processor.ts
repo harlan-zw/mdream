@@ -87,6 +87,8 @@ export interface MarkdownState {
   preOwnFence?: boolean
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
+  /** Exact marker for a trailing quoted blank line withheld from streaming. */
+  quotedBlankPrefix?: string
 }
 
 // Marker kind per tag id for inline tags that wrap content in a symmetric
@@ -233,6 +235,10 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
   let first = true
   let i = 0
   const len = value.length
+  if (col === 0 && prefix) {
+    out += prefix
+    col = prefixLen
+  }
   while (i < len) {
     // Manual split on single spaces to avoid an intermediate array allocation.
     let next = value.indexOf(' ', i)
@@ -272,12 +278,12 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
 function calculateNewLineConfig(node: ElementNode, depthMap: Uint8Array, plainText: boolean): readonly [number, number] {
   const tagId = node.tagId
 
-  // Adjust for list items and blockquotes
-  if ((tagId !== TAG_LI && (depthMap[TAG_LI] || 0) > 0)
-    || (tagId !== TAG_BLOCKQUOTE && (depthMap[TAG_BLOCKQUOTE] || 0) > 0)) {
-    // Markdown suppresses nested block spacing because the surrounding list or
-    // quote handler owns its prefixes. Plain text has no such prefixes, so a
-    // nested <pre> still needs a line boundary around its literal contents.
+  // List-item descendants use specialised handlers for their boundaries. A
+  // blockquote is different: its descendants keep their normal block spacing,
+  // and the output writer prefixes every continued line with the open quote.
+  if (tagId !== TAG_LI && tagId !== TAG_BLOCKQUOTE && (depthMap[TAG_LI] || 0) > 0) {
+    // Plain text has no list prefix, so a nested <pre> still needs a line
+    // boundary around its literal contents.
     if (plainText && tagId === TAG_PRE)
       return [1, 1]
     return NO_SPACING
@@ -299,9 +305,8 @@ function calculateNewLineConfig(node: ElementNode, depthMap: Uint8Array, plainTe
     }
     currParent = currParent.parent
   }
-  if (node.tagHandler?.spacing) {
-    return node.tagHandler?.spacing
-  }
+  if (node.tagHandler?.spacing)
+    return node.tagHandler.spacing
   // Truly unknown tags (no dictionary entry) default to inline zero spacing so
   // they don't fragment surrounding paragraphs. Built-in tags without a handler
   // (e.g. caption) keep block-default. Applies whether or not an override
@@ -309,7 +314,125 @@ function calculateNewLineConfig(node: ElementNode, depthMap: Uint8Array, plainTe
   if (tagId === -1) {
     return NO_SPACING
   }
+  // A quoted block needs a blank line before another block, but only a single
+  // continuation before following prose. The next block's enter spacing will
+  // still widen adjacent blocks to a quoted blank line. Tables retain a blank
+  // line after themselves so following text cannot be parsed as a table row.
+  if (!plainText && (depthMap[TAG_BLOCKQUOTE] || 0) > 0 && tagId !== TAG_TABLE)
+    return [DEFAULT_BLOCK_SPACING[0], 1]
   return DEFAULT_BLOCK_SPACING
+}
+
+/** Return the full continuation prefix when the node has a blockquote ancestor. */
+function blockquoteContinuationPrefix(node: ElementNode | TextNode, listIndentWidths: readonly number[]): string | undefined {
+  let parent = node.parent
+  while (parent) {
+    if (parent.tagId === TAG_BLOCKQUOTE)
+      return continuationPrefix(node, listIndentWidths)
+    parent = parent.parent
+  }
+  return undefined
+}
+
+/** Read a small suffix without joining the complete streaming output buffer. */
+function bufferTail(buffer: string[], maxLength: number): string {
+  let tail = ''
+  for (let i = buffer.length - 1; i >= 0 && tail.length < maxLength; i--) {
+    const fragment = buffer[i]!
+    const remaining = maxLength - tail.length
+    tail = fragment.slice(-remaining) + tail
+  }
+  return tail
+}
+
+/** Count trailing logical line breaks, including a quoted blank continuation line. */
+function trailingNewLineCount(buffer: string[], prefix?: string): number {
+  const tail = bufferTail(buffer, (prefix?.length || 0) + 3)
+  if (!tail.endsWith('\n'))
+    return 0
+
+  const beforeLast = tail.slice(0, -1)
+  const previousNewline = beforeLast.lastIndexOf('\n')
+  const previousLine = beforeLast.slice(previousNewline + 1)
+  if (previousLine === '')
+    return 2
+  if (prefix) {
+    const blankPrefix = prefix.trimEnd()
+    // Streaming keeps only a short suffix of already-emitted output.
+    if (previousLine === blankPrefix || (previousNewline < 0 && blankPrefix.endsWith(previousLine)))
+      return 2
+  }
+  return 1
+}
+
+/** Whether the current line contains only the already-emitted quote prefix. */
+function currentLineIsPrefix(buffer: string[], prefix: string): boolean {
+  const tail = bufferTail(buffer, prefix.length + 1)
+  const newline = tail.lastIndexOf('\n')
+  const line = tail.slice(newline + 1)
+  return line === prefix || (newline < 0 && line.length > 0 && prefix.endsWith(line))
+}
+
+/** Append a fragment while keeping each complete line inside its blockquote. */
+function appendBlockquoteFragment(state: MarkdownState, value: string, prefix: string): void {
+  const buffer = state.buffer
+  let start = 0
+  while (start <= value.length) {
+    const newline = value.indexOf('\n', start)
+    const end = newline === -1 ? value.length : newline
+    const line = value.slice(start, end)
+    const atLineStart = buffer.length === 0 || buffer.at(-1)!.endsWith('\n')
+
+    if (atLineStart) {
+      if (line) {
+        buffer.push(prefix)
+        state.quotedBlankPrefix = undefined
+      }
+      else if (newline !== -1) {
+        const blankPrefix = prefix.trimEnd()
+        buffer.push(blankPrefix)
+        state.quotedBlankPrefix = blankPrefix
+      }
+    }
+    else if (line || newline !== -1) {
+      state.quotedBlankPrefix = undefined
+    }
+    if (line)
+      buffer.push(line)
+    if (newline === -1)
+      break
+
+    buffer.push('\n')
+    start = newline + 1
+  }
+}
+
+/** Locate a trailing blank quote marker (`>`, optionally nested/indented). */
+function trailingQuotedBlankStart(content: string, prefix?: string): number {
+  if (!prefix || !content.endsWith('\n'))
+    return -1
+  const beforeLast = content.slice(0, -1)
+  const previousNewline = beforeLast.lastIndexOf('\n')
+  const line = beforeLast.slice(previousNewline + 1)
+  if (line !== prefix && !(previousNewline < 0 && prefix.endsWith(line)))
+    return -1
+  return previousNewline + 1
+}
+
+/** Remove bytes from the end while preserving the surrounding fragments. */
+function removeBufferEnd(buffer: string[], count: number): void {
+  let remaining = count
+  while (remaining > 0 && buffer.length > 0) {
+    const last = buffer.at(-1)!
+    if (last.length <= remaining) {
+      remaining -= last.length
+      buffer.pop()
+    }
+    else {
+      buffer[buffer.length - 1] = last.slice(0, -remaining)
+      remaining = 0
+    }
+  }
 }
 
 /**
@@ -347,7 +470,7 @@ function dropEmptyMarker(buffer: string[], packed: number, markerType: number): 
  * otherwise a plain ```lang opener. Marks the <pre> as owning the fence so a
  * nested <code> does not double up and the <pre> exit emits the closing fence.
  */
-function flushPreFence(state: MarkdownState): void {
+function flushPreFence(state: MarkdownState, node: ElementNode | TextNode): void {
   if (state.plainText) {
     state.preFencePending = false
     state.preOwnFence = false
@@ -357,10 +480,14 @@ function flushPreFence(state: MarkdownState): void {
   state.preOwnFence = true
   const lang = state.preFenceLang || ''
   const liDepth = state.depthMap[TAG_LI] || 0
-  const fence = liDepth > 0
+  const quotePrefix = blockquoteContinuationPrefix(node, state.listIndentWidths)
+  const fence = liDepth > 0 && !quotePrefix
     ? `\n\n${state.listIndent}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
     : `${MARKDOWN_CODE_BLOCK}${lang}\n`
-  state.buffer.push(fence)
+  if (quotePrefix)
+    appendBlockquoteFragment(state, fence, quotePrefix)
+  else
+    state.buffer.push(fence)
   state.lastContentCache = fence
 }
 
@@ -449,11 +576,23 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           state.preFencePending = false
         }
         else if (el.tagId !== TAG_PRE) {
-          flushPreFence(state)
+          flushPreFence(state, el)
         }
       }
       else if (node.type === TEXT_NODE && hasNonWhitespace((node as TextNode).value)) {
-        flushPreFence(state)
+        flushPreFence(state, node as TextNode)
+      }
+    }
+
+    // A descendant block exit may leave a quoted blank continuation line at
+    // the end of the quote. It separates siblings, but must not survive after
+    // the blockquote itself closes.
+    if (!state.plainText && node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_BLOCKQUOTE) {
+      const content = state.buffer.join('')
+      const blankStart = trailingQuotedBlankStart(content, state.quotedBlankPrefix)
+      if (blankStart >= 0) {
+        removeBufferEnd(state.buffer, content.length - blankStart)
+        state.quotedBlankPrefix = undefined
       }
     }
 
@@ -517,7 +656,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         // stays within the list item's content column. Only add indent to lines
         // that start at column 0 — preserves any existing indentation in the
         // HTML source and stays safe for text nodes that span stream chunks.
-        if ((state.depthMap[TAG_PRE] || 0) > 0 && (state.depthMap[TAG_LI] || 0) > 0) {
+        const quotePrefix = blockquoteContinuationPrefix(textNode, state.listIndentWidths)
+        if (!quotePrefix && (state.depthMap[TAG_PRE] || 0) > 0 && (state.depthMap[TAG_LI] || 0) > 0) {
           const indent = state.listIndent
           // Prepend list_indent on every non-blank line — CommonMark closes
           // the list item if any line is indented less than the content column,
@@ -536,10 +676,14 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         if (wrapWidth && canWrapHere(state.depthMap)) {
           const wrapped = wrapText(textNode.value, currentColumn(state.buffer), wrapWidth, continuationPrefix(textNode, state.listIndentWidths))
           state.buffer.push(wrapped)
+          state.quotedBlankPrefix = undefined
           state.lastContentCache = wrapped
         }
         else {
-          state.buffer.push(textNode.value)
+          if (quotePrefix)
+            appendBlockquoteFragment(state, textNode.value, quotePrefix)
+          else
+            state.buffer.push(textNode.value)
           state.lastContentCache = textNode.value
         }
 
@@ -567,13 +711,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // Get last content from buffer regions
     const lastFragment = state.lastContentCache
 
-    let lastNewLines = 0
-    if (lastChar === '\n') {
-      lastNewLines++
-    }
-    if (secondLastChar === '\n') {
-      lastNewLines++
-    }
+    const quotePrefix = blockquoteContinuationPrefix(element, state.listIndentWidths)
+    const lastNewLines = trailingNewLineCount(buff, quotePrefix)
 
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
     const handler = node.tagHandler
@@ -613,7 +752,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // Handle newlines
     const newLineConfig = calculateNewLineConfig(node as ElementNode, state.depthMap, state.plainText === true)
     const configuredNewLines = newLineConfig[eventType] || 0
-    const newLines = Math.max(0, configuredNewLines - lastNewLines)
+    const prefixOnlyLine = eventType === NodeEventEnter && element.tagId !== TAG_BLOCKQUOTE && quotePrefix && currentLineIsPrefix(buff, quotePrefix)
+    const newLines = prefixOnlyLine ? 0 : Math.max(0, configuredNewLines - lastNewLines)
 
     if (state.pendingInlineWhitespace) {
       const firstOutput = output?.[0]?.[0] || ''
@@ -650,7 +790,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       // Add newlines
       const newlinesStr = '\n'.repeat(newLines)
       // Trim only whitespace
-      if (lastChar === ' ' && buff?.length) {
+      const preserveEmptyListMarker = eventType === NodeEventEnter
+        && element.tagId === TAG_BLOCKQUOTE
+        && element.parent?.tagId === TAG_LI
+      if (lastChar === ' ' && buff?.length && !preserveEmptyListMarker) {
         buff[buff.length - 1] = buff.at(-1)!.substring(0, buff.at(-1)!.length - 1)
         // This source whitespace was consumed by the block boundary; do not
         // let its state leak into a later inline event and trim that output.
@@ -723,9 +866,18 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     // Add all output fragments
     if (output) {
+      const literalOutput = eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit
       for (const fragment of output) {
         if (fragment) {
-          state.buffer.push(fragment)
+          // A blockquote opener already contains its complete mixed-context
+          // prefix. Descendant fragments are continued centrally here.
+          if (quotePrefix && !literalOutput && !(eventType === NodeEventEnter && element.tagId === TAG_BLOCKQUOTE && fragment === handlerOutput)) {
+            appendBlockquoteFragment(state, fragment, quotePrefix)
+          }
+          else {
+            state.buffer.push(fragment)
+            state.quotedBlankPrefix = undefined
+          }
           state.lastContentCache = fragment
         }
       }
@@ -798,6 +950,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       while (stableLength > 0 && currentContent[stableLength - 1] === ' ')
         stableLength--
     }
+
+    const quotedBlankStart = trailingQuotedBlankStart(currentContent, state.quotedBlankPrefix)
+    if (quotedBlankStart >= 0)
+      stableLength = Math.min(stableLength, quotedBlankStart)
 
     // An open inline marker may still be dropped if its element closes empty in a later chunk;
     // hold the buffer at the earliest such marker so already-yielded output is never rewritten.

@@ -307,7 +307,11 @@ export const tagHandlers: Record<number, TagHandler> = {
         return '<br>'
       }
 
-      const prefix = continuationPrefix(node, state.listIndentWidths || [])
+      // Quote continuations are applied centrally to every emitted line. Lists
+      // without a blockquote still need their explicit continuation indent.
+      const prefix = (depthMap[TAG_BLOCKQUOTE] || 0) > 0
+        ? ''
+        : continuationPrefix(node, state.listIndentWidths || [])
       return `\n${prefix}`
     },
     isSelfClosing: true,
@@ -358,18 +362,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_BLOCKQUOTE]: {
-    enter: ({ state }) => {
-      const depth = state.depthMap?.[TAG_BLOCKQUOTE] || 1
-      let prefix = '> '.repeat(depth)
-
-      // Add indentation if inside a list item
-      const liDepth = state.depthMap?.[TAG_LI] || 0
-      if (liDepth > 0) {
-        prefix = `\n${state.listIndent}${prefix}`
-      }
-
-      return prefix
-    },
+    enter: ({ node, state }) => `${continuationPrefix(node, state.listIndentWidths || [])}> `,
     spacing: BLOCKQUOTE_SPACING,
   },
   // A bare <pre> (no <code> child) becomes a fenced code block (issue #97).
@@ -392,7 +385,7 @@ export const tagHandlers: Record<number, TagHandler> = {
         return undefined
       }
       const liDepth = state.depthMap?.[TAG_LI] || 0
-      if (liDepth > 0) {
+      if (liDepth > 0 && !(state.depthMap?.[TAG_BLOCKQUOTE] || 0)) {
         const indent = state.listIndent
         return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
       }
@@ -411,7 +404,7 @@ export const tagHandlers: Record<number, TagHandler> = {
         state.preFencePending = false
         const language = getLanguageFromClass(node.attributes?.class)
         const liDepth = state.depthMap?.[TAG_LI] || 0
-        if (liDepth > 0) {
+        if (liDepth > 0 && !(state.depthMap?.[TAG_BLOCKQUOTE] || 0)) {
           const indent = state.listIndent
           return `\n\n${indent}${MARKDOWN_CODE_BLOCK}${language}\n`
         }
@@ -443,7 +436,7 @@ export const tagHandlers: Record<number, TagHandler> = {
           return undefined
         }
         const liDepth = state.depthMap?.[TAG_LI] || 0
-        if (liDepth > 0) {
+        if (liDepth > 0 && !(state.depthMap?.[TAG_BLOCKQUOTE] || 0)) {
           const indent = state.listIndent
           return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
         }
@@ -475,7 +468,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       // (see markdown-processor.ts).
       const isOrdered = node.parent?.tagId === TAG_OL
       const marker = isOrdered ? `${node.index + 1}. ` : '- '
-      return `${state.listIndent}${marker}`
+      return `${(state.depthMap?.[TAG_BLOCKQUOTE] || 0) > 0 ? '' : state.listIndent}${marker}`
     },
     exit: ({ state }) => isInsideTableCell(state) ? '</li>' : undefined,
     spacing: LIST_ITEM_SPACING,
@@ -646,21 +639,11 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_P]: {
     enter: ({ state }) => {
-      const bqDepth = state.depthMap?.[TAG_BLOCKQUOTE] || 0
-      if (bqDepth > 0) {
-        const lastEntry = state.buffer.at(-1)
-        const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
-        // Only add separator if there's preceding text content (not the first <p> in the blockquote)
-        if (lastChar && lastChar !== '\n' && lastChar !== ' ' && lastChar !== '>') {
-          const prefix = '> '.repeat(bqDepth)
-          return `\n${prefix.trimEnd()}\n${prefix}`
-        }
-      }
       if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
         if (lastChar && lastChar !== ' ' && lastChar !== '\n') {
-          return `\n\n${state.listIndent}`
+          return (state.depthMap?.[TAG_BLOCKQUOTE] || 0) > 0 ? '\n\n' : `\n\n${state.listIndent}`
         }
       }
     },

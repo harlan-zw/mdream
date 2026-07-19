@@ -129,7 +129,7 @@ impl ConvertState {
     // Phase 1 ends — self.stack borrow released
 
     // Phase 2: calculate new lines + write buffer
-    let new_line_config = self.calculate_new_line_config(tag_id, node_spacing);
+    let new_line_config = self.calculate_new_line_config(true, tag_id, node_spacing);
     let configured_new_lines = new_line_config[0];
 
     // Clean mode — single guard for all clean checks
@@ -177,6 +177,7 @@ impl ConvertState {
 
     self.write_output(
       true,
+      tag_id,
       is_inline,
       configured_new_lines,
       output.as_deref(),
@@ -241,6 +242,18 @@ impl ConvertState {
     }
 
     let tag_id = node.tag_id;
+
+    // A descendant block exit may leave a quoted blank continuation line at
+    // the end of the quote. It separates siblings, but must not survive after
+    // the blockquote itself closes.
+    if !self.plain_text
+      && tag_id == Some(TAG_BLOCKQUOTE)
+      && let Some(blank_start) = self.trailing_quoted_blank_start()
+    {
+      self.buffer.truncate(blank_start);
+      self.last_content_cache_len = 0;
+      self.quoted_blank_prefix = None;
+    }
 
     // Check override
     let override_config = if self.has_tag_overrides {
@@ -315,7 +328,7 @@ impl ConvertState {
       node.spacing
     };
 
-    let new_line_config = self.calculate_new_line_config(tag_id, node_spacing);
+    let new_line_config = self.calculate_new_line_config(false, tag_id, node_spacing);
     let configured_new_lines = new_line_config[1];
 
     // Clean mode exit — single guard. Skipped for overridden anchors,
@@ -432,7 +445,7 @@ impl ConvertState {
     // TAG_A exit: write ](url) directly to buffer — zero allocation
     if !self.plain_text && !has_override && tag_id == Some(TAG_A) && table_separator.is_none() {
       // Handle whitespace trimming (write_output with None)
-      self.write_output(false, is_inline, configured_new_lines, None, false);
+      self.write_output(false, tag_id, is_inline, configured_new_lines, None, false);
       // Write link close directly
       if let Some(href) = node.attributes.get("href") {
         let resolved = resolve_url(
@@ -543,7 +556,14 @@ impl ConvertState {
       output.as_deref()
     };
 
-    self.write_output(false, is_inline, configured_new_lines, effective, false);
+    self.write_output(
+      false,
+      tag_id,
+      is_inline,
+      configured_new_lines,
+      effective,
+      has_override,
+    );
 
     // Reset <pre> fence deferral once the element closes (issue #97).
     if tag_id == Some(TAG_PRE) {
@@ -582,13 +602,18 @@ impl ConvertState {
     self.pre_fence_pending = false;
     self.pre_own_fence = true;
     let li_depth = self.depth_map[TAG_LI as usize];
-    let fence = if li_depth > 0 {
+    let (quote_prefix, in_blockquote) = self.continuation_prefix_for(&self.stack);
+    let fence = if li_depth > 0 && !in_blockquote {
       format!("\n\n{0}```{1}\n{0}", self.list_indent, self.pre_fence_lang)
     } else {
       format!("```{}\n", self.pre_fence_lang)
     };
     self.last_content_cache_len = fence.len();
-    self.buffer.push_str(&fence);
+    if in_blockquote {
+      self.push_blockquote_fragment(&fence, &quote_prefix);
+    } else {
+      self.buffer.push_str(&fence);
+    }
     self.last_node_is_inline = false;
   }
 
@@ -662,9 +687,11 @@ impl ConvertState {
     // alone so they stay blank.
     let li_depth = self.depth_map[TAG_LI as usize] as usize;
     let indented_storage;
+    let in_blockquote = self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
     let text = if !self.plain_text
       && self.depth_map[TAG_PRE as usize] > 0
       && li_depth > 0
+      && !in_blockquote
       && (text.contains('\n') || last_char == b'\n')
     {
       let indent = self.list_indent.as_str();
@@ -703,10 +730,20 @@ impl ConvertState {
     {
       self.buffer.push(' ');
       self.last_content_cache_len = text.len() + 1;
-      self.buffer.push_str(text);
+      if in_blockquote {
+        let prefix = self.continuation_prefix();
+        self.push_blockquote_fragment(text, &prefix);
+      } else {
+        self.buffer.push_str(text);
+      }
     } else {
       self.last_content_cache_len = text.len();
-      self.buffer.push_str(text);
+      if in_blockquote {
+        let prefix = self.continuation_prefix();
+        self.push_blockquote_fragment(text, &prefix);
+      } else {
+        self.buffer.push_str(text);
+      }
     }
 
     if !self.open_markers.is_empty() && text.as_bytes().iter().any(|&b| !is_whitespace(b)) {
@@ -775,16 +812,20 @@ impl ConvertState {
   /// indentation interleave in the real nesting order: `<li><blockquote>` →
   /// `  > `, `<blockquote><li>` → `>   `. A flat "all quotes then all indent"
   /// prefix would corrupt the Markdown structure of nested blocks.
-  fn continuation_prefix(&self) -> String {
+  fn continuation_prefix_for(&self, nodes: &[ElementNode]) -> (String, bool) {
     if self.plain_text {
-      return String::new();
+      return (String::new(), false);
     }
 
     let mut p = String::new();
     let mut li_idx = 0usize;
-    for node in &self.stack {
+    let mut has_blockquote = false;
+    for node in nodes {
       match node.tag_id {
-        Some(TAG_BLOCKQUOTE) => p.push_str("> "),
+        Some(TAG_BLOCKQUOTE) => {
+          p.push_str("> ");
+          has_blockquote = true;
+        }
         Some(TAG_LI) => {
           // Each open <li> contributes its marker-width of spaces, in
           // the same order they were pushed onto list_indent_widths.
@@ -797,7 +838,80 @@ impl ConvertState {
         _ => {}
       }
     }
-    p
+    (p, has_blockquote)
+  }
+
+  fn continuation_prefix(&self) -> String {
+    self.continuation_prefix_for(&self.stack).0
+  }
+
+  /// Append a fragment while keeping each complete line inside its blockquote.
+  fn push_blockquote_fragment(&mut self, value: &str, prefix: &str) {
+    let mut start = 0usize;
+    loop {
+      let newline = value[start..].find('\n').map(|offset| start + offset);
+      let end = newline.unwrap_or(value.len());
+      let line = &value[start..end];
+      let at_line_start = self.buffer.is_empty() || self.buffer.ends_with('\n');
+
+      if at_line_start {
+        if !line.is_empty() {
+          self.buffer.push_str(prefix);
+          self.quoted_blank_prefix = None;
+        } else if newline.is_some() {
+          let blank_prefix = prefix.trim_end();
+          self.buffer.push_str(blank_prefix);
+          self.quoted_blank_prefix = Some(blank_prefix.to_string());
+        }
+      } else if !line.is_empty() || newline.is_some() {
+        self.quoted_blank_prefix = None;
+      }
+      self.buffer.push_str(line);
+      let Some(newline) = newline else { break };
+      self.buffer.push('\n');
+      start = newline + 1;
+    }
+  }
+
+  fn trailing_new_line_count(&self, prefix: Option<&str>) -> u8 {
+    if !self.buffer.ends_with('\n') {
+      return 0;
+    }
+    let before_last = &self.buffer[..self.buffer.len() - 1];
+    let previous_newline = before_last.rfind('\n');
+    let previous_line = previous_newline.map_or(before_last, |i| &before_last[i + 1..]);
+    if previous_line.is_empty() {
+      return 2;
+    }
+    if let Some(prefix) = prefix {
+      let blank = prefix.trim_end();
+      if previous_line == blank || (previous_newline.is_none() && blank.ends_with(previous_line)) {
+        return 2;
+      }
+    }
+    1
+  }
+
+  fn current_line_is_prefix(&self, prefix: &str) -> bool {
+    let previous_newline = self.buffer.rfind('\n');
+    let line = previous_newline.map_or(self.buffer.as_str(), |i| &self.buffer[i + 1..]);
+    line == prefix || (previous_newline.is_none() && !line.is_empty() && prefix.ends_with(line))
+  }
+
+  /// Locate a trailing blank quote marker (`>`, optionally nested/indented).
+  pub(super) fn trailing_quoted_blank_start(&self) -> Option<usize> {
+    let prefix = self.quoted_blank_prefix.as_deref()?;
+    if !self.buffer.ends_with('\n') {
+      return None;
+    }
+    let before_last = &self.buffer[..self.buffer.len() - 1];
+    let previous_newline = before_last.rfind('\n');
+    let start = previous_newline.map_or(0, |i| i + 1);
+    let line = &before_last[start..];
+    if line != prefix && !(previous_newline.is_none() && prefix.ends_with(line)) {
+      return None;
+    }
+    Some(start)
   }
 
   /// Push `text` into the buffer, hard-wrapping on spaces so no output line
@@ -814,10 +928,17 @@ impl ConvertState {
     let leading_space = text.starts_with(' ');
     let trailing_space = text.ends_with(' ');
     let first_needs_space = leading_space || self.should_add_spacing_before_text(last_char, text);
-    let prefix = self.continuation_prefix();
+    let (prefix, in_blockquote) = self.continuation_prefix_for(&self.stack);
     let prefix_len = prefix.chars().count();
-    let buf_start = self.buffer.len();
     let mut col = self.current_column();
+    if col == 0 && in_blockquote {
+      self.buffer.push_str(&prefix);
+      col = prefix_len;
+    }
+    if in_blockquote {
+      self.quoted_blank_prefix = None;
+    }
+    let buf_start = self.buffer.len();
     let mut first = true;
 
     for word in text.split(' ') {
@@ -873,6 +994,9 @@ impl ConvertState {
       TAG_BR => {
         if self.in_table_cell() || self.in_heading() || self.in_raw_html_block() {
           Some(Cow::Borrowed("<br>"))
+        } else if self.depth_map[TAG_BLOCKQUOTE as usize] > 0 {
+          // Quote continuations are applied centrally to every emitted line.
+          Some(Cow::Borrowed("\n"))
         } else {
           let prefix = self.continuation_prefix();
           if prefix.is_empty() {
@@ -913,27 +1037,12 @@ impl ConvertState {
       TAG_SUP => Some(Cow::Borrowed("<sup>")),
       TAG_INS => Some(Cow::Borrowed("<ins>")),
       TAG_P => {
-        let bq_depth = self.depth_map[TAG_BLOCKQUOTE as usize] as usize;
-        if bq_depth > 0 {
-          let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
-          if last_char != 0 && last_char != b'\n' && last_char != b' ' && last_char != b'>' {
-            let prefix = if bq_depth < BQ_PREFIXES.len() {
-              BQ_PREFIXES[bq_depth]
-            } else {
-              &"> ".repeat(bq_depth)
-            };
-            let trimmed = prefix.trim_end();
-            let mut s = String::with_capacity(1 + trimmed.len() + 1 + prefix.len());
-            s.push('\n');
-            s.push_str(trimmed);
-            s.push('\n');
-            s.push_str(prefix);
-            return Some(Cow::Owned(s));
-          }
-        }
         if self.depth_map[TAG_LI as usize] > 0 && !self.in_table_cell() {
           let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
           if last_char != 0 && last_char != b' ' && last_char != b'\n' {
+            if self.depth_map[TAG_BLOCKQUOTE as usize] > 0 {
+              return Some(Cow::Borrowed("\n\n"));
+            }
             let indent = self.list_indent.as_str();
             let mut s = String::with_capacity(2 + indent.len());
             s.push_str("\n\n");
@@ -944,20 +1053,9 @@ impl ConvertState {
         None
       }
       TAG_BLOCKQUOTE => {
-        let depth = std::cmp::max(1, self.depth_map[TAG_BLOCKQUOTE as usize]) as usize;
-        if self.depth_map[TAG_LI as usize] == 0 && depth < BQ_PREFIXES.len() {
-          Some(Cow::Borrowed(BQ_PREFIXES[depth]))
-        } else {
-          let mut prefix = if depth < BQ_PREFIXES.len() {
-            BQ_PREFIXES[depth].to_string()
-          } else {
-            "> ".repeat(depth)
-          };
-          if self.depth_map[TAG_LI as usize] > 0 {
-            prefix = format!("\n{}{}", self.list_indent, prefix);
-          }
-          Some(Cow::Owned(prefix))
-        }
+        let mut prefix = self.continuation_prefix_for(_ancestors).0;
+        prefix.push_str("> ");
+        Some(Cow::Owned(prefix))
       }
       TAG_CODE => {
         if self.depth_map[TAG_PRE as usize] > 0 {
@@ -968,7 +1066,7 @@ impl ConvertState {
           }
           let lang = Self::get_language_from_class(node.attributes.get("class"));
           let li_depth = self.depth_map[TAG_LI as usize] as usize;
-          if li_depth > 0 {
+          if li_depth > 0 && self.depth_map[TAG_BLOCKQUOTE as usize] == 0 {
             let indent = self.list_indent.as_str();
             let mut s = String::with_capacity(2 + indent.len() * 2 + 4 + lang.len() + 1);
             s.push_str("\n\n");
@@ -1038,8 +1136,15 @@ impl ConvertState {
         // contribution is pushed onto list_indent AFTER this output
         // is written to the buffer.
         let is_ordered = _ancestors.last().is_some_and(|p| p.tag_id == Some(TAG_OL));
-        let mut s = String::with_capacity(self.list_indent.len() + 6);
-        s.push_str(&self.list_indent);
+        let in_blockquote = self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
+        let mut s = String::with_capacity(if in_blockquote {
+          6
+        } else {
+          self.list_indent.len() + 6
+        });
+        if !in_blockquote {
+          s.push_str(&self.list_indent);
+        }
         if is_ordered {
           use std::fmt::Write;
           let _ = write!(s, "{}. ", node.index + 1);
@@ -1182,7 +1287,7 @@ impl ConvertState {
             return None;
           }
           let li_depth = self.depth_map[TAG_LI as usize] as usize;
-          if li_depth > 0 {
+          if li_depth > 0 && self.depth_map[TAG_BLOCKQUOTE as usize] == 0 {
             let indent = self.list_indent.as_str();
             let mut s = String::with_capacity(1 + indent.len() * 2 + 5);
             s.push('\n');
@@ -1205,7 +1310,7 @@ impl ConvertState {
           return None;
         }
         let li_depth = self.depth_map[TAG_LI as usize] as usize;
-        if li_depth > 0 {
+        if li_depth > 0 && self.depth_map[TAG_BLOCKQUOTE as usize] == 0 {
           let indent = self.list_indent.as_str();
           let mut s = String::with_capacity(1 + indent.len() * 2 + 5);
           s.push('\n');
@@ -1386,12 +1491,20 @@ impl ConvertState {
   pub(crate) fn write_output(
     &mut self,
     is_enter: bool,
+    tag_id: Option<u8>,
     is_inline: bool,
     configured_new_lines: u8,
     output: Option<&str>,
     literal: bool,
   ) {
     let output_str = output.unwrap_or("");
+    let context_nodes = if is_enter && !self.stack.is_empty() {
+      &self.stack[..self.stack.len() - 1]
+    } else {
+      &self.stack[..]
+    };
+    let (context_prefix, in_blockquote) = self.continuation_prefix_for(context_nodes);
+    let prefix_output = in_blockquote && !literal && !(is_enter && tag_id == Some(TAG_BLOCKQUOTE));
 
     // A separator trimmed from inside a previously closed inline element must
     // sit outside its Markdown delimiter. Resolve it only when later visible
@@ -1427,33 +1540,40 @@ impl ConvertState {
     } else {
       0
     };
-    let second_last_char = if buf_len > 1 {
-      buf_bytes[buf_len - 2]
-    } else {
+    let last_new_lines =
+      self.trailing_new_line_count(in_blockquote.then_some(context_prefix.as_str()));
+    let prefix_only_line = is_enter
+      && tag_id != Some(TAG_BLOCKQUOTE)
+      && in_blockquote
+      && self.current_line_is_prefix(&context_prefix);
+    let new_lines = if prefix_only_line {
       0
+    } else {
+      configured_new_lines.saturating_sub(last_new_lines)
     };
-
-    let mut last_new_lines: u8 = 0;
-    if last_char == b'\n' {
-      last_new_lines += 1;
-    }
-    if second_last_char == b'\n' {
-      last_new_lines += 1;
-    }
-
-    let new_lines = configured_new_lines.saturating_sub(last_new_lines);
 
     if new_lines > 0 {
       if self.buffer.is_empty() {
         if !output_str.is_empty() {
           self.last_content_cache_len = output_str.len();
-          self.buffer.push_str(output_str);
+          if prefix_output {
+            self.push_blockquote_fragment(output_str, &context_prefix);
+          } else {
+            self.buffer.push_str(output_str);
+            if in_blockquote {
+              self.quoted_blank_prefix = None;
+            }
+          }
         }
         self.last_node_is_inline = is_inline;
         return;
       }
 
-      if last_char == b' ' && !self.buffer.is_empty() {
+      let preserve_empty_list_marker = is_enter
+        && tag_id == Some(TAG_BLOCKQUOTE)
+        && self.stack.len() >= 2
+        && self.stack[self.stack.len() - 2].tag_id == Some(TAG_LI);
+      if last_char == b' ' && !self.buffer.is_empty() && !preserve_empty_list_marker {
         let trimmed_len = self.buffer.trim_end_matches(' ').len();
         self.buffer.truncate(trimmed_len);
         // This source whitespace was consumed by the block boundary; do not
@@ -1464,19 +1584,41 @@ impl ConvertState {
 
       if is_enter {
         for _ in 0..new_lines {
-          self.buffer.push('\n');
+          if in_blockquote {
+            self.push_blockquote_fragment("\n", &context_prefix);
+          } else {
+            self.buffer.push('\n');
+          }
         }
         if !output_str.is_empty() {
           self.last_content_cache_len = output_str.len();
-          self.buffer.push_str(output_str);
+          if prefix_output {
+            self.push_blockquote_fragment(output_str, &context_prefix);
+          } else {
+            self.buffer.push_str(output_str);
+            if in_blockquote {
+              self.quoted_blank_prefix = None;
+            }
+          }
         }
       } else {
         if !output_str.is_empty() {
           self.last_content_cache_len = output_str.len();
-          self.buffer.push_str(output_str);
+          if prefix_output {
+            self.push_blockquote_fragment(output_str, &context_prefix);
+          } else {
+            self.buffer.push_str(output_str);
+            if in_blockquote {
+              self.quoted_blank_prefix = None;
+            }
+          }
         }
         for _ in 0..new_lines {
-          self.buffer.push('\n');
+          if in_blockquote {
+            self.push_blockquote_fragment("\n", &context_prefix);
+          } else {
+            self.buffer.push('\n');
+          }
         }
       }
     } else {
@@ -1533,7 +1675,14 @@ impl ConvertState {
 
       if !output_str.is_empty() {
         self.last_content_cache_len = output_str.len();
-        self.buffer.push_str(output_str);
+        if prefix_output {
+          self.push_blockquote_fragment(output_str, &context_prefix);
+        } else {
+          self.buffer.push_str(output_str);
+          if in_blockquote {
+            self.quoted_blank_prefix = None;
+          }
+        }
       }
     }
     self.last_node_is_inline = is_inline;
@@ -1591,6 +1740,7 @@ impl ConvertState {
   #[inline]
   pub(crate) fn calculate_new_line_config(
     &self,
+    is_enter: bool,
     tag_id: Option<u8>,
     node_spacing: Option<[u8; 2]>,
   ) -> [u8; 2] {
@@ -1601,18 +1751,30 @@ impl ConvertState {
       return [1, 1];
     }
     if let Some(id) = tag_id {
-      if (id != TAG_LI && self.depth_map[TAG_LI as usize] > 0)
-        || (id != TAG_BLOCKQUOTE && self.depth_map[TAG_BLOCKQUOTE as usize] > 0)
-      {
+      if id != TAG_LI && id != TAG_BLOCKQUOTE && self.depth_map[TAG_LI as usize] > 0 {
         return NO_SPACING;
       }
-    } else if self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0 {
+    } else if self.depth_map[TAG_LI as usize] > 0 {
       return NO_SPACING;
     }
-    if self.collapse_non_span_depth > 0 {
+    // Enter-time collapse counters already include the current element. Match
+    // the JS ancestor walk by excluding that element from the ancestor count.
+    let mut collapse_non_span_depth = self.collapse_non_span_depth;
+    let mut collapse_span_depth = self.collapse_span_depth;
+    if is_enter
+      && let Some(current) = self.stack.last()
+      && current.collapses_inner_white_space
+    {
+      if current.tag_id == Some(TAG_SPAN) {
+        collapse_span_depth = collapse_span_depth.saturating_sub(1);
+      } else {
+        collapse_non_span_depth = collapse_non_span_depth.saturating_sub(1);
+      }
+    }
+    if collapse_non_span_depth > 0 {
       return NO_SPACING;
     }
-    if self.collapse_span_depth > 0 {
+    if collapse_span_depth > 0 {
       let is_block =
         tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id) || id == TAG_P || id == TAG_DIV);
       if !is_block {
@@ -1636,7 +1798,17 @@ impl ConvertState {
         }
       }
     }
-    node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)
+    if let Some(spacing) = node_spacing {
+      return spacing;
+    }
+    // A quoted block needs a blank line before another block, but only one
+    // continuation before following prose. Tables retain their trailing blank
+    // line so prose cannot be parsed as another table row.
+    if !self.plain_text && self.depth_map[TAG_BLOCKQUOTE as usize] > 0 && tag_id != Some(TAG_TABLE)
+    {
+      return [DEFAULT_BLOCK_SPACING[0], 1];
+    }
+    DEFAULT_BLOCK_SPACING
   }
 
   #[inline]
