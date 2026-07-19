@@ -118,6 +118,7 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
     expect(htmlToMarkdown('<p><del><del></del></del>x</p>', { engine })).toBe('x')
     expect(htmlToMarkdown('<p><strong><b></b></strong>x</p>', { engine })).toBe('x')
     expect(htmlToMarkdown('<p><strong><em><b></b></em></strong>x</p>', { engine })).toBe('x')
+    expect(htmlToMarkdown('<p><strong><x-unknown></x-unknown></strong>x</p>', { engine })).toBe('x')
   })
 
   it('drops markers for an empty figcaption', async () => {
@@ -135,6 +136,11 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
     expect(htmlToMarkdown('<p>a<var></var>b</p>', { engine })).toBe('ab')
     // <q> drops its quote markers but keeps its surrounding spacing, like <del>.
     expect(htmlToMarkdown('<p>a<q></q>b</p>', { engine })).toBe('a b')
+  })
+
+  it('drops the separator owned by empty inline code in a list', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<ul><li>x<code></code>y</li></ul>', { engine })).toBe('- xy')
   })
 
   it('keeps non-empty markers for other symmetric inline tags', async () => {
@@ -189,5 +195,28 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
     ))
     expect(chunks.slice(0, -1).join(''), 'image held until close').toContain('![y](x.png)')
     expect(chunks.join('').trim()).toBe('**![y](x.png)more**')
+  })
+
+  it('releases a literal exit override without waiting for later text', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const chunks = await collectChunks(streamHtmlToMarkdown(
+      chunkedStream(['<p><b></b><span>', 'later</span></p>']),
+      {
+        plugins: { tagOverrides: { b: { exit: '' } } },
+        engine,
+      },
+    ))
+    expect(chunks.slice(0, -1).join(''), 'literal exit held until finish').toContain('**')
+    expect(chunks.join('').trim()).toBe('**later')
+  })
+
+  it('does not hold a block code fence as an inline marker', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const chunks = await collectChunks(streamHtmlToMarkdown(
+      chunkedStream(['<pre><code><span>', 'x</span></code></pre>']),
+      { engine },
+    ))
+    expect(chunks.slice(0, -1).join(''), 'code fence held until content').toContain('```')
+    expect(chunks.join('').trim()).toBe('```\nx\n```')
   })
 })

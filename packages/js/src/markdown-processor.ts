@@ -85,29 +85,26 @@ export interface MarkdownState {
   preFencePending?: boolean
   preFenceLang?: string
   preOwnFence?: boolean
-  /** Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind); lets the exit drop empty pairs. */
-  openMarkers: number[]
-  openMarkerCount: number
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
 }
 
 // Marker kind per tag id for inline tags that wrap content in a symmetric
-// delimiter (-1 = none); indexed like depthMap for O(1) lookup on every enter.
-const INLINE_MARKER_TYPE = new Int8Array(MAX_TAG_ID).fill(-1)
-INLINE_MARKER_TYPE[TAG_STRONG] = 0 // **
-INLINE_MARKER_TYPE[TAG_B] = 0 // **
-INLINE_MARKER_TYPE[TAG_DFN] = 0 // **
-INLINE_MARKER_TYPE[TAG_EM] = 1 // _
-INLINE_MARKER_TYPE[TAG_I] = 1 // _
-INLINE_MARKER_TYPE[TAG_FIGCAPTION] = 1 // _
-INLINE_MARKER_TYPE[TAG_DEL] = 2 // ~~
-INLINE_MARKER_TYPE[TAG_CITE] = 3 // *
-INLINE_MARKER_TYPE[TAG_KBD] = 4 // `
-INLINE_MARKER_TYPE[TAG_CODE] = 4 // `
-INLINE_MARKER_TYPE[TAG_SAMP] = 4 // `
-INLINE_MARKER_TYPE[TAG_VAR] = 4 // `
-INLINE_MARKER_TYPE[TAG_Q] = 5 // "
+// delimiter (0 = none); indexed like depthMap for O(1) lookup on emitted tags.
+const INLINE_MARKER_TYPE = new Uint8Array(MAX_TAG_ID)
+INLINE_MARKER_TYPE[TAG_STRONG] = 1 // **
+INLINE_MARKER_TYPE[TAG_B] = 1 // **
+INLINE_MARKER_TYPE[TAG_DFN] = 1 // **
+INLINE_MARKER_TYPE[TAG_EM] = 2 // _
+INLINE_MARKER_TYPE[TAG_I] = 2 // _
+INLINE_MARKER_TYPE[TAG_FIGCAPTION] = 2 // _
+INLINE_MARKER_TYPE[TAG_DEL] = 3 // ~~
+INLINE_MARKER_TYPE[TAG_CITE] = 4 // *
+INLINE_MARKER_TYPE[TAG_KBD] = 5 // `
+INLINE_MARKER_TYPE[TAG_CODE] = 5 // `
+INLINE_MARKER_TYPE[TAG_SAMP] = 5 // `
+INLINE_MARKER_TYPE[TAG_VAR] = 5 // `
+INLINE_MARKER_TYPE[TAG_Q] = 6 // "
 
 /**
  * Maintain the list-item indent stack. On `<li>` enter, push this item's
@@ -329,6 +326,21 @@ function hasNonWhitespace(value: string): boolean {
   return false
 }
 
+/** Drop the top marker when every following fragment is whitespace. */
+function dropEmptyMarker(buffer: string[], packed: number, markerType: number): number {
+  const idx = packed >> 3
+  if ((packed & 7) === markerType && idx < buffer.length) {
+    for (let i = idx + 1; i < buffer.length; i++) {
+      const fragment = buffer[i]!
+      if (fragment && hasNonWhitespace(fragment))
+        return -1
+    }
+    buffer.length = idx
+    return idx
+  }
+  return -1
+}
+
 /**
  * Emit a bare <pre>'s opening code fence (issue #97). Mirrors the <code>-in-<pre>
  * enter formatting in tags.ts: indented and newline-padded inside a list item,
@@ -394,10 +406,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     depthMap: new Uint8Array(MAX_TAG_ID),
     listIndent: '',
     listIndentWidths: [],
-    openMarkers: [],
-    openMarkerCount: 0,
     plainText: options.format === 'text',
   }
+  // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
+  const openMarkers: number[] = []
+  let openMarkerCount = 0
 
   let lastYieldedLength = 0
   let hasYieldedContent = false
@@ -530,9 +543,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           state.lastContentCache = textNode.value
         }
 
-        if (state.openMarkerCount && hasNonWhitespace(textNode.value)) {
-          state.openMarkerCount = 0
-        }
+        if (openMarkerCount && hasNonWhitespace(textNode.value))
+          openMarkerCount = 0
       }
       state.lastTextNode = textNode
       return
@@ -577,34 +589,16 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
     }
 
-    if (eventType === NodeEventExit && state.openMarkerCount) {
+    if (eventType === NodeEventExit && openMarkerCount) {
       // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
-      if (handlerOutput !== undefined && !handler?.literalExit) {
-        const markerType = INLINE_MARKER_TYPE[element.tagId!]!
-        if (markerType >= 0) {
-          const packed = state.openMarkers[--state.openMarkerCount]!
-          const idx = packed >> 3
-          const openType = packed & 7
-          if (openType === markerType && idx < buff.length && buff[idx] === handlerOutput) {
-            let onlyWhitespace = true
-            for (let i = idx + 1; i < buff.length; i++) {
-              const frag = buff[i]!
-              if (frag && hasNonWhitespace(frag)) {
-                onlyWhitespace = false
-                break
-              }
-            }
-            if (onlyWhitespace) {
-              buff.length = idx
-              state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
-              return
-            }
-          }
+      const markerType = handlerOutput === undefined ? 0 : INLINE_MARKER_TYPE[element.tagId!]!
+      if (markerType && (element.tagId !== TAG_CODE || !state.depthMap[TAG_PRE]) && !handler?.literalExit) {
+        const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType)
+        if (idx >= 0) {
+          state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
+          return
         }
-      }
-      // Clear open inline markers when leaving an inline context
-      if (!isInlineElement) {
-        state.openMarkerCount = 0
+        openMarkerCount = 0
       }
     }
 
@@ -737,15 +731,20 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
     }
 
-    // Track open inline markers for empty pair detection
-    if (handlerOutput !== undefined && eventType === NodeEventEnter && isInlineElement) {
+    // Track open inline markers for empty pair detection. Inline code in a
+    // list may own a leading separator (" `"), so retain the whole output
+    // fragment as the drop boundary.
+    if (eventType === NodeEventEnter && handlerOutput !== undefined && isInlineElement && !handler?.literalEnter) {
       const markerType = INLINE_MARKER_TYPE[element.tagId!]!
-      if (!handler?.literalEnter && markerType >= 0 && buff[buff.length - 1] === handlerOutput) {
-        state.openMarkers[state.openMarkerCount++] = (buff.length - 1) << 3 | markerType
-      }
-      else if (state.openMarkerCount && hasNonWhitespace(handlerOutput)) {
-        state.openMarkerCount = 0
-      }
+      if (markerType && (element.tagId !== TAG_CODE || !state.depthMap[TAG_PRE]) && buff[buff.length - 1] === handlerOutput)
+        openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
+      else if (openMarkerCount && hasNonWhitespace(handlerOutput))
+        openMarkerCount = 0
+    }
+    else if (openMarkerCount && (handler?.literalExit || (element.tagId !== -1 && !isInlineElement) || output?.some(hasNonWhitespace))) {
+      // Literal overrides, plugin output, and block boundaries make all open
+      // markers permanent, allowing streaming to release buffered content.
+      openMarkerCount = 0
     }
 
     updateListIndent(state, element, eventType)
@@ -802,9 +801,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     // An open inline marker may still be dropped if its element closes empty in a later chunk;
     // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
-    const markerHeld = state.openMarkerCount > 0
+    const markerHeld = openMarkerCount > 0
     if (markerHeld) {
-      const openFragment = state.openMarkers[0]! >> 3
+      const openFragment = openMarkers[0]! >> 3
       let markerPos = 0
       for (let i = 0; i < openFragment; i++)
         markerPos += state.buffer[i]!.length

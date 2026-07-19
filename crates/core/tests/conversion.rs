@@ -395,6 +395,10 @@ fn nested_empty_emphasis_fully_dropped() {
   assert_eq!(convert("<p><del><del></del></del>x</p>"), "x");
   assert_eq!(convert("<p><strong><b></b></strong>x</p>"), "x");
   assert_eq!(convert("<p><strong><em><b></b></em></strong>x</p>"), "x");
+  assert_eq!(
+    convert("<p><strong><x-unknown></x-unknown></strong>x</p>"),
+    "x"
+  );
 }
 
 #[test]
@@ -412,6 +416,11 @@ fn non_empty_emphasis_unchanged_by_empty_drop() {
   assert_eq!(convert("<p><b>x<i></i></b></p>"), "**x**");
   assert_eq!(convert("<p><b>x<i></i><i></i></b></p>"), "**x**");
   assert_eq!(convert("<p><del>a<b></b>b</del></p>"), "~~ab~~");
+}
+
+#[test]
+fn empty_inline_code_in_list_drops_owned_separator() {
+  assert_eq!(convert("<ul><li>x<code></code>y</li></ul>"), "- xy");
 }
 
 #[test]
@@ -480,6 +489,39 @@ fn tag_override_emphasis_marker_not_dropped_when_empty() {
     },
   );
   assert_eq!(md, "****x");
+}
+
+#[test]
+fn literal_exit_override_releases_open_marker() {
+  let overrides = vec![(
+    "b".to_string(),
+    TagOverrideConfig {
+      exit: Some(String::new()),
+      ..Default::default()
+    },
+  )];
+  let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(overrides),
+      ..Default::default()
+    }),
+    ..Default::default()
+  });
+  let first = stream.process_chunk("<p><b></b><span>");
+  assert!(
+    first.contains("**"),
+    "literal exit held in buffer: {first:?}"
+  );
+}
+
+#[test]
+fn block_code_fence_is_not_tracked_as_inline_marker() {
+  let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let first = stream.process_chunk("<pre><code><span>");
+  assert!(
+    first.contains("```"),
+    "code fence held in buffer: {first:?}"
+  );
 }
 
 // ── Blockquotes ──

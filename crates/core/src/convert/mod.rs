@@ -335,8 +335,8 @@ pub struct ConvertState {
   skip_current_link: bool,
   /// Buffer position of the `[` character written for TAG_A enter
   link_bracket_pos: usize,
-  /// Open inline-emphasis enter markers as (kind, buffer position); lets the exit drop empty pairs.
-  open_markers: Vec<(u8, usize)>,
+  /// Open inline markers as (kind, output start, content start); lets the exit drop empty pairs.
+  open_markers: Vec<(u8, usize, usize)>,
   /// Heading slugs collected during conversion for fragment validation
   heading_slugs: Vec<String>,
   /// Fragment link locations: (bracket_start, link_end)
@@ -448,7 +448,7 @@ impl ConvertState {
       clean_flags: 0,
       skip_current_link: false,
       link_bracket_pos: 0,
-      open_markers: Vec::with_capacity(4),
+      open_markers: Vec::new(),
       heading_slugs: Vec::new(),
       fragment_links: Vec::new(),
       in_heading: false,
@@ -1019,7 +1019,7 @@ impl ConvertState {
     };
     // An open inline marker may still be dropped if its element closes empty in a later chunk;
     // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
-    if let Some(&(_, p)) = self.open_markers.first() {
+    if let Some(&(_, p, _)) = self.open_markers.first() {
       let trim_offset = self.buffer.len() - current_content.len();
       let adj = p.saturating_sub(trim_offset);
       if adj < stable_len {
