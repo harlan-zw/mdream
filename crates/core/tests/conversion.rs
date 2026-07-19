@@ -667,6 +667,23 @@ fn blockquote_following_list_content_matches_across_every_stream_split() {
     actual.push_str(&stream.finish());
     assert_eq!(actual.trim_end(), expected, "split at byte {split}");
   }
+
+  let wrapped_html = "<ul><li>intro<blockquote>quote</blockquote><span>credit words continue after quote for wrapping</span></li></ul>";
+  let wrapped_expected = "- intro\n  > quote\n  credit words continue\n  after quote for\n  wrapping";
+  assert_eq!(convert_wrapped(wrapped_html, 24), wrapped_expected);
+  for split in 0..=wrapped_html.len() {
+    let mut stream = MarkdownStreamProcessor::new(
+      HTMLToMarkdownOptions::default().with_wrap_width(24),
+    );
+    let mut actual = stream.process_chunk(&wrapped_html[..split]);
+    actual.push_str(&stream.process_chunk(&wrapped_html[split..]));
+    actual.push_str(&stream.finish());
+    assert_eq!(
+      actual.trim_end(),
+      wrapped_expected,
+      "wrapped split at byte {split}"
+    );
+  }
 }
 
 #[test]

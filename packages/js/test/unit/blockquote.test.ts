@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 
-async function streamConvert(html: string, split: number): Promise<string> {
+async function streamConvert(html: string, split: number, options: { wrapWidth?: number } = {}): Promise<string> {
   const stream = new ReadableStream<string>({
     start(controller) {
       controller.enqueue(html.slice(0, split))
@@ -10,7 +10,7 @@ async function streamConvert(html: string, split: number): Promise<string> {
     },
   })
   let output = ''
-  for await (const chunk of streamHtmlToMarkdown(stream))
+  for await (const chunk of streamHtmlToMarkdown(stream, options))
     output += chunk
   return output.trimEnd()
 }
@@ -52,6 +52,14 @@ describe('blockquotes', () => {
     const expected = '- intro\n  > quote\n  credit'
     for (let split = 0; split <= html.length; split++)
       expect(await streamConvert(html, split), `split at byte ${split}`).toBe(expected)
+  })
+
+  it('preserves the list continuation indent when post-quote text wraps', async () => {
+    const html = '<ul><li>intro<blockquote>quote</blockquote><span>credit words continue after quote for wrapping</span></li></ul>'
+    const expected = '- intro\n  > quote\n  credit words continue\n  after quote for\n  wrapping'
+    expect(htmlToMarkdown(html, { wrapWidth: 24 })).toBe(expected)
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert(html, split, { wrapWidth: 24 }), `split at byte ${split}`).toBe(expected)
   })
 
   it.each([

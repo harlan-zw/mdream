@@ -723,8 +723,7 @@ impl ConvertState {
       text
     };
 
-    let list_continuation_storage;
-    let text = if !self.plain_text
+    let actual_last_char = if !self.plain_text
       && self.depth_map[TAG_PRE as usize] == 0
       && li_depth > 0
       && !in_blockquote
@@ -734,19 +733,18 @@ impl ConvertState {
       // A blockquote closes with a line break. Restore the list content
       // column only when following content arrives so streaming never emits
       // speculative trailing indentation at the end of a list item.
-      let mut out = String::with_capacity(self.list_indent.len() + text.len());
-      out.push_str(&self.list_indent);
-      out.push_str(text);
-      list_continuation_storage = out;
-      list_continuation_storage.as_str()
+      // Write it separately so the wrapping path cannot collapse the
+      // indentation's repeated spaces while tokenizing the text.
+      self.buffer.push_str(&self.list_indent);
+      self.list_indent.as_bytes().last().copied().unwrap_or(b'\n')
     } else {
-      text
+      last_char
     };
 
     if self.wrap_width != 0 && self.can_wrap_here() {
-      self.push_text_wrapped(text, last_char);
+      self.push_text_wrapped(text, actual_last_char);
     } else if !(self.plain_text && self.depth_map[TAG_PRE as usize] > 0)
-      && self.should_add_spacing_before_text(last_char, text)
+      && self.should_add_spacing_before_text(actual_last_char, text)
     {
       self.buffer.push(' ');
       self.last_content_cache_len = text.len() + 1;
@@ -928,7 +926,8 @@ impl ConvertState {
     let previous_newline = before_last.rfind('\n');
     let start = previous_newline.map_or(0, |i| i + 1);
     let line = &before_last[start..];
-    if line != prefix && !(previous_newline.is_none() && prefix.ends_with(line)) {
+    if line != prefix && !(previous_newline.is_none() && !line.is_empty() && prefix.ends_with(line))
+    {
       return None;
     }
     Some(start)

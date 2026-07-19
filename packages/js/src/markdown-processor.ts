@@ -416,7 +416,7 @@ function trailingQuotedBlankStart(content: string, prefix?: string): number {
   const beforeLast = content.slice(0, -1)
   const previousNewline = beforeLast.lastIndexOf('\n')
   const line = beforeLast.slice(previousNewline + 1)
-  if (line !== prefix && !(previousNewline < 0 && prefix.endsWith(line)))
+  if (line !== prefix && !(previousNewline < 0 && line.length > 0 && prefix.endsWith(line)))
     return -1
   return previousNewline + 1
 }
@@ -686,7 +686,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           // inside the same list item, restore the list content column only
           // when that content arrives so streaming never emits speculative
           // trailing indentation for a blockquote at the end of an item.
-          textNode.value = state.listIndent + textNode.value
+          // Write it separately so the wrapping path cannot collapse the
+          // indentation's repeated spaces while tokenizing the text.
+          state.buffer.push(state.listIndent)
         }
 
         const wrapWidth = state.options?.wrapWidth
