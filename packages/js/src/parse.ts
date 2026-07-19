@@ -99,6 +99,11 @@ const SCRIPT_SEQUENCE_NO_MATCH = -1
 const SCRIPT_SEQUENCE_INCOMPLETE = -2
 const SCRIPT_SCAN_COMPLETE = -1
 
+// Firefox and Chromium flatten DOM trees beyond this practical depth. Stop
+// conversion at the same boundary instead of growing the parser's parent chain
+// without limit on pathologically nested input.
+const MAX_ELEMENT_DEPTH = 512
+
 // Tags that are valid inside <head>. Per the HTML parser's "in head" insertion
 // mode, any start tag NOT in this set implies the end of <head> and the start of
 // the body, so we auto-close an unclosed <head> when one appears (browser
@@ -472,6 +477,8 @@ export interface ParseState {
   depthMap: Uint8Array
   /** Current overall nesting depth */
   depth: number
+  /** Whether parsing stopped after reaching the practical browser depth limit. */
+  depthLimitReached?: boolean
   /** Currently processing element node */
   currentNode?: ElementNode | null
   /** Whether current content contains HTML entities that need decoding */
@@ -734,6 +741,9 @@ function parseHtmlInternal(
   state: ParseState,
   handleEvent: (event: NodeEvent) => void,
 ): string {
+  if (state.depthLimitReached)
+    return ''
+
   let textBuffer = '' // Buffer to accumulate text content
 
   // Initialize state
@@ -754,7 +764,7 @@ function parseHtmlInternal(
     i = scanResult
   }
 
-  while (i < chunkLength) {
+  while (i < chunkLength && !state.depthLimitReached) {
     const currentCharCode = htmlChunk.charCodeAt(i)
 
     // If not starting a tag, add to text buffer and continue
@@ -1302,7 +1312,7 @@ function processCdataSection(
   // `>` at position 0 and exits immediately, so the synthetic tag has no
   // attributes to parse. Mirrors the Rust engine's synthetic-tag handling.
   const open = processOpeningTag('#cdata-section', -1, '>', 0, state, handleEvent)
-  if (!open.complete || open.selfClosing) {
+  if (!open.complete || open.selfClosing || open.skip) {
     return
   }
 
@@ -1466,6 +1476,17 @@ function processOpeningTag(
           closeImpliedTo(state, DT_DD, DL_SCOPE_BOUNDARY, handleEvent)
         }
       }
+    }
+  }
+
+  if (!result.selfClosing && state.depth >= MAX_ELEMENT_DEPTH) {
+    state.depthLimitReached = true
+    return {
+      complete: true,
+      newPosition: result.newPosition,
+      remainingText: '',
+      selfClosing: false,
+      skip: true,
     }
   }
 
