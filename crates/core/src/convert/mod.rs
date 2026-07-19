@@ -260,6 +260,7 @@ pub struct ConvertState {
   script_data_state: u8,
   escape_ctx: u8,
   in_pre: bool,
+  depth_limit_reached: bool,
   /// Filter: depth of the shallowest currently-open visually-hidden element, or
   /// None. Lets the parser skip a hidden subtree in O(1) without re-checking
   /// styles per node, and keeps this state off the public `ElementNode`.
@@ -403,6 +404,7 @@ impl ConvertState {
       script_data_state: SCRIPT_DATA,
       escape_ctx: 0,
       in_pre: false,
+      depth_limit_reached: false,
       hidden_since_depth: None,
       collapse_non_span_depth: 0,
       collapse_span_depth: 0,
@@ -586,6 +588,9 @@ impl ConvertState {
   }
 
   pub fn process_html(&mut self, chunk: &str) -> String {
+    if self.depth_limit_reached {
+      return String::new();
+    }
     // Reuse text_buffer allocation from previous call if available
     let mut text_buffer = std::mem::take(&mut self.parse_text_buffer);
     text_buffer.clear();
@@ -606,7 +611,7 @@ impl ConvertState {
         .unwrap_or(chunk_length);
     }
 
-    while i < chunk_length {
+    while i < chunk_length && !self.depth_limit_reached {
       let cc = bytes[i];
 
       if cc != LT_CHAR {
