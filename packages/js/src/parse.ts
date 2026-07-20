@@ -13,7 +13,6 @@ import {
   TAG_BUTTON,
   TAG_CAPTION,
   TAG_CENTER,
-  TAG_CODE,
   TAG_DD,
   TAG_DETAILS,
   TAG_DIALOG,
@@ -83,7 +82,6 @@ const TAB_CHAR = 9 // '\t'
 const NEWLINE_CHAR = 10 // '\n'
 const FORM_FEED_CHAR = 12 // '\f'
 const CARRIAGE_RETURN_CHAR = 13 // '\r'
-const BACKTICK_CHAR = 96 // '`'
 const PIPE_CHAR = 124 // '|'
 const OPEN_BRACKET_CHAR = 91 // '['
 const CLOSE_BRACKET_CHAR = 93 // ']'
@@ -810,9 +808,10 @@ function parseHtmlInternal(
         if (!state.plainText && currentCharCode === PIPE_CHAR && state.depthMap[TAG_TABLE]) {
           textBuffer += '\\|'
         }
-        else if (!state.plainText && currentCharCode === BACKTICK_CHAR && (state.depthMap[TAG_CODE] || state.depthMap[TAG_PRE])) {
-          textBuffer += '\\`'
-        }
+        // Backticks inside <code>/<pre> are NOT backslash-escaped: escapes are
+        // inert in GFM code context. They flow through literally and the code
+        // span / fence delimiter is widened to be longer than any inner run
+        // (issue #149, handled at element exit in markdown-processor.ts).
         else if (!state.plainText && currentCharCode === OPEN_BRACKET_CHAR && state.depthMap[TAG_A]) {
           textBuffer += '\\['
         }

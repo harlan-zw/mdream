@@ -327,6 +327,30 @@ function hasNonWhitespace(value: string): boolean {
 }
 
 /** Drop the top marker when every following fragment is whitespace. */
+/**
+ * Longest run of consecutive backticks across buffer fragments [start, end)
+ * (issue #149). The run counter persists across fragment boundaries so a run
+ * split by chunking is measured whole. Used to size a code span / fence
+ * delimiter longer than any backtick run it must contain.
+ */
+function maxBacktickRun(buffer: string[], start: number, end: number): number {
+  let max = 0
+  let run = 0
+  for (let f = start; f < end; f++) {
+    const s = buffer[f]!
+    for (let i = 0; i < s.length; i++) {
+      if (s.charCodeAt(i) === 96) {
+        if (++run > max)
+          max = run
+      }
+      else {
+        run = 0
+      }
+    }
+  }
+  return max
+}
+
 function dropEmptyMarker(buffer: string[], packed: number, markerType: number): number {
   const idx = packed >> 3
   if ((packed & 7) === markerType && idx < buffer.length) {
@@ -412,6 +436,14 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   const openMarkers: number[] = []
   let openMarkerCount = 0
 
+  // Buffer-fragment index of each open code span / fence opener (issue #149).
+  // The delimiter is emitted before its content, so it is widened at the
+  // element's exit once the content's longest backtick run is known. In
+  // streaming, an open region holds the buffer at its opener so the delimiter
+  // is never yielded before it can be resized.
+  const codeOpeners: number[] = []
+  let codeOpenerCount = 0
+
   let lastYieldedLength = 0
   let hasYieldedContent = false
   let preserveLeadingWhitespace = false
@@ -450,10 +482,14 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         }
         else if (el.tagId !== TAG_PRE) {
           flushPreFence(state)
+          if (state.preOwnFence)
+            codeOpeners[codeOpenerCount++] = buff.length - 1
         }
       }
       else if (node.type === TEXT_NODE && hasNonWhitespace((node as TextNode).value)) {
         flushPreFence(state)
+        if (state.preOwnFence)
+          codeOpeners[codeOpenerCount++] = buff.length - 1
       }
     }
 
@@ -589,6 +625,17 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
     }
 
+    // issue #149: at a code span / fence close, size its delimiter to the
+    // content's longest backtick run. Pop the opener now so it stays paired
+    // even if the empty-pair drop below returns early (empty code emits nothing
+    // to size). Only <code>/<pre> that emitted an opener land here.
+    let codeExitOpenerIdx = -1
+    if (eventType === NodeEventExit && codeOpenerCount && !state.plainText
+      && handlerOutput !== undefined
+      && (element.tagId === TAG_CODE || element.tagId === TAG_PRE)) {
+      codeExitOpenerIdx = codeOpeners[--codeOpenerCount]!
+    }
+
     if (eventType === NodeEventExit && openMarkerCount) {
       // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
       const markerType = handlerOutput === undefined ? 0 : INLINE_MARKER_TYPE[element.tagId!]!
@@ -599,6 +646,29 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           return
         }
         openMarkerCount = 0
+      }
+    }
+
+    if (codeExitOpenerIdx >= 0) {
+      const maxRun = maxBacktickRun(buff, codeExitOpenerIdx + 1, buff.length)
+      if (element.tagId === TAG_CODE && !state.depthMap[TAG_PRE]) {
+        // Inline code span: widen delimiter to maxRun+1 backticks and pad one
+        // space each side (CommonMark) so any inner run is contained.
+        if (maxRun > 0) {
+          const delim = '`'.repeat(maxRun + 1)
+          const opener = buff[codeExitOpenerIdx]!
+          buff[codeExitOpenerIdx] = `${opener.slice(0, -1)}${delim} `
+          output = [` ${delim}`]
+          handlerOutput = output[0]
+        }
+      }
+      // Fenced block: widen the fence only when the content holds a run of 3+
+      // backticks (a shorter fence would be closed early by that run).
+      else if (maxRun >= 3) {
+        const fence = '`'.repeat(maxRun + 1)
+        buff[codeExitOpenerIdx] = buff[codeExitOpenerIdx]!.replace(MARKDOWN_CODE_BLOCK, fence)
+        if (output)
+          output = output.map(f => f.replace(MARKDOWN_CODE_BLOCK, fence))
       }
     }
 
@@ -747,6 +817,13 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       openMarkerCount = 0
     }
 
+    // issue #149: record a <code> opener (inline span, or a <code> that owns
+    // its <pre>'s fence) as the last-pushed fragment so its delimiter can be
+    // widened at close. A bare <pre>'s fence is recorded in the flush hook.
+    if (eventType === NodeEventEnter && element.tagId === TAG_CODE && handlerOutput !== undefined) {
+      codeOpeners[codeOpenerCount++] = buff.length - 1
+    }
+
     updateListIndent(state, element, eventType)
   }
 
@@ -815,6 +892,22 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         stableLength = markerPos
     }
 
+    // An open code span / fence delimiter is widened at its close (issue #149);
+    // hold the buffer at the earliest open opener so the delimiter is never
+    // yielded before it can be resized.
+    const codeHeld = codeOpenerCount > 0
+    if (codeHeld) {
+      const openFragment = codeOpeners[0]!
+      let codePos = 0
+      for (let i = 0; i < openFragment; i++)
+        codePos += state.buffer[i]!.length
+      codePos -= content.length - currentContent.length
+      if (codePos < lastYieldedLength)
+        codePos = lastYieldedLength
+      if (codePos < stableLength)
+        stableLength = codePos
+    }
+
     const newContent = currentContent.slice(lastYieldedLength, stableLength)
     lastYieldedLength = stableLength
     if (newContent)
@@ -825,7 +918,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // from joining and slicing the entire cumulative output. Plugin, wrapping,
     // and open-link paths retain the full buffer because they can inspect or
     // rewrite earlier content.
-    if (!markerHeld && !hasMutableTrailingSpace) {
+    if (!markerHeld && !codeHeld && !hasMutableTrailingSpace) {
       if (!resolvedPlugins.length && !options.wrapWidth && !state.depthMap[TAG_A]) {
         const tailStart = Math.max(0, stableLength - 2)
         const emittedTail = currentContent.slice(tailStart, stableLength)

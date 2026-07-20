@@ -2,6 +2,25 @@
 
 use super::*;
 
+/// Longest run of consecutive backtick bytes in `content` (issue #149). Used to
+/// size a code span / fence delimiter longer than any run it must contain.
+#[inline]
+fn max_backtick_run(content: &[u8]) -> usize {
+  let mut max = 0usize;
+  let mut run = 0usize;
+  for &b in content {
+    if b == b'`' {
+      run += 1;
+      if run > max {
+        max = run;
+      }
+    } else {
+      run = 0;
+    }
+  }
+  max
+}
+
 impl ConvertState {
   #[inline]
   fn inline_marker_type(tag_id: u8) -> Option<u8> {
@@ -221,6 +240,25 @@ impl ConvertState {
       self.open_markers.clear();
     }
 
+    // issue #149: record a <code> opener (inline span, or a <code> that owns
+    // its <pre>'s fence) so its delimiter can be widened to the content's
+    // longest backtick run at close. A bare <pre>'s fence is recorded in
+    // flush_pre_fence. Nested <code> in a fence-owning <pre> emits no opener.
+    if !self.plain_text
+      && !enter_is_literal
+      && tag_id == Some(TAG_CODE)
+      && let Some(emitted) = output.as_deref()
+      && !emitted.is_empty()
+    {
+      let output_start = self.buffer.len() - emitted.len();
+      let bt = emitted
+        .as_bytes()
+        .iter()
+        .position(|&b| b == b'`')
+        .unwrap_or(0);
+      self.code_openers.push((output_start + bt, self.buffer.len()));
+    }
+
     // Clean: track heading start for slug collection
     if self.clean_flags & CLEAN_FRAGMENTS != 0
       && let Some(id) = tag_id
@@ -308,6 +346,25 @@ impl ConvertState {
         output = self.get_exit_output(node);
       }
     }
+
+    // issue #149: at a code span / fence close, pop its opener now so it stays
+    // paired even if the empty-pair drop below returns early (empty code needs
+    // no widening). The delimiter is resized after that check. `is_inline_span`
+    // distinguishes an inline `<code>` from a fenced block.
+    let code_exit: Option<(usize, usize, bool)> = if !self.plain_text
+      && (tag_id == Some(TAG_CODE) || tag_id == Some(TAG_PRE))
+      && output.as_deref().is_some_and(|e| !e.is_empty())
+    {
+      self.code_openers.pop().map(|(delim_start, content_start)| {
+        (
+          delim_start,
+          content_start,
+          tag_id == Some(TAG_CODE) && self.depth_map[TAG_PRE as usize] == 0,
+        )
+      })
+    } else {
+      None
+    };
 
     let node_spacing = if let Some(ov) = override_config {
       ov.spacing.or(node.spacing)
@@ -536,6 +593,38 @@ impl ConvertState {
       self.open_markers.clear();
     }
 
+    // issue #149: widen the code delimiter to be longer than the content's
+    // longest backtick run, now that all content is buffered. Cold path: the
+    // common case (no inner backticks) leaves the emitted delimiter untouched.
+    if let Some((delim_start, content_start, is_inline_span)) = code_exit {
+      let max_run = max_backtick_run(&self.buffer.as_bytes()[content_start..]);
+      if is_inline_span {
+        if max_run > 0 {
+          let width = max_run + 1;
+          let mut opener = "`".repeat(width);
+          opener.push(' ');
+          self.buffer.replace_range(delim_start..delim_start + 1, &opener);
+          let mut closer = String::with_capacity(width + 1);
+          closer.push(' ');
+          closer.push_str(&"`".repeat(width));
+          output = Some(Cow::Owned(closer));
+        }
+      } else if max_run >= 3 {
+        let width = max_run + 1;
+        let fence = "`".repeat(width);
+        self.buffer.replace_range(delim_start..delim_start + 3, &fence);
+        if let Some(o) = output.as_deref()
+          && let Some(pos) = o.find("```")
+        {
+          let mut s = String::with_capacity(o.len() + width - 3);
+          s.push_str(&o[..pos]);
+          s.push_str(&fence);
+          s.push_str(&o[pos + 3..]);
+          output = Some(Cow::Owned(s));
+        }
+      }
+    }
+
     // Get effective output
     let effective: Option<&str> = if let Some(ref sep) = table_separator {
       Some(sep.as_str())
@@ -588,7 +677,11 @@ impl ConvertState {
       format!("```{}\n", self.pre_fence_lang)
     };
     self.last_content_cache_len = fence.len();
+    let output_start = self.buffer.len();
+    let bt = fence.as_bytes().iter().position(|&b| b == b'`').unwrap_or(0);
     self.buffer.push_str(&fence);
+    // issue #149: record the fence so its width can grow at <pre> exit.
+    self.code_openers.push((output_start + bt, self.buffer.len()));
     self.last_node_is_inline = false;
   }
 

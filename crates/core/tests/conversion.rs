@@ -515,13 +515,51 @@ fn literal_exit_override_releases_open_marker() {
 }
 
 #[test]
-fn block_code_fence_is_not_tracked_as_inline_marker() {
+fn block_code_fence_width_is_held_until_content_known() {
+  // issue #149: a fence is sized to be longer than the longest backtick run in
+  // its content, so the opener is held until the block closes rather than
+  // streamed eagerly at three backticks. Streaming still equals one-shot.
   let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
   let first = stream.process_chunk("<pre><code><span>");
   assert!(
-    first.contains("```"),
-    "code fence held in buffer: {first:?}"
+    !first.contains("```"),
+    "fence must be held until its width is known: {first:?}"
   );
+}
+
+#[test]
+fn code_backticks_not_escaped_and_delimiter_widened() {
+  // Inline: delimiter widens past the inner run and pads a space each side.
+  assert_eq!(convert("<p>x: <code>a `b` c</code>.</p>"), "x: `` a `b` c ``.");
+  assert_eq!(convert("<p><code>plain</code></p>"), "`plain`");
+  assert_eq!(convert("<p><code>a`</code></p>"), "`` a` ``");
+  // Fenced: fence grows to be longer than a triple-backtick inner run.
+  assert_eq!(
+    convert("<pre><code>Contains ```triple``` inside.</code></pre>"),
+    "````\nContains ```triple``` inside.\n````"
+  );
+  assert_eq!(convert("<pre><code>a\nb</code></pre>"), "```\na\nb\n```");
+}
+
+#[test]
+fn code_delimiter_widening_streaming_matches_every_split() {
+  for html in [
+    "<p>x: <code>a `b` c</code> done.</p>",
+    "<pre><code>Contains ```triple``` inside.</code></pre>",
+  ] {
+    let one_shot = convert(html);
+    for split in 1..html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let mut out = stream.process_chunk(&html[..split]);
+      out.push_str(&stream.process_chunk(&html[split..]));
+      out.push_str(&stream.finish());
+      assert_eq!(
+        out.trim_end(),
+        one_shot,
+        "input {html:?}, split at byte {split}"
+      );
+    }
+  }
 }
 
 // ── Blockquotes ──

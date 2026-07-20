@@ -43,7 +43,6 @@ pub(crate) fn fix_redundant_delimiters(content: &str) -> String {
 
 // Escape context bitmask flags
 const ESC_TABLE: u8 = 1;
-const ESC_CODE_PRE: u8 = 2;
 const ESC_LINK: u8 = 4;
 const ESC_BLOCKQUOTE: u8 = 8;
 
@@ -348,6 +347,10 @@ pub struct ConvertState {
   link_bracket_pos: usize,
   /// Open inline markers as (kind, output start, content start); lets the exit drop empty pairs.
   open_markers: Vec<(u8, usize, usize)>,
+  /// Open code span / fence openers as (delimiter start, content start). The
+  /// delimiter is emitted before its content, so it is widened at the element's
+  /// exit once the content's longest backtick run is known (issue #149).
+  code_openers: Vec<(usize, usize)>,
   /// Heading slugs collected during conversion for fragment validation
   heading_slugs: Vec<String>,
   /// Fragment link locations: (bracket_start, link_end)
@@ -465,6 +468,7 @@ impl ConvertState {
       skip_current_link: false,
       link_bracket_pos: 0,
       open_markers: Vec::new(),
+      code_openers: Vec::new(),
       heading_slugs: Vec::new(),
       fragment_links: Vec::new(),
       in_heading: false,
@@ -698,8 +702,6 @@ impl ConvertState {
             }
           } else if cc == PIPE_CHAR && (self.escape_ctx & ESC_TABLE) != 0 {
             text_buffer.push_str("\\|");
-          } else if cc == BACKTICK_CHAR && (self.escape_ctx & ESC_CODE_PRE) != 0 {
-            text_buffer.push_str("\\`");
           } else if cc == OPEN_BRACKET_CHAR && (self.escape_ctx & ESC_LINK) != 0 {
             text_buffer.push_str("\\[");
           } else if cc == CLOSE_BRACKET_CHAR && (self.escape_ctx & ESC_LINK) != 0 {
@@ -1041,6 +1043,11 @@ impl ConvertState {
     if let Some(&(_, p, _)) = self.open_markers.first() {
       stable_end = stable_end.min(p);
     }
+    // An open code span / fence delimiter is widened at its close (issue #149);
+    // hold the buffer at its start so it is never yielded before resizing.
+    if let Some(&(delim_start, _)) = self.code_openers.first() {
+      stable_end = stable_end.min(delim_start);
+    }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let start = self.last_yielded_length.max(leading);
     if start >= stable_end {
@@ -1090,6 +1097,9 @@ impl ConvertState {
     if let Some(&(_, output_start, _)) = self.open_markers.first() {
       drain_end = drain_end.min(output_start);
     }
+    if let Some(&(delim_start, _)) = self.code_openers.first() {
+      drain_end = drain_end.min(delim_start);
+    }
     if drain_end == 0 {
       return;
     }
@@ -1108,6 +1118,10 @@ impl ConvertState {
     self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);
     for (_, output_start, content_start) in &mut self.open_markers {
       *output_start -= drain_end;
+      *content_start -= drain_end;
+    }
+    for (delim_start, content_start) in &mut self.code_openers {
+      *delim_start -= drain_end;
       *content_start -= drain_end;
     }
   }

@@ -101,4 +101,13 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
     expect(htmlToMarkdown(`<p>- List Item</p>`, { engine })).toBe('\- List Item')
     expect(htmlToMarkdown(`<p>Just a - dash<p>`, { engine })).toBe('Just a - dash')
   })
+  it('code backticks: never backslash-escaped; the delimiter widens to contain them (issue #149).', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p>x: <code>a `b` c</code>.</p>', { engine })).toBe('x: `` a `b` c ``.')
+    expect(htmlToMarkdown('<p><code>plain</code></p>', { engine })).toBe('`plain`')
+    expect(htmlToMarkdown('<p><code>a`</code></p>', { engine })).toBe('`` a` ``')
+    expect(htmlToMarkdown('<pre><code>Contains ```triple``` inside.</code></pre>', { engine }))
+      .toBe('````\nContains ```triple``` inside.\n````')
+    expect(htmlToMarkdown('<pre><code>a\nb</code></pre>', { engine })).toBe('```\na\nb\n```')
+  })
 })

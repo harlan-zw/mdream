@@ -210,13 +210,14 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
     expect(chunks.join('').trim()).toBe('**later')
   })
 
-  it('does not hold a block code fence as an inline marker', async () => {
+  it('holds a block code fence until its width is known, then streams correctly (issue #149)', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const chunks = await collectChunks(streamHtmlToMarkdown(
       chunkedStream(['<pre><code><span>', 'x</span></code></pre>']),
       { engine },
     ))
-    expect(chunks.slice(0, -1).join(''), 'code fence held until content').toContain('```')
+    // The fence must not be emitted before the content decides its width.
+    expect(chunks.slice(0, -1).join(''), 'fence held until content').not.toContain('```')
     expect(chunks.join('').trim()).toBe('```\nx\n```')
   })
 })

@@ -6,7 +6,7 @@ const RE_IF_TRUE_BLOCK = /^if \(true\) \{$/
 const RE_CODE_BLOCK_WITH_LINES = /```.*Line 1.*Line 2.*Line 3.*```/s
 
 describe.each(engines)('code blocks $name', (engineConfig) => {
-  it('escapes triple backticks within code blocks', async () => {
+  it('widens the fence past inner triple backticks instead of escaping (issue #149)', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <pre><code>
@@ -21,11 +21,12 @@ function example() {
 
     const markdown = htmlToMarkdown(html, { engine })
 
-    // The triple backticks should be escaped
-    expect(markdown).toContain('\\`\\`\\`js')
-    expect(markdown).toContain('\\`\\`\\`')
-    // Triple backticks should not appear unescaped
-    expect(markdown).not.toContain('```js')
+    // Backslash escapes are inert in GFM code — never emit them.
+    expect(markdown).not.toContain('\\`')
+    // Inner triple backticks are preserved literally.
+    expect(markdown).toContain('```js')
+    // The enclosing fence widens to four backticks so it outlives the inner run.
+    expect(markdown).toContain('````')
   })
 
   it('handles nested code blocks properly', async () => {
@@ -45,10 +46,11 @@ function example() {
 
     // Check formatting
     expect(markdown).toContain('Here\'s a code block:')
-    // Check for language annotation
-    expect(markdown).toContain('```javascript')
-    // Check for escaped backticks
-    expect(markdown).toContain('\\`\\`\\`python')
+    // Fence widens to four backticks and keeps the language annotation.
+    expect(markdown).toContain('````javascript')
+    // Inner triple backticks are preserved literally, never backslash-escaped.
+    expect(markdown).toContain('```python')
+    expect(markdown).not.toContain('\\`')
   })
 
   it('preserves newlines within pre tags', async () => {
