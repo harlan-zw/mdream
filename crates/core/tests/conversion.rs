@@ -696,6 +696,42 @@ fn multiple_paragraphs_in_list_item_inside_table_cell_stay_inline() {
   );
 }
 
+// https://github.com/harlan-zw/mdream/issues/147
+#[test]
+fn pre_code_inside_table_cell_stays_on_one_row() {
+  // A GFM table row must stay on one line: <pre>/<code> in a cell emit raw
+  // HTML with <br> for content newlines instead of a fenced code block.
+  let html = "<table><tr><td><pre><code>a\nb</code></pre></td><td>ok</td></tr></table>";
+  assert_eq!(
+    convert(html),
+    "| <pre><code>a<br>b</code></pre> | ok |\n| --- | --- |"
+  );
+}
+
+#[test]
+fn bare_pre_inside_table_cell_stays_on_one_row() {
+  let html = "<table><tr><td><pre>x\ny\nz</pre></td><td>ok</td></tr></table>";
+  assert_eq!(
+    convert(html),
+    "| <pre>x<br>y<br>z</pre> | ok |\n| --- | --- |"
+  );
+}
+
+#[test]
+fn details_inside_table_cell_stays_on_one_row() {
+  let html = "<table><tr><td><details><summary>s</summary>d</details></td><td>ok</td></tr></table>";
+  assert_eq!(
+    convert(html),
+    "| <details><summary>s</summary>d</details> | ok |\n| --- | --- |"
+  );
+}
+
+#[test]
+fn pre_code_outside_table_still_fenced() {
+  // Regression: normal (non-cell) <pre><code> keeps the fenced code block.
+  assert_eq!(convert("<pre><code>a\nb</code></pre>"), "```\na\nb\n```");
+}
+
 // https://github.com/harlan-zw/mdream/issues/76
 #[test]
 fn inline_code_inside_strong_inside_list_no_leading_space() {

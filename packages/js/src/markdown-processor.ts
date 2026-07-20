@@ -201,6 +201,44 @@ function canWrapHere(depthMap: Uint8Array): boolean {
 }
 
 /**
+ * Fold the literal line breaks of `<pre>` content into `<br>` so the value
+ * stays on a single line inside a GFM table cell (issue #147). Leading and
+ * trailing breaks are dropped; a `\r\n` pair counts as one break.
+ */
+function foldPreLinesToBr(value: string): string {
+  let start = 0
+  while (start < value.length) {
+    const c = value.charCodeAt(start)
+    if (c !== 10 && c !== 13)
+      break
+    start++
+  }
+  let end = value.length
+  while (end > start) {
+    const c = value.charCodeAt(end - 1)
+    if (c !== 10 && c !== 13)
+      break
+    end--
+  }
+  let out = ''
+  for (let i = start; i < end; i++) {
+    const c = value.charCodeAt(i)
+    if (c === 13) {
+      out += '<br>'
+      if (i + 1 < end && value.charCodeAt(i + 1) === 10)
+        i++
+    }
+    else if (c === 10) {
+      out += '<br>'
+    }
+    else {
+      out += value[i]
+    }
+  }
+  return out
+}
+
+/**
  * Character count (code points) of the current unterminated output line, i.e.
  * since the last newline across the buffer chunks. Includes any block prefix
  * (`> `, list indent) already written for the line.
@@ -530,6 +568,15 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
             value = indent + value
           }
           textNode.value = value
+        }
+
+        // Inside a table cell a literal newline in <pre> content splits the
+        // GFM row. The <pre>/<code> is emitted as raw HTML, so fold each line
+        // break into <br> (issue #147).
+        if ((state.depthMap[TAG_PRE] || 0) > 0
+          && ((state.depthMap[TAG_TD] || 0) > 0 || (state.depthMap[TAG_TH] || 0) > 0)
+          && (textNode.value.includes('\n') || textNode.value.includes('\r'))) {
+          textNode.value = foldPreLinesToBr(textNode.value)
         }
 
         const wrapWidth = state.options?.wrapWidth
