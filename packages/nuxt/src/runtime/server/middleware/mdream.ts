@@ -1,71 +1,108 @@
-import type { HTMLToMarkdownOptions } from 'mdream'
-import type { MdreamMarkdownContext, ModuleRuntimeConfig } from '../../../types'
-import { withSiteUrl } from '#site-config/server/composables/utils'
+import type { H3Event } from 'h3'
+import type { MdreamOptions } from 'mdream'
+import type { MdreamMarkdownContext, MdreamNegotiateContext, ModuleRuntimeConfig } from '../../types.js'
+import { negotiateContent } from '@mdream/js/negotiate'
 import { consola } from 'consola'
-import { createError, defineEventHandler, setHeader } from 'h3'
+import { appendHeader, createError, defineEventHandler, getHeader, setHeader } from 'h3'
 import { htmlToMarkdown } from 'mdream'
-import { extractionPlugin } from 'mdream/plugins'
-import { withMinimalPreset } from 'mdream/preset/minimal'
 import { useNitroApp, useRuntimeConfig } from 'nitropack/runtime'
+import { withSiteUrl } from '#site-config/server/composables/utils'
 
 const logger = consola.withTag('nuxt-mdream')
 
-// Convert HTML to Markdown
-async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRuntimeConfig, route: string) {
-  let options: HTMLToMarkdownOptions = {
-    origin: url,
-    ...config.mdreamOptions,
-  }
+function negotiate(event: H3Event) {
+  return negotiateContent(
+    getHeader(event, 'accept'),
+    getHeader(event, 'sec-fetch-dest'),
+  )
+}
 
-  // Apply preset if specified
-  if (config.mdreamOptions?.preset === 'minimal') {
-    options = withMinimalPreset(options)
-  }
+// Convert HTML to Markdown
+async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRuntimeConfig, route: string, event: H3Event) {
+  const nitroApp = useNitroApp()
 
   let title = ''
-  let markdown = htmlToMarkdown(html, {
-    ...options,
-    plugins: [
-      ...(options.plugins || []),
-      // Add any additional plugins here if needed
-      extractionPlugin({
-        title(html) {
-          title = html.textContent
-        },
-      }),
-    ],
-  })
+  let description = ''
 
-  // Create hook context
+  const options: MdreamOptions = {
+    origin: url,
+    ...config.mdreamOptions,
+  } as MdreamOptions
+
+  // Add declarative extraction for title/description
+  options.extraction = {
+    'title': (el) => { title = el.textContent },
+    'meta[name="description"]': (el) => { description = el.attributes.content || '' },
+  }
+
+  await nitroApp.hooks.callHook('mdream:config', options)
+  let markdown = htmlToMarkdown(html, options)
+
+  // Create hook context for mdream:markdown (Nitro hook)
   const context: MdreamMarkdownContext = {
     html,
     markdown,
     route,
     title,
+    description,
     isPrerender: Boolean(import.meta.prerender),
+    event,
   }
 
-  // Call Nitro runtime hook if available
-  const nitroApp = useNitroApp()
-  if (nitroApp?.hooks) {
-    await nitroApp.hooks.callHook('mdream:markdown', context)
-    markdown = context.markdown // Use potentially modified markdown
-  }
-
-  return markdown
+  await nitroApp.hooks.callHook('mdream:markdown', context)
+  markdown = context.markdown // Use potentially modified markdown
+  return { markdown, title, description }
 }
 
 export default defineEventHandler(async (event) => {
   let path = event.path
+  const config = useRuntimeConfig(event).mdream as ModuleRuntimeConfig
 
-  // Early check: only process .md requests
-  if (!path.endsWith('.md')) {
+  // never run on API routes or internal routes
+  if (path.startsWith('/api') || path.startsWith('/_') || path.startsWith('/@')) {
     return
   }
 
-  const config = useRuntimeConfig(event).mdream as ModuleRuntimeConfig
+  // Extract file extension from path (e.g., /file.js -> .js, /path/to/file.css -> .css)
+  const lastSegment = path.split('/').pop() || ''
+  const hasExtension = lastSegment.includes('.')
+  const extension = hasExtension ? lastSegment.substring(lastSegment.lastIndexOf('.')) : ''
 
-  path = path.slice(0, -3) // Remove .md
+  // Only run on .md extension or no extension at all
+  // Skip all other file extensions (.js, .css, .html, .json, etc.)
+  if (hasExtension && extension !== '.md') {
+    return
+  }
+
+  // Check if we should serve markdown based on Accept header or .md extension
+  const hasMarkdownExtension = path.endsWith('.md')
+  const negotiation = negotiate(event)
+
+  // Advertise that the response varies by these request headers so caches
+  // don't collapse markdown and html responses together.
+  appendHeader(event, 'Vary', 'Accept, Sec-Fetch-Dest')
+
+  let clientPrefersMarkdown = negotiation === 'markdown'
+
+  // Allow users to override the negotiate decision via hook
+  const nitroApp = useNitroApp()
+  const negotiateContext: MdreamNegotiateContext = { event, shouldServe: clientPrefersMarkdown }
+  await nitroApp.hooks.callHook('mdream:negotiate', negotiateContext)
+  clientPrefersMarkdown = negotiateContext.shouldServe
+
+  // Early exit: skip if not requesting .md and client doesn't prefer markdown.
+  // We defer the 406 decision until after fetching downstream, because this
+  // middleware runs for every extensionless route and we can't 406 a JSON-only
+  // endpoint like /health just because Accept didn't list text/*.
+  const wantsNotAcceptable = !hasMarkdownExtension && !clientPrefersMarkdown && negotiation === 'not-acceptable'
+  if (!hasMarkdownExtension && !clientPrefersMarkdown && !wantsNotAcceptable) {
+    return
+  }
+
+  // Remove .md extension if present
+  if (hasMarkdownExtension) {
+    path = path.slice(0, -3)
+  }
 
   // Special handling for index.md -> /
   if (path === '/index') {
@@ -76,25 +113,70 @@ export default defineEventHandler(async (event) => {
 
   // Fetch the HTML page
   try {
-    html = await globalThis.$fetch(path)
+    const response = await globalThis.$fetch.raw(path)
+
+    // Check if response is successful
+    if (!response.ok) {
+      if (hasMarkdownExtension) {
+        return createError({
+          statusCode: response.status,
+          statusMessage: response.statusText,
+          message: `Failed to fetch HTML for ${path}`,
+        })
+      }
+      return
+    }
+
+    // Check content-type is HTML
+    const contentType = response.headers.get('content-type') || ''
+    if (!contentType.includes('text/html')) {
+      if (hasMarkdownExtension) {
+        return createError({
+          statusCode: 415,
+          statusMessage: 'Unsupported Media Type',
+          message: `Expected text/html but got ${contentType} for ${path}`,
+        })
+      }
+      // Not an HTML route, fall through so the non-HTML response is served
+      return
+    }
+
+    // We now know the route serves HTML. If the client's Accept header listed
+    // nothing we can serve, this is a genuine 406.
+    if (wantsNotAcceptable) {
+      return createError({
+        statusCode: 406,
+        statusMessage: 'Not Acceptable',
+        message: 'This resource can be served as text/html or text/markdown.',
+      })
+    }
+
+    html = response._data as string
   }
   catch (e) {
     logger.error(`Failed to fetch HTML for ${path}`, e)
-    return createError({
-      statusCode: 500,
-      statusMessage: 'Internal Server Error',
-      message: `Failed to fetch HTML for ${path}`,
-    })
+    if (hasMarkdownExtension) {
+      return createError({
+        statusCode: 500,
+        statusMessage: 'Internal Server Error',
+        message: `Failed to fetch HTML for ${path}`,
+      })
+    }
+    return
   }
   // Convert to markdown
-  const markdown = await convertHtmlToMarkdown(
+  const result = await convertHtmlToMarkdown(
     html,
     withSiteUrl(event, path),
     config,
     path,
+    event,
   )
-
-  // Set appropriate headers and return markdown
   setHeader(event, 'content-type', 'text/markdown; charset=utf-8')
-  return markdown
+  if (import.meta.prerender) {
+    // return JSON which will be transformed by the build hooks
+    return JSON.stringify(result)
+  }
+  // Set appropriate headers and return markdown
+  return result.markdown
 })

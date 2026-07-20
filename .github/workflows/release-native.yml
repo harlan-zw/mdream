@@ -1,0 +1,190 @@
+name: Build Native
+
+on:
+  workflow_call:
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+            use_napi_cross: true
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+            use_zigbuild: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04
+            use_zigbuild: true
+          - target: armv7-unknown-linux-gnueabihf
+            os: ubuntu-24.04
+            use_napi_cross: true
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-unknown-freebsd
+            os: ubuntu-24.04
+            use_zigbuild: true
+          - target: aarch64-linux-android
+            os: ubuntu-24.04
+          - target: armv7-linux-androideabi
+            os: ubuntu-24.04
+          - target: wasm32-wasip1-threads
+            os: ubuntu-24.04
+
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53 # v6.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install zig
+        if: matrix.use_zigbuild
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.15.2
+
+      - name: Install cargo-zigbuild
+        if: matrix.use_zigbuild
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: cargo-zigbuild
+
+      - name: Setup Android NDK linkers
+        if: contains(matrix.target, 'android')
+        run: |
+          echo "ANDROID_NDK=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+          if [[ "${{ matrix.target }}" == "aarch64-linux-android" ]]; then
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang" >> $GITHUB_ENV
+          elif [[ "${{ matrix.target }}" == "armv7-linux-androideabi" ]]; then
+            echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang" >> $GITHUB_ENV
+          fi
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: crates -> target
+
+      - name: Build native module (zigbuild)
+        if: matrix.use_zigbuild
+        working-directory: crates/node
+        run: pnpm exec napi build --platform --release --esm --target ${{ matrix.target }} -x
+
+      - name: Build native module (napi-cross)
+        if: matrix.use_napi_cross
+        working-directory: crates/node
+        run: pnpm exec napi build --platform --release --esm --target ${{ matrix.target }} --use-napi-cross
+
+      - name: Build native module (wasm)
+        if: startsWith(matrix.target, 'wasm')
+        working-directory: crates/node
+        run: pnpm exec napi build --target ${{ matrix.target }} --profile wasm
+
+      - name: Build native module
+        if: ${{ !matrix.use_zigbuild && !matrix.use_napi_cross && !startsWith(matrix.target, 'wasm') }}
+        working-directory: crates/node
+        run: pnpm exec napi build --platform --release --esm --target ${{ matrix.target }}
+
+      - name: Move artifacts
+        working-directory: crates/node
+        run: node ./scripts/move-artifacts.mjs
+        if: ${{ !startsWith(matrix.target, 'wasm') }}
+
+      - name: Install wasm-opt
+        if: startsWith(matrix.target, 'wasm')
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: wasm-opt
+
+      - name: Optimize WASM with wasm-opt
+        if: startsWith(matrix.target, 'wasm')
+        working-directory: crates/node
+        run: |
+          wasm-opt -Oz --all-features --converge --low-memory-unused rust.wasm -o rust.wasm
+          node ./scripts/move-artifacts.mjs
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bindings-${{ matrix.target }}
+          path: |
+            crates/node/npm/**/*.node
+            crates/node/npm/**/*.wasm
+            crates/node/npm/**/*.js
+            crates/node/npm/**/*.cjs
+            crates/node/npm/**/*.mjs
+          if-no-files-found: error
+
+  build-wasm-edge:
+    name: Build WASM Edge
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53 # v6.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: crates -> target
+
+      - name: Install wasm-pack and wasm-opt
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: wasm-pack,wasm-opt
+
+      - name: Build WASM edge module
+        run: |
+          node scripts/build-wasm-edge.mjs --target web --out-dir packages/mdream/wasm
+          node scripts/build-wasm-edge.mjs --target bundler --out-dir packages/mdream/wasm-bundler
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wasm-edge
+          path: |
+            packages/mdream/wasm/
+            packages/mdream/wasm-bundler/
+          if-no-files-found: error

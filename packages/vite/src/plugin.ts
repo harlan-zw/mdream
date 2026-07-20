@@ -1,26 +1,65 @@
+import type { MdreamOptions } from 'mdream'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Plugin, ViteDevServer } from 'vite'
 import type { CacheEntry, MarkdownConversionResult, ViteHtmlToMarkdownOptions } from './types.js'
 import fs from 'node:fs'
 import path from 'node:path'
+import { negotiateContent } from '@mdream/js/negotiate'
 import { htmlToMarkdown } from 'mdream'
 
-const DEFAULT_OPTIONS: Required<ViteHtmlToMarkdownOptions> = {
-  include: ['**/*.html'],
+const GLOB_BACKSLASH_RE = /\\/g
+const GLOB_DOT_RE = /\./g
+const GLOB_DOUBLE_STAR_RE = /\*\*/g
+const GLOB_STAR_RE = /\*/g
+const GLOB_QUESTION_RE = /\?/g
+
+/**
+ * Merge the given tokens into the response's `Vary` header, preserving any
+ * existing tokens and avoiding case-insensitive duplicates.
+ */
+function mergeVary(res: ServerResponse, tokens: string) {
+  const existing = res.getHeader?.('Vary')
+  const merged: string[] = []
+  const seen = new Set<string>()
+  const add = (raw: string) => {
+    const t = raw.trim()
+    if (!t)
+      return
+    const k = t.toLowerCase()
+    if (seen.has(k))
+      return
+    seen.add(k)
+    merged.push(t)
+  }
+  if (existing) {
+    for (const token of String(existing).split(','))
+      add(token)
+  }
+  for (const token of tokens.split(','))
+    add(token)
+  res.setHeader('Vary', merged.join(', '))
+}
+
+const DEFAULT_OPTIONS: Required<Omit<ViteHtmlToMarkdownOptions, 'mdreamOptions'>> & { mdreamOptions: Partial<MdreamOptions> } = {
+  include: ['*.html', '**/*.html'], // Include root level and nested
   exclude: ['**/node_modules/**'],
   outputDir: '', // Output in same directory as HTML files by default
   cacheEnabled: true,
   mdreamOptions: {},
-  preserveStructure: true,
   cacheTTL: 3600000, // 1 hour
-  verbose: true,
+  verbose: false,
 }
 
 export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions = {}): Plugin {
   const options = { ...DEFAULT_OPTIONS, ...userOptions }
+  const mdreamOptions: Partial<MdreamOptions> = {
+    ...options.mdreamOptions,
+  }
   const markdownCache = new Map<string, CacheEntry>()
 
   function log(message: string) {
     if (options.verbose) {
+      // eslint-disable-next-line no-console
       console.log(`[vite-html-to-markdown] ${message}`)
     }
   }
@@ -58,7 +97,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
   async function convertHtmlToMarkdown(htmlContent: string, source: string): Promise<string> {
     try {
-      const markdownContent = htmlToMarkdown(htmlContent, options.mdreamOptions)
+      const markdownContent = htmlToMarkdown(htmlContent, mdreamOptions)
       log(`Converted ${source} to markdown (${markdownContent.length} chars)`)
       return markdownContent
     }
@@ -72,7 +111,8 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     server: ViteDevServer | null = null,
     outDir?: string,
   ): Promise<MarkdownConversionResult> {
-    let basePath = url.slice(0, -3) // Remove .md extension
+    // Remove .md extension if present
+    let basePath = url.endsWith('.md') ? url.slice(0, -3) : url
 
     // Handle index.md -> / mapping
     if (basePath === '/index') {
@@ -146,48 +186,112 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     return patterns.some((pattern) => {
       // Simple glob pattern matching - convert to regex
       const regexPattern = pattern
-        .replace(/\./g, '\\.') // Escape literal dots first
-        .replace(/\*\*/g, '.*') // ** matches anything including /
-        .replace(/\*/g, '[^/]*') // * matches filename chars except /
-        .replace(/\?/g, '.') // ? matches any single char
+        .replace(GLOB_BACKSLASH_RE, '\\\\') // Escape backslashes first
+        .replace(GLOB_DOT_RE, '\\.') // Escape literal dots
+        .replace(GLOB_DOUBLE_STAR_RE, '.*') // ** matches anything including /
+        .replace(GLOB_STAR_RE, '[^/]*') // * matches filename chars except /
+        .replace(GLOB_QUESTION_RE, '.') // ? matches any single char
 
       const regex = new RegExp(`^${regexPattern}$`)
       return regex.test(fileName)
     })
   }
 
+  function createMarkdownMiddleware(
+    getServer: () => ViteDevServer | null,
+    getOutDir: () => string | undefined,
+    cacheControl: string,
+  ) {
+    return async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
+      const path = new URL(req.url || '', 'http://localhost').pathname
+      const hasMarkdownExtension = path.endsWith('.md')
+      const negotiation = negotiateContent(
+        req.headers.accept,
+        req.headers['sec-fetch-dest'] as string | undefined,
+      )
+      const clientPrefersMarkdown = negotiation === 'markdown'
+
+      // never run on API routes or internal routes
+      if (path.startsWith('/api') || path.startsWith('/_') || path.startsWith('/@')) {
+        return next()
+      }
+
+      // Extract file extension from path (e.g., /file.js -> .js, /path/to/file.css -> .css)
+      const lastSegment = path.split('/').pop() || ''
+      const hasExtension = lastSegment.includes('.')
+      const extension = hasExtension ? lastSegment.substring(lastSegment.lastIndexOf('.')) : ''
+
+      // Only run on .md extension or no extension at all
+      // Skip all other file extensions (.js, .css, .html, .json, etc.)
+      if (hasExtension && extension !== '.md') {
+        return next()
+      }
+
+      // This path participates in negotiation (markdown vs html), so every
+      // response from here on must advertise Vary so caches don't collapse
+      // them together. Merge to preserve any Vary set upstream.
+      mergeVary(res, 'Accept, Sec-Fetch-Dest')
+
+      const wantsNotAcceptable = !hasMarkdownExtension && !clientPrefersMarkdown && negotiation === 'not-acceptable'
+
+      // Skip if not requesting .md and client doesn't prefer markdown and
+      // Accept isn't strictly unsatisfiable. For the not-acceptable case we
+      // still proceed, but only to confirm the route is one we serve before
+      // returning 406 (so non-HTML endpoints fall through to next()).
+      if (!hasMarkdownExtension && !clientPrefersMarkdown && !wantsNotAcceptable) {
+        return next()
+      }
+
+      const url = req.url!
+
+      try {
+        const result = await handleMarkdownRequest(url, getServer(), getOutDir())
+
+        // Route is one we serve; if the client's Accept left us nothing to
+        // return, this is now a genuine 406.
+        if (wantsNotAcceptable) {
+          res.statusCode = 406
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+          res.end('Not Acceptable: this resource can be served as text/html or text/markdown.')
+          return
+        }
+
+        res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+        res.setHeader('Cache-Control', cacheControl)
+        res.setHeader('X-Markdown-Source', result.source)
+        res.setHeader('X-Markdown-Cached', result.cached.toString())
+
+        res.end(result.content)
+        log(`Served ${url} from ${result.source} (cached: ${result.cached})`)
+      }
+      catch (error) {
+        // Route has no HTML representation. For not-acceptable requests we
+        // never owned the route, so hand back to the next middleware.
+        if (wantsNotAcceptable) {
+          return next()
+        }
+        const message = error instanceof Error ? error.message : String(error)
+        log(`Error serving ${url}: ${message}`)
+        res.statusCode = 404
+        res.end(`HTML content not found for ${url}`)
+      }
+    }
+  }
+
   return {
     name: 'vite-html-to-markdown',
 
-    // Development server integration - intercept .md requests
+    // Development server integration - intercept .md requests or Accept header markdown requests
     configureServer(server) {
-      server.middlewares.use(async (req, res, next) => {
-        if (!req.url?.endsWith('.md')) {
-          return next()
-        }
-
-        try {
-          const result = await handleMarkdownRequest(req.url, server)
-
-          res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
-          res.setHeader('Cache-Control', 'no-cache')
-          res.setHeader('X-Markdown-Source', result.source)
-          res.setHeader('X-Markdown-Cached', result.cached.toString())
-
-          res.end(result.content)
-          log(`Served ${req.url} from ${result.source} (cached: ${result.cached})`)
-        }
-        catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          log(`Error serving ${req.url}: ${message}`)
-          res.statusCode = 404
-          res.end(`HTML content not found for ${req.url}`)
-        }
-      })
+      server.middlewares.use(createMarkdownMiddleware(
+        () => server,
+        () => undefined,
+        'no-cache',
+      ))
     },
 
     // Build-time processing - generate static markdown files
-    generateBundle(outputOptions, bundle) {
+    generateBundle(_outputOptions, bundle) {
       const htmlFiles = Object.entries(bundle).filter(([fileName, file]) => {
         return (
           fileName.endsWith('.html')
@@ -197,7 +301,9 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
         )
       })
 
-      log(`Processing ${htmlFiles.length} HTML files for markdown generation`)
+      if (htmlFiles.length > 0) {
+        log(`Processing ${htmlFiles.length} HTML files for markdown generation`)
+      }
 
       for (const [fileName, htmlFile] of htmlFiles) {
         try {
@@ -206,13 +312,13 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
             continue
           }
           const htmlContent = htmlFile.source as string
-          const markdownContent = htmlToMarkdown(htmlContent, options.mdreamOptions)
+          const markdownContent = htmlToMarkdown(htmlContent, mdreamOptions)
 
-          // Generate corresponding .md filename
+          // Generate corresponding .md filename (preserving directory structure)
           const markdownFileName = fileName.replace('.html', '.md')
-          const outputPath = options.preserveStructure
+          const outputPath = options.outputDir
             ? `${options.outputDir}/${markdownFileName}`
-            : `${options.outputDir}/${path.basename(markdownFileName)}`
+            : markdownFileName
 
           // Emit markdown file to bundle
           this.emitFile({
@@ -232,30 +338,11 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
     // Preview server integration (for production preview)
     configurePreviewServer(server) {
-      server.middlewares.use(async (req, res, next) => {
-        if (!req.url?.endsWith('.md')) {
-          return next()
-        }
-
-        try {
-          const outDir = server.config.build?.outDir || 'dist'
-          const result = await handleMarkdownRequest(req.url, null, outDir)
-
-          res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
-          res.setHeader('Cache-Control', 'public, max-age=3600')
-          res.setHeader('X-Markdown-Source', result.source)
-          res.setHeader('X-Markdown-Cached', result.cached.toString())
-
-          res.end(result.content)
-          log(`Served ${req.url} from ${result.source} (cached: ${result.cached})`)
-        }
-        catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          log(`Error in preview server for ${req.url}: ${message}`)
-          res.statusCode = 404
-          res.end(`HTML content not found for ${req.url}`)
-        }
-      })
+      server.middlewares.use(createMarkdownMiddleware(
+        () => null,
+        () => server.config.build?.outDir || 'dist',
+        'public, max-age=3600',
+      ))
     },
   }
 }

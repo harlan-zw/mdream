@@ -1,6 +1,7 @@
+import type { CrawlLogger } from './logger.ts'
 import * as p from '@clack/prompts'
-import { PlaywrightCrawler } from 'crawlee'
 import { addDependency } from 'nypm'
+import { createClackLogger } from './logger.js'
 
 export async function checkPlaywrightInstallation(): Promise<boolean> {
   try {
@@ -13,7 +14,9 @@ export async function checkPlaywrightInstallation(): Promise<boolean> {
   }
 }
 
-export async function promptPlaywrightInstall(): Promise<boolean> {
+export async function promptPlaywrightInstall(logger: CrawlLogger = createClackLogger()): Promise<boolean> {
+  // The confirm prompt is interactive input (not log output), so it stays on
+  // clack regardless of the logger.
   const shouldInstall = await p.confirm({
     message: 'Playwright is required for the Playwright driver. Install it now?',
     initialValue: true,
@@ -23,7 +26,7 @@ export async function promptPlaywrightInstall(): Promise<boolean> {
     return false
   }
 
-  const s = p.spinner()
+  const s = logger.spinner()
   s.start('Installing Playwright globally...')
 
   try {
@@ -35,23 +38,24 @@ export async function promptPlaywrightInstall(): Promise<boolean> {
   catch (fallbackError) {
     // Fallback: try without workspace flag
     s.stop('Failed to install Playwright')
-    p.log.error(`Installation failed: ${fallbackError}`)
+    const reason = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+    logger.error(`Installation failed: ${reason}`)
     return false
   }
 }
 
-export async function ensurePlaywrightInstalled(): Promise<boolean> {
+export async function ensurePlaywrightInstalled(logger: CrawlLogger = createClackLogger()): Promise<boolean> {
   const isInstalled = await checkPlaywrightInstallation()
 
   if (isInstalled) {
     return true
   }
 
-  p.log.warn('Playwright driver selected but Playwright is not installed.')
+  logger.warn('Playwright driver selected but Playwright is not installed.')
 
-  const installed = await promptPlaywrightInstall()
+  const installed = await promptPlaywrightInstall(logger)
   if (!installed) {
-    p.log.error('Cannot proceed with Playwright driver without Playwright installed.')
+    logger.error('Cannot proceed with Playwright driver without Playwright installed.')
     return false
   }
 
@@ -60,6 +64,7 @@ export async function ensurePlaywrightInstalled(): Promise<boolean> {
 
 export async function isUseChromeSupported(): Promise<boolean> {
   try {
+    const { PlaywrightCrawler } = await import('crawlee')
     // Create a minimal crawler instance with useChrome option
     const crawler = new PlaywrightCrawler({
       launchContext: {

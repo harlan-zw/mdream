@@ -1,7 +1,7 @@
 {
   "name": "@mdream/crawl",
   "type": "module",
-  "version": "0.9.1",
+  "version": "1.5.3",
   "description": "Mdream Crawl generates comprehensive llms.txt artifacts from a single URL, using mdream to convert HTML to Markdown.",
   "author": {
     "name": "Harlan Wilton",
@@ -9,6 +9,11 @@
     "url": "https://harlanzw.com/"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harlan-zw/mdream",
+    "directory": "packages/crawl"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
@@ -41,26 +46,35 @@
     "typecheck": "tsc --noEmit",
     "dev:prepare": "obuild --stub",
     "test": "vitest test",
-    "test:attw": "attw --pack"
+    "test:attw": "attw --pack",
+    "prepack": "pnpm run build"
   },
   "peerDependencies": {
+    "crawlee": "^3.16.0",
     "playwright": "^1.53.2"
   },
   "peerDependenciesMeta": {
+    "crawlee": {
+      "optional": true
+    },
     "playwright": {
       "optional": true
     }
   },
   "dependencies": {
-    "@clack/prompts": "^0.11.0",
-    "crawlee": "^3.14.1",
+    "@clack/prompts": "catalog:",
+    "@mdream/js": "workspace:*",
+    "c12": "catalog:",
+    "hookable": "catalog:",
     "mdream": "workspace:*",
-    "nypm": "^0.6.1",
-    "pathe": "^2.0.3",
-    "picomatch": "^4.0.3",
-    "ufo": "^1.6.1"
+    "nypm": "catalog:",
+    "ofetch": "catalog:",
+    "pathe": "catalog:",
+    "picomatch": "catalog:",
+    "tldts": "catalog:",
+    "ufo": "catalog:"
   },
   "devDependencies": {
-    "@types/picomatch": "^4.0.2"
+    "@types/picomatch": "catalog:"
   }
 }

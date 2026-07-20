@@ -1,11 +1,21 @@
 # Dependencies
 node_modules/
-*/node_modules/
+**/node_modules/
 
-# Build artifacts
+# Build artifacts (rebuilt inside Docker)
 dist/
 */dist/
 .output/
+
+# Packages not needed for the Docker images
+packages/action/
+packages/nuxt/
+packages/vite/
+
+# Rust build artifacts (the core image rebuilds from crates/ source).
+# crates/ itself is kept in context so Dockerfile.core can build it.
+**/target/
+crates/fuzz/
 
 # Development files
 .git/
@@ -39,3 +49,6 @@ docs/
 .cache/
 .temp/
 .tmp/
+
+# Keep napi native bindings (needed for mdream)
+!packages/mdream/napi/

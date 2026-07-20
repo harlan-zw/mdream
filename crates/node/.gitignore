@@ -1,0 +1,21 @@
+/target
+Cargo.lock
+
+# Generated NAPI binary artifacts
+*.node
+*.wasm
+browser.js
+rust.wasi-browser.js
+rust.wasi.cjs
+wasi-worker-browser.mjs
+wasi-worker.mjs
+artifacts/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+*.log
+*.tgz

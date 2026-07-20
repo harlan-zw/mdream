@@ -1,40 +1,50 @@
 {
   "type": "module",
   "private": true,
-  "packageManager": "pnpm@10.14.0",
+  "packageManager": "pnpm@11.14.0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harlan-zw/mdream"
+  },
   "scripts": {
+    "bundle-size:sync": "pnpm test:bundle-size && pnpm test:bundle-size:rust && node bench/bundle/analyze.ts && node bench/bundle/update.ts",
     "build": "pnpm run -r build",
+    "lint": "eslint .",
     "typecheck": "pnpm run -r typecheck",
-    "test": "vitest test",
-    "release": "pnpm build && bumpp package.json packages/*/package.json && pnpm -r publish",
-    "test:attw": "pnpm -r --parallel --filter=./packages/** run test:attw"
+    "test": "pnpm exec playwright install && vitest test",
+    "test:bundle-size": "pnpm --filter @mdream/js build && obuild --dir bench/bundle",
+    "test:bundle-size:rust": "node scripts/build-wasm-edge.mjs --target web --out-dir bench/bundle/dist/rust",
+    "release": "pnpm build && bumpp --all --output=CHANGELOG.md --execute=\"node scripts/sync-cargo-version.mjs\" packages/*/package.json",
+    "release:beta": "pnpm build && bumpp --all --release prerelease --preid beta --output=CHANGELOG.md --execute=\"node scripts/sync-cargo-version.mjs\" packages/*/package.json",
+    "test:attw": "pnpm -r --parallel --filter './packages/**' run test:attw",
+    "bench": "vitest bench --config bench/vitest.config.ts",
+    "bench:cli": "./bench/cli-compare.sh",
+    "knip": "knip"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^5.2.1",
-    "@arethetypeswrong/cli": "^0.18.2",
-    "@types/node": "^24.2.1",
-    "bumpp": "^10.2.3",
-    "crawlee": "^3.14.1",
-    "eslint": "^9.33.0",
-    "llm-cost": "^1.0.5",
-    "obuild": "^0.2.1",
-    "typescript": "5.8.3",
-    "vitest": "^3.2.4"
-  },
-  "pnpm": {
-    "overrides": {
-      "vite": "npm:rolldown-vite@latest"
-    },
-    "onlyBuiltDependencies": [
-      "@parcel/watcher",
-      "@tailwindcss/oxide",
-      "better-sqlite3",
-      "esbuild",
-      "maplibre-gl",
-      "sharp",
-      "vue-demi",
-      "workerd"
-    ]
+    "@antfu/eslint-config": "catalog:",
+    "@arethetypeswrong/cli": "catalog:",
+    "@kreuzberg/html-to-markdown-node": "catalog:bench",
+    "@mdream/js": "workspace:*",
+    "@types/node": "catalog:",
+    "@vitest/browser": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "bumpp": "catalog:",
+    "eslint": "catalog:",
+    "knip": "catalog:",
+    "node-html-markdown": "catalog:bench",
+    "obuild": "catalog:",
+    "pathe": "catalog:",
+    "playwright": "catalog:",
+    "rehype-parse": "catalog:bench",
+    "rehype-remark": "catalog:bench",
+    "remark-gfm": "catalog:bench",
+    "remark-stringify": "catalog:bench",
+    "turndown": "catalog:bench",
+    "turndown-plugin-gfm": "catalog:bench",
+    "typescript": "catalog:",
+    "unified": "catalog:bench",
+    "vitest": "catalog:"
   }
 }

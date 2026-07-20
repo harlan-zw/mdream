@@ -1,0 +1,42 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": ["bench/**/*.bench.ts"]
+    },
+    "packages/mdream": {
+      "entry": ["src/iife.ts", "bin/*.mjs"]
+    },
+    "packages/js": {
+      "entry": ["src/clean.ts", "bin/*.mjs"]
+    },
+    "packages/crawl": {
+      "entry": ["bin/*.mjs"]
+    },
+    "packages/action": {
+      "entry": ["src/index.ts"],
+      "ignoreDependencies": ["@actions/exec", "@vercel/ncc"]
+    },
+    "packages/vite": {
+      "entry": ["src/index.ts"]
+    },
+    "packages/nuxt": {
+      "entry": ["src/module.ts", "src/runtime/**/*.ts"],
+      "ignoreDependencies": ["@nuxt/devtools", "@nuxt/schema", "changelogen", "@antfu/eslint-config", "@arethetypeswrong/cli", "pathe"]
+    },
+    "crates/node": {
+      "entry": ["wrapper.ts"],
+      "ignore": ["npm/**"],
+      "ignoreDependencies": ["@emnapi/core", "@napi-rs/wasm-runtime", "@tybys/wasm-util"]
+    }
+  },
+  "ignore": [
+    "crates/node/npm/**",
+    "crates/edge/**",
+    "examples/**",
+    "scripts/**",
+    "bench/bundle/**",
+    "bench/token-compare.ts",
+    "bench/token-usage.ts"
+  ]
+}

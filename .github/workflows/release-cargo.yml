@@ -1,0 +1,63 @@
+name: Release Cargo
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: crates -> target
+
+      - name: Resolve crate version
+        id: version
+        working-directory: crates
+        run: |
+          CRATE_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "mdream") | .version')
+          echo "crate=$CRATE_VERSION" >> "$GITHUB_OUTPUT"
+
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG_VERSION=${GITHUB_REF#refs/tags/v}
+            if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
+              echo "::error::Tag v$TAG_VERSION does not match crate version $CRATE_VERSION. Did the version bump run scripts/sync-cargo-version.mjs?"
+              exit 1
+            fi
+          fi
+
+          if curl -sf "https://crates.io/api/v1/crates/mdream/$CRATE_VERSION" >/dev/null; then
+            echo "mdream@$CRATE_VERSION is already on crates.io; skipping publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Test crate
+        if: steps.version.outputs.publish == 'true'
+        working-directory: crates
+        run: cargo test -p mdream --locked
+
+      - name: Authenticate with crates.io
+        if: steps.version.outputs.publish == 'true'
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+        id: auth
+
+      - name: Publish to crates.io
+        if: steps.version.outputs.publish == 'true'
+        working-directory: crates/core
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

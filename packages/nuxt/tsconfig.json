@@ -1,3 +1,20 @@
 {
-  "extends": "./.nuxt/tsconfig.json"
+  "extends": "./.nuxt/tsconfig.json",
+  "exclude": [
+    "../../bench/**",
+    "../../docs/**",
+    "../../examples/**",
+    "../../packages/mdream/**",
+    "../../packages/crawl/**",
+    "../../packages/vite/**",
+    "../../packages/action/**",
+    "../../crates/**",
+    "../../../bench/**",
+    "../../../docs/**",
+    "../../../examples/**",
+    "../../../packages/mdream/**",
+    "../../../packages/crawl/**",
+    "../../../packages/vite/**",
+    "../../../packages/action/**"
+  ]
 }

@@ -1,10 +1,10 @@
-import type { HTMLToMarkdownOptions } from 'mdream'
+import type { MdreamOptions } from 'mdream'
 import type { Plugin } from 'vite'
 
 export interface ViteHtmlToMarkdownOptions {
   /**
    * Glob patterns to include HTML files for processing
-   * @default ['**\/*.html']
+   * @default ['*.html', '**\/*.html']
    */
   include?: string[]
 
@@ -29,13 +29,7 @@ export interface ViteHtmlToMarkdownOptions {
   /**
    * Options to pass to mdream's htmlToMarkdown function
    */
-  mdreamOptions?: HTMLToMarkdownOptions
-
-  /**
-   * Whether to preserve directory structure in output
-   * @default true
-   */
-  preserveStructure?: boolean
+  mdreamOptions?: Partial<MdreamOptions>
 
   /**
    * Custom cache TTL in milliseconds for production
@@ -44,7 +38,7 @@ export interface ViteHtmlToMarkdownOptions {
   cacheTTL?: number
 
   /**
-   * Whether to log conversion activities
+   * Enable verbose logging for debugging
    * @default false
    */
   verbose?: boolean

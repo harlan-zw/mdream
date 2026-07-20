@@ -1,0 +1,44 @@
+{
+  "name": "@mdream/rust-wasm32-wasi",
+  "version": "1.5.3",
+  "cpu": [
+    "wasm32"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/harlan-zw/mdream.git",
+    "directory": "crates/node"
+  },
+  "main": "rust.wasi.cjs",
+  "files": [
+    "rust.wasi-browser.js",
+    "rust.wasi.cjs",
+    "rust.wasm32-wasi.wasm",
+    "wasi-worker-browser.mjs",
+    "wasi-worker.mjs"
+  ],
+  "engines": {
+    "node": ">= 22.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "browser": "rust.wasi-browser.js",
+  "dependencies": {
+    "@emnapi/core": "catalog:",
+    "@emnapi/runtime": "catalog:",
+    "@emnapi/wasi-threads": "catalog:",
+    "@napi-rs/wasm-runtime": "catalog:",
+    "@tybys/wasm-util": "catalog:",
+    "tslib": "catalog:"
+  },
+  "bundledDependencies": [
+    "@napi-rs/wasm-runtime",
+    "@emnapi/core",
+    "@emnapi/runtime",
+    "@tybys/wasm-util",
+    "@emnapi/wasi-threads",
+    "tslib"
+  ]
+}

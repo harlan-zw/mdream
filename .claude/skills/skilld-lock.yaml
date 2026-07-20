@@ -1,0 +1,8 @@
+skills:
+  shiki-skilld:
+    packageName: shiki
+    version: 4.0.2
+    repo: shikijs/shiki
+    source: 'https://github.com/shikijs/shiki/tree/v4.0.2/docs'
+    syncedAt: 2026-03-10
+    generator: skilld

@@ -2,7 +2,6 @@ name: Test
 
 permissions:
   contents: read
-  pull-requests: write
 
 on:
   push:
@@ -10,40 +9,248 @@ on:
       - main
     paths-ignore:
       - '**/README.md'
-  pull_request_target:
+  pull_request:
     branches:
       - main
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
 
+jobs:
+  # ── Rust lint (fmt + clippy, host and wasm targets) ──
+  rust-lint:
+    name: Rust Lint
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      # pedantic/nursery stay warn-only in CI so new lints on fresh stable
+      # releases can't break unrelated builds; they still surface locally.
+      - name: Run clippy
+        working-directory: crates
+        run: cargo clippy --workspace --exclude mdream-edge --locked -- -D warnings -A clippy::pedantic -A clippy::nursery
+
+      - name: Run clippy (edge, wasm target)
+        working-directory: crates
+        run: cargo clippy -p mdream-edge --target wasm32-unknown-unknown --locked -- -D warnings -A clippy::pedantic -A clippy::nursery
+
+  # ── MSRV check (keep in sync with rust-version in crates/Cargo.toml) ──
+  rust-msrv:
+    name: Rust MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install MSRV Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Check workspace builds on MSRV
+        working-directory: crates
+        run: cargo check --workspace --locked
+
+  # ── Rust unit tests (all OSes on main, Linux-only on PRs) ──
+  rust-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest","macos-latest","windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
+    name: Rust Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Run cargo tests
+        working-directory: crates
+        run: cargo test --workspace --exclude mdream-edge
+
+  # ── WASM compilation check ──
+  wasm-compile:
+    name: WASM Compile Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Check edge crate compiles to WASM
+        working-directory: crates
+        run: cargo build -p mdream-edge --target wasm32-unknown-unknown
+
+      - name: Install wasm-pack and wasm-opt
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack,wasm-opt
+
+      - name: Full edge WASM build
+        run: node scripts/build-wasm-edge.mjs --target web --out-dir /tmp/wasm-test
+
+  # ── WASM browser tests (wasm-bindgen-test in headless Chrome) ──
+  wasm-browser-test:
+    name: WASM Browser Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Run WASM tests in headless Chrome
+        working-directory: crates/edge
+        run: wasm-pack test --headless --chrome
+
+  # ── Cloudflare Workers runtime test ──
+  wasm-workers-test:
+    name: Cloudflare Workers Test
+    runs-on: ubuntu-latest
+    needs: wasm-compile
+    steps:
+      - uses: actions/checkout@v6
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
-      - name: Use Node.js 24.x
-        uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
-          node-version: 24.x
+          node-version: 24
+          cache: pnpm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Install wasm-pack and wasm-opt
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack,wasm-opt
+
+      - name: Build WASM for Workers
+        run: |
+          node scripts/build-wasm-edge.mjs --target web --out-dir crates/edge/test-worker/wasm
+          node scripts/build-wasm-edge.mjs --target web --out-dir packages/mdream/wasm
+
+      - run: pnpm install
+
+      - name: Build NAPI bindings (bundling mdream's node entry needs napi/)
+        working-directory: crates/node
+        run: pnpm build:platform
+
+      - name: Build mdream package
+        working-directory: packages/mdream
+        run: pnpm build
+
+      - name: Run Workers tests
+        working-directory: crates/edge/test-worker
+        run: pnpm test
+
+  # ── Node.js integration tests (all OSes on main, Linux-only on PRs) ──
+  node-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest","macos-latest","windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
+    name: Node Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
           registry-url: https://registry.npmjs.org/
           cache: pnpm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1-threads,wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Install wasm-pack and wasm-opt
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack,wasm-opt
 
       - run: pnpm i
 
       - name: Prepare
         run: pnpm -r run dev:prepare
 
+      - name: Build WASM web & bundler
+        run: |
+          node scripts/build-wasm-edge.mjs --target web --out-dir packages/mdream/wasm
+          node scripts/build-wasm-edge.mjs --target bundler --out-dir packages/mdream/wasm-bundler
+
       - name: Build
         run: pnpm run build
+
+      - name: Lint
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm run lint
 
       - name: Typecheck
         run: pnpm run typecheck
 
       - name: Test package types
+        if: matrix.os == 'ubuntu-latest'
         run: pnpm run test:attw
+
+      - name: Browser Test Setup
+        run: pnpm exec playwright install --with-deps
 
       - name: Test
         run: pnpm run test

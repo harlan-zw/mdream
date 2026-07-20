@@ -1,0 +1,54 @@
+[package]
+name = "mdream"
+
+version.workspace = true
+
+edition.workspace = true
+
+rust-version.workspace = true
+
+description = "Fastest HTML-to-Markdown converter. Zero dependencies, streaming support."
+
+license.workspace = true
+
+repository.workspace = true
+
+homepage = "https://github.com/harlan-zw/mdream"
+documentation = "https://docs.rs/mdream"
+readme = "README.md"
+keywords = [
+  "html",
+  "markdown",
+  "converter",
+  "parser",
+  "streaming"
+]
+categories = [
+  "parser-implementations",
+  "text-processing",
+  "command-line-utilities",
+  "web-programming"
+]
+exclude = [
+  "tests/",
+  "benches/"
+]
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "mdream"
+path = "src/bin.rs"
+
+[[bench]]
+name = "convert_bench"
+harness = false
+
+[[bench]]
+name = "token_cost"
+harness = false
+
+[[bench]]
+name = "diff_output"
+harness = false

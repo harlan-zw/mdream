@@ -1,7 +1,7 @@
 {
   "name": "mdream",
   "type": "module",
-  "version": "0.9.1",
+  "version": "1.5.3",
   "description": "Ultra-performant HTML to Markdown Convertor Optimized for LLMs and llm.txt artifacts.",
   "author": {
     "name": "Harlan Wilton",
@@ -9,49 +9,52 @@
     "url": "https://harlanzw.com/"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harlan-zw/mdream",
+    "directory": "packages/mdream"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
+      "workerd": "./dist/edge.mjs",
+      "edge-light": "./dist/edge.mjs",
+      "browser": "./dist/browser.mjs",
       "import": {
         "types": "./dist/index.d.mts",
         "default": "./dist/index.mjs"
       },
       "default": "./dist/index.mjs"
     },
-    "./cli": {
-      "types": "./dist/cli.d.mts",
+    "./worker": {
+      "types": "./dist/worker.d.mts",
       "import": {
-        "types": "./dist/cli.d.mts",
-        "default": "./dist/cli.mjs"
+        "types": "./dist/worker.d.mts",
+        "default": "./dist/worker.mjs"
       },
-      "default": "./dist/cli.mjs"
+      "default": "./dist/worker.mjs"
     },
-    "./plugins": {
-      "types": "./dist/plugins.d.mts",
-      "import": {
-        "types": "./dist/plugins.d.mts",
-        "default": "./dist/plugins.mjs"
-      },
-      "default": "./dist/plugins.mjs"
+    "./wasm": {
+      "types": "./wasm/mdream_edge.d.ts",
+      "default": "./wasm/mdream_edge.js"
     },
-    "./preset/minimal": {
-      "types": "./dist/preset/minimal.d.mts",
-      "import": {
-        "types": "./dist/preset/minimal.d.mts",
-        "default": "./dist/preset/minimal.mjs"
-      },
-      "default": "./dist/preset/minimal.mjs"
-    }
+    "./wasm/*": "./wasm/*"
   },
   "main": "./dist/index.mjs",
+  "unpkg": "./dist/iife.js",
+  "jsdelivr": "./dist/iife.js",
   "types": "./dist/index.d.mts",
   "bin": {
     "mdream": "./bin/mdream.mjs"
   },
   "files": [
     "bin",
-    "dist"
+    "dist",
+    "napi/",
+    "wasm-bundler/",
+    "wasm/"
   ],
+  "browser": "./dist/browser.mjs",
   "scripts": {
     "flame": "pnpm build && unbuild bench/bundle && clinic flame -- node bench/bundle/dist/string.mjs 10",
     "bench:build": "pnpm build && unbuild bench/bundle",
@@ -66,14 +69,32 @@
     "test:wiki:file": "pnpm build && cat test/fixtures/wikipedia-largest.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "test:wiki-small:file": "cat test/fixtures/wikipedia-small.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "build": "obuild",
+    "build:native": "cd ../../crates/node && napi build --platform --release",
+    "build:edge": "cd ../../crates/edge && wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge && wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --strip-producers ../../packages/mdream/wasm/mdream_edge_bg.wasm -o ../../packages/mdream/wasm/mdream_edge_bg.wasm && wasm-pack build --target bundler --out-dir ../../packages/mdream/wasm-bundler --out-name mdream_edge && wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --strip-producers ../../packages/mdream/wasm-bundler/mdream_edge_bg.wasm -o ../../packages/mdream/wasm-bundler/mdream_edge_bg.wasm",
     "typecheck": "tsc --noEmit",
     "dev:prepare": "obuild --stub",
     "test": "vitest test",
-    "test:attw": "attw --pack"
+    "test:browser": "vitest test --project=browser",
+    "test:attw": "attw --pack",
+    "prepack": "pnpm run build"
   },
-  "dependencies": {
-    "cac": "^6.7.14",
-    "pathe": "^2.0.3",
-    "tinyglobby": "^0.2.14"
+  "dependencies": {},
+  "optionalDependencies": {
+    "@mdream/rust-android-arm-eabi": "workspace:*",
+    "@mdream/rust-android-arm64": "workspace:*",
+    "@mdream/rust-darwin-arm64": "workspace:*",
+    "@mdream/rust-darwin-x64": "workspace:*",
+    "@mdream/rust-freebsd-x64": "workspace:*",
+    "@mdream/rust-linux-arm-gnueabihf": "workspace:*",
+    "@mdream/rust-linux-arm64-gnu": "workspace:*",
+    "@mdream/rust-linux-arm64-musl": "workspace:*",
+    "@mdream/rust-linux-x64-gnu": "workspace:*",
+    "@mdream/rust-linux-x64-musl": "workspace:*",
+    "@mdream/rust-wasm32-wasi": "workspace:*",
+    "@mdream/rust-win32-arm64-msvc": "workspace:*",
+    "@mdream/rust-win32-x64-msvc": "workspace:*"
+  },
+  "devDependencies": {
+    "@mdream/js": "workspace:*"
   }
 }

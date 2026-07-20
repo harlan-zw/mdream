@@ -1,19 +1,10 @@
 import type { Plugin, ViteDevServer } from 'vite'
-import { htmlToMarkdown } from 'mdream'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { viteHtmlToMarkdownPlugin } from '../../src/plugin.js'
-
-// Mock mdream
-vi.mock('mdream', () => ({
-  htmlToMarkdown: vi.fn((html: string) => `# Converted\n\n${html.replace(/<[^>]*>/g, '')}`),
-}))
-
-const mockHtmlToMarkdown = htmlToMarkdown as ReturnType<typeof vi.fn>
 
 describe('viteHtmlToMarkdownPlugin - Dev Server', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockHtmlToMarkdown.mockClear()
   })
 
   it('should handle .md requests in dev server', async () => {
@@ -39,7 +30,7 @@ describe('viteHtmlToMarkdownPlugin - Dev Server', () => {
     const middleware = middlewareCall.mock.calls[0][0]
 
     // Mock request/response objects
-    const mockReq = { url: '/test.md' }
+    const mockReq = { url: '/test.md', headers: {} }
     const mockRes = {
       setHeader: vi.fn(),
       end: vi.fn(),
@@ -50,12 +41,11 @@ describe('viteHtmlToMarkdownPlugin - Dev Server', () => {
     await middleware(mockReq, mockRes, mockNext)
 
     expect(mockTransformRequest).toHaveBeenCalledWith('/test.html')
-    expect(mockHtmlToMarkdown).toHaveBeenCalledWith('<html><body><h1>Test Page</h1></body></html>', {})
     expect(mockRes.setHeader).toHaveBeenCalledWith('Content-Type', 'text/markdown; charset=utf-8')
     expect(mockRes.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache')
     expect(mockRes.setHeader).toHaveBeenCalledWith('X-Markdown-Source', 'dev')
     expect(mockRes.setHeader).toHaveBeenCalledWith('X-Markdown-Cached', 'false')
-    expect(mockRes.end).toHaveBeenCalledWith('# Converted\n\nTest Page')
+    expect(mockRes.end).toHaveBeenCalledWith(expect.stringContaining('# Test Page'))
   })
 
   it('should handle index.md mapping to root', async () => {
@@ -73,7 +63,7 @@ describe('viteHtmlToMarkdownPlugin - Dev Server', () => {
     plugin.configureServer(mockServer)
     const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
-    const mockReq = { url: '/index.md' }
+    const mockReq = { url: '/index.md', headers: {} }
     const mockRes = {
       setHeader: vi.fn(),
       end: vi.fn(),
@@ -105,7 +95,7 @@ describe('viteHtmlToMarkdownPlugin - Dev Server', () => {
     plugin.configureServer(mockServer)
     const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
-    const mockReq = { url: '/about.md' }
+    const mockReq = { url: '/about.md', headers: {} }
     const mockRes = {
       setHeader: vi.fn(),
       end: vi.fn(),
@@ -119,7 +109,7 @@ describe('viteHtmlToMarkdownPlugin - Dev Server', () => {
     expect(mockTransformRequest).toHaveBeenCalledWith('/about.html')
     expect(mockTransformRequest).toHaveBeenCalledWith('/about')
     expect(mockTransformRequest).toHaveBeenCalledWith('/index.html')
-    expect(mockRes.end).toHaveBeenCalledWith('# Converted\n\nFallback')
+    expect(mockRes.end).toHaveBeenCalledWith(expect.stringContaining('# Fallback'))
   })
 
   it('should handle errors gracefully', async () => {
@@ -135,7 +125,7 @@ describe('viteHtmlToMarkdownPlugin - Dev Server', () => {
     plugin.configureServer(mockServer)
     const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
-    const mockReq = { url: '/missing.md' }
+    const mockReq = { url: '/missing.md', headers: {} }
     const mockRes = {
       setHeader: vi.fn(),
       end: vi.fn(),
@@ -160,7 +150,7 @@ describe('viteHtmlToMarkdownPlugin - Dev Server', () => {
     plugin.configureServer(mockServer)
     const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
-    const mockReq = { url: '/test.html' }
+    const mockReq = { url: '/test.html', headers: {} }
     const mockRes = { setHeader: vi.fn(), end: vi.fn() }
     const mockNext = vi.fn()
 
@@ -188,7 +178,7 @@ describe('viteHtmlToMarkdownPlugin - Dev Server', () => {
     plugin.configureServer(mockServer)
     const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
-    const mockReq = { url: '/cached.md' }
+    const mockReq = { url: '/cached.md', headers: {} }
     const mockRes = {
       setHeader: vi.fn(),
       end: vi.fn(),
@@ -212,6 +202,6 @@ describe('viteHtmlToMarkdownPlugin - Dev Server', () => {
 
     expect(mockTransformRequest).not.toHaveBeenCalled()
     expect(mockRes.setHeader).toHaveBeenCalledWith('X-Markdown-Cached', 'true')
-    expect(mockRes.end).toHaveBeenCalledWith('# Converted\n\nCached Content')
+    expect(mockRes.end).toHaveBeenCalledWith(expect.stringContaining('# Cached Content'))
   })
 })

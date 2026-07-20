@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../../src/index.js'
-import { frontmatterPlugin } from '../../../src/plugins/frontmatter.js'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
-describe('frontmatter plugin', () => {
-  it('extracts title and description from head', () => {
+describe.each(engines)('frontmatter plugin $name', (engineConfig) => {
+  it('extracts title and description from head', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <html>
         <head>
@@ -18,7 +18,8 @@ describe('frontmatter plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [frontmatterPlugin()],
+      plugins: { frontmatter: true },
+      engine,
     })
 
     expect(markdown).toContain('---')
@@ -30,7 +31,8 @@ describe('frontmatter plugin', () => {
     expect(markdown).toContain('This is the main content of the page.')
   })
 
-  it('includes additional frontmatter fields', () => {
+  it('includes additional frontmatter fields', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <html>
         <head>
@@ -43,12 +45,13 @@ describe('frontmatter plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [frontmatterPlugin({
+      plugins: { frontmatter: {
         additionalFields: {
           layout: 'post',
           date: '2025-05-10',
         },
-      })],
+      } },
+      engine,
     })
 
     expect(markdown).toContain('title: "Test Page"')
@@ -56,7 +59,8 @@ describe('frontmatter plugin', () => {
     expect(markdown).toContain('date: 2025-05-10')
   })
 
-  it('correctly formats frontmatter values', () => {
+  it('correctly formats frontmatter values', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <html>
         <head>
@@ -71,7 +75,8 @@ describe('frontmatter plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [frontmatterPlugin()],
+      plugins: { frontmatter: true },
+      engine,
     })
 
     expect(markdown).toContain('title: "Title with \\"quotes\\""')
@@ -79,7 +84,8 @@ describe('frontmatter plugin', () => {
     expect(markdown).toContain('author: "John Doe"')
   })
 
-  it('extracts social media meta tags', () => {
+  it('extracts social media meta tags', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <html>
         <head>
@@ -96,7 +102,8 @@ describe('frontmatter plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [frontmatterPlugin()],
+      plugins: { frontmatter: true },
+      engine,
     })
 
     expect(markdown).toContain('meta:')
@@ -106,35 +113,59 @@ describe('frontmatter plugin', () => {
     expect(markdown).toContain('"twitter:description": "Twitter Description"')
   })
 
-  it('supports custom field formatters', () => {
+  it('receives structured frontmatter via callback', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <html>
         <head>
-          <title>Test Page</title>
-          <meta name="keywords" content="key1, key2, key3">
+          <title>My Page</title>
+          <meta name="description" content="A test page">
+          <meta name="author" content="Jane">
         </head>
-        <body>
-          <p>Content</p>
-        </body>
+        <body><p>Content</p></body>
       </html>
     `
 
-    const markdown = htmlToMarkdown(html, {
-      plugins: [frontmatterPlugin({
-        formatValue: (name, value) => {
-          if (name === 'keywords') {
-            // Format as an array
-            return `[${value.split(',').map(k => `"${k.trim()}"`).join(', ')}]`
-          }
-          return `"${value}"`
-        },
-      })],
+    let frontmatter: Record<string, string> | undefined
+    htmlToMarkdown(html, {
+      plugins: { frontmatter: (fm) => { frontmatter = fm } },
+      engine,
     })
 
-    expect(markdown).toContain('keywords: ["key1", "key2", "key3"]')
+    expect(frontmatter).toBeDefined()
+    expect(frontmatter!.title).toBe('My Page')
+    expect(frontmatter!.description).toBe('A test page')
+    expect(frontmatter!.author).toBe('Jane')
   })
 
-  it('supports custom meta fields', () => {
+  it('receives structured frontmatter via onExtract with config', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `
+      <html>
+        <head><title>Page</title></head>
+        <body><p>Content</p></body>
+      </html>
+    `
+
+    let frontmatter: Record<string, string> | undefined
+    htmlToMarkdown(html, {
+      plugins: {
+        frontmatter: {
+          additionalFields: { layout: 'post', category: 'blog' },
+          onExtract: (fm) => { frontmatter = fm },
+        },
+      },
+      engine,
+    })
+
+    expect(frontmatter).toBeDefined()
+    expect(frontmatter!.title).toBe('Page')
+    expect(frontmatter!.layout).toBe('post')
+    expect(frontmatter!.category).toBe('blog')
+  })
+
+  it('supports custom meta fields', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <html>
         <head>
@@ -149,9 +180,8 @@ describe('frontmatter plugin', () => {
     `
 
     const markdown = htmlToMarkdown(html, {
-      plugins: [frontmatterPlugin({
-        metaFields: ['custom-field', 'another-field'],
-      })],
+      plugins: { frontmatter: { metaFields: ['custom-field', 'another-field'] } },
+      engine,
     })
 
     expect(markdown).toContain('meta:')

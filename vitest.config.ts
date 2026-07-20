@@ -1,0 +1,32 @@
+import { playwright } from '@vitest/browser-playwright'
+import { defineConfig, defineProject } from 'vitest/config'
+
+export default defineConfig({
+  test: {
+    projects: [
+      defineProject({
+        test: {
+          name: 'node',
+          environment: 'node',
+          include: ['./packages/js/test/**/*.test.ts', './packages/mdream/test/unit/**/*.test.ts', './packages/mdream/test/integration/**/*.test.ts', './packages/vite/test/unit/**/*.test.ts', './packages/crawl/test/unit/**/*.test.ts', './packages/llms-txt/test/**/*.test.ts', './packages/action/test/**/*.test.ts', './crates/edge/test/**/*.test.ts'],
+          exclude: ['**/*.browser.test.ts'],
+        },
+      }),
+      defineProject({
+        test: {
+          name: 'browser',
+          browser: {
+            enabled: true,
+            provider: playwright(),
+            instances: [
+              { browser: 'chromium' },
+            ],
+            headless: true,
+            screenshotFailures: true,
+          },
+          include: ['**/*.browser.test.ts'],
+        },
+      }),
+    ],
+  },
+})

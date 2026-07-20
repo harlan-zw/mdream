@@ -34,14 +34,18 @@ Never add files to git or make a commit. This will be done by a human.
 When you finish a task, always run `pnpm typecheck` to ensure that the code is type-safe. If you see any errors, fix them before proceeding.
 
 ## Build/Lint/Test Commands
-- Build: `pnpm build`
-- Test all: `pnpm test`
+- Build all packages: `pnpm build` (root)
+- Build mdream only: `pnpm build` (in packages/mdream/)
+- Test all: `pnpm test` (root - installs playwright first)
 - Test single file: `pnpm test path/to/test.ts`
 - Test with pattern: `pnpm test -t "test pattern"`
 - Test folder: `pnpm test test/unit/plugins/`
-- Development build (stub): `pnpm dev:prepare`
-- Live test with real sites: `pnpm test:github:live`, `pnpm test:wiki:file`
-- Benchmarking: `pnpm bench:stream`, `pnpm bench:string`
+- Test browser/Playwright: `pnpm test:browser` (in packages/mdream/)
+- Development build (stub): `pnpm dev:prepare` (in packages/mdream/)
+- Live test with real sites: `pnpm test:github:live`, `pnpm test:wiki:file` (in packages/mdream/)
+- Benchmarking: `pnpm bench:stream`, `pnpm bench:string`, `pnpm bench:await` (in packages/mdream/)
+- Performance profiling: `pnpm flame` (in packages/mdream/ - creates flame graph)
+- Typecheck all: `pnpm typecheck` (root - runs across all packages)
 
 ## Code Style Guidelines
 - Indentation: 2 spaces
@@ -57,14 +61,25 @@ When you finish a task, always run `pnpm typecheck` to ensure that the code is t
 
 ## Project Architecture
 
-### Core Architecture
-- `src/index.ts`: Main entry point with `htmlToMarkdown` and `streamHtmlToMarkdown` APIs
-- `src/parse.ts`: Manual HTML parsing into DOM-like structure for performance
-- `src/markdown-processor.ts`: DOM node to Markdown transformation logic with state management
-- `src/stream.ts`: Streaming HTML processing with content-based buffering
-- `src/types.ts`: Core TypeScript interfaces for nodes, plugins, and state management
-- `src/tags.ts`: HTML tag handlers for Markdown conversion
-- `src/buffer-region.ts`: Streaming buffer management for optimal chunk boundaries
+This is a pnpm monorepo with multiple packages:
+- `packages/mdream`: Core HTML to Markdown converter (zero dependencies)
+- `packages/llms-txt`: Engine-agnostic llms.txt artifact generation (no mdream dependency)
+- `packages/crawl`: Site-wide crawler for llms.txt generation
+- `packages/vite`: Vite plugin integration
+- `packages/nuxt`: Nuxt module integration
+- `packages/action`: GitHub Actions integration
+
+### Core Architecture (packages/mdream/src/)
+- `index.ts`: Main entry point with `htmlToMarkdown` and `streamHtmlToMarkdown` APIs
+- `parse.ts`: Manual HTML parsing into DOM-like structure for performance
+- `markdown-processor.ts`: DOM node to Markdown transformation logic with state management
+- `stream.ts`: Streaming HTML processing with content-based buffering
+- `types.ts`: Core TypeScript interfaces for nodes, plugins, and state management
+- `tags.ts`: HTML tag handlers for Markdown conversion
+- `buffer-region.ts`: Streaming buffer management for optimal chunk boundaries
+- `const.ts`: TAG_* constant IDs for fast tag lookups (avoids string comparison)
+- `splitter.ts`: Single-pass Markdown text splitter (LangChain compatible)
+- `preset/minimal.ts`: Preset combining frontmatter, isolate-main, tailwind, and filter plugins
 
 ### Plugin System
 
@@ -169,51 +184,70 @@ export function adBlockPlugin() {
 }
 ```
 
+### Built-in Plugins
+- `frontmatterPlugin()`: Extracts metadata from HTML `<head>` into YAML frontmatter
+- `isolateMainPlugin()`: Isolates main content area using semantic HTML
+- `tailwindPlugin()`: Converts Tailwind utility classes to semantic Markdown
+- `filterPlugin({ exclude: [...] })`: Filters out unwanted HTML elements by TAG_* constant
+- `extractionPlugin({ 'selector': callback })`: Extracts elements using CSS selectors during conversion
+
 ### Key Concepts
 - **Node Types**: ElementNode (HTML elements) and TextNode (text content) with parent/child relationships
+- **TAG_* Constants**: Integer IDs in `const.ts` for fast tag lookups without string comparison (101 constants defined for all standard HTML tags)
 - **Streaming Architecture**: Processes HTML incrementally using buffer regions and optimal chunk boundaries
 - **Plugin Pipeline**: Each plugin can intercept and transform content at different processing stages
 - **Memory Efficiency**: Immediate processing and callback patterns to avoid collecting large data structures
-- **CSS Query Selector**: Custom CSS selector implementation in `src/libs/query-selector.ts` for element matching in plugins
+- **CSS Query Selector**: Custom CSS selector implementation in `libs/query-selector.ts` for element matching
+- **depthMap**: Uint8Array tracking nesting depth for each tag type on ElementNode (performance optimization)
 
 ## Technical Details
 - Parser: Manual HTML parsing for performance, doesn't use browser DOM
 - Node traversal: Stack-based, non-recursive approach to handle large documents
 - Streaming: Chunks content using optimal breakpoints (paragraphs, lines)
 - HTML entities: Custom decoder with performance optimizations
-- Markdown generation: Tag handlers for each HTML element type
-- State management: MarkdownState tracks context during conversion
+- Markdown generation: Tag handlers for each HTML element type accessed via TAG_* constants
+- State management: MdreamRuntimeState tracks context during conversion
 - Tables: Special handling for alignment, colspan, and header formatting
 - Lists: Support for nested ordered/unordered lists with proper indentation
 - Blockquotes: Handles proper nesting and continuations
 
-## CLI Usage
-- Processes HTML from stdin and outputs Markdown to stdout
-- Options:
-  - `--chunk-size <size>`: Controls stream chunking (default: 4096)
-  - `-v, --verbose`: Enables debug logging
+## Module Exports & Entry Points
+
+The package provides multiple entry points for different use cases:
+
+- `mdream` - Main API (`htmlToMarkdown`, `streamHtmlToMarkdown`, `parseHtml`)
+- `mdream/plugins` - Plugin utilities (`createPlugin`, `extractionPlugin`, etc.)
+- `mdream/preset/minimal` - Preset configurations (`withMinimalPreset`)
+- `mdream/splitter` - Markdown text splitter (`htmlToMarkdownSplitChunks`)
+- `mdream/cli` - CLI entry point
 
 ## CLI and Testing
 
-### CLI Usage
+### CLI Usage (packages/mdream/)
+- Entry: `node ./bin/mdream.mjs` (also via `mdream` when installed globally)
 - Processes HTML from stdin, outputs Markdown to stdout
 - Test with live sites: `curl -s https://example.com | node ./bin/mdream.mjs --origin https://example.com`
-- Key CLI options: `--origin <url>`, `-v/--verbose`, `--chunk-size <size>`
+- Key CLI options: `--origin <url>`, `-v/--verbose`, `--chunk-size <size>`, `--preset minimal`
 
-### Testing Strategy
+### Testing Strategy (packages/mdream/test/)
 - Unit tests in `test/unit/` organized by feature:
-  - `nodes/` - tests for HTML element conversion
+  - `nodes/` - HTML element conversion tests
   - `plugins/` - plugin functionality tests
-  - `templates/` - real-world site template tests (NASA, HackerNews, etc.)
-  - `readability/` - content extraction and scoring tests
+  - `templates/` - real-world site template tests (NASA, HackerNews, Wikipedia, etc.)
   - `libs/` - utility library tests (query selector, etc.)
+  - `preset/` - preset configuration tests
 - Integration tests in `test/integration/` for end-to-end streaming
 - Test fixtures in `test/fixtures/` with real HTML from GitHub, Wikipedia
 - Always add tests for new plugins in `test/unit/plugins/`
-- Run specific test categories: `pnpm test test/unit/plugins/` for plugin tests
+- Run specific test categories: `pnpm test test/unit/plugins/`
 
-# important-instruction-reminders
+## Important Instruction Reminders
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
 ALWAYS prefer editing an existing file to creating a new one.
 NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
+
+<!-- skilld -->
+Before modifying code, evaluate each installed skill against the current task.
+For each skill, determine YES/NO relevance and invoke all YES skills before proceeding.
+<!-- /skilld -->

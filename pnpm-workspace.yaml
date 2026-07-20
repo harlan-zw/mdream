@@ -1,7 +1,98 @@
+shellEmulator: true
+
+trustPolicy: no-downgrade
+# These versions predate npm provenance/trusted-publishing, while their newer
+# releases publish with it, so no-downgrade flags them as trust downgrades.
+# Both are long-standing, widely-audited packages (chokidar by paulmillr,
+# semver by npm); the flag is a known false positive.
+trustPolicyExclude:
+  - chokidar@4.0.3
+  - semver@6.3.1
+
 packages:
-  - playground
   - packages/*
+  - crates/node
+  - crates/node/npm/*
+  - crates/edge/test-worker
   - examples/*
+  - '!examples/nextjs'
+
+overrides:
+  emnapi: ^1.11.2
+  # fflate 0.8.3 emits a trailing empty Gunzip chunk that breaks
+  # @arethetypeswrong/cli 0.18.2 tarball extraction (attw --pack crashes
+  # with "Cannot read properties of undefined (reading 'filename')").
+  fflate: 0.8.2
+  vite: npm:rolldown-vite@latest
+catalog:
+  '@actions/core': ^3.0.1
+  '@actions/exec': ^3.0.0
+  '@antfu/eslint-config': ^9.1.0
+  '@arethetypeswrong/cli': ^0.18.5
+  '@clack/prompts': ^1.7.0
+  '@cloudflare/vitest-pool-workers': ^0.18.6
+  '@emnapi/core': ^1.11.2
+  '@emnapi/runtime': ^1.11.2
+  '@emnapi/wasi-threads': ^2.0.0
+  '@napi-rs/cli': ^3.7.3
+  '@napi-rs/wasm-runtime': ^1.1.6
+  '@nuxt/devtools': 2.4.0
+  '@nuxt/kit': ^4.4.8
+  '@nuxt/module-builder': ^1.0.2
+  '@nuxt/schema': ^4.4.8
+  '@nuxt/test-utils': ^4.0.3
+  '@tybys/wasm-util': ^0.10.3
+  '@types/node': ^26.1.1
+  '@types/picomatch': ^4.0.3
+  '@vercel/ncc': ^0.44.1
+  '@vitejs/plugin-vue': ^6.0.8
+  '@vitest/browser': ^4.1.10
+  '@vitest/browser-playwright': ^4.1.10
+  bumpp: ^11.1.0
+  c12: ^3.3.4
+  cac: ^7.0.0
+  changelogen: ^0.6.2
+  compression: ^1.8.1
+  consola: ^3.4.2
+  cross-env: ^10.1.0
+  defu: ^6.1.7
+  eslint: ^10.7.0
+  express: ^5.2.1
+  hookable: ^6.1.1
+  knip: ^6.27.0
+  nuxt: ^4.4.8
+  nuxt-site-config: ^4.1.1
+  nypm: ^0.6.8
+  obuild: ^0.4.38
+  ofetch: ^1.5.1
+  pathe: ^2.0.3
+  picomatch: ^4.0.5
+  playwright: ^1.61.1
+  sirv: ^3.0.2
+  tinyglobby: ^0.2.17
+  tldts: ^7.4.9
+  tslib: ^2.8.1
+  typescript: ^6.0.3
+  ufo: ^1.6.4
+  vite: ^8.1.0
+  vitest: ^4.1.10
+  vue: ^3.5.40
+  vue-router: ^5.2.0
+  vue-tsc: ^3.3.7
+  wrangler: ^4.104.0
+
+catalogs:
+  bench:
+    '@kreuzberg/html-to-markdown-node': ^3.7.2
+    node-html-markdown: ^2.0.0
+    rehype-parse: ^9.0.1
+    rehype-remark: ^10.0.1
+    remark-gfm: ^4.0.1
+    remark-stringify: ^11.0.0
+    turndown: ^7.2.4
+    turndown-plugin-gfm: ^1.0.2
+    unified: ^11.0.5
+
 onlyBuiltDependencies:
   - esbuild
   - '@parcel/watcher'
@@ -11,3 +102,10 @@ onlyBuiltDependencies:
   - vue-demi
   - workerd
   - maplibre-gl
+
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
+  sharp: true
+  vue-demi: false
+  workerd: true
