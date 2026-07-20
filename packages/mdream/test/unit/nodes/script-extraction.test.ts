@@ -1,6 +1,23 @@
-import { htmlToMarkdown } from '@mdream/js'
+import { htmlToMarkdown, streamHtmlToMarkdown } from '@mdream/js'
 import { createPlugin } from '@mdream/js/plugins'
 import { describe, expect, it } from 'vitest'
+
+function chunkedStream(chunks: string[]): ReadableStream<string> {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks)
+        controller.enqueue(chunk)
+      controller.close()
+    },
+  })
+}
+
+async function collect(stream: AsyncIterable<string>): Promise<string> {
+  let out = ''
+  for await (const chunk of stream)
+    out += chunk
+  return out
+}
 
 describe('script content extraction', () => {
   it('should extract JSON content from Nuxt data script', () => {
@@ -247,5 +264,24 @@ describe('script content extraction', () => {
     expect(parsedData.data.quotes).toBe('Mix of \'single\' and "double" quotes')
 
     expect(result.trim()).toBe('Content')
+  })
+
+  it('preserves extracted script text across small stream chunks', async () => {
+    const scriptText = '<!--<script>const payload = "value";</script>-->'
+    const html = `<script>${scriptText}</script><p>BODY</p>`
+    let extracted = ''
+    const plugin = createPlugin({
+      processTextNode(textNode) {
+        if (textNode.parent?.name === 'script')
+          extracted += textNode.value
+      },
+    })
+
+    const result = await collect(streamHtmlToMarkdown(chunkedStream([...html]), {
+      hooks: [plugin],
+    }))
+
+    expect(extracted).toBe(scriptText)
+    expect(result.trim()).toBe('BODY')
   })
 })

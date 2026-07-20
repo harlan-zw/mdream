@@ -2,6 +2,11 @@ name: Release Docker Images
 
 on:
   workflow_call:
+    inputs:
+      tag:
+        description: Release tag to build
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       tag:
@@ -15,7 +20,8 @@ env:
   IMAGE_NAME: mdream
 
 jobs:
-  publish-docker:
+  # ── crawl image: @mdream/crawl with Playwright Chrome ──
+  publish-crawl:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -24,18 +30,18 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53 # v6.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 24
           cache: pnpm
@@ -70,16 +76,16 @@ jobs:
           ls -la packages/mdream/napi/
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY_GHCR }}
           username: ${{ github.actor }}
@@ -87,87 +93,86 @@ jobs:
 
       - name: Extract version from tag
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_REF: ${{ github.ref }}
+          INPUT_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION=${{ github.event.inputs.tag }}
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-          elif [[ "${{ github.event_name }}" == "release" ]]; then
-            VERSION=${{ github.event.release.tag_name }}
-            VERSION=${VERSION#v}
+          if [[ -n "$INPUT_TAG" ]]; then
+            VERSION="$INPUT_TAG"
+          elif [[ "$GH_REF" == refs/tags/* ]]; then
+            VERSION="${GH_REF#refs/tags/v}"
+          elif [[ "$EVENT_NAME" == "release" ]]; then
+            VERSION="${RELEASE_TAG#v}"
           else
             VERSION=latest
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building version: $VERSION"
 
       - name: Check if prerelease
         id: prerelease
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION=${{ steps.version.outputs.version }}
           if [[ "$VERSION" == *"-"* ]]; then
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
           else
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: |
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
             ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          # `latest` is kept as a back-compat alias of `crawl`; documentation
+          # points users at the explicit `crawl` tag.
           tags: |
+            type=raw,value=crawl
             type=raw,value=latest,enable=${{ steps.prerelease.outputs.is_prerelease == 'false' }}
             type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=${{ steps.version.outputs.version }}-crawl
             type=semver,pattern={{version}},value=v${{ steps.version.outputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=v${{ steps.version.outputs.version }},enable=${{ steps.prerelease.outputs.is_prerelease == 'false' }}
             type=semver,pattern={{major}},value=v${{ steps.version.outputs.version }},enable=${{ steps.prerelease.outputs.is_prerelease == 'false' }}
           labels: |
-            org.opencontainers.image.title=mdream
-            org.opencontainers.image.description=Ultra-performant HTML to Markdown converter optimized for LLMs with Playwright Chrome
+            org.opencontainers.image.title=mdream (crawl)
+            org.opencontainers.image.description=Site crawler that generates llms.txt artifacts, with Playwright Chrome
             org.opencontainers.image.vendor=${{ github.repository_owner }}
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+      - name: Build and push crawl image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
+          file: Dockerfile.crawl
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=crawl
+          cache-to: type=gha,mode=max,scope=crawl
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
 
-      - name: Test published images
+      - name: Test published crawl image
         run: |
-          echo "Testing published Docker crawl images..."
+          echo "Testing published crawl image..."
+          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:crawl
+          docker pull "$IMAGE"
 
-          # Wait for images to be available
-          sleep 30
+          echo "Testing --help..."
+          timeout 60 docker run --rm "$IMAGE" --help > /dev/null
+          echo "Testing --version..."
+          timeout 60 docker run --rm "$IMAGE" --version > /dev/null
 
-          # Test Docker Hub image with help (default ENTRYPOINT behavior)
-          echo "Testing Docker Hub image help..."
-          timeout 60 docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} --help > /dev/null
-          echo "Docker Hub image help works!"
-
-          # Test GitHub Container Registry image
-          echo "Testing GHCR image help..."
-          timeout 60 docker run --rm ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} --help > /dev/null
-          echo "GHCR image works!"
-
-          # Test version command (direct to ENTRYPOINT)
-          echo "Testing version command..."
-          timeout 60 docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} --version > /dev/null
-          echo "Version command works!"
-
-          # Test that container runs without arguments (should show help)
-          echo "Testing container without arguments..."
-          OUTPUT=$(timeout 60 docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} 2>&1 || true)
+          echo "Testing no-argument help output..."
+          OUTPUT=$(timeout 60 docker run --rm "$IMAGE" 2>&1 || true)
           if [[ "$OUTPUT" == *"@mdream/crawl"* ]]; then
             echo "Container shows help when run without arguments!"
           else
@@ -176,71 +181,127 @@ jobs:
             exit 1
           fi
 
-          # Test with a URL argument to ensure ENTRYPOINT works correctly
-          echo "Testing with URL argument (should show error for demo URL)..."
-          OUTPUT=$(timeout 60 docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} --url https://httpbin.org/delay/30 --max-pages 1 2>&1 || true)
-          echo "Container accepts arguments correctly via ENTRYPOINT!"
-
-      - name: Report image sizes
+      - name: Report crawl image size
+        env:
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:crawl
         run: |
-          echo "## Image Size Report" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Crawl Image Size" >> "$GITHUB_STEP_SUMMARY"
+          SIZE=$(docker inspect "$IMAGE" --format='{{.Size}}' | numfmt --to=iec-i --suffix=B)
+          echo "- \`$IMAGE\` — **$SIZE**" >> "$GITHUB_STEP_SUMMARY"
 
-          # Get and display image sizes
-          DOCKERHUB_SIZE=$(docker inspect ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} --format='{{.Size}}' | numfmt --to=iec-i --suffix=B)
-          GHCR_SIZE=$(docker inspect ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} --format='{{.Size}}' | numfmt --to=iec-i --suffix=B)
+  # ── core image: native Rust HTML-to-Markdown converter ──
+  publish-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
 
-          echo "| Registry | Image | Size |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Docker Hub | \`${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}\` | **$DOCKERHUB_SIZE** |" >> $GITHUB_STEP_SUMMARY
-          echo "| GHCR | \`${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}\` | **$GHCR_SIZE** |" >> $GITHUB_STEP_SUMMARY
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-          # Get layer information
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Layer Analysis" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          docker history ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} --no-trunc --format "table {{.CreatedBy}}\t{{.Size}}" | head -20 >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - name: Create release summary
+      - name: Log in to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY_GHCR }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_REF: ${{ github.ref }}
+          INPUT_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          echo "## Docker Crawl Images Published" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**@mdream/crawl with Playwright Chrome pre-installed**" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Available Images" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Quick Start" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "# Pull the crawl image" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# Crawl a website" >> $GITHUB_STEP_SUMMARY
-          echo "docker run --rm -v \$(pwd)/output:/app/output \\\\" >> $GITHUB_STEP_SUMMARY
-          echo "  ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} \\\\" >> $GITHUB_STEP_SUMMARY
-          echo "  --url https://example.com --output /app/output" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Available Commands" >> $GITHUB_STEP_SUMMARY
-          echo "- \`mdream-crawl\` - Main crawling command" >> $GITHUB_STEP_SUMMARY
-          echo "- \`crawl\` - Short alias" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Platforms" >> $GITHUB_STEP_SUMMARY
-          echo "- linux/amd64" >> $GITHUB_STEP_SUMMARY
+          if [[ -n "$INPUT_TAG" ]]; then
+            VERSION="$INPUT_TAG"
+          elif [[ "$GH_REF" == refs/tags/* ]]; then
+            VERSION="${GH_REF#refs/tags/v}"
+          elif [[ "$EVENT_NAME" == "release" ]]; then
+            VERSION="${RELEASE_TAG#v}"
+          else
+            VERSION=latest
+          fi
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building version: $VERSION"
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+            ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=core
+            type=raw,value=${{ steps.version.outputs.version }}-core
+          labels: |
+            org.opencontainers.image.title=mdream (core)
+            org.opencontainers.image.description=Native Rust HTML-to-Markdown converter (stdin to stdout)
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+
+      - name: Build and push core image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: .
+          file: Dockerfile.core
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=core
+          cache-to: type=gha,mode=max,scope=core
+
+      - name: Test published core image
+        run: |
+          echo "Testing published core image..."
+          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:core
+          docker pull "$IMAGE"
+
+          echo "Testing --help..."
+          timeout 60 docker run --rm "$IMAGE" --help > /dev/null
+
+          echo "Testing HTML-to-Markdown conversion..."
+          OUTPUT=$(printf '<h1>Hello</h1><p>world</p>' | timeout 60 docker run -i --rm "$IMAGE")
+          if [[ "$OUTPUT" == *"# Hello"* && "$OUTPUT" == *"world"* ]]; then
+            echo "Core conversion works!"
+          else
+            echo "Unexpected core output: $OUTPUT"
+            exit 1
+          fi
+
+      - name: Report core image size
+        env:
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:core
+        run: |
+          echo "## Core Image Size" >> "$GITHUB_STEP_SUMMARY"
+          SIZE=$(docker inspect "$IMAGE" --format='{{.Size}}' | numfmt --to=iec-i --suffix=B)
+          echo "- \`$IMAGE\` — **$SIZE**" >> "$GITHUB_STEP_SUMMARY"
 
   notify-success:
-    needs: publish-docker
+    needs: [publish-crawl, publish-core]
     runs-on: ubuntu-latest
     if: success()
     permissions: {}
     steps:
       - name: Notify release success
+        env:
+          RELEASE_REF: ${{ github.event.release.tag_name || github.ref_name }}
         run: |
-          echo "Docker images for ${{ github.event.release.tag_name || github.ref_name }} published successfully!"
-          echo "Images are available at:"
-          echo "- Docker Hub: ${{ secrets.DOCKERHUB_USERNAME }}/mdream"
-          echo "- GHCR: ghcr.io/${{ github.repository_owner }}/mdream"
+          echo "Docker images for $RELEASE_REF published successfully!"
+          echo "- crawl: ${{ secrets.DOCKERHUB_USERNAME }}/mdream:crawl (and :latest)"
+          echo "- core:  ${{ secrets.DOCKERHUB_USERNAME }}/mdream:core"

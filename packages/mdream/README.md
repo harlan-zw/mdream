@@ -116,6 +116,11 @@ const markdown = htmlToMarkdown('<h1>Hello World</h1><p>Some content.</p>')
 // # Hello World
 //
 // Some content.
+
+const text = htmlToMarkdown('<h1>Hello <strong>World</strong></h1>', {
+  format: 'text',
+})
+// Hello World
 ```
 
 ### `streamHtmlToMarkdown()`
@@ -213,6 +218,16 @@ interface MdreamOptions {
 
   /** Override tag rendering behavior. String values act as aliases. */
   tagOverrides?: Record<string, TagOverride | string>
+
+  /**
+   * Hard-wrap prose at this many characters, breaking on word boundaries.
+   * Applied inline during conversion (zero-cost when unset). Code blocks,
+   * tables, and headings are never wrapped. `0` (or unset) disables wrapping.
+   */
+  wrapWidth?: number
+
+  /** Output Markdown or plain text. Default: 'markdown' */
+  format?: 'markdown' | 'text'
 }
 ```
 
@@ -230,6 +245,16 @@ interface EngineOptions {
   origin?: string
   clean?: boolean | CleanOptions
   plugins?: BuiltinPlugins
+
+  /**
+   * Hard-wrap prose at this many characters, breaking on word boundaries.
+   * Code blocks, tables, and headings are never wrapped. `0` (or unset)
+   * disables wrapping.
+   */
+  wrapWidth?: number
+
+  /** Output Markdown or plain text. Default: 'markdown' */
+  format?: 'markdown' | 'text'
 }
 
 interface BuiltinPlugins {
@@ -302,6 +327,13 @@ interface FrontmatterConfig {
 
 Override how specific HTML tags are rendered in Markdown. String values act as aliases.
 
+> **Unknown tags pass through as plain text.** Tag matching is strict: only the standard HTML tags ship with built-in Markdown semantics. Custom elements (`<my-widget>`), web components, and any non-standard tag emit their text content verbatim, with the surrounding tag dropped. To render a custom tag with Markdown semantics, alias it with `tagOverrides`:
+>
+> ```ts
+> htmlToMarkdown('<my-em>hi</my-em>', { tagOverrides: { 'my-em': 'em' } })
+> // → "_hi_"
+> ```
+
 ```ts
 interface TagOverride {
   /** Markdown string to insert when entering this tag */
@@ -337,6 +369,20 @@ const markdown = htmlToMarkdown(html, {
   },
 })
 ```
+
+**Output is GitHub Flavored Markdown.** Mdream emits a fixed GFM dialect tuned for LLM input: ATX headings (`#`), fenced code blocks (` ``` `), `-` bullets, `_` emphasis, `**` strong, `---` horizontal rules, inline links. These are not configurable. For simple delimiter swaps you can use `tagOverrides`:
+
+```ts
+htmlToMarkdown(html, {
+  tagOverrides: {
+    em: { enter: '*', exit: '*', isInline: true }, // _x_  →  *x*
+    strong: { enter: '__', exit: '__', isInline: true }, // **x** →  __x__
+    hr: { enter: '* * *', exit: '' }, // ---  →  * * *
+  },
+})
+```
+
+Structural style differences (setext headings, indented code blocks, reference-style links, `~~~` fences, dynamic list markers) are out of scope. If you need turndown-style configurability, use [turndown](https://github.com/mixmark-io/turndown). If you have a use case for these in mdream, please open an issue.
 
 ### FilterOptions
 
@@ -845,15 +891,26 @@ cat index.html \
   | tee output.md
 ```
 
+**Plain text output:**
+
+```bash
+cat index.html \
+  | npx mdream --format text \
+  | tee output.txt
+```
+
 ### CLI Options
 
 | Option | Description |
 |--------|-------------|
 | `--origin <url>` | Base URL for resolving relative links and images |
 | `--preset minimal` | Enable the minimal preset |
+| `--wrap-width <n>` | Hard-wrap prose at `n` characters (code, tables, and headings are never wrapped) |
+| `--format <format>` | Output format: `markdown`, `text` |
+| `--text` | Alias for `--format text` |
 | `-h`, `--help` | Display help information |
 
-The CLI reads HTML from stdin and writes Markdown to stdout. It uses the streaming API internally.
+The CLI reads HTML from stdin and writes Markdown or plain text to stdout. It uses the streaming API internally.
 
 ## Browser and Edge Usage
 
@@ -872,6 +929,16 @@ const response = await fetch('https://example.com')
 for await (const chunk of streamHtmlToMarkdown(response.body)) {
   // process chunk
 }
+```
+
+If your toolchain doesn't resolve the export conditions, the raw wasm-bindgen build (web target) is exposed at `mdream/wasm` for manual initialization:
+
+```ts
+import init, { htmlToMarkdown } from 'mdream/wasm'
+import wasmModule from 'mdream/wasm/mdream_edge_bg.wasm'
+
+await init({ module_or_path: wasmModule })
+const markdown = htmlToMarkdown('<h1>Hello</h1>', {})
 ```
 
 You can also import the edge entry point directly:

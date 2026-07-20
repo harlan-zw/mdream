@@ -1,7 +1,7 @@
 {
   "name": "mdream",
   "type": "module",
-  "version": "1.0.4",
+  "version": "1.5.3",
   "description": "Ultra-performant HTML to Markdown Convertor Optimized for LLMs and llm.txt artifacts.",
   "author": {
     "name": "Harlan Wilton",
@@ -33,7 +33,12 @@
         "default": "./dist/worker.mjs"
       },
       "default": "./dist/worker.mjs"
-    }
+    },
+    "./wasm": {
+      "types": "./wasm/mdream_edge.d.ts",
+      "default": "./wasm/mdream_edge.js"
+    },
+    "./wasm/*": "./wasm/*"
   },
   "main": "./dist/index.mjs",
   "unpkg": "./dist/iife.js",
@@ -46,6 +51,7 @@
     "bin",
     "dist",
     "napi/",
+    "wasm-bundler/",
     "wasm/"
   ],
   "browser": "./dist/browser.mjs",
@@ -64,7 +70,7 @@
     "test:wiki-small:file": "cat test/fixtures/wikipedia-small.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "build": "obuild",
     "build:native": "cd ../../crates/node && napi build --platform --release",
-    "build:edge": "cd ../../crates/edge && wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge && wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --strip-producers ../../packages/mdream/wasm/mdream_edge_bg.wasm -o ../../packages/mdream/wasm/mdream_edge_bg.wasm",
+    "build:edge": "cd ../../crates/edge && wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge && wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --strip-producers ../../packages/mdream/wasm/mdream_edge_bg.wasm -o ../../packages/mdream/wasm/mdream_edge_bg.wasm && wasm-pack build --target bundler --out-dir ../../packages/mdream/wasm-bundler --out-name mdream_edge && wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --strip-producers ../../packages/mdream/wasm-bundler/mdream_edge_bg.wasm -o ../../packages/mdream/wasm-bundler/mdream_edge_bg.wasm",
     "typecheck": "tsc --noEmit",
     "dev:prepare": "obuild --stub",
     "test": "vitest test",

@@ -5,6 +5,7 @@ export default antfu({
     '**/.mdream/**',
     '**/examples/**',
     '**/crates/node/**',
+    '**/packages/mdream/wasm-bundler/**',
     '**/packages/mdream/wasm/**',
     'debug_test.ts',
     'rewrite-imports.mjs',

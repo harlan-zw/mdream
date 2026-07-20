@@ -172,6 +172,9 @@ export function* htmlToMarkdownSplitChunksStream(
   }
 
   const eventBuffer: NodeEvent[] = []
+  const processResolvedEvent: (event: NodeEvent) => void = opts.resolvedPlugins?.length
+    ? event => processPluginsForEvent(event, opts.resolvedPlugins, processor.state, processor.processEvent)
+    : processor.processEvent
 
   parseHtmlStream(html, parseState, (event: NodeEvent) => {
     eventBuffer.push(event)
@@ -179,6 +182,23 @@ export function* htmlToMarkdownSplitChunksStream(
 
   for (const event of eventBuffer) {
     const { type: eventType, node } = event
+
+    // Parsing finishes before this generator replays its buffered events, so
+    // the shared parser depth map is back at zero here. Restore the live depth
+    // for each event from its parent chain; exit handlers observe the element
+    // after its own depth has been decremented, matching the streaming parser.
+    const eventDepthMap = node.type === ELEMENT_NODE
+      ? (node as ElementNode).depthMap
+      : node.parent?.depthMap
+    if (eventDepthMap)
+      processor.state.depthMap.set(eventDepthMap)
+    else
+      processor.state.depthMap.fill(0)
+    if (eventType === NodeEventExit && node.type === ELEMENT_NODE) {
+      const tagId = (node as ElementNode).tagId
+      if (tagId !== undefined && tagId >= 0 && tagId < processor.state.depthMap.length)
+        processor.state.depthMap[tagId] = Math.max(0, processor.state.depthMap[tagId]! - 1)
+    }
 
     if (node.type === ELEMENT_NODE) {
       const element = node as ElementNode
@@ -226,7 +246,7 @@ export function* htmlToMarkdownSplitChunksStream(
       currentHeaderText += textNode.value
     }
 
-    processPluginsForEvent(event, opts.resolvedPlugins, processor.state, processor.processEvent)
+    processResolvedEvent(event)
 
     if (!opts.returnEachLine) {
       const currentMd = getCurrentMarkdown(processor.state)

@@ -9,6 +9,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to resume (for example, v1.5.2)
+        required: true
+        type: string
 
 jobs:
   native:
@@ -18,15 +24,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: [native]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53 # v6.0.1
 
       - name: Set node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 24
           cache: pnpm
@@ -35,15 +41,17 @@ jobs:
       - name: Force Set pnpm Registry
         run: pnpm config set registry https://registry.npmjs.org
 
-      - run: npx changelogithub
+      - name: Create GitHub release
+        if: github.event_name == 'push'
+        run: npx changelogithub
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
       - name: Install Dependencies
-        run: pnpm i
+        run: pnpm i --frozen-lockfile
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
 
@@ -60,7 +68,9 @@ jobs:
       - name: Move WASM edge artifacts
         run: |
           mkdir -p packages/mdream/wasm
-          cp -v artifacts/wasm-edge/* packages/mdream/wasm/
+          mkdir -p packages/mdream/wasm-bundler
+          cp -v artifacts/wasm-edge/wasm/* packages/mdream/wasm/
+          cp -v artifacts/wasm-edge/wasm-bundler/* packages/mdream/wasm-bundler/
 
       - name: Generate NAPI index.js and move to npm dirs
         working-directory: crates/node
@@ -73,30 +83,77 @@ jobs:
           cp crates/node/index.d.ts packages/mdream/napi/index.d.ts
           cp crates/node/index.d.ts packages/mdream/napi/index.d.mts
 
+      - name: Build publishable packages
+        # Build before the idempotent publish checks: a resumed release may
+        # skip @mdream/js and mdream, but @mdream/action still needs their
+        # generated declarations when ncc bundles the action.
+        run: pnpm --filter './packages/**' run build
+
       - name: Determine npm dist-tag
         id: dist-tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          VERSION="${RELEASE_TAG#v}"
           if [[ "$VERSION" == *"-"* ]]; then
-            echo "tag=--tag beta" >> $GITHUB_OUTPUT
+            echo "tag=--tag beta" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=" >> $GITHUB_OUTPUT
+            echo "tag=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publish platform packages
         run: |
+          failed=""
           for pkg in crates/node/npm/*/; do
             if [ -f "$pkg/package.json" ]; then
-              pnpm publish --access public --no-git-checks --provenance ${{ steps.dist-tag.outputs.tag }} --filter "$(node -p "require('./$pkg/package.json').name")" || true
+              name=$(node -p "require('./$pkg/package.json').name")
+              version=$(node -p "require('./$pkg/package.json').version")
+              # Idempotent on re-runs: skip versions that are already live.
+              if npm view "$name@$version" version >/dev/null 2>&1; then
+                echo "Skipping $name@$version (already published)"
+                continue
+              fi
+              if [ "$name" = "@mdream/rust-wasm32-wasi" ] && ! npm view "$name" name >/dev/null 2>&1; then
+                # Trusted publishing cannot create a package's first release.
+                echo "::warning::Skipping optional package $name@$version; bootstrap it on npm before enabling trusted publishing."
+                continue
+              fi
+              pnpm publish --access public --no-git-checks --provenance ${{ steps.dist-tag.outputs.tag }} --filter "$name" || failed="$failed $name"
             fi
           done
+          if [ -n "$failed" ]; then
+            echo "::error::Failed to publish platform packages:$failed"
+            exit 1
+          fi
 
       - name: Publish all other packages
-        run: pnpm publish -r --access public --no-git-checks --provenance --filter '!@mdream/rust-*' ${{ steps.dist-tag.outputs.tag }}
+        run: |
+          failed=""
+          for pkg in packages/*/; do
+            if [ -f "$pkg/package.json" ]; then
+              name=$(node -p "require('./$pkg/package.json').name")
+              version=$(node -p "require('./$pkg/package.json').version")
+              private=$(node -p "Boolean(require('./$pkg/package.json').private)")
+              if [ "$private" = "true" ]; then
+                continue
+              fi
+              if npm view "$name@$version" version >/dev/null 2>&1; then
+                echo "Skipping $name@$version (already published)"
+                continue
+              fi
+              pnpm publish --access public --no-git-checks --provenance ${{ steps.dist-tag.outputs.tag }} --filter "$name" || failed="$failed $name"
+            fi
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Failed to publish packages:$failed"
+            exit 1
+          fi
 
   docker:
     needs: [native]
     uses: ./.github/workflows/release-docker.yml
+    with:
+      tag: ${{ inputs.tag || github.ref_name }}
     secrets: inherit
     permissions:
       contents: read

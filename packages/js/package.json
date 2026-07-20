@@ -1,7 +1,7 @@
 {
   "name": "@mdream/js",
   "type": "module",
-  "version": "1.0.4",
+  "version": "1.5.3",
   "description": "JavaScript HTML-to-Markdown engine for mdream. Escape hatch for hooks and edge runtimes.",
   "author": {
     "name": "Harlan Wilton",
@@ -14,6 +14,7 @@
     "url": "https://github.com/harlan-zw/mdream",
     "directory": "packages/js"
   },
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
@@ -22,6 +23,14 @@
         "default": "./dist/index.mjs"
       },
       "default": "./dist/index.mjs"
+    },
+    "./core": {
+      "types": "./dist/core.d.mts",
+      "import": {
+        "types": "./dist/core.d.mts",
+        "default": "./dist/core.mjs"
+      },
+      "default": "./dist/core.mjs"
     },
     "./negotiate": {
       "types": "./dist/negotiate.d.mts",
@@ -85,7 +94,8 @@
     "build": "obuild",
     "typecheck": "tsc --noEmit",
     "dev:prepare": "obuild --stub",
-    "prepack": "pnpm run build"
+    "prepack": "pnpm run build",
+    "test:attw": "attw --pack --profile esm-only"
   },
   "dependencies": {
     "cac": "catalog:",

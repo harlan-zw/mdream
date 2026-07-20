@@ -71,11 +71,11 @@ fn main() {
         };
 
         let html2md_rs_ms = bench("html2md-rs", &html, |h| {
-            html2md_rs::to_md::from_html_to_md(h.to_string())
+            html2md_rs::to_md::safe_from_html_to_md(h.to_string()).unwrap_or_default()
         }, *iterations);
 
         let mdka_ms = bench("mdka", &html, |h| {
-            mdka::from_html(h)
+            mdka::html_to_markdown(h)
         }, *iterations);
 
         let h2m_ms = bench("html-to-markdown", &html, |h| {

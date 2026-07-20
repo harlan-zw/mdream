@@ -94,6 +94,7 @@ fuzz_target!(|input: FuzzInput| {
         clean_urls: input.clean_urls,
         clean,
         plugins,
+        ..Default::default()
     };
 
     let _ = html_to_markdown(&input.html, options);

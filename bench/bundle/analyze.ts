@@ -1,55 +1,34 @@
 import fs from 'node:fs'
-import path from 'node:path'
-import zlib from 'node:zlib'
+import process from 'node:process'
+import { collectBundleData, renderBundleReport } from './bundle-report.ts'
+import { renderPerfReport } from './perf-report.ts'
 
-function formatSize(size: number): string {
-  return `${Math.round(size / 102.4) / 10} kB`
+// Combined size + perf comment for the PR. Bundle data comes from the dist dirs
+// (BASE_DIST for the base baseline); perf comes from JSON the workflow produced by
+// running bench/perf-ci.mjs against the base and PR bundles (BASE_PERF / PR_PERF).
+// Each env var may hold a comma-separated list of JSON files (the timed run and the
+// no-opt alloc run); their benches are merged into one set.
+const sections: string[] = [renderBundleReport(collectBundleData())]
+
+function readPerf(paths?: string) {
+  if (!paths)
+    return null
+  const benches = paths.split(',').flatMap((path) => {
+    if (!path || !fs.existsSync(path))
+      return []
+    return JSON.parse(fs.readFileSync(path, 'utf8'))?.benches ?? []
+  })
+  return benches.length ? { benches } : null
 }
 
-function calculatePercentageDiff(current: number, previous: number): string {
-  if (previous === 0)
-    return 'N/A'
-  const diff = ((current - previous) / previous) * 100
-  return `${diff.toFixed(2)}%`
-}
+// guard on benches: a perf run that failed writes `{}`, which must skip the section, not crash
+const prPerf = readPerf(process.env.PR_PERF)
+if (prPerf?.benches?.length)
+  sections.push(renderPerfReport(readPerf(process.env.BASE_PERF), prPerf))
 
-function generateMarkdownTable(data: { name: string, size: number, gzippedSize: number, sizeDiff: string, gzippedSizeDiff: string, sizeDiffBytes: string, gzipSizeDiffBytes: string }[]): string {
-  const headers = ['File', 'Size', 'Gzipped Size', 'Size Diff', 'Gzipped Size Diff']
-  const rows = data.map(item => [item.name, `${formatSize(item.size)} (${item.size} B)`, `${formatSize(item.gzippedSize)} (${item.gzippedSize} B)`, `${item.sizeDiff} (${item.sizeDiffBytes} B)`, `${item.gzippedSizeDiff} ( ${item.gzipSizeDiffBytes} B)`])
-  const table = [
-    `| ${headers.join(' | ')} |`,
-    `| ${headers.map(() => '---').join(' | ')} |`,
-    ...rows.map(row => `| ${row.join(' | ')} |`),
-  ]
-  return table.join('\n')
-}
+let report = sections.join('\n\n---\n\n')
 
-const client = fs.readFileSync(path.resolve(__dirname, 'dist/client/client/minimal.mjs'))
-const server = fs.readFileSync(path.resolve(__dirname, 'dist/server/server/minimal.mjs'))
+if (process.env.BASE_LABEL)
+  report += `\n\n<sub>Baseline: ${process.env.BASE_LABEL} · gzip is the headline size metric · perf is directional (shared runner, noise-gated)</sub>`
 
-const lastStats = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'last.json'), 'utf8'))
-
-const data = [
-  {
-    name: 'Client',
-    size: client.length,
-    gzippedSize: zlib.gzipSync(client).length,
-    sizeDiff: calculatePercentageDiff(client.length, lastStats.client.size),
-    sizeDiffBytes: client.length - lastStats.client.size,
-    gzippedSizeDiff: calculatePercentageDiff(zlib.gzipSync(client).length, lastStats.client.gz),
-    gzipSizeDiffBytes: zlib.gzipSync(client).length - lastStats.client.gz,
-  },
-  {
-    name: 'Server',
-    size: server.length,
-    gzippedSize: zlib.gzipSync(server).length,
-    sizeDiffBytes: server.length - lastStats.server.size,
-    sizeDiff: calculatePercentageDiff(server.length, lastStats.server.size),
-    gzipSizeDiffBytes: zlib.gzipSync(server).length - lastStats.server.gz,
-    gzippedSizeDiff: calculatePercentageDiff(zlib.gzipSync(server).length, lastStats.server.gz),
-  },
-]
-
-// @ts-expect-error untyped
-// eslint-disable-next-line no-console
-console.log(generateMarkdownTable(data))
+process.stdout.write(`${report}\n`)

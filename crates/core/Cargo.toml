@@ -1,6 +1,7 @@
 [package]
 name = "mdream"
-version = "1.0.4"
+
+version.workspace = true
 
 edition.workspace = true
 

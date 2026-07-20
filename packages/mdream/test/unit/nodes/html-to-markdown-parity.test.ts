@@ -35,7 +35,7 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
       <li>Nested</li>
     </ul>
   </li>
-</ol>`, { engine })).toBe('1. Nine\n2. Ten\n3. Eleven\n  - Nested')
+</ol>`, { engine })).toBe('1. Nine\n2. Ten\n3. Eleven\n   - Nested')
   })
   it('blockquote: Blockquotes can include other elements, with seamless support for nested quotes.', async () => {
     const engine = await resolveEngine(engineConfig.engine)
@@ -59,7 +59,7 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
   Output a message: <br/>
   <code>console.log("hello")</code>
 </p>
-`, { engine })).toBe('Output a message:  `console.log("hello")`')
+`, { engine })).toBe('Output a message:\n`console.log("hello")`')
 
     // We need to pass the backtick testing for now
     const result = htmlToMarkdown(`<code>with \`\` backticks</code>`, { engine })
