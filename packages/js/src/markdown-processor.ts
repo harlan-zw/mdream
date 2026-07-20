@@ -626,7 +626,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       for (let i = output.length - 1; i >= 0; i--) {
         const frag = output[i]
         if (frag) {
-          if (frag[frag.length - 1] === '`')
+          if (frag.charCodeAt(frag.length - 1) === 96) // '`'
             effectiveLastNewLines = 0
           break
         }
