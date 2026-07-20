@@ -15,6 +15,45 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
     expect(markdown).toBe('__bold__')
   })
 
+  it('preserves code override delimiters around backticks', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<p><code>a `b` c</code></p>', {
+      plugins: {
+        tagOverrides: {
+          code: { enter: '<code>', exit: '</code>' },
+        },
+      },
+      engine,
+    })
+    expect(markdown).toBe('<code>a `b` c</code>')
+  })
+
+  it('preserves pre override delimiters around backticks', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<pre>a ``` b</pre>', {
+      plugins: {
+        tagOverrides: {
+          pre: { enter: '<pre>', exit: '</pre>' },
+        },
+      },
+      engine,
+    })
+    expect(markdown).toBe('<pre>a ``` b</pre>')
+  })
+
+  it('preserves a custom code exit without widening it', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<p><code>a `b` c</code></p>', {
+      plugins: {
+        tagOverrides: {
+          code: { exit: '</code>' },
+        },
+      },
+      engine,
+    })
+    expect(markdown).toBe('`a `b` c</code>')
+  })
+
   it('aliases custom element to known tag', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const markdown = htmlToMarkdown('<p><x-heading>content</x-heading></p>', {

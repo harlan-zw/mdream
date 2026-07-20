@@ -410,7 +410,10 @@ fn empty_figcaption_emits_no_markers() {
 fn non_empty_emphasis_unchanged_by_empty_drop() {
   assert_eq!(convert("<p><b>hi</b></p>"), "**hi**");
   assert_eq!(convert("<p><b><em>x</em></b></p>"), "**_x_**");
-  assert_eq!(convert("<p><b><img src=\"x.png\" alt=\"y\"></b></p>"), "**![y](x.png)**");
+  assert_eq!(
+    convert("<p><b><img src=\"x.png\" alt=\"y\"></b></p>"),
+    "**![y](x.png)**"
+  );
   // A nested empty pair after real content still drops, without dropping the
   // outer marker that content already made permanent.
   assert_eq!(convert("<p><b>x<i></i></b></p>"), "**x**");
@@ -530,7 +533,10 @@ fn block_code_fence_width_is_held_until_content_known() {
 #[test]
 fn code_backticks_not_escaped_and_delimiter_widened() {
   // Inline: delimiter widens past the inner run and pads a space each side.
-  assert_eq!(convert("<p>x: <code>a `b` c</code>.</p>"), "x: `` a `b` c ``.");
+  assert_eq!(
+    convert("<p>x: <code>a `b` c</code>.</p>"),
+    "x: `` a `b` c ``."
+  );
   assert_eq!(convert("<p><code>plain</code></p>"), "`plain`");
   assert_eq!(convert("<p><code>a`</code></p>"), "`` a` ``");
   // Fenced: fence grows to be longer than a triple-backtick inner run.
@@ -1440,6 +1446,97 @@ fn tag_override_enter_exit() {
     },
   );
   assert_eq!(md, "<<Hello>>");
+}
+
+#[test]
+fn code_tag_override_delimiters_are_not_widened() {
+  let overrides = vec![(
+    "code".to_string(),
+    TagOverrideConfig {
+      enter: Some("<code>".to_string()),
+      exit: Some("</code>".to_string()),
+      ..Default::default()
+    },
+  )];
+  let md = html_to_markdown(
+    "<p><code>a `b` c</code></p>",
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert_eq!(md, "<code>a `b` c</code>");
+}
+
+#[test]
+fn pre_tag_override_delimiters_are_not_widened() {
+  let overrides = vec![(
+    "pre".to_string(),
+    TagOverrideConfig {
+      enter: Some("<pre>".to_string()),
+      exit: Some("</pre>".to_string()),
+      ..Default::default()
+    },
+  )];
+  let md = html_to_markdown(
+    "<pre>a ``` b</pre>",
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert_eq!(md, "<pre>a ``` b</pre>");
+}
+
+#[test]
+fn code_tag_exit_override_is_not_widened() {
+  let overrides = vec![(
+    "code".to_string(),
+    TagOverrideConfig {
+      exit: Some("</code>".to_string()),
+      ..Default::default()
+    },
+  )];
+  let md = html_to_markdown(
+    "<p><code>a `b` c</code></p>",
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert_eq!(md, "`a `b` c</code>");
+}
+
+#[test]
+fn empty_code_exit_override_releases_streamed_output() {
+  let overrides = vec![(
+    "code".to_string(),
+    TagOverrideConfig {
+      exit: Some(String::new()),
+      ..Default::default()
+    },
+  )];
+  let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(overrides),
+      ..Default::default()
+    }),
+    ..Default::default()
+  });
+  let first = stream.process_chunk("<p><code>a</code><span>");
+  assert!(
+    first.contains("`a"),
+    "literal code exit held in buffer: {first:?}"
+  );
 }
 
 #[test]

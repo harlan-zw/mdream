@@ -45,6 +45,20 @@ impl ConvertState {
       return;
     }
 
+    let is_pre = self.stack[stack_len - 1].tag_id == Some(TAG_PRE);
+    let pre_enter_has_override = if is_pre && self.has_tag_overrides {
+      let node = &self.stack[stack_len - 1];
+      self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|p| p.tag_overrides.as_ref())
+        .and_then(|ovs| ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v))
+        .is_some_and(|ov| ov.enter.is_some())
+    } else {
+      false
+    };
+
     // Excluded nodes (including parsed template descendants) must return before
     // deferred <pre> handling so an inert subtree cannot mutate output state.
     if self.stack[stack_len - 1].excluded_from_markdown {
@@ -68,7 +82,7 @@ impl ConvertState {
     }
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
     // language) is emitted lazily above for the no-<code> case.
-    if !self.plain_text && self.stack[stack_len - 1].tag_id == Some(TAG_PRE) {
+    if !self.plain_text && !pre_enter_has_override && is_pre {
       let lang = Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
         .to_string();
       self.pre_fence_pending = true;
@@ -256,7 +270,9 @@ impl ConvertState {
         .iter()
         .position(|&b| b == b'`')
         .unwrap_or(0);
-      self.code_openers.push((output_start + bt, self.buffer.len()));
+      self
+        .code_openers
+        .push((output_start + bt, self.buffer.len()));
     }
 
     // Clean: track heading start for slug collection
@@ -306,6 +322,7 @@ impl ConvertState {
     let mut table_separator: Option<String> = None;
 
     // Check override exit string
+    let enter_has_override = override_config.is_some_and(|ov| ov.enter.is_some());
     let has_override = if let Some(ov) = override_config {
       if let Some(ref s) = ov.exit {
         output = Some(Cow::Owned(s.clone()));
@@ -352,16 +369,21 @@ impl ConvertState {
     // no widening). The delimiter is resized after that check. `is_inline_span`
     // distinguishes an inline `<code>` from a fenced block.
     let code_exit: Option<(usize, usize, bool)> = if !self.plain_text
+      && !enter_has_override
       && (tag_id == Some(TAG_CODE) || tag_id == Some(TAG_PRE))
-      && output.as_deref().is_some_and(|e| !e.is_empty())
     {
-      self.code_openers.pop().map(|(delim_start, content_start)| {
-        (
-          delim_start,
-          content_start,
-          tag_id == Some(TAG_CODE) && self.depth_map[TAG_PRE as usize] == 0,
-        )
-      })
+      let opener = self.code_openers.pop();
+      if !has_override && output.as_deref().is_some_and(|e| !e.is_empty()) {
+        opener.map(|(delim_start, content_start)| {
+          (
+            delim_start,
+            content_start,
+            tag_id == Some(TAG_CODE) && self.depth_map[TAG_PRE as usize] == 0,
+          )
+        })
+      } else {
+        None
+      }
     } else {
       None
     };
@@ -603,7 +625,9 @@ impl ConvertState {
           let width = max_run + 1;
           let mut opener = "`".repeat(width);
           opener.push(' ');
-          self.buffer.replace_range(delim_start..delim_start + 1, &opener);
+          self
+            .buffer
+            .replace_range(delim_start..delim_start + 1, &opener);
           let mut closer = String::with_capacity(width + 1);
           closer.push(' ');
           closer.push_str(&"`".repeat(width));
@@ -612,7 +636,9 @@ impl ConvertState {
       } else if max_run >= 3 {
         let width = max_run + 1;
         let fence = "`".repeat(width);
-        self.buffer.replace_range(delim_start..delim_start + 3, &fence);
+        self
+          .buffer
+          .replace_range(delim_start..delim_start + 3, &fence);
         if let Some(o) = output.as_deref()
           && let Some(pos) = o.find("```")
         {
@@ -678,10 +704,16 @@ impl ConvertState {
     };
     self.last_content_cache_len = fence.len();
     let output_start = self.buffer.len();
-    let bt = fence.as_bytes().iter().position(|&b| b == b'`').unwrap_or(0);
+    let bt = fence
+      .as_bytes()
+      .iter()
+      .position(|&b| b == b'`')
+      .unwrap_or(0);
     self.buffer.push_str(&fence);
     // issue #149: record the fence so its width can grow at <pre> exit.
-    self.code_openers.push((output_start + bt, self.buffer.len()));
+    self
+      .code_openers
+      .push((output_start + bt, self.buffer.len()));
     self.last_node_is_inline = false;
   }
 

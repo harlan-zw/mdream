@@ -442,7 +442,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   // streaming, an open region holds the buffer at its opener so the delimiter
   // is never yielded before it can be resized.
   const codeOpeners: number[] = []
-  let codeOpenerCount = 0
 
   let lastYieldedLength = 0
   let hasYieldedContent = false
@@ -483,13 +482,13 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         else if (el.tagId !== TAG_PRE) {
           flushPreFence(state)
           if (state.preOwnFence)
-            codeOpeners[codeOpenerCount++] = buff.length - 1
+            codeOpeners.push(buff.length - 1)
         }
       }
       else if (node.type === TEXT_NODE && hasNonWhitespace((node as TextNode).value)) {
         flushPreFence(state)
         if (state.preOwnFence)
-          codeOpeners[codeOpenerCount++] = buff.length - 1
+          codeOpeners.push(buff.length - 1)
       }
     }
 
@@ -630,10 +629,13 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // even if the empty-pair drop below returns early (empty code emits nothing
     // to size). Only <code>/<pre> that emitted an opener land here.
     let codeExitOpenerIdx = -1
-    if (eventType === NodeEventExit && codeOpenerCount && !state.plainText
-      && handlerOutput !== undefined
+    if (eventType === NodeEventExit && codeOpeners.length && !state.plainText
+      && !handler?.literalEnter
+      && (handlerOutput !== undefined || handler?.literalExit)
       && (element.tagId === TAG_CODE || element.tagId === TAG_PRE)) {
-      codeExitOpenerIdx = codeOpeners[--codeOpenerCount]!
+      const openerIdx = codeOpeners.pop()!
+      if (!handler?.literalExit)
+        codeExitOpenerIdx = openerIdx
     }
 
     if (eventType === NodeEventExit && openMarkerCount) {
@@ -820,8 +822,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // issue #149: record a <code> opener (inline span, or a <code> that owns
     // its <pre>'s fence) as the last-pushed fragment so its delimiter can be
     // widened at close. A bare <pre>'s fence is recorded in the flush hook.
-    if (eventType === NodeEventEnter && element.tagId === TAG_CODE && handlerOutput !== undefined) {
-      codeOpeners[codeOpenerCount++] = buff.length - 1
+    if (eventType === NodeEventEnter && element.tagId === TAG_CODE && handlerOutput !== undefined && !handler?.literalEnter) {
+      codeOpeners.push(buff.length - 1)
     }
 
     updateListIndent(state, element, eventType)
@@ -895,7 +897,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // An open code span / fence delimiter is widened at its close (issue #149);
     // hold the buffer at the earliest open opener so the delimiter is never
     // yielded before it can be resized.
-    const codeHeld = codeOpenerCount > 0
+    const codeHeld = codeOpeners.length > 0
     if (codeHeld) {
       const openFragment = codeOpeners[0]!
       let codePos = 0
