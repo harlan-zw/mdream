@@ -266,7 +266,7 @@ describe.each(engines)('tables $name', (engineConfig) => {
     )
   })
 
-  it('HTML-escapes decoded < > & in a cell <pre><code> (XSS regression)', async () => {
+  it('html-escapes decoded < > & in a cell <pre><code> (XSS regression)', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<table><tr><td><pre><code>&lt;script&gt;alert(1)&amp;2&lt;/script&gt;</code></pre></td><td>ok</td></tr></table>'
     expect(htmlToMarkdown(html, { engine })).toBe(

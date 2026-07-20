@@ -173,7 +173,7 @@ function isAutolinkUri(s: string): boolean {
 // Helper function to check if we're inside a table cell
 function isInsideTableCell(state: HandlerContext['state']): boolean {
   const depthMap = state.depthMap!
-  return depthMap[TAG_TD] > 0 || depthMap[TAG_TH] > 0
+  return depthMap[TAG_TD]! > 0 || depthMap[TAG_TH]! > 0
 }
 
 function isInsideRawHtmlBlock(state: HandlerContext['state']): boolean {

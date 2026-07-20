@@ -585,8 +585,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         // text node must be escaped (so decoded `<`/`&` are not live HTML) and
         // its line breaks folded into <br> (issue #147). Runs on all such text,
         // not only text with newlines, since escaping is always required.
-        if (state.depthMap[TAG_PRE] > 0
-          && (state.depthMap[TAG_TD] > 0 || state.depthMap[TAG_TH] > 0)) {
+        if (state.depthMap[TAG_PRE]! > 0
+          && (state.depthMap[TAG_TD]! > 0 || state.depthMap[TAG_TH]! > 0)) {
           textNode.value = foldPreLinesToBr(textNode.value)
         }
 
