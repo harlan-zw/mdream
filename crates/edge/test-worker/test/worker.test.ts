@@ -1,6 +1,63 @@
 import { SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 
+const OPTIONS_HTML = '<!DOCTYPE html><html><head><title>Edge Options</title></head><body><div>Outside chrome</div><main><nav>Inside nav</nav><h1>Real Content</h1><p><a href="#">Empty link</a></p></main><footer>Footer junk</footer></body></html>'
+const OPTIONS_MARKDOWN = '---\ntitle: "Edge Options"\n---\n\n# Real Content\n\nEmpty link'
+
+describe('mdream package export in Workers runtime (#119)', () => {
+  it('converts HTML via the workerd export condition', async () => {
+    const res = await SELF.fetch('http://localhost/pkg/convert', {
+      method: 'POST',
+      body: '<h1>Hello</h1><p>World</p>',
+    })
+    const md = await res.text()
+    expect(md).toContain('# Hello')
+    expect(md).toContain('World')
+  })
+
+  it('streams HTML via the workerd export condition', async () => {
+    const res = await SELF.fetch('http://localhost/pkg/stream', {
+      method: 'POST',
+      body: '<h1>Stream</h1><ul><li>One</li><li>Two</li></ul>',
+    })
+    const md = await res.text()
+    expect(md).toContain('# Stream')
+    expect(md).toContain('- One')
+    expect(md).toContain('- Two')
+  })
+
+  it('honours public options via the workerd export condition', async () => {
+    const res = await SELF.fetch('http://localhost/pkg/options', {
+      method: 'POST',
+      body: OPTIONS_HTML,
+    })
+    expect(await res.text()).toBe(OPTIONS_MARKDOWN)
+  })
+
+  it('normalizes public options for streaming once before conversion', async () => {
+    const res = await SELF.fetch('http://localhost/pkg/options/stream', {
+      method: 'POST',
+      body: OPTIONS_HTML,
+    })
+    expect((await res.text()).trimEnd()).toBe(OPTIONS_MARKDOWN)
+  })
+
+  it('dispatches frontmatter and extraction callbacks outside WASM', async () => {
+    const res = await SELF.fetch('http://localhost/pkg/options/callbacks', {
+      method: 'POST',
+      body: '<html><head><title>Callbacks</title></head><body><h1>Heading</h1></body></html>',
+    })
+    const data = await res.json() as {
+      markdown: string
+      frontmatter: Record<string, string>
+      heading: { tagName: string, textContent: string }
+    }
+    expect(data.markdown).toContain('# Heading')
+    expect(data.frontmatter).toMatchObject({ title: 'Callbacks' })
+    expect(data.heading).toMatchObject({ tagName: 'h1', textContent: 'Heading' })
+  })
+})
+
 describe('mdream WASM in Workers runtime', () => {
   it('converts basic HTML to Markdown', async () => {
     const res = await SELF.fetch('http://localhost/convert', {

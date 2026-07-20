@@ -1,263 +1,210 @@
-// HTML named character references — HTML4 + common HTML5 (245 entries)
-// Mirrors packages/js/src/entities.ts for parity between JS and Rust engines.
-// Source: https://html.spec.whatwg.org/entities.json
-//
-// Intentionally omitted:
-//   &emsp; &ensp; &thinsp; — space variants cause table cell layout issues
-//   &lrm; &rlm; — invisible bidi formatting characters
-//   &shy; — invisible soft hyphen
-//   &zwj; &zwnj; — zero-width formatting characters
+use std::borrow::Cow;
 
-/// Look up a named HTML entity (without `&` prefix and `;` suffix).
-/// Returns the decoded character, or `None` if unknown.
-#[allow(clippy::too_many_lines)]
-pub(crate) fn lookup_named_entity(name: &[u8]) -> Option<char> {
-    match name {
-        b"aacute" => Some('\u{00E1}'),
-        b"Aacute" => Some('\u{00C1}'),
-        b"acirc" => Some('\u{00E2}'),
-        b"Acirc" => Some('\u{00C2}'),
-        b"acute" => Some('\u{00B4}'),
-        b"aelig" => Some('\u{00E6}'),
-        b"AElig" => Some('\u{00C6}'),
-        b"agrave" => Some('\u{00E0}'),
-        b"Agrave" => Some('\u{00C0}'),
-        b"alefsym" => Some('\u{2135}'),
-        b"alpha" => Some('\u{03B1}'),
-        b"Alpha" => Some('\u{0391}'),
-        b"amp" => Some('&'),
-        b"and" => Some('\u{2227}'),
-        b"ang" => Some('\u{2220}'),
-        b"apos" => Some('\''),
-        b"aring" => Some('\u{00E5}'),
-        b"Aring" => Some('\u{00C5}'),
-        b"asymp" => Some('\u{2248}'),
-        b"atilde" => Some('\u{00E3}'),
-        b"Atilde" => Some('\u{00C3}'),
-        b"auml" => Some('\u{00E4}'),
-        b"Auml" => Some('\u{00C4}'),
-        b"bdquo" => Some('\u{201E}'),
-        b"beta" => Some('\u{03B2}'),
-        b"Beta" => Some('\u{0392}'),
-        b"brvbar" => Some('\u{00A6}'),
-        b"bull" => Some('\u{2022}'),
-        b"cap" => Some('\u{2229}'),
-        b"ccedil" => Some('\u{00E7}'),
-        b"Ccedil" => Some('\u{00C7}'),
-        b"cedil" => Some('\u{00B8}'),
-        b"cent" => Some('\u{00A2}'),
-        b"chi" => Some('\u{03C7}'),
-        b"Chi" => Some('\u{03A7}'),
-        b"circ" => Some('\u{02C6}'),
-        b"clubs" => Some('\u{2663}'),
-        b"cong" => Some('\u{2245}'),
-        b"copy" => Some('\u{00A9}'),
-        b"crarr" => Some('\u{21B5}'),
-        b"cup" => Some('\u{222A}'),
-        b"curren" => Some('\u{00A4}'),
-        b"dagger" => Some('\u{2020}'),
-        b"Dagger" => Some('\u{2021}'),
-        b"darr" => Some('\u{2193}'),
-        b"dArr" => Some('\u{21D3}'),
-        b"deg" => Some('\u{00B0}'),
-        b"delta" => Some('\u{03B4}'),
-        b"Delta" => Some('\u{0394}'),
-        b"diams" => Some('\u{2666}'),
-        b"divide" => Some('\u{00F7}'),
-        b"eacute" => Some('\u{00E9}'),
-        b"Eacute" => Some('\u{00C9}'),
-        b"ecirc" => Some('\u{00EA}'),
-        b"Ecirc" => Some('\u{00CA}'),
-        b"egrave" => Some('\u{00E8}'),
-        b"Egrave" => Some('\u{00C8}'),
-        b"empty" => Some('\u{2205}'),
-        b"epsilon" => Some('\u{03B5}'),
-        b"Epsilon" => Some('\u{0395}'),
-        b"equiv" => Some('\u{2261}'),
-        b"eta" => Some('\u{03B7}'),
-        b"Eta" => Some('\u{0397}'),
-        b"eth" => Some('\u{00F0}'),
-        b"ETH" => Some('\u{00D0}'),
-        b"euml" => Some('\u{00EB}'),
-        b"Euml" => Some('\u{00CB}'),
-        b"euro" => Some('\u{20AC}'),
-        b"exist" => Some('\u{2203}'),
-        b"fnof" => Some('\u{0192}'),
-        b"forall" => Some('\u{2200}'),
-        b"frac12" => Some('\u{00BD}'),
-        b"frac14" => Some('\u{00BC}'),
-        b"frac34" => Some('\u{00BE}'),
-        b"frasl" => Some('\u{2044}'),
-        b"gamma" => Some('\u{03B3}'),
-        b"Gamma" => Some('\u{0393}'),
-        b"ge" => Some('\u{2265}'),
-        b"gt" => Some('>'),
-        b"harr" => Some('\u{2194}'),
-        b"hArr" => Some('\u{21D4}'),
-        b"hearts" => Some('\u{2665}'),
-        b"hellip" => Some('\u{2026}'),
-        b"iacute" => Some('\u{00ED}'),
-        b"Iacute" => Some('\u{00CD}'),
-        b"icirc" => Some('\u{00EE}'),
-        b"Icirc" => Some('\u{00CE}'),
-        b"iexcl" => Some('\u{00A1}'),
-        b"igrave" => Some('\u{00EC}'),
-        b"Igrave" => Some('\u{00CC}'),
-        b"image" => Some('\u{2111}'),
-        b"infin" => Some('\u{221E}'),
-        b"int" => Some('\u{222B}'),
-        b"iota" => Some('\u{03B9}'),
-        b"Iota" => Some('\u{0399}'),
-        b"iquest" => Some('\u{00BF}'),
-        b"isin" => Some('\u{2208}'),
-        b"iuml" => Some('\u{00EF}'),
-        b"Iuml" => Some('\u{00CF}'),
-        b"kappa" => Some('\u{03BA}'),
-        b"Kappa" => Some('\u{039A}'),
-        b"lambda" => Some('\u{03BB}'),
-        b"Lambda" => Some('\u{039B}'),
-        b"lang" => Some('\u{27E8}'),
-        b"laquo" => Some('\u{00AB}'),
-        b"larr" => Some('\u{2190}'),
-        b"lArr" => Some('\u{21D0}'),
-        b"lceil" => Some('\u{2308}'),
-        b"ldquo" => Some('\u{201C}'),
-        b"le" => Some('\u{2264}'),
-        b"lfloor" => Some('\u{230A}'),
-        b"lowast" => Some('\u{2217}'),
-        b"loz" => Some('\u{25CA}'),
-        b"lsaquo" => Some('\u{2039}'),
-        b"lsquo" => Some('\u{2018}'),
-        b"lt" => Some('<'),
-        b"macr" => Some('\u{00AF}'),
-        b"mdash" => Some('\u{2014}'),
-        b"micro" => Some('\u{00B5}'),
-        b"middot" => Some('\u{00B7}'),
-        b"minus" => Some('\u{2212}'),
-        b"mu" => Some('\u{03BC}'),
-        b"Mu" => Some('\u{039C}'),
-        b"nabla" => Some('\u{2207}'),
-        b"nbsp" => Some(' '),
-        b"ndash" => Some('\u{2013}'),
-        b"ne" => Some('\u{2260}'),
-        b"ni" => Some('\u{220B}'),
-        b"not" => Some('\u{00AC}'),
-        b"notin" => Some('\u{2209}'),
-        b"nsub" => Some('\u{2284}'),
-        b"ntilde" => Some('\u{00F1}'),
-        b"Ntilde" => Some('\u{00D1}'),
-        b"nu" => Some('\u{03BD}'),
-        b"Nu" => Some('\u{039D}'),
-        b"oacute" => Some('\u{00F3}'),
-        b"Oacute" => Some('\u{00D3}'),
-        b"ocirc" => Some('\u{00F4}'),
-        b"Ocirc" => Some('\u{00D4}'),
-        b"oelig" => Some('\u{0153}'),
-        b"OElig" => Some('\u{0152}'),
-        b"ograve" => Some('\u{00F2}'),
-        b"Ograve" => Some('\u{00D2}'),
-        b"oline" => Some('\u{203E}'),
-        b"omega" => Some('\u{03C9}'),
-        b"Omega" => Some('\u{03A9}'),
-        b"omicron" => Some('\u{03BF}'),
-        b"Omicron" => Some('\u{039F}'),
-        b"oplus" => Some('\u{2295}'),
-        b"or" => Some('\u{2228}'),
-        b"ordf" => Some('\u{00AA}'),
-        b"ordm" => Some('\u{00BA}'),
-        b"oslash" => Some('\u{00F8}'),
-        b"Oslash" => Some('\u{00D8}'),
-        b"otilde" => Some('\u{00F5}'),
-        b"Otilde" => Some('\u{00D5}'),
-        b"otimes" => Some('\u{2297}'),
-        b"ouml" => Some('\u{00F6}'),
-        b"Ouml" => Some('\u{00D6}'),
-        b"para" => Some('\u{00B6}'),
-        b"part" => Some('\u{2202}'),
-        b"permil" => Some('\u{2030}'),
-        b"perp" => Some('\u{22A5}'),
-        b"phi" => Some('\u{03C6}'),
-        b"Phi" => Some('\u{03A6}'),
-        b"pi" => Some('\u{03C0}'),
-        b"Pi" => Some('\u{03A0}'),
-        b"piv" => Some('\u{03D6}'),
-        b"plusmn" => Some('\u{00B1}'),
-        b"pound" => Some('\u{00A3}'),
-        b"prime" => Some('\u{2032}'),
-        b"Prime" => Some('\u{2033}'),
-        b"prod" => Some('\u{220F}'),
-        b"prop" => Some('\u{221D}'),
-        b"psi" => Some('\u{03C8}'),
-        b"Psi" => Some('\u{03A8}'),
-        b"quot" => Some('"'),
-        b"radic" => Some('\u{221A}'),
-        b"rang" => Some('\u{27E9}'),
-        b"raquo" => Some('\u{00BB}'),
-        b"rarr" => Some('\u{2192}'),
-        b"rArr" => Some('\u{21D2}'),
-        b"rceil" => Some('\u{2309}'),
-        b"rdquo" => Some('\u{201D}'),
-        b"real" => Some('\u{211C}'),
-        b"reg" => Some('\u{00AE}'),
-        b"rfloor" => Some('\u{230B}'),
-        b"rho" => Some('\u{03C1}'),
-        b"Rho" => Some('\u{03A1}'),
-        b"rsaquo" => Some('\u{203A}'),
-        b"rsquo" => Some('\u{2019}'),
-        b"sbquo" => Some('\u{201A}'),
-        b"scaron" => Some('\u{0161}'),
-        b"Scaron" => Some('\u{0160}'),
-        b"sdot" => Some('\u{22C5}'),
-        b"sect" => Some('\u{00A7}'),
-        b"sigma" => Some('\u{03C3}'),
-        b"Sigma" => Some('\u{03A3}'),
-        b"sigmaf" => Some('\u{03C2}'),
-        b"sim" => Some('\u{223C}'),
-        b"spades" => Some('\u{2660}'),
-        b"sub" => Some('\u{2282}'),
-        b"sube" => Some('\u{2286}'),
-        b"sum" => Some('\u{2211}'),
-        b"sup" => Some('\u{2283}'),
-        b"sup1" => Some('\u{00B9}'),
-        b"sup2" => Some('\u{00B2}'),
-        b"sup3" => Some('\u{00B3}'),
-        b"supe" => Some('\u{2287}'),
-        b"szlig" => Some('\u{00DF}'),
-        b"tau" => Some('\u{03C4}'),
-        b"Tau" => Some('\u{03A4}'),
-        b"there4" => Some('\u{2234}'),
-        b"theta" => Some('\u{03B8}'),
-        b"Theta" => Some('\u{0398}'),
-        b"thetasym" => Some('\u{03D1}'),
-        b"thorn" => Some('\u{00FE}'),
-        b"THORN" => Some('\u{00DE}'),
-        b"tilde" => Some('\u{02DC}'),
-        b"times" => Some('\u{00D7}'),
-        b"trade" => Some('\u{2122}'),
-        b"uacute" => Some('\u{00FA}'),
-        b"Uacute" => Some('\u{00DA}'),
-        b"uarr" => Some('\u{2191}'),
-        b"uArr" => Some('\u{21D1}'),
-        b"ucirc" => Some('\u{00FB}'),
-        b"Ucirc" => Some('\u{00DB}'),
-        b"ugrave" => Some('\u{00F9}'),
-        b"Ugrave" => Some('\u{00D9}'),
-        b"uml" => Some('\u{00A8}'),
-        b"upsih" => Some('\u{03D2}'),
-        b"upsilon" => Some('\u{03C5}'),
-        b"Upsilon" => Some('\u{03A5}'),
-        b"uuml" => Some('\u{00FC}'),
-        b"Uuml" => Some('\u{00DC}'),
-        b"weierp" => Some('\u{2118}'),
-        b"xi" => Some('\u{03BE}'),
-        b"Xi" => Some('\u{039E}'),
-        b"yacute" => Some('\u{00FD}'),
-        b"Yacute" => Some('\u{00DD}'),
-        b"yen" => Some('\u{00A5}'),
-        b"yuml" => Some('\u{00FF}'),
-        b"Yuml" => Some('\u{0178}'),
-        b"zeta" => Some('\u{03B6}'),
-        b"Zeta" => Some('\u{0396}'),
-        _ => None,
+#[path = "entities_generated.rs"]
+mod generated;
+
+use generated::{
+  MAX_ENTITY_NAME_LENGTH, MAX_LEGACY_ENTITY_NAME_LENGTH, lookup_legacy_named_entity,
+  lookup_named_entity,
+};
+
+#[inline]
+pub(crate) fn decode_html_entities(text: &str) -> Cow<'_, str> {
+  decode_html_entities_in_context(text, false)
+}
+
+#[inline]
+pub(crate) fn decode_html_attribute_entities(text: &str) -> Cow<'_, str> {
+  decode_html_entities_in_context(text, true)
+}
+
+#[inline]
+fn decode_html_entities_in_context(text: &str, in_attribute: bool) -> Cow<'_, str> {
+  if !text.as_bytes().contains(&b'&') {
+    return Cow::Borrowed(text);
+  }
+  Cow::Owned(decode_html_entities_alloc(text, in_attribute))
+}
+
+/// Resolve a numeric character reference value per the HTML standard.
+fn decode_numeric_ref(code: u32) -> char {
+  // Undefined Windows-1252 slots intentionally retain their C1 controls.
+  const C1_REPLACEMENTS: [u32; 32] = [
+    0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039,
+    0x0152, 0x008D, 0x017D, 0x008F, 0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+    0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
+  ];
+
+  let code = if (0x80..=0x9F).contains(&code) {
+    C1_REPLACEMENTS[(code - 0x80) as usize]
+  } else {
+    code
+  };
+  if code == 0 || code > 0x10_FFFF || (0xD800..=0xDFFF).contains(&code) {
+    return '\u{FFFD}';
+  }
+  char::from_u32(code).unwrap_or('\u{FFFD}')
+}
+
+#[inline]
+fn is_ascii_alphanumeric(byte: u8) -> bool {
+  byte.is_ascii_alphanumeric()
+}
+
+fn decode_html_entities_alloc(text: &str, in_attribute: bool) -> String {
+  let bytes = text.as_bytes();
+  let len = bytes.len();
+  let mut result = String::with_capacity(len);
+  let mut i = 0;
+
+  while i < len {
+    if bytes[i] != b'&' {
+      let plain_start = i;
+      while i < len && bytes[i] != b'&' {
+        i += 1;
+      }
+      result.push_str(&text[plain_start..i]);
+      continue;
     }
+
+    // Consume numeric references through the first non-digit. The semicolon
+    // is optional; overflow saturates while all remaining digits are consumed.
+    if i + 2 < len && bytes[i + 1] == b'#' {
+      let mut end = i + 2;
+      let is_hex = bytes[end] == b'x' || bytes[end] == b'X';
+      if is_hex {
+        end += 1;
+      }
+      let digit_start = end;
+      let radix = if is_hex { 16 } else { 10 };
+      let mut code_point = 0u32;
+
+      while end < len {
+        let digit = match bytes[end] {
+          b'0'..=b'9' => Some(u32::from(bytes[end] - b'0')),
+          b'A'..=b'F' if is_hex => Some(u32::from(bytes[end] - b'A' + 10)),
+          b'a'..=b'f' if is_hex => Some(u32::from(bytes[end] - b'a' + 10)),
+          _ => None,
+        };
+        let Some(digit) = digit else {
+          break;
+        };
+        code_point = code_point
+          .saturating_mul(radix)
+          .saturating_add(digit)
+          .min(0x11_0000);
+        end += 1;
+      }
+
+      if end > digit_start {
+        result.push(decode_numeric_ref(code_point));
+        if end < len && bytes[end] == b';' {
+          end += 1;
+        }
+        i = end;
+        continue;
+      }
+    }
+
+    // A canonical name includes a semicolon. If that misses, find the longest
+    // legacy name prefix; only those 106 names may omit their semicolon.
+    let name_start = i + 1;
+    let mut name_end = name_start;
+    let scan_end = len.min(name_start + MAX_ENTITY_NAME_LENGTH);
+    while name_end < scan_end && is_ascii_alphanumeric(bytes[name_end]) {
+      name_end += 1;
+    }
+
+    if name_end > name_start
+      && name_end < len
+      && bytes[name_end] == b';'
+      && let Some(replacement) = lookup_named_entity(&bytes[name_start..name_end])
+    {
+      result.push_str(replacement);
+      i = name_end + 1;
+      continue;
+    }
+
+    let mut legacy_end = name_end.min(name_start + MAX_LEGACY_ENTITY_NAME_LENGTH);
+    let mut decoded_legacy = false;
+    while legacy_end > name_start {
+      let name = &bytes[name_start..legacy_end];
+      if let Some(replacement) = lookup_legacy_named_entity(name) {
+        let next = bytes.get(legacy_end).copied();
+        let ambiguous_attribute =
+          in_attribute && next.is_some_and(|byte| byte == b'=' || is_ascii_alphanumeric(byte));
+        if !ambiguous_attribute {
+          result.push_str(replacement);
+          i = legacy_end;
+          decoded_legacy = true;
+        }
+        break;
+      }
+      legacy_end -= 1;
+    }
+    if decoded_legacy {
+      continue;
+    }
+
+    result.push('&');
+    i += 1;
+  }
+
+  result
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn no_ampersand_borrows() {
+    assert!(matches!(
+      decode_html_entities("plain text"),
+      Cow::Borrowed(_)
+    ));
+  }
+
+  #[test]
+  fn decodes_canonical_names_using_the_longest_match() {
+    assert_eq!(decode_html_entities("&copy; &notin; &thetasym;"), "© ∉ ϑ");
+    assert_eq!(decode_html_entities("&notit;"), "¬it;");
+  }
+
+  #[test]
+  fn decodes_semicolonless_numeric_references_without_swallowing() {
+    assert_eq!(
+      decode_html_entities("&#65 &#x41; &#65copy; &#x41zz;"),
+      "A A Acopy; Azz;"
+    );
+  }
+
+  #[test]
+  fn numeric_references_follow_html_replacement_rules() {
+    assert_eq!(
+      decode_html_entities("&#x80; &#0; &#xD800; &#x110000; &#999999999999999999999;"),
+      "€ � � � �"
+    );
+  }
+
+  #[test]
+  fn named_references_preserve_nbsp_and_legacy_uppercase_names() {
+    assert_eq!(decode_html_entities("&nbsp;"), "\u{00A0}");
+    assert_eq!(decode_html_entities("&COPY;"), "©");
+  }
+
+  #[test]
+  fn attribute_ambiguity_only_applies_to_legacy_names() {
+    assert_eq!(
+      decode_html_attribute_entities("&copycat &copy=1 &copy! &copy;cat"),
+      "&copycat &copy=1 ©! ©cat"
+    );
+    assert_eq!(decode_html_entities("&copycat"), "©cat");
+  }
+
+  #[test]
+  fn unknown_references_do_not_scan_to_a_later_semicolon() {
+    assert_eq!(decode_html_entities("&bogus &#65;"), "&bogus A");
+    assert_eq!(decode_html_entities("&#nope; &#xnope;"), "&#nope; &#xnope;");
+  }
 }

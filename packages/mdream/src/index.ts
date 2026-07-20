@@ -1,5 +1,5 @@
-import type { HtmlToMarkdownOptions, PluginOptions, TagOverrideNapi } from '../napi/index.js'
 import { htmlToMarkdown as _htmlToMarkdown, MarkdownStream as _MarkdownStream } from '../napi/index.mjs'
+import { resolveOptions } from './resolve-options.js'
 
 export interface CleanOptions {
   /** Strip tracking query parameters (utm_*, fbclid, gclid, etc.) from URLs */
@@ -72,94 +72,20 @@ export interface MdreamOptions {
   extraction?: Record<string, (element: ExtractedElement) => void>
   /** Tag overrides. String values act as aliases */
   tagOverrides?: Record<string, TagOverride | string>
-}
-
-const MINIMAL_FILTER_EXCLUDE = ['form', 'fieldset', 'object', 'embed', 'footer', 'aside', 'iframe', 'input', 'textarea', 'select', 'button', 'nav'] as const
-const MINIMAL_FILTER_DEFAULT = { exclude: MINIMAL_FILTER_EXCLUDE as unknown as string[] }
-
-const CLEAN_ALL: CleanOptions = { urls: true, fragments: true, emptyLinks: true, redundantLinks: true, selfLinkHeadings: true, emptyImages: true, emptyLinkText: true }
-
-function resolveCleanConfig(options: Partial<MdreamOptions>, minimal: boolean): { cleanUrls: boolean, clean?: CleanOptions } {
-  let cleanOpt = options.clean
-  if (cleanOpt === undefined && minimal)
-    cleanOpt = true
-  if (!cleanOpt)
-    return { cleanUrls: false }
-  const resolved = cleanOpt === true ? CLEAN_ALL : cleanOpt
-  return {
-    cleanUrls: resolved.urls || false,
-    clean: resolved,
-  }
-}
-
-interface ResolvedOptions {
-  napiOpts: HtmlToMarkdownOptions
-  extractionHandlers?: Record<string, (el: ExtractedElement) => void>
-  frontmatterCallback?: (fm: Record<string, string>) => void
-}
-
-function resolveFrontmatter(opt: MdreamOptions['frontmatter']): { config?: object, callback?: (fm: Record<string, string>) => void } {
-  if (typeof opt === 'function')
-    return { config: {}, callback: opt }
-  if (typeof opt === 'object')
-    return { config: opt, callback: opt.onExtract }
-  return { config: {} }
-}
-
-function resolveOptions(options: Partial<MdreamOptions>): ResolvedOptions {
-  const minimal = options.minimal === true
-  const plugins: PluginOptions = {}
-  let frontmatterCallback: ((fm: Record<string, string>) => void) | undefined
-
-  const enableFm = minimal ? options.frontmatter !== false : !!options.frontmatter
-  if (enableFm) {
-    const fm = resolveFrontmatter(options.frontmatter)
-    plugins.frontmatter = fm.config
-    frontmatterCallback = fm.callback
-  }
-  if (minimal ? options.isolateMain !== false : options.isolateMain)
-    plugins.isolateMain = true
-  if (minimal ? options.tailwind !== false : options.tailwind)
-    plugins.tailwind = true
-  if (minimal)
-    plugins.filter = options.filter || MINIMAL_FILTER_DEFAULT
-  else if (options.filter)
-    plugins.filter = options.filter
-
-  let extractionHandlers: Record<string, (el: ExtractedElement) => void> | undefined
-  if (options.extraction) {
-    plugins.extraction = { selectors: Object.keys(options.extraction) }
-    extractionHandlers = options.extraction
-  }
-
-  if (options.tagOverrides) {
-    const overrides: Record<string, TagOverrideNapi> = {}
-    for (const tag in options.tagOverrides) {
-      const v = options.tagOverrides[tag]
-      if (v)
-        overrides[tag] = typeof v === 'string' ? { alias: v } : v
-    }
-    plugins.tagOverrides = overrides
-  }
-
-  const { cleanUrls, clean } = resolveCleanConfig(options, minimal)
-
-  return {
-    napiOpts: { origin: options.origin, cleanUrls, clean, plugins },
-    extractionHandlers,
-    frontmatterCallback,
-  }
+  /**
+   * Hard-wrap prose at this many characters, breaking on word boundaries.
+   * Applied inline during conversion (zero-cost when unset). Code blocks,
+   * tables, and headings are never wrapped. `0` disables wrapping.
+   */
+  wrapWidth?: number
+  /**
+   * Output format. Defaults to `markdown`; use `text` to omit Markdown/HTML
+   * markup while preserving readable text and block spacing.
+   */
+  format?: 'markdown' | 'text'
 }
 
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
-  if (Array.isArray((options as any).plugins)) {
-    throw new TypeError(
-      'Custom hook plugins require @mdream/js. '
-      + 'Pass declarative config (e.g. { frontmatter: true }) to the Rust engine, '
-      + 'or import { htmlToMarkdown } from \'@mdream/js\' for hook-based plugins. '
-      + 'See https://mdream.dev/v1-migration#custom-plugins',
-    )
-  }
   const { napiOpts, extractionHandlers, frontmatterCallback } = resolveOptions(options)
   const napiResult = _htmlToMarkdown(html, napiOpts)
   if (napiResult.frontmatter && frontmatterCallback)
@@ -186,8 +112,16 @@ export async function* streamHtmlToMarkdown(
       const { done, value } = await reader.read()
       if (done)
         break
-      const chunk = typeof value === 'string' ? value : decoder.decode(value)
+      const chunk = typeof value === 'string'
+        ? decoder.decode() + value
+        : decoder.decode(value, { stream: true })
       const processed = stream.processChunk(chunk)
+      if (processed)
+        yield processed
+    }
+    const decoderTail = decoder.decode()
+    if (decoderTail) {
+      const processed = stream.processChunk(decoderTail)
       if (processed)
         yield processed
     }

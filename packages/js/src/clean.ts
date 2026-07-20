@@ -241,17 +241,46 @@ export function cleanBlankLines(md: string): string {
 
 // ── Redundant links ──
 
+// A bare absolute URI eligible for GFM autolink shorthand. Mirrors the scheme
+// list used by the converter so `<url>` autolinks can be recognised here.
+function isAutolinkUri(s: string): boolean {
+  if (!(s.startsWith('http://') || s.startsWith('https://')
+    || s.startsWith('ftp://') || s.startsWith('mailto:'))) {
+    return false
+  }
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c === 32 || c === 60 || c === 62 || c === 10 || c === 13 || c === 9)
+      return false
+  }
+  return true
+}
+
 export function cleanRedundantLinks(md: string): string {
   const len = md.length
   let result = ''
   let i = 0
   while (i < len) {
-    if (md.charCodeAt(i) === 91 /* [ */) {
+    const code = md.charCodeAt(i)
+    if (code === 91 /* [ */) {
       const link = parseLink(md, i)
       if (link && link.text === link.url) {
         result += link.text
         i = link.end
         continue
+      }
+    }
+    else if (code === 60 /* < */) {
+      // A GFM autolink `<url>` has identical text and target by construction,
+      // so it is redundant under the same rule as `[url](url)`.
+      const close = md.indexOf('>', i + 1)
+      if (close !== -1) {
+        const inner = md.slice(i + 1, close)
+        if (isAutolinkUri(inner)) {
+          result += inner
+          i = close + 1
+          continue
+        }
       }
     }
     result += md[i]

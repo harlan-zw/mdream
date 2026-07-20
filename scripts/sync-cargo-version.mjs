@@ -5,21 +5,19 @@ import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 const rootPkg = JSON.parse(readFileSync('packages/mdream/package.json', 'utf8'))
 const version = rootPkg.version
 
-const cargoFiles = [
-  'crates/core/Cargo.toml',
-  'crates/node/Cargo.toml',
-  'crates/edge/Cargo.toml',
-]
+// Crate versions are inherited from [workspace.package] in crates/Cargo.toml
+const cargoFiles = ['crates/Cargo.toml', 'crates/Cargo.lock']
 
-for (const file of cargoFiles) {
-  const content = readFileSync(file, 'utf8')
-  const updated = content.replace(
-    /^(version\s*=\s*)"[^"]*"/m,
-    `$1"${version}"`,
-  )
-  writeFileSync(file, updated)
-  console.log(`Updated ${file} to ${version}`)
-}
+const workspaceManifest = readFileSync('crates/Cargo.toml', 'utf8')
+const updatedManifest = workspaceManifest.replace(
+  /^(version\s*=\s*)"[^"]*"/m,
+  `$1"${version}"`,
+)
+writeFileSync('crates/Cargo.toml', updatedManifest)
+console.log(`Updated crates/Cargo.toml to ${version}`)
+
+// Keep Cargo.lock in sync so --locked builds don't fail after the bump
+execSync('cargo update --workspace --offline', { cwd: 'crates', stdio: 'inherit' })
 
 // Sync platform package versions
 const platformDir = 'crates/node/npm'

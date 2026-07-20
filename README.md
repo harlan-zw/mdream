@@ -43,17 +43,21 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 | Package                                                                                                                                                                                                  | Description                                                                                                                                                   |
 |----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;mdream](./packages/mdream/README.md) | Rust NAPI engine + WASM for edge. Performance-first, declarative config. Includes CLI. |
-| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;@mdream/js](./packages/js/README.md) | Pure JS engine. Full hook access, zero native deps. Subpaths: `/plugins`, `/splitter`, `/parse`, `/llms-txt`, `/negotiate`. |
+| [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">&nbsp;@mdream/js](./packages/js/README.md) | Pure JS engine. Full hook access, zero native deps. Tree-shakable conversion via `/core`. |
 | [<img src="https://github.com/harlan-zw/mdream/raw/refs/heads/main/.github/logo.png" width="16" height="16" style="vertical-align: middle;" alt="mdream logo">@mdream/crawl](./packages/crawl/README.md) | Site-wide crawler to generate `llms.txt` artifacts from entire websites                                                                                       |
-| [<img src="https://api.iconify.design/logos:docker-icon.svg" width="16" height="16" style="vertical-align: middle;" alt="docker icon">&nbsp;Docker](./DOCKER.md)                                         | Pre-built Docker image with Playwright Chrome for containerized website crawling                                                                              |
+| [<img src="https://api.iconify.design/logos:docker-icon.svg" width="16" height="16" style="vertical-align: middle;" alt="docker icon">&nbsp;Docker](./DOCKER.md)                                         | Pre-built Docker images: a tiny `core` HTML-to-Markdown converter and a `crawl` image with Playwright Chrome                                                                              |
 | [<img src="https://api.iconify.design/logos:vitejs.svg" width="16" height="16" style="vertical-align: middle;" alt="vite icon">&nbsp;@mdream/vite](./packages/vite/README.md)                            | Generate automatic `.md` for your own Vite sites                                                                                                              |
-| [<img src="https://api.iconify.design/logos:nuxt-icon.svg" width="16" height="16" style="vertical-align: middle;" alt="nuxt icon">&nbsp;@mdream/nuxt](./packages/nuxt/README.md)                         | Generate automatic `.md` and `llms.txt` artifacts generation for Nuxt Sites                                                                                   |
 | [<img src="https://api.iconify.design/mdi:github.svg" width="16" height="16" style="vertical-align: middle;" alt="github icon">&nbsp;@mdream/action](./packages/action/README.md)                        | Generate `.md` and `llms.txt` artifacts from your static `.html` output                                                                                       |
 | [<img src="https://api.iconify.design/logos:rust.svg" width="16" height="16" style="vertical-align: middle;" alt="rust icon">&nbsp;mdream (crate)](./crates/core/README.md)                              | Native Rust crate with CLI. Zero dependencies, streaming support. Available on [crates.io](https://crates.io/crates/mdream)                                                                                       |
 | [<img src="https://api.iconify.design/material-symbols:language.svg" width="16" height="16" style="vertical-align: middle;" alt="browser icon">&nbsp;Browser CDN](#browser-cdn-usage)                    | Use mdream directly in browsers via unpkg/jsDelivr without any build step                                |
 
 ### What can Mdream do?
 
+Pipe any HTML into `mdream` to get clean, LLM-ready Markdown:
+
+```bash
+curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream --preset minimal
+```
 
 <details>
 <summary><b>📥 URL to Markdown</b></summary>
@@ -62,7 +66,7 @@ Fetches the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown) an
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
+ | npx mdream --origin https://en.wikipedia.org --preset minimal \
   | tee streaming.md
 ```
 
@@ -72,7 +76,7 @@ Want to make it look nice? Use [glow](https://github.com/charmbracelet/glow).
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
+ | npx mdream --origin https://en.wikipedia.org --preset minimal \
    | glow
 ```
 
@@ -85,7 +89,7 @@ Converts a local HTML file to a Markdown file, using `tee` to write the output t
 
 ```bash
 cat index.html \
- | npx mdream@beta --preset minimal \
+ | npx mdream --preset minimal \
   | tee streaming.md
 ```
 
@@ -93,7 +97,7 @@ Want to make it look nice? Use [glow](https://github.com/charmbracelet/glow).
 
 ```bash
 cat index.html \
- | npx mdream@beta --preset minimal \
+ | npx mdream --preset minimal \
   | glow
 ```
 
@@ -106,7 +110,7 @@ Pipe web content straight into Claude, GPT, or any LLM CLI:
 
 ```bash
 # Single page → Claude
-curl -s https://react.dev/learn | npx mdream@beta --origin https://react.dev --preset minimal \
+curl -s https://react.dev/learn | npx mdream --origin https://react.dev --preset minimal \
   | claude -p "explain the key concepts on this page"
 
 # Crawl entire docs → summarize
@@ -114,8 +118,8 @@ npx @mdream/crawl@beta "https://nuxt.com/docs/getting-started/**"
 cat output/llms-full.txt | claude -p "write a getting started guide from these docs"
 
 # Compare two frameworks
-diff <(curl -s https://vuejs.org/guide/introduction | npx mdream@beta --preset minimal) \
-     <(curl -s https://react.dev/learn | npx mdream@beta --preset minimal) \
+diff <(curl -s https://vuejs.org/guide/introduction | npx mdream --preset minimal) \
+     <(curl -s https://react.dev/learn | npx mdream --preset minimal) \
   | claude -p "compare these two frameworks based on their intro docs"
 
 # JavaScript/SPA sites (React, Vue, Angular)
@@ -231,7 +235,7 @@ htmlToMarkdown(html, {
 ### Installation
 
 ```bash
-pnpm add mdream@beta
+pnpm add mdream
 ```
 
 > [!TIP]
@@ -271,6 +275,11 @@ import { htmlToMarkdown } from 'mdream'
 // Rust NAPI engine in Node.js, WASM in edge/browser runtimes
 const markdown = htmlToMarkdown('<h1>Hello World</h1>')
 console.log(markdown) // # Hello World
+
+const text = htmlToMarkdown('<h1>Hello <strong>World</strong></h1>', {
+  format: 'text',
+})
+console.log(text) // Hello World
 ```
 
 ```ts
@@ -312,22 +321,21 @@ npx @mdream/crawl@beta -h
 
 ## Docker
 
-Run `@mdream/crawl` with Playwright Chrome pre-installed for website crawling in containerized environments.
+Two images for two jobs:
 
 ```bash
-# Quick start
-docker run harlanzw/mdream:latest site.com/docs/**
+# core — convert HTML to Markdown (native Rust binary, ~600KB, no Node)
+curl -s https://example.com | docker run -i --rm harlanzw/mdream:core --origin https://example.com
 
-# Interactive mode
-docker run -it harlanzw/mdream:latest
-
-# Using Playwright for JavaScript sites
-docker run harlanzw/mdream:latest spa-site.com --driver playwright
+# crawl — crawl a site / generate llms.txt (Playwright Chrome included)
+docker run harlanzw/mdream:crawl site.com/docs/**
+docker run harlanzw/mdream:crawl spa-site.com --driver playwright
 ```
 
-**Available Images:**
-- `harlanzw/mdream:latest` - Latest stable release
-- `ghcr.io/harlan-zw/mdream:latest` - GitHub Container Registry
+**Available Images** (Docker Hub `harlanzw/mdream`, also on `ghcr.io/harlan-zw/mdream`):
+- `:core` - native Rust HTML-to-Markdown converter (stdin → stdout)
+- `:crawl` - site crawler with Playwright Chrome
+- `:latest` - back-compat alias of `:crawl`
 
 See [DOCKER.md](./DOCKER.md) for complete usage, configuration, and building instructions.
 
@@ -445,4 +453,3 @@ Benchmarks run on real-world HTML using [Vitest bench](https://vitest.dev/guide/
 ## License
 
 Licensed under the [MIT license](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md).
-

@@ -83,6 +83,35 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
     expect(markdown).toBe('_text_')
   })
 
+  it('converts sup/sub to extended markdown syntax (issue #93)', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<p>E = mc<sup>2</sup> and H<sub>2</sub>O</p>', {
+      plugins: {
+        tagOverrides: {
+          sup: { enter: '^', exit: '^' },
+          sub: { enter: '~', exit: '~' },
+        },
+      },
+      engine,
+    })
+    expect(markdown).toBe('E = mc^2^ and H~2~O')
+  })
+
+  it('overrides a top-level inline tag with no block ancestor (issue #93)', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    // The reported regression: the override worked inside a block but not
+    // when the tag sat at the top level of the input.
+    const markdown = htmlToMarkdown('foo <sup>bar</sup>', {
+      plugins: {
+        tagOverrides: {
+          sup: { enter: '^', exit: '^' },
+        },
+      },
+      engine,
+    })
+    expect(markdown).toBe('foo ^bar^')
+  })
+
   it('works alongside extraction without interference', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const extracted: string[] = []
@@ -99,6 +128,38 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
     })
     expect(markdown).toBe('__bold___italic_')
     expect(extracted).toEqual(['italic'])
+  })
+
+  it('drops CDATA sections by default', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<p>before<![CDATA[secret payload]]>after</p>', {
+      engine,
+    })
+    expect(markdown).not.toContain('secret payload')
+    expect(markdown).toContain('before')
+    expect(markdown).toContain('after')
+  })
+
+  it('emits CDATA content via #cdata-section enter/exit override', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<p>a<![CDATA[hidden]]>b</p>', {
+      plugins: {
+        tagOverrides: {
+          '#cdata-section': { enter: '[', exit: ']', isInline: true, spacing: [0, 0] },
+        },
+      },
+      engine,
+    })
+    expect(markdown).toBe('a[hidden]b')
+  })
+
+  it('does not treat <![ conditional comments as CDATA', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<p>x<![if !IE]>y<![endif]>z</p>', {
+      engine,
+    })
+    expect(markdown).toContain('x')
+    expect(markdown).toContain('z')
   })
 
   it('works alongside filter without interference', async () => {

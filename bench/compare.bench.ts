@@ -23,9 +23,9 @@ import TurndownService from 'turndown'
 import { gfm } from 'turndown-plugin-gfm'
 import { unified } from 'unified'
 import { bench, describe } from 'vitest'
-import { htmlToMarkdown, streamHtmlToMarkdown } from '../packages/js/src'
+import { htmlToMarkdown, streamHtmlToMarkdown } from '../packages/js/src/index'
 import { withMinimalPreset } from '../packages/js/src/preset/minimal'
-import { htmlToMarkdown as mdreamRust } from '../packages/mdream/src'
+import { htmlToMarkdown as mdreamRust, streamHtmlToMarkdown as mdreamRustStream_ } from '../packages/mdream/src'
 
 function stringToStream(str: string): ReadableStream<string> {
   return new ReadableStream({
@@ -152,9 +152,7 @@ describe('large HTML (1.8 MB - Wikipedia)', () => {
     turndown.turndown(wikiLarge)
   })
 
-  bench('node-html-markdown', () => {
-    nhm.translate(wikiLarge)
-  })
+  // node-html-markdown skipped: O(n^2) blowup makes the 1.8 MB run take ~25s/op
 
   bench('rehype-remark', async () => {
     await rehypeRemarkProcessor.process(wikiLarge)

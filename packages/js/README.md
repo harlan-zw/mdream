@@ -21,7 +21,8 @@ yarn add @mdream/js@beta
 
 | Import | Description |
 |---|---|
-| `@mdream/js` | Core `htmlToMarkdown` and `streamHtmlToMarkdown` APIs |
+| `@mdream/js` | Full `htmlToMarkdown` and `streamHtmlToMarkdown` APIs, including declarative plugins and cleanup |
+| `@mdream/js/core` | Tree-shakable pre-v1-style conversion APIs with composable plugin arrays and tag overrides |
 | `@mdream/js/plugins` | Plugin utilities: `createPlugin`, `extractionPlugin`, `extractionCollectorPlugin`, `filterPlugin`, `frontmatterPlugin`, `isolateMainPlugin`, `tailwindPlugin` |
 | `@mdream/js/preset/minimal` | `withMinimalPreset` for declarative config combining frontmatter, isolateMain, tailwind, and filter plugins |
 | `@mdream/js/negotiate` | HTTP content negotiation: `shouldServeMarkdown`, `parseAcceptHeader` |
@@ -30,6 +31,10 @@ yarn add @mdream/js@beta
 | `@mdream/js/llms-txt` | llms.txt artifact generation: `generateLlmsTxtArtifacts`, `createLlmsTxtStream` |
 
 ## API Reference
+
+The package root remains the full conversion API. Import `@mdream/js/core` when
+you want the smaller tree-shakable implementation and explicitly composed
+plugins.
 
 ### `htmlToMarkdown(html, options?)`
 
@@ -40,6 +45,11 @@ import { htmlToMarkdown } from '@mdream/js'
 
 const md = htmlToMarkdown('<h1>Hello</h1><p>World</p>')
 // # Hello\n\nWorld
+
+const text = htmlToMarkdown('<h1>Hello</h1><p><strong>World</strong></p>', {
+  format: 'text',
+})
+// Hello\n\nWorld
 ```
 
 **Parameters:**
@@ -76,6 +86,20 @@ for await (const chunk of stream) {
 
 **Returns:** `AsyncIterable<string>`
 
+### Tree-shakable core
+
+The `/core` subpath restores the original composable JS interface without
+loading declarative built-in plugins or cleanup:
+
+```typescript
+import { htmlToMarkdown } from '@mdream/js/core'
+import { filterPlugin } from '@mdream/js/plugins'
+
+const markdown = htmlToMarkdown(html, {
+  plugins: [filterPlugin({ exclude: ['nav', 'footer'] })],
+})
+```
+
 ---
 
 ## Options
@@ -88,6 +112,8 @@ for await (const chunk of stream) {
 | `plugins` | `BuiltinPlugins` | `undefined` | Declarative built-in plugin configuration (see [BuiltinPlugins](#builtinplugins)) |
 | `clean` | `boolean \| CleanOptions` | `undefined` | Post-processing cleanup. Pass `true` for all cleanup rules or an object for specific features (see [CleanOptions](#cleanoptions)). Sync API only for `fragments`. |
 | `hooks` | `TransformPlugin[]` | `undefined` | Imperative hook-based transform plugins for custom behavior (see [Plugins](#plugins)) |
+| `wrapWidth` | `number` | `undefined` | Hard-wrap prose at this many characters on word boundaries |
+| `format` | `'markdown' \| 'text'` | `'markdown'` | Output Markdown or plain text with Markdown/HTML markup omitted |
 
 ### `BuiltinPlugins`
 
@@ -252,9 +278,11 @@ import { tailwindPlugin } from '@mdream/js/plugins'
 const plugin = tailwindPlugin()
 ```
 
-### `extractionPlugin(selectors)` (Deprecated)
+### `extractionPlugin(selectors)`
 
-> Deprecated. Use `plugins.extraction` config for declarative extraction that works with both JS and Rust engines.
+Use this explicitly imported plugin with the tree-shakable core converter. Use
+the `plugins.extraction` declarative config instead when sharing options with
+the Rust engine.
 
 Extracts elements matching CSS selectors during conversion. Callbacks receive matching elements with their accumulated text content.
 
@@ -562,6 +590,9 @@ curl -s https://example.com | npx @mdream/js --origin https://example.com
 
 # With minimal preset
 curl -s https://example.com | npx @mdream/js --origin https://example.com --preset minimal
+
+# Plain text output
+curl -s https://example.com | npx @mdream/js --format text
 ```
 
 ### CLI Options
@@ -570,6 +601,9 @@ curl -s https://example.com | npx @mdream/js --origin https://example.com --pres
 |---|---|
 | `--origin <url>` | Origin URL for resolving relative image paths and links |
 | `--preset <preset>` | Conversion preset. Currently supports: `minimal` |
+| `--wrap-width <n>` | Hard-wrap prose at `n` characters |
+| `--format <format>` | Output format: `markdown`, `text` |
+| `--text` | Alias for `--format text` |
 | `-v, --version` | Show version number |
 | `-h, --help` | Show help |
 
@@ -582,7 +616,7 @@ curl -s https://example.com | npx @mdream/js --origin https://example.com --pres
 Map custom HTML elements to standard Markdown behavior:
 
 ```typescript
-import { htmlToMarkdown } from '@mdream/js'
+import { htmlToMarkdown } from '@mdream/js/core'
 
 const md = htmlToMarkdown('<x-heading>Title</x-heading>', {
   plugins: {
@@ -651,14 +685,14 @@ console.log('Title:', metadata.title)
 console.log('Description:', metadata.description)
 ```
 
-### Custom Hooks for Content Filtering
+### Composable Plugin for Content Filtering
 
 ```typescript
-import { htmlToMarkdown } from '@mdream/js'
+import { htmlToMarkdown } from '@mdream/js/core'
 import { createPlugin } from '@mdream/js/plugins'
 
 const md = htmlToMarkdown(html, {
-  hooks: [
+  plugins: [
     createPlugin({
       beforeNodeProcess(event) {
         const { node } = event
@@ -720,6 +754,8 @@ import type {
   TextNode,
   TransformPlugin,
 } from '@mdream/js'
+
+import type { CoreOptions, Plugin } from '@mdream/js/core'
 ```
 
 ## Exported Constants

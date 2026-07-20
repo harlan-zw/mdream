@@ -96,6 +96,15 @@ Vitest bench runs each benchmark for a minimum time window, collecting enough sa
 - Minimum 10 samples per benchmark
 - Results include margin of error (±%)
 
+### CI Regression Benchmarks (`perf-ci.mjs`)
+
+Every PR's Bundle Size comment includes a Performance section produced by `bench/perf-ci.mjs`. It benchmarks the built bench bundles (JS core, minimal preset, stream, Rust edge WASM) converting the 1.8 MB Wikipedia fixture, running base and PR back-to-back on the same runner so machine variance cancels. Signals per bench:
+
+- **Main-thread CPU** (`process.threadCpuUsage()`): the gated timing authority. Excludes V8's background GC/JIT threads and descheduling, which makes it ~3x steadier than process-wide CPU on this allocation-heavy workload. A change is flagged past `max(5%, 2x combined RME)`.
+- **Wall time**: informational only; never drives the verdict.
+- **Allocated bytes per convert**: the gated memory signal, measured under `--no-opt` so it reflects what the code semantically allocates. With the JIT on, TurboFan escape analysis can eliminate several MiB per convert and whether it does depends on inlining heuristics that flip with unrelated code-size changes, node minor, and CPU arch. The JIT-on number is still reported as an informational "allocated (JIT)" row. Measurement pins the semi-space (`--min/max-semi-space-size=256`) so no scavenge fires mid-run and heapUsed delta equals bytes allocated; the minimum over samples reproduces to ~0.03%. Gate: `max(2%, 64 KiB)`.
+- **Rust WASM linear memory**: peak `memory.buffer.byteLength` after warm runs; exactly deterministic.
+
 ## Running Benchmarks
 
 ### Prerequisites

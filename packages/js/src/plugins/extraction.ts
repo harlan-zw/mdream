@@ -6,9 +6,7 @@ export interface ExtractedElement extends ElementNode {
   textContent: string
 }
 
-/**
- * @deprecated Use `plugins.extraction` config for declarative extraction that works with both JS and Rust engines.
- */
+/** Extract matching elements through the composable JavaScript plugin interface. */
 export function extractionPlugin(selectors: Record<string, (element: ExtractedElement, state: MdreamRuntimeState) => void>): TransformPlugin {
   // Parse selectors and create matcher-callback pairs
   const matcherCallbacks = Object.entries(selectors).map(([selector, callback]) => ({

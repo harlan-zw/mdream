@@ -1,7 +1,7 @@
 import type { ParseState } from './parse'
-import type { EngineOptions, TagHandler, TransformPlugin } from './types'
+import type { EngineOptions, NodeEvent, TagHandler, TransformPlugin } from './types'
 import { createMarkdownProcessor } from './markdown-processor'
-import { parseHtmlStream } from './parse'
+import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
 
 /**
@@ -30,7 +30,11 @@ export async function* streamHtmlToMarkdown(
     depth: 0,
     resolvedPlugins,
     tagOverrideHandlers,
+    plainText: processor.state.plainText,
   }
+  const handleEvent: (event: NodeEvent) => void = resolvedPlugins.length
+    ? event => processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)
+    : processor.processEvent
 
   let remainingHtml = ''
 
@@ -43,23 +47,26 @@ export async function* streamHtmlToMarkdown(
       }
 
       // Process the HTML chunk
-      const htmlContent = `${remainingHtml}${typeof value === 'string' ? value : decoder.decode(value, { stream: true })}`
+      const decoded = typeof value === 'string'
+        ? decoder.decode() + value
+        : decoder.decode(value, { stream: true })
+      const htmlContent = `${remainingHtml}${decoded}`
 
-      remainingHtml = parseHtmlStream(htmlContent, parseState, (event) => {
-        processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)
-      })
+      remainingHtml = parseHtmlStream(htmlContent, parseState, handleEvent)
 
       const chunk = processor.getMarkdownChunk()
       if (chunk) {
         yield chunk
       }
     }
-    // Process any remaining HTML and emit final chunk
-    if (remainingHtml) {
-      parseHtmlStream(remainingHtml, parseState, (event) => {
-        processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)
-      })
-    }
+    // Process any remaining HTML, then commit trailing text and close any
+    // elements left open at end of input.
+    const decoderTail = decoder.decode()
+    const finalHtml = remainingHtml + decoderTail
+    const leftover = finalHtml
+      ? parseHtmlStream(finalHtml, parseState, handleEvent)
+      : ''
+    finalizeParse(leftover, parseState, handleEvent)
 
     // Emit any final content
     const finalChunk = processor.getMarkdownChunk()
@@ -68,10 +75,6 @@ export async function* streamHtmlToMarkdown(
     }
   }
   finally {
-    // Ensure proper cleanup
-    if (remainingHtml) {
-      decoder.decode(new Uint8Array(0), { stream: false })
-    }
     reader.releaseLock()
   }
 }

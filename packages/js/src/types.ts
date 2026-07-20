@@ -136,6 +136,20 @@ export interface EngineOptions {
    * final markdown (sync API only for `fragments`).
    */
   clean?: boolean | CleanOptions
+
+  /**
+   * Hard-wrap prose at this many characters, breaking on word boundaries.
+   * Applied inline during conversion (zero-cost when unset). Code blocks
+   * (`<pre>`/`<code>`), tables, and headings are never wrapped. `0` disables
+   * wrapping.
+   */
+  wrapWidth?: number
+
+  /**
+   * Output format. Defaults to `markdown`; use `text` to omit Markdown/HTML
+   * markup while preserving readable text and block spacing.
+   */
+  format?: 'markdown' | 'text'
 }
 
 // Standard DOM node types
@@ -162,8 +176,6 @@ export interface TextNode extends Node {
   value: string
   /** Custom data added by plugins */
   context?: PluginContext
-  /** Whether this text node should be excluded from markdown output (for script/style elements) */
-  excludedFromMarkdown?: boolean
 }
 
 /**
@@ -190,6 +202,9 @@ export interface Node {
 
   /** Whether node contains whitespace - used for whitespace optimization */
   containsWhitespace?: boolean
+
+  /** Whether this node belongs to an inert subtree and should not render */
+  excludedFromMarkdown?: boolean
 
   /** Cached reference to tag handler for performance */
   tagHandler?: TagHandler
@@ -238,12 +253,13 @@ export interface MdreamProcessingState {
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
 
-  /** Quote state tracking for non-nesting tags - avoids backward scanning */
+  /** @deprecated No longer read or written. Retained for source compatibility. */
   inSingleQuote?: boolean
+  /** @deprecated No longer read or written. Retained for source compatibility. */
   inDoubleQuote?: boolean
+  /** @deprecated No longer read or written. Retained for source compatibility. */
   inBacktick?: boolean
-
-  /** Backslash escaping state tracking - avoids checking previous character */
+  /** @deprecated No longer read or written. Retained for source compatibility. */
   lastCharWasBackslash?: boolean
 
   /** Resolved plugin instances for efficient iteration */
@@ -290,6 +306,15 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
    */
   listIndent?: string
   listIndentWidths?: number[]
+
+  /**
+   * <pre> fenced-code deferral (issue #97). See MarkdownState for semantics.
+   */
+  preFencePending?: boolean
+  preFenceLang?: string
+  preOwnFence?: boolean
+  /** Whether output should omit Markdown/HTML markup */
+  plainText?: boolean
 }
 
 type NodeEventEnter = 0
@@ -338,6 +363,19 @@ export interface TagHandler {
   // Number of newlines to add before/after the tag
   spacing?: readonly [number, number]
   excludesTextNodes?: boolean
+  /**
+   * When true, the `enter` string is emitted verbatim without synthesizing a
+   * separating space before it. Set for user-supplied tagOverride enter
+   * strings so markers like `^`/`~` attach to adjacent content (issue #93).
+   */
+  literalEnter?: boolean
+  /** When true, the `exit` string is a user-supplied tagOverride, exempt from empty-pair cleanup. */
+  literalExit?: boolean
+  /**
+   * Built-in tag id used by declarative string aliases.
+   * @internal
+   */
+  aliasTagId?: number
 }
 
 // Plugin-specific context interfaces

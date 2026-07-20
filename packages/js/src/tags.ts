@@ -29,6 +29,7 @@ import {
   TAG_CITE,
   TAG_CODE,
   TAG_COL,
+  TAG_DATALIST,
   TAG_DD,
   TAG_DEL,
   TAG_DETAILS,
@@ -73,6 +74,7 @@ import {
   TAG_NOFRAMES,
   TAG_NOSCRIPT,
   TAG_OL,
+  TAG_OPTGROUP,
   TAG_OPTION,
   TAG_P,
   TAG_PARAM,
@@ -116,6 +118,7 @@ import {
   TAG_XMP,
   TagIdMap,
 } from './const'
+import { continuationPrefix } from './utils'
 
 // Helper function to resolve URLs
 function resolveUrl(url: string, origin?: string): string {
@@ -152,9 +155,35 @@ function resolveUrl(url: string, origin?: string): string {
   return url
 }
 
+// GFM autolink shorthand: only inline-syntax-safe absolute URIs are eligible
+// for `<url>` rendering. Conservative scheme list matches the Rust core.
+function isAutolinkUri(s: string): boolean {
+  if (!(s.startsWith('http://') || s.startsWith('https://')
+    || s.startsWith('ftp://') || s.startsWith('mailto:'))) {
+    return false
+  }
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c === 32 || c === 60 || c === 62 || c === 10 || c === 13 || c === 9)
+      return false
+  }
+  return true
+}
+
 // Helper function to check if we're inside a table cell
-function isInsideTableCell(node: HandlerContext['node']): boolean {
-  return (node.depthMap[TAG_TD] || 0) > 0 || (node.depthMap[TAG_TH] || 0) > 0
+function isInsideTableCell(state: HandlerContext['state']): boolean {
+  const depthMap = state.depthMap!
+  return (depthMap[TAG_TD] || 0) > 0 || (depthMap[TAG_TH] || 0) > 0
+}
+
+function isInsideRawHtmlBlock(state: HandlerContext['state']): boolean {
+  const depthMap = state.depthMap!
+  return Boolean(depthMap[TAG_DETAILS]
+    || depthMap[TAG_SUMMARY]
+    || depthMap[TAG_ADDRESS]
+    || depthMap[TAG_DL]
+    || depthMap[TAG_DT]
+    || depthMap[TAG_DD])
 }
 
 // Helper function to get language from code class attribute
@@ -172,14 +201,14 @@ function getLanguageFromClass(className: string | undefined): string {
 
 function handleHeading(depth: number): TagHandler {
   return {
-    enter: ({ node }) => {
-      if ((node.depthMap[TAG_A] || 0) > 0) {
+    enter: ({ state }) => {
+      if ((state.depthMap?.[TAG_A] || 0) > 0) {
         return `<h${depth}>`
       }
       return `${'#'.repeat(depth)} `
     },
-    exit: ({ node }) => {
-      if ((node.depthMap[TAG_A] || 0) > 0) {
+    exit: ({ state }) => {
+      if ((state.depthMap?.[TAG_A] || 0) > 0) {
         return `</h${depth}>`
       }
     },
@@ -188,16 +217,16 @@ function handleHeading(depth: number): TagHandler {
 }
 
 const Strong: TagHandler = {
-  enter: ({ node }) => {
+  enter: ({ state }) => {
     // we are already bold
-    if ((node?.depthMap?.[TAG_B] || 0) > 1) {
+    if ((state.depthMap?.[TAG_B] || 0) > 1) {
       return ''
     }
     return MARKDOWN_STRONG
   },
-  exit: ({ node }) => {
+  exit: ({ node, state }) => {
     // we are already bold
-    if ((node?.depthMap?.[TAG_B] || 0) > 1) {
+    if ((state.depthMap?.[TAG_B] || 0) + (node.tagId === TAG_B ? 1 : 0) > 1) {
       return ''
     }
     return MARKDOWN_STRONG
@@ -208,16 +237,16 @@ const Strong: TagHandler = {
 }
 
 const Emphasis: TagHandler = {
-  enter: ({ node }) => {
+  enter: ({ state }) => {
     // we are already italic
-    if ((node?.depthMap?.[TAG_I] || 0) > 1) {
+    if ((state.depthMap?.[TAG_I] || 0) > 1) {
       return ''
     }
     return MARKDOWN_EMPHASIS
   },
-  exit: ({ node }) => {
+  exit: ({ node, state }) => {
     // we are already italic
-    if ((node?.depthMap?.[TAG_I] || 0) > 1) {
+    if ((state.depthMap?.[TAG_I] || 0) + (node.tagId === TAG_I ? 1 : 0) > 1) {
       return ''
     }
     return MARKDOWN_EMPHASIS
@@ -264,9 +293,22 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
   },
   [TAG_BR]: {
-    enter: ({ node }) => {
-      // Keep <br> inside table cells
-      return isInsideTableCell(node) ? '<br>' : undefined
+    enter: ({ node, state }) => {
+      // A literal newline would terminate a table row/ATX heading or collapse
+      // inside a raw HTML block, so preserve the inline HTML there.
+      const depthMap = state.depthMap!
+      if (isInsideTableCell(state) || isInsideRawHtmlBlock(state)
+        || depthMap[TAG_H1]
+        || depthMap[TAG_H2]
+        || depthMap[TAG_H3]
+        || depthMap[TAG_H4]
+        || depthMap[TAG_H5]
+        || depthMap[TAG_H6]) {
+        return '<br>'
+      }
+
+      const prefix = continuationPrefix(node, state.listIndentWidths || [])
+      return `\n${prefix}`
     },
     isSelfClosing: true,
     spacing: NO_SPACING,
@@ -316,12 +358,12 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_BLOCKQUOTE]: {
-    enter: ({ node, state }) => {
-      const depth = node.depthMap[TAG_BLOCKQUOTE] || 1
+    enter: ({ state }) => {
+      const depth = state.depthMap?.[TAG_BLOCKQUOTE] || 1
       let prefix = '> '.repeat(depth)
 
       // Add indentation if inside a list item
-      const liDepth = node.depthMap[TAG_LI] || 0
+      const liDepth = state.depthMap?.[TAG_LI] || 0
       if (liDepth > 0) {
         prefix = `\n${state.listIndent}${prefix}`
       }
@@ -330,11 +372,45 @@ export const tagHandlers: Record<number, TagHandler> = {
     },
     spacing: BLOCKQUOTE_SPACING,
   },
+  // A bare <pre> (no <code> child) becomes a fenced code block (issue #97).
+  // The opening fence is deferred to the first non-whitespace child by the
+  // processor (flushPreFence) so empty/whitespace-only blocks emit nothing and a
+  // <pre><code> keeps its existing fence. Only the closing fence lives here.
+  [TAG_PRE]: {
+    enter: ({ node, state }) => {
+      state.preFencePending = true
+      state.preOwnFence = false
+      state.preFenceLang = getLanguageFromClass(node.attributes?.class)
+    },
+    exit: ({ state }) => {
+      const ownFence = state.preOwnFence
+      state.preFencePending = false
+      state.preOwnFence = false
+      // No own fence means a <code> child emitted it, or the <pre> had no
+      // non-whitespace content (empty block stripped) — nothing to close.
+      if (!ownFence) {
+        return undefined
+      }
+      const liDepth = state.depthMap?.[TAG_LI] || 0
+      if (liDepth > 0) {
+        const indent = state.listIndent
+        return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
+      }
+      return `\n${MARKDOWN_CODE_BLOCK}`
+    },
+  },
   [TAG_CODE]: {
     enter: ({ node, state }) => {
-      if ((node.depthMap[TAG_PRE] || 0) > 0) {
+      if ((state.depthMap?.[TAG_PRE] || 0) > 0) {
+        // The enclosing <pre> already opened its own fence (e.g. <pre> with
+        // mixed text and <code> children); don't emit a nested fence.
+        if (state.preOwnFence) {
+          return undefined
+        }
+        // This <code> owns the <pre>'s fence; cancel the deferred pre fence.
+        state.preFencePending = false
         const language = getLanguageFromClass(node.attributes?.class)
-        const liDepth = node.depthMap[TAG_LI] || 0
+        const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent
           return `\n\n${indent}${MARKDOWN_CODE_BLOCK}${language}\n`
@@ -349,7 +425,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       // whitespace. A trailing backtick does NOT suppress: two adjacent
       // `<code>` elements must be separated with a space so CommonMark parses
       // them as two code spans rather than merging into one.
-      if ((node.depthMap[TAG_LI] || 0) > 0) {
+      if ((state.depthMap?.[TAG_LI] || 0) > 0) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
         if (lastChar && lastChar !== ' ' && lastChar !== '\n' && lastChar !== '\t'
@@ -360,9 +436,13 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
       return MARKDOWN_INLINE_CODE
     },
-    exit: ({ node, state }) => {
-      if ((node.depthMap[TAG_PRE] || 0) > 0) {
-        const liDepth = node.depthMap[TAG_LI] || 0
+    exit: ({ state }) => {
+      if ((state.depthMap?.[TAG_PRE] || 0) > 0) {
+        // The enclosing <pre> owns the fence; this <code> emitted no opener.
+        if (state.preOwnFence) {
+          return undefined
+        }
+        const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent
           return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
@@ -376,16 +456,16 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_UL]: {
-    enter: ({ node }) => isInsideTableCell(node) ? '<ul>' : undefined,
-    exit: ({ node }) => isInsideTableCell(node) ? '</ul>' : undefined,
+    enter: ({ state }) => isInsideTableCell(state) ? '<ul>' : undefined,
+    exit: ({ state }) => isInsideTableCell(state) ? '</ul>' : undefined,
   },
   [TAG_OL]: {
-    enter: ({ node }) => isInsideTableCell(node) ? '<ol>' : undefined,
-    exit: ({ node }) => isInsideTableCell(node) ? '</ol>' : undefined,
+    enter: ({ state }) => isInsideTableCell(state) ? '<ol>' : undefined,
+    exit: ({ state }) => isInsideTableCell(state) ? '</ol>' : undefined,
   },
   [TAG_LI]: {
     enter: ({ node, state }) => {
-      if (isInsideTableCell(node)) {
+      if (isInsideTableCell(state)) {
         return '<li>'
       }
 
@@ -397,7 +477,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       const marker = isOrdered ? `${node.index + 1}. ` : '- '
       return `${state.listIndent}${marker}`
     },
-    exit: ({ node }) => isInsideTableCell(node) ? '</li>' : undefined,
+    exit: ({ state }) => isInsideTableCell(state) ? '</li>' : undefined,
     spacing: LIST_ITEM_SPACING,
   },
   [TAG_A]: {
@@ -417,6 +497,30 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (lastContent === title) {
         title = ''
       }
+      // GFM autolink shorthand: when the link text equals href and href is a
+      // bare absolute URI, emit `<href>` instead of `[href](href)`. Mirrors
+      // the Rust core (crates/core/src/convert.rs).
+      if (!title && isAutolinkUri(href)) {
+        const buf = state.buffer
+        let i = buf.length - 1
+        // Sum the link-text length while scanning back for `[`, so the
+        // slice/join allocation only happens when the text could equal href.
+        let textLen = 0
+        while (i >= 0) {
+          const entry = buf[i]!
+          if (entry === '[')
+            break
+          textLen += entry.length
+          i--
+        }
+        if (i >= 0 && textLen === href.length && buf.slice(i + 1).join('') === href) {
+          buf.length = i
+          const auto = `<${href}>`
+          buf.push(auto)
+          state.lastContentCache = auto
+          return ''
+        }
+      }
       return title ? `](${href} "${title}")` : `](${href})`
     },
     collapsesInnerWhiteSpace: true,
@@ -435,38 +539,38 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_TABLE]: {
-    enter: ({ node, state }) => {
-      if (isInsideTableCell(node)) {
+    enter: ({ state }) => {
+      if (isInsideTableCell(state)) {
         return '<table>'
       }
-      if ((node.depthMap[TAG_TABLE] || 0) <= 1) {
+      if ((state.depthMap?.[TAG_TABLE] || 0) <= 1) {
         state.tableRenderedTable = false
       }
       // Initialize table state
       state.tableColumnAlignments = []
     },
-    exit: ({ node }) => isInsideTableCell(node) ? '</table>' : undefined,
+    exit: ({ state }) => isInsideTableCell(state) ? '</table>' : undefined,
   },
   [TAG_THEAD]: {
-    enter: ({ node }) => {
-      if (isInsideTableCell(node)) {
+    enter: ({ state }) => {
+      if (isInsideTableCell(state)) {
         return '<thead>'
       }
     },
-    exit: ({ node }) => isInsideTableCell(node) ? '</thead>' : undefined,
+    exit: ({ state }) => isInsideTableCell(state) ? '</thead>' : undefined,
     spacing: TABLE_ROW_SPACING,
     excludesTextNodes: true,
   },
   [TAG_TR]: {
-    enter: ({ node, state }) => {
-      if (isInsideTableCell(node)) {
+    enter: ({ state }) => {
+      if (isInsideTableCell(state)) {
         return '<tr>'
       }
       state.tableCurrentRowCells = 0
       return '| '
     },
-    exit: ({ node, state }) => {
-      if (isInsideTableCell(node) || (node.depthMap[TAG_TABLE] || 0) > 1) {
+    exit: ({ state }) => {
+      if (isInsideTableCell(state) || (state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '</tr>'
       }
 
@@ -500,7 +604,7 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_TH]: {
     enter: ({ node, state }) => {
-      if ((node.depthMap[TAG_TABLE] || 0) > 1) {
+      if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '<th>'
       }
 
@@ -515,8 +619,8 @@ export const tagHandlers: Record<number, TagHandler> = {
 
       return node.index === 0 ? '' : ' | '
     },
-    exit: ({ node, state }) => {
-      if ((node.depthMap[TAG_TABLE] || 0) > 1) {
+    exit: ({ state }) => {
+      if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '</th>'
       }
       state.tableCurrentRowCells!++
@@ -525,14 +629,14 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
   },
   [TAG_TD]: {
-    enter: ({ node }) => {
-      if ((node.depthMap[TAG_TABLE] || 0) > 1) {
+    enter: ({ node, state }) => {
+      if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '<td>'
       }
       return node.index === 0 ? '' : ' | '
     },
-    exit: ({ node, state }) => {
-      if ((node.depthMap[TAG_TABLE] || 0) > 1) {
+    exit: ({ state }) => {
+      if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '</td>'
       }
       state.tableCurrentRowCells!++
@@ -541,8 +645,8 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
   },
   [TAG_P]: {
-    enter: ({ node, state }) => {
-      const bqDepth = node.depthMap[TAG_BLOCKQUOTE] || 0
+    enter: ({ state }) => {
+      const bqDepth = state.depthMap?.[TAG_BLOCKQUOTE] || 0
       if (bqDepth > 0) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
@@ -552,7 +656,7 @@ export const tagHandlers: Record<number, TagHandler> = {
           return `\n${prefix.trimEnd()}\n${prefix}`
         }
       }
-      if ((node.depthMap[TAG_LI] || 0) > 0 && !isInsideTableCell(node)) {
+      if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
         if (lastChar && lastChar !== ' ' && lastChar !== '\n') {
@@ -576,18 +680,19 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_BUTTON]: {
     collapsesInnerWhiteSpace: true,
+    spacing: NO_SPACING,
     isInline: true,
   },
   [TAG_BODY]: { spacing: NO_SPACING },
   [TAG_CENTER]: {
     // if in table cell we preserve
-    enter: ({ node }) => {
-      if ((node.depthMap[TAG_TABLE] || 0) > 1) {
+    enter: ({ state }) => {
+      if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '<center>'
       }
     },
-    exit: ({ node }) => {
-      if ((node.depthMap[TAG_TABLE] || 0) > 1) {
+    exit: ({ state }) => {
+      if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '</center>'
       }
     },
@@ -681,7 +786,9 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
   },
   [TAG_OPTION]: {
-    isNonNesting: true,
+    spacing: NO_SPACING,
+  },
+  [TAG_OPTGROUP]: {
     spacing: NO_SPACING,
   },
   [TAG_FIELDSET]: {
@@ -716,6 +823,9 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
   },
   [TAG_TEMPLATE]: {
+    // <template> content is parsed (including nested templates) but remains
+    // inert, so its subtree is excluded from Markdown by the parser/processor.
+    excludesTextNodes: true,
     spacing: NO_SPACING,
   },
   [TAG_ABBR]: {
@@ -754,6 +864,13 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_NOSCRIPT]: {
+    excludesTextNodes: true,
+    spacing: NO_SPACING,
+  },
+  [TAG_DATALIST]: {
+    // <datalist> holds <option> autocomplete data that browsers never render.
+    // Treat the whole body as inert and drop it, mirroring <template>.
+    isNonNesting: true,
     excludesTextNodes: true,
     spacing: NO_SPACING,
   },
@@ -902,7 +1019,7 @@ export function buildTagOverrideHandlers(overrides: Record<string, TagOverride |
       if (targetId !== undefined) {
         const baseHandler = tagHandlers[targetId]
         if (baseHandler) {
-          result.set(tagName, { ...baseHandler })
+          result.set(tagName, { ...baseHandler, aliasTagId: targetId })
         }
       }
     }
@@ -915,10 +1032,12 @@ export function buildTagOverrideHandlers(overrides: Record<string, TagOverride |
       if (override.enter !== undefined) {
         const enterStr = override.enter
         handler.enter = () => enterStr
+        handler.literalEnter = true
       }
       if (override.exit !== undefined) {
         const exitStr = override.exit
         handler.exit = () => exitStr
+        handler.literalExit = true
       }
       if (override.spacing !== undefined) {
         handler.spacing = override.spacing

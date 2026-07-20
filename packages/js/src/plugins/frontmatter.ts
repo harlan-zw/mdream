@@ -78,6 +78,9 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
 
   const plugin = createPlugin({
     onNodeEnter(node: any): string | undefined {
+      if (node.excludedFromMarkdown)
+        return
+
       // Track when we enter the head section
       if (node.tagId === TAG_HEAD) {
         inHead = true
@@ -107,9 +110,14 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
     },
 
     onNodeExit(node: any, state: any) {
+      if (node.excludedFromMarkdown)
+        return undefined
+
       // Handle exiting the head tag
       if (node.type === ELEMENT_NODE && node.tagId === TAG_HEAD) {
         inHead = false
+        if (state.options?.format === 'text')
+          return undefined
 
         // Generate frontmatter as we exit the head
         if (Object.keys(frontmatter).length > 0) {
@@ -125,6 +133,9 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
     },
 
     processTextNode(node: TextNode) {
+      if (node.parent?.excludedFromMarkdown)
+        return
+
       // Only process if we're in the head section
       if (!inHead) {
         return
