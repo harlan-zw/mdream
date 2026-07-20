@@ -1433,12 +1433,24 @@ impl ConvertState {
       0
     };
 
+    // A closing code fence ("\n```") is the one block-exit output that ends in
+    // a backtick. Its block-spacing newlines are appended AFTER the fence, so
+    // any trailing newlines already in the buffer (blank lines inside <pre>)
+    // sit BEFORE the fence and no longer separate this block from the next
+    // sibling — leaving ```<sibling> on one line, an invalid fence that never
+    // closes. Measure the trailing-newline run from the fence's own tail (0) so
+    // the block spacing is not suppressed (#148). Scoped to the fence: other
+    // block closers (raw-HTML </dd>/</dl>, etc.) intentionally glue.
+    let measure_from_output_tail = !is_enter && output_str.as_bytes().last() == Some(&b'`');
+
     let mut last_new_lines: u8 = 0;
-    if last_char == b'\n' {
-      last_new_lines += 1;
-    }
-    if second_last_char == b'\n' {
-      last_new_lines += 1;
+    if !measure_from_output_tail {
+      if last_char == b'\n' {
+        last_new_lines += 1;
+      }
+      if second_last_char == b'\n' {
+        last_new_lines += 1;
+      }
     }
 
     let new_lines = configured_new_lines.saturating_sub(last_new_lines);
