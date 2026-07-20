@@ -44,6 +44,10 @@ const bundle = name => import(pathToFileURL(resolve(distDir, name)).href)
 // the fixture always comes from the PR checkout so base and PR chew identical input
 const html = readFileSync(resolve(currentDir, 'bundle/wiki.html'), 'utf8')
 const htmlBytes = new TextEncoder().encode(html)
+const quoteWords = 'alpha beta gamma delta epsilon zeta eta theta iota kappa'
+const quoteBlocksHtml = `<blockquote>${`<p>${quoteWords}</p>`.repeat(2000)}</blockquote>`
+const quoteInlineHtml = `<blockquote><p>${`<span>${quoteWords}</span>`.repeat(2000)}</p></blockquote>`
+const quoteBlocksBytes = new TextEncoder().encode(quoteBlocksHtml)
 const STREAM_CHUNK_SIZE = 16 * 1024
 
 function forceGC() {
@@ -143,12 +147,12 @@ async function main() {
   const { convert: convertMinimal } = await bundle('minimal/fixtures/minimal.mjs')
   const { convertStream } = await bundle('stream/fixtures/stream.mjs')
 
-  async function drainStream() {
+  async function drainStream(bytes = htmlBytes) {
     let offset = 0
     const stream = new ReadableStream({
       pull(controller) {
-        if (offset < htmlBytes.length) {
-          controller.enqueue(htmlBytes.subarray(offset, offset + STREAM_CHUNK_SIZE))
+        if (offset < bytes.length) {
+          controller.enqueue(bytes.subarray(offset, offset + STREAM_CHUNK_SIZE))
           offset += STREAM_CHUNK_SIZE
         }
         else {
@@ -165,7 +169,10 @@ async function main() {
   const JS_BENCHES = [
     ['core-wiki', 'JS htmlToMarkdown · wiki (1.8 MB)', () => convert(html), undefined],
     ['minimal-wiki', 'JS minimal preset · wiki', () => convertMinimal(html), { reps: 12, runs: 1 }],
-    ['stream-wiki', 'JS stream drain · wiki', drainStream, undefined],
+    ['stream-wiki', 'JS stream drain · wiki', () => drainStream(), undefined],
+    ['core-quote-blocks', 'JS htmlToMarkdown · 2,000 quoted blocks', () => convert(quoteBlocksHtml), { warmup: 8, reps: 16, runs: 40 }],
+    ['core-quote-inline', 'JS htmlToMarkdown · 2,000 quoted inline spans', () => convert(quoteInlineHtml), { warmup: 8, reps: 16, runs: 40 }],
+    ['stream-quote-blocks', 'JS stream drain · 2,000 quoted blocks', () => drainStream(quoteBlocksBytes), { warmup: 8, reps: 16, runs: 25 }],
   ]
 
   // gated memory signal: run under --no-opt so escape analysis can't make the
