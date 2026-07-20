@@ -8,6 +8,17 @@ fn convert(html: &str) -> String {
   html_to_markdown(html, HTMLToMarkdownOptions::default())
 }
 
+fn assert_stream_matches_every_split(html: &str, expected: &str) {
+  assert_eq!(convert(html), expected, "input: {html}");
+  for split in 0..=html.len() {
+    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut actual = stream.process_chunk(&html[..split]);
+    actual.push_str(&stream.process_chunk(&html[split..]));
+    actual.push_str(&stream.finish());
+    assert_eq!(actual.trim_end(), expected, "split at byte {split}: {html}");
+  }
+}
+
 fn convert_with_origin(html: &str, origin: &str) -> String {
   html_to_markdown(
     html,
@@ -677,14 +688,7 @@ fn blockquote_preserves_descendant_block_structure() {
 fn blockquote_structure_matches_across_every_stream_split() {
   let html = "<blockquote><p>intro</p><ul><li>one<ul><li>sub</li></ul></li><li>two</li></ul><table><tr><td>a</td></tr></table>tail</blockquote>";
   let expected = convert(html);
-
-  for split in 0..=html.len() {
-    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
-    let mut actual = stream.process_chunk(&html[..split]);
-    actual.push_str(&stream.process_chunk(&html[split..]));
-    actual.push_str(&stream.finish());
-    assert_eq!(actual.trim_end(), expected, "split at byte {split}");
-  }
+  assert_stream_matches_every_split(html, &expected);
 }
 
 #[test]
@@ -738,14 +742,7 @@ fn blockquote_integrations_match_across_every_stream_split() {
   ];
 
   for (html, expected) in cases {
-    assert_eq!(convert(html), expected, "input: {html}");
-    for split in 0..=html.len() {
-      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
-      let mut actual = stream.process_chunk(&html[..split]);
-      actual.push_str(&stream.process_chunk(&html[split..]));
-      actual.push_str(&stream.finish());
-      assert_eq!(actual.trim_end(), expected, "split at byte {split}: {html}");
-    }
+    assert_stream_matches_every_split(html, expected);
   }
 }
 
@@ -753,14 +750,7 @@ fn blockquote_integrations_match_across_every_stream_split() {
 fn blockquote_following_list_content_matches_across_every_stream_split() {
   let html = "<ul><li>intro<blockquote>quote</blockquote><span>credit</span></li></ul>";
   let expected = "- intro\n  > quote\n  credit";
-
-  for split in 0..=html.len() {
-    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
-    let mut actual = stream.process_chunk(&html[..split]);
-    actual.push_str(&stream.process_chunk(&html[split..]));
-    actual.push_str(&stream.finish());
-    assert_eq!(actual.trim_end(), expected, "split at byte {split}");
-  }
+  assert_stream_matches_every_split(html, expected);
 
   let wrapped_html = "<ul><li>intro<blockquote>quote</blockquote><span>credit words continue after quote for wrapping</span></li></ul>";
   let wrapped_expected = "- intro\n  > quote\n  credit words continue\n  after quote for\n  wrapping";
@@ -794,14 +784,7 @@ fn autolink_rewrite_matches_across_every_stream_split() {
   ];
 
   for (html, expected) in cases {
-    assert_eq!(convert(html), expected, "input: {html}");
-    for split in 0..=html.len() {
-      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
-      let mut actual = stream.process_chunk(&html[..split]);
-      actual.push_str(&stream.process_chunk(&html[split..]));
-      actual.push_str(&stream.finish());
-      assert_eq!(actual.trim_end(), expected, "split at byte {split}: {html}");
-    }
+    assert_stream_matches_every_split(html, expected);
   }
 }
 
@@ -827,13 +810,7 @@ fn blockquote_trailing_marker_is_never_streamed_speculatively() {
   ];
 
   for (html, expected) in cases {
-    for split in 0..=html.len() {
-      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
-      let mut actual = stream.process_chunk(&html[..split]);
-      actual.push_str(&stream.process_chunk(&html[split..]));
-      actual.push_str(&stream.finish());
-      assert_eq!(actual.trim_end(), expected, "split at byte {split}: {html}");
-    }
+    assert_stream_matches_every_split(html, expected);
   }
 }
 
