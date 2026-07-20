@@ -1007,10 +1007,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
             const trimmedChars = originalLength - trimmed.length
 
             // Update the last content in buffer regions with trimmed content
-            if (trimmedChars > 0) {
-              if (buff?.length && buff.at(-1) === lastFragment) {
+            // Quoted <pre> tails may already have streamed, so preserve them
+            // rather than making chunked output differ from one-shot output.
+            if (trimmedChars > 0 && !(quotePrefix && state.depthMap[TAG_PRE])) {
+              if (buff?.length && buff.at(-1) === lastFragment)
                 buff[buff.length - 1] = trimmed
-              }
               if (eventType === NodeEventExit && isInlineElement)
                 state.pendingInlineWhitespace = true
             }

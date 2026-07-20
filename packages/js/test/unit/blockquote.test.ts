@@ -57,6 +57,33 @@ describe('blockquotes', () => {
     ['empty marker before text', '<blockquote><p>a</p><p><strong></strong>b</p></blockquote>', '> a\n>\n> b'],
     ['autolink rewrite', '<blockquote><p>a</p><p><a href="https://e.test">https://e.test</a></p></blockquote>', '> a\n>\n> <https://e.test>'],
     ['repeated preformatted blank lines', '<blockquote><pre><code>a\n\n\nb</code></pre></blockquote>', '> ```\n> a\n>\n>\n> b\n> ```'],
+    [
+      'raw table cells containing pre and details',
+      '<blockquote><table><tr><td><pre><code>&lt;x&gt;\ny</code></pre></td><td><details><summary>s</summary>d</details></td></tr></table></blockquote>',
+      '> | <pre><code>&lt;x&gt;<br>y</code></pre> | <details><summary>s</summary>d</details> |\n> | --- | --- |',
+    ],
+    [
+      'raw table cells inside a quoted list item',
+      '<ul><li><blockquote><table><tr><td><pre><code>&lt;x&gt;\ny</code></pre></td><td><details><summary>s</summary>d</details></td></tr></table></blockquote></li></ul>',
+      '- \n  > | <pre><code>&lt;x&gt;<br>y</code></pre> | <details><summary>s</summary>d</details> |\n  > | --- | --- |',
+    ],
+    [
+      'pre trailing blanks before an inline sibling',
+      '<blockquote><pre><code>a\n\n\n</code></pre><span>after</span></blockquote>',
+      '> ```\n> a\n>\n>\n>\n> ```\n> after',
+    ],
+    [
+      'pre trailing blanks before post-quote list text',
+      '<ul><li><blockquote><pre><code>a\n\n\n</code></pre></blockquote><span>after</span></li></ul>',
+      '- \n  > ```\n  > a\n  >\n  >\n  >\n  > ```\n  after',
+    ],
+    ['pre trailing spaces', '<blockquote><pre><code>a  </code></pre></blockquote>', '> ```\n> a  \n> ```'],
+    ['pre trailing tab', '<blockquote><pre><code>a\t</code></pre></blockquote>', '> ```\n> a\t\n> ```'],
+    [
+      'bare pre trailing blanks before an inline sibling',
+      '<blockquote><pre>a\n\n</pre><span>after</span></blockquote>',
+      '> ```\n> a\n>\n>\n> ```\n> after',
+    ],
     ['multiline tag output', '<blockquote><p>a<br>b</p></blockquote>', '> a\n> b'],
     [
       'mixed nested quote/list prefixes',

@@ -1750,7 +1750,12 @@ impl ConvertState {
         let should_trim = !(is_block || h_is_inline && is_enter || is_enter && collapses)
           && !(has_spacing && is_enter);
 
-        if should_trim && self.last_content_cache_len > 0 {
+        // Quoted <pre> tails may already have streamed, so preserve them
+        // rather than making chunked output differ from one-shot output.
+        if should_trim
+          && !(in_blockquote && self.depth_map[TAG_PRE as usize] > 0)
+          && self.last_content_cache_len > 0
+        {
           let cache_len = self.last_content_cache_len;
           let buf_len = self.buffer.len();
           let start = buf_len.saturating_sub(cache_len);

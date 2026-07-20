@@ -688,6 +688,51 @@ fn blockquote_structure_matches_across_every_stream_split() {
 }
 
 #[test]
+fn blockquote_integrations_match_across_every_stream_split() {
+  let cases = [
+    (
+      "<blockquote><table><tr><td><pre><code>&lt;x&gt;\ny</code></pre></td><td><details><summary>s</summary>d</details></td></tr></table></blockquote>",
+      "> | <pre><code>&lt;x&gt;<br>y</code></pre> | <details><summary>s</summary>d</details> |\n> | --- | --- |",
+    ),
+    (
+      "<ul><li><blockquote><table><tr><td><pre><code>&lt;x&gt;\ny</code></pre></td><td><details><summary>s</summary>d</details></td></tr></table></blockquote></li></ul>",
+      "- \n  > | <pre><code>&lt;x&gt;<br>y</code></pre> | <details><summary>s</summary>d</details> |\n  > | --- | --- |",
+    ),
+    (
+      "<blockquote><pre><code>a\n\n\n</code></pre><span>after</span></blockquote>",
+      "> ```\n> a\n>\n>\n>\n> ```\n> after",
+    ),
+    (
+      "<ul><li><blockquote><pre><code>a\n\n\n</code></pre></blockquote><span>after</span></li></ul>",
+      "- \n  > ```\n  > a\n  >\n  >\n  >\n  > ```\n  after",
+    ),
+    (
+      "<blockquote><pre><code>a  </code></pre></blockquote>",
+      "> ```\n> a  \n> ```",
+    ),
+    (
+      "<blockquote><pre><code>a\t</code></pre></blockquote>",
+      "> ```\n> a\t\n> ```",
+    ),
+    (
+      "<blockquote><pre>a\n\n</pre><span>after</span></blockquote>",
+      "> ```\n> a\n>\n>\n> ```\n> after",
+    ),
+  ];
+
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "input: {html}");
+    for split in 0..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let mut actual = stream.process_chunk(&html[..split]);
+      actual.push_str(&stream.process_chunk(&html[split..]));
+      actual.push_str(&stream.finish());
+      assert_eq!(actual.trim_end(), expected, "split at byte {split}: {html}");
+    }
+  }
+}
+
+#[test]
 fn blockquote_following_list_content_matches_across_every_stream_split() {
   let html = "<ul><li>intro<blockquote>quote</blockquote><span>credit</span></li></ul>";
   let expected = "- intro\n  > quote\n  credit";
