@@ -41,10 +41,26 @@ describe('code backtick escaping (issue #149)', () => {
     expect(htmlToMarkdown('<pre><code>a\nb</code></pre>')).toBe('```\na\nb\n```')
   })
 
+  it('does not treat raw table-cell code as a Markdown fence', () => {
+    const html = '<table><tr><td><pre><code>Contains ``` ticks &amp; &lt; &gt;</code></pre></td><td>ok</td></tr></table><p><code>x`y</code></p>'
+    expect(htmlToMarkdown(html)).toBe('| <pre><code>Contains ``` ticks &amp; &lt; &gt;</code></pre> | ok |\n| --- | --- |\n\n`` x`y ``')
+  })
+
+  it('separates a widened trailing-blank fence from inline and plain siblings', () => {
+    const prefix = '````\nContains ``` ticks\n\n\n````\n\n'
+    expect(htmlToMarkdown('<div><pre>Contains ``` ticks\n\n</pre><a href="#x">link</a></div>'))
+      .toBe(`${prefix}[link](#x)`)
+    expect(htmlToMarkdown('<div><pre>Contains ``` ticks\n\n</pre>after</div>'))
+      .toBe(`${prefix}after`)
+  })
+
   it('streaming output matches one-shot at every chunk size', async () => {
     for (const html of [
       '<p>x: <code>a `b` c</code> done.</p>',
       '<pre><code>Contains ```triple``` inside.</code></pre>',
+      '<table><tr><td><pre><code>Contains ``` ticks &amp; &lt; &gt;</code></pre></td><td>ok</td></tr></table><p><code>x`y</code></p>',
+      '<div><pre>Contains ``` ticks\n\n</pre><a href="#x">link</a></div>',
+      '<div><pre>Contains ``` ticks\n\n</pre>after</div>',
     ]) {
       const oneShot = htmlToMarkdown(html)
       for (let chunk = 1; chunk <= html.length; chunk++)

@@ -39,3 +39,29 @@ describe('inline whitespace', () => {
     }
   })
 })
+
+describe('block element followed by inline sibling (#148)', () => {
+  it('closes a trailing-blank <pre> fence before an inline link', () => {
+    expect(htmlToMarkdown('<div><pre>a\nb\n\n</pre><a href="#x">link</a></div>'))
+      .toBe('```\na\nb\n\n\n```\n\n[link](#x)')
+  })
+
+  it('does not glue the closing fence to a pilcrow link (xml2rfc case)', () => {
+    const out = htmlToMarkdown('<div><pre>GET /hello.txt HTTP/1.1\n\n</pre><a href="#s" class="pilcrow">P</a></div>')
+    expect(out).toContain('```\n\n[P](#s)')
+  })
+
+  it('separates a trailing-blank <pre> from following text', () => {
+    expect(htmlToMarkdown('<div><pre>a\nb\n\n</pre>after</div>'))
+      .toBe('```\na\nb\n\n\n```\n\nafter')
+  })
+
+  it('matches across every streaming chunk boundary', async () => {
+    const html = '<div><pre>a\nb\n\n</pre><a href="#x">link</a></div>'
+    const expected = htmlToMarkdown(html)
+    for (let split = 0; split <= html.length; split++) {
+      const output = await streamConvert([html.slice(0, split), html.slice(split)])
+      expect(output.trimEnd(), `split at byte ${split}`).toBe(expected)
+    }
+  })
+})

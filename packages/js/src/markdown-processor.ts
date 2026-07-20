@@ -201,6 +201,55 @@ function canWrapHere(depthMap: Uint8Array): boolean {
 }
 
 /**
+ * Prepare `<pre>` content for raw-HTML emission inside a GFM table cell
+ * (issue #147): fold literal line breaks into `<br>` so the value stays on one
+ * row, and HTML-escape `&`, `<`, `>` so decoded source (e.g. `<script>`) is not
+ * evaluated as live HTML by downstream renderers. Leading and trailing breaks
+ * are dropped; a `\r\n` pair counts as one break.
+ */
+function foldPreLinesToBr(value: string): string {
+  let start = 0
+  while (start < value.length) {
+    const c = value.charCodeAt(start)
+    if (c !== 10 && c !== 13)
+      break
+    start++
+  }
+  let end = value.length
+  while (end > start) {
+    const c = value.charCodeAt(end - 1)
+    if (c !== 10 && c !== 13)
+      break
+    end--
+  }
+  let out = ''
+  for (let i = start; i < end; i++) {
+    const c = value.charCodeAt(i)
+    if (c === 13) {
+      out += '<br>'
+      if (i + 1 < end && value.charCodeAt(i + 1) === 10)
+        i++
+    }
+    else if (c === 10) {
+      out += '<br>'
+    }
+    else if (c === 38) {
+      out += '&amp;'
+    }
+    else if (c === 60) {
+      out += '&lt;'
+    }
+    else if (c === 62) {
+      out += '&gt;'
+    }
+    else {
+      out += value[i]
+    }
+  }
+  return out
+}
+
+/**
  * Character count (code points) of the current unterminated output line, i.e.
  * since the last newline across the buffer chunks. Includes any block prefix
  * (`> `, list indent) already written for the line.
@@ -567,6 +616,15 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           textNode.value = value
         }
 
+        // Inside a table cell the <pre>/<code> is emitted as raw HTML, so every
+        // text node must be escaped (so decoded `<`/`&` are not live HTML) and
+        // its line breaks folded into <br> (issue #147). Runs on all such text,
+        // not only text with newlines, since escaping is always required.
+        if (state.depthMap[TAG_PRE]! > 0
+          && (state.depthMap[TAG_TD]! > 0 || state.depthMap[TAG_TH]! > 0)) {
+          textNode.value = foldPreLinesToBr(textNode.value)
+        }
+
         const wrapWidth = state.options?.wrapWidth
         if (wrapWidth && canWrapHere(state.depthMap)) {
           const wrapped = wrapText(textNode.value, currentColumn(state.buffer), wrapWidth, continuationPrefix(textNode, state.listIndentWidths))
@@ -631,7 +689,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     let codeExitOpenerIdx = -1
     if (eventType === NodeEventExit && codeOpeners.length && !state.plainText
       && !handler?.literalEnter
-      && (handlerOutput !== undefined || handler?.literalExit)
+      && (handler?.literalExit || handlerOutput?.includes('`'))
       && (element.tagId === TAG_CODE || element.tagId === TAG_PRE)) {
       const openerIdx = codeOpeners.pop()!
       if (!handler?.literalExit)
@@ -685,7 +743,26 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // Handle newlines
     const newLineConfig = calculateNewLineConfig(node as ElementNode, state.depthMap, state.plainText === true)
     const configuredNewLines = newLineConfig[eventType] || 0
-    const newLines = Math.max(0, configuredNewLines - lastNewLines)
+    // A closing code fence ("\n```") is the one block-exit output that ends in
+    // a backtick. Its block-spacing newlines are appended AFTER the fence, so
+    // any trailing newlines already in the buffer (blank lines inside <pre>)
+    // sit BEFORE the fence and no longer separate this block from the next
+    // sibling — leaving ```<sibling> on one line, an invalid fence that never
+    // closes. Measure the trailing-newline run from the fence's own tail (#148,
+    // parity with Rust core). Scoped to the fence: other block closers
+    // (raw-HTML </dd>/</dl>, etc.) intentionally glue.
+    let effectiveLastNewLines = lastNewLines
+    if (eventType === NodeEventExit && output) {
+      for (let i = output.length - 1; i >= 0; i--) {
+        const frag = output[i]
+        if (frag) {
+          if (frag.charCodeAt(frag.length - 1) === 96) // '`'
+            effectiveLastNewLines = 0
+          break
+        }
+      }
+    }
+    const newLines = Math.max(0, configuredNewLines - effectiveLastNewLines)
 
     if (state.pendingInlineWhitespace) {
       const firstOutput = output?.[0]?.[0] || ''
@@ -822,7 +899,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // issue #149: record a <code> opener (inline span, or a <code> that owns
     // its <pre>'s fence) as the last-pushed fragment so its delimiter can be
     // widened at close. A bare <pre>'s fence is recorded in the flush hook.
-    if (eventType === NodeEventEnter && element.tagId === TAG_CODE && handlerOutput !== undefined && !handler?.literalEnter) {
+    if (eventType === NodeEventEnter && element.tagId === TAG_CODE && handlerOutput?.includes('`') && !handler?.literalEnter) {
       codeOpeners.push(buff.length - 1)
     }
 

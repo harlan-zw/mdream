@@ -173,7 +173,7 @@ function isAutolinkUri(s: string): boolean {
 // Helper function to check if we're inside a table cell
 function isInsideTableCell(state: HandlerContext['state']): boolean {
   const depthMap = state.depthMap!
-  return (depthMap[TAG_TD] || 0) > 0 || (depthMap[TAG_TH] || 0) > 0
+  return depthMap[TAG_TD]! > 0 || depthMap[TAG_TH]! > 0
 }
 
 function isInsideRawHtmlBlock(state: HandlerContext['state']): boolean {
@@ -265,12 +265,14 @@ export const tagHandlers: Record<number, TagHandler> = {
     collapsesInnerWhiteSpace: true,
   },
   [TAG_DETAILS]: {
+    // Inside a table cell the trailing block break would split the GFM row, so
+    // emit the raw tags with no newlines (issue #147).
     enter: () => '<details>',
-    exit: () => '</details>\n\n',
+    exit: ({ state }) => isInsideTableCell(state) ? '</details>' : '</details>\n\n',
   },
   [TAG_SUMMARY]: {
     enter: () => '<summary>',
-    exit: () => '</summary>\n\n',
+    exit: ({ state }) => isInsideTableCell(state) ? '</summary>' : '</summary>\n\n',
   },
   [TAG_TITLE]: {
     // No special handling for title - plugins will handle frontmatter
@@ -378,11 +380,19 @@ export const tagHandlers: Record<number, TagHandler> = {
   // <pre><code> keeps its existing fence. Only the closing fence lives here.
   [TAG_PRE]: {
     enter: ({ node, state }) => {
+      // Inside a table cell a fenced code block would split the GFM row; emit
+      // raw <pre> and let the content newlines become <br> (issue #147).
+      if (isInsideTableCell(state)) {
+        return '<pre>'
+      }
       state.preFencePending = true
       state.preOwnFence = false
       state.preFenceLang = getLanguageFromClass(node.attributes?.class)
     },
     exit: ({ state }) => {
+      if (isInsideTableCell(state)) {
+        return '</pre>'
+      }
       const ownFence = state.preOwnFence
       state.preFencePending = false
       state.preOwnFence = false
@@ -402,6 +412,11 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_CODE]: {
     enter: ({ node, state }) => {
       if ((state.depthMap?.[TAG_PRE] || 0) > 0) {
+        // Inside a table cell emit raw <code> so no fence newline splits the
+        // GFM row (issue #147). The enclosing <pre> emitted raw <pre>.
+        if (isInsideTableCell(state)) {
+          return '<code>'
+        }
         // The enclosing <pre> already opened its own fence (e.g. <pre> with
         // mixed text and <code> children); don't emit a nested fence.
         if (state.preOwnFence) {
@@ -438,6 +453,10 @@ export const tagHandlers: Record<number, TagHandler> = {
     },
     exit: ({ state }) => {
       if ((state.depthMap?.[TAG_PRE] || 0) > 0) {
+        // Raw <code> close inside a table cell (issue #147).
+        if (isInsideTableCell(state)) {
+          return '</code>'
+        }
         // The enclosing <pre> owns the fence; this <code> emitted no opener.
         if (state.preOwnFence) {
           return undefined

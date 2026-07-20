@@ -548,10 +548,36 @@ fn code_backticks_not_escaped_and_delimiter_widened() {
 }
 
 #[test]
+fn raw_table_code_backticks_do_not_enter_fence_bookkeeping() {
+  assert_eq!(
+    convert(
+      "<table><tr><td><pre><code>Contains ``` ticks &amp; &lt; &gt;</code></pre></td><td>ok</td></tr></table><p><code>x`y</code></p>"
+    ),
+    "| <pre><code>Contains ``` ticks &amp; &lt; &gt;</code></pre> | ok |\n| --- | --- |\n\n`` x`y ``"
+  );
+}
+
+#[test]
+fn widened_fence_with_trailing_blanks_separates_following_siblings() {
+  let prefix = "````\nContains ``` ticks\n\n\n````\n\n";
+  assert_eq!(
+    convert("<div><pre>Contains ``` ticks\n\n</pre><a href=\"#x\">link</a></div>"),
+    format!("{prefix}[link](#x)")
+  );
+  assert_eq!(
+    convert("<div><pre>Contains ``` ticks\n\n</pre>after</div>"),
+    format!("{prefix}after")
+  );
+}
+
+#[test]
 fn code_delimiter_widening_streaming_matches_every_split() {
   for html in [
     "<p>x: <code>a `b` c</code> done.</p>",
     "<pre><code>Contains ```triple``` inside.</code></pre>",
+    "<table><tr><td><pre><code>Contains ``` ticks &amp; &lt; &gt;</code></pre></td><td>ok</td></tr></table><p><code>x`y</code></p>",
+    "<div><pre>Contains ``` ticks\n\n</pre><a href=\"#x\">link</a></div>",
+    "<div><pre>Contains ``` ticks\n\n</pre>after</div>",
   ] {
     let one_shot = convert(html);
     for split in 1..html.len() {
@@ -566,6 +592,38 @@ fn code_delimiter_widening_streaming_matches_every_split() {
       );
     }
   }
+}
+
+// A <pre> whose content ends in blank lines followed by an inline sibling must
+// still close its fence on its own line and separate the sibling (#148).
+#[test]
+fn pre_with_trailing_blank_lines_closes_fence_before_inline_sibling() {
+  assert_eq!(
+    convert("<div><pre>a\nb\n\n</pre><a href=\"#x\">link</a></div>"),
+    "```\na\nb\n\n\n```\n\n[link](#x)"
+  );
+}
+
+// The xml2rfc case from the issue: closing fence must not glue to the pilcrow
+// link, which would leave the fence open and swallow the rest of the document.
+#[test]
+fn block_pre_does_not_glue_closing_fence_to_inline_link() {
+  let result = convert(
+    "<div><pre>GET /hello.txt HTTP/1.1\n\n</pre><a href=\"#s\" class=\"pilcrow\">P</a></div>",
+  );
+  assert!(
+    result.contains("```\n\n[P](#s)"),
+    "fence glued to inline link: {result:?}"
+  );
+}
+
+// A trailing-blank <pre> followed by plain text must also separate cleanly.
+#[test]
+fn pre_with_trailing_blank_lines_separates_following_text() {
+  assert_eq!(
+    convert("<div><pre>a\nb\n\n</pre>after</div>"),
+    "```\na\nb\n\n\n```\n\nafter"
+  );
 }
 
 // ── Blockquotes ──
@@ -737,6 +795,53 @@ fn multiple_paragraphs_in_list_item_inside_table_cell_stay_inline() {
   assert!(
     !out.contains("\n\n"),
     "expected no blank lines inside table cell, got: {out}"
+  );
+}
+
+// https://github.com/harlan-zw/mdream/issues/147
+#[test]
+fn pre_code_inside_table_cell_stays_on_one_row() {
+  // A GFM table row must stay on one line: <pre>/<code> in a cell emit raw
+  // HTML with <br> for content newlines instead of a fenced code block.
+  let html = "<table><tr><td><pre><code>a\nb</code></pre></td><td>ok</td></tr></table>";
+  assert_eq!(
+    convert(html),
+    "| <pre><code>a<br>b</code></pre> | ok |\n| --- | --- |"
+  );
+}
+
+#[test]
+fn bare_pre_inside_table_cell_stays_on_one_row() {
+  let html = "<table><tr><td><pre>x\ny\nz</pre></td><td>ok</td></tr></table>";
+  assert_eq!(
+    convert(html),
+    "| <pre>x<br>y<br>z</pre> | ok |\n| --- | --- |"
+  );
+}
+
+#[test]
+fn details_inside_table_cell_stays_on_one_row() {
+  let html = "<table><tr><td><details><summary>s</summary>d</details></td><td>ok</td></tr></table>";
+  assert_eq!(
+    convert(html),
+    "| <details><summary>s</summary>d</details> | ok |\n| --- | --- |"
+  );
+}
+
+#[test]
+fn pre_code_outside_table_still_fenced() {
+  // Regression: normal (non-cell) <pre><code> keeps the fenced code block.
+  assert_eq!(convert("<pre><code>a\nb</code></pre>"), "```\na\nb\n```");
+}
+
+#[test]
+fn pre_code_inside_table_cell_escapes_html() {
+  // Raw <pre><code> emission in a cell must HTML-escape decoded `<`/`>`/`&` so
+  // source like `<script>` cannot render as live HTML (XSS regression, #147).
+  let html = "<table><tr><td><pre><code>&lt;script&gt;alert(1)&amp;2&lt;/script&gt;</code></pre></td><td>ok</td></tr></table>";
+  assert_eq!(
+    convert(html),
+    "| <pre><code>&lt;script&gt;alert(1)&amp;2&lt;/script&gt;</code></pre> | ok |\n| --- | --- |"
   );
 }
 
