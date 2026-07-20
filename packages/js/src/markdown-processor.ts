@@ -74,6 +74,10 @@ export interface MarkdownState {
   listIndent: string
   /** Per-`<li>` contribution widths, parallel stack to listIndent. */
   listIndentWidths: number[]
+  /** Cached mixed list/blockquote continuation prefix while a quote is open. */
+  quotePrefix?: string
+  /** Logical state of the current quoted line; absent outside blockquotes. */
+  quoteLineState?: number
   /**
    * <pre> fenced-code deferral (issue #97). A bare <pre> (no <code> child)
    * becomes a fenced code block, but the opening fence is deferred until the
@@ -87,8 +91,8 @@ export interface MarkdownState {
   preOwnFence?: boolean
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
-  /** Exact marker for a trailing quoted blank line withheld from streaming. */
-  quotedBlankPrefix?: string
+  /** Prefix captured for a deferred quoted blank separator. */
+  pendingQuotedBlank?: string
 }
 
 // Marker kind per tag id for inline tags that wrap content in a symmetric
@@ -108,13 +112,30 @@ INLINE_MARKER_TYPE[TAG_SAMP] = 5 // `
 INLINE_MARKER_TYPE[TAG_VAR] = 5 // `
 INLINE_MARKER_TYPE[TAG_Q] = 6 // "
 
+const QUOTE_LINE_START = 0
+const QUOTE_LINE_PREFIX = 1
+const QUOTE_LINE_CONTENT = 2
+
 /**
- * Maintain the list-item indent stack. On `<li>` enter, push this item's
- * marker-width of spaces so subsequent continuation content (code blocks,
- * paragraphs, nested lists) lands in the correct column. On exit, pop.
- * Skip when the list item is rendered as literal `<li>` inside a table cell.
+ * Maintain block continuation state incrementally. The quote prefix is created
+ * lazily on the first `<blockquote>`, then extended by nested quotes and list
+ * items in DOM order so emitted fragments never need to walk their ancestors.
  */
-function updateListIndent(state: MarkdownState, element: ElementNode, eventType: number): void {
+function updateBlockContext(state: MarkdownState, element: ElementNode, eventType: number): void {
+  if (element.tagId === TAG_BLOCKQUOTE && !state.plainText) {
+    if (eventType === NodeEventEnter) {
+      state.quotePrefix = `${state.quotePrefix ?? continuationPrefix(element, state.listIndentWidths)}> `
+      state.quoteLineState = QUOTE_LINE_PREFIX
+    }
+    else {
+      state.quotePrefix = state.depthMap[TAG_BLOCKQUOTE]
+        ? state.quotePrefix?.slice(0, -2)
+        : undefined
+      if (state.quotePrefix === undefined)
+        state.quoteLineState = undefined
+    }
+    return
+  }
   if (element.tagId !== TAG_LI)
     return
   if ((state.depthMap[TAG_TD] || 0) > 0 || (state.depthMap[TAG_TH] || 0) > 0)
@@ -124,10 +145,14 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
     const width = state.plainText ? 0 : (isOrdered ? String(element.index + 1).length + 2 : 2)
     state.listIndentWidths.push(width)
     state.listIndent += ' '.repeat(width)
+    if (state.quotePrefix !== undefined)
+      state.quotePrefix += ' '.repeat(width)
   }
   else if (eventType === NodeEventExit) {
     const width = state.listIndentWidths.pop() ?? 0
     state.listIndent = state.listIndent.slice(0, state.listIndent.length - width)
+    if (state.quotePrefix !== undefined)
+      state.quotePrefix = state.quotePrefix.slice(0, -width)
   }
 }
 
@@ -289,6 +314,15 @@ function calculateNewLineConfig(node: ElementNode, depthMap: Uint8Array, plainTe
     return NO_SPACING
   }
 
+  // Inline descendants never own block spacing. Keep them on the old constant-
+  // time path even inside a quote; only block descendants need quote-aware
+  // spacing and continuation markers.
+  if (tagId !== TAG_BLOCKQUOTE
+    && (depthMap[TAG_BLOCKQUOTE] || 0) > 0
+    && (node.tagHandler?.isInline || tagId === -1)) {
+    return NO_SPACING
+  }
+
   // Adjust for inline elements
   // Block elements preserve spacing even inside span elements (presentational containers)
   // because spans shouldn't affect block-level semantics of their children
@@ -323,118 +357,121 @@ function calculateNewLineConfig(node: ElementNode, depthMap: Uint8Array, plainTe
   return DEFAULT_BLOCK_SPACING
 }
 
-/** Return the full continuation prefix when the node has a blockquote ancestor. */
-function blockquoteContinuationPrefix(node: ElementNode | TextNode, listIndentWidths: readonly number[], blockquoteDepth: number): string | undefined {
-  if (!blockquoteDepth)
-    return undefined
-  let parent = node.parent
-  while (parent) {
-    if (parent.tagId === TAG_BLOCKQUOTE)
-      return continuationPrefix(node, listIndentWidths)
-    parent = parent.parent
+/** Return the cached ancestor prefix for an element event. */
+function blockquoteContinuationPrefix(state: MarkdownState, element: ElementNode, eventType: number): string | undefined {
+  const prefix = state.quotePrefix
+  if (prefix === undefined || eventType !== NodeEventExit)
+    return prefix
+  if (element.tagId === TAG_BLOCKQUOTE)
+    return state.depthMap[TAG_BLOCKQUOTE] ? prefix.slice(0, -2) : undefined
+  if (element.tagId === TAG_LI) {
+    const width = state.listIndentWidths.at(-1) || 0
+    return prefix.slice(0, -width)
   }
-  return undefined
+  return prefix
 }
 
-/** Read a small suffix without joining the complete streaming output buffer. */
-function bufferTail(buffer: string[], maxLength: number): string {
-  let tail = ''
-  for (let i = buffer.length - 1; i >= 0 && tail.length < maxLength; i--) {
-    const fragment = buffer[i]!
-    const remaining = maxLength - tail.length
-    tail = fragment.slice(-remaining) + tail
+function flushPendingQuotedBlank(state: MarkdownState): void {
+  const prefix = state.pendingQuotedBlank
+  if (prefix !== undefined) {
+    state.buffer.push(`${prefix.trimEnd()}\n`)
+    state.pendingQuotedBlank = undefined
+    state.quoteLineState = QUOTE_LINE_START
   }
-  return tail
 }
 
-/** Count trailing logical line breaks, including a quoted blank continuation line. */
-function trailingNewLineCount(buffer: string[], prefix?: string): number {
-  const tail = bufferTail(buffer, (prefix?.length || 0) + 3)
-  if (!tail.endsWith('\n'))
-    return 0
-
-  const beforeLast = tail.slice(0, -1)
-  const previousNewline = beforeLast.lastIndexOf('\n')
-  const previousLine = beforeLast.slice(previousNewline + 1)
-  if (previousLine === '')
-    return 2
-  if (prefix) {
-    const blankPrefix = prefix.trimEnd()
-    // Streaming keeps only a short suffix of already-emitted output.
-    if (previousLine === blankPrefix || (previousNewline < 0 && blankPrefix.endsWith(previousLine)))
-      return 2
+/** Apply one or two structural line breaks without allocating a fragment. */
+function appendBlockquoteBreaks(state: MarkdownState, count: number, prefix: string): void {
+  let lineState = state.quoteLineState ?? QUOTE_LINE_START
+  const preserveBlankLines = (state.depthMap[TAG_PRE] || 0) > 0
+  let output = ''
+  if (preserveBlankLines && lineState === QUOTE_LINE_START && state.pendingQuotedBlank !== undefined) {
+    output = `${state.pendingQuotedBlank.trimEnd()}\n`
+    state.pendingQuotedBlank = undefined
   }
-  return 1
+  for (let i = 0; i < count; i++) {
+    if (lineState === QUOTE_LINE_START) {
+      if (preserveBlankLines)
+        output += `${prefix.trimEnd()}\n`
+      else
+        state.pendingQuotedBlank ??= prefix
+    }
+    else {
+      output += '\n'
+    }
+    lineState = QUOTE_LINE_START
+  }
+  if (output)
+    state.buffer.push(output)
+  state.quoteLineState = lineState
 }
 
-/** Whether the current line contains only the already-emitted quote prefix. */
-function currentLineIsPrefix(buffer: string[], prefix: string): boolean {
-  const tail = bufferTail(buffer, prefix.length + 1)
-  const newline = tail.lastIndexOf('\n')
-  const line = tail.slice(newline + 1)
-  return line === prefix || (newline < 0 && line.length > 0 && prefix.endsWith(line))
-}
-
-/** Append a fragment while keeping each complete line inside its blockquote. */
+/**
+ * Append quoted output through a tiny line writer. The writer tracks line state
+ * explicitly, so ordinary fragments never inspect prior buffer entries and a
+ * multi-line fragment is committed as one buffer entry.
+ */
 function appendBlockquoteFragment(state: MarkdownState, value: string, prefix: string): void {
-  const buffer = state.buffer
+  if (!value)
+    return
+
+  if (value === '\n' || value === '\n\n') {
+    appendBlockquoteBreaks(state, value.length, prefix)
+    return
+  }
+
+  let lineState = state.quoteLineState ?? QUOTE_LINE_START
+  const firstNewline = value.indexOf('\n')
+  if (firstNewline === -1) {
+    if (lineState === QUOTE_LINE_START) {
+      const pendingPrefix = state.pendingQuotedBlank
+      state.pendingQuotedBlank = undefined
+      state.buffer.push(pendingPrefix === undefined ? prefix : `${pendingPrefix.trimEnd()}\n${prefix}`)
+      state.buffer.push(value)
+    }
+    else {
+      state.buffer.push(value)
+    }
+    state.quoteLineState = QUOTE_LINE_CONTENT
+    return
+  }
+
+  let output = ''
   let start = 0
   while (start <= value.length) {
-    const newline = value.indexOf('\n', start)
+    const newline = start === 0 ? firstNewline : value.indexOf('\n', start)
     const end = newline === -1 ? value.length : newline
     const line = value.slice(start, end)
-    const atLineStart = buffer.length === 0 || buffer.at(-1)!.endsWith('\n')
-
-    if (atLineStart) {
-      if (line) {
-        buffer.push(prefix)
-        state.quotedBlankPrefix = undefined
+    if (line) {
+      if (lineState === QUOTE_LINE_START) {
+        if (state.pendingQuotedBlank !== undefined) {
+          output += `${state.pendingQuotedBlank.trimEnd()}\n`
+          state.pendingQuotedBlank = undefined
+        }
+        output += prefix
       }
-      else if (newline !== -1) {
-        const blankPrefix = prefix.trimEnd()
-        buffer.push(blankPrefix)
-        state.quotedBlankPrefix = blankPrefix
-      }
+      output += line
+      lineState = QUOTE_LINE_CONTENT
     }
-    else if (line || newline !== -1) {
-      state.quotedBlankPrefix = undefined
-    }
-    if (line)
-      buffer.push(line)
     if (newline === -1)
       break
 
-    buffer.push('\n')
-    start = newline + 1
-  }
-}
-
-/** Locate a trailing blank quote marker (`>`, optionally nested/indented). */
-function trailingQuotedBlankStart(content: string, prefix?: string): number {
-  if (!prefix || !content.endsWith('\n'))
-    return -1
-  const beforeLast = content.slice(0, -1)
-  const previousNewline = beforeLast.lastIndexOf('\n')
-  const line = beforeLast.slice(previousNewline + 1)
-  if (line !== prefix && !(previousNewline < 0 && line.length > 0 && prefix.endsWith(line)))
-    return -1
-  return previousNewline + 1
-}
-
-/** Remove bytes from the end while preserving the surrounding fragments. */
-function removeBufferEnd(buffer: string[], count: number): void {
-  let remaining = count
-  while (remaining > 0 && buffer.length > 0) {
-    const last = buffer.at(-1)!
-    if (last.length <= remaining) {
-      remaining -= last.length
-      buffer.pop()
+    if (lineState === QUOTE_LINE_START) {
+      if ((state.depthMap[TAG_PRE] || 0) > 0)
+        output += `${prefix.trimEnd()}\n`
+      else
+        state.pendingQuotedBlank = prefix
     }
     else {
-      buffer[buffer.length - 1] = last.slice(0, -remaining)
-      remaining = 0
+      output += '\n'
     }
+    lineState = QUOTE_LINE_START
+    start = newline + 1
   }
+
+  if (output)
+    state.buffer.push(output)
+  state.quoteLineState = lineState
 }
 
 /**
@@ -452,16 +489,16 @@ function hasNonWhitespace(value: string): boolean {
 }
 
 /** Drop the top marker when every following fragment is whitespace. */
-function dropEmptyMarker(buffer: string[], packed: number, markerType: number): number {
-  const idx = packed >> 3
-  if ((packed & 7) === markerType && idx < buffer.length) {
-    for (let i = idx + 1; i < buffer.length; i++) {
+function dropEmptyMarker(buffer: string[], packed: number, markerType: number, rollbackIndex: number): number {
+  const markerIndex = packed >> 3
+  if ((packed & 7) === markerType && markerIndex < buffer.length) {
+    for (let i = markerIndex + 1; i < buffer.length; i++) {
       const fragment = buffer[i]!
       if (fragment && hasNonWhitespace(fragment))
         return -1
     }
-    buffer.length = idx
-    return idx
+    buffer.length = rollbackIndex
+    return rollbackIndex
   }
   return -1
 }
@@ -472,7 +509,7 @@ function dropEmptyMarker(buffer: string[], packed: number, markerType: number): 
  * otherwise a plain ```lang opener. Marks the <pre> as owning the fence so a
  * nested <code> does not double up and the <pre> exit emits the closing fence.
  */
-function flushPreFence(state: MarkdownState, node: ElementNode | TextNode): void {
+function flushPreFence(state: MarkdownState): void {
   if (state.plainText) {
     state.preFencePending = false
     state.preOwnFence = false
@@ -482,7 +519,7 @@ function flushPreFence(state: MarkdownState, node: ElementNode | TextNode): void
   state.preOwnFence = true
   const lang = state.preFenceLang || ''
   const liDepth = state.depthMap[TAG_LI] || 0
-  const quotePrefix = blockquoteContinuationPrefix(node, state.listIndentWidths, state.depthMap[TAG_BLOCKQUOTE] || 0)
+  const quotePrefix = state.quotePrefix
   const fence = liDepth > 0 && !quotePrefix
     ? `\n\n${state.listIndent}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
     : `${MARKDOWN_CODE_BLOCK}${lang}\n`
@@ -539,7 +576,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   }
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
+  const openMarkerRollbacks: number[] = []
+  const openMarkerLineStates: Array<number | undefined> = []
+  const openMarkerPendingBlanks: Array<string | undefined> = []
   let openMarkerCount = 0
+  let openLinkRollback = -1
 
   let lastYieldedLength = 0
   let hasYieldedContent = false
@@ -578,26 +619,21 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           state.preFencePending = false
         }
         else if (el.tagId !== TAG_PRE) {
-          flushPreFence(state, el)
+          flushPreFence(state)
         }
       }
       else if (node.type === TEXT_NODE && hasNonWhitespace((node as TextNode).value)) {
-        flushPreFence(state, node as TextNode)
+        flushPreFence(state)
       }
     }
 
-    // A descendant block exit may leave a quoted blank continuation line at
-    // the end of the quote. It separates siblings, but must not survive after
-    // the blockquote itself closes.
-    if (!state.plainText && node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_BLOCKQUOTE) {
-      const prefix = state.quotedBlankPrefix
-      const tail = prefix ? bufferTail(state.buffer, prefix.length + 1) : ''
-      const blankStart = trailingQuotedBlankStart(tail, prefix)
-      if (blankStart >= 0) {
-        removeBufferEnd(state.buffer, tail.length - blankStart)
-        state.lastContentCache = undefined
-        state.quotedBlankPrefix = undefined
-      }
+    // A blank separator only becomes output if quoted content follows it.
+    // Closing the quote proves that it was trailing, so discard it.
+    if (state.pendingQuotedBlank !== undefined
+      && node.type === ELEMENT_NODE
+      && eventType === NodeEventExit
+      && (node as ElementNode).tagId === TAG_BLOCKQUOTE) {
+      state.pendingQuotedBlank = undefined
     }
 
     const lastBuffEntry = buff.at(-1)!
@@ -660,8 +696,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         // stays within the list item's content column. Only add indent to lines
         // that start at column 0 — preserves any existing indentation in the
         // HTML source and stays safe for text nodes that span stream chunks.
-        const quotePrefix = blockquoteContinuationPrefix(textNode, state.listIndentWidths, state.depthMap[TAG_BLOCKQUOTE] || 0)
-        if (!quotePrefix && (state.depthMap[TAG_PRE] || 0) > 0 && (state.depthMap[TAG_LI] || 0) > 0) {
+        const quotePrefix = state.quotePrefix
+        const inBlockquote = quotePrefix !== undefined
+        if (!inBlockquote && (state.depthMap[TAG_PRE] || 0) > 0 && (state.depthMap[TAG_LI] || 0) > 0) {
           const indent = state.listIndent
           // Prepend list_indent on every non-blank line — CommonMark closes
           // the list item if any line is indented less than the content column,
@@ -676,7 +713,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           textNode.value = value
         }
         else if (!state.plainText
-          && !quotePrefix
+          && !inBlockquote
           && !(state.depthMap[TAG_PRE] || 0)
           && (state.depthMap[TAG_LI] || 0) > 0
           && lastChar === '\n'
@@ -693,16 +730,27 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
         const wrapWidth = state.options?.wrapWidth
         if (wrapWidth && canWrapHere(state.depthMap)) {
-          const wrapped = wrapText(textNode.value, currentColumn(state.buffer), wrapWidth, continuationPrefix(textNode, state.listIndentWidths))
+          if (inBlockquote)
+            flushPendingQuotedBlank(state)
+          const wrapped = wrapText(textNode.value, currentColumn(state.buffer), wrapWidth, quotePrefix ?? continuationPrefix(textNode, state.listIndentWidths))
           state.buffer.push(wrapped)
-          state.quotedBlankPrefix = undefined
+          if (inBlockquote && wrapped)
+            state.quoteLineState = wrapped.endsWith('\n') ? QUOTE_LINE_START : QUOTE_LINE_CONTENT
           state.lastContentCache = wrapped
         }
         else {
-          if (quotePrefix)
-            appendBlockquoteFragment(state, textNode.value, quotePrefix)
-          else
+          if (inBlockquote) {
+            if (state.quoteLineState !== QUOTE_LINE_START && !textNode.value.includes('\n')) {
+              state.buffer.push(textNode.value)
+              state.quoteLineState = QUOTE_LINE_CONTENT
+            }
+            else {
+              appendBlockquoteFragment(state, textNode.value, quotePrefix!)
+            }
+          }
+          else {
             state.buffer.push(textNode.value)
+          }
           state.lastContentCache = textNode.value
         }
 
@@ -730,9 +778,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // Get last content from buffer regions
     const lastFragment = state.lastContentCache
 
-    const quotePrefix = blockquoteContinuationPrefix(element, state.listIndentWidths, state.depthMap[TAG_BLOCKQUOTE] || 0)
-    const lastNewLines = trailingNewLineCount(buff, quotePrefix)
-
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
     const handler = node.tagHandler
     const isInlineElement = handler?.isInline === true
@@ -747,19 +792,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
     }
 
-    if (eventType === NodeEventExit && openMarkerCount) {
-      // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
-      const markerType = handlerOutput === undefined ? 0 : INLINE_MARKER_TYPE[element.tagId!]!
-      if (markerType && (element.tagId !== TAG_CODE || !state.depthMap[TAG_PRE]) && !handler?.literalExit) {
-        const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType)
-        if (idx >= 0) {
-          state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
-          return
-        }
-        openMarkerCount = 0
-      }
-    }
-
     // A <br> can introduce one blank line, but never needs 3+ consecutive
     // newlines in normalized prose. Preserve every newline inside <pre>.
     if (element.tagId === TAG_BR && !state.depthMap[TAG_PRE]
@@ -771,7 +803,34 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // Handle newlines
     const newLineConfig = calculateNewLineConfig(node as ElementNode, state.depthMap, state.plainText === true)
     const configuredNewLines = newLineConfig[eventType] || 0
-    const prefixOnlyLine = eventType === NodeEventEnter && element.tagId !== TAG_BLOCKQUOTE && quotePrefix && currentLineIsPrefix(buff, quotePrefix)
+    const quotePrefix = state.quotePrefix === undefined || (!output && configuredNewLines === 0)
+      ? undefined
+      : blockquoteContinuationPrefix(state, element, eventType)
+    const lastNewLines = configuredNewLines > 0 && lastChar === '\n'
+      ? (secondLastChar === '\n' || (quotePrefix !== undefined && state.pendingQuotedBlank !== undefined) ? 2 : 1)
+      : 0
+    const handlerMarkerType = handlerOutput === undefined ? 0 : INLINE_MARKER_TYPE[element.tagId!]!
+
+    if (eventType === NodeEventExit && openMarkerCount) {
+      // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
+      if (handlerMarkerType && (element.tagId !== TAG_CODE || !state.depthMap[TAG_PRE]) && !handler?.literalExit) {
+        const markerSlot = --openMarkerCount
+        const idx = dropEmptyMarker(buff, openMarkers[markerSlot]!, handlerMarkerType, openMarkerRollbacks[markerSlot]!)
+        if (idx >= 0) {
+          state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
+          state.quoteLineState = openMarkerLineStates[markerSlot]
+          state.pendingQuotedBlank = openMarkerPendingBlanks[markerSlot]
+          return
+        }
+        openMarkerCount = 0
+      }
+    }
+
+    const prefixOnlyLine = configuredNewLines > 0
+      && eventType === NodeEventEnter
+      && element.tagId !== TAG_BLOCKQUOTE
+      && quotePrefix
+      && state.quoteLineState === QUOTE_LINE_PREFIX
     const newLines = prefixOnlyLine ? 0 : Math.max(0, configuredNewLines - lastNewLines)
 
     if (state.pendingInlineWhitespace) {
@@ -781,8 +840,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           state.pendingInlineWhitespace = false
         }
         else if (firstOutput) {
-          if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput))
+          if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput)) {
             state.buffer.push(' ')
+            if (state.quotePrefix !== undefined)
+              state.quoteLineState = QUOTE_LINE_CONTENT
+          }
           state.pendingInlineWhitespace = false
         }
       }
@@ -802,12 +864,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
             }
           }
         }
-        updateListIndent(state, element, eventType)
+        updateBlockContext(state, element, eventType)
         return
       }
 
-      // Add newlines
-      const newlinesStr = '\n'.repeat(newLines)
       // Trim only whitespace
       const preserveEmptyListMarker = eventType === NodeEventEnter
         && element.tagId === TAG_BLOCKQUOTE
@@ -819,17 +879,24 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         state.lastTextNode = undefined
       }
 
-      if (eventType === NodeEventEnter) {
-        if (output)
-          output.unshift(newlinesStr)
-        else
-          output = [newlinesStr]
+      if (!output && quotePrefix) {
+        appendBlockquoteBreaks(state, newLines, quotePrefix)
+        state.lastContentCache = newLines === 1 ? '\n' : '\n\n'
       }
       else {
-        if (output)
-          output.push(newlinesStr)
-        else
-          output = [newlinesStr]
+        const newlinesStr = '\n'.repeat(newLines)
+        if (eventType === NodeEventEnter) {
+          if (output)
+            output.unshift(newlinesStr)
+          else
+            output = [newlinesStr]
+        }
+        else {
+          if (output)
+            output.push(newlinesStr)
+          else
+            output = [newlinesStr]
+        }
       }
     }
     else {
@@ -877,9 +944,21 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
     }
 
+    // Only inline markers and links can rewrite their opening output. Snapshot
+    // the quote writer lazily so ordinary block and text events pay no cost.
+    const mutableHandlerEnter = eventType === NodeEventEnter
+      && handlerOutput !== undefined
+      && !handler?.literalEnter
+      && (handlerMarkerType !== 0 || element.tagId === TAG_A)
+    const markerRollbackIndex = mutableHandlerEnter ? buff.length : -1
+    const markerRollbackLineState = mutableHandlerEnter ? state.quoteLineState : undefined
+    const markerRollbackPendingBlank = mutableHandlerEnter ? state.pendingQuotedBlank : undefined
+
     // Add spacing between inline elements if needed
     if (output?.[0]?.[0] && eventType === NodeEventEnter && !node.tagHandler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
       state.buffer.push(' ')
+      if (state.quotePrefix !== undefined)
+        state.quoteLineState = QUOTE_LINE_CONTENT
       state.lastContentCache = ' '
     }
 
@@ -891,11 +970,20 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           // A blockquote opener already contains its complete mixed-context
           // prefix. Descendant fragments are continued centrally here.
           if (quotePrefix && !literalOutput && !(eventType === NodeEventEnter && element.tagId === TAG_BLOCKQUOTE && fragment === handlerOutput)) {
-            appendBlockquoteFragment(state, fragment, quotePrefix)
+            if (state.quoteLineState !== QUOTE_LINE_START && !fragment.includes('\n')) {
+              state.buffer.push(fragment)
+              state.quoteLineState = QUOTE_LINE_CONTENT
+            }
+            else {
+              appendBlockquoteFragment(state, fragment, quotePrefix)
+            }
           }
           else {
+            if (state.pendingQuotedBlank !== undefined)
+              flushPendingQuotedBlank(state)
             state.buffer.push(fragment)
-            state.quotedBlankPrefix = undefined
+            if (state.quotePrefix !== undefined)
+              state.quoteLineState = fragment.endsWith('\n') ? QUOTE_LINE_START : QUOTE_LINE_CONTENT
           }
           state.lastContentCache = fragment
         }
@@ -906,11 +994,16 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // list may own a leading separator (" `"), so retain the whole output
     // fragment as the drop boundary.
     if (eventType === NodeEventEnter && handlerOutput !== undefined && isInlineElement && !handler?.literalEnter) {
-      const markerType = INLINE_MARKER_TYPE[element.tagId!]!
-      if (markerType && (element.tagId !== TAG_CODE || !state.depthMap[TAG_PRE]) && buff[buff.length - 1] === handlerOutput)
-        openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
-      else if (openMarkerCount && hasNonWhitespace(handlerOutput))
+      if (handlerMarkerType && (element.tagId !== TAG_CODE || !state.depthMap[TAG_PRE]) && buff[buff.length - 1] === handlerOutput) {
+        openMarkers[openMarkerCount] = (buff.length - 1) << 3 | handlerMarkerType
+        openMarkerRollbacks[openMarkerCount] = markerRollbackIndex
+        openMarkerLineStates[openMarkerCount] = markerRollbackLineState
+        openMarkerPendingBlanks[openMarkerCount] = markerRollbackPendingBlank
+        openMarkerCount++
+      }
+      else if (openMarkerCount && hasNonWhitespace(handlerOutput)) {
         openMarkerCount = 0
+      }
     }
     else if (openMarkerCount && (handler?.literalExit || (element.tagId !== -1 && !isInlineElement) || output?.some(hasNonWhitespace))) {
       // Literal overrides, plugin output, and block boundaries make all open
@@ -918,7 +1011,16 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       openMarkerCount = 0
     }
 
-    updateListIndent(state, element, eventType)
+    // Autolink shorthand rewrites the opening `[` and link text on exit. Hold
+    // that mutable region across stream chunks until the closing tag resolves.
+    if (element.tagId === TAG_A) {
+      if (eventType === NodeEventEnter && handlerOutput === '[')
+        openLinkRollback = markerRollbackIndex
+      else if (eventType === NodeEventExit)
+        openLinkRollback = -1
+    }
+
+    updateBlockContext(state, element, eventType)
   }
 
   /**
@@ -970,15 +1072,17 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         stableLength--
     }
 
-    const quotedBlankStart = trailingQuotedBlankStart(currentContent, state.quotedBlankPrefix)
-    if (quotedBlankStart >= 0)
-      stableLength = Math.min(stableLength, quotedBlankStart)
-
-    // An open inline marker may still be dropped if its element closes empty in a later chunk;
-    // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
-    const markerHeld = openMarkerCount > 0
-    if (markerHeld) {
-      const openFragment = openMarkers[0]! >> 3
+    // Open inline markers and links can still rewrite earlier fragments when a
+    // later chunk closes them. Hold output at the earliest mutable bookmark.
+    const markerRollback = openMarkerCount > 0 ? openMarkerRollbacks[0]! : -1
+    const heldFragment = markerRollback < 0
+      ? openLinkRollback
+      : openLinkRollback < 0
+        ? markerRollback
+        : Math.min(markerRollback, openLinkRollback)
+    const mutableOutputHeld = heldFragment >= 0
+    if (mutableOutputHeld) {
+      const openFragment = heldFragment
       let markerPos = 0
       for (let i = 0; i < openFragment; i++)
         markerPos += state.buffer[i]!.length
@@ -1000,7 +1104,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // from joining and slicing the entire cumulative output. Plugin, wrapping,
     // and open-link paths retain the full buffer because they can inspect or
     // rewrite earlier content.
-    if (!markerHeld && !hasMutableTrailingSpace) {
+    if (!mutableOutputHeld && !hasMutableTrailingSpace) {
       if (!resolvedPlugins.length && !options.wrapWidth && !state.depthMap[TAG_A]) {
         const tailStart = Math.max(0, stableLength - 2)
         const emittedTail = currentContent.slice(tailStart, stableLength)

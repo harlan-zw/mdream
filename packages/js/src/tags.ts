@@ -362,7 +362,10 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_BLOCKQUOTE]: {
-    enter: ({ node, state }) => `${continuationPrefix(node, state.listIndentWidths || [])}> `,
+    // The processor caches the mixed list/quote prefix after the outer opener.
+    // Reuse it for nested quotes instead of walking the ancestor chain at every
+    // depth; the outermost quote still derives its exact list context here.
+    enter: ({ node, state }) => `${(state as { quotePrefix?: string }).quotePrefix ?? continuationPrefix(node, state.listIndentWidths || [])}> `,
     spacing: BLOCKQUOTE_SPACING,
   },
   // A bare <pre> (no <code> child) becomes a fenced code block (issue #97).
