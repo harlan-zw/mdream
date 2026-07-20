@@ -996,7 +996,12 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     if (eventType === NodeEventEnter && handlerOutput !== undefined && isInlineElement && !handler?.literalEnter) {
       if (handlerMarkerType && (element.tagId !== TAG_CODE || !state.depthMap[TAG_PRE]) && buff[buff.length - 1] === handlerOutput) {
         openMarkers[openMarkerCount] = (buff.length - 1) << 3 | handlerMarkerType
-        openMarkerRollbacks[openMarkerCount] = markerRollbackIndex
+        // At a quoted line start, dropping an empty marker must also roll back
+        // the prefix that was emitted with it. Outside quotes, keep any spacing
+        // inserted before the marker, matching the established inline behavior.
+        openMarkerRollbacks[openMarkerCount] = quotePrefix === undefined
+          ? buff.length - 1
+          : markerRollbackIndex
         openMarkerLineStates[openMarkerCount] = markerRollbackLineState
         openMarkerPendingBlanks[openMarkerCount] = markerRollbackPendingBlank
         openMarkerCount++
