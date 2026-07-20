@@ -240,4 +240,37 @@ describe.each(engines)('tables $name', (engineConfig) => {
       + '| Underline | `<ins> </ins>` | None | `This is an <ins>underlined</ins> text` | This is an <ins>underlined</ins> text |',
     )
   })
+
+  // https://github.com/harlan-zw/mdream/issues/147
+  it('keeps <pre><code> in a cell on one row via raw HTML + <br>', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<table><tr><td><pre><code>a\nb</code></pre></td><td>ok</td></tr></table>'
+    expect(htmlToMarkdown(html, { engine })).toBe(
+      '| <pre><code>a<br>b</code></pre> | ok |\n| --- | --- |',
+    )
+  })
+
+  it('keeps a bare <pre> in a cell on one row', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<table><tr><td><pre>x\ny\nz</pre></td><td>ok</td></tr></table>'
+    expect(htmlToMarkdown(html, { engine })).toBe(
+      '| <pre>x<br>y<br>z</pre> | ok |\n| --- | --- |',
+    )
+  })
+
+  it('keeps <details> in a cell on one row (no trailing block break)', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<table><tr><td><details><summary>s</summary>d</details></td><td>ok</td></tr></table>'
+    expect(htmlToMarkdown(html, { engine })).toBe(
+      '| <details><summary>s</summary>d</details> | ok |\n| --- | --- |',
+    )
+  })
+
+  it('html-escapes decoded < > & in a cell <pre><code> (XSS regression)', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<table><tr><td><pre><code>&lt;script&gt;alert(1)&amp;2&lt;/script&gt;</code></pre></td><td>ok</td></tr></table>'
+    expect(htmlToMarkdown(html, { engine })).toBe(
+      '| <pre><code>&lt;script&gt;alert(1)&amp;2&lt;/script&gt;</code></pre> | ok |\n| --- | --- |',
+    )
+  })
 })

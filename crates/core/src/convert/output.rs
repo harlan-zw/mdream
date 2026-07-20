@@ -48,8 +48,12 @@ impl ConvertState {
       }
     }
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
-    // language) is emitted lazily above for the no-<code> case.
-    if !self.plain_text && self.stack[stack_len - 1].tag_id == Some(TAG_PRE) {
+    // language) is emitted lazily above for the no-<code> case. Skipped inside
+    // a table cell, where the <pre> is emitted as raw HTML instead (issue #147).
+    if !self.plain_text
+      && self.stack[stack_len - 1].tag_id == Some(TAG_PRE)
+      && !self.in_table_cell()
+    {
       let lang = Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
         .to_string();
       self.pre_fence_pending = true;
@@ -696,6 +700,21 @@ impl ConvertState {
       text
     };
 
+    // Inside a table cell the <pre>/<code> is emitted as raw HTML, so every
+    // text node must be escaped (so decoded `<`/`&` are not live HTML) and its
+    // line breaks folded into <br> (issue #147). Runs on all such text, not
+    // only text with newlines, since escaping is always required.
+    let cell_storage;
+    let text = if !self.plain_text
+      && self.depth_map[TAG_PRE as usize] > 0
+      && self.in_table_cell()
+    {
+      cell_storage = Self::fold_pre_lines_to_br(text);
+      cell_storage.as_str()
+    } else {
+      text
+    };
+
     if self.wrap_width != 0 && self.can_wrap_here() {
       self.push_text_wrapped(text, last_char);
     } else if !(self.plain_text && self.depth_map[TAG_PRE as usize] > 0)
@@ -739,6 +758,46 @@ impl ConvertState {
       || self.depth_map[TAG_H4 as usize] > 0
       || self.depth_map[TAG_H5 as usize] > 0
       || self.depth_map[TAG_H6 as usize] > 0
+  }
+
+  /// Prepare `<pre>` content for raw-HTML emission inside a GFM table cell
+  /// (issue #147): fold literal line breaks into `<br>` so the value stays on
+  /// one row, and HTML-escape `&`, `<`, `>` so decoded source (e.g. `<script>`)
+  /// is not evaluated as live HTML. Leading and trailing breaks are dropped; a
+  /// `\r\n` pair counts as one break.
+  fn fold_pre_lines_to_br(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut start = 0usize;
+    while start < bytes.len() && (bytes[start] == b'\n' || bytes[start] == b'\r') {
+      start += 1;
+    }
+    let mut end = bytes.len();
+    while end > start && (bytes[end - 1] == b'\n' || bytes[end - 1] == b'\r') {
+      end -= 1;
+    }
+    // `start`/`end` land on ASCII newline bytes, so slicing here is UTF-8 safe.
+    let trimmed = &value[start..end];
+    let mut out = String::with_capacity(trimmed.len());
+    let mut chars = trimmed.chars().peekable();
+    while let Some(c) = chars.next() {
+      if c == '\r' {
+        out.push_str("<br>");
+        if chars.peek() == Some(&'\n') {
+          chars.next();
+        }
+      } else if c == '\n' {
+        out.push_str("<br>");
+      } else if c == '&' {
+        out.push_str("&amp;");
+      } else if c == '<' {
+        out.push_str("&lt;");
+      } else if c == '>' {
+        out.push_str("&gt;");
+      } else {
+        out.push(c);
+      }
+    }
+    out
   }
 
   #[inline]
@@ -870,6 +929,9 @@ impl ConvertState {
     match tag_id {
       TAG_DETAILS => Some(Cow::Borrowed("<details>")),
       TAG_SUMMARY => Some(Cow::Borrowed("<summary>")),
+      // Inside a table cell a fenced code block would split the GFM row; emit
+      // raw <pre> and let the content newlines become <br> (issue #147).
+      TAG_PRE if self.in_table_cell() => Some(Cow::Borrowed("<pre>")),
       TAG_BR => {
         if self.in_table_cell() || self.in_heading() || self.in_raw_html_block() {
           Some(Cow::Borrowed("<br>"))
@@ -961,6 +1023,11 @@ impl ConvertState {
       }
       TAG_CODE => {
         if self.depth_map[TAG_PRE as usize] > 0 {
+          // Inside a table cell emit raw <code> so no fence newline splits
+          // the GFM row (issue #147). The enclosing <pre> emitted raw <pre>.
+          if self.in_table_cell() {
+            return Some(Cow::Borrowed("<code>"));
+          }
           // The enclosing <pre> already opened its own fence (mixed
           // text + <code> children); don't emit a nested fence.
           if self.pre_own_fence {
@@ -1144,6 +1211,10 @@ impl ConvertState {
 
     let tag_id = node.tag_id?;
     match tag_id {
+      // Inside a table cell the trailing block break would split the GFM row,
+      // so emit the raw close tags with no newlines (issue #147).
+      TAG_DETAILS if self.in_table_cell() => Some(Cow::Borrowed("</details>")),
+      TAG_SUMMARY if self.in_table_cell() => Some(Cow::Borrowed("</summary>")),
       TAG_DETAILS => Some(Cow::Borrowed("</details>\n\n")),
       TAG_SUMMARY => Some(Cow::Borrowed("</summary>\n\n")),
       TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6 => {
@@ -1177,6 +1248,10 @@ impl ConvertState {
       TAG_INS => Some(Cow::Borrowed("</ins>")),
       TAG_CODE => {
         if self.depth_map[TAG_PRE as usize] > 0 {
+          // Raw <code> close inside a table cell (issue #147).
+          if self.in_table_cell() {
+            return Some(Cow::Borrowed("</code>"));
+          }
           // The enclosing <pre> owns the fence; this <code> opened none.
           if self.pre_own_fence {
             return None;
@@ -1197,6 +1272,8 @@ impl ConvertState {
           Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
         }
       }
+      // Raw <pre> close inside a table cell (issue #147).
+      TAG_PRE if self.in_table_cell() => Some(Cow::Borrowed("</pre>")),
       // Bare <pre> (no <code> child) closing fence (issue #97). Only emitted
       // when the <pre> opened its own fence; otherwise a <code> child or an
       // empty/whitespace-only <pre> means there is nothing to close.

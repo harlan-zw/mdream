@@ -201,6 +201,55 @@ function canWrapHere(depthMap: Uint8Array): boolean {
 }
 
 /**
+ * Prepare `<pre>` content for raw-HTML emission inside a GFM table cell
+ * (issue #147): fold literal line breaks into `<br>` so the value stays on one
+ * row, and HTML-escape `&`, `<`, `>` so decoded source (e.g. `<script>`) is not
+ * evaluated as live HTML by downstream renderers. Leading and trailing breaks
+ * are dropped; a `\r\n` pair counts as one break.
+ */
+function foldPreLinesToBr(value: string): string {
+  let start = 0
+  while (start < value.length) {
+    const c = value.charCodeAt(start)
+    if (c !== 10 && c !== 13)
+      break
+    start++
+  }
+  let end = value.length
+  while (end > start) {
+    const c = value.charCodeAt(end - 1)
+    if (c !== 10 && c !== 13)
+      break
+    end--
+  }
+  let out = ''
+  for (let i = start; i < end; i++) {
+    const c = value.charCodeAt(i)
+    if (c === 13) {
+      out += '<br>'
+      if (i + 1 < end && value.charCodeAt(i + 1) === 10)
+        i++
+    }
+    else if (c === 10) {
+      out += '<br>'
+    }
+    else if (c === 38) {
+      out += '&amp;'
+    }
+    else if (c === 60) {
+      out += '&lt;'
+    }
+    else if (c === 62) {
+      out += '&gt;'
+    }
+    else {
+      out += value[i]
+    }
+  }
+  return out
+}
+
+/**
  * Character count (code points) of the current unterminated output line, i.e.
  * since the last newline across the buffer chunks. Includes any block prefix
  * (`> `, list indent) already written for the line.
@@ -530,6 +579,15 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
             value = indent + value
           }
           textNode.value = value
+        }
+
+        // Inside a table cell the <pre>/<code> is emitted as raw HTML, so every
+        // text node must be escaped (so decoded `<`/`&` are not live HTML) and
+        // its line breaks folded into <br> (issue #147). Runs on all such text,
+        // not only text with newlines, since escaping is always required.
+        if (state.depthMap[TAG_PRE]! > 0
+          && (state.depthMap[TAG_TD]! > 0 || state.depthMap[TAG_TH]! > 0)) {
+          textNode.value = foldPreLinesToBr(textNode.value)
         }
 
         const wrapWidth = state.options?.wrapWidth
