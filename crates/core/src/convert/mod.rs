@@ -337,8 +337,8 @@ pub struct ConvertState {
   skip_current_link: bool,
   /// Buffer position of the `[` character written for TAG_A enter
   link_bracket_pos: usize,
-  /// Open inline markers as (kind, output start, content start); lets the exit drop empty pairs.
-  open_markers: Vec<(u8, usize, usize)>,
+  /// Open inline markers that may still be removed when their element closes empty.
+  open_markers: Vec<OpenMarker>,
   /// Heading slugs collected during conversion for fragment validation
   heading_slugs: Vec<String>,
   /// Fragment link locations: (bracket_start, link_end)
@@ -369,6 +369,19 @@ pub struct ConvertState {
   pre_fence_pending: bool,
   pre_fence_lang: String,
   pre_own_fence: bool,
+}
+
+struct OpenMarker {
+  marker_type: u8,
+  content_start: usize,
+  /// Earliest output owned by the opener. Inside a blockquote this includes
+  /// the continuation prefix inserted immediately before the marker.
+  rollback_start: usize,
+  /// Earliest buffered output that must stay mutable while the marker is open.
+  /// A quoted blank before the marker is retained for following content, but
+  /// must not stream until the marker proves non-empty.
+  hold_start: usize,
+  had_quoted_blank: bool,
 }
 
 impl ConvertState {
@@ -1030,8 +1043,11 @@ impl ConvertState {
     };
     // An open inline marker may still be dropped if its element closes empty in a later chunk;
     // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
-    if let Some(&(_, p, _)) = self.open_markers.first() {
-      stable_end = stable_end.min(p);
+    if let Some(marker) = self.open_markers.first() {
+      stable_end = stable_end.min(marker.hold_start);
+    }
+    if self.depth_map[TAG_A as usize] > 0 {
+      stable_end = stable_end.min(self.link_bracket_pos);
     }
     let quoted_blank_start = self.trailing_quoted_blank_start();
     if let Some(start) = quoted_blank_start {
@@ -1083,8 +1099,8 @@ impl ConvertState {
     if self.depth_map[TAG_A as usize] > 0 {
       drain_end = drain_end.min(self.link_bracket_pos);
     }
-    if let Some(&(_, output_start, _)) = self.open_markers.first() {
-      drain_end = drain_end.min(output_start);
+    if let Some(marker) = self.open_markers.first() {
+      drain_end = drain_end.min(marker.hold_start);
     }
     if drain_end == 0 {
       return;
@@ -1102,9 +1118,10 @@ impl ConvertState {
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
     self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);
-    for (_, output_start, content_start) in &mut self.open_markers {
-      *output_start -= drain_end;
-      *content_start -= drain_end;
+    for marker in &mut self.open_markers {
+      marker.content_start -= drain_end;
+      marker.rollback_start -= drain_end;
+      marker.hold_start -= drain_end;
     }
   }
 }

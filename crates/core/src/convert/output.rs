@@ -179,6 +179,31 @@ impl ConvertState {
       }
     }
 
+    let removable_marker_type = if enter_is_literal {
+      None
+    } else {
+      tag_id
+        .filter(|&id| id != TAG_CODE || self.depth_map[TAG_PRE as usize] == 0)
+        .and_then(Self::inline_marker_type)
+    };
+    // Only removable marker enters need a quote-state snapshot. The buffered
+    // blank remains part of rollback output (following text may need it), but
+    // must be withheld from streaming until the marker proves non-empty.
+    let marker_quote_rollback = if removable_marker_type.is_some()
+      && self.depth_map[TAG_BLOCKQUOTE as usize] > 0
+    {
+      let rollback_start = self.buffer.len();
+      Some((
+        rollback_start,
+        self
+          .trailing_quoted_blank_start()
+          .unwrap_or(rollback_start),
+        self.quoted_blank_prefix.is_some(),
+      ))
+    } else {
+      None
+    };
+
     self.write_output(
       true,
       tag_id,
@@ -200,18 +225,20 @@ impl ConvertState {
       };
     }
 
-    if !enter_is_literal
-      && let Some(id) = tag_id
-      && (id != TAG_CODE || self.depth_map[TAG_PRE as usize] == 0)
-      && let Some(inline_marker_type) = Self::inline_marker_type(id)
+    if let Some(inline_marker_type) = removable_marker_type
       && let Some(emitted) = output.as_deref()
       && !emitted.is_empty()
     {
-      self.open_markers.push((
-        inline_marker_type,
-        self.buffer.len() - emitted.len(),
-        self.buffer.len(),
-      ));
+      let output_start = self.buffer.len() - emitted.len();
+      let (rollback_start, hold_start, had_quoted_blank) =
+        marker_quote_rollback.unwrap_or((output_start, output_start, false));
+      self.open_markers.push(OpenMarker {
+        marker_type: inline_marker_type,
+        content_start: self.buffer.len(),
+        rollback_start,
+        hold_start,
+        had_quoted_blank,
+      });
     } else if !self.open_markers.is_empty()
       && output
         .as_deref()
@@ -521,18 +548,20 @@ impl ConvertState {
       && (id != TAG_CODE || self.depth_map[TAG_PRE as usize] == 0)
       && let Some(inline_marker_type) = Self::inline_marker_type(id)
       && output.as_deref().is_some_and(|emitted| !emitted.is_empty())
-      && let Some((open_type, output_start, content_start)) = self.open_markers.pop()
+      && let Some(open_marker) = self.open_markers.pop()
     {
-      if open_type == inline_marker_type
-        && content_start <= self.buffer.len()
-        && self.buffer.as_bytes()[content_start..]
+      if open_marker.marker_type == inline_marker_type
+        && open_marker.content_start <= self.buffer.len()
+        && self.buffer.as_bytes()[open_marker.content_start..]
           .iter()
           .all(|&b| is_whitespace(b))
       {
-        // `output_start` includes a separator owned by the opener (inline
-        // code in a list can emit " `"), but excludes normal surrounding
-        // spacing synthesized by write_output.
-        self.buffer.truncate(output_start);
+        self.buffer.truncate(open_marker.rollback_start);
+        self.quoted_blank_prefix = if open_marker.had_quoted_blank {
+          Some(self.continuation_prefix().trim_end().to_string())
+        } else {
+          None
+        };
         self.last_content_cache_len = 0;
         self.last_node_is_inline = is_inline;
         return;
@@ -1645,6 +1674,8 @@ impl ConvertState {
     // following sibling (#148), so measure from the output tail in this case.
     let last_new_lines = if !is_enter && output_str.as_bytes().last() == Some(&b'`') {
       0
+    } else if !is_enter && in_blockquote && output_str.ends_with('\n') {
+      if output_str.ends_with("\n\n") { 2 } else { 1 }
     } else {
       self.trailing_new_line_count(in_blockquote.then_some(context_prefix.as_str()))
     };
