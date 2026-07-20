@@ -524,6 +524,38 @@ fn block_code_fence_is_not_tracked_as_inline_marker() {
   );
 }
 
+// A <pre> whose content ends in blank lines followed by an inline sibling must
+// still close its fence on its own line and separate the sibling (#148).
+#[test]
+fn pre_with_trailing_blank_lines_closes_fence_before_inline_sibling() {
+  assert_eq!(
+    convert("<div><pre>a\nb\n\n</pre><a href=\"#x\">link</a></div>"),
+    "```\na\nb\n\n\n```\n\n[link](#x)"
+  );
+}
+
+// The xml2rfc case from the issue: closing fence must not glue to the pilcrow
+// link, which would leave the fence open and swallow the rest of the document.
+#[test]
+fn block_pre_does_not_glue_closing_fence_to_inline_link() {
+  let result = convert(
+    "<div><pre>GET /hello.txt HTTP/1.1\n\n</pre><a href=\"#s\" class=\"pilcrow\">P</a></div>",
+  );
+  assert!(
+    result.contains("```\n\n[P](#s)"),
+    "fence glued to inline link: {result:?}"
+  );
+}
+
+// A trailing-blank <pre> followed by plain text must also separate cleanly.
+#[test]
+fn pre_with_trailing_blank_lines_separates_following_text() {
+  assert_eq!(
+    convert("<div><pre>a\nb\n\n</pre>after</div>"),
+    "```\na\nb\n\n\n```\n\nafter"
+  );
+}
+
 // ── Blockquotes ──
 
 #[test]

@@ -671,7 +671,26 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // Handle newlines
     const newLineConfig = calculateNewLineConfig(node as ElementNode, state.depthMap, state.plainText === true)
     const configuredNewLines = newLineConfig[eventType] || 0
-    const newLines = Math.max(0, configuredNewLines - lastNewLines)
+    // A closing code fence ("\n```") is the one block-exit output that ends in
+    // a backtick. Its block-spacing newlines are appended AFTER the fence, so
+    // any trailing newlines already in the buffer (blank lines inside <pre>)
+    // sit BEFORE the fence and no longer separate this block from the next
+    // sibling — leaving ```<sibling> on one line, an invalid fence that never
+    // closes. Measure the trailing-newline run from the fence's own tail (#148,
+    // parity with Rust core). Scoped to the fence: other block closers
+    // (raw-HTML </dd>/</dl>, etc.) intentionally glue.
+    let effectiveLastNewLines = lastNewLines
+    if (eventType === NodeEventExit && output) {
+      for (let i = output.length - 1; i >= 0; i--) {
+        const frag = output[i]
+        if (frag) {
+          if (frag.charCodeAt(frag.length - 1) === 96) // '`'
+            effectiveLastNewLines = 0
+          break
+        }
+      }
+    }
+    const newLines = Math.max(0, configuredNewLines - effectiveLastNewLines)
 
     if (state.pendingInlineWhitespace) {
       const firstOutput = output?.[0]?.[0] || ''
