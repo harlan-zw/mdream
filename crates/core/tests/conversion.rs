@@ -732,6 +732,17 @@ fn pre_code_outside_table_still_fenced() {
   assert_eq!(convert("<pre><code>a\nb</code></pre>"), "```\na\nb\n```");
 }
 
+#[test]
+fn pre_code_inside_table_cell_escapes_html() {
+  // Raw <pre><code> emission in a cell must HTML-escape decoded `<`/`>`/`&` so
+  // source like `<script>` cannot render as live HTML (XSS regression, #147).
+  let html = "<table><tr><td><pre><code>&lt;script&gt;alert(1)&amp;2&lt;/script&gt;</code></pre></td><td>ok</td></tr></table>";
+  assert_eq!(
+    convert(html),
+    "| <pre><code>&lt;script&gt;alert(1)&amp;2&lt;/script&gt;</code></pre> | ok |\n| --- | --- |"
+  );
+}
+
 // https://github.com/harlan-zw/mdream/issues/76
 #[test]
 fn inline_code_inside_strong_inside_list_no_leading_space() {

@@ -700,14 +700,14 @@ impl ConvertState {
       text
     };
 
-    // Inside a table cell a literal newline in <pre> content splits the GFM
-    // row. The <pre>/<code> is emitted as raw HTML, so fold each line break
-    // into <br> (issue #147).
+    // Inside a table cell the <pre>/<code> is emitted as raw HTML, so every
+    // text node must be escaped (so decoded `<`/`&` are not live HTML) and its
+    // line breaks folded into <br> (issue #147). Runs on all such text, not
+    // only text with newlines, since escaping is always required.
     let cell_storage;
     let text = if !self.plain_text
       && self.depth_map[TAG_PRE as usize] > 0
       && self.in_table_cell()
-      && (text.contains('\n') || text.contains('\r'))
     {
       cell_storage = Self::fold_pre_lines_to_br(text);
       cell_storage.as_str()
@@ -760,9 +760,11 @@ impl ConvertState {
       || self.depth_map[TAG_H6 as usize] > 0
   }
 
-  /// Fold the literal line breaks of `<pre>` content into `<br>` so the value
-  /// stays on a single line inside a GFM table cell (issue #147). Leading and
-  /// trailing breaks are dropped; a `\r\n` pair counts as one break.
+  /// Prepare `<pre>` content for raw-HTML emission inside a GFM table cell
+  /// (issue #147): fold literal line breaks into `<br>` so the value stays on
+  /// one row, and HTML-escape `&`, `<`, `>` so decoded source (e.g. `<script>`)
+  /// is not evaluated as live HTML. Leading and trailing breaks are dropped; a
+  /// `\r\n` pair counts as one break.
   fn fold_pre_lines_to_br(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut start = 0usize;
@@ -785,6 +787,12 @@ impl ConvertState {
         }
       } else if c == '\n' {
         out.push_str("<br>");
+      } else if c == '&' {
+        out.push_str("&amp;");
+      } else if c == '<' {
+        out.push_str("&lt;");
+      } else if c == '>' {
+        out.push_str("&gt;");
       } else {
         out.push(c);
       }

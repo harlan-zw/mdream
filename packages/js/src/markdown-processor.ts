@@ -201,9 +201,11 @@ function canWrapHere(depthMap: Uint8Array): boolean {
 }
 
 /**
- * Fold the literal line breaks of `<pre>` content into `<br>` so the value
- * stays on a single line inside a GFM table cell (issue #147). Leading and
- * trailing breaks are dropped; a `\r\n` pair counts as one break.
+ * Prepare `<pre>` content for raw-HTML emission inside a GFM table cell
+ * (issue #147): fold literal line breaks into `<br>` so the value stays on one
+ * row, and HTML-escape `&`, `<`, `>` so decoded source (e.g. `<script>`) is not
+ * evaluated as live HTML by downstream renderers. Leading and trailing breaks
+ * are dropped; a `\r\n` pair counts as one break.
  */
 function foldPreLinesToBr(value: string): string {
   let start = 0
@@ -230,6 +232,15 @@ function foldPreLinesToBr(value: string): string {
     }
     else if (c === 10) {
       out += '<br>'
+    }
+    else if (c === 38) {
+      out += '&amp;'
+    }
+    else if (c === 60) {
+      out += '&lt;'
+    }
+    else if (c === 62) {
+      out += '&gt;'
     }
     else {
       out += value[i]
@@ -570,12 +581,12 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           textNode.value = value
         }
 
-        // Inside a table cell a literal newline in <pre> content splits the
-        // GFM row. The <pre>/<code> is emitted as raw HTML, so fold each line
-        // break into <br> (issue #147).
-        if ((state.depthMap[TAG_PRE] || 0) > 0
-          && ((state.depthMap[TAG_TD] || 0) > 0 || (state.depthMap[TAG_TH] || 0) > 0)
-          && (textNode.value.includes('\n') || textNode.value.includes('\r'))) {
+        // Inside a table cell the <pre>/<code> is emitted as raw HTML, so every
+        // text node must be escaped (so decoded `<`/`&` are not live HTML) and
+        // its line breaks folded into <br> (issue #147). Runs on all such text,
+        // not only text with newlines, since escaping is always required.
+        if (state.depthMap[TAG_PRE] > 0
+          && (state.depthMap[TAG_TD] > 0 || state.depthMap[TAG_TH] > 0)) {
           textNode.value = foldPreLinesToBr(textNode.value)
         }
 
