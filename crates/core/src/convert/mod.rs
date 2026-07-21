@@ -1056,14 +1056,25 @@ impl ConvertState {
 
   pub fn get_markdown_chunk(&mut self) -> String {
     let buf_len = self.buffer.len();
-    // A trailing whitespace-bearing text node may still be trimmed when a
-    // closing inline tag arrives in a later chunk. Hold that mutable suffix back.
-    let mut stable_end =
-      if self.last_text_node_contains_whitespace && self.depth_map[TAG_PRE as usize] == 0 {
-        self.buffer.trim_end_matches(' ').len()
-      } else {
-        buf_len
-      };
+    // Trailing spaces at the buffer end are never final outside <pre>: a later
+    // block close (or a dropped empty element followed by a block) trims them,
+    // and an inline close arriving next chunk can trim a text node's trailing
+    // space. Yielding them would let that later trim silently remove an
+    // already-sent byte and shift every byte after it. Always hold them back;
+    // they are re-yielded once real content follows, or dropped at finalize.
+    let mut stable_end = self.buffer.trim_end_matches(' ').len();
+    if stable_end < buf_len && self.depth_map[TAG_PRE as usize] != 0 {
+      // Inside <pre> trailing spaces are usually significant code, so yield
+      // them. The exception is a line-leading run (preceded by a newline): a
+      // list continuation indent is emitted right after the closing fence, and
+      // before the next sibling is known, while <pre>'s depth is still set.
+      // That indent is speculative (the next <li> rewrites it to its marker),
+      // so hold it back like any other trailing whitespace.
+      let line_leading = stable_end == 0 || self.buffer.as_bytes()[stable_end - 1] == b'\n';
+      if !line_leading {
+        stable_end = buf_len;
+      }
+    }
     let leading = if self.preserve_leading_whitespace || self.has_streamed_output {
       0
     } else {
@@ -1071,8 +1082,21 @@ impl ConvertState {
     };
     // An open inline marker may still be dropped if its element closes empty in a later chunk;
     // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
+    // The spaces immediately before it belong to the preceding text node: if the marker is
+    // dropped (empty element) and a block boundary then trims that trailing space, a yielded
+    // space would be silently removed and shift every later byte. Hold those spaces back too.
     if let Some(&(_, p, _)) = self.open_markers.first() {
-      stable_end = stable_end.min(p);
+      stable_end = stable_end.min(self.buffer[..p].trim_end_matches(' ').len());
+    }
+    // An open `<a>`'s close can rewrite the buffer back to `link_bracket_pos`
+    // (emptyLinkText drop, selfLinkHeadings, redundantLinks, GFM autolink). Hold the
+    // yield boundary there so a link that turns out empty never leaks a stray `[`.
+    // As with inline markers, the spaces just before the `[` belong to the
+    // preceding text: an empty-link drop followed by a block close trims them,
+    // so hold them back too or a yielded space would be silently removed.
+    // Mirrors the same guard in `drain_streamed_prefix`.
+    if self.depth_map[TAG_A as usize] > 0 {
+      stable_end = stable_end.min(self.buffer[..self.link_bracket_pos].trim_end_matches(' ').len());
     }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let mut start = self.last_yielded_length.max(leading);
@@ -1130,11 +1154,24 @@ impl ConvertState {
       retained_tail_start -= 1;
     }
     let mut drain_end = self.last_yielded_length.min(retained_tail_start);
+    // An empty link or inline marker closing in a later chunk truncates the
+    // buffer back to its reach-back point (`link_bracket_pos` / `output_start`).
+    // The next block then counts its leading newlines from the two bytes ending
+    // there (see `write_output`, which inspects only the last two), so keep
+    // those two bytes; otherwise a dropped element leaks an extra newline in
+    // streaming.
+    let keep_two_before = |buf: &str, at: usize| {
+      let mut i = at.saturating_sub(2);
+      while i > 0 && !buf.is_char_boundary(i) {
+        i -= 1;
+      }
+      i
+    };
     if self.depth_map[TAG_A as usize] > 0 {
-      drain_end = drain_end.min(self.link_bracket_pos);
+      drain_end = drain_end.min(keep_two_before(&self.buffer, self.link_bracket_pos));
     }
     if let Some(&(_, output_start, _)) = self.open_markers.first() {
-      drain_end = drain_end.min(output_start);
+      drain_end = drain_end.min(keep_two_before(&self.buffer, output_start));
     }
     if drain_end == 0 {
       return;

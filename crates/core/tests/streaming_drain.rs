@@ -142,6 +142,31 @@ fn streaming_does_not_re_escape_carried_text() {
   }
 }
 
+// A code block ending a list item dropped the next item's list marker in
+// streaming (`2.` became a plain continuation indent).
+#[test]
+fn streaming_keeps_list_marker_after_code_block() {
+  for html in [
+    "<ol><li>one<pre><code>cmd</code></pre></li><li>two</li></ol>",
+    "<ul><li>one<pre><code>cmd</code></pre></li><li>two</li></ul>",
+    "<ol><li>one<pre><code>a</code></pre></li><li>two</li><li>three</li></ol>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// A raw-passthrough element (<summary>) containing a foreign child (<svg>) lost
+// the `<` of its closing tag in streaming (`</summary>` → ` /summary>`).
+#[test]
+fn streaming_keeps_raw_close_tag_after_foreign_child() {
+  for html in [
+    "<summary>text <svg></svg></summary>",
+    "<details><summary>text <svg><polyline points=\"1 2\"></polyline></svg></summary><p>b</p></details>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  }
+}
+
 // Script data is dropped from output; a chunk boundary landing inside the
 // script (or across its `</script>` close tag) must still leave the surrounding
 // content identical to one-shot. Guards the script-data carry path, which now
@@ -194,6 +219,36 @@ fn streaming_multibyte_never_panics() {
   for &html in CASES {
     for max_bytes in [1usize, 2, 3, 4, 5, 7, 11] {
       let _ = stream_chars(html, max_bytes, HTMLToMarkdownOptions::default());
+    }
+  }
+}
+
+// An empty link or inline marker that closes in a later chunk is truncated
+// away; the drain must keep the two bytes of block spacing before its
+// reach-back point so the next block counts newlines correctly. Without it the
+// close leaked a stray `[` and, once that was held back, an extra blank line.
+#[test]
+fn streaming_dropped_empty_element_keeps_block_spacing() {
+  let cases = [
+    r##"<h3>Set priority</h3><a class="anchor-link" href="#x"></a><p>The value.</p>"##,
+    r#"<h2>Section</h2><a href="/x"><svg></svg></a><p>Body text.</p>"#,
+    "<p>First para.</p><em></em><p>Second para.</p>",
+    // A heading in a list item trailed by an empty anchor-link icon: the space
+    // before the dropped `[` leaked, then the following block trimmed it.
+    r##"<ul><li><h3>NetSparkle</h3><a class="anchor-link" href="#x"><span><svg></svg></span></a></li></ul><p>Copyright.</p>"##,
+  ];
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  for html in cases {
+    let expected = html_to_markdown(html, opts.clone());
+    for chunk in 1..=32 {
+      assert_eq!(
+        stream_chunks(html, chunk, opts.clone()).trim(),
+        expected.trim(),
+        "mismatch: chunk={chunk} html={html:?}"
+      );
     }
   }
 }
