@@ -114,6 +114,50 @@ fn streamed_output_matches_one_shot() {
   }
 }
 
+// Streaming must equal one-shot for these parse-layer cases (drain-transparent).
+// Each asserts across chunk sizes so a boundary landing anywhere is covered.
+fn assert_stream_matches(html: &str, opts: HTMLToMarkdownOptions) {
+  let expected = html_to_markdown(html, opts.clone());
+  for chunk in 1..=html.len().max(1) {
+    assert_eq!(
+      stream_chunks(html, chunk, opts.clone()).trim(),
+      expected.trim(),
+      "mismatch: chunk={chunk} html={html:?}"
+    );
+  }
+}
+
+// A chunk boundary inside an escape context (code/pre/table/link) returned the
+// already-escaped text as the unparsed remainder, so it was re-escaped on the
+// next chunk and backslashes multiplied (`\\`` → `\\\\``…).
+#[test]
+fn streaming_does_not_re_escape_carried_text() {
+  for html in [
+    "<pre><code>const x = `hi ${y}`;</code></pre>",
+    "<p>use <code>a`b</code> here</p>",
+    "<table><tr><td>a`b</td><td>c\\d</td></tr></table>",
+    r#"<p>text with <a href="/x">a [bracket] link</a> end</p>"#,
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// Script data is dropped from output; a chunk boundary landing inside the
+// script (or across its `</script>` close tag) must still leave the surrounding
+// content identical to one-shot. Guards the script-data carry path, which now
+// carries only the unconsumed tail instead of re-feeding consumed script bytes.
+#[test]
+fn streaming_drops_script_without_disturbing_neighbors() {
+  for html in [
+    "<p>before</p><script>var x = 1; if (a < b) { y(); }</script><p>after</p>",
+    "<script>a()</script><script>b()</script><p>ok</p>",
+    r#"<p>x</p><script>let s = "</scr" + "ipt>end";</script><p>y</p>"#,
+    "<p>one</p><script>\n  line1\n  line2\n</script><p>two</p>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  }
+}
+
 // Regression: the streaming buffer was sliced/drained on raw byte offsets that
 // could land mid-codepoint, panicking on non-ASCII input.
 #[test]

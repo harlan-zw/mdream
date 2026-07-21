@@ -1168,7 +1168,6 @@ impl ConvertState {
       return CloseTagResult {
         complete: false,
         new_position: position,
-        remaining_start: position,
       };
     }
 
@@ -1210,7 +1209,6 @@ impl ConvertState {
       return CloseTagResult {
         complete: false,
         new_position: position,
-        remaining_start: position,
       };
     }
 
@@ -1269,7 +1267,6 @@ impl ConvertState {
     CloseTagResult {
       complete: true,
       new_position: i + 1,
-      remaining_start: 0,
     }
   }
 

@@ -89,6 +89,16 @@ enum ScriptScanBoundary {
   Complete,
 }
 
+/// Outcome of feeding one chunk to the script-data scanner.
+enum ScriptChunk {
+  /// The `</script` close tag was found; resume normal parsing at this index.
+  Closed(usize),
+  /// The chunk ended inside script data; carry the raw tail from this offset
+  /// into the next chunk (`chunk.len()` when everything was consumed, i.e.
+  /// nothing to carry).
+  Carry(usize),
+}
+
 struct ScriptScanResult {
   boundary: ScriptScanBoundary,
   state: u8,
@@ -560,12 +570,7 @@ impl ConvertState {
     self.script_text_buffer = script_text;
   }
 
-  fn process_script_chunk(
-    &mut self,
-    chunk: &str,
-    start: usize,
-    text_buffer: &mut String,
-  ) -> Option<usize> {
+  fn process_script_chunk(&mut self, chunk: &str, start: usize) -> ScriptChunk {
     let scan = find_script_end_tag(chunk.as_bytes(), start, self.script_data_state);
     self.script_data_state = scan.state;
     match scan.boundary {
@@ -573,16 +578,18 @@ impl ConvertState {
         self.push_script_text(&chunk[start..close_index]);
         self.flush_script_text();
         self.script_data_state = SCRIPT_DATA;
-        Some(close_index)
+        ScriptChunk::Closed(close_index)
       }
       ScriptScanBoundary::Pending(pending_start) => {
+        // Consume the script text before the partial `</scr…` and carry only
+        // that raw tail. Carrying from the script start instead would re-feed
+        // the text just pushed here, which the resume path would push again.
         self.push_script_text(&chunk[start..pending_start]);
-        text_buffer.push_str(&chunk[pending_start..]);
-        None
+        ScriptChunk::Carry(pending_start)
       }
       ScriptScanBoundary::Complete => {
         self.push_script_text(&chunk[start..]);
-        None
+        ScriptChunk::Carry(chunk.len())
       }
     }
   }
@@ -600,18 +607,31 @@ impl ConvertState {
     let bytes = chunk.as_bytes();
     let chunk_length = bytes.len();
     let mut i = 0;
+    // Raw start of the text/tag run currently held in `text_buffer`. Any tail
+    // carried to the next chunk is returned raw from here, never the decoded
+    // and escaped `text_buffer` (which would be re-escaped, multiplying `\`).
+    let mut run_start = 0usize;
+    let mut carry = false;
 
     if self
       .stack
       .last()
       .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none())
     {
-      i = self
-        .process_script_chunk(chunk, i, &mut text_buffer)
-        .unwrap_or(chunk_length);
+      match self.process_script_chunk(chunk, i) {
+        ScriptChunk::Closed(close_index) => i = close_index,
+        ScriptChunk::Carry(from) => {
+          run_start = from;
+          carry = true;
+          i = chunk_length;
+        }
+      }
     }
 
     while i < chunk_length && !self.depth_limit_reached {
+      if text_buffer.is_empty() {
+        run_start = i;
+      }
       let cc = bytes[i];
 
       if cc != LT_CHAR {
@@ -721,7 +741,7 @@ impl ConvertState {
 
       // Processing '<'
       if i + 1 >= chunk_length {
-        text_buffer.push(cc as char);
+        carry = true;
         break;
       }
 
@@ -751,12 +771,13 @@ impl ConvertState {
             if !text_buffer.is_empty() {
               self.process_text_buffer(&mut text_buffer);
               text_buffer.clear();
+              run_start = i;
             }
             let result = self.process_closing_tag(chunk, i);
             if result.complete {
               i = result.new_position;
             } else {
-              text_buffer.push_str(&chunk[result.remaining_start..]);
+              carry = true;
               break;
             }
             continue;
@@ -787,41 +808,44 @@ impl ConvertState {
             if !text_buffer.is_empty() {
               self.process_text_buffer(&mut text_buffer);
               text_buffer.clear();
+              run_start = i;
             }
             self.process_cdata_section(&after_open[..rel]);
             i += "<![CDATA[".len() + rel + 3;
             continue;
           }
           // Unterminated CDATA: re-parse from '<' in the next chunk.
-          text_buffer.push_str(remaining);
+          carry = true;
           break;
         }
         if remaining.len() < "<![CDATA[".len() && "<![CDATA[".starts_with(remaining) {
           // Chunk boundary fell inside the `<![CDATA[` opener.
-          text_buffer.push_str(remaining);
+          carry = true;
           break;
         }
         if !text_buffer.is_empty() {
           self.process_text_buffer(&mut text_buffer);
           text_buffer.clear();
+          run_start = i;
         }
         let result = process_comment_or_doctype(chunk, i);
         if result.complete {
           i = result.new_position;
         } else {
-          text_buffer.push_str(&chunk[result.remaining_start..]);
+          carry = true;
           break;
         }
       } else if next == SLASH_CHAR {
         if !text_buffer.is_empty() {
           self.process_text_buffer(&mut text_buffer);
           text_buffer.clear();
+          run_start = i;
         }
         let result = self.process_closing_tag(chunk, i);
         if result.complete {
           i = result.new_position;
         } else {
-          text_buffer.push_str(&chunk[result.remaining_start..]);
+          carry = true;
           break;
         }
       } else {
@@ -837,7 +861,7 @@ impl ConvertState {
           i2 += 1;
         }
         let Some(tag_name_end) = tag_name_end else {
-          text_buffer.push_str(&chunk[i..]);
+          carry = true;
           break;
         };
         let tag_name_raw = &chunk[tag_name_start..tag_name_end];
@@ -880,6 +904,7 @@ impl ConvertState {
         if !text_buffer.is_empty() {
           self.process_text_buffer(&mut text_buffer);
           text_buffer.clear();
+          run_start = i;
         }
 
         let result =
@@ -894,33 +919,41 @@ impl ConvertState {
           } else {
             self.is_first_text_in_element = true;
             if builtin_tag_id == Some(TAG_SCRIPT) {
-              let Some(close_index) = self.process_script_chunk(chunk, i, &mut text_buffer) else {
-                break;
-              };
-              i = close_index;
+              match self.process_script_chunk(chunk, i) {
+                ScriptChunk::Closed(close_index) => i = close_index,
+                ScriptChunk::Carry(from) => {
+                  // Carry the raw script tail (from the partial close tag, or
+                  // nothing when fully consumed) into the next chunk.
+                  run_start = from;
+                  carry = true;
+                  break;
+                }
+              }
             }
           }
         } else {
-          // Include full tag from '<' for re-parsing in next chunk
-          text_buffer.push_str(&chunk[i..]);
+          // Incomplete opening tag: re-parse from '<' in the next chunk.
+          carry = true;
           break;
         }
       }
     }
 
-    // If text_buffer is empty (common for non-streaming), save allocation for reuse
-    if text_buffer.is_empty() {
+    // Carry the chunk's unfinished tail (incomplete tag/entity, or text a later
+    // chunk may extend) RAW from `run_start`, never the decoded+escaped
+    // `text_buffer`; re-processing re-derives it so nothing is double-applied.
+    // Otherwise reuse the allocation (the common non-streaming case).
+    if carry || !text_buffer.is_empty() {
+      let leftover = chunk[run_start..].to_string();
+      text_buffer.clear();
       self.parse_text_buffer = text_buffer;
-      String::new()
-    } else {
-      if text_buffer
-        .as_bytes()
-        .first()
-        .is_some_and(|&c| is_whitespace(c))
-      {
+      if leftover.as_bytes().first().is_some_and(|&c| is_whitespace(c)) {
         self.last_char_was_whitespace = false;
       }
-      text_buffer
+      leftover
+    } else {
+      self.parse_text_buffer = text_buffer;
+      String::new()
     }
   }
 
@@ -1139,6 +1172,4 @@ pub(crate) struct OpeningTagResult {
 pub(crate) struct CloseTagResult {
   complete: bool,
   new_position: usize,
-  /// Start offset into html_chunk for remaining text (only meaningful when !complete)
-  remaining_start: usize,
 }
