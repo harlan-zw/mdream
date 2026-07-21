@@ -69,6 +69,8 @@ fn main() -> io::Result<()> {
   let stdout = io::stdout();
   let mut out = stdout.lock();
   let mut buf = [0u8; 8192];
+  // A codepoint can straddle a read boundary; carry the incomplete tail over.
+  let mut carry: Vec<u8> = Vec::new();
   let mut total_in: usize = 0;
   let mut total_out: usize = 0;
 
@@ -78,14 +80,30 @@ fn main() -> io::Result<()> {
       break;
     }
     total_in += n;
-    let chunk =
-      std::str::from_utf8(&buf[..n]).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let md = processor.process_chunk(chunk);
-    if !md.is_empty() {
-      total_out += md.len();
-      out.write_all(md.as_bytes())?;
-      out.flush()?;
+    carry.extend_from_slice(&buf[..n]);
+
+    let valid_up_to = match std::str::from_utf8(&carry) {
+      Ok(s) => s.len(),
+      Err(e) if e.error_len().is_none() => e.valid_up_to(),
+      Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e)),
+    };
+    if valid_up_to > 0 {
+      let chunk = std::str::from_utf8(&carry[..valid_up_to]).unwrap();
+      let md = processor.process_chunk(chunk);
+      if !md.is_empty() {
+        total_out += md.len();
+        out.write_all(md.as_bytes())?;
+        out.flush()?;
+      }
+      carry.drain(..valid_up_to);
     }
+  }
+
+  if !carry.is_empty() {
+    return Err(io::Error::new(
+      io::ErrorKind::InvalidData,
+      "stream ended with an incomplete UTF-8 codepoint",
+    ));
   }
 
   let remaining = processor.finish();
