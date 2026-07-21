@@ -66,6 +66,7 @@ fn main() -> io::Result<()> {
 
   let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
   let stdin = io::stdin();
+  let mut input = stdin.lock();
   let stdout = io::stdout();
   let mut out = stdout.lock();
   let mut buf = [0u8; 8192];
@@ -75,7 +76,7 @@ fn main() -> io::Result<()> {
   let mut total_out: usize = 0;
 
   loop {
-    let n = stdin.lock().read(&mut buf)?;
+    let n = input.read(&mut buf)?;
     if n == 0 {
       break;
     }
