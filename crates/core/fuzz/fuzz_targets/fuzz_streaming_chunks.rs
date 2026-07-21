@@ -6,12 +6,17 @@ use mdream::{MarkdownStreamProcessor, types::HTMLToMarkdownOptions};
 // fixed-width chunks (rounded up to char boundaries). Unlike `fuzz_streaming`
 // (arbitrary `Vec<String>`), this drives narrow chunk boundaries through the
 // drain, where multibyte codepoints straddle internal buffer offsets. Seed
-// corpus entries are plain text: first byte = chunk width, rest = HTML.
+// corpus entries are plain text: first byte = chunk width, rest = HTML. ASCII
+// digits 1-9 encode their numeric width so regression seeds remain readable.
 fuzz_target!(|data: &[u8]| {
   let Some((&width, html_bytes)) = data.split_first() else {
     return;
   };
-  let width = (width as usize).max(1);
+  let width = if width.is_ascii_digit() && width != b'0' {
+    (width - b'0') as usize
+  } else {
+    (width as usize).max(1)
+  };
   let html = String::from_utf8_lossy(html_bytes);
 
   let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());

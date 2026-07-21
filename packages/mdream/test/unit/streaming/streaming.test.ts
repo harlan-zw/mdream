@@ -1,9 +1,38 @@
 import { ReadableStream } from 'node:stream/web'
 import { describe, expect, it, vi } from 'vitest'
+import { MarkdownStream as NativeMarkdownStream } from '../../../napi/index.mjs'
 import { engines, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
 
 const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
+
+describe('native byte streaming', () => {
+  it('carries incomplete UTF-8 across byte chunks', () => {
+    const bytes = new TextEncoder().encode('<p>🎉</p>')
+    const stream = new NativeMarkdownStream()
+    let markdown = ''
+
+    for (let index = 0; index < bytes.length; index++)
+      markdown += stream.processChunkBytes(bytes.subarray(index, index + 1))
+    markdown += stream.finish()
+
+    expect(markdown.trim()).toBe('🎉')
+  })
+
+  it('rejects an incomplete UTF-8 sequence at the end of a byte stream', () => {
+    const stream = new NativeMarkdownStream()
+    stream.processChunkBytes(new Uint8Array([0xF0]))
+
+    expect(() => stream.finish()).toThrow('incomplete UTF-8 byte sequence')
+  })
+
+  it('rejects string chunks while an incomplete byte sequence is buffered', () => {
+    const stream = new NativeMarkdownStream()
+    stream.processChunkBytes(new Uint8Array([0xF0]))
+
+    expect(() => stream.processChunk('text')).toThrow('incomplete UTF-8 byte sequence')
+  })
+})
 
 describe.each(engines)('hTML to Markdown Streaming $name', (engineConfig) => {
   describe('basic Stream Functionality', () => {
@@ -97,6 +126,26 @@ describe.each(engines)('hTML to Markdown Streaming $name', (engineConfig) => {
       // Check that the binary content was correctly decoded and processed
       const combined = result.join('')
       expect(combined).toContain('# Encoded title')
+    })
+
+    it('preserves multibyte rewrites one input byte at a time', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
+      const html = '<blockquote>”<br>\n</><p>🎉'
+      const bytes = new TextEncoder().encode(html)
+      const htmlStream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (let index = 0; index < bytes.length; index++)
+            controller.enqueue(bytes.subarray(index, index + 1))
+          controller.close()
+        },
+      })
+
+      let streamed = ''
+      for await (const chunk of streamHtmlToMarkdown(htmlStream, { engine }))
+        streamed += chunk
+
+      expect(streamed).toContain('”')
+      expect(streamed).toContain('🎉')
     })
   })
 

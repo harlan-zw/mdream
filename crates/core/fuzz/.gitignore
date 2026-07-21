@@ -1,4 +1,7 @@
 target
-corpus
+corpus/*
+!corpus/fuzz_streaming_chunks/
+corpus/fuzz_streaming_chunks/*
+!corpus/fuzz_streaming_chunks/utf8-rewrite
 artifacts
 coverage

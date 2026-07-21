@@ -270,6 +270,7 @@ pub fn html_to_markdown_bytes(
 #[napi]
 pub struct MarkdownStream {
   inner: mdream::MarkdownStreamProcessor,
+  utf8_carry: Vec<u8>,
 }
 
 #[napi]
@@ -279,25 +280,73 @@ impl MarkdownStream {
     let (opts, format) = to_core_opts(options);
     Self {
       inner: mdream::MarkdownStreamProcessor::new_with_format(opts, format),
+      utf8_carry: Vec::new(),
     }
   }
 
   #[napi]
   #[allow(clippy::needless_pass_by_value)]
-  pub fn process_chunk(&mut self, chunk: String) -> String {
-    self.inner.process_chunk(&chunk)
+  pub fn process_chunk(&mut self, chunk: String) -> Result<String> {
+    if !self.utf8_carry.is_empty() {
+      return Err(napi::Error::new(
+        napi::Status::InvalidArg,
+        "Cannot process a string chunk while an incomplete UTF-8 byte sequence is buffered",
+      ));
+    }
+    Ok(self.inner.process_chunk(&chunk))
   }
 
   #[napi(js_name = "processChunkBytes")]
   pub fn process_chunk_bytes(&mut self, chunk: &[u8]) -> Result<String> {
-    let text = std::str::from_utf8(chunk)
-      .map_err(|e| napi::Error::new(napi::Status::InvalidArg, format!("Invalid UTF-8: {e}")))?;
-    Ok(self.inner.process_chunk(text))
+    if self.utf8_carry.is_empty() {
+      return match std::str::from_utf8(chunk) {
+        Ok(text) => Ok(self.inner.process_chunk(text)),
+        Err(error) if error.error_len().is_none() => {
+          let valid_up_to = error.valid_up_to();
+          let text = std::str::from_utf8(&chunk[..valid_up_to])
+            .expect("valid_up_to must end at a UTF-8 boundary");
+          let markdown = self.inner.process_chunk(text);
+          self.utf8_carry.extend_from_slice(&chunk[valid_up_to..]);
+          Ok(markdown)
+        }
+        Err(error) => Err(napi::Error::new(
+          napi::Status::InvalidArg,
+          format!("Invalid UTF-8: {error}"),
+        )),
+      };
+    }
+
+    self.utf8_carry.extend_from_slice(chunk);
+    let valid_up_to = match std::str::from_utf8(&self.utf8_carry) {
+      Ok(text) => text.len(),
+      Err(error) if error.error_len().is_none() => error.valid_up_to(),
+      Err(error) => {
+        return Err(napi::Error::new(
+          napi::Status::InvalidArg,
+          format!("Invalid UTF-8: {error}"),
+        ));
+      }
+    };
+    if valid_up_to == 0 {
+      return Ok(String::new());
+    }
+
+    let text = std::str::from_utf8(&self.utf8_carry[..valid_up_to])
+      .expect("valid_up_to must end at a UTF-8 boundary");
+    let markdown = self.inner.process_chunk(text);
+    self.utf8_carry.drain(..valid_up_to);
+    Ok(markdown)
   }
 
   #[napi]
-  pub fn finish(&mut self) -> String {
-    self.inner.finish()
+  pub fn finish(&mut self) -> Result<String> {
+    if !self.utf8_carry.is_empty() {
+      return Err(napi::Error::new(
+        napi::Status::InvalidArg,
+        "Stream ended with an incomplete UTF-8 byte sequence",
+      ));
+    }
+    Ok(self.inner.finish())
   }
 }
 
