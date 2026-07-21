@@ -31,6 +31,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fuzz_streaming_chunks"
+path = "fuzz_targets/fuzz_streaming_chunks.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fuzz_splitter"
 path = "fuzz_targets/fuzz_splitter.rs"
 test = false

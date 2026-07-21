@@ -59,6 +59,23 @@ fn stream_chunks(html: &str, chunk: usize, opts: HTMLToMarkdownOptions) -> Strin
   out
 }
 
+// Splits on char boundaries so multibyte input can be fed in small chunks.
+fn stream_chars(html: &str, max_bytes: usize, opts: HTMLToMarkdownOptions) -> String {
+  let mut p = MarkdownStreamProcessor::new(opts);
+  let mut out = String::new();
+  let mut start = 0;
+  while start < html.len() {
+    let mut end = (start + max_bytes.max(1)).min(html.len());
+    while end < html.len() && !html.is_char_boundary(end) {
+      end += 1;
+    }
+    out.push_str(&p.process_chunk(&html[start..end]));
+    start = end;
+  }
+  out.push_str(&p.finish());
+  out
+}
+
 // Compares chunked streaming against one-shot, so it excludes the
 // rewrite-after-yield constructs (autolink text==url, self-link headings,
 // redundant `[url](url)`) that diverge from one-shot even on `main`. Drain
@@ -93,6 +110,46 @@ fn streamed_output_matches_one_shot() {
           "mismatch: chunk={chunk} html={html:?}"
         );
       }
+    }
+  }
+}
+
+// Regression: the streaming buffer was sliced/drained on raw byte offsets that
+// could land mid-codepoint, panicking on non-ASCII input.
+#[test]
+fn multibyte_drain_matches_one_shot() {
+  const UNIT: &str = r#"<div><a href="/a">link</a> <span>&ldquo;Create&rdquo;</span></div>"#;
+  let doc = format!("<article>{}</article>", UNIT.repeat(40));
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+
+  let expected = html_to_markdown(&doc, opts.clone());
+  assert!(expected.contains('“') && !expected.is_empty());
+  for max_bytes in [1usize, 2, 3, 5, 8, 64] {
+    let got = stream_chars(&doc, max_bytes, opts.clone());
+    assert_eq!(
+      got.trim(),
+      expected.trim(),
+      "mismatch at max_bytes={max_bytes}"
+    );
+  }
+}
+
+// A rewrite-after-yield can leave a chunk/drain offset inside a multibyte
+// codepoint; the streaming buffer must never be sliced there. A panic here
+// fails the test.
+#[test]
+fn streaming_multibyte_never_panics() {
+  const CASES: &[&str] = &[
+    "<blockquote>”<br>\n</><p>🎉",
+    "<a href=\"/x\">link</a>“<strong></strong>—漢字",
+    "<ul><li>é<a href=\"/x\"></a>…</li></ul>🎉&mdash;",
+  ];
+  for &html in CASES {
+    for max_bytes in [1usize, 2, 3, 4, 5, 7, 11] {
+      let _ = stream_chars(html, max_bytes, HTMLToMarkdownOptions::default());
     }
   }
 }

@@ -1042,7 +1042,20 @@ impl ConvertState {
       stable_end = stable_end.min(p);
     }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
-    let start = self.last_yielded_length.max(leading);
+    let mut start = self.last_yielded_length.max(leading);
+    if start >= stable_end {
+      self.drain_streamed_prefix();
+      return String::new();
+    }
+    // Offsets here derive from marker positions and drain rebasing that need not
+    // fall on a UTF-8 boundary; slicing mid-codepoint panics. Clamp both bounds
+    // down to a boundary, holding any partial codepoint for the next chunk.
+    while stable_end > start && !self.buffer.is_char_boundary(stable_end) {
+      stable_end -= 1;
+    }
+    while start > 0 && !self.buffer.is_char_boundary(start) {
+      start -= 1;
+    }
     if start >= stable_end {
       self.drain_streamed_prefix();
       return String::new();
