@@ -21,6 +21,7 @@ jobs:
           - fuzz_options
           - fuzz_splitter
           - fuzz_streaming
+          - fuzz_streaming_chunks
     steps:
       - uses: actions/checkout@v6
 
