@@ -303,6 +303,10 @@ impl MarkdownStream {
         Ok(text) => Ok(self.inner.process_chunk(text)),
         Err(error) if error.error_len().is_none() => {
           let valid_up_to = error.valid_up_to();
+          if valid_up_to == 0 {
+            self.utf8_carry.extend_from_slice(chunk);
+            return Ok(String::new());
+          }
           let text = std::str::from_utf8(&chunk[..valid_up_to])
             .expect("valid_up_to must end at a UTF-8 boundary");
           let markdown = self.inner.process_chunk(text);
