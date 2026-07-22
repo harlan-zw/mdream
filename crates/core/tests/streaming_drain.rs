@@ -155,6 +155,18 @@ fn streaming_keeps_list_marker_after_code_block() {
   }
 }
 
+#[test]
+fn streaming_keeps_closing_fence_after_cleaned_empty_link_in_pre() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  assert_stream_matches(
+    r#"<pre><code>b c<em></em><a href="/x"><svg></svg></a></code></pre>"#,
+    opts,
+  );
+}
+
 // A raw-passthrough element (<summary>) containing a foreign child (<svg>) lost
 // the `<` of its closing tag in streaming (`</summary>` → ` /summary>`).
 #[test]

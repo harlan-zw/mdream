@@ -1065,13 +1065,14 @@ impl ConvertState {
     let mut stable_end = self.buffer.trim_end_matches(' ').len();
     if stable_end < buf_len && self.depth_map[TAG_PRE as usize] != 0 {
       // Inside <pre> trailing spaces are usually significant code, so yield
-      // them. The exception is a line-leading run (preceded by a newline): a
-      // list continuation indent is emitted right after the closing fence, and
+      // them unless the last text node can still be trimmed by an inline
+      // rewrite. Another exception is a line-leading run preceded by a newline.
+      // A list continuation indent is emitted right after the closing fence, and
       // before the next sibling is known, while <pre>'s depth is still set.
       // That indent is speculative (the next <li> rewrites it to its marker),
       // so hold it back like any other trailing whitespace.
       let line_leading = stable_end == 0 || self.buffer.as_bytes()[stable_end - 1] == b'\n';
-      if !line_leading {
+      if !line_leading && !self.last_text_node_contains_whitespace {
         stable_end = buf_len;
       }
     }
