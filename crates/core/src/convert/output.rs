@@ -643,6 +643,11 @@ impl ConvertState {
     let buf_len = buf_bytes.len();
     let last_char = if buf_len > 0 {
       buf_bytes[buf_len - 1]
+    } else if self.has_streamed_output {
+      // The buffer was drained (and possibly trimmed) empty, but earlier output
+      // ended with this byte. Spacing must be decided against it, not `0`, so a
+      // word separator that one-shot keeps is not dropped across the boundary.
+      self.last_flushed_byte
     } else {
       0
     };
@@ -1499,13 +1504,22 @@ impl ConvertState {
 
     let buf_bytes = self.buffer.as_bytes();
     let buf_len = buf_bytes.len();
+    // Draining removes the front of the buffer, so a block boundary counting its
+    // preceding newlines from the last two bytes must see through the drain:
+    // `last_flushed_byte` is the byte immediately before `buffer[0]`. Without it
+    // a separator that one-shot (which never drains) trims to one newline is
+    // emitted as two in streaming (e.g. a lone `-` left at the buffer start).
     let last_char = if buf_len > 0 {
       buf_bytes[buf_len - 1]
+    } else if self.has_streamed_output {
+      self.last_flushed_byte
     } else {
       0
     };
     let second_last_char = if buf_len > 1 {
       buf_bytes[buf_len - 2]
+    } else if buf_len == 1 && self.has_streamed_output {
+      self.last_flushed_byte
     } else {
       0
     };

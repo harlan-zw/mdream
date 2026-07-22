@@ -337,6 +337,11 @@ pub struct ConvertState {
   /// Once streaming starts, whitespace at the front of a drained buffer is
   /// content, not document-leading whitespace.
   has_streamed_output: bool,
+  /// Last byte flushed out of the front of the buffer by draining. When a
+  /// later block boundary trims the buffer empty, the word that anchored an
+  /// inter-token space may already have been drained; spacing decisions then
+  /// consult this byte so streaming keeps the separator one-shot would emit.
+  last_flushed_byte: u8,
   /// Output column immediately before `buffer[0]`. Draining may remove the
   /// beginning of the current line, but wrapping still needs its full column.
   buffer_start_column: usize,
@@ -464,6 +469,7 @@ impl ConvertState {
       pending_inline_whitespace: false,
       last_yielded_length: 0,
       has_streamed_output: false,
+      last_flushed_byte: 0,
       buffer_start_column: 0,
       #[cfg(test)]
       disable_drain: false,
@@ -1196,6 +1202,7 @@ impl ConvertState {
           .saturating_add(drained.chars().count())
       };
     }
+    self.last_flushed_byte = self.buffer.as_bytes()[drain_end - 1];
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
     self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);

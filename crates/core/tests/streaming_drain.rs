@@ -466,3 +466,61 @@ fn streaming_drops_block_separator_before_empty_trailing_marker() {
     assert_eq!(stream_chunks(&html, chunk, opts.clone()), expected, "chunk={chunk}");
   }
 }
+
+// Inside a list item a nested block renders on one line (NO_SPACING). A word,
+// a <br>, then that block: once the word has been drained out of the buffer the
+// inter-token space it anchored sat at the buffer start and was trimmed away,
+// gluing the word to the block's text (`New Domain` -> `NewDomain`). Spacing
+// now consults the last flushed byte so the separator survives the drain.
+#[test]
+fn streaming_keeps_inter_token_space_across_drain() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  for inner in [
+    "<li><a href=\"/t\">Schedule</a> New<br> <div>Domain Services</div></li>",
+    "<li><a href=\"/t\">Schedule</a> New<br>\n  <div>Domain Services</div></li>",
+  ] {
+    let html = format!("{}<ul>{inner}</ul>", drain_filler());
+    let expected = html_to_markdown(&html, opts.clone());
+    for chunk in 1..=40usize {
+      assert_eq!(
+        stream_chunks(&html, chunk, opts.clone()).trim(),
+        expected.trim(),
+        "chunk={chunk} inner={inner:?}"
+      );
+    }
+  }
+}
+
+// A block boundary counts the newlines already in the buffer from its last two
+// bytes. When an empty list item renders a lone `-` marker and the block spacing
+// before it has been drained away, the `-` sits alone at the buffer start and
+// the byte before it (a newline) is gone; the boundary then miscounted and
+// emitted an extra blank line (`-\n\n[link]` instead of `-\n[link]`). Newline
+// counting now consults the last flushed byte so the count survives the drain.
+// The nested `div > form` and the ragged inline whitespace reproduce the exact
+// buffer state; every small chunk size lands a boundary that triggers it.
+#[test]
+fn streaming_keeps_block_newline_count_across_drain() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  let html = "<div class=\"wrap\">\n\t\t\t\t        \
+    <form action=\"https://ex.example/act?x=1&amp;id=42\" class=\"foo bar wrap\" \
+    data-flag method=\"post\"><a aria-controls=\"dd\"\n       aria-expanded=\"false\"\n\
+    \x20      class=\"btn menu-btn\"\n       data-dropdown=\"dd\"\n       href=\"#\"\n    >\n\
+    \x20       <span>Alpha Beta Gamma</a>\n    <li>\n            </li>\n    </form>\
+    <div class=\"badges\"><a href=\"/other-link/\" target=\"_blank\" class=\"bp\"> Delta</a></div></div>";
+  let expected = html_to_markdown(html, opts.clone());
+  assert!(expected.contains("-\n[Delta]"), "one-shot tightens the list/block gap: {expected:?}");
+  for chunk in 1..=40usize {
+    assert_eq!(
+      stream_chunks(html, chunk, opts.clone()).trim(),
+      expected.trim(),
+      "chunk={chunk}"
+    );
+  }
+}
