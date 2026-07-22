@@ -928,6 +928,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       // content makes them stable.
       while (stableLength > 0 && (currentContent[stableLength - 1] === ' ' || currentContent[stableLength - 1] === '\n'))
         stableLength--
+      retainMutableFragments = stableLength < currentContent.length
     }
 
     const leadingTrimmed = content.length - currentContent.length
@@ -975,13 +976,27 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // rewrite earlier content.
     if (!markerHeld && !linkHeld && (!retainMutableFragments || !inPre)) {
       if (!resolvedPlugins.length && !options.wrapWidth && !state.depthMap[TAG_A]) {
-        const tailStart = Math.max(0, stableLength - 2)
-        const emittedTail = currentContent.slice(tailStart, stableLength)
-        const mutableTail = currentContent.slice(stableLength)
-        state.buffer.length = 0
-        if (emittedTail || mutableTail)
-          state.buffer.push(emittedTail + mutableTail)
-        lastYieldedLength = emittedTail.length
+        if (retainMutableFragments && leadingTrimmed === 0) {
+          // Preserve the final fragment as a separate value: close handlers
+          // identify and trim it by reference equality with lastContentCache.
+          const lastFragment = state.buffer.at(-1)!
+          const fragmentStart = currentContent.length - lastFragment.length
+          const tailStart = Math.max(0, Math.min(stableLength - 2, fragmentStart))
+          const emittedTail = currentContent.slice(tailStart, fragmentStart)
+          state.buffer.length = 0
+          if (emittedTail)
+            state.buffer.push(emittedTail)
+          state.buffer.push(lastFragment)
+          lastYieldedLength = stableLength - tailStart
+        }
+        else if (!retainMutableFragments) {
+          const tailStart = Math.max(0, stableLength - 2)
+          const emittedTail = currentContent.slice(tailStart, stableLength)
+          state.buffer.length = 0
+          if (emittedTail)
+            state.buffer.push(emittedTail)
+          lastYieldedLength = emittedTail.length
+        }
       }
       else if (!retainMutableFragments && state.buffer.length > 1) {
         state.buffer.length = 0
