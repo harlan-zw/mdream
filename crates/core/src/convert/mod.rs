@@ -337,6 +337,10 @@ pub struct ConvertState {
   /// Once streaming starts, whitespace at the front of a drained buffer is
   /// content, not document-leading whitespace.
   has_streamed_output: bool,
+  /// Last two bytes flushed out of the front of the buffer by draining. When a
+  /// later rewrite trims the retained buffer empty, spacing and newline counts
+  /// still need the same two-byte context one-shot conversion sees.
+  flushed_tail: [u8; 2],
   /// Output column immediately before `buffer[0]`. Draining may remove the
   /// beginning of the current line, but wrapping still needs its full column.
   buffer_start_column: usize,
@@ -464,6 +468,7 @@ impl ConvertState {
       pending_inline_whitespace: false,
       last_yielded_length: 0,
       has_streamed_output: false,
+      flushed_tail: [0; 2],
       buffer_start_column: 0,
       #[cfg(test)]
       disable_drain: false,
@@ -1062,27 +1067,32 @@ impl ConvertState {
     // space. Yielding them would let that later trim silently remove an
     // already-sent byte and shift every byte after it. Always hold them back;
     // they are re-yielded once real content follows, or dropped at finalize.
+    let in_pre = self.depth_map[TAG_PRE as usize] != 0;
     let mut stable_end = self.buffer.trim_end_matches(' ').len();
-    if stable_end < buf_len && self.depth_map[TAG_PRE as usize] != 0 {
-      // Inside <pre> trailing spaces are usually significant code, so yield
-      // them unless the last text node can still be trimmed by an inline
-      // rewrite. Another exception is a line-leading run preceded by a newline.
-      // A list continuation indent is emitted right after the closing fence, and
-      // before the next sibling is known, while <pre>'s depth is still set.
-      // That indent is speculative (the next <li> rewrites it to its marker),
-      // so hold it back like any other trailing whitespace.
-      let line_leading = stable_end == 0 || self.buffer.as_bytes()[stable_end - 1] == b'\n';
-      if !line_leading && !self.last_text_node_contains_whitespace {
-        stable_end = buf_len;
+    if in_pre {
+      if self.last_text_node_contains_whitespace {
+        // A trailing whitespace run in the current text node stays mutable
+        // until its inline/code element closes. That close trims ASCII
+        // whitespace, so hold the whole run rather than yielding bytes it may
+        // retract later.
+        stable_end = self
+          .buffer
+          .trim_end_matches(|c: char| c.is_ascii_whitespace())
+          .len();
+      } else if stable_end < buf_len {
+        // Other trailing spaces inside <pre> are significant code. A
+        // line-leading run is the exception: list continuation indentation is
+        // emitted before the next sibling is known and can still be replaced
+        // by its list marker.
+        let line_leading = stable_end == 0 || self.buffer.as_bytes()[stable_end - 1] == b'\n';
+        if !line_leading {
+          stable_end = buf_len;
+        }
       }
-    }
-    // In a raw-HTML block (`<dl>`/`<dt>`/`<dd>`, `<details>`/`<summary>`,
-    // `<address>`) the next block close is a literal tag glued onto its
-    // predecessor, trimming the block-spacing newline before it (`</dd>\n</dl>`
-    // → `</dd></dl>`). A yielded newline can't be un-sent, so hold trailing
-    // newlines here too; they stay in the buffer for newline counting and are
-    // re-yielded once content (or a non-gluing close) follows.
-    if self.in_raw_html_block() && self.depth_map[TAG_PRE as usize] == 0 {
+    } else {
+      // A block close or document finalization may still trim trailing block
+      // spacing. Keep newlines buffered until following content makes them
+      // stable, since yielded bytes cannot be retracted.
       stable_end = stable_end.min(self.buffer.trim_end_matches(['\n', ' ']).len());
     }
     let leading = if self.preserve_leading_whitespace || self.has_streamed_output {
@@ -1096,7 +1106,7 @@ impl ConvertState {
     // dropped (empty element) and a block boundary then trims that trailing space, a yielded
     // space would be silently removed and shift every later byte. Hold those spaces back too.
     if let Some(&(_, p, _)) = self.open_markers.first() {
-      stable_end = stable_end.min(self.buffer[..p].trim_end_matches(' ').len());
+      stable_end = stable_end.min(self.buffer[..p].trim_end_matches(['\n', ' ']).len());
     }
     // An open `<a>`'s close can rewrite the buffer back to `link_bracket_pos`
     // (emptyLinkText drop, selfLinkHeadings, redundantLinks, GFM autolink). Hold the
@@ -1106,7 +1116,7 @@ impl ConvertState {
     // so hold them back too or a yielded space would be silently removed.
     // Mirrors the same guard in `drain_streamed_prefix`.
     if self.depth_map[TAG_A as usize] > 0 {
-      stable_end = stable_end.min(self.buffer[..self.link_bracket_pos].trim_end_matches(' ').len());
+      stable_end = stable_end.min(self.buffer[..self.link_bracket_pos].trim_end_matches(['\n', ' ']).len());
     }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let mut start = self.last_yielded_length.max(leading);
@@ -1196,6 +1206,12 @@ impl ConvertState {
           .saturating_add(drained.chars().count())
       };
     }
+    let bytes = self.buffer.as_bytes();
+    self.flushed_tail = if drain_end >= 2 {
+      [bytes[drain_end - 2], bytes[drain_end - 1]]
+    } else {
+      [self.flushed_tail[1], bytes[0]]
+    };
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
     self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);

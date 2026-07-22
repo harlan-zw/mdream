@@ -375,28 +375,32 @@ function hasNonWhitespace(value: string): boolean {
   return false
 }
 
+function isAsciiWhitespace(code: number): boolean {
+  return code === 32 || (code >= 9 && code <= 13)
+}
+
 function trimAsciiWhitespaceEnd(value: string): string {
   let end = value.length
-  while (end > 0) {
-    const code = value.charCodeAt(end - 1)
-    if (code !== 32 && (code < 9 || code > 13))
-      break
+  while (end > 0 && isAsciiWhitespace(value.charCodeAt(end - 1)))
     end--
-  }
   return end === value.length ? value : value.slice(0, end)
 }
 
 function fragmentPosition(buffer: string[], fragment: number): number {
   let position = 0
-  for (let i = 0; i < fragment; i++)
-    position += buffer[i]!.length
+  for (let index = 0; index < fragment; index++)
+    position += buffer[index]!.length
   return position
 }
 
-function trimSpacePosition(content: string, position: number): number {
+function trimBufferedWhitespacePosition(content: string, position: number): number {
   let end = Math.max(0, position)
-  while (end > 0 && content.charCodeAt(end - 1) === 32)
+  while (end > 0) {
+    const code = content.charCodeAt(end - 1)
+    if (code !== 32 && code !== 10)
+      break
     end--
+  }
   return end
 }
 
@@ -898,16 +902,34 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     const currentContent = hasYieldedContent || (state.plainText && preserveLeadingWhitespace)
       ? content
       : content.trimStart()
-    let stableLength = currentContent.length
-    while (stableLength > 0 && currentContent.charCodeAt(stableLength - 1) === 32)
-      stableLength--
-
-    if (stableLength < currentContent.length && state.depthMap[TAG_PRE]) {
-      const lineLeading = stableLength === 0 || currentContent.charCodeAt(stableLength - 1) === 10
-      if (!lineLeading && !state.lastTextNode?.containsWhitespace)
-        stableLength = currentContent.length
+    const inPre = state.depthMap[TAG_PRE] !== 0
+    const trailingCode = currentContent.charCodeAt(currentContent.length - 1)
+    let trailingSpaceEnd = currentContent.length
+    while (trailingSpaceEnd > 0 && currentContent.charCodeAt(trailingSpaceEnd - 1) === 32)
+      trailingSpaceEnd--
+    let stableLength = trailingSpaceEnd
+    let retainMutableFragments = stableLength < currentContent.length
+    if (inPre) {
+      if (state.lastTextNode?.containsWhitespace && isAsciiWhitespace(trailingCode)) {
+        stableLength = trimAsciiWhitespaceEnd(currentContent).length
+        retainMutableFragments = stableLength < currentContent.length
+      }
+      else if (stableLength < currentContent.length) {
+        const lineLeading = stableLength === 0 || currentContent.charCodeAt(stableLength - 1) === 10
+        if (!lineLeading) {
+          stableLength = currentContent.length
+          retainMutableFragments = false
+        }
+      }
     }
-    const hasMutableTrailingSpace = stableLength < currentContent.length
+    else {
+      // Block spacing and trailing spaces can still be trimmed by a later
+      // element close or by finalization. Keep them buffered until following
+      // content makes them stable.
+      while (stableLength > 0 && (currentContent[stableLength - 1] === ' ' || currentContent[stableLength - 1] === '\n'))
+        stableLength--
+      retainMutableFragments = stableLength < currentContent.length
+    }
 
     const leadingTrimmed = content.length - currentContent.length
 
@@ -916,7 +938,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     const markerHeld = openMarkerCount > 0
     if (markerHeld) {
       const openFragment = openMarkers[0]! >> 3
-      const markerPos = Math.max(lastYieldedLength, trimSpacePosition(currentContent, fragmentPosition(state.buffer, openFragment) - leadingTrimmed))
+      const markerPos = Math.max(
+        lastYieldedLength,
+        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, openFragment) - leadingTrimmed),
+      )
       if (markerPos < stableLength)
         stableLength = markerPos
     }
@@ -925,10 +950,19 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // closes as a GFM autolink. Hold that region until the close is final.
     const linkHeld = openLinkFragment >= 0
     if (linkHeld) {
-      const linkPos = Math.max(lastYieldedLength, trimSpacePosition(currentContent, fragmentPosition(state.buffer, openLinkFragment) - leadingTrimmed))
+      const linkPos = Math.max(
+        lastYieldedLength,
+        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, openLinkFragment) - leadingTrimmed),
+      )
       if (linkPos < stableLength)
         stableLength = linkPos
     }
+
+    // A later mutable tail can move the stable boundary behind bytes already
+    // returned to the caller. Keep the cursor monotonic so those bytes are not
+    // emitted a second time once following content makes the tail stable.
+    if (stableLength < lastYieldedLength)
+      stableLength = lastYieldedLength
 
     const newContent = currentContent.slice(lastYieldedLength, stableLength)
     lastYieldedLength = stableLength
@@ -940,17 +974,31 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // from joining and slicing the entire cumulative output. Plugin, wrapping,
     // and open-link paths retain the full buffer because they can inspect or
     // rewrite earlier content.
-    if (!markerHeld && !linkHeld && !hasMutableTrailingSpace) {
+    if (!markerHeld && !linkHeld && (!retainMutableFragments || !inPre)) {
       if (!resolvedPlugins.length && !options.wrapWidth && !state.depthMap[TAG_A]) {
-        const tailStart = Math.max(0, stableLength - 2)
-        const emittedTail = currentContent.slice(tailStart, stableLength)
-        const mutableTail = currentContent.slice(stableLength)
-        state.buffer.length = 0
-        if (emittedTail || mutableTail)
-          state.buffer.push(emittedTail + mutableTail)
-        lastYieldedLength = emittedTail.length
+        if (retainMutableFragments && leadingTrimmed === 0) {
+          // Preserve the final fragment as a separate value: close handlers
+          // identify and trim it by reference equality with lastContentCache.
+          const lastFragment = state.buffer.at(-1)!
+          const fragmentStart = currentContent.length - lastFragment.length
+          const tailStart = Math.max(0, Math.min(stableLength - 2, fragmentStart))
+          const emittedTail = currentContent.slice(tailStart, fragmentStart)
+          state.buffer.length = 0
+          if (emittedTail)
+            state.buffer.push(emittedTail)
+          state.buffer.push(lastFragment)
+          lastYieldedLength = stableLength - tailStart
+        }
+        else if (!retainMutableFragments) {
+          const tailStart = Math.max(0, stableLength - 2)
+          const emittedTail = currentContent.slice(tailStart, stableLength)
+          state.buffer.length = 0
+          if (emittedTail)
+            state.buffer.push(emittedTail)
+          lastYieldedLength = emittedTail.length
+        }
       }
-      else if (state.buffer.length > 1) {
+      else if (!retainMutableFragments && state.buffer.length > 1) {
         state.buffer.length = 0
         state.buffer.push(currentContent)
       }

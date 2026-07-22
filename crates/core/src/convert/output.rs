@@ -643,6 +643,11 @@ impl ConvertState {
     let buf_len = buf_bytes.len();
     let last_char = if buf_len > 0 {
       buf_bytes[buf_len - 1]
+    } else if self.has_streamed_output {
+      // The buffer was drained (and possibly trimmed) empty, but earlier output
+      // ended with this byte. Spacing must be decided against it, not `0`, so a
+      // word separator that one-shot keeps is not dropped across the boundary.
+      self.flushed_tail[1]
     } else {
       0
     };
@@ -1499,13 +1504,24 @@ impl ConvertState {
 
     let buf_bytes = self.buffer.as_bytes();
     let buf_len = buf_bytes.len();
+    // Draining removes the front of the buffer, so a block boundary counting its
+    // preceding newlines from the last two bytes must see through the drain:
+    // `flushed_tail` contains the two bytes immediately before `buffer[0]`.
+    // Without that context a separator that one-shot trims to one newline can
+    // be emitted as two in streaming (e.g. a lone `-` at the buffer start).
     let last_char = if buf_len > 0 {
       buf_bytes[buf_len - 1]
+    } else if self.has_streamed_output {
+      self.flushed_tail[1]
     } else {
       0
     };
     let second_last_char = if buf_len > 1 {
       buf_bytes[buf_len - 2]
+    } else if buf_len == 1 && self.has_streamed_output {
+      self.flushed_tail[1]
+    } else if self.has_streamed_output {
+      self.flushed_tail[0]
     } else {
       0
     };
@@ -1533,7 +1549,13 @@ impl ConvertState {
     let new_lines = configured_new_lines.saturating_sub(last_new_lines);
 
     if new_lines > 0 {
-      if self.buffer.is_empty() {
+      // An empty buffer at true document start has no preceding block to
+      // separate from, so the leading block newlines are suppressed. Mid-stream
+      // the buffer can be empty only because earlier output was already yielded
+      // and drained; the block separator is still required there, so fall
+      // through and emit it (otherwise streaming drops a `\n\n` that one-shot,
+      // which never drains, keeps).
+      if self.buffer.is_empty() && !self.has_streamed_output {
         if !output_str.is_empty() {
           self.last_content_cache_len = output_str.len();
           self.buffer.push_str(output_str);
@@ -1742,5 +1764,26 @@ impl ConvertState {
       }
     }
     ""
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::ConvertState;
+  use crate::types::{HTMLToMarkdownOptions, OutputFormat};
+
+  #[test]
+  fn empty_drained_buffer_counts_two_flushed_newlines() {
+    let mut state = ConvertState::new(
+      HTMLToMarkdownOptions::default(),
+      64,
+      OutputFormat::Markdown,
+    );
+    state.has_streamed_output = true;
+    state.flushed_tail = [b'\n', b'\n'];
+
+    state.write_output(true, false, 2, Some("next"), false);
+
+    assert_eq!(state.buffer, "next");
   }
 }

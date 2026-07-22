@@ -104,11 +104,7 @@ fn streamed_output_matches_one_shot() {
       let expected = html_to_markdown(html, opts.clone());
       for chunk in [1usize, 3, 7, 64, html.len().max(1)] {
         let got = stream_chunks(html, chunk, opts.clone());
-        assert_eq!(
-          got.trim(),
-          expected.trim(),
-          "mismatch: chunk={chunk} html={html:?}"
-        );
+        assert_eq!(got, expected, "mismatch: chunk={chunk} html={html:?}");
       }
     }
   }
@@ -120,8 +116,8 @@ fn assert_stream_matches(html: &str, opts: HTMLToMarkdownOptions) {
   let expected = html_to_markdown(html, opts.clone());
   for chunk in 1..=html.len().max(1) {
     assert_eq!(
-      stream_chunks(html, chunk, opts.clone()).trim(),
-      expected.trim(),
+      stream_chunks(html, chunk, opts.clone()),
+      expected,
       "mismatch: chunk={chunk} html={html:?}"
     );
   }
@@ -211,8 +207,8 @@ fn multibyte_drain_matches_one_shot() {
   for max_bytes in [1usize, 2, 3, 5, 8, 64] {
     let got = stream_chars(&doc, max_bytes, opts.clone());
     assert_eq!(
-      got.trim(),
-      expected.trim(),
+      got,
+      expected,
       "mismatch at max_bytes={max_bytes}"
     );
   }
@@ -257,8 +253,8 @@ fn streaming_dropped_empty_element_keeps_block_spacing() {
     let expected = html_to_markdown(html, opts.clone());
     for chunk in 1..=32 {
       assert_eq!(
-        stream_chunks(html, chunk, opts.clone()).trim(),
-        expected.trim(),
+        stream_chunks(html, chunk, opts.clone()),
+        expected,
         "mismatch: chunk={chunk} html={html:?}"
       );
     }
@@ -277,7 +273,7 @@ fn streaming_wrap_preserves_the_full_current_column() {
   actual.push_str(&processor.process_chunk(" delta</p>"));
   actual.push_str(&processor.finish());
 
-  assert_eq!(actual.trim(), expected.trim());
+  assert_eq!(actual, expected);
 }
 
 #[test]
@@ -300,7 +296,7 @@ fn streaming_retains_two_newlines_of_block_context() {
   )));
   actual.push_str(&processor.finish());
 
-  assert_eq!(actual.trim(), expected.trim());
+  assert_eq!(actual, expected);
 }
 
 #[test]
@@ -321,7 +317,7 @@ fn streaming_only_trims_whitespace_at_the_document_start() {
   actual.push_str(&processor.process_chunk("<td>Northern Australia</td></tr></table>"));
   actual.push_str(&processor.finish());
 
-  assert_eq!(actual.trim(), expected.trim());
+  assert_eq!(actual, expected);
 }
 
 #[test]
@@ -370,8 +366,8 @@ fn streaming_memory_is_bounded_not_document_sized() {
 #[test]
 fn streaming_keeps_trailing_nbsp_before_sibling() {
   let cases: &[&str] = &[
-    r#"<p>answered on <span>03 Apr 2013,&nbsp;</span><span>09:53 AM</span></p>"#,
-    r#"<p><span>a b,&nbsp;</span><span>0</span></p>"#,
+    r"<p>answered on <span>03 Apr 2013,&nbsp;</span><span>09:53 AM</span></p>",
+    r"<p><span>a b,&nbsp;</span><span>0</span></p>",
   ];
   let opts = HTMLToMarkdownOptions {
     clean: Some(safe_clean()),
@@ -382,7 +378,7 @@ fn streaming_keeps_trailing_nbsp_before_sibling() {
     assert!(expected.contains('\u{a0}'), "nbsp should be preserved: {expected:?}");
     for chunk in 1..=html.len().max(1) {
       let got = stream_chunks(html, chunk, opts.clone());
-      assert_eq!(got.trim(), expected.trim(), "chunk={chunk} html={html:?}");
+      assert_eq!(got, expected, "chunk={chunk} html={html:?}");
     }
   }
 }
@@ -411,9 +407,137 @@ fn streaming_keeps_raw_block_close_after_drain() {
   assert!(expected.contains("</dl>"));
   for chunk in [1usize, 7, 16, 31, 32, 33, 64, 128, 256, 512] {
     assert_eq!(
-      stream_chunks(&html, chunk, opts.clone()).trim(),
-      expected.trim(),
+      stream_chunks(&html, chunk, opts.clone()),
+      expected,
       "mismatch: chunk={chunk}"
+    );
+  }
+}
+
+// Enough preceding content to force the buffer to drain before the tail case.
+fn drain_filler() -> String {
+  let mut s = String::new();
+  for i in 0..400 {
+    s.push_str(&format!("<p>Filler paragraph number {i} with some words.</p>"));
+  }
+  s
+}
+
+// A block separator (`\n\n`) is written before an inline element that later
+// turns out empty (an image with no alt / an empty link) and is dropped. When
+// that element is the last content, one-shot holds the trailing newlines and
+// finalize drops them; streaming had yielded the `\n\n` the moment the `[`
+// appeared. The block-separator hold now also covers the newlines before an
+// open link bracket, so the orphan `\n\n` is never emitted.
+#[test]
+fn streaming_drops_block_separator_before_empty_trailing_link() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  let html = format!(
+    "{}<div>Alpha 12345</div>\
+     <a href=\"https://e.com/x\"><img src=\"https://e.com/i.png\" alt=\"\"></a>",
+    drain_filler()
+  );
+  let expected = html_to_markdown(&html, opts.clone());
+  assert!(expected.trim_end().ends_with("Alpha 12345"), "one-shot has no trailing link: {expected:?}");
+  for chunk in [4usize, 7, 16, 64] {
+    assert_eq!(stream_chunks(&html, chunk, opts.clone()), expected, "chunk={chunk}");
+  }
+}
+
+// Same as above but the dropped trailing element is an empty inline marker
+// (`<em></em>`): the newlines before its open `_`/`*` marker must also be held.
+#[test]
+fn streaming_drops_block_separator_before_empty_trailing_marker() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  let html = format!("{}<div>Bolt 1 db</div><em></em>", drain_filler());
+  let expected = html_to_markdown(&html, opts.clone());
+  assert!(expected.trim_end().ends_with("Bolt 1 db"), "one-shot tail: {expected:?}");
+  for chunk in [4usize, 7, 16, 64] {
+    assert_eq!(stream_chunks(&html, chunk, opts.clone()), expected, "chunk={chunk}");
+  }
+}
+
+// A trailing whitespace run inside `<pre>` is still mutable until the code
+// element closes. Streaming must not emit bytes that one-shot trims before
+// writing the closing fence.
+#[test]
+fn streaming_holds_mutable_trailing_pre_whitespace() {
+  for html in [
+    "<pre><code>alpha\n</code></pre>",
+    "<pre><code>alpha\n\n</code></pre>",
+    "<pre><code>alpha  </code></pre>",
+  ] {
+    let expected = html_to_markdown(html, HTMLToMarkdownOptions::default());
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, chunk, HTMLToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+  }
+}
+
+// Inside a list item a nested block renders on one line (NO_SPACING). A word,
+// a <br>, then that block: once the word has been drained out of the buffer the
+// inter-token space it anchored sat at the buffer start and was trimmed away,
+// gluing the word to the block's text (`New Domain` -> `NewDomain`). Spacing
+// now consults the last flushed byte so the separator survives the drain.
+#[test]
+fn streaming_keeps_inter_token_space_across_drain() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  for inner in [
+    "<li><a href=\"/t\">Schedule</a> New<br> <div>Domain Services</div></li>",
+    "<li><a href=\"/t\">Schedule</a> New<br>\n  <div>Domain Services</div></li>",
+  ] {
+    let html = format!("{}<ul>{inner}</ul>", drain_filler());
+    let expected = html_to_markdown(&html, opts.clone());
+    for chunk in 1..=40usize {
+      assert_eq!(
+        stream_chunks(&html, chunk, opts.clone()),
+        expected,
+        "chunk={chunk} inner={inner:?}"
+      );
+    }
+  }
+}
+
+// A block boundary counts the newlines already in the buffer from its last two
+// bytes. When an empty list item renders a lone `-` marker and the block spacing
+// before it has been drained away, the `-` sits alone at the buffer start and
+// the byte before it (a newline) is gone; the boundary then miscounted and
+// emitted an extra blank line (`-\n\n[link]` instead of `-\n[link]`). Newline
+// counting now consults the last flushed byte so the count survives the drain.
+// The nested `div > form` and the ragged inline whitespace reproduce the exact
+// buffer state; every small chunk size lands a boundary that triggers it.
+#[test]
+fn streaming_keeps_block_newline_count_across_drain() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  let html = "<div class=\"wrap\">\n\t\t\t\t        \
+    <form action=\"https://ex.example/act?x=1&amp;id=42\" class=\"foo bar wrap\" \
+    data-flag method=\"post\"><a aria-controls=\"dd\"\n       aria-expanded=\"false\"\n\
+    \x20      class=\"btn menu-btn\"\n       data-dropdown=\"dd\"\n       href=\"#\"\n    >\n\
+    \x20       <span>Alpha Beta Gamma</a>\n    <li>\n            </li>\n    </form>\
+    <div class=\"badges\"><a href=\"/other-link/\" target=\"_blank\" class=\"bp\"> Delta</a></div></div>";
+  let expected = html_to_markdown(html, opts.clone());
+  assert!(expected.contains("-\n[Delta]"), "one-shot tightens the list/block gap: {expected:?}");
+  for chunk in 1..=40usize {
+    assert_eq!(
+      stream_chunks(html, chunk, opts.clone()),
+      expected,
+      "chunk={chunk}"
     );
   }
 }

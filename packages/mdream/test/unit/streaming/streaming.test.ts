@@ -6,6 +6,44 @@ import { engines, resolveEngine, streamHtmlToMarkdown } from '../../utils/engine
 const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
 
+const BYTE_PARITY_CASES = [
+  '<div>Alpha</div>',
+  '<div>Alpha</div><div>Beta</div>',
+  '<div>Alpha</div><em></em>',
+  '<div>Alpha</div><em></em><div>Beta</div>',
+  '<pre><code>alpha\n\n</code></pre>',
+  '<p>use <code>a`b</code> here</p>',
+  '<a href="https://example.com">https://example.com</a>',
+  '<p>answered on <span>03 Apr 2013,&nbsp;</span><span>09:53 AM</span></p>',
+]
+
+describe('cross-engine streaming byte parity', () => {
+  it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width: %s', async (html) => {
+    const engineOutputs: string[] = []
+
+    for (const { engine, name } of engines) {
+      const expected = engine.htmlToMarkdown(html)
+      engineOutputs.push(expected)
+
+      for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {
+        const htmlStream = new ReadableStream<string>({
+          start(controller) {
+            for (let offset = 0; offset < html.length; offset += chunkSize)
+              controller.enqueue(html.slice(offset, offset + chunkSize))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream))
+          streamed += chunk
+        expect(streamed, `engine=${name} chunkSize=${chunkSize}`).toBe(expected)
+      }
+    }
+
+    expect(engineOutputs[1]).toBe(engineOutputs[0])
+  })
+})
+
 describe('native byte streaming', () => {
   it('carries incomplete UTF-8 across byte chunks', () => {
     const bytes = new TextEncoder().encode('<p>🎉</p>')
