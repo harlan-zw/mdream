@@ -973,7 +973,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // from joining and slicing the entire cumulative output. Plugin, wrapping,
     // and open-link paths retain the full buffer because they can inspect or
     // rewrite earlier content.
-    if (!markerHeld && !linkHeld && !retainMutableFragments) {
+    if (!markerHeld && !linkHeld && (!retainMutableFragments || !inPre)) {
       if (!resolvedPlugins.length && !options.wrapWidth && !state.depthMap[TAG_A]) {
         const tailStart = Math.max(0, stableLength - 2)
         const emittedTail = currentContent.slice(tailStart, stableLength)
@@ -983,7 +983,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           state.buffer.push(emittedTail + mutableTail)
         lastYieldedLength = emittedTail.length
       }
-      else if (state.buffer.length > 1) {
+      else if (!retainMutableFragments && state.buffer.length > 1) {
         state.buffer.length = 0
         state.buffer.push(currentContent)
       }
