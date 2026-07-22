@@ -745,6 +745,10 @@ function parseHtmlInternal(
     return ''
 
   let textBuffer = '' // Buffer to accumulate text content
+  // Raw start of the run held in textBuffer. Streaming must carry the source
+  // bytes from here, since textBuffer may already contain decoded or escaped
+  // Markdown that would be transformed again on the next chunk.
+  let runStart = 0
 
   // Initialize state
   state.depthMap ??= new Uint8Array(MAX_TAG_ID)
@@ -765,6 +769,9 @@ function parseHtmlInternal(
   }
 
   while (i < chunkLength && !state.depthLimitReached) {
+    if (textBuffer.length === 0)
+      runStart = i
+
     const currentCharCode = htmlChunk.charCodeAt(i)
 
     // If not starting a tag, add to text buffer and continue
@@ -857,6 +864,7 @@ function parseHtmlInternal(
           if (textBuffer.length > 0) {
             processTextBuffer(textBuffer, state, handleEvent)
             textBuffer = ''
+            runStart = i
           }
           processCdataSection(htmlChunk.substring(i + 9, end), state, handleEvent)
           i = end + 3
@@ -873,6 +881,7 @@ function parseHtmlInternal(
       if (textBuffer.length > 0) {
         processTextBuffer(textBuffer, state, handleEvent)
         textBuffer = ''
+        runStart = i
       }
 
       const result = processCommentOrDoctype(htmlChunk, i)
@@ -907,6 +916,7 @@ function parseHtmlInternal(
       if (textBuffer.length > 0) {
         processTextBuffer(textBuffer, state, handleEvent)
         textBuffer = ''
+        runStart = i
       }
 
       const result = processClosingTag(htmlChunk, i, state, handleEvent)
@@ -962,6 +972,7 @@ function parseHtmlInternal(
       if (textBuffer.length > 0) {
         processTextBuffer(textBuffer, state, handleEvent)
         textBuffer = ''
+        runStart = i
       }
 
       const result = processOpeningTag(tagName, tagId, htmlChunk, i2, state, handleEvent)
@@ -976,9 +987,13 @@ function parseHtmlInternal(
           if (tagId === TAG_SCRIPT && tagName === 'script') {
             const scanResult = scanScriptChunk(htmlChunk, i, state)
             if (scanResult < 0) {
-              textBuffer = scanResult <= SCRIPT_SEQUENCE_INCOMPLETE
-                ? htmlChunk.substring(-scanResult - 2)
-                : ''
+              if (scanResult <= SCRIPT_SEQUENCE_INCOMPLETE) {
+                runStart = -scanResult - 2
+                textBuffer = htmlChunk.substring(runStart)
+              }
+              else {
+                textBuffer = ''
+              }
               break
             }
             textBuffer = takeScriptText(state)
@@ -993,13 +1008,15 @@ function parseHtmlInternal(
     }
   }
 
-  // Trailing text is returned and re-scanned with the next stream chunk. A
-  // leading whitespace character in that buffer was accepted from a
+  // Trailing text is returned raw and re-scanned with the next stream chunk.
+  // Returning textBuffer would reprocess decoded and escaped Markdown. A
+  // leading whitespace character in the raw remainder was accepted from a
   // non-whitespace state, so restore that state before the re-scan.
-  if (textBuffer.length > 0 && isWhitespace(textBuffer.charCodeAt(0)))
+  const remainingHtml = textBuffer.length > 0 ? htmlChunk.substring(runStart) : ''
+  if (remainingHtml.length > 0 && isWhitespace(remainingHtml.charCodeAt(0)))
     state.lastCharWasWhitespace = false
 
-  return textBuffer
+  return remainingHtml
 }
 
 /**

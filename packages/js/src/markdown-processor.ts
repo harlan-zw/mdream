@@ -375,6 +375,31 @@ function hasNonWhitespace(value: string): boolean {
   return false
 }
 
+function trimAsciiWhitespaceEnd(value: string): string {
+  let end = value.length
+  while (end > 0) {
+    const code = value.charCodeAt(end - 1)
+    if (code !== 32 && (code < 9 || code > 13))
+      break
+    end--
+  }
+  return end === value.length ? value : value.slice(0, end)
+}
+
+function fragmentPosition(buffer: string[], fragment: number): number {
+  let position = 0
+  for (let i = 0; i < fragment; i++)
+    position += buffer[i]!.length
+  return position
+}
+
+function trimSpacePosition(content: string, position: number): number {
+  let end = Math.max(0, position)
+  while (end > 0 && content.charCodeAt(end - 1) === 32)
+    end--
+  return end
+}
+
 /** Drop the top marker when every following fragment is whitespace. */
 function dropEmptyMarker(buffer: string[], packed: number, markerType: number): number {
   const idx = packed >> 3
@@ -460,6 +485,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
   let openMarkerCount = 0
+  let openLinkFragment = -1
 
   let lastYieldedLength = 0
   let hasYieldedContent = false
@@ -774,7 +800,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
           if (shouldTrim) {
             const originalLength = lastFragment.length
-            const trimmed = lastFragment.trimEnd()
+            const trimmed = trimAsciiWhitespaceEnd(lastFragment)
             const trimmedChars = originalLength - trimmed.length
 
             // Update the last content in buffer regions with trimmed content
@@ -808,6 +834,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
     }
 
+    if (eventType === NodeEventEnter && element.tagId === TAG_A && handlerOutput === '[' && buff.at(-1) === '[')
+      openLinkFragment = buff.length - 1
+
     // Track open inline markers for empty pair detection. Inline code in a
     // list may own a leading separator (" `"), so retain the whole output
     // fragment as the drop boundary.
@@ -823,6 +852,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       // markers permanent, allowing streaming to release buffered content.
       openMarkerCount = 0
     }
+
+    if (eventType === NodeEventExit && element.tagId === TAG_A)
+      openLinkFragment = -1
 
     updateListIndent(state, element, eventType)
   }
@@ -866,30 +898,36 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     const currentContent = hasYieldedContent || (state.plainText && preserveLeadingWhitespace)
       ? content
       : content.trimStart()
-    const hasMutableTrailingSpace = state.lastTextNode?.containsWhitespace
-      && !state.depthMap[TAG_PRE]
-      && currentContent.endsWith(' ')
-
     let stableLength = currentContent.length
-    if (hasMutableTrailingSpace) {
-      while (stableLength > 0 && currentContent[stableLength - 1] === ' ')
-        stableLength--
+    while (stableLength > 0 && currentContent.charCodeAt(stableLength - 1) === 32)
+      stableLength--
+
+    if (stableLength < currentContent.length && state.depthMap[TAG_PRE]) {
+      const lineLeading = stableLength === 0 || currentContent.charCodeAt(stableLength - 1) === 10
+      if (!lineLeading && !state.lastTextNode?.containsWhitespace)
+        stableLength = currentContent.length
     }
+    const hasMutableTrailingSpace = stableLength < currentContent.length
+
+    const leadingTrimmed = content.length - currentContent.length
 
     // An open inline marker may still be dropped if its element closes empty in a later chunk;
     // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
     const markerHeld = openMarkerCount > 0
     if (markerHeld) {
       const openFragment = openMarkers[0]! >> 3
-      let markerPos = 0
-      for (let i = 0; i < openFragment; i++)
-        markerPos += state.buffer[i]!.length
-      // markerPos was recorded pre-trim; shift it into currentContent space.
-      markerPos -= content.length - currentContent.length
-      if (markerPos < lastYieldedLength)
-        markerPos = lastYieldedLength
+      const markerPos = Math.max(lastYieldedLength, trimSpacePosition(currentContent, fragmentPosition(state.buffer, openFragment) - leadingTrimmed))
       if (markerPos < stableLength)
         stableLength = markerPos
+    }
+
+    // An open link can rewrite its opening bracket and all link text when it
+    // closes as a GFM autolink. Hold that region until the close is final.
+    const linkHeld = openLinkFragment >= 0
+    if (linkHeld) {
+      const linkPos = Math.max(lastYieldedLength, trimSpacePosition(currentContent, fragmentPosition(state.buffer, openLinkFragment) - leadingTrimmed))
+      if (linkPos < stableLength)
+        stableLength = linkPos
     }
 
     const newContent = currentContent.slice(lastYieldedLength, stableLength)
@@ -902,7 +940,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // from joining and slicing the entire cumulative output. Plugin, wrapping,
     // and open-link paths retain the full buffer because they can inspect or
     // rewrite earlier content.
-    if (!markerHeld && !hasMutableTrailingSpace) {
+    if (!markerHeld && !linkHeld && !hasMutableTrailingSpace) {
       if (!resolvedPlugins.length && !options.wrapWidth && !state.depthMap[TAG_A]) {
         const tailStart = Math.max(0, stableLength - 2)
         const emittedTail = currentContent.slice(tailStart, stableLength)
