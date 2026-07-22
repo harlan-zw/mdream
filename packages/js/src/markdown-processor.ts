@@ -695,14 +695,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
     }
 
-    // A <br> can introduce one blank line, but never needs 3+ consecutive
-    // newlines in normalized prose. Preserve every newline inside <pre>.
-    if (element.tagId === TAG_BR && !state.depthMap[TAG_PRE]
-      && output?.length === 1 && output[0] === '\n'
-      && lastChar === '\n' && secondLastChar === '\n') {
-      output = undefined
-    }
-
     // Handle newlines
     const newLineConfig = calculateNewLineConfig(node as ElementNode, state.depthMap, state.plainText === true)
     const configuredNewLines = newLineConfig[eventType] || 0
@@ -804,8 +796,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           const isBlockElement = !isInlineElement && !collapsesWhiteSpace && configuredNewLines > 0
           // Don't trim before elements that have collapsesInnerWhiteSpace on enter
           // Also don't trim before block elements that have their own spacing configuration
-          const shouldTrim = (element.tagId === TAG_BR && output?.[0]?.[0] === '\n' && !parentInPre)
-            || ((!isInlineElement || eventType === NodeEventExit) && !isBlockElement && !(collapsesWhiteSpace && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter))
+          const shouldTrim = (!isInlineElement || eventType === NodeEventExit) && !isBlockElement && !(collapsesWhiteSpace && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter)
 
           if (shouldTrim) {
             const originalLength = lastFragment.length
