@@ -417,3 +417,52 @@ fn streaming_keeps_raw_block_close_after_drain() {
     );
   }
 }
+
+// Enough preceding content to force the buffer to drain before the tail case.
+fn drain_filler() -> String {
+  let mut s = String::new();
+  for i in 0..400 {
+    s.push_str(&format!("<p>Filler paragraph number {i} with some words.</p>"));
+  }
+  s
+}
+
+// A block separator (`\n\n`) is written before an inline element that later
+// turns out empty (an image with no alt / an empty link) and is dropped. When
+// that element is the last content, one-shot holds the trailing newlines and
+// finalize drops them; streaming had yielded the `\n\n` the moment the `[`
+// appeared. The block-separator hold now also covers the newlines before an
+// open link bracket, so the orphan `\n\n` is never emitted.
+#[test]
+fn streaming_drops_block_separator_before_empty_trailing_link() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  let html = format!(
+    "{}<div>Alpha 12345</div>\
+     <a href=\"https://e.com/x\"><img src=\"https://e.com/i.png\" alt=\"\"></a>",
+    drain_filler()
+  );
+  let expected = html_to_markdown(&html, opts.clone());
+  assert!(expected.trim_end().ends_with("Alpha 12345"), "one-shot has no trailing link: {expected:?}");
+  for chunk in [4usize, 7, 16, 64] {
+    assert_eq!(stream_chunks(&html, chunk, opts.clone()), expected, "chunk={chunk}");
+  }
+}
+
+// Same as above but the dropped trailing element is an empty inline marker
+// (`<em></em>`): the newlines before its open `_`/`*` marker must also be held.
+#[test]
+fn streaming_drops_block_separator_before_empty_trailing_marker() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  let html = format!("{}<div>Bolt 1 db</div><em></em>", drain_filler());
+  let expected = html_to_markdown(&html, opts.clone());
+  assert!(expected.trim_end().ends_with("Bolt 1 db"), "one-shot tail: {expected:?}");
+  for chunk in [4usize, 7, 16, 64] {
+    assert_eq!(stream_chunks(&html, chunk, opts.clone()), expected, "chunk={chunk}");
+  }
+}

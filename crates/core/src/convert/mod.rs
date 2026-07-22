@@ -1096,7 +1096,7 @@ impl ConvertState {
     // dropped (empty element) and a block boundary then trims that trailing space, a yielded
     // space would be silently removed and shift every later byte. Hold those spaces back too.
     if let Some(&(_, p, _)) = self.open_markers.first() {
-      stable_end = stable_end.min(self.buffer[..p].trim_end_matches(' ').len());
+      stable_end = stable_end.min(self.buffer[..p].trim_end_matches(['\n', ' ']).len());
     }
     // An open `<a>`'s close can rewrite the buffer back to `link_bracket_pos`
     // (emptyLinkText drop, selfLinkHeadings, redundantLinks, GFM autolink). Hold the
@@ -1106,7 +1106,7 @@ impl ConvertState {
     // so hold them back too or a yielded space would be silently removed.
     // Mirrors the same guard in `drain_streamed_prefix`.
     if self.depth_map[TAG_A as usize] > 0 {
-      stable_end = stable_end.min(self.buffer[..self.link_bracket_pos].trim_end_matches(' ').len());
+      stable_end = stable_end.min(self.buffer[..self.link_bracket_pos].trim_end_matches(['\n', ' ']).len());
     }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let mut start = self.last_yielded_length.max(leading);
