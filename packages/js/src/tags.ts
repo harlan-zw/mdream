@@ -323,9 +323,9 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
 
       const prefix = continuationPrefix(node, state.listIndentWidths || [])
-      // Inside a fenced block, the literal newline is already meaningful and
-      // trailing spaces would become part of the code.
-      return depthMap[TAG_PRE] ? `\n${prefix}` : hardBreak(state.buffer, prefix)
+      // Inside <pre>/<code> a hard break's marker would become literal
+      // content, so emit a plain newline there.
+      return (depthMap[TAG_PRE] || depthMap[TAG_CODE]) ? `\n${prefix}` : hardBreak(state.buffer, prefix)
     },
     isSelfClosing: true,
     spacing: NO_SPACING,

@@ -2644,6 +2644,7 @@ fn br_keeps_nested_block_continuation_prefixes() {
     convert("<pre>first<br>second</pre>"),
     "```\nfirst\nsecond\n```"
   );
+  assert_eq!(convert("<code>first<br>second</code>"), "`first\nsecond`");
 }
 
 #[test]

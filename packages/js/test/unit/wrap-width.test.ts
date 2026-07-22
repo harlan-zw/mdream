@@ -45,6 +45,8 @@ describe('wrap width (issue #106)', () => {
       .toBe('# first<br>second')
     expect(htmlToMarkdown('<pre>first<br>second</pre>'))
       .toBe('```\nfirst\nsecond\n```')
+    expect(htmlToMarkdown('<code>first<br>second</code>'))
+      .toBe('`first\nsecond`')
   })
 
   it('never splits an oversized token', () => {

@@ -944,7 +944,9 @@ impl ConvertState {
           Some(Cow::Borrowed("<br>"))
         } else {
           let prefix = self.continuation_prefix();
-          if self.depth_map[TAG_PRE as usize] > 0 {
+          // Inside <pre>/<code> a hard break's marker would become literal
+          // content, so emit a plain newline there.
+          if self.depth_map[TAG_PRE as usize] > 0 || self.depth_map[TAG_CODE as usize] > 0 {
             if prefix.is_empty() {
               Some(Cow::Borrowed("\n"))
             } else {
