@@ -1443,12 +1443,26 @@ impl ConvertState {
         }
       }
       TAG_IMG => {
-        let alt = node.attributes.get("alt").map_or("", String::as_str);
-        if alt.is_empty() {
-          None
-        } else {
-          Some(Cow::Owned(alt.to_string()))
+        if let Some(alt) = node.attributes.get("alt") {
+          return if alt.is_empty() {
+            None
+          } else {
+            Some(Cow::Owned(alt.clone()))
+          };
         }
+
+        if let Some(title) = node
+          .attributes
+          .get("title")
+          .filter(|title| !title.is_empty())
+        {
+          return Some(Cow::Owned(title.clone()));
+        }
+
+        let src = node.attributes.get("src").filter(|src| !src.is_empty())?;
+        Some(Cow::Owned(
+          resolve_url(src, self.options.origin.as_deref(), self.options.clean_urls).into_owned(),
+        ))
       }
       TAG_Q => Some(Cow::Borrowed("\"")),
       _ => None,

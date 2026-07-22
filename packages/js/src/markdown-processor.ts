@@ -40,6 +40,7 @@ import {
 } from './const'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
+import { resolveUrl } from './tags'
 import { continuationPrefix } from './utils'
 
 export interface MarkdownState {
@@ -463,8 +464,12 @@ function getPlainTextOutput(node: ElementNode, eventType: number, state: Markdow
     }
     if (tagId === TAG_TD || tagId === TAG_TH)
       return (depthMap[TAG_TABLE] || 0) > 1 || node.index === 0 ? '' : '\t'
-    if (tagId === TAG_IMG)
-      return node.attributes?.alt || undefined
+    if (tagId === TAG_IMG) {
+      const alt = node.attributes?.alt
+      if (alt !== undefined)
+        return alt || undefined
+      return node.attributes?.title || resolveUrl(node.attributes?.src || '', state.options?.origin) || undefined
+    }
     if (tagId === TAG_Q)
       return '"'
     return undefined
