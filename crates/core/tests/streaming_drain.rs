@@ -361,3 +361,34 @@ fn streaming_memory_is_bounded_not_document_sized() {
     "peak {peak} should be a bounded window, not ~{total_out} output"
   );
 }
+
+// A raw-HTML block (`<dl>`/`<dt>`/`<dd>`, `<details>`, `<address>`) closes with
+// a literal tag glued onto its predecessor, trimming the block-spacing newline
+// before it (`</dd>\n</dl>` → `</dd></dl>`). Once the buffer drains past that
+// newline it was already yielded and can't be un-sent, so the trim shifted the
+// close tag and dropped the `<` of `</dl>`. Needs enough preceding content to
+// force a drain before the final close.
+#[test]
+fn streaming_keeps_raw_block_close_after_drain() {
+  let mut html = String::from("<article>");
+  for i in 0..400 {
+    html.push_str(&format!("<p>Filler paragraph number {i} with some words.</p>"));
+  }
+  html.push_str(
+    "<dl><dt>MPN:</dt><dd>D100-V36-PBO-1WZ</dd>\
+     <dt>Availability:</dt><dd>Ships in 2-3 days</dd></dl></article>",
+  );
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  let expected = html_to_markdown(&html, opts.clone());
+  assert!(expected.contains("</dl>"));
+  for chunk in [1usize, 7, 16, 31, 32, 33, 64, 128, 256, 512] {
+    assert_eq!(
+      stream_chunks(&html, chunk, opts.clone()).trim(),
+      expected.trim(),
+      "mismatch: chunk={chunk}"
+    );
+  }
+}

@@ -801,7 +801,7 @@ impl ConvertState {
   }
 
   #[inline]
-  fn in_raw_html_block(&self) -> bool {
+  pub(crate) fn in_raw_html_block(&self) -> bool {
     self.depth_map[TAG_DETAILS as usize] > 0
       || self.depth_map[TAG_SUMMARY as usize] > 0
       || self.depth_map[TAG_ADDRESS as usize] > 0
