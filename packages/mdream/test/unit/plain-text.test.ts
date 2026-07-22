@@ -25,6 +25,23 @@ describe.each(engines)('plain text output $name', (engineConfig) => {
     expect(text).toBe('Line\nBreak\n\nName\tRole\nAda\tAdmin\n\nDiagram')
   })
 
+  it('falls back from image alt text to title and src', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+
+    expect(htmlToMarkdown('<img src="image.png" alt="Alt" title="Title">', { engine, format: 'text' }))
+      .toBe('Alt')
+    expect(htmlToMarkdown('<img src="image.png" title="Title">', { engine, format: 'text' }))
+      .toBe('Title')
+    expect(htmlToMarkdown('<img src="image.png">', { engine, format: 'text' }))
+      .toBe('image.png')
+    expect(htmlToMarkdown('<img src="/image.png">', { engine, format: 'text', origin: 'https://example.com' }))
+      .toBe('https://example.com/image.png')
+    expect(htmlToMarkdown('<img src="image.png" alt="" title="Title">', { engine, format: 'text' }))
+      .toBe('')
+    expect(htmlToMarkdown('<img>', { engine, format: 'text' }))
+      .toBe('')
+  })
+
   it('matches streaming output', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<h2>Title</h2><p>A <code>code</code> sample with <a href="/docs">docs</a>.</p>'

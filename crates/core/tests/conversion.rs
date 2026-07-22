@@ -22,6 +22,16 @@ fn convert_text(html: &str) -> String {
   html_to_text(html, HTMLToMarkdownOptions::default())
 }
 
+fn convert_text_with_origin(html: &str, origin: &str) -> String {
+  html_to_text(
+    html,
+    HTMLToMarkdownOptions {
+      origin: Some(origin.to_string()),
+      ..Default::default()
+    },
+  )
+}
+
 // ── Plain text output ──
 
 #[test]
@@ -42,6 +52,28 @@ fn plain_text_output_preserves_readable_separators() {
     ),
     "Line\nBreak\n\nName\tRole\nAda\tAdmin\n\nDiagram"
   );
+}
+
+#[test]
+fn plain_text_images_fall_back_to_title_then_src() {
+  assert_eq!(
+    convert_text(r#"<img src="image.png" alt="Alt" title="Title">"#),
+    "Alt"
+  );
+  assert_eq!(
+    convert_text(r#"<img src="image.png" title="Title">"#),
+    "Title"
+  );
+  assert_eq!(convert_text(r#"<img src="image.png">"#), "image.png");
+  assert_eq!(
+    convert_text_with_origin(r#"<img src="/image.png">"#, "https://example.com"),
+    "https://example.com/image.png"
+  );
+  assert_eq!(
+    convert_text(r#"<img src="image.png" alt="" title="Title">"#),
+    ""
+  );
+  assert_eq!(convert_text("<img>"), "");
 }
 
 #[test]

@@ -121,7 +121,7 @@ import {
 import { continuationPrefix } from './utils'
 
 // Helper function to resolve URLs
-function resolveUrl(url: string, origin?: string): string {
+export function resolveUrl(url: string, origin?: string): string {
   if (!url)
     return url
 
