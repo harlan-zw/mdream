@@ -745,8 +745,9 @@ function parseHtmlInternal(
     return ''
 
   let textBuffer = '' // Buffer to accumulate text content
-  // Raw start of the run held in textBuffer. Streaming must carry source HTML
-  // from here because textBuffer may already contain decoded or escaped output.
+  // Raw start of the run held in textBuffer. Streaming must carry the source
+  // bytes from here, since textBuffer may already contain decoded or escaped
+  // Markdown that would be transformed again on the next chunk.
   let runStart = 0
 
   // Initialize state
