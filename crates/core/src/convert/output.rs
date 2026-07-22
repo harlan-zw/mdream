@@ -1533,7 +1533,13 @@ impl ConvertState {
     let new_lines = configured_new_lines.saturating_sub(last_new_lines);
 
     if new_lines > 0 {
-      if self.buffer.is_empty() {
+      // An empty buffer at true document start has no preceding block to
+      // separate from, so the leading block newlines are suppressed. Mid-stream
+      // the buffer can be empty only because earlier output was already yielded
+      // and drained; the block separator is still required there, so fall
+      // through and emit it (otherwise streaming drops a `\n\n` that one-shot,
+      // which never drains, keeps).
+      if self.buffer.is_empty() && !self.has_streamed_output {
         if !output_str.is_empty() {
           self.last_content_cache_len = output_str.len();
           self.buffer.push_str(output_str);
