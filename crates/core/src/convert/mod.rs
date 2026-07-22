@@ -901,7 +901,11 @@ impl ConvertState {
         i2 = tag_name_end;
 
         if tag_name_raw.is_empty() {
+          // `<` followed by whitespace or `>` is not a tag: treat as literal text
           text_buffer.push(bytes[i] as char);
+          self.text_buffer_contains_non_whitespace = true;
+          self.last_char_was_whitespace = false;
+          self.just_closed_tag = false;
           i += 1;
           continue;
         }

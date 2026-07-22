@@ -967,6 +967,10 @@ function parseHtmlInternal(
       }
 
       if (!tagName) {
+        // `<` followed by whitespace or `>` is not a tag: treat as literal text
+        state.textBufferContainsNonWhitespace = true
+        state.lastCharWasWhitespace = false
+        state.justClosedTag = false
         textBuffer += htmlChunk[i++]
         continue
       }

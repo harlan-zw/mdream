@@ -101,4 +101,11 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
     expect(htmlToMarkdown(`<p>- List Item</p>`, { engine })).toBe('\- List Item')
     expect(htmlToMarkdown(`<p>Just a - dash<p>`, { engine })).toBe('Just a - dash')
   })
+  it('raw <: keeps a literal < with its surrounding spacing intact.', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(`<p>a < b</p>`, { engine })).toBe('a < b')
+    expect(htmlToMarkdown(`<p>4 < 5</p>`, { engine })).toBe('4 < 5')
+    expect(htmlToMarkdown(`<p>x < y < z</p>`, { engine })).toBe('x < y < z')
+    expect(htmlToMarkdown(`<p>a <> b</p>`, { engine })).toBe('a <> b')
+  })
 })
