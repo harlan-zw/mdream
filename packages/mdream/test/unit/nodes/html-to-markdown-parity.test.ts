@@ -12,6 +12,12 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
     expect(htmlToMarkdown('<p><strong>Bold and <em>italic</em></strong></p>', { engine })).toBe('**Bold and _italic_**')
     expect(htmlToMarkdown('<b><b>Incredibly</b> <b>Bold</b></b>', { engine })).toBe('**Incredibly Bold**')
   })
+  it('strikethrough: del, s and strike all map to ~~', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<del>deleted</del>', { engine })).toBe('~~deleted~~')
+    expect(htmlToMarkdown('<s>struck</s>', { engine })).toBe('~~struck~~')
+    expect(htmlToMarkdown('<strike>old</strike>', { engine })).toBe('~~old~~')
+  })
   it('list: Handles ordered and unordered lists with full nesting support.', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(`

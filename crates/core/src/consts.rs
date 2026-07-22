@@ -110,8 +110,10 @@ pub const TAG_FIGCAPTION: u8 = 106;
 pub const TAG_CAPTION: u8 = 107;
 pub const TAG_DATALIST: u8 = 108;
 pub const TAG_OPTGROUP: u8 = 109;
+pub const TAG_S: u8 = 110;
+pub const TAG_STRIKE: u8 = 111;
 
-pub const MAX_TAG_ID: usize = 110;
+pub const MAX_TAG_ID: usize = 112;
 
 /// Reverse lookup: tag ID → static tag name string.
 /// Avoids allocating a String for known tags.
@@ -136,6 +138,8 @@ pub static TAG_NAMES: [&str; MAX_TAG_ID] = {
   names[TAG_EM as usize] = "em";
   names[TAG_I as usize] = "i";
   names[TAG_DEL as usize] = "del";
+  names[TAG_S as usize] = "s";
+  names[TAG_STRIKE as usize] = "strike";
   names[TAG_SUB as usize] = "sub";
   names[TAG_SUP as usize] = "sup";
   names[TAG_INS as usize] = "ins";
@@ -342,6 +346,7 @@ fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
     b"center" => TAG_CENTER,
     b"canvas" => TAG_CANVAS,
     b"button" => TAG_BUTTON,
+    b"strike" => TAG_STRIKE,
     b"video" => TAG_VIDEO,
     b"track" => TAG_TRACK,
     b"title" => TAG_TITLE,
@@ -414,6 +419,7 @@ fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
     b"dd" => TAG_DD,
     b"br" => TAG_BR,
     b"u" => TAG_U,
+    b"s" => TAG_S,
     b"q" => TAG_Q,
     b"p" => TAG_P,
     b"i" => TAG_I,

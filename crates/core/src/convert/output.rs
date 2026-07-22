@@ -10,7 +10,7 @@ impl ConvertState {
     match tag_id {
       TAG_STRONG | TAG_B | TAG_DFN => Some(0),
       TAG_EM | TAG_I | TAG_FIGCAPTION => Some(1),
-      TAG_DEL => Some(2),
+      TAG_DEL | TAG_S | TAG_STRIKE => Some(2),
       TAG_CITE => Some(3),
       TAG_KBD | TAG_CODE | TAG_SAMP | TAG_VAR => Some(4),
       TAG_Q => Some(5),
@@ -975,7 +975,7 @@ impl ConvertState {
           Some(Cow::Borrowed(MARKDOWN_EMPHASIS))
         }
       }
-      TAG_DEL => Some(Cow::Borrowed(MARKDOWN_STRIKETHROUGH)),
+      TAG_DEL | TAG_S | TAG_STRIKE => Some(Cow::Borrowed(MARKDOWN_STRIKETHROUGH)),
       TAG_SUB => Some(Cow::Borrowed("<sub>")),
       TAG_SUP => Some(Cow::Borrowed("<sup>")),
       TAG_INS => Some(Cow::Borrowed("<ins>")),
@@ -1247,7 +1247,7 @@ impl ConvertState {
           Some(Cow::Borrowed(MARKDOWN_EMPHASIS))
         }
       }
-      TAG_DEL => Some(Cow::Borrowed(MARKDOWN_STRIKETHROUGH)),
+      TAG_DEL | TAG_S | TAG_STRIKE => Some(Cow::Borrowed(MARKDOWN_STRIKETHROUGH)),
       TAG_SUB => Some(Cow::Borrowed("</sub>")),
       TAG_SUP => Some(Cow::Borrowed("</sup>")),
       TAG_INS => Some(Cow::Borrowed("</ins>")),
