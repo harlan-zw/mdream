@@ -769,9 +769,6 @@ function parseHtmlInternal(
   }
 
   while (i < chunkLength && !state.depthLimitReached) {
-    if (textBuffer.length === 0)
-      runStart = i
-
     const currentCharCode = htmlChunk.charCodeAt(i)
 
     // If not starting a tag, add to text buffer and continue
@@ -792,6 +789,8 @@ function parseHtmlInternal(
 
         // Skip if last character was whitespace and we're not in a pre tag
         if (!inPreTag && state.lastCharWasWhitespace) {
+          if (textBuffer.length === 0)
+            runStart = i + 1
           i++
           continue
         }
@@ -868,6 +867,7 @@ function parseHtmlInternal(
           }
           processCdataSection(htmlChunk.substring(i + 9, end), state, handleEvent)
           i = end + 3
+          runStart = i
           continue
         }
         if (chunkLength - i < 9 && '<![CDATA['.startsWith(htmlChunk.substring(i))) {
@@ -887,6 +887,7 @@ function parseHtmlInternal(
       const result = processCommentOrDoctype(htmlChunk, i)
       if (result.complete) {
         i = result.newPosition
+        runStart = i
       }
       else {
         textBuffer += result.remainingText
@@ -922,6 +923,7 @@ function parseHtmlInternal(
       const result = processClosingTag(htmlChunk, i, state, handleEvent)
       if (result.complete) {
         i = result.newPosition
+        runStart = i
       }
       else {
         textBuffer += result.remainingText
@@ -979,6 +981,7 @@ function parseHtmlInternal(
 
       if (result.skip) {
         i = result.newPosition
+        runStart = i
       }
       else if (result.complete) {
         i = result.newPosition
@@ -1000,6 +1003,8 @@ function parseHtmlInternal(
             i = scanResult
           }
         }
+        if (textBuffer.length === 0)
+          runStart = i
       }
       else {
         textBuffer += result.remainingText
