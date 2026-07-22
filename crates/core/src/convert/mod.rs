@@ -1076,6 +1076,15 @@ impl ConvertState {
         stable_end = buf_len;
       }
     }
+    // In a raw-HTML block (`<dl>`/`<dt>`/`<dd>`, `<details>`/`<summary>`,
+    // `<address>`) the next block close is a literal tag glued onto its
+    // predecessor, trimming the block-spacing newline before it (`</dd>\n</dl>`
+    // → `</dd></dl>`). A yielded newline can't be un-sent, so hold trailing
+    // newlines here too; they stay in the buffer for newline counting and are
+    // re-yielded once content (or a non-gluing close) follows.
+    if self.in_raw_html_block() && self.depth_map[TAG_PRE as usize] == 0 {
+      stable_end = stable_end.min(self.buffer.trim_end_matches(['\n', ' ']).len());
+    }
     let leading = if self.preserve_leading_whitespace || self.has_streamed_output {
       0
     } else {

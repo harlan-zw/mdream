@@ -801,7 +801,7 @@ impl ConvertState {
   }
 
   #[inline]
-  fn in_raw_html_block(&self) -> bool {
+  pub(crate) fn in_raw_html_block(&self) -> bool {
     self.depth_map[TAG_DETAILS as usize] > 0
       || self.depth_map[TAG_SUMMARY as usize] > 0
       || self.depth_map[TAG_ADDRESS as usize] > 0
@@ -1597,7 +1597,11 @@ impl ConvertState {
           let start = buf_len.saturating_sub(cache_len);
           if cache_len <= buf_len && self.buffer.is_char_boundary(start) {
             let frag = &self.buffer[start..];
-            let trimmed_len = frag.trim_end().len();
+            // Trim only ASCII whitespace, not `str::trim_end`'s full Unicode
+            // set: a trailing U+00A0 (`&nbsp;`) is meaningful content, and once
+            // streaming has yielded it the truncation can't un-send its bytes,
+            // so the reach-back would drop the next text's leading char.
+            let trimmed_len = frag.trim_end_matches(|c: char| c.is_ascii_whitespace()).len();
             if trimmed_len < cache_len {
               self.buffer.truncate(start + trimmed_len);
               if !is_enter && is_inline {
