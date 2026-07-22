@@ -236,7 +236,7 @@ export const TagIdMap = {
 
 // Pre-defined strings to avoid repeated allocations
 export const MARKDOWN_STRONG = '**'
-export const MARKDOWN_EMPHASIS = '_'
+export const MARKDOWN_EMPHASIS = '*'
 export const MARKDOWN_STRIKETHROUGH = '~~'
 export const MARKDOWN_CODE_BLOCK = '```'
 export const MARKDOWN_INLINE_CODE = '`'

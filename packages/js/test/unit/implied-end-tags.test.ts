@@ -127,7 +127,7 @@ describe('headings', () => {
 
   it('leaves well-formed headings unchanged', () => {
     expect(htmlToMarkdown('<h1>a</h1><h2>b</h2>')).toBe('# a\n\n## b')
-    expect(htmlToMarkdown('<h1><em>a</em></h1>')).toBe('# _a_')
+    expect(htmlToMarkdown('<h1><em>a</em></h1>')).toBe('# *a*')
   })
 })
 

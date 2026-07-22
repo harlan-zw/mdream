@@ -28,7 +28,7 @@ describe('inline whitespace', () => {
     expect(htmlToMarkdown('<div><strong><a href="http://xxx.yyy/">abc</a> </strong>def</div>'))
       .toBe('**[abc](http://xxx.yyy/)** def')
     expect(htmlToMarkdown('<p><strong><em>abc </em></strong>def</p>'))
-      .toBe('**_abc_** def')
+      .toBe('***abc*** def')
   })
 
   it('preserves the separator when a closing tag is split across chunks', async () => {

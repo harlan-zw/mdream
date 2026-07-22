@@ -23,7 +23,7 @@ describe('plugin skip override', () => {
     const html = '<html><body><main><figure><img src="photo.jpg" alt="test"><figcaption>Caption</figcaption></figure></main></body></html>'
     const markdown = htmlToMarkdown(html, withMinimalPreset())
     expect(markdown).toContain('![test](photo.jpg)')
-    expect(markdown).toContain('_Caption_')
+    expect(markdown).toContain('*Caption*')
   })
 
   it('user onNodeEnter works for figure elements', () => {

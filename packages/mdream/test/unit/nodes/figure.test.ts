@@ -8,7 +8,7 @@ describe.each(engines)('figure $name', (engineConfig) => {
     const html = '<figure><img src="photo.jpg" alt="A photo"><figcaption>Photo caption</figcaption></figure>'
     const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toContain('![A photo](photo.jpg)')
-    expect(markdown).toContain('_Photo caption_')
+    expect(markdown).toContain('*Photo caption*')
   })
 
   it('converts figure with only an image', async () => {
@@ -23,6 +23,6 @@ describe.each(engines)('figure $name', (engineConfig) => {
     const html = '<html><body><main><figure><img src="photo.jpg" alt="A photo"><figcaption>Caption</figcaption></figure></main></body></html>'
     const markdown = htmlToMarkdown(html, { ...withMinimalPreset(), engine })
     expect(markdown).toContain('![A photo](photo.jpg)')
-    expect(markdown).toContain('_Caption_')
+    expect(markdown).toContain('*Caption*')
   })
 })

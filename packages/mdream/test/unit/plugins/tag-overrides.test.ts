@@ -80,7 +80,7 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
       },
       engine,
     })
-    expect(markdown).toBe('_text_')
+    expect(markdown).toBe('*text*')
   })
 
   it('converts sup/sub to extended markdown syntax (issue #93)', async () => {
@@ -126,7 +126,7 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
       },
       engine,
     })
-    expect(markdown).toBe('__bold___italic_')
+    expect(markdown).toBe('__bold__*italic*')
     expect(extracted).toEqual(['italic'])
   })
 

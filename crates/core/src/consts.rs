@@ -234,7 +234,7 @@ pub const ELEMENT_NODE: u8 = 1;
 pub const TEXT_NODE: u8 = 2;
 
 pub const MARKDOWN_STRONG: &str = "**";
-pub const MARKDOWN_EMPHASIS: &str = "_";
+pub const MARKDOWN_EMPHASIS: &str = "*";
 pub const MARKDOWN_STRIKETHROUGH: &str = "~~";
 pub const MARKDOWN_CODE_BLOCK: &str = "```";
 pub const MARKDOWN_INLINE_CODE: &str = "`";

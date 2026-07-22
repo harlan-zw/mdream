@@ -44,21 +44,21 @@ describe.each(engines)('text Formatting $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>This is <em>italic</em> text</p>'
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('This is _italic_ text')
+    expect(markdown).toBe('This is *italic* text')
   })
 
   it('converts italic text with <i>', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>This is <i>italic</i> text</p>'
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('This is _italic_ text')
+    expect(markdown).toBe('This is *italic* text')
   })
 
   it('handles nested formatting', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>This is <strong><em>bold and italic</em></strong> text</p>'
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('This is **_bold and italic_** text')
+    expect(markdown).toBe('This is ***bold and italic*** text')
   })
 })
 
@@ -66,12 +66,12 @@ describe.each(engines)('text Formatting $name', (engineConfig) => {
 describe.each(engines)('top-level inline text $name', (engineConfig) => {
   it('keeps text before a top-level inline tag', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(htmlToMarkdown('foo <em>bar</em>', { engine })).toBe('foo _bar_')
+    expect(htmlToMarkdown('foo <em>bar</em>', { engine })).toBe('foo *bar*')
   })
 
   it('keeps text between top-level inline tags', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(htmlToMarkdown('<strong>a</strong> and <em>b</em>', { engine })).toBe('**a** and _b_')
+    expect(htmlToMarkdown('<strong>a</strong> and <em>b</em>', { engine })).toBe('**a** and *b*')
   })
 
   it('keeps text between repeated top-level inline tags', async () => {
@@ -157,7 +157,7 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
   it('keeps non-empty emphasis untouched', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<p><b>hi</b></p>', { engine })).toBe('**hi**')
-    expect(htmlToMarkdown('<p><b><em>x</em></b></p>', { engine })).toBe('**_x_**')
+    expect(htmlToMarkdown('<p><b><em>x</em></b></p>', { engine })).toBe('***x***')
     expect(htmlToMarkdown('<p><b><img src="x.png" alt="y"></b></p>', { engine })).toBe('**![y](x.png)**')
   })
 

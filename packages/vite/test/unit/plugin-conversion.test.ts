@@ -65,7 +65,7 @@ describe('viteHtmlToMarkdownPlugin - HTML to Markdown Conversion', () => {
 
     expect(emitted.source).toContain('## Features')
     expect(emitted.source).toContain('**Fast**')
-    expect(emitted.source).toContain('_Easy_')
+    expect(emitted.source).toContain('*Easy*')
     expect(emitted.source).toContain('[our site](https://example.com)')
   })
 
