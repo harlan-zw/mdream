@@ -19,8 +19,6 @@ pub(crate) fn is_whitespace(c: u8) -> bool {
 pub(crate) struct CommentResult {
   pub(crate) complete: bool,
   pub(crate) new_position: usize,
-  /// Start offset into html_chunk for remaining text (only meaningful when !complete)
-  pub(crate) remaining_start: usize,
 }
 
 pub(crate) fn process_comment_or_doctype(html_chunk: &str, position: usize) -> CommentResult {
@@ -36,7 +34,6 @@ pub(crate) fn process_comment_or_doctype(html_chunk: &str, position: usize) -> C
         return CommentResult {
           complete: true,
           new_position: i,
-          remaining_start: 0,
         };
       }
       i += 1;
@@ -44,7 +41,6 @@ pub(crate) fn process_comment_or_doctype(html_chunk: &str, position: usize) -> C
     CommentResult {
       complete: false,
       new_position: position,
-      remaining_start: position,
     }
   } else {
     i += 2;
@@ -54,7 +50,6 @@ pub(crate) fn process_comment_or_doctype(html_chunk: &str, position: usize) -> C
         return CommentResult {
           complete: true,
           new_position: i,
-          remaining_start: 0,
         };
       }
       i += 1;
@@ -62,7 +57,6 @@ pub(crate) fn process_comment_or_doctype(html_chunk: &str, position: usize) -> C
     CommentResult {
       complete: false,
       new_position: i,
-      remaining_start: position,
     }
   }
 }

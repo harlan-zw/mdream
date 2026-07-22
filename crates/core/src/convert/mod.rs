@@ -89,6 +89,16 @@ enum ScriptScanBoundary {
   Complete,
 }
 
+/// Outcome of feeding one chunk to the script-data scanner.
+enum ScriptChunk {
+  /// The `</script` close tag was found; resume normal parsing at this index.
+  Closed(usize),
+  /// The chunk ended inside script data; carry the raw tail from this offset
+  /// into the next chunk (`chunk.len()` when everything was consumed, i.e.
+  /// nothing to carry).
+  Carry(usize),
+}
+
 struct ScriptScanResult {
   boundary: ScriptScanBoundary,
   state: u8,
@@ -560,12 +570,7 @@ impl ConvertState {
     self.script_text_buffer = script_text;
   }
 
-  fn process_script_chunk(
-    &mut self,
-    chunk: &str,
-    start: usize,
-    text_buffer: &mut String,
-  ) -> Option<usize> {
+  fn process_script_chunk(&mut self, chunk: &str, start: usize) -> ScriptChunk {
     let scan = find_script_end_tag(chunk.as_bytes(), start, self.script_data_state);
     self.script_data_state = scan.state;
     match scan.boundary {
@@ -573,16 +578,18 @@ impl ConvertState {
         self.push_script_text(&chunk[start..close_index]);
         self.flush_script_text();
         self.script_data_state = SCRIPT_DATA;
-        Some(close_index)
+        ScriptChunk::Closed(close_index)
       }
       ScriptScanBoundary::Pending(pending_start) => {
+        // Consume the script text before the partial `</scr…` and carry only
+        // that raw tail. Carrying from the script start instead would re-feed
+        // the text just pushed here, which the resume path would push again.
         self.push_script_text(&chunk[start..pending_start]);
-        text_buffer.push_str(&chunk[pending_start..]);
-        None
+        ScriptChunk::Carry(pending_start)
       }
       ScriptScanBoundary::Complete => {
         self.push_script_text(&chunk[start..]);
-        None
+        ScriptChunk::Carry(chunk.len())
       }
     }
   }
@@ -600,18 +607,31 @@ impl ConvertState {
     let bytes = chunk.as_bytes();
     let chunk_length = bytes.len();
     let mut i = 0;
+    // Raw start of the text/tag run currently held in `text_buffer`. Any tail
+    // carried to the next chunk is returned raw from here, never the decoded
+    // and escaped `text_buffer` (which would be re-escaped, multiplying `\`).
+    let mut run_start = 0usize;
+    let mut carry = false;
 
     if self
       .stack
       .last()
       .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none())
     {
-      i = self
-        .process_script_chunk(chunk, i, &mut text_buffer)
-        .unwrap_or(chunk_length);
+      match self.process_script_chunk(chunk, i) {
+        ScriptChunk::Closed(close_index) => i = close_index,
+        ScriptChunk::Carry(from) => {
+          run_start = from;
+          carry = true;
+          i = chunk_length;
+        }
+      }
     }
 
     while i < chunk_length && !self.depth_limit_reached {
+      if text_buffer.is_empty() {
+        run_start = i;
+      }
       let cc = bytes[i];
 
       if cc != LT_CHAR {
@@ -721,7 +741,7 @@ impl ConvertState {
 
       // Processing '<'
       if i + 1 >= chunk_length {
-        text_buffer.push(cc as char);
+        carry = true;
         break;
       }
 
@@ -751,12 +771,13 @@ impl ConvertState {
             if !text_buffer.is_empty() {
               self.process_text_buffer(&mut text_buffer);
               text_buffer.clear();
+              run_start = i;
             }
             let result = self.process_closing_tag(chunk, i);
             if result.complete {
               i = result.new_position;
             } else {
-              text_buffer.push_str(&chunk[result.remaining_start..]);
+              carry = true;
               break;
             }
             continue;
@@ -787,41 +808,44 @@ impl ConvertState {
             if !text_buffer.is_empty() {
               self.process_text_buffer(&mut text_buffer);
               text_buffer.clear();
+              run_start = i;
             }
             self.process_cdata_section(&after_open[..rel]);
             i += "<![CDATA[".len() + rel + 3;
             continue;
           }
           // Unterminated CDATA: re-parse from '<' in the next chunk.
-          text_buffer.push_str(remaining);
+          carry = true;
           break;
         }
         if remaining.len() < "<![CDATA[".len() && "<![CDATA[".starts_with(remaining) {
           // Chunk boundary fell inside the `<![CDATA[` opener.
-          text_buffer.push_str(remaining);
+          carry = true;
           break;
         }
         if !text_buffer.is_empty() {
           self.process_text_buffer(&mut text_buffer);
           text_buffer.clear();
+          run_start = i;
         }
         let result = process_comment_or_doctype(chunk, i);
         if result.complete {
           i = result.new_position;
         } else {
-          text_buffer.push_str(&chunk[result.remaining_start..]);
+          carry = true;
           break;
         }
       } else if next == SLASH_CHAR {
         if !text_buffer.is_empty() {
           self.process_text_buffer(&mut text_buffer);
           text_buffer.clear();
+          run_start = i;
         }
         let result = self.process_closing_tag(chunk, i);
         if result.complete {
           i = result.new_position;
         } else {
-          text_buffer.push_str(&chunk[result.remaining_start..]);
+          carry = true;
           break;
         }
       } else {
@@ -837,7 +861,7 @@ impl ConvertState {
           i2 += 1;
         }
         let Some(tag_name_end) = tag_name_end else {
-          text_buffer.push_str(&chunk[i..]);
+          carry = true;
           break;
         };
         let tag_name_raw = &chunk[tag_name_start..tag_name_end];
@@ -880,6 +904,7 @@ impl ConvertState {
         if !text_buffer.is_empty() {
           self.process_text_buffer(&mut text_buffer);
           text_buffer.clear();
+          run_start = i;
         }
 
         let result =
@@ -894,33 +919,41 @@ impl ConvertState {
           } else {
             self.is_first_text_in_element = true;
             if builtin_tag_id == Some(TAG_SCRIPT) {
-              let Some(close_index) = self.process_script_chunk(chunk, i, &mut text_buffer) else {
-                break;
-              };
-              i = close_index;
+              match self.process_script_chunk(chunk, i) {
+                ScriptChunk::Closed(close_index) => i = close_index,
+                ScriptChunk::Carry(from) => {
+                  // Carry the raw script tail (from the partial close tag, or
+                  // nothing when fully consumed) into the next chunk.
+                  run_start = from;
+                  carry = true;
+                  break;
+                }
+              }
             }
           }
         } else {
-          // Include full tag from '<' for re-parsing in next chunk
-          text_buffer.push_str(&chunk[i..]);
+          // Incomplete opening tag: re-parse from '<' in the next chunk.
+          carry = true;
           break;
         }
       }
     }
 
-    // If text_buffer is empty (common for non-streaming), save allocation for reuse
-    if text_buffer.is_empty() {
+    // Carry the chunk's unfinished tail (incomplete tag/entity, or text a later
+    // chunk may extend) RAW from `run_start`, never the decoded+escaped
+    // `text_buffer`; re-processing re-derives it so nothing is double-applied.
+    // Otherwise reuse the allocation (the common non-streaming case).
+    if carry || !text_buffer.is_empty() {
+      let leftover = chunk[run_start..].to_string();
+      text_buffer.clear();
       self.parse_text_buffer = text_buffer;
-      String::new()
-    } else {
-      if text_buffer
-        .as_bytes()
-        .first()
-        .is_some_and(|&c| is_whitespace(c))
-      {
+      if leftover.as_bytes().first().is_some_and(|&c| is_whitespace(c)) {
         self.last_char_was_whitespace = false;
       }
-      text_buffer
+      leftover
+    } else {
+      self.parse_text_buffer = text_buffer;
+      String::new()
     }
   }
 
@@ -1023,14 +1056,26 @@ impl ConvertState {
 
   pub fn get_markdown_chunk(&mut self) -> String {
     let buf_len = self.buffer.len();
-    // A trailing whitespace-bearing text node may still be trimmed when a
-    // closing inline tag arrives in a later chunk. Hold that mutable suffix back.
-    let mut stable_end =
-      if self.last_text_node_contains_whitespace && self.depth_map[TAG_PRE as usize] == 0 {
-        self.buffer.trim_end_matches(' ').len()
-      } else {
-        buf_len
-      };
+    // Trailing spaces at the buffer end are never final outside <pre>: a later
+    // block close (or a dropped empty element followed by a block) trims them,
+    // and an inline close arriving next chunk can trim a text node's trailing
+    // space. Yielding them would let that later trim silently remove an
+    // already-sent byte and shift every byte after it. Always hold them back;
+    // they are re-yielded once real content follows, or dropped at finalize.
+    let mut stable_end = self.buffer.trim_end_matches(' ').len();
+    if stable_end < buf_len && self.depth_map[TAG_PRE as usize] != 0 {
+      // Inside <pre> trailing spaces are usually significant code, so yield
+      // them unless the last text node can still be trimmed by an inline
+      // rewrite. Another exception is a line-leading run preceded by a newline.
+      // A list continuation indent is emitted right after the closing fence, and
+      // before the next sibling is known, while <pre>'s depth is still set.
+      // That indent is speculative (the next <li> rewrites it to its marker),
+      // so hold it back like any other trailing whitespace.
+      let line_leading = stable_end == 0 || self.buffer.as_bytes()[stable_end - 1] == b'\n';
+      if !line_leading && !self.last_text_node_contains_whitespace {
+        stable_end = buf_len;
+      }
+    }
     let leading = if self.preserve_leading_whitespace || self.has_streamed_output {
       0
     } else {
@@ -1038,8 +1083,21 @@ impl ConvertState {
     };
     // An open inline marker may still be dropped if its element closes empty in a later chunk;
     // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
+    // The spaces immediately before it belong to the preceding text node: if the marker is
+    // dropped (empty element) and a block boundary then trims that trailing space, a yielded
+    // space would be silently removed and shift every later byte. Hold those spaces back too.
     if let Some(&(_, p, _)) = self.open_markers.first() {
-      stable_end = stable_end.min(p);
+      stable_end = stable_end.min(self.buffer[..p].trim_end_matches(' ').len());
+    }
+    // An open `<a>`'s close can rewrite the buffer back to `link_bracket_pos`
+    // (emptyLinkText drop, selfLinkHeadings, redundantLinks, GFM autolink). Hold the
+    // yield boundary there so a link that turns out empty never leaks a stray `[`.
+    // As with inline markers, the spaces just before the `[` belong to the
+    // preceding text: an empty-link drop followed by a block close trims them,
+    // so hold them back too or a yielded space would be silently removed.
+    // Mirrors the same guard in `drain_streamed_prefix`.
+    if self.depth_map[TAG_A as usize] > 0 {
+      stable_end = stable_end.min(self.buffer[..self.link_bracket_pos].trim_end_matches(' ').len());
     }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let mut start = self.last_yielded_length.max(leading);
@@ -1097,11 +1155,24 @@ impl ConvertState {
       retained_tail_start -= 1;
     }
     let mut drain_end = self.last_yielded_length.min(retained_tail_start);
+    // An empty link or inline marker closing in a later chunk truncates the
+    // buffer back to its reach-back point (`link_bracket_pos` / `output_start`).
+    // The next block then counts its leading newlines from the two bytes ending
+    // there (see `write_output`, which inspects only the last two), so keep
+    // those two bytes; otherwise a dropped element leaks an extra newline in
+    // streaming.
+    let keep_two_before = |buf: &str, at: usize| {
+      let mut i = at.saturating_sub(2);
+      while i > 0 && !buf.is_char_boundary(i) {
+        i -= 1;
+      }
+      i
+    };
     if self.depth_map[TAG_A as usize] > 0 {
-      drain_end = drain_end.min(self.link_bracket_pos);
+      drain_end = drain_end.min(keep_two_before(&self.buffer, self.link_bracket_pos));
     }
     if let Some(&(_, output_start, _)) = self.open_markers.first() {
-      drain_end = drain_end.min(output_start);
+      drain_end = drain_end.min(keep_two_before(&self.buffer, output_start));
     }
     if drain_end == 0 {
       return;
@@ -1139,6 +1210,4 @@ pub(crate) struct OpeningTagResult {
 pub(crate) struct CloseTagResult {
   complete: bool,
   new_position: usize,
-  /// Start offset into html_chunk for remaining text (only meaningful when !complete)
-  remaining_start: usize,
 }
