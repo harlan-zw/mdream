@@ -207,8 +207,8 @@ fn multibyte_drain_matches_one_shot() {
   for max_bytes in [1usize, 2, 3, 5, 8, 64] {
     let got = stream_chars(&doc, max_bytes, opts.clone());
     assert_eq!(
-      got.trim(),
-      expected.trim(),
+      got,
+      expected,
       "mismatch at max_bytes={max_bytes}"
     );
   }
@@ -253,8 +253,8 @@ fn streaming_dropped_empty_element_keeps_block_spacing() {
     let expected = html_to_markdown(html, opts.clone());
     for chunk in 1..=32 {
       assert_eq!(
-        stream_chunks(html, chunk, opts.clone()).trim(),
-        expected.trim(),
+        stream_chunks(html, chunk, opts.clone()),
+        expected,
         "mismatch: chunk={chunk} html={html:?}"
       );
     }
@@ -273,7 +273,7 @@ fn streaming_wrap_preserves_the_full_current_column() {
   actual.push_str(&processor.process_chunk(" delta</p>"));
   actual.push_str(&processor.finish());
 
-  assert_eq!(actual.trim(), expected.trim());
+  assert_eq!(actual, expected);
 }
 
 #[test]
@@ -296,7 +296,7 @@ fn streaming_retains_two_newlines_of_block_context() {
   )));
   actual.push_str(&processor.finish());
 
-  assert_eq!(actual.trim(), expected.trim());
+  assert_eq!(actual, expected);
 }
 
 #[test]
@@ -317,7 +317,7 @@ fn streaming_only_trims_whitespace_at_the_document_start() {
   actual.push_str(&processor.process_chunk("<td>Northern Australia</td></tr></table>"));
   actual.push_str(&processor.finish());
 
-  assert_eq!(actual.trim(), expected.trim());
+  assert_eq!(actual, expected);
 }
 
 #[test]
@@ -366,8 +366,8 @@ fn streaming_memory_is_bounded_not_document_sized() {
 #[test]
 fn streaming_keeps_trailing_nbsp_before_sibling() {
   let cases: &[&str] = &[
-    r#"<p>answered on <span>03 Apr 2013,&nbsp;</span><span>09:53 AM</span></p>"#,
-    r#"<p><span>a b,&nbsp;</span><span>0</span></p>"#,
+    r"<p>answered on <span>03 Apr 2013,&nbsp;</span><span>09:53 AM</span></p>",
+    r"<p><span>a b,&nbsp;</span><span>0</span></p>",
   ];
   let opts = HTMLToMarkdownOptions {
     clean: Some(safe_clean()),
@@ -378,7 +378,7 @@ fn streaming_keeps_trailing_nbsp_before_sibling() {
     assert!(expected.contains('\u{a0}'), "nbsp should be preserved: {expected:?}");
     for chunk in 1..=html.len().max(1) {
       let got = stream_chunks(html, chunk, opts.clone());
-      assert_eq!(got.trim(), expected.trim(), "chunk={chunk} html={html:?}");
+      assert_eq!(got, expected, "chunk={chunk} html={html:?}");
     }
   }
 }
@@ -407,8 +407,8 @@ fn streaming_keeps_raw_block_close_after_drain() {
   assert!(expected.contains("</dl>"));
   for chunk in [1usize, 7, 16, 31, 32, 33, 64, 128, 256, 512] {
     assert_eq!(
-      stream_chunks(&html, chunk, opts.clone()).trim(),
-      expected.trim(),
+      stream_chunks(&html, chunk, opts.clone()),
+      expected,
       "mismatch: chunk={chunk}"
     );
   }
