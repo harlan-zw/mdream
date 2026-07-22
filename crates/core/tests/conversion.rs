@@ -2767,3 +2767,35 @@ fn wrap_nested_list_in_blockquote_keeps_structure() {
     );
   }
 }
+
+#[test]
+fn br_hard_break_streaming_matches_one_shot() {
+    let long = "word ".repeat(200);
+    let inputs = [
+        "<p>foo <br>bar</p>".to_string(),
+        "<p>foo  <br>bar</p>".to_string(),
+        "<p>foo&nbsp;<br>bar</p>".to_string(),
+        "<p><b>x</b> <br>y</p>".to_string(),
+        format!("<p>{long} <br>tail</p>"),
+        format!("<p>done</p><p>{long} <br>tail</p>"),
+    ];
+    for width in [0usize, 40] {
+        for html in &inputs {
+            let opts = HTMLToMarkdownOptions { wrap_width: width, ..Default::default() };
+            let expected = html_to_markdown(html, opts.clone());
+            for chunk in [1usize, 7, 64] {
+                let mut stream = MarkdownStreamProcessor::new(opts.clone());
+                let mut actual = String::new();
+                let mut i = 0;
+                while i < html.len() {
+                    let mut end = (i + chunk).min(html.len());
+                    while !html.is_char_boundary(end) { end += 1; }
+                    actual.push_str(&stream.process_chunk(&html[i..end]));
+                    i = end;
+                }
+                actual.push_str(&stream.finish());
+                assert_eq!(actual, expected, "width {width} chunk {chunk} html {html:?}");
+            }
+        }
+    }
+}
