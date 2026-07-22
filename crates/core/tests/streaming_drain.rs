@@ -362,6 +362,31 @@ fn streaming_memory_is_bounded_not_document_sized() {
   );
 }
 
+// A text node ending in `&nbsp;` (U+00A0) before a sibling inline was trimmed
+// at the element boundary by `str::trim_end` (nbsp is Unicode whitespace). In
+// streaming the nbsp was already yielded, so the truncation shifted the reach-
+// back and dropped the next element's leading char (`2013, 09:53` →
+// `2013,\u{a0}9:53`, losing the `0`). Trailing nbsp is now kept.
+#[test]
+fn streaming_keeps_trailing_nbsp_before_sibling() {
+  let cases: &[&str] = &[
+    r#"<p>answered on <span>03 Apr 2013,&nbsp;</span><span>09:53 AM</span></p>"#,
+    r#"<p><span>a b,&nbsp;</span><span>0</span></p>"#,
+  ];
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  for html in cases {
+    let expected = html_to_markdown(html, opts.clone());
+    assert!(expected.contains('\u{a0}'), "nbsp should be preserved: {expected:?}");
+    for chunk in 1..=html.len().max(1) {
+      let got = stream_chunks(html, chunk, opts.clone());
+      assert_eq!(got.trim(), expected.trim(), "chunk={chunk} html={html:?}");
+    }
+  }
+}
+
 // A raw-HTML block (`<dl>`/`<dt>`/`<dd>`, `<details>`, `<address>`) closes with
 // a literal tag glued onto its predecessor, trimming the block-spacing newline
 // before it (`</dd>\n</dl>` → `</dd></dl>`). Once the buffer drains past that
