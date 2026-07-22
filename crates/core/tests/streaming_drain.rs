@@ -104,11 +104,7 @@ fn streamed_output_matches_one_shot() {
       let expected = html_to_markdown(html, opts.clone());
       for chunk in [1usize, 3, 7, 64, html.len().max(1)] {
         let got = stream_chunks(html, chunk, opts.clone());
-        assert_eq!(
-          got.trim(),
-          expected.trim(),
-          "mismatch: chunk={chunk} html={html:?}"
-        );
+        assert_eq!(got, expected, "mismatch: chunk={chunk} html={html:?}");
       }
     }
   }
@@ -120,8 +116,8 @@ fn assert_stream_matches(html: &str, opts: HTMLToMarkdownOptions) {
   let expected = html_to_markdown(html, opts.clone());
   for chunk in 1..=html.len().max(1) {
     assert_eq!(
-      stream_chunks(html, chunk, opts.clone()).trim(),
-      expected.trim(),
+      stream_chunks(html, chunk, opts.clone()),
+      expected,
       "mismatch: chunk={chunk} html={html:?}"
     );
   }
@@ -467,6 +463,27 @@ fn streaming_drops_block_separator_before_empty_trailing_marker() {
   }
 }
 
+// A trailing whitespace run inside `<pre>` is still mutable until the code
+// element closes. Streaming must not emit bytes that one-shot trims before
+// writing the closing fence.
+#[test]
+fn streaming_holds_mutable_trailing_pre_whitespace() {
+  for html in [
+    "<pre><code>alpha\n</code></pre>",
+    "<pre><code>alpha\n\n</code></pre>",
+    "<pre><code>alpha  </code></pre>",
+  ] {
+    let expected = html_to_markdown(html, HTMLToMarkdownOptions::default());
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, chunk, HTMLToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+  }
+}
+
 // Inside a list item a nested block renders on one line (NO_SPACING). A word,
 // a <br>, then that block: once the word has been drained out of the buffer the
 // inter-token space it anchored sat at the buffer start and was trimmed away,
@@ -486,8 +503,8 @@ fn streaming_keeps_inter_token_space_across_drain() {
     let expected = html_to_markdown(&html, opts.clone());
     for chunk in 1..=40usize {
       assert_eq!(
-        stream_chunks(&html, chunk, opts.clone()).trim(),
-        expected.trim(),
+        stream_chunks(&html, chunk, opts.clone()),
+        expected,
         "chunk={chunk} inner={inner:?}"
       );
     }
@@ -518,8 +535,8 @@ fn streaming_keeps_block_newline_count_across_drain() {
   assert!(expected.contains("-\n[Delta]"), "one-shot tightens the list/block gap: {expected:?}");
   for chunk in 1..=40usize {
     assert_eq!(
-      stream_chunks(html, chunk, opts.clone()).trim(),
-      expected.trim(),
+      stream_chunks(html, chunk, opts.clone()),
+      expected,
       "chunk={chunk}"
     );
   }

@@ -1068,27 +1068,32 @@ impl ConvertState {
     // space. Yielding them would let that later trim silently remove an
     // already-sent byte and shift every byte after it. Always hold them back;
     // they are re-yielded once real content follows, or dropped at finalize.
+    let in_pre = self.depth_map[TAG_PRE as usize] != 0;
     let mut stable_end = self.buffer.trim_end_matches(' ').len();
-    if stable_end < buf_len && self.depth_map[TAG_PRE as usize] != 0 {
-      // Inside <pre> trailing spaces are usually significant code, so yield
-      // them unless the last text node can still be trimmed by an inline
-      // rewrite. Another exception is a line-leading run preceded by a newline.
-      // A list continuation indent is emitted right after the closing fence, and
-      // before the next sibling is known, while <pre>'s depth is still set.
-      // That indent is speculative (the next <li> rewrites it to its marker),
-      // so hold it back like any other trailing whitespace.
-      let line_leading = stable_end == 0 || self.buffer.as_bytes()[stable_end - 1] == b'\n';
-      if !line_leading && !self.last_text_node_contains_whitespace {
-        stable_end = buf_len;
+    if in_pre {
+      if self.last_text_node_contains_whitespace {
+        // A trailing whitespace run in the current text node stays mutable
+        // until its inline/code element closes. That close trims ASCII
+        // whitespace, so hold the whole run rather than yielding bytes it may
+        // retract later.
+        stable_end = self
+          .buffer
+          .trim_end_matches(|c: char| c.is_ascii_whitespace())
+          .len();
+      } else if stable_end < buf_len {
+        // Other trailing spaces inside <pre> are significant code. A
+        // line-leading run is the exception: list continuation indentation is
+        // emitted before the next sibling is known and can still be replaced
+        // by its list marker.
+        let line_leading = stable_end == 0 || self.buffer.as_bytes()[stable_end - 1] == b'\n';
+        if !line_leading {
+          stable_end = buf_len;
+        }
       }
-    }
-    // In a raw-HTML block (`<dl>`/`<dt>`/`<dd>`, `<details>`/`<summary>`,
-    // `<address>`) the next block close is a literal tag glued onto its
-    // predecessor, trimming the block-spacing newline before it (`</dd>\n</dl>`
-    // → `</dd></dl>`). A yielded newline can't be un-sent, so hold trailing
-    // newlines here too; they stay in the buffer for newline counting and are
-    // re-yielded once content (or a non-gluing close) follows.
-    if self.depth_map[TAG_PRE as usize] == 0 {
+    } else {
+      // A block close or document finalization may still trim trailing block
+      // spacing. Keep newlines buffered until following content makes them
+      // stable, since yielded bytes cannot be retracted.
       stable_end = stable_end.min(self.buffer.trim_end_matches(['\n', ' ']).len());
     }
     let leading = if self.preserve_leading_whitespace || self.has_streamed_output {

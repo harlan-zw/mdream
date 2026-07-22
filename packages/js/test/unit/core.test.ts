@@ -23,15 +23,16 @@ describe('core entry', () => {
   })
 
   it('streams without declarative plugins', async () => {
+    const html = '<h1>Hello</h1>'
     const stream = new ReadableStream<string>({
       start(controller) {
-        controller.enqueue('<h1>Hello</h1>')
+        controller.enqueue(html)
         controller.close()
       },
     })
     let markdown = ''
     for await (const chunk of streamHtmlToMarkdown(stream))
       markdown += chunk
-    expect(markdown).toBe('# Hello\n\n')
+    expect(markdown).toBe(htmlToMarkdown(html))
   })
 })
