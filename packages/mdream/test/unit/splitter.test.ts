@@ -69,6 +69,55 @@ describe('htmlToMarkdownSplitChunks', () => {
     expect(chunks[0].metadata.code).toBe('javascript')
   })
 
+  it('uses validated code languages in output and metadata', () => {
+    for (const [className, language] of [
+      ['language-C#', 'C#'],
+      ['language-js&#10;ignored', 'js'],
+      ['language-bad&#96; language-rust', 'rust'],
+      ['language-~~~&#96;', ''],
+      ['notlanguage-js', ''],
+    ]) {
+      const chunks = htmlToMarkdownSplitChunks(
+        `<pre><code class="${className}">code</code></pre>`,
+      )
+
+      expect(chunks).toHaveLength(1)
+      expect(chunks[0].content, `class=${className}`)
+        .toBe(`\`\`\`${language}\ncode\n\`\`\``)
+      if (language)
+        expect(chunks[0].metadata.code).toBe(language)
+      else
+        expect(chunks[0].metadata.code).toBeUndefined()
+    }
+  })
+
+  it('gets metadata from the fence that actually opened', () => {
+    for (const [html, language] of [
+      ['<pre class="language-rust">code</pre>', 'rust'],
+      ['<pre class="language-rust"><code class="language-js">code</code></pre>', 'js'],
+      ['<pre class="language-rust">before<code class="language-js">code</code></pre>', 'rust'],
+    ]) {
+      const chunks = htmlToMarkdownSplitChunks(html)
+
+      expect(chunks).toHaveLength(1)
+      expect(chunks[0].content.startsWith(`\`\`\`${language}\n`)).toBe(true)
+      expect(chunks[0].metadata.code, html).toBe(language)
+    }
+  })
+
+  it('does not treat fence-like code content as chunk metadata', () => {
+    for (const chunkOverlap of [0, 10]) {
+      const chunks = htmlToMarkdownSplitChunks(
+        `<pre><code class="language-js">first\n\`\`\`rust\n${'content '.repeat(30)}</code></pre>`,
+        { chunkSize: 40, chunkOverlap },
+      )
+
+      expect(chunks.length).toBeGreaterThan(1)
+      expect(chunks[0].metadata.code).toBe('js')
+      expect(chunks.every(chunk => chunk.metadata.code !== 'rust')).toBe(true)
+    }
+  })
+
   it('splits on horizontal rules', () => {
     const html = `
       <p>Section 1</p>

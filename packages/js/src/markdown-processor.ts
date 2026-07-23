@@ -98,6 +98,8 @@ export interface MarkdownState {
   preOwnFence?: boolean
   /** Open fenced block whose delimiter is finalized after its content is known. */
   codeFence?: CodeFence
+  /** Internal observer used by the splitter to track the fence actually opened. */
+  onCodeFenceOpen?: (language: string) => void
   /** Open blockquotes buffered until every child line can receive its prefix. */
   blockquotes: BlockquoteFrame[]
   /** Public runtime view used by tag handlers without exposing frame internals. */
@@ -726,6 +728,7 @@ function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
 function startCodeFence(state: MarkdownState, fragment: number, language: string, indent: string): void {
   const markerOffset = state.buffer[fragment]!.lastIndexOf(MARKDOWN_CODE_BLOCK)
   state.codeFence = { fragment, markerOffset, indent, language }
+  state.onCodeFenceOpen?.(language)
 }
 
 function finalizeCodeFence(state: MarkdownState): string | undefined {

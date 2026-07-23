@@ -2352,9 +2352,14 @@ impl ConvertState {
   #[inline]
   pub(crate) fn get_language_from_class(class_name: Option<&String>) -> &str {
     if let Some(class) = class_name {
-      for part in class.split_whitespace() {
-        if let Some(lang) = part.strip_prefix("language-") {
-          return lang.trim();
+      for part in class.split([' ', '\t', '\n', '\u{000C}', '\r']) {
+        if let Some(lang) = part.strip_prefix("language-")
+          && !lang.is_empty()
+          && lang
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'#' | b'+' | b'-' | b'.'))
+        {
+          return lang;
         }
       }
     }

@@ -525,7 +525,7 @@ fn code_delimiters_widen_for_literal_backticks() {
       r#"<pre><code class="language-js`x">~~~
 code</code></pre>"#
     ),
-    "~~~~js`x\n~~~\ncode\n~~~~"
+    "```\n~~~\ncode\n```"
   );
   assert_eq!(
     convert(
@@ -534,7 +534,51 @@ b
 
 </pre><a href="#x">link</a></div>"##
     ),
-    "~~~js`x\na\nb\n\n\n~~~\n\n[link](#x)"
+    "```\na\nb\n\n\n```\n\n[link](#x)"
+  );
+}
+
+#[test]
+fn code_language_metadata_is_validated() {
+  for (class, language) in [
+    ("language-js", "js"),
+    ("language-c++", "c++"),
+    ("language-C#", "C#"),
+    ("language-objective-c", "objective-c"),
+    ("language-.net", ".net"),
+    ("ignored\tlanguage-js\nlanguage-rust", "js"),
+    ("language-bad&#96; language-rust", "rust"),
+    ("language- language-C#", "C#"),
+    ("language-js&#11; language-rust", "rust"),
+    ("language-js&#160; language-rust", "rust"),
+  ] {
+    let html = format!(r#"<pre><code class="{class}">code</code></pre>"#);
+    assert_eq!(
+      convert(&html),
+      format!("```{language}\ncode\n```"),
+      "class={class:?}"
+    );
+  }
+
+  for class in [
+    "language-",
+    "language-~~~&#96;",
+    "language-js_foo",
+    "language-js&quot;x",
+    "language-js&#1;x",
+    "notlanguage-js",
+  ] {
+    let html = format!(r#"<pre><code class="{class}">code</code></pre>"#);
+    assert_eq!(convert(&html), "```\ncode\n```", "class={class:?}");
+  }
+
+  assert_eq!(
+    convert(r#"<pre class="language-bad&#96; language-.net">code</pre>"#),
+    "```.net\ncode\n```"
+  );
+  assert_eq!(
+    convert(r#"<pre><code class="language-~~~&#96;">code</code></pre><p>after</p>"#),
+    "```\ncode\n```\n\nafter"
   );
 }
 

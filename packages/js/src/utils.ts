@@ -72,6 +72,63 @@ function isAsciiAlphaNumeric(code: number): boolean {
     || (code >= 97 && code <= 122)
 }
 
+function isHtmlAsciiWhitespace(code: number): boolean {
+  return code === 32 || code === 9 || code === 10 || code === 12 || code === 13
+}
+
+// Code units for the `language-` prefix, matched without string comparison.
+const LANGUAGE_PREFIX = [108, 97, 110, 103, 117, 97, 103, 101, 45]
+
+function hasLanguagePrefix(value: string, start: number): boolean {
+  for (let offset = 0; offset < 9; offset++) {
+    if (value.charCodeAt(start + offset) !== LANGUAGE_PREFIX[offset])
+      return false
+  }
+  return true
+}
+
+// Scan ASCII-whitespace-delimited class tokens without allocating a split
+// array; return the first `language-` token whose suffix is a safe fence
+// info string (non-empty, only [A-Za-z0-9#+-.]).
+export function getLanguageFromClass(className: string | undefined): string {
+  if (!className)
+    return ''
+
+  const length = className.length
+  let index = 0
+  while (index < length) {
+    if (isHtmlAsciiWhitespace(className.charCodeAt(index))) {
+      index++
+      continue
+    }
+
+    const tokenStart = index
+    do {
+      index++
+    } while (index < length && !isHtmlAsciiWhitespace(className.charCodeAt(index)))
+    const tokenEnd = index
+
+    // Reject tokens without a non-empty `language-` prefix (9 chars) before
+    // checking the prefix, so short tokens are skipped cheaply.
+    const languageStart = tokenStart + 9
+    if (languageStart >= tokenEnd || !hasLanguagePrefix(className, tokenStart))
+      continue
+
+    let valid = true
+    for (let cursor = languageStart; cursor < tokenEnd; cursor++) {
+      const code = className.charCodeAt(cursor)
+      if (!isAsciiAlphaNumeric(code) && code !== 35 && code !== 43 && code !== 45 && code !== 46) {
+        valid = false
+        break
+      }
+    }
+    if (valid)
+      return className.slice(languageStart, tokenEnd)
+  }
+
+  return ''
+}
+
 function numericReplacement(codePoint: number): string {
   if (codePoint === 0 || codePoint > 0x10FFFF || (codePoint >= 0xD800 && codePoint <= 0xDFFF))
     return '\uFFFD'
