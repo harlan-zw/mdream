@@ -125,13 +125,18 @@ fn assert_stream_matches(html: &str, opts: HTMLToMarkdownOptions) {
 
 fn assert_stream_matches_every_split(html: &str, opts: HTMLToMarkdownOptions) {
   let expected = html_to_markdown(html, opts.clone());
-  for split in 0..=html.len() {
+  for split in (0..=html.len()).filter(|&split| html.is_char_boundary(split)) {
     let mut stream = MarkdownStreamProcessor::new(opts.clone());
     let mut actual = stream.process_chunk(&html[..split]);
     actual.push_str(&stream.process_chunk(&html[split..]));
     actual.push_str(&stream.finish());
     assert_eq!(actual, expected, "split={split} html={html:?}");
   }
+}
+
+#[test]
+fn streaming_every_split_supports_multibyte_html() {
+  assert_stream_matches_every_split("<p>café 😀</p>", HTMLToMarkdownOptions::default());
 }
 
 #[test]
