@@ -9,8 +9,14 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
     <strong>Important</strong>
     Heading
 </h4>`, { engine })).toBe('#### **Important** Heading')
-    expect(htmlToMarkdown('<p><strong>Bold and <em>italic</em></strong></p>', { engine })).toBe('**Bold and _italic_**')
+    expect(htmlToMarkdown('<p><strong>Bold and <em>italic</em></strong></p>', { engine })).toBe('**Bold and *italic***')
     expect(htmlToMarkdown('<b><b>Incredibly</b> <b>Bold</b></b>', { engine })).toBe('**Incredibly Bold**')
+  })
+  it('strikethrough: del, s and strike all map to ~~', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<del>deleted</del>', { engine })).toBe('~~deleted~~')
+    expect(htmlToMarkdown('<s>struck</s>', { engine })).toBe('~~struck~~')
+    expect(htmlToMarkdown('<strike>old</strike>', { engine })).toBe('~~old~~')
   })
   it('list: Handles ordered and unordered lists with full nesting support.', async () => {
     const engine = await resolveEngine(engineConfig.engine)
@@ -50,7 +56,7 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
       <p>Another Quote</p>
       <p>by someone</p>
     </blockquote>
-</blockquote>`, { engine })).toBe('> ## Heading 1. List 2. List\n> > Another Quote\n> >\n> > by someone')
+</blockquote>`, { engine })).toBe('> ## Heading\n>\n> 1. List\n> 2. List\n> > Another Quote\n> >\n> > by someone')
   })
   it('inline Code & Code Block: Correctly handles backticks and multi-line code blocks, preserving code structure.', async () => {
     const engine = await resolveEngine(engineConfig.engine)
@@ -59,7 +65,7 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
   Output a message: <br/>
   <code>console.log("hello")</code>
 </p>
-`, { engine })).toBe('Output a message:  \n`console.log("hello")`')
+`, { engine })).toBe('Output a message:\\\n`console.log("hello")`')
 
     // We need to pass the backtick testing for now
     const result = htmlToMarkdown(`<code>with \`\` backticks</code>`, { engine })
@@ -96,9 +102,16 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
   it('smart Escaping: Escapes special characters only when necessary, to avoid accidental Markdown rendering.', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(`<h2># Heading #</h2>`, { engine })).toBe('## # Heading #')
-    expect(htmlToMarkdown(`<p># Heading</p>`, { engine })).toBe('\# Heading')
+    expect(htmlToMarkdown(`<p># Heading</p>`, { engine })).toBe('\\# Heading')
     expect(htmlToMarkdown(`<p>#hashtag</p>`, { engine })).toBe('#hashtag')
-    expect(htmlToMarkdown(`<p>- List Item</p>`, { engine })).toBe('\- List Item')
+    expect(htmlToMarkdown(`<p>- List Item</p>`, { engine })).toBe('\\- List Item')
     expect(htmlToMarkdown(`<p>Just a - dash<p>`, { engine })).toBe('Just a - dash')
+  })
+  it('raw <: keeps a literal < with its surrounding spacing intact.', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(`<p>a < b</p>`, { engine })).toBe('a < b')
+    expect(htmlToMarkdown(`<p>4 < 5</p>`, { engine })).toBe('4 < 5')
+    expect(htmlToMarkdown(`<p>x < y < z</p>`, { engine })).toBe('x < y < z')
+    expect(htmlToMarkdown(`<p>a <> b</p>`, { engine })).toBe('a <> b')
   })
 })

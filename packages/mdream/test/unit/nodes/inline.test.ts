@@ -44,21 +44,21 @@ describe.each(engines)('text Formatting $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>This is <em>italic</em> text</p>'
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('This is _italic_ text')
+    expect(markdown).toBe('This is *italic* text')
   })
 
   it('converts italic text with <i>', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>This is <i>italic</i> text</p>'
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('This is _italic_ text')
+    expect(markdown).toBe('This is *italic* text')
   })
 
   it('handles nested formatting', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>This is <strong><em>bold and italic</em></strong> text</p>'
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('This is **_bold and italic_** text')
+    expect(markdown).toBe('This is ***bold and italic*** text')
   })
 })
 
@@ -66,12 +66,12 @@ describe.each(engines)('text Formatting $name', (engineConfig) => {
 describe.each(engines)('top-level inline text $name', (engineConfig) => {
   it('keeps text before a top-level inline tag', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(htmlToMarkdown('foo <em>bar</em>', { engine })).toBe('foo _bar_')
+    expect(htmlToMarkdown('foo <em>bar</em>', { engine })).toBe('foo *bar*')
   })
 
   it('keeps text between top-level inline tags', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(htmlToMarkdown('<strong>a</strong> and <em>b</em>', { engine })).toBe('**a** and _b_')
+    expect(htmlToMarkdown('<strong>a</strong> and <em>b</em>', { engine })).toBe('**a** and *b*')
   })
 
   it('keeps text between repeated top-level inline tags', async () => {
@@ -157,13 +157,13 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
   it('keeps non-empty emphasis untouched', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<p><b>hi</b></p>', { engine })).toBe('**hi**')
-    expect(htmlToMarkdown('<p><b><em>x</em></b></p>', { engine })).toBe('**_x_**')
+    expect(htmlToMarkdown('<p><b><em>x</em></b></p>', { engine })).toBe('***x***')
     expect(htmlToMarkdown('<p><b><img src="x.png" alt="y"></b></p>', { engine })).toBe('**![y](x.png)**')
   })
 
   it('does not mistake literal marker text at the tail for an empty pair', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(htmlToMarkdown('<p><b>x<span>**</span></b></p>', { engine })).toBe('**x****')
+    expect(htmlToMarkdown('<p><b>x<span>**</span></b></p>', { engine })).toBe('**x\\*\\***')
   })
 
   it('drops empty emphasis at every stream split point', async () => {
@@ -210,13 +210,33 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
     expect(chunks.join('').trim()).toBe('**later')
   })
 
-  it('does not hold a block code fence as an inline marker', async () => {
+  it('holds a block code fence until its delimiter is known', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const chunks = await collectChunks(streamHtmlToMarkdown(
       chunkedStream(['<pre><code><span>', 'x</span></code></pre>']),
       { engine },
     ))
-    expect(chunks.slice(0, -1).join(''), 'code fence held until content').toContain('```')
     expect(chunks.join('').trim()).toBe('```\nx\n```')
+  })
+})
+
+describe.each(engines)('gfm inline code delimiters $name', (engineConfig) => {
+  it('widens around backticks and applies required padding', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<code>a `b` c</code>', { engine })).toBe('``a `b` c``')
+    expect(htmlToMarkdown('<code>`edge`</code>', { engine })).toBe('`` `edge` ``')
+  })
+
+  it('matches batch output at every stream split', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<p>before <code>a `b` c</code> after</p>'
+    const expected = htmlToMarkdown(html, { engine })
+    for (let split = 1; split < html.length; split++) {
+      const actual = await collect(streamHtmlToMarkdown(
+        chunkedStream([html.slice(0, split), html.slice(split)]),
+        { engine },
+      ))
+      expect(actual, `split at ${split}`).toBe(expected)
+    }
   })
 })

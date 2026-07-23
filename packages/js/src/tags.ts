@@ -85,6 +85,7 @@ import {
   TAG_RP,
   TAG_RT,
   TAG_RUBY,
+  TAG_S,
   TAG_SAMP,
   TAG_SCRIPT,
   TAG_SECTION,
@@ -92,6 +93,7 @@ import {
   TAG_SMALL,
   TAG_SOURCE,
   TAG_SPAN,
+  TAG_STRIKE,
   TAG_STRONG,
   TAG_STYLE,
   TAG_SUB,
@@ -118,7 +120,7 @@ import {
   TAG_XMP,
   TagIdMap,
 } from './const'
-import { continuationPrefix } from './utils'
+import { continuationPrefix, isEmptyLinkHref } from './utils'
 
 // Helper function to resolve URLs
 export function resolveUrl(url: string, origin?: string): string {
@@ -155,6 +157,40 @@ export function resolveUrl(url: string, origin?: string): string {
   return url
 }
 
+function serializeMarkdownDestination(destination: string): string {
+  if (!/[\t\n\f\r ()\\<>]/.test(destination))
+    return destination
+
+  const escaped = /[\\<>]/.test(destination)
+    ? destination.replace(/[\\<>]/g, '\\$&')
+    : destination
+  return `<${escaped}>`
+}
+
+function stripsEmptyLink(state: HandlerContext['state'], href: string): boolean {
+  const clean = state.options?.clean
+  if (!(clean === true || (typeof clean === 'object' && clean.emptyLinks)))
+    return false
+  return isEmptyLinkHref(href)
+}
+
+function serializeMarkdownTitle(title: string): string {
+  return /[\\"]/.test(title)
+    ? title.replace(/[\\"]/g, '\\$&')
+    : title
+}
+
+function serializeMarkdownResource(destination: string, title?: string): string {
+  const serializedTitle = title ? ` "${serializeMarkdownTitle(title)}"` : ''
+  return `(${serializeMarkdownDestination(destination)}${serializedTitle})`
+}
+
+function serializeImageDescription(alt: string): string {
+  return /[\\[\]*_`~<&]/.test(alt)
+    ? alt.replace(/[\\[\]*_`~<&]/g, '\\$&')
+    : alt
+}
+
 // GFM autolink shorthand: only inline-syntax-safe absolute URIs are eligible
 // for `<url>` rendering. Conservative scheme list matches the Rust core.
 function isAutolinkUri(s: string): boolean {
@@ -186,17 +222,37 @@ function isInsideRawHtmlBlock(state: HandlerContext['state']): boolean {
     || depthMap[TAG_DD])
 }
 
-function hardBreak(buffer: string[], prefix: string): string {
-  let spacesNeeded = 2
-  for (let i = buffer.length - 1; i >= 0 && spacesNeeded > 0; i--) {
-    const fragment = buffer[i]!
-    for (let j = fragment.length - 1; j >= 0 && spacesNeeded > 0; j--) {
-      if (fragment.charCodeAt(j) !== 32)
-        return `${' '.repeat(spacesNeeded)}\n${prefix}`
-      spacesNeeded--
-    }
+export function renderBreak(node: HandlerContext['node'], state: HandlerContext['state']): string {
+  // A literal newline would terminate a table row/ATX heading or collapse
+  // inside a raw HTML block, so preserve the inline HTML there.
+  const depthMap = state.depthMap!
+  if (isInsideTableCell(state) || isInsideRawHtmlBlock(state)
+    || depthMap[TAG_H1]
+    || depthMap[TAG_H2]
+    || depthMap[TAG_H3]
+    || depthMap[TAG_H4]
+    || depthMap[TAG_H5]
+    || depthMap[TAG_H6]) {
+    return '<br>'
   }
-  return `${' '.repeat(spacesNeeded)}\n${prefix}`
+  // Hard-break markers are literal content inside code.
+  if (depthMap[TAG_PRE] || depthMap[TAG_CODE])
+    return '\n'
+
+  const prefix = continuationPrefix(
+    node,
+    state.listIndentWidths || [],
+    !state.bufferedBlockquoteDepth,
+  )
+  return `\\\n${prefix}`
+}
+
+export const breakHandler: TagHandler = {
+  enter: ({ node, state }) => renderBreak(node, state),
+  isSelfClosing: true,
+  spacing: NO_SPACING,
+  collapsesInnerWhiteSpace: true,
+  isInline: true,
 }
 
 // Helper function to get language from code class attribute
@@ -269,6 +325,14 @@ const Emphasis: TagHandler = {
   isInline: true,
 }
 
+const Strikethrough: TagHandler = {
+  enter: () => MARKDOWN_STRIKETHROUGH,
+  exit: () => MARKDOWN_STRIKETHROUGH,
+  collapsesInnerWhiteSpace: true,
+  spacing: NO_SPACING,
+  isInline: true,
+}
+
 // Tag handlers with metadata
 export const tagHandlers: Record<number, TagHandler> = {
   // Numeric tag constants
@@ -307,31 +371,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     isSelfClosing: true,
     spacing: NO_SPACING,
   },
-  [TAG_BR]: {
-    enter: ({ node, state }) => {
-      // A Markdown hard break would terminate a table row/ATX heading or be
-      // ignored inside a raw HTML block, so preserve the inline HTML there.
-      const depthMap = state.depthMap!
-      if (isInsideTableCell(state) || isInsideRawHtmlBlock(state)
-        || depthMap[TAG_H1]
-        || depthMap[TAG_H2]
-        || depthMap[TAG_H3]
-        || depthMap[TAG_H4]
-        || depthMap[TAG_H5]
-        || depthMap[TAG_H6]) {
-        return '<br>'
-      }
-
-      const prefix = continuationPrefix(node, state.listIndentWidths || [])
-      // Inside <pre>/<code> a hard break's marker would become literal
-      // content, so emit a plain newline there.
-      return (depthMap[TAG_PRE] || depthMap[TAG_CODE]) ? `\n${prefix}` : hardBreak(state.buffer, prefix)
-    },
-    isSelfClosing: true,
-    spacing: NO_SPACING,
-    collapsesInnerWhiteSpace: true,
-    isInline: true,
-  },
+  [TAG_BR]: breakHandler,
   [TAG_H1]: handleHeading(1),
   [TAG_H2]: handleHeading(2),
   [TAG_H3]: handleHeading(3),
@@ -346,13 +386,9 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_B]: Strong,
   [TAG_EM]: Emphasis,
   [TAG_I]: Emphasis,
-  [TAG_DEL]: {
-    enter: () => MARKDOWN_STRIKETHROUGH,
-    exit: () => MARKDOWN_STRIKETHROUGH,
-    collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
-    isInline: true,
-  },
+  [TAG_DEL]: Strikethrough,
+  [TAG_S]: Strikethrough,
+  [TAG_STRIKE]: Strikethrough,
   [TAG_SUB]: {
     enter: () => '<sub>',
     exit: () => '</sub>',
@@ -376,17 +412,12 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_BLOCKQUOTE]: {
     enter: ({ state }) => {
-      const depth = state.depthMap?.[TAG_BLOCKQUOTE] || 1
-      let prefix = '> '.repeat(depth)
-
-      // Add indentation if inside a list item
-      const liDepth = state.depthMap?.[TAG_LI] || 0
-      if (liDepth > 0) {
-        prefix = `\n${state.listIndent}${prefix}`
-      }
-
-      return prefix
+      // The processor prefixes the completed subtree once every structural
+      // newline is known. Preserve the list marker's trailing space here.
+      const output = (state.depthMap?.[TAG_LI] || 0) > 0 ? '\n' : undefined
+      return { _tag: 'BlockquoteEnter', output }
     },
+    exit: () => ({ _tag: 'BlockquoteExit' }),
     spacing: BLOCKQUOTE_SPACING,
   },
   // A bare <pre> (no <code> child) becomes a fenced code block (issue #97).
@@ -400,28 +431,16 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (isInsideTableCell(state)) {
         return '<pre>'
       }
-      state.preFencePending = true
-      state.preOwnFence = false
-      state.preFenceLang = getLanguageFromClass(node.attributes?.class)
+      return {
+        _tag: 'PreEnter',
+        language: getLanguageFromClass(node.attributes?.class),
+      }
     },
     exit: ({ state }) => {
       if (isInsideTableCell(state)) {
         return '</pre>'
       }
-      const ownFence = state.preOwnFence
-      state.preFencePending = false
-      state.preOwnFence = false
-      // No own fence means a <code> child emitted it, or the <pre> had no
-      // non-whitespace content (empty block stripped) — nothing to close.
-      if (!ownFence) {
-        return undefined
-      }
-      const liDepth = state.depthMap?.[TAG_LI] || 0
-      if (liDepth > 0) {
-        const indent = state.listIndent
-        return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
-      }
-      return `\n${MARKDOWN_CODE_BLOCK}`
+      return { _tag: 'PreExit' }
     },
   },
   [TAG_CODE]: {
@@ -437,15 +456,21 @@ export const tagHandlers: Record<number, TagHandler> = {
         if (state.preOwnFence) {
           return undefined
         }
-        // This <code> owns the <pre>'s fence; cancel the deferred pre fence.
-        state.preFencePending = false
         const language = getLanguageFromClass(node.attributes?.class)
         const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent
-          return `\n\n${indent}${MARKDOWN_CODE_BLOCK}${language}\n`
+          return {
+            _tag: 'CodeFenceEnter',
+            language,
+            output: `\n\n${indent}${MARKDOWN_CODE_BLOCK}${language}\n`,
+          }
         }
-        return `${MARKDOWN_CODE_BLOCK}${language}\n`
+        return {
+          _tag: 'CodeFenceEnter',
+          language,
+          output: `${MARKDOWN_CODE_BLOCK}${language}\n`,
+        }
       }
       // Inline code inside a list item: collapse the paragraph boundary with a
       // separator space when following text, but not when the buffer just
@@ -461,10 +486,10 @@ export const tagHandlers: Record<number, TagHandler> = {
         if (lastChar && lastChar !== ' ' && lastChar !== '\n' && lastChar !== '\t'
           && lastChar !== '*' && lastChar !== '_' && lastChar !== '~'
           && lastChar !== '[' && lastChar !== '>') {
-          return ` ${MARKDOWN_INLINE_CODE}`
+          return { _tag: 'CodeSpanEnter', output: ` ${MARKDOWN_INLINE_CODE}` }
         }
       }
-      return MARKDOWN_INLINE_CODE
+      return { _tag: 'CodeSpanEnter', output: MARKDOWN_INLINE_CODE }
     },
     exit: ({ state }) => {
       if ((state.depthMap?.[TAG_PRE] || 0) > 0) {
@@ -479,11 +504,14 @@ export const tagHandlers: Record<number, TagHandler> = {
         const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent
-          return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
+          return {
+            _tag: 'CodeFenceExit',
+            output: `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`,
+          }
         }
-        return `\n${MARKDOWN_CODE_BLOCK}`
+        return { _tag: 'CodeFenceExit', output: `\n${MARKDOWN_CODE_BLOCK}` }
       }
-      return MARKDOWN_INLINE_CODE
+      return { _tag: 'CodeSpanExit' }
     },
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
@@ -515,16 +543,20 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: LIST_ITEM_SPACING,
   },
   [TAG_A]: {
-    enter: ({ node }) => {
-      if (node.attributes?.href) {
+    enter: ({ node, state }) => {
+      if (node.attributes?.href !== undefined) {
+        if (stripsEmptyLink(state, node.attributes.href))
+          return
         return '['
       }
     },
     exit: ({ node, state }) => {
-      if (!node.attributes?.href) {
+      if (node.attributes?.href === undefined) {
         return ''
       }
-      const href = resolveUrl(node.attributes?.href || '', state.options?.origin)
+      if (stripsEmptyLink(state, node.attributes.href))
+        return ''
+      const href = resolveUrl(node.attributes.href, state.options?.origin)
       let title = node.attributes?.title
       // Check if title matches the last content to avoid duplication
       const lastContent = state.lastContentCache
@@ -555,7 +587,7 @@ export const tagHandlers: Record<number, TagHandler> = {
           return ''
         }
       }
-      return title ? `](${href} "${title}")` : `](${href})`
+      return `]${serializeMarkdownResource(href, title)}`
     },
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
@@ -565,7 +597,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     enter: ({ node, state }) => {
       const alt = node.attributes?.alt || ''
       const src = resolveUrl(node.attributes?.src || '', state.options?.origin)
-      return `![${alt}](${src})`
+      return `![${serializeImageDescription(alt)}]${serializeMarkdownResource(src, node.attributes?.title)}`
     },
     collapsesInnerWhiteSpace: true,
     isSelfClosing: true,
@@ -680,16 +712,6 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_P]: {
     enter: ({ state }) => {
-      const bqDepth = state.depthMap?.[TAG_BLOCKQUOTE] || 0
-      if (bqDepth > 0) {
-        const lastEntry = state.buffer.at(-1)
-        const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
-        // Only add separator if there's preceding text content (not the first <p> in the blockquote)
-        if (lastChar && lastChar !== '\n' && lastChar !== ' ' && lastChar !== '>') {
-          const prefix = '> '.repeat(bqDepth)
-          return `\n${prefix.trimEnd()}\n${prefix}`
-        }
-      }
       if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''

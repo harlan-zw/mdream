@@ -27,7 +27,7 @@ fn nested_elements() {
   let result = convert(html);
   assert!(result.contains("# Title"));
   assert!(result.contains("**bold**"));
-  assert!(result.contains("_italic_"));
+  assert!(result.contains("*italic*"));
 }
 
 #[wasm_bindgen_test]

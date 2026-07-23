@@ -109,9 +109,11 @@ export const TAG_FIGCAPTION = 106 // Caption for a figure
 export const TAG_CAPTION = 107 // Table caption
 export const TAG_DATALIST = 108 // Inert: <option> children are autocomplete data, never rendered
 export const TAG_OPTGROUP = 109
+export const TAG_S = 110
+export const TAG_STRIKE = 111
 
 // Maximum tag ID for creating the typed array (update to match the highest tag ID)
-export const MAX_TAG_ID = 110
+export const MAX_TAG_ID = 112
 
 // Node type constants
 export const ELEMENT_NODE = 1
@@ -141,6 +143,8 @@ export const TagIdMap = {
   em: TAG_EM,
   i: TAG_I,
   del: TAG_DEL,
+  s: TAG_S,
+  strike: TAG_STRIKE,
   sub: TAG_SUB,
   sup: TAG_SUP,
   ins: TAG_INS,
@@ -236,7 +240,7 @@ export const TagIdMap = {
 
 // Pre-defined strings to avoid repeated allocations
 export const MARKDOWN_STRONG = '**'
-export const MARKDOWN_EMPHASIS = '_'
+export const MARKDOWN_EMPHASIS = '*'
 export const MARKDOWN_STRIKETHROUGH = '~~'
 export const MARKDOWN_CODE_BLOCK = '```'
 export const MARKDOWN_INLINE_CODE = '`'

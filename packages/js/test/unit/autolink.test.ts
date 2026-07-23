@@ -24,7 +24,7 @@ describe('gfm autolink shorthand', () => {
 
   it('does not collapse hrefs containing whitespace', () => {
     expect(htmlToMarkdown('<a href="https://example.com/a b">https://example.com/a b</a>'))
-      .toBe('[https://example.com/a b](https://example.com/a b)')
+      .toBe('[https://example.com/a b](<https://example.com/a b>)')
   })
 
   it('keeps verbose link when text differs from href', () => {

@@ -451,7 +451,7 @@ pub struct CleanConfig {
   pub urls: bool,
   /// Strip fragment-only links that don't match any heading slug.
   pub fragments: bool,
-  /// Strip links with meaningless hrefs (`#`, `javascript:`) → plain text.
+  /// Strip links with meaningless or executable hrefs → plain text.
   pub empty_links: bool,
   /// Collapse 3+ consecutive blank lines to 2.
   pub blank_lines: bool,

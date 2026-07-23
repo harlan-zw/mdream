@@ -8,7 +8,7 @@ describe('html-to-markdown parity', () => {
     <strong>Important</strong>
     Heading
 </h4>`)).toBe('#### **Important** Heading')
-    expect(htmlToMarkdown('<p><strong>Bold and <em>italic</em></strong></p>')).toBe('**Bold and _italic_**')
+    expect(htmlToMarkdown('<p><strong>Bold and <em>italic</em></strong></p>')).toBe('**Bold and *italic***')
     expect(htmlToMarkdown('<b><b>Incredibly</b> <b>Bold</b></b>')).toBe('**Incredibly Bold**')
   })
   it('list: Handles ordered and unordered lists with full nesting support.', () => {

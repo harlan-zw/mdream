@@ -6,7 +6,7 @@ const RE_IF_TRUE_BLOCK = /^if \(true\) \{$/
 const RE_CODE_BLOCK_WITH_LINES = /```.*Line 1.*Line 2.*Line 3.*```/s
 
 describe.each(engines)('code blocks $name', (engineConfig) => {
-  it('escapes triple backticks within code blocks', async () => {
+  it('widens the fence around line-leading triple backticks', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `
       <pre><code>
@@ -21,11 +21,9 @@ function example() {
 
     const markdown = htmlToMarkdown(html, { engine })
 
-    // The triple backticks should be escaped
-    expect(markdown).toContain('\\`\\`\\`js')
-    expect(markdown).toContain('\\`\\`\\`')
-    // Triple backticks should not appear unescaped
-    expect(markdown).not.toContain('```js')
+    expect(markdown).toContain('````\nfunction example()')
+    expect(markdown).toContain('```js')
+    expect(markdown).toContain('\n````')
   })
 
   it('handles nested code blocks properly', async () => {
@@ -47,8 +45,8 @@ function example() {
     expect(markdown).toContain('Here\'s a code block:')
     // Check for language annotation
     expect(markdown).toContain('```javascript')
-    // Check for escaped backticks
-    expect(markdown).toContain('\\`\\`\\`python')
+    // Eight content-leading spaces make this run inert inside a triple fence.
+    expect(markdown).toContain('```python')
   })
 
   it('preserves newlines within pre tags', async () => {

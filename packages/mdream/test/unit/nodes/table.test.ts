@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
 
 describe.each(engines)('tables $name', (engineConfig) => {
+  it('does not double escape protected cell pipes', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<table><tr><td>a|b</td></tr></table>', { engine }))
+      .toBe('| a\\|b |\n| --- |')
+  })
+
   it('converts basic tables with headers', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `
@@ -231,10 +237,10 @@ describe.each(engines)('tables $name', (engineConfig) => {
       '| Style | Syntax | Keyboard shortcut | Example | Output |\n'
       + '| --- | --- | --- | --- | --- |\n'
       + '| Bold | `** **` or `__ __` | `Command`+`B` (Mac) or `Ctrl`+`B` (Windows/Linux) | `**This is bold text**` | **This is bold text** |\n'
-      + '| Italic | `* *` or `_ _` &emsp;&emsp;&emsp;&emsp; | `Command`+`I` (Mac) or `Ctrl`+`I` (Windows/Linux) | `_This text is italicized_` | _This text is italicized_ |\n'
+      + '| Italic | `* *` or `_ _` &emsp;&emsp;&emsp;&emsp; | `Command`+`I` (Mac) or `Ctrl`+`I` (Windows/Linux) | `_This text is italicized_` | *This text is italicized* |\n'
       + '| Strikethrough | `~~ ~~` or `~ ~` | None | `~~This was mistaken text~~` | ~~This was mistaken text~~ |\n'
-      + '| Bold and nested italic | `** **` and `_ _` | None | `**This text is _extremely_ important**` | **This text is _extremely_ important** |\n'
-      + '| All bold and italic | `*** ***` | None | `***All this text is important***` | _**All this text is important**_ |\n'
+      + '| Bold and nested italic | `** **` and `_ _` | None | `**This text is _extremely_ important**` | **This text is *extremely* important** |\n'
+      + '| All bold and italic | `*** ***` | None | `***All this text is important***` | ***All this text is important*** |\n'
       + '| Subscript | `<sub> </sub>` | None | `This is a <sub>subscript</sub> text` | This is a <sub>subscript</sub> text |\n'
       + '| Superscript | `<sup> </sup>` | None | `This is a <sup>superscript</sup> text` | This is a <sup>superscript</sup> text |\n'
       + '| Underline | `<ins> </ins>` | None | `This is an <ins>underlined</ins> text` | This is an <ins>underlined</ins> text |',

@@ -3,6 +3,8 @@
  * Character-scan approach — no regex. All operate on the final markdown string.
  */
 
+import { isEmptyLinkHref } from './utils'
+
 export interface CleanOptions {
   /** Strip tracking query parameters (utm_*, fbclid, gclid, etc.) from URLs */
   urls?: boolean
@@ -207,7 +209,7 @@ export function cleanEmptyLinks(md: string): string {
       const link = parseLink(md, i)
       if (link) {
         const url = link.url
-        if (url === '#' || url.startsWith('javascript:') || url.startsWith('data:') || url.startsWith('vbscript:')) {
+        if (isEmptyLinkHref(url)) {
           result += link.text
           i = link.end
           continue

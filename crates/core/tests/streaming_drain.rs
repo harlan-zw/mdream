@@ -123,6 +123,68 @@ fn assert_stream_matches(html: &str, opts: HTMLToMarkdownOptions) {
   }
 }
 
+fn assert_stream_matches_every_split(html: &str, opts: HTMLToMarkdownOptions) {
+  let expected = html_to_markdown(html, opts.clone());
+  for split in (0..=html.len()).filter(|&split| html.is_char_boundary(split)) {
+    let mut stream = MarkdownStreamProcessor::new(opts.clone());
+    let mut actual = stream.process_chunk(&html[..split]);
+    actual.push_str(&stream.process_chunk(&html[split..]));
+    actual.push_str(&stream.finish());
+    assert_eq!(actual, expected, "split={split} html={html:?}");
+  }
+}
+
+#[test]
+fn streaming_every_split_supports_multibyte_html() {
+  assert_stream_matches_every_split("<p>café 😀</p>", HTMLToMarkdownOptions::default());
+}
+
+#[test]
+fn streaming_gfm_hard_break_matches_every_split() {
+  for html in [
+    "<p>first<br>second</p>",
+    r"<p>before\<br>after<br><br>last</p>",
+    "<ul><li>first<br>second</li></ul>",
+    "<blockquote><p>first<br>second</p></blockquote>",
+    "<table><tr><td>first<br>second</td></tr></table>",
+    "<h1>first<br>second</h1>",
+    "<address>first<br>second</address>",
+    "<code>first<br>second</code>",
+  ] {
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn streaming_blockquote_structure_matches_every_split() {
+  for html in [
+    "<blockquote><p>intro</p><ul><li>one</li><li>two</li></ul></blockquote>",
+    "<blockquote>lead<table><tr><td>a</td></tr></table>tail</blockquote>",
+    "<blockquote><ul><li>one<ul><li>sub</li></ul></li></ul></blockquote>",
+    "<ul><li><blockquote><ul><li>x</li><li>y</li></ul></blockquote></li></ul>",
+  ] {
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn streaming_large_nested_blockquote_drains_without_changing_output() {
+  let mut html = String::from("<blockquote><blockquote><blockquote>");
+  while html.len() < 24 * 1024 {
+    html.push_str("<p>quoted paragraph</p>");
+  }
+  html.push_str("</blockquote></blockquote></blockquote>");
+
+  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  for chunk in [97usize, 1024, 8192] {
+    assert_eq!(
+      stream_chunks(&html, chunk, HTMLToMarkdownOptions::default()),
+      expected,
+      "chunk={chunk}"
+    );
+  }
+}
+
 // A chunk boundary inside an escape context (code/pre/table/link) returned the
 // already-escaped text as the unparsed remainder, so it was re-escaped on the
 // next chunk and backslashes multiplied (`\\`` → `\\\\``…).
@@ -133,6 +195,38 @@ fn streaming_does_not_re_escape_carried_text() {
     "<p>use <code>a`b</code> here</p>",
     "<table><tr><td>a`b</td><td>c\\d</td></tr></table>",
     r#"<p>text with <a href="/x">a [bracket] link</a> end</p>"#,
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn streaming_gfm_text_escaping_matches_every_split() {
+  assert_stream_matches(
+    r"<p>&#35; heading [label](url) and *bar* ~~baz~~ `qux` &amp;copy;</p><p>> quote</p><p>1. item</p><p>---</p>",
+    HTMLToMarkdownOptions::default(),
+  );
+}
+
+#[test]
+fn streaming_gfm_link_and_image_serialization_matches_every_split() {
+  for html in [
+    r#"<a href="">text</a>"#,
+    r#"<a href="docs/a b">text</a>"#,
+    r#"<a href="docs/(a)\file">text</a>"#,
+    r#"<a href="/x" title="say &quot;hi&quot; \ path">text</a>"#,
+    r#"<img src="/x.png" alt="a ] \ *bold* _em_ &#96;code&#96;">"#,
+    r#"<img src="/x.png" alt="alt" title="say &quot;hi&quot; \ path">"#,
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn streaming_code_delimiter_widening_matches_every_split() {
+  for html in [
+    "<p>before <code>a `b` c</code> after</p>",
+    "<pre><code>before\n```line-leading\n````\nafter</code></pre>",
   ] {
     assert_stream_matches(html, HTMLToMarkdownOptions::default());
   }
@@ -206,11 +300,7 @@ fn multibyte_drain_matches_one_shot() {
   assert!(expected.contains('“') && !expected.is_empty());
   for max_bytes in [1usize, 2, 3, 5, 8, 64] {
     let got = stream_chars(&doc, max_bytes, opts.clone());
-    assert_eq!(
-      got,
-      expected,
-      "mismatch at max_bytes={max_bytes}"
-    );
+    assert_eq!(got, expected, "mismatch at max_bytes={max_bytes}");
   }
 }
 
@@ -375,7 +465,10 @@ fn streaming_keeps_trailing_nbsp_before_sibling() {
   };
   for html in cases {
     let expected = html_to_markdown(html, opts.clone());
-    assert!(expected.contains('\u{a0}'), "nbsp should be preserved: {expected:?}");
+    assert!(
+      expected.contains('\u{a0}'),
+      "nbsp should be preserved: {expected:?}"
+    );
     for chunk in 1..=html.len().max(1) {
       let got = stream_chunks(html, chunk, opts.clone());
       assert_eq!(got, expected, "chunk={chunk} html={html:?}");
@@ -393,7 +486,9 @@ fn streaming_keeps_trailing_nbsp_before_sibling() {
 fn streaming_keeps_raw_block_close_after_drain() {
   let mut html = String::from("<article>");
   for i in 0..400 {
-    html.push_str(&format!("<p>Filler paragraph number {i} with some words.</p>"));
+    html.push_str(&format!(
+      "<p>Filler paragraph number {i} with some words.</p>"
+    ));
   }
   html.push_str(
     "<dl><dt>MPN:</dt><dd>D100-V36-PBO-1WZ</dd>\
@@ -418,7 +513,9 @@ fn streaming_keeps_raw_block_close_after_drain() {
 fn drain_filler() -> String {
   let mut s = String::new();
   for i in 0..400 {
-    s.push_str(&format!("<p>Filler paragraph number {i} with some words.</p>"));
+    s.push_str(&format!(
+      "<p>Filler paragraph number {i} with some words.</p>"
+    ));
   }
   s
 }
@@ -441,9 +538,16 @@ fn streaming_drops_block_separator_before_empty_trailing_link() {
     drain_filler()
   );
   let expected = html_to_markdown(&html, opts.clone());
-  assert!(expected.trim_end().ends_with("Alpha 12345"), "one-shot has no trailing link: {expected:?}");
+  assert!(
+    expected.trim_end().ends_with("Alpha 12345"),
+    "one-shot has no trailing link: {expected:?}"
+  );
   for chunk in [4usize, 7, 16, 64] {
-    assert_eq!(stream_chunks(&html, chunk, opts.clone()), expected, "chunk={chunk}");
+    assert_eq!(
+      stream_chunks(&html, chunk, opts.clone()),
+      expected,
+      "chunk={chunk}"
+    );
   }
 }
 
@@ -457,9 +561,16 @@ fn streaming_drops_block_separator_before_empty_trailing_marker() {
   };
   let html = format!("{}<div>Bolt 1 db</div><em></em>", drain_filler());
   let expected = html_to_markdown(&html, opts.clone());
-  assert!(expected.trim_end().ends_with("Bolt 1 db"), "one-shot tail: {expected:?}");
+  assert!(
+    expected.trim_end().ends_with("Bolt 1 db"),
+    "one-shot tail: {expected:?}"
+  );
   for chunk in [4usize, 7, 16, 64] {
-    assert_eq!(stream_chunks(&html, chunk, opts.clone()), expected, "chunk={chunk}");
+    assert_eq!(
+      stream_chunks(&html, chunk, opts.clone()),
+      expected,
+      "chunk={chunk}"
+    );
   }
 }
 
@@ -532,7 +643,10 @@ fn streaming_keeps_block_newline_count_across_drain() {
     \x20       <span>Alpha Beta Gamma</a>\n    <li>\n            </li>\n    </form>\
     <div class=\"badges\"><a href=\"/other-link/\" target=\"_blank\" class=\"bp\"> Delta</a></div></div>";
   let expected = html_to_markdown(html, opts.clone());
-  assert!(expected.contains("-\n[Delta]"), "one-shot tightens the list/block gap: {expected:?}");
+  assert!(
+    expected.contains("-\n[Delta]"),
+    "one-shot tightens the list/block gap: {expected:?}"
+  );
   for chunk in 1..=40usize {
     assert_eq!(
       stream_chunks(html, chunk, opts.clone()),
