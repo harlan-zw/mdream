@@ -50,7 +50,7 @@ import {
 } from './const'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
-import { resolveUrl } from './tags'
+import { breakHandler, renderBreak, resolveUrl } from './tags'
 import { continuationPrefix } from './utils'
 
 export interface MarkdownState {
@@ -1061,18 +1061,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     let lastBuffEntry = buff.at(-1)!
     let lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
 
-    // Get second last character
-    let secondLastChar
-    if (lastBuffEntry && lastBuffEntry.length > 1) {
-      secondLastChar = lastBuffEntry.charAt(lastBuffEntry.length - 2)
-    }
-    else if (buff.length > 1) {
-      const prevBuff = buff[buff.length - 2]
-      if (prevBuff) {
-        secondLastChar = prevBuff.charAt(prevBuff.length - 1)
-      }
-    }
-
     if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
       processTextNode(node as TextNode, lastNode, lastChar)
       return
@@ -1082,11 +1070,80 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       return
     }
 
+    const element = node as ElementNode
+    const handler = node.tagHandler
+
+    // The built-in break has zero structural spacing and no exit event. Keep it
+    // out of the generic element pipeline, which otherwise scans ancestry and
+    // allocates an output array for every hard break.
+    if (eventType === NodeEventEnter
+      && handler === breakHandler
+      && !element.pluginOutput?.length) {
+      const inPre = state.depthMap[TAG_PRE] !== 0
+      let breakOutput: string | undefined = state.plainText ? '\n' : renderBreak(element, state)
+
+      // Plain-text breaks normalize at three consecutive newlines. Markdown
+      // hard breaks and literal pre newlines remain exact.
+      if (state.plainText && !inPre && lastChar === '\n') {
+        const previousChar = lastBuffEntry.length > 1
+          ? lastBuffEntry.charAt(lastBuffEntry.length - 2)
+          : buff.length > 1
+            ? buff[buff.length - 2]?.at(-1)
+            : undefined
+        if (previousChar === '\n')
+          breakOutput = undefined
+      }
+
+      if (state.pendingInlineWhitespace)
+        state.pendingInlineWhitespace = false
+
+      const lastFragment = state.lastContentCache
+      const lastTextNode = state.lastTextNode
+      if (lastFragment && lastTextNode?.containsWhitespace && typeof lastTextNode.value === 'string') {
+        let parent = element.parent
+        let parentInPre = false
+        while (parent) {
+          if (parent.tagId === TAG_PRE) {
+            parentInPre = true
+            break
+          }
+          parent = parent.parent
+        }
+        if (!parentInPre || element.parent?.tagId === TAG_PRE) {
+          if (breakOutput?.endsWith('\n') && !parentInPre) {
+            const trimmed = trimAsciiWhitespaceEnd(lastFragment)
+            if (trimmed.length !== lastFragment.length && buff.at(-1) === lastFragment)
+              buff[buff.length - 1] = trimmed
+          }
+          state.lastTextNode = undefined
+        }
+      }
+
+      if (breakOutput) {
+        buff.push(breakOutput)
+        state.lastContentCache = breakOutput
+        if (openMarkerCount && hasNonWhitespace(breakOutput))
+          openMarkerCount = 0
+      }
+      return
+    }
+
+    // The generic element pipeline needs two trailing characters for newline
+    // normalization. Text nodes and built-in breaks return before this work.
+    let secondLastChar
+    if (lastBuffEntry && lastBuffEntry.length > 1) {
+      secondLastChar = lastBuffEntry.charAt(lastBuffEntry.length - 2)
+    }
+    else if (buff.length > 1) {
+      const prevBuff = buff[buff.length - 2]
+      if (prevBuff)
+        secondLastChar = prevBuff.charAt(prevBuff.length - 1)
+    }
+
     // Keep the common no-output path allocation-free. Most structural and
     // unknown elements only affect spacing, so allocating an empty array for
     // every enter/exit event adds pure GC pressure.
     let output: string[] | undefined
-    const element = node as ElementNode
     if (element.pluginOutput?.length) {
       output = element.pluginOutput
       element.pluginOutput = undefined
@@ -1096,7 +1153,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     let lastFragment = state.lastContentCache
 
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
-    const handler = node.tagHandler
     const isInlineElement = handler?.isInline === true
     let gfmAction: GfmAction | undefined
     let handlerOutput: string | undefined

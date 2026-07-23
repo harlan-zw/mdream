@@ -222,6 +222,38 @@ function isInsideRawHtmlBlock(state: HandlerContext['state']): boolean {
     || depthMap[TAG_DD])
 }
 
+export function renderBreak(node: HandlerContext['node'], state: HandlerContext['state']): string {
+  // A literal newline would terminate a table row/ATX heading or collapse
+  // inside a raw HTML block, so preserve the inline HTML there.
+  const depthMap = state.depthMap!
+  if (isInsideTableCell(state) || isInsideRawHtmlBlock(state)
+    || depthMap[TAG_H1]
+    || depthMap[TAG_H2]
+    || depthMap[TAG_H3]
+    || depthMap[TAG_H4]
+    || depthMap[TAG_H5]
+    || depthMap[TAG_H6]) {
+    return '<br>'
+  }
+  if (depthMap[TAG_PRE])
+    return '\n'
+
+  const prefix = continuationPrefix(
+    node,
+    state.listIndentWidths || [],
+    !state.bufferedBlockquoteDepth,
+  )
+  return `\\\n${prefix}`
+}
+
+export const breakHandler: TagHandler = {
+  enter: ({ node, state }) => renderBreak(node, state),
+  isSelfClosing: true,
+  spacing: NO_SPACING,
+  collapsesInnerWhiteSpace: true,
+  isInline: true,
+}
+
 // Helper function to get language from code class attribute
 function getLanguageFromClass(className: string | undefined): string {
   if (!className)
@@ -338,35 +370,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     isSelfClosing: true,
     spacing: NO_SPACING,
   },
-  [TAG_BR]: {
-    enter: ({ node, state }) => {
-      // A literal newline would terminate a table row/ATX heading or collapse
-      // inside a raw HTML block, so preserve the inline HTML there.
-      const depthMap = state.depthMap!
-      if (isInsideTableCell(state) || isInsideRawHtmlBlock(state)
-        || depthMap[TAG_H1]
-        || depthMap[TAG_H2]
-        || depthMap[TAG_H3]
-        || depthMap[TAG_H4]
-        || depthMap[TAG_H5]
-        || depthMap[TAG_H6]) {
-        return '<br>'
-      }
-      if (depthMap[TAG_PRE])
-        return '\n'
-
-      const prefix = continuationPrefix(
-        node,
-        state.listIndentWidths || [],
-        !state.bufferedBlockquoteDepth,
-      )
-      return `\\\n${prefix}`
-    },
-    isSelfClosing: true,
-    spacing: NO_SPACING,
-    collapsesInnerWhiteSpace: true,
-    isInline: true,
-  },
+  [TAG_BR]: breakHandler,
   [TAG_H1]: handleHeading(1),
   [TAG_H2]: handleHeading(2),
   [TAG_H3]: handleHeading(3),

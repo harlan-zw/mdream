@@ -37,6 +37,33 @@ describe('gfm hard breaks', () => {
     expect(htmlToMarkdown(html)).toBe(expected)
   })
 
+  it('preserves plugin output in place of the built-in break', () => {
+    expect(htmlToMarkdown('<p>first<br>second</p>', {
+      hooks: [{
+        onNodeEnter(node) {
+          return node.name === 'br' ? '<plugin-break>' : undefined
+        },
+      }],
+    })).toBe('first<plugin-break>second')
+  })
+
+  it('preserves literal tag overrides in place of the built-in break', () => {
+    expect(htmlToMarkdown('<p>first<br>second</p>', {
+      plugins: {
+        tagOverrides: {
+          br: { enter: '<literal-break>' },
+        },
+      },
+    })).toBe('first<literal-break>second')
+  })
+
+  it('normalizes plain-text breaks while preserving pre newlines', () => {
+    expect(htmlToMarkdown('<p>first<br><br><br>second</p>', { format: 'text' }))
+      .toBe('first\n\nsecond')
+    expect(htmlToMarkdown('<pre>first<br><br><br>second</pre>', { format: 'text' }))
+      .toBe('first\n\n\nsecond')
+  })
+
   it('matches one-shot output at every stream split', async () => {
     const cases = [
       '<p>first<br>second</p>',
