@@ -354,13 +354,26 @@ export interface HandlerContext {
   state: MdreamRuntimeState
 }
 
+/** Internal serializer lifecycle emitted only by built-in GFM handlers. */
+export type GfmAction
+  = | { _tag: 'BlockquoteEnter', output?: string }
+    | { _tag: 'BlockquoteExit' }
+    | { _tag: 'PreEnter', language: string }
+    | { _tag: 'PreExit' }
+    | { _tag: 'CodeSpanEnter', output: string }
+    | { _tag: 'CodeSpanExit' }
+    | { _tag: 'CodeFenceEnter', language: string, output: string }
+    | { _tag: 'CodeFenceExit', output: string }
+
+type TagHandlerResult = string | GfmAction | undefined | void
+
 /**
  * Tag handler interface for HTML elements
  * Used by plugins to extend or customize tag handling
  */
 export interface TagHandler {
-  enter?: (context: HandlerContext) => string | undefined | void
-  exit?: (context: HandlerContext) => string | undefined | void
+  enter?: (context: HandlerContext) => TagHandlerResult
+  exit?: (context: HandlerContext) => TagHandlerResult
   isSelfClosing?: boolean
   isNonNesting?: boolean
   collapsesInnerWhiteSpace?: boolean

@@ -409,9 +409,10 @@ export const tagHandlers: Record<number, TagHandler> = {
     enter: ({ state }) => {
       // The processor prefixes the completed subtree once every structural
       // newline is known. Preserve the list marker's trailing space here.
-      if ((state.depthMap?.[TAG_LI] || 0) > 0)
-        return '\n'
+      const output = (state.depthMap?.[TAG_LI] || 0) > 0 ? '\n' : undefined
+      return { _tag: 'BlockquoteEnter', output }
     },
+    exit: () => ({ _tag: 'BlockquoteExit' }),
     spacing: BLOCKQUOTE_SPACING,
   },
   // A bare <pre> (no <code> child) becomes a fenced code block (issue #97).
@@ -425,28 +426,16 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (isInsideTableCell(state)) {
         return '<pre>'
       }
-      state.preFencePending = true
-      state.preOwnFence = false
-      state.preFenceLang = getLanguageFromClass(node.attributes?.class)
+      return {
+        _tag: 'PreEnter',
+        language: getLanguageFromClass(node.attributes?.class),
+      }
     },
     exit: ({ state }) => {
       if (isInsideTableCell(state)) {
         return '</pre>'
       }
-      const ownFence = state.preOwnFence
-      state.preFencePending = false
-      state.preOwnFence = false
-      // No own fence means a <code> child emitted it, or the <pre> had no
-      // non-whitespace content (empty block stripped) — nothing to close.
-      if (!ownFence) {
-        return undefined
-      }
-      const liDepth = state.depthMap?.[TAG_LI] || 0
-      if (liDepth > 0) {
-        const indent = state.listIndent
-        return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
-      }
-      return `\n${MARKDOWN_CODE_BLOCK}`
+      return { _tag: 'PreExit' }
     },
   },
   [TAG_CODE]: {
@@ -462,15 +451,21 @@ export const tagHandlers: Record<number, TagHandler> = {
         if (state.preOwnFence) {
           return undefined
         }
-        // This <code> owns the <pre>'s fence; cancel the deferred pre fence.
-        state.preFencePending = false
         const language = getLanguageFromClass(node.attributes?.class)
         const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent
-          return `\n\n${indent}${MARKDOWN_CODE_BLOCK}${language}\n`
+          return {
+            _tag: 'CodeFenceEnter',
+            language,
+            output: `\n\n${indent}${MARKDOWN_CODE_BLOCK}${language}\n`,
+          }
         }
-        return `${MARKDOWN_CODE_BLOCK}${language}\n`
+        return {
+          _tag: 'CodeFenceEnter',
+          language,
+          output: `${MARKDOWN_CODE_BLOCK}${language}\n`,
+        }
       }
       // Inline code inside a list item: collapse the paragraph boundary with a
       // separator space when following text, but not when the buffer just
@@ -486,10 +481,10 @@ export const tagHandlers: Record<number, TagHandler> = {
         if (lastChar && lastChar !== ' ' && lastChar !== '\n' && lastChar !== '\t'
           && lastChar !== '*' && lastChar !== '_' && lastChar !== '~'
           && lastChar !== '[' && lastChar !== '>') {
-          return ` ${MARKDOWN_INLINE_CODE}`
+          return { _tag: 'CodeSpanEnter', output: ` ${MARKDOWN_INLINE_CODE}` }
         }
       }
-      return MARKDOWN_INLINE_CODE
+      return { _tag: 'CodeSpanEnter', output: MARKDOWN_INLINE_CODE }
     },
     exit: ({ state }) => {
       if ((state.depthMap?.[TAG_PRE] || 0) > 0) {
@@ -504,11 +499,14 @@ export const tagHandlers: Record<number, TagHandler> = {
         const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent
-          return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
+          return {
+            _tag: 'CodeFenceExit',
+            output: `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`,
+          }
         }
-        return `\n${MARKDOWN_CODE_BLOCK}`
+        return { _tag: 'CodeFenceExit', output: `\n${MARKDOWN_CODE_BLOCK}` }
       }
-      return MARKDOWN_INLINE_CODE
+      return { _tag: 'CodeSpanExit' }
     },
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,

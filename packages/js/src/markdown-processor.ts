@@ -1,5 +1,5 @@
 import type { ParseState } from './parse'
-import type { ElementNode, EngineOptions, NodeEvent, PluginContext, TagHandler, TextNode, TransformPlugin } from './types'
+import type { ElementNode, EngineOptions, GfmAction, Node, NodeEvent, PluginContext, TagHandler, TextNode, TransformPlugin } from './types'
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
@@ -121,6 +121,10 @@ interface CodeFence {
 interface BlockquoteFrame {
   fragment: number
   listIndent: string
+}
+
+interface GfmLifecycleState {
+  openCodeSpans: CodeSpan[]
 }
 
 // Marker kind per tag id for inline tags that wrap content in a symmetric
@@ -805,6 +809,99 @@ function flushPreFence(state: MarkdownState): void {
   state.lastContentCache = fence
 }
 
+function consumePendingPreChild(state: MarkdownState, node: Node, eventType: number): boolean {
+  if (eventType !== NodeEventEnter)
+    return false
+  if (node.type === ELEMENT_NODE) {
+    const element = node as ElementNode
+    if (element.tagId === TAG_CODE && element.parent?.tagId === TAG_PRE)
+      state.preFencePending = false
+    else if (element.tagId !== TAG_PRE)
+      flushPreFence(state)
+    return false
+  }
+  if (hasNonWhitespace((node as TextNode).value)) {
+    flushPreFence(state)
+    return false
+  }
+  return true
+}
+
+function consumeGfmAction(action: GfmAction, state: MarkdownState, lifecycle: GfmLifecycleState): string | undefined {
+  switch (action._tag) {
+    case 'BlockquoteEnter':
+      return action.output
+    case 'BlockquoteExit':
+      finalizeBlockquote(state)
+      return undefined
+    case 'PreEnter':
+      state.preFencePending = true
+      state.preOwnFence = false
+      state.preFenceLang = action.language
+      return undefined
+    case 'PreExit': {
+      const ownFence = state.preOwnFence
+      state.preFencePending = false
+      state.preOwnFence = false
+      if (!ownFence)
+        return undefined
+      const indent = state.listIndent
+      const output = (state.depthMap[TAG_LI] || 0) > 0
+        ? `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
+        : `\n${MARKDOWN_CODE_BLOCK}`
+      const delimiter = finalizeCodeFence(state)
+      return delimiter ? output.replace(MARKDOWN_CODE_BLOCK, delimiter) : output
+    }
+    case 'CodeSpanEnter':
+      return action.output
+    case 'CodeSpanExit': {
+      const span = lifecycle.openCodeSpans.pop()
+      return span ? finalizeCodeSpan(state, span) : MARKDOWN_INLINE_CODE
+    }
+    case 'CodeFenceEnter':
+      state.preFencePending = false
+      return action.output
+    case 'CodeFenceExit': {
+      const delimiter = finalizeCodeFence(state)
+      return delimiter ? action.output.replace(MARKDOWN_CODE_BLOCK, delimiter) : action.output
+    }
+  }
+}
+
+function commitGfmAction(
+  action: GfmAction,
+  state: MarkdownState,
+  lifecycle: GfmLifecycleState,
+  outputStart: number,
+): void {
+  switch (action._tag) {
+    case 'BlockquoteEnter':
+      if (state.blockquotes.length > 0)
+        collapseNestedBlockquoteSeparator(state.buffer)
+      state.blockquotes.push({
+        fragment: state.buffer.length,
+        listIndent: state.listIndent,
+      })
+      state.bufferedBlockquoteDepth = state.blockquotes.length
+      break
+    case 'CodeSpanEnter':
+      lifecycle.openCodeSpans.push({
+        fragment: outputStart,
+        prefix: action.output.slice(0, -MARKDOWN_INLINE_CODE.length),
+      })
+      break
+    case 'CodeFenceEnter': {
+      const fenceFragment = state.buffer.findIndex(
+        (fragment, index) => index >= outputStart && fragment.includes(MARKDOWN_CODE_BLOCK),
+      )
+      if (fenceFragment < 0)
+        throw new Error('code fence opener missing from output')
+      startCodeFence(state, fenceFragment, action.language, state.listIndent)
+      break
+    }
+  }
+}
+
 function getPlainTextOutput(node: ElementNode, eventType: number, state: MarkdownState): string | undefined {
   const override = state.options?.plugins?.tagOverrides?.[node.name]
   if (override && typeof override !== 'string') {
@@ -858,12 +955,80 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
   let openMarkerCount = 0
-  const openCodeSpans: CodeSpan[] = []
+  const gfmLifecycle: GfmLifecycleState = { openCodeSpans: [] }
   let openLinkFragment = -1
 
   let lastYieldedLength = 0
   let hasYieldedContent = false
   let preserveLeadingWhitespace = false
+
+  function processTextNode(textNode: TextNode, lastNode: ElementNode | TextNode | undefined, lastChar: string): void {
+    if (textNode.value) {
+      if (textNode.excludedFromMarkdown)
+        return
+
+      if (state.pendingInlineWhitespace) {
+        if (!textNode.value.trim())
+          return
+        if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || ''))
+          textNode.value = ` ${textNode.value}`
+        state.pendingInlineWhitespace = false
+      }
+
+      if (state.plainText && state.depthMap[TAG_PRE] && state.buffer.length === 0)
+        preserveLeadingWhitespace = true
+
+      if (textNode.value === ' ' && (lastChar === ' ' || lastChar === '\n' || lastChar === '\t' || lastChar === '\r'))
+        return
+
+      if (!(state.plainText && state.depthMap[TAG_PRE]) && shouldAddSpacingBeforeText(lastChar, lastNode, textNode))
+        textNode.value = ` ${textNode.value}`
+
+      if ((state.depthMap[TAG_PRE] || 0) > 0 && (state.depthMap[TAG_LI] || 0) > 0) {
+        const indent = state.listIndent
+        let value = textNode.value.replace(/\n(?!\n|$)/g, `\n${indent}`)
+        if (lastChar === '\n' && value[0] && value[0] !== '\n')
+          value = indent + value
+        textNode.value = value
+      }
+
+      if (state.depthMap[TAG_PRE]! > 0
+        && (state.depthMap[TAG_TD]! > 0 || state.depthMap[TAG_TH]! > 0)) {
+        textNode.value = foldPreLinesToBr(textNode.value)
+      }
+
+      if (!state.plainText
+        && !state.depthMap[TAG_PRE]
+        && !state.depthMap[TAG_CODE]
+        && !isInsideRawHtmlBlock(state.depthMap)
+        && mayNeedGfmTextEscape(textNode.value, state.buffer)) {
+        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap)
+      }
+
+      if (textNode.generatedMarkdown && textNode.value)
+        textNode.value = `${textNode.generatedMarkdown.prefix}${textNode.value}${textNode.generatedMarkdown.suffix}`
+
+      const wrapWidth = state.options?.wrapWidth
+      if (wrapWidth && canWrapHere(state.depthMap)) {
+        const wrapped = wrapText(
+          textNode.value,
+          currentColumn(state.buffer),
+          wrapWidth,
+          continuationPrefix(textNode, state.listIndentWidths, state.blockquotes.length === 0),
+        )
+        state.buffer.push(wrapped)
+        state.lastContentCache = wrapped
+      }
+      else {
+        state.buffer.push(textNode.value)
+        state.lastContentCache = textNode.value
+      }
+
+      if (openMarkerCount && hasNonWhitespace(textNode.value))
+        openMarkerCount = 0
+    }
+    state.lastTextNode = textNode
+  }
 
   /**
    * Process a DOM event and generate markdown
@@ -886,39 +1051,15 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     state.lastNode = event.node as ElementNode | TextNode
     const buff = state.buffer
 
-    const eventElement = node.type === ELEMENT_NODE ? node as ElementNode : undefined
-    if (eventElement
-      && eventType === NodeEventExit
-      && eventElement.tagId === TAG_BLOCKQUOTE
-      && !state.plainText
-      && !eventElement.pluginOutput?.length
-      && !eventElement.tagHandler?.literalEnter
-      && !eventElement.tagHandler?.literalExit) {
-      finalizeBlockquote(state)
-    }
-
     // Deferred <pre> code fence (issue #97). A bare <pre> opens its fence right
     // before its first non-whitespace child so empty/whitespace-only blocks emit
     // nothing. A direct <code> child keeps fence ownership (handled in tags.ts).
     // Runs before lastChar is read so the fence is reflected in spacing checks.
-    if (!state.plainText && state.preFencePending && eventType === NodeEventEnter) {
-      if (node.type === ELEMENT_NODE) {
-        const el = node as ElementNode
-        if (el.tagId === TAG_CODE && el.parent?.tagId === TAG_PRE) {
-          // <pre><code>…</code></pre>: let the <code> handler emit the fence.
-          state.preFencePending = false
-        }
-        else if (el.tagId !== TAG_PRE) {
-          flushPreFence(state)
-        }
-      }
-      else if (node.type === TEXT_NODE && hasNonWhitespace((node as TextNode).value)) {
-        flushPreFence(state)
-      }
-    }
+    if (!state.plainText && state.preFencePending && consumePendingPreChild(state, node, eventType))
+      return
 
-    const lastBuffEntry = buff.at(-1)!
-    const lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
+    let lastBuffEntry = buff.at(-1)!
+    let lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
 
     // Get second last character
     let secondLastChar
@@ -932,107 +1073,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
     }
 
-    // Handle text nodes
     if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
-      const textNode = node as TextNode
-
-      if (textNode.value) {
-        // Skip text nodes that are excluded from markdown output
-        if (textNode.excludedFromMarkdown) {
-          return
-        }
-
-        // A <pre> whose fence is still pending has only seen whitespace so far
-        // (non-whitespace would have opened the fence in the hook above). Drop
-        // that whitespace so an empty/whitespace-only <pre> emits nothing and
-        // never leaks between surrounding blocks (issue #97).
-        if (state.preFencePending) {
-          return
-        }
-
-        if (state.pendingInlineWhitespace) {
-          if (!textNode.value.trim())
-            return
-          if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || ''))
-            textNode.value = ` ${textNode.value}`
-          state.pendingInlineWhitespace = false
-        }
-
-        if (state.plainText && state.depthMap[TAG_PRE] && state.buffer.length === 0)
-          preserveLeadingWhitespace = true
-
-        // Whitespace runs can be split by tags/comments into separate text
-        // events. Collapse a separator that follows existing whitespace just
-        // as CSS white-space processing would.
-        if (textNode.value === ' ' && (lastChar === ' ' || lastChar === '\n' || lastChar === '\t' || lastChar === '\r')) {
-          return
-        }
-
-        // Add spacing before text if needed
-        if (!(state.plainText && state.depthMap[TAG_PRE]) && shouldAddSpacingBeforeText(lastChar, lastNode, textNode)) {
-          textNode.value = ` ${textNode.value}`
-        }
-
-        // Indent code block content when inside a list item so the fenced block
-        // stays within the list item's content column. Only add indent to lines
-        // that start at column 0 — preserves any existing indentation in the
-        // HTML source and stays safe for text nodes that span stream chunks.
-        if ((state.depthMap[TAG_PRE] || 0) > 0 && (state.depthMap[TAG_LI] || 0) > 0) {
-          const indent = state.listIndent
-          // Prepend list_indent on every non-blank line — CommonMark closes
-          // the list item if any line is indented less than the content column,
-          // so we add on top of any in-source indentation rather than skipping
-          // lines that already start with whitespace.
-          let value = textNode.value.replace(/\n(?!\n|$)/g, `\n${indent}`)
-          // Prepend indent for first line if the previous buffer ended with a
-          // newline (code fence opener). Blank first line stays blank.
-          if (lastChar === '\n' && value[0] && value[0] !== '\n') {
-            value = indent + value
-          }
-          textNode.value = value
-        }
-
-        // Inside a table cell the <pre>/<code> is emitted as raw HTML, so every
-        // text node must be escaped (so decoded `<`/`&` are not live HTML) and
-        // its line breaks folded into <br> (issue #147). Runs on all such text,
-        // not only text with newlines, since escaping is always required.
-        if (state.depthMap[TAG_PRE]! > 0
-          && (state.depthMap[TAG_TD]! > 0 || state.depthMap[TAG_TH]! > 0)) {
-          textNode.value = foldPreLinesToBr(textNode.value)
-        }
-
-        if (!state.plainText
-          && !state.depthMap[TAG_PRE]
-          && !state.depthMap[TAG_CODE]
-          && !isInsideRawHtmlBlock(state.depthMap)
-          && mayNeedGfmTextEscape(textNode.value, state.buffer)) {
-          textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap)
-        }
-
-        if (textNode.generatedMarkdown && textNode.value) {
-          textNode.value = `${textNode.generatedMarkdown.prefix}${textNode.value}${textNode.generatedMarkdown.suffix}`
-        }
-
-        const wrapWidth = state.options?.wrapWidth
-        if (wrapWidth && canWrapHere(state.depthMap)) {
-          const wrapped = wrapText(
-            textNode.value,
-            currentColumn(state.buffer),
-            wrapWidth,
-            continuationPrefix(textNode, state.listIndentWidths, state.blockquotes.length === 0),
-          )
-          state.buffer.push(wrapped)
-          state.lastContentCache = wrapped
-        }
-        else {
-          state.buffer.push(textNode.value)
-          state.lastContentCache = textNode.value
-        }
-
-        if (openMarkerCount && hasNonWhitespace(textNode.value))
-          openMarkerCount = 0
-      }
-      state.lastTextNode = textNode
+      processTextNode(node as TextNode, lastNode, lastChar)
       return
     }
 
@@ -1045,49 +1087,52 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // every enter/exit event adds pure GC pressure.
     let output: string[] | undefined
     const element = node as ElementNode
-    const closesOwnPreFence = eventType === NodeEventExit
-      && element.tagId === TAG_PRE
-      && state.preOwnFence
     if (element.pluginOutput?.length) {
       output = element.pluginOutput
       element.pluginOutput = undefined
     }
 
     // Get last content from buffer regions
-    const lastFragment = state.lastContentCache
-
-    let lastNewLines = 0
-    if (lastChar === '\n') {
-      lastNewLines++
-    }
-    if (secondLastChar === '\n') {
-      lastNewLines++
-    }
+    let lastFragment = state.lastContentCache
 
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
     const handler = node.tagHandler
     const isInlineElement = handler?.isInline === true
-    const startsBlockquote = eventType === NodeEventEnter
-      && element.tagId === TAG_BLOCKQUOTE
-      && !state.plainText
-      && !handler?.literalEnter
-      && !handler?.literalExit
+    let gfmAction: GfmAction | undefined
     let handlerOutput: string | undefined
     if (!output && handler?.[eventFn]) {
       const res = state.plainText
         ? getPlainTextOutput(element, eventType, state)
         : handler[eventFn]({ node: element, state })
-      if (res) {
-        output = [res]
-        handlerOutput = res
+      if (typeof res === 'string') {
+        if (res) {
+          output = [res]
+          handlerOutput = res
+        }
+      }
+      else if (res) {
+        gfmAction = res
+        handlerOutput = consumeGfmAction(res, state, gfmLifecycle)
+        if (handlerOutput)
+          output = [handlerOutput]
+        if (res._tag === 'BlockquoteExit') {
+          lastFragment = state.lastContentCache
+          lastBuffEntry = buff.at(-1)!
+          lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
+          secondLastChar = lastBuffEntry && lastBuffEntry.length > 1
+            ? lastBuffEntry.charAt(lastBuffEntry.length - 2)
+            : buff.length > 1
+              ? buff[buff.length - 2]?.at(-1)
+              : undefined
+        }
       }
     }
-    const closingCodeSpan = eventType === NodeEventExit
-      && element.tagId === TAG_CODE
-      && !state.depthMap[TAG_PRE]
-      && !handler?.literalExit
-      ? openCodeSpans.pop()
-      : undefined
+
+    let lastNewLines = 0
+    if (lastChar === '\n')
+      lastNewLines++
+    if (secondLastChar === '\n')
+      lastNewLines++
 
     if (eventType === NodeEventExit && openMarkerCount) {
       // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
@@ -1100,19 +1145,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         }
         openMarkerCount = 0
       }
-    }
-
-    if (eventType === NodeEventExit && closingCodeSpan && output) {
-      const closing = finalizeCodeSpan(state, closingCodeSpan)
-      output = output.map(fragment => fragment === MARKDOWN_INLINE_CODE ? closing : fragment)
-    }
-
-    if (eventType === NodeEventExit
-      && ((element.tagId === TAG_CODE && state.depthMap[TAG_PRE] && !state.preOwnFence)
-        || closesOwnPreFence)) {
-      const delimiter = finalizeCodeFence(state)
-      if (delimiter && output)
-        output = output.map(fragment => fragment.replace(MARKDOWN_CODE_BLOCK, delimiter))
     }
 
     // A <br> can introduce one blank line, but never needs 3+ consecutive
@@ -1181,13 +1213,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
             }
           }
         }
-        if (startsBlockquote) {
-          state.blockquotes.push({
-            fragment: state.buffer.length,
-            listIndent: state.listIndent,
-          })
-          state.bufferedBlockquoteDepth = state.blockquotes.length
-        }
+        if (gfmAction)
+          commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length)
         updateListIndent(state, element, eventType)
         return
       }
@@ -1267,53 +1294,22 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     }
 
     // Add all output fragments
+    let outputStart = state.buffer.length
     if (output) {
-      const outputStart = state.buffer.length
+      outputStart = state.buffer.length
       for (const fragment of output) {
         if (fragment) {
           state.buffer.push(fragment)
           state.lastContentCache = fragment
         }
       }
-      if (eventType === NodeEventEnter && !handler?.literalEnter) {
-        if (element.tagId === TAG_CODE && !state.depthMap[TAG_PRE] && handlerOutput) {
-          openCodeSpans.push({
-            fragment: outputStart,
-            prefix: handlerOutput.slice(0, -MARKDOWN_INLINE_CODE.length),
-          })
-        }
-        else if (element.tagId === TAG_CODE
-          && state.depthMap[TAG_PRE]
-          && !state.preOwnFence
-          && handlerOutput
-          && !((state.depthMap[TAG_TD] || 0) > 0 || (state.depthMap[TAG_TH] || 0) > 0)) {
-          const fenceFragment = state.buffer.findIndex(
-            (fragment, index) => index >= outputStart && fragment.includes(MARKDOWN_CODE_BLOCK),
-          )
-          if (fenceFragment < 0)
-            throw new Error('code fence opener missing from output')
-          startCodeFence(
-            state,
-            fenceFragment,
-            element.attributes?.class?.split(' ').map(value => value.split('language-')[1]).find(Boolean)?.trim() || '',
-            state.listIndent,
-          )
-        }
-      }
     }
+
+    if (gfmAction)
+      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart)
 
     if (eventType === NodeEventEnter && element.tagId === TAG_A && handlerOutput === '[' && buff.at(-1) === '[')
       openLinkFragment = buff.length - 1
-
-    if (startsBlockquote) {
-      if (state.blockquotes.length > 0)
-        collapseNestedBlockquoteSeparator(state.buffer)
-      state.blockquotes.push({
-        fragment: state.buffer.length,
-        listIndent: state.listIndent,
-      })
-      state.bufferedBlockquoteDepth = state.blockquotes.length
-    }
 
     // Track open inline markers for empty pair detection. Inline code in a
     // list may own a leading separator (" `"), so retain the whole output
@@ -1419,11 +1415,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       if (markerPos < stableLength)
         stableLength = markerPos
     }
-    const codeSpanHeld = openCodeSpans.length > 0
+    const codeSpanHeld = gfmLifecycle.openCodeSpans.length > 0
     if (codeSpanHeld) {
       const spanPos = Math.max(
         lastYieldedLength,
-        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, openCodeSpans[0]!.fragment) - leadingTrimmed),
+        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, gfmLifecycle.openCodeSpans[0]!.fragment) - leadingTrimmed),
       )
       if (spanPos < stableLength)
         stableLength = spanPos
