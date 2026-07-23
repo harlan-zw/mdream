@@ -235,7 +235,8 @@ export function renderBreak(node: HandlerContext['node'], state: HandlerContext[
     || depthMap[TAG_H6]) {
     return '<br>'
   }
-  if (depthMap[TAG_PRE])
+  // Hard-break markers are literal content inside code.
+  if (depthMap[TAG_PRE] || depthMap[TAG_CODE])
     return '\n'
 
   const prefix = continuationPrefix(

@@ -1570,7 +1570,8 @@ impl ConvertState {
       TAG_BR => {
         if self.in_table_cell() || self.in_heading() || self.in_raw_html_block() {
           Some(Cow::Borrowed("<br>"))
-        } else if self.depth_map[TAG_PRE as usize] > 0 {
+        // Hard-break markers are literal content inside code.
+        } else if self.depth_map[TAG_PRE as usize] > 0 || self.depth_map[TAG_CODE as usize] > 0 {
           Some(Cow::Borrowed("\n"))
         } else {
           let prefix = self.continuation_prefix();

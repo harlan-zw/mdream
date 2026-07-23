@@ -149,6 +149,7 @@ fn streaming_gfm_hard_break_matches_every_split() {
     "<table><tr><td>first<br>second</td></tr></table>",
     "<h1>first<br>second</h1>",
     "<address>first<br>second</address>",
+    "<code>first<br>second</code>",
   ] {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }

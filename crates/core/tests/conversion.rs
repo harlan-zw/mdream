@@ -201,6 +201,11 @@ fn br_stays_html_where_a_markdown_line_break_is_not_safe() {
 }
 
 #[test]
+fn inline_code_br_does_not_emit_a_hard_break_marker() {
+  assert_eq!(convert("<code>first<br>second</code>"), "`first\nsecond`");
+}
+
+#[test]
 fn gfm_syntax_in_text_is_escaped() {
   for (html, expected) in [
     ("<p># heading</p>", r"\# heading"),

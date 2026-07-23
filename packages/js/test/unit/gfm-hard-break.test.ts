@@ -37,6 +37,11 @@ describe('gfm hard breaks', () => {
     expect(htmlToMarkdown(html)).toBe(expected)
   })
 
+  it('does not emit a hard-break marker inside inline code', () => {
+    expect(htmlToMarkdown('<code>first<br>second</code>'))
+      .toBe('`first\nsecond`')
+  })
+
   it('preserves plugin output in place of the built-in break', () => {
     expect(htmlToMarkdown('<p>first<br>second</p>', {
       hooks: [{
@@ -73,6 +78,7 @@ describe('gfm hard breaks', () => {
       '<table><tr><td>first<br>second</td></tr></table>',
       '<h1>first<br>second</h1>',
       '<address>first<br>second</address>',
+      '<code>first<br>second</code>',
     ]
 
     for (const html of cases) {
