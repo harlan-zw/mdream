@@ -180,7 +180,7 @@ fn heading_closes_open_heading() {
 #[test]
 fn well_formed_headings_unchanged() {
   assert_eq!(convert("<h1>a</h1><h2>b</h2>"), "# a\n\n## b");
-  assert_eq!(convert("<h1><em>a</em></h1>"), "# _a_");
+  assert_eq!(convert("<h1><em>a</em></h1>"), "# *a*");
 }
 
 // ── trailing content at EOF ──

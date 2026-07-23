@@ -9,7 +9,7 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
     <strong>Important</strong>
     Heading
 </h4>`, { engine })).toBe('#### **Important** Heading')
-    expect(htmlToMarkdown('<p><strong>Bold and <em>italic</em></strong></p>', { engine })).toBe('**Bold and _italic_**')
+    expect(htmlToMarkdown('<p><strong>Bold and <em>italic</em></strong></p>', { engine })).toBe('**Bold and *italic***')
     expect(htmlToMarkdown('<b><b>Incredibly</b> <b>Bold</b></b>', { engine })).toBe('**Incredibly Bold**')
   })
   it('strikethrough: del, s and strike all map to ~~', async () => {

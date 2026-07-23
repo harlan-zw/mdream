@@ -17,18 +17,18 @@ describe('text Formatting', () => {
   it('converts italic text with <em>', () => {
     const html = '<p>This is <em>italic</em> text</p>'
     const markdown = htmlToMarkdown(html)
-    expect(markdown).toBe('This is _italic_ text')
+    expect(markdown).toBe('This is *italic* text')
   })
 
   it('converts italic text with <i>', () => {
     const html = '<p>This is <i>italic</i> text</p>'
     const markdown = htmlToMarkdown(html)
-    expect(markdown).toBe('This is _italic_ text')
+    expect(markdown).toBe('This is *italic* text')
   })
 
   it('handles nested formatting', () => {
     const html = '<p>This is <strong><em>bold and italic</em></strong> text</p>'
     const markdown = htmlToMarkdown(html)
-    expect(markdown).toBe('This is **_bold and italic_** text')
+    expect(markdown).toBe('This is ***bold and italic*** text')
   })
 })

@@ -20,7 +20,7 @@ describe('wrap width (issue #106)', () => {
 
   it('preserves inline spacing around emphasis', () => {
     expect(wrap('<p>see <em>this</em> word and more words after the emphasis here please now</p>', 40))
-      .toBe('see _this_ word and more words after the\nemphasis here please now')
+      .toBe('see *this* word and more words after the\nemphasis here please now')
   })
 
   it('preserves br as a line break with and without wrapping (issue #128)', () => {

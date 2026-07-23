@@ -52,7 +52,7 @@ describe('mdream browser compatibility', () => {
 
     // Verify all elements are properly converted and displayed
     await expect.element(page.getByText('# Main Title')).toBeInTheDocument()
-    await expect.element(page.getByText('This is a paragraph with _emphasis_')).toBeInTheDocument()
+    await expect.element(page.getByText('This is a paragraph with *emphasis*')).toBeInTheDocument()
     await expect.element(page.getByText('[a link](/test)')).toBeInTheDocument()
     await expect.element(page.getByText('- Item 1')).toBeInTheDocument()
     await expect.element(page.getByText('- Item 2 with `code`')).toBeInTheDocument()

@@ -121,7 +121,7 @@ fn uppercase_tag_names() {
 #[test]
 fn mixed_case_tag_names() {
   assert_eq!(convert("<Strong>bold</Strong>"), "**bold**");
-  assert_eq!(convert("<eM>italic</Em>"), "_italic_");
+  assert_eq!(convert("<eM>italic</Em>"), "*italic*");
 }
 
 #[test]
@@ -335,10 +335,10 @@ fn trailing_whitespace_inside_inline_moves_after_delimiter() {
   let html = "<div><strong><a href='http://xxx.yyy/'>abc</a> </strong>def</div>";
   let expected = "**[abc](http://xxx.yyy/)** def";
   assert_eq!(convert(html), expected);
-  assert_eq!(convert("<p><em>abc </em>def</p>"), "_abc_ def");
+  assert_eq!(convert("<p><em>abc </em>def</p>"), "*abc* def");
   assert_eq!(
     convert("<p><strong><em>abc </em></strong>def</p>"),
-    "**_abc_** def"
+    "***abc*** def"
   );
   assert_eq!(convert("<strong>abc </strong>"), "**abc**");
 
@@ -353,8 +353,8 @@ fn trailing_whitespace_inside_inline_moves_after_delimiter() {
 
 #[test]
 fn italic() {
-  assert_eq!(convert("<em>italic</em>"), "_italic_");
-  assert_eq!(convert("<i>italic</i>"), "_italic_");
+  assert_eq!(convert("<em>italic</em>"), "*italic*");
+  assert_eq!(convert("<i>italic</i>"), "*italic*");
 }
 
 #[test]
@@ -386,7 +386,7 @@ fn nested_bold_collapses() {
 
 #[test]
 fn nested_italic_collapses() {
-  assert_eq!(convert("<i><i>text</i></i>"), "_text_");
+  assert_eq!(convert("<i><i>text</i></i>"), "*text*");
 }
 
 // ── Empty inline emphasis ──
@@ -443,7 +443,7 @@ fn empty_figcaption_emits_no_markers() {
 #[test]
 fn non_empty_emphasis_unchanged_by_empty_drop() {
   assert_eq!(convert("<p><b>hi</b></p>"), "**hi**");
-  assert_eq!(convert("<p><b><em>x</em></b></p>"), "**_x_**");
+  assert_eq!(convert("<p><b><em>x</em></b></p>"), "***x***");
   assert_eq!(convert("<p><b><img src=\"x.png\" alt=\"y\"></b></p>"), "**![y](x.png)**");
   // A nested empty pair after real content still drops, without dropping the
   // outer marker that content already made permanent.
@@ -2368,7 +2368,7 @@ fn tag_override_alias_preserves_trailing_siblings() {
     }),
     ..Default::default()
   };
-  assert_eq!(html_to_markdown(html, opts), "before _foo_ after");
+  assert_eq!(html_to_markdown(html, opts), "before *foo* after");
 }
 // ── Regression: CodeRabbit-found pre-existing bugs (PR #95) ──
 
@@ -2410,8 +2410,8 @@ fn top_level_text_node_is_not_dropped() {
   // Top-level (root) text nodes with no element parent were dropped because
   // process_text_buffer bailed on an empty stack (issue #93). Such text is
   // flushed when the next tag opens.
-  assert_eq!(convert("foo <em>bar</em>"), "foo _bar_");
-  assert_eq!(convert("a<em>b</em>c<em>d</em>"), "a_b_c_d_");
+  assert_eq!(convert("foo <em>bar</em>"), "foo *bar*");
+  assert_eq!(convert("a<em>b</em>c<em>d</em>"), "a*b*c*d*");
 }
 
 #[test]
@@ -2606,7 +2606,7 @@ fn wrap_preserves_inline_spacing() {
       "<p>see <em>this</em> word and more words after the emphasis here please now</p>",
       40
     ),
-    "see _this_ word and more words after the\nemphasis here please now",
+    "see *this* word and more words after the\nemphasis here please now",
   );
 }
 
