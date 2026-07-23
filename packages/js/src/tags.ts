@@ -149,7 +149,9 @@ export function resolveUrl(url: string, origin?: string, clean?: EngineOptions['
   }
   else if (origin && !URL_SCHEME_RE.test(url)) {
     const path = url.startsWith('./') ? url.slice(2) : url
-    resolved = `${origin.replace(/\/+$/, '')}${path[0] === '/' ? '' : '/'}${path}`
+    while (origin.endsWith('/'))
+      origin = origin.slice(0, -1)
+    resolved = `${origin}${path[0] === '/' ? '' : '/'}${path}`
   }
 
   const cleansUrls = clean === true || (!!clean && clean.urls === true)
