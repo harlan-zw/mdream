@@ -90,6 +90,8 @@ export interface MarkdownState {
   preOwnFence?: boolean
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
+  /** Whether tracking parameters should be stripped while resolving URLs */
+  cleanUrls: boolean
 }
 
 // Marker kind per tag id for inline tags that wrap content in a symmetric
@@ -472,7 +474,7 @@ function getPlainTextOutput(node: ElementNode, eventType: number, state: Markdow
       const alt = node.attributes?.alt
       if (alt !== undefined)
         return alt || undefined
-      return node.attributes?.title || resolveUrl(node.attributes?.src || '', state.options?.origin) || undefined
+      return node.attributes?.title || resolveUrl(node.attributes?.src || '', state.options?.origin, state.cleanUrls) || undefined
     }
     if (tagId === TAG_Q)
       return '"'
@@ -487,6 +489,7 @@ function getPlainTextOutput(node: ElementNode, eventType: number, state: Markdow
  * Creates a markdown processor that consumes DOM events and generates markdown
  */
 export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlugins: TransformPlugin[] = [], tagOverrideHandlers?: Map<string, TagHandler>) {
+  const clean = options.clean
   const state: MarkdownState = {
     options,
     buffer: [],
@@ -494,6 +497,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     listIndent: '',
     listIndentWidths: [],
     plainText: options.format === 'text',
+    cleanUrls: clean === true || (typeof clean === 'object' && clean.urls === true),
   }
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []

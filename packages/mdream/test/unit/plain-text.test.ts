@@ -36,6 +36,14 @@ describe.each(engines)('plain text output $name', (engineConfig) => {
       .toBe('image.png')
     expect(htmlToMarkdown('<img src="/image.png">', { engine, format: 'text', origin: 'https://example.com' }))
       .toBe('https://example.com/image.png')
+    expect(htmlToMarkdown('<img src="./image.png">', { engine, format: 'text', origin: 'https://example.com/' }))
+      .toBe('https://example.com/image.png')
+    expect(htmlToMarkdown('<img src="/image.png?utm_source=test&width=10">', {
+      clean: { urls: true },
+      engine,
+      format: 'text',
+      origin: 'https://example.com',
+    })).toBe('https://example.com/image.png?width=10')
     expect(htmlToMarkdown('<img src="image.png" alt="" title="Title">', { engine, format: 'text' }))
       .toBe('')
     expect(htmlToMarkdown('<img>', { engine, format: 'text' }))

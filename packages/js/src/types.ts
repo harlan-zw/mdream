@@ -315,6 +315,8 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   preOwnFence?: boolean
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
+  /** Whether tracking parameters should be stripped while resolving URLs */
+  cleanUrls?: boolean
 }
 
 type NodeEventEnter = 0

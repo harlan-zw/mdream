@@ -113,6 +113,10 @@ const TAG_ID_TO_NAME: string[] = [
   'header',
   'figcaption',
   'caption',
+  'datalist',
+  'optgroup',
+  's',
+  'strike',
 ]
 
 function convertFilterForRust(filter: any): RustMdreamOptions['filter'] {
@@ -155,14 +159,13 @@ function toFlatOptions(options?: EngineOptions): Partial<RustMdreamOptions> {
     if (p.tagOverrides != null)
       flat.tagOverrides = p.tagOverrides
   }
+  if (options?.clean != null)
+    (flat as any).clean = options.clean
   return flat
 }
 
 function rustHtmlToMarkdown(html: string, options?: EngineOptions): string {
-  const flat = toFlatOptions(options)
-  if (options?.clean)
-    (flat as any).clean = options.clean
-  return _rustHtmlToMarkdown(html, flat)
+  return _rustHtmlToMarkdown(html, toFlatOptions(options))
 }
 function rustStreamHtmlToMarkdown(htmlStream: ReadableStream<Uint8Array | string> | null, options?: EngineOptions): AsyncIterable<string> {
   return _rustStreamHtmlToMarkdown(htmlStream, toFlatOptions(options))

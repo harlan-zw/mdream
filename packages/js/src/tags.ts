@@ -122,39 +122,99 @@ import {
 } from './const'
 import { continuationPrefix } from './utils'
 
-// Helper function to resolve URLs
-export function resolveUrl(url: string, origin?: string): string {
-  if (!url)
+const TRACKING_PREFIXES = ['utm_', 'fbclid', 'gclid', 'mc_eid', 'msclkid', 'oly_'] as const
+
+function isTrackingParam(url: string, start: number, end: number): boolean {
+  for (let index = 0; index < TRACKING_PREFIXES.length; index++) {
+    const prefix = TRACKING_PREFIXES[index]!
+    if (end - start >= prefix.length && url.startsWith(prefix, start))
+      return true
+  }
+  return false
+}
+
+function stripTrackingParams(url: string): string {
+  const queryStart = url.indexOf('?')
+  if (queryStart === -1)
     return url
 
-  if (url.startsWith('//')) {
-    return `https:${url}`
+  const fragmentStart = url.indexOf('#', queryStart + 1)
+  const queryEnd = fragmentStart === -1 ? url.length : fragmentStart
+  let result = url.slice(0, queryStart)
+  let parameterStart = queryStart + 1
+  let kept = 0
+  let removed = false
+
+  while (parameterStart <= queryEnd) {
+    let parameterEnd = url.indexOf('&', parameterStart)
+    if (parameterEnd === -1 || parameterEnd > queryEnd)
+      parameterEnd = queryEnd
+
+    let keyEnd = url.indexOf('=', parameterStart)
+    if (keyEnd === -1 || keyEnd > parameterEnd)
+      keyEnd = parameterEnd
+
+    if (isTrackingParam(url, parameterStart, keyEnd)) {
+      removed = true
+    }
+    else {
+      result += kept++ === 0 ? '?' : '&'
+      result += url.slice(parameterStart, parameterEnd)
+    }
+
+    if (parameterEnd === queryEnd)
+      break
+    parameterStart = parameterEnd + 1
   }
 
-  if (url.startsWith('#')) {
+  if (!removed)
     return url
+  if (fragmentStart !== -1)
+    result += url.slice(fragmentStart)
+  return result
+}
+
+function hasExplicitScheme(url: string): boolean {
+  const colon = url.indexOf(':')
+  if (colon <= 0)
+    return false
+  for (let index = 0; index < colon; index++) {
+    const code = url.charCodeAt(index)
+    const isAlphaNumeric = (code >= 48 && code <= 57)
+      || (code >= 65 && code <= 90)
+      || (code >= 97 && code <= 122)
+    if (!isAlphaNumeric && code !== 43 && code !== 45 && code !== 46)
+      return false
+  }
+  return true
+}
+
+export function resolveUrl(url: string, origin?: string, clean = false): string {
+  if (!url || url.charCodeAt(0) === 35)
+    return url
+
+  let resolved = url
+  if (url.charCodeAt(0) === 47 && url.charCodeAt(1) === 47) {
+    resolved = `https:${url}`
+  }
+  else if (origin) {
+    let originEnd = origin.length
+    while (originEnd > 0 && origin.charCodeAt(originEnd - 1) === 47)
+      originEnd--
+    const cleanOrigin = originEnd === origin.length ? origin : origin.slice(0, originEnd)
+
+    if (url.charCodeAt(0) === 47) {
+      resolved = `${cleanOrigin}${url}`
+    }
+    else if (url.charCodeAt(0) === 46 && url.charCodeAt(1) === 47) {
+      resolved = `${cleanOrigin}/${url.slice(2)}`
+    }
+    else if (!hasExplicitScheme(url)) {
+      resolved = `${cleanOrigin}/${url}`
+    }
   }
 
-  if (origin) {
-    if (url.startsWith('/') && origin) {
-      // Remove trailing slash from origin if present
-      const cleanOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin
-      return `${cleanOrigin}${url}`
-    }
-    // handle ./ paths
-    if (url.startsWith('./')) {
-      return `${origin}/${url.slice(2)}`
-    }
-
-    // relative url
-    if (!url.startsWith('http')) {
-      // Remove leading slash if present
-      const cleanUrl = url.startsWith('/') ? url.slice(1) : url
-      return `${origin}/${cleanUrl}`
-    }
-  }
-
-  return url
+  return clean && resolved.includes('?') ? stripTrackingParams(resolved) : resolved
 }
 
 // GFM autolink shorthand: only inline-syntax-safe absolute URIs are eligible
@@ -515,7 +575,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (!node.attributes?.href) {
         return ''
       }
-      const href = resolveUrl(node.attributes?.href || '', state.options?.origin)
+      const href = resolveUrl(node.attributes?.href || '', state.options?.origin, state.cleanUrls === true)
       let title = node.attributes?.title
       // Check if title matches the last content to avoid duplication
       const lastContent = state.lastContentCache
@@ -555,7 +615,7 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_IMG]: {
     enter: ({ node, state }) => {
       const alt = node.attributes?.alt || ''
-      const src = resolveUrl(node.attributes?.src || '', state.options?.origin)
+      const src = resolveUrl(node.attributes?.src || '', state.options?.origin, state.cleanUrls === true)
       return `![${alt}](${src})`
     },
     collapsesInnerWhiteSpace: true,

@@ -1,5 +1,44 @@
+import type { EngineOptions } from '@mdream/js'
+import { ReadableStream } from 'node:stream/web'
 import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
+
+type TestEngine = (typeof engines)[number]['engine']
+
+interface ParityCase {
+  html: string
+  options?: EngineOptions
+}
+
+const recentMergeCases: ParityCase[] = [
+  { html: '<p>foo<em>bar</em>baz</p>' },
+  { html: '<p><strong>foo<em>bar</em>baz</strong></p>' },
+  { html: '<p>before <s>struck</s> after</p>' },
+  { html: '<p><strike><em>old</em></strike></p>' },
+  { html: '<p>a < b < c</p>' },
+  { html: '<p>a <\tb <\nc</p>' },
+  { html: '<p>a <> b</p>' },
+  { html: '<img src="./image.png?w=1" title="Diagram">', options: { format: 'text' } },
+  { html: '<img src="./image.png?w=1">', options: { format: 'text', origin: 'https://example.com/' } },
+  {
+    html: '<img src="/image.png?utm_source=test&width=10">',
+    options: { clean: { urls: true }, format: 'text', origin: 'https://example.com' },
+  },
+]
+
+async function streamConvert(engine: TestEngine, { html, options }: ParityCase, chunkSize: number): Promise<string> {
+  const stream = new ReadableStream<string>({
+    start(controller) {
+      for (let offset = 0; offset < html.length; offset += chunkSize)
+        controller.enqueue(html.slice(offset, offset + chunkSize))
+      controller.close()
+    },
+  })
+  let output = ''
+  for await (const chunk of engine.streamHtmlToMarkdown(stream, options))
+    output += chunk
+  return output
+}
 
 describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
   it('bold & Italic: Supports bold and italic—even within single words.', async () => {
@@ -113,5 +152,25 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
     expect(htmlToMarkdown(`<p>4 < 5</p>`, { engine })).toBe('4 < 5')
     expect(htmlToMarkdown(`<p>x < y < z</p>`, { engine })).toBe('x < y < z')
     expect(htmlToMarkdown(`<p>a <> b</p>`, { engine })).toBe('a <> b')
+  })
+})
+
+describe('recent merge cross-engine parity', () => {
+  const javaScriptEngine = engines[0].engine
+  const rustEngine = engines[1].engine
+
+  it.each(recentMergeCases)('matches one-shot output for $html', ({ html, options }) => {
+    expect(rustEngine.htmlToMarkdown(html, options)).toBe(javaScriptEngine.htmlToMarkdown(html, options))
+  })
+
+  it.each(recentMergeCases)('matches streamed output for $html', async (parityCase) => {
+    const expected = javaScriptEngine.htmlToMarkdown(parityCase.html, parityCase.options)
+
+    for (let chunkSize = 1; chunkSize <= parityCase.html.length; chunkSize++) {
+      expect(await streamConvert(javaScriptEngine, parityCase, chunkSize), `JavaScript chunkSize=${chunkSize}`)
+        .toBe(expected)
+      expect(await streamConvert(rustEngine, parityCase, chunkSize), `Rust chunkSize=${chunkSize}`)
+        .toBe(expected)
+    }
   })
 })
