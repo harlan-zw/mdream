@@ -6,6 +6,30 @@ import {
   MAX_LEGACY_ENTITY_NAME_LENGTH,
 } from './entities'
 
+function equalsAsciiCaseInsensitive(value: string, expected: string): boolean {
+  for (let index = 0; index < expected.length; index++) {
+    if ((value.charCodeAt(index) | 32) !== expected.charCodeAt(index))
+      return false
+  }
+  return true
+}
+
+export function isEmptyLinkHref(href: string): boolean {
+  if (href === '#')
+    return true
+
+  switch (href.indexOf(':')) {
+    case 4:
+      return equalsAsciiCaseInsensitive(href, 'data')
+    case 8:
+      return equalsAsciiCaseInsensitive(href, 'vbscript')
+    case 10:
+      return equalsAsciiCaseInsensitive(href, 'javascript')
+    default:
+      return false
+  }
+}
+
 /**
  * Build the Markdown prefix needed to keep a continued line inside its open
  * blockquotes and list items. Ancestors are emitted outermost-first so mixed

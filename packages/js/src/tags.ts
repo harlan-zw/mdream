@@ -120,7 +120,7 @@ import {
   TAG_XMP,
   TagIdMap,
 } from './const'
-import { continuationPrefix } from './utils'
+import { continuationPrefix, isEmptyLinkHref } from './utils'
 
 // Helper function to resolve URLs
 export function resolveUrl(url: string, origin?: string): string {
@@ -171,10 +171,7 @@ function stripsEmptyLink(state: HandlerContext['state'], href: string): boolean 
   const clean = state.options?.clean
   if (!(clean === true || (typeof clean === 'object' && clean.emptyLinks)))
     return false
-  return href === '#'
-    || href.startsWith('javascript:')
-    || href.startsWith('data:')
-    || href.startsWith('vbscript:')
+  return isEmptyLinkHref(href)
 }
 
 function serializeMarkdownTitle(title: string): string {

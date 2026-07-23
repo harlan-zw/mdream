@@ -61,6 +61,14 @@ fn write_image_description(output: &mut String, alt: &str) {
   write_ascii_escaped(output, alt, &IMAGE_DESCRIPTION_ESCAPES);
 }
 
+#[inline]
+fn starts_with_ignore_ascii_case(value: &str, prefix: &[u8]) -> bool {
+  value
+    .as_bytes()
+    .get(..prefix.len())
+    .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
+}
+
 impl ConvertState {
   #[inline]
   fn inline_marker_type(tag_id: u8) -> Option<u8> {
@@ -386,7 +394,6 @@ impl ConvertState {
     let tag_id: Option<u8>;
     let is_inline: bool;
     let node_spacing: Option<[u8; 2]>;
-    let uses_default_handler: bool;
     let mut output: Option<Cow<'static, str>>;
     // True when `output` is a user-supplied override enter string — emit it
     // verbatim without synthesizing a separating space (issue #93).
@@ -408,8 +415,6 @@ impl ConvertState {
       } else {
         None
       };
-      uses_default_handler = override_config.is_none();
-
       is_inline = override_config
         .and_then(|ov| ov.is_inline)
         .unwrap_or(node.is_inline);
@@ -477,9 +482,9 @@ impl ConvertState {
           let node = &self.stack[self.stack.len() - 1];
           if let Some(href) = node.attributes.get("href")
             && (href == "#"
-              || href.starts_with("javascript:")
-              || href.starts_with("data:")
-              || href.starts_with("vbscript:"))
+              || starts_with_ignore_ascii_case(href, b"javascript:")
+              || starts_with_ignore_ascii_case(href, b"data:")
+              || starts_with_ignore_ascii_case(href, b"vbscript:"))
           {
             self.skip_current_link = true;
             self.last_node_is_inline = is_inline;
@@ -519,7 +524,7 @@ impl ConvertState {
       enter_is_literal,
     );
 
-    if !self.plain_text && uses_default_handler && tag_id == Some(TAG_BLOCKQUOTE) {
+    if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
       if !self.blockquotes.is_empty() && self.buffer.ends_with("\n\n") {
         self.buffer.pop();
       }

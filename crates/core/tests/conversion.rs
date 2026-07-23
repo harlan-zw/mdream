@@ -1781,6 +1781,52 @@ fn tag_override_spacing() {
   assert!(!md.contains("\n\n"));
 }
 
+#[test]
+fn blockquote_spacing_override_keeps_default_quote_frame() {
+  let overrides = vec![(
+    "blockquote".to_string(),
+    TagOverrideConfig {
+      spacing: Some([0, 0]),
+      ..Default::default()
+    },
+  )];
+  let md = html_to_markdown(
+    "<blockquote>Quoted text</blockquote>",
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert_eq!(md, "> Quoted text");
+}
+
+#[test]
+fn blockquote_literal_override_replaces_default_quote_frame() {
+  let overrides = vec![(
+    "blockquote".to_string(),
+    TagOverrideConfig {
+      enter: Some("[".to_string()),
+      exit: Some("]".to_string()),
+      spacing: Some([0, 0]),
+      ..Default::default()
+    },
+  )];
+  let md = html_to_markdown(
+    "<blockquote>Quoted text</blockquote>",
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert_eq!(md, "[Quoted text]");
+}
+
 // ── Clean URLs ──
 
 fn convert_clean(html: &str) -> String {
@@ -1936,6 +1982,21 @@ fn clean_strips_data_and_vbscript_links() {
     assert_eq!(
       convert_with_clean(&format!(r#"<a href="{href}">Click</a>"#), clean_all()),
       "Click"
+    );
+  }
+}
+
+#[test]
+fn clean_strips_executable_link_schemes_case_insensitively() {
+  for href in [
+    "JavaScript:void(0)",
+    "DATA:text/html,payload",
+    "VbScRiPt:msgbox(1)",
+  ] {
+    assert_eq!(
+      convert_with_clean(&format!(r#"<a href="{href}">Click</a>"#), clean_all()),
+      "Click",
+      "expected clean.empty_links to strip {href}"
     );
   }
 }
