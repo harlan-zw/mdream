@@ -1320,8 +1320,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           const isBlockElement = !isInlineElement && !collapsesWhiteSpace && configuredNewLines > 0
           // Don't trim before elements that have collapsesInnerWhiteSpace on enter
           // Also don't trim before block elements that have their own spacing configuration
-          const shouldTrim = (element.tagId === TAG_BR && output?.[0]?.endsWith('\n') && !parentInPre)
-            || ((!isInlineElement || eventType === NodeEventExit) && !isBlockElement && !(collapsesWhiteSpace && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter))
+          // At a quote's content start the last fragment is the sibling separator,
+          // not trailing whitespace; trimming it would glue adjacent quotes.
+          const shouldTrim = !quoteAtStart
+            && ((element.tagId === TAG_BR && output?.[0]?.endsWith('\n') && !parentInPre)
+              || ((!isInlineElement || eventType === NodeEventExit) && !isBlockElement && !(collapsesWhiteSpace && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter)))
 
           if (shouldTrim) {
             const originalLength = lastFragment.length

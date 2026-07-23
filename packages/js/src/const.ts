@@ -249,6 +249,6 @@ export const MARKDOWN_HORIZONTAL_RULE = '---'
 // Newline configurations
 export const NO_SPACING: readonly [number, number] = [0, 0]
 export const DEFAULT_BLOCK_SPACING: readonly [number, number] = [2, 2]
-export const BLOCKQUOTE_SPACING: readonly [number, number] = [1, 1]
+export const BLOCKQUOTE_SPACING: readonly [number, number] = [2, 2]
 export const LIST_ITEM_SPACING: readonly [number, number] = [1, 0]
 export const TABLE_ROW_SPACING: readonly [number, number] = [0, 1]

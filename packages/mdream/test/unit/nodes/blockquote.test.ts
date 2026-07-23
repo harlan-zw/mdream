@@ -109,6 +109,42 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
 
+  it.each([
+    [
+      'single-line siblings',
+      '<blockquote>a</blockquote><blockquote>b</blockquote>',
+      '> a\n\n> b',
+    ],
+    [
+      'paragraph siblings',
+      '<blockquote><p>a</p></blockquote><blockquote><p>b</p></blockquote>',
+      '> a\n\n> b',
+    ],
+    [
+      'nested quote followed by sibling',
+      '<blockquote><p>Outer</p><blockquote><p>Nested</p></blockquote></blockquote><blockquote><p>After</p></blockquote>',
+      '> Outer\n> > Nested\n\n> After',
+    ],
+    [
+      'siblings with newline whitespace',
+      '<blockquote>a</blockquote>\n<blockquote>b</blockquote>',
+      '> a\n\n> b',
+    ],
+    [
+      'bare-text quote then paragraph-child quote',
+      '<blockquote>A quote.</blockquote>\n<blockquote><p>b</p></blockquote>',
+      '> A quote.\n\n> b',
+    ],
+    [
+      'bare-text quote then heading-child quote',
+      '<blockquote>A quote.</blockquote>\n<blockquote><h2>H</h2></blockquote>',
+      '> A quote.\n\n> ## H',
+    ],
+  ])('separates %s with a blank line', async (_name, html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
   it('keeps representative quote structure across every stream split', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li><blockquote><ul><li>x</li><li>y</li></ul></blockquote></li></ul>'

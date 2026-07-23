@@ -864,6 +864,44 @@ fn blockquote_keeps_block_children_inside_the_quote() {
   }
 }
 
+#[test]
+fn sibling_blockquotes_separated_by_blank_line() {
+  for (name, html, expected) in [
+    (
+      "single-line siblings",
+      "<blockquote>a</blockquote><blockquote>b</blockquote>",
+      "> a\n\n> b",
+    ),
+    (
+      "paragraph siblings",
+      "<blockquote><p>a</p></blockquote><blockquote><p>b</p></blockquote>",
+      "> a\n\n> b",
+    ),
+    (
+      "nested quote then sibling",
+      "<blockquote><p>Outer</p><blockquote><p>Nested</p></blockquote></blockquote><blockquote><p>After</p></blockquote>",
+      "> Outer\n> > Nested\n\n> After",
+    ),
+    (
+      "siblings with newline whitespace",
+      "<blockquote>a</blockquote>\n<blockquote>b</blockquote>",
+      "> a\n\n> b",
+    ),
+    (
+      "bare-text quote then paragraph-child quote",
+      "<blockquote>A quote.</blockquote>\n<blockquote><p>b</p></blockquote>",
+      "> A quote.\n\n> b",
+    ),
+    (
+      "bare-text quote then heading-child quote",
+      "<blockquote>A quote.</blockquote>\n<blockquote><h2>H</h2></blockquote>",
+      "> A quote.\n\n> ## H",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{name}");
+  }
+}
+
 // ── Lists ──
 
 #[test]
