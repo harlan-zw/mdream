@@ -85,6 +85,7 @@ import {
   TAG_RP,
   TAG_RT,
   TAG_RUBY,
+  TAG_S,
   TAG_SAMP,
   TAG_SCRIPT,
   TAG_SECTION,
@@ -92,6 +93,7 @@ import {
   TAG_SMALL,
   TAG_SOURCE,
   TAG_SPAN,
+  TAG_STRIKE,
   TAG_STRONG,
   TAG_STYLE,
   TAG_SUB,
@@ -256,6 +258,14 @@ const Emphasis: TagHandler = {
   isInline: true,
 }
 
+const Strikethrough: TagHandler = {
+  enter: () => MARKDOWN_STRIKETHROUGH,
+  exit: () => MARKDOWN_STRIKETHROUGH,
+  collapsesInnerWhiteSpace: true,
+  spacing: NO_SPACING,
+  isInline: true,
+}
+
 // Tag handlers with metadata
 export const tagHandlers: Record<number, TagHandler> = {
   // Numeric tag constants
@@ -331,13 +341,9 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_B]: Strong,
   [TAG_EM]: Emphasis,
   [TAG_I]: Emphasis,
-  [TAG_DEL]: {
-    enter: () => MARKDOWN_STRIKETHROUGH,
-    exit: () => MARKDOWN_STRIKETHROUGH,
-    collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
-    isInline: true,
-  },
+  [TAG_DEL]: Strikethrough,
+  [TAG_S]: Strikethrough,
+  [TAG_STRIKE]: Strikethrough,
   [TAG_SUB]: {
     enter: () => '<sub>',
     exit: () => '</sub>',

@@ -360,6 +360,8 @@ fn italic() {
 #[test]
 fn strikethrough() {
   assert_eq!(convert("<del>deleted</del>"), "~~deleted~~");
+  assert_eq!(convert("<s>struck</s>"), "~~struck~~");
+  assert_eq!(convert("<strike>old</strike>"), "~~old~~");
 }
 
 #[test]
