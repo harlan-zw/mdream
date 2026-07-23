@@ -1,5 +1,5 @@
 use crate::consts::*;
-use crate::entities::decode_html_entities;
+use crate::entities::{decode_html_entities, decode_html_entities_for_markdown};
 use crate::scan::{is_whitespace, process_comment_or_doctype, process_tag_attributes};
 use crate::selector::{matches_selector, parse_css_selector};
 use crate::tags::get_tag_handler;
@@ -23,42 +23,31 @@ pub(crate) struct TrackedExtraction {
   pub(crate) attributes: Vec<(String, String)>,
 }
 
-pub(crate) fn fix_redundant_delimiters(content: &str) -> String {
-  let mut c = content.replace("****", "**");
-  c = c.replace("~~~~", "~~");
-  if c.contains("***") && c.split("***").count() > 3 {
-    let parts: Vec<&str> = c.split("***").collect();
-    if parts.len() >= 4 {
-      c = format!(
-        "{}***{} {}***{}",
-        parts[0],
-        parts[1],
-        parts[2],
-        parts[3..].join("***")
-      );
-    }
-  }
-  c
-}
-
 // Escape context bitmask flags
 const ESC_TABLE: u8 = 1;
-const ESC_CODE_PRE: u8 = 2;
 const ESC_LINK: u8 = 4;
 const ESC_BLOCKQUOTE: u8 = 8;
 
-static HEADING_PREFIXES: [&str; 6] = ["# ", "## ", "### ", "#### ", "##### ", "###### "];
+struct CodeSpanState {
+  output_start: usize,
+  content_start: usize,
+}
 
-/// Pre-computed blockquote prefixes for depths 1-6 (avoids `"> ".repeat()`)
-static BQ_PREFIXES: [&str; 7] = [
-  "",
-  "> ",
-  "> > ",
-  "> > > ",
-  "> > > > ",
-  "> > > > > ",
-  "> > > > > > ",
-];
+struct CodeFenceState {
+  output_start: usize,
+  marker_offset: usize,
+  content_start: usize,
+  indent: String,
+  language: String,
+}
+
+#[derive(Clone)]
+struct BlockquoteFrame {
+  content_start: usize,
+  list_indent: String,
+}
+
+static HEADING_PREFIXES: [&str; 6] = ["# ", "## ", "### ", "#### ", "##### ", "###### "];
 
 // Clean mode bitmask flags
 const CLEAN_EMPTY_LINKS: u8 = 1;
@@ -362,6 +351,12 @@ pub struct ConvertState {
   link_bracket_pos: usize,
   /// Open inline markers as (kind, output start, content start); lets the exit drop empty pairs.
   open_markers: Vec<(u8, usize, usize)>,
+  /// Open code spans and fenced blocks stay buffered until their closing
+  /// delimiter can be chosen from the complete literal content.
+  code_spans: Vec<CodeSpanState>,
+  code_fence: Option<CodeFenceState>,
+  /// Open blockquotes stay buffered until all child line boundaries are known.
+  blockquotes: Vec<BlockquoteFrame>,
   /// Heading slugs collected during conversion for fragment validation
   heading_slugs: Vec<String>,
   /// Fragment link locations: (bracket_start, link_end)
@@ -480,6 +475,9 @@ impl ConvertState {
       skip_current_link: false,
       link_bracket_pos: 0,
       open_markers: Vec::new(),
+      code_spans: Vec::new(),
+      code_fence: None,
+      blockquotes: Vec::with_capacity(4),
       heading_slugs: Vec::new(),
       fragment_links: Vec::new(),
       in_heading: false,
@@ -723,8 +721,6 @@ impl ConvertState {
             }
           } else if cc == PIPE_CHAR && (self.escape_ctx & ESC_TABLE) != 0 {
             text_buffer.push_str("\\|");
-          } else if cc == BACKTICK_CHAR && (self.escape_ctx & ESC_CODE_PRE) != 0 {
-            text_buffer.push_str("\\`");
           } else if cc == OPEN_BRACKET_CHAR && (self.escape_ctx & ESC_LINK) != 0 {
             text_buffer.push_str("\\[");
           } else if cc == CLOSE_BRACKET_CHAR && (self.escape_ctx & ESC_LINK) != 0 {
@@ -956,7 +952,11 @@ impl ConvertState {
       let leftover = chunk[run_start..].to_string();
       text_buffer.clear();
       self.parse_text_buffer = text_buffer;
-      if leftover.as_bytes().first().is_some_and(|&c| is_whitespace(c)) {
+      if leftover
+        .as_bytes()
+        .first()
+        .is_some_and(|&c| is_whitespace(c))
+      {
         self.last_char_was_whitespace = false;
       }
       leftover
@@ -1064,6 +1064,7 @@ impl ConvertState {
   }
 
   pub fn get_markdown_chunk(&mut self) -> String {
+    self.flush_streaming_blockquote_lines();
     let buf_len = self.buffer.len();
     // Trailing spaces at the buffer end are never final outside <pre>: a later
     // block close (or a dropped empty element followed by a block) trims them,
@@ -1112,6 +1113,27 @@ impl ConvertState {
     if let Some(&(_, p, _)) = self.open_markers.first() {
       stable_end = stable_end.min(self.buffer[..p].trim_end_matches(['\n', ' ']).len());
     }
+    if let Some(span) = self.code_spans.first() {
+      stable_end = stable_end.min(
+        self.buffer[..span.output_start]
+          .trim_end_matches(['\n', ' '])
+          .len(),
+      );
+    }
+    if let Some(fence) = &self.code_fence {
+      stable_end = stable_end.min(
+        self.buffer[..fence.output_start]
+          .trim_end_matches(['\n', ' '])
+          .len(),
+      );
+    }
+    if let Some(frame) = self.blockquotes.first() {
+      stable_end = stable_end.min(
+        self.buffer[..frame.content_start]
+          .trim_end_matches(['\n', ' '])
+          .len(),
+      );
+    }
     // An open `<a>`'s close can rewrite the buffer back to `link_bracket_pos`
     // (emptyLinkText drop, selfLinkHeadings, redundantLinks, GFM autolink). Hold the
     // yield boundary there so a link that turns out empty never leaks a stray `[`.
@@ -1120,7 +1142,11 @@ impl ConvertState {
     // so hold them back too or a yielded space would be silently removed.
     // Mirrors the same guard in `drain_streamed_prefix`.
     if self.depth_map[TAG_A as usize] > 0 {
-      stable_end = stable_end.min(self.buffer[..self.link_bracket_pos].trim_end_matches(['\n', ' ']).len());
+      stable_end = stable_end.min(
+        self.buffer[..self.link_bracket_pos]
+          .trim_end_matches(['\n', ' '])
+          .len(),
+      );
     }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let mut start = self.last_yielded_length.max(leading);
@@ -1197,6 +1223,15 @@ impl ConvertState {
     if let Some(&(_, output_start, _)) = self.open_markers.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, output_start));
     }
+    if let Some(span) = self.code_spans.first() {
+      drain_end = drain_end.min(keep_two_before(&self.buffer, span.output_start));
+    }
+    if let Some(fence) = &self.code_fence {
+      drain_end = drain_end.min(keep_two_before(&self.buffer, fence.output_start));
+    }
+    if let Some(frame) = self.blockquotes.first() {
+      drain_end = drain_end.min(keep_two_before(&self.buffer, frame.content_start));
+    }
     if drain_end == 0 {
       return;
     }
@@ -1222,6 +1257,17 @@ impl ConvertState {
     for (_, output_start, content_start) in &mut self.open_markers {
       *output_start -= drain_end;
       *content_start -= drain_end;
+    }
+    for span in &mut self.code_spans {
+      span.output_start -= drain_end;
+      span.content_start -= drain_end;
+    }
+    if let Some(fence) = &mut self.code_fence {
+      fence.output_start -= drain_end;
+      fence.content_start -= drain_end;
+    }
+    for frame in &mut self.blockquotes {
+      frame.content_start -= drain_end;
     }
   }
 }

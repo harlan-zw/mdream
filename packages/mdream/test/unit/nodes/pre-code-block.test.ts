@@ -35,6 +35,20 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
     expect(htmlToMarkdown('<pre>line1\nline2\n  indented</pre>', { engine })).toBe('```\nline1\nline2\n  indented\n```')
   })
 
+  it('widens fences only for line-leading matching runs', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<pre><code>Contains ```triple``` inside.</code></pre>', { engine }))
+      .toBe('```\nContains ```triple``` inside.\n```')
+    expect(htmlToMarkdown('<pre><code>before\n```line-leading\n````\nafter</code></pre>', { engine }))
+      .toBe('`````\nbefore\n```line-leading\n````\nafter\n`````')
+    expect(htmlToMarkdown('<pre>before\n```\nafter</pre>', { engine }))
+      .toBe('````\nbefore\n```\nafter\n````')
+    expect(htmlToMarkdown('<pre><code class="language-js`x">~~~\ncode</code></pre>', { engine }))
+      .toBe('~~~~js`x\n~~~\ncode\n~~~~')
+    expect(htmlToMarkdown('<div><pre class="language-js`x">a\nb\n\n</pre><a href="#x">link</a></div>', { engine }))
+      .toBe('~~~js`x\na\nb\n\n\n~~~\n\n[link](#x)')
+  })
+
   it('leaves the existing <pre><code> behaviour unchanged', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<pre><code>const x = 1</code></pre>', { engine })).toBe('```\nconst x = 1\n```')
@@ -81,5 +95,18 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
     const chunks = ['<p>A</p><pre>line one\n', 'line two</pre><p>B</p>']
     const result = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { engine }))
     expect(result.trim()).toBe('A\n\n```\nline one\nline two\n```\n\nB')
+  })
+
+  it('widens fences at every stream split', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<pre><code>before\n```line-leading\n````\nafter</code></pre>'
+    const expected = htmlToMarkdown(html, { engine })
+    for (let split = 1; split < html.length; split++) {
+      const result = await collect(streamHtmlToMarkdown(
+        chunkedStream([html.slice(0, split), html.slice(split)]),
+        { engine },
+      ))
+      expect(result, `split at ${split}`).toBe(expected)
+    }
   })
 })

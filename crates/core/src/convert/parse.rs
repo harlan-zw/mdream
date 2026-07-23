@@ -302,6 +302,8 @@ impl ConvertState {
       first_block_parent_index.map_or(0, |idx| self.stack[idx].child_text_node_index);
 
     let mut text = std::mem::take(text_buffer);
+    let mut tailwind_prefix = None;
+    let mut tailwind_suffix = None;
     let is_first_text_in_block = first_block_child_text_count == 0
       && (first_block_parent_index.is_some()
         || self.buffer.is_empty()
@@ -324,7 +326,16 @@ impl ConvertState {
     }
 
     if self.has_encoded_html_entity {
-      if let Cow::Owned(decoded) = decode_html_entities(&text) {
+      let protect_decoded_entity_references = !self.plain_text
+        && self.depth_map[TAG_PRE as usize] == 0
+        && self.depth_map[TAG_CODE as usize] == 0
+        && !self.in_raw_html_block();
+      let decoded = if protect_decoded_entity_references {
+        decode_html_entities_for_markdown(&text)
+      } else {
+        decode_html_entities(&text)
+      };
+      if let Cow::Owned(decoded) = decoded {
         text = decoded;
       }
       self.has_encoded_html_entity = false;
@@ -337,20 +348,8 @@ impl ConvertState {
       if tw.hidden {
         excludes_text_nodes = true;
       } else if !excludes_text_nodes {
-        let mut modified = false;
-        let mut new_text = String::new();
-        if let Some(p) = &tw.prefix {
-          new_text.push_str(p);
-          modified = true;
-        }
-        new_text.push_str(&text);
-        if let Some(s) = &tw.suffix {
-          new_text.push_str(s);
-          modified = true;
-        }
-        if modified {
-          text = fix_redundant_delimiters(&new_text);
-        }
+        tailwind_prefix = tw.prefix.clone();
+        tailwind_suffix = tw.suffix.clone();
       }
     }
 
@@ -366,7 +365,14 @@ impl ConvertState {
     if !excludes_text_nodes {
       let depth = self.depth;
       let index = self.stack.last().map_or(0, |n| n.current_walk_index);
-      self.emit_text(&text, contains_whitespace, depth, index);
+      self.emit_text_with_generated_markdown(
+        &text,
+        contains_whitespace,
+        depth,
+        index,
+        tailwind_prefix.as_deref(),
+        tailwind_suffix.as_deref(),
+      );
     }
 
     // Recover String allocation
@@ -620,14 +626,7 @@ impl ConvertState {
       }
       match id {
         TAG_TABLE if !self.plain_text => self.escape_ctx |= ESC_TABLE,
-        TAG_CODE | TAG_PRE => {
-          if !self.plain_text {
-            self.escape_ctx |= ESC_CODE_PRE;
-          }
-          if id == TAG_PRE {
-            self.in_pre = true;
-          }
-        }
+        TAG_PRE => self.in_pre = true,
         TAG_A if !self.plain_text => self.escape_ctx |= ESC_LINK,
         TAG_BLOCKQUOTE if !self.plain_text => self.escape_ctx |= ESC_BLOCKQUOTE,
         _ => {}
@@ -1332,16 +1331,8 @@ impl ConvertState {
   pub(crate) fn update_escape_ctx_on_close(&mut self, id: u8) {
     match id {
       TAG_TABLE if self.depth_map[id as usize] == 0 => self.escape_ctx &= !ESC_TABLE,
-      TAG_CODE
-        if self.depth_map[TAG_CODE as usize] == 0 && self.depth_map[TAG_PRE as usize] == 0 =>
-      {
-        self.escape_ctx &= !ESC_CODE_PRE;
-      }
       TAG_PRE if self.depth_map[TAG_PRE as usize] == 0 => {
         self.in_pre = false;
-        if self.depth_map[TAG_CODE as usize] == 0 {
-          self.escape_ctx &= !ESC_CODE_PRE;
-        }
       }
       TAG_A if self.depth_map[id as usize] == 0 => self.escape_ctx &= !ESC_LINK,
       TAG_BLOCKQUOTE if self.depth_map[id as usize] == 0 => self.escape_ctx &= !ESC_BLOCKQUOTE,

@@ -10,20 +10,33 @@ use generated::{
 
 #[inline]
 pub(crate) fn decode_html_entities(text: &str) -> Cow<'_, str> {
-  decode_html_entities_in_context(text, false)
+  decode_html_entities_in_context(text, false, false)
+}
+
+#[inline]
+pub(crate) fn decode_html_entities_for_markdown(text: &str) -> Cow<'_, str> {
+  decode_html_entities_in_context(text, false, true)
 }
 
 #[inline]
 pub(crate) fn decode_html_attribute_entities(text: &str) -> Cow<'_, str> {
-  decode_html_entities_in_context(text, true)
+  decode_html_entities_in_context(text, true, false)
 }
 
 #[inline]
-fn decode_html_entities_in_context(text: &str, in_attribute: bool) -> Cow<'_, str> {
+fn decode_html_entities_in_context(
+  text: &str,
+  in_attribute: bool,
+  protect_decoded_entity_references: bool,
+) -> Cow<'_, str> {
   if !text.as_bytes().contains(&b'&') {
     return Cow::Borrowed(text);
   }
-  Cow::Owned(decode_html_entities_alloc(text, in_attribute))
+  Cow::Owned(decode_html_entities_alloc(
+    text,
+    in_attribute,
+    protect_decoded_entity_references,
+  ))
 }
 
 /// Resolve a numeric character reference value per the HTML standard.
@@ -51,7 +64,55 @@ fn is_ascii_alphanumeric(byte: u8) -> bool {
   byte.is_ascii_alphanumeric()
 }
 
-fn decode_html_entities_alloc(text: &str, in_attribute: bool) -> String {
+fn is_character_reference_tail(bytes: &[u8], start: usize) -> bool {
+  let mut index = start;
+  if bytes.get(index) == Some(&b'#') {
+    index += 1;
+    let hex = matches!(bytes.get(index), Some(b'x' | b'X'));
+    if hex {
+      index += 1;
+    }
+    let digit_start = index;
+    while let Some(&byte) = bytes.get(index) {
+      if byte.is_ascii_digit() || (hex && byte.is_ascii_hexdigit()) {
+        index += 1;
+      } else {
+        break;
+      }
+    }
+    return index > digit_start && bytes.get(index) == Some(&b';');
+  }
+
+  let name_start = index;
+  while bytes.get(index).is_some_and(u8::is_ascii_alphanumeric) {
+    index += 1;
+  }
+  index > name_start && bytes.get(index) == Some(&b';')
+}
+
+#[inline]
+fn push_decoded_reference(
+  result: &mut String,
+  replacement: &str,
+  bytes: &[u8],
+  next: usize,
+  protect_decoded_entity_references: bool,
+) {
+  if replacement == "&"
+    && protect_decoded_entity_references
+    && is_character_reference_tail(bytes, next)
+  {
+    result.push_str("\\&");
+  } else {
+    result.push_str(replacement);
+  }
+}
+
+fn decode_html_entities_alloc(
+  text: &str,
+  in_attribute: bool,
+  protect_decoded_entity_references: bool,
+) -> String {
   let bytes = text.as_bytes();
   let len = bytes.len();
   let mut result = String::with_capacity(len);
@@ -97,7 +158,20 @@ fn decode_html_entities_alloc(text: &str, in_attribute: bool) -> String {
       }
 
       if end > digit_start {
-        result.push(decode_numeric_ref(code_point));
+        let replacement = decode_numeric_ref(code_point);
+        let next = if end < len && bytes[end] == b';' {
+          end + 1
+        } else {
+          end
+        };
+        if replacement == '&'
+          && protect_decoded_entity_references
+          && is_character_reference_tail(bytes, next)
+        {
+          result.push_str("\\&");
+        } else {
+          result.push(replacement);
+        }
         if end < len && bytes[end] == b';' {
           end += 1;
         }
@@ -120,7 +194,13 @@ fn decode_html_entities_alloc(text: &str, in_attribute: bool) -> String {
       && bytes[name_end] == b';'
       && let Some(replacement) = lookup_named_entity(&bytes[name_start..name_end])
     {
-      result.push_str(replacement);
+      push_decoded_reference(
+        &mut result,
+        replacement,
+        bytes,
+        name_end + 1,
+        protect_decoded_entity_references,
+      );
       i = name_end + 1;
       continue;
     }
@@ -134,7 +214,13 @@ fn decode_html_entities_alloc(text: &str, in_attribute: bool) -> String {
         let ambiguous_attribute =
           in_attribute && next.is_some_and(|byte| byte == b'=' || is_ascii_alphanumeric(byte));
         if !ambiguous_attribute {
-          result.push_str(replacement);
+          push_decoded_reference(
+            &mut result,
+            replacement,
+            bytes,
+            legacy_end,
+            protect_decoded_entity_references,
+          );
           i = legacy_end;
           decoded_legacy = true;
         }

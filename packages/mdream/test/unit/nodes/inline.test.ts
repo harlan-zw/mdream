@@ -163,7 +163,7 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
 
   it('does not mistake literal marker text at the tail for an empty pair', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(htmlToMarkdown('<p><b>x<span>**</span></b></p>', { engine })).toBe('**x****')
+    expect(htmlToMarkdown('<p><b>x<span>**</span></b></p>', { engine })).toBe('**x\\*\\***')
   })
 
   it('drops empty emphasis at every stream split point', async () => {
@@ -210,13 +210,33 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
     expect(chunks.join('').trim()).toBe('**later')
   })
 
-  it('does not hold a block code fence as an inline marker', async () => {
+  it('holds a block code fence until its delimiter is known', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const chunks = await collectChunks(streamHtmlToMarkdown(
       chunkedStream(['<pre><code><span>', 'x</span></code></pre>']),
       { engine },
     ))
-    expect(chunks.slice(0, -1).join(''), 'code fence held until content').toContain('```')
     expect(chunks.join('').trim()).toBe('```\nx\n```')
+  })
+})
+
+describe.each(engines)('gfm inline code delimiters $name', (engineConfig) => {
+  it('widens around backticks and applies required padding', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<code>a `b` c</code>', { engine })).toBe('``a `b` c``')
+    expect(htmlToMarkdown('<code>`edge`</code>', { engine })).toBe('`` `edge` ``')
+  })
+
+  it('matches batch output at every stream split', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<p>before <code>a `b` c</code> after</p>'
+    const expected = htmlToMarkdown(html, { engine })
+    for (let split = 1; split < html.length; split++) {
+      const actual = await collect(streamHtmlToMarkdown(
+        chunkedStream([html.slice(0, split), html.slice(split)]),
+        { engine },
+      ))
+      expect(actual, `split at ${split}`).toBe(expected)
+    }
   })
 })

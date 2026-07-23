@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('links $name', (engineConfig) => {
+  it('does not double escape protected link text', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<a href="/x">a[b] *c*</a>', { engine }))
+      .toBe('[a\\[b\\] \\*c\\*](/x)')
+  })
+
   it('converts simple links', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<a href="https://example.com">Example</a>'

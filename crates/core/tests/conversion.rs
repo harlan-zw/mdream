@@ -156,6 +156,98 @@ fn heading_with_numbered_prefix() {
   assert_eq!(convert("<h1>1. Hello world</h1>"), "# 1. Hello world");
 }
 
+#[test]
+fn prose_br_serializes_as_gfm_hard_break() {
+  const HARD_BREAK: &str = "\\\n";
+
+  for (html, expected) in [
+    ("<p>first<br>second</p>", format!("first{HARD_BREAK}second")),
+    (
+      r"<p>before\<br>after</p>",
+      format!(r"before\\{HARD_BREAK}after"),
+    ),
+    (
+      "<p>first<br><br>third</p>",
+      format!("first{HARD_BREAK}{HARD_BREAK}third"),
+    ),
+    (
+      "<ul><li>first<br>second</li></ul>",
+      format!("- first{HARD_BREAK}  second"),
+    ),
+    (
+      "<blockquote><p>first<br>second</p></blockquote>",
+      format!("> first{HARD_BREAK}> second"),
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn br_stays_html_where_a_markdown_line_break_is_not_safe() {
+  for (html, expected) in [
+    (
+      "<table><tr><td>first<br>second</td></tr></table>",
+      "| first<br>second |\n| --- |",
+    ),
+    ("<h1>first<br>second</h1>", "# first<br>second"),
+    (
+      "<address>first<br>second</address>",
+      "<address>first<br>second</address>",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn gfm_syntax_in_text_is_escaped() {
+  for (html, expected) in [
+    ("<p># heading</p>", r"\# heading"),
+    ("<p>#</p>", r"\#"),
+    ("<p>- item</p>", r"\- item"),
+    ("<p>-</p>", r"\-"),
+    ("<p>> quote</p>", r"\> quote"),
+    ("<p>1. item</p>", r"1\. item"),
+    ("<p>---</p>", r"\---"),
+    ("<p>[label](url)</p>", r"\[label](url)"),
+    (
+      "<p>foo *bar* ~~baz~~ `qux`</p>",
+      r"foo \*bar\* \~\~baz\~\~ \`qux\`",
+    ),
+    ("<p>&#35; heading</p>", r"\# heading"),
+    ("<p>&amp;copy;</p>", r"\&copy;"),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn gfm_text_escaping_preserves_generated_markers_and_code() {
+  assert_eq!(
+    convert("<h2># Heading #</h2><p>#hashtag</p><p>Just a - dash</p>"),
+    "## # Heading #\n\n#hashtag\n\nJust a - dash"
+  );
+  assert_eq!(
+    convert(
+      "<p><strong>bold</strong> <del>gone</del> <code>*raw*</code></p><pre><code># raw</code></pre>"
+    ),
+    "**bold** ~~gone~~ `*raw*`\n\n```\n# raw\n```"
+  );
+}
+
+#[test]
+fn gfm_text_escaping_does_not_repeat_context_escapes() {
+  assert_eq!(
+    convert(r#"<a href="/x">a[b] *c*</a>"#),
+    r"[a\[b\] \*c\*](/x)"
+  );
+  assert_eq!(
+    convert("<table><tr><td>a|b</td></tr></table>"),
+    "| a\\|b |\n| --- |"
+  );
+}
+
 // ── Links ──
 
 #[test]
@@ -172,6 +264,24 @@ fn link_with_title() {
     convert(r#"<a href="https://example.com" title="Example Site">Example</a>"#),
     r#"[Example](https://example.com "Example Site")"#
   );
+}
+
+#[test]
+fn gfm_links_have_reparsable_destinations_and_titles() {
+  for (html, expected) in [
+    (r#"<a href="">text</a>"#, r#"[text]()"#),
+    (r#"<a href="docs/a b">text</a>"#, r#"[text](<docs/a b>)"#),
+    (
+      r#"<a href="docs/(a)\file">text</a>"#,
+      r#"[text](<docs/(a)\\file>)"#,
+    ),
+    (
+      r#"<a href="/x" title="say &quot;hi&quot; \ path">text</a>"#,
+      r#"[text](/x "say \"hi\" \\ path")"#,
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
 }
 
 #[test]
@@ -279,7 +389,7 @@ fn autolink_collapses_ftp_urls() {
 fn autolink_not_collapsed_with_whitespace_in_href() {
   assert_eq!(
     convert(r#"<a href="https://example.com/a b">https://example.com/a b</a>"#),
-    "[https://example.com/a b](https://example.com/a b)"
+    "[https://example.com/a b](<https://example.com/a b>)"
   );
 }
 
@@ -312,6 +422,22 @@ fn image() {
     convert(r#"<img src="img.png" alt="alt text">"#),
     "![alt text](img.png)"
   );
+}
+
+#[test]
+fn gfm_images_have_literal_alt_text_and_reparsable_titles() {
+  for (html, expected) in [
+    (
+      r#"<img src="/x.png" alt="a ] \ *bold* _em_ &#96;code&#96;">"#,
+      r"![a \] \\ \*bold\* \_em\_ \`code\`](/x.png)",
+    ),
+    (
+      r#"<img src="/x.png" alt="alt" title="say &quot;hi&quot; \ path">"#,
+      r#"![alt](/x.png "say \"hi\" \\ path")"#,
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
 }
 
 #[test]
@@ -370,6 +496,40 @@ fn inline_code() {
   assert_eq!(
     convert("<p>Use the <code>print()</code> function</p>"),
     "Use the `print()` function"
+  );
+}
+
+#[test]
+fn code_delimiters_widen_for_literal_backticks() {
+  assert_eq!(convert("<code>a `b` c</code>"), "``a `b` c``");
+  assert_eq!(convert("<code>`edge`</code>"), "`` `edge` ``");
+  assert_eq!(
+    convert("<pre><code>Contains ```triple``` inside.</code></pre>"),
+    "```\nContains ```triple``` inside.\n```"
+  );
+  assert_eq!(
+    convert("<pre><code>before\n```line-leading\n````\nafter</code></pre>"),
+    "`````\nbefore\n```line-leading\n````\nafter\n`````"
+  );
+  assert_eq!(
+    convert("<pre>before\n```\nafter</pre>"),
+    "````\nbefore\n```\nafter\n````"
+  );
+  assert_eq!(
+    convert(
+      r#"<pre><code class="language-js`x">~~~
+code</code></pre>"#
+    ),
+    "~~~~js`x\n~~~\ncode\n~~~~"
+  );
+  assert_eq!(
+    convert(
+      r##"<div><pre class="language-js`x">a
+b
+
+</pre><a href="#x">link</a></div>"##
+    ),
+    "~~~js`x\na\nb\n\n\n~~~\n\n[link](#x)"
   );
 }
 
@@ -444,7 +604,10 @@ fn empty_figcaption_emits_no_markers() {
 fn non_empty_emphasis_unchanged_by_empty_drop() {
   assert_eq!(convert("<p><b>hi</b></p>"), "**hi**");
   assert_eq!(convert("<p><b><em>x</em></b></p>"), "***x***");
-  assert_eq!(convert("<p><b><img src=\"x.png\" alt=\"y\"></b></p>"), "**![y](x.png)**");
+  assert_eq!(
+    convert("<p><b><img src=\"x.png\" alt=\"y\"></b></p>"),
+    "**![y](x.png)**"
+  );
   // A nested empty pair after real content still drops, without dropping the
   // outer marker that content already made permanent.
   assert_eq!(convert("<p><b>x<i></i></b></p>"), "**x**");
@@ -461,7 +624,7 @@ fn empty_inline_code_in_list_drops_owned_separator() {
 fn literal_marker_text_at_emphasis_tail_not_mistaken_for_empty() {
   // The buffer ends with the literal text "**" when the element closes;
   // the recorded marker position must prevent a false drop.
-  assert_eq!(convert("<p><b>x<span>**</span></b></p>"), "**x****");
+  assert_eq!(convert("<p><b>x<span>**</span></b></p>"), r"**x\*\***");
 }
 
 #[test]
@@ -549,13 +712,13 @@ fn literal_exit_override_releases_open_marker() {
 }
 
 #[test]
-fn block_code_fence_is_not_tracked_as_inline_marker() {
+fn block_code_fence_is_held_until_its_delimiter_is_known() {
   let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
   let first = stream.process_chunk("<pre><code><span>");
-  assert!(
-    first.contains("```"),
-    "code fence held in buffer: {first:?}"
-  );
+  assert_eq!(first, "");
+  let mut rest = stream.process_chunk("x</span></code></pre>");
+  rest.push_str(&stream.finish());
+  assert_eq!(rest, "```\nx\n```");
 }
 
 // A <pre> whose content ends in blank lines followed by an inline sibling must
@@ -621,6 +784,79 @@ fn blockquote_with_image() {
     convert(r#"<blockquote>Quote with <img src="image.jpg" alt="image"></blockquote>"#),
     "> Quote with ![image](image.jpg)"
   );
+}
+
+#[test]
+fn blockquote_keeps_block_children_inside_the_quote() {
+  for (name, html, expected) in [
+    (
+      "unordered lists",
+      "<blockquote><ul><li>one</li><li>two</li></ul></blockquote>",
+      "> - one\n> - two",
+    ),
+    (
+      "ordered lists",
+      "<blockquote><ol><li>one</li><li>two</li></ol></blockquote>",
+      "> 1. one\n> 2. two",
+    ),
+    (
+      "paragraph followed by list",
+      "<blockquote><p>intro</p><ul><li>one</li></ul></blockquote>",
+      "> intro\n>\n> - one",
+    ),
+    (
+      "text followed by heading",
+      "<blockquote>text<h2>H</h2></blockquote>",
+      "> text\n>\n> ## H",
+    ),
+    (
+      "horizontal rule",
+      "<blockquote>a<hr>b</blockquote>",
+      "> a\n>\n> ---\n> b",
+    ),
+    (
+      "sibling divs",
+      "<blockquote><div>a</div><div>b</div></blockquote>",
+      "> a\n>\n> b",
+    ),
+    (
+      "table surrounded by text",
+      "<blockquote>lead<table><tr><td>a</td></tr></table>tail</blockquote>",
+      "> lead\n>\n> | a |\n> | --- |\n>\n> tail",
+    ),
+    (
+      "section surrounded by text",
+      "<blockquote>lead<section>x</section>tail</blockquote>",
+      "> lead\n>\n> x\n> tail",
+    ),
+    (
+      "article surrounded by text",
+      "<blockquote>lead<article>x</article>tail</blockquote>",
+      "> lead\n>\n> x\n> tail",
+    ),
+    (
+      "nav surrounded by text",
+      "<blockquote>lead<nav>x</nav>tail</blockquote>",
+      "> lead\n>\n> x\n> tail",
+    ),
+    (
+      "figure surrounded by text",
+      "<blockquote>lead<figure>x</figure>tail</blockquote>",
+      "> lead\n>\n> x\n> tail",
+    ),
+    (
+      "nested list",
+      "<blockquote><ul><li>one<ul><li>sub</li></ul></li></ul></blockquote>",
+      "> - one\n>   - sub",
+    ),
+    (
+      "blockquote nested in list item",
+      "<ul><li><blockquote><ul><li>x</li><li>y</li></ul></blockquote></li></ul>",
+      "- \n  > - x\n  > - y",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{name}");
+  }
 }
 
 // ── Lists ──
@@ -941,7 +1177,7 @@ fn code_block_preserves_newlines() {
 fn common_entities() {
   assert_eq!(
     convert("<p>&lt;div&gt; &amp; &quot;quotes&quot; &apos;apostrophes&apos;</p>"),
-    r#"<div> & "quotes" 'apostrophes'"#
+    r#"\<div> & "quotes" 'apostrophes'"#
   );
 }
 
@@ -1922,7 +2158,7 @@ fn named_entities_accented() {
 #[test]
 fn named_entities_xml_defaults() {
   assert_eq!(convert("<p>&lt;</p>"), "<");
-  assert_eq!(convert("<p>&gt;</p>"), ">");
+  assert_eq!(convert("<p>&gt;</p>"), r"\>");
   assert_eq!(convert("<p>&amp;</p>"), "&");
   assert_eq!(convert("<p>&quot;</p>"), "\"");
   assert_eq!(convert("<p>&apos;</p>"), "'");
@@ -2614,28 +2850,33 @@ fn wrap_preserves_inline_spacing() {
 
 #[test]
 fn br_preserves_a_line_break_with_and_without_wrapping() {
+  const HARD_BREAK: &str = "\\\n";
   let html = "<div>abc def ghi jkl mno<br/>111 222 333 444 555 666 777 888 999 000 abc</div>";
 
   assert_eq!(
     convert(html),
-    "abc def ghi jkl mno\n111 222 333 444 555 666 777 888 999 000 abc"
+    format!("abc def ghi jkl mno{HARD_BREAK}111 222 333 444 555 666 777 888 999 000 abc")
   );
   assert_eq!(
     convert_wrapped(html, 40),
-    "abc def ghi jkl mno\n111 222 333 444 555 666 777 888 999 000\nabc"
+    format!("abc def ghi jkl mno{HARD_BREAK}111 222 333 444 555 666 777 888 999 000\nabc")
   );
-  assert_eq!(convert("<p>first <br>second</p>"), "first\nsecond");
+  assert_eq!(
+    convert("<p>first <br>second</p>"),
+    format!("first{HARD_BREAK}second")
+  );
 }
 
 #[test]
 fn br_keeps_nested_block_continuation_prefixes() {
+  const HARD_BREAK: &str = "\\\n";
   assert_eq!(
     convert("<ul><li>first<br>second</li></ul>"),
-    "- first\n  second"
+    format!("- first{HARD_BREAK}  second")
   );
   assert_eq!(
     convert("<blockquote><p>first<br>second</p></blockquote>"),
-    "> first\n> second"
+    format!("> first{HARD_BREAK}> second")
   );
   assert_eq!(
     convert("<address>first<br>second</address>"),

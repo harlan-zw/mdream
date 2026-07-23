@@ -7,7 +7,7 @@ describe.each(engines)('html Entities $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>&lt;div&gt; &amp; &quot;quotes&quot; &apos;apostrophes&apos;</p>'
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('<div> & "quotes" \'apostrophes\'')
+    expect(markdown).toBe('\\<div> & "quotes" \'apostrophes\'')
   })
 
   it('decodes numeric entities', async () => {
@@ -15,6 +15,11 @@ describe.each(engines)('html Entities $name', (engineConfig) => {
     const html = '<p>&#169; &#8212; &#x1F600;</p>'
     const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('© — 😀')
+  })
+
+  it('preserves a literal entity reference after HTML decoding', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p>&amp;copy;</p>', { engine })).toBe('\\&copy;')
   })
 })
 

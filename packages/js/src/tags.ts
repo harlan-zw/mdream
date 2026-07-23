@@ -157,6 +157,54 @@ export function resolveUrl(url: string, origin?: string): string {
   return url
 }
 
+function serializeMarkdownDestination(destination: string): string {
+  if (!/[\t\n\f\r ()\\<>]/.test(destination))
+    return destination
+
+  let escaped = ''
+  for (const character of destination) {
+    if (character === '\\' || character === '<' || character === '>')
+      escaped += '\\'
+    escaped += character
+  }
+  return `<${escaped}>`
+}
+
+function stripsEmptyLink(state: HandlerContext['state'], href: string): boolean {
+  const clean = state.options?.clean
+  if (!(clean === true || (typeof clean === 'object' && clean.emptyLinks)))
+    return false
+  return href === '#'
+    || href.startsWith('javascript:')
+    || href.startsWith('data:')
+    || href.startsWith('vbscript:')
+}
+
+function serializeMarkdownTitle(title: string): string {
+  let escaped = ''
+  for (const character of title) {
+    if (character === '\\' || character === '"')
+      escaped += '\\'
+    escaped += character
+  }
+  return escaped
+}
+
+function serializeMarkdownResource(destination: string, title?: string): string {
+  const serializedTitle = title ? ` "${serializeMarkdownTitle(title)}"` : ''
+  return `(${serializeMarkdownDestination(destination)}${serializedTitle})`
+}
+
+function serializeImageDescription(alt: string): string {
+  let escaped = ''
+  for (const character of alt) {
+    if ('\\[]*_`~<&'.includes(character))
+      escaped += '\\'
+    escaped += character
+  }
+  return escaped
+}
+
 // GFM autolink shorthand: only inline-syntax-safe absolute URIs are eligible
 // for `<url>` rendering. Conservative scheme list matches the Rust core.
 function isAutolinkUri(s: string): boolean {
@@ -318,9 +366,15 @@ export const tagHandlers: Record<number, TagHandler> = {
         || depthMap[TAG_H6]) {
         return '<br>'
       }
+      if (depthMap[TAG_PRE])
+        return '\n'
 
-      const prefix = continuationPrefix(node, state.listIndentWidths || [])
-      return `\n${prefix}`
+      const prefix = continuationPrefix(
+        node,
+        state.listIndentWidths || [],
+        !state.bufferedBlockquoteDepth,
+      )
+      return `\\\n${prefix}`
     },
     isSelfClosing: true,
     spacing: NO_SPACING,
@@ -367,16 +421,10 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_BLOCKQUOTE]: {
     enter: ({ state }) => {
-      const depth = state.depthMap?.[TAG_BLOCKQUOTE] || 1
-      let prefix = '> '.repeat(depth)
-
-      // Add indentation if inside a list item
-      const liDepth = state.depthMap?.[TAG_LI] || 0
-      if (liDepth > 0) {
-        prefix = `\n${state.listIndent}${prefix}`
-      }
-
-      return prefix
+      // The processor prefixes the completed subtree once every structural
+      // newline is known. Preserve the list marker's trailing space here.
+      if ((state.depthMap?.[TAG_LI] || 0) > 0)
+        return '\n'
     },
     spacing: BLOCKQUOTE_SPACING,
   },
@@ -506,16 +554,20 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: LIST_ITEM_SPACING,
   },
   [TAG_A]: {
-    enter: ({ node }) => {
-      if (node.attributes?.href) {
+    enter: ({ node, state }) => {
+      if (node.attributes?.href !== undefined) {
+        if (stripsEmptyLink(state, node.attributes.href))
+          return
         return '['
       }
     },
     exit: ({ node, state }) => {
-      if (!node.attributes?.href) {
+      if (node.attributes?.href === undefined) {
         return ''
       }
-      const href = resolveUrl(node.attributes?.href || '', state.options?.origin)
+      if (stripsEmptyLink(state, node.attributes.href))
+        return ''
+      const href = resolveUrl(node.attributes.href, state.options?.origin)
       let title = node.attributes?.title
       // Check if title matches the last content to avoid duplication
       const lastContent = state.lastContentCache
@@ -546,7 +598,7 @@ export const tagHandlers: Record<number, TagHandler> = {
           return ''
         }
       }
-      return title ? `](${href} "${title}")` : `](${href})`
+      return `]${serializeMarkdownResource(href, title)}`
     },
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
@@ -556,7 +608,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     enter: ({ node, state }) => {
       const alt = node.attributes?.alt || ''
       const src = resolveUrl(node.attributes?.src || '', state.options?.origin)
-      return `![${alt}](${src})`
+      return `![${serializeImageDescription(alt)}]${serializeMarkdownResource(src, node.attributes?.title)}`
     },
     collapsesInnerWhiteSpace: true,
     isSelfClosing: true,
@@ -671,16 +723,6 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_P]: {
     enter: ({ state }) => {
-      const bqDepth = state.depthMap?.[TAG_BLOCKQUOTE] || 0
-      if (bqDepth > 0) {
-        const lastEntry = state.buffer.at(-1)
-        const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
-        // Only add separator if there's preceding text content (not the first <p> in the blockquote)
-        if (lastChar && lastChar !== '\n' && lastChar !== ' ' && lastChar !== '>') {
-          const prefix = '> '.repeat(bqDepth)
-          return `\n${prefix.trimEnd()}\n${prefix}`
-        }
-      }
       if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
