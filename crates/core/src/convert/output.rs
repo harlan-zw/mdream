@@ -521,19 +521,20 @@ impl ConvertState {
             content_start: self.buffer.len(),
           });
         }
-      } else if !self.pre_own_fence && !self.in_table_cell() {
-        if let Some(emitted) = output.as_deref() {
-          let output_start = self.buffer.len() - emitted.len();
-          let language =
-            Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
-              .to_string();
-          self.start_code_fence(
-            output_start,
-            self.buffer.len(),
-            language,
-            self.list_indent.clone(),
-          );
-        }
+      } else if !self.pre_own_fence
+        && !self.in_table_cell()
+        && let Some(emitted) = output.as_deref()
+      {
+        let output_start = self.buffer.len() - emitted.len();
+        let language =
+          Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
+            .to_string();
+        self.start_code_fence(
+          output_start,
+          self.buffer.len(),
+          language,
+          self.list_indent.clone(),
+        );
       }
     }
 
