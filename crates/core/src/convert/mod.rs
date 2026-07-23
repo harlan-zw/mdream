@@ -28,6 +28,18 @@ const ESC_TABLE: u8 = 1;
 const ESC_LINK: u8 = 4;
 const ESC_BLOCKQUOTE: u8 = 8;
 
+#[inline(always)]
+fn is_inline_gfm_hazard(byte: u8) -> bool {
+  const LOW: u64 = (1 << b'*') | (1 << b'<');
+  const HIGH: u64 = (1 << (b'[' - 64))
+    | (1 << (b'\\' - 64))
+    | (1 << (b'_' - 64))
+    | (1 << (b'`' - 64))
+    | (1 << (b'~' - 64));
+  let mask = if byte < 64 { LOW } else { HIGH };
+  (mask >> (byte & 63)) & 1 != 0
+}
+
 struct CodeSpanState {
   output_start: usize,
   content_start: usize,
@@ -253,6 +265,7 @@ pub struct ConvertState {
   last_char_was_whitespace: bool,
   text_buffer_contains_whitespace: bool,
   text_buffer_contains_non_whitespace: bool,
+  text_buffer_has_inline_gfm_hazard: bool,
   just_closed_tag: bool,
   is_first_text_in_element: bool,
   in_non_nesting: bool,
@@ -387,6 +400,8 @@ pub struct ConvertState {
   pre_fence_pending: bool,
   pre_fence_lang: String,
   pre_own_fence: bool,
+  #[cfg(test)]
+  gfm_escape_slow_path_calls: usize,
 }
 
 impl ConvertState {
@@ -407,6 +422,7 @@ impl ConvertState {
       last_char_was_whitespace: true,
       text_buffer_contains_whitespace: false,
       text_buffer_contains_non_whitespace: false,
+      text_buffer_has_inline_gfm_hazard: false,
       just_closed_tag: false,
       is_first_text_in_element: false,
       in_non_nesting: false,
@@ -489,6 +505,8 @@ impl ConvertState {
       pre_fence_pending: false,
       pre_fence_lang: String::new(),
       pre_own_fence: false,
+      #[cfg(test)]
+      gfm_escape_slow_path_calls: 0,
     };
     // Resolve clean config into bitmask
     let effective_clean_urls;
@@ -643,6 +661,7 @@ impl ConvertState {
         if cc > 32
           && cc < 0x80
           && cc != AMPERSAND_CHAR
+          && !is_inline_gfm_hazard(cc)
           && self.escape_ctx == 0
           && !self.in_non_nesting
           && !self.in_pre
@@ -651,7 +670,12 @@ impl ConvertState {
           i += 1;
           while i < chunk_length {
             let c = bytes[i];
-            if c <= 32 || c >= 0x80 || c == LT_CHAR || c == AMPERSAND_CHAR {
+            if c <= 32
+              || c >= 0x80
+              || c == LT_CHAR
+              || c == AMPERSAND_CHAR
+              || is_inline_gfm_hazard(c)
+            {
               break;
             }
             i += 1;
@@ -683,6 +707,9 @@ impl ConvertState {
 
         if cc == AMPERSAND_CHAR {
           self.has_encoded_html_entity = true;
+        }
+        if cc > 32 && cc < 0x80 && is_inline_gfm_hazard(cc) {
+          self.text_buffer_has_inline_gfm_hazard = true;
         }
 
         if is_whitespace(cc) {
@@ -900,6 +927,7 @@ impl ConvertState {
           // `<` followed by whitespace or `>` is not a tag: treat as literal text
           text_buffer.push(bytes[i] as char);
           self.text_buffer_contains_non_whitespace = true;
+          self.text_buffer_has_inline_gfm_hazard = true;
           self.last_char_was_whitespace = false;
           self.just_closed_tag = false;
           i += 1;

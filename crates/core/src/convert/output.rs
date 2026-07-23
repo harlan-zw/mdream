@@ -2,58 +2,63 @@
 
 use super::*;
 
-fn serialize_markdown_destination(destination: &str) -> Cow<'_, str> {
-  if !destination.bytes().any(|byte| {
-    matches!(
-      byte,
-      b'\t' | b'\n' | 0x0C | b'\r' | b' ' | b'(' | b')' | b'\\' | b'<' | b'>'
-    )
-  }) {
-    return Cow::Borrowed(destination);
-  }
+const DESTINATION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 80, 0, 0, 0, 16, 0, 0, 0, 0];
+const TITLE_ESCAPES: [u8; 16] = [0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0];
+const IMAGE_DESCRIPTION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 64, 4, 0, 16, 0, 0, 0, 184, 1, 0, 0, 64];
 
-  let mut escaped = String::with_capacity(destination.len() + 2);
-  escaped.push('<');
-  for character in destination.chars() {
-    if matches!(character, '\\' | '<' | '>') {
-      escaped.push('\\');
+#[inline(never)]
+fn write_ascii_escaped(output: &mut String, value: &str, escapes: &[u8; 16]) {
+  let bytes = value.as_bytes();
+  let mut copied = 0usize;
+  let mut index = 0usize;
+  while index < bytes.len() {
+    let byte = bytes[index];
+    if byte < 128 && escapes[(byte >> 3) as usize] & (1 << (byte & 7)) != 0 {
+      output.push_str(&value[copied..index]);
+      output.push('\\');
+      copied = index;
     }
-    escaped.push(character);
+    index += 1;
   }
-  escaped.push('>');
-  Cow::Owned(escaped)
+  output.push_str(&value[copied..]);
 }
 
-fn write_markdown_title(output: &mut String, title: &str) {
-  for character in title.chars() {
-    if matches!(character, '\\' | '"') {
-      output.push('\\');
-    }
-    output.push(character);
+fn write_markdown_destination(output: &mut String, destination: &str) {
+  let bytes = destination.as_bytes();
+  let mut index = 0usize;
+  while index < bytes.len()
+    && !matches!(
+      bytes[index],
+      b'\t' | b'\n' | 0x0C | b'\r' | b' ' | b'(' | b')' | b'\\' | b'<' | b'>'
+    )
+  {
+    index += 1;
   }
+  if index == bytes.len() {
+    output.push_str(destination);
+    return;
+  }
+
+  output.push('<');
+  write_ascii_escaped(output, destination, &DESTINATION_ESCAPES);
+  output.push('>');
 }
 
 fn write_markdown_resource(output: &mut String, destination: &str, title: Option<&str>) {
   output.push('(');
-  output.push_str(&serialize_markdown_destination(destination));
-  if let Some(title) = title.filter(|title| !title.is_empty()) {
+  write_markdown_destination(output, destination);
+  if let Some(title) = title
+    && !title.is_empty()
+  {
     output.push_str(" \"");
-    write_markdown_title(output, title);
+    write_ascii_escaped(output, title, &TITLE_ESCAPES);
     output.push('"');
   }
   output.push(')');
 }
 
 fn write_image_description(output: &mut String, alt: &str) {
-  for character in alt.chars() {
-    if matches!(
-      character,
-      '\\' | '[' | ']' | '*' | '_' | '`' | '~' | '<' | '&'
-    ) {
-      output.push('\\');
-    }
-    output.push(character);
-  }
+  write_ascii_escaped(output, alt, &IMAGE_DESCRIPTION_ESCAPES);
 }
 
 impl ConvertState {
@@ -105,6 +110,8 @@ impl ConvertState {
       .unwrap_or(0)
   }
 
+  #[cold]
+  #[inline(never)]
   fn finalize_code_span(&mut self, span: CodeSpanState) -> String {
     let max_run = Self::max_backtick_run(&self.buffer[span.content_start..]);
     let delimiter = "`".repeat((max_run + 1).max(1));
@@ -128,6 +135,8 @@ impl ConvertState {
     }
   }
 
+  #[cold]
+  #[inline(never)]
   fn start_code_fence(
     &mut self,
     output_start: usize,
@@ -147,6 +156,8 @@ impl ConvertState {
     });
   }
 
+  #[cold]
+  #[inline(never)]
   fn finalize_code_fence(&mut self) -> Option<String> {
     let fence = self.code_fence.take()?;
     let marker = if fence.language.contains('`') {
@@ -188,6 +199,8 @@ impl ConvertState {
     output_start
   }
 
+  #[cold]
+  #[inline(never)]
   fn finalize_blockquote(&mut self) {
     let Some(frame) = self.blockquotes.pop() else {
       return;
@@ -459,11 +472,14 @@ impl ConvertState {
       && let Some(id) = tag_id
     {
       if id == TAG_A {
-        // emptyLinks: skip href="#" or "javascript:"
+        // emptyLinks: skip hrefs that cannot represent meaningful navigation.
         if self.clean_flags & CLEAN_EMPTY_LINKS != 0 {
           let node = &self.stack[self.stack.len() - 1];
           if let Some(href) = node.attributes.get("href")
-            && (href == "#" || href.starts_with("javascript:"))
+            && (href == "#"
+              || href.starts_with("javascript:")
+              || href.starts_with("data:")
+              || href.starts_with("vbscript:"))
           {
             self.skip_current_link = true;
             self.last_node_is_inline = is_inline;
@@ -660,7 +676,7 @@ impl ConvertState {
         } else {
           output = self.get_exit_output(node);
         }
-      } else {
+      } else if self.plain_text || tag_id != Some(TAG_A) {
         output = self.get_exit_output(node);
       }
     }
@@ -990,6 +1006,10 @@ impl ConvertState {
     depth: usize,
     index: usize,
   ) {
+    let has_inline_gfm_hazard = text.bytes().any(|byte| {
+      (byte > 32 && byte < 0x80 && is_inline_gfm_hazard(byte)) || matches!(byte, b'\n' | b'\r')
+    });
+    self.text_buffer_has_inline_gfm_hazard |= has_inline_gfm_hazard;
     self.emit_text_with_generated_markdown(text, contains_whitespace, depth, index, None, None);
   }
 
@@ -1002,6 +1022,7 @@ impl ConvertState {
     generated_prefix: Option<&str>,
     generated_suffix: Option<&str>,
   ) {
+    let has_inline_gfm_hazard = std::mem::take(&mut self.text_buffer_has_inline_gfm_hazard);
     if text.is_empty() {
       return;
     }
@@ -1121,7 +1142,12 @@ impl ConvertState {
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
       && !self.in_raw_html_block()
+      && (has_inline_gfm_hazard || self.starts_with_gfm_block_candidate(text))
     {
+      #[cfg(test)]
+      {
+        self.gfm_escape_slow_path_calls += 1;
+      }
       escaped_storage = self.escape_gfm_text(text);
       escaped_storage.as_ref()
     } else {
@@ -1249,6 +1275,21 @@ impl ConvertState {
     } else {
       Cow::Borrowed(text)
     }
+  }
+
+  #[inline]
+  fn starts_with_gfm_block_candidate(&self, text: &str) -> bool {
+    let Some(mut indent) = self.markdown_line_indent() else {
+      return false;
+    };
+    for byte in text.bytes() {
+      if byte == b' ' && indent < 3 {
+        indent += 1;
+        continue;
+      }
+      return matches!(byte, b'#' | b'-' | b'+' | b'>' | b'0'..=b'9');
+    }
+    false
   }
 
   #[inline]
@@ -1879,32 +1920,6 @@ impl ConvertState {
           None
         }
       }
-      TAG_A => {
-        if let Some(href) = node.attributes.get("href") {
-          let resolved = resolve_url(
-            href,
-            self.options.origin.as_deref(),
-            self.options.clean_urls,
-          );
-          let mut title = node.attributes.get("title").map_or("", String::as_str);
-          if self.last_content_cache_len > 0 {
-            let buf_len = self.buffer.len();
-            let start = buf_len.saturating_sub(self.last_content_cache_len);
-            if self.buffer.is_char_boundary(start) {
-              let cache = &self.buffer[start..];
-              if cache == title {
-                title = "";
-              }
-            }
-          }
-          let mut s = String::with_capacity(resolved.len() + title.len() + 8);
-          s.push(']');
-          write_markdown_resource(&mut s, &resolved, (!title.is_empty()).then_some(title));
-          Some(Cow::Owned(s))
-        } else {
-          Some(Cow::Borrowed(""))
-        }
-      }
       TAG_TABLE => {
         if self.in_table_cell() {
           Some(Cow::Borrowed("</table>"))
@@ -2355,5 +2370,36 @@ mod tests {
     state.write_output(true, false, 2, Some("next"), false);
 
     assert_eq!(state.buffer, "next");
+  }
+
+  #[test]
+  fn safe_prose_skips_the_gfm_escape_slow_path() {
+    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+
+    assert!(
+      state
+        .process_html("<p>ordinary prose with 123 numbers and punctuation.</p>")
+        .is_empty()
+    );
+
+    assert_eq!(state.gfm_escape_slow_path_calls, 0);
+    assert_eq!(
+      state.get_markdown(),
+      "ordinary prose with 123 numbers and punctuation."
+    );
+  }
+
+  #[test]
+  fn syntax_and_entities_use_the_gfm_escape_slow_path() {
+    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+
+    assert!(
+      state
+        .process_html("<p>* literal</p><p>&#42; decoded</p>")
+        .is_empty()
+    );
+
+    assert_eq!(state.gfm_escape_slow_path_calls, 2);
+    assert_eq!(state.get_markdown(), "\\* literal\n\n\\* decoded");
   }
 }

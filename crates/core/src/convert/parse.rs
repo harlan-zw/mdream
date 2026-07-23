@@ -238,8 +238,11 @@ impl ConvertState {
   pub(crate) fn process_text_buffer(&mut self, text_buffer: &mut String) {
     let contains_non_whitespace = self.text_buffer_contains_non_whitespace;
     let contains_whitespace = self.text_buffer_contains_whitespace;
+    let has_inline_gfm_hazard =
+      self.text_buffer_has_inline_gfm_hazard || self.has_encoded_html_entity;
     self.text_buffer_contains_non_whitespace = false;
     self.text_buffer_contains_whitespace = false;
+    self.text_buffer_has_inline_gfm_hazard = false;
 
     // No parent element means this is a top-level (root) text node, e.g. the
     // leading `foo ` in the fragment `foo <sup>bar</sup>`. Such text must
@@ -365,6 +368,7 @@ impl ConvertState {
     if !excludes_text_nodes {
       let depth = self.depth;
       let index = self.stack.last().map_or(0, |n| n.current_walk_index);
+      self.text_buffer_has_inline_gfm_hazard = has_inline_gfm_hazard;
       self.emit_text_with_generated_markdown(
         &text,
         contains_whitespace,

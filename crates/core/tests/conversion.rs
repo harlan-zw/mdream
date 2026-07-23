@@ -1931,6 +1931,16 @@ fn clean_strips_javascript_link() {
 }
 
 #[test]
+fn clean_strips_data_and_vbscript_links() {
+  for href in ["data:text/html,payload", "vbscript:msgbox(1)"] {
+    assert_eq!(
+      convert_with_clean(&format!(r#"<a href="{href}">Click</a>"#), clean_all()),
+      "Click"
+    );
+  }
+}
+
+#[test]
 fn clean_strips_broken_fragment() {
   assert_eq!(
     convert_with_clean(r##"<a href="#nonexistent">Link</a>"##, clean_all()),

@@ -1,7 +1,12 @@
+import type { MdreamOptions, TextNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { createPlugin, htmlToMarkdown, NodeEventEnter, streamHtmlToMarkdown, TEXT_NODE } from '../../src/index'
 
-async function streamConvert(html: string, chunkSize: number): Promise<string> {
+async function streamConvert(
+  html: string,
+  chunkSize: number,
+  options: Partial<MdreamOptions> = {},
+): Promise<string> {
   const stream = new ReadableStream<string>({
     start(controller) {
       for (let index = 0; index < html.length; index += chunkSize)
@@ -10,7 +15,7 @@ async function streamConvert(html: string, chunkSize: number): Promise<string> {
     },
   })
   let output = ''
-  for await (const chunk of streamHtmlToMarkdown(stream))
+  for await (const chunk of streamHtmlToMarkdown(stream, options))
     output += chunk
   return output
 }
@@ -35,6 +40,45 @@ describe('gfm text escaping', () => {
   it('only escapes syntax where plain text could activate it', () => {
     expect(htmlToMarkdown('<h2># Heading #</h2><p>#hashtag</p><p>Just a - dash</p>'))
       .toBe('## # Heading #\n\n#hashtag\n\nJust a - dash')
+  })
+
+  it('escapes syntax introduced by entity decoding', () => {
+    expect(htmlToMarkdown('<p>&#42;x&#42;</p><p>foo&#10;# heading</p>'))
+      .toBe('\\*x\\*\n\nfoo\n\\# heading')
+  })
+
+  it('escapes text replaced or mutated by plugins', async () => {
+    const replaceText = createPlugin({
+      processTextNode: () => ({
+        content: '# plugin *text*',
+        skip: false,
+      }),
+    })
+    const mutateText = createPlugin({
+      beforeNodeProcess(event) {
+        if (event.type === NodeEventEnter && event.node.type === TEXT_NODE)
+          (event.node as TextNode).value = '1. plugin item'
+      },
+    })
+
+    expect(htmlToMarkdown('<p>safe</p>', { hooks: [replaceText] }))
+      .toBe('\\# plugin \\*text\\*')
+    expect(htmlToMarkdown('<p>safe</p>', { hooks: [mutateText] }))
+      .toBe('1\\. plugin item')
+    expect(await streamConvert('<p>safe</p>', 1, { hooks: [replaceText] }))
+      .toBe('\\# plugin \\*text\\*')
+  })
+
+  it('detects block markers after generated output fragments', () => {
+    expect(htmlToMarkdown('<p>before<br><span># heading</span></p>'))
+      .toBe('before\\\n\\# heading')
+    expect(htmlToMarkdown('<p>before<br><span>1. item</span></p>'))
+      .toBe('before\\\n1\\. item')
+  })
+
+  it('handles terminal trigger characters safely', () => {
+    expect(htmlToMarkdown('<p>&lt;</p><p>[</p><p>1</p>'))
+      .toBe('<\n\n\\[\n\n1')
   })
 
   it('keeps generated markers and code content verbatim', () => {

@@ -161,12 +161,9 @@ function serializeMarkdownDestination(destination: string): string {
   if (!/[\t\n\f\r ()\\<>]/.test(destination))
     return destination
 
-  let escaped = ''
-  for (const character of destination) {
-    if (character === '\\' || character === '<' || character === '>')
-      escaped += '\\'
-    escaped += character
-  }
+  const escaped = /[\\<>]/.test(destination)
+    ? destination.replace(/[\\<>]/g, '\\$&')
+    : destination
   return `<${escaped}>`
 }
 
@@ -181,13 +178,9 @@ function stripsEmptyLink(state: HandlerContext['state'], href: string): boolean 
 }
 
 function serializeMarkdownTitle(title: string): string {
-  let escaped = ''
-  for (const character of title) {
-    if (character === '\\' || character === '"')
-      escaped += '\\'
-    escaped += character
-  }
-  return escaped
+  return /[\\"]/.test(title)
+    ? title.replace(/[\\"]/g, '\\$&')
+    : title
 }
 
 function serializeMarkdownResource(destination: string, title?: string): string {
@@ -196,13 +189,9 @@ function serializeMarkdownResource(destination: string, title?: string): string 
 }
 
 function serializeImageDescription(alt: string): string {
-  let escaped = ''
-  for (const character of alt) {
-    if ('\\[]*_`~<&'.includes(character))
-      escaped += '\\'
-    escaped += character
-  }
-  return escaped
+  return /[\\[\]*_`~<&]/.test(alt)
+    ? alt.replace(/[\\[\]*_`~<&]/g, '\\$&')
+    : alt
 }
 
 // GFM autolink shorthand: only inline-syntax-safe absolute URIs are eligible

@@ -382,6 +382,37 @@ function isEntityReferenceAfterAmpersand(value: string, ampersand: number): bool
   return index > start && value.charCodeAt(index) === 59
 }
 
+const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
+
+/**
+ * Reject ordinary prose through the native string search before entering the
+ * precise JavaScript scanner. A block marker can only begin within the first
+ * four characters here; later lines are covered by the newline trigger.
+ */
+function mayNeedGfmTextEscape(value: string, buffer: string[]): boolean {
+  if (value.search(GFM_TEXT_NATIVE_TRIGGER) !== -1)
+    return true
+
+  let lineIndent = markdownLineIndent(buffer)
+  if (lineIndent < 0)
+    return false
+
+  let index = 0
+  while (index < value.length && lineIndent < 3 && value.charCodeAt(index) === 32) {
+    index++
+    lineIndent++
+  }
+  if (index >= value.length)
+    return false
+
+  const code = value.charCodeAt(index)
+  return code === 35 // #
+    || code === 43 // +
+    || code === 45 // -
+    || code === 62 // >
+    || (code >= 48 && code <= 57)
+}
+
 /**
  * Escape Markdown syntax originating in HTML text nodes. Generated tag
  * markers never pass through here, while code and raw-HTML contexts bypass it.
@@ -398,7 +429,7 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint8Array): s
 
     // These escapes were inserted by the parser for structural contexts.
     // Preserve the pair verbatim so this text pass never doubles the slash.
-    const next = value.charCodeAt(index + 1)
+    const next = index + 1 < value.length ? value.charCodeAt(index + 1) : 0
     if (code === 92 && (isParserProtectedEscape(depthMap, next)
       || (next === 38 && isEntityReferenceAfterAmpersand(value, index + 1)))) {
       lineIndent = -1
@@ -973,7 +1004,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         if (!state.plainText
           && !state.depthMap[TAG_PRE]
           && !state.depthMap[TAG_CODE]
-          && !isInsideRawHtmlBlock(state.depthMap)) {
+          && !isInsideRawHtmlBlock(state.depthMap)
+          && mayNeedGfmTextEscape(textNode.value, state.buffer)) {
           textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap)
         }
 
