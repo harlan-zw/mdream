@@ -41,6 +41,9 @@ pub(crate) fn strip_tracking_params(url: &str) -> Cow<'_, str> {
   let Some(qmark) = url.find('?') else {
     return Cow::Borrowed(url);
   };
+  if url.find('#').is_some_and(|hash| hash < qmark) {
+    return Cow::Borrowed(url);
+  }
   let query_start = qmark + 1;
   let query_end = url[query_start..]
     .find('#')
@@ -64,6 +67,9 @@ pub(crate) fn strip_tracking_params_owned(url: String) -> String {
   let Some(qmark) = url.find('?') else {
     return url;
   };
+  if url.find('#').is_some_and(|hash| hash < qmark) {
+    return url;
+  }
   let (base, rest) = url.split_at(qmark);
   let query = &rest[1..]; // skip '?'
 
@@ -348,6 +354,15 @@ mod tests {
     assert_eq!(
       resolve_url("/p?utm_source=n", Some("https://x.com"), false),
       "https://x.com/p?utm_source=n",
+    );
+    // A query-like suffix inside the fragment is opaque.
+    assert_eq!(
+      resolve_url(
+        "https://x.com/#/route?utm_source=n&keep=1",
+        None,
+        true
+      ),
+      "https://x.com/#/route?utm_source=n&keep=1",
     );
   }
 

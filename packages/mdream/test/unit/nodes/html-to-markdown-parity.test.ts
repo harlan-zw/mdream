@@ -156,14 +156,26 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
 })
 
 describe('recent merge cross-engine parity', () => {
-  const javaScriptEngine = engines[0].engine
-  const rustEngine = engines[1].engine
+  async function resolveNamedEngine(name: string): Promise<TestEngine> {
+    const config = engines.find(engine => engine.name === name)
+    if (!config)
+      throw new Error(`Missing test engine: ${name}`)
+    return resolveEngine(config.engine)
+  }
 
-  it.each(recentMergeCases)('matches one-shot output for $html', ({ html, options }) => {
+  it.each(recentMergeCases)('matches one-shot output for $html', async ({ html, options }) => {
+    const [javaScriptEngine, rustEngine] = await Promise.all([
+      resolveNamedEngine('JavaScript Engine'),
+      resolveNamedEngine('Rust Engine'),
+    ])
     expect(rustEngine.htmlToMarkdown(html, options)).toBe(javaScriptEngine.htmlToMarkdown(html, options))
   })
 
   it.each(recentMergeCases)('matches streamed output for $html', async (parityCase) => {
+    const [javaScriptEngine, rustEngine] = await Promise.all([
+      resolveNamedEngine('JavaScript Engine'),
+      resolveNamedEngine('Rust Engine'),
+    ])
     const expected = javaScriptEngine.htmlToMarkdown(parityCase.html, parityCase.options)
 
     for (let chunkSize = 1; chunkSize <= parityCase.html.length; chunkSize++) {

@@ -135,10 +135,10 @@ function isTrackingParam(url: string, start: number, end: number): boolean {
 
 function stripTrackingParams(url: string): string {
   const queryStart = url.indexOf('?')
-  if (queryStart === -1)
+  const fragmentStart = url.indexOf('#')
+  if (queryStart === -1 || (fragmentStart !== -1 && fragmentStart < queryStart))
     return url
 
-  const fragmentStart = url.indexOf('#', queryStart + 1)
   const queryEnd = fragmentStart === -1 ? url.length : fragmentStart
   let result = url.slice(0, queryStart)
   let parameterStart = queryStart + 1

@@ -44,6 +44,16 @@ describe.each(engines)('plain text output $name', (engineConfig) => {
       format: 'text',
       origin: 'https://example.com',
     })).toBe('https://example.com/image.png?width=10')
+    expect(htmlToMarkdown('<img src="https://example.com/#/route?utm_source=test&width=10">', {
+      clean: { urls: true },
+      engine,
+      format: 'text',
+    })).toBe('https://example.com/#/route?utm_source=test&width=10')
+    expect(htmlToMarkdown('<img src="image.png">', {
+      clean: null as any,
+      engine,
+      format: 'text',
+    })).toBe('image.png')
     expect(htmlToMarkdown('<img src="image.png" alt="" title="Title">', { engine, format: 'text' }))
       .toBe('')
     expect(htmlToMarkdown('<img>', { engine, format: 'text' }))

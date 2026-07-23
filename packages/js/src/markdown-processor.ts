@@ -497,7 +497,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     listIndent: '',
     listIndentWidths: [],
     plainText: options.format === 'text',
-    cleanUrls: clean === true || (typeof clean === 'object' && clean.urls === true),
+    cleanUrls: clean === true || (clean !== null && typeof clean === 'object' && clean.urls === true),
   }
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
