@@ -96,9 +96,9 @@ describe('gfm text escaping', () => {
     expect(htmlToMarkdown('<pre>before\n```\nafter</pre>'))
       .toBe('````\nbefore\n```\nafter\n````')
     expect(htmlToMarkdown('<pre><code class="language-js`x">~~~\ncode</code></pre>'))
-      .toBe('~~~~js`x\n~~~\ncode\n~~~~')
+      .toBe('```\n~~~\ncode\n```')
     expect(htmlToMarkdown('<div><pre class="language-js`x">a\nb\n\n</pre><a href="#x">link</a></div>'))
-      .toBe('~~~js`x\na\nb\n\n\n~~~\n\n[link](#x)')
+      .toBe('```\na\nb\n\n\n```\n\n[link](#x)')
   })
 
   it('does not double escape parser-protected link and table text', () => {

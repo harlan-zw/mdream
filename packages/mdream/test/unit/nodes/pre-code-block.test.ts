@@ -30,6 +30,43 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
     expect(htmlToMarkdown('<pre class="language-js">const x = 1</pre>', { engine })).toBe('```js\nconst x = 1\n```')
   })
 
+  it('accepts only safe language class tokens', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    for (const [className, language] of [
+      ['language-js', 'js'],
+      ['language-c++', 'c++'],
+      ['language-C#', 'C#'],
+      ['language-objective-c', 'objective-c'],
+      ['language-.net', '.net'],
+      ['ignored&#9;language-js&#10;language-rust', 'js'],
+      ['language-bad&#96; language-rust', 'rust'],
+      ['language- language-C#', 'C#'],
+      ['language-js&#11; language-rust', 'rust'],
+      ['language-js&#160; language-rust', 'rust'],
+      ['language-js_foo', ''],
+      ['language-js&quot;x', ''],
+      ['language-js&#1;x', ''],
+      ['notlanguage-js', ''],
+    ]) {
+      const html = `<pre><code class="${className}">code</code></pre>`
+      expect(htmlToMarkdown(html, { engine }), `class=${className}`)
+        .toBe(`\`\`\`${language}\ncode\n\`\`\``)
+    }
+
+    expect(htmlToMarkdown('<pre class="language-bad&#96; language-.net">code</pre>', { engine }))
+      .toBe('```.net\ncode\n```')
+  })
+
+  it('keeps rejected language metadata from changing the fence', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown(
+      '<pre><code class="language-~~~&#96;">code</code></pre><p>after</p>',
+      { engine },
+    )
+
+    expect(markdown).toBe('```\ncode\n```\n\nafter')
+  })
+
   it('preserves multi-line whitespace inside the block', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<pre>line1\nline2\n  indented</pre>', { engine })).toBe('```\nline1\nline2\n  indented\n```')
@@ -44,9 +81,9 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
     expect(htmlToMarkdown('<pre>before\n```\nafter</pre>', { engine }))
       .toBe('````\nbefore\n```\nafter\n````')
     expect(htmlToMarkdown('<pre><code class="language-js`x">~~~\ncode</code></pre>', { engine }))
-      .toBe('~~~~js`x\n~~~\ncode\n~~~~')
+      .toBe('```\n~~~\ncode\n```')
     expect(htmlToMarkdown('<div><pre class="language-js`x">a\nb\n\n</pre><a href="#x">link</a></div>', { engine }))
-      .toBe('~~~js`x\na\nb\n\n\n~~~\n\n[link](#x)')
+      .toBe('```\na\nb\n\n\n```\n\n[link](#x)')
   })
 
   it('leaves the existing <pre><code> behaviour unchanged', async () => {
@@ -107,6 +144,24 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
         { engine },
       ))
       expect(result, `split at ${split}`).toBe(expected)
+    }
+  })
+
+  it('validates language metadata at every stream split', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    for (const html of [
+      '<pre><code class="language-~~~&#96;">code</code></pre><p>after</p>',
+      '<pre><code class="language-js&#10;ignored">code</code></pre>',
+      '<pre><code class="language-bad&#96; language-rust">code</code></pre>',
+    ]) {
+      const expected = htmlToMarkdown(html, { engine })
+      for (let split = 1; split < html.length; split++) {
+        const result = await collect(streamHtmlToMarkdown(
+          chunkedStream([html.slice(0, split), html.slice(split)]),
+          { engine },
+        ))
+        expect(result, `${html}: split at ${split}`).toBe(expected)
+      }
     }
   })
 })
