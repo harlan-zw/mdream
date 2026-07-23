@@ -3,6 +3,7 @@ import { htmlToMarkdown } from '../../src/index'
 import { streamHtmlToMarkdown } from '../../src/stream'
 
 const wrap = (html: string, width: number) => htmlToMarkdown(html, { wrapWidth: width })
+const HARD_BREAK = '\\\n'
 
 describe('wrap width (issue #106)', () => {
   it('is a no-op when unset or zero', () => {
@@ -27,18 +28,18 @@ describe('wrap width (issue #106)', () => {
     const html = '<div>abc def ghi jkl mno<br/>111 222 333 444 555 666 777 888 999 000 abc</div>'
 
     expect(htmlToMarkdown(html))
-      .toBe('abc def ghi jkl mno\n111 222 333 444 555 666 777 888 999 000 abc')
+      .toBe(`abc def ghi jkl mno${HARD_BREAK}111 222 333 444 555 666 777 888 999 000 abc`)
     expect(wrap(html, 40))
-      .toBe('abc def ghi jkl mno\n111 222 333 444 555 666 777 888 999 000\nabc')
+      .toBe(`abc def ghi jkl mno${HARD_BREAK}111 222 333 444 555 666 777 888 999 000\nabc`)
     expect(htmlToMarkdown('<p>first <br>second</p>'))
-      .toBe('first\nsecond')
+      .toBe(`first${HARD_BREAK}second`)
   })
 
   it('keeps nested block continuation prefixes after br', () => {
     expect(htmlToMarkdown('<ul><li>first<br>second</li></ul>'))
-      .toBe('- first\n  second')
+      .toBe(`- first${HARD_BREAK}  second`)
     expect(htmlToMarkdown('<blockquote><p>first<br>second</p></blockquote>'))
-      .toBe('> first\n> second')
+      .toBe(`> first${HARD_BREAK}> second`)
     expect(htmlToMarkdown('<address>first<br>second</address>'))
       .toBe('<address>first<br>second</address>')
     expect(htmlToMarkdown('<h1>first<br>second</h1>'))

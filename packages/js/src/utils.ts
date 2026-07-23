@@ -6,12 +6,40 @@ import {
   MAX_LEGACY_ENTITY_NAME_LENGTH,
 } from './entities'
 
+function equalsAsciiCaseInsensitive(value: string, expected: string): boolean {
+  for (let index = 0; index < expected.length; index++) {
+    if ((value.charCodeAt(index) | 32) !== expected.charCodeAt(index))
+      return false
+  }
+  return true
+}
+
+export function isEmptyLinkHref(href: string): boolean {
+  if (href === '#')
+    return true
+
+  switch (href.indexOf(':')) {
+    case 4:
+      return equalsAsciiCaseInsensitive(href, 'data')
+    case 8:
+      return equalsAsciiCaseInsensitive(href, 'vbscript')
+    case 10:
+      return equalsAsciiCaseInsensitive(href, 'javascript')
+    default:
+      return false
+  }
+}
+
 /**
  * Build the Markdown prefix needed to keep a continued line inside its open
  * blockquotes and list items. Ancestors are emitted outermost-first so mixed
  * nesting retains its real structure.
  */
-export function continuationPrefix(node: Pick<Node, 'parent'>, listIndentWidths: readonly number[]): string {
+export function continuationPrefix(
+  node: Pick<Node, 'parent'>,
+  listIndentWidths: readonly number[],
+  includeBlockquotes = true,
+): string {
   const chain: ElementNode[] = []
   let current = node.parent
   while (current) {
@@ -23,7 +51,7 @@ export function continuationPrefix(node: Pick<Node, 'parent'>, listIndentWidths:
   let listIndex = 0
   for (let i = chain.length - 1; i >= 0; i--) {
     const tagId = chain[i]!.tagId
-    if (tagId === TAG_BLOCKQUOTE) {
+    if (tagId === TAG_BLOCKQUOTE && includeBlockquotes) {
       prefix += '> '
     }
     else if (tagId === TAG_LI) {
@@ -52,8 +80,50 @@ function numericReplacement(codePoint: number): string {
   return String.fromCodePoint(codePoint)
 }
 
+function isCharacterReferenceTail(text: string, start: number): boolean {
+  let index = start
+  if (text.charCodeAt(index) === 35) { // #
+    index++
+    const hex = text.charCodeAt(index) === 120 || text.charCodeAt(index) === 88
+    if (hex)
+      index++
+    const digitStart = index
+    while (index < text.length) {
+      const code = text.charCodeAt(index)
+      const digit = code >= 48 && code <= 57
+      const hexDigit = hex && ((code >= 65 && code <= 70) || (code >= 97 && code <= 102))
+      if (!digit && !hexDigit)
+        break
+      index++
+    }
+    return index > digitStart && text.charCodeAt(index) === 59
+  }
+
+  const nameStart = index
+  while (index < text.length && isAsciiAlphaNumeric(text.charCodeAt(index)))
+    index++
+  return index > nameStart && text.charCodeAt(index) === 59
+}
+
+function decodedReference(
+  replacement: string,
+  text: string,
+  next: number,
+  protectDecodedEntityReferences: boolean,
+): string {
+  return replacement === '&'
+    && protectDecodedEntityReferences
+    && isCharacterReferenceTail(text, next)
+    ? '\\&'
+    : replacement
+}
+
 /** Decode character references using the HTML tokenizer's longest-match rules. */
-export function decodeHTMLEntities(text: string, inAttribute = false): string {
+export function decodeHTMLEntities(
+  text: string,
+  inAttribute = false,
+  protectDecodedEntityReferences = false,
+): string {
   let result = ''
   let i = 0
   const len = text.length
@@ -93,7 +163,12 @@ export function decodeHTMLEntities(text: string, inAttribute = false): string {
       }
 
       if (end > digitStart) {
-        result += numericReplacement(codePoint)
+        result += decodedReference(
+          numericReplacement(codePoint),
+          text,
+          text.charCodeAt(end) === 59 ? end + 1 : end,
+          protectDecodedEntityReferences,
+        )
         if (text.charCodeAt(end) === 59) // ';'
           end++
         i = end
@@ -114,7 +189,7 @@ export function decodeHTMLEntities(text: string, inAttribute = false): string {
       const direct = HTML_ENTITIES[name]
       const replacement = typeof direct === 'string' ? direct : HTML_ENTITIES[`$${name}`]
       if (replacement !== undefined) {
-        result += replacement
+        result += decodedReference(replacement, text, nameEnd + 1, protectDecodedEntityReferences)
         i = nameEnd + 1
         continue
       }
@@ -128,7 +203,7 @@ export function decodeHTMLEntities(text: string, inAttribute = false): string {
       if (typeof replacement === 'string') {
         const next = text.charCodeAt(legacyEnd)
         if (replacement !== undefined && !(inAttribute && (next === 61 || isAsciiAlphaNumeric(next)))) {
-          result += replacement
+          result += decodedReference(replacement, text, legacyEnd, protectDecodedEntityReferences)
           i = legacyEnd
           decodedLegacy = true
         }

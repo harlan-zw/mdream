@@ -170,7 +170,7 @@ describe('tag nesting depth', () => {
 
     expect(depths).toEqual([1, 2])
     expect(htmlToMarkdown('<blockquote><blockquote id="nested">text</blockquote></blockquote>'))
-      .toBe('>\n> > text')
+      .toBe('> > text')
   })
 
   it('matches distinct custom elements by name', () => {

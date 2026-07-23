@@ -357,11 +357,7 @@ mod tests {
     );
     // A query-like suffix inside the fragment is opaque.
     assert_eq!(
-      resolve_url(
-        "https://x.com/#/route?utm_source=n&keep=1",
-        None,
-        true
-      ),
+      resolve_url("https://x.com/#/route?utm_source=n&keep=1", None, true),
       "https://x.com/#/route?utm_source=n&keep=1",
     );
   }

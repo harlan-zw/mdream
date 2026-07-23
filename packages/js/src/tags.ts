@@ -1,4 +1,4 @@
-import type { HandlerContext, TagHandler, TagOverride } from './types'
+import type { EngineOptions, HandlerContext, TagHandler, TagOverride } from './types'
 import {
   BLOCKQUOTE_SPACING,
   LIST_ITEM_SPACING,
@@ -120,18 +120,10 @@ import {
   TAG_XMP,
   TagIdMap,
 } from './const'
-import { continuationPrefix } from './utils'
+import { continuationPrefix, isEmptyLinkHref } from './utils'
 
-const TRACKING_PREFIXES = ['utm_', 'fbclid', 'gclid', 'mc_eid', 'msclkid', 'oly_'] as const
-
-function isTrackingParam(url: string, start: number, end: number): boolean {
-  for (let index = 0; index < TRACKING_PREFIXES.length; index++) {
-    const prefix = TRACKING_PREFIXES[index]!
-    if (end - start >= prefix.length && url.startsWith(prefix, start))
-      return true
-  }
-  return false
-}
+const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
+const URL_SCHEME_RE = /^[\dA-Z+.-]+:/i
 
 function stripTrackingParams(url: string): string {
   const queryStart = url.indexOf('?')
@@ -140,81 +132,62 @@ function stripTrackingParams(url: string): string {
     return url
 
   const queryEnd = fragmentStart === -1 ? url.length : fragmentStart
-  let result = url.slice(0, queryStart)
-  let parameterStart = queryStart + 1
-  let kept = 0
-  let removed = false
-
-  while (parameterStart <= queryEnd) {
-    let parameterEnd = url.indexOf('&', parameterStart)
-    if (parameterEnd === -1 || parameterEnd > queryEnd)
-      parameterEnd = queryEnd
-
-    let keyEnd = url.indexOf('=', parameterStart)
-    if (keyEnd === -1 || keyEnd > parameterEnd)
-      keyEnd = parameterEnd
-
-    if (isTrackingParam(url, parameterStart, keyEnd)) {
-      removed = true
-    }
-    else {
-      result += kept++ === 0 ? '?' : '&'
-      result += url.slice(parameterStart, parameterEnd)
-    }
-
-    if (parameterEnd === queryEnd)
-      break
-    parameterStart = parameterEnd + 1
-  }
-
-  if (!removed)
-    return url
-  if (fragmentStart !== -1)
-    result += url.slice(fragmentStart)
-  return result
+  const query = url.slice(queryStart + 1, queryEnd)
+    .split('&')
+    .filter(parameter => !TRACKING_PARAM_RE.test(parameter))
+    .join('&')
+  return `${url.slice(0, queryStart)}${query ? `?${query}` : ''}${url.slice(queryEnd)}`
 }
 
-function hasExplicitScheme(url: string): boolean {
-  const colon = url.indexOf(':')
-  if (colon <= 0)
-    return false
-  for (let index = 0; index < colon; index++) {
-    const code = url.charCodeAt(index)
-    const isAlphaNumeric = (code >= 48 && code <= 57)
-      || (code >= 65 && code <= 90)
-      || (code >= 97 && code <= 122)
-    if (!isAlphaNumeric && code !== 43 && code !== 45 && code !== 46)
-      return false
-  }
-  return true
-}
-
-export function resolveUrl(url: string, origin?: string, clean = false): string {
-  if (!url || url.charCodeAt(0) === 35)
+export function resolveUrl(url: string, origin?: string, clean?: EngineOptions['clean']): string {
+  if (!url || url[0] === '#')
     return url
 
   let resolved = url
-  if (url.charCodeAt(0) === 47 && url.charCodeAt(1) === 47) {
+  if (url.startsWith('//')) {
     resolved = `https:${url}`
   }
-  else if (origin) {
-    let originEnd = origin.length
-    while (originEnd > 0 && origin.charCodeAt(originEnd - 1) === 47)
-      originEnd--
-    const cleanOrigin = originEnd === origin.length ? origin : origin.slice(0, originEnd)
-
-    if (url.charCodeAt(0) === 47) {
-      resolved = `${cleanOrigin}${url}`
-    }
-    else if (url.charCodeAt(0) === 46 && url.charCodeAt(1) === 47) {
-      resolved = `${cleanOrigin}/${url.slice(2)}`
-    }
-    else if (!hasExplicitScheme(url)) {
-      resolved = `${cleanOrigin}/${url}`
-    }
+  else if (origin && !URL_SCHEME_RE.test(url)) {
+    const path = url.startsWith('./') ? url.slice(2) : url
+    resolved = `${origin.replace(/\/+$/, '')}${path[0] === '/' ? '' : '/'}${path}`
   }
 
-  return clean && resolved.includes('?') ? stripTrackingParams(resolved) : resolved
+  const cleansUrls = clean === true || (!!clean && clean.urls === true)
+  return cleansUrls && resolved.includes('?') ? stripTrackingParams(resolved) : resolved
+}
+
+function serializeMarkdownDestination(destination: string): string {
+  if (!/[\t\n\f\r ()\\<>]/.test(destination))
+    return destination
+
+  const escaped = /[\\<>]/.test(destination)
+    ? destination.replace(/[\\<>]/g, '\\$&')
+    : destination
+  return `<${escaped}>`
+}
+
+function stripsEmptyLink(state: HandlerContext['state'], href: string): boolean {
+  const clean = state.options?.clean
+  if (!(clean === true || (typeof clean === 'object' && clean.emptyLinks)))
+    return false
+  return isEmptyLinkHref(href)
+}
+
+function serializeMarkdownTitle(title: string): string {
+  return /[\\"]/.test(title)
+    ? title.replace(/[\\"]/g, '\\$&')
+    : title
+}
+
+function serializeMarkdownResource(destination: string, title?: string): string {
+  const serializedTitle = title ? ` "${serializeMarkdownTitle(title)}"` : ''
+  return `(${serializeMarkdownDestination(destination)}${serializedTitle})`
+}
+
+function serializeImageDescription(alt: string): string {
+  return /[\\[\]*_`~<&]/.test(alt)
+    ? alt.replace(/[\\[\]*_`~<&]/g, '\\$&')
+    : alt
 }
 
 // GFM autolink shorthand: only inline-syntax-safe absolute URIs are eligible
@@ -246,6 +219,39 @@ function isInsideRawHtmlBlock(state: HandlerContext['state']): boolean {
     || depthMap[TAG_DL]
     || depthMap[TAG_DT]
     || depthMap[TAG_DD])
+}
+
+export function renderBreak(node: HandlerContext['node'], state: HandlerContext['state']): string {
+  // A literal newline would terminate a table row/ATX heading or collapse
+  // inside a raw HTML block, so preserve the inline HTML there.
+  const depthMap = state.depthMap!
+  if (isInsideTableCell(state) || isInsideRawHtmlBlock(state)
+    || depthMap[TAG_H1]
+    || depthMap[TAG_H2]
+    || depthMap[TAG_H3]
+    || depthMap[TAG_H4]
+    || depthMap[TAG_H5]
+    || depthMap[TAG_H6]) {
+    return '<br>'
+  }
+  // Hard-break markers are literal content inside code.
+  if (depthMap[TAG_PRE] || depthMap[TAG_CODE])
+    return '\n'
+
+  const prefix = continuationPrefix(
+    node,
+    state.listIndentWidths || [],
+    !state.bufferedBlockquoteDepth,
+  )
+  return `\\\n${prefix}`
+}
+
+export const breakHandler: TagHandler = {
+  enter: ({ node, state }) => renderBreak(node, state),
+  isSelfClosing: true,
+  spacing: NO_SPACING,
+  collapsesInnerWhiteSpace: true,
+  isInline: true,
 }
 
 // Helper function to get language from code class attribute
@@ -364,29 +370,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     isSelfClosing: true,
     spacing: NO_SPACING,
   },
-  [TAG_BR]: {
-    enter: ({ node, state }) => {
-      // A literal newline would terminate a table row/ATX heading or collapse
-      // inside a raw HTML block, so preserve the inline HTML there.
-      const depthMap = state.depthMap!
-      if (isInsideTableCell(state) || isInsideRawHtmlBlock(state)
-        || depthMap[TAG_H1]
-        || depthMap[TAG_H2]
-        || depthMap[TAG_H3]
-        || depthMap[TAG_H4]
-        || depthMap[TAG_H5]
-        || depthMap[TAG_H6]) {
-        return '<br>'
-      }
-
-      const prefix = continuationPrefix(node, state.listIndentWidths || [])
-      return `\n${prefix}`
-    },
-    isSelfClosing: true,
-    spacing: NO_SPACING,
-    collapsesInnerWhiteSpace: true,
-    isInline: true,
-  },
+  [TAG_BR]: breakHandler,
   [TAG_H1]: handleHeading(1),
   [TAG_H2]: handleHeading(2),
   [TAG_H3]: handleHeading(3),
@@ -427,17 +411,12 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_BLOCKQUOTE]: {
     enter: ({ state }) => {
-      const depth = state.depthMap?.[TAG_BLOCKQUOTE] || 1
-      let prefix = '> '.repeat(depth)
-
-      // Add indentation if inside a list item
-      const liDepth = state.depthMap?.[TAG_LI] || 0
-      if (liDepth > 0) {
-        prefix = `\n${state.listIndent}${prefix}`
-      }
-
-      return prefix
+      // The processor prefixes the completed subtree once every structural
+      // newline is known. Preserve the list marker's trailing space here.
+      const output = (state.depthMap?.[TAG_LI] || 0) > 0 ? '\n' : undefined
+      return { _tag: 'BlockquoteEnter', output }
     },
+    exit: () => ({ _tag: 'BlockquoteExit' }),
     spacing: BLOCKQUOTE_SPACING,
   },
   // A bare <pre> (no <code> child) becomes a fenced code block (issue #97).
@@ -451,28 +430,16 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (isInsideTableCell(state)) {
         return '<pre>'
       }
-      state.preFencePending = true
-      state.preOwnFence = false
-      state.preFenceLang = getLanguageFromClass(node.attributes?.class)
+      return {
+        _tag: 'PreEnter',
+        language: getLanguageFromClass(node.attributes?.class),
+      }
     },
     exit: ({ state }) => {
       if (isInsideTableCell(state)) {
         return '</pre>'
       }
-      const ownFence = state.preOwnFence
-      state.preFencePending = false
-      state.preOwnFence = false
-      // No own fence means a <code> child emitted it, or the <pre> had no
-      // non-whitespace content (empty block stripped) — nothing to close.
-      if (!ownFence) {
-        return undefined
-      }
-      const liDepth = state.depthMap?.[TAG_LI] || 0
-      if (liDepth > 0) {
-        const indent = state.listIndent
-        return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
-      }
-      return `\n${MARKDOWN_CODE_BLOCK}`
+      return { _tag: 'PreExit' }
     },
   },
   [TAG_CODE]: {
@@ -488,15 +455,21 @@ export const tagHandlers: Record<number, TagHandler> = {
         if (state.preOwnFence) {
           return undefined
         }
-        // This <code> owns the <pre>'s fence; cancel the deferred pre fence.
-        state.preFencePending = false
         const language = getLanguageFromClass(node.attributes?.class)
         const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent
-          return `\n\n${indent}${MARKDOWN_CODE_BLOCK}${language}\n`
+          return {
+            _tag: 'CodeFenceEnter',
+            language,
+            output: `\n\n${indent}${MARKDOWN_CODE_BLOCK}${language}\n`,
+          }
         }
-        return `${MARKDOWN_CODE_BLOCK}${language}\n`
+        return {
+          _tag: 'CodeFenceEnter',
+          language,
+          output: `${MARKDOWN_CODE_BLOCK}${language}\n`,
+        }
       }
       // Inline code inside a list item: collapse the paragraph boundary with a
       // separator space when following text, but not when the buffer just
@@ -512,10 +485,10 @@ export const tagHandlers: Record<number, TagHandler> = {
         if (lastChar && lastChar !== ' ' && lastChar !== '\n' && lastChar !== '\t'
           && lastChar !== '*' && lastChar !== '_' && lastChar !== '~'
           && lastChar !== '[' && lastChar !== '>') {
-          return ` ${MARKDOWN_INLINE_CODE}`
+          return { _tag: 'CodeSpanEnter', output: ` ${MARKDOWN_INLINE_CODE}` }
         }
       }
-      return MARKDOWN_INLINE_CODE
+      return { _tag: 'CodeSpanEnter', output: MARKDOWN_INLINE_CODE }
     },
     exit: ({ state }) => {
       if ((state.depthMap?.[TAG_PRE] || 0) > 0) {
@@ -530,11 +503,14 @@ export const tagHandlers: Record<number, TagHandler> = {
         const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent
-          return `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
+          return {
+            _tag: 'CodeFenceExit',
+            output: `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`,
+          }
         }
-        return `\n${MARKDOWN_CODE_BLOCK}`
+        return { _tag: 'CodeFenceExit', output: `\n${MARKDOWN_CODE_BLOCK}` }
       }
-      return MARKDOWN_INLINE_CODE
+      return { _tag: 'CodeSpanExit' }
     },
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
@@ -566,16 +542,20 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: LIST_ITEM_SPACING,
   },
   [TAG_A]: {
-    enter: ({ node }) => {
-      if (node.attributes?.href) {
+    enter: ({ node, state }) => {
+      if (node.attributes?.href !== undefined) {
+        if (stripsEmptyLink(state, node.attributes.href))
+          return
         return '['
       }
     },
     exit: ({ node, state }) => {
-      if (!node.attributes?.href) {
+      if (node.attributes?.href === undefined) {
         return ''
       }
-      const href = resolveUrl(node.attributes?.href || '', state.options?.origin, state.cleanUrls === true)
+      if (stripsEmptyLink(state, node.attributes.href))
+        return ''
+      const href = resolveUrl(node.attributes.href, state.options?.origin, state.options?.clean)
       let title = node.attributes?.title
       // Check if title matches the last content to avoid duplication
       const lastContent = state.lastContentCache
@@ -606,7 +586,7 @@ export const tagHandlers: Record<number, TagHandler> = {
           return ''
         }
       }
-      return title ? `](${href} "${title}")` : `](${href})`
+      return `]${serializeMarkdownResource(href, title)}`
     },
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
@@ -615,8 +595,8 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_IMG]: {
     enter: ({ node, state }) => {
       const alt = node.attributes?.alt || ''
-      const src = resolveUrl(node.attributes?.src || '', state.options?.origin, state.cleanUrls === true)
-      return `![${alt}](${src})`
+      const src = resolveUrl(node.attributes?.src || '', state.options?.origin, state.options?.clean)
+      return `![${serializeImageDescription(alt)}]${serializeMarkdownResource(src, node.attributes?.title)}`
     },
     collapsesInnerWhiteSpace: true,
     isSelfClosing: true,
@@ -731,16 +711,6 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_P]: {
     enter: ({ state }) => {
-      const bqDepth = state.depthMap?.[TAG_BLOCKQUOTE] || 0
-      if (bqDepth > 0) {
-        const lastEntry = state.buffer.at(-1)
-        const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
-        // Only add separator if there's preceding text content (not the first <p> in the blockquote)
-        if (lastChar && lastChar !== '\n' && lastChar !== ' ' && lastChar !== '>') {
-          const prefix = '> '.repeat(bqDepth)
-          return `\n${prefix.trimEnd()}\n${prefix}`
-        }
-      }
       if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)) {
         const lastEntry = state.buffer.at(-1)
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''

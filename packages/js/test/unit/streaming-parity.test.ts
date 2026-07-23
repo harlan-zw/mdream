@@ -46,6 +46,15 @@ describe('streaming parity with the Rust core', () => {
   })
 
   it.each([
+    '<blockquote><p>intro</p><ul><li>one</li><li>two</li></ul></blockquote>',
+    '<blockquote>lead<table><tr><td>a</td></tr></table>tail</blockquote>',
+    '<blockquote><ul><li>one<ul><li>sub</li></ul></li></ul></blockquote>',
+    '<ul><li><blockquote><ul><li>x</li><li>y</li></ul></blockquote></li></ul>',
+  ])('keeps blockquote structure across every split for %s', async (html) => {
+    await expectStreamingParity(html)
+  })
+
+  it.each([
     '<summary>text <svg></svg></summary>',
     '<details><summary>text <svg><polyline points="1 2"></polyline></svg></summary><p>b</p></details>',
   ])('keeps raw closing tags after foreign children for %s', async (html) => {
@@ -63,6 +72,17 @@ describe('streaming parity with the Rust core', () => {
 
   it('does not emit link syntax before an autolink rewrite is final', async () => {
     await expectStreamingParity('<a href="https://example.com">https://example.com</a>')
+  })
+
+  it.each([
+    '<a href="">text</a>',
+    '<a href="docs/a b">text</a>',
+    String.raw`<a href="docs/(a)\file">text</a>`,
+    String.raw`<a href="/x" title="say &quot;hi&quot; \ path">text</a>`,
+    String.raw`<img src="/x.png" alt="a ] \ *bold* _em_ &#96;code&#96;">`,
+    String.raw`<img src="/x.png" alt="alt" title="say &quot;hi&quot; \ path">`,
+  ])('keeps serialized link and image output stable for %s', async (html) => {
+    await expectStreamingParity(html)
   })
 
   it.each([
