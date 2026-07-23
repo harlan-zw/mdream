@@ -129,30 +129,6 @@ function groupByFormattingType(classes: string[]): Record<string, string[]> {
 }
 
 /**
- * Fix redundant markdown delimiters without regex
- */
-function fixRedundantDelimiters(content: string): string {
-  // Fix doubled delimiters like ****text**** -> **text**
-  content = content.replaceAll('****', '**')
-
-  // Fix doubled strikethrough like ~~~~text~~~~ -> ~~text~~
-  content = content.replaceAll('~~~~', '~~')
-
-  // Fix doubled bold + italic like ***bold***italic*** -> ***bold italic***
-  // This is more complex, so we'll keep it simple and just handle the common case
-  if (content.includes('***') && content.split('***').length > 3) {
-    // Simple approach: if we have multiple *** sections, add space between them
-    const parts = content.split('***')
-    if (parts.length >= 4) {
-      // Rejoin with spaces between the middle parts
-      content = `${parts[0]}***${parts[1]} ${parts[2]}***${parts.slice(3).join('***')}`
-    }
-  }
-
-  return content
-}
-
-/**
  * Normalizes a list of Tailwind classes by processing breakpoints and resolving conflicts
  */
 function normalizeClasses(classes: string[]): string[] {
@@ -305,19 +281,15 @@ export function tailwindPlugin(): TransformPlugin {
         return { content: '', skip: true }
       }
 
-      // Get the content
-      let content = node.value
-
       // Apply Tailwind prefix/suffix
       const prefix = state.options?.format === 'text' ? '' : (tailwindData?.prefix || '')
       const suffix = state.options?.format === 'text' ? '' : (tailwindData?.suffix || '')
 
       if (prefix || suffix) {
-        content = prefix + content + suffix
-        content = fixRedundantDelimiters(content)
+        node.generatedMarkdown = { prefix, suffix }
       }
 
-      return { content, skip: false }
+      return undefined
     },
 
     // Filter out hidden elements

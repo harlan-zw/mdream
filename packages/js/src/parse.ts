@@ -83,10 +83,22 @@ const TAB_CHAR = 9 // '\t'
 const NEWLINE_CHAR = 10 // '\n'
 const FORM_FEED_CHAR = 12 // '\f'
 const CARRIAGE_RETURN_CHAR = 13 // '\r'
-const BACKTICK_CHAR = 96 // '`'
 const PIPE_CHAR = 124 // '|'
 const OPEN_BRACKET_CHAR = 91 // '['
 const CLOSE_BRACKET_CHAR = 93 // ']'
+
+function shouldProtectDecodedEntityReferences(state: ParseState): boolean {
+  const depthMap = state.depthMap
+  return !state.plainText
+    && !depthMap[TAG_PRE]
+    && !depthMap[TAG_CODE]
+    && !depthMap[TAG_DETAILS]
+    && !depthMap[TAG_SUMMARY]
+    && !depthMap[TAG_ADDRESS]
+    && !depthMap[TAG_DL]
+    && !depthMap[TAG_DT]
+    && !depthMap[TAG_DD]
+}
 
 const SCRIPT_DATA = 0
 const SCRIPT_DATA_ESCAPED = 1
@@ -816,9 +828,6 @@ function parseHtmlInternal(
         if (!state.plainText && currentCharCode === PIPE_CHAR && state.depthMap[TAG_TABLE]) {
           textBuffer += '\\|'
         }
-        else if (!state.plainText && currentCharCode === BACKTICK_CHAR && (state.depthMap[TAG_CODE] || state.depthMap[TAG_PRE])) {
-          textBuffer += '\\`'
-        }
         else if (!state.plainText && currentCharCode === OPEN_BRACKET_CHAR && state.depthMap[TAG_A]) {
           textBuffer += '\\['
         }
@@ -1047,7 +1056,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
       return
     }
     if (state.hasEncodedHtmlEntity) {
-      rootText = decodeHTMLEntities(String(rootText))
+      rootText = decodeHTMLEntities(String(rootText), false, shouldProtectDecodedEntityReferences(state))
       state.hasEncodedHtmlEntity = false
     }
     const rootTextNode: TextNode = {
@@ -1094,7 +1103,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   }
 
   if (state.hasEncodedHtmlEntity) {
-    text = decodeHTMLEntities(String(text))
+    text = decodeHTMLEntities(String(text), false, shouldProtectDecodedEntityReferences(state))
     state.hasEncodedHtmlEntity = false
   }
 

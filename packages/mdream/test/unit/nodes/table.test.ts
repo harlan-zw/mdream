@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
 
 describe.each(engines)('tables $name', (engineConfig) => {
+  it('does not double escape protected cell pipes', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<table><tr><td>a|b</td></tr></table>', { engine }))
+      .toBe('| a\\|b |\n| --- |')
+  })
+
   it('converts basic tables with headers', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `
