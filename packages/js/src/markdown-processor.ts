@@ -927,7 +927,7 @@ function getPlainTextOutput(node: ElementNode, eventType: number, state: Markdow
       const alt = node.attributes?.alt
       if (alt !== undefined)
         return alt || undefined
-      return node.attributes?.title || resolveUrl(node.attributes?.src || '', state.options?.origin) || undefined
+      return node.attributes?.title || resolveUrl(node.attributes?.src || '', state.options?.origin, state.options?.clean) || undefined
     }
     if (tagId === TAG_Q)
       return '"'

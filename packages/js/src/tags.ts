@@ -1,4 +1,4 @@
-import type { HandlerContext, TagHandler, TagOverride } from './types'
+import type { EngineOptions, HandlerContext, TagHandler, TagOverride } from './types'
 import {
   BLOCKQUOTE_SPACING,
   LIST_ITEM_SPACING,
@@ -122,39 +122,40 @@ import {
 } from './const'
 import { continuationPrefix, isEmptyLinkHref } from './utils'
 
-// Helper function to resolve URLs
-export function resolveUrl(url: string, origin?: string): string {
-  if (!url)
+const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
+const URL_SCHEME_RE = /^[\dA-Z+.-]+:/i
+
+function stripTrackingParams(url: string): string {
+  const queryStart = url.indexOf('?')
+  const fragmentStart = url.indexOf('#')
+  if (queryStart === -1 || (fragmentStart !== -1 && fragmentStart < queryStart))
     return url
 
+  const queryEnd = fragmentStart === -1 ? url.length : fragmentStart
+  const query = url.slice(queryStart + 1, queryEnd)
+    .split('&')
+    .filter(parameter => !TRACKING_PARAM_RE.test(parameter))
+    .join('&')
+  return `${url.slice(0, queryStart)}${query ? `?${query}` : ''}${url.slice(queryEnd)}`
+}
+
+export function resolveUrl(url: string, origin?: string, clean?: EngineOptions['clean']): string {
+  if (!url || url[0] === '#')
+    return url
+
+  let resolved = url
   if (url.startsWith('//')) {
-    return `https:${url}`
+    resolved = `https:${url}`
+  }
+  else if (origin && !URL_SCHEME_RE.test(url)) {
+    const path = url.startsWith('./') ? url.slice(2) : url
+    while (origin.endsWith('/'))
+      origin = origin.slice(0, -1)
+    resolved = `${origin}${path[0] === '/' ? '' : '/'}${path}`
   }
 
-  if (url.startsWith('#')) {
-    return url
-  }
-
-  if (origin) {
-    if (url.startsWith('/') && origin) {
-      // Remove trailing slash from origin if present
-      const cleanOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin
-      return `${cleanOrigin}${url}`
-    }
-    // handle ./ paths
-    if (url.startsWith('./')) {
-      return `${origin}/${url.slice(2)}`
-    }
-
-    // relative url
-    if (!url.startsWith('http')) {
-      // Remove leading slash if present
-      const cleanUrl = url.startsWith('/') ? url.slice(1) : url
-      return `${origin}/${cleanUrl}`
-    }
-  }
-
-  return url
+  const cleansUrls = clean === true || (!!clean && clean.urls === true)
+  return cleansUrls && resolved.includes('?') ? stripTrackingParams(resolved) : resolved
 }
 
 function serializeMarkdownDestination(destination: string): string {
@@ -556,7 +557,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
       if (stripsEmptyLink(state, node.attributes.href))
         return ''
-      const href = resolveUrl(node.attributes.href, state.options?.origin)
+      const href = resolveUrl(node.attributes.href, state.options?.origin, state.options?.clean)
       let title = node.attributes?.title
       // Check if title matches the last content to avoid duplication
       const lastContent = state.lastContentCache
@@ -596,7 +597,7 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_IMG]: {
     enter: ({ node, state }) => {
       const alt = node.attributes?.alt || ''
-      const src = resolveUrl(node.attributes?.src || '', state.options?.origin)
+      const src = resolveUrl(node.attributes?.src || '', state.options?.origin, state.options?.clean)
       return `![${serializeImageDescription(alt)}]${serializeMarkdownResource(src, node.attributes?.title)}`
     },
     collapsesInnerWhiteSpace: true,
