@@ -534,7 +534,7 @@ impl ConvertState {
       });
     }
 
-    if !enter_is_literal && tag_id == Some(TAG_CODE) {
+    if !enter_is_literal && tag_id == Some(TAG_CODE) && !self.in_raw_html_block() {
       if self.depth_map[TAG_PRE as usize] == 0 {
         if let Some(emitted) = output.as_deref() {
           self.code_spans.push(CodeSpanState {
@@ -573,7 +573,7 @@ impl ConvertState {
 
     if !enter_is_literal
       && let Some(id) = tag_id
-      && (id != TAG_CODE || self.depth_map[TAG_PRE as usize] == 0)
+      && (id != TAG_CODE || (self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block()))
       && let Some(inline_marker_type) = Self::inline_marker_type(id)
       && let Some(emitted) = output.as_deref()
       && !emitted.is_empty()
@@ -685,12 +685,15 @@ impl ConvertState {
         output = self.get_exit_output(node);
       }
     }
-    let closing_code_span =
-      if !has_override && tag_id == Some(TAG_CODE) && self.depth_map[TAG_PRE as usize] == 0 {
-        self.code_spans.pop()
-      } else {
-        None
-      };
+    let closing_code_span = if !has_override
+      && tag_id == Some(TAG_CODE)
+      && self.depth_map[TAG_PRE as usize] == 0
+      && !self.in_raw_html_block()
+    {
+      self.code_spans.pop()
+    } else {
+      None
+    };
 
     let node_spacing = if let Some(ov) = override_config {
       ov.spacing.or(node.spacing)
@@ -890,7 +893,7 @@ impl ConvertState {
     // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
     if !has_override
       && let Some(id) = tag_id
-      && (id != TAG_CODE || self.depth_map[TAG_PRE as usize] == 0)
+      && (id != TAG_CODE || (self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block()))
       && let Some(inline_marker_type) = Self::inline_marker_type(id)
       && output.as_deref().is_some_and(|emitted| !emitted.is_empty())
       && let Some((open_type, output_start, content_start)) = self.open_markers.pop()
@@ -1142,12 +1145,34 @@ impl ConvertState {
       text
     };
 
+    let inside_raw_html_block = self.in_raw_html_block();
+    let raw_html_storage;
+    let text = if !self.plain_text && self.depth_map[TAG_PRE as usize] == 0 && inside_raw_html_block
+    {
+      raw_html_storage = self.escape_raw_html_text(text);
+      raw_html_storage.as_ref()
+    } else {
+      text
+    };
+
+    let has_contextual_escape = self.depth_map[TAG_TABLE as usize] > 0
+      || self.depth_map[TAG_A as usize] > 0
+      || self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
+    let context_has_gfm_hazard = !inside_raw_html_block
+      && has_contextual_escape
+      && text.bytes().any(|byte| {
+        (byte == b'|' && self.depth_map[TAG_TABLE as usize] > 0)
+          || (byte == b']' && self.depth_map[TAG_A as usize] > 0)
+          || (byte == b'>' && self.depth_map[TAG_BLOCKQUOTE as usize] > 0)
+      });
     let escaped_storage;
     let text = if !self.plain_text
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
-      && !self.in_raw_html_block()
-      && (has_inline_gfm_hazard || self.starts_with_gfm_block_candidate(text))
+      && !inside_raw_html_block
+      && (has_inline_gfm_hazard
+        || context_has_gfm_hazard
+        || self.starts_with_gfm_block_candidate(text))
     {
       #[cfg(test)]
       {
@@ -1200,6 +1225,9 @@ impl ConvertState {
   /// markers are written elsewhere and never pass through this path.
   #[inline]
   fn escape_gfm_text<'a>(&self, text: &'a str) -> Cow<'a, str> {
+    let in_table = self.depth_map[TAG_TABLE as usize] > 0;
+    let in_link = self.depth_map[TAG_A as usize] > 0;
+    let in_blockquote = self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
     let mut line_indent = self.markdown_line_indent();
     let mut ordered_digits = 0u8;
     let bytes = text.as_bytes();
@@ -1210,11 +1238,12 @@ impl ConvertState {
     while index < bytes.len() {
       let byte = bytes[index];
 
+      // A `\&` guarding a decoded entity reference is emitted by the entity
+      // decoder; preserve the pair verbatim so this pass never doubles the slash.
       if byte == b'\\'
-        && bytes.get(index + 1).is_some_and(|&next| {
-          self.is_parser_protected_escape(next)
-            || (next == b'&' && Self::is_entity_reference_after_ampersand(&bytes[index + 1..]))
-        })
+        && bytes
+          .get(index + 1)
+          .is_some_and(|&next| next == b'&' && Self::is_entity_reference_after_ampersand(&bytes[index + 1..]))
       {
         line_indent = None;
         ordered_digits = 0;
@@ -1222,7 +1251,19 @@ impl ConvertState {
         continue;
       }
 
+      if in_table && matches!(byte, b'\n' | b'\r') {
+        let out = output.get_or_insert_with(|| String::with_capacity(text.len() + 8));
+        out.push_str(&text[copied_until..index]);
+        out.push_str(if byte == b'\n' { "&#10;" } else { "&#13;" });
+        copied_until = index + 1;
+        index += 1;
+        continue;
+      }
+
       let mut should_escape = matches!(byte, b'\\' | b'*' | b'_' | b'~' | b'`' | b'[')
+        || (byte == b']' && in_link)
+        || (byte == b'|' && in_table)
+        || (byte == b'>' && in_blockquote)
         || (byte == b'<'
           && bytes
             .get(index + 1)
@@ -1318,13 +1359,6 @@ impl ConvertState {
   }
 
   #[inline]
-  fn is_parser_protected_escape(&self, next: u8) -> bool {
-    (next == b'|' && self.depth_map[TAG_TABLE as usize] > 0)
-      || ((next == b'[' || next == b']') && self.depth_map[TAG_A as usize] > 0)
-      || (next == b'>' && self.depth_map[TAG_BLOCKQUOTE as usize] > 0)
-  }
-
-  #[inline]
   fn is_entity_reference_after_ampersand(value: &[u8]) -> bool {
     let mut index = 1usize;
     if value.get(index) == Some(&b'#') {
@@ -1397,9 +1431,9 @@ impl ConvertState {
 
   /// Prepare `<pre>` content for raw-HTML emission inside a GFM table cell
   /// (issue #147): fold literal line breaks into `<br>` so the value stays on
-  /// one row, and HTML-escape `&`, `<`, `>` so decoded source (e.g. `<script>`)
-  /// is not evaluated as live HTML. Leading and trailing breaks are dropped; a
-  /// `\r\n` pair counts as one break.
+  /// one row, encode `|`, and HTML-escape `&`, `<`, `>` so decoded source (e.g.
+  /// `<script>`) is not evaluated as live HTML. Leading and trailing breaks are
+  /// dropped; a `\r\n` pair counts as one break.
   fn fold_pre_lines_to_br(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut start = 0usize;
@@ -1428,11 +1462,51 @@ impl ConvertState {
         out.push_str("&lt;");
       } else if c == '>' {
         out.push_str("&gt;");
+      } else if c == '|' {
+        out.push_str("&#124;");
       } else {
         out.push(c);
       }
     }
     out
+  }
+
+  fn escape_raw_html_text<'a>(&self, value: &'a str) -> Cow<'a, str> {
+    let in_table = self.depth_map[TAG_TABLE as usize] > 0;
+    let in_link = self.depth_map[TAG_A as usize] > 0;
+    let mut output: Option<String> = None;
+    let mut copied_until = 0usize;
+
+    let bytes = value.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+      let byte = bytes[index];
+      let replacement = match byte {
+        b'&' => Some("&amp;"),
+        b'<' => Some("&lt;"),
+        b'>' => Some("&gt;"),
+        b'\n' => Some("&#10;"),
+        b'\r' => Some("&#13;"),
+        b'|' if in_table => Some("&#124;"),
+        b'[' if in_link => Some("&#91;"),
+        b']' if in_link => Some("&#93;"),
+        _ => None,
+      };
+      if let Some(replacement) = replacement {
+        let out = output.get_or_insert_with(|| String::with_capacity(value.len() + 8));
+        out.push_str(&value[copied_until..index]);
+        out.push_str(replacement);
+        copied_until = index + 1;
+      }
+      index += 1;
+    }
+
+    if let Some(mut output) = output {
+      output.push_str(&value[copied_until..]);
+      Cow::Owned(output)
+    } else {
+      Cow::Borrowed(value)
+    }
   }
 
   #[inline]
@@ -1663,6 +1737,8 @@ impl ConvertState {
             s.push('\n');
             Some(Cow::Owned(s))
           }
+        } else if self.in_raw_html_block() {
+          Some(Cow::Borrowed("<code>"))
         } else if self.depth_map[TAG_LI as usize] > 0 {
           // Inline code inside a list item: collapse the paragraph
           // boundary with a separator space when following text, but
@@ -1879,6 +1955,8 @@ impl ConvertState {
           } else {
             Some(Cow::Borrowed("\n```"))
           }
+        } else if self.in_raw_html_block() {
+          Some(Cow::Borrowed("</code>"))
         } else {
           Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
         }

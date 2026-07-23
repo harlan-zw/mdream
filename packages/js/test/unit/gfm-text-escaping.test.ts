@@ -108,11 +108,42 @@ describe('gfm text escaping', () => {
       .toBe('| a\\|b |\n| --- |')
   })
 
+  it('serializes decoded text for its output context', () => {
+    expect(htmlToMarkdown('<a href="/safe">x&#93;(/evil) [y</a>'))
+      .toBe('[x\\](/evil) \\[y](/safe)')
+    expect(htmlToMarkdown('<table><tr><td>a&#124;b</td><td>c&#10;d</td></tr></table>'))
+      .toBe('| a\\|b | c&#10;d |\n| --- | --- |')
+
+    const details = htmlToMarkdown('<details><summary>&lt;img src=x onerror=alert(1)&gt;</summary></details>')
+    expect(details).toContain('<summary>&lt;img src=x onerror=alert(1)&gt;</summary>')
+    expect(htmlToMarkdown('<details><summary><code>&lt;img src=x onerror=alert(1)&gt;</code></summary></details>'))
+      .toContain('<code>&lt;img src=x onerror=alert(1)&gt;</code>')
+    expect(htmlToMarkdown('<details><a href="/x">a[b]</a></details>'))
+      .toContain('[a&#91;b&#93;](/x)')
+    expect(htmlToMarkdown('<details><a href="/x">&#92;&#91;</a></details>'))
+      .toContain('[\\&#91;](/x)')
+    expect(htmlToMarkdown('<details><table><tr><td><pre>a|b&#124;c</pre></td><td>x</td></tr></table></details>'))
+      .toContain('| <pre>a&#124;b&#124;c</pre> | x |')
+    expect(htmlToMarkdown('<table><tr><td><pre>a|b&#124;c</pre></td><td>x</td></tr></table>'))
+      .toBe('| <pre>a&#124;b&#124;c</pre> | x |\n| --- | --- |')
+  })
+
   it('matches one-shot output across stream boundaries', async () => {
-    const html = '<p>&#35; heading [label](url) and *bar* ~~baz~~ `qux` &amp;copy;</p><p>> quote</p><p>1. item</p><p>---</p>'
-    const expected = htmlToMarkdown(html)
-    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
-      expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(expected)
+    for (const html of [
+      '<p>&#35; heading [label](url) and *bar* ~~baz~~ `qux` &amp;copy;</p><p>> quote</p><p>1. item</p><p>---</p>',
+      '<a href="/safe">x&#93;(/evil) [y</a>',
+      '<table><tr><td>a&#124;b</td><td>c&#10;d</td></tr></table>',
+      '<details><summary>&lt;img src=x onerror=alert(1)&gt;</summary></details>',
+      '<details><summary><code>&lt;img src=x onerror=alert(1)&gt;</code></summary></details>',
+      '<details><a href="/x">a[b]</a></details>',
+      '<details><a href="/x">&#92;&#91;</a></details>',
+      '<details><table><tr><td><pre>a|b&#124;c</pre></td><td>x</td></tr></table></details>',
+      '<table><tr><td><pre>a|b&#124;c</pre></td><td>x</td></tr></table>',
+    ]) {
+      const expected = htmlToMarkdown(html)
+      for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+        expect(await streamConvert(html, chunkSize), `${html}: chunk size ${chunkSize}`).toBe(expected)
+    }
   })
 
   it('widens code delimiters across every stream boundary', async () => {

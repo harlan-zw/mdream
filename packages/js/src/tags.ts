@@ -1,6 +1,7 @@
 import type { EngineOptions, HandlerContext, TagHandler, TagOverride } from './types'
 import {
   BLOCKQUOTE_SPACING,
+  isInsideRawHtmlBlock,
   LIST_ITEM_SPACING,
   MARKDOWN_CODE_BLOCK,
   MARKDOWN_EMPHASIS,
@@ -213,21 +214,11 @@ function isInsideTableCell(state: HandlerContext['state']): boolean {
   return depthMap[TAG_TD]! > 0 || depthMap[TAG_TH]! > 0
 }
 
-function isInsideRawHtmlBlock(state: HandlerContext['state']): boolean {
-  const depthMap = state.depthMap!
-  return Boolean(depthMap[TAG_DETAILS]
-    || depthMap[TAG_SUMMARY]
-    || depthMap[TAG_ADDRESS]
-    || depthMap[TAG_DL]
-    || depthMap[TAG_DT]
-    || depthMap[TAG_DD])
-}
-
 export function renderBreak(node: HandlerContext['node'], state: HandlerContext['state']): string {
   // A literal newline would terminate a table row/ATX heading or collapse
   // inside a raw HTML block, so preserve the inline HTML there.
   const depthMap = state.depthMap!
-  if (isInsideTableCell(state) || isInsideRawHtmlBlock(state)
+  if (isInsideTableCell(state) || isInsideRawHtmlBlock(depthMap)
     || depthMap[TAG_H1]
     || depthMap[TAG_H2]
     || depthMap[TAG_H3]
@@ -473,6 +464,9 @@ export const tagHandlers: Record<number, TagHandler> = {
           output: `${MARKDOWN_CODE_BLOCK}${language}\n`,
         }
       }
+      if (isInsideRawHtmlBlock(state.depthMap!)) {
+        return '<code>'
+      }
       // Inline code inside a list item: collapse the paragraph boundary with a
       // separator space when following text, but not when the buffer just
       // emitted a wrapper opener where a leading space would break the
@@ -511,6 +505,9 @@ export const tagHandlers: Record<number, TagHandler> = {
           }
         }
         return { _tag: 'CodeFenceExit', output: `\n${MARKDOWN_CODE_BLOCK}` }
+      }
+      if (isInsideRawHtmlBlock(state.depthMap!)) {
+        return '</code>'
       }
       return { _tag: 'CodeSpanExit' }
     },

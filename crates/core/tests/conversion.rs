@@ -253,6 +253,49 @@ fn gfm_text_escaping_does_not_repeat_context_escapes() {
   );
 }
 
+#[test]
+fn decoded_text_is_serialized_for_its_output_context() {
+  assert_eq!(
+    convert(r#"<a href="/safe">x&#93;(/evil) [y</a>"#),
+    r"[x\](/evil) \[y](/safe)"
+  );
+  assert_eq!(
+    convert("<table><tr><td>a&#124;b</td><td>c&#10;d</td></tr></table>"),
+    "| a\\|b | c&#10;d |\n| --- | --- |"
+  );
+
+  let details = convert("<details><summary>&lt;img src=x onerror=alert(1)&gt;</summary></details>");
+  assert!(
+    details.contains("<summary>&lt;img src=x onerror=alert(1)&gt;</summary>"),
+    "decoded text became active raw HTML: {details}"
+  );
+
+  let raw_code = convert(
+    "<details><summary><code>&lt;img src=x onerror=alert(1)&gt;</code></summary></details>",
+  );
+  assert!(
+    raw_code.contains("<code>&lt;img src=x onerror=alert(1)&gt;</code>"),
+    "decoded code became active raw HTML: {raw_code}"
+  );
+  assert!(
+    convert(r#"<details><a href="/x">a[b]</a></details>"#).contains("[a&#91;b&#93;](/x)"),
+    "parser-added escapes must not become visible raw-HTML text"
+  );
+  assert!(
+    convert(r#"<details><a href="/x">&#92;&#91;</a></details>"#).contains(r"[\&#91;](/x)"),
+    "decoded backslashes must remain visible raw-HTML text"
+  );
+  assert!(
+    convert("<details><table><tr><td><pre>a|b&#124;c</pre></td><td>x</td></tr></table></details>",)
+      .contains("| <pre>a&#124;b&#124;c</pre> | x |"),
+    "raw pre text must not split a GFM table row"
+  );
+  assert_eq!(
+    convert("<table><tr><td><pre>a|b&#124;c</pre></td><td>x</td></tr></table>"),
+    "| <pre>a&#124;b&#124;c</pre> | x |\n| --- | --- |"
+  );
+}
+
 // ── Links ──
 
 #[test]

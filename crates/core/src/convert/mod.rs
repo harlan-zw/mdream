@@ -23,11 +23,6 @@ pub(crate) struct TrackedExtraction {
   pub(crate) attributes: Vec<(String, String)>,
 }
 
-// Escape context bitmask flags
-const ESC_TABLE: u8 = 1;
-const ESC_LINK: u8 = 4;
-const ESC_BLOCKQUOTE: u8 = 8;
-
 #[inline(always)]
 fn is_inline_gfm_hazard(byte: u8) -> bool {
   const LOW: u64 = (1 << b'*') | (1 << b'<');
@@ -270,7 +265,6 @@ pub struct ConvertState {
   is_first_text_in_element: bool,
   in_non_nesting: bool,
   script_data_state: u8,
-  escape_ctx: u8,
   in_pre: bool,
   depth_limit_reached: bool,
   /// Filter: depth of the shallowest currently-open visually-hidden element, or
@@ -427,7 +421,6 @@ impl ConvertState {
       is_first_text_in_element: false,
       in_non_nesting: false,
       script_data_state: SCRIPT_DATA,
-      escape_ctx: 0,
       in_pre: false,
       depth_limit_reached: false,
       hidden_since_depth: None,
@@ -657,12 +650,11 @@ impl ConvertState {
 
       if cc != LT_CHAR {
         // FAST PATH: batch contiguous plain ASCII text (>32, <128, not & or <)
-        // Skip when: in escape context, non-nesting mode, or pre tag
+        // Skip when: non-nesting mode or pre tag
         if cc > 32
           && cc < 0x80
           && cc != AMPERSAND_CHAR
           && !is_inline_gfm_hazard(cc)
-          && self.escape_ctx == 0
           && !self.in_non_nesting
           && !self.in_pre
         {
@@ -733,28 +725,11 @@ impl ConvertState {
           self.last_char_was_whitespace = false;
           self.just_closed_tag = false;
 
-          if self.escape_ctx == 0 {
-            if cc < 0x80 {
-              text_buffer.push(cc as char);
-            } else {
-              if let Some(ch) = chunk[i..].chars().next() {
-                text_buffer.push(ch);
-                i += ch.len_utf8();
-              } else {
-                i += 1;
-              }
-
-              continue;
-            }
-          } else if cc == PIPE_CHAR && (self.escape_ctx & ESC_TABLE) != 0 {
-            text_buffer.push_str("\\|");
-          } else if cc == OPEN_BRACKET_CHAR && (self.escape_ctx & ESC_LINK) != 0 {
-            text_buffer.push_str("\\[");
-          } else if cc == CLOSE_BRACKET_CHAR && (self.escape_ctx & ESC_LINK) != 0 {
-            text_buffer.push_str("\\]");
-          } else if cc == GT_CHAR && (self.escape_ctx & ESC_BLOCKQUOTE) != 0 {
-            text_buffer.push_str("\\>");
-          } else if cc < 0x80 {
+          // Structural GFM escaping (|, [, ], > in table/link/blockquote
+          // context) is applied at output time in escape_gfm_text, which also
+          // covers characters produced by decoded entities that never pass
+          // through this parse loop.
+          if cc < 0x80 {
             text_buffer.push(cc as char);
           } else if let Some(ch) = chunk[i..].chars().next() {
             text_buffer.push(ch);

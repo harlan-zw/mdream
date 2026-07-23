@@ -3,6 +3,7 @@ import type { ElementNode, EngineOptions, GfmAction, Node, NodeEvent, PluginCont
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
+  isInsideRawHtmlBlock,
   MARKDOWN_CODE_BLOCK,
   MARKDOWN_INLINE_CODE,
   MAX_TAG_ID,
@@ -10,19 +11,14 @@ import {
   NodeEventEnter,
   NodeEventExit,
   TAG_A,
-  TAG_ADDRESS,
   TAG_B,
   TAG_BLOCKQUOTE,
   TAG_BR,
   TAG_CITE,
   TAG_CODE,
-  TAG_DD,
   TAG_DEL,
-  TAG_DETAILS,
   TAG_DFN,
   TAG_DIV,
-  TAG_DL,
-  TAG_DT,
   TAG_EM,
   TAG_FIGCAPTION,
   TAG_H1,
@@ -41,7 +37,6 @@ import {
   TAG_SPAN,
   TAG_STRIKE,
   TAG_STRONG,
-  TAG_SUMMARY,
   TAG_TABLE,
   TAG_TD,
   TAG_TH,
@@ -243,9 +238,9 @@ function canWrapHere(depthMap: Uint8Array): boolean {
 /**
  * Prepare `<pre>` content for raw-HTML emission inside a GFM table cell
  * (issue #147): fold literal line breaks into `<br>` so the value stays on one
- * row, and HTML-escape `&`, `<`, `>` so decoded source (e.g. `<script>`) is not
- * evaluated as live HTML by downstream renderers. Leading and trailing breaks
- * are dropped; a `\r\n` pair counts as one break.
+ * row, encode `|`, and HTML-escape `&`, `<`, `>` so decoded source (e.g.
+ * `<script>`) is not evaluated as live HTML by downstream renderers. Leading
+ * and trailing breaks are dropped; a `\r\n` pair counts as one break.
  */
 function foldPreLinesToBr(value: string): string {
   let start = 0
@@ -282,6 +277,9 @@ function foldPreLinesToBr(value: string): string {
     else if (c === 62) {
       out += '&gt;'
     }
+    else if (c === 124) {
+      out += '&#124;'
+    }
     else {
       out += value[i]
     }
@@ -289,13 +287,41 @@ function foldPreLinesToBr(value: string): string {
   return out
 }
 
-function isInsideRawHtmlBlock(depthMap: Uint8Array): boolean {
-  return Boolean(depthMap[TAG_DETAILS]
-    || depthMap[TAG_SUMMARY]
-    || depthMap[TAG_ADDRESS]
-    || depthMap[TAG_DL]
-    || depthMap[TAG_DT]
-    || depthMap[TAG_DD])
+function escapeRawHtmlText(value: string, depthMap: Uint8Array): string {
+  const inTable = Boolean(depthMap[TAG_TABLE])
+  const inLink = Boolean(depthMap[TAG_A])
+  let escaped = ''
+  let copiedUntil = 0
+
+  let index = 0
+  while (index < value.length) {
+    const code = value.charCodeAt(index)
+    let replacement: string | undefined
+    if (code === 38)
+      replacement = '&amp;'
+    else if (code === 60)
+      replacement = '&lt;'
+    else if (code === 62)
+      replacement = '&gt;'
+    else if (code === 10)
+      replacement = '&#10;'
+    else if (code === 13)
+      replacement = '&#13;'
+    else if (inTable && code === 124)
+      replacement = '&#124;'
+    else if (inLink && code === 91)
+      replacement = '&#91;'
+    else if (inLink && code === 93)
+      replacement = '&#93;'
+
+    if (replacement) {
+      escaped += value.slice(copiedUntil, index) + replacement
+      copiedUntil = index + 1
+    }
+    index++
+  }
+
+  return copiedUntil === 0 ? value : escaped + value.slice(copiedUntil)
 }
 
 /**
@@ -349,12 +375,6 @@ function isThematicBreak(value: string, start: number, marker: number): boolean 
   return count >= 3
 }
 
-function isParserProtectedEscape(depthMap: Uint8Array, next: number): boolean {
-  return (next === 124 && Boolean(depthMap[TAG_TABLE])) // |
-    || ((next === 91 || next === 93) && Boolean(depthMap[TAG_A])) // []
-    || (next === 62 && Boolean(depthMap[TAG_BLOCKQUOTE])) // >
-}
-
 function isEntityReferenceAfterAmpersand(value: string, ampersand: number): boolean {
   let index = ampersand + 1
   if (value.charCodeAt(index) === 35) {
@@ -393,9 +413,14 @@ const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
  * precise JavaScript scanner. A block marker can only begin within the first
  * four characters here; later lines are covered by the newline trigger.
  */
-function mayNeedGfmTextEscape(value: string, buffer: string[]): boolean {
+function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint8Array): boolean {
   if (value.search(GFM_TEXT_NATIVE_TRIGGER) !== -1)
     return true
+  if ((depthMap[TAG_TABLE] && value.includes('|'))
+    || (depthMap[TAG_A] && value.includes(']'))
+    || (depthMap[TAG_BLOCKQUOTE] && value.includes('>'))) {
+    return true
+  }
 
   let lineIndent = markdownLineIndent(buffer)
   if (lineIndent < 0)
@@ -423,6 +448,9 @@ function mayNeedGfmTextEscape(value: string, buffer: string[]): boolean {
  * The common plain-text path returns the original string without allocation.
  */
 function escapeGfmText(value: string, buffer: string[], depthMap: Uint8Array): string {
+  const inTable = Boolean(depthMap[TAG_TABLE])
+  const inLink = Boolean(depthMap[TAG_A])
+  const inBlockquote = Boolean(depthMap[TAG_BLOCKQUOTE])
   let lineIndent = markdownLineIndent(buffer)
   let orderedDigits = 0
   let copiedUntil = 0
@@ -431,14 +459,20 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint8Array): s
   for (let index = 0; index < value.length; index++) {
     const code = value.charCodeAt(index)
 
-    // These escapes were inserted by the parser for structural contexts.
-    // Preserve the pair verbatim so this text pass never doubles the slash.
+    // A `\&` guarding a decoded entity reference is emitted by the entity
+    // decoder; preserve the pair verbatim so this pass never doubles the slash.
     const next = index + 1 < value.length ? value.charCodeAt(index + 1) : 0
-    if (code === 92 && (isParserProtectedEscape(depthMap, next)
-      || (next === 38 && isEntityReferenceAfterAmpersand(value, index + 1)))) {
+    if (code === 92 && next === 38 && isEntityReferenceAfterAmpersand(value, index + 1)) {
       lineIndent = -1
       orderedDigits = 0
       index++
+      continue
+    }
+
+    if (inTable && (code === 10 || code === 13)) {
+      escaped += value.slice(copiedUntil, index)
+      escaped += code === 10 ? '&#10;' : '&#13;'
+      copiedUntil = index + 1
       continue
     }
 
@@ -448,6 +482,9 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint8Array): s
       || code === 126 // ~
       || code === 96 // `
       || code === 91 // [
+      || (code === 93 && inLink) // ]
+      || (code === 124 && inTable) // |
+      || (code === 62 && inBlockquote) // >
       || (code === 60 && canStartGfmAngleConstruct(value.charCodeAt(index + 1))) // <
 
     if (!shouldEscape && lineIndent >= 0) {
@@ -997,11 +1034,18 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         textNode.value = foldPreLinesToBr(textNode.value)
       }
 
+      const insideRawHtmlBlock = isInsideRawHtmlBlock(state.depthMap)
+      if (!state.plainText
+        && !state.depthMap[TAG_PRE]
+        && insideRawHtmlBlock) {
+        textNode.value = escapeRawHtmlText(textNode.value, state.depthMap)
+      }
+
       if (!state.plainText
         && !state.depthMap[TAG_PRE]
         && !state.depthMap[TAG_CODE]
-        && !isInsideRawHtmlBlock(state.depthMap)
-        && mayNeedGfmTextEscape(textNode.value, state.buffer)) {
+        && !insideRawHtmlBlock
+        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap)) {
         textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap)
       }
 
@@ -1193,7 +1237,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     if (eventType === NodeEventExit && openMarkerCount) {
       // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
       const markerType = handlerOutput === undefined ? 0 : INLINE_MARKER_TYPE[element.tagId!]!
-      if (markerType && (element.tagId !== TAG_CODE || !state.depthMap[TAG_PRE]) && !handler?.literalExit) {
+      if (markerType
+        && (element.tagId !== TAG_CODE
+          || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
+        && !handler?.literalExit) {
         const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType)
         if (idx >= 0) {
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
@@ -1372,10 +1419,15 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // fragment as the drop boundary.
     if (eventType === NodeEventEnter && handlerOutput !== undefined && isInlineElement && !handler?.literalEnter) {
       const markerType = INLINE_MARKER_TYPE[element.tagId!]!
-      if (markerType && (element.tagId !== TAG_CODE || !state.depthMap[TAG_PRE]) && buff[buff.length - 1] === handlerOutput)
+      if (markerType
+        && (element.tagId !== TAG_CODE
+          || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
+        && buff[buff.length - 1] === handlerOutput) {
         openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
-      else if (openMarkerCount && hasNonWhitespace(handlerOutput))
+      }
+      else if (openMarkerCount && hasNonWhitespace(handlerOutput)) {
         openMarkerCount = 0
+      }
     }
     else if (openMarkerCount && (handler?.literalExit || (element.tagId !== -1 && !isInlineElement) || output?.some(hasNonWhitespace))) {
       // Literal overrides, plugin output, and block boundaries make all open

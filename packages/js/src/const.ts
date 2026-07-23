@@ -246,6 +246,16 @@ export const MARKDOWN_CODE_BLOCK = '```'
 export const MARKDOWN_INLINE_CODE = '`'
 export const MARKDOWN_HORIZONTAL_RULE = '---'
 
+// Raw-HTML blocks whose text/code is emitted verbatim rather than as Markdown.
+export function isInsideRawHtmlBlock(depthMap: Uint8Array): boolean {
+  return Boolean(depthMap[TAG_DETAILS]
+    || depthMap[TAG_SUMMARY]
+    || depthMap[TAG_ADDRESS]
+    || depthMap[TAG_DL]
+    || depthMap[TAG_DT]
+    || depthMap[TAG_DD])
+}
+
 // Newline configurations
 export const NO_SPACING: readonly [number, number] = [0, 0]
 export const DEFAULT_BLOCK_SPACING: readonly [number, number] = [2, 2]
