@@ -628,12 +628,8 @@ impl ConvertState {
       if (id as usize) < MAX_TAG_ID {
         self.depth_map[id as usize] = self.depth_map[id as usize].saturating_add(1);
       }
-      match id {
-        TAG_TABLE if !self.plain_text => self.escape_ctx |= ESC_TABLE,
-        TAG_PRE => self.in_pre = true,
-        TAG_A if !self.plain_text => self.escape_ctx |= ESC_LINK,
-        TAG_BLOCKQUOTE if !self.plain_text => self.escape_ctx |= ESC_BLOCKQUOTE,
-        _ => {}
+      if id == TAG_PRE {
+        self.in_pre = true;
       }
     }
     self.depth += 1;
@@ -1087,7 +1083,7 @@ impl ConvertState {
           if (id as usize) < MAX_TAG_ID {
             self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
           }
-          self.update_escape_ctx_on_close(id);
+          self.update_in_pre_on_close(id);
           if id == TAG_LI
             && let Some(w) = self.list_indent_widths.pop()
           {
@@ -1117,7 +1113,7 @@ impl ConvertState {
       if (id as usize) < MAX_TAG_ID {
         self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
       }
-      self.update_escape_ctx_on_close(id);
+      self.update_in_pre_on_close(id);
       if id == TAG_LI
         && let Some(w) = self.list_indent_widths.pop()
       {
@@ -1332,15 +1328,9 @@ impl ConvertState {
   }
 
   #[inline]
-  pub(crate) fn update_escape_ctx_on_close(&mut self, id: u8) {
-    match id {
-      TAG_TABLE if self.depth_map[id as usize] == 0 => self.escape_ctx &= !ESC_TABLE,
-      TAG_PRE if self.depth_map[TAG_PRE as usize] == 0 => {
-        self.in_pre = false;
-      }
-      TAG_A if self.depth_map[id as usize] == 0 => self.escape_ctx &= !ESC_LINK,
-      TAG_BLOCKQUOTE if self.depth_map[id as usize] == 0 => self.escape_ctx &= !ESC_BLOCKQUOTE,
-      _ => {}
+  pub(crate) fn update_in_pre_on_close(&mut self, id: u8) {
+    if id == TAG_PRE && self.depth_map[TAG_PRE as usize] == 0 {
+      self.in_pre = false;
     }
   }
 }

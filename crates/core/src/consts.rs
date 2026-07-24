@@ -265,9 +265,6 @@ pub const TAB_CHAR: u8 = 9; // '\t'
 pub const NEWLINE_CHAR: u8 = 10; // '\n'
 pub const CARRIAGE_RETURN_CHAR: u8 = 13; // '\r'
 pub const BACKTICK_CHAR: u8 = 96; // '`'
-pub const PIPE_CHAR: u8 = 124; // '|'
-pub const OPEN_BRACKET_CHAR: u8 = 91; // '['
-pub const CLOSE_BRACKET_CHAR: u8 = 93; // ']'
 
 /// Longest built-in HTML tag name (`blockquote`, `figcaption`); also the size
 /// of the stack buffer used for the case-insensitive lookup.

@@ -24,6 +24,14 @@ const recentMergeCases: ParityCase[] = [
     html: '<img src="/image.png?utm_source=test&width=10">',
     options: { clean: { urls: true }, format: 'text', origin: 'https://example.com' },
   },
+  { html: '<a href="/safe">x&#93;(/evil) [y</a>' },
+  { html: '<table><tr><td>a&#124;b</td><td>c&#10;d</td></tr></table>' },
+  { html: '<details><summary>&lt;img src=x onerror=alert(1)&gt;</summary></details>' },
+  { html: '<details><summary><code>&lt;img src=x onerror=alert(1)&gt;</code></summary></details>' },
+  { html: '<details><a href="/x">a[b]</a></details>' },
+  { html: '<details><a href="/x">&#92;&#91;</a></details>' },
+  { html: '<details><table><tr><td><pre>a|b&#124;c</pre></td><td>x</td></tr></table></details>' },
+  { html: '<table><tr><td><pre>a|b&#124;c</pre></td><td>x</td></tr></table>' },
 ]
 
 async function streamConvert(engine: TestEngine, { html, options }: ParityCase, chunkSize: number): Promise<string> {
