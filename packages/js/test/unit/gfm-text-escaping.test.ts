@@ -71,9 +71,9 @@ describe('gfm text escaping', () => {
 
   it('detects block markers after generated output fragments', () => {
     expect(htmlToMarkdown('<p>before<br><span># heading</span></p>'))
-      .toBe('before\\\n\\# heading')
+      .toBe('before  \n\\# heading')
     expect(htmlToMarkdown('<p>before<br><span>1. item</span></p>'))
-      .toBe('before\\\n1\\. item')
+      .toBe('before  \n1\\. item')
   })
 
   it('handles terminal trigger characters safely', () => {

@@ -158,7 +158,7 @@ fn heading_with_numbered_prefix() {
 
 #[test]
 fn prose_br_serializes_as_gfm_hard_break() {
-  const HARD_BREAK: &str = "\\\n";
+  const HARD_BREAK: &str = "  \n";
 
   for (html, expected) in [
     ("<p>first<br>second</p>", format!("first{HARD_BREAK}second")),
@@ -3007,7 +3007,7 @@ fn wrap_preserves_inline_spacing() {
 
 #[test]
 fn br_preserves_a_line_break_with_and_without_wrapping() {
-  const HARD_BREAK: &str = "\\\n";
+  const HARD_BREAK: &str = "  \n";
   let html = "<div>abc def ghi jkl mno<br/>111 222 333 444 555 666 777 888 999 000 abc</div>";
 
   assert_eq!(
@@ -3026,7 +3026,7 @@ fn br_preserves_a_line_break_with_and_without_wrapping() {
 
 #[test]
 fn br_keeps_nested_block_continuation_prefixes() {
-  const HARD_BREAK: &str = "\\\n";
+  const HARD_BREAK: &str = "  \n";
   assert_eq!(
     convert("<ul><li>first<br>second</li></ul>"),
     format!("- first{HARD_BREAK}  second")
