@@ -121,7 +121,7 @@ import {
   TAG_XMP,
   TagIdMap,
 } from './const'
-import { continuationPrefix, isEmptyLinkHref } from './utils'
+import { continuationPrefix, getLanguageFromClass, isEmptyLinkHref } from './utils'
 
 const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
 const URL_SCHEME_RE = /^[\dA-Z+.-]+:/i
@@ -245,19 +245,6 @@ export const breakHandler: TagHandler = {
   spacing: NO_SPACING,
   collapsesInnerWhiteSpace: true,
   isInline: true,
-}
-
-// Helper function to get language from code class attribute
-function getLanguageFromClass(className: string | undefined): string {
-  if (!className)
-    return ''
-
-  const langParts = className
-    .split(' ')
-    .map(c => c.split('language-')[1])
-    .filter(Boolean)
-
-  return (langParts && langParts.length > 0) ? langParts[0]!.trim() : ''
 }
 
 function handleHeading(depth: number): TagHandler {
