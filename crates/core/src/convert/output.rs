@@ -1650,9 +1650,9 @@ impl ConvertState {
         } else {
           let prefix = self.continuation_prefix();
           if prefix.is_empty() {
-            Some(Cow::Borrowed("\\\n"))
+            Some(Cow::Borrowed("  \n"))
           } else {
-            Some(Cow::Owned(format!("\\\n{prefix}")))
+            Some(Cow::Owned(format!("  \n{prefix}")))
           }
         }
       }
