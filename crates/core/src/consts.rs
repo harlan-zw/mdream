@@ -246,7 +246,7 @@ pub const MARKDOWN_HORIZONTAL_RULE: &str = "---";
 
 pub const NO_SPACING: [u8; 2] = [0, 0];
 pub const DEFAULT_BLOCK_SPACING: [u8; 2] = [2, 2];
-pub const BLOCKQUOTE_SPACING: [u8; 2] = [1, 1];
+pub const BLOCKQUOTE_SPACING: [u8; 2] = [2, 2];
 pub const LIST_ITEM_SPACING: [u8; 2] = [1, 0];
 pub const TABLE_ROW_SPACING: [u8; 2] = [0, 1];
 
