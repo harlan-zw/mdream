@@ -6,14 +6,18 @@ const DESTINATION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 80, 0, 0, 0, 16, 0, 
 const TITLE_ESCAPES: [u8; 16] = [0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0];
 const IMAGE_DESCRIPTION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 64, 4, 0, 16, 0, 0, 0, 184, 1, 0, 0, 64];
 
+#[inline(always)]
+fn in_byte_set(byte: u8, set: &[u8; 16]) -> bool {
+  byte < 128 && set[(byte >> 3) as usize] & (1 << (byte & 7)) != 0
+}
+
 #[inline(never)]
 fn write_ascii_escaped(output: &mut String, value: &str, escapes: &[u8; 16]) {
   let bytes = value.as_bytes();
   let mut copied = 0usize;
   let mut index = 0usize;
   while index < bytes.len() {
-    let byte = bytes[index];
-    if byte < 128 && escapes[(byte >> 3) as usize] & (1 << (byte & 7)) != 0 {
+    if in_byte_set(bytes[index], escapes) {
       output.push_str(&value[copied..index]);
       output.push('\\');
       copied = index;
@@ -23,15 +27,14 @@ fn write_ascii_escaped(output: &mut String, value: &str, escapes: &[u8; 16]) {
   output.push_str(&value[copied..]);
 }
 
+/// Bytes forcing a destination into angle brackets: tab, LF, FF, CR, space,
+/// `(`, `)`, and every byte of [`DESTINATION_ESCAPES`] (must stay a superset).
+const DESTINATION_NEEDS_ANGLE: [u8; 16] = [0, 54, 0, 0, 1, 3, 0, 80, 0, 0, 0, 16, 0, 0, 0, 0];
+
 fn write_markdown_destination(output: &mut String, destination: &str) {
   let bytes = destination.as_bytes();
   let mut index = 0usize;
-  while index < bytes.len()
-    && !matches!(
-      bytes[index],
-      b'\t' | b'\n' | 0x0C | b'\r' | b' ' | b'(' | b')' | b'\\' | b'<' | b'>'
-    )
-  {
+  while index < bytes.len() && !in_byte_set(bytes[index], &DESTINATION_NEEDS_ANGLE) {
     index += 1;
   }
   if index == bytes.len() {
@@ -509,8 +512,7 @@ impl ConvertState {
       && self.depth_map[TAG_PRE as usize] == 0
       && output.as_deref().is_some_and(|value| value.ends_with('\n'))
     {
-      let trimmed_len = self.buffer.trim_end_matches(' ').len();
-      self.buffer.truncate(trimmed_len);
+      self.trim_trailing_spaces();
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
         output = None;
       }
@@ -783,30 +785,30 @@ impl ConvertState {
       // redundantLinks: [url](url) → url
       if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0
         && let Some(href) = node.attributes.get("href")
-      {
-        let resolved = resolve_url(
+        && let resolved = resolve_url(
           href,
           self.options.origin.as_deref(),
           self.options.clean_urls,
-        );
-        if link_text == resolved.as_ref() && text_len > 0 {
-          // Remove [ and keep text only — use truncate+copy without intermediate String
-          let new_len = bracket_pos + text_len;
-          // SAFETY: same invariants as self-link heading case. Preserves valid UTF-8.
-          #[allow(unsafe_code)]
-          unsafe {
-            let buf = self.buffer.as_mut_vec();
-            std::ptr::copy(
-              buf.as_ptr().add(text_start),
-              buf.as_mut_ptr().add(bracket_pos),
-              text_len,
-            );
-            buf.set_len(new_len);
-          }
-          self.last_content_cache_len = text_len;
-          self.last_node_is_inline = is_inline;
-          return;
+        )
+        && link_text == resolved.as_ref()
+        && text_len > 0
+      {
+        // Remove [ and keep text only — use truncate+copy without intermediate String
+        let new_len = bracket_pos + text_len;
+        // SAFETY: same invariants as self-link heading case. Preserves valid UTF-8.
+        #[allow(unsafe_code)]
+        unsafe {
+          let buf = self.buffer.as_mut_vec();
+          std::ptr::copy(
+            buf.as_ptr().add(text_start),
+            buf.as_mut_ptr().add(bracket_pos),
+            text_len,
+          );
+          buf.set_len(new_len);
         }
+        self.last_content_cache_len = text_len;
+        self.last_node_is_inline = is_inline;
+        return;
       }
     }
 
@@ -834,6 +836,7 @@ impl ConvertState {
           self.options.origin.as_deref(),
           self.options.clean_urls,
         );
+        let resolved = resolved.as_ref();
         let mut title = node.attributes.get("title").map_or("", String::as_str);
         if !title.is_empty() && self.last_content_cache_len > 0 {
           let buf_len = self.buffer.len();
@@ -851,16 +854,16 @@ impl ConvertState {
         // directly at the `[` byte (set in emit_enter_element), so this
         // is an O(1) check. `[` is single-byte UTF-8, so `bp + 1` is
         // always a char boundary once `buf_bytes[bp]` is confirmed `[`.
-        if title.is_empty() && is_autolink_uri(&resolved) {
+        if title.is_empty() && is_autolink_uri(resolved) {
           let bp = self.link_bracket_pos;
           let buf_bytes = self.buffer.as_bytes();
           if bp < buf_bytes.len()
             && buf_bytes[bp] == b'['
-            && &self.buffer[bp + 1..] == resolved.as_ref()
+            && &self.buffer[bp + 1..] == resolved
           {
             self.buffer.truncate(bp);
             self.buffer.push('<');
-            self.buffer.push_str(&resolved);
+            self.buffer.push_str(resolved);
             self.buffer.push('>');
             self.last_content_cache_len = self.buffer.len();
             self.last_node_is_inline = is_inline;
@@ -870,7 +873,7 @@ impl ConvertState {
         self.buffer.push(']');
         write_markdown_resource(
           &mut self.buffer,
-          &resolved,
+          resolved,
           (!title.is_empty()).then_some(title),
         );
         self.last_content_cache_len = self.buffer.len(); // will be recalculated
@@ -973,8 +976,6 @@ impl ConvertState {
     }
   }
 
-  /// Emit markdown for a text node (no TextNode allocation).
-  #[inline]
   /// Emit a bare <pre>'s opening code fence (issue #97). Mirrors the
   /// <code>-in-<pre> enter formatting: indented and newline-padded inside a
   /// list item, otherwise a plain ```lang opener. Marks the <pre> as owning
@@ -1007,6 +1008,8 @@ impl ConvertState {
     self.last_node_is_inline = false;
   }
 
+  /// Emit markdown for a text node (no TextNode allocation).
+  #[inline]
   pub(crate) fn emit_text(
     &mut self,
     text: &str,
@@ -1506,6 +1509,34 @@ impl ConvertState {
       Cow::Owned(output)
     } else {
       Cow::Borrowed(value)
+    }
+  }
+
+  /// Lowest offset a trailing-whitespace trim may cut back to. Open fences,
+  /// code spans, and blockquotes record offsets whose bytes are delimiter, not
+  /// spacing; cutting behind one corrupts the block and leaves `content_start`
+  /// past the buffer end, which panics on finalize.
+  #[inline]
+  fn trim_floor(&self) -> usize {
+    let mut floor = 0usize;
+    if let Some(fence) = &self.code_fence {
+      floor = floor.max(fence.content_start);
+    }
+    if let Some(span) = self.code_spans.last() {
+      floor = floor.max(span.content_start);
+    }
+    if let Some(frame) = self.blockquotes.last() {
+      floor = floor.max(frame.content_start);
+    }
+    floor
+  }
+
+  #[inline]
+  fn trim_trailing_spaces(&mut self) {
+    let floor = self.trim_floor();
+    if self.buffer.len() > floor {
+      let trimmed_len = floor + self.buffer[floor..].trim_end_matches(' ').len();
+      self.buffer.truncate(trimmed_len);
     }
   }
 
@@ -2233,8 +2264,7 @@ impl ConvertState {
       }
 
       if last_char == b' ' && !self.buffer.is_empty() {
-        let trimmed_len = self.buffer.trim_end_matches(' ').len();
-        self.buffer.truncate(trimmed_len);
+        self.trim_trailing_spaces();
         // This source whitespace was consumed by the block boundary; do not
         // let its state leak into a later inline event and trim that output.
         self.last_text_node_contains_whitespace = false;
@@ -2284,8 +2314,9 @@ impl ConvertState {
         if should_trim && self.last_content_cache_len > 0 {
           let cache_len = self.last_content_cache_len;
           let buf_len = self.buffer.len();
-          let start = buf_len.saturating_sub(cache_len);
-          if cache_len <= buf_len && self.buffer.is_char_boundary(start) {
+          // The cached run can include a fence opener (see `trim_floor`).
+          let start = buf_len.saturating_sub(cache_len).max(self.trim_floor());
+          if cache_len <= buf_len && start <= buf_len && self.buffer.is_char_boundary(start) {
             let frag = &self.buffer[start..];
             // Trim only ASCII whitespace, not `str::trim_end`'s full Unicode
             // set: a trailing U+00A0 (`&nbsp;`) is meaningful content, and once
@@ -2294,7 +2325,7 @@ impl ConvertState {
             let trimmed_len = frag
               .trim_end_matches(|c: char| c.is_ascii_whitespace())
               .len();
-            if trimmed_len < cache_len {
+            if start + trimmed_len < buf_len {
               self.buffer.truncate(start + trimmed_len);
               if !is_enter && is_inline {
                 self.pending_inline_whitespace = true;
@@ -2361,7 +2392,11 @@ impl ConvertState {
     if self.last_node_is_inline {
       return false;
     }
-    let first_byte = text.as_bytes()[0];
+    // Malformed attribute quoting can carry a start tag past its `>` and leave
+    // an empty text node behind, so there may be no first byte to inspect.
+    let Some(&first_byte) = text.as_bytes().first() else {
+      return false;
+    };
     if first_byte == b' ' {
       return false;
     }

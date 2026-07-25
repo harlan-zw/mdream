@@ -107,105 +107,179 @@ fn needs_implied_end_recovery(tag_id: u8) -> bool {
   (tag_id as usize) < MAX_TAG_ID && NEEDS_IMPLIED_END_RECOVERY[tag_id as usize]
 }
 
+/// Build a tag lookup table. Sized 256 rather than `MAX_TAG_ID` so indexing by
+/// any `u8` is in bounds by construction: no bounds check, no panic path.
+const fn tag_set(ids: &[u8]) -> [bool; 256] {
+  let mut t = [false; 256];
+  let mut i = 0;
+  while i < ids.len() {
+    t[ids[i] as usize] = true;
+    i += 1;
+  }
+  t
+}
+
 /// "Button scope" terminators for closing a `<p>`: scanning up the open stack
 /// stops here so a `<p>` outside a table cell is never closed from inside one.
 /// `UL`/`OL`/`DL`/`LI` are added (a deviation from the bare spec list) to keep
 /// scans short; a `<p>` is always closed before any of these can become its
 /// ancestor, so they never hide a closable `<p>`.
-fn is_p_scope_boundary(tag_id: u8) -> bool {
-  matches!(
-    tag_id,
-    TAG_BUTTON
-      | TAG_TD
-      | TAG_TH
-      | TAG_CAPTION
-      | TAG_TABLE
-      | TAG_TEMPLATE
-      | TAG_HTML
-      | TAG_UL
-      | TAG_OL
-      | TAG_DL
-      | TAG_LI
-  )
-}
+const P_SCOPE_BOUNDARY: [bool; 256] = tag_set(&[
+  TAG_BUTTON,
+  TAG_TD,
+  TAG_TH,
+  TAG_CAPTION,
+  TAG_TABLE,
+  TAG_TEMPLATE,
+  TAG_HTML,
+  TAG_UL,
+  TAG_OL,
+  TAG_DL,
+  TAG_LI,
+]);
 
 /// "List item scope" terminators for closing a `<li>`: a new `<li>` closes the
 /// previous one only within the same list, never across a nested list or table.
-fn is_li_scope_boundary(tag_id: u8) -> bool {
-  matches!(
-    tag_id,
-    TAG_UL | TAG_OL | TAG_TABLE | TAG_TD | TAG_TH | TAG_CAPTION | TAG_TEMPLATE | TAG_HTML
-  )
-}
+const LI_SCOPE_BOUNDARY: [bool; 256] = tag_set(&[
+  TAG_UL,
+  TAG_OL,
+  TAG_TABLE,
+  TAG_TD,
+  TAG_TH,
+  TAG_CAPTION,
+  TAG_TEMPLATE,
+  TAG_HTML,
+]);
 
 /// Scope terminators for closing a `<dt>`/`<dd>`: each closes the other within
 /// the same `<dl>`, never crossing into a nested list or table.
-fn is_dl_scope_boundary(tag_id: u8) -> bool {
-  matches!(
-    tag_id,
-    TAG_DL
-      | TAG_UL
-      | TAG_OL
-      | TAG_LI
-      | TAG_TABLE
-      | TAG_TD
-      | TAG_TH
-      | TAG_CAPTION
-      | TAG_TEMPLATE
-      | TAG_HTML
-  )
-}
+const DL_SCOPE_BOUNDARY: [bool; 256] = tag_set(&[
+  TAG_DL,
+  TAG_UL,
+  TAG_OL,
+  TAG_LI,
+  TAG_TABLE,
+  TAG_TD,
+  TAG_TH,
+  TAG_CAPTION,
+  TAG_TEMPLATE,
+  TAG_HTML,
+]);
 
 /// "Table cell scope" terminators: a new `<td>`/`<th>` closes the current cell
 /// (and any inline content left open inside it), stopping at the row/section.
-fn is_cell_scope_boundary(tag_id: u8) -> bool {
-  matches!(
-    tag_id,
-    TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT | TAG_TABLE | TAG_CAPTION | TAG_TEMPLATE | TAG_HTML
-  )
-}
+const CELL_SCOPE_BOUNDARY: [bool; 256] = tag_set(&[
+  TAG_TR,
+  TAG_THEAD,
+  TAG_TBODY,
+  TAG_TFOOT,
+  TAG_TABLE,
+  TAG_CAPTION,
+  TAG_TEMPLATE,
+  TAG_HTML,
+]);
 
 /// Block-level terminators for closing an `<a>`: a nested `<a>` closes the open
 /// one (HTML forbids nested anchors — the adoption agency closes the outer),
 /// but only within the same block so a stray open `<a>` in another block is left
 /// alone. Closing intervening inline formatting matches the spec's reconstruction.
-fn is_a_scope_boundary(tag_id: u8) -> bool {
-  matches!(
-    tag_id,
-    TAG_P
-      | TAG_DIV
-      | TAG_LI
-      | TAG_UL
-      | TAG_OL
-      | TAG_DL
-      | TAG_DD
-      | TAG_DT
-      | TAG_TABLE
-      | TAG_TD
-      | TAG_TH
-      | TAG_TR
-      | TAG_CAPTION
-      | TAG_BLOCKQUOTE
-      | TAG_SECTION
-      | TAG_ARTICLE
-      | TAG_HEADER
-      | TAG_FOOTER
-      | TAG_NAV
-      | TAG_ASIDE
-      | TAG_MAIN
-      | TAG_FORM
-      | TAG_FIELDSET
-      | TAG_FIGURE
-      | TAG_BUTTON
-      | TAG_H1
-      | TAG_H2
-      | TAG_H3
-      | TAG_H4
-      | TAG_H5
-      | TAG_H6
-      | TAG_TEMPLATE
-      | TAG_HTML
-  )
+const A_SCOPE_BOUNDARY: [bool; 256] = tag_set(&[
+  TAG_P,
+  TAG_DIV,
+  TAG_LI,
+  TAG_UL,
+  TAG_OL,
+  TAG_DL,
+  TAG_DD,
+  TAG_DT,
+  TAG_TABLE,
+  TAG_TD,
+  TAG_TH,
+  TAG_TR,
+  TAG_CAPTION,
+  TAG_BLOCKQUOTE,
+  TAG_SECTION,
+  TAG_ARTICLE,
+  TAG_HEADER,
+  TAG_FOOTER,
+  TAG_NAV,
+  TAG_ASIDE,
+  TAG_MAIN,
+  TAG_FORM,
+  TAG_FIELDSET,
+  TAG_FIGURE,
+  TAG_BUTTON,
+  TAG_H1,
+  TAG_H2,
+  TAG_H3,
+  TAG_H4,
+  TAG_H5,
+  TAG_H6,
+  TAG_TEMPLATE,
+  TAG_HTML,
+]);
+
+/// Close targets use the same table form so the scan loop makes no indirect call.
+const TARGET_A: [bool; 256] = tag_set(&[TAG_A]);
+const TARGET_P: [bool; 256] = tag_set(&[TAG_P]);
+const TARGET_LI: [bool; 256] = tag_set(&[TAG_LI]);
+const TARGET_CELL: [bool; 256] = tag_set(&[TAG_TD, TAG_TH]);
+const TARGET_DT_DD: [bool; 256] = tag_set(&[TAG_DT, TAG_DD]);
+
+const ROW_CLOSEABLE: [bool; 256] = tag_set(&[TAG_TD, TAG_TH, TAG_TR]);
+
+const SECTION_CLOSEABLE: [bool; 256] = tag_set(&[
+  TAG_TD,
+  TAG_TH,
+  TAG_TR,
+  TAG_THEAD,
+  TAG_TBODY,
+  TAG_TFOOT,
+  TAG_CAPTION,
+]);
+
+/// Allows one optional space, so `display:none` and `display: none` both match.
+#[inline]
+fn style_value_at(bytes: &[u8], index: usize, prop: &[u8]) -> Option<usize> {
+  let end = index + prop.len();
+  if end > bytes.len() || &bytes[index..end] != prop {
+    return None;
+  }
+  Some(end + usize::from(bytes.get(end) == Some(&SPACE_CHAR)))
+}
+
+/// Single pass over the declarations, dispatching on the property's first byte.
+fn style_hides(style: &str) -> bool {
+  let bytes = style.as_bytes();
+  let mut index = 0usize;
+  while index < bytes.len() {
+    match bytes[index] {
+      b'd' => {
+        if let Some(value) = style_value_at(bytes, index, b"display:")
+          && bytes[value..].starts_with(b"none")
+        {
+          return true;
+        }
+      }
+      b'v' => {
+        if let Some(value) = style_value_at(bytes, index, b"visibility:")
+          && bytes[value..].starts_with(b"hidden")
+        {
+          return true;
+        }
+      }
+      b'p' => {
+        if let Some(value) = style_value_at(bytes, index, b"position:")
+          && (bytes[value..].starts_with(b"absolute") || bytes[value..].starts_with(b"fixed"))
+        {
+          return true;
+        }
+      }
+      _ => {}
+    }
+    index += 1;
+  }
+  false
 }
 
 /// Whether an element is visually hidden, so the filter should drop it and its
@@ -218,14 +292,7 @@ fn is_a_scope_boundary(tag_id: u8) -> bool {
 /// properties (rare in inline styles) are not handled.
 fn is_hidden(node: &ElementNode) -> bool {
   if let Some(style) = node.attributes.get("style")
-    && (style.contains("display:none")
-      || style.contains("display: none")
-      || style.contains("visibility:hidden")
-      || style.contains("visibility: hidden")
-      || style.contains("position:absolute")
-      || style.contains("position: absolute")
-      || style.contains("position:fixed")
-      || style.contains("position: fixed"))
+    && style_hides(style)
   {
     return true;
   }
@@ -399,17 +466,17 @@ impl ConvertState {
   /// `<dt>`/`<dd>`: the intervening unmatched nodes (inline formatting, unknown
   /// elements) are closed along the way, mirroring the spec's "generate implied
   /// end tags" step.
-  fn close_implied_to(&mut self, target: fn(u8) -> bool, boundary: fn(u8) -> bool) {
+  fn close_implied_to(&mut self, target: &[bool; 256], boundary: &[bool; 256]) {
     let mut close_count = 0usize;
     let mut found = false;
     for node in self.stack.iter().rev() {
       match node.tag_id {
-        Some(id) if target(id) => {
+        Some(id) if target[id as usize] => {
           close_count += 1;
           found = true;
           break;
         }
-        Some(id) if boundary(id) => break,
+        Some(id) if boundary[id as usize] => break,
         _ => close_count += 1,
       }
     }
@@ -424,10 +491,10 @@ impl ConvertState {
   /// they match `closeable`, stopping at the first node that does not (e.g. the
   /// enclosing `<table>`). Implements implied end tags for `<tr>` (closes an open
   /// cell + row) and `<thead>`/`<tbody>`/`<tfoot>` (closes cell + row + section).
-  fn close_table_context(&mut self, closeable: fn(u8) -> bool) {
+  fn close_table_context(&mut self, closeable: &[bool; 256]) {
     while let Some(top) = self.stack.last() {
       match top.tag_id {
-        Some(id) if closeable(id) => self.close_node(),
+        Some(id) if closeable[id as usize] => self.close_node(),
         _ => break,
       }
     }
@@ -468,14 +535,19 @@ impl ConvertState {
     position: usize,
   ) -> OpeningTagResult {
     let tag_handler = tag_id.and_then(get_tag_handler);
-    let needs_attrs = tag_handler.is_some_and(|h| h.needs_attributes)
-      || self.has_tailwind
+    // Plugins can read any attribute, so they force full capture. `frontmatter`
+    // is absent deliberately: TAG_META's own mask already covers what it reads.
+    let attr_mask = if self.has_tailwind
       || self.has_filter
       || self.has_extraction
       || self.has_tag_overrides
-      || self.has_frontmatter;
+    {
+      ATTR_ALL
+    } else {
+      tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
+    };
     let (complete, new_position, attributes, self_closing) =
-      process_tag_attributes(html_chunk, position, tag_handler, !needs_attrs);
+      process_tag_attributes(html_chunk, position, tag_handler, attr_mask);
 
     if !complete {
       return OpeningTagResult {
@@ -550,7 +622,7 @@ impl ConvertState {
         // A nested <a> closes the open one (anchors cannot nest), so the
         // markdown is two adjacent links rather than invalid nested `[..]`.
         TAG_A if self.depth_map[TAG_A as usize] > 0 => {
-          self.close_implied_to(|t| t == TAG_A, is_a_scope_boundary);
+          self.close_implied_to(&TARGET_A, &A_SCOPE_BOUNDARY);
         }
         TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT
           if self.depth_map[TAG_TABLE as usize] > 0 =>
@@ -559,18 +631,13 @@ impl ConvertState {
             TAG_TD | TAG_TH
               if self.depth_map[TAG_TD as usize] > 0 || self.depth_map[TAG_TH as usize] > 0 =>
             {
-              self.close_implied_to(|t| t == TAG_TD || t == TAG_TH, is_cell_scope_boundary);
+              self.close_implied_to(&TARGET_CELL, &CELL_SCOPE_BOUNDARY);
             }
             TAG_TR if self.depth_map[TAG_TR as usize] > 0 => {
-              self.close_table_context(|t| matches!(t, TAG_TD | TAG_TH | TAG_TR));
+              self.close_table_context(&ROW_CLOSEABLE);
             }
             TAG_THEAD | TAG_TBODY | TAG_TFOOT => {
-              self.close_table_context(|t| {
-                matches!(
-                  t,
-                  TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT | TAG_CAPTION
-                )
-              });
+              self.close_table_context(&SECTION_CLOSEABLE);
             }
             _ => {}
           }
@@ -580,7 +647,7 @@ impl ConvertState {
         _ => {
           if self.depth_map[TAG_P as usize] > 0 {
             debug_assert!(closes_p(id));
-            self.close_implied_to(|t| t == TAG_P, is_p_scope_boundary);
+            self.close_implied_to(&TARGET_P, &P_SCOPE_BOUNDARY);
           }
           match id {
             // A heading start closes an open heading (they cannot nest); only
@@ -597,12 +664,12 @@ impl ConvertState {
               self.close_node();
             }
             TAG_LI if self.depth_map[TAG_LI as usize] > 0 => {
-              self.close_implied_to(|t| t == TAG_LI, is_li_scope_boundary);
+              self.close_implied_to(&TARGET_LI, &LI_SCOPE_BOUNDARY);
             }
             TAG_DT | TAG_DD
               if self.depth_map[TAG_DT as usize] > 0 || self.depth_map[TAG_DD as usize] > 0 =>
             {
-              self.close_implied_to(|t| t == TAG_DT || t == TAG_DD, is_dl_scope_boundary);
+              self.close_implied_to(&TARGET_DT_DD, &DL_SCOPE_BOUNDARY);
             }
             _ => {}
           }
@@ -739,60 +806,36 @@ impl ConvertState {
       }
 
       if self.has_filter {
-        // Hidden elements (and their subtrees) are dropped — browsers never
-        // render them. `hidden_since_depth` records the shallowest open hidden
-        // element, so once inside a hidden subtree we skip O(1) without calling
-        // is_hidden() again. Cleared in close_node at the matching depth.
+        // Hidden and exclude-matched elements both drop their whole subtree, so
+        // one marker covers both: a descendant costs an Option check instead of
+        // rescanning every ancestor against every selector.
         if self.hidden_since_depth.is_some() {
           skip_node = true;
           filter_excluded = true;
-        } else if is_hidden(&tag) {
+        } else if is_hidden(&tag)
+          || self
+            .filter_exclude_parsed
+            .iter()
+            .any(|(_, parsed)| matches_selector(&tag, parsed))
+        {
           skip_node = true;
           filter_excluded = true;
           self.hidden_since_depth = Some(self.depth);
         }
-        if !skip_node {
-          for (_, parsed) in &self.filter_exclude_parsed {
-            if matches_selector(&tag, parsed) {
-              skip_node = true;
-              filter_excluded = true;
-              break;
-            }
-          }
-        }
-        if !skip_node {
-          for parent in &self.stack {
-            for (_, parsed) in &self.filter_exclude_parsed {
-              if matches_selector(parent, parsed) {
-                skip_node = true;
-                filter_excluded = true;
-                break;
-              }
-            }
-            if skip_node {
-              break;
-            }
-          }
-        }
         if !skip_node && !self.filter_include_parsed.is_empty() {
-          let mut match_found = false;
-          for (_, parsed) in &self.filter_include_parsed {
-            if matches_selector(&tag, parsed) {
-              match_found = true;
-              break;
-            }
-          }
-          if !match_found && self.filter_process_children {
-            for parent in &self.stack {
-              for (_, parsed) in &self.filter_include_parsed {
-                if matches_selector(parent, parsed) {
-                  match_found = true;
-                  break;
-                }
-              }
-              if match_found {
-                break;
-              }
+          // Inclusion is inherited the same way, but only when
+          // `process_children` keeps the matched element's subtree.
+          let mut match_found =
+            self.filter_process_children && self.filter_included_since_depth.is_some();
+          if !match_found
+            && self
+              .filter_include_parsed
+              .iter()
+              .any(|(_, parsed)| matches_selector(&tag, parsed))
+          {
+            match_found = true;
+            if self.filter_included_since_depth.is_none() {
+              self.filter_included_since_depth = Some(self.depth);
             }
           }
           if !match_found {
@@ -1007,9 +1050,12 @@ impl ConvertState {
     // Guard already checked above, but avoid panic on edge cases
     let Some(node) = self.stack.pop() else { return };
 
-    // Leaving the element that opened the current hidden subtree (filter).
+    // Each marker holds the shallowest open match, so only its own close clears it.
     if self.hidden_since_depth == Some(node.depth) {
       self.hidden_since_depth = None;
+    }
+    if self.filter_included_since_depth == Some(node.depth) {
+      self.filter_included_since_depth = None;
     }
 
     if self.first_block_parent_index == Some(popping_index) {
