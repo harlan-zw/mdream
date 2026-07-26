@@ -2,6 +2,22 @@
 
 use super::*;
 
+/// Bytes rejected from a fenced-code info string.
+///
+/// Two classes, for two different reasons:
+/// - `` ` ``, `~` and the C0/DEL controls can break the construct itself — a
+///   marker run extends or terminates the fence, a line terminator ends the
+///   opening line and starts a new block.
+/// - `"`, `'`, `<`, `>` and `&` are inert in CommonMark, but renderers
+///   interpolate the info string into `<code class="language-…">`, so mdream
+///   does not hand them markup characters.
+///
+/// Everything else is accepted, including `_`, `/` and non-ASCII names.
+#[inline]
+const fn is_unsafe_fence_info_byte(byte: u8) -> bool {
+  byte < 0x20 || matches!(byte, 0x7F | b'`' | b'~' | b'"' | b'\'' | b'<' | b'>' | b'&')
+}
+
 const DESTINATION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 80, 0, 0, 0, 16, 0, 0, 0, 0];
 const TITLE_ESCAPES: [u8; 16] = [0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0];
 const IMAGE_DESCRIPTION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 64, 4, 0, 16, 0, 0, 0, 184, 1, 0, 0, 64];
@@ -2433,9 +2449,7 @@ impl ConvertState {
       for part in class.split([' ', '\t', '\n', '\u{000C}', '\r']) {
         if let Some(lang) = part.strip_prefix("language-")
           && !lang.is_empty()
-          && lang
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'#' | b'+' | b'-' | b'.'))
+          && !lang.bytes().any(is_unsafe_fence_info_byte)
         {
           return lang;
         }

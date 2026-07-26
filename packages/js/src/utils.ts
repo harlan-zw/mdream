@@ -87,9 +87,28 @@ function hasLanguagePrefix(value: string, start: number): boolean {
   return true
 }
 
+// Code units rejected from a fenced-code info string.
+//
+// Two classes, for two different reasons:
+// - backtick, tilde and the C0/DEL controls can break the construct itself - a
+//   marker run extends or terminates the fence, a line terminator ends the
+//   opening line and starts a new block.
+// - `"`, `'`, `<`, `>` and `&` are inert in CommonMark, but renderers
+//   interpolate the info string into `<code class="language-...">`, so mdream
+//   does not hand them markup characters.
+//
+// Everything else is accepted, including `_`, `/` and non-ASCII names.
+function isUnsafeFenceInfoCode(code: number): boolean {
+  if (code < 0x20 || code === 0x7F)
+    return true
+  // " ' & < > ` ~
+  return code === 34 || code === 39 || code === 38 || code === 60 || code === 62
+    || code === 96 || code === 126
+}
+
 // Scan ASCII-whitespace-delimited class tokens without allocating a split
 // array; return the first `language-` token whose suffix is a safe fence
-// info string (non-empty, only [A-Za-z0-9#+-.]).
+// info string.
 export function getLanguageFromClass(className: string | undefined): string {
   if (!className)
     return ''
@@ -116,8 +135,7 @@ export function getLanguageFromClass(className: string | undefined): string {
 
     let valid = true
     for (let cursor = languageStart; cursor < tokenEnd; cursor++) {
-      const code = className.charCodeAt(cursor)
-      if (!isAsciiAlphaNumeric(code) && code !== 35 && code !== 43 && code !== 45 && code !== 46) {
+      if (isUnsafeFenceInfoCode(className.charCodeAt(cursor))) {
         valid = false
         break
       }

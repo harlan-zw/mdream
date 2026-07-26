@@ -38,14 +38,24 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
       ['language-C#', 'C#'],
       ['language-objective-c', 'objective-c'],
       ['language-.net', '.net'],
+      // Underscores and slashes are inert in an info string and appear in real
+      // highlighter class names (Ace `c_cpp`, CodeMirror `text/x-csrc`).
+      ['language-vim_script', 'vim_script'],
+      ['language-c_cpp', 'c_cpp'],
+      ['language-text/x-csrc', 'text/x-csrc'],
       ['ignored&#9;language-js&#10;language-rust', 'js'],
       ['language-bad&#96; language-rust', 'rust'],
       ['language- language-C#', 'C#'],
       ['language-js&#11; language-rust', 'rust'],
-      ['language-js&#160; language-rust', 'rust'],
-      ['language-js_foo', ''],
+      // NBSP is not HTML ASCII whitespace, so it stays inside the token rather
+      // than splitting it, and it cannot break the fence.
+      ['language-js&#160; language-rust', 'js\u00A0'],
       ['language-js&quot;x', ''],
+      ['language-js&#39;x', ''],
+      ['language-js&lt;x', ''],
+      ['language-js&amp;x', ''],
       ['language-js&#1;x', ''],
+      ['language-js&#127;x', ''],
       ['notlanguage-js', ''],
     ]) {
       const html = `<pre><code class="${className}">code</code></pre>`
