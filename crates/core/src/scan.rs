@@ -69,35 +69,76 @@ pub(crate) fn process_tag_attributes(
   tag_handler: Option<&crate::types::TagHandler>,
   attr_mask: u16,
 ) -> (bool, usize, Attributes, bool) {
-  let mut i = position;
+  let self_closing = tag_handler.is_some_and(|h| h.is_self_closing);
+  if attr_mask == ATTR_NONE {
+    scan_tag::<false>(html_chunk, position, self_closing, ATTR_NONE)
+  } else {
+    scan_tag::<true>(html_chunk, position, self_closing, attr_mask)
+  }
+}
+
+/// Walk a start tag to its `>`, extracting attributes on the way when
+/// `EXTRACT`. Finding `>` needs the same quote tracking the extraction does, so
+/// both come from one pass; the flag is a const so the `ATTR_NONE`
+/// instantiation compiles the extraction out, which is what most tags want.
+fn scan_tag<const EXTRACT: bool>(
+  html_chunk: &str,
+  position: usize,
+  self_closing: bool,
+  attr_mask: u16,
+) -> (bool, usize, Attributes, bool) {
   let bytes = html_chunk.as_bytes();
   let chunk_length = bytes.len();
-
-  let self_closing = tag_handler.is_some_and(|h| h.is_self_closing);
+  let mut scan = AttrScan::new(attr_mask);
   let mut inside_quote = false;
   let mut quote_char: u8 = 0;
-  let attr_start_pos = i;
+  let mut i = position;
 
   while i < chunk_length {
     let c = bytes[i];
 
+    // A quote opened outside a value hides `>` until it closes.
     if inside_quote {
       if c == quote_char {
         inside_quote = false;
       }
+      if EXTRACT {
+        scan.step(html_chunk, c, i);
+      }
       i += 1;
       continue;
-    } else if c == QUOTE_CHAR || c == APOS_CHAR {
-      inside_quote = true;
-      quote_char = c;
-    } else if c == SLASH_CHAR && i + 1 < chunk_length && bytes[i + 1] == GT_CHAR {
-      let attrs = parse_attributes(html_chunk[attr_start_pos..i].trim(), attr_mask);
-      return (true, i + 2, attrs, true);
-    } else if c == GT_CHAR {
-      let attrs = parse_attributes(html_chunk[attr_start_pos..i].trim(), attr_mask);
-      return (true, i + 1, attrs, self_closing);
     }
 
+    if c == SLASH_CHAR && i + 1 < chunk_length && bytes[i + 1] == GT_CHAR {
+      return (true, i + 2, scan.finish(html_chunk, i), true);
+    }
+    if c == GT_CHAR {
+      return (true, i + 1, scan.finish(html_chunk, i), self_closing);
+    }
+
+    // Run to the closing quote without re-entering the state dispatch.
+    if EXTRACT && scan.opens_quoted_value(c) {
+      let value_start = i + 1;
+      let mut end = value_start;
+      while end < chunk_length && bytes[end] != c {
+        end += 1;
+      }
+      if end == chunk_length {
+        // Unterminated: the tag cannot close in this chunk.
+        return (false, chunk_length, Attributes::new(), false);
+      }
+      scan.take_value(html_chunk, value_start, end);
+      i = end + 1;
+      continue;
+    }
+
+    if c == QUOTE_CHAR || c == APOS_CHAR {
+      inside_quote = true;
+      quote_char = c;
+    }
+    if EXTRACT {
+      scan.step(html_chunk, c, i);
+    }
     i += 1;
   }
 
@@ -118,139 +159,134 @@ fn push_attr(result: &mut Attributes, mask: u16, raw: &str, value: Option<&str>)
   }
 }
 
-#[allow(clippy::collapsible_match)]
-pub(crate) fn parse_attributes(attr_str: &str, mask: u16) -> Attributes {
-  if attr_str.is_empty() || mask == ATTR_NONE {
-    return Attributes::new();
-  }
-  // A filtered mask keeps at most three names, so skip the eager reservation.
-  let mut result = if mask == ATTR_ALL {
-    Attributes::with_capacity(4)
-  } else {
-    Attributes::new()
-  };
+/// Attribute extraction fed one byte at a time by the tag scan. Offsets index
+/// the chunk itself, so nothing is allocated until a wanted attribute is whole.
+struct AttrScan {
+  mask: u16,
+  result: Attributes,
+  state: State,
+  name_start: usize,
+  name_end: usize,
+  value_start: usize,
+}
 
-  let bytes = attr_str.as_bytes();
-  let len = bytes.len();
-  let mut i = 0;
+/// Where the scan sits within one `name="value"` triple.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum State {
+  Gap,
+  Name,
+  AfterName,
+  BeforeValue,
+  UnquotedValue,
+}
 
-  const WHITESPACE: u8 = 0;
-  const NAME: u8 = 1;
-  const AFTER_NAME: u8 = 2;
-  const BEFORE_VALUE: u8 = 3;
-  const QUOTED_VALUE: u8 = 4;
-  const UNQUOTED_VALUE: u8 = 5;
-
-  let mut state = WHITESPACE;
-  let mut name_start = 0;
-  let mut name_end;
-  let mut value_start = 0;
-  let mut quote_char = 0;
-  let mut name_start_saved = 0;
-  let mut name_end_saved = 0;
-
-  while i < len {
-    let char_code = bytes[i];
-
-    // `is_whitespace` is computed per arm, not per byte: the quoted-value arm,
-    // where most attribute bytes live, never needs it.
-    match state {
-      WHITESPACE => {
-        if !is_whitespace(char_code) {
-          state = NAME;
-          name_start = i;
-        }
-      }
-      NAME => {
-        if char_code == EQUALS_CHAR || is_whitespace(char_code) {
-          name_end = i;
-          name_start_saved = name_start;
-          name_end_saved = name_end;
-          state = if char_code == EQUALS_CHAR {
-            BEFORE_VALUE
-          } else {
-            AFTER_NAME
-          };
-        }
-      }
-      AFTER_NAME => {
-        if char_code == EQUALS_CHAR {
-          state = BEFORE_VALUE;
-        } else if !is_whitespace(char_code) {
-          push_attr(
-            &mut result,
-            mask,
-            &attr_str[name_start_saved..name_end_saved],
-            None,
-          );
-          state = NAME;
-          name_start = i;
-        }
-      }
-      BEFORE_VALUE => {
-        if !is_whitespace(char_code) {
-          if char_code == QUOTE_CHAR || char_code == APOS_CHAR {
-            state = QUOTED_VALUE;
-            quote_char = char_code;
-            value_start = i + 1;
-          } else {
-            state = UNQUOTED_VALUE;
-            value_start = i;
-          }
-        }
-      }
-      QUOTED_VALUE => {
-        // Run to the closing quote without re-entering the state dispatch.
-        while i < len && bytes[i] != quote_char {
-          i += 1;
-        }
-        if i == len {
-          // Unterminated quote: the attribute is dropped.
-          break;
-        }
-        push_attr(
-          &mut result,
-          mask,
-          &attr_str[name_start_saved..name_end_saved],
-          Some(&attr_str[value_start..i]),
-        );
-        state = WHITESPACE;
-      }
-      UNQUOTED_VALUE => {
-        if is_whitespace(char_code) {
-          push_attr(
-            &mut result,
-            mask,
-            &attr_str[name_start_saved..name_end_saved],
-            Some(&attr_str[value_start..i]),
-          );
-          state = WHITESPACE;
-        }
-      }
-      _ => {}
+impl AttrScan {
+  #[inline]
+  fn new(mask: u16) -> Self {
+    Self {
+      mask,
+      // A filtered mask keeps at most three names, so skip the eager reservation.
+      result: if mask == ATTR_ALL {
+        Attributes::with_capacity(4)
+      } else {
+        Attributes::new()
+      },
+      state: State::Gap,
+      name_start: 0,
+      name_end: 0,
+      value_start: 0,
     }
-    i += 1;
   }
 
-  if state == NAME {
-    push_attr(&mut result, mask, &attr_str[name_start..], None);
-  } else if state == UNQUOTED_VALUE {
+  #[inline]
+  fn opens_quoted_value(&self, c: u8) -> bool {
+    self.state == State::BeforeValue && (c == QUOTE_CHAR || c == APOS_CHAR)
+  }
+
+  #[inline]
+  fn take_value(&mut self, chunk: &str, value_start: usize, value_end: usize) {
     push_attr(
-      &mut result,
-      mask,
-      &attr_str[name_start_saved..name_end_saved],
-      Some(&attr_str[value_start..]),
+      &mut self.result,
+      self.mask,
+      &chunk[self.name_start..self.name_end],
+      Some(&chunk[value_start..value_end]),
     );
-  } else if state == AFTER_NAME || state == BEFORE_VALUE {
+    self.state = State::Gap;
+  }
+
+  #[inline]
+  fn take_bare_name(&mut self, chunk: &str, name_end: usize) {
     push_attr(
-      &mut result,
-      mask,
-      &attr_str[name_start_saved..name_end_saved],
+      &mut self.result,
+      self.mask,
+      &chunk[self.name_start..name_end],
       None,
     );
   }
 
-  result
+  /// `is_whitespace` is computed per arm, not per byte: the value arms, where
+  /// most attribute bytes live, never need it.
+  #[inline]
+  fn step(&mut self, chunk: &str, c: u8, index: usize) {
+    match self.state {
+      State::Gap => {
+        if !is_whitespace(c) {
+          self.state = State::Name;
+          self.name_start = index;
+        }
+      }
+      State::Name => {
+        if c == EQUALS_CHAR || is_whitespace(c) {
+          self.name_end = index;
+          self.state = if c == EQUALS_CHAR {
+            State::BeforeValue
+          } else {
+            State::AfterName
+          };
+        }
+      }
+      State::AfterName => {
+        if c == EQUALS_CHAR {
+          self.state = State::BeforeValue;
+        } else if !is_whitespace(c) {
+          self.take_bare_name(chunk, self.name_end);
+          self.state = State::Name;
+          self.name_start = index;
+        }
+      }
+      State::BeforeValue => {
+        if !is_whitespace(c) {
+          self.state = State::UnquotedValue;
+          self.value_start = index;
+        }
+      }
+      State::UnquotedValue => {
+        if is_whitespace(c) {
+          self.take_value(chunk, self.value_start, index);
+        }
+      }
+    }
+  }
+
+  /// Take the attribute still open when the tag ended at `end`.
+  #[inline]
+  fn finish(mut self, chunk: &str, end: usize) -> Attributes {
+    match self.state {
+      State::Name => self.take_bare_name(chunk, end),
+      State::AfterName | State::BeforeValue => self.take_bare_name(chunk, self.name_end),
+      State::UnquotedValue => self.take_value(chunk, self.value_start, end),
+      State::Gap => {}
+    }
+    self.result
+  }
+}
+
+/// Attributes of a bare region, for tests that write their input as it reads
+/// inside `<…>`.
+#[cfg(test)]
+pub(crate) fn parse_attributes(attr_str: &str, mask: u16) -> Attributes {
+  let (_, _, attrs, _) = process_tag_attributes(&format!("{attr_str}>"), 0, None, mask);
+  attrs
 }
 
 #[cfg(test)]
@@ -358,5 +394,48 @@ mod tests {
     assert!(!self_closing);
     assert_eq!(&html[new_pos..], "rest");
     assert_eq!(attrs.get("href").map(String::as_str), Some("x"));
+  }
+
+  #[test]
+  fn an_unterminated_quoted_value_leaves_the_tag_incomplete() {
+    // The closing quote may still arrive in the next chunk, so nothing is
+    // reported until it does.
+    let html = "a href=\"x";
+    let (complete, _, attrs, _) = process_tag_attributes(html, 1, None, ATTR_ALL);
+    assert!(!complete);
+    assert!(attrs.is_empty());
+  }
+
+  #[test]
+  fn a_quoted_value_hides_a_tag_terminator() {
+    let html = "a href=\"x>y\">rest";
+    let (complete, new_pos, attrs, _) = process_tag_attributes(html, 1, None, ATTR_ALL);
+    assert!(complete);
+    assert_eq!(attrs.get("href").map(String::as_str), Some("x>y"));
+    assert_eq!(&html[new_pos..], "rest");
+  }
+
+  #[test]
+  fn both_scan_instantiations_agree_on_the_tag_end() {
+    // `ATTR_NONE` compiles the extraction out, so the two instantiations have
+    // to keep finding the same `>`.
+    for html in [
+      "a href=\"x>y\">rest",
+      "a href=x/>rest",
+      "a href=a\"b>rest",
+      "a>rest",
+    ] {
+      let (complete, extracted_pos, _, extracted_self_closing) =
+        process_tag_attributes(html, 1, None, ATTR_ALL);
+      let (bare_complete, bare_pos, bare_attrs, bare_self_closing) =
+        process_tag_attributes(html, 1, None, ATTR_NONE);
+      assert_eq!(complete, bare_complete, "html={html:?}");
+      assert_eq!(extracted_pos, bare_pos, "html={html:?}");
+      assert_eq!(
+        extracted_self_closing, bare_self_closing,
+        "html={html:?}"
+      );
+      assert!(bare_attrs.is_empty(), "html={html:?}");
+    }
   }
 }
