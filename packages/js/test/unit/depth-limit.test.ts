@@ -179,10 +179,10 @@ describe('element depth limit', () => {
   it('recovers across streaming chunk boundaries above the materialized limit', async () => {
     const chunks = [
       '<p>before</p>',
-      ...Array.from({ length: LIMIT }).fill('<div>'),
+      ...Array.from<string>({ length: LIMIT }).fill('<div>'),
       '<x-one><x-two>in',
       'side</x-one><p>after</p>',
-      ...Array.from({ length: LIMIT }).fill('</div>'),
+      ...Array.from<string>({ length: LIMIT }).fill('</div>'),
       '<p>tail</p>',
     ]
     expect(await streamConvert(chunks)).toBe('before\n\ninside after\n\ntail')
