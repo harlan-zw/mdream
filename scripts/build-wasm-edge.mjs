@@ -3,9 +3,14 @@
  * Every consumer (CI tests, release, bundle-size bench) must build through
  * this script so the shipped artifact matches the measured one.
  *
- * Pipeline: wasm-pack (release, opt-level=s) -> wasm-opt -Oz
+ * Pipeline: wasm-pack (release, opt-level=s)
+ *        -> wasm-opt -O3 --converge --low-memory-unused
  * opt-level=s measured 20% smaller than the default opt-level=3 at a 3-7%
  * throughput cost; opt-level=z was 29% slower on large documents.
+ *
+ * On the wasm-opt side the win comes from --converge. Benchmark this flag set
+ * on arm64, which the perf gate uses: it is worth 4.3% there and only ~1.4% on
+ * x86_64, so a local x86 run reads as noise.
  */
 import { execFileSync } from 'node:child_process'
 import { statSync } from 'node:fs'
@@ -34,10 +39,12 @@ execFileSync('wasm-pack', ['build', '--target', target, '--out-dir', outDir, '--
   env: { ...process.env, CARGO_PROFILE_RELEASE_OPT_LEVEL: 's' },
 })
 
+const OPT_FLAGS = ['-O3', '--converge', '--low-memory-unused']
+
 const wasmFile = resolve(outDir, `${outName}_bg.wasm`)
 const rawSize = statSync(wasmFile).size
 execFileSync('wasm-opt', [
-  '-Oz',
+  ...OPT_FLAGS,
   '--enable-bulk-memory',
   '--enable-nontrapping-float-to-int',
   '--strip-producers',
@@ -47,4 +54,4 @@ execFileSync('wasm-opt', [
 ], { stdio: 'inherit' })
 
 const optSize = statSync(wasmFile).size
-console.log(`${wasmFile}: ${rawSize} -> ${optSize} bytes (wasm-opt -Oz)`)
+console.log(`${wasmFile}: ${rawSize} -> ${optSize} bytes (wasm-opt ${OPT_FLAGS.join(' ')})`)

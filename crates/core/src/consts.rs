@@ -237,6 +237,85 @@ pub static TAG_NAMES: [&str; MAX_TAG_ID] = {
 pub const ELEMENT_NODE: u8 = 1;
 pub const TEXT_NODE: u8 = 2;
 
+/// Attribute bitmask: which attribute names a tag's rendering actually reads.
+/// Each stored value costs an owned `String`, the dominant allocation during
+/// parsing, yet a built-in tag reads at most three.
+pub const ATTR_NONE: u16 = 0;
+pub const ATTR_HREF: u16 = 1 << 0;
+pub const ATTR_TITLE: u16 = 1 << 1;
+pub const ATTR_ARIA_LABEL: u16 = 1 << 2;
+pub const ATTR_SRC: u16 = 1 << 3;
+pub const ATTR_ALT: u16 = 1 << 4;
+pub const ATTR_CLASS: u16 = 1 << 5;
+pub const ATTR_ALIGN: u16 = 1 << 6;
+pub const ATTR_NAME: u16 = 1 << 7;
+pub const ATTR_PROPERTY: u16 = 1 << 8;
+pub const ATTR_CONTENT: u16 = 1 << 9;
+pub const ATTR_ALL: u16 = u16::MAX;
+
+/// Case-insensitive, length-first so the common miss costs one compare.
+#[inline]
+pub(crate) fn attr_bit(name: &[u8]) -> u16 {
+  match name.len() {
+    3 => {
+      if name.eq_ignore_ascii_case(b"alt") {
+        ATTR_ALT
+      } else if name.eq_ignore_ascii_case(b"src") {
+        ATTR_SRC
+      } else {
+        ATTR_NONE
+      }
+    }
+    4 => {
+      if name.eq_ignore_ascii_case(b"href") {
+        ATTR_HREF
+      } else if name.eq_ignore_ascii_case(b"name") {
+        ATTR_NAME
+      } else {
+        ATTR_NONE
+      }
+    }
+    5 => {
+      if name.eq_ignore_ascii_case(b"title") {
+        ATTR_TITLE
+      } else if name.eq_ignore_ascii_case(b"class") {
+        ATTR_CLASS
+      } else if name.eq_ignore_ascii_case(b"align") {
+        ATTR_ALIGN
+      } else {
+        ATTR_NONE
+      }
+    }
+    7 => {
+      if name.eq_ignore_ascii_case(b"content") {
+        ATTR_CONTENT
+      } else {
+        ATTR_NONE
+      }
+    }
+    8 => {
+      if name.eq_ignore_ascii_case(b"property") {
+        ATTR_PROPERTY
+      } else {
+        ATTR_NONE
+      }
+    }
+    10 => {
+      if name.eq_ignore_ascii_case(b"aria-label") {
+        ATTR_ARIA_LABEL
+      } else {
+        ATTR_NONE
+      }
+    }
+    _ => ATTR_NONE,
+  }
+}
+
+#[inline]
+pub(crate) fn attr_wanted(mask: u16, name: &[u8]) -> bool {
+  mask == ATTR_ALL || mask & attr_bit(name) != 0
+}
+
 pub const MARKDOWN_STRONG: &str = "**";
 pub const MARKDOWN_EMPHASIS: &str = "*";
 pub const MARKDOWN_STRIKETHROUGH: &str = "~~";
