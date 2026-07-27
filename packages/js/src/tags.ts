@@ -236,7 +236,7 @@ export function renderBreak(node: HandlerContext['node'], state: HandlerContext[
     state.listIndentWidths || [],
     !state.bufferedBlockquoteDepth,
   )
-  return `\\\n${prefix}`
+  return `  \n${prefix}`
 }
 
 export const breakHandler: TagHandler = {

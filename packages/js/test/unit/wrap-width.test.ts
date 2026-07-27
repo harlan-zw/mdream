@@ -3,7 +3,7 @@ import { htmlToMarkdown } from '../../src/index'
 import { streamHtmlToMarkdown } from '../../src/stream'
 
 const wrap = (html: string, width: number) => htmlToMarkdown(html, { wrapWidth: width })
-const HARD_BREAK = '\\\n'
+const HARD_BREAK = '  \n'
 
 describe('wrap width (issue #106)', () => {
   it('is a no-op when unset or zero', () => {
