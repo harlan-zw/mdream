@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 
-const HARD_BREAK = '\\\n'
+const HARD_BREAK = '  \n'
 
 async function streamConvert(chunks: string[]): Promise<string> {
   const stream = new ReadableStream<string>({
