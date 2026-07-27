@@ -647,9 +647,9 @@ impl ConvertState {
     if self.depth_limit_reached {
       return String::new();
     }
-    // Reuse text_buffer allocation from previous call if available
+    // Non-empty only when the previous chunk ended mid-text: that run continues
+    // here instead of being re-fed as raw input. Every flush leaves it empty.
     let mut text_buffer = std::mem::take(&mut self.parse_text_buffer);
-    text_buffer.clear();
     if text_buffer.capacity() == 0 {
       text_buffer.reserve(256);
     }
@@ -781,6 +781,7 @@ impl ConvertState {
 
       // Processing '<'
       if i + 1 >= chunk_length {
+        run_start = i;
         carry = true;
         break;
       }
@@ -799,6 +800,14 @@ impl ConvertState {
               break;
             }
             peek_end += 1;
+          }
+          if peek_end == chunk_length {
+            // The name is cut off by the chunk end, so it cannot be compared
+            // yet. Carry the tag; treating '<' as text here would consume a
+            // close tag that a later chunk completes.
+            run_start = i;
+            carry = true;
+            break;
           }
           let peek_name = &chunk[peek_start..peek_end];
           let peek_tag_id = crate::consts::get_tag_id_ci_bytes(peek_name.as_bytes());
@@ -855,11 +864,13 @@ impl ConvertState {
             continue;
           }
           // Unterminated CDATA: re-parse from '<' in the next chunk.
+          run_start = i;
           carry = true;
           break;
         }
         if remaining.len() < "<![CDATA[".len() && "<![CDATA[".starts_with(remaining) {
           // Chunk boundary fell inside the `<![CDATA[` opener.
+          run_start = i;
           carry = true;
           break;
         }
@@ -901,6 +912,7 @@ impl ConvertState {
           i2 += 1;
         }
         let Some(tag_name_end) = tag_name_end else {
+          run_start = i;
           carry = true;
           break;
         };
@@ -984,26 +996,17 @@ impl ConvertState {
       }
     }
 
-    // Carry the chunk's unfinished tail (incomplete tag/entity, or text a later
-    // chunk may extend) RAW from `run_start`, never the decoded+escaped
-    // `text_buffer`; re-processing re-derives it so nothing is double-applied.
-    // Otherwise reuse the allocation (the common non-streaming case).
-    if carry || !text_buffer.is_empty() {
-      let leftover = chunk[run_start..].to_string();
-      text_buffer.clear();
-      self.parse_text_buffer = text_buffer;
-      if leftover
-        .as_bytes()
-        .first()
-        .is_some_and(|&c| is_whitespace(c))
-      {
-        self.last_char_was_whitespace = false;
-      }
-      leftover
+    // Carry only an unfinished token, RAW from `run_start`, never the parsed
+    // `text_buffer` (re-processing would re-derive it). A trailing text run is
+    // kept in `text_buffer` instead, so it is parsed once however many chunks
+    // it spans.
+    let leftover = if carry {
+      chunk[run_start..].to_string()
     } else {
-      self.parse_text_buffer = text_buffer;
       String::new()
-    }
+    };
+    self.parse_text_buffer = text_buffer;
+    leftover
   }
 
   pub fn get_markdown(&mut self) -> String {
@@ -1094,9 +1097,16 @@ impl ConvertState {
       self.push_script_text(leftover);
       self.flush_script_text();
       self.script_data_state = SCRIPT_DATA;
-    } else if !leftover.is_empty() && leftover.as_bytes()[0] != LT_CHAR {
-      let mut buf = leftover.to_string();
-      self.process_text_buffer(&mut buf);
+    } else {
+      if !self.parse_text_buffer.is_empty() {
+        let mut buf = std::mem::take(&mut self.parse_text_buffer);
+        self.process_text_buffer(&mut buf);
+        self.parse_text_buffer = buf;
+      }
+      if !leftover.is_empty() && leftover.as_bytes()[0] != LT_CHAR {
+        let mut buf = leftover.to_string();
+        self.process_text_buffer(&mut buf);
+      }
     }
     while !self.stack.is_empty() {
       self.close_node();
