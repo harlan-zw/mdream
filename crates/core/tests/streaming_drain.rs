@@ -84,6 +84,7 @@ const CORPUS: &[&str] = &[
   "<h1>Title</h1><p>Para one.</p><p>Para <strong>two</strong>.</p>",
   "<ul><li>a</li><li>b<ul><li>b1</li><li>b2</li></ul></li></ul>",
   r#"<p>See <a href="https://example.com">Example</a> and <a href="https://x.io">the X site</a>.</p>"#,
+  r#"<p>See <a href="https://example.com" title="Example site">Example</a> then more.</p>"#,
   "<blockquote><p>quote</p><blockquote><p>nested</p></blockquote></blockquote><p>after</p>",
   "<pre><code>let x = 1;\nlet y = 2;</code></pre><p>done</p>",
   "<p>before <strong></strong><em>after</em></p>",

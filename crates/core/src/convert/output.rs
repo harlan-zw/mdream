@@ -881,7 +881,7 @@ impl ConvertState {
             self.buffer.push('<');
             self.buffer.push_str(resolved);
             self.buffer.push('>');
-            self.last_content_cache_len = self.buffer.len();
+            self.last_content_cache_len = self.buffer.len() - bp;
             self.last_node_is_inline = is_inline;
             return;
           }
@@ -892,7 +892,10 @@ impl ConvertState {
           resolved,
           (!title.is_empty()).then_some(title),
         );
-        self.last_content_cache_len = self.buffer.len(); // will be recalculated
+        // The cache is a length, not an offset: the link starts at its `[`.
+        // Saturating because `link_bracket_pos` is `buffer.len()` when no `[`
+        // was emitted.
+        self.last_content_cache_len = self.buffer.len().saturating_sub(self.link_bracket_pos);
       }
       // Record fragment link position for deferred fixup
       if self.clean_flags & CLEAN_FRAGMENTS != 0
