@@ -72,6 +72,81 @@ function isAsciiAlphaNumeric(code: number): boolean {
     || (code >= 97 && code <= 122)
 }
 
+function isHtmlAsciiWhitespace(code: number): boolean {
+  return code === 32 || code === 9 || code === 10 || code === 12 || code === 13
+}
+
+// Code units for the `language-` prefix, matched without string comparison.
+const LANGUAGE_PREFIX = [108, 97, 110, 103, 117, 97, 103, 101, 45]
+
+function hasLanguagePrefix(value: string, start: number): boolean {
+  for (let offset = 0; offset < 9; offset++) {
+    if (value.charCodeAt(start + offset) !== LANGUAGE_PREFIX[offset])
+      return false
+  }
+  return true
+}
+
+// Code units rejected from a fenced-code info string.
+//
+// Two classes, for two different reasons:
+// - backtick, tilde and the C0/DEL controls can break the construct itself - a
+//   marker run extends or terminates the fence, a line terminator ends the
+//   opening line and starts a new block.
+// - `"`, `'`, `<`, `>` and `&` are inert in CommonMark, but renderers
+//   interpolate the info string into `<code class="language-...">`, so mdream
+//   does not hand them markup characters.
+//
+// Everything else is accepted, including `_`, `/` and non-ASCII names.
+function isUnsafeFenceInfoCode(code: number): boolean {
+  if (code < 0x20 || code === 0x7F)
+    return true
+  // " ' & < > ` ~
+  return code === 34 || code === 39 || code === 38 || code === 60 || code === 62
+    || code === 96 || code === 126
+}
+
+// Scan ASCII-whitespace-delimited class tokens without allocating a split
+// array; return the first `language-` token whose suffix is a safe fence
+// info string.
+export function getLanguageFromClass(className: string | undefined): string {
+  if (!className)
+    return ''
+
+  const length = className.length
+  let index = 0
+  while (index < length) {
+    if (isHtmlAsciiWhitespace(className.charCodeAt(index))) {
+      index++
+      continue
+    }
+
+    const tokenStart = index
+    do {
+      index++
+    } while (index < length && !isHtmlAsciiWhitespace(className.charCodeAt(index)))
+    const tokenEnd = index
+
+    // Reject tokens without a non-empty `language-` prefix (9 chars) before
+    // checking the prefix, so short tokens are skipped cheaply.
+    const languageStart = tokenStart + 9
+    if (languageStart >= tokenEnd || !hasLanguagePrefix(className, tokenStart))
+      continue
+
+    let valid = true
+    for (let cursor = languageStart; cursor < tokenEnd; cursor++) {
+      if (isUnsafeFenceInfoCode(className.charCodeAt(cursor))) {
+        valid = false
+        break
+      }
+    }
+    if (valid)
+      return className.slice(languageStart, tokenEnd)
+  }
+
+  return ''
+}
+
 function numericReplacement(codePoint: number): string {
   if (codePoint === 0 || codePoint > 0x10FFFF || (codePoint >= 0xD800 && codePoint <= 0xDFFF))
     return '\uFFFD'

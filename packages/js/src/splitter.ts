@@ -4,7 +4,6 @@ import {
   ELEMENT_NODE,
   NodeEventEnter,
   NodeEventExit,
-  TAG_CODE,
   TAG_H1,
   TAG_H2,
   TAG_H3,
@@ -12,7 +11,6 @@ import {
   TAG_H5,
   TAG_H6,
   TAG_HR,
-  TAG_PRE,
   TEXT_NODE,
 } from './const'
 import { createMarkdownProcessor } from './markdown-processor'
@@ -44,19 +42,6 @@ function createOptions(options: SplitterOptions) {
   }
 }
 
-function getCodeLanguage(node: ElementNode): string {
-  const className = node.attributes?.class
-  if (!className)
-    return ''
-
-  const langParts = className
-    .split(' ')
-    .map(c => c.split('language-')[1])
-    .filter(Boolean)
-
-  return (langParts && langParts.length > 0) ? langParts[0]!.trim() : ''
-}
-
 function shouldSplitOnHeader(tagId: number, options: ReturnType<typeof createOptions>): boolean {
   return options.headersToSplitOn.includes(tagId)
 }
@@ -85,13 +70,18 @@ export function* htmlToMarkdownSplitChunksStream(
     throw new Error('chunkOverlap must be less than chunkSize')
   }
 
+  let currentChunkCodeLanguage = ''
+
   // Create processor
   const processor = createMarkdownProcessor(options, opts.resolvedPlugins)
+  processor.state.onCodeFenceOpen = (language) => {
+    if (language && !currentChunkCodeLanguage)
+      currentChunkCodeLanguage = language
+  }
 
   // Chunking state
   const headerHierarchy = new Map<number, string>()
   const seenSplitHeaders = new Set<number>()
-  let currentChunkCodeLanguage = ''
   let collectingHeaderText = false
   let currentHeaderTagId: number | null = null
   let currentHeaderText = ''
@@ -144,9 +134,8 @@ export function* htmlToMarkdownSplitChunksStream(
       }
     }
 
-    if (currentChunkCodeLanguage) {
+    if (currentChunkCodeLanguage)
       chunk.metadata.code = currentChunkCodeLanguage
-    }
 
     yield chunk
 
@@ -224,15 +213,6 @@ export function* htmlToMarkdownSplitChunksStream(
           headerHierarchy.set(tagId, currentHeaderText.trim())
           collectingHeaderText = false
           currentHeaderTagId = null
-        }
-      }
-
-      if (tagId === TAG_CODE && (element.depthMap[TAG_PRE] || 0) > 0) {
-        if (eventType === NodeEventEnter) {
-          const lang = getCodeLanguage(element)
-          if (lang && !currentChunkCodeLanguage) {
-            currentChunkCodeLanguage = lang
-          }
         }
       }
 

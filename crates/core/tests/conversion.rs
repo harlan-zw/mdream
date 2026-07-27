@@ -568,7 +568,7 @@ fn code_delimiters_widen_for_literal_backticks() {
       r#"<pre><code class="language-js`x">~~~
 code</code></pre>"#
     ),
-    "~~~~js`x\n~~~\ncode\n~~~~"
+    "```\n~~~\ncode\n```"
   );
   assert_eq!(
     convert(
@@ -577,7 +577,61 @@ b
 
 </pre><a href="#x">link</a></div>"##
     ),
-    "~~~js`x\na\nb\n\n\n~~~\n\n[link](#x)"
+    "```\na\nb\n\n\n```\n\n[link](#x)"
+  );
+}
+
+#[test]
+fn code_language_metadata_is_validated() {
+  for (class, language) in [
+    ("language-js", "js"),
+    ("language-c++", "c++"),
+    ("language-C#", "C#"),
+    ("language-objective-c", "objective-c"),
+    ("language-.net", ".net"),
+    // Underscores and slashes are inert in an info string and appear in real
+    // highlighter class names (Ace `c_cpp`, CodeMirror `text/x-csrc`).
+    ("language-vim_script", "vim_script"),
+    ("language-c_cpp", "c_cpp"),
+    ("language-text/x-csrc", "text/x-csrc"),
+    ("ignored\tlanguage-js\nlanguage-rust", "js"),
+    ("language-bad&#96; language-rust", "rust"),
+    ("language- language-C#", "C#"),
+    ("language-js&#11; language-rust", "rust"),
+    // NBSP is not HTML ASCII whitespace, so it stays inside the token rather
+    // than splitting it, and it cannot break the fence.
+    ("language-js&#160; language-rust", "js\u{a0}"),
+  ] {
+    let html = format!(r#"<pre><code class="{class}">code</code></pre>"#);
+    assert_eq!(
+      convert(&html),
+      format!("```{language}\ncode\n```"),
+      "class={class:?}"
+    );
+  }
+
+  for class in [
+    "language-",
+    "language-~~~&#96;",
+    "language-js&quot;x",
+    "language-js&#39;x",
+    "language-js&lt;x",
+    "language-js&amp;x",
+    "language-js&#1;x",
+    "language-js&#127;x",
+    "notlanguage-js",
+  ] {
+    let html = format!(r#"<pre><code class="{class}">code</code></pre>"#);
+    assert_eq!(convert(&html), "```\ncode\n```", "class={class:?}");
+  }
+
+  assert_eq!(
+    convert(r#"<pre class="language-bad&#96; language-.net">code</pre>"#),
+    "```.net\ncode\n```"
+  );
+  assert_eq!(
+    convert(r#"<pre><code class="language-~~~&#96;">code</code></pre><p>after</p>"#),
+    "```\ncode\n```\n\nafter"
   );
 }
 
