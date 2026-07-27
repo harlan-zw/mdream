@@ -8,7 +8,7 @@ const NONE: TagHandler = TagHandler {
   is_inline: false,
   spacing: None,
   excludes_text_nodes: false,
-  needs_attributes: false,
+  wanted_attrs: ATTR_NONE,
 };
 
 const BLOCK: TagHandler = NONE;
@@ -77,7 +77,7 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
     collapses_inner_white_space: true,
     is_self_closing: true,
     spacing: Some(NO_SPACING),
-    needs_attributes: true,
+    wanted_attrs: ATTR_NAME | ATTR_PROPERTY | ATTR_CONTENT,
     ..NONE
   });
   t[TAG_BR as usize] = Some(TagHandler {
@@ -139,7 +139,7 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
     collapses_inner_white_space: true,
     spacing: Some(NO_SPACING),
     is_inline: true,
-    needs_attributes: true,
+    wanted_attrs: ATTR_CLASS,
     ..NONE
   });
 
@@ -156,7 +156,7 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
     collapses_inner_white_space: true,
     spacing: Some(NO_SPACING),
     is_inline: true,
-    needs_attributes: true,
+    wanted_attrs: ATTR_HREF | ATTR_TITLE | ATTR_ARIA_LABEL,
     ..NONE
   });
   t[TAG_IMG as usize] = Some(TagHandler {
@@ -164,7 +164,7 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
     is_self_closing: true,
     spacing: Some(NO_SPACING),
     is_inline: true,
-    needs_attributes: true,
+    wanted_attrs: ATTR_SRC | ATTR_ALT | ATTR_TITLE,
     ..NONE
   });
 
@@ -182,7 +182,7 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   });
   t[TAG_TH as usize] = Some(TagHandler {
     collapses_inner_white_space: true,
-    needs_attributes: true,
+    wanted_attrs: ATTR_ALIGN,
     spacing: Some(NO_SPACING),
     ..NONE
   });
@@ -211,10 +211,10 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   t[TAG_HEADER as usize] = Some(BLOCK);
   t[TAG_MAIN as usize] = Some(BLOCK);
   t[TAG_FIGURE as usize] = Some(BLOCK);
-  // needs_attributes so a bare <pre class="language-x"> can resolve its fence
+  // `class` is kept so a bare <pre class="language-x"> can resolve its fence
   // language for the deferred code block (issue #97).
   t[TAG_PRE as usize] = Some(TagHandler {
-    needs_attributes: true,
+    wanted_attrs: ATTR_CLASS,
     ..NONE
   });
 

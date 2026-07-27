@@ -655,3 +655,25 @@ fn streaming_keeps_block_newline_count_across_drain() {
     );
   }
 }
+
+// A chunk boundary inside a batched ASCII run must not change whitespace
+// collapsing, at any split point.
+#[test]
+fn streaming_text_whitespace_batching_matches_every_split() {
+  for html in [
+    "<p>one two three four</p>",
+    "<p>a  b</p>",
+    "<p>a   b   c</p>",
+    "<p> leading and trailing </p>",
+    "<p>a <b>bold word</b> c</p>",
+    "<p>one two<span> three four</span>five six</p>",
+    "<p>a\tb c\nd  e</p>",
+    "<p>plain a &amp; b more words</p>",
+    "<p>hazard a *b* c words</p>",
+    "<p>word café word ok</p>",
+    "<pre>keep  double   spaces</pre>",
+    "<p>trailing space before tag <em>x</em></p>",
+  ] {
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}

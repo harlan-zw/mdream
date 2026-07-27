@@ -1780,6 +1780,199 @@ fn filter_exclude_by_compound_selector() {
   assert!(!md.contains("Remove"));
 }
 
+// ── Attribute masking (TagHandler::wanted_attrs) ──
+
+/// A renderer only sees attributes its tag's `wanted_attrs` mask keeps, so
+/// reading a new one without widening the mask fails here.
+#[test]
+fn every_rendered_attribute_survives_the_wanted_attrs_mask() {
+  let opts = HTMLToMarkdownOptions::default;
+
+  // TAG_A: href, title
+  let md = html_to_markdown(r#"<a href="/x" title="T">link</a>"#, opts());
+  assert_eq!(md, "[link](/x \"T\")", "a href/title: {md:?}");
+
+  // TAG_A: aria-label feeds empty-link text synthesis
+  let md = html_to_markdown(
+    r#"<a href="/x" aria-label="Label"><span></span></a>"#,
+    opts(),
+  );
+  assert!(md.contains("Label"), "a aria-label: {md:?}");
+
+  // TAG_IMG: src, alt, title
+  let md = html_to_markdown(r#"<img src="/i.png" alt="A" title="T">"#, opts());
+  assert_eq!(md, "![A](/i.png \"T\")", "img src/alt/title: {md:?}");
+
+  // TAG_CODE inside TAG_PRE: class → fence language
+  let md = html_to_markdown(
+    r#"<pre><code class="language-rust">let x = 1;</code></pre>"#,
+    opts(),
+  );
+  assert!(md.starts_with("```rust\n"), "code class: {md:?}");
+
+  // TAG_PRE: its own class → deferred fence language (issue #97)
+  let md = html_to_markdown(r#"<pre class="language-js">let x = 1;</pre>"#, opts());
+  assert!(md.starts_with("```js\n"), "pre class: {md:?}");
+
+  // TAG_TH: align → column alignment
+  let md = html_to_markdown(
+    r#"<table><tr><th align="center">H</th></tr><tr><td>c</td></tr></table>"#,
+    opts(),
+  );
+  assert!(md.contains(":---:"), "th align: {md:?}");
+
+  // TAG_META: name/property/content, read only by the frontmatter plugin
+  let md = html_to_markdown(
+    r#"<html><head><title>T</title><meta name="description" content="D"><meta property="og:title" content="O"></head><body><p>x</p></body></html>"#,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig::frontmatter()),
+      ..Default::default()
+    },
+  );
+  assert!(md.contains("description: D"), "meta name: {md:?}");
+  assert!(md.contains("og:title"), "meta property: {md:?}");
+}
+
+// ── Trailing-whitespace trims must not reach behind an open block frame ──
+
+#[test]
+fn blockquote_content_start_survives_a_trailing_space_trim() {
+  // Regression: a trim reaching behind the blockquote's `content_start` splices
+  // the quote prefix mid-token (`<d> etails>` instead of `> <details>`).
+  let md = html_to_markdown(
+    "> e<blockquote><details>x</details></blockquote>",
+    HTMLToMarkdownOptions::default(),
+  );
+  assert_eq!(md, "\\> e\n\n> <details>x</details>", "got: {md:?}");
+}
+
+#[test]
+fn pre_fence_opener_survives_a_trailing_space_trim() {
+  // Regression: the same reach-back against a code fence eats the opener's
+  // trailing newline, leaving `content_start` past the buffer end and
+  // finalizing panicking.
+  let md = html_to_markdown("# h<pre><td></pre>", HTMLToMarkdownOptions::default());
+  assert_eq!(md, "\\# h\n\n```\n\n```", "got: {md:?}");
+
+  let md = html_to_markdown(
+    "# h<pre><code><td></code></pre>",
+    HTMLToMarkdownOptions::default(),
+  );
+  assert_eq!(md, "\\# h\n\n```\n```", "got: {md:?}");
+
+  // Every block-marker escape (`#`, `-`, `>`) can precede the fence.
+  for html in [
+    "- x<pre><td></pre>",
+    "> q<pre><td></pre>",
+    "#  hash<pre><span></pre>",
+  ] {
+    let md = html_to_markdown(html, HTMLToMarkdownOptions::default());
+    assert!(md.contains("```"), "{html} produced {md:?}");
+  }
+}
+
+#[test]
+fn spacing_check_tolerates_an_empty_text_node() {
+  // A `<td>` inside `<pre>` opens an implied table, and closing the row emits
+  // an empty text node while the last written byte is still content, so
+  // `should_add_spacing_before_text` has no first byte to index.
+  for (html, expected) in [
+    ("<pre><td>\n<th>6</th>\n<l>", "```\n | 6\n```"),
+    // Same shape without the `<pre>`, so no fence is opened.
+    ("<td>\n<th>6</th>\n<l>", "6"),
+    ("<pre><td>\n<th>x</th>\n<span>", "```\n | x\n```"),
+    ("<pre><td></td><th></th>\n<l>", "```\n |\n```"),
+  ] {
+    let md = html_to_markdown(html, HTMLToMarkdownOptions::default());
+    assert_eq!(md, expected, "{html:?} produced {md:?}");
+  }
+}
+
+#[test]
+fn filter_exclude_is_inherited_and_released_at_the_matching_close() {
+  // Exclusion reaches a deep subtree, and the matching close must clear the
+  // marker so later siblings survive.
+  let md = html_to_markdown(
+    r#"<p>Before</p><div class="ad"><section><ul><li><span>Deep</span></li></ul></section></div><p>After</p><div class="ad">Second</div><p>Last</p>"#,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        filter: Some(FilterConfig {
+          exclude: Some(vec![".ad".to_string()]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert!(md.contains("Before"), "got: {md:?}");
+  assert!(md.contains("After"), "got: {md:?}");
+  assert!(md.contains("Last"), "got: {md:?}");
+  assert!(!md.contains("Deep"), "got: {md:?}");
+  assert!(!md.contains("Second"), "got: {md:?}");
+}
+
+#[test]
+fn filter_exclude_nested_match_does_not_release_the_outer_subtree() {
+  // An inner match closing must not clear the outer element's exclusion.
+  let md = html_to_markdown(
+    r#"<div class="ad"><div class="ad">Inner</div><p>StillInside</p></div><p>Outside</p>"#,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        filter: Some(FilterConfig {
+          exclude: Some(vec![".ad".to_string()]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert!(md.contains("Outside"), "got: {md:?}");
+  assert!(!md.contains("Inner"), "got: {md:?}");
+  assert!(!md.contains("StillInside"), "got: {md:?}");
+}
+
+#[test]
+fn filter_include_is_inherited_by_descendants() {
+  let md = html_to_markdown(
+    r#"<div class="content"><section><p>Deep</p></section></div><div class="sidebar"><p>Nope</p></div>"#,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        filter: Some(FilterConfig {
+          include: Some(vec![".content".to_string()]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert!(md.contains("Deep"), "got: {md:?}");
+  assert!(!md.contains("Nope"), "got: {md:?}");
+}
+
+#[test]
+fn filter_include_without_process_children_drops_unmatched_descendants() {
+  // process_children: false means an included ancestor does not carry inclusion
+  // down; only elements matching a selector themselves are kept.
+  let md = html_to_markdown(
+    r#"<div class="content"><p>Child</p></div>"#,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        filter: Some(FilterConfig {
+          include: Some(vec![".content".to_string()]),
+          process_children: Some(false),
+          ..Default::default()
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert!(!md.contains("Child"), "got: {md:?}");
+}
+
 #[test]
 fn filter_exclude_empty_link_title_in_footer() {
   // Regression: <a title="Twitter"> inside excluded <footer> leaked "Twitter" into output

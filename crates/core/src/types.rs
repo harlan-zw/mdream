@@ -114,8 +114,9 @@ pub struct TagHandler {
   pub is_inline: bool,
   pub spacing: Option<[u8; 2]>,
   pub excludes_text_nodes: bool,
-  /// Whether the tag handler reads attributes (href, src, class, etc.)
-  pub needs_attributes: bool,
+  /// `ATTR_*` bitmask of the attribute names this tag's rendering reads.
+  /// Anything outside it is skipped instead of lowercased, decoded, and stored.
+  pub wanted_attrs: u16,
 }
 
 // Internal config types (distinct from NAPI types in lib.rs)
