@@ -10,7 +10,6 @@ use crate::types::{
 };
 use crate::url::{is_autolink_uri, resolve_url, slugify_heading};
 use std::borrow::Cow;
-use std::collections::HashMap;
 
 mod output;
 mod parse;
@@ -94,8 +93,8 @@ impl SuppressedTag {
 
 struct SuppressedState {
   tags: Vec<SuppressedTag>,
-  custom_names: HashMap<String, u16>,
-  custom_last_index: Vec<u16>,
+  custom_names: Vec<SuppressedCustomName>,
+  custom_name_order: Vec<u16>,
   custom_name_bytes: usize,
   depth_map: [u16; MAX_TAG_ID],
   last_tag_index: [u16; MAX_TAG_ID],
@@ -105,12 +104,17 @@ struct SuppressedState {
   isolate_main_depth: u16,
 }
 
+struct SuppressedCustomName {
+  name: Box<str>,
+  last_index: u16,
+}
+
 impl SuppressedState {
   fn new() -> Self {
     Self {
       tags: Vec::new(),
-      custom_names: HashMap::new(),
-      custom_last_index: Vec::new(),
+      custom_names: Vec::new(),
+      custom_name_order: Vec::new(),
       custom_name_bytes: 0,
       depth_map: [0; MAX_TAG_ID],
       last_tag_index: [0; MAX_TAG_ID],
@@ -119,6 +123,13 @@ impl SuppressedState {
       filter_include_depth: 0,
       isolate_main_depth: 0,
     }
+  }
+
+  fn find_custom_name(&self, tag_name: &str) -> Result<u16, usize> {
+    self
+      .custom_name_order
+      .binary_search_by(|id| self.custom_names[*id as usize - 1].name.as_ref().cmp(tag_name))
+      .map(|position| self.custom_name_order[position])
   }
 }
 
@@ -390,6 +401,7 @@ pub struct ConvertState {
   script_data_state: u8,
   in_pre: bool,
   failure: Option<ConversionError>,
+  degraded: bool,
   /// Shallowest open element that is hidden or matches an exclude selector.
   /// Both drop their whole subtree, so one marker skips it in O(1).
   hidden_since_depth: Option<usize>,
@@ -564,6 +576,11 @@ impl ConvertState {
   }
 
   #[inline]
+  fn parser_tag_depth(&self, tag_id: u8) -> usize {
+    self.depth_map[tag_id as usize] as usize + self.suppressed_tag_depth(tag_id) as usize
+  }
+
+  #[inline]
   fn suppressed_last_template_index(&self) -> u16 {
     self
       .suppressed_state()
@@ -594,20 +611,30 @@ impl ConvertState {
   fn suppressed_custom_name_id(&self, tag_name: &str) -> u16 {
     self
       .suppressed_state()
-      .and_then(|suppressed| suppressed.custom_names.get(tag_name).copied())
+      .and_then(|suppressed| suppressed.find_custom_name(tag_name).ok())
       .unwrap_or(0)
   }
 
   fn intern_suppressed_custom_name(&mut self, tag_name: &str) -> Option<u16> {
-    if let Some(id) = self
+    let insertion_position = match self
       .suppressed_state()
-      .and_then(|suppressed| suppressed.custom_names.get(tag_name).copied())
+      .map_or(Err(0), |suppressed| suppressed.find_custom_name(tag_name))
     {
-      return Some(id);
-    }
+      Ok(id) => return Some(id),
+      Err(position) => position,
+    };
     let custom_name_bytes = self
       .suppressed_state()
       .map_or(0, |suppressed| suppressed.custom_name_bytes);
+    let custom_name_count = self
+      .suppressed_state()
+      .map_or(0, |suppressed| suppressed.custom_names.len());
+    if custom_name_count >= MAX_SUPPRESSED_DEPTH {
+      self.failure = Some(ConversionError::ElementNameCountLimitExceeded {
+        max_names: MAX_SUPPRESSED_DEPTH,
+      });
+      return None;
+    }
     if custom_name_bytes.saturating_add(tag_name.len()) > MAX_SUPPRESSED_CUSTOM_NAME_BYTES {
       self.failure = Some(ConversionError::ElementNameMemoryLimitExceeded {
         max_bytes: MAX_SUPPRESSED_CUSTOM_NAME_BYTES,
@@ -619,8 +646,11 @@ impl ConvertState {
       .get_or_insert_with(|| Box::new(SuppressedState::new()));
     let id = u16::try_from(suppressed.custom_names.len() + 1)
       .expect("suppressed depth bound must fit in u16");
-    suppressed.custom_names.insert(tag_name.to_string(), id);
-    suppressed.custom_last_index.push(0);
+    suppressed.custom_names.push(SuppressedCustomName {
+      name: tag_name.into(),
+      last_index: 0,
+    });
+    suppressed.custom_name_order.insert(insertion_position, id);
     suppressed.custom_name_bytes += tag_name.len();
     Some(id)
   }
@@ -634,12 +664,12 @@ impl ConvertState {
       u16::try_from(suppressed.tags.len() + 1).expect("suppressed depth bound must fit in u16");
     tag.previous_template_index = suppressed.last_template_index;
     if tag.custom_name_id > 0 {
-      if let Some(last_index) = suppressed
-        .custom_last_index
+      if let Some(custom_name) = suppressed
+        .custom_names
         .get_mut(tag.custom_name_id as usize - 1)
       {
-        tag.previous_identity_index = *last_index;
-        *last_index = index;
+        tag.previous_identity_index = custom_name.last_index;
+        custom_name.last_index = index;
       }
     } else if let Some(id) = tag.tag_id {
       tag.previous_identity_index = suppressed.last_tag_index[id as usize];
@@ -675,11 +705,11 @@ impl ConvertState {
       };
       for tag in suppressed.tags[len..].iter().rev() {
         if tag.custom_name_id > 0 {
-          if let Some(last_index) = suppressed
-            .custom_last_index
+          if let Some(custom_name) = suppressed
+            .custom_names
             .get_mut(tag.custom_name_id as usize - 1)
           {
-            *last_index = tag.previous_identity_index;
+            custom_name.last_index = tag.previous_identity_index;
           }
         } else if let Some(id) = tag.tag_id {
           suppressed.last_tag_index[id as usize] = tag.previous_identity_index;
@@ -705,7 +735,7 @@ impl ConvertState {
       suppressed.tags.truncate(len);
       if suppressed.tags.is_empty() {
         suppressed.custom_names.clear();
-        suppressed.custom_last_index.clear();
+        suppressed.custom_name_order.clear();
         suppressed.custom_name_bytes = 0;
       }
     }
@@ -744,9 +774,9 @@ impl ConvertState {
       tag_id.map_or(0, |id| suppressed.last_tag_index[id as usize])
     } else if custom_name_id > 0 {
       suppressed
-        .custom_last_index
+        .custom_names
         .get(custom_name_id as usize - 1)
-        .copied()
+        .map(|custom_name| custom_name.last_index)
         .unwrap_or(0)
     } else {
       0
@@ -768,6 +798,11 @@ impl ConvertState {
   #[inline]
   pub(crate) fn failure(&self) -> Option<ConversionError> {
     self.failure
+  }
+
+  #[inline]
+  pub(crate) fn degraded(&self) -> bool {
+    self.degraded
   }
 
   /// Check if we're inside a table cell (either `<td>` or `<th>`).
@@ -794,6 +829,7 @@ impl ConvertState {
       script_data_state: SCRIPT_DATA,
       in_pre: false,
       failure: None,
+      degraded: false,
       hidden_since_depth: None,
       filter_included_since_depth: None,
       collapse_non_span_depth: 0,

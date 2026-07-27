@@ -248,6 +248,13 @@ fn conversion_error(error: mdream::ConversionError) -> JsValue {
         .expect("configured element-name budget must fit in a JavaScript u32");
       set_error_property(&js_error, "maxBytes", &max_bytes.into());
     }
+    mdream::ConversionError::ElementNameCountLimitExceeded { max_names } => {
+      set_error_property(&js_error, "_tag", &"ElementNameCountLimitExceeded".into());
+      set_error_property(&js_error, "code", &"ELEMENT_NAME_COUNT_LIMIT".into());
+      let max_names = u32::try_from(max_names)
+        .expect("configured element-name count must fit in a JavaScript u32");
+      set_error_property(&js_error, "maxNames", &max_names.into());
+    }
   }
   js_error.into()
 }
@@ -265,6 +272,7 @@ pub fn html_to_markdown_result(html: &str, options: JsValue) -> Result<JsValue, 
 
   let obj = js_sys::Object::new();
   js_sys::Reflect::set(&obj, &"markdown".into(), &result.markdown.into()).unwrap_or_default();
+  js_sys::Reflect::set(&obj, &"degraded".into(), &result.degraded.into()).unwrap_or_default();
 
   if let Some(extracted) = result.extracted {
     let arr = js_sys::Array::new();
@@ -320,5 +328,10 @@ impl MarkdownStream {
 
   pub fn finish(&mut self) -> Result<String, JsValue> {
     self.inner.try_finish().map_err(conversion_error)
+  }
+
+  #[wasm_bindgen(getter)]
+  pub fn degraded(&self) -> bool {
+    self.inner.degraded()
   }
 }

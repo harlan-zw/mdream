@@ -1,6 +1,6 @@
 use mdream::{
   ConversionError, HTMLToMarkdownOptions, MarkdownStreamProcessor, PluginConfig, TagOverrideConfig,
-  html_to_markdown, try_html_to_markdown,
+  html_to_markdown, try_html_to_markdown, try_html_to_markdown_result,
 };
 
 const LIMIT: usize = 512;
@@ -26,6 +26,43 @@ fn content_and_later_siblings_survive_the_element_stack_limit() {
     html_to_markdown(&html, HTMLToMarkdownOptions::default()),
     "before\n\ndeep\n\nafter",
   );
+}
+
+#[test]
+fn result_reports_compact_fallback_as_degraded() {
+  let exact = format!("{}deep{}", "<div>".repeat(LIMIT), "</div>".repeat(LIMIT));
+  assert!(
+    !try_html_to_markdown_result(&exact, HTMLToMarkdownOptions::default())
+      .unwrap()
+      .degraded
+  );
+
+  for semantic_html in [
+    "<table><tr><td>cell</td></tr></table>",
+    r#"<img src="image.png" alt="image">"#,
+    r#"<a href="https://example.com">link</a>"#,
+  ] {
+    let html = format!(
+      "{}{semantic_html}{}",
+      "<div>".repeat(LIMIT),
+      "</div>".repeat(LIMIT),
+    );
+    assert!(
+      try_html_to_markdown_result(&html, HTMLToMarkdownOptions::default())
+        .unwrap()
+        .degraded,
+      "compact fallback was not reported for {semantic_html}",
+    );
+  }
+}
+
+#[test]
+fn stream_reports_compact_fallback_as_degraded() {
+  let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  stream
+    .try_process_chunk(&format!("{}<img>", "<div>".repeat(LIMIT)))
+    .unwrap();
+  assert!(stream.degraded());
 }
 
 #[test]
@@ -239,6 +276,40 @@ fn one_shot_hard_logical_depth_limit_returns_a_tagged_error() {
 }
 
 #[test]
+fn self_closing_element_beyond_the_hard_logical_depth_returns_a_tagged_error() {
+  let html = format!("{}<br>", "<div>".repeat(HARD_LIMIT));
+  assert_eq!(
+    try_html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    Err(ConversionError::ElementDepthLimitExceeded {
+      max_depth: HARD_LIMIT,
+      attempted_depth: HARD_LIMIT + 1,
+    }),
+  );
+}
+
+#[test]
+fn implied_end_recovery_crosses_from_the_compact_stack_into_the_rich_stack() {
+  let html = format!("<p>A{}<em>B<div>C", "<span>".repeat(LIMIT - 1));
+  assert_eq!(
+    try_html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    Ok("AB\n\nC".to_string()),
+  );
+}
+
+#[test]
+fn compact_head_recovery_keeps_rich_ancestors_open() {
+  let html = format!(
+    "<blockquote><blockquote>ALPHA{}<head><p>X</p>{}OMEGA</blockquote></blockquote>ZED",
+    "<div>".repeat(LIMIT),
+    "</div>".repeat(LIMIT),
+  );
+  assert_eq!(
+    try_html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    Ok("> > ALPHA\n> >\n> > X\n> >\n> > OMEGA\n\nZED".to_string()),
+  );
+}
+
+#[test]
 fn streaming_hard_logical_depth_limit_returns_a_tagged_error() {
   let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
   assert_eq!(
@@ -277,6 +348,21 @@ fn compact_custom_name_memory_limit_returns_a_distinct_error() {
     stream.try_process_chunk(&html),
     Err(ConversionError::ElementNameMemoryLimitExceeded {
       max_bytes: 64 * 1024,
+    }),
+  );
+}
+
+#[test]
+fn compact_custom_name_count_limit_is_terminal_and_observable() {
+  let mut html = "<div>".repeat(LIMIT + 1);
+  for index in 0..=HARD_LIMIT - LIMIT {
+    html.push_str(&format!("<x-{index:x}></x-{index:x}>"));
+  }
+
+  assert_eq!(
+    try_html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    Err(ConversionError::ElementNameCountLimitExceeded {
+      max_names: HARD_LIMIT - LIMIT,
     }),
   );
 }

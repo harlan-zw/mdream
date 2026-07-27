@@ -397,6 +397,23 @@ fn html_to_markdown_chunks_convenience() {
 }
 
 #[test]
+fn fallible_html_to_markdown_chunks_returns_conversion_errors() {
+  let html = "<div>".repeat(4_097);
+  let result = mdream::splitter::try_html_to_markdown_chunks(
+    &html,
+    mdream::HTMLToMarkdownOptions::default(),
+    &default_opts(),
+  );
+  assert!(matches!(
+    result,
+    Err(mdream::ConversionError::ElementDepthLimitExceeded {
+      max_depth: 4_096,
+      attempted_depth: 4_097,
+    }),
+  ));
+}
+
+#[test]
 #[should_panic(expected = "chunk_overlap must be less than chunk_size")]
 fn panics_when_overlap_exceeds_size() {
   let opts = SplitterOptions {

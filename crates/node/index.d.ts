@@ -5,6 +5,7 @@ export declare class MarkdownStream {
   processChunk(chunk: string): string
   processChunkBytes(chunk: Uint8Array): string
   finish(): string
+  get degraded(): boolean
 }
 
 export interface ChunkLocNapi {
@@ -75,6 +76,7 @@ export interface MdreamNapiResult {
   markdown: string
   extracted?: Array<ExtractedElementNapi>
   frontmatter?: Record<string, string>
+  degraded: boolean
 }
 
 export interface PluginOptions {

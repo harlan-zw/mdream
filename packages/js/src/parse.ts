@@ -1,4 +1,4 @@
-import type { ElementDepthError, ElementNameMemoryError, ElementNode, Node, NodeEvent, TagHandler, TextNode, TransformPlugin } from './types'
+import type { ElementDepthError, ElementNameCountError, ElementNameMemoryError, ElementNode, Node, NodeEvent, TagHandler, TextNode, TransformPlugin } from './types'
 import {
   ELEMENT_NODE,
   isInsideRawHtmlBlock,
@@ -120,7 +120,6 @@ const COMPACT_SCRIPT = 8
 
 interface CompactElementStack {
   tagIds: Int16Array
-  depthMap: Uint16Array
   nameIds: Uint16Array
   flags: Uint8Array
   tagTops: Int16Array
@@ -314,6 +313,7 @@ const HEADINGS = new Set<number>([TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6
 const SINGLE_P = new Set<number>([TAG_P])
 const SINGLE_LI = new Set<number>([TAG_LI])
 const SINGLE_A = new Set<number>([TAG_A])
+const SINGLE_HEAD = new Set<number>([TAG_HEAD])
 const DT_DD = new Set<number>([TAG_DT, TAG_DD])
 const TD_TH = new Set<number>([TAG_TD, TAG_TH])
 const TR_CELLS = new Set<number>([TAG_TD, TAG_TH, TAG_TR])
@@ -768,7 +768,7 @@ function matchesClosingTag(node: ElementNode, tagName: string, tagId: number, cl
   return node.name === tagName || (!nodeIsAlias && !closingIsAlias)
 }
 
-function createElementDepthError(): ElementDepthError {
+function createElementDepthError(attemptedDepth = MAX_LOGICAL_DEPTH + 1): ElementDepthError {
   return Object.assign(
     new Error(`Element nesting exceeds the maximum logical depth of ${MAX_LOGICAL_DEPTH}`),
     {
@@ -776,6 +776,7 @@ function createElementDepthError(): ElementDepthError {
       _tag: 'ElementDepthLimitExceeded' as const,
       code: 'ELEMENT_DEPTH_LIMIT' as const,
       maxDepth: MAX_LOGICAL_DEPTH as 4096,
+      attemptedDepth,
     },
   )
 }
@@ -788,6 +789,18 @@ function createElementNameMemoryError(): ElementNameMemoryError {
       _tag: 'ElementNameMemoryLimitExceeded' as const,
       code: 'ELEMENT_NAME_MEMORY_LIMIT' as const,
       maxBytes: MAX_COMPACT_CUSTOM_NAME_BYTES as 65536,
+    },
+  )
+}
+
+function createElementNameCountError(): ElementNameCountError {
+  return Object.assign(
+    new Error(`Compact parsing exceeds the maximum of ${COMPACT_CAPACITY} distinct custom element names`),
+    {
+      name: 'ElementNameCountError',
+      _tag: 'ElementNameCountLimitExceeded' as const,
+      code: 'ELEMENT_NAME_COUNT_LIMIT' as const,
+      maxNames: COMPACT_CAPACITY as 3584,
     },
   )
 }
@@ -805,7 +818,6 @@ function createCompactElementStack(): CompactElementStack {
   previousMatch.fill(-1)
   return {
     tagIds: new Int16Array(COMPACT_CAPACITY),
-    depthMap: new Uint16Array(MAX_TAG_ID),
     nameIds: new Uint16Array(COMPACT_CAPACITY),
     flags: new Uint8Array(COMPACT_CAPACITY),
     tagTops,
@@ -834,8 +846,9 @@ function retainCompactName(stack: CompactElementStack, tagName: string): number 
     return existingId
 
   const nameBytes = utf8ByteLength(tagName)
-  if (stack.customNameIds.size >= COMPACT_CAPACITY
-    || stack.customNameBytes + nameBytes > MAX_COMPACT_CUSTOM_NAME_BYTES) {
+  if (stack.customNameIds.size >= COMPACT_CAPACITY)
+    throw createElementNameCountError()
+  if (stack.customNameBytes + nameBytes > MAX_COMPACT_CUSTOM_NAME_BYTES) {
     throw createElementNameMemoryError()
   }
   const id = MAX_TAG_ID + stack.customNameIds.size + 1
@@ -875,7 +888,8 @@ function compactLength(state: ParseState): number {
 }
 
 function parserTagDepth(state: ParseState, tagId: number): number {
-  return state.depthMap[tagId]! + (state.compactElements?.depthMap[tagId] || 0)
+  const compactDepth = (state.compactElements?.tagTops[tagId] ?? -1) >= 0 ? 1 : 0
+  return state.depthMap[tagId]! + compactDepth
 }
 
 function compactTopFlags(state: ParseState): number {
@@ -920,12 +934,6 @@ function popCompactElement(state: ParseState): void {
   }
   if (tagId === -1 || flags & COMPACT_ALIAS)
     stack.nameTops[nameId] = stack.previousMatch[index]!
-  if (tagId >= 0 && tagId < MAX_TAG_ID)
-    stack.depthMap[tagId] = Math.max(0, stack.depthMap[tagId]! - 1)
-  stack.flags[index] = 0
-  stack.nameIds[index] = 0
-  stack.previousTagTop[index] = -1
-  stack.previousMatch[index] = -1
   state.depth--
   if (stack.length === 0) {
     stack.customNameIds.clear()
@@ -946,9 +954,6 @@ function pushCompactElement(
   tagId: number,
   tagHandler: TagHandler | undefined,
 ): void {
-  if (state.depth >= MAX_LOGICAL_DEPTH)
-    throw createElementDepthError()
-
   const stack = state.compactElements ??= createCompactElementStack()
   const parentExcluded = Boolean(compactTopFlags(state) & COMPACT_EXCLUDED)
     || Boolean(state.currentNode?.excludedFromMarkdown)
@@ -972,7 +977,6 @@ function pushCompactElement(
       stack.previousMatch[index] = stack.regularTagTops[tagId]!
       stack.regularTagTops[tagId] = index
     }
-    stack.depthMap[tagId] = stack.depthMap[tagId]! + 1
   }
   if (tagId === -1 || flags & COMPACT_ALIAS) {
     stack.previousMatch[index] = stack.nameTops[nameId]!
@@ -1715,14 +1719,22 @@ function processOpeningTag(
   if (parserTagDepth(state, TAG_HEAD) > 0
     && parserTagDepth(state, TAG_TEMPLATE) === 0
     && !HEAD_CONTENT_TAGS.has(tagId)) {
-    while (compactLength(state))
-      popCompactElement(state)
-    while (state.currentNode && state.currentNode.tagId !== TAG_HEAD) {
-      closeNode(state.currentNode, state, handleEvent)
+    const compactHeadIndex = state.compactElements
+      ? compactTopIndexForIds(state.compactElements, SINGLE_HEAD)
+      : -1
+    if (compactHeadIndex >= 0) {
+      closeCompactThrough(state, compactHeadIndex)
     }
-    const headNode = state.currentNode
-    if (headNode && headNode.tagId === TAG_HEAD) {
-      closeNode(headNode, state, handleEvent)
+    else {
+      while (compactLength(state))
+        popCompactElement(state)
+      while (state.currentNode && state.currentNode.tagId !== TAG_HEAD) {
+        closeNode(state.currentNode, state, handleEvent)
+      }
+      const headNode = state.currentNode
+      if (headNode && headNode.tagId === TAG_HEAD) {
+        closeNode(headNode, state, handleEvent)
+      }
     }
   }
 
@@ -1826,6 +1838,8 @@ function processOpeningTag(
   }
 
   if (state.depth >= MAX_MATERIALIZED_DEPTH) {
+    if (state.depth >= MAX_LOGICAL_DEPTH)
+      throw createElementDepthError(state.depth + 1)
     if (!result.selfClosing)
       pushCompactElement(state, tagName, tagId, tagHandler)
     return {

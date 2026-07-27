@@ -155,11 +155,13 @@ pub fn try_html_to_format_result(
   };
 
   let frontmatter = state.frontmatter();
+  let degraded = state.degraded();
 
   Ok(MdreamResult {
     markdown: state.get_markdown(),
     extracted,
     frontmatter,
+    degraded,
   })
 }
 
@@ -220,6 +222,11 @@ impl MarkdownStreamProcessor {
   /// The terminal bounded parser failure, when one has occurred.
   pub fn failure(&self) -> Option<ConversionError> {
     self.state.failure()
+  }
+
+  /// Whether compact fallback preserved content with reduced rendering fidelity.
+  pub fn degraded(&self) -> bool {
+    self.state.degraded()
   }
 
   pub fn finish(&mut self) -> String {

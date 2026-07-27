@@ -5,6 +5,7 @@ import { parseHtml } from '../../src/parse'
 const LIMIT = 512
 const LOGICAL_LIMIT = 4096
 const NAME_MEMORY_LIMIT = 64 * 1024
+const NAME_COUNT_LIMIT = LOGICAL_LIMIT - LIMIT
 
 async function streamConvert(chunks: string[]): Promise<string> {
   const stream = new ReadableStream<string>({
@@ -66,6 +67,16 @@ describe('element depth limit', () => {
       _tag: 'ElementDepthLimitExceeded',
       code: 'ELEMENT_DEPTH_LIMIT',
       maxDepth: LOGICAL_LIMIT,
+    }))
+  })
+
+  it('rejects a self-closing element beyond the logical limit', () => {
+    const html = `${'<div>'.repeat(LOGICAL_LIMIT)}<br>`
+    expect(() => htmlToMarkdown(html)).toThrowError(expect.objectContaining({
+      _tag: 'ElementDepthLimitExceeded',
+      code: 'ELEMENT_DEPTH_LIMIT',
+      maxDepth: LOGICAL_LIMIT,
+      attemptedDepth: LOGICAL_LIMIT + 1,
     }))
   })
 
@@ -139,6 +150,16 @@ describe('element depth limit', () => {
     expect(htmlToMarkdown(html)).toBe('one two\n\nafter')
   })
 
+  it('applies implied-end recovery from the compact stack into the rich stack', () => {
+    const html = `<p>A${'<span>'.repeat(LIMIT - 1)}<em>B<div>C`
+    expect(htmlToMarkdown(html)).toBe('AB\n\nC')
+  })
+
+  it('keeps rich ancestors when recovering a compact head', () => {
+    const html = `<blockquote><blockquote>ALPHA${'<div>'.repeat(LIMIT)}<head><p>X</p>${'</div>'.repeat(LIMIT)}OMEGA</blockquote></blockquote>ZED`
+    expect(htmlToMarkdown(html)).toBe('> > ALPHA\n> >\n> > X\n> >\n> > OMEGA\n\nZED')
+  })
+
   it.each(['script', 'style'])('keeps suppressed <%s> content inert without closing outer nodes', (tag) => {
     const html = `${'<div>'.repeat(LIMIT)}<${tag}></div><p>hidden</p></${tag}><p>visible</p>${'</div>'.repeat(LIMIT)}`
     expect(htmlToMarkdown(html)).toBe('visible')
@@ -167,6 +188,19 @@ describe('element depth limit', () => {
       _tag: 'ElementNameMemoryLimitExceeded',
       code: 'ELEMENT_NAME_MEMORY_LIMIT',
       maxBytes: NAME_MEMORY_LIMIT,
+    }))
+  })
+
+  it('reports the distinct compact-name limit accurately', () => {
+    const tags = Array.from(
+      { length: NAME_COUNT_LIMIT + 1 },
+      (_, index) => `<x-${index.toString(36)}></x-${index.toString(36)}>`,
+    ).join('')
+    const html = `${'<div>'.repeat(LIMIT + 1)}${tags}`
+    expect(() => htmlToMarkdown(html)).toThrowError(expect.objectContaining({
+      _tag: 'ElementNameCountLimitExceeded',
+      code: 'ELEMENT_NAME_COUNT_LIMIT',
+      maxNames: NAME_COUNT_LIMIT,
     }))
   })
 

@@ -535,20 +535,38 @@ impl ConvertState {
 
   fn close_suppressed_implied_to(&mut self, target: &[bool; 256], boundary: &[bool; 256]) {
     let mut close_count = 0usize;
-    let mut found = false;
+    let mut found_target = false;
+    let mut found_boundary = false;
     for tag in self.suppressed_tags().iter().rev() {
       match tag.tag_id {
         Some(id) if target[id as usize] => {
           close_count += 1;
-          found = true;
+          found_target = true;
           break;
         }
-        Some(id) if boundary[id as usize] => break,
+        Some(id) if boundary[id as usize] => {
+          found_boundary = true;
+          break;
+        }
         _ => close_count += 1,
       }
     }
-    if found {
+    if found_target {
       self.truncate_suppressed(self.suppressed_len() - close_count);
+      return;
+    }
+    if found_boundary {
+      return;
+    }
+
+    let rich_target_is_in_scope = self.stack.iter().rev().find_map(|node| match node.tag_id {
+      Some(id) if target[id as usize] => Some(true),
+      Some(id) if boundary[id as usize] => Some(false),
+      _ => None,
+    });
+    if rich_target_is_in_scope == Some(true) {
+      self.truncate_suppressed(0);
+      self.close_implied_to(target, boundary);
     }
   }
 
@@ -560,36 +578,59 @@ impl ConvertState {
       .take_while(|tag| tag.tag_id.is_some_and(|id| closeable[id as usize]))
       .count();
     self.truncate_suppressed(self.suppressed_len() - close_count);
+    if !self.has_suppressed() {
+      self.close_table_context(closeable);
+    }
   }
 
   fn close_suppressed_select_to(&mut self, target_id: u8) -> bool {
     let mut target_index = None;
+    let mut found_boundary = false;
     for index in (0..self.suppressed_len()).rev() {
       match self.suppressed_tags()[index].tag_id {
         Some(id) if id == target_id => {
           target_index = Some(index);
           break;
         }
-        Some(TAG_SELECT) if target_id != TAG_SELECT => break,
-        Some(TAG_TEMPLATE) => break,
+        Some(TAG_SELECT) if target_id != TAG_SELECT => {
+          found_boundary = true;
+          break;
+        }
+        Some(TAG_TEMPLATE) => {
+          found_boundary = true;
+          break;
+        }
         _ => {}
       }
     }
     if let Some(index) = target_index {
       self.truncate_suppressed(index);
       true
-    } else {
+    } else if found_boundary {
       false
+    } else {
+      let rich_target_is_in_scope = self.stack.iter().rev().find_map(|node| match node.tag_id {
+        Some(id) if id == target_id => Some(true),
+        Some(TAG_SELECT) if target_id != TAG_SELECT => Some(false),
+        Some(TAG_TEMPLATE) => Some(false),
+        _ => None,
+      });
+      if rich_target_is_in_scope == Some(true) {
+        self.truncate_suppressed(0);
+        self.close_select_to(target_id)
+      } else {
+        false
+      }
     }
   }
 
   fn recover_suppressed_opening(&mut self, id: u8) -> bool {
     match id {
-      TAG_SELECT if self.suppressed_tag_depth(TAG_SELECT) > 0 => {
+      TAG_SELECT if self.parser_tag_depth(TAG_SELECT) > 0 => {
         return self.close_suppressed_select_to(TAG_SELECT);
       }
       TAG_OPTION => {
-        if self.suppressed_tag_depth(TAG_SELECT) > 0 {
+        if self.parser_tag_depth(TAG_SELECT) > 0 {
           self.close_suppressed_select_to(TAG_OPTION);
         } else if self
           .suppressed_last()
@@ -598,23 +639,23 @@ impl ConvertState {
           self.pop_suppressed();
         }
       }
-      TAG_OPTGROUP if self.suppressed_tag_depth(TAG_SELECT) > 0 => {
+      TAG_OPTGROUP if self.parser_tag_depth(TAG_SELECT) > 0 => {
         self.close_suppressed_select_to(TAG_OPTION);
         self.close_suppressed_select_to(TAG_OPTGROUP);
       }
-      TAG_A if self.suppressed_tag_depth(TAG_A) > 0 => {
+      TAG_A if self.parser_tag_depth(TAG_A) > 0 => {
         self.close_suppressed_implied_to(&TARGET_A, &A_SCOPE_BOUNDARY);
       }
       TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT
-        if self.suppressed_tag_depth(TAG_TABLE) > 0 =>
+        if self.parser_tag_depth(TAG_TABLE) > 0 =>
       {
         match id {
           TAG_TD | TAG_TH
-            if self.suppressed_tag_depth(TAG_TD) > 0 || self.suppressed_tag_depth(TAG_TH) > 0 =>
+            if self.parser_tag_depth(TAG_TD) > 0 || self.parser_tag_depth(TAG_TH) > 0 =>
           {
             self.close_suppressed_implied_to(&TARGET_CELL, &CELL_SCOPE_BOUNDARY);
           }
-          TAG_TR if self.suppressed_tag_depth(TAG_TR) > 0 => {
+          TAG_TR if self.parser_tag_depth(TAG_TR) > 0 => {
             self.close_suppressed_table_context(&ROW_CLOSEABLE);
           }
           TAG_THEAD | TAG_TBODY | TAG_TFOOT => {
@@ -626,7 +667,7 @@ impl ConvertState {
       TAG_A | TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT | TAG_OPTGROUP
       | TAG_SELECT => {}
       _ => {
-        if self.suppressed_tag_depth(TAG_P) > 0 {
+        if self.parser_tag_depth(TAG_P) > 0 {
           self.close_suppressed_implied_to(&TARGET_P, &P_SCOPE_BOUNDARY);
         }
         match id {
@@ -640,11 +681,11 @@ impl ConvertState {
           {
             self.pop_suppressed();
           }
-          TAG_LI if self.suppressed_tag_depth(TAG_LI) > 0 => {
+          TAG_LI if self.parser_tag_depth(TAG_LI) > 0 => {
             self.close_suppressed_implied_to(&TARGET_LI, &LI_SCOPE_BOUNDARY);
           }
           TAG_DT | TAG_DD
-            if self.suppressed_tag_depth(TAG_DT) > 0 || self.suppressed_tag_depth(TAG_DD) > 0 =>
+            if self.parser_tag_depth(TAG_DT) > 0 || self.parser_tag_depth(TAG_DD) > 0 =>
           {
             self.close_suppressed_implied_to(&TARGET_DT_DD, &DL_SCOPE_BOUNDARY);
           }
@@ -856,7 +897,7 @@ impl ConvertState {
     }
 
     let flatten = self.stack.len() >= MAX_ELEMENT_DEPTH;
-    if flatten && !self_closing && self.stack.len() + self.suppressed_len() >= MAX_LOGICAL_DEPTH {
+    if flatten && self.stack.len() + self.suppressed_len() >= MAX_LOGICAL_DEPTH {
       self.failure = Some(ConversionError::ElementDepthLimitExceeded {
         max_depth: MAX_LOGICAL_DEPTH,
         attempted_depth: MAX_LOGICAL_DEPTH + 1,
@@ -870,6 +911,7 @@ impl ConvertState {
     }
 
     if flatten {
+      self.degraded = true;
       let virtual_depth = self.depth + self.suppressed_len() + 1;
       let custom_name = if is_builtin {
         None

@@ -344,6 +344,7 @@ export interface ElementDepthError extends Error {
   _tag: 'ElementDepthLimitExceeded'
   code: 'ELEMENT_DEPTH_LIMIT'
   maxDepth: 4096
+  attemptedDepth: number
 }
 
 /** Explicit failure when compact custom element names exceed their memory budget. */
@@ -353,7 +354,14 @@ export interface ElementNameMemoryError extends Error {
   maxBytes: 65536
 }
 
-export type ElementParserError = ElementDepthError | ElementNameMemoryError
+/** Explicit failure when compact parsing retains too many distinct custom names. */
+export interface ElementNameCountError extends Error {
+  _tag: 'ElementNameCountLimitExceeded'
+  code: 'ELEMENT_NAME_COUNT_LIMIT'
+  maxNames: 3584
+}
+
+export type ElementParserError = ElementDepthError | ElementNameMemoryError | ElementNameCountError
 
 /**
  * Handler context for markdown conversion

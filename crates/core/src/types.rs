@@ -595,6 +595,8 @@ pub struct MdreamResult {
   pub markdown: String,
   pub extracted: Option<Vec<ExtractedElement>>,
   pub frontmatter: Option<Vec<(String, String)>>,
+  /// `true` when compact fallback preserved content with reduced rendering fidelity.
+  pub degraded: bool,
 }
 
 /// Expected conversion failure for bounded parsing of untrusted HTML.
@@ -607,6 +609,8 @@ pub enum ConversionError {
   },
   /// Compact custom element identities exhausted their bounded memory budget.
   ElementNameMemoryLimitExceeded { max_bytes: usize },
+  /// Compact parsing retained the maximum number of distinct custom names.
+  ElementNameCountLimitExceeded { max_names: usize },
 }
 
 impl std::fmt::Display for ConversionError {
@@ -622,6 +626,10 @@ impl std::fmt::Display for ConversionError {
       Self::ElementNameMemoryLimitExceeded { max_bytes } => write!(
         formatter,
         "compact element names exceed the maximum memory budget of {max_bytes} bytes"
+      ),
+      Self::ElementNameCountLimitExceeded { max_names } => write!(
+        formatter,
+        "compact parsing exceeds the maximum of {max_names} distinct custom element names"
       ),
     }
   }

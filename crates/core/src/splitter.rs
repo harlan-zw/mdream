@@ -1,5 +1,5 @@
 use crate::consts::{TAG_H1, TAG_H2};
-use crate::types::{HTMLToMarkdownOptions, OutputFormat};
+use crate::types::{ConversionError, HTMLToMarkdownOptions, OutputFormat};
 
 /// Options for splitting markdown into chunks.
 pub struct SplitterOptions {
@@ -452,21 +452,51 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
 }
 
 /// Convert HTML to Markdown and split into chunks in one call.
+///
+/// # Panics
+///
+/// Panics when bounded parsing fails. Use [`try_html_to_markdown_chunks`] for
+/// untrusted HTML.
 pub fn html_to_markdown_chunks(
   html: &str,
   md_opts: HTMLToMarkdownOptions,
   split_opts: &SplitterOptions,
 ) -> Vec<MarkdownChunk> {
-  html_to_format_chunks(html, md_opts, split_opts, OutputFormat::Markdown)
+  try_html_to_markdown_chunks(html, md_opts, split_opts).unwrap_or_else(|error| panic!("{error}"))
 }
 
 /// Convert HTML to the requested output format and split it into chunks in one call.
+///
+/// # Panics
+///
+/// Panics when bounded parsing fails. Use [`try_html_to_format_chunks`] for
+/// untrusted HTML.
 pub fn html_to_format_chunks(
   html: &str,
   md_opts: HTMLToMarkdownOptions,
   split_opts: &SplitterOptions,
   format: OutputFormat,
 ) -> Vec<MarkdownChunk> {
-  let output = crate::html_to_format(html, md_opts, format);
-  split_markdown(&output, split_opts)
+  try_html_to_format_chunks(html, md_opts, split_opts, format)
+    .unwrap_or_else(|error| panic!("{error}"))
+}
+
+/// Fallible HTML to Markdown conversion and splitting for untrusted input.
+pub fn try_html_to_markdown_chunks(
+  html: &str,
+  md_opts: HTMLToMarkdownOptions,
+  split_opts: &SplitterOptions,
+) -> Result<Vec<MarkdownChunk>, ConversionError> {
+  try_html_to_format_chunks(html, md_opts, split_opts, OutputFormat::Markdown)
+}
+
+/// Fallible HTML conversion and splitting for untrusted input.
+pub fn try_html_to_format_chunks(
+  html: &str,
+  md_opts: HTMLToMarkdownOptions,
+  split_opts: &SplitterOptions,
+  format: OutputFormat,
+) -> Result<Vec<MarkdownChunk>, ConversionError> {
+  let output = crate::try_html_to_format(html, md_opts, format)?;
+  Ok(split_markdown(&output, split_opts))
 }

@@ -575,8 +575,10 @@ const remaining = parseHtmlStream(htmlChunk, state, (event) => {
 
 **Returns:** `string` (remaining unparsed HTML)
 
-**Throws:** `ElementDepthError` when logical nesting exceeds 4096, or
-`ElementNameMemoryError` when compact custom names exceed 65536 bytes.
+**Throws:** `ElementDepthError` when logical nesting exceeds 4096,
+`ElementNameMemoryError` when compact custom names exceed 65536 bytes, or
+`ElementNameCountError` when compact parsing retains more than 3584 distinct
+custom names.
 
 Migration note: `ElementNode.depthMap` and `MdreamProcessingState.depthMap` now
 use `Uint16Array`. Update explicit downstream annotations and manually created
