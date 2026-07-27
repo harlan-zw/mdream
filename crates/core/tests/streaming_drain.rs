@@ -486,35 +486,6 @@ fn streaming_memory_is_bounded_not_document_sized() {
   );
 }
 
-// Script data is dropped from the output, so buffering it retains the whole
-// element to emit nothing. Only extraction reads it.
-#[test]
-fn excluded_script_data_is_not_retained() {
-  let mut html = String::with_capacity(2 * 1024 * 1024 + 64);
-  html.push_str("<p>before</p><script>");
-  while html.len() < 2 * 1024 * 1024 {
-    html.push_str("var filler = 1; function f() { return 2; } ");
-  }
-  html.push_str("</script><p>after</p>");
-
-  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
-  let baseline = LIVE.load(Ordering::Relaxed);
-  PEAK.store(baseline, Ordering::Relaxed);
-  let mut out = String::new();
-  for chunk in html.as_bytes().chunks(8 * 1024) {
-    out.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
-  }
-  out.push_str(&processor.finish());
-  let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
-
-  assert_eq!(out.trim(), "before\n\nafter");
-  assert!(
-    peak < 256 * 1024,
-    "peak {peak} should not scale with the {} byte script",
-    html.len()
-  );
-}
-
 // A text node ending in `&nbsp;` (U+00A0) before a sibling inline was trimmed
 // at the element boundary by `str::trim_end` (nbsp is Unicode whitespace). In
 // streaming the nbsp was already yielded, so the truncation shifted the reach-

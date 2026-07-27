@@ -49,8 +49,8 @@ const SIZE: usize = 4 * 1024 * 1024;
 /// Measured allocation per input byte at this size, before the fix and after:
 /// text run 777x -> 8x, style body 773x -> 4x, title 775x -> 6x. The script body
 /// was already linear in volume (4x -> 0x); it retained the element instead,
-/// which `streaming_drain::excluded_script_data_is_not_retained` covers. This
-/// sits an order of magnitude clear of both sides.
+/// which `streaming_script_retention` covers. This sits an order of magnitude
+/// clear of both sides.
 const MAX_ALLOCATION_PER_BYTE: f64 = 64.0;
 
 /// Splits on char boundaries, so the helper stays valid if a case gains
