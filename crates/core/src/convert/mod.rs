@@ -600,7 +600,11 @@ impl ConvertState {
     if text.is_empty() {
       return;
     }
-    self.script_text_buffer.push_str(text);
+    // Script data is excluded from the output; only extraction reads it, so
+    // buffering it otherwise retains the whole element to emit nothing.
+    if self.has_extraction {
+      self.script_text_buffer.push_str(text);
+    }
     self.text_buffer_contains_non_whitespace = true;
     self.last_char_was_whitespace = false;
     self.just_closed_tag = false;
