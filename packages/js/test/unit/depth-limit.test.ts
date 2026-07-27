@@ -107,6 +107,17 @@ describe('element depth limit', () => {
     })).toBe('visible')
   })
 
+  it('does not consume the hard depth budget for a suppressed CDATA override', () => {
+    const html = `${'<div>'.repeat(LIMIT)}<![CDATA[hidden]]>${'<div>'.repeat(LOGICAL_LIMIT - LIMIT)}kept${'</div>'.repeat(LOGICAL_LIMIT)}`
+    expect(htmlToMarkdown(html, {
+      plugins: {
+        tagOverrides: {
+          '#cdata-section': { enter: '[', exit: ']', isInline: true, spacing: [0, 0] },
+        },
+      },
+    })).toBe('kept')
+  })
+
   it('matches custom and mismatched closing tags in the compact stack', () => {
     const html = `${'<div>'.repeat(LIMIT)}<x-one><x-two>inside</x-one><p>after</p>${'</div>'.repeat(LIMIT)}`
     expect(htmlToMarkdown(html)).toBe('inside after')

@@ -127,6 +127,31 @@ fn skipped_cdata_override_does_not_emit_or_pop_its_parent_past_the_element_stack
 }
 
 #[test]
+fn skipped_cdata_override_does_not_consume_the_hard_depth_budget() {
+  let html = format!(
+    "{}<![CDATA[hidden]]>{}kept{}",
+    "<div>".repeat(LIMIT),
+    "<div>".repeat(HARD_LIMIT - LIMIT),
+    "</div>".repeat(HARD_LIMIT),
+  );
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "#cdata-section".to_string(),
+        TagOverrideConfig {
+          enter: Some("[".to_string()),
+          exit: Some("]".to_string()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(try_html_to_markdown(&html, options), Ok("kept".to_string()));
+}
+
+#[test]
 fn mismatched_and_custom_closes_past_the_element_stack_limit_do_not_desync() {
   let html = format!(
     "{}<x-outer><x-inner>inside</x-outer></span>{}<p>after</p>",

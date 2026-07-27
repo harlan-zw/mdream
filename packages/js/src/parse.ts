@@ -1183,10 +1183,7 @@ function parseHtmlInternal(
     }
     // CLOSING TAG
     else if (nextCharCode === SLASH_CHAR) {
-      const compactTopIsNonNesting = state.compactElements?.length
-        ? Boolean(compactTopFlags(state) & COMPACT_NON_NESTING)
-        : false
-      if (compactTopIsNonNesting || state.currentNode?.tagHandler?.isNonNesting) {
+      if (isCurrentNonNesting(state)) {
         // Peek at the closing tag name to check if it matches the non-nesting tag
         let peekEnd = i + 2
         while (peekEnd < chunkLength) {
@@ -1255,10 +1252,7 @@ function parseHtmlInternal(
 
       // Inside a non-nesting element (script/style/title/textarea) no opening
       // tag is a real element; a nested `<script>` is literal text (issue #93).
-      const compactTopIsNonNesting = state.compactElements?.length
-        ? Boolean(compactTopFlags(state) & COMPACT_NON_NESTING)
-        : false
-      if (compactTopIsNonNesting || state.currentNode?.tagHandler?.isNonNesting) {
+      if (isCurrentNonNesting(state)) {
         textBuffer += htmlChunk[i++]
         continue
       }
@@ -1643,7 +1637,11 @@ function processCdataSection(
   // `>` at position 0 and exits immediately, so the synthetic tag has no
   // attributes to parse. Mirrors the Rust engine's synthetic-tag handling.
   const open = processOpeningTag('#cdata-section', -1, '>', 0, state, handleEvent)
-  if (!open.complete || open.selfClosing || open.skip || open.suppressed) {
+  if (!open.complete || open.selfClosing || open.skip) {
+    return
+  }
+  if (open.suppressed) {
+    popCompactElement(state)
     return
   }
 
@@ -1749,11 +1747,12 @@ function processOpeningTag(
       }
     }
     else if (tagId === TAG_OPTION) {
+      const compactTop = compactTopTagId(state)
       if (parserTagDepth(state, TAG_SELECT) > 0) {
         closeSelectTo(state, TAG_OPTION, handleEvent)
       }
-      else if (compactTopTagId(state) !== undefined) {
-        if (compactTopTagId(state) === TAG_OPTION)
+      else if (compactTop !== undefined) {
+        if (compactTop === TAG_OPTION)
           popCompactElement(state)
       }
       else if (state.currentNode?.tagId === TAG_OPTION) {

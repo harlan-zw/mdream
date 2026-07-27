@@ -940,13 +940,7 @@ impl ConvertState {
           filter_excluded = self
             .filter_exclude_parsed
             .iter()
-            .any(|(_, parsed)| matches_selector(&probe, parsed))
-            || self.stack.iter().any(|parent| {
-              self
-                .filter_exclude_parsed
-                .iter()
-                .any(|(_, parsed)| matches_selector(parent, parsed))
-            });
+            .any(|(_, parsed)| matches_selector(&probe, parsed));
           skip_node |= filter_excluded;
         }
         if !skip_node && !self.filter_include_parsed.is_empty() {
@@ -957,12 +951,7 @@ impl ConvertState {
           let mut match_found = filter_include_match;
           if !match_found && self.filter_process_children {
             match_found = self.suppressed_filter_include_depth() > 0
-              || self.stack.iter().any(|parent| {
-                self
-                  .filter_include_parsed
-                  .iter()
-                  .any(|(_, parsed)| matches_selector(parent, parsed))
-              });
+              || self.filter_included_since_depth.is_some();
           }
           if !match_found {
             skip_node = true;
@@ -1710,7 +1699,13 @@ impl ConvertState {
     };
 
     let result = self.process_opening_tag("#cdata-section", tag_id, false, ">", 0);
-    if !result.complete || result.skip {
+    if !result.complete {
+      return;
+    }
+    if result.skip {
+      if !result.self_closing && self.failure.is_none() {
+        self.pop_suppressed();
+      }
       return;
     }
 
@@ -1731,13 +1726,7 @@ impl ConvertState {
       }
     }
     if !result.self_closing {
-      if result.skip {
-        if self.failure.is_none() {
-          self.pop_suppressed();
-        }
-      } else {
-        self.close_node();
-      }
+      self.close_node();
     }
   }
 

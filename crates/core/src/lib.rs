@@ -25,6 +25,11 @@ pub use types::{
 pub use consts::get_tag_id;
 
 /// Convert HTML to Markdown in a single pass.
+///
+/// # Panics
+///
+/// Panics when bounded parsing fails. Use [`try_html_to_markdown`] to handle
+/// [`ConversionError`] as a value.
 pub fn html_to_markdown(html: &str, options: HTMLToMarkdownOptions) -> String {
   try_html_to_markdown(html, options).unwrap_or_else(|error| panic!("{error}"))
 }
@@ -38,6 +43,11 @@ pub fn try_html_to_markdown(
 }
 
 /// Convert HTML to readable plain text in a single pass.
+///
+/// # Panics
+///
+/// Panics when bounded parsing fails. Use [`try_html_to_text`] to handle
+/// [`ConversionError`] as a value.
 pub fn html_to_text(html: &str, options: HTMLToMarkdownOptions) -> String {
   try_html_to_text(html, options).unwrap_or_else(|error| panic!("{error}"))
 }
@@ -51,6 +61,11 @@ pub fn try_html_to_text(
 }
 
 /// Convert HTML to the requested output format in a single pass.
+///
+/// # Panics
+///
+/// Panics when bounded parsing fails. Use [`try_html_to_format`] to handle
+/// [`ConversionError`] as a value.
 pub fn html_to_format(html: &str, options: HTMLToMarkdownOptions, format: OutputFormat) -> String {
   try_html_to_format(html, options, format).unwrap_or_else(|error| panic!("{error}"))
 }
@@ -65,6 +80,11 @@ pub fn try_html_to_format(
 }
 
 /// Convert HTML to Markdown with full results (extraction, frontmatter).
+///
+/// # Panics
+///
+/// Panics when bounded parsing fails. Use [`try_html_to_markdown_result`] to
+/// handle [`ConversionError`] as a value.
 pub fn html_to_markdown_result(html: &str, options: HTMLToMarkdownOptions) -> MdreamResult {
   try_html_to_markdown_result(html, options).unwrap_or_else(|error| panic!("{error}"))
 }
@@ -78,6 +98,11 @@ pub fn try_html_to_markdown_result(
 }
 
 /// Convert HTML to plain text with full results (extraction, frontmatter).
+///
+/// # Panics
+///
+/// Panics when bounded parsing fails. Use [`try_html_to_text_result`] to handle
+/// [`ConversionError`] as a value.
 pub fn html_to_text_result(html: &str, options: HTMLToMarkdownOptions) -> MdreamResult {
   try_html_to_text_result(html, options).unwrap_or_else(|error| panic!("{error}"))
 }
@@ -91,6 +116,11 @@ pub fn try_html_to_text_result(
 }
 
 /// Convert HTML to the requested format with full results (extraction, frontmatter).
+///
+/// # Panics
+///
+/// Panics when bounded parsing fails. Use [`try_html_to_format_result`] to
+/// handle [`ConversionError`] as a value.
 pub fn html_to_format_result(
   html: &str,
   options: HTMLToMarkdownOptions,
