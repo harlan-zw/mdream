@@ -23,16 +23,44 @@ pub(crate) struct TrackedExtraction {
   pub(crate) attributes: Vec<(String, String)>,
 }
 
+/// ASCII split point of the hazard bitmap: one `u64` covers bytes 0..63, the
+/// other 64..127.
+const HAZARD_MASK_SPLIT: u8 = 64;
+
+/// Bytes readable as GFM inline markup if emitted unescaped. [`BATCHABLE_TEXT`]
+/// derives from these, so a hazard added here cannot be left batchable.
+const GFM_HAZARD_LOW: u64 = (1 << b'*') | (1 << b'<');
+const GFM_HAZARD_HIGH: u64 = (1 << (b'[' - HAZARD_MASK_SPLIT))
+  | (1 << (b'\\' - HAZARD_MASK_SPLIT))
+  | (1 << (b'_' - HAZARD_MASK_SPLIT))
+  | (1 << (b'`' - HAZARD_MASK_SPLIT))
+  | (1 << (b'~' - HAZARD_MASK_SPLIT));
+
+const BATCHABLE_TEXT: [bool; 256] = {
+  let mut t = [false; 256];
+  let mut c = 33usize;
+  while c < 0x80 {
+    let mask = if c < HAZARD_MASK_SPLIT as usize {
+      GFM_HAZARD_LOW
+    } else {
+      GFM_HAZARD_HIGH
+    };
+    t[c] = (mask >> (c & (HAZARD_MASK_SPLIT as usize - 1))) & 1 == 0;
+    c += 1;
+  }
+  t[AMPERSAND_CHAR as usize] = false;
+  t
+};
+
+/// Callers must range-guard: bytes >= 128 alias into `GFM_HAZARD_HIGH`.
 #[inline(always)]
 fn is_inline_gfm_hazard(byte: u8) -> bool {
-  const LOW: u64 = (1 << b'*') | (1 << b'<');
-  const HIGH: u64 = (1 << (b'[' - 64))
-    | (1 << (b'\\' - 64))
-    | (1 << (b'_' - 64))
-    | (1 << (b'`' - 64))
-    | (1 << (b'~' - 64));
-  let mask = if byte < 64 { LOW } else { HIGH };
-  (mask >> (byte & 63)) & 1 != 0
+  let mask = if byte < HAZARD_MASK_SPLIT {
+    GFM_HAZARD_LOW
+  } else {
+    GFM_HAZARD_HIGH
+  };
+  (mask >> (byte & (HAZARD_MASK_SPLIT - 1))) & 1 != 0
 }
 
 struct CodeSpanState {
@@ -267,10 +295,12 @@ pub struct ConvertState {
   script_data_state: u8,
   in_pre: bool,
   depth_limit_reached: bool,
-  /// Filter: depth of the shallowest currently-open visually-hidden element, or
-  /// None. Lets the parser skip a hidden subtree in O(1) without re-checking
-  /// styles per node, and keeps this state off the public `ElementNode`.
+  /// Shallowest open element that is hidden or matches an exclude selector.
+  /// Both drop their whole subtree, so one marker skips it in O(1).
   hidden_since_depth: Option<usize>,
+  /// Shallowest open element matching an include selector. Only consulted
+  /// when `filter_process_children` is set.
+  filter_included_since_depth: Option<usize>,
   /// Unified collapse depth counter (replaces separate counters in ParseState + MarkdownState)
   collapse_non_span_depth: u8,
   collapse_span_depth: u8,
@@ -424,6 +454,7 @@ impl ConvertState {
       in_pre: false,
       depth_limit_reached: false,
       hidden_since_depth: None,
+      filter_included_since_depth: None,
       collapse_non_span_depth: 0,
       collapse_span_depth: 0,
       first_block_parent_index: None,
@@ -649,31 +680,33 @@ impl ConvertState {
       let cc = bytes[i];
 
       if cc != LT_CHAR {
-        // FAST PATH: batch contiguous plain ASCII text (>32, <128, not & or <)
-        // Skip when: non-nesting mode or pre tag
-        if cc > 32
-          && cc < 0x80
-          && cc != AMPERSAND_CHAR
-          && !is_inline_gfm_hazard(cc)
-          && !self.in_non_nesting
-          && !self.in_pre
-        {
+        // Batch contiguous plain ASCII text, absorbing single inter-word
+        // spaces so prose is copied once per text node, not per word.
+        if BATCHABLE_TEXT[cc as usize] && !self.in_non_nesting && !self.in_pre {
           let start = i;
           i += 1;
-          while i < chunk_length {
-            let c = bytes[i];
-            if c <= 32
-              || c >= 0x80
-              || c == LT_CHAR
-              || c == AMPERSAND_CHAR
-              || is_inline_gfm_hazard(c)
-            {
-              break;
+          let mut had_space = false;
+          loop {
+            while i < chunk_length && BATCHABLE_TEXT[bytes[i] as usize] {
+              i += 1;
             }
-            i += 1;
+            // Doubled, trailing, and pre-tag spaces leave the run to the
+            // general path, which keeps its collapsing semantics.
+            if i + 1 < chunk_length
+              && bytes[i] == SPACE_CHAR
+              && BATCHABLE_TEXT[bytes[i + 1] as usize]
+            {
+              had_space = true;
+              i += 2;
+              continue;
+            }
+            break;
           }
           text_buffer.push_str(&chunk[start..i]);
           self.text_buffer_contains_non_whitespace = true;
+          if had_space {
+            self.text_buffer_contains_whitespace = true;
+          }
           self.last_char_was_whitespace = false;
           self.just_closed_tag = false;
           continue;
