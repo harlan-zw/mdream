@@ -597,6 +597,38 @@ pub struct MdreamResult {
   pub frontmatter: Option<Vec<(String, String)>>,
 }
 
+/// Expected conversion failure for bounded parsing of untrusted HTML.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversionError {
+  /// The bounded logical element stack cannot represent another open element.
+  ElementDepthLimitExceeded {
+    max_depth: usize,
+    attempted_depth: usize,
+  },
+  /// Compact custom element identities exhausted their bounded memory budget.
+  ElementNameMemoryLimitExceeded { max_bytes: usize },
+}
+
+impl std::fmt::Display for ConversionError {
+  fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Self::ElementDepthLimitExceeded {
+        max_depth,
+        attempted_depth,
+      } => write!(
+        formatter,
+        "element nesting depth {attempted_depth} exceeds the maximum of {max_depth}"
+      ),
+      Self::ElementNameMemoryLimitExceeded { max_bytes } => write!(
+        formatter,
+        "compact element names exceed the maximum memory budget of {max_bytes} bytes"
+      ),
+    }
+  }
+}
+
+impl std::error::Error for ConversionError {}
+
 /// Output format for conversion.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum OutputFormat {

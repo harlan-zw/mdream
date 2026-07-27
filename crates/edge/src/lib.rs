@@ -220,16 +220,48 @@ fn parse_plugins(p: &JsValue) -> mdream::types::PluginConfig {
 
 // ── WASM exports ──
 
+fn set_error_property(error: &js_sys::Error, key: &str, value: &JsValue) {
+  js_sys::Reflect::set(error, &key.into(), value)
+    .expect("fresh JavaScript Error properties must be writable");
+}
+
+fn conversion_error(error: mdream::ConversionError) -> JsValue {
+  let js_error = js_sys::Error::new(&error.to_string());
+  match error {
+    mdream::ConversionError::ElementDepthLimitExceeded {
+      max_depth,
+      attempted_depth,
+    } => {
+      set_error_property(&js_error, "_tag", &"ElementDepthLimitExceeded".into());
+      set_error_property(&js_error, "code", &"ELEMENT_DEPTH_LIMIT".into());
+      let max_depth =
+        u32::try_from(max_depth).expect("configured maximum depth must fit in a JavaScript u32");
+      let attempted_depth = u32::try_from(attempted_depth)
+        .expect("attempted bounded depth must fit in a JavaScript u32");
+      set_error_property(&js_error, "maxDepth", &max_depth.into());
+      set_error_property(&js_error, "attemptedDepth", &attempted_depth.into());
+    }
+    mdream::ConversionError::ElementNameMemoryLimitExceeded { max_bytes } => {
+      set_error_property(&js_error, "_tag", &"ElementNameMemoryLimitExceeded".into());
+      set_error_property(&js_error, "code", &"ELEMENT_NAME_MEMORY_LIMIT".into());
+      let max_bytes = u32::try_from(max_bytes)
+        .expect("configured element-name budget must fit in a JavaScript u32");
+      set_error_property(&js_error, "maxBytes", &max_bytes.into());
+    }
+  }
+  js_error.into()
+}
+
 #[wasm_bindgen(js_name = "htmlToMarkdown")]
-pub fn html_to_markdown(html: &str, options: JsValue) -> String {
+pub fn html_to_markdown(html: &str, options: JsValue) -> Result<String, JsValue> {
   let (opts, format) = parse_options(&options);
-  mdream::html_to_format(html, opts, format)
+  mdream::try_html_to_format(html, opts, format).map_err(conversion_error)
 }
 
 #[wasm_bindgen(js_name = "htmlToMarkdownResult")]
-pub fn html_to_markdown_result(html: &str, options: JsValue) -> JsValue {
+pub fn html_to_markdown_result(html: &str, options: JsValue) -> Result<JsValue, JsValue> {
   let (opts, format) = parse_options(&options);
-  let result = mdream::html_to_format_result(html, opts, format);
+  let result = mdream::try_html_to_format_result(html, opts, format).map_err(conversion_error)?;
 
   let obj = js_sys::Object::new();
   js_sys::Reflect::set(&obj, &"markdown".into(), &result.markdown.into()).unwrap_or_default();
@@ -260,7 +292,7 @@ pub fn html_to_markdown_result(html: &str, options: JsValue) -> JsValue {
     js_sys::Reflect::set(&obj, &"frontmatter".into(), &fm).unwrap_or_default();
   }
 
-  obj.into()
+  Ok(obj.into())
 }
 
 #[wasm_bindgen]
@@ -279,11 +311,14 @@ impl MarkdownStream {
   }
 
   #[wasm_bindgen(js_name = "processChunk")]
-  pub fn process_chunk(&mut self, chunk: &str) -> String {
-    self.inner.process_chunk(chunk)
+  pub fn process_chunk(&mut self, chunk: &str) -> Result<String, JsValue> {
+    self
+      .inner
+      .try_process_chunk(chunk)
+      .map_err(conversion_error)
   }
 
-  pub fn finish(&mut self) -> String {
-    self.inner.finish()
+  pub fn finish(&mut self) -> Result<String, JsValue> {
+    self.inner.try_finish().map_err(conversion_error)
   }
 }

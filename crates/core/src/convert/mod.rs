@@ -5,14 +5,21 @@ use crate::selector::{matches_selector, parse_css_selector};
 use crate::tags::get_tag_handler;
 use crate::tailwind::process_tailwind_classes;
 use crate::types::{
-  ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, ParsedSelector, TailwindData,
+  ConversionError, ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat,
+  ParsedSelector, TailwindData,
 };
 use crate::url::{is_autolink_uri, resolve_url, slugify_heading};
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 mod output;
 mod parse;
 mod plugins;
+
+const MAX_ELEMENT_DEPTH: usize = 512;
+const MAX_LOGICAL_DEPTH: usize = 4096;
+const MAX_SUPPRESSED_DEPTH: usize = MAX_LOGICAL_DEPTH - MAX_ELEMENT_DEPTH;
+const MAX_SUPPRESSED_CUSTOM_NAME_BYTES: usize = 64 * 1024;
 
 /// Tracked element during extraction — maps stack depth to accumulator
 pub(crate) struct TrackedExtraction {
@@ -26,6 +33,94 @@ pub(crate) struct TrackedExtraction {
 /// ASCII split point of the hazard bitmap: one `u64` covers bytes 0..63, the
 /// other 64..127.
 const HAZARD_MASK_SPLIT: u8 = 64;
+
+const SUPPRESSED_EXCLUDES_TEXT: u8 = 1;
+const SUPPRESSED_NON_NESTING: u8 = 2;
+const SUPPRESSED_FILTER_INCLUDE: u8 = 4;
+const SUPPRESSED_ISOLATE_MAIN: u8 = 8;
+
+/// Compact identity and parser flags for an element flattened past
+/// `MAX_ELEMENT_DEPTH`. Custom names are interned once per suppressed subtree.
+#[derive(Clone, Copy)]
+struct SuppressedTag {
+  custom_name_id: u16,
+  previous_identity_index: u16,
+  previous_template_index: u16,
+  tag_id: Option<u8>,
+  flags: u8,
+}
+
+impl SuppressedTag {
+  fn new(tag_id: Option<u8>, custom_name_id: u16, flags: u8) -> Self {
+    Self {
+      custom_name_id,
+      previous_identity_index: 0,
+      previous_template_index: 0,
+      tag_id,
+      flags,
+    }
+  }
+
+  #[inline]
+  fn matches(self, tag_id: Option<u8>, custom_name_id: u16, is_builtin: bool) -> bool {
+    self.tag_id == tag_id && (is_builtin || self.custom_name_id == custom_name_id)
+  }
+
+  #[inline]
+  fn excludes_text_nodes(self) -> bool {
+    self.flags & SUPPRESSED_EXCLUDES_TEXT != 0
+  }
+
+  #[inline]
+  fn is_non_nesting(self) -> bool {
+    self.flags & SUPPRESSED_NON_NESTING != 0
+  }
+
+  #[inline]
+  fn is_filter_include(self) -> bool {
+    self.flags & SUPPRESSED_FILTER_INCLUDE != 0
+  }
+
+  #[inline]
+  fn is_isolate_main(self) -> bool {
+    self.flags & SUPPRESSED_ISOLATE_MAIN != 0
+  }
+
+  #[inline]
+  fn is_builtin_script(self) -> bool {
+    self.custom_name_id == 0 && self.tag_id == Some(TAG_SCRIPT)
+  }
+}
+
+struct SuppressedState {
+  tags: Vec<SuppressedTag>,
+  custom_names: HashMap<String, u16>,
+  custom_last_index: Vec<u16>,
+  custom_name_bytes: usize,
+  depth_map: [u16; MAX_TAG_ID],
+  last_tag_index: [u16; MAX_TAG_ID],
+  last_template_index: u16,
+  excludes_text_depth: u16,
+  filter_include_depth: u16,
+  isolate_main_depth: u16,
+}
+
+impl SuppressedState {
+  fn new() -> Self {
+    Self {
+      tags: Vec::new(),
+      custom_names: HashMap::new(),
+      custom_last_index: Vec::new(),
+      custom_name_bytes: 0,
+      depth_map: [0; MAX_TAG_ID],
+      last_tag_index: [0; MAX_TAG_ID],
+      last_template_index: 0,
+      excludes_text_depth: 0,
+      filter_include_depth: 0,
+      isolate_main_depth: 0,
+    }
+  }
+}
 
 /// Bytes readable as GFM inline markup if emitted unescaped. [`BATCHABLE_TEXT`]
 /// derives from these, so a hazard added here cannot be left batchable.
@@ -282,7 +377,7 @@ fn find_script_end_tag(bytes: &[u8], start: usize, initial_state: u8) -> ScriptS
 /// duplicate state tracking, and enable full inlining of tag handler logic.
 pub struct ConvertState {
   // === Parser state ===
-  pub depth_map: [u8; MAX_TAG_ID],
+  pub depth_map: [u16; MAX_TAG_ID],
   pub depth: usize,
   has_encoded_html_entity: bool,
   last_char_was_whitespace: bool,
@@ -294,7 +389,7 @@ pub struct ConvertState {
   in_non_nesting: bool,
   script_data_state: u8,
   in_pre: bool,
-  depth_limit_reached: bool,
+  failure: Option<ConversionError>,
   /// Shallowest open element that is hidden or matches an exclude selector.
   /// Both drop their whole subtree, so one marker skips it in O(1).
   hidden_since_depth: Option<usize>,
@@ -306,6 +401,7 @@ pub struct ConvertState {
   collapse_span_depth: u8,
   first_block_parent_index: Option<usize>,
   block_parent_indices: Vec<usize>,
+  suppressed: Option<Box<SuppressedState>>,
   parse_text_buffer: String,
   script_text_buffer: String,
   pub stack: Vec<ElementNode>,
@@ -429,6 +525,251 @@ pub struct ConvertState {
 }
 
 impl ConvertState {
+  #[inline]
+  fn suppressed_state(&self) -> Option<&SuppressedState> {
+    self.suppressed.as_deref()
+  }
+
+  #[inline]
+  fn suppressed_tags(&self) -> &[SuppressedTag] {
+    self
+      .suppressed_state()
+      .map_or(&[], |suppressed| suppressed.tags.as_slice())
+  }
+
+  #[inline]
+  fn suppressed_len(&self) -> usize {
+    self
+      .suppressed_state()
+      .map_or(0, |suppressed| suppressed.tags.len())
+  }
+
+  #[inline]
+  fn has_suppressed(&self) -> bool {
+    self.suppressed_len() > 0
+  }
+
+  #[inline]
+  fn suppressed_last(&self) -> Option<SuppressedTag> {
+    self
+      .suppressed_state()
+      .and_then(|suppressed| suppressed.tags.last().copied())
+  }
+
+  #[inline]
+  fn suppressed_tag_depth(&self, tag_id: u8) -> u16 {
+    self
+      .suppressed_state()
+      .map_or(0, |suppressed| suppressed.depth_map[tag_id as usize])
+  }
+
+  #[inline]
+  fn suppressed_last_template_index(&self) -> u16 {
+    self
+      .suppressed_state()
+      .map_or(0, |suppressed| suppressed.last_template_index)
+  }
+
+  #[inline]
+  fn suppressed_excludes_text_depth(&self) -> u16 {
+    self
+      .suppressed_state()
+      .map_or(0, |suppressed| suppressed.excludes_text_depth)
+  }
+
+  #[inline]
+  fn suppressed_filter_include_depth(&self) -> u16 {
+    self
+      .suppressed_state()
+      .map_or(0, |suppressed| suppressed.filter_include_depth)
+  }
+
+  #[inline]
+  fn suppressed_isolate_main_depth(&self) -> u16 {
+    self
+      .suppressed_state()
+      .map_or(0, |suppressed| suppressed.isolate_main_depth)
+  }
+
+  fn suppressed_custom_name_id(&self, tag_name: &str) -> u16 {
+    self
+      .suppressed_state()
+      .and_then(|suppressed| suppressed.custom_names.get(tag_name).copied())
+      .unwrap_or(0)
+  }
+
+  fn intern_suppressed_custom_name(&mut self, tag_name: &str) -> Option<u16> {
+    if let Some(id) = self
+      .suppressed_state()
+      .and_then(|suppressed| suppressed.custom_names.get(tag_name).copied())
+    {
+      return Some(id);
+    }
+    let custom_name_bytes = self
+      .suppressed_state()
+      .map_or(0, |suppressed| suppressed.custom_name_bytes);
+    if custom_name_bytes.saturating_add(tag_name.len()) > MAX_SUPPRESSED_CUSTOM_NAME_BYTES {
+      self.failure = Some(ConversionError::ElementNameMemoryLimitExceeded {
+        max_bytes: MAX_SUPPRESSED_CUSTOM_NAME_BYTES,
+      });
+      return None;
+    }
+    let suppressed = self
+      .suppressed
+      .get_or_insert_with(|| Box::new(SuppressedState::new()));
+    let id = u16::try_from(suppressed.custom_names.len() + 1)
+      .expect("suppressed depth bound must fit in u16");
+    suppressed.custom_names.insert(tag_name.to_string(), id);
+    suppressed.custom_last_index.push(0);
+    suppressed.custom_name_bytes += tag_name.len();
+    Some(id)
+  }
+
+  fn push_suppressed(&mut self, mut tag: SuppressedTag) {
+    let suppressed = self
+      .suppressed
+      .get_or_insert_with(|| Box::new(SuppressedState::new()));
+    debug_assert!(suppressed.tags.len() < MAX_SUPPRESSED_DEPTH);
+    let index =
+      u16::try_from(suppressed.tags.len() + 1).expect("suppressed depth bound must fit in u16");
+    tag.previous_template_index = suppressed.last_template_index;
+    if tag.custom_name_id > 0 {
+      if let Some(last_index) = suppressed
+        .custom_last_index
+        .get_mut(tag.custom_name_id as usize - 1)
+      {
+        tag.previous_identity_index = *last_index;
+        *last_index = index;
+      }
+    } else if let Some(id) = tag.tag_id {
+      tag.previous_identity_index = suppressed.last_tag_index[id as usize];
+      suppressed.last_tag_index[id as usize] = index;
+    }
+    if let Some(id) = tag.tag_id {
+      suppressed.depth_map[id as usize] = suppressed.depth_map[id as usize].saturating_add(1);
+      if id == TAG_TEMPLATE {
+        suppressed.last_template_index = index;
+      }
+    }
+    if tag.excludes_text_nodes() {
+      suppressed.excludes_text_depth = suppressed.excludes_text_depth.saturating_add(1);
+    }
+    if tag.is_filter_include() {
+      suppressed.filter_include_depth = suppressed.filter_include_depth.saturating_add(1);
+    }
+    if tag.is_isolate_main() {
+      suppressed.isolate_main_depth = suppressed.isolate_main_depth.saturating_add(1);
+    }
+    if tag.is_non_nesting() {
+      self.in_non_nesting = true;
+    }
+    suppressed.tags.push(tag);
+  }
+
+  fn truncate_suppressed(&mut self, len: usize) {
+    let mut closes_isolate_main = false;
+    let mut closes_frontmatter_head = false;
+    {
+      let Some(suppressed) = self.suppressed.as_deref_mut() else {
+        return;
+      };
+      for tag in suppressed.tags[len..].iter().rev() {
+        if tag.custom_name_id > 0 {
+          if let Some(last_index) = suppressed
+            .custom_last_index
+            .get_mut(tag.custom_name_id as usize - 1)
+          {
+            *last_index = tag.previous_identity_index;
+          }
+        } else if let Some(id) = tag.tag_id {
+          suppressed.last_tag_index[id as usize] = tag.previous_identity_index;
+        }
+        if let Some(id) = tag.tag_id {
+          suppressed.depth_map[id as usize] = suppressed.depth_map[id as usize].saturating_sub(1);
+          if id == TAG_TEMPLATE {
+            suppressed.last_template_index = tag.previous_template_index;
+          }
+        }
+        if tag.excludes_text_nodes() {
+          suppressed.excludes_text_depth = suppressed.excludes_text_depth.saturating_sub(1);
+        }
+        if tag.is_filter_include() {
+          suppressed.filter_include_depth = suppressed.filter_include_depth.saturating_sub(1);
+        }
+        if tag.is_isolate_main() {
+          suppressed.isolate_main_depth = suppressed.isolate_main_depth.saturating_sub(1);
+        }
+        closes_isolate_main |= tag.is_isolate_main();
+        closes_frontmatter_head |= tag.tag_id == Some(TAG_HEAD);
+      }
+      suppressed.tags.truncate(len);
+      if suppressed.tags.is_empty() {
+        suppressed.custom_names.clear();
+        suppressed.custom_last_index.clear();
+        suppressed.custom_name_bytes = 0;
+      }
+    }
+    self.in_non_nesting = self
+      .suppressed_last()
+      .is_some_and(SuppressedTag::is_non_nesting)
+      || self.stack.last().is_some_and(|node| node.is_non_nesting);
+    if closes_isolate_main && self.isolate_main_found && !self.isolate_main_closed {
+      self.isolate_main_closed = true;
+    }
+    if closes_frontmatter_head && self.has_frontmatter && self.frontmatter_in_head {
+      self.frontmatter_in_head = false;
+      self.generate_frontmatter_yaml();
+    }
+  }
+
+  fn clear_suppressed(&mut self) {
+    self.truncate_suppressed(0);
+  }
+
+  fn pop_suppressed(&mut self) {
+    let len = self.suppressed_len();
+    if len > 0 {
+      self.truncate_suppressed(len - 1);
+    }
+  }
+
+  fn suppressed_match_position(
+    &self,
+    tag_id: Option<u8>,
+    custom_name_id: u16,
+    is_builtin: bool,
+  ) -> Option<usize> {
+    let suppressed = self.suppressed_state()?;
+    let index = if is_builtin {
+      tag_id.map_or(0, |id| suppressed.last_tag_index[id as usize])
+    } else if custom_name_id > 0 {
+      suppressed
+        .custom_last_index
+        .get(custom_name_id as usize - 1)
+        .copied()
+        .unwrap_or(0)
+    } else {
+      0
+    };
+    if index == 0 {
+      return None;
+    }
+    if tag_id != Some(TAG_TEMPLATE) && index <= suppressed.last_template_index {
+      return None;
+    }
+    let position = index as usize - 1;
+    debug_assert!(
+      suppressed.tags[position].matches(tag_id, custom_name_id, is_builtin),
+      "suppressed identity index must point at a matching tag"
+    );
+    Some(position)
+  }
+
+  #[inline]
+  pub(crate) fn failure(&self) -> Option<ConversionError> {
+    self.failure
+  }
+
   /// Check if we're inside a table cell (either `<td>` or `<th>`).
   #[inline]
   pub(crate) fn in_table_cell(&self) -> bool {
@@ -452,13 +793,14 @@ impl ConvertState {
       in_non_nesting: false,
       script_data_state: SCRIPT_DATA,
       in_pre: false,
-      depth_limit_reached: false,
+      failure: None,
       hidden_since_depth: None,
       filter_included_since_depth: None,
       collapse_non_span_depth: 0,
       collapse_span_depth: 0,
       first_block_parent_index: None,
       block_parent_indices: Vec::with_capacity(16),
+      suppressed: None,
       parse_text_buffer: String::new(),
       script_text_buffer: String::new(),
       stack: Vec::with_capacity(32),
@@ -640,7 +982,7 @@ impl ConvertState {
   }
 
   pub fn process_html(&mut self, chunk: &str) -> String {
-    if self.depth_limit_reached {
+    if self.failure.is_some() {
       return String::new();
     }
     // Reuse text_buffer allocation from previous call if available
@@ -659,9 +1001,12 @@ impl ConvertState {
     let mut carry = false;
 
     if self
-      .stack
-      .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none())
+      .suppressed_last()
+      .is_some_and(SuppressedTag::is_builtin_script)
+      || self
+        .stack
+        .last()
+        .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none())
     {
       match self.process_script_chunk(chunk, i) {
         ScriptChunk::Closed(close_index) => i = close_index,
@@ -673,7 +1018,7 @@ impl ConvertState {
       }
     }
 
-    while i < chunk_length && !self.depth_limit_reached {
+    while i < chunk_length && self.failure.is_none() {
       if text_buffer.is_empty() {
         run_start = i;
       }
@@ -717,7 +1062,10 @@ impl ConvertState {
         // text path. Quotes are ordinary rawtext bytes; HTML closes these
         // elements at the first matching end tag (issue #132).
         if self.in_non_nesting
-          && (self.depth_map[TAG_SCRIPT as usize] > 0 || self.depth_map[TAG_STYLE as usize] > 0)
+          && (self.depth_map[TAG_SCRIPT as usize] > 0
+            || self.depth_map[TAG_STYLE as usize] > 0
+            || self.suppressed_tag_depth(TAG_SCRIPT) > 0
+            || self.suppressed_tag_depth(TAG_STYLE) > 0)
         {
           let start = i;
           while i < chunk_length && bytes[i] != LT_CHAR {
@@ -798,10 +1146,15 @@ impl ConvertState {
           }
           let peek_name = &chunk[peek_start..peek_end];
           let peek_tag_id = crate::consts::get_tag_id_ci_bytes(peek_name.as_bytes());
-          if self
-            .stack
-            .last()
-            .is_some_and(|curr| curr.tag_id == peek_tag_id)
+          let matches_suppressed = peek_tag_id.is_some()
+            && self
+              .suppressed_last()
+              .is_some_and(|tag| tag.matches(peek_tag_id, 0, true));
+          if matches_suppressed
+            || self
+              .stack
+              .last()
+              .is_some_and(|curr| curr.tag_id == peek_tag_id)
           {
             // Matching closing tag: fall through to normal closing tag processing
             if !text_buffer.is_empty() {
@@ -952,6 +1305,16 @@ impl ConvertState {
           self.process_opening_tag(&tag_name, tag_id, builtin_tag_id.is_some(), chunk, i2);
         if result.skip {
           i = result.new_position;
+          if self.failure.is_none() && !result.self_closing && builtin_tag_id == Some(TAG_SCRIPT) {
+            match self.process_script_chunk(chunk, i) {
+              ScriptChunk::Closed(close_index) => i = close_index,
+              ScriptChunk::Carry(from) => {
+                run_start = from;
+                carry = true;
+                break;
+              }
+            }
+          }
         } else if result.complete {
           i = result.new_position;
           if result.self_closing {
@@ -1083,9 +1446,12 @@ impl ConvertState {
   /// commits it exactly as if the next tag had triggered the flush.
   pub fn finalize(&mut self, leftover: &str) {
     let in_script = self
-      .stack
-      .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none());
+      .suppressed_last()
+      .is_some_and(SuppressedTag::is_builtin_script)
+      || self
+        .stack
+        .last()
+        .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none());
     if in_script {
       self.push_script_text(leftover);
       self.flush_script_text();
@@ -1094,6 +1460,7 @@ impl ConvertState {
       let mut buf = leftover.to_string();
       self.process_text_buffer(&mut buf);
     }
+    self.clear_suppressed();
     while !self.stack.is_empty() {
       self.close_node();
     }

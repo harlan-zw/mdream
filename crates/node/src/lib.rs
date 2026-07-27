@@ -238,6 +238,10 @@ fn catch_panic<F: FnOnce() -> Result<T> + std::panic::UnwindSafe, T>(f: F) -> Re
   }
 }
 
+fn conversion_error(error: mdream::ConversionError) -> napi::Error {
+  napi::Error::new(napi::Status::InvalidArg, error.to_string())
+}
+
 // ── NAPI exports ──
 
 #[napi(js_name = "htmlToMarkdown")]
@@ -247,7 +251,8 @@ pub fn html_to_markdown(
 ) -> Result<MdreamNapiResult> {
   catch_panic(move || {
     let (opts, format) = to_core_opts(options);
-    let result = mdream::html_to_format_result(&html, opts, format);
+    let result =
+      mdream::try_html_to_format_result(&html, opts, format).map_err(conversion_error)?;
     Ok(result_to_napi(result))
   })
 }
@@ -262,7 +267,8 @@ pub fn html_to_markdown_bytes(
   let text = text.to_string();
   catch_panic(move || {
     let (opts, format) = to_core_opts(options);
-    let result = mdream::html_to_format_result(&text, opts, format);
+    let result =
+      mdream::try_html_to_format_result(&text, opts, format).map_err(conversion_error)?;
     Ok(result_to_napi(result))
   })
 }
@@ -293,14 +299,17 @@ impl MarkdownStream {
         "Cannot process a string chunk while an incomplete UTF-8 byte sequence is buffered",
       ));
     }
-    Ok(self.inner.process_chunk(&chunk))
+    self
+      .inner
+      .try_process_chunk(&chunk)
+      .map_err(conversion_error)
   }
 
   #[napi(js_name = "processChunkBytes")]
   pub fn process_chunk_bytes(&mut self, chunk: &[u8]) -> Result<String> {
     if self.utf8_carry.is_empty() {
       return match std::str::from_utf8(chunk) {
-        Ok(text) => Ok(self.inner.process_chunk(text)),
+        Ok(text) => self.inner.try_process_chunk(text).map_err(conversion_error),
         Err(error) if error.error_len().is_none() => {
           let valid_up_to = error.valid_up_to();
           if valid_up_to == 0 {
@@ -309,7 +318,10 @@ impl MarkdownStream {
           }
           let text = std::str::from_utf8(&chunk[..valid_up_to])
             .expect("valid_up_to must end at a UTF-8 boundary");
-          let markdown = self.inner.process_chunk(text);
+          let markdown = self
+            .inner
+            .try_process_chunk(text)
+            .map_err(conversion_error)?;
           self.utf8_carry.extend_from_slice(&chunk[valid_up_to..]);
           Ok(markdown)
         }
@@ -337,7 +349,10 @@ impl MarkdownStream {
 
     let text = std::str::from_utf8(&self.utf8_carry[..valid_up_to])
       .expect("valid_up_to must end at a UTF-8 boundary");
-    let markdown = self.inner.process_chunk(text);
+    let markdown = self
+      .inner
+      .try_process_chunk(text)
+      .map_err(conversion_error)?;
     self.utf8_carry.drain(..valid_up_to);
     Ok(markdown)
   }
@@ -350,7 +365,7 @@ impl MarkdownStream {
         "Stream ended with an incomplete UTF-8 byte sequence",
       ));
     }
-    Ok(self.inner.finish())
+    self.inner.try_finish().map_err(conversion_error)
   }
 }
 

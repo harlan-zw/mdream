@@ -247,7 +247,7 @@ export const MARKDOWN_INLINE_CODE = '`'
 export const MARKDOWN_HORIZONTAL_RULE = '---'
 
 // Raw-HTML blocks whose text/code is emitted verbatim rather than as Markdown.
-export function isInsideRawHtmlBlock(depthMap: Uint8Array): boolean {
+export function isInsideRawHtmlBlock(depthMap: Uint16Array): boolean {
   return Boolean(depthMap[TAG_DETAILS]
     || depthMap[TAG_SUMMARY]
     || depthMap[TAG_ADDRESS]

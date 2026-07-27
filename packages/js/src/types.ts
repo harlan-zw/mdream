@@ -165,8 +165,8 @@ export interface ElementNode extends Node {
   context?: PluginContext
   /** ID of the tag for fast handler lookup */
   tagId?: number
-  /** Map of tag names to their nesting count (using Uint8Array for performance) */
-  depthMap: Uint8Array
+  /** Map of tag names to their nesting count */
+  depthMap: Uint16Array
   /** Plugin outputs collected during processing */
   pluginOutput?: string[]
 }
@@ -227,7 +227,7 @@ export interface Node {
  */
 export interface MdreamProcessingState {
   /** Map of tag names to their current nesting depth - uses TypedArray for performance */
-  depthMap: Uint8Array
+  depthMap: Uint16Array
 
   /** Current overall nesting depth */
   depth: number
@@ -338,6 +338,22 @@ export interface NodeEvent {
   /** The node being processed */
   node: Node
 }
+
+/** Explicit failure returned when untrusted HTML exceeds the bounded parser stack. */
+export interface ElementDepthError extends Error {
+  _tag: 'ElementDepthLimitExceeded'
+  code: 'ELEMENT_DEPTH_LIMIT'
+  maxDepth: 4096
+}
+
+/** Explicit failure when compact custom element names exceed their memory budget. */
+export interface ElementNameMemoryError extends Error {
+  _tag: 'ElementNameMemoryLimitExceeded'
+  code: 'ELEMENT_NAME_MEMORY_LIMIT'
+  maxBytes: 65536
+}
+
+export type ElementParserError = ElementDepthError | ElementNameMemoryError
 
 /**
  * Handler context for markdown conversion
