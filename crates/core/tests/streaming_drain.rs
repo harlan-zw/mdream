@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mdream::MarkdownStreamProcessor;
 use mdream::html_to_markdown;
-use mdream::types::{CleanConfig, HTMLToMarkdownOptions};
+use mdream::types::{CleanConfig, HTMLToMarkdownOptions, PluginConfig, TagOverrideConfig};
 
 // ── Peak-allocation tracking allocator ──
 // Streaming must free already-yielded output; a criterion/time bench can't show
@@ -137,6 +137,44 @@ fn assert_stream_matches_every_split(html: &str, opts: HTMLToMarkdownOptions) {
 #[test]
 fn streaming_every_split_supports_multibyte_html() {
   assert_stream_matches_every_split("<p>café 😀</p>", HTMLToMarkdownOptions::default());
+}
+
+// CDATA is dropped unless opted into, so the fixture cases never reach it. Both
+// of its carry paths (a boundary inside the `<![CDATA[` opener, and an
+// unterminated section) hold text in the buffer while carrying only the token,
+// so a leading text run is the case that would duplicate if they disagreed.
+fn cdata_emitted() -> HTMLToMarkdownOptions {
+  HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "#cdata-section".to_string(),
+        TagOverrideConfig {
+          enter: Some("[".to_string()),
+          exit: Some("]".to_string()),
+          spacing: Some([0, 0]),
+          is_inline: Some(true),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  }
+}
+
+#[test]
+fn streaming_cdata_matches_one_shot_at_every_boundary() {
+  for html in [
+    "<p>a<![CDATA[x]]>b</p>",
+    "<p>before text <![CDATA[payload here]]> after text</p>",
+    "<p>lead<![CDATA[one]]>mid<![CDATA[two]]>tail</p>",
+    "<p>text</p><![CDATA[between blocks]]><p>more</p>",
+  ] {
+    // Chunk sizes from 1 up feed the opener a byte at a time, so the partial
+    // `<![CDATA[` path is hit repeatedly; every_split covers each single cut.
+    assert_stream_matches(html, cdata_emitted());
+    assert_stream_matches_every_split(html, cdata_emitted());
+  }
 }
 
 #[test]
