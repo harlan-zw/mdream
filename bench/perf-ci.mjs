@@ -24,7 +24,7 @@
 // The pinned semi-space keeps the biggest single run (a stream drain allocates
 // ~156 MB) inside new-space so no scavenge fires mid-run, making heapUsed delta ==
 // bytes allocated. Output is a single JSON line; keep stdout clean.
-import { readFileSync } from 'node:fs'
+import { accessSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -45,6 +45,9 @@ const bundle = name => import(pathToFileURL(resolve(distDir, name)).href)
 const html = readFileSync(resolve(currentDir, 'bundle/wiki.html'), 'utf8')
 const htmlBytes = new TextEncoder().encode(html)
 const STREAM_CHUNK_SIZE = 16 * 1024
+const RUST_STREAM_CHUNK_SIZE = 8 * 1024
+const RUST_STREAM_BODY_SIZE = 2 * 1024 * 1024
+const RUST_SCRIPT_BODY_SIZE = 8 * 1024 * 1024
 
 function forceGC() {
   globalThis.gc()
@@ -117,24 +120,74 @@ async function bench(id, name, fn, timeOpts) {
 // Tolerate absence — an older base dist may predate the Rust bundle, in which case
 // the PR's Rust benches surface as new instead of failing the base run.
 async function rustBenches() {
-  let glue, wasmBytes
+  let wasmBytes, wasmGlueUrl
   try {
     wasmBytes = readFileSync(resolve(distDir, 'rust/mdream_edge_bg.wasm'))
-    glue = await import(pathToFileURL(resolve(distDir, 'rust/mdream_edge.js')).href)
+    const wasmGluePath = resolve(distDir, 'rust/mdream_edge.js')
+    accessSync(wasmGluePath)
+    wasmGlueUrl = pathToFileURL(wasmGluePath)
   }
   catch (e) {
     if (e?.code === 'ENOENT' || e?.code === 'MODULE_NOT_FOUND' || e?.code === 'ERR_MODULE_NOT_FOUND')
       return []
     throw e
   }
-  const instance = await glue.default({ module_or_path: wasmBytes })
+
+  async function loadRust(instanceName) {
+    const instanceUrl = new URL(wasmGlueUrl)
+    instanceUrl.searchParams.set('instance', instanceName)
+    const glue = await import(instanceUrl.href)
+    const instance = await glue.default({ module_or_path: wasmBytes })
+    return { glue, instance }
+  }
+
+  function drainRustStream(glue, source) {
+    const stream = new glue.MarkdownStream(undefined)
+    let outputLength = 0
+    try {
+      for (let offset = 0; offset < source.length; offset += RUST_STREAM_CHUNK_SIZE)
+        outputLength += stream.processChunk(source.slice(offset, offset + RUST_STREAM_CHUNK_SIZE)).length
+      outputLength += stream.finish().length
+      return outputLength
+    }
+    finally {
+      stream.free()
+    }
+  }
+
+  const { glue, instance } = await loadRust('timing')
   const convertRust = () => glue.htmlToMarkdown(html, undefined)
-  const times = await timeBenches('rust-wiki', 'Rust edge (WASM) · wiki', convertRust, { warmup: 5, reps: 16, runs: 8 })
+  const wikiTimes = await timeBenches('rust-wiki', 'Rust edge (WASM) · wiki', convertRust, { warmup: 5, reps: 16, runs: 8 })
+  const wikiMemory = instance.memory.buffer.byteLength
+  const textRun = 'a'.repeat(RUST_STREAM_BODY_SIZE)
+  const styleRun = `<style>${textRun}</style>`
+  const streamTimeOptions = { warmup: 1, reps: 8, runs: 4 }
+  const textTimes = await timeBenches(
+    'rust-stream-text',
+    'Rust stream (WASM) · 2 MiB text run',
+    () => drainRustStream(glue, textRun),
+    streamTimeOptions,
+  )
+  const styleTimes = await timeBenches(
+    'rust-stream-style',
+    'Rust stream (WASM) · 2 MiB style body',
+    () => drainRustStream(glue, styleRun),
+    streamTimeOptions,
+  )
+
+  // Use a fresh WASM instance so earlier fixtures cannot set the memory high-water mark.
+  const { glue: scriptGlue, instance: scriptInstance } = await loadRust('script-memory')
+  const scriptRun = `<script>${'a'.repeat(RUST_SCRIPT_BODY_SIZE)}</script>`
+  drainRustStream(scriptGlue, scriptRun)
+
   // linear memory only grows, and after the timed warm runs it has hit its plateau,
   // so this is a deterministic peak (exact byte-for-byte across runs), not a sample
   return [
-    ...times,
-    { id: 'rust-wiki-mem', name: 'Rust edge (WASM) · wiki linear memory (peak)', kind: 'alloc', value: instance.memory.buffer.byteLength },
+    ...wikiTimes,
+    ...textTimes,
+    ...styleTimes,
+    { id: 'rust-wiki-mem', name: 'Rust edge (WASM) · wiki linear memory (peak)', kind: 'alloc', value: wikiMemory },
+    { id: 'rust-stream-script-mem', name: 'Rust stream (WASM) · excluded 8 MiB script memory (peak)', kind: 'alloc', value: scriptInstance.memory.buffer.byteLength },
   ]
 }
 
