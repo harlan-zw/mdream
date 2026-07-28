@@ -221,10 +221,12 @@ fn parse_plugins(p: &JsValue) -> mdream::types::PluginConfig {
 // ── WASM exports ──
 
 fn set_error_property(error: &js_sys::Error, key: &str, value: &JsValue) {
-  js_sys::Reflect::set(error, &key.into(), value)
-    .expect("fresh JavaScript Error properties must be writable");
+  if !matches!(js_sys::Reflect::set(error, &key.into(), value), Ok(true)) {
+    wasm_bindgen::throw_str("failed to construct a structured conversion error");
+  }
 }
 
+#[cold]
 fn conversion_error(error: mdream::ConversionError) -> JsValue {
   let js_error = js_sys::Error::new(&error.to_string());
   match error {

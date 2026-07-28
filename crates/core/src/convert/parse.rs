@@ -474,6 +474,26 @@ impl ConvertState {
   /// elements) are closed along the way, mirroring the spec's "generate implied
   /// end tags" step.
   fn close_implied_to(&mut self, target: &[bool; 256], boundary: &[bool; 256]) {
+    let mut compact_close_count = 0usize;
+    let mut compact_found_boundary = false;
+    for tag in self.suppressed_tags().iter().rev() {
+      match tag.tag_id {
+        Some(id) if target[id as usize] => {
+          compact_close_count += 1;
+          self.truncate_suppressed(self.suppressed_len() - compact_close_count);
+          return;
+        }
+        Some(id) if boundary[id as usize] => {
+          compact_found_boundary = true;
+          break;
+        }
+        _ => compact_close_count += 1,
+      }
+    }
+    if compact_found_boundary {
+      return;
+    }
+
     let mut close_count = 0usize;
     let mut found = false;
     for node in self.stack.iter().rev() {
@@ -488,6 +508,7 @@ impl ConvertState {
       }
     }
     if found {
+      self.truncate_suppressed(0);
       for _ in 0..close_count {
         self.close_node();
       }
@@ -499,6 +520,17 @@ impl ConvertState {
   /// enclosing `<table>`). Implements implied end tags for `<tr>` (closes an open
   /// cell + row) and `<thead>`/`<tbody>`/`<tfoot>` (closes cell + row + section).
   fn close_table_context(&mut self, closeable: &[bool; 256]) {
+    let compact_close_count = self
+      .suppressed_tags()
+      .iter()
+      .rev()
+      .take_while(|tag| tag.tag_id.is_some_and(|id| closeable[id as usize]))
+      .count();
+    self.truncate_suppressed(self.suppressed_len() - compact_close_count);
+    if self.has_suppressed() {
+      return;
+    }
+
     while let Some(top) = self.stack.last() {
       match top.tag_id {
         Some(id) if closeable[id as usize] => self.close_node(),
@@ -511,6 +543,28 @@ impl ConvertState {
   /// at their owning `<select>`; a select scan includes the select itself. This
   /// only runs for recovery tags, leaving the common path as one table lookup.
   fn close_select_to(&mut self, target_id: u8) -> bool {
+    let mut compact_found_boundary = false;
+    for index in (0..self.suppressed_len()).rev() {
+      match self.suppressed_tags()[index].tag_id {
+        Some(id) if id == target_id => {
+          self.truncate_suppressed(index);
+          return true;
+        }
+        Some(TAG_SELECT) if target_id != TAG_SELECT => {
+          compact_found_boundary = true;
+          break;
+        }
+        Some(TAG_TEMPLATE) => {
+          compact_found_boundary = true;
+          break;
+        }
+        _ => {}
+      }
+    }
+    if compact_found_boundary {
+      return false;
+    }
+
     let mut target_index = None;
     for i in (0..self.stack.len()).rev() {
       match self.stack[i].tag_id {
@@ -524,6 +578,7 @@ impl ConvertState {
       }
     }
     if let Some(index) = target_index {
+      self.truncate_suppressed(0);
       while self.stack.len() > index {
         self.close_node();
       }
@@ -533,118 +588,45 @@ impl ConvertState {
     }
   }
 
-  fn close_suppressed_implied_to(&mut self, target: &[bool; 256], boundary: &[bool; 256]) {
-    let mut close_count = 0usize;
-    let mut found_target = false;
-    let mut found_boundary = false;
-    for tag in self.suppressed_tags().iter().rev() {
-      match tag.tag_id {
-        Some(id) if target[id as usize] => {
-          close_count += 1;
-          found_target = true;
-          break;
-        }
-        Some(id) if boundary[id as usize] => {
-          found_boundary = true;
-          break;
-        }
-        _ => close_count += 1,
-      }
-    }
-    if found_target {
-      self.truncate_suppressed(self.suppressed_len() - close_count);
-      return;
-    }
-    if found_boundary {
-      return;
-    }
-
-    let rich_target_is_in_scope = self.stack.iter().rev().find_map(|node| match node.tag_id {
-      Some(id) if target[id as usize] => Some(true),
-      Some(id) if boundary[id as usize] => Some(false),
-      _ => None,
-    });
-    if rich_target_is_in_scope == Some(true) {
-      self.truncate_suppressed(0);
-      self.close_implied_to(target, boundary);
-    }
-  }
-
-  fn close_suppressed_table_context(&mut self, closeable: &[bool; 256]) {
-    let close_count = self
-      .suppressed_tags()
-      .iter()
-      .rev()
-      .take_while(|tag| tag.tag_id.is_some_and(|id| closeable[id as usize]))
-      .count();
-    self.truncate_suppressed(self.suppressed_len() - close_count);
-    if !self.has_suppressed() {
-      self.close_table_context(closeable);
-    }
-  }
-
-  fn close_suppressed_select_to(&mut self, target_id: u8) -> bool {
-    let mut target_index = None;
-    let mut found_boundary = false;
-    for index in (0..self.suppressed_len()).rev() {
-      match self.suppressed_tags()[index].tag_id {
-        Some(id) if id == target_id => {
-          target_index = Some(index);
-          break;
-        }
-        Some(TAG_SELECT) if target_id != TAG_SELECT => {
-          found_boundary = true;
-          break;
-        }
-        Some(TAG_TEMPLATE) => {
-          found_boundary = true;
-          break;
-        }
-        _ => {}
-      }
-    }
-    if let Some(index) = target_index {
-      self.truncate_suppressed(index);
-      true
-    } else if found_boundary {
-      false
+  fn parser_last_tag_id(&self) -> Option<u8> {
+    if let Some(tag) = self.suppressed_last() {
+      tag.tag_id
     } else {
-      let rich_target_is_in_scope = self.stack.iter().rev().find_map(|node| match node.tag_id {
-        Some(id) if id == target_id => Some(true),
-        Some(TAG_SELECT) if target_id != TAG_SELECT => Some(false),
-        Some(TAG_TEMPLATE) => Some(false),
-        _ => None,
-      });
-      if rich_target_is_in_scope == Some(true) {
-        self.truncate_suppressed(0);
-        self.close_select_to(target_id)
-      } else {
-        false
-      }
+      self.stack.last().and_then(|node| node.tag_id)
     }
   }
 
-  fn recover_suppressed_opening(&mut self, id: u8) -> bool {
+  fn pop_parser_top(&mut self) {
+    if self.has_suppressed() {
+      self.pop_suppressed();
+    } else {
+      self.close_node();
+    }
+  }
+
+  /// Apply start-tag recovery across the compact and materialized stack tiers.
+  /// Returns `true` when the incoming start tag must itself be ignored.
+  fn recover_opening(&mut self, id: u8) -> bool {
     match id {
+      // In the "in select" insertion mode a nested select acts as the end of
+      // the open select; the incoming start tag itself is ignored.
       TAG_SELECT if self.parser_tag_depth(TAG_SELECT) > 0 => {
-        return self.close_suppressed_select_to(TAG_SELECT);
+        return self.close_select_to(TAG_SELECT);
       }
       TAG_OPTION => {
         if self.parser_tag_depth(TAG_SELECT) > 0 {
-          self.close_suppressed_select_to(TAG_OPTION);
-        } else if self
-          .suppressed_last()
-          .is_some_and(|tag| tag.tag_id == Some(TAG_OPTION))
-        {
-          self.pop_suppressed();
+          self.close_select_to(TAG_OPTION);
+        } else if self.parser_last_tag_id() == Some(TAG_OPTION) {
+          self.pop_parser_top();
         }
       }
       TAG_OPTGROUP if self.parser_tag_depth(TAG_SELECT) > 0 => {
-        self.close_suppressed_select_to(TAG_OPTION);
-        self.close_suppressed_select_to(TAG_OPTGROUP);
+        self.close_select_to(TAG_OPTION);
+        self.close_select_to(TAG_OPTGROUP);
       }
+      // Anchors cannot nest, so a nested start closes the open anchor.
       TAG_A if self.parser_tag_depth(TAG_A) > 0 => {
-        self.close_suppressed_implied_to(&TARGET_A, &A_SCOPE_BOUNDARY);
+        self.close_implied_to(&TARGET_A, &A_SCOPE_BOUNDARY);
       }
       TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT
         if self.parser_tag_depth(TAG_TABLE) > 0 =>
@@ -653,13 +635,13 @@ impl ConvertState {
           TAG_TD | TAG_TH
             if self.parser_tag_depth(TAG_TD) > 0 || self.parser_tag_depth(TAG_TH) > 0 =>
           {
-            self.close_suppressed_implied_to(&TARGET_CELL, &CELL_SCOPE_BOUNDARY);
+            self.close_implied_to(&TARGET_CELL, &CELL_SCOPE_BOUNDARY);
           }
           TAG_TR if self.parser_tag_depth(TAG_TR) > 0 => {
-            self.close_suppressed_table_context(&ROW_CLOSEABLE);
+            self.close_table_context(&ROW_CLOSEABLE);
           }
           TAG_THEAD | TAG_TBODY | TAG_TFOOT => {
-            self.close_suppressed_table_context(&SECTION_CLOSEABLE);
+            self.close_table_context(&SECTION_CLOSEABLE);
           }
           _ => {}
         }
@@ -668,26 +650,25 @@ impl ConvertState {
       | TAG_SELECT => {}
       _ => {
         if self.parser_tag_depth(TAG_P) > 0 {
-          self.close_suppressed_implied_to(&TARGET_P, &P_SCOPE_BOUNDARY);
+          debug_assert!(closes_p(id));
+          self.close_implied_to(&TARGET_P, &P_SCOPE_BOUNDARY);
         }
         match id {
+          // Heading starts only pop an immediately current heading.
           TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6
-            if self.suppressed_last().is_some_and(|tag| {
-              matches!(
-                tag.tag_id,
-                Some(TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6)
-              )
+            if self.parser_last_tag_id().is_some_and(|tag_id| {
+              matches!(tag_id, TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6)
             }) =>
           {
-            self.pop_suppressed();
+            self.pop_parser_top();
           }
           TAG_LI if self.parser_tag_depth(TAG_LI) > 0 => {
-            self.close_suppressed_implied_to(&TARGET_LI, &LI_SCOPE_BOUNDARY);
+            self.close_implied_to(&TARGET_LI, &LI_SCOPE_BOUNDARY);
           }
           TAG_DT | TAG_DD
             if self.parser_tag_depth(TAG_DT) > 0 || self.parser_tag_depth(TAG_DD) > 0 =>
           {
-            self.close_suppressed_implied_to(&TARGET_DT_DD, &DL_SCOPE_BOUNDARY);
+            self.close_implied_to(&TARGET_DT_DD, &DL_SCOPE_BOUNDARY);
           }
           _ => {}
         }
@@ -800,100 +781,14 @@ impl ConvertState {
     // mutates parser state or emits a premature close.
     if let Some(id) = tag_id
       && needs_implied_end_recovery(id)
+      && self.recover_opening(id)
     {
-      if !self.has_suppressed() {
-        match id {
-          // In the "in select" insertion mode a nested <select> acts as the end
-          // of the open select; the incoming start tag itself is ignored.
-          TAG_SELECT if self.depth_map[TAG_SELECT as usize] > 0 => {
-            if self.close_select_to(TAG_SELECT) {
-              return OpeningTagResult {
-                complete: true,
-                new_position,
-                self_closing: false,
-                skip: true,
-              };
-            }
-          }
-          TAG_OPTION => {
-            if self.depth_map[TAG_SELECT as usize] > 0 {
-              self.close_select_to(TAG_OPTION);
-            } else if self
-              .stack
-              .last()
-              .is_some_and(|node| node.tag_id == Some(TAG_OPTION))
-            {
-              self.close_node();
-            }
-          }
-          TAG_OPTGROUP if self.depth_map[TAG_SELECT as usize] > 0 => {
-            self.close_select_to(TAG_OPTION);
-            self.close_select_to(TAG_OPTGROUP);
-          }
-          // A nested <a> closes the open one (anchors cannot nest), so the
-          // markdown is two adjacent links rather than invalid nested `[..]`.
-          TAG_A if self.depth_map[TAG_A as usize] > 0 => {
-            self.close_implied_to(&TARGET_A, &A_SCOPE_BOUNDARY);
-          }
-          TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT
-            if self.depth_map[TAG_TABLE as usize] > 0 =>
-          {
-            match id {
-              TAG_TD | TAG_TH
-                if self.depth_map[TAG_TD as usize] > 0 || self.depth_map[TAG_TH as usize] > 0 =>
-              {
-                self.close_implied_to(&TARGET_CELL, &CELL_SCOPE_BOUNDARY);
-              }
-              TAG_TR if self.depth_map[TAG_TR as usize] > 0 => {
-                self.close_table_context(&ROW_CLOSEABLE);
-              }
-              TAG_THEAD | TAG_TBODY | TAG_TFOOT => {
-                self.close_table_context(&SECTION_CLOSEABLE);
-              }
-              _ => {}
-            }
-          }
-          TAG_A | TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT | TAG_OPTGROUP
-          | TAG_SELECT => {}
-          _ => {
-            if self.depth_map[TAG_P as usize] > 0 {
-              debug_assert!(closes_p(id));
-              self.close_implied_to(&TARGET_P, &P_SCOPE_BOUNDARY);
-            }
-            match id {
-              // A heading start closes an open heading (they cannot nest); only
-              // when one is the current node, matching the spec's "if the current
-              // node is an h1–h6 element, pop it" step.
-              TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6
-                if self.stack.last().is_some_and(|n| {
-                  matches!(
-                    n.tag_id,
-                    Some(TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6)
-                  )
-                }) =>
-              {
-                self.close_node();
-              }
-              TAG_LI if self.depth_map[TAG_LI as usize] > 0 => {
-                self.close_implied_to(&TARGET_LI, &LI_SCOPE_BOUNDARY);
-              }
-              TAG_DT | TAG_DD
-                if self.depth_map[TAG_DT as usize] > 0 || self.depth_map[TAG_DD as usize] > 0 =>
-              {
-                self.close_implied_to(&TARGET_DT_DD, &DL_SCOPE_BOUNDARY);
-              }
-              _ => {}
-            }
-          }
-        }
-      } else if self.recover_suppressed_opening(id) {
-        return OpeningTagResult {
-          complete: true,
-          new_position,
-          self_closing: false,
-          skip: true,
-        };
-      }
+      return OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing: false,
+        skip: true,
+      };
     }
 
     let flatten = self.stack.len() >= MAX_ELEMENT_DEPTH;

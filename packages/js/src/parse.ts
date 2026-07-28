@@ -149,15 +149,12 @@ const HEAD_CONTENT_TAGS = new Set<number>([
   TAG_TEMPLATE,
 ])
 
-// Implied end tags (HTML §13.1.2.4 optional tags + "in body" insertion mode).
-// Mirrors the Rust engine's `parse.rs`. Start tags that cannot appear inside a
-// `<p>` imply its end; block containers, headings, lists, tables, and the
-// list-item/definition tags all close an open `<p>`.
+// Start tags that trigger implied-end recovery. This combines tags that close
+// an open `<p>` with anchor, table, and select recovery triggers.
 //
 // A typed-array lookup, not a Set: this is checked for every start tag opened
-// while a `<p>` is on the stack (most inline tags in prose), so the hot path is
-// a single indexed load rather than a Set hash.
-const CLOSES_P: Uint8Array = (() => {
+// so the hot path is a single indexed load rather than a Set hash.
+const NEEDS_IMPLIED_END_RECOVERY: Uint8Array = (() => {
   const t = new Uint8Array(MAX_TAG_ID)
   const ids = [
     TAG_DIV,
@@ -194,19 +191,18 @@ const CLOSES_P: Uint8Array = (() => {
     TAG_DETAILS,
     TAG_SUMMARY,
     TAG_DIALOG,
+    TAG_A,
+    TAG_TD,
+    TAG_TH,
+    TAG_TR,
+    TAG_THEAD,
+    TAG_TBODY,
+    TAG_TFOOT,
+    TAG_OPTION,
+    TAG_OPTGROUP,
+    TAG_SELECT,
   ]
   for (const id of ids)
-    t[id] = 1
-  return t
-})()
-
-// Start tags that can trigger any implied-end-tag recovery branch. The common
-// inline tags (`code`, `em`, `span`, ...) otherwise run the whole dispatch just
-// to prove they need no recovery, so gating on a single indexed load lets them
-// skip it entirely. Mirrors the Rust engine's `NEEDS_IMPLIED_END_RECOVERY`.
-const NEEDS_IMPLIED_END_RECOVERY: Uint8Array = (() => {
-  const t = CLOSES_P.slice()
-  for (const id of [TAG_A, TAG_TD, TAG_TH, TAG_TR, TAG_THEAD, TAG_TBODY, TAG_TFOOT, TAG_OPTION, TAG_OPTGROUP, TAG_SELECT])
     t[id] = 1
   return t
 })()
@@ -313,7 +309,6 @@ const HEADINGS = new Set<number>([TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6
 const SINGLE_P = new Set<number>([TAG_P])
 const SINGLE_LI = new Set<number>([TAG_LI])
 const SINGLE_A = new Set<number>([TAG_A])
-const SINGLE_HEAD = new Set<number>([TAG_HEAD])
 const DT_DD = new Set<number>([TAG_DT, TAG_DD])
 const TD_TH = new Set<number>([TAG_TD, TAG_TH])
 const TR_CELLS = new Set<number>([TAG_TD, TAG_TH, TAG_TR])
@@ -1719,9 +1714,7 @@ function processOpeningTag(
   if (parserTagDepth(state, TAG_HEAD) > 0
     && parserTagDepth(state, TAG_TEMPLATE) === 0
     && !HEAD_CONTENT_TAGS.has(tagId)) {
-    const compactHeadIndex = state.compactElements
-      ? compactTopIndexForIds(state.compactElements, SINGLE_HEAD)
-      : -1
+    const compactHeadIndex = state.compactElements?.tagTops[TAG_HEAD] ?? -1
     if (compactHeadIndex >= 0) {
       closeCompactThrough(state, compactHeadIndex)
     }
@@ -1805,8 +1798,8 @@ function processOpeningTag(
       }
     }
     else {
-      // Remaining recovery tags are all in CLOSES_P, so they close an open <p>
-      // first, then any heading/list-item implied end.
+      // Remaining recovery tags close an open <p> first, then any
+      // heading/list-item implied end.
       if (parserTagDepth(state, TAG_P) > 0) {
         closeImpliedTo(state, SINGLE_P, P_SCOPE_BOUNDARY, handleEvent)
       }
