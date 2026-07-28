@@ -1482,10 +1482,11 @@ function processCommentOrDoctype(htmlChunk: string, position: number): {
       }
       i = dash
       if (htmlChunk.charCodeAt(i + 1) === DASH_CHAR) {
-        if (htmlChunk.charCodeAt(i + 2) === GT_CHAR) {
+        const afterDashes = htmlChunk.charCodeAt(i + 2)
+        if (afterDashes === GT_CHAR) {
           return { complete: true, newPosition: i + 3, remainingText: '' }
         }
-        if (htmlChunk.charCodeAt(i + 2) === EXCLAMATION_CHAR
+        if (afterDashes === EXCLAMATION_CHAR
           && i + 3 < chunkLength
           && htmlChunk.charCodeAt(i + 3) === GT_CHAR) {
           return { complete: true, newPosition: i + 4, remainingText: '' }

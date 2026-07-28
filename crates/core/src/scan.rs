@@ -54,13 +54,17 @@ pub(crate) fn process_comment_or_doctype(html_chunk: &str, position: usize) -> C
         break;
       }
       if bytes[i + 1] == DASH_CHAR {
-        if bytes[i + 2] == GT_CHAR {
+        let after_dashes = bytes[i + 2];
+        if after_dashes == GT_CHAR {
           return CommentResult {
             complete: true,
             new_position: i + 3,
           };
         }
-        if bytes[i + 2] == EXCLAMATION_CHAR && i + 3 < chunk_length && bytes[i + 3] == GT_CHAR {
+        if after_dashes == EXCLAMATION_CHAR
+          && i + 3 < chunk_length
+          && bytes[i + 3] == GT_CHAR
+        {
           return CommentResult {
             complete: true,
             new_position: i + 4,
@@ -123,18 +127,19 @@ fn scan_tag<const EXTRACT: bool>(
   let mut scan = AttrScan::new(attr_mask);
   let mut inside_quote = false;
   let mut quote_char: u8 = 0;
+  // `ATTR_NONE` compiles `AttrScan` out, but still needs the same tokenizer
+  // state to distinguish a quoted value from a quote inside an unquoted one.
+  let mut state = State::Gap;
   let mut i = position;
 
   while i < chunk_length {
     let c = bytes[i];
 
-    // A quote opened outside a value hides `>` until it closes.
+    // A quoted value hides `>`. `EXTRACT` consumes those whole below.
     if inside_quote {
       if c == quote_char {
         inside_quote = false;
-      }
-      if EXTRACT {
-        scan.step(html_chunk, c, i);
+        state = State::Gap;
       }
       i += 1;
       continue;
@@ -163,12 +168,15 @@ fn scan_tag<const EXTRACT: bool>(
       continue;
     }
 
-    if c == QUOTE_CHAR || c == APOS_CHAR {
-      inside_quote = true;
-      quote_char = c;
-    }
     if EXTRACT {
       scan.step(html_chunk, c, i);
+    } else {
+      if state == State::BeforeValue && (c == QUOTE_CHAR || c == APOS_CHAR) {
+        inside_quote = true;
+        quote_char = c;
+      } else {
+        state = state.step_without_extraction(c);
+      }
     }
     i += 1;
   }
@@ -209,6 +217,53 @@ enum State {
   AfterName,
   BeforeValue,
   UnquotedValue,
+}
+
+impl State {
+  #[inline]
+  fn step_without_extraction(self, c: u8) -> Self {
+    match self {
+      Self::Gap => {
+        if is_whitespace(c) {
+          Self::Gap
+        } else {
+          Self::Name
+        }
+      }
+      Self::Name => {
+        if c == EQUALS_CHAR {
+          Self::BeforeValue
+        } else if is_whitespace(c) {
+          Self::AfterName
+        } else {
+          Self::Name
+        }
+      }
+      Self::AfterName => {
+        if c == EQUALS_CHAR {
+          Self::BeforeValue
+        } else if is_whitespace(c) {
+          Self::AfterName
+        } else {
+          Self::Name
+        }
+      }
+      Self::BeforeValue => {
+        if is_whitespace(c) {
+          Self::BeforeValue
+        } else {
+          Self::UnquotedValue
+        }
+      }
+      Self::UnquotedValue => {
+        if is_whitespace(c) {
+          Self::Gap
+        } else {
+          Self::UnquotedValue
+        }
+      }
+    }
+  }
 }
 
 impl AttrScan {
@@ -341,6 +396,18 @@ mod tests {
     assert_eq!(a.get("id").map(String::as_str), Some("main"));
   }
 
+  /// A parse error per the spec, but the quote joins the value rather than
+  /// opening a quoted region, so it must not hide the `>` that ends the tag.
+  #[test]
+  fn quote_inside_an_unquoted_value_is_an_ordinary_character() {
+    let a = parse_attributes("alt=Bob's src=/i.png", ATTR_ALL);
+    assert_eq!(a.get("alt").map(String::as_str), Some("Bob's"));
+    assert_eq!(a.get("src").map(String::as_str), Some("/i.png"));
+
+    let b = parse_attributes("alt=Bob\"s", ATTR_ALL);
+    assert_eq!(b.get("alt").map(String::as_str), Some("Bob\"s"));
+  }
+
   /// A repeated name is a duplicate-attribute parse error and the later one is
   /// dropped from the token, so the first wins. Names are lowercased first, so
   /// `HREF` collides with `href`.
@@ -464,17 +531,24 @@ mod tests {
   #[test]
   fn both_scan_instantiations_agree_on_the_tag_end() {
     // `ATTR_NONE` compiles the extraction out, so the two instantiations have
-    // to keep finding the same `>`.
-    for html in [
-      "a href=\"x>y\">rest",
-      "a href=x/>rest",
-      "a href=a\"b>rest",
-      "a>rest",
+    // to keep finding the same `>`. The expected position pins which one, since
+    // agreeing on the wrong `>` would otherwise satisfy this.
+    for (html, end) in [
+      ("a href=\"x>y\">rest", 13),
+      ("a href = \"x>y\">rest", 15),
+      ("a href=x/>rest", 10),
+      ("a href=a\"b>rest", 11),
+      ("a href=a'b>rest", 11),
+      ("a href=a'b c=d'e>rest", 17),
+      ("a href=x='y>rest", 12),
+      ("a>rest", 2),
     ] {
       let (complete, extracted_pos, _, extracted_self_closing) =
         process_tag_attributes(html, 1, None, ATTR_ALL);
       let (bare_complete, bare_pos, bare_attrs, bare_self_closing) =
         process_tag_attributes(html, 1, None, ATTR_NONE);
+      assert!(complete, "html={html:?}");
+      assert_eq!(extracted_pos, end, "html={html:?}");
       assert_eq!(complete, bare_complete, "html={html:?}");
       assert_eq!(extracted_pos, bare_pos, "html={html:?}");
       assert_eq!(
@@ -638,6 +712,30 @@ mod tests {
           "html={html:?}"
         );
       }
+    }
+  }
+
+  #[test]
+  fn both_scan_instantiations_agree_for_short_inputs() {
+    const ALPHABET: &[u8] = b"a ='\".>/";
+    const WIDTH: usize = 6;
+
+    for case in 0..ALPHABET.len().pow(WIDTH as u32) {
+      let mut encoded = case;
+      let mut input = [b'a'; WIDTH];
+      for byte in &mut input {
+        *byte = ALPHABET[encoded % ALPHABET.len()];
+        encoded /= ALPHABET.len();
+      }
+      let html = std::str::from_utf8(&input).expect("ASCII alphabet");
+      let (complete, position, _, self_closing) = process_tag_attributes(html, 0, None, ATTR_ALL);
+      let (bare_complete, bare_position, bare_attrs, bare_self_closing) =
+        process_tag_attributes(html, 0, None, ATTR_NONE);
+
+      assert_eq!(complete, bare_complete, "html={html:?}");
+      assert_eq!(position, bare_position, "html={html:?}");
+      assert_eq!(self_closing, bare_self_closing, "html={html:?}");
+      assert!(bare_attrs.is_empty(), "html={html:?}");
     }
   }
 }
