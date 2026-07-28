@@ -11,7 +11,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mdream::MarkdownStreamProcessor;
-use mdream::types::HTMLToMarkdownOptions;
+use mdream::types::{ExtractionConfig, HTMLToMarkdownOptions, PluginConfig};
 
 struct Tracking;
 
@@ -45,22 +45,36 @@ fn excluded_script_data_is_not_retained() {
   }
   html.push_str("</script><p>after</p>");
 
-  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
-  // Keep LIVE as the allocator's true process-wide total; resetting it would
-  // make deallocations for pre-existing allocations underflow.
-  let baseline = LIVE.load(Ordering::Relaxed);
-  PEAK.store(baseline, Ordering::Relaxed);
-  let mut out = String::new();
-  for chunk in html.as_bytes().chunks(8 * 1024) {
-    out.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
-  }
-  out.push_str(&processor.finish());
-  let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+  for (label, options) in [
+    ("without extraction", HTMLToMarkdownOptions::default()),
+    (
+      "without an active extraction",
+      HTMLToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          extraction: Some(ExtractionConfig::new(&["p"])),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+  ] {
+    let mut processor = MarkdownStreamProcessor::new(options);
+    // Keep LIVE as the allocator's true process-wide total; resetting it would
+    // make deallocations for pre-existing allocations underflow.
+    let baseline = LIVE.load(Ordering::Relaxed);
+    PEAK.store(baseline, Ordering::Relaxed);
+    let mut out = String::new();
+    for chunk in html.as_bytes().chunks(8 * 1024) {
+      out.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+    }
+    out.push_str(&processor.finish());
+    let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
 
-  assert_eq!(out.trim(), "before\n\nafter");
-  assert!(
-    peak < 256 * 1024,
-    "peak {peak} should not scale with the {} byte script",
-    html.len()
-  );
+    assert_eq!(out.trim(), "before\n\nafter");
+    assert!(
+      peak < 256 * 1024,
+      "{label}: peak {peak} should not scale with the {} byte script",
+      html.len()
+    );
+  }
 }

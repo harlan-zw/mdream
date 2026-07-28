@@ -600,9 +600,10 @@ impl ConvertState {
     if text.is_empty() {
       return;
     }
-    // Script data is excluded from the output; only extraction reads it, so
-    // buffering it otherwise retains the whole element to emit nothing.
-    if self.has_extraction {
+    // Script data is excluded from the output; only an extraction tracking the
+    // script or an ancestor reads it, so buffering it otherwise retains the
+    // whole element to emit nothing.
+    if !self.extraction_tracked.is_empty() {
       self.script_text_buffer.push_str(text);
     }
     self.text_buffer_contains_non_whitespace = true;
