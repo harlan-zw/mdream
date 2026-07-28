@@ -3109,6 +3109,26 @@ fn script_and_style_closing_tags_are_not_quote_aware() {
   assert_eq!(convert("<script>x</script/><p>BODY</p>"), "BODY");
 }
 
+/// A quote in an unquoted value is an ordinary character, so it must not hide
+/// the `>` and drop everything after the tag.
+#[test]
+fn quote_in_an_unquoted_attribute_value_does_not_truncate() {
+  assert_eq!(
+    convert("<p>ok</p><img alt=Bob's src=/i.png><p>after</p>"),
+    "ok\n\n![Bob's](/i.png)\n\nafter"
+  );
+  assert_eq!(convert("<p>a</p><div class=x'y></div><p>b</p>"), "a\n\nb");
+  // An even number of them re-balanced, which masked the defect.
+  assert_eq!(
+    convert("<div a=1'></div><div b=2'></div><p>kept</p>"),
+    "kept"
+  );
+  assert_eq!(
+    convert("<p>a</p><span data-value=x='y>inside</span><p>b</p>"),
+    "a\n\ninside\n\nb"
+  );
+}
+
 #[test]
 fn script_data_escaped_and_double_escaped_end_tags() {
   for html in [
