@@ -3427,3 +3427,50 @@ fn wrap_nested_list_in_blockquote_keeps_structure() {
     );
   }
 }
+
+#[test]
+fn abrupt_and_bang_terminated_comments_do_not_swallow_the_document() {
+  // `<!-->`, `<!--->` and `--!>` all end a comment. Scanning for `-->` alone
+  // left them open, so the scan ran to end of chunk, reported the tag
+  // incomplete and discarded every byte after it. The spacing matches an
+  // ordinary `<!--x-->`, which also separates the two text runs.
+  for html in [
+    "before<!-->after",
+    "before<!--->after",
+    "before<!--x--!>after",
+    "before<!----!>after",
+    "before<!--x---!>after",
+  ] {
+    assert_eq!(convert(html), "before after", "{html}");
+    for split in 0..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let mut out = stream.process_chunk(&html[..split]);
+      out.push_str(&stream.process_chunk(&html[split..]));
+      out.push_str(&stream.finish());
+      assert_eq!(out.trim_end(), "before after", "{html} split at {split}");
+    }
+  }
+
+  assert_eq!(convert("<p>a</p><!--><p>b</p>"), "a\n\nb");
+  assert_eq!(convert("<!-->after"), "after");
+  assert_eq!(convert("before<!-->"), "before");
+
+  // A `>` inside the comment body still is not a terminator.
+  assert_eq!(
+    convert("before<!--[if IE]>hidden<![endif]-->after"),
+    "before after"
+  );
+}
+
+#[test]
+fn a_short_malformed_comment_does_not_truncate_a_long_document() {
+  let mut html = String::from("<p>lead</p><!-->");
+  for i in 0..200 {
+    html.push_str("<p>para ");
+    html.push_str(&i.to_string());
+    html.push_str("</p>");
+  }
+  let out = convert(&html);
+  assert_eq!(out.matches("para ").count(), 200, "{out:.120}");
+  assert!(out.starts_with("lead"));
+}

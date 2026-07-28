@@ -28,13 +28,44 @@ pub(crate) fn process_comment_or_doctype(html_chunk: &str, position: usize) -> C
 
   if i + 3 < chunk_length && bytes[i + 2] == DASH_CHAR && bytes[i + 3] == DASH_CHAR {
     i += 4;
-    while i < chunk_length - 2 {
-      if bytes[i] == DASH_CHAR && bytes[i + 1] == DASH_CHAR && bytes[i + 2] == GT_CHAR {
-        i += 3;
-        return CommentResult {
-          complete: true,
-          new_position: i,
-        };
+    // `-->` is not the only terminator. `<!-->` and `<!--->` close straight out
+    // of the comment start states, and a run of two or more dashes also closes
+    // on `!>`. Matching `-->` alone leaves those comments open, so the scan
+    // runs to end of chunk and every byte after them is discarded.
+    if i < chunk_length && bytes[i] == GT_CHAR {
+      return CommentResult {
+        complete: true,
+        new_position: i + 1,
+      };
+    }
+    if i + 1 < chunk_length && bytes[i] == DASH_CHAR && bytes[i + 1] == GT_CHAR {
+      return CommentResult {
+        complete: true,
+        new_position: i + 2,
+      };
+    }
+    while i + 2 < chunk_length {
+      // Scanning for the dash on its own keeps this loop vectorizable; the
+      // three-byte window is only formed once a dash is found.
+      while i + 2 < chunk_length && bytes[i] != DASH_CHAR {
+        i += 1;
+      }
+      if i + 2 >= chunk_length {
+        break;
+      }
+      if bytes[i + 1] == DASH_CHAR {
+        if bytes[i + 2] == GT_CHAR {
+          return CommentResult {
+            complete: true,
+            new_position: i + 3,
+          };
+        }
+        if bytes[i + 2] == EXCLAMATION_CHAR && i + 3 < chunk_length && bytes[i + 3] == GT_CHAR {
+          return CommentResult {
+            complete: true,
+            new_position: i + 4,
+          };
+        }
       }
       i += 1;
     }
@@ -451,6 +482,162 @@ mod tests {
         "html={html:?}"
       );
       assert!(bare_attrs.is_empty(), "html={html:?}");
+    }
+  }
+
+  fn comment_end(html: &str) -> Option<usize> {
+    let r = process_comment_or_doctype(html, 0);
+    r.complete.then_some(r.new_position)
+  }
+
+  #[test]
+  fn comment_closes_at_every_spec_end_state() {
+    // Offsets cross-checked against parse5 (rehype-parse) comment token spans.
+    assert_eq!(comment_end("<!-->Z"), Some(5));
+    assert_eq!(comment_end("<!--->Z"), Some(6));
+    assert_eq!(comment_end("<!---->Z"), Some(7));
+    assert_eq!(comment_end("<!--x-->Z"), Some(8));
+    assert_eq!(comment_end("<!--x--!>Z"), Some(9));
+    assert_eq!(comment_end("<!-----!>Z"), Some(9));
+    assert_eq!(comment_end("<!--!--!>Z"), Some(9));
+    assert_eq!(comment_end("<!--<--!>Z"), Some(9));
+    assert_eq!(comment_end("<!--<!-->Z"), Some(9));
+
+    // An earlier terminator wins; scanning for `-->` alone overshot these.
+    assert_eq!(comment_end("<!-->-->Z"), Some(5));
+    assert_eq!(comment_end("<!--->-->Z"), Some(6));
+
+    // A `>` inside the body is not a terminator, so downlevel-hidden
+    // conditional comments still close only at `-->`.
+    assert_eq!(comment_end("<!--[if IE]>x<![endif]-->Z"), Some(25));
+
+    // Unterminated: the caller carries the chunk instead.
+    assert_eq!(comment_end("<!--"), None);
+    assert_eq!(comment_end("<!--x"), None);
+    assert_eq!(comment_end("<!--x--"), None);
+    assert_eq!(comment_end("<!--x--!"), None);
+  }
+
+  // Literal transcription of the WHATWG comment states, including the
+  // less-than-sign states and the reconsume steps the scan above collapses
+  // into a sliding window.
+  fn spec_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
+    enum S {
+      Start,
+      StartDash,
+      Comment,
+      Lt,
+      LtBang,
+      LtBangDash,
+      LtBangDashDash,
+      EndDash,
+      End,
+      EndBang,
+    }
+    let mut state = S::Start;
+    let mut i = start;
+    while i < bytes.len() {
+      let c = bytes[i];
+      match state {
+        S::Start => match c {
+          GT_CHAR => return Some(i + 1),
+          DASH_CHAR => {
+            state = S::StartDash;
+            i += 1;
+          }
+          _ => state = S::Comment,
+        },
+        S::StartDash => match c {
+          GT_CHAR => return Some(i + 1),
+          DASH_CHAR => {
+            state = S::End;
+            i += 1;
+          }
+          _ => state = S::Comment,
+        },
+        S::Comment => match c {
+          b'<' => {
+            state = S::Lt;
+            i += 1;
+          }
+          DASH_CHAR => {
+            state = S::EndDash;
+            i += 1;
+          }
+          _ => i += 1,
+        },
+        S::Lt => match c {
+          EXCLAMATION_CHAR => {
+            state = S::LtBang;
+            i += 1;
+          }
+          b'<' => i += 1,
+          _ => state = S::Comment,
+        },
+        S::LtBang => match c {
+          DASH_CHAR => {
+            state = S::LtBangDash;
+            i += 1;
+          }
+          _ => state = S::Comment,
+        },
+        S::LtBangDash => match c {
+          DASH_CHAR => {
+            state = S::LtBangDashDash;
+            i += 1;
+          }
+          _ => state = S::EndDash,
+        },
+        S::LtBangDashDash => state = S::End,
+        S::EndDash => match c {
+          DASH_CHAR => {
+            state = S::End;
+            i += 1;
+          }
+          _ => state = S::Comment,
+        },
+        S::End => match c {
+          GT_CHAR => return Some(i + 1),
+          EXCLAMATION_CHAR => {
+            state = S::EndBang;
+            i += 1;
+          }
+          DASH_CHAR => i += 1,
+          _ => state = S::Comment,
+        },
+        S::EndBang => match c {
+          GT_CHAR => return Some(i + 1),
+          DASH_CHAR => {
+            state = S::EndDash;
+            i += 1;
+          }
+          _ => state = S::Comment,
+        },
+      }
+    }
+    None
+  }
+
+  #[test]
+  fn scan_matches_the_spec_state_machine_for_every_short_comment() {
+    // `-`, `!` and `>` are the only bytes with transitions, `<` reaches the
+    // less-than-sign states, `x` stands for every other byte.
+    const ALPHABET: [u8; 5] = *b"-!>x<";
+    for len in 0..=6u32 {
+      for n in 0..ALPHABET.len().pow(len) {
+        let mut html = String::from("<!--");
+        let mut rest = n;
+        for _ in 0..len {
+          html.push(ALPHABET[rest % ALPHABET.len()] as char);
+          rest /= ALPHABET.len();
+        }
+        html.push('Z');
+        assert_eq!(
+          comment_end(&html),
+          spec_comment_end(html.as_bytes(), 4),
+          "html={html:?}"
+        );
+      }
     }
   }
 }
