@@ -5,7 +5,8 @@ use crate::selector::{matches_selector, parse_css_selector};
 use crate::tags::get_tag_handler;
 use crate::tailwind::process_tailwind_classes;
 use crate::types::{
-  ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, ParsedSelector, TailwindData,
+  ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, ParsedSelector, TagHandler,
+  TailwindData,
 };
 use crate::url::{is_autolink_uri, resolve_url, slugify_heading};
 use std::borrow::Cow;
@@ -282,7 +283,7 @@ fn find_script_end_tag(bytes: &[u8], start: usize, initial_state: u8) -> ScriptS
 /// duplicate state tracking, and enable full inlining of tag handler logic.
 pub struct ConvertState {
   // === Parser state ===
-  pub depth_map: [u8; MAX_TAG_ID],
+  pub depth_map: [u16; MAX_TAG_ID],
   pub depth: usize,
   has_encoded_html_entity: bool,
   last_char_was_whitespace: bool,
@@ -294,7 +295,11 @@ pub struct ConvertState {
   in_non_nesting: bool,
   script_data_state: u8,
   in_pre: bool,
-  depth_limit_reached: bool,
+  overflow_tags: Vec<u8>,
+  overflow_debt: usize,
+  overflow_excluded_at: Option<usize>,
+  overflow_raw_tag_id: Option<u8>,
+  overflow_raw_at: Option<usize>,
   /// Shallowest open element that is hidden or matches an exclude selector.
   /// Both drop their whole subtree, so one marker skips it in O(1).
   hidden_since_depth: Option<usize>,
@@ -452,7 +457,11 @@ impl ConvertState {
       in_non_nesting: false,
       script_data_state: SCRIPT_DATA,
       in_pre: false,
-      depth_limit_reached: false,
+      overflow_tags: Vec::new(),
+      overflow_debt: 0,
+      overflow_excluded_at: None,
+      overflow_raw_tag_id: None,
+      overflow_raw_at: None,
       hidden_since_depth: None,
       filter_included_since_depth: None,
       collapse_non_span_depth: 0,
@@ -640,9 +649,6 @@ impl ConvertState {
   }
 
   pub fn process_html(&mut self, chunk: &str) -> String {
-    if self.depth_limit_reached {
-      return String::new();
-    }
     // Reuse text_buffer allocation from previous call if available
     let mut text_buffer = std::mem::take(&mut self.parse_text_buffer);
     text_buffer.clear();
@@ -673,7 +679,7 @@ impl ConvertState {
       }
     }
 
-    while i < chunk_length && !self.depth_limit_reached {
+    while i < chunk_length {
       if text_buffer.is_empty() {
         run_start = i;
       }
@@ -784,6 +790,61 @@ impl ConvertState {
       // Non-nesting guard: inside script/style/title/textarea, only the
       // matching closing tag exits. All other '<' patterns (comments,
       // non-matching closing tags, opening tags) are treated as literal text.
+      if let Some(raw_tag_id) = self.overflow_raw_tag_id {
+        let next = bytes[i + 1];
+        if next == SLASH_CHAR {
+          let peek_start = i + 2;
+          let mut peek_end = peek_start;
+          while peek_end < chunk_length {
+            let c = bytes[peek_end];
+            if c == GT_CHAR || c == SLASH_CHAR || is_whitespace(c) {
+              break;
+            }
+            peek_end += 1;
+          }
+          if peek_end == chunk_length {
+            carry = true;
+            break;
+          }
+          let peek_name = &chunk[peek_start..peek_end];
+          let peek_tag_id =
+            crate::consts::get_tag_id_ci_bytes(peek_name.as_bytes()).or_else(|| {
+              self
+                .options
+                .plugins
+                .as_ref()
+                .and_then(|plugins| plugins.tag_overrides.as_ref())
+                .and_then(|overrides| {
+                  overrides
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(peek_name))
+                    .and_then(|(_, override_config)| override_config.alias_tag_id)
+                })
+            });
+          if peek_tag_id == Some(raw_tag_id) {
+            if !text_buffer.is_empty() {
+              self.process_text_buffer(&mut text_buffer);
+              text_buffer.clear();
+              run_start = i;
+            }
+            let result = self.process_closing_tag(chunk, i);
+            if result.complete {
+              i = result.new_position;
+            } else {
+              carry = true;
+              break;
+            }
+            continue;
+          }
+        }
+        text_buffer.push('<');
+        self.text_buffer_contains_non_whitespace = true;
+        self.last_char_was_whitespace = false;
+        self.just_closed_tag = false;
+        i += 1;
+        continue;
+      }
+
       if self.in_non_nesting {
         let next = bytes[i + 1];
         if next == SLASH_CHAR {

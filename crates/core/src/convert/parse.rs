@@ -2,10 +2,12 @@
 
 use super::*;
 
-// Firefox and Chromium flatten DOM trees beyond this practical depth. Stop
-// conversion at the same boundary instead of growing the parser stack without
-// limit. Output produced before the boundary remains available to the caller.
+// Keep rich element nodes to the same practical depth as browsers. A bounded
+// identity window protects those nodes from mismatched closes; arbitrary deeper
+// nesting becomes scalar debt, so untrusted input cannot grow memory forever.
 const MAX_ELEMENT_DEPTH: usize = 512;
+const MAX_OVERFLOW_TAGS: usize = 512;
+const OVERFLOW_CUSTOM_TAG: u8 = u8::MAX;
 
 /// Tags valid inside `<head>` per the HTML parser's "in head" insertion mode.
 /// Any other start tag implies the end of `<head>` and the start of the body, so
@@ -302,6 +304,93 @@ fn is_hidden(node: &ElementNode) -> bool {
 }
 
 impl ConvertState {
+  fn push_overflow_element(
+    &mut self,
+    tag_id: Option<u8>,
+    is_builtin: bool,
+    tag_handler: Option<&TagHandler>,
+    self_closing: bool,
+  ) {
+    if self_closing {
+      return;
+    }
+
+    if self.overflow_debt > 0 || self.overflow_tags.len() >= MAX_OVERFLOW_TAGS {
+      self.overflow_debt = self.overflow_debt.saturating_add(1);
+    } else {
+      self.overflow_tags.push(if is_builtin {
+        tag_id.unwrap_or(OVERFLOW_CUSTOM_TAG)
+      } else {
+        OVERFLOW_CUSTOM_TAG
+      });
+    }
+    let overflow_depth = self.overflow_depth();
+    if self.overflow_excluded_at.is_none()
+      && (tag_id == Some(TAG_TEMPLATE)
+        || tag_handler.is_some_and(|handler| handler.excludes_text_nodes))
+    {
+      self.overflow_excluded_at = Some(overflow_depth);
+    }
+    if tag_handler.is_some_and(|handler| handler.is_non_nesting) {
+      self.overflow_raw_tag_id = tag_id;
+      self.overflow_raw_at = Some(overflow_depth);
+    }
+  }
+
+  fn pop_overflow_element(&mut self) {
+    if self.overflow_debt > 0 {
+      self.overflow_debt -= 1;
+    } else if self.overflow_tags.pop().is_none() {
+      return;
+    }
+    self.sync_overflow_markers();
+  }
+
+  fn overflow_depth(&self) -> usize {
+    self.overflow_tags.len().saturating_add(self.overflow_debt)
+  }
+
+  fn sync_overflow_markers(&mut self) {
+    let overflow_depth = self.overflow_depth();
+    if self
+      .overflow_excluded_at
+      .is_some_and(|depth| depth > overflow_depth)
+    {
+      self.overflow_excluded_at = None;
+    }
+    if self
+      .overflow_raw_at
+      .is_some_and(|depth| depth > overflow_depth)
+    {
+      self.overflow_raw_tag_id = None;
+      self.overflow_raw_at = None;
+    }
+  }
+
+  fn close_overflow_element(&mut self, tag_id: Option<u8>, is_builtin: bool) {
+    if self.overflow_debt > 0 {
+      self.pop_overflow_element();
+      return;
+    }
+
+    let target = if is_builtin {
+      tag_id.unwrap_or(OVERFLOW_CUSTOM_TAG)
+    } else {
+      OVERFLOW_CUSTOM_TAG
+    };
+    for index in (0..self.overflow_tags.len()).rev() {
+      let open_tag = self.overflow_tags[index];
+      if target != TAG_TEMPLATE && open_tag == TAG_TEMPLATE {
+        return;
+      }
+      if open_tag == target {
+        self.overflow_tags.truncate(index);
+        self.sync_overflow_markers();
+        return;
+      }
+    }
+  }
+
   pub(crate) fn process_text_buffer(&mut self, text_buffer: &mut String) {
     let contains_non_whitespace = self.text_buffer_contains_non_whitespace;
     let contains_whitespace = self.text_buffer_contains_whitespace;
@@ -314,10 +403,11 @@ impl ConvertState {
     // No parent element means this is a top-level (root) text node, e.g. the
     // leading `foo ` in the fragment `foo <sup>bar</sup>`. Such text must
     // still be emitted rather than dropped (issue #93).
-    let mut excludes_text_nodes = self
-      .stack
-      .last()
-      .is_some_and(|parent| parent.excludes_text_nodes || parent.excluded_from_markdown);
+    let mut excludes_text_nodes = self.overflow_excluded_at.is_some()
+      || self
+        .stack
+        .last()
+        .is_some_and(|parent| parent.excludes_text_nodes || parent.excluded_from_markdown);
 
     if self.has_isolate_main {
       if self.isolate_main_found {
@@ -537,15 +627,12 @@ impl ConvertState {
     let tag_handler = tag_id.and_then(get_tag_handler);
     // Plugins can read any attribute, so they force full capture. `frontmatter`
     // is absent deliberately: TAG_META's own mask already covers what it reads.
-    let attr_mask = if self.has_tailwind
-      || self.has_filter
-      || self.has_extraction
-      || self.has_tag_overrides
-    {
-      ATTR_ALL
-    } else {
-      tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
-    };
+    let attr_mask =
+      if self.has_tailwind || self.has_filter || self.has_extraction || self.has_tag_overrides {
+        ATTR_ALL
+      } else {
+        tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
+      };
     let (complete, new_position, attributes, self_closing) =
       process_tag_attributes(html_chunk, position, tag_handler, attr_mask);
 
@@ -556,6 +643,24 @@ impl ConvertState {
         self_closing: false,
         skip: false,
       };
+    }
+
+    if self.overflow_depth() > 0 {
+      if self.overflow_debt == 0
+        && tag_id.is_some_and(closes_p)
+        && self.overflow_tags.contains(&TAG_P)
+      {
+        self.close_overflow_element(Some(TAG_P), true);
+      }
+      if self.overflow_depth() > 0 {
+        self.push_overflow_element(tag_id, is_builtin, tag_handler, self_closing);
+        return OpeningTagResult {
+          complete: true,
+          new_position,
+          self_closing,
+          skip: true,
+        };
+      }
     }
 
     // Browser recovery: a non-head start tag while <head> is still open means the
@@ -678,7 +783,7 @@ impl ConvertState {
     }
 
     if !self_closing && self.stack.len() >= MAX_ELEMENT_DEPTH {
-      self.depth_limit_reached = true;
+      self.push_overflow_element(tag_id, is_builtin, tag_handler, false);
       return OpeningTagResult {
         complete: true,
         new_position,
@@ -1247,6 +1352,20 @@ impl ConvertState {
         .and_then(|ov| ov.alias_tag_id)
     };
 
+    if self.overflow_depth() > 0 {
+      if !tag_id
+        .and_then(get_tag_handler)
+        .is_some_and(|handler| handler.is_self_closing)
+      {
+        self.close_overflow_element(tag_id, builtin_tag_id.is_some());
+      }
+      self.just_closed_tag = true;
+      return CloseTagResult {
+        complete: true,
+        new_position: i + 1,
+      };
+    }
+
     if let Some(curr) = self.stack.last()
       && curr.is_non_nesting
       && curr.tag_id != tag_id
@@ -1340,7 +1459,11 @@ impl ConvertState {
     };
 
     let result = self.process_opening_tag("#cdata-section", tag_id, false, ">", 0);
-    if !result.complete || result.skip {
+    if !result.complete {
+      return;
+    }
+    if result.skip {
+      self.pop_overflow_element();
       return;
     }
 
