@@ -273,6 +273,23 @@ fn included_flattened_root_overrides_excluded_ancestors() {
 }
 
 #[test]
+fn included_flattened_root_stays_hidden_under_a_hidden_ancestor() {
+  let html = format!(
+    "<div hidden>{}<nav>HIDDEN</nav>{}</div>",
+    "<div>".repeat(LIMIT - 1),
+    "</div>".repeat(LIMIT - 1),
+  );
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::include(&["nav"])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(&html, options), "");
+}
+
+#[test]
 fn output_neutral_plugins_keep_visible_overflow_content() {
   let html = format!(
     "{}<span>visible</span>{}<p>after</p>",
