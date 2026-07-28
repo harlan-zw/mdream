@@ -72,6 +72,7 @@ import {
   TAG_META,
   TAG_METER,
   TAG_NAV,
+  TAG_NOEMBED,
   TAG_NOFRAMES,
   TAG_NOSCRIPT,
   TAG_OL,
@@ -313,6 +314,15 @@ const Strikethrough: TagHandler = {
 }
 
 // Tag handlers with metadata
+// Fallback content a browser with the feature enabled does not render. Both
+// flags are needed: isNonNesting alone emits the raw text, excludesTextNodes
+// alone still parses descendant markup into elements.
+const INERT_RAWTEXT: TagHandler = {
+  isNonNesting: true,
+  excludesTextNodes: true,
+  spacing: NO_SPACING,
+}
+
 export const tagHandlers: Record<number, TagHandler> = {
   // Numeric tag constants
   [TAG_HEAD]: {
@@ -847,10 +857,7 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_CANVAS]: {
     spacing: NO_SPACING,
   },
-  [TAG_IFRAME]: {
-    isNonNesting: true,
-    spacing: NO_SPACING,
-  },
+  [TAG_IFRAME]: { ...INERT_RAWTEXT },
   [TAG_MAP]: {
     spacing: NO_SPACING,
   },
@@ -904,10 +911,8 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
     isInline: true,
   },
-  [TAG_NOSCRIPT]: {
-    excludesTextNodes: true,
-    spacing: NO_SPACING,
-  },
+  [TAG_NOSCRIPT]: { ...INERT_RAWTEXT },
+  [TAG_NOEMBED]: { ...INERT_RAWTEXT },
   [TAG_DATALIST]: {
     // <datalist> holds <option> autocomplete data that browsers never render.
     // Treat the whole body as inert and drop it, mirroring <template>.
@@ -915,10 +920,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     excludesTextNodes: true,
     spacing: NO_SPACING,
   },
-  [TAG_NOFRAMES]: {
-    isNonNesting: true,
-    spacing: NO_SPACING,
-  },
+  [TAG_NOFRAMES]: { ...INERT_RAWTEXT },
   [TAG_XMP]: {
     isNonNesting: true,
     spacing: NO_SPACING,

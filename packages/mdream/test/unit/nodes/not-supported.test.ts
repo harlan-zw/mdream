@@ -43,4 +43,17 @@ describe.each(engines)('not supported $name', (engineConfig) => {
     })
     expect(markdown).toBe('[Nuxt Concepts](/docs/guide/concepts) Read more in Nuxt Concepts.')
   })
+  // Fallback content for a feature the reader supports: read as raw text, and a
+  // browser with the feature enabled renders none of it.
+  it.each(['iframe', 'noframes', 'noembed', 'noscript'])('drops %s fallback content', async (tag) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<p>before</p><${tag}><p>hidden</p></${tag}><p>after</p>`
+    expect(htmlToMarkdown(html, { engine })).toBe('before\n\nafter')
+  })
+
+  // The counterpart: these are raw text too, but are rendered.
+  it.each(['textarea', 'xmp', 'plaintext'])('keeps %s body', async (tag) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(`<${tag}>kept text</${tag}>`, { engine })).toContain('kept text')
+  })
 })

@@ -112,8 +112,9 @@ pub const TAG_DATALIST: u8 = 108;
 pub const TAG_OPTGROUP: u8 = 109;
 pub const TAG_S: u8 = 110;
 pub const TAG_STRIKE: u8 = 111;
+pub const TAG_NOEMBED: u8 = 112;
 
-pub const MAX_TAG_ID: usize = 112;
+pub const MAX_TAG_ID: usize = 113;
 
 /// Reverse lookup: tag ID → static tag name string.
 /// Avoids allocating a String for known tags.
@@ -231,6 +232,7 @@ pub static TAG_NAMES: [&str; MAX_TAG_ID] = {
   names[TAG_CAPTION as usize] = "caption";
   names[TAG_DATALIST as usize] = "datalist";
   names[TAG_OPTGROUP as usize] = "optgroup";
+  names[TAG_NOEMBED as usize] = "noembed";
   names
 };
 
@@ -406,6 +408,7 @@ fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
     b"optgroup" => TAG_OPTGROUP,
     b"article" => TAG_ARTICLE,
     b"address" => TAG_ADDRESS,
+    b"noembed" => TAG_NOEMBED,
     b"strong" => TAG_STRONG,
     b"source" => TAG_SOURCE,
     b"select" => TAG_SELECT,
