@@ -51,9 +51,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           pr_sha=$(git rev-parse HEAD)
-          trap 'git checkout --detach "$pr_sha"' EXIT
+          trap 'git checkout --force --detach "$pr_sha"' EXIT
 
-          git checkout --detach "$BASE_SHA"
+          git checkout --force --detach "$BASE_SHA"
           rm -rf /tmp/base-dist
           mkdir -p /tmp/base-dist
 
@@ -70,7 +70,7 @@ jobs:
             echo "The base commit predates the bundle-size harness; bundles will be reported as new."
           fi
 
-          git checkout --detach "$pr_sha"
+          git checkout --force --detach "$pr_sha"
           trap - EXIT
 
       - name: Build pull request bundles
