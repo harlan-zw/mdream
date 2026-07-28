@@ -1,6 +1,6 @@
 {
   "name": "@mdream/rust-wasm32-wasi",
-  "version": "1.5.6",
+  "version": "1.5.7",
   "cpu": [
     "wasm32"
   ],
