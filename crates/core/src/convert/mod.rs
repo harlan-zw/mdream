@@ -953,6 +953,15 @@ impl ConvertState {
           carry = true;
           break;
         }
+      } else if !next.is_ascii_alphabetic() && next != QUESTION_CHAR {
+        // Tag open state starts a tag only on an ASCII letter; `?` opens a bogus
+        // comment. Anything else is text, so `I <3 Rust` is not a tag named `3`.
+        text_buffer.push(LT_CHAR as char);
+        self.text_buffer_contains_non_whitespace = true;
+        self.text_buffer_has_inline_gfm_hazard = true;
+        self.last_char_was_whitespace = false;
+        self.just_closed_tag = false;
+        i += 1;
       } else {
         let mut i2 = i + 1;
         let tag_name_start = i2;
@@ -1000,17 +1009,6 @@ impl ConvertState {
             .and_then(|ov| ov.alias_tag_id)
         };
         i2 = tag_name_end;
-
-        if tag_name_raw.is_empty() {
-          // `<` followed by whitespace or `>` is not a tag: treat as literal text
-          text_buffer.push(bytes[i] as char);
-          self.text_buffer_contains_non_whitespace = true;
-          self.text_buffer_has_inline_gfm_hazard = true;
-          self.last_char_was_whitespace = false;
-          self.just_closed_tag = false;
-          i += 1;
-          continue;
-        }
 
         if !text_buffer.is_empty() {
           self.process_text_buffer(&mut text_buffer);

@@ -76,6 +76,7 @@ const EQUALS_CHAR = 61 // '='
 const QUOTE_CHAR = 34 // '"'
 const APOS_CHAR = 39 // '\''
 const EXCLAMATION_CHAR = 33 // '!'
+const QUESTION_CHAR = 63 // '?'
 const AMPERSAND_CHAR = 38 // '&'
 const BACKSLASH_CHAR = 92 // '\'
 const DASH_CHAR = 45 // '-'
@@ -85,6 +86,10 @@ const NEWLINE_CHAR = 10 // '\n'
 const FORM_FEED_CHAR = 12 // '\f'
 const CARRIAGE_RETURN_CHAR = 13 // '\r'
 const OPEN_BRACKET_CHAR = 91 // '['
+
+function isAsciiAlpha(code: number): boolean {
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+}
 
 function shouldProtectDecodedEntityReferences(state: ParseState): boolean {
   const depthMap = state.depthMap
@@ -425,18 +430,29 @@ function popParserTop(state: ParseState, handleEvent: (event: NodeEvent) => void
     closeNode(state.currentNode!, state, handleEvent)
 }
 
+// A leading `<` is an incomplete tag only when the next byte could start one:
+// `<3` and `<>` are text and must still be emitted.
+function isIncompleteTagResidual(leftover: string): boolean {
+  if (leftover.charCodeAt(0) !== LT_CHAR)
+    return false
+  if (leftover.length === 1)
+    return true
+  const c = leftover.charCodeAt(1)
+  return isAsciiAlpha(c) || c === SLASH_CHAR || c === EXCLAMATION_CHAR || c === QUESTION_CHAR
+}
+
 /**
  * Commit end-of-input state: flush trailing buffered text and close any open
  * elements. The streaming parser keeps trailing text and unclosed elements
  * pending (a later chunk might continue them); at true EOF they must be
  * committed so trailing content is not dropped (e.g. `<p>a<p>b`).
  *
- * `leftover` is the residual returned by the final `parseHtmlStream`. Pure
- * trailing text (no leading `<`) is emitted; a residual that is an incomplete
- * start tag (leading `<`) is dropped, matching the browser tokenizer's
- * EOF-in-tag behaviour. The text-buffer flags set while the trailing text was
- * scanned persist on `state`, so `processTextBuffer` commits it as if the next
- * tag had triggered the flush.
+ * `leftover` is the residual returned by the final `parseHtmlStream`. Trailing
+ * text is emitted; a residual that is an incomplete start tag is dropped,
+ * matching the browser tokenizer's EOF-in-tag behaviour. A leading `<` alone
+ * does not make it a tag: `<3` is text. The text-buffer flags set while the
+ * trailing text was scanned persist on `state`, so `processTextBuffer` commits
+ * it as if the next tag had triggered the flush.
  */
 export function finalizeParse(
   leftover: string,
@@ -450,7 +466,7 @@ export function finalizeParse(
       processTextBuffer(scriptText, state, handleEvent)
     }
   }
-  else if (leftover.length > 0 && leftover.charCodeAt(0) !== LT_CHAR) {
+  else if (leftover.length > 0 && !isIncompleteTagResidual(leftover)) {
     processTextBuffer(leftover, state, handleEvent)
   }
   while (state.currentNode) {
@@ -994,6 +1010,16 @@ function parseHtmlInternal(
         textBuffer += result.remainingText
         break
       }
+    }
+    // `<` NOT STARTING A TAG
+    // Tag open state starts a tag only on an ASCII letter; `?` opens a bogus
+    // comment. Anything else is text, so `I <3 Rust` is not a tag named `3`.
+    else if (!isAsciiAlpha(nextCharCode) && nextCharCode !== QUESTION_CHAR) {
+      state.textBufferContainsNonWhitespace = true
+      state.lastCharWasWhitespace = false
+      state.justClosedTag = false
+      textBuffer += htmlChunk[i++]
+      continue
     }
     // OPENING TAG
     else {

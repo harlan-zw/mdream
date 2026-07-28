@@ -3447,3 +3447,54 @@ fn wrap_nested_list_in_blockquote_keeps_structure() {
     );
   }
 }
+
+#[test]
+fn lt_before_a_non_letter_is_text_not_a_tag() {
+  // `<3` was scanned as a tag named `3` whose attributes ran to the next `>`,
+  // so the rest of the text node disappeared.
+  for (html, expected) in [
+    ("<p>I <3 Rust</p>", "I <3 Rust"),
+    ("<p>5 <10 and 10> 5</p>", "5 <10 and 10> 5"),
+    ("<p>a <1b>c</p>", "a <1b>c"),
+    ("<p>a <-b>c</p>", "a <-b>c"),
+    ("<p>a <<em>b</em>c</p>", "a <*b*c"),
+    ("<3", "<3"),
+    ("<>", "<>"),
+    ("< 3", "< 3"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for split in 0..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let mut out = stream.process_chunk(&html[..split]);
+      out.push_str(&stream.process_chunk(&html[split..]));
+      out.push_str(&stream.finish());
+      assert_eq!(out.trim_end(), expected, "{html} split at {split}");
+    }
+  }
+
+  // `_` is still escaped for Markdown; only the tag/text decision changed.
+  assert_eq!(convert("<p>x <_y>z</p>"), "x <\\_y>z");
+
+  // `?` opens a bogus comment, which is discarded rather than emitted.
+  assert_eq!(convert("<?pi?>after"), "after");
+  assert_eq!(convert("<p>a <?b>c</p>"), "a c");
+
+  // An incomplete tag at end of input is still dropped, not emitted as text.
+  assert_eq!(convert("<div"), "");
+  assert_eq!(convert("<p>ok</p><div"), "ok");
+
+  // A run whose only non-whitespace byte is `<` must still count as non-empty,
+  // or the text node is dropped. Table cells take a separate emit path.
+  assert_eq!(convert("<p>< </p>"), "<");
+  assert_eq!(convert("<p><\t</p>"), "<");
+  assert_eq!(convert("<div>< </div>"), "<");
+  assert_eq!(convert("<p>< <b>x</b></p>"), "< **x**");
+  assert_eq!(
+    convert("<table><tr><td>< </td></tr></table>"),
+    "| < |\n| --- |"
+  );
+  assert_eq!(
+    convert("<table><tr><td>< <b>x</b></td></tr></table>"),
+    "| < **x** |\n| --- |"
+  );
+}
