@@ -98,7 +98,7 @@ Vitest bench runs each benchmark for a minimum time window, collecting enough sa
 
 ### CI Regression Benchmarks (`perf-ci.mjs`)
 
-Every PR's Bundle Size comment includes a Performance section produced by `bench/perf-ci.mjs`. It benchmarks the built bench bundles (JS core, minimal preset, stream, Rust edge WASM), running base and PR back-to-back on the same runner so machine variance cancels. The suite converts the 1.8 MB Wikipedia fixture and streams synthetic long text, style, and excluded script bodies through the compiled Rust WASM API. The synthetic cases exercise chunk-boundary scaling that ordinary markup cannot expose. Signals per bench:
+Every PR's Bundle Size comment includes a Performance section produced by `bench/perf-ci.mjs`. It benchmarks the built bench bundles (JS core, minimal preset, stream, Rust edge WASM), running base and PR back-to-back on the same runner so machine variance cancels. The suite converts the 1.8 MB Wikipedia fixture, streams it with link-aligned chunk boundaries, and streams synthetic long text, style, and excluded script bodies through the compiled Rust WASM API. The streaming cases exercise real conversion and chunk-boundary scaling. Signals per bench:
 
 - **Main-thread CPU** (`process.threadCpuUsage()`): the gated timing authority. Excludes V8's background GC/JIT threads and descheduling, which makes it ~3x steadier than process-wide CPU on this allocation-heavy workload. A change is flagged past `max(5%, 2x combined RME)`.
 - **Wall time**: informational only; never drives the verdict.

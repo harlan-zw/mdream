@@ -44,6 +44,7 @@ const bundle = name => import(pathToFileURL(resolve(distDir, name)).href)
 // the fixture always comes from the PR checkout so base and PR chew identical input
 const html = readFileSync(resolve(currentDir, 'bundle/wiki.html'), 'utf8')
 const htmlBytes = new TextEncoder().encode(html)
+const htmlAnchorChunks = splitAfterAnchors(html)
 const STREAM_CHUNK_SIZE = 16 * 1024
 const RUST_STREAM_CHUNK_SIZE = 8 * 1024
 const RUST_STREAM_BODY_SIZE = 2 * 1024 * 1024
@@ -59,6 +60,19 @@ function stats(samples) {
   const variance = samples.reduce((a, b) => a + (b - mean) ** 2, 0) / (samples.length - 1)
   const sem = Math.sqrt(variance) / Math.sqrt(samples.length)
   return { value: mean, rme: (sem * 1.96 / mean) * 100 } // 95% CI as a percentage of the mean
+}
+
+function splitAfterAnchors(source) {
+  const chunks = []
+  let start = 0
+  for (const match of source.matchAll(/<\/a\s*>/gi)) {
+    const end = match.index + match[0].length
+    chunks.push(source.slice(start, end))
+    start = end
+  }
+  if (start < source.length)
+    chunks.push(source.slice(start))
+  return chunks
 }
 
 // per batch, record both wall time and main-thread CPU time (user+system); the
@@ -155,6 +169,20 @@ async function rustBenches() {
     }
   }
 
+  function drainRustChunks(glue, chunks) {
+    const stream = new glue.MarkdownStream(undefined)
+    let outputLength = 0
+    try {
+      for (const chunk of chunks)
+        outputLength += stream.processChunk(chunk).length
+      outputLength += stream.finish().length
+      return outputLength
+    }
+    finally {
+      stream.free()
+    }
+  }
+
   const { glue, instance } = await loadRust('timing')
   const convertRust = () => glue.htmlToMarkdown(html, undefined)
   const wikiTimes = await timeBenches('rust-wiki', 'Rust edge (WASM) · wiki', convertRust, { warmup: 5, reps: 16, runs: 8 })
@@ -174,11 +202,22 @@ async function rustBenches() {
     () => drainRustStream(glue, styleRun),
     streamTimeOptions,
   )
+  const anchorStreamTimes = await timeBenches(
+    'rust-stream-wiki-anchors',
+    'Rust stream (WASM) · wiki at link boundaries',
+    () => drainRustChunks(glue, htmlAnchorChunks),
+    { warmup: 1, reps: 8, runs: 2 },
+  )
 
   // Use a fresh WASM instance so earlier fixtures cannot set the memory high-water mark.
   const { glue: scriptGlue, instance: scriptInstance } = await loadRust('script-memory')
   const scriptRun = `<script>${'a'.repeat(RUST_SCRIPT_BODY_SIZE)}</script>`
   drainRustStream(scriptGlue, scriptRun)
+
+  // Use the full fixture with a boundary after every link. This covers normal
+  // conversion while exposing retention hidden by fixed-size transport frames.
+  const { glue: streamWikiGlue, instance: streamWikiInstance } = await loadRust('stream-wiki-memory')
+  drainRustChunks(streamWikiGlue, htmlAnchorChunks)
 
   // linear memory only grows, and after the timed warm runs it has hit its plateau,
   // so this is a deterministic peak (exact byte-for-byte across runs), not a sample
@@ -186,8 +225,10 @@ async function rustBenches() {
     ...wikiTimes,
     ...textTimes,
     ...styleTimes,
+    ...anchorStreamTimes,
     { id: 'rust-wiki-mem', name: 'Rust edge (WASM) · wiki linear memory (peak)', kind: 'alloc', value: wikiMemory },
     { id: 'rust-stream-script-mem', name: 'Rust stream (WASM) · excluded 8 MiB script memory (peak)', kind: 'alloc', value: scriptInstance.memory.buffer.byteLength },
+    { id: 'rust-stream-wiki-anchors-mem', name: 'Rust stream (WASM) · wiki at link boundaries memory (peak)', kind: 'alloc', value: streamWikiInstance.memory.buffer.byteLength },
   ]
 }
 
