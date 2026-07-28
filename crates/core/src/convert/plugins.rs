@@ -2,9 +2,11 @@
 
 use super::*;
 
-/// Frontmatter fields are bounded by explicit plugin configuration and the
-/// metadata allowlist. A small stable insertion sort avoids linking Rust's
-/// general-purpose stable sorter into the Edge WASM build.
+/// Both collections are bounded independently of document length: extracted
+/// metadata is deduplicated against the fixed defaults plus `meta_fields`,
+/// while additional fields come directly from trusted plugin configuration. A
+/// small stable insertion sort avoids linking Rust's general-purpose stable
+/// sorter into the Edge WASM build.
 fn sort_fields_by_key<T, F>(fields: &mut [T], key: F)
 where
   F: for<'a> Fn(&'a T) -> &'a str,

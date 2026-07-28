@@ -19,7 +19,7 @@ pub(crate) fn process_tailwind_classes(
 
   let mut weight = None::<(u8, bool)>;
   let mut emphasis = None::<(u8, bool)>;
-  let mut decoration = false;
+  let mut decoration = None::<(u8, bool)>;
   let mut display_hidden = None::<(u8, bool)>;
   let mut position_hidden = None::<(u8, bool)>;
 
@@ -50,8 +50,14 @@ pub(crate) fn process_tailwind_classes(
       if supersedes(weight) {
         weight = Some((breakpoint, false));
       }
-    } else if base.contains("line-through") || base.contains("underline") {
-      decoration = true;
+    } else if base == "line-through" || base == "underline" {
+      if supersedes(decoration) {
+        decoration = Some((breakpoint, true));
+      }
+    } else if base == "no-underline" {
+      if supersedes(decoration) {
+        decoration = Some((breakpoint, false));
+      }
     } else if base == "hidden" || base.contains("invisible") {
       if supersedes(display_hidden) {
         display_hidden = Some((breakpoint, true));
@@ -77,7 +83,7 @@ pub(crate) fn process_tailwind_classes(
     prefix.push('*');
     suffix.insert(0, '*');
   }
-  if decoration {
+  if decoration.is_some_and(|(_, enabled)| enabled) {
     prefix.push_str("~~");
     suffix.insert_str(0, "~~");
   }
@@ -123,6 +129,35 @@ mod tests {
     assert_eq!(p.as_deref(), Some("~~"));
     let (p, _, _) = process_tailwind_classes("underline");
     assert_eq!(p.as_deref(), Some("~~"));
+  }
+
+  #[test]
+  fn decoration_modifiers_do_not_enable_strikethrough() {
+    for classes in [
+      "underline-offset-4",
+      "no-underline",
+      "decoration-underline",
+    ] {
+      let (prefix, suffix, _) = process_tailwind_classes(classes);
+      assert!(prefix.is_none(), "{classes}");
+      assert!(suffix.is_none(), "{classes}");
+    }
+  }
+
+  #[test]
+  fn decoration_resets_follow_breakpoint_priority() {
+    assert!(process_tailwind_classes("line-through no-underline").0.is_none());
+    assert!(process_tailwind_classes("no-underline line-through").0.is_some());
+    assert!(
+      process_tailwind_classes("md:line-through no-underline")
+        .0
+        .is_some()
+    );
+    assert!(
+      process_tailwind_classes("line-through md:no-underline")
+        .0
+        .is_none()
+    );
   }
 
   #[test]
