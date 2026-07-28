@@ -295,15 +295,14 @@ pub struct ConvertState {
   in_non_nesting: bool,
   script_data_state: u8,
   in_pre: bool,
-  overflow_tags: Vec<u8>,
-  overflow_debt: usize,
-  overflow_opaque_tag_id: Option<u8>,
-  overflow_opaque_custom_name: Option<String>,
+  overflow_tag_id: Option<u8>,
+  overflow_custom_name: Option<String>,
+  overflow_same_name_depth: usize,
+  overflow_included: bool,
+  overflow_opaque_name: Option<String>,
   overflow_opaque_depth: usize,
-  overflow_raw_tag_id: Option<u8>,
-  overflow_raw_custom_name: Option<String>,
+  overflow_raw_name: Option<String>,
   overflow_raw_excludes_text: bool,
-  overflow_raw_at: Option<usize>,
   /// Shallowest open element that is hidden or matches an exclude selector.
   /// Both drop their whole subtree, so one marker skips it in O(1).
   hidden_since_depth: Option<usize>,
@@ -461,15 +460,14 @@ impl ConvertState {
       in_non_nesting: false,
       script_data_state: SCRIPT_DATA,
       in_pre: false,
-      overflow_tags: Vec::new(),
-      overflow_debt: 0,
-      overflow_opaque_tag_id: None,
-      overflow_opaque_custom_name: None,
+      overflow_tag_id: None,
+      overflow_custom_name: None,
+      overflow_same_name_depth: 0,
+      overflow_included: false,
+      overflow_opaque_name: None,
       overflow_opaque_depth: 0,
-      overflow_raw_tag_id: None,
-      overflow_raw_custom_name: None,
+      overflow_raw_name: None,
       overflow_raw_excludes_text: false,
-      overflow_raw_at: None,
       hidden_since_depth: None,
       filter_included_since_depth: None,
       collapse_non_span_depth: 0,
@@ -798,7 +796,7 @@ impl ConvertState {
       // Non-nesting guard: inside script/style/title/textarea, only the
       // matching closing tag exits. All other '<' patterns (comments,
       // non-matching closing tags, opening tags) are treated as literal text.
-      if let Some(raw_tag_id) = self.overflow_raw_tag_id {
+      if let Some(raw_name) = self.overflow_raw_name.as_deref() {
         let next = bytes[i + 1];
         if next == SLASH_CHAR {
           let peek_start = i + 2;
@@ -815,27 +813,7 @@ impl ConvertState {
             break;
           }
           let peek_name = &chunk[peek_start..peek_end];
-          let peek_tag_id =
-            crate::consts::get_tag_id_ci_bytes(peek_name.as_bytes()).or_else(|| {
-              self
-                .options
-                .plugins
-                .as_ref()
-                .and_then(|plugins| plugins.tag_overrides.as_ref())
-                .and_then(|overrides| {
-                  overrides
-                    .iter()
-                    .find(|(name, _)| name.eq_ignore_ascii_case(peek_name))
-                    .and_then(|(_, override_config)| override_config.alias_tag_id)
-                })
-            });
-          let matches_raw = self
-            .overflow_raw_custom_name
-            .as_deref()
-            .map_or(peek_tag_id == Some(raw_tag_id), |name| {
-              name.eq_ignore_ascii_case(peek_name)
-            });
-          if matches_raw {
+          if raw_name.eq_ignore_ascii_case(peek_name) {
             if !text_buffer.is_empty() {
               self.process_text_buffer(&mut text_buffer);
               text_buffer.clear();

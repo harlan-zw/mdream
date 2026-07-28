@@ -256,6 +256,23 @@ fn filtered_content_stays_hidden_in_overflow() {
 }
 
 #[test]
+fn included_flattened_root_overrides_excluded_ancestors() {
+  let html = format!(
+    "{}<nav>KEEP</nav>{}",
+    "<div>".repeat(LIMIT),
+    "</div>".repeat(LIMIT),
+  );
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::include(&["nav"])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(&html, options), "KEEP");
+}
+
+#[test]
 fn output_neutral_plugins_keep_visible_overflow_content() {
   let html = format!(
     "{}<span>visible</span>{}<p>after</p>",
