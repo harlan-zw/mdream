@@ -120,7 +120,7 @@ describe('element depth limit', () => {
     expect(htmlToMarkdown(html)).toBe('> > ALPHA\n> >\n> > X\n> >\n> > OMEGA\n\nZED')
   })
 
-  it('keeps template content inert after the identity window', () => {
+  it('keeps template content inert inside the flattened subtree', () => {
     const html = `${'<div>'.repeat(LIMIT)}${'<span>'.repeat(LIMIT)}<template><b>hidden</template>${'</span>'.repeat(LIMIT)}${'</div>'.repeat(LIMIT)}<p>after</p>`
     expect(htmlToMarkdown(html)).toBe('after')
   })

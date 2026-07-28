@@ -224,7 +224,7 @@ fn structural_ancestors_survive_the_overflow_boundary() {
 }
 
 #[test]
-fn template_content_stays_inert_after_the_identity_window() {
+fn template_content_stays_inert_inside_the_flattened_subtree() {
   let html = format!(
     "{}{}<template><b>hidden</template>{}{}<p>after</p>",
     "<div>".repeat(LIMIT),
