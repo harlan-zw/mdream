@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mdream::MarkdownStreamProcessor;
 use mdream::html_to_markdown;
-use mdream::types::{CleanConfig, HTMLToMarkdownOptions};
+use mdream::types::{CleanConfig, HTMLToMarkdownOptions, PluginConfig, TagOverrideConfig};
 
 // ── Peak-allocation tracking allocator ──
 // Streaming must free already-yielded output; a criterion/time bench can't show
@@ -137,6 +137,44 @@ fn assert_stream_matches_every_split(html: &str, opts: HTMLToMarkdownOptions) {
 #[test]
 fn streaming_every_split_supports_multibyte_html() {
   assert_stream_matches_every_split("<p>café 😀</p>", HTMLToMarkdownOptions::default());
+}
+
+// CDATA is dropped unless opted into, so the fixture cases never reach it. Both
+// of its carry paths (a boundary inside the `<![CDATA[` opener, and an
+// unterminated section) hold text in the buffer while carrying only the token,
+// so a leading text run is the case that would duplicate if they disagreed.
+fn cdata_emitted() -> HTMLToMarkdownOptions {
+  HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "#cdata-section".to_string(),
+        TagOverrideConfig {
+          enter: Some("[".to_string()),
+          exit: Some("]".to_string()),
+          spacing: Some([0, 0]),
+          is_inline: Some(true),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  }
+}
+
+#[test]
+fn streaming_cdata_matches_one_shot_at_every_boundary() {
+  for html in [
+    "<p>a<![CDATA[x]]>b</p>",
+    "<p>before text <![CDATA[payload here]]> after text</p>",
+    "<p>lead<![CDATA[one]]>mid<![CDATA[two]]>tail</p>",
+    "<p>text</p><![CDATA[between blocks]]><p>more</p>",
+  ] {
+    // Chunk sizes from 1 up feed the opener a byte at a time, so the partial
+    // `<![CDATA[` path is hit repeatedly; every_split covers each single cut.
+    assert_stream_matches(html, cdata_emitted());
+    assert_stream_matches_every_split(html, cdata_emitted());
+  }
 }
 
 #[test]
@@ -653,6 +691,88 @@ fn streaming_keeps_block_newline_count_across_drain() {
       expected,
       "chunk={chunk}"
     );
+  }
+}
+
+// A text run is parsed once across however many chunks it spans instead of
+// being re-fed as raw input, so a run longer than the chunk resumes rather than
+// restarting. The existing cases are all shorter than one chunk, which cannot
+// exercise that.
+#[test]
+fn streaming_long_text_run_matches_one_shot() {
+  let long = "lorem ipsum dolor sit amet consectetur adipiscing elit ".repeat(40);
+  for html in [
+    format!("<p>{long}</p>"),
+    format!("<p>{long}</p><p>after</p>"),
+    format!("<p>a  b{long}   c</p>"),
+    format!("<pre>{long}</pre>"),
+    format!("<p>{long}&amp;{long}</p>"),
+    format!("<p>{long}<em>x</em>{long}</p>"),
+    format!("<style>{long}</style><p>after</p>"),
+    format!("<script>{long}</script><p>after</p>"),
+    format!("<!--{long}--><p>after</p>"),
+    format!("<p>café {long} 😀</p>"),
+  ] {
+    let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+    for chunk in [1usize, 2, 3, 7, 64, 997, 8192] {
+      assert_eq!(
+        stream_chars(&html, chunk, HTMLToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} len={}",
+        html.len()
+      );
+    }
+  }
+}
+
+// A text run that spans a chunk boundary must not shift with the boundary, at
+// any split point, including inside multibyte characters' neighbourhoods.
+#[test]
+fn streaming_text_run_spanning_chunks_matches_every_split() {
+  for html in [
+    "<p>the quick brown fox jumps over the lazy dog and keeps running onwards</p>",
+    "<p>double  spaces   and\ttabs\nand newlines spread across a longer run</p>",
+    "<p>entity &amp; heavy &lt;text&gt; run that continues past a boundary</p>",
+    "<p>trailing whitespace sensitive run ending in a space <em>x</em></p>",
+    "<pre>preformatted  run   keeping    spacing across a chunk boundary</pre>",
+  ] {
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// Real-world documents at several chunk sizes: the broadest guard that chunking
+// never changes the output.
+#[test]
+fn streaming_matches_one_shot_on_fixtures() {
+  const FIXTURES: &[(&str, &str)] = &[
+    ("wikipedia", include_str!("fixtures/wikipedia-small.html")),
+    ("mdn", include_str!("fixtures/mdn-array.html")),
+    ("react", include_str!("fixtures/react-learn.html")),
+    ("vuejs", include_str!("fixtures/vuejs-docs.html")),
+    ("nuxt", include_str!("fixtures/nuxt-example.html")),
+    (
+      "github",
+      include_str!("fixtures/github-markdown-complete.html"),
+    ),
+  ];
+  for (name, html) in FIXTURES {
+    for opts in [
+      HTMLToMarkdownOptions::default(),
+      HTMLToMarkdownOptions {
+        clean: Some(safe_clean()),
+        ..Default::default()
+      },
+    ] {
+      let expected = html_to_markdown(html, opts.clone());
+      assert!(!expected.trim().is_empty(), "{name} produced no output");
+      for chunk in [997usize, 4096, 8192, 65536] {
+        assert_eq!(
+          stream_chars(html, chunk, opts.clone()),
+          expected,
+          "{name} diverged at chunk={chunk}"
+        );
+      }
+    }
   }
 }
 
