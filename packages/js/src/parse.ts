@@ -1271,6 +1271,8 @@ function processClosingTag(
     }
   }
 
+  const stopAtTemplate = tagId !== TAG_TEMPLATE && (state.depthMap[TAG_TEMPLATE] || 0) > 0
+  let curr: ElementNode | null | undefined
   if (state.flattenedTagName) {
     const closedRaw = state.flattenedRawTagName !== undefined
     if (closedRaw) {
@@ -1289,16 +1291,15 @@ function processClosingTag(
       }
     }
     if (!closedRaw) {
-      const stopAtTemplate = tagId !== TAG_TEMPLATE && (state.depthMap[TAG_TEMPLATE] || 0) > 0
-      let richMatch: ElementNode | null | undefined = state.currentNode
-      while (richMatch && !matchesClosingTag(richMatch, tagName, tagId, closingIsAlias)) {
-        if (stopAtTemplate && richMatch.tagId === TAG_TEMPLATE) {
-          richMatch = null
+      curr = state.currentNode
+      while (curr && !matchesClosingTag(curr, tagName, tagId, closingIsAlias)) {
+        if (stopAtTemplate && curr.tagId === TAG_TEMPLATE) {
+          curr = null
           break
         }
-        richMatch = richMatch.parent
+        curr = curr.parent
       }
-      if (richMatch) {
+      if (curr) {
         clearFlattenedElements(state)
       }
       else {
@@ -1330,14 +1331,15 @@ function processClosingTag(
 
   // Find a matching parent node. A template is a scope boundary: an end tag in
   // its inert contents must never pop an element from the outer document.
-  const stopAtTemplate = tagId !== TAG_TEMPLATE && (state.depthMap[TAG_TEMPLATE] || 0) > 0
-  let curr: ElementNode | null | undefined = state.currentNode
-  while (curr && !matchesClosingTag(curr, tagName, tagId, closingIsAlias)) {
-    if (stopAtTemplate && curr.tagId === TAG_TEMPLATE) {
-      curr = null
-      break
+  if (!curr) {
+    curr = state.currentNode
+    while (curr && !matchesClosingTag(curr, tagName, tagId, closingIsAlias)) {
+      if (stopAtTemplate && curr.tagId === TAG_TEMPLATE) {
+        curr = null
+        break
+      }
+      curr = curr.parent
     }
-    curr = curr.parent
   }
 
   if (curr) {
@@ -1412,18 +1414,26 @@ function startsOpaqueFlattening(
 ): boolean {
   if (tagId === TAG_TEMPLATE)
     return true
-  if (!state.resolvedPlugins?.some(plugin => plugin.excludesOverflowSubtree))
+  const plugins = state.resolvedPlugins
+  if (!plugins)
     return false
-  const node = new ParsedElementNode(
-    tagName,
-    attributes,
-    state.currentNode,
-    state.depth + 1,
-    0,
-    tagId,
-    tagHandler,
-  )
-  return state.resolvedPlugins.some(plugin => plugin.excludesOverflowSubtree?.(node))
+  let node: ParsedElementNode | undefined
+  for (const plugin of plugins) {
+    if (!plugin.excludesOverflowSubtree)
+      continue
+    node ||= new ParsedElementNode(
+      tagName,
+      attributes,
+      state.currentNode,
+      state.depth + 1,
+      0,
+      tagId,
+      tagHandler,
+    )
+    if (plugin.excludesOverflowSubtree(node))
+      return true
+  }
+  return false
 }
 
 function enterOpaqueFlattening(state: ParseState, tagName: string, tagHandler: Node['tagHandler']): void {
