@@ -310,6 +310,21 @@ mod tests {
     assert_eq!(a.get("id").map(String::as_str), Some("main"));
   }
 
+  /// A repeated name is a duplicate-attribute parse error and the later one is
+  /// dropped from the token, so the first wins. Names are lowercased first, so
+  /// `HREF` collides with `href`.
+  #[test]
+  fn duplicate_attribute_keeps_the_first() {
+    let a = parse_attributes("href=/first href=/second", ATTR_ALL);
+    assert_eq!(a.get("href").map(String::as_str), Some("/first"));
+
+    let b = parse_attributes("href=/first HREF=/second", ATTR_ALL);
+    assert_eq!(b.get("href").map(String::as_str), Some("/first"));
+
+    let c = parse_attributes("href=\"/1\" href='/2' href=/3", ATTR_ALL);
+    assert_eq!(c.get("href").map(String::as_str), Some("/1"));
+  }
+
   #[test]
   fn parses_valueless_and_empty_attributes() {
     let a = parse_attributes("disabled checked", ATTR_ALL);

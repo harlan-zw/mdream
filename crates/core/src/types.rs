@@ -33,15 +33,14 @@ impl Attributes {
     self.inner.iter().any(|(k, _)| k == key)
   }
 
+  /// The first occurrence of a name wins: the HTML parser treats a repeated
+  /// attribute name as a duplicate-attribute parse error and drops the later
+  /// one, so `<a href=/first href=/second>` links to `/first`.
   #[inline]
   pub fn insert(&mut self, key: String, value: String) {
-    for (k, v) in &mut self.inner {
-      if *k == key {
-        *v = value;
-        return;
-      }
+    if !self.contains_key(&key) {
+      self.inner.push((key, value));
     }
-    self.inner.push((key, value));
   }
 
   #[inline]
