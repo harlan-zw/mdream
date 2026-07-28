@@ -2,6 +2,11 @@
 
 use super::*;
 
+// Firefox and Chromium flatten DOM trees beyond this practical depth. Stop
+// conversion at the same boundary instead of growing the parser stack without
+// limit. Output produced before the boundary remains available to the caller.
+const MAX_ELEMENT_DEPTH: usize = 512;
+
 /// Tags valid inside `<head>` per the HTML parser's "in head" insertion mode.
 /// Any other start tag implies the end of `<head>` and the start of the body, so
 /// an unclosed head is auto-closed when one appears. Unknown tags (`None`) are
@@ -309,19 +314,10 @@ impl ConvertState {
     // No parent element means this is a top-level (root) text node, e.g. the
     // leading `foo ` in the fragment `foo <sup>bar</sup>`. Such text must
     // still be emitted rather than dropped (issue #93).
-    let mut excludes_text_nodes = if self.stack.len() >= MAX_ELEMENT_DEPTH {
-      let suppressed_reincludes =
-        self.suppressed_filter_include_depth() > 0 || self.suppressed_isolate_main_depth() > 0;
-      self.stack.last().is_some_and(|parent| {
-        parent.excludes_text_nodes || (parent.excluded_from_markdown && !suppressed_reincludes)
-      }) || self.suppressed_excludes_text_depth() > 0
-        || self.hidden_since_depth.is_some()
-    } else {
-      self
-        .stack
-        .last()
-        .is_some_and(|parent| parent.excludes_text_nodes || parent.excluded_from_markdown)
-    };
+    let mut excludes_text_nodes = self
+      .stack
+      .last()
+      .is_some_and(|parent| parent.excludes_text_nodes || parent.excluded_from_markdown);
 
     if self.has_isolate_main {
       if self.isolate_main_found {
@@ -340,13 +336,10 @@ impl ConvertState {
     if self.has_frontmatter
       && self.frontmatter_in_head
       && !excludes_text_nodes
-      && (self
-        .suppressed_last()
-        .is_some_and(|tag| tag.tag_id == Some(TAG_TITLE))
-        || self
-          .stack
-          .last()
-          .is_some_and(|parent| parent.tag_id == Some(TAG_TITLE)))
+      && self
+        .stack
+        .last()
+        .is_some_and(|p| p.tag_id == Some(TAG_TITLE))
     {
       let val = text_buffer.trim().to_string();
       if !val.is_empty() {
@@ -474,26 +467,6 @@ impl ConvertState {
   /// elements) are closed along the way, mirroring the spec's "generate implied
   /// end tags" step.
   fn close_implied_to(&mut self, target: &[bool; 256], boundary: &[bool; 256]) {
-    let mut compact_close_count = 0usize;
-    let mut compact_found_boundary = false;
-    for tag in self.suppressed_tags().iter().rev() {
-      match tag.tag_id {
-        Some(id) if target[id as usize] => {
-          compact_close_count += 1;
-          self.truncate_suppressed(self.suppressed_len() - compact_close_count);
-          return;
-        }
-        Some(id) if boundary[id as usize] => {
-          compact_found_boundary = true;
-          break;
-        }
-        _ => compact_close_count += 1,
-      }
-    }
-    if compact_found_boundary {
-      return;
-    }
-
     let mut close_count = 0usize;
     let mut found = false;
     for node in self.stack.iter().rev() {
@@ -508,7 +481,6 @@ impl ConvertState {
       }
     }
     if found {
-      self.truncate_suppressed(0);
       for _ in 0..close_count {
         self.close_node();
       }
@@ -520,17 +492,6 @@ impl ConvertState {
   /// enclosing `<table>`). Implements implied end tags for `<tr>` (closes an open
   /// cell + row) and `<thead>`/`<tbody>`/`<tfoot>` (closes cell + row + section).
   fn close_table_context(&mut self, closeable: &[bool; 256]) {
-    let compact_close_count = self
-      .suppressed_tags()
-      .iter()
-      .rev()
-      .take_while(|tag| tag.tag_id.is_some_and(|id| closeable[id as usize]))
-      .count();
-    self.truncate_suppressed(self.suppressed_len() - compact_close_count);
-    if self.has_suppressed() {
-      return;
-    }
-
     while let Some(top) = self.stack.last() {
       match top.tag_id {
         Some(id) if closeable[id as usize] => self.close_node(),
@@ -543,28 +504,6 @@ impl ConvertState {
   /// at their owning `<select>`; a select scan includes the select itself. This
   /// only runs for recovery tags, leaving the common path as one table lookup.
   fn close_select_to(&mut self, target_id: u8) -> bool {
-    let mut compact_found_boundary = false;
-    for index in (0..self.suppressed_len()).rev() {
-      match self.suppressed_tags()[index].tag_id {
-        Some(id) if id == target_id => {
-          self.truncate_suppressed(index);
-          return true;
-        }
-        Some(TAG_SELECT) if target_id != TAG_SELECT => {
-          compact_found_boundary = true;
-          break;
-        }
-        Some(TAG_TEMPLATE) => {
-          compact_found_boundary = true;
-          break;
-        }
-        _ => {}
-      }
-    }
-    if compact_found_boundary {
-      return false;
-    }
-
     let mut target_index = None;
     for i in (0..self.stack.len()).rev() {
       match self.stack[i].tag_id {
@@ -578,144 +517,12 @@ impl ConvertState {
       }
     }
     if let Some(index) = target_index {
-      self.truncate_suppressed(0);
       while self.stack.len() > index {
         self.close_node();
       }
       true
     } else {
       false
-    }
-  }
-
-  fn parser_last_tag_id(&self) -> Option<u8> {
-    if let Some(tag) = self.suppressed_last() {
-      tag.tag_id
-    } else {
-      self.stack.last().and_then(|node| node.tag_id)
-    }
-  }
-
-  fn pop_parser_top(&mut self) {
-    if self.has_suppressed() {
-      self.pop_suppressed();
-    } else {
-      self.close_node();
-    }
-  }
-
-  /// Apply start-tag recovery across the compact and materialized stack tiers.
-  /// Returns `true` when the incoming start tag must itself be ignored.
-  fn recover_opening(&mut self, id: u8) -> bool {
-    match id {
-      // In the "in select" insertion mode a nested select acts as the end of
-      // the open select; the incoming start tag itself is ignored.
-      TAG_SELECT if self.parser_tag_depth(TAG_SELECT) > 0 => {
-        return self.close_select_to(TAG_SELECT);
-      }
-      TAG_OPTION => {
-        if self.parser_tag_depth(TAG_SELECT) > 0 {
-          self.close_select_to(TAG_OPTION);
-        } else if self.parser_last_tag_id() == Some(TAG_OPTION) {
-          self.pop_parser_top();
-        }
-      }
-      TAG_OPTGROUP if self.parser_tag_depth(TAG_SELECT) > 0 => {
-        self.close_select_to(TAG_OPTION);
-        self.close_select_to(TAG_OPTGROUP);
-      }
-      // Anchors cannot nest, so a nested start closes the open anchor.
-      TAG_A if self.parser_tag_depth(TAG_A) > 0 => {
-        self.close_implied_to(&TARGET_A, &A_SCOPE_BOUNDARY);
-      }
-      TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT
-        if self.parser_tag_depth(TAG_TABLE) > 0 =>
-      {
-        match id {
-          TAG_TD | TAG_TH
-            if self.parser_tag_depth(TAG_TD) > 0 || self.parser_tag_depth(TAG_TH) > 0 =>
-          {
-            self.close_implied_to(&TARGET_CELL, &CELL_SCOPE_BOUNDARY);
-          }
-          TAG_TR if self.parser_tag_depth(TAG_TR) > 0 => {
-            self.close_table_context(&ROW_CLOSEABLE);
-          }
-          TAG_THEAD | TAG_TBODY | TAG_TFOOT => {
-            self.close_table_context(&SECTION_CLOSEABLE);
-          }
-          _ => {}
-        }
-      }
-      TAG_A | TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT | TAG_OPTGROUP
-      | TAG_SELECT => {}
-      _ => {
-        if self.parser_tag_depth(TAG_P) > 0 {
-          debug_assert!(closes_p(id));
-          self.close_implied_to(&TARGET_P, &P_SCOPE_BOUNDARY);
-        }
-        match id {
-          // Heading starts only pop an immediately current heading.
-          TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6
-            if self.parser_last_tag_id().is_some_and(|tag_id| {
-              matches!(tag_id, TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6)
-            }) =>
-          {
-            self.pop_parser_top();
-          }
-          TAG_LI if self.parser_tag_depth(TAG_LI) > 0 => {
-            self.close_implied_to(&TARGET_LI, &LI_SCOPE_BOUNDARY);
-          }
-          TAG_DT | TAG_DD
-            if self.parser_tag_depth(TAG_DT) > 0 || self.parser_tag_depth(TAG_DD) > 0 =>
-          {
-            self.close_implied_to(&TARGET_DT_DD, &DL_SCOPE_BOUNDARY);
-          }
-          _ => {}
-        }
-      }
-    }
-    false
-  }
-
-  fn process_frontmatter_opening(&mut self, tag: &ElementNode, in_template: bool) {
-    if !self.has_frontmatter || in_template {
-      return;
-    }
-    if tag.tag_id == Some(TAG_HEAD) {
-      self.frontmatter_in_head = true;
-    } else if self.frontmatter_in_head && tag.tag_id == Some(TAG_META) {
-      let name = tag
-        .attributes
-        .get("name")
-        .or_else(|| tag.attributes.get("property"));
-      let content = tag.attributes.get("content");
-      if let (Some(n), Some(c)) = (name, content) {
-        let n_str = n.as_str();
-        let is_allowed = match n_str {
-          "description"
-          | "keywords"
-          | "author"
-          | "date"
-          | "og:title"
-          | "og:description"
-          | "twitter:title"
-          | "twitter:description" => true,
-          _ => self
-            .options
-            .plugins
-            .as_ref()
-            .and_then(|plugins| plugins.frontmatter.as_ref())
-            .and_then(|frontmatter| frontmatter.meta_fields.as_ref())
-            .is_some_and(|allowed| allowed.iter().any(|field| field == n_str)),
-        };
-        if is_allowed {
-          if let Some(entry) = self.frontmatter_meta.iter_mut().find(|(key, _)| key == n) {
-            entry.1.clone_from(c);
-          } else {
-            self.frontmatter_meta.push((n.clone(), c.clone()));
-          }
-        }
-      }
     }
   }
 
@@ -730,12 +537,15 @@ impl ConvertState {
     let tag_handler = tag_id.and_then(get_tag_handler);
     // Plugins can read any attribute, so they force full capture. `frontmatter`
     // is absent deliberately: TAG_META's own mask already covers what it reads.
-    let attr_mask =
-      if self.has_tailwind || self.has_filter || self.has_extraction || self.has_tag_overrides {
-        ATTR_ALL
-      } else {
-        tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
-      };
+    let attr_mask = if self.has_tailwind
+      || self.has_filter
+      || self.has_extraction
+      || self.has_tag_overrides
+    {
+      ATTR_ALL
+    } else {
+      tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
+    };
     let (complete, new_position, attributes, self_closing) =
       process_tag_attributes(html_chunk, position, tag_handler, attr_mask);
 
@@ -755,7 +565,6 @@ impl ConvertState {
     if self.depth_map[TAG_HEAD as usize] > 0
       && self.depth_map[TAG_TEMPLATE as usize] == 0
       && !is_head_content_tag(tag_id)
-      && !self.has_suppressed()
     {
       while self
         .stack
@@ -781,201 +590,99 @@ impl ConvertState {
     // mutates parser state or emits a premature close.
     if let Some(id) = tag_id
       && needs_implied_end_recovery(id)
-      && self.recover_opening(id)
     {
-      return OpeningTagResult {
-        complete: true,
-        new_position,
-        self_closing: false,
-        skip: true,
-      };
-    }
-
-    let flatten = self.stack.len() >= MAX_ELEMENT_DEPTH;
-    if flatten && self.stack.len() + self.suppressed_len() >= MAX_LOGICAL_DEPTH {
-      self.failure = Some(ConversionError::ElementDepthLimitExceeded {
-        max_depth: MAX_LOGICAL_DEPTH,
-        attempted_depth: MAX_LOGICAL_DEPTH + 1,
-      });
-      return OpeningTagResult {
-        complete: true,
-        new_position,
-        self_closing: false,
-        skip: true,
-      };
-    }
-
-    if flatten {
-      self.degraded = true;
-      let virtual_depth = self.depth + self.suppressed_len() + 1;
-      let custom_name = if is_builtin {
-        None
-      } else {
-        Some(tag_name.to_string())
-      };
-      let (h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) =
-        if let Some(handler) = tag_handler {
-          (
-            handler.is_inline,
-            handler.excludes_text_nodes,
-            handler.is_non_nesting,
-            handler.collapses_inner_white_space,
-            handler.spacing,
-          )
-        } else if tag_id.is_none() {
-          (true, false, false, false, Some(NO_SPACING))
-        } else {
-          (false, false, false, false, None)
-        };
-      let probe = ElementNode {
-        custom_name,
-        attributes,
-        tag_id,
-        depth: virtual_depth,
-        index: 0,
-        current_walk_index: 0,
-        child_text_node_index: 0,
-        contains_whitespace: false,
-        excluded_from_markdown: false,
-        tailwind: None,
-        is_inline: h_inline,
-        excludes_text_nodes: h_excludes,
-        is_non_nesting: h_non_nesting,
-        collapses_inner_white_space: h_collapses,
-        spacing: h_spacing,
-      };
-
-      let in_template = tag_id == Some(TAG_TEMPLATE)
-        || self.depth_map[TAG_TEMPLATE as usize] > 0
-        || self.suppressed_tag_depth(TAG_TEMPLATE) > 0;
-      let mut skip_node = false;
-      let mut filter_excluded = false;
-      let mut filter_include_match = false;
-      let mut tailwind_hidden = false;
-
-      if self.has_tailwind {
-        let parent_hidden = self.suppressed_excludes_text_depth() > 0
-          || self
+      match id {
+        // In the "in select" insertion mode a nested <select> acts as the end
+        // of the open select; the incoming start tag itself is ignored.
+        TAG_SELECT if self.depth_map[TAG_SELECT as usize] > 0 => {
+          if self.close_select_to(TAG_SELECT) {
+            return OpeningTagResult {
+              complete: true,
+              new_position,
+              self_closing: false,
+              skip: true,
+            };
+          }
+        }
+        TAG_OPTION => {
+          if self.depth_map[TAG_SELECT as usize] > 0 {
+            self.close_select_to(TAG_OPTION);
+          } else if self
             .stack
             .last()
-            .and_then(|parent| parent.tailwind.as_ref())
-            .is_some_and(|tailwind| tailwind.hidden);
-        tailwind_hidden = probe
-          .attributes
-          .get("class")
-          .is_some_and(|class| process_tailwind_classes(class).2)
-          || parent_hidden;
-        skip_node |= tailwind_hidden;
-      }
-
-      if self.has_filter {
-        if self.hidden_since_depth.is_some() || is_hidden(&probe) {
-          skip_node = true;
-          filter_excluded = true;
-        }
-        if !skip_node {
-          filter_excluded = self
-            .filter_exclude_parsed
-            .iter()
-            .any(|(_, parsed)| matches_selector(&probe, parsed));
-          skip_node |= filter_excluded;
-        }
-        if !skip_node && !self.filter_include_parsed.is_empty() {
-          filter_include_match = self
-            .filter_include_parsed
-            .iter()
-            .any(|(_, parsed)| matches_selector(&probe, parsed));
-          let mut match_found = filter_include_match;
-          if !match_found && self.filter_process_children {
-            match_found = self.suppressed_filter_include_depth() > 0
-              || self.filter_included_since_depth.is_some();
-          }
-          if !match_found {
-            skip_node = true;
-            filter_excluded = true;
-          }
-        }
-      }
-
-      let isolate_main = if self.has_isolate_main && !in_template {
-        let is_main = tag_id == Some(TAG_MAIN);
-        if !self.isolate_main_found && is_main && virtual_depth <= 50 {
-          self.isolate_main_found = true;
-        }
-        if self.isolate_main_found {
-          if self.isolate_main_closed {
-            skip_node = true;
-          }
-        } else {
-          let is_header = tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id));
-          if self.isolate_first_header_depth.is_none()
-            && is_header
-            && self.depth_map[TAG_HEADER as usize] == 0
-            && self.suppressed_tag_depth(TAG_HEADER) == 0
+            .is_some_and(|node| node.tag_id == Some(TAG_OPTION))
           {
-            self.isolate_first_header_depth = Some(virtual_depth);
+            self.close_node();
           }
-          if let Some(header_depth) = self.isolate_first_header_depth
-            && !self.isolate_after_footer
-            && tag_id == Some(TAG_FOOTER)
-            && virtual_depth.saturating_sub(header_depth) <= 5
-          {
-            self.isolate_after_footer = true;
-            skip_node = true;
-          }
-          if self.isolate_first_header_depth.is_none() {
-            let head_is_open =
-              self.depth_map[TAG_HEAD as usize] > 0 || self.suppressed_tag_depth(TAG_HEAD) > 0;
-            if tag_id != Some(TAG_HEAD) && !head_is_open {
-              skip_node = true;
+        }
+        TAG_OPTGROUP if self.depth_map[TAG_SELECT as usize] > 0 => {
+          self.close_select_to(TAG_OPTION);
+          self.close_select_to(TAG_OPTGROUP);
+        }
+        // A nested <a> closes the open one (anchors cannot nest), so the
+        // markdown is two adjacent links rather than invalid nested `[..]`.
+        TAG_A if self.depth_map[TAG_A as usize] > 0 => {
+          self.close_implied_to(&TARGET_A, &A_SCOPE_BOUNDARY);
+        }
+        TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT
+          if self.depth_map[TAG_TABLE as usize] > 0 =>
+        {
+          match id {
+            TAG_TD | TAG_TH
+              if self.depth_map[TAG_TD as usize] > 0 || self.depth_map[TAG_TH as usize] > 0 =>
+            {
+              self.close_implied_to(&TARGET_CELL, &CELL_SCOPE_BOUNDARY);
             }
-          } else if self.isolate_after_footer {
-            skip_node = true;
+            TAG_TR if self.depth_map[TAG_TR as usize] > 0 => {
+              self.close_table_context(&ROW_CLOSEABLE);
+            }
+            TAG_THEAD | TAG_TBODY | TAG_TFOOT => {
+              self.close_table_context(&SECTION_CLOSEABLE);
+            }
+            _ => {}
           }
         }
-        is_main && self.isolate_main_found && !self.isolate_main_closed && !skip_node
-      } else {
-        false
-      };
-
-      self.process_frontmatter_opening(&probe, in_template);
-      if !self_closing {
-        let custom_name_id = if is_builtin {
-          Some(0)
-        } else {
-          self.intern_suppressed_custom_name(tag_name)
-        };
-        let Some(custom_name_id) = custom_name_id else {
-          return OpeningTagResult {
-            complete: true,
-            new_position,
-            self_closing: false,
-            skip: true,
-          };
-        };
-        let excluded_from_markdown = in_template
-          || tailwind_hidden
-          || filter_excluded
-          || (skip_node && (!self.has_isolate_main || self.isolate_main_found));
-        let mut flags = 0;
-        if h_excludes || excluded_from_markdown {
-          flags |= SUPPRESSED_EXCLUDES_TEXT;
+        TAG_A | TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT | TAG_OPTGROUP
+        | TAG_SELECT => {}
+        _ => {
+          if self.depth_map[TAG_P as usize] > 0 {
+            debug_assert!(closes_p(id));
+            self.close_implied_to(&TARGET_P, &P_SCOPE_BOUNDARY);
+          }
+          match id {
+            // A heading start closes an open heading (they cannot nest); only
+            // when one is the current node, matching the spec's "if the current
+            // node is an h1–h6 element, pop it" step.
+            TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6
+              if self.stack.last().is_some_and(|n| {
+                matches!(
+                  n.tag_id,
+                  Some(TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6)
+                )
+              }) =>
+            {
+              self.close_node();
+            }
+            TAG_LI if self.depth_map[TAG_LI as usize] > 0 => {
+              self.close_implied_to(&TARGET_LI, &LI_SCOPE_BOUNDARY);
+            }
+            TAG_DT | TAG_DD
+              if self.depth_map[TAG_DT as usize] > 0 || self.depth_map[TAG_DD as usize] > 0 =>
+            {
+              self.close_implied_to(&TARGET_DT_DD, &DL_SCOPE_BOUNDARY);
+            }
+            _ => {}
+          }
         }
-        if h_non_nesting {
-          flags |= SUPPRESSED_NON_NESTING;
-        }
-        if filter_include_match {
-          flags |= SUPPRESSED_FILTER_INCLUDE;
-        }
-        if isolate_main {
-          flags |= SUPPRESSED_ISOLATE_MAIN;
-        }
-        self.push_suppressed(SuppressedTag::new(tag_id, custom_name_id, flags));
       }
+    }
+
+    if !self_closing && self.stack.len() >= MAX_ELEMENT_DEPTH {
+      self.depth_limit_reached = true;
       return OpeningTagResult {
         complete: true,
         new_position,
-        self_closing,
+        self_closing: false,
         skip: true,
       };
     }
@@ -1173,7 +880,44 @@ impl ConvertState {
         }
       }
 
-      self.process_frontmatter_opening(&tag, in_template);
+      if self.has_frontmatter && !in_template {
+        if tag_id == Some(TAG_HEAD) {
+          self.frontmatter_in_head = true;
+        } else if self.frontmatter_in_head && tag_id == Some(TAG_META) {
+          let name = tag
+            .attributes
+            .get("name")
+            .or_else(|| tag.attributes.get("property"));
+          let content = tag.attributes.get("content");
+          if let (Some(n), Some(c)) = (name, content) {
+            let n_str = n.as_str();
+            let is_allowed = match n_str {
+              "description"
+              | "keywords"
+              | "author"
+              | "date"
+              | "og:title"
+              | "og:description"
+              | "twitter:title"
+              | "twitter:description" => true,
+              _ => self
+                .options
+                .plugins
+                .as_ref()
+                .and_then(|p| p.frontmatter.as_ref())
+                .and_then(|f| f.meta_fields.as_ref())
+                .is_some_and(|allowed| allowed.iter().any(|a| a == n_str)),
+            };
+            if is_allowed {
+              if let Some(entry) = self.frontmatter_meta.iter_mut().find(|(k, _)| k == n) {
+                entry.1.clone_from(c);
+              } else {
+                self.frontmatter_meta.push((n.clone(), c.clone()));
+              }
+            }
+          }
+        }
+      }
     }
 
     tag.excluded_from_markdown = in_template
@@ -1503,46 +1247,6 @@ impl ConvertState {
         .and_then(|ov| ov.alias_tag_id)
     };
 
-    if self.has_suppressed() {
-      let custom_name_id = if builtin_tag_id.is_some() {
-        0
-      } else {
-        self.suppressed_custom_name_id(tag_name.as_ref())
-      };
-      let is_builtin = builtin_tag_id.is_some();
-      if let Some(position) = self.suppressed_match_position(tag_id, custom_name_id, is_builtin) {
-        self.truncate_suppressed(position);
-        self.just_closed_tag = true;
-        return CloseTagResult {
-          complete: true,
-          new_position: i + 1,
-        };
-      }
-
-      let scope_blocks_real =
-        tag_id != Some(TAG_TEMPLATE) && self.suppressed_last_template_index() > 0;
-      let targets_real = !scope_blocks_real
-        && if builtin_tag_id.is_some() {
-          matches!(tag_id, Some(id) if self.depth_map[id as usize] > 0)
-        } else {
-          let close_name: &str = tag_name.as_ref();
-          self
-            .stack
-            .iter()
-            .any(|node| node.tag_id == tag_id && node.custom_name.as_deref() == Some(close_name))
-        };
-      if targets_real {
-        self.clear_suppressed();
-      } else {
-        self.last_node_is_inline = true;
-        self.just_closed_tag = true;
-        return CloseTagResult {
-          complete: true,
-          new_position: i + 1,
-        };
-      }
-    }
-
     if let Some(curr) = self.stack.last()
       && curr.is_non_nesting
       && curr.tag_id != tag_id
@@ -1636,13 +1340,7 @@ impl ConvertState {
     };
 
     let result = self.process_opening_tag("#cdata-section", tag_id, false, ">", 0);
-    if !result.complete {
-      return;
-    }
-    if result.skip {
-      if !result.self_closing && self.failure.is_none() {
-        self.pop_suppressed();
-      }
+    if !result.complete || result.skip {
       return;
     }
 
@@ -1650,8 +1348,7 @@ impl ConvertState {
       let excluded = self
         .stack
         .last()
-        .is_some_and(|n| n.excluded_from_markdown || n.excludes_text_nodes)
-        || self.suppressed_excludes_text_depth() > 0;
+        .is_some_and(|n| n.excluded_from_markdown || n.excludes_text_nodes);
       if !excluded {
         let depth = self.depth;
         let index = self.stack.last().map_or(0, |n| n.current_walk_index);

@@ -1,16 +1,8 @@
 use mdream::MarkdownStreamProcessor;
 use mdream::types::{HTMLToMarkdownOptions, OutputFormat};
-use std::error::Error;
 use std::io::{self, Read, Write};
 
-fn main() {
-  if let Err(error) = run() {
-    eprintln!("mdream: {error}");
-    std::process::exit(1);
-  }
-}
-
-fn run() -> Result<(), Box<dyn Error>> {
+fn main() -> io::Result<()> {
   let args: Vec<String> = std::env::args().collect();
   let mut origin: Option<String> = None;
   let mut verbose = false;
@@ -94,11 +86,11 @@ fn run() -> Result<(), Box<dyn Error>> {
     let valid_up_to = match std::str::from_utf8(&carry) {
       Ok(s) => s.len(),
       Err(e) if e.error_len().is_none() => e.valid_up_to(),
-      Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e).into()),
+      Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e)),
     };
     if valid_up_to > 0 {
       let chunk = std::str::from_utf8(&carry[..valid_up_to]).unwrap();
-      let md = processor.try_process_chunk(chunk)?;
+      let md = processor.process_chunk(chunk);
       if !md.is_empty() {
         total_out += md.len();
         out.write_all(md.as_bytes())?;
@@ -109,25 +101,16 @@ fn run() -> Result<(), Box<dyn Error>> {
   }
 
   if !carry.is_empty() {
-    return Err(
-      io::Error::new(
-        io::ErrorKind::InvalidData,
-        "stream ended with an incomplete UTF-8 codepoint",
-      )
-      .into(),
-    );
+    return Err(io::Error::new(
+      io::ErrorKind::InvalidData,
+      "stream ended with an incomplete UTF-8 codepoint",
+    ));
   }
 
-  let remaining = processor.try_finish()?;
+  let remaining = processor.finish();
   if !remaining.is_empty() {
     total_out += remaining.len();
     out.write_all(remaining.as_bytes())?;
-  }
-
-  if processor.degraded() {
-    eprintln!(
-      "mdream: warning: compact depth fallback was used; output may have reduced rendering fidelity"
-    );
   }
 
   if verbose {

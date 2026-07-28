@@ -15,9 +15,8 @@ use convert::ConvertState;
 // pulls in everything needed to call `html_to_markdown` without reaching into
 // the `types` module.
 pub use types::{
-  CleanConfig, ConversionError, ExtractionConfig, FilterConfig, FrontmatterConfig,
-  HTMLToMarkdownOptions, IsolateMainConfig, MdreamResult, OutputFormat, PluginConfig,
-  TagOverrideConfig, TailwindConfig,
+  CleanConfig, ExtractionConfig, FilterConfig, FrontmatterConfig, HTMLToMarkdownOptions,
+  IsolateMainConfig, MdreamResult, OutputFormat, PluginConfig, TagOverrideConfig, TailwindConfig,
 };
 
 // Re-export `get_tag_id` so callers can resolve tag names to IDs (for
@@ -25,122 +24,39 @@ pub use types::{
 pub use consts::get_tag_id;
 
 /// Convert HTML to Markdown in a single pass.
-///
-/// # Panics
-///
-/// Panics when bounded parsing fails. Use [`try_html_to_markdown`] to handle
-/// [`ConversionError`] as a value.
 pub fn html_to_markdown(html: &str, options: HTMLToMarkdownOptions) -> String {
-  try_html_to_markdown(html, options).unwrap_or_else(|error| panic!("{error}"))
-}
-
-/// Fallible single-pass conversion for bounded parsing of untrusted HTML.
-pub fn try_html_to_markdown(
-  html: &str,
-  options: HTMLToMarkdownOptions,
-) -> Result<String, ConversionError> {
-  try_html_to_format(html, options, OutputFormat::Markdown)
+  html_to_format(html, options, OutputFormat::Markdown)
 }
 
 /// Convert HTML to readable plain text in a single pass.
-///
-/// # Panics
-///
-/// Panics when bounded parsing fails. Use [`try_html_to_text`] to handle
-/// [`ConversionError`] as a value.
 pub fn html_to_text(html: &str, options: HTMLToMarkdownOptions) -> String {
-  try_html_to_text(html, options).unwrap_or_else(|error| panic!("{error}"))
-}
-
-/// Fallible plain-text conversion for bounded parsing of untrusted HTML.
-pub fn try_html_to_text(
-  html: &str,
-  options: HTMLToMarkdownOptions,
-) -> Result<String, ConversionError> {
-  try_html_to_format(html, options, OutputFormat::Text)
+  html_to_format(html, options, OutputFormat::Text)
 }
 
 /// Convert HTML to the requested output format in a single pass.
-///
-/// # Panics
-///
-/// Panics when bounded parsing fails. Use [`try_html_to_format`] to handle
-/// [`ConversionError`] as a value.
 pub fn html_to_format(html: &str, options: HTMLToMarkdownOptions, format: OutputFormat) -> String {
-  try_html_to_format(html, options, format).unwrap_or_else(|error| panic!("{error}"))
-}
-
-/// Fallible conversion to the requested output format.
-pub fn try_html_to_format(
-  html: &str,
-  options: HTMLToMarkdownOptions,
-  format: OutputFormat,
-) -> Result<String, ConversionError> {
-  Ok(try_html_to_format_result(html, options, format)?.markdown)
+  html_to_format_result(html, options, format).markdown
 }
 
 /// Convert HTML to Markdown with full results (extraction, frontmatter).
-///
-/// # Panics
-///
-/// Panics when bounded parsing fails. Use [`try_html_to_markdown_result`] to
-/// handle [`ConversionError`] as a value.
 pub fn html_to_markdown_result(html: &str, options: HTMLToMarkdownOptions) -> MdreamResult {
-  try_html_to_markdown_result(html, options).unwrap_or_else(|error| panic!("{error}"))
-}
-
-/// Fallible Markdown conversion with extraction and frontmatter results.
-pub fn try_html_to_markdown_result(
-  html: &str,
-  options: HTMLToMarkdownOptions,
-) -> Result<MdreamResult, ConversionError> {
-  try_html_to_format_result(html, options, OutputFormat::Markdown)
+  html_to_format_result(html, options, OutputFormat::Markdown)
 }
 
 /// Convert HTML to plain text with full results (extraction, frontmatter).
-///
-/// # Panics
-///
-/// Panics when bounded parsing fails. Use [`try_html_to_text_result`] to handle
-/// [`ConversionError`] as a value.
 pub fn html_to_text_result(html: &str, options: HTMLToMarkdownOptions) -> MdreamResult {
-  try_html_to_text_result(html, options).unwrap_or_else(|error| panic!("{error}"))
-}
-
-/// Fallible plain-text conversion with extraction and frontmatter results.
-pub fn try_html_to_text_result(
-  html: &str,
-  options: HTMLToMarkdownOptions,
-) -> Result<MdreamResult, ConversionError> {
-  try_html_to_format_result(html, options, OutputFormat::Text)
+  html_to_format_result(html, options, OutputFormat::Text)
 }
 
 /// Convert HTML to the requested format with full results (extraction, frontmatter).
-///
-/// # Panics
-///
-/// Panics when bounded parsing fails. Use [`try_html_to_format_result`] to
-/// handle [`ConversionError`] as a value.
 pub fn html_to_format_result(
   html: &str,
   options: HTMLToMarkdownOptions,
   format: OutputFormat,
 ) -> MdreamResult {
-  try_html_to_format_result(html, options, format).unwrap_or_else(|error| panic!("{error}"))
-}
-
-/// Fallible conversion to the requested format with full results.
-pub fn try_html_to_format_result(
-  html: &str,
-  options: HTMLToMarkdownOptions,
-  format: OutputFormat,
-) -> Result<MdreamResult, ConversionError> {
   let capacity = (html.len() / 3).clamp(1024, 256 * 1024);
   let mut state = ConvertState::new(options, capacity, format);
   let leftover = state.process_html(html);
-  if let Some(error) = state.failure() {
-    return Err(error);
-  }
   state.finalize(&leftover);
 
   let extracted = if state.has_extraction {
@@ -155,14 +71,12 @@ pub fn try_html_to_format_result(
   };
 
   let frontmatter = state.frontmatter();
-  let degraded = state.degraded();
 
-  Ok(MdreamResult {
+  MdreamResult {
     markdown: state.get_markdown(),
     extracted,
     frontmatter,
-    degraded,
-  })
+  }
 }
 
 /// Streaming HTML-to-Markdown converter.
@@ -195,16 +109,6 @@ impl MarkdownStreamProcessor {
   }
 
   pub fn process_chunk(&mut self, chunk: &str) -> String {
-    self
-      .try_process_chunk(chunk)
-      .unwrap_or_else(|error| panic!("{error}"))
-  }
-
-  /// Process one stream chunk, returning bounded parser failures as values.
-  pub fn try_process_chunk(&mut self, chunk: &str) -> Result<String, ConversionError> {
-    if let Some(error) = self.state.failure() {
-      return Err(error);
-    }
     if self.buffer.is_empty() {
       self.buffer = self.state.process_html(chunk);
     } else {
@@ -212,43 +116,18 @@ impl MarkdownStreamProcessor {
       let full = std::mem::take(&mut self.buffer);
       self.buffer = self.state.process_html(&full);
     }
-    if let Some(error) = self.state.failure() {
-      Err(error)
-    } else {
-      Ok(self.state.get_markdown_chunk())
-    }
-  }
-
-  /// The terminal bounded parser failure, when one has occurred.
-  pub fn failure(&self) -> Option<ConversionError> {
-    self.state.failure()
-  }
-
-  /// Whether compact fallback preserved content with reduced rendering fidelity.
-  pub fn degraded(&self) -> bool {
-    self.state.degraded()
+    self.state.get_markdown_chunk()
   }
 
   pub fn finish(&mut self) -> String {
-    self.try_finish().unwrap_or_else(|error| panic!("{error}"))
-  }
-
-  /// Finish streaming conversion, returning bounded parser failures as values.
-  pub fn try_finish(&mut self) -> Result<String, ConversionError> {
-    if let Some(error) = self.state.failure() {
-      return Err(error);
-    }
     let leftover = if self.buffer.is_empty() {
       String::new()
     } else {
       let chunk = std::mem::take(&mut self.buffer);
       self.state.process_html(&chunk)
     };
-    if let Some(error) = self.state.failure() {
-      return Err(error);
-    }
     self.state.finalize(&leftover);
-    Ok(self.state.get_markdown_chunk())
+    self.state.get_markdown_chunk()
   }
 }
 

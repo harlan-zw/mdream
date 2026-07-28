@@ -567,22 +567,13 @@ Streaming parser that calls `onEvent` for each DOM event. Returns any remaining 
 ```typescript
 import { parseHtmlStream } from '@mdream/js/parse'
 
-const state = { depthMap: new Uint16Array(1024), depth: 0 }
+const state = { depthMap: new Uint8Array(1024), depth: 0 }
 const remaining = parseHtmlStream(htmlChunk, state, (event) => {
   // Process each event
 })
 ```
 
 **Returns:** `string` (remaining unparsed HTML)
-
-**Throws:** `ElementDepthError` when logical nesting exceeds 4096,
-`ElementNameMemoryError` when compact custom names exceed 65536 bytes, or
-`ElementNameCountError` when compact parsing retains more than 3584 distinct
-custom names.
-
-Migration note: `ElementNode.depthMap` and `MdreamProcessingState.depthMap` now
-use `Uint16Array`. Update explicit downstream annotations and manually created
-parser state from `Uint8Array`.
 
 ---
 

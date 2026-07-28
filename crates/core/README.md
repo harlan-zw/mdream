@@ -19,22 +19,12 @@ cargo install mdream
 ### Library
 
 ```rust
-use mdream::{try_html_to_markdown, types::HTMLToMarkdownOptions};
+use mdream::{html_to_markdown, types::HTMLToMarkdownOptions};
 
 let html = "<h1>Hello</h1><p>World</p>";
-let md = try_html_to_markdown(html, HTMLToMarkdownOptions::default())?;
+let md = html_to_markdown(html, HTMLToMarkdownOptions::default());
 assert_eq!(md, "# Hello\n\nWorld");
-# Ok::<(), mdream::ConversionError>(())
 ```
-
-Use the `try_*` APIs for untrusted HTML. The convenience APIs panic on bounded
-parser failures. Fallible splitter equivalents are also available:
-`try_html_to_markdown_chunks` and `try_html_to_format_chunks`.
-
-Full-result APIs expose `MdreamResult::degraded`. A `true` value means parsing
-crossed the 512-element materialization boundary. Content and later siblings
-were preserved with the bounded compact stack, but deeply nested formatting,
-tables, links, or images may have reduced fidelity.
 
 ### Streaming
 
@@ -43,10 +33,9 @@ use mdream::MarkdownStreamProcessor;
 use mdream::types::HTMLToMarkdownOptions;
 
 let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
-let chunk1 = stream.try_process_chunk("<h1>Hello</h1>")?;
-let chunk2 = stream.try_process_chunk("<p>World</p>")?;
-let remaining = stream.try_finish()?;
-# Ok::<(), mdream::ConversionError>(())
+let chunk1 = stream.process_chunk("<h1>Hello</h1>");
+let chunk2 = stream.process_chunk("<p>World</p>");
+let remaining = stream.finish();
 ```
 
 ### CLI

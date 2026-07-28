@@ -66,7 +66,7 @@ export interface MarkdownState {
   tableCurrentRowCells?: number
   tableColumnAlignments?: string[]
   /** Map of tag names to their current nesting depth */
-  depthMap: Uint16Array
+  depthMap: Uint8Array
   /** Current depth for plugin access */
   depth?: number
   /** Context for additional data */
@@ -226,7 +226,7 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
  * never corrupts fences, table rows, or heading lines. Parity with the Rust
  * engine's `can_wrap_here`.
  */
-function canWrapHere(depthMap: Uint16Array): boolean {
+function canWrapHere(depthMap: Uint8Array): boolean {
   if (depthMap[TAG_PRE] || depthMap[TAG_CODE] || depthMap[TAG_TD] || depthMap[TAG_TH]) {
     return false
   }
@@ -289,7 +289,7 @@ function foldPreLinesToBr(value: string): string {
   return out
 }
 
-function escapeRawHtmlText(value: string, depthMap: Uint16Array): string {
+function escapeRawHtmlText(value: string, depthMap: Uint8Array): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
   const inLink = Boolean(depthMap[TAG_A])
   let escaped = ''
@@ -415,7 +415,7 @@ const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
  * precise JavaScript scanner. A block marker can only begin within the first
  * four characters here; later lines are covered by the newline trigger.
  */
-function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array): boolean {
+function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint8Array): boolean {
   if (value.search(GFM_TEXT_NATIVE_TRIGGER) !== -1)
     return true
   if ((depthMap[TAG_TABLE] && value.includes('|'))
@@ -449,7 +449,7 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
  * markers never pass through here, while code and raw-HTML contexts bypass it.
  * The common plain-text path returns the original string without allocation.
  */
-function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): string {
+function escapeGfmText(value: string, buffer: string[], depthMap: Uint8Array): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
   const inLink = Boolean(depthMap[TAG_A])
   const inBlockquote = Boolean(depthMap[TAG_BLOCKQUOTE])
@@ -610,7 +610,7 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
 /**
  * Calculate newline configuration based on tag handler spacing config
  */
-function calculateNewLineConfig(node: ElementNode, depthMap: Uint16Array, plainText: boolean): readonly [number, number] {
+function calculateNewLineConfig(node: ElementNode, depthMap: Uint8Array, plainText: boolean): readonly [number, number] {
   const tagId = node.tagId
 
   // List-item descendants own their structural indentation. Markdown
@@ -985,7 +985,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   const state: MarkdownState = {
     options,
     buffer: [],
-    depthMap: new Uint16Array(MAX_TAG_ID),
+    depthMap: new Uint8Array(MAX_TAG_ID),
     listIndent: '',
     listIndentWidths: [],
     blockquotes: [],

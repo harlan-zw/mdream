@@ -48,7 +48,7 @@ export function streamHtmlToMarkdown(
 export { ELEMENT_NODE, NodeEventEnter, NodeEventExit, TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6, TEXT_NODE } from './const'
 export { createPlugin } from './pluggable/plugin'
 export { withMinimalPreset } from './preset/minimal'
-export type { ElementDepthError, ElementNameCountError, ElementNameMemoryError, ElementParserError, MdreamOptions } from './types'
+export type { MdreamOptions } from './types'
 export type {
   BuiltinPlugins,
   CleanOptions,

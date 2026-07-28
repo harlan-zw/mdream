@@ -74,7 +74,6 @@ pub struct MdreamNapiResult {
   pub extracted: Option<Vec<ExtractedElementNapi>>,
   #[napi(ts_type = "Record<string, string>")]
   pub frontmatter: Option<std::collections::HashMap<String, String>>,
-  pub degraded: bool,
 }
 
 #[napi(object)]
@@ -220,7 +219,6 @@ fn result_to_napi(result: mdream::types::MdreamResult) -> MdreamNapiResult {
         .collect()
     }),
     frontmatter: result.frontmatter.map(|v| v.into_iter().collect()),
-    degraded: result.degraded,
   }
 }
 
@@ -240,67 +238,22 @@ fn catch_panic<F: FnOnce() -> Result<T> + std::panic::UnwindSafe, T>(f: F) -> Re
   }
 }
 
-fn conversion_error(env: Env, error: mdream::ConversionError) -> napi::Error {
-  let build = || -> Result<napi::Error> {
-    let to_u32 = |value| {
-      u32::try_from(value)
-        .map_err(|error: std::num::TryFromIntError| napi::Error::from_reason(error.to_string()))
-    };
-    let mut js_error = env.create_error(napi::Error::new(
-      napi::Status::InvalidArg,
-      error.to_string(),
-    ))?;
-    match error {
-      mdream::ConversionError::ElementDepthLimitExceeded {
-        max_depth,
-        attempted_depth,
-      } => {
-        js_error.set_named_property("_tag", "ElementDepthLimitExceeded")?;
-        js_error.set_named_property("code", "ELEMENT_DEPTH_LIMIT")?;
-        js_error.set_named_property("maxDepth", to_u32(max_depth)?)?;
-        js_error.set_named_property("attemptedDepth", to_u32(attempted_depth)?)?;
-      }
-      mdream::ConversionError::ElementNameMemoryLimitExceeded { max_bytes } => {
-        js_error.set_named_property("_tag", "ElementNameMemoryLimitExceeded")?;
-        js_error.set_named_property("code", "ELEMENT_NAME_MEMORY_LIMIT")?;
-        js_error.set_named_property("maxBytes", to_u32(max_bytes)?)?;
-      }
-      mdream::ConversionError::ElementNameCountLimitExceeded { max_names } => {
-        js_error.set_named_property("_tag", "ElementNameCountLimitExceeded")?;
-        js_error.set_named_property("code", "ELEMENT_NAME_COUNT_LIMIT")?;
-        js_error.set_named_property("maxNames", to_u32(max_names)?)?;
-      }
-    }
-    Ok(napi::Error::from(js_error.into_unknown(&env)?))
-  };
-
-  build().unwrap_or_else(|binding_error| {
-    napi::Error::new(
-      napi::Status::GenericFailure,
-      format!("failed to construct structured conversion error: {binding_error}"),
-    )
-  })
-}
-
 // ── NAPI exports ──
 
 #[napi(js_name = "htmlToMarkdown")]
 pub fn html_to_markdown(
-  env: Env,
   html: String,
   options: Option<HtmlToMarkdownOptions>,
 ) -> Result<MdreamNapiResult> {
   catch_panic(move || {
     let (opts, format) = to_core_opts(options);
-    let result = mdream::try_html_to_format_result(&html, opts, format)
-      .map_err(|error| conversion_error(env, error))?;
+    let result = mdream::html_to_format_result(&html, opts, format);
     Ok(result_to_napi(result))
   })
 }
 
 #[napi(js_name = "htmlToMarkdownBytes")]
 pub fn html_to_markdown_bytes(
-  env: Env,
   html: &[u8],
   options: Option<HtmlToMarkdownOptions>,
 ) -> Result<MdreamNapiResult> {
@@ -309,8 +262,7 @@ pub fn html_to_markdown_bytes(
   let text = text.to_string();
   catch_panic(move || {
     let (opts, format) = to_core_opts(options);
-    let result = mdream::try_html_to_format_result(&text, opts, format)
-      .map_err(|error| conversion_error(env, error))?;
+    let result = mdream::html_to_format_result(&text, opts, format);
     Ok(result_to_napi(result))
   })
 }
@@ -334,27 +286,21 @@ impl MarkdownStream {
 
   #[napi]
   #[allow(clippy::needless_pass_by_value)]
-  pub fn process_chunk(&mut self, env: Env, chunk: String) -> Result<String> {
+  pub fn process_chunk(&mut self, chunk: String) -> Result<String> {
     if !self.utf8_carry.is_empty() {
       return Err(napi::Error::new(
         napi::Status::InvalidArg,
         "Cannot process a string chunk while an incomplete UTF-8 byte sequence is buffered",
       ));
     }
-    self
-      .inner
-      .try_process_chunk(&chunk)
-      .map_err(|error| conversion_error(env, error))
+    Ok(self.inner.process_chunk(&chunk))
   }
 
   #[napi(js_name = "processChunkBytes")]
-  pub fn process_chunk_bytes(&mut self, env: Env, chunk: &[u8]) -> Result<String> {
+  pub fn process_chunk_bytes(&mut self, chunk: &[u8]) -> Result<String> {
     if self.utf8_carry.is_empty() {
       return match std::str::from_utf8(chunk) {
-        Ok(text) => self
-          .inner
-          .try_process_chunk(text)
-          .map_err(|error| conversion_error(env, error)),
+        Ok(text) => Ok(self.inner.process_chunk(text)),
         Err(error) if error.error_len().is_none() => {
           let valid_up_to = error.valid_up_to();
           if valid_up_to == 0 {
@@ -363,10 +309,7 @@ impl MarkdownStream {
           }
           let text = std::str::from_utf8(&chunk[..valid_up_to])
             .expect("valid_up_to must end at a UTF-8 boundary");
-          let markdown = self
-            .inner
-            .try_process_chunk(text)
-            .map_err(|error| conversion_error(env, error))?;
+          let markdown = self.inner.process_chunk(text);
           self.utf8_carry.extend_from_slice(&chunk[valid_up_to..]);
           Ok(markdown)
         }
@@ -394,31 +337,20 @@ impl MarkdownStream {
 
     let text = std::str::from_utf8(&self.utf8_carry[..valid_up_to])
       .expect("valid_up_to must end at a UTF-8 boundary");
-    let markdown = self
-      .inner
-      .try_process_chunk(text)
-      .map_err(|error| conversion_error(env, error))?;
+    let markdown = self.inner.process_chunk(text);
     self.utf8_carry.drain(..valid_up_to);
     Ok(markdown)
   }
 
   #[napi]
-  pub fn finish(&mut self, env: Env) -> Result<String> {
+  pub fn finish(&mut self) -> Result<String> {
     if !self.utf8_carry.is_empty() {
       return Err(napi::Error::new(
         napi::Status::InvalidArg,
         "Stream ended with an incomplete UTF-8 byte sequence",
       ));
     }
-    self
-      .inner
-      .try_finish()
-      .map_err(|error| conversion_error(env, error))
-  }
-
-  #[napi(getter)]
-  pub fn degraded(&self) -> bool {
-    self.inner.degraded()
+    Ok(self.inner.finish())
   }
 }
 
@@ -520,7 +452,6 @@ pub fn split_markdown(
 
 #[napi(js_name = "htmlToMarkdownChunks")]
 pub fn html_to_markdown_chunks(
-  env: Env,
   html: String,
   options: Option<HtmlToMarkdownOptions>,
   splitter_options: Option<SplitterOptionsNapi>,
@@ -528,8 +459,7 @@ pub fn html_to_markdown_chunks(
   catch_panic(move || {
     let (md_opts, format) = to_core_opts(options);
     let split_opts = to_core_splitter_opts(splitter_options)?;
-    let chunks = mdream::splitter::try_html_to_format_chunks(&html, md_opts, &split_opts, format)
-      .map_err(|error| conversion_error(env, error))?;
+    let chunks = mdream::splitter::html_to_format_chunks(&html, md_opts, &split_opts, format);
     Ok(chunks.into_iter().map(chunk_to_napi).collect())
   })
 }

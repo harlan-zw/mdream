@@ -1,4 +1,4 @@
-import type { ElementDepthError, ElementNameCountError, ElementNameMemoryError, ElementNode, Node, NodeEvent, TagHandler, TextNode, TransformPlugin } from './types'
+import type { ElementNode, Node, NodeEvent, TagHandler, TextNode, TransformPlugin } from './types'
 import {
   ELEMENT_NODE,
   isInsideRawHtmlBlock,
@@ -105,32 +105,10 @@ const SCRIPT_SEQUENCE_NO_MATCH = -1
 const SCRIPT_SEQUENCE_INCOMPLETE = -2
 const SCRIPT_SCAN_COMPLETE = -1
 
-// Firefox and Chromium flatten DOM trees beyond this practical depth. Keep the
-// public parent chain at that boundary, then track only bounded parser identity
-// until the hard logical limit.
-const MAX_MATERIALIZED_DEPTH = 512
-const MAX_LOGICAL_DEPTH = 4096
-const COMPACT_CAPACITY = MAX_LOGICAL_DEPTH - MAX_MATERIALIZED_DEPTH
-const MAX_COMPACT_CUSTOM_NAME_BYTES = 64 * 1024
-
-const COMPACT_ALIAS = 1
-const COMPACT_NON_NESTING = 2
-const COMPACT_EXCLUDED = 4
-const COMPACT_SCRIPT = 8
-
-interface CompactElementStack {
-  tagIds: Int16Array
-  nameIds: Uint16Array
-  flags: Uint8Array
-  tagTops: Int16Array
-  regularTagTops: Int16Array
-  nameTops: Int16Array
-  previousTagTop: Int16Array
-  previousMatch: Int16Array
-  length: number
-  customNameIds: Map<string, number>
-  customNameBytes: number
-}
+// Firefox and Chromium flatten DOM trees beyond this practical depth. Stop
+// conversion at the same boundary instead of growing the parser's parent chain
+// without limit on pathologically nested input.
+const MAX_ELEMENT_DEPTH = 512
 
 // Tags that are valid inside <head>. Per the HTML parser's "in head" insertion
 // mode, any start tag NOT in this set implies the end of <head> and the start of
@@ -149,12 +127,15 @@ const HEAD_CONTENT_TAGS = new Set<number>([
   TAG_TEMPLATE,
 ])
 
-// Start tags that trigger implied-end recovery. This combines tags that close
-// an open `<p>` with anchor, table, and select recovery triggers.
+// Implied end tags (HTML §13.1.2.4 optional tags + "in body" insertion mode).
+// Mirrors the Rust engine's `parse.rs`. Start tags that cannot appear inside a
+// `<p>` imply its end; block containers, headings, lists, tables, and the
+// list-item/definition tags all close an open `<p>`.
 //
 // A typed-array lookup, not a Set: this is checked for every start tag opened
-// so the hot path is a single indexed load rather than a Set hash.
-const NEEDS_IMPLIED_END_RECOVERY: Uint8Array = (() => {
+// while a `<p>` is on the stack (most inline tags in prose), so the hot path is
+// a single indexed load rather than a Set hash.
+const CLOSES_P: Uint8Array = (() => {
   const t = new Uint8Array(MAX_TAG_ID)
   const ids = [
     TAG_DIV,
@@ -191,18 +172,19 @@ const NEEDS_IMPLIED_END_RECOVERY: Uint8Array = (() => {
     TAG_DETAILS,
     TAG_SUMMARY,
     TAG_DIALOG,
-    TAG_A,
-    TAG_TD,
-    TAG_TH,
-    TAG_TR,
-    TAG_THEAD,
-    TAG_TBODY,
-    TAG_TFOOT,
-    TAG_OPTION,
-    TAG_OPTGROUP,
-    TAG_SELECT,
   ]
   for (const id of ids)
+    t[id] = 1
+  return t
+})()
+
+// Start tags that can trigger any implied-end-tag recovery branch. The common
+// inline tags (`code`, `em`, `span`, ...) otherwise run the whole dispatch just
+// to prove they need no recovery, so gating on a single indexed load lets them
+// skip it entirely. Mirrors the Rust engine's `NEEDS_IMPLIED_END_RECOVERY`.
+const NEEDS_IMPLIED_END_RECOVERY: Uint8Array = (() => {
+  const t = CLOSES_P.slice()
+  for (const id of [TAG_A, TAG_TD, TAG_TH, TAG_TR, TAG_THEAD, TAG_TBODY, TAG_TFOOT, TAG_OPTION, TAG_OPTGROUP, TAG_SELECT])
     t[id] = 1
   return t
 })()
@@ -327,17 +309,6 @@ function closeImpliedTo(
   boundary: Set<number>,
   handleEvent: (event: NodeEvent) => void,
 ): void {
-  const compact = state.compactElements
-  if (compact?.length) {
-    const targetIndex = compactTopIndexForIds(compact, target)
-    const boundaryIndex = compactTopIndexForIds(compact, boundary)
-    if (targetIndex >= 0 || boundaryIndex >= 0) {
-      if (targetIndex > boundaryIndex)
-        closeCompactThrough(state, targetIndex)
-      return
-    }
-  }
-
   let found = false
   for (let node = state.currentNode; node; node = node.parent) {
     const id = node.tagId
@@ -352,8 +323,6 @@ function closeImpliedTo(
   if (!found) {
     return
   }
-  while (compactLength(state))
-    popCompactElement(state)
   // closeNode always closes the current top and walks to its parent, so close
   // from the top until the matched node has itself been closed.
   while (state.currentNode) {
@@ -377,12 +346,6 @@ function closeTableContext(
   closeable: Set<number>,
   handleEvent: (event: NodeEvent) => void,
 ): void {
-  while (compactLength(state)) {
-    const id = compactTopTagId(state)
-    if (id === undefined || !closeable.has(id))
-      return
-    popCompactElement(state)
-  }
   while (state.currentNode) {
     const id = state.currentNode.tagId
     if (id === undefined || !closeable.has(id)) {
@@ -403,21 +366,6 @@ function closeSelectTo(
   targetId: number,
   handleEvent: (event: NodeEvent) => void,
 ): boolean {
-  const compact = state.compactElements
-  if (compact?.length) {
-    const targetIndex = compact.tagTops[targetId]!
-    const boundaryIndex = Math.max(
-      compact.tagTops[TAG_SELECT]!,
-      compact.tagTops[TAG_TEMPLATE]!,
-    )
-    if (targetIndex >= boundaryIndex && targetIndex >= 0) {
-      closeCompactThrough(state, targetIndex)
-      return true
-    }
-    if (boundaryIndex >= 0)
-      return false
-  }
-
   let target: ElementNode | null | undefined
   for (let node = state.currentNode; node; node = node.parent) {
     if (node.tagId === targetId) {
@@ -429,8 +377,6 @@ function closeSelectTo(
   }
   if (!target)
     return false
-  while (compactLength(state))
-    popCompactElement(state)
   while (state.currentNode && state.currentNode !== target)
     closeNode(state.currentNode, state, handleEvent)
   closeNode(target, state, handleEvent)
@@ -455,7 +401,7 @@ export function finalizeParse(
   state: ParseState,
   handleEvent: (event: NodeEvent) => void,
 ): void {
-  if (isCurrentScript(state)) {
+  if (state.currentNode && isScriptElement(state.currentNode)) {
     pushScriptTextChunk(state, leftover)
     const scriptText = takeScriptText(state)
     if (scriptText) {
@@ -465,8 +411,6 @@ export function finalizeParse(
   else if (leftover.length > 0 && leftover.charCodeAt(0) !== LT_CHAR) {
     processTextBuffer(leftover, state, handleEvent)
   }
-  while (compactLength(state))
-    popCompactElement(state)
   while (state.currentNode) {
     closeNode(state.currentNode, state, handleEvent)
   }
@@ -491,7 +435,7 @@ class ParsedElementNode implements ElementNode {
   declare excludedFromMarkdown?: boolean
   pluginOutput?: string[]
   context?: ElementNode['context']
-  private cachedDepthMap?: Uint16Array
+  private cachedDepthMap?: Uint8Array
 
   constructor(
     name: string,
@@ -511,11 +455,11 @@ class ParsedElementNode implements ElementNode {
     this.tagHandler = tagHandler
   }
 
-  get depthMap(): Uint16Array {
+  get depthMap(): Uint8Array {
     if (this.cachedDepthMap)
       return this.cachedDepthMap
 
-    const depthMap = new Uint16Array(MAX_TAG_ID)
+    const depthMap = new Uint8Array(MAX_TAG_ID)
     if (this.tagId >= 0 && this.tagId < MAX_TAG_ID)
       depthMap[this.tagId] = 1
     let node = this.parent
@@ -536,11 +480,11 @@ export interface ParseOptions {
 
 export interface ParseState {
   /** Map of tag names to their current nesting depth - uses TypedArray for performance */
-  depthMap: Uint16Array
+  depthMap: Uint8Array
   /** Current overall nesting depth */
   depth: number
-  /** Compact bounded representation for elements beyond the public node chain. */
-  compactElements?: CompactElementStack
+  /** Whether parsing stopped after reaching the practical browser depth limit. */
+  depthLimitReached?: boolean
   /** Currently processing element node */
   currentNode?: ElementNode | null
   /** Whether current content contains HTML entities that need decoding */
@@ -763,248 +707,6 @@ function matchesClosingTag(node: ElementNode, tagName: string, tagId: number, cl
   return node.name === tagName || (!nodeIsAlias && !closingIsAlias)
 }
 
-function createElementDepthError(attemptedDepth = MAX_LOGICAL_DEPTH + 1): ElementDepthError {
-  return Object.assign(
-    new Error(`Element nesting exceeds the maximum logical depth of ${MAX_LOGICAL_DEPTH}`),
-    {
-      name: 'ElementDepthError',
-      _tag: 'ElementDepthLimitExceeded' as const,
-      code: 'ELEMENT_DEPTH_LIMIT' as const,
-      maxDepth: MAX_LOGICAL_DEPTH as 4096,
-      attemptedDepth,
-    },
-  )
-}
-
-function createElementNameMemoryError(): ElementNameMemoryError {
-  return Object.assign(
-    new Error(`Compact element names exceed the maximum memory budget of ${MAX_COMPACT_CUSTOM_NAME_BYTES} bytes`),
-    {
-      name: 'ElementNameMemoryError',
-      _tag: 'ElementNameMemoryLimitExceeded' as const,
-      code: 'ELEMENT_NAME_MEMORY_LIMIT' as const,
-      maxBytes: MAX_COMPACT_CUSTOM_NAME_BYTES as 65536,
-    },
-  )
-}
-
-function createElementNameCountError(): ElementNameCountError {
-  return Object.assign(
-    new Error(`Compact parsing exceeds the maximum of ${COMPACT_CAPACITY} distinct custom element names`),
-    {
-      name: 'ElementNameCountError',
-      _tag: 'ElementNameCountLimitExceeded' as const,
-      code: 'ELEMENT_NAME_COUNT_LIMIT' as const,
-      maxNames: COMPACT_CAPACITY as 3584,
-    },
-  )
-}
-
-function createCompactElementStack(): CompactElementStack {
-  const tagTops = new Int16Array(MAX_TAG_ID)
-  const regularTagTops = new Int16Array(MAX_TAG_ID)
-  const nameTops = new Int16Array(MAX_TAG_ID + COMPACT_CAPACITY + 1)
-  const previousTagTop = new Int16Array(COMPACT_CAPACITY)
-  const previousMatch = new Int16Array(COMPACT_CAPACITY)
-  tagTops.fill(-1)
-  regularTagTops.fill(-1)
-  nameTops.fill(-1)
-  previousTagTop.fill(-1)
-  previousMatch.fill(-1)
-  return {
-    tagIds: new Int16Array(COMPACT_CAPACITY),
-    nameIds: new Uint16Array(COMPACT_CAPACITY),
-    flags: new Uint8Array(COMPACT_CAPACITY),
-    tagTops,
-    regularTagTops,
-    nameTops,
-    previousTagTop,
-    previousMatch,
-    length: 0,
-    customNameIds: new Map(),
-    customNameBytes: 0,
-  }
-}
-
-function knownNameId(tagName: string): number {
-  const id = TagIdMap[tagName as keyof typeof TagIdMap]
-  return typeof id === 'number' ? id + 1 : 0
-}
-
-function retainCompactName(stack: CompactElementStack, tagName: string): number {
-  const knownId = knownNameId(tagName)
-  if (knownId)
-    return knownId
-
-  const existingId = stack.customNameIds.get(tagName)
-  if (existingId !== undefined)
-    return existingId
-
-  const nameBytes = utf8ByteLength(tagName)
-  if (stack.customNameIds.size >= COMPACT_CAPACITY)
-    throw createElementNameCountError()
-  if (stack.customNameBytes + nameBytes > MAX_COMPACT_CUSTOM_NAME_BYTES) {
-    throw createElementNameMemoryError()
-  }
-  const id = MAX_TAG_ID + stack.customNameIds.size + 1
-  stack.customNameIds.set(tagName, id)
-  stack.customNameBytes += nameBytes
-  return id
-}
-
-function utf8ByteLength(value: string): number {
-  let bytes = 0
-  for (let i = 0; i < value.length; i++) {
-    const code = value.charCodeAt(i)
-    if (code < 0x80) {
-      bytes++
-    }
-    else if (code < 0x800) {
-      bytes += 2
-    }
-    else if (code >= 0xD800 && code <= 0xDBFF && i + 1 < value.length
-      && value.charCodeAt(i + 1) >= 0xDC00 && value.charCodeAt(i + 1) <= 0xDFFF) {
-      bytes += 4
-      i++
-    }
-    else {
-      bytes += 3
-    }
-  }
-  return bytes
-}
-
-function lookupCompactName(stack: CompactElementStack, tagName: string): number {
-  return knownNameId(tagName) || stack.customNameIds.get(tagName) || 0
-}
-
-function compactLength(state: ParseState): number {
-  return state.compactElements?.length || 0
-}
-
-function parserTagDepth(state: ParseState, tagId: number): number {
-  const compactDepth = (state.compactElements?.tagTops[tagId] ?? -1) >= 0 ? 1 : 0
-  return state.depthMap[tagId]! + compactDepth
-}
-
-function compactTopFlags(state: ParseState): number {
-  const stack = state.compactElements
-  return stack?.length ? stack.flags[stack.length - 1]! : 0
-}
-
-function compactTopTagId(state: ParseState): number | undefined {
-  const stack = state.compactElements
-  return stack?.length ? stack.tagIds[stack.length - 1] : undefined
-}
-
-function compactMatchIndex(
-  stack: CompactElementStack,
-  tagName: string,
-  tagId: number,
-  closingIsAlias: boolean,
-): number {
-  if (tagId >= 0 && !closingIsAlias)
-    return stack.regularTagTops[tagId]!
-  const nameId = lookupCompactName(stack, tagName)
-  return nameId ? stack.nameTops[nameId]! : -1
-}
-
-function compactTopIndexForIds(stack: CompactElementStack, ids: Set<number>): number {
-  let top = -1
-  for (const id of ids)
-    top = Math.max(top, stack.tagTops[id]!)
-  return top
-}
-
-function popCompactElement(state: ParseState): void {
-  const stack = state.compactElements!
-  const index = --stack.length
-  const tagId = stack.tagIds[index]!
-  const flags = stack.flags[index]!
-  const nameId = stack.nameIds[index]!
-  if (tagId >= 0 && tagId < MAX_TAG_ID) {
-    stack.tagTops[tagId] = stack.previousTagTop[index]!
-    if (!(flags & COMPACT_ALIAS))
-      stack.regularTagTops[tagId] = stack.previousMatch[index]!
-  }
-  if (tagId === -1 || flags & COMPACT_ALIAS)
-    stack.nameTops[nameId] = stack.previousMatch[index]!
-  state.depth--
-  if (stack.length === 0) {
-    stack.customNameIds.clear()
-    stack.customNameBytes = 0
-  }
-  state.hasEncodedHtmlEntity = false
-  state.justClosedTag = true
-}
-
-function closeCompactThrough(state: ParseState, index: number): void {
-  while (compactLength(state) > index)
-    popCompactElement(state)
-}
-
-function pushCompactElement(
-  state: ParseState,
-  tagName: string,
-  tagId: number,
-  tagHandler: TagHandler | undefined,
-): void {
-  const stack = state.compactElements ??= createCompactElementStack()
-  const parentExcluded = Boolean(compactTopFlags(state) & COMPACT_EXCLUDED)
-    || Boolean(state.currentNode?.excludedFromMarkdown)
-  const index = stack.length++
-  let flags = tagHandler?.aliasTagId !== undefined ? COMPACT_ALIAS : 0
-  if (tagHandler?.isNonNesting)
-    flags |= COMPACT_NON_NESTING
-  if (tagId === TAG_TEMPLATE || parentExcluded || tagHandler?.excludesTextNodes)
-    flags |= COMPACT_EXCLUDED
-  if (tagId === TAG_SCRIPT && tagName === 'script')
-    flags |= COMPACT_SCRIPT
-
-  stack.tagIds[index] = tagId
-  const nameId = retainCompactName(stack, tagName)
-  stack.nameIds[index] = nameId
-  stack.flags[index] = flags
-  if (tagId >= 0 && tagId < MAX_TAG_ID) {
-    stack.previousTagTop[index] = stack.tagTops[tagId]!
-    stack.tagTops[tagId] = index
-    if (!(flags & COMPACT_ALIAS)) {
-      stack.previousMatch[index] = stack.regularTagTops[tagId]!
-      stack.regularTagTops[tagId] = index
-    }
-  }
-  if (tagId === -1 || flags & COMPACT_ALIAS) {
-    stack.previousMatch[index] = stack.nameTops[nameId]!
-    stack.nameTops[nameId] = index
-  }
-  state.depth++
-  state.hasEncodedHtmlEntity = false
-  state.justClosedTag = false
-}
-
-function isCurrentNonNesting(state: ParseState): boolean {
-  return compactLength(state)
-    ? Boolean(compactTopFlags(state) & COMPACT_NON_NESTING)
-    : Boolean(state.currentNode?.tagHandler?.isNonNesting)
-}
-
-function isCurrentScript(state: ParseState): boolean {
-  return compactLength(state)
-    ? Boolean(compactTopFlags(state) & COMPACT_SCRIPT)
-    : Boolean(state.currentNode && isScriptElement(state.currentNode))
-}
-
-function compactTopMatchesClosingTag(
-  state: ParseState,
-  tagName: string,
-  tagId: number,
-  closingIsAlias: boolean,
-): boolean {
-  const stack = state.compactElements
-  return Boolean(stack?.length
-    && compactMatchIndex(stack, tagName, tagId, closingIsAlias) === stack.length - 1)
-}
-
 /**
  * Pure HTML parser that emits DOM events
  * Completely decoupled from markdown generation
@@ -1012,7 +714,7 @@ function compactTopMatchesClosingTag(
 export function parseHtml(html: string, options: ParseOptions = {}): ParseResult {
   const events: NodeEvent[] = []
   const state: ParseState = {
-    depthMap: new Uint16Array(MAX_TAG_ID),
+    depthMap: new Uint8Array(MAX_TAG_ID),
     depth: 0,
     resolvedPlugins: options.resolvedPlugins || [],
   }
@@ -1045,6 +747,9 @@ function parseHtmlInternal(
   state: ParseState,
   handleEvent: (event: NodeEvent) => void,
 ): string {
+  if (state.depthLimitReached)
+    return ''
+
   let textBuffer = '' // Buffer to accumulate text content
   // Raw start of the run held in textBuffer. Streaming must carry the source
   // bytes from here, since textBuffer may already contain decoded or escaped
@@ -1052,7 +757,7 @@ function parseHtmlInternal(
   let runStart = 0
 
   // Initialize state
-  state.depthMap ??= new Uint16Array(MAX_TAG_ID)
+  state.depthMap ??= new Uint8Array(MAX_TAG_ID)
   state.depth ??= 0
   state.lastCharWasWhitespace ??= true
   state.justClosedTag ??= false
@@ -1061,7 +766,7 @@ function parseHtmlInternal(
   // Process chunk character by character
   let i = 0
   const chunkLength = htmlChunk.length
-  if (isCurrentScript(state)) {
+  if (state.currentNode && isScriptElement(state.currentNode)) {
     const scanResult = scanScriptChunk(htmlChunk, i, state)
     if (scanResult < 0)
       return scanResult <= SCRIPT_SEQUENCE_INCOMPLETE ? htmlChunk.substring(-scanResult - 2) : ''
@@ -1069,7 +774,7 @@ function parseHtmlInternal(
     i = scanResult
   }
 
-  while (i < chunkLength) {
+  while (i < chunkLength && !state.depthLimitReached) {
     const currentCharCode = htmlChunk.charCodeAt(i)
 
     // If not starting a tag, add to text buffer and continue
@@ -1182,7 +887,7 @@ function parseHtmlInternal(
     }
     // CLOSING TAG
     else if (nextCharCode === SLASH_CHAR) {
-      if (isCurrentNonNesting(state)) {
+      if (state.currentNode?.tagHandler?.isNonNesting) {
         // Peek at the closing tag name to check if it matches the non-nesting tag
         let peekEnd = i + 2
         while (peekEnd < chunkLength) {
@@ -1194,11 +899,7 @@ function parseHtmlInternal(
         const peekTagName = normalizeTagName(htmlChunk.substring(i + 2, peekEnd))
         const peekHandler = state.tagOverrideHandlers?.get(peekTagName)
         const peekTagId = effectiveTagId(peekTagName, TagIdMap[peekTagName] ?? -1, state)
-        const closingIsAlias = peekHandler?.aliasTagId !== undefined
-        const matchesCurrent = compactLength(state)
-          ? compactTopMatchesClosingTag(state, peekTagName, peekTagId, closingIsAlias)
-          : Boolean(state.currentNode && matchesClosingTag(state.currentNode, peekTagName, peekTagId, closingIsAlias))
-        if (!matchesCurrent) {
+        if (!matchesClosingTag(state.currentNode, peekTagName, peekTagId, peekHandler?.aliasTagId !== undefined)) {
           textBuffer += htmlChunk[i++]
           continue
         }
@@ -1251,7 +952,7 @@ function parseHtmlInternal(
 
       // Inside a non-nesting element (script/style/title/textarea) no opening
       // tag is a real element; a nested `<script>` is literal text (issue #93).
-      if (isCurrentNonNesting(state)) {
+      if (state.currentNode?.tagHandler?.isNonNesting) {
         textBuffer += htmlChunk[i++]
         continue
       }
@@ -1271,7 +972,7 @@ function parseHtmlInternal(
         runStart = i
       }
 
-      const result = processOpeningTag(tagName, tagId, htmlChunk, i2, state, handleEvent, false)
+      const result = processOpeningTag(tagName, tagId, htmlChunk, i2, state, handleEvent)
 
       if (result.skip) {
         i = result.newPosition
@@ -1281,7 +982,7 @@ function parseHtmlInternal(
         i = result.newPosition
         if (!result.selfClosing) {
           state.isFirstTextInElement = true
-          if (tagId === TAG_SCRIPT && tagName === 'script' && isCurrentScript(state)) {
+          if (tagId === TAG_SCRIPT && tagName === 'script') {
             const scanResult = scanScriptChunk(htmlChunk, i, state)
             if (scanResult < 0) {
               if (scanResult <= SCRIPT_SEQUENCE_INCOMPLETE) {
@@ -1356,8 +1057,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
 
   // Template exclusion is copied to descendants when they open, so text can
   // inherit it from its immediate parent without walking the ancestor chain.
-  const excludesTextNodes = Boolean(compactTopFlags(state) & COMPACT_EXCLUDED)
-    || state.currentNode?.tagHandler?.excludesTextNodes
+  const excludesTextNodes = state.currentNode?.tagHandler?.excludesTextNodes
     || state.currentNode?.excludedFromMarkdown
   const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
 
@@ -1470,37 +1170,30 @@ function processClosingTag(
   const tagId = effectiveTagId(tagName, typeof mappedTagId === 'number' ? mappedTagId : -1, state)
   const closingIsAlias = tagHandler?.aliasTagId !== undefined
 
+  if (state.currentNode?.tagHandler?.isNonNesting && !matchesClosingTag(state.currentNode, tagName, tagId, closingIsAlias)) {
+    return {
+      complete: false,
+      newPosition: position,
+      remainingText: htmlChunk.substring(position),
+    }
+  }
+
   // Find a matching parent node. A template is a scope boundary: an end tag in
   // its inert contents must never pop an element from the outer document.
-  const stopAtTemplate = tagId !== TAG_TEMPLATE && parserTagDepth(state, TAG_TEMPLATE) > 0
-  const compact = state.compactElements
-  const compactMatch = compact?.length
-    ? compactMatchIndex(compact, tagName, tagId, closingIsAlias)
-    : -1
-  const compactScopeBoundary = Boolean(stopAtTemplate
-    && compact?.length
-    && compact.tagTops[TAG_TEMPLATE]! > compactMatch)
-
-  if (compactMatch >= 0 && !compactScopeBoundary) {
-    closeCompactThrough(state, compactMatch)
+  const stopAtTemplate = tagId !== TAG_TEMPLATE && (state.depthMap[TAG_TEMPLATE] || 0) > 0
+  let curr: ElementNode | null | undefined = state.currentNode
+  while (curr && !matchesClosingTag(curr, tagName, tagId, closingIsAlias)) {
+    if (stopAtTemplate && curr.tagId === TAG_TEMPLATE) {
+      curr = null
+      break
+    }
+    curr = curr.parent
   }
-  else if (!compactScopeBoundary) {
-    let curr: ElementNode | null | undefined = state.currentNode
-    while (curr && !matchesClosingTag(curr, tagName, tagId, closingIsAlias)) {
-      if (stopAtTemplate && curr.tagId === TAG_TEMPLATE) {
-        curr = null
-        break
-      }
-      curr = curr.parent
-    }
 
-    if (curr) {
-      while (compactLength(state))
-        popCompactElement(state)
-      while (state.currentNode && state.currentNode !== curr)
-        closeNode(state.currentNode, state, handleEvent)
-      closeNode(curr, state, handleEvent)
-    }
+  if (curr) {
+    while (state.currentNode && state.currentNode !== curr)
+      closeNode(state.currentNode, state, handleEvent)
+    closeNode(curr, state, handleEvent)
   }
 
   state.justClosedTag = true
@@ -1639,10 +1332,6 @@ function processCdataSection(
   if (!open.complete || open.selfClosing || open.skip) {
     return
   }
-  if (open.suppressed) {
-    popCompactElement(state)
-    return
-  }
 
   const node = state.currentNode!
   if (content.length > 0 && !node.tagHandler?.excludesTextNodes) {
@@ -1674,23 +1363,18 @@ function processOpeningTag(
   i: number,
   state: ParseState,
   handleEvent: (event: NodeEvent) => void,
-  closeCurrentNonNesting = true,
 ): {
   complete: boolean
   newPosition: number
   remainingText: string
   selfClosing: boolean
   skip?: boolean
-  suppressed?: boolean
 } {
   tagId = effectiveTagId(tagName, tagId, state)
 
   // Check if current element needs closing
-  if (closeCurrentNonNesting && isCurrentNonNesting(state)) {
-    if (compactLength(state))
-      popCompactElement(state)
-    else
-      closeNode(state.currentNode ?? null, state, handleEvent)
+  if (state.currentNode?.tagHandler?.isNonNesting) {
+    closeNode(state.currentNode, state, handleEvent)
   }
 
   const tagHandler = state.tagOverrideHandlers?.get(tagName) ?? tagHandlers[tagId]
@@ -1711,23 +1395,15 @@ function processOpeningTag(
   // normal block spacing, instead of inheriting head's whitespace collapsing.
   // Runs only after the tag is confirmed complete so incomplete/chunk-split start
   // tags do not mutate parser state or emit a premature head close.
-  if (parserTagDepth(state, TAG_HEAD) > 0
-    && parserTagDepth(state, TAG_TEMPLATE) === 0
+  if ((state.depthMap[TAG_HEAD] || 0) > 0
+    && (state.depthMap[TAG_TEMPLATE] || 0) === 0
     && !HEAD_CONTENT_TAGS.has(tagId)) {
-    const compactHeadIndex = state.compactElements?.tagTops[TAG_HEAD] ?? -1
-    if (compactHeadIndex >= 0) {
-      closeCompactThrough(state, compactHeadIndex)
+    while (state.currentNode && state.currentNode.tagId !== TAG_HEAD) {
+      closeNode(state.currentNode, state, handleEvent)
     }
-    else {
-      while (compactLength(state))
-        popCompactElement(state)
-      while (state.currentNode && state.currentNode.tagId !== TAG_HEAD) {
-        closeNode(state.currentNode, state, handleEvent)
-      }
-      const headNode = state.currentNode
-      if (headNode && headNode.tagId === TAG_HEAD) {
-        closeNode(headNode, state, handleEvent)
-      }
+    const headNode = state.currentNode
+    if (headNode && headNode.tagId === TAG_HEAD) {
+      closeNode(headNode, state, handleEvent)
     }
   }
 
@@ -1738,7 +1414,7 @@ function processOpeningTag(
   // confirmed complete (above) so a chunk-split start tag never mutates parser
   // state or emits a premature close.
   if (tagId >= 0 && tagId < MAX_TAG_ID && NEEDS_IMPLIED_END_RECOVERY[tagId] === 1) {
-    if (tagId === TAG_SELECT && parserTagDepth(state, TAG_SELECT) > 0) {
+    if (tagId === TAG_SELECT && (state.depthMap[TAG_SELECT] || 0) > 0) {
       // In the "in select" insertion mode a nested <select> acts as the end
       // of the open select; the incoming start tag itself is ignored.
       if (closeSelectTo(state, TAG_SELECT, handleEvent)) {
@@ -1752,20 +1428,15 @@ function processOpeningTag(
       }
     }
     else if (tagId === TAG_OPTION) {
-      const compactTop = compactTopTagId(state)
-      if (parserTagDepth(state, TAG_SELECT) > 0) {
+      if ((state.depthMap[TAG_SELECT] || 0) > 0) {
         closeSelectTo(state, TAG_OPTION, handleEvent)
-      }
-      else if (compactTop !== undefined) {
-        if (compactTop === TAG_OPTION)
-          popCompactElement(state)
       }
       else if (state.currentNode?.tagId === TAG_OPTION) {
         // The in-body rule also pops an option when it is the current node.
         closeNode(state.currentNode, state, handleEvent)
       }
     }
-    else if (tagId === TAG_OPTGROUP && parserTagDepth(state, TAG_SELECT) > 0) {
+    else if (tagId === TAG_OPTGROUP && (state.depthMap[TAG_SELECT] || 0) > 0) {
       // An optgroup start first closes a current option, then the previous
       // optgroup, making both optional end tags observable as siblings.
       closeSelectTo(state, TAG_OPTION, handleEvent)
@@ -1774,21 +1445,21 @@ function processOpeningTag(
     else if (tagId === TAG_A) {
       // A nested <a> closes the open one (anchors cannot nest), so the markdown is
       // two adjacent links rather than invalid nested `[..]`. <a> never closes <p>.
-      if (parserTagDepth(state, TAG_A) > 0) {
+      if ((state.depthMap[TAG_A] || 0) > 0) {
         closeImpliedTo(state, SINGLE_A, A_SCOPE_BOUNDARY, handleEvent)
       }
     }
     else if (tagId === TAG_TD || tagId === TAG_TH || tagId === TAG_TR
       || tagId === TAG_THEAD || tagId === TAG_TBODY || tagId === TAG_TFOOT) {
       // Table cells/rows/sections close earlier ones; they never close <p>.
-      if (parserTagDepth(state, TAG_TABLE) > 0) {
+      if ((state.depthMap[TAG_TABLE] || 0) > 0) {
         if (tagId === TAG_TD || tagId === TAG_TH) {
-          if (parserTagDepth(state, TAG_TD) > 0 || parserTagDepth(state, TAG_TH) > 0) {
+          if ((state.depthMap[TAG_TD] || 0) > 0 || (state.depthMap[TAG_TH] || 0) > 0) {
             closeImpliedTo(state, TD_TH, CELL_SCOPE_BOUNDARY, handleEvent)
           }
         }
         else if (tagId === TAG_TR) {
-          if (parserTagDepth(state, TAG_TR) > 0) {
+          if ((state.depthMap[TAG_TR] || 0) > 0) {
             closeTableContext(state, TR_CELLS, handleEvent)
           }
         }
@@ -1798,9 +1469,9 @@ function processOpeningTag(
       }
     }
     else {
-      // Remaining recovery tags close an open <p> first, then any
-      // heading/list-item implied end.
-      if (parserTagDepth(state, TAG_P) > 0) {
+      // Remaining recovery tags are all in CLOSES_P, so they close an open <p>
+      // first, then any heading/list-item implied end.
+      if ((state.depthMap[TAG_P] || 0) > 0) {
         closeImpliedTo(state, SINGLE_P, P_SCOPE_BOUNDARY, handleEvent)
       }
       if (HEADINGS.has(tagId)) {
@@ -1808,39 +1479,31 @@ function processOpeningTag(
         // is the current node, matching the spec's "if the current node is an
         // h1–h6 element, pop it" step.
         const top = state.currentNode
-        const compactTop = compactTopTagId(state)
-        if (compactTop !== undefined) {
-          if (HEADINGS.has(compactTop))
-            popCompactElement(state)
-        }
-        else if (top && top.tagId !== undefined && HEADINGS.has(top.tagId)) {
+        if (top && top.tagId !== undefined && HEADINGS.has(top.tagId)) {
           closeNode(top, state, handleEvent)
         }
       }
       else if (tagId === TAG_LI) {
-        if (parserTagDepth(state, TAG_LI) > 0) {
+        if ((state.depthMap[TAG_LI] || 0) > 0) {
           closeImpliedTo(state, SINGLE_LI, LI_SCOPE_BOUNDARY, handleEvent)
         }
       }
       else if (tagId === TAG_DT || tagId === TAG_DD) {
-        if (parserTagDepth(state, TAG_DT) > 0 || parserTagDepth(state, TAG_DD) > 0) {
+        if ((state.depthMap[TAG_DT] || 0) > 0 || (state.depthMap[TAG_DD] || 0) > 0) {
           closeImpliedTo(state, DT_DD, DL_SCOPE_BOUNDARY, handleEvent)
         }
       }
     }
   }
 
-  if (state.depth >= MAX_MATERIALIZED_DEPTH) {
-    if (state.depth >= MAX_LOGICAL_DEPTH)
-      throw createElementDepthError(state.depth + 1)
-    if (!result.selfClosing)
-      pushCompactElement(state, tagName, tagId, tagHandler)
+  if (!result.selfClosing && state.depth >= MAX_ELEMENT_DEPTH) {
+    state.depthLimitReached = true
     return {
       complete: true,
       newPosition: result.newPosition,
       remainingText: '',
-      selfClosing: result.selfClosing,
-      suppressed: true,
+      selfClosing: false,
+      skip: true,
     }
   }
 

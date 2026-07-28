@@ -220,61 +220,19 @@ fn parse_plugins(p: &JsValue) -> mdream::types::PluginConfig {
 
 // ── WASM exports ──
 
-fn set_error_property(error: &js_sys::Error, key: &str, value: &JsValue) {
-  if !matches!(js_sys::Reflect::set(error, &key.into(), value), Ok(true)) {
-    wasm_bindgen::throw_str("failed to construct a structured conversion error");
-  }
-}
-
-#[cold]
-fn conversion_error(error: mdream::ConversionError) -> JsValue {
-  let js_error = js_sys::Error::new(&error.to_string());
-  match error {
-    mdream::ConversionError::ElementDepthLimitExceeded {
-      max_depth,
-      attempted_depth,
-    } => {
-      set_error_property(&js_error, "_tag", &"ElementDepthLimitExceeded".into());
-      set_error_property(&js_error, "code", &"ELEMENT_DEPTH_LIMIT".into());
-      let max_depth =
-        u32::try_from(max_depth).expect("configured maximum depth must fit in a JavaScript u32");
-      let attempted_depth = u32::try_from(attempted_depth)
-        .expect("attempted bounded depth must fit in a JavaScript u32");
-      set_error_property(&js_error, "maxDepth", &max_depth.into());
-      set_error_property(&js_error, "attemptedDepth", &attempted_depth.into());
-    }
-    mdream::ConversionError::ElementNameMemoryLimitExceeded { max_bytes } => {
-      set_error_property(&js_error, "_tag", &"ElementNameMemoryLimitExceeded".into());
-      set_error_property(&js_error, "code", &"ELEMENT_NAME_MEMORY_LIMIT".into());
-      let max_bytes = u32::try_from(max_bytes)
-        .expect("configured element-name budget must fit in a JavaScript u32");
-      set_error_property(&js_error, "maxBytes", &max_bytes.into());
-    }
-    mdream::ConversionError::ElementNameCountLimitExceeded { max_names } => {
-      set_error_property(&js_error, "_tag", &"ElementNameCountLimitExceeded".into());
-      set_error_property(&js_error, "code", &"ELEMENT_NAME_COUNT_LIMIT".into());
-      let max_names = u32::try_from(max_names)
-        .expect("configured element-name count must fit in a JavaScript u32");
-      set_error_property(&js_error, "maxNames", &max_names.into());
-    }
-  }
-  js_error.into()
-}
-
 #[wasm_bindgen(js_name = "htmlToMarkdown")]
-pub fn html_to_markdown(html: &str, options: JsValue) -> Result<String, JsValue> {
+pub fn html_to_markdown(html: &str, options: JsValue) -> String {
   let (opts, format) = parse_options(&options);
-  mdream::try_html_to_format(html, opts, format).map_err(conversion_error)
+  mdream::html_to_format(html, opts, format)
 }
 
 #[wasm_bindgen(js_name = "htmlToMarkdownResult")]
-pub fn html_to_markdown_result(html: &str, options: JsValue) -> Result<JsValue, JsValue> {
+pub fn html_to_markdown_result(html: &str, options: JsValue) -> JsValue {
   let (opts, format) = parse_options(&options);
-  let result = mdream::try_html_to_format_result(html, opts, format).map_err(conversion_error)?;
+  let result = mdream::html_to_format_result(html, opts, format);
 
   let obj = js_sys::Object::new();
   js_sys::Reflect::set(&obj, &"markdown".into(), &result.markdown.into()).unwrap_or_default();
-  js_sys::Reflect::set(&obj, &"degraded".into(), &result.degraded.into()).unwrap_or_default();
 
   if let Some(extracted) = result.extracted {
     let arr = js_sys::Array::new();
@@ -302,7 +260,7 @@ pub fn html_to_markdown_result(html: &str, options: JsValue) -> Result<JsValue, 
     js_sys::Reflect::set(&obj, &"frontmatter".into(), &fm).unwrap_or_default();
   }
 
-  Ok(obj.into())
+  obj.into()
 }
 
 #[wasm_bindgen]
@@ -321,19 +279,11 @@ impl MarkdownStream {
   }
 
   #[wasm_bindgen(js_name = "processChunk")]
-  pub fn process_chunk(&mut self, chunk: &str) -> Result<String, JsValue> {
-    self
-      .inner
-      .try_process_chunk(chunk)
-      .map_err(conversion_error)
+  pub fn process_chunk(&mut self, chunk: &str) -> String {
+    self.inner.process_chunk(chunk)
   }
 
-  pub fn finish(&mut self) -> Result<String, JsValue> {
-    self.inner.try_finish().map_err(conversion_error)
-  }
-
-  #[wasm_bindgen(getter)]
-  pub fn degraded(&self) -> bool {
-    self.inner.degraded()
+  pub fn finish(&mut self) -> String {
+    self.inner.finish()
   }
 }
