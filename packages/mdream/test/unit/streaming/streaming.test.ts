@@ -15,6 +15,14 @@ const BYTE_PARITY_CASES = [
   '<p>use <code>a`b</code> here</p>',
   '<a href="https://example.com">https://example.com</a>',
   '<p>answered on <span>03 Apr 2013,&nbsp;</span><span>09:53 AM</span></p>',
+  // `<` before a non-letter is text, so a chunk can split between the `<` and
+  // the byte that decides it is not a tag.
+  '<p>I <3 Rust</p>',
+  '<p>5 <10 and 10> 5</p>',
+  '<p>< </p>',
+  '<p>a <?b>c</p>',
+  '<3',
+  '<>',
 ]
 
 describe('cross-engine streaming byte parity', () => {
