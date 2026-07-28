@@ -45,6 +45,16 @@ const NON_NESTING_NO_SPACING: TagHandler = TagHandler {
   ..NONE
 };
 
+// Fallback content a browser with the feature enabled does not render. Both
+// flags are needed: `is_non_nesting` alone emits the raw text,
+// `excludes_text_nodes` alone still parses descendant markup into elements.
+const INERT_RAWTEXT: TagHandler = TagHandler {
+  is_non_nesting: true,
+  excludes_text_nodes: true,
+  spacing: Some(NO_SPACING),
+  ..NONE
+};
+
 // Compile-time tag handler table. No runtime init, no LazyLock, no indirection.
 static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   let mut t: [Option<TagHandler>; MAX_TAG_ID] = [None; MAX_TAG_ID];
@@ -302,17 +312,15 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   });
 
   // Non-nesting elements
+  // `textarea`, `xmp`, and `plaintext` are rendered, so their raw text is kept.
   t[TAG_TEXTAREA as usize] = Some(NON_NESTING_NO_SPACING);
-  t[TAG_IFRAME as usize] = Some(NON_NESTING_NO_SPACING);
-  t[TAG_NOFRAMES as usize] = Some(NON_NESTING_NO_SPACING);
   t[TAG_XMP as usize] = Some(NON_NESTING_NO_SPACING);
   t[TAG_PLAINTEXT as usize] = Some(NON_NESTING_NO_SPACING);
 
-  t[TAG_NOSCRIPT as usize] = Some(TagHandler {
-    excludes_text_nodes: true,
-    spacing: Some(NO_SPACING),
-    ..NONE
-  });
+  t[TAG_IFRAME as usize] = Some(INERT_RAWTEXT);
+  t[TAG_NOFRAMES as usize] = Some(INERT_RAWTEXT);
+  t[TAG_NOEMBED as usize] = Some(INERT_RAWTEXT);
+  t[TAG_NOSCRIPT as usize] = Some(INERT_RAWTEXT);
   // <datalist> holds <option> autocomplete data browsers never render; treat
   // the whole body as inert and drop it, mirroring <template>.
   t[TAG_DATALIST as usize] = Some(TagHandler {

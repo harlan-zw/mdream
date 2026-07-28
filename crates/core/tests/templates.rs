@@ -152,6 +152,34 @@ mod edge_cases {
     assert!(!md.contains("analytics"));
   }
 
+  /// The case above uses an empty `<iframe>` as the body, which leaks nothing
+  /// either way; a body carrying text is what separates dropping it from
+  /// copying it out.
+  #[test]
+  fn fallback_content_is_not_rendered() {
+    for tag in ["iframe", "noframes", "noembed", "noscript"] {
+      let html = format!("<p>before</p><{tag}><p>hidden</p></{tag}><p>after</p>");
+      assert_eq!(
+        convert(&html).trim(),
+        "before\n\nafter",
+        "<{tag}> fallback content should not reach the output"
+      );
+    }
+  }
+
+  /// `textarea`, `xmp`, and `plaintext` are also raw text, but are rendered.
+  #[test]
+  fn rendered_rawtext_keeps_its_body() {
+    for tag in ["textarea", "xmp", "plaintext"] {
+      let html = format!("<p>before</p><{tag}>kept text</{tag}>");
+      let md = convert(&html);
+      assert!(
+        md.contains("kept text"),
+        "<{tag}> body should be kept, got {md:?}"
+      );
+    }
+  }
+
   #[test]
   fn script_content_not_rendered() {
     let html = "<p>Text</p><script>var x = 1;</script><p>More</p>";
