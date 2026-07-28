@@ -253,6 +253,20 @@ fn gfm_text_escaping_does_not_repeat_context_escapes() {
   );
 }
 
+/// A browser navigates to the first `href`, so reporting the last one would
+/// point somewhere the reader never goes.
+#[test]
+fn duplicate_attribute_keeps_the_first() {
+  assert_eq!(
+    convert("<a href=/first href=/second>link</a>"),
+    "[link](/first)"
+  );
+  assert_eq!(
+    convert("<img src=/first.png src=/second.png alt=x>"),
+    "![x](/first.png)"
+  );
+}
+
 #[test]
 fn decoded_text_is_serialized_for_its_output_context() {
   assert_eq!(
