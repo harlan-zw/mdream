@@ -5,6 +5,12 @@
  */
 export interface TransformPlugin {
   /**
+   * Whether a flattened element starts an output-excluded subtree.
+   * @internal
+   */
+  excludesOverflowSubtree?: (node: ElementNode) => boolean
+
+  /**
    * Process a node before it's handled by the parser
    */
   beforeNodeProcess?: (event: NodeEvent, state: MdreamRuntimeState) => undefined | void | { skip: boolean }
@@ -165,8 +171,8 @@ export interface ElementNode extends Node {
   context?: PluginContext
   /** ID of the tag for fast handler lookup */
   tagId?: number
-  /** Map of tag names to their nesting count (using Uint8Array for performance) */
-  depthMap: Uint8Array
+  /** Map of tag names to their nesting count */
+  depthMap: Uint16Array
   /** Plugin outputs collected during processing */
   pluginOutput?: string[]
 }
@@ -227,7 +233,7 @@ export interface Node {
  */
 export interface MdreamProcessingState {
   /** Map of tag names to their current nesting depth - uses TypedArray for performance */
-  depthMap: Uint8Array
+  depthMap: Uint16Array
 
   /** Current overall nesting depth */
   depth: number

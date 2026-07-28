@@ -105,9 +105,9 @@ const SCRIPT_SEQUENCE_NO_MATCH = -1
 const SCRIPT_SEQUENCE_INCOMPLETE = -2
 const SCRIPT_SCAN_COMPLETE = -1
 
-// Firefox and Chromium flatten DOM trees beyond this practical depth. Stop
-// conversion at the same boundary instead of growing the parser's parent chain
-// without limit on pathologically nested input.
+// Keep rich element nodes to the same practical depth as browsers. One exact
+// flattened root preserves balanced recovery beyond it without allowing
+// untrusted nesting to grow memory forever.
 const MAX_ELEMENT_DEPTH = 512
 
 // Tags that are valid inside <head>. Per the HTML parser's "in head" insertion
@@ -309,6 +309,15 @@ function closeImpliedTo(
   boundary: Set<number>,
   handleEvent: (event: NodeEvent) => void,
 ): void {
+  if (state.flattenedTagName) {
+    const id = state.flattenedTagId
+    if (id !== undefined && target.has(id)) {
+      clearFlattenedElements(state)
+      return
+    }
+    if (id !== undefined && boundary.has(id))
+      return
+  }
   let found = false
   for (let node = state.currentNode; node; node = node.parent) {
     const id = node.tagId
@@ -323,6 +332,7 @@ function closeImpliedTo(
   if (!found) {
     return
   }
+  clearFlattenedElements(state)
   // closeNode always closes the current top and walks to its parent, so close
   // from the top until the matched node has itself been closed.
   while (state.currentNode) {
@@ -346,6 +356,12 @@ function closeTableContext(
   closeable: Set<number>,
   handleEvent: (event: NodeEvent) => void,
 ): void {
+  if (state.flattenedTagName) {
+    const id = state.flattenedTagId
+    if (id === undefined || !closeable.has(id))
+      return
+    clearFlattenedElements(state)
+  }
   while (state.currentNode) {
     const id = state.currentNode.tagId
     if (id === undefined || !closeable.has(id)) {
@@ -366,6 +382,15 @@ function closeSelectTo(
   targetId: number,
   handleEvent: (event: NodeEvent) => void,
 ): boolean {
+  if (state.flattenedTagName) {
+    const id = state.flattenedTagId
+    if (id === targetId) {
+      clearFlattenedElements(state)
+      return true
+    }
+    if ((id === TAG_SELECT && targetId !== TAG_SELECT) || id === TAG_TEMPLATE)
+      return false
+  }
   let target: ElementNode | null | undefined
   for (let node = state.currentNode; node; node = node.parent) {
     if (node.tagId === targetId) {
@@ -377,10 +402,27 @@ function closeSelectTo(
   }
   if (!target)
     return false
+  clearFlattenedElements(state)
   while (state.currentNode && state.currentNode !== target)
     closeNode(state.currentNode, state, handleEvent)
   closeNode(target, state, handleEvent)
   return true
+}
+
+function parserTagDepth(state: ParseState, tagId: number): number {
+  return (state.depthMap[tagId] || 0)
+    + (state.flattenedTagId === tagId ? (state.flattenedTagDepth || 0) : 0)
+}
+
+function parserLastTagId(state: ParseState): number | undefined {
+  return state.flattenedTagName ? state.flattenedTagId : state.currentNode?.tagId
+}
+
+function popParserTop(state: ParseState, handleEvent: (event: NodeEvent) => void): void {
+  if (state.flattenedTagName)
+    clearFlattenedElements(state)
+  else
+    closeNode(state.currentNode!, state, handleEvent)
 }
 
 /**
@@ -435,7 +477,7 @@ class ParsedElementNode implements ElementNode {
   declare excludedFromMarkdown?: boolean
   pluginOutput?: string[]
   context?: ElementNode['context']
-  private cachedDepthMap?: Uint8Array
+  private cachedDepthMap?: Uint16Array
 
   constructor(
     name: string,
@@ -455,11 +497,11 @@ class ParsedElementNode implements ElementNode {
     this.tagHandler = tagHandler
   }
 
-  get depthMap(): Uint8Array {
+  get depthMap(): Uint16Array {
     if (this.cachedDepthMap)
       return this.cachedDepthMap
 
-    const depthMap = new Uint8Array(MAX_TAG_ID)
+    const depthMap = new Uint16Array(MAX_TAG_ID)
     if (this.tagId >= 0 && this.tagId < MAX_TAG_ID)
       depthMap[this.tagId] = 1
     let node = this.parent
@@ -480,11 +522,22 @@ export interface ParseOptions {
 
 export interface ParseState {
   /** Map of tag names to their current nesting depth - uses TypedArray for performance */
-  depthMap: Uint8Array
+  depthMap: Uint16Array
   /** Current overall nesting depth */
   depth: number
-  /** Whether parsing stopped after reaching the practical browser depth limit. */
-  depthLimitReached?: boolean
+  /** Root tag currently flattened beyond the rich element depth. */
+  flattenedTagName?: string
+  /** Resolved built-in identity of the flattened root. */
+  flattenedTagId?: number
+  /** Same-name nesting below the flattened root. */
+  flattenedTagDepth?: number
+  /** Exact output-excluded scope nested inside the flattened subtree. */
+  flattenedOpaqueTagName?: string
+  flattenedOpaqueDepth?: number
+  /** Raw-text tag currently open inside the flattened subtree. */
+  flattenedRawTagName?: string
+  /** Whether flattened raw text must be excluded from output. */
+  flattenedRawExcludesText?: boolean
   /** Currently processing element node */
   currentNode?: ElementNode | null
   /** Whether current content contains HTML entities that need decoding */
@@ -714,7 +767,7 @@ function matchesClosingTag(node: ElementNode, tagName: string, tagId: number, cl
 export function parseHtml(html: string, options: ParseOptions = {}): ParseResult {
   const events: NodeEvent[] = []
   const state: ParseState = {
-    depthMap: new Uint8Array(MAX_TAG_ID),
+    depthMap: new Uint16Array(MAX_TAG_ID),
     depth: 0,
     resolvedPlugins: options.resolvedPlugins || [],
   }
@@ -747,9 +800,6 @@ function parseHtmlInternal(
   state: ParseState,
   handleEvent: (event: NodeEvent) => void,
 ): string {
-  if (state.depthLimitReached)
-    return ''
-
   let textBuffer = '' // Buffer to accumulate text content
   // Raw start of the run held in textBuffer. Streaming must carry the source
   // bytes from here, since textBuffer may already contain decoded or escaped
@@ -757,7 +807,7 @@ function parseHtmlInternal(
   let runStart = 0
 
   // Initialize state
-  state.depthMap ??= new Uint8Array(MAX_TAG_ID)
+  state.depthMap ??= new Uint16Array(MAX_TAG_ID)
   state.depth ??= 0
   state.lastCharWasWhitespace ??= true
   state.justClosedTag ??= false
@@ -774,7 +824,7 @@ function parseHtmlInternal(
     i = scanResult
   }
 
-  while (i < chunkLength && !state.depthLimitReached) {
+  while (i < chunkLength) {
     const currentCharCode = htmlChunk.charCodeAt(i)
 
     // If not starting a tag, add to text buffer and continue
@@ -834,6 +884,30 @@ function parseHtmlInternal(
     }
 
     const nextCharCode = htmlChunk.charCodeAt(i + 1)
+
+    if (state.flattenedRawTagName) {
+      if (nextCharCode === SLASH_CHAR) {
+        let peekEnd = i + 2
+        while (peekEnd < chunkLength) {
+          const c = htmlChunk.charCodeAt(peekEnd)
+          if (c === GT_CHAR || c === SLASH_CHAR || isWhitespace(c))
+            break
+          peekEnd++
+        }
+        if (peekEnd === chunkLength) {
+          textBuffer += htmlChunk.substring(i)
+          break
+        }
+        if (normalizeTagName(htmlChunk.substring(i + 2, peekEnd)) !== state.flattenedRawTagName) {
+          textBuffer += htmlChunk[i++]
+          continue
+        }
+      }
+      else {
+        textBuffer += htmlChunk[i++]
+        continue
+      }
+    }
 
     // COMMENT, DOCTYPE or CDATA
     if (nextCharCode === EXCLAMATION_CHAR) {
@@ -1057,7 +1131,9 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
 
   // Template exclusion is copied to descendants when they open, so text can
   // inherit it from its immediate parent without walking the ancestor chain.
-  const excludesTextNodes = state.currentNode?.tagHandler?.excludesTextNodes
+  const excludesTextNodes = (state.flattenedOpaqueDepth || 0) > 0
+    || state.flattenedRawExcludesText
+    || state.currentNode?.tagHandler?.excludesTextNodes
     || state.currentNode?.excludedFromMarkdown
   const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
 
@@ -1170,6 +1246,81 @@ function processClosingTag(
   const tagId = effectiveTagId(tagName, typeof mappedTagId === 'number' ? mappedTagId : -1, state)
   const closingIsAlias = tagHandler?.aliasTagId !== undefined
 
+  if ((state.flattenedOpaqueDepth || 0) > 0) {
+    const closedRaw = state.flattenedRawTagName !== undefined
+    if (closedRaw) {
+      state.flattenedRawTagName = undefined
+      state.flattenedRawExcludesText = undefined
+    }
+    if (tagName === state.flattenedOpaqueTagName) {
+      state.flattenedOpaqueDepth!--
+      if (!state.flattenedOpaqueDepth) {
+        state.flattenedOpaqueTagName = undefined
+        if (tagName === state.flattenedTagName) {
+          state.flattenedTagDepth!--
+          if (!state.flattenedTagDepth)
+            clearFlattenedElements(state)
+        }
+      }
+    }
+    state.justClosedTag = true
+    return {
+      complete: true,
+      newPosition: i + 1,
+      remainingText: '',
+    }
+  }
+
+  const stopAtTemplate = tagId !== TAG_TEMPLATE && (state.depthMap[TAG_TEMPLATE] || 0) > 0
+  let curr: ElementNode | null | undefined
+  if (state.flattenedTagName) {
+    const closedRaw = state.flattenedRawTagName !== undefined
+    if (closedRaw) {
+      state.flattenedRawTagName = undefined
+      state.flattenedRawExcludesText = undefined
+    }
+    if (tagName === state.flattenedTagName) {
+      state.flattenedTagDepth!--
+      if (!state.flattenedTagDepth)
+        clearFlattenedElements(state)
+      state.justClosedTag = true
+      return {
+        complete: true,
+        newPosition: i + 1,
+        remainingText: '',
+      }
+    }
+    if (!closedRaw) {
+      curr = state.currentNode
+      while (curr && !matchesClosingTag(curr, tagName, tagId, closingIsAlias)) {
+        if (stopAtTemplate && curr.tagId === TAG_TEMPLATE) {
+          curr = null
+          break
+        }
+        curr = curr.parent
+      }
+      if (curr) {
+        clearFlattenedElements(state)
+      }
+      else {
+        state.justClosedTag = true
+        return {
+          complete: true,
+          newPosition: i + 1,
+          remainingText: '',
+        }
+      }
+    }
+    if (closedRaw) {
+      state.justClosedTag = true
+      return {
+        complete: true,
+        newPosition: i + 1,
+        remainingText: '',
+      }
+    }
+  }
+
   if (state.currentNode?.tagHandler?.isNonNesting && !matchesClosingTag(state.currentNode, tagName, tagId, closingIsAlias)) {
     return {
       complete: false,
@@ -1180,14 +1331,15 @@ function processClosingTag(
 
   // Find a matching parent node. A template is a scope boundary: an end tag in
   // its inert contents must never pop an element from the outer document.
-  const stopAtTemplate = tagId !== TAG_TEMPLATE && (state.depthMap[TAG_TEMPLATE] || 0) > 0
-  let curr: ElementNode | null | undefined = state.currentNode
-  while (curr && !matchesClosingTag(curr, tagName, tagId, closingIsAlias)) {
-    if (stopAtTemplate && curr.tagId === TAG_TEMPLATE) {
-      curr = null
-      break
+  if (!curr) {
+    curr = state.currentNode
+    while (curr && !matchesClosingTag(curr, tagName, tagId, closingIsAlias)) {
+      if (stopAtTemplate && curr.tagId === TAG_TEMPLATE) {
+        curr = null
+        break
+      }
+      curr = curr.parent
     }
-    curr = curr.parent
   }
 
   if (curr) {
@@ -1243,6 +1395,54 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
   state.currentNode = state.currentNode!.parent!
   state.hasEncodedHtmlEntity = false
   state.justClosedTag = true
+}
+
+function clearFlattenedElements(state: ParseState): void {
+  state.flattenedTagName = undefined
+  state.flattenedTagId = undefined
+  state.flattenedTagDepth = undefined
+  state.flattenedRawTagName = undefined
+  state.flattenedRawExcludesText = undefined
+}
+
+function startsOpaqueFlattening(
+  state: ParseState,
+  tagName: string,
+  tagId: number,
+  attributes: Record<string, string>,
+  tagHandler: Node['tagHandler'],
+): boolean {
+  if (tagId === TAG_TEMPLATE)
+    return true
+  const plugins = state.resolvedPlugins
+  if (!plugins)
+    return false
+  let node: ParsedElementNode | undefined
+  for (const plugin of plugins) {
+    if (!plugin.excludesOverflowSubtree)
+      continue
+    node ||= new ParsedElementNode(
+      tagName,
+      attributes,
+      state.currentNode,
+      state.depth + 1,
+      0,
+      tagId,
+      tagHandler,
+    )
+    if (plugin.excludesOverflowSubtree(node))
+      return true
+  }
+  return false
+}
+
+function enterOpaqueFlattening(state: ParseState, tagName: string, tagHandler: Node['tagHandler']): void {
+  state.flattenedOpaqueTagName = tagName
+  state.flattenedOpaqueDepth = 1
+  if (tagHandler?.isNonNesting) {
+    state.flattenedRawTagName = tagName
+    state.flattenedRawExcludesText = tagHandler.excludesTextNodes
+  }
 }
 
 /**
@@ -1389,13 +1589,30 @@ function processOpeningTag(
     }
   }
 
+  if ((state.flattenedOpaqueDepth || 0) > 0) {
+    if (!result.selfClosing && tagName === state.flattenedOpaqueTagName)
+      state.flattenedOpaqueDepth!++
+    if (!result.selfClosing && tagHandler?.isNonNesting) {
+      state.flattenedRawTagName = tagName
+      state.flattenedRawExcludesText = tagHandler.excludesTextNodes
+    }
+    return {
+      complete: true,
+      newPosition: result.newPosition,
+      remainingText: '',
+      selfClosing: result.selfClosing,
+      skip: true,
+    }
+  }
+
   // Browser recovery: a non-head start tag while <head> is still open means the
   // page never closed its head (no </head>/<body>). Auto-close head (and anything
   // wrongly opened inside it) so body content is parsed as flow content with
   // normal block spacing, instead of inheriting head's whitespace collapsing.
   // Runs only after the tag is confirmed complete so incomplete/chunk-split start
   // tags do not mutate parser state or emit a premature head close.
-  if ((state.depthMap[TAG_HEAD] || 0) > 0
+  if (!state.flattenedTagName
+    && (state.depthMap[TAG_HEAD] || 0) > 0
     && (state.depthMap[TAG_TEMPLATE] || 0) === 0
     && !HEAD_CONTENT_TAGS.has(tagId)) {
     while (state.currentNode && state.currentNode.tagId !== TAG_HEAD) {
@@ -1414,7 +1631,7 @@ function processOpeningTag(
   // confirmed complete (above) so a chunk-split start tag never mutates parser
   // state or emits a premature close.
   if (tagId >= 0 && tagId < MAX_TAG_ID && NEEDS_IMPLIED_END_RECOVERY[tagId] === 1) {
-    if (tagId === TAG_SELECT && (state.depthMap[TAG_SELECT] || 0) > 0) {
+    if (tagId === TAG_SELECT && parserTagDepth(state, TAG_SELECT) > 0) {
       // In the "in select" insertion mode a nested <select> acts as the end
       // of the open select; the incoming start tag itself is ignored.
       if (closeSelectTo(state, TAG_SELECT, handleEvent)) {
@@ -1428,15 +1645,15 @@ function processOpeningTag(
       }
     }
     else if (tagId === TAG_OPTION) {
-      if ((state.depthMap[TAG_SELECT] || 0) > 0) {
+      if (parserTagDepth(state, TAG_SELECT) > 0) {
         closeSelectTo(state, TAG_OPTION, handleEvent)
       }
-      else if (state.currentNode?.tagId === TAG_OPTION) {
+      else if (parserLastTagId(state) === TAG_OPTION) {
         // The in-body rule also pops an option when it is the current node.
-        closeNode(state.currentNode, state, handleEvent)
+        popParserTop(state, handleEvent)
       }
     }
-    else if (tagId === TAG_OPTGROUP && (state.depthMap[TAG_SELECT] || 0) > 0) {
+    else if (tagId === TAG_OPTGROUP && parserTagDepth(state, TAG_SELECT) > 0) {
       // An optgroup start first closes a current option, then the previous
       // optgroup, making both optional end tags observable as siblings.
       closeSelectTo(state, TAG_OPTION, handleEvent)
@@ -1445,21 +1662,21 @@ function processOpeningTag(
     else if (tagId === TAG_A) {
       // A nested <a> closes the open one (anchors cannot nest), so the markdown is
       // two adjacent links rather than invalid nested `[..]`. <a> never closes <p>.
-      if ((state.depthMap[TAG_A] || 0) > 0) {
+      if (parserTagDepth(state, TAG_A) > 0) {
         closeImpliedTo(state, SINGLE_A, A_SCOPE_BOUNDARY, handleEvent)
       }
     }
     else if (tagId === TAG_TD || tagId === TAG_TH || tagId === TAG_TR
       || tagId === TAG_THEAD || tagId === TAG_TBODY || tagId === TAG_TFOOT) {
       // Table cells/rows/sections close earlier ones; they never close <p>.
-      if ((state.depthMap[TAG_TABLE] || 0) > 0) {
+      if (parserTagDepth(state, TAG_TABLE) > 0) {
         if (tagId === TAG_TD || tagId === TAG_TH) {
-          if ((state.depthMap[TAG_TD] || 0) > 0 || (state.depthMap[TAG_TH] || 0) > 0) {
+          if (parserTagDepth(state, TAG_TD) > 0 || parserTagDepth(state, TAG_TH) > 0) {
             closeImpliedTo(state, TD_TH, CELL_SCOPE_BOUNDARY, handleEvent)
           }
         }
         else if (tagId === TAG_TR) {
-          if ((state.depthMap[TAG_TR] || 0) > 0) {
+          if (parserTagDepth(state, TAG_TR) > 0) {
             closeTableContext(state, TR_CELLS, handleEvent)
           }
         }
@@ -1471,33 +1688,62 @@ function processOpeningTag(
     else {
       // Remaining recovery tags are all in CLOSES_P, so they close an open <p>
       // first, then any heading/list-item implied end.
-      if ((state.depthMap[TAG_P] || 0) > 0) {
+      if (parserTagDepth(state, TAG_P) > 0) {
         closeImpliedTo(state, SINGLE_P, P_SCOPE_BOUNDARY, handleEvent)
       }
       if (HEADINGS.has(tagId)) {
         // A heading start closes an open heading (they cannot nest); only when one
         // is the current node, matching the spec's "if the current node is an
         // h1–h6 element, pop it" step.
-        const top = state.currentNode
-        if (top && top.tagId !== undefined && HEADINGS.has(top.tagId)) {
-          closeNode(top, state, handleEvent)
-        }
+        const topId = parserLastTagId(state)
+        if (topId !== undefined && HEADINGS.has(topId))
+          popParserTop(state, handleEvent)
       }
       else if (tagId === TAG_LI) {
-        if ((state.depthMap[TAG_LI] || 0) > 0) {
+        if (parserTagDepth(state, TAG_LI) > 0) {
           closeImpliedTo(state, SINGLE_LI, LI_SCOPE_BOUNDARY, handleEvent)
         }
       }
       else if (tagId === TAG_DT || tagId === TAG_DD) {
-        if ((state.depthMap[TAG_DT] || 0) > 0 || (state.depthMap[TAG_DD] || 0) > 0) {
+        if (parserTagDepth(state, TAG_DT) > 0 || parserTagDepth(state, TAG_DD) > 0) {
           closeImpliedTo(state, DT_DD, DL_SCOPE_BOUNDARY, handleEvent)
         }
       }
     }
   }
 
+  if (state.flattenedTagName && !result.selfClosing) {
+    if (tagName === state.flattenedTagName)
+      state.flattenedTagDepth!++
+    if (startsOpaqueFlattening(state, tagName, tagId, result.attributes, tagHandler)) {
+      enterOpaqueFlattening(state, tagName, tagHandler)
+    }
+    else {
+      if (tagHandler?.isNonNesting) {
+        state.flattenedRawTagName = tagName
+        state.flattenedRawExcludesText = tagHandler.excludesTextNodes
+      }
+    }
+    return {
+      complete: true,
+      newPosition: result.newPosition,
+      remainingText: '',
+      selfClosing: false,
+      skip: true,
+    }
+  }
+
   if (!result.selfClosing && state.depth >= MAX_ELEMENT_DEPTH) {
-    state.depthLimitReached = true
+    state.flattenedTagName = tagName
+    state.flattenedTagId = tagId
+    state.flattenedTagDepth = 1
+    if (startsOpaqueFlattening(state, tagName, tagId, result.attributes, tagHandler)) {
+      enterOpaqueFlattening(state, tagName, tagHandler)
+    }
+    else if (tagHandler?.isNonNesting) {
+      state.flattenedRawTagName = tagName
+      state.flattenedRawExcludesText = tagHandler.excludesTextNodes
+    }
     return {
       complete: true,
       newPosition: result.newPosition,

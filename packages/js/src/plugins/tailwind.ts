@@ -238,6 +238,13 @@ function processTailwindClasses(classes: string[]): TailwindNodeData {
  */
 export function tailwindPlugin(): TransformPlugin {
   return createPlugin({
+    excludesOverflowSubtree(node) {
+      if ((node.parent as ElementNode | undefined)?.context?.tailwind?.hidden)
+        return true
+      const classes = node.attributes?.class?.trim().split(' ').filter(Boolean)
+      return classes ? processTailwindClasses(classes).hidden : false
+    },
+
     // Process node attributes to extract Tailwind classes
     processAttributes(node: ElementNode): void {
       const parentHidden = (node.parent as ElementNode | undefined)?.context?.tailwind?.hidden
