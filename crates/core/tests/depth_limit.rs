@@ -1,5 +1,6 @@
 use mdream::{
-  HTMLToMarkdownOptions, MarkdownStreamProcessor, PluginConfig, TagOverrideConfig, html_to_markdown,
+  FilterConfig, HTMLToMarkdownOptions, MarkdownStreamProcessor, PluginConfig, TagOverrideConfig,
+  html_to_markdown,
 };
 
 const LIMIT: usize = 512;
@@ -54,6 +55,30 @@ fn later_siblings_survive_implied_ends_in_overflow() {
   assert_eq!(
     html_to_markdown(&html, HTMLToMarkdownOptions::default()),
     "one two\n\nafter"
+  );
+}
+
+#[test]
+fn implied_ends_recover_across_the_overflow_boundary() {
+  let html = format!("<p>A{}<em>B<div>C", "<span>".repeat(LIMIT - 1));
+  assert_eq!(
+    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    "AB\n\nC"
+  );
+}
+
+#[test]
+fn links_and_list_items_recover_across_the_overflow_boundary() {
+  let link = format!("<a href=\"x\">A{}<em>B</a>C", "<span>".repeat(LIMIT - 1));
+  assert_eq!(
+    html_to_markdown(&link, HTMLToMarkdownOptions::default()),
+    "[AB](x)C"
+  );
+
+  let list = format!("<ul><li>A{}<em>B<li>C</ul>", "<span>".repeat(LIMIT - 2));
+  assert_eq!(
+    html_to_markdown(&list, HTMLToMarkdownOptions::default()),
+    "- AB\n- C"
   );
 }
 
@@ -137,6 +162,19 @@ fn raw_text_stays_hidden_beyond_the_materialized_limit() {
 }
 
 #[test]
+fn visible_table_and_image_content_survives_overflow() {
+  let html = format!(
+    "{}<table><tr><td>cell</td></tr></table><span><img src=\"x\" alt=\"image\"></span>{}<p>after</p>",
+    "<div>".repeat(LIMIT),
+    "</div>".repeat(LIMIT),
+  );
+  assert_eq!(
+    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    "cell![image](x)\n\nafter"
+  );
+}
+
+#[test]
 fn builtin_closes_are_case_insensitive_in_overflow() {
   let html = format!(
     "{}<SCRIPT>hidden</SCRIPT><p>visible</p>{}",
@@ -183,4 +221,147 @@ fn structural_ancestors_survive_the_overflow_boundary() {
     html_to_markdown(&html, HTMLToMarkdownOptions::default()),
     "> > ALPHA\n> >\n> > X\n> >\n> > OMEGA\n\nZED"
   );
+}
+
+#[test]
+fn template_content_stays_inert_after_the_identity_window() {
+  let html = format!(
+    "{}{}<template><b>hidden</template>{}{}<p>after</p>",
+    "<div>".repeat(LIMIT),
+    "<span>".repeat(LIMIT),
+    "</span>".repeat(LIMIT),
+    "</div>".repeat(LIMIT),
+  );
+  assert_eq!(
+    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    "after"
+  );
+}
+
+#[test]
+fn filtered_content_stays_hidden_in_overflow() {
+  let html = format!(
+    "{}<div style=\"display:none\"></span><img src=\"x\" alt=\"secret\"></div>{}<p>after</p>",
+    "<div>".repeat(LIMIT),
+    "</div>".repeat(LIMIT),
+  );
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(&html, options), "after");
+}
+
+#[test]
+fn output_neutral_plugins_keep_visible_overflow_content() {
+  let html = format!(
+    "{}<span>visible</span>{}<p>after</p>",
+    "<div>".repeat(LIMIT),
+    "</div>".repeat(LIMIT),
+  );
+  for plugins in [
+    PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    },
+    PluginConfig {
+      tailwind: Some(Default::default()),
+      ..Default::default()
+    },
+  ] {
+    let options = HTMLToMarkdownOptions {
+      plugins: Some(plugins),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(&html, options), "visible\n\nafter");
+  }
+}
+
+#[test]
+fn self_closing_content_stays_inert_inside_overflow_templates() {
+  let html = format!(
+    "{}<template><script></template></script><img src=\"x\" alt=\"secret\"><hr></template>{}<p>after</p>",
+    "<div>".repeat(LIMIT),
+    "</div>".repeat(LIMIT),
+  );
+  assert_eq!(
+    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    "after"
+  );
+}
+
+#[test]
+fn excluded_raw_aliases_stay_inert_in_overflow() {
+  let html = format!(
+    "{}<x-raw>secret</y-raw>still secret</x-raw>{}<p>after</p>",
+    "<div>".repeat(LIMIT),
+    "</div>".repeat(LIMIT),
+  );
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![
+        ("x-raw".to_string(), TagOverrideConfig::alias("script")),
+        ("y-raw".to_string(), TagOverrideConfig::alias("script")),
+      ]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(&html, options), "after");
+}
+
+#[test]
+fn hidden_raw_overflow_root_scans_as_raw_text() {
+  let html = format!(
+    "{}<script hidden>let x = \"<script>\"</script>{}<p>after</p>",
+    "<div>".repeat(LIMIT),
+    "</div>".repeat(LIMIT),
+  );
+  for plugins in [
+    PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    },
+    PluginConfig {
+      tailwind: Some(Default::default()),
+      ..Default::default()
+    },
+  ] {
+    let options = HTMLToMarkdownOptions {
+      plugins: Some(plugins),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(&html, options), "after");
+  }
+}
+
+#[test]
+fn only_plugin_hidden_subtrees_start_opaque_overflow() {
+  let html = format!(
+    "{}<span class=\"secret hidden\"><img src=\"x\" alt=\"secret\"></span>{}<p>after</p>",
+    "<div>".repeat(LIMIT),
+    "</div>".repeat(LIMIT),
+  );
+  for plugins in [
+    PluginConfig {
+      filter: Some(FilterConfig {
+        exclude: Some(vec![".secret".to_string()]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+    PluginConfig {
+      tailwind: Some(Default::default()),
+      ..Default::default()
+    },
+  ] {
+    let options = HTMLToMarkdownOptions {
+      plugins: Some(plugins),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(&html, options), "after");
+  }
 }

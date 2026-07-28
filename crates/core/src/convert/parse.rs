@@ -306,6 +306,7 @@ fn is_hidden(node: &ElementNode) -> bool {
 impl ConvertState {
   fn push_overflow_element(
     &mut self,
+    tag_name: &str,
     tag_id: Option<u8>,
     is_builtin: bool,
     tag_handler: Option<&TagHandler>,
@@ -324,16 +325,12 @@ impl ConvertState {
         OVERFLOW_CUSTOM_TAG
       });
     }
-    let overflow_depth = self.overflow_depth();
-    if self.overflow_excluded_at.is_none()
-      && (tag_id == Some(TAG_TEMPLATE)
-        || tag_handler.is_some_and(|handler| handler.excludes_text_nodes))
-    {
-      self.overflow_excluded_at = Some(overflow_depth);
-    }
     if tag_handler.is_some_and(|handler| handler.is_non_nesting) {
       self.overflow_raw_tag_id = tag_id;
-      self.overflow_raw_at = Some(overflow_depth);
+      self.overflow_raw_custom_name = (!is_builtin).then(|| tag_name.to_string());
+      self.overflow_raw_excludes_text =
+        tag_handler.is_some_and(|handler| handler.excludes_text_nodes);
+      self.overflow_raw_at = Some(self.overflow_depth());
     }
   }
 
@@ -350,27 +347,29 @@ impl ConvertState {
     self.overflow_tags.len().saturating_add(self.overflow_debt)
   }
 
+  fn clear_overflow_elements(&mut self) {
+    self.overflow_tags.clear();
+    self.overflow_debt = 0;
+    self.sync_overflow_markers();
+  }
+
   fn sync_overflow_markers(&mut self) {
     let overflow_depth = self.overflow_depth();
-    if self
-      .overflow_excluded_at
-      .is_some_and(|depth| depth > overflow_depth)
-    {
-      self.overflow_excluded_at = None;
-    }
     if self
       .overflow_raw_at
       .is_some_and(|depth| depth > overflow_depth)
     {
       self.overflow_raw_tag_id = None;
+      self.overflow_raw_custom_name = None;
+      self.overflow_raw_excludes_text = false;
       self.overflow_raw_at = None;
     }
   }
 
-  fn close_overflow_element(&mut self, tag_id: Option<u8>, is_builtin: bool) {
+  fn close_overflow_element(&mut self, tag_id: Option<u8>, is_builtin: bool) -> bool {
     if self.overflow_debt > 0 {
       self.pop_overflow_element();
-      return;
+      return true;
     }
 
     let target = if is_builtin {
@@ -381,14 +380,101 @@ impl ConvertState {
     for index in (0..self.overflow_tags.len()).rev() {
       let open_tag = self.overflow_tags[index];
       if target != TAG_TEMPLATE && open_tag == TAG_TEMPLATE {
-        return;
+        return true;
       }
       if open_tag == target {
         self.overflow_tags.truncate(index);
         self.sync_overflow_markers();
-        return;
+        return true;
       }
     }
+    false
+  }
+
+  fn matches_opaque_tag(&self, tag_name: &str, tag_id: Option<u8>, is_builtin: bool) -> bool {
+    if is_builtin {
+      self.overflow_opaque_tag_id == tag_id
+    } else {
+      self.overflow_opaque_custom_name.as_deref() == Some(tag_name)
+    }
+  }
+
+  fn enter_opaque_overflow(
+    &mut self,
+    tag_name: &str,
+    tag_id: Option<u8>,
+    is_builtin: bool,
+    tag_handler: Option<&TagHandler>,
+  ) {
+    self.overflow_opaque_tag_id = is_builtin.then_some(tag_id).flatten();
+    self.overflow_opaque_custom_name = (!is_builtin).then(|| tag_name.to_string());
+    self.overflow_opaque_depth = 1;
+    if tag_handler.is_some_and(|handler| handler.is_non_nesting) {
+      self.overflow_raw_tag_id = tag_id;
+      self.overflow_raw_custom_name = (!is_builtin).then(|| tag_name.to_string());
+      self.overflow_raw_excludes_text =
+        tag_handler.is_some_and(|handler| handler.excludes_text_nodes);
+      self.overflow_raw_at = None;
+    }
+  }
+
+  fn clear_opaque_overflow(&mut self) {
+    self.overflow_opaque_tag_id = None;
+    self.overflow_opaque_custom_name = None;
+    self.overflow_opaque_depth = 0;
+  }
+
+  fn overflow_plugin_excludes(
+    &self,
+    tag_name: &str,
+    tag_id: Option<u8>,
+    is_builtin: bool,
+    attributes: &crate::types::Attributes,
+    tag_handler: Option<&TagHandler>,
+  ) -> bool {
+    if !self.has_filter && !self.has_tailwind {
+      return false;
+    }
+    let handler = tag_handler.copied().unwrap_or(TagHandler {
+      is_self_closing: false,
+      is_non_nesting: false,
+      collapses_inner_white_space: false,
+      is_inline: true,
+      spacing: Some(NO_SPACING),
+      excludes_text_nodes: false,
+      wanted_attrs: ATTR_NONE,
+    });
+    let node = ElementNode {
+      attributes: attributes.clone(),
+      tailwind: None,
+      custom_name: (!is_builtin).then(|| tag_name.to_string()),
+      depth: self.depth + 1,
+      index: 0,
+      current_walk_index: 0,
+      child_text_node_index: 0,
+      tag_id,
+      contains_whitespace: false,
+      excluded_from_markdown: false,
+      is_inline: handler.is_inline,
+      excludes_text_nodes: handler.excludes_text_nodes,
+      is_non_nesting: handler.is_non_nesting,
+      collapses_inner_white_space: handler.collapses_inner_white_space,
+      spacing: handler.spacing,
+    };
+    if self.has_tailwind
+      && node
+        .attributes
+        .get("class")
+        .is_some_and(|class| process_tailwind_classes(class).2)
+    {
+      return true;
+    }
+    self.has_filter
+      && (is_hidden(&node)
+        || self
+          .filter_exclude_parsed
+          .iter()
+          .any(|(_, parsed)| matches_selector(&node, parsed)))
   }
 
   pub(crate) fn process_text_buffer(&mut self, text_buffer: &mut String) {
@@ -403,7 +489,15 @@ impl ConvertState {
     // No parent element means this is a top-level (root) text node, e.g. the
     // leading `foo ` in the fragment `foo <sup>bar</sup>`. Such text must
     // still be emitted rather than dropped (issue #93).
-    let mut excludes_text_nodes = self.overflow_excluded_at.is_some()
+    let overflow_excludes_text = self.overflow_debt == 0
+      && self
+        .overflow_tags
+        .last()
+        .and_then(|&id| get_tag_handler(id))
+        .is_some_and(|handler| handler.excludes_text_nodes);
+    let mut excludes_text_nodes = self.overflow_opaque_depth > 0
+      || self.overflow_raw_excludes_text
+      || overflow_excludes_text
       || self
         .stack
         .last()
@@ -557,6 +651,23 @@ impl ConvertState {
   /// elements) are closed along the way, mirroring the spec's "generate implied
   /// end tags" step.
   fn close_implied_to(&mut self, target: &[bool; 256], boundary: &[bool; 256]) {
+    if self.overflow_debt > 0 {
+      return;
+    }
+    let mut overflow_close_count = 0usize;
+    for &id in self.overflow_tags.iter().rev() {
+      overflow_close_count += 1;
+      if target[id as usize] {
+        self
+          .overflow_tags
+          .truncate(self.overflow_tags.len() - overflow_close_count);
+        self.sync_overflow_markers();
+        return;
+      }
+      if boundary[id as usize] {
+        return;
+      }
+    }
     let mut close_count = 0usize;
     let mut found = false;
     for node in self.stack.iter().rev() {
@@ -571,6 +682,7 @@ impl ConvertState {
       }
     }
     if found {
+      self.clear_overflow_elements();
       for _ in 0..close_count {
         self.close_node();
       }
@@ -582,6 +694,20 @@ impl ConvertState {
   /// enclosing `<table>`). Implements implied end tags for `<tr>` (closes an open
   /// cell + row) and `<thead>`/`<tbody>`/`<tfoot>` (closes cell + row + section).
   fn close_table_context(&mut self, closeable: &[bool; 256]) {
+    if self.overflow_debt > 0 {
+      return;
+    }
+    while self
+      .overflow_tags
+      .last()
+      .is_some_and(|id| closeable[*id as usize])
+    {
+      self.pop_overflow_element();
+    }
+    if !self.overflow_tags.is_empty() {
+      return;
+    }
+
     while let Some(top) = self.stack.last() {
       match top.tag_id {
         Some(id) if closeable[id as usize] => self.close_node(),
@@ -594,6 +720,21 @@ impl ConvertState {
   /// at their owning `<select>`; a select scan includes the select itself. This
   /// only runs for recovery tags, leaving the common path as one table lookup.
   fn close_select_to(&mut self, target_id: u8) -> bool {
+    if self.overflow_debt > 0 {
+      return false;
+    }
+    for index in (0..self.overflow_tags.len()).rev() {
+      match self.overflow_tags[index] {
+        id if id == target_id => {
+          self.overflow_tags.truncate(index);
+          self.sync_overflow_markers();
+          return true;
+        }
+        TAG_SELECT if target_id != TAG_SELECT => return false,
+        TAG_TEMPLATE => return false,
+        _ => {}
+      }
+    }
     let mut target_index = None;
     for i in (0..self.stack.len()).rev() {
       match self.stack[i].tag_id {
@@ -607,12 +748,43 @@ impl ConvertState {
       }
     }
     if let Some(index) = target_index {
+      self.clear_overflow_elements();
       while self.stack.len() > index {
         self.close_node();
       }
       true
     } else {
       false
+    }
+  }
+
+  fn parser_tag_depth(&self, tag_id: u8) -> usize {
+    self.depth_map[tag_id as usize] as usize
+      + self
+        .overflow_tags
+        .iter()
+        .filter(|&&id| id == tag_id)
+        .count()
+  }
+
+  fn parser_last_tag_id(&self) -> Option<u8> {
+    if self.overflow_debt > 0 {
+      None
+    } else {
+      self
+        .overflow_tags
+        .last()
+        .copied()
+        .filter(|&id| id != OVERFLOW_CUSTOM_TAG)
+        .or_else(|| self.stack.last().and_then(|node| node.tag_id))
+    }
+  }
+
+  fn pop_parser_top(&mut self) {
+    if self.overflow_depth() > 0 {
+      self.pop_overflow_element();
+    } else {
+      self.close_node();
     }
   }
 
@@ -645,29 +817,30 @@ impl ConvertState {
       };
     }
 
-    if self.overflow_depth() > 0 {
-      if self.overflow_debt == 0
-        && tag_id.is_some_and(closes_p)
-        && self.overflow_tags.contains(&TAG_P)
-      {
-        self.close_overflow_element(Some(TAG_P), true);
+    if self.overflow_opaque_depth > 0 {
+      if !self_closing && self.matches_opaque_tag(tag_name, tag_id, is_builtin) {
+        self.overflow_opaque_depth = self.overflow_opaque_depth.saturating_add(1);
+      } else if !self_closing && tag_handler.is_some_and(|handler| handler.is_non_nesting) {
+        self.overflow_raw_tag_id = tag_id;
+        self.overflow_raw_custom_name = (!is_builtin).then(|| tag_name.to_string());
+        self.overflow_raw_excludes_text =
+          tag_handler.is_some_and(|handler| handler.excludes_text_nodes);
+        self.overflow_raw_at = None;
       }
-      if self.overflow_depth() > 0 {
-        self.push_overflow_element(tag_id, is_builtin, tag_handler, self_closing);
-        return OpeningTagResult {
-          complete: true,
-          new_position,
-          self_closing,
-          skip: true,
-        };
-      }
+      return OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing,
+        skip: true,
+      };
     }
 
     // Browser recovery: a non-head start tag while <head> is still open means the
     // page never closed its head (no </head>/<body>). Auto-close head (and anything
     // wrongly opened inside it) so body content parses as flow content with normal
     // block spacing instead of inheriting head's whitespace collapsing.
-    if self.depth_map[TAG_HEAD as usize] > 0
+    if self.overflow_depth() == 0
+      && self.depth_map[TAG_HEAD as usize] > 0
       && self.depth_map[TAG_TEMPLATE as usize] == 0
       && !is_head_content_tag(tag_id)
     {
@@ -699,7 +872,7 @@ impl ConvertState {
       match id {
         // In the "in select" insertion mode a nested <select> acts as the end
         // of the open select; the incoming start tag itself is ignored.
-        TAG_SELECT if self.depth_map[TAG_SELECT as usize] > 0 => {
+        TAG_SELECT if self.parser_tag_depth(TAG_SELECT) > 0 => {
           if self.close_select_to(TAG_SELECT) {
             return OpeningTagResult {
               complete: true,
@@ -710,35 +883,31 @@ impl ConvertState {
           }
         }
         TAG_OPTION => {
-          if self.depth_map[TAG_SELECT as usize] > 0 {
+          if self.parser_tag_depth(TAG_SELECT) > 0 {
             self.close_select_to(TAG_OPTION);
-          } else if self
-            .stack
-            .last()
-            .is_some_and(|node| node.tag_id == Some(TAG_OPTION))
-          {
-            self.close_node();
+          } else if self.parser_last_tag_id() == Some(TAG_OPTION) {
+            self.pop_parser_top();
           }
         }
-        TAG_OPTGROUP if self.depth_map[TAG_SELECT as usize] > 0 => {
+        TAG_OPTGROUP if self.parser_tag_depth(TAG_SELECT) > 0 => {
           self.close_select_to(TAG_OPTION);
           self.close_select_to(TAG_OPTGROUP);
         }
         // A nested <a> closes the open one (anchors cannot nest), so the
         // markdown is two adjacent links rather than invalid nested `[..]`.
-        TAG_A if self.depth_map[TAG_A as usize] > 0 => {
+        TAG_A if self.parser_tag_depth(TAG_A) > 0 => {
           self.close_implied_to(&TARGET_A, &A_SCOPE_BOUNDARY);
         }
         TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT
-          if self.depth_map[TAG_TABLE as usize] > 0 =>
+          if self.parser_tag_depth(TAG_TABLE) > 0 =>
         {
           match id {
             TAG_TD | TAG_TH
-              if self.depth_map[TAG_TD as usize] > 0 || self.depth_map[TAG_TH as usize] > 0 =>
+              if self.parser_tag_depth(TAG_TD) > 0 || self.parser_tag_depth(TAG_TH) > 0 =>
             {
               self.close_implied_to(&TARGET_CELL, &CELL_SCOPE_BOUNDARY);
             }
-            TAG_TR if self.depth_map[TAG_TR as usize] > 0 => {
+            TAG_TR if self.parser_tag_depth(TAG_TR) > 0 => {
               self.close_table_context(&ROW_CLOSEABLE);
             }
             TAG_THEAD | TAG_TBODY | TAG_TFOOT => {
@@ -750,7 +919,7 @@ impl ConvertState {
         TAG_A | TAG_TD | TAG_TH | TAG_TR | TAG_THEAD | TAG_TBODY | TAG_TFOOT | TAG_OPTGROUP
         | TAG_SELECT => {}
         _ => {
-          if self.depth_map[TAG_P as usize] > 0 {
+          if self.parser_tag_depth(TAG_P) > 0 {
             debug_assert!(closes_p(id));
             self.close_implied_to(&TARGET_P, &P_SCOPE_BOUNDARY);
           }
@@ -759,20 +928,17 @@ impl ConvertState {
             // when one is the current node, matching the spec's "if the current
             // node is an h1–h6 element, pop it" step.
             TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6
-              if self.stack.last().is_some_and(|n| {
-                matches!(
-                  n.tag_id,
-                  Some(TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6)
-                )
+              if self.parser_last_tag_id().is_some_and(|id| {
+                matches!(id, TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6)
               }) =>
             {
-              self.close_node();
+              self.pop_parser_top();
             }
-            TAG_LI if self.depth_map[TAG_LI as usize] > 0 => {
+            TAG_LI if self.parser_tag_depth(TAG_LI) > 0 => {
               self.close_implied_to(&TARGET_LI, &LI_SCOPE_BOUNDARY);
             }
             TAG_DT | TAG_DD
-              if self.depth_map[TAG_DT as usize] > 0 || self.depth_map[TAG_DD as usize] > 0 =>
+              if self.parser_tag_depth(TAG_DT) > 0 || self.parser_tag_depth(TAG_DD) > 0 =>
             {
               self.close_implied_to(&TARGET_DT_DD, &DL_SCOPE_BOUNDARY);
             }
@@ -782,8 +948,32 @@ impl ConvertState {
       }
     }
 
+    if !self_closing
+      && (self.overflow_depth() > 0 || self.stack.len() >= MAX_ELEMENT_DEPTH)
+      && (tag_id == Some(TAG_TEMPLATE)
+        || self.overflow_plugin_excludes(tag_name, tag_id, is_builtin, &attributes, tag_handler))
+    {
+      self.enter_opaque_overflow(tag_name, tag_id, is_builtin, tag_handler);
+      return OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing: false,
+        skip: true,
+      };
+    }
+
+    if self.overflow_depth() > 0 && !self_closing {
+      self.push_overflow_element(tag_name, tag_id, is_builtin, tag_handler, false);
+      return OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing: false,
+        skip: true,
+      };
+    }
+
     if !self_closing && self.stack.len() >= MAX_ELEMENT_DEPTH {
-      self.push_overflow_element(tag_id, is_builtin, tag_handler, false);
+      self.push_overflow_element(tag_name, tag_id, is_builtin, tag_handler, false);
       return OpeningTagResult {
         complete: true,
         new_position,
@@ -1352,18 +1542,42 @@ impl ConvertState {
         .and_then(|ov| ov.alias_tag_id)
     };
 
-    if self.overflow_depth() > 0 {
-      if !tag_id
-        .and_then(get_tag_handler)
-        .is_some_and(|handler| handler.is_self_closing)
-      {
-        self.close_overflow_element(tag_id, builtin_tag_id.is_some());
+    if self.overflow_opaque_depth > 0 {
+      if self.overflow_raw_tag_id.is_some() {
+        let closes_opaque_root =
+          self.matches_opaque_tag(tag_name.as_ref(), tag_id, builtin_tag_id.is_some());
+        self.overflow_raw_tag_id = None;
+        self.overflow_raw_custom_name = None;
+        self.overflow_raw_excludes_text = false;
+        self.overflow_raw_at = None;
+        if closes_opaque_root {
+          self.clear_opaque_overflow();
+        }
+      } else if self.matches_opaque_tag(tag_name.as_ref(), tag_id, builtin_tag_id.is_some()) {
+        self.overflow_opaque_depth -= 1;
+        if self.overflow_opaque_depth == 0 {
+          self.clear_opaque_overflow();
+        }
       }
       self.just_closed_tag = true;
       return CloseTagResult {
         complete: true,
         new_position: i + 1,
       };
+    }
+
+    if self.overflow_depth() > 0 {
+      let is_self_closing = tag_id
+        .and_then(get_tag_handler)
+        .is_some_and(|handler| handler.is_self_closing);
+      if is_self_closing || self.close_overflow_element(tag_id, builtin_tag_id.is_some()) {
+        self.just_closed_tag = true;
+        return CloseTagResult {
+          complete: true,
+          new_position: i + 1,
+        };
+      }
+      self.clear_overflow_elements();
     }
 
     if let Some(curr) = self.stack.last()

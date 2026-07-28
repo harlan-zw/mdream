@@ -77,7 +77,22 @@ export function filterPlugin(options: {
   // element instead of being re-evaluated for every ancestor of every node.
   const skippedSubtrees = new WeakSet<ElementNode>()
 
+  function excludesSubtree(element: ElementNode): boolean {
+    if (skippedSubtrees.has(element))
+      return true
+    const parentSkipped = element.parent ? skippedSubtrees.has(element.parent) : false
+    if (parentSkipped
+      || isHidden(element)
+      || excludeSelectors.some(selector => selector.matches(element))) {
+      skippedSubtrees.add(element)
+      return true
+    }
+    return false
+  }
+
   return createPlugin({
+    excludesOverflowSubtree: excludesSubtree,
+
     // Handle include/exclude filtering for elements and text nodes
     beforeNodeProcess(event: any) {
       const { node } = event
@@ -100,20 +115,9 @@ export function filterPlugin(options: {
 
       const element = node as ElementNode
 
-      if (skippedSubtrees.has(element)) {
-        return { skip: true }
-      }
-
       // Drop hidden elements and their subtrees. Inherit the parent's hidden flag
       // (O(1)); only run the style/attr scan when not already inside a hidden subtree.
-      const parentSkipped = element.parent ? skippedSubtrees.has(element.parent as ElementNode) : false
-      if (parentSkipped || isHidden(element)) {
-        skippedSubtrees.add(element)
-        return { skip: true }
-      }
-      // Check if element should be excluded
-      if (excludeSelectors.length && excludeSelectors.some(selector => selector.matches(element))) {
-        skippedSubtrees.add(element)
+      if (excludesSubtree(element)) {
         return { skip: true }
       }
 

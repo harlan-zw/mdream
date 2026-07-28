@@ -5,6 +5,12 @@
  */
 export interface TransformPlugin {
   /**
+   * Whether a flattened element starts an output-excluded subtree.
+   * @internal
+   */
+  excludesOverflowSubtree?: (node: ElementNode) => boolean
+
+  /**
    * Process a node before it's handled by the parser
    */
   beforeNodeProcess?: (event: NodeEvent, state: MdreamRuntimeState) => undefined | void | { skip: boolean }

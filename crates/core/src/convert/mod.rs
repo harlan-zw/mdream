@@ -297,8 +297,12 @@ pub struct ConvertState {
   in_pre: bool,
   overflow_tags: Vec<u8>,
   overflow_debt: usize,
-  overflow_excluded_at: Option<usize>,
+  overflow_opaque_tag_id: Option<u8>,
+  overflow_opaque_custom_name: Option<String>,
+  overflow_opaque_depth: usize,
   overflow_raw_tag_id: Option<u8>,
+  overflow_raw_custom_name: Option<String>,
+  overflow_raw_excludes_text: bool,
   overflow_raw_at: Option<usize>,
   /// Shallowest open element that is hidden or matches an exclude selector.
   /// Both drop their whole subtree, so one marker skips it in O(1).
@@ -459,8 +463,12 @@ impl ConvertState {
       in_pre: false,
       overflow_tags: Vec::new(),
       overflow_debt: 0,
-      overflow_excluded_at: None,
+      overflow_opaque_tag_id: None,
+      overflow_opaque_custom_name: None,
+      overflow_opaque_depth: 0,
       overflow_raw_tag_id: None,
+      overflow_raw_custom_name: None,
+      overflow_raw_excludes_text: false,
       overflow_raw_at: None,
       hidden_since_depth: None,
       filter_included_since_depth: None,
@@ -821,7 +829,13 @@ impl ConvertState {
                     .and_then(|(_, override_config)| override_config.alias_tag_id)
                 })
             });
-          if peek_tag_id == Some(raw_tag_id) {
+          let matches_raw = self
+            .overflow_raw_custom_name
+            .as_deref()
+            .map_or(peek_tag_id == Some(raw_tag_id), |name| {
+              name.eq_ignore_ascii_case(peek_name)
+            });
+          if matches_raw {
             if !text_buffer.is_empty() {
               self.process_text_buffer(&mut text_buffer);
               text_buffer.clear();

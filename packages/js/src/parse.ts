@@ -311,6 +311,19 @@ function closeImpliedTo(
   boundary: Set<number>,
   handleEvent: (event: NodeEvent) => void,
 ): void {
+  if ((state.overflowDebt || 0) > 0)
+    return
+  const tags = state.overflowTags
+  for (let index = (state.overflowLength || 0) - 1; index >= 0; index--) {
+    const id = tags![index]!
+    if (target.has(id)) {
+      state.overflowLength = index
+      syncOverflowMarkers(state)
+      return
+    }
+    if (boundary.has(id))
+      return
+  }
   let found = false
   for (let node = state.currentNode; node; node = node.parent) {
     const id = node.tagId
@@ -325,6 +338,7 @@ function closeImpliedTo(
   if (!found) {
     return
   }
+  clearOverflowElements(state)
   // closeNode always closes the current top and walks to its parent, so close
   // from the top until the matched node has itself been closed.
   while (state.currentNode) {
@@ -348,6 +362,17 @@ function closeTableContext(
   closeable: Set<number>,
   handleEvent: (event: NodeEvent) => void,
 ): void {
+  if ((state.overflowDebt || 0) > 0)
+    return
+  while ((state.overflowLength || 0) > 0) {
+    const id = state.overflowTags![state.overflowLength! - 1]!
+    if (!closeable.has(id))
+      break
+    popOverflowElement(state)
+  }
+  if ((state.overflowLength || 0) > 0)
+    return
+
   while (state.currentNode) {
     const id = state.currentNode.tagId
     if (id === undefined || !closeable.has(id)) {
@@ -368,6 +393,18 @@ function closeSelectTo(
   targetId: number,
   handleEvent: (event: NodeEvent) => void,
 ): boolean {
+  if ((state.overflowDebt || 0) > 0)
+    return false
+  for (let index = (state.overflowLength || 0) - 1; index >= 0; index--) {
+    const id = state.overflowTags![index]!
+    if (id === targetId) {
+      state.overflowLength = index
+      syncOverflowMarkers(state)
+      return true
+    }
+    if ((id === TAG_SELECT && targetId !== TAG_SELECT) || id === TAG_TEMPLATE)
+      return false
+  }
   let target: ElementNode | null | undefined
   for (let node = state.currentNode; node; node = node.parent) {
     if (node.tagId === targetId) {
@@ -379,10 +416,39 @@ function closeSelectTo(
   }
   if (!target)
     return false
+  clearOverflowElements(state)
   while (state.currentNode && state.currentNode !== target)
     closeNode(state.currentNode, state, handleEvent)
   closeNode(target, state, handleEvent)
   return true
+}
+
+function parserTagDepth(state: ParseState, tagId: number): number {
+  let depth = state.depthMap[tagId] || 0
+  const tags = state.overflowTags
+  for (let index = (state.overflowLength || 0) - 1; index >= 0; index--) {
+    if (tags![index] === tagId)
+      depth++
+  }
+  return depth
+}
+
+function parserLastTagId(state: ParseState): number | undefined {
+  if ((state.overflowDebt || 0) > 0)
+    return
+  const length = state.overflowLength || 0
+  if (length > 0) {
+    const id = state.overflowTags![length - 1]!
+    return id === OVERFLOW_CUSTOM_TAG ? undefined : id
+  }
+  return state.currentNode?.tagId
+}
+
+function popParserTop(state: ParseState, handleEvent: (event: NodeEvent) => void): void {
+  if (overflowDepth(state) > 0)
+    popOverflowElement(state)
+  else
+    closeNode(state.currentNode!, state, handleEvent)
 }
 
 /**
@@ -490,10 +556,12 @@ export interface ParseState {
   overflowLength?: number
   /** Deeper elements represented as scalar debt after the identity window. */
   overflowDebt?: number
-  /** Overflow depth where inert text started. */
-  overflowExcludedAt?: number
+  /** Exact fail-closed scope kept outside generic overflow recovery. */
+  overflowOpaqueTagName?: string
+  overflowOpaqueDepth?: number
   /** Raw-text element flattened into overflow state. */
   overflowRawTagName?: string
+  overflowRawExcludesText?: boolean
   /** Overflow depth where the raw-text element opened. */
   overflowRawAt?: number
   /** Currently processing element node */
@@ -1097,7 +1165,12 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
 
   // Template exclusion is copied to descendants when they open, so text can
   // inherit it from its immediate parent without walking the ancestor chain.
-  const excludesTextNodes = state.overflowExcludedAt !== undefined
+  const overflowTagId = (state.overflowDebt || 0) === 0
+    ? state.overflowTags?.[(state.overflowLength || 0) - 1]
+    : undefined
+  const excludesTextNodes = (state.overflowOpaqueDepth || 0) > 0
+    || state.overflowRawExcludesText
+    || (overflowTagId !== undefined && tagHandlers[overflowTagId]?.excludesTextNodes)
     || state.currentNode?.tagHandler?.excludesTextNodes
     || state.currentNode?.excludedFromMarkdown
   const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
@@ -1211,15 +1284,41 @@ function processClosingTag(
   const tagId = effectiveTagId(tagName, typeof mappedTagId === 'number' ? mappedTagId : -1, state)
   const closingIsAlias = tagHandler?.aliasTagId !== undefined
 
-  if (overflowDepth(state) > 0) {
-    if (!(tagHandler ?? tagHandlers[tagId])?.isSelfClosing)
-      closeOverflowElement(state, tagId, typeof mappedTagId === 'number')
+  if ((state.overflowOpaqueDepth || 0) > 0) {
+    if (state.overflowRawTagName) {
+      const closesOpaqueRoot = tagName === state.overflowOpaqueTagName
+      state.overflowRawTagName = undefined
+      state.overflowRawExcludesText = undefined
+      state.overflowRawAt = undefined
+      if (closesOpaqueRoot) {
+        state.overflowOpaqueTagName = undefined
+        state.overflowOpaqueDepth = 0
+      }
+    }
+    else if (tagName === state.overflowOpaqueTagName) {
+      state.overflowOpaqueDepth!--
+      if (state.overflowOpaqueDepth === 0)
+        state.overflowOpaqueTagName = undefined
+    }
     state.justClosedTag = true
     return {
       complete: true,
       newPosition: i + 1,
       remainingText: '',
     }
+  }
+
+  if (overflowDepth(state) > 0) {
+    const isSelfClosing = (tagHandler ?? tagHandlers[tagId])?.isSelfClosing
+    if (isSelfClosing || closeOverflowElement(state, tagId, typeof mappedTagId === 'number')) {
+      state.justClosedTag = true
+      return {
+        complete: true,
+        newPosition: i + 1,
+        remainingText: '',
+      }
+    }
+    clearOverflowElements(state)
   }
 
   if (state.currentNode?.tagHandler?.isNonNesting && !matchesClosingTag(state.currentNode, tagName, tagId, closingIsAlias)) {
@@ -1318,12 +1417,9 @@ function pushOverflowElement(
     state.overflowLength = length + 1
   }
   const depth = overflowDepth(state)
-  if (state.overflowExcludedAt === undefined
-    && (tagId === TAG_TEMPLATE || tagHandler?.excludesTextNodes)) {
-    state.overflowExcludedAt = depth
-  }
   if (tagHandler?.isNonNesting) {
     state.overflowRawTagName = tagName
+    state.overflowRawExcludesText = tagHandler.excludesTextNodes
     state.overflowRawAt = depth
   }
 }
@@ -1344,20 +1440,62 @@ function overflowDepth(state: ParseState): number {
   return (state.overflowLength || 0) + (state.overflowDebt || 0)
 }
 
+function clearOverflowElements(state: ParseState): void {
+  state.overflowLength = 0
+  state.overflowDebt = 0
+  syncOverflowMarkers(state)
+}
+
 function syncOverflowMarkers(state: ParseState): void {
   const depth = overflowDepth(state)
-  if (state.overflowExcludedAt !== undefined && state.overflowExcludedAt > depth)
-    state.overflowExcludedAt = undefined
   if (state.overflowRawAt !== undefined && state.overflowRawAt > depth) {
     state.overflowRawTagName = undefined
+    state.overflowRawExcludesText = undefined
     state.overflowRawAt = undefined
   }
 }
 
-function closeOverflowElement(state: ParseState, tagId: number, isBuiltin: boolean): void {
+function startsOpaqueOverflow(
+  state: ParseState,
+  tagName: string,
+  tagId: number,
+  attributes: Record<string, string>,
+  tagHandler: Node['tagHandler'],
+): boolean {
+  if (tagId === TAG_TEMPLATE)
+    return true
+  if (!state.resolvedPlugins?.some(plugin => plugin.excludesOverflowSubtree))
+    return false
+  const node = new ParsedElementNode(
+    tagName,
+    attributes,
+    state.currentNode,
+    state.depth + 1,
+    0,
+    tagId,
+    tagHandler,
+  )
+  return state.resolvedPlugins.some(plugin => plugin.excludesOverflowSubtree?.(node))
+}
+
+function enterOpaqueOverflow(
+  state: ParseState,
+  tagName: string,
+  tagHandler: Node['tagHandler'],
+): void {
+  state.overflowOpaqueTagName = tagName
+  state.overflowOpaqueDepth = 1
+  if (tagHandler?.isNonNesting) {
+    state.overflowRawTagName = tagName
+    state.overflowRawExcludesText = tagHandler.excludesTextNodes
+    state.overflowRawAt = 0
+  }
+}
+
+function closeOverflowElement(state: ParseState, tagId: number, isBuiltin: boolean): boolean {
   if ((state.overflowDebt || 0) > 0) {
     popOverflowElement(state)
-    return
+    return true
   }
 
   const tags = state.overflowTags
@@ -1366,13 +1504,14 @@ function closeOverflowElement(state: ParseState, tagId: number, isBuiltin: boole
   for (let index = length - 1; index >= 0; index--) {
     const openTag = tags![index]!
     if (target !== TAG_TEMPLATE && openTag === TAG_TEMPLATE)
-      return
+      return true
     if (openTag === target) {
       state.overflowLength = index
       syncOverflowMarkers(state)
-      return
+      return true
     }
   }
+  return false
 }
 
 /**
@@ -1523,28 +1662,21 @@ function processOpeningTag(
     }
   }
 
-  if (overflowDepth(state) > 0) {
-    if ((state.overflowDebt || 0) === 0
-      && CLOSES_P[tagId] === 1
-      && state.overflowTags?.includes(TAG_P, 0)) {
-      closeOverflowElement(state, TAG_P, true)
+  if ((state.overflowOpaqueDepth || 0) > 0) {
+    if (!result.selfClosing && tagName === state.overflowOpaqueTagName) {
+      state.overflowOpaqueDepth!++
     }
-    if (overflowDepth(state) > 0) {
-      pushOverflowElement(
-        state,
-        tagName,
-        tagId,
-        typeof TagIdMap[tagName as keyof typeof TagIdMap] === 'number',
-        tagHandler,
-        result.selfClosing,
-      )
-      return {
-        complete: true,
-        newPosition: result.newPosition,
-        remainingText: '',
-        selfClosing: result.selfClosing,
-        skip: true,
-      }
+    else if (!result.selfClosing && tagHandler?.isNonNesting) {
+      state.overflowRawTagName = tagName
+      state.overflowRawExcludesText = tagHandler.excludesTextNodes
+      state.overflowRawAt = 0
+    }
+    return {
+      complete: true,
+      newPosition: result.newPosition,
+      remainingText: '',
+      selfClosing: result.selfClosing,
+      skip: true,
     }
   }
 
@@ -1554,7 +1686,8 @@ function processOpeningTag(
   // normal block spacing, instead of inheriting head's whitespace collapsing.
   // Runs only after the tag is confirmed complete so incomplete/chunk-split start
   // tags do not mutate parser state or emit a premature head close.
-  if ((state.depthMap[TAG_HEAD] || 0) > 0
+  if (overflowDepth(state) === 0
+    && (state.depthMap[TAG_HEAD] || 0) > 0
     && (state.depthMap[TAG_TEMPLATE] || 0) === 0
     && !HEAD_CONTENT_TAGS.has(tagId)) {
     while (state.currentNode && state.currentNode.tagId !== TAG_HEAD) {
@@ -1573,7 +1706,7 @@ function processOpeningTag(
   // confirmed complete (above) so a chunk-split start tag never mutates parser
   // state or emits a premature close.
   if (tagId >= 0 && tagId < MAX_TAG_ID && NEEDS_IMPLIED_END_RECOVERY[tagId] === 1) {
-    if (tagId === TAG_SELECT && (state.depthMap[TAG_SELECT] || 0) > 0) {
+    if (tagId === TAG_SELECT && parserTagDepth(state, TAG_SELECT) > 0) {
       // In the "in select" insertion mode a nested <select> acts as the end
       // of the open select; the incoming start tag itself is ignored.
       if (closeSelectTo(state, TAG_SELECT, handleEvent)) {
@@ -1587,15 +1720,15 @@ function processOpeningTag(
       }
     }
     else if (tagId === TAG_OPTION) {
-      if ((state.depthMap[TAG_SELECT] || 0) > 0) {
+      if (parserTagDepth(state, TAG_SELECT) > 0) {
         closeSelectTo(state, TAG_OPTION, handleEvent)
       }
-      else if (state.currentNode?.tagId === TAG_OPTION) {
+      else if (parserLastTagId(state) === TAG_OPTION) {
         // The in-body rule also pops an option when it is the current node.
-        closeNode(state.currentNode, state, handleEvent)
+        popParserTop(state, handleEvent)
       }
     }
-    else if (tagId === TAG_OPTGROUP && (state.depthMap[TAG_SELECT] || 0) > 0) {
+    else if (tagId === TAG_OPTGROUP && parserTagDepth(state, TAG_SELECT) > 0) {
       // An optgroup start first closes a current option, then the previous
       // optgroup, making both optional end tags observable as siblings.
       closeSelectTo(state, TAG_OPTION, handleEvent)
@@ -1604,21 +1737,21 @@ function processOpeningTag(
     else if (tagId === TAG_A) {
       // A nested <a> closes the open one (anchors cannot nest), so the markdown is
       // two adjacent links rather than invalid nested `[..]`. <a> never closes <p>.
-      if ((state.depthMap[TAG_A] || 0) > 0) {
+      if (parserTagDepth(state, TAG_A) > 0) {
         closeImpliedTo(state, SINGLE_A, A_SCOPE_BOUNDARY, handleEvent)
       }
     }
     else if (tagId === TAG_TD || tagId === TAG_TH || tagId === TAG_TR
       || tagId === TAG_THEAD || tagId === TAG_TBODY || tagId === TAG_TFOOT) {
       // Table cells/rows/sections close earlier ones; they never close <p>.
-      if ((state.depthMap[TAG_TABLE] || 0) > 0) {
+      if (parserTagDepth(state, TAG_TABLE) > 0) {
         if (tagId === TAG_TD || tagId === TAG_TH) {
-          if ((state.depthMap[TAG_TD] || 0) > 0 || (state.depthMap[TAG_TH] || 0) > 0) {
+          if (parserTagDepth(state, TAG_TD) > 0 || parserTagDepth(state, TAG_TH) > 0) {
             closeImpliedTo(state, TD_TH, CELL_SCOPE_BOUNDARY, handleEvent)
           }
         }
         else if (tagId === TAG_TR) {
-          if ((state.depthMap[TAG_TR] || 0) > 0) {
+          if (parserTagDepth(state, TAG_TR) > 0) {
             closeTableContext(state, TR_CELLS, handleEvent)
           }
         }
@@ -1630,28 +1763,58 @@ function processOpeningTag(
     else {
       // Remaining recovery tags are all in CLOSES_P, so they close an open <p>
       // first, then any heading/list-item implied end.
-      if ((state.depthMap[TAG_P] || 0) > 0) {
+      if (parserTagDepth(state, TAG_P) > 0) {
         closeImpliedTo(state, SINGLE_P, P_SCOPE_BOUNDARY, handleEvent)
       }
       if (HEADINGS.has(tagId)) {
         // A heading start closes an open heading (they cannot nest); only when one
         // is the current node, matching the spec's "if the current node is an
         // h1–h6 element, pop it" step.
-        const top = state.currentNode
-        if (top && top.tagId !== undefined && HEADINGS.has(top.tagId)) {
-          closeNode(top, state, handleEvent)
-        }
+        const topId = parserLastTagId(state)
+        if (topId !== undefined && HEADINGS.has(topId))
+          popParserTop(state, handleEvent)
       }
       else if (tagId === TAG_LI) {
-        if ((state.depthMap[TAG_LI] || 0) > 0) {
+        if (parserTagDepth(state, TAG_LI) > 0) {
           closeImpliedTo(state, SINGLE_LI, LI_SCOPE_BOUNDARY, handleEvent)
         }
       }
       else if (tagId === TAG_DT || tagId === TAG_DD) {
-        if ((state.depthMap[TAG_DT] || 0) > 0 || (state.depthMap[TAG_DD] || 0) > 0) {
+        if (parserTagDepth(state, TAG_DT) > 0 || parserTagDepth(state, TAG_DD) > 0) {
           closeImpliedTo(state, DT_DD, DL_SCOPE_BOUNDARY, handleEvent)
         }
       }
+    }
+  }
+
+  if (!result.selfClosing
+    && (overflowDepth(state) > 0 || state.depth >= MAX_ELEMENT_DEPTH)
+    && startsOpaqueOverflow(state, tagName, tagId, result.attributes, tagHandler)) {
+    enterOpaqueOverflow(state, tagName, tagHandler)
+    return {
+      complete: true,
+      newPosition: result.newPosition,
+      remainingText: '',
+      selfClosing: false,
+      skip: true,
+    }
+  }
+
+  if (overflowDepth(state) > 0 && !result.selfClosing) {
+    pushOverflowElement(
+      state,
+      tagName,
+      tagId,
+      typeof TagIdMap[tagName as keyof typeof TagIdMap] === 'number',
+      tagHandler,
+      false,
+    )
+    return {
+      complete: true,
+      newPosition: result.newPosition,
+      remainingText: '',
+      selfClosing: false,
+      skip: true,
     }
   }
 
