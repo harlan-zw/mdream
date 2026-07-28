@@ -1,47 +1,41 @@
 //! Tailwind utility-class to Markdown-emphasis mapping.
 
 #[inline]
-fn extract_base_class(class: &str) -> (&str, &str) {
+fn extract_base_class(class: &str) -> (&str, u8) {
   let breakpoints = ["sm:", "md:", "lg:", "xl:", "2xl:"];
-  for bp in breakpoints {
+  for (index, bp) in breakpoints.into_iter().enumerate() {
     if let Some(rest) = class.strip_prefix(bp) {
-      return (rest, bp);
+      return (rest, index as u8 + 1);
     }
   }
-  (class, "")
+  (class, 0)
 }
 
 pub(crate) fn process_tailwind_classes(
   classes_attr: &str,
 ) -> (Option<String>, Option<String>, bool) {
-  let mut classes: Vec<&str> = classes_attr.split_whitespace().collect();
-  let bp_weight = |bp| match bp {
-    "" => 0,
-    "sm:" => 1,
-    "md:" => 2,
-    "lg:" => 3,
-    "xl:" => 4,
-    "2xl:" => 5,
-    _ => 6,
-  };
-  classes.sort_by_key(|c| bp_weight(extract_base_class(c).1));
-
   let mut prefix = String::new();
   let mut suffix = String::new();
-  let mut hidden = false;
 
-  let mut weight = None;
-  let mut emphasis = None;
-  let mut decoration = None;
-  let mut display_hidden = false;
-  let mut position_hidden = false;
+  let mut weight = None::<(u8, bool)>;
+  let mut emphasis = None::<(u8, bool)>;
+  let mut decoration = None::<(u8, bool)>;
+  let mut display_hidden = None::<(u8, bool)>;
+  let mut position_hidden = None::<(u8, bool)>;
 
-  for cls in classes {
-    let base = extract_base_class(cls).0;
+  for cls in classes_attr.split_whitespace() {
+    let (base, breakpoint) = extract_base_class(cls);
+    let supersedes = |current: Option<(u8, bool)>| {
+      current.is_none_or(|(current_breakpoint, _)| breakpoint >= current_breakpoint)
+    };
     if base == "italic" {
-      emphasis = Some(("*", "*"));
+      if supersedes(emphasis) {
+        emphasis = Some((breakpoint, true));
+      }
     } else if base == "not-italic" {
-      emphasis = None;
+      if supersedes(emphasis) {
+        emphasis = Some((breakpoint, false));
+      }
     } else if base == "font-bold"
       || base == "font-semibold"
       || base == "font-black"
@@ -49,37 +43,49 @@ pub(crate) fn process_tailwind_classes(
       || base == "font-medium"
       || base == "bold"
     {
-      weight = Some(("**", "**"));
+      if supersedes(weight) {
+        weight = Some((breakpoint, true));
+      }
     } else if base.contains("font-") {
-      weight = None;
-    } else if base.contains("line-through") || base.contains("underline") {
-      decoration = Some(("~~", "~~"));
+      if supersedes(weight) {
+        weight = Some((breakpoint, false));
+      }
+    } else if base == "line-through" || base == "underline" {
+      if supersedes(decoration) {
+        decoration = Some((breakpoint, true));
+      }
+    } else if base == "no-underline" {
+      if supersedes(decoration) {
+        decoration = Some((breakpoint, false));
+      }
     } else if base == "hidden" || base.contains("invisible") {
-      display_hidden = true;
+      if supersedes(display_hidden) {
+        display_hidden = Some((breakpoint, true));
+      }
     } else if base == "block" || base == "flex" || base == "inline" {
-      display_hidden = false;
+      if supersedes(display_hidden) {
+        display_hidden = Some((breakpoint, false));
+      }
     } else if base == "absolute" || base == "fixed" || base == "sticky" {
-      position_hidden = true;
-    } else if base == "static" || base == "relative" {
-      position_hidden = false;
+      if supersedes(position_hidden) {
+        position_hidden = Some((breakpoint, true));
+      }
+    } else if (base == "static" || base == "relative") && supersedes(position_hidden) {
+      position_hidden = Some((breakpoint, false));
     }
   }
 
-  if display_hidden || position_hidden {
-    hidden = true;
+  if weight.is_some_and(|(_, enabled)| enabled) {
+    prefix.push_str("**");
+    suffix.push_str("**");
   }
-
-  if let Some((p, s)) = weight {
-    prefix.push_str(p);
-    suffix.insert_str(0, s);
+  if emphasis.is_some_and(|(_, enabled)| enabled) {
+    prefix.push('*');
+    suffix.insert(0, '*');
   }
-  if let Some((p, s)) = emphasis {
-    prefix.push_str(p);
-    suffix.insert_str(0, s);
-  }
-  if let Some((p, s)) = decoration {
-    prefix.push_str(p);
-    suffix.insert_str(0, s);
+  if decoration.is_some_and(|(_, enabled)| enabled) {
+    prefix.push_str("~~");
+    suffix.insert_str(0, "~~");
   }
 
   (
@@ -93,7 +99,8 @@ pub(crate) fn process_tailwind_classes(
     } else {
       Some(suffix)
     },
-    hidden,
+    display_hidden.is_some_and(|(_, hidden)| hidden)
+      || position_hidden.is_some_and(|(_, hidden)| hidden),
   )
 }
 
@@ -125,6 +132,35 @@ mod tests {
   }
 
   #[test]
+  fn decoration_modifiers_do_not_enable_strikethrough() {
+    for classes in [
+      "underline-offset-4",
+      "no-underline",
+      "decoration-underline",
+    ] {
+      let (prefix, suffix, _) = process_tailwind_classes(classes);
+      assert!(prefix.is_none(), "{classes}");
+      assert!(suffix.is_none(), "{classes}");
+    }
+  }
+
+  #[test]
+  fn decoration_resets_follow_breakpoint_priority() {
+    assert!(process_tailwind_classes("line-through no-underline").0.is_none());
+    assert!(process_tailwind_classes("no-underline line-through").0.is_some());
+    assert!(
+      process_tailwind_classes("md:line-through no-underline")
+        .0
+        .is_some()
+    );
+    assert!(
+      process_tailwind_classes("line-through md:no-underline")
+        .0
+        .is_none()
+    );
+  }
+
+  #[test]
   fn hidden_display_flags_hidden() {
     assert!(process_tailwind_classes("hidden").2);
     assert!(process_tailwind_classes("invisible").2);
@@ -140,6 +176,24 @@ mod tests {
     let (_, _, hidden) = process_tailwind_classes("md:block hidden");
     // "hidden" (weight 0) sorts before "md:block" (weight 2): block wins last
     assert!(!hidden);
+
+    assert!(process_tailwind_classes("md:block md:hidden").2);
+    assert!(!process_tailwind_classes("md:hidden md:block").2);
+    assert!(process_tailwind_classes("md:hidden block").2);
+  }
+
+  #[test]
+  fn responsive_ties_preserve_source_order() {
+    let classes = (0..35)
+      .map(|index| match index {
+        3 => "sm:hidden",
+        33 => "sm:block",
+        index if index % 2 == 0 => "noop",
+        _ => "sm:noop",
+      })
+      .collect::<Vec<_>>()
+      .join(" ");
+    assert!(!process_tailwind_classes(&classes).2);
   }
 
   #[test]
