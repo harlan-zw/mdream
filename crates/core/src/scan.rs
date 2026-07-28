@@ -92,18 +92,18 @@ fn scan_tag<const EXTRACT: bool>(
   let mut scan = AttrScan::new(attr_mask);
   let mut inside_quote = false;
   let mut quote_char: u8 = 0;
+  // A quote opens a value only directly after `=`; elsewhere it is an ordinary
+  // character. `EXTRACT` gets this from `AttrScan`, which `ATTR_NONE` compiles out.
+  let mut may_open_value = false;
   let mut i = position;
 
   while i < chunk_length {
     let c = bytes[i];
 
-    // A quote opened outside a value hides `>` until it closes.
+    // A quoted value hides `>`. `EXTRACT` consumes those whole below.
     if inside_quote {
       if c == quote_char {
         inside_quote = false;
-      }
-      if EXTRACT {
-        scan.step(html_chunk, c, i);
       }
       i += 1;
       continue;
@@ -132,12 +132,14 @@ fn scan_tag<const EXTRACT: bool>(
       continue;
     }
 
-    if c == QUOTE_CHAR || c == APOS_CHAR {
-      inside_quote = true;
-      quote_char = c;
-    }
     if EXTRACT {
       scan.step(html_chunk, c, i);
+    } else {
+      if may_open_value && (c == QUOTE_CHAR || c == APOS_CHAR) {
+        inside_quote = true;
+        quote_char = c;
+      }
+      may_open_value = c == EQUALS_CHAR || (may_open_value && is_whitespace(c));
     }
     i += 1;
   }
@@ -310,6 +312,18 @@ mod tests {
     assert_eq!(a.get("id").map(String::as_str), Some("main"));
   }
 
+  /// A parse error per the spec, but the quote joins the value rather than
+  /// opening a quoted region, so it must not hide the `>` that ends the tag.
+  #[test]
+  fn quote_inside_an_unquoted_value_is_an_ordinary_character() {
+    let a = parse_attributes("alt=Bob's src=/i.png", ATTR_ALL);
+    assert_eq!(a.get("alt").map(String::as_str), Some("Bob's"));
+    assert_eq!(a.get("src").map(String::as_str), Some("/i.png"));
+
+    let b = parse_attributes("alt=Bob\"s", ATTR_ALL);
+    assert_eq!(b.get("alt").map(String::as_str), Some("Bob\"s"));
+  }
+
   #[test]
   fn parses_valueless_and_empty_attributes() {
     let a = parse_attributes("disabled checked", ATTR_ALL);
@@ -418,17 +432,23 @@ mod tests {
   #[test]
   fn both_scan_instantiations_agree_on_the_tag_end() {
     // `ATTR_NONE` compiles the extraction out, so the two instantiations have
-    // to keep finding the same `>`.
-    for html in [
-      "a href=\"x>y\">rest",
-      "a href=x/>rest",
-      "a href=a\"b>rest",
-      "a>rest",
+    // to keep finding the same `>`. The expected position pins which one, since
+    // agreeing on the wrong `>` would otherwise satisfy this.
+    for (html, end) in [
+      ("a href=\"x>y\">rest", 13),
+      ("a href = \"x>y\">rest", 15),
+      ("a href=x/>rest", 10),
+      ("a href=a\"b>rest", 11),
+      ("a href=a'b>rest", 11),
+      ("a href=a'b c=d'e>rest", 17),
+      ("a>rest", 2),
     ] {
       let (complete, extracted_pos, _, extracted_self_closing) =
         process_tag_attributes(html, 1, None, ATTR_ALL);
       let (bare_complete, bare_pos, bare_attrs, bare_self_closing) =
         process_tag_attributes(html, 1, None, ATTR_NONE);
+      assert!(complete, "html={html:?}");
+      assert_eq!(extracted_pos, end, "html={html:?}");
       assert_eq!(complete, bare_complete, "html={html:?}");
       assert_eq!(extracted_pos, bare_pos, "html={html:?}");
       assert_eq!(
