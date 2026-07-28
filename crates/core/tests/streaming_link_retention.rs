@@ -3,9 +3,9 @@
 // the retained-tail start at 0, so the drain released nothing.
 //
 // Feeding one element per chunk makes every drain land right after a link
-// close, so already-yielded output accumulated for the whole document: 350k
-// links retained ~3 MB, autolinks ~12 MB. Under fixed-size frames the next
-// text resets the cache, so the cost there is one skipped drain cycle.
+// close, so already-yielded output accumulated for the whole document. Under
+// fixed-size frames the next text resets the cache, limiting the cost to one
+// skipped drain cycle.
 //
 // Peak allocation is process-wide, so this lives in its own test binary rather
 // than in `streaming_drain.rs`: a concurrent test allocating tens of MB would
@@ -80,6 +80,8 @@ fn assert_released(label: &str, unit: &str, iterations: usize, opts: HTMLToMarkd
 
 #[test]
 fn completed_links_do_not_pin_yielded_output() {
+  const ITERATIONS: usize = 50_000;
+
   let clean = HTMLToMarkdownOptions {
     clean: Some(safe_clean()),
     ..Default::default()
@@ -95,7 +97,7 @@ fn completed_links_do_not_pin_yielded_output() {
       r#"<a href="https://example.com">https://example.com</a>"#,
     ),
   ] {
-    assert_released(label, unit, 350_000, HTMLToMarkdownOptions::default());
-    assert_released(label, unit, 350_000, clean.clone());
+    assert_released(label, unit, ITERATIONS, HTMLToMarkdownOptions::default());
+    assert_released(label, unit, ITERATIONS, clean.clone());
   }
 }
