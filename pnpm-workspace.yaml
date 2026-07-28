@@ -1,3 +1,12 @@
+# pnpm's self-management rewrites pnpm-lock.yaml as a side effect of unrelated
+# commands, including the read-only `pnpm store path` that actions/setup-node
+# runs to locate its cache. It prepends a second YAML document recording
+# '@pnpm/exe' and pnpm as packageManagerDependencies, which leaves the working
+# tree dirty in every CI job before any install has run. CI already gets its
+# pinned version from pnpm/action-setup reading the packageManager field, so
+# nothing here needs pnpm to manage it.
+managePackageManagerVersions: false
+
 shellEmulator: true
 
 trustPolicy: no-downgrade
