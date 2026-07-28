@@ -253,6 +253,20 @@ fn gfm_text_escaping_does_not_repeat_context_escapes() {
   );
 }
 
+/// A browser navigates to the first `href`, so reporting the last one would
+/// point somewhere the reader never goes.
+#[test]
+fn duplicate_attribute_keeps_the_first() {
+  assert_eq!(
+    convert("<a href=/first href=/second>link</a>"),
+    "[link](/first)"
+  );
+  assert_eq!(
+    convert("<img src=/first.png src=/second.png alt=x>"),
+    "![x](/first.png)"
+  );
+}
+
 #[test]
 fn decoded_text_is_serialized_for_its_output_context() {
   assert_eq!(
@@ -3105,7 +3119,14 @@ fn quote_in_an_unquoted_attribute_value_does_not_truncate() {
   );
   assert_eq!(convert("<p>a</p><div class=x'y></div><p>b</p>"), "a\n\nb");
   // An even number of them re-balanced, which masked the defect.
-  assert_eq!(convert("<div a=1'></div><p>kept</p>"), "kept");
+  assert_eq!(
+    convert("<div a=1'></div><div b=2'></div><p>kept</p>"),
+    "kept"
+  );
+  assert_eq!(
+    convert("<p>a</p><span data-value=x='y>inside</span><p>b</p>"),
+    "a\n\ninside\n\nb"
+  );
 }
 
 #[test]

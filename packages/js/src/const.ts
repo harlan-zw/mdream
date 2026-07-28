@@ -111,9 +111,10 @@ export const TAG_DATALIST = 108 // Inert: <option> children are autocomplete dat
 export const TAG_OPTGROUP = 109
 export const TAG_S = 110
 export const TAG_STRIKE = 111
+export const TAG_NOEMBED = 112
 
 // Maximum tag ID for creating the typed array (update to match the highest tag ID)
-export const MAX_TAG_ID = 112
+export const MAX_TAG_ID = 113
 
 // Node type constants
 export const ELEMENT_NODE = 1
@@ -212,6 +213,7 @@ export const TagIdMap = {
   small: TAG_SMALL,
   noscript: TAG_NOSCRIPT,
   noframes: TAG_NOFRAMES,
+  noembed: TAG_NOEMBED,
   xmp: TAG_XMP,
   plaintext: TAG_PLAINTEXT,
   aside: TAG_ASIDE,

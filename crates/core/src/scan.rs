@@ -92,9 +92,9 @@ fn scan_tag<const EXTRACT: bool>(
   let mut scan = AttrScan::new(attr_mask);
   let mut inside_quote = false;
   let mut quote_char: u8 = 0;
-  // A quote opens a value only directly after `=`; elsewhere it is an ordinary
-  // character. `EXTRACT` gets this from `AttrScan`, which `ATTR_NONE` compiles out.
-  let mut may_open_value = false;
+  // `ATTR_NONE` compiles `AttrScan` out, but still needs the same tokenizer
+  // state to distinguish a quoted value from a quote inside an unquoted one.
+  let mut state = State::Gap;
   let mut i = position;
 
   while i < chunk_length {
@@ -104,6 +104,7 @@ fn scan_tag<const EXTRACT: bool>(
     if inside_quote {
       if c == quote_char {
         inside_quote = false;
+        state = State::Gap;
       }
       i += 1;
       continue;
@@ -135,11 +136,12 @@ fn scan_tag<const EXTRACT: bool>(
     if EXTRACT {
       scan.step(html_chunk, c, i);
     } else {
-      if may_open_value && (c == QUOTE_CHAR || c == APOS_CHAR) {
+      if state == State::BeforeValue && (c == QUOTE_CHAR || c == APOS_CHAR) {
         inside_quote = true;
         quote_char = c;
+      } else {
+        state = state.step_without_extraction(c);
       }
-      may_open_value = c == EQUALS_CHAR || (may_open_value && is_whitespace(c));
     }
     i += 1;
   }
@@ -180,6 +182,53 @@ enum State {
   AfterName,
   BeforeValue,
   UnquotedValue,
+}
+
+impl State {
+  #[inline]
+  fn step_without_extraction(self, c: u8) -> Self {
+    match self {
+      Self::Gap => {
+        if is_whitespace(c) {
+          Self::Gap
+        } else {
+          Self::Name
+        }
+      }
+      Self::Name => {
+        if c == EQUALS_CHAR {
+          Self::BeforeValue
+        } else if is_whitespace(c) {
+          Self::AfterName
+        } else {
+          Self::Name
+        }
+      }
+      Self::AfterName => {
+        if c == EQUALS_CHAR {
+          Self::BeforeValue
+        } else if is_whitespace(c) {
+          Self::AfterName
+        } else {
+          Self::Name
+        }
+      }
+      Self::BeforeValue => {
+        if is_whitespace(c) {
+          Self::BeforeValue
+        } else {
+          Self::UnquotedValue
+        }
+      }
+      Self::UnquotedValue => {
+        if is_whitespace(c) {
+          Self::Gap
+        } else {
+          Self::UnquotedValue
+        }
+      }
+    }
+  }
 }
 
 impl AttrScan {
@@ -324,6 +373,21 @@ mod tests {
     assert_eq!(b.get("alt").map(String::as_str), Some("Bob\"s"));
   }
 
+  /// A repeated name is a duplicate-attribute parse error and the later one is
+  /// dropped from the token, so the first wins. Names are lowercased first, so
+  /// `HREF` collides with `href`.
+  #[test]
+  fn duplicate_attribute_keeps_the_first() {
+    let a = parse_attributes("href=/first href=/second", ATTR_ALL);
+    assert_eq!(a.get("href").map(String::as_str), Some("/first"));
+
+    let b = parse_attributes("href=/first HREF=/second", ATTR_ALL);
+    assert_eq!(b.get("href").map(String::as_str), Some("/first"));
+
+    let c = parse_attributes("href=\"/1\" href='/2' href=/3", ATTR_ALL);
+    assert_eq!(c.get("href").map(String::as_str), Some("/1"));
+  }
+
   #[test]
   fn parses_valueless_and_empty_attributes() {
     let a = parse_attributes("disabled checked", ATTR_ALL);
@@ -441,6 +505,7 @@ mod tests {
       ("a href=a\"b>rest", 11),
       ("a href=a'b>rest", 11),
       ("a href=a'b c=d'e>rest", 17),
+      ("a href=x='y>rest", 12),
       ("a>rest", 2),
     ] {
       let (complete, extracted_pos, _, extracted_self_closing) =
@@ -455,6 +520,30 @@ mod tests {
         extracted_self_closing, bare_self_closing,
         "html={html:?}"
       );
+      assert!(bare_attrs.is_empty(), "html={html:?}");
+    }
+  }
+
+  #[test]
+  fn both_scan_instantiations_agree_for_short_inputs() {
+    const ALPHABET: &[u8] = b"a ='\".>/";
+    const WIDTH: usize = 6;
+
+    for case in 0..ALPHABET.len().pow(WIDTH as u32) {
+      let mut encoded = case;
+      let mut input = [b'a'; WIDTH];
+      for byte in &mut input {
+        *byte = ALPHABET[encoded % ALPHABET.len()];
+        encoded /= ALPHABET.len();
+      }
+      let html = std::str::from_utf8(&input).expect("ASCII alphabet");
+      let (complete, position, _, self_closing) = process_tag_attributes(html, 0, None, ATTR_ALL);
+      let (bare_complete, bare_position, bare_attrs, bare_self_closing) =
+        process_tag_attributes(html, 0, None, ATTR_NONE);
+
+      assert_eq!(complete, bare_complete, "html={html:?}");
+      assert_eq!(position, bare_position, "html={html:?}");
+      assert_eq!(self_closing, bare_self_closing, "html={html:?}");
       assert!(bare_attrs.is_empty(), "html={html:?}");
     }
   }
