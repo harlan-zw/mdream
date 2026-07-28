@@ -61,10 +61,7 @@ pub(crate) fn process_comment_or_doctype(html_chunk: &str, position: usize) -> C
             new_position: i + 3,
           };
         }
-        if after_dashes == EXCLAMATION_CHAR
-          && i + 3 < chunk_length
-          && bytes[i + 3] == GT_CHAR
-        {
+        if after_dashes == EXCLAMATION_CHAR && i + 3 < chunk_length && bytes[i + 3] == GT_CHAR {
           return CommentResult {
             complete: true,
             new_position: i + 4,
