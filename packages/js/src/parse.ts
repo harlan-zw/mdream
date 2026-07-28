@@ -105,9 +105,9 @@ const SCRIPT_SEQUENCE_NO_MATCH = -1
 const SCRIPT_SEQUENCE_INCOMPLETE = -2
 const SCRIPT_SCAN_COMPLETE = -1
 
-// Firefox and Chromium flatten DOM trees beyond this practical depth. Stop
-// conversion at the same boundary instead of growing the parser's parent chain
-// without limit on pathologically nested input.
+// Keep rich element nodes to the same practical depth as browsers. One exact
+// flattened root preserves balanced recovery beyond it without allowing
+// untrusted nesting to grow memory forever.
 const MAX_ELEMENT_DEPTH = 512
 
 // Tags that are valid inside <head>. Per the HTML parser's "in head" insertion
