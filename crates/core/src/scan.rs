@@ -142,7 +142,12 @@ fn scan_tag<const EXTRACT: bool>(
       continue;
     }
 
-    if c == SLASH_CHAR && i + 1 < chunk_length && bytes[i + 1] == GT_CHAR {
+    let attribute_state = if EXTRACT { scan.state } else { state };
+    if attribute_state != State::UnquotedValue
+      && c == SLASH_CHAR
+      && i + 1 < chunk_length
+      && bytes[i + 1] == GT_CHAR
+    {
       return (true, i + 2, scan.finish(html_chunk, i), true);
     }
     if c == GT_CHAR {
@@ -403,6 +408,12 @@ mod tests {
 
     let b = parse_attributes("alt=Bob\"s", ATTR_ALL);
     assert_eq!(b.get("alt").map(String::as_str), Some("Bob\"s"));
+  }
+
+  #[test]
+  fn slash_inside_an_unquoted_value_is_an_ordinary_character() {
+    let a = parse_attributes("href=/a/b/", ATTR_ALL);
+    assert_eq!(a.get("href").map(String::as_str), Some("/a/b/"));
   }
 
   /// A repeated name is a duplicate-attribute parse error and the later one is

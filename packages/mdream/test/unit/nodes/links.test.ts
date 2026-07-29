@@ -2,6 +2,24 @@ import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('links $name', (engineConfig) => {
+  it.each([
+    [
+      String.raw`<a href="x\" onclick=alert(1)">link</a>`,
+      String.raw`[link](<x\\>)`,
+    ],
+    [
+      String.raw`<a href="c:\path\" title=t>link</a>`,
+      String.raw`[link](<c:\\path\\> "t")`,
+    ],
+    [
+      `<a href=/a/b/>link</a>`,
+      `[link](/a/b/)`,
+    ],
+  ])('keeps attribute tokenization browser-compatible for %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
   it('does not double escape protected link text', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<a href="/x">a[b] *c*</a>', { engine }))

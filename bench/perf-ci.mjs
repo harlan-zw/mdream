@@ -45,6 +45,7 @@ const bundle = name => import(pathToFileURL(resolve(distDir, name)).href)
 const html = readFileSync(resolve(currentDir, 'bundle/wiki.html'), 'utf8')
 const htmlBytes = new TextEncoder().encode(html)
 const htmlAnchorChunks = splitAfterAnchors(html)
+const attributeHeavyHtml = '<div id="item" class="card primary" data-a="alpha" data-b="beta" aria-label="Card" title="Title"></div>'.repeat(12_000)
 const STREAM_CHUNK_SIZE = 16 * 1024
 const RUST_STREAM_CHUNK_SIZE = 8 * 1024
 const RUST_STREAM_BODY_SIZE = 2 * 1024 * 1024
@@ -258,6 +259,7 @@ async function main() {
 
   const JS_BENCHES = [
     ['core-wiki', 'JS htmlToMarkdown · wiki (1.8 MB)', () => convert(html), undefined],
+    ['core-attributes', 'JS htmlToMarkdown · attribute-heavy (1.2 MB)', () => convert(attributeHeavyHtml), { warmup: 20, reps: 24, runs: 3 }],
     ['minimal-wiki', 'JS minimal preset · wiki', () => convertMinimal(html), { reps: 12, runs: 1 }],
     ['stream-wiki', 'JS stream drain · wiki', drainStream, undefined],
   ]

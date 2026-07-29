@@ -78,7 +78,6 @@ const APOS_CHAR = 39 // '\''
 const EXCLAMATION_CHAR = 33 // '!'
 const QUESTION_CHAR = 63 // '?'
 const AMPERSAND_CHAR = 38 // '&'
-const BACKSLASH_CHAR = 92 // '\'
 const DASH_CHAR = 45 // '-'
 const SPACE_CHAR = 32 // ' '
 const TAB_CHAR = 9 // '\t'
@@ -86,6 +85,13 @@ const NEWLINE_CHAR = 10 // '\n'
 const FORM_FEED_CHAR = 12 // '\f'
 const CARRIAGE_RETURN_CHAR = 13 // '\r'
 const OPEN_BRACKET_CHAR = 91 // '['
+
+const ATTRIBUTE_GAP = 0
+const ATTRIBUTE_NAME = 1
+const ATTRIBUTE_AFTER_NAME = 2
+const ATTRIBUTE_BEFORE_VALUE = 3
+const ATTRIBUTE_QUOTED_VALUE = 4
+const ATTRIBUTE_UNQUOTED_VALUE = 5
 
 function isAsciiAlpha(code: number): boolean {
   return (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
@@ -1576,7 +1582,7 @@ function processCdataSection(
     return
   }
 
-  // The `'>'` htmlChunk is a deliberate dummy: processTagAttributes hits the
+  // The `'>'` htmlChunk is a deliberate dummy: scanTagAttributes hits the
   // `>` at position 0 and exits immediately, so the synthetic tag has no
   // attributes to parse. Mirrors the Rust engine's synthetic-tag handling.
   const open = processOpeningTag('#cdata-section', -1, '>', 0, state, handleEvent)
@@ -1629,9 +1635,9 @@ function processOpeningTag(
   }
 
   const tagHandler = state.tagOverrideHandlers?.get(tagName) ?? tagHandlers[tagId]
-  const result = processTagAttributes(htmlChunk, i, tagHandler)
+  const result = scanTagAttributes(htmlChunk, i, tagHandler)
 
-  if (!result.complete) {
+  if (result._tag === 'incomplete') {
     return {
       complete: false,
       newPosition: i,
@@ -1860,76 +1866,200 @@ function processOpeningTag(
 }
 
 /**
- * Extract and process HTML tag attributes
+ * Attribute scanning has two consumers: opening-tag parsing stops at `>` while
+ * the public isolated parser commits at EOF. Both use this state machine so tag
+ * completion and extracted values cannot disagree about quote semantics.
  */
-function processTagAttributes(htmlChunk: string, position: number, tagHandler: Node['tagHandler']): {
-  complete: boolean
-  newPosition: number
-  attributes: Record<string, string>
-  selfClosing: boolean
-  attrBuffer: string
-} {
-  let i = position
-  const chunkLength = htmlChunk.length
+type AttributeScanResult
+  = | {
+    _tag: 'complete'
+    newPosition: number
+    attributes: Record<string, string>
+    selfClosing: boolean
+  }
+  | {
+    _tag: 'incomplete'
+    attrBuffer: string
+  }
 
-  const selfClosing = tagHandler?.isSelfClosing || false
-  const attrStartPos = i
-  let insideQuote = false
+function setAttribute(
+  attributes: Record<string, string>,
+  rawName: string,
+  rawValue: string,
+): Record<string, string> {
+  if (!rawName)
+    return attributes
+
+  const name = rawName.toLowerCase()
+  if (Object.hasOwn(attributes, name))
+    return attributes
+
+  const result = attributes === EMPTY_ATTRIBUTES ? {} : attributes
+  result[name] = rawValue.includes('&')
+    ? decodeHTMLEntities(rawValue, true)
+    : rawValue
+  return result
+}
+
+function scanAttributes(
+  source: string,
+  position: number,
+  selfClosing: boolean,
+  stopAtTagEnd: boolean,
+): AttributeScanResult {
+  const length = source.length
+  let attributes = EMPTY_ATTRIBUTES
+  let state = ATTRIBUTE_GAP
+  let nameStart = 0
+  let nameEnd = 0
+  let valueStart = 0
   let quoteChar = 0
-  let hasAttributeContent = false
+  let newPosition = -1
+  let valueEnd = length
+  let i = position
 
-  let prevChar = 0
-  while (i < chunkLength) {
-    const c = htmlChunk.charCodeAt(i)
+  while (i < length) {
+    const charCode = source.charCodeAt(i)
 
-    if (insideQuote) {
-      if (c === quoteChar && prevChar !== BACKSLASH_CHAR) {
-        insideQuote = false
+    if (stopAtTagEnd && state !== ATTRIBUTE_QUOTED_VALUE) {
+      if (state !== ATTRIBUTE_UNQUOTED_VALUE
+        && charCode === SLASH_CHAR
+        && i + 1 < length
+        && source.charCodeAt(i + 1) === GT_CHAR) {
+        selfClosing = true
+        valueEnd = i
+        newPosition = i + 2
+        break
       }
-      i++
-      continue
-    }
-    else if (c === QUOTE_CHAR || c === APOS_CHAR) {
-      insideQuote = true
-      quoteChar = c
-      hasAttributeContent = true
-    }
-    else if (c === SLASH_CHAR && i + 1 < chunkLength
-      && htmlChunk.charCodeAt(i + 1) === GT_CHAR) {
-      const attrStr = hasAttributeContent ? htmlChunk.substring(attrStartPos, i).trim() : ''
-      return {
-        complete: true,
-        newPosition: i + 2,
-        attributes: hasAttributeContent ? parseAttributes(attrStr) : EMPTY_ATTRIBUTES,
-        selfClosing: true,
-        attrBuffer: attrStr,
+      if (charCode === GT_CHAR) {
+        valueEnd = i
+        newPosition = i + 1
+        break
       }
     }
-    else if (c === GT_CHAR) {
-      const attrStr = hasAttributeContent ? htmlChunk.substring(attrStartPos, i).trim() : ''
-      return {
-        complete: true,
-        newPosition: i + 1,
-        attributes: hasAttributeContent ? parseAttributes(attrStr) : EMPTY_ATTRIBUTES,
-        selfClosing,
-        attrBuffer: attrStr,
-      }
-    }
-    else if (!isWhitespace(c)) {
-      hasAttributeContent = true
-    }
 
+    const isSpace = isWhitespace(charCode)
+    switch (state) {
+      case ATTRIBUTE_GAP:
+        if (!isSpace) {
+          state = ATTRIBUTE_NAME
+          nameStart = i
+        }
+        break
+
+      case ATTRIBUTE_NAME:
+        if (charCode === EQUALS_CHAR || isSpace) {
+          nameEnd = i
+          state = charCode === EQUALS_CHAR
+            ? ATTRIBUTE_BEFORE_VALUE
+            : ATTRIBUTE_AFTER_NAME
+        }
+        break
+
+      case ATTRIBUTE_AFTER_NAME:
+        if (charCode === EQUALS_CHAR) {
+          state = ATTRIBUTE_BEFORE_VALUE
+        }
+        else if (!isSpace) {
+          attributes = setAttribute(
+            attributes,
+            source.substring(nameStart, nameEnd),
+            '',
+          )
+          state = ATTRIBUTE_NAME
+          nameStart = i
+        }
+        break
+
+      case ATTRIBUTE_BEFORE_VALUE:
+        if (charCode === QUOTE_CHAR || charCode === APOS_CHAR) {
+          quoteChar = charCode
+          state = ATTRIBUTE_QUOTED_VALUE
+          valueStart = i + 1
+        }
+        else if (!isSpace) {
+          state = ATTRIBUTE_UNQUOTED_VALUE
+          valueStart = i
+        }
+        break
+
+      case ATTRIBUTE_QUOTED_VALUE:
+        if (charCode === quoteChar) {
+          attributes = setAttribute(
+            attributes,
+            source.substring(nameStart, nameEnd),
+            source.substring(valueStart, i),
+          )
+          state = ATTRIBUTE_GAP
+        }
+        break
+
+      case ATTRIBUTE_UNQUOTED_VALUE:
+        if (isSpace || (!stopAtTagEnd && charCode === GT_CHAR)) {
+          attributes = setAttribute(
+            attributes,
+            source.substring(nameStart, nameEnd),
+            source.substring(valueStart, i),
+          )
+          state = ATTRIBUTE_GAP
+        }
+        break
+    }
     i++
-    prevChar = c
+  }
+
+  if (stopAtTagEnd && newPosition === -1) {
+    return {
+      _tag: 'incomplete',
+      attrBuffer: source.substring(position),
+    }
+  }
+
+  switch (state) {
+    case ATTRIBUTE_NAME:
+      attributes = setAttribute(
+        attributes,
+        source.substring(nameStart, valueEnd),
+        '',
+      )
+      break
+    case ATTRIBUTE_AFTER_NAME:
+    case ATTRIBUTE_BEFORE_VALUE:
+      attributes = setAttribute(
+        attributes,
+        source.substring(nameStart, nameEnd),
+        '',
+      )
+      break
+    case ATTRIBUTE_QUOTED_VALUE:
+    case ATTRIBUTE_UNQUOTED_VALUE:
+      attributes = setAttribute(
+        attributes,
+        source.substring(nameStart, nameEnd),
+        source.substring(valueStart, valueEnd),
+      )
+      break
   }
 
   return {
-    complete: false,
-    newPosition: i,
-    attributes: EMPTY_ATTRIBUTES,
-    selfClosing: false,
-    attrBuffer: htmlChunk.substring(attrStartPos, i),
+    _tag: 'complete',
+    newPosition: stopAtTagEnd ? newPosition : length,
+    attributes,
+    selfClosing,
   }
+}
+
+function scanTagAttributes(
+  htmlChunk: string,
+  position: number,
+  tagHandler: Node['tagHandler'],
+): AttributeScanResult {
+  return scanAttributes(
+    htmlChunk,
+    position,
+    tagHandler?.isSelfClosing || false,
+    true,
+  )
 }
 
 /**
@@ -1939,107 +2069,8 @@ export function parseAttributes(attrStr: string): Record<string, string> {
   if (!attrStr)
     return EMPTY_ATTRIBUTES
 
-  const result: Record<string, string> = {}
-  const len = attrStr.length
-  let i = 0
-
-  // State machine states
-  const WHITESPACE = 0
-  const NAME = 1
-  const AFTER_NAME = 2
-  const BEFORE_VALUE = 3
-  const QUOTED_VALUE = 4
-  const UNQUOTED_VALUE = 5
-
-  let state = WHITESPACE
-  let nameStart = 0
-  let nameEnd = 0
-  let valueStart = 0
-  let quoteChar = 0
-  let name = ''
-
-  while (i < len) {
-    const charCode = attrStr.charCodeAt(i)
-    const isSpace = isWhitespace(charCode)
-
-    switch (state) {
-      case WHITESPACE:
-        if (!isSpace) {
-          state = NAME
-          nameStart = i
-          nameEnd = 0 // Reset nameEnd when starting a new attribute
-        }
-        break
-
-      case NAME:
-        if (charCode === EQUALS_CHAR || isSpace) {
-          nameEnd = i
-          name = attrStr.substring(nameStart, nameEnd).toLowerCase()
-          state = charCode === EQUALS_CHAR ? BEFORE_VALUE : AFTER_NAME
-        }
-        break
-
-      case AFTER_NAME:
-        if (charCode === EQUALS_CHAR) {
-          state = BEFORE_VALUE
-        }
-        else if (!isSpace) {
-          result[name] = ''
-          state = NAME
-          nameStart = i
-          nameEnd = 0 // Reset nameEnd when starting a new attribute
-        }
-        break
-
-      case BEFORE_VALUE:
-        if (charCode === QUOTE_CHAR || charCode === APOS_CHAR) {
-          quoteChar = charCode
-          state = QUOTED_VALUE
-          valueStart = i + 1
-        }
-        else if (!isSpace) {
-          state = UNQUOTED_VALUE
-          valueStart = i
-        }
-        break
-
-      case QUOTED_VALUE:
-        if (charCode === BACKSLASH_CHAR && i + 1 < len) {
-          i++
-        }
-        else if (charCode === quoteChar) {
-          const raw = attrStr.substring(valueStart, i)
-          result[name] = raw.includes('&') ? decodeHTMLEntities(raw, true) : raw
-          state = WHITESPACE
-        }
-        break
-
-      case UNQUOTED_VALUE:
-        if (isSpace || charCode === GT_CHAR) {
-          const raw = attrStr.substring(valueStart, i)
-          result[name] = raw.includes('&') ? decodeHTMLEntities(raw, true) : raw
-          state = WHITESPACE
-        }
-        break
-    }
-
-    i++
-  }
-
-  // Handle the last attribute
-  if (state === QUOTED_VALUE || state === UNQUOTED_VALUE) {
-    if (name) {
-      const raw = attrStr.substring(valueStart, i)
-      result[name] = raw.includes('&') ? decodeHTMLEntities(raw, true) : raw
-    }
-  }
-  else if (state === NAME || state === AFTER_NAME || state === BEFORE_VALUE) {
-    nameEnd = nameEnd || i
-    const currentName = attrStr.substring(nameStart, nameEnd).toLowerCase()
-    if (currentName) {
-      result[currentName] = ''
-    }
-  }
-
-  return result
+  const result = scanAttributes(attrStr, 0, false, false)
+  if (result._tag === 'incomplete')
+    throw new Error('Isolated attribute scans always complete at EOF')
+  return result.attributes === EMPTY_ATTRIBUTES ? {} : result.attributes
 }
