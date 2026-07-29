@@ -28,6 +28,51 @@ describe.each(engines)('malformed html %s', ({ name: _name, engine }) => {
     })
   })
 
+  describe('< before a non-letter', () => {
+    // `<3` was scanned as a tag named `3` whose attributes ran to the next `>`,
+    // so the rest of the text node disappeared.
+    it.each([
+      ['<p>I <3 Rust</p>', 'I <3 Rust'],
+      ['<p>5 <10 and 10> 5</p>', '5 <10 and 10> 5'],
+      ['<p>a <1b>c</p>', 'a <1b>c'],
+      ['<p>a <-b>c</p>', 'a <-b>c'],
+      ['<p>a <<em>b</em>c</p>', 'a <*b*c'],
+      ['<3', '<3'],
+      ['<3<div', '<3'],
+      ['<>', '<>'],
+      ['< 3', '< 3'],
+    ])('keeps the text of %s', async (html, expected) => {
+      const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
+      expect(markdown).toBe(expected)
+    })
+
+    it('still discards a bogus comment opened by ?', async () => {
+      const resolved = await resolveEngine(engine)
+      expect(htmlToMarkdown('<?pi?>after', { engine: resolved })).toBe('after')
+      expect(htmlToMarkdown('<p>a <?b>c</p>', { engine: resolved })).toBe('a c')
+    })
+
+    it('still drops an incomplete tag at end of input', async () => {
+      const resolved = await resolveEngine(engine)
+      expect(htmlToMarkdown('<div', { engine: resolved })).toBe('')
+      expect(htmlToMarkdown('<p>ok</p><div', { engine: resolved })).toBe('ok')
+    })
+
+    // A run whose only non-whitespace byte is `<` must still count as non-empty,
+    // or the text node is dropped. Table cells take a separate emit path.
+    it.each([
+      ['<p>< </p>', '<'],
+      ['<p><\t</p>', '<'],
+      ['<div>< </div>', '<'],
+      ['<p>< <b>x</b></p>', '< **x**'],
+      ['<table><tr><td>< </td></tr></table>', '| < |\n| --- |'],
+      ['<table><tr><td>< <b>x</b></td></tr></table>', '| < **x** |\n| --- |'],
+    ])('emits a lone < in %s', async (html, expected) => {
+      const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
+      expect(markdown).toBe(expected)
+    })
+  })
+
   describe('comment end states', () => {
     // `<!-->`, `<!--->` and `--!>` all end a comment. Scanning for `-->` alone
     // left them open, so every byte after them was discarded.
