@@ -38,6 +38,7 @@ describe.each(engines)('malformed html %s', ({ name: _name, engine }) => {
       ['<p>a <-b>c</p>', 'a <-b>c'],
       ['<p>a <<em>b</em>c</p>', 'a <*b*c'],
       ['<3', '<3'],
+      ['<3<div', '<3'],
       ['<>', '<>'],
       ['< 3', '< 3'],
     ])('keeps the text of %s', async (html, expected) => {

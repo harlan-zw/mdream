@@ -3459,6 +3459,7 @@ fn lt_before_a_non_letter_is_text_not_a_tag() {
     ("<p>a <-b>c</p>", "a <-b>c"),
     ("<p>a <<em>b</em>c</p>", "a <*b*c"),
     ("<3", "<3"),
+    ("<3<div", "<3"),
     ("<>", "<>"),
     ("< 3", "< 3"),
   ] {

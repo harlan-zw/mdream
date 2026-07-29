@@ -22,6 +22,7 @@ const BYTE_PARITY_CASES = [
   '<p>< </p>',
   '<p>a <?b>c</p>',
   '<3',
+  '<3<div',
   '<>',
 ]
 

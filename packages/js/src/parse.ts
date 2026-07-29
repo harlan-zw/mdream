@@ -430,15 +430,19 @@ function popParserTop(state: ParseState, handleEvent: (event: NodeEvent) => void
     closeNode(state.currentNode!, state, handleEvent)
 }
 
-// A leading `<` is an incomplete tag only when the next byte could start one:
-// `<3` and `<>` are text and must still be emitted.
-function isIncompleteTagResidual(leftover: string): boolean {
-  if (leftover.charCodeAt(0) !== LT_CHAR)
-    return false
-  if (leftover.length === 1)
-    return true
-  const c = leftover.charCodeAt(1)
-  return isAsciiAlpha(c) || c === SLASH_CHAR || c === EXCLAMATION_CHAR || c === QUESTION_CHAR
+// Find the incomplete tag suffix while skipping literal `<` sequences in the
+// pending text run. For example, `<3<div` must emit `<3` and drop `<div`.
+function findIncompleteTagResidualIndex(leftover: string): number {
+  let index = leftover.indexOf('<')
+  while (index !== -1) {
+    if (index + 1 === leftover.length)
+      return index
+    const c = leftover.charCodeAt(index + 1)
+    if (isAsciiAlpha(c) || c === SLASH_CHAR || c === EXCLAMATION_CHAR || c === QUESTION_CHAR)
+      return index
+    index = leftover.indexOf('<', index + 1)
+  }
+  return -1
 }
 
 /**
@@ -466,8 +470,11 @@ export function finalizeParse(
       processTextBuffer(scriptText, state, handleEvent)
     }
   }
-  else if (leftover.length > 0 && !isIncompleteTagResidual(leftover)) {
-    processTextBuffer(leftover, state, handleEvent)
+  else if (leftover.length > 0) {
+    const incompleteTagIndex = findIncompleteTagResidualIndex(leftover)
+    const text = incompleteTagIndex === -1 ? leftover : leftover.slice(0, incompleteTagIndex)
+    if (text)
+      processTextBuffer(text, state, handleEvent)
   }
   while (state.currentNode) {
     closeNode(state.currentNode, state, handleEvent)
