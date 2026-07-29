@@ -29,6 +29,24 @@ async function expectStreamingParity(html: string, options: Partial<MdreamOption
 
 describe('streaming parity with the Rust core', () => {
   it.each([
+    [
+      String.raw`<a href="x\" onclick=alert(1)">link</a>`,
+      String.raw`[link](<x\\>)`,
+    ],
+    [
+      String.raw`<a href="c:\path\" title=t>link</a>`,
+      String.raw`[link](<c:\\path\\> "t")`,
+    ],
+    [
+      `<p>ok</p><img alt=Bob's src=/i.png><p>after</p>`,
+      `ok\n\n![Bob's](/i.png)\n\nafter`,
+    ],
+  ])('keeps malformed attribute recovery stable across every split for %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    await expectStreamingParity(html)
+  })
+
+  it.each([
     '<pre><code>const x = `hi $' + '{y}`;</code></pre>',
     '<p>use <code>a`b</code> here</p>',
     '<table><tr><td>a`b</td><td>c\\d</td></tr></table>',
