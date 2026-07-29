@@ -24,6 +24,55 @@ pub(crate) fn is_autolink_uri(s: &str) -> bool {
     .any(|b| b == b' ' || b == b'<' || b == b'>' || b == b'\n' || b == b'\r' || b == b'\t')
 }
 
+/// Whether the significant bytes of `rest` start with `scheme`, ignoring case.
+/// Tab, LF and CR are skipped: the URL parser removes them before the scheme,
+/// so `java\tscript:` is the `javascript:` scheme.
+fn scheme_matches(rest: &[u8], scheme: &[u8]) -> bool {
+  let mut matched = 0;
+  for &byte in rest {
+    if matches!(byte, b'\t' | b'\n' | b'\r') {
+      continue;
+    }
+    if !byte.eq_ignore_ascii_case(&scheme[matched]) {
+      return false;
+    }
+    matched += 1;
+    if matched == scheme.len() {
+      return true;
+    }
+  }
+  false
+}
+
+/// Whether `href` cannot represent meaningful navigation: a bare `#`, or a
+/// `javascript:`, `data:` or `vbscript:` URL.
+///
+/// Mirrors the URL parser's preprocessing, so `" javascript:"` and the decoded
+/// form of `java&#9;script:` are recognised. An interior space is *not* removed
+/// by the URL parser, so `java script:x` stays an ordinary relative URL.
+pub(crate) fn is_empty_link_href(href: &str) -> bool {
+  let bytes = href.as_bytes();
+  // Leading and trailing C0 controls and spaces are stripped. UTF-8
+  // continuation bytes are all >= 0x80, so this cannot split a character.
+  let start = bytes
+    .iter()
+    .position(|&byte| byte > b' ')
+    .unwrap_or(bytes.len());
+  let end = bytes
+    .iter()
+    .rposition(|&byte| byte > b' ')
+    .map_or(start, |last| last + 1);
+  let rest = &bytes[start..end];
+
+  match rest.first().map(u8::to_ascii_lowercase) {
+    Some(b'#') => rest.len() == 1,
+    Some(b'j') => scheme_matches(rest, b"javascript:"),
+    Some(b'd') => scheme_matches(rest, b"data:"),
+    Some(b'v') => scheme_matches(rest, b"vbscript:"),
+    _ => false,
+  }
+}
+
 /// Check if a query parameter key is a tracking parameter.
 #[inline]
 pub(crate) fn is_tracking_param(key: &str) -> bool {
@@ -243,6 +292,73 @@ pub(crate) fn resolve_url<'a>(url: &'a str, origin: Option<&str>, clean: bool) -
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn empty_link_href_applies_url_preprocessing() {
+    for href in ["#", "javascript:void(0)", "data:text/html,x", "vbscript:x"] {
+      assert!(is_empty_link_href(href), "{href:?}");
+    }
+    // Leading C0 controls and spaces are ignored by the URL parser.
+    for href in [
+      " javascript:void(0)",
+      "\tjavascript:void(0)",
+      "\njavascript:void(0)",
+      "\rjavascript:void(0)",
+      "\u{1}javascript:void(0)",
+      "  \t javascript:void(0)",
+      " data:text/html,x",
+      " vbscript:x",
+    ] {
+      assert!(is_empty_link_href(href), "{href:?}");
+    }
+    // Tab, LF and CR are removed anywhere in the scheme.
+    for href in [
+      "java\tscript:void(0)",
+      "java\nscript:void(0)",
+      "java\rscript:void(0)",
+      "j\ta\nv\ra\tscript:void(0)",
+      "javascript\t:void(0)",
+      "da\tta:x",
+      "vb\tscript:x",
+      " java\tscript:void(0)",
+    ] {
+      assert!(is_empty_link_href(href), "{href:?}");
+    }
+    // Case folding, with controls interleaved.
+    for href in [
+      "JavaScript:x",
+      " JAVASCRIPT:x",
+      "\tJaVa\tScRiPt:x",
+      "DATA:x",
+    ] {
+      assert!(is_empty_link_href(href), "{href:?}");
+    }
+    // A bare `#` keeps its meaning through surrounding whitespace.
+    for href in [" # ", "#\t", "\t#", "\n#\r"] {
+      assert!(is_empty_link_href(href), "{href:?}");
+    }
+
+    // An interior space is NOT removed, so the scheme is not `javascript:`.
+    for href in [
+      "java script:x",
+      "notjavascript:x",
+      "/javascript/guide",
+      "https://x.com/a",
+      "javascript",
+      "#section",
+      " #section",
+      "#a\tb",
+      "",
+      "   ",
+      "mailto:a@b.c",
+    ] {
+      assert!(!is_empty_link_href(href), "{href:?}");
+    }
+    // Only ASCII letters case-fold: `\u{1a}` must not be read as `:`.
+    assert!(!is_empty_link_href("javascript\u{1a}x"));
+    // A non-breaking space is not ASCII whitespace and is not stripped.
+    assert!(!is_empty_link_href("\u{a0}javascript:x"));
+  }
 
   #[test]
   fn autolink_uri_detection() {

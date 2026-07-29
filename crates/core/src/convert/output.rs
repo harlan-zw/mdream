@@ -80,14 +80,6 @@ fn write_image_description(output: &mut String, alt: &str) {
   write_ascii_escaped(output, alt, &IMAGE_DESCRIPTION_ESCAPES);
 }
 
-#[inline]
-fn starts_with_ignore_ascii_case(value: &str, prefix: &[u8]) -> bool {
-  value
-    .as_bytes()
-    .get(..prefix.len())
-    .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
-}
-
 impl ConvertState {
   #[inline]
   fn inline_marker_type(tag_id: u8) -> Option<u8> {
@@ -500,10 +492,7 @@ impl ConvertState {
         if self.clean_flags & CLEAN_EMPTY_LINKS != 0 {
           let node = &self.stack[self.stack.len() - 1];
           if let Some(href) = node.attributes.get("href")
-            && (href == "#"
-              || starts_with_ignore_ascii_case(href, b"javascript:")
-              || starts_with_ignore_ascii_case(href, b"data:")
-              || starts_with_ignore_ascii_case(href, b"vbscript:"))
+            && is_empty_link_href(href)
           {
             self.skip_current_link = true;
             self.last_node_is_inline = is_inline;

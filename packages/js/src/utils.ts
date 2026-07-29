@@ -6,25 +6,55 @@ import {
   MAX_LEGACY_ENTITY_NAME_LENGTH,
 } from './entities'
 
-function equalsAsciiCaseInsensitive(value: string, expected: string): boolean {
-  for (let index = 0; index < expected.length; index++) {
-    if ((value.charCodeAt(index) | 32) !== expected.charCodeAt(index))
-      return false
-  }
-  return true
+function lowerAscii(code: number): number {
+  return code >= 65 && code <= 90 ? code + 32 : code
 }
 
-export function isEmptyLinkHref(href: string): boolean {
-  if (href === '#')
-    return true
+/**
+ * Whether the significant characters of `href` in `[start, end)` begin with
+ * `scheme`, ignoring case. Tab, LF and CR are skipped: the URL parser removes
+ * them before the scheme, so `java\tscript:` is `javascript:`.
+ */
+function schemeMatches(href: string, start: number, end: number, scheme: string): boolean {
+  let matched = 0
+  for (let index = start; index < end; index++) {
+    const code = href.charCodeAt(index)
+    if (code === 9 || code === 10 || code === 13)
+      continue
+    if (lowerAscii(code) !== scheme.charCodeAt(matched))
+      return false
+    if (++matched === scheme.length)
+      return true
+  }
+  return false
+}
 
-  switch (href.indexOf(':')) {
-    case 4:
-      return equalsAsciiCaseInsensitive(href, 'data')
-    case 8:
-      return equalsAsciiCaseInsensitive(href, 'vbscript')
-    case 10:
-      return equalsAsciiCaseInsensitive(href, 'javascript')
+/**
+ * Whether `href` cannot represent meaningful navigation: a bare `#`, or a
+ * `javascript:`, `data:` or `vbscript:` URL.
+ *
+ * Mirrors the URL parser's preprocessing, so `' javascript:'` and the decoded
+ * form of `java&#9;script:` are recognised. An interior space is *not* removed
+ * by the URL parser, so `java script:x` stays an ordinary relative URL.
+ */
+export function isEmptyLinkHref(href: string): boolean {
+  // Leading and trailing C0 controls and spaces are stripped.
+  let start = 0
+  while (start < href.length && href.charCodeAt(start) <= 32)
+    start++
+  let end = href.length
+  while (end > start && href.charCodeAt(end - 1) <= 32)
+    end--
+
+  switch (lowerAscii(href.charCodeAt(start))) {
+    case 35 /* # */:
+      return end - start === 1
+    case 106 /* j */:
+      return schemeMatches(href, start, end, 'javascript:')
+    case 100 /* d */:
+      return schemeMatches(href, start, end, 'data:')
+    case 118 /* v */:
+      return schemeMatches(href, start, end, 'vbscript:')
     default:
       return false
   }
