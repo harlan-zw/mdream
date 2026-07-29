@@ -71,4 +71,31 @@ describe.each(engines)('malformed html %s', ({ name: _name, engine }) => {
       expect(markdown).toBe(expected)
     })
   })
+
+  describe('comment end states', () => {
+    // `<!-->`, `<!--->` and `--!>` all end a comment. Scanning for `-->` alone
+    // left them open, so every byte after them was discarded.
+    it.each([
+      'before<!-->after',
+      'before<!--->after',
+      'before<!--x--!>after',
+      'before<!----!>after',
+      'before<!--x---!>after',
+    ])('closes %s and keeps the rest of the document', async (html) => {
+      const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
+      expect(markdown).toBe('before after')
+    })
+
+    it('does not treat a > inside the comment body as a terminator', async () => {
+      const html = 'before<!--[if IE]>hidden<![endif]-->after'
+      const markdown = htmlToMarkdown(html, { engine: await resolveEngine(engine) })
+      expect(markdown).toBe('before after')
+    })
+
+    it('keeps a long document that contains a five-byte malformed comment', async () => {
+      const body = Array.from({ length: 200 }, (_, i) => `<p>para ${i}</p>`).join('')
+      const markdown = htmlToMarkdown(`<p>lead</p><!-->${body}`, { engine: await resolveEngine(engine) })
+      expect(markdown.match(/para /g)?.length).toBe(200)
+    })
+  })
 })

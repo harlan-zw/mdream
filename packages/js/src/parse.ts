@@ -1486,18 +1486,36 @@ function processCommentOrDoctype(htmlChunk: string, position: number): {
   if (i + 3 < chunkLength
     && htmlChunk.charCodeAt(i + 2) === DASH_CHAR
     && htmlChunk.charCodeAt(i + 3) === DASH_CHAR) {
-    i += 4 // Skip past '<!--'
+    i += 4
 
-    // Look for --> sequence
-    while (i < chunkLength - 2) {
-      if (htmlChunk.charCodeAt(i) === DASH_CHAR
-        && htmlChunk.charCodeAt(i + 1) === DASH_CHAR
-        && htmlChunk.charCodeAt(i + 2) === GT_CHAR) {
-        i += 3
-        return {
-          complete: true,
-          newPosition: i,
-          remainingText: '',
+    // `-->` is not the only terminator. `<!-->` and `<!--->` close straight out
+    // of the comment start states, and a run of two or more dashes also closes
+    // on `!>`. Matching `-->` alone leaves those comments open, so the scan
+    // runs to end of chunk and every byte after them is discarded.
+    if (i < chunkLength && htmlChunk.charCodeAt(i) === GT_CHAR) {
+      return { complete: true, newPosition: i + 1, remainingText: '' }
+    }
+    if (i + 1 < chunkLength
+      && htmlChunk.charCodeAt(i) === DASH_CHAR
+      && htmlChunk.charCodeAt(i + 1) === GT_CHAR) {
+      return { complete: true, newPosition: i + 2, remainingText: '' }
+    }
+
+    while (i + 2 < chunkLength) {
+      const dash = htmlChunk.indexOf('-', i)
+      if (dash < 0 || dash + 2 >= chunkLength) {
+        break
+      }
+      i = dash
+      if (htmlChunk.charCodeAt(i + 1) === DASH_CHAR) {
+        const afterDashes = htmlChunk.charCodeAt(i + 2)
+        if (afterDashes === GT_CHAR) {
+          return { complete: true, newPosition: i + 3, remainingText: '' }
+        }
+        if (afterDashes === EXCLAMATION_CHAR
+          && i + 3 < chunkLength
+          && htmlChunk.charCodeAt(i + 3) === GT_CHAR) {
+          return { complete: true, newPosition: i + 4, remainingText: '' }
         }
       }
       i++
