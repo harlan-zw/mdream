@@ -2,9 +2,148 @@ import type { ExtractedElement } from 'mdream'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { htmlToMarkdown as publicHtmlToMarkdown } from '../../../src'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
+describe('declarative extraction public API', () => {
+  it('dispatches comma-separated selector lists', () => {
+    const extracted: Array<[string, string]> = []
+
+    publicHtmlToMarkdown(
+      '<main><h1>Alpha</h1><h2>Beta</h2><p>Gamma</p></main>',
+      {
+        extraction: {
+          'h1, h2': element => extracted.push([element.tagName, element.textContent]),
+          'p, li': element => extracted.push([element.tagName, element.textContent]),
+        },
+      },
+    )
+
+    expect(extracted).toEqual([
+      ['h1', 'Alpha'],
+      ['h2', 'Beta'],
+      ['p', 'Gamma'],
+    ])
+  })
+})
+
 describe.each(engines)('declarative extraction (plugins.extraction) $name', (engineConfig) => {
+  it('dispatches nested matches when their text content is complete', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const tags: string[] = []
+
+    htmlToMarkdown('<div><span>Text</span></div>', {
+      plugins: {
+        extraction: {
+          'div, span': element => tags.push(element.tagName),
+        },
+      },
+      engine,
+    })
+
+    // Extraction finalizes on element exit, so a nested element completes first.
+    expect(tags).toEqual(['span', 'div'])
+  })
+
+  it('calls every handler when selector keys overlap', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const calls: string[] = []
+
+    htmlToMarkdown('<h1 class="featured">Title</h1>', {
+      plugins: {
+        extraction: {
+          'h1': element => calls.push(`tag:${element.textContent}`),
+          'h1, h2': element => calls.push(`list:${element.textContent}`),
+          '.featured': element => calls.push(`class:${element.textContent}`),
+        },
+      },
+      engine,
+    })
+
+    expect(calls).toEqual([
+      'tag:Title',
+      'list:Title',
+      'class:Title',
+    ])
+  })
+
+  it('preserves extracted text when include filtering omits a nested element', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const extracted: string[] = []
+
+    const markdown = htmlToMarkdown('<h1>A<span>B</span>C</h1>', {
+      plugins: {
+        filter: {
+          include: ['h1'],
+          processChildren: false,
+        },
+        extraction: {
+          h1: element => extracted.push(element.textContent),
+        },
+      },
+      engine,
+    })
+
+    expect(markdown).not.toContain('B')
+    expect(extracted).toEqual(['ABC'])
+  })
+
+  it('extracts comma-separated selector lists across sibling branches', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `
+      <html>
+        <head><meta name="keywords" content="alpha,beta" /></head>
+        <body>
+          <h1 id="alpha">Alpha</h1>
+          <h2 data-section="beta">Beta</h2>
+          <p class="summary">Gamma</p>
+          <li>Delta</li>
+        </body>
+      </html>
+    `
+    const extracted: ExtractedElement[] = []
+    const keywords: string[] = []
+
+    htmlToMarkdown(html, {
+      plugins: {
+        extraction: {
+          'meta[name="keywords"]': el => keywords.push(el.attributes.content),
+          'h1, h2': el => extracted.push(el),
+          'p, li': el => extracted.push(el),
+        },
+      },
+      engine,
+    })
+
+    expect(keywords).toEqual(['alpha,beta'])
+    expect(extracted).toEqual([
+      {
+        selector: 'h1, h2',
+        tagName: 'h1',
+        textContent: 'Alpha',
+        attributes: { id: 'alpha' },
+      },
+      {
+        selector: 'h1, h2',
+        tagName: 'h2',
+        textContent: 'Beta',
+        attributes: { 'data-section': 'beta' },
+      },
+      {
+        selector: 'p, li',
+        tagName: 'p',
+        textContent: 'Gamma',
+        attributes: { class: 'summary' },
+      },
+      {
+        selector: 'p, li',
+        tagName: 'li',
+        textContent: 'Delta',
+        attributes: {},
+      },
+    ])
+  })
+
   it('extracts elements by tag selector', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<html><body><h1>Main Title</h1><h2>Section 1</h2><h2>Section 2</h2><p>Content</p></body></html>`

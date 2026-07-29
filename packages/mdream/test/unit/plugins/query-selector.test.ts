@@ -25,6 +25,16 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     expect(markdown).toContain('This paragraph should be included')
   })
 
+  it('does not leak unmatched text when using an include selector list', async () => {
+    const markdown = htmlToMarkdown('<h1>Included</h1><p>secret</p>', {
+      engine: await resolveEngine(engine),
+      plugins: { filter: { include: ['h1, h2'] } },
+    })
+
+    expect(markdown).toContain('# Included')
+    expect(markdown).not.toContain('secret')
+  })
+
   it('excludes specified elements by tag', async () => {
     const html = `
       <div>This should be included</div>

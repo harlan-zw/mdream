@@ -1,12 +1,11 @@
 use crate::consts::*;
 use crate::entities::{decode_html_entities, decode_html_entities_for_markdown};
 use crate::scan::{is_whitespace, process_comment_or_doctype, process_tag_attributes};
-use crate::selector::{matches_selector, parse_css_selector};
+use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selector_list};
 use crate::tags::get_tag_handler;
 use crate::tailwind::process_tailwind_classes;
 use crate::types::{
-  ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, ParsedSelector, TagHandler,
-  TailwindData,
+  ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, TagHandler, TailwindData,
 };
 use crate::url::{is_autolink_uri, is_empty_link_href, resolve_url, slugify_heading};
 use std::borrow::Cow;
@@ -338,12 +337,12 @@ pub struct ConvertState {
   pub frontmatter_title: Option<String>,
   pub frontmatter_meta: Vec<(String, String)>,
 
-  extraction_parsed_selectors: Vec<(String, ParsedSelector)>,
+  extraction_parsed_selectors: Vec<(String, ParsedSelectorList)>,
   extraction_tracked: Vec<TrackedExtraction>,
   pub extraction_results: Vec<ExtractedElement>,
 
-  filter_include_parsed: Vec<(String, ParsedSelector)>,
-  filter_exclude_parsed: Vec<(String, ParsedSelector)>,
+  filter_include_parsed: Vec<(String, ParsedSelectorList)>,
+  filter_exclude_parsed: Vec<(String, ParsedSelectorList)>,
   filter_process_children: bool,
 
   // === Markdown output state ===
@@ -587,7 +586,7 @@ impl ConvertState {
         s.extraction_parsed_selectors = extraction
           .selectors
           .iter()
-          .map(|sel| (sel.clone(), parse_css_selector(sel)))
+          .map(|sel| (sel.clone(), parse_css_selector_list(sel)))
           .collect();
       }
       if let Some(filter) = &plugins.filter {
@@ -595,13 +594,13 @@ impl ConvertState {
         if let Some(incl) = &filter.include {
           s.filter_include_parsed = incl
             .iter()
-            .map(|sel| (sel.clone(), parse_css_selector(sel)))
+            .map(|sel| (sel.clone(), parse_css_selector_list(sel)))
             .collect();
         }
         if let Some(excl) = &filter.exclude {
           s.filter_exclude_parsed = excl
             .iter()
-            .map(|sel| (sel.clone(), parse_css_selector(sel)))
+            .map(|sel| (sel.clone(), parse_css_selector_list(sel)))
             .collect();
         }
         s.filter_process_children = filter.process_children.unwrap_or(true);

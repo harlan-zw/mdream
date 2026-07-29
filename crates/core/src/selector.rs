@@ -2,6 +2,67 @@
 
 use crate::types::{ElementNode, ParsedSelector};
 
+#[derive(Debug, Clone)]
+pub(crate) enum ParsedSelectorList {
+  Single(ParsedSelector),
+  Multiple(Vec<ParsedSelector>),
+}
+
+pub(crate) fn parse_css_selector_list(selector: &str) -> ParsedSelectorList {
+  let selector = selector.trim();
+  if selector.is_empty() {
+    return ParsedSelectorList::Single(parse_css_selector(selector));
+  }
+
+  let mut selectors = Vec::new();
+  let mut start = 0;
+  let mut in_attr = false;
+  let mut quote = None;
+  let mut escaped = false;
+
+  for (index, ch) in selector.char_indices() {
+    if let Some(active_quote) = quote {
+      if escaped {
+        escaped = false;
+      } else if ch == '\\' {
+        escaped = true;
+      } else if ch == active_quote {
+        quote = None;
+      }
+      continue;
+    }
+    if in_attr {
+      if ch == '"' || ch == '\'' {
+        quote = Some(ch);
+      } else if ch == ']' {
+        in_attr = false;
+      }
+      continue;
+    }
+    if ch == '[' {
+      in_attr = true;
+    } else if ch == ',' {
+      let part = selector[start..index].trim();
+      if part.is_empty() {
+        return ParsedSelectorList::Single(ParsedSelector::Tag(selector.to_string()));
+      }
+      selectors.push(parse_css_selector(part));
+      start = index + ch.len_utf8();
+    }
+  }
+
+  if selectors.is_empty() {
+    return ParsedSelectorList::Single(parse_css_selector(selector));
+  }
+
+  let last = selector[start..].trim();
+  if last.is_empty() {
+    return ParsedSelectorList::Single(ParsedSelector::Tag(selector.to_string()));
+  }
+  selectors.push(parse_css_selector(last));
+  ParsedSelectorList::Multiple(selectors)
+}
+
 pub(crate) fn parse_css_selector(selector: &str) -> ParsedSelector {
   let selector = selector.trim();
   if selector.is_empty() {
@@ -119,6 +180,15 @@ pub(crate) fn matches_selector(tag: &ElementNode, selector: &ParsedSelector) -> 
       },
     },
     ParsedSelector::Compound(parts) => parts.iter().all(|p| matches_selector(tag, p)),
+  }
+}
+
+pub(crate) fn matches_selector_list(tag: &ElementNode, selectors: &ParsedSelectorList) -> bool {
+  match selectors {
+    ParsedSelectorList::Single(selector) => matches_selector(tag, selector),
+    ParsedSelectorList::Multiple(selectors) => selectors
+      .iter()
+      .any(|selector| matches_selector(tag, selector)),
   }
 }
 
