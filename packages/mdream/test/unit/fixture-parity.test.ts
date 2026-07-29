@@ -591,6 +591,46 @@ describe('cross-engine parity', () => {
     }
   })
 
+  it('gfm block-structure escaping produces identical output', async () => {
+    const [jsEngine, rustEngine] = await Promise.all([
+      resolveEngine(engines[0].engine),
+      resolveEngine(engines[1].engine),
+    ])
+    const cases = [
+      '<details><p>a</p>\n\n<p>b_c</p></details>',
+      '<table><tr><td><p>a<td>b</tr><tr><td>c</td></tr></table>',
+      '<table><tr><th>h1</th><th colspan="2">h2</th></tr><tr><td>a</td><td>b</td><td>c</td></tr></table>',
+      '<ul><li># h</li><li>- x</li><li>1. y</li></ul>',
+      '<ul><li>x<table><tr><th>h</th></tr><tr><td>c</td></tr></table></li></ul>',
+      '<table><tr><th>h</th></tr><tr><td><code>a|b</code></td></tr></table>',
+      '<h2># Heading #</h2>',
+      '<table><tr><th>h</th></tr><tr><td><h3>Ends with #</h3></td></tr></table>',
+      '<table><tr><th>h</th></tr><tr><td><h3>H</h3></td></tr></table>',
+      '<pre><b>a</b> <i>c</i></pre>',
+      '<ul><li>a<hr></li></ul>',
+      '<ul><li><hr></li><li>b</li></ul>',
+      '<ul><li><p>a</p><hr><p>b</p></li></ul>',
+      '<ul><li>a<ul><li></li></ul></li></ul>',
+      '<p>a</p><ul><li></li><li>b</li></ul>',
+      '<ul><li>a</li><li></li><li>b</li></ul>',
+      '<ul><li>a<ul><li><pre><code>x</code></pre></li></ul></li></ul>',
+      '<ol start="9"><li>Nine</li><li>Ten</li></ol>',
+      '<pre lang="rust">fn main(){}</pre>',
+      '<ul><li><pre><code>a\nb</code></pre></li></ul>',
+      '<ul><li>text<pre><code>x</code></pre></li></ul>',
+      '<dl><dt>BASH_VERSINFO</dt><dd>x</dd>\n\n<dt>A_B</dt><dd>y</dd></dl>',
+      '<pre><code>a</code> [-o option]</pre>',
+      '<ul><li><pre>code</pre><p>after</p></li></ul>',
+      '<table><caption>Cap</caption><tr><th>h</th></tr><tr><td>c</td></tr></table>',
+      '<ul><li><p>Intro:</p><table><caption>Cap</caption><tr><th>h</th></tr><tr><td>c</td></tr></table></li></ul>',
+    ]
+    for (const html of cases) {
+      const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()
+      const rustResult = rustEngine.htmlToMarkdown(html).trimEnd()
+      expect(rustResult, `GFM mismatch for: ${html}`).toBe(jsResult)
+    }
+  })
+
   it('text entity decoding in content produces identical output', async () => {
     const [jsEngine, rustEngine] = await Promise.all([
       resolveEngine(engines[0].engine),

@@ -155,9 +155,11 @@ describe.each(engines)('tables $name', (engineConfig) => {
       </table>
     `
     const markdown = htmlToMarkdown(html, { engine })
+    // The spanned header contributes an empty trailing cell so the delimiter
+    // row is as wide as the body; a narrower delimiter drops the third column.
     expect(markdown).toBe(
-      '| Header 1 | Header 2-3 |\n'
-      + '| --- | --- |\n'
+      '| Header 1 | Header 2-3 | |\n'
+      + '| --- | --- | --- |\n'
       + '| Value 1 | Value 2 | Value 3 |',
     )
   })

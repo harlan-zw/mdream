@@ -39,7 +39,7 @@ describe('gfm text escaping', () => {
 
   it('only escapes syntax where plain text could activate it', () => {
     expect(htmlToMarkdown('<h2># Heading #</h2><p>#hashtag</p><p>Just a - dash</p>'))
-      .toBe('## # Heading #\n\n#hashtag\n\nJust a - dash')
+      .toBe('## # Heading \\#\n\n#hashtag\n\nJust a - dash')
   })
 
   it('escapes syntax introduced by entity decoding', () => {

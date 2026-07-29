@@ -295,6 +295,8 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   tableRenderedTable?: boolean
   tableCurrentRowCells?: number
   tableColumnAlignments?: string[]
+  /** See MarkdownState for semantics. */
+  tableHeaderCells?: number
 
   /** Resolved plugin instances for efficient iteration */
   resolvedPlugins?: TransformPlugin[]
@@ -323,7 +325,7 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
    */
   preFencePending?: boolean
   preFenceLang?: string
-  preOwnFence?: boolean
+  preFenceOpen?: boolean
   /** Number of default blockquotes currently buffered for line prefixing. */
   bufferedBlockquoteDepth?: number
   /** Whether output should omit Markdown/HTML markup */
@@ -369,7 +371,6 @@ export type GfmAction
     | { _tag: 'CodeSpanEnter', output: string }
     | { _tag: 'CodeSpanExit' }
     | { _tag: 'CodeFenceEnter', language: string, output: string }
-    | { _tag: 'CodeFenceExit', output: string }
 
 type TagHandlerResult = string | GfmAction | undefined | void
 

@@ -88,7 +88,7 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
       <li>Nested</li>
     </ul>
   </li>
-</ol>`, { engine })).toBe('1. Nine\n2. Ten\n3. Eleven\n   - Nested')
+</ol>`, { engine })).toBe('9. Nine\n10. Ten\n11. Eleven\n    - Nested')
   })
   it('blockquote: Blockquotes can include other elements, with seamless support for nested quotes.', async () => {
     const engine = await resolveEngine(engineConfig.engine)
@@ -148,7 +148,9 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
   })
   it('smart Escaping: Escapes special characters only when necessary, to avoid accidental Markdown rendering.', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(htmlToMarkdown(`<h2># Heading #</h2>`, { engine })).toBe('## # Heading #')
+    // The trailing `#` is escaped: unescaped it is an ATX closing sequence and
+    // the heading renders as `# Heading`.
+    expect(htmlToMarkdown(`<h2># Heading #</h2>`, { engine })).toBe('## # Heading \\#')
     expect(htmlToMarkdown(`<p># Heading</p>`, { engine })).toBe('\\# Heading')
     expect(htmlToMarkdown(`<p>#hashtag</p>`, { engine })).toBe('#hashtag')
     expect(htmlToMarkdown(`<p>- List Item</p>`, { engine })).toBe('\\- List Item')

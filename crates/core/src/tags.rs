@@ -149,13 +149,16 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
     collapses_inner_white_space: true,
     spacing: Some(NO_SPACING),
     is_inline: true,
-    wanted_attrs: ATTR_CLASS,
+    wanted_attrs: ATTR_CLASS | ATTR_LANG,
     ..NONE
   });
 
   // Lists
   t[TAG_UL as usize] = Some(BLOCK);
-  t[TAG_OL as usize] = Some(BLOCK);
+  t[TAG_OL as usize] = Some(TagHandler {
+    wanted_attrs: ATTR_START,
+    ..NONE
+  });
   t[TAG_LI as usize] = Some(TagHandler {
     spacing: Some(LIST_ITEM_SPACING),
     ..NONE
@@ -192,12 +195,13 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   });
   t[TAG_TH as usize] = Some(TagHandler {
     collapses_inner_white_space: true,
-    wanted_attrs: ATTR_ALIGN,
+    wanted_attrs: ATTR_ALIGN | ATTR_COLSPAN,
     spacing: Some(NO_SPACING),
     ..NONE
   });
   t[TAG_TD as usize] = Some(TagHandler {
     collapses_inner_white_space: true,
+    wanted_attrs: ATTR_COLSPAN,
     spacing: Some(NO_SPACING),
     ..NONE
   });
@@ -224,7 +228,7 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   // `class` is kept so a bare <pre class="language-x"> can resolve its fence
   // language for the deferred code block (issue #97).
   t[TAG_PRE as usize] = Some(TagHandler {
-    wanted_attrs: ATTR_CLASS,
+    wanted_attrs: ATTR_CLASS | ATTR_LANG,
     ..NONE
   });
 

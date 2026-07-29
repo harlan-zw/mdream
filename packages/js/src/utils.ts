@@ -1,5 +1,5 @@
 import type { ElementNode, Node } from './types'
-import { TAG_BLOCKQUOTE, TAG_LI } from './const'
+import { NEWLINE_CHAR, SPACE_CHAR, TAG_BLOCKQUOTE, TAG_LI } from './const'
 import {
   HTML_ENTITIES,
   MAX_ENTITY_NAME_LENGTH,
@@ -175,6 +175,119 @@ export function getLanguageFromClass(className: string | undefined): string {
   }
 
   return ''
+}
+
+// Fence info string for a <pre>/<code>: `class="language-x"` first, then
+// `lang="x"`, the form cmark-gfm itself emits. A `lang` carrying a subtag
+// (`en-US`) or spaces is a human language, never an info string.
+export function fenceLanguage(attributes: Record<string, string> | undefined): string {
+  const fromClass = getLanguageFromClass(attributes?.class)
+  if (fromClass)
+    return fromClass
+
+  const lang = attributes?.lang
+  if (!lang)
+    return ''
+  for (let index = 0; index < lang.length; index++) {
+    const code = lang.charCodeAt(index)
+    if (code === 45 || isUnsafeFenceInfoCode(code))
+      return ''
+  }
+  return lang
+}
+
+/**
+ * Code unit last written to the buffer, or -1 when nothing has been. Handlers
+ * legitimately return `''`, so the last *fragment* is not always the last
+ * character.
+ */
+function lastOutputChar(buffer: readonly string[]): number {
+  for (let index = buffer.length - 1; index >= 0; index--) {
+    const fragment = buffer[index]!
+    if (fragment.length > 0)
+      return fragment.charCodeAt(fragment.length - 1)
+  }
+  return -1
+}
+
+/**
+ * Separation a block needs to open at the content column `prefix` describes, or
+ * `undefined` when the buffer already sits there.
+ */
+export function blockOpenPrefix(
+  buffer: readonly string[],
+  prefix: string | undefined,
+): string | undefined {
+  switch (lastOutputChar(buffer)) {
+    // Empty output, or a pending list marker already at the content column.
+    case -1:
+    case SPACE_CHAR:
+      return undefined
+    case NEWLINE_CHAR:
+      return prefix || undefined
+    // Directly under text the block reads as a setext underline or a lazy
+    // continuation, so it has to break the paragraph first.
+    default:
+      return `\n\n${prefix ?? ''}`
+  }
+}
+
+/** Whether the buffer sits at the start of a fresh line. */
+export function endsOutputLine(buffer: readonly string[]): boolean {
+  return lastOutputChar(buffer) === NEWLINE_CHAR
+}
+
+// The last character of a list marker: `-`/`*`/`+`, or the `.`/`)` closing an
+// ordered one. Rejects ordinary prose before the backward walk starts.
+export function isListMarkerTail(code: number): boolean {
+  return code === 45 || code === 42 || code === 43 || code === 46 || code === 41
+}
+
+/**
+ * Whether the list marker ending at `fragmentIndex`/`markerIndex` is all its
+ * line holds: optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
+ */
+export function listMarkerLineStart(buffer: string[], fragmentIndex: number, markerIndex: number): boolean {
+  const marker = buffer[fragmentIndex]!.charCodeAt(markerIndex)
+  const ordered = marker === 46 || marker === 41 // . )
+  if (!ordered && marker !== 45 && marker !== 42 && marker !== 43) // - * +
+    return false
+
+  let digits = 0
+  let spaces = 0
+  let fragment = fragmentIndex
+  let cursor = markerIndex
+  for (;;) {
+    if (cursor === 0) {
+      if (--fragment < 0)
+        return !ordered || digits > 0
+      cursor = buffer[fragment]!.length
+      continue
+    }
+    const code = buffer[fragment]!.charCodeAt(--cursor)
+    if (ordered && spaces === 0 && code >= 48 && code <= 57) {
+      if (++digits > 9)
+        return false
+      continue
+    }
+    if (ordered && digits === 0)
+      return false
+    if (code === 32) {
+      if (++spaces > 3)
+        return false
+      continue
+    }
+    return code === 10
+  }
+}
+
+// The rendered number of an ordered list item, honouring `<ol start>`.
+export function orderedItemNumber(list: ElementNode | null | undefined, index: number): number {
+  const raw = list?.attributes?.start
+  if (raw === undefined)
+    return index + 1
+  const start = Number.parseInt(raw, 10)
+  return (Number.isNaN(start) ? 1 : start) + index
 }
 
 function numericReplacement(codePoint: number): string {

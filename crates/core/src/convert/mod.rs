@@ -5,7 +5,8 @@ use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selec
 use crate::tags::get_tag_handler;
 use crate::tailwind::process_tailwind_classes;
 use crate::types::{
-  ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, TagHandler, TailwindData,
+  Attributes, ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, TagHandler,
+  TailwindData,
 };
 use crate::url::{is_autolink_uri, is_empty_link_href, resolve_url, slugify_heading};
 use std::borrow::Cow;
@@ -36,6 +37,20 @@ const GFM_HAZARD_HIGH: u64 = (1 << (b'[' - HAZARD_MASK_SPLIT))
   | (1 << (b'`' - HAZARD_MASK_SPLIT))
   | (1 << (b'~' - HAZARD_MASK_SPLIT));
 
+/// Bytes `escape_gfm_text` must inspect one at a time: escape candidates, line
+/// terminators, and block-marker leads. Every other byte only clears both
+/// trackers, so a run of them collapses to one state update.
+const GFM_TEXT_ACTIVE: [bool; 256] = {
+  let mut t = [false; 256];
+  let active = b"\\*_~`[]|><\n\r#-+.) 0123456789";
+  let mut i = 0usize;
+  while i < active.len() {
+    t[active[i] as usize] = true;
+    i += 1;
+  }
+  t
+};
+
 const BATCHABLE_TEXT: [bool; 256] = {
   let mut t = [false; 256];
   let mut c = 33usize;
@@ -52,16 +67,29 @@ const BATCHABLE_TEXT: [bool; 256] = {
   t
 };
 
-/// Callers must range-guard: bytes >= 128 alias into `GFM_HAZARD_HIGH`.
-#[inline(always)]
-fn is_inline_gfm_hazard(byte: u8) -> bool {
-  let mask = if byte < HAZARD_MASK_SPLIT {
-    GFM_HAZARD_LOW
-  } else {
-    GFM_HAZARD_HIGH
-  };
-  (mask >> (byte & (HAZARD_MASK_SPLIT - 1))) & 1 != 0
-}
+const GFM_HAZARD_BIT: u8 = 1;
+const GFM_NEWLINE_BIT: u8 = 2;
+
+/// Per-byte hazard and newline flags checked on every text-node byte; newlines
+/// fold into `<br>`. A table replaces a range guard plus a shift per byte.
+const INLINE_GFM_HAZARD: [u8; 256] = {
+  let mut t = [0u8; 256];
+  let mut c = 33usize;
+  while c < 0x80 {
+    let mask = if c < HAZARD_MASK_SPLIT as usize {
+      GFM_HAZARD_LOW
+    } else {
+      GFM_HAZARD_HIGH
+    };
+    if (mask >> (c & (HAZARD_MASK_SPLIT as usize - 1))) & 1 != 0 {
+      t[c] = GFM_HAZARD_BIT;
+    }
+    c += 1;
+  }
+  t[b'\n' as usize] |= GFM_NEWLINE_BIT;
+  t[b'\r' as usize] |= GFM_NEWLINE_BIT;
+  t
+};
 
 struct CodeSpanState {
   output_start: usize,
@@ -83,6 +111,58 @@ struct BlockquoteFrame {
 }
 
 static HEADING_PREFIXES: [&str; 6] = ["# ", "## ", "### ", "#### ", "##### ", "###### "];
+
+/// Inline tags whose delimiters are suppressed inside `<pre>` (content only).
+/// `<code>` and `<br>` are absent — already `<pre>`-aware. Sized 256, not
+/// `MAX_TAG_ID`, so a `u8` tag id indexes it without a bounds check.
+const SUPPRESSED_IN_PRE: [bool; 256] = {
+  let mut t = [false; 256];
+  let ids = [
+    TAG_STRONG, TAG_B, TAG_EM, TAG_I, TAG_DEL, TAG_S, TAG_STRIKE, TAG_CITE, TAG_DFN, TAG_KBD,
+    TAG_SAMP, TAG_VAR, TAG_Q, TAG_SUB, TAG_SUP, TAG_INS, TAG_MARK, TAG_ABBR, TAG_SMALL, TAG_U,
+    TAG_TIME, TAG_BDO, TAG_A,
+  ];
+  let mut i = 0;
+  while i < ids.len() {
+    t[ids[i] as usize] = true;
+    i += 1;
+  }
+  t
+};
+
+#[inline]
+fn trailing_spaces(bytes: &[u8]) -> usize {
+  bytes.len()
+    - bytes
+      .iter()
+      .rposition(|byte| *byte != b' ')
+      .map_or(0, |i| i + 1)
+}
+
+/// What the current output line holds where a table row is about to be written.
+enum LineBeforeRow {
+  /// Nothing but block prefix, or a pending list marker.
+  Open,
+  /// A row left open mid-line.
+  Row,
+  /// Other content, so the row needs a block break to become a table.
+  Content,
+}
+
+/// Widest `colspan` honoured.
+const MAX_CELL_SPAN: u8 = 64;
+
+/// `" |"` repeated to `MAX_CELL_SPAN`, so a spanned cell's filler is a slice of
+/// this rather than a string built per cell.
+static SPAN_FILLER: [u8; (MAX_CELL_SPAN as usize - 1) * 2] = {
+  let mut t = [b' '; (MAX_CELL_SPAN as usize - 1) * 2];
+  let mut i = 1;
+  while i < t.len() {
+    t[i] = b'|';
+    i += 2;
+  }
+  t
+};
 
 // Clean mode bitmask flags
 const CLEAN_EMPTY_LINKS: u8 = 1;
@@ -351,6 +431,18 @@ pub struct ConvertState {
   last_content_cache_len: usize,
   table_rendered_table: bool,
   table_current_row_cells: usize,
+  /// A raw-HTML region (`<details>`, `<dl>`, …) stops being raw at the first
+  /// blank line: CommonMark ends an HTML block there and reads what follows as
+  /// Markdown, so text past one needs escaping after all. The scan resumes from
+  /// `raw_html_scanned_to`, so a region costs one pass however many nodes it holds.
+  raw_html_markdown: bool,
+  raw_html_scanned_to: usize,
+  /// Index just past the buffer's last `\n`, and how far it was scanned to find
+  /// it. Recomputing walks the whole line, which is quadratic over a long one.
+  line_start: usize,
+  line_start_scanned_to: usize,
+  /// Columns the delimiter row promised; cells past it would be dropped by GFM.
+  table_header_cells: usize,
   // 0=none, 1=left, 2=center, 3=right
   table_column_alignments: Vec<u8>,
   last_text_node_contains_whitespace: bool,
@@ -426,11 +518,19 @@ pub struct ConvertState {
   /// until the first non-whitespace child so empty/whitespace-only blocks emit
   /// nothing. `pre_fence_pending`: inside a `<pre>` whose fence is undecided.
   /// `pre_fence_lang`: language resolved from the `<pre>`'s own class.
-  /// `pre_own_fence`: the `<pre>` opened its own fence (so a nested `<code>`
-  /// must not, and the `<pre>` exit emits the closing fence).
   pre_fence_pending: bool,
   pre_fence_lang: String,
-  pre_own_fence: bool,
+  /// A fence is open for the current `<pre>`, however it was opened. The `<pre>`
+  /// exit owns the closer, so a `<code>` child's trailing siblings stay in the
+  /// block instead of landing on the fence line.
+  pre_fence_open: bool,
+  /// The open `<li>` wrote its marker onto a line that continues the paragraph
+  /// above, so an empty item would read as a setext underline. `empty_item_len`
+  /// is the buffer length that still means "nothing written since the marker",
+  /// and `empty_item_line_start` where the separating newline goes.
+  empty_item_hazard: bool,
+  empty_item_line_start: usize,
+  empty_item_len: usize,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
 }
@@ -508,6 +608,11 @@ impl ConvertState {
       last_content_cache_len: 0,
       table_rendered_table: false,
       table_current_row_cells: 0,
+      raw_html_markdown: false,
+      raw_html_scanned_to: 0,
+      line_start: 0,
+      line_start_scanned_to: 0,
+      table_header_cells: 0,
       table_column_alignments: Vec::new(),
       last_text_node_contains_whitespace: false,
       last_text_node_depth: 0,
@@ -542,7 +647,10 @@ impl ConvertState {
 
       pre_fence_pending: false,
       pre_fence_lang: String::new(),
-      pre_own_fence: false,
+      pre_fence_open: false,
+      empty_item_hazard: false,
+      empty_item_line_start: 0,
+      empty_item_len: 0,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
     };
@@ -749,7 +857,7 @@ impl ConvertState {
         if cc == AMPERSAND_CHAR {
           self.has_encoded_html_entity = true;
         }
-        if cc > 32 && cc < 0x80 && is_inline_gfm_hazard(cc) {
+        if INLINE_GFM_HAZARD[cc as usize] & GFM_HAZARD_BIT != 0 {
           self.text_buffer_has_inline_gfm_hazard = true;
         }
 
@@ -1333,6 +1441,12 @@ impl ConvertState {
     if let Some(frame) = self.blockquotes.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, frame.content_start));
     }
+    // Settle a pending marker-line guard when the item's first content already
+    // answers it, so the hold below never outlives the marker's own line.
+    self.resolve_item_marker(false);
+    if self.empty_item_hazard {
+      drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
+    }
     if drain_end == 0 {
       return;
     }
@@ -1370,6 +1484,13 @@ impl ConvertState {
     for frame in &mut self.blockquotes {
       frame.content_start -= drain_end;
     }
+    self.empty_item_line_start = self.empty_item_line_start.saturating_sub(drain_end);
+    self.empty_item_len = self.empty_item_len.saturating_sub(drain_end);
+    // Buffer-indexed like every other stored offset: left alone, streaming reads
+    // a different line start than one-shot.
+    self.raw_html_scanned_to = self.raw_html_scanned_to.saturating_sub(drain_end);
+    self.line_start = self.line_start.saturating_sub(drain_end);
+    self.line_start_scanned_to = self.line_start_scanned_to.saturating_sub(drain_end);
   }
 }
 

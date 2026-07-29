@@ -166,6 +166,10 @@ const DL_SCOPE_BOUNDARY: [bool; 256] = tag_set(&[
   TAG_HTML,
 ]);
 
+/// Where a row-recovery scan stops: the table itself, and the contexts that hold
+/// their own table structure.
+const ROW_SCOPE_BOUNDARY: [bool; 256] = tag_set(&[TAG_TABLE, TAG_TEMPLATE, TAG_CAPTION]);
+
 /// "Table cell scope" terminators: a new `<td>`/`<th>` closes the current cell
 /// (and any inline content left open inside it), stopping at the row/section.
 const CELL_SCOPE_BOUNDARY: [bool; 256] = tag_set(&[
@@ -405,6 +409,7 @@ impl ConvertState {
       excludes_text_nodes: handler.excludes_text_nodes,
       is_non_nesting: handler.is_non_nesting,
       collapses_inner_white_space: handler.collapses_inner_white_space,
+      cell_span: 0,
       spacing: handler.spacing,
     };
     if self.has_tailwind
@@ -652,11 +657,25 @@ impl ConvertState {
       self.clear_overflow();
     }
 
-    while let Some(top) = self.stack.last() {
-      match top.tag_id {
-        Some(id) if closeable[id as usize] => self.close_node(),
+    // One reverse pass, as in `close_implied_to`: re-deciding after each close
+    // walks the stack once per closed node.
+    let mut close_count = 0usize;
+    let mut walked = 0usize;
+    for node in self.stack.iter().rev() {
+      match node.tag_id {
+        Some(id) if closeable[id as usize] => {
+          walked += 1;
+          close_count = walked;
+        }
+        // Content left open inside a cell (`<td><p>text` with no `</p>`) sits
+        // above the closeable element and closes with it; stopping here would
+        // leave the new row nested inside the old cell.
+        Some(id) if !ROW_SCOPE_BOUNDARY[id as usize] => walked += 1,
         _ => break,
       }
+    }
+    for _ in 0..close_count {
+      self.close_node();
     }
   }
 
@@ -733,7 +752,7 @@ impl ConvertState {
       } else {
         tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
       };
-    let (complete, new_position, attributes, self_closing) =
+    let (complete, new_position, attributes, self_closing, cell_span) =
       process_tag_attributes(html_chunk, position, tag_handler, attr_mask);
 
     if !complete {
@@ -983,12 +1002,14 @@ impl ConvertState {
       pooled.excludes_text_nodes = h_excludes;
       pooled.is_non_nesting = h_non_nesting;
       pooled.collapses_inner_white_space = h_collapses;
+      pooled.cell_span = cell_span;
       pooled.spacing = h_spacing;
       pooled
     } else {
       ElementNode {
         custom_name,
         attributes,
+        cell_span,
         tag_id,
         depth: self.depth,
         index: current_walk_index,
@@ -1225,7 +1246,9 @@ impl ConvertState {
         let stack_len = self.stack.len();
         let parent_is_ordered = stack_len >= 2 && self.stack[stack_len - 2].tag_id == Some(TAG_OL);
         if parent_is_ordered {
-          let n = li.index + 1;
+          // Must match the marker actually written, `start` included, or the
+          // item's continuation content drifts out of it.
+          let n = Self::ordered_item_number(&self.stack[stack_len - 2], li.index).max(1);
           // n >= 1 so ilog10 never panics; +1 converts floor(log10) to digit count.
           let digits = (n.ilog10() + 1) as usize;
           digits + 2

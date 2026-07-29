@@ -6,6 +6,7 @@ import {
   MARKDOWN_CODE_BLOCK,
   MARKDOWN_EMPHASIS,
   MARKDOWN_HORIZONTAL_RULE,
+  MARKDOWN_HORIZONTAL_RULE_ALT,
   MARKDOWN_INLINE_CODE,
   MARKDOWN_STRIKETHROUGH,
   MARKDOWN_STRONG,
@@ -26,6 +27,7 @@ import {
   TAG_BR,
   TAG_BUTTON,
   TAG_CANVAS,
+  TAG_CAPTION,
   TAG_CENTER,
   TAG_CITE,
   TAG_CODE,
@@ -122,7 +124,7 @@ import {
   TAG_XMP,
   TagIdMap,
 } from './const'
-import { continuationPrefix, getLanguageFromClass, isEmptyLinkHref } from './utils'
+import { blockOpenPrefix, continuationPrefix, endsOutputLine, fenceLanguage, isEmptyLinkHref, listMarkerLineStart, orderedItemNumber } from './utils'
 
 const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
 const URL_SCHEME_RE = /^[\dA-Z+.-]+:/i
@@ -248,18 +250,154 @@ export const breakHandler: TagHandler = {
   isInline: true,
 }
 
+// A `#` run closing a heading is an ATX closing sequence and is dropped by the
+// renderer, so the last one is escaped back into content.
+function escapeTrailingHeadingHashes(buffer: string[]): void {
+  let index = buffer.length - 1
+  while (index >= 0 && buffer[index] === '')
+    index--
+  if (index < 0)
+    return
+
+  const entry = buffer[index]!
+  let end = entry.length
+  while (end > 0 && (entry[end - 1] === ' ' || entry[end - 1] === '\t'))
+    end--
+  let run = end
+  while (run > 0 && entry[run - 1] === '#')
+    run--
+  if (run === end)
+    return
+
+  // Only a run opening the heading content or preceded by whitespace closes it.
+  // Requiring a space also rejects the `## ` prefix entry of an empty heading.
+  const previous = buffer[index - 1]
+  const before = run > 0 ? entry[run - 1] : previous?.charAt(previous.length - 1)
+  if (before !== ' ' && before !== '\t')
+    return
+
+  buffer[index] = `${entry.slice(0, run)}\\${entry.slice(run)}`
+}
+
+// What the current output line holds where a table row is about to be written.
+const LINE_OPEN = 0 // nothing but block prefix, or a pending list marker
+const LINE_ROW = 1 // a row left open mid-line
+const LINE_CONTENT = 2 // other content, so the row needs a block break
+
+// A row must open its own line at the item's content column: sharing one with
+// preceding content (a `<caption>`) leaves the header as prose and the
+// delimiter row never forms a table.
+function lineStateBeforeRow(buffer: string[]): number {
+  let fragment = buffer.length - 1
+  while (fragment >= 0 && buffer[fragment]!.length === 0)
+    fragment--
+  if (fragment < 0)
+    return LINE_OPEN
+  // Rows end their line, so the row after a row decides on one character and
+  // never rescans the line it just wrote.
+  const tail = buffer[fragment]!
+  if (tail.charCodeAt(tail.length - 1) === 10)
+    return LINE_OPEN
+
+  let firstNonSpace = -1
+  let markerFragment = -1
+  let markerIndex = -1
+  let cursor = tail.length
+  for (;;) {
+    if (cursor === 0) {
+      if (--fragment < 0)
+        break
+      cursor = buffer[fragment]!.length
+      continue
+    }
+    const code = buffer[fragment]!.charCodeAt(--cursor)
+    if (code === 10)
+      break
+    if (code !== 32 && code !== 9) {
+      firstNonSpace = code
+      if (markerFragment < 0) {
+        markerFragment = fragment
+        markerIndex = cursor
+      }
+    }
+  }
+
+  if (firstNonSpace === -1)
+    return LINE_OPEN
+  // A row already open only needs its line broken, not a new block.
+  if (firstNonSpace === 124) // |
+    return LINE_ROW
+  // A pending list marker is block prefix, not content: a table's first row
+  // belongs on it.
+  return listMarkerLineStart(buffer, markerFragment, markerIndex) ? LINE_OPEN : LINE_CONTENT
+}
+
+// A row's own line at the enclosing list item's content column. Outside a list
+// the marker is constant, which covers most tables.
+function rowMarker(state: HandlerContext['state']): string {
+  const indent = state.listIndent
+  const lineState = lineStateBeforeRow(state.buffer)
+  if (!indent) {
+    return lineState === LINE_ROW ? '\n| ' : lineState === LINE_CONTENT ? '\n\n| ' : '| '
+  }
+  switch (lineState) {
+    case LINE_ROW:
+      return `\n${indent}| `
+    case LINE_CONTENT:
+      return `\n\n${indent}| `
+    default:
+      // A pending list marker already supplies the column; only a fresh line
+      // needs the indent written.
+      return endsOutputLine(state.buffer) ? `${indent}| ` : '| '
+  }
+}
+
+const MAX_CELL_SPAN = 64
+
+// GFM has no `colspan`: a spanned cell is written as its content followed by empty
+// cells, or the delimiter row is too narrow and GFM drops every cell past it.
+function cellSpan(node: HandlerContext['node']): number {
+  const raw = (node as { attributes?: Record<string, string> }).attributes?.colspan
+  if (raw === undefined)
+    return 1
+  const span = Number.parseInt(raw, 10)
+  return span > 1 ? Math.min(span, MAX_CELL_SPAN) : 1
+}
+
+// Whether the cell about to open sits past the width the delimiter promised.
+function cellOverflowsHeader(state: HandlerContext['state']): boolean {
+  const header = state.tableHeaderCells || 0
+  return header > 0 && (state.tableCurrentRowCells || 0) >= header
+}
+
+function cellEnter(node: HandlerContext['node'], state: HandlerContext['state']): string {
+  if (node.index === 0)
+    return ''
+  // GFM discards cells past the delimiter row's width, so this one folds into
+  // the previous cell rather than vanishing.
+  return cellOverflowsHeader(state) ? ' ' : ' | '
+}
+
+function cellExit(node: HandlerContext['node'], state: HandlerContext['state']): string | undefined {
+  const span = cellSpan(node)
+  state.tableCurrentRowCells! += span
+  return span > 1 ? ' |'.repeat(span - 1) : undefined
+}
+
 function handleHeading(depth: number): TagHandler {
   return {
+    // A `#` prefix needs its own line, which a GFM row cannot give it.
     enter: ({ state }) => {
-      if ((state.depthMap?.[TAG_A] || 0) > 0) {
+      if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {
         return `<h${depth}>`
       }
       return `${'#'.repeat(depth)} `
     },
     exit: ({ state }) => {
-      if ((state.depthMap?.[TAG_A] || 0) > 0) {
+      if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {
         return `</h${depth}>`
       }
+      escapeTrailingHeadingHashes(state.buffer)
     },
     collapsesInnerWhiteSpace: true,
   }
@@ -368,7 +506,28 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_H5]: handleHeading(5),
   [TAG_H6]: handleHeading(6),
   [TAG_HR]: {
-    enter: () => MARKDOWN_HORIZONTAL_RULE,
+    enter: ({ node, state }) => {
+      // A thematic break cannot end a GFM row; raw <hr> can sit in a cell.
+      if (isInsideTableCell(state))
+        return '<hr>'
+      // `continuationPrefix` allocates an ancestor chain, so only a rule that
+      // can actually carry a prefix asks for one.
+      if (!(state.depthMap?.[TAG_LI] || state.bufferedBlockquoteDepth))
+        return MARKDOWN_HORIZONTAL_RULE
+      const prefix = continuationPrefix(
+        node,
+        state.listIndentWidths || [],
+        !state.bufferedBlockquoteDepth,
+      )
+      if (!prefix)
+        return MARKDOWN_HORIZONTAL_RULE
+      const open = blockOpenPrefix(state.buffer, prefix)
+      // Sharing the marker's line, where `---` would make the whole line a
+      // thematic break and take the item with it.
+      return open === undefined
+        ? MARKDOWN_HORIZONTAL_RULE_ALT
+        : `${open}${MARKDOWN_HORIZONTAL_RULE}`
+    },
     isSelfClosing: true,
   },
   [TAG_STRONG]: Strong,
@@ -422,7 +581,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
       return {
         _tag: 'PreEnter',
-        language: getLanguageFromClass(node.attributes?.class),
+        language: fenceLanguage(node.attributes),
       }
     },
     exit: ({ state }) => {
@@ -440,19 +599,22 @@ export const tagHandlers: Record<number, TagHandler> = {
         if (isInsideTableCell(state)) {
           return '<code>'
         }
-        // The enclosing <pre> already opened its own fence (e.g. <pre> with
-        // mixed text and <code> children); don't emit a nested fence.
-        if (state.preOwnFence) {
+        // A fence is already open for this <pre>: the <pre> opened it (mixed text
+        // + <code> children) or an earlier <code> sibling did.
+        if (state.preFenceOpen) {
           return undefined
         }
-        const language = getLanguageFromClass(node.attributes?.class)
+        const language = fenceLanguage(node.attributes)
         const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent
+          // A blank line between the marker and the fence ends the item, leaving
+          // the block a sibling of the list.
+          const open = blockOpenPrefix(state.buffer, indent) ?? ''
           return {
             _tag: 'CodeFenceEnter',
             language,
-            output: `\n\n${indent}${MARKDOWN_CODE_BLOCK}${language}\n`,
+            output: `${open}${MARKDOWN_CODE_BLOCK}${language}\n`,
           }
         }
         return {
@@ -489,19 +651,9 @@ export const tagHandlers: Record<number, TagHandler> = {
         if (isInsideTableCell(state)) {
           return '</code>'
         }
-        // The enclosing <pre> owns the fence; this <code> emitted no opener.
-        if (state.preOwnFence) {
-          return undefined
-        }
-        const liDepth = state.depthMap?.[TAG_LI] || 0
-        if (liDepth > 0) {
-          const indent = state.listIndent
-          return {
-            _tag: 'CodeFenceExit',
-            output: `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`,
-          }
-        }
-        return { _tag: 'CodeFenceExit', output: `\n${MARKDOWN_CODE_BLOCK}` }
+        // The <pre> exit owns the closing fence, so a text sibling after this
+        // </code> still lands inside the block.
+        return undefined
       }
       if (isInsideRawHtmlBlock(state.depthMap!)) {
         return '</code>'
@@ -531,7 +683,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       // is pushed onto state.listIndent after the enter output is written
       // (see markdown-processor.ts).
       const isOrdered = node.parent?.tagId === TAG_OL
-      const marker = isOrdered ? `${node.index + 1}. ` : '- '
+      const marker = isOrdered ? `${orderedItemNumber(node.parent, node.index)}. ` : '- '
       return `${state.listIndent}${marker}`
     },
     exit: ({ state }) => isInsideTableCell(state) ? '</li>' : undefined,
@@ -609,8 +761,19 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
       // Initialize table state
       state.tableColumnAlignments = []
+      state.tableHeaderCells = 0
     },
     exit: ({ state }) => isInsideTableCell(state) ? '</table>' : undefined,
+  },
+  // Inside a list item nothing else writes the caption's content column: glued to
+  // preceding text it swallows the table's first row, and at column 0 it takes the
+  // table out of the item.
+  [TAG_CAPTION]: {
+    enter: ({ state }) => {
+      if ((state.depthMap?.[TAG_LI] || 0) === 0 || isInsideTableCell(state))
+        return undefined
+      return blockOpenPrefix(state.buffer, state.listIndent)
+    },
   },
   [TAG_THEAD]: {
     enter: ({ state }) => {
@@ -628,7 +791,7 @@ export const tagHandlers: Record<number, TagHandler> = {
         return '<tr>'
       }
       state.tableCurrentRowCells = 0
-      return '| '
+      return rowMarker(state)
     },
     exit: ({ state }) => {
       if (isInsideTableCell(state) || (state.depthMap?.[TAG_TABLE] || 0) > 1) {
@@ -655,7 +818,9 @@ export const tagHandlers: Record<number, TagHandler> = {
           }
         })
 
-        return ` |\n| ${alignmentMarkers.join(' | ')} |`
+        state.tableHeaderCells = alignments.length
+        const indent = (state.depthMap?.[TAG_LI] || 0) > 0 ? state.listIndent : ''
+        return ` |\n${indent}| ${alignmentMarkers.join(' | ')} |`
       }
 
       return ' |'
@@ -678,13 +843,13 @@ export const tagHandlers: Record<number, TagHandler> = {
         state.tableColumnAlignments!.push('')
       }
 
-      return node.index === 0 ? '' : ' | '
+      return cellEnter(node, state)
     },
-    exit: ({ state }) => {
+    exit: ({ node, state }) => {
       if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '</th>'
       }
-      state.tableCurrentRowCells!++
+      return cellExit(node, state)
     },
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
@@ -694,13 +859,13 @@ export const tagHandlers: Record<number, TagHandler> = {
       if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '<td>'
       }
-      return node.index === 0 ? '' : ' | '
+      return cellEnter(node, state)
     },
-    exit: ({ state }) => {
+    exit: ({ node, state }) => {
       if ((state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '</td>'
       }
-      state.tableCurrentRowCells!++
+      return cellExit(node, state)
     },
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,

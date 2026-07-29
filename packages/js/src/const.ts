@@ -247,6 +247,9 @@ export const MARKDOWN_STRIKETHROUGH = '~~'
 export const MARKDOWN_CODE_BLOCK = '```'
 export const MARKDOWN_INLINE_CODE = '`'
 export const MARKDOWN_HORIZONTAL_RULE = '---'
+// Rule sharing a line with a list marker: `- ---` is dashes and spaces only, so
+// the whole line is a thematic break and the item is lost. `*` cannot collide.
+export const MARKDOWN_HORIZONTAL_RULE_ALT = '***'
 
 // Raw-HTML blocks whose text/code is emitted verbatim rather than as Markdown.
 export function isInsideRawHtmlBlock(depthMap: Uint16Array): boolean {
@@ -257,6 +260,12 @@ export function isInsideRawHtmlBlock(depthMap: Uint16Array): boolean {
     || depthMap[TAG_DT]
     || depthMap[TAG_DD])
 }
+
+// Code units for hot-path scanners, compared instead of one-character strings.
+export const TAB_CHAR = 9
+export const NEWLINE_CHAR = 10
+export const CARRIAGE_RETURN_CHAR = 13
+export const SPACE_CHAR = 32
 
 // Newline configurations
 export const NO_SPACING: readonly [number, number] = [0, 0]
