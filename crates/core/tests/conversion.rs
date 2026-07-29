@@ -2349,6 +2349,71 @@ fn clean_strips_executable_link_schemes_case_insensitively() {
 }
 
 #[test]
+fn clean_strips_link_schemes_through_url_preprocessing() {
+  // `url::tests` covers the predicate exhaustively; these pin the wiring for
+  // each mechanism. All are an executable scheme to a browser.
+  for href in [
+    " javascript:void(0)",
+    "\u{1}javascript:void(0)",
+    "java\tscript:void(0)",
+    " data:text/html,payload",
+    "\tVbScRiPt:msgbox(1)",
+  ] {
+    assert_eq!(
+      convert_with_clean(&format!(r#"<a href="{href}">Click</a>"#), clean_all()),
+      "Click",
+      "expected clean.empty_links to strip {href:?}"
+    );
+  }
+}
+
+#[test]
+fn clean_strips_entity_encoded_link_schemes() {
+  // Attribute entities are decoded before the href is inspected. This is the
+  // form these take in real documents.
+  for href in [
+    "java&#9;script:void(0)",
+    "java&#10;script:void(0)",
+    "java&#13;script:void(0)",
+    "&#32;javascript:void(0)",
+  ] {
+    assert_eq!(
+      convert_with_clean(&format!(r#"<a href="{href}">Click</a>"#), clean_all()),
+      "Click",
+      "expected clean.empty_links to strip {href}"
+    );
+  }
+}
+
+#[test]
+fn clean_strips_bare_hash_surrounded_by_whitespace() {
+  for href in [" # ", "#\t", "\t#"] {
+    assert_eq!(
+      convert_with_clean(&format!(r#"<a href="{href}">Link</a>"#), clean_all()),
+      "Link",
+      "expected clean.empty_links to strip {href:?}"
+    );
+  }
+}
+
+#[test]
+fn clean_keeps_links_that_only_look_like_executable_schemes() {
+  // An interior space is not removed, so the scheme is not `javascript:`.
+  for (href, expected) in [
+    ("java script:x", "[Keep](<java script:x>)"),
+    ("notjavascript:x", "[Keep](notjavascript:x)"),
+    ("/javascript/guide", "[Keep](/javascript/guide)"),
+    ("https://x.com/a", "[Keep](https://x.com/a)"),
+  ] {
+    assert_eq!(
+      convert_with_clean(&format!(r#"<a href="{href}">Keep</a>"#), clean_all()),
+      expected,
+      "expected clean.empty_links to keep {href:?}"
+    );
+  }
+}
+
+#[test]
 fn clean_strips_broken_fragment() {
   assert_eq!(
     convert_with_clean(r##"<a href="#nonexistent">Link</a>"##, clean_all()),

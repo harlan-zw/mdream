@@ -8,7 +8,7 @@ use crate::types::{
   ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, ParsedSelector, TagHandler,
   TailwindData,
 };
-use crate::url::{is_autolink_uri, resolve_url, slugify_heading};
+use crate::url::{is_autolink_uri, is_empty_link_href, resolve_url, slugify_heading};
 use std::borrow::Cow;
 
 mod output;

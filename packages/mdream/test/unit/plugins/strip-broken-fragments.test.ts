@@ -149,6 +149,59 @@ describe.each(engines)('clean $name', (engineConfig) => {
       const md = htmlToMarkdown(html, { engine, ...opts })
       expect(md).toBe('[Link](#section)')
     })
+
+    // All of these are the `javascript:` scheme to a browser.
+    it.each([
+      ' javascript:void(0)',
+      '\tjavascript:void(0)',
+      '\njavascript:void(0)',
+      '\u0001javascript:void(0)',
+      'java\tscript:void(0)',
+      'java\nscript:void(0)',
+      'java\rscript:void(0)',
+      ' java\tscript:void(0)',
+      ' data:text/html,payload',
+      'da\tta:text/html,payload',
+      ' vbscript:msgbox(1)',
+      '\tVbScRiPt:msgbox(1)',
+    ])('strips %j', async (href) => {
+      const engine = await resolveEngine(engineConfig.engine)
+      const md = htmlToMarkdown(`<a href="${href}">Click</a>`, { engine, ...opts })
+      expect(md).toBe('Click')
+    })
+
+    // Entity-encoded controls are the form these actually take in real HTML.
+    it.each([
+      'java&#9;script:void(0)',
+      'java&#10;script:void(0)',
+      'java&#13;script:void(0)',
+      '&#32;javascript:void(0)',
+    ])('strips the decoded form of %s', async (href) => {
+      const engine = await resolveEngine(engineConfig.engine)
+      const md = htmlToMarkdown(`<a href="${href}">Click</a>`, { engine, ...opts })
+      expect(md).toBe('Click')
+    })
+
+    it('strips a bare # surrounded by whitespace', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
+      for (const href of [' # ', '#\t', '\t#']) {
+        const md = htmlToMarkdown(`<a href="${href}">Link</a>`, { engine, ...opts })
+        expect(md, href).toBe('Link')
+      }
+    })
+
+    // An interior space is NOT removed, so these stay links.
+    it.each([
+      ['java script:x', '[Keep](<java script:x>)'],
+      ['notjavascript:x', '[Keep](notjavascript:x)'],
+      ['/javascript/guide', '[Keep](/javascript/guide)'],
+      ['https://x.com/a', '[Keep](https://x.com/a)'],
+      ['#section', '[Keep](#section)'],
+    ])('keeps %j', async (href, expected) => {
+      const engine = await resolveEngine(engineConfig.engine)
+      const md = htmlToMarkdown(`<a href="${href}">Keep</a>`, { engine, ...opts })
+      expect(md).toBe(expected)
+    })
   })
 
   describe('disabled by default', () => {
