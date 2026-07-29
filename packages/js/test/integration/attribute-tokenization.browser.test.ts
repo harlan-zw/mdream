@@ -18,6 +18,8 @@ describe('html attribute browser parity', () => {
     String.raw`href="x\\" title=t`,
     String.raw`href="a\b"`,
     `alt=Bob's src=/i.png`,
+    `href=/a/b/ title=t`,
+    `href=/first HREF=/second`,
   ])('matches Chromium for %s', (source) => {
     expect(parseAttributes(source)).toEqual(browserAttributes(source))
   })

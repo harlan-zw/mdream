@@ -28,6 +28,10 @@ describe('html attribute tokenization', () => {
       `alt=Bob's src=/i.png`,
       { alt: `Bob's`, src: '/i.png' },
     ],
+    [
+      `href=/first HREF=/second`,
+      { href: '/first' },
+    ],
   ])('treats backslashes and quotes as HTML does for %s', (source, expected) => {
     expect(parseAttributes(source)).toEqual(expected)
   })
@@ -48,6 +52,10 @@ describe('html attribute tokenization', () => {
     [
       `<p>ok</p><img alt=Bob's src=/i.png><p>after</p>`,
       `ok\n\n![Bob's](/i.png)\n\nafter`,
+    ],
+    [
+      `<a href=/a/b/>link</a>`,
+      `[link](/a/b/)`,
     ],
   ])('keeps conversion aligned with browser attributes for %s', (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)

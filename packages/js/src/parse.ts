@@ -1890,8 +1890,12 @@ function setAttribute(
   if (!rawName)
     return attributes
 
+  const name = rawName.toLowerCase()
+  if (Object.hasOwn(attributes, name))
+    return attributes
+
   const result = attributes === EMPTY_ATTRIBUTES ? {} : attributes
-  result[rawName.toLowerCase()] = rawValue.includes('&')
+  result[name] = rawValue.includes('&')
     ? decodeHTMLEntities(rawValue, true)
     : rawValue
   return result
@@ -1918,7 +1922,8 @@ function scanAttributes(
     const charCode = source.charCodeAt(i)
 
     if (stopAtTagEnd && state !== ATTRIBUTE_QUOTED_VALUE) {
-      if (charCode === SLASH_CHAR
+      if (state !== ATTRIBUTE_UNQUOTED_VALUE
+        && charCode === SLASH_CHAR
         && i + 1 < length
         && source.charCodeAt(i + 1) === GT_CHAR) {
         selfClosing = true
