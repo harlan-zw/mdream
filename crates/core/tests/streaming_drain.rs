@@ -827,3 +827,22 @@ fn streaming_text_whitespace_batching_matches_every_split() {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
 }
+
+// A `<br>`'s hard break, trimmed off when the inline element closes, can be the
+// whole buffer after a drain, so the trim empties it and the pending separator
+// was suppressed as if this were the start of output. Each case needs a block
+// inside the inline element for the drain to reach that far, and content after
+// the close to want the separator.
+#[test]
+fn streaming_pending_space_after_drained_hard_break_matches_one_shot() {
+  for html in [
+    "<span><p></p>x<br>\n</span>a",
+    "<span><hr>x<br> </span>a",
+    "<ul><li><span><p></p>x<br>\n</span>a</li></ul>",
+    // A link's `[` is generated markdown, resolved at the other call site.
+    "<p><span><em>x</em><br /> </span><a href=\"u\">a",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}

@@ -1055,7 +1055,7 @@ impl ConvertState {
       if text.as_bytes().iter().all(|&b| is_whitespace(b)) {
         return;
       }
-      let last = self.buffer.as_bytes().last().copied();
+      let last = self.last_output_byte();
       let first = text.as_bytes()[0];
       if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
         self.buffer.push(' ');
@@ -1542,6 +1542,18 @@ impl ConvertState {
       floor = floor.max(frame.content_start);
     }
     floor
+  }
+
+  /// Byte the next output will follow, or `None` only at the true start of
+  /// output. Draining, or a rewrite that trims what draining retained, can empty
+  /// the buffer mid-document; `flushed_tail` then holds the bytes before it.
+  #[inline]
+  fn last_output_byte(&self) -> Option<u8> {
+    match self.buffer.as_bytes().last().copied() {
+      Some(byte) => Some(byte),
+      None if self.has_streamed_output => Some(self.flushed_tail[1]),
+      None => None,
+    }
   }
 
   #[inline]
@@ -2194,7 +2206,7 @@ impl ConvertState {
       {
         self.pending_inline_whitespace = false;
       } else if let Some(first) = first_output {
-        let last = self.buffer.as_bytes().last().copied();
+        let last = self.last_output_byte();
         if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
           self.buffer.push(' ');
         }
@@ -2505,6 +2517,22 @@ mod tests {
     state.write_output(true, false, 2, Some("next"), false);
 
     assert_eq!(state.buffer, "next");
+  }
+
+  // Draining, and then a rewrite trimming what draining retained, leaves the
+  // buffer empty mid-document; only a buffer nothing has streamed past is the
+  // start of output.
+  #[test]
+  fn last_output_byte_sees_through_a_drain() {
+    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    assert_eq!(state.last_output_byte(), None);
+
+    state.has_streamed_output = true;
+    state.flushed_tail = *b"xy";
+    assert_eq!(state.last_output_byte(), Some(b'y'));
+
+    state.buffer.push('z');
+    assert_eq!(state.last_output_byte(), Some(b'z'));
   }
 
   #[test]
