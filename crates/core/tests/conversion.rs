@@ -886,6 +886,29 @@ fn nested_blockquotes() {
   assert!(result.contains("> > Inner"));
 }
 
+// Text before an immediately nested blockquote leaves the outer frame anchored at the
+// buffer end, which the separator collapse stranded; the outer quote then rendered one
+// byte too far in, as `>>` with a doubled space.
+#[test]
+fn nested_blockquotes_after_text_quote_both_levels() {
+  assert_eq!(
+    convert("Lead<blockquote><blockquote>Inner</blockquote></blockquote>"),
+    "Lead\n> > Inner"
+  );
+  assert_eq!(
+    convert("Lead<blockquote><blockquote><blockquote>Deep</blockquote></blockquote></blockquote>"),
+    "Lead\n> > > Deep"
+  );
+  // Strands two frames at once; rebasing only the innermost glues the outer marker
+  // to the next one.
+  assert_eq!(
+    convert(
+      "<pre><blockquote><br><blockquote><blockquote>x</blockquote></blockquote></blockquote></pre>"
+    ),
+    "```\n> > > x\n\n\n```"
+  );
+}
+
 #[test]
 fn blockquote_with_paragraphs() {
   assert_eq!(

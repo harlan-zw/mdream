@@ -534,6 +534,11 @@ impl ConvertState {
     if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
       if !self.blockquotes.is_empty() && self.buffer.ends_with("\n\n") {
         self.buffer.pop();
+        // Frames anchored at the old end move with the popped byte. Siblings can
+        // share an offset, so this is not only the innermost. See `trim_floor`.
+        for frame in &mut self.blockquotes {
+          frame.content_start = frame.content_start.min(self.buffer.len());
+        }
       }
       self.blockquotes.push(BlockquoteFrame {
         content_start: self.buffer.len(),

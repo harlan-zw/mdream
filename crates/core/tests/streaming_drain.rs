@@ -206,6 +206,35 @@ fn streaming_blockquote_structure_matches_every_split() {
   }
 }
 
+// The nested-separator collapse stranded `content_start` past the buffer end, which
+// panicked when streaming picked a yield boundary. Needs leading text so a drain
+// rebases first, and no text between the opens so the outer frame is still empty.
+#[test]
+fn streaming_nested_blockquote_separator_collapse_matches_one_shot() {
+  for html in [
+    "a<blockquote><blockquote>",
+    "a<blockquote><blockquote>x",
+    "a<blockquote><blockquote></blockquote></blockquote>",
+    "a<blockquote><blockquote>b</blockquote></blockquote>",
+    // Any block open as the inner element.
+    "a<blockquote><div><blockquote>",
+    "a<blockquote><blockquote><blockquote><blockquote>d",
+    // Strands two frames at once, so rebasing only the innermost still panics.
+    "<pre><blockquote><br><blockquote><blockquote>",
+    // A list indent makes `content_start` non-zero within the line.
+    "<ul><li>a<blockquote><blockquote>x</blockquote></blockquote></li></ul>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(
+      html,
+      HTMLToMarkdownOptions {
+        clean: Some(safe_clean()),
+        ..Default::default()
+      },
+    );
+  }
+}
+
 #[test]
 fn streaming_large_nested_blockquote_drains_without_changing_output() {
   let mut html = String::from("<blockquote><blockquote><blockquote>");
