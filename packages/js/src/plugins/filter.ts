@@ -76,6 +76,10 @@ export function filterPlugin(options: {
   // the parent (set on enter, before children), so isHidden() runs once per
   // element instead of being re-evaluated for every ancestor of every node.
   const skippedSubtrees = new WeakSet<ElementNode>()
+  // Include filtering may skip an element while still allowing a matching
+  // descendant. Track those elements separately so only their direct text is
+  // skipped instead of incorrectly hiding the whole subtree.
+  const skippedByInclude = new WeakSet<ElementNode>()
 
   function excludesSubtree(element: ElementNode): boolean {
     if (skippedSubtrees.has(element))
@@ -104,6 +108,11 @@ export function filterPlugin(options: {
         // Hidden propagates to the immediate parent, so one lookup covers all ancestors.
         if (parent && skippedSubtrees.has(parent)) {
           return { skip: true }
+        }
+        if (parent && skippedByInclude.has(parent)) {
+          // Keep the node visible to downstream hooks (notably extraction),
+          // while preventing the Markdown processor from rendering it.
+          textNode.excludedFromMarkdown = true
         }
         return
       }
@@ -136,6 +145,7 @@ export function filterPlugin(options: {
         }
 
         // If we have include selectors but nothing matched, exclude this element
+        skippedByInclude.add(element)
         return { skip: true }
       }
     },

@@ -151,18 +151,23 @@ export function createCompoundSelector(selectors: SelectorMatcher[]): SelectorMa
 }
 
 /**
- * Parses a CSS selector into a matcher
+ * Creates a selector-list matcher (e.g., 'h1, h2')
  */
-export function parseSelector(selector: string): SelectorMatcher {
-  // Remove whitespace
-  selector = selector.trim()
-
-  if (!selector) {
-    throw new Error('Empty selector')
+function createSelectorList(selectors: SelectorMatcher[]): SelectorMatcher {
+  return {
+    matches(element) {
+      for (let i = 0; i < selectors.length; i++) {
+        if (selectors[i]!.matches(element))
+          return true
+      }
+      return false
+    },
+    toString: () => selectors.map(s => s.toString()).join(', '),
   }
+}
 
-  // Handle compound selectors (without spaces/combinators for now)
-  // This supports basic compound selectors like "div.class#id[attr=val]"
+/** Parses one compound selector without list separators. */
+function parseCompoundSelector(selector: string): SelectorMatcher {
   const selectorParts: SelectorMatcher[] = []
   let current = ''
   let inAttribute = false
@@ -226,4 +231,65 @@ export function parseSelector(selector: string): SelectorMatcher {
 
   // Otherwise, return a compound selector
   return createCompoundSelector(selectorParts)
+}
+
+/**
+ * Parses a CSS selector into a matcher
+ */
+export function parseSelector(selector: string): SelectorMatcher {
+  selector = selector.trim()
+
+  if (!selector) {
+    throw new Error('Empty selector')
+  }
+
+  // Split selector lists on commas outside attribute values. The configured
+  // selector remains intact in extraction results; this only expands matching.
+  const selectors: SelectorMatcher[] = []
+  let start = 0
+  let inAttribute = false
+  let quote = 0
+  let escaped = false
+
+  for (let i = 0; i < selector.length; i++) {
+    const char = selector.charCodeAt(i)
+    if (quote) {
+      if (escaped) {
+        escaped = false
+      }
+      else if (char === 92 /* \ */) {
+        escaped = true
+      }
+      else if (char === quote) {
+        quote = 0
+      }
+      continue
+    }
+    if (inAttribute) {
+      if (char === 34 /* " */ || char === 39 /* ' */)
+        quote = char
+      else if (char === 93 /* ] */)
+        inAttribute = false
+      continue
+    }
+    if (char === 91 /* [ */) {
+      inAttribute = true
+    }
+    else if (char === 44 /* , */) {
+      const part = selector.slice(start, i).trim()
+      if (!part)
+        return createTagSelector(selector)
+      selectors.push(parseCompoundSelector(part))
+      start = i + 1
+    }
+  }
+
+  if (!selectors.length)
+    return parseCompoundSelector(selector)
+
+  const last = selector.slice(start).trim()
+  if (!last)
+    return createTagSelector(selector)
+  selectors.push(parseCompoundSelector(last))
+  return createSelectorList(selectors)
 }

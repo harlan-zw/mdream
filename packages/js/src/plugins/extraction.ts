@@ -6,8 +6,10 @@ export interface ExtractedElement extends ElementNode {
   textContent: string
 }
 
+type ExtractionCallback = (element: ExtractedElement, state: MdreamRuntimeState) => void
+
 /** Extract matching elements through the composable JavaScript plugin interface. */
-export function extractionPlugin(selectors: Record<string, (element: ExtractedElement, state: MdreamRuntimeState) => void>): TransformPlugin {
+export function extractionPlugin(selectors: Record<string, ExtractionCallback>): TransformPlugin {
   // Parse selectors and create matcher-callback pairs
   const matcherCallbacks = Object.entries(selectors).map(([selector, callback]) => ({
     matcher: parseSelector(selector),
@@ -15,17 +17,21 @@ export function extractionPlugin(selectors: Record<string, (element: ExtractedEl
   }))
 
   // Track elements we're currently collecting content for
-  const trackedElements = new Map<ElementNode, { textContent: string, callback: (element: ExtractedElement, state: MdreamRuntimeState) => void }>()
+  const trackedElements = new Map<ElementNode, { textContent: string, callbacks: ExtractionCallback[] }>()
 
   return createPlugin({
     onNodeEnter(element) {
       // Check if this element matches any of our selectors
-      matcherCallbacks.forEach(({ matcher, callback }) => {
+      let callbacks: ExtractionCallback[] | undefined
+      for (let i = 0; i < matcherCallbacks.length; i++) {
+        const { matcher, callback } = matcherCallbacks[i]!
         if (matcher.matches(element)) {
-          // Start tracking this element's content
-          trackedElements.set(element, { textContent: '', callback })
+          callbacks ||= []
+          callbacks.push(callback)
         }
-      })
+      }
+      if (callbacks)
+        trackedElements.set(element, { textContent: '', callbacks })
     },
 
     processTextNode(textNode) {
@@ -46,14 +52,15 @@ export function extractionPlugin(selectors: Record<string, (element: ExtractedEl
       // Check if we were tracking this element
       const tracked = trackedElements.get(element)
       if (tracked) {
-        // Create extracted element with textContent
-        const extractedElement: ExtractedElement = {
-          ...element,
-          textContent: tracked.textContent.trim(),
+        for (let i = 0; i < tracked.callbacks.length; i++) {
+          // Each matching handler receives its own extracted element object.
+          const extractedElement: ExtractedElement = {
+            ...element,
+            attributes: { ...element.attributes },
+            textContent: tracked.textContent.trim(),
+          }
+          tracked.callbacks[i]!(extractedElement, state)
         }
-
-        // Call the callback with the complete element and its text content
-        tracked.callback(extractedElement, state)
 
         // Stop tracking this element
         trackedElements.delete(element)
@@ -75,16 +82,20 @@ export function extractionCollectorPlugin(config: Record<string, (element: CoreE
   }))
   const results: CoreExtractedElement[] = []
 
-  const trackedElements = new Map<ElementNode, { textContent: string, selector: string, callback: (element: CoreExtractedElement) => void }>()
+  const trackedElements = new Map<ElementNode, { textContent: string, selectors: string[] }>()
 
   const plugin = createPlugin({
     onNodeEnter(element) {
+      let selectors: string[] | undefined
       for (let i = 0; i < matchers.length; i++) {
         const m = matchers[i]!
         if (m.matcher.matches(element)) {
-          trackedElements.set(element, { textContent: '', selector: m.selector, callback: m.callback })
+          selectors ||= []
+          selectors.push(m.selector)
         }
       }
+      if (selectors)
+        trackedElements.set(element, { textContent: '', selectors })
     },
 
     processTextNode(textNode) {
@@ -102,13 +113,15 @@ export function extractionCollectorPlugin(config: Record<string, (element: CoreE
     onNodeExit(element) {
       const tracked = trackedElements.get(element)
       if (tracked) {
-        const extracted: CoreExtractedElement = {
-          selector: tracked.selector,
-          tagName: element.name,
-          textContent: tracked.textContent.trim(),
-          attributes: { ...element.attributes },
+        for (let i = 0; i < tracked.selectors.length; i++) {
+          const extracted: CoreExtractedElement = {
+            selector: tracked.selectors[i]!,
+            tagName: element.name,
+            textContent: tracked.textContent.trim(),
+            attributes: { ...element.attributes },
+          }
+          results.push(extracted)
         }
-        results.push(extracted)
         trackedElements.delete(element)
       }
     },

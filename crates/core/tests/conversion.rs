@@ -1739,6 +1739,27 @@ fn extraction_by_tag() {
 }
 
 #[test]
+fn extraction_preserves_declaration_order_for_overlapping_selectors() {
+  let result = html_to_markdown_result(
+    r#"<h1 class="featured">Title</h1>"#,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        extraction: Some(ExtractionConfig::new(&["h1", "h1, h2", ".featured"])),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  let extracted = result.extracted.unwrap();
+  let selectors: Vec<&str> = extracted
+    .iter()
+    .map(|element| element.selector.as_str())
+    .collect();
+
+  assert_eq!(selectors, vec!["h1", "h1, h2", ".featured"]);
+}
+
+#[test]
 fn extraction_by_class() {
   let result = html_to_markdown_result(
     r#"<div class="target">Found</div><div class="other">Ignored</div>"#,

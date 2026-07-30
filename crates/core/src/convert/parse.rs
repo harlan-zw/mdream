@@ -422,7 +422,7 @@ impl ConvertState {
       || self
         .filter_exclude_parsed
         .iter()
-        .any(|(_, parsed)| matches_selector(&node, parsed))
+        .any(|(_, parsed)| matches_selector_list(&node, parsed))
     {
       return 1;
     }
@@ -430,7 +430,7 @@ impl ConvertState {
       self
         .filter_include_parsed
         .iter()
-        .any(|(_, parsed)| matches_selector(&node, parsed)),
+        .any(|(_, parsed)| matches_selector_list(&node, parsed)),
     ) * 2
   }
 
@@ -1055,7 +1055,7 @@ impl ConvertState {
           || self
             .filter_exclude_parsed
             .iter()
-            .any(|(_, parsed)| matches_selector(&tag, parsed))
+            .any(|(_, parsed)| matches_selector_list(&tag, parsed))
         {
           skip_node = true;
           filter_excluded = true;
@@ -1070,7 +1070,7 @@ impl ConvertState {
             && self
               .filter_include_parsed
               .iter()
-              .any(|(_, parsed)| matches_selector(&tag, parsed))
+              .any(|(_, parsed)| matches_selector_list(&tag, parsed))
           {
             match_found = true;
             if self.filter_included_since_depth.is_none() {
@@ -1189,7 +1189,7 @@ impl ConvertState {
     {
       let stack_depth = self.stack.len();
       for (selector, parsed) in &self.extraction_parsed_selectors {
-        if matches_selector(element, parsed) {
+        if matches_selector_list(element, parsed) {
           let attrs: Vec<(String, String)> = element
             .attributes
             .iter()
@@ -1269,18 +1269,19 @@ impl ConvertState {
     // Extraction finalize
     if !self.extraction_tracked.is_empty() {
       let current_depth = self.stack.len();
-      let mut i = 0;
-      while i < self.extraction_tracked.len() {
-        if self.extraction_tracked[i].stack_depth == current_depth {
-          let tracked = self.extraction_tracked.swap_remove(i);
-          self.extraction_results.push(ExtractedElement {
+      if let Some(first) = self
+        .extraction_tracked
+        .iter()
+        .position(|tracked| tracked.stack_depth == current_depth)
+      {
+        let extraction_results = &mut self.extraction_results;
+        for tracked in self.extraction_tracked.drain(first..) {
+          extraction_results.push(ExtractedElement {
             selector: tracked.selector,
             tag_name: tracked.tag_name,
             text_content: tracked.text_content.trim().to_string(),
             attributes: tracked.attributes,
           });
-        } else {
-          i += 1;
         }
       }
     }

@@ -6,6 +6,41 @@ import { extractionPlugin } from '@mdream/js/plugins'
 import { describe, expect, it } from 'vitest'
 
 describe('extraction plugin', () => {
+  it('calls every handler when selector keys overlap', () => {
+    const calls: string[] = []
+    const plugin = extractionPlugin({
+      'h1': element => calls.push(`tag:${element.textContent}`),
+      'h1, h2': element => calls.push(`list:${element.textContent}`),
+    })
+
+    htmlToMarkdown('<h1>Title</h1>', {
+      hooks: [plugin],
+    })
+
+    expect(calls).toEqual([
+      'tag:Title',
+      'list:Title',
+    ])
+  })
+
+  it('isolates attributes between overlapping handlers', () => {
+    const observedAttributes: Array<Record<string, string>> = []
+    const plugin = extractionPlugin({
+      'h1': (element) => {
+        element.attributes.injected = 'first'
+      },
+      '.featured': (element) => {
+        observedAttributes.push(element.attributes)
+      },
+    })
+
+    htmlToMarkdown('<h1 class="featured">Title</h1>', {
+      hooks: [plugin],
+    })
+
+    expect(observedAttributes).toEqual([{ class: 'featured' }])
+  })
+
   it('should extract elements by tag selector', () => {
     const html = `
       <html>
