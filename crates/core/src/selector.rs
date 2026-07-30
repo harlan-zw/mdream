@@ -8,6 +8,7 @@ pub(crate) enum ParsedSelectorList {
   Multiple(Vec<ParsedSelector>),
 }
 
+/// Parses a comma-separated selector list while preserving attribute values.
 pub(crate) fn parse_css_selector_list(selector: &str) -> ParsedSelectorList {
   let selector = selector.trim();
   if selector.is_empty() {
@@ -183,6 +184,7 @@ pub(crate) fn matches_selector(tag: &ElementNode, selector: &ParsedSelector) -> 
   }
 }
 
+/// Returns whether an element matches any selector in a parsed list.
 pub(crate) fn matches_selector_list(tag: &ElementNode, selectors: &ParsedSelectorList) -> bool {
   match selectors {
     ParsedSelectorList::Single(selector) => matches_selector(tag, selector),

@@ -166,6 +166,7 @@ function createSelectorList(selectors: SelectorMatcher[]): SelectorMatcher {
   }
 }
 
+/** Parses one compound selector without list separators. */
 function parseCompoundSelector(selector: string): SelectorMatcher {
   const selectorParts: SelectorMatcher[] = []
   let current = ''

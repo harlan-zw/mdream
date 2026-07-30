@@ -2,8 +2,8 @@ import type { ExtractedElement } from 'mdream'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown as publicHtmlToMarkdown } from '../../../src'
-import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
+import { htmlToMarkdown as publicHtmlToMarkdown } from '../../../src/index.js'
+import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines.js'
 
 describe('declarative extraction public API', () => {
   it('dispatches comma-separated selector lists', () => {
