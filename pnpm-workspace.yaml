@@ -39,25 +39,25 @@ catalog:
   '@antfu/eslint-config': ^9.2.0
   '@arethetypeswrong/cli': ^0.18.5
   '@clack/prompts': ^1.7.0
-  '@cloudflare/vitest-pool-workers': ^0.18.8
+  '@cloudflare/vitest-pool-workers': ^0.19.0
   '@emnapi/core': ^1.11.3
   '@emnapi/runtime': ^1.11.3
   '@emnapi/wasi-threads': ^2.0.1
-  '@napi-rs/cli': ^3.7.4
-  '@napi-rs/wasm-runtime': ^1.1.6
+  '@napi-rs/cli': ^3.8.0
+  '@napi-rs/wasm-runtime': ^1.2.0
   '@nuxt/devtools': 2.4.0
   '@nuxt/kit': ^4.5.1
   '@nuxt/module-builder': ^1.0.3
   '@nuxt/schema': ^4.5.1
-  '@nuxt/test-utils': ^4.0.3
+  '@nuxt/test-utils': ^4.1.0
   '@tybys/wasm-util': ^0.10.3
-  '@types/node': ^26.1.1
+  '@types/node': ^26.1.2
   '@types/picomatch': ^4.0.3
   '@vercel/ncc': ^0.44.1
   '@vitejs/plugin-vue': ^6.0.8
   '@vitest/browser': ^4.1.10
   '@vitest/browser-playwright': ^4.1.10
-  bumpp: ^12.0.0
+  bumpp: ^12.1.1
   c12: ^3.3.4
   cac: ^7.0.0
   changelogen: ^0.6.2
@@ -71,7 +71,7 @@ catalog:
   knip: ^6.29.0
   nuxt: ^4.5.1
   nuxt-site-config: ^4.1.2
-  nypm: ^0.6.8
+  nypm: ^0.6.9
   obuild: ^0.4.38
   ofetch: ^1.5.1
   pathe: ^2.0.3
@@ -88,7 +88,7 @@ catalog:
   vue: ^3.5.40
   vue-router: ^5.2.0
   vue-tsc: ^3.3.8
-  wrangler: ^4.112.0
+  wrangler: ^4.115.0
 
 catalogs:
   bench:
