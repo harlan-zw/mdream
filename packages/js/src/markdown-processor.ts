@@ -343,7 +343,6 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
   return true
 }
 
-/** Parity with the Rust engine's `in_heading`. */
 function isInsideHeading(depthMap: Uint16Array): boolean {
   for (let h = TAG_H1; h <= TAG_H6; h++) {
     if (depthMap[h])
@@ -1261,9 +1260,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
       const insideRawHtmlBlock = isInsideRawHtmlBlock(state.depthMap)
       if (insideRawHtmlBlock) {
-        // The scan starts where the last text outside a block left it, so the
-        // blank line the block's own opening tag wrote counts: that line ends
-        // the HTML block, and what follows is Markdown again.
         trackRawHtmlMarkdownContext(state)
       }
       else {
@@ -1838,8 +1834,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     if (headingHeld) {
       let headingPos = currentContent.length
       while (headingPos > 0) {
-        const char = currentContent[headingPos - 1]
-        if (char !== '#' && char !== ' ' && char !== '\t')
+        const code = currentContent.charCodeAt(headingPos - 1)
+        if (code !== 35 && code !== 32 && code !== 9) // # space tab
           break
         headingPos--
       }

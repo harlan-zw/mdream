@@ -1405,6 +1405,17 @@ fn a_rule_inside_a_list_item_keeps_its_own_block() {
   // spaces only, so the line would be a thematic break and the item would vanish.
   assert_eq!(convert("<ul><li><hr></li></ul>"), "- ***");
   assert_eq!(convert("<ul><li><hr></li><li>b</li></ul>"), "- ***\n- b");
+  // Regression: text's own trailing space (not a marker's) was mistaken for the
+  // content column, so `<hr>` glued onto it with no break and vanished as `***`.
+  assert_eq!(convert("<ul><li>text <hr></li></ul>"), "- text\n\n  ---");
+  assert_eq!(
+    convert("<ul><li>text <hr>after</li></ul>"),
+    "- text\n\n  --- after"
+  );
+  assert_eq!(
+    convert("<ul><li><blockquote>text <hr></blockquote></li></ul>"),
+    "- \n  > text\n  >\n  > ---"
+  );
 }
 
 // ── Paragraphs and spacing ──
@@ -3685,7 +3696,7 @@ fn a_heading_without_an_atx_prefix_keeps_its_hash_unescaped() {
 }
 
 #[test]
-fn ordered_lists_honour_the_start_attribute() {
+fn ordered_lists_honor_the_start_attribute() {
   assert_eq!(
     convert("<ol start=\"3\"><li>a</li><li>b</li></ol>"),
     "3. a\n4. b"

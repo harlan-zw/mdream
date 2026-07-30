@@ -220,10 +220,30 @@ export function blockOpenPrefix(
   prefix: string | undefined,
 ): string | undefined {
   switch (lastOutputChar(buffer)) {
-    // Empty output, or a pending list marker already at the content column.
+    // Empty output.
     case -1:
-    case SPACE_CHAR:
       return undefined
+    case SPACE_CHAR: {
+      // A trailing space can be a pending list marker already at the content
+      // column, or ordinary text (`"item "`) that still has to break as a
+      // paragraph. Only the former needs no separator.
+      let fragment = buffer.length - 1
+      let index = buffer[fragment]!.length
+      for (;;) {
+        if (index === 0) {
+          if (--fragment < 0)
+            return undefined
+          index = buffer[fragment]!.length
+          continue
+        }
+        const code = buffer[fragment]!.charCodeAt(--index)
+        if (code !== SPACE_CHAR) {
+          return code === NEWLINE_CHAR || listMarkerLineStart(buffer, fragment, index)
+            ? undefined
+            : `\n\n${prefix ?? ''}`
+        }
+      }
+    }
     case NEWLINE_CHAR:
       return prefix || undefined
     // Directly under text the block reads as a setext underline or a lazy
@@ -248,7 +268,7 @@ export function isListMarkerTail(code: number): boolean {
  * Whether the list marker ending at `fragmentIndex`/`markerIndex` is all its
  * line holds: optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
  */
-export function listMarkerLineStart(buffer: string[], fragmentIndex: number, markerIndex: number): boolean {
+export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: number, markerIndex: number): boolean {
   const marker = buffer[fragmentIndex]!.charCodeAt(markerIndex)
   const ordered = marker === 46 || marker === 41 // . )
   if (!ordered && marker !== 45 && marker !== 42 && marker !== 43) // - * +
@@ -286,16 +306,38 @@ export function listMarkerLineStart(buffer: string[], fragmentIndex: number, mar
 // digits, so anything wider stops being a list marker at all.
 const MAX_ORDERED_START = 999_999_999
 
-// The rendered number of an ordered list item, honouring `<ol start>`. A `start`
+// `start`'s shape, matching Rust's `str::parse::<u32>()`: optional leading `+`,
+// digits only, no partial parse — `Number.parseInt` would read "10foo" as 10.
+function parseOrderedStart(raw: string): number | undefined {
+  let begin = 0
+  let end = raw.length
+  while (begin < end && isHtmlAsciiWhitespace(raw.charCodeAt(begin)))
+    begin++
+  while (end > begin && isHtmlAsciiWhitespace(raw.charCodeAt(end - 1)))
+    end--
+  if (begin < end && raw.charCodeAt(begin) === 43) // '+'
+    begin++
+  if (begin === end)
+    return undefined
+  for (let index = begin; index < end; index++) {
+    const code = raw.charCodeAt(index)
+    if (code < 48 || code > 57)
+      return undefined
+  }
+  return Number.parseInt(raw.slice(begin, end), 10)
+}
+
+// The rendered number of an ordered list item, honoring `<ol start>`. A `start`
 // too wide for an ordered marker is not one, so it falls back to the default
 // numbering, and the running number stops at the same width.
 export function orderedItemNumber(list: ElementNode | null | undefined, index: number): number {
   const raw = list?.attributes?.start
   if (raw === undefined)
     return index + 1
-  const start = Number.parseInt(raw, 10)
-  const valid = start >= 0 && start <= MAX_ORDERED_START
-  return Math.min((valid ? start : 1) + index, MAX_ORDERED_START)
+  const start = parseOrderedStart(raw)
+  if (start === undefined || start > MAX_ORDERED_START)
+    return Math.min(1 + index, MAX_ORDERED_START)
+  return Math.min(start + index, MAX_ORDERED_START)
 }
 
 function numericReplacement(codePoint: number): string {

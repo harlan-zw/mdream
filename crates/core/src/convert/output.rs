@@ -1459,7 +1459,7 @@ impl ConvertState {
 
   /// Whether `end` sits just past a list marker that is all its line holds:
   /// optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
-  fn list_marker_line_start(bytes: &[u8], end: usize) -> bool {
+  fn list_marker_line_start(&self, bytes: &[u8], end: usize) -> bool {
     let mut index = end - 1;
     match bytes[index] {
       b'.' | b')' => {
@@ -1479,7 +1479,10 @@ impl ConvertState {
       index -= 1;
       spaces += 1;
     }
-    index == 0 || bytes[index - 1] == b'\n'
+    if index == 0 {
+      return !self.has_streamed_output || self.flushed_tail[1] == b'\n';
+    }
+    bytes[index - 1] == b'\n'
   }
 
   /// Arm the empty-item guard for the `<li>` whose marker was just written from
@@ -1493,9 +1496,6 @@ impl ConvertState {
       self.empty_item_hazard = false;
       return;
     }
-    // `output_start` is captured before `write_output`, which can trim trailing
-    // whitespace from behind it, so clamp rather than index past the end.
-    debug_assert!(output_start <= self.buffer.len());
     let output_start = output_start.min(self.buffer.len());
     let bytes = self.buffer.as_bytes();
     let line_start = bytes[output_start..]
@@ -1604,7 +1604,7 @@ impl ConvertState {
       if byte != b' ' || spaces == 3 {
         // A list marker is block prefix too: its content column opens a fresh
         // block context, so `- # h` escapes exactly like `# h` would.
-        return Self::list_marker_line_start(bytes, offset + 1).then_some(0);
+        return self.list_marker_line_start(bytes, offset + 1).then_some(0);
       }
       spaces += 1;
     }
@@ -1837,9 +1837,20 @@ impl ConvertState {
   /// Separation a block needs to open at the content column `prefix` describes,
   /// or `None` when the buffer already sits there.
   fn block_open_prefix(&self, prefix: &str) -> Option<Cow<'static, str>> {
-    match self.buffer.as_bytes().last() {
-      // Empty output, or a pending list marker already at the content column.
-      None | Some(b' ') => None,
+    let bytes = self.buffer.as_bytes();
+    match bytes.last() {
+      None => None,
+      Some(b' ') => {
+        // A trailing space can be a pending list marker already at the content
+        // column, or ordinary text (`"item "`) that still has to break as a
+        // paragraph. Only the former needs no separator.
+        let end = bytes.len() - trailing_spaces(bytes);
+        if end > 0 && bytes[end - 1] != b'\n' && !self.list_marker_line_start(bytes, end) {
+          Some(Cow::Owned(format!("\n\n{prefix}")))
+        } else {
+          None
+        }
+      }
       Some(b'\n') => (!prefix.is_empty()).then(|| Cow::Owned(prefix.to_string())),
       // Directly under text the block reads as a setext underline or a lazy
       // continuation, so it has to break the paragraph first.
@@ -2817,7 +2828,7 @@ impl ConvertState {
       None => LineBeforeRow::Open,
       // A pending list marker is block prefix, not content: a table's first row
       // belongs on it.
-      Some(_) if Self::list_marker_line_start(bytes, bytes.len() - trailing_spaces(bytes)) => {
+      Some(_) if self.list_marker_line_start(bytes, bytes.len() - trailing_spaces(bytes)) => {
         LineBeforeRow::Open
       }
       Some(_) => LineBeforeRow::Content,

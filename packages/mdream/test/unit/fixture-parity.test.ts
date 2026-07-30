@@ -637,8 +637,18 @@ describe('cross-engine parity', () => {
       '<ol start="-5"><li>a</li></ol>',
       '<ol start="1000000000"><li>a</li></ol>',
       '<ol start="999999998"><li>a</li><li>b</li><li>c</li></ol>',
+      // A `start` with trailing garbage is not a number at all — full-string
+      // parse like Rust's, not `parseInt`'s partial read.
+      '<ol start="10foo"><li>a</li></ol>',
+      '<ol start="0x10"><li>a</li></ol>',
+      '<ol start="+5"><li>a</li></ol>',
       // A space ends the fence info string, so the rest would leak onto the fence.
       '<pre lang="en US">x</pre>',
+      // Text's own trailing space is not a pending list marker at the content
+      // column; it still needs a paragraph break before the next block.
+      '<ul><li>text <hr></li></ul>',
+      '<ul><li>text <hr>after</li></ul>',
+      '<ul><li><blockquote>text <hr></blockquote></li></ul>',
     ]
     for (const html of cases) {
       const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()

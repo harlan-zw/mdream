@@ -397,8 +397,9 @@ function closeTableContext(
       walked++
     }
   }
-  for (let i = 0; i < closeCount && state.currentNode; i++)
+  for (let i = 0; i < closeCount && state.currentNode; i++) {
     closeNode(state.currentNode, state, handleEvent)
+  }
 }
 
 /**

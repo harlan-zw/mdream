@@ -149,7 +149,7 @@ enum LineBeforeRow {
   Content,
 }
 
-/// Widest `colspan` honoured.
+/// Widest `colspan` honored.
 const MAX_CELL_SPAN: u8 = 64;
 
 /// Largest `<ol start>` CommonMark can express: an ordered marker is at most
@@ -437,7 +437,7 @@ pub struct ConvertState {
   table_current_row_cells: usize,
   /// A raw-HTML region (`<details>`, `<dl>`, …) stops being raw at the first
   /// blank line: CommonMark ends an HTML block there and reads what follows as
-  /// Markdown, so text past one needs escaping after all. The scan resumes from
+  /// Markdown, so text past one needs escaping. The scan resumes from
   /// `raw_html_scanned_to`, so a region costs one pass however many nodes it holds.
   raw_html_markdown: bool,
   raw_html_scanned_to: usize,
@@ -1362,8 +1362,7 @@ impl ConvertState {
       );
     }
     // A marker still alone on its line has its separating newline inserted at
-    // the line start when the item resolves, so the line stays mutable. Mirrors
-    // the same guard in `drain_streamed_prefix`.
+    // the line start when the item resolves, so the line stays mutable.
     if self.empty_item_hazard {
       stable_end = stable_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
