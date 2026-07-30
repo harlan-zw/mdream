@@ -152,6 +152,10 @@ enum LineBeforeRow {
 /// Widest `colspan` honoured.
 const MAX_CELL_SPAN: u8 = 64;
 
+/// Largest `<ol start>` CommonMark can express: an ordered marker is at most
+/// nine digits, so anything wider stops being a list marker at all.
+const MAX_ORDERED_START: u32 = 999_999_999;
+
 /// `" |"` repeated to `MAX_CELL_SPAN`, so a spanned cell's filler is a slice of
 /// this rather than a string built per cell.
 static SPAN_FILLER: [u8; (MAX_CELL_SPAN as usize - 1) * 2] = {
@@ -1357,6 +1361,18 @@ impl ConvertState {
           .len(),
       );
     }
+    // A marker still alone on its line has its separating newline inserted at
+    // the line start when the item resolves, so the line stays mutable. Mirrors
+    // the same guard in `drain_streamed_prefix`.
+    if self.empty_item_hazard {
+      stable_end = stable_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
+    }
+    // A heading's exit escapes the trailing `#` run GFM would read as an ATX
+    // closing sequence, so hold the run (and the spacing that decides whether it
+    // closes) until the heading is complete.
+    if self.in_heading() {
+      stable_end = stable_end.min(self.buffer.trim_end_matches(['#', ' ', '\t']).len());
+    }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let mut start = self.last_yielded_length.max(leading);
     if start >= stable_end {
@@ -1419,13 +1435,6 @@ impl ConvertState {
     // there (see `write_output`, which inspects only the last two), so keep
     // those two bytes; otherwise a dropped element leaks an extra newline in
     // streaming.
-    let keep_two_before = |buf: &str, at: usize| {
-      let mut i = at.saturating_sub(2);
-      while i > 0 && !buf.is_char_boundary(i) {
-        i -= 1;
-      }
-      i
-    };
     if self.depth_map[TAG_A as usize] > 0 {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.link_bracket_pos));
     }
@@ -1492,6 +1501,17 @@ impl ConvertState {
     self.line_start = self.line_start.saturating_sub(drain_end);
     self.line_start_scanned_to = self.line_start_scanned_to.saturating_sub(drain_end);
   }
+}
+
+/// Highest offset that still keeps the two bytes before `at` in the buffer, for
+/// a rewrite that can reach back there. Floored to a UTF-8 boundary, so the
+/// result is always safe to slice at even if `at` has drifted past the end.
+fn keep_two_before(buf: &str, at: usize) -> usize {
+  let mut i = at.saturating_sub(2);
+  while i > 0 && !buf.is_char_boundary(i) {
+    i -= 1;
+  }
+  i
 }
 
 // Internal result structs

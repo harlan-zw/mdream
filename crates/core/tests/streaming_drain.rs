@@ -846,3 +846,39 @@ fn streaming_pending_space_after_drained_hard_break_matches_one_shot() {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
 }
+
+// A heading's exit escapes a trailing `#` run so GFM does not read it as an ATX
+// closing sequence. Streaming used to yield the run before the exit could escape
+// it, emitting `## foo ##` where one-shot gives `## foo \#`.
+#[test]
+fn streaming_heading_trailing_hashes_matches_one_shot() {
+  for html in [
+    "<h2>foo #</h2>",
+    "<h2>foo ##</h2>",
+    "<h3>foo ##</h3>",
+    "<h1>#</h1>",
+    "<h2>foo # bar</h2>",
+    "<h2>foo <em>b</em> #</h2>",
+    "<h2>foo #</h2><p>after</p>",
+    "<h2>a</h2><h2>b #</h2>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// An empty `<li>` inserts a newline at its marker's line start when it resolves,
+// so the line stays mutable. Streaming used to yield the marker first, turning
+// one-shot's `- a\n\n  -` into `- a\n  --`.
+#[test]
+fn streaming_empty_nested_item_marker_matches_one_shot() {
+  for html in [
+    "<ul><li>a<ul><li></li></ul></li></ul>",
+    "<ul><li>a<ol><li></li></ol></li></ul>",
+    "<ul><li></li></ul>",
+    "<ul><li>a<ul><li></li><li>b</li></ul></li></ul>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}

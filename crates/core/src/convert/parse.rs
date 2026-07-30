@@ -667,11 +667,11 @@ impl ConvertState {
           walked += 1;
           close_count = walked;
         }
-        // Content left open inside a cell (`<td><p>text` with no `</p>`) sits
-        // above the closeable element and closes with it; stopping here would
-        // leave the new row nested inside the old cell.
-        Some(id) if !ROW_SCOPE_BOUNDARY[id as usize] => walked += 1,
-        _ => break,
+        // Content left open inside a cell (`<td><p>text` with no `</p>`, or an
+        // unknown custom element) sits above the closeable element and closes
+        // with it; stopping here would leave the new row nested in the old cell.
+        Some(id) if ROW_SCOPE_BOUNDARY[id as usize] => break,
+        _ => walked += 1,
       }
     }
     for _ in 0..close_count {

@@ -523,6 +523,30 @@ mod tests {
     assert!(all.contains_key("href") && all.contains_key("class"));
   }
 
+  /// `colspan` is carried out of the scan as a scalar so a cell never has to
+  /// re-parse its own attribute string. A value that is not a `u8` is not a span.
+  #[test]
+  fn colspan_is_scanned_into_a_scalar() {
+    fn span(attr_str: &str, mask: u16) -> (u8, bool) {
+      let (_, _, attrs, _, span) = process_tag_attributes(&format!("{attr_str}>"), 0, None, mask);
+      (span, attrs.contains_key("colspan"))
+    }
+
+    assert_eq!(span("colspan=2", ATTR_ALL), (2, true));
+    assert_eq!(span("colspan=\" 3 \"", ATTR_ALL), (3, true));
+    assert_eq!(span("COLSPAN=4", ATTR_ALL), (4, true));
+    assert_eq!(span("colspan=255", ATTR_ALL), (255, true));
+    // Not a span: wider than a `u8`, non-numeric, negative, or absent entirely.
+    assert_eq!(span("colspan=256", ATTR_ALL), (0, true));
+    assert_eq!(span("colspan=abc", ATTR_ALL), (0, true));
+    assert_eq!(span("colspan=-1", ATTR_ALL), (0, true));
+    assert_eq!(span("colspan", ATTR_ALL), (0, true));
+    assert_eq!(span("id=x", ATTR_ALL), (0, false));
+    // A mask asking for the span alone needs no string copy of it.
+    assert_eq!(span("colspan=2 id=x", ATTR_COLSPAN), (2, false));
+    assert_eq!(span("colspan=2", ATTR_NONE), (0, false));
+  }
+
   #[test]
   fn process_tag_attributes_finds_close() {
     // "<a href=\"x\">" — scan from after the tag name

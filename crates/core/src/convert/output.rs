@@ -1493,6 +1493,10 @@ impl ConvertState {
       self.empty_item_hazard = false;
       return;
     }
+    // `output_start` is captured before `write_output`, which can trim trailing
+    // whitespace from behind it, so clamp rather than index past the end.
+    debug_assert!(output_start <= self.buffer.len());
+    let output_start = output_start.min(self.buffer.len());
     let bytes = self.buffer.as_bytes();
     let line_start = bytes[output_start..]
       .iter()
@@ -1522,7 +1526,12 @@ impl ConvertState {
     if !self.empty_item_hazard {
       return;
     }
-    let end = self.empty_item_len.min(self.buffer.len());
+    // A rewrite behind the recorded length followed by multi-byte content can
+    // leave the offset mid-codepoint, which panics on slicing.
+    let mut end = self.empty_item_len.min(self.buffer.len());
+    while end > 0 && !self.buffer.is_char_boundary(end) {
+      end -= 1;
+    }
     let tail = self.buffer[end..].trim_start_matches(' ');
     if tail.is_empty() && !at_exit {
       return;
@@ -1622,7 +1631,7 @@ impl ConvertState {
   }
 
   #[inline]
-  fn in_heading(&self) -> bool {
+  pub(crate) fn in_heading(&self) -> bool {
     self.depth_map[TAG_H1 as usize] > 0
       || self.depth_map[TAG_H2 as usize] > 0
       || self.depth_map[TAG_H3 as usize] > 0
@@ -2787,7 +2796,6 @@ impl ConvertState {
     ""
   }
 
-  /// What the current line holds where a table row is about to be written.
   fn line_state_before_row(&self) -> LineBeforeRow {
     let bytes = self.buffer.as_bytes();
     // Rows end their line, so the row after a row decides on one byte and never
@@ -2805,7 +2813,6 @@ impl ConvertState {
       .position(|byte| !matches!(byte, b' ' | b'\t'))
       .unwrap_or(line.len());
     match line.get(start) {
-      // A row already open only needs its line broken, not a new block.
       Some(b'|') => LineBeforeRow::Row,
       None => LineBeforeRow::Open,
       // A pending list marker is block prefix, not content: a table's first row
@@ -2825,7 +2832,6 @@ impl ConvertState {
     node.cell_span.clamp(1, MAX_CELL_SPAN)
   }
 
-  /// Empty cells standing in for the columns a `colspan` swallowed.
   fn span_filler(&self, node: &ElementNode) -> Option<Cow<'static, str>> {
     match Self::cell_span(node) {
       1 => None,
@@ -2848,8 +2854,10 @@ impl ConvertState {
       .attributes
       .get("start")
       .and_then(|value| value.trim_ascii().parse::<u32>().ok())
+      .filter(|start| *start <= MAX_ORDERED_START)
       .unwrap_or(1)
       .saturating_add(index as u32)
+      .min(MAX_ORDERED_START)
   }
 
   /// Fence info string for a `<pre>`/`<code>`: `class="language-x"` first, then
@@ -2865,7 +2873,7 @@ impl ConvertState {
         if !lang.is_empty()
           && !lang
             .bytes()
-            .any(|byte| byte == b'-' || is_unsafe_fence_info_byte(byte)) =>
+            .any(|byte| byte == b'-' || byte == b' ' || is_unsafe_fence_info_byte(byte)) =>
       {
         lang
       }

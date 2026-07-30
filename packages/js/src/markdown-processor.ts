@@ -120,7 +120,6 @@ export interface MarkdownState {
    * `rawHtmlMarkdown`: a blank line has been seen inside the current block.
    * The scan cursors hold how far the buffer was walked to decide that.
    */
-  inRawHtmlRegion?: boolean
   rawHtmlMarkdown?: boolean
   rawHtmlScannedTo?: number
   lineScannedTo?: number
@@ -344,6 +343,15 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
   return true
 }
 
+/** Parity with the Rust engine's `in_heading`. */
+function isInsideHeading(depthMap: Uint16Array): boolean {
+  for (let h = TAG_H1; h <= TAG_H6; h++) {
+    if (depthMap[h])
+      return true
+  }
+  return false
+}
+
 /**
  * Whether prose at the current position may be hard-wrapped. Code blocks
  * (`<pre>`/`<code>`), table cells, and headings are emitted verbatim so wrapping
@@ -354,11 +362,7 @@ function canWrapHere(depthMap: Uint16Array): boolean {
   if (depthMap[TAG_PRE] || depthMap[TAG_CODE] || depthMap[TAG_TD] || depthMap[TAG_TH]) {
     return false
   }
-  for (let h = TAG_H1; h <= TAG_H6; h++) {
-    if (depthMap[h])
-      return false
-  }
-  return true
+  return !isInsideHeading(depthMap)
 }
 
 /**
@@ -1204,7 +1208,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemHazard: false,
     emptyItemFragment: 0,
-    inRawHtmlRegion: false,
     rawHtmlMarkdown: false,
     rawHtmlScannedTo: 0,
     lineScannedTo: 0,
@@ -1258,17 +1261,14 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
       const insideRawHtmlBlock = isInsideRawHtmlBlock(state.depthMap)
       if (insideRawHtmlBlock) {
-        // Anchor the scan on the way in, so the region never sees a blank line
-        // that preceded it, and text outside one pays only this test.
-        if (!state.inRawHtmlRegion) {
-          state.inRawHtmlRegion = true
-          state.rawHtmlMarkdown = false
-          state.rawHtmlScannedTo = state.buffer.length
-        }
+        // The scan starts where the last text outside a block left it, so the
+        // blank line the block's own opening tag wrote counts: that line ends
+        // the HTML block, and what follows is Markdown again.
         trackRawHtmlMarkdownContext(state)
       }
-      else if (state.inRawHtmlRegion) {
-        state.inRawHtmlRegion = false
+      else {
+        state.rawHtmlMarkdown = false
+        state.rawHtmlScannedTo = state.buffer.length
       }
       if (!state.plainText
         && !state.depthMap[TAG_PRE]
@@ -1831,6 +1831,22 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         stableLength = linkPos
     }
 
+    // A heading's exit escapes the trailing `#` run GFM would read as an ATX
+    // closing sequence, so hold the run (and the spacing that decides whether it
+    // closes) until the heading is complete.
+    const headingHeld = isInsideHeading(state.depthMap)
+    if (headingHeld) {
+      let headingPos = currentContent.length
+      while (headingPos > 0) {
+        const char = currentContent[headingPos - 1]
+        if (char !== '#' && char !== ' ' && char !== '\t')
+          break
+        headingPos--
+      }
+      if (headingPos < stableLength)
+        stableLength = headingPos
+    }
+
     // A later mutable tail can move the stable boundary behind bytes already
     // returned to the caller. Keep the cursor monotonic so those bytes are not
     // emitted a second time once following content makes the tail stable.
@@ -1847,7 +1863,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // from joining and slicing the entire cumulative output. Plugin, wrapping,
     // and open-link paths retain the full buffer because they can inspect or
     // rewrite earlier content.
-    if (!markerHeld && !codeSpanHeld && !codeFenceHeld && !blockquoteHeld && !linkHeld && !emptyItemHeld && (!retainMutableFragments || !inPre)) {
+    if (!markerHeld && !codeSpanHeld && !codeFenceHeld && !blockquoteHeld && !linkHeld && !emptyItemHeld && !headingHeld && (!retainMutableFragments || !inPre)) {
       if (!resolvedPlugins.length && !options.wrapWidth && !state.depthMap[TAG_A]) {
         if (retainMutableFragments && leadingTrimmed === 0) {
           // Preserve the final fragment as a separate value: close handlers

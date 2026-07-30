@@ -190,7 +190,8 @@ export function fenceLanguage(attributes: Record<string, string> | undefined): s
     return ''
   for (let index = 0; index < lang.length; index++) {
     const code = lang.charCodeAt(index)
-    if (code === 45 || isUnsafeFenceInfoCode(code))
+    // `-` and ` ` mark a human language; tab and the rest are unsafe outright.
+    if (code === 45 || code === 32 || isUnsafeFenceInfoCode(code))
       return ''
   }
   return lang
@@ -281,13 +282,20 @@ export function listMarkerLineStart(buffer: string[], fragmentIndex: number, mar
   }
 }
 
-// The rendered number of an ordered list item, honouring `<ol start>`.
+// Largest `<ol start>` CommonMark can express: an ordered marker is at most nine
+// digits, so anything wider stops being a list marker at all.
+const MAX_ORDERED_START = 999_999_999
+
+// The rendered number of an ordered list item, honouring `<ol start>`. A `start`
+// too wide for an ordered marker is not one, so it falls back to the default
+// numbering, and the running number stops at the same width.
 export function orderedItemNumber(list: ElementNode | null | undefined, index: number): number {
   const raw = list?.attributes?.start
   if (raw === undefined)
     return index + 1
   const start = Number.parseInt(raw, 10)
-  return (Number.isNaN(start) ? 1 : start) + index
+  const valid = start >= 0 && start <= MAX_ORDERED_START
+  return Math.min((valid ? start : 1) + index, MAX_ORDERED_START)
 }
 
 function numericReplacement(codePoint: number): string {

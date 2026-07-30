@@ -3696,6 +3696,31 @@ fn ordered_lists_honour_the_start_attribute() {
     convert("<ol start=\"9\"><li><p>a</p><p>b</p></li></ol>"),
     "9. a\n\n   b"
   );
+  // 0 is a valid CommonMark start; browsers render it too.
+  assert_eq!(
+    convert("<ol start=\"0\"><li>a</li><li>b</li></ol>"),
+    "0. a\n1. b"
+  );
+  assert_eq!(convert("<ol start=\" 7 \"><li>a</li></ol>"), "7. a");
+}
+
+#[test]
+fn ordered_start_wider_than_a_marker_falls_back_to_default_numbering() {
+  // An ordered marker is at most nine digits, so a wider `start` is not a marker
+  // at all: it must not emit a ten-digit number GFM would read as a paragraph.
+  assert_eq!(
+    convert("<ol start=\"999999999\"><li>a</li></ol>"),
+    "999999999. a"
+  );
+  assert_eq!(convert("<ol start=\"1000000000\"><li>a</li></ol>"), "1. a");
+  assert_eq!(convert("<ol start=\"99999999999\"><li>a</li></ol>"), "1. a");
+  assert_eq!(convert("<ol start=\"-5\"><li>a</li></ol>"), "1. a");
+  assert_eq!(convert("<ol start=\"\"><li>a</li></ol>"), "1. a");
+  // The running number saturates at the same width rather than overflowing it.
+  assert_eq!(
+    convert("<ol start=\"999999998\"><li>a</li><li>b</li><li>c</li></ol>"),
+    "999999998. a\n999999999. b\n999999999. c"
+  );
 }
 
 #[test]
@@ -3711,6 +3736,9 @@ fn fence_language_falls_back_to_the_lang_attribute() {
     "```c\nx\n```"
   );
   assert_eq!(convert("<pre lang=\"en-US\">x</pre>"), "```\nx\n```");
+  // A space or tab ends the info string, so the rest would leak onto the fence.
+  assert_eq!(convert("<pre lang=\"en US\">x</pre>"), "```\nx\n```");
+  assert_eq!(convert("<pre lang=\"en\tUS\">x</pre>"), "```\nx\n```");
 }
 
 #[test]

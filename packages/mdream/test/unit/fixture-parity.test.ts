@@ -623,6 +623,22 @@ describe('cross-engine parity', () => {
       '<ul><li><pre>code</pre><p>after</p></li></ul>',
       '<table><caption>Cap</caption><tr><th>h</th></tr><tr><td>c</td></tr></table>',
       '<ul><li><p>Intro:</p><table><caption>Cap</caption><tr><th>h</th></tr><tr><td>c</td></tr></table></li></ul>',
+      // A raw block's own opening tag writes the blank line that ends it, so the
+      // text after it is Markdown and needs escaping even with no `<summary>`.
+      '<details><p>* one</p></details>',
+      '<details><p># one</p></details>',
+      // An implied `<tr>` end has to close content left open in the cell.
+      '<table><tr><td>a<x-widget><tr><td>b</table>',
+      '<table><tr><td>a<span>y<tr><td>b</table>',
+      '<table><thead><tr><th>V<th>C<tbody><tr><td>a<td><p>x<tr><td>b<td><p>y</table>',
+      '<table><tr><td><table><tr><td>inner<tr><td>b</table><tr><td>outer</table>',
+      // A `start` too wide for an ordered marker is not one.
+      '<ol start="0"><li>a</li><li>b</li></ol>',
+      '<ol start="-5"><li>a</li></ol>',
+      '<ol start="1000000000"><li>a</li></ol>',
+      '<ol start="999999998"><li>a</li><li>b</li><li>c</li></ol>',
+      // A space ends the fence info string, so the rest would leak onto the fence.
+      '<pre lang="en US">x</pre>',
     ]
     for (const html of cases) {
       const jsResult = jsEngine.htmlToMarkdown(html).trimEnd()

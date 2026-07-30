@@ -244,6 +244,10 @@ const DL_SCOPE_BOUNDARY = new Set<number>([
   TAG_HTML,
 ])
 
+// Where a row-recovery scan stops: the table itself, and the contexts that hold
+// their own table structure.
+const ROW_SCOPE_BOUNDARY = new Set<number>([TAG_TABLE, TAG_TEMPLATE, TAG_CAPTION])
+
 // "Table cell scope": a new `<td>`/`<th>` closes the current cell, stopping at
 // the row/section.
 const CELL_SCOPE_BOUNDARY = new Set<number>([
@@ -373,13 +377,28 @@ function closeTableContext(
       return
     clearFlattenedElements(state)
   }
-  while (state.currentNode) {
-    const id = state.currentNode.tagId
-    if (id === undefined || !closeable.has(id)) {
+  // One reverse pass, as in `closeImpliedTo`: re-deciding after each close walks
+  // the stack once per closed node.
+  let closeCount = 0
+  let walked = 0
+  for (let node = state.currentNode; node; node = node.parent) {
+    const id = node.tagId
+    if (id !== undefined && closeable.has(id)) {
+      walked++
+      closeCount = walked
+    }
+    // Content left open inside a cell (`<td><p>text` with no `</p>`, or an
+    // unknown custom element) sits above the closeable element and closes with
+    // it; stopping here would leave the new row nested in the old cell.
+    else if (id !== undefined && ROW_SCOPE_BOUNDARY.has(id)) {
       break
     }
-    closeNode(state.currentNode, state, handleEvent)
+    else {
+      walked++
+    }
   }
+  for (let i = 0; i < closeCount && state.currentNode; i++)
+    closeNode(state.currentNode, state, handleEvent)
 }
 
 /**
