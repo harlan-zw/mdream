@@ -44,10 +44,10 @@ jobs:
       # corpus/ is gitignored, so without this every weekly run starts cold and
       # rediscovers the same shallow inputs for 300s
       - name: Restore corpus
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: crates/core/fuzz/corpus/${{ matrix.target }}
-          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: fuzz-corpus-${{ matrix.target }}-
 
       # --target is pinned because cargo-fuzz defaults it to its own build
@@ -65,3 +65,12 @@ jobs:
           name: fuzz-artifacts-${{ matrix.target }}
           path: crates/core/fuzz/artifacts/
           if-no-files-found: ignore
+
+      # a run that crashed is the one whose corpus is worth keeping, and a
+      # plain actions/cache step only saves when the job succeeded
+      - name: Save corpus
+        if: always()
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: crates/core/fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
