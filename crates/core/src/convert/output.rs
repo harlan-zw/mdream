@@ -575,6 +575,19 @@ impl ConvertState {
       self.record_item_marker(self.stack[stack_len - 1].index, output_start);
     }
 
+    // The blank line that re-enables Markdown must be looked for *inside* the
+    // region. `raw_html_scanned_to` only moves on text nodes, so it still points
+    // before the region began and earlier block spacing is read as if inside,
+    // escaping text that is passed through verbatim: `\*` reaches the reader as a
+    // literal backslash.
+    if !self.plain_text
+      && tag_id.is_some_and(Self::is_raw_html_block_tag)
+      && self.raw_html_block_depth() == 1
+    {
+      self.raw_html_markdown = false;
+      self.raw_html_scanned_to = self.buffer.len();
+    }
+
     if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
       if !self.blockquotes.is_empty() && self.buffer.ends_with("\n\n") {
         self.buffer.pop();
@@ -1919,13 +1932,28 @@ impl ConvertState {
     line.get(indent) == Some(&b'<')
   }
 
+  /// Tags whose content is emitted as raw HTML, suspending Markdown until a
+  /// blank line inside the region re-enables it.
+  #[inline]
+  pub(crate) fn is_raw_html_block_tag(id: u8) -> bool {
+    matches!(
+      id,
+      TAG_DETAILS | TAG_SUMMARY | TAG_ADDRESS | TAG_DL | TAG_DT | TAG_DD
+    )
+  }
+
+  /// `1` at an enter means this tag begins the region.
+  fn raw_html_block_depth(&self) -> u32 {
+    u32::from(self.depth_map[TAG_DETAILS as usize])
+      + u32::from(self.depth_map[TAG_SUMMARY as usize])
+      + u32::from(self.depth_map[TAG_ADDRESS as usize])
+      + u32::from(self.depth_map[TAG_DL as usize])
+      + u32::from(self.depth_map[TAG_DT as usize])
+      + u32::from(self.depth_map[TAG_DD as usize])
+  }
+
   pub(crate) fn in_raw_html_block(&self) -> bool {
-    self.depth_map[TAG_DETAILS as usize] > 0
-      || self.depth_map[TAG_SUMMARY as usize] > 0
-      || self.depth_map[TAG_ADDRESS as usize] > 0
-      || self.depth_map[TAG_DL as usize] > 0
-      || self.depth_map[TAG_DT as usize] > 0
-      || self.depth_map[TAG_DD as usize] > 0
+    self.raw_html_block_depth() > 0
   }
 
   /// Character count of the current (unterminated) buffer line, i.e. since the

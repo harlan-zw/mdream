@@ -1157,3 +1157,25 @@ fn streaming_marker_guard_defers_to_item_exit_matches_one_shot() {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
 }
+
+// Raw HTML is passed through verbatim, so a GFM escape written inside a raw
+// region is not an escape: the backslash reaches the reader. The blank line that
+// re-enables Markdown must be looked for inside the region, not before it.
+#[test]
+fn raw_html_region_text_is_not_gfm_escaped() {
+  for (html, expected) in [
+    (".<ul><li><dd>*", ".\n\n- <dd>*</dd>"),
+    ("<p>x</p><li><dd>_", "x\n\n- <dd>_</dd>"),
+    ("<caption>c</caption><tr><dd>*", "c\n\n| <dd>*</dd>\n |\n|"),
+    // Only inside the region: the leading `*` is still escaped.
+    ("*<ul><li><dd>_", "\\*\n\n- <dd>_</dd>"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HTMLToMarkdownOptions::default()),
+      expected,
+      "one-shot for {html:?}"
+    );
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
