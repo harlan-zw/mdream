@@ -1186,7 +1186,7 @@ impl ConvertState {
     let buf_len = buf_bytes.len();
     let last_char = if buf_len > 0 {
       buf_bytes[buf_len - 1]
-    } else if self.has_streamed_output {
+    } else if self.flushed_tail_valid {
       // The buffer was drained (and possibly trimmed) empty, but earlier output
       // ended with this byte. Spacing must be decided against it, not `0`, so a
       // word separator that one-shot keeps is not dropped across the boundary.
@@ -1542,7 +1542,7 @@ impl ConvertState {
       spaces += 1;
     }
     if index == 0 {
-      return !self.has_streamed_output || self.flushed_tail[1] == b'\n';
+      return !self.flushed_tail_valid || self.flushed_tail[1] == b'\n';
     }
     bytes[index - 1] == b'\n'
   }
@@ -1569,7 +1569,7 @@ impl ConvertState {
     let before = |offset: usize| -> u8 {
       match line_start.checked_sub(offset) {
         Some(at) => bytes[at],
-        None if self.has_streamed_output => self.flushed_tail[2 - (offset - line_start)],
+        None if self.flushed_tail_valid => self.flushed_tail[2 - (offset - line_start)],
         None => 0,
       }
     };
@@ -1822,7 +1822,7 @@ impl ConvertState {
   fn last_output_byte(&self) -> Option<u8> {
     match self.buffer.as_bytes().last().copied() {
       Some(byte) => Some(byte),
-      None if self.has_streamed_output => Some(self.flushed_tail[1]),
+      None if self.flushed_tail_valid => Some(self.flushed_tail[1]),
       None => None,
     }
   }
@@ -1878,7 +1878,7 @@ impl ConvertState {
     // a drain has taken this line's beginning: the fragment left behind can open
     // with a tag the real line only continues, which suspends Markdown and drops
     // the escapes a one-shot conversion writes.
-    if self.line_start == 0 && self.has_streamed_output && self.flushed_tail[1] != b'\n' {
+    if self.line_start == 0 && self.flushed_tail_valid && self.flushed_tail[1] != b'\n' {
       return self.cut_line_lead == Some(b'<');
     }
     let line = &bytes[self.line_start..len];
@@ -2632,18 +2632,23 @@ impl ConvertState {
     // `flushed_tail` contains the two bytes immediately before `buffer[0]`.
     // Without that context a separator that one-shot trims to one newline can
     // be emitted as two in streaming (e.g. a lone `-` at the buffer start).
+    // Yielding does not remove bytes, so `has_streamed_output` is no evidence that
+    // anything precedes `buffer[0]`: until a drain actually cuts, `flushed_tail`
+    // still holds its document-start sentinel and reading it invents a newline
+    // that suppresses half of a block separator.
+    let tail_known = self.flushed_tail_valid;
     let last_char = if buf_len > 0 {
       buf_bytes[buf_len - 1]
-    } else if self.has_streamed_output {
+    } else if tail_known {
       self.flushed_tail[1]
     } else {
       0
     };
     let second_last_char = if buf_len > 1 {
       buf_bytes[buf_len - 2]
-    } else if buf_len == 1 && self.has_streamed_output {
+    } else if buf_len == 1 && tail_known {
       self.flushed_tail[1]
-    } else if self.has_streamed_output {
+    } else if tail_known {
       self.flushed_tail[0]
     } else {
       0
@@ -2911,7 +2916,7 @@ impl ConvertState {
     // An empty buffer is a fresh line only while no drain has taken this line's
     // beginning: afterwards `flushed_tail` is what the row follows, so the
     // emptied buffer has to fall through to the drain-aware scan below.
-    let line_lead_drained = self.has_streamed_output && self.flushed_tail[1] != b'\n';
+    let line_lead_drained = self.flushed_tail_valid && self.flushed_tail[1] != b'\n';
     // Rows end their line, so the row after a row decides on one byte and never
     // rescans the line it just wrote.
     if matches!(bytes.last(), Some(b'\n')) || (bytes.is_empty() && !line_lead_drained) {
@@ -2995,11 +3000,28 @@ mod tests {
   fn empty_drained_buffer_counts_two_flushed_newlines() {
     let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
     state.has_streamed_output = true;
+    // A drain is what puts bytes behind `buffer[0]`; yielding alone does not, and
+    // the counting below may only read `flushed_tail` once one has happened.
+    state.flushed_tail_valid = true;
     state.flushed_tail = [b'\n', b'\n'];
 
     state.write_output(true, false, 2, Some("next"), false);
 
     assert_eq!(state.buffer, "next");
+  }
+
+  // Yielded output that never drained leaves `buffer[0]` at the document start,
+  // where one-shot counts no preceding newlines. Reading the sentinel there
+  // suppresses half of every following block separator.
+  #[test]
+  fn undrained_buffer_counts_no_flushed_newlines() {
+    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.has_streamed_output = true;
+    state.buffer.push('c');
+
+    state.write_output(true, false, 2, Some("next"), false);
+
+    assert_eq!(state.buffer, "c\n\nnext");
   }
 
   // Draining, and then a rewrite trimming what draining retained, leaves the
@@ -3011,6 +3033,8 @@ mod tests {
     assert_eq!(state.last_output_byte(), None);
 
     state.has_streamed_output = true;
+    // A drain is what puts bytes behind `buffer[0]`; yielding alone does not.
+    state.flushed_tail_valid = true;
     state.flushed_tail = *b"xy";
     assert_eq!(state.last_output_byte(), Some(b'y'));
 

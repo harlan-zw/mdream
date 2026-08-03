@@ -441,6 +441,10 @@ pub struct ConvertState {
   /// newlines at the document start. When a later rewrite trims the buffer
   /// empty, spacing and newline counts still see the one-shot context.
   flushed_tail: [u8; 2],
+  /// Whether `flushed_tail` describes real removed bytes. Output can be yielded
+  /// without the buffer being cut, and until a cut happens `flushed_tail` is
+  /// still the document-start sentinel, which no consumer may read as context.
+  flushed_tail_valid: bool,
   /// First non-blank byte of the current line when draining has removed that
   /// line's start, so line-leading questions survive the cut. `None` means the
   /// retained buffer still holds the whole line (or its lead is still blank).
@@ -606,6 +610,7 @@ impl ConvertState {
       last_yielded_length: 0,
       has_streamed_output: false,
       flushed_tail: [b'\n'; 2],
+      flushed_tail_valid: false,
       cut_line_lead: None,
       buffer_start_column: 0,
       #[cfg(test)]
@@ -1450,6 +1455,7 @@ impl ConvertState {
       };
     }
     let bytes = self.buffer.as_bytes();
+    self.flushed_tail_valid = true;
     self.flushed_tail = if drain_end >= 2 {
       [bytes[drain_end - 2], bytes[drain_end - 1]]
     } else {

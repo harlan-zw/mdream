@@ -949,3 +949,21 @@ fn streaming_raw_html_blank_line_drained_matches_one_shot() {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
 }
+
+// Yielding does not remove bytes, but `has_streamed_output` is set as soon as any
+// are yielded. `flushed_tail` only describes real removed bytes, so reading it on
+// the strength of that flag invents a newline before `buffer[0]` and suppresses
+// half of the following block separator.
+#[test]
+fn streaming_block_separator_after_undrained_yield_matches_one_shot() {
+  for html in [
+    "<table><caption>c</caption>.",
+    "<table><p>x</p>.",
+    "<table><caption>c</caption><tr>",
+    "<td>d</td><table><tr>",
+    "<table><p>x</p><dd>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
