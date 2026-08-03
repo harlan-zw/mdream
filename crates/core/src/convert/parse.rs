@@ -652,11 +652,25 @@ impl ConvertState {
       self.clear_overflow();
     }
 
-    while let Some(top) = self.stack.last() {
-      match top.tag_id {
-        Some(id) if closeable[id as usize] => self.close_node(),
-        _ => break,
+    // One reverse pass, as in `close_implied_to`: re-deciding after each close
+    // walks the stack once per closed node.
+    let mut close_count = 0usize;
+    let mut walked = 0usize;
+    for node in self.stack.iter().rev() {
+      match node.tag_id {
+        Some(id) if closeable[id as usize] => {
+          walked += 1;
+          close_count = walked;
+        }
+        // Content left open inside a cell (`<td><p>text` with no `</p>`, or an
+        // unknown custom element) sits above the closeable element and closes
+        // with it; stopping here would leave the new row nested in the old cell.
+        Some(TAG_TABLE | TAG_TEMPLATE | TAG_CAPTION) => break,
+        _ => walked += 1,
       }
+    }
+    for _ in 0..close_count {
+      self.close_node();
     }
   }
 
@@ -1225,7 +1239,9 @@ impl ConvertState {
         let stack_len = self.stack.len();
         let parent_is_ordered = stack_len >= 2 && self.stack[stack_len - 2].tag_id == Some(TAG_OL);
         if parent_is_ordered {
-          let n = li.index + 1;
+          // Must match the marker actually written, `start` included, or the
+          // item's continuation content drifts out of it.
+          let n = Self::ordered_item_number(&self.stack[stack_len - 2], li.index).max(1);
           // n >= 1 so ilog10 never panics; +1 converts floor(log10) to digit count.
           let digits = (n.ilog10() + 1) as usize;
           digits + 2

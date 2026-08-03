@@ -253,6 +253,8 @@ pub const ATTR_ALIGN: u16 = 1 << 6;
 pub const ATTR_NAME: u16 = 1 << 7;
 pub const ATTR_PROPERTY: u16 = 1 << 8;
 pub const ATTR_CONTENT: u16 = 1 << 9;
+pub const ATTR_START: u16 = 1 << 10;
+pub const ATTR_COLSPAN: u16 = 1 << 11;
 pub const ATTR_ALL: u16 = u16::MAX;
 
 /// Case-insensitive, length-first so the common miss costs one compare.
@@ -284,6 +286,8 @@ pub(crate) fn attr_bit(name: &[u8]) -> u16 {
         ATTR_CLASS
       } else if name.eq_ignore_ascii_case(b"align") {
         ATTR_ALIGN
+      } else if name.eq_ignore_ascii_case(b"start") {
+        ATTR_START
       } else {
         ATTR_NONE
       }
@@ -291,6 +295,8 @@ pub(crate) fn attr_bit(name: &[u8]) -> u16 {
     7 => {
       if name.eq_ignore_ascii_case(b"content") {
         ATTR_CONTENT
+      } else if name.eq_ignore_ascii_case(b"colspan") {
+        ATTR_COLSPAN
       } else {
         ATTR_NONE
       }
@@ -313,17 +319,15 @@ pub(crate) fn attr_bit(name: &[u8]) -> u16 {
   }
 }
 
-#[inline]
-pub(crate) fn attr_wanted(mask: u16, name: &[u8]) -> bool {
-  mask == ATTR_ALL || mask & attr_bit(name) != 0
-}
-
 pub const MARKDOWN_STRONG: &str = "**";
 pub const MARKDOWN_EMPHASIS: &str = "*";
 pub const MARKDOWN_STRIKETHROUGH: &str = "~~";
 pub const MARKDOWN_CODE_BLOCK: &str = "```";
 pub const MARKDOWN_INLINE_CODE: &str = "`";
 pub const MARKDOWN_HORIZONTAL_RULE: &str = "---";
+/// Rule sharing a line with a list marker: `- ---` is dashes and spaces only, so
+/// the whole line is a thematic break and the item is lost. `*` cannot collide.
+pub const MARKDOWN_HORIZONTAL_RULE_ALT: &str = "***";
 
 pub const NO_SPACING: [u8; 2] = [0, 0];
 pub const DEFAULT_BLOCK_SPACING: [u8; 2] = [2, 2];

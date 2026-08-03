@@ -39,7 +39,7 @@ describe('gfm text escaping', () => {
 
   it('only escapes syntax where plain text could activate it', () => {
     expect(htmlToMarkdown('<h2># Heading #</h2><p>#hashtag</p><p>Just a - dash</p>'))
-      .toBe('## # Heading #\n\n#hashtag\n\nJust a - dash')
+      .toBe('## # Heading \\#\n\n#hashtag\n\nJust a - dash')
   })
 
   it('escapes syntax introduced by entity decoding', () => {
@@ -106,6 +106,13 @@ describe('gfm text escaping', () => {
       .toBe('[a\\[b\\] \\*c\\*](/x)')
     expect(htmlToMarkdown('<table><tr><td>a|b</td></tr></table>'))
       .toBe('| a\\|b |\n| --- |')
+  })
+
+  it('rejects malformed or out-of-range colspan', () => {
+    expect(htmlToMarkdown('<table><tr><th colspan="2x">h</th></tr><tr><td>a</td><td>b</td></tr></table>'))
+      .toBe('| h |\n| --- |\n| a b |')
+    expect(htmlToMarkdown('<table><tr><th colspan="300">h</th></tr><tr><td>a</td><td>b</td></tr></table>'))
+      .toBe('| h |\n| --- |\n| a b |')
   })
 
   it('serializes decoded text for its output context', () => {

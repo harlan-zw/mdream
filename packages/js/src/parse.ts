@@ -373,11 +373,27 @@ function closeTableContext(
       return
     clearFlattenedElements(state)
   }
-  while (state.currentNode) {
-    const id = state.currentNode.tagId
-    if (id === undefined || !closeable.has(id)) {
+  // One reverse pass, as in `closeImpliedTo`: re-deciding after each close walks
+  // the stack once per closed node.
+  let closeCount = 0
+  let walked = 0
+  for (let node = state.currentNode; node; node = node.parent) {
+    const id = node.tagId
+    if (id !== undefined && closeable.has(id)) {
+      walked++
+      closeCount = walked
+    }
+    // Content left open inside a cell (`<td><p>text` with no `</p>`, or an
+    // unknown custom element) sits above the closeable element and closes with
+    // it; stopping here would leave the new row nested in the old cell.
+    else if (id === TAG_TABLE || id === TAG_TEMPLATE || id === TAG_CAPTION) {
       break
     }
+    else {
+      walked++
+    }
+  }
+  for (let i = 0; i < closeCount && state.currentNode; i++) {
     closeNode(state.currentNode, state, handleEvent)
   }
 }

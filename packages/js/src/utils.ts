@@ -1,5 +1,5 @@
 import type { ElementNode, Node } from './types'
-import { TAG_BLOCKQUOTE, TAG_LI } from './const'
+import { NEWLINE_CHAR, SPACE_CHAR, TAG_BLOCKQUOTE, TAG_H1, TAG_H6, TAG_LI, TAG_TD, TAG_TH } from './const'
 import {
   HTML_ENTITIES,
   MAX_ENTITY_NAME_LENGTH,
@@ -8,6 +8,19 @@ import {
 
 function lowerAscii(code: number): number {
   return code >= 65 && code <= 90 ? code + 32 : code
+}
+
+export function isInsideHeading(depthMap: Uint16Array): boolean {
+  for (let tagId = TAG_H1; tagId <= TAG_H6; tagId++) {
+    if (depthMap[tagId])
+      return true
+  }
+  return false
+}
+
+export function isInsideTableCell(state: { depthMap?: Uint16Array }): boolean {
+  const depthMap = state.depthMap!
+  return depthMap[TAG_TD]! > 0 || depthMap[TAG_TH]! > 0
 }
 
 /**
@@ -177,6 +190,125 @@ export function getLanguageFromClass(className: string | undefined): string {
   return ''
 }
 
+// Strict unsigned integer parsing shared by numeric HTML attributes. Partial
+// reads such as `2x` must not disagree with Rust's full-string parse.
+export function parseUnsignedInteger(raw: string | undefined): number | undefined {
+  return raw !== undefined && /^[\t\n\f\r ]*\+?\d+[\t\n\f\r ]*$/.test(raw)
+    ? Number(raw)
+    : undefined
+}
+
+/**
+ * Code unit last written to the buffer, or -1 when nothing has been. Handlers
+ * legitimately return `''`, so the last *fragment* is not always the last
+ * character.
+ */
+function lastOutputChar(buffer: readonly string[]): number {
+  for (let index = buffer.length - 1; index >= 0; index--) {
+    const fragment = buffer[index]!
+    if (fragment.length > 0)
+      return fragment.charCodeAt(fragment.length - 1)
+  }
+  return -1
+}
+
+/**
+ * Separation a block needs to open at the content column `prefix` describes, or
+ * `undefined` when the buffer already sits there.
+ */
+export function blockOpenPrefix(
+  buffer: readonly string[],
+  prefix: string | undefined,
+): string | undefined {
+  switch (lastOutputChar(buffer)) {
+    // Empty output.
+    case -1:
+      return undefined
+    case SPACE_CHAR: {
+      // A trailing space can be a pending list marker already at the content
+      // column, or ordinary text (`"item "`) that still has to break as a
+      // paragraph. Only the former needs no separator.
+      let fragment = buffer.length - 1
+      let index = buffer[fragment]!.length
+      for (;;) {
+        if (index === 0) {
+          if (--fragment < 0)
+            return undefined
+          index = buffer[fragment]!.length
+          continue
+        }
+        const code = buffer[fragment]!.charCodeAt(--index)
+        if (code !== SPACE_CHAR) {
+          return code === NEWLINE_CHAR || listMarkerLineStart(buffer, fragment, index)
+            ? undefined
+            : `\n\n${prefix ?? ''}`
+        }
+      }
+    }
+    case NEWLINE_CHAR:
+      return prefix || undefined
+    // Directly under text the block reads as a setext underline or a lazy
+    // continuation, so it has to break the paragraph first.
+    default:
+      return `\n\n${prefix ?? ''}`
+  }
+}
+
+/**
+ * Whether the list marker ending at `fragmentIndex`/`markerIndex` is all its
+ * line holds: optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
+ */
+export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: number, markerIndex: number): boolean {
+  const marker = buffer[fragmentIndex]!.charCodeAt(markerIndex)
+  const ordered = marker === 46 || marker === 41 // . )
+  if (!ordered && marker !== 45 && marker !== 42 && marker !== 43) // - * +
+    return false
+
+  let digits = 0
+  let spaces = 0
+  let fragment = fragmentIndex
+  let cursor = markerIndex
+  for (;;) {
+    if (cursor === 0) {
+      if (--fragment < 0)
+        return !ordered || digits > 0
+      cursor = buffer[fragment]!.length
+      continue
+    }
+    const code = buffer[fragment]!.charCodeAt(--cursor)
+    if (ordered && spaces === 0 && code >= 48 && code <= 57) {
+      if (++digits > 9)
+        return false
+      continue
+    }
+    if (ordered && digits === 0)
+      return false
+    if (code === 32) {
+      if (++spaces > 3)
+        return false
+      continue
+    }
+    return code === 10
+  }
+}
+
+// Largest `<ol start>` CommonMark can express: an ordered marker is at most nine
+// digits, so anything wider stops being a list marker at all.
+const MAX_ORDERED_START = 999_999_999
+
+// The rendered number of an ordered list item, honoring `<ol start>`. A `start`
+// too wide for an ordered marker is not one, so it falls back to the default
+// numbering, and the running number stops at the same width.
+export function orderedItemNumber(list: ElementNode | null | undefined, index: number): number {
+  const raw = list?.attributes?.start
+  if (raw === undefined)
+    return index + 1
+  const start = parseUnsignedInteger(raw)
+  if (start === undefined || start > MAX_ORDERED_START)
+    return Math.min(1 + index, MAX_ORDERED_START)
+  return Math.min(start + index, MAX_ORDERED_START)
+}
+
 function numericReplacement(codePoint: number): string {
   if (codePoint === 0 || codePoint > 0x10FFFF || (codePoint >= 0xD800 && codePoint <= 0xDFFF))
     return '\uFFFD'
@@ -185,7 +317,7 @@ function numericReplacement(codePoint: number): string {
   return String.fromCodePoint(codePoint)
 }
 
-function isCharacterReferenceTail(text: string, start: number): boolean {
+export function isCharacterReferenceTail(text: string, start: number): boolean {
   let index = start
   if (text.charCodeAt(index) === 35) { // #
     index++

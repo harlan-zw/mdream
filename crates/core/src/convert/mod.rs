@@ -52,16 +52,35 @@ const BATCHABLE_TEXT: [bool; 256] = {
   t
 };
 
-/// Callers must range-guard: bytes >= 128 alias into `GFM_HAZARD_HIGH`.
-#[inline(always)]
-fn is_inline_gfm_hazard(byte: u8) -> bool {
-  let mask = if byte < HAZARD_MASK_SPLIT {
-    GFM_HAZARD_LOW
-  } else {
-    GFM_HAZARD_HIGH
-  };
-  (mask >> (byte & (HAZARD_MASK_SPLIT - 1))) & 1 != 0
-}
+const GFM_HAZARD_BIT: u8 = 1;
+const GFM_NEWLINE_BIT: u8 = 2;
+const GFM_TEXT_ACTIVE_BIT: u8 = 4;
+
+/// Per-byte GFM flags shared by the parser and escaping pass.
+const GFM_BYTE_FLAGS: [u8; 256] = {
+  let mut t = [0u8; 256];
+  let mut c = 33usize;
+  while c < 0x80 {
+    let mask = if c < HAZARD_MASK_SPLIT as usize {
+      GFM_HAZARD_LOW
+    } else {
+      GFM_HAZARD_HIGH
+    };
+    if (mask >> (c & (HAZARD_MASK_SPLIT as usize - 1))) & 1 != 0 {
+      t[c] |= GFM_HAZARD_BIT;
+    }
+    c += 1;
+  }
+  t[b'\n' as usize] |= GFM_NEWLINE_BIT;
+  t[b'\r' as usize] |= GFM_NEWLINE_BIT;
+  let active = b"\\*_~`[]|><\n\r#-+.) 0123456789";
+  let mut i = 0usize;
+  while i < active.len() {
+    t[active[i] as usize] |= GFM_TEXT_ACTIVE_BIT;
+    i += 1;
+  }
+  t
+};
 
 struct CodeSpanState {
   output_start: usize,
@@ -83,6 +102,42 @@ struct BlockquoteFrame {
 }
 
 static HEADING_PREFIXES: [&str; 6] = ["# ", "## ", "### ", "#### ", "##### ", "###### "];
+
+/// Inline tags whose delimiters are suppressed inside `<pre>` (content only).
+/// The tag ids form three dense ranges plus four exceptions.
+#[inline]
+fn suppresses_formatting_in_pre(tag_id: u8) -> bool {
+  matches!(tag_id, TAG_A | TAG_KBD | TAG_S | TAG_STRIKE)
+    || (TAG_STRONG..=TAG_INS).contains(&tag_id)
+    || (TAG_ABBR..=TAG_SMALL).contains(&tag_id)
+    || (TAG_U..=TAG_BDO).contains(&tag_id)
+}
+
+#[inline]
+fn trailing_spaces(bytes: &[u8]) -> usize {
+  bytes.len()
+    - bytes
+      .iter()
+      .rposition(|byte| *byte != b' ')
+      .map_or(0, |i| i + 1)
+}
+
+/// What the current output line holds where a table row is about to be written.
+enum LineBeforeRow {
+  /// Nothing but block prefix, or a pending list marker.
+  Open,
+  /// A row left open mid-line.
+  Row,
+  /// Other content, so the row needs a block break to become a table.
+  Content,
+}
+
+/// Widest `colspan` honored.
+const MAX_CELL_SPAN: u8 = 64;
+
+/// Largest `<ol start>` CommonMark can express: an ordered marker is at most
+/// nine digits, so anything wider stops being a list marker at all.
+const MAX_ORDERED_START: u32 = 999_999_999;
 
 // Clean mode bitmask flags
 const CLEAN_EMPTY_LINKS: u8 = 1;
@@ -351,6 +406,18 @@ pub struct ConvertState {
   last_content_cache_len: usize,
   table_rendered_table: bool,
   table_current_row_cells: usize,
+  /// A raw-HTML region (`<details>`, `<dl>`, …) stops being raw at the first
+  /// blank line: CommonMark ends an HTML block there and reads what follows as
+  /// Markdown, so text past one needs escaping. The scan resumes from
+  /// `raw_html_scanned_to`, so a region costs one pass however many nodes it holds.
+  raw_html_markdown: bool,
+  raw_html_scanned_to: usize,
+  /// Index just past the buffer's last `\n`, and how far it was scanned to find
+  /// it. Recomputing walks the whole line, which is quadratic over a long one.
+  line_start: usize,
+  line_start_scanned_to: usize,
+  /// Columns the delimiter row promised; cells past it would be dropped by GFM.
+  table_header_cells: usize,
   // 0=none, 1=left, 2=center, 3=right
   table_column_alignments: Vec<u8>,
   last_text_node_contains_whitespace: bool,
@@ -370,9 +437,9 @@ pub struct ConvertState {
   /// Once streaming starts, whitespace at the front of a drained buffer is
   /// content, not document-leading whitespace.
   has_streamed_output: bool,
-  /// Last two bytes flushed out of the front of the buffer by draining. When a
-  /// later rewrite trims the retained buffer empty, spacing and newline counts
-  /// still need the same two-byte context one-shot conversion sees.
+  /// Two bytes immediately before the retained buffer, initialized as virtual
+  /// newlines at the document start. When a later rewrite trims the buffer
+  /// empty, spacing and newline counts still see the one-shot context.
   flushed_tail: [u8; 2],
   /// Output column immediately before `buffer[0]`. Draining may remove the
   /// beginning of the current line, but wrapping still needs its full column.
@@ -426,11 +493,19 @@ pub struct ConvertState {
   /// until the first non-whitespace child so empty/whitespace-only blocks emit
   /// nothing. `pre_fence_pending`: inside a `<pre>` whose fence is undecided.
   /// `pre_fence_lang`: language resolved from the `<pre>`'s own class.
-  /// `pre_own_fence`: the `<pre>` opened its own fence (so a nested `<code>`
-  /// must not, and the `<pre>` exit emits the closing fence).
   pre_fence_pending: bool,
   pre_fence_lang: String,
-  pre_own_fence: bool,
+  /// A fence is open for the current `<pre>`, however it was opened. The `<pre>`
+  /// exit owns the closer, so a `<code>` child's trailing siblings stay in the
+  /// block instead of landing on the fence line.
+  pre_fence_open: bool,
+  /// The open `<li>` wrote its marker onto a line that continues the paragraph
+  /// above, so an empty item would read as a setext underline. `empty_item_len`
+  /// is the buffer length that still means "nothing written since the marker",
+  /// and `empty_item_line_start` where the separating newline goes.
+  empty_item_hazard: bool,
+  empty_item_line_start: usize,
+  empty_item_len: usize,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
 }
@@ -508,6 +583,11 @@ impl ConvertState {
       last_content_cache_len: 0,
       table_rendered_table: false,
       table_current_row_cells: 0,
+      raw_html_markdown: false,
+      raw_html_scanned_to: 0,
+      line_start: 0,
+      line_start_scanned_to: 0,
+      table_header_cells: 0,
       table_column_alignments: Vec::new(),
       last_text_node_contains_whitespace: false,
       last_text_node_depth: 0,
@@ -517,7 +597,7 @@ impl ConvertState {
       pending_inline_whitespace: false,
       last_yielded_length: 0,
       has_streamed_output: false,
-      flushed_tail: [0; 2],
+      flushed_tail: [b'\n'; 2],
       buffer_start_column: 0,
       #[cfg(test)]
       disable_drain: false,
@@ -542,7 +622,10 @@ impl ConvertState {
 
       pre_fence_pending: false,
       pre_fence_lang: String::new(),
-      pre_own_fence: false,
+      pre_fence_open: false,
+      empty_item_hazard: false,
+      empty_item_line_start: 0,
+      empty_item_len: 0,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
     };
@@ -749,7 +832,7 @@ impl ConvertState {
         if cc == AMPERSAND_CHAR {
           self.has_encoded_html_entity = true;
         }
-        if cc > 32 && cc < 0x80 && is_inline_gfm_hazard(cc) {
+        if GFM_BYTE_FLAGS[cc as usize] & GFM_HAZARD_BIT != 0 {
           self.text_buffer_has_inline_gfm_hazard = true;
         }
 
@@ -1249,6 +1332,17 @@ impl ConvertState {
           .len(),
       );
     }
+    // A marker still alone on its line has its separating newline inserted at
+    // the line start when the item resolves, so the line stays mutable.
+    if self.empty_item_hazard {
+      stable_end = stable_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
+    }
+    // A heading's exit escapes the trailing `#` run GFM would read as an ATX
+    // closing sequence, so hold the run (and the spacing that decides whether it
+    // closes) until the heading is complete.
+    if self.in_heading() {
+      stable_end = stable_end.min(self.buffer.trim_end_matches(['#', ' ', '\t']).len());
+    }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let mut start = self.last_yielded_length.max(leading);
     if start >= stable_end {
@@ -1311,13 +1405,6 @@ impl ConvertState {
     // there (see `write_output`, which inspects only the last two), so keep
     // those two bytes; otherwise a dropped element leaks an extra newline in
     // streaming.
-    let keep_two_before = |buf: &str, at: usize| {
-      let mut i = at.saturating_sub(2);
-      while i > 0 && !buf.is_char_boundary(i) {
-        i -= 1;
-      }
-      i
-    };
     if self.depth_map[TAG_A as usize] > 0 {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.link_bracket_pos));
     }
@@ -1332,6 +1419,12 @@ impl ConvertState {
     }
     if let Some(frame) = self.blockquotes.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, frame.content_start));
+    }
+    // Settle a pending marker-line guard when the item's first content already
+    // answers it, so the hold below never outlives the marker's own line.
+    self.resolve_item_marker(false);
+    if self.empty_item_hazard {
+      drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
     if drain_end == 0 {
       return;
@@ -1370,7 +1463,25 @@ impl ConvertState {
     for frame in &mut self.blockquotes {
       frame.content_start -= drain_end;
     }
+    self.empty_item_line_start = self.empty_item_line_start.saturating_sub(drain_end);
+    self.empty_item_len = self.empty_item_len.saturating_sub(drain_end);
+    // Buffer-indexed like every other stored offset: left alone, streaming reads
+    // a different line start than one-shot.
+    self.raw_html_scanned_to = self.raw_html_scanned_to.saturating_sub(drain_end);
+    self.line_start = self.line_start.saturating_sub(drain_end);
+    self.line_start_scanned_to = self.line_start_scanned_to.saturating_sub(drain_end);
   }
+}
+
+/// Highest offset that still keeps the two bytes before `at` in the buffer, for
+/// a rewrite that can reach back there. Floored to a UTF-8 boundary, so the
+/// result is always safe to slice at even if `at` has drifted past the end.
+fn keep_two_before(buf: &str, at: usize) -> usize {
+  let mut i = at.saturating_sub(2);
+  while i > 0 && !buf.is_char_boundary(i) {
+    i -= 1;
+  }
+  i
 }
 
 // Internal result structs

@@ -111,6 +111,8 @@ describe('streaming parity with the Rust core', () => {
     '<dl><dt>MPN:</dt><dd>D100</dd><dt>Availability:</dt><dd>Ships</dd></dl>',
     '<details><summary>Title</summary><p>Body</p></details>',
     '<address><p>One</p><p>Two</p></address>',
+    '<details><p>a</p>\n\n<p>b</p></details><dl><dd>~tilde~</dd></dl>',
+    '<details><p>a</p>\n\n<p>b</p></details><dl>a<span>b</span>~tilde~</dl>',
   ])('keeps raw HTML block closes stable for %s', async (html) => {
     await expectStreamingParity(html)
   })

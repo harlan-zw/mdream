@@ -100,6 +100,43 @@ fn well_formed_table_is_unchanged() {
   );
 }
 
+#[test]
+fn implicit_row_end_closes_content_left_open_in_the_cell() {
+  // Regression: an unclosed child of the cell (an unknown element, or a block
+  // with no end tag) stopped the row scan, so the next <tr> nested inside the
+  // old cell and its markup leaked into the output as text.
+  assert_eq!(
+    convert("<table><tr><td>a<x-widget><tr><td>b</table>"),
+    "| a |\n| --- |\n| b |",
+  );
+  assert_eq!(
+    convert("<table><tr><td>a<p>x<tr><td>b</table>"),
+    "| a x |\n| --- |\n| b |",
+  );
+  assert_eq!(
+    convert("<table><thead><tr><th>V<th>C<tbody><tr><td>a<td><p>x<tr><td>b<td><p>y</table>"),
+    "| V | C |\n| --- | --- |\n| a | x |\n| b | y |",
+  );
+}
+
+#[test]
+fn row_recovery_stops_at_a_nested_table_or_template() {
+  // The scan must not walk out of a nested table, template, or caption: those
+  // hold their own row structure, so the outer <tr> belongs to the outer table.
+  assert_eq!(
+    convert("<table><tr><td><table><tr><td>inner<tr><td>b</table><tr><td>outer</table>"),
+    "| <table><tr><td>inner</td></tr><tr><td>b</td></tr></table> |\n| --- |\n| outer |",
+  );
+  assert_eq!(
+    convert("<table><tr><td>a<template><tr><td>t</template><tr><td>b</table>"),
+    "| a |\n| --- |\n| b |",
+  );
+  assert_eq!(
+    convert("<table><caption>C<tr><td>a<tr><td>b</table>"),
+    "C\n\n| a |\n| --- |\n| b |",
+  );
+}
+
 // ── definition lists ──
 //
 // `<dl>`/`<dt>`/`<dd>` keep their raw-HTML passthrough (valid inline markup for

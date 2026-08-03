@@ -148,10 +148,12 @@ fn scan_tag<const EXTRACT: bool>(
       && i + 1 < chunk_length
       && bytes[i + 1] == GT_CHAR
     {
-      return (true, i + 2, scan.finish(html_chunk, i), true);
+      let attrs = scan.finish(html_chunk, i);
+      return (true, i + 2, attrs, true);
     }
     if c == GT_CHAR {
-      return (true, i + 1, scan.finish(html_chunk, i), self_closing);
+      let attrs = scan.finish(html_chunk, i);
+      return (true, i + 1, attrs, self_closing);
     }
 
     // Run to the closing quote without re-entering the state dispatch.
@@ -190,7 +192,8 @@ fn scan_tag<const EXTRACT: bool>(
 /// unwanted attributes cost no allocations.
 #[inline]
 fn push_attr(result: &mut Attributes, mask: u16, raw: &str, value: Option<&str>) {
-  if !attr_wanted(mask, raw.as_bytes()) {
+  let bit = attr_bit(raw.as_bytes());
+  if mask != ATTR_ALL && mask & bit == 0 {
     return;
   }
   let name = raw.to_ascii_lowercase();
@@ -506,11 +509,17 @@ mod tests {
   }
 
   #[test]
+  fn colspan_uses_the_filtered_attribute_path() {
+    let attrs = parse_attributes("colspan=2 id=x", ATTR_COLSPAN);
+    assert_eq!(attrs.get("colspan").map(String::as_str), Some("2"));
+    assert!(!attrs.contains_key("id"));
+  }
+
+  #[test]
   fn process_tag_attributes_finds_close() {
     // "<a href=\"x\">" — scan from after the tag name
     let html = "a href=\"x\">rest";
-    let (complete, new_pos, attrs, self_closing) =
-      process_tag_attributes(html, 1, None, ATTR_ALL);
+    let (complete, new_pos, attrs, self_closing) = process_tag_attributes(html, 1, None, ATTR_ALL);
     assert!(complete);
     assert!(!self_closing);
     assert_eq!(&html[new_pos..], "rest");
@@ -559,10 +568,7 @@ mod tests {
       assert_eq!(extracted_pos, end, "html={html:?}");
       assert_eq!(complete, bare_complete, "html={html:?}");
       assert_eq!(extracted_pos, bare_pos, "html={html:?}");
-      assert_eq!(
-        extracted_self_closing, bare_self_closing,
-        "html={html:?}"
-      );
+      assert_eq!(extracted_self_closing, bare_self_closing, "html={html:?}");
       assert!(bare_attrs.is_empty(), "html={html:?}");
     }
   }

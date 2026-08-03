@@ -230,8 +230,10 @@ fn gfm_syntax_in_text_is_escaped() {
 #[test]
 fn gfm_text_escaping_preserves_generated_markers_and_code() {
   assert_eq!(
+    // The trailing `#` is escaped: unescaped it is an ATX closing sequence and
+    // GFM drops it. The leading one and `#hashtag` stay literal.
     convert("<h2># Heading #</h2><p>#hashtag</p><p>Just a - dash</p>"),
-    "## # Heading #\n\n#hashtag\n\nJust a - dash"
+    "## # Heading \\#\n\n#hashtag\n\nJust a - dash"
   );
   assert_eq!(
     convert(
@@ -1371,6 +1373,51 @@ fn horizontal_rule() {
   assert_eq!(convert("<hr/>"), "---");
 }
 
+#[test]
+fn an_empty_list_item_does_not_underline_the_text_above() {
+  // A lone marker continuing the paragraph above is a setext underline: the
+  // text becomes a heading and the item itself disappears.
+  assert_eq!(
+    convert("<ul><li>a<ul><li></li></ul></li></ul>"),
+    "- a\n\n  -"
+  );
+  assert_eq!(
+    convert("<p>a</p><ul><li></li><li>b</li></ul>"),
+    "a\n\n-\n- b"
+  );
+  // A sibling marker above already opens its own block, so nothing is inserted.
+  assert_eq!(
+    convert("<ul><li>a</li><li></li><li>b</li></ul>"),
+    "- a\n-\n- b"
+  );
+  assert_eq!(convert("<ul><li></li><li>a</li></ul>"), "-\n- a");
+}
+
+#[test]
+fn a_rule_inside_a_list_item_keeps_its_own_block() {
+  // Without the blank line `<hr>` reads as a setext underline instead.
+  assert_eq!(convert("<ul><li>a<hr></li></ul>"), "- a\n\n  ---");
+  assert_eq!(
+    convert("<ul><li><p>a</p><hr><p>b</p></li></ul>"),
+    "- a\n\n  ---\n\n  b"
+  );
+  // A pending marker already opened the content column, but `- ---` is dashes and
+  // spaces only, so the line would be a thematic break and the item would vanish.
+  assert_eq!(convert("<ul><li><hr></li></ul>"), "- ***");
+  assert_eq!(convert("<ul><li><hr></li><li>b</li></ul>"), "- ***\n- b");
+  // Regression: text's own trailing space (not a marker's) was mistaken for the
+  // content column, so `<hr>` glued onto it with no break and vanished as `***`.
+  assert_eq!(convert("<ul><li>text <hr></li></ul>"), "- text\n\n  ---");
+  assert_eq!(
+    convert("<ul><li>text <hr>after</li></ul>"),
+    "- text\n\n  --- after"
+  );
+  assert_eq!(
+    convert("<ul><li><blockquote>text <hr></blockquote></li></ul>"),
+    "- \n  > text\n  >\n  > ---"
+  );
+}
+
 // ── Paragraphs and spacing ──
 
 #[test]
@@ -1966,11 +2013,13 @@ fn pre_fence_opener_survives_a_trailing_space_trim() {
   let md = html_to_markdown("# h<pre><td></pre>", HTMLToMarkdownOptions::default());
   assert_eq!(md, "\\# h\n\n```\n\n```", "got: {md:?}");
 
+  // A <code> child's fence is closed by the <pre>, so the closer lands after the
+  // trim and the block keeps an empty body. Both forms are an empty code block.
   let md = html_to_markdown(
     "# h<pre><code><td></code></pre>",
     HTMLToMarkdownOptions::default(),
   );
-  assert_eq!(md, "\\# h\n\n```\n```", "got: {md:?}");
+  assert_eq!(md, "\\# h\n\n```\n\n```", "got: {md:?}");
 
   // Every block-marker escape (`#`, `-`, `>`) can precede the fence.
   for html in [
@@ -3610,6 +3659,107 @@ fn lt_before_a_non_letter_is_text_not_a_tag() {
 }
 
 #[test]
+fn block_markers_are_escaped_after_a_list_marker() {
+  for (html, expected) in [
+    ("<ul><li>- text</li></ul>", "- \\- text"),
+    ("<ul><li>+ text</li></ul>", "- \\+ text"),
+    ("<ul><li>1. text</li></ul>", "- 1\\. text"),
+    ("<ul><li>&gt; text</li></ul>", "- \\> text"),
+    ("<ul><li># text</li></ul>", "- \\# text"),
+    ("<ul><li>---</li></ul>", "- \\---"),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // An ordered marker gives its content column the same treatment.
+  assert_eq!(convert("<ol><li># text</li></ol>"), "1. \\# text");
+}
+
+#[test]
+fn heading_keeps_a_trailing_hash() {
+  assert_eq!(convert("<h2>Ends with #</h2>"), "## Ends with \\#");
+  assert_eq!(convert("<h3>#</h3>"), "### \\#");
+  assert_eq!(convert("<h2>Ends with ###</h2>"), "## Ends with \\###");
+  // Not a closing sequence without whitespace before it, so nothing to escape.
+  assert_eq!(convert("<h2>C#</h2>"), "## C#");
+  assert_eq!(convert("<h2>plain</h2>"), "## plain");
+}
+
+#[test]
+fn a_heading_without_an_atx_prefix_keeps_its_hash_unescaped() {
+  // No `#` prefix is written in either case, so there is no closing sequence to
+  // protect and a backslash would be literal content.
+  assert_eq!(
+    convert("<table><tr><th>h</th></tr><tr><td><h3>Ends with #</h3></td></tr></table>"),
+    "| h |\n| --- |\n| <h3>Ends with #</h3> |"
+  );
+  assert_eq!(convert_text("<h2>Ends with #</h2>"), "Ends with #");
+}
+
+#[test]
+fn ordered_lists_honor_the_start_attribute() {
+  assert_eq!(
+    convert("<ol start=\"3\"><li>a</li><li>b</li></ol>"),
+    "3. a\n4. b"
+  );
+  assert_eq!(convert("<ol><li>a</li></ol>"), "1. a");
+  // A wider marker widens the continuation column with it.
+  assert_eq!(
+    convert("<ol start=\"9\"><li><p>a</p><p>b</p></li></ol>"),
+    "9. a\n\n   b"
+  );
+  // 0 is a valid CommonMark start; browsers render it too.
+  assert_eq!(
+    convert("<ol start=\"0\"><li>a</li><li>b</li></ol>"),
+    "0. a\n1. b"
+  );
+  assert_eq!(convert("<ol start=\" 7 \"><li>a</li></ol>"), "7. a");
+  assert_eq!(convert("<ol start=\"+7\"><li>a</li></ol>"), "7. a");
+}
+
+#[test]
+fn ordered_start_wider_than_a_marker_falls_back_to_default_numbering() {
+  // An ordered marker is at most nine digits, so a wider `start` is not a marker
+  // at all: it must not emit a ten-digit number GFM would read as a paragraph.
+  assert_eq!(
+    convert("<ol start=\"999999999\"><li>a</li></ol>"),
+    "999999999. a"
+  );
+  assert_eq!(convert("<ol start=\"1000000000\"><li>a</li></ol>"), "1. a");
+  assert_eq!(convert("<ol start=\"99999999999\"><li>a</li></ol>"), "1. a");
+  assert_eq!(convert("<ol start=\"-5\"><li>a</li></ol>"), "1. a");
+  assert_eq!(convert("<ol start=\"\"><li>a</li></ol>"), "1. a");
+  // The running number saturates at the same width rather than overflowing it.
+  assert_eq!(
+    convert("<ol start=\"999999998\"><li>a</li><li>b</li><li>c</li></ol>"),
+    "999999998. a\n999999999. b\n999999999. c"
+  );
+}
+
+#[test]
+fn colspan_widens_the_delimiter_row() {
+  // The spanned cell is followed by the empty cells it swallowed, so the
+  // delimiter row is wide enough for `b` to survive.
+  assert_eq!(
+    convert("<table><tr><td colspan=\"2\">wide</td></tr><tr><td>a</td><td>b</td></tr></table>"),
+    "| wide | |\n| --- | --- |\n| a | b |"
+  );
+  assert_eq!(
+    convert(
+      "<table><tr><th colspan=\"3\">h</th></tr><tr><td>a</td><td>b</td><td>c</td></tr></table>"
+    ),
+    "| h | | |\n| --- | --- | --- |\n| a | b | c |"
+  );
+  assert_eq!(
+    convert("<table><tr><td colspan=\"+2\">wide</td></tr></table>"),
+    "| wide | |\n| --- | --- |"
+  );
+  assert_eq!(
+    convert("<table><tr><td colspan=\"256\">wide</td></tr></table>"),
+    "| wide |\n| --- |"
+  );
+}
+
+#[test]
 fn abrupt_and_bang_terminated_comments_do_not_swallow_the_document() {
   // `<!-->`, `<!--->` and `--!>` all end a comment. Scanning for `-->` alone
   // left them open, so the scan ran to end of chunk, reported the tag
@@ -3644,6 +3794,36 @@ fn abrupt_and_bang_terminated_comments_do_not_swallow_the_document() {
 }
 
 #[test]
+fn cells_past_the_delimiter_row_merge_instead_of_vanishing() {
+  // GFM would otherwise drop the cells past the delimiter row's width.
+  assert_eq!(
+    convert("<table><tr><th>h</th><th>i</th></tr><tr><td>a</td><td>b</td><td>c</td></tr></table>"),
+    "| h | i |\n| --- | --- |\n| a | b c |"
+  );
+}
+
+#[test]
+fn a_table_inside_a_list_item_stays_a_table() {
+  assert_eq!(
+    convert("<ul><li><table><tr><th>h</th></tr><tr><td>c</td></tr></table></li></ul>"),
+    "- | h |\n  | --- |\n  | c |"
+  );
+  // An item that already holds text opens the table on its own line.
+  assert_eq!(
+    convert("<ul><li><p>intro</p><table><tr><th>h</th></tr><tr><td>c</td></tr></table></li></ul>"),
+    "- intro\n\n  | h |\n  | --- |\n  | c |"
+  );
+}
+
+#[test]
+fn a_caption_does_not_share_a_line_with_the_header_row() {
+  assert_eq!(
+    convert("<table><caption>Cap</caption><tr><th>h</th></tr><tr><td>c</td></tr></table>"),
+    "Cap\n\n| h |\n| --- |\n| c |"
+  );
+}
+
+#[test]
 fn a_short_malformed_comment_does_not_truncate_a_long_document() {
   let mut html = String::from("<p>lead</p><!-->");
   for i in 0..200 {
@@ -3654,4 +3834,121 @@ fn a_short_malformed_comment_does_not_truncate_a_long_document() {
   let out = convert(&html);
   assert_eq!(out.matches("para ").count(), 200, "{out:.120}");
   assert!(out.starts_with("lead"));
+}
+
+#[test]
+fn a_caption_in_a_list_item_keeps_the_content_column() {
+  assert_eq!(
+    convert(
+      "<ul><li><p>Intro:</p><table><caption>Cap</caption><tr><th>h</th></tr><tr><td>c</td></tr></table></li></ul>"
+    ),
+    "- Intro:\n\n  Cap\n\n  | h |\n  | --- |\n  | c |"
+  );
+  assert_eq!(
+    convert("<ul><li>x<br>y<table><caption>Cap</caption><tr><th>h</th></tr></table></li></ul>"),
+    "- x  \n  y\n\n  Cap\n\n  | h |\n  | --- |"
+  );
+}
+
+#[test]
+fn a_heading_in_a_table_cell_stays_in_the_row() {
+  assert_eq!(
+    convert("<table><tr><th>h</th></tr><tr><td><h3>H</h3></td></tr></table>"),
+    "| h |\n| --- |\n| <h3>H</h3> |"
+  );
+}
+
+#[test]
+fn pre_content_carries_no_inline_markup() {
+  assert_eq!(
+    convert("<pre>a <em>b</em> <strong>c</strong>\n</pre>"),
+    "```\na b c\n\n```"
+  );
+  assert_eq!(
+    convert("<pre>a <a href=\"/x\">l</a>\n</pre>"),
+    "```\na l\n\n```"
+  );
+  // Outside a fence the same markup still renders.
+  assert_eq!(
+    convert("<p>a <em>b</em> <a href=\"/x\">l</a></p>"),
+    "a *b* [l](/x)"
+  );
+}
+
+#[test]
+fn a_pipe_inside_a_table_code_span_is_escaped() {
+  assert_eq!(
+    convert("<table><tr><th>h</th></tr><tr><td><code>a|b</code></td></tr></table>"),
+    "| h |\n| --- |\n| `a\\|b` |"
+  );
+  // Outside a table the pipe is ordinary code content.
+  assert_eq!(convert("<p><code>a|b</code></p>"), "`a|b`");
+}
+
+#[test]
+fn raw_html_regions_escape_markdown_past_a_blank_line() {
+  // CommonMark ends the HTML block at the blank line, so what follows is
+  // Markdown and its block markers have to be escaped.
+  let md = convert("<details><summary>S</summary><p>* text</p></details>");
+  assert!(md.contains("\\* text"), "got: {md:?}");
+
+  // A line that opens a fresh HTML block suspends Markdown again, so text on it
+  // must not be escaped.
+  let md = convert(
+    "<dl><dt><code>A_B</code></dt><dd><p>one</p></dd>\
+     <dt><code>C_D</code></dt><dd><p>two</p></dd></dl>",
+  );
+  assert!(md.contains("<code>C_D</code>"), "got: {md:?}");
+  assert!(!md.contains("C\\_D"), "got: {md:?}");
+}
+
+#[test]
+fn a_row_closes_through_content_left_open_in_a_cell() {
+  // `<tr>` must close an unclosed `<p>` inside the previous cell; otherwise the
+  // literal tag lands in the row and every later row merges into one cell.
+  assert_eq!(
+    convert("<table><thead><tr><th>V<th>C<tbody><tr><td>a<td><p>x<tr><td>b<td><p>y</table>"),
+    "| V | C |\n| --- | --- |\n| a | x |\n| b | y |"
+  );
+}
+
+#[test]
+fn pre_keeps_text_after_a_code_child_inside_the_fence() {
+  // A sibling after </code> must stay inside the block: on the fence line it
+  // would read as ``` <text>, an opener that never closes.
+  assert_eq!(
+    convert("<pre><code>compopt</code> [-o option]</pre><p>after</p>"),
+    "```\ncompopt [-o option]\n```\n\nafter"
+  );
+  // Several <code> children share the one fence the <pre> closes.
+  assert_eq!(
+    convert("<pre><code>a</code><code>b</code></pre>"),
+    "```\nab\n```"
+  );
+}
+
+#[test]
+fn a_block_after_a_bare_pre_in_a_list_item_keeps_its_line() {
+  let md = convert("<ul><li><pre>code\n</pre><p>after</p></li></ul>");
+  assert!(md.contains("```\n\n  after"), "got: {md:?}");
+}
+
+#[test]
+fn a_fence_opening_a_list_item_shares_the_marker_line() {
+  // A blank line between the marker and the fence ends the item: CommonMark allows
+  // an item to begin with at most one blank line, so the block becomes a sibling of
+  // the list instead of its content.
+  assert_eq!(
+    convert("<ul><li><pre><code>a\nb</code></pre></li></ul>"),
+    "- ```\n  a\n  b\n  ```"
+  );
+  assert_eq!(
+    convert("<ul><li>a<ul><li><pre><code>x</code></pre></li></ul></li></ul>"),
+    "- a\n  - ```\n    x\n    ```"
+  );
+  // Content already on the line still opens the fence in its own block.
+  assert_eq!(
+    convert("<ul><li>text<pre><code>x</code></pre></li></ul>"),
+    "- text\n\n  ```\n  x\n  ```"
+  );
 }
