@@ -128,8 +128,14 @@ jobs:
         if: startsWith(matrix.target, 'wasm')
         working-directory: crates/node
         run: |
-          wasm-opt -Oz --all-features --converge --low-memory-unused rust.wasm -o rust.wasm
-          node ./scripts/move-artifacts.mjs
+          # napi renames its wasm output between minor releases (3.7 emitted
+          # rust.wasm, 3.8 emits rust.wasm32-wasi.wasm), so resolve the name
+          # from the script that owns napi's naming rules rather than
+          # hardcoding it here.
+          wasm=$(node ./scripts/move-artifacts.mjs --print-release-wasm)
+          echo "Optimizing $wasm"
+          wasm-opt -Oz --all-features --converge --low-memory-unused "$wasm" -o "$wasm"
+          node ./scripts/move-artifacts.mjs --require-wasm
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -141,6 +147,9 @@ jobs:
             crates/node/npm/**/*.js
             crates/node/npm/**/*.cjs
             crates/node/npm/**/*.mjs
+            crates/node/npm/**/*.d.ts
+            crates/node/npm/**/*.d.cts
+            crates/node/npm/**/*.d.mts
           if-no-files-found: error
 
   build-wasm-edge:
