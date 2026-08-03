@@ -124,6 +124,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
@@ -146,26 +148,9 @@ jobs:
         with:
           workspaces: crates -> target
 
-      - name: Install wasm-opt
-        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
-        with:
-          tool: wasm-opt
-
-      # Mirrors .github/workflows/release-native.yml; keep the two in sync.
-      - name: Build wasi target
-        working-directory: crates/node
-        run: pnpm exec napi build --target wasm32-wasip1-threads --profile wasm
-
-      - name: Optimize and stage wasi artifacts
-        working-directory: crates/node
-        run: |
-          wasm=$(node ./scripts/move-artifacts.mjs --print-release-wasm)
-          echo "Optimizing $wasm"
-          wasm-opt -Oz --all-features --converge --low-memory-unused "$wasm" -o "$wasm"
-          node ./scripts/move-artifacts.mjs --require-wasm
-
-      - name: Verify staged npm artifacts
-        run: node scripts/verify-npm-artifacts.mjs wasm32-wasi
+      # Same composite action the release runs, so the two cannot drift.
+      - name: Build wasi artifacts
+        uses: ./.github/actions/wasi-build
 
   # ── WASM browser tests (wasm-bindgen-test in headless Chrome) ──
   wasm-browser-test:

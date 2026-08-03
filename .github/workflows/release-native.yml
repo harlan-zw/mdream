@@ -103,10 +103,13 @@ jobs:
         working-directory: crates/node
         run: pnpm exec napi build --platform --release --esm --target ${{ matrix.target }} --use-napi-cross
 
-      - name: Build native module (wasm)
+      # Build, wasm-opt and staging live in the composite action so the Test
+      # workflow exercises this exact path on every PR.
+      - name: Build wasi artifacts
         if: startsWith(matrix.target, 'wasm')
-        working-directory: crates/node
-        run: pnpm exec napi build --target ${{ matrix.target }} --profile wasm
+        uses: ./.github/actions/wasi-build
+        with:
+          target: ${{ matrix.target }}
 
       - name: Build native module
         if: ${{ !matrix.use_zigbuild && !matrix.use_napi_cross && !startsWith(matrix.target, 'wasm') }}
@@ -117,25 +120,6 @@ jobs:
         working-directory: crates/node
         run: node ./scripts/move-artifacts.mjs
         if: ${{ !startsWith(matrix.target, 'wasm') }}
-
-      - name: Install wasm-opt
-        if: startsWith(matrix.target, 'wasm')
-        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
-        with:
-          tool: wasm-opt
-
-      - name: Optimize WASM with wasm-opt
-        if: startsWith(matrix.target, 'wasm')
-        working-directory: crates/node
-        run: |
-          # napi renames its wasm output between minor releases (3.7 emitted
-          # rust.wasm, 3.8 emits rust.wasm32-wasi.wasm), so resolve the name
-          # from the script that owns napi's naming rules rather than
-          # hardcoding it here.
-          wasm=$(node ./scripts/move-artifacts.mjs --print-release-wasm)
-          echo "Optimizing $wasm"
-          wasm-opt -Oz --all-features --converge --low-memory-unused "$wasm" -o "$wasm"
-          node ./scripts/move-artifacts.mjs --require-wasm
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

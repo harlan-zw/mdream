@@ -35,7 +35,8 @@ function resolveReleaseWasm() {
   return release.candidates.find(name => entries.has(name))
 }
 
-// `--print-release-wasm` lets CI feed wasm-opt the right filename without
+// `--print-release-wasm` lets CI feed wasm-opt the right filename, and
+// `--print-glue-names` lets the release job restage the glue, both without
 // duplicating napi's naming rules in a shell script.
 if (process.argv.includes('--print-release-wasm')) {
   const found = resolveReleaseWasm()
@@ -44,6 +45,11 @@ if (process.argv.includes('--print-release-wasm')) {
     process.exit(1)
   }
   console.log(found)
+  process.exit(0)
+}
+
+if (process.argv.includes('--print-glue-names')) {
+  console.log(wasmGlue.map(glue => glue.name).join('\n'))
   process.exit(0)
 }
 
