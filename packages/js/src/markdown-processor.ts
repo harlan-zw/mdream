@@ -166,8 +166,7 @@ function suppressesFormattingInPre(tagId: number): boolean {
 }
 
 /**
- * Length of the newline run ending just before fragment `index`, or -1 when
- * nothing but newlines precedes it — the marker opens the document.
+ * Length of the newline run ending just before fragment `index`.
  */
 function newlineRunBefore(buffer: string[], index: number): number {
   let run = 0
@@ -179,7 +178,7 @@ function newlineRunBefore(buffer: string[], index: number): number {
       run++
     }
   }
-  return -1
+  return run
 }
 
 /**
@@ -931,13 +930,7 @@ function finalizeBlockquote(state: MarkdownState): void {
 }
 
 function collapseNestedBlockquoteSeparator(buffer: string[]): void {
-  let trailingNewlines = 0
-  for (let fragmentIndex = buffer.length - 1; fragmentIndex >= 0 && trailingNewlines < 2; fragmentIndex--) {
-    const fragment = buffer[fragmentIndex]!
-    for (let index = fragment.length - 1; index >= 0 && fragment.charCodeAt(index) === 10; index--)
-      trailingNewlines++
-  }
-  if (trailingNewlines < 2)
+  if (newlineRunBefore(buffer, buffer.length) < 2)
     return
 
   const last = buffer.at(-1)!
