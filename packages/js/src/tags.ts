@@ -499,18 +499,14 @@ export const tagHandlers: Record<number, TagHandler> = {
       )
       if (!prefix)
         return MARKDOWN_HORIZONTAL_RULE
+      if (state.depthMap?.[TAG_LI])
+        state.listRulePending = prefix
       const open = blockOpenPrefix(state.buffer, prefix)
       // Sharing the marker's line, where `---` would make the whole line a
       // thematic break and take the item with it.
       return open === undefined
         ? MARKDOWN_HORIZONTAL_RULE_ALT
         : `${open}${MARKDOWN_HORIZONTAL_RULE}`
-    },
-    exit: ({ state }) => {
-      if (isInsideTableCell(state) || !(state.depthMap?.[TAG_LI] || 0))
-        return ''
-      state.listRulePending = true
-      return ''
     },
     isSelfClosing: true,
   },

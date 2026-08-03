@@ -328,8 +328,8 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   preFenceOpen?: boolean
   /** Number of default blockquotes currently buffered for line prefixing. */
   bufferedBlockquoteDepth?: number
-  /** A list item rule whose following content still needs its content column. */
-  listRulePending?: true
+  /** Content-column prefix deferred after a list item rule. */
+  listRulePending?: string
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
 }

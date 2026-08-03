@@ -108,8 +108,8 @@ export interface MarkdownState {
   bufferedBlockquoteDepth: number
   /** Fragment for a marker line at risk of becoming a setext underline. */
   emptyItemFragment?: number
-  /** A list item rule whose following content still needs its content column. */
-  listRulePending?: true
+  /** Content-column prefix deferred after a list item rule. */
+  listRulePending?: string
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
 }
@@ -1219,7 +1219,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     if (inTemplate)
       return
 
-    if (state.listRulePending) {
+    if (state.listRulePending !== undefined) {
       const isVisibleText = node.type === TEXT_NODE
         && eventType === NodeEventEnter
         && hasNonWhitespace((node as TextNode).value)
@@ -1227,11 +1227,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         && eventType === NodeEventEnter
         && !node.tagHandler?.excludesTextNodes
       if (isVisibleText || opensVisibleElement) {
-        const separator = blockOpenPrefix(state.buffer, continuationPrefix(
-          node,
-          state.listIndentWidths || [],
-          !state.bufferedBlockquoteDepth,
-        ))!
+        const separator = blockOpenPrefix(state.buffer, state.listRulePending)!
         state.buffer.push(separator)
         state.lastContentCache = separator
         state.listRulePending = undefined
