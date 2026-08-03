@@ -186,15 +186,16 @@ export function fenceLanguage(attributes: Record<string, string> | undefined): s
     return fromClass
 
   const lang = attributes?.lang
-  if (!lang)
-    return ''
-  for (let index = 0; index < lang.length; index++) {
-    const code = lang.charCodeAt(index)
-    // `-` and ` ` mark a human language; tab and the rest are unsafe outright.
-    if (code === 45 || code === 32 || isUnsafeFenceInfoCode(code))
-      return ''
-  }
-  return lang
+  // eslint-disable-next-line no-control-regex
+  return lang && !/[-\x00-\x20\x7F"'&<>`~]/.test(lang) ? lang : ''
+}
+
+// Strict unsigned integer parsing shared by numeric HTML attributes. Partial
+// reads such as `2x` must not disagree with Rust's full-string parse.
+export function parseUnsignedInteger(raw: string | undefined): number | undefined {
+  return raw !== undefined && /^[\t\n\f\r ]*\+?\d+[\t\n\f\r ]*$/.test(raw)
+    ? Number(raw)
+    : undefined
 }
 
 /**
@@ -253,17 +254,6 @@ export function blockOpenPrefix(
   }
 }
 
-/** Whether the buffer sits at the start of a fresh line. */
-export function endsOutputLine(buffer: readonly string[]): boolean {
-  return lastOutputChar(buffer) === NEWLINE_CHAR
-}
-
-// The last character of a list marker: `-`/`*`/`+`, or the `.`/`)` closing an
-// ordered one. Rejects ordinary prose before the backward walk starts.
-export function isListMarkerTail(code: number): boolean {
-  return code === 45 || code === 42 || code === 43 || code === 46 || code === 41
-}
-
 /**
  * Whether the list marker ending at `fragmentIndex`/`markerIndex` is all its
  * line holds: optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
@@ -306,27 +296,6 @@ export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: nu
 // digits, so anything wider stops being a list marker at all.
 const MAX_ORDERED_START = 999_999_999
 
-// `start`'s shape, matching Rust's `str::parse::<u32>()`: optional leading `+`,
-// digits only, no partial parse — `Number.parseInt` would read "10foo" as 10.
-function parseOrderedStart(raw: string): number | undefined {
-  let begin = 0
-  let end = raw.length
-  while (begin < end && isHtmlAsciiWhitespace(raw.charCodeAt(begin)))
-    begin++
-  while (end > begin && isHtmlAsciiWhitespace(raw.charCodeAt(end - 1)))
-    end--
-  if (begin < end && raw.charCodeAt(begin) === 43) // '+'
-    begin++
-  if (begin === end)
-    return undefined
-  for (let index = begin; index < end; index++) {
-    const code = raw.charCodeAt(index)
-    if (code < 48 || code > 57)
-      return undefined
-  }
-  return Number.parseInt(raw.slice(begin, end), 10)
-}
-
 // The rendered number of an ordered list item, honoring `<ol start>`. A `start`
 // too wide for an ordered marker is not one, so it falls back to the default
 // numbering, and the running number stops at the same width.
@@ -334,7 +303,7 @@ export function orderedItemNumber(list: ElementNode | null | undefined, index: n
   const raw = list?.attributes?.start
   if (raw === undefined)
     return index + 1
-  const start = parseOrderedStart(raw)
+  const start = parseUnsignedInteger(raw)
   if (start === undefined || start > MAX_ORDERED_START)
     return Math.min(1 + index, MAX_ORDERED_START)
   return Math.min(start + index, MAX_ORDERED_START)

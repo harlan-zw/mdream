@@ -166,10 +166,6 @@ const DL_SCOPE_BOUNDARY: [bool; 256] = tag_set(&[
   TAG_HTML,
 ]);
 
-/// Where a row-recovery scan stops: the table itself, and the contexts that hold
-/// their own table structure.
-const ROW_SCOPE_BOUNDARY: [bool; 256] = tag_set(&[TAG_TABLE, TAG_TEMPLATE, TAG_CAPTION]);
-
 /// "Table cell scope" terminators: a new `<td>`/`<th>` closes the current cell
 /// (and any inline content left open inside it), stopping at the row/section.
 const CELL_SCOPE_BOUNDARY: [bool; 256] = tag_set(&[
@@ -409,7 +405,6 @@ impl ConvertState {
       excludes_text_nodes: handler.excludes_text_nodes,
       is_non_nesting: handler.is_non_nesting,
       collapses_inner_white_space: handler.collapses_inner_white_space,
-      cell_span: 0,
       spacing: handler.spacing,
     };
     if self.has_tailwind
@@ -670,7 +665,7 @@ impl ConvertState {
         // Content left open inside a cell (`<td><p>text` with no `</p>`, or an
         // unknown custom element) sits above the closeable element and closes
         // with it; stopping here would leave the new row nested in the old cell.
-        Some(id) if ROW_SCOPE_BOUNDARY[id as usize] => break,
+        Some(TAG_TABLE | TAG_TEMPLATE | TAG_CAPTION) => break,
         _ => walked += 1,
       }
     }
@@ -752,7 +747,7 @@ impl ConvertState {
       } else {
         tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
       };
-    let (complete, new_position, attributes, self_closing, cell_span) =
+    let (complete, new_position, attributes, self_closing) =
       process_tag_attributes(html_chunk, position, tag_handler, attr_mask);
 
     if !complete {
@@ -1002,14 +997,12 @@ impl ConvertState {
       pooled.excludes_text_nodes = h_excludes;
       pooled.is_non_nesting = h_non_nesting;
       pooled.collapses_inner_white_space = h_collapses;
-      pooled.cell_span = cell_span;
       pooled.spacing = h_spacing;
       pooled
     } else {
       ElementNode {
         custom_name,
         attributes,
-        cell_span,
         tag_id,
         depth: self.depth,
         index: current_walk_index,

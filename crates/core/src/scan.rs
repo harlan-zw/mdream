@@ -100,7 +100,7 @@ pub(crate) fn process_tag_attributes(
   position: usize,
   tag_handler: Option<&crate::types::TagHandler>,
   attr_mask: u16,
-) -> (bool, usize, Attributes, bool, u8) {
+) -> (bool, usize, Attributes, bool) {
   let self_closing = tag_handler.is_some_and(|h| h.is_self_closing);
   if attr_mask == ATTR_NONE {
     scan_tag::<false>(html_chunk, position, self_closing, ATTR_NONE)
@@ -118,7 +118,7 @@ fn scan_tag<const EXTRACT: bool>(
   position: usize,
   self_closing: bool,
   attr_mask: u16,
-) -> (bool, usize, Attributes, bool, u8) {
+) -> (bool, usize, Attributes, bool) {
   let bytes = html_chunk.as_bytes();
   let chunk_length = bytes.len();
   let mut scan = AttrScan::new(attr_mask);
@@ -148,12 +148,12 @@ fn scan_tag<const EXTRACT: bool>(
       && i + 1 < chunk_length
       && bytes[i + 1] == GT_CHAR
     {
-      let (attrs, span) = scan.finish(html_chunk, i);
-      return (true, i + 2, attrs, true, span);
+      let attrs = scan.finish(html_chunk, i);
+      return (true, i + 2, attrs, true);
     }
     if c == GT_CHAR {
-      let (attrs, span) = scan.finish(html_chunk, i);
-      return (true, i + 1, attrs, self_closing, span);
+      let attrs = scan.finish(html_chunk, i);
+      return (true, i + 1, attrs, self_closing);
     }
 
     // Run to the closing quote without re-entering the state dispatch.
@@ -165,7 +165,7 @@ fn scan_tag<const EXTRACT: bool>(
       }
       if end == chunk_length {
         // Unterminated: the tag cannot close in this chunk.
-        return (false, chunk_length, Attributes::new(), false, 0);
+        return (false, chunk_length, Attributes::new(), false);
       }
       scan.take_value(html_chunk, value_start, end);
       i = end + 1;
@@ -185,26 +185,16 @@ fn scan_tag<const EXTRACT: bool>(
     i += 1;
   }
 
-  (false, i, Attributes::new(), false, 0)
+  (false, i, Attributes::new(), false)
 }
 
 /// Mask rejection happens before any lowercasing or entity decoding, so
 /// unwanted attributes cost no allocations.
 #[inline]
-fn push_attr(result: &mut Attributes, mask: u16, raw: &str, value: Option<&str>, span: &mut u8) {
+fn push_attr(result: &mut Attributes, mask: u16, raw: &str, value: Option<&str>) {
   let bit = attr_bit(raw.as_bytes());
   if mask != ATTR_ALL && mask & bit == 0 {
     return;
-  }
-  // Plugins request every attribute, so `ATTR_ALL` stores `colspan` as a string
-  // too; a mask asking for it alone only needs the scalar.
-  if bit == ATTR_COLSPAN {
-    *span = value
-      .and_then(|value| value.trim_ascii().parse::<u8>().ok())
-      .unwrap_or(0);
-    if mask != ATTR_ALL {
-      return;
-    }
   }
   let name = raw.to_ascii_lowercase();
   match value {
@@ -218,8 +208,6 @@ fn push_attr(result: &mut Attributes, mask: u16, raw: &str, value: Option<&str>,
 struct AttrScan {
   mask: u16,
   result: Attributes,
-  /// `colspan`, parsed in place rather than stored as strings. 0 when absent.
-  cell_span: u8,
   state: State,
   name_start: usize,
   name_end: usize,
@@ -294,7 +282,6 @@ impl AttrScan {
       } else {
         Attributes::new()
       },
-      cell_span: 0,
       state: State::Gap,
       name_start: 0,
       name_end: 0,
@@ -314,7 +301,6 @@ impl AttrScan {
       self.mask,
       &chunk[self.name_start..self.name_end],
       Some(&chunk[value_start..value_end]),
-      &mut self.cell_span,
     );
     self.state = State::Gap;
   }
@@ -326,7 +312,6 @@ impl AttrScan {
       self.mask,
       &chunk[self.name_start..name_end],
       None,
-      &mut self.cell_span,
     );
   }
 
@@ -376,14 +361,14 @@ impl AttrScan {
 
   /// Take the attribute still open when the tag ended at `end`.
   #[inline]
-  fn finish(mut self, chunk: &str, end: usize) -> (Attributes, u8) {
+  fn finish(mut self, chunk: &str, end: usize) -> Attributes {
     match self.state {
       State::Name => self.take_bare_name(chunk, end),
       State::AfterName | State::BeforeValue => self.take_bare_name(chunk, self.name_end),
       State::UnquotedValue => self.take_value(chunk, self.value_start, end),
       State::Gap => {}
     }
-    (self.result, self.cell_span)
+    self.result
   }
 }
 
@@ -391,7 +376,7 @@ impl AttrScan {
 /// inside `<…>`.
 #[cfg(test)]
 pub(crate) fn parse_attributes(attr_str: &str, mask: u16) -> Attributes {
-  let (_, _, attrs, _, _) = process_tag_attributes(&format!("{attr_str}>"), 0, None, mask);
+  let (_, _, attrs, _) = process_tag_attributes(&format!("{attr_str}>"), 0, None, mask);
   attrs
 }
 
@@ -523,36 +508,18 @@ mod tests {
     assert!(all.contains_key("href") && all.contains_key("class"));
   }
 
-  /// `colspan` is carried out of the scan as a scalar so a cell never has to
-  /// re-parse its own attribute string. A value that is not a `u8` is not a span.
   #[test]
-  fn colspan_is_scanned_into_a_scalar() {
-    fn span(attr_str: &str, mask: u16) -> (u8, bool) {
-      let (_, _, attrs, _, span) = process_tag_attributes(&format!("{attr_str}>"), 0, None, mask);
-      (span, attrs.contains_key("colspan"))
-    }
-
-    assert_eq!(span("colspan=2", ATTR_ALL), (2, true));
-    assert_eq!(span("colspan=\" 3 \"", ATTR_ALL), (3, true));
-    assert_eq!(span("COLSPAN=4", ATTR_ALL), (4, true));
-    assert_eq!(span("colspan=255", ATTR_ALL), (255, true));
-    // Not a span: wider than a `u8`, non-numeric, negative, or absent entirely.
-    assert_eq!(span("colspan=256", ATTR_ALL), (0, true));
-    assert_eq!(span("colspan=abc", ATTR_ALL), (0, true));
-    assert_eq!(span("colspan=-1", ATTR_ALL), (0, true));
-    assert_eq!(span("colspan", ATTR_ALL), (0, true));
-    assert_eq!(span("id=x", ATTR_ALL), (0, false));
-    // A mask asking for the span alone needs no string copy of it.
-    assert_eq!(span("colspan=2 id=x", ATTR_COLSPAN), (2, false));
-    assert_eq!(span("colspan=2", ATTR_NONE), (0, false));
+  fn colspan_uses_the_filtered_attribute_path() {
+    let attrs = parse_attributes("colspan=2 id=x", ATTR_COLSPAN);
+    assert_eq!(attrs.get("colspan").map(String::as_str), Some("2"));
+    assert!(!attrs.contains_key("id"));
   }
 
   #[test]
   fn process_tag_attributes_finds_close() {
     // "<a href=\"x\">" — scan from after the tag name
     let html = "a href=\"x\">rest";
-    let (complete, new_pos, attrs, self_closing, _) =
-      process_tag_attributes(html, 1, None, ATTR_ALL);
+    let (complete, new_pos, attrs, self_closing) = process_tag_attributes(html, 1, None, ATTR_ALL);
     assert!(complete);
     assert!(!self_closing);
     assert_eq!(&html[new_pos..], "rest");
@@ -564,7 +531,7 @@ mod tests {
     // The closing quote may still arrive in the next chunk, so nothing is
     // reported until it does.
     let html = "a href=\"x";
-    let (complete, _, attrs, _, _) = process_tag_attributes(html, 1, None, ATTR_ALL);
+    let (complete, _, attrs, _) = process_tag_attributes(html, 1, None, ATTR_ALL);
     assert!(!complete);
     assert!(attrs.is_empty());
   }
@@ -572,7 +539,7 @@ mod tests {
   #[test]
   fn a_quoted_value_hides_a_tag_terminator() {
     let html = "a href=\"x>y\">rest";
-    let (complete, new_pos, attrs, _, _) = process_tag_attributes(html, 1, None, ATTR_ALL);
+    let (complete, new_pos, attrs, _) = process_tag_attributes(html, 1, None, ATTR_ALL);
     assert!(complete);
     assert_eq!(attrs.get("href").map(String::as_str), Some("x>y"));
     assert_eq!(&html[new_pos..], "rest");
@@ -593,9 +560,9 @@ mod tests {
       ("a href=x='y>rest", 12),
       ("a>rest", 2),
     ] {
-      let (complete, extracted_pos, _, extracted_self_closing, _) =
+      let (complete, extracted_pos, _, extracted_self_closing) =
         process_tag_attributes(html, 1, None, ATTR_ALL);
-      let (bare_complete, bare_pos, bare_attrs, bare_self_closing, _) =
+      let (bare_complete, bare_pos, bare_attrs, bare_self_closing) =
         process_tag_attributes(html, 1, None, ATTR_NONE);
       assert!(complete, "html={html:?}");
       assert_eq!(extracted_pos, end, "html={html:?}");
@@ -775,9 +742,8 @@ mod tests {
         encoded /= ALPHABET.len();
       }
       let html = std::str::from_utf8(&input).expect("ASCII alphabet");
-      let (complete, position, _, self_closing, _) =
-        process_tag_attributes(html, 0, None, ATTR_ALL);
-      let (bare_complete, bare_position, bare_attrs, bare_self_closing, _) =
+      let (complete, position, _, self_closing) = process_tag_attributes(html, 0, None, ATTR_ALL);
+      let (bare_complete, bare_position, bare_attrs, bare_self_closing) =
         process_tag_attributes(html, 0, None, ATTR_NONE);
 
       assert_eq!(complete, bare_complete, "html={html:?}");

@@ -124,7 +124,7 @@ import {
   TAG_XMP,
   TagIdMap,
 } from './const'
-import { blockOpenPrefix, continuationPrefix, endsOutputLine, fenceLanguage, isEmptyLinkHref, listMarkerLineStart, orderedItemNumber } from './utils'
+import { blockOpenPrefix, continuationPrefix, fenceLanguage, isEmptyLinkHref, listMarkerLineStart, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
 const URL_SCHEME_RE = /^[\dA-Z+.-]+:/i
@@ -280,6 +280,7 @@ function escapeTrailingHeadingHashes(buffer: string[]): void {
 }
 
 // What the current output line holds where a table row is about to be written.
+const LINE_FRESH = -1 // a newline already opened the content column
 const LINE_OPEN = 0 // nothing but block prefix, or a pending list marker
 const LINE_ROW = 1 // a row left open mid-line
 const LINE_CONTENT = 2 // other content, so the row needs a block break
@@ -297,7 +298,7 @@ function lineStateBeforeRow(buffer: string[]): number {
   // never rescans the line it just wrote.
   const tail = buffer[fragment]!
   if (tail.charCodeAt(tail.length - 1) === 10)
-    return LINE_OPEN
+    return LINE_FRESH
 
   let firstNonSpace = -1
   let markerFragment = -1
@@ -345,10 +346,11 @@ function rowMarker(state: HandlerContext['state']): string {
       return `\n${indent}| `
     case LINE_CONTENT:
       return `\n\n${indent}| `
+    case LINE_FRESH:
+      return `${indent}| `
     default:
-      // A pending list marker already supplies the column; only a fresh line
-      // needs the indent written.
-      return endsOutputLine(state.buffer) ? `${indent}| ` : '| '
+      // A pending list marker already supplies the content column.
+      return '| '
   }
 }
 
@@ -356,30 +358,18 @@ const MAX_CELL_SPAN = 64
 
 // GFM has no `colspan`: a spanned cell is written as its content followed by empty
 // cells, or the delimiter row is too narrow and GFM drops every cell past it.
-function cellSpan(node: HandlerContext['node']): number {
-  const raw = (node as { attributes?: Record<string, string> }).attributes?.colspan
-  if (raw === undefined)
-    return 1
-  const span = Number.parseInt(raw, 10)
-  return span > 1 ? Math.min(span, MAX_CELL_SPAN) : 1
-}
-
-// Whether the cell about to open sits past the width the delimiter promised.
-function cellOverflowsHeader(state: HandlerContext['state']): boolean {
-  const header = state.tableHeaderCells || 0
-  return header > 0 && (state.tableCurrentRowCells || 0) >= header
-}
-
 function cellEnter(node: HandlerContext['node'], state: HandlerContext['state']): string {
   if (node.index === 0)
     return ''
   // GFM discards cells past the delimiter row's width, so this one folds into
   // the previous cell rather than vanishing.
-  return cellOverflowsHeader(state) ? ' ' : ' | '
+  const header = state.tableHeaderCells || 0
+  return header > 0 && (state.tableCurrentRowCells || 0) >= header ? ' ' : ' | '
 }
 
 function cellExit(node: HandlerContext['node'], state: HandlerContext['state']): string | undefined {
-  const span = cellSpan(node)
+  const parsedSpan = parseUnsignedInteger((node as { attributes?: Record<string, string> }).attributes?.colspan)
+  const span = parsedSpan && parsedSpan > 1 ? Math.min(parsedSpan, MAX_CELL_SPAN) : 1
   state.tableCurrentRowCells! += span
   return span > 1 ? ' |'.repeat(span - 1) : undefined
 }

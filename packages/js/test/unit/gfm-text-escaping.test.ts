@@ -108,6 +108,11 @@ describe('gfm text escaping', () => {
       .toBe('| a\\|b |\n| --- |')
   })
 
+  it('rejects a partially numeric colspan', () => {
+    expect(htmlToMarkdown('<table><tr><th colspan="2x">h</th></tr><tr><td>a</td><td>b</td></tr></table>'))
+      .toBe('| h |\n| --- |\n| a b |')
+  })
+
   it('serializes decoded text for its output context', () => {
     expect(htmlToMarkdown('<a href="/safe">x&#93;(/evil) [y</a>'))
       .toBe('[x\\](/evil) \\[y](/safe)')

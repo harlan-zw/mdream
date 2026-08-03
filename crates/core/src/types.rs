@@ -87,9 +87,6 @@ pub struct ElementNode {
   pub excludes_text_nodes: bool,
   pub is_non_nesting: bool,
   pub collapses_inner_white_space: bool,
-  /// `colspan`, parsed during the tag scan; 0 when absent. A scalar avoids the
-  /// two-string allocation a map entry would cost.
-  pub cell_span: u8,
   pub spacing: Option<[u8; 2]>,
 }
 

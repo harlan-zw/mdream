@@ -659,11 +659,14 @@ impl ConvertState {
       .and_then(|ov| ov.is_inline)
       .unwrap_or(node.is_inline);
 
-    // Table cell count (exit)
-    if (tag_id == Some(TAG_TH) || tag_id == Some(TAG_TD)) && self.depth_map[TAG_TABLE as usize] <= 1
-    {
-      self.table_current_row_cells += Self::cell_span(node) as usize;
-    }
+    let cell_span =
+      if matches!(tag_id, Some(TAG_TH | TAG_TD)) && self.depth_map[TAG_TABLE as usize] <= 1 {
+        let span = Self::cell_span(node);
+        self.table_current_row_cells += span as usize;
+        span
+      } else {
+        1
+      };
 
     let mut output: Option<Cow<'static, str>> = None;
     let mut table_separator: Option<String> = None;
@@ -711,10 +714,10 @@ impl ConvertState {
           self.table_header_cells = col_count;
           table_separator = Some(sep);
         } else {
-          output = self.get_exit_output(node);
+          output = self.get_exit_output(node, cell_span);
         }
       } else if self.plain_text || tag_id != Some(TAG_A) {
-        output = self.get_exit_output(node);
+        output = self.get_exit_output(node, cell_span);
       }
     }
     let closing_code_span = if !has_override
@@ -1071,7 +1074,7 @@ impl ConvertState {
   ) {
     let has_inline_gfm_hazard = text
       .bytes()
-      .any(|byte| INLINE_GFM_HAZARD[byte as usize] != 0);
+      .any(|byte| GFM_BYTE_FLAGS[byte as usize] & (GFM_HAZARD_BIT | GFM_NEWLINE_BIT) != 0);
     self.text_buffer_has_inline_gfm_hazard |= has_inline_gfm_hazard;
     self.emit_text_with_generated_markdown(text, contains_whitespace, depth, index, None, None);
   }
@@ -1307,8 +1310,10 @@ impl ConvertState {
     while index < bytes.len() {
       let byte = bytes[index];
 
-      if !GFM_TEXT_ACTIVE[byte as usize] {
-        while index < bytes.len() && !GFM_TEXT_ACTIVE[bytes[index] as usize] {
+      if GFM_BYTE_FLAGS[byte as usize] & GFM_TEXT_ACTIVE_BIT == 0 {
+        while index < bytes.len()
+          && GFM_BYTE_FLAGS[bytes[index] as usize] & GFM_TEXT_ACTIVE_BIT == 0
+        {
           index += 1;
         }
         line_indent = None;
@@ -1956,7 +1961,7 @@ impl ConvertState {
     }
 
     let tag_id = node.tag_id?;
-    if self.depth_map[TAG_PRE as usize] > 0 && SUPPRESSED_IN_PRE[tag_id as usize] {
+    if self.depth_map[TAG_PRE as usize] > 0 && suppresses_formatting_in_pre(tag_id) {
       return None;
     }
     match tag_id {
@@ -2228,7 +2233,9 @@ impl ConvertState {
         }
         if node.index == 0 {
           Some(Cow::Borrowed(""))
-        } else if self.cell_overflows_header() {
+        } else if self.table_header_cells > 0
+          && self.table_current_row_cells >= self.table_header_cells
+        {
           // GFM discards cells past the delimiter row's width, so this one folds
           // into the previous cell rather than vanishing.
           Some(Cow::Borrowed(" "))
@@ -2262,13 +2269,17 @@ impl ConvertState {
   }
 
   #[inline]
-  pub(crate) fn get_exit_output(&self, node: &ElementNode) -> Option<Cow<'static, str>> {
+  pub(crate) fn get_exit_output(
+    &self,
+    node: &ElementNode,
+    cell_span: u8,
+  ) -> Option<Cow<'static, str>> {
     if self.plain_text {
       return Self::get_text_exit_output(node);
     }
 
     let tag_id = node.tag_id?;
-    if self.depth_map[TAG_PRE as usize] > 0 && SUPPRESSED_IN_PRE[tag_id as usize] {
+    if self.depth_map[TAG_PRE as usize] > 0 && suppresses_formatting_in_pre(tag_id) {
       return None;
     }
     match tag_id {
@@ -2394,7 +2405,7 @@ impl ConvertState {
             "</td>"
           }))
         } else {
-          self.span_filler(node)
+          Self::span_filler(cell_span)
         }
       }
       TAG_CENTER => {
@@ -2840,22 +2851,19 @@ impl ConvertState {
   /// delimiter row is too narrow and GFM drops every cell past it.
   #[inline]
   pub(crate) fn cell_span(node: &ElementNode) -> u8 {
-    node.cell_span.clamp(1, MAX_CELL_SPAN)
+    node
+      .attributes
+      .get("colspan")
+      .and_then(|value| value.trim_ascii().parse::<u8>().ok())
+      .unwrap_or(1)
+      .clamp(1, MAX_CELL_SPAN)
   }
 
-  fn span_filler(&self, node: &ElementNode) -> Option<Cow<'static, str>> {
-    match Self::cell_span(node) {
+  fn span_filler(span: u8) -> Option<Cow<'static, str>> {
+    match span {
       1 => None,
-      span => Some(Cow::Borrowed(
-        std::str::from_utf8(&SPAN_FILLER[..(span as usize - 1) * 2]).unwrap_or(" |"),
-      )),
+      span => Some(Cow::Owned(" |".repeat(span as usize - 1))),
     }
-  }
-
-  /// Whether the cell about to open sits past the width the delimiter promised.
-  #[inline]
-  fn cell_overflows_header(&self) -> bool {
-    self.table_header_cells > 0 && self.table_current_row_cells >= self.table_header_cells
   }
 
   /// Marker number for an `<ol>`'s nth item. GFM numbers a list from its first

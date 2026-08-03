@@ -244,10 +244,6 @@ const DL_SCOPE_BOUNDARY = new Set<number>([
   TAG_HTML,
 ])
 
-// Where a row-recovery scan stops: the table itself, and the contexts that hold
-// their own table structure.
-const ROW_SCOPE_BOUNDARY = new Set<number>([TAG_TABLE, TAG_TEMPLATE, TAG_CAPTION])
-
 // "Table cell scope": a new `<td>`/`<th>` closes the current cell, stopping at
 // the row/section.
 const CELL_SCOPE_BOUNDARY = new Set<number>([
@@ -390,7 +386,7 @@ function closeTableContext(
     // Content left open inside a cell (`<td><p>text` with no `</p>`, or an
     // unknown custom element) sits above the closeable element and closes with
     // it; stopping here would leave the new row nested in the old cell.
-    else if (id !== undefined && ROW_SCOPE_BOUNDARY.has(id)) {
+    else if (id === TAG_TABLE || id === TAG_TEMPLATE || id === TAG_CAPTION) {
       break
     }
     else {

@@ -37,20 +37,6 @@ const GFM_HAZARD_HIGH: u64 = (1 << (b'[' - HAZARD_MASK_SPLIT))
   | (1 << (b'`' - HAZARD_MASK_SPLIT))
   | (1 << (b'~' - HAZARD_MASK_SPLIT));
 
-/// Bytes `escape_gfm_text` must inspect one at a time: escape candidates, line
-/// terminators, and block-marker leads. Every other byte only clears both
-/// trackers, so a run of them collapses to one state update.
-const GFM_TEXT_ACTIVE: [bool; 256] = {
-  let mut t = [false; 256];
-  let active = b"\\*_~`[]|><\n\r#-+.) 0123456789";
-  let mut i = 0usize;
-  while i < active.len() {
-    t[active[i] as usize] = true;
-    i += 1;
-  }
-  t
-};
-
 const BATCHABLE_TEXT: [bool; 256] = {
   let mut t = [false; 256];
   let mut c = 33usize;
@@ -69,10 +55,10 @@ const BATCHABLE_TEXT: [bool; 256] = {
 
 const GFM_HAZARD_BIT: u8 = 1;
 const GFM_NEWLINE_BIT: u8 = 2;
+const GFM_TEXT_ACTIVE_BIT: u8 = 4;
 
-/// Per-byte hazard and newline flags checked on every text-node byte; newlines
-/// fold into `<br>`. A table replaces a range guard plus a shift per byte.
-const INLINE_GFM_HAZARD: [u8; 256] = {
+/// Per-byte GFM flags shared by the parser and escaping pass.
+const GFM_BYTE_FLAGS: [u8; 256] = {
   let mut t = [0u8; 256];
   let mut c = 33usize;
   while c < 0x80 {
@@ -82,12 +68,18 @@ const INLINE_GFM_HAZARD: [u8; 256] = {
       GFM_HAZARD_HIGH
     };
     if (mask >> (c & (HAZARD_MASK_SPLIT as usize - 1))) & 1 != 0 {
-      t[c] = GFM_HAZARD_BIT;
+      t[c] |= GFM_HAZARD_BIT;
     }
     c += 1;
   }
   t[b'\n' as usize] |= GFM_NEWLINE_BIT;
   t[b'\r' as usize] |= GFM_NEWLINE_BIT;
+  let active = b"\\*_~`[]|><\n\r#-+.) 0123456789";
+  let mut i = 0usize;
+  while i < active.len() {
+    t[active[i] as usize] |= GFM_TEXT_ACTIVE_BIT;
+    i += 1;
+  }
   t
 };
 
@@ -113,22 +105,14 @@ struct BlockquoteFrame {
 static HEADING_PREFIXES: [&str; 6] = ["# ", "## ", "### ", "#### ", "##### ", "###### "];
 
 /// Inline tags whose delimiters are suppressed inside `<pre>` (content only).
-/// `<code>` and `<br>` are absent — already `<pre>`-aware. Sized 256, not
-/// `MAX_TAG_ID`, so a `u8` tag id indexes it without a bounds check.
-const SUPPRESSED_IN_PRE: [bool; 256] = {
-  let mut t = [false; 256];
-  let ids = [
-    TAG_STRONG, TAG_B, TAG_EM, TAG_I, TAG_DEL, TAG_S, TAG_STRIKE, TAG_CITE, TAG_DFN, TAG_KBD,
-    TAG_SAMP, TAG_VAR, TAG_Q, TAG_SUB, TAG_SUP, TAG_INS, TAG_MARK, TAG_ABBR, TAG_SMALL, TAG_U,
-    TAG_TIME, TAG_BDO, TAG_A,
-  ];
-  let mut i = 0;
-  while i < ids.len() {
-    t[ids[i] as usize] = true;
-    i += 1;
-  }
-  t
-};
+/// The tag ids form three dense ranges plus four exceptions.
+#[inline]
+fn suppresses_formatting_in_pre(tag_id: u8) -> bool {
+  matches!(tag_id, TAG_A | TAG_KBD | TAG_S | TAG_STRIKE)
+    || (TAG_STRONG..=TAG_INS).contains(&tag_id)
+    || (TAG_ABBR..=TAG_SMALL).contains(&tag_id)
+    || (TAG_U..=TAG_BDO).contains(&tag_id)
+}
 
 #[inline]
 fn trailing_spaces(bytes: &[u8]) -> usize {
@@ -155,18 +139,6 @@ const MAX_CELL_SPAN: u8 = 64;
 /// Largest `<ol start>` CommonMark can express: an ordered marker is at most
 /// nine digits, so anything wider stops being a list marker at all.
 const MAX_ORDERED_START: u32 = 999_999_999;
-
-/// `" |"` repeated to `MAX_CELL_SPAN`, so a spanned cell's filler is a slice of
-/// this rather than a string built per cell.
-static SPAN_FILLER: [u8; (MAX_CELL_SPAN as usize - 1) * 2] = {
-  let mut t = [b' '; (MAX_CELL_SPAN as usize - 1) * 2];
-  let mut i = 1;
-  while i < t.len() {
-    t[i] = b'|';
-    i += 2;
-  }
-  t
-};
 
 // Clean mode bitmask flags
 const CLEAN_EMPTY_LINKS: u8 = 1;
@@ -861,7 +833,7 @@ impl ConvertState {
         if cc == AMPERSAND_CHAR {
           self.has_encoded_html_entity = true;
         }
-        if INLINE_GFM_HAZARD[cc as usize] & GFM_HAZARD_BIT != 0 {
+        if GFM_BYTE_FLAGS[cc as usize] & GFM_HAZARD_BIT != 0 {
           self.text_buffer_has_inline_gfm_hazard = true;
         }
 
