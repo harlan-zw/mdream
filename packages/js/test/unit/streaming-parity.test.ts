@@ -68,6 +68,14 @@ describe('streaming parity with the Rust core', () => {
   })
 
   it.each([
+    '<ul><li>text <hr>after</li></ul>',
+    '<ul><li><blockquote>text<hr></blockquote>after</li></ul>',
+    '<ol><li><span>parent<ul><li>child</li><li>child 2</li></ul></span></li></ol>',
+  ])('keeps cmark block structure across every split for %s', async (html) => {
+    await expectStreamingParity(html)
+  })
+
+  it.each([
     '<blockquote><p>intro</p><ul><li>one</li><li>two</li></ul></blockquote>',
     '<blockquote>lead<table><tr><td>a</td></tr></table>tail</blockquote>',
     '<blockquote><ul><li>one<ul><li>sub</li></ul></li></ul></blockquote>',

@@ -404,6 +404,10 @@ impl ConvertState {
       return;
     }
 
+    if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
+      self.flush_list_rule();
+    }
+
     // Deferred <pre> code fence (issue #97): open a bare <pre>'s fence right
     // before its first non-whitespace child. A direct <code> child keeps
     // fence ownership; a deeper/other first child opens the <pre>'s own fence.
@@ -668,6 +672,9 @@ impl ConvertState {
     }
 
     let tag_id = node.tag_id;
+    if tag_id == Some(TAG_LI) {
+      self.list_rule_pending = false;
+    }
     let closes_own_pre_fence = tag_id == Some(TAG_PRE) && self.pre_fence_open;
 
     // Check override
@@ -762,6 +769,15 @@ impl ConvertState {
     } else {
       node.spacing
     };
+
+    if !has_override
+      && !self.plain_text
+      && tag_id == Some(TAG_HR)
+      && !self.in_table_cell()
+      && self.depth_map[TAG_LI as usize] > 0
+    {
+      self.list_rule_pending = true;
+    }
 
     if !self.plain_text && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty() {
       self.finalize_blockquote();
@@ -1118,6 +1134,13 @@ impl ConvertState {
     let has_inline_gfm_hazard = std::mem::take(&mut self.text_buffer_has_inline_gfm_hazard);
     if text.is_empty() {
       return;
+    }
+
+    if self.list_rule_pending {
+      if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
+        return;
+      }
+      self.flush_list_rule();
     }
 
     if self.pending_inline_whitespace {
@@ -1919,6 +1942,15 @@ impl ConvertState {
       }
     }
     p
+  }
+
+  fn flush_list_rule(&mut self) {
+    let prefix = self.continuation_prefix();
+    self.buffer.reserve(2 + prefix.len());
+    self.buffer.push_str("\n\n");
+    self.buffer.push_str(&prefix);
+    self.last_content_cache_len = 2 + prefix.len();
+    self.list_rule_pending = false;
   }
 
   /// Push `text` into the buffer, hard-wrapping on spaces so no output line
@@ -2804,8 +2836,9 @@ impl ConvertState {
       return NO_SPACING;
     }
     if self.collapse_span_depth > 0 {
-      let is_block =
-        tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id) || id == TAG_P || id == TAG_DIV);
+      let is_block = tag_id.is_some_and(|id| {
+        (TAG_H1..=TAG_H6).contains(&id) || matches!(id, TAG_P | TAG_DIV | TAG_LI)
+      });
       if !is_block {
         return NO_SPACING;
       }
