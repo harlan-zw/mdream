@@ -124,7 +124,7 @@ import {
   TAG_XMP,
   TagIdMap,
 } from './const'
-import { blockOpenPrefix, continuationPrefix, fenceLanguage, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, orderedItemNumber, parseUnsignedInteger } from './utils'
+import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
 const URL_SCHEME_RE = /^[\dA-Z+.-]+:/i
@@ -559,7 +559,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
       return {
         _tag: 'PreEnter',
-        language: fenceLanguage(node.attributes),
+        language: getLanguageFromClass(node.attributes?.class),
       }
     },
     exit: ({ state }) => {
@@ -582,7 +582,7 @@ export const tagHandlers: Record<number, TagHandler> = {
         if (state.preFenceOpen) {
           return undefined
         }
-        const language = fenceLanguage(node.attributes)
+        const language = getLanguageFromClass(node.attributes?.class)
         const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent

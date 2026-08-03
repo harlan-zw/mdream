@@ -5,8 +5,7 @@ use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selec
 use crate::tags::get_tag_handler;
 use crate::tailwind::process_tailwind_classes;
 use crate::types::{
-  Attributes, ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, TagHandler,
-  TailwindData,
+  ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, TagHandler, TailwindData,
 };
 use crate::url::{is_autolink_uri, is_empty_link_href, resolve_url, slugify_heading};
 use std::borrow::Cow;

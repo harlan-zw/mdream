@@ -3736,24 +3736,6 @@ fn ordered_start_wider_than_a_marker_falls_back_to_default_numbering() {
 }
 
 #[test]
-fn fence_language_falls_back_to_the_lang_attribute() {
-  assert_eq!(convert("<pre lang=\"rust\">x</pre>"), "```rust\nx\n```");
-  assert_eq!(
-    convert("<pre><code lang=\"js\">x</code></pre>"),
-    "```js\nx\n```"
-  );
-  // class wins, and a human language tag is not an info string.
-  assert_eq!(
-    convert("<pre lang=\"en-US\" class=\"language-c\">x</pre>"),
-    "```c\nx\n```"
-  );
-  assert_eq!(convert("<pre lang=\"en-US\">x</pre>"), "```\nx\n```");
-  // A space or tab ends the info string, so the rest would leak onto the fence.
-  assert_eq!(convert("<pre lang=\"en US\">x</pre>"), "```\nx\n```");
-  assert_eq!(convert("<pre lang=\"en\tUS\">x</pre>"), "```\nx\n```");
-}
-
-#[test]
 fn colspan_widens_the_delimiter_row() {
   // The spanned cell is followed by the empty cells it swallowed, so the
   // delimiter row is wide enough for `b` to survive.

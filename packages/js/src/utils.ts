@@ -190,19 +190,6 @@ export function getLanguageFromClass(className: string | undefined): string {
   return ''
 }
 
-// Fence info string for a <pre>/<code>: `class="language-x"` first, then
-// `lang="x"`, the form cmark-gfm itself emits. A `lang` carrying a subtag
-// (`en-US`) or spaces is a human language, never an info string.
-export function fenceLanguage(attributes: Record<string, string> | undefined): string {
-  const fromClass = getLanguageFromClass(attributes?.class)
-  if (fromClass)
-    return fromClass
-
-  const lang = attributes?.lang
-  // eslint-disable-next-line no-control-regex
-  return lang && !/[-\x00-\x20\x7F"'&<>`~]/.test(lang) ? lang : ''
-}
-
 // Strict unsigned integer parsing shared by numeric HTML attributes. Partial
 // reads such as `2x` must not disagree with Rust's full-string parse.
 export function parseUnsignedInteger(raw: string | undefined): number | undefined {

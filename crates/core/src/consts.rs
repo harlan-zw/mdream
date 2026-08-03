@@ -253,9 +253,8 @@ pub const ATTR_ALIGN: u16 = 1 << 6;
 pub const ATTR_NAME: u16 = 1 << 7;
 pub const ATTR_PROPERTY: u16 = 1 << 8;
 pub const ATTR_CONTENT: u16 = 1 << 9;
-pub const ATTR_LANG: u16 = 1 << 10;
-pub const ATTR_START: u16 = 1 << 11;
-pub const ATTR_COLSPAN: u16 = 1 << 12;
+pub const ATTR_START: u16 = 1 << 10;
+pub const ATTR_COLSPAN: u16 = 1 << 11;
 pub const ATTR_ALL: u16 = u16::MAX;
 
 /// Case-insensitive, length-first so the common miss costs one compare.
@@ -274,8 +273,6 @@ pub(crate) fn attr_bit(name: &[u8]) -> u16 {
     4 => {
       if name.eq_ignore_ascii_case(b"href") {
         ATTR_HREF
-      } else if name.eq_ignore_ascii_case(b"lang") {
-        ATTR_LANG
       } else if name.eq_ignore_ascii_case(b"name") {
         ATTR_NAME
       } else {

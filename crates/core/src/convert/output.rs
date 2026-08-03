@@ -425,7 +425,8 @@ impl ConvertState {
       && self.stack[stack_len - 1].tag_id == Some(TAG_PRE)
       && !self.in_table_cell()
     {
-      let lang = Self::fence_language(&self.stack[stack_len - 1].attributes).to_string();
+      let lang = Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
+        .to_string();
       self.pre_fence_pending = true;
       self.pre_fence_lang = lang;
     }
@@ -596,7 +597,9 @@ impl ConvertState {
         && let Some(emitted) = output.as_deref()
       {
         let output_start = self.buffer.len() - emitted.len();
-        let language = Self::fence_language(&self.stack[stack_len - 1].attributes).to_string();
+        let language =
+          Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
+            .to_string();
         self.start_code_fence(
           output_start,
           self.buffer.len(),
@@ -2096,7 +2099,7 @@ impl ConvertState {
           if self.pre_fence_open {
             return None;
           }
-          let lang = Self::fence_language(&node.attributes);
+          let lang = Self::get_language_from_class(node.attributes.get("class"));
           let li_depth = self.depth_map[TAG_LI as usize] as usize;
           if li_depth > 0 {
             let indent = self.list_indent.as_str();
@@ -2901,27 +2904,6 @@ impl ConvertState {
       .unwrap_or(1)
       .saturating_add(index as u32)
       .min(MAX_ORDERED_START)
-  }
-
-  /// Fence info string for a `<pre>`/`<code>`: `class="language-x"` first, then
-  /// `lang="x"`, the form cmark-gfm itself emits. A `lang` carrying a subtag
-  /// (`en-US`) or spaces is a human language, never an info string.
-  pub(crate) fn fence_language(attributes: &Attributes) -> &str {
-    let from_class = Self::get_language_from_class(attributes.get("class"));
-    if !from_class.is_empty() {
-      return from_class;
-    }
-    match attributes.get("lang") {
-      Some(lang)
-        if !lang.is_empty()
-          && !lang
-            .bytes()
-            .any(|byte| byte == b'-' || byte == b' ' || is_unsafe_fence_info_byte(byte)) =>
-      {
-        lang
-      }
-      _ => "",
-    }
   }
 }
 

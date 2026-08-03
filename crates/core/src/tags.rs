@@ -149,7 +149,7 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
     collapses_inner_white_space: true,
     spacing: Some(NO_SPACING),
     is_inline: true,
-    wanted_attrs: ATTR_CLASS | ATTR_LANG,
+    wanted_attrs: ATTR_CLASS,
     ..NONE
   });
 
@@ -228,7 +228,7 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   // `class` is kept so a bare <pre class="language-x"> can resolve its fence
   // language for the deferred code block (issue #97).
   t[TAG_PRE as usize] = Some(TagHandler {
-    wanted_attrs: ATTR_CLASS | ATTR_LANG,
+    wanted_attrs: ATTR_CLASS,
     ..NONE
   });
 
