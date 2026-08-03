@@ -8,7 +8,7 @@ exclude = [ "core/fuzz" ]
 resolver = "2"
 
 [workspace.package]
-version = "1.5.9"
+version = "1.5.10"
 edition = "2024"
 license = "MIT"
 rust-version = "1.95"
