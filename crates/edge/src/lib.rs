@@ -1,4 +1,40 @@
+use std::cell::Cell;
+
 use wasm_bindgen::prelude::*;
+
+// ── Panic reporting ──
+//
+// wasm32-unknown-unknown always aborts on panic: the std shipped by rustup
+// builds `panic_unwind` with the abort strategy, so `-Cpanic=unwind` fails to
+// link (`the crate panic_unwind does not have the panic strategy unwind`) and
+// the workspace `panic = "unwind"` profile setting is ignored for this target.
+// Unwinding needs a nightly `-Zbuild-std` rebuild plus wasm exception handling,
+// which measured +8.8% wasm and 6-7% slower conversions.
+//
+// An abort reaches JS as a bare `RuntimeError: unreachable` trap. The trap is
+// catchable and leaves the instance usable, so the only thing actually missing
+// is the message: capture it in a panic hook and let the JS glue re-throw it as
+// a real `Error`. Every panic runs the hook, unlike a hook that throws (that
+// leaves std's panic counter raised, so later panics abort before the hook).
+//
+// `Cell` rather than `RefCell`: a hook running inside a panic must not be able
+// to panic itself on a conflicting borrow.
+thread_local! {
+  static PANIC_MESSAGE: Cell<Option<String>> = const { Cell::new(None) };
+}
+
+#[wasm_bindgen(start)]
+pub fn install_panic_hook() {
+  std::panic::set_hook(Box::new(|info| {
+    PANIC_MESSAGE.with(|slot| slot.set(Some(info.to_string())));
+  }));
+}
+
+/// Consumes the message of the panic that aborted the last export call.
+#[wasm_bindgen(js_name = "__mdreamTakePanicMessage")]
+pub fn take_panic_message() -> Option<String> {
+  PANIC_MESSAGE.with(Cell::take)
+}
 
 // ── Manual JsValue helpers (replaces serde) ──
 
@@ -100,6 +136,14 @@ fn parse_options(
   }
 
   let origin = as_string(&get_prop(options, "origin"));
+
+  // Test-only trigger for the panic reporting regression test (#195); compiled
+  // out of every released artifact.
+  #[cfg(feature = "panic-probe")]
+  if origin.as_deref() == Some("__mdream_panic_probe__") {
+    panic!("panic probe: intentional panic");
+  }
+
   let clean_urls = as_bool(&get_prop(options, "cleanUrls")).unwrap_or(false);
   let clean = parse_clean(&get_prop(options, "clean"));
 

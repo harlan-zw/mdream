@@ -143,6 +143,33 @@ describe('mdream WASM in Workers runtime', () => {
     expect(md).toContain('& < > "')
   })
 
+  it('reports Rust panics as catchable errors and keeps converting (#195)', async () => {
+    const first = await SELF.fetch('http://localhost/panic', {
+      method: 'POST',
+      body: '<h1>Alive</h1>',
+    })
+    const data = await first.json() as {
+      reported?: { name: string, message: string, cause: string }
+      afterPanic: string
+    }
+    expect(data.reported).toBeDefined()
+    expect(data.reported!.name).toBe('Error')
+    expect(data.reported!.message).toContain('panic probe: intentional panic')
+    expect(data.reported!.message).toContain('mdream WASM panic')
+    // the raw trap is kept as the cause
+    expect(data.reported!.cause).toContain('unreachable')
+    // the aborted instance still converts
+    expect(data.afterPanic).toBe('# Alive')
+
+    // and a second panic is reported just as well: the hook is not one-shot
+    const second = await SELF.fetch('http://localhost/panic', {
+      method: 'POST',
+      body: '<h1>Alive</h1>',
+    })
+    const secondData = await second.json() as { reported?: { message: string } }
+    expect(secondData.reported?.message).toContain('panic probe: intentional panic')
+  })
+
   it('returns 404 for unknown routes', async () => {
     const res = await SELF.fetch('http://localhost/unknown')
     expect(res.status).toBe(404)

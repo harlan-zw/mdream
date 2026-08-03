@@ -1,5 +1,6 @@
 import type { HtmlToMarkdownOptions, MdreamNapiResult } from '../napi/index.js'
 import init, { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream } from '../wasm/mdream_edge.js'
+import { wasmPanicError } from './wasm-panic.js'
 
 let _initPromise: Promise<unknown>
 
@@ -15,7 +16,13 @@ ensureInit()
 
 export async function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): Promise<MdreamNapiResult> {
   await ensureInit()
-  return _htmlToMarkdownResult(html, options || {})
+  try {
+    return _htmlToMarkdownResult(html, options || {})
+  }
+  catch (error) {
+    // A Rust panic aborts the WASM instance; surface its message (#195).
+    throw wasmPanicError(error)
+  }
 }
 
 export async function createMarkdownStream(options?: HtmlToMarkdownOptions): Promise<MarkdownStream> {
@@ -27,15 +34,30 @@ export class MarkdownStream {
   private _inner: _MarkdownStream
 
   constructor(options?: HtmlToMarkdownOptions) {
-    this._inner = new _MarkdownStream(options || {})
+    try {
+      this._inner = new _MarkdownStream(options || {})
+    }
+    catch (error) {
+      throw wasmPanicError(error)
+    }
   }
 
   processChunk(chunk: string): string {
-    return this._inner.processChunk(chunk)
+    try {
+      return this._inner.processChunk(chunk)
+    }
+    catch (error) {
+      throw wasmPanicError(error)
+    }
   }
 
   finish(): string {
-    return this._inner.finish()
+    try {
+      return this._inner.finish()
+    }
+    catch (error) {
+      throw wasmPanicError(error)
+    }
   }
 }
 
@@ -46,6 +68,7 @@ export async function* streamHtmlToMarkdown(
   if (!htmlStream)
     throw new Error('Invalid HTML stream provided')
   await ensureInit()
+  // the raw binding, wrapped once below rather than once per chunk
   const stream = new _MarkdownStream(options || {})
   const reader = htmlStream.getReader()
   const decoder = new TextDecoder()
@@ -70,6 +93,9 @@ export async function* streamHtmlToMarkdown(
     const final_ = stream.finish()
     if (final_)
       yield final_
+  }
+  catch (error) {
+    throw wasmPanicError(error)
   }
   finally {
     reader.releaseLock()
