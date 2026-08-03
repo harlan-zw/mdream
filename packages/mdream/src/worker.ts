@@ -17,7 +17,7 @@ const WASM_RE = /\.wasm$/
 
 function getWorkerBlob(wasmUrl: string): Blob {
   const code = `
-import init, { htmlToMarkdownResult } from '${wasmUrl.replace(WASM_RE, '.js')}';
+import init, { __mdreamTakePanicMessage, htmlToMarkdownResult } from '${wasmUrl.replace(WASM_RE, '.js')}';
 
 let ready = false;
 
@@ -42,7 +42,9 @@ self.onmessage = function(e) {
       const result = htmlToMarkdownResult(msg.html, msg.options || {});
       self.postMessage({ id: msg.id, type: 'result', data: result.markdown || '' });
     } catch (err) {
-      self.postMessage({ id: msg.id, type: 'error', message: err.message });
+      // WASM aborts on panic (#195): the message is stashed by the panic hook
+      const panic = __mdreamTakePanicMessage();
+      self.postMessage({ id: msg.id, type: 'error', message: panic || err.message });
     }
   }
 };`

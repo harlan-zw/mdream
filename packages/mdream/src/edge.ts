@@ -2,17 +2,28 @@ import type { HtmlToMarkdownOptions } from '../napi/index.js'
 import { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream, initSync } from '../wasm/mdream_edge.js'
 import wasmModule from '../wasm/mdream_edge_bg.wasm'
 import { resolveOptions } from './resolve-options.js'
+import { wasmPanicError } from './wasm-panic.js'
 
 // Edge runtimes (workerd, edge-light) resolve `.wasm` imports to a compiled
 // WebAssembly.Module that must be instantiated manually (#119).
 initSync({ module: wasmModule })
 
+function convert(html: string, napiOpts: HtmlToMarkdownOptions | undefined) {
+  try {
+    return _htmlToMarkdownResult(html, napiOpts)
+  }
+  catch (error) {
+    // A Rust panic aborts the WASM instance; surface its message (#195).
+    throw wasmPanicError(error)
+  }
+}
+
 export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): string {
   if (!options)
-    return _htmlToMarkdownResult(html, undefined).markdown || ''
+    return convert(html, undefined).markdown || ''
 
   const { napiOpts, extractionHandlers, frontmatterCallback } = resolveOptions(options)
-  const result = _htmlToMarkdownResult(html, napiOpts)
+  const result = convert(html, napiOpts)
   if (result.frontmatter && frontmatterCallback)
     frontmatterCallback(result.frontmatter)
   if (result.extracted?.length && extractionHandlers) {
@@ -26,15 +37,30 @@ export class MarkdownStream {
   private _inner: _MarkdownStream
 
   constructor(options?: HtmlToMarkdownOptions) {
-    this._inner = new _MarkdownStream(options)
+    try {
+      this._inner = new _MarkdownStream(options)
+    }
+    catch (error) {
+      throw wasmPanicError(error)
+    }
   }
 
   processChunk(chunk: string): string {
-    return this._inner.processChunk(chunk)
+    try {
+      return this._inner.processChunk(chunk)
+    }
+    catch (error) {
+      throw wasmPanicError(error)
+    }
   }
 
   finish(): string {
-    return this._inner.finish()
+    try {
+      return this._inner.finish()
+    }
+    catch (error) {
+      throw wasmPanicError(error)
+    }
   }
 }
 
@@ -44,7 +70,7 @@ export async function* streamHtmlToMarkdown(
 ): AsyncIterable<string> {
   if (!htmlStream)
     throw new Error('Invalid HTML stream provided')
-  const stream = new _MarkdownStream(options ? resolveOptions(options).napiOpts : undefined)
+  const stream = new MarkdownStream(options ? resolveOptions(options).napiOpts : undefined)
   const reader = htmlStream.getReader()
   const decoder = new TextDecoder()
   try {

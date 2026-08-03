@@ -931,6 +931,19 @@ for await (const chunk of streamHtmlToMarkdown(response.body)) {
 }
 ```
 
+Conversion errors are catchable. WASM has no unwinding, so an internal Rust panic aborts the call, but the message is preserved and re-thrown as a normal `Error` (with the raw WASM trap as `cause`), and the instance keeps working for later requests:
+
+```ts
+try {
+  return new Response(htmlToMarkdown(html))
+}
+catch (error) {
+  // "mdream WASM panic, please report this at ...\npanicked at ..."
+  console.error(error)
+  return new Response('conversion failed', { status: 500 })
+}
+```
+
 If your toolchain doesn't resolve the export conditions, the raw wasm-bindgen build (web target) is exposed at `mdream/wasm` for manual initialization:
 
 ```ts

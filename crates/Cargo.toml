@@ -50,6 +50,9 @@ opt-level = 3
 lto = true
 strip = true
 codegen-units = 1
+# napi catches unwinds and turns them into JS exceptions. wasm32-unknown-unknown
+# ignores this: rustup ships `panic_unwind` built with abort for that target, so
+# the edge crate always aborts and reports panics through its panic hook instead.
 panic = "unwind"
 
 [profile.wasm]
