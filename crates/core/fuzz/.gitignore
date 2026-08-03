@@ -3,5 +3,8 @@ corpus/*
 !corpus/fuzz_streaming_chunks/
 corpus/fuzz_streaming_chunks/*
 !corpus/fuzz_streaming_chunks/utf8-rewrite
+!corpus/fuzz_streaming_options/
+corpus/fuzz_streaming_options/*
+!corpus/fuzz_streaming_options/heading-slug-start-past-buffer
 artifacts
 coverage

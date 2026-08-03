@@ -3968,3 +3968,30 @@ fn a_fence_opening_a_list_item_shares_the_marker_line() {
     "- text\n\n  ```\n  x\n  ```"
   );
 }
+
+#[test]
+fn clean_fragments_survives_a_heading_whose_content_is_all_dropped() {
+  // A heading records its slug-scan start at the buffer end, just past the
+  // marker's trailing space. An element that emits nothing (`<style>`) trims
+  // that space on entry, leaving the recorded offset one byte past the buffer
+  // end, and slicing from it at the heading's close panicked with
+  // "start byte index N is out of bounds".
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  for html in [
+    "x x<h4><style>",
+    "x x<h4><style></style></h4>",
+    "x x<h1><script>",
+    "x x<h6><style>y</style>",
+  ] {
+    // Collecting slugs must not change what the heading renders to.
+    assert_eq!(
+      convert_with_clean(html, clean.clone()),
+      convert(html),
+      "{html:?}"
+    );
+  }
+  assert_eq!(convert_with_clean("x x<h4><style>", clean), "x x\n\n####");
+}

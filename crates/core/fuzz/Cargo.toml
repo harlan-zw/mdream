@@ -45,6 +45,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fuzz_streaming_options"
+path = "fuzz_targets/fuzz_streaming_options.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fuzz_splitter"
 path = "fuzz_targets/fuzz_splitter.rs"
 test = false
