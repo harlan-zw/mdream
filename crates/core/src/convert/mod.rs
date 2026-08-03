@@ -441,6 +441,12 @@ pub struct ConvertState {
   /// newlines at the document start. When a later rewrite trims the buffer
   /// empty, spacing and newline counts still see the one-shot context.
   flushed_tail: [u8; 2],
+  /// First non-blank byte of the current line when draining has removed that
+  /// line's start, so line-leading questions survive the cut. `None` means the
+  /// retained buffer still holds the whole line (or its lead is still blank).
+  /// Rescanning `buffer` for a line start is wrong once a drain has happened;
+  /// this is the same trick as `flushed_tail`, one step further back.
+  cut_line_lead: Option<u8>,
   /// Output column immediately before `buffer[0]`. Draining may remove the
   /// beginning of the current line, but wrapping still needs its full column.
   buffer_start_column: usize,
@@ -600,6 +606,7 @@ impl ConvertState {
       last_yielded_length: 0,
       has_streamed_output: false,
       flushed_tail: [b'\n'; 2],
+      cut_line_lead: None,
       buffer_start_column: 0,
       #[cfg(test)]
       disable_drain: false,
@@ -1447,6 +1454,17 @@ impl ConvertState {
       [bytes[drain_end - 2], bytes[drain_end - 1]]
     } else {
       [self.flushed_tail[1], bytes[0]]
+    };
+    // Remember what the line being cut leads with; a line opened before an
+    // earlier drain keeps that answer across successive cuts.
+    self.cut_line_lead = if bytes[drain_end - 1] == b'\n' {
+      None
+    } else {
+      let (line, inherited) = match bytes[..drain_end].iter().rposition(|b| *b == b'\n') {
+        Some(at) => (&bytes[at + 1..drain_end], None),
+        None => (&bytes[..drain_end], self.cut_line_lead),
+      };
+      inherited.or_else(|| line.iter().copied().find(|b| !matches!(b, b' ' | b'\t')))
     };
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;

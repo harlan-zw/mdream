@@ -895,3 +895,24 @@ fn streaming_empty_nested_item_marker_matches_one_shot() {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
 }
+
+// A table row's separator depends on what its line already holds, read by
+// scanning the buffer back to the last newline. A drain can take that line's
+// beginning — or the whole line — so the scan runs out of buffer and reads the
+// fragment as a fresh line: an open row is classified as content and separated
+// with a blank line, which ends the GFM table and ejects every row after it.
+#[test]
+fn streaming_table_row_after_drained_line_matches_one_shot() {
+  for html in [
+    // The line's beginning is drained, leaving a fragment of the open row.
+    "<ul><li><table><tr><td></td></tr><tr><td>d</td></tr><tr><td></td></tr></table></li></ul>",
+    // The line is drained entirely, so the buffer is empty where one-shot still
+    // sees the content the row must be separated from. An open inline element
+    // holds the drain boundary far enough to reach that state.
+    "<i><div>.<br />\n<table><tr>",
+    "<span><div>.<br />\n<table><tr>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}

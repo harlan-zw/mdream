@@ -2887,9 +2887,13 @@ impl ConvertState {
 
   fn line_state_before_row(&self) -> LineBeforeRow {
     let bytes = self.buffer.as_bytes();
+    // An empty buffer is a fresh line only while no drain has taken this line's
+    // beginning: afterwards `flushed_tail` is what the row follows, so the
+    // emptied buffer has to fall through to the drain-aware scan below.
+    let line_lead_drained = self.has_streamed_output && self.flushed_tail[1] != b'\n';
     // Rows end their line, so the row after a row decides on one byte and never
     // rescans the line it just wrote.
-    if matches!(bytes.last(), None | Some(b'\n')) {
+    if matches!(bytes.last(), Some(b'\n')) || (bytes.is_empty() && !line_lead_drained) {
       return LineBeforeRow::Open;
     }
     let mut index = bytes.len();
@@ -2901,12 +2905,26 @@ impl ConvertState {
       .iter()
       .position(|byte| !matches!(byte, b' ' | b'\t'))
       .unwrap_or(line.len());
-    match line.get(start) {
+    // `index == 0` means the scan ran out of buffer, not that the line starts
+    // here: a drain may have taken the beginning of this line away. Trusting the
+    // fragment reads an open row as content and separates it with a blank line,
+    // which ends the GFM table and ejects every row after it.
+    let cut_lead = if index == 0 && line_lead_drained {
+      self.cut_line_lead
+    } else {
+      None
+    };
+    match cut_lead.as_ref().or_else(|| line.get(start)) {
       Some(b'|') => LineBeforeRow::Row,
       None => LineBeforeRow::Open,
       // A pending list marker is block prefix, not content: a table's first row
       // belongs on it.
-      Some(_) if self.list_marker_line_start(bytes, bytes.len() - trailing_spaces(bytes)) => {
+      // A drain can empty the buffer entirely; the marker scan needs a byte to
+      // start from, and a fully drained line has none to offer.
+      Some(_)
+        if !bytes.is_empty()
+          && self.list_marker_line_start(bytes, bytes.len() - trailing_spaces(bytes)) =>
+      {
         LineBeforeRow::Open
       }
       Some(_) => LineBeforeRow::Content,
