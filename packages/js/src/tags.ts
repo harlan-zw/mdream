@@ -124,7 +124,7 @@ import {
   TAG_XMP,
   TagIdMap,
 } from './const'
-import { blockOpenPrefix, continuationPrefix, fenceLanguage, isEmptyLinkHref, listMarkerLineStart, orderedItemNumber, parseUnsignedInteger } from './utils'
+import { blockOpenPrefix, continuationPrefix, fenceLanguage, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
 const URL_SCHEME_RE = /^[\dA-Z+.-]+:/i
@@ -211,23 +211,11 @@ function isAutolinkUri(s: string): boolean {
   return true
 }
 
-// Helper function to check if we're inside a table cell
-function isInsideTableCell(state: HandlerContext['state']): boolean {
-  const depthMap = state.depthMap!
-  return depthMap[TAG_TD]! > 0 || depthMap[TAG_TH]! > 0
-}
-
 export function renderBreak(node: HandlerContext['node'], state: HandlerContext['state']): string {
   // A literal newline would terminate a table row/ATX heading or collapse
   // inside a raw HTML block, so preserve the inline HTML there.
   const depthMap = state.depthMap!
-  if (isInsideTableCell(state) || isInsideRawHtmlBlock(depthMap)
-    || depthMap[TAG_H1]
-    || depthMap[TAG_H2]
-    || depthMap[TAG_H3]
-    || depthMap[TAG_H4]
-    || depthMap[TAG_H5]
-    || depthMap[TAG_H6]) {
+  if (isInsideTableCell(state) || isInsideRawHtmlBlock(depthMap) || isInsideHeading(depthMap)) {
     return '<br>'
   }
   // Hard-break markers are literal content inside code.

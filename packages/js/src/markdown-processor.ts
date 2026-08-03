@@ -51,7 +51,7 @@ import {
 import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
 import { breakHandler, renderBreak, resolveUrl } from './tags'
-import { blockOpenPrefix, continuationPrefix, listMarkerLineStart, orderedItemNumber } from './utils'
+import { blockOpenPrefix, continuationPrefix, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, listMarkerLineStart, orderedItemNumber } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -237,7 +237,7 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean): void {
 function updateListIndent(state: MarkdownState, element: ElementNode, eventType: number): void {
   if (element.tagId !== TAG_LI)
     return
-  if ((state.depthMap[TAG_TD] || 0) > 0 || (state.depthMap[TAG_TH] || 0) > 0)
+  if (isInsideTableCell(state))
     return
   if (eventType === NodeEventEnter) {
     const isOrdered = element.parent?.tagId === TAG_OL
@@ -257,38 +257,23 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
  * Determines if spacing is needed between two characters
  */
 function needsSpacing(lastChar: string, firstChar: string, state?: MarkdownState): boolean {
-  // Don't add space if last char is already a space or newline
-  if (lastChar === ' ' || lastChar === '\n' || lastChar === '\t') {
+  if (' \n\t'.includes(lastChar) || ' \n\t'.includes(firstChar)) {
     return false
   }
-
-  // Don't add space if first char is a space or newline
-  if (firstChar === ' ' || firstChar === '\n' || firstChar === '\t') {
-    return false
-  }
-
-  // Special cases where we don't want spacing
-  const noSpaceAfter = new Set(['[', '(', '>', '*', '_', '`'])
-  const noSpaceBefore = new Set([']', ')', '<', '.', ',', '!', '?', ':', ';', '*', '_', '`'])
 
   // Special case: Allow spacing between pipe and HTML tags in table cells
   if (lastChar === '|' && firstChar === '<' && state && (state.depthMap[TAG_TABLE] || 0) > 0) {
     return true
   }
 
-  if (noSpaceAfter.has(lastChar) || noSpaceBefore.has(firstChar)) {
-    return false
-  }
-
-  // For everything else, add spacing
-  return true
+  return !'[(>*_`'.includes(lastChar) && !'])<.,!?:;*_`'.includes(firstChar)
 }
 
 /**
  * Determines if spacing should be added before text content
  */
 function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | TextNode | undefined, textNode: TextNode): boolean {
-  if (!lastChar || lastChar === '\n' || lastChar === ' ' || lastChar === '\t' || lastChar === '[' || lastChar === '>') {
+  if (!lastChar || '\n \t[>'.includes(lastChar)) {
     return false
   }
   if (lastNode?.tagHandler?.isInline) {
@@ -299,20 +284,10 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
     return false
   }
   // Skip spacing before punctuation (parity with Rust engine)
-  if (firstChar === '.' || firstChar === ',' || firstChar === '!' || firstChar === '?'
-    || firstChar === ':' || firstChar === ';' || firstChar === '_' || firstChar === '*'
-    || firstChar === '`' || firstChar === ')' || firstChar === ']') {
+  if (firstChar && '.,!?:;_*`)]'.includes(firstChar)) {
     return false
   }
   return true
-}
-
-function isInsideHeading(depthMap: Uint16Array): boolean {
-  for (let h = TAG_H1; h <= TAG_H6; h++) {
-    if (depthMap[h])
-      return true
-  }
-  return false
 }
 
 /**
@@ -548,37 +523,6 @@ function isThematicBreak(value: string, start: number, marker: number): boolean 
   return count >= 3
 }
 
-function isEntityReferenceAfterAmpersand(value: string, ampersand: number): boolean {
-  let index = ampersand + 1
-  if (value.charCodeAt(index) === 35) {
-    index++
-    const hex = value.charCodeAt(index) === 120 || value.charCodeAt(index) === 88
-    if (hex)
-      index++
-    const start = index
-    while (index < value.length) {
-      const code = value.charCodeAt(index)
-      if (!((code >= 48 && code <= 57)
-        || (hex && ((code >= 65 && code <= 70) || (code >= 97 && code <= 102))))) {
-        break
-      }
-      index++
-    }
-    return index > start && value.charCodeAt(index) === 59
-  }
-  const start = index
-  while (index < value.length) {
-    const code = value.charCodeAt(index)
-    if (!((code >= 48 && code <= 57)
-      || (code >= 65 && code <= 90)
-      || (code >= 97 && code <= 122))) {
-      break
-    }
-    index++
-  }
-  return index > start && value.charCodeAt(index) === 59
-}
-
 const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
 
 /**
@@ -598,8 +542,7 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
   // Text-side reject first: prose that cannot open a block skips the buffer
   // scan entirely, which is most text nodes.
   const first = value.charCodeAt(0)
-  if (first !== 32 && first !== 35 && first !== 43 && first !== 45 && first !== 62
-    && !(first >= 48 && first <= 57)) {
+  if (!' #+->'.includes(value[0]!) && !(first >= 48 && first <= 57)) {
     return false
   }
 
@@ -616,10 +559,7 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
     return false
 
   const code = value.charCodeAt(index)
-  return code === 35 // #
-    || code === 43 // +
-    || code === 45 // -
-    || code === 62 // >
+  return '#+->'.includes(value[index]!)
     || (code >= 48 && code <= 57)
 }
 
@@ -639,11 +579,12 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): 
 
   for (let index = 0; index < value.length; index++) {
     const code = value.charCodeAt(index)
+    const character = value[index]!
 
     // A `\&` guarding a decoded entity reference is emitted by the entity
     // decoder; preserve the pair verbatim so this pass never doubles the slash.
     const next = index + 1 < value.length ? value.charCodeAt(index + 1) : 0
-    if (code === 92 && next === 38 && isEntityReferenceAfterAmpersand(value, index + 1)) {
+    if (code === 92 && next === 38 && isCharacterReferenceTail(value, index + 2)) {
       lineIndent = -1
       orderedDigits = 0
       index++
@@ -657,12 +598,7 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): 
       continue
     }
 
-    let shouldEscape = code === 92 // \
-      || code === 42 // *
-      || code === 95 // _
-      || code === 126 // ~
-      || code === 96 // `
-      || code === 91 // [
+    let shouldEscape = '\\*_~`['.includes(character)
       || (code === 93 && inLink) // ]
       || (code === 124 && inTable) // |
       || (code === 62 && inBlockquote) // >
@@ -692,7 +628,7 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): 
 
     if (shouldEscape) {
       escaped += value.slice(copiedUntil, index)
-      escaped += `\\${value[index]}`
+      escaped += `\\${character}`
       copiedUntil = index + 1
     }
 
@@ -1139,7 +1075,7 @@ function getPlainTextOutput(node: ElementNode, eventType: number, state: Markdow
   if (eventType === NodeEventEnter) {
     if (tagId === TAG_BR)
       return '\n'
-    if (tagId === TAG_P && ((depthMap[TAG_BLOCKQUOTE] || 0) > 0 || ((depthMap[TAG_LI] || 0) > 0 && !(depthMap[TAG_TD] || 0) && !(depthMap[TAG_TH] || 0)))) {
+    if (tagId === TAG_P && ((depthMap[TAG_BLOCKQUOTE] || 0) > 0 || ((depthMap[TAG_LI] || 0) > 0 && !isInsideTableCell(state)))) {
       const lastEntry = state.buffer.at(-1)
       const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
       if (lastChar && lastChar !== ' ' && lastChar !== '\n')
@@ -1220,8 +1156,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         textNode.value = value
       }
 
-      if (state.depthMap[TAG_PRE]! > 0
-        && (state.depthMap[TAG_TD]! > 0 || state.depthMap[TAG_TH]! > 0)) {
+      if (state.depthMap[TAG_PRE]! > 0 && isInsideTableCell(state)) {
         textNode.value = foldPreLinesToBr(textNode.value)
       }
 
@@ -1621,7 +1556,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     if (gfmAction)
       commitGfmAction(gfmAction, state, gfmLifecycle, outputStart)
 
-    if (element.tagId === TAG_LI && !state.plainText && !(state.depthMap[TAG_TD] || state.depthMap[TAG_TH])) {
+    if (element.tagId === TAG_LI && !state.plainText && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)
         recordItemMarker(state, element.index)
       else

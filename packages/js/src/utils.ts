@@ -1,5 +1,5 @@
 import type { ElementNode, Node } from './types'
-import { NEWLINE_CHAR, SPACE_CHAR, TAG_BLOCKQUOTE, TAG_LI } from './const'
+import { NEWLINE_CHAR, SPACE_CHAR, TAG_BLOCKQUOTE, TAG_H1, TAG_H6, TAG_LI, TAG_TD, TAG_TH } from './const'
 import {
   HTML_ENTITIES,
   MAX_ENTITY_NAME_LENGTH,
@@ -8,6 +8,19 @@ import {
 
 function lowerAscii(code: number): number {
   return code >= 65 && code <= 90 ? code + 32 : code
+}
+
+export function isInsideHeading(depthMap: Uint16Array): boolean {
+  for (let tagId = TAG_H1; tagId <= TAG_H6; tagId++) {
+    if (depthMap[tagId])
+      return true
+  }
+  return false
+}
+
+export function isInsideTableCell(state: { depthMap?: Uint16Array }): boolean {
+  const depthMap = state.depthMap!
+  return depthMap[TAG_TD]! > 0 || depthMap[TAG_TH]! > 0
 }
 
 /**
@@ -317,7 +330,7 @@ function numericReplacement(codePoint: number): string {
   return String.fromCodePoint(codePoint)
 }
 
-function isCharacterReferenceTail(text: string, start: number): boolean {
+export function isCharacterReferenceTail(text: string, start: number): boolean {
   let index = start
   if (text.charCodeAt(index) === 35) { // #
     index++
