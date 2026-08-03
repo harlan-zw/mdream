@@ -19,6 +19,11 @@ describe('wasmPanicError', () => {
     expect(wasmPanicError(TRAP, () => undefined)).toBe(TRAP)
   })
 
+  it('never labels a non-trap failure with a stale panic message', () => {
+    const failure = new TypeError('expected a string argument')
+    expect(wasmPanicError(failure, () => 'panicked at edge/src/lib.rs:12:5:\nstale')).toBe(failure)
+  })
+
   it('rethrows untouched when the message cannot be read', () => {
     expect(wasmPanicError(TRAP, () => {
       throw new TypeError('wasm is undefined')

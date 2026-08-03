@@ -12,6 +12,12 @@ import { __mdreamTakePanicMessage } from '../wasm/mdream_edge.js'
  * probe build can be checked against the same reporting path.
  */
 export function wasmPanicError(error: unknown, takeMessage: () => string | undefined = __mdreamTakePanicMessage): unknown {
+  // An abort always surfaces as a trap. Anything else (a TypeError from the
+  // bindings, a rejected stream read) must not be labelled with a message left
+  // behind by a panic someone else caught.
+  if (!(error instanceof WebAssembly.RuntimeError))
+    return error
+
   let message: string | undefined
   try {
     message = takeMessage()
