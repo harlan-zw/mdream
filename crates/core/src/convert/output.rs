@@ -1838,7 +1838,7 @@ impl ConvertState {
 
   #[inline]
   /// Note whether the open raw-HTML region has been broken by a blank line.
-  fn track_raw_html_markdown_context(&mut self) {
+  pub(super) fn track_raw_html_markdown_context(&mut self) {
     if self.raw_html_markdown {
       return;
     }
@@ -1874,6 +1874,13 @@ impl ConvertState {
     }
     self.line_start_scanned_to = len;
 
+    // A `line_start` of zero is the drained buffer's front, not the line's, once
+    // a drain has taken this line's beginning: the fragment left behind can open
+    // with a tag the real line only continues, which suspends Markdown and drops
+    // the escapes a one-shot conversion writes.
+    if self.line_start == 0 && self.has_streamed_output && self.flushed_tail[1] != b'\n' {
+      return self.cut_line_lead == Some(b'<');
+    }
     let line = &bytes[self.line_start..len];
     let indent = line
       .iter()

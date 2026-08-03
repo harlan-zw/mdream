@@ -934,3 +934,18 @@ fn streaming_empty_item_with_open_marker_matches_one_shot() {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
 }
+
+// Past a blank line a raw-HTML region is Markdown again, tracked by scanning the
+// buffer for that blank line. A drain can carry those bytes away before the scan
+// reaches them, leaving the region suspended forever: streaming then omits every
+// escape one-shot writes there.
+#[test]
+fn streaming_raw_html_blank_line_drained_matches_one_shot() {
+  for html in [
+    "<dd><p>.<br />*<Foo/Bar>",
+    "<dd><tr><a href=\"u\" title=\"t\">_</html>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}

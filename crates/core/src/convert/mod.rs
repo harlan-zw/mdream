@@ -1466,6 +1466,12 @@ impl ConvertState {
       };
       inherited.or_else(|| line.iter().copied().find(|b| !matches!(b, b' ' | b'\t')))
     };
+    // The blank line that ends a raw-HTML region may sit in the bytes about to
+    // leave; dropped unscanned, the region never closes and keeps suspending the
+    // escapes one-shot writes.
+    if self.raw_html_scanned_to < drain_end && !self.raw_html_markdown && self.in_raw_html_block() {
+      self.track_raw_html_markdown_context();
+    }
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
     self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);
