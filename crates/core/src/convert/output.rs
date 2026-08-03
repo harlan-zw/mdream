@@ -259,8 +259,12 @@ impl ConvertState {
       .buffer
       .trim_end_matches(|c: char| c.is_ascii_whitespace())
       .len();
+    // An empty range means "no content" only while none of it has left the
+    // buffer. `has_streamed_output` is global, so reading it here drops the `>`
+    // of a genuinely empty blockquote that one-shot emits.
+    let content_left_buffer = self.last_yielded_length > frame.content_start;
     if content_end < frame.content_start
-      || (content_end == frame.content_start && self.has_streamed_output)
+      || (content_end == frame.content_start && content_left_buffer)
     {
       return;
     }

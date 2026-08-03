@@ -1118,3 +1118,26 @@ fn streaming_open_marker_across_item_newline_matches_one_shot() {
     "- \n  >\n  > -"
   );
 }
+
+// An empty blockquote's `>` was dropped for the rest of the document once
+// anything had been yielded, because the emptiness test read the global
+// `has_streamed_output` instead of asking about the frame's own range.
+#[test]
+fn streaming_empty_blockquote_marker_matches_one_shot() {
+  for html in [
+    "<i><blockquote>",
+    "<i>><blockquote>",
+    "<em>-<blockquote>",
+    "<table><dt><blockquote>",
+    "<tr><a href=\"u\"><blockquote>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+  // Parity alone cannot see this: both sides agreeing on a dropped `>` would
+  // pass. Pin the marker itself.
+  assert_eq!(
+    html_to_markdown("<i><blockquote>", HTMLToMarkdownOptions::default()),
+    "*>*"
+  );
+}
