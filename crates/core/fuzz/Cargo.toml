@@ -38,6 +38,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fuzz_html_grammar"
+path = "fuzz_targets/fuzz_html_grammar.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fuzz_splitter"
 path = "fuzz_targets/fuzz_splitter.rs"
 test = false

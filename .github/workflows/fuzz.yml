@@ -18,6 +18,7 @@ jobs:
       matrix:
         target:
           - fuzz_html_to_markdown
+          - fuzz_html_grammar
           - fuzz_options
           - fuzz_splitter
           - fuzz_streaming
@@ -55,7 +56,7 @@ jobs:
       # ("sanitizer is incompatible with statically linked libc").
       - name: Run fuzzer
         working-directory: crates/core
-        run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }} -- -max_total_time=300
+        run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }} -- -dict=fuzz/html.dict -max_total_time=300
 
       - name: Upload crash artifacts
         if: failure()

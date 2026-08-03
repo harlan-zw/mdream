@@ -1,0 +1,146 @@
+# libFuzzer dictionary for the byte-oriented HTML targets.
+#
+# Without it a mutator spends most of its budget rediscovering that input has
+# to start with '<' to reach anything past the tokenizer. Tokens are inserted
+# and spliced into the raw input, so this also feeds the Arbitrary-derived
+# targets through their String fields.
+#
+# Pass with: cargo fuzz run <target> -- -dict=fuzz/html.dict
+
+# ── structure ──
+"<html>"
+"<head>"
+"<body>"
+"<main>"
+"<article>"
+"<section>"
+"<nav>"
+"<footer>"
+"<header>"
+"<div>"
+"</div>"
+"<span>"
+"</span>"
+"<p>"
+"</p>"
+
+# ── headings, where slug and buffer offsets are recorded ──
+"<h1>"
+"</h1>"
+"<h2>"
+"<h4>"
+"</h4>"
+"<h6>"
+
+# ── inline formatting ──
+"<strong>"
+"</strong>"
+"<em>"
+"<b>"
+"<i>"
+"<del>"
+"<sup>"
+"<sub>"
+"<code>"
+"</code>"
+"<pre>"
+"</pre>"
+"<blockquote>"
+"</blockquote>"
+
+# ── lists ──
+"<ul>"
+"<ol>"
+"<li>"
+"</li>"
+"<dl>"
+"<dt>"
+"<dd>"
+
+# ── tables ──
+"<table>"
+"<thead>"
+"<tbody>"
+"<tr>"
+"<th>"
+"<td>"
+"</td>"
+"colspan=\"2\""
+"rowspan=\"9999\""
+
+# ── links and media ──
+"<a href=\"/rel\">"
+"<a href=\"https://example.com\">"
+"<a href=\"#frag\">"
+"</a>"
+"<img src=\"/x.png\" alt=\"a\">"
+"<picture>"
+"<source>"
+"<svg>"
+
+# ── raw text and void elements, which suspend normal tokenizing ──
+"<script>"
+"</script>"
+"<style>"
+"</style>"
+"<textarea>"
+"<template>"
+"<title>"
+"<br>"
+"<hr>"
+"<meta charset=\"utf-8\">"
+"<link rel=\"canonical\">"
+
+# ── attributes ──
+" class=\""
+" id=\""
+" hidden"
+" aria-hidden=\"true\""
+"class=\"sr-only\""
+"class=\"line-through font-bold\""
+"style=\"display:none\""
+
+# ── malformed markup the tokenizer has to resynchronise from ──
+"<"
+">"
+"</"
+"< "
+"<>"
+"</>"
+"<!--"
+"-->"
+"<!-- unterminated"
+"<!DOCTYPE html>"
+"<![CDATA["
+"<div class=\"x"
+"<div =>"
+"<DIV>"
+"<my-widget>"
+"< div>"
+"</ div>"
+
+# ── entities ──
+"&amp;"
+"&lt;"
+"&gt;"
+"&quot;"
+"&nbsp;"
+"&#x1F600;"
+"&#65;"
+"&#xZZ;"
+"&notanentity;"
+"&"
+"&#"
+
+# ── text that interacts with Markdown escaping ──
+"\x0a\x0a"
+"\x0d\x0a"
+"*"
+"_"
+"`"
+"|"
+"# "
+"> "
+"- "
+"[]("
+"\x00"
