@@ -1617,9 +1617,26 @@ impl ConvertState {
       return;
     }
     self.buffer.insert(self.empty_item_line_start, '\n');
-    // The insertion moves every cached buffer offset at or past the line.
+    // The insertion moves cached offsets at or past the line: an inline marker
+    // still open across it measures emptiness from `content_start`, so left
+    // unshifted it stops looking empty and streaming leaks markers one-shot drops.
+    //
+    // Not the blockquote frames. Their `content_start` marks where quote
+    // prefixing begins, which belongs *before* this newline; shifting it turns
+    // `- \n  >\n  > -` into `- \n\n  > -`, which GFM reads as the list's sibling
+    // rather than its child. `link_bracket_pos` needs no shift either — a pending
+    // `[` is the tail this function has already returned on.
+    let at = self.empty_item_line_start;
+    for (_, output_start, content_start) in &mut self.open_markers {
+      if *output_start >= at {
+        *output_start += 1;
+      }
+      if *content_start >= at {
+        *content_start += 1;
+      }
+    }
     self.line_start_scanned_to = usize::MAX;
-    self.raw_html_scanned_to = self.raw_html_scanned_to.min(self.empty_item_line_start);
+    self.raw_html_scanned_to = self.raw_html_scanned_to.min(at);
   }
 
   #[inline]

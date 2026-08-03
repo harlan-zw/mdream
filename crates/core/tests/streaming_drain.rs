@@ -2,7 +2,7 @@
 #![allow(unsafe_code)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
 use mdream::MarkdownStreamProcessor;
 use mdream::html_to_markdown;
@@ -14,26 +14,79 @@ use mdream::types::{CleanConfig, HTMLToMarkdownOptions, PluginConfig, TagOverrid
 
 struct Tracking;
 
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-static PEAK: AtomicUsize = AtomicUsize::new(0);
+/// Accounting is per-thread. Process-wide counters measure whatever else the
+/// harness is doing: tests run in parallel, and one building a multi-megabyte
+/// fixture lands in another's peak, so the bound has to be either loose enough
+/// to be meaningless or flaky. A thread only sees its own allocations, so two
+/// measurements can run at once.
+#[derive(Clone, Copy)]
+struct Acct {
+  on: bool,
+  live: isize,
+  peak: isize,
+}
+
+thread_local! {
+  static ACCT: Cell<Acct> = const {
+    Cell::new(Acct { on: false, live: 0, peak: 0 })
+  };
+}
+
+/// `try_with` because TLS is already gone late in thread teardown, and a `Cell`
+/// with a const initialiser never allocates, so this cannot recurse back into
+/// the allocator.
+fn account(delta: isize) {
+  let _ = ACCT.try_with(|cell| {
+    let mut acct = cell.get();
+    if !acct.on {
+      return;
+    }
+    acct.live += delta;
+    if acct.live > acct.peak {
+      acct.peak = acct.live;
+    }
+    cell.set(acct);
+  });
+}
 
 unsafe impl GlobalAlloc for Tracking {
   unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
     let p = unsafe { System.alloc(layout) };
     if !p.is_null() {
-      let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
-      PEAK.fetch_max(live, Ordering::Relaxed);
+      account(layout.size() as isize);
     }
     p
   }
   unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-    LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+    account(-(layout.size() as isize));
     unsafe { System.dealloc(ptr, layout) };
   }
 }
 
 #[global_allocator]
 static ALLOC: Tracking = Tracking;
+
+/// Peak live bytes while `feed` runs, and the total output it produced. The
+/// output is dropped as it arrives, the way a wire consumer would.
+fn measure_peak(html: &str, chunk: usize, opts: HTMLToMarkdownOptions) -> (u64, u64) {
+  ACCT.set(Acct {
+    on: true,
+    live: 0,
+    peak: 0,
+  });
+  let mut p = MarkdownStreamProcessor::new(opts);
+  let mut total_out: u64 = 0;
+  for c in html.as_bytes().chunks(chunk) {
+    total_out += p.process_chunk(std::str::from_utf8(c).unwrap()).len() as u64;
+  }
+  total_out += p.finish().len() as u64;
+  let mut acct = ACCT.get();
+  acct.on = false;
+  ACCT.set(acct);
+  // Freeing something allocated before the measurement can drive `live`
+  // negative; the peak is what matters and it can only be >= 0.
+  (acct.peak.max(0) as u64, total_out)
+}
 
 fn safe_clean() -> CleanConfig {
   // Everything except `fragments`, which needs the whole buffer.
@@ -503,19 +556,7 @@ fn streaming_memory_is_bounded_not_document_sized() {
     html.push_str("<p>x</p>");
   }
 
-  let mut p = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
-  let mut total_out: u64 = 0;
-
-  // Keep LIVE as the allocator's true process-wide total. Resetting it here
-  // would make later deallocations for pre-existing allocations underflow.
-  let baseline = LIVE.load(Ordering::Relaxed);
-  PEAK.store(baseline, Ordering::Relaxed);
-  for c in html.as_bytes().chunks(8 * 1024) {
-    let out = p.process_chunk(std::str::from_utf8(c).unwrap());
-    total_out += out.len() as u64; // wire would send + drop this
-  }
-  total_out += p.finish().len() as u64;
-  let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline) as u64;
+  let (peak, total_out) = measure_peak(&html, 8 * 1024, HTMLToMarkdownOptions::default());
 
   // Amplification really happened...
   assert!(
@@ -950,6 +991,69 @@ fn streaming_raw_html_blank_line_drained_matches_one_shot() {
   }
 }
 
+// Every item's marker is immediately followed by a link and an emphasis, the
+// shape that holds the empty-item decision open across a chunk boundary. That
+// hold pins the drain at the marker's line, so one that outlived its item would
+// retain the document instead of a window.
+#[test]
+fn streaming_memory_bounded_with_empty_item_marker_holds() {
+  let mut html = String::with_capacity(8 * 1024 * 1024 + 64);
+  html.push_str("<ul>");
+  while html.len() < 8 * 1024 * 1024 {
+    html.push_str("<li><li><a href=\"/u\">t</a><em>e</em>x</li>");
+  }
+  html.push_str("</ul>");
+
+  let (peak, total_out) = measure_peak(&html, 8 * 1024, HTMLToMarkdownOptions::default());
+
+  // The conversion really ran...
+  assert!(
+    total_out > 1024 * 1024,
+    "expected >1MB output, got {total_out}"
+  );
+  // ...and the hold released every item, so memory stayed a window. Measures
+  // ~9KB against an 8MB input; the bound is loose enough to absorb allocator
+  // and scheduling noise while still failing if the hold ever pins the document.
+  assert!(
+    peak < 1024 * 1024,
+    "peak {peak} should be a bounded window, not ~{} input",
+    html.len()
+  );
+}
+
+// The measurement must ignore other threads: tests run in parallel, and one
+// building a multi-megabyte fixture would otherwise land in another's peak.
+// Joining the allocating thread while this thread's window is still open is
+// what makes the overlap a fact rather than a matter of timing.
+#[test]
+fn memory_measurement_ignores_other_threads() {
+  ACCT.set(Acct {
+    on: true,
+    live: 0,
+    peak: 0,
+  });
+  let allocated = std::thread::spawn(|| {
+    let fixture = vec![7u8; 8 * 1024 * 1024];
+    std::hint::black_box(fixture.len())
+  })
+  .join()
+  .unwrap();
+  let mut acct = ACCT.get();
+  acct.on = false;
+  ACCT.set(acct);
+
+  assert_eq!(
+    allocated,
+    8 * 1024 * 1024,
+    "the other thread did not allocate"
+  );
+  assert!(
+    acct.peak < 64 * 1024,
+    "peak {} includes another thread's 8MB",
+    acct.peak
+  );
+}
+
 // Yielding does not remove bytes, but `has_streamed_output` is set as soon as any
 // are yielded. `flushed_tail` only describes real removed bytes, so reading it on
 // the strength of that flag invents a newline before `buffer[0]` and suppresses
@@ -982,4 +1086,35 @@ fn streaming_block_open_after_drained_line_matches_one_shot() {
     assert_stream_matches(html, HTMLToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
+}
+
+// The newline an empty item inserts at its marker line moves every buffer offset
+// at or past it. An inline element still open across the insertion measures its
+// own emptiness from one of them, so leaving it unshifted stops an empty element
+// from looking empty and leaks the markers one-shot drops.
+#[test]
+fn streaming_open_marker_across_item_newline_matches_one_shot() {
+  for html in [
+    "<li><li><br /><i>",
+    "<li><li><br /><em>",
+    "<ul><li><ul><li><br /><i>",
+    "<tr><li><br /><i>",
+    ".<li><br /><i>",
+    "<ul><li><blockquote><ul><li>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+
+  // The blockquote frames must NOT be shifted with the rest: their
+  // `content_start` belongs before the inserted newline. Shifting it moves the
+  // quote out of the list item, and because that moves one-shot too, parity
+  // cannot see it — so pin the bytes a GFM parser reads back as `li > blockquote`.
+  assert_eq!(
+    html_to_markdown(
+      "<ul><li><blockquote><ul><li>",
+      HTMLToMarkdownOptions::default()
+    ),
+    "- \n  >\n  > -"
+  );
 }
