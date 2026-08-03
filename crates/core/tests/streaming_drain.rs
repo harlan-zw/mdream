@@ -1141,3 +1141,19 @@ fn streaming_empty_blockquote_marker_matches_one_shot() {
     "*>*"
   );
 }
+
+// Draining resolves a pending marker guard early so it can release its hold. It
+// must not insert on the item's behalf: the very next `<li>` drops the pending
+// guard, which is how one-shot leaves `<li><li>` tight.
+#[test]
+fn streaming_marker_guard_defers_to_item_exit_matches_one_shot() {
+  for html in [
+    "<li><li><br /><ul><li>",
+    "<ul><li><ul><li><br /><ul><li>",
+    "<tr><li><br /><ul><li>",
+    "<td>d</td><li><br /><ul><li>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}

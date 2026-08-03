@@ -1616,10 +1616,18 @@ impl ConvertState {
     {
       return;
     }
-    self.empty_item_hazard = false;
+    // Content on the marker's own line settles it: no blank line is owed.
     if !tail.is_empty() && !tail.starts_with('\n') {
+      self.empty_item_hazard = false;
       return;
     }
+    // Otherwise only the item's own exit may act. A following `<li>` records a new
+    // marker and drops this pending one, which is how one-shot leaves `<li><li>`
+    // tight; the drain calling in early must not insert on its behalf.
+    if !at_exit {
+      return;
+    }
+    self.empty_item_hazard = false;
     self.buffer.insert(self.empty_item_line_start, '\n');
     // The insertion moves cached offsets at or past the line: an inline marker
     // still open across it measures emptiness from `content_start`, so left
