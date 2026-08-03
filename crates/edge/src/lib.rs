@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::Cell;
 
 use wasm_bindgen::prelude::*;
 
@@ -16,21 +16,24 @@ use wasm_bindgen::prelude::*;
 // is the message: capture it in a panic hook and let the JS glue re-throw it as
 // a real `Error`. Every panic runs the hook, unlike a hook that throws (that
 // leaves std's panic counter raised, so later panics abort before the hook).
+//
+// `Cell` rather than `RefCell`: a hook running inside a panic must not be able
+// to panic itself on a conflicting borrow.
 thread_local! {
-  static PANIC_MESSAGE: RefCell<Option<String>> = const { RefCell::new(None) };
+  static PANIC_MESSAGE: Cell<Option<String>> = const { Cell::new(None) };
 }
 
 #[wasm_bindgen(start)]
 pub fn install_panic_hook() {
   std::panic::set_hook(Box::new(|info| {
-    PANIC_MESSAGE.with_borrow_mut(|slot| *slot = Some(info.to_string()));
+    PANIC_MESSAGE.with(|slot| slot.set(Some(info.to_string())));
   }));
 }
 
 /// Consumes the message of the panic that aborted the last export call.
 #[wasm_bindgen(js_name = "__mdreamTakePanicMessage")]
 pub fn take_panic_message() -> Option<String> {
-  PANIC_MESSAGE.with_borrow_mut(Option::take)
+  PANIC_MESSAGE.with(Cell::take)
 }
 
 // ── Manual JsValue helpers (replaces serde) ──

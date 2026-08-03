@@ -68,7 +68,8 @@ export async function* streamHtmlToMarkdown(
   if (!htmlStream)
     throw new Error('Invalid HTML stream provided')
   await ensureInit()
-  const stream = new MarkdownStream(options || {})
+  // the raw binding, wrapped once below rather than once per chunk
+  const stream = new _MarkdownStream(options || {})
   const reader = htmlStream.getReader()
   const decoder = new TextDecoder()
   try {
@@ -92,6 +93,9 @@ export async function* streamHtmlToMarkdown(
     const final_ = stream.finish()
     if (final_)
       yield final_
+  }
+  catch (error) {
+    throw wasmPanicError(error)
   }
   finally {
     reader.releaseLock()
