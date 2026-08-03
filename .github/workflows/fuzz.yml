@@ -27,6 +27,9 @@ jobs:
 
       - name: Install Rust nightly toolchain
         uses: dtolnay/rust-toolchain@nightly
+        with:
+          # cargo-fuzz can pass -Zbuild-std, which needs the std source
+          components: rust-src
 
       - name: Install cargo-fuzz
         uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
@@ -37,9 +40,22 @@ jobs:
         with:
           workspaces: crates/core/fuzz -> target
 
+      # corpus/ is gitignored, so without this every weekly run starts cold and
+      # rediscovers the same shallow inputs for 300s
+      - name: Restore corpus
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: crates/core/fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+
+      # --target is pinned because cargo-fuzz defaults it to its own build
+      # triple: install-action dropped cargo-fuzz, so binstall now fetches the
+      # musl build, and a musl target cannot link the sanitizer
+      # ("sanitizer is incompatible with statically linked libc").
       - name: Run fuzzer
         working-directory: crates/core
-        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=300
+        run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }} -- -max_total_time=300
 
       - name: Upload crash artifacts
         if: failure()
