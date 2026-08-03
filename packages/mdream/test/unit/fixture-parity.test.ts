@@ -601,6 +601,7 @@ describe('cross-engine parity', () => {
       '<table><tr><td><p>a<td>b</tr><tr><td>c</td></tr></table>',
       '<table><tr><th>h1</th><th colspan="2">h2</th></tr><tr><td>a</td><td>b</td><td>c</td></tr></table>',
       '<table><tr><th colspan="2x">h</th></tr><tr><td>a</td><td>b</td></tr></table>',
+      '<table><tr><th colspan="300">h</th></tr><tr><td>a</td><td>b</td></tr></table>',
       '<ul><li># h</li><li>- x</li><li>1. y</li></ul>',
       '<ul><li>x<table><tr><th>h</th></tr><tr><td>c</td></tr></table></li></ul>',
       '<table><tr><th>h</th></tr><tr><td><code>a|b</code></td></tr></table>',

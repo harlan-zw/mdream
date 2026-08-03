@@ -136,6 +136,16 @@ enum LineBeforeRow {
 /// Widest `colspan` honored.
 const MAX_CELL_SPAN: u8 = 64;
 
+static SPAN_FILLER: [u8; (MAX_CELL_SPAN as usize - 1) * 2] = {
+  let mut filler = [b' '; (MAX_CELL_SPAN as usize - 1) * 2];
+  let mut index = 1;
+  while index < filler.len() {
+    filler[index] = b'|';
+    index += 2;
+  }
+  filler
+};
+
 /// Largest `<ol start>` CommonMark can express: an ordered marker is at most
 /// nine digits, so anything wider stops being a list marker at all.
 const MAX_ORDERED_START: u32 = 999_999_999;
@@ -438,9 +448,9 @@ pub struct ConvertState {
   /// Once streaming starts, whitespace at the front of a drained buffer is
   /// content, not document-leading whitespace.
   has_streamed_output: bool,
-  /// Last two bytes flushed out of the front of the buffer by draining. When a
-  /// later rewrite trims the retained buffer empty, spacing and newline counts
-  /// still need the same two-byte context one-shot conversion sees.
+  /// Two bytes immediately before the retained buffer, initialized as virtual
+  /// newlines at the document start. When a later rewrite trims the buffer
+  /// empty, spacing and newline counts still see the one-shot context.
   flushed_tail: [u8; 2],
   /// Output column immediately before `buffer[0]`. Draining may remove the
   /// beginning of the current line, but wrapping still needs its full column.
@@ -598,7 +608,7 @@ impl ConvertState {
       pending_inline_whitespace: false,
       last_yielded_length: 0,
       has_streamed_output: false,
-      flushed_tail: [0; 2],
+      flushed_tail: [b'\n'; 2],
       buffer_start_column: 0,
       #[cfg(test)]
       disable_drain: false,

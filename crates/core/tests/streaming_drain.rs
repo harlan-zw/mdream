@@ -270,10 +270,12 @@ fn streaming_does_not_re_escape_carried_text() {
 
 #[test]
 fn streaming_gfm_text_escaping_matches_every_split() {
-  assert_stream_matches(
+  for html in [
     r"<p>&#35; heading [label](url) and *bar* ~~baz~~ `qux` &amp;copy;</p><p>> quote</p><p>1. item</p><p>---</p>",
-    HTMLToMarkdownOptions::default(),
-  );
+    r#"<ol start="10"><li>> quote</li><li>after</li></ol>"#,
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  }
 }
 
 #[test]

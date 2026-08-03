@@ -1179,6 +1179,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     emptyItemFragment: undefined,
   }
   const bufferScan: BufferScanState = [false, 0, 0, 0, 0]
+  let inRawHtmlRegion = false
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
   let openMarkerCount = 0
@@ -1226,13 +1227,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
       const insideRawHtmlBlock = isInsideRawHtmlBlock(state.depthMap)
       let rawHtmlMarkdown = false
-      if (insideRawHtmlBlock) {
+      if (insideRawHtmlBlock)
         rawHtmlMarkdown = trackRawHtmlMarkdownContext(state.buffer, bufferScan)
-      }
-      else {
-        bufferScan[0] = false
-        bufferScan[1] = state.buffer.length
-      }
       if (!state.plainText
         && !state.depthMap[TAG_PRE]
         && insideRawHtmlBlock) {
@@ -1318,6 +1314,12 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     const element = node as ElementNode
     const handler = node.tagHandler
+    const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
+    if (insideRawHtmlRegion && !inRawHtmlRegion) {
+      bufferScan[0] = false
+      bufferScan[1] = state.buffer.length
+      inRawHtmlRegion = true
+    }
 
     // The built-in break has zero structural spacing and no exit event. Keep it
     // out of the generic element pipeline, which otherwise scans ancestry and
@@ -1654,6 +1656,12 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       openLinkFragment = -1
 
     updateListIndent(state, element, eventType)
+
+    if (!insideRawHtmlRegion && inRawHtmlRegion) {
+      bufferScan[0] = false
+      bufferScan[1] = state.buffer.length
+      inRawHtmlRegion = false
+    }
   }
 
   /**

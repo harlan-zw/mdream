@@ -108,8 +108,10 @@ describe('gfm text escaping', () => {
       .toBe('| a\\|b |\n| --- |')
   })
 
-  it('rejects a partially numeric colspan', () => {
+  it('rejects malformed or out-of-range colspan', () => {
     expect(htmlToMarkdown('<table><tr><th colspan="2x">h</th></tr><tr><td>a</td><td>b</td></tr></table>'))
+      .toBe('| h |\n| --- |\n| a b |')
+    expect(htmlToMarkdown('<table><tr><th colspan="300">h</th></tr><tr><td>a</td><td>b</td></tr></table>'))
       .toBe('| h |\n| --- |\n| a b |')
   })
 

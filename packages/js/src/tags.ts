@@ -369,7 +369,7 @@ function cellEnter(node: HandlerContext['node'], state: HandlerContext['state'])
 
 function cellExit(node: HandlerContext['node'], state: HandlerContext['state']): string | undefined {
   const parsedSpan = parseUnsignedInteger((node as { attributes?: Record<string, string> }).attributes?.colspan)
-  const span = parsedSpan && parsedSpan > 1 ? Math.min(parsedSpan, MAX_CELL_SPAN) : 1
+  const span = parsedSpan && parsedSpan < 256 ? Math.min(parsedSpan, MAX_CELL_SPAN) : 1
   state.tableCurrentRowCells! += span
   return span > 1 ? ' |'.repeat(span - 1) : undefined
 }

@@ -2862,7 +2862,9 @@ impl ConvertState {
   fn span_filler(span: u8) -> Option<Cow<'static, str>> {
     match span {
       1 => None,
-      span => Some(Cow::Owned(" |".repeat(span as usize - 1))),
+      span => Some(Cow::Borrowed(
+        std::str::from_utf8(&SPAN_FILLER[..(span as usize - 1) * 2]).unwrap_or(" |"),
+      )),
     }
   }
 
