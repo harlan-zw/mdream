@@ -115,6 +115,18 @@ describe('gfm text escaping', () => {
       .toBe('| h |\n| --- |\n| a b |')
   })
 
+  it('keeps content after a list item rule in a separate block', () => {
+    expect(htmlToMarkdown('<ul><li>text <hr>after</li></ul>'))
+      .toBe('- text\n\n  ---\n\n  after')
+    expect(htmlToMarkdown('<ul><li><blockquote>text<hr></blockquote>after</li></ul>'))
+      .toBe('- \n  > text\n  >\n  > ---\n\n  after')
+  })
+
+  it('keeps a nested list structured inside a span', () => {
+    expect(htmlToMarkdown('<ol><li><span>parent<ul><li>child</li><li>child 2</li></ul></span></li></ol>'))
+      .toBe('1. parent\n   - child\n   - child 2')
+  })
+
   it('serializes decoded text for its output context', () => {
     expect(htmlToMarkdown('<a href="/safe">x&#93;(/evil) [y</a>'))
       .toBe('[x\\](/evil) \\[y](/safe)')

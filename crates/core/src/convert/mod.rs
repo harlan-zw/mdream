@@ -506,6 +506,8 @@ pub struct ConvertState {
   empty_item_hazard: bool,
   empty_item_line_start: usize,
   empty_item_len: usize,
+  /// A list item rule waiting to see whether visible content follows it.
+  list_rule_pending: bool,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
 }
@@ -626,6 +628,7 @@ impl ConvertState {
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
+      list_rule_pending: false,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
     };
