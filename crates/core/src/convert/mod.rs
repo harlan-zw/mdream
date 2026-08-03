@@ -1159,7 +1159,12 @@ impl ConvertState {
   }
 
   pub fn get_markdown(&mut self) -> String {
-    let trimmed_end_len = self.buffer.trim_end().len();
+    // ASCII whitespace only, as everywhere else: U+00A0 is content, and the
+    // streaming path cannot un-send a nbsp it has already yielded.
+    let trimmed_end_len = self
+      .buffer
+      .trim_end_matches(|c: char| c.is_ascii_whitespace())
+      .len();
     self.buffer.truncate(trimmed_end_len);
     let start = if self.preserve_leading_whitespace {
       0

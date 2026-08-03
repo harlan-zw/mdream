@@ -1179,3 +1179,24 @@ fn raw_html_region_text_is_not_gfm_escaped() {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
 }
+
+// The one-shot finaliser trimmed the buffer with `str::trim_end`, whose Unicode
+// set includes U+00A0. Everywhere else nbsp is content, and streaming cannot
+// un-send a nbsp it has already yielded, so one-shot deleted a trailing one that
+// streaming kept -- silently dropping content in the last case below.
+#[test]
+fn trailing_nbsp_is_content_and_matches_one_shot() {
+  for (html, expected) in [
+    ("<p>x</p><p>&nbsp;</p>", "x\n\n\u{a0}"),
+    ("<p>x</p><p>a&nbsp;</p>", "x\n\na\u{a0}"),
+    ("<p>hello&nbsp;world&nbsp;</p>", "hello\u{a0}world\u{a0}"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HTMLToMarkdownOptions::default()),
+      expected,
+      "one-shot for {html:?}"
+    );
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
