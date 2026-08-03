@@ -52,6 +52,10 @@ fn plain_text_output_preserves_readable_separators() {
     ),
     "Line\nBreak\n\nName\tRole\nAda\tAdmin\n\nDiagram"
   );
+  assert_eq!(
+    convert_text("<ul><li>text<hr>after</li></ul>"),
+    "text after"
+  );
 }
 
 #[test]
@@ -1081,6 +1085,14 @@ fn mixed_nested_lists() {
 }
 
 #[test]
+fn a_nested_list_inside_a_span_keeps_its_structure() {
+  assert_eq!(
+    convert("<ol><li><span>parent<ul><li>child</li><li>child 2</li></ul></span></li></ol>"),
+    "1. parent\n   - child\n   - child 2"
+  );
+}
+
+#[test]
 fn ordered_list_with_code_block_uses_marker_width_indent() {
   // Ordered list continuation must be indented by the marker width
   // (3 columns for "1. ") so the fenced code block parses as part of the
@@ -1410,11 +1422,15 @@ fn a_rule_inside_a_list_item_keeps_its_own_block() {
   assert_eq!(convert("<ul><li>text <hr></li></ul>"), "- text\n\n  ---");
   assert_eq!(
     convert("<ul><li>text <hr>after</li></ul>"),
-    "- text\n\n  --- after"
+    "- text\n\n  ---\n\n  after"
   );
   assert_eq!(
     convert("<ul><li><blockquote>text <hr></blockquote></li></ul>"),
     "- \n  > text\n  >\n  > ---"
+  );
+  assert_eq!(
+    convert("<ul><li><blockquote>text<hr></blockquote>after</li></ul>"),
+    "- \n  > text\n  >\n  > ---\n\n  after"
   );
 }
 

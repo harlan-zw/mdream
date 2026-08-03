@@ -506,6 +506,12 @@ export const tagHandlers: Record<number, TagHandler> = {
         ? MARKDOWN_HORIZONTAL_RULE_ALT
         : `${open}${MARKDOWN_HORIZONTAL_RULE}`
     },
+    exit: ({ state }) => {
+      if (isInsideTableCell(state) || !(state.depthMap?.[TAG_LI] || 0))
+        return ''
+      state.listRulePending = true
+      return ''
+    },
     isSelfClosing: true,
   },
   [TAG_STRONG]: Strong,

@@ -108,6 +108,8 @@ export interface MarkdownState {
   bufferedBlockquoteDepth: number
   /** Fragment for a marker line at risk of becoming a setext underline. */
   emptyItemFragment?: number
+  /** A list item rule whose following content still needs its content column. */
+  listRulePending?: true
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
 }
@@ -743,7 +745,7 @@ function calculateNewLineConfig(node: ElementNode, depthMap: Uint16Array, plainT
   // Adjust for inline elements
   // Block elements preserve spacing even inside span elements (presentational containers)
   // because spans shouldn't affect block-level semantics of their children
-  const isBlockElement = tagId !== undefined && ((tagId >= TAG_H1 && tagId <= TAG_H6) || tagId === TAG_P || tagId === TAG_DIV)
+  const isBlockElement = tagId !== undefined && ((tagId >= TAG_H1 && tagId <= TAG_H6) || tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_LI)
   let currParent = node.parent
   while (currParent) {
     if (currParent.tagHandler?.collapsesInnerWhiteSpace) {
@@ -1216,6 +1218,31 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       : node.parent?.excludedFromMarkdown
     if (inTemplate)
       return
+
+    if (state.listRulePending) {
+      const isVisibleText = node.type === TEXT_NODE
+        && eventType === NodeEventEnter
+        && hasNonWhitespace((node as TextNode).value)
+      const opensVisibleElement = node.type === ELEMENT_NODE
+        && eventType === NodeEventEnter
+        && !node.tagHandler?.excludesTextNodes
+      if (isVisibleText || opensVisibleElement) {
+        const separator = blockOpenPrefix(state.buffer, continuationPrefix(
+          node,
+          state.listIndentWidths || [],
+          !state.bufferedBlockquoteDepth,
+        ))!
+        state.buffer.push(separator)
+        state.lastContentCache = separator
+        state.listRulePending = undefined
+      }
+      else if (node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_LI) {
+        state.listRulePending = undefined
+      }
+      else if (node.type === TEXT_NODE) {
+        return
+      }
+    }
 
     const lastNode = state.lastNode
     state.lastNode = event.node as ElementNode | TextNode
