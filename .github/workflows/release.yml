@@ -56,13 +56,7 @@ jobs:
           pattern: '!*.dockerbuild'
 
       - name: Flatten native artifacts for napi
-        run: |
-          mkdir -p crates/node/artifacts
-          find artifacts/bindings-* -type f \( -name '*.node' -o -name '*.wasm' -o -name '*.js' -o -name '*.cjs' -o -name '*.mjs' -o -name '*.d.ts' -o -name '*.d.cts' -o -name '*.d.mts' \) -exec cp -v {} crates/node/artifacts/ \;
-          # napi artifacts expects wasm glue files in the working directory, not just in artifacts/
-          for glue in $(node crates/node/scripts/move-artifacts.mjs --print-glue-names); do
-            cp "crates/node/artifacts/$glue" crates/node/ 2>/dev/null || true
-          done
+        run: node scripts/stage-napi-artifacts.mjs
 
       - name: Move WASM edge artifacts
         run: |
