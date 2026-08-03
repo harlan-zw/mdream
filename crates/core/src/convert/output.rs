@@ -1921,14 +1921,27 @@ impl ConvertState {
   /// or `None` when the buffer already sits there.
   fn block_open_prefix(&self, prefix: &str) -> Option<Cow<'static, str>> {
     let bytes = self.buffer.as_bytes();
+    // An emptied buffer is the start of the output only while no drain has taken
+    // this line away; afterwards `flushed_tail` holds what the block would be
+    // glued to. A space there is the ambiguous case the `Some(b' ')` arm below
+    // resolves by scanning, which a drained line no longer offers, so leave it to
+    // the arm's conservative answer rather than guess a separator.
+    let drained_onto_content =
+      self.flushed_tail_valid && !matches!(self.flushed_tail[1], b'\n' | b' ');
     match bytes.last() {
+      None if drained_onto_content => Some(Cow::Owned(format!("\n\n{prefix}"))),
       None => None,
       Some(b' ') => {
         // A trailing space can be a pending list marker already at the content
         // column, or ordinary text (`"item "`) that still has to break as a
         // paragraph. Only the former needs no separator.
         let end = bytes.len() - trailing_spaces(bytes);
-        if end > 0 && bytes[end - 1] != b'\n' && !self.list_marker_line_start(bytes, end) {
+        if end == 0 {
+          // Every retained byte is a space, so the line's content — and the
+          // marker scan's starting point — left with the drain.
+          return drained_onto_content.then(|| Cow::Owned(format!("\n\n{prefix}")));
+        }
+        if bytes[end - 1] != b'\n' && !self.list_marker_line_start(bytes, end) {
           Some(Cow::Owned(format!("\n\n{prefix}")))
         } else {
           None

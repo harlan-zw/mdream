@@ -967,3 +967,19 @@ fn streaming_block_separator_after_undrained_yield_matches_one_shot() {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
 }
+
+// A block opening inside a list item asks what its line already holds. An emptied
+// buffer is the start of the output only until a drain takes that line away;
+// afterwards the block is glued to text it should have broken away from.
+#[test]
+fn streaming_block_open_after_drained_line_matches_one_shot() {
+  for html in [
+    "<ul><li>.<br />\n<table><caption>c</caption><tr><td>d</td></tr></table>",
+    "<ol><li>.<br />\n<table><caption>c</caption><tr><td>d</td></tr></table>",
+    "<i><ul><li>.<br />\n<table><caption>c</caption><tr><td>d</td></tr></table>",
+    "<ul><li>t<ul><li>.<br />\n<table><caption>c</caption><tr><td>d</td></tr></table>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
