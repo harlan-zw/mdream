@@ -136,16 +136,6 @@ enum LineBeforeRow {
 /// Widest `colspan` honored.
 const MAX_CELL_SPAN: u8 = 64;
 
-static SPAN_FILLER: [u8; (MAX_CELL_SPAN as usize - 1) * 2] = {
-  let mut filler = [b' '; (MAX_CELL_SPAN as usize - 1) * 2];
-  let mut index = 1;
-  while index < filler.len() {
-    filler[index] = b'|';
-    index += 2;
-  }
-  filler
-};
-
 /// Largest `<ol start>` CommonMark can express: an ordered marker is at most
 /// nine digits, so anything wider stops being a list marker at all.
 const MAX_ORDERED_START: u32 = 999_999_999;

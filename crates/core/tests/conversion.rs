@@ -3713,6 +3713,7 @@ fn ordered_lists_honor_the_start_attribute() {
     "0. a\n1. b"
   );
   assert_eq!(convert("<ol start=\" 7 \"><li>a</li></ol>"), "7. a");
+  assert_eq!(convert("<ol start=\"+7\"><li>a</li></ol>"), "7. a");
 }
 
 #[test]
@@ -3765,6 +3766,14 @@ fn colspan_widens_the_delimiter_row() {
       "<table><tr><th colspan=\"3\">h</th></tr><tr><td>a</td><td>b</td><td>c</td></tr></table>"
     ),
     "| h | | |\n| --- | --- | --- |\n| a | b | c |"
+  );
+  assert_eq!(
+    convert("<table><tr><td colspan=\"+2\">wide</td></tr></table>"),
+    "| wide | |\n| --- | --- |"
+  );
+  assert_eq!(
+    convert("<table><tr><td colspan=\"256\">wide</td></tr></table>"),
+    "| wide |\n| --- |"
   );
 }
 

@@ -80,6 +80,30 @@ fn write_image_description(output: &mut String, alt: &str) {
   write_ascii_escaped(output, alt, &IMAGE_DESCRIPTION_ESCAPES);
 }
 
+#[inline(never)]
+#[allow(clippy::cast_possible_truncation)] // `parsed` is bounded by the `u32` maximum argument.
+fn parse_bounded_u32(value: &str, max: u32) -> Option<u32> {
+  let value = value.trim_ascii().as_bytes();
+  let mut index = usize::from(value.first() == Some(&b'+'));
+  if index == value.len() {
+    return None;
+  }
+  let mut parsed = 0u64;
+  while index < value.len() {
+    let byte = value[index];
+    let digit = byte.wrapping_sub(b'0');
+    if digit > 9 {
+      return None;
+    }
+    parsed = parsed * 10 + u64::from(digit);
+    if parsed > u64::from(max) {
+      return None;
+    }
+    index += 1;
+  }
+  Some(parsed as u32)
+}
+
 impl ConvertState {
   #[inline]
   fn inline_marker_type(tag_id: u8) -> Option<u8> {
@@ -2850,21 +2874,20 @@ impl ConvertState {
   /// is written as its content followed by empty cells; without them the
   /// delimiter row is too narrow and GFM drops every cell past it.
   #[inline]
+  #[allow(clippy::cast_possible_truncation)] // Parsing is explicitly bounded to `u8::MAX`.
   pub(crate) fn cell_span(node: &ElementNode) -> u8 {
-    node
+    (node
       .attributes
       .get("colspan")
-      .and_then(|value| value.trim_ascii().parse::<u8>().ok())
-      .unwrap_or(1)
+      .and_then(|value| parse_bounded_u32(value, u8::MAX.into()))
+      .unwrap_or(1) as u8)
       .clamp(1, MAX_CELL_SPAN)
   }
 
   fn span_filler(span: u8) -> Option<Cow<'static, str>> {
     match span {
       1 => None,
-      span => Some(Cow::Borrowed(
-        std::str::from_utf8(&SPAN_FILLER[..(span as usize - 1) * 2]).unwrap_or(" |"),
-      )),
+      span => Some(Cow::Owned(" |".repeat(span as usize - 1))),
     }
   }
 
@@ -2874,8 +2897,7 @@ impl ConvertState {
     list
       .attributes
       .get("start")
-      .and_then(|value| value.trim_ascii().parse::<u32>().ok())
-      .filter(|start| *start <= MAX_ORDERED_START)
+      .and_then(|value| parse_bounded_u32(value, MAX_ORDERED_START))
       .unwrap_or(1)
       .saturating_add(index as u32)
       .min(MAX_ORDERED_START)
