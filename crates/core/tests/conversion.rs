@@ -3968,3 +3968,61 @@ fn a_fence_opening_a_list_item_shares_the_marker_line() {
     "- text\n\n  ```\n  x\n  ```"
   );
 }
+
+#[test]
+fn clean_fragments_survives_a_heading_whose_content_is_all_dropped() {
+  // A heading records its slug-scan start at the buffer end, just past the
+  // marker's trailing space. An element that emits nothing (`<style>`) trims
+  // that space on entry, leaving the recorded offset one byte past the buffer
+  // end, and slicing from it at the heading's close panicked with
+  // "start byte index N is out of bounds".
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  for html in [
+    "x x<h4><style>",
+    "x x<h4><style></style></h4>",
+    "x x<h1><script>",
+    "x x<h6><style>y</style>",
+  ] {
+    // Collecting slugs must not change what the heading renders to.
+    assert_eq!(
+      convert_with_clean(html, clean.clone()),
+      convert(html),
+      "{html:?}"
+    );
+  }
+  assert_eq!(
+    convert_with_clean("x x<h4><style>", clean.clone()),
+    "x x\n\n####"
+  );
+
+  // The crash was found through the streaming target, and the offset it slices
+  // from is rebased by the drain, so cover narrow chunk boundaries too.
+  for html in [
+    "x x<h4><style>",
+    "x x<h4><style></style></h4>",
+    "x x<h1><script>",
+  ] {
+    for width in [1usize, 3, 7, 64] {
+      let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+        clean: Some(clean.clone()),
+        ..Default::default()
+      });
+      let mut streamed = String::new();
+      let mut start = 0;
+      while start < html.len() {
+        let end = (start + width).min(html.len());
+        streamed.push_str(&processor.process_chunk(&html[start..end]));
+        start = end;
+      }
+      streamed.push_str(&processor.finish());
+      assert_eq!(
+        streamed.trim_end(),
+        convert(html).trim_end(),
+        "{html:?} width={width}"
+      );
+    }
+  }
+}

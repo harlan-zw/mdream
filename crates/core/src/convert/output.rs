@@ -893,9 +893,16 @@ impl ConvertState {
       && self.depth_map[TAG_A as usize] == 0
     {
       if self.in_heading {
-        let slug = slugify_heading(&self.buffer[self.heading_buffer_start..]);
-        if !slug.is_empty() {
-          self.heading_slugs.push(slug);
+        // `heading_buffer_start` was recorded past the marker's trailing space,
+        // which a following element that emits nothing (`<style>`, `<script>`)
+        // trims away, leaving the offset past the buffer end. `get` returns
+        // `None` there instead of panicking, and a heading with no content left
+        // has no slug to record.
+        if let Some(text) = self.buffer.get(self.heading_buffer_start..) {
+          let slug = slugify_heading(text);
+          if !slug.is_empty() {
+            self.heading_slugs.push(slug);
+          }
         }
         self.in_heading = false;
       }
