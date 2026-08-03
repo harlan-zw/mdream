@@ -115,6 +115,43 @@ jobs:
       - name: Full edge WASM build
         run: node scripts/build-wasm-edge.mjs --target web --out-dir /tmp/wasm-test
 
+  # ── NAPI wasi release path ──
+  # The release workflow is the only other place this runs, so without this job
+  # a napi CLI bump that renames artifacts only surfaces on a tag push, after
+  # the GitHub release already exists (mdream#194).
+  napi-wasi-build:
+    name: NAPI wasi Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          targets: wasm32-wasip1-threads
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      # Same composite action the release runs, so the two cannot drift.
+      - name: Build wasi artifacts
+        uses: ./.github/actions/wasi-build
+
   # ── WASM browser tests (wasm-bindgen-test in headless Chrome) ──
   wasm-browser-test:
     name: WASM Browser Tests

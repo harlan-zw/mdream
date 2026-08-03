@@ -58,12 +58,11 @@ jobs:
       - name: Flatten native artifacts for napi
         run: |
           mkdir -p crates/node/artifacts
-          find artifacts/bindings-* -type f \( -name '*.node' -o -name '*.wasm' -o -name '*.js' -o -name '*.cjs' -o -name '*.mjs' \) -exec cp -v {} crates/node/artifacts/ \;
+          find artifacts/bindings-* -type f \( -name '*.node' -o -name '*.wasm' -o -name '*.js' -o -name '*.cjs' -o -name '*.mjs' -o -name '*.d.ts' -o -name '*.d.cts' -o -name '*.d.mts' \) -exec cp -v {} crates/node/artifacts/ \;
           # napi artifacts expects wasm glue files in the working directory, not just in artifacts/
-          cp crates/node/artifacts/rust.wasi.cjs crates/node/ 2>/dev/null || true
-          cp crates/node/artifacts/rust.wasi-browser.js crates/node/ 2>/dev/null || true
-          cp crates/node/artifacts/wasi-worker.mjs crates/node/ 2>/dev/null || true
-          cp crates/node/artifacts/wasi-worker-browser.mjs crates/node/ 2>/dev/null || true
+          for glue in $(node crates/node/scripts/move-artifacts.mjs --print-glue-names); do
+            cp "crates/node/artifacts/$glue" crates/node/ 2>/dev/null || true
+          done
 
       - name: Move WASM edge artifacts
         run: |
@@ -75,6 +74,11 @@ jobs:
       - name: Generate NAPI index.js and move to npm dirs
         working-directory: crates/node
         run: pnpm exec napi artifacts
+
+      - name: Verify every platform package has its binary
+        # Publishing a platform package whose declared files are missing yields
+        # an installable-but-broken npm release, so gate on it here.
+        run: node scripts/verify-npm-artifacts.mjs
 
       - name: Copy NAPI entry files to distribution package
         run: |

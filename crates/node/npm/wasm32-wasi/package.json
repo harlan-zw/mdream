@@ -14,6 +14,7 @@
   "files": [
     "rust.wasi-browser.js",
     "rust.wasi.cjs",
+    "rust.wasi.d.cts",
     "rust.wasm32-wasi.wasm",
     "wasi-worker-browser.mjs",
     "wasi-worker.mjs"
