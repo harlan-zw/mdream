@@ -916,3 +916,21 @@ fn streaming_table_row_after_drained_line_matches_one_shot() {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
 }
+
+// An empty `<li>`'s marker needs a newline inserted at its line start, decided
+// at the item's exit. An open inline marker, and an open `<a>`'s `[`, are both
+// dropped if their element closes empty, so neither is item content — but a
+// chunk boundary materialises them into the buffer, where the item read them as
+// content and resolved without the newline one-shot inserts.
+#[test]
+fn streaming_empty_item_with_open_marker_matches_one_shot() {
+  for html in [
+    "<li><li><i></li>",
+    "<li><li><a href=\"x\"></li>",
+    "<li><li><em></li>",
+    "<ul><li><li><i></li></ul>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}

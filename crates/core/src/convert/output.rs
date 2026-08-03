@@ -1598,6 +1598,20 @@ impl ConvertState {
     if tail.is_empty() && !at_exit {
       return;
     }
+    // An open inline marker, and an open `<a>`'s `[`, are rewritten away if the
+    // element closes empty, so neither is content the item can be decided on —
+    // only its exit is. It must open exactly at the item's content start;
+    // anything earlier is content that already settles the question.
+    let opens_the_item = |position: usize| position == end;
+    if !at_exit
+      && (self
+        .open_markers
+        .first()
+        .is_some_and(|&(_, position, _)| opens_the_item(position))
+        || (self.depth_map[TAG_A as usize] > 0 && opens_the_item(self.link_bracket_pos)))
+    {
+      return;
+    }
     self.empty_item_hazard = false;
     if !tail.is_empty() && !tail.starts_with('\n') {
       return;
