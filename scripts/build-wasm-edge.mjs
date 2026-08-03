@@ -31,9 +31,13 @@ function argValue(name, fallback) {
 const target = argValue('--target')
 const outDir = resolve(argValue('--out-dir'))
 const outName = argValue('--out-name', 'mdream_edge')
+// Test-only cargo features (e.g. panic-probe). Released artifacts pass none.
+const features = argValue('--features', '')
 const edgeDir = resolve(import.meta.dirname, '../crates/edge')
 
-execFileSync('wasm-pack', ['build', '--target', target, '--out-dir', outDir, '--out-name', outName], {
+const cargoArgs = features ? ['--', '--features', features] : []
+
+execFileSync('wasm-pack', ['build', '--target', target, '--out-dir', outDir, '--out-name', outName, ...cargoArgs], {
   cwd: edgeDir,
   stdio: 'inherit',
   env: { ...process.env, CARGO_PROFILE_RELEASE_OPT_LEVEL: 's' },

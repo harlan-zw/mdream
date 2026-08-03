@@ -210,7 +210,9 @@ jobs:
 
       - name: Build WASM for Workers
         run: |
-          node scripts/build-wasm-edge.mjs --target web --out-dir crates/edge/test-worker/wasm
+          # the test worker's own artifact carries the panic probe (#195); the
+          # packaged artifact stays exactly what we release
+          node scripts/build-wasm-edge.mjs --target web --out-dir crates/edge/test-worker/wasm --features panic-probe
           node scripts/build-wasm-edge.mjs --target web --out-dir packages/mdream/wasm
 
       - run: pnpm install

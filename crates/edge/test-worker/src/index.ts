@@ -1,6 +1,7 @@
 import type { MdreamOptions } from 'mdream'
 import { htmlToMarkdown as pkgHtmlToMarkdown, streamHtmlToMarkdown as pkgStreamHtmlToMarkdown } from 'mdream'
-import init, { htmlToMarkdown, htmlToMarkdownResult, MarkdownStream } from '../wasm/mdream_edge.js'
+import { wasmPanicError } from '../../../../packages/mdream/src/wasm-panic.js'
+import init, { __mdreamTakePanicMessage, htmlToMarkdown, htmlToMarkdownResult, MarkdownStream } from '../wasm/mdream_edge.js'
 // @ts-expect-error wasm module import
 import wasmModule from '../wasm/mdream_edge_bg.wasm'
 
@@ -68,6 +69,27 @@ export default {
         },
       })
       return Response.json({ markdown, frontmatter, heading })
+    }
+
+    // Regression for #195: a Rust panic aborts the WASM instance, so it must
+    // still reach Workers code as a catchable error carrying the panic message,
+    // and the instance must keep converting afterwards. Needs the wasm built
+    // with `--features panic-probe`.
+    if (url.pathname === '/panic' && request.method === 'POST') {
+      const html = await request.text()
+      let reported: { name: string, message: string, cause: string } | undefined
+      try {
+        htmlToMarkdown(html, { origin: '__mdream_panic_probe__' })
+      }
+      catch (error) {
+        const panic = wasmPanicError(error, __mdreamTakePanicMessage) as Error
+        reported = {
+          name: panic.name,
+          message: panic.message,
+          cause: String((panic as { cause?: unknown }).cause),
+        }
+      }
+      return Response.json({ reported, afterPanic: htmlToMarkdown(html) })
     }
 
     if (url.pathname === '/convert' && request.method === 'POST') {

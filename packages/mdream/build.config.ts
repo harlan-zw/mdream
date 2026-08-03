@@ -69,7 +69,7 @@ ${bindingsCode}
 // Auto-init with inlined WASM
 initSync({module:_decodeBase64(_wasmBase64)});
 // Public API
-function htmlToMarkdown(html,options){return htmlToMarkdownResult(html,options||{})}
+function htmlToMarkdown(html,options){try{return htmlToMarkdownResult(html,options||{})}catch(e){var p=__mdreamTakePanicMessage();if(p)throw new Error("mdream WASM panic, please report this at https://github.com/harlan-zw/mdream/issues\\n"+p,{cause:e});throw e}}
 if(typeof window!=='undefined'){window.mdream={htmlToMarkdown:htmlToMarkdown}}
 })();`
 
