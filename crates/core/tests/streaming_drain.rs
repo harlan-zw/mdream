@@ -952,6 +952,11 @@ fn streaming_table_row_after_drained_line_matches_one_shot() {
     // holds the drain boundary far enough to reach that state.
     "<i><div>.<br />\n<table><tr>",
     "<span><div>.<br />\n<table><tr>",
+    // The drained prefix is a complete list marker, not paragraph content.
+    "<i><li><br><li><tr>",
+    // Ordered markers remain recognizable when their leading digit would
+    // otherwise be the first byte drained.
+    "<ol><li><table><i></table><tr>",
   ] {
     assert_stream_matches(html, HTMLToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
@@ -989,6 +994,20 @@ fn streaming_raw_html_blank_line_drained_matches_one_shot() {
     assert_stream_matches(html, HTMLToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
+}
+
+#[test]
+fn streaming_raw_html_ignores_rewritable_blockquote_separator() {
+  let html = "<dd>*<blockquote><blockquote>_";
+  assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+}
+
+#[test]
+fn streaming_raw_html_keeps_stable_blank_line_context() {
+  let html = "<dd><ol><i><ol>_";
+  assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
 }
 
 // Every item's marker is immediately followed by a link and an emphasis, the

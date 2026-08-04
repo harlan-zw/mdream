@@ -106,6 +106,11 @@ fn parse_bounded_u32(value: &str, max: u32) -> Option<u32> {
 
 impl ConvertState {
   #[inline]
+  fn has_flushed_tail(&self) -> bool {
+    self.cut_line_lead != CutLineLead::Uncut
+  }
+
+  #[inline]
   fn inline_marker_type(tag_id: u8) -> Option<u8> {
     // The kind is the delimiter identity: one value per distinct delimiter
     // string, so tags sharing a delimiter share a kind.
@@ -255,10 +260,7 @@ impl ConvertState {
     let Some(frame) = self.blockquotes.pop() else {
       return;
     };
-    let content_end = self
-      .buffer
-      .trim_end_matches(|c: char| c.is_ascii_whitespace())
-      .len();
+    let content_end = trim_ascii_whitespace_end(&self.buffer);
     // An empty range means "no content" only while none of it has left the
     // buffer. `has_streamed_output` is global, so reading it here drops the `>`
     // of a genuinely empty blockquote that one-shot emits.
@@ -1203,7 +1205,7 @@ impl ConvertState {
     let buf_len = buf_bytes.len();
     let last_char = if buf_len > 0 {
       buf_bytes[buf_len - 1]
-    } else if self.flushed_tail_valid {
+    } else if self.has_flushed_tail() {
       // The buffer was drained (and possibly trimmed) empty, but earlier output
       // ended with this byte. Spacing must be decided against it, not `0`, so a
       // word separator that one-shot keeps is not dropped across the boundary.
@@ -1279,7 +1281,7 @@ impl ConvertState {
 
     let inside_raw_html_block = self.in_raw_html_block();
     if inside_raw_html_block {
-      self.track_raw_html_markdown_context();
+      self.track_raw_html_markdown_context(self.buffer.len());
     } else {
       self.raw_html_markdown = false;
       self.raw_html_scanned_to = self.buffer.len();
@@ -1559,7 +1561,7 @@ impl ConvertState {
       spaces += 1;
     }
     if index == 0 {
-      return !self.flushed_tail_valid || self.flushed_tail[1] == b'\n';
+      return !self.has_flushed_tail() || self.flushed_tail[1] == b'\n';
     }
     bytes[index - 1] == b'\n'
   }
@@ -1586,7 +1588,7 @@ impl ConvertState {
     let before = |offset: usize| -> u8 {
       match line_start.checked_sub(offset) {
         Some(at) => bytes[at],
-        None if self.flushed_tail_valid => self.flushed_tail[2 - (offset - line_start)],
+        None if self.has_flushed_tail() => self.flushed_tail[2 - (offset - line_start)],
         None => 0,
       }
     };
@@ -1864,7 +1866,7 @@ impl ConvertState {
   fn last_output_byte(&self) -> Option<u8> {
     match self.buffer.as_bytes().last().copied() {
       Some(byte) => Some(byte),
-      None if self.flushed_tail_valid => Some(self.flushed_tail[1]),
+      None if self.has_flushed_tail() => Some(self.flushed_tail[1]),
       None => None,
     }
   }
@@ -1880,14 +1882,22 @@ impl ConvertState {
 
   #[inline]
   /// Note whether the open raw-HTML region has been broken by a blank line.
-  pub(super) fn track_raw_html_markdown_context(&mut self) {
+  pub(super) fn track_raw_html_markdown_context(&mut self, end: usize) {
     if self.raw_html_markdown {
       return;
     }
-    let len = self.buffer.len();
+    let len = end.min(self.buffer.len());
+    if self.raw_html_scanned_to == 0
+      && self.has_flushed_tail()
+      && self.flushed_tail[1] == b'\n'
+      && self.buffer.as_bytes().first() == Some(&b'\n')
+    {
+      self.raw_html_markdown = true;
+      return;
+    }
     // Byte scanning, so a resume point inside a multi-byte character is fine.
     let from = self.raw_html_scanned_to.min(len).saturating_sub(1);
-    if self.buffer.as_bytes()[from..]
+    if self.buffer.as_bytes()[from..len]
       .windows(2)
       .any(|pair| pair == b"\n\n")
     {
@@ -1920,8 +1930,8 @@ impl ConvertState {
     // a drain has taken this line's beginning: the fragment left behind can open
     // with a tag the real line only continues, which suspends Markdown and drops
     // the escapes a one-shot conversion writes.
-    if self.line_start == 0 && self.flushed_tail_valid && self.flushed_tail[1] != b'\n' {
-      return self.cut_line_lead == Some(b'<');
+    if self.line_start == 0 && self.has_flushed_tail() && self.flushed_tail[1] != b'\n' {
+      return self.cut_line_lead == CutLineLead::RawHtml;
     }
     let line = &bytes[self.line_start..len];
     let indent = line
@@ -1953,7 +1963,12 @@ impl ConvertState {
   }
 
   pub(crate) fn in_raw_html_block(&self) -> bool {
-    self.raw_html_block_depth() > 0
+    self.depth_map[TAG_DETAILS as usize] > 0
+      || self.depth_map[TAG_SUMMARY as usize] > 0
+      || self.depth_map[TAG_ADDRESS as usize] > 0
+      || self.depth_map[TAG_DL as usize] > 0
+      || self.depth_map[TAG_DT as usize] > 0
+      || self.depth_map[TAG_DD as usize] > 0
   }
 
   /// Character count of the current (unterminated) buffer line, i.e. since the
@@ -1984,7 +1999,7 @@ impl ConvertState {
     // resolves by scanning, which a drained line no longer offers, so leave it to
     // the arm's conservative answer rather than guess a separator.
     let drained_onto_content =
-      self.flushed_tail_valid && !matches!(self.flushed_tail[1], b'\n' | b' ');
+      self.has_flushed_tail() && !matches!(self.flushed_tail[1], b'\n' | b' ');
     match bytes.last() {
       None if drained_onto_content => Some(Cow::Owned(format!("\n\n{prefix}"))),
       None => None,
@@ -2706,7 +2721,7 @@ impl ConvertState {
     // anything precedes `buffer[0]`: until a drain actually cuts, `flushed_tail`
     // still holds its document-start sentinel and reading it invents a newline
     // that suppresses half of a block separator.
-    let tail_known = self.flushed_tail_valid;
+    let tail_known = self.has_flushed_tail();
     let last_char = if buf_len > 0 {
       buf_bytes[buf_len - 1]
     } else if tail_known {
@@ -2822,9 +2837,7 @@ impl ConvertState {
             // set: a trailing U+00A0 (`&nbsp;`) is meaningful content, and once
             // streaming has yielded it the truncation can't un-send its bytes,
             // so the reach-back would drop the next text's leading char.
-            let trimmed_len = frag
-              .trim_end_matches(|c: char| c.is_ascii_whitespace())
-              .len();
+            let trimmed_len = trim_ascii_whitespace_end(frag);
             if start + trimmed_len < buf_len {
               self.buffer.truncate(start + trimmed_len);
               if !is_enter && is_inline {
@@ -2986,7 +2999,7 @@ impl ConvertState {
     // An empty buffer is a fresh line only while no drain has taken this line's
     // beginning: afterwards `flushed_tail` is what the row follows, so the
     // emptied buffer has to fall through to the drain-aware scan below.
-    let line_lead_drained = self.flushed_tail_valid && self.flushed_tail[1] != b'\n';
+    let line_lead_drained = self.has_flushed_tail() && self.flushed_tail[1] != b'\n';
     // Rows end their line, so the row after a row decides on one byte and never
     // rescans the line it just wrote.
     if matches!(bytes.last(), Some(b'\n')) || (bytes.is_empty() && !line_lead_drained) {
@@ -3005,12 +3018,14 @@ impl ConvertState {
     // here: a drain may have taken the beginning of this line away. Trusting the
     // fragment reads an open row as content and separates it with a blank line,
     // which ends the GFM table and ejects every row after it.
-    let cut_lead = if index == 0 && line_lead_drained {
-      self.cut_line_lead
-    } else {
-      None
-    };
-    match cut_lead.as_ref().or_else(|| line.get(start)) {
+    if index == 0 && line_lead_drained {
+      match self.cut_line_lead {
+        CutLineLead::Row => return LineBeforeRow::Row,
+        CutLineLead::RawHtml | CutLineLead::Content => return LineBeforeRow::Content,
+        CutLineLead::Uncut | CutLineLead::Blank => {}
+      }
+    }
+    match line.get(start) {
       Some(b'|') => LineBeforeRow::Row,
       None => LineBeforeRow::Open,
       // A pending list marker is block prefix, not content: a table's first row
@@ -3063,7 +3078,7 @@ impl ConvertState {
 
 #[cfg(test)]
 mod tests {
-  use super::ConvertState;
+  use super::{ConvertState, CutLineLead};
   use crate::types::{HTMLToMarkdownOptions, OutputFormat};
 
   #[test]
@@ -3072,7 +3087,7 @@ mod tests {
     state.has_streamed_output = true;
     // A drain is what puts bytes behind `buffer[0]`; yielding alone does not, and
     // the counting below may only read `flushed_tail` once one has happened.
-    state.flushed_tail_valid = true;
+    state.cut_line_lead = CutLineLead::Blank;
     state.flushed_tail = [b'\n', b'\n'];
 
     state.write_output(true, false, 2, Some("next"), false);
@@ -3104,7 +3119,7 @@ mod tests {
 
     state.has_streamed_output = true;
     // A drain is what puts bytes behind `buffer[0]`; yielding alone does not.
-    state.flushed_tail_valid = true;
+    state.cut_line_lead = CutLineLead::Content;
     state.flushed_tail = *b"xy";
     assert_eq!(state.last_output_byte(), Some(b'y'));
 
