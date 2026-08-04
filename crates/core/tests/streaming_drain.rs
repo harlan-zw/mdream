@@ -2,7 +2,7 @@
 #![allow(unsafe_code)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
 use mdream::MarkdownStreamProcessor;
 use mdream::html_to_markdown;
@@ -14,26 +14,79 @@ use mdream::types::{CleanConfig, HTMLToMarkdownOptions, PluginConfig, TagOverrid
 
 struct Tracking;
 
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-static PEAK: AtomicUsize = AtomicUsize::new(0);
+/// Accounting is per-thread. Process-wide counters measure whatever else the
+/// harness is doing: tests run in parallel, and one building a multi-megabyte
+/// fixture lands in another's peak, so the bound has to be either loose enough
+/// to be meaningless or flaky. A thread only sees its own allocations, so two
+/// measurements can run at once.
+#[derive(Clone, Copy)]
+struct Acct {
+  on: bool,
+  live: isize,
+  peak: isize,
+}
+
+thread_local! {
+  static ACCT: Cell<Acct> = const {
+    Cell::new(Acct { on: false, live: 0, peak: 0 })
+  };
+}
+
+/// `try_with` because TLS is already gone late in thread teardown, and a `Cell`
+/// with a const initialiser never allocates, so this cannot recurse back into
+/// the allocator.
+fn account(delta: isize) {
+  let _ = ACCT.try_with(|cell| {
+    let mut acct = cell.get();
+    if !acct.on {
+      return;
+    }
+    acct.live += delta;
+    if acct.live > acct.peak {
+      acct.peak = acct.live;
+    }
+    cell.set(acct);
+  });
+}
 
 unsafe impl GlobalAlloc for Tracking {
   unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
     let p = unsafe { System.alloc(layout) };
     if !p.is_null() {
-      let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
-      PEAK.fetch_max(live, Ordering::Relaxed);
+      account(layout.size() as isize);
     }
     p
   }
   unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-    LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+    account(-(layout.size() as isize));
     unsafe { System.dealloc(ptr, layout) };
   }
 }
 
 #[global_allocator]
 static ALLOC: Tracking = Tracking;
+
+/// Peak live bytes while `feed` runs, and the total output it produced. The
+/// output is dropped as it arrives, the way a wire consumer would.
+fn measure_peak(html: &str, chunk: usize, opts: HTMLToMarkdownOptions) -> (u64, u64) {
+  ACCT.set(Acct {
+    on: true,
+    live: 0,
+    peak: 0,
+  });
+  let mut p = MarkdownStreamProcessor::new(opts);
+  let mut total_out: u64 = 0;
+  for c in html.as_bytes().chunks(chunk) {
+    total_out += p.process_chunk(std::str::from_utf8(c).unwrap()).len() as u64;
+  }
+  total_out += p.finish().len() as u64;
+  let mut acct = ACCT.get();
+  acct.on = false;
+  ACCT.set(acct);
+  // Freeing something allocated before the measurement can drive `live`
+  // negative; the peak is what matters and it can only be >= 0.
+  (acct.peak.max(0) as u64, total_out)
+}
 
 fn safe_clean() -> CleanConfig {
   // Everything except `fragments`, which needs the whole buffer.
@@ -503,19 +556,7 @@ fn streaming_memory_is_bounded_not_document_sized() {
     html.push_str("<p>x</p>");
   }
 
-  let mut p = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
-  let mut total_out: u64 = 0;
-
-  // Keep LIVE as the allocator's true process-wide total. Resetting it here
-  // would make later deallocations for pre-existing allocations underflow.
-  let baseline = LIVE.load(Ordering::Relaxed);
-  PEAK.store(baseline, Ordering::Relaxed);
-  for c in html.as_bytes().chunks(8 * 1024) {
-    let out = p.process_chunk(std::str::from_utf8(c).unwrap());
-    total_out += out.len() as u64; // wire would send + drop this
-  }
-  total_out += p.finish().len() as u64;
-  let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline) as u64;
+  let (peak, total_out) = measure_peak(&html, 8 * 1024, HTMLToMarkdownOptions::default());
 
   // Amplification really happened...
   assert!(
@@ -891,6 +932,289 @@ fn streaming_empty_nested_item_marker_matches_one_shot() {
     "<ul><li></li></ul>",
     "<ul><li>a<ul><li></li><li>b</li></ul></li></ul>",
   ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// A table row's separator depends on what its line already holds, read by
+// scanning the buffer back to the last newline. A drain can take that line's
+// beginning — or the whole line — so the scan runs out of buffer and reads the
+// fragment as a fresh line: an open row is classified as content and separated
+// with a blank line, which ends the GFM table and ejects every row after it.
+#[test]
+fn streaming_table_row_after_drained_line_matches_one_shot() {
+  for html in [
+    // The line's beginning is drained, leaving a fragment of the open row.
+    "<ul><li><table><tr><td></td></tr><tr><td>d</td></tr><tr><td></td></tr></table></li></ul>",
+    // The line is drained entirely, so the buffer is empty where one-shot still
+    // sees the content the row must be separated from. An open inline element
+    // holds the drain boundary far enough to reach that state.
+    "<i><div>.<br />\n<table><tr>",
+    "<span><div>.<br />\n<table><tr>",
+    // The drained prefix is a complete list marker, not paragraph content.
+    "<i><li><br><li><tr>",
+    // Ordered markers remain recognizable when their leading digit would
+    // otherwise be the first byte drained.
+    "<ol><li><table><i></table><tr>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// An empty `<li>`'s marker needs a newline inserted at its line start, decided
+// at the item's exit. An open inline marker, and an open `<a>`'s `[`, are both
+// dropped if their element closes empty, so neither is item content — but a
+// chunk boundary materialises them into the buffer, where the item read them as
+// content and resolved without the newline one-shot inserts.
+#[test]
+fn streaming_empty_item_with_open_marker_matches_one_shot() {
+  for html in [
+    "<li><li><i></li>",
+    "<li><li><a href=\"x\"></li>",
+    "<li><li><em></li>",
+    "<ul><li><li><i></li></ul>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// Past a blank line a raw-HTML region is Markdown again, tracked by scanning the
+// buffer for that blank line. A drain can carry those bytes away before the scan
+// reaches them, leaving the region suspended forever: streaming then omits every
+// escape one-shot writes there.
+#[test]
+fn streaming_raw_html_blank_line_drained_matches_one_shot() {
+  for html in [
+    "<dd><p>.<br />*<Foo/Bar>",
+    "<dd><tr><a href=\"u\" title=\"t\">_</html>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn streaming_raw_html_ignores_rewritable_blockquote_separator() {
+  let html = "<dd>*<blockquote><blockquote>_";
+  assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+}
+
+#[test]
+fn streaming_raw_html_keeps_stable_blank_line_context() {
+  let html = "<dd><ol><i><ol>_";
+  assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+}
+
+// Every item's marker is immediately followed by a link and an emphasis, the
+// shape that holds the empty-item decision open across a chunk boundary. That
+// hold pins the drain at the marker's line, so one that outlived its item would
+// retain the document instead of a window.
+#[test]
+fn streaming_memory_bounded_with_empty_item_marker_holds() {
+  let mut html = String::with_capacity(8 * 1024 * 1024 + 64);
+  html.push_str("<ul>");
+  while html.len() < 8 * 1024 * 1024 {
+    html.push_str("<li><li><a href=\"/u\">t</a><em>e</em>x</li>");
+  }
+  html.push_str("</ul>");
+
+  let (peak, total_out) = measure_peak(&html, 8 * 1024, HTMLToMarkdownOptions::default());
+
+  // The conversion really ran...
+  assert!(
+    total_out > 1024 * 1024,
+    "expected >1MB output, got {total_out}"
+  );
+  // ...and the hold released every item, so memory stayed a window. Measures
+  // ~9KB against an 8MB input; the bound is loose enough to absorb allocator
+  // and scheduling noise while still failing if the hold ever pins the document.
+  assert!(
+    peak < 1024 * 1024,
+    "peak {peak} should be a bounded window, not ~{} input",
+    html.len()
+  );
+}
+
+// The measurement must ignore other threads: tests run in parallel, and one
+// building a multi-megabyte fixture would otherwise land in another's peak.
+// Joining the allocating thread while this thread's window is still open is
+// what makes the overlap a fact rather than a matter of timing.
+#[test]
+fn memory_measurement_ignores_other_threads() {
+  ACCT.set(Acct {
+    on: true,
+    live: 0,
+    peak: 0,
+  });
+  let allocated = std::thread::spawn(|| {
+    let fixture = vec![7u8; 8 * 1024 * 1024];
+    std::hint::black_box(fixture.len())
+  })
+  .join()
+  .unwrap();
+  let mut acct = ACCT.get();
+  acct.on = false;
+  ACCT.set(acct);
+
+  assert_eq!(
+    allocated,
+    8 * 1024 * 1024,
+    "the other thread did not allocate"
+  );
+  assert!(
+    acct.peak < 64 * 1024,
+    "peak {} includes another thread's 8MB",
+    acct.peak
+  );
+}
+
+// Yielding does not remove bytes, but `has_streamed_output` is set as soon as any
+// are yielded. `flushed_tail` only describes real removed bytes, so reading it on
+// the strength of that flag invents a newline before `buffer[0]` and suppresses
+// half of the following block separator.
+#[test]
+fn streaming_block_separator_after_undrained_yield_matches_one_shot() {
+  for html in [
+    "<table><caption>c</caption>.",
+    "<table><p>x</p>.",
+    "<table><caption>c</caption><tr>",
+    "<td>d</td><table><tr>",
+    "<table><p>x</p><dd>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// A block opening inside a list item asks what its line already holds. An emptied
+// buffer is the start of the output only until a drain takes that line away;
+// afterwards the block is glued to text it should have broken away from.
+#[test]
+fn streaming_block_open_after_drained_line_matches_one_shot() {
+  for html in [
+    "<ul><li>.<br />\n<table><caption>c</caption><tr><td>d</td></tr></table>",
+    "<ol><li>.<br />\n<table><caption>c</caption><tr><td>d</td></tr></table>",
+    "<i><ul><li>.<br />\n<table><caption>c</caption><tr><td>d</td></tr></table>",
+    "<ul><li>t<ul><li>.<br />\n<table><caption>c</caption><tr><td>d</td></tr></table>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// The newline an empty item inserts at its marker line moves every buffer offset
+// at or past it. An inline element still open across the insertion measures its
+// own emptiness from one of them, so leaving it unshifted stops an empty element
+// from looking empty and leaks the markers one-shot drops.
+#[test]
+fn streaming_open_marker_across_item_newline_matches_one_shot() {
+  for html in [
+    "<li><li><br /><i>",
+    "<li><li><br /><em>",
+    "<ul><li><ul><li><br /><i>",
+    "<tr><li><br /><i>",
+    ".<li><br /><i>",
+    "<ul><li><blockquote><ul><li>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+
+  // The blockquote frames must NOT be shifted with the rest: their
+  // `content_start` belongs before the inserted newline. Shifting it moves the
+  // quote out of the list item, and because that moves one-shot too, parity
+  // cannot see it — so pin the bytes a GFM parser reads back as `li > blockquote`.
+  assert_eq!(
+    html_to_markdown(
+      "<ul><li><blockquote><ul><li>",
+      HTMLToMarkdownOptions::default()
+    ),
+    "- \n  >\n  > -"
+  );
+}
+
+// An empty blockquote's `>` was dropped for the rest of the document once
+// anything had been yielded, because the emptiness test read the global
+// `has_streamed_output` instead of asking about the frame's own range.
+#[test]
+fn streaming_empty_blockquote_marker_matches_one_shot() {
+  for html in [
+    "<i><blockquote>",
+    "<i>><blockquote>",
+    "<em>-<blockquote>",
+    "<table><dt><blockquote>",
+    "<tr><a href=\"u\"><blockquote>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+  // Parity alone cannot see this: both sides agreeing on a dropped `>` would
+  // pass. Pin the marker itself.
+  assert_eq!(
+    html_to_markdown("<i><blockquote>", HTMLToMarkdownOptions::default()),
+    "*>*"
+  );
+}
+
+// Draining resolves a pending marker guard early so it can release its hold. It
+// must not insert on the item's behalf: the very next `<li>` drops the pending
+// guard, which is how one-shot leaves `<li><li>` tight.
+#[test]
+fn streaming_marker_guard_defers_to_item_exit_matches_one_shot() {
+  for html in [
+    "<li><li><br /><ul><li>",
+    "<ul><li><ul><li><br /><ul><li>",
+    "<tr><li><br /><ul><li>",
+    "<td>d</td><li><br /><ul><li>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// Raw HTML is passed through verbatim, so a GFM escape written inside a raw
+// region is not an escape: the backslash reaches the reader. The blank line that
+// re-enables Markdown must be looked for inside the region, not before it.
+#[test]
+fn raw_html_region_text_is_not_gfm_escaped() {
+  for (html, expected) in [
+    (".<ul><li><dd>*", ".\n\n- <dd>*</dd>"),
+    ("<p>x</p><li><dd>_", "x\n\n- <dd>_</dd>"),
+    ("<caption>c</caption><tr><dd>*", "c\n\n| <dd>*</dd>\n |\n|"),
+    // Only inside the region: the leading `*` is still escaped.
+    ("*<ul><li><dd>_", "\\*\n\n- <dd>_</dd>"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HTMLToMarkdownOptions::default()),
+      expected,
+      "one-shot for {html:?}"
+    );
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// The one-shot finaliser trimmed the buffer with `str::trim_end`, whose Unicode
+// set includes U+00A0. Everywhere else nbsp is content, and streaming cannot
+// un-send a nbsp it has already yielded, so one-shot deleted a trailing one that
+// streaming kept -- silently dropping content in the last case below.
+#[test]
+fn trailing_nbsp_is_content_and_matches_one_shot() {
+  for (html, expected) in [
+    ("<p>x</p><p>&nbsp;</p>", "x\n\n\u{a0}"),
+    ("<p>x</p><p>a&nbsp;</p>", "x\n\na\u{a0}"),
+    ("<p>hello&nbsp;world&nbsp;</p>", "hello\u{a0}world\u{a0}"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HTMLToMarkdownOptions::default()),
+      expected,
+      "one-shot for {html:?}"
+    );
     assert_stream_matches(html, HTMLToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }

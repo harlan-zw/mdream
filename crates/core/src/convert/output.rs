@@ -106,6 +106,11 @@ fn parse_bounded_u32(value: &str, max: u32) -> Option<u32> {
 
 impl ConvertState {
   #[inline]
+  fn has_flushed_tail(&self) -> bool {
+    self.cut_line_lead != CutLineLead::Uncut
+  }
+
+  #[inline]
   fn inline_marker_type(tag_id: u8) -> Option<u8> {
     // The kind is the delimiter identity: one value per distinct delimiter
     // string, so tags sharing a delimiter share a kind.
@@ -255,12 +260,13 @@ impl ConvertState {
     let Some(frame) = self.blockquotes.pop() else {
       return;
     };
-    let content_end = self
-      .buffer
-      .trim_end_matches(|c: char| c.is_ascii_whitespace())
-      .len();
+    let content_end = trim_ascii_whitespace_end(&self.buffer);
+    // An empty range means "no content" only while none of it has left the
+    // buffer. `has_streamed_output` is global, so reading it here drops the `>`
+    // of a genuinely empty blockquote that one-shot emits.
+    let content_left_buffer = self.last_yielded_length > frame.content_start;
     if content_end < frame.content_start
-      || (content_end == frame.content_start && self.has_streamed_output)
+      || (content_end == frame.content_start && content_left_buffer)
     {
       return;
     }
@@ -569,6 +575,19 @@ impl ConvertState {
 
     if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
       self.record_item_marker(self.stack[stack_len - 1].index, output_start);
+    }
+
+    // The blank line that re-enables Markdown must be looked for *inside* the
+    // region. `raw_html_scanned_to` only moves on text nodes, so it still points
+    // before the region began and earlier block spacing is read as if inside,
+    // escaping text that is passed through verbatim: `\*` reaches the reader as a
+    // literal backslash.
+    if !self.plain_text
+      && tag_id.is_some_and(Self::is_raw_html_block_tag)
+      && self.raw_html_block_depth() == 1
+    {
+      self.raw_html_markdown = false;
+      self.raw_html_scanned_to = self.buffer.len();
     }
 
     if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
@@ -1186,7 +1205,7 @@ impl ConvertState {
     let buf_len = buf_bytes.len();
     let last_char = if buf_len > 0 {
       buf_bytes[buf_len - 1]
-    } else if self.has_streamed_output {
+    } else if self.has_flushed_tail() {
       // The buffer was drained (and possibly trimmed) empty, but earlier output
       // ended with this byte. Spacing must be decided against it, not `0`, so a
       // word separator that one-shot keeps is not dropped across the boundary.
@@ -1262,7 +1281,7 @@ impl ConvertState {
 
     let inside_raw_html_block = self.in_raw_html_block();
     if inside_raw_html_block {
-      self.track_raw_html_markdown_context();
+      self.track_raw_html_markdown_context(self.buffer.len());
     } else {
       self.raw_html_markdown = false;
       self.raw_html_scanned_to = self.buffer.len();
@@ -1542,7 +1561,7 @@ impl ConvertState {
       spaces += 1;
     }
     if index == 0 {
-      return !self.has_streamed_output || self.flushed_tail[1] == b'\n';
+      return !self.has_flushed_tail() || self.flushed_tail[1] == b'\n';
     }
     bytes[index - 1] == b'\n'
   }
@@ -1569,7 +1588,7 @@ impl ConvertState {
     let before = |offset: usize| -> u8 {
       match line_start.checked_sub(offset) {
         Some(at) => bytes[at],
-        None if self.has_streamed_output => self.flushed_tail[2 - (offset - line_start)],
+        None if self.has_flushed_tail() => self.flushed_tail[2 - (offset - line_start)],
         None => 0,
       }
     };
@@ -1598,14 +1617,53 @@ impl ConvertState {
     if tail.is_empty() && !at_exit {
       return;
     }
-    self.empty_item_hazard = false;
-    if !tail.is_empty() && !tail.starts_with('\n') {
+    // An open inline marker, and an open `<a>`'s `[`, are rewritten away if the
+    // element closes empty, so neither is content the item can be decided on —
+    // only its exit is. It must open exactly at the item's content start;
+    // anything earlier is content that already settles the question.
+    let opens_the_item = |position: usize| position == end;
+    if !at_exit
+      && (self
+        .open_markers
+        .first()
+        .is_some_and(|&(_, position, _)| opens_the_item(position))
+        || (self.depth_map[TAG_A as usize] > 0 && opens_the_item(self.link_bracket_pos)))
+    {
       return;
     }
+    // Content on the marker's own line settles it: no blank line is owed.
+    if !tail.is_empty() && !tail.starts_with('\n') {
+      self.empty_item_hazard = false;
+      return;
+    }
+    // Otherwise only the item's own exit may act. A following `<li>` records a new
+    // marker and drops this pending one, which is how one-shot leaves `<li><li>`
+    // tight; the drain calling in early must not insert on its behalf.
+    if !at_exit {
+      return;
+    }
+    self.empty_item_hazard = false;
     self.buffer.insert(self.empty_item_line_start, '\n');
-    // The insertion moves every cached buffer offset at or past the line.
+    // The insertion moves cached offsets at or past the line: an inline marker
+    // still open across it measures emptiness from `content_start`, so left
+    // unshifted it stops looking empty and streaming leaks markers one-shot drops.
+    //
+    // Not the blockquote frames. Their `content_start` marks where quote
+    // prefixing begins, which belongs *before* this newline; shifting it turns
+    // `- \n  >\n  > -` into `- \n\n  > -`, which GFM reads as the list's sibling
+    // rather than its child. `link_bracket_pos` needs no shift either — a pending
+    // `[` is the tail this function has already returned on.
+    let at = self.empty_item_line_start;
+    for (_, output_start, content_start) in &mut self.open_markers {
+      if *output_start >= at {
+        *output_start += 1;
+      }
+      if *content_start >= at {
+        *content_start += 1;
+      }
+    }
     self.line_start_scanned_to = usize::MAX;
-    self.raw_html_scanned_to = self.raw_html_scanned_to.min(self.empty_item_line_start);
+    self.raw_html_scanned_to = self.raw_html_scanned_to.min(at);
   }
 
   #[inline]
@@ -1808,7 +1866,7 @@ impl ConvertState {
   fn last_output_byte(&self) -> Option<u8> {
     match self.buffer.as_bytes().last().copied() {
       Some(byte) => Some(byte),
-      None if self.has_streamed_output => Some(self.flushed_tail[1]),
+      None if self.has_flushed_tail() => Some(self.flushed_tail[1]),
       None => None,
     }
   }
@@ -1824,14 +1882,22 @@ impl ConvertState {
 
   #[inline]
   /// Note whether the open raw-HTML region has been broken by a blank line.
-  fn track_raw_html_markdown_context(&mut self) {
+  pub(super) fn track_raw_html_markdown_context(&mut self, end: usize) {
     if self.raw_html_markdown {
       return;
     }
-    let len = self.buffer.len();
+    let len = end.min(self.buffer.len());
+    if self.raw_html_scanned_to == 0
+      && self.has_flushed_tail()
+      && self.flushed_tail[1] == b'\n'
+      && self.buffer.as_bytes().first() == Some(&b'\n')
+    {
+      self.raw_html_markdown = true;
+      return;
+    }
     // Byte scanning, so a resume point inside a multi-byte character is fine.
     let from = self.raw_html_scanned_to.min(len).saturating_sub(1);
-    if self.buffer.as_bytes()[from..]
+    if self.buffer.as_bytes()[from..len]
       .windows(2)
       .any(|pair| pair == b"\n\n")
     {
@@ -1860,6 +1926,13 @@ impl ConvertState {
     }
     self.line_start_scanned_to = len;
 
+    // A `line_start` of zero is the drained buffer's front, not the line's, once
+    // a drain has taken this line's beginning: the fragment left behind can open
+    // with a tag the real line only continues, which suspends Markdown and drops
+    // the escapes a one-shot conversion writes.
+    if self.line_start == 0 && self.has_flushed_tail() && self.flushed_tail[1] != b'\n' {
+      return self.cut_line_lead == CutLineLead::RawHtml;
+    }
     let line = &bytes[self.line_start..len];
     let indent = line
       .iter()
@@ -1867,6 +1940,26 @@ impl ConvertState {
       .take_while(|&&byte| byte == b' ')
       .count();
     line.get(indent) == Some(&b'<')
+  }
+
+  /// Tags whose content is emitted as raw HTML, suspending Markdown until a
+  /// blank line inside the region re-enables it.
+  #[inline]
+  pub(crate) fn is_raw_html_block_tag(id: u8) -> bool {
+    matches!(
+      id,
+      TAG_DETAILS | TAG_SUMMARY | TAG_ADDRESS | TAG_DL | TAG_DT | TAG_DD
+    )
+  }
+
+  /// `1` at an enter means this tag begins the region.
+  fn raw_html_block_depth(&self) -> u32 {
+    u32::from(self.depth_map[TAG_DETAILS as usize])
+      + u32::from(self.depth_map[TAG_SUMMARY as usize])
+      + u32::from(self.depth_map[TAG_ADDRESS as usize])
+      + u32::from(self.depth_map[TAG_DL as usize])
+      + u32::from(self.depth_map[TAG_DT as usize])
+      + u32::from(self.depth_map[TAG_DD as usize])
   }
 
   pub(crate) fn in_raw_html_block(&self) -> bool {
@@ -1900,14 +1993,27 @@ impl ConvertState {
   /// or `None` when the buffer already sits there.
   fn block_open_prefix(&self, prefix: &str) -> Option<Cow<'static, str>> {
     let bytes = self.buffer.as_bytes();
+    // An emptied buffer is the start of the output only while no drain has taken
+    // this line away; afterwards `flushed_tail` holds what the block would be
+    // glued to. A space there is the ambiguous case the `Some(b' ')` arm below
+    // resolves by scanning, which a drained line no longer offers, so leave it to
+    // the arm's conservative answer rather than guess a separator.
+    let drained_onto_content =
+      self.has_flushed_tail() && !matches!(self.flushed_tail[1], b'\n' | b' ');
     match bytes.last() {
+      None if drained_onto_content => Some(Cow::Owned(format!("\n\n{prefix}"))),
       None => None,
       Some(b' ') => {
         // A trailing space can be a pending list marker already at the content
         // column, or ordinary text (`"item "`) that still has to break as a
         // paragraph. Only the former needs no separator.
         let end = bytes.len() - trailing_spaces(bytes);
-        if end > 0 && bytes[end - 1] != b'\n' && !self.list_marker_line_start(bytes, end) {
+        if end == 0 {
+          // Every retained byte is a space, so the line's content — and the
+          // marker scan's starting point — left with the drain.
+          return drained_onto_content.then(|| Cow::Owned(format!("\n\n{prefix}")));
+        }
+        if bytes[end - 1] != b'\n' && !self.list_marker_line_start(bytes, end) {
           Some(Cow::Owned(format!("\n\n{prefix}")))
         } else {
           None
@@ -2611,18 +2717,23 @@ impl ConvertState {
     // `flushed_tail` contains the two bytes immediately before `buffer[0]`.
     // Without that context a separator that one-shot trims to one newline can
     // be emitted as two in streaming (e.g. a lone `-` at the buffer start).
+    // Yielding does not remove bytes, so `has_streamed_output` is no evidence that
+    // anything precedes `buffer[0]`: until a drain actually cuts, `flushed_tail`
+    // still holds its document-start sentinel and reading it invents a newline
+    // that suppresses half of a block separator.
+    let tail_known = self.has_flushed_tail();
     let last_char = if buf_len > 0 {
       buf_bytes[buf_len - 1]
-    } else if self.has_streamed_output {
+    } else if tail_known {
       self.flushed_tail[1]
     } else {
       0
     };
     let second_last_char = if buf_len > 1 {
       buf_bytes[buf_len - 2]
-    } else if buf_len == 1 && self.has_streamed_output {
+    } else if buf_len == 1 && tail_known {
       self.flushed_tail[1]
-    } else if self.has_streamed_output {
+    } else if tail_known {
       self.flushed_tail[0]
     } else {
       0
@@ -2726,9 +2837,7 @@ impl ConvertState {
             // set: a trailing U+00A0 (`&nbsp;`) is meaningful content, and once
             // streaming has yielded it the truncation can't un-send its bytes,
             // so the reach-back would drop the next text's leading char.
-            let trimmed_len = frag
-              .trim_end_matches(|c: char| c.is_ascii_whitespace())
-              .len();
+            let trimmed_len = trim_ascii_whitespace_end(frag);
             if start + trimmed_len < buf_len {
               self.buffer.truncate(start + trimmed_len);
               if !is_enter && is_inline {
@@ -2887,9 +2996,13 @@ impl ConvertState {
 
   fn line_state_before_row(&self) -> LineBeforeRow {
     let bytes = self.buffer.as_bytes();
+    // An empty buffer is a fresh line only while no drain has taken this line's
+    // beginning: afterwards `flushed_tail` is what the row follows, so the
+    // emptied buffer has to fall through to the drain-aware scan below.
+    let line_lead_drained = self.has_flushed_tail() && self.flushed_tail[1] != b'\n';
     // Rows end their line, so the row after a row decides on one byte and never
     // rescans the line it just wrote.
-    if matches!(bytes.last(), None | Some(b'\n')) {
+    if matches!(bytes.last(), Some(b'\n')) || (bytes.is_empty() && !line_lead_drained) {
       return LineBeforeRow::Open;
     }
     let mut index = bytes.len();
@@ -2901,12 +3014,28 @@ impl ConvertState {
       .iter()
       .position(|byte| !matches!(byte, b' ' | b'\t'))
       .unwrap_or(line.len());
+    // `index == 0` means the scan ran out of buffer, not that the line starts
+    // here: a drain may have taken the beginning of this line away. Trusting the
+    // fragment reads an open row as content and separates it with a blank line,
+    // which ends the GFM table and ejects every row after it.
+    if index == 0 && line_lead_drained {
+      match self.cut_line_lead {
+        CutLineLead::Row => return LineBeforeRow::Row,
+        CutLineLead::RawHtml | CutLineLead::Content => return LineBeforeRow::Content,
+        CutLineLead::Uncut | CutLineLead::Blank => {}
+      }
+    }
     match line.get(start) {
       Some(b'|') => LineBeforeRow::Row,
       None => LineBeforeRow::Open,
       // A pending list marker is block prefix, not content: a table's first row
       // belongs on it.
-      Some(_) if self.list_marker_line_start(bytes, bytes.len() - trailing_spaces(bytes)) => {
+      // A drain can empty the buffer entirely; the marker scan needs a byte to
+      // start from, and a fully drained line has none to offer.
+      Some(_)
+        if !bytes.is_empty()
+          && self.list_marker_line_start(bytes, bytes.len() - trailing_spaces(bytes)) =>
+      {
         LineBeforeRow::Open
       }
       Some(_) => LineBeforeRow::Content,
@@ -2949,18 +3078,35 @@ impl ConvertState {
 
 #[cfg(test)]
 mod tests {
-  use super::ConvertState;
+  use super::{ConvertState, CutLineLead};
   use crate::types::{HTMLToMarkdownOptions, OutputFormat};
 
   #[test]
   fn empty_drained_buffer_counts_two_flushed_newlines() {
     let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
     state.has_streamed_output = true;
+    // A drain is what puts bytes behind `buffer[0]`; yielding alone does not, and
+    // the counting below may only read `flushed_tail` once one has happened.
+    state.cut_line_lead = CutLineLead::Blank;
     state.flushed_tail = [b'\n', b'\n'];
 
     state.write_output(true, false, 2, Some("next"), false);
 
     assert_eq!(state.buffer, "next");
+  }
+
+  // Yielded output that never drained leaves `buffer[0]` at the document start,
+  // where one-shot counts no preceding newlines. Reading the sentinel there
+  // suppresses half of every following block separator.
+  #[test]
+  fn undrained_buffer_counts_no_flushed_newlines() {
+    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.has_streamed_output = true;
+    state.buffer.push('c');
+
+    state.write_output(true, false, 2, Some("next"), false);
+
+    assert_eq!(state.buffer, "c\n\nnext");
   }
 
   // Draining, and then a rewrite trimming what draining retained, leaves the
@@ -2972,6 +3118,8 @@ mod tests {
     assert_eq!(state.last_output_byte(), None);
 
     state.has_streamed_output = true;
+    // A drain is what puts bytes behind `buffer[0]`; yielding alone does not.
+    state.cut_line_lead = CutLineLead::Content;
     state.flushed_tail = *b"xy";
     assert_eq!(state.last_output_byte(), Some(b'y'));
 

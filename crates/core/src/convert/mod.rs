@@ -122,6 +122,16 @@ fn trailing_spaces(bytes: &[u8]) -> usize {
       .map_or(0, |i| i + 1)
 }
 
+#[inline]
+fn trim_ascii_whitespace_end(value: &str) -> usize {
+  let bytes = value.as_bytes();
+  let mut len = bytes.len();
+  while len > 0 && bytes[len - 1].is_ascii_whitespace() {
+    len -= 1;
+  }
+  len
+}
+
 /// What the current output line holds where a table row is about to be written.
 enum LineBeforeRow {
   /// Nothing but block prefix, or a pending list marker.
@@ -129,6 +139,16 @@ enum LineBeforeRow {
   /// A row left open mid-line.
   Row,
   /// Other content, so the row needs a block break to become a table.
+  Content,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+#[repr(u8)]
+enum CutLineLead {
+  Uncut,
+  Blank,
+  RawHtml,
+  Row,
   Content,
 }
 
@@ -508,6 +528,12 @@ pub struct ConvertState {
   empty_item_len: usize,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
+  /// What leads the current line when draining has removed that line's start.
+  /// `Uncut` also says `flushed_tail` still holds its document-start sentinel;
+  /// yielding alone does not make that context valid.
+  /// Rescanning `buffer` for a line start is wrong once a drain has happened;
+  /// this is the same trick as `flushed_tail`, one step further back.
+  cut_line_lead: CutLineLead,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
 }
@@ -600,6 +626,7 @@ impl ConvertState {
       last_yielded_length: 0,
       has_streamed_output: false,
       flushed_tail: [b'\n'; 2],
+      cut_line_lead: CutLineLead::Uncut,
       buffer_start_column: 0,
       #[cfg(test)]
       disable_drain: false,
@@ -1147,7 +1174,9 @@ impl ConvertState {
   }
 
   pub fn get_markdown(&mut self) -> String {
-    let trimmed_end_len = self.buffer.trim_end().len();
+    // ASCII whitespace only, as everywhere else: U+00A0 is content, and the
+    // streaming path cannot un-send a nbsp it has already yielded.
+    let trimmed_end_len = trim_ascii_whitespace_end(&self.buffer);
     self.buffer.truncate(trimmed_end_len);
     let start = if self.preserve_leading_whitespace {
       0
@@ -1267,10 +1296,7 @@ impl ConvertState {
         // until its inline/code element closes. That close trims ASCII
         // whitespace, so hold the whole run rather than yielding bytes it may
         // retract later.
-        stable_end = self
-          .buffer
-          .trim_end_matches(|c: char| c.is_ascii_whitespace())
-          .len();
+        stable_end = trim_ascii_whitespace_end(&self.buffer);
       } else if stable_end < buf_len {
         // Other trailing spaces inside <pre> are significant code. A
         // line-leading run is the exception: list continuation indentation is
@@ -1393,11 +1419,13 @@ impl ConvertState {
     // Keep the tail a late rewrite may still touch, and never drop the `[` of an
     // open link (its close can rewrite from that offset).
     // Formatting also inspects the last two bytes to count existing newlines.
-    // Keep both, moving to a UTF-8 boundary if the tail starts in a code point.
+    // Keep enough for the widest GFM list marker too: up to three spaces, nine
+    // digits, a delimiter, and a trailing space. Row separation can then still
+    // recognize a marker after earlier output has drained.
     let mut retained_tail_start = self
       .buffer
       .len()
-      .saturating_sub(self.last_content_cache_len.max(2));
+      .saturating_sub(self.last_content_cache_len.max(14));
     while !self.buffer.is_char_boundary(retained_tail_start) {
       retained_tail_start -= 1;
     }
@@ -1442,11 +1470,43 @@ impl ConvertState {
           .saturating_add(drained.chars().count())
       };
     }
+    // The blank line that ends a raw-HTML region may sit in the bytes about to
+    // leave; dropped unscanned, the region never closes and keeps suspending the
+    // escapes one-shot writes.
+    if self.raw_html_scanned_to < drain_end && !self.raw_html_markdown && self.in_raw_html_block() {
+      self.track_raw_html_markdown_context(drain_end);
+    }
     let bytes = self.buffer.as_bytes();
     self.flushed_tail = if drain_end >= 2 {
       [bytes[drain_end - 2], bytes[drain_end - 1]]
     } else {
       [self.flushed_tail[1], bytes[0]]
+    };
+    // Remember what the line being cut leads with; a line opened before an
+    // earlier drain keeps that answer across successive cuts.
+    self.cut_line_lead = if bytes[drain_end - 1] == b'\n' {
+      CutLineLead::Blank
+    } else {
+      let (line, inherited) = match bytes[..drain_end].iter().rposition(|b| *b == b'\n') {
+        Some(at) => (&bytes[at + 1..drain_end], CutLineLead::Blank),
+        None => (&bytes[..drain_end], self.cut_line_lead),
+      };
+      if matches!(
+        inherited,
+        CutLineLead::RawHtml | CutLineLead::Row | CutLineLead::Content
+      ) {
+        inherited
+      } else {
+        line
+          .iter()
+          .copied()
+          .find(|b| !matches!(b, b' ' | b'\t'))
+          .map_or(CutLineLead::Blank, |byte| match byte {
+            b'<' => CutLineLead::RawHtml,
+            b'|' => CutLineLead::Row,
+            _ => CutLineLead::Content,
+          })
+      }
     };
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
