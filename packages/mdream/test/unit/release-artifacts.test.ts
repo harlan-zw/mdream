@@ -11,6 +11,12 @@ afterEach(async () => {
 })
 
 describe('release artifact staging', () => {
+  it('does not declare the unpublished WASI platform package', async () => {
+    const manifest = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'))
+
+    expect(manifest.optionalDependencies).not.toHaveProperty('@mdream/rust-wasm32-wasi')
+  })
+
   it('collects napi outputs while excluding bundled node_modules', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mdream-release-'))
     tempDirs.push(root)

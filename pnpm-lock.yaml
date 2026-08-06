@@ -516,9 +516,6 @@ importers:
       '@mdream/rust-linux-x64-musl':
         specifier: workspace:*
         version: link:../../crates/node/npm/linux-x64-musl
-      '@mdream/rust-wasm32-wasi':
-        specifier: workspace:*
-        version: link:../../crates/node/npm/wasm32-wasi
       '@mdream/rust-win32-arm64-msvc':
         specifier: workspace:*
         version: link:../../crates/node/npm/win32-arm64-msvc
