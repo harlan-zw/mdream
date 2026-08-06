@@ -90,6 +90,7 @@
     "@mdream/rust-linux-arm64-musl": "workspace:*",
     "@mdream/rust-linux-x64-gnu": "workspace:*",
     "@mdream/rust-linux-x64-musl": "workspace:*",
+    "@mdream/rust-wasm32-wasi": "workspace:*",
     "@mdream/rust-win32-arm64-msvc": "workspace:*",
     "@mdream/rust-win32-x64-msvc": "workspace:*"
   },

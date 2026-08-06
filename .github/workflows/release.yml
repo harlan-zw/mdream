@@ -116,7 +116,9 @@ jobs:
                 echo "Skipping $name@$version (already published)"
                 continue
               fi
-              pnpm publish --access public --no-git-checks --provenance ${{ steps.dist-tag.outputs.tag }} --filter "$name" || failed="$failed $name"
+              # WASI bundles its runtime dependencies; pnpm requires the
+              # hoisted linker while assembling that package for publish.
+              PNPM_CONFIG_NODE_LINKER=hoisted pnpm publish --access public --no-git-checks --provenance ${{ steps.dist-tag.outputs.tag }} --filter "$name" || failed="$failed $name"
             fi
           done
           if [ -n "$failed" ]; then
