@@ -11,6 +11,24 @@ afterEach(async () => {
 })
 
 describe('release artifact staging', () => {
+  it('declares only publishable optional platform packages', async () => {
+    const manifest = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'))
+    const platformDir = new URL('../../../../crates/node/npm/', import.meta.url)
+    const platformDirs = (await readdir(platformDir, { withFileTypes: true }))
+      .filter(entry => entry.isDirectory())
+    const platformManifests = await Promise.all(platformDirs.map(async (entry) => {
+      return JSON.parse(await readFile(new URL(`${entry.name}/package.json`, platformDir), 'utf8'))
+    }))
+    const platformsByName = new Map(platformManifests.map(platform => [platform.name, platform]))
+
+    for (const name of Object.keys(manifest.optionalDependencies)) {
+      const platform = platformsByName.get(name)
+      expect(platform, `${name} must have a platform package`).toBeDefined()
+      expect(platform.private, `${name} must be publishable`).not.toBe(true)
+      expect(platform.version, `${name} must match mdream's version`).toBe(manifest.version)
+    }
+  })
+
   it('collects napi outputs while excluding bundled node_modules', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mdream-release-'))
     tempDirs.push(root)

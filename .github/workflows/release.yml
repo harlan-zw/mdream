@@ -106,17 +106,19 @@ jobs:
             if [ -f "$pkg/package.json" ]; then
               name=$(node -p "require('./$pkg/package.json').name")
               version=$(node -p "require('./$pkg/package.json').version")
+              private=$(node -p "Boolean(require('./$pkg/package.json').private)")
+              if [ "$private" = "true" ]; then
+                echo "Skipping private platform package $name"
+                continue
+              fi
               # Idempotent on re-runs: skip versions that are already live.
               if npm view "$name@$version" version >/dev/null 2>&1; then
                 echo "Skipping $name@$version (already published)"
                 continue
               fi
-              if [ "$name" = "@mdream/rust-wasm32-wasi" ] && ! npm view "$name" name >/dev/null 2>&1; then
-                # Trusted publishing cannot create a package's first release.
-                echo "::warning::Skipping optional package $name@$version; bootstrap it on npm before enabling trusted publishing."
-                continue
-              fi
-              pnpm publish --access public --no-git-checks --provenance ${{ steps.dist-tag.outputs.tag }} --filter "$name" || failed="$failed $name"
+              # WASI bundles its runtime dependencies; pnpm requires the
+              # hoisted linker while assembling that package for publish.
+              PNPM_CONFIG_NODE_LINKER=hoisted pnpm publish --access public --no-git-checks --provenance ${{ steps.dist-tag.outputs.tag }} --filter "$name" || failed="$failed $name"
             fi
           done
           if [ -n "$failed" ]; then
