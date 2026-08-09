@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 mdream = { path = "../../crates/core" }
-html2md = { version = "0.0", package = "fast_html2md" }
+html2md = { version = "0.0.62", package = "fast_html2md" }
 
 [profile.release]
 opt-level = 3
