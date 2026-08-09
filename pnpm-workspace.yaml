@@ -27,7 +27,6 @@ packages:
   - '!examples/nextjs'
 
 overrides:
-  emnapi: ^1.11.3
   # fflate 0.8.3 emits a trailing empty Gunzip chunk that breaks
   # @arethetypeswrong/cli 0.18.2 tarball extraction (attw --pack crashes
   # with "Cannot read properties of undefined (reading 'filename')").
@@ -40,8 +39,9 @@ catalog:
   '@arethetypeswrong/cli': ^0.18.5
   '@clack/prompts': ^1.7.0
   '@cloudflare/vitest-pool-workers': ^0.20.3
-  '@emnapi/core': ^1.11.3
-  '@emnapi/runtime': ^1.11.3
+  # napi-build 2.4 links emnapi v2 exports; keep the runtime and archive aligned.
+  '@emnapi/core': 2.0.0-alpha.3
+  '@emnapi/runtime': 2.0.0-alpha.3
   '@emnapi/wasi-threads': ^2.0.1
   '@napi-rs/cli': ^3.8.2
   '@napi-rs/wasm-runtime': ^1.2.2
