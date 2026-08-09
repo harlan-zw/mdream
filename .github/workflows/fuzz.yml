@@ -34,7 +34,7 @@ jobs:
           components: rust-src
 
       - name: Install cargo-fuzz
-        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
         with:
           tool: cargo-fuzz
 
@@ -45,10 +45,11 @@ jobs:
       # corpus/ is gitignored, so without this every weekly run starts cold and
       # rediscovers the same shallow inputs for 300s
       - name: Restore corpus
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: crates/core/fuzz/corpus/${{ matrix.target }}
-          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}-${{
+            github.run_attempt }}
           restore-keys: fuzz-corpus-${{ matrix.target }}-
 
       # --target is pinned because cargo-fuzz defaults it to its own build
@@ -57,7 +58,8 @@ jobs:
       # ("sanitizer is incompatible with statically linked libc").
       - name: Run fuzzer
         working-directory: crates/core
-        run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }} -- -dict=fuzz/html.dict -max_total_time=300
+        run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target
+          }} -- -dict=fuzz/html.dict -max_total_time=300
 
       - name: Upload crash artifacts
         if: failure()
@@ -71,7 +73,8 @@ jobs:
       # plain actions/cache step only saves when the job succeeded
       - name: Save corpus
         if: always()
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: crates/core/fuzz/corpus/${{ matrix.target }}
-          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}-${{
+            github.run_attempt }}

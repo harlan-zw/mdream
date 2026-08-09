@@ -1,5 +1,6 @@
 name: Build wasi artifacts
-description: napi wasi build, wasm-opt pass and staging into crates/node/npm. Shared by Test and Release so the two cannot drift.
+description: napi wasi build, wasm-opt pass and staging into crates/node/npm.
+  Shared by Test and Release so the two cannot drift.
 
 inputs:
   target:
@@ -16,7 +17,7 @@ runs:
       run: pnpm exec napi build --target ${{ inputs.target }} --profile wasm
 
     - name: Install wasm-opt
-      uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+      uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
       with:
         tool: wasm-opt
 
