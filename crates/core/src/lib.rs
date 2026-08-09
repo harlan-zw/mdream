@@ -56,8 +56,8 @@ pub fn html_to_format_result(
 ) -> MdreamResult {
   let capacity = (html.len() / 3).clamp(1024, 256 * 1024);
   let mut state = ConvertState::new(options, capacity, format);
-  let leftover = state.process_html(html);
-  state.finalize(&leftover);
+  let consumed = state.process_html(html);
+  state.finalize(&html[consumed..]);
 
   let extracted = if state.has_extraction {
     let results = std::mem::take(&mut state.extraction_results);
@@ -110,23 +110,26 @@ impl MarkdownStreamProcessor {
 
   pub fn process_chunk(&mut self, chunk: &str) -> String {
     if self.buffer.is_empty() {
-      self.buffer = self.state.process_html(chunk);
+      let consumed = self.state.process_html(chunk);
+      self.buffer.push_str(&chunk[consumed..]);
     } else {
       self.buffer.push_str(chunk);
-      let full = std::mem::take(&mut self.buffer);
-      self.buffer = self.state.process_html(&full);
+      // Draining only what was consumed leaves a token still waiting for its
+      // terminator in place, rather than recopying it every chunk.
+      let consumed = self.state.process_html(&self.buffer);
+      self.buffer.drain(..consumed);
     }
     self.state.get_markdown_chunk()
   }
 
   pub fn finish(&mut self) -> String {
-    let leftover = if self.buffer.is_empty() {
-      String::new()
+    let buffer = std::mem::take(&mut self.buffer);
+    let consumed = if buffer.is_empty() {
+      0
     } else {
-      let chunk = std::mem::take(&mut self.buffer);
-      self.state.process_html(&chunk)
+      self.state.process_html(&buffer)
     };
-    self.state.finalize(&leftover);
+    self.state.finalize(&buffer[consumed..]);
     self.state.get_markdown_chunk()
   }
 }

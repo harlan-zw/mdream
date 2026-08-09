@@ -93,6 +93,69 @@ pub(crate) fn process_comment_or_doctype(html_chunk: &str, position: usize) -> C
   }
 }
 
+/// How far a start tag spanning several chunks has been searched for its `>`,
+/// so the next chunk resumes instead of restarting. Without this a tag longer
+/// than the chunk is re-scanned from `<` every chunk, which is quadratic.
+#[derive(Clone, Copy)]
+pub(crate) struct PendingTagScan {
+  /// Bytes of the attribute region already examined.
+  scanned: usize,
+  state: State,
+  /// The quote still open at `scanned`, or 0 outside a quoted value.
+  quote_char: u8,
+}
+
+impl PendingTagScan {
+  #[inline]
+  pub(crate) fn new() -> Self {
+    Self {
+      scanned: 0,
+      state: State::Gap,
+      quote_char: 0,
+    }
+  }
+}
+
+/// Resume the search for a start tag's `>`, reporting whether the tag is now
+/// complete. Runs the same tokenizer as [`scan_tag`] so the two always agree on
+/// where a tag ends; `process_tag_attributes` still does the single real parse.
+pub(crate) fn tag_is_complete(
+  html_chunk: &str,
+  attrs_start: usize,
+  pending: &mut PendingTagScan,
+) -> bool {
+  let bytes = html_chunk.as_bytes();
+  let mut i = attrs_start + pending.scanned;
+
+  while i < bytes.len() {
+    let c = bytes[i];
+
+    if pending.quote_char != 0 {
+      if c == pending.quote_char {
+        pending.quote_char = 0;
+        pending.state = State::Gap;
+      }
+      i += 1;
+      continue;
+    }
+
+    // `/>` is reached through its own `>`, so one test covers both endings.
+    if c == GT_CHAR {
+      return true;
+    }
+
+    if pending.state == State::BeforeValue && (c == QUOTE_CHAR || c == APOS_CHAR) {
+      pending.quote_char = c;
+    } else {
+      pending.state = pending.state.step_without_extraction(c);
+    }
+    i += 1;
+  }
+
+  pending.scanned = i - attrs_start;
+  false
+}
+
 /// Scan a start tag's attribute region to its `>`, storing only the attributes
 /// `attr_mask` selects.
 pub(crate) fn process_tag_attributes(

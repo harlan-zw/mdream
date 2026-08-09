@@ -89,12 +89,17 @@ fn repeat_to(prefix: &str, unit: &str, target: usize, suffix: &str) -> String {
 }
 
 /// Each body is one run longer than the chunk, so none of them offers the tag
-/// boundary that flushes the text buffer.
-fn cases() -> [(&'static str, String); 4] {
+/// boundary that flushes the text buffer. `start tag` withholds that boundary a
+/// different way: the tag is the run, so it is the terminator that never comes.
+fn cases() -> [(&'static str, String); 5] {
   [
     (
       "text run",
       repeat_to("<p>", "lorem ipsum dolor sit amet ", SIZE, "</p>"),
+    ),
+    (
+      "start tag",
+      repeat_to("<a href=\"/", "aaaaaaaaaaaaaaaa", SIZE, "\">link</a>"),
     ),
     (
       "style body",
