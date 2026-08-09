@@ -1239,7 +1239,13 @@ fn trailing_tab_is_held_back_like_a_space() {
 // hold, so an empty one yielded spacing that finalize then trimmed.
 #[test]
 fn empty_pre_does_not_yield_block_spacing_finalize_trims() {
-  for html in ["S<pre>", "><pre>", "S<pre></pre>", "S<pre>  </pre>", "S<pre></pre><pre>"] {
+  for html in [
+    "S<pre>",
+    "><pre>",
+    "S<pre></pre>",
+    "S<pre>  </pre>",
+    "S<pre></pre><pre>",
+  ] {
     assert_stream_matches(html, HTMLToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
@@ -1263,4 +1269,35 @@ fn empty_link_text_drop_keeps_a_preceding_escaped_bracket() {
     assert_stream_matches_every_split(html, opts.clone());
   }
   assert_eq!(html_to_markdown("[<A/>", opts), "\\[");
+}
+
+// Inside a raw-HTML region Markdown escaping is suspended until a blank line
+// closes it, so a drain has to record whether the line it cuts opened such a
+// region. The `<dd>` here sits under five spaces of indent, three more than can
+// open one, so the escapes stay -- but a lead classified from the first
+// non-blank byte alone reads that `<` as a suspension and drops them, leaving a
+// bare `[` that gives the output a link the source never had. Drain-only.
+#[test]
+fn raw_html_escape_suspension_survives_a_drain() {
+  let chunks = [
+    "<l",
+    "I\r><d",
+    "L>d<o",
+    "L>",
+    "",
+    "\r",
+    "<l",
+    "I>%&<hr><dd/L>\u{7}%",
+    "\0\0\0\0\0\0<\u{18}<<o",
+    "L>/[\u{18}\u{7}]",
+  ];
+  let html: String = chunks.concat();
+  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  let mut p = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut actual = String::new();
+  for c in chunks {
+    actual.push_str(&p.process_chunk(c));
+  }
+  actual.push_str(&p.finish());
+  assert_eq!(actual, expected);
 }

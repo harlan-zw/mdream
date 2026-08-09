@@ -1524,15 +1524,24 @@ impl ConvertState {
       ) {
         inherited
       } else {
-        line
-          .iter()
-          .copied()
-          .find(|b| !matches!(b, b' ' | b'\t'))
-          .map_or(CutLineLead::Blank, |byte| match byte {
-            b'<' => CutLineLead::RawHtml,
-            b'|' => CutLineLead::Row,
-            _ => CutLineLead::Content,
-          })
+        // Only up to three *spaces* may precede the `<` that suspends Markdown,
+        // so a more deeply (or tab-) indented tag leads a content line -- the
+        // same rule `line_opens_raw_html_block` applies to an uncut line. Read
+        // more freely here and the fragment left behind claims a suspension the
+        // whole line never had, dropping escapes one-shot writes.
+        let indent = line.iter().take(3).take_while(|&&b| b == b' ').count();
+        if line.get(indent) == Some(&b'<') {
+          CutLineLead::RawHtml
+        } else {
+          line
+            .iter()
+            .copied()
+            .find(|b| !matches!(b, b' ' | b'\t'))
+            .map_or(CutLineLead::Blank, |byte| match byte {
+              b'|' => CutLineLead::Row,
+              _ => CutLineLead::Content,
+            })
+        }
       }
     };
     self.buffer.drain(..drain_end);
