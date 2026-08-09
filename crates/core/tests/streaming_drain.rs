@@ -1222,3 +1222,14 @@ fn trailing_nbsp_is_content_and_matches_one_shot() {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
 }
+
+// Every trim that reaches back into the buffer takes the whole ASCII
+// whitespace set, but the yield boundary only held back `\n` and spaces, so a
+// trailing tab was sent and then trimmed from the buffer alone.
+#[test]
+fn trailing_tab_is_held_back_like_a_space() {
+  for html in ["$&#9", "$&#9;", "a&#9;&#9;", "x&Tab;"] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}

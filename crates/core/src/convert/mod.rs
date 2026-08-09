@@ -1344,8 +1344,10 @@ impl ConvertState {
     } else {
       // A block close or document finalization may still trim trailing block
       // spacing. Keep newlines buffered until following content makes them
-      // stable, since yielded bytes cannot be retracted.
-      stable_end = stable_end.min(self.buffer.trim_end_matches(['\n', ' ']).len());
+      // stable, since yielded bytes cannot be retracted. The trims that reach
+      // back here take the whole ASCII set, so holding only `\n` and ` ` leaks
+      // a trailing tab that a later trim then removes from the buffer alone.
+      stable_end = stable_end.min(trim_ascii_whitespace_end(&self.buffer));
     }
     let leading = if self.preserve_leading_whitespace || self.has_streamed_output {
       0
