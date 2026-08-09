@@ -1233,3 +1233,14 @@ fn trailing_tab_is_held_back_like_a_space() {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
 }
+
+// A `<pre>` writes its block spacing on open but the fence only when content
+// arrives. Treating the element as open was enough to skip the trailing-newline
+// hold, so an empty one yielded spacing that finalize then trimmed.
+#[test]
+fn empty_pre_does_not_yield_block_spacing_finalize_trims() {
+  for html in ["S<pre>", "><pre>", "S<pre></pre>", "S<pre>  </pre>", "S<pre></pre><pre>"] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}

@@ -1322,7 +1322,11 @@ impl ConvertState {
     // space. Yielding them would let that later trim silently remove an
     // already-sent byte and shift every byte after it. Always hold them back;
     // they are re-yielded once real content follows, or dropped at finalize.
-    let in_pre = self.depth_map[TAG_PRE as usize] != 0;
+    // The fence is written lazily, so until it opens the `<pre>` has produced
+    // no content and the buffer tail is still the block spacing its own open
+    // wrote. Finalize trims that, so it has to stay held back like any other
+    // block's; only past the fence is trailing whitespace significant code.
+    let in_pre = self.depth_map[TAG_PRE as usize] != 0 && self.pre_fence_open;
     let mut stable_end = self.buffer.trim_end_matches(' ').len();
     if in_pre {
       if self.last_text_node_contains_whitespace {
