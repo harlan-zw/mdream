@@ -447,6 +447,9 @@ fn streaming_multibyte_never_panics() {
     "<blockquote>”<br>\n</><p>🎉",
     "<a href=\"/x\">link</a>“<strong></strong>—漢字",
     "<ul><li>é<a href=\"/x\"></a>…</li></ul>🎉&mdash;",
+    // Inline element still open at yield: the hold-back offsets are read
+    // before the yield bounds are floored, so a drifted one sliced mid-char.
+    "><li><br>é<a><td><li><li>",
   ];
   for &html in CASES {
     for max_bytes in [1usize, 2, 3, 4, 5, 7, 11] {

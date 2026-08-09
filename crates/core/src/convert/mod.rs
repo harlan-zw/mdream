@@ -1324,28 +1324,16 @@ impl ConvertState {
     // dropped (empty element) and a block boundary then trims that trailing space, a yielded
     // space would be silently removed and shift every later byte. Hold those spaces back too.
     if let Some(&(_, p, _)) = self.open_markers.first() {
-      stable_end = stable_end.min(self.buffer[..p].trim_end_matches(['\n', ' ']).len());
+      stable_end = stable_end.min(hold_before(&self.buffer, p));
     }
     if let Some(span) = self.code_spans.first() {
-      stable_end = stable_end.min(
-        self.buffer[..span.output_start]
-          .trim_end_matches(['\n', ' '])
-          .len(),
-      );
+      stable_end = stable_end.min(hold_before(&self.buffer, span.output_start));
     }
     if let Some(fence) = &self.code_fence {
-      stable_end = stable_end.min(
-        self.buffer[..fence.output_start]
-          .trim_end_matches(['\n', ' '])
-          .len(),
-      );
+      stable_end = stable_end.min(hold_before(&self.buffer, fence.output_start));
     }
     if let Some(frame) = self.blockquotes.first() {
-      stable_end = stable_end.min(
-        self.buffer[..frame.content_start]
-          .trim_end_matches(['\n', ' '])
-          .len(),
-      );
+      stable_end = stable_end.min(hold_before(&self.buffer, frame.content_start));
     }
     // An open `<a>`'s close can rewrite the buffer back to `link_bracket_pos`
     // (emptyLinkText drop, selfLinkHeadings, redundantLinks, GFM autolink). Hold the
@@ -1355,11 +1343,7 @@ impl ConvertState {
     // so hold them back too or a yielded space would be silently removed.
     // Mirrors the same guard in `drain_streamed_prefix`.
     if self.depth_map[TAG_A as usize] > 0 {
-      stable_end = stable_end.min(
-        self.buffer[..self.link_bracket_pos]
-          .trim_end_matches(['\n', ' '])
-          .len(),
-      );
+      stable_end = stable_end.min(hold_before(&self.buffer, self.link_bracket_pos));
     }
     // A marker still alone on its line has its separating newline inserted at
     // the line start when the item resolves, so the line stays mutable.
@@ -1534,6 +1518,17 @@ impl ConvertState {
     self.line_start = self.line_start.saturating_sub(drain_end);
     self.line_start_scanned_to = self.line_start_scanned_to.saturating_sub(drain_end);
   }
+}
+
+/// Highest offset that holds back everything from `at`, plus the blank run just
+/// before it that a rewrite reaching back there can trim. Floored like
+/// `keep_two_before`, so a drifted `at` never slices mid-codepoint.
+fn hold_before(buf: &str, at: usize) -> usize {
+  let mut i = at.min(buf.len());
+  while !buf.is_char_boundary(i) {
+    i -= 1;
+  }
+  buf[..i].trim_end_matches(['\n', ' ']).len()
 }
 
 /// Highest offset that still keeps the two bytes before `at` in the buffer, for
