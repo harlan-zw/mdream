@@ -3131,11 +3131,8 @@ mod tests {
   fn safe_prose_skips_the_gfm_escape_slow_path() {
     let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
 
-    assert!(
-      state
-        .process_html("<p>ordinary prose with 123 numbers and punctuation.</p>")
-        .is_empty()
-    );
+    let html = "<p>ordinary prose with 123 numbers and punctuation.</p>";
+    assert_eq!(state.process_html(html), html.len());
 
     assert_eq!(state.gfm_escape_slow_path_calls, 0);
     assert_eq!(
@@ -3148,11 +3145,8 @@ mod tests {
   fn syntax_and_entities_use_the_gfm_escape_slow_path() {
     let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
 
-    assert!(
-      state
-        .process_html("<p>* literal</p><p>&#42; decoded</p>")
-        .is_empty()
-    );
+    let html = "<p>* literal</p><p>&#42; decoded</p>";
+    assert_eq!(state.process_html(html), html.len());
 
     assert_eq!(state.gfm_escape_slow_path_calls, 2);
     assert_eq!(state.get_markdown(), "\\* literal\n\n\\* decoded");

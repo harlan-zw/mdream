@@ -1,6 +1,9 @@
 use crate::consts::*;
 use crate::entities::{decode_html_entities, decode_html_entities_for_markdown};
-use crate::scan::{is_whitespace, process_comment_or_doctype, process_tag_attributes};
+use crate::scan::{
+  PendingTagScan, is_whitespace, process_comment_or_doctype, process_tag_attributes,
+  tag_is_complete,
+};
 use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selector_list};
 use crate::tags::get_tag_handler;
 use crate::tailwind::process_tailwind_classes;
@@ -389,6 +392,9 @@ pub struct ConvertState {
   first_block_parent_index: Option<usize>,
   block_parent_indices: Vec<usize>,
   parse_text_buffer: String,
+  /// Set while a start tag is known to span chunks, holding how far its `>`
+  /// search reached so the next chunk resumes instead of restarting it.
+  pending_tag: Option<PendingTagScan>,
   script_text_buffer: String,
   pub stack: Vec<ElementNode>,
   node_pool: Vec<ElementNode>,
@@ -577,6 +583,7 @@ impl ConvertState {
       first_block_parent_index: None,
       block_parent_indices: Vec::with_capacity(16),
       parse_text_buffer: String::new(),
+      pending_tag: None,
       script_text_buffer: String::new(),
       stack: Vec::with_capacity(32),
       node_pool: Vec::with_capacity(32),
@@ -771,7 +778,10 @@ impl ConvertState {
     }
   }
 
-  pub fn process_html(&mut self, chunk: &str) -> String {
+  /// Consumes what it can of `chunk` and returns how many bytes that was. The
+  /// caller keeps the rest; returning an owned tail instead would copy a token
+  /// that spans many chunks once per chunk, which is quadratic.
+  pub fn process_html(&mut self, chunk: &str) -> usize {
     // Non-empty only when the previous chunk ended mid-text: that run continues
     // here instead of being re-fed as raw input. Every flush leaves it empty.
     let mut text_buffer = std::mem::take(&mut self.parse_text_buffer);
@@ -1128,6 +1138,17 @@ impl ConvertState {
           run_start = i;
         }
 
+        // `process_opening_tag` throws away everything it parsed when the tag
+        // is incomplete, so resume the `>` search instead of re-parsing it.
+        if let Some(mut pending) = self.pending_tag {
+          if !tag_is_complete(chunk, i2, &mut pending) {
+            self.pending_tag = Some(pending);
+            carry = true;
+            break;
+          }
+          self.pending_tag = None;
+        }
+
         let result =
           self.process_opening_tag(&tag_name, tag_id, builtin_tag_id.is_some(), chunk, i2);
         if result.skip {
@@ -1153,24 +1174,22 @@ impl ConvertState {
             }
           }
         } else {
-          // Incomplete opening tag: re-parse from '<' in the next chunk.
+          // Incomplete opening tag. The next chunk resumes the `>` search from
+          // here rather than re-parsing the tag from '<'.
+          self.pending_tag = Some(PendingTagScan::new());
           carry = true;
           break;
         }
       }
     }
 
-    // Carry only an unfinished token, RAW from `run_start`, never the parsed
-    // `text_buffer` (re-processing would re-derive it). A trailing text run is
-    // kept in `text_buffer` instead, so it is parsed once however many chunks
-    // it spans.
-    let leftover = if carry {
-      chunk[run_start..].to_string()
-    } else {
-      String::new()
-    };
+    // An unfinished token stays with the caller RAW from `run_start`, never the
+    // parsed `text_buffer` (re-processing would re-derive it). A trailing text
+    // run is kept in `text_buffer` instead, so it is parsed once however many
+    // chunks it spans.
+    let consumed = if carry { run_start } else { chunk_length };
     self.parse_text_buffer = text_buffer;
-    leftover
+    consumed
   }
 
   pub fn get_markdown(&mut self) -> String {
