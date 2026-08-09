@@ -1445,11 +1445,14 @@ impl ConvertState {
     // Formatting also inspects the last two bytes to count existing newlines.
     // Keep enough for the widest GFM list marker too: up to three spaces, nine
     // digits, a delimiter, and a trailing space. Row separation can then still
-    // recognize a marker after earlier output has drained.
+    // recognize a marker after earlier output has drained. Inside a list that
+    // marker is preceded by the continuation indent, and the separation logic
+    // reads the whole line lead, so the indent has to survive the cut as well.
+    let marker_tail = 14 + self.list_indent.len();
     let mut retained_tail_start = self
       .buffer
       .len()
-      .saturating_sub(self.last_content_cache_len.max(14));
+      .saturating_sub(self.last_content_cache_len.max(marker_tail));
     while !self.buffer.is_char_boundary(retained_tail_start) {
       retained_tail_start -= 1;
     }
