@@ -1244,3 +1244,23 @@ fn empty_pre_does_not_yield_block_spacing_finalize_trims() {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
 }
+
+// `link_bracket_pos` marks where an empty link is truncated back to. It was
+// taken from the buffer's last byte being `[`, which is also true of an escaped
+// literal `\[` in the text before the link, so the drop cut into that text and
+// left its backslash stranded.
+#[test]
+fn empty_link_text_drop_keeps_a_preceding_escaped_bracket() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_link_text: true,
+      ..CleanConfig::default()
+    }),
+    ..Default::default()
+  };
+  for html in ["[<A/>", "[<a></a>", "a [ <a href=\"/x\"></a>", "\\[<a></a>"] {
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
+  }
+  assert_eq!(html_to_markdown("[<A/>", opts), "\\[");
+}

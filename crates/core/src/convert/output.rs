@@ -643,7 +643,12 @@ impl ConvertState {
     // bracket in O(1) instead of scanning forward.
     if tag_id == Some(TAG_A) {
       let buf_len = self.buffer.len();
-      self.link_bracket_pos = if buf_len > 0 && self.buffer.as_bytes()[buf_len - 1] == b'[' {
+      // Only a bracket this element just emitted counts. Testing the buffer's
+      // last byte alone also matches the `[` of an escaped literal `\[` in the
+      // text before the link, and the empty-link drop then truncates into that
+      // text instead of the link it meant to remove.
+      self.link_bracket_pos = if buf_len > 0 && output.as_deref().is_some_and(|o| o.ends_with('['))
+      {
         buf_len - 1
       } else {
         buf_len
