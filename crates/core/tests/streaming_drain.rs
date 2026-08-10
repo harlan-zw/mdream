@@ -1548,3 +1548,20 @@ fn streaming_matches_one_shot_across_blockquote_quoting() {
     HTMLToMarkdownOptions::default(),
   );
 }
+
+// A trim takes the marker's own trailing space, which leaves the marker's
+// recorded end past where the item's content now starts, so the element that
+// opens the item -- a code span's backtick, or an emphasis marker -- reads as
+// content. Streaming resolves the marker as content arrives and settled the
+// question on it; one-shot only looks at the item's exit and never saw it, so
+// they disagreed on the blank line that keeps an empty item from continuing the
+// paragraph above.
+#[test]
+fn streaming_keeps_an_empty_items_blank_line_across_a_code_span() {
+  assert_stream_matches_every_split("a a<li><p><code>", HTMLToMarkdownOptions::default());
+}
+
+#[test]
+fn streaming_keeps_an_empty_items_blank_line_across_an_inline_marker() {
+  assert_stream_matches_every_split("a a<li><html><strong>", HTMLToMarkdownOptions::default());
+}

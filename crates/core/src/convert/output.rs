@@ -1970,6 +1970,16 @@ impl ConvertState {
     }
   }
 
+  /// Note that the buffer has been shortened to `len`. A list marker's recorded
+  /// end is a length, and the space a trim takes is the marker's own: left past
+  /// the content it reads the element that opens the item as content.
+  #[inline]
+  fn clamp_item_marker_end(&mut self, len: usize) {
+    if self.empty_item_len > len {
+      self.empty_item_len = len;
+    }
+  }
+
   #[inline]
   fn trim_trailing_spaces(&mut self) {
     let floor = self.trim_floor();
@@ -1982,6 +1992,7 @@ impl ConvertState {
       self.last_content_cache_len = self
         .last_content_cache_len
         .saturating_sub(self.buffer.len() - trimmed_len);
+      self.clamp_item_marker_end(trimmed_len);
       self.buffer.truncate(trimmed_len);
     }
   }
@@ -2964,6 +2975,7 @@ impl ConvertState {
             // so the reach-back would drop the next text's leading char.
             let trimmed_len = trim_ascii_whitespace_end(frag);
             if start + trimmed_len < buf_len {
+              self.clamp_item_marker_end(start + trimmed_len);
               self.buffer.truncate(start + trimmed_len);
               // The run just shrank; a stale length lets the next trim start
               // behind it and reach into spacing no text node wrote.
