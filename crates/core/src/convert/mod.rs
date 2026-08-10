@@ -1285,6 +1285,31 @@ impl ConvertState {
     std::mem::take(&mut self.buffer)
   }
 
+  /// Whether a rawtext residual is this element's end tag with its name already
+  /// delimited, the one shape EOF discards: the tokenizer has left the end tag
+  /// name state for a tag state, where EOF drops the whole tag. A bare `<`, a
+  /// `</` alone, a name that cannot close this element, and a name still being
+  /// read at EOF all stay in the rawtext states, which emit them as text.
+  fn rawtext_leftover_is_end_tag(&self, leftover: &str) -> bool {
+    let bytes = leftover.as_bytes();
+    if bytes.len() < 3 || bytes[1] != SLASH_CHAR {
+      return false;
+    }
+    let mut name_end = 2;
+    while name_end < bytes.len() {
+      let c = bytes[name_end];
+      if c == GT_CHAR || c == SLASH_CHAR || is_whitespace(c) {
+        break;
+      }
+      name_end += 1;
+    }
+    if name_end == bytes.len() {
+      return false;
+    }
+    let tag_id = crate::consts::get_tag_id_ci_bytes(&bytes[2..name_end]);
+    self.stack.last().is_some_and(|node| node.tag_id == tag_id)
+  }
+
   /// Commit end-of-input state: flush trailing buffered text and close any
   /// elements left open. The streaming parser keeps trailing text and unclosed
   /// elements pending because a later chunk might continue them; at true EOF
@@ -1297,6 +1322,10 @@ impl ConvertState {
   /// tokenizer's EOF-in-tag behaviour. The text-buffer flags set while the
   /// trailing text was scanned persist on `self`, so `process_text_buffer`
   /// commits it exactly as if the next tag had triggered the flush.
+  ///
+  /// Rawtext is the exception: there `<` opens nothing but this element's own
+  /// end tag, so the residual is text unless it is an appropriate end tag that
+  /// already reached a tag state (see `rawtext_leftover_is_end_tag`).
   pub fn finalize(&mut self, leftover: &str) {
     let in_script = self
       .stack
@@ -1307,12 +1336,23 @@ impl ConvertState {
       self.flush_script_text();
       self.script_data_state = SCRIPT_DATA;
     } else {
+      // A rawtext residual continues the text run already pending, so it has to
+      // join that buffer rather than be flushed as a second text node: two nodes
+      // are separated by a space this text never contained.
+      let rawtext_text = leftover.as_bytes().first() == Some(&LT_CHAR)
+        && self.in_non_nesting
+        && !self.rawtext_leftover_is_end_tag(leftover);
+      if rawtext_text {
+        self.parse_text_buffer.push_str(leftover);
+        self.text_buffer_contains_non_whitespace = true;
+        self.last_char_was_whitespace = false;
+      }
       if !self.parse_text_buffer.is_empty() {
         let mut buf = std::mem::take(&mut self.parse_text_buffer);
         self.process_text_buffer(&mut buf);
         self.parse_text_buffer = buf;
       }
-      if !leftover.is_empty() && leftover.as_bytes()[0] != LT_CHAR {
+      if !rawtext_text && !leftover.is_empty() && leftover.as_bytes()[0] != LT_CHAR {
         let mut buf = leftover.to_string();
         self.process_text_buffer(&mut buf);
       }

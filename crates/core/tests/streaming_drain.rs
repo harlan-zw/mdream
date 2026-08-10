@@ -1481,3 +1481,40 @@ fn rawtext_close_tag_split_across_chunks_is_carried_without_its_text() {
     }
   }
 }
+
+// The rawtext EOF residual is committed by `finalize`, which both paths share, so
+// streaming has to keep the text one-shot now keeps. Pin the value, not just the
+// parity: before the fix both paths dropped it and agreed on the wrong output.
+// Every split matters because the boundary is what produces the residual.
+#[test]
+fn streaming_matches_one_shot_on_a_rawtext_eof_residual() {
+  for (truncated, closed) in [
+    ("<textarea>a<", "<textarea>a<</textarea>"),
+    ("<textarea>a</", "<textarea>a</</textarea>"),
+    ("<textarea>a</tex", "<textarea>a</tex</textarea>"),
+    ("<textarea>></", "<textarea>></</textarea>"),
+    ("<xmp>a</", "<xmp>a</</xmp>"),
+    ("<title>a</", "<title>a</</title>"),
+  ] {
+    let expected = html_to_markdown(closed, HTMLToMarkdownOptions::default());
+    for chunk in 1..=truncated.len() {
+      assert_eq!(
+        stream_chunks(truncated, chunk, HTMLToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} truncated={truncated:?}"
+      );
+    }
+    assert_stream_matches_every_split(truncated, HTMLToMarkdownOptions::default());
+  }
+
+  // The one residual EOF still discards: an appropriate end tag already delimited.
+  assert_stream_matches("<textarea>a</textarea ", HTMLToMarkdownOptions::default());
+  assert_eq!(
+    stream_chunks(
+      "<textarea>a</textarea ",
+      1,
+      HTMLToMarkdownOptions::default()
+    ),
+    "a"
+  );
+}

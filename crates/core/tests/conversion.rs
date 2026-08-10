@@ -4153,3 +4153,51 @@ fn code_offsets_follow_blockquote_prefixing() {
     }
   }
 }
+
+// At EOF inside rawtext the residual `<` opened nothing: only this element's own
+// end tag can, so the RCDATA/RAWTEXT states emit `<`, `/` and any partial name as
+// text. Dropping it as an incomplete start tag -- right for the data state, where
+// EOF in a tag discards it -- silently ate trailing text. Each truncated document
+// has to read exactly like the closed one that produces the same text node.
+#[test]
+fn rawtext_eof_residual_is_text_not_a_dropped_tag() {
+  for (truncated, closed) in [
+    ("<textarea>a<", "<textarea>a<</textarea>"),
+    ("<textarea>a</", "<textarea>a</</textarea>"),
+    ("<textarea>a</tex", "<textarea>a</tex</textarea>"),
+    (
+      "<textarea>a</textareax",
+      "<textarea>a</textareax</textarea>",
+    ),
+    ("<textarea>a</foo", "<textarea>a</foo</textarea>"),
+    ("<textarea>></", "<textarea>></</textarea>"),
+    ("<xmp>a</", "<xmp>a</</xmp>"),
+    ("<title>a</", "<title>a</</title>"),
+  ] {
+    assert_eq!(
+      convert(truncated),
+      convert(closed),
+      "truncated={truncated:?}"
+    );
+    assert!(!convert(truncated).is_empty(), "dropped: {truncated:?}");
+  }
+
+  // A name the tokenizer already delimited left the end tag name state for a tag
+  // state, and EOF there drops the tag -- so these stay dropped.
+  for html in ["<textarea>a</textarea ", "<textarea>a</textarea/"] {
+    assert_eq!(convert(html), "a", "html={html:?}");
+  }
+
+  // An unterminated name is still text, even where it names this element.
+  assert_eq!(convert("<textarea>a</textarea"), "a</textarea");
+
+  // Elements whose text is excluded keep emitting nothing.
+  for html in ["<script>a</", "<style>a</", "<iframe>a</", "<noscript>a</"] {
+    assert_eq!(convert(html), "", "html={html:?}");
+  }
+
+  // The data state is unchanged: EOF in a tag drops it.
+  for html in ["<p>a</", "<p>a<", "<p>a</p", "<div>a<di"] {
+    assert_eq!(convert(html), "a", "html={html:?}");
+  }
+}
