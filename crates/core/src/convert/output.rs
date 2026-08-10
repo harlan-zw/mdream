@@ -1685,6 +1685,27 @@ impl ConvertState {
         *content_start += 1;
       }
     }
+    // A code span or fence measures and rewrites itself through these offsets,
+    // so an insertion before them leaves both pointing a byte early -- far
+    // enough to land inside a multi-byte character and panic the slice that
+    // builds the closing delimiter.
+    for span in &mut self.code_spans {
+      if span.output_start >= at {
+        span.output_start += 1;
+      }
+      if span.content_start >= at {
+        span.content_start += 1;
+      }
+    }
+    if let Some(fence) = &mut self.code_fence {
+      // `marker_offset` is relative to `output_start`, so it rides along.
+      if fence.output_start >= at {
+        fence.output_start += 1;
+      }
+      if fence.content_start >= at {
+        fence.content_start += 1;
+      }
+    }
     self.line_start_scanned_to = usize::MAX;
     self.raw_html_scanned_to = self.raw_html_scanned_to.min(at);
   }

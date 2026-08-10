@@ -4086,3 +4086,37 @@ fn clean_fragments_survives_a_heading_whose_content_is_all_dropped() {
     }
   }
 }
+
+// An empty list item owes a blank line, inserted into the buffer once the item
+// closes. Cached offsets at or past that line are shifted to follow it, but a
+// code span's were not: its `output_start` then pointed one byte early, and the
+// slice that builds the closing delimiter panicked as soon as that byte was
+// inside a multi-byte character. `html_to_markdown` itself aborted, so this is
+// not a streaming-only concern -- the stream is checked here only to keep the
+// two paths honest about the shift.
+#[test]
+fn code_span_offsets_follow_an_empty_item_blank_line() {
+  for html in [
+    "[<li><bR>\u{fffd}<code><TD><li>",
+    "<li><br>\u{e9}<code>x</code>",
+    "<ul><li><li><code>a</code></ul>",
+    "<li><br><code><pre>a</pre></code>",
+  ] {
+    let expected = convert(html);
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let mut streamed = String::new();
+      let mut start = 0;
+      while start < html.len() {
+        let mut end = (start + width).min(html.len());
+        while end < html.len() && !html.is_char_boundary(end) {
+          end += 1;
+        }
+        streamed.push_str(&processor.process_chunk(&html[start..end]));
+        start = end;
+      }
+      streamed.push_str(&processor.finish());
+      assert_eq!(streamed, expected, "{html:?} width={width}");
+    }
+  }
+}
