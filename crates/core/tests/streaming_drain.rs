@@ -749,6 +749,34 @@ fn streaming_holds_full_whitespace_run_before_a_droppable_marker() {
   }
 }
 
+// A block boundary trims the trailing spaces of the run before it, and the
+// cached run length has to shrink with them. Left stale, it outruns the buffer
+// wherever a drain has already cut the front, and the reach-back trim's
+// `cache_len <= buf_len` guard then skips the retraction entirely -- so the
+// block spacing the empty `<ol/>` wrote survived as `\n\n` where one-shot
+// retracts it to the pending space of the run it replaced. One-shot escapes the
+// stale length only because nothing has left its buffer, leaving the count exact
+// by coincidence.
+#[test]
+fn streaming_retracts_empty_block_spacing_after_a_space_trim() {
+  let html = "<pre>ace><source>tity;      <ol/> <d/>*";
+  let expected =
+    html_to_format_result(html, HTMLToMarkdownOptions::default(), OutputFormat::Text).markdown;
+  assert_eq!(expected, "ace>tity; *");
+  for chunk in 1..=html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(
+      HTMLToMarkdownOptions::default(),
+      OutputFormat::Text,
+    );
+    let mut actual = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      actual.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    actual.push_str(&p.finish());
+    assert_eq!(actual, expected, "chunk={chunk} html={html:?}");
+  }
+}
+
 // A heading's exit escapes the trailing `#` run GFM would read as an ATX closing
 // sequence, so the run must stay held while the heading is open. `<em>` writes a
 // `*` after the run, which left it no longer trailing at the buffer end and

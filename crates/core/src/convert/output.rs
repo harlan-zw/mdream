@@ -1950,6 +1950,13 @@ impl ConvertState {
     let floor = self.trim_floor();
     if self.buffer.len() > floor {
       let trimmed_len = floor + self.buffer[floor..].trim_end_matches(' ').len();
+      // The cached run just lost its tail. Left stale, the length outruns the
+      // buffer wherever a drain has already cut the front, and the reach-back
+      // trim's `cache_len <= buf_len` guard then skips a retraction one-shot
+      // performs, keeping block spacing an empty element wrote.
+      self.last_content_cache_len = self
+        .last_content_cache_len
+        .saturating_sub(self.buffer.len() - trimmed_len);
       self.buffer.truncate(trimmed_len);
     }
   }
