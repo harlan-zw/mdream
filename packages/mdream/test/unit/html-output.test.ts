@@ -68,6 +68,21 @@ describe.each(engines)('safe HTML output $name', (engineConfig) => {
     })).toBe('<table><tr><th align="center">Value</th></tr></table>text')
   })
 
+  it('omits unsigned attributes outside the u32 range', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const input = [
+      '<ol start="4294967295"><li>max</li></ol>',
+      '<ol start="4294967296"><li>overflow</li></ol>',
+      '<table><tr><td colspan="999999999999999999999999999999999999999999999999999">huge</td></tr></table>',
+    ].join('')
+
+    expect(htmlToMarkdown(input, { engine, format: 'html' })).toBe([
+      '<ol start="4294967295"><li>max</li></ol>',
+      '<ol><li>overflow</li></ol>',
+      '<table><tr><td>huge</td></tr></table>',
+    ].join(''))
+  })
+
   it('keeps nested pre content in the outer code block', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<pre>a<pre>b</pre>c</pre><p>d</p>', {

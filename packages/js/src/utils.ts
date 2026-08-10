@@ -223,12 +223,13 @@ export function getLanguageFromClass(className: string | undefined): string {
   return ''
 }
 
-// Strict unsigned integer parsing shared by numeric HTML attributes. Partial
-// reads such as `2x` must not disagree with Rust's full-string parse.
+// Strict u32 parsing shared by numeric HTML attributes. Partial reads such as
+// `2x` and values outside Rust's u32 range must be rejected consistently.
 export function parseUnsignedInteger(raw: string | undefined): number | undefined {
-  return raw !== undefined && /^[\t\n\f\r ]*\+?\d+[\t\n\f\r ]*$/.test(raw)
-    ? Number(raw)
-    : undefined
+  if (raw === undefined || !/^[\t\n\f\r ]*\+?\d+[\t\n\f\r ]*$/.test(raw))
+    return undefined
+  const value = Number(raw)
+  return value <= 4_294_967_295 ? value : undefined
 }
 
 /**
