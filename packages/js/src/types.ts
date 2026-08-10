@@ -152,10 +152,10 @@ export interface EngineOptions {
   wrapWidth?: number
 
   /**
-   * Output format. Defaults to `markdown`; use `text` to omit Markdown/HTML
-   * markup while preserving readable text and block spacing.
+   * Output format. Defaults to `markdown`; use `text` for readable plain text,
+   * or `html` for allowlisted semantic HTML.
    */
-  format?: 'markdown' | 'text'
+  format?: 'markdown' | 'text' | 'html'
 }
 
 // Standard DOM node types

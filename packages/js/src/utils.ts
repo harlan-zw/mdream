@@ -73,6 +73,39 @@ export function isEmptyLinkHref(href: string): boolean {
   }
 }
 
+/** Whether a URL is safe to emit into an HTML href or src attribute. */
+export function isSafeHtmlUrl(href: string, image = false): boolean {
+  let start = 0
+  while (start < href.length && href.charCodeAt(start) <= 32)
+    start++
+  let end = href.length
+  while (end > start && href.charCodeAt(end - 1) <= 32)
+    end--
+  if (start === end)
+    return false
+
+  for (let index = start; index < end; index++) {
+    const code = href.charCodeAt(index)
+    if (code === 9 || code === 10 || code === 13)
+      continue
+    if (code === 58) {
+      switch (lowerAscii(href.charCodeAt(start))) {
+        case 104: return schemeMatches(href, start, end, 'http:') || schemeMatches(href, start, end, 'https:')
+        case 109: return !image && schemeMatches(href, start, end, 'mailto:')
+        case 116: return !image && schemeMatches(href, start, end, 'tel:')
+        case 102: return !image && schemeMatches(href, start, end, 'ftp:')
+        default: return false
+      }
+    }
+    if (code === 47 || code === 63 || code === 35)
+      return true
+    const lower = lowerAscii(code)
+    if (!((lower >= 97 && lower <= 122) || (code >= 48 && code <= 57) || code === 43 || code === 45 || code === 46))
+      return true
+  }
+  return true
+}
+
 /**
  * Build the Markdown prefix needed to keep a continued line inside its open
  * blockquotes and list items. Ancestors are emitted outermost-first so mixed
@@ -190,12 +223,13 @@ export function getLanguageFromClass(className: string | undefined): string {
   return ''
 }
 
-// Strict unsigned integer parsing shared by numeric HTML attributes. Partial
-// reads such as `2x` must not disagree with Rust's full-string parse.
+// Strict u32 parsing shared by numeric HTML attributes. Partial reads such as
+// `2x` and values outside Rust's u32 range must be rejected consistently.
 export function parseUnsignedInteger(raw: string | undefined): number | undefined {
-  return raw !== undefined && /^[\t\n\f\r ]*\+?\d+[\t\n\f\r ]*$/.test(raw)
-    ? Number(raw)
-    : undefined
+  if (raw === undefined || !/^[\t\n\f\r ]*\+?\d+[\t\n\f\r ]*$/.test(raw))
+    return undefined
+  const value = Number(raw)
+  return value <= 4_294_967_295 ? value : undefined
 }
 
 /**

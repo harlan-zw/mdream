@@ -79,10 +79,10 @@ export interface MdreamOptions {
    */
   wrapWidth?: number
   /**
-   * Output format. Defaults to `markdown`; use `text` to omit Markdown/HTML
-   * markup while preserving readable text and block spacing.
+   * Output format. Defaults to `markdown`; use `text` for readable plain text,
+   * or `html` for allowlisted semantic HTML.
    */
-  format?: 'markdown' | 'text'
+  format?: 'markdown' | 'text' | 'html'
 }
 
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {

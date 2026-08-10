@@ -10,12 +10,17 @@ use crate::tailwind::process_tailwind_classes;
 use crate::types::{
   ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, TagHandler, TailwindData,
 };
-use crate::url::{is_autolink_uri, is_empty_link_href, resolve_url, slugify_heading};
+use crate::url::{
+  is_autolink_uri, is_empty_link_href, is_safe_html_url, resolve_url, slugify_heading,
+};
 use std::borrow::Cow;
 
+mod html_output;
 mod output;
 mod parse;
 mod plugins;
+
+use html_output::HtmlFrame;
 
 /// Tracked element during extraction — maps stack depth to accumulator
 pub(crate) struct TrackedExtraction {
@@ -477,6 +482,7 @@ pub struct ConvertState {
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
   /// hot path — a single integer compare). Code/tables/headings are exempt.
   wrap_width: usize,
+  format: OutputFormat,
   plain_text: bool,
   preserve_leading_whitespace: bool,
 
@@ -503,6 +509,7 @@ pub struct ConvertState {
   in_heading: bool,
   /// Buffer position at heading start (for extracting heading text)
   heading_buffer_start: usize,
+  html_frames: Vec<HtmlFrame>,
 
   /// Cumulative indent string for list-item continuation content. Grows by
   /// each ancestor `<li>`'s marker width (`"- "` = 2, `"N. "` = digits(N)+2),
@@ -639,6 +646,7 @@ impl ConvertState {
       disable_drain: false,
 
       wrap_width: options_wrap_width,
+      format,
       plain_text,
       preserve_leading_whitespace: false,
       clean_flags: 0,
@@ -652,6 +660,7 @@ impl ConvertState {
       fragment_links: Vec::new(),
       in_heading: false,
       heading_buffer_start: 0,
+      html_frames: Vec::new(),
 
       list_indent: String::new(),
       list_indent_widths: Vec::with_capacity(8),
@@ -1193,6 +1202,9 @@ impl ConvertState {
   }
 
   pub fn get_markdown(&mut self) -> String {
+    if self.format == OutputFormat::Html {
+      return std::mem::take(&mut self.buffer);
+    }
     // ASCII whitespace only, as everywhere else: U+00A0 is content, and the
     // streaming path cannot un-send a nbsp it has already yielded.
     let trimmed_end_len = trim_ascii_whitespace_end(&self.buffer);
@@ -1299,6 +1311,9 @@ impl ConvertState {
   }
 
   pub fn get_markdown_chunk(&mut self) -> String {
+    if self.format == OutputFormat::Html {
+      return std::mem::take(&mut self.buffer);
+    }
     self.flush_streaming_blockquote_lines();
     let buf_len = self.buffer.len();
     // Trailing spaces at the buffer end are never final outside <pre>: a later

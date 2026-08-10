@@ -280,6 +280,11 @@ const text = htmlToMarkdown('<h1>Hello <strong>World</strong></h1>', {
   format: 'text',
 })
 console.log(text) // Hello World
+
+const html = htmlToMarkdown('<h1>Hello <strong>World</strong></h1>', {
+  format: 'html',
+})
+console.log(html) // <h1 id="hello-world">Hello <strong>World</strong></h1>
 ```
 
 ```ts

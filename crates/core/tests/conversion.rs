@@ -2,7 +2,9 @@ use mdream::types::{
   ExtractionConfig, FilterConfig, FrontmatterConfig, HTMLToMarkdownOptions, IsolateMainConfig,
   OutputFormat, PluginConfig, TagOverrideConfig,
 };
-use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_markdown_result, html_to_text};
+use mdream::{
+  MarkdownStreamProcessor, html_to_html, html_to_markdown, html_to_markdown_result, html_to_text,
+};
 
 fn convert(html: &str) -> String {
   html_to_markdown(html, HTMLToMarkdownOptions::default())
@@ -30,6 +32,64 @@ fn convert_text_with_origin(html: &str, origin: &str) -> String {
       ..Default::default()
     },
   )
+}
+
+// ── Safe HTML output ──
+
+#[test]
+fn html_output_is_semantic_and_safe() {
+  let options = HTMLToMarkdownOptions {
+    origin: Some("https://mdream.dev".to_string()),
+    clean_urls: true,
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_html(
+      r#"<script>alert(1)</script><h1>Hello <em>world</em></h1><p onclick="x">Visit <a href="/docs?utm_source=x&section=api" title="Docs">docs</a> <a href="java&#9;script:x">bad</a><a href="file:///etc/passwd">file</a><img src="/safe.png" alt="A &quot;quote&quot;"><img src="data:text/html,x"><img src="blob:https://mdream.dev/id"></p><pre><code class="language-ts">1 &lt; 2</code></pre>"#,
+      options,
+    ),
+    r#"<h1 id="hello-world">Hello <em>world</em></h1><p>Visit <a href="https://mdream.dev/docs?section=api" title="Docs">docs</a> badfile<img src="https://mdream.dev/safe.png" alt="A &quot;quote&quot;"></p><pre tabindex="0"><code class="language-ts">1 &lt; 2</code></pre>"#,
+  );
+  assert_eq!(
+    html_to_html(
+      r#"<table><tr><th align="CENTER">Value</th></tr></table><bdo>text</bdo>"#,
+      HTMLToMarkdownOptions::default(),
+    ),
+    r#"<table><tr><th align="center">Value</th></tr></table>text"#,
+  );
+  assert_eq!(
+    html_to_html(
+      "<pre>a<pre>b</pre>c</pre><p>d</p>",
+      HTMLToMarkdownOptions::default(),
+    ),
+    "<pre tabindex=\"0\"><code>abc</code></pre><p>d</p>",
+  );
+  assert_eq!(
+    html_to_html(
+      "<p><a href=\"/safe\">link</a><img src=\"/safe\"></p>",
+      HTMLToMarkdownOptions {
+        origin: Some("javascript:alert(1)".to_string()),
+        ..Default::default()
+      },
+    ),
+    "<p>link</p>",
+  );
+}
+
+#[test]
+fn html_output_stream_matches_batch_at_every_split() {
+  let input = "<article><h2>Streaming</h2><p>A <code>small</code> example.</p></article>";
+  let expected = html_to_html(input, HTMLToMarkdownOptions::default());
+  for split in 0..=input.len() {
+    let mut processor = MarkdownStreamProcessor::new_with_format(
+      HTMLToMarkdownOptions::default(),
+      OutputFormat::Html,
+    );
+    let mut output = processor.process_chunk(&input[..split]);
+    output.push_str(&processor.process_chunk(&input[split..]));
+    output.push_str(&processor.finish());
+    assert_eq!(output, expected, "split={split}");
+  }
 }
 
 // ── Plain text output ──

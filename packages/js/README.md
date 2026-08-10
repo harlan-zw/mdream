@@ -38,7 +38,7 @@ plugins.
 
 ### `htmlToMarkdown(html, options?)`
 
-Converts an HTML string to Markdown synchronously.
+Converts an HTML string synchronously.
 
 ```typescript
 import { htmlToMarkdown } from '@mdream/js'
@@ -50,6 +50,11 @@ const text = htmlToMarkdown('<h1>Hello</h1><p><strong>World</strong></p>', {
   format: 'text',
 })
 // Hello\n\nWorld
+
+const html = htmlToMarkdown('<h1>Hello</h1><p><strong>World</strong></p>', {
+  format: 'html',
+})
+// <h1 id="hello">Hello</h1><p><strong>World</strong></p>
 ```
 
 **Parameters:**
@@ -63,7 +68,7 @@ const text = htmlToMarkdown('<h1>Hello</h1><p><strong>World</strong></p>', {
 
 ### `streamHtmlToMarkdown(htmlStream, options?)`
 
-Converts an HTML stream to Markdown incrementally. Useful for large documents or streaming HTTP responses.
+Converts an HTML stream incrementally. Useful for large documents or streaming HTTP responses.
 
 ```typescript
 import { streamHtmlToMarkdown } from '@mdream/js'
@@ -113,7 +118,7 @@ const markdown = htmlToMarkdown(html, {
 | `clean` | `boolean \| CleanOptions` | `undefined` | Post-processing cleanup. Pass `true` for all cleanup rules or an object for specific features (see [CleanOptions](#cleanoptions)). Sync API only for `fragments`. |
 | `hooks` | `TransformPlugin[]` | `undefined` | Imperative hook-based transform plugins for custom behavior (see [Plugins](#plugins)) |
 | `wrapWidth` | `number` | `undefined` | Hard-wrap prose at this many characters on word boundaries |
-| `format` | `'markdown' \| 'text'` | `'markdown'` | Output Markdown or plain text with Markdown/HTML markup omitted |
+| `format` | `'markdown' \| 'text' \| 'html'` | `'markdown'` | Output Markdown, plain text, or HTML |
 
 ### `BuiltinPlugins`
 
@@ -579,7 +584,7 @@ const remaining = parseHtmlStream(htmlChunk, state, (event) => {
 
 ## CLI
 
-Reads HTML from stdin and outputs Markdown to stdout.
+Reads HTML from stdin and writes the selected format to stdout.
 
 ```bash
 # Basic conversion
@@ -593,6 +598,9 @@ curl -s https://example.com | npx @mdream/js --origin https://example.com --pres
 
 # Plain text output
 curl -s https://example.com | npx @mdream/js --format text
+
+# HTML output
+curl -s https://example.com | npx @mdream/js --format html
 ```
 
 ### CLI Options
@@ -602,7 +610,7 @@ curl -s https://example.com | npx @mdream/js --format text
 | `--origin <url>` | Origin URL for resolving relative image paths and links |
 | `--preset <preset>` | Conversion preset. Currently supports: `minimal` |
 | `--wrap-width <n>` | Hard-wrap prose at `n` characters |
-| `--format <format>` | Output format: `markdown`, `text` |
+| `--format <format>` | Output format: `markdown`, `text`, `html` |
 | `--text` | Alias for `--format text` |
 | `-v, --version` | Show version number |
 | `-h, --help` | Show help |

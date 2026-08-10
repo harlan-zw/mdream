@@ -28,7 +28,7 @@ function convert(html: string, options: EngineOptions, hooks?: TransformPlugin[]
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
   const hooks = resolveHooks(options)
   const markdown = convert(html, options, hooks)
-  if (options.clean && options.format !== 'text')
+  if (options.clean && (options.format === undefined || options.format === 'markdown'))
     return applyClean(markdown, resolveClean(options.clean))
   return markdown
 }

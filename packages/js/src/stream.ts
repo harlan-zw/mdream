@@ -30,7 +30,7 @@ export async function* streamHtmlToMarkdown(
     depth: 0,
     resolvedPlugins,
     tagOverrideHandlers,
-    plainText: processor.state.plainText,
+    plainText: options.format === 'text' || options.format === 'html',
   }
   const handleEvent: (event: NodeEvent) => void = resolvedPlugins.length
     ? event => processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)

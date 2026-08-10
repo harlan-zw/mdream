@@ -35,4 +35,17 @@ describe('core entry', () => {
       markdown += chunk
     expect(markdown).toBe(htmlToMarkdown(html))
   })
+
+  it('falls back to markdown for an unsupported runtime format', async () => {
+    const html = '<p>&amp;copy;</p>'
+    const options = { format: 'unsupported' } as unknown as Parameters<typeof htmlToMarkdown>[1]
+    const expected = htmlToMarkdown(html)
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+
+    const stream = new Blob([html]).stream()
+    let markdown = ''
+    for await (const chunk of streamHtmlToMarkdown(stream, options))
+      markdown += chunk
+    expect(markdown).toBe(expected)
+  })
 })

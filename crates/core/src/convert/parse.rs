@@ -534,7 +534,7 @@ impl ConvertState {
     }
 
     if self.has_encoded_html_entity {
-      let protect_decoded_entity_references = !self.plain_text
+      let protect_decoded_entity_references = self.format == OutputFormat::Markdown
         && self.depth_map[TAG_PRE as usize] == 0
         && self.depth_map[TAG_CODE as usize] == 0
         && !self.in_raw_html_block();

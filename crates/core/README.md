@@ -19,11 +19,17 @@ cargo install mdream
 ### Library
 
 ```rust
-use mdream::{html_to_markdown, types::HTMLToMarkdownOptions};
+use mdream::{html_to_html, html_to_markdown, types::HTMLToMarkdownOptions};
 
 let html = "<h1>Hello</h1><p>World</p>";
 let md = html_to_markdown(html, HTMLToMarkdownOptions::default());
 assert_eq!(md, "# Hello\n\nWorld");
+
+let html_output = html_to_html(
+    "<h1>Hello</h1><p>World</p>",
+    HTMLToMarkdownOptions::default(),
+);
+assert_eq!(html_output, "<h1 id=\"hello\">Hello</h1><p>World</p>");
 ```
 
 ### Streaming
@@ -42,6 +48,9 @@ let remaining = stream.finish();
 
 ```sh
 curl -s https://example.com | mdream
+
+# HTML output
+curl -s https://example.com | mdream --format html
 ```
 
 ## License
