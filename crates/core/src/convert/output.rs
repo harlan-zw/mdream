@@ -360,6 +360,11 @@ impl ConvertState {
       || self.clean_flags & CLEAN_FRAGMENTS != 0
       || self.has_frontmatter
       || self.has_extraction
+      // A code span or fence measures and rewrites itself through buffer offsets
+      // that quoting moves, and the drain already holds at the open one, so
+      // flushing past it releases nothing and only invalidates its offsets.
+      || self.code_fence.is_some()
+      || !self.code_spans.is_empty()
     {
       return;
     }

@@ -1565,3 +1565,21 @@ fn streaming_keeps_an_empty_items_blank_line_across_a_code_span() {
 fn streaming_keeps_an_empty_items_blank_line_across_an_inline_marker() {
   assert_stream_matches_every_split("a a<li><html><strong>", HTMLToMarkdownOptions::default());
 }
+
+// A code span or fence measures and rewrites itself through buffer offsets, and
+// quoting moves the bytes under them. The drain already holds at the open one,
+// so flushing past it releases nothing and leaves the fence pointing into the
+// quote prefix -- mid-codepoint, where finalizing it panics. Long enough to
+// cross the flush threshold while the fence is still open.
+#[test]
+fn streaming_defers_the_blockquote_flush_while_a_fence_is_open() {
+  let html = format!("<blockquote><pre>{}", "\u{e9}\n<br>".repeat(3000));
+  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  for chunk in [512, 4096] {
+    assert_eq!(
+      stream_chars(&html, chunk, HTMLToMarkdownOptions::default()),
+      expected,
+      "chunk={chunk}"
+    );
+  }
+}
