@@ -604,4 +604,6 @@ pub enum OutputFormat {
   Markdown,
   /// Plain text output with Markdown/HTML syntax omitted.
   Text,
+  /// Allowlisted semantic HTML output.
+  Html,
 }

@@ -33,6 +33,11 @@ pub fn html_to_text(html: &str, options: HTMLToMarkdownOptions) -> String {
   html_to_format(html, options, OutputFormat::Text)
 }
 
+/// Convert HTML to allowlisted semantic HTML in a single pass.
+pub fn html_to_html(html: &str, options: HTMLToMarkdownOptions) -> String {
+  html_to_format(html, options, OutputFormat::Html)
+}
+
 /// Convert HTML to the requested output format in a single pass.
 pub fn html_to_format(html: &str, options: HTMLToMarkdownOptions, format: OutputFormat) -> String {
   html_to_format_result(html, options, format).markdown

@@ -20,10 +20,10 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === '--format') {
     const value = args[++i]
     if (!value) {
-      process.stderr.write('--format requires a value: markdown or text\n')
+      process.stderr.write('--format requires a value: markdown, text, or html\n')
       process.exit(1)
     }
-    if (value !== 'markdown' && value !== 'text') {
+    if (value !== 'markdown' && value !== 'text' && value !== 'html') {
       process.stderr.write(`Unknown format: ${value}\n`)
       process.exit(1)
     }
@@ -33,7 +33,7 @@ for (let i = 0; i < args.length; i++) {
     format = 'text'
   }
   else if (args[i] === '-h' || args[i] === '--help') {
-    process.stdout.write('Usage: mdream [--origin <url>] [--preset minimal] [--wrap-width <n>] [--format markdown|text] [--text]\nPipe HTML via stdin, outputs Markdown or plain text to stdout.\n')
+    process.stdout.write('Usage: mdream [--origin <url>] [--preset minimal] [--wrap-width <n>] [--format markdown|text|html] [--text]\nPipe HTML via stdin, outputs Markdown, plain text, or safe HTML to stdout.\n')
     process.exit(0)
   }
 }

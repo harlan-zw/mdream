@@ -103,7 +103,7 @@ pub struct HtmlToMarkdownOptions {
   pub plugins: Option<PluginOptions>,
   #[napi(js_name = "wrapWidth")]
   pub wrap_width: Option<u32>,
-  #[napi(ts_type = "\"markdown\" | \"text\"")]
+  #[napi(ts_type = "\"markdown\" | \"text\" | \"html\"")]
   pub format: Option<String>,
 }
 
@@ -130,6 +130,7 @@ fn to_core_opts(
     });
   let format = match options.as_ref().and_then(|o| o.format.as_deref()) {
     Some("text") => mdream::types::OutputFormat::Text,
+    Some("html") => mdream::types::OutputFormat::Html,
     _ => mdream::types::OutputFormat::Markdown,
   };
 

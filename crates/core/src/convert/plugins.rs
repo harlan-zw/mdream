@@ -34,7 +34,7 @@ mod tests {
 
 impl ConvertState {
   pub(crate) fn generate_frontmatter_yaml(&mut self) {
-    if self.plain_text {
+    if self.format != OutputFormat::Markdown {
       return;
     }
 

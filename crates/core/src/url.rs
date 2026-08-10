@@ -77,6 +77,51 @@ pub(crate) fn is_empty_link_href(href: &str) -> bool {
   }
 }
 
+/// Whether a URL is safe to emit into an HTML href or src attribute.
+pub(crate) fn is_safe_html_url(href: &str, image: bool) -> bool {
+  let bytes = href.as_bytes();
+  let start = bytes
+    .iter()
+    .position(|&byte| byte > b' ')
+    .unwrap_or(bytes.len());
+  let end = bytes
+    .iter()
+    .rposition(|&byte| byte > b' ')
+    .map_or(start, |last| last + 1);
+  if start == end {
+    return false;
+  }
+
+  let rest = &bytes[start..end];
+  let mut colon = None;
+  for (index, &byte) in rest.iter().enumerate() {
+    if matches!(byte, b'\t' | b'\n' | b'\r') {
+      continue;
+    }
+    if byte == b':' {
+      colon = Some(index + 1);
+      break;
+    }
+    if matches!(byte, b'/' | b'?' | b'#') {
+      return true;
+    }
+    if !(byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.')) {
+      return true;
+    }
+  }
+  let Some(scheme_end) = colon else {
+    return true;
+  };
+  let scheme = &rest[..scheme_end];
+  if scheme_matches(scheme, b"http:") || scheme_matches(scheme, b"https:") {
+    return true;
+  }
+  !image
+    && (scheme_matches(scheme, b"mailto:")
+      || scheme_matches(scheme, b"tel:")
+      || scheme_matches(scheme, b"ftp:"))
+}
+
 /// Check if a query parameter key is a tracking parameter.
 #[inline]
 pub(crate) fn is_tracking_param(key: &str) -> bool {

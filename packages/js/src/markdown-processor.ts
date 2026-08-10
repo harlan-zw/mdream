@@ -48,6 +48,7 @@ import {
   TAG_VAR,
   TEXT_NODE,
 } from './const'
+import { createHtmlOutputState, processHtmlOutputEvent } from './html-output'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
 import { breakHandler, renderBreak, resolveUrl } from './tags'
@@ -1097,6 +1098,8 @@ function getPlainTextOutput(node: ElementNode, eventType: number, state: Markdow
  * Creates a markdown processor that consumes DOM events and generates markdown
  */
 export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlugins: TransformPlugin[] = [], tagOverrideHandlers?: Map<string, TagHandler>) {
+  const outputFormat = options.format || 'markdown'
+  const htmlState = outputFormat === 'html' ? createHtmlOutputState() : undefined
   const state: MarkdownState = {
     options,
     buffer: [],
@@ -1218,6 +1221,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       : node.parent?.excludedFromMarkdown
     if (inTemplate)
       return
+
+    if (htmlState) {
+      processHtmlOutputEvent(event, htmlState, state.buffer, options)
+      return
+    }
 
     if (state.listRulePending !== undefined) {
       const isVisibleText = node.type === TEXT_NODE
@@ -1624,7 +1632,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       depth: 0,
       resolvedPlugins,
       tagOverrideHandlers,
-      plainText: state.plainText,
+      plainText: outputFormat !== 'markdown',
     }
 
     const handleEvent: (event: NodeEvent) => void = resolvedPlugins.length
@@ -1640,6 +1648,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
    */
   function getMarkdown(): string {
     const content = state.buffer.join('')
+    if (htmlState) {
+      state.buffer.length = 0
+      return content
+    }
     const result = state.plainText && preserveLeadingWhitespace ? content : content.trimStart()
     state.buffer.length = 0
     preserveLeadingWhitespace = false
@@ -1650,6 +1662,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
    * Get new markdown content since the last call (for streaming)
    */
   function getMarkdownChunk(): string {
+    if (htmlState) {
+      const chunk = state.buffer.join('')
+      state.buffer.length = 0
+      return chunk
+    }
     // Settle an open marker-line guard when the item's first content already
     // answers it, so the hold below never outlives the marker's own line.
     resolveItemMarker(state, false)

@@ -410,6 +410,11 @@ impl ConvertState {
       return;
     }
 
+    if self.format == OutputFormat::Html {
+      self.emit_html_enter();
+      return;
+    }
+
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
       self.flush_list_rule();
     }
@@ -687,6 +692,11 @@ impl ConvertState {
   pub(crate) fn emit_exit_element(&mut self, node: &ElementNode) {
     if node.excluded_from_markdown {
       self.last_node_is_inline = node.is_inline;
+      return;
+    }
+
+    if self.format == OutputFormat::Html {
+      self.emit_html_exit(node);
       return;
     }
 
@@ -1141,6 +1151,10 @@ impl ConvertState {
     depth: usize,
     index: usize,
   ) {
+    if self.format == OutputFormat::Html {
+      self.emit_html_text(text);
+      return;
+    }
     let has_inline_gfm_hazard = text
       .bytes()
       .any(|byte| GFM_BYTE_FLAGS[byte as usize] & (GFM_HAZARD_BIT | GFM_NEWLINE_BIT) != 0);
@@ -1157,6 +1171,10 @@ impl ConvertState {
     generated_prefix: Option<&str>,
     generated_suffix: Option<&str>,
   ) {
+    if self.format == OutputFormat::Html {
+      self.emit_html_text(text);
+      return;
+    }
     let has_inline_gfm_hazard = std::mem::take(&mut self.text_buffer_has_inline_gfm_hazard);
     if text.is_empty() {
       return;
@@ -2116,7 +2134,7 @@ impl ConvertState {
 
   /// Emit frontmatter content.
   pub(crate) fn emit_frontmatter(&mut self, content: &str) {
-    if !content.is_empty() {
+    if self.format == OutputFormat::Markdown && !content.is_empty() {
       self.last_content_cache_len = content.len();
       self.buffer.push_str(content);
     }

@@ -73,6 +73,41 @@ export function isEmptyLinkHref(href: string): boolean {
   }
 }
 
+/** Whether a URL is safe to emit into an HTML href or src attribute. */
+export function isSafeHtmlUrl(href: string, image = false): boolean {
+  let start = 0
+  while (start < href.length && href.charCodeAt(start) <= 32)
+    start++
+  let end = href.length
+  while (end > start && href.charCodeAt(end - 1) <= 32)
+    end--
+  if (start === end)
+    return false
+
+  let colon = -1
+  for (let index = start; index < end; index++) {
+    const code = href.charCodeAt(index)
+    if (code === 9 || code === 10 || code === 13)
+      continue
+    if (code === 58) {
+      colon = index
+      break
+    }
+    if (code === 47 || code === 63 || code === 35)
+      return true
+    const lower = lowerAscii(code)
+    if (!((lower >= 97 && lower <= 122) || (code >= 48 && code <= 57) || code === 43 || code === 45 || code === 46))
+      return true
+  }
+  if (colon < 0)
+    return true
+  if (schemeMatches(href, start, colon + 1, 'http:') || schemeMatches(href, start, colon + 1, 'https:'))
+    return true
+  return !image && (schemeMatches(href, start, colon + 1, 'mailto:')
+    || schemeMatches(href, start, colon + 1, 'tel:')
+    || schemeMatches(href, start, colon + 1, 'ftp:'))
+}
+
 /**
  * Build the Markdown prefix needed to keep a continued line inside its open
  * blockquotes and list items. Ancestors are emitted outermost-first so mixed

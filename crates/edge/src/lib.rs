@@ -160,6 +160,7 @@ fn parse_options(
     .map_or(0, |n| n as usize);
   let format = match as_string(&get_prop(options, "format")).as_deref() {
     Some("text") => mdream::types::OutputFormat::Text,
+    Some("html") => mdream::types::OutputFormat::Html,
     _ => mdream::types::OutputFormat::Markdown,
   };
 

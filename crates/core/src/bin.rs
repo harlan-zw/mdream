@@ -26,26 +26,27 @@ fn main() -> io::Result<()> {
           format = match args[i].as_str() {
             "markdown" => OutputFormat::Markdown,
             "text" => OutputFormat::Text,
+            "html" => OutputFormat::Html,
             other => {
               eprintln!("Unknown format: {other}");
               std::process::exit(1);
             }
           };
         } else {
-          eprintln!("--format requires a value: markdown or text");
+          eprintln!("--format requires a value: markdown, text, or html");
           std::process::exit(1);
         }
       }
       "--text" => format = OutputFormat::Text,
       "--help" | "-h" => {
         eprintln!("Usage: mdream [OPTIONS]");
-        eprintln!("  Reads HTML from stdin, outputs Markdown or plain text to stdout");
+        eprintln!("  Reads HTML from stdin, outputs Markdown, plain text, or safe HTML");
         eprintln!();
         eprintln!("Options:");
         eprintln!("  -o, --origin <URL>  Base URL for resolving relative links");
         eprintln!("  -v, --verbose       Print conversion stats to stderr");
         eprintln!("  --clean-urls        Strip tracking query params (utm_*, fbclid, etc.)");
-        eprintln!("  --format <format>   Output format: markdown, text");
+        eprintln!("  --format <format>   Output format: markdown, text, html");
         eprintln!("  --text              Alias for --format text");
         eprintln!("  -h, --help          Show this help");
         return Ok(());
