@@ -955,6 +955,9 @@ impl ConvertState {
             peek_end += 1;
           }
           if peek_end == chunk_length {
+            // Text before the `<` is already in `text_buffer`; carry only the
+            // truncated close tag or finalize re-feeds that text and doubles it.
+            run_start = i;
             carry = true;
             break;
           }

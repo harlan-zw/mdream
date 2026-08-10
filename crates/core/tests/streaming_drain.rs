@@ -1414,3 +1414,42 @@ fn streaming_survives_two_reach_back_trims_over_one_run() {
     }
   }
 }
+
+// Inside a rawtext element a `</` whose tag name runs past the chunk end is
+// carried to the next chunk, but the text before it is already buffered. Not
+// advancing the carry point re-fed that text, so a one-shot pass emitted it
+// twice while a stream, having consumed it in an earlier chunk, emitted it once.
+#[test]
+fn rawtext_close_tag_split_across_chunks_is_carried_without_its_text() {
+  for tail in [
+    "<textarea>></",
+    "<textarea>x</",
+    "<textarea>x</textare",
+    "<title>x</",
+    "<style>x</",
+  ] {
+    // Enough unclosed inline elements to hold the yield boundary back, so the
+    // carry lands mid-document rather than at a fresh buffer.
+    let html = format!("{}{tail}", "<s><Q>".repeat(400));
+    for format in [OutputFormat::Text, OutputFormat::Markdown] {
+      let expected =
+        html_to_format_result(&html, HTMLToMarkdownOptions::default(), format).markdown;
+      for chunk in 1..=3 {
+        let mut p =
+          MarkdownStreamProcessor::new_with_format(HTMLToMarkdownOptions::default(), format);
+        let mut actual = String::new();
+        let mut start = 0;
+        while start < html.len() {
+          let end = (start + chunk).min(html.len());
+          actual.push_str(&p.process_chunk(&html[start..end]));
+          start = end;
+        }
+        actual.push_str(&p.finish());
+        assert_eq!(
+          actual, expected,
+          "chunk={chunk} tail={tail:?} format={format:?}"
+        );
+      }
+    }
+  }
+}
