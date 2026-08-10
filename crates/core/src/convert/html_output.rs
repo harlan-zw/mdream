@@ -312,3 +312,86 @@ impl ConvertState {
     }
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn html_tag_allowlist_is_exact() {
+    const ALLOWED: &[&str] = &[
+      "details",
+      "summary",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "hr",
+      "strong",
+      "b",
+      "em",
+      "i",
+      "del",
+      "sub",
+      "sup",
+      "ins",
+      "blockquote",
+      "code",
+      "ul",
+      "li",
+      "a",
+      "table",
+      "thead",
+      "tr",
+      "th",
+      "td",
+      "ol",
+      "pre",
+      "p",
+      "div",
+      "span",
+      "tbody",
+      "tfoot",
+      "nav",
+      "kbd",
+      "footer",
+      "article",
+      "section",
+      "abbr",
+      "mark",
+      "q",
+      "samp",
+      "small",
+      "aside",
+      "u",
+      "cite",
+      "dfn",
+      "var",
+      "time",
+      "ruby",
+      "rt",
+      "rp",
+      "dd",
+      "dt",
+      "address",
+      "dl",
+      "figure",
+      "main",
+      "header",
+      "figcaption",
+      "caption",
+      "s",
+      "strike",
+    ];
+
+    for (tag_id, name) in TAG_NAMES.iter().enumerate() {
+      assert_eq!(
+        html_tag_name(tag_id as u8).is_some(),
+        ALLOWED.contains(name),
+        "tag={name}",
+      );
+    }
+  }
+}
