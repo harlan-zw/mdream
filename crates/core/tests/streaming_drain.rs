@@ -749,6 +749,25 @@ fn streaming_holds_full_whitespace_run_before_a_droppable_marker() {
   }
 }
 
+// A heading's exit escapes the trailing `#` run GFM would read as an ATX closing
+// sequence, so the run must stay held while the heading is open. `<em>` writes a
+// `*` after the run, which left it no longer trailing at the buffer end and
+// released it -- then the empty `<em>` was dropped, the run became trailing
+// again, and the exit inserted its `\` into bytes already sent. The stray byte
+// surfaced at the far end: `- ####` for one-shot's `- \###`.
+#[test]
+fn streaming_holds_heading_hashes_behind_a_droppable_marker() {
+  for html in [
+    "<li><h3><em>",
+    "<h3><em>",
+    "<h3>a #<em>",
+    "<li><h3><a href=/u>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
 // Inside a list item a nested block renders on one line (NO_SPACING). A word,
 // a <br>, then that block: once the word has been drained out of the buffer the
 // inter-token space it anchored sat at the buffer start and was trimmed away,

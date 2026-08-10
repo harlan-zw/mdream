@@ -1402,8 +1402,19 @@ impl ConvertState {
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
     // closing sequence, so hold the run (and the spacing that decides whether it
     // closes) until the heading is complete.
+    //
+    // Measured against what is about to be yielded, not the whole buffer: an
+    // inline marker written after the run leaves it no longer trailing, and a
+    // marker still droppable is already held back above. Reading the buffer end
+    // instead releases a run that the marker's own drop makes trailing again,
+    // and the exit then inserts its `\` into bytes already sent.
     if self.in_heading() {
-      stable_end = stable_end.min(self.buffer.trim_end_matches(['#', ' ', '\t']).len());
+      let bytes = self.buffer.as_bytes();
+      let mut end = stable_end.min(bytes.len());
+      while end > 0 && matches!(bytes[end - 1], b'#' | b' ' | b'\t') {
+        end -= 1;
+      }
+      stable_end = end;
     }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let mut start = self.last_yielded_length.max(leading);
