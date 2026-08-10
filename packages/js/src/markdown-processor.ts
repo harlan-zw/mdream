@@ -1098,7 +1098,7 @@ function getPlainTextOutput(node: ElementNode, eventType: number, state: Markdow
  * Creates a markdown processor that consumes DOM events and generates markdown
  */
 export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlugins: TransformPlugin[] = [], tagOverrideHandlers?: Map<string, TagHandler>) {
-  const outputFormat = options.format || 'markdown'
+  const outputFormat = options.format === 'html' || options.format === 'text' ? options.format : 'markdown'
   const htmlState = outputFormat === 'html' ? createHtmlOutputState() : undefined
   const state: MarkdownState = {
     options,

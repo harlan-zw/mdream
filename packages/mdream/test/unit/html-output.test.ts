@@ -51,6 +51,22 @@ describe.each(engines)('safe HTML output $name', (engineConfig) => {
     })).toBe('<p>&lt;safe&gt; linkfile<img src="https://mdream.dev/safe.png" alt="A &quot;quote&quot;"></p>')
   })
 
+  it('normalizes safe attributes and omits unsupported direction tags', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<table><tr><th align="CENTER">Value</th></tr></table><bdo>text</bdo>', {
+      engine,
+      format: 'html',
+    })).toBe('<table><tr><th align="center">Value</th></tr></table>text')
+  })
+
+  it('keeps nested pre content in the outer code block', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<pre>a<pre>b</pre>c</pre><p>d</p>', {
+      engine,
+      format: 'html',
+    })).toBe('<pre tabindex="0"><code>abc</code></pre><p>d</p>')
+  })
+
   it('matches batch output at every stream split', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const input = '<article><h2>Streaming</h2><p>A <code>small</code> example.</p></article>'
@@ -65,7 +81,7 @@ describe.each(engines)('safe HTML output $name', (engineConfig) => {
         },
       })
       const streamed = await collect(streamHtmlToMarkdown(stream, { engine, format: 'html' }))
-      expect(streamed.trimEnd(), `split=${split}`).toBe(expected)
+      expect(streamed, `split=${split}`).toBe(expected)
     }
   })
 })

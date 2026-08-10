@@ -84,14 +84,18 @@ export function isSafeHtmlUrl(href: string, image = false): boolean {
   if (start === end)
     return false
 
-  let colon = -1
   for (let index = start; index < end; index++) {
     const code = href.charCodeAt(index)
     if (code === 9 || code === 10 || code === 13)
       continue
     if (code === 58) {
-      colon = index
-      break
+      switch (lowerAscii(href.charCodeAt(start))) {
+        case 104: return schemeMatches(href, start, end, 'http:') || schemeMatches(href, start, end, 'https:')
+        case 109: return !image && schemeMatches(href, start, end, 'mailto:')
+        case 116: return !image && schemeMatches(href, start, end, 'tel:')
+        case 102: return !image && schemeMatches(href, start, end, 'ftp:')
+        default: return false
+      }
     }
     if (code === 47 || code === 63 || code === 35)
       return true
@@ -99,13 +103,7 @@ export function isSafeHtmlUrl(href: string, image = false): boolean {
     if (!((lower >= 97 && lower <= 122) || (code >= 48 && code <= 57) || code === 43 || code === 45 || code === 46))
       return true
   }
-  if (colon < 0)
-    return true
-  if (schemeMatches(href, start, colon + 1, 'http:') || schemeMatches(href, start, colon + 1, 'https:'))
-    return true
-  return !image && (schemeMatches(href, start, colon + 1, 'mailto:')
-    || schemeMatches(href, start, colon + 1, 'tel:')
-    || schemeMatches(href, start, colon + 1, 'ftp:'))
+  return true
 }
 
 /**

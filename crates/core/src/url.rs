@@ -48,16 +48,9 @@ fn scheme_matches(rest: &[u8], scheme: &[u8]) -> bool {
   false
 }
 
-/// Whether `href` cannot represent meaningful navigation: a bare `#`, or a
-/// `javascript:`, `data:` or `vbscript:` URL.
-///
-/// Mirrors the URL parser's preprocessing, so `" javascript:"` and the decoded
-/// form of `java&#9;script:` are recognised. An interior space is *not* removed
-/// by the URL parser, so `java script:x` stays an ordinary relative URL.
-pub(crate) fn is_empty_link_href(href: &str) -> bool {
+#[inline(never)]
+fn trim_url_c0(href: &str) -> &[u8] {
   let bytes = href.as_bytes();
-  // Leading and trailing C0 controls and spaces are stripped. UTF-8
-  // continuation bytes are all >= 0x80, so this cannot split a character.
   let start = bytes
     .iter()
     .position(|&byte| byte > b' ')
@@ -66,7 +59,19 @@ pub(crate) fn is_empty_link_href(href: &str) -> bool {
     .iter()
     .rposition(|&byte| byte > b' ')
     .map_or(start, |last| last + 1);
-  let rest = &bytes[start..end];
+  &bytes[start..end]
+}
+
+/// Whether `href` cannot represent meaningful navigation: a bare `#`, or a
+/// `javascript:`, `data:` or `vbscript:` URL.
+///
+/// Mirrors the URL parser's preprocessing, so `" javascript:"` and the decoded
+/// form of `java&#9;script:` are recognised. An interior space is *not* removed
+/// by the URL parser, so `java script:x` stays an ordinary relative URL.
+pub(crate) fn is_empty_link_href(href: &str) -> bool {
+  // Leading and trailing C0 controls and spaces are stripped. UTF-8
+  // continuation bytes are all >= 0x80, so this cannot split a character.
+  let rest = trim_url_c0(href);
 
   match rest.first().map(u8::to_ascii_lowercase) {
     Some(b'#') => rest.len() == 1,
@@ -79,28 +84,22 @@ pub(crate) fn is_empty_link_href(href: &str) -> bool {
 
 /// Whether a URL is safe to emit into an HTML href or src attribute.
 pub(crate) fn is_safe_html_url(href: &str, image: bool) -> bool {
-  let bytes = href.as_bytes();
-  let start = bytes
-    .iter()
-    .position(|&byte| byte > b' ')
-    .unwrap_or(bytes.len());
-  let end = bytes
-    .iter()
-    .rposition(|&byte| byte > b' ')
-    .map_or(start, |last| last + 1);
-  if start == end {
+  let rest = trim_url_c0(href);
+  if rest.is_empty() {
     return false;
   }
-
-  let rest = &bytes[start..end];
-  let mut colon = None;
-  for (index, &byte) in rest.iter().enumerate() {
+  for &byte in rest {
     if matches!(byte, b'\t' | b'\n' | b'\r') {
       continue;
     }
     if byte == b':' {
-      colon = Some(index + 1);
-      break;
+      return match rest.first().map(u8::to_ascii_lowercase) {
+        Some(b'h') => scheme_matches(rest, b"http:") || scheme_matches(rest, b"https:"),
+        Some(b'm') => !image && scheme_matches(rest, b"mailto:"),
+        Some(b't') => !image && scheme_matches(rest, b"tel:"),
+        Some(b'f') => !image && scheme_matches(rest, b"ftp:"),
+        _ => false,
+      };
     }
     if matches!(byte, b'/' | b'?' | b'#') {
       return true;
@@ -109,17 +108,7 @@ pub(crate) fn is_safe_html_url(href: &str, image: bool) -> bool {
       return true;
     }
   }
-  let Some(scheme_end) = colon else {
-    return true;
-  };
-  let scheme = &rest[..scheme_end];
-  if scheme_matches(scheme, b"http:") || scheme_matches(scheme, b"https:") {
-    return true;
-  }
-  !image
-    && (scheme_matches(scheme, b"mailto:")
-      || scheme_matches(scheme, b"tel:")
-      || scheme_matches(scheme, b"ftp:"))
+  true
 }
 
 /// Check if a query parameter key is a tracking parameter.

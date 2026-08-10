@@ -50,6 +50,20 @@ fn html_output_is_semantic_and_safe() {
     ),
     r#"<h1 id="hello-world">Hello <em>world</em></h1><p>Visit <a href="https://mdream.dev/docs?section=api" title="Docs">docs</a> badfile<img src="https://mdream.dev/safe.png" alt="A &quot;quote&quot;"></p><pre tabindex="0"><code class="language-ts">1 &lt; 2</code></pre>"#,
   );
+  assert_eq!(
+    html_to_html(
+      r#"<table><tr><th align="CENTER">Value</th></tr></table><bdo>text</bdo>"#,
+      HTMLToMarkdownOptions::default(),
+    ),
+    r#"<table><tr><th align="center">Value</th></tr></table>text"#,
+  );
+  assert_eq!(
+    html_to_html(
+      "<pre>a<pre>b</pre>c</pre><p>d</p>",
+      HTMLToMarkdownOptions::default(),
+    ),
+    "<pre tabindex=\"0\"><code>abc</code></pre><p>d</p>",
+  );
 }
 
 #[test]

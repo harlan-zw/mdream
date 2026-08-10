@@ -82,7 +82,7 @@ fn write_image_description(output: &mut String, alt: &str) {
 
 #[inline(never)]
 #[allow(clippy::cast_possible_truncation)] // `parsed` is bounded by the `u32` maximum argument.
-fn parse_bounded_u32(value: &str, max: u32) -> Option<u32> {
+pub(super) fn parse_bounded_u32(value: &str, max: u32) -> Option<u32> {
   let value = value.trim_ascii().as_bytes();
   let mut index = usize::from(value.first() == Some(&b'+'));
   if index == value.len() {

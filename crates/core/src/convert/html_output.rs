@@ -1,8 +1,8 @@
+use super::output::parse_bounded_u32;
 use super::*;
 
 pub(super) enum HtmlFrame {
   Heading {
-    depth: usize,
     level: u8,
     output: String,
     text: String,
@@ -33,24 +33,6 @@ fn push_escaped(output: &mut String, value: &str, attribute: bool) {
   output.push_str(&value[copied..]);
 }
 
-fn parse_unsigned(value: Option<&String>) -> Option<u32> {
-  let bytes = value?.trim_ascii().as_bytes();
-  let mut index = usize::from(bytes.first() == Some(&b'+'));
-  if index == bytes.len() {
-    return None;
-  }
-  let mut output = 0u32;
-  while index < bytes.len() {
-    let digit = bytes[index].wrapping_sub(b'0');
-    if digit > 9 {
-      return None;
-    }
-    output = output.checked_mul(10)?.checked_add(u32::from(digit))?;
-    index += 1;
-  }
-  Some(output)
-}
-
 fn html_tag_name(tag_id: u8) -> Option<&'static str> {
   let canonical = match tag_id {
     TAG_B => "strong",
@@ -73,20 +55,23 @@ fn html_tag_name(tag_id: u8) -> Option<&'static str> {
       | TAG_ARTICLE
       | TAG_SECTION
       | TAG_ABBR..=TAG_SMALL
-      | TAG_ASIDE..=TAG_FIGURE
+      | TAG_ASIDE..=TAG_TIME
+      | TAG_RUBY..=TAG_FIGURE
       | TAG_MAIN..=TAG_CAPTION
   );
-  safe.then(|| TAG_NAMES[tag_id as usize])
+  safe.then_some(TAG_NAMES[tag_id as usize])
 }
 
 impl ConvertState {
-  fn push_html(&mut self, value: &str) {
+  fn html_output_mut(&mut self) -> &mut String {
     match self.html_frames.last_mut() {
-      Some(HtmlFrame::Heading { output, .. } | HtmlFrame::Pre { output, .. }) => {
-        output.push_str(value);
-      }
-      None => self.buffer.push_str(value),
+      Some(HtmlFrame::Heading { output, .. } | HtmlFrame::Pre { output, .. }) => output,
+      None => &mut self.buffer,
     }
+  }
+
+  fn push_html(&mut self, value: &str) {
+    self.html_output_mut().push_str(value);
   }
 
   fn push_html_text(&mut self, value: &str) {
@@ -96,9 +81,7 @@ impl ConvertState {
         break;
       }
     }
-    let mut escaped = String::with_capacity(value.len());
-    push_escaped(&mut escaped, value, false);
-    self.push_html(&escaped);
+    push_escaped(self.html_output_mut(), value, false);
   }
 
   fn html_element_output(&self, node: &ElementNode, entering: bool) -> Option<String> {
@@ -138,7 +121,11 @@ impl ConvertState {
         }
       }
       TAG_OL => {
-        if let Some(start) = parse_unsigned(node.attributes.get("start")) {
+        if let Some(start) = node
+          .attributes
+          .get("start")
+          .and_then(|value| parse_bounded_u32(value, u32::MAX))
+        {
           output.push_str(" start=\"");
           output.push_str(&start.to_string());
           output.push('"');
@@ -153,7 +140,10 @@ impl ConvertState {
         }
       }
       TAG_TH | TAG_TD => {
-        if let Some(colspan) = parse_unsigned(node.attributes.get("colspan"))
+        if let Some(colspan) = node
+          .attributes
+          .get("colspan")
+          .and_then(|value| parse_bounded_u32(value, u32::MAX))
           && colspan > 0
         {
           output.push_str(" colspan=\"");
@@ -162,11 +152,21 @@ impl ConvertState {
         }
         if tag_id == TAG_TH
           && let Some(align) = node.attributes.get("align")
-          && matches!(align.as_str(), "left" | "center" | "right")
         {
-          output.push_str(" align=\"");
-          output.push_str(align);
-          output.push('"');
+          let normalized = if align.eq_ignore_ascii_case("left") {
+            "left"
+          } else if align.eq_ignore_ascii_case("center") {
+            "center"
+          } else if align.eq_ignore_ascii_case("right") {
+            "right"
+          } else {
+            ""
+          };
+          if !normalized.is_empty() {
+            output.push_str(" align=\"");
+            output.push_str(normalized);
+            output.push('"');
+          }
         }
       }
       _ => {}
@@ -180,8 +180,6 @@ impl ConvertState {
       return;
     };
     let tag_id = node.tag_id;
-    let depth = node.depth;
-
     if let Some(HtmlFrame::Pre {
       language, output, ..
     }) = self.html_frames.last_mut()
@@ -196,7 +194,6 @@ impl ConvertState {
 
     if let Some(level) = tag_id.filter(|id| id.wrapping_sub(TAG_H1) < 6) {
       self.html_frames.push(HtmlFrame::Heading {
-        depth,
         level: level - TAG_H1 + 1,
         output: String::new(),
         text: String::new(),
@@ -205,7 +202,7 @@ impl ConvertState {
     }
     if tag_id == Some(TAG_PRE) {
       self.html_frames.push(HtmlFrame::Pre {
-        depth,
+        depth: node.depth,
         language: Self::get_language_from_class(node.attributes.get("class")).to_string(),
         output: String::new(),
       });
@@ -258,9 +255,7 @@ impl ConvertState {
     if let Some(frame) = self.html_frames.last() {
       let in_pre = matches!(frame, HtmlFrame::Pre { .. });
       let closes_frame = match frame {
-        HtmlFrame::Heading { depth, .. } => {
-          *depth == node.depth && node.tag_id.is_some_and(|id| id.wrapping_sub(TAG_H1) < 6)
-        }
+        HtmlFrame::Heading { .. } => node.tag_id.is_some_and(|id| id.wrapping_sub(TAG_H1) < 6),
         HtmlFrame::Pre { depth, .. } => *depth == node.depth && node.tag_id == Some(TAG_PRE),
       };
       if closes_frame {
