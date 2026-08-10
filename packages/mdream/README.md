@@ -89,7 +89,7 @@ externals: ['mdream']
 
 ### `htmlToMarkdown()`
 
-Converts a complete HTML string to Markdown synchronously.
+Converts a complete HTML string to Markdown, plain text, or HTML synchronously.
 
 **Rust engine** (`mdream`):
 
@@ -130,7 +130,7 @@ const html = htmlToMarkdown('<h1>Hello <strong>World</strong></h1>', {
 
 ### `streamHtmlToMarkdown()`
 
-Converts an HTML `ReadableStream` to Markdown incrementally. Returns an `AsyncIterable<string>` that yields Markdown chunks as they are processed.
+Converts an HTML `ReadableStream` to Markdown, plain text, or HTML incrementally. Returns an `AsyncIterable<string>` that yields output chunks as they are processed.
 
 
 ```ts
