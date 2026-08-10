@@ -116,15 +116,21 @@ function resolveTagId(node: ElementNode): number | undefined {
   return node.tagHandler?.aliasTagId ?? node.tagId
 }
 
+function resolveSafeUrl(url: string, options: EngineOptions, image = false): string | undefined {
+  if (!isSafeHtmlUrl(url, image))
+    return
+  const resolved = resolveUrl(url, options.origin, options.clean)
+  return isSafeHtmlUrl(resolved, image) ? resolved : undefined
+}
+
 function safeAttributes(node: ElementNode, tagId: number, options: EngineOptions): string | undefined {
   const attributes = node.attributes
   if (tagId === TAG_A) {
-    const href = attributes.href
-    if (!href || !isSafeHtmlUrl(href))
+    const href = attributes.href && resolveSafeUrl(attributes.href, options)
+    if (!href)
       return undefined
-    const resolved = resolveUrl(href, options.origin, options.clean)
     const title = attributes.title === undefined ? '' : ` title="${escapeHtml(attributes.title, true)}"`
-    return ` href="${escapeHtml(resolved, true)}"${title}`
+    return ` href="${escapeHtml(href, true)}"${title}`
   }
   if (tagId === TAG_OL) {
     const start = parseUnsignedInteger(attributes.start)
@@ -234,9 +240,9 @@ export function processHtmlOutputEvent(
   }
   if (tagId === TAG_IMG) {
     if (type === NodeEventEnter) {
-      const src = element.attributes.src
-      if (src && isSafeHtmlUrl(src, true)) {
-        const resolved = escapeHtml(resolveUrl(src, options.origin, options.clean), true)
+      const src = element.attributes.src && resolveSafeUrl(element.attributes.src, options, true)
+      if (src) {
+        const resolved = escapeHtml(src, true)
         const alt = escapeHtml(element.attributes.alt || '', true)
         const title = element.attributes.title === undefined ? '' : ` title="${escapeHtml(element.attributes.title, true)}"`
         append(state, output, `<img src="${resolved}" alt="${alt}"${title}>`)

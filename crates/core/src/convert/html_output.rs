@@ -63,6 +63,14 @@ fn html_tag_name(tag_id: u8) -> Option<&'static str> {
 }
 
 impl ConvertState {
+  fn resolve_html_url<'a>(&self, url: &'a str, image: bool) -> Option<Cow<'a, str>> {
+    if !is_safe_html_url(url, image) {
+      return None;
+    }
+    let resolved = resolve_url(url, self.options.origin.as_deref(), self.options.clean_urls);
+    is_safe_html_url(resolved.as_ref(), image).then_some(resolved)
+  }
+
   fn html_output_mut(&mut self) -> &mut String {
     match self.html_frames.last_mut() {
       Some(HtmlFrame::Heading { output, .. } | HtmlFrame::Pre { output, .. }) => output,
@@ -90,9 +98,7 @@ impl ConvertState {
     if !entering {
       if tag_id == TAG_A {
         let href = node.attributes.get("href")?;
-        if !is_safe_html_url(href, false) {
-          return None;
-        }
+        self.resolve_html_url(href, false)?;
       }
       return Some(format!("</{name}>"));
     }
@@ -103,14 +109,7 @@ impl ConvertState {
     match tag_id {
       TAG_A => {
         let href = node.attributes.get("href")?;
-        if !is_safe_html_url(href, false) {
-          return None;
-        }
-        let resolved = resolve_url(
-          href,
-          self.options.origin.as_deref(),
-          self.options.clean_urls,
-        );
+        let resolved = self.resolve_html_url(href, false)?;
         output.push_str(" href=\"");
         push_escaped(&mut output, resolved.as_ref(), true);
         output.push('"');
@@ -218,10 +217,7 @@ impl ConvertState {
     }
     if tag_id == Some(TAG_IMG) {
       let rendered = node.attributes.get("src").and_then(|src| {
-        if !is_safe_html_url(src, true) {
-          return None;
-        }
-        let resolved = resolve_url(src, self.options.origin.as_deref(), self.options.clean_urls);
+        let resolved = self.resolve_html_url(src, true)?;
         let mut output = String::with_capacity(resolved.len() + 32);
         output.push_str("<img src=\"");
         push_escaped(&mut output, resolved.as_ref(), true);

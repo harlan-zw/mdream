@@ -51,6 +51,15 @@ describe.each(engines)('safe HTML output $name', (engineConfig) => {
     })).toBe('<p>&lt;safe&gt; linkfile<img src="https://mdream.dev/safe.png" alt="A &quot;quote&quot;"></p>')
   })
 
+  it('rejects relative URLs resolved against an unsafe origin', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p><a href="/safe">link</a><img src="/safe"></p>', {
+      engine,
+      format: 'html',
+      origin: 'javascript:alert(1)',
+    })).toBe('<p>link</p>')
+  })
+
   it('normalizes safe attributes and omits unsupported direction tags', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<table><tr><th align="CENTER">Value</th></tr></table><bdo>text</bdo>', {

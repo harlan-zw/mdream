@@ -64,6 +64,16 @@ fn html_output_is_semantic_and_safe() {
     ),
     "<pre tabindex=\"0\"><code>abc</code></pre><p>d</p>",
   );
+  assert_eq!(
+    html_to_html(
+      "<p><a href=\"/safe\">link</a><img src=\"/safe\"></p>",
+      HTMLToMarkdownOptions {
+        origin: Some("javascript:alert(1)".to_string()),
+        ..Default::default()
+      },
+    ),
+    "<p>link</p>",
+  );
 }
 
 #[test]
