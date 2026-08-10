@@ -1540,3 +1540,11 @@ fn streaming_holds_a_blockquote_blank_line_until_content_follows() {
     }
   }
 }
+
+#[test]
+fn streaming_matches_one_shot_across_blockquote_quoting() {
+  assert_stream_matches_every_split(
+    "<dd><h2><li><blockquote>a<p><code><p>>aa<<a><<li>`",
+    HTMLToMarkdownOptions::default(),
+  );
+}

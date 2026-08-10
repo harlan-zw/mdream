@@ -348,6 +348,9 @@ impl ConvertState {
     self.buffer.truncate(frame.content_start);
     self.buffer.push_str(&quoted);
     self.last_content_cache_len = quoted.len();
+    // Quoting inserted a `> ` and a newline per line, so a line the scan had
+    // already passed is no longer where the cache says the current one begins.
+    self.invalidate_line_start();
   }
 
   pub(crate) fn flush_streaming_blockquote_lines(&mut self) {
@@ -407,6 +410,7 @@ impl ConvertState {
         frame.content_start = flush_end;
       }
       self.last_content_cache_len = self.buffer.len() - flush_end;
+      self.invalidate_line_start();
       return;
     }
 
@@ -441,6 +445,7 @@ impl ConvertState {
       frame.content_start = flush_end;
     }
     self.last_content_cache_len = self.buffer.len() - flush_end;
+    self.invalidate_line_start();
   }
 
   /// Emit markdown for entering the element currently on top of self.stack.
@@ -1756,7 +1761,7 @@ impl ConvertState {
         fence.content_start += 1;
       }
     }
-    self.line_start_scanned_to = usize::MAX;
+    self.invalidate_line_start();
     self.raw_html_scanned_to = self.raw_html_scanned_to.min(at);
   }
 
@@ -2005,6 +2010,13 @@ impl ConvertState {
       self.raw_html_markdown = true;
     }
     self.raw_html_scanned_to = len;
+  }
+
+  /// Rebuild the cached line start on the next read: a rewrite has moved or
+  /// inserted newlines behind the incremental scan point.
+  #[inline]
+  fn invalidate_line_start(&mut self) {
+    self.line_start_scanned_to = usize::MAX;
   }
 
   /// Whether the current line opens a raw HTML block, which suspends Markdown

@@ -4204,3 +4204,15 @@ fn rawtext_eof_residual_is_text_not_a_dropped_tag() {
     assert_eq!(convert(html), "a", "html={html:?}");
   }
 }
+
+// Quoting a closed blockquote rewrites its content in place, inserting a `> `
+// and a newline per line behind the cached line start. Read stale, the "current
+// line" began with the literal `<code>` text, which suspends escaping the way
+// a line that opens a raw HTML block does.
+#[test]
+fn blockquote_quoting_keeps_escaping_a_later_line() {
+  assert_eq!(
+    convert("<dd><h2><li><blockquote>a<p><code><p>>aa<<a><<li>`"),
+    "<dd>\n\n## - \n  > a\n  >\n  > <code></code>\n  >\n  > &gt;aa&lt;&lt; - \\`\n\n</dd>"
+  );
+}
