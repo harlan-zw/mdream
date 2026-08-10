@@ -2755,7 +2755,7 @@ impl ConvertState {
         if self.depth_map[TAG_BLOCKQUOTE as usize] > 0
           || (self.depth_map[TAG_LI as usize] > 0 && !self.in_table_cell())
         {
-          let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
+          let last_char = self.last_output_byte().unwrap_or(0);
           if last_char != 0 && last_char != b' ' && last_char != b'\n' {
             return Some(Cow::Borrowed("\n\n"));
           }

@@ -1583,3 +1583,27 @@ fn streaming_defers_the_blockquote_flush_while_a_fence_is_open() {
     );
   }
 }
+
+// A `<p>` inside a list item or blockquote separates itself from the text before
+// it, and asks the buffer's last byte what that text ended with. An empty buffer
+// means the start of the document to that question, but streaming empties the
+// buffer whenever it yields, so the paragraph read a mid-document position as
+// the first thing written and skipped the blank line one-shot writes.
+#[test]
+fn streaming_separates_a_paragraph_from_text_it_has_already_yielded() {
+  let html = "<li><pre>a<!>              <!><h3><h3><p>a";
+  let expected =
+    html_to_format_result(html, HTMLToMarkdownOptions::default(), OutputFormat::Text).markdown;
+  for chunk in 1..=html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(
+      HTMLToMarkdownOptions::default(),
+      OutputFormat::Text,
+    );
+    let mut actual = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      actual.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    actual.push_str(&p.finish());
+    assert_eq!(actual, expected, "chunk={chunk}");
+  }
+}
