@@ -1954,12 +1954,24 @@ impl ConvertState {
     // with a tag the real line only continues, which suspends Markdown and drops
     // the escapes a one-shot conversion writes.
     if self.line_start == 0 && self.has_flushed_tail() && self.flushed_tail[1] != b'\n' {
-      return self.cut_line_lead == CutLineLead::RawHtml;
+      return match self.cut_line_lead {
+        CutLineLead::RawHtml => true,
+        // The cut fell inside this line's indent, so the fragment's own spaces
+        // continue a run that started before it -- and three is all the run may
+        // total, however it is split across cuts.
+        CutLineLead::Blank(already) => {
+          let line = &bytes[..len];
+          let own = line.iter().take_while(|&&byte| byte == b' ').count();
+          (already as usize).saturating_add(own) <= RAW_HTML_MAX_INDENT as usize
+            && line.get(own) == Some(&b'<')
+        }
+        CutLineLead::Row | CutLineLead::Content | CutLineLead::Uncut => false,
+      };
     }
     let line = &bytes[self.line_start..len];
     let indent = line
       .iter()
-      .take(3)
+      .take(RAW_HTML_MAX_INDENT as usize)
       .take_while(|&&byte| byte == b' ')
       .count();
     line.get(indent) == Some(&b'<')
@@ -3045,7 +3057,7 @@ impl ConvertState {
       match self.cut_line_lead {
         CutLineLead::Row => return LineBeforeRow::Row,
         CutLineLead::RawHtml | CutLineLead::Content => return LineBeforeRow::Content,
-        CutLineLead::Uncut | CutLineLead::Blank => {}
+        CutLineLead::Uncut | CutLineLead::Blank(_) => {}
       }
     }
     match line.get(start) {
@@ -3110,7 +3122,7 @@ mod tests {
     state.has_streamed_output = true;
     // A drain is what puts bytes behind `buffer[0]`; yielding alone does not, and
     // the counting below may only read `flushed_tail` once one has happened.
-    state.cut_line_lead = CutLineLead::Blank;
+    state.cut_line_lead = CutLineLead::Blank(0);
     state.flushed_tail = [b'\n', b'\n'];
 
     state.write_output(true, false, 2, Some("next"), false);

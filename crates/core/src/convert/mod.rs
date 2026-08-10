@@ -150,15 +150,24 @@ enum LineBeforeRow {
   Content,
 }
 
+/// What the line a drain cut leads with, so the fragment left behind can still
+/// answer questions about a line whose start it no longer holds.
 #[derive(Clone, Copy, PartialEq)]
-#[repr(u8)]
 enum CutLineLead {
   Uncut,
-  Blank,
+  /// The cut left the line still inside its indent, carrying the number of
+  /// leading spaces already drained. The count matters because only three may
+  /// precede the tag that suspends Markdown, measured from the line's real
+  /// start: the fragment's own spaces continue this run rather than beginning
+  /// one. `RAW_HTML_MAX_INDENT + 1` means "too deep, or not spaces at all".
+  Blank(u8),
   RawHtml,
   Row,
   Content,
 }
+
+/// Deepest space indent a `<` may sit at and still suspend Markdown.
+const RAW_HTML_MAX_INDENT: u8 = 3;
 
 /// Widest `colspan` honored.
 const MAX_CELL_SPAN: u8 = 64;
@@ -1511,39 +1520,7 @@ impl ConvertState {
     };
     // Remember what the line being cut leads with; a line opened before an
     // earlier drain keeps that answer across successive cuts.
-    self.cut_line_lead = if bytes[drain_end - 1] == b'\n' {
-      CutLineLead::Blank
-    } else {
-      let (line, inherited) = match bytes[..drain_end].iter().rposition(|b| *b == b'\n') {
-        Some(at) => (&bytes[at + 1..drain_end], CutLineLead::Blank),
-        None => (&bytes[..drain_end], self.cut_line_lead),
-      };
-      if matches!(
-        inherited,
-        CutLineLead::RawHtml | CutLineLead::Row | CutLineLead::Content
-      ) {
-        inherited
-      } else {
-        // Only up to three *spaces* may precede the `<` that suspends Markdown,
-        // so a more deeply (or tab-) indented tag leads a content line -- the
-        // same rule `line_opens_raw_html_block` applies to an uncut line. Read
-        // more freely here and the fragment left behind claims a suspension the
-        // whole line never had, dropping escapes one-shot writes.
-        let indent = line.iter().take(3).take_while(|&&b| b == b' ').count();
-        if line.get(indent) == Some(&b'<') {
-          CutLineLead::RawHtml
-        } else {
-          line
-            .iter()
-            .copied()
-            .find(|b| !matches!(b, b' ' | b'\t'))
-            .map_or(CutLineLead::Blank, |byte| match byte {
-              b'|' => CutLineLead::Row,
-              _ => CutLineLead::Content,
-            })
-        }
-      }
-    };
+    self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
     self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);
@@ -1569,6 +1546,55 @@ impl ConvertState {
     self.raw_html_scanned_to = self.raw_html_scanned_to.saturating_sub(drain_end);
     self.line_start = self.line_start.saturating_sub(drain_end);
     self.line_start_scanned_to = self.line_start_scanned_to.saturating_sub(drain_end);
+  }
+}
+
+impl ConvertState {
+  /// What the line ending at `drain_end` leads with, given what an earlier cut
+  /// of the same line already found. `previous` makes the indent additive: a
+  /// line's leading spaces can be split across any number of drains, and the
+  /// rule that only three of them may precede the `<` suspending Markdown
+  /// counts from the line's real start. Read each fragment's indent on its own
+  /// and a line indented past three claims a suspension it never had, dropping
+  /// the escapes one-shot writes.
+  fn classify_cut_line(bytes: &[u8], drain_end: usize, previous: CutLineLead) -> CutLineLead {
+    if bytes[drain_end - 1] == b'\n' {
+      // The cut ends the line, so the next one starts fresh at column zero.
+      return CutLineLead::Blank(0);
+    }
+    let (line, already) = match bytes[..drain_end].iter().rposition(|b| *b == b'\n') {
+      // The line starts inside the drained bytes, so its indent starts there.
+      Some(at) => (&bytes[at + 1..drain_end], 0),
+      // It began before this cut: a lead already decided stands, and one still
+      // inside the indent carries that count on.
+      None => match previous {
+        CutLineLead::RawHtml => return CutLineLead::RawHtml,
+        CutLineLead::Row => return CutLineLead::Row,
+        CutLineLead::Content => return CutLineLead::Content,
+        CutLineLead::Blank(n) => (&bytes[..drain_end], n),
+        CutLineLead::Uncut => (&bytes[..drain_end], 0),
+      },
+    };
+    let own = line.iter().take_while(|&&b| b == b' ').count();
+    let indent = usize::from(already).saturating_add(own);
+    match line.get(own) {
+      // Still nothing but spaces, so the count continues past this cut too. Any
+      // indent past the limit is equally too deep, so one value stands for them
+      // all and the count never has to grow beyond a byte.
+      None => CutLineLead::Blank(
+        u8::try_from(indent)
+          .unwrap_or(u8::MAX)
+          .min(RAW_HTML_MAX_INDENT + 1),
+      ),
+      Some(&b'<') if indent <= usize::from(RAW_HTML_MAX_INDENT) => CutLineLead::RawHtml,
+      _ => match line.iter().copied().find(|b| !matches!(b, b' ' | b'\t')) {
+        Some(b'|') => CutLineLead::Row,
+        Some(_) => CutLineLead::Content,
+        // Blank, but with a tab in it: no space count describes this indent, so
+        // record one that can never open a raw block.
+        None => CutLineLead::Blank(RAW_HTML_MAX_INDENT + 1),
+      },
+    }
   }
 }
 

@@ -1300,6 +1300,18 @@ fn empty_link_text_drop_keeps_a_preceding_escaped_bracket() {
   assert_eq!(html_to_markdown("[<A/>", opts), "\\[");
 }
 
+// A line's indent can be split across cuts, and the three-space limit on what
+// may precede the `<` that suspends Markdown counts from the line's real start.
+// The `<dd>` here sits under five spaces, two of which leave with the drain: a
+// fragment read on its own opens with three spaces and a tag, claiming a
+// suspension the whole line never had and dropping the `\[` one-shot writes.
+#[test]
+fn streaming_counts_raw_html_indent_across_a_drain() {
+  let html = "<lI><dd/L><oL><lI><oL><I><hr><dd/L>%%&<lI><<o>[";
+  assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+}
+
 // Inside a raw-HTML region Markdown escaping is suspended until a blank line
 // closes it, so a drain has to record whether the line it cuts opened such a
 // region. The `<dd>` here sits under five spaces of indent, three more than can
