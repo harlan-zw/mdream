@@ -5,8 +5,10 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use mdream::MarkdownStreamProcessor;
-use mdream::html_to_markdown;
-use mdream::types::{CleanConfig, HTMLToMarkdownOptions, PluginConfig, TagOverrideConfig};
+use mdream::types::{
+  CleanConfig, HTMLToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
+};
+use mdream::{html_to_format_result, html_to_markdown};
 
 // ── Peak-allocation tracking allocator ──
 // Streaming must free already-yielded output; a criterion/time bench can't show
@@ -716,6 +718,33 @@ fn streaming_holds_mutable_trailing_pre_whitespace() {
         expected,
         "chunk={chunk} html={html:?}"
       );
+    }
+  }
+}
+
+// An inline marker is held back until its element is known to be non-empty, and
+// with it the whitespace run before it, which a drop-then-trim would take. That
+// run is the whole ASCII set: `<q>` writes a `"` that leaves the `\r` before it
+// no longer trailing, so the `\r` was yielded, then the empty `<q>` was dropped
+// and finalize trimmed back past it -- output one-shot never wrote. Needs
+// `<pre>` (elsewhere the `\r` normalises to a space) and text output (a fence
+// would leave the run mid-buffer), but the hold applies to every marker.
+#[test]
+fn streaming_holds_full_whitespace_run_before_a_droppable_marker() {
+  for html in ["<pre>a\r<q>", "<pre>a\t<q>", "<pre>a \r<q>", "<pre>a\r<em>"] {
+    let expected =
+      html_to_format_result(html, HTMLToMarkdownOptions::default(), OutputFormat::Text).markdown;
+    for chunk in 1..=html.len() {
+      let mut p = MarkdownStreamProcessor::new_with_format(
+        HTMLToMarkdownOptions::default(),
+        OutputFormat::Text,
+      );
+      let mut actual = String::new();
+      for c in html.as_bytes().chunks(chunk) {
+        actual.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+      }
+      actual.push_str(&p.finish());
+      assert_eq!(actual, expected, "chunk={chunk} html={html:?}");
     }
   }
 }

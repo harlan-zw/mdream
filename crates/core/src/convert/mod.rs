@@ -1572,15 +1572,20 @@ impl ConvertState {
   }
 }
 
-/// Highest offset that holds back everything from `at`, plus the blank run just
-/// before it that a rewrite reaching back there can trim. Floored like
+/// Highest offset that holds back everything from `at`, plus the whitespace run
+/// just before it that a rewrite reaching back there can trim. Floored like
 /// `keep_two_before`, so a drifted `at` never slices mid-codepoint.
+///
+/// The run is the whole ASCII set, not just `\n` and ` `: the rewrites that
+/// reach back here drop the marker and then trim with `trim_ascii_whitespace_end`
+/// (a block close, or the document's own finalize). Holding the narrower set
+/// yields a `\r` or a tab that the later trim removes from the buffer alone.
 fn hold_before(buf: &str, at: usize) -> usize {
   let mut i = at.min(buf.len());
   while !buf.is_char_boundary(i) {
     i -= 1;
   }
-  buf[..i].trim_end_matches(['\n', ' ']).len()
+  trim_ascii_whitespace_end(&buf[..i])
 }
 
 /// Highest offset that still keeps the two bytes before `at` in the buffer, for
