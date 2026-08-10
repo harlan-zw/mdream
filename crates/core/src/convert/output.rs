@@ -305,6 +305,36 @@ impl ConvertState {
       }
     }
 
+    // Every line gains a quote prefix, so an offset inside the content moves by
+    // however many prefixes precede it -- the same remapping the fragment links
+    // above need. A code span or fence measures and rewrites itself through its
+    // offsets too, and left unmapped they point into the middle of the quoted
+    // text, or of a character, and panic the slice that builds the delimiter.
+    let quoted_end = frame.content_start + quoted.len();
+    let remap = |offset: usize| -> usize {
+      if offset < frame.content_start {
+        offset
+      } else if offset <= content_end {
+        frame.content_start
+          + Self::blockquote_offset(content, &frame.list_indent, offset - frame.content_start)
+      } else {
+        // Past the trimmed content there is nothing left to point at.
+        quoted_end
+      }
+    };
+    for span in &mut self.code_spans {
+      span.output_start = remap(span.output_start);
+      span.content_start = remap(span.content_start);
+    }
+    if let Some(fence) = &mut self.code_fence {
+      // Held relative to `output_start`, and a prefix can land between the two,
+      // so the marker is remapped on its own and the offset rebuilt from it.
+      let marker_start = remap(fence.output_start + fence.marker_offset);
+      fence.output_start = remap(fence.output_start);
+      fence.content_start = remap(fence.content_start);
+      fence.marker_offset = marker_start.saturating_sub(fence.output_start);
+    }
+
     self.buffer.truncate(frame.content_start);
     self.buffer.push_str(&quoted);
     self.last_content_cache_len = quoted.len();

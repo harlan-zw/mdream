@@ -4120,3 +4120,36 @@ fn code_span_offsets_follow_an_empty_item_blank_line() {
     }
   }
 }
+
+// Closing a blockquote rewrites its content with a `> ` prefix on every line, so
+// an offset inside it moves by however many prefixes precede it. Fragment links
+// were remapped; a code span and the code fence were not, leaving them pointing
+// into the middle of the quoted text -- and of a character -- which aborted the
+// slice that builds the closing delimiter. `html_to_markdown` panics on its own.
+#[test]
+fn code_offsets_follow_blockquote_prefixing() {
+  for html in [
+    "<pre><li><pre><li><blockquote>><br>0\n\u{fffd}<code>",
+    "<blockquote>a <code>b</code> c</blockquote>",
+    "<blockquote><pre><code>x</code></pre></blockquote>",
+    "<blockquote>\u{e9} <code>`b`</code></blockquote>",
+    "<blockquote><li><pre><code>\u{fffd}</code></pre></blockquote>",
+  ] {
+    let expected = convert(html);
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let mut streamed = String::new();
+      let mut start = 0;
+      while start < html.len() {
+        let mut end = (start + width).min(html.len());
+        while end < html.len() && !html.is_char_boundary(end) {
+          end += 1;
+        }
+        streamed.push_str(&processor.process_chunk(&html[start..end]));
+        start = end;
+      }
+      streamed.push_str(&processor.finish());
+      assert_eq!(streamed, expected, "{html:?} width={width}");
+    }
+  }
+}
