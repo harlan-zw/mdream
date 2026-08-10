@@ -2926,6 +2926,9 @@ impl ConvertState {
             let trimmed_len = trim_ascii_whitespace_end(frag);
             if start + trimmed_len < buf_len {
               self.buffer.truncate(start + trimmed_len);
+              // The run just shrank; a stale length lets the next trim start
+              // behind it and reach into spacing no text node wrote.
+              self.last_content_cache_len = trimmed_len;
               if !is_enter && is_inline {
                 self.pending_inline_whitespace = true;
               }

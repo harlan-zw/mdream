@@ -1361,3 +1361,56 @@ fn raw_html_escape_suspension_survives_a_drain() {
   actual.push_str(&p.finish());
   assert_eq!(actual, expected);
 }
+
+// A reach-back trim shrinks the last content run, so the cached length must
+// shrink too: left stale, the next trim starts behind the run and eats block
+// spacing the stream already yielded. Text output only -- a fence makes the run
+// real content, so nothing reaches back over it.
+#[test]
+fn streaming_survives_two_reach_back_trims_over_one_run() {
+  let long = "a < b".repeat(18);
+  let cases = [
+    // Second trim is a block exit, which drops the spacing outright.
+    (
+      "through\"><=>><h><pre>     \n\n\r\n\r\n\r\n\r\n<source> <source>>".to_string(),
+      HTMLToMarkdownOptions::default(),
+    ),
+    // Second trim is an inline exit, which leaves a pending space behind: the
+    // stream kept a bare `\r` where one-shot wrote that space. Straight from
+    // fuzz_html_grammar and not reducible -- both nested `<pre>`s and the run
+    // that overflows the wrap width are load-bearing.
+    (
+      format!(
+        "<h3 id=># not a heading</tr></pre><pre colspan=\"text-red-500 font-bold line-through\">\
+         <h3 src=>\r\n\r\n\r\n[link] (paren)<script/>\r\n\r\n\r\n\r\n\r\n<h1 src=><td id=>\r\n\r\n\
+         <pre>\r\n\r\n<source> <source>       \n\n<source> </DIV><h1 src=>\r\n\r\n<DIV></main>\r\n\r\n\
+         {long}\r\n\r\n</pre>"
+      ),
+      HTMLToMarkdownOptions {
+        origin: Some("https://example.com/base/".to_string()),
+        clean_urls: true,
+        clean: Some(safe_clean()),
+        wrap_width: 123,
+        ..Default::default()
+      },
+    ),
+  ];
+  for (html, opts) in cases {
+    let expected = html_to_format_result(&html, opts.clone(), OutputFormat::Text).markdown;
+    for chunk in 1..=html.len() {
+      let mut p = MarkdownStreamProcessor::new_with_format(opts.clone(), OutputFormat::Text);
+      let mut actual = String::new();
+      let mut start = 0;
+      while start < html.len() {
+        let mut end = (start + chunk).min(html.len());
+        while end < html.len() && !html.is_char_boundary(end) {
+          end += 1;
+        }
+        actual.push_str(&p.process_chunk(&html[start..end]));
+        start = end;
+      }
+      actual.push_str(&p.finish());
+      assert_eq!(actual, expected, "chunk={chunk} html={html:?}");
+    }
+  }
+}
