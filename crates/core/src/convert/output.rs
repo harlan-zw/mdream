@@ -354,6 +354,14 @@ impl ConvertState {
     let Some(mut flush_end) = self.buffer.rfind('\n').map(|index| index + 1) else {
       return;
     };
+    // A blank line at the tail is not final: whether it keeps a `>` depends on
+    // content that has not arrived, and `finalize_blockquote` trims it off the
+    // buffer end when none does. Quoting it here commits a prefix one-shot never
+    // writes, so leave it for a later flush or for the close to decide.
+    let bytes = self.buffer.as_bytes();
+    while flush_end >= 2 && bytes[flush_end - 1] == b'\n' && bytes[flush_end - 2] == b'\n' {
+      flush_end -= 1;
+    }
     if self
       .blockquotes
       .iter()

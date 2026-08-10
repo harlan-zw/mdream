@@ -1518,3 +1518,25 @@ fn streaming_matches_one_shot_on_a_rawtext_eof_residual() {
     "a"
   );
 }
+
+// Once the buffer passes the flush threshold, streaming pre-quotes every
+// complete line of open blockquote content. A blank line at the tail is not
+// complete in that sense: whether it keeps a `>` depends on content that has not
+// arrived, and `finalize_blockquote` trims it off the buffer end when none does.
+// Quoting it early appended a stray `>` line no one-shot output contains. Needs
+// content past the 8 KiB threshold, then a block that leaves the quote on a
+// blank line -- and the `>` must still appear when content does follow.
+#[test]
+fn streaming_holds_a_blockquote_blank_line_until_content_follows() {
+  for tail in ["<p>", "<div>", "<html>", "<blockquote>", "<p>y</p>", "<p>y"] {
+    let html = format!("a<blockquote>{}{tail}", "x".repeat(8192));
+    let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+    for chunk in [1usize, 7, 64, 4096] {
+      assert_eq!(
+        stream_chunks(&html, chunk, HTMLToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} tail={tail:?}"
+      );
+    }
+  }
+}
