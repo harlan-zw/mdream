@@ -33,6 +33,10 @@ fn count_tokens_approx(text: &str) -> usize {
   tokens
 }
 
+fn usize_as_f64(value: usize) -> f64 {
+  f64::from(u32::try_from(value).expect("benchmark value fits in u32"))
+}
+
 fn make_clean() -> mdream::types::CleanConfig {
   mdream::types::CleanConfig {
     urls: true,
@@ -48,7 +52,7 @@ fn make_clean() -> mdream::types::CleanConfig {
 
 fn make_minimal_plugins() -> mdream::types::PluginConfig {
   mdream::types::PluginConfig {
-    isolate_main: Some(mdream::types::IsolateMainConfig {}),
+    isolate_main: Some(mdream::types::IsolateMainConfig),
     filter: Some(mdream::types::FilterConfig {
       exclude: Some(vec![
         "form".into(),
@@ -67,7 +71,7 @@ fn make_minimal_plugins() -> mdream::types::PluginConfig {
       include: None,
       process_children: None,
     }),
-    tailwind: Some(mdream::types::TailwindConfig {}),
+    tailwind: Some(mdream::types::TailwindConfig),
     frontmatter: Some(mdream::types::FrontmatterConfig {
       additional_fields: None,
       meta_fields: None,
@@ -78,7 +82,7 @@ fn make_minimal_plugins() -> mdream::types::PluginConfig {
 }
 
 fn analyze(label: &str, html: &str) {
-  let html_kb = html.len() as f64 / 1024.0;
+  let html_kb = usize_as_f64(html.len()) / 1024.0;
   let html_tokens = count_tokens_approx(html);
 
   let default_md = mdream::html_to_markdown(html, mdream::types::HTMLToMarkdownOptions::default());
@@ -94,10 +98,13 @@ fn analyze(label: &str, html: &str) {
   );
   let minimal_clean_tokens = count_tokens_approx(&minimal_clean_md);
 
+  let html_tokens_float = usize_as_f64(html_tokens);
+  let default_tokens_float = usize_as_f64(default_tokens);
+  let minimal_clean_tokens_float = usize_as_f64(minimal_clean_tokens);
   let html_reduction =
-    ((html_tokens as f64 - minimal_clean_tokens as f64) / html_tokens as f64) * 100.0;
+    ((html_tokens_float - minimal_clean_tokens_float) / html_tokens_float) * 100.0;
   let default_reduction =
-    ((default_tokens as f64 - minimal_clean_tokens as f64) / default_tokens as f64) * 100.0;
+    ((default_tokens_float - minimal_clean_tokens_float) / default_tokens_float) * 100.0;
 
   println!(
     "| {label:28} | {html_kb:>8.0} KB | {html_tokens:>8} | {default_tokens:>8} | {minimal_clean_tokens:>8} | {html_reduction:>5.0}% | {default_reduction:>5.0}% |",

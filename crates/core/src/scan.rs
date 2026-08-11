@@ -237,13 +237,11 @@ fn scan_tag<const EXTRACT: bool>(
 
     if EXTRACT {
       scan.step(html_chunk, c, i);
+    } else if state == State::BeforeValue && (c == QUOTE_CHAR || c == APOS_CHAR) {
+      inside_quote = true;
+      quote_char = c;
     } else {
-      if state == State::BeforeValue && (c == QUOTE_CHAR || c == APOS_CHAR) {
-        inside_quote = true;
-        quote_char = c;
-      } else {
-        state = state.step_without_extraction(c);
-      }
+      state = state.step_without_extraction(c);
     }
     i += 1;
   }
@@ -797,7 +795,10 @@ mod tests {
     const ALPHABET: &[u8] = b"a ='\".>/";
     const WIDTH: usize = 6;
 
-    for case in 0..ALPHABET.len().pow(WIDTH as u32) {
+    for case in 0..ALPHABET
+      .len()
+      .pow(u32::try_from(WIDTH).expect("test width fits in u32"))
+    {
       let mut encoded = case;
       let mut input = [b'a'; WIDTH];
       for byte in &mut input {

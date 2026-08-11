@@ -100,6 +100,7 @@ fn main() -> io::Result<()> {
       carry.drain(..valid_up_to);
     }
   }
+  drop(input);
 
   if !carry.is_empty() {
     return Err(io::Error::new(

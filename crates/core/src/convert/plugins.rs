@@ -20,18 +20,6 @@ where
   }
 }
 
-#[cfg(test)]
-mod tests {
-  use super::sort_fields_by_key;
-
-  #[test]
-  fn field_sort_is_ordered_and_stable() {
-    let mut fields = [("b", 0), ("a", 1), ("a", 2), ("c", 3)];
-    sort_fields_by_key(&mut fields, |(key, _)| key);
-    assert_eq!(fields, [("a", 1), ("a", 2), ("b", 0), ("c", 3)]);
-  }
-}
-
 impl ConvertState {
   pub(crate) fn generate_frontmatter_yaml(&mut self) {
     if self.format != OutputFormat::Markdown {
@@ -116,5 +104,17 @@ impl ConvertState {
       }
     }
     Some(entries)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::sort_fields_by_key;
+
+  #[test]
+  fn field_sort_is_ordered_and_stable() {
+    let mut fields = [("b", 0), ("a", 1), ("a", 2), ("c", 3)];
+    sort_fields_by_key(&mut fields, |(key, _)| key);
+    assert_eq!(fields, [("a", 1), ("a", 2), ("b", 0), ("c", 3)]);
   }
 }
