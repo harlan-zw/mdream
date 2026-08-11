@@ -271,9 +271,12 @@ impl ConvertState {
       return;
     }
     let content = &self.buffer[frame.content_start..content_end];
-    let mut quoted = String::with_capacity(
-      content.len() + (frame.list_indent.len() + 2) * (content.matches('\n').count() + 1),
-    );
+    // Borrowed rather than allocated: the capacity outlives the call, so a
+    // document full of quotes pays for this region once.
+    let mut quoted = core::mem::take(&mut self.blockquote_scratch);
+    quoted.clear();
+    quoted
+      .reserve(content.len() + (frame.list_indent.len() + 2) * (content.matches('\n').count() + 1));
 
     for (index, line) in content.split('\n').enumerate() {
       if index > 0 {
@@ -348,6 +351,7 @@ impl ConvertState {
     self.buffer.truncate(frame.content_start);
     self.buffer.push_str(&quoted);
     self.last_content_cache_len = quoted.len();
+    self.blockquote_scratch = quoted;
     // Quoting inserted a `> ` and a newline per line, so a line the scan had
     // already passed is no longer where the cache says the current one begins.
     self.invalidate_line_start();
@@ -397,8 +401,9 @@ impl ConvertState {
       let content = &self.buffer[shared_start..flush_end];
       let quoted_prefix = "> ".repeat(self.blockquotes.len());
       let blank_prefix = quoted_prefix.trim_end();
-      let mut quoted =
-        String::with_capacity(content.len() + quoted_prefix.len() * content.matches('\n').count());
+      let mut quoted = core::mem::take(&mut self.blockquote_scratch);
+      quoted.clear();
+      quoted.reserve(content.len() + quoted_prefix.len() * content.matches('\n').count());
       for line in content.split_inclusive('\n') {
         let line = line.strip_suffix('\n').unwrap_or(line);
         if line.is_empty() {
@@ -411,6 +416,7 @@ impl ConvertState {
       }
       self.buffer.replace_range(shared_start..flush_end, &quoted);
       flush_end = shared_start + quoted.len();
+      self.blockquote_scratch = quoted;
       for frame in &mut self.blockquotes {
         frame.content_start = flush_end;
       }
@@ -420,11 +426,13 @@ impl ConvertState {
     }
 
     let frames = self.blockquotes.clone();
+    // Taken once for the whole walk: every frame rewrites the same region again,
+    // so without this each nesting level allocates its own copy of it per flush.
+    let mut quoted = core::mem::take(&mut self.blockquote_scratch);
     for frame in frames.iter().rev() {
       let content = &self.buffer[frame.content_start..flush_end];
-      let mut quoted = String::with_capacity(
-        content.len() + (frame.list_indent.len() + 2) * content.matches('\n').count(),
-      );
+      quoted.clear();
+      quoted.reserve(content.len() + (frame.list_indent.len() + 2) * content.matches('\n').count());
       for line in content.split_inclusive('\n') {
         let line = line.strip_suffix('\n').unwrap_or(line);
         quoted.push_str(&frame.list_indent);
@@ -445,6 +453,7 @@ impl ConvertState {
         .replace_range(frame.content_start..flush_end, &quoted);
       flush_end = frame.content_start + quoted.len();
     }
+    self.blockquote_scratch = quoted;
 
     for frame in &mut self.blockquotes {
       frame.content_start = flush_end;

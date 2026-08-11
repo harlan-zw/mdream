@@ -510,6 +510,10 @@ pub struct ConvertState {
   code_fence: Option<CodeFenceState>,
   /// Open blockquotes stay buffered until all child line boundaries are known.
   blockquotes: Vec<BlockquoteFrame>,
+  /// Scratch for the quoted rewrite of a blockquote region. Held across calls so
+  /// a flush, which can run once per 8KB and once per open frame, reuses the
+  /// capacity instead of allocating a fresh copy of the region each time.
+  blockquote_scratch: String,
   /// Heading slugs collected during conversion for fragment validation
   heading_slugs: Vec<String>,
   /// Fragment link locations: (bracket_start, link_end)
@@ -667,6 +671,7 @@ impl ConvertState {
       code_spans: Vec::new(),
       code_fence: None,
       blockquotes: Vec::with_capacity(4),
+      blockquote_scratch: String::new(),
       heading_slugs: Vec::new(),
       fragment_links: Vec::new(),
       in_heading: false,
