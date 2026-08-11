@@ -323,16 +323,26 @@ impl ConvertState {
       }
     };
     for span in &mut self.code_spans {
-      span.output_start = remap(span.output_start);
-      span.content_start = remap(span.content_start);
+      for offset in [&mut span.output_start, &mut span.content_start] {
+        *offset = remap(*offset);
+      }
     }
     if let Some(fence) = &mut self.code_fence {
       // Held relative to `output_start`, and a prefix can land between the two,
       // so the marker is remapped on its own and the offset rebuilt from it.
-      let marker_start = remap(fence.output_start + fence.marker_offset);
-      fence.output_start = remap(fence.output_start);
-      fence.content_start = remap(fence.content_start);
-      fence.marker_offset = marker_start.saturating_sub(fence.output_start);
+      let mut offsets = [
+        fence.output_start,
+        fence.content_start,
+        fence.output_start + fence.marker_offset,
+      ];
+      for offset in &mut offsets {
+        *offset = remap(*offset);
+      }
+      [fence.output_start, fence.content_start, fence.marker_offset] = [
+        offsets[0],
+        offsets[1],
+        offsets[2].saturating_sub(offsets[0]),
+      ];
     }
 
     self.buffer.truncate(frame.content_start);
@@ -685,7 +695,9 @@ impl ConvertState {
       // last byte alone also matches the `[` of an escaped literal `\[` in the
       // text before the link, and the empty-link drop then truncates into that
       // text instead of the link it meant to remove.
-      self.link_bracket_pos = if buf_len > 0 && output.as_deref().is_some_and(|o| o.ends_with('['))
+      self.link_bracket_pos = if output
+        .as_deref()
+        .is_some_and(|o| o.as_bytes().last() == Some(&b'['))
       {
         buf_len - 1
       } else {

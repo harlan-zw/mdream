@@ -384,6 +384,7 @@ pub struct ConvertState {
   just_closed_tag: bool,
   is_first_text_in_element: bool,
   in_non_nesting: bool,
+  rawtext_end_tag_pending: bool,
   script_data_state: u8,
   in_pre: bool,
   overflow_tag_id: Option<u8>,
@@ -582,6 +583,7 @@ impl ConvertState {
       just_closed_tag: false,
       is_first_text_in_element: false,
       in_non_nesting: false,
+      rawtext_end_tag_pending: false,
       script_data_state: SCRIPT_DATA,
       in_pre: false,
       overflow_tag_id: None,
@@ -800,6 +802,7 @@ impl ConvertState {
   /// caller keeps the rest; returning an owned tail instead would copy a token
   /// that spans many chunks once per chunk, which is quadratic.
   pub fn process_html(&mut self, chunk: &str) -> usize {
+    self.rawtext_end_tag_pending = false;
     // Non-empty only when the previous chunk ended mid-text: that run continues
     // here instead of being re-fed as raw input. Every flush leaves it empty.
     let mut text_buffer = std::mem::take(&mut self.parse_text_buffer);
@@ -972,6 +975,7 @@ impl ConvertState {
             if result.complete {
               i = result.new_position;
             } else {
+              self.rawtext_end_tag_pending = true;
               carry = true;
               break;
             }
@@ -1023,6 +1027,7 @@ impl ConvertState {
             if result.complete {
               i = result.new_position;
             } else {
+              self.rawtext_end_tag_pending = true;
               carry = true;
               break;
             }
@@ -1285,31 +1290,6 @@ impl ConvertState {
     std::mem::take(&mut self.buffer)
   }
 
-  /// Whether a rawtext residual is this element's end tag with its name already
-  /// delimited, the one shape EOF discards: the tokenizer has left the end tag
-  /// name state for a tag state, where EOF drops the whole tag. A bare `<`, a
-  /// `</` alone, a name that cannot close this element, and a name still being
-  /// read at EOF all stay in the rawtext states, which emit them as text.
-  fn rawtext_leftover_is_end_tag(&self, leftover: &str) -> bool {
-    let bytes = leftover.as_bytes();
-    if bytes.len() < 3 || bytes[1] != SLASH_CHAR {
-      return false;
-    }
-    let mut name_end = 2;
-    while name_end < bytes.len() {
-      let c = bytes[name_end];
-      if c == GT_CHAR || c == SLASH_CHAR || is_whitespace(c) {
-        break;
-      }
-      name_end += 1;
-    }
-    if name_end == bytes.len() {
-      return false;
-    }
-    let tag_id = crate::consts::get_tag_id_ci_bytes(&bytes[2..name_end]);
-    self.stack.last().is_some_and(|node| node.tag_id == tag_id)
-  }
-
   /// Commit end-of-input state: flush trailing buffered text and close any
   /// elements left open. The streaming parser keeps trailing text and unclosed
   /// elements pending because a later chunk might continue them; at true EOF
@@ -1325,7 +1305,7 @@ impl ConvertState {
   ///
   /// Rawtext is the exception: there `<` opens nothing but this element's own
   /// end tag, so the residual is text unless it is an appropriate end tag that
-  /// already reached a tag state (see `rawtext_leftover_is_end_tag`).
+  /// already reached a tag state.
   pub fn finalize(&mut self, leftover: &str) {
     let in_script = self
       .stack
@@ -1341,10 +1321,20 @@ impl ConvertState {
       // are separated by a space this text never contained.
       let rawtext_text = leftover.as_bytes().first() == Some(&LT_CHAR)
         && self.in_non_nesting
-        && !self.rawtext_leftover_is_end_tag(leftover);
+        && !self.rawtext_end_tag_pending;
       if rawtext_text {
         self.parse_text_buffer.push_str(leftover);
         self.text_buffer_contains_non_whitespace = true;
+        // The ordinary rawtext path records these flags byte by byte. Carrying
+        // the residual must preserve them so RCDATA entities still decode and
+        // generated Markdown escapes remain safe.
+        self.text_buffer_has_inline_gfm_hazard |= leftover.as_bytes()[1..]
+          .iter()
+          .any(|&c| GFM_BYTE_FLAGS[c as usize] & GFM_HAZARD_BIT != 0);
+        if self.depth_map[TAG_STYLE as usize] == 0 && leftover.as_bytes().contains(&AMPERSAND_CHAR)
+        {
+          self.has_encoded_html_entity = true;
+        }
         self.last_char_was_whitespace = false;
       }
       if !self.parse_text_buffer.is_empty() {
