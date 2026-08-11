@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "mdream"
-version = "1.5.12"
+version = "1.6.1"
 
 [[package]]
 name = "mdream-fuzz"
