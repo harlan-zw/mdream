@@ -1543,3 +1543,99 @@ fn streaming_holds_a_blockquote_blank_line_until_content_follows() {
     }
   }
 }
+
+#[test]
+fn streaming_matches_one_shot_across_blockquote_quoting() {
+  assert_stream_matches_every_split(
+    "<dd><h2><li><blockquote>a<p><code><p>>aa<<a><<li>`",
+    HTMLToMarkdownOptions::default(),
+  );
+}
+
+// A trim takes the marker's own trailing space, which leaves the marker's
+// recorded end past where the item's content now starts, so the element that
+// opens the item -- a code span's backtick, or an emphasis marker -- reads as
+// content. Streaming resolves the marker as content arrives and settled the
+// question on it; one-shot only looks at the item's exit and never saw it, so
+// they disagreed on the blank line that keeps an empty item from continuing the
+// paragraph above.
+#[test]
+fn streaming_keeps_an_empty_items_blank_line_across_a_code_span() {
+  assert_stream_matches_every_split("a a<li><p><code>", HTMLToMarkdownOptions::default());
+}
+
+#[test]
+fn streaming_keeps_an_empty_items_blank_line_across_an_inline_marker() {
+  assert_stream_matches_every_split("a a<li><html><strong>", HTMLToMarkdownOptions::default());
+}
+
+// A code span or fence measures and rewrites itself through buffer offsets, and
+// quoting moves the bytes under them. The drain already holds at the open one,
+// so flushing past it releases nothing and leaves the fence pointing into the
+// quote prefix -- mid-codepoint, where finalizing it panics. Long enough to
+// cross the flush threshold while the fence is still open.
+#[test]
+fn streaming_defers_the_blockquote_flush_while_a_fence_is_open() {
+  let html = format!("<blockquote><pre>{}", "\u{e9}\n<br>".repeat(3000));
+  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  for chunk in [512, 4096] {
+    assert_eq!(
+      stream_chars(&html, chunk, HTMLToMarkdownOptions::default()),
+      expected,
+      "chunk={chunk}"
+    );
+  }
+}
+
+// A code span or fence opened after completed quote lines only owns the output
+// from its delimiter onward. The earlier quote prefix can be finalized and
+// yielded before recording those buffer offsets.
+#[test]
+fn streaming_releases_a_completed_blockquote_prefix_before_open_code() {
+  for container in ["<blockquote>", "<ul><li><blockquote>"] {
+    for open_code in ["<code>x", "<pre>x"] {
+      let html = format!(
+        "{container}{}{open_code}",
+        "<p>quoted line</p>".repeat(1024)
+      );
+      let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let first = stream.process_chunk(&html);
+
+      assert!(
+        first.contains("> quoted line"),
+        "completed quote prefix held behind {open_code:?}"
+      );
+      let mut actual = first;
+      actual.push_str(&stream.finish());
+      assert_eq!(
+        actual, expected,
+        "container={container:?} open_code={open_code:?}"
+      );
+    }
+  }
+}
+
+// A `<p>` inside a list item or blockquote separates itself from the text before
+// it, and asks the buffer's last byte what that text ended with. An empty buffer
+// means the start of the document to that question, but streaming empties the
+// buffer whenever it yields, so the paragraph read a mid-document position as
+// the first thing written and skipped the blank line one-shot writes.
+#[test]
+fn streaming_separates_a_paragraph_from_text_it_has_already_yielded() {
+  let html = "<li><pre>a<!>              <!><h3><h3><p>a";
+  let expected =
+    html_to_format_result(html, HTMLToMarkdownOptions::default(), OutputFormat::Text).markdown;
+  for chunk in 1..=html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(
+      HTMLToMarkdownOptions::default(),
+      OutputFormat::Text,
+    );
+    let mut actual = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      actual.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    actual.push_str(&p.finish());
+    assert_eq!(actual, expected, "chunk={chunk}");
+  }
+}

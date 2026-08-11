@@ -271,9 +271,12 @@ impl ConvertState {
       return;
     }
     let content = &self.buffer[frame.content_start..content_end];
-    let mut quoted = String::with_capacity(
-      content.len() + (frame.list_indent.len() + 2) * (content.matches('\n').count() + 1),
-    );
+    // Borrowed rather than allocated: the capacity outlives the call, so a
+    // document full of quotes pays for this region once.
+    let mut quoted = core::mem::take(&mut self.blockquote_scratch);
+    quoted.clear();
+    quoted
+      .reserve(content.len() + (frame.list_indent.len() + 2) * (content.matches('\n').count() + 1));
 
     for (index, line) in content.split('\n').enumerate() {
       if index > 0 {
@@ -348,6 +351,10 @@ impl ConvertState {
     self.buffer.truncate(frame.content_start);
     self.buffer.push_str(&quoted);
     self.last_content_cache_len = quoted.len();
+    self.blockquote_scratch = quoted;
+    // Quoting inserted a `> ` and a newline per line, so a line the scan had
+    // already passed is no longer where the cache says the current one begins.
+    self.invalidate_line_start();
   }
 
   pub(crate) fn flush_streaming_blockquote_lines(&mut self) {
@@ -357,6 +364,11 @@ impl ConvertState {
       || self.clean_flags & CLEAN_FRAGMENTS != 0
       || self.has_frontmatter
       || self.has_extraction
+      // A code span or fence measures and rewrites itself through buffer offsets
+      // that quoting moves, and the drain already holds at the open one, so
+      // flushing past it releases nothing and only invalidates its offsets.
+      || self.code_fence.is_some()
+      || !self.code_spans.is_empty()
     {
       return;
     }
@@ -389,8 +401,9 @@ impl ConvertState {
       let content = &self.buffer[shared_start..flush_end];
       let quoted_prefix = "> ".repeat(self.blockquotes.len());
       let blank_prefix = quoted_prefix.trim_end();
-      let mut quoted =
-        String::with_capacity(content.len() + quoted_prefix.len() * content.matches('\n').count());
+      let mut quoted = core::mem::take(&mut self.blockquote_scratch);
+      quoted.clear();
+      quoted.reserve(content.len() + quoted_prefix.len() * content.matches('\n').count());
       for line in content.split_inclusive('\n') {
         let line = line.strip_suffix('\n').unwrap_or(line);
         if line.is_empty() {
@@ -403,19 +416,22 @@ impl ConvertState {
       }
       self.buffer.replace_range(shared_start..flush_end, &quoted);
       flush_end = shared_start + quoted.len();
+      self.blockquote_scratch = quoted;
       for frame in &mut self.blockquotes {
         frame.content_start = flush_end;
       }
       self.last_content_cache_len = self.buffer.len() - flush_end;
+      self.invalidate_line_start();
       return;
     }
 
-    let frames = self.blockquotes.clone();
-    for frame in frames.iter().rev() {
+    // Taken once for the whole walk: every frame rewrites the same region again,
+    // so without this each nesting level allocates its own copy of it per flush.
+    let mut quoted = core::mem::take(&mut self.blockquote_scratch);
+    for frame in self.blockquotes.iter().rev() {
       let content = &self.buffer[frame.content_start..flush_end];
-      let mut quoted = String::with_capacity(
-        content.len() + (frame.list_indent.len() + 2) * content.matches('\n').count(),
-      );
+      quoted.clear();
+      quoted.reserve(content.len() + (frame.list_indent.len() + 2) * content.matches('\n').count());
       for line in content.split_inclusive('\n') {
         let line = line.strip_suffix('\n').unwrap_or(line);
         quoted.push_str(&frame.list_indent);
@@ -436,11 +452,13 @@ impl ConvertState {
         .replace_range(frame.content_start..flush_end, &quoted);
       flush_end = frame.content_start + quoted.len();
     }
+    self.blockquote_scratch = quoted;
 
     for frame in &mut self.blockquotes {
       frame.content_start = flush_end;
     }
     self.last_content_cache_len = self.buffer.len() - flush_end;
+    self.invalidate_line_start();
   }
 
   /// Emit markdown for entering the element currently on top of self.stack.
@@ -615,6 +633,19 @@ impl ConvertState {
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
         output = None;
       }
+    }
+
+    // Finalize completed quote lines before recording a new code offset. A
+    // later flush must stop at that offset, but the prefix before it is safe to
+    // quote and yield now even when both arrive in one large input chunk.
+    if !self.plain_text
+      && !enter_is_literal
+      && tag_id == Some(TAG_CODE)
+      && output.is_some()
+      && ((self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block())
+        || (self.depth_map[TAG_PRE as usize] > 0 && !self.pre_fence_open && !self.in_table_cell()))
+    {
+      self.flush_streaming_blockquote_lines();
     }
 
     let output_start = self.buffer.len();
@@ -1172,6 +1203,10 @@ impl ConvertState {
       self.pre_fence_pending = false;
       return;
     }
+
+    // Flush before the fence records buffer offsets. Completed quote lines do
+    // not need to stay retained behind a fence that starts later in this chunk.
+    self.flush_streaming_blockquote_lines();
 
     self.pre_fence_pending = false;
     self.pre_fence_open = true;
@@ -1756,7 +1791,7 @@ impl ConvertState {
         fence.content_start += 1;
       }
     }
-    self.line_start_scanned_to = usize::MAX;
+    self.invalidate_line_start();
     self.raw_html_scanned_to = self.raw_html_scanned_to.min(at);
   }
 
@@ -1965,6 +2000,16 @@ impl ConvertState {
     }
   }
 
+  /// Note that the buffer has been shortened to `len`. A list marker's recorded
+  /// end is a length, and the space a trim takes is the marker's own: left past
+  /// the content it reads the element that opens the item as content.
+  #[inline]
+  fn clamp_item_marker_end(&mut self, len: usize) {
+    if self.empty_item_len > len {
+      self.empty_item_len = len;
+    }
+  }
+
   #[inline]
   fn trim_trailing_spaces(&mut self) {
     let floor = self.trim_floor();
@@ -1977,6 +2022,7 @@ impl ConvertState {
       self.last_content_cache_len = self
         .last_content_cache_len
         .saturating_sub(self.buffer.len() - trimmed_len);
+      self.clamp_item_marker_end(trimmed_len);
       self.buffer.truncate(trimmed_len);
     }
   }
@@ -2005,6 +2051,13 @@ impl ConvertState {
       self.raw_html_markdown = true;
     }
     self.raw_html_scanned_to = len;
+  }
+
+  /// Rebuild the cached line start on the next read: a rewrite has moved or
+  /// inserted newlines behind the incremental scan point.
+  #[inline]
+  fn invalidate_line_start(&mut self) {
+    self.line_start_scanned_to = usize::MAX;
   }
 
   /// Whether the current line opens a raw HTML block, which suspends Markdown
@@ -2727,7 +2780,7 @@ impl ConvertState {
         if self.depth_map[TAG_BLOCKQUOTE as usize] > 0
           || (self.depth_map[TAG_LI as usize] > 0 && !self.in_table_cell())
         {
-          let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
+          let last_char = self.last_output_byte().unwrap_or(0);
           if last_char != 0 && last_char != b' ' && last_char != b'\n' {
             return Some(Cow::Borrowed("\n\n"));
           }
@@ -2952,6 +3005,7 @@ impl ConvertState {
             // so the reach-back would drop the next text's leading char.
             let trimmed_len = trim_ascii_whitespace_end(frag);
             if start + trimmed_len < buf_len {
+              self.clamp_item_marker_end(start + trimmed_len);
               self.buffer.truncate(start + trimmed_len);
               // The run just shrank; a stale length lets the next trim start
               // behind it and reach into spacing no text node wrote.
