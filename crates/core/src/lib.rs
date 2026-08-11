@@ -162,6 +162,10 @@ mod drain_equiv {
     r#"<p>Visit <a href="https://x.io">https://x.io</a> today.</p>"#,
     r##"<h2><a href="#section">Section</a></h2><p>body</p>"##,
     r#"<p>link <a href="https://example.com">https://example.com</a> end</p>"#,
+    // Nested deep enough that the continuation indent alone outgrows the
+    // retained tail: the cut then lands inside the indent the block separation
+    // reads, and the paragraph break collapses to a space.
+    "<li><ul><li><ul><li><ul><li><ul><li><ul><li><p>q<br>\n<p>X",
   ];
 
   fn stream(html: &str, chunk: usize, opts: HTMLToMarkdownOptions, disable_drain: bool) -> String {

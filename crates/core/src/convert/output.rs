@@ -305,6 +305,46 @@ impl ConvertState {
       }
     }
 
+    // Every line gains a quote prefix, so an offset inside the content moves by
+    // however many prefixes precede it -- the same remapping the fragment links
+    // above need. A code span or fence measures and rewrites itself through its
+    // offsets too, and left unmapped they point into the middle of the quoted
+    // text, or of a character, and panic the slice that builds the delimiter.
+    let quoted_end = frame.content_start + quoted.len();
+    let remap = |offset: usize| -> usize {
+      if offset < frame.content_start {
+        offset
+      } else if offset <= content_end {
+        frame.content_start
+          + Self::blockquote_offset(content, &frame.list_indent, offset - frame.content_start)
+      } else {
+        // Past the trimmed content there is nothing left to point at.
+        quoted_end
+      }
+    };
+    for span in &mut self.code_spans {
+      for offset in [&mut span.output_start, &mut span.content_start] {
+        *offset = remap(*offset);
+      }
+    }
+    if let Some(fence) = &mut self.code_fence {
+      // Held relative to `output_start`, and a prefix can land between the two,
+      // so the marker is remapped on its own and the offset rebuilt from it.
+      let mut offsets = [
+        fence.output_start,
+        fence.content_start,
+        fence.output_start + fence.marker_offset,
+      ];
+      for offset in &mut offsets {
+        *offset = remap(*offset);
+      }
+      [fence.output_start, fence.content_start, fence.marker_offset] = [
+        offsets[0],
+        offsets[1],
+        offsets[2].saturating_sub(offsets[0]),
+      ];
+    }
+
     self.buffer.truncate(frame.content_start);
     self.buffer.push_str(&quoted);
     self.last_content_cache_len = quoted.len();
@@ -324,6 +364,14 @@ impl ConvertState {
     let Some(mut flush_end) = self.buffer.rfind('\n').map(|index| index + 1) else {
       return;
     };
+    // A blank line at the tail is not final: whether it keeps a `>` depends on
+    // content that has not arrived, and `finalize_blockquote` trims it off the
+    // buffer end when none does. Quoting it here commits a prefix one-shot never
+    // writes, so leave it for a later flush or for the close to decide.
+    let bytes = self.buffer.as_bytes();
+    while flush_end >= 2 && bytes[flush_end - 1] == b'\n' && bytes[flush_end - 2] == b'\n' {
+      flush_end -= 1;
+    }
     if self
       .blockquotes
       .iter()
@@ -643,7 +691,14 @@ impl ConvertState {
     // bracket in O(1) instead of scanning forward.
     if tag_id == Some(TAG_A) {
       let buf_len = self.buffer.len();
-      self.link_bracket_pos = if buf_len > 0 && self.buffer.as_bytes()[buf_len - 1] == b'[' {
+      // Only a bracket this element just emitted counts. Testing the buffer's
+      // last byte alone also matches the `[` of an escaped literal `\[` in the
+      // text before the link, and the empty-link drop then truncates into that
+      // text instead of the link it meant to remove.
+      self.link_bracket_pos = if output
+        .as_deref()
+        .is_some_and(|o| o.as_bytes().last() == Some(&b'['))
+      {
         buf_len - 1
       } else {
         buf_len
@@ -1680,6 +1735,27 @@ impl ConvertState {
         *content_start += 1;
       }
     }
+    // A code span or fence measures and rewrites itself through these offsets,
+    // so an insertion before them leaves both pointing a byte early -- far
+    // enough to land inside a multi-byte character and panic the slice that
+    // builds the closing delimiter.
+    for span in &mut self.code_spans {
+      if span.output_start >= at {
+        span.output_start += 1;
+      }
+      if span.content_start >= at {
+        span.content_start += 1;
+      }
+    }
+    if let Some(fence) = &mut self.code_fence {
+      // `marker_offset` is relative to `output_start`, so it rides along.
+      if fence.output_start >= at {
+        fence.output_start += 1;
+      }
+      if fence.content_start >= at {
+        fence.content_start += 1;
+      }
+    }
     self.line_start_scanned_to = usize::MAX;
     self.raw_html_scanned_to = self.raw_html_scanned_to.min(at);
   }
@@ -1894,6 +1970,13 @@ impl ConvertState {
     let floor = self.trim_floor();
     if self.buffer.len() > floor {
       let trimmed_len = floor + self.buffer[floor..].trim_end_matches(' ').len();
+      // The cached run just lost its tail. Left stale, the length outruns the
+      // buffer wherever a drain has already cut the front, and the reach-back
+      // trim's `cache_len <= buf_len` guard then skips a retraction one-shot
+      // performs, keeping block spacing an empty element wrote.
+      self.last_content_cache_len = self
+        .last_content_cache_len
+        .saturating_sub(self.buffer.len() - trimmed_len);
       self.buffer.truncate(trimmed_len);
     }
   }
@@ -1949,12 +2032,24 @@ impl ConvertState {
     // with a tag the real line only continues, which suspends Markdown and drops
     // the escapes a one-shot conversion writes.
     if self.line_start == 0 && self.has_flushed_tail() && self.flushed_tail[1] != b'\n' {
-      return self.cut_line_lead == CutLineLead::RawHtml;
+      return match self.cut_line_lead {
+        CutLineLead::RawHtml => true,
+        // The cut fell inside this line's indent, so the fragment's own spaces
+        // continue a run that started before it -- and three is all the run may
+        // total, however it is split across cuts.
+        CutLineLead::Blank(already) => {
+          let line = &bytes[..len];
+          let own = line.iter().take_while(|&&byte| byte == b' ').count();
+          (already as usize).saturating_add(own) <= RAW_HTML_MAX_INDENT as usize
+            && line.get(own) == Some(&b'<')
+        }
+        CutLineLead::Row | CutLineLead::Content | CutLineLead::Uncut => false,
+      };
     }
     let line = &bytes[self.line_start..len];
     let indent = line
       .iter()
-      .take(3)
+      .take(RAW_HTML_MAX_INDENT as usize)
       .take_while(|&&byte| byte == b' ')
       .count();
     line.get(indent) == Some(&b'<')
@@ -2858,6 +2953,9 @@ impl ConvertState {
             let trimmed_len = trim_ascii_whitespace_end(frag);
             if start + trimmed_len < buf_len {
               self.buffer.truncate(start + trimmed_len);
+              // The run just shrank; a stale length lets the next trim start
+              // behind it and reach into spacing no text node wrote.
+              self.last_content_cache_len = trimmed_len;
               if !is_enter && is_inline {
                 self.pending_inline_whitespace = true;
               }
@@ -3040,7 +3138,7 @@ impl ConvertState {
       match self.cut_line_lead {
         CutLineLead::Row => return LineBeforeRow::Row,
         CutLineLead::RawHtml | CutLineLead::Content => return LineBeforeRow::Content,
-        CutLineLead::Uncut | CutLineLead::Blank => {}
+        CutLineLead::Uncut | CutLineLead::Blank(_) => {}
       }
     }
     match line.get(start) {
@@ -3105,7 +3203,7 @@ mod tests {
     state.has_streamed_output = true;
     // A drain is what puts bytes behind `buffer[0]`; yielding alone does not, and
     // the counting below may only read `flushed_tail` once one has happened.
-    state.cut_line_lead = CutLineLead::Blank;
+    state.cut_line_lead = CutLineLead::Blank(0);
     state.flushed_tail = [b'\n', b'\n'];
 
     state.write_output(true, false, 2, Some("next"), false);

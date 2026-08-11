@@ -5,8 +5,10 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use mdream::MarkdownStreamProcessor;
-use mdream::html_to_markdown;
-use mdream::types::{CleanConfig, HTMLToMarkdownOptions, PluginConfig, TagOverrideConfig};
+use mdream::types::{
+  CleanConfig, HTMLToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
+};
+use mdream::{html_to_format_result, html_to_markdown};
 
 // ── Peak-allocation tracking allocator ──
 // Streaming must free already-yielded output; a criterion/time bench can't show
@@ -720,6 +722,80 @@ fn streaming_holds_mutable_trailing_pre_whitespace() {
   }
 }
 
+// An inline marker is held back until its element is known to be non-empty, and
+// with it the whitespace run before it, which a drop-then-trim would take. That
+// run is the whole ASCII set: `<q>` writes a `"` that leaves the `\r` before it
+// no longer trailing, so the `\r` was yielded, then the empty `<q>` was dropped
+// and finalize trimmed back past it -- output one-shot never wrote. Needs
+// `<pre>` (elsewhere the `\r` normalises to a space) and text output (a fence
+// would leave the run mid-buffer), but the hold applies to every marker.
+#[test]
+fn streaming_holds_full_whitespace_run_before_a_droppable_marker() {
+  for html in ["<pre>a\r<q>", "<pre>a\t<q>", "<pre>a \r<q>", "<pre>a\r<em>"] {
+    let expected =
+      html_to_format_result(html, HTMLToMarkdownOptions::default(), OutputFormat::Text).markdown;
+    for chunk in 1..=html.len() {
+      let mut p = MarkdownStreamProcessor::new_with_format(
+        HTMLToMarkdownOptions::default(),
+        OutputFormat::Text,
+      );
+      let mut actual = String::new();
+      for c in html.as_bytes().chunks(chunk) {
+        actual.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+      }
+      actual.push_str(&p.finish());
+      assert_eq!(actual, expected, "chunk={chunk} html={html:?}");
+    }
+  }
+}
+
+// A block boundary trims the trailing spaces of the run before it, and the
+// cached run length has to shrink with them. Left stale, it outruns the buffer
+// wherever a drain has already cut the front, and the reach-back trim's
+// `cache_len <= buf_len` guard then skips the retraction entirely -- so the
+// block spacing the empty `<ol/>` wrote survived as `\n\n` where one-shot
+// retracts it to the pending space of the run it replaced. One-shot escapes the
+// stale length only because nothing has left its buffer, leaving the count exact
+// by coincidence.
+#[test]
+fn streaming_retracts_empty_block_spacing_after_a_space_trim() {
+  let html = "<pre>ace><source>tity;      <ol/> <d/>*";
+  let expected =
+    html_to_format_result(html, HTMLToMarkdownOptions::default(), OutputFormat::Text).markdown;
+  assert_eq!(expected, "ace>tity; *");
+  for chunk in 1..=html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(
+      HTMLToMarkdownOptions::default(),
+      OutputFormat::Text,
+    );
+    let mut actual = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      actual.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    actual.push_str(&p.finish());
+    assert_eq!(actual, expected, "chunk={chunk} html={html:?}");
+  }
+}
+
+// A heading's exit escapes the trailing `#` run GFM would read as an ATX closing
+// sequence, so the run must stay held while the heading is open. `<em>` writes a
+// `*` after the run, which left it no longer trailing at the buffer end and
+// released it -- then the empty `<em>` was dropped, the run became trailing
+// again, and the exit inserted its `\` into bytes already sent. The stray byte
+// surfaced at the far end: `- ####` for one-shot's `- \###`.
+#[test]
+fn streaming_holds_heading_hashes_behind_a_droppable_marker() {
+  for html in [
+    "<li><h3><em>",
+    "<h3><em>",
+    "<h3>a #<em>",
+    "<li><h3><a href=/u>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
 // Inside a list item a nested block renders on one line (NO_SPACING). A word,
 // a <br>, then that block: once the word has been drained out of the buffer the
 // inter-token space it anchored sat at the buffer start and was trimmed away,
@@ -1220,5 +1296,247 @@ fn trailing_nbsp_is_content_and_matches_one_shot() {
     );
     assert_stream_matches(html, HTMLToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// Every trim that reaches back into the buffer takes the whole ASCII
+// whitespace set, but the yield boundary only held back `\n` and spaces, so a
+// trailing tab was sent and then trimmed from the buffer alone.
+#[test]
+fn trailing_tab_is_held_back_like_a_space() {
+  for html in ["$&#9", "$&#9;", "a&#9;&#9;", "x&Tab;"] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// A `<pre>` writes its block spacing on open but the fence only when content
+// arrives. Treating the element as open was enough to skip the trailing-newline
+// hold, so an empty one yielded spacing that finalize then trimmed.
+#[test]
+fn empty_pre_does_not_yield_block_spacing_finalize_trims() {
+  for html in [
+    "S<pre>",
+    "><pre>",
+    "S<pre></pre>",
+    "S<pre>  </pre>",
+    "S<pre></pre><pre>",
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// `link_bracket_pos` marks where an empty link is truncated back to. It was
+// taken from the buffer's last byte being `[`, which is also true of an escaped
+// literal `\[` in the text before the link, so the drop cut into that text and
+// left its backslash stranded.
+#[test]
+fn empty_link_text_drop_keeps_a_preceding_escaped_bracket() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_link_text: true,
+      ..CleanConfig::default()
+    }),
+    ..Default::default()
+  };
+  for html in ["[<A/>", "[<a></a>", "a [ <a href=\"/x\"></a>", "\\[<a></a>"] {
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
+  }
+  assert_eq!(html_to_markdown("[<A/>", opts), "\\[");
+}
+
+// A line's indent can be split across cuts, and the three-space limit on what
+// may precede the `<` that suspends Markdown counts from the line's real start.
+// The `<dd>` here sits under five spaces, two of which leave with the drain: a
+// fragment read on its own opens with three spaces and a tag, claiming a
+// suspension the whole line never had and dropping the `\[` one-shot writes.
+#[test]
+fn streaming_counts_raw_html_indent_across_a_drain() {
+  let html = "<lI><dd/L><oL><lI><oL><I><hr><dd/L>%%&<lI><<o>[";
+  assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+}
+
+// Inside a raw-HTML region Markdown escaping is suspended until a blank line
+// closes it, so a drain has to record whether the line it cuts opened such a
+// region. The `<dd>` here sits under five spaces of indent, three more than can
+// open one, so the escapes stay -- but a lead classified from the first
+// non-blank byte alone reads that `<` as a suspension and drops them, leaving a
+// bare `[` that gives the output a link the source never had. Drain-only.
+#[test]
+fn raw_html_escape_suspension_survives_a_drain() {
+  let chunks = [
+    "<l",
+    "I\r><d",
+    "L>d<o",
+    "L>",
+    "",
+    "\r",
+    "<l",
+    "I>%&<hr><dd/L>\u{7}%",
+    "\0\0\0\0\0\0<\u{18}<<o",
+    "L>/[\u{18}\u{7}]",
+  ];
+  let html: String = chunks.concat();
+  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  let mut p = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut actual = String::new();
+  for c in chunks {
+    actual.push_str(&p.process_chunk(c));
+  }
+  actual.push_str(&p.finish());
+  assert_eq!(actual, expected);
+}
+
+// A reach-back trim shrinks the last content run, so the cached length must
+// shrink too: left stale, the next trim starts behind the run and eats block
+// spacing the stream already yielded. Text output only -- a fence makes the run
+// real content, so nothing reaches back over it.
+#[test]
+fn streaming_survives_two_reach_back_trims_over_one_run() {
+  let long = "a < b".repeat(18);
+  let cases = [
+    // Second trim is a block exit, which drops the spacing outright.
+    (
+      "through\"><=>><h><pre>     \n\n\r\n\r\n\r\n\r\n<source> <source>>".to_string(),
+      HTMLToMarkdownOptions::default(),
+    ),
+    // Second trim is an inline exit, which leaves a pending space behind: the
+    // stream kept a bare `\r` where one-shot wrote that space. Straight from
+    // fuzz_html_grammar and not reducible -- both nested `<pre>`s and the run
+    // that overflows the wrap width are load-bearing.
+    (
+      format!(
+        "<h3 id=># not a heading</tr></pre><pre colspan=\"text-red-500 font-bold line-through\">\
+         <h3 src=>\r\n\r\n\r\n[link] (paren)<script/>\r\n\r\n\r\n\r\n\r\n<h1 src=><td id=>\r\n\r\n\
+         <pre>\r\n\r\n<source> <source>       \n\n<source> </DIV><h1 src=>\r\n\r\n<DIV></main>\r\n\r\n\
+         {long}\r\n\r\n</pre>"
+      ),
+      HTMLToMarkdownOptions {
+        origin: Some("https://example.com/base/".to_string()),
+        clean_urls: true,
+        clean: Some(safe_clean()),
+        wrap_width: 123,
+        ..Default::default()
+      },
+    ),
+  ];
+  for (html, opts) in cases {
+    let expected = html_to_format_result(&html, opts.clone(), OutputFormat::Text).markdown;
+    for chunk in 1..=html.len() {
+      let mut p = MarkdownStreamProcessor::new_with_format(opts.clone(), OutputFormat::Text);
+      let mut actual = String::new();
+      let mut start = 0;
+      while start < html.len() {
+        let mut end = (start + chunk).min(html.len());
+        while end < html.len() && !html.is_char_boundary(end) {
+          end += 1;
+        }
+        actual.push_str(&p.process_chunk(&html[start..end]));
+        start = end;
+      }
+      actual.push_str(&p.finish());
+      assert_eq!(actual, expected, "chunk={chunk} html={html:?}");
+    }
+  }
+}
+
+// Inside a rawtext element a `</` whose tag name runs past the chunk end is
+// carried to the next chunk, but the text before it is already buffered. Not
+// advancing the carry point re-fed that text, so a one-shot pass emitted it
+// twice while a stream, having consumed it in an earlier chunk, emitted it once.
+#[test]
+fn rawtext_close_tag_split_across_chunks_is_carried_without_its_text() {
+  for tail in [
+    "<textarea>></",
+    "<textarea>x</",
+    "<textarea>x</textare",
+    "<title>x</",
+    "<style>x</",
+  ] {
+    // Enough unclosed inline elements to hold the yield boundary back, so the
+    // carry lands mid-document rather than at a fresh buffer.
+    let html = format!("{}{tail}", "<s><Q>".repeat(400));
+    for format in [OutputFormat::Text, OutputFormat::Markdown] {
+      let expected =
+        html_to_format_result(&html, HTMLToMarkdownOptions::default(), format).markdown;
+      for chunk in 1..=3 {
+        let mut p =
+          MarkdownStreamProcessor::new_with_format(HTMLToMarkdownOptions::default(), format);
+        let mut actual = String::new();
+        let mut start = 0;
+        while start < html.len() {
+          let end = (start + chunk).min(html.len());
+          actual.push_str(&p.process_chunk(&html[start..end]));
+          start = end;
+        }
+        actual.push_str(&p.finish());
+        assert_eq!(
+          actual, expected,
+          "chunk={chunk} tail={tail:?} format={format:?}"
+        );
+      }
+    }
+  }
+}
+
+// The rawtext EOF residual is committed by `finalize`, which both paths share, so
+// streaming has to keep the text one-shot now keeps. Pin the value, not just the
+// parity: before the fix both paths dropped it and agreed on the wrong output.
+// Every split matters because the boundary is what produces the residual.
+#[test]
+fn streaming_matches_one_shot_on_a_rawtext_eof_residual() {
+  for (truncated, closed) in [
+    ("<textarea>a<", "<textarea>a<</textarea>"),
+    ("<textarea>a</", "<textarea>a</</textarea>"),
+    ("<textarea>a</tex", "<textarea>a</tex</textarea>"),
+    ("<textarea>></", "<textarea>></</textarea>"),
+    ("<xmp>a</", "<xmp>a</</xmp>"),
+    ("<title>a</", "<title>a</</title>"),
+  ] {
+    let expected = html_to_markdown(closed, HTMLToMarkdownOptions::default());
+    for chunk in 1..=truncated.len() {
+      assert_eq!(
+        stream_chunks(truncated, chunk, HTMLToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} truncated={truncated:?}"
+      );
+    }
+    assert_stream_matches_every_split(truncated, HTMLToMarkdownOptions::default());
+  }
+
+  // The one residual EOF still discards: an appropriate end tag already delimited.
+  assert_stream_matches("<textarea>a</textarea ", HTMLToMarkdownOptions::default());
+  assert_eq!(
+    stream_chunks(
+      "<textarea>a</textarea ",
+      1,
+      HTMLToMarkdownOptions::default()
+    ),
+    "a"
+  );
+}
+
+// Once the buffer passes the flush threshold, streaming pre-quotes every
+// complete line of open blockquote content. A blank line at the tail is not
+// complete in that sense: whether it keeps a `>` depends on content that has not
+// arrived, and `finalize_blockquote` trims it off the buffer end when none does.
+// Quoting it early appended a stray `>` line no one-shot output contains. Needs
+// content past the 8 KiB threshold, then a block that leaves the quote on a
+// blank line -- and the `>` must still appear when content does follow.
+#[test]
+fn streaming_holds_a_blockquote_blank_line_until_content_follows() {
+  for tail in ["<p>", "<div>", "<html>", "<blockquote>", "<p>y</p>", "<p>y"] {
+    let html = format!("a<blockquote>{}{tail}", "x".repeat(8192));
+    let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+    for chunk in [1usize, 7, 64, 4096] {
+      assert_eq!(
+        stream_chunks(&html, chunk, HTMLToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} tail={tail:?}"
+      );
+    }
   }
 }

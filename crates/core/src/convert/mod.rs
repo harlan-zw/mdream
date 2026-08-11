@@ -150,15 +150,24 @@ enum LineBeforeRow {
   Content,
 }
 
+/// What the line a drain cut leads with, so the fragment left behind can still
+/// answer questions about a line whose start it no longer holds.
 #[derive(Clone, Copy, PartialEq)]
-#[repr(u8)]
 enum CutLineLead {
   Uncut,
-  Blank,
+  /// The cut left the line still inside its indent, carrying the number of
+  /// leading spaces already drained. The count matters because only three may
+  /// precede the tag that suspends Markdown, measured from the line's real
+  /// start: the fragment's own spaces continue this run rather than beginning
+  /// one. `RAW_HTML_MAX_INDENT + 1` means "too deep, or not spaces at all".
+  Blank(u8),
   RawHtml,
   Row,
   Content,
 }
+
+/// Deepest space indent a `<` may sit at and still suspend Markdown.
+const RAW_HTML_MAX_INDENT: u8 = 3;
 
 /// Widest `colspan` honored.
 const MAX_CELL_SPAN: u8 = 64;
@@ -375,6 +384,7 @@ pub struct ConvertState {
   just_closed_tag: bool,
   is_first_text_in_element: bool,
   in_non_nesting: bool,
+  rawtext_end_tag_pending: bool,
   script_data_state: u8,
   in_pre: bool,
   overflow_tag_id: Option<u8>,
@@ -573,6 +583,7 @@ impl ConvertState {
       just_closed_tag: false,
       is_first_text_in_element: false,
       in_non_nesting: false,
+      rawtext_end_tag_pending: false,
       script_data_state: SCRIPT_DATA,
       in_pre: false,
       overflow_tag_id: None,
@@ -791,6 +802,7 @@ impl ConvertState {
   /// caller keeps the rest; returning an owned tail instead would copy a token
   /// that spans many chunks once per chunk, which is quadratic.
   pub fn process_html(&mut self, chunk: &str) -> usize {
+    self.rawtext_end_tag_pending = false;
     // Non-empty only when the previous chunk ended mid-text: that run continues
     // here instead of being re-fed as raw input. Every flush leaves it empty.
     let mut text_buffer = std::mem::take(&mut self.parse_text_buffer);
@@ -946,6 +958,9 @@ impl ConvertState {
             peek_end += 1;
           }
           if peek_end == chunk_length {
+            // Text before the `<` is already in `text_buffer`; carry only the
+            // truncated close tag or finalize re-feeds that text and doubles it.
+            run_start = i;
             carry = true;
             break;
           }
@@ -960,6 +975,7 @@ impl ConvertState {
             if result.complete {
               i = result.new_position;
             } else {
+              self.rawtext_end_tag_pending = true;
               carry = true;
               break;
             }
@@ -1011,6 +1027,7 @@ impl ConvertState {
             if result.complete {
               i = result.new_position;
             } else {
+              self.rawtext_end_tag_pending = true;
               carry = true;
               break;
             }
@@ -1285,6 +1302,10 @@ impl ConvertState {
   /// tokenizer's EOF-in-tag behaviour. The text-buffer flags set while the
   /// trailing text was scanned persist on `self`, so `process_text_buffer`
   /// commits it exactly as if the next tag had triggered the flush.
+  ///
+  /// Rawtext is the exception: there `<` opens nothing but this element's own
+  /// end tag, so the residual is text unless it is an appropriate end tag that
+  /// already reached a tag state.
   pub fn finalize(&mut self, leftover: &str) {
     let in_script = self
       .stack
@@ -1295,12 +1316,33 @@ impl ConvertState {
       self.flush_script_text();
       self.script_data_state = SCRIPT_DATA;
     } else {
+      // A rawtext residual continues the text run already pending, so it has to
+      // join that buffer rather than be flushed as a second text node: two nodes
+      // are separated by a space this text never contained.
+      let rawtext_text = leftover.as_bytes().first() == Some(&LT_CHAR)
+        && self.in_non_nesting
+        && !self.rawtext_end_tag_pending;
+      if rawtext_text {
+        self.parse_text_buffer.push_str(leftover);
+        self.text_buffer_contains_non_whitespace = true;
+        // The ordinary rawtext path records these flags byte by byte. Carrying
+        // the residual must preserve them so RCDATA entities still decode and
+        // generated Markdown escapes remain safe.
+        self.text_buffer_has_inline_gfm_hazard |= leftover.as_bytes()[1..]
+          .iter()
+          .any(|&c| GFM_BYTE_FLAGS[c as usize] & GFM_HAZARD_BIT != 0);
+        if self.depth_map[TAG_STYLE as usize] == 0 && leftover.as_bytes().contains(&AMPERSAND_CHAR)
+        {
+          self.has_encoded_html_entity = true;
+        }
+        self.last_char_was_whitespace = false;
+      }
       if !self.parse_text_buffer.is_empty() {
         let mut buf = std::mem::take(&mut self.parse_text_buffer);
         self.process_text_buffer(&mut buf);
         self.parse_text_buffer = buf;
       }
-      if !leftover.is_empty() && leftover.as_bytes()[0] != LT_CHAR {
+      if !rawtext_text && !leftover.is_empty() && leftover.as_bytes()[0] != LT_CHAR {
         let mut buf = leftover.to_string();
         self.process_text_buffer(&mut buf);
       }
@@ -1322,7 +1364,11 @@ impl ConvertState {
     // space. Yielding them would let that later trim silently remove an
     // already-sent byte and shift every byte after it. Always hold them back;
     // they are re-yielded once real content follows, or dropped at finalize.
-    let in_pre = self.depth_map[TAG_PRE as usize] != 0;
+    // The fence is written lazily, so until it opens the `<pre>` has produced
+    // no content and the buffer tail is still the block spacing its own open
+    // wrote. Finalize trims that, so it has to stay held back like any other
+    // block's; only past the fence is trailing whitespace significant code.
+    let in_pre = self.depth_map[TAG_PRE as usize] != 0 && self.pre_fence_open;
     let mut stable_end = self.buffer.trim_end_matches(' ').len();
     if in_pre {
       if self.last_text_node_contains_whitespace {
@@ -1344,8 +1390,10 @@ impl ConvertState {
     } else {
       // A block close or document finalization may still trim trailing block
       // spacing. Keep newlines buffered until following content makes them
-      // stable, since yielded bytes cannot be retracted.
-      stable_end = stable_end.min(self.buffer.trim_end_matches(['\n', ' ']).len());
+      // stable, since yielded bytes cannot be retracted. The trims that reach
+      // back here take the whole ASCII set, so holding only `\n` and ` ` leaks
+      // a trailing tab that a later trim then removes from the buffer alone.
+      stable_end = stable_end.min(trim_ascii_whitespace_end(&self.buffer));
     }
     let leading = if self.preserve_leading_whitespace || self.has_streamed_output {
       0
@@ -1387,8 +1435,19 @@ impl ConvertState {
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
     // closing sequence, so hold the run (and the spacing that decides whether it
     // closes) until the heading is complete.
+    //
+    // Measured against what is about to be yielded, not the whole buffer: an
+    // inline marker written after the run leaves it no longer trailing, and a
+    // marker still droppable is already held back above. Reading the buffer end
+    // instead releases a run that the marker's own drop makes trailing again,
+    // and the exit then inserts its `\` into bytes already sent.
     if self.in_heading() {
-      stable_end = stable_end.min(self.buffer.trim_end_matches(['#', ' ', '\t']).len());
+      let bytes = self.buffer.as_bytes();
+      let mut end = stable_end.min(bytes.len());
+      while end > 0 && matches!(bytes[end - 1], b'#' | b' ' | b'\t') {
+        end -= 1;
+      }
+      stable_end = end;
     }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let mut start = self.last_yielded_length.max(leading);
@@ -1439,11 +1498,14 @@ impl ConvertState {
     // Formatting also inspects the last two bytes to count existing newlines.
     // Keep enough for the widest GFM list marker too: up to three spaces, nine
     // digits, a delimiter, and a trailing space. Row separation can then still
-    // recognize a marker after earlier output has drained.
+    // recognize a marker after earlier output has drained. Inside a list that
+    // marker is preceded by the continuation indent, and the separation logic
+    // reads the whole line lead, so the indent has to survive the cut as well.
+    let marker_tail = 14 + self.list_indent.len();
     let mut retained_tail_start = self
       .buffer
       .len()
-      .saturating_sub(self.last_content_cache_len.max(14));
+      .saturating_sub(self.last_content_cache_len.max(marker_tail));
     while !self.buffer.is_char_boundary(retained_tail_start) {
       retained_tail_start -= 1;
     }
@@ -1502,30 +1564,7 @@ impl ConvertState {
     };
     // Remember what the line being cut leads with; a line opened before an
     // earlier drain keeps that answer across successive cuts.
-    self.cut_line_lead = if bytes[drain_end - 1] == b'\n' {
-      CutLineLead::Blank
-    } else {
-      let (line, inherited) = match bytes[..drain_end].iter().rposition(|b| *b == b'\n') {
-        Some(at) => (&bytes[at + 1..drain_end], CutLineLead::Blank),
-        None => (&bytes[..drain_end], self.cut_line_lead),
-      };
-      if matches!(
-        inherited,
-        CutLineLead::RawHtml | CutLineLead::Row | CutLineLead::Content
-      ) {
-        inherited
-      } else {
-        line
-          .iter()
-          .copied()
-          .find(|b| !matches!(b, b' ' | b'\t'))
-          .map_or(CutLineLead::Blank, |byte| match byte {
-            b'<' => CutLineLead::RawHtml,
-            b'|' => CutLineLead::Row,
-            _ => CutLineLead::Content,
-          })
-      }
-    };
+    self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
     self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);
@@ -1554,15 +1593,69 @@ impl ConvertState {
   }
 }
 
-/// Highest offset that holds back everything from `at`, plus the blank run just
-/// before it that a rewrite reaching back there can trim. Floored like
+impl ConvertState {
+  /// What the line ending at `drain_end` leads with, given what an earlier cut
+  /// of the same line already found. `previous` makes the indent additive: a
+  /// line's leading spaces can be split across any number of drains, and the
+  /// rule that only three of them may precede the `<` suspending Markdown
+  /// counts from the line's real start. Read each fragment's indent on its own
+  /// and a line indented past three claims a suspension it never had, dropping
+  /// the escapes one-shot writes.
+  fn classify_cut_line(bytes: &[u8], drain_end: usize, previous: CutLineLead) -> CutLineLead {
+    if bytes[drain_end - 1] == b'\n' {
+      // The cut ends the line, so the next one starts fresh at column zero.
+      return CutLineLead::Blank(0);
+    }
+    let (line, already) = match bytes[..drain_end].iter().rposition(|b| *b == b'\n') {
+      // The line starts inside the drained bytes, so its indent starts there.
+      Some(at) => (&bytes[at + 1..drain_end], 0),
+      // It began before this cut: a lead already decided stands, and one still
+      // inside the indent carries that count on.
+      None => match previous {
+        CutLineLead::RawHtml => return CutLineLead::RawHtml,
+        CutLineLead::Row => return CutLineLead::Row,
+        CutLineLead::Content => return CutLineLead::Content,
+        CutLineLead::Blank(n) => (&bytes[..drain_end], n),
+        CutLineLead::Uncut => (&bytes[..drain_end], 0),
+      },
+    };
+    let own = line.iter().take_while(|&&b| b == b' ').count();
+    let indent = usize::from(already).saturating_add(own);
+    match line.get(own) {
+      // Still nothing but spaces, so the count continues past this cut too. Any
+      // indent past the limit is equally too deep, so one value stands for them
+      // all and the count never has to grow beyond a byte.
+      None => CutLineLead::Blank(
+        u8::try_from(indent)
+          .unwrap_or(u8::MAX)
+          .min(RAW_HTML_MAX_INDENT + 1),
+      ),
+      Some(&b'<') if indent <= usize::from(RAW_HTML_MAX_INDENT) => CutLineLead::RawHtml,
+      _ => match line.iter().copied().find(|b| !matches!(b, b' ' | b'\t')) {
+        Some(b'|') => CutLineLead::Row,
+        Some(_) => CutLineLead::Content,
+        // Blank, but with a tab in it: no space count describes this indent, so
+        // record one that can never open a raw block.
+        None => CutLineLead::Blank(RAW_HTML_MAX_INDENT + 1),
+      },
+    }
+  }
+}
+
+/// Highest offset that holds back everything from `at`, plus the whitespace run
+/// just before it that a rewrite reaching back there can trim. Floored like
 /// `keep_two_before`, so a drifted `at` never slices mid-codepoint.
+///
+/// The run is the whole ASCII set, not just `\n` and ` `: the rewrites that
+/// reach back here drop the marker and then trim with `trim_ascii_whitespace_end`
+/// (a block close, or the document's own finalize). Holding the narrower set
+/// yields a `\r` or a tab that the later trim removes from the buffer alone.
 fn hold_before(buf: &str, at: usize) -> usize {
   let mut i = at.min(buf.len());
   while !buf.is_char_boundary(i) {
     i -= 1;
   }
-  buf[..i].trim_end_matches(['\n', ' ']).len()
+  trim_ascii_whitespace_end(&buf[..i])
 }
 
 /// Highest offset that still keeps the two bytes before `at` in the buffer, for
