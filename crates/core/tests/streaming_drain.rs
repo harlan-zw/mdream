@@ -1639,3 +1639,25 @@ fn streaming_separates_a_paragraph_from_text_it_has_already_yielded() {
     assert_eq!(actual, expected, "chunk={chunk}");
   }
 }
+
+// A blank line breaks an open raw-HTML region, which the escape gate reads off a
+// scan cursor holding an absolute buffer offset. Quoting a large blockquote's
+// completed lines in place grows that region, moving every byte after it, so the
+// cursor pointed short of where it had scanned to and the window reached back to
+// a blank line from before the region opened -- escaping a `[` one-shot passes
+// through. The text run crosses the flush threshold before `<dl>` opens.
+#[test]
+fn streaming_keeps_the_raw_html_blank_line_scan_aligned_across_quoting() {
+  let html = format!(
+    "{}<blockquote>xxxxxxxx>xxxxxxxxxxxxxxxxxx>xxxxxxxxxxxxxxxx>xxx>xxx>xxx<h3>xx><h3><h3><h3><dl>xxxxxxxx><x>[",
+    "x".repeat(8100)
+  );
+  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  for chunk in [512, 4096] {
+    assert_eq!(
+      stream_chars(&html, chunk, HTMLToMarkdownOptions::default()),
+      expected,
+      "chunk={chunk}"
+    );
+  }
+}

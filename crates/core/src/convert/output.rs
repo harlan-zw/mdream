@@ -348,8 +348,10 @@ impl ConvertState {
       ];
     }
 
+    self.scan_before_requote(content_end);
     self.buffer.truncate(frame.content_start);
     self.buffer.push_str(&quoted);
+    self.shift_raw_html_scan(content_end, quoted_end);
     self.last_content_cache_len = quoted.len();
     self.blockquote_scratch = quoted;
     // Quoting inserted a `> ` and a newline per line, so a line the scan had
@@ -414,8 +416,11 @@ impl ConvertState {
         }
         quoted.push('\n');
       }
+      self.scan_before_requote(flush_end);
       self.buffer.replace_range(shared_start..flush_end, &quoted);
-      flush_end = shared_start + quoted.len();
+      let quoted_end = shared_start + quoted.len();
+      self.shift_raw_html_scan(flush_end, quoted_end);
+      flush_end = quoted_end;
       self.blockquote_scratch = quoted;
       for frame in &mut self.blockquotes {
         frame.content_start = flush_end;
@@ -425,6 +430,10 @@ impl ConvertState {
       return;
     }
 
+    // Every frame re-quotes the same region, so only the first pass sees the
+    // bytes unquoted; the rest just move them further.
+    let unquoted_end = flush_end;
+    self.scan_before_requote(unquoted_end);
     // Taken once for the whole walk: every frame rewrites the same region again,
     // so without this each nesting level allocates its own copy of it per flush.
     let mut quoted = core::mem::take(&mut self.blockquote_scratch);
@@ -453,6 +462,7 @@ impl ConvertState {
       flush_end = frame.content_start + quoted.len();
     }
     self.blockquote_scratch = quoted;
+    self.shift_raw_html_scan(unquoted_end, flush_end);
 
     for frame in &mut self.blockquotes {
       frame.content_start = flush_end;
@@ -2025,6 +2035,26 @@ impl ConvertState {
       self.clamp_item_marker_end(trimmed_len);
       self.buffer.truncate(trimmed_len);
     }
+  }
+
+  // The blank-line scan holds an absolute buffer offset, so quoting has to scan
+  // the bytes it is about to move while they still read the way one-shot sees
+  // them. Call before the rewrite, `shift_raw_html_scan` after it.
+  fn scan_before_requote(&mut self, old_end: usize) {
+    if self.raw_html_scanned_to < old_end && self.in_raw_html_block() {
+      self.track_raw_html_markdown_context(old_end);
+    }
+  }
+
+  // Quoting `[_, old_end)` into `[_, new_end)` moves every byte after it.
+  fn shift_raw_html_scan(&mut self, old_end: usize, new_end: usize) {
+    self.raw_html_scanned_to = if self.raw_html_scanned_to < old_end {
+      // A blank line among the quoted bytes is a `>` line now, which the scan
+      // would not match, and the cursor is rebased before it is next read.
+      new_end
+    } else {
+      self.raw_html_scanned_to + new_end - old_end
+    };
   }
 
   #[inline]
