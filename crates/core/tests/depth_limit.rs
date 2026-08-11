@@ -1,6 +1,6 @@
 use mdream::{
   FilterConfig, HTMLToMarkdownOptions, MarkdownStreamProcessor, PluginConfig, TagOverrideConfig,
-  html_to_markdown,
+  TailwindConfig, html_to_markdown,
 };
 
 const LIMIT: usize = 512;
@@ -302,7 +302,7 @@ fn output_neutral_plugins_keep_visible_overflow_content() {
       ..Default::default()
     },
     PluginConfig {
-      tailwind: Some(Default::default()),
+      tailwind: Some(TailwindConfig),
       ..Default::default()
     },
   ] {
@@ -360,7 +360,7 @@ fn hidden_raw_overflow_root_scans_as_raw_text() {
       ..Default::default()
     },
     PluginConfig {
-      tailwind: Some(Default::default()),
+      tailwind: Some(TailwindConfig),
       ..Default::default()
     },
   ] {
@@ -388,7 +388,7 @@ fn only_plugin_hidden_subtrees_start_opaque_overflow() {
       ..Default::default()
     },
     PluginConfig {
-      tailwind: Some(Default::default()),
+      tailwind: Some(TailwindConfig),
       ..Default::default()
     },
   ] {

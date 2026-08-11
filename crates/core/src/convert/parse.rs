@@ -556,8 +556,8 @@ impl ConvertState {
       if tw.hidden {
         excludes_text_nodes = true;
       } else if !excludes_text_nodes {
-        tailwind_prefix = tw.prefix.clone();
-        tailwind_suffix = tw.suffix.clone();
+        tailwind_prefix.clone_from(&tw.prefix);
+        tailwind_suffix.clone_from(&tw.suffix);
       }
     }
 

@@ -1,12 +1,16 @@
 use std::time::Instant;
 
+fn usize_as_f64(value: usize) -> f64 {
+  f64::from(u32::try_from(value).expect("benchmark value fits in u32"))
+}
+
 fn bench(
   label: &str,
   html: &str,
-  opts: mdream::types::HTMLToMarkdownOptions,
+  opts: &mdream::types::HTMLToMarkdownOptions,
   iterations: u32,
 ) -> f64 {
-  let size_kb = html.len() as f64 / 1024.0;
+  let size_kb = usize_as_f64(html.len()) / 1024.0;
   for _ in 0..50 {
     let _ = mdream::html_to_markdown(html, opts.clone());
   }
@@ -16,7 +20,7 @@ fn bench(
     for _ in 0..iterations {
       let _ = mdream::html_to_markdown(html, opts.clone());
     }
-    let us = start.elapsed().as_micros() as f64 / f64::from(iterations);
+    let us = start.elapsed().as_secs_f64() * 1_000_000.0 / f64::from(iterations);
     if us < best {
       best = us;
     }
@@ -43,8 +47,8 @@ fn utf8_chunks(s: &str, target: usize) -> Vec<&str> {
 }
 
 /// Stream `html` in `chunk`-sized pieces, discarding output like the wire.
-fn run_stream(html: &str, opts: mdream::types::HTMLToMarkdownOptions, chunk: usize) -> usize {
-  let mut p = mdream::MarkdownStreamProcessor::new(opts);
+fn run_stream(html: &str, opts: &mdream::types::HTMLToMarkdownOptions, chunk: usize) -> usize {
+  let mut p = mdream::MarkdownStreamProcessor::new(opts.clone());
   let mut produced = 0usize;
   for piece in utf8_chunks(html, chunk) {
     produced += p.process_chunk(piece).len();
@@ -55,21 +59,21 @@ fn run_stream(html: &str, opts: mdream::types::HTMLToMarkdownOptions, chunk: usi
 fn bench_stream(
   label: &str,
   html: &str,
-  opts: mdream::types::HTMLToMarkdownOptions,
+  opts: &mdream::types::HTMLToMarkdownOptions,
   chunk: usize,
   iterations: u32,
 ) {
-  let size_kb = html.len() as f64 / 1024.0;
+  let size_kb = usize_as_f64(html.len()) / 1024.0;
   for _ in 0..20 {
-    let _ = run_stream(html, opts.clone(), chunk);
+    let _ = run_stream(html, opts, chunk);
   }
   let mut best = f64::MAX;
   for _ in 0..3 {
     let start = Instant::now();
     for _ in 0..iterations {
-      let _ = run_stream(html, opts.clone(), chunk);
+      let _ = run_stream(html, opts, chunk);
     }
-    let us = start.elapsed().as_micros() as f64 / f64::from(iterations);
+    let us = start.elapsed().as_secs_f64() * 1_000_000.0 / f64::from(iterations);
     if us < best {
       best = us;
     }
@@ -145,13 +149,8 @@ fn main() {
   );
 
   for (label, html) in &fixtures {
-    let d = bench(
-      &format!("{label} default"),
-      html,
-      default_opts.clone(),
-      iters,
-    );
-    let c = bench(&format!("{label} clean"), html, clean_opts.clone(), iters);
+    let d = bench(&format!("{label} default"), html, &default_opts, iters);
+    let c = bench(&format!("{label} clean"), html, &clean_opts, iters);
     let overhead = ((c - d) / d) * 100.0;
     // Reprint as table row
     println!(
@@ -178,14 +177,14 @@ fn main() {
       bench_stream(
         &format!("{label} default @ {}KB", chunk / 1024),
         html,
-        default_opts.clone(),
+        &default_opts,
         chunk,
         iters,
       );
       bench_stream(
         &format!("{label} clean @ {}KB", chunk / 1024),
         html,
-        stream_clean_opts.clone(),
+        &stream_clean_opts,
         chunk,
         iters,
       );

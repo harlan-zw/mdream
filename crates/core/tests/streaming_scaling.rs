@@ -75,7 +75,9 @@ fn allocation_per_byte(html: &str) -> f64 {
   let before = TOTAL.load(Ordering::Relaxed);
   black_box(stream(html));
   let allocated = TOTAL.load(Ordering::Relaxed).saturating_sub(before);
-  allocated as f64 / html.len() as f64
+  let allocated = f64::from(u32::try_from(allocated).expect("allocation count fits in u32"));
+  let input = f64::from(u32::try_from(html.len()).expect("test input length fits in u32"));
+  allocated / input
 }
 
 fn repeat_to(prefix: &str, unit: &str, target: usize, suffix: &str) -> String {

@@ -3,6 +3,7 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
+use std::fmt::Write as _;
 
 use mdream::MarkdownStreamProcessor;
 use mdream::types::{
@@ -168,6 +169,8 @@ fn streamed_output_matches_one_shot() {
 
 // Streaming must equal one-shot for these parse-layer cases (drain-transparent).
 // Each asserts across chunk sizes so a boundary landing anywhere is covered.
+// Owned options keep the many test call sites concise while this helper clones them.
+#[allow(clippy::needless_pass_by_value)]
 fn assert_stream_matches(html: &str, opts: HTMLToMarkdownOptions) {
   let expected = html_to_markdown(html, opts.clone());
   for chunk in 1..=html.len().max(1) {
@@ -179,6 +182,8 @@ fn assert_stream_matches(html: &str, opts: HTMLToMarkdownOptions) {
   }
 }
 
+// Owned options keep the many test call sites concise while this helper clones them.
+#[allow(clippy::needless_pass_by_value)]
 fn assert_stream_matches_every_split(html: &str, opts: HTMLToMarkdownOptions) {
   let expected = html_to_markdown(html, opts.clone());
   for split in (0..=html.len()).filter(|&split| html.is_char_boundary(split)) {
@@ -613,9 +618,8 @@ fn streaming_keeps_trailing_nbsp_before_sibling() {
 fn streaming_keeps_raw_block_close_after_drain() {
   let mut html = String::from("<article>");
   for i in 0..400 {
-    html.push_str(&format!(
-      "<p>Filler paragraph number {i} with some words.</p>"
-    ));
+    write!(html, "<p>Filler paragraph number {i} with some words.</p>")
+      .expect("writing to a String cannot fail");
   }
   html.push_str(
     "<dl><dt>MPN:</dt><dd>D100-V36-PBO-1WZ</dd>\
@@ -640,9 +644,8 @@ fn streaming_keeps_raw_block_close_after_drain() {
 fn drain_filler() -> String {
   let mut s = String::new();
   for i in 0..400 {
-    s.push_str(&format!(
-      "<p>Filler paragraph number {i} with some words.</p>"
-    ));
+    write!(s, "<p>Filler paragraph number {i} with some words.</p>")
+      .expect("writing to a String cannot fail");
   }
   s
 }

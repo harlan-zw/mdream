@@ -2,10 +2,10 @@
 
 #[inline]
 fn extract_base_class(class: &str) -> (&str, u8) {
-  let breakpoints = ["sm:", "md:", "lg:", "xl:", "2xl:"];
-  for (index, bp) in breakpoints.into_iter().enumerate() {
+  let breakpoints = [("sm:", 1), ("md:", 2), ("lg:", 3), ("xl:", 4), ("2xl:", 5)];
+  for (bp, priority) in breakpoints {
     if let Some(rest) = class.strip_prefix(bp) {
-      return (rest, index as u8 + 1);
+      return (rest, priority);
     }
   }
   (class, 0)
@@ -133,11 +133,7 @@ mod tests {
 
   #[test]
   fn decoration_modifiers_do_not_enable_strikethrough() {
-    for classes in [
-      "underline-offset-4",
-      "no-underline",
-      "decoration-underline",
-    ] {
+    for classes in ["underline-offset-4", "no-underline", "decoration-underline"] {
       let (prefix, suffix, _) = process_tailwind_classes(classes);
       assert!(prefix.is_none(), "{classes}");
       assert!(suffix.is_none(), "{classes}");
@@ -146,8 +142,16 @@ mod tests {
 
   #[test]
   fn decoration_resets_follow_breakpoint_priority() {
-    assert!(process_tailwind_classes("line-through no-underline").0.is_none());
-    assert!(process_tailwind_classes("no-underline line-through").0.is_some());
+    assert!(
+      process_tailwind_classes("line-through no-underline")
+        .0
+        .is_none()
+    );
+    assert!(
+      process_tailwind_classes("no-underline line-through")
+        .0
+        .is_some()
+    );
     assert!(
       process_tailwind_classes("md:line-through no-underline")
         .0

@@ -384,7 +384,7 @@ mod tests {
 
     for (tag_id, name) in TAG_NAMES.iter().enumerate() {
       assert_eq!(
-        html_tag_name(tag_id as u8).is_some(),
+        html_tag_name(u8::try_from(tag_id).expect("tag ID fits in u8")).is_some(),
         ALLOWED.contains(name),
         "tag={name}",
       );

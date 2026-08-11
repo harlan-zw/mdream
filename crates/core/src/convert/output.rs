@@ -160,7 +160,7 @@ impl ConvertState {
 
   #[cold]
   #[inline(never)]
-  fn finalize_code_span(&mut self, span: CodeSpanState) -> String {
+  fn finalize_code_span(&mut self, span: &CodeSpanState) -> String {
     // A pipe splits the row even inside a code span; `\|` is GFM's escape and is
     // honoured there. Content sits at the buffer tail, so this shifts no offset.
     if self.depth_map[TAG_TABLE as usize] > 0 && self.buffer[span.content_start..].contains('|') {
@@ -281,10 +281,10 @@ impl ConvertState {
       }
       quoted.push_str(&frame.list_indent);
       quoted.push('>');
-      let unindented = if !frame.list_indent.is_empty() {
-        line.strip_prefix(&frame.list_indent).unwrap_or(line)
-      } else {
+      let unindented = if frame.list_indent.is_empty() {
         line
+      } else {
+        line.strip_prefix(&frame.list_indent).unwrap_or(line)
       };
       if !unindented.is_empty() {
         quoted.push(' ');
@@ -420,10 +420,10 @@ impl ConvertState {
         let line = line.strip_suffix('\n').unwrap_or(line);
         quoted.push_str(&frame.list_indent);
         quoted.push('>');
-        let unindented = if !frame.list_indent.is_empty() {
-          line.strip_prefix(&frame.list_indent).unwrap_or(line)
-        } else {
+        let unindented = if frame.list_indent.is_empty() {
           line
+        } else {
+          line.strip_prefix(&frame.list_indent).unwrap_or(line)
         };
         if !unindented.is_empty() {
           quoted.push(' ');
@@ -1109,7 +1109,7 @@ impl ConvertState {
     }
 
     if let Some(span) = closing_code_span {
-      output = Some(Cow::Owned(self.finalize_code_span(span)));
+      output = Some(Cow::Owned(self.finalize_code_span(&span)));
     }
     if !has_override
       && closes_own_pre_fence
@@ -3187,7 +3187,7 @@ impl ConvertState {
       .get("start")
       .and_then(|value| parse_bounded_u32(value, MAX_ORDERED_START))
       .unwrap_or(1)
-      .saturating_add(index as u32)
+      .saturating_add(u32::try_from(index).unwrap_or(u32::MAX))
       .min(MAX_ORDERED_START)
   }
 }
