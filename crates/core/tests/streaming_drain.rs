@@ -1661,3 +1661,27 @@ fn streaming_keeps_the_raw_html_blank_line_scan_aligned_across_quoting() {
     );
   }
 }
+
+// `flushed_tail` holds the two bytes before `buffer[0]`, so a block boundary can
+// count the newlines already separating it from the last block. A first cut that
+// takes a single byte has no byte two back, and shifting the document-start
+// sentinel into that slot claimed a newline there, cancelling a separator
+// one-shot writes -- joining two list items onto one line.
+#[test]
+fn streaming_does_not_invent_a_newline_behind_a_single_byte_cut() {
+  let html = "<li><pre>x<x>              <x><li>x";
+  let opts = HTMLToMarkdownOptions::default();
+  let expected = html_to_format_result(html, opts.clone(), OutputFormat::Text).markdown;
+  for chunk in 1..=html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(opts.clone(), OutputFormat::Text);
+    let mut actual = String::new();
+    let mut start = 0;
+    while start < html.len() {
+      let end = (start + chunk).min(html.len());
+      actual.push_str(&p.process_chunk(&html[start..end]));
+      start = end;
+    }
+    actual.push_str(&p.finish());
+    assert_eq!(actual, expected, "chunk={chunk}");
+  }
+}
