@@ -1584,6 +1584,35 @@ fn streaming_defers_the_blockquote_flush_while_a_fence_is_open() {
   }
 }
 
+// A code span or fence opened after completed quote lines only owns the output
+// from its delimiter onward. The earlier quote prefix can be finalized and
+// yielded before recording those buffer offsets.
+#[test]
+fn streaming_releases_a_completed_blockquote_prefix_before_open_code() {
+  for container in ["<blockquote>", "<ul><li><blockquote>"] {
+    for open_code in ["<code>x", "<pre>x"] {
+      let html = format!(
+        "{container}{}{open_code}",
+        "<p>quoted line</p>".repeat(1024)
+      );
+      let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let first = stream.process_chunk(&html);
+
+      assert!(
+        first.contains("> quoted line"),
+        "completed quote prefix held behind {open_code:?}"
+      );
+      let mut actual = first;
+      actual.push_str(&stream.finish());
+      assert_eq!(
+        actual, expected,
+        "container={container:?} open_code={open_code:?}"
+      );
+    }
+  }
+}
+
 // A `<p>` inside a list item or blockquote separates itself from the text before
 // it, and asks the buffer's last byte what that text ended with. An empty buffer
 // means the start of the document to that question, but streaming empties the

@@ -425,11 +425,10 @@ impl ConvertState {
       return;
     }
 
-    let frames = self.blockquotes.clone();
     // Taken once for the whole walk: every frame rewrites the same region again,
     // so without this each nesting level allocates its own copy of it per flush.
     let mut quoted = core::mem::take(&mut self.blockquote_scratch);
-    for frame in frames.iter().rev() {
+    for frame in self.blockquotes.iter().rev() {
       let content = &self.buffer[frame.content_start..flush_end];
       quoted.clear();
       quoted.reserve(content.len() + (frame.list_indent.len() + 2) * content.matches('\n').count());
@@ -634,6 +633,19 @@ impl ConvertState {
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
         output = None;
       }
+    }
+
+    // Finalize completed quote lines before recording a new code offset. A
+    // later flush must stop at that offset, but the prefix before it is safe to
+    // quote and yield now even when both arrive in one large input chunk.
+    if !self.plain_text
+      && !enter_is_literal
+      && tag_id == Some(TAG_CODE)
+      && output.is_some()
+      && ((self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block())
+        || (self.depth_map[TAG_PRE as usize] > 0 && !self.pre_fence_open && !self.in_table_cell()))
+    {
+      self.flush_streaming_blockquote_lines();
     }
 
     let output_start = self.buffer.len();
@@ -1191,6 +1203,10 @@ impl ConvertState {
       self.pre_fence_pending = false;
       return;
     }
+
+    // Flush before the fence records buffer offsets. Completed quote lines do
+    // not need to stay retained behind a fence that starts later in this chunk.
+    self.flush_streaming_blockquote_lines();
 
     self.pre_fence_pending = false;
     self.pre_fence_open = true;
