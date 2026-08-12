@@ -906,6 +906,35 @@ fn streaming_text_run_spanning_chunks_matches_every_split() {
   }
 }
 
+// The streaming flush quotes completed blockquote lines once the buffer passes
+// 8KB, so a document has to get that far before it can quote anything early.
+// Deeply nested lists inside a quote get there on continuation indent alone,
+// and the indent is written before anyone knows whether content follows it on
+// that line -- so the buffer tail at a chunk boundary is whitespace a later
+// trim still removes. Quoting it there commits a `> ` prefix one-shot never
+// writes, and a streamed byte cannot be taken back.
+//
+// Reduced from a `fuzz_streaming_chunks` finding. The multibyte characters are
+// load-bearing: they place the chunk boundaries that expose the flush, so the
+// case does not survive being rewritten in ASCII.
+#[test]
+fn streaming_blockquote_flush_holds_unstable_tail() {
+  let html = include_str!("fixtures/streaming-blockquote-flush.html");
+  let expected = html_to_markdown(html, HTMLToMarkdownOptions::default());
+  assert!(
+    expected.len() > 8 * 1024,
+    "fixture must outgrow the flush threshold, got {}",
+    expected.len()
+  );
+  for chunk in [7usize, 64, 512, 4096] {
+    assert_eq!(
+      stream_chars(html, chunk, HTMLToMarkdownOptions::default()),
+      expected,
+      "diverged at chunk={chunk}"
+    );
+  }
+}
+
 // Real-world documents at several chunk sizes: the broadest guard that chunking
 // never changes the output.
 #[test]
