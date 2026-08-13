@@ -387,11 +387,12 @@ impl ConvertState {
       || self.clean_flags & CLEAN_FRAGMENTS != 0
       || self.has_frontmatter
       || self.has_extraction
-      // A code span or fence measures and rewrites itself through buffer offsets
-      // that quoting moves, and the drain already holds at the open one, so
-      // flushing past it releases nothing and only invalidates its offsets.
+      // These pending rewrites keep absolute buffer offsets. Quoting content
+      // before them shifts those offsets, so wait until each rewrite settles.
       || self.code_fence.is_some()
       || !self.code_spans.is_empty()
+      || self.depth_map[TAG_A as usize] > 0
+      || self.empty_item_hazard
     {
       return;
     }
