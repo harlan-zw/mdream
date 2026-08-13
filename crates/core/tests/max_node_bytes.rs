@@ -632,3 +632,35 @@ fn a_row_of_aligned_headers_does_not_grow_the_alignment_vector() {
     html.len()
   );
 }
+
+// Alignment is recorded when a header opens but the span is clamped when it
+// closes, so a cell the cap drops could still align whichever retained column
+// its entry landed on.
+#[test]
+fn a_dropped_header_does_not_align_a_retained_column() {
+  // 63/7 leaves 9 columns, which the first cell's colspan fills on its own.
+  let html = "<table><tr><th colspan=\"9\">A</th><th align=\"right\">B</th></tr>\
+              <tr><td>x</td></tr></table>";
+  let delimiter = |out: &str| {
+    out
+      .lines()
+      .find(|line| line.contains("---"))
+      .unwrap_or_default()
+      .to_owned()
+  };
+
+  let capped = delimiter(&stream(html, 4096, 63));
+  assert_eq!(
+    capped.matches("---").count(),
+    9,
+    "the row should keep the columns the cap allows: {capped}"
+  );
+  assert!(
+    !capped.contains(':'),
+    "the dropped header must not align a column it does not own: {capped}"
+  );
+  // Uncapped the cell is kept, so its alignment belongs to a column of its own.
+  let uncapped = delimiter(&stream(html, 4096, 0));
+  assert_eq!(uncapped.matches("---").count(), 10, "{uncapped}");
+  assert_eq!(uncapped.matches("---:").count(), 1, "{uncapped}");
+}

@@ -602,8 +602,10 @@ impl ConvertState {
           });
           // A nonzero align used to push unconditionally, so a row of aligned
           // headers grew the delimiter row past the cap after its cells stopped
-          // counting.
-          if self.table_column_alignments.len() < self.table_column_cap
+          // counting. A cell the cap drops must not align a column either, or it
+          // would align whichever retained column its entry landed on.
+          if self.table_current_row_cells < self.table_column_cap
+            && self.table_column_alignments.len() < self.table_column_cap
             && (align_val != 0
               || self.table_column_alignments.len() <= self.table_current_row_cells)
           {
