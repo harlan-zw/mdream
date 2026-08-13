@@ -519,11 +519,13 @@ pub struct HTMLToMarkdownOptions {
   /// set to `0`. Code (`<pre>`/`<code>`), tables, and headings are never
   /// wrapped.
   pub wrap_width: usize,
-  /// Cap on the bytes one text node, unterminated tag/comment, open code block, or
-  /// table row may buffer; `0` (the default) is unlimited. Content past the cap is
-  /// **dropped** — bounding memory on adversarial input, at the cost of that
-  /// content, a tag's attributes when the tag is over-long, and a row's extra
-  /// columns. Applies to one-shot conversion as well as streaming;
+  /// Cap on the bytes one construct may buffer — a text node, a tag, a comment, an
+  /// open code block, a table row's columns, or the script text an extraction
+  /// reads; `0` (the default) is unlimited. Content past the cap is **dropped**,
+  /// bounding memory on adversarial input at the cost of that content, an over-long
+  /// tag entirely (attributes included), and a row's extra columns. A tag is
+  /// measured by its own length, so the result does not depend on chunking, and the
+  /// cap applies to one-shot conversion as well as streaming.
   /// [`MdreamResult::truncated`] reports whether it fired.
   pub max_node_bytes: usize,
 }
@@ -617,7 +619,7 @@ pub struct MdreamResult {
   pub frontmatter: Option<Vec<(String, String)>>,
   /// Whether `max_node_bytes` fired. `false` guarantees the output is exactly what
   /// an uncapped conversion produces. `true` is conservative: dropping a comment or
-  /// an attribute costs no output, so the markdown may still be identical.
+  /// an unemitted attribute costs no output, so the markdown may still be identical.
   pub truncated: bool,
 }
 

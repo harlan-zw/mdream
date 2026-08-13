@@ -1,14 +1,15 @@
 // Test-only peak-allocation tracker; the crate itself stays unsafe-free.
 #![allow(unsafe_code)]
 
-//! `max_node_bytes` drops content past a per-node byte cap so adversarial input
-//! cannot balloon the streamer. Two buffers grow with a single node: the text
-//! buffered for one text node (~5x its size in peak heap), and the raw bytes of
-//! an unterminated tag or comment the parser cannot consume yet (~3x).
+//! `max_node_bytes` drops content past a per-construct byte cap so adversarial
+//! input cannot balloon the streamer. Two buffers grow with a single node: the
+//! text buffered for one text node (~5x its size in peak heap), and the raw bytes
+//! of a tag or comment the parser cannot consume yet (~3x).
 //!
-//! Two more grow with a whole element rather than one node: an open code fence
-//! pins the output buffer until its delimiter is known (~0.9x the block), and a
-//! row's width forces a delimiter row of 7 bytes a column.
+//! Three more grow with a whole element rather than one node: an open code fence
+//! pins the output buffer until its delimiter is known (~0.9x the block), a row's
+//! width forces a delimiter row of 7 bytes a column, and script text is retained
+//! whole for an extraction that reads it (~4x).
 //!
 //! The cap must bound memory, stay inert by default, and — since it changes what
 //! is emitted — cut at a point that depends only on content, never on chunking.
@@ -16,7 +17,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use mdream::types::HTMLToMarkdownOptions;
+use mdream::types::{ExtractionConfig, HTMLToMarkdownOptions, PluginConfig};
 use mdream::{MarkdownStreamProcessor, html_to_markdown_result};
 
 // Peak-allocation tracker, per-thread so parallel tests do not pollute each other.
@@ -86,14 +87,28 @@ fn stream(html: &str, chunk: usize, cap: usize) -> String {
   out
 }
 
+fn extracting(cap: usize, selectors: &[&str]) -> HTMLToMarkdownOptions {
+  HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      extraction: Some(ExtractionConfig::new(selectors)),
+      ..Default::default()
+    }),
+    ..options(cap)
+  }
+}
+
 /// Peak live bytes while streaming `html`.
 fn peak(html: &str, chunk: usize, cap: usize) -> u64 {
+  peak_with(html, chunk, options(cap))
+}
+
+fn peak_with(html: &str, chunk: usize, opts: HTMLToMarkdownOptions) -> u64 {
   ACCT.set(Acct {
     on: true,
     live: 0,
     peak: 0,
   });
-  let mut p = MarkdownStreamProcessor::new(options(cap));
+  let mut p = MarkdownStreamProcessor::new(opts);
   let mut sink = 0usize;
   for c in html.as_bytes().chunks(chunk) {
     sink += p.process_chunk(std::str::from_utf8(c).unwrap()).len();
@@ -310,9 +325,17 @@ fn a_truncated_code_block_is_still_a_valid_fence() {
     .position(|line| *line == "```")
     .expect("closing fence");
   assert!(close > 0, "block should keep some content: {out:.80}");
+  // Clamping to the cap cuts inside the last node, as the plain-text path does, so
+  // the content is a prefix of the original rather than whole nodes only.
+  let content = rest[..close].join("\n");
   assert!(
-    rest[..close].iter().all(|line| *line == "let x = 1;"),
-    "content must be intact, not mangled: {out:.80}"
+    repeat_to("let x = 1;\n", 64 * 1024).starts_with(&content),
+    "content must be a prefix of the input, not mangled: {content:.80}"
+  );
+  assert!(
+    content.len() <= 64,
+    "content {} should fit the 64 byte cap",
+    content.len()
   );
   assert_eq!(
     rest[close + 1..].join("\n").trim(),
@@ -413,6 +436,10 @@ fn truncating_fixtures() -> Vec<(&'static str, String)> {
         repeat_to("<td>x</td>", 256 * 1024)
       ),
     ),
+    (
+      "emitted attribute",
+      format!("<a href=\"https://e.com/{filler}\">link</a>"),
+    ),
   ]
 }
 
@@ -449,19 +476,16 @@ fn every_kind_of_truncation_is_reported() {
       "{name}: reported truncation with the cap disabled"
     );
 
-    // One-shot sees the whole document at once, so a terminated tag never has to be
-    // discarded however long its attributes are; the other four still truncate.
-    let one_shot = html_to_markdown_result(&html, options(CAP)).truncated;
-    assert_eq!(
-      one_shot,
-      name != "attribute",
-      "{name}: one-shot reported {one_shot}"
+    assert!(
+      html_to_markdown_result(&html, options(CAP)).truncated,
+      "{name}: one-shot truncation went unreported"
     );
   }
 }
 
-// `true` is deliberately conservative, and this is why a byte count would lie:
-// skipping a comment or an attribute costs the output nothing.
+// `true` is deliberately conservative, and this is why a byte count would lie: a
+// `class` or a comment is never emitted, so dropping it costs no output at all.
+// An `href` is emitted, so the signal cannot promise either way.
 #[test]
 fn truncation_is_reported_even_when_no_output_is_lost() {
   for (name, html) in truncating_fixtures() {
@@ -477,4 +501,134 @@ fn truncation_is_reported_even_when_no_output_is_lost() {
       );
     }
   }
+}
+
+// Script data is buffered only for an active extraction, and that buffer used to
+// ignore the cap: 2 MB of script cost 8 MB of peak heap with a 64 KB cap set.
+#[test]
+fn an_extracted_script_is_capped_like_any_text() {
+  let html = format!(
+    "<p>before</p><script>{}</script><p>after</p>",
+    repeat_to("var filler = 1; function f() { return 2; } ", HUGE)
+  );
+  let uncapped = peak_with(&html, 8 * 1024, extracting(0, &["script"]));
+  let capped = peak_with(&html, 8 * 1024, extracting(CAP, &["script"]));
+  assert!(
+    uncapped > (HUGE / 2) as u64,
+    "fixture should retain the script uncapped, got {uncapped}"
+  );
+  assert!(
+    capped < (HUGE / 4) as u64,
+    "capped peak {capped} should be a window, not the {} byte script",
+    html.len()
+  );
+}
+
+// A node arriving while the fence sits just under the cap used to be appended
+// whole, taking the block to twice the cap.
+#[test]
+fn a_code_fence_holds_at_most_the_cap() {
+  for first in [CAP - 1, CAP / 2, CAP] {
+    let html = format!(
+      "<pre><code><span>{}</span><span>{}</span></code></pre>",
+      repeat_to("a", first),
+      repeat_to("b", CAP)
+    );
+    let out = stream(&html, 8 * 1024, CAP);
+    let content = out
+      .lines()
+      .skip(1)
+      .take_while(|line| *line != "```")
+      .collect::<Vec<_>>()
+      .join("\n");
+    assert!(
+      content.len() <= CAP,
+      "first_node={first}: fence content {} should fit the {CAP} byte cap",
+      content.len()
+    );
+  }
+}
+
+// `colspan` used to be added whole after the count check, and a nonzero `align`
+// pushed a column unconditionally, so a wide row escaped the cap either way.
+#[test]
+fn a_wide_row_stays_within_the_column_cap() {
+  const SMALL: usize = 700;
+  let col_cap = SMALL / 7;
+  for (name, cell) in [
+    ("plain", "<td>x</td>"),
+    ("colspan", "<td colspan=\"255\">x</td>"),
+    ("aligned header", "<th align=\"left\">x</th>"),
+  ] {
+    let html = format!("<table><tr>{}</tr></table>", repeat_to(cell, 64 * 1024));
+    let out = stream(&html, 8 * 1024, SMALL);
+    let columns = out
+      .lines()
+      .find(|line| line.contains("---"))
+      .unwrap_or_default()
+      .matches("---")
+      .count();
+    assert!(
+      columns <= col_cap,
+      "{name}: {columns} delimiter columns exceed the {col_cap} the cap allows"
+    );
+    assert!(
+      out.len() < 4 * SMALL,
+      "{name}: output {} should stay near the {SMALL} byte cap",
+      out.len()
+    );
+  }
+}
+
+// The cap drops a tag on its own length, not on whether a chunk boundary split
+// it, so an emitted attribute cannot survive whole in one chunk yet vanish in two.
+#[test]
+fn an_over_cap_tag_is_dropped_however_it_is_chunked() {
+  let filler = repeat_to("a", 256 * 1024);
+  for (name, html) in [
+    (
+      "emitted href",
+      format!("<a href=\"https://e.com/{filler}\">link</a><p>after</p>"),
+    ),
+    (
+      "unemitted class",
+      format!("<p class=\"{filler}\">seen</p><p>after</p>"),
+    ),
+  ] {
+    let expected = stream(&html, 1024, CAP);
+    assert!(
+      !expected.contains("aaaa"),
+      "{name}: the over-cap attribute should be gone: {expected:.60}"
+    );
+    for chunk in [7, 4096, 64 * 1024, html.len()] {
+      assert_eq!(stream(&html, chunk, CAP), expected, "{name}: chunk={chunk}");
+    }
+    assert_eq!(
+      html_to_markdown_result(&html, options(CAP)).markdown,
+      expected,
+      "{name}: one-shot must agree with streaming"
+    );
+  }
+}
+
+// A nonzero `align` pushed a column per header unconditionally, so the alignment
+// vector grew with the row however tight the cap. The delimiter row it feeds is
+// bounded by the output tests; this bounds the vector behind it.
+#[test]
+fn a_row_of_aligned_headers_does_not_grow_the_alignment_vector() {
+  let html = format!(
+    "<table><tr>{}</tr></table>",
+    repeat_to("<th align=\"left\">x</th>", HUGE)
+  );
+  let capped = peak(&html, 8 * 1024, 64);
+  let uncapped = peak(&html, 8 * 1024, 0);
+  assert!(
+    uncapped > (HUGE / 8) as u64,
+    "fixture should grow the vector uncapped, got {uncapped}"
+  );
+  assert!(
+    capped < 64 * 1024,
+    "capped peak {capped} should not scale with the {} byte row",
+    html.len()
+  );
 }

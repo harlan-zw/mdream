@@ -463,8 +463,8 @@ pub struct ConvertState {
   /// Widest row `max_node_bytes` allows, chosen so the delimiter row it forces
   /// (7 bytes a column) fits the cap. `usize::MAX` when uncapped.
   table_column_cap: usize,
-  /// Whether `max_node_bytes` has fired. Conservative: some drops (attributes,
-  /// comments) cost no output at all, so this can be true for identical output.
+  /// Whether `max_node_bytes` has fired. Conservative: some drops (comments,
+  /// unemitted attributes) cost no output, so this can be true for identical output.
   pub truncated: bool,
   // 0=none, 1=left, 2=center, 3=right
   table_column_alignments: Vec<u8>,
@@ -776,9 +776,12 @@ impl ConvertState {
     }
     // Script data is excluded from the output; only an extraction tracking the
     // script or an ancestor reads it, so buffering it otherwise retains the
-    // whole element to emit nothing.
+    // whole element to emit nothing. An active extraction still gets capped, as
+    // an extracted text node does.
     if !self.extraction_tracked.is_empty() {
-      self.script_text_buffer.push_str(text);
+      let cap = self.options.max_node_bytes;
+      let clamped = push_capped(&mut self.script_text_buffer, text, cap);
+      self.truncated |= clamped;
     }
     self.text_buffer_contains_non_whitespace = true;
     self.last_char_was_whitespace = false;
@@ -1221,13 +1224,35 @@ impl ConvertState {
 
         // `process_opening_tag` throws away everything it parsed when the tag
         // is incomplete, so resume the `>` search instead of re-parsing it.
-        if let Some(mut pending) = self.pending_tag {
-          if tag_is_complete(chunk, i2, &mut pending).is_none() {
+        let mut tag_end = if let Some(mut pending) = self.pending_tag {
+          let Some(gt) = tag_is_complete(chunk, i2, &mut pending) else {
             self.pending_tag = Some(pending);
             carry = true;
             break;
-          }
+          };
           self.pending_tag = None;
+          Some(gt)
+        } else {
+          None
+        };
+
+        // Drop a tag past the cap on its own length, not on whether a chunk
+        // boundary happened to split it: an emitted attribute like `href` must
+        // not survive whole in one chunk yet vanish in two. No tag can outrun the
+        // bytes left in the chunk, so that comparison keeps the scan off the hot
+        // path whenever the cap exceeds the chunk size.
+        if max_node_bytes != 0 && chunk_length - i > max_node_bytes {
+          if tag_end.is_none() {
+            let mut scan = PendingTagScan::new();
+            tag_end = tag_is_complete(chunk, i2, &mut scan);
+          }
+          if let Some(gt) = tag_end
+            && gt + 1 - i > max_node_bytes
+          {
+            self.truncated = true;
+            i = gt + 1;
+            continue;
+          }
         }
 
         let result =
@@ -1792,6 +1817,19 @@ pub(crate) struct CloseTagResult {
   new_position: usize,
 }
 
+/// Longest prefix of `text` that fits `max` bytes without splitting a char.
+#[inline]
+pub(crate) fn clamp_to_char_boundary(text: &str, max: usize) -> &str {
+  if max >= text.len() {
+    return text;
+  }
+  let mut end = max;
+  while end > 0 && !text.is_char_boundary(end) {
+    end -= 1;
+  }
+  &text[..end]
+}
+
 /// Append `text`, stopping at `cap` bytes total (`0` = no cap) on a char boundary,
 /// reporting whether it had to clamp. Clamping here rather than after the fact keeps
 /// the truncation point a function of content alone, so streamed output stays
@@ -1802,15 +1840,7 @@ fn push_capped(buffer: &mut String, text: &str, cap: usize) -> bool {
     buffer.push_str(text);
     return false;
   }
-  let room = cap.saturating_sub(buffer.len());
-  if room >= text.len() {
-    buffer.push_str(text);
-    return false;
-  }
-  let mut end = room;
-  while end > 0 && !text.is_char_boundary(end) {
-    end -= 1;
-  }
-  buffer.push_str(&text[..end]);
-  true
+  let kept = clamp_to_char_boundary(text, cap.saturating_sub(buffer.len()));
+  buffer.push_str(kept);
+  kept.len() != text.len()
 }

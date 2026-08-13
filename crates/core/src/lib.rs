@@ -130,7 +130,7 @@ impl MarkdownStreamProcessor {
 
   /// Whether [`HTMLToMarkdownOptions::max_node_bytes`] has fired so far. `false`
   /// guarantees the output matches an uncapped conversion; `true` is conservative,
-  /// since dropping a comment or an attribute costs no output.
+  /// since dropping a comment or an unemitted attribute costs no output.
   pub fn truncated(&self) -> bool {
     self.state.truncated
   }
