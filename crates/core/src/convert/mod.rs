@@ -1564,6 +1564,10 @@ impl ConvertState {
     let bytes = self.buffer.as_bytes();
     self.flushed_tail = if drain_end >= 2 {
       [bytes[drain_end - 2], bytes[drain_end - 1]]
+    } else if self.cut_line_lead == CutLineLead::Uncut {
+      // Nothing precedes a first cut this small: shifting the document-start
+      // sentinel in would invent a newline that cancels a real block separator.
+      [0, bytes[0]]
     } else {
       [self.flushed_tail[1], bytes[0]]
     };

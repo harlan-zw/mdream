@@ -1639,3 +1639,49 @@ fn streaming_separates_a_paragraph_from_text_it_has_already_yielded() {
     assert_eq!(actual, expected, "chunk={chunk}");
   }
 }
+
+// A blank line breaks an open raw-HTML region, which the escape gate reads off a
+// scan cursor holding an absolute buffer offset. Quoting a large blockquote's
+// completed lines in place grows that region, moving every byte after it, so the
+// cursor pointed short of where it had scanned to and the window reached back to
+// a blank line from before the region opened -- escaping a `[` one-shot passes
+// through. The text run crosses the flush threshold before `<dl>` opens.
+#[test]
+fn streaming_keeps_the_raw_html_blank_line_scan_aligned_across_quoting() {
+  let html = format!(
+    "{}<blockquote>xxxxxxxx>xxxxxxxxxxxxxxxxxx>xxxxxxxxxxxxxxxx>xxx>xxx>xxx<h3>xx><h3><h3><h3><dl>xxxxxxxx><x>[",
+    "x".repeat(8100)
+  );
+  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  for chunk in [512, 4096] {
+    assert_eq!(
+      stream_chars(&html, chunk, HTMLToMarkdownOptions::default()),
+      expected,
+      "chunk={chunk}"
+    );
+  }
+}
+
+// `flushed_tail` holds the two bytes before `buffer[0]`, so a block boundary can
+// count the newlines already separating it from the last block. A first cut that
+// takes a single byte has no byte two back, and shifting the document-start
+// sentinel into that slot claimed a newline there, cancelling a separator
+// one-shot writes -- joining two list items onto one line.
+#[test]
+fn streaming_does_not_invent_a_newline_behind_a_single_byte_cut() {
+  let html = "<li><pre>x<x>              <x><li>x";
+  let opts = HTMLToMarkdownOptions::default();
+  let expected = html_to_format_result(html, opts.clone(), OutputFormat::Text).markdown;
+  for chunk in 1..=html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(opts.clone(), OutputFormat::Text);
+    let mut actual = String::new();
+    let mut start = 0;
+    while start < html.len() {
+      let end = (start + chunk).min(html.len());
+      actual.push_str(&p.process_chunk(&html[start..end]));
+      start = end;
+    }
+    actual.push_str(&p.finish());
+    assert_eq!(actual, expected, "chunk={chunk}");
+  }
+}
