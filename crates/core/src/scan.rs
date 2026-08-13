@@ -114,16 +114,38 @@ impl PendingTagScan {
       quote_char: 0,
     }
   }
+
+  /// Resume from the start of a fresh chunk, keeping the tokenizer state. Lets a
+  /// discarded tag's bytes be dropped while its `>` is still found correctly.
+  #[inline]
+  pub(crate) fn restart(&mut self) {
+    self.scanned = 0;
+  }
 }
 
-/// Resume the search for a start tag's `>`, reporting whether the tag is now
+/// Find the end of a comment whose earlier bytes have been dropped, resuming from
+/// `dashes` (the trailing dash-run state). Only `-->` and `--!>` can still close
+/// one this far in, so no bytes need retaining. Returns the index after the `>`.
+pub(crate) fn discarded_comment_end(chunk: &str, dashes: &mut u8) -> Option<usize> {
+  for (index, &c) in chunk.as_bytes().iter().enumerate() {
+    match c {
+      DASH_CHAR => *dashes = (*dashes + 1).min(2),
+      GT_CHAR if *dashes >= 2 => return Some(index + 1),
+      EXCLAMATION_CHAR if *dashes >= 2 => {}
+      _ => *dashes = 0,
+    }
+  }
+  None
+}
+
+/// Resume the search for a start tag's `>`, returning its index once the tag is
 /// complete. Runs the same tokenizer as [`scan_tag`] so the two always agree on
 /// where a tag ends; `process_tag_attributes` still does the single real parse.
 pub(crate) fn tag_is_complete(
   html_chunk: &str,
   attrs_start: usize,
   pending: &mut PendingTagScan,
-) -> bool {
+) -> Option<usize> {
   let bytes = html_chunk.as_bytes();
   let mut i = attrs_start + pending.scanned;
 
@@ -141,7 +163,7 @@ pub(crate) fn tag_is_complete(
 
     // `/>` is reached through its own `>`, so one test covers both endings.
     if c == GT_CHAR {
-      return true;
+      return Some(i);
     }
 
     if pending.state == State::BeforeValue && (c == QUOTE_CHAR || c == APOS_CHAR) {
@@ -153,7 +175,7 @@ pub(crate) fn tag_is_complete(
   }
 
   pending.scanned = i - attrs_start;
-  false
+  None
 }
 
 /// Scan a start tag's attribute region to its `>`, storing only the attributes

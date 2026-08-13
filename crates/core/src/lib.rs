@@ -81,6 +81,7 @@ pub fn html_to_format_result(
     markdown: state.get_markdown(),
     extracted,
     frontmatter,
+    truncated: state.truncated,
   }
 }
 
@@ -125,6 +126,13 @@ impl MarkdownStreamProcessor {
       self.buffer.drain(..consumed);
     }
     self.state.get_markdown_chunk()
+  }
+
+  /// Whether [`HTMLToMarkdownOptions::max_node_bytes`] has fired so far. `false`
+  /// guarantees the output matches an uncapped conversion; `true` is conservative,
+  /// since dropping a comment or an attribute costs no output.
+  pub fn truncated(&self) -> bool {
+    self.state.truncated
   }
 
   pub fn finish(&mut self) -> String {

@@ -850,7 +850,11 @@ impl ConvertState {
     let cell_span =
       if matches!(tag_id, Some(TAG_TH | TAG_TD)) && self.depth_map[TAG_TABLE as usize] <= 1 {
         let span = Self::cell_span(node);
-        self.table_current_row_cells += span as usize;
+        // Counting stops at the cap so the delimiter row this row forces stays
+        // bounded; the cells past it are dropped on entry.
+        if self.table_current_row_cells < self.table_column_cap {
+          self.table_current_row_cells += span as usize;
+        }
         span
       } else {
         1
@@ -1306,6 +1310,22 @@ impl ConvertState {
     }
     let has_inline_gfm_hazard = std::mem::take(&mut self.text_buffer_has_inline_gfm_hazard);
     if text.is_empty() {
+      return;
+    }
+
+    // An open fence pins the buffer until its delimiter is known, so a code block
+    // is capped by everything it has buffered, not by each text node separately.
+    if self.options.max_node_bytes != 0
+      && let Some(fence) = &self.code_fence
+      && self.buffer.len().saturating_sub(fence.content_start) >= self.options.max_node_bytes
+    {
+      self.truncated = true;
+      return;
+    }
+
+    // Text inside a cell the row cap already dropped.
+    if self.table_current_row_cells >= self.table_column_cap && self.in_table_cell() {
+      self.truncated = true;
       return;
     }
 
@@ -2629,6 +2649,10 @@ impl ConvertState {
           }));
         }
         if node.index == 0 {
+          Some(Cow::Borrowed(""))
+        } else if self.table_current_row_cells >= self.table_column_cap {
+          // Past the cap the delimiter row cannot promise this column, so GFM
+          // would discard the cell anyway. Drop it outright to bound the row.
           Some(Cow::Borrowed(""))
         } else if self.table_header_cells > 0
           && self.table_current_row_cells >= self.table_header_cells

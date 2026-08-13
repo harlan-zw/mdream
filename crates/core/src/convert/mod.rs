@@ -1,8 +1,8 @@
 use crate::consts::*;
 use crate::entities::{decode_html_entities, decode_html_entities_for_markdown};
 use crate::scan::{
-  PendingTagScan, is_whitespace, process_comment_or_doctype, process_tag_attributes,
-  tag_is_complete,
+  PendingTagScan, discarded_comment_end, is_whitespace, process_comment_or_doctype,
+  process_tag_attributes, tag_is_complete,
 };
 use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selector_list};
 use crate::tags::get_tag_handler;
@@ -410,6 +410,7 @@ pub struct ConvertState {
   /// Set while a start tag is known to span chunks, holding how far its `>`
   /// search reached so the next chunk resumes instead of restarting it.
   pending_tag: Option<PendingTagScan>,
+  discard: Discard,
   script_text_buffer: String,
   pub stack: Vec<ElementNode>,
   node_pool: Vec<ElementNode>,
@@ -459,6 +460,12 @@ pub struct ConvertState {
   line_start_scanned_to: usize,
   /// Columns the delimiter row promised; cells past it would be dropped by GFM.
   table_header_cells: usize,
+  /// Widest row `max_node_bytes` allows, chosen so the delimiter row it forces
+  /// (7 bytes a column) fits the cap. `usize::MAX` when uncapped.
+  table_column_cap: usize,
+  /// Whether `max_node_bytes` has fired. Conservative: some drops (attributes,
+  /// comments) cost no output at all, so this can be true for identical output.
+  pub truncated: bool,
   // 0=none, 1=left, 2=center, 3=right
   table_column_alignments: Vec<u8>,
   last_text_node_contains_whitespace: bool,
@@ -575,6 +582,7 @@ impl ConvertState {
   pub fn new(options: HTMLToMarkdownOptions, capacity: usize, format: OutputFormat) -> Self {
     // Read wrap width before `options` is moved into the struct below.
     let options_wrap_width = options.wrap_width;
+    let options_max_node_bytes = options.max_node_bytes;
     let plain_text = format == OutputFormat::Text;
     let mut s = Self {
       depth_map: [0; MAX_TAG_ID],
@@ -606,6 +614,7 @@ impl ConvertState {
       block_parent_indices: Vec::with_capacity(16),
       parse_text_buffer: String::new(),
       pending_tag: None,
+      discard: Discard::No,
       script_text_buffer: String::new(),
       stack: Vec::with_capacity(32),
       node_pool: Vec::with_capacity(32),
@@ -645,6 +654,12 @@ impl ConvertState {
       line_start: 0,
       line_start_scanned_to: 0,
       table_header_cells: 0,
+      truncated: false,
+      table_column_cap: if options_max_node_bytes == 0 {
+        usize::MAX
+      } else {
+        (options_max_node_bytes / 7).max(1)
+      },
       table_column_alignments: Vec::new(),
       last_text_node_contains_whitespace: false,
       last_text_node_depth: 0,
@@ -816,12 +831,37 @@ impl ConvertState {
     }
     let bytes = chunk.as_bytes();
     let chunk_length = bytes.len();
+    let max_node_bytes = self.options.max_node_bytes;
     let mut i = 0;
     // Raw start of the text/tag run currently held in `text_buffer`. Any tail
     // carried to the next chunk is returned raw from here, never the decoded
     // and escaped `text_buffer` (which would be re-escaped, multiplying `\`).
     let mut run_start = 0usize;
     let mut carry = false;
+
+    // Mid-token from a previous chunk: keep dropping until its end is found.
+    match self.discard {
+      Discard::No => {}
+      Discard::Tag(mut pending) => {
+        pending.restart();
+        let Some(gt) = tag_is_complete(chunk, 0, &mut pending) else {
+          self.discard = Discard::Tag(pending);
+          self.parse_text_buffer = text_buffer;
+          return chunk_length;
+        };
+        self.discard = Discard::No;
+        i = gt + 1;
+      }
+      Discard::Comment(mut dashes) => {
+        let Some(end) = discarded_comment_end(chunk, &mut dashes) else {
+          self.discard = Discard::Comment(dashes);
+          self.parse_text_buffer = text_buffer;
+          return chunk_length;
+        };
+        self.discard = Discard::No;
+        i = end;
+      }
+    }
 
     if self
       .stack
@@ -843,6 +883,16 @@ impl ConvertState {
         run_start = i;
       }
       let cc = bytes[i];
+
+      // Past the cap this node's remaining text is dropped, not buffered: skip to
+      // the next tag without copying. Loses content, never structure.
+      if max_node_bytes != 0 && text_buffer.len() >= max_node_bytes && cc != LT_CHAR {
+        while i < chunk_length && bytes[i] != LT_CHAR {
+          i += 1;
+        }
+        self.truncated = true;
+        continue;
+      }
 
       if cc != LT_CHAR {
         // Batch contiguous plain ASCII text, absorbing single inter-word
@@ -867,7 +917,7 @@ impl ConvertState {
             }
             break;
           }
-          text_buffer.push_str(&chunk[start..i]);
+          self.truncated |= push_capped(&mut text_buffer, &chunk[start..i], max_node_bytes);
           self.text_buffer_contains_non_whitespace = true;
           if had_space {
             self.text_buffer_contains_whitespace = true;
@@ -888,7 +938,7 @@ impl ConvertState {
           while i < chunk_length && bytes[i] != LT_CHAR {
             i += 1;
           }
-          text_buffer.push_str(&chunk[start..i]);
+          self.truncated |= push_capped(&mut text_buffer, &chunk[start..i], max_node_bytes);
           self.text_buffer_contains_non_whitespace = true;
           self.last_char_was_whitespace = false;
           self.just_closed_tag = false;
@@ -1172,7 +1222,7 @@ impl ConvertState {
         // `process_opening_tag` throws away everything it parsed when the tag
         // is incomplete, so resume the `>` search instead of re-parsing it.
         if let Some(mut pending) = self.pending_tag {
-          if !tag_is_complete(chunk, i2, &mut pending) {
+          if tag_is_complete(chunk, i2, &mut pending).is_none() {
             self.pending_tag = Some(pending);
             carry = true;
             break;
@@ -1218,9 +1268,37 @@ impl ConvertState {
     // parsed `text_buffer` (re-processing would re-derive it). A trailing text
     // run is kept in `text_buffer` instead, so it is parsed once however many
     // chunks it spans.
-    let consumed = if carry { run_start } else { chunk_length };
+    let consumed = if carry {
+      if max_node_bytes != 0 && chunk_length - run_start > max_node_bytes {
+        self.start_discard(chunk, run_start);
+        chunk_length
+      } else {
+        run_start
+      }
+    } else {
+      chunk_length
+    };
     self.parse_text_buffer = text_buffer;
     consumed
+  }
+
+  /// Drop a token that outgrew the cap instead of carrying it. The element is
+  /// lost, but scanning its bytes here leaves the quote/dash state that finds its
+  /// end, so the raw input buffer stops growing.
+  #[cold]
+  #[inline(never)]
+  fn start_discard(&mut self, chunk: &str, run_start: usize) {
+    self.pending_tag = None;
+    self.truncated = true;
+    if chunk.as_bytes()[run_start..].starts_with(b"<!--") {
+      let mut dashes = 0;
+      discarded_comment_end(&chunk[run_start + 4..], &mut dashes);
+      self.discard = Discard::Comment(dashes);
+    } else {
+      let mut pending = PendingTagScan::new();
+      tag_is_complete(chunk, run_start, &mut pending);
+      self.discard = Discard::Tag(pending);
+    }
   }
 
   pub fn get_markdown(&mut self) -> String {
@@ -1698,7 +1776,41 @@ pub(crate) struct OpeningTagResult {
   skip: bool,
 }
 
+/// A token that outgrew `max_node_bytes` is being dropped byte by byte; only the
+/// scanner state that finds its end is kept, so nothing accumulates.
+#[derive(Clone, Copy)]
+enum Discard {
+  No,
+  /// Quote-aware resume for the `>` ending a dropped tag.
+  Tag(PendingTagScan),
+  /// Trailing dash-run state for the `-->` or `--!>` ending a dropped comment.
+  Comment(u8),
+}
+
 pub(crate) struct CloseTagResult {
   complete: bool,
   new_position: usize,
+}
+
+/// Append `text`, stopping at `cap` bytes total (`0` = no cap) on a char boundary,
+/// reporting whether it had to clamp. Clamping here rather than after the fact keeps
+/// the truncation point a function of content alone, so streamed output stays
+/// chunk-invariant.
+#[inline]
+fn push_capped(buffer: &mut String, text: &str, cap: usize) -> bool {
+  if cap == 0 {
+    buffer.push_str(text);
+    return false;
+  }
+  let room = cap.saturating_sub(buffer.len());
+  if room >= text.len() {
+    buffer.push_str(text);
+    return false;
+  }
+  let mut end = room;
+  while end > 0 && !text.is_char_boundary(end) {
+    end -= 1;
+  }
+  buffer.push_str(&text[..end]);
+  true
 }
