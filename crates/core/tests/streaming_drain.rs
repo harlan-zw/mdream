@@ -952,6 +952,22 @@ fn streaming_blockquote_flush_preserves_an_open_link_offset() {
   assert_eq!(actual, expected);
 }
 
+#[test]
+fn streaming_blockquote_flush_preserves_an_open_marker_offset() {
+  let html = format!(
+    "<blockquote>{}<p>keep</p><em></em></blockquote>",
+    "<p>line</p>".repeat(2048)
+  );
+  let split = html.find("</em>").unwrap();
+  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut actual = processor.process_chunk(&html[..split]);
+  actual.push_str(&processor.process_chunk(&html[split..]));
+  actual.push_str(&processor.finish());
+
+  assert_eq!(actual, expected);
+}
+
 // Real-world documents at several chunk sizes: the broadest guard that chunking
 // never changes the output.
 #[test]

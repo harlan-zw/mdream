@@ -389,6 +389,7 @@ impl ConvertState {
       || self.has_extraction
       // These pending rewrites keep absolute buffer offsets. Quoting content
       // before them shifts those offsets, so wait until each rewrite settles.
+      || !self.open_markers.is_empty()
       || self.code_fence.is_some()
       || !self.code_spans.is_empty()
       || self.depth_map[TAG_A as usize] > 0
