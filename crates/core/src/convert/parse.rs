@@ -441,6 +441,7 @@ impl ConvertState {
       self.text_buffer_has_inline_gfm_hazard || self.has_encoded_html_entity;
     self.text_buffer_contains_non_whitespace = false;
     self.text_buffer_contains_whitespace = false;
+    self.text_buffer_batchable_len = 0;
     self.text_buffer_has_inline_gfm_hazard = false;
 
     // No parent element means this is a top-level (root) text node, e.g. the
