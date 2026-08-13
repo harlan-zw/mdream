@@ -18,6 +18,10 @@ const fn is_unsafe_fence_info_byte(byte: u8) -> bool {
   byte < 0x20 || matches!(byte, 0x7F | b'`' | b'~' | b'"' | b'\'' | b'<' | b'>' | b'&')
 }
 
+/// Buffer size at which a streaming flush starts quoting completed blockquote
+/// lines, so a long quote releases instead of growing with the document.
+const STREAMING_FLUSH_THRESHOLD: usize = 8 * 1024;
+
 const DESTINATION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 80, 0, 0, 0, 16, 0, 0, 0, 0];
 const TITLE_ESCAPES: [u8; 16] = [0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0];
 const IMAGE_DESCRIPTION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 64, 4, 0, 16, 0, 0, 0, 184, 1, 0, 0, 64];
@@ -359,23 +363,48 @@ impl ConvertState {
     self.invalidate_line_start();
   }
 
+  /// Whether a flush could quote anything, by the two checks that cost nothing
+  /// to make. A caller computing a limit for the flush tests this first, so a
+  /// document with no open quote -- the common case -- pays neither the limit
+  /// nor the call.
+  #[inline]
+  pub(crate) fn streaming_flush_possible(&self) -> bool {
+    self.buffer.len() >= STREAMING_FLUSH_THRESHOLD && !self.blockquotes.is_empty()
+  }
+
   pub(crate) fn flush_streaming_blockquote_lines(&mut self) {
-    const FLUSH_THRESHOLD: usize = 8 * 1024;
-    if self.buffer.len() < FLUSH_THRESHOLD
-      || self.blockquotes.is_empty()
+    self.flush_streaming_blockquote_lines_upto(usize::MAX);
+  }
+
+  /// Quote completed blockquote lines, never reaching past `limit`.
+  ///
+  /// A flush between chunks runs at an arbitrary point in the document, where
+  /// the buffer tail is still open to rewrites the caller has not settled yet.
+  /// Quoting a line there commits a prefix that a later trim or reach-back
+  /// rewrite turns into bytes one-shot never writes, and a streamed byte cannot
+  /// be taken back. `limit` is the caller's own "safe to hand out" point, so
+  /// only lines it would already release get quoted.
+  pub(crate) fn flush_streaming_blockquote_lines_upto(&mut self, limit: usize) {
+    if !self.streaming_flush_possible()
       || self.clean_flags & CLEAN_FRAGMENTS != 0
       || self.has_frontmatter
       || self.has_extraction
-      // A code span or fence measures and rewrites itself through buffer offsets
-      // that quoting moves, and the drain already holds at the open one, so
-      // flushing past it releases nothing and only invalidates its offsets.
+      // These pending rewrites keep absolute buffer offsets. Quoting content
+      // before them shifts those offsets, so wait until each rewrite settles.
+      || !self.open_markers.is_empty()
       || self.code_fence.is_some()
       || !self.code_spans.is_empty()
+      || self.depth_map[TAG_A as usize] > 0
+      || self.empty_item_hazard
     {
       return;
     }
 
-    let Some(mut flush_end) = self.buffer.rfind('\n').map(|index| index + 1) else {
+    let mut ceiling = limit.min(self.buffer.len());
+    while ceiling > 0 && !self.buffer.is_char_boundary(ceiling) {
+      ceiling -= 1;
+    }
+    let Some(mut flush_end) = self.buffer[..ceiling].rfind('\n').map(|index| index + 1) else {
       return;
     };
     // A blank line at the tail is not final: whether it keeps a `>` depends on

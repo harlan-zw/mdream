@@ -906,6 +906,68 @@ fn streaming_text_run_spanning_chunks_matches_every_split() {
   }
 }
 
+// The streaming flush quotes completed blockquote lines once the buffer passes
+// 8KB, so a document has to get that far before it can quote anything early.
+// Deeply nested lists inside a quote get there on continuation indent alone,
+// and the indent is written before anyone knows whether content follows it on
+// that line -- so the buffer tail at a chunk boundary is whitespace a later
+// trim still removes. Quoting it there commits a `> ` prefix one-shot never
+// writes, and a streamed byte cannot be taken back.
+//
+// Reduced from a `fuzz_streaming_chunks` finding. The multibyte characters are
+// load-bearing: they place the chunk boundaries that expose the flush, so the
+// case does not survive being rewritten in ASCII.
+#[test]
+fn streaming_blockquote_flush_holds_unstable_tail() {
+  let html = include_str!("fixtures/streaming-blockquote-flush.html");
+  let expected = html_to_markdown(html, HTMLToMarkdownOptions::default());
+  assert!(
+    expected.len() > 8 * 1024,
+    "fixture must outgrow the flush threshold, got {}",
+    expected.len()
+  );
+  for chunk in [7usize, 64, 512, 4096] {
+    assert_eq!(
+      stream_chars(html, chunk, HTMLToMarkdownOptions::default()),
+      expected,
+      "diverged at chunk={chunk}"
+    );
+  }
+}
+
+#[test]
+fn streaming_blockquote_flush_preserves_an_open_link_offset() {
+  let url = "https://example.com";
+  let html = format!(
+    "<blockquote>{}<p><a href=\"{url}\">{url}</a></p></blockquote>",
+    "<p>line</p>".repeat(2048)
+  );
+  let split = html.find("</a>").unwrap();
+  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut actual = processor.process_chunk(&html[..split]);
+  actual.push_str(&processor.process_chunk(&html[split..]));
+  actual.push_str(&processor.finish());
+
+  assert_eq!(actual, expected);
+}
+
+#[test]
+fn streaming_blockquote_flush_preserves_an_open_marker_offset() {
+  let html = format!(
+    "<blockquote>{}<p>keep</p><em></em></blockquote>",
+    "<p>line</p>".repeat(2048)
+  );
+  let split = html.find("</em>").unwrap();
+  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut actual = processor.process_chunk(&html[..split]);
+  actual.push_str(&processor.process_chunk(&html[split..]));
+  actual.push_str(&processor.finish());
+
+  assert_eq!(actual, expected);
+}
+
 // Real-world documents at several chunk sizes: the broadest guard that chunking
 // never changes the output.
 #[test]
