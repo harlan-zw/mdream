@@ -60,6 +60,39 @@ const BATCHABLE_TEXT: [bool; 256] = {
   t
 };
 
+/// A batchable text run this long is emitted as more than one text node, so a
+/// document that is one enormous run streams in a window instead of being held
+/// whole. Only the batchable path splits, and only between words there, which is
+/// why the split cannot be observed in the output.
+const TEXT_RUN_FLUSH_THRESHOLD: usize = 64 * 1024;
+
+/// How far back a split looks for a usable word boundary. Prose offers one
+/// within a word or two; giving up keeps the scan off the hot path for input
+/// that offers none.
+const TEXT_RUN_SPLIT_SCAN: usize = 64;
+
+/// Offset after which a text run may be cut. Prefer a word boundary that keeps
+/// the next piece from looking like a Markdown block. With no such boundary,
+/// leave one byte in the buffer: that byte makes the next piece a continuation
+/// of the same source node rather than a new Markdown line.
+#[inline]
+fn split_point(bytes: &[u8]) -> usize {
+  let floor = bytes.len().saturating_sub(TEXT_RUN_SPLIT_SCAN);
+  let mut index = bytes.len().saturating_sub(1);
+  while index > floor {
+    index -= 1;
+    if bytes[index] == SPACE_CHAR
+      && !matches!(
+        bytes[index + 1],
+        b' ' | b'#' | b'-' | b'+' | b'>' | b'0'..=b'9'
+      )
+    {
+      return index;
+    }
+  }
+  bytes.len() - 2
+}
+
 const GFM_HAZARD_BIT: u8 = 1;
 const GFM_NEWLINE_BIT: u8 = 2;
 const GFM_TEXT_ACTIVE_BIT: u8 = 4;
@@ -380,6 +413,12 @@ pub struct ConvertState {
   last_char_was_whitespace: bool,
   text_buffer_contains_whitespace: bool,
   text_buffer_contains_non_whitespace: bool,
+  /// Bytes in the pending text run that the batchable-ASCII path appended. When
+  /// this equals the run's length the run holds nothing else, which is the only
+  /// state in which the run may be emitted in pieces: any push from another path
+  /// (an entity, a GFM hazard, a literal `<`, rawtext, collapsed whitespace)
+  /// leaves the two unequal without that path having to know about splitting.
+  text_buffer_batchable_len: usize,
   text_buffer_has_inline_gfm_hazard: bool,
   just_closed_tag: bool,
   is_first_text_in_element: bool,
@@ -583,6 +622,7 @@ impl ConvertState {
       last_char_was_whitespace: true,
       text_buffer_contains_whitespace: false,
       text_buffer_contains_non_whitespace: false,
+      text_buffer_batchable_len: 0,
       text_buffer_has_inline_gfm_hazard: false,
       just_closed_tag: false,
       is_first_text_in_element: false,
@@ -803,6 +843,39 @@ impl ConvertState {
     }
   }
 
+  /// Whether the text run being accumulated may be emitted as several text
+  /// nodes instead of one. `<title>` text is *assigned* to the frontmatter title
+  /// rather than appended, and a Tailwind prefix/suffix wraps every text node,
+  /// so splitting either would truncate or double the output. Wrapping measures
+  /// its column per text node, so a piece boundary would lose a wrap point.
+  #[inline]
+  fn text_run_splittable(&self) -> bool {
+    if self.wrap_width != 0 || self.in_raw_html_block() {
+      return false;
+    }
+    // A link's title is dropped when it repeats the link text, which is decided
+    // by comparing the title against the *last* text node, so a piece boundary
+    // inside such a link would change that decision. A link carrying no title
+    // never makes the comparison, so its text may still be split.
+    if self.depth_map[TAG_A as usize] > 0
+      && self.stack.iter().any(|node| {
+        node.tag_id == Some(TAG_A)
+          && node
+            .attributes
+            .get("title")
+            .is_some_and(|title| !title.is_empty())
+      })
+    {
+      return false;
+    }
+    match self.stack.last() {
+      Some(parent) => {
+        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind.is_none())
+      }
+      None => true,
+    }
+  }
+
   /// Consumes what it can of `chunk` and returns how many bytes that was. The
   /// caller keeps the rest; returning an owned tail instead would copy a token
   /// that spans many chunks once per chunk, which is quadratic.
@@ -868,12 +941,40 @@ impl ConvertState {
             break;
           }
           text_buffer.push_str(&chunk[start..i]);
+          self.text_buffer_batchable_len += i - start;
           self.text_buffer_contains_non_whitespace = true;
           if had_space {
             self.text_buffer_contains_whitespace = true;
           }
           self.last_char_was_whitespace = false;
           self.just_closed_tag = false;
+          // A run with no tag in it would otherwise be held whole, making peak
+          // memory the length of the run rather than a window. These bytes carry
+          // no entity, no GFM hazard and no multi-byte sequence, so a piece
+          // boundary here cannot change decoding or escaping; and because the
+          // buffer is left mid-line, no piece after the first can be read as
+          // opening a block.
+          if text_buffer.len() >= TEXT_RUN_FLUSH_THRESHOLD
+            && self.text_buffer_batchable_len == text_buffer.len()
+            && self.text_run_splittable()
+          {
+            debug_assert!(
+              text_buffer
+                .bytes()
+                .all(|byte| BATCHABLE_TEXT[byte as usize] || byte == SPACE_CHAR),
+              "a run counted as batchable held a byte no split may cross"
+            );
+            let cut = split_point(text_buffer.as_bytes());
+            let tail = text_buffer.split_off(cut + 1);
+            self.process_text_buffer_piece(&mut text_buffer, false);
+            // A hard cut has no whitespace separator. The retained tail is a
+            // continuation of this text node, so it must not gain one either.
+            self.last_node_is_inline = true;
+            text_buffer.push_str(&tail);
+            self.text_buffer_batchable_len = text_buffer.len();
+            self.text_buffer_contains_non_whitespace = true;
+            self.text_buffer_contains_whitespace = tail.as_bytes().contains(&SPACE_CHAR);
+          }
           continue;
         }
 
@@ -915,6 +1016,11 @@ impl ConvertState {
             text_buffer.push(cc as char);
           } else if cc == SPACE_CHAR || !self.last_char_was_whitespace {
             text_buffer.push(' ');
+            // A collapsed run reaching the buffer as one space is the same byte
+            // the batchable path absorbs itself, so it keeps the run splittable.
+            // Without this a chunk ending between two words would settle the run
+            // as unsplittable for good, which is every chunk in a long one.
+            self.text_buffer_batchable_len += 1;
           }
           self.last_char_was_whitespace = true;
           self.text_buffer_contains_whitespace = true;

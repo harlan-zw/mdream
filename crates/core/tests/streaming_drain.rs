@@ -554,6 +554,131 @@ fn streaming_only_trims_whitespace_at_the_document_start() {
   assert_eq!(actual, expected);
 }
 
+/// Builds `target` bytes of prose with no tag in it, wrapped in `open`/`close`.
+/// The point is a single uninterrupted text run: the parser used to flush its
+/// text buffer only at a `<`.
+fn one_long_text_run(open: &str, close: &str, target: usize) -> String {
+  let mut html = String::with_capacity(target + open.len() + close.len() + 8);
+  html.push_str(open);
+  while html.len() < target {
+    html.push_str("word ");
+  }
+  html.push_str(close);
+  html
+}
+
+// A document that is one uninterrupted text run was held whole, so peak memory
+// was the length of the run and not a window: 2MB of prose peaked at ~10.5MB.
+// Long runs are now emitted as several text nodes.
+#[test]
+fn streaming_memory_is_bounded_for_one_long_text_run() {
+  const TARGET: usize = 2 * 1024 * 1024;
+  let html = one_long_text_run("<p>", "</p>", TARGET);
+  let opts = HTMLToMarkdownOptions::default();
+
+  let (peak, total_out) = measure_peak(&html, 8 * 1024, opts.clone());
+
+  // The run really did reach the output rather than being dropped somewhere.
+  assert!(
+    total_out > TARGET as u64 - 4096,
+    "expected the whole run in the output, got {total_out}"
+  );
+  // Measures ~359KB. Well clear of the ~10.5MB it used to hold, and of the 2MB
+  // document, so this fails loudly if a run is ever held whole again.
+  assert!(
+    peak < TARGET as u64,
+    "peak {peak} should be a window, not the {} byte run",
+    html.len()
+  );
+}
+
+#[test]
+fn streaming_single_token_uses_a_bounded_window() {
+  const TARGET: usize = 2 * 1024 * 1024;
+  let token = "a".repeat(TARGET);
+  let html = format!("<p>{token}</p>");
+  let opts = HTMLToMarkdownOptions::default();
+
+  let output = stream_chunks(&html, 8 * 1024, opts.clone());
+  assert_eq!(output.len(), token.len());
+  assert_eq!(output, token);
+
+  let (peak, total_out) = measure_peak(&html, 8 * 1024, opts);
+  assert_eq!(total_out, TARGET as u64);
+  assert!(
+    peak < TARGET as u64,
+    "peak {peak} should be a window, not the {} byte input",
+    html.len()
+  );
+}
+
+// Emitting a run in pieces must not be observable, so every context whose
+// output depends on text-node granularity is excluded from splitting. Each of
+// these carries a run past the split threshold, which is where a loosened guard
+// would show up; none of the shorter fixtures elsewhere reach it.
+#[test]
+fn a_long_text_run_streams_identically_to_one_shot_in_every_context() {
+  const TARGET: usize = 200 * 1024;
+  let cases: &[(&str, &str, &str, HTMLToMarkdownOptions)] = &[
+    ("plain", "<p>", "</p>", HTMLToMarkdownOptions::default()),
+    // No title, so the title-vs-text comparison never runs and this one splits.
+    (
+      "untitled link",
+      "<a href=\"/u\">",
+      "</a><p>after</p>",
+      HTMLToMarkdownOptions::default(),
+    ),
+    // A title is dropped when it repeats the link text, decided against the
+    // *last* text node.
+    (
+      "titled link",
+      "<a href=\"/u\" title=\"t\">",
+      "</a><p>after</p>",
+      HTMLToMarkdownOptions::default(),
+    ),
+    // Wrapping measures its column per text node.
+    (
+      "wrapped",
+      "<p>",
+      "</p>",
+      HTMLToMarkdownOptions::default().with_wrap_width(40),
+    ),
+    // `<title>` text is assigned to the frontmatter title, not appended.
+    (
+      "title element",
+      "<html><head><title>",
+      "</title></head><body><p>after</p></body></html>",
+      HTMLToMarkdownOptions::default(),
+    ),
+    // Preformatted text keeps its own whitespace and fence handling.
+    (
+      "pre",
+      "<pre><code>",
+      "</code></pre><p>after</p>",
+      HTMLToMarkdownOptions::default(),
+    ),
+    // Escaping inside a raw HTML block depends on whether the line opens one.
+    (
+      "raw html block",
+      "<details><summary>s</summary>",
+      "</details>",
+      HTMLToMarkdownOptions::default(),
+    ),
+  ];
+
+  for (name, open, close, opts) in cases {
+    let html = one_long_text_run(open, close, TARGET);
+    let expected = html_to_markdown(&html, opts.clone());
+    for chunk in [8 * 1024usize, 997, 64] {
+      assert_eq!(
+        stream_chunks(&html, chunk, opts.clone()),
+        expected,
+        "{name} diverged at chunk={chunk}"
+      );
+    }
+  }
+}
+
 #[test]
 fn streaming_memory_is_bounded_not_document_sized() {
   // Blockquote line-prefixing amplifies ~130x; without draining the emitted
