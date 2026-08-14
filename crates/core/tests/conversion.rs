@@ -2612,6 +2612,17 @@ fn clean_keeps_valid_fragment() {
 }
 
 #[test]
+fn clean_keeps_valid_fragment_with_title() {
+  assert_eq!(
+    convert_with_clean(
+      r##"<h2>My Section</h2><a href="#my-section" title="Jump">Link</a>"##,
+      clean_all(),
+    ),
+    "## My Section\n\n[Link](#my-section \"Jump\")",
+  );
+}
+
+#[test]
 fn clean_keeps_valid_strips_broken() {
   assert_eq!(
     convert_with_clean(
@@ -2645,6 +2656,50 @@ fn clean_fragments_survive_output_rewrites() {
   );
   let html = r##"<code><pre>”yy<a href="#a"><img alt=z>"##;
   assert_eq!(convert_with_clean(html, clean), convert(html));
+}
+
+#[test]
+fn clean_fragments_preserve_code_text_that_looks_like_a_link() {
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  let html = r##"<pre><code><a href="#missing">[x](#y)</a></code></pre>"##;
+  assert_eq!(convert_with_clean(html, clean), convert(html));
+}
+
+#[test]
+fn clean_fragments_scales_with_many_broken_links() {
+  let html = r##"<a href="#missing">x</a>"##.repeat(50_000);
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  let started = std::time::Instant::now();
+
+  let _ = convert_with_clean(&html, clean);
+
+  assert!(
+    started.elapsed() < std::time::Duration::from_secs(2),
+    "fragment cleanup took {:?}",
+    started.elapsed(),
+  );
+}
+
+#[test]
+fn clean_nested_anchor_state_is_independent() {
+  let clean = mdream::types::CleanConfig {
+    empty_links: true,
+    ..Default::default()
+  };
+
+  assert_eq!(
+    convert_with_clean(
+      r##"<a href="#"><blockquote>x<a href="/b">y</a></blockquote></a>"##,
+      clean,
+    ),
+    "> x [y](/b)",
+  );
 }
 
 #[test]
