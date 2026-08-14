@@ -2659,6 +2659,27 @@ fn clean_fragments_survive_output_rewrites() {
 }
 
 #[test]
+fn streaming_clean_fragments_matches_one_shot() {
+  let html = r##"<h2>Section</h2><a href="#section">keep</a><a href="#missing">drop</a>"##;
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  let expected = convert_with_clean(html, clean.clone());
+
+  for split in 0..=html.len() {
+    let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+      clean: Some(clean.clone()),
+      ..Default::default()
+    });
+    let mut output = processor.process_chunk(&html[..split]);
+    output.push_str(&processor.process_chunk(&html[split..]));
+    output.push_str(&processor.finish());
+    assert_eq!(output, expected, "split={split}");
+  }
+}
+
+#[test]
 fn clean_fragments_preserve_code_text_that_looks_like_a_link() {
   let clean = mdream::types::CleanConfig {
     fragments: true,
@@ -2666,11 +2687,24 @@ fn clean_fragments_preserve_code_text_that_looks_like_a_link() {
   };
   let html = r##"<pre><code><a href="#missing">[x](#y)</a></code></pre>"##;
   assert_eq!(convert_with_clean(html, clean), convert(html));
+
+  let html = r##"<code><a href="#missing">[x](#y)</a></code>"##;
+  assert_eq!(
+    convert_with_clean(
+      html,
+      mdream::types::CleanConfig {
+        fragments: true,
+        ..Default::default()
+      }
+    ),
+    convert(html),
+  );
 }
 
 #[test]
 fn clean_fragments_scales_with_many_broken_links() {
-  let html = r##"<a href="#missing">x</a>"##.repeat(50_000);
+  let mut html = "<h2>section</h2>".repeat(20_000);
+  html.push_str(&r##"<a href="#missing">x</a>"##.repeat(20_000));
   let clean = mdream::types::CleanConfig {
     fragments: true,
     ..Default::default()

@@ -1174,6 +1174,7 @@ impl ConvertState {
         // was emitted.
         self.last_content_cache_len = self.buffer.len().saturating_sub(self.link.bracket_pos);
         if self.clean_flags & CLEAN_FRAGMENTS != 0
+          && self.depth_map[TAG_CODE as usize] == 0
           && let Some(fragment) = resolved.strip_prefix('#')
           && !fragment.is_empty()
         {

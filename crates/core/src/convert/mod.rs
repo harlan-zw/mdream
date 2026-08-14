@@ -1361,6 +1361,8 @@ impl ConvertState {
     // link's wrappers preserves nested link text without repeatedly shifting the
     // whole output buffer.
     if self.clean_flags & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
+      self.heading_slugs.sort_unstable();
+      self.heading_slugs.dedup();
       let trim_offset = start;
       let mut removals = Vec::with_capacity(self.fragment_links.len());
       for link in &self.fragment_links {
@@ -1379,8 +1381,7 @@ impl ConvertState {
         {
           continue;
         }
-        let is_valid = !self.heading_slugs.is_empty()
-          && self.heading_slugs.iter().any(|slug| slug == &link.fragment);
+        let is_valid = self.heading_slugs.binary_search(&link.fragment).is_ok();
         if is_valid {
           continue;
         }
@@ -1475,6 +1476,9 @@ impl ConvertState {
   pub fn get_markdown_chunk(&mut self) -> String {
     if self.format == OutputFormat::Html {
       return std::mem::take(&mut self.buffer);
+    }
+    if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+      return String::new();
     }
     // Quote only what this chunk could already hand out. The tail past here is
     // still open to the trims below and to a reach-back rewrite from the next
@@ -1603,6 +1607,17 @@ impl ConvertState {
     self.last_yielded_length = stable_end;
     self.drain_streamed_prefix();
     new_content
+  }
+
+  pub fn get_final_markdown_chunk(&mut self) -> String {
+    if !self.plain_text
+      && self.format != OutputFormat::Html
+      && self.clean_flags & CLEAN_FRAGMENTS != 0
+    {
+      self.get_markdown()
+    } else {
+      self.get_markdown_chunk()
+    }
   }
 
   /// Free already-yielded output so streaming memory stays O(window), not
