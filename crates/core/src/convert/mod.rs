@@ -71,13 +71,12 @@ const TEXT_RUN_FLUSH_THRESHOLD: usize = 64 * 1024;
 /// that offers none.
 const TEXT_RUN_SPLIT_SCAN: usize = 64;
 
-/// Offset a text run may be cut at, or `None` when the tail offers no such
-/// point. The cut falls *inside* a word, never next to a space: whitespace at
-/// the edge of a text node is collapsed and trimmed differently from whitespace
-/// inside one, so a cut beside a space can add or drop one. Being mid-word also
-/// leaves the cut unable to look like the start of a Markdown block.
+/// Offset after which a text run may be cut. Prefer a word boundary that keeps
+/// the next piece from looking like a Markdown block. With no such boundary,
+/// leave one byte in the buffer: that byte makes the next piece a continuation
+/// of the same source node rather than a new Markdown line.
 #[inline]
-fn split_point(bytes: &[u8]) -> Option<usize> {
+fn split_point(bytes: &[u8]) -> usize {
   let floor = bytes.len().saturating_sub(TEXT_RUN_SPLIT_SCAN);
   let mut index = bytes.len().saturating_sub(1);
   while index > floor {
@@ -88,10 +87,10 @@ fn split_point(bytes: &[u8]) -> Option<usize> {
         b' ' | b'#' | b'-' | b'+' | b'>' | b'0'..=b'9'
       )
     {
-      return Some(index);
+      return index;
     }
   }
-  None
+  bytes.len() - 2
 }
 
 const GFM_HAZARD_BIT: u8 = 1;
@@ -965,24 +964,16 @@ impl ConvertState {
                 .all(|byte| BATCHABLE_TEXT[byte as usize] || byte == SPACE_CHAR),
               "a run counted as batchable held a byte no split may cross"
             );
-            // Only whole words may be emitted: wrapping and collapsing treat each
-            // text node as a unit, so a cut inside a word would let a line break
-            // or a space land in the middle of it. The partial word stays for the
-            // next piece.
-            //
-            // The word after the cut must also be unable to open a Markdown
-            // block. A piece is escaped as a block opener when it starts one, and
-            // a piece that follows a list marker counts as starting one, so a cut
-            // before `- 1` inside prose would escape text the whole run never
-            // would. Runs offering no such cut are simply left whole.
-            if let Some(cut) = split_point(text_buffer.as_bytes()) {
-              let tail = text_buffer.split_off(cut + 1);
-              self.process_text_buffer_piece(&mut text_buffer, false);
-              text_buffer.push_str(&tail);
-              self.text_buffer_batchable_len = text_buffer.len();
-              self.text_buffer_contains_non_whitespace = true;
-              self.text_buffer_contains_whitespace = tail.as_bytes().contains(&SPACE_CHAR);
-            }
+            let cut = split_point(text_buffer.as_bytes());
+            let tail = text_buffer.split_off(cut + 1);
+            self.process_text_buffer_piece(&mut text_buffer, false);
+            // A hard cut has no whitespace separator. The retained tail is a
+            // continuation of this text node, so it must not gain one either.
+            self.last_node_is_inline = true;
+            text_buffer.push_str(&tail);
+            self.text_buffer_batchable_len = text_buffer.len();
+            self.text_buffer_contains_non_whitespace = true;
+            self.text_buffer_contains_whitespace = tail.as_bytes().contains(&SPACE_CHAR);
           }
           continue;
         }

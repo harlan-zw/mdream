@@ -592,6 +592,26 @@ fn streaming_memory_is_bounded_for_one_long_text_run() {
   );
 }
 
+#[test]
+fn streaming_single_token_uses_a_bounded_window() {
+  const TARGET: usize = 2 * 1024 * 1024;
+  let token = "a".repeat(TARGET);
+  let html = format!("<p>{token}</p>");
+  let opts = HTMLToMarkdownOptions::default();
+
+  let output = stream_chunks(&html, 8 * 1024, opts.clone());
+  assert_eq!(output.len(), token.len());
+  assert_eq!(output, token);
+
+  let (peak, total_out) = measure_peak(&html, 8 * 1024, opts);
+  assert_eq!(total_out, TARGET as u64);
+  assert!(
+    peak < TARGET as u64,
+    "peak {peak} should be a window, not the {} byte input",
+    html.len()
+  );
+}
+
 // Emitting a run in pieces must not be observable, so every context whose
 // output depends on text-node granularity is excluded from splitting. Each of
 // these carries a run past the split threshold, which is where a loosened guard
