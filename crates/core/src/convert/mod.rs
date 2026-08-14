@@ -977,9 +977,11 @@ impl ConvertState {
             // would. Runs offering no such cut are simply left whole.
             if let Some(cut) = split_point(text_buffer.as_bytes()) {
               let tail = text_buffer.split_off(cut + 1);
-              self.process_text_buffer(&mut text_buffer);
+              self.process_text_buffer_piece(&mut text_buffer, false);
               text_buffer.push_str(&tail);
               self.text_buffer_batchable_len = text_buffer.len();
+              self.text_buffer_contains_non_whitespace = true;
+              self.text_buffer_contains_whitespace = tail.as_bytes().contains(&SPACE_CHAR);
             }
           }
           continue;

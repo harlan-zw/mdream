@@ -435,6 +435,16 @@ impl ConvertState {
   }
 
   pub(crate) fn process_text_buffer(&mut self, text_buffer: &mut String) {
+    self.process_text_buffer_piece(text_buffer, true);
+  }
+
+  /// Emit buffered text. Internal size flushes split one source text node into
+  /// pieces, so they defer advancing the parent's child index until the run ends.
+  pub(crate) fn process_text_buffer_piece(
+    &mut self,
+    text_buffer: &mut String,
+    completes_text_node: bool,
+  ) {
     let contains_non_whitespace = self.text_buffer_contains_non_whitespace;
     let contains_whitespace = self.text_buffer_contains_whitespace;
     let has_inline_gfm_hazard =
@@ -589,13 +599,15 @@ impl ConvertState {
     text.clear();
     *text_buffer = text;
 
-    if let Some(parent) = self.stack.last_mut() {
-      parent.current_walk_index += 1;
-    }
+    if completes_text_node {
+      if let Some(parent) = self.stack.last_mut() {
+        parent.current_walk_index += 1;
+      }
 
-    let up_to = first_block_parent_index.unwrap_or(0);
-    for idx in up_to..self.stack.len() {
-      self.stack[idx].child_text_node_index += 1;
+      let up_to = first_block_parent_index.unwrap_or(0);
+      for idx in up_to..self.stack.len() {
+        self.stack[idx].child_text_node_index += 1;
+      }
     }
   }
 

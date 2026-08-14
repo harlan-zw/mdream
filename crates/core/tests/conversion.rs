@@ -1120,6 +1120,13 @@ fn ordered_list() {
 }
 
 #[test]
+fn long_text_before_an_ordered_list_item_counts_as_one_child() {
+  let text = "word ".repeat(16_384);
+  let html = format!("<ol>{text}<li>item</li></ol>");
+  assert_eq!(convert(&html).rsplit('\n').next(), Some("2. item"));
+}
+
+#[test]
 fn nested_unordered_list() {
   assert_eq!(
     convert("<ul><li>Level 1<ul><li>Level 2</li></ul></li><li>Another</li></ul>"),
