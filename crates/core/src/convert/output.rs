@@ -228,11 +228,29 @@ impl ConvertState {
       Self::max_line_leading_run(&self.buffer[fence.content_start..], marker, &fence.indent);
     let delimiter = (marker as char).to_string().repeat((max_run + 1).max(3));
     let marker_start = fence.output_start + fence.marker_offset;
+    self.shift_fragment_links_after(
+      marker_start + MARKDOWN_CODE_BLOCK.len(),
+      delimiter.len() as isize - MARKDOWN_CODE_BLOCK.len() as isize,
+    );
     self.buffer.replace_range(
       marker_start..marker_start + MARKDOWN_CODE_BLOCK.len(),
       &delimiter,
     );
     Some(delimiter)
+  }
+
+  fn shift_fragment_links_after(&mut self, offset: usize, amount: isize) {
+    if amount == 0 {
+      return;
+    }
+    for (bracket_start, link_end) in &mut self.fragment_links {
+      if *bracket_start >= offset {
+        *bracket_start = bracket_start.saturating_add_signed(amount);
+      }
+      if *link_end >= offset {
+        *link_end = link_end.saturating_add_signed(amount);
+      }
+    }
   }
 
   fn blockquote_offset(content: &str, list_indent: &str, offset: usize) -> usize {
@@ -765,6 +783,7 @@ impl ConvertState {
       // last byte alone also matches the `[` of an escaped literal `\[` in the
       // text before the link, and the empty-link drop then truncates into that
       // text instead of the link it meant to remove.
+      self.link_bracket_positions.push(self.link_bracket_pos);
       self.link_bracket_pos = if output
         .as_deref()
         .is_some_and(|o| o.as_bytes().last() == Some(&b'['))
@@ -966,6 +985,7 @@ impl ConvertState {
       };
       // Guard: if bracket not found, bracket_pos == buf_len; text_start would overflow
       if bracket_pos >= buf_len {
+        self.link_bracket_pos = self.link_bracket_positions.pop().unwrap_or(0);
         self.last_node_is_inline = is_inline;
         return;
       }
@@ -980,6 +1000,7 @@ impl ConvertState {
       // emptyLinkText: [](url) → drop entirely
       if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
         self.buffer.truncate(bracket_pos);
+        self.link_bracket_pos = self.link_bracket_positions.pop().unwrap_or(0);
         self.last_node_is_inline = is_inline;
         return;
       }
@@ -1007,6 +1028,7 @@ impl ConvertState {
             buf.set_len(new_len);
           }
           self.last_content_cache_len = text_len;
+          self.link_bracket_pos = self.link_bracket_positions.pop().unwrap_or(0);
           self.last_node_is_inline = is_inline;
           return;
         }
@@ -1037,6 +1059,7 @@ impl ConvertState {
           buf.set_len(new_len);
         }
         self.last_content_cache_len = text_len;
+        self.link_bracket_pos = self.link_bracket_positions.pop().unwrap_or(0);
         self.last_node_is_inline = is_inline;
         return;
       }
@@ -1110,6 +1133,7 @@ impl ConvertState {
             self.buffer.push_str(resolved);
             self.buffer.push('>');
             self.last_content_cache_len = self.buffer.len() - bp;
+            self.link_bracket_pos = self.link_bracket_positions.pop().unwrap_or(0);
             self.last_node_is_inline = is_inline;
             return;
           }
@@ -1136,6 +1160,7 @@ impl ConvertState {
           .fragment_links
           .push((self.link_bracket_pos, self.buffer.len()));
       }
+      self.link_bracket_pos = self.link_bracket_positions.pop().unwrap_or(0);
       self.last_node_is_inline = is_inline;
       return;
     }
@@ -1229,6 +1254,9 @@ impl ConvertState {
       self
         .fragment_links
         .push((self.link_bracket_pos, self.buffer.len()));
+    }
+    if tag_id == Some(TAG_A) {
+      self.link_bracket_pos = self.link_bracket_positions.pop().unwrap_or(0);
     }
   }
 

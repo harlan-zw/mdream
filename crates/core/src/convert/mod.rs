@@ -541,6 +541,8 @@ pub struct ConvertState {
   skip_current_link: bool,
   /// Buffer position of the `[` character written for TAG_A enter
   link_bracket_pos: usize,
+  /// Parent link bracket positions, for malformed input with nested anchors.
+  link_bracket_positions: Vec<usize>,
   /// Open inline markers as (kind, output start, content start); lets the exit drop empty pairs.
   open_markers: Vec<(u8, usize, usize)>,
   /// Open code spans and fenced blocks stay buffered until their closing
@@ -707,6 +709,7 @@ impl ConvertState {
       clean_flags: 0,
       skip_current_link: false,
       link_bracket_pos: 0,
+      link_bracket_positions: Vec::new(),
       open_markers: Vec::new(),
       code_spans: Vec::new(),
       code_fence: None,
@@ -1346,56 +1349,55 @@ impl ConvertState {
       self.buffer.drain(..start);
     }
 
-    // Apply clean.fragments using recorded positions
-    // Build new string copying segments, replacing broken links with text only
+    // Apply clean.fragments using recorded positions. Process links from the
+    // inside out so dropping an enclosing broken link preserves or removes its
+    // nested links before their text becomes part of the enclosing replacement.
     if self.clean_flags & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
       let trim_offset = start;
-      let mut result = String::with_capacity(self.buffer.len());
-      let mut cursor = 0usize;
-
+      let mut fragment_links = Vec::with_capacity(self.fragment_links.len());
       for &(bracket_start, link_end) in &self.fragment_links {
-        let adj_start = bracket_start.saturating_sub(trim_offset);
-        let adj_end = link_end.saturating_sub(trim_offset);
-        if adj_end > self.buffer.len() || adj_start >= adj_end {
+        let bracket_start = bracket_start.saturating_sub(trim_offset);
+        let link_end = link_end.saturating_sub(trim_offset);
+        fragment_links.push((bracket_start, link_end));
+      }
+      fragment_links.sort_unstable_by_key(|link| std::cmp::Reverse(link.0));
+
+      for index in 0..fragment_links.len() {
+        let (bracket_start, link_end) = fragment_links[index];
+        if link_end > self.buffer.len()
+          || bracket_start >= link_end
+          || !self.buffer.is_char_boundary(bracket_start)
+          || !self.buffer.is_char_boundary(link_end)
+        {
           continue;
         }
 
-        // Extract fragment from buffer: [text](#fragment) → find ](#
-        let range = &self.buffer[adj_start..adj_end];
-        let is_valid = if let Some(hash_pos) = range.find("](#") {
-          let frag_start = hash_pos + 3; // skip ](#
-          let frag_end = range.len().saturating_sub(1); // skip trailing )
-          if frag_start < frag_end {
-            let fragment = &range[frag_start..frag_end];
-            !self.heading_slugs.is_empty() && self.heading_slugs.iter().any(|s| s == fragment)
-          } else {
-            false
-          }
-        } else {
-          true // not a fragment link pattern, keep as-is
+        let range = &self.buffer[bracket_start..link_end];
+        let Some(close_bracket) = range.rfind("](#") else {
+          continue;
         };
-
+        let frag_start = close_bracket + 3;
+        let frag_end = range.len().saturating_sub(1);
+        let is_valid = frag_start < frag_end
+          && !self.heading_slugs.is_empty()
+          && self
+            .heading_slugs
+            .iter()
+            .any(|slug| slug == &range[frag_start..frag_end]);
         if is_valid {
-          continue; // keep original, will be copied by cursor
+          continue;
         }
 
-        // Copy everything before this link
-        if cursor < adj_start {
-          result.push_str(&self.buffer[cursor..adj_start]);
+        let link_text = range[1..close_bracket].to_string();
+        let offset = link_text.len() as isize - (link_end - bracket_start) as isize;
+        self
+          .buffer
+          .replace_range(bracket_start..link_end, &link_text);
+        for (_, other_link_end) in fragment_links.iter_mut().skip(index + 1) {
+          if *other_link_end > bracket_start {
+            *other_link_end = other_link_end.saturating_add_signed(offset);
+          }
         }
-        // Extract and copy just the text (between [ and ])
-        if let Some(close_bracket) = range.find("](#") {
-          result.push_str(&self.buffer[adj_start + 1..adj_start + close_bracket]);
-        }
-        cursor = adj_end;
-      }
-
-      // Only rebuild if we actually replaced something
-      if cursor > 0 {
-        if cursor < self.buffer.len() {
-          result.push_str(&self.buffer[cursor..]);
-        }
-        self.buffer = result;
       }
     }
     std::mem::take(&mut self.buffer)

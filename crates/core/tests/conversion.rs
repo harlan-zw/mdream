@@ -2623,6 +2623,31 @@ fn clean_keeps_valid_strips_broken() {
 }
 
 #[test]
+fn clean_fragments_survive_output_rewrites() {
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+
+  assert_eq!(
+    convert_with_clean(
+      r##"<h2 id="b">b</h2><a href="#a"><blockquote>e<a href="#b">x</a></blockquote></a>"##,
+      clean.clone(),
+    ),
+    "## b\n\n> e [x](#b)",
+  );
+  assert_eq!(
+    convert_with_clean(
+      r##"<a href="#a"><blockquote>é<a href="#b">x</a></blockquote></a>"##,
+      clean.clone(),
+    ),
+    "> é x",
+  );
+  let html = r##"<code><pre>”yy<a href="#a"><img alt=z>"##;
+  assert_eq!(convert_with_clean(html, clean), convert(html));
+}
+
+#[test]
 fn clean_preserves_absolute_url_fragments() {
   assert_eq!(
     convert_with_clean(
