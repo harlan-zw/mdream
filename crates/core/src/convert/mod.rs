@@ -1,7 +1,8 @@
 use crate::consts::*;
 use crate::entities::{decode_html_entities, decode_html_entities_for_markdown};
 use crate::scan::{
-  PendingTagScan, discarded_comment_end, is_whitespace, process_comment_or_doctype,
+  DiscardedCloseTag, PendingTagScan, discarded_cdata_end, discarded_close_tag_end,
+  discarded_comment_end, discarded_gt, is_whitespace, process_comment_or_doctype,
   process_tag_attributes, tag_is_complete,
 };
 use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selector_list};
@@ -916,27 +917,27 @@ impl ConvertState {
     let mut carry = false;
 
     // Mid-token from a previous chunk: keep dropping until its end is found.
-    match self.discard {
-      Discard::No => {}
-      Discard::Tag(mut pending) => {
-        pending.restart();
-        let Some(gt) = tag_is_complete(chunk, 0, &mut pending) else {
-          self.discard = Discard::Tag(pending);
-          self.parse_text_buffer = text_buffer;
-          return chunk_length;
-        };
-        self.discard = Discard::No;
-        i = gt + 1;
-      }
-      Discard::Comment(mut dashes) => {
-        let Some(end) = discarded_comment_end(chunk, &mut dashes) else {
-          self.discard = Discard::Comment(dashes);
-          self.parse_text_buffer = text_buffer;
-          return chunk_length;
-        };
-        self.discard = Discard::No;
-        i = end;
-      }
+    if !matches!(self.discard, Discard::No) {
+      let mut discard = self.discard;
+      let end = match &mut discard {
+        // Guarded above; scanning nothing leaves `i` at the chunk start.
+        Discard::No => Some(0),
+        Discard::Tag(pending) => {
+          pending.restart();
+          tag_is_complete(chunk, 0, pending).map(|gt| gt + 1)
+        }
+        Discard::Comment(dashes) => discarded_comment_end(chunk, dashes),
+        Discard::CloseTag(state) => discarded_close_tag_end(chunk, state),
+        Discard::Doctype => discarded_gt(chunk),
+        Discard::Cdata(brackets) => discarded_cdata_end(chunk, brackets),
+      };
+      let Some(end) = end else {
+        self.discard = discard;
+        self.parse_text_buffer = text_buffer;
+        return chunk_length;
+      };
+      self.discard = Discard::No;
+      i = end;
     }
 
     if self
@@ -1422,15 +1423,32 @@ impl ConvertState {
   fn start_discard(&mut self, chunk: &str, run_start: usize) {
     self.pending_tag = None;
     self.truncated = true;
-    if chunk.as_bytes()[run_start..].starts_with(b"<!--") {
+    let rest = &chunk[run_start..];
+    // Seed the state by running the scanner that owns this kind of token over the
+    // bytes already read, so the resume continues that one scan. The scanners
+    // disagree on purpose: a `>` inside a quoted end-tag attribute, a `--!!>` in
+    // a comment and a `>` inside CDATA each end the token in one scanner and not
+    // in another. Picking the owning one here is what keeps a dropped token
+    // ending where an uncapped parse ends it, so the document resumes in step.
+    self.discard = if let Some(body) = rest.strip_prefix("<!--") {
       let mut dashes = 0;
-      discarded_comment_end(&chunk[run_start + 4..], &mut dashes);
-      self.discard = Discard::Comment(dashes);
+      discarded_comment_end(body, &mut dashes);
+      Discard::Comment(dashes)
+    } else if let Some(body) = rest.strip_prefix("<![CDATA[") {
+      let mut brackets = 0;
+      discarded_cdata_end(body, &mut brackets);
+      Discard::Cdata(brackets)
+    } else if rest.starts_with("<!") {
+      Discard::Doctype
+    } else if let Some(body) = rest.strip_prefix("</") {
+      let mut state = DiscardedCloseTag::default();
+      discarded_close_tag_end(body, &mut state);
+      Discard::CloseTag(state)
     } else {
       let mut pending = PendingTagScan::new();
       tag_is_complete(chunk, run_start, &mut pending);
-      self.discard = Discard::Tag(pending);
-    }
+      Discard::Tag(pending)
+    };
   }
 
   pub fn get_markdown(&mut self) -> String {
@@ -1913,10 +1931,17 @@ pub(crate) struct OpeningTagResult {
 #[derive(Clone, Copy)]
 enum Discard {
   No,
-  /// Quote-aware resume for the `>` ending a dropped tag.
+  /// Quote-aware resume for the `>` ending a dropped start tag.
   Tag(PendingTagScan),
   /// Trailing dash-run state for the `-->` or `--!>` ending a dropped comment.
   Comment(u8),
+  /// Name and quote state for the `>` ending a dropped end tag, which the
+  /// end-tag tokenizer quotes differently from a start tag's.
+  CloseTag(DiscardedCloseTag),
+  /// A dropped doctype or bogus comment, which ends at the first `>`.
+  Doctype,
+  /// Trailing `]` run for the `]]>` ending a dropped CDATA section.
+  Cdata(u8),
 }
 
 pub(crate) struct CloseTagResult {

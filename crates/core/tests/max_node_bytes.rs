@@ -277,6 +277,28 @@ fn dropping_a_token_keeps_the_surrounding_document() {
   }
 }
 
+// Each kind of token is ended by its own scanner, and they disagree: a `>` inside
+// a quoted end-tag attribute closes a doctype but not an end tag, `--!!>` closes
+// nothing, and CDATA ends only at `]]>`. Dropping a token with the wrong scanner
+// resumes the document inside it, so its bytes surface as text. Everything after
+// each token is under the cap, so capped output must equal uncapped output.
+#[test]
+fn a_dropped_token_ends_where_an_uncapped_scan_ends_it() {
+  let filler = repeat_to("a", 256);
+  for (name, token) in [
+    ("comment", format!("<!--{filler}--!!>inside the comment-->")),
+    ("cdata", format!("<![CDATA[{filler}>inside the cdata]]>")),
+    (
+      "doctype",
+      format!("<!DOCTYPE x=\"{filler}>after the doctype\">"),
+    ),
+    ("end tag", format!("</x {filler} \"a>inside the tag\">")),
+  ] {
+    let html = format!("<p>before</p>{token}<p>after</p>");
+    assert_eq!(stream(&html, 32, 64), stream(&html, 32, 0), "case={name}");
+  }
+}
+
 // As with text, dropping must cut at a content-determined point.
 #[test]
 fn the_discard_does_not_depend_on_chunking() {
