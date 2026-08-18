@@ -170,6 +170,8 @@ fn parse_options(
     clean,
     plugins,
     wrap_width,
+    // Not exposed through the bindings yet: the JS engine has no equivalent cap.
+    max_node_bytes: 0,
   };
   (core_options, format)
 }

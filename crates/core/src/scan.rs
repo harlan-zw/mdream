@@ -114,16 +114,107 @@ impl PendingTagScan {
       quote_char: 0,
     }
   }
+
+  /// Resume from the start of a fresh chunk, keeping the tokenizer state. Lets a
+  /// discarded tag's bytes be dropped while its `>` is still found correctly.
+  #[inline]
+  pub(crate) fn restart(&mut self) {
+    self.scanned = 0;
+  }
 }
 
-/// Resume the search for a start tag's `>`, reporting whether the tag is now
+/// State after the `!` in `--!`, where only `>` still closes the comment. Held in
+/// the same byte as the dash run, which counts 0, 1, or 2-or-more.
+const COMMENT_BANG: u8 = 3;
+
+/// Find the end of a comment whose earlier bytes have been dropped, resuming from
+/// `dashes` (the trailing dash-run state). Only `-->` and `--!>` can still close
+/// one this far in, so no bytes need retaining. Returns the index after the `>`.
+///
+/// A second `!` leaves the comment end bang state, and a `-` after it starts a
+/// fresh dash run, so `--!!>` and `--!->` do not close. Diverging here would let
+/// a dropped comment end at a byte the full scan runs past, which resumes the
+/// document inside the comment.
+pub(crate) fn discarded_comment_end(chunk: &str, dashes: &mut u8) -> Option<usize> {
+  for (index, &c) in chunk.as_bytes().iter().enumerate() {
+    match c {
+      DASH_CHAR => {
+        *dashes = if *dashes == COMMENT_BANG {
+          1
+        } else {
+          (*dashes + 1).min(2)
+        };
+      }
+      GT_CHAR if *dashes >= 2 => return Some(index + 1),
+      EXCLAMATION_CHAR if *dashes == 2 => *dashes = COMMENT_BANG,
+      _ => *dashes = 0,
+    }
+  }
+  None
+}
+
+/// Quote state carried while an end tag's bytes are dropped. The end-tag
+/// tokenizer only treats a quote as opening a value once the tag name has ended,
+/// so both bits have to survive a chunk boundary.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct DiscardedCloseTag {
+  name_ended: bool,
+  quote: u8,
+}
+
+/// Find the `>` ending an end tag whose earlier bytes have been dropped. Mirrors
+/// the end-tag tokenizer in `process_closing_tag`, where a `>` inside a quoted
+/// parse-error attribute does not complete the token. Returns the index after
+/// the `>`.
+pub(crate) fn discarded_close_tag_end(chunk: &str, state: &mut DiscardedCloseTag) -> Option<usize> {
+  for (index, &c) in chunk.as_bytes().iter().enumerate() {
+    if !state.name_ended && (is_whitespace(c) || c == SLASH_CHAR || c == GT_CHAR) {
+      state.name_ended = true;
+    }
+    if state.quote != 0 {
+      if c == state.quote {
+        state.quote = 0;
+      }
+    } else if state.name_ended && (c == QUOTE_CHAR || c == APOS_CHAR) {
+      state.quote = c;
+    } else if c == GT_CHAR {
+      return Some(index + 1);
+    }
+  }
+  None
+}
+
+/// Find the `>` ending a dropped doctype or bogus comment. Both end at the first
+/// `>`, quoted or not, exactly as [`process_comment_or_doctype`] scans them.
+pub(crate) fn discarded_gt(chunk: &str) -> Option<usize> {
+  chunk
+    .as_bytes()
+    .iter()
+    .position(|&c| c == GT_CHAR)
+    .map(|index| index + 1)
+}
+
+/// Find the `]]>` ending a dropped CDATA section, resuming from `brackets` (the
+/// trailing `]` run). Returns the index after the `>`.
+pub(crate) fn discarded_cdata_end(chunk: &str, brackets: &mut u8) -> Option<usize> {
+  for (index, &c) in chunk.as_bytes().iter().enumerate() {
+    match c {
+      b']' => *brackets = (*brackets + 1).min(2),
+      GT_CHAR if *brackets >= 2 => return Some(index + 1),
+      _ => *brackets = 0,
+    }
+  }
+  None
+}
+
+/// Resume the search for a start tag's `>`, returning its index once the tag is
 /// complete. Runs the same tokenizer as [`scan_tag`] so the two always agree on
 /// where a tag ends; `process_tag_attributes` still does the single real parse.
 pub(crate) fn tag_is_complete(
   html_chunk: &str,
   attrs_start: usize,
   pending: &mut PendingTagScan,
-) -> bool {
+) -> Option<usize> {
   let bytes = html_chunk.as_bytes();
   let mut i = attrs_start + pending.scanned;
 
@@ -141,7 +232,7 @@ pub(crate) fn tag_is_complete(
 
     // `/>` is reached through its own `>`, so one test covers both endings.
     if c == GT_CHAR {
-      return true;
+      return Some(i);
     }
 
     if pending.state == State::BeforeValue && (c == QUOTE_CHAR || c == APOS_CHAR) {
@@ -153,7 +244,7 @@ pub(crate) fn tag_is_complete(
   }
 
   pending.scanned = i - attrs_start;
-  false
+  None
 }
 
 /// Scan a start tag's attribute region to its `>`, storing only the attributes
@@ -785,6 +876,32 @@ mod tests {
           comment_end(&html),
           spec_comment_end(html.as_bytes(), 4),
           "html={html:?}"
+        );
+      }
+    }
+  }
+
+  // A dropped comment ends where the full scan ends it, or the document resumes
+  // inside the comment. `discarded_comment_end` starts where the cap cut, which is
+  // the spec's comment state, so the reference is prefixed by one ordinary byte.
+  #[test]
+  fn the_discarded_comment_scan_matches_the_spec_state_machine() {
+    const ALPHABET: [u8; 5] = *b"-!>x<";
+    for len in 0..=6u32 {
+      for n in 0..ALPHABET.len().pow(len) {
+        let mut tail = String::new();
+        let mut rest = n;
+        for _ in 0..len {
+          tail.push(ALPHABET[rest % ALPHABET.len()] as char);
+          rest /= ALPHABET.len();
+        }
+        tail.push('Z');
+        let mut dashes = 0;
+        let reference = spec_comment_end(format!("x{tail}").as_bytes(), 0).map(|end| end - 1);
+        assert_eq!(
+          discarded_comment_end(&tail, &mut dashes),
+          reference,
+          "tail={tail:?}"
         );
       }
     }
