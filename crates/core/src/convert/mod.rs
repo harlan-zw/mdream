@@ -164,6 +164,10 @@ fn slug_hash(slug: &str) -> usize {
 /// Open-addressed index over the collected heading slugs, returned with its
 /// probe mask. Hand-rolled because `sort_unstable` + `binary_search` drags the
 /// generic sort machinery (~11 kB) into the wasm build for one membership test.
+///
+/// The hash is not keyed, so a document whose headings all collide degrades to
+/// a linear scan. That is the cost the unindexed lookup paid on every document,
+/// so a crafted input can only reach the old behaviour, never a worse one.
 fn build_slug_index(slugs: &[String]) -> (Vec<usize>, usize) {
   // Load factor stays at or below 0.5, so probing always terminates. `usize::MAX`
   // marks an empty slot; no slice can hold that many entries, so it can never
