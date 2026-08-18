@@ -312,6 +312,33 @@ fn the_discard_does_not_depend_on_chunking() {
   }
 }
 
+// Above `TEXT_RUN_FLUSH_THRESHOLD` the two bounds compose: a run the flush can
+// split never reaches the cap, and one it cannot is cut by the cap. Both are
+// decided by buffered content, so neither cut may move with the chunk size.
+#[test]
+fn the_cut_point_does_not_depend_on_chunking_above_the_flush_threshold() {
+  // `*` is a GFM hazard, so this run is never batchable and the flush leaves it
+  // to the cap.
+  let unsplittable = format!("<p>{}</p><p>after</p>", repeat_to("wo*d ", 512 * 1024));
+  for cap in [96 * 1024usize, 128 * 1024] {
+    let expected = stream(&unsplittable, 4096, cap);
+    for chunk in [37, 512, 8192, 1024 * 1024] {
+      assert_eq!(
+        stream(&unsplittable, chunk, cap),
+        expected,
+        "cap={cap} chunk={chunk}"
+      );
+    }
+  }
+  // Plain prose is split by the flush long before the cap, so a cap this high
+  // never fires and the output is the uncapped one.
+  let splittable = format!("<p>{}</p><p>after</p>", repeat_to("word ", 512 * 1024));
+  assert_eq!(
+    stream(&splittable, 8192, 128 * 1024),
+    stream(&splittable, 8192, 0)
+  );
+}
+
 // A code fence cannot be closed until the longest backtick run inside it is known,
 // so the block pins the buffer however small its text nodes are. The cap is
 // measured against the block, not the node.
