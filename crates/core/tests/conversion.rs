@@ -2713,10 +2713,30 @@ fn clean_fragments_scales_with_many_broken_links() {
 
   let _ = convert_with_clean(&html, clean);
 
+  // Generous because the gate is complexity, not speed: the quadratic scan this
+  // replaces takes minutes on this input, so a slow shared runner cannot flake.
   assert!(
-    started.elapsed() < std::time::Duration::from_secs(2),
+    started.elapsed() < std::time::Duration::from_secs(10),
     "fragment cleanup took {:?}",
     started.elapsed(),
+  );
+}
+
+#[test]
+fn clean_fragments_ignore_link_syntax_in_the_link_text() {
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  // The text carries its own `](#`, so a fixup that searched the emitted link
+  // for that marker cut the wrapper at the wrong offset.
+  assert_eq!(
+    convert_with_clean(r##"<a href="#missing">a](#b) c</a>"##, clean.clone()),
+    "a\\](#b) c",
+  );
+  assert_eq!(
+    convert_with_clean(r##"<h2>keep</h2><a href="#keep">a](#b) c</a>"##, clean),
+    "## keep\n\n[a\\](#b) c](#keep)",
   );
 }
 

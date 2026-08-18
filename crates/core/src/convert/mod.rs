@@ -149,6 +149,54 @@ struct FragmentLink {
   fragment: String,
 }
 
+/// FNV-1a over the slug bytes. Only used to bucket heading slugs, so a short
+/// non-cryptographic hash is enough.
+#[allow(clippy::cast_possible_truncation)] // Dropping the high bits keeps a valid hash.
+fn slug_hash(slug: &str) -> usize {
+  let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+  for &byte in slug.as_bytes() {
+    hash ^= u64::from(byte);
+    hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+  }
+  hash as usize
+}
+
+/// Open-addressed index over the collected heading slugs, returned with its
+/// probe mask. Hand-rolled because `sort_unstable` + `binary_search` drags the
+/// generic sort machinery (~11 kB) into the wasm build for one membership test.
+fn build_slug_index(slugs: &[String]) -> (Vec<usize>, usize) {
+  // Load factor stays at or below 0.5, so probing always terminates. `usize::MAX`
+  // marks an empty slot; no slice can hold that many entries, so it can never
+  // collide with a real index.
+  let capacity = slugs.len().saturating_mul(2).next_power_of_two().max(8);
+  let mask = capacity - 1;
+  let mut table = vec![usize::MAX; capacity];
+  for (index, slug) in slugs.iter().enumerate() {
+    let mut slot = slug_hash(slug) & mask;
+    while table[slot] != usize::MAX {
+      slot = (slot + 1) & mask;
+    }
+    table[slot] = index;
+  }
+  (table, mask)
+}
+
+/// Membership test against `build_slug_index`. Duplicate slugs occupy separate
+/// slots, so the first exact string match wins.
+fn slug_index_contains(table: &[usize], mask: usize, slugs: &[String], needle: &str) -> bool {
+  let mut slot = slug_hash(needle) & mask;
+  loop {
+    let index = table[slot];
+    if index == usize::MAX {
+      return false;
+    }
+    if slugs[index] == needle {
+      return true;
+    }
+    slot = (slot + 1) & mask;
+  }
+}
+
 #[derive(Clone)]
 struct BlockquoteFrame {
   content_start: usize,
@@ -1361,8 +1409,7 @@ impl ConvertState {
     // link's wrappers preserves nested link text without repeatedly shifting the
     // whole output buffer.
     if self.clean_flags & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
-      self.heading_slugs.sort_unstable();
-      self.heading_slugs.dedup();
+      let (slug_table, slug_mask) = build_slug_index(&self.heading_slugs);
       let trim_offset = start;
       let mut removals = Vec::with_capacity(self.fragment_links.len());
       for link in &self.fragment_links {
@@ -1381,8 +1428,7 @@ impl ConvertState {
         {
           continue;
         }
-        let is_valid = self.heading_slugs.binary_search(&link.fragment).is_ok();
-        if is_valid {
+        if slug_index_contains(&slug_table, slug_mask, &self.heading_slugs, &link.fragment) {
           continue;
         }
         removals.push((bracket_start, bracket_start + 1));
@@ -1390,7 +1436,20 @@ impl ConvertState {
       }
 
       if !removals.is_empty() {
-        removals.sort_unstable_by_key(|&(remove_start, _)| remove_start);
+        // Links are recorded at their close, so a link lands after the ones
+        // it wraps. Only nesting breaks the ascending order, and element depth
+        // is capped, so this insertion pass costs one comparison per entry on
+        // flat documents. It also keeps the generic sort, ~11 kB of wasm, out
+        // of the binary.
+        for index in 1..removals.len() {
+          let entry = removals[index];
+          let mut slot = index;
+          while slot > 0 && removals[slot - 1].0 > entry.0 {
+            removals[slot] = removals[slot - 1];
+            slot -= 1;
+          }
+          removals[slot] = entry;
+        }
         let mut result = String::with_capacity(self.buffer.len());
         let mut cursor = 0;
         for (remove_start, remove_end) in removals {
