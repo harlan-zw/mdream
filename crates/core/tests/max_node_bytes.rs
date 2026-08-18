@@ -135,10 +135,16 @@ const CAP: usize = 64 * 1024;
 
 // The point of the option. Uncapped these cost ~10MB of peak heap for a 2MB
 // document; the cap has to make that a window instead.
+//
+// Plain ASCII prose in a `<p>` is already a window without the cap: a batchable
+// run is flushed in pieces once it passes `TEXT_RUN_FLUSH_THRESHOLD`. That flush
+// only splits a run that is batchable end to end, so a word carrying a non-ASCII
+// byte leaves the run unsplittable and the whole node buffered. The cap is what
+// bounds the runs the flush cannot reach.
 #[test]
 fn one_huge_text_node_no_longer_costs_the_document() {
   for (name, html) in [
-    ("p", format!("<p>{}</p>", repeat_to("word ", HUGE))),
+    ("p", format!("<p>{}</p>", repeat_to("wörd ", HUGE))),
     (
       "pre",
       format!("<pre><code>{}</code></pre>", repeat_to("x = 1;\n", HUGE)),
