@@ -137,6 +137,71 @@ struct CodeFenceState {
   language: String,
 }
 
+#[derive(Clone, Copy, Default)]
+struct LinkOutputState {
+  bracket_pos: usize,
+  skipped: bool,
+}
+
+struct FragmentLink {
+  bracket_start: usize,
+  text_end: usize,
+  link_end: usize,
+  fragment: String,
+}
+
+/// FNV-1a over the slug bytes. Only used to bucket heading slugs, so a short
+/// non-cryptographic hash is enough.
+#[allow(clippy::cast_possible_truncation)] // Dropping the high bits keeps a valid hash.
+fn slug_hash(slug: &str) -> usize {
+  let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+  for &byte in slug.as_bytes() {
+    hash ^= u64::from(byte);
+    hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+  }
+  hash as usize
+}
+
+/// Open-addressed index over the collected heading slugs, returned with its
+/// probe mask. Hand-rolled because `sort_unstable` + `binary_search` drags the
+/// generic sort machinery (~11 kB) into the wasm build for one membership test.
+///
+/// The hash is not keyed, so a document whose headings all collide degrades to
+/// a linear scan. That is the cost the unindexed lookup paid on every document,
+/// so a crafted input can only reach the old behaviour, never a worse one.
+fn build_slug_index(slugs: &[String]) -> (Vec<usize>, usize) {
+  // Load factor stays at or below 0.5, so probing always terminates. `usize::MAX`
+  // marks an empty slot; no slice can hold that many entries, so it can never
+  // collide with a real index.
+  let capacity = slugs.len().saturating_mul(2).next_power_of_two().max(8);
+  let mask = capacity - 1;
+  let mut table = vec![usize::MAX; capacity];
+  for (index, slug) in slugs.iter().enumerate() {
+    let mut slot = slug_hash(slug) & mask;
+    while table[slot] != usize::MAX {
+      slot = (slot + 1) & mask;
+    }
+    table[slot] = index;
+  }
+  (table, mask)
+}
+
+/// Membership test against `build_slug_index`. Duplicate slugs occupy separate
+/// slots, so the first exact string match wins.
+fn slug_index_contains(table: &[usize], mask: usize, slugs: &[String], needle: &str) -> bool {
+  let mut slot = slug_hash(needle) & mask;
+  loop {
+    let index = table[slot];
+    if index == usize::MAX {
+      return false;
+    }
+    if slugs[index] == needle {
+      return true;
+    }
+    slot = (slot + 1) & mask;
+  }
+}
+
 #[derive(Clone)]
 struct BlockquoteFrame {
   content_start: usize,
@@ -545,10 +610,9 @@ pub struct ConvertState {
 
   // Clean mode — bitmask for zero-cost when disabled
   clean_flags: u8,
-  /// Set when current TAG_A has a meaningless href and should be rendered as plain text
-  skip_current_link: bool,
-  /// Buffer position of the `[` character written for TAG_A enter
-  link_bracket_pos: usize,
+  /// Output state for the active anchor and its malformed nested parents.
+  link: LinkOutputState,
+  parent_links: Vec<LinkOutputState>,
   /// Open inline markers as (kind, output start, content start); lets the exit drop empty pairs.
   open_markers: Vec<(u8, usize, usize)>,
   /// Open code spans and fenced blocks stay buffered until their closing
@@ -563,9 +627,8 @@ pub struct ConvertState {
   blockquote_scratch: String,
   /// Heading slugs collected during conversion for fragment validation
   heading_slugs: Vec<String>,
-  /// Fragment link locations: (bracket_start, link_end)
-  /// Fragment slug is derived from buffer at fixup time
-  fragment_links: Vec<(usize, usize)>,
+  /// Emitted fragment links retained until all heading slugs are known.
+  fragment_links: Vec<FragmentLink>,
   /// Whether we're inside a heading (for slug collection)
   in_heading: bool,
   /// Buffer position at heading start (for extracting heading text)
@@ -721,8 +784,8 @@ impl ConvertState {
       plain_text,
       preserve_leading_whitespace: false,
       clean_flags: 0,
-      skip_current_link: false,
-      link_bracket_pos: 0,
+      link: LinkOutputState::default(),
+      parent_links: Vec::new(),
       open_markers: Vec::new(),
       code_spans: Vec::new(),
       code_fence: None,
@@ -1468,52 +1531,62 @@ impl ConvertState {
       self.buffer.drain(..start);
     }
 
-    // Apply clean.fragments using recorded positions
-    // Build new string copying segments, replacing broken links with text only
+    // Apply clean.fragments using recorded positions. Removing only each broken
+    // link's wrappers preserves nested link text without repeatedly shifting the
+    // whole output buffer.
     if self.clean_flags & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
+      let (slug_table, slug_mask) = build_slug_index(&self.heading_slugs);
       let trim_offset = start;
-      let mut result = String::with_capacity(self.buffer.len());
-      let mut cursor = 0usize;
-
-      for &(bracket_start, link_end) in &self.fragment_links {
-        let adj_start = bracket_start.saturating_sub(trim_offset);
-        let adj_end = link_end.saturating_sub(trim_offset);
-        if adj_end > self.buffer.len() || adj_start >= adj_end {
+      let mut removals = Vec::with_capacity(self.fragment_links.len());
+      for link in &self.fragment_links {
+        let bracket_start = link.bracket_start.saturating_sub(trim_offset);
+        let text_end = link.text_end.saturating_sub(trim_offset);
+        let link_end = link.link_end.saturating_sub(trim_offset);
+        if link_end > self.buffer.len()
+          || bracket_start >= text_end
+          || text_end >= link_end
+          || !self.buffer.is_char_boundary(bracket_start)
+          || !self.buffer.is_char_boundary(text_end)
+          || !self.buffer.is_char_boundary(link_end)
+          || self.buffer.as_bytes().get(bracket_start) != Some(&b'[')
+          || self.buffer.as_bytes().get(text_end) != Some(&b']')
+          || self.buffer.as_bytes().get(link_end - 1) != Some(&b')')
+        {
           continue;
         }
-
-        // Extract fragment from buffer: [text](#fragment) → find ](#
-        let range = &self.buffer[adj_start..adj_end];
-        let is_valid = if let Some(hash_pos) = range.find("](#") {
-          let frag_start = hash_pos + 3; // skip ](#
-          let frag_end = range.len().saturating_sub(1); // skip trailing )
-          if frag_start < frag_end {
-            let fragment = &range[frag_start..frag_end];
-            !self.heading_slugs.is_empty() && self.heading_slugs.iter().any(|s| s == fragment)
-          } else {
-            false
-          }
-        } else {
-          true // not a fragment link pattern, keep as-is
-        };
-
-        if is_valid {
-          continue; // keep original, will be copied by cursor
+        if slug_index_contains(&slug_table, slug_mask, &self.heading_slugs, &link.fragment) {
+          continue;
         }
-
-        // Copy everything before this link
-        if cursor < adj_start {
-          result.push_str(&self.buffer[cursor..adj_start]);
-        }
-        // Extract and copy just the text (between [ and ])
-        if let Some(close_bracket) = range.find("](#") {
-          result.push_str(&self.buffer[adj_start + 1..adj_start + close_bracket]);
-        }
-        cursor = adj_end;
+        removals.push((bracket_start, bracket_start + 1));
+        removals.push((text_end, link_end));
       }
 
-      // Only rebuild if we actually replaced something
-      if cursor > 0 {
+      if !removals.is_empty() {
+        // Links are recorded at their close, so a link lands after the ones
+        // it wraps. Only nesting breaks the ascending order, and element depth
+        // is capped, so this insertion pass costs one comparison per entry on
+        // flat documents. It also keeps the generic sort, ~11 kB of wasm, out
+        // of the binary.
+        for index in 1..removals.len() {
+          let entry = removals[index];
+          let mut slot = index;
+          while slot > 0 && removals[slot - 1].0 > entry.0 {
+            removals[slot] = removals[slot - 1];
+            slot -= 1;
+          }
+          removals[slot] = entry;
+        }
+        let mut result = String::with_capacity(self.buffer.len());
+        let mut cursor = 0;
+        for (remove_start, remove_end) in removals {
+          if remove_end <= cursor {
+            continue;
+          }
+          if remove_start > cursor {
+            result.push_str(&self.buffer[cursor..remove_start]);
+          }
+          cursor = cursor.max(remove_end);
+        }
         if cursor < self.buffer.len() {
           result.push_str(&self.buffer[cursor..]);
         }
@@ -1588,6 +1661,9 @@ impl ConvertState {
   pub fn get_markdown_chunk(&mut self) -> String {
     if self.format == OutputFormat::Html {
       return std::mem::take(&mut self.buffer);
+    }
+    if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+      return String::new();
     }
     // Quote only what this chunk could already hand out. The tail past here is
     // still open to the trims below and to a reach-back rewrite from the next
@@ -1668,7 +1744,7 @@ impl ConvertState {
     // so hold them back too or a yielded space would be silently removed.
     // Mirrors the same guard in `drain_streamed_prefix`.
     if self.depth_map[TAG_A as usize] > 0 {
-      stable_end = stable_end.min(hold_before(&self.buffer, self.link_bracket_pos));
+      stable_end = stable_end.min(hold_before(&self.buffer, self.link.bracket_pos));
     }
     // A marker still alone on its line has its separating newline inserted at
     // the line start when the item resolves, so the line stays mutable.
@@ -1718,6 +1794,17 @@ impl ConvertState {
     new_content
   }
 
+  pub fn get_final_markdown_chunk(&mut self) -> String {
+    if !self.plain_text
+      && self.format != OutputFormat::Html
+      && self.clean_flags & CLEAN_FRAGMENTS != 0
+    {
+      self.get_markdown()
+    } else {
+      self.get_markdown_chunk()
+    }
+  }
+
   /// Free already-yielded output so streaming memory stays O(window), not
   /// O(document). Skipped when a whole-document feature (fragment cleaning,
   /// frontmatter, extraction) still needs the full buffer.
@@ -1760,7 +1847,7 @@ impl ConvertState {
     // those two bytes; otherwise a dropped element leaks an extra newline in
     // streaming.
     if self.depth_map[TAG_A as usize] > 0 {
-      drain_end = drain_end.min(keep_two_before(&self.buffer, self.link_bracket_pos));
+      drain_end = drain_end.min(keep_two_before(&self.buffer, self.link.bracket_pos));
     }
     if let Some(&(_, output_start, _)) = self.open_markers.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, output_start));
@@ -1814,7 +1901,10 @@ impl ConvertState {
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
-    self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);
+    self.link.bracket_pos = self.link.bracket_pos.saturating_sub(drain_end);
+    for parent in &mut self.parent_links {
+      parent.bracket_pos = parent.bracket_pos.saturating_sub(drain_end);
+    }
     for (_, output_start, content_start) in &mut self.open_markers {
       *output_start -= drain_end;
       *content_start -= drain_end;

@@ -143,7 +143,7 @@ impl MarkdownStreamProcessor {
       self.state.process_html(&buffer)
     };
     self.state.finalize(&buffer[consumed..]);
-    self.state.get_markdown_chunk()
+    self.state.get_final_markdown_chunk()
   }
 }
 
