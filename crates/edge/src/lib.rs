@@ -273,6 +273,21 @@ pub fn html_to_markdown(html: &str, options: JsValue) -> String {
   mdream::html_to_format(html, opts, format)
 }
 
+/// Bytes in, string out: skips the transcode (~14% of a convert) for a
+/// caller already holding UTF-8 bytes. Encoding a string to get here
+/// measures 1-16% *slower* than [`html_to_markdown`] — only worth it when
+/// the bytes are already in hand.
+#[wasm_bindgen(js_name = "htmlToMarkdownBytes")]
+pub fn html_to_markdown_bytes(html: &[u8], options: JsValue) -> String {
+  let (opts, format) = parse_options(&options);
+  // Valid input costs one strict pass; only invalid bytes pay the lossy
+  // chunker, which replaces each maximal invalid subsequence with U+FFFD.
+  match std::str::from_utf8(html) {
+    Ok(text) => mdream::html_to_format(text, opts, format),
+    Err(_) => mdream::html_to_format(&String::from_utf8_lossy(html), opts, format),
+  }
+}
+
 #[wasm_bindgen(js_name = "htmlToMarkdownResult")]
 pub fn html_to_markdown_result(html: &str, options: JsValue) -> JsValue {
   let (opts, format) = parse_options(&options);
@@ -313,6 +328,9 @@ pub fn html_to_markdown_result(html: &str, options: JsValue) -> JsValue {
 #[wasm_bindgen]
 pub struct MarkdownStream {
   inner: mdream::MarkdownStreamProcessor,
+  /// A multi-byte sequence split across a chunk boundary; 1-3 bytes, byte
+  /// entry points only.
+  tail: Vec<u8>,
 }
 
 #[wasm_bindgen]
@@ -322,15 +340,90 @@ impl MarkdownStream {
     let (opts, format) = parse_options(&options);
     Self {
       inner: mdream::MarkdownStreamProcessor::new_with_format(opts, format),
+      tail: Vec::new(),
     }
   }
 
+  /// A carried byte tail cannot be completed by a string chunk, so it is
+  /// flushed first. Byte and string chunks may be mixed freely.
   #[wasm_bindgen(js_name = "processChunk")]
   pub fn process_chunk(&mut self, chunk: &str) -> String {
-    self.inner.process_chunk(chunk)
+    if self.tail.is_empty() {
+      return self.inner.process_chunk(chunk);
+    }
+    let mut out = self.flush_tail();
+    out.push_str(&self.inner.process_chunk(chunk));
+    out
   }
 
   pub fn finish(&mut self) -> String {
-    self.inner.finish()
+    if self.tail.is_empty() {
+      return self.inner.finish();
+    }
+    let mut out = self.flush_tail();
+    out.push_str(&self.inner.finish());
+    out
+  }
+
+  /// Byte chunk in, string out, skipping the transcode per chunk. A sequence
+  /// split across chunks carries to the next call rather than decoding early,
+  /// matching `TextDecoder({ stream: true })`; invalid bytes become U+FFFD.
+  #[wasm_bindgen(js_name = "processChunkBytes")]
+  pub fn process_chunk_bytes(&mut self, chunk: &[u8]) -> String {
+    // Fast path: nothing held back, chunk valid or cut short at its end;
+    // neither case allocates or copies.
+    if self.tail.is_empty() {
+      match std::str::from_utf8(chunk) {
+        Ok(text) => return self.inner.process_chunk(text),
+        Err(error) if error.error_len().is_none() => {
+          let (head, rest) = chunk.split_at(error.valid_up_to());
+          // `head` is valid by construction: it is what `valid_up_to` reports.
+          let out = match std::str::from_utf8(head) {
+            Ok(text) => self.inner.process_chunk(text),
+            Err(_) => String::new(),
+          };
+          self.tail.extend_from_slice(rest);
+          return out;
+        }
+        Err(_) => {}
+      }
+    }
+    self.process_joined(chunk)
+  }
+}
+
+impl MarkdownStream {
+  /// A tail still incomplete becomes U+FFFD, matching `TextDecoder`'s final
+  /// `decode()`. Caller checks emptiness.
+  fn flush_tail(&mut self) -> String {
+    let tail = std::mem::take(&mut self.tail);
+    self.inner.process_chunk(&String::from_utf8_lossy(&tail))
+  }
+
+  /// Slow path: rejoin a carried tail, or replace invalid bytes.
+  fn process_joined(&mut self, chunk: &[u8]) -> String {
+    let mut buffer = std::mem::take(&mut self.tail);
+    buffer.extend_from_slice(chunk);
+
+    // Walk errors only to find a trailing incomplete sequence; everything
+    // before it goes to `from_utf8_lossy` (borrows when clean, else replaces).
+    let mut consumed = 0;
+    let split = loop {
+      match std::str::from_utf8(&buffer[consumed..]) {
+        Ok(_) => break buffer.len(),
+        Err(error) => match error.error_len() {
+          Some(invalid) => consumed += error.valid_up_to() + invalid,
+          None => break consumed + error.valid_up_to(),
+        },
+      }
+    };
+
+    let out = self
+      .inner
+      .process_chunk(&String::from_utf8_lossy(&buffer[..split]));
+    // Drain rather than reallocate, so the tail keeps its capacity.
+    buffer.drain(..split);
+    self.tail = buffer;
+    out
   }
 }
