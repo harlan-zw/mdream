@@ -538,7 +538,7 @@ impl<'a> AttrScan<'a> {
   }
 }
 
-/// Attributes of a bare region, for tests that write their input as it reads
+/// Attributes of a bare region, for tests that write input as it appears
 /// inside `<…>`.
 #[cfg(test)]
 pub(crate) fn parse_attributes(attr_str: &str, mask: u16) -> Attributes {
@@ -626,10 +626,7 @@ mod tests {
   #[test]
   fn attribute_entities_follow_ambiguous_ampersand_rules() {
     let a = parse_attributes("title='&copycat &copy=1 &copy! &copy;cat'", ATTR_ALL);
-    assert_eq!(
-      a.get("title"),
-      Some("&copycat &copy=1 ©! ©cat")
-    );
+    assert_eq!(a.get("title"), Some("&copycat &copy=1 ©! ©cat"));
   }
 
   #[test]
