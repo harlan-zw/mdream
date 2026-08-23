@@ -4073,6 +4073,40 @@ fn a_fence_opening_a_list_item_shares_the_marker_line() {
 }
 
 #[test]
+fn clean_fragments_resolves_against_many_headings() {
+  // Headings emit in DESCENDING slug order, so document order is the reverse
+  // of sorted order — this catches a search over the unsorted view.
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  let mut html = String::new();
+  for i in (0..200).rev() {
+    html.push_str(&format!("<h2>Section {i:03}</h2>"));
+  }
+  for target in ["section-000", "section-100", "section-199"] {
+    html.push_str(&format!("<a href=\"#{target}\">keep {target}</a>"));
+  }
+  html.push_str("<a href=\"#section-900\">drop me</a>");
+
+  let out = convert_with_clean(&html, clean);
+  for target in ["section-000", "section-100", "section-199"] {
+    assert!(
+      out.contains(&format!("[keep {target}](#{target})")),
+      "kept link for {target} missing from:\n{out}"
+    );
+  }
+  assert!(
+    out.contains("drop me"),
+    "dropped link lost its text:\n{out}"
+  );
+  assert!(
+    !out.contains("#section-900"),
+    "link with no matching heading kept its target:\n{out}"
+  );
+}
+
+#[test]
 fn clean_fragments_survives_a_heading_whose_content_is_all_dropped() {
   // A heading records its slug-scan start at the buffer end, just past the
   // marker's trailing space. An element that emits nothing (`<style>`) trims

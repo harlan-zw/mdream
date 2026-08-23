@@ -1502,10 +1502,15 @@ impl ConvertState {
       self.buffer.drain(..start);
     }
 
-    // Apply clean.fragments using recorded positions
-    // Build new string copying segments, replacing broken links with text only
+    // Apply clean.fragments using recorded positions: a link whose #fragment
+    // matches no heading keeps its text and loses its target.
     if self.clean_flags & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
       let trim_offset = start;
+      // Sorted once, then probed per link: rescanning every slug per fragment
+      // is quadratic — ~1.3k headings against ~50k links on a spec page.
+      let mut slugs: Vec<&str> = self.heading_slugs.iter().map(String::as_str).collect();
+      slugs.sort_unstable();
+
       let mut result = String::with_capacity(self.buffer.len());
       let mut cursor = 0usize;
 
@@ -1523,7 +1528,7 @@ impl ConvertState {
           let frag_end = range.len().saturating_sub(1); // skip trailing )
           if frag_start < frag_end {
             let fragment = &range[frag_start..frag_end];
-            !self.heading_slugs.is_empty() && self.heading_slugs.iter().any(|s| s == fragment)
+            slugs.binary_search(&fragment).is_ok()
           } else {
             false
           }
