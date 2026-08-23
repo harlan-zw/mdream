@@ -1511,52 +1511,62 @@ impl ConvertState {
       let mut slugs: Vec<&str> = self.heading_slugs.iter().map(String::as_str).collect();
       slugs.sort_unstable();
 
-      let mut result = String::with_capacity(self.buffer.len());
-      let mut cursor = 0usize;
+      // Only deletes, so it compacts in place: `write` trails `read` by bytes
+      // dropped so far. A clean document never writes a byte; rebuilding into
+      // a second String cost 7.2 MB on the spec page.
+      let buf_len = self.buffer.len();
+      let mut read = 0usize;
+      let mut write = 0usize;
 
       for &(bracket_start, link_end) in &self.fragment_links {
         let adj_start = bracket_start.saturating_sub(trim_offset);
         let adj_end = link_end.saturating_sub(trim_offset);
-        if adj_end > self.buffer.len() || adj_start >= adj_end {
+        // `read > adj_start` would mean overlapping links (anchors can't
+        // nest); skipping keeps the compaction from reading overwritten bytes.
+        if adj_end > buf_len || adj_start >= adj_end || read > adj_start {
           continue;
         }
 
-        // Extract fragment from buffer: [text](#fragment) → find ](#
         let range = &self.buffer[adj_start..adj_end];
-        let is_valid = if let Some(hash_pos) = range.find("](#") {
-          let frag_start = hash_pos + 3; // skip ](#
-          let frag_end = range.len().saturating_sub(1); // skip trailing )
-          if frag_start < frag_end {
-            let fragment = &range[frag_start..frag_end];
-            slugs.binary_search(&fragment).is_ok()
-          } else {
-            false
-          }
-        } else {
-          true // not a fragment link pattern, keep as-is
+        let Some(hash_pos) = range.find("](#") else {
+          continue; // not a fragment link pattern, keep as-is
         };
-
-        if is_valid {
-          continue; // keep original, will be copied by cursor
+        // A link with no text has nothing to rewrite to, so leave it whole.
+        if hash_pos == 0 {
+          continue;
+        }
+        let frag_start = hash_pos + 3; // skip ](#
+        let frag_end = range.len() - 1; // skip trailing )
+        if frag_start < frag_end {
+          let fragment = &range[frag_start..frag_end];
+          if slugs.binary_search(&fragment).is_ok() {
+            continue; // resolves to a heading, keep the link whole
+          }
         }
 
-        // Copy everything before this link
-        if cursor < adj_start {
-          result.push_str(&self.buffer[cursor..adj_start]);
+        // SAFETY: both moved runs are whole slices delimited by the ASCII
+        // `[` and `](#` markers, so every char boundary is preserved.
+        #[allow(unsafe_code)]
+        let bytes = unsafe { self.buffer.as_mut_vec() };
+        if read < adj_start {
+          bytes.copy_within(read..adj_start, write);
+          write += adj_start - read;
         }
-        // Extract and copy just the text (between [ and ])
-        if let Some(close_bracket) = range.find("](#") {
-          result.push_str(&self.buffer[adj_start + 1..adj_start + close_bracket]);
-        }
-        cursor = adj_end;
+        bytes.copy_within(adj_start + 1..adj_start + hash_pos, write);
+        write += hash_pos - 1;
+        read = adj_end;
       }
 
-      // Only rebuild if we actually replaced something
-      if cursor > 0 {
-        if cursor < self.buffer.len() {
-          result.push_str(&self.buffer[cursor..]);
+      // `read` only advances past a dropped link, so zero means nothing changed.
+      if read > 0 {
+        // SAFETY: as above; the surviving tail is moved whole.
+        #[allow(unsafe_code)]
+        let bytes = unsafe { self.buffer.as_mut_vec() };
+        if read < buf_len {
+          bytes.copy_within(read..buf_len, write);
+          write += buf_len - read;
         }
-        self.buffer = result;
+        bytes.truncate(write);
       }
     }
     std::mem::take(&mut self.buffer)
