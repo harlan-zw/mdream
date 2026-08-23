@@ -466,6 +466,9 @@ pub struct ConvertState {
   has_filter: bool,
   pub has_extraction: bool,
   has_tag_overrides: bool,
+  /// Some plugin reads arbitrary attributes, so every tag captures all of them.
+  /// `frontmatter` is absent deliberately: TAG_META's mask covers what it reads.
+  attrs_force_all: bool,
 
   // Plugin tracking
   isolate_main_found: bool,
@@ -671,6 +674,7 @@ impl ConvertState {
       has_filter: false,
       has_extraction: false,
       has_tag_overrides: false,
+      attrs_force_all: false,
 
       isolate_main_found: false,
       isolate_main_closed: false,
@@ -810,6 +814,7 @@ impl ConvertState {
         }
         s.filter_process_children = filter.process_children.unwrap_or(true);
       }
+      s.attrs_force_all = s.has_tailwind || s.has_filter || s.has_extraction;
     }
     s
   }

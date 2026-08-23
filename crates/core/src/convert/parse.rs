@@ -754,14 +754,11 @@ impl ConvertState {
     position: usize,
   ) -> OpeningTagResult {
     let tag_handler = tag_id.and_then(get_tag_handler);
-    // Plugins can read any attribute, so they force full capture. `frontmatter`
-    // is absent deliberately: TAG_META's own mask already covers what it reads.
-    let attr_mask =
-      if self.has_tailwind || self.has_filter || self.has_extraction || self.has_tag_overrides {
-        ATTR_ALL
-      } else {
-        tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
-      };
+    let attr_mask = if self.attrs_force_all {
+      ATTR_ALL
+    } else {
+      tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
+    };
     let (complete, new_position, self_closing) = process_tag_attributes(
       html_chunk,
       position,
