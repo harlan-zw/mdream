@@ -598,6 +598,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
   // Pre-compute shared origin if provided (avoids per-page URL parsing)
   const sharedOrigin = origin || ''
+  // Trim the trailing slash so a page path appends cleanly below
+  const sharedOriginBase = sharedOrigin.replace(URL_TRAILING_SLASH_RE, '')
 
   // Queue for BFS link following
   const pendingUrls: { url: string, depth: number }[] = []
@@ -624,9 +626,11 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       await hooks.callHook('crawl:html', htmlCtx)
       content = htmlCtx.html
 
-      // Single htmlToMarkdown call with merged extraction
+      // Single htmlToMarkdown call with merged extraction. An origin
+      // override swaps the host and keeps the page path.
+      const pageBaseUrl = sharedOriginBase ? `${sharedOriginBase}${parsedUrl.pathname}` : url
       const { extraction, getMetadata } = extractMetadataInline(parsedUrl, allowedRegistrableDomains)
-      md = htmlToMarkdown(content, { origin: pageOrigin, extraction })
+      md = htmlToMarkdown(content, { origin: pageBaseUrl, extraction })
       metadata = getMetadata()
     }
     let title = initialTitle || metadata.title
