@@ -286,13 +286,18 @@ fn scan_tag<const EXTRACT: bool>(
   while i < chunk_length {
     let c = bytes[i];
 
-    // A quoted value hides `>`. `EXTRACT` consumes those whole below.
+    // A quoted value hides `>`. Jump it whole; the `ATTR_NONE` scan only has to
+    // get past it, and stepping byte by byte made this the dominant cost.
     if inside_quote {
-      if c == quote_char {
-        inside_quote = false;
-        state = State::Gap;
+      match bytes[i..].iter().position(|&b| b == quote_char) {
+        Some(offset) => {
+          inside_quote = false;
+          state = State::Gap;
+          i += offset + 1;
+        }
+        // Unterminated: the tag cannot close in this chunk.
+        None => return (false, chunk_length, Attributes::new(), false),
       }
-      i += 1;
       continue;
     }
 
