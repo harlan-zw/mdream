@@ -82,6 +82,11 @@ pub(crate) fn is_empty_link_href(href: &str) -> bool {
   }
 }
 
+#[inline]
+fn is_scheme_char(byte: u8) -> bool {
+  byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.')
+}
+
 /// Whether a URL is safe to emit into an HTML href or src attribute.
 pub(crate) fn is_safe_html_url(href: &str, image: bool) -> bool {
   let rest = trim_url_c0(href);
@@ -104,7 +109,7 @@ pub(crate) fn is_safe_html_url(href: &str, image: bool) -> bool {
     if matches!(byte, b'/' | b'?' | b'#') {
       return true;
     }
-    if !(byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.')) {
+    if !is_scheme_char(byte) {
       return true;
     }
   }
@@ -128,7 +133,7 @@ pub(crate) fn strip_tracking_params(url: &str) -> Cow<'_, str> {
   let Some(qmark) = url.find('?') else {
     return Cow::Borrowed(url);
   };
-  if url.find('#').is_some_and(|hash| hash < qmark) {
+  if url[..qmark].contains('#') {
     return Cow::Borrowed(url);
   }
   let query_start = qmark + 1;
@@ -256,6 +261,170 @@ pub(crate) fn slugify_heading(text: &str) -> String {
   slug
 }
 
+/// Query and fragment take no part in resolution, so the split drops them.
+struct BaseUrl<'a> {
+  root: &'a str,
+  path: &'a str,
+}
+
+impl<'a> BaseUrl<'a> {
+  fn split(origin: &'a str) -> Option<Self> {
+    let bytes = origin.as_bytes();
+    let mut i = origin.find("://")? + 3;
+    let mut root_end = None;
+    while i < bytes.len() {
+      match bytes[i] {
+        b'?' | b'#' => break,
+        b'/' if root_end.is_none() => root_end = Some(i),
+        _ => {}
+      }
+      i += 1;
+    }
+    let root_end = root_end.unwrap_or(i);
+    Some(Self {
+      root: origin.get(..root_end).unwrap_or(origin),
+      path: origin.get(root_end..i).unwrap_or(""),
+    })
+  }
+
+  fn dir(&self) -> &'a str {
+    match self.path.rfind('/') {
+      Some(i) => self.path.get(..=i).unwrap_or("/"),
+      None => "/",
+    }
+  }
+}
+
+#[inline]
+fn is_dot_segment(segment: &[u8]) -> bool {
+  matches!(segment, [b'.'] | [b'.', b'.'])
+}
+
+/// One pass over a reference: its scheme, where its path ends (first `?` or
+/// `#`, else its length), and whether that path holds a dot segment.
+struct RefScan {
+  scheme: bool,
+  path_end: usize,
+  has_dot: bool,
+}
+
+fn scan_reference(url: &str) -> RefScan {
+  let bytes = url.as_bytes();
+  let mut i = 0;
+  let mut segment_start = 0;
+  let mut dot = false;
+  // A scheme opens with a letter; every byte so far could still belong to one.
+  let mut scheme_chars = bytes.first().is_some_and(u8::is_ascii_alphabetic);
+  while i < bytes.len() {
+    let byte = bytes[i];
+    match byte {
+      b'?' | b'#' => break,
+      b':' if scheme_chars && i > 0 => {
+        return RefScan {
+          scheme: true,
+          path_end: i,
+          has_dot: false,
+        };
+      }
+      b'/' => {
+        dot |= is_dot_segment(bytes.get(segment_start..i).unwrap_or(&[]));
+        segment_start = i + 1;
+        scheme_chars = false;
+      }
+      _ => {
+        if scheme_chars && !is_scheme_char(byte) {
+          scheme_chars = false;
+        }
+      }
+    }
+    i += 1;
+  }
+  RefScan {
+    scheme: false,
+    path_end: i,
+    has_dot: dot || is_dot_segment(bytes.get(segment_start..i).unwrap_or(&[])),
+  }
+}
+
+/// `root_len` marks where the path starts; a `..` never climbs past it.
+fn pop_path_segment(out: &mut String, root_len: usize) {
+  let end = out.len() - 1; // the trailing `/` is not part of the segment
+  if end <= root_len {
+    return;
+  }
+  let prev = out
+    .get(root_len..end)
+    .and_then(|path| path.rfind('/'))
+    .map_or(root_len, |i| root_len + i);
+  out.truncate(prev + 1);
+}
+
+/// `out` must end with `/`, and does so again after every segment.
+fn push_path_segments(out: &mut String, path: &str, root_len: usize) {
+  let mut segments = path.split('/').peekable();
+  while let Some(segment) = segments.next() {
+    match segment.as_bytes() {
+      // Writes no segment, so `out` keeps the `/` it ends with.
+      [b'.'] => {}
+      [b'.', b'.'] => pop_path_segment(out, root_len),
+      _ => {
+        out.push_str(segment);
+        if segments.peek().is_some() {
+          out.push('/');
+        }
+      }
+    }
+  }
+}
+
+/// Resolves `url` against `base` the way a browser would.
+fn join_base_url(base: &BaseUrl<'_>, url: &str, scan: &RefScan) -> String {
+  // Only the path resolves; query and fragment carry across.
+  let path = url.get(..scan.path_end).unwrap_or(url);
+  let suffix = url.get(scan.path_end..).unwrap_or("");
+  let mut resolved = String::with_capacity(base.root.len() + base.path.len() + url.len() + 1);
+  resolved.push_str(base.root);
+  if path.is_empty() {
+    resolved.push_str(base.path);
+    resolved.push_str(suffix);
+    return resolved;
+  }
+  let (dir, rest) = match path.strip_prefix('/') {
+    Some(absolute) => ("/", absolute),
+    None => (base.dir(), path),
+  };
+  resolved.push_str(dir);
+  if scan.has_dot {
+    push_path_segments(&mut resolved, rest, base.root.len());
+  } else {
+    resolved.push_str(rest);
+  }
+  resolved.push_str(suffix);
+  resolved
+}
+
+/// No `scheme://authority`, so no base path to resolve against.
+fn join_origin_prefix(origin: &str, url: &str) -> String {
+  let origin = origin.trim_end_matches('/');
+  let suffix = url.strip_prefix("./").unwrap_or(url);
+  let mut resolved = String::with_capacity(origin.len() + 1 + suffix.len());
+  resolved.push_str(origin);
+  if !suffix.starts_with('/') {
+    resolved.push('/');
+  }
+  resolved.push_str(suffix);
+  resolved
+}
+
+#[inline]
+fn cleaned(resolved: String, needs_clean: bool) -> Cow<'static, str> {
+  Cow::Owned(if needs_clean {
+    strip_tracking_params_owned(resolved)
+  } else {
+    resolved
+  })
+}
+
 #[inline]
 pub(crate) fn resolve_url<'a>(url: &'a str, origin: Option<&str>, clean: bool) -> Cow<'a, str> {
   if url.is_empty() || url.starts_with('#') {
@@ -263,61 +432,27 @@ pub(crate) fn resolve_url<'a>(url: &'a str, origin: Option<&str>, clean: bool) -
   }
 
   // Fast path: check if cleaning needed before any allocation
-  let needs_clean = clean && url.as_bytes().contains(&b'?');
+  let needs_clean = clean && url.find('?').is_some();
   if url.starts_with("//") {
-    let mut resolved = String::with_capacity(6 + url.len());
-    resolved.push_str("https:");
-    resolved.push_str(url);
-    return Cow::Owned(if needs_clean {
-      strip_tracking_params_owned(resolved)
-    } else {
-      resolved
+    // A network-path reference inherits only the base scheme.
+    let scheme = origin.and_then(BaseUrl::split).map_or("https", |base| {
+      &base.root[..base.root.find(':').unwrap_or(0)]
     });
+    let mut resolved = String::with_capacity(scheme.len() + 1 + url.len());
+    resolved.push_str(scheme);
+    resolved.push(':');
+    resolved.push_str(url);
+    return cleaned(resolved, needs_clean);
   }
   if let Some(orig) = origin {
-    let orig = orig.trim_end_matches('/');
-    if url.starts_with('/') {
-      let mut resolved = String::with_capacity(orig.len() + url.len());
-      resolved.push_str(orig);
-      resolved.push_str(url);
-      return Cow::Owned(if needs_clean {
-        strip_tracking_params_owned(resolved)
-      } else {
-        resolved
-      });
-    }
-    if let Some(suffix) = url.strip_prefix("./") {
-      let mut resolved = String::with_capacity(orig.len() + 1 + suffix.len());
-      resolved.push_str(orig);
-      resolved.push('/');
-      resolved.push_str(suffix);
-      return Cow::Owned(if needs_clean {
-        strip_tracking_params_owned(resolved)
-      } else {
-        resolved
-      });
-    }
-    // A url with an explicit scheme (`mailto:`, `ftp:`, `https:`, …) is
-    // absolute — only scheme-less urls are joined against the origin.
-    // Checked here rather than up-front so the common relative/`/`-prefixed
-    // paths never pay for the scan.
-    let has_scheme = url.find(':').is_some_and(|ci| {
-      ci > 0
-        && url[..ci]
-          .bytes()
-          .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.'))
-    });
-    if !has_scheme {
-      let suffix = url.strip_prefix('/').unwrap_or(url);
-      let mut resolved = String::with_capacity(orig.len() + 1 + suffix.len());
-      resolved.push_str(orig);
-      resolved.push('/');
-      resolved.push_str(suffix);
-      return Cow::Owned(if needs_clean {
-        strip_tracking_params_owned(resolved)
-      } else {
-        resolved
-      });
+    // An explicit scheme (`mailto:`, `https:`, …) means absolute.
+    let scan = scan_reference(url);
+    if !scan.scheme {
+      let resolved = match BaseUrl::split(orig) {
+        Some(base) => join_base_url(&base, url, &scan),
+        None => join_origin_prefix(orig, url),
+      };
+      return cleaned(resolved, needs_clean);
     }
   }
   if needs_clean {
@@ -454,6 +589,25 @@ mod tests {
       strip_tracking_params("https://x.com/a?id=1&fbclid=z#sec"),
       "https://x.com/a?id=1#sec",
     );
+    // trailing tracking param takes the separator before it
+    assert_eq!(
+      strip_tracking_params("https://x.com/a?id=1&utm_source=n"),
+      "https://x.com/a?id=1",
+    );
+    // adjacent tracking params
+    assert_eq!(
+      strip_tracking_params("https://x.com/a?utm_a=1&utm_b=2&id=3"),
+      "https://x.com/a?id=3",
+    );
+    assert_eq!(
+      strip_tracking_params("https://x.com/a?utm_a=1&fbclid=2"),
+      "https://x.com/a",
+    );
+    // a fragment before the query makes the whole thing opaque
+    assert_eq!(
+      strip_tracking_params("https://x.com/a#s?utm_source=n"),
+      "https://x.com/a#s?utm_source=n",
+    );
   }
 
   #[test]
@@ -481,21 +635,59 @@ mod tests {
 
   #[test]
   fn resolve_url_relative_against_origin() {
-    // root-relative
-    assert_eq!(
-      resolve_url("/path", Some("https://x.com/"), false),
-      "https://x.com/path",
-    );
-    // ./ prefix
-    assert_eq!(
-      resolve_url("./sub", Some("https://x.com"), false),
-      "https://x.com/sub",
-    );
-    // bare relative
     assert_eq!(
       resolve_url("page", Some("https://x.com"), false),
       "https://x.com/page",
     );
+    assert_eq!(
+      resolve_url("./sub", Some("https://x.com"), false),
+      "https://x.com/sub",
+    );
+    assert_eq!(
+      resolve_url("./sub", Some("https://x.com/"), false),
+      "https://x.com/sub",
+    );
+    assert_eq!(
+      resolve_url("/path", Some("https://x.com/"), false),
+      "https://x.com/path",
+    );
+  }
+
+  #[test]
+  fn resolve_url_resolves_relative_references() {
+    // The dual-engine table in packages/mdream/test/unit/nodes/links.test.ts
+    // covers the scenarios; this pins the mechanics for `cargo test`.
+    let doc = Some("https://x.com/a/b/doc.html?q=1#frag");
+    assert_eq!(
+      resolve_url("c.html", doc, false),
+      "https://x.com/a/b/c.html"
+    );
+    assert_eq!(
+      resolve_url("../c.html", doc, false),
+      "https://x.com/a/c.html"
+    );
+    assert_eq!(resolve_url("/a/../c", doc, false), "https://x.com/c");
+    assert_eq!(resolve_url("../../../c", doc, false), "https://x.com/c");
+    assert_eq!(resolve_url("..", doc, false), "https://x.com/a/");
+    assert_eq!(resolve_url("c//d", doc, false), "https://x.com/a/b/c//d");
+    assert_eq!(
+      resolve_url("c.html?p=../x#f", doc, false),
+      "https://x.com/a/b/c.html?p=../x#f",
+    );
+    assert_eq!(
+      resolve_url("?p=2", doc, false),
+      "https://x.com/a/b/doc.html?p=2"
+    );
+  }
+
+  #[test]
+  fn resolve_url_origin_without_authority_is_a_prefix() {
+    // A plain prefix keeps an unsafe origin recognisable downstream.
+    assert_eq!(
+      resolve_url("/safe", Some("javascript:alert(1)"), false),
+      "javascript:alert(1)/safe",
+    );
+    assert_eq!(resolve_url("b.html", Some("docs"), false), "docs/b.html");
   }
 
   #[test]
@@ -542,23 +734,6 @@ mod tests {
     assert_eq!(
       resolve_url("tel:123", Some("https://x.com"), true),
       "tel:123"
-    );
-  }
-
-  #[test]
-  fn relative_join_no_double_slash() {
-    // trailing slash on origin must not produce `//`
-    assert_eq!(
-      resolve_url("./sub", Some("https://x.com/"), false),
-      "https://x.com/sub"
-    );
-    assert_eq!(
-      resolve_url("/p", Some("https://x.com/"), false),
-      "https://x.com/p"
-    );
-    assert_eq!(
-      resolve_url("page", Some("https://x.com/"), false),
-      "https://x.com/page"
     );
   }
 
