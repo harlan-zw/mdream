@@ -500,6 +500,47 @@ impl ConvertState {
     self.invalidate_line_start();
   }
 
+  /// Override keyed by built-in tag id, via the precomputed table. `idx` is
+  /// `None` only when the key list was too long to index, so every lookup scans.
+  #[inline]
+  fn override_by_id<'a>(
+    ovs: Option<&'a Vec<(String, TagOverrideConfig)>>,
+    idx: Option<&[u8; MAX_TAG_ID]>,
+    id: u8,
+  ) -> Option<&'a TagOverrideConfig> {
+    let ovs = ovs?;
+    if let Some(idx) = idx {
+      let i = idx[id as usize];
+      if i != NO_OVERRIDE {
+        return ovs.get(i as usize).map(|(_, v)| v);
+      }
+      return None;
+    }
+    ovs
+      .iter()
+      .find(|(k, _)| k == TAG_NAMES[id as usize])
+      .map(|(_, v)| v)
+  }
+
+  /// Resolve the tag override for a node: built-in tags hit the precomputed
+  /// id table via `tag_id`; custom/aliased names fall back to the key scan.
+  /// Takes fields rather than `&self` — hoisting the options chain at the
+  /// call sites measured 3% slower on wiki.
+  #[inline]
+  fn override_for_node<'a>(
+    ovs: Option<&'a Vec<(String, TagOverrideConfig)>>,
+    idx: Option<&[u8; MAX_TAG_ID]>,
+    node: &ElementNode,
+  ) -> Option<&'a TagOverrideConfig> {
+    let ovs = ovs?;
+    if let Some(id) = node.tag_id
+      && node.custom_name().is_none()
+    {
+      return Self::override_by_id(Some(ovs), idx, id);
+    }
+    ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v)
+  }
+
   /// Emit markdown for entering the element currently on top of self.stack.
   #[inline]
   pub(crate) fn emit_enter_element(&mut self) {
@@ -568,12 +609,12 @@ impl ConvertState {
 
       // Check override is_inline
       let override_config = if self.has_tag_overrides {
-        self
+        let ovs = self
           .options
           .plugins
           .as_ref()
-          .and_then(|p| p.tag_overrides.as_ref())
-          .and_then(|ovs| ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v))
+          .and_then(|p| p.tag_overrides.as_ref());
+        Self::override_for_node(ovs, self.override_idx.as_deref(), node)
       } else {
         None
       };
@@ -842,12 +883,12 @@ impl ConvertState {
 
     // Check override
     let override_config = if self.has_tag_overrides {
-      self
+      let ovs = self
         .options
         .plugins
         .as_ref()
-        .and_then(|p| p.tag_overrides.as_ref())
-        .and_then(|ovs| ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v))
+        .and_then(|p| p.tag_overrides.as_ref());
+      Self::override_for_node(ovs, self.override_idx.as_deref(), node)
     } else {
       None
     };
@@ -3240,21 +3281,18 @@ impl ConvertState {
         return NO_SPACING;
       }
     }
-    if self.has_tag_overrides {
-      // For override spacing, we'd need the node name — but we have tag_id.
-      // Use tag_id to get name for override lookup.
-      if let Some(id) = tag_id {
-        let name = TAG_NAMES[id as usize];
-        if let Some(sp) = self
-          .options
-          .plugins
-          .as_ref()
-          .and_then(|p| p.tag_overrides.as_ref())
-          .and_then(|ovs| ovs.iter().find(|(k, _)| k == name).map(|(_, v)| v))
-          .and_then(|ov| ov.spacing)
-        {
-          return sp;
-        }
+    if self.has_tag_overrides
+      && let Some(id) = tag_id
+    {
+      let ovs = self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|p| p.tag_overrides.as_ref());
+      if let Some(sp) =
+        Self::override_by_id(ovs, self.override_idx.as_deref(), id).and_then(|ov| ov.spacing)
+      {
+        return sp;
       }
     }
     node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)

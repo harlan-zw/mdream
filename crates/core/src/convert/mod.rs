@@ -10,7 +10,7 @@ use crate::tags::get_tag_handler;
 use crate::tailwind::process_tailwind_classes;
 use crate::types::{
   ElementNode, ExtractedElement, HTMLToMarkdownOptions, NodeExtras, OutputFormat, TagHandler,
-  TailwindData,
+  TagOverrideConfig, TailwindData,
 };
 use crate::url::{
   is_autolink_uri, is_empty_link_href, is_safe_html_url, resolve_url, slugify_heading,
@@ -616,7 +616,14 @@ pub struct ConvertState {
   cut_line_lead: CutLineLead,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
+  /// tag_id -> index into `tag_overrides`; `NO_OVERRIDE` means no key. Boxed:
+  /// held inline it costs the override-free path more than the scan it replaces.
+  override_idx: Option<Box<[u8; MAX_TAG_ID]>>,
 }
+
+/// `override_idx` slot for a tag no override key names. Doubles as the
+/// exclusive upper bound on indices the table can hold.
+pub(crate) const NO_OVERRIDE: u8 = u8::MAX;
 
 impl ConvertState {
   /// Check if we're inside a table cell (either `<td>` or `<th>`).
@@ -674,6 +681,7 @@ impl ConvertState {
       has_filter: false,
       has_extraction: false,
       has_tag_overrides: false,
+      override_idx: None,
       attrs_force_all: false,
 
       isolate_main_found: false,
@@ -789,7 +797,24 @@ impl ConvertState {
       s.has_tailwind = plugins.tailwind.is_some();
       s.has_isolate_main = plugins.isolate_main.is_some();
       s.has_frontmatter = plugins.frontmatter.is_some();
-      s.has_tag_overrides = plugins.tag_overrides.is_some();
+      if let Some(ovs) = &plugins.tag_overrides {
+        s.has_tag_overrides = true;
+        // A longer list has keys the sentinel cannot index; leaving the table
+        // unbuilt sends every lookup down the key scan instead of testing here.
+        if ovs.len() < NO_OVERRIDE as usize {
+          let mut idx = Box::new([NO_OVERRIDE; MAX_TAG_ID]);
+          // `zip` over a u8 counter: the length check above keeps it in range.
+          for ((k, _), i) in ovs.iter().zip(0u8..) {
+            if let Some(id) = crate::consts::get_tag_id(k)
+              && idx[id as usize] == NO_OVERRIDE
+            {
+              // First key wins, matching `find` order on duplicate keys.
+              idx[id as usize] = i;
+            }
+          }
+          s.override_idx = Some(idx);
+        }
+      }
       if let Some(extraction) = &plugins.extraction {
         s.has_extraction = true;
         s.extraction_parsed_selectors = extraction
