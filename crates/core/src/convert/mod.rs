@@ -9,7 +9,8 @@ use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selec
 use crate::tags::get_tag_handler;
 use crate::tailwind::process_tailwind_classes;
 use crate::types::{
-  ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, TagHandler, TailwindData,
+  ElementNode, ExtractedElement, HTMLToMarkdownOptions, NodeExtras, OutputFormat, TagHandler,
+  TailwindData,
 };
 use crate::url::{
   is_autolink_uri, is_empty_link_href, is_safe_html_url, resolve_url, slugify_heading,
@@ -889,7 +890,7 @@ impl ConvertState {
     }
     match self.stack.last() {
       Some(parent) => {
-        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind.is_none())
+        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind().is_none())
       }
       None => true,
     }
@@ -943,7 +944,7 @@ impl ConvertState {
     if self
       .stack
       .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none())
+      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none())
     {
       match self.process_script_chunk(chunk, i) {
         ScriptChunk::Closed(close_index) => i = close_index,
@@ -1543,7 +1544,7 @@ impl ConvertState {
     let in_script = self
       .stack
       .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none());
+      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none());
     if in_script {
       self.push_script_text(leftover);
       self.flush_script_text();

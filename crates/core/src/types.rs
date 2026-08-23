@@ -24,11 +24,14 @@ impl Attr {
   }
 }
 
-/// Growing this measured slower; see the note below. 64-bit only: wasm32 halves it.
+/// Growing any of these measured slower; see the notes above and on
+/// [`NodeExtras`]. 64-bit only: wasm32 halves them.
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(size_of::<Attr>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(size_of::<Attributes>() == 24);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(size_of::<ElementNode>() == 64);
 
 /// Compact attribute storage: one linear-scanned Vec (elements have 0-4
 /// attributes; cheaper than hashing). Known names intern to [`attr_bit`],
@@ -138,7 +141,6 @@ impl Attributes {
   }
 }
 
-/// Tailwind-specific data, boxed to keep ElementNode small when tailwind isn't active.
 #[derive(Debug, Clone)]
 pub struct TailwindData {
   pub prefix: Option<String>,
@@ -146,17 +148,38 @@ pub struct TailwindData {
   pub hidden: bool,
 }
 
+/// The two rare per-node fields, boxed together: held inline they cost every
+/// node 24 bytes, and padding `ElementNode` by 24 measured 3.3-7.8% slower.
+#[derive(Debug, Clone, Default)]
+pub struct NodeExtras {
+  /// Only set for custom (non-builtin) tags; built-in names come from `tag_id`.
+  pub custom_name: Option<Box<str>>,
+  pub tailwind: Option<TailwindData>,
+}
+
+impl NodeExtras {
+  /// Extras for a freshly parsed tag: `None` for a built-in, whose name comes
+  /// back from `tag_id`. Keeps the boxing decision out of the parser.
+  #[inline]
+  pub fn for_tag(is_builtin: bool, tag_name: &str) -> Option<Box<Self>> {
+    (!is_builtin).then(|| {
+      Box::new(Self {
+        custom_name: Some(tag_name.into()),
+        tailwind: None,
+      })
+    })
+  }
+}
+
 #[derive(Debug, Clone)]
 pub struct ElementNode {
   // Pointer-sized fields first (8 bytes each on 64-bit)
   pub attributes: Attributes,
-  pub tailwind: Option<Box<TailwindData>>,
-  /// Only set for custom (non-builtin) tags. Built-in tags derive name from tag_id.
-  pub custom_name: Option<String>,
+  pub extras: Option<Box<NodeExtras>>,
   pub depth: usize,
-  pub index: usize,
-  pub current_walk_index: usize,
-  pub child_text_node_index: usize,
+  pub index: u32,
+  pub current_walk_index: u32,
+  pub child_text_node_index: u32,
   // Small fields grouped to minimize padding
   pub tag_id: Option<u8>,
   pub contains_whitespace: bool,
@@ -170,12 +193,27 @@ pub struct ElementNode {
 }
 
 impl ElementNode {
+  #[inline]
+  pub fn custom_name(&self) -> Option<&str> {
+    self.extras.as_ref().and_then(|e| e.custom_name.as_deref())
+  }
+
+  #[inline]
+  pub fn tailwind(&self) -> Option<&TailwindData> {
+    self.extras.as_ref().and_then(|e| e.tailwind.as_ref())
+  }
+
+  #[inline]
+  pub fn set_tailwind(&mut self, data: TailwindData) {
+    self.extras.get_or_insert_default().tailwind = Some(data);
+  }
+
   /// Get the tag name. For built-in tags, derives from tag_id. For custom tags, uses custom_name.
   #[inline]
   pub fn name(&self) -> &str {
     // Custom name takes priority (e.g. custom tags with alias_tag_id)
-    if let Some(ref n) = self.custom_name {
-      n.as_str()
+    if let Some(n) = self.custom_name() {
+      n
     } else if let Some(id) = self.tag_id {
       crate::consts::TAG_NAMES[id as usize]
     } else {

@@ -706,7 +706,7 @@ impl ConvertState {
     );
 
     if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
-      self.record_item_marker(self.stack[stack_len - 1].index, output_start);
+      self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
     }
 
     // The blank line that re-enables Markdown must be looked for *inside* the
@@ -2590,7 +2590,11 @@ impl ConvertState {
         s.push_str(&self.list_indent);
         if let Some(list) = ordered {
           use std::fmt::Write;
-          let _ = write!(s, "{}. ", Self::ordered_item_number(list, node.index));
+          let _ = write!(
+            s,
+            "{}. ",
+            Self::ordered_item_number(list, node.index as usize)
+          );
         } else {
           s.push_str("- ");
         }

@@ -376,7 +376,7 @@ impl ConvertState {
       || self
         .stack
         .last()
-        .and_then(|node| node.tailwind.as_ref())
+        .and_then(ElementNode::tailwind)
         .is_some_and(|tailwind| tailwind.hidden)
     {
       return 1;
@@ -392,8 +392,7 @@ impl ConvertState {
     });
     let node = ElementNode {
       attributes: attributes.clone(),
-      tailwind: None,
-      custom_name: (!is_builtin).then(|| tag_name.to_string()),
+      extras: NodeExtras::for_tag(is_builtin, tag_name),
       depth: self.depth + 1,
       index: 0,
       current_walk_index: 0,
@@ -562,7 +561,7 @@ impl ConvertState {
 
     if self.has_tailwind
       && let Some(parent) = self.stack.last()
-      && let Some(tw) = &parent.tailwind
+      && let Some(tw) = parent.tailwind()
     {
       if tw.hidden {
         excludes_text_nodes = true;
@@ -583,7 +582,10 @@ impl ConvertState {
 
     if !excludes_text_nodes {
       let depth = self.depth;
-      let index = self.stack.last().map_or(0, |n| n.current_walk_index);
+      let index = self
+        .stack
+        .last()
+        .map_or(0, |n| n.current_walk_index as usize);
       self.text_buffer_has_inline_gfm_hazard = has_inline_gfm_hazard;
       self.emit_text_with_generated_markdown(
         &text,
@@ -968,11 +970,7 @@ impl ConvertState {
     self.depth += 1;
 
     let current_walk_index = self.stack.last().map_or(0, |n| n.current_walk_index);
-    let custom_name = if is_builtin {
-      None
-    } else {
-      Some(tag_name.to_string())
-    };
+    let extras = NodeExtras::for_tag(is_builtin, tag_name);
 
     let (h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) = if let Some(h) = tag_handler
     {
@@ -996,7 +994,7 @@ impl ConvertState {
     };
 
     let mut tag = if let Some(mut pooled) = self.node_pool.pop() {
-      pooled.custom_name = custom_name;
+      pooled.extras = extras;
       pooled.attributes = attributes;
       pooled.tag_id = tag_id;
       pooled.depth = self.depth;
@@ -1005,7 +1003,6 @@ impl ConvertState {
       pooled.child_text_node_index = 0;
       pooled.contains_whitespace = false;
       pooled.excluded_from_markdown = false;
-      pooled.tailwind = None;
       pooled.is_inline = h_inline;
       pooled.excludes_text_nodes = h_excludes;
       pooled.is_non_nesting = h_non_nesting;
@@ -1014,7 +1011,7 @@ impl ConvertState {
       pooled
     } else {
       ElementNode {
-        custom_name,
+        extras,
         attributes,
         tag_id,
         depth: self.depth,
@@ -1023,7 +1020,6 @@ impl ConvertState {
         child_text_node_index: 0,
         contains_whitespace: false,
         excluded_from_markdown: false,
-        tailwind: None,
         is_inline: h_inline,
         excludes_text_nodes: h_excludes,
         is_non_nesting: h_non_nesting,
@@ -1041,7 +1037,7 @@ impl ConvertState {
         let parent_hidden = self
           .stack
           .last()
-          .and_then(|p| p.tailwind.as_ref())
+          .and_then(ElementNode::tailwind)
           .is_some_and(|tw| tw.hidden);
 
         if let Some(class_attr) = tag.attributes.get_bit(ATTR_CLASS) {
@@ -1052,21 +1048,21 @@ impl ConvertState {
           }
           let hidden = hidden || parent_hidden;
           if prefix.is_some() || suffix.is_some() || hidden {
-            tag.tailwind = Some(Box::new(TailwindData {
+            tag.set_tailwind(TailwindData {
               prefix,
               suffix,
               hidden,
-            }));
+            });
             if hidden {
               skip_node = true;
             }
           }
         } else if parent_hidden {
-          tag.tailwind = Some(Box::new(TailwindData {
+          tag.set_tailwind(TailwindData {
             prefix: None,
             suffix: None,
             hidden: true,
-          }));
+          });
           skip_node = true;
         }
       }
@@ -1253,7 +1249,7 @@ impl ConvertState {
         if parent_is_ordered {
           // Must match the marker actually written, `start` included, or the
           // item's continuation content drifts out of it.
-          let n = Self::ordered_item_number(&self.stack[stack_len - 2], li.index).max(1);
+          let n = Self::ordered_item_number(&self.stack[stack_len - 2], li.index as usize).max(1);
           // n >= 1 so ilog10 never panics; +1 converts floor(log10) to digit count.
           let digits = (n.ilog10() + 1) as usize;
           digits + 2
@@ -1605,7 +1601,7 @@ impl ConvertState {
       if !needs_name_match {
         return true;
       }
-      node.custom_name.as_deref() == Some(close_name)
+      node.custom_name() == Some(close_name)
     };
 
     let mut matched = false;
@@ -1694,7 +1690,7 @@ impl ConvertState {
       if !excluded {
         let depth = self.depth;
         let index = self.stack.last().map_or(0, |n| n.current_walk_index);
-        self.emit_text(content, false, depth, index);
+        self.emit_text(content, false, depth, index as usize);
       }
       if let Some(parent) = self.stack.last_mut() {
         parent.current_walk_index += 1;
@@ -1710,8 +1706,7 @@ impl ConvertState {
   #[inline]
   pub(crate) fn recycle_node(&mut self, mut node: ElementNode) {
     node.attributes.clear();
-    node.custom_name = None;
-    node.tailwind = None;
+    node.extras = None;
     self.node_pool.push(node);
   }
 
