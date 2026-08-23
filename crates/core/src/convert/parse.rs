@@ -410,7 +410,7 @@ impl ConvertState {
     if self.has_tailwind
       && node
         .attributes
-        .get("class")
+        .get_bit(ATTR_CLASS)
         .is_some_and(|class| process_tailwind_classes(class).2)
     {
       return 1;
@@ -1044,7 +1044,7 @@ impl ConvertState {
           .and_then(|p| p.tailwind.as_ref())
           .is_some_and(|tw| tw.hidden);
 
-        if let Some(class_attr) = tag.attributes.get("class") {
+        if let Some(class_attr) = tag.attributes.get_bit(ATTR_CLASS) {
           let (mut prefix, mut suffix, hidden) = process_tailwind_classes(class_attr);
           if self.plain_text {
             prefix = None;
@@ -1152,12 +1152,11 @@ impl ConvertState {
         } else if self.frontmatter_in_head && tag_id == Some(TAG_META) {
           let name = tag
             .attributes
-            .get("name")
-            .or_else(|| tag.attributes.get("property"));
-          let content = tag.attributes.get("content");
+            .get_bit(ATTR_NAME)
+            .or_else(|| tag.attributes.get_bit(ATTR_PROPERTY));
+          let content = tag.attributes.get_bit(ATTR_CONTENT);
           if let (Some(n), Some(c)) = (name, content) {
-            let n_str = n.as_str();
-            let is_allowed = match n_str {
+            let is_allowed = match n {
               "description"
               | "keywords"
               | "author"
@@ -1172,13 +1171,13 @@ impl ConvertState {
                 .as_ref()
                 .and_then(|p| p.frontmatter.as_ref())
                 .and_then(|f| f.meta_fields.as_ref())
-                .is_some_and(|allowed| allowed.iter().any(|a| a == n_str)),
+                .is_some_and(|allowed| allowed.iter().any(|a| a == n)),
             };
             if is_allowed {
               if let Some(entry) = self.frontmatter_meta.iter_mut().find(|(k, _)| k == n) {
-                entry.1.clone_from(c);
+                c.clone_into(&mut entry.1);
               } else {
-                self.frontmatter_meta.push((n.clone(), c.clone()));
+                self.frontmatter_meta.push((n.to_string(), c.to_string()));
               }
             }
           }
@@ -1220,7 +1219,7 @@ impl ConvertState {
           let attrs: Vec<(String, String)> = element
             .attributes
             .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
+            .map(|(name, value)| (name.to_string(), value.to_string()))
             .collect();
           self.extraction_tracked.push(TrackedExtraction {
             selector: selector.clone(),
@@ -1368,9 +1367,9 @@ impl ConvertState {
     {
       let prefix = node
         .attributes
-        .get("title")
-        .or_else(|| node.attributes.get("aria-label"))
-        .cloned()
+        .get_bit(ATTR_TITLE)
+        .or_else(|| node.attributes.get_bit(ATTR_ARIA_LABEL))
+        .map(ToString::to_string)
         .unwrap_or_default();
       if !prefix.is_empty() {
         let node_depth = node.depth;

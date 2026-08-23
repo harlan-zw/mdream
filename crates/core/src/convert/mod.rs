@@ -881,7 +881,7 @@ impl ConvertState {
         node.tag_id == Some(TAG_A)
           && node
             .attributes
-            .get("title")
+            .get_bit(ATTR_TITLE)
             .is_some_and(|title| !title.is_empty())
       })
     {

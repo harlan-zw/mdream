@@ -1871,6 +1871,39 @@ fn extraction_by_tag() {
   assert_eq!(extracted[1].text_content, "Sub");
 }
 
+/// Extraction output is the one place an interned `ATTR_*` bit has to turn back
+/// into a name. Mixes interned names with ones that keep an owned string.
+#[test]
+fn extraction_reports_interned_and_custom_attribute_names() {
+  let result = html_to_markdown_result(
+    r#"<a href="/x" title="T" class="c" id="i" data-k="v" aria-label="L">Link</a>"#,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        extraction: Some(ExtractionConfig {
+          selectors: vec!["a".to_string()],
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  let extracted = result.extracted.unwrap();
+  assert_eq!(extracted.len(), 1);
+  let mut attrs = extracted[0].attributes.clone();
+  attrs.sort();
+  assert_eq!(
+    attrs,
+    vec![
+      ("aria-label".to_string(), "L".to_string()),
+      ("class".to_string(), "c".to_string()),
+      ("data-k".to_string(), "v".to_string()),
+      ("href".to_string(), "/x".to_string()),
+      ("id".to_string(), "i".to_string()),
+      ("title".to_string(), "T".to_string()),
+    ]
+  );
+}
+
 #[test]
 fn extraction_preserves_declaration_order_for_overlapping_selectors() {
   let result = html_to_markdown_result(

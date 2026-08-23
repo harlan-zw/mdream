@@ -348,10 +348,16 @@ fn push_attr(result: &mut Attributes, mask: u16, raw: &str, value: Option<&str>)
   if mask != ATTR_ALL && mask & bit == 0 {
     return;
   }
-  let name = raw.to_ascii_lowercase();
-  match value {
-    Some(value) => result.insert(name, decode_html_attribute_entities(value).into_owned()),
-    None => result.insert(name, String::new()),
+  // A known name is fully described by `bit`; only the `ATTR_ALL` long tail
+  // needs an owned, lowercased copy.
+  let value = match value {
+    Some(value) => decode_html_attribute_entities(value).into_owned(),
+    None => String::new(),
+  };
+  if bit == ATTR_NONE {
+    result.insert_custom(raw.to_ascii_lowercase().into_boxed_str(), value);
+  } else {
+    result.insert_known(bit, value);
   }
 }
 
@@ -426,14 +432,14 @@ impl State {
 impl AttrScan {
   #[inline]
   fn new(mask: u16) -> Self {
+    let mut result = Attributes::new();
+    // A filtered mask keeps at most three names, so skip the eager reservation.
+    if mask == ATTR_ALL {
+      result.reserve(4);
+    }
     Self {
       mask,
-      // A filtered mask keeps at most three names, so skip the eager reservation.
-      result: if mask == ATTR_ALL {
-        Attributes::with_capacity(4)
-      } else {
-        Attributes::new()
-      },
+      result,
       state: State::Gap,
       name_start: 0,
       name_end: 0,
@@ -549,8 +555,8 @@ mod tests {
   #[test]
   fn parses_quoted_and_unquoted_attributes() {
     let a = parse_attributes("href=\"/x\" id=main", ATTR_ALL);
-    assert_eq!(a.get("href").map(String::as_str), Some("/x"));
-    assert_eq!(a.get("id").map(String::as_str), Some("main"));
+    assert_eq!(a.get("href"), Some("/x"));
+    assert_eq!(a.get("id"), Some("main"));
   }
 
   /// A parse error per the spec, but the quote joins the value rather than
@@ -558,17 +564,17 @@ mod tests {
   #[test]
   fn quote_inside_an_unquoted_value_is_an_ordinary_character() {
     let a = parse_attributes("alt=Bob's src=/i.png", ATTR_ALL);
-    assert_eq!(a.get("alt").map(String::as_str), Some("Bob's"));
-    assert_eq!(a.get("src").map(String::as_str), Some("/i.png"));
+    assert_eq!(a.get("alt"), Some("Bob's"));
+    assert_eq!(a.get("src"), Some("/i.png"));
 
     let b = parse_attributes("alt=Bob\"s", ATTR_ALL);
-    assert_eq!(b.get("alt").map(String::as_str), Some("Bob\"s"));
+    assert_eq!(b.get("alt"), Some("Bob\"s"));
   }
 
   #[test]
   fn slash_inside_an_unquoted_value_is_an_ordinary_character() {
     let a = parse_attributes("href=/a/b/", ATTR_ALL);
-    assert_eq!(a.get("href").map(String::as_str), Some("/a/b/"));
+    assert_eq!(a.get("href"), Some("/a/b/"));
   }
 
   /// A repeated name is a duplicate-attribute parse error and the later one is
@@ -577,13 +583,13 @@ mod tests {
   #[test]
   fn duplicate_attribute_keeps_the_first() {
     let a = parse_attributes("href=/first href=/second", ATTR_ALL);
-    assert_eq!(a.get("href").map(String::as_str), Some("/first"));
+    assert_eq!(a.get("href"), Some("/first"));
 
     let b = parse_attributes("href=/first HREF=/second", ATTR_ALL);
-    assert_eq!(b.get("href").map(String::as_str), Some("/first"));
+    assert_eq!(b.get("href"), Some("/first"));
 
     let c = parse_attributes("href=\"/1\" href='/2' href=/3", ATTR_ALL);
-    assert_eq!(c.get("href").map(String::as_str), Some("/1"));
+    assert_eq!(c.get("href"), Some("/1"));
   }
 
   #[test]
@@ -598,14 +604,14 @@ mod tests {
   #[test]
   fn attribute_names_lowercased_values_decoded() {
     let a = parse_attributes("DATA-X='a &amp; b'", ATTR_ALL);
-    assert_eq!(a.get("data-x").map(String::as_str), Some("a & b"));
+    assert_eq!(a.get("data-x"), Some("a & b"));
   }
 
   #[test]
   fn attribute_entities_follow_ambiguous_ampersand_rules() {
     let a = parse_attributes("title='&copycat &copy=1 &copy! &copy;cat'", ATTR_ALL);
     assert_eq!(
-      a.get("title").map(String::as_str),
+      a.get("title"),
       Some("&copycat &copy=1 ©! ©cat")
     );
   }
@@ -620,7 +626,7 @@ mod tests {
     // `<a href=>` — attribute ends in `name=`, must survive as empty value
     let a = parse_attributes("href=", ATTR_ALL);
     assert!(a.contains_key("href"));
-    assert_eq!(a.get("href").map(String::as_str), Some(""));
+    assert_eq!(a.get("href"), Some(""));
   }
 
   #[test]
@@ -631,8 +637,8 @@ mod tests {
       "class=btn href=\"/x\" rel=nofollow data-id='7' TITLE=\"t\" target=_blank",
       mask,
     );
-    assert_eq!(a.get("href").map(String::as_str), Some("/x"));
-    assert_eq!(a.get("title").map(String::as_str), Some("t"));
+    assert_eq!(a.get("href"), Some("/x"));
+    assert_eq!(a.get("title"), Some("t"));
     assert!(!a.contains_key("class"));
     assert!(!a.contains_key("rel"));
     assert!(!a.contains_key("data-id"));
@@ -645,9 +651,7 @@ mod tests {
     assert!(parse_attributes("hidden href", ATTR_HREF).contains_key("href"));
     assert!(parse_attributes("hidden href=", ATTR_HREF).contains_key("href"));
     assert_eq!(
-      parse_attributes("class=c src=/i.png", ATTR_SRC)
-        .get("src")
-        .map(String::as_str),
+      parse_attributes("class=c src=/i.png", ATTR_SRC).get("src"),
       Some("/i.png")
     );
     assert!(!parse_attributes("class=c src=/i.png", ATTR_SRC).contains_key("class"));
@@ -663,7 +667,7 @@ mod tests {
   #[test]
   fn colspan_uses_the_filtered_attribute_path() {
     let attrs = parse_attributes("colspan=2 id=x", ATTR_COLSPAN);
-    assert_eq!(attrs.get("colspan").map(String::as_str), Some("2"));
+    assert_eq!(attrs.get("colspan"), Some("2"));
     assert!(!attrs.contains_key("id"));
   }
 
@@ -675,7 +679,7 @@ mod tests {
     assert!(complete);
     assert!(!self_closing);
     assert_eq!(&html[new_pos..], "rest");
-    assert_eq!(attrs.get("href").map(String::as_str), Some("x"));
+    assert_eq!(attrs.get("href"), Some("x"));
   }
 
   #[test]
@@ -693,7 +697,7 @@ mod tests {
     let html = "a href=\"x>y\">rest";
     let (complete, new_pos, attrs, _) = process_tag_attributes(html, 1, None, ATTR_ALL);
     assert!(complete);
-    assert_eq!(attrs.get("href").map(String::as_str), Some("x>y"));
+    assert_eq!(attrs.get("href"), Some("x>y"));
     assert_eq!(&html[new_pos..], "rest");
   }
 

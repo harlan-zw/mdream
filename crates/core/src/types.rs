@@ -1,8 +1,42 @@
-/// Compact attribute storage using Vec for small-N linear scan.
-/// Most HTML elements have 0-4 attributes; linear scan on Vec beats HashMap hashing.
+use crate::consts::{ATTR_NONE, attr_bit, attr_name};
+
+/// One attribute: a known name interned to its bit, or an owned lowercase name.
+#[derive(Debug, Clone)]
+pub struct Attr {
+  bit: u16,
+  /// `Some` only when `bit == ATTR_NONE`; a known name comes back from the bit.
+  name: Option<Box<str>>,
+  value: String,
+}
+
+impl Attr {
+  #[inline]
+  pub fn name(&self) -> &str {
+    match &self.name {
+      Some(name) => name,
+      None => attr_name(self.bit),
+    }
+  }
+
+  #[inline]
+  pub fn value(&self) -> &str {
+    &self.value
+  }
+}
+
+/// Growing this measured slower; see the note below. 64-bit only: wasm32 halves it.
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(size_of::<Attr>() == 48);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(size_of::<Attributes>() == 24);
+
+/// Compact attribute storage: one linear-scanned Vec (elements have 0-4
+/// attributes; cheaper than hashing). Known names intern to [`attr_bit`],
+/// costing no allocation; only `ATTR_ALL` long-tail names keep an owned
+/// string. Splitting known/custom into two Vecs measured 4-6% slower.
 #[derive(Debug, Clone, Default)]
 pub struct Attributes {
-  inner: Vec<(String, String)>,
+  inner: Vec<Attr>,
 }
 
 impl Attributes {
@@ -12,35 +46,80 @@ impl Attributes {
   }
 
   #[inline]
-  pub fn with_capacity(cap: usize) -> Self {
-    Self {
-      inner: Vec::with_capacity(cap),
-    }
+  pub fn reserve(&mut self, cap: usize) {
+    self.inner.reserve(cap);
   }
 
   #[inline]
-  pub fn get(&self, key: &str) -> Option<&String> {
-    for (k, v) in &self.inner {
-      if k == key {
-        return Some(v);
+  pub fn get_bit(&self, bit: u16) -> Option<&str> {
+    for attr in &self.inner {
+      if attr.bit == bit {
+        return Some(&attr.value);
+      }
+    }
+    None
+  }
+
+  /// Lookup by name, for names with no bit of their own (`style`, `hidden`,
+  /// `id`) and for selector matching against arbitrary attributes.
+  #[inline]
+  pub fn get(&self, key: &str) -> Option<&str> {
+    let bit = attr_bit(key.as_bytes());
+    if bit != ATTR_NONE {
+      return self.get_bit(bit);
+    }
+    for attr in &self.inner {
+      if let Some(name) = &attr.name
+        && name.eq_ignore_ascii_case(key)
+      {
+        return Some(&attr.value);
       }
     }
     None
   }
 
   #[inline]
-  pub fn contains_key(&self, key: &str) -> bool {
-    self.inner.iter().any(|(k, _)| k == key)
+  pub fn contains_bit(&self, bit: u16) -> bool {
+    self.inner.iter().any(|attr| attr.bit == bit)
   }
 
-  /// The first occurrence of a name wins: the HTML parser treats a repeated
-  /// attribute name as a duplicate-attribute parse error and drops the later
-  /// one, so `<a href=/first href=/second>` links to `/first`.
   #[inline]
-  pub fn insert(&mut self, key: String, value: String) {
-    if !self.contains_key(&key) {
-      self.inner.push((key, value));
+  pub fn contains_key(&self, key: &str) -> bool {
+    self.get(key).is_some()
+  }
+
+  /// Store a known-set attribute by its `attr_bit`; the name is never
+  /// allocated. First occurrence wins, per the HTML duplicate-attribute rule:
+  /// `<a href=/first href=/second>` links to `/first`.
+  #[inline]
+  pub fn insert_known(&mut self, bit: u16, value: String) {
+    debug_assert!(bit != ATTR_NONE, "a known attribute has a bit");
+    if self.contains_bit(bit) {
+      return;
     }
+    self.inner.push(Attr {
+      bit,
+      name: None,
+      value,
+    });
+  }
+
+  /// Store a name outside the known set; reachable only under `ATTR_ALL`.
+  /// `name` must already be lowercase. First occurrence wins, as above.
+  #[inline]
+  pub fn insert_custom(&mut self, name: Box<str>, value: String) {
+    if self
+      .inner
+      .iter()
+      .any(|attr| attr.name.as_deref() == Some(&*name))
+    {
+      return;
+    }
+    self.inner.push(Attr {
+      bit: ATTR_NONE,
+      name: Some(name),
+      value,
+    });
   }
 
   #[inline]
@@ -53,9 +132,9 @@ impl Attributes {
     self.inner.clear();
   }
 
-  #[inline]
-  pub fn iter(&self) -> std::slice::Iter<'_, (String, String)> {
-    self.inner.iter()
+  /// Name/value pairs in source order, with a known name rebuilt from its bit.
+  pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+    self.inner.iter().map(|attr| (attr.name(), attr.value()))
   }
 }
 
