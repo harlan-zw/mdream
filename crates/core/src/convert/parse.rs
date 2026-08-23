@@ -762,8 +762,13 @@ impl ConvertState {
       } else {
         tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
       };
-    let (complete, new_position, attributes, self_closing) =
-      process_tag_attributes(html_chunk, position, tag_handler, attr_mask);
+    let (complete, new_position, self_closing) = process_tag_attributes(
+      html_chunk,
+      position,
+      tag_handler,
+      attr_mask,
+      &mut self.attr_scratch,
+    );
 
     if !complete {
       return OpeningTagResult {
@@ -903,17 +908,20 @@ impl ConvertState {
       }
     }
 
-    let overflow_plugin_mode = if !self_closing
-      && (self.overflow_same_name_depth > 0 || self.stack.len() >= MAX_ELEMENT_DEPTH)
-    {
-      self.overflow_plugin_mode(tag_name, tag_id, is_builtin, &attributes, tag_handler)
+    let in_overflow =
+      !self_closing && (self.overflow_same_name_depth > 0 || self.stack.len() >= MAX_ELEMENT_DEPTH);
+    let overflow_plugin_mode = if in_overflow {
+      self.overflow_plugin_mode(
+        tag_name,
+        tag_id,
+        is_builtin,
+        &self.attr_scratch,
+        tag_handler,
+      )
     } else {
       0
     };
-    if !self_closing
-      && (self.overflow_same_name_depth > 0 || self.stack.len() >= MAX_ELEMENT_DEPTH)
-      && (tag_id == Some(TAG_TEMPLATE) || overflow_plugin_mode == 1)
-    {
+    if in_overflow && (tag_id == Some(TAG_TEMPLATE) || overflow_plugin_mode == 1) {
       self.enter_opaque_overflow(tag_name, tag_handler);
       return OpeningTagResult {
         complete: true,
@@ -995,7 +1003,8 @@ impl ConvertState {
 
     let mut tag = if let Some(mut pooled) = self.node_pool.pop() {
       pooled.extras = extras;
-      pooled.attributes = attributes;
+      // Swap, not assign: assigning drops the pooled node's kept buffer.
+      std::mem::swap(&mut pooled.attributes, &mut self.attr_scratch);
       pooled.tag_id = tag_id;
       pooled.depth = self.depth;
       pooled.index = current_walk_index;
@@ -1012,7 +1021,8 @@ impl ConvertState {
     } else {
       ElementNode {
         extras,
-        attributes,
+        // Pool empty, so no buffer to trade back; the scratch regrows once.
+        attributes: std::mem::take(&mut self.attr_scratch),
         tag_id,
         depth: self.depth,
         index: current_walk_index,
@@ -1702,7 +1712,8 @@ impl ConvertState {
     }
   }
 
-  /// Recycle a node into the pool, preserving its Attributes Vec allocation.
+  /// Recycle a node into the pool. `clear` keeps the `Attributes` capacity,
+  /// which `process_opening_tag` swaps back out into `attr_scratch`.
   #[inline]
   pub(crate) fn recycle_node(&mut self, mut node: ElementNode) {
     node.attributes.clear();

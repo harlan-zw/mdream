@@ -455,6 +455,8 @@ pub struct ConvertState {
   script_text_buffer: String,
   pub stack: Vec<ElementNode>,
   node_pool: Vec<ElementNode>,
+  /// Scan target, swapped with the pooled node so attribute buffers recycle.
+  pub(crate) attr_scratch: crate::types::Attributes,
 
   // Plugin flags
   has_plugins: bool,
@@ -660,6 +662,7 @@ impl ConvertState {
       script_text_buffer: String::new(),
       stack: Vec::with_capacity(32),
       node_pool: Vec::with_capacity(32),
+      attr_scratch: crate::types::Attributes::new(),
 
       has_plugins: false,
       has_tailwind: false,

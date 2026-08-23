@@ -248,18 +248,21 @@ pub(crate) fn tag_is_complete(
 }
 
 /// Scan a start tag's attribute region to its `>`, storing only the attributes
-/// `attr_mask` selects.
+/// `attr_mask` selects into `out`. `out` is cleared on entry and owned by the
+/// caller so its buffer is recycled across elements; on an incomplete tag it
+/// holds a partial capture the caller must not read.
 pub(crate) fn process_tag_attributes(
   html_chunk: &str,
   position: usize,
   tag_handler: Option<&crate::types::TagHandler>,
   attr_mask: u16,
-) -> (bool, usize, Attributes, bool) {
+  out: &mut Attributes,
+) -> (bool, usize, bool) {
   let self_closing = tag_handler.is_some_and(|h| h.is_self_closing);
   if attr_mask == ATTR_NONE {
-    scan_tag::<false>(html_chunk, position, self_closing, ATTR_NONE)
+    scan_tag::<false>(html_chunk, position, self_closing, ATTR_NONE, out)
   } else {
-    scan_tag::<true>(html_chunk, position, self_closing, attr_mask)
+    scan_tag::<true>(html_chunk, position, self_closing, attr_mask, out)
   }
 }
 
@@ -272,10 +275,11 @@ fn scan_tag<const EXTRACT: bool>(
   position: usize,
   self_closing: bool,
   attr_mask: u16,
-) -> (bool, usize, Attributes, bool) {
+  out: &mut Attributes,
+) -> (bool, usize, bool) {
   let bytes = html_chunk.as_bytes();
   let chunk_length = bytes.len();
-  let mut scan = AttrScan::new(attr_mask);
+  let mut scan = AttrScan::new(attr_mask, out);
   let mut inside_quote = false;
   let mut quote_char: u8 = 0;
   // `ATTR_NONE` compiles `AttrScan` out, but still needs the same tokenizer
@@ -296,7 +300,7 @@ fn scan_tag<const EXTRACT: bool>(
           i += offset + 1;
         }
         // Unterminated: the tag cannot close in this chunk.
-        None => return (false, chunk_length, Attributes::new(), false),
+        None => return (false, chunk_length, false),
       }
       continue;
     }
@@ -307,12 +311,12 @@ fn scan_tag<const EXTRACT: bool>(
       && i + 1 < chunk_length
       && bytes[i + 1] == GT_CHAR
     {
-      let attrs = scan.finish(html_chunk, i);
-      return (true, i + 2, attrs, true);
+      scan.finish(html_chunk, i);
+      return (true, i + 2, true);
     }
     if c == GT_CHAR {
-      let attrs = scan.finish(html_chunk, i);
-      return (true, i + 1, attrs, self_closing);
+      scan.finish(html_chunk, i);
+      return (true, i + 1, self_closing);
     }
 
     // Run to the closing quote without re-entering the state dispatch.
@@ -324,7 +328,7 @@ fn scan_tag<const EXTRACT: bool>(
       }
       if end == chunk_length {
         // Unterminated: the tag cannot close in this chunk.
-        return (false, chunk_length, Attributes::new(), false);
+        return (false, chunk_length, false);
       }
       scan.take_value(html_chunk, value_start, end);
       i = end + 1;
@@ -342,7 +346,7 @@ fn scan_tag<const EXTRACT: bool>(
     i += 1;
   }
 
-  (false, i, Attributes::new(), false)
+  (false, i, false)
 }
 
 /// Mask rejection happens before any lowercasing or entity decoding, so
@@ -368,9 +372,9 @@ fn push_attr(result: &mut Attributes, mask: u16, raw: &str, value: Option<&str>)
 
 /// Attribute extraction fed one byte at a time by the tag scan. Offsets index
 /// the chunk itself, so nothing is allocated until a wanted attribute is whole.
-struct AttrScan {
+struct AttrScan<'a> {
   mask: u16,
-  result: Attributes,
+  result: &'a mut Attributes,
   state: State,
   name_start: usize,
   name_end: usize,
@@ -434,10 +438,10 @@ impl State {
   }
 }
 
-impl AttrScan {
+impl<'a> AttrScan<'a> {
   #[inline]
-  fn new(mask: u16) -> Self {
-    let mut result = Attributes::new();
+  fn new(mask: u16, result: &'a mut Attributes) -> Self {
+    result.clear();
     // A filtered mask keeps at most three names, so skip the eager reservation.
     if mask == ATTR_ALL {
       result.reserve(4);
@@ -460,7 +464,7 @@ impl AttrScan {
   #[inline]
   fn take_value(&mut self, chunk: &str, value_start: usize, value_end: usize) {
     push_attr(
-      &mut self.result,
+      self.result,
       self.mask,
       &chunk[self.name_start..self.name_end],
       Some(&chunk[value_start..value_end]),
@@ -471,7 +475,7 @@ impl AttrScan {
   #[inline]
   fn take_bare_name(&mut self, chunk: &str, name_end: usize) {
     push_attr(
-      &mut self.result,
+      self.result,
       self.mask,
       &chunk[self.name_start..name_end],
       None,
@@ -524,14 +528,13 @@ impl AttrScan {
 
   /// Take the attribute still open when the tag ended at `end`.
   #[inline]
-  fn finish(mut self, chunk: &str, end: usize) -> Attributes {
+  fn finish(&mut self, chunk: &str, end: usize) {
     match self.state {
       State::Name => self.take_bare_name(chunk, end),
       State::AfterName | State::BeforeValue => self.take_bare_name(chunk, self.name_end),
       State::UnquotedValue => self.take_value(chunk, self.value_start, end),
       State::Gap => {}
     }
-    self.result
   }
 }
 
@@ -539,8 +542,16 @@ impl AttrScan {
 /// inside `<…>`.
 #[cfg(test)]
 pub(crate) fn parse_attributes(attr_str: &str, mask: u16) -> Attributes {
-  let (_, _, attrs, _) = process_tag_attributes(&format!("{attr_str}>"), 0, None, mask);
-  attrs
+  scan_attrs(&format!("{attr_str}>"), 0, mask).2
+}
+
+/// [`process_tag_attributes`] owning its capture buffer, for one-tag tests.
+#[cfg(test)]
+fn scan_attrs(html: &str, position: usize, mask: u16) -> (bool, usize, Attributes, bool) {
+  let mut attrs = Attributes::new();
+  let (complete, new_position, self_closing) =
+    process_tag_attributes(html, position, None, mask, &mut attrs);
+  (complete, new_position, attrs, self_closing)
 }
 
 #[cfg(test)]
@@ -680,7 +691,7 @@ mod tests {
   fn process_tag_attributes_finds_close() {
     // "<a href=\"x\">" — scan from after the tag name
     let html = "a href=\"x\">rest";
-    let (complete, new_pos, attrs, self_closing) = process_tag_attributes(html, 1, None, ATTR_ALL);
+    let (complete, new_pos, attrs, self_closing) = scan_attrs(html, 1, ATTR_ALL);
     assert!(complete);
     assert!(!self_closing);
     assert_eq!(&html[new_pos..], "rest");
@@ -692,7 +703,7 @@ mod tests {
     // The closing quote may still arrive in the next chunk, so nothing is
     // reported until it does.
     let html = "a href=\"x";
-    let (complete, _, attrs, _) = process_tag_attributes(html, 1, None, ATTR_ALL);
+    let (complete, _, attrs, _) = scan_attrs(html, 1, ATTR_ALL);
     assert!(!complete);
     assert!(attrs.is_empty());
   }
@@ -700,7 +711,7 @@ mod tests {
   #[test]
   fn a_quoted_value_hides_a_tag_terminator() {
     let html = "a href=\"x>y\">rest";
-    let (complete, new_pos, attrs, _) = process_tag_attributes(html, 1, None, ATTR_ALL);
+    let (complete, new_pos, attrs, _) = scan_attrs(html, 1, ATTR_ALL);
     assert!(complete);
     assert_eq!(attrs.get("href"), Some("x>y"));
     assert_eq!(&html[new_pos..], "rest");
@@ -721,10 +732,8 @@ mod tests {
       ("a href=x='y>rest", 12),
       ("a>rest", 2),
     ] {
-      let (complete, extracted_pos, _, extracted_self_closing) =
-        process_tag_attributes(html, 1, None, ATTR_ALL);
-      let (bare_complete, bare_pos, bare_attrs, bare_self_closing) =
-        process_tag_attributes(html, 1, None, ATTR_NONE);
+      let (complete, extracted_pos, _, extracted_self_closing) = scan_attrs(html, 1, ATTR_ALL);
+      let (bare_complete, bare_pos, bare_attrs, bare_self_closing) = scan_attrs(html, 1, ATTR_NONE);
       assert!(complete, "html={html:?}");
       assert_eq!(extracted_pos, end, "html={html:?}");
       assert_eq!(complete, bare_complete, "html={html:?}");
@@ -932,9 +941,9 @@ mod tests {
         encoded /= ALPHABET.len();
       }
       let html = std::str::from_utf8(&input).expect("ASCII alphabet");
-      let (complete, position, _, self_closing) = process_tag_attributes(html, 0, None, ATTR_ALL);
+      let (complete, position, _, self_closing) = scan_attrs(html, 0, ATTR_ALL);
       let (bare_complete, bare_position, bare_attrs, bare_self_closing) =
-        process_tag_attributes(html, 0, None, ATTR_NONE);
+        scan_attrs(html, 0, ATTR_NONE);
 
       assert_eq!(complete, bare_complete, "html={html:?}");
       assert_eq!(position, bare_position, "html={html:?}");
