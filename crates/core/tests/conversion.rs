@@ -2601,6 +2601,14 @@ fn clean_strips_broken_fragment() {
 }
 
 #[test]
+fn clean_strips_broken_titled_fragment() {
+  assert_eq!(
+    convert_with_clean(r##"<a href="#missing" title="T">x</a>"##, clean_all()),
+    "x"
+  );
+}
+
+#[test]
 fn clean_keeps_valid_fragment() {
   assert_eq!(
     convert_with_clean(

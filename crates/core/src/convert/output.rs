@@ -1198,6 +1198,7 @@ impl ConvertState {
             text_end: link_text_end,
             link_end: self.buffer.len(),
             fragment: fragment.to_string(),
+            has_title: !title.is_empty(),
           });
         }
       }

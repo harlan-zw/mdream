@@ -148,6 +148,9 @@ struct FragmentLink {
   text_end: usize,
   link_end: usize,
   fragment: String,
+  /// The close was written as `](#frag "title")` instead of `](#frag)`, so the
+  /// drift check must accept a quoted title between the fragment and `)`.
+  has_title: bool,
 }
 
 /// FNV-1a over the slug bytes. Only used to bucket heading slugs, so a short
@@ -1556,9 +1559,26 @@ impl ConvertState {
           || self.buffer.as_bytes().get(bracket_start) != Some(&b'[')
           || !self.buffer[text_end..link_end].starts_with("](")
           || !self.buffer[text_end..link_end].ends_with(')')
-          || link_end - text_end != link.fragment.len() + 4
-          || self.buffer[text_end + 3..link_end - 1] != link.fragment
         {
+          continue;
+        }
+        // `](#fragment)` exactly, or the titled close `](#fragment "title")`
+        // recorded by `has_title`: fragment bytes followed by a space, an open
+        // quote and a closing quote before the final `)`. The title itself is
+        // not compared, only its shape, so escaped titles still match.
+        let fragment = link.fragment.as_str();
+        let fragment_end = text_end + 3 + fragment.len();
+        let matched = if link.has_title {
+          let bytes = self.buffer.as_bytes();
+          Some(&b' ') == bytes.get(fragment_end)
+            && Some(&b'"') == bytes.get(fragment_end + 1)
+            && Some(&b'"') == bytes.get(link_end - 2)
+            && &self.buffer[text_end + 3..fragment_end] == fragment
+        } else {
+          link_end - text_end == fragment.len() + 4
+            && &self.buffer[text_end + 3..link_end - 1] == fragment
+        };
+        if !matched {
           continue;
         }
         if slug_index_contains(&slug_table, slug_mask, &self.heading_slugs, &link.fragment) {
