@@ -54,6 +54,15 @@ export class MarkdownStream {
     }
   }
 
+  processChunkBytes(chunk: Uint8Array): string {
+    try {
+      return this._inner.processChunkBytes(chunk)
+    }
+    catch (error) {
+      throw wasmPanicError(error)
+    }
+  }
+
   finish(): string {
     try {
       return this._inner.finish()
