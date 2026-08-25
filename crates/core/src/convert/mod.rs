@@ -1502,13 +1502,21 @@ impl ConvertState {
         }
 
         // Copy everything before this link
+        // Extract and copy just the text (between [ and ]). The recorded start
+        // can drift off the `[` when other rewrites shift the buffer; only a
+        // real `[text](#frag)` shape is safe to slice and rewrite. A drifted
+        // entry is left untouched: skipping it here lets the normal cursor flow
+        // copy its bytes verbatim instead of deleting them.
+        if !range.starts_with('[') {
+          continue;
+        }
+        let Some(close_bracket) = range.find("](#") else {
+          continue;
+        };
         if cursor < adj_start {
           result.push_str(&self.buffer[cursor..adj_start]);
         }
-        // Extract and copy just the text (between [ and ])
-        if let Some(close_bracket) = range.find("](#") {
-          result.push_str(&self.buffer[adj_start + 1..adj_start + close_bracket]);
-        }
+        result.push_str(&self.buffer[adj_start + 1..adj_start + close_bracket]);
         cursor = adj_end;
       }
 
