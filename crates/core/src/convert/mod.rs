@@ -1544,6 +1544,14 @@ impl ConvertState {
           }
         }
 
+        // The recorded start can drift off the `[` when other rewrites shift
+        // the buffer; only a real `[text](#frag)` shape is safe to slice and
+        // rewrite. A drifted entry is left untouched: skipping it here lets
+        // the normal cursor flow copy its bytes verbatim instead of deleting
+        // them.
+        if !range.starts_with('[') {
+          continue;
+        }
         // SAFETY: both moved runs are whole slices delimited by the ASCII
         // `[` and `](#` markers, so every char boundary is preserved.
         #[allow(unsafe_code)]
