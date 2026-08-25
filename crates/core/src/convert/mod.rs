@@ -1505,8 +1505,12 @@ impl ConvertState {
         if cursor < adj_start {
           result.push_str(&self.buffer[cursor..adj_start]);
         }
-        // Extract and copy just the text (between [ and ])
-        if let Some(close_bracket) = range.find("](#") {
+        // Extract and copy just the text (between [ and ]). The recorded start
+        // can drift off the `[` when other rewrites shift the buffer; only a
+        // real `[text](#frag)` shape is safe to slice and rewrite.
+        if range.starts_with('[')
+          && let Some(close_bracket) = range.find("](#")
+        {
           result.push_str(&self.buffer[adj_start + 1..adj_start + close_bracket]);
         }
         cursor = adj_end;

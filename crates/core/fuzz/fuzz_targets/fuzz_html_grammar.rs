@@ -231,6 +231,7 @@ fuzz_target!(|input: Input| {
     clean: input.clean_all.then(CleanConfig::all),
     plugins,
     wrap_width: input.wrap_width as usize,
+    max_node_bytes: 0,
   };
 
   let format = if input.plain_text {
