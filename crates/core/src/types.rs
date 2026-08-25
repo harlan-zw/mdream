@@ -523,6 +523,15 @@ pub struct HTMLToMarkdownOptions {
   /// set to `0`. Code (`<pre>`/`<code>`), tables, and headings are never
   /// wrapped.
   pub wrap_width: usize,
+  /// Cap on the bytes one construct may buffer — a text node, a tag, a comment, an
+  /// open code block, a table row's columns, or the script text an extraction
+  /// reads; `0` (the default) is unlimited. Content past the cap is **dropped**,
+  /// bounding memory on adversarial input at the cost of that content, an over-long
+  /// tag entirely (attributes included), and a row's extra columns. A tag is
+  /// measured by its own length, so the result does not depend on chunking, and the
+  /// cap applies to one-shot conversion as well as streaming.
+  /// [`MdreamResult::truncated`] reports whether it fired.
+  pub max_node_bytes: usize,
 }
 
 impl HTMLToMarkdownOptions {
@@ -591,6 +600,20 @@ impl HTMLToMarkdownOptions {
     self.wrap_width = width;
     self
   }
+
+  /// Drop content past `bytes` in one node, token, or code block, bounding
+  /// streaming memory.
+  ///
+  /// ```rust
+  /// use mdream::HTMLToMarkdownOptions;
+  ///
+  /// let opts = HTMLToMarkdownOptions::default().with_max_node_bytes(64 * 1024);
+  /// ```
+  #[must_use]
+  pub fn with_max_node_bytes(mut self, bytes: usize) -> Self {
+    self.max_node_bytes = bytes;
+    self
+  }
 }
 
 /// Result from html_to_markdown conversion with extraction/frontmatter data
@@ -598,6 +621,10 @@ pub struct MdreamResult {
   pub markdown: String,
   pub extracted: Option<Vec<ExtractedElement>>,
   pub frontmatter: Option<Vec<(String, String)>>,
+  /// Whether `max_node_bytes` fired. `false` guarantees the output is exactly what
+  /// an uncapped conversion produces. `true` is conservative: dropping a comment or
+  /// an unemitted attribute costs no output, so the markdown may still be identical.
+  pub truncated: bool,
 }
 
 /// Output format for conversion.

@@ -142,6 +142,8 @@ fn to_core_opts(
       .as_ref()
       .and_then(|o| o.wrap_width)
       .map_or(0, |w| w as usize),
+    // Not exposed through the bindings yet: the JS engine has no equivalent cap.
+    max_node_bytes: 0,
     plugins: options.and_then(|o| {
       o.plugins.map(|p| mdream::types::PluginConfig {
         filter: p.filter.map(|f| mdream::types::FilterConfig {

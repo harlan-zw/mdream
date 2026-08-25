@@ -643,7 +643,15 @@ impl ConvertState {
               _ => 0,
             }
           });
-          if align_val != 0 || self.table_column_alignments.len() <= self.table_current_row_cells {
+          // A nonzero align used to push unconditionally, so a row of aligned
+          // headers grew the delimiter row past the cap after its cells stopped
+          // counting. A cell the cap drops must not align a column either, or it
+          // would align whichever retained column its entry landed on.
+          if self.table_current_row_cells < self.table_column_cap
+            && self.table_column_alignments.len() < self.table_column_cap
+            && (align_val != 0
+              || self.table_column_alignments.len() <= self.table_current_row_cells)
+          {
             self.table_column_alignments.push(align_val);
           }
         }
@@ -892,8 +900,15 @@ impl ConvertState {
 
     let cell_span =
       if matches!(tag_id, Some(TAG_TH | TAG_TD)) && self.depth_map[TAG_TABLE as usize] <= 1 {
-        let span = Self::cell_span(node);
-        self.table_current_row_cells += span as usize;
+        // Clamped to the columns the cap has left, so neither the counter nor a
+        // dropped cell's span filler can widen the row past it.
+        let want = Self::cell_span(node);
+        let room = self
+          .table_column_cap
+          .saturating_sub(self.table_current_row_cells);
+        let span = want.min(u8::try_from(room).unwrap_or(u8::MAX));
+        self.truncated |= span != want;
+        self.table_current_row_cells += usize::from(span);
         span
       } else {
         1
@@ -1348,6 +1363,31 @@ impl ConvertState {
     }
     let has_inline_gfm_hazard = std::mem::take(&mut self.text_buffer_has_inline_gfm_hazard);
     if text.is_empty() {
+      return;
+    }
+
+    // An open fence pins the buffer until its delimiter is known, so a code block
+    // is capped by everything it has buffered, not by each text node separately.
+    // Clamped to the room left rather than rejected whole, or a node arriving just
+    // under the cap would take the block to twice it.
+    let mut text = text;
+    if self.options.max_node_bytes != 0
+      && let Some(content_start) = self.code_fence.as_ref().map(|fence| fence.content_start)
+    {
+      let held = self.buffer.len().saturating_sub(content_start);
+      let kept = clamp_to_char_boundary(text, self.options.max_node_bytes.saturating_sub(held));
+      if kept.len() != text.len() {
+        self.truncated = true;
+        if kept.is_empty() {
+          return;
+        }
+        text = kept;
+      }
+    }
+
+    // Text inside a cell the row cap already dropped.
+    if self.table_current_row_cells >= self.table_column_cap && self.in_table_cell() {
+      self.truncated = true;
       return;
     }
 
@@ -2672,6 +2712,10 @@ impl ConvertState {
         }
         if node.index == 0 {
           Some(Cow::Borrowed(""))
+        } else if self.table_current_row_cells >= self.table_column_cap {
+          // Past the cap the delimiter row cannot promise this column, so GFM
+          // would discard the cell anyway. Drop it outright to bound the row.
+          Some(Cow::Borrowed(""))
         } else if self.table_header_cells > 0
           && self.table_current_row_cells >= self.table_header_cells
         {
@@ -3329,7 +3373,8 @@ impl ConvertState {
 
   fn span_filler(span: u8) -> Option<Cow<'static, str>> {
     match span {
-      1 => None,
+      // 0 is a cell the row cap dropped entirely.
+      0 | 1 => None,
       span => Some(Cow::Owned(" |".repeat(span as usize - 1))),
     }
   }

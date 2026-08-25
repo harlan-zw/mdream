@@ -203,11 +203,11 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "mdream"
-version = "1.6.3"
+version = "1.7.0"
 
 [[package]]
 name = "mdream-edge"
-version = "1.6.3"
+version = "1.7.0"
 dependencies = [
  "js-sys",
  "mdream",
@@ -217,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "mdream-node"
-version = "1.6.3"
+version = "1.7.0"
 dependencies = [
  "mdream",
  "napi",
