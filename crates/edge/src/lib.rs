@@ -331,6 +331,7 @@ pub struct MarkdownStream {
   /// A multi-byte sequence split across a chunk boundary; 1-3 bytes, byte
   /// entry points only.
   tail: Vec<u8>,
+  at_start: bool,
 }
 
 #[wasm_bindgen]
@@ -341,6 +342,7 @@ impl MarkdownStream {
     Self {
       inner: mdream::MarkdownStreamProcessor::new_with_format(opts, format),
       tail: Vec::new(),
+      at_start: true,
     }
   }
 
@@ -374,12 +376,12 @@ impl MarkdownStream {
     // neither case allocates or copies.
     if self.tail.is_empty() {
       match std::str::from_utf8(chunk) {
-        Ok(text) => return self.inner.process_chunk(text),
+        Ok(text) => return self.process_decoded_bytes(text),
         Err(error) if error.error_len().is_none() => {
           let (head, rest) = chunk.split_at(error.valid_up_to());
           // `head` is valid by construction: it is what `valid_up_to` reports.
           let out = match std::str::from_utf8(head) {
-            Ok(text) => self.inner.process_chunk(text),
+            Ok(text) => self.process_decoded_bytes(text),
             Err(_) => String::new(),
           };
           self.tail.extend_from_slice(rest);
@@ -393,11 +395,21 @@ impl MarkdownStream {
 }
 
 impl MarkdownStream {
+  fn process_decoded_bytes(&mut self, text: &str) -> String {
+    if self.at_start && !text.is_empty() {
+      self.at_start = false;
+      return self
+        .inner
+        .process_chunk(text.strip_prefix("\u{FEFF}").unwrap_or(text));
+    }
+    self.inner.process_chunk(text)
+  }
+
   /// A tail still incomplete becomes U+FFFD, matching `TextDecoder`'s final
   /// `decode()`. Caller checks emptiness.
   fn flush_tail(&mut self) -> String {
     let tail = std::mem::take(&mut self.tail);
-    self.inner.process_chunk(&String::from_utf8_lossy(&tail))
+    self.process_decoded_bytes(&String::from_utf8_lossy(&tail))
   }
 
   /// Slow path: rejoin a carried tail, or replace invalid bytes.
@@ -418,9 +430,7 @@ impl MarkdownStream {
       }
     };
 
-    let out = self
-      .inner
-      .process_chunk(&String::from_utf8_lossy(&buffer[..split]));
+    let out = self.process_decoded_bytes(&String::from_utf8_lossy(&buffer[..split]));
     // Drain rather than reallocate, so the tail keeps its capacity.
     buffer.drain(..split);
     self.tail = buffer;
@@ -437,6 +447,7 @@ mod tests {
     MarkdownStream {
       inner: mdream::MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default()),
       tail: Vec::new(),
+      at_start: true,
     }
   }
 

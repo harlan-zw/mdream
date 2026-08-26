@@ -1,7 +1,7 @@
 import type { MdreamOptions } from 'mdream'
 import { htmlToMarkdown as pkgHtmlToMarkdown, streamHtmlToMarkdown as pkgStreamHtmlToMarkdown } from 'mdream'
 import { wasmPanicError } from '../../../../packages/mdream/src/wasm-panic.js'
-import init, { __mdreamTakePanicMessage, htmlToMarkdown, htmlToMarkdownResult, MarkdownStream } from '../wasm/mdream_edge.js'
+import init, { __mdreamTakePanicMessage, htmlToMarkdown, htmlToMarkdownBytes, htmlToMarkdownResult, MarkdownStream } from '../wasm/mdream_edge.js'
 // @ts-expect-error wasm module import
 import wasmModule from '../wasm/mdream_edge_bg.wasm'
 
@@ -108,6 +108,46 @@ export default {
         },
       })
       return Response.json(result)
+    }
+
+    if (url.pathname === '/bytes' && request.method === 'POST') {
+      const encoder = new TextEncoder()
+      const splitHtml = encoder.encode('<p>Café 🌍</p>')
+      const convertStream = (chunks: (string | Uint8Array)[]) => {
+        const stream = new MarkdownStream(undefined)
+        let markdown = ''
+        for (const chunk of chunks) {
+          markdown += typeof chunk === 'string'
+            ? stream.processChunk(chunk)
+            : stream.processChunkBytes(chunk)
+        }
+        return markdown + stream.finish()
+      }
+
+      return Response.json({
+        bom: convertStream([
+          new Uint8Array([0xEF]),
+          new Uint8Array([0xBB]),
+          new Uint8Array([0xBF, ...encoder.encode('<h1>Title</h1>')]),
+        ]),
+        split: convertStream([
+          splitHtml.subarray(0, 7),
+          splitHtml.subarray(7, 10),
+          splitHtml.subarray(10),
+        ]),
+        invalid: htmlToMarkdownBytes(
+          new Uint8Array([
+            ...encoder.encode('<p>Bad '),
+            0xFF,
+            ...encoder.encode(' byte</p>'),
+          ]),
+          undefined,
+        ),
+        mixed: convertStream([
+          '<p>Mix',
+          encoder.encode('ed 🌍</p>'),
+        ]),
+      })
     }
 
     if (url.pathname === '/stream' && request.method === 'POST') {
