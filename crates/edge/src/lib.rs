@@ -282,10 +282,13 @@ pub fn html_to_markdown_bytes(html: &[u8], options: JsValue) -> String {
   let (opts, format) = parse_options(&options);
   // Valid input costs one strict pass; only invalid bytes pay the lossy
   // chunker, which replaces each maximal invalid subsequence with U+FFFD.
-  match std::str::from_utf8(html) {
-    Ok(text) => mdream::html_to_format(text, opts, format),
-    Err(_) => mdream::html_to_format(&String::from_utf8_lossy(html), opts, format),
+  // A leading U+FEFF is stripped either way, matching
+  // [`MarkdownStream::process_decoded_bytes`] and `TextDecoder`.
+  if let Ok(text) = std::str::from_utf8(html) {
+    return mdream::html_to_format(text.strip_prefix('\u{FEFF}').unwrap_or(text), opts, format);
   }
+  let text = String::from_utf8_lossy(html);
+  mdream::html_to_format(text.strip_prefix('\u{FEFF}').unwrap_or(&text), opts, format)
 }
 
 #[wasm_bindgen(js_name = "htmlToMarkdownResult")]

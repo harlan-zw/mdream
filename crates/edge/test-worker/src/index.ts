@@ -130,6 +130,10 @@ export default {
           new Uint8Array([0xBB]),
           new Uint8Array([0xBF, ...encoder.encode('<h1>Title</h1>')]),
         ]),
+        bytesBom: htmlToMarkdownBytes(
+          new Uint8Array([0xEF, 0xBB, 0xBF, ...encoder.encode('<h1>Title</h1>')]),
+          undefined,
+        ),
         split: convertStream([
           splitHtml.subarray(0, 7),
           splitHtml.subarray(7, 10),
