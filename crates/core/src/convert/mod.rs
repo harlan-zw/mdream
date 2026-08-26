@@ -175,6 +175,50 @@ fn trim_ascii_whitespace_end(value: &str) -> usize {
   len
 }
 
+fn heap_sort_heading_slugs(slugs: &mut [String]) {
+  fn sift_down(slugs: &mut [String], mut root: usize, end: usize) {
+    let mut child = root * 2 + 1;
+    while child < end {
+      if child + 1 < end && slugs[child] < slugs[child + 1] {
+        child += 1;
+      }
+      if slugs[root] >= slugs[child] {
+        return;
+      }
+      slugs.swap(root, child);
+      root = child;
+      child = root * 2 + 1;
+    }
+  }
+
+  let mut root = slugs.len() / 2;
+  while root > 0 {
+    root -= 1;
+    sift_down(slugs, root, slugs.len());
+  }
+
+  let mut end = slugs.len();
+  while end > 1 {
+    end -= 1;
+    slugs.swap(0, end);
+    sift_down(slugs, 0, end);
+  }
+}
+
+fn contains_sorted_heading_slug(slugs: &[String], target: &str) -> bool {
+  let mut start = 0usize;
+  let mut end = slugs.len();
+  while start < end {
+    let midpoint = start + (end - start) / 2;
+    match slugs[midpoint].as_str().cmp(target) {
+      std::cmp::Ordering::Less => start = midpoint + 1,
+      std::cmp::Ordering::Greater => end = midpoint,
+      std::cmp::Ordering::Equal => return true,
+    }
+  }
+  false
+}
+
 /// What the current output line holds where a table row is about to be written.
 enum LineBeforeRow {
   /// Nothing but block prefix, or a pending list marker.
@@ -1506,10 +1550,8 @@ impl ConvertState {
     // matches no heading keeps its text and loses its target.
     if self.clean_flags & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
       let trim_offset = start;
-      // Sorted once, then probed per link: rescanning every slug per fragment
-      // is quadratic — ~1.3k headings against ~50k links on a spec page.
-      let mut slugs: Vec<&str> = self.heading_slugs.iter().map(String::as_str).collect();
-      slugs.sort_unstable();
+      // A specialized heap sort avoids pulling Rust's larger generic sort into WASM.
+      heap_sort_heading_slugs(&mut self.heading_slugs);
 
       // Only deletes, so it compacts in place: `write` trails `read` by bytes
       // dropped so far. A clean document never writes a byte; rebuilding into
@@ -1539,7 +1581,7 @@ impl ConvertState {
         let frag_end = range.len() - 1; // skip trailing )
         if frag_start < frag_end {
           let fragment = &range[frag_start..frag_end];
-          if slugs.binary_search(&fragment).is_ok() {
+          if contains_sorted_heading_slug(&self.heading_slugs, fragment) {
             continue; // resolves to a heading, keep the link whole
           }
         }
