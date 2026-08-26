@@ -427,3 +427,90 @@ impl MarkdownStream {
     out
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::MarkdownStream;
+  use mdream::types::HTMLToMarkdownOptions;
+
+  fn test_stream() -> MarkdownStream {
+    MarkdownStream {
+      inner: mdream::MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default()),
+      tail: Vec::new(),
+    }
+  }
+
+  #[test]
+  fn split_multibyte_across_byte_chunks_survives() {
+    let mut stream = test_stream();
+    let mut out = String::new();
+    out += &stream.process_chunk_bytes(b"<p>");
+    // 🎉 is 4 bytes; cut it across three calls so both the fast path and the
+    // rejoin path have to carry an incomplete sequence.
+    out += &stream.process_chunk_bytes(&[0xF0]);
+    out += &stream.process_chunk_bytes(&[0x9F, 0x8E]);
+    out += &stream.process_chunk_bytes(&[0x89, 0x3C, 0x2F, 0x70, 0x3E]); // `</p>`
+    out += &stream.finish();
+
+    assert!(out.contains('\u{1F389}'), "emoji lost in {out:?}");
+    assert!(
+      !out.contains('\u{FFFD}'),
+      "replacement char leaked into {out:?}"
+    );
+  }
+
+  #[test]
+  fn string_chunk_after_carried_tail_flushes_tail_as_replacement() {
+    let mut stream = test_stream();
+    let mut out = String::new();
+    out += &stream.process_chunk_bytes(b"<p>\xF0\x9F\x8E");
+    // A string chunk cannot complete a byte tail: it is flushed first, so the
+    // replacement char must land before the string chunk's own content.
+    out += &stream.process_chunk("</p>x<p>ok</p>");
+    out += &stream.finish();
+
+    let flush = out.find('\u{FFFD}').expect("carried tail not flushed");
+    let string_content = out.find('x').expect("string chunk lost");
+    assert!(
+      flush < string_content,
+      "tail flushed after string chunk: {out:?}"
+    );
+  }
+
+  #[test]
+  fn finish_flushes_pending_tail_as_replacement() {
+    let mut stream = test_stream();
+    stream.process_chunk_bytes(b"<p>\xF0\x9F");
+    let out = stream.finish();
+
+    assert!(out.contains('\u{FFFD}'), "pending tail dropped in {out:?}");
+  }
+
+  #[test]
+  fn invalid_bytes_become_replacement_chars() {
+    let mut stream = test_stream();
+    let out = stream.process_chunk_bytes(b"<p>a\xFFb</p>") + &stream.finish();
+
+    assert!(
+      out.contains("a\u{FFFD}b"),
+      "invalid byte mishandled in {out:?}"
+    );
+  }
+
+  #[test]
+  fn mixed_string_and_byte_chunks_convert_clean_html() {
+    let mut stream = test_stream();
+    let mut out = String::new();
+    out += &stream.process_chunk("<h1>Tit");
+    out += &stream.process_chunk_bytes(b"le</h1><p>bo");
+    out += &stream.process_chunk("dy</p>");
+    out += &stream.finish();
+
+    assert!(out.contains("# Title"), "heading lost in {out:?}");
+    assert!(out.contains("body"), "paragraph lost in {out:?}");
+    assert!(
+      !out.contains('\u{FFFD}'),
+      "replacement char leaked into {out:?}"
+    );
+  }
+}
