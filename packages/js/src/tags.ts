@@ -127,7 +127,8 @@ import {
 import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
-const URL_SCHEME_RE = /^[\dA-Z+.-]+:/i
+const URL_SCHEME_RE = /^[A-Z][\dA-Z+.-]*:/i
+const SLASH_CHAR = 47
 
 function stripTrackingParams(url: string): string {
   const queryStart = url.indexOf('?')
@@ -143,19 +144,107 @@ function stripTrackingParams(url: string): string {
   return `${url.slice(0, queryStart)}${query ? `?${query}` : ''}${url.slice(queryEnd)}`
 }
 
+/** Index of the first `?` or `#` at or after `from`, else `value.length`. */
+function pathEnd(value: string, from: number): number {
+  const query = value.indexOf('?', from)
+  const fragment = value.indexOf('#', from)
+  if (query === -1)
+    return fragment === -1 ? value.length : fragment
+  return fragment === -1 ? query : Math.min(query, fragment)
+}
+
+function hasDotSegment(path: string): boolean {
+  // No `.` anywhere rules out a dot segment.
+  return path.includes('.')
+    && (path === '.' || path === '..' || path.startsWith('./') || path.startsWith('../')
+      || path.includes('/./') || path.includes('/../') || path.endsWith('/.') || path.endsWith('/..'))
+}
+
+/** `dir` starts and ends with `/`; a `..` never climbs past the root. */
+function mergeDotSegments(dir: string, rest: string): string {
+  let out = dir
+  let index = 0
+  for (;;) {
+    let end = rest.indexOf('/', index)
+    const last = end === -1
+    if (last)
+      end = rest.length
+    const segment = rest.slice(index, end)
+    if (segment === '..')
+      // lastIndexOf clamps a negative start to 0, which holds `out` at the root.
+      out = out.slice(0, out.lastIndexOf('/', out.length - 2) + 1)
+    else if (segment !== '.')
+      out += last ? segment : `${segment}/`
+    if (last)
+      return out
+    index = end + 1
+  }
+}
+
+// One origin serves a whole document, so its split is kept until a different
+// one arrives. Keying by the string keeps interleaved conversions correct.
+let baseOrigin: string | undefined
+let baseRoot = ''
+let basePath = ''
+let baseDir = ''
+
+/** False when `origin` has no `scheme://authority` to resolve against. */
+function loadBase(origin: string): boolean {
+  if (origin !== baseOrigin) {
+    baseOrigin = origin
+    baseRoot = ''
+    const authority = origin.indexOf('://')
+    if (authority !== -1) {
+      // The base query and fragment take no part in resolution.
+      const end = pathEnd(origin, authority + 3)
+      const slash = origin.indexOf('/', authority + 3)
+      const rootEnd = slash === -1 || slash > end ? end : slash
+      baseRoot = origin.slice(0, rootEnd)
+      basePath = origin.slice(rootEnd, end)
+      baseDir = basePath.slice(0, basePath.lastIndexOf('/') + 1) || '/'
+    }
+  }
+  return baseRoot !== ''
+}
+
+function resolveAgainstBase(origin: string, url: string): string {
+  if (!loadBase(origin)) {
+    let prefix = origin
+    while (prefix.endsWith('/'))
+      prefix = prefix.slice(0, -1)
+    const path = url.startsWith('./') ? url.slice(2) : url
+    return `${prefix}${path.charCodeAt(0) === SLASH_CHAR ? '' : '/'}${path}`
+  }
+
+  // Only the path resolves; query and fragment carry across.
+  const end = pathEnd(url, 0)
+  const path = url.slice(0, end)
+  const suffix = end === url.length ? '' : url.slice(end)
+  if (!path)
+    return `${baseRoot}${basePath}${suffix}`
+
+  const dot = hasDotSegment(path)
+  if (path.charCodeAt(0) === SLASH_CHAR)
+    return `${baseRoot}${dot ? mergeDotSegments('/', path.slice(1)) : path}${suffix}`
+  return `${baseRoot}${dot ? mergeDotSegments(baseDir, path) : baseDir + path}${suffix}`
+}
+
 export function resolveUrl(url: string, origin?: string, clean?: EngineOptions['clean']): string {
   if (!url || url[0] === '#')
     return url
 
+  const isSlash = url.charCodeAt(0) === SLASH_CHAR
   let resolved = url
-  if (url.startsWith('//')) {
-    resolved = `https:${url}`
+  if (isSlash && url.charCodeAt(1) === SLASH_CHAR) {
+    // A network-path reference inherits only the base scheme.
+    let scheme = 'https'
+    if (origin && loadBase(origin))
+      scheme = baseRoot.slice(0, baseRoot.indexOf(':'))
+    resolved = `${scheme}:${url}`
   }
-  else if (origin && !URL_SCHEME_RE.test(url)) {
-    const path = url.startsWith('./') ? url.slice(2) : url
-    while (origin.endsWith('/'))
-      origin = origin.slice(0, -1)
-    resolved = `${origin}${path[0] === '/' ? '' : '/'}${path}`
+  // An explicit scheme (`mailto:`, `https:`, …) means absolute.
+  else if (origin && (isSlash || !URL_SCHEME_RE.test(url))) {
+    resolved = resolveAgainstBase(origin, url)
   }
 
   const cleansUrls = clean === true || (!!clean && clean.urls === true)
