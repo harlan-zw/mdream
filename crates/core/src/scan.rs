@@ -123,31 +123,61 @@ impl PendingTagScan {
   }
 }
 
-/// State after the `!` in `--!`, where only `>` still closes the comment. Held in
-/// the same byte as the dash run, which counts 0, 1, or 2-or-more.
-const COMMENT_BANG: u8 = 3;
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub(crate) enum DiscardedCommentState {
+  Start,
+  StartDash,
+  Comment,
+  EndDash,
+  End,
+  EndBang,
+}
+
+impl DiscardedCommentState {
+  #[inline]
+  pub(crate) fn new() -> Self {
+    Self::Start
+  }
+}
 
 /// Find the end of a comment whose earlier bytes have been dropped, resuming from
-/// `dashes` (the trailing dash-run state). Only `-->` and `--!>` can still close
-/// one this far in, so no bytes need retaining. Returns the index after the `>`.
-///
-/// A second `!` leaves the comment end bang state, and a `-` after it starts a
-/// fresh dash run, so `--!!>` and `--!->` do not close. Diverging here would let
-/// a dropped comment end at a byte the full scan runs past, which resumes the
-/// document inside the comment.
-pub(crate) fn discarded_comment_end(chunk: &str, dashes: &mut u8) -> Option<usize> {
+/// its tokenizer state. Returns the index after the `>` without retaining bytes.
+pub(crate) fn discarded_comment_end(
+  chunk: &str,
+  state: &mut DiscardedCommentState,
+) -> Option<usize> {
   for (index, &c) in chunk.as_bytes().iter().enumerate() {
-    match c {
-      DASH_CHAR => {
-        *dashes = if *dashes == COMMENT_BANG {
-          1
-        } else {
-          (*dashes + 1).min(2)
-        };
-      }
-      GT_CHAR if *dashes >= 2 => return Some(index + 1),
-      EXCLAMATION_CHAR if *dashes == 2 => *dashes = COMMENT_BANG,
-      _ => *dashes = 0,
+    *state = match *state {
+      DiscardedCommentState::Start => match c {
+        GT_CHAR => return Some(index + 1),
+        DASH_CHAR => DiscardedCommentState::StartDash,
+        _ => DiscardedCommentState::Comment,
+      },
+      DiscardedCommentState::StartDash => match c {
+        GT_CHAR => return Some(index + 1),
+        DASH_CHAR => DiscardedCommentState::End,
+        _ => DiscardedCommentState::Comment,
+      },
+      DiscardedCommentState::Comment => match c {
+        DASH_CHAR => DiscardedCommentState::EndDash,
+        _ => DiscardedCommentState::Comment,
+      },
+      DiscardedCommentState::EndDash => match c {
+        DASH_CHAR => DiscardedCommentState::End,
+        _ => DiscardedCommentState::Comment,
+      },
+      DiscardedCommentState::End => match c {
+        GT_CHAR => return Some(index + 1),
+        EXCLAMATION_CHAR => DiscardedCommentState::EndBang,
+        DASH_CHAR => DiscardedCommentState::End,
+        _ => DiscardedCommentState::Comment,
+      },
+      DiscardedCommentState::EndBang => match c {
+        GT_CHAR => return Some(index + 1),
+        DASH_CHAR => DiscardedCommentState::EndDash,
+        _ => DiscardedCommentState::Comment,
+      },
     }
   }
   None
@@ -882,8 +912,7 @@ mod tests {
   }
 
   // A dropped comment ends where the full scan ends it, or the document resumes
-  // inside the comment. `discarded_comment_end` starts where the cap cut, which is
-  // the spec's comment state, so the reference is prefixed by one ordinary byte.
+  // inside the comment. Check every carried state by splitting each short input.
   #[test]
   fn the_discarded_comment_scan_matches_the_spec_state_machine() {
     const ALPHABET: [u8; 5] = *b"-!>x<";
@@ -896,13 +925,14 @@ mod tests {
           rest /= ALPHABET.len();
         }
         tail.push('Z');
-        let mut dashes = 0;
-        let reference = spec_comment_end(format!("x{tail}").as_bytes(), 0).map(|end| end - 1);
-        assert_eq!(
-          discarded_comment_end(&tail, &mut dashes),
-          reference,
-          "tail={tail:?}"
-        );
+        let reference = spec_comment_end(tail.as_bytes(), 0);
+        for split in 0..=tail.len() {
+          let mut state = DiscardedCommentState::new();
+          let first = discarded_comment_end(&tail[..split], &mut state);
+          let actual = first
+            .or_else(|| discarded_comment_end(&tail[split..], &mut state).map(|end| split + end));
+          assert_eq!(actual, reference, "tail={tail:?} split={split}");
+        }
       }
     }
   }

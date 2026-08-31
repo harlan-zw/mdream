@@ -277,6 +277,75 @@ fn dropping_a_token_keeps_the_surrounding_document() {
   }
 }
 
+#[test]
+fn an_oversized_complete_comment_reports_truncation() {
+  for html in ["<!-->x", "<!--->x", "<!--x-->x", "<!--x--!>x"] {
+    let result = html_to_markdown_result(html, options(3));
+    assert_eq!(result.markdown, "x", "html={html:?}");
+    assert!(result.truncated, "html={html:?}");
+
+    let exact = html_to_markdown_result(html, options(html.len() - 1));
+    assert_eq!(exact.markdown, "x", "html={html:?}");
+    assert!(!exact.truncated, "html={html:?}");
+  }
+}
+
+#[test]
+fn a_discarded_comment_preserves_its_start_state() {
+  for html in ["<!-->x", "<!--->x"] {
+    for split in 0..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(options(3));
+      let mut out = processor.process_chunk(&html[..split]);
+      out.push_str(&processor.process_chunk(&html[split..]));
+      out.push_str(&processor.finish());
+      assert_eq!(out, "x", "html={html:?} split={split}");
+      assert!(processor.truncated(), "html={html:?} split={split}");
+    }
+  }
+}
+
+#[test]
+fn a_partial_comment_opener_is_not_discarded_as_a_bogus_comment() {
+  let html = "<!--a>inside-->x";
+  for cap in 1..=3 {
+    for split in 0..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(options(cap));
+      let mut out = processor.process_chunk(&html[..split]);
+      out.push_str(&processor.process_chunk(&html[split..]));
+      out.push_str(&processor.finish());
+      assert_eq!(out, "x", "cap={cap} split={split}");
+      assert!(processor.truncated(), "cap={cap} split={split}");
+    }
+  }
+}
+
+#[test]
+fn an_oversized_complete_markup_declaration_reports_truncation() {
+  for html in ["<!x>x", "<!DOCTYPE html>x"] {
+    for cap in 1..=3 {
+      let result = html_to_markdown_result(html, options(cap));
+      assert_eq!(result.markdown, "x", "html={html:?} cap={cap}");
+      assert!(result.truncated, "html={html:?} cap={cap}");
+
+      for split in 0..=html.len() {
+        let mut processor = MarkdownStreamProcessor::new(options(cap));
+        let mut out = processor.process_chunk(&html[..split]);
+        out.push_str(&processor.process_chunk(&html[split..]));
+        out.push_str(&processor.finish());
+        assert_eq!(
+          out, result.markdown,
+          "html={html:?} cap={cap} split={split}"
+        );
+        assert_eq!(
+          processor.truncated(),
+          result.truncated,
+          "html={html:?} cap={cap} split={split}"
+        );
+      }
+    }
+  }
+}
+
 // Each kind of token is ended by its own scanner, and they disagree: a `>` inside
 // a quoted end-tag attribute closes a doctype but not an end tag, `--!!>` closes
 // nothing, and CDATA ends only at `]]>`. Dropping a token with the wrong scanner

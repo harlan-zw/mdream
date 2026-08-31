@@ -1,9 +1,9 @@
 use crate::consts::*;
 use crate::entities::{decode_html_entities, decode_html_entities_for_markdown};
 use crate::scan::{
-  DiscardedCloseTag, PendingTagScan, discarded_cdata_end, discarded_close_tag_end,
-  discarded_comment_end, discarded_gt, is_whitespace, process_comment_or_doctype,
-  process_tag_attributes, tag_is_complete,
+  DiscardedCloseTag, DiscardedCommentState, PendingTagScan, discarded_cdata_end,
+  discarded_close_tag_end, discarded_comment_end, discarded_gt, is_whitespace,
+  process_comment_or_doctype, process_tag_attributes, tag_is_complete,
 };
 use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selector_list};
 use crate::tags::get_tag_handler;
@@ -1249,6 +1249,9 @@ impl ConvertState {
         }
         let result = process_comment_or_doctype(chunk, i);
         if result.complete {
+          if max_node_bytes != 0 && result.new_position - i > max_node_bytes {
+            self.truncated = true;
+          }
           i = result.new_position;
         } else {
           carry = true;
@@ -1402,7 +1405,12 @@ impl ConvertState {
     // run is kept in `text_buffer` instead, so it is parsed once however many
     // chunks it spans.
     let consumed = if carry {
-      if max_node_bytes != 0 && chunk_length - run_start > max_node_bytes {
+      let carried = &chunk[run_start..];
+      // Keep an ambiguous markup-declaration opener until it can be classified.
+      // Both prefixes are fixed-size, so this retains at most eight bytes.
+      let partial_declaration = (carried.len() < "<!--".len() && "<!--".starts_with(carried))
+        || (carried.len() < "<![CDATA[".len() && "<![CDATA[".starts_with(carried));
+      if max_node_bytes != 0 && chunk_length - run_start > max_node_bytes && !partial_declaration {
         self.start_discard(chunk, run_start);
         chunk_length
       } else {
@@ -1431,9 +1439,9 @@ impl ConvertState {
     // in another. Picking the owning one here is what keeps a dropped token
     // ending where an uncapped parse ends it, so the document resumes in step.
     self.discard = if let Some(body) = rest.strip_prefix("<!--") {
-      let mut dashes = 0;
-      discarded_comment_end(body, &mut dashes);
-      Discard::Comment(dashes)
+      let mut state = DiscardedCommentState::new();
+      discarded_comment_end(body, &mut state);
+      Discard::Comment(state)
     } else if let Some(body) = rest.strip_prefix("<![CDATA[") {
       let mut brackets = 0;
       discarded_cdata_end(body, &mut brackets);
@@ -1941,8 +1949,8 @@ enum Discard {
   No,
   /// Quote-aware resume for the `>` ending a dropped start tag.
   Tag(PendingTagScan),
-  /// Trailing dash-run state for the `-->` or `--!>` ending a dropped comment.
-  Comment(u8),
+  /// Tokenizer state for the end of a dropped comment.
+  Comment(DiscardedCommentState),
   /// Name and quote state for the `>` ending a dropped end tag, which the
   /// end-tag tokenizer quotes differently from a start tag's.
   CloseTag(DiscardedCloseTag),
