@@ -87,6 +87,31 @@ fn stream(html: &str, chunk: usize, cap: usize) -> String {
   out
 }
 
+fn stream_parts(parts: &[&str], cap: usize) -> (String, bool) {
+  let mut p = MarkdownStreamProcessor::new(options(cap));
+  let mut out = String::new();
+  for part in parts {
+    out.push_str(&p.process_chunk(part));
+  }
+  out.push_str(&p.finish());
+  (out, p.truncated())
+}
+
+fn assert_capped_text(html: &str, cap: usize, expected: &str, truncated: bool) {
+  let result = html_to_markdown_result(html, options(cap));
+  assert_eq!(result.markdown, expected, "one-shot html={html:?}");
+  assert_eq!(result.truncated, truncated, "one-shot html={html:?}");
+
+  for split in (0..=html.len()).filter(|&split| html.is_char_boundary(split)) {
+    let (actual, actual_truncated) = stream_parts(&[&html[..split], &html[split..]], cap);
+    assert_eq!(actual, expected, "html={html:?} split={split}");
+    assert_eq!(
+      actual_truncated, truncated,
+      "truncation html={html:?} split={split}"
+    );
+  }
+}
+
 fn extracting(cap: usize, selectors: &[&str]) -> HTMLToMarkdownOptions {
   HTMLToMarkdownOptions {
     plugins: Some(PluginConfig {
@@ -173,6 +198,92 @@ fn the_cut_point_does_not_depend_on_chunking() {
   for chunk in [37, 512, 8192, 1024 * 1024] {
     assert_eq!(stream(&html, chunk, 4096), expected, "chunk={chunk}");
   }
+}
+
+#[test]
+fn a_text_cap_rejects_a_whole_utf8_scalar() {
+  for (html, expected) in [
+    ("<p>aaaéz</p>", "aaa"),
+    ("<p>aa€zz</p>", "aa"),
+    ("<p>a😀zzz</p>", "a"),
+  ] {
+    assert_capped_text(html, 4, expected, true);
+  }
+
+  assert_capped_text(
+    "<textarea>aaaaaaaaaaaaaaaéz</textarea>",
+    16,
+    "aaaaaaaaaaaaaaa",
+    true,
+  );
+}
+
+#[test]
+fn an_exact_utf8_prefix_does_not_report_truncation() {
+  for html in ["<p>aaé</p>", "<p>a€</p>", "<p>😀</p>"] {
+    let expected = &html[3..html.len() - 4];
+    assert_capped_text(html, 4, expected, false);
+  }
+}
+
+#[test]
+fn a_literal_lt_respects_the_text_cap() {
+  for (html, expected) in [("<p>aaaa<3z</p>", "aaaa"), ("<p>aaa<3z</p>", "aaa<")] {
+    assert_capped_text(html, 4, expected, true);
+  }
+  for html in [
+    "<textarea>aaaaaaaaaaaaaaaa<z</textarea>",
+    "<title>aaaaaaaaaaaaaaaa<z</title>",
+  ] {
+    assert_capped_text(html, 16, "aaaaaaaaaaaaaaaa", true);
+  }
+}
+
+#[test]
+fn a_rawtext_eof_residual_respects_the_text_cap() {
+  for html in ["<textarea>aaaaaaaaaaaaaaa</x", "<title>aaaaaaaaaaaaaaa</x"] {
+    assert_capped_text(html, 16, "aaaaaaaaaaaaaaa<", true);
+  }
+}
+
+#[test]
+fn text_exhaustion_ends_at_a_markup_boundary() {
+  assert_capped_text("<p>aaaéz</p><p>ok</p>", 4, "aaa\n\nok", true);
+  assert_capped_text("<p>aaaé<abcdefgh>ok</p>", 4, "aaa ok", true);
+  assert_eq!(
+    stream_parts(&["<p>aaa", "é<abc", "defgh", ">ok</p>"], 4),
+    ("aaa ok".to_string(), true)
+  );
+}
+
+#[test]
+fn a_fragmented_non_matching_rawtext_close_does_not_end_exhaustion() {
+  let html = "<textarea>aaaaaaaaaaaaaaaé</not-a-real-rawtext>ok</textarea>";
+  assert_capped_text(html, 16, "aaaaaaaaaaaaaaa", true);
+  assert_eq!(
+    stream_parts(
+      &[
+        "<textarea>aaaaaaaaaaaaaaa",
+        "é</not",
+        "-a-real-rawtext",
+        ">",
+        "ok</textarea>",
+      ],
+      16,
+    ),
+    ("aaaaaaaaaaaaaaa".to_string(), true)
+  );
+}
+
+#[test]
+fn a_fragmented_rawtext_candidate_consumes_the_text_cap() {
+  let html = "<textarea>aa</abcdefghijklmnop>z</textarea>";
+  let expected = "aa</abcdefghijkl";
+  assert_capped_text(html, 16, expected, true);
+  assert_eq!(
+    stream_parts(&["<textarea>aa</abcdefgh", "ijklmnop", ">z</textarea>"], 16,),
+    (expected.to_string(), true)
+  );
 }
 
 // Truncation drops content, never structure: the node still closes and later

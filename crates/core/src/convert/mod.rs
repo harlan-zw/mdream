@@ -414,6 +414,8 @@ pub struct ConvertState {
   last_char_was_whitespace: bool,
   text_buffer_contains_whitespace: bool,
   text_buffer_contains_non_whitespace: bool,
+  /// Once a scalar does not fit, the rest of this source text node is dropped.
+  text_node_exhausted: bool,
   /// Bytes in the pending text run that the batchable-ASCII path appended. When
   /// this equals the run's length the run holds nothing else, which is the only
   /// state in which the run may be emitted in pieces: any push from another path
@@ -631,6 +633,7 @@ impl ConvertState {
       last_char_was_whitespace: true,
       text_buffer_contains_whitespace: false,
       text_buffer_contains_non_whitespace: false,
+      text_node_exhausted: false,
       text_buffer_batchable_len: 0,
       text_buffer_has_inline_gfm_hazard: false,
       just_closed_tag: false,
@@ -821,7 +824,12 @@ impl ConvertState {
     // an extracted text node does.
     if !self.extraction_tracked.is_empty() {
       let cap = self.options.max_node_bytes;
-      let clamped = push_capped(&mut self.script_text_buffer, text, cap);
+      let clamped = push_capped_text_node(
+        &mut self.script_text_buffer,
+        text,
+        cap,
+        &mut self.text_node_exhausted,
+      );
       self.truncated |= clamped;
     }
     self.text_buffer_contains_non_whitespace = true;
@@ -830,12 +838,30 @@ impl ConvertState {
   }
 
   fn flush_script_text(&mut self) {
-    if self.script_text_buffer.is_empty() {
+    if self.script_text_buffer.is_empty() && !self.text_node_exhausted {
       return;
     }
     let mut script_text = std::mem::take(&mut self.script_text_buffer);
-    self.process_text_buffer(&mut script_text);
+    self.complete_text_node(&mut script_text);
     self.script_text_buffer = script_text;
+  }
+
+  #[inline]
+  fn complete_text_node(&mut self, text_buffer: &mut String) {
+    let exhausted = self.text_node_exhausted;
+    if !text_buffer.is_empty() {
+      self.process_text_buffer(text_buffer);
+      text_buffer.clear();
+    } else if exhausted {
+      self.text_buffer_contains_whitespace = false;
+      self.text_buffer_contains_non_whitespace = false;
+      self.text_buffer_batchable_len = 0;
+      self.text_buffer_has_inline_gfm_hazard = false;
+      self.has_encoded_html_entity = false;
+    }
+    if exhausted {
+      self.text_node_exhausted = false;
+    }
   }
 
   fn process_script_chunk(&mut self, chunk: &str, start: usize) -> ScriptChunk {
@@ -963,10 +989,14 @@ impl ConvertState {
 
       // Past the cap this node's remaining text is dropped, not buffered: skip to
       // the next tag without copying. Loses content, never structure.
-      if max_node_bytes != 0 && text_buffer.len() >= max_node_bytes && cc != LT_CHAR {
+      if max_node_bytes != 0
+        && cc != LT_CHAR
+        && (self.text_node_exhausted || text_buffer.len() >= max_node_bytes)
+      {
         while i < chunk_length && bytes[i] != LT_CHAR {
           i += 1;
         }
+        self.text_node_exhausted = true;
         self.truncated = true;
         continue;
       }
@@ -995,7 +1025,12 @@ impl ConvertState {
             break;
           }
           let before_len = text_buffer.len();
-          self.truncated |= push_capped(&mut text_buffer, &chunk[start..i], max_node_bytes);
+          self.truncated |= push_capped_text_node(
+            &mut text_buffer,
+            &chunk[start..i],
+            max_node_bytes,
+            &mut self.text_node_exhausted,
+          );
           self.text_buffer_batchable_len += text_buffer.len() - before_len;
           self.text_buffer_contains_non_whitespace = true;
           if had_space {
@@ -1044,7 +1079,12 @@ impl ConvertState {
           while i < chunk_length && bytes[i] != LT_CHAR {
             i += 1;
           }
-          self.truncated |= push_capped(&mut text_buffer, &chunk[start..i], max_node_bytes);
+          self.truncated |= push_capped_text_node(
+            &mut text_buffer,
+            &chunk[start..i],
+            max_node_bytes,
+            &mut self.text_node_exhausted,
+          );
           self.text_buffer_contains_non_whitespace = true;
           self.last_char_was_whitespace = false;
           self.just_closed_tag = false;
@@ -1080,20 +1120,29 @@ impl ConvertState {
           self.last_char_was_whitespace = true;
           self.text_buffer_contains_whitespace = true;
         } else {
-          self.text_buffer_contains_non_whitespace = true;
-          self.last_char_was_whitespace = false;
-          self.just_closed_tag = false;
-
           // Structural GFM escaping (|, [, ], > in table/link/blockquote
           // context) is applied at output time in escape_gfm_text, which also
           // covers characters produced by decoded entities that never pass
           // through this parse loop.
+          let before_len = text_buffer.len();
           if cc < 0x80 {
             text_buffer.push(cc as char);
           } else if let Some(ch) = chunk[i..].chars().next() {
-            text_buffer.push(ch);
-            i += ch.len_utf8();
-
+            let end = i + ch.len_utf8();
+            self.truncated |= push_capped_text_node(
+              &mut text_buffer,
+              &chunk[i..end],
+              max_node_bytes,
+              &mut self.text_node_exhausted,
+            );
+            i = end;
+          }
+          if text_buffer.len() != before_len {
+            self.text_buffer_contains_non_whitespace = true;
+            self.last_char_was_whitespace = false;
+            self.just_closed_tag = false;
+          }
+          if cc >= 0x80 {
             continue;
           }
         }
@@ -1123,20 +1172,16 @@ impl ConvertState {
             }
             peek_end += 1;
           }
-          if peek_end == chunk_length {
-            // Text before the `<` is already in `text_buffer`; carry only the
-            // truncated close tag or finalize re-feeds that text and doubles it.
+          let peek_name = &chunk[peek_start..peek_end];
+          if peek_end == chunk_length && can_complete_raw_end_tag(peek_name, raw_name) {
+            // Text before the `<` is already buffered; carry only the partial close.
             run_start = i;
             carry = true;
             break;
           }
-          let peek_name = &chunk[peek_start..peek_end];
           if raw_name.eq_ignore_ascii_case(peek_name) {
-            if !text_buffer.is_empty() {
-              self.process_text_buffer(&mut text_buffer);
-              text_buffer.clear();
-              run_start = i;
-            }
+            self.complete_text_node(&mut text_buffer);
+            run_start = i;
             let result = self.process_closing_tag(chunk, i);
             if result.complete {
               i = result.new_position;
@@ -1148,8 +1193,14 @@ impl ConvertState {
             continue;
           }
         }
-        text_buffer.push('<');
-        self.text_buffer_contains_non_whitespace = true;
+        let before_len = text_buffer.len();
+        self.truncated |= push_capped_text_node(
+          &mut text_buffer,
+          "<",
+          max_node_bytes,
+          &mut self.text_node_exhausted,
+        );
+        self.text_buffer_contains_non_whitespace |= text_buffer.len() != before_len;
         self.last_char_was_whitespace = false;
         self.just_closed_tag = false;
         i += 1;
@@ -1168,27 +1219,21 @@ impl ConvertState {
             }
             peek_end += 1;
           }
-          if peek_end == chunk_length {
-            // The name is cut off by the chunk end, so it cannot be compared
-            // yet. Carry the tag; treating '<' as text here would consume a
-            // close tag that a later chunk completes.
+          let peek_name = &chunk[peek_start..peek_end];
+          let current_tag_id = self.stack.last().and_then(|curr| curr.tag_id);
+          if peek_end == chunk_length
+            && current_tag_id
+              .is_some_and(|tag_id| can_complete_raw_end_tag(peek_name, TAG_NAMES[tag_id as usize]))
+          {
             run_start = i;
             carry = true;
             break;
           }
-          let peek_name = &chunk[peek_start..peek_end];
           let peek_tag_id = crate::consts::get_tag_id_ci_bytes(peek_name.as_bytes());
-          if self
-            .stack
-            .last()
-            .is_some_and(|curr| curr.tag_id == peek_tag_id)
-          {
+          if current_tag_id.is_some_and(|tag_id| Some(tag_id) == peek_tag_id) {
             // Matching closing tag: fall through to normal closing tag processing
-            if !text_buffer.is_empty() {
-              self.process_text_buffer(&mut text_buffer);
-              text_buffer.clear();
-              run_start = i;
-            }
+            self.complete_text_node(&mut text_buffer);
+            run_start = i;
             let result = self.process_closing_tag(chunk, i);
             if result.complete {
               i = result.new_position;
@@ -1201,8 +1246,14 @@ impl ConvertState {
           }
         }
         // Not a matching closing tag: treat '<' as literal text
-        text_buffer.push('<');
-        self.text_buffer_contains_non_whitespace = true;
+        let before_len = text_buffer.len();
+        self.truncated |= push_capped_text_node(
+          &mut text_buffer,
+          "<",
+          max_node_bytes,
+          &mut self.text_node_exhausted,
+        );
+        self.text_buffer_contains_non_whitespace |= text_buffer.len() != before_len;
         self.last_char_was_whitespace = false;
         self.just_closed_tag = false;
         i += 1;
@@ -1222,11 +1273,8 @@ impl ConvertState {
         // doctype cases.
         if let Some(after_open) = chunk[i + 2..].strip_prefix("[CDATA[") {
           if let Some(rel) = after_open.find("]]>") {
-            if !text_buffer.is_empty() {
-              self.process_text_buffer(&mut text_buffer);
-              text_buffer.clear();
-              run_start = i;
-            }
+            self.complete_text_node(&mut text_buffer);
+            run_start = i;
             self.process_cdata_section(&after_open[..rel]);
             i += "<![CDATA[".len() + rel + 3;
             continue;
@@ -1242,11 +1290,8 @@ impl ConvertState {
           carry = true;
           break;
         }
-        if !text_buffer.is_empty() {
-          self.process_text_buffer(&mut text_buffer);
-          text_buffer.clear();
-          run_start = i;
-        }
+        self.complete_text_node(&mut text_buffer);
+        run_start = i;
         let result = process_comment_or_doctype(chunk, i);
         if result.complete {
           i = result.new_position;
@@ -1255,11 +1300,8 @@ impl ConvertState {
           break;
         }
       } else if next == SLASH_CHAR {
-        if !text_buffer.is_empty() {
-          self.process_text_buffer(&mut text_buffer);
-          text_buffer.clear();
-          run_start = i;
-        }
+        self.complete_text_node(&mut text_buffer);
+        run_start = i;
         let result = self.process_closing_tag(chunk, i);
         if result.complete {
           i = result.new_position;
@@ -1270,9 +1312,17 @@ impl ConvertState {
       } else if !next.is_ascii_alphabetic() && next != QUESTION_CHAR {
         // Tag open state starts a tag only on an ASCII letter; `?` opens a bogus
         // comment. Anything else is text, so `I <3 Rust` is not a tag named `3`.
-        text_buffer.push(LT_CHAR as char);
-        self.text_buffer_contains_non_whitespace = true;
-        self.text_buffer_has_inline_gfm_hazard = true;
+        let before_len = text_buffer.len();
+        self.truncated |= push_capped_text_node(
+          &mut text_buffer,
+          "<",
+          max_node_bytes,
+          &mut self.text_node_exhausted,
+        );
+        if text_buffer.len() != before_len {
+          self.text_buffer_contains_non_whitespace = true;
+          self.text_buffer_has_inline_gfm_hazard = true;
+        }
         self.last_char_was_whitespace = false;
         self.just_closed_tag = false;
         i += 1;
@@ -1324,11 +1374,8 @@ impl ConvertState {
         };
         i2 = tag_name_end;
 
-        if !text_buffer.is_empty() {
-          self.process_text_buffer(&mut text_buffer);
-          text_buffer.clear();
-          run_start = i;
-        }
+        self.complete_text_node(&mut text_buffer);
+        run_start = i;
 
         // `process_opening_tag` throws away everything it parsed when the tag
         // is incomplete, so resume the `>` search instead of re-parsing it.
@@ -1403,6 +1450,7 @@ impl ConvertState {
     // chunks it spans.
     let consumed = if carry {
       if max_node_bytes != 0 && chunk_length - run_start > max_node_bytes {
+        self.complete_text_node(&mut text_buffer);
         self.start_discard(chunk, run_start);
         chunk_length
       } else {
@@ -1564,28 +1612,45 @@ impl ConvertState {
         && self.in_non_nesting
         && !self.rawtext_end_tag_pending;
       if rawtext_text {
-        self.parse_text_buffer.push_str(leftover);
-        self.text_buffer_contains_non_whitespace = true;
+        let before_len = self.parse_text_buffer.len();
+        self.truncated |= push_capped_text_node(
+          &mut self.parse_text_buffer,
+          leftover,
+          self.options.max_node_bytes,
+          &mut self.text_node_exhausted,
+        );
+        let kept = &leftover[..self.parse_text_buffer.len() - before_len];
+        self.text_buffer_contains_non_whitespace |= !kept.is_empty();
         // The ordinary rawtext path records these flags byte by byte. Carrying
         // the residual must preserve them so RCDATA entities still decode and
         // generated Markdown escapes remain safe.
-        self.text_buffer_has_inline_gfm_hazard |= leftover.as_bytes()[1..]
+        self.text_buffer_has_inline_gfm_hazard |= kept
+          .as_bytes()
+          .get(1..)
+          .unwrap_or_default()
           .iter()
           .any(|&c| GFM_BYTE_FLAGS[c as usize] & GFM_HAZARD_BIT != 0);
-        if self.depth_map[TAG_STYLE as usize] == 0 && leftover.as_bytes().contains(&AMPERSAND_CHAR)
-        {
+        if self.depth_map[TAG_STYLE as usize] == 0 && kept.as_bytes().contains(&AMPERSAND_CHAR) {
           self.has_encoded_html_entity = true;
         }
-        self.last_char_was_whitespace = false;
+        if !kept.is_empty() {
+          self.last_char_was_whitespace = false;
+        }
       }
-      if !self.parse_text_buffer.is_empty() {
+      if !self.parse_text_buffer.is_empty() || self.text_node_exhausted {
         let mut buf = std::mem::take(&mut self.parse_text_buffer);
-        self.process_text_buffer(&mut buf);
+        self.complete_text_node(&mut buf);
         self.parse_text_buffer = buf;
       }
       if !rawtext_text && !leftover.is_empty() && leftover.as_bytes()[0] != LT_CHAR {
-        let mut buf = leftover.to_string();
-        self.process_text_buffer(&mut buf);
+        let mut buf = String::new();
+        self.truncated |= push_capped_text_node(
+          &mut buf,
+          leftover,
+          self.options.max_node_bytes,
+          &mut self.text_node_exhausted,
+        );
+        self.complete_text_node(&mut buf);
       }
     }
     while !self.stack.is_empty() {
@@ -1983,4 +2048,83 @@ fn push_capped(buffer: &mut String, text: &str, cap: usize) -> bool {
   let kept = clamp_to_char_boundary(text, cap.saturating_sub(buffer.len()));
   buffer.push_str(kept);
   kept.len() != text.len()
+}
+
+#[inline]
+fn push_capped_text_node(
+  buffer: &mut String,
+  text: &str,
+  cap: usize,
+  exhausted: &mut bool,
+) -> bool {
+  if cap == 0 {
+    buffer.push_str(text);
+    return false;
+  }
+  if text.is_empty() {
+    return false;
+  }
+  if *exhausted {
+    return true;
+  }
+  let truncated = push_capped(buffer, text, cap);
+  *exhausted |= truncated;
+  truncated
+}
+
+#[inline]
+fn can_complete_raw_end_tag(candidate: &str, expected: &str) -> bool {
+  expected
+    .get(..candidate.len())
+    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(candidate))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::MarkdownStreamProcessor;
+  use crate::types::{ExtractionConfig, PluginConfig};
+
+  #[test]
+  fn extracted_script_does_not_backfill_rejected_utf8_slack() {
+    let options = HTMLToMarkdownOptions {
+      max_node_bytes: 8,
+      plugins: Some(PluginConfig {
+        extraction: Some(ExtractionConfig::new(&["script"])),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let mut processor = MarkdownStreamProcessor::new(options);
+    for part in ["<script>aaaaaaa", "é", "z</script>"] {
+      processor.process_chunk(part);
+    }
+    processor.finish();
+
+    assert!(processor.truncated());
+    assert_eq!(
+      processor.state.extraction_results[0].text_content,
+      "aaaaaaa"
+    );
+  }
+
+  #[test]
+  fn rejected_utf8_does_not_mark_text_non_whitespace() {
+    fn check(parts: &[&str]) {
+      let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+        max_node_bytes: 4,
+        ..Default::default()
+      });
+      for part in parts {
+        processor.process_chunk(part);
+      }
+
+      assert!(processor.truncated());
+      assert!(!processor.state.text_buffer_contains_non_whitespace);
+      assert!(processor.state.last_char_was_whitespace);
+    }
+
+    check(&["<p><b></b> 😀"]);
+    check(&["<p><b></b> ", "😀"]);
+  }
 }
