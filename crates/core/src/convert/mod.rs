@@ -1560,12 +1560,30 @@ impl ConvertState {
       let mut read = 0usize;
       let mut write = 0usize;
 
+      // A nested `<a>` across a block boundary reuses the outer anchor's
+      // link_bracket_pos instead of getting its own `[`, so two
+      // fragment_links entries can point at the same bracket. Rewriting
+      // either one then risks corrupting the other's text. Skip any bracket
+      // used more than once.
+      let mut bracket_starts: Vec<usize> = self.fragment_links.iter().map(|&(b, _)| b).collect();
+      bracket_starts.sort_unstable();
+      let has_aliased_bracket = |bracket_start: usize| {
+        let Ok(idx) = bracket_starts.binary_search(&bracket_start) else {
+          return false;
+        };
+        (idx > 0 && bracket_starts[idx - 1] == bracket_start)
+          || (idx + 1 < bracket_starts.len() && bracket_starts[idx + 1] == bracket_start)
+      };
+
       for &(bracket_start, link_end) in &self.fragment_links {
         let adj_start = bracket_start.saturating_sub(trim_offset);
         let adj_end = link_end.saturating_sub(trim_offset);
         // `read > adj_start` would mean overlapping links (anchors can't
         // nest); skipping keeps the compaction from reading overwritten bytes.
         if adj_end > buf_len || adj_start >= adj_end || read > adj_start {
+          continue;
+        }
+        if has_aliased_bracket(bracket_start) {
           continue;
         }
 
