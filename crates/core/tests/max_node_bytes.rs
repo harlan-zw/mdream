@@ -18,7 +18,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use mdream::types::{ExtractionConfig, HTMLToMarkdownOptions, PluginConfig};
-use mdream::{MarkdownStreamProcessor, html_to_markdown_result};
+use mdream::{MarkdownStreamProcessor, TagOverrideConfig, html_to_markdown_result};
 
 // Peak-allocation tracker, per-thread so parallel tests do not pollute each other.
 
@@ -74,6 +74,19 @@ fn options(cap: usize) -> HTMLToMarkdownOptions {
     opts
   } else {
     opts.with_max_node_bytes(cap)
+  }
+}
+
+fn surfaced_cdata_options(cap: usize) -> HTMLToMarkdownOptions {
+  HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "#cdata-section".to_string(),
+        TagOverrideConfig::default(),
+      )]),
+      ..Default::default()
+    }),
+    ..options(cap)
   }
 }
 
@@ -447,6 +460,80 @@ fn a_dropped_ignored_token_leaves_no_trace() {
     64,
     "ab",
     false,
+  );
+}
+
+#[test]
+fn a_dropped_comment_keeps_its_abrupt_end_state() {
+  assert_capped_text("<!-->z", 1, "z", false);
+  assert_capped_text("<!--->z", 1, "z", false);
+}
+
+#[test]
+fn an_over_cap_partial_declaration_at_eof_reports_truncation() {
+  assert_capped_text("<!", 1, "", true);
+}
+
+#[test]
+fn an_oversized_surfaced_cdata_is_dropped_at_every_chunk_boundary() {
+  let html = format!("b<![CDATA[{}>inside]]>a", repeat_to("x", 200));
+
+  for cap in [1, 8, 9, 64] {
+    let expected = html_to_markdown_result(&html, options(cap));
+    assert!(!expected.truncated, "ignored CDATA cap={cap}");
+
+    let options = surfaced_cdata_options(cap);
+    let one_shot = html_to_markdown_result(&html, options.clone());
+    assert_eq!(one_shot.markdown, expected.markdown, "one-shot cap={cap}");
+    assert!(one_shot.truncated, "one-shot cap={cap}");
+
+    for split in 0..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(options.clone());
+      let mut actual = processor.process_chunk(&html[..split]);
+      actual.push_str(&processor.process_chunk(&html[split..]));
+      actual.push_str(&processor.finish());
+
+      assert_eq!(actual, expected.markdown, "cap={cap} split={split}");
+      assert!(processor.truncated(), "cap={cap} split={split}");
+    }
+  }
+}
+
+#[test]
+fn surfaced_cdata_uses_its_exact_token_length_for_the_cap() {
+  let html = "<![CDATA[x]]>";
+  let stream_bytes = |options| {
+    let mut processor = MarkdownStreamProcessor::new(options);
+    let mut output = String::new();
+    for byte in html.as_bytes().chunks(1) {
+      output.push_str(&processor.process_chunk(std::str::from_utf8(byte).unwrap()));
+    }
+    output.push_str(&processor.finish());
+    (output, processor.truncated())
+  };
+
+  for cap in [html.len() - 1, html.len()] {
+    assert_eq!(
+      stream_bytes(options(cap)),
+      (String::new(), false),
+      "ignored CDATA cap={cap}"
+    );
+  }
+
+  assert_eq!(
+    html_to_markdown_result(html, surfaced_cdata_options(html.len())).markdown,
+    "x"
+  );
+  let dropped = html_to_markdown_result(html, surfaced_cdata_options(html.len() - 1));
+  assert_eq!(dropped.markdown, "");
+  assert!(dropped.truncated);
+  assert_eq!(
+    stream_bytes(surfaced_cdata_options(html.len())),
+    ("x".to_string(), false)
+  );
+  assert_eq!(
+    stream_bytes(surfaced_cdata_options(html.len() - 1)),
+    (String::new(), true)
   );
 }
 

@@ -1273,10 +1273,17 @@ impl ConvertState {
         // doctype cases.
         if let Some(after_open) = chunk[i + 2..].strip_prefix("[CDATA[") {
           if let Some(rel) = after_open.find("]]>") {
+            let token_len = "<![CDATA[".len() + rel + 3;
             self.complete_text_node(&mut text_buffer);
             run_start = i;
-            self.process_cdata_section(&after_open[..rel]);
-            i += "<![CDATA[".len() + rel + 3;
+            if max_node_bytes != 0 && token_len > max_node_bytes {
+              if self.has_surfaced_cdata() {
+                self.truncated = true;
+              }
+            } else {
+              self.process_cdata_section(&after_open[..rel]);
+            }
+            i += token_len;
             continue;
           }
           // Unterminated CDATA: re-parse from '<' in the next chunk.
@@ -1449,7 +1456,13 @@ impl ConvertState {
     // run is kept in `text_buffer` instead, so it is parsed once however many
     // chunks it spans.
     let consumed = if carry {
-      if max_node_bytes != 0 && chunk_length - run_start > max_node_bytes {
+      let tail = &chunk[run_start..];
+      let over_cap = max_node_bytes != 0 && tail.len() > max_node_bytes;
+      let needs_declaration_state = over_cap
+        && ((tail.len() < b"<!-->".len() && b"<!-->".starts_with(tail.as_bytes()))
+          || (tail.len() < b"<!--->".len() && b"<!--->".starts_with(tail.as_bytes()))
+          || (tail.len() < b"<![CDATA[".len() && b"<![CDATA[".starts_with(tail.as_bytes())));
+      if over_cap && !needs_declaration_state {
         self.complete_text_node(&mut text_buffer);
         self.start_discard(chunk, run_start);
         chunk_length
@@ -1645,7 +1658,9 @@ impl ConvertState {
     // ends such a token at EOF with its own truncation report, so a dropped
     // one that found its end earlier stays unflagged and this is the only
     // place the abandoned ones are reported.
-    if !matches!(self.discard, Discard::No) {
+    if !matches!(self.discard, Discard::No)
+      || (self.options.max_node_bytes != 0 && leftover.len() > self.options.max_node_bytes)
+    {
       self.truncated = true;
     }
     let in_script = self
