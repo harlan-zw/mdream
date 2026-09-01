@@ -1,58 +1,22 @@
+import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 import v8 from 'node:v8'
 
-if (typeof globalThis.gc !== 'function')
-  throw new TypeError('Run with node --expose-gc so timing starts from equal heap states.')
-
-const newSpace = v8.getHeapSpaceStatistics().find(space => space.space_name === 'new_space')
-if (!newSpace || newSpace.space_size < 200 * 1024 * 1024)
-  throw new TypeError('Set both semi-space sizes to 256 MiB so collection stays outside timed work.')
-
-const args = process.argv.slice(2)
 function argValue(name) {
-  const index = args.indexOf(name)
-  if (index === -1 || !args[index + 1])
+  const index = process.argv.indexOf(name)
+  if (index === -1 || !process.argv[index + 1])
     throw new TypeError(`Missing required argument ${name}`)
-  return args[index + 1]
+  return process.argv[index + 1]
 }
 
-const baseDist = resolve(argValue('--base-dist'))
-const prDist = resolve(argValue('--pr-dist'))
-const baseOut = resolve(argValue('--base-out'))
-const prOut = resolve(argValue('--pr-out'))
-const html = readFileSync(new URL('./bundle/wiki.html', import.meta.url), 'utf8')
-const encoder = new TextEncoder()
-const chunks = splitAfterAnchors(html).map(chunk => encoder.encode(chunk))
-
-function splitAfterAnchors(source) {
-  const chunks = []
-  let start = 0
-  for (const match of source.matchAll(/<\/a\s*>/gi)) {
-    const end = match.index + match[0].length
-    chunks.push(source.slice(start, end))
-    start = end
-  }
-  if (start < source.length)
-    chunks.push(source.slice(start))
-  return chunks
-}
-
-async function loadRust(distDir, instanceName) {
-  const wasmBytes = readFileSync(resolve(distDir, 'rust/mdream_edge_bg.wasm'))
-  const glueUrl = pathToFileURL(resolve(distDir, 'rust/mdream_edge.js'))
-  glueUrl.searchParams.set('instance', instanceName)
-  const glue = await import(glueUrl.href)
-  await glue.default({ module_or_path: wasmBytes })
-  return glue
-}
-
-function drainByteChunks(glue) {
+export function drainByteChunks(glue, chunks) {
   const stream = new glue.MarkdownStream(undefined)
   const acceptsBytes = typeof stream.processChunkBytes === 'function'
   const decoder = acceptsBytes ? null : new TextDecoder()
+  const hash = createHash('sha256')
   let outputLength = 0
   try {
     for (const chunk of chunks) {
@@ -60,18 +24,33 @@ function drainByteChunks(glue) {
         ? stream.processChunkBytes(chunk)
         : stream.processChunk(decoder.decode(chunk, { stream: true }))
       outputLength += output.length
+      hash.update(output)
     }
     if (decoder) {
       const tail = decoder.decode()
-      if (tail)
-        outputLength += stream.processChunk(tail).length
+      if (tail) {
+        const output = stream.processChunk(tail)
+        outputLength += output.length
+        hash.update(output)
+      }
     }
-    outputLength += stream.finish().length
-    return outputLength
+    const output = stream.finish()
+    outputLength += output.length
+    hash.update(output)
+    return { length: outputLength, digest: hash.digest() }
   }
   finally {
     stream.free()
   }
+}
+
+export function assertPairedOutputEquivalence(baseFn, prFn) {
+  const base = baseFn()
+  const pr = prFn()
+  if (base.length !== pr.length)
+    throw new TypeError('Base and PR produced different output lengths for the paired fixture.')
+  if (!base.digest.equals(pr.digest))
+    throw new TypeError('Base and PR produced different markdown output for the paired fixture.')
 }
 
 function forceGC() {
@@ -145,13 +124,48 @@ function perfRun(samples, comparisons) {
   }
 }
 
+function splitAfterAnchors(source) {
+  const chunks = []
+  let start = 0
+  for (const match of source.matchAll(/<\/a\s*>/gi)) {
+    const end = match.index + match[0].length
+    chunks.push(source.slice(start, end))
+    start = end
+  }
+  if (start < source.length)
+    chunks.push(source.slice(start))
+  return chunks
+}
+
+async function loadRust(distDir, instanceName) {
+  const wasmBytes = readFileSync(resolve(distDir, 'rust/mdream_edge_bg.wasm'))
+  const glueUrl = pathToFileURL(resolve(distDir, 'rust/mdream_edge.js'))
+  glueUrl.searchParams.set('instance', instanceName)
+  const glue = await import(glueUrl.href)
+  await glue.default({ module_or_path: wasmBytes })
+  return glue
+}
+
 async function main() {
+  if (typeof globalThis.gc !== 'function')
+    throw new TypeError('Run with node --expose-gc so timing starts from equal heap states.')
+  const newSpace = v8.getHeapSpaceStatistics().find(space => space.space_name === 'new_space')
+  if (!newSpace || newSpace.space_size < 200 * 1024 * 1024)
+    throw new TypeError('Set both semi-space sizes to 256 MiB so collection stays outside timed work.')
+
+  const baseDist = resolve(argValue('--base-dist'))
+  const prDist = resolve(argValue('--pr-dist'))
+  const baseOut = resolve(argValue('--base-out'))
+  const prOut = resolve(argValue('--pr-out'))
+  const html = readFileSync(new URL('./bundle/wiki.html', import.meta.url), 'utf8')
+  const encoder = new TextEncoder()
+  const chunks = splitAfterAnchors(html).map(chunk => encoder.encode(chunk))
+
   const baseGlue = await loadRust(baseDist, 'paired-base')
   const prGlue = await loadRust(prDist, 'paired-pr')
-  const baseFn = () => drainByteChunks(baseGlue)
-  const prFn = () => drainByteChunks(prGlue)
-  if (baseFn() !== prFn())
-    throw new TypeError('Base and PR produced different output lengths for the paired fixture.')
+  const baseFn = () => drainByteChunks(baseGlue, chunks)
+  const prFn = () => drainByteChunks(prGlue, chunks)
+  assertPairedOutputEquivalence(baseFn, prFn)
 
   const paired = pairedBenches(baseFn, prFn)
   const comparisons = {
@@ -162,4 +176,5 @@ async function main() {
   writeFileSync(prOut, `${JSON.stringify(perfRun(paired.pr, comparisons))}\n`)
 }
 
-main()
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  main()
