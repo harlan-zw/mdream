@@ -141,6 +141,10 @@ struct CodeFenceState {
 struct LinkOutputState {
   bracket_pos: usize,
   skipped: bool,
+  /// A link `begin_link` opened and its `end_link` has not run yet. The default
+  /// (and a popped-when-empty result) is `false`, so a closed link can never be
+  /// mistaken for an enclosing one when the next link opens.
+  open: bool,
 }
 
 struct FragmentLink {
@@ -1763,15 +1767,17 @@ impl ConvertState {
     if let Some(frame) = self.blockquotes.first() {
       stable_end = stable_end.min(hold_before(&self.buffer, frame.content_start));
     }
-    // An open `<a>`'s close can rewrite the buffer back to `link_bracket_pos`
+    // An open `<a>`'s close can rewrite the buffer back to its `bracket_pos`
     // (emptyLinkText drop, selfLinkHeadings, redundantLinks, GFM autolink). Hold the
-    // yield boundary there so a link that turns out empty never leaks a stray `[`.
-    // As with inline markers, the spaces just before the `[` belong to the
-    // preceding text: an empty-link drop followed by a block close trims them,
-    // so hold them back too or a yielded space would be silently removed.
+    // yield boundary at the earliest such bracket over every open link, not just
+    // the innermost: an enclosing link's `[` sits before the inner one, and its
+    // clean drop would retract bytes already yielded. As with inline markers,
+    // the spaces just before the `[` belong to the preceding text: an empty-link
+    // drop followed by a block close trims them, so hold them back too or a
+    // yielded space would be silently removed.
     // Mirrors the same guard in `drain_streamed_prefix`.
     if self.depth_map[TAG_A as usize] > 0 {
-      stable_end = stable_end.min(hold_before(&self.buffer, self.link.bracket_pos));
+      stable_end = stable_end.min(hold_before(&self.buffer, self.open_link_bracket_floor()));
     }
     // A marker still alone on its line has its separating newline inserted at
     // the line start when the item resolves, so the line stays mutable.
@@ -1832,6 +1838,22 @@ impl ConvertState {
     }
   }
 
+  /// Earliest `[` any open `<a>` may still rewrite back to: the innermost
+  /// link's own bracket or an enclosing one's, whichever comes first in the
+  /// buffer. A link's close (empty-link drop, self-link headings, redundant
+  /// links, GFM autolink) truncates from that link's bracket, so a chunk
+  /// boundary must never yield or free past the earliest open one. `parent_links`
+  /// only holds live links (`begin_link` skips closed states), and nesting order
+  /// makes their positions increase toward the innermost.
+  #[inline]
+  fn open_link_bracket_floor(&self) -> usize {
+    let mut bracket_pos = self.link.bracket_pos;
+    for parent in &self.parent_links {
+      bracket_pos = bracket_pos.min(parent.bracket_pos);
+    }
+    bracket_pos
+  }
+
   /// Free already-yielded output so streaming memory stays O(window), not
   /// O(document). Skipped when a whole-document feature (fragment cleaning,
   /// frontmatter, extraction) still needs the full buffer.
@@ -1874,7 +1896,10 @@ impl ConvertState {
     // those two bytes; otherwise a dropped element leaks an extra newline in
     // streaming.
     if self.depth_map[TAG_A as usize] > 0 {
-      drain_end = drain_end.min(keep_two_before(&self.buffer, self.link.bracket_pos));
+      drain_end = drain_end.min(keep_two_before(
+        &self.buffer,
+        self.open_link_bracket_floor(),
+      ));
     }
     if let Some(&(_, output_start, _)) = self.open_markers.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, output_start));

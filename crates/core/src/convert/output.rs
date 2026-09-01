@@ -110,10 +110,16 @@ pub(super) fn parse_bounded_u32(value: &str, max: u32) -> Option<u32> {
 
 impl ConvertState {
   fn begin_link(&mut self, bracket_pos: usize, skipped: bool) {
-    self.parent_links.push(self.link);
+    // `self.link` describes a live enclosing `<a>` only when `open` is set; an
+    // implied close (a nested `<a>` start) resets it to the default, and pushing
+    // that phantom would poison the bracket floor the streaming guards read.
+    if self.link.open {
+      self.parent_links.push(self.link);
+    }
     self.link = LinkOutputState {
       bracket_pos,
       skipped,
+      open: true,
     };
   }
 

@@ -170,6 +170,9 @@ mod drain_equiv {
     r#"<p>Visit <a href="https://x.io">https://x.io</a> today.</p>"#,
     r##"<h2><a href="#section">Section</a></h2><p>body</p>"##,
     r#"<p>link <a href="https://example.com">https://example.com</a> end</p>"#,
+    // A block between the anchors keeps both open at once, so the link hold
+    // must cover the outer bracket too, not just the innermost one.
+    r##"<h2><a href="#x">pre<div><a href="/b">y</a></a></div></h2>"##,
     // Nested deep enough that the continuation indent alone outgrows the
     // retained tail: the cut then lands inside the indent the block separation
     // reads, and the paragraph break collapses to a space.
