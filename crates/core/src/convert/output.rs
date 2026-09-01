@@ -1029,8 +1029,10 @@ impl ConvertState {
         output = self.get_exit_output(node, cell_span);
       }
     }
-    let closing_code_span = if !has_override
-      && tag_id == Some(TAG_CODE)
+    // Pop for every inline <code> exit that could have pushed: the enter push
+    // ignores overrides, so an exit-only override that skipped the pop leaked
+    // the span, whose exhausted flag then capped the rest of the document.
+    let closing_code_span = if tag_id == Some(TAG_CODE)
       && self.depth_map[TAG_PRE as usize] == 0
       && !self.in_raw_html_block()
     {
@@ -1318,13 +1320,17 @@ impl ConvertState {
     }
 
     if let Some(span) = closing_code_span {
-      if span.opener_emitted && span.exhausted && self.buffer.len() == span.content_start {
-        self.buffer.truncate(span.output_start);
-        output = None;
-      } else if span.opener_emitted {
-        output = Some(Cow::Owned(self.finalize_code_span(&span)));
-      } else {
-        output = None;
+      // An explicit exit override replaces the default closing delimiter, but
+      // the span state is still popped and discarded above.
+      if !has_override {
+        if span.opener_emitted && span.exhausted && self.buffer.len() == span.content_start {
+          self.buffer.truncate(span.output_start);
+          output = None;
+        } else if span.opener_emitted {
+          output = Some(Cow::Owned(self.finalize_code_span(&span)));
+        } else {
+          output = None;
+        }
       }
     }
     if !has_override

@@ -494,6 +494,32 @@ fn override_output_consumes_the_inline_code_span_cap() {
   );
 }
 
+// An exit-only override still pushes the span on enter, so skipping the pop on
+// exit leaked the span: its exhausted flag then capped every byte after the
+// first inline code element, and streaming held its output at the leaked span.
+#[test]
+fn an_exit_only_override_still_pops_the_inline_code_span() {
+  let opts = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "code".to_string(),
+        TagOverrideConfig {
+          exit: Some("X".to_string()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..options(8)
+  };
+  assert_capped_inline_code_with_options(
+    "<code>abcdefgh</code><p>ij</p><p>kl</p>",
+    opts,
+    "`abcdefghX\n\nij\n\nkl",
+    false,
+  );
+}
+
 #[test]
 fn frontmatter_output_cannot_escape_an_inline_code_span_cap() {
   let opts = HTMLToMarkdownOptions {
