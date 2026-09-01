@@ -158,7 +158,9 @@ pub(crate) fn discarded_comment_end(chunk: &str, dashes: &mut u8) -> Option<usiz
 /// so both bits have to survive a chunk boundary.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct DiscardedCloseTag {
-  name_ended: bool,
+  /// The tag name has ended within the bytes scanned so far, so a dropped end
+  /// tag's match can be resolved against the open elements.
+  pub(crate) name_ended: bool,
   quote: u8,
 }
 

@@ -410,6 +410,46 @@ fn a_dropped_token_ends_where_an_uncapped_scan_ends_it() {
   }
 }
 
+// A close tag dropped past the cap is an ignored token to an uncapped parse: no
+// truncation flag, and no separator between the text nodes on either side.
+#[test]
+fn a_dropped_close_tag_is_an_ignored_token() {
+  let html = format!("<p>ab{{}}</{}>cd</p>", "s".repeat(1100));
+  assert_capped_text(&html, 1024, "ab{}cd", false);
+}
+
+// A matching end tag dropped past the cap still closes its element, exactly
+// where the uncapped parse closes it.
+#[test]
+fn a_dropped_matching_close_tag_still_closes_its_element() {
+  let html = format!("<p>ab</p {}>cd</p>", repeat_to("x", 200));
+  assert_capped_text(&html, 64, "ab\n\ncd", false);
+}
+
+// Comments, CDATA and doctypes are ignored tokens to an uncapped parse: a
+// dropped one changes no text state and reports no truncation, at any chunking.
+#[test]
+fn a_dropped_ignored_token_leaves_no_trace() {
+  assert_capped_text(
+    &format!("<p>ab<!--{}-->cd</p>", repeat_to("x", 200)),
+    64,
+    "ab cd",
+    false,
+  );
+  assert_capped_text(
+    &format!("<p>ab<![CDATA[{}]]>cd</p>", repeat_to("x", 200)),
+    64,
+    "ab cd",
+    false,
+  );
+  assert_capped_text(
+    &format!("<!DOCTYPE {}><p>ab</p>", repeat_to("x", 200)),
+    64,
+    "ab",
+    false,
+  );
+}
+
 // As with text, dropping must cut at a content-determined point.
 #[test]
 fn the_discard_does_not_depend_on_chunking() {

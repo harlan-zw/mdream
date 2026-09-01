@@ -1466,11 +1466,17 @@ impl ConvertState {
   /// Drop a token that outgrew the cap instead of carrying it. The element is
   /// lost, but scanning its bytes here leaves the quote/dash state that finds its
   /// end, so the raw input buffer stops growing.
+  ///
+  /// Semantics stay aligned with an uncapped parse, which processes each of
+  /// these tokens whole with no length check: an end tag closes its element or
+  /// is an ignored token, a comment, doctype and unsurfaced CDATA are ignored,
+  /// and none of that reports truncation. Only a start tag (checked at its `>`
+  /// on completion) and surfaced CDATA (emitted, so dropping it loses output)
+  /// flag here; a dropped token abandoned at EOF is flagged by `finalize`.
   #[cold]
   #[inline(never)]
   fn start_discard(&mut self, chunk: &str, run_start: usize) {
     self.pending_tag = None;
-    self.truncated = true;
     let rest = &chunk[run_start..];
     // Seed the state by running the scanner that owns this kind of token over the
     // bytes already read, so the resume continues that one scan. The scanners
@@ -1485,18 +1491,57 @@ impl ConvertState {
     } else if let Some(body) = rest.strip_prefix("<![CDATA[") {
       let mut brackets = 0;
       discarded_cdata_end(body, &mut brackets);
+      if self.has_surfaced_cdata() {
+        self.truncated = true;
+      }
       Discard::Cdata(brackets)
     } else if rest.starts_with("<!") {
       Discard::Doctype
     } else if let Some(body) = rest.strip_prefix("</") {
       let mut state = DiscardedCloseTag::default();
       discarded_close_tag_end(body, &mut state);
+      // One-shot runs every complete end tag through `process_closing_tag`
+      // whatever its length. Apply the same state moves here: a name that
+      // ended in the bytes read re-runs that match on a synthetic complete
+      // token, closing its element or taking the ignored-token path; a name
+      // still open is longer than any open element's name (an over-cap start
+      // tag is dropped whole), so it can only be a miss.
+      if state.name_ended {
+        let name_end = body
+          .as_bytes()
+          .iter()
+          .position(|&c| is_whitespace(c) || c == SLASH_CHAR || c == GT_CHAR)
+          .expect("name_ended records a scanned terminator");
+        let mut synthetic = String::with_capacity(name_end + 3);
+        synthetic.push_str("</");
+        synthetic.push_str(&body[..name_end]);
+        synthetic.push('>');
+        // The non-nesting guard is the one way this reports incomplete, and
+        // no non-nesting element's end tag can reach the carry that led here.
+        self.process_closing_tag(&synthetic, 0);
+      } else {
+        self.last_node_is_inline = true;
+        self.just_closed_tag = true;
+      }
       Discard::CloseTag(state)
     } else {
+      self.truncated = true;
       let mut pending = PendingTagScan::new();
       tag_is_complete(chunk, run_start, &mut pending);
       Discard::Tag(pending)
     };
+  }
+
+  /// Whether CDATA sections surface as output through a `#cdata-section`
+  /// override, making a dropped one a lost-output truncation.
+  fn has_surfaced_cdata(&self) -> bool {
+    self.has_tag_overrides
+      && self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|p| p.tag_overrides.as_ref())
+        .is_some_and(|ovs| ovs.iter().any(|(k, _)| k == "#cdata-section"))
   }
 
   pub fn get_markdown(&mut self) -> String {
@@ -1596,6 +1641,13 @@ impl ConvertState {
   /// end tag, so the residual is text unless it is an appropriate end tag that
   /// already reached a tag state.
   pub fn finalize(&mut self, leftover: &str) {
+    // A token still being dropped at EOF never completed. An uncapped parse
+    // ends such a token at EOF with its own truncation report, so a dropped
+    // one that found its end earlier stays unflagged and this is the only
+    // place the abandoned ones are reported.
+    if !matches!(self.discard, Discard::No) {
+      self.truncated = true;
+    }
     let in_script = self
       .stack
       .last()
