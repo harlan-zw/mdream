@@ -39,7 +39,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: crates -> target
+          workspaces: |
+            crates -> target
+            bench/rust-bundle -> target
 
       - name: Install wasm-pack and wasm-opt
         uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
@@ -65,6 +67,11 @@ jobs:
             else
               echo "The base commit predates the Rust bundle-size harness; the WASM bundle will be reported as new."
             fi
+            if node -e "const pkg = require('./package.json'); process.exit(pkg.scripts?.['test:bundle-size:rust-native'] ? 0 : 1)"; then
+              pnpm test:bundle-size:rust-native
+            else
+              echo "The base commit predates the native Rust size harness."
+            fi
             cp -R bench/bundle/dist/. /tmp/base-dist/
           else
             echo "The base commit predates the bundle-size harness; bundles will be reported as new."
@@ -78,6 +85,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm test:bundle-size
           pnpm test:bundle-size:rust
+          pnpm test:bundle-size:rust-native
 
       - name: Run performance benchmarks
         run: |
