@@ -553,6 +553,16 @@ pub struct ConvertState {
   skip_current_link: bool,
   /// Buffer position of the `[` character written for TAG_A enter
   link_bracket_pos: usize,
+  /// Upper bound on the resolved href length used by equality rewrites.
+  /// Overestimation delays release; underestimation could change output.
+  link_url_max_len: usize,
+  /// A close-time rewrite can reach back without a bounded distance.
+  link_hold_forever: bool,
+  /// A yield or drain boundary has passed `link_bracket_pos`.
+  link_hold_released: bool,
+  /// Closing the link may still truncate an empty label at its bracket.
+  link_empty_text_pending: bool,
+  pub(crate) streaming: bool,
   /// Open inline markers as (kind, output start, content start); lets the exit drop empty pairs.
   open_markers: Vec<(u8, usize, usize)>,
   /// Open code spans and fenced blocks stay buffered until their closing
@@ -728,6 +738,11 @@ impl ConvertState {
       clean_flags: 0,
       skip_current_link: false,
       link_bracket_pos: 0,
+      link_url_max_len: 0,
+      link_hold_forever: false,
+      link_hold_released: false,
+      link_empty_text_pending: false,
+      streaming: false,
       open_markers: Vec::new(),
       code_spans: Vec::new(),
       code_fence: None,
@@ -1719,6 +1734,36 @@ impl ConvertState {
     }
   }
 
+  #[inline]
+  fn link_hold_required(&self) -> bool {
+    if self.depth_map[TAG_A as usize] == 0 {
+      return false;
+    }
+    if self.link_hold_released {
+      return false;
+    }
+    if self.link_hold_forever {
+      return true;
+    }
+    if self.link_empty_text_pending {
+      return true;
+    }
+    // These may still truncate link text below the release threshold.
+    if !self.open_markers.is_empty() || !self.code_spans.is_empty() {
+      return true;
+    }
+    let text_start = self.link_bracket_pos + 1;
+    let text_end = trim_ascii_whitespace_end(&self.buffer);
+    text_end.saturating_sub(text_start) <= self.link_url_max_len
+  }
+
+  #[inline]
+  fn note_link_release(&mut self, boundary: usize) {
+    if self.depth_map[TAG_A as usize] > 0 && boundary > self.link_bracket_pos {
+      self.link_hold_released = true;
+    }
+  }
+
   pub fn get_markdown_chunk(&mut self) -> String {
     if self.format == OutputFormat::Html {
       return std::mem::take(&mut self.buffer);
@@ -1794,14 +1839,8 @@ impl ConvertState {
     if let Some(frame) = self.blockquotes.first() {
       stable_end = stable_end.min(hold_before(&self.buffer, frame.content_start));
     }
-    // An open `<a>`'s close can rewrite the buffer back to `link_bracket_pos`
-    // (emptyLinkText drop, selfLinkHeadings, redundantLinks, GFM autolink). Hold the
-    // yield boundary there so a link that turns out empty never leaks a stray `[`.
-    // As with inline markers, the spaces just before the `[` belong to the
-    // preceding text: an empty-link drop followed by a block close trims them,
-    // so hold them back too or a yielded space would be silently removed.
-    // Mirrors the same guard in `drain_streamed_prefix`.
-    if self.depth_map[TAG_A as usize] > 0 {
+    // Hold the bracket and preceding spaces while the close can rewrite them.
+    if self.link_hold_required() {
       stable_end = stable_end.min(hold_before(&self.buffer, self.link_bracket_pos));
     }
     // A marker still alone on its line has its separating newline inserted at
@@ -1845,6 +1884,7 @@ impl ConvertState {
       self.drain_streamed_prefix();
       return String::new();
     }
+    self.note_link_release(stable_end);
     let new_content = self.buffer[start..stable_end].to_string();
     self.has_streamed_output = true;
     self.last_yielded_length = stable_end;
@@ -1887,13 +1927,8 @@ impl ConvertState {
       retained_tail_start -= 1;
     }
     let mut drain_end = self.last_yielded_length.min(retained_tail_start);
-    // An empty link or inline marker closing in a later chunk truncates the
-    // buffer back to its reach-back point (`link_bracket_pos` / `output_start`).
-    // The next block then counts its leading newlines from the two bytes ending
-    // there (see `write_output`, which inspects only the last two), so keep
-    // those two bytes; otherwise a dropped element leaks an extra newline in
-    // streaming.
-    if self.depth_map[TAG_A as usize] > 0 {
+    // Preserve newline context before every live reach-back point.
+    if self.link_hold_required() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.link_bracket_pos));
     }
     if let Some(&(_, output_start, _)) = self.open_markers.first() {
@@ -1946,6 +1981,7 @@ impl ConvertState {
     // Remember what the line being cut leads with; a line opened before an
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
+    self.note_link_release(drain_end);
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
     self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);

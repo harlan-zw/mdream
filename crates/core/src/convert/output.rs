@@ -649,6 +649,7 @@ impl ConvertState {
     let is_inline: bool;
     let node_spacing: Option<[u8; 2]>;
     let mut output: Option<Cow<'static, str>>;
+    let exit_is_overridden: bool;
     // True when `output` is a user-supplied override enter string — emit it
     // verbatim without synthesizing a separating space (issue #93).
     let enter_is_literal: bool;
@@ -673,6 +674,7 @@ impl ConvertState {
         .and_then(|ov| ov.is_inline)
         .unwrap_or(node.is_inline);
       node_spacing = override_config.and_then(|ov| ov.spacing).or(node.spacing);
+      exit_is_overridden = override_config.is_some_and(|ov| ov.exit.is_some());
 
       // Table state reads (tag_id.is_some() is sufficient — all table tags have handlers)
       if tag_id.is_some() {
@@ -747,6 +749,11 @@ impl ConvertState {
             && is_empty_link_href(href)
           {
             self.skip_current_link = true;
+            if self.streaming {
+              self.link_hold_forever = false;
+              self.link_hold_released = true;
+              self.link_empty_text_pending = false;
+            }
             self.last_node_is_inline = is_inline;
             return;
           }
@@ -796,6 +803,18 @@ impl ConvertState {
       output.as_deref(),
       enter_is_literal,
     );
+
+    if self.link_empty_text_pending
+      && tag_id != Some(TAG_A)
+      && tag_id != Some(TAG_CODE)
+      && tag_id.and_then(Self::inline_marker_type).is_none()
+      && self
+        .buffer
+        .get(output_start..)
+        .is_some_and(|content| !content.trim().is_empty())
+    {
+      self.link_empty_text_pending = false;
+    }
 
     if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
       self.record_item_marker(self.stack[stack_len - 1].index, output_start);
@@ -876,15 +895,33 @@ impl ConvertState {
       // last byte alone also matches the `[` of an escaped literal `\[` in the
       // text before the link, and the empty-link drop then truncates into that
       // text instead of the link it meant to remove.
-      self.link_bracket_pos = if output
+      let emitted_bracket = output
         .as_deref()
         .is_some_and(|o| o.as_bytes().last() == Some(&b'['))
-        && self.buffer.len() > output_start
-      {
+        && self.buffer.len() > output_start;
+      self.link_bracket_pos = if emitted_bracket {
         buf_len - 1
       } else {
         buf_len
       };
+      // Avoid the href lookup and hold bookkeeping for one-shot conversion.
+      if self.streaming {
+        let has_rewrite_anchor = emitted_bracket && !exit_is_overridden;
+        self.link_hold_released = !has_rewrite_anchor;
+        self.link_empty_text_pending =
+          has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
+        let href = self.stack[stack_len - 1].attributes.get("href");
+        self.link_url_max_len = href.map_or(0, |href| {
+          6 + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
+        });
+        self.link_hold_forever = has_rewrite_anchor
+          && href.is_some_and(|href| {
+            href.starts_with('#')
+              && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
+                || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0
+                  && (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0)))
+          });
+      }
     }
 
     if !enter_is_literal
@@ -1066,17 +1103,29 @@ impl ConvertState {
     } else {
       new_line_config[1]
     };
+    if tag_id == Some(TAG_A) {
+      self.link_empty_text_pending = false;
+    }
 
-    // Clean mode exit — single guard. Skipped for overridden anchors,
-    // whose custom exit output isn't the default `[…](…)` shape.
-    if !self.plain_text && self.clean_flags != 0 && tag_id == Some(TAG_A) && !has_override {
-      // emptyLinks: skip exit for skipped links
-      if self.skip_current_link {
-        self.skip_current_link = false;
-        self.last_node_is_inline = is_inline;
-        return;
-      }
+    // A skipped link has no bracket for the clean rewrites below.
+    if !self.plain_text
+      && self.clean_flags != 0
+      && tag_id == Some(TAG_A)
+      && !has_override
+      && self.skip_current_link
+    {
+      self.skip_current_link = false;
+      self.last_node_is_inline = is_inline;
+      return;
+    }
 
+    // Released links skip bracket-anchored rewrites; the ordinary close remains.
+    if !self.plain_text
+      && self.clean_flags != 0
+      && tag_id == Some(TAG_A)
+      && !has_override
+      && !self.link_hold_released
+    {
       // Find actual [ position: scan from recorded pos (write_output may have inserted newlines before it)
       let buf_len = self.buffer.len();
       let bracket_pos = {
@@ -1219,13 +1268,8 @@ impl ConvertState {
             }
           }
         }
-        // GFM autolink shorthand: when href equals text content and is a
-        // bare absolute URI (http(s)://, ftp://, mailto:), emit `<href>`
-        // instead of the verbose `[href](href)`. link_bracket_pos points
-        // directly at the `[` byte (set in emit_enter_element), so this
-        // is an O(1) check. `[` is single-byte UTF-8, so `bp + 1` is
-        // always a char boundary once `buf_bytes[bp]` is confirmed `[`.
-        if title.is_empty() && is_autolink_uri(resolved) {
+        // A released link no longer has a valid bracket anchor.
+        if title.is_empty() && is_autolink_uri(resolved) && !self.link_hold_released {
           let bp = self.link_bracket_pos;
           let buf_bytes = self.buffer.as_bytes();
           if bp < buf_bytes.len() && buf_bytes[bp] == b'[' && &self.buffer[bp + 1..] == resolved {
@@ -1356,7 +1400,16 @@ impl ConvertState {
       self.resolve_item_marker(true);
     }
 
+    let output_start = self.buffer.len();
     self.write_output(false, is_inline, configured_new_lines, effective, false);
+    if self.link_empty_text_pending
+      && self
+        .buffer
+        .get(output_start..)
+        .is_some_and(|content| !content.trim().is_empty())
+    {
+      self.link_empty_text_pending = false;
+    }
 
     // Reset <pre> fence deferral once the element closes (issue #97).
     if tag_id == Some(TAG_PRE) {
@@ -1961,7 +2014,9 @@ impl ConvertState {
         .open_markers
         .first()
         .is_some_and(|&(_, position, _)| opens_the_item(position))
-        || (self.depth_map[TAG_A as usize] > 0 && opens_the_item(self.link_bracket_pos)))
+        || (self.depth_map[TAG_A as usize] > 0
+          && !self.link_hold_released
+          && opens_the_item(self.link_bracket_pos)))
     {
       return;
     }
