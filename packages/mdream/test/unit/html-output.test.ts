@@ -25,7 +25,8 @@ describe.each(engines)('safe HTML output $name', (engineConfig) => {
       origin: 'https://mdream.dev/base/',
     })).toBe([
       '<h1 id="hello-world">Hello <em>world</em></h1>',
-      '<p>Visit <a href="https://mdream.dev/base/docs?section=api" title="Docs">docs</a>.</p>',
+      // Root-relative, so it skips the origin's `/base/` directory.
+      '<p>Visit <a href="https://mdream.dev/docs?section=api" title="Docs">docs</a>.</p>',
       '<ol start="3"><li><strong>First</strong></li><li>Second</li></ol>',
       '<pre tabindex="0"><code class="language-ts">const value = 1 &lt; 2</code></pre>',
     ].join(''))

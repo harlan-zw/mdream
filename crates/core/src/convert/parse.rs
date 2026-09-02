@@ -587,6 +587,9 @@ impl ConvertState {
         .last()
         .map_or(0, |n| n.current_walk_index as usize);
       self.text_buffer_has_inline_gfm_hazard = has_inline_gfm_hazard;
+      if self.link_empty_text_pending && !text.trim().is_empty() {
+        self.link_empty_text_pending = false;
+      }
       self.emit_text_with_generated_markdown(
         &text,
         contains_whitespace,
@@ -1490,6 +1493,19 @@ impl ConvertState {
     // Only the initial name participates in matching. Whitespace, a trailing
     // solidus, and parse-error attributes belong to the rest of the end tag.
     let tag_name_raw = &html_chunk[tag_name_start..tag_name_end];
+    if !self.process_closing_tag_name(tag_name_raw) {
+      return CloseTagResult {
+        complete: false,
+        new_position: position,
+      };
+    }
+    CloseTagResult {
+      complete: true,
+      new_position: i + 1,
+    }
+  }
+
+  pub(crate) fn process_closing_tag_name(&mut self, tag_name_raw: &str) -> bool {
     let builtin_tag_id = crate::consts::get_tag_id_ci_bytes(tag_name_raw.as_bytes());
     let tag_name: Cow<str> = if builtin_tag_id.is_some() {
       Cow::Borrowed(tag_name_raw)
@@ -1533,10 +1549,7 @@ impl ConvertState {
         }
       }
       self.just_closed_tag = true;
-      return CloseTagResult {
-        complete: true,
-        new_position: i + 1,
-      };
+      return true;
     }
 
     if self.overflow_same_name_depth > 0 {
@@ -1545,10 +1558,7 @@ impl ConvertState {
         .is_some_and(|handler| handler.is_self_closing);
       if is_self_closing {
         self.just_closed_tag = true;
-        return CloseTagResult {
-          complete: true,
-          new_position: i + 1,
-        };
+        return true;
       }
       if self.overflow_raw_name.is_some() {
         let closes_root =
@@ -1559,10 +1569,7 @@ impl ConvertState {
           self.clear_overflow();
         }
         self.just_closed_tag = true;
-        return CloseTagResult {
-          complete: true,
-          new_position: i + 1,
-        };
+        return true;
       }
       if self.matches_overflow_tag(tag_name.as_ref(), tag_id, builtin_tag_id.is_some()) {
         self.overflow_same_name_depth -= 1;
@@ -1570,19 +1577,13 @@ impl ConvertState {
           self.clear_overflow();
         }
         self.just_closed_tag = true;
-        return CloseTagResult {
-          complete: true,
-          new_position: i + 1,
-        };
+        return true;
       }
       if tag_id.is_some_and(|id| self.depth_map[id as usize] > 0) {
         self.clear_overflow();
       } else {
         self.just_closed_tag = true;
-        return CloseTagResult {
-          complete: true,
-          new_position: i + 1,
-        };
+        return true;
       }
     }
 
@@ -1590,10 +1591,7 @@ impl ConvertState {
       && curr.is_non_nesting
       && curr.tag_id != tag_id
     {
-      return CloseTagResult {
-        complete: false,
-        new_position: position,
-      };
+      return false;
     }
 
     // Non-built-in names must match the open node's custom name as well as its
@@ -1648,10 +1646,7 @@ impl ConvertState {
     }
     // Keep the scanner's whitespace state aligned after consuming a tag token.
     self.just_closed_tag = true;
-    CloseTagResult {
-      complete: true,
-      new_position: i + 1,
-    }
+    true
   }
 
   /// Handle a CDATA section's inner content.

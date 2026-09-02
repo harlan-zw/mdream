@@ -102,6 +102,99 @@ describe.each(engines)('links $name', (engineConfig) => {
     expect(markdown).toBe('[Link](/page#section)')
   })
 
+  it.each([
+    ['https://example.com', 'page.html', 'https://example.com/page.html'],
+    ['https://example.com/', 'page.html', 'https://example.com/page.html'],
+    ['https://example.com/docs/', 'page.html', 'https://example.com/docs/page.html'],
+    ['https://example.com/docs/x.html?a=1#f', 'page.html', 'https://example.com/docs/page.html'],
+    ['https://example.com', '../page.html', 'https://example.com/page.html'],
+    // No scheme and authority to resolve against, so the origin is a prefix.
+    ['docs', 'b.html', 'docs/b.html'],
+  ])('resolves %s + %s', async (origin, href, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown(`<a href="${href}">Link</a>`, { origin, engine })
+    expect(markdown).toBe(`[Link](${expected})`)
+  })
+
+  // RFC 3986 section 5.4, verbatim. The two references it resolves to the
+  // base URI itself are left alone instead; see the test below.
+  it.each([
+    // 5.4.1 normal examples
+    ['g:h', 'g:h'],
+    ['g', 'http://a/b/c/g'],
+    ['./g', 'http://a/b/c/g'],
+    ['g/', 'http://a/b/c/g/'],
+    ['/g', 'http://a/g'],
+    ['//g', 'http://g'],
+    ['?y', 'http://a/b/c/d;p?y'],
+    ['g?y', 'http://a/b/c/g?y'],
+    ['g#s', 'http://a/b/c/g#s'],
+    ['g?y#s', 'http://a/b/c/g?y#s'],
+    [';x', 'http://a/b/c/;x'],
+    ['g;x', 'http://a/b/c/g;x'],
+    ['g;x?y#s', 'http://a/b/c/g;x?y#s'],
+    ['.', 'http://a/b/c/'],
+    ['./', 'http://a/b/c/'],
+    ['..', 'http://a/b/'],
+    ['../', 'http://a/b/'],
+    ['../g', 'http://a/b/g'],
+    ['../..', 'http://a/'],
+    ['../../', 'http://a/'],
+    ['../../g', 'http://a/g'],
+    // 5.4.2 abnormal examples
+    ['../../../g', 'http://a/g'],
+    ['../../../../g', 'http://a/g'],
+    ['/./g', 'http://a/g'],
+    ['/../g', 'http://a/g'],
+    ['g.', 'http://a/b/c/g.'],
+    ['.g', 'http://a/b/c/.g'],
+    ['g..', 'http://a/b/c/g..'],
+    ['..g', 'http://a/b/c/..g'],
+    ['./../g', 'http://a/b/g'],
+    ['./g/.', 'http://a/b/c/g/'],
+    ['g/./h', 'http://a/b/c/g/h'],
+    ['g/../h', 'http://a/b/c/h'],
+    ['g;x=1/./y', 'http://a/b/c/g;x=1/y'],
+    ['g;x=1/../y', 'http://a/b/c/y'],
+    ['g?y/./x', 'http://a/b/c/g?y/./x'],
+    ['g?y/../x', 'http://a/b/c/g?y/../x'],
+    ['g#s/./x', 'http://a/b/c/g#s/./x'],
+    ['g#s/../x', 'http://a/b/c/g#s/../x'],
+    // Strict resolution: a scheme means absolute.
+    ['http:g', 'http:g'],
+  ])('resolves RFC 3986 reference %s', async (href, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown(`<a href="${href}">Link</a>`, {
+      origin: 'http://a/b/c/d;p?q',
+      engine,
+    })
+    expect(markdown).toBe(`[Link](${expected})`)
+  })
+
+  it.each([
+    // A scheme opens with a letter, so these are relative references.
+    ['3:16', 'http://a/b/c/3:16'],
+    ['+x:y', 'http://a/b/c/+x:y'],
+    ['a3:x', 'a3:x'],
+  ])('resolves %s against its scheme rule', async (href, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown(`<a href="${href}">Link</a>`, {
+      origin: 'http://a/b/c/d;p?q',
+      engine,
+    })
+    expect(markdown).toBe(`[Link](${expected})`)
+  })
+
+  it('keeps an empty reference unresolved', async () => {
+    // RFC 3986 resolves it to the base URI; the href stays as it is.
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<a href="">Link</a>', {
+      origin: 'http://a/b/c/d;p?q',
+      engine,
+    })
+    expect(markdown).toBe('[Link]()')
+  })
+
   it('handles empty fragment', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<a href="#">Link</a>'
