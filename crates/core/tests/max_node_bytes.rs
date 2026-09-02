@@ -6,8 +6,8 @@
 //! text buffered for one text node (~5x its size in peak heap), and the raw bytes
 //! of a tag or comment the parser cannot consume yet (~3x).
 //!
-//! Three more grow with a whole element rather than one node: an open code fence
-//! pins the output buffer until its delimiter is known (~0.9x the block), a row's
+//! Four more grow with a whole element rather than one node: open code fences and
+//! inline code spans pin the output buffer until their delimiter is known, a row's
 //! width forces a delimiter row of 7 bytes a column, and script text is retained
 //! whole for an extraction that reads it (~4x).
 //!
@@ -17,7 +17,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use mdream::types::{ExtractionConfig, HTMLToMarkdownOptions, PluginConfig};
+use mdream::types::{ExtractionConfig, HTMLToMarkdownOptions, PluginConfig, TagOverrideConfig};
 use mdream::{MarkdownStreamProcessor, html_to_markdown_result};
 
 // Peak-allocation tracker, per-thread so parallel tests do not pollute each other.
@@ -85,6 +85,36 @@ fn stream(html: &str, chunk: usize, cap: usize) -> String {
   }
   out.push_str(&p.finish());
   out
+}
+
+fn stream_parts_with_options(parts: &[&str], options: HTMLToMarkdownOptions) -> (String, bool) {
+  let mut p = MarkdownStreamProcessor::new(options);
+  let mut out = String::new();
+  for part in parts {
+    out.push_str(&p.process_chunk(part));
+  }
+  out.push_str(&p.finish());
+  (out, p.truncated())
+}
+
+fn assert_capped_inline_code(html: &str, cap: usize, expected: &str, truncated: bool) {
+  assert_capped_inline_code_with_options(html, options(cap), expected, truncated);
+}
+
+fn assert_capped_inline_code_with_options(
+  html: &str,
+  options: HTMLToMarkdownOptions,
+  expected: &str,
+  truncated: bool,
+) {
+  let result = html_to_markdown_result(html, options.clone());
+  assert_eq!(result.markdown, expected, "one-shot html={html:?}");
+  assert_eq!(result.truncated, truncated, "one-shot html={html:?}");
+
+  for split in (0..=html.len()).filter(|&split| html.is_char_boundary(split)) {
+    let actual = stream_parts_with_options(&[&html[..split], &html[split..]], options.clone());
+    assert_eq!(actual, (expected.to_string(), truncated), "split={split}");
+  }
 }
 
 fn extracting(cap: usize, selectors: &[&str]) -> HTMLToMarkdownOptions {
@@ -408,6 +438,204 @@ fn the_cut_point_does_not_depend_on_chunking_above_the_flush_threshold() {
   );
 }
 
+#[test]
+fn inline_code_cap_is_aggregate_and_chunk_invariant() {
+  assert_capped_inline_code(
+    "<code><span>ab</span><span>cd</span><span>ef</span><span>gh</span><span>ij</span></code><p>after</p>",
+    8,
+    "`abcdefgh`\n\nafter",
+    true,
+  );
+}
+
+#[test]
+fn inline_code_exhaustion_is_sticky_at_a_utf8_boundary() {
+  assert_capped_inline_code(
+    "<code><span>aaaaaaa</span><span>é</span><span>z</span></code>",
+    8,
+    "`aaaaaaa`",
+    true,
+  );
+}
+
+#[test]
+fn an_exact_utf8_inline_code_cap_does_not_report_truncation() {
+  assert_capped_inline_code(
+    "<code><span>aaaaaa</span><span>é</span></code>",
+    8,
+    "`aaaaaaé`",
+    false,
+  );
+}
+
+#[test]
+fn generated_inline_code_content_consumes_the_cap() {
+  assert_capped_inline_code(
+    "<code>a<br>b<br>c<br>d<br>e</code>",
+    8,
+    "`a\nb\nc\nd\n`",
+    true,
+  );
+}
+
+#[test]
+fn inline_markers_and_spacing_consume_the_code_span_cap() {
+  assert_capped_inline_code(
+    "<code><em>abcde</em><span>x</span><span>y</span></code>",
+    8,
+    "`*abcde*x`",
+    true,
+  );
+}
+
+#[test]
+fn a_rejected_inline_marker_cannot_remove_retained_code_content() {
+  assert_capped_inline_code(
+    "<code><span>abcdefgh</span><em>x</em></code>",
+    8,
+    "`abcdefgh`",
+    true,
+  );
+}
+
+#[test]
+fn inline_code_delimiter_growth_does_not_consume_content_budget() {
+  assert_capped_inline_code(
+    "<code><span>``abcdef</span><span>g</span></code>",
+    8,
+    "``` ``abcdef ```",
+    true,
+  );
+}
+
+#[test]
+fn an_exhausted_outer_span_keeps_nested_span_state_balanced() {
+  assert_capped_inline_code(
+    "<code><span>abcdefgh</span><code>x</code><span>y</span></code><p>after</p>",
+    8,
+    "`abcdefgh`\n\nafter",
+    true,
+  );
+}
+
+#[test]
+fn a_rejected_nested_code_fence_does_not_create_invalid_state() {
+  assert_capped_inline_code(
+    "<code>abcdefgh<pre><code>x</code></pre></code><p>after</p>",
+    8,
+    "`abcdefgh`\n\nafter",
+    true,
+  );
+}
+
+#[test]
+fn an_unclosed_inline_code_span_is_finalized_after_exhaustion() {
+  assert_capped_inline_code("<code><span>abcdefgh</span><span>ij", 8, "`abcdefgh`", true);
+}
+
+#[test]
+fn link_output_cannot_grow_an_inline_code_span_past_the_cap() {
+  assert_capped_inline_code(
+    "<code><a href=x>abcdefghijklmn</a><span>z</span></code>",
+    16,
+    "`[abcdefghijklmn`",
+    true,
+  );
+}
+
+#[test]
+fn override_output_consumes_the_inline_code_span_cap() {
+  let opts = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "x".to_string(),
+        TagOverrideConfig::wrap("12345", "67890"),
+      )]),
+      ..Default::default()
+    }),
+    ..options(8)
+  };
+  assert_capped_inline_code_with_options(
+    "<code><x></x><span>z</span></code>",
+    opts,
+    "`12345`",
+    true,
+  );
+}
+
+// An exit-only override still pushes the span on enter, so skipping the pop on
+// exit leaked the span: its exhausted flag then capped every byte after the
+// first inline code element, and streaming held its output at the leaked span.
+#[test]
+fn an_exit_only_override_still_pops_the_inline_code_span() {
+  let opts = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "code".to_string(),
+        TagOverrideConfig {
+          exit: Some("X".to_string()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..options(8)
+  };
+  assert_capped_inline_code_with_options(
+    "<code>abcdefgh</code><p>ij</p><p>kl</p>",
+    opts,
+    "`abcdefghX\n\nij\n\nkl",
+    false,
+  );
+}
+
+#[test]
+fn frontmatter_output_cannot_escape_an_inline_code_span_cap() {
+  let opts = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig::frontmatter()),
+    ..options(8)
+  };
+  assert_capped_inline_code_with_options(
+    "<code><head><title>a</title></head></code><p>after</p>",
+    opts,
+    "after",
+    true,
+  );
+}
+
+#[test]
+fn generated_spacing_consumes_the_inline_code_span_cap() {
+  assert_capped_inline_code("<code><em>a </em>bcdefgh</code>", 8, "`*a* bcde`", true);
+}
+
+#[test]
+fn a_growing_autolink_rewrite_can_exactly_fill_the_span_cap() {
+  assert_capped_inline_code(
+    "<code><span>12345678</span><a href=http://x>http://x</a></code>",
+    19,
+    "`12345678 <http://x>`",
+    false,
+  );
+}
+
+#[test]
+fn table_pipe_escaping_respects_the_inline_code_span_cap() {
+  assert_capped_inline_code(
+    "<table><tr><td><code>a|b|c|d</code></td></tr></table>",
+    8,
+    "| `a\\|b\\|c` |\n| --- |",
+    true,
+  );
+}
+
+#[test]
+fn inline_code_truncation_is_reported_before_finish() {
+  let mut p = MarkdownStreamProcessor::new(options(8));
+  let first = p.process_chunk("<code><span>abcdefgh</span><span>ij</span></code><p>after</p>");
+  assert!(p.truncated());
+  assert_eq!(first + &p.finish(), "`abcdefgh`\n\nafter");
+}
+
 // A code fence cannot be closed until the longest backtick run inside it is known,
 // so the block pins the buffer however small its text nodes are. The cap is
 // measured against the block, not the node.
@@ -554,6 +782,13 @@ fn truncating_fixtures() -> Vec<(&'static str, String)> {
       ),
     ),
     (
+      "inline code",
+      format!(
+        "<code>{}</code>",
+        repeat_to("<span>abcdefgh</span>", 256 * 1024)
+      ),
+    ),
+    (
       "table row",
       format!(
         "<table><tr>{}</tr></table>",
@@ -671,6 +906,38 @@ fn a_code_fence_holds_at_most_the_cap() {
       content.len()
     );
   }
+}
+
+#[test]
+fn inline_code_from_many_small_nodes_stays_bounded() {
+  let html = format!("<code>{}</code>", repeat_to("<span>abcdefgh</span>", HUGE));
+  let uncapped = peak(&html, 8 * 1024, 0);
+  let capped = peak(&html, 8 * 1024, CAP);
+  assert!(
+    uncapped > (HUGE / 4) as u64,
+    "fixture should retain aggregate code uncapped, got {uncapped}"
+  );
+  assert!(
+    capped < (HUGE / 4) as u64,
+    "capped peak {capped} should be a window, not the {} byte span",
+    html.len()
+  );
+}
+
+#[test]
+fn inline_code_from_many_breaks_stays_bounded() {
+  let html = format!("<code>{}</code>", repeat_to("a<br>", HUGE));
+  let uncapped = peak(&html, 8 * 1024, 0);
+  let capped = peak(&html, 8 * 1024, CAP);
+  assert!(
+    uncapped > (HUGE / 4) as u64,
+    "fixture should retain generated breaks uncapped, got {uncapped}"
+  );
+  assert!(
+    capped < (HUGE / 4) as u64,
+    "capped peak {capped} should be a window, not the {} byte span",
+    html.len()
+  );
 }
 
 // `colspan` used to be added whole after the count check, and a nonzero `align`

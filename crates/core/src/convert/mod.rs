@@ -127,6 +127,8 @@ const GFM_BYTE_FLAGS: [u8; 256] = {
 struct CodeSpanState {
   output_start: usize,
   content_start: usize,
+  opener_emitted: bool,
+  exhausted: bool,
 }
 
 struct CodeFenceState {
