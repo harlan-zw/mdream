@@ -72,12 +72,21 @@ static ALLOC: Tracking = Tracking;
 /// Peak live bytes while `feed` runs, and the total output it produced. The
 /// output is dropped as it arrives, the way a wire consumer would.
 fn measure_peak(html: &str, chunk: usize, opts: HTMLToMarkdownOptions) -> (u64, u64) {
+  measure_peak_format(html, chunk, opts, OutputFormat::Markdown)
+}
+
+fn measure_peak_format(
+  html: &str,
+  chunk: usize,
+  opts: HTMLToMarkdownOptions,
+  format: OutputFormat,
+) -> (u64, u64) {
   ACCT.set(Acct {
     on: true,
     live: 0,
     peak: 0,
   });
-  let mut p = MarkdownStreamProcessor::new(opts);
+  let mut p = MarkdownStreamProcessor::new_with_format(opts, format);
   let mut total_out: u64 = 0;
   for c in html.as_bytes().chunks(chunk) {
     total_out += p.process_chunk(std::str::from_utf8(c).unwrap()).len() as u64;
@@ -1908,5 +1917,218 @@ fn streaming_does_not_invent_a_newline_behind_a_single_byte_cut() {
     }
     actual.push_str(&p.finish());
     assert_eq!(actual, expected, "chunk={chunk}");
+  }
+}
+
+const LINK_STREAM_PEAK_LIMIT: u64 = 768 * 1024;
+
+#[test]
+fn streaming_memory_is_bounded_for_a_link_wrapping_the_document() {
+  const TARGET: usize = 2 * 1024 * 1024;
+  let html = one_long_text_run("<a href=\"/x\">", "</a>", TARGET);
+
+  let (peak, total_out) = measure_peak(&html, 8 * 1024, HTMLToMarkdownOptions::default());
+
+  assert!(
+    total_out > TARGET as u64 - 4096,
+    "expected the whole link text in the output, got {total_out}"
+  );
+  assert!(
+    peak < LINK_STREAM_PEAK_LIMIT,
+    "peak {peak} should be a window, not the {} byte link",
+    html.len()
+  );
+}
+
+#[test]
+fn streaming_memory_is_bounded_without_a_link_rewrite_anchor() {
+  const TARGET: usize = 2 * 1024 * 1024;
+  let cases = [
+    (
+      "missing href",
+      one_long_text_run("<a>", "</a>", TARGET),
+      HTMLToMarkdownOptions::default(),
+      OutputFormat::Markdown,
+    ),
+    (
+      "cleaned href",
+      one_long_text_run("<a href=\"#\">", "</a>", TARGET),
+      HTMLToMarkdownOptions::default().with_clean(safe_clean()),
+      OutputFormat::Markdown,
+    ),
+    (
+      "plain text",
+      one_long_text_run("<a href=\"/x\">", "</a>", TARGET),
+      HTMLToMarkdownOptions::default(),
+      OutputFormat::Text,
+    ),
+  ];
+
+  for (name, html, opts, format) in cases {
+    let (peak, total_out) = measure_peak_format(&html, 8 * 1024, opts, format);
+    assert!(
+      total_out > TARGET as u64 - 4096,
+      "case={name} output={total_out}"
+    );
+    assert!(peak < LINK_STREAM_PEAK_LIMIT, "case={name} peak={peak}");
+  }
+}
+
+#[test]
+fn unicode_whitespace_does_not_settle_empty_link_text() {
+  let opts = HTMLToMarkdownOptions::default().with_clean(safe_clean());
+  let first = "before<a href=\"/x\">&nbsp;<!>&nbsp;<!>&nbsp;<!>&nbsp;<!>&nbsp;<!>&#9;";
+  let second = "</a>after";
+  let expected = html_to_markdown(&format!("{first}{second}"), opts.clone());
+  let mut stream = MarkdownStreamProcessor::new(opts);
+  let actual = stream.process_chunk(first) + &stream.process_chunk(second) + &stream.finish();
+
+  assert_eq!(actual, expected);
+}
+
+#[test]
+fn enter_only_link_override_keeps_clean_rewrites() {
+  let path = format!("/{}", "a".repeat(70 * 1024));
+  let html = format!("<a href=\"{path}\">{path}</a>");
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "a".to_string(),
+        TagOverrideConfig {
+          enter: Some("[".to_string()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let expected = html_to_markdown(&html, opts.clone());
+
+  assert_eq!(stream_chunks(&html, 8 * 1024, opts), expected);
+}
+
+#[test]
+fn generated_link_content_releases_the_hold() {
+  let cases = [
+    (
+      "images",
+      format!(
+        "<a href=\"/x\">{}</a>",
+        "<img src=\"/i\" alt=\"x\">".repeat(100_000)
+      ),
+    ),
+    (
+      "markers",
+      format!("<a href=\"/x\">{}</a>", "<em>&nbsp;</em>".repeat(100_000)),
+    ),
+  ];
+
+  for (name, html) in cases {
+    let opts = HTMLToMarkdownOptions::default().with_clean(safe_clean());
+    let (peak, total_out) = measure_peak(&html, 8 * 1024, opts);
+    assert!(total_out > 300_000, "case={name} output={total_out}");
+    assert!(peak < LINK_STREAM_PEAK_LIMIT, "case={name} peak={peak}");
+  }
+}
+
+#[test]
+fn a_released_link_still_writes_its_target() {
+  let html = one_long_text_run("<p><a href=\"/examples/\">", "</a></p>", 256 * 1024);
+  for clean in [false, true] {
+    let opts = if clean {
+      HTMLToMarkdownOptions::default().with_clean(safe_clean())
+    } else {
+      HTMLToMarkdownOptions::default()
+    };
+    let expected = html_to_markdown(&html, opts.clone());
+    assert!(
+      expected.trim_end().ends_with("](/examples/)"),
+      "clean={clean} fixture should produce a closed link, got tail {:?}",
+      &expected[expected.len() - 32..]
+    );
+    for chunk in [8192, 997, 64] {
+      assert_eq!(
+        stream_chunks(&html, chunk, opts.clone()),
+        expected,
+        "clean={clean} chunk={chunk}"
+      );
+    }
+  }
+
+  let href = "a".repeat(70 * 1024);
+  let resolved = format!("https://example.com/a/b/{href}");
+  let html = format!("<a href=\"{href}\">{resolved}</a>");
+  let opts = HTMLToMarkdownOptions {
+    origin: Some("https://example.com/a/b/document.html".to_string()),
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  let expected = html_to_markdown(&html, opts.clone());
+  assert_eq!(expected, resolved);
+  assert_eq!(stream_chunks(&html, 8 * 1024, opts), expected);
+}
+
+#[test]
+fn long_links_still_get_every_bracket_anchored_rewrite() {
+  const URL: &str = "/some/quite/long/canonical/path/for/this/page/index.html";
+  let long = "word ".repeat(16_384);
+  let long_path = format!("/{}", "a".repeat(70 * 1024));
+  let long_absolute = format!("https://example.com/{}", "a".repeat(70 * 1024));
+  let cases: [(&str, String); 8] = [
+    (
+      "redundant",
+      format!("<p><a href=\"{long_path}\">{long_path}</a></p>"),
+    ),
+    (
+      "autolink",
+      format!("<p><a href=\"{long_absolute}\">{long_absolute}</a></p>"),
+    ),
+    (
+      "empty text",
+      format!("<p><a href=\"{URL}\">{}</a></p>", " ".repeat(80 * 1024)),
+    ),
+    (
+      "self link heading",
+      format!("<h2><a href=\"#slug\">{long}</a></h2>"),
+    ),
+    (
+      "skipped after released",
+      format!("<p><a href=\"{URL}\">{long}</a><a href=\"#\">{long}</a></p>"),
+    ),
+    (
+      "marker shrink",
+      format!("<p><a href=\"{URL}\">{URL}<em></em></a></p>"),
+    ),
+    (
+      "trimmed back to equal",
+      format!(
+        "<p><a href=\"{URL}\">{URL}{}</a></p>",
+        " ".repeat(80 * 1024)
+      ),
+    ),
+    (
+      "titled",
+      format!("<p><a href=\"{URL}\" title=\"{long}\">{long}</a></p>"),
+    ),
+  ];
+
+  for clean in [false, true] {
+    let opts = if clean {
+      HTMLToMarkdownOptions::default().with_clean(safe_clean())
+    } else {
+      HTMLToMarkdownOptions::default()
+    };
+    for (name, html) in &cases {
+      let expected = html_to_markdown(html, opts.clone());
+      for chunk in [8192, 997, 64] {
+        assert_eq!(
+          stream_chunks(html, chunk, opts.clone()),
+          expected,
+          "case={name} clean={clean} chunk={chunk}"
+        );
+      }
+    }
   }
 }

@@ -100,8 +100,11 @@ impl MarkdownStreamProcessor {
 
   /// Create a streaming converter for the requested output format.
   pub fn new_with_format(options: HTMLToMarkdownOptions, format: OutputFormat) -> Self {
+    let mut state = ConvertState::new(options, 4096, format);
+    // One-shot conversion does not pay for link hold bookkeeping.
+    state.streaming = true;
     Self {
-      state: ConvertState::new(options, 4096, format),
+      state,
       buffer: String::new(),
     }
   }

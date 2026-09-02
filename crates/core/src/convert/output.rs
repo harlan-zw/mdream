@@ -120,6 +120,7 @@ impl ConvertState {
       bracket_pos,
       skipped,
       open: true,
+      ..Default::default()
     };
   }
 
@@ -699,6 +700,7 @@ impl ConvertState {
     let is_inline: bool;
     let node_spacing: Option<[u8; 2]>;
     let mut output: Option<Cow<'static, str>>;
+    let exit_is_overridden: bool;
     // True when `output` is a user-supplied override enter string — emit it
     // verbatim without synthesizing a separating space (issue #93).
     let enter_is_literal: bool;
@@ -723,6 +725,7 @@ impl ConvertState {
         .and_then(|ov| ov.is_inline)
         .unwrap_or(node.is_inline);
       node_spacing = override_config.and_then(|ov| ov.spacing).or(node.spacing);
+      exit_is_overridden = override_config.is_some_and(|ov| ov.exit.is_some());
 
       // Table state reads (tag_id.is_some() is sufficient — all table tags have handlers)
       if tag_id.is_some() {
@@ -797,6 +800,9 @@ impl ConvertState {
             && is_empty_link_href(href)
           {
             self.begin_link(self.buffer.len(), true);
+            if self.streaming {
+              self.link.hold_released = true;
+            }
             self.last_node_is_inline = is_inline;
             return;
           }
@@ -845,6 +851,18 @@ impl ConvertState {
       output.as_deref(),
       enter_is_literal,
     );
+
+    if self.link.empty_text_pending
+      && tag_id != Some(TAG_A)
+      && tag_id != Some(TAG_CODE)
+      && tag_id.and_then(Self::inline_marker_type).is_none()
+      && self
+        .buffer
+        .get(output_start..)
+        .is_some_and(|content| !content.trim().is_empty())
+    {
+      self.link.empty_text_pending = false;
+    }
 
     if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
       self.record_item_marker(self.stack[stack_len - 1].index, output_start);
@@ -925,16 +943,34 @@ impl ConvertState {
       // last byte alone also matches the `[` of an escaped literal `\[` in the
       // text before the link, and the empty-link drop then truncates into that
       // text instead of the link it meant to remove.
-      let bracket_pos = if output
+      let emitted_bracket = output
         .as_deref()
         .is_some_and(|o| o.as_bytes().last() == Some(&b'['))
-        && self.buffer.len() > output_start
-      {
+        && self.buffer.len() > output_start;
+      let bracket_pos = if emitted_bracket {
         buf_len - 1
       } else {
         buf_len
       };
       self.begin_link(bracket_pos, false);
+      // Avoid the href lookup and hold bookkeeping for one-shot conversion.
+      if self.streaming {
+        let has_rewrite_anchor = emitted_bracket && !exit_is_overridden;
+        self.link.hold_released = !has_rewrite_anchor;
+        self.link.empty_text_pending =
+          has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
+        let href = self.stack[stack_len - 1].attributes.get("href");
+        self.link.url_max_len = href.map_or(0, |href| {
+          6 + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
+        });
+        self.link.hold_forever = has_rewrite_anchor
+          && href.is_some_and(|href| {
+            href.starts_with('#')
+              && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
+                || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0
+                  && (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0)))
+          });
+      }
     }
 
     if !enter_is_literal
@@ -1116,6 +1152,9 @@ impl ConvertState {
     } else {
       new_line_config[1]
     };
+    if tag_id == Some(TAG_A) {
+      self.link.empty_text_pending = false;
+    }
 
     // Clean mode exit — single guard. Skipped for overridden anchors,
     // whose custom exit output isn't the default `[…](…)` shape.
@@ -1127,50 +1166,88 @@ impl ConvertState {
         return;
       }
 
-      // Find actual [ position: scan from recorded pos (write_output may have inserted newlines before it)
-      let buf_len = self.buffer.len();
-      let bracket_pos = {
-        let mut pos = self.link.bracket_pos;
-        let buf = self.buffer.as_bytes();
-        while pos < buf.len() && buf[pos] != b'[' {
-          pos += 1;
+      // Released links skip bracket-anchored rewrites; the ordinary close remains.
+      if !self.plain_text
+        && self.clean_flags != 0
+        && tag_id == Some(TAG_A)
+        && !has_override
+        && !self.link.hold_released
+      {
+        // Find actual [ position: scan from recorded pos (write_output may have inserted newlines before it)
+        let buf_len = self.buffer.len();
+        let bracket_pos = {
+          let mut pos = self.link.bracket_pos;
+          let buf = self.buffer.as_bytes();
+          while pos < buf.len() && buf[pos] != b'[' {
+            pos += 1;
+          }
+          pos
+        };
+        // Guard: if bracket not found, bracket_pos == buf_len; text_start would overflow
+        if bracket_pos >= buf_len {
+          self.end_link();
+          self.last_node_is_inline = is_inline;
+          return;
         }
-        pos
-      };
-      // Guard: if bracket not found, bracket_pos == buf_len; text_start would overflow
-      if bracket_pos >= buf_len {
-        self.end_link();
-        self.last_node_is_inline = is_inline;
-        return;
-      }
-      let text_start = bracket_pos + 1;
-      let link_text = if text_start <= buf_len && self.buffer.is_char_boundary(text_start) {
-        &self.buffer[text_start..buf_len]
-      } else {
-        ""
-      };
-      let text_len = buf_len.saturating_sub(text_start);
+        let text_start = bracket_pos + 1;
+        let link_text = if text_start <= buf_len && self.buffer.is_char_boundary(text_start) {
+          &self.buffer[text_start..buf_len]
+        } else {
+          ""
+        };
+        let text_len = buf_len.saturating_sub(text_start);
 
-      // emptyLinkText: [](url) → drop entirely
-      if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
-        self.buffer.truncate(bracket_pos);
-        self.end_link();
-        self.last_node_is_inline = is_inline;
-        return;
-      }
+        // emptyLinkText: [](url) → drop entirely
+        if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
+          self.buffer.truncate(bracket_pos);
+          self.end_link();
+          self.last_node_is_inline = is_inline;
+          return;
+        }
 
-      // selfLinkHeadings: ## [Title](#slug) → ## Title
-      if self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 {
-        let in_heading = (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0);
-        if in_heading
+        // selfLinkHeadings: ## [Title](#slug) → ## Title
+        if self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 {
+          let in_heading = (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0);
+          if in_heading
+            && let Some(href) = node.attributes.get("href")
+            && href.starts_with('#')
+            && text_len > 0
+          {
+            // Remove [ and keep text only — use truncate+copy without intermediate String
+            let new_len = bracket_pos + text_len;
+            // SAFETY: bracket_pos < text_start are within buffer bounds (guarded above).
+            // We copy link text backwards over "[", then truncate. Preserves valid UTF-8.
+            #[allow(unsafe_code)]
+            unsafe {
+              let buf = self.buffer.as_mut_vec();
+              std::ptr::copy(
+                buf.as_ptr().add(text_start),
+                buf.as_mut_ptr().add(bracket_pos),
+                text_len,
+              );
+              buf.set_len(new_len);
+            }
+            self.last_content_cache_len = text_len;
+            self.end_link();
+            self.last_node_is_inline = is_inline;
+            return;
+          }
+        }
+
+        // redundantLinks: [url](url) → url
+        if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0
           && let Some(href) = node.attributes.get("href")
-          && href.starts_with('#')
+          && let resolved = resolve_url(
+            href,
+            self.options.origin.as_deref(),
+            self.options.clean_urls,
+          )
+          && link_text == resolved.as_ref()
           && text_len > 0
         {
           // Remove [ and keep text only — use truncate+copy without intermediate String
           let new_len = bracket_pos + text_len;
-          // SAFETY: bracket_pos < text_start are within buffer bounds (guarded above).
-          // We copy link text backwards over "[", then truncate. Preserves valid UTF-8.
+          // SAFETY: same invariants as self-link heading case. Preserves valid UTF-8.
           #[allow(unsafe_code)]
           unsafe {
             let buf = self.buffer.as_mut_vec();
@@ -1186,36 +1263,6 @@ impl ConvertState {
           self.last_node_is_inline = is_inline;
           return;
         }
-      }
-
-      // redundantLinks: [url](url) → url
-      if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0
-        && let Some(href) = node.attributes.get("href")
-        && let resolved = resolve_url(
-          href,
-          self.options.origin.as_deref(),
-          self.options.clean_urls,
-        )
-        && link_text == resolved.as_ref()
-        && text_len > 0
-      {
-        // Remove [ and keep text only — use truncate+copy without intermediate String
-        let new_len = bracket_pos + text_len;
-        // SAFETY: same invariants as self-link heading case. Preserves valid UTF-8.
-        #[allow(unsafe_code)]
-        unsafe {
-          let buf = self.buffer.as_mut_vec();
-          std::ptr::copy(
-            buf.as_ptr().add(text_start),
-            buf.as_mut_ptr().add(bracket_pos),
-            text_len,
-          );
-          buf.set_len(new_len);
-        }
-        self.last_content_cache_len = text_len;
-        self.end_link();
-        self.last_node_is_inline = is_inline;
-        return;
       }
     }
 
@@ -1274,13 +1321,8 @@ impl ConvertState {
             }
           }
         }
-        // GFM autolink shorthand: when href equals text content and is a
-        // bare absolute URI (http(s)://, ftp://, mailto:), emit `<href>`
-        // instead of the verbose `[href](href)`. link_bracket_pos points
-        // directly at the `[` byte (set in emit_enter_element), so this
-        // is an O(1) check. `[` is single-byte UTF-8, so `bp + 1` is
-        // always a char boundary once `buf_bytes[bp]` is confirmed `[`.
-        if title.is_empty() && is_autolink_uri(resolved) {
+        // A released link no longer has a valid bracket anchor.
+        if title.is_empty() && is_autolink_uri(resolved) && !self.link.hold_released {
           let bp = self.link.bracket_pos;
           let buf_bytes = self.buffer.as_bytes();
           if bp < buf_bytes.len() && buf_bytes[bp] == b'[' && &self.buffer[bp + 1..] == resolved {
@@ -1416,7 +1458,16 @@ impl ConvertState {
       self.resolve_item_marker(true);
     }
 
+    let output_start = self.buffer.len();
     self.write_output(false, is_inline, configured_new_lines, effective, false);
+    if self.link.empty_text_pending
+      && self
+        .buffer
+        .get(output_start..)
+        .is_some_and(|content| !content.trim().is_empty())
+    {
+      self.link.empty_text_pending = false;
+    }
 
     // Reset <pre> fence deferral once the element closes (issue #97).
     if tag_id == Some(TAG_PRE) {
@@ -2012,7 +2063,7 @@ impl ConvertState {
         .open_markers
         .first()
         .is_some_and(|&(_, position, _)| opens_the_item(position))
-        || (self.depth_map[TAG_A as usize] > 0 && opens_the_item(self.link.bracket_pos)))
+        || self.open_link_hold_floor().is_some_and(opens_the_item))
     {
       return;
     }
