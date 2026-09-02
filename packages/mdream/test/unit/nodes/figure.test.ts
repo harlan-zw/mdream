@@ -1,4 +1,4 @@
-import { withMinimalPreset } from '@mdream/js'
+import { withMinimalPreset } from '@mdream/js/preset/minimal'
 import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 

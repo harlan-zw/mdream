@@ -289,8 +289,8 @@ export function tailwindPlugin(): TransformPlugin {
       }
 
       // Apply Tailwind prefix/suffix
-      const prefix = state.options?.format === 'text' ? '' : (tailwindData?.prefix || '')
-      const suffix = state.options?.format === 'text' ? '' : (tailwindData?.suffix || '')
+      const prefix = state.outputFormat === 'markdown' ? (tailwindData?.prefix || '') : ''
+      const suffix = state.outputFormat === 'markdown' ? (tailwindData?.suffix || '') : ''
 
       if (prefix || suffix) {
         node.generatedMarkdown = { prefix, suffix }

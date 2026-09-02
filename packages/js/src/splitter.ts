@@ -16,7 +16,8 @@ import {
 import { createMarkdownProcessor } from './markdown-processor'
 import { parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
-import { resolvePlugins } from './resolve-plugins'
+import { buildTagOverrideHandlers } from './tag-overrides'
+import { tagHandlers } from './tags'
 
 const MARKDOWN_HEADER_LINE_RE = /^#{1,6}\s+/
 const NEWLINE_RE = /\n/g
@@ -38,7 +39,10 @@ function createOptions(options: SplitterOptions) {
     chunkOverlap: options.chunkOverlap ?? 200,
     lengthFunction: options.lengthFunction ?? ((text: string) => text.length),
     keepSeparator: options.keepSeparator ?? false,
-    resolvedPlugins: resolvePlugins(options).plugins,
+    resolvedPlugins: options.plugins ?? [],
+    tagOverrideHandlers: options.tagOverrides
+      ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
+      : undefined,
   }
 }
 
@@ -73,7 +77,7 @@ export function* htmlToMarkdownSplitChunksStream(
   let currentChunkCodeLanguage = ''
 
   // Create processor
-  const processor = createMarkdownProcessor(options, opts.resolvedPlugins)
+  const processor = createMarkdownProcessor(options, opts.resolvedPlugins, opts.tagOverrideHandlers)
   processor.state.onCodeFenceOpen = (language) => {
     if (language && !currentChunkCodeLanguage)
       currentChunkCodeLanguage = language
@@ -158,6 +162,8 @@ export function* htmlToMarkdownSplitChunksStream(
     depthMap: processor.state.depthMap,
     depth: 0,
     resolvedPlugins: opts.resolvedPlugins,
+    tagHandlers,
+    tagOverrideHandlers: opts.tagOverrideHandlers,
   }
 
   const eventBuffer: NodeEvent[] = []

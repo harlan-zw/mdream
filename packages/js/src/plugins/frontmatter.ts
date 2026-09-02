@@ -11,6 +11,8 @@ export interface FrontmatterPluginOptions {
   additionalFields?: Record<string, string>
   /** Meta tag names to extract (beyond the standard ones) */
   metaFields?: string[]
+  /** Receive structured frontmatter when the document head closes. */
+  onExtract?: (frontmatter: Record<string, string>) => void
 }
 
 interface FrontmatterData {
@@ -116,7 +118,10 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
       // Handle exiting the head tag
       if (node.type === ELEMENT_NODE && node.tagId === TAG_HEAD) {
         inHead = false
-        if (state.options?.format === 'text')
+        const structured = getStructuredData()
+        if (structured)
+          options.onExtract?.(structured)
+        if (state.outputFormat !== 'markdown')
           return undefined
 
         // Generate frontmatter as we exit the head
@@ -149,9 +154,6 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
       }
     },
   } as any)
-
-  // Attach getter to the plugin for structured data access
-  ;(plugin as any).getFrontmatter = getStructuredData
 
   return plugin
 
