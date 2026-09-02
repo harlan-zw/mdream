@@ -131,7 +131,7 @@ describe('mdream browser compatibility', () => {
 
     const htmlWithMark = '<p>This is <mark>highlighted text</mark> in a paragraph.</p>'
     const result = htmlToMarkdown(htmlWithMark, {
-      hooks: [testPlugin],
+      plugins: [testPlugin],
     })
 
     renderMarkdown(result)

@@ -41,7 +41,7 @@ import {
   TagIdMap,
   TEXT_NODE,
 } from './const'
-import { resolveUrl } from './tags'
+import { resolveUrl } from './url'
 import { getLanguageFromClass, isSafeHtmlUrl, parseUnsignedInteger } from './utils'
 
 interface HeadingFrame {

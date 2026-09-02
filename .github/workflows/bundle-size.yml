@@ -39,7 +39,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: crates -> target
+          workspaces: |
+            crates -> target
+            bench/rust-bundle -> target
 
       - name: Install wasm-pack and wasm-opt
         uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
@@ -65,6 +67,11 @@ jobs:
             else
               echo "The base commit predates the Rust bundle-size harness; the WASM bundle will be reported as new."
             fi
+            if node -e "const pkg = require('./package.json'); process.exit(pkg.scripts?.['test:bundle-size:rust-native'] ? 0 : 1)"; then
+              pnpm test:bundle-size:rust-native
+            else
+              echo "The base commit predates the native Rust size harness."
+            fi
             cp -R bench/bundle/dist/. /tmp/base-dist/
           else
             echo "The base commit predates the bundle-size harness; bundles will be reported as new."
@@ -78,6 +85,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm test:bundle-size
           pnpm test:bundle-size:rust
+          pnpm test:bundle-size:rust-native
 
       - name: Run performance benchmarks
         run: |
@@ -87,16 +95,25 @@ jobs:
           # measurement deterministic (see bench/perf-ci.mjs). The extra
           # --no-opt --alloc-only run carries the gated memory signal: with the
           # JIT off, escape-analysis inlining luck can't move the number.
+          # The SSR byte test loads both artifacts together and alternates samples.
           NODE_FLAGS="--expose-gc --min-semi-space-size=256 --max-semi-space-size=256"
           if [ -f /tmp/base-dist/core/fixtures/core.mjs ]; then
             MDREAM_PERF_DIST=/tmp/base-dist node $NODE_FLAGS bench/perf-ci.mjs > /tmp/base-perf.json \
               || { echo "::warning::base perf run failed; perf deltas will be reported as new"; echo '{}' > /tmp/base-perf.json; }
             MDREAM_PERF_DIST=/tmp/base-dist node --no-opt $NODE_FLAGS bench/perf-ci.mjs --alloc-only > /tmp/base-alloc.json \
               || { echo "::warning::base alloc run failed; alloc deltas will be reported as new"; echo '{}' > /tmp/base-alloc.json; }
+            node $NODE_FLAGS bench/perf-paired-ci.mjs \
+              --base-dist /tmp/base-dist \
+              --pr-dist bench/bundle/dist \
+              --base-out /tmp/base-paired-perf.json \
+              --pr-out /tmp/pr-paired-perf.json \
+              || { echo "::warning::paired perf run failed; paired deltas will be omitted"; echo '{}' > /tmp/base-paired-perf.json; echo '{}' > /tmp/pr-paired-perf.json; }
           else
             echo "The base commit predates the perf harness; benchmarks will be reported as new."
             echo '{}' > /tmp/base-perf.json
             echo '{}' > /tmp/base-alloc.json
+            echo '{}' > /tmp/base-paired-perf.json
+            echo '{}' > /tmp/pr-paired-perf.json
           fi
           node $NODE_FLAGS bench/perf-ci.mjs > /tmp/pr-perf.json \
             || { echo "::warning::PR perf run failed; the perf section will be omitted"; echo '{}' > /tmp/pr-perf.json; }
@@ -115,9 +132,9 @@ jobs:
       - name: Generate bundle report
         env:
           BASE_DIST: /tmp/base-dist
-          BASE_PERF: /tmp/base-perf.json,/tmp/base-alloc.json
+          BASE_PERF: /tmp/base-perf.json,/tmp/base-paired-perf.json,/tmp/base-alloc.json
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_PERF: /tmp/pr-perf.json,/tmp/pr-alloc.json
+          PR_PERF: /tmp/pr-perf.json,/tmp/pr-paired-perf.json,/tmp/pr-alloc.json
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPORT_DIR: ${{ runner.temp }}/bundle-size-report
         run: |

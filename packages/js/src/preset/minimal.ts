@@ -1,4 +1,4 @@
-import type { EngineOptions } from '../types'
+import type { MdreamOptions } from '../types'
 import {
   TAG_ASIDE,
   TAG_BUTTON,
@@ -13,23 +13,23 @@ import {
   TAG_SELECT,
   TAG_TEXTAREA,
 } from '../const'
+import { filterPlugin } from '../plugins/filter'
+import { frontmatterPlugin } from '../plugins/frontmatter'
+import { isolateMainPlugin } from '../plugins/isolate-main'
+import { tailwindPlugin } from '../plugins/tailwind'
 
 /**
- * Creates a configurable minimal preset with advanced options.
- * Returns declarative plugin config that works with both JS and Rust engines.
+ * Compose the minimal plugin set with explicit user plugins.
  */
-export function withMinimalPreset<T extends EngineOptions>(
-  options: T = {} as T,
-): T {
+export function withMinimalPreset(options: MdreamOptions = {}): MdreamOptions {
   return {
-    // Default clean: true unless explicitly overridden
-    clean: options.clean !== undefined ? options.clean : true,
     ...options,
-    plugins: {
-      frontmatter: true,
-      isolateMain: true,
-      tailwind: true,
-      filter: {
+    clean: options.clean ?? true,
+    plugins: [
+      frontmatterPlugin(),
+      isolateMainPlugin(),
+      tailwindPlugin(),
+      filterPlugin({
         exclude: [
           TAG_FORM,
           TAG_FIELDSET,
@@ -44,9 +44,8 @@ export function withMinimalPreset<T extends EngineOptions>(
           TAG_BUTTON,
           TAG_NAV,
         ],
-      },
-      // Allow user overrides
-      ...options.plugins,
-    },
+      }),
+      ...(options.plugins ?? []),
+    ],
   }
 }

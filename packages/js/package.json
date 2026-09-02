@@ -2,7 +2,7 @@
   "name": "@mdream/js",
   "type": "module",
   "version": "1.7.0",
-  "description": "JavaScript HTML-to-Markdown engine for mdream. Escape hatch for hooks and edge runtimes.",
+  "description": "Tree-shakable JavaScript converters and plugins for mdream.",
   "author": {
     "name": "Harlan Wilton",
     "email": "harlan@harlanzw.com",
@@ -24,13 +24,21 @@
       },
       "default": "./dist/index.mjs"
     },
-    "./core": {
-      "types": "./dist/core.d.mts",
+    "./text": {
+      "types": "./dist/text.d.mts",
       "import": {
-        "types": "./dist/core.d.mts",
-        "default": "./dist/core.mjs"
+        "types": "./dist/text.d.mts",
+        "default": "./dist/text.mjs"
       },
-      "default": "./dist/core.mjs"
+      "default": "./dist/text.mjs"
+    },
+    "./html": {
+      "types": "./dist/html.d.mts",
+      "import": {
+        "types": "./dist/html.d.mts",
+        "default": "./dist/html.mjs"
+      },
+      "default": "./dist/html.mjs"
     },
     "./negotiate": {
       "types": "./dist/negotiate.d.mts",

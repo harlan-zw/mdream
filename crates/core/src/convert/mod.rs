@@ -9,7 +9,8 @@ use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selec
 use crate::tags::get_tag_handler;
 use crate::tailwind::process_tailwind_classes;
 use crate::types::{
-  ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, TagHandler, TailwindData,
+  ElementNode, ExtractedElement, HTMLToMarkdownOptions, NodeExtras, OutputFormat, TagHandler,
+  TagOverrideConfig, TailwindData,
 };
 use crate::url::{
   is_autolink_uri, is_empty_link_href, is_safe_html_url, resolve_url, slugify_heading,
@@ -174,6 +175,50 @@ fn trim_ascii_whitespace_end(value: &str) -> usize {
     len -= 1;
   }
   len
+}
+
+fn heap_sort_heading_slugs(slugs: &mut [String]) {
+  fn sift_down(slugs: &mut [String], mut root: usize, end: usize) {
+    let mut child = root * 2 + 1;
+    while child < end {
+      if child + 1 < end && slugs[child] < slugs[child + 1] {
+        child += 1;
+      }
+      if slugs[root] >= slugs[child] {
+        return;
+      }
+      slugs.swap(root, child);
+      root = child;
+      child = root * 2 + 1;
+    }
+  }
+
+  let mut root = slugs.len() / 2;
+  while root > 0 {
+    root -= 1;
+    sift_down(slugs, root, slugs.len());
+  }
+
+  let mut end = slugs.len();
+  while end > 1 {
+    end -= 1;
+    slugs.swap(0, end);
+    sift_down(slugs, 0, end);
+  }
+}
+
+fn contains_sorted_heading_slug(slugs: &[String], target: &str) -> bool {
+  let mut start = 0usize;
+  let mut end = slugs.len();
+  while start < end {
+    let midpoint = start + (end - start) / 2;
+    match slugs[midpoint].as_str().cmp(target) {
+      std::cmp::Ordering::Less => start = midpoint + 1,
+      std::cmp::Ordering::Greater => end = midpoint,
+      std::cmp::Ordering::Equal => return true,
+    }
+  }
+  false
 }
 
 /// What the current output line holds where a table row is about to be written.
@@ -458,6 +503,8 @@ pub struct ConvertState {
   script_text_buffer: String,
   pub stack: Vec<ElementNode>,
   node_pool: Vec<ElementNode>,
+  /// Scan target, swapped with the pooled node so attribute buffers recycle.
+  pub(crate) attr_scratch: crate::types::Attributes,
 
   // Plugin flags
   has_plugins: bool,
@@ -467,6 +514,9 @@ pub struct ConvertState {
   has_filter: bool,
   pub has_extraction: bool,
   has_tag_overrides: bool,
+  /// Some plugin reads arbitrary attributes, so every tag captures all of them.
+  /// `frontmatter` is absent deliberately: TAG_META's mask covers what it reads.
+  attrs_force_all: bool,
 
   // Plugin tracking
   isolate_main_found: bool,
@@ -624,7 +674,14 @@ pub struct ConvertState {
   cut_line_lead: CutLineLead,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
+  /// tag_id -> index into `tag_overrides`; `NO_OVERRIDE` means no key. Boxed:
+  /// held inline it costs the override-free path more than the scan it replaces.
+  override_idx: Option<Box<[u8; MAX_TAG_ID]>>,
 }
+
+/// `override_idx` slot for a tag no override key names. Doubles as the
+/// exclusive upper bound on indices the table can hold.
+pub(crate) const NO_OVERRIDE: u8 = u8::MAX;
 
 impl ConvertState {
   /// Check if we're inside a table cell (either `<td>` or `<th>`).
@@ -674,6 +731,7 @@ impl ConvertState {
       script_text_buffer: String::new(),
       stack: Vec::with_capacity(32),
       node_pool: Vec::with_capacity(32),
+      attr_scratch: crate::types::Attributes::new(),
 
       has_plugins: false,
       has_tailwind: false,
@@ -682,6 +740,8 @@ impl ConvertState {
       has_filter: false,
       has_extraction: false,
       has_tag_overrides: false,
+      override_idx: None,
+      attrs_force_all: false,
 
       isolate_main_found: false,
       isolate_main_closed: false,
@@ -801,7 +861,24 @@ impl ConvertState {
       s.has_tailwind = plugins.tailwind.is_some();
       s.has_isolate_main = plugins.isolate_main.is_some();
       s.has_frontmatter = plugins.frontmatter.is_some();
-      s.has_tag_overrides = plugins.tag_overrides.is_some();
+      if let Some(ovs) = &plugins.tag_overrides {
+        s.has_tag_overrides = true;
+        // A longer list has keys the sentinel cannot index; leaving the table
+        // unbuilt sends every lookup down the key scan instead of testing here.
+        if ovs.len() < NO_OVERRIDE as usize {
+          let mut idx = Box::new([NO_OVERRIDE; MAX_TAG_ID]);
+          // `zip` over a u8 counter: the length check above keeps it in range.
+          for ((k, _), i) in ovs.iter().zip(0u8..) {
+            if let Some(id) = crate::consts::get_tag_id(k)
+              && idx[id as usize] == NO_OVERRIDE
+            {
+              // First key wins, matching `find` order on duplicate keys.
+              idx[id as usize] = i;
+            }
+          }
+          s.override_idx = Some(idx);
+        }
+      }
       if let Some(extraction) = &plugins.extraction {
         s.has_extraction = true;
         s.extraction_parsed_selectors = extraction
@@ -826,6 +903,7 @@ impl ConvertState {
         }
         s.filter_process_children = filter.process_children.unwrap_or(true);
       }
+      s.attrs_force_all = s.has_tailwind || s.has_filter || s.has_extraction;
     }
     s
   }
@@ -923,7 +1001,7 @@ impl ConvertState {
         node.tag_id == Some(TAG_A)
           && node
             .attributes
-            .get("title")
+            .get_bit(ATTR_TITLE)
             .is_some_and(|title| !title.is_empty())
       })
     {
@@ -931,7 +1009,7 @@ impl ConvertState {
     }
     match self.stack.last() {
       Some(parent) => {
-        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind.is_none())
+        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind().is_none())
       }
       None => true,
     }
@@ -985,7 +1063,7 @@ impl ConvertState {
     if self
       .stack
       .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none())
+      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none())
     {
       match self.process_script_chunk(chunk, i) {
         ScriptChunk::Closed(close_index) => i = close_index,
@@ -1583,64 +1661,98 @@ impl ConvertState {
       self.buffer.drain(..start);
     }
 
-    // Apply clean.fragments using recorded positions
-    // Build new string copying segments, replacing broken links with text only
+    // Apply clean.fragments using recorded positions: a link whose #fragment
+    // matches no heading keeps its text and loses its target.
     if self.clean_flags & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
       let trim_offset = start;
-      let mut result = String::with_capacity(self.buffer.len());
-      let mut cursor = 0usize;
+      // A specialized heap sort avoids pulling Rust's larger generic sort into WASM.
+      heap_sort_heading_slugs(&mut self.heading_slugs);
+
+      // Only deletes, so it compacts in place: `write` trails `read` by bytes
+      // dropped so far. A clean document never writes a byte; rebuilding into
+      // a second String cost 7.2 MB on the spec page.
+      let buf_len = self.buffer.len();
+      let mut read = 0usize;
+      let mut write = 0usize;
+
+      // A nested `<a>` across a block boundary reuses the outer anchor's
+      // link_bracket_pos instead of getting its own `[`, so two
+      // fragment_links entries can point at the same bracket. Rewriting
+      // either one then risks corrupting the other's text. Skip any bracket
+      // used more than once.
+      let mut bracket_starts: Vec<usize> = self.fragment_links.iter().map(|&(b, _)| b).collect();
+      bracket_starts.sort_unstable();
+      let has_aliased_bracket = |bracket_start: usize| {
+        let Ok(idx) = bracket_starts.binary_search(&bracket_start) else {
+          return false;
+        };
+        (idx > 0 && bracket_starts[idx - 1] == bracket_start)
+          || (idx + 1 < bracket_starts.len() && bracket_starts[idx + 1] == bracket_start)
+      };
 
       for &(bracket_start, link_end) in &self.fragment_links {
         let adj_start = bracket_start.saturating_sub(trim_offset);
         let adj_end = link_end.saturating_sub(trim_offset);
-        if adj_end > self.buffer.len() || adj_start >= adj_end {
+        // `read > adj_start` would mean overlapping links (anchors can't
+        // nest); skipping keeps the compaction from reading overwritten bytes.
+        if adj_end > buf_len || adj_start >= adj_end || read > adj_start {
+          continue;
+        }
+        if has_aliased_bracket(bracket_start) {
+          continue;
+        }
+        if !self.buffer.is_char_boundary(adj_start) || !self.buffer.is_char_boundary(adj_end) {
           continue;
         }
 
-        // Extract fragment from buffer: [text](#fragment) → find ](#
         let range = &self.buffer[adj_start..adj_end];
-        let is_valid = if let Some(hash_pos) = range.find("](#") {
-          let frag_start = hash_pos + 3; // skip ](#
-          let frag_end = range.len().saturating_sub(1); // skip trailing )
-          if frag_start < frag_end {
-            let fragment = &range[frag_start..frag_end];
-            !self.heading_slugs.is_empty() && self.heading_slugs.iter().any(|s| s == fragment)
-          } else {
-            false
-          }
-        } else {
-          true // not a fragment link pattern, keep as-is
+        let Some(hash_pos) = range.find("](#") else {
+          continue; // not a fragment link pattern, keep as-is
         };
-
-        if is_valid {
-          continue; // keep original, will be copied by cursor
+        // A link with no text has nothing to rewrite to, so leave it whole.
+        if hash_pos == 0 {
+          continue;
+        }
+        let frag_start = hash_pos + 3; // skip ](#
+        let frag_end = range.len() - 1; // skip trailing )
+        if frag_start < frag_end {
+          let fragment = &range[frag_start..frag_end];
+          if contains_sorted_heading_slug(&self.heading_slugs, fragment) {
+            continue; // resolves to a heading, keep the link whole
+          }
         }
 
-        // Copy everything before this link
-        // Extract and copy just the text (between [ and ]). The recorded start
-        // can drift off the `[` when other rewrites shift the buffer; only a
-        // real `[text](#frag)` shape is safe to slice and rewrite. A drifted
-        // entry is left untouched: skipping it here lets the normal cursor flow
-        // copy its bytes verbatim instead of deleting them.
+        // The recorded start can drift off the `[` when other rewrites shift
+        // the buffer; only a real `[text](#frag)` shape is safe to slice and
+        // rewrite. A drifted entry is left untouched: skipping it here lets
+        // the normal cursor flow copy its bytes verbatim instead of deleting
+        // them.
         if !range.starts_with('[') {
           continue;
         }
-        let Some(close_bracket) = range.find("](#") else {
-          continue;
-        };
-        if cursor < adj_start {
-          result.push_str(&self.buffer[cursor..adj_start]);
+        // SAFETY: both moved runs are whole slices delimited by the ASCII
+        // `[` and `](#` markers, so every char boundary is preserved.
+        #[allow(unsafe_code)]
+        let bytes = unsafe { self.buffer.as_mut_vec() };
+        if read < adj_start {
+          bytes.copy_within(read..adj_start, write);
+          write += adj_start - read;
         }
-        result.push_str(&self.buffer[adj_start + 1..adj_start + close_bracket]);
-        cursor = adj_end;
+        bytes.copy_within(adj_start + 1..adj_start + hash_pos, write);
+        write += hash_pos - 1;
+        read = adj_end;
       }
 
-      // Only rebuild if we actually replaced something
-      if cursor > 0 {
-        if cursor < self.buffer.len() {
-          result.push_str(&self.buffer[cursor..]);
+      // `read` only advances past a dropped link, so zero means nothing changed.
+      if read > 0 {
+        // SAFETY: as above; the surviving tail is moved whole.
+        #[allow(unsafe_code)]
+        let bytes = unsafe { self.buffer.as_mut_vec() };
+        if read < buf_len {
+          bytes.copy_within(read..buf_len, write);
+          write += buf_len - read;
         }
-        self.buffer = result;
+        bytes.truncate(write);
       }
     }
     std::mem::take(&mut self.buffer)
@@ -1675,7 +1787,7 @@ impl ConvertState {
     let in_script = self
       .stack
       .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none());
+      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none());
     if in_script {
       self.push_script_text(leftover);
       self.flush_script_text();

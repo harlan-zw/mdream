@@ -376,7 +376,7 @@ impl ConvertState {
       || self
         .stack
         .last()
-        .and_then(|node| node.tailwind.as_ref())
+        .and_then(ElementNode::tailwind)
         .is_some_and(|tailwind| tailwind.hidden)
     {
       return 1;
@@ -392,8 +392,7 @@ impl ConvertState {
     });
     let node = ElementNode {
       attributes: attributes.clone(),
-      tailwind: None,
-      custom_name: (!is_builtin).then(|| tag_name.to_string()),
+      extras: NodeExtras::for_tag(is_builtin, tag_name),
       depth: self.depth + 1,
       index: 0,
       current_walk_index: 0,
@@ -410,7 +409,7 @@ impl ConvertState {
     if self.has_tailwind
       && node
         .attributes
-        .get("class")
+        .get_bit(ATTR_CLASS)
         .is_some_and(|class| process_tailwind_classes(class).2)
     {
       return 1;
@@ -562,7 +561,7 @@ impl ConvertState {
 
     if self.has_tailwind
       && let Some(parent) = self.stack.last()
-      && let Some(tw) = &parent.tailwind
+      && let Some(tw) = parent.tailwind()
     {
       if tw.hidden {
         excludes_text_nodes = true;
@@ -583,7 +582,10 @@ impl ConvertState {
 
     if !excludes_text_nodes {
       let depth = self.depth;
-      let index = self.stack.last().map_or(0, |n| n.current_walk_index);
+      let index = self
+        .stack
+        .last()
+        .map_or(0, |n| n.current_walk_index as usize);
       self.text_buffer_has_inline_gfm_hazard = has_inline_gfm_hazard;
       if self.link_empty_text_pending && !text.trim().is_empty() {
         self.link_empty_text_pending = false;
@@ -755,16 +757,18 @@ impl ConvertState {
     position: usize,
   ) -> OpeningTagResult {
     let tag_handler = tag_id.and_then(get_tag_handler);
-    // Plugins can read any attribute, so they force full capture. `frontmatter`
-    // is absent deliberately: TAG_META's own mask already covers what it reads.
-    let attr_mask =
-      if self.has_tailwind || self.has_filter || self.has_extraction || self.has_tag_overrides {
-        ATTR_ALL
-      } else {
-        tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
-      };
-    let (complete, new_position, attributes, self_closing) =
-      process_tag_attributes(html_chunk, position, tag_handler, attr_mask);
+    let attr_mask = if self.attrs_force_all {
+      ATTR_ALL
+    } else {
+      tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
+    };
+    let (complete, new_position, self_closing) = process_tag_attributes(
+      html_chunk,
+      position,
+      tag_handler,
+      attr_mask,
+      &mut self.attr_scratch,
+    );
 
     if !complete {
       return OpeningTagResult {
@@ -904,17 +908,20 @@ impl ConvertState {
       }
     }
 
-    let overflow_plugin_mode = if !self_closing
-      && (self.overflow_same_name_depth > 0 || self.stack.len() >= MAX_ELEMENT_DEPTH)
-    {
-      self.overflow_plugin_mode(tag_name, tag_id, is_builtin, &attributes, tag_handler)
+    let in_overflow =
+      !self_closing && (self.overflow_same_name_depth > 0 || self.stack.len() >= MAX_ELEMENT_DEPTH);
+    let overflow_plugin_mode = if in_overflow {
+      self.overflow_plugin_mode(
+        tag_name,
+        tag_id,
+        is_builtin,
+        &self.attr_scratch,
+        tag_handler,
+      )
     } else {
       0
     };
-    if !self_closing
-      && (self.overflow_same_name_depth > 0 || self.stack.len() >= MAX_ELEMENT_DEPTH)
-      && (tag_id == Some(TAG_TEMPLATE) || overflow_plugin_mode == 1)
-    {
+    if in_overflow && (tag_id == Some(TAG_TEMPLATE) || overflow_plugin_mode == 1) {
       self.enter_opaque_overflow(tag_name, tag_handler);
       return OpeningTagResult {
         complete: true,
@@ -971,11 +978,7 @@ impl ConvertState {
     self.depth += 1;
 
     let current_walk_index = self.stack.last().map_or(0, |n| n.current_walk_index);
-    let custom_name = if is_builtin {
-      None
-    } else {
-      Some(tag_name.to_string())
-    };
+    let extras = NodeExtras::for_tag(is_builtin, tag_name);
 
     let (h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) = if let Some(h) = tag_handler
     {
@@ -999,8 +1002,9 @@ impl ConvertState {
     };
 
     let mut tag = if let Some(mut pooled) = self.node_pool.pop() {
-      pooled.custom_name = custom_name;
-      pooled.attributes = attributes;
+      pooled.extras = extras;
+      // Swap, not assign: assigning drops the pooled node's kept buffer.
+      std::mem::swap(&mut pooled.attributes, &mut self.attr_scratch);
       pooled.tag_id = tag_id;
       pooled.depth = self.depth;
       pooled.index = current_walk_index;
@@ -1008,7 +1012,6 @@ impl ConvertState {
       pooled.child_text_node_index = 0;
       pooled.contains_whitespace = false;
       pooled.excluded_from_markdown = false;
-      pooled.tailwind = None;
       pooled.is_inline = h_inline;
       pooled.excludes_text_nodes = h_excludes;
       pooled.is_non_nesting = h_non_nesting;
@@ -1017,8 +1020,9 @@ impl ConvertState {
       pooled
     } else {
       ElementNode {
-        custom_name,
-        attributes,
+        extras,
+        // Pool empty, so no buffer to trade back; the scratch regrows once.
+        attributes: std::mem::take(&mut self.attr_scratch),
         tag_id,
         depth: self.depth,
         index: current_walk_index,
@@ -1026,7 +1030,6 @@ impl ConvertState {
         child_text_node_index: 0,
         contains_whitespace: false,
         excluded_from_markdown: false,
-        tailwind: None,
         is_inline: h_inline,
         excludes_text_nodes: h_excludes,
         is_non_nesting: h_non_nesting,
@@ -1044,10 +1047,10 @@ impl ConvertState {
         let parent_hidden = self
           .stack
           .last()
-          .and_then(|p| p.tailwind.as_ref())
+          .and_then(ElementNode::tailwind)
           .is_some_and(|tw| tw.hidden);
 
-        if let Some(class_attr) = tag.attributes.get("class") {
+        if let Some(class_attr) = tag.attributes.get_bit(ATTR_CLASS) {
           let (mut prefix, mut suffix, hidden) = process_tailwind_classes(class_attr);
           if self.plain_text {
             prefix = None;
@@ -1055,21 +1058,21 @@ impl ConvertState {
           }
           let hidden = hidden || parent_hidden;
           if prefix.is_some() || suffix.is_some() || hidden {
-            tag.tailwind = Some(Box::new(TailwindData {
+            tag.set_tailwind(TailwindData {
               prefix,
               suffix,
               hidden,
-            }));
+            });
             if hidden {
               skip_node = true;
             }
           }
         } else if parent_hidden {
-          tag.tailwind = Some(Box::new(TailwindData {
+          tag.set_tailwind(TailwindData {
             prefix: None,
             suffix: None,
             hidden: true,
-          }));
+          });
           skip_node = true;
         }
       }
@@ -1155,12 +1158,11 @@ impl ConvertState {
         } else if self.frontmatter_in_head && tag_id == Some(TAG_META) {
           let name = tag
             .attributes
-            .get("name")
-            .or_else(|| tag.attributes.get("property"));
-          let content = tag.attributes.get("content");
+            .get_bit(ATTR_NAME)
+            .or_else(|| tag.attributes.get_bit(ATTR_PROPERTY));
+          let content = tag.attributes.get_bit(ATTR_CONTENT);
           if let (Some(n), Some(c)) = (name, content) {
-            let n_str = n.as_str();
-            let is_allowed = match n_str {
+            let is_allowed = match n {
               "description"
               | "keywords"
               | "author"
@@ -1175,13 +1177,13 @@ impl ConvertState {
                 .as_ref()
                 .and_then(|p| p.frontmatter.as_ref())
                 .and_then(|f| f.meta_fields.as_ref())
-                .is_some_and(|allowed| allowed.iter().any(|a| a == n_str)),
+                .is_some_and(|allowed| allowed.iter().any(|a| a == n)),
             };
             if is_allowed {
               if let Some(entry) = self.frontmatter_meta.iter_mut().find(|(k, _)| k == n) {
-                entry.1.clone_from(c);
+                c.clone_into(&mut entry.1);
               } else {
-                self.frontmatter_meta.push((n.clone(), c.clone()));
+                self.frontmatter_meta.push((n.to_string(), c.to_string()));
               }
             }
           }
@@ -1223,7 +1225,7 @@ impl ConvertState {
           let attrs: Vec<(String, String)> = element
             .attributes
             .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
+            .map(|(name, value)| (name.to_string(), value.to_string()))
             .collect();
           self.extraction_tracked.push(TrackedExtraction {
             selector: selector.clone(),
@@ -1257,7 +1259,7 @@ impl ConvertState {
         if parent_is_ordered {
           // Must match the marker actually written, `start` included, or the
           // item's continuation content drifts out of it.
-          let n = Self::ordered_item_number(&self.stack[stack_len - 2], li.index).max(1);
+          let n = Self::ordered_item_number(&self.stack[stack_len - 2], li.index as usize).max(1);
           // n >= 1 so ilog10 never panics; +1 converts floor(log10) to digit count.
           let digits = (n.ilog10() + 1) as usize;
           digits + 2
@@ -1371,9 +1373,9 @@ impl ConvertState {
     {
       let prefix = node
         .attributes
-        .get("title")
-        .or_else(|| node.attributes.get("aria-label"))
-        .cloned()
+        .get_bit(ATTR_TITLE)
+        .or_else(|| node.attributes.get_bit(ATTR_ARIA_LABEL))
+        .map(ToString::to_string)
         .unwrap_or_default();
       if !prefix.is_empty() {
         let node_depth = node.depth;
@@ -1604,7 +1606,7 @@ impl ConvertState {
       if !needs_name_match {
         return true;
       }
-      node.custom_name.as_deref() == Some(close_name)
+      node.custom_name() == Some(close_name)
     };
 
     let mut matched = false;
@@ -1690,7 +1692,7 @@ impl ConvertState {
       if !excluded {
         let depth = self.depth;
         let index = self.stack.last().map_or(0, |n| n.current_walk_index);
-        self.emit_text(content, false, depth, index);
+        self.emit_text(content, false, depth, index as usize);
       }
       if let Some(parent) = self.stack.last_mut() {
         parent.current_walk_index += 1;
@@ -1702,12 +1704,12 @@ impl ConvertState {
     }
   }
 
-  /// Recycle a node into the pool, preserving its Attributes Vec allocation.
+  /// Recycle a node into the pool. `clear` keeps the `Attributes` capacity,
+  /// which `process_opening_tag` swaps back out into `attr_scratch`.
   #[inline]
   pub(crate) fn recycle_node(&mut self, mut node: ElementNode) {
     node.attributes.clear();
-    node.custom_name = None;
-    node.tailwind = None;
+    node.extras = None;
     self.node_pool.push(node);
   }
 

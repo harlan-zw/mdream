@@ -67,6 +67,8 @@ bench/rust-compare/target/
 bench/rust-compare/Cargo.lock
 bench/rust-compare-fast/target/
 bench/rust-compare-fast/Cargo.lock
+bench/rust-bundle/target/
+bench/rust-bundle/Cargo.lock
 *.node
 packages/mdream/napi/
 # wasm-pack output; ignored here (not via nested .gitignore) so npm packing still includes it

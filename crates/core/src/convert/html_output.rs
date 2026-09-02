@@ -97,7 +97,7 @@ impl ConvertState {
     let name = html_tag_name(tag_id)?;
     if !entering {
       if tag_id == TAG_A {
-        let href = node.attributes.get("href")?;
+        let href = node.attributes.get_bit(ATTR_HREF)?;
         self.resolve_html_url(href, false)?;
       }
       return Some(format!("</{name}>"));
@@ -108,12 +108,12 @@ impl ConvertState {
     output.push_str(name);
     match tag_id {
       TAG_A => {
-        let href = node.attributes.get("href")?;
+        let href = node.attributes.get_bit(ATTR_HREF)?;
         let resolved = self.resolve_html_url(href, false)?;
         output.push_str(" href=\"");
         push_escaped(&mut output, resolved.as_ref(), true);
         output.push('"');
-        if let Some(title) = node.attributes.get("title") {
+        if let Some(title) = node.attributes.get_bit(ATTR_TITLE) {
           output.push_str(" title=\"");
           push_escaped(&mut output, title, true);
           output.push('"');
@@ -122,7 +122,7 @@ impl ConvertState {
       TAG_OL => {
         if let Some(start) = node
           .attributes
-          .get("start")
+          .get_bit(ATTR_START)
           .and_then(|value| parse_bounded_u32(value, u32::MAX))
         {
           output.push_str(" start=\"");
@@ -131,7 +131,7 @@ impl ConvertState {
         }
       }
       TAG_CODE => {
-        let language = Self::get_language_from_class(node.attributes.get("class"));
+        let language = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS));
         if !language.is_empty() {
           output.push_str(" class=\"language-");
           push_escaped(&mut output, language, true);
@@ -141,7 +141,7 @@ impl ConvertState {
       TAG_TH | TAG_TD => {
         if let Some(colspan) = node
           .attributes
-          .get("colspan")
+          .get_bit(ATTR_COLSPAN)
           .and_then(|value| parse_bounded_u32(value, u32::MAX))
           && colspan > 0
         {
@@ -150,7 +150,7 @@ impl ConvertState {
           output.push('"');
         }
         if tag_id == TAG_TH
-          && let Some(align) = node.attributes.get("align")
+          && let Some(align) = node.attributes.get_bit(ATTR_ALIGN)
         {
           let normalized = if align.eq_ignore_ascii_case("left") {
             "left"
@@ -184,7 +184,7 @@ impl ConvertState {
     }) = self.html_frames.last_mut()
     {
       if tag_id == Some(TAG_CODE) && language.is_empty() {
-        *language = Self::get_language_from_class(node.attributes.get("class")).to_string();
+        *language = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS)).to_string();
       } else if tag_id == Some(TAG_BR) {
         output.push('\n');
       }
@@ -202,7 +202,7 @@ impl ConvertState {
     if tag_id == Some(TAG_PRE) {
       self.html_frames.push(HtmlFrame::Pre {
         depth: node.depth,
-        language: Self::get_language_from_class(node.attributes.get("class")).to_string(),
+        language: Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS)).to_string(),
         output: String::new(),
       });
       return;
@@ -216,7 +216,7 @@ impl ConvertState {
       return;
     }
     if tag_id == Some(TAG_IMG) {
-      let rendered = node.attributes.get("src").and_then(|src| {
+      let rendered = node.attributes.get_bit(ATTR_SRC).and_then(|src| {
         let resolved = self.resolve_html_url(src, true)?;
         let mut output = String::with_capacity(resolved.len() + 32);
         output.push_str("<img src=\"");
@@ -224,11 +224,11 @@ impl ConvertState {
         output.push_str("\" alt=\"");
         push_escaped(
           &mut output,
-          node.attributes.get("alt").map_or("", String::as_str),
+          node.attributes.get_bit(ATTR_ALT).unwrap_or(""),
           true,
         );
         output.push('"');
-        if let Some(title) = node.attributes.get("title") {
+        if let Some(title) = node.attributes.get_bit(ATTR_TITLE) {
           output.push_str(" title=\"");
           push_escaped(&mut output, title, true);
           output.push('"');

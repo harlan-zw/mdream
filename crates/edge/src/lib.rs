@@ -273,6 +273,22 @@ pub fn html_to_markdown(html: &str, options: JsValue) -> String {
   mdream::html_to_format(html, opts, format)
 }
 
+/// Bytes in, string out: skips the transcode (~14% of a convert) for a
+/// caller already holding UTF-8 bytes. Encoding a string to get here
+/// measures 1-16% *slower* than [`html_to_markdown`] — only worth it when
+/// the bytes are already in hand.
+#[wasm_bindgen(js_name = "htmlToMarkdownBytes")]
+pub fn html_to_markdown_bytes(html: &[u8], options: JsValue) -> String {
+  let (opts, format) = parse_options(&options);
+  let html = html.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(html);
+  // Valid input costs one strict pass; only invalid bytes pay the lossy
+  // chunker, which replaces each maximal invalid subsequence with U+FFFD.
+  match std::str::from_utf8(html) {
+    Ok(text) => mdream::html_to_format(text, opts, format),
+    Err(_) => mdream::html_to_format(&String::from_utf8_lossy(html), opts, format),
+  }
+}
+
 #[wasm_bindgen(js_name = "htmlToMarkdownResult")]
 pub fn html_to_markdown_result(html: &str, options: JsValue) -> JsValue {
   let (opts, format) = parse_options(&options);
@@ -313,6 +329,10 @@ pub fn html_to_markdown_result(html: &str, options: JsValue) -> JsValue {
 #[wasm_bindgen]
 pub struct MarkdownStream {
   inner: mdream::MarkdownStreamProcessor,
+  /// A multi-byte sequence split across a chunk boundary; 1-3 bytes, byte
+  /// entry points only.
+  tail: Vec<u8>,
+  at_start: bool,
 }
 
 #[wasm_bindgen]
@@ -322,15 +342,202 @@ impl MarkdownStream {
     let (opts, format) = parse_options(&options);
     Self {
       inner: mdream::MarkdownStreamProcessor::new_with_format(opts, format),
+      tail: Vec::new(),
+      at_start: true,
     }
   }
 
+  /// A carried byte tail cannot be completed by a string chunk, so it is
+  /// flushed first. Byte and string chunks may be mixed freely.
   #[wasm_bindgen(js_name = "processChunk")]
   pub fn process_chunk(&mut self, chunk: &str) -> String {
-    self.inner.process_chunk(chunk)
+    if !chunk.is_empty() {
+      self.at_start = false;
+    }
+    if self.tail.is_empty() {
+      return self.inner.process_chunk(chunk);
+    }
+    let mut out = self.flush_tail();
+    out.push_str(&self.inner.process_chunk(chunk));
+    out
   }
 
   pub fn finish(&mut self) -> String {
-    self.inner.finish()
+    if self.tail.is_empty() {
+      return self.inner.finish();
+    }
+    let mut out = self.flush_tail();
+    out.push_str(&self.inner.finish());
+    out
+  }
+
+  /// Byte chunk in, string out, skipping the transcode per chunk. A sequence
+  /// split across chunks carries to the next call rather than decoding early,
+  /// matching `TextDecoder({ stream: true })`; invalid bytes become U+FFFD.
+  #[wasm_bindgen(js_name = "processChunkBytes")]
+  pub fn process_chunk_bytes(&mut self, chunk: &[u8]) -> String {
+    // Fast path: nothing held back, chunk valid or cut short at its end;
+    // neither case allocates or copies.
+    if self.tail.is_empty() {
+      match std::str::from_utf8(chunk) {
+        Ok(text) => return self.process_decoded_bytes(text),
+        Err(error) if error.error_len().is_none() => {
+          let (head, rest) = chunk.split_at(error.valid_up_to());
+          // `head` is valid by construction: it is what `valid_up_to` reports.
+          let out = match std::str::from_utf8(head) {
+            Ok(text) => self.process_decoded_bytes(text),
+            Err(_) => String::new(),
+          };
+          self.tail.extend_from_slice(rest);
+          return out;
+        }
+        Err(_) => {}
+      }
+    }
+    self.process_joined(chunk)
+  }
+}
+
+impl MarkdownStream {
+  fn process_decoded_bytes(&mut self, text: &str) -> String {
+    if self.at_start && !text.is_empty() {
+      self.at_start = false;
+      return self
+        .inner
+        .process_chunk(text.strip_prefix("\u{FEFF}").unwrap_or(text));
+    }
+    self.inner.process_chunk(text)
+  }
+
+  /// A tail still incomplete becomes U+FFFD, matching `TextDecoder`'s final
+  /// `decode()`. Caller checks emptiness.
+  fn flush_tail(&mut self) -> String {
+    let tail = std::mem::take(&mut self.tail);
+    self.process_decoded_bytes(&String::from_utf8_lossy(&tail))
+  }
+
+  /// Slow path: rejoin a carried tail, or replace invalid bytes.
+  fn process_joined(&mut self, chunk: &[u8]) -> String {
+    let mut buffer = std::mem::take(&mut self.tail);
+    buffer.extend_from_slice(chunk);
+
+    // Walk errors only to find a trailing incomplete sequence; everything
+    // before it goes to `from_utf8_lossy` (borrows when clean, else replaces).
+    let mut consumed = 0;
+    let split = loop {
+      match std::str::from_utf8(&buffer[consumed..]) {
+        Ok(_) => break buffer.len(),
+        Err(error) => match error.error_len() {
+          Some(invalid) => consumed += error.valid_up_to() + invalid,
+          None => break consumed + error.valid_up_to(),
+        },
+      }
+    };
+
+    let out = self.process_decoded_bytes(&String::from_utf8_lossy(&buffer[..split]));
+    // A trailing incomplete UTF-8 sequence has at most three bytes.
+    self.tail = buffer[split..].to_vec();
+    out
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::MarkdownStream;
+  use mdream::types::HTMLToMarkdownOptions;
+
+  fn test_stream() -> MarkdownStream {
+    MarkdownStream {
+      inner: mdream::MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default()),
+      tail: Vec::new(),
+      at_start: true,
+    }
+  }
+
+  #[test]
+  fn split_multibyte_across_byte_chunks_survives() {
+    let mut stream = test_stream();
+    let mut out = String::new();
+    out += &stream.process_chunk_bytes(b"<p>");
+    // 🎉 is 4 bytes; cut it across three calls so both the fast path and the
+    // rejoin path have to carry an incomplete sequence.
+    out += &stream.process_chunk_bytes(&[0xF0]);
+    out += &stream.process_chunk_bytes(&[0x9F, 0x8E]);
+    out += &stream.process_chunk_bytes(&[0x89, 0x3C, 0x2F, 0x70, 0x3E]); // `</p>`
+    out += &stream.finish();
+
+    assert!(out.contains('\u{1F389}'), "emoji lost in {out:?}");
+    assert!(
+      !out.contains('\u{FFFD}'),
+      "replacement char leaked into {out:?}"
+    );
+  }
+
+  #[test]
+  fn string_chunk_after_carried_tail_flushes_tail_as_replacement() {
+    let mut stream = test_stream();
+    let mut out = String::new();
+    out += &stream.process_chunk_bytes(b"<p>\xF0\x9F\x8E");
+    // A string chunk cannot complete a byte tail: it is flushed first, so the
+    // replacement char must land before the string chunk's own content.
+    out += &stream.process_chunk("</p>x<p>ok</p>");
+    out += &stream.finish();
+
+    let flush = out.find('\u{FFFD}').expect("carried tail not flushed");
+    let string_content = out.find('x').expect("string chunk lost");
+    assert!(
+      flush < string_content,
+      "tail flushed after string chunk: {out:?}"
+    );
+  }
+
+  #[test]
+  fn finish_flushes_pending_tail_as_replacement() {
+    let mut stream = test_stream();
+    stream.process_chunk_bytes(b"<p>\xF0\x9F");
+    let out = stream.finish();
+
+    assert!(out.contains('\u{FFFD}'), "pending tail dropped in {out:?}");
+  }
+
+  #[test]
+  fn invalid_bytes_become_replacement_chars() {
+    let mut stream = test_stream();
+    let out = stream.process_chunk_bytes(b"<p>a\xFFb</p>") + &stream.finish();
+
+    assert!(
+      out.contains("a\u{FFFD}b"),
+      "invalid byte mishandled in {out:?}"
+    );
+  }
+
+  #[test]
+  fn mixed_string_and_byte_chunks_convert_clean_html() {
+    let mut stream = test_stream();
+    let mut out = String::new();
+    out += &stream.process_chunk("<h1>Tit");
+    out += &stream.process_chunk_bytes(b"le</h1><p>bo");
+    out += &stream.process_chunk("dy</p>");
+    out += &stream.finish();
+
+    assert!(out.contains("# Title"), "heading lost in {out:?}");
+    assert!(out.contains("body"), "paragraph lost in {out:?}");
+    assert!(
+      !out.contains('\u{FFFD}'),
+      "replacement char leaked into {out:?}"
+    );
+  }
+
+  #[test]
+  fn byte_bom_after_string_content_is_preserved() {
+    let mut stream = test_stream();
+    let mut out = stream.process_chunk("<p>before");
+    out += &stream.process_chunk_bytes(b"\xEF\xBB\xBFafter</p>");
+    out += &stream.finish();
+
+    assert!(
+      out.contains("before\u{FEFF}after"),
+      "mid-stream BOM was removed in {out:?}"
+    );
   }
 }
