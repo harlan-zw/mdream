@@ -4,7 +4,6 @@ import { createPlugin } from '../pluggable/plugin'
 
 const BACKSLASH_RE = /\\/g
 const DOUBLE_QUOTE_RE = /"/g
-const ESCAPED_DOUBLE_QUOTE_RE = /\\"/g
 
 export interface FrontmatterPluginOptions {
   /** Additional frontmatter fields to include */
@@ -51,22 +50,37 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
     return value
   }
 
+  function rawValue(value: string): string {
+    const content = value.startsWith('"') && value.endsWith('"')
+      ? value.slice(1, -1)
+      : value
+    let result = ''
+    for (let index = 0; index < content.length; index++) {
+      const character = content[index]
+      const next = content[index + 1]
+      if (character === '\\' && (next === '\\' || next === '"')) {
+        result += next
+        index++
+      }
+      else {
+        result += character
+      }
+    }
+    return result
+  }
+
   function getStructuredData(): Record<string, string> | undefined {
     const result: Record<string, string> = {}
     if (frontmatter.title) {
       // Strip quotes that formatValue adds
       const raw = frontmatter.title
-      result.title = raw.startsWith('"') && raw.endsWith('"')
-        ? raw.slice(1, -1).replace(ESCAPED_DOUBLE_QUOTE_RE, '"')
-        : raw
+      result.title = rawValue(raw)
     }
     for (const [k, v] of Object.entries(frontmatter.meta)) {
       // Strip wrapping quotes from key (e.g. '"og:title"' → 'og:title')
       const cleanKey = k.startsWith('"') && k.endsWith('"') ? k.slice(1, -1) : k
       // Strip wrapping quotes from value
-      const cleanVal = typeof v === 'string' && v.startsWith('"') && v.endsWith('"')
-        ? v.slice(1, -1).replace(ESCAPED_DOUBLE_QUOTE_RE, '"')
-        : String(v)
+      const cleanVal = rawValue(String(v))
       result[cleanKey] = cleanVal
     }
     if (additionalFields) {

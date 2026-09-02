@@ -1701,6 +1701,9 @@ impl ConvertState {
         if has_aliased_bracket(bracket_start) {
           continue;
         }
+        if !self.buffer.is_char_boundary(adj_start) || !self.buffer.is_char_boundary(adj_end) {
+          continue;
+        }
 
         let range = &self.buffer[adj_start..adj_end];
         let Some(hash_pos) = range.find("](#") else {

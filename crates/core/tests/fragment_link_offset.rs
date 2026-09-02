@@ -12,6 +12,40 @@ use mdream::types::{
   PluginConfig, TailwindConfig,
 };
 
+fn convert_fragments(html: &str) -> String {
+  mdream::html_to_markdown(
+    html,
+    HTMLToMarkdownOptions {
+      clean: Some(CleanConfig {
+        fragments: true,
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  )
+}
+
+#[test]
+fn multibyte_fragment_offset_never_panics() {
+  let html = "<a href=\"#a\"><blockquote>é<a href=\"#b\">x</a></blockquote></a>";
+  let _ = convert_fragments(html);
+}
+
+#[test]
+fn drifted_fragment_offset_keeps_balanced_link_markers() {
+  let html = "<a href=\"#a\"><blockquote>e<a href=\"#b\">x</a></blockquote></a>";
+  let markdown = convert_fragments(html);
+  assert_eq!(markdown.matches('[').count(), markdown.matches(']').count());
+}
+
+#[test]
+fn valid_heading_fragment_survives_a_drifted_offset() {
+  let html = "<h2 id=\"b\">b</h2><a href=\"#a\"><blockquote>e<a href=\"#b\">x</a></blockquote></a>";
+  let clean = convert_fragments(html);
+  let unchanged = mdream::html_to_markdown(html, HTMLToMarkdownOptions::default());
+  assert_eq!(clean, unchanged);
+}
+
 #[test]
 fn fragment_rewrite_survives_drifted_link_offset() {
   let clean = CleanConfig {

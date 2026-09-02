@@ -98,9 +98,11 @@ function pairedBenches(baseFn, prFn) {
   return { base, pr }
 }
 
-function perfRun(samples, comparisons) {
+export function perfRun(samples, comparisons) {
   const cpu = stats(samples.cpu)
   const wall = stats(samples.wall)
+  const cpuComparison = comparisons ? stats(comparisons.cpu) : undefined
+  const wallComparison = comparisons ? stats(comparisons.wall) : undefined
   return {
     benches: [
       {
@@ -109,7 +111,8 @@ function perfRun(samples, comparisons) {
         kind: 'time',
         ...cpu,
         samples: samples.cpu,
-        comparisonRme: comparisons ? stats(comparisons.cpu).rme : undefined,
+        comparisonRatio: cpuComparison?.value,
+        comparisonRme: cpuComparison?.rme,
       },
       {
         id: 'rust-ssr-wiki-bytes-wall',
@@ -117,7 +120,8 @@ function perfRun(samples, comparisons) {
         kind: 'time',
         ...wall,
         samples: samples.wall,
-        comparisonRme: comparisons ? stats(comparisons.wall).rme : undefined,
+        comparisonRatio: wallComparison?.value,
+        comparisonRme: wallComparison?.rme,
         informational: true,
       },
     ],

@@ -21,6 +21,12 @@ describe('root conversion', () => {
     })).toBe('shown')
   })
 
+  it('keeps root-relative parent traversal inside the origin', () => {
+    expect(htmlToMarkdown('<a href="../guide">Guide</a>', {
+      origin: 'https://example.com/',
+    })).toBe('[Guide](https://example.com/guide)')
+  })
+
   it('streams without optional plugins', async () => {
     const html = '<h1>Hello</h1>'
     const stream = new ReadableStream<string>({
