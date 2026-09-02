@@ -161,6 +161,67 @@ impl ConvertState {
     max
   }
 
+  /// Append content retained behind the outermost inline-code delimiter. Tag
+  /// output is atomic so a cap cannot leave half a Markdown marker; text may be
+  /// cut at a UTF-8 boundary. Once an append cannot fit, later content is never
+  /// allowed to refill the spare bytes.
+  #[inline(always)]
+  fn push_code_span_content(&mut self, value: &str, atomic: bool) -> usize {
+    if value.is_empty() {
+      return 0;
+    }
+    let cap = self.options.max_node_bytes;
+    if cap == 0 || self.code_spans.is_empty() {
+      self.buffer.push_str(value);
+      return value.len();
+    }
+
+    self.push_capped_code_span_content(value, atomic, cap)
+  }
+
+  #[cold]
+  #[inline(never)]
+  fn push_capped_code_span_content(&mut self, value: &str, atomic: bool, cap: usize) -> usize {
+    let span = &self.code_spans[0];
+    if !span.opener_emitted || span.exhausted {
+      self.truncated = true;
+      return 0;
+    }
+    let room = cap.saturating_sub(self.buffer.len().saturating_sub(span.content_start));
+    let kept = if atomic && value.len() > room {
+      ""
+    } else {
+      clamp_to_char_boundary(value, room)
+    };
+    if kept.len() != value.len() {
+      self.code_spans[0].exhausted = true;
+      self.truncated = true;
+    }
+    self.buffer.push_str(kept);
+    kept.len()
+  }
+
+  /// Replace already-accounted inline-code bytes. Growth is atomic because the
+  /// replacement is structural Markdown; shrinking rewrites are always safe.
+  #[inline]
+  fn replace_code_span_content(&mut self, range: std::ops::Range<usize>, value: &str) -> bool {
+    let cap = self.options.max_node_bytes;
+    if cap != 0
+      && let Some(span) = self.code_spans.first()
+      && range.start >= span.content_start
+      && value.len() > range.len()
+    {
+      let held = self.buffer.len().saturating_sub(span.content_start);
+      if span.exhausted || held - range.len() + value.len() > cap {
+        self.code_spans[0].exhausted = true;
+        self.truncated = true;
+        return false;
+      }
+    }
+    self.buffer.replace_range(range, value);
+    true
+  }
+
   fn max_line_leading_run(value: &str, marker: u8, indent: &str) -> usize {
     value
       .split('\n')
@@ -184,11 +245,31 @@ impl ConvertState {
   #[inline(never)]
   fn finalize_code_span(&mut self, span: &CodeSpanState) -> String {
     // A pipe splits the row even inside a code span; `\|` is GFM's escape and is
-    // honoured there. Content sits at the buffer tail, so this shifts no offset.
+    // honoured there. Its expanded form still has to fit the aggregate budget.
     if self.depth_map[TAG_TABLE as usize] > 0 && self.buffer[span.content_start..].contains('|') {
-      let escaped = self.buffer[span.content_start..].replace('|', "\\|");
-      self.buffer.truncate(span.content_start);
-      self.buffer.push_str(&escaped);
+      let content = &self.buffer[span.content_start..];
+      let escaped_cap = if self.options.max_node_bytes == 0 {
+        usize::MAX
+      } else if let Some(outer) = self.code_spans.first() {
+        let held = self.buffer.len().saturating_sub(outer.content_start);
+        content.len() + self.options.max_node_bytes.saturating_sub(held)
+      } else {
+        self.options.max_node_bytes
+      };
+      let mut escaped = String::with_capacity(content.len().min(escaped_cap));
+      for ch in content.chars() {
+        let addition = if ch == '|' { 2 } else { ch.len_utf8() };
+        if escaped.len() + addition > escaped_cap {
+          self.truncated = true;
+          break;
+        }
+        if ch == '|' {
+          escaped.push('\\');
+        }
+        escaped.push(ch);
+      }
+      let content_end = self.buffer.len();
+      self.replace_code_span_content(span.content_start..content_end, &escaped);
     }
     let max_run = Self::max_backtick_run(&self.buffer[span.content_start..]);
     let delimiter = "`".repeat((max_run + 1).max(1));
@@ -202,9 +283,7 @@ impl ConvertState {
     if padded {
       opening.push(' ');
     }
-    self
-      .buffer
-      .replace_range(span.output_start..span.content_start, &opening);
+    self.replace_code_span_content(span.output_start..span.content_start, &opening);
     if padded {
       format!(" {delimiter}")
     } else {
@@ -246,14 +325,15 @@ impl ConvertState {
       Self::max_line_leading_run(&self.buffer[fence.content_start..], marker, &fence.indent);
     let delimiter = (marker as char).to_string().repeat((max_run + 1).max(3));
     let marker_start = fence.output_start + fence.marker_offset;
-    self.shift_fragment_links_after(
-      marker_start + MARKDOWN_CODE_BLOCK.len(),
-      delimiter.len() as isize - MARKDOWN_CODE_BLOCK.len() as isize,
-    );
-    self.buffer.replace_range(
+    if self.replace_code_span_content(
       marker_start..marker_start + MARKDOWN_CODE_BLOCK.len(),
       &delimiter,
-    );
+    ) {
+      self.shift_fragment_links_after(
+        marker_start + MARKDOWN_CODE_BLOCK.len(),
+        delimiter.len() as isize - MARKDOWN_CODE_BLOCK.len() as isize,
+      );
+    }
     Some(delimiter)
   }
 
@@ -335,6 +415,20 @@ impl ConvertState {
       if !unindented.is_empty() {
         quoted.push(' ');
         quoted.push_str(unindented);
+      }
+    }
+
+    if self.options.max_node_bytes != 0
+      && let Some(span) = self.code_spans.first()
+      && frame.content_start >= span.content_start
+      && quoted.len() > content.len()
+    {
+      let held = self.buffer.len().saturating_sub(span.content_start);
+      if span.exhausted || held - content.len() + quoted.len() > self.options.max_node_bytes {
+        self.code_spans[0].exhausted = true;
+        self.truncated = true;
+        self.blockquote_scratch = quoted;
+        return;
       }
     }
 
@@ -789,14 +883,24 @@ impl ConvertState {
         if !self.in_raw_html_block()
           && let Some(emitted) = output.as_deref()
         {
+          let opener_emitted = self.buffer.len() > output_start && self.buffer.ends_with(emitted);
+          let content_start = self.buffer.len();
           self.code_spans.push(CodeSpanState {
-            output_start: self.buffer.len() - emitted.len(),
-            content_start: self.buffer.len(),
+            output_start: if opener_emitted {
+              content_start - emitted.len()
+            } else {
+              content_start
+            },
+            content_start,
+            opener_emitted,
+            exhausted: false,
           });
         }
       } else if !self.pre_fence_open
         && !self.in_table_cell()
         && let Some(emitted) = output.as_deref()
+        && self.buffer.len() > output_start
+        && self.buffer.ends_with(emitted)
       {
         let output_start = self.buffer.len() - emitted.len();
         let language =
@@ -824,6 +928,7 @@ impl ConvertState {
       let bracket_pos = if output
         .as_deref()
         .is_some_and(|o| o.as_bytes().last() == Some(&b'['))
+        && self.buffer.len() > output_start
       {
         buf_len - 1
       } else {
@@ -838,6 +943,8 @@ impl ConvertState {
       && let Some(inline_marker_type) = Self::inline_marker_type(id)
       && let Some(emitted) = output.as_deref()
       && !emitted.is_empty()
+      && self.buffer.len() > output_start
+      && self.buffer.ends_with(emitted)
     {
       self.open_markers.push((
         inline_marker_type,
@@ -972,8 +1079,10 @@ impl ConvertState {
         output = self.get_exit_output(node, cell_span);
       }
     }
-    let closing_code_span = if !has_override
-      && tag_id == Some(TAG_CODE)
+    // Pop for every inline <code> exit that could have pushed: the enter push
+    // ignores overrides, so an exit-only override that skipped the pop leaked
+    // the span, whose exhausted flag then capped the rest of the document.
+    let closing_code_span = if tag_id == Some(TAG_CODE)
       && self.depth_map[TAG_PRE as usize] == 0
       && !self.in_raw_html_block()
     {
@@ -1147,6 +1256,7 @@ impl ConvertState {
       let link_text_end = self.buffer.len();
       // Write link close directly
       if let Some(href) = node.attributes.get("href") {
+        let capped_code_span = self.options.max_node_bytes != 0 && !self.code_spans.is_empty();
         let resolved = resolve_url(
           href,
           self.options.origin.as_deref(),
@@ -1174,22 +1284,40 @@ impl ConvertState {
           let bp = self.link.bracket_pos;
           let buf_bytes = self.buffer.as_bytes();
           if bp < buf_bytes.len() && buf_bytes[bp] == b'[' && &self.buffer[bp + 1..] == resolved {
-            self.buffer.truncate(bp);
-            self.buffer.push('<');
-            self.buffer.push_str(resolved);
-            self.buffer.push('>');
-            self.last_content_cache_len = self.buffer.len() - bp;
-            self.end_link();
-            self.last_node_is_inline = is_inline;
-            return;
+            if capped_code_span {
+              let end = self.buffer.len();
+              if self.replace_code_span_content(end..end, ">") {
+                self.buffer.replace_range(bp..bp + 1, "<");
+                self.last_content_cache_len = self.buffer.len() - bp;
+                self.end_link();
+                self.last_node_is_inline = is_inline;
+                return;
+              }
+            } else {
+              self.buffer.truncate(bp);
+              self.buffer.push('<');
+              self.buffer.push_str(resolved);
+              self.buffer.push('>');
+              self.last_content_cache_len = self.buffer.len() - bp;
+              self.end_link();
+              self.last_node_is_inline = is_inline;
+              return;
+            }
           }
         }
-        self.buffer.push(']');
-        write_markdown_resource(
-          &mut self.buffer,
-          resolved,
-          (!title.is_empty()).then_some(title),
-        );
+        if capped_code_span {
+          let mut close = String::with_capacity(resolved.len() + title.len() + 6);
+          close.push(']');
+          write_markdown_resource(&mut close, resolved, (!title.is_empty()).then_some(title));
+          self.push_code_span_content(&close, true);
+        } else {
+          self.buffer.push(']');
+          write_markdown_resource(
+            &mut self.buffer,
+            resolved,
+            (!title.is_empty()).then_some(title),
+          );
+        }
         // The cache is a length, not an offset: the link starts at its `[`.
         // Saturating because `link_bracket_pos` is `buffer.len()` when no `[`
         // was emitted.
@@ -1252,7 +1380,18 @@ impl ConvertState {
     }
 
     if let Some(span) = closing_code_span {
-      output = Some(Cow::Owned(self.finalize_code_span(&span)));
+      // An explicit exit override replaces the default closing delimiter, but
+      // the span state is still popped and discarded above.
+      if !has_override {
+        if span.opener_emitted && span.exhausted && self.buffer.len() == span.content_start {
+          self.buffer.truncate(span.output_start);
+          output = None;
+        } else if span.opener_emitted {
+          output = Some(Cow::Owned(self.finalize_code_span(&span)));
+        } else {
+          output = None;
+        }
+      }
     }
     if !has_override
       && closes_own_pre_fence
@@ -1324,8 +1463,11 @@ impl ConvertState {
       format!("```{}\n", self.pre_fence_lang)
     };
     let output_start = self.buffer.len();
-    self.last_content_cache_len = fence.len();
-    self.buffer.push_str(&fence);
+    self.last_content_cache_len = self.push_code_span_content(&fence, true);
+    if self.last_content_cache_len != fence.len() {
+      self.pre_fence_open = false;
+      return;
+    }
     self.start_code_fence(
       output_start,
       self.buffer.len(),
@@ -1412,7 +1554,7 @@ impl ConvertState {
       let last = self.last_output_byte();
       let first = text.as_bytes()[0];
       if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
-        self.buffer.push(' ');
+        self.push_code_span_content(" ", true);
       }
       self.pending_inline_whitespace = false;
     }
@@ -1586,12 +1728,19 @@ impl ConvertState {
     } else if !(self.plain_text && self.depth_map[TAG_PRE as usize] > 0)
       && self.should_add_spacing_before_text(last_char, text)
     {
-      self.buffer.push(' ');
-      self.last_content_cache_len = text.len() + 1;
-      self.buffer.push_str(text);
-    } else {
+      if self.options.max_node_bytes == 0 {
+        self.buffer.push(' ');
+        self.last_content_cache_len = text.len() + 1;
+        self.buffer.push_str(text);
+      } else {
+        let written = self.push_code_span_content(" ", true);
+        self.last_content_cache_len = written + self.push_code_span_content(text, false);
+      }
+    } else if self.options.max_node_bytes == 0 {
       self.last_content_cache_len = text.len();
       self.buffer.push_str(text);
+    } else {
+      self.last_content_cache_len = self.push_code_span_content(text, false);
     }
 
     if !self.open_markers.is_empty() && text.as_bytes().iter().any(|&b| !is_whitespace(b)) {
@@ -1770,7 +1919,7 @@ impl ConvertState {
       run -= 1;
     }
     if run < end && (run == start || matches!(bytes[run - 1], b' ' | b'\t')) {
-      self.buffer.insert(run, '\\');
+      self.replace_code_span_content(run..run, "\\");
     }
   }
 
@@ -1879,7 +2028,10 @@ impl ConvertState {
       return;
     }
     self.empty_item_hazard = false;
-    self.buffer.insert(self.empty_item_line_start, '\n');
+    if !self.replace_code_span_content(self.empty_item_line_start..self.empty_item_line_start, "\n")
+    {
+      return;
+    }
     // The insertion moves cached offsets at or past the line: an inline marker
     // still open across it measures emptiness from `content_start`, so left
     // unshifted it stops looking empty and streaming leaks markers one-shot drops.
@@ -2373,10 +2525,15 @@ impl ConvertState {
 
   fn flush_list_rule(&mut self) {
     let prefix = self.continuation_prefix();
-    self.buffer.reserve(2 + prefix.len());
-    self.buffer.push_str("\n\n");
-    self.buffer.push_str(&prefix);
-    self.last_content_cache_len = 2 + prefix.len();
+    if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
+      self.buffer.reserve(2 + prefix.len());
+      self.buffer.push_str("\n\n");
+      self.buffer.push_str(&prefix);
+      self.last_content_cache_len = 2 + prefix.len();
+    } else {
+      let output = format!("\n\n{prefix}");
+      self.last_content_cache_len = self.push_code_span_content(&output, true);
+    }
     self.list_rule_pending = false;
   }
 
@@ -2408,14 +2565,14 @@ impl ConvertState {
       let need_space = if first { first_needs_space } else { true };
 
       if need_space && col > prefix_len && col + 1 + word_len > width {
-        self.buffer.push('\n');
-        self.buffer.push_str(&prefix);
+        self.push_code_span_content("\n", true);
+        self.push_code_span_content(&prefix, true);
         col = prefix_len;
       } else if need_space {
-        self.buffer.push(' ');
+        self.push_code_span_content(" ", true);
         col += 1;
       }
-      self.buffer.push_str(word);
+      self.push_code_span_content(word, false);
       col += word_len;
       first = false;
     }
@@ -2423,7 +2580,7 @@ impl ConvertState {
     // Preserve a trailing separator space (unless we emitted nothing or the
     // line already ends in whitespace) so the next inline run stays separated.
     if trailing_space && !matches!(self.buffer.as_bytes().last(), Some(b' ' | b'\n') | None) {
-      self.buffer.push(' ');
+      self.push_code_span_content(" ", true);
     }
     self.last_content_cache_len = self.buffer.len() - buf_start;
   }
@@ -2431,8 +2588,7 @@ impl ConvertState {
   /// Emit frontmatter content.
   pub(crate) fn emit_frontmatter(&mut self, content: &str) {
     if self.format == OutputFormat::Markdown && !content.is_empty() {
-      self.last_content_cache_len = content.len();
-      self.buffer.push_str(content);
+      self.last_content_cache_len = self.push_code_span_content(content, true);
     }
   }
 
@@ -3011,7 +3167,7 @@ impl ConvertState {
       } else if let Some(first) = first_output {
         let last = self.last_output_byte();
         if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
-          self.buffer.push(' ');
+          self.push_code_span_content(" ", true);
         }
         self.pending_inline_whitespace = false;
       }
@@ -3089,8 +3245,7 @@ impl ConvertState {
       // which never drains, keeps).
       if self.buffer.is_empty() && !self.has_streamed_output {
         if !output_str.is_empty() {
-          self.last_content_cache_len = output_str.len();
-          self.buffer.push_str(output_str);
+          self.last_content_cache_len = self.push_code_span_content(output_str, true);
         }
         self.last_node_is_inline = is_inline;
         return;
@@ -3106,19 +3261,17 @@ impl ConvertState {
 
       if is_enter {
         for _ in 0..new_lines {
-          self.buffer.push('\n');
+          self.push_code_span_content("\n", true);
         }
         if !output_str.is_empty() {
-          self.last_content_cache_len = output_str.len();
-          self.buffer.push_str(output_str);
+          self.last_content_cache_len = self.push_code_span_content(output_str, true);
         }
       } else {
         if !output_str.is_empty() {
-          self.last_content_cache_len = output_str.len();
-          self.buffer.push_str(output_str);
+          self.last_content_cache_len = self.push_code_span_content(output_str, true);
         }
         for _ in 0..new_lines {
-          self.buffer.push('\n');
+          self.push_code_span_content("\n", true);
         }
       }
     } else {
@@ -3179,13 +3332,11 @@ impl ConvertState {
         && last_char != 0
         && self.needs_spacing(last_char, output_str.as_bytes()[0])
       {
-        self.buffer.push(' ');
-        self.last_content_cache_len = 1;
+        self.last_content_cache_len = self.push_code_span_content(" ", true);
       }
 
       if !output_str.is_empty() {
-        self.last_content_cache_len = output_str.len();
-        self.buffer.push_str(output_str);
+        self.last_content_cache_len = self.push_code_span_content(output_str, true);
       }
     }
     self.last_node_is_inline = is_inline;
