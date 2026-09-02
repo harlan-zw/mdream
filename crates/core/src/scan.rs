@@ -148,36 +148,31 @@ pub(crate) fn discarded_comment_end(
   state: &mut DiscardedCommentState,
 ) -> Option<usize> {
   for (index, &c) in chunk.as_bytes().iter().enumerate() {
-    *state = match *state {
-      DiscardedCommentState::Start => match c {
-        GT_CHAR => return Some(index + 1),
-        DASH_CHAR => DiscardedCommentState::StartDash,
-        _ => DiscardedCommentState::Comment,
+    if c == GT_CHAR
+      && matches!(
+        *state,
+        DiscardedCommentState::Start
+          | DiscardedCommentState::StartDash
+          | DiscardedCommentState::End
+          | DiscardedCommentState::EndBang
+      )
+    {
+      return Some(index + 1);
+    }
+    *state = match c {
+      DASH_CHAR => match *state {
+        DiscardedCommentState::Start => DiscardedCommentState::StartDash,
+        DiscardedCommentState::StartDash
+        | DiscardedCommentState::EndDash
+        | DiscardedCommentState::End => DiscardedCommentState::End,
+        DiscardedCommentState::Comment | DiscardedCommentState::EndBang => {
+          DiscardedCommentState::EndDash
+        }
       },
-      DiscardedCommentState::StartDash => match c {
-        GT_CHAR => return Some(index + 1),
-        DASH_CHAR => DiscardedCommentState::End,
-        _ => DiscardedCommentState::Comment,
-      },
-      DiscardedCommentState::Comment => match c {
-        DASH_CHAR => DiscardedCommentState::EndDash,
-        _ => DiscardedCommentState::Comment,
-      },
-      DiscardedCommentState::EndDash => match c {
-        DASH_CHAR => DiscardedCommentState::End,
-        _ => DiscardedCommentState::Comment,
-      },
-      DiscardedCommentState::End => match c {
-        GT_CHAR => return Some(index + 1),
-        EXCLAMATION_CHAR => DiscardedCommentState::EndBang,
-        DASH_CHAR => DiscardedCommentState::End,
-        _ => DiscardedCommentState::Comment,
-      },
-      DiscardedCommentState::EndBang => match c {
-        GT_CHAR => return Some(index + 1),
-        DASH_CHAR => DiscardedCommentState::EndDash,
-        _ => DiscardedCommentState::Comment,
-      },
+      EXCLAMATION_CHAR if matches!(*state, DiscardedCommentState::End) => {
+        DiscardedCommentState::EndBang
+      }
+      _ => DiscardedCommentState::Comment,
     }
   }
   None
