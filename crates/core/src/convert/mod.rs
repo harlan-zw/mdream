@@ -1,9 +1,9 @@
 use crate::consts::*;
 use crate::entities::{decode_html_entities, decode_html_entities_for_markdown};
 use crate::scan::{
-  DiscardedCloseTag, PendingTagScan, discarded_cdata_end, discarded_close_tag_end,
-  discarded_comment_end, discarded_gt, is_whitespace, process_comment_or_doctype,
-  process_tag_attributes, tag_is_complete,
+  DiscardedCloseTag, DiscardedCommentState, PendingTagScan, discarded_cdata_end,
+  discarded_close_tag_end, discarded_comment_end, discarded_gt, is_whitespace,
+  process_comment_or_doctype, process_tag_attributes, tag_is_complete,
 };
 use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selector_list};
 use crate::tags::get_tag_handler;
@@ -128,6 +128,8 @@ const GFM_BYTE_FLAGS: [u8; 256] = {
 struct CodeSpanState {
   output_start: usize,
   content_start: usize,
+  opener_emitted: bool,
+  exhausted: bool,
 }
 
 struct CodeFenceState {
@@ -459,6 +461,8 @@ pub struct ConvertState {
   last_char_was_whitespace: bool,
   text_buffer_contains_whitespace: bool,
   text_buffer_contains_non_whitespace: bool,
+  /// Once a scalar does not fit, the rest of this source text node is dropped.
+  text_node_exhausted: bool,
   /// Bytes in the pending text run that the batchable-ASCII path appended. When
   /// this equals the run's length the run holds nothing else, which is the only
   /// state in which the run may be emitted in pieces: any push from another path
@@ -599,6 +603,16 @@ pub struct ConvertState {
   skip_current_link: bool,
   /// Buffer position of the `[` character written for TAG_A enter
   link_bracket_pos: usize,
+  /// Upper bound on the resolved href length used by equality rewrites.
+  /// Overestimation delays release; underestimation could change output.
+  link_url_max_len: usize,
+  /// A close-time rewrite can reach back without a bounded distance.
+  link_hold_forever: bool,
+  /// A yield or drain boundary has passed `link_bracket_pos`.
+  link_hold_released: bool,
+  /// Closing the link may still truncate an empty label at its bracket.
+  link_empty_text_pending: bool,
+  pub(crate) streaming: bool,
   /// Open inline markers as (kind, output start, content start); lets the exit drop empty pairs.
   open_markers: Vec<(u8, usize, usize)>,
   /// Open code spans and fenced blocks stay buffered until their closing
@@ -688,6 +702,7 @@ impl ConvertState {
       last_char_was_whitespace: true,
       text_buffer_contains_whitespace: false,
       text_buffer_contains_non_whitespace: false,
+      text_node_exhausted: false,
       text_buffer_batchable_len: 0,
       text_buffer_has_inline_gfm_hazard: false,
       just_closed_tag: false,
@@ -783,6 +798,11 @@ impl ConvertState {
       clean_flags: 0,
       skip_current_link: false,
       link_bracket_pos: 0,
+      link_url_max_len: 0,
+      link_hold_forever: false,
+      link_hold_released: false,
+      link_empty_text_pending: false,
+      streaming: false,
       open_markers: Vec::new(),
       code_spans: Vec::new(),
       code_fence: None,
@@ -899,7 +919,12 @@ impl ConvertState {
     // an extracted text node does.
     if !self.extraction_tracked.is_empty() {
       let cap = self.options.max_node_bytes;
-      let clamped = push_capped(&mut self.script_text_buffer, text, cap);
+      let clamped = push_capped_text_node(
+        &mut self.script_text_buffer,
+        text,
+        cap,
+        &mut self.text_node_exhausted,
+      );
       self.truncated |= clamped;
     }
     self.text_buffer_contains_non_whitespace = true;
@@ -908,12 +933,29 @@ impl ConvertState {
   }
 
   fn flush_script_text(&mut self) {
-    if self.script_text_buffer.is_empty() {
+    if self.script_text_buffer.is_empty() && !self.text_node_exhausted {
       return;
     }
     let mut script_text = std::mem::take(&mut self.script_text_buffer);
-    self.process_text_buffer(&mut script_text);
+    self.complete_text_node(&mut script_text);
     self.script_text_buffer = script_text;
+  }
+
+  fn complete_text_node(&mut self, text_buffer: &mut String) {
+    let exhausted = self.text_node_exhausted;
+    if !text_buffer.is_empty() {
+      self.process_text_buffer(text_buffer);
+      text_buffer.clear();
+    } else if exhausted {
+      self.text_buffer_contains_whitespace = false;
+      self.text_buffer_contains_non_whitespace = false;
+      self.text_buffer_batchable_len = 0;
+      self.text_buffer_has_inline_gfm_hazard = false;
+      self.has_encoded_html_entity = false;
+    }
+    if exhausted {
+      self.text_node_exhausted = false;
+    }
   }
 
   fn process_script_chunk(&mut self, chunk: &str, start: usize) -> ScriptChunk {
@@ -1041,10 +1083,14 @@ impl ConvertState {
 
       // Past the cap this node's remaining text is dropped, not buffered: skip to
       // the next tag without copying. Loses content, never structure.
-      if max_node_bytes != 0 && text_buffer.len() >= max_node_bytes && cc != LT_CHAR {
+      if max_node_bytes != 0
+        && cc != LT_CHAR
+        && (self.text_node_exhausted || text_buffer.len() >= max_node_bytes)
+      {
         while i < chunk_length && bytes[i] != LT_CHAR {
           i += 1;
         }
+        self.text_node_exhausted = true;
         self.truncated = true;
         continue;
       }
@@ -1073,7 +1119,12 @@ impl ConvertState {
             break;
           }
           let before_len = text_buffer.len();
-          self.truncated |= push_capped(&mut text_buffer, &chunk[start..i], max_node_bytes);
+          self.truncated |= push_capped_text_node(
+            &mut text_buffer,
+            &chunk[start..i],
+            max_node_bytes,
+            &mut self.text_node_exhausted,
+          );
           self.text_buffer_batchable_len += text_buffer.len() - before_len;
           self.text_buffer_contains_non_whitespace = true;
           if had_space {
@@ -1122,7 +1173,12 @@ impl ConvertState {
           while i < chunk_length && bytes[i] != LT_CHAR {
             i += 1;
           }
-          self.truncated |= push_capped(&mut text_buffer, &chunk[start..i], max_node_bytes);
+          self.truncated |= push_capped_text_node(
+            &mut text_buffer,
+            &chunk[start..i],
+            max_node_bytes,
+            &mut self.text_node_exhausted,
+          );
           self.text_buffer_contains_non_whitespace = true;
           self.last_char_was_whitespace = false;
           self.just_closed_tag = false;
@@ -1158,20 +1214,29 @@ impl ConvertState {
           self.last_char_was_whitespace = true;
           self.text_buffer_contains_whitespace = true;
         } else {
-          self.text_buffer_contains_non_whitespace = true;
-          self.last_char_was_whitespace = false;
-          self.just_closed_tag = false;
-
           // Structural GFM escaping (|, [, ], > in table/link/blockquote
           // context) is applied at output time in escape_gfm_text, which also
           // covers characters produced by decoded entities that never pass
           // through this parse loop.
+          let before_len = text_buffer.len();
           if cc < 0x80 {
             text_buffer.push(cc as char);
           } else if let Some(ch) = chunk[i..].chars().next() {
-            text_buffer.push(ch);
-            i += ch.len_utf8();
-
+            let end = i + ch.len_utf8();
+            self.truncated |= push_capped_text_node(
+              &mut text_buffer,
+              &chunk[i..end],
+              max_node_bytes,
+              &mut self.text_node_exhausted,
+            );
+            i = end;
+          }
+          if text_buffer.len() != before_len {
+            self.text_buffer_contains_non_whitespace = true;
+            self.last_char_was_whitespace = false;
+            self.just_closed_tag = false;
+          }
+          if cc >= 0x80 {
             continue;
           }
         }
@@ -1201,20 +1266,16 @@ impl ConvertState {
             }
             peek_end += 1;
           }
-          if peek_end == chunk_length {
-            // Text before the `<` is already in `text_buffer`; carry only the
-            // truncated close tag or finalize re-feeds that text and doubles it.
+          let peek_name = &chunk[peek_start..peek_end];
+          if peek_end == chunk_length && can_complete_raw_end_tag(peek_name, raw_name) {
+            // Text before the `<` is already buffered; carry only the partial close.
             run_start = i;
             carry = true;
             break;
           }
-          let peek_name = &chunk[peek_start..peek_end];
           if raw_name.eq_ignore_ascii_case(peek_name) {
-            if !text_buffer.is_empty() {
-              self.process_text_buffer(&mut text_buffer);
-              text_buffer.clear();
-              run_start = i;
-            }
+            self.complete_text_node(&mut text_buffer);
+            run_start = i;
             let result = self.process_closing_tag(chunk, i);
             if result.complete {
               i = result.new_position;
@@ -1226,8 +1287,14 @@ impl ConvertState {
             continue;
           }
         }
-        text_buffer.push('<');
-        self.text_buffer_contains_non_whitespace = true;
+        let before_len = text_buffer.len();
+        self.truncated |= push_capped_text_node(
+          &mut text_buffer,
+          "<",
+          max_node_bytes,
+          &mut self.text_node_exhausted,
+        );
+        self.text_buffer_contains_non_whitespace |= text_buffer.len() != before_len;
         self.last_char_was_whitespace = false;
         self.just_closed_tag = false;
         i += 1;
@@ -1246,27 +1313,21 @@ impl ConvertState {
             }
             peek_end += 1;
           }
-          if peek_end == chunk_length {
-            // The name is cut off by the chunk end, so it cannot be compared
-            // yet. Carry the tag; treating '<' as text here would consume a
-            // close tag that a later chunk completes.
+          let peek_name = &chunk[peek_start..peek_end];
+          let current_tag_id = self.stack.last().and_then(|curr| curr.tag_id);
+          if peek_end == chunk_length
+            && current_tag_id
+              .is_some_and(|tag_id| can_complete_raw_end_tag(peek_name, TAG_NAMES[tag_id as usize]))
+          {
             run_start = i;
             carry = true;
             break;
           }
-          let peek_name = &chunk[peek_start..peek_end];
           let peek_tag_id = crate::consts::get_tag_id_ci_bytes(peek_name.as_bytes());
-          if self
-            .stack
-            .last()
-            .is_some_and(|curr| curr.tag_id == peek_tag_id)
-          {
+          if current_tag_id.is_some_and(|tag_id| Some(tag_id) == peek_tag_id) {
             // Matching closing tag: fall through to normal closing tag processing
-            if !text_buffer.is_empty() {
-              self.process_text_buffer(&mut text_buffer);
-              text_buffer.clear();
-              run_start = i;
-            }
+            self.complete_text_node(&mut text_buffer);
+            run_start = i;
             let result = self.process_closing_tag(chunk, i);
             if result.complete {
               i = result.new_position;
@@ -1279,8 +1340,14 @@ impl ConvertState {
           }
         }
         // Not a matching closing tag: treat '<' as literal text
-        text_buffer.push('<');
-        self.text_buffer_contains_non_whitespace = true;
+        let before_len = text_buffer.len();
+        self.truncated |= push_capped_text_node(
+          &mut text_buffer,
+          "<",
+          max_node_bytes,
+          &mut self.text_node_exhausted,
+        );
+        self.text_buffer_contains_non_whitespace |= text_buffer.len() != before_len;
         self.last_char_was_whitespace = false;
         self.just_closed_tag = false;
         i += 1;
@@ -1300,13 +1367,17 @@ impl ConvertState {
         // doctype cases.
         if let Some(after_open) = chunk[i + 2..].strip_prefix("[CDATA[") {
           if let Some(rel) = after_open.find("]]>") {
-            if !text_buffer.is_empty() {
-              self.process_text_buffer(&mut text_buffer);
-              text_buffer.clear();
-              run_start = i;
+            let token_len = "<![CDATA[".len() + rel + 3;
+            self.complete_text_node(&mut text_buffer);
+            run_start = i;
+            if max_node_bytes != 0 && token_len > max_node_bytes {
+              if self.has_surfaced_cdata() {
+                self.truncated = true;
+              }
+            } else {
+              self.process_cdata_section(&after_open[..rel]);
             }
-            self.process_cdata_section(&after_open[..rel]);
-            i += "<![CDATA[".len() + rel + 3;
+            i += token_len;
             continue;
           }
           // Unterminated CDATA: re-parse from '<' in the next chunk.
@@ -1320,24 +1391,21 @@ impl ConvertState {
           carry = true;
           break;
         }
-        if !text_buffer.is_empty() {
-          self.process_text_buffer(&mut text_buffer);
-          text_buffer.clear();
-          run_start = i;
-        }
+        self.complete_text_node(&mut text_buffer);
+        run_start = i;
         let result = process_comment_or_doctype(chunk, i);
         if result.complete {
+          if max_node_bytes != 0 && result.new_position - i > max_node_bytes {
+            self.truncated = true;
+          }
           i = result.new_position;
         } else {
           carry = true;
           break;
         }
       } else if next == SLASH_CHAR {
-        if !text_buffer.is_empty() {
-          self.process_text_buffer(&mut text_buffer);
-          text_buffer.clear();
-          run_start = i;
-        }
+        self.complete_text_node(&mut text_buffer);
+        run_start = i;
         let result = self.process_closing_tag(chunk, i);
         if result.complete {
           i = result.new_position;
@@ -1348,9 +1416,17 @@ impl ConvertState {
       } else if !next.is_ascii_alphabetic() && next != QUESTION_CHAR {
         // Tag open state starts a tag only on an ASCII letter; `?` opens a bogus
         // comment. Anything else is text, so `I <3 Rust` is not a tag named `3`.
-        text_buffer.push(LT_CHAR as char);
-        self.text_buffer_contains_non_whitespace = true;
-        self.text_buffer_has_inline_gfm_hazard = true;
+        let before_len = text_buffer.len();
+        self.truncated |= push_capped_text_node(
+          &mut text_buffer,
+          "<",
+          max_node_bytes,
+          &mut self.text_node_exhausted,
+        );
+        if text_buffer.len() != before_len {
+          self.text_buffer_contains_non_whitespace = true;
+          self.text_buffer_has_inline_gfm_hazard = true;
+        }
         self.last_char_was_whitespace = false;
         self.just_closed_tag = false;
         i += 1;
@@ -1402,11 +1478,8 @@ impl ConvertState {
         };
         i2 = tag_name_end;
 
-        if !text_buffer.is_empty() {
-          self.process_text_buffer(&mut text_buffer);
-          text_buffer.clear();
-          run_start = i;
-        }
+        self.complete_text_node(&mut text_buffer);
+        run_start = i;
 
         // `process_opening_tag` throws away everything it parsed when the tag
         // is incomplete, so resume the `>` search instead of re-parsing it.
@@ -1480,7 +1553,13 @@ impl ConvertState {
     // run is kept in `text_buffer` instead, so it is parsed once however many
     // chunks it spans.
     let consumed = if carry {
-      if max_node_bytes != 0 && chunk_length - run_start > max_node_bytes {
+      let carried = &chunk[run_start..];
+      // Keep an ambiguous markup-declaration opener until it can be classified.
+      // Both prefixes are fixed-size, so this retains at most eight bytes.
+      let partial_declaration = (carried.len() < "<!--".len() && "<!--".starts_with(carried))
+        || (carried.len() < "<![CDATA[".len() && "<![CDATA[".starts_with(carried));
+      if max_node_bytes != 0 && chunk_length - run_start > max_node_bytes && !partial_declaration {
+        self.complete_text_node(&mut text_buffer);
         self.start_discard(chunk, run_start);
         chunk_length
       } else {
@@ -1496,11 +1575,17 @@ impl ConvertState {
   /// Drop a token that outgrew the cap instead of carrying it. The element is
   /// lost, but scanning its bytes here leaves the quote/dash state that finds its
   /// end, so the raw input buffer stops growing.
+  ///
+  /// Semantics stay aligned with an uncapped parse, which processes each of
+  /// these tokens whole with no length check: an end tag closes its element or
+  /// is an ignored token, a comment, doctype and unsurfaced CDATA are ignored,
+  /// and none of that reports truncation. Only a start tag (checked at its `>`
+  /// on completion) and surfaced CDATA (emitted, so dropping it loses output)
+  /// flag here; a dropped token abandoned at EOF is flagged by `finalize`.
   #[cold]
   #[inline(never)]
   fn start_discard(&mut self, chunk: &str, run_start: usize) {
     self.pending_tag = None;
-    self.truncated = true;
     let rest = &chunk[run_start..];
     // Seed the state by running the scanner that owns this kind of token over the
     // bytes already read, so the resume continues that one scan. The scanners
@@ -1509,24 +1594,54 @@ impl ConvertState {
     // in another. Picking the owning one here is what keeps a dropped token
     // ending where an uncapped parse ends it, so the document resumes in step.
     self.discard = if let Some(body) = rest.strip_prefix("<!--") {
-      let mut dashes = 0;
-      discarded_comment_end(body, &mut dashes);
-      Discard::Comment(dashes)
+      self.truncated = true;
+      let mut state = DiscardedCommentState::new();
+      discarded_comment_end(body, &mut state);
+      Discard::Comment(state)
     } else if let Some(body) = rest.strip_prefix("<![CDATA[") {
       let mut brackets = 0;
       discarded_cdata_end(body, &mut brackets);
+      if self.has_surfaced_cdata() {
+        self.truncated = true;
+      }
       Discard::Cdata(brackets)
     } else if rest.starts_with("<!") {
+      self.truncated = true;
       Discard::Doctype
     } else if let Some(body) = rest.strip_prefix("</") {
       let mut state = DiscardedCloseTag::default();
       discarded_close_tag_end(body, &mut state);
+      // Dropped end tags must still update stack state once their name has ended.
+      if state.name_ended {
+        let name_end = body
+          .as_bytes()
+          .iter()
+          .position(|&c| is_whitespace(c) || c == SLASH_CHAR || c == GT_CHAR)
+          .expect("name_ended records a scanned terminator");
+        self.process_closing_tag_name(&body[..name_end]);
+      } else {
+        self.last_node_is_inline = true;
+        self.just_closed_tag = true;
+      }
       Discard::CloseTag(state)
     } else {
+      self.truncated = true;
       let mut pending = PendingTagScan::new();
       tag_is_complete(chunk, run_start, &mut pending);
       Discard::Tag(pending)
     };
+  }
+
+  /// Whether CDATA sections surface as output through a `#cdata-section`
+  /// override, making a dropped one a lost-output truncation.
+  fn has_surfaced_cdata(&self) -> bool {
+    self.has_tag_overrides
+      && self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|p| p.tag_overrides.as_ref())
+        .is_some_and(|ovs| ovs.iter().any(|(k, _)| k == "#cdata-section"))
   }
 
   pub fn get_markdown(&mut self) -> String {
@@ -1657,6 +1772,15 @@ impl ConvertState {
   /// end tag, so the residual is text unless it is an appropriate end tag that
   /// already reached a tag state.
   pub fn finalize(&mut self, leftover: &str) {
+    // A token still being dropped at EOF never completed. An uncapped parse
+    // ends such a token at EOF with its own truncation report, so a dropped
+    // one that found its end earlier stays unflagged and this is the only
+    // place the abandoned ones are reported.
+    if !matches!(self.discard, Discard::No)
+      || (self.options.max_node_bytes != 0 && leftover.len() > self.options.max_node_bytes)
+    {
+      self.truncated = true;
+    }
     let in_script = self
       .stack
       .last()
@@ -1673,32 +1797,79 @@ impl ConvertState {
         && self.in_non_nesting
         && !self.rawtext_end_tag_pending;
       if rawtext_text {
-        self.parse_text_buffer.push_str(leftover);
-        self.text_buffer_contains_non_whitespace = true;
+        let before_len = self.parse_text_buffer.len();
+        self.truncated |= push_capped_text_node(
+          &mut self.parse_text_buffer,
+          leftover,
+          self.options.max_node_bytes,
+          &mut self.text_node_exhausted,
+        );
+        let kept = &leftover[..self.parse_text_buffer.len() - before_len];
+        self.text_buffer_contains_non_whitespace |= !kept.is_empty();
         // The ordinary rawtext path records these flags byte by byte. Carrying
         // the residual must preserve them so RCDATA entities still decode and
         // generated Markdown escapes remain safe.
-        self.text_buffer_has_inline_gfm_hazard |= leftover.as_bytes()[1..]
+        self.text_buffer_has_inline_gfm_hazard |= kept
+          .as_bytes()
+          .get(1..)
+          .unwrap_or_default()
           .iter()
           .any(|&c| GFM_BYTE_FLAGS[c as usize] & GFM_HAZARD_BIT != 0);
-        if self.depth_map[TAG_STYLE as usize] == 0 && leftover.as_bytes().contains(&AMPERSAND_CHAR)
-        {
+        if self.depth_map[TAG_STYLE as usize] == 0 && kept.as_bytes().contains(&AMPERSAND_CHAR) {
           self.has_encoded_html_entity = true;
         }
-        self.last_char_was_whitespace = false;
+        if !kept.is_empty() {
+          self.last_char_was_whitespace = false;
+        }
       }
-      if !self.parse_text_buffer.is_empty() {
+      if !self.parse_text_buffer.is_empty() || self.text_node_exhausted {
         let mut buf = std::mem::take(&mut self.parse_text_buffer);
-        self.process_text_buffer(&mut buf);
+        self.complete_text_node(&mut buf);
         self.parse_text_buffer = buf;
       }
       if !rawtext_text && !leftover.is_empty() && leftover.as_bytes()[0] != LT_CHAR {
-        let mut buf = leftover.to_string();
-        self.process_text_buffer(&mut buf);
+        let mut buf = String::new();
+        self.truncated |= push_capped_text_node(
+          &mut buf,
+          leftover,
+          self.options.max_node_bytes,
+          &mut self.text_node_exhausted,
+        );
+        self.complete_text_node(&mut buf);
       }
     }
     while !self.stack.is_empty() {
       self.close_node();
+    }
+  }
+
+  #[inline]
+  fn link_hold_required(&self) -> bool {
+    if self.depth_map[TAG_A as usize] == 0 {
+      return false;
+    }
+    if self.link_hold_released {
+      return false;
+    }
+    if self.link_hold_forever {
+      return true;
+    }
+    if self.link_empty_text_pending {
+      return true;
+    }
+    // These may still truncate link text below the release threshold.
+    if !self.open_markers.is_empty() || !self.code_spans.is_empty() {
+      return true;
+    }
+    let text_start = self.link_bracket_pos + 1;
+    let text_end = trim_ascii_whitespace_end(&self.buffer);
+    text_end.saturating_sub(text_start) <= self.link_url_max_len
+  }
+
+  #[inline]
+  fn note_link_release(&mut self, boundary: usize) {
+    if self.depth_map[TAG_A as usize] > 0 && boundary > self.link_bracket_pos {
+      self.link_hold_released = true;
     }
   }
 
@@ -1777,14 +1948,8 @@ impl ConvertState {
     if let Some(frame) = self.blockquotes.first() {
       stable_end = stable_end.min(hold_before(&self.buffer, frame.content_start));
     }
-    // An open `<a>`'s close can rewrite the buffer back to `link_bracket_pos`
-    // (emptyLinkText drop, selfLinkHeadings, redundantLinks, GFM autolink). Hold the
-    // yield boundary there so a link that turns out empty never leaks a stray `[`.
-    // As with inline markers, the spaces just before the `[` belong to the
-    // preceding text: an empty-link drop followed by a block close trims them,
-    // so hold them back too or a yielded space would be silently removed.
-    // Mirrors the same guard in `drain_streamed_prefix`.
-    if self.depth_map[TAG_A as usize] > 0 {
+    // Hold the bracket and preceding spaces while the close can rewrite them.
+    if self.link_hold_required() {
       stable_end = stable_end.min(hold_before(&self.buffer, self.link_bracket_pos));
     }
     // A marker still alone on its line has its separating newline inserted at
@@ -1828,6 +1993,7 @@ impl ConvertState {
       self.drain_streamed_prefix();
       return String::new();
     }
+    self.note_link_release(stable_end);
     let new_content = self.buffer[start..stable_end].to_string();
     self.has_streamed_output = true;
     self.last_yielded_length = stable_end;
@@ -1870,13 +2036,8 @@ impl ConvertState {
       retained_tail_start -= 1;
     }
     let mut drain_end = self.last_yielded_length.min(retained_tail_start);
-    // An empty link or inline marker closing in a later chunk truncates the
-    // buffer back to its reach-back point (`link_bracket_pos` / `output_start`).
-    // The next block then counts its leading newlines from the two bytes ending
-    // there (see `write_output`, which inspects only the last two), so keep
-    // those two bytes; otherwise a dropped element leaks an extra newline in
-    // streaming.
-    if self.depth_map[TAG_A as usize] > 0 {
+    // Preserve newline context before every live reach-back point.
+    if self.link_hold_required() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.link_bracket_pos));
     }
     if let Some(&(_, output_start, _)) = self.open_markers.first() {
@@ -1929,6 +2090,7 @@ impl ConvertState {
     // Remember what the line being cut leads with; a line opened before an
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
+    self.note_link_release(drain_end);
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
     self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);
@@ -2050,8 +2212,8 @@ enum Discard {
   No,
   /// Quote-aware resume for the `>` ending a dropped start tag.
   Tag(PendingTagScan),
-  /// Trailing dash-run state for the `-->` or `--!>` ending a dropped comment.
-  Comment(u8),
+  /// Tokenizer state for the end of a dropped comment.
+  Comment(DiscardedCommentState),
   /// Name and quote state for the `>` ending a dropped end tag, which the
   /// end-tag tokenizer quotes differently from a start tag's.
   CloseTag(DiscardedCloseTag),
@@ -2079,17 +2241,81 @@ pub(crate) fn clamp_to_char_boundary(text: &str, max: usize) -> &str {
   &text[..end]
 }
 
-/// Append `text`, stopping at `cap` bytes total (`0` = no cap) on a char boundary,
-/// reporting whether it had to clamp. Clamping here rather than after the fact keeps
-/// the truncation point a function of content alone, so streamed output stays
-/// chunk-invariant.
-#[inline]
-fn push_capped(buffer: &mut String, text: &str, cap: usize) -> bool {
+fn push_capped_text_node(
+  buffer: &mut String,
+  text: &str,
+  cap: usize,
+  exhausted: &mut bool,
+) -> bool {
   if cap == 0 {
     buffer.push_str(text);
     return false;
   }
+  if text.is_empty() {
+    return false;
+  }
+  if *exhausted {
+    return true;
+  }
   let kept = clamp_to_char_boundary(text, cap.saturating_sub(buffer.len()));
   buffer.push_str(kept);
-  kept.len() != text.len()
+  let truncated = kept.len() != text.len();
+  *exhausted |= truncated;
+  truncated
+}
+
+fn can_complete_raw_end_tag(candidate: &str, expected: &str) -> bool {
+  expected
+    .get(..candidate.len())
+    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(candidate))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::MarkdownStreamProcessor;
+  use crate::types::{ExtractionConfig, PluginConfig};
+
+  #[test]
+  fn extracted_script_does_not_backfill_rejected_utf8_slack() {
+    let options = HTMLToMarkdownOptions {
+      max_node_bytes: 8,
+      plugins: Some(PluginConfig {
+        extraction: Some(ExtractionConfig::new(&["script"])),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let mut processor = MarkdownStreamProcessor::new(options);
+    for part in ["<script>aaaaaaa", "é", "z</script>"] {
+      processor.process_chunk(part);
+    }
+    processor.finish();
+
+    assert!(processor.truncated());
+    assert_eq!(
+      processor.state.extraction_results[0].text_content,
+      "aaaaaaa"
+    );
+  }
+
+  #[test]
+  fn rejected_utf8_does_not_mark_text_non_whitespace() {
+    fn check(parts: &[&str]) {
+      let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+        max_node_bytes: 4,
+        ..Default::default()
+      });
+      for part in parts {
+        processor.process_chunk(part);
+      }
+
+      assert!(processor.truncated());
+      assert!(!processor.state.text_buffer_contains_non_whitespace);
+      assert!(processor.state.last_char_was_whitespace);
+    }
+
+    check(&["<p><b></b> 😀"]);
+    check(&["<p><b></b> ", "😀"]);
+  }
 }

@@ -637,12 +637,12 @@ pub struct HTMLToMarkdownOptions {
   /// wrapped.
   pub wrap_width: usize,
   /// Cap on the bytes one construct may buffer — a text node, a tag, a comment, an
-  /// open code block, a table row's columns, or the script text an extraction
-  /// reads; `0` (the default) is unlimited. Content past the cap is **dropped**,
-  /// bounding memory on adversarial input at the cost of that content, an over-long
-  /// tag entirely (attributes included), and a row's extra columns. A tag is
-  /// measured by its own length, so the result does not depend on chunking, and the
-  /// cap applies to one-shot conversion as well as streaming.
+  /// open code block or inline code span, a table row's columns, or the script text
+  /// an extraction reads; `0` (the default) is unlimited. Content past the cap is
+  /// **dropped**, bounding memory on adversarial input at the cost of that content,
+  /// an over-long tag entirely (attributes included), and a row's extra columns. A
+  /// tag is measured by its own length, so the result does not depend on chunking,
+  /// and the cap applies to one-shot conversion as well as streaming.
   /// [`MdreamResult::truncated`] reports whether it fired.
   pub max_node_bytes: usize,
 }
@@ -714,8 +714,8 @@ impl HTMLToMarkdownOptions {
     self
   }
 
-  /// Drop content past `bytes` in one node, token, or code block, bounding
-  /// streaming memory.
+  /// Drop content past `bytes` in one buffered construct, including a text node,
+  /// token, code block, or inline code span. Applies to one-shot and streaming conversion.
   ///
   /// ```rust
   /// use mdream::HTMLToMarkdownOptions;
