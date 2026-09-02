@@ -846,7 +846,6 @@ impl ConvertState {
     self.script_text_buffer = script_text;
   }
 
-  #[inline]
   fn complete_text_node(&mut self, text_buffer: &mut String) {
     let exhausted = self.text_node_exhausted;
     if !text_buffer.is_empty() {
@@ -1513,25 +1512,14 @@ impl ConvertState {
     } else if let Some(body) = rest.strip_prefix("</") {
       let mut state = DiscardedCloseTag::default();
       discarded_close_tag_end(body, &mut state);
-      // One-shot runs every complete end tag through `process_closing_tag`
-      // whatever its length. Apply the same state moves here: a name that
-      // ended in the bytes read re-runs that match on a synthetic complete
-      // token, closing its element or taking the ignored-token path; a name
-      // still open is longer than any open element's name (an over-cap start
-      // tag is dropped whole), so it can only be a miss.
+      // Dropped end tags must still update stack state once their name has ended.
       if state.name_ended {
         let name_end = body
           .as_bytes()
           .iter()
           .position(|&c| is_whitespace(c) || c == SLASH_CHAR || c == GT_CHAR)
           .expect("name_ended records a scanned terminator");
-        let mut synthetic = String::with_capacity(name_end + 3);
-        synthetic.push_str("</");
-        synthetic.push_str(&body[..name_end]);
-        synthetic.push('>');
-        // The non-nesting guard is the one way this reports incomplete, and
-        // no non-nesting element's end tag can reach the carry that led here.
-        self.process_closing_tag(&synthetic, 0);
+        self.process_closing_tag_name(&body[..name_end]);
       } else {
         self.last_node_is_inline = true;
         self.just_closed_tag = true;
@@ -2102,22 +2090,6 @@ pub(crate) fn clamp_to_char_boundary(text: &str, max: usize) -> &str {
   &text[..end]
 }
 
-/// Append `text`, stopping at `cap` bytes total (`0` = no cap) on a char boundary,
-/// reporting whether it had to clamp. Clamping here rather than after the fact keeps
-/// the truncation point a function of content alone, so streamed output stays
-/// chunk-invariant.
-#[inline]
-fn push_capped(buffer: &mut String, text: &str, cap: usize) -> bool {
-  if cap == 0 {
-    buffer.push_str(text);
-    return false;
-  }
-  let kept = clamp_to_char_boundary(text, cap.saturating_sub(buffer.len()));
-  buffer.push_str(kept);
-  kept.len() != text.len()
-}
-
-#[inline]
 fn push_capped_text_node(
   buffer: &mut String,
   text: &str,
@@ -2134,12 +2106,13 @@ fn push_capped_text_node(
   if *exhausted {
     return true;
   }
-  let truncated = push_capped(buffer, text, cap);
+  let kept = clamp_to_char_boundary(text, cap.saturating_sub(buffer.len()));
+  buffer.push_str(kept);
+  let truncated = kept.len() != text.len();
   *exhausted |= truncated;
   truncated
 }
 
-#[inline]
 fn can_complete_raw_end_tag(candidate: &str, expected: &str) -> bool {
   expected
     .get(..candidate.len())
