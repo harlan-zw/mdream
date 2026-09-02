@@ -1230,10 +1230,10 @@ impl ConvertState {
           let buf_bytes = self.buffer.as_bytes();
           if bp < buf_bytes.len() && buf_bytes[bp] == b'[' && &self.buffer[bp + 1..] == resolved {
             if capped_code_span {
-              let replacement = format!("<{resolved}>");
               let end = self.buffer.len();
-              if self.replace_code_span_content(bp..end, &replacement) {
-                self.last_content_cache_len = replacement.len();
+              if self.replace_code_span_content(end..end, ">") {
+                self.buffer.replace_range(bp..bp + 1, "<");
+                self.last_content_cache_len = self.buffer.len() - bp;
                 self.last_node_is_inline = is_inline;
                 return;
               }
