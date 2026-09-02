@@ -77,6 +77,19 @@ fn options(cap: usize) -> HTMLToMarkdownOptions {
   }
 }
 
+fn surfaced_cdata_options(cap: usize) -> HTMLToMarkdownOptions {
+  HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "#cdata-section".to_string(),
+        TagOverrideConfig::default(),
+      )]),
+      ..Default::default()
+    }),
+    ..options(cap)
+  }
+}
+
 fn stream(html: &str, chunk: usize, cap: usize) -> String {
   let mut p = MarkdownStreamProcessor::new(options(cap));
   let mut out = String::new();
@@ -95,6 +108,21 @@ fn stream_parts_with_options(parts: &[&str], options: HTMLToMarkdownOptions) -> 
   }
   out.push_str(&p.finish());
   (out, p.truncated())
+}
+
+fn stream_parts(parts: &[&str], cap: usize) -> (String, bool) {
+  stream_parts_with_options(parts, options(cap))
+}
+
+fn assert_capped_text(html: &str, cap: usize, expected: &str, truncated: bool) {
+  let result = html_to_markdown_result(html, options(cap));
+  assert_eq!(result.markdown, expected, "one-shot html={html:?}");
+  assert_eq!(result.truncated, truncated, "one-shot html={html:?}");
+
+  for split in (0..=html.len()).filter(|&split| html.is_char_boundary(split)) {
+    let actual = stream_parts(&[&html[..split], &html[split..]], cap);
+    assert_eq!(actual, (expected.to_string(), truncated), "split={split}");
+  }
 }
 
 fn assert_capped_inline_code(html: &str, cap: usize, expected: &str, truncated: bool) {
@@ -203,6 +231,92 @@ fn the_cut_point_does_not_depend_on_chunking() {
   for chunk in [37, 512, 8192, 1024 * 1024] {
     assert_eq!(stream(&html, chunk, 4096), expected, "chunk={chunk}");
   }
+}
+
+#[test]
+fn a_text_cap_rejects_a_whole_utf8_scalar() {
+  for (html, expected) in [
+    ("<p>aaaéz</p>", "aaa"),
+    ("<p>aa€zz</p>", "aa"),
+    ("<p>a😀zzz</p>", "a"),
+  ] {
+    assert_capped_text(html, 4, expected, true);
+  }
+
+  assert_capped_text(
+    "<textarea>aaaaaaaaaaaaaaaéz</textarea>",
+    16,
+    "aaaaaaaaaaaaaaa",
+    true,
+  );
+}
+
+#[test]
+fn an_exact_utf8_prefix_does_not_report_truncation() {
+  for html in ["<p>aaé</p>", "<p>a€</p>", "<p>😀</p>"] {
+    let expected = &html[3..html.len() - 4];
+    assert_capped_text(html, 4, expected, false);
+  }
+}
+
+#[test]
+fn a_literal_lt_respects_the_text_cap() {
+  for (html, expected) in [("<p>aaaa<3z</p>", "aaaa"), ("<p>aaa<3z</p>", "aaa<")] {
+    assert_capped_text(html, 4, expected, true);
+  }
+  for html in [
+    "<textarea>aaaaaaaaaaaaaaaa<z</textarea>",
+    "<title>aaaaaaaaaaaaaaaa<z</title>",
+  ] {
+    assert_capped_text(html, 16, "aaaaaaaaaaaaaaaa", true);
+  }
+}
+
+#[test]
+fn a_rawtext_eof_residual_respects_the_text_cap() {
+  for html in ["<textarea>aaaaaaaaaaaaaaa</x", "<title>aaaaaaaaaaaaaaa</x"] {
+    assert_capped_text(html, 16, "aaaaaaaaaaaaaaa<", true);
+  }
+}
+
+#[test]
+fn text_exhaustion_ends_at_a_markup_boundary() {
+  assert_capped_text("<p>aaaéz</p><p>ok</p>", 4, "aaa\n\nok", true);
+  assert_capped_text("<p>aaaé<abcdefgh>ok</p>", 4, "aaa ok", true);
+  assert_eq!(
+    stream_parts(&["<p>aaa", "é<abc", "defgh", ">ok</p>"], 4),
+    ("aaa ok".to_string(), true)
+  );
+}
+
+#[test]
+fn a_fragmented_non_matching_rawtext_close_does_not_end_exhaustion() {
+  let html = "<textarea>aaaaaaaaaaaaaaaé</not-a-real-rawtext>ok</textarea>";
+  assert_capped_text(html, 16, "aaaaaaaaaaaaaaa", true);
+  assert_eq!(
+    stream_parts(
+      &[
+        "<textarea>aaaaaaaaaaaaaaa",
+        "é</not",
+        "-a-real-rawtext",
+        ">",
+        "ok</textarea>",
+      ],
+      16,
+    ),
+    ("aaaaaaaaaaaaaaa".to_string(), true)
+  );
+}
+
+#[test]
+fn a_fragmented_rawtext_candidate_consumes_the_text_cap() {
+  let html = "<textarea>aa</abcdefghijklmnop>z</textarea>";
+  let expected = "aa</abcdefghijkl";
+  assert_capped_text(html, 16, expected, true);
+  assert_eq!(
+    stream_parts(&["<textarea>aa</abcdefgh", "ijklmnop", ">z</textarea>"], 16,),
+    (expected.to_string(), true)
+  );
 }
 
 // Truncation drops content, never structure: the node still closes and later
@@ -396,6 +510,120 @@ fn a_dropped_token_ends_where_an_uncapped_scan_ends_it() {
     let html = format!("<p>before</p>{token}<p>after</p>");
     assert_eq!(stream(&html, 32, 64), stream(&html, 32, 0), "case={name}");
   }
+}
+
+// A close tag dropped past the cap is an ignored token to an uncapped parse: no
+// truncation flag, and no separator between the text nodes on either side.
+#[test]
+fn a_dropped_close_tag_is_an_ignored_token() {
+  let html = format!("<p>ab{{}}</{}>cd</p>", "s".repeat(1100));
+  assert_capped_text(&html, 1024, "ab{}cd", false);
+}
+
+// A matching end tag dropped past the cap still closes its element, exactly
+// where the uncapped parse closes it.
+#[test]
+fn a_dropped_matching_close_tag_still_closes_its_element() {
+  let html = format!("<p>ab</p {}>cd</p>", repeat_to("x", 200));
+  assert_capped_text(&html, 64, "ab\n\ncd", false);
+}
+
+// Oversized ignored declarations preserve output. Comments and doctypes report
+// conservative truncation; unsurfaced CDATA does not.
+#[test]
+fn a_dropped_ignored_token_preserves_the_truncation_contract() {
+  assert_capped_text(
+    &format!("<p>ab<!--{}-->cd</p>", repeat_to("x", 200)),
+    64,
+    "ab cd",
+    true,
+  );
+  assert_capped_text(
+    &format!("<p>ab<![CDATA[{}]]>cd</p>", repeat_to("x", 200)),
+    64,
+    "ab cd",
+    false,
+  );
+  assert_capped_text(
+    &format!("<!DOCTYPE {}><p>ab</p>", repeat_to("x", 200)),
+    64,
+    "ab",
+    true,
+  );
+}
+
+#[test]
+fn a_dropped_comment_keeps_its_abrupt_end_state() {
+  assert_capped_text("<!-->z", 1, "z", true);
+  assert_capped_text("<!--->z", 1, "z", true);
+}
+
+#[test]
+fn an_over_cap_partial_declaration_at_eof_reports_truncation() {
+  assert_capped_text("<!", 1, "", true);
+}
+
+#[test]
+fn an_oversized_surfaced_cdata_is_dropped_at_every_chunk_boundary() {
+  let html = format!("b<![CDATA[{}>inside]]>a", repeat_to("x", 200));
+
+  for cap in [1, 8, 9, 64] {
+    let expected = html_to_markdown_result(&html, options(cap));
+    assert!(!expected.truncated, "ignored CDATA cap={cap}");
+
+    let options = surfaced_cdata_options(cap);
+    let one_shot = html_to_markdown_result(&html, options.clone());
+    assert_eq!(one_shot.markdown, expected.markdown, "one-shot cap={cap}");
+    assert!(one_shot.truncated, "one-shot cap={cap}");
+
+    for split in 0..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(options.clone());
+      let mut actual = processor.process_chunk(&html[..split]);
+      actual.push_str(&processor.process_chunk(&html[split..]));
+      actual.push_str(&processor.finish());
+
+      assert_eq!(actual, expected.markdown, "cap={cap} split={split}");
+      assert!(processor.truncated(), "cap={cap} split={split}");
+    }
+  }
+}
+
+#[test]
+fn surfaced_cdata_uses_its_exact_token_length_for_the_cap() {
+  let html = "<![CDATA[x]]>";
+  let stream_bytes = |options| {
+    let mut processor = MarkdownStreamProcessor::new(options);
+    let mut output = String::new();
+    for byte in html.as_bytes().chunks(1) {
+      output.push_str(&processor.process_chunk(std::str::from_utf8(byte).unwrap()));
+    }
+    output.push_str(&processor.finish());
+    (output, processor.truncated())
+  };
+
+  for cap in [html.len() - 1, html.len()] {
+    assert_eq!(
+      stream_bytes(options(cap)),
+      (String::new(), false),
+      "ignored CDATA cap={cap}"
+    );
+  }
+
+  assert_eq!(
+    html_to_markdown_result(html, surfaced_cdata_options(html.len())).markdown,
+    "x"
+  );
+  let dropped = html_to_markdown_result(html, surfaced_cdata_options(html.len() - 1));
+  assert_eq!(dropped.markdown, "");
+  assert!(dropped.truncated);
+  assert_eq!(
+    stream_bytes(surfaced_cdata_options(html.len())),
+    ("x".to_string(), false)
+  );
+  assert_eq!(
+    stream_bytes(surfaced_cdata_options(html.len() - 1)),
+    (String::new(), true)
+  );
 }
 
 // As with text, dropping must cut at a content-determined point.
