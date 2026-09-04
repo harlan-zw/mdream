@@ -222,6 +222,35 @@ fn one_huge_text_node_no_longer_costs_the_document() {
   }
 }
 
+#[test]
+fn cap_bounds_an_unfinished_entity_inside_a_raw_html_link() {
+  let html = format!(
+    "<details><a href=\"/x\">&#{}</a></details>",
+    "1".repeat(HUGE)
+  );
+  let (expected, truncated) = stream_reporting(&html, 8 * 1024, CAP);
+  assert!(truncated);
+  assert!(expected.starts_with(r#"<details><a href="/x">"#));
+  assert!(expected.ends_with("</a></details>"));
+
+  for chunk in [37, 8 * 1024, 128 * 1024, html.len()] {
+    assert_eq!(
+      stream_reporting(&html, chunk, CAP),
+      (expected.clone(), true),
+      "chunk={chunk}"
+    );
+  }
+
+  let batch = html_to_markdown_result(&html, options(CAP));
+  assert!(batch.truncated);
+  assert_eq!(batch.markdown, expected);
+  let capped = peak(&html, 8 * 1024, CAP);
+  assert!(
+    capped < (HUGE / 4) as u64,
+    "capped peak {capped} should be a window, not the {HUGE} byte entity"
+  );
+}
+
 // The cap changes output, so where it cuts must not depend on chunk boundaries.
 // Clamping at the append rather than after it is what makes this hold.
 #[test]

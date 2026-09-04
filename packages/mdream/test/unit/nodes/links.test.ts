@@ -26,6 +26,187 @@ describe.each(engines)('links $name', (engineConfig) => {
       .toBe('[a\\[b\\] \\*c\\*](/x)')
   })
 
+  it.each([
+    [
+      '<details><a href="/x">a[b]</a></details>',
+      '<details><a href="/x">a&#91;b&#93;</a></details>',
+    ],
+    [
+      '<dl><dt>Term <a href="/term">link</a></dt><dd>Definition</dd></dl>',
+      '<dl><dt>Term <a href="/term">link</a></dt>\n<dd>Definition</dd>\n</dl>',
+    ],
+    [
+      '<details><a href="/x?a=1&amp;b=2" title="say &quot;hi&quot; &amp; bye">link</a></details>',
+      '<details><a href="/x?a=1&amp;b=2" title="say &quot;hi&quot; &amp; bye">link</a></details>',
+    ],
+    [
+      '<details><a href="/&#91;x&#93;" title="[Title] &amp; &amp;#91;">link</a></details>',
+      '<details><a href="/&#91;x&#93;" title="&#91;Title&#93; &amp; &amp;#91;">link</a></details>',
+    ],
+    [
+      '<details><a href="javascript:alert(1)">a[b]</a></details>',
+      '<details>a[b]</details>',
+    ],
+  ])('preserves safe raw HTML links for %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    [
+      '<details><a href="/x?utm_source=test&amp;keep=1">Link</a></details>',
+      { urls: true },
+      '<details><a href="/x?keep=1">Link</a></details>',
+    ],
+    [
+      '<details><a href="#">Link</a></details>',
+      { emptyLinks: true },
+      '<details>Link</details>',
+    ],
+    [
+      '<details><a href="/x"></a></details>',
+      { emptyLinkText: true },
+      '<details><a href="/x"></a></details>',
+    ],
+    [
+      '<details><a href="#missing">Link</a></details>',
+      { fragments: true },
+      '<details><a href="#missing">Link</a></details>',
+    ],
+    [
+      '<details><a href="https://example.com">https://example.com</a></details>',
+      { redundantLinks: true },
+      '<details><a href="https://example.com">https://example.com</a></details>',
+    ],
+    [
+      '<details><h2><a href="#section">Section</a></h2></details>',
+      { selfLinkHeadings: true },
+      '<details>\n\n## <a href="#section">Section</a>\n\n</details>',
+    ],
+  ])('keeps raw HTML link cleanup boundaries for %s', async (html, clean, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { clean, engine })).toBe(expected)
+  })
+
+  it('keeps a balanced visible raw HTML link with clean enabled', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<details><a href="/x">Visible</a></details>', { clean: true, engine }))
+      .toBe('<details><a href="/x">Visible</a></details>')
+  })
+
+  it.each([
+    [{ enter: '{', exit: '}' }, '<details>{Link}</details>'],
+    [{ enter: '[' }, '<details>[Link](/x)</details>'],
+    [{ exit: '}' }, '<details><a href="/x">Link}</details>'],
+  ])('preserves raw HTML link tag override %o', async (override, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<details><a href="/x">Link</a></details>', {
+      engine,
+      plugins: {
+        tagOverrides: {
+          a: override,
+        },
+      },
+    })).toBe(expected)
+  })
+
+  it('keeps bracket text literal when an override replaces the raw link tags', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<details><a href="/x">a[b]</a></details>', {
+      engine,
+      plugins: {
+        tagOverrides: {
+          a: { enter: '{', exit: '}' },
+        },
+      },
+    })).toBe('<details>{a[b]}</details>')
+  })
+
+  it('keeps bracket text literal when an override resembles a raw link tag', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<details><a href="/x">a[b]</a></details>', {
+      engine,
+      plugins: {
+        tagOverrides: {
+          a: { enter: '<abbr>', exit: '</abbr>' },
+        },
+      },
+    })).toBe('<details><abbr>a[b]</abbr></details>')
+  })
+
+  it('does not promote an escaped raw HTML link attribute to an executable URL', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<details>\\<a href="[javascript:alert(1)](#)">Click</a></details>', {
+      engine,
+      clean: true,
+    })).toBe('<details>\\<a href="&#91;javascript:alert(1)&#93;(#)">Click</a></details>')
+  })
+
+  it.each([
+    ['[javascript:alert(1)](#missing)', { fragments: true }],
+    ['[javascript:alert(1)](#)', { emptyLinks: true }],
+    ['[javascript:alert(1)](javascript:alert(1))', { redundantLinks: true }],
+    ['java![](#)script:alert(1)', { emptyImages: true }],
+    ['java[](#)script:alert(1)', { emptyLinkText: true }],
+    ['line one\n## [Title](#title)', { selfLinkHeadings: true }],
+  ])('keeps raw HTML href %s opaque to its cleaner', async (href, clean) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<details>\\<a href="${href}">Click</a></details>`
+    expect(htmlToMarkdown(html, { clean, engine }))
+      .toBe(html.replaceAll('[', '&#91;').replaceAll(']', '&#93;'))
+  })
+
+  it('keeps fragment links to headings containing raw HTML links', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<details><h2><a href="#section">Section</a></h2></details><p><a href="#section">jump</a></p>', {
+      engine,
+      clean: { fragments: true },
+    })
+    expect(markdown).toContain('## <a href="#section">Section</a>')
+    expect(markdown).toContain('[jump](#section)')
+
+    expect(htmlToMarkdown('<h2>&lt;http://x&gt;</h2><p><a href="#httpx">jump</a></p>', {
+      engine,
+      clean: { fragments: true },
+    })).toContain('[jump](#httpx)')
+
+    for (const heading of ['&lt;span&gt;', '<code>&lt;span&gt;</code>']) {
+      expect(htmlToMarkdown(`<h2>${heading}</h2><p><a href="#span">jump</a></p>`, {
+        engine,
+        clean: { fragments: true },
+      })).toContain('[jump](#span)')
+    }
+
+    expect(htmlToMarkdown('<h2><b></b></h2><p><a href="#foobar">jump</a></p>', {
+      engine,
+      clean: { fragments: true },
+      plugins: { tagOverrides: { b: { enter: '`foo_bar' } } },
+    })).toContain('[jump](#foobar)')
+
+    for (const [heading, fragment] of [
+      ['`foo_bar<span title="`"></span>', 'foobar'],
+      ['`foo_bar\\<span title="`"></span>', 'foo_barspan-title'],
+      ['`foo_bar\\\\<span title="`"></span>', 'foobar'],
+    ]) {
+      expect(htmlToMarkdown(`<h2><b></b></h2><p><a href="#${fragment}">jump</a></p>`, {
+        engine,
+        clean: { fragments: true },
+        plugins: {
+          tagOverrides: {
+            b: { enter: heading, exit: '' },
+          },
+        },
+      })).toContain(`[jump](#${fragment})`)
+    }
+
+    const visibleTagText = htmlToMarkdown('&lt;a title=&quot;<a href="#missing">jump</a>&quot;&gt;', {
+      engine,
+      clean: { fragments: true },
+    })
+    expect(visibleTagText).toContain('jump')
+    expect(visibleTagText).not.toContain('[jump]')
+  })
+
   it('converts simple links', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<a href="https://example.com">Example</a>'

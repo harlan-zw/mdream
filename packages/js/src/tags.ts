@@ -1,4 +1,4 @@
-import type { EngineOptions, HandlerContext, TagHandler, TagOverride } from './types'
+import type { ElementNode, EngineOptions, HandlerContext, TagHandler, TagOverride } from './types'
 import {
   BLOCKQUOTE_SPACING,
   isInsideRawHtmlBlock,
@@ -124,7 +124,7 @@ import {
   TAG_XMP,
   TagIdMap,
 } from './const'
-import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, orderedItemNumber, parseUnsignedInteger } from './utils'
+import { blockOpenPrefix, continuationPrefix, escapeHtml, getLanguageFromClass, isEmptyLinkHref, isInsideHeading, isInsideTableCell, isSafeHtmlUrl, listMarkerLineStart, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
 const URL_SCHEME_RE = /^[A-Z][\dA-Z+.-]*:/i
@@ -249,6 +249,34 @@ export function resolveUrl(url: string, origin?: string, clean?: EngineOptions['
 
   const cleansUrls = clean === true || (!!clean && clean.urls === true)
   return cleansUrls && resolved.includes('?') ? stripTrackingParams(resolved) : resolved
+}
+
+function escapeRawAnchorAttribute(value: string): string {
+  return value.replace(/[&<>"[\]]/g, character => character === '&'
+    ? '&amp;'
+    : character === '<'
+      ? '&lt;'
+      : character === '>'
+        ? '&gt;'
+        : character === '"'
+          ? '&quot;'
+          : character === '[' ? '&#91;' : '&#93;')
+}
+
+export function safeAnchorOutput(node: ElementNode, options: EngineOptions | undefined, entering: boolean, protectMarkdown = false): string | undefined {
+  const href = node.attributes?.href
+  if (!href || !isSafeHtmlUrl(href))
+    return
+  const resolved = resolveUrl(href, options?.origin, options?.clean)
+  if (!isSafeHtmlUrl(resolved))
+    return
+  if (!entering)
+    return '</a>'
+  const escapedHref = protectMarkdown ? escapeRawAnchorAttribute(resolved) : escapeHtml(resolved, true)
+  const title = node.attributes?.title === undefined
+    ? ''
+    : ` title="${protectMarkdown ? escapeRawAnchorAttribute(node.attributes.title) : escapeHtml(node.attributes.title, true)}"`
+  return `<a href="${escapedHref}"${title}>`
 }
 
 function serializeMarkdownDestination(destination: string): string {
@@ -763,6 +791,8 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (node.attributes?.href !== undefined) {
         if (stripsEmptyLink(state, node.attributes.href))
           return
+        if (isInsideRawHtmlBlock(state.depthMap!))
+          return safeAnchorOutput(node, state.options, true, true)
         return '['
       }
     },
@@ -772,6 +802,8 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
       if (stripsEmptyLink(state, node.attributes.href))
         return ''
+      if (isInsideRawHtmlBlock(state.depthMap!) && !node.tagHandler?.literalEnter)
+        return safeAnchorOutput(node, state.options, false, true)
       const href = resolveUrl(node.attributes.href, state.options?.origin, state.options?.clean)
       let title = node.attributes?.title
       // Check if title matches the last content to avoid duplication

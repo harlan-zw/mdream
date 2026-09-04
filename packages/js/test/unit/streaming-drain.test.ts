@@ -1,5 +1,8 @@
+import type { ParseState } from '../../src/parse'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { createMarkdownProcessor } from '../../src/markdown-processor'
+import { finalizeParse, parseHtmlStream } from '../../src/parse'
 
 function chunkedStream(html: string, chunkSize: number): ReadableStream<string> {
   return new ReadableStream({
@@ -16,6 +19,12 @@ async function streamConvert(html: string, chunkSize: number): Promise<string> {
   for await (const chunk of streamHtmlToMarkdown(chunkedStream(html, chunkSize)))
     markdown += chunk
   return markdown
+}
+
+function hashChunk(hash: number, chunk: string): number {
+  for (let i = 0; i < chunk.length; i++)
+    hash = Math.imul(hash ^ chunk.charCodeAt(i), 16777619)
+  return hash >>> 0
 }
 
 const BLOCK_NEWLINE_HTML = [
@@ -71,5 +80,51 @@ describe('streaming drain parity', () => {
 
     for (const chunkSize of [1, 3, 7, 16, 40])
       expect(await streamConvert(BLOCK_NEWLINE_HTML, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
+
+  it('bounds retained output while streaming a raw HTML anchor body', () => {
+    const processor = createMarkdownProcessor()
+    const parseState: ParseState = {
+      depthMap: processor.state.depthMap,
+      depth: 0,
+      resolvedPlugins: [],
+      plainText: false,
+    }
+    const text = '0123456789abcdef'
+    const repetitions = 32 * 1024
+    const html = `<details><a href="/x">${`<span>${text}</span>`.repeat(repetitions)}</a></details>`
+    const expectedLength = '<details><a href="/x">'.length + text.length * repetitions + '</a></details>'.length
+    const chunkSize = 4 * 1024
+    let remainingHtml = ''
+    let emittedLength = 0
+    let emittedHash = 2166136261
+    let peakRetainedLength = 0
+
+    for (let offset = 0; offset < html.length; offset += chunkSize) {
+      remainingHtml = parseHtmlStream(remainingHtml + html.slice(offset, offset + chunkSize), parseState, processor.processEvent)
+      const chunk = processor.getMarkdownChunk()
+      emittedLength += chunk.length
+      emittedHash = hashChunk(emittedHash, chunk)
+
+      let retainedLength = 0
+      for (let i = 0; i < processor.state.buffer.length; i++)
+        retainedLength += processor.state.buffer[i]!.length
+      if (retainedLength > peakRetainedLength)
+        peakRetainedLength = retainedLength
+    }
+
+    finalizeParse(remainingHtml, parseState, processor.processEvent)
+    const finalChunk = processor.getMarkdownChunk()
+    emittedLength += finalChunk.length
+    emittedHash = hashChunk(emittedHash, finalChunk)
+
+    let expectedHash = hashChunk(2166136261, '<details><a href="/x">')
+    for (let i = 0; i < repetitions; i++)
+      expectedHash = hashChunk(expectedHash, text)
+    expectedHash = hashChunk(expectedHash, '</a></details>')
+
+    expect(emittedLength).toBe(expectedLength)
+    expect(emittedHash).toBe(expectedHash)
+    expect(peakRetainedLength).toBeLessThan(chunkSize)
   })
 })

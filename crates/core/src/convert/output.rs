@@ -737,6 +737,10 @@ impl ConvertState {
       new_line_config[0]
     };
 
+    if tag_id == Some(TAG_A) {
+      self.raw_html_link_open = false;
+    }
+
     // Clean mode — single guard for all clean checks
     if self.clean_flags != 0
       && let Some(id) = tag_id
@@ -803,6 +807,15 @@ impl ConvertState {
       output.as_deref(),
       enter_is_literal,
     );
+
+    if tag_id == Some(TAG_A) {
+      self.raw_html_link_open = !enter_is_literal
+        && self.in_raw_html_block()
+        && self.buffer.len() > output_start
+        && output
+          .as_deref()
+          .is_some_and(|emitted| !emitted.is_empty() && self.buffer.ends_with(emitted));
+    }
 
     if self.link_empty_text_pending
       && tag_id != Some(TAG_A)
@@ -977,6 +990,9 @@ impl ConvertState {
     }
 
     let tag_id = node.tag_id;
+    if tag_id == Some(TAG_A) {
+      self.raw_html_link_open = false;
+    }
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
     }
@@ -997,6 +1013,9 @@ impl ConvertState {
     let is_inline = override_config
       .and_then(|ov| ov.is_inline)
       .unwrap_or(node.is_inline);
+    let raw_html_anchor = tag_id == Some(TAG_A)
+      && self.in_raw_html_block()
+      && override_config.is_none_or(|ov| ov.enter.is_none());
 
     let cell_span =
       if matches!(tag_id, Some(TAG_TH | TAG_TD)) && self.depth_map[TAG_TABLE as usize] <= 1 {
@@ -1062,7 +1081,7 @@ impl ConvertState {
         } else {
           output = self.get_exit_output(node, cell_span);
         }
-      } else if self.plain_text || tag_id != Some(TAG_A) {
+      } else if self.plain_text || tag_id != Some(TAG_A) || raw_html_anchor {
         output = self.get_exit_output(node, cell_span);
       }
     }
@@ -1124,6 +1143,7 @@ impl ConvertState {
       && self.clean_flags != 0
       && tag_id == Some(TAG_A)
       && !has_override
+      && !raw_html_anchor
       && !self.link_hold_released
     {
       // Find actual [ position: scan from recorded pos (write_output may have inserted newlines before it)
@@ -1243,6 +1263,7 @@ impl ConvertState {
     if !self.plain_text
       && !has_override
       && tag_id == Some(TAG_A)
+      && !raw_html_anchor
       && table_separator.is_none()
       && self.depth_map[TAG_PRE as usize] == 0
     {
@@ -1427,6 +1448,7 @@ impl ConvertState {
     if !self.plain_text
       && self.clean_flags & CLEAN_FRAGMENTS != 0
       && tag_id == Some(TAG_A)
+      && !raw_html_anchor
       && let Some(href) = node.attributes.get("href")
       && href.starts_with('#')
       && href.len() > 1
@@ -2217,7 +2239,6 @@ impl ConvertState {
 
   fn escape_raw_html_text<'a>(&self, value: &'a str) -> Cow<'a, str> {
     let in_table = self.depth_map[TAG_TABLE as usize] > 0;
-    let in_link = self.depth_map[TAG_A as usize] > 0;
     let mut output: Option<String> = None;
     let mut copied_until = 0usize;
 
@@ -2232,8 +2253,8 @@ impl ConvertState {
         b'\n' => Some("&#10;"),
         b'\r' => Some("&#13;"),
         b'|' if in_table => Some("&#124;"),
-        b'[' if in_link => Some("&#91;"),
-        b']' if in_link => Some("&#93;"),
+        b'[' if self.raw_html_link_open => Some("&#91;"),
+        b']' if self.raw_html_link_open => Some("&#93;"),
         _ => None,
       };
       if let Some(replacement) = replacement {
@@ -2805,7 +2826,9 @@ impl ConvertState {
         Some(Cow::Owned(s))
       }
       TAG_A => {
-        if node.attributes.contains_key("href") {
+        if self.in_raw_html_block() {
+          self.html_element_output(node, true, true).map(Cow::Owned)
+        } else if node.attributes.contains_key("href") {
           Some(Cow::Borrowed("["))
         } else {
           None
@@ -2968,6 +2991,9 @@ impl ConvertState {
       TAG_SUB => Some(Cow::Borrowed("</sub>")),
       TAG_SUP => Some(Cow::Borrowed("</sup>")),
       TAG_INS => Some(Cow::Borrowed("</ins>")),
+      TAG_A if self.in_raw_html_block() => {
+        self.html_element_output(node, false, true).map(Cow::Owned)
+      }
       TAG_CODE => {
         if self.depth_map[TAG_PRE as usize] > 0 {
           // Raw <code> close inside a table cell (issue #147).

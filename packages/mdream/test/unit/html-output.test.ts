@@ -32,6 +32,12 @@ describe.each(engines)('safe HTML output $name', (engineConfig) => {
     ].join(''))
   })
 
+  it('does not treat an unmatched backtick as inline code in heading IDs', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<h2>`foo_bar</h2>', { engine, format: 'html' }))
+      .toBe('<h2 id="foobar">`foo_bar</h2>')
+  })
+
   it('escapes text and attributes while removing active content', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const input = [
@@ -50,6 +56,14 @@ describe.each(engines)('safe HTML output $name', (engineConfig) => {
       format: 'html',
       origin: 'https://mdream.dev/',
     })).toBe('<p>&lt;safe&gt; linkfile<img src="https://mdream.dev/safe.png" alt="A &quot;quote&quot;"></p>')
+  })
+
+  it('keeps square brackets literal in HTML anchor attributes', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p><a href="/[x]" title="[Title]">link</a></p>', {
+      engine,
+      format: 'html',
+    })).toBe('<p><a href="/[x]" title="[Title]">link</a></p>')
   })
 
   it('rejects relative URLs resolved against an unsafe origin', async () => {
@@ -94,7 +108,7 @@ describe.each(engines)('safe HTML output $name', (engineConfig) => {
 
   it('matches batch output at every stream split', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    const input = '<article><h2>Streaming</h2><p>A <code>small</code> example.</p></article>'
+    const input = '<article><h2>Streaming</h2><p>A <a href="/[x]" title="[Title]">small</a> example.</p></article>'
     const expected = htmlToMarkdown(input, { engine, format: 'html' })
 
     for (let split = 0; split <= input.length; split++) {
