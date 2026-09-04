@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+// Vitest exports this browser entry without a file extension.
 import { page } from 'vitest/browser'
 
 // Helper function to render markdown to DOM
