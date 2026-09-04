@@ -251,18 +251,6 @@ export function resolveUrl(url: string, origin?: string, clean?: EngineOptions['
   return cleansUrls && resolved.includes('?') ? stripTrackingParams(resolved) : resolved
 }
 
-function escapeRawAnchorAttribute(value: string): string {
-  return value.replace(/[&<>"[\]]/g, character => character === '&'
-    ? '&amp;'
-    : character === '<'
-      ? '&lt;'
-      : character === '>'
-        ? '&gt;'
-        : character === '"'
-          ? '&quot;'
-          : character === '[' ? '&#91;' : '&#93;')
-}
-
 export function safeAnchorOutput(node: ElementNode, options: EngineOptions | undefined, entering: boolean, protectMarkdown = false): string | undefined {
   const href = node.attributes?.href
   if (!href || !isSafeHtmlUrl(href))
@@ -272,10 +260,10 @@ export function safeAnchorOutput(node: ElementNode, options: EngineOptions | und
     return
   if (!entering)
     return '</a>'
-  const escapedHref = protectMarkdown ? escapeRawAnchorAttribute(resolved) : escapeHtml(resolved, true)
+  const escapedHref = escapeHtml(resolved, true, protectMarkdown)
   const title = node.attributes?.title === undefined
     ? ''
-    : ` title="${protectMarkdown ? escapeRawAnchorAttribute(node.attributes.title) : escapeHtml(node.attributes.title, true)}"`
+    : ` title="${escapeHtml(node.attributes.title, true, protectMarkdown)}"`
   return `<a href="${escapedHref}"${title}>`
 }
 

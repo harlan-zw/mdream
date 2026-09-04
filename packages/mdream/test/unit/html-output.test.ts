@@ -42,7 +42,7 @@ describe.each(engines)('safe HTML output $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     const input = [
       '<script>alert(1)</script>',
-      '<p onclick="alert(1)">&lt;safe&gt; ',
+      '<p onclick="alert(1)">🙂&amp;&lt;&gt;&quot; ',
       '<a href="java&#9;script:alert(1)" title="&quot;quoted&quot;">link</a>',
       '<a href="file:///etc/passwd">file</a>',
       '<img src="data:text/html,boom" alt="bad">',
@@ -55,15 +55,15 @@ describe.each(engines)('safe HTML output $name', (engineConfig) => {
       engine,
       format: 'html',
       origin: 'https://mdream.dev/',
-    })).toBe('<p>&lt;safe&gt; linkfile<img src="https://mdream.dev/safe.png" alt="A &quot;quote&quot;"></p>')
+    })).toBe('<p>🙂&amp;&lt;&gt;" linkfile<img src="https://mdream.dev/safe.png" alt="A &quot;quote&quot;"></p>')
   })
 
   it('keeps square brackets literal in HTML anchor attributes', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(htmlToMarkdown('<p><a href="/[x]" title="[Title]">link</a></p>', {
+    expect(htmlToMarkdown('<p><a href="/[x]?q=&lt;&amp;" title="🙂[Title] &quot;&lt;&gt;&amp;">link</a></p>', {
       engine,
       format: 'html',
-    })).toBe('<p><a href="/[x]" title="[Title]">link</a></p>')
+    })).toBe('<p><a href="/[x]?q=&lt;&amp;" title="🙂[Title] &quot;&lt;&gt;&amp;">link</a></p>')
   })
 
   it('rejects relative URLs resolved against an unsafe origin', async () => {

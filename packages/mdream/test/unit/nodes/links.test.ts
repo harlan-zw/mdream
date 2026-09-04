@@ -40,8 +40,8 @@ describe.each(engines)('links $name', (engineConfig) => {
       '<details><a href="/x?a=1&amp;b=2" title="say &quot;hi&quot; &amp; bye">link</a></details>',
     ],
     [
-      '<details><a href="/&#91;x&#93;" title="[Title] &amp; &amp;#91;">link</a></details>',
-      '<details><a href="/&#91;x&#93;" title="&#91;Title&#93; &amp; &amp;#91;">link</a></details>',
+      '<details><a href="/&#91;x&#93;" title="🙂[Title] &amp; &amp;#91; &lt;&gt;&quot;">link</a></details>',
+      '<details><a href="/&#91;x&#93;" title="🙂&#91;Title&#93; &amp; &amp;#91; &lt;&gt;&quot;">link</a></details>',
     ],
     [
       '<details><a href="javascript:alert(1)">a[b]</a></details>',
