@@ -504,6 +504,44 @@ fn streaming_dropped_empty_element_keeps_block_spacing() {
   }
 }
 
+// Only the innermost open link's bracket was held at the yield boundary, so an
+// enclosing `<a>`'s `[` could be yielded and then retracted by that outer
+// link's clean drop (here `self_link_headings`): the streamed output diverged
+// from one-shot. The hold must cover every open link, not just the innermost.
+// A block between the two anchors keeps the outer one open (the implied close
+// for a nested `<a>` stops at a scope boundary), which is the shape that makes
+// the outer bracket reachable by a chunk boundary.
+#[test]
+fn streaming_holds_outer_nested_link_bracket_through_clean_drop() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  for html in [
+    // Adjacent anchors: the outer is implied-closed before the inner opens, so
+    // this pins the everyday nested-anchor path against regressions.
+    r"<h2><a href=#x>pre<a href=/b>y</a></a></h2>",
+    // A block boundary between the anchors: both are open at once, and the
+    // outer self-link's drop used to retract already-yielded bytes.
+    r"<h2><a href=#x>pre<div><a href=/b>y</a></a></div></h2>",
+  ] {
+    let expected = html_to_markdown(html, opts.clone());
+    // Boundary immediately after the inner `<a href=/b>` enter: the outer
+    // self-link's `[` sits in already-yielded bytes when its close drops it.
+    let split = html.find("<a href=/b>").unwrap() + "<a href=/b>".len();
+    let mut processor = MarkdownStreamProcessor::new(opts.clone());
+    let mut actual = processor.process_chunk(&html[..split]);
+    actual.push_str(&processor.process_chunk(&html[split..]));
+    actual.push_str(&processor.finish());
+    assert_eq!(
+      actual, expected,
+      "nested self-link heading diverged at split={split} html={html:?}"
+    );
+    // Every other boundary must hold too.
+    assert_stream_matches_every_split(html, opts.clone());
+  }
+}
+
 #[test]
 fn streaming_wrap_preserves_the_full_current_column() {
   let html = "<p>alpha <span>beta</span> <span>gamma</span> delta</p>";
