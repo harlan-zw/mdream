@@ -1081,6 +1081,11 @@ function getPlainTextOutput(node: ElementNode, eventType: number, state: Markdow
       return (depthMap[TAG_TABLE] || 0) > 1 || node.index === 0 ? '' : '\t'
     if (tagId === TAG_IMG) {
       const alt = node.attributes?.alt
+      const clean = state.options?.clean
+      const stripsEmptyImage = clean === true
+        || (clean != null && clean !== false && clean.emptyImages === true)
+      if (stripsEmptyImage && !(alt !== undefined && alt.trim().length > 0))
+        return undefined
       const output = alt !== undefined
         ? alt || undefined
         : node.attributes?.title || resolveUrl(node.attributes?.src || '', state.options?.origin, state.options?.clean) || undefined

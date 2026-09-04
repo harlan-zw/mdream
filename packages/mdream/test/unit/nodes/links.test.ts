@@ -122,6 +122,32 @@ describe.each(engines)('links $name', (engineConfig) => {
       .toBe('[![Photo](/photo.jpg)](/file)')
   })
 
+  it('drops images with whitespace-only alt from clean text output', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p>Before</p><a href="/file" title="File:Photo"><img src="/photo.jpg" alt=" "></a>', { clean: true, engine, format: 'text' }))
+      .toBe('Before\n\nFile:Photo')
+  })
+
+  it('aligns the clean empty-image text gate with the markdown gate', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    for (const alt of [' ', '\t', '\n', '\f', '\r', '\u00A0', '\uFEFF']) {
+      expect(htmlToMarkdown(`<p>Before</p><a href="/file" title="File:Photo"><img src="/photo.jpg" alt="${alt}"></a>`, { clean: true, engine, format: 'text' }))
+        .toBe('Before\n\nFile:Photo')
+    }
+    expect(htmlToMarkdown('<p>Before</p><a href="/file" title="File:Photo"><img src="/photo.jpg"></a>', { clean: true, engine, format: 'text' }))
+      .toBe('Before\n\nFile:Photo')
+    expect(htmlToMarkdown('<p>A</p><img src="/photo.jpg" alt=" "><p>B</p>', { clean: true, engine, format: 'text' }))
+      .toBe('A\n\nB')
+    expect(htmlToMarkdown('<img src="image.png" title="Title">', { clean: true, engine, format: 'text' }))
+      .toBe('')
+    expect(htmlToMarkdown('<img src="/image.png">', { clean: { emptyImages: true }, engine, format: 'text' }))
+      .toBe('')
+    expect(htmlToMarkdown('<img src="image.png" title="Title">', { clean: { urls: true }, engine, format: 'text' }))
+      .toBe('Title')
+    expect(htmlToMarkdown('<p>A</p><img src="/photo.jpg" alt="Photo"><p>B</p>', { clean: true, engine, format: 'text' }))
+      .toBe('A\n\nPhoto\n\nB')
+  })
+
   it('updates linked-image content only for built-in emitted output', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<a href="/x" title="Title"><img src="/i" alt="Alt"></a>', { engine, format: 'html' }))
