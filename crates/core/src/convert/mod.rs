@@ -131,6 +131,57 @@ struct CodeSpanState {
   exhausted: bool,
 }
 
+#[derive(Clone, Copy)]
+struct OpenMarker {
+  output_start: usize,
+  content_start: usize,
+  kind: u8,
+}
+
+#[derive(Clone, Copy)]
+enum CaptionState {
+  Pending,
+  Tentative {
+    output_start: usize,
+    content_start: usize,
+    restore_space: bool,
+  },
+  Committed,
+}
+
+struct DeferredBreakRun {
+  fragment: String,
+  count: usize,
+}
+
+struct StreamingBreakRun {
+  output_start: usize,
+  output_end: usize,
+  unit: String,
+  count: usize,
+}
+
+#[derive(Clone, Copy)]
+enum CaptionMaterialization {
+  Tentative,
+  Commit,
+  ExplicitCommit,
+}
+
+struct CaptionFrame {
+  state: CaptionState,
+  spacing: [u8; 2],
+  deferred_breaks: Option<DeferredBreakRun>,
+  has_internal_break: bool,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum CaptionBoundary {
+  None,
+  Pending(u8),
+  ConsumeSpace,
+}
+
 struct CodeFenceState {
   output_start: usize,
   marker_offset: usize,
@@ -148,13 +199,21 @@ struct BlockquoteFrame {
 static HEADING_PREFIXES: [&str; 6] = ["# ", "## ", "### ", "#### ", "##### ", "###### "];
 
 /// Inline tags whose delimiters are suppressed inside `<pre>` (content only).
-/// The tag ids form three dense ranges plus four exceptions.
+/// The tag ids form three dense ranges plus five exceptions.
 #[inline]
 fn suppresses_formatting_in_pre(tag_id: u8) -> bool {
-  matches!(tag_id, TAG_A | TAG_KBD | TAG_S | TAG_STRIKE)
-    || (TAG_STRONG..=TAG_INS).contains(&tag_id)
+  matches!(
+    tag_id,
+    TAG_A | TAG_KBD | TAG_S | TAG_STRIKE | TAG_FIGCAPTION
+  ) || (TAG_STRONG..=TAG_INS).contains(&tag_id)
     || (TAG_ABBR..=TAG_SMALL).contains(&tag_id)
     || (TAG_U..=TAG_BDO).contains(&tag_id)
+}
+
+fn code_owns_pending_pre_fence(stack: &[ElementNode]) -> bool {
+  stack.len() >= 2
+    && stack.last().and_then(|node| node.tag_id) == Some(TAG_CODE)
+    && stack[stack.len() - 2].tag_id == Some(TAG_PRE)
 }
 
 #[inline]
@@ -522,6 +581,8 @@ pub struct ConvertState {
   /// delimiters close before the separator and streaming output has no
   /// speculative trailing whitespace.
   pending_inline_whitespace: bool,
+  /// Deferred spacing after a committed figcaption.
+  caption_boundary: CaptionBoundary,
 
   // Streaming
   last_yielded_length: usize,
@@ -562,9 +623,16 @@ pub struct ConvertState {
   link_hold_released: bool,
   /// Closing the link may still truncate an empty label at its bracket.
   link_empty_text_pending: bool,
+  /// Deferred caption break counts/flags before an empty-text-cleanable link.
+  link_caption_break_snapshot: Vec<(usize, bool)>,
+  link_caption_break_snapshot_active: bool,
   pub(crate) streaming: bool,
-  /// Open inline markers as (kind, output start, content start); lets the exit drop empty pairs.
-  open_markers: Vec<(u8, usize, usize)>,
+  /// Open inline markers retained until visible content makes them permanent.
+  open_markers: Vec<OpenMarker>,
+  /// Figcaptions defer their opener until content commits the caption.
+  caption_frames: Vec<CaptionFrame>,
+  /// Unresolved trailing hard breaks retain one physical representative.
+  streaming_break_runs: Vec<StreamingBreakRun>,
   /// Open code spans and fenced blocks stay buffered until their closing
   /// delimiter can be chosen from the complete literal content.
   code_spans: Vec<CodeSpanState>,
@@ -723,6 +791,7 @@ impl ConvertState {
       has_last_text_node: false,
       last_node_is_inline: false,
       pending_inline_whitespace: false,
+      caption_boundary: CaptionBoundary::None,
       last_yielded_length: 0,
       has_streamed_output: false,
       flushed_tail: [b'\n'; 2],
@@ -742,8 +811,12 @@ impl ConvertState {
       link_hold_forever: false,
       link_hold_released: false,
       link_empty_text_pending: false,
+      link_caption_break_snapshot: Vec::new(),
+      link_caption_break_snapshot_active: false,
       streaming: false,
       open_markers: Vec::new(),
+      caption_frames: Vec::new(),
+      streaming_break_runs: Vec::new(),
       code_spans: Vec::new(),
       code_fence: None,
       blockquotes: Vec::with_capacity(4),
@@ -1573,7 +1646,7 @@ impl ConvertState {
     // ASCII whitespace only, as everywhere else: U+00A0 is content, and the
     // streaming path cannot un-send a nbsp it has already yielded.
     let trimmed_end_len = trim_ascii_whitespace_end(&self.buffer);
-    self.buffer.truncate(trimmed_end_len);
+    self.truncate_buffer(trimmed_end_len);
     let start = if self.preserve_leading_whitespace {
       0
     } else {
@@ -1581,6 +1654,13 @@ impl ConvertState {
     };
     if start > 0 {
       self.buffer.drain(..start);
+      self
+        .streaming_break_runs
+        .retain(|run| run.output_end > start);
+      for run in &mut self.streaming_break_runs {
+        run.output_start = run.output_start.saturating_sub(start);
+        run.output_end -= start;
+      }
     }
 
     // Apply clean.fragments using recorded positions
@@ -1642,6 +1722,24 @@ impl ConvertState {
         }
         self.buffer = result;
       }
+    }
+    if !self.streaming_break_runs.is_empty() {
+      let extra_len = self.streaming_break_runs.iter().fold(0usize, |total, run| {
+        total.saturating_add(run.unit.len().saturating_mul(run.count.saturating_sub(1)))
+      });
+      let source = std::mem::take(&mut self.buffer);
+      let mut output = String::with_capacity(source.len() + extra_len);
+      let mut cursor = 0usize;
+      for run in &self.streaming_break_runs {
+        output.push_str(&source[cursor..run.output_start]);
+        for _ in 1..run.count {
+          output.push_str(&run.unit);
+        }
+        cursor = run.output_start;
+      }
+      output.push_str(&source[cursor..]);
+      self.streaming_break_runs.clear();
+      self.buffer = output;
     }
     std::mem::take(&mut self.buffer)
   }
@@ -1774,8 +1872,11 @@ impl ConvertState {
     // so a document with no open quote does not pay for the limit every chunk.
     if self.streaming_flush_possible() {
       let mut flush_limit = trim_ascii_whitespace_end(&self.buffer);
-      if let Some(&(_, p, _)) = self.open_markers.first() {
-        flush_limit = flush_limit.min(hold_before(&self.buffer, p));
+      if let Some(marker) = self.open_markers.first() {
+        flush_limit = flush_limit.min(hold_before(&self.buffer, marker.output_start));
+      }
+      if let Some(output_start) = self.first_tentative_caption_start() {
+        flush_limit = flush_limit.min(hold_before(&self.buffer, output_start));
       }
       self.flush_streaming_blockquote_lines_upto(flush_limit);
     }
@@ -1827,8 +1928,11 @@ impl ConvertState {
     // The spaces immediately before it belong to the preceding text node: if the marker is
     // dropped (empty element) and a block boundary then trims that trailing space, a yielded
     // space would be silently removed and shift every later byte. Hold those spaces back too.
-    if let Some(&(_, p, _)) = self.open_markers.first() {
-      stable_end = stable_end.min(hold_before(&self.buffer, p));
+    if let Some(marker) = self.open_markers.first() {
+      stable_end = stable_end.min(hold_before(&self.buffer, marker.output_start));
+    }
+    if let Some(output_start) = self.first_tentative_caption_start() {
+      stable_end = stable_end.min(hold_before(&self.buffer, output_start));
     }
     if let Some(span) = self.code_spans.first() {
       stable_end = stable_end.min(hold_before(&self.buffer, span.output_start));
@@ -1865,6 +1969,16 @@ impl ConvertState {
       }
       stable_end = end;
     }
+    for run in &self.streaming_break_runs {
+      if run.output_end > stable_end
+        || !self.buffer[run.output_end..stable_end]
+          .bytes()
+          .any(|byte| !is_whitespace(byte))
+      {
+        stable_end = stable_end.min(run.output_start);
+        break;
+      }
+    }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let mut start = self.last_yielded_length.max(leading);
     if start >= stable_end {
@@ -1885,7 +1999,34 @@ impl ConvertState {
       return String::new();
     }
     self.note_link_release(stable_end);
-    let new_content = self.buffer[start..stable_end].to_string();
+    let extra_len = self
+      .streaming_break_runs
+      .iter()
+      .filter(|run| run.output_start >= start && run.output_end <= stable_end)
+      .fold(0usize, |total, run| {
+        total.saturating_add(run.unit.len().saturating_mul(run.count.saturating_sub(1)))
+      });
+    let new_content = if extra_len == 0 {
+      self.buffer[start..stable_end].to_string()
+    } else {
+      let mut output = String::with_capacity(stable_end - start + extra_len);
+      let mut cursor = start;
+      for run in &self.streaming_break_runs {
+        if run.output_start < start || run.output_end > stable_end {
+          continue;
+        }
+        output.push_str(&self.buffer[cursor..run.output_start]);
+        for _ in 1..run.count {
+          output.push_str(&run.unit);
+        }
+        cursor = run.output_start;
+      }
+      output.push_str(&self.buffer[cursor..stable_end]);
+      output
+    };
+    self
+      .streaming_break_runs
+      .retain(|run| run.output_end > stable_end);
     self.has_streamed_output = true;
     self.last_yielded_length = stable_end;
     self.drain_streamed_prefix();
@@ -1931,8 +2072,8 @@ impl ConvertState {
     if self.link_hold_required() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.link_bracket_pos));
     }
-    if let Some(&(_, output_start, _)) = self.open_markers.first() {
-      drain_end = drain_end.min(keep_two_before(&self.buffer, output_start));
+    if let Some(marker) = self.open_markers.first() {
+      drain_end = drain_end.min(keep_two_before(&self.buffer, marker.output_start));
     }
     if let Some(span) = self.code_spans.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, span.output_start));
@@ -1985,9 +2126,24 @@ impl ConvertState {
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
     self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);
-    for (_, output_start, content_start) in &mut self.open_markers {
-      *output_start -= drain_end;
-      *content_start -= drain_end;
+    for marker in &mut self.open_markers {
+      marker.output_start -= drain_end;
+      marker.content_start -= drain_end;
+    }
+    for frame in &mut self.caption_frames {
+      if let CaptionState::Tentative {
+        output_start,
+        content_start,
+        ..
+      } = &mut frame.state
+      {
+        *output_start -= drain_end;
+        *content_start -= drain_end;
+      }
+    }
+    for run in &mut self.streaming_break_runs {
+      run.output_start -= drain_end;
+      run.output_end -= drain_end;
     }
     for span in &mut self.code_spans {
       span.output_start -= drain_end;
