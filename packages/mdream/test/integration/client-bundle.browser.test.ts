@@ -1,5 +1,5 @@
-import { page } from 'vitest/browser'
 import { describe, expect, it } from 'vitest'
+import { page } from 'vitest/browser'
 
 // Helper function to render markdown to DOM
 function renderMarkdown(markdown: string) {
