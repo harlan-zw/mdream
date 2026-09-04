@@ -238,6 +238,7 @@ impl ConvertState {
       });
       if let Some(rendered) = rendered {
         self.push_html(&rendered);
+        self.mark_rendered_child_content();
       }
       return;
     }

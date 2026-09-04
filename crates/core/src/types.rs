@@ -77,6 +77,7 @@ pub struct ElementNode {
   pub depth: usize,
   pub index: usize,
   pub current_walk_index: usize,
+  /// Child-content counter used by whitespace and empty-link handling.
   pub child_text_node_index: usize,
   // Small fields grouped to minimize padding
   pub tag_id: Option<u8>,

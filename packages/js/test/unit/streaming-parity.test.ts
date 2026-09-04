@@ -116,6 +116,64 @@ describe('streaming parity with the Rust core', () => {
   })
 
   it.each([
+    '<a href="/edit" title="Edit"><img src="/edit.svg" alt="Edit"></a>',
+    '<a href="/x" aria-label="Open"><img src="/i" alt="Alt"></a>',
+    '<a href="/x" title="Title"><span><span><img src="/i" alt="Alt"></span></span></a>',
+    '<a href="/x"><img src="/i" alt="A"> </a>Caption',
+    '<div><a href="/x"><x-wrap><img src="/i" alt="A"></x-wrap></a> Caption</div>',
+  ])('keeps linked-image content stable across every split for %s', async (html) => {
+    await expectStreamingParity(html)
+  })
+
+  it.each(['html', 'text'] as const)('keeps linked-image %s output stable across every split', async (format) => {
+    await expectStreamingParity(
+      '<a href="/x" title="Title"><img src="/i" alt="Alt"></a>',
+      { format },
+    )
+  })
+
+  it('keeps deferred linked-image whitespace across every split', async () => {
+    const html = '<div><a href="/x"><span><img src="/i" alt="Alt"> </span></a>Caption</div>'
+    expect(htmlToMarkdown(html, { format: 'text' })).toBe('Alt Caption')
+    await expectStreamingParity(html, { format: 'text' })
+
+    const imageSibling = '<div><a href="/x"><span><img src="/i" alt="Alt"> </span></a><img src="/caption" alt="Caption"></div>'
+    expect(htmlToMarkdown(imageSibling)).toBe('[![Alt](/i)](/x) ![Caption](/caption)')
+    expect(htmlToMarkdown(imageSibling, { format: 'text' })).toBe('Alt Caption')
+    await expectStreamingParity(imageSibling)
+    await expectStreamingParity(imageSibling, { format: 'text' })
+  })
+
+  it('keeps block-overridden image scopes across every split', async () => {
+    const html = '<div><a href="/x"><img src="/i" alt="Alt"></a> Caption</div>'
+    const plugins = {
+      tagOverrides: {
+        img: { spacing: [0, 0] as [number, number], isInline: false },
+      },
+    }
+    expect(htmlToMarkdown(html, { plugins })).toBe('[![Alt](/i)](/x) Caption')
+    expect(htmlToMarkdown(html, { plugins, format: 'text' })).toBe('Alt Caption')
+    await expectStreamingParity(html, { plugins })
+    await expectStreamingParity(html, { plugins, format: 'text' })
+
+    const wrapperHtml = '<div><a href="/x"><x-block><img src="/i" alt="Alt"></x-block></a> <span>after</span></div>'
+    const wrapperPlugins = {
+      tagOverrides: {
+        'x-block': { enter: '', exit: '', spacing: [0, 0] as [number, number], isInline: false },
+      },
+    }
+    expect(htmlToMarkdown(wrapperHtml, { plugins: wrapperPlugins })).toBe('[![Alt](/i)](/x) after')
+    await expectStreamingParity(wrapperHtml, { plugins: wrapperPlugins })
+  })
+
+  it('keeps whitespace-only text fallback stable across every split', async () => {
+    await expectStreamingParity(
+      '<a href="/x" title="Title"><img src="/i" alt=" "></a>',
+      { format: 'text' },
+    )
+  })
+
+  it.each([
     '<dl><dt>MPN:</dt><dd>D100</dd><dt>Availability:</dt><dd>Ships</dd></dl>',
     '<details><summary>Title</summary><p>Body</p></details>',
     '<address><p>One</p><p>Two</p></address>',

@@ -52,7 +52,7 @@ import { createHtmlOutputState, processHtmlOutputEvent } from './html-output'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
 import { breakHandler, renderBreak, resolveUrl } from './tags'
-import { blockOpenPrefix, continuationPrefix, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, listMarkerLineStart, orderedItemNumber } from './utils'
+import { blockOpenPrefix, continuationPrefix, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, orderedItemNumber } from './utils.js'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -773,13 +773,13 @@ function calculateNewLineConfig(node: ElementNode, depthMap: Uint16Array, plainT
 }
 
 /**
- * Whether a string contains any non-whitespace character (space, tab, CR, LF).
+ * Whether a string contains any non-whitespace character (space, tab, LF, FF, CR).
  * Used to decide if a <pre>'s content warrants opening a fenced code block.
  */
 function hasNonWhitespace(value: string): boolean {
   for (let i = 0; i < value.length; i++) {
     const c = value.charCodeAt(i)
-    if (c !== 32 && c !== 9 && c !== 10 && c !== 13) {
+    if (c !== 32 && c !== 9 && c !== 10 && c !== 12 && c !== 13) {
       return true
     }
   }
@@ -1081,9 +1081,12 @@ function getPlainTextOutput(node: ElementNode, eventType: number, state: Markdow
       return (depthMap[TAG_TABLE] || 0) > 1 || node.index === 0 ? '' : '\t'
     if (tagId === TAG_IMG) {
       const alt = node.attributes?.alt
-      if (alt !== undefined)
-        return alt || undefined
-      return node.attributes?.title || resolveUrl(node.attributes?.src || '', state.options?.origin, state.options?.clean) || undefined
+      const output = alt !== undefined
+        ? alt || undefined
+        : node.attributes?.title || resolveUrl(node.attributes?.src || '', state.options?.origin, state.options?.clean) || undefined
+      if (output && hasNonWhitespace(output))
+        markRenderedChildContent(node)
+      return output
     }
     if (tagId === TAG_Q)
       return '"'
@@ -1261,6 +1264,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     let lastBuffEntry = buff.at(-1)!
     let lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
+    if (!lastChar && state.pendingInlineWhitespace && eventType === NodeEventEnter) {
+      const code = lastOutputChar(buff)
+      if (code !== -1)
+        lastChar = String.fromCharCode(code)
+    }
 
     if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
       processTextNode(node as TextNode, lastNode, lastChar)
@@ -1461,8 +1469,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           state.pendingInlineWhitespace = false
         }
         else if (firstOutput) {
-          if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput))
+          if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput)) {
             state.buffer.push(' ')
+            state.lastContentCache = ' '
+            lastChar = ' '
+          }
           state.pendingInlineWhitespace = false
         }
       }
