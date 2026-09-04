@@ -12,6 +12,25 @@ fn convert(html: &str) -> String {
   html_to_markdown(html, HTMLToMarkdownOptions::default())
 }
 
+fn transparent_override(name: &str, is_inline: bool) -> HTMLToMarkdownOptions {
+  HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        name.to_string(),
+        TagOverrideConfig {
+          enter: Some(String::new()),
+          exit: Some(String::new()),
+          spacing: Some([0, 0]),
+          is_inline: Some(is_inline),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  }
+}
+
 fn convert_with_origin(html: &str, origin: &str) -> String {
   html_to_markdown(
     html,
@@ -393,6 +412,225 @@ fn link_with_title() {
   assert_eq!(
     convert(r#"<a href="https://example.com" title="Example Site">Example</a>"#),
     r#"[Example](https://example.com "Example Site")"#
+  );
+}
+
+#[test]
+fn rendered_images_count_as_link_content() {
+  for (html, expected) in [
+    (
+      r#"<a href="/edit" title="Edit"><img src="/edit.svg" alt="Edit"></a>"#,
+      r#"[![Edit](/edit.svg)](/edit "Edit")"#,
+    ),
+    (
+      r#"<a href="/x" title="Title"><img src="/i" alt="Alt"></a>"#,
+      r#"[![Alt](/i)](/x "Title")"#,
+    ),
+    (
+      r#"<a href="/x" aria-label="Open"><img src="/i" alt="Alt"></a>"#,
+      "[![Alt](/i)](/x)",
+    ),
+    (
+      r#"<a href="/x" title="Title"><span><span><img src="/i" alt="Alt"></span></span></a>"#,
+      r#"[![Alt](/i)](/x "Title")"#,
+    ),
+    (
+      r#"<div><a href="/x"><span><img src="/i" alt="Alt"> </span></a>Caption</div>"#,
+      "[![Alt](/i)](/x) Caption",
+    ),
+    (
+      r#"<div><a href="/x"><x-wrap><img src="/i" alt="A"></x-wrap></a> Caption</div>"#,
+      "[![A](/i)](/x) Caption",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn rendered_images_mark_block_and_anchor_scopes() {
+  assert_eq!(
+    convert(r#"<a href="/x" title="Title"><div><img src="/i" alt="Alt"> after</div></a>"#),
+    r#"[![Alt](/i) after](/x "Title")"#
+  );
+
+  let markdown = html_to_markdown(
+    r#"<div><a href="/x" title="Title"><x-block><img src="/i" alt="Alt"> after</x-block></a></div>"#,
+    transparent_override("x-block", false),
+  );
+  assert_eq!(markdown, r#"[![Alt](/i) after](/x "Title")"#);
+
+  let outer_scope = html_to_markdown(
+    r#"<div><a href="/x"><x-block><img src="/i" alt="Alt"></x-block></a> <span>after</span></div>"#,
+    transparent_override("x-block", false),
+  );
+  assert_eq!(outer_scope, "[![Alt](/i)](/x) after");
+}
+
+#[test]
+fn linked_images_respect_mixed_case_builtin_override_scopes() {
+  for (html, name, is_inline, expected) in [
+    (
+      r#"<section><a href="/x"><DIV><img src="/i" alt="A"></DIV></a> Caption</section>"#,
+      "div",
+      true,
+      "[![A](/i)](/x) Caption",
+    ),
+    (
+      r#"<div><a href="/x"><SPAN><img src="/i" alt="A"></SPAN></a> Caption</div>"#,
+      "span",
+      false,
+      "[![A](/i)](/x) Caption",
+    ),
+  ] {
+    let markdown = html_to_markdown(html, transparent_override(name, is_inline));
+    assert_eq!(markdown, expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn whitespace_after_a_linked_image_remains_a_separator() {
+  assert_eq!(
+    convert(r#"<a href="/x"><img src="/i" alt="A"> </a>Caption"#),
+    "[![A](/i)](/x) Caption"
+  );
+}
+
+#[test]
+fn linked_image_empty_fallbacks_and_cleaning_are_preserved() {
+  assert_eq!(
+    convert(r#"<a href="/x" aria-label="label"><span></span></a>"#),
+    "[label](/x)"
+  );
+
+  let html = r#"<a href="/file" title="File:Photo"><img src="/photo.jpg" alt=""></a>"#;
+  assert_eq!(convert_with_clean(html, clean_all()), "[File:Photo](/file)");
+  for alt in [" ", "\t", "\n", "\u{000C}", "\r", "\u{00A0}", "\u{FEFF}"] {
+    let whitespace_alt =
+      format!(r#"<a href="/file" title="File:Photo"><img src="/photo.jpg" alt="{alt}"></a>"#);
+    assert_eq!(
+      convert_with_clean(&whitespace_alt, clean_all()),
+      "[File:Photo](/file)",
+      "alt={alt:?}"
+    );
+  }
+  let nel_alt = format!(
+    r#"<a href="/file" title="File:Photo"><img src="/photo.jpg" alt="{}"></a>"#,
+    '\u{0085}'
+  );
+  assert_eq!(
+    convert_with_clean(&nel_alt, clean_all()),
+    "[![\u{0085}](/photo.jpg)](/file \"File:Photo\")"
+  );
+  let mut keep_empty_image = clean_all();
+  keep_empty_image.empty_images = false;
+  assert_eq!(
+    convert_with_clean(html, keep_empty_image),
+    r#"[![](/photo.jpg)](/file "File:Photo")"#
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"<a href="/file"><img src="/photo.jpg" alt=""></a>"#,
+      clean_all()
+    ),
+    ""
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"<a href="/file"><img src="/photo.jpg" alt="Photo"></a>"#,
+      clean_all()
+    ),
+    "[![Photo](/photo.jpg)](/file)"
+  );
+}
+
+#[test]
+fn linked_images_count_only_when_builtin_output_is_emitted() {
+  assert_eq!(
+    html_to_html(
+      r#"<a href="/x" title="Title"><img src="/i" alt="Alt"></a>"#,
+      HTMLToMarkdownOptions::default()
+    ),
+    r#"<a href="/x" title="Title"><img src="/i" alt="Alt"></a>"#
+  );
+  assert_eq!(
+    html_to_html(
+      r#"<a href="/x" title="Title"><img src="data:text/html,bad" alt="Alt"></a>"#,
+      HTMLToMarkdownOptions::default()
+    ),
+    r#"<a href="/x" title="Title">Title</a>"#
+  );
+  assert_eq!(
+    html_to_text(
+      r#"<a href="/x" title="Title"><img src="/i" alt="Alt"></a>"#,
+      HTMLToMarkdownOptions::default()
+    ),
+    "Alt"
+  );
+  assert_eq!(
+    html_to_text(
+      r#"<a href="/x" title="Title"><img src="/i" alt=""></a>"#,
+      HTMLToMarkdownOptions::default()
+    ),
+    "Title"
+  );
+  assert_eq!(
+    html_to_text(
+      r#"<a href="/x" title="Title"><img src="/i" alt=" "></a>"#,
+      HTMLToMarkdownOptions::default()
+    ),
+    "Title"
+  );
+
+  let overridden = html_to_markdown(
+    r#"<a href="/x" title="Title"><img src="/i" alt="Alt"></a>"#,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "img".to_string(),
+          TagOverrideConfig {
+            enter: Some("custom".to_string()),
+            exit: Some(String::new()),
+            spacing: Some([0, 0]),
+            is_inline: Some(true),
+            is_self_closing: Some(true),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert_eq!(overridden, "[customTitle](/x)");
+}
+
+#[test]
+fn block_overridden_images_mark_their_parent_scope() {
+  let html = r#"<div><a href="/x"><img src="/i" alt="Alt"></a> Caption</div>"#;
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "img".to_string(),
+        TagOverrideConfig {
+          spacing: Some([0, 0]),
+          is_inline: Some(false),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+
+  assert_eq!(
+    html_to_markdown(html, options.clone()),
+    "[![Alt](/i)](/x) Caption"
+  );
+  assert_eq!(html_to_text(html, options.clone()), "Alt Caption");
+  assert_eq!(
+    html_to_html(html, options),
+    r#"<div><a href="/x"><img src="/i" alt="Alt"></a> Caption</div>"#
   );
 }
 

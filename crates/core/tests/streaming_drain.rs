@@ -373,6 +373,146 @@ fn streaming_gfm_link_and_image_serialization_matches_every_split() {
 }
 
 #[test]
+fn linked_images_match_one_shot_with_cleaning_and_draining() {
+  for html in [
+    r#"<a href="/edit" title="Edit"><img src="/edit.svg" alt="Edit"></a>"#,
+    r#"<a href="/x" aria-label="Open"><img src="/i" alt="Alt"></a>"#,
+    r#"<a href="/x" title="Title"><span><span><img src="/i" alt="Alt"></span></span></a>"#,
+    r#"<div><a href="/x"><span><img src="/i" alt="Alt"> </span></a>Caption</div>"#,
+    r#"<div><a href="/x"><x-wrap><img src="/i" alt="A"></x-wrap></a> Caption</div>"#,
+  ] {
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  }
+
+  let mixed_case =
+    r#"<section><a href="/x"><DIV><img src="/i" alt="A"></DIV></a> Caption</section>"#;
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "div".to_string(),
+        TagOverrideConfig {
+          enter: Some(String::new()),
+          exit: Some(String::new()),
+          spacing: Some([0, 0]),
+          is_inline: Some(true),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown(mixed_case, options.clone()),
+    "[![A](/i)](/x) Caption"
+  );
+  assert_stream_matches(mixed_case, options);
+
+  let block_image = r#"<div><a href="/x"><img src="/i" alt="Alt"></a> Caption</div>"#;
+  let block_image_options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "img".to_string(),
+        TagOverrideConfig {
+          spacing: Some([0, 0]),
+          is_inline: Some(false),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown(block_image, block_image_options.clone()),
+    "[![Alt](/i)](/x) Caption"
+  );
+  assert_stream_matches(block_image, block_image_options.clone());
+  for chunk in 1..=block_image.len() {
+    let mut processor =
+      MarkdownStreamProcessor::new_with_format(block_image_options.clone(), OutputFormat::Text);
+    let mut actual = String::new();
+    for input in block_image.as_bytes().chunks(chunk) {
+      actual.push_str(&processor.process_chunk(std::str::from_utf8(input).unwrap()));
+    }
+    actual.push_str(&processor.finish());
+    assert_eq!(actual, "Alt Caption", "chunk={chunk}");
+  }
+
+  for alt in [" ", "\u{00A0}"] {
+    let whitespace_alt = format!(r#"<a href="/x" title="Title"><img src="/i" alt="{alt}"></a>"#);
+    let options = HTMLToMarkdownOptions {
+      clean: Some(safe_clean()),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(&whitespace_alt, options.clone()),
+      "[Title](/x)"
+    );
+    assert_stream_matches_every_split(&whitespace_alt, options);
+  }
+
+  let filler = "filler ".repeat(20_000);
+  let html = format!(
+    "<p>{filler}</p><a href=\"/file\" title=\"File:Photo\"><img src=\"/photo.jpg\" alt=\"\"></a><p>after</p>"
+  );
+  let mut keep_empty_image = safe_clean();
+  keep_empty_image.empty_images = false;
+
+  for opts in [
+    HTMLToMarkdownOptions {
+      clean: Some(safe_clean()),
+      ..Default::default()
+    },
+    HTMLToMarkdownOptions {
+      clean: Some(keep_empty_image),
+      ..Default::default()
+    },
+  ] {
+    let expected = html_to_markdown(&html, opts.clone());
+    for chunk in [1usize, 2, 7, 31, 8 * 1024, html.len()] {
+      assert_eq!(
+        stream_chunks(&html, chunk, opts.clone()),
+        expected,
+        "chunk={chunk}"
+      );
+    }
+  }
+
+  for (linked_image, format) in [
+    (
+      r#"<a href="/x" title="Title"><img src="/i" alt="Alt"></a>"#,
+      OutputFormat::Html,
+    ),
+    (
+      r#"<a href="/x" title="Title"><img src="/i" alt="Alt"></a>"#,
+      OutputFormat::Text,
+    ),
+    (
+      r#"<a href="/x" title="Title"><img src="/i" alt=" "></a>"#,
+      OutputFormat::Text,
+    ),
+    (
+      r#"<div><a href="/x"><span><img src="/i" alt="Alt"> </span></a>Caption</div>"#,
+      OutputFormat::Text,
+    ),
+  ] {
+    let expected =
+      html_to_format_result(linked_image, HTMLToMarkdownOptions::default(), format).markdown;
+    for chunk in [1usize, 2, 7, 31, linked_image.len()] {
+      let mut processor =
+        MarkdownStreamProcessor::new_with_format(HTMLToMarkdownOptions::default(), format);
+      let mut actual = String::new();
+      for input in linked_image.as_bytes().chunks(chunk) {
+        actual.push_str(&processor.process_chunk(std::str::from_utf8(input).unwrap()));
+      }
+      actual.push_str(&processor.finish());
+      assert_eq!(actual, expected, "format={format:?} chunk={chunk}");
+    }
+  }
+}
+
+#[test]
 fn streaming_code_delimiter_widening_matches_every_split() {
   for html in [
     "<p>before <code>a `b` c</code> after</p>",

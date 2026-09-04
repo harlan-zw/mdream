@@ -124,7 +124,7 @@ import {
   TAG_XMP,
   TagIdMap,
 } from './const'
-import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, orderedItemNumber, parseUnsignedInteger } from './utils'
+import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
 const URL_SCHEME_RE = /^[A-Z][\dA-Z+.-]*:/i
@@ -813,6 +813,11 @@ export const tagHandlers: Record<number, TagHandler> = {
     enter: ({ node, state }) => {
       const alt = node.attributes?.alt || ''
       const src = resolveUrl(node.attributes?.src || '', state.options?.origin, state.options?.clean)
+      const clean = state.options?.clean
+      const stripsEmptyImage = clean === true
+        || (clean !== undefined && clean !== false && clean.emptyImages === true)
+      if (!stripsEmptyImage || alt.trim().length > 0)
+        markRenderedChildContent(node)
       return `![${serializeImageDescription(alt)}]${serializeMarkdownResource(src, node.attributes?.title)}`
     },
     collapsesInnerWhiteSpace: true,
