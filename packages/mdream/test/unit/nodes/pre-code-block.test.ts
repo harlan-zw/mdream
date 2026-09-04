@@ -100,6 +100,14 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<pre><code>const x = 1</code></pre>', { engine })).toBe('```\nconst x = 1\n```')
     expect(htmlToMarkdown('<pre><code class="language-js">const x = 1</code></pre>', { engine })).toBe('```js\nconst x = 1\n```')
+    expect(htmlToMarkdown('<pre><code>x</code></pre>', {
+      engine,
+      plugins: { tagOverrides: { code: { enter: '^' } } },
+    })).toBe('```\n^x\n```')
+    expect(htmlToMarkdown('<pre><code class="language-js">x</code></pre>', {
+      engine,
+      plugins: { tagOverrides: { code: { enter: '^', exit: '$' } } },
+    })).toBe('```js\n^x$\n```')
   })
 
   it('strips an empty <pre> (no fence)', async () => {

@@ -300,6 +300,27 @@ function isAutolinkUri(s: string): boolean {
   return true
 }
 
+function collapseCaptionAutolink(state: HandlerContext['state'], href: string): boolean {
+  const buffer = state.buffer
+  for (let index = buffer.length - 1; index >= 0; index--) {
+    const entry = buffer[index]!
+    const length = entry.length
+    if (length > 1
+      && entry.charCodeAt(length - 1) === 91
+      && entry.charCodeAt(length - 2) === 42) {
+      if (buffer.slice(index + 1).join('') !== href)
+        return false
+      buffer[index] = entry.slice(0, -1)
+      buffer.length = index + 1
+      const output = `<${href}>`
+      buffer.push(output)
+      state.lastContentCache = output
+      return true
+    }
+  }
+  return false
+}
+
 export function renderBreak(node: HandlerContext['node'], state: HandlerContext['state']): string {
   // A literal newline would terminate a table row/ATX heading or collapse
   // inside a raw HTML block, so preserve the inline HTML there.
@@ -802,6 +823,8 @@ export const tagHandlers: Record<number, TagHandler> = {
           state.lastContentCache = auto
           return ''
         }
+        if (i < 0 && state.depthMap?.[TAG_FIGCAPTION] && collapseCaptionAutolink(state, href))
+          return ''
       }
       return `]${serializeMarkdownResource(href, title)}`
     },
@@ -812,6 +835,11 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_IMG]: {
     enter: ({ node, state }) => {
       const alt = node.attributes?.alt || ''
+      if (state.depthMap?.[TAG_FIGCAPTION]) {
+        const clean = state.options?.clean
+        if ((clean === true || (clean !== null && typeof clean === 'object' && clean.emptyImages === true)) && !alt.trim())
+          return undefined
+      }
       const src = resolveUrl(node.attributes?.src || '', state.options?.origin, state.options?.clean)
       return `![${serializeImageDescription(alt)}]${serializeMarkdownResource(src, node.attributes?.title)}`
     },
@@ -1269,10 +1297,8 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_FIGURE]: {},
 
   [TAG_FIGCAPTION]: {
-    enter: () => MARKDOWN_EMPHASIS,
     exit: () => MARKDOWN_EMPHASIS,
     collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
     isInline: true,
   },
 }
