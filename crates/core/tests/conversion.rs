@@ -1871,6 +1871,39 @@ fn extraction_by_tag() {
   assert_eq!(extracted[1].text_content, "Sub");
 }
 
+/// Extraction output is the one place an interned `ATTR_*` bit has to turn back
+/// into a name. Mixes interned names with ones that keep an owned string.
+#[test]
+fn extraction_reports_interned_and_custom_attribute_names() {
+  let result = html_to_markdown_result(
+    r#"<a href="/x" title="T" class="c" id="i" data-k="v" aria-label="L">Link</a>"#,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        extraction: Some(ExtractionConfig {
+          selectors: vec!["a".to_string()],
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  let extracted = result.extracted.unwrap();
+  assert_eq!(extracted.len(), 1);
+  let mut attrs = extracted[0].attributes.clone();
+  attrs.sort();
+  assert_eq!(
+    attrs,
+    vec![
+      ("aria-label".to_string(), "L".to_string()),
+      ("class".to_string(), "c".to_string()),
+      ("data-k".to_string(), "v".to_string()),
+      ("href".to_string(), "/x".to_string()),
+      ("id".to_string(), "i".to_string()),
+      ("title".to_string(), "T".to_string()),
+    ]
+  );
+}
+
 #[test]
 fn extraction_preserves_declaration_order_for_overlapping_selectors() {
   let result = html_to_markdown_result(
@@ -4036,6 +4069,40 @@ fn a_fence_opening_a_list_item_shares_the_marker_line() {
   assert_eq!(
     convert("<ul><li>text<pre><code>x</code></pre></li></ul>"),
     "- text\n\n  ```\n  x\n  ```"
+  );
+}
+
+#[test]
+fn clean_fragments_resolves_against_many_headings() {
+  // Headings emit in DESCENDING slug order, so document order is the reverse
+  // of sorted order — this catches a search over the unsorted view.
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  let mut html = String::new();
+  for i in (0..200).rev() {
+    html.push_str(&format!("<h2>Section {i:03}</h2>"));
+  }
+  for target in ["section-000", "section-100", "section-199"] {
+    html.push_str(&format!("<a href=\"#{target}\">keep {target}</a>"));
+  }
+  html.push_str("<a href=\"#section-900\">drop me</a>");
+
+  let out = convert_with_clean(&html, clean);
+  for target in ["section-000", "section-100", "section-199"] {
+    assert!(
+      out.contains(&format!("[keep {target}](#{target})")),
+      "kept link for {target} missing from:\n{out}"
+    );
+  }
+  assert!(
+    out.contains("drop me"),
+    "dropped link lost its text:\n{out}"
+  );
+  assert!(
+    !out.contains("#section-900"),
+    "link with no matching heading kept its target:\n{out}"
   );
 }
 
