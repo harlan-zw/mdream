@@ -551,6 +551,8 @@ pub struct ConvertState {
   clean_flags: u8,
   /// Set when current TAG_A has a meaningless href and should be rendered as plain text
   skip_current_link: bool,
+  /// The current raw-HTML anchor emitted its built-in safe opening tag.
+  raw_html_link_open: bool,
   /// Buffer position of the `[` character written for TAG_A enter
   link_bracket_pos: usize,
   /// Upper bound on the resolved href length used by equality rewrites.
@@ -737,6 +739,7 @@ impl ConvertState {
       preserve_leading_whitespace: false,
       clean_flags: 0,
       skip_current_link: false,
+      raw_html_link_open: false,
       link_bracket_pos: 0,
       link_url_max_len: 0,
       link_hold_forever: false,

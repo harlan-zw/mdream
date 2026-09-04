@@ -106,6 +106,33 @@ export function isSafeHtmlUrl(href: string, image = false): boolean {
   return true
 }
 
+export function escapeHtml(value: string, attribute = false, protectMarkdown = false): string {
+  let escaped = ''
+  let copiedUntil = 0
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+    let replacement: string | undefined
+    if (code === 38)
+      replacement = '&amp;'
+    else if (code === 60)
+      replacement = '&lt;'
+    else if (code === 62)
+      replacement = '&gt;'
+    else if (attribute && code === 34)
+      replacement = '&quot;'
+    else if (protectMarkdown && code === 91)
+      replacement = '&#91;'
+    else if (protectMarkdown && code === 93)
+      replacement = '&#93;'
+
+    if (replacement !== undefined) {
+      escaped += value.slice(copiedUntil, index) + replacement
+      copiedUntil = index + 1
+    }
+  }
+  return copiedUntil === 0 ? value : escaped + value.slice(copiedUntil)
+}
+
 /**
  * Build the Markdown prefix needed to keep a continued line inside its open
  * blockquotes and list items. Ancestors are emitted outermost-first so mixed

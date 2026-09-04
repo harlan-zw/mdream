@@ -83,6 +83,50 @@ function parseLink(md: string, start: number): { text: string, url: string, end:
   }
 }
 
+function isEscaped(md: string, index: number): boolean {
+  const end = index
+  while (index > 0 && md.charCodeAt(index - 1) === 92 /* \\ */)
+    index--
+  return (end - index) % 2 !== 0
+}
+
+function htmlTagEnd(md: string, start: number, lastGt: number): number {
+  if (start >= lastGt || isEscaped(md, start))
+    return -1
+  let i = start + 1
+  if (md.charCodeAt(i) === 47 /* / */)
+    i++
+  let code = md.charCodeAt(i)
+  if (!((code >= 65 && code <= 90) || (code >= 97 && code <= 122)))
+    return -1
+  do {
+    i++
+    code = md.charCodeAt(i)
+  } while ((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code === 45)
+  if (code !== 32 && code !== 9 && code !== 10 && code !== 13 && code !== 47 && code !== 62)
+    return -1
+
+  let quote = 0
+  while (i < md.length) {
+    code = md.charCodeAt(i)
+    if (quote) {
+      if (code === quote)
+        quote = 0
+    }
+    else if (code === 34 || code === 39) {
+      quote = code
+    }
+    else if (code === 62) {
+      return i + 1
+    }
+    else if (code === 60) {
+      return -1
+    }
+    i++
+  }
+  return -1
+}
+
 // ── Fragments ──
 
 function slugify(text: string): string {
@@ -122,9 +166,77 @@ function slugify(text: string): string {
 function stripHeadingFormatting(text: string): string {
   let result = ''
   const len = text.length
+  const lastGt = text.lastIndexOf('>')
+  let firstTickLength = 0
+  let firstTickLast = 0
+  let otherTickLasts: Map<number, number> | undefined
+  if (text.includes('`')) {
+    let scan = 0
+    while (scan < len) {
+      let code = text.charCodeAt(scan)
+      if (code === 96 /* ` */) {
+        const start = scan
+        do {
+          scan++
+          code = text.charCodeAt(scan)
+        } while (code === 96)
+        const ticks = scan - start
+        if (firstTickLength === 0) {
+          firstTickLength = ticks
+          firstTickLast = start
+        }
+        else if (ticks === firstTickLength) {
+          firstTickLast = start
+        }
+        else {
+          otherTickLasts ||= new Map()
+          otherTickLasts.set(ticks, start)
+        }
+      }
+      else if (code === 60 /* < */) {
+        const tagEnd = htmlTagEnd(text, scan, lastGt)
+        scan = tagEnd === -1 ? scan + 1 : tagEnd
+      }
+      else {
+        scan++
+      }
+    }
+  }
   let i = 0
+  let codeTicks = 0
   while (i < len) {
     const c = text.charCodeAt(i)
+    if (c === 96 /* ` */) {
+      let end = i + 1
+      while (text.charCodeAt(end) === 96)
+        end++
+      const ticks = end - i
+      if (codeTicks === 0) {
+        const last = ticks === firstTickLength ? firstTickLast : otherTickLasts?.get(ticks) ?? i
+        if (last > i)
+          codeTicks = ticks
+      }
+      else if (codeTicks === ticks) {
+        codeTicks = 0
+      }
+      i = end
+      continue
+    }
+    if (codeTicks !== 0) {
+      result += text[i]
+      i++
+      continue
+    }
+    if (c === 92 /* \\ */ && i + 1 < len) {
+      result += text[i + 1]
+      i += 2
+      continue
+    }
+    const tagEnd = c === 60 ? htmlTagEnd(text, i, lastGt) : -1
+    if (tagEnd !== -1) {
+      i = tagEnd
+      continue
+    }
     if (c === 91 /* [ */) {
       // Try to parse [text](url) → extract text only
       const link = parseLink(text, i)
@@ -134,7 +246,7 @@ function stripHeadingFormatting(text: string): string {
         continue
       }
     }
-    if (c === 42 || c === 95 || c === 96 || c === 126) { // *_`~
+    if (c === 42 || c === 95 || c === 126) { // *_~
       i++
       continue
     }
@@ -176,10 +288,17 @@ function collectHeadingSlugs(md: string): Set<string> {
 export function cleanFragments(md: string): string {
   const slugs = collectHeadingSlugs(md)
   const len = md.length
+  const lastGt = md.lastIndexOf('>')
   let result = ''
   let i = 0
 
   while (i < len) {
+    const tagEnd = md.charCodeAt(i) === 60 ? htmlTagEnd(md, i, lastGt) : -1
+    if (tagEnd !== -1) {
+      result += md.slice(i, tagEnd)
+      i = tagEnd
+      continue
+    }
     if (md.charCodeAt(i) === 91 /* [ */) {
       const link = parseLink(md, i)
       if (link && link.url.charCodeAt(0) === 35 /* # */ && link.url.length > 1) {
@@ -201,10 +320,17 @@ export function cleanFragments(md: string): string {
 
 export function cleanEmptyLinks(md: string): string {
   const len = md.length
+  const lastGt = md.lastIndexOf('>')
   let result = ''
   let i = 0
 
   while (i < len) {
+    const tagEnd = md.charCodeAt(i) === 60 ? htmlTagEnd(md, i, lastGt) : -1
+    if (tagEnd !== -1) {
+      result += md.slice(i, tagEnd)
+      i = tagEnd
+      continue
+    }
     if (md.charCodeAt(i) === 91 /* [ */) {
       const link = parseLink(md, i)
       if (link) {
@@ -260,10 +386,17 @@ function isAutolinkUri(s: string): boolean {
 
 export function cleanRedundantLinks(md: string): string {
   const len = md.length
+  const lastGt = md.lastIndexOf('>')
   let result = ''
   let i = 0
   while (i < len) {
     const code = md.charCodeAt(i)
+    const tagEnd = code === 60 ? htmlTagEnd(md, i, lastGt) : -1
+    if (tagEnd !== -1) {
+      result += md.slice(i, tagEnd)
+      i = tagEnd
+      continue
+    }
     if (code === 91 /* [ */) {
       const link = parseLink(md, i)
       if (link && link.text === link.url) {
@@ -272,7 +405,7 @@ export function cleanRedundantLinks(md: string): string {
         continue
       }
     }
-    else if (code === 60 /* < */) {
+    else if (code === 60 /* < */ && !isEscaped(md, i)) {
       // A GFM autolink `<url>` has identical text and target by construction,
       // so it is redundant under the same rule as `[url](url)`.
       const close = md.indexOf('>', i + 1)
@@ -295,9 +428,16 @@ export function cleanRedundantLinks(md: string): string {
 
 export function cleanSelfLinkHeadings(md: string): string {
   const len = md.length
+  const lastGt = md.lastIndexOf('>')
   let result = ''
   let i = 0
   while (i < len) {
+    const tagEnd = md.charCodeAt(i) === 60 ? htmlTagEnd(md, i, lastGt) : -1
+    if (tagEnd !== -1) {
+      result += md.slice(i, tagEnd)
+      i = tagEnd
+      continue
+    }
     // Check for heading at line start
     if (i === 0 || md.charCodeAt(i - 1) === 10) {
       let hashes = 0
@@ -331,9 +471,16 @@ export function cleanSelfLinkHeadings(md: string): string {
 
 export function cleanEmptyImages(md: string): string {
   const len = md.length
+  const lastGt = md.lastIndexOf('>')
   let result = ''
   let i = 0
   while (i < len) {
+    const tagEnd = md.charCodeAt(i) === 60 ? htmlTagEnd(md, i, lastGt) : -1
+    if (tagEnd !== -1) {
+      result += md.slice(i, tagEnd)
+      i = tagEnd
+      continue
+    }
     // Check for ![
     if (md.charCodeAt(i) === 33 /* ! */ && i + 1 < len && md.charCodeAt(i + 1) === 91 /* [ */) {
       // Find ]
@@ -371,9 +518,16 @@ export function cleanEmptyImages(md: string): string {
 
 export function cleanEmptyLinkText(md: string): string {
   const len = md.length
+  const lastGt = md.lastIndexOf('>')
   let result = ''
   let i = 0
   while (i < len) {
+    const tagEnd = md.charCodeAt(i) === 60 ? htmlTagEnd(md, i, lastGt) : -1
+    if (tagEnd !== -1) {
+      result += md.slice(i, tagEnd)
+      i = tagEnd
+      continue
+    }
     if (md.charCodeAt(i) === 91 /* [ */) {
       const link = parseLink(md, i)
       if (link && link.text.trim().length === 0) {

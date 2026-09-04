@@ -202,6 +202,57 @@ pub(crate) fn strip_tracking_params_owned(url: String) -> String {
   }
 }
 
+#[inline]
+fn heading_is_escaped(bytes: &[u8], mut index: usize) -> bool {
+  let end = index;
+  while index > 0 && bytes[index - 1] == b'\\' {
+    index -= 1;
+  }
+  (end - index) & 1 != 0
+}
+
+#[inline]
+fn heading_html_tag_end(bytes: &[u8], start: usize) -> Option<usize> {
+  let len = bytes.len();
+  let mut end = start + 1;
+  if bytes.get(end) == Some(&b'/') {
+    end += 1;
+  }
+  if !bytes.get(end).is_some_and(u8::is_ascii_alphabetic) {
+    return None;
+  }
+  end += 1;
+  while bytes
+    .get(end)
+    .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
+  {
+    end += 1;
+  }
+  if !matches!(
+    bytes.get(end),
+    Some(b' ' | b'\t' | b'\n' | b'\r' | b'/' | b'>')
+  ) {
+    return None;
+  }
+  let mut quote = 0;
+  while end < len {
+    let byte = bytes[end];
+    if quote != 0 {
+      if byte == quote {
+        quote = 0;
+      }
+    } else if byte == b'\'' || byte == b'"' {
+      quote = byte;
+    } else if byte == b'>' {
+      return Some(end + 1);
+    } else if byte == b'<' {
+      return None;
+    }
+    end += 1;
+  }
+  None
+}
+
 /// GFM-style slug from heading text: lowercase, collapse whitespace/- → -, strip non-alnum except -_
 pub(crate) fn slugify_heading(text: &str) -> String {
   // Strip inline markdown formatting from heading text
@@ -209,9 +260,83 @@ pub(crate) fn slugify_heading(text: &str) -> String {
   let mut cleaned = String::with_capacity(text.len());
   let bytes = text.as_bytes();
   let len = bytes.len();
+  let last_gt = bytes.iter().rposition(|byte| *byte == b'>');
+  let mut first_tick_len = 0;
+  let mut first_tick_last = 0;
+  let mut other_tick_lasts: Option<Vec<(usize, usize)>> = None;
+  let mut scan = 0;
+  while scan < len {
+    if bytes[scan] == b'`' {
+      let start = scan;
+      scan += 1;
+      while bytes.get(scan) == Some(&b'`') {
+        scan += 1;
+      }
+      let ticks = scan - start;
+      if first_tick_len == 0 {
+        first_tick_len = ticks;
+        first_tick_last = start;
+      } else if ticks == first_tick_len {
+        first_tick_last = start;
+      } else {
+        let positions = other_tick_lasts.get_or_insert_with(Vec::new);
+        match positions.binary_search_by_key(&ticks, |entry| entry.0) {
+          Ok(index) => positions[index].1 = start,
+          Err(index) => positions.insert(index, (ticks, start)),
+        }
+      }
+    } else if bytes[scan] == b'<'
+      && last_gt.is_some_and(|last| scan < last)
+      && !heading_is_escaped(bytes, scan)
+    {
+      scan = heading_html_tag_end(bytes, scan).unwrap_or(scan + 1);
+    } else {
+      scan += 1;
+    }
+  }
   let mut i = 0;
+  let mut code_ticks = 0;
   while i < len {
-    if bytes[i] == b'[' {
+    if bytes[i] == b'`' {
+      let mut end = i + 1;
+      while bytes.get(end) == Some(&b'`') {
+        end += 1;
+      }
+      let ticks = end - i;
+      if code_ticks == 0 {
+        let last = if ticks == first_tick_len {
+          first_tick_last
+        } else {
+          other_tick_lasts
+            .as_ref()
+            .and_then(|positions| {
+              positions
+                .binary_search_by_key(&ticks, |entry| entry.0)
+                .ok()
+                .map(|index| positions[index].1)
+            })
+            .unwrap_or(i)
+        };
+        if last > i {
+          code_ticks = ticks;
+        }
+      } else if code_ticks == ticks {
+        code_ticks = 0;
+      }
+      i = end;
+    } else if code_ticks != 0 {
+      cleaned.push(bytes[i] as char);
+      i += 1;
+    } else if bytes[i] == b'\\' && i + 1 < len {
+      cleaned.push(bytes[i + 1] as char);
+      i += 2;
+    } else if bytes[i] == b'<' && last_gt.is_some_and(|last| i < last) {
+      if let Some(end) = heading_html_tag_end(bytes, i) {
+        i = end;
+        continue;
+      }
+      i += 1;
+    } else if bytes[i] == b'[' {
       // Look for ](url) pattern
       if let Some(close) = text[i + 1..].find(']') {
         let close_abs = i + 1 + close;
@@ -746,5 +871,32 @@ mod tests {
     );
     // emphasis / code markers dropped
     assert_eq!(slugify_heading("*bold* and `code`"), "bold-and-code");
+    assert_eq!(
+      slugify_heading("<a href=\"#section\">Section</a>"),
+      "section"
+    );
+    assert_eq!(slugify_heading("<http://x>"), "httpx");
+    assert_eq!(slugify_heading(r"\<span\>"), "span");
+    assert_eq!(slugify_heading("`<span>`"), "span");
+    assert_eq!(slugify_heading("`foo_bar"), "foobar");
+    assert_eq!(slugify_heading("``foo_bar`"), "foobar");
+    assert_eq!(slugify_heading("``foo_bar``"), "foo_bar");
+    assert_eq!(slugify_heading("`` `foo_bar`"), "foo_bar");
+    assert_eq!(
+      slugify_heading(r#"`foo_bar<span title="`"></span>"#),
+      "foobar"
+    );
+    assert_eq!(
+      slugify_heading(r#"`foo_bar\<span title="`"></span>"#),
+      "foo_barspan-title"
+    );
+    assert_eq!(
+      slugify_heading(r#"`foo_bar\\<span title="`"></span>"#),
+      "foobar"
+    );
+    assert_eq!(slugify_heading(r"\`foo_bar"), "foobar");
+    assert_eq!(slugify_heading(r"`foo\_bar"), "foo_bar");
+    assert_eq!(slugify_heading(r"`foo_bar\`"), "foo_bar");
+    assert_eq!(slugify_heading(r"`foo_bar\` baz_qux`"), "foo_bar-bazqux");
   }
 }
