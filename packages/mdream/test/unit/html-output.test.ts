@@ -38,6 +38,12 @@ describe.each(engines)('safe HTML output $name', (engineConfig) => {
       .toBe('<h2 id="foobar">`foo_bar</h2>')
   })
 
+  it('strips escaped inline HTML tags from heading IDs', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<h2>&lt;span&gt;x&lt;/span&gt;</h2>', { engine, format: 'html' }))
+      .toBe('<h2 id="x">&lt;span&gt;x&lt;/span&gt;</h2>')
+  })
+
   it('escapes text and attributes while removing active content', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const input = [

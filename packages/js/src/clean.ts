@@ -162,8 +162,10 @@ function slugify(text: string): string {
   return slug
 }
 
+export { slugify }
+
 /** Strip inline markdown formatting from heading text for slug generation */
-function stripHeadingFormatting(text: string): string {
+export function stripHeadingFormatting(text: string): string {
   let result = ''
   const len = text.length
   const lastGt = text.lastIndexOf('>')

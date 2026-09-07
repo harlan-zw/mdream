@@ -1,4 +1,5 @@
 import type { ElementNode, EngineOptions, NodeEvent, TextNode } from './types'
+import { slugify, stripHeadingFormatting } from './clean'
 import {
   ELEMENT_NODE,
   NodeEventEnter,
@@ -69,7 +70,7 @@ export function createHtmlOutputState(): HtmlOutputState {
 }
 
 function slugifyHeading(text: string): string {
-  return text.toLowerCase().replace(/[^a-z\d \t\n\r-]/g, '').trim().replace(/[ \t\n\r-]+/g, '-')
+  return slugify(stripHeadingFormatting(text))
 }
 
 function tagName(node: ElementNode, tagId: number): string | undefined {

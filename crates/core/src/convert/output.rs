@@ -857,7 +857,11 @@ impl ConvertState {
     );
 
     if tag_id == Some(TAG_A) {
-      self.raw_html_link_open = !enter_is_literal
+      // Escaping matters only while the anchor's *exit* will still build a
+      // Markdown close (`](url)`), which happens exactly when the exit is not
+      // overridden. A literal enter override still gets that default exit, so
+      // its link text must keep the bracket escaping.
+      self.raw_html_link_open = !exit_is_overridden
         && self.in_raw_html_block()
         && self.buffer.len() > output_start
         && output

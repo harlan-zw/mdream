@@ -1399,7 +1399,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     if (element.tagId === TAG_A) {
       if (eventType === NodeEventEnter)
-        rawHtmlLink = insideRawHtmlRegion && handlerOutput !== undefined && !handler?.literalEnter ? element : undefined
+        rawHtmlLink = insideRawHtmlRegion && handlerOutput !== undefined && !handler?.literalExit ? element : undefined
       else
         rawHtmlLink = undefined
     }
