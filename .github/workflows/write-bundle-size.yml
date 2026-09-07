@@ -29,7 +29,7 @@ jobs:
           cache: pnpm
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
@@ -39,7 +39,7 @@ jobs:
           workspaces: crates -> target
 
       - name: Install wasm-pack and wasm-opt
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
         with:
           tool: wasm-pack,wasm-opt
 

@@ -95,6 +95,7 @@
     "@mdream/rust-win32-x64-msvc": "workspace:*"
   },
   "devDependencies": {
-    "@mdream/js": "workspace:*"
+    "@mdream/js": "workspace:*",
+    "@mdream/rust-build": "workspace:*"
   }
 }

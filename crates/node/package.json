@@ -71,6 +71,7 @@
     "@napi-rs/cli": "catalog:",
     "@napi-rs/wasm-runtime": "catalog:",
     "@tybys/wasm-util": "catalog:",
+    "emnapi": "catalog:",
     "typescript": "catalog:"
   }
 }
