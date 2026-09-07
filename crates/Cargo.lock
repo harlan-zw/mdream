@@ -203,11 +203,11 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "mdream"
-version = "1.7.0"
+version = "1.7.1"
 
 [[package]]
 name = "mdream-edge"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "js-sys",
  "mdream",
@@ -217,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "mdream-node"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "mdream",
  "napi",
@@ -243,9 +243,9 @@ dependencies = [
 
 [[package]]
 name = "napi"
-version = "3.12.1"
+version = "3.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "459197f1592f4c3dbbf9c1b13f5a4599a343e4ef66b96bc340e2a518b36a6662"
+checksum = "58c5f4d5375213fdb7be2655e152386e82f026f9a5ba36a75556e11359aafe09"
 dependencies = [
  "bitflags",
  "ctor",

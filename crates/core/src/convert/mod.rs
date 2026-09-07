@@ -140,6 +140,35 @@ struct CodeFenceState {
   language: String,
 }
 
+#[derive(Clone, Copy, Default)]
+struct LinkOutputState {
+  bracket_pos: usize,
+  skipped: bool,
+  url_max_len: usize,
+  hold_forever: bool,
+  hold_released: bool,
+  empty_text_pending: bool,
+  /// A link `begin_link` opened and its `end_link` has not run yet. The default
+  /// (and a popped-when-empty result) is `false`, so a closed link can never be
+  /// mistaken for an enclosing one when the next link opens.
+  open: bool,
+  /// The `depth` this link's own `begin_link` ran at. An anchor exit that
+  /// never began (its enter was skipped) reads an ancestor's state instead;
+  /// the depth mismatch identifies the stale state so its bracket is never
+  /// treated as this anchor's own.
+  begin_depth: usize,
+}
+
+struct FragmentLink {
+  bracket_start: usize,
+  text_end: usize,
+  link_end: usize,
+  fragment: String,
+  /// The close was written as `](#frag "title")` instead of `](#frag)`, so the
+  /// drift check must accept a quoted title between the fragment and `)`.
+  has_title: bool,
+}
+
 #[derive(Clone)]
 struct BlockquoteFrame {
   content_start: usize,
@@ -599,19 +628,9 @@ pub struct ConvertState {
 
   // Clean mode — bitmask for zero-cost when disabled
   clean_flags: u8,
-  /// Set when current TAG_A has a meaningless href and should be rendered as plain text
-  skip_current_link: bool,
-  /// Buffer position of the `[` character written for TAG_A enter
-  link_bracket_pos: usize,
-  /// Upper bound on the resolved href length used by equality rewrites.
-  /// Overestimation delays release; underestimation could change output.
-  link_url_max_len: usize,
-  /// A close-time rewrite can reach back without a bounded distance.
-  link_hold_forever: bool,
-  /// A yield or drain boundary has passed `link_bracket_pos`.
-  link_hold_released: bool,
-  /// Closing the link may still truncate an empty label at its bracket.
-  link_empty_text_pending: bool,
+  /// Output state for the active anchor and its malformed nested parents.
+  link: LinkOutputState,
+  parent_links: Vec<LinkOutputState>,
   pub(crate) streaming: bool,
   /// Open inline markers as (kind, output start, content start); lets the exit drop empty pairs.
   open_markers: Vec<(u8, usize, usize)>,
@@ -627,9 +646,8 @@ pub struct ConvertState {
   blockquote_scratch: String,
   /// Heading slugs collected during conversion for fragment validation
   heading_slugs: Vec<String>,
-  /// Fragment link locations: (bracket_start, link_end)
-  /// Fragment slug is derived from buffer at fixup time
-  fragment_links: Vec<(usize, usize)>,
+  /// Emitted fragment links retained until all heading slugs are known.
+  fragment_links: Vec<FragmentLink>,
   /// Whether we're inside a heading (for slug collection)
   in_heading: bool,
   /// Buffer position at heading start (for extracting heading text)
@@ -796,12 +814,8 @@ impl ConvertState {
       plain_text,
       preserve_leading_whitespace: false,
       clean_flags: 0,
-      skip_current_link: false,
-      link_bracket_pos: 0,
-      link_url_max_len: 0,
-      link_hold_forever: false,
-      link_hold_released: false,
-      link_empty_text_pending: false,
+      link: LinkOutputState::default(),
+      parent_links: Vec::new(),
       streaming: false,
       open_markers: Vec::new(),
       code_spans: Vec::new(),
@@ -1661,26 +1675,24 @@ impl ConvertState {
       self.buffer.drain(..start);
     }
 
-    // Apply clean.fragments using recorded positions: a link whose #fragment
-    // matches no heading keeps its text and loses its target.
+    // Apply clean.fragments using recorded positions. Removing only each broken
+    // link's wrappers preserves nested link text without repeatedly shifting the
+    // whole output buffer.
     if self.clean_flags & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
       let trim_offset = start;
       // A specialized heap sort avoids pulling Rust's larger generic sort into WASM.
       heap_sort_heading_slugs(&mut self.heading_slugs);
 
-      // Only deletes, so it compacts in place: `write` trails `read` by bytes
-      // dropped so far. A clean document never writes a byte; rebuilding into
-      // a second String cost 7.2 MB on the spec page.
-      let buf_len = self.buffer.len();
-      let mut read = 0usize;
-      let mut write = 0usize;
-
       // A nested `<a>` across a block boundary reuses the outer anchor's
-      // link_bracket_pos instead of getting its own `[`, so two
+      // bracket position instead of getting its own `[`, so two
       // fragment_links entries can point at the same bracket. Rewriting
       // either one then risks corrupting the other's text. Skip any bracket
       // used more than once.
-      let mut bracket_starts: Vec<usize> = self.fragment_links.iter().map(|&(b, _)| b).collect();
+      let mut bracket_starts: Vec<usize> = self
+        .fragment_links
+        .iter()
+        .map(|link| link.bracket_start)
+        .collect();
       bracket_starts.sort_unstable();
       let has_aliased_bracket = |bracket_start: usize| {
         let Ok(idx) = bracket_starts.binary_search(&bracket_start) else {
@@ -1690,61 +1702,96 @@ impl ConvertState {
           || (idx + 1 < bracket_starts.len() && bracket_starts[idx + 1] == bracket_start)
       };
 
-      for &(bracket_start, link_end) in &self.fragment_links {
-        let adj_start = bracket_start.saturating_sub(trim_offset);
-        let adj_end = link_end.saturating_sub(trim_offset);
-        // `read > adj_start` would mean overlapping links (anchors can't
-        // nest); skipping keeps the compaction from reading overwritten bytes.
-        if adj_end > buf_len || adj_start >= adj_end || read > adj_start {
+      let mut removals = Vec::with_capacity(self.fragment_links.len());
+      for link in &self.fragment_links {
+        if has_aliased_bracket(link.bracket_start) {
           continue;
         }
-        if has_aliased_bracket(bracket_start) {
+        let bracket_start = link.bracket_start.saturating_sub(trim_offset);
+        let text_end = link.text_end.saturating_sub(trim_offset);
+        let link_end = link.link_end.saturating_sub(trim_offset);
+        // A shifted buffer can leave a recorded range pointing at bytes that
+        // still look like `[..]..)` without belonging to this link. Only an
+        // exact `](#fragment)` tail proves the entry survived every rewrite
+        // intact; anything else is left untouched so the normal cursor flow
+        // copies its bytes verbatim instead of deleting them.
+        if link_end > self.buffer.len()
+          || bracket_start >= text_end
+          || text_end >= link_end
+          || !self.buffer.is_char_boundary(bracket_start)
+          || !self.buffer.is_char_boundary(text_end)
+          || !self.buffer.is_char_boundary(link_end)
+          || self.buffer.as_bytes().get(bracket_start) != Some(&b'[')
+          || !self.buffer[text_end..link_end].starts_with("](")
+          || !self.buffer[text_end..link_end].ends_with(')')
+        {
           continue;
         }
-
-        let range = &self.buffer[adj_start..adj_end];
-        let Some(hash_pos) = range.find("](#") else {
-          continue; // not a fragment link pattern, keep as-is
+        // `](#fragment)` exactly, or the titled close `](#fragment "title")`
+        // recorded by `has_title`: fragment bytes followed by a space, an open
+        // quote and a closing quote before the final `)`. The title itself is
+        // not compared, only its shape, so escaped titles still match.
+        let fragment = link.fragment.as_str();
+        let fragment_end = text_end + 3 + fragment.len();
+        let matched = if link.has_title {
+          let bytes = self.buffer.as_bytes();
+          Some(&b' ') == bytes.get(fragment_end)
+            && Some(&b'"') == bytes.get(fragment_end + 1)
+            && Some(&b'"') == bytes.get(link_end - 2)
+            && &self.buffer[text_end + 3..fragment_end] == fragment
+        } else {
+          link_end - text_end == fragment.len() + 4
+            && &self.buffer[text_end + 3..link_end - 1] == fragment
         };
-        // A link with no text has nothing to rewrite to, so leave it whole.
-        if hash_pos == 0 {
+        if !matched {
           continue;
         }
-        let frag_start = hash_pos + 3; // skip ](#
-        let frag_end = range.len() - 1; // skip trailing )
-        if frag_start < frag_end {
-          let fragment = &range[frag_start..frag_end];
-          if contains_sorted_heading_slug(&self.heading_slugs, fragment) {
-            continue; // resolves to a heading, keep the link whole
-          }
+        if contains_sorted_heading_slug(&self.heading_slugs, fragment) {
+          continue; // resolves to a heading, keep the link whole
         }
-
-        // The recorded start can drift off the `[` when other rewrites shift
-        // the buffer; only a real `[text](#frag)` shape is safe to slice and
-        // rewrite. A drifted entry is left untouched: skipping it here lets
-        // the normal cursor flow copy its bytes verbatim instead of deleting
-        // them.
-        if !range.starts_with('[') {
-          continue;
-        }
-        // SAFETY: both moved runs are whole slices delimited by the ASCII
-        // `[` and `](#` markers, so every char boundary is preserved.
-        #[allow(unsafe_code)]
-        let bytes = unsafe { self.buffer.as_mut_vec() };
-        if read < adj_start {
-          bytes.copy_within(read..adj_start, write);
-          write += adj_start - read;
-        }
-        bytes.copy_within(adj_start + 1..adj_start + hash_pos, write);
-        write += hash_pos - 1;
-        read = adj_end;
+        removals.push((bracket_start, bracket_start + 1));
+        removals.push((text_end, link_end));
       }
 
-      // `read` only advances past a dropped link, so zero means nothing changed.
+      // Links are recorded at their close, so a link lands after the ones
+      // it wraps. Only nesting breaks the ascending order, and element depth
+      // is capped, so this insertion pass costs one comparison per entry on
+      // flat documents. It also keeps the generic sort, ~11 kB of wasm, out
+      // of the binary.
+      for index in 1..removals.len() {
+        let entry = removals[index];
+        let mut slot = index;
+        while slot > 0 && removals[slot - 1].0 > entry.0 {
+          removals[slot] = removals[slot - 1];
+          slot -= 1;
+        }
+        removals[slot] = entry;
+      }
+
+      // Only deletes, so it compacts in place: `write` trails `read` by bytes
+      // dropped so far. A clean document never writes a byte; rebuilding into
+      // a second String cost 7.2 MB on the spec page.
+      let buf_len = self.buffer.len();
+      let mut read = 0usize;
+      let mut write = 0usize;
+      // SAFETY: every removal boundary sits on validated ASCII `[`, `]` or `)`
+      // delimiters, so moving whole runs cannot split a UTF-8 sequence.
+      #[allow(unsafe_code)]
+      let bytes = unsafe { self.buffer.as_mut_vec() };
+      for (remove_start, remove_end) in &removals {
+        // A duplicate range (an aliased bracket shared with a nested anchor)
+        // is already dropped; skip it without copying.
+        if *remove_end <= read {
+          continue;
+        }
+        if *remove_start > read {
+          bytes.copy_within(read..*remove_start, write);
+          write += *remove_start - read;
+        }
+        read = *remove_end;
+      }
+      // `read` only advances past a dropped run, so zero means nothing changed.
       if read > 0 {
-        // SAFETY: as above; the surviving tail is moved whole.
-        #[allow(unsafe_code)]
-        let bytes = unsafe { self.buffer.as_mut_vec() };
         if read < buf_len {
           bytes.copy_within(read..buf_len, write);
           write += buf_len - read;
@@ -1844,38 +1891,43 @@ impl ConvertState {
   }
 
   #[inline]
-  fn link_hold_required(&self) -> bool {
-    if self.depth_map[TAG_A as usize] == 0 {
+  fn link_hold_required(&self, link: &LinkOutputState) -> bool {
+    if !link.open || link.hold_released {
       return false;
     }
-    if self.link_hold_released {
-      return false;
-    }
-    if self.link_hold_forever {
+    if link.hold_forever {
       return true;
     }
-    if self.link_empty_text_pending {
+    if link.empty_text_pending {
       return true;
     }
     // These may still truncate link text below the release threshold.
     if !self.open_markers.is_empty() || !self.code_spans.is_empty() {
       return true;
     }
-    let text_start = self.link_bracket_pos + 1;
+    let text_start = link.bracket_pos + 1;
     let text_end = trim_ascii_whitespace_end(&self.buffer);
-    text_end.saturating_sub(text_start) <= self.link_url_max_len
+    text_end.saturating_sub(text_start) <= link.url_max_len
   }
 
   #[inline]
   fn note_link_release(&mut self, boundary: usize) {
-    if self.depth_map[TAG_A as usize] > 0 && boundary > self.link_bracket_pos {
-      self.link_hold_released = true;
+    if self.link.open && boundary > self.link.bracket_pos {
+      self.link.hold_released = true;
+    }
+    for parent in &mut self.parent_links {
+      if boundary > parent.bracket_pos {
+        parent.hold_released = true;
+      }
     }
   }
 
   pub fn get_markdown_chunk(&mut self) -> String {
     if self.format == OutputFormat::Html {
       return std::mem::take(&mut self.buffer);
+    }
+    if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+      return String::new();
     }
     // Quote only what this chunk could already hand out. The tail past here is
     // still open to the trims below and to a reach-back rewrite from the next
@@ -1949,8 +2001,8 @@ impl ConvertState {
       stable_end = stable_end.min(hold_before(&self.buffer, frame.content_start));
     }
     // Hold the bracket and preceding spaces while the close can rewrite them.
-    if self.link_hold_required() {
-      stable_end = stable_end.min(hold_before(&self.buffer, self.link_bracket_pos));
+    if let Some(bracket_pos) = self.open_link_hold_floor() {
+      stable_end = stable_end.min(hold_before(&self.buffer, bracket_pos));
     }
     // A marker still alone on its line has its separating newline inserted at
     // the line start when the item resolves, so the line stays mutable.
@@ -2001,6 +2053,26 @@ impl ConvertState {
     new_content
   }
 
+  pub fn get_final_markdown_chunk(&mut self) -> String {
+    if !self.plain_text
+      && self.format != OutputFormat::Html
+      && self.clean_flags & CLEAN_FRAGMENTS != 0
+    {
+      self.get_markdown()
+    } else {
+      self.get_markdown_chunk()
+    }
+  }
+
+  #[inline]
+  fn open_link_hold_floor(&self) -> Option<usize> {
+    std::iter::once(&self.link)
+      .chain(&self.parent_links)
+      .filter(|link| self.link_hold_required(link))
+      .map(|link| link.bracket_pos)
+      .min()
+  }
+
   /// Free already-yielded output so streaming memory stays O(window), not
   /// O(document). Skipped when a whole-document feature (fragment cleaning,
   /// frontmatter, extraction) still needs the full buffer.
@@ -2037,8 +2109,8 @@ impl ConvertState {
     }
     let mut drain_end = self.last_yielded_length.min(retained_tail_start);
     // Preserve newline context before every live reach-back point.
-    if self.link_hold_required() {
-      drain_end = drain_end.min(keep_two_before(&self.buffer, self.link_bracket_pos));
+    if let Some(bracket_pos) = self.open_link_hold_floor() {
+      drain_end = drain_end.min(keep_two_before(&self.buffer, bracket_pos));
     }
     if let Some(&(_, output_start, _)) = self.open_markers.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, output_start));
@@ -2093,7 +2165,10 @@ impl ConvertState {
     self.note_link_release(drain_end);
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
-    self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);
+    self.link.bracket_pos = self.link.bracket_pos.saturating_sub(drain_end);
+    for parent in &mut self.parent_links {
+      parent.bracket_pos = parent.bracket_pos.saturating_sub(drain_end);
+    }
     for (_, output_start, content_start) in &mut self.open_markers {
       *output_start -= drain_end;
       *content_start -= drain_end;
