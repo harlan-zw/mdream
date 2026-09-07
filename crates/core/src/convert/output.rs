@@ -109,6 +109,25 @@ pub(super) fn parse_bounded_u32(value: &str, max: u32) -> Option<u32> {
 }
 
 impl ConvertState {
+  fn begin_link(&mut self, bracket_pos: usize, skipped: bool) {
+    // `self.link` describes a live enclosing `<a>` only when `open` is set; an
+    // implied close (a nested `<a>` start) resets it to the default, and pushing
+    // that phantom would poison the bracket floor the streaming guards read.
+    if self.link.open {
+      self.parent_links.push(self.link);
+    }
+    self.link = LinkOutputState {
+      bracket_pos,
+      skipped,
+      open: true,
+      ..Default::default()
+    };
+  }
+
+  fn end_link(&mut self) {
+    self.link = self.parent_links.pop().unwrap_or_default();
+  }
+
   #[inline]
   fn has_flushed_tail(&self) -> bool {
     self.cut_line_lead != CutLineLead::Uncut
@@ -307,11 +326,33 @@ impl ConvertState {
       Self::max_line_leading_run(&self.buffer[fence.content_start..], marker, &fence.indent);
     let delimiter = (marker as char).to_string().repeat((max_run + 1).max(3));
     let marker_start = fence.output_start + fence.marker_offset;
-    self.replace_code_span_content(
+    if self.replace_code_span_content(
       marker_start..marker_start + MARKDOWN_CODE_BLOCK.len(),
       &delimiter,
-    );
+    ) {
+      self.shift_fragment_links_after(
+        marker_start + MARKDOWN_CODE_BLOCK.len(),
+        delimiter.len() as isize - MARKDOWN_CODE_BLOCK.len() as isize,
+      );
+    }
     Some(delimiter)
+  }
+
+  fn shift_fragment_links_after(&mut self, offset: usize, amount: isize) {
+    if amount == 0 {
+      return;
+    }
+    for link in &mut self.fragment_links {
+      if link.bracket_start >= offset {
+        link.bracket_start = link.bracket_start.saturating_add_signed(amount);
+      }
+      if link.text_end >= offset {
+        link.text_end = link.text_end.saturating_add_signed(amount);
+      }
+      if link.link_end >= offset {
+        link.link_end = link.link_end.saturating_add_signed(amount);
+      }
+    }
   }
 
   fn blockquote_offset(content: &str, list_indent: &str, offset: usize) -> usize {
@@ -392,16 +433,26 @@ impl ConvertState {
       }
     }
 
-    for (bracket_start, link_end) in &mut self.fragment_links {
-      if *bracket_start >= frame.content_start && *link_end <= content_end {
-        *bracket_start = frame.content_start
+    for link in &mut self.fragment_links {
+      if link.bracket_start >= frame.content_start && link.link_end <= content_end {
+        link.bracket_start = frame.content_start
           + Self::blockquote_offset(
             content,
             &frame.list_indent,
-            *bracket_start - frame.content_start,
+            link.bracket_start - frame.content_start,
           );
-        *link_end = frame.content_start
-          + Self::blockquote_offset(content, &frame.list_indent, *link_end - frame.content_start);
+        link.text_end = frame.content_start
+          + Self::blockquote_offset(
+            content,
+            &frame.list_indent,
+            link.text_end - frame.content_start,
+          );
+        link.link_end = frame.content_start
+          + Self::blockquote_offset(
+            content,
+            &frame.list_indent,
+            link.link_end - frame.content_start,
+          );
       }
     }
 
@@ -748,16 +799,13 @@ impl ConvertState {
           if let Some(href) = node.attributes.get("href")
             && is_empty_link_href(href)
           {
-            self.skip_current_link = true;
+            self.begin_link(self.buffer.len(), true);
             if self.streaming {
-              self.link_hold_forever = false;
-              self.link_hold_released = true;
-              self.link_empty_text_pending = false;
+              self.link.hold_released = true;
             }
             self.last_node_is_inline = is_inline;
             return;
           }
-          self.skip_current_link = false;
         }
       } else if id == TAG_IMG && self.clean_flags & CLEAN_EMPTY_IMAGES != 0 {
         let node = &self.stack[self.stack.len() - 1];
@@ -804,7 +852,7 @@ impl ConvertState {
       enter_is_literal,
     );
 
-    if self.link_empty_text_pending
+    if self.link.empty_text_pending
       && tag_id != Some(TAG_A)
       && tag_id != Some(TAG_CODE)
       && tag_id.and_then(Self::inline_marker_type).is_none()
@@ -813,7 +861,7 @@ impl ConvertState {
         .get(output_start..)
         .is_some_and(|content| !content.trim().is_empty())
     {
-      self.link_empty_text_pending = false;
+      self.link.empty_text_pending = false;
     }
 
     if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
@@ -899,22 +947,23 @@ impl ConvertState {
         .as_deref()
         .is_some_and(|o| o.as_bytes().last() == Some(&b'['))
         && self.buffer.len() > output_start;
-      self.link_bracket_pos = if emitted_bracket {
+      let bracket_pos = if emitted_bracket {
         buf_len - 1
       } else {
         buf_len
       };
+      self.begin_link(bracket_pos, false);
       // Avoid the href lookup and hold bookkeeping for one-shot conversion.
       if self.streaming {
         let has_rewrite_anchor = emitted_bracket && !exit_is_overridden;
-        self.link_hold_released = !has_rewrite_anchor;
-        self.link_empty_text_pending =
+        self.link.hold_released = !has_rewrite_anchor;
+        self.link.empty_text_pending =
           has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
         let href = self.stack[stack_len - 1].attributes.get("href");
-        self.link_url_max_len = href.map_or(0, |href| {
+        self.link.url_max_len = href.map_or(0, |href| {
           6 + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
         });
-        self.link_hold_forever = has_rewrite_anchor
+        self.link.hold_forever = has_rewrite_anchor
           && href.is_some_and(|href| {
             href.starts_with('#')
               && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
@@ -1104,70 +1153,101 @@ impl ConvertState {
       new_line_config[1]
     };
     if tag_id == Some(TAG_A) {
-      self.link_empty_text_pending = false;
+      self.link.empty_text_pending = false;
     }
 
-    // A skipped link has no bracket for the clean rewrites below.
-    if !self.plain_text
-      && self.clean_flags != 0
-      && tag_id == Some(TAG_A)
-      && !has_override
-      && self.skip_current_link
-    {
-      self.skip_current_link = false;
-      self.last_node_is_inline = is_inline;
-      return;
-    }
+    // Clean mode exit — single guard. Skipped for overridden anchors,
+    // whose custom exit output isn't the default `[…](…)` shape.
+    if !self.plain_text && self.clean_flags != 0 && tag_id == Some(TAG_A) && !has_override {
+      // emptyLinks: skip exit for skipped links
+      if self.link.skipped {
+        self.end_link();
+        self.last_node_is_inline = is_inline;
+        return;
+      }
 
-    // Released links skip bracket-anchored rewrites; the ordinary close remains.
-    if !self.plain_text
-      && self.clean_flags != 0
-      && tag_id == Some(TAG_A)
-      && !has_override
-      && !self.link_hold_released
-    {
-      // Find actual [ position: scan from recorded pos (write_output may have inserted newlines before it)
-      let buf_len = self.buffer.len();
-      let bracket_pos = {
-        let mut pos = self.link_bracket_pos;
-        let buf = self.buffer.as_bytes();
-        while pos < buf.len() && buf[pos] != b'[' {
-          pos += 1;
+      // Released links skip bracket-anchored rewrites; the ordinary close remains.
+      if !self.plain_text
+        && self.clean_flags != 0
+        && tag_id == Some(TAG_A)
+        && !has_override
+        && !self.link.hold_released
+      {
+        // Find actual [ position: scan from recorded pos (write_output may have inserted newlines before it)
+        let buf_len = self.buffer.len();
+        let bracket_pos = {
+          let mut pos = self.link.bracket_pos;
+          let buf = self.buffer.as_bytes();
+          while pos < buf.len() && buf[pos] != b'[' {
+            pos += 1;
+          }
+          pos
+        };
+        // Guard: if bracket not found, bracket_pos == buf_len; text_start would overflow
+        if bracket_pos >= buf_len {
+          self.end_link();
+          self.last_node_is_inline = is_inline;
+          return;
         }
-        pos
-      };
-      // Guard: if bracket not found, bracket_pos == buf_len; text_start would overflow
-      if bracket_pos >= buf_len {
-        self.last_node_is_inline = is_inline;
-        return;
-      }
-      let text_start = bracket_pos + 1;
-      let link_text = if text_start <= buf_len && self.buffer.is_char_boundary(text_start) {
-        &self.buffer[text_start..buf_len]
-      } else {
-        ""
-      };
-      let text_len = buf_len.saturating_sub(text_start);
+        let text_start = bracket_pos + 1;
+        let link_text = if text_start <= buf_len && self.buffer.is_char_boundary(text_start) {
+          &self.buffer[text_start..buf_len]
+        } else {
+          ""
+        };
+        let text_len = buf_len.saturating_sub(text_start);
 
-      // emptyLinkText: [](url) → drop entirely
-      if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
-        self.buffer.truncate(bracket_pos);
-        self.last_node_is_inline = is_inline;
-        return;
-      }
+        // emptyLinkText: [](url) → drop entirely
+        if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
+          self.buffer.truncate(bracket_pos);
+          self.end_link();
+          self.last_node_is_inline = is_inline;
+          return;
+        }
 
-      // selfLinkHeadings: ## [Title](#slug) → ## Title
-      if self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 {
-        let in_heading = (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0);
-        if in_heading
+        // selfLinkHeadings: ## [Title](#slug) → ## Title
+        if self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 {
+          let in_heading = (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0);
+          if in_heading
+            && let Some(href) = node.attributes.get("href")
+            && href.starts_with('#')
+            && text_len > 0
+          {
+            // Remove [ and keep text only — use truncate+copy without intermediate String
+            let new_len = bracket_pos + text_len;
+            // SAFETY: bracket_pos < text_start are within buffer bounds (guarded above).
+            // We copy link text backwards over "[", then truncate. Preserves valid UTF-8.
+            #[allow(unsafe_code)]
+            unsafe {
+              let buf = self.buffer.as_mut_vec();
+              std::ptr::copy(
+                buf.as_ptr().add(text_start),
+                buf.as_mut_ptr().add(bracket_pos),
+                text_len,
+              );
+              buf.set_len(new_len);
+            }
+            self.last_content_cache_len = text_len;
+            self.end_link();
+            self.last_node_is_inline = is_inline;
+            return;
+          }
+        }
+
+        // redundantLinks: [url](url) → url
+        if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0
           && let Some(href) = node.attributes.get("href")
-          && href.starts_with('#')
+          && let resolved = resolve_url(
+            href,
+            self.options.origin.as_deref(),
+            self.options.clean_urls,
+          )
+          && link_text == resolved.as_ref()
           && text_len > 0
         {
           // Remove [ and keep text only — use truncate+copy without intermediate String
           let new_len = bracket_pos + text_len;
-          // SAFETY: bracket_pos < text_start are within buffer bounds (guarded above).
-          // We copy link text backwards over "[", then truncate. Preserves valid UTF-8.
+          // SAFETY: same invariants as self-link heading case. Preserves valid UTF-8.
           #[allow(unsafe_code)]
           unsafe {
             let buf = self.buffer.as_mut_vec();
@@ -1179,38 +1259,10 @@ impl ConvertState {
             buf.set_len(new_len);
           }
           self.last_content_cache_len = text_len;
+          self.end_link();
           self.last_node_is_inline = is_inline;
           return;
         }
-      }
-
-      // redundantLinks: [url](url) → url
-      if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0
-        && let Some(href) = node.attributes.get("href")
-        && let resolved = resolve_url(
-          href,
-          self.options.origin.as_deref(),
-          self.options.clean_urls,
-        )
-        && link_text == resolved.as_ref()
-        && text_len > 0
-      {
-        // Remove [ and keep text only — use truncate+copy without intermediate String
-        let new_len = bracket_pos + text_len;
-        // SAFETY: same invariants as self-link heading case. Preserves valid UTF-8.
-        #[allow(unsafe_code)]
-        unsafe {
-          let buf = self.buffer.as_mut_vec();
-          std::ptr::copy(
-            buf.as_ptr().add(text_start),
-            buf.as_mut_ptr().add(bracket_pos),
-            text_len,
-          );
-          buf.set_len(new_len);
-        }
-        self.last_content_cache_len = text_len;
-        self.last_node_is_inline = is_inline;
-        return;
       }
     }
 
@@ -1248,6 +1300,7 @@ impl ConvertState {
     {
       // Handle whitespace trimming (write_output with None)
       self.write_output(false, is_inline, configured_new_lines, None, false);
+      let link_text_end = self.buffer.len();
       // Write link close directly
       if let Some(href) = node.attributes.get("href") {
         let capped_code_span = self.options.max_node_bytes != 0 && !self.code_spans.is_empty();
@@ -1269,8 +1322,8 @@ impl ConvertState {
           }
         }
         // A released link no longer has a valid bracket anchor.
-        if title.is_empty() && is_autolink_uri(resolved) && !self.link_hold_released {
-          let bp = self.link_bracket_pos;
+        if title.is_empty() && is_autolink_uri(resolved) && !self.link.hold_released {
+          let bp = self.link.bracket_pos;
           let buf_bytes = self.buffer.as_bytes();
           if bp < buf_bytes.len() && buf_bytes[bp] == b'[' && &self.buffer[bp + 1..] == resolved {
             if capped_code_span {
@@ -1278,6 +1331,7 @@ impl ConvertState {
               if self.replace_code_span_content(end..end, ">") {
                 self.buffer.replace_range(bp..bp + 1, "<");
                 self.last_content_cache_len = self.buffer.len() - bp;
+                self.end_link();
                 self.last_node_is_inline = is_inline;
                 return;
               }
@@ -1287,6 +1341,7 @@ impl ConvertState {
               self.buffer.push_str(resolved);
               self.buffer.push('>');
               self.last_content_cache_len = self.buffer.len() - bp;
+              self.end_link();
               self.last_node_is_inline = is_inline;
               return;
             }
@@ -1308,19 +1363,22 @@ impl ConvertState {
         // The cache is a length, not an offset: the link starts at its `[`.
         // Saturating because `link_bracket_pos` is `buffer.len()` when no `[`
         // was emitted.
-        self.last_content_cache_len = self.buffer.len().saturating_sub(self.link_bracket_pos);
+        self.last_content_cache_len = self.buffer.len().saturating_sub(self.link.bracket_pos);
+        if self.clean_flags & CLEAN_FRAGMENTS != 0
+          && self.depth_map[TAG_CODE as usize] == 0
+          && let Some(fragment) = resolved.strip_prefix('#')
+          && !fragment.is_empty()
+        {
+          self.fragment_links.push(FragmentLink {
+            bracket_start: self.link.bracket_pos,
+            text_end: link_text_end,
+            link_end: self.buffer.len(),
+            fragment: fragment.to_string(),
+            has_title: !title.is_empty(),
+          });
+        }
       }
-      // Record fragment link position for deferred fixup
-      if self.clean_flags & CLEAN_FRAGMENTS != 0
-        && let Some(href) = node.attributes.get("href")
-        && href.starts_with('#')
-        && href.len() > 1
-      {
-        // link_bracket_pos now points exactly at `[` (set in emit_enter_element).
-        self
-          .fragment_links
-          .push((self.link_bracket_pos, self.buffer.len()));
-      }
+      self.end_link();
       self.last_node_is_inline = is_inline;
       return;
     }
@@ -1402,13 +1460,13 @@ impl ConvertState {
 
     let output_start = self.buffer.len();
     self.write_output(false, is_inline, configured_new_lines, effective, false);
-    if self.link_empty_text_pending
+    if self.link.empty_text_pending
       && self
         .buffer
         .get(output_start..)
         .is_some_and(|content| !content.trim().is_empty())
     {
-      self.link_empty_text_pending = false;
+      self.link.empty_text_pending = false;
     }
 
     // Reset <pre> fence deferral once the element closes (issue #97).
@@ -1423,17 +1481,8 @@ impl ConvertState {
       self.pre_fence_open = false;
     }
 
-    // Record fragment link position for deferred fixup (no String alloc)
-    if !self.plain_text
-      && self.clean_flags & CLEAN_FRAGMENTS != 0
-      && tag_id == Some(TAG_A)
-      && let Some(href) = node.attributes.get("href")
-      && href.starts_with('#')
-      && href.len() > 1
-    {
-      self
-        .fragment_links
-        .push((self.link_bracket_pos, self.buffer.len()));
+    if tag_id == Some(TAG_A) {
+      self.end_link();
     }
   }
 
@@ -2014,9 +2063,7 @@ impl ConvertState {
         .open_markers
         .first()
         .is_some_and(|&(_, position, _)| opens_the_item(position))
-        || (self.depth_map[TAG_A as usize] > 0
-          && !self.link_hold_released
-          && opens_the_item(self.link_bracket_pos)))
+        || self.open_link_hold_floor().is_some_and(opens_the_item))
     {
       return;
     }

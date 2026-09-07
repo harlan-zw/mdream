@@ -2601,6 +2601,14 @@ fn clean_strips_broken_fragment() {
 }
 
 #[test]
+fn clean_strips_broken_titled_fragment() {
+  assert_eq!(
+    convert_with_clean(r##"<a href="#missing" title="T">x</a>"##, clean_all()),
+    "x"
+  );
+}
+
+#[test]
 fn clean_keeps_valid_fragment() {
   assert_eq!(
     convert_with_clean(
@@ -2612,6 +2620,17 @@ fn clean_keeps_valid_fragment() {
 }
 
 #[test]
+fn clean_keeps_valid_fragment_with_title() {
+  assert_eq!(
+    convert_with_clean(
+      r##"<h2>My Section</h2><a href="#my-section" title="Jump">Link</a>"##,
+      clean_all(),
+    ),
+    "## My Section\n\n[Link](#my-section \"Jump\")",
+  );
+}
+
+#[test]
 fn clean_keeps_valid_strips_broken() {
   assert_eq!(
     convert_with_clean(
@@ -2619,6 +2638,129 @@ fn clean_keeps_valid_strips_broken() {
       clean_all()
     ),
     "## Introduction\n\n[Intro](#introduction) and Missing"
+  );
+}
+
+#[test]
+fn clean_fragments_survive_output_rewrites() {
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+
+  assert_eq!(
+    convert_with_clean(
+      r##"<h2 id="b">b</h2><a href="#a"><blockquote>e<a href="#b">x</a></blockquote></a>"##,
+      clean.clone(),
+    ),
+    "## b\n\n> e [x](#b)",
+  );
+  assert_eq!(
+    convert_with_clean(
+      r##"<a href="#a"><blockquote>é<a href="#b">x</a></blockquote></a>"##,
+      clean.clone(),
+    ),
+    "> é x",
+  );
+  let html = r##"<code><pre>”yy<a href="#a"><img alt=z>"##;
+  assert_eq!(convert_with_clean(html, clean), convert(html));
+}
+
+#[test]
+fn streaming_clean_fragments_matches_one_shot() {
+  let html = r##"<h2>Section</h2><a href="#section">keep</a><a href="#missing">drop</a>"##;
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  let expected = convert_with_clean(html, clean.clone());
+
+  for split in 0..=html.len() {
+    let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+      clean: Some(clean.clone()),
+      ..Default::default()
+    });
+    let mut output = processor.process_chunk(&html[..split]);
+    output.push_str(&processor.process_chunk(&html[split..]));
+    output.push_str(&processor.finish());
+    assert_eq!(output, expected, "split={split}");
+  }
+}
+
+#[test]
+fn clean_fragments_preserve_code_text_that_looks_like_a_link() {
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  let html = r##"<pre><code><a href="#missing">[x](#y)</a></code></pre>"##;
+  assert_eq!(convert_with_clean(html, clean), convert(html));
+
+  let html = r##"<code><a href="#missing">[x](#y)</a></code>"##;
+  assert_eq!(
+    convert_with_clean(
+      html,
+      mdream::types::CleanConfig {
+        fragments: true,
+        ..Default::default()
+      }
+    ),
+    convert(html),
+  );
+}
+
+#[test]
+fn clean_fragments_scales_with_many_broken_links() {
+  let mut html = "<h2>section</h2>".repeat(20_000);
+  html.push_str(&r##"<a href="#missing">x</a>"##.repeat(20_000));
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  let started = std::time::Instant::now();
+
+  let _ = convert_with_clean(&html, clean);
+
+  // Generous because the gate is complexity, not speed: the quadratic scan this
+  // replaces takes minutes on this input, so a slow shared runner cannot flake.
+  assert!(
+    started.elapsed() < std::time::Duration::from_secs(10),
+    "fragment cleanup took {:?}",
+    started.elapsed(),
+  );
+}
+
+#[test]
+fn clean_fragments_ignore_link_syntax_in_the_link_text() {
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  // The text carries its own `](#`, so a fixup that searched the emitted link
+  // for that marker cut the wrapper at the wrong offset.
+  assert_eq!(
+    convert_with_clean(r##"<a href="#missing">a](#b) c</a>"##, clean.clone()),
+    "a\\](#b) c",
+  );
+  assert_eq!(
+    convert_with_clean(r##"<h2>keep</h2><a href="#keep">a](#b) c</a>"##, clean),
+    "## keep\n\n[a\\](#b) c](#keep)",
+  );
+}
+
+#[test]
+fn clean_nested_anchor_state_is_independent() {
+  let clean = mdream::types::CleanConfig {
+    empty_links: true,
+    ..Default::default()
+  };
+
+  assert_eq!(
+    convert_with_clean(
+      r##"<a href="#"><blockquote>x<a href="/b">y</a></blockquote></a>"##,
+      clean,
+    ),
+    "> x [y](/b)",
   );
 }
 

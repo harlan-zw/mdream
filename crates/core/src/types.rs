@@ -450,6 +450,10 @@ pub struct CleanConfig {
   /// Strip tracking query parameters from URLs (utm_*, fbclid, gclid, …).
   pub urls: bool,
   /// Strip fragment-only links that don't match any heading slug.
+  ///
+  /// A link can only be judged once every heading is known, so streaming holds
+  /// the whole document and returns it from `finish` instead of yielding it
+  /// chunk by chunk.
   pub fragments: bool,
   /// Strip links with meaningless or executable hrefs → plain text.
   pub empty_links: bool,
