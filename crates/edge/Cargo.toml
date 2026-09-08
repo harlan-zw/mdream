@@ -22,11 +22,11 @@ panic-probe = [ ]
 
 [dependencies]
 mdream = { path = "../core" }
-wasm-bindgen = "0.2.127"
-js-sys = "0.3.104"
+wasm-bindgen = "0.2.128"
+js-sys = "0.3.105"
 
 [lints]
 workspace = true
 
 [dev-dependencies]
-wasm-bindgen-test = "0.3.77"
+wasm-bindgen-test = "0.3.78"

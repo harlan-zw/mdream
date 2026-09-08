@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`nav { name: 'JavaScript Engine', engine: { htmlToMarkdown: [Function htmlToMarkdown], streamHtmlToMarkdown: [Function streamHtmlToMarkdown] } } > github 1`] = `
+exports[`nav { name: 'JavaScript Engine', …(1) } > github 1`] = `
 "- Start your journey
   - [About GitHub and Git](/en/get-started/start-your-journey/about-github-and-git)
   - [Create an account](/en/get-started/start-your-journey/creating-an-account-on-github)
@@ -118,7 +118,7 @@ exports[`nav { name: 'JavaScript Engine', engine: { htmlToMarkdown: [Function ht
   - [Registering for an exam](/en/get-started/showcase-your-expertise-with-github-certifications/registering-for-a-github-certifications-exam)"
 `;
 
-exports[`nav { name: 'Rust Engine', engine: { htmlToMarkdown: [Function rustHtmlToMarkdown], streamHtmlToMarkdown: [Function rustStreamHtmlToMarkdown] } } > github 1`] = `
+exports[`nav { name: 'Rust Engine', …(1) } > github 1`] = `
 "- Start your journey
   - [About GitHub and Git](/en/get-started/start-your-journey/about-github-and-git)
   - [Create an account](/en/get-started/start-your-journey/creating-an-account-on-github)
