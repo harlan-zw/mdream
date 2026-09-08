@@ -9,7 +9,8 @@ use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selec
 use crate::tags::get_tag_handler;
 use crate::tailwind::process_tailwind_classes;
 use crate::types::{
-  ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, TagHandler, TailwindData,
+  ElementNode, ExtractedElement, HTMLToMarkdownOptions, NodeExtras, OutputFormat, TagHandler,
+  TagOverrideConfig, TailwindData,
 };
 use crate::url::{
   is_autolink_uri, is_empty_link_href, is_safe_html_url, resolve_url, slugify_heading,
@@ -151,6 +152,8 @@ struct LinkOutputState {
   /// (and a popped-when-empty result) is `false`, so a closed link can never be
   /// mistaken for an enclosing one when the next link opens.
   open: bool,
+  /// Identifies the anchor that owns the recorded bracket.
+  begin_depth: usize,
 }
 
 struct FragmentLink {
@@ -161,58 +164,6 @@ struct FragmentLink {
   /// The close was written as `](#frag "title")` instead of `](#frag)`, so the
   /// drift check must accept a quoted title between the fragment and `)`.
   has_title: bool,
-}
-
-/// FNV-1a over the slug bytes. Only used to bucket heading slugs, so a short
-/// non-cryptographic hash is enough.
-#[allow(clippy::cast_possible_truncation)] // Dropping the high bits keeps a valid hash.
-fn slug_hash(slug: &str) -> usize {
-  let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-  for &byte in slug.as_bytes() {
-    hash ^= u64::from(byte);
-    hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-  }
-  hash as usize
-}
-
-/// Open-addressed index over the collected heading slugs, returned with its
-/// probe mask. Hand-rolled because `sort_unstable` + `binary_search` drags the
-/// generic sort machinery (~11 kB) into the wasm build for one membership test.
-///
-/// The hash is not keyed, so a document whose headings all collide degrades to
-/// a linear scan. That is the cost the unindexed lookup paid on every document,
-/// so a crafted input can only reach the old behaviour, never a worse one.
-fn build_slug_index(slugs: &[String]) -> (Vec<usize>, usize) {
-  // Load factor stays at or below 0.5, so probing always terminates. `usize::MAX`
-  // marks an empty slot; no slice can hold that many entries, so it can never
-  // collide with a real index.
-  let capacity = slugs.len().saturating_mul(2).next_power_of_two().max(8);
-  let mask = capacity - 1;
-  let mut table = vec![usize::MAX; capacity];
-  for (index, slug) in slugs.iter().enumerate() {
-    let mut slot = slug_hash(slug) & mask;
-    while table[slot] != usize::MAX {
-      slot = (slot + 1) & mask;
-    }
-    table[slot] = index;
-  }
-  (table, mask)
-}
-
-/// Membership test against `build_slug_index`. Duplicate slugs occupy separate
-/// slots, so the first exact string match wins.
-fn slug_index_contains(table: &[usize], mask: usize, slugs: &[String], needle: &str) -> bool {
-  let mut slot = slug_hash(needle) & mask;
-  loop {
-    let index = table[slot];
-    if index == usize::MAX {
-      return false;
-    }
-    if slugs[index] == needle {
-      return true;
-    }
-    slot = (slot + 1) & mask;
-  }
 }
 
 #[derive(Clone)]
@@ -250,6 +201,50 @@ fn trim_ascii_whitespace_end(value: &str) -> usize {
     len -= 1;
   }
   len
+}
+
+fn heap_sort_heading_slugs(slugs: &mut [String]) {
+  fn sift_down(slugs: &mut [String], mut root: usize, end: usize) {
+    let mut child = root * 2 + 1;
+    while child < end {
+      if child + 1 < end && slugs[child] < slugs[child + 1] {
+        child += 1;
+      }
+      if slugs[root] >= slugs[child] {
+        return;
+      }
+      slugs.swap(root, child);
+      root = child;
+      child = root * 2 + 1;
+    }
+  }
+
+  let mut root = slugs.len() / 2;
+  while root > 0 {
+    root -= 1;
+    sift_down(slugs, root, slugs.len());
+  }
+
+  let mut end = slugs.len();
+  while end > 1 {
+    end -= 1;
+    slugs.swap(0, end);
+    sift_down(slugs, 0, end);
+  }
+}
+
+fn contains_sorted_heading_slug(slugs: &[String], target: &str) -> bool {
+  let mut start = 0usize;
+  let mut end = slugs.len();
+  while start < end {
+    let midpoint = start + (end - start) / 2;
+    match slugs[midpoint].as_str().cmp(target) {
+      std::cmp::Ordering::Less => start = midpoint + 1,
+      std::cmp::Ordering::Greater => end = midpoint,
+      std::cmp::Ordering::Equal => return true,
+    }
+  }
+  false
 }
 
 /// What the current output line holds where a table row is about to be written.
@@ -534,6 +529,8 @@ pub struct ConvertState {
   script_text_buffer: String,
   pub stack: Vec<ElementNode>,
   node_pool: Vec<ElementNode>,
+  /// Scan target, swapped with the pooled node so attribute buffers recycle.
+  pub(crate) attr_scratch: crate::types::Attributes,
 
   // Plugin flags
   has_plugins: bool,
@@ -543,6 +540,9 @@ pub struct ConvertState {
   has_filter: bool,
   pub has_extraction: bool,
   has_tag_overrides: bool,
+  /// Some plugin reads arbitrary attributes, so every tag captures all of them.
+  /// `frontmatter` is absent deliberately: TAG_META's mask covers what it reads.
+  attrs_force_all: bool,
 
   // Plugin tracking
   isolate_main_found: bool,
@@ -691,7 +691,14 @@ pub struct ConvertState {
   cut_line_lead: CutLineLead,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
+  /// tag_id -> index into `tag_overrides`; `NO_OVERRIDE` means no key. Boxed:
+  /// held inline it costs the override-free path more than the scan it replaces.
+  override_idx: Option<Box<[u8; MAX_TAG_ID]>>,
 }
+
+/// `override_idx` slot for a tag no override key names. Doubles as the
+/// exclusive upper bound on indices the table can hold.
+pub(crate) const NO_OVERRIDE: u8 = u8::MAX;
 
 impl ConvertState {
   /// Check if we're inside a table cell (either `<td>` or `<th>`).
@@ -741,6 +748,7 @@ impl ConvertState {
       script_text_buffer: String::new(),
       stack: Vec::with_capacity(32),
       node_pool: Vec::with_capacity(32),
+      attr_scratch: crate::types::Attributes::new(),
 
       has_plugins: false,
       has_tailwind: false,
@@ -749,6 +757,8 @@ impl ConvertState {
       has_filter: false,
       has_extraction: false,
       has_tag_overrides: false,
+      override_idx: None,
+      attrs_force_all: false,
 
       isolate_main_found: false,
       isolate_main_closed: false,
@@ -865,7 +875,24 @@ impl ConvertState {
       s.has_tailwind = plugins.tailwind.is_some();
       s.has_isolate_main = plugins.isolate_main.is_some();
       s.has_frontmatter = plugins.frontmatter.is_some();
-      s.has_tag_overrides = plugins.tag_overrides.is_some();
+      if let Some(ovs) = &plugins.tag_overrides {
+        s.has_tag_overrides = true;
+        // A longer list has keys the sentinel cannot index; leaving the table
+        // unbuilt sends every lookup down the key scan instead of testing here.
+        if ovs.len() < NO_OVERRIDE as usize {
+          let mut idx = Box::new([NO_OVERRIDE; MAX_TAG_ID]);
+          // `zip` over a u8 counter: the length check above keeps it in range.
+          for ((k, _), i) in ovs.iter().zip(0u8..) {
+            if let Some(id) = crate::consts::get_tag_id(k)
+              && idx[id as usize] == NO_OVERRIDE
+            {
+              // First key wins, matching `find` order on duplicate keys.
+              idx[id as usize] = i;
+            }
+          }
+          s.override_idx = Some(idx);
+        }
+      }
       if let Some(extraction) = &plugins.extraction {
         s.has_extraction = true;
         s.extraction_parsed_selectors = extraction
@@ -890,6 +917,7 @@ impl ConvertState {
         }
         s.filter_process_children = filter.process_children.unwrap_or(true);
       }
+      s.attrs_force_all = s.has_tailwind || s.has_filter || s.has_extraction;
     }
     s
   }
@@ -987,7 +1015,7 @@ impl ConvertState {
         node.tag_id == Some(TAG_A)
           && node
             .attributes
-            .get("title")
+            .get_bit(ATTR_TITLE)
             .is_some_and(|title| !title.is_empty())
       })
     {
@@ -995,7 +1023,7 @@ impl ConvertState {
     }
     match self.stack.last() {
       Some(parent) => {
-        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind.is_none())
+        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind().is_none())
       }
       None => true,
     }
@@ -1049,7 +1077,7 @@ impl ConvertState {
     if self
       .stack
       .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none())
+      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none())
     {
       match self.process_script_chunk(chunk, i) {
         ScriptChunk::Closed(close_index) => i = close_index,
@@ -1651,10 +1679,34 @@ impl ConvertState {
     // link's wrappers preserves nested link text without repeatedly shifting the
     // whole output buffer.
     if self.clean_flags & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
-      let (slug_table, slug_mask) = build_slug_index(&self.heading_slugs);
       let trim_offset = start;
+      // A specialized heap sort avoids pulling Rust's larger generic sort into WASM.
+      heap_sort_heading_slugs(&mut self.heading_slugs);
+
+      // A nested `<a>` across a block boundary reuses the outer anchor's
+      // bracket position instead of getting its own `[`, so two
+      // fragment_links entries can point at the same bracket. Rewriting
+      // either one then risks corrupting the other's text. Skip any bracket
+      // used more than once.
+      let mut bracket_starts: Vec<usize> = self
+        .fragment_links
+        .iter()
+        .map(|link| link.bracket_start)
+        .collect();
+      bracket_starts.sort_unstable();
+      let has_aliased_bracket = |bracket_start: usize| {
+        let Ok(idx) = bracket_starts.binary_search(&bracket_start) else {
+          return false;
+        };
+        (idx > 0 && bracket_starts[idx - 1] == bracket_start)
+          || (idx + 1 < bracket_starts.len() && bracket_starts[idx + 1] == bracket_start)
+      };
+
       let mut removals = Vec::with_capacity(self.fragment_links.len());
       for link in &self.fragment_links {
+        if has_aliased_bracket(link.bracket_start) {
+          continue;
+        }
         let bracket_start = link.bracket_start.saturating_sub(trim_offset);
         let text_end = link.text_end.saturating_sub(trim_offset);
         let link_end = link.link_end.saturating_sub(trim_offset);
@@ -1694,43 +1746,57 @@ impl ConvertState {
         if !matched {
           continue;
         }
-        if slug_index_contains(&slug_table, slug_mask, &self.heading_slugs, &link.fragment) {
-          continue;
+        if contains_sorted_heading_slug(&self.heading_slugs, fragment) {
+          continue; // resolves to a heading, keep the link whole
         }
         removals.push((bracket_start, bracket_start + 1));
         removals.push((text_end, link_end));
       }
 
-      if !removals.is_empty() {
-        // Links are recorded at their close, so a link lands after the ones
-        // it wraps. Only nesting breaks the ascending order, and element depth
-        // is capped, so this insertion pass costs one comparison per entry on
-        // flat documents. It also keeps the generic sort, ~11 kB of wasm, out
-        // of the binary.
-        for index in 1..removals.len() {
-          let entry = removals[index];
-          let mut slot = index;
-          while slot > 0 && removals[slot - 1].0 > entry.0 {
-            removals[slot] = removals[slot - 1];
-            slot -= 1;
-          }
-          removals[slot] = entry;
+      // Links are recorded at their close, so a link lands after the ones
+      // it wraps. Only nesting breaks the ascending order, and element depth
+      // is capped, so this insertion pass costs one comparison per entry on
+      // flat documents. It also keeps the generic sort, ~11 kB of wasm, out
+      // of the binary.
+      for index in 1..removals.len() {
+        let entry = removals[index];
+        let mut slot = index;
+        while slot > 0 && removals[slot - 1].0 > entry.0 {
+          removals[slot] = removals[slot - 1];
+          slot -= 1;
         }
-        let mut result = String::with_capacity(self.buffer.len());
-        let mut cursor = 0;
-        for (remove_start, remove_end) in removals {
-          if remove_end <= cursor {
-            continue;
-          }
-          if remove_start > cursor {
-            result.push_str(&self.buffer[cursor..remove_start]);
-          }
-          cursor = cursor.max(remove_end);
+        removals[slot] = entry;
+      }
+
+      // Only deletes, so it compacts in place: `write` trails `read` by bytes
+      // dropped so far. A clean document never writes a byte; rebuilding into
+      // a second String cost 7.2 MB on the spec page.
+      let buf_len = self.buffer.len();
+      let mut read = 0usize;
+      let mut write = 0usize;
+      // SAFETY: every removal boundary sits on validated ASCII `[`, `]` or `)`
+      // delimiters, so moving whole runs cannot split a UTF-8 sequence.
+      #[allow(unsafe_code)]
+      let bytes = unsafe { self.buffer.as_mut_vec() };
+      for (remove_start, remove_end) in &removals {
+        // A duplicate range (an aliased bracket shared with a nested anchor)
+        // is already dropped; skip it without copying.
+        if *remove_end <= read {
+          continue;
         }
-        if cursor < self.buffer.len() {
-          result.push_str(&self.buffer[cursor..]);
+        if *remove_start > read {
+          bytes.copy_within(read..*remove_start, write);
+          write += *remove_start - read;
         }
-        self.buffer = result;
+        read = *remove_end;
+      }
+      // `read` only advances past a dropped run, so zero means nothing changed.
+      if read > 0 {
+        if read < buf_len {
+          bytes.copy_within(read..buf_len, write);
+          write += buf_len - read;
+        }
+        bytes.truncate(write);
       }
     }
     std::mem::take(&mut self.buffer)
@@ -1765,7 +1831,7 @@ impl ConvertState {
     let in_script = self
       .stack
       .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name.is_none());
+      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none());
     if in_script {
       self.push_script_text(leftover);
       self.flush_script_text();

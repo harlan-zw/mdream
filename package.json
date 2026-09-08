@@ -8,13 +8,14 @@
     "url": "https://github.com/harlan-zw/mdream"
   },
   "scripts": {
-    "bundle-size:sync": "pnpm test:bundle-size && pnpm test:bundle-size:rust && node bench/bundle/analyze.ts && node bench/bundle/update.ts",
+    "bundle-size:sync": "pnpm test:bundle-size && pnpm test:bundle-size:rust && pnpm test:bundle-size:rust-native && node bench/bundle/analyze.ts && node bench/bundle/update.ts",
     "build": "pnpm run -r build",
     "lint": "eslint .",
     "typecheck": "pnpm run -r typecheck",
     "test": "pnpm exec playwright install && vitest test",
     "test:bundle-size": "pnpm --filter @mdream/js build && obuild --dir bench/bundle",
     "test:bundle-size:rust": "node scripts/build-wasm-edge.mjs --target web --out-dir bench/bundle/dist/rust",
+    "test:bundle-size:rust-native": "node bench/rust-bundle/build.mjs",
     "release": "pnpm build && bumpp --all --output=CHANGELOG.md --execute=\"node scripts/sync-cargo-version.mjs\" packages/*/package.json",
     "release:beta": "pnpm build && bumpp --all --release prerelease --preid beta --output=CHANGELOG.md --execute=\"node scripts/sync-cargo-version.mjs\" packages/*/package.json",
     "test:attw": "pnpm -r --parallel --filter './packages/**' run test:attw",

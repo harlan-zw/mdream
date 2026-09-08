@@ -1,4 +1,4 @@
-import { streamHtmlToMarkdown } from '@mdream/js/core'
+import { streamHtmlToMarkdown } from '@mdream/js'
 
 export function convertStream(
   html: ReadableStream<Uint8Array | string>,

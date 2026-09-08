@@ -1,8 +1,12 @@
-import type { ElementNode, ExtractedElement } from '../../src/types'
+import type { ExtractedElement } from '../../src/plugins/extraction'
+import type { ElementNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { ELEMENT_NODE, TAG_TEMPLATE } from '../../src/const'
 import { htmlToMarkdown, NodeEventEnter, streamHtmlToMarkdown } from '../../src/index'
 import { parseHtml } from '../../src/parse'
+import { extractionPlugin } from '../../src/plugins/extraction'
+import { frontmatterPlugin } from '../../src/plugins/frontmatter'
+import { isolateMainPlugin } from '../../src/plugins/isolate-main'
 
 async function streamConvert(chunks: string[]): Promise<string> {
   const stream = new ReadableStream<string>({
@@ -74,17 +78,17 @@ describe('template parsing', () => {
     const seen: string[] = []
     const extracted: ExtractedElement[] = []
     const markdown = htmlToMarkdown('<template><strong class="target">hidden</strong></template><p>after</p>', {
-      hooks: [{
-        onNodeEnter(node) {
-          seen.push(node.name)
-          return node.name === 'strong' ? 'HOOK-LEAK' : undefined
+      plugins: [
+        {
+          onNodeEnter(node) {
+            seen.push(node.name)
+            return node.name === 'strong' ? 'HOOK-LEAK' : undefined
+          },
         },
-      }],
-      plugins: {
-        extraction: {
+        extractionPlugin({
           '.target': element => extracted.push(element),
-        },
-      },
+        }),
+      ],
     })
 
     expect(markdown).toBe('after')
@@ -96,10 +100,7 @@ describe('template parsing', () => {
   it('does not let inert content affect isolate-main or frontmatter state', () => {
     const html = '<head><template><title>Hidden</title><meta name="description" content="Hidden description"></template><title>Visible</title></head><template><main>Hidden main</main></template><main><p>Visible body</p></main>'
     expect(htmlToMarkdown(html, {
-      plugins: {
-        frontmatter: true,
-        isolateMain: true,
-      },
+      plugins: [frontmatterPlugin(), isolateMainPlugin()],
     })).toBe('---\ntitle: Visible\n---\n\nVisible body')
   })
 

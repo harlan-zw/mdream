@@ -42,7 +42,7 @@ import {
   TagIdMap,
   TEXT_NODE,
 } from './const'
-import { resolveUrl, safeAnchorOutput } from './tags'
+import { resolveUrl, safeAnchorOutput } from './url'
 import { escapeHtml, getLanguageFromClass, isSafeHtmlUrl, parseUnsignedInteger } from './utils'
 
 interface HeadingFrame {

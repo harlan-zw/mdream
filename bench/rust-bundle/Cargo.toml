@@ -1,0 +1,16 @@
+[package]
+name = "mdream-rust-bundle"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[dependencies]
+mdream = { path = "../../crates/core" }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

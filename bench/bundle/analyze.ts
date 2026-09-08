@@ -2,13 +2,17 @@ import fs from 'node:fs'
 import process from 'node:process'
 import { collectBundleData, renderBundleReport } from './bundle-report.ts'
 import { renderPerfReport } from './perf-report.ts'
+import { collectRustBundleData, renderRustBundleReport } from './rust-bundle-report.ts'
 
 // Combined size + perf comment for the PR. Bundle data comes from the dist dirs
 // (BASE_DIST for the base baseline); perf comes from JSON the workflow produced by
 // running bench/perf-ci.mjs against the base and PR bundles (BASE_PERF / PR_PERF).
 // Each env var may hold a comma-separated list of JSON files (the timed run and the
 // no-opt alloc run); their benches are merged into one set.
-const sections: string[] = [renderBundleReport(collectBundleData())]
+const sections: string[] = [
+  renderBundleReport(collectBundleData()),
+  renderRustBundleReport(collectRustBundleData()),
+]
 
 function readPerf(paths?: string) {
   if (!paths)

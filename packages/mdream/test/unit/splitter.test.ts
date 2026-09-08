@@ -1,4 +1,5 @@
-import { TAG_H1, TAG_H2, withMinimalPreset } from '@mdream/js'
+import { TAG_H1, TAG_H2 } from '@mdream/js'
+import { withMinimalPreset } from '@mdream/js/preset/minimal'
 import { htmlToMarkdownSplitChunks, htmlToMarkdownSplitChunksStream } from '@mdream/js/splitter'
 import { describe, expect, it } from 'vitest'
 

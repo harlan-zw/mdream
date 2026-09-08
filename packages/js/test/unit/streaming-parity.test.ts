@@ -106,13 +106,13 @@ describe('streaming parity with the Rust core', () => {
 
   it('does not emit an enter-only link override before the built-in exit', async () => {
     await expectStreamingParity('<a href="https://example.com">https://example.com</a>', {
-      plugins: { tagOverrides: { a: { enter: '[' } } },
+      tagOverrides: { a: { enter: '[' } },
     })
   })
 
   it('does not emit a hook link opener before the built-in autolink rewrite', async () => {
     await expectStreamingParity('<a href="https://example.com">https://example.com</a>', {
-      hooks: [{
+      plugins: [{
         onNodeEnter(node) {
           return node.name === 'a' ? '[' : undefined
         },
@@ -123,7 +123,7 @@ describe('streaming parity with the Rust core', () => {
   it('keeps bracket text literal when hooks replace the raw link tags', async () => {
     const html = '<details><a href="/x">a[b]</a></details>'
     const options: Partial<MdreamOptions> = {
-      hooks: [{
+      plugins: [{
         onNodeEnter(node) {
           return node.name === 'a' ? '{' : undefined
         },
@@ -139,7 +139,7 @@ describe('streaming parity with the Rust core', () => {
   it('does not carry raw link protection past a skipped exit', async () => {
     const html = '<details><a href="/x">first</a></details><details>a[b]</details>'
     const options: Partial<MdreamOptions> = {
-      hooks: [{
+      plugins: [{
         beforeNodeProcess(event) {
           return { skip: event.type === NodeEventExit && 'name' in event.node && event.node.name === 'a' }
         },
@@ -154,11 +154,9 @@ describe('streaming parity with the Rust core', () => {
   it('protects raw link text when an empty-buffer path emits the opener', async () => {
     const html = '<details><a href="/x">a[b]</a></details>'
     const options: Partial<MdreamOptions> = {
-      plugins: {
-        tagOverrides: {
-          details: { enter: '', exit: '' },
-          a: { spacing: [1, 0] },
-        },
+      tagOverrides: {
+        details: { enter: '', exit: '' },
+        a: { spacing: [1, 0] },
       },
     }
     expect(htmlToMarkdown(html, options)).toBe('<a href="/x">a&#91;b&#93;</a>')

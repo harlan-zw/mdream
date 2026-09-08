@@ -1,8 +1,4 @@
-/**
- * Imperative hook-based transform plugins. **JavaScript engine only.**
- * When transforms are provided, the JS engine is used regardless of engine selection.
- * For declarative config that works with both engines, use `BuiltinPlugins`.
- */
+/** Composable JavaScript conversion plugin. */
 export interface TransformPlugin {
   /**
    * Whether a flattened element starts an output-excluded subtree.
@@ -41,6 +37,9 @@ export interface TransformPlugin {
   ) => { content: string, skip: boolean } | undefined
 }
 
+export type Plugin = TransformPlugin
+export type OutputFormat = 'markdown' | 'text' | 'html'
+
 /**
  * Declarative tag override configuration.
  * When a string value is provided, it acts as an alias (e.g. `{ "x-heading": "h2" }`).
@@ -54,58 +53,7 @@ export interface TagOverride {
   collapsesInnerWhiteSpace?: boolean
 }
 
-/**
- * Frontmatter configuration options.
- */
-export interface FrontmatterConfig {
-  additionalFields?: Record<string, string>
-  metaFields?: string[]
-  /**
-   * Callback to receive structured frontmatter data.
-   * Called after conversion with the extracted key-value pairs.
-   */
-  onExtract?: (frontmatter: Record<string, string>) => void
-}
-
-/**
- * Declarative configuration for built-in plugins.
- * Works with both the JavaScript and Rust engines.
- */
-export interface BuiltinPlugins {
-  /** Filter elements by CSS selectors, tag names, or TAG_* constants */
-  filter?: {
-    include?: (string | number)[]
-    exclude?: (string | number)[]
-    processChildren?: boolean
-  }
-  /**
-   * Extract frontmatter from HTML head.
-   * - `true`: enable with defaults
-   * - `(fm) => void`: enable and receive structured data via callback
-   * - `FrontmatterConfig`: enable with config options and optional callback
-   */
-  frontmatter?: boolean | ((frontmatter: Record<string, string>) => void) | FrontmatterConfig
-  /** Isolate main content area */
-  isolateMain?: boolean
-  /** Convert Tailwind utility classes to markdown formatting */
-  tailwind?: boolean
-  /**
-   * Extract elements matching CSS selectors during conversion.
-   * Each key is a CSS selector; the handler is called for every match.
-   */
-  extraction?: Record<string, (element: ExtractedElement) => void>
-  /**
-   * Declarative tag overrides for customizing tag behavior.
-   * String values act as aliases (e.g. `{ "x-heading": "h2" }` makes `<x-heading>` behave like `<h2>`).
-   * Object values override specific handler properties.
-   */
-  tagOverrides?: Record<string, TagOverride | string>
-}
-
-/**
- * Shared engine options that work with both JS and Rust engines.
- * This is the contract that `MarkdownEngine` methods accept.
- */
+/** Core conversion options. */
 export interface CleanOptions {
   /** Strip tracking query parameters (utm_*, fbclid, gclid, etc.) from URLs */
   urls?: boolean
@@ -131,10 +79,8 @@ export interface EngineOptions {
    */
   origin?: string
 
-  /**
-   * Declarative built-in plugin config. Works with both JS and Rust engines.
-   */
-  plugins?: BuiltinPlugins
+  /** Declarative tag behavior overrides. */
+  tagOverrides?: Record<string, TagOverride | string>
 
   /**
    * Clean up the markdown output. Pass `true` for all cleanup or an object
@@ -151,11 +97,6 @@ export interface EngineOptions {
    */
   wrapWidth?: number
 
-  /**
-   * Output format. Defaults to `markdown`; use `text` for readable plain text,
-   * or `html` for allowlisted semantic HTML.
-   */
-  format?: 'markdown' | 'text' | 'html'
 }
 
 // Standard DOM node types
@@ -285,6 +226,9 @@ export interface MdreamProcessingState {
  * Extended state that includes output tracking and options
  */
 export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
+  /** Active output format for format-aware plugins. */
+  outputFormat?: OutputFormat
+
   /** Number of newlines at end of most recent output */
   lastNewLines?: number
 
@@ -449,16 +393,10 @@ export interface ExtractedElement {
   attributes: Record<string, string>
 }
 
-/**
- * Top-level options for the mdream JS engine.
- * Extends the shared `EngineOptions` with JS-specific concerns.
- */
+/** Top-level options for the mdream JavaScript engine. */
 export interface MdreamOptions extends EngineOptions {
-  /**
-   * Imperative hook-based transform plugins.
-   * When provided, a new JS engine is created with these hooks.
-   */
-  hooks?: TransformPlugin[]
+  /** Explicit plugins, applied in array order. */
+  plugins?: Plugin[]
 }
 
 /**
@@ -488,7 +426,7 @@ export interface MarkdownChunk {
  * Options for HTML to Markdown chunking
  * Extends EngineOptions with chunking-specific settings
  */
-export interface SplitterOptions extends EngineOptions {
+export interface SplitterOptions extends MdreamOptions {
   /**
    * Header tag IDs to split on (TAG_H1, TAG_H2, etc.)
    * @example [TAG_H1, TAG_H2]

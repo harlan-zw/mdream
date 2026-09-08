@@ -21,10 +21,11 @@ yarn add @mdream/js@beta
 
 | Import | Description |
 |---|---|
-| `@mdream/js` | Full `htmlToMarkdown` and `streamHtmlToMarkdown` APIs, including declarative plugins and cleanup |
-| `@mdream/js/core` | Tree-shakable pre-v1-style conversion APIs with composable plugin arrays and tag overrides |
-| `@mdream/js/plugins` | Plugin utilities: `createPlugin`, `extractionPlugin`, `extractionCollectorPlugin`, `filterPlugin`, `frontmatterPlugin`, `isolateMainPlugin`, `tailwindPlugin` |
-| `@mdream/js/preset/minimal` | `withMinimalPreset` for declarative config combining frontmatter, isolateMain, tailwind, and filter plugins |
+| `@mdream/js` | Tree-shakable Markdown conversion and streaming |
+| `@mdream/js/text` | Tree-shakable plain text conversion and streaming |
+| `@mdream/js/html` | Tree-shakable safe HTML conversion and streaming |
+| `@mdream/js/plugins` | Optional plugin factories |
+| `@mdream/js/preset/minimal` | Explicit composition of the minimal plugin set |
 | `@mdream/js/negotiate` | HTTP content negotiation: `shouldServeMarkdown`, `parseAcceptHeader` |
 | `@mdream/js/parse` | Low-level HTML parser: `parseHtml`, `parseHtmlStream` |
 | `@mdream/js/splitter` | Single-pass markdown splitter: `htmlToMarkdownSplitChunks`, `htmlToMarkdownSplitChunksStream` |
@@ -32,9 +33,8 @@ yarn add @mdream/js@beta
 
 ## API Reference
 
-The package root remains the full conversion API. Import `@mdream/js/core` when
-you want the smaller tree-shakable implementation and explicitly composed
-plugins.
+Each output format has its own entry point. Import only the format and plugins
+that your application uses.
 
 ### `htmlToMarkdown(html, options?)`
 
@@ -45,15 +45,27 @@ import { htmlToMarkdown } from '@mdream/js'
 
 const md = htmlToMarkdown('<h1>Hello</h1><p>World</p>')
 // # Hello\n\nWorld
+```
 
-const text = htmlToMarkdown('<h1>Hello</h1><p><strong>World</strong></p>', {
-  format: 'text',
-})
+### `htmlToText(html, options?)`
+
+Converts HTML to readable plain text.
+
+```typescript
+import { htmlToText } from '@mdream/js/text'
+
+const text = htmlToText('<h1>Hello</h1><p><strong>World</strong></p>')
 // Hello\n\nWorld
+```
 
-const html = htmlToMarkdown('<h1>Hello</h1><p><strong>World</strong></p>', {
-  format: 'html',
-})
+### `htmlToSafeHtml(html, options?)`
+
+Converts HTML to allowlisted semantic HTML.
+
+```typescript
+import { htmlToSafeHtml } from '@mdream/js/html'
+
+const html = htmlToSafeHtml('<h1>Hello</h1><p><strong>World</strong></p>')
 // <h1 id="hello">Hello</h1><p><strong>World</strong></p>
 ```
 
@@ -91,13 +103,12 @@ for await (const chunk of stream) {
 
 **Returns:** `AsyncIterable<string>`
 
-### Tree-shakable core
+### Optional plugins
 
-The `/core` subpath restores the original composable JS interface without
-loading declarative built-in plugins or cleanup:
+Import and compose each plugin explicitly.
 
 ```typescript
-import { htmlToMarkdown } from '@mdream/js/core'
+import { htmlToMarkdown } from '@mdream/js'
 import { filterPlugin } from '@mdream/js/plugins'
 
 const markdown = htmlToMarkdown(html, {
@@ -114,32 +125,10 @@ const markdown = htmlToMarkdown(html, {
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `origin` | `string` | `undefined` | Origin URL for resolving relative image paths and internal links |
-| `plugins` | `BuiltinPlugins` | `undefined` | Declarative built-in plugin configuration (see [BuiltinPlugins](#builtinplugins)) |
+| `plugins` | `Plugin[]` | `undefined` | Explicit conversion plugins, applied in array order |
+| `tagOverrides` | `Record<string, TagOverride \| string>` | `undefined` | Custom tag output or aliases |
 | `clean` | `boolean \| CleanOptions` | `undefined` | Post-processing cleanup. Pass `true` for all cleanup rules or an object for specific features (see [CleanOptions](#cleanoptions)). Sync API only for `fragments`. |
-| `hooks` | `TransformPlugin[]` | `undefined` | Imperative hook-based transform plugins for custom behavior (see [Plugins](#plugins)) |
 | `wrapWidth` | `number` | `undefined` | Hard-wrap prose at this many characters on word boundaries |
-| `format` | `'markdown' \| 'text' \| 'html'` | `'markdown'` | Output Markdown, plain text, or HTML |
-
-### `BuiltinPlugins`
-
-Declarative configuration for built-in plugins. Works with both the JavaScript and Rust engines.
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `frontmatter` | `boolean \| ((fm: Record<string, string>) => void) \| FrontmatterConfig` | `undefined` | Extract metadata from HTML `<head>` into YAML frontmatter. Pass `true` for defaults, a callback to receive structured data, or a config object. |
-| `isolateMain` | `boolean` | `undefined` | Isolate main content area. Prioritizes `<main>` elements, then falls back to header-to-footer heuristic. |
-| `tailwind` | `boolean` | `undefined` | Convert Tailwind utility classes (bold, italic, hidden, etc.) to semantic Markdown formatting. |
-| `filter` | `{ include?, exclude?, processChildren? }` | `undefined` | Filter elements by CSS selectors, tag names, or TAG_* constants (see [Filter Plugin](#filterpluginoptions)). |
-| `extraction` | `Record<string, (element: ExtractedElement) => void>` | `undefined` | Extract elements matching CSS selectors during conversion. Each key is a CSS selector; the handler is called for every match. |
-| `tagOverrides` | `Record<string, TagOverride \| string>` | `undefined` | Declarative tag overrides. String values act as aliases (e.g., `{ "x-heading": "h2" }`). Object values override specific handler properties. |
-
-### `FrontmatterConfig`
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `additionalFields` | `Record<string, string>` | `undefined` | Extra key-value pairs to inject into the frontmatter |
-| `metaFields` | `string[]` | `['description', 'keywords', 'author', 'date', 'og:title', 'og:description', 'twitter:title', 'twitter:description']` | Meta tag names to extract beyond the standard set |
-| `onExtract` | `(frontmatter: Record<string, string>) => void` | `undefined` | Callback to receive structured frontmatter data after conversion |
 
 ### `TagOverride`
 
@@ -285,9 +274,7 @@ const plugin = tailwindPlugin()
 
 ### `extractionPlugin(selectors)`
 
-Use this explicitly imported plugin with the tree-shakable core converter. Use
-the `plugins.extraction` declarative config instead when sharing options with
-the Rust engine.
+Extracts elements with explicit callbacks.
 
 Extracts elements matching CSS selectors during conversion. Callbacks receive matching elements with their accumulated text content.
 
@@ -304,17 +291,13 @@ const plugin = extractionPlugin({
 })
 ```
 
-### `extractionCollectorPlugin(selectors)`
-
-Internal extraction collector for the `plugins.extraction` config. Collects results during processing and calls callbacks post-conversion to match Rust engine behavior.
-
 ---
 
 ## Presets
 
 ### `withMinimalPreset(options?)`
 
-Returns a declarative config combining frontmatter, isolateMain, tailwind, and filter plugins. Also enables `clean: true` by default. You can override any option.
+Returns explicit frontmatter, isolate, Tailwind, and filter plugins. It enables `clean: true` by default.
 
 ```typescript
 import { htmlToMarkdown } from '@mdream/js'
@@ -327,17 +310,13 @@ const md = htmlToMarkdown(html, withMinimalPreset({
 
 The minimal preset excludes these elements by default: `<form>`, `<fieldset>`, `<object>`, `<embed>`, `<footer>`, `<aside>`, `<iframe>`, `<input>`, `<textarea>`, `<select>`, `<button>`, `<nav>`.
 
-You can override or extend the plugin config:
+You can append custom plugins:
 
 ```typescript
 const md = htmlToMarkdown(html, withMinimalPreset({
   origin: 'https://example.com',
   clean: { urls: true, fragments: true },
-  plugins: {
-    frontmatter: {
-      additionalFields: { source: 'my-crawler' },
-    },
-  },
+  plugins: [myPlugin],
 }))
 ```
 
@@ -624,45 +603,44 @@ curl -s https://example.com | npx @mdream/js --format html
 Map custom HTML elements to standard Markdown behavior:
 
 ```typescript
-import { htmlToMarkdown } from '@mdream/js/core'
+import { htmlToMarkdown } from '@mdream/js'
 
 const md = htmlToMarkdown('<x-heading>Title</x-heading>', {
-  plugins: {
-    tagOverrides: {
-      // String alias: make <x-heading> behave like <h2>
-      'x-heading': 'h2',
+  tagOverrides: {
+    // String alias: make <x-heading> behave like <h2>
+    'x-heading': 'h2',
 
-      // Object override: custom enter/exit strings
-      'callout': {
-        enter: '> **Note:** ',
-        exit: '\n',
-        spacing: [2, 2],
-      },
+    // Object override: custom enter/exit strings
+    'callout': {
+      enter: '> **Note:** ',
+      exit: '\n',
+      spacing: [2, 2],
     },
   },
 })
 ```
 
-### Declarative Extraction
+### Extraction
 
 Extract data from elements during conversion:
 
 ```typescript
 import { htmlToMarkdown } from '@mdream/js'
+import { extractionPlugin } from '@mdream/js/plugins'
 
 const images: { src: string, alt: string }[] = []
 
 const md = htmlToMarkdown(html, {
-  plugins: {
-    extraction: {
+  plugins: [
+    extractionPlugin({
       'img[alt]': (element) => {
         images.push({
           src: element.attributes.src,
           alt: element.attributes.alt,
         })
       },
-    },
-  },
+    }),
+  ],
 })
 
 console.log('Found images:', images)
@@ -674,19 +652,20 @@ Receive structured frontmatter data for further processing:
 
 ```typescript
 import { htmlToMarkdown } from '@mdream/js'
+import { frontmatterPlugin } from '@mdream/js/plugins'
 
 let metadata: Record<string, string> = {}
 
 const md = htmlToMarkdown(html, {
-  plugins: {
-    frontmatter: {
+  plugins: [
+    frontmatterPlugin({
       additionalFields: { source: 'crawler' },
       metaFields: ['robots'],
       onExtract: (fm) => {
         metadata = fm
       },
-    },
-  },
+    }),
+  ],
 })
 
 console.log('Title:', metadata.title)
@@ -696,7 +675,7 @@ console.log('Description:', metadata.description)
 ### Composable Plugin for Content Filtering
 
 ```typescript
-import { htmlToMarkdown } from '@mdream/js/core'
+import { htmlToMarkdown } from '@mdream/js'
 import { createPlugin } from '@mdream/js/plugins'
 
 const md = htmlToMarkdown(html, {
@@ -746,24 +725,22 @@ const chunks = htmlToMarkdownSplitChunks(html, {
 
 ```typescript
 import type {
-  BuiltinPlugins,
   CleanOptions,
   ElementNode,
   EngineOptions,
   ExtractedElement,
-  FrontmatterConfig,
   MarkdownChunk,
   MdreamOptions,
   Node,
   NodeEvent,
+  OutputFormat,
+  Plugin,
   PluginContext,
   SplitterOptions,
   TagOverride,
   TextNode,
   TransformPlugin,
 } from '@mdream/js'
-
-import type { CoreOptions, Plugin } from '@mdream/js/core'
 ```
 
 ## Exported Constants

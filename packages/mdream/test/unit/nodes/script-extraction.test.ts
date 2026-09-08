@@ -129,7 +129,7 @@ describe('script content extraction', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      hooks: [scriptExtractionPlugin],
+      plugins: [scriptExtractionPlugin],
     })
 
     // Should extract the script content
@@ -199,7 +199,7 @@ describe('script content extraction', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      hooks: [scriptExtractionPlugin],
+      plugins: [scriptExtractionPlugin],
     })
 
     expect(extractedScripts).toHaveLength(1)
@@ -250,7 +250,7 @@ describe('script content extraction', () => {
     })
 
     const result = htmlToMarkdown(html, {
-      hooks: [scriptExtractionPlugin],
+      plugins: [scriptExtractionPlugin],
     })
 
     expect(extractedScripts).toHaveLength(1)
@@ -278,7 +278,7 @@ describe('script content extraction', () => {
     })
 
     const result = await collect(streamHtmlToMarkdown(chunkedStream([...html]), {
-      hooks: [plugin],
+      plugins: [plugin],
     }))
 
     expect(extracted).toBe(scriptText)

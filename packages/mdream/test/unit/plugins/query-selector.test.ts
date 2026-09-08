@@ -1,5 +1,5 @@
 import { htmlToMarkdown as jsHtmlToMarkdown } from '@mdream/js'
-import { createPlugin } from '@mdream/js/plugins'
+import { createPlugin, filterPlugin } from '@mdream/js/plugins'
 import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines.ts'
 
@@ -291,8 +291,7 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     })
 
     const markdown = jsHtmlToMarkdown(html, {
-      plugins: { filter: { exclude: ['aside'] } },
-      hooks: [codePlugin],
+      plugins: [filterPlugin({ exclude: ['aside'] }), codePlugin],
     })
 
     expect(markdown).toContain('# Main Heading')
