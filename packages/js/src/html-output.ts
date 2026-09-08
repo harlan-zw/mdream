@@ -1,4 +1,5 @@
 import type { ElementNode, EngineOptions, NodeEvent, TextNode } from './types'
+import { slugify, stripHeadingFormatting } from './clean'
 import {
   ELEMENT_NODE,
   NodeEventEnter,
@@ -41,8 +42,8 @@ import {
   TagIdMap,
   TEXT_NODE,
 } from './const'
-import { resolveUrl } from './tags'
-import { getLanguageFromClass, isSafeHtmlUrl, parseUnsignedInteger } from './utils'
+import { resolveUrl, safeAnchorOutput } from './tags'
+import { escapeHtml, getLanguageFromClass, isSafeHtmlUrl, parseUnsignedInteger } from './utils'
 
 interface HeadingFrame {
   _tag: 0
@@ -68,16 +69,8 @@ export function createHtmlOutputState(): HtmlOutputState {
   return { frames: [] }
 }
 
-function escapeHtml(value: string, attribute = false): string {
-  return value.replace(attribute ? /[&<>"]/g : /[&<>]/g, character => character === '&'
-    ? '&amp;'
-    : character === '<'
-      ? '&lt;'
-      : character === '>' ? '&gt;' : '&quot;')
-}
-
 function slugifyHeading(text: string): string {
-  return text.toLowerCase().replace(/[^a-z\d \t\n\r-]/g, '').trim().replace(/[ \t\n\r-]+/g, '-')
+  return slugify(stripHeadingFormatting(text))
 }
 
 function tagName(node: ElementNode, tagId: number): string | undefined {
@@ -123,15 +116,8 @@ function resolveSafeUrl(url: string, options: EngineOptions, image = false): str
   return isSafeHtmlUrl(resolved, image) ? resolved : undefined
 }
 
-function safeAttributes(node: ElementNode, tagId: number, options: EngineOptions): string | undefined {
+function safeAttributes(node: ElementNode, tagId: number): string | undefined {
   const attributes = node.attributes
-  if (tagId === TAG_A) {
-    const href = attributes.href && resolveSafeUrl(attributes.href, options)
-    if (!href)
-      return undefined
-    const title = attributes.title === undefined ? '' : ` title="${escapeHtml(attributes.title, true)}"`
-    return ` href="${escapeHtml(href, true)}"${title}`
-  }
   if (tagId === TAG_OL) {
     const start = parseUnsignedInteger(attributes.start)
     return start === undefined ? '' : ` start="${start}"`
@@ -250,13 +236,19 @@ export function processHtmlOutputEvent(
     }
     return
   }
+  if (tagId === TAG_A) {
+    const rendered = safeAnchorOutput(element, options, type === NodeEventEnter)
+    if (rendered)
+      append(state, output, rendered)
+    return
+  }
 
   if (tagId === undefined)
     return
   const name = tagName(element, tagId)
   if (!name)
     return
-  const attributes = safeAttributes(element, tagId, options)
+  const attributes = safeAttributes(element, tagId)
   if (attributes === undefined)
     return
   append(state, output, type === NodeEventEnter ? `<${name}${attributes}>` : `</${name}>`)

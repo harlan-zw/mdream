@@ -14,7 +14,11 @@ pub(super) enum HtmlFrame {
   },
 }
 
-fn push_escaped(output: &mut String, value: &str, attribute: bool) {
+fn push_escaped_inner<const ESCAPE_BRACKETS: bool>(
+  output: &mut String,
+  value: &str,
+  attribute: bool,
+) {
   let mut copied = 0usize;
   for (index, byte) in value.bytes().enumerate() {
     let replacement = match byte {
@@ -22,6 +26,8 @@ fn push_escaped(output: &mut String, value: &str, attribute: bool) {
       b'<' => Some("&lt;"),
       b'>' => Some("&gt;"),
       b'"' if attribute => Some("&quot;"),
+      b'[' if ESCAPE_BRACKETS => Some("&#91;"),
+      b']' if ESCAPE_BRACKETS => Some("&#93;"),
       _ => None,
     };
     if let Some(replacement) = replacement {
@@ -31,6 +37,14 @@ fn push_escaped(output: &mut String, value: &str, attribute: bool) {
     }
   }
   output.push_str(&value[copied..]);
+}
+
+fn push_escaped(output: &mut String, value: &str, attribute: bool) {
+  push_escaped_inner::<false>(output, value, attribute);
+}
+
+fn push_raw_anchor_attribute(output: &mut String, value: &str) {
+  push_escaped_inner::<true>(output, value, true);
 }
 
 fn html_tag_name(tag_id: u8) -> Option<&'static str> {
@@ -92,7 +106,12 @@ impl ConvertState {
     push_escaped(self.html_output_mut(), value, false);
   }
 
-  fn html_element_output(&self, node: &ElementNode, entering: bool) -> Option<String> {
+  pub(super) fn html_element_output(
+    &self,
+    node: &ElementNode,
+    entering: bool,
+    protect_markdown: bool,
+  ) -> Option<String> {
     let tag_id = node.tag_id?;
     let name = html_tag_name(tag_id)?;
     if !entering {
@@ -111,11 +130,19 @@ impl ConvertState {
         let href = node.attributes.get("href")?;
         let resolved = self.resolve_html_url(href, false)?;
         output.push_str(" href=\"");
-        push_escaped(&mut output, resolved.as_ref(), true);
+        if protect_markdown {
+          push_raw_anchor_attribute(&mut output, resolved.as_ref());
+        } else {
+          push_escaped(&mut output, resolved.as_ref(), true);
+        }
         output.push('"');
         if let Some(title) = node.attributes.get("title") {
           output.push_str(" title=\"");
-          push_escaped(&mut output, title, true);
+          if protect_markdown {
+            push_raw_anchor_attribute(&mut output, title);
+          } else {
+            push_escaped(&mut output, title, true);
+          }
           output.push('"');
         }
       }
@@ -241,7 +268,7 @@ impl ConvertState {
       }
       return;
     }
-    let rendered = self.html_element_output(node, true);
+    let rendered = self.html_element_output(node, true, false);
     if let Some(rendered) = rendered {
       self.push_html(&rendered);
     }
@@ -296,7 +323,7 @@ impl ConvertState {
     if matches!(node.tag_id, Some(TAG_BR | TAG_HR | TAG_IMG | TAG_PRE)) {
       return;
     }
-    let rendered = self.html_element_output(node, false);
+    let rendered = self.html_element_output(node, false, false);
     if let Some(rendered) = rendered {
       self.push_html(&rendered);
     }

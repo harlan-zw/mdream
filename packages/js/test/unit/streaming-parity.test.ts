@@ -1,6 +1,6 @@
 import type { MdreamOptions } from '../../src/types'
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { htmlToMarkdown, NodeEventExit, streamHtmlToMarkdown } from '../../src/index'
 
 async function streamConvert(html: string, chunkSize: number, options: Partial<MdreamOptions> = {}): Promise<string> {
   const stream = new ReadableStream<string>({
@@ -104,11 +104,73 @@ describe('streaming parity with the Rust core', () => {
     await expectStreamingParity('<a href="https://example.com">https://example.com</a>')
   })
 
+  it('does not emit an enter-only link override before the built-in exit', async () => {
+    await expectStreamingParity('<a href="https://example.com">https://example.com</a>', {
+      plugins: { tagOverrides: { a: { enter: '[' } } },
+    })
+  })
+
+  it('does not emit a hook link opener before the built-in autolink rewrite', async () => {
+    await expectStreamingParity('<a href="https://example.com">https://example.com</a>', {
+      hooks: [{
+        onNodeEnter(node) {
+          return node.name === 'a' ? '[' : undefined
+        },
+      }],
+    })
+  })
+
+  it('keeps bracket text literal when hooks replace the raw link tags', async () => {
+    const html = '<details><a href="/x">a[b]</a></details>'
+    const options: Partial<MdreamOptions> = {
+      hooks: [{
+        onNodeEnter(node) {
+          return node.name === 'a' ? '{' : undefined
+        },
+        onNodeExit(node) {
+          return node.name === 'a' ? '}' : undefined
+        },
+      }],
+    }
+    expect(htmlToMarkdown(html, options)).toBe('<details>{a[b]}</details>')
+    await expectStreamingParity(html, options)
+  })
+
+  it('does not carry raw link protection past a skipped exit', async () => {
+    const html = '<details><a href="/x">first</a></details><details>a[b]</details>'
+    const options: Partial<MdreamOptions> = {
+      hooks: [{
+        beforeNodeProcess(event) {
+          return { skip: event.type === NodeEventExit && 'name' in event.node && event.node.name === 'a' }
+        },
+      }],
+    }
+    const output = htmlToMarkdown(html, options)
+    expect(output).toContain('<details>a[b]</details>')
+    expect(output).not.toContain('&#91;')
+    await expectStreamingParity(html, options)
+  })
+
+  it('protects raw link text when an empty-buffer path emits the opener', async () => {
+    const html = '<details><a href="/x">a[b]</a></details>'
+    const options: Partial<MdreamOptions> = {
+      plugins: {
+        tagOverrides: {
+          details: { enter: '', exit: '' },
+          a: { spacing: [1, 0] },
+        },
+      },
+    }
+    expect(htmlToMarkdown(html, options)).toBe('<a href="/x">a&#91;b&#93;</a>')
+    await expectStreamingParity(html, options)
+  })
+
   it.each([
     '<a href="">text</a>',
     '<a href="docs/a b">text</a>',
     String.raw`<a href="docs/(a)\file">text</a>`,
     String.raw`<a href="/x" title="say &quot;hi&quot; \ path">text</a>`,
+    '<details><a href="/&#91;x&#93;" title="[Title] &amp; &amp;#91;">text</a></details>',
     String.raw`<img src="/x.png" alt="a ] \ *bold* _em_ &#96;code&#96;">`,
     String.raw`<img src="/x.png" alt="alt" title="say &quot;hi&quot; \ path">`,
   ])('keeps serialized link and image output stable for %s', async (html) => {
@@ -122,6 +184,16 @@ describe('streaming parity with the Rust core', () => {
     '<details><p>a</p>\n\n<p>b</p></details><dl><dd>~tilde~</dd></dl>',
     '<details><p>a</p>\n\n<p>b</p></details><dl>a<span>b</span>~tilde~</dl>',
   ])('keeps raw HTML block closes stable for %s', async (html) => {
+    await expectStreamingParity(html)
+  })
+
+  it.each([
+    '<details><a href="/x">a[b]</a></details>',
+    '<dl><dt>Term <a href="/term">link</a></dt><dd>Definition</dd></dl>',
+    '<details><a href="/x?a=1&amp;b=2" title="say &quot;hi&quot; &amp; bye">link</a></details>',
+    '<details><a href="javascript:alert(1)">a[b]</a></details>',
+    '<details><a href="/x">before 🙂 after</a></details>',
+  ])('keeps raw HTML links stable across every split for %s', async (html) => {
     await expectStreamingParity(html)
   })
 

@@ -15,6 +15,19 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
     expect(markdown).toBe('__bold__')
   })
 
+  it('escapes link text brackets when only the anchor enter is overridden in a raw HTML block', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown('<details><a href="/x">a[b]</a></details>', {
+      plugins: {
+        tagOverrides: {
+          a: { enter: '[' },
+        },
+      },
+      engine,
+    })
+    expect(markdown).toBe('<details>[a&#91;b&#93;](/x)</details>')
+  })
+
   it('aliases custom element to known tag', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const markdown = htmlToMarkdown('<p><x-heading>content</x-heading></p>', {
