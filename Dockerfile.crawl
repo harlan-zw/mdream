@@ -8,9 +8,9 @@ WORKDIR /app
 # Skip Playwright browser download since they're pre-installed in the base image
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
-# Install pnpm globally as root
+# The base image includes Corepack shims at pnpm's install paths.
 USER root
-RUN npm install -g pnpm@11.25.0
+RUN corepack disable pnpm && npm install -g pnpm@12.3.4
 
 # Copy only package files first for better caching
 COPY --chown=myuser:myuser package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
@@ -21,8 +21,8 @@ COPY --chown=myuser:myuser packages/crawl/package.json ./packages/crawl/
 # Switch to myuser for dependency installation
 USER myuser
 
-# Install all dependencies including production dependencies
-RUN pnpm install --frozen-lockfile --prod=false
+# Build tools need devDependencies despite the base image's production environment.
+RUN NODE_ENV=development pnpm install --frozen-lockfile
 
 # Copy source code after dependencies are installed
 COPY --chown=myuser:myuser packages/mdream/ ./packages/mdream/
