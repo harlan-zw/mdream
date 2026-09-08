@@ -316,27 +316,6 @@ function isAutolinkUri(s: string): boolean {
   return true
 }
 
-function collapseCaptionAutolink(state: HandlerContext['state'], href: string): boolean {
-  const buffer = state.buffer
-  for (let index = buffer.length - 1; index >= 0; index--) {
-    const entry = buffer[index]!
-    const length = entry.length
-    if (length > 1
-      && entry.charCodeAt(length - 1) === 91
-      && entry.charCodeAt(length - 2) === 42) {
-      if (buffer.slice(index + 1).join('') !== href)
-        return false
-      buffer[index] = entry.slice(0, -1)
-      buffer.length = index + 1
-      const output = `<${href}>`
-      buffer.push(output)
-      state.lastContentCache = output
-      return true
-    }
-  }
-  return false
-}
-
 export function renderBreak(node: HandlerContext['node'], state: HandlerContext['state']): string {
   // A literal newline would terminate a table row/ATX heading or collapse
   // inside a raw HTML block, so preserve the inline HTML there.
@@ -829,22 +808,33 @@ export const tagHandlers: Record<number, TagHandler> = {
         // Sum the link-text length while scanning back for `[`, so the
         // slice/join allocation only happens when the text could equal href.
         let textLen = 0
+        let captionBracket = -1
+        let captionTextLen = 0
         while (i >= 0) {
           const entry = buf[i]!
           if (entry === '[')
             break
+          if (captionBracket < 0 && state.depthMap?.[TAG_FIGCAPTION] && entry.endsWith('*[')) {
+            captionBracket = i
+            captionTextLen = textLen
+          }
           textLen += entry.length
           i--
         }
+        const captionLink = i < 0 && captionBracket >= 0
+        if (captionLink) {
+          i = captionBracket
+          textLen = captionTextLen
+        }
         if (i >= 0 && textLen === href.length && buf.slice(i + 1).join('') === href) {
-          buf.length = i
+          if (captionLink)
+            buf[i] = buf[i]!.slice(0, -1)
+          buf.length = i + (captionLink ? 1 : 0)
           const auto = `<${href}>`
           buf.push(auto)
           state.lastContentCache = auto
           return ''
         }
-        if (i < 0 && state.depthMap?.[TAG_FIGCAPTION] && collapseCaptionAutolink(state, href))
-          return ''
       }
       return `]${serializeMarkdownResource(href, title)}`
     },
@@ -855,17 +845,17 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_IMG]: {
     enter: ({ node, state }) => {
       const alt = node.attributes?.alt || ''
-      if (state.depthMap?.[TAG_FIGCAPTION]) {
-        const clean = state.options?.clean
-        if ((clean === true || (clean !== null && typeof clean === 'object' && clean.emptyImages === true)) && !alt.trim())
-          return undefined
-      }
       const src = resolveUrl(node.attributes?.src || '', state.options?.origin, state.options?.clean)
       const clean = state.options?.clean
       const stripsEmptyImage = clean === true
         || (clean !== undefined && clean !== false && clean.emptyImages === true)
-      if (!stripsEmptyImage || alt.trim().length > 0)
+      if (stripsEmptyImage && !alt.trim()) {
+        if (state.depthMap?.[TAG_FIGCAPTION])
+          return undefined
+      }
+      else {
         markRenderedChildContent(node)
+      }
       return `![${serializeImageDescription(alt)}]${serializeMarkdownResource(src, node.attributes?.title)}`
     },
     collapsesInnerWhiteSpace: true,

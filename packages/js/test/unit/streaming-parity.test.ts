@@ -360,6 +360,21 @@ describe('streaming parity with the Rust core', () => {
     await expectEverySplitParity(html)
   })
 
+  it.each([
+    [
+      '<ul><li><figcaption><code>a`b</code><a href="https://x.com">https://x.com</a></figcaption></li></ul>',
+      '- *``a`b``<https://x.com>*',
+    ],
+    [
+      '<blockquote><figcaption><em></em><code>a`b</code></figcaption></blockquote>',
+      '> *``a`b``*',
+    ],
+  ])('holds nested caption output across every split for %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let split = 1; split < html.length; split++)
+      expect(await streamConvertAtSplit(html, split), `split ${split}`).toBe(expected)
+  })
+
   it('collapses an autolink after an anchored caption opener', async () => {
     const html = '<figcaption><a href="https://x.com">https://x.com</a></figcaption>'
     expect(htmlToMarkdown(html)).toBe('*<https://x.com>*')

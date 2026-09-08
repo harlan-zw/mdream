@@ -751,7 +751,6 @@ impl ConvertState {
     let is_inline: bool;
     let node_spacing: Option<[u8; 2]>;
     let caption_spacing: [u8; 2];
-    let caption_spacing_is_explicit: bool;
     let mut output: Option<Cow<'static, str>>;
     let exit_is_overridden: bool;
     // True when `output` is a user-supplied override enter string — emit it
@@ -782,8 +781,6 @@ impl ConvertState {
       } else {
         NO_SPACING
       };
-      caption_spacing_is_explicit =
-        tag_id == Some(TAG_FIGCAPTION) && override_config.is_some_and(|ov| ov.spacing.is_some());
       exit_is_overridden = override_config.is_some_and(|ov| ov.exit.is_some());
 
       // Table state reads (tag_id.is_some() is sufficient — all table tags have handlers)
@@ -871,11 +868,7 @@ impl ConvertState {
     if caption_enter {
       self.caption_frames.push(CaptionFrame {
         state: CaptionState::Pending,
-        spacing: if if caption_spacing_is_explicit {
-          self.figcaption_owns_explicit_spacing()
-        } else {
-          self.figcaption_owns_block_spacing()
-        } {
+        spacing: if self.figcaption_owns_block_spacing() {
           caption_spacing
         } else {
           NO_SPACING
@@ -2739,7 +2732,8 @@ impl ConvertState {
     }
   }
 
-  #[inline]
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
+  #[cfg_attr(not(target_arch = "wasm32"), inline)]
   fn trim_trailing_spaces(&mut self) {
     let floor = self.trim_floor();
     if self.buffer.len() > floor {
@@ -2794,6 +2788,13 @@ impl ConvertState {
     true
   }
 
+  // Keep caption appends shared without adding calls to ordinary text output.
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  fn push_caption_content(&mut self, value: &str) {
+    self.last_content_cache_len = self.push_code_span_content(value, true);
+  }
+
   fn caption_open_prefix(
     &self,
     prefix: &str,
@@ -2817,7 +2818,9 @@ impl ConvertState {
     if missing == 0 {
       return open.filter(|value| !value.is_empty());
     }
-    Some(Cow::Owned(format!("{}{prefix}", "\n".repeat(missing))))
+    let mut output = "\n".repeat(missing);
+    output.push_str(prefix);
+    Some(Cow::Owned(output))
   }
 
   #[inline]
@@ -2828,7 +2831,7 @@ impl ConvertState {
       ""
     };
     if let Some(prefix) = self.caption_open_prefix(prefix, configured_new_lines) {
-      self.last_content_cache_len = self.push_code_span_content(prefix.as_ref(), true);
+      self.push_caption_content(prefix.as_ref());
     }
   }
 
@@ -2948,10 +2951,10 @@ impl ConvertState {
       }
       let output_start = self.buffer.len();
       if let Some(prefix) = prefix {
-        self.last_content_cache_len = self.push_code_span_content(prefix.as_ref(), true);
+        self.push_caption_content(prefix.as_ref());
       }
       if !self.plain_text && (!explicit_top || index != top) {
-        self.last_content_cache_len = self.push_code_span_content(MARKDOWN_EMPHASIS, true);
+        self.push_caption_content(MARKDOWN_EMPHASIS);
       }
       self.caption_frames[index].state = if commit {
         CaptionState::Committed
@@ -4141,11 +4144,6 @@ impl ConvertState {
 
   #[inline]
   fn figcaption_owns_block_spacing(&self) -> bool {
-    !self.in_table_cell() && (self.plain_text || self.collapse_non_span_depth == 1)
-  }
-
-  #[inline]
-  fn figcaption_owns_explicit_spacing(&self) -> bool {
     !self.in_table_cell() && (self.plain_text || self.collapse_non_span_depth == 1)
   }
 

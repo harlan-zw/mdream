@@ -864,13 +864,7 @@ function trimBufferedWhitespacePosition(content: string, position: number): numb
 function dropEmptyMarker(buffer: string[], packed: number, markerType: number): number {
   const idx = packed >> 3
   if ((packed & MARKER_TYPE_MASK) === markerType && idx < buffer.length) {
-    for (let i = idx + 1; i < buffer.length; i++) {
-      const fragment = buffer[i]!
-      if (fragment && hasNonWhitespace(fragment))
-        return -1
-    }
-    buffer.length = idx
-    return idx
+    return dropEmptyLinkText(buffer, idx) ? idx : -1
   }
   return -1
 }
@@ -1716,18 +1710,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       return
     }
 
-    // The generic element pipeline needs two trailing characters for newline
-    // normalization. Text nodes and built-in breaks return before this work.
-    let secondLastChar
-    if (lastBuffEntry && lastBuffEntry.length > 1) {
-      secondLastChar = lastBuffEntry.charAt(lastBuffEntry.length - 2)
-    }
-    else if (buff.length > 1) {
-      const prevBuff = buff[buff.length - 2]
-      if (prevBuff)
-        secondLastChar = prevBuff.charAt(prevBuff.length - 1)
-    }
-
     // Keep the common no-output path allocation-free. Most structural and
     // unknown elements only affect spacing, so allocating an empty array for
     // every enter/exit event adds pure GC pressure.
@@ -1737,8 +1719,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       element.pluginOutput = undefined
     }
 
-    // Get last content from buffer regions
-    let lastFragment = state.lastContentCache
+    let captionBufferChanged = false
 
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
     const isInlineElement = handler?.isInline === true
@@ -1778,16 +1759,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         handlerOutput = consumeGfmAction(res, state, gfmLifecycle)
         if (handlerOutput)
           output = [handlerOutput]
-        if (res._tag === 'BlockquoteExit') {
-          lastFragment = state.lastContentCache
-          lastBuffEntry = buff.at(-1)!
-          lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
-          secondLastChar = lastBuffEntry && lastBuffEntry.length > 1
-            ? lastBuffEntry.charAt(lastBuffEntry.length - 2)
-            : buff.length > 1
-              ? buff[buff.length - 2]?.at(-1)
-              : undefined
-        }
+        if (res._tag === 'BlockquoteExit')
+          captionBufferChanged = true
       }
     }
     if (captionBreakRun
@@ -1796,19 +1769,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       flushCaptionBreakRun()
       if (gfmAction?._tag !== 'BlockquoteEnter')
         anchorPendingCaptions(state.buffer.length)
-      lastFragment = state.lastContentCache
-      lastBuffEntry = buff.at(-1)!
-      lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
-      secondLastChar = lastBuffEntry && lastBuffEntry.length > 1
-        ? lastBuffEntry.charAt(lastBuffEntry.length - 2)
-        : buff.length > 1
-          ? buff[buff.length - 2]?.at(-1)
-          : undefined
+      captionBufferChanged = true
     }
 
     const captionEvent = tagId === TAG_FIGCAPTION
     let captionTransition = false
-    let captionBufferChanged = false
     if (captionEvent || captionBoundary !== 0 || captionFrameCount !== 0) {
       const captionEnter = captionEvent && eventType === NodeEventEnter && !state.depthMap[TAG_PRE]
       const captionExit = captionEvent && eventType === NodeEventExit && !state.depthMap[TAG_PRE]
@@ -1817,7 +1782,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
       let dropBlockquoteOutput = false
       if (captionBoundary === 1 && eventType === NodeEventEnter && tagId === TAG_BLOCKQUOTE) {
-        captionBufferChanged = appendCaptionSpacing(captionBoundarySpacing, false)
+        captionBufferChanged = appendCaptionSpacing(captionBoundarySpacing, false) || captionBufferChanged
         captionTransition = true
         captionBoundary = 0
         dropBlockquoteOutput = true
@@ -1876,16 +1841,17 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         commitCaptionFrames()
     }
 
+    const lastFragment = state.lastContentCache
     if (captionBufferChanged) {
-      lastFragment = state.lastContentCache
       lastBuffEntry = buff.at(-1)!
       lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
-      secondLastChar = lastBuffEntry && lastBuffEntry.length > 1
-        ? lastBuffEntry.charAt(lastBuffEntry.length - 2)
-        : buff.length > 1
-          ? buff[buff.length - 2]?.at(-1)
-          : undefined
     }
+    // Read the trailing characters after handlers and captions finish rewriting.
+    const secondLastChar = lastBuffEntry && lastBuffEntry.length > 1
+      ? lastBuffEntry.charAt(lastBuffEntry.length - 2)
+      : buff.length > 1
+        ? buff[buff.length - 2]?.at(-1)
+        : undefined
 
     if (element.tagId === TAG_A) {
       if (eventType === NodeEventEnter)
@@ -2250,89 +2216,30 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     const leadingTrimmed = content.length - currentContent.length
 
-    let captionHeld = false
-    if (captionFrames) {
-      for (let index = 0; index < captionFrameCount; index++) {
-        const offset = index * CAPTION_FRAME_SIZE
-        const anchor = captionFrames[offset + 3]!
-        if ((captionFrames[offset + 2]! & CAPTION_OPEN) === 0 && anchor !== CAPTION_NO_ANCHOR) {
-          const captionPos = Math.max(
-            lastYieldedLength,
-            trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, anchor) - leadingTrimmed),
-          )
-          if (captionPos < stableLength)
-            stableLength = captionPos
-          captionHeld = true
-          break
-        }
+    // Each owner can rewrite its opening fragment. The earliest one bounds
+    // every hold, so scan and trim that position once.
+    let heldFragment = Math.min(
+      openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
+      gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
+      state.emptyItemFragment ?? Infinity,
+      state.codeFence?.fragment ?? Infinity,
+      state.blockquotes[0]?.fragment ?? Infinity,
+      openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
+    )
+    for (let index = 0; index < captionFrameCount; index++) {
+      const offset = index * CAPTION_FRAME_SIZE
+      const anchor = captionFrames![offset + 3]!
+      if ((captionFrames![offset + 2]! & CAPTION_OPEN) === 0 && anchor !== CAPTION_NO_ANCHOR) {
+        heldFragment = Math.min(heldFragment, anchor)
+        break
       }
     }
-
-    // An open inline marker may still be dropped if its element closes empty in a later chunk;
-    // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
-    const markerHeld = openMarkerCount > 0
-    if (markerHeld) {
-      const openFragment = openMarkers[0]! >> 3
-      const markerPos = Math.max(
-        lastYieldedLength,
-        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, openFragment) - leadingTrimmed),
-      )
-      if (markerPos < stableLength)
-        stableLength = markerPos
-    }
-    const codeSpanHeld = gfmLifecycle.openCodeSpans.length > 0
-    if (codeSpanHeld) {
-      const spanPos = Math.max(
-        lastYieldedLength,
-        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, gfmLifecycle.openCodeSpans[0]!.fragment) - leadingTrimmed),
-      )
-      if (spanPos < stableLength)
-        stableLength = spanPos
-    }
-    // An empty `<li>` rewrites its own marker fragment on exit.
-    const emptyItemFragment = state.emptyItemFragment
-    const emptyItemHeld = emptyItemFragment !== undefined
-    if (emptyItemHeld) {
-      const itemPos = Math.max(
-        lastYieldedLength,
-        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, emptyItemFragment) - leadingTrimmed),
-      )
-      if (itemPos < stableLength)
-        stableLength = itemPos
-    }
-    const codeFenceHeld = state.codeFence !== undefined
-    if (codeFenceHeld) {
-      const fencePos = Math.max(
-        lastYieldedLength,
-        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, state.codeFence!.fragment) - leadingTrimmed),
-      )
-      if (fencePos < stableLength)
-        stableLength = fencePos
-    }
-    const blockquoteHeld = state.blockquotes.length > 0
-    if (blockquoteHeld) {
-      const blockquotePos = Math.max(
-        lastYieldedLength,
-        trimBufferedWhitespacePosition(
-          currentContent,
-          fragmentPosition(state.buffer, state.blockquotes[0]!.fragment) - leadingTrimmed,
-        ),
-      )
-      if (blockquotePos < stableLength)
-        stableLength = blockquotePos
-    }
-
-    // An open link can rewrite its opening bracket and all link text when it
-    // closes as a GFM autolink. Hold that region until the close is final.
-    const linkHeld = openLinkFragment !== -1
-    if (linkHeld) {
-      const fragment = openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment
-      const linkPos = Math.max(
-        lastYieldedLength,
-        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, fragment) - leadingTrimmed),
-      )
-      if (linkPos < stableLength)
-        stableLength = linkPos
+    const fragmentHeld = heldFragment !== Infinity
+    if (fragmentHeld) {
+      stableLength = Math.min(stableLength, trimBufferedWhitespacePosition(
+        currentContent,
+        fragmentPosition(state.buffer, heldFragment) - leadingTrimmed,
+      ))
     }
 
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
@@ -2367,7 +2274,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // from joining and slicing the entire cumulative output. Plugin, wrapping,
     // and open-link paths retain the full buffer because they can inspect or
     // rewrite earlier content.
-    if (!captionHeld && !markerHeld && !codeSpanHeld && !codeFenceHeld && !blockquoteHeld && !linkHeld && !emptyItemHeld && !headingHeld && (!retainMutableFragments || !inPre)) {
+    if (!fragmentHeld && !headingHeld && (!retainMutableFragments || !inPre)) {
       if (!resolvedPlugins.length && !options.wrapWidth) {
         if (retainMutableFragments && leadingTrimmed === 0) {
           // Preserve the final fragment as a separate value: close handlers
