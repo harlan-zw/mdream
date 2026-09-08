@@ -123,7 +123,7 @@ import {
   TAG_WBR,
   TAG_XMP,
 } from './const'
-import { resolveUrl } from './url'
+import { resolveUrl, safeAnchorOutput } from './url'
 import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
@@ -638,6 +638,8 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (node.attributes?.href !== undefined) {
         if (stripsEmptyLink(state, node.attributes.href))
           return
+        if (isInsideRawHtmlBlock(state.depthMap!))
+          return safeAnchorOutput(node, state.options, true, true)
         return '['
       }
     },
@@ -647,6 +649,8 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
       if (stripsEmptyLink(state, node.attributes.href))
         return ''
+      if (isInsideRawHtmlBlock(state.depthMap!) && !node.tagHandler?.literalEnter)
+        return safeAnchorOutput(node, state.options, false, true)
       const href = resolveUrl(node.attributes.href, state.options?.origin, state.options?.clean)
       let title = node.attributes?.title
       // Check if title matches the last content to avoid duplication

@@ -373,6 +373,25 @@ fn streaming_gfm_link_and_image_serialization_matches_every_split() {
 }
 
 #[test]
+fn streaming_raw_html_links_match_one_shot() {
+  for html in [
+    r#"<details><a href="/x">a[b]</a></details>"#,
+    r#"<dl><dt>Term <a href="/term">link</a></dt><dd>Definition</dd></dl>"#,
+    r#"<details><a href="/x?a=1&amp;b=2" title="say &quot;hi&quot; &amp; bye">link</a></details>"#,
+    r#"<details><a href="javascript:alert(1)">visible</a></details>"#,
+  ] {
+    let expected = html_to_markdown(html, HTMLToMarkdownOptions::default());
+    for chunk in [1usize, 2, 7, 31, html.len()] {
+      assert_eq!(
+        stream_chunks(html, chunk, HTMLToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+  }
+}
+
+#[test]
 fn streaming_code_delimiter_widening_matches_every_split() {
   for html in [
     "<p>before <code>a `b` c</code> after</p>",
@@ -501,6 +520,44 @@ fn streaming_dropped_empty_element_keeps_block_spacing() {
         "mismatch: chunk={chunk} html={html:?}"
       );
     }
+  }
+}
+
+// Only the innermost open link's bracket was held at the yield boundary, so an
+// enclosing `<a>`'s `[` could be yielded and then retracted by that outer
+// link's clean drop (here `self_link_headings`): the streamed output diverged
+// from one-shot. The hold must cover every open link, not just the innermost.
+// A block between the two anchors keeps the outer one open (the implied close
+// for a nested `<a>` stops at a scope boundary), which is the shape that makes
+// the outer bracket reachable by a chunk boundary.
+#[test]
+fn streaming_holds_outer_nested_link_bracket_through_clean_drop() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(safe_clean()),
+    ..Default::default()
+  };
+  for html in [
+    // Adjacent anchors: the outer is implied-closed before the inner opens, so
+    // this pins the everyday nested-anchor path against regressions.
+    r"<h2><a href=#x>pre<a href=/b>y</a></a></h2>",
+    // A block boundary between the anchors: both are open at once, and the
+    // outer self-link's drop used to retract already-yielded bytes.
+    r"<h2><a href=#x>pre<div><a href=/b>y</a></a></div></h2>",
+  ] {
+    let expected = html_to_markdown(html, opts.clone());
+    // Boundary immediately after the inner `<a href=/b>` enter: the outer
+    // self-link's `[` sits in already-yielded bytes when its close drops it.
+    let split = html.find("<a href=/b>").unwrap() + "<a href=/b>".len();
+    let mut processor = MarkdownStreamProcessor::new(opts.clone());
+    let mut actual = processor.process_chunk(&html[..split]);
+    actual.push_str(&processor.process_chunk(&html[split..]));
+    actual.push_str(&processor.finish());
+    assert_eq!(
+      actual, expected,
+      "nested self-link heading diverged at split={split} html={html:?}"
+    );
+    // Every other boundary must hold too.
+    assert_stream_matches_every_split(html, opts.clone());
   }
 }
 
@@ -1053,8 +1110,13 @@ fn streaming_text_run_spanning_chunks_matches_every_split() {
 // case does not survive being rewritten in ASCII.
 #[test]
 fn streaming_blockquote_flush_holds_unstable_tail() {
-  let html = include_str!("fixtures/streaming-blockquote-flush.html");
-  let expected = html_to_markdown(html, HTMLToMarkdownOptions::default());
+  let fixture = include_str!("fixtures/streaming-blockquote-flush.html");
+  let mut html = fixture.strip_suffix("<p>").unwrap().to_owned();
+  // Leave output-size headroom without settling the terminal <p>'s pending
+  // indentation, which is the unstable tail this fuzz regression exercises.
+  html.push_str(&"0123456789abcdef".repeat(32));
+  html.push_str("<p>");
+  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
   assert!(
     expected.len() > 8 * 1024,
     "fixture must outgrow the flush threshold, got {}",
@@ -1062,7 +1124,7 @@ fn streaming_blockquote_flush_holds_unstable_tail() {
   );
   for chunk in [7usize, 64, 512, 4096] {
     assert_eq!(
-      stream_chars(html, chunk, HTMLToMarkdownOptions::default()),
+      stream_chars(&html, chunk, HTMLToMarkdownOptions::default()),
       expected,
       "diverged at chunk={chunk}"
     );

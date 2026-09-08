@@ -1,7 +1,7 @@
 {
   "name": "mdream",
   "type": "module",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Ultra-performant HTML to Markdown Convertor Optimized for LLMs and llm.txt artifacts.",
   "author": {
     "name": "Harlan Wilton",
@@ -95,6 +95,7 @@
     "@mdream/rust-win32-x64-msvc": "workspace:*"
   },
   "devDependencies": {
-    "@mdream/js": "workspace:*"
+    "@mdream/js": "workspace:*",
+    "@mdream/rust-build": "workspace:*"
   }
 }

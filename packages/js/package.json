@@ -1,7 +1,7 @@
 {
   "name": "@mdream/js",
   "type": "module",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Tree-shakable JavaScript converters and plugins for mdream.",
   "author": {
     "name": "Harlan Wilton",

@@ -1,4 +1,5 @@
-import type { EngineOptions } from './types'
+import type { ElementNode, EngineOptions } from './types'
+import { escapeHtml, isSafeHtmlUrl } from './utils'
 
 const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
 const URL_SCHEME_RE = /^[A-Z][\dA-Z+.-]*:/i
@@ -112,4 +113,19 @@ export function resolveUrl(url: string, origin?: string, clean?: EngineOptions['
 
   const cleansUrls = clean === true || Boolean(clean && clean.urls)
   return cleansUrls && resolved.includes('?') ? stripTrackingParams(resolved) : resolved
+}
+export function safeAnchorOutput(node: ElementNode, options: EngineOptions | undefined, entering: boolean, protectMarkdown = false): string | undefined {
+  const href = node.attributes?.href
+  if (!href || !isSafeHtmlUrl(href))
+    return
+  const resolved = resolveUrl(href, options?.origin, options?.clean)
+  if (!isSafeHtmlUrl(resolved))
+    return
+  if (!entering)
+    return '</a>'
+  const escapedHref = escapeHtml(resolved, true, protectMarkdown)
+  const title = node.attributes?.title === undefined
+    ? ''
+    : ` title="${escapeHtml(node.attributes.title, true, protectMarkdown)}"`
+  return `<a href="${escapedHref}"${title}>`
 }

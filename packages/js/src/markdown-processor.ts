@@ -353,9 +353,8 @@ function foldPreLinesToBr(value: string): string {
   return out
 }
 
-function escapeRawHtmlText(value: string, depthMap: Uint16Array): string {
+function escapeRawHtmlText(value: string, depthMap: Uint16Array, protectLinkText: boolean): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
-  const inLink = Boolean(depthMap[TAG_A])
   let escaped = ''
   let copiedUntil = 0
 
@@ -375,9 +374,9 @@ function escapeRawHtmlText(value: string, depthMap: Uint16Array): string {
       replacement = '&#13;'
     else if (inTable && code === 124)
       replacement = '&#124;'
-    else if (inLink && code === 91)
+    else if (protectLinkText && code === 91)
       replacement = '&#91;'
-    else if (inLink && code === 93)
+    else if (protectLinkText && code === 93)
       replacement = '&#93;'
 
     if (replacement) {
@@ -1067,6 +1066,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   let openMarkerCount = 0
   const gfmLifecycle: GfmLifecycleState = { openCodeSpans: [] }
   let openLinkFragment = -1
+  let rawHtmlLink: ElementNode | undefined
 
   let lastYieldedLength = 0
   let hasYieldedContent = false
@@ -1108,7 +1108,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         rawHtmlMarkdown = trackRawHtmlMarkdownContext(state.buffer, bufferScan)
       if (!state.depthMap[TAG_PRE]
         && insideRawHtmlBlock) {
-        textNode.value = escapeRawHtmlText(textNode.value, state.depthMap)
+        let parent = rawHtmlLink ? textNode.parent : undefined
+        while (parent && parent !== rawHtmlLink)
+          parent = parent.parent
+        textNode.value = escapeRawHtmlText(textNode.value, state.depthMap, rawHtmlLink !== undefined && parent === rawHtmlLink)
       }
 
       if (!state.depthMap[TAG_PRE]
@@ -1315,6 +1318,13 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
     }
 
+    if (element.tagId === TAG_A) {
+      if (eventType === NodeEventEnter)
+        rawHtmlLink = insideRawHtmlRegion && handlerOutput !== undefined && !handler?.literalExit ? element : undefined
+      else
+        rawHtmlLink = undefined
+    }
+
     let lastNewLines = 0
     if (lastChar === '\n')
       lastNewLines++
@@ -1508,8 +1518,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         resolveItemMarker(state, true)
     }
 
-    if (eventType === NodeEventEnter && element.tagId === TAG_A && handlerOutput === '[' && buff.at(-1) === '[')
-      openLinkFragment = buff.length - 1
+    if (eventType === NodeEventEnter && element.tagId === TAG_A) {
+      if (outputStart < buff.length && buff.at(-1) === '[')
+        openLinkFragment = buff.length - 1
+    }
 
     // Track open inline markers for empty pair detection. Inline code in a
     // list may own a leading separator (" `"), so retain the whole output
@@ -1532,8 +1544,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       openMarkerCount = 0
     }
 
-    if (eventType === NodeEventExit && element.tagId === TAG_A)
+    if (eventType === NodeEventExit && element.tagId === TAG_A) {
       openLinkFragment = -1
+    }
 
     updateListIndent(state, element, eventType)
 
@@ -1714,7 +1727,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // and open-link paths retain the full buffer because they can inspect or
     // rewrite earlier content.
     if (!markerHeld && !codeSpanHeld && !codeFenceHeld && !blockquoteHeld && !linkHeld && !emptyItemHeld && !headingHeld && (!retainMutableFragments || !inPre)) {
-      if (!resolvedPlugins.length && !options.wrapWidth && !state.depthMap[TAG_A]) {
+      if (!resolvedPlugins.length && !options.wrapWidth) {
         if (retainMutableFragments && leadingTrimmed === 0) {
           // Preserve the final fragment as a separate value: close handlers
           // identify and trim it by reference equality with lastContentCache.

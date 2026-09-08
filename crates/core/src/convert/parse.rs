@@ -587,8 +587,8 @@ impl ConvertState {
         .last()
         .map_or(0, |n| n.current_walk_index as usize);
       self.text_buffer_has_inline_gfm_hazard = has_inline_gfm_hazard;
-      if self.link_empty_text_pending && !text.trim().is_empty() {
-        self.link_empty_text_pending = false;
+      if self.link.empty_text_pending && !text.trim().is_empty() {
+        self.link.empty_text_pending = false;
       }
       self.emit_text_with_generated_markdown(
         &text,
