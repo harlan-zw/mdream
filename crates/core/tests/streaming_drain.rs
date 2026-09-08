@@ -100,6 +100,25 @@ fn measure_peak_format(
   (acct.peak.max(0) as u64, total_out)
 }
 
+fn measure_peak_unfinished(html: &str, chunk: usize) -> (u64, u64) {
+  ACCT.set(Acct {
+    on: true,
+    live: 0,
+    peak: 0,
+  });
+  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut total_out = 0u64;
+  for part in html.as_bytes().chunks(chunk) {
+    total_out += processor
+      .process_chunk(std::str::from_utf8(part).unwrap())
+      .len() as u64;
+  }
+  let mut acct = ACCT.get();
+  acct.on = false;
+  ACCT.set(acct);
+  (acct.peak.max(0) as u64, total_out)
+}
+
 fn safe_clean() -> CleanConfig {
   // Everything except `fragments`, which needs the whole buffer.
   CleanConfig {
@@ -195,8 +214,21 @@ fn assert_stream_matches(html: &str, opts: HTMLToMarkdownOptions) {
 #[allow(clippy::needless_pass_by_value)]
 fn assert_stream_matches_every_split(html: &str, opts: HTMLToMarkdownOptions) {
   let expected = html_to_markdown(html, opts.clone());
-  for split in (0..=html.len()).filter(|&split| html.is_char_boundary(split)) {
+  for split in (1..html.len()).filter(|&split| html.is_char_boundary(split)) {
     let mut stream = MarkdownStreamProcessor::new(opts.clone());
+    let mut actual = stream.process_chunk(&html[..split]);
+    actual.push_str(&stream.process_chunk(&html[split..]));
+    actual.push_str(&stream.finish());
+    assert_eq!(actual, expected, "split={split} html={html:?}");
+  }
+}
+
+fn assert_text_stream_matches_every_split(html: &str, expected: &str) {
+  for split in (1..html.len()).filter(|&split| html.is_char_boundary(split)) {
+    let mut stream = MarkdownStreamProcessor::new_with_format(
+      HTMLToMarkdownOptions::default(),
+      OutputFormat::Text,
+    );
     let mut actual = stream.process_chunk(&html[..split]);
     actual.push_str(&stream.process_chunk(&html[split..]));
     actual.push_str(&stream.finish());
@@ -207,6 +239,492 @@ fn assert_stream_matches_every_split(html: &str, opts: HTMLToMarkdownOptions) {
 #[test]
 fn streaming_every_split_supports_multibyte_html() {
   assert_stream_matches_every_split("<p>café 😀</p>", HTMLToMarkdownOptions::default());
+}
+
+#[test]
+fn figcaption_streaming_matches_one_shot() {
+  let cases = [
+    (
+      "<figure><img src=\"/i.png\" alt=\"Alt\"><figcaption>Caption</figcaption></figure>",
+      "![Alt](/i.png)\n\n*Caption*",
+    ),
+    ("<figcaption></figcaption>", ""),
+    ("<figcaption><div></div></figcaption>", ""),
+    ("Before<figcaption></figcaption>After", "BeforeAfter"),
+    ("Before<figcaption></figcaption> After", "Before After"),
+    ("Before <figcaption></figcaption>After", "Before After"),
+    ("a<figcaption><br></figcaption>b", "a  \nb"),
+    ("<figcaption><br>x</figcaption>", "*x*"),
+    (
+      "Before<figcaption><br><br><br>Late</figcaption>After",
+      "Before  \n  \n  \n*Late*\n\nAfter",
+    ),
+    (
+      "<figcaption><blockquote>x</blockquote></figcaption>",
+      "> *x*",
+    ),
+    ("<pre><figcaption>text</figcaption></pre>", "```\ntext\n```"),
+    ("<pre><figcaption> \n </figcaption></pre>", ""),
+    (
+      "<pre><figcaption><code>x</code></figcaption></pre>",
+      "```\nx\n```",
+    ),
+    ("a<br><figcaption>b</figcaption>", "a  \n\n*b*"),
+    (
+      r#"<figure><img src="i" alt="A"><figcaption><a href="x">Source</a></figcaption></figure>"#,
+      "![A](i)\n\n*[Source](x)*",
+    ),
+    (
+      "Before<figcaption><em></em><br>x</figcaption>",
+      "Before  \n*x*",
+    ),
+    (
+      "<figcaption><a href=\"/x\"></a> x</figcaption>",
+      "*[](/x)x*",
+    ),
+    (
+      "<figcaption><a href=\"/x\">a</a> x</figcaption>",
+      "*[a](/x) x*",
+    ),
+    (
+      "<figcaption><a href=\"x\"><br></a>x</figcaption>",
+      "*[  \n](x)x*",
+    ),
+    ("a <figcaption><br>x</figcaption>", "a  \n*x*"),
+    ("a<figcaption><br></figcaption> b", "a  \nb"),
+    ("<figcaption><pre>x</pre></figcaption>", "*```\nx\n```*"),
+    ("<pre><figcaption><em></em></figcaption></pre>", ""),
+    (
+      "<img alt=\"x\"><menu><li><figcaption><em></em></figcaption></li></menu>",
+      "![x]()\n\n-",
+    ),
+    (
+      "<blockquote><figcaption><br>x</figcaption></blockquote>",
+      ">   \n> *x*",
+    ),
+    (
+      "<p>Before</p><figcaption></figcaption>After",
+      "Before\n\nAfter",
+    ),
+    (
+      "<ul><li><figure><img src=\"/i\" alt=\"A\"><figcaption>Caption</figcaption></figure></li></ul>",
+      "- ![A](/i)\n\n  *Caption*",
+    ),
+    (
+      "<ul><li>Before<figure><figcaption></figcaption></figure>After</li></ul>",
+      "- Before After",
+    ),
+    (
+      "<ul><li><figcaption>One</figcaption></li><li>Two</li></ul>",
+      "- *One*\n\n- Two",
+    ),
+    (
+      "<ul><li><figcaption>One</figcaption></li></ul><p>After</p>",
+      "- *One*\n\nAfter",
+    ),
+    (
+      "<ul><li><figcaption>One</figcaption><blockquote>Quote</blockquote></li></ul>",
+      "- *One*\n\n  > Quote",
+    ),
+    (
+      "<ul><li><figcaption>Outer</figcaption><ul><li>Inner</li></ul></li></ul>",
+      "- *Outer*\n\n  - Inner",
+    ),
+    (
+      "<ul><li>Before<figcaption> Caption </figcaption>After</li></ul>",
+      "- Before\n\n  *Caption*\n\n  After",
+    ),
+    (
+      "<ul><li>Before <figcaption> Caption </figcaption> After</li></ul>",
+      "- Before\n\n  *Caption*\n\n  After",
+    ),
+    (
+      "<ul><li><figcaption>x</figcaption><span> After</span></li></ul>",
+      "- *x*\n\n  After",
+    ),
+    (
+      "<figcaption><span> Caption</span></figcaption>",
+      "*Caption*",
+    ),
+    ("<figcaption><div> Caption</div></figcaption>", "*Caption*"),
+    (
+      "<figcaption>One*<span> Two</span></figcaption>",
+      "*One\\* Two*",
+    ),
+    (
+      "<figure>Before<figcaption><br><blockquote>x</blockquote></figcaption>After</figure>",
+      "Before  \n> *x*\n\nAfter",
+    ),
+    (
+      "<ul><li><figure>Before<figcaption><br><br>x</figcaption>After</figure></li></ul>",
+      "- Before  \n    \n  *x*\n\n  After",
+    ),
+    (
+      "<table><tr><td><figure><figcaption><br>x</figcaption></figure></td></tr></table>",
+      "| *<br>x* |\n| --- |",
+    ),
+    (
+      "<blockquote>Before <figcaption> Caption </figcaption> After</blockquote>",
+      "> Before\n>\n> *Caption*\n>\n> After",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><figure><img src=\"/i\" alt=\"A\"><figcaption>Caption</figcaption></figure></a></li></ul>",
+      "- [![A](/i)*Caption*](/x)",
+    ),
+  ];
+
+  for (html, expected) in cases {
+    let opts = HTMLToMarkdownOptions::default();
+    assert_eq!(html_to_markdown(html, opts.clone()), expected);
+    for chunk in [1, 2, 7, 31] {
+      assert_eq!(
+        stream_chunks(html, chunk, opts.clone()),
+        expected,
+        "chunk={chunk}"
+      );
+    }
+    assert_stream_matches_every_split(html, opts);
+  }
+
+  let clean_empty_links = HTMLToMarkdownOptions {
+    clean: Some(mdream::types::CleanConfig {
+      empty_links: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_stream_matches_every_split(
+    r##"<figcaption><a href="#"></a><blockquote>x</blockquote></figcaption>"##,
+    clean_empty_links,
+  );
+  let clean_empty_link_text = HTMLToMarkdownOptions {
+    clean: Some(mdream::types::CleanConfig {
+      empty_link_text: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_stream_matches_every_split(
+    r#"<figcaption><a href="/x"></a><blockquote>x</blockquote></figcaption>"#,
+    clean_empty_link_text.clone(),
+  );
+  assert_stream_matches_every_split(
+    r#"<figure><img src="i" alt="A"><figcaption><a href="x"><br></a>Caption</figcaption></figure>"#,
+    clean_empty_link_text.clone(),
+  );
+  assert_stream_matches_every_split(
+    r#"<figcaption><em><a href="x"><br></a></em></figcaption>"#,
+    clean_empty_link_text.clone(),
+  );
+  assert_stream_matches_every_split(
+    r#"<figcaption><em><a href="x"></a></em>x</figcaption>"#,
+    clean_empty_link_text,
+  );
+  let clean_empty_images = HTMLToMarkdownOptions {
+    clean: Some(mdream::types::CleanConfig {
+      empty_images: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_stream_matches_every_split(
+    r#"A<figcaption><img src="i"></figcaption>B"#,
+    clean_empty_images.clone(),
+  );
+  assert_stream_matches_every_split(
+    r#"A<figcaption><img src="i" alt=" "></figcaption>B"#,
+    clean_empty_images,
+  );
+}
+
+#[test]
+fn figcaption_override_streaming_matches_one_shot() {
+  let exit_only_child = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "div".to_string(),
+        TagOverrideConfig {
+          exit: Some("X".to_string()),
+          spacing: Some([0, 0]),
+          is_inline: Some(true),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_stream_matches_every_split(
+    "Before<figcaption><div></div></figcaption>After",
+    exit_only_child,
+  );
+
+  for spacing in [[0, 0], [1, 1]] {
+    let options = HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "figcaption".to_string(),
+          TagOverrideConfig {
+            spacing: Some(spacing),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_stream_matches_every_split("Before<figcaption>Caption</figcaption>After", options);
+  }
+
+  for (tag, config) in [
+    (
+      "em",
+      TagOverrideConfig {
+        enter: Some("^".to_string()),
+        ..Default::default()
+      },
+    ),
+    (
+      "em",
+      TagOverrideConfig {
+        exit: Some("$".to_string()),
+        ..Default::default()
+      },
+    ),
+    (
+      "figcaption",
+      TagOverrideConfig {
+        enter: Some("^".to_string()),
+        ..Default::default()
+      },
+    ),
+    (
+      "figcaption",
+      TagOverrideConfig {
+        exit: Some("$".to_string()),
+        ..Default::default()
+      },
+    ),
+  ] {
+    let options = HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(tag.to_string(), config)]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let html = format!("<pre><{tag}></{tag}>x</pre>");
+    assert_stream_matches_every_split(&html, options);
+  }
+
+  let literal_code = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "code".to_string(),
+        TagOverrideConfig {
+          enter: Some("^".to_string()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_stream_matches_every_split("<pre><code>x</code></pre>", literal_code);
+  let literal_code_with_language = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "code".to_string(),
+        TagOverrideConfig {
+          enter: Some("^".to_string()),
+          exit: Some("$".to_string()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_stream_matches_every_split(
+    "<pre><code class=\"language-js\">x</code></pre>",
+    literal_code_with_language,
+  );
+
+  let literal_caption = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "figcaption".to_string(),
+        TagOverrideConfig {
+          enter: Some("^".to_string()),
+          exit: Some("$".to_string()),
+          spacing: Some([1, 1]),
+          is_inline: Some(true),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "Before<figcaption>Caption</figcaption>After",
+    "<a href=/x>Before<figcaption>Caption</figcaption>After</a>",
+    "<em>Before<figcaption>Caption</figcaption>After</em>",
+    "<table><tr><td>Before<figcaption>Caption</figcaption>After</td></tr></table>",
+  ] {
+    assert_stream_matches_every_split(html, literal_caption.clone());
+  }
+}
+
+#[test]
+fn deferred_caption_breaks_preserve_late_content_output() {
+  let mut breaks = String::new();
+  for _ in 0..1024 {
+    breaks.push_str("<br>");
+  }
+  for html in [
+    format!("Before<figcaption>{breaks}Late</figcaption>After"),
+    format!("<ul><li>Before<figcaption>{breaks}Late</figcaption>After</li></ul>"),
+    format!("<blockquote>Before<figcaption>{breaks}Late</figcaption>After</blockquote>"),
+  ] {
+    let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+    for chunk in [1, 7, 127, 4096] {
+      assert_eq!(
+        stream_chunks(&html, chunk, HTMLToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+  }
+}
+
+#[test]
+fn streaming_break_only_pending_figcaption_stays_bounded_before_finish() {
+  let mut visible_break = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  assert_eq!(
+    visible_break.process_chunk("<table><tr><td><figcaption><br>"),
+    "| *<br>"
+  );
+
+  let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  assert_eq!(stream.process_chunk("Before<figcaption><br><br>"), "Before");
+
+  const TARGET: usize = 1024 * 1024;
+  let mut html = String::with_capacity(TARGET + 128);
+  html.push_str("Before<figcaption>");
+  while html.len() < TARGET {
+    html.push_str("<br>");
+  }
+
+  let (peak, total_out) = measure_peak_unfinished(&html, 8 * 1024);
+  assert_eq!(total_out, "Before".len() as u64);
+  assert!(
+    peak < TARGET as u64 / 2,
+    "peak {peak} should stay bounded below the {} byte open caption",
+    html.len()
+  );
+}
+
+#[test]
+fn streaming_unresolved_root_and_list_break_runs_stay_bounded() {
+  const TARGET: usize = 1024 * 1024;
+  for (open, expected) in [("Before", "Before"), ("<ul><li>Before", "- Before")] {
+    let mut html = String::with_capacity(TARGET + open.len() + 4);
+    html.push_str(open);
+    while html.len() < TARGET {
+      html.push_str("<br>");
+    }
+
+    let (peak, total_out) = measure_peak_unfinished(&html, 8 * 1024);
+    assert_eq!(total_out, expected.len() as u64, "open={open:?}");
+    assert!(
+      peak < TARGET as u64 / 2,
+      "peak {peak} should stay bounded below the {} byte unresolved break run for {open:?}",
+      html.len()
+    );
+  }
+}
+
+#[test]
+fn streaming_compacted_break_runs_preserve_late_output() {
+  let breaks = "<br>".repeat(32 * 1024);
+  for (open, close) in [("Before", "Late"), ("<ul><li>Before", "Late</li></ul>")] {
+    let prefix = format!("{open}{breaks}");
+    let html = format!("{prefix}{close}");
+    let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut actual = String::new();
+    for chunk in prefix.as_bytes().chunks(8 * 1024) {
+      actual.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+    }
+    assert_eq!(
+      actual,
+      if open == "Before" {
+        "Before"
+      } else {
+        "- Before"
+      }
+    );
+    actual.push_str(&stream.process_chunk(close));
+    actual.push_str(&stream.finish());
+
+    assert_eq!(actual, expected, "open={open:?}");
+  }
+
+  for html in [
+    "a<br><em></em><br>x",
+    "<ul><li>a<br><span></span><br>x</li></ul>",
+    "<p>a<br><br></p>x",
+    "<ul><li>a<br><br></li><li>x</li></ul>",
+    "<ul><li>x<br><br> </li><li>y</li></ul>",
+    "<ul><li>a<ul><li><br><br>x</li></ul></li></ul>",
+  ] {
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn plain_text_figcaption_streaming_matches_one_shot() {
+  let cases = [
+    ("Before<figcaption></figcaption>After", "BeforeAfter"),
+    ("Before <figcaption> \n </figcaption>After", "Before After"),
+    (
+      "Before<figcaption>One</figcaption><figcaption></figcaption>After",
+      "Before\n\nOne\n\nAfter",
+    ),
+    (
+      "<ul><li><figure><img alt=A><figcaption>Caption</figcaption></figure></li></ul>",
+      "A\n\nCaption",
+    ),
+    (
+      "<ul><li><figcaption>Caption</figcaption><img alt=A></li></ul>",
+      "Caption\n\nA",
+    ),
+    (
+      "<ul><li>Before<figcaption> Caption </figcaption>After</li></ul>",
+      "Before\n\nCaption\n\nAfter",
+    ),
+    (
+      "<blockquote>Before<span><figcaption><span> Caption</span></figcaption></span>After</blockquote>",
+      "Before\n\nCaption\n\nAfter",
+    ),
+    (
+      "Before<em><figcaption>Caption</figcaption></em>After",
+      "Before\n\nCaption\n\nAfter",
+    ),
+    (
+      "Before<a href=/x><figcaption>Caption</figcaption></a>After",
+      "Before\n\nCaption\n\nAfter",
+    ),
+    (
+      "Before<strong><span><figcaption>Caption</figcaption></span></strong>After",
+      "Before\n\nCaption\n\nAfter",
+    ),
+    ("A<figcaption><br>x</figcaption>", "A\nx"),
+  ];
+  for (html, expected) in cases {
+    assert_text_stream_matches_every_split(html, expected);
+  }
 }
 
 // CDATA is dropped unless opted into, so the fixture cases never reach it. Both

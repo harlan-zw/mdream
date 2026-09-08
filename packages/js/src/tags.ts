@@ -808,15 +808,28 @@ export const tagHandlers: Record<number, TagHandler> = {
         // Sum the link-text length while scanning back for `[`, so the
         // slice/join allocation only happens when the text could equal href.
         let textLen = 0
+        let captionBracket = -1
+        let captionTextLen = 0
         while (i >= 0) {
           const entry = buf[i]!
           if (entry === '[')
             break
+          if (captionBracket < 0 && state.depthMap?.[TAG_FIGCAPTION] && entry.endsWith('*[')) {
+            captionBracket = i
+            captionTextLen = textLen
+          }
           textLen += entry.length
           i--
         }
+        const captionLink = i < 0 && captionBracket >= 0
+        if (captionLink) {
+          i = captionBracket
+          textLen = captionTextLen
+        }
         if (i >= 0 && textLen === href.length && buf.slice(i + 1).join('') === href) {
-          buf.length = i
+          if (captionLink)
+            buf[i] = buf[i]!.slice(0, -1)
+          buf.length = i + (captionLink ? 1 : 0)
           const auto = `<${href}>`
           buf.push(auto)
           state.lastContentCache = auto
@@ -836,8 +849,13 @@ export const tagHandlers: Record<number, TagHandler> = {
       const clean = state.options?.clean
       const stripsEmptyImage = clean === true
         || (clean !== undefined && clean !== false && clean.emptyImages === true)
-      if (!stripsEmptyImage || alt.trim().length > 0)
+      if (stripsEmptyImage && !alt.trim()) {
+        if (state.depthMap?.[TAG_FIGCAPTION])
+          return undefined
+      }
+      else {
         markRenderedChildContent(node)
+      }
       return `![${serializeImageDescription(alt)}]${serializeMarkdownResource(src, node.attributes?.title)}`
     },
     collapsesInnerWhiteSpace: true,
@@ -1294,10 +1312,8 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_FIGURE]: {},
 
   [TAG_FIGCAPTION]: {
-    enter: () => MARKDOWN_EMPHASIS,
     exit: () => MARKDOWN_EMPHASIS,
     collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
     isInline: true,
   },
 }
