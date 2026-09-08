@@ -360,11 +360,13 @@ fn decoded_text_is_serialized_for_its_output_context() {
     "decoded code became active raw HTML: {raw_code}"
   );
   assert!(
-    convert(r#"<details><a href="/x">a[b]</a></details>"#).contains("[a&#91;b&#93;](/x)"),
+    convert(r#"<details><a href="/x">a[b]</a></details>"#)
+      .contains(r#"<a href="/x">a&#91;b&#93;</a>"#),
     "parser-added escapes must not become visible raw-HTML text"
   );
   assert!(
-    convert(r#"<details><a href="/x">&#92;&#91;</a></details>"#).contains(r"[\&#91;](/x)"),
+    convert(r#"<details><a href="/x">&#92;&#91;</a></details>"#)
+      .contains(r#"<a href="/x">\&#91;</a>"#),
     "decoded backslashes must remain visible raw-HTML text"
   );
   assert!(
@@ -386,6 +388,141 @@ fn simple_link() {
     convert(r#"<a href="https://example.com">Example</a>"#),
     "[Example](https://example.com)"
   );
+}
+
+#[test]
+fn links_inside_raw_html_blocks_are_safe_html() {
+  for (html, expected) in [
+    (
+      r#"<details><a href="/x">a[b]</a></details>"#,
+      r#"<details><a href="/x">a&#91;b&#93;</a></details>"#,
+    ),
+    (
+      r#"<dl><dt>Term <a href="/term">link</a></dt><dd>Definition</dd></dl>"#,
+      "<dl><dt>Term <a href=\"/term\">link</a></dt>\n<dd>Definition</dd>\n</dl>",
+    ),
+    (
+      r#"<details><a href="/x?a=1&amp;b=2" title="say &quot;hi&quot; &amp; bye">link</a></details>"#,
+      r#"<details><a href="/x?a=1&amp;b=2" title="say &quot;hi&quot; &amp; bye">link</a></details>"#,
+    ),
+    (
+      r#"<details><a href="javascript:alert(1)">visible</a></details>"#,
+      "<details>visible</details>",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn raw_html_links_keep_source_and_markdown_cleaning_boundaries() {
+  assert_eq!(
+    html_to_markdown(
+      r#"<details><a href="/x?utm_source=test&amp;keep=1">Link</a></details>"#,
+      HTMLToMarkdownOptions::default().with_clean(mdream::types::CleanConfig {
+        urls: true,
+        ..Default::default()
+      }),
+    ),
+    r#"<details><a href="/x?keep=1">Link</a></details>"#,
+  );
+  assert_eq!(
+    convert_with_clean(
+      r##"<details><a href="#">Link</a></details>"##,
+      mdream::types::CleanConfig {
+        empty_links: true,
+        ..Default::default()
+      },
+    ),
+    "<details>Link</details>",
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"<details><a href="/x"></a></details>"#,
+      mdream::types::CleanConfig {
+        empty_link_text: true,
+        ..Default::default()
+      },
+    ),
+    r#"<details><a href="/x"></a></details>"#,
+  );
+  assert_eq!(
+    convert_with_clean(
+      r##"<details><a href="#missing">Link</a></details>"##,
+      mdream::types::CleanConfig {
+        fragments: true,
+        ..Default::default()
+      },
+    ),
+    r##"<details><a href="#missing">Link</a></details>"##,
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"<details><a href="https://example.com">https://example.com</a></details>"#,
+      mdream::types::CleanConfig {
+        redundant_links: true,
+        ..Default::default()
+      },
+    ),
+    r#"<details><a href="https://example.com">https://example.com</a></details>"#,
+  );
+  assert_eq!(
+    convert_with_clean(
+      r##"<details><h2><a href="#section">Section</a></h2></details>"##,
+      mdream::types::CleanConfig {
+        self_link_headings: true,
+        ..Default::default()
+      },
+    ),
+    "<details>\n\n## <a href=\"#section\">Section</a>\n\n</details>",
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"<details><a href="/x">Visible</a></details>"#,
+      clean_all(),
+    ),
+    r#"<details><a href="/x">Visible</a></details>"#,
+  );
+}
+
+#[test]
+fn raw_html_link_tag_overrides_still_own_their_output() {
+  for (override_config, expected) in [
+    (
+      TagOverrideConfig {
+        enter: Some("{".to_string()),
+        exit: Some("}".to_string()),
+        ..Default::default()
+      },
+      "<details>{Link}</details>",
+    ),
+    (
+      TagOverrideConfig {
+        enter: Some("[".to_string()),
+        ..Default::default()
+      },
+      "<details>[Link](/x)</details>",
+    ),
+    (
+      TagOverrideConfig {
+        exit: Some("}".to_string()),
+        ..Default::default()
+      },
+      "<details><a href=\"/x\">Link}</details>",
+    ),
+  ] {
+    let output = html_to_markdown(
+      r#"<details><a href="/x">Link</a></details>"#,
+      HTMLToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          tag_overrides: Some(vec![("a".to_string(), override_config)]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    );
+    assert_eq!(output, expected);
+  }
 }
 
 #[test]
