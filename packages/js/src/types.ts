@@ -208,7 +208,7 @@ export interface Node {
   /** Current walk index for child traversal during streaming */
   currentWalkIndex?: number
 
-  /** Count of text child nodes - used for whitespace handling */
+  /** Child-content counter used by whitespace and empty-link handling */
   childTextNodeIndex?: number
 
   /** Whether node contains whitespace - used for whitespace optimization */

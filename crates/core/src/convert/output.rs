@@ -84,6 +84,24 @@ fn write_image_description(output: &mut String, alt: &str) {
   write_ascii_escaped(output, alt, &IMAGE_DESCRIPTION_ESCAPES);
 }
 
+#[inline]
+fn is_ecmascript_whitespace(character: char) -> bool {
+  matches!(
+    character,
+    '\u{0009}'..='\u{000D}'
+      | '\u{0020}'
+      | '\u{00A0}'
+      | '\u{1680}'
+      | '\u{2000}'..='\u{200A}'
+      | '\u{2028}'
+      | '\u{2029}'
+      | '\u{202F}'
+      | '\u{205F}'
+      | '\u{3000}'
+      | '\u{FEFF}'
+  )
+}
+
 #[inline(never)]
 #[allow(clippy::cast_possible_truncation)] // `parsed` is bounded by the `u32` maximum argument.
 pub(super) fn parse_bounded_u32(value: &str, max: u32) -> Option<u32> {
@@ -126,6 +144,43 @@ impl ConvertState {
 
   fn end_link(&mut self) {
     self.link = self.parent_links.pop().unwrap_or_default();
+  }
+
+  #[inline]
+  pub(super) fn mark_rendered_child_content(&mut self) {
+    let image_index = self.stack.len().saturating_sub(1);
+    let mut scope_start = self.first_block_parent_index.unwrap_or(0);
+    if scope_start >= image_index {
+      scope_start = if self.block_parent_indices.len() > 1 {
+        self.block_parent_indices[self.block_parent_indices.len() - 2]
+      } else {
+        0
+      };
+    }
+
+    let mut anchor_in_scope = false;
+    for parent in &mut self.stack[scope_start..image_index] {
+      parent.child_text_node_index += 1;
+      if parent.tag_id == Some(TAG_A) {
+        anchor_in_scope = true;
+      }
+    }
+    if anchor_in_scope {
+      return;
+    }
+    let mut anchor_found = false;
+    for parent in self.stack[..scope_start].iter_mut().rev() {
+      if !anchor_found {
+        if parent.tag_id != Some(TAG_A) {
+          continue;
+        }
+        anchor_found = true;
+      }
+      parent.child_text_node_index += 1;
+      if !parent.is_inline {
+        return;
+      }
+    }
   }
 
   #[inline]
@@ -708,7 +763,6 @@ impl ConvertState {
 
       tag_id = node.tag_id;
 
-      // Check override is_inline
       let override_config = if self.has_tag_overrides {
         self
           .options
@@ -719,9 +773,7 @@ impl ConvertState {
       } else {
         None
       };
-      is_inline = override_config
-        .and_then(|ov| ov.is_inline)
-        .unwrap_or(node.is_inline);
+      is_inline = node.is_inline;
       node_spacing = override_config.and_then(|ov| ov.spacing).or(node.spacing);
       caption_spacing = if tag_id == Some(TAG_FIGCAPTION) {
         override_config
@@ -808,7 +860,7 @@ impl ConvertState {
       && self.stack[stack_len - 1]
         .attributes
         .get("alt")
-        .is_none_or(|alt| alt.trim().is_empty())
+        .is_none_or(|alt| alt.chars().all(is_ecmascript_whitespace))
     {
       self.last_node_is_inline = is_inline;
       return;
@@ -975,6 +1027,17 @@ impl ConvertState {
       output.as_deref(),
       enter_is_literal,
     );
+
+    if tag_id == Some(TAG_IMG)
+      && !enter_is_literal
+      && output.as_deref().is_some_and(|emitted| {
+        self.buffer.len() > output_start
+          && self.last_content_cache_len == emitted.len()
+          && (!self.plain_text || emitted.as_bytes().iter().any(|&byte| !is_whitespace(byte)))
+      })
+    {
+      self.mark_rendered_child_content();
+    }
 
     if tag_id == Some(TAG_A) {
       // Escaping matters only while the anchor's *exit* will still build a
@@ -1188,9 +1251,7 @@ impl ConvertState {
       None
     };
 
-    let is_inline = override_config
-      .and_then(|ov| ov.is_inline)
-      .unwrap_or(node.is_inline);
+    let is_inline = node.is_inline;
     let raw_html_anchor = tag_id == Some(TAG_A)
       && self.in_raw_html_block()
       && override_config.is_none_or(|ov| ov.enter.is_none());
@@ -4188,7 +4249,7 @@ impl ConvertState {
 
 #[cfg(test)]
 mod tests {
-  use super::{ConvertState, CutLineLead};
+  use super::{ConvertState, CutLineLead, TAG_A};
   use crate::types::{HTMLToMarkdownOptions, OutputFormat};
 
   #[test]
@@ -4260,5 +4321,28 @@ mod tests {
 
     assert_eq!(state.gfm_escape_slow_path_calls, 2);
     assert_eq!(state.get_markdown(), "\\* literal\n\n\\* decoded");
+  }
+
+  #[test]
+  fn atomic_image_marks_content_only_when_written() {
+    let html = format!(
+      r#"<code>{}<a href="/x" title="Title"><img src="/i" alt="Alt">"#,
+      "x".repeat(63)
+    );
+    for (cap, expected) in [(64, 0), (128, 1)] {
+      let mut state = ConvertState::new(
+        HTMLToMarkdownOptions::default().with_max_node_bytes(cap),
+        64,
+        OutputFormat::Markdown,
+      );
+      assert_eq!(state.process_html(&html), html.len());
+
+      let anchor = state
+        .stack
+        .iter()
+        .find(|node| node.tag_id == Some(TAG_A))
+        .unwrap();
+      assert_eq!(anchor.child_text_node_index, expected, "cap={cap}");
+    }
   }
 }

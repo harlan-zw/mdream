@@ -43,7 +43,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { resolveUrl, safeAnchorOutput } from './tags'
-import { escapeHtml, getLanguageFromClass, isSafeHtmlUrl, parseUnsignedInteger } from './utils'
+import { escapeHtml, getLanguageFromClass, isSafeHtmlUrl, markRenderedChildContent, parseUnsignedInteger } from './utils'
 
 interface HeadingFrame {
   _tag: 0
@@ -232,6 +232,7 @@ export function processHtmlOutputEvent(
         const alt = escapeHtml(element.attributes.alt || '', true)
         const title = element.attributes.title === undefined ? '' : ` title="${escapeHtml(element.attributes.title, true)}"`
         append(state, output, `<img src="${resolved}" alt="${alt}"${title}>`)
+        markRenderedChildContent(element)
       }
     }
     return
