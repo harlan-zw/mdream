@@ -31,7 +31,7 @@ describe('mdream browser compatibility', () => {
 
     // Render to DOM and verify
     renderMarkdown(result)
-    await expect.element(page.getByText('Hello **world**!')).toBeInTheDocument()
+    await expect.element(page.getByText('Hello **world**!', { exact: false })).toBeInTheDocument()
 
     // Test complex HTML structures
     const complexHtml = `
@@ -52,12 +52,12 @@ describe('mdream browser compatibility', () => {
     renderMarkdown(complexResult)
 
     // Verify all elements are properly converted and displayed
-    await expect.element(page.getByText('# Main Title')).toBeInTheDocument()
-    await expect.element(page.getByText('This is a paragraph with *emphasis*')).toBeInTheDocument()
-    await expect.element(page.getByText('[a link](/test)')).toBeInTheDocument()
-    await expect.element(page.getByText('- Item 1')).toBeInTheDocument()
-    await expect.element(page.getByText('- Item 2 with `code`')).toBeInTheDocument()
-    await expect.element(page.getByText('> This is a quote')).toBeInTheDocument()
+    await expect.element(page.getByText('# Main Title', { exact: false })).toBeInTheDocument()
+    await expect.element(page.getByText('This is a paragraph with *emphasis*', { exact: false })).toBeInTheDocument()
+    await expect.element(page.getByText('[a link](/test)', { exact: false })).toBeInTheDocument()
+    await expect.element(page.getByText('- Item 1', { exact: false })).toBeInTheDocument()
+    await expect.element(page.getByText('- Item 2 with `code`', { exact: false })).toBeInTheDocument()
+    await expect.element(page.getByText('> This is a quote', { exact: false })).toBeInTheDocument()
   })
 
   it('should not include Node.js APIs in browser environment', async () => {
@@ -85,8 +85,8 @@ describe('mdream browser compatibility', () => {
     `
 
     // Verify through DOM
-    await expect.element(page.getByText('htmlToMarkdown: available')).toBeInTheDocument()
-    await expect.element(page.getByText('generateLlmsTxtArtifacts: properly excluded')).toBeInTheDocument()
+    await expect.element(page.getByText('htmlToMarkdown: available', { exact: false })).toBeInTheDocument()
+    await expect.element(page.getByText('generateLlmsTxtArtifacts: properly excluded', { exact: false })).toBeInTheDocument()
   })
 
   it('should handle browser environment edge cases in DOM', async () => {
@@ -97,18 +97,18 @@ describe('mdream browser compatibility', () => {
     const entityResult = htmlToMarkdown(entityHtml)
 
     renderMarkdown(entityResult)
-    await expect.element(page.getByText('Test & HTML entities')).toBeInTheDocument()
-    await expect.element(page.getByText('<script>')).toBeInTheDocument()
-    await expect.element(page.getByText('"quotes"')).toBeInTheDocument()
+    await expect.element(page.getByText('Test & HTML entities', { exact: false })).toBeInTheDocument()
+    await expect.element(page.getByText('<script>', { exact: false })).toBeInTheDocument()
+    await expect.element(page.getByText('"quotes"', { exact: false })).toBeInTheDocument()
 
     // Test with malformed HTML (browser tolerant)
     const malformedHtml = '<p>Unclosed paragraph<div>Mixed content<span>nested</span></div>'
     const malformedResult = htmlToMarkdown(malformedHtml)
 
     renderMarkdown(malformedResult)
-    await expect.element(page.getByText('Unclosed paragraph')).toBeInTheDocument()
-    await expect.element(page.getByText('Mixed content')).toBeInTheDocument()
-    await expect.element(page.getByText('nested')).toBeInTheDocument()
+    await expect.element(page.getByText('Unclosed paragraph', { exact: false })).toBeInTheDocument()
+    await expect.element(page.getByText('Mixed content', { exact: false })).toBeInTheDocument()
+    await expect.element(page.getByText('nested', { exact: false })).toBeInTheDocument()
   })
 
   it('should work with plugins in browser environment', async () => {
@@ -136,7 +136,7 @@ describe('mdream browser compatibility', () => {
     })
 
     renderMarkdown(result)
-    await expect.element(page.getByText('This is ==highlighted text== in a paragraph.')).toBeInTheDocument()
+    await expect.element(page.getByText('This is ==highlighted text== in a paragraph.', { exact: false })).toBeInTheDocument()
   })
 
   it('should handle interactive HTML-to-Markdown conversion', async () => {
@@ -182,15 +182,15 @@ describe('mdream browser compatibility', () => {
     })
 
     // Test the interactive conversion
-    await expect.element(page.getByText('Interactive HTML to Markdown Converter')).toBeInTheDocument()
+    await expect.element(page.getByText('Interactive HTML to Markdown Converter', { exact: false })).toBeInTheDocument()
 
     // Click the convert button
     await page.getByRole('button', { name: 'Convert to Markdown' }).click()
 
     // Verify the conversion worked
-    await expect.element(page.getByText('# Sample Blog Post')).toBeInTheDocument()
-    await expect.element(page.getByText('This is a **sample** blog post')).toBeInTheDocument()
-    await expect.element(page.getByText('- List item 1')).toBeInTheDocument()
-    await expect.element(page.getByText('> A wise quote goes here.')).toBeInTheDocument()
+    await expect.element(page.getByText('# Sample Blog Post', { exact: false })).toBeInTheDocument()
+    await expect.element(page.getByText('This is a **sample** blog post', { exact: false })).toBeInTheDocument()
+    await expect.element(page.getByText('- List item 1', { exact: false })).toBeInTheDocument()
+    await expect.element(page.getByText('> A wise quote goes here.', { exact: false })).toBeInTheDocument()
   })
 })

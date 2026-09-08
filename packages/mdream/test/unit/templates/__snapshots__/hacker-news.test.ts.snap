@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`hacker news { name: 'JavaScript Engine', engine: { htmlToMarkdown: [Function htmlToMarkdown], streamHtmlToMarkdown: [Function streamHtmlToMarkdown] } } > table 1`] = `
+exports[`hacker news { name: 'JavaScript Engine', …(1) } > table 1`] = `
 "| <table><tr><td>[![](y18.svg)](https://news.ycombinator.com)</td><td>**[Hacker News](news)** [new](newest) \\| [past](front) \\| [comments](newcomments) \\| [ask](ask) \\| [show](show) \\| [jobs](jobs) \\| [submit](submit)</td><td>[login](login?goto=news)</td></tr></table> |
 | --- |
 | |
@@ -8,7 +8,7 @@ exports[`hacker news { name: 'JavaScript Engine', engine: { htmlToMarkdown: [Fun
 | ![](s.gif)<table><tr><td></td></tr></table><br> Join us for [<u>AI Startup School</u>](https://events.ycombinator.com/ai-sus) this June 16-17 in San Francisco!<br> [Guidelines](newsguidelines.html) \\| [FAQ](newsfaq.html) \\| [Lists](lists) \\| [API](https://github.com/HackerNews/API) \\| [Security](security.html) \\| [Legal](https://www.ycombinator.com/legal/) \\| [Apply to YC](https://www.ycombinator.com/apply/) \\| [Contact](mailto:hn@ycombinator.com)<br><br> Search: |"
 `;
 
-exports[`hacker news { name: 'Rust Engine', engine: { htmlToMarkdown: [Function rustHtmlToMarkdown], streamHtmlToMarkdown: [Function rustStreamHtmlToMarkdown] } } > table 1`] = `
+exports[`hacker news { name: 'Rust Engine', …(1) } > table 1`] = `
 "| <table><tr><td>[![](y18.svg)](https://news.ycombinator.com)</td><td>**[Hacker News](news)** [new](newest) \\| [past](front) \\| [comments](newcomments) \\| [ask](ask) \\| [show](show) \\| [jobs](jobs) \\| [submit](submit)</td><td>[login](login?goto=news)</td></tr></table> |
 | --- |
 | |

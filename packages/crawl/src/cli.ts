@@ -119,7 +119,7 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
     },
   })
 
-  if (p.isCancel(urlsInput)) {
+  if (typeof urlsInput !== 'string') {
     p.cancel('Operation cancelled.')
     return null
   }

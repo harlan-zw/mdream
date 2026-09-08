@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`recipes 'JavaScript Engine' > tables 1`] = `
+exports[`recipes JavaScript Engine > tables 1`] = `
 "## Nutrition Facts (per serving)
 
 | 366 | Calories |
@@ -10,7 +10,7 @@ exports[`recipes 'JavaScript Engine' > tables 1`] = `
 | 9g | Protein |"
 `;
 
-exports[`recipes 'Rust Engine' > tables 1`] = `
+exports[`recipes Rust Engine > tables 1`] = `
 "## Nutrition Facts (per serving)
 
 | 366 | Calories |
