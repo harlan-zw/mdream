@@ -686,6 +686,8 @@ pub struct ConvertState {
 
   // Clean mode — bitmask for zero-cost when disabled
   clean_flags: u8,
+  /// The current raw-HTML anchor emitted its built-in safe opening tag.
+  raw_html_link_open: bool,
   /// Output state for the active anchor and its malformed nested parents.
   link: LinkOutputState,
   parent_links: Vec<LinkOutputState>,
@@ -870,6 +872,7 @@ impl ConvertState {
       plain_text,
       preserve_leading_whitespace: false,
       clean_flags: 0,
+      raw_html_link_open: false,
       link: LinkOutputState::default(),
       parent_links: Vec::new(),
       link_caption_break_snapshot: Vec::new(),
