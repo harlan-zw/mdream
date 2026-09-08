@@ -120,6 +120,7 @@ impl ConvertState {
       bracket_pos,
       skipped,
       open: true,
+      begin_depth: self.depth,
       ..Default::default()
     };
   }
@@ -644,6 +645,47 @@ impl ConvertState {
     self.invalidate_line_start();
   }
 
+  /// Override keyed by built-in tag id, via the precomputed table. `idx` is
+  /// `None` only when the key list was too long to index, so every lookup scans.
+  #[inline]
+  fn override_by_id<'a>(
+    ovs: Option<&'a Vec<(String, TagOverrideConfig)>>,
+    idx: Option<&[u8; MAX_TAG_ID]>,
+    id: u8,
+  ) -> Option<&'a TagOverrideConfig> {
+    let ovs = ovs?;
+    if let Some(idx) = idx {
+      let i = idx[id as usize];
+      if i != NO_OVERRIDE {
+        return ovs.get(i as usize).map(|(_, v)| v);
+      }
+      return None;
+    }
+    ovs
+      .iter()
+      .find(|(k, _)| k == TAG_NAMES[id as usize])
+      .map(|(_, v)| v)
+  }
+
+  /// Resolve the tag override for a node: built-in tags hit the precomputed
+  /// id table via `tag_id`; custom/aliased names fall back to the key scan.
+  /// Takes fields rather than `&self` — hoisting the options chain at the
+  /// call sites measured 3% slower on wiki.
+  #[inline]
+  fn override_for_node<'a>(
+    ovs: Option<&'a Vec<(String, TagOverrideConfig)>>,
+    idx: Option<&[u8; MAX_TAG_ID]>,
+    node: &ElementNode,
+  ) -> Option<&'a TagOverrideConfig> {
+    let ovs = ovs?;
+    if let Some(id) = node.tag_id
+      && node.custom_name().is_none()
+    {
+      return Self::override_by_id(Some(ovs), idx, id);
+    }
+    ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v)
+  }
+
   /// Emit markdown for entering the element currently on top of self.stack.
   #[inline]
   pub(crate) fn emit_enter_element(&mut self) {
@@ -689,8 +731,9 @@ impl ConvertState {
       && self.stack[stack_len - 1].tag_id == Some(TAG_PRE)
       && !self.in_table_cell()
     {
-      let lang = Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
-        .to_string();
+      let lang =
+        Self::get_language_from_class(self.stack[stack_len - 1].attributes.get_bit(ATTR_CLASS))
+          .to_string();
       self.pre_fence_pending = true;
       self.pre_fence_lang = lang;
     }
@@ -712,12 +755,12 @@ impl ConvertState {
 
       // Check override is_inline
       let override_config = if self.has_tag_overrides {
-        self
+        let ovs = self
           .options
           .plugins
           .as_ref()
-          .and_then(|p| p.tag_overrides.as_ref())
-          .and_then(|ovs| ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v))
+          .and_then(|p| p.tag_overrides.as_ref());
+        Self::override_for_node(ovs, self.override_idx.as_deref(), node)
       } else {
         None
       };
@@ -738,7 +781,7 @@ impl ConvertState {
         } else if tag_id == Some(TAG_TR) {
           self.table_current_row_cells = 0;
         } else if tag_id == Some(TAG_TH) {
-          let align_val = node.attributes.get("align").map_or(0u8, |s| {
+          let align_val = node.attributes.get_bit(ATTR_ALIGN).map_or(0u8, |s| {
             match s.as_bytes().first().copied().unwrap_or(0) | 0x20 {
               b'l' => 1, // left
               b'c' => 2, // center
@@ -800,7 +843,7 @@ impl ConvertState {
         // emptyLinks: skip hrefs that cannot represent meaningful navigation.
         if self.clean_flags & CLEAN_EMPTY_LINKS != 0 {
           let node = &self.stack[self.stack.len() - 1];
-          if let Some(href) = node.attributes.get("href")
+          if let Some(href) = node.attributes.get_bit(ATTR_HREF)
             && is_empty_link_href(href)
           {
             self.begin_link(self.buffer.len(), true);
@@ -813,7 +856,7 @@ impl ConvertState {
         }
       } else if id == TAG_IMG && self.clean_flags & CLEAN_EMPTY_IMAGES != 0 {
         let node = &self.stack[self.stack.len() - 1];
-        let alt = node.attributes.get("alt").map_or("", String::as_str);
+        let alt = node.attributes.get_bit(ATTR_ALT).unwrap_or("");
         if alt.is_empty() {
           self.last_node_is_inline = is_inline;
           return;
@@ -882,7 +925,7 @@ impl ConvertState {
     }
 
     if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
-      self.record_item_marker(self.stack[stack_len - 1].index, output_start);
+      self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
     }
 
     // The blank line that re-enables Markdown must be looked for *inside* the
@@ -939,7 +982,7 @@ impl ConvertState {
       {
         let output_start = self.buffer.len() - emitted.len();
         let language =
-          Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
+          Self::get_language_from_class(self.stack[stack_len - 1].attributes.get_bit(ATTR_CLASS))
             .to_string();
         self.start_code_fence(
           output_start,
@@ -1053,12 +1096,12 @@ impl ConvertState {
 
     // Check override
     let override_config = if self.has_tag_overrides {
-      self
+      let ovs = self
         .options
         .plugins
         .as_ref()
-        .and_then(|p| p.tag_overrides.as_ref())
-        .and_then(|ovs| ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v))
+        .and_then(|p| p.tag_overrides.as_ref());
+      Self::override_for_node(ovs, self.override_idx.as_deref(), node)
     } else {
       None
     };
@@ -1233,7 +1276,7 @@ impl ConvertState {
         if self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 {
           let in_heading = (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0);
           if in_heading
-            && let Some(href) = node.attributes.get("href")
+            && let Some(href) = node.attributes.get_bit(ATTR_HREF)
             && href.starts_with('#')
             && text_len > 0
           {
@@ -1260,7 +1303,7 @@ impl ConvertState {
 
         // redundantLinks: [url](url) → url
         if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0
-          && let Some(href) = node.attributes.get("href")
+          && let Some(href) = node.attributes.get_bit(ATTR_HREF)
           && let resolved = resolve_url(
             href,
             self.options.origin.as_deref(),
@@ -1327,7 +1370,7 @@ impl ConvertState {
       self.write_output(false, is_inline, configured_new_lines, None, false);
       let link_text_end = self.buffer.len();
       // Write link close directly
-      if let Some(href) = node.attributes.get("href") {
+      if let Some(href) = node.attributes.get_bit(ATTR_HREF) {
         let capped_code_span = self.options.max_node_bytes != 0 && !self.code_spans.is_empty();
         let resolved = resolve_url(
           href,
@@ -1335,7 +1378,7 @@ impl ConvertState {
           self.options.clean_urls,
         );
         let resolved = resolved.as_ref();
-        let mut title = node.attributes.get("title").map_or("", String::as_str);
+        let mut title = node.attributes.get_bit(ATTR_TITLE).unwrap_or("");
         if !title.is_empty() && self.last_content_cache_len > 0 {
           let buf_len = self.buffer.len();
           let start = buf_len.saturating_sub(self.last_content_cache_len);
@@ -1391,6 +1434,12 @@ impl ConvertState {
         self.last_content_cache_len = self.buffer.len().saturating_sub(self.link.bracket_pos);
         if self.clean_flags & CLEAN_FRAGMENTS != 0
           && self.depth_map[TAG_CODE as usize] == 0
+          // An anchor whose enter was skipped never began a link of its own;
+          // `self.link` then still holds an enclosing anchor's state, and its
+          // bracket belongs to that ancestor. Recording it would let the
+          // cleanup splice one link's target into the other's text, so only a
+          // begin at this anchor's own depth may record.
+          && self.link.begin_depth == self.depth
           && let Some(fragment) = resolved.strip_prefix('#')
           && !fragment.is_empty()
         {
@@ -2789,7 +2838,7 @@ impl ConvertState {
           if self.pre_fence_open {
             return None;
           }
-          let lang = Self::get_language_from_class(node.attributes.get("class"));
+          let lang = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS));
           let li_depth = self.depth_map[TAG_LI as usize] as usize;
           if li_depth > 0 {
             let indent = self.list_indent.as_str();
@@ -2869,7 +2918,11 @@ impl ConvertState {
         s.push_str(&self.list_indent);
         if let Some(list) = ordered {
           use std::fmt::Write;
-          let _ = write!(s, "{}. ", Self::ordered_item_number(list, node.index));
+          let _ = write!(
+            s,
+            "{}. ",
+            Self::ordered_item_number(list, node.index as usize)
+          );
         } else {
           s.push_str("- ");
         }
@@ -2878,19 +2931,19 @@ impl ConvertState {
       TAG_A => {
         if self.in_raw_html_block() {
           self.html_element_output(node, true, true).map(Cow::Owned)
-        } else if node.attributes.contains_key("href") {
+        } else if node.attributes.contains_bit(ATTR_HREF) {
           Some(Cow::Borrowed("["))
         } else {
           None
         }
       }
       TAG_IMG => {
-        let alt = node.attributes.get("alt").map_or("", String::as_str);
-        let src = node.attributes.get("src").map_or("", String::as_str);
+        let alt = node.attributes.get_bit(ATTR_ALT).unwrap_or("");
+        let src = node.attributes.get_bit(ATTR_SRC).unwrap_or("");
         let resolved_src =
           resolve_url(src, self.options.origin.as_deref(), self.options.clean_urls);
         {
-          let title = node.attributes.get("title").map(String::as_str);
+          let title = node.attributes.get_bit(ATTR_TITLE);
           let mut s = String::with_capacity(
             alt.len() + resolved_src.len() + title.map_or(5, |title| title.len() + 8),
           );
@@ -3185,23 +3238,26 @@ impl ConvertState {
         }
       }
       TAG_IMG => {
-        if let Some(alt) = node.attributes.get("alt") {
+        if let Some(alt) = node.attributes.get_bit(ATTR_ALT) {
           return if alt.is_empty() {
             None
           } else {
-            Some(Cow::Owned(alt.clone()))
+            Some(Cow::Owned(alt.to_string()))
           };
         }
 
         if let Some(title) = node
           .attributes
-          .get("title")
+          .get_bit(ATTR_TITLE)
           .filter(|title| !title.is_empty())
         {
-          return Some(Cow::Owned(title.clone()));
+          return Some(Cow::Owned(title.to_string()));
         }
 
-        let src = node.attributes.get("src").filter(|src| !src.is_empty())?;
+        let src = node
+          .attributes
+          .get_bit(ATTR_SRC)
+          .filter(|src| !src.is_empty())?;
         Some(Cow::Owned(
           resolve_url(src, self.options.origin.as_deref(), self.options.clean_urls).into_owned(),
         ))
@@ -3512,28 +3568,25 @@ impl ConvertState {
         return NO_SPACING;
       }
     }
-    if self.has_tag_overrides {
-      // For override spacing, we'd need the node name — but we have tag_id.
-      // Use tag_id to get name for override lookup.
-      if let Some(id) = tag_id {
-        let name = TAG_NAMES[id as usize];
-        if let Some(sp) = self
-          .options
-          .plugins
-          .as_ref()
-          .and_then(|p| p.tag_overrides.as_ref())
-          .and_then(|ovs| ovs.iter().find(|(k, _)| k == name).map(|(_, v)| v))
-          .and_then(|ov| ov.spacing)
-        {
-          return sp;
-        }
+    if self.has_tag_overrides
+      && let Some(id) = tag_id
+    {
+      let ovs = self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|p| p.tag_overrides.as_ref());
+      if let Some(sp) =
+        Self::override_by_id(ovs, self.override_idx.as_deref(), id).and_then(|ov| ov.spacing)
+      {
+        return sp;
       }
     }
     node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)
   }
 
   #[inline]
-  pub(crate) fn get_language_from_class(class_name: Option<&String>) -> &str {
+  pub(crate) fn get_language_from_class(class_name: Option<&str>) -> &str {
     if let Some(class) = class_name {
       for part in class.split([' ', '\t', '\n', '\u{000C}', '\r']) {
         if let Some(lang) = part.strip_prefix("language-")
@@ -3603,7 +3656,7 @@ impl ConvertState {
   pub(crate) fn cell_span(node: &ElementNode) -> u8 {
     (node
       .attributes
-      .get("colspan")
+      .get_bit(ATTR_COLSPAN)
       .and_then(|value| parse_bounded_u32(value, u8::MAX.into()))
       .unwrap_or(1) as u8)
       .clamp(1, MAX_CELL_SPAN)
@@ -3622,7 +3675,7 @@ impl ConvertState {
   pub(crate) fn ordered_item_number(list: &ElementNode, index: usize) -> u32 {
     list
       .attributes
-      .get("start")
+      .get_bit(ATTR_START)
       .and_then(|value| parse_bounded_u32(value, MAX_ORDERED_START))
       .unwrap_or(1)
       .saturating_add(u32::try_from(index).unwrap_or(u32::MAX))
