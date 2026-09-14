@@ -3513,7 +3513,12 @@ impl ConvertState {
       }
       TAG_IMG => {
         let alt = node.attributes.get("alt").map_or("", String::as_str);
-        let src = node.attributes.get("src").map_or("", String::as_str);
+        // A data URL is unreadable and can be megabytes of base64; keep only the alt.
+        let src = node
+          .attributes
+          .get("src")
+          .filter(|src| !is_data_url(src))
+          .map_or("", String::as_str);
         let resolved_src =
           resolve_url(src, self.options.origin.as_deref(), self.options.clean_urls);
         {
@@ -3828,7 +3833,10 @@ impl ConvertState {
           return Some(Cow::Owned(title.clone()));
         }
 
-        let src = node.attributes.get("src").filter(|src| !src.is_empty())?;
+        let src = node
+          .attributes
+          .get("src")
+          .filter(|src| !src.is_empty() && !is_data_url(src))?;
         Some(Cow::Owned(
           resolve_url(src, self.options.origin.as_deref(), self.options.clean_urls).into_owned(),
         ))

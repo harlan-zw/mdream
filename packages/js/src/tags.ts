@@ -124,7 +124,7 @@ import {
   TAG_XMP,
   TagIdMap,
 } from './const'
-import { blockOpenPrefix, continuationPrefix, escapeHtml, getLanguageFromClass, isEmptyLinkHref, isInsideHeading, isInsideTableCell, isSafeHtmlUrl, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
+import { blockOpenPrefix, continuationPrefix, escapeHtml, getLanguageFromClass, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, isSafeHtmlUrl, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
 const URL_SCHEME_RE = /^[A-Z][\dA-Z+.-]*:/i
@@ -845,7 +845,9 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_IMG]: {
     enter: ({ node, state }) => {
       const alt = node.attributes?.alt || ''
-      const src = resolveUrl(node.attributes?.src || '', state.options?.origin, state.options?.clean)
+      const rawSrc = node.attributes?.src || ''
+      // A data URL is unreadable and can be megabytes of base64; keep only the alt.
+      const src = isDataUrl(rawSrc) ? '' : resolveUrl(rawSrc, state.options?.origin, state.options?.clean)
       const clean = state.options?.clean
       const stripsEmptyImage = clean === true
         || (clean !== undefined && clean !== false && clean.emptyImages === true)

@@ -82,6 +82,11 @@ pub(crate) fn is_empty_link_href(href: &str) -> bool {
   }
 }
 
+/// Whether `src` is a `data:` URL, with the same preprocessing as [`is_empty_link_href`].
+pub(crate) fn is_data_url(src: &str) -> bool {
+  scheme_matches(trim_url_c0(src), b"data:")
+}
+
 #[inline]
 fn is_scheme_char(byte: u8) -> bool {
   byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.')
@@ -656,6 +661,30 @@ mod tests {
     assert!(!is_empty_link_href("javascript\u{1a}x"));
     // A non-breaking space is not ASCII whitespace and is not stripped.
     assert!(!is_empty_link_href("\u{a0}javascript:x"));
+  }
+
+  #[test]
+  fn data_url_detection_matches_empty_link_preprocessing() {
+    for src in [
+      "data:image/png;base64,AAA=",
+      "DATA:image/png;base64,AAA=",
+      " data:,x",
+      "\tdata:,x",
+      "da\tta:,x",
+      "data:",
+    ] {
+      assert!(is_data_url(src), "{src:?}");
+    }
+    for src in [
+      "database.png",
+      "/data/x.png",
+      "https://example.com/data:x",
+      "",
+      "   ",
+      "\u{a0}data:,x",
+    ] {
+      assert!(!is_data_url(src), "{src:?}");
+    }
   }
 
   #[test]

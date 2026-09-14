@@ -12,7 +12,7 @@ use crate::types::{
   ElementNode, ExtractedElement, HTMLToMarkdownOptions, OutputFormat, TagHandler, TailwindData,
 };
 use crate::url::{
-  is_autolink_uri, is_empty_link_href, is_safe_html_url, resolve_url, slugify_heading,
+  is_autolink_uri, is_data_url, is_empty_link_href, is_safe_html_url, resolve_url, slugify_heading,
 };
 use std::borrow::Cow;
 
