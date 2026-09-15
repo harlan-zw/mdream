@@ -1,5 +1,5 @@
 import type { ElementNode, Node } from './types'
-import { NEWLINE_CHAR, SPACE_CHAR, TAG_BLOCKQUOTE, TAG_H1, TAG_H6, TAG_LI, TAG_TD, TAG_TH } from './const'
+import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_BLOCKQUOTE, TAG_H1, TAG_H6, TAG_LI, TAG_SPAN, TAG_TD, TAG_TH } from './const'
 import {
   HTML_ENTITIES,
   MAX_ENTITY_NAME_LENGTH,
@@ -40,6 +40,20 @@ function schemeMatches(href: string, start: number, end: number, scheme: string)
       return true
   }
   return false
+}
+
+/**
+ * Whether `src` is a `data:` URL, with the same preprocessing as {@link isEmptyLinkHref}.
+ */
+export function isDataUrl(src: string): boolean {
+  let start = 0
+  while (start < src.length && src.charCodeAt(start) <= 32)
+    start++
+  let end = src.length
+  while (end > start && src.charCodeAt(end - 1) <= 32)
+    end--
+
+  return schemeMatches(src, start, end, 'data:')
 }
 
 /**
@@ -264,8 +278,8 @@ export function parseUnsignedInteger(raw: string | undefined): number | undefine
  * legitimately return `''`, so the last *fragment* is not always the last
  * character.
  */
-function lastOutputChar(buffer: readonly string[]): number {
-  for (let index = buffer.length - 1; index >= 0; index--) {
+export function lastOutputChar(buffer: readonly string[], end = buffer.length): number {
+  for (let index = end - 1; index >= 0; index--) {
     const fragment = buffer[index]!
     if (fragment.length > 0)
       return fragment.charCodeAt(fragment.length - 1)
@@ -280,8 +294,9 @@ function lastOutputChar(buffer: readonly string[]): number {
 export function blockOpenPrefix(
   buffer: readonly string[],
   prefix: string | undefined,
+  end = buffer.length,
 ): string | undefined {
-  switch (lastOutputChar(buffer)) {
+  switch (lastOutputChar(buffer, end)) {
     // Empty output.
     case -1:
       return undefined
@@ -289,7 +304,7 @@ export function blockOpenPrefix(
       // A trailing space can be a pending list marker already at the content
       // column, or ordinary text (`"item "`) that still has to break as a
       // paragraph. Only the former needs no separator.
-      let fragment = buffer.length - 1
+      let fragment = end - 1
       let index = buffer[fragment]!.length
       for (;;) {
         if (index === 0) {
@@ -313,6 +328,18 @@ export function blockOpenPrefix(
     default:
       return `\n\n${prefix ?? ''}`
   }
+}
+
+export function figcaptionOwnsBlockSpacing(node: Node, plainText: boolean): boolean {
+  let parent = node.parent
+  while (parent) {
+    if (parent.tagId === TAG_TD || parent.tagId === TAG_TH)
+      return false
+    if (!plainText && parent.tagId !== TAG_SPAN && parent.tagHandler?.collapsesInnerWhiteSpace)
+      return false
+    parent = parent.parent
+  }
+  return true
 }
 
 /**
@@ -521,11 +548,16 @@ export function decodeHTMLEntities(
   return result
 }
 
-export function traverseUpToFirstBlockNode(node: Node) {
+function isInlineNode(node: ElementNode): boolean {
+  const isInline = node.tagHandler?.isInline
+  return isInline === undefined ? node.tagId === -1 : isInline
+}
+
+export function traverseUpToFirstBlockNode(node: ElementNode) {
   let firstBlockParent = node
   const parentsToIncrement = [firstBlockParent]
   // find first block element
-  while (firstBlockParent.tagHandler?.isInline) {
+  while (isInlineNode(firstBlockParent)) {
     if (!firstBlockParent.parent) {
       break
     }
@@ -533,4 +565,32 @@ export function traverseUpToFirstBlockNode(node: Node) {
     parentsToIncrement.push(firstBlockParent)
   }
   return parentsToIncrement
+}
+
+export function markRenderedChildContent(node: Node): void {
+  let parent = node.parent
+  let anchorInScope = false
+  while (parent) {
+    parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
+    if (parent.tagId === TAG_A)
+      anchorInScope = true
+    if (!isInlineNode(parent))
+      break
+    parent = parent.parent
+  }
+  if (anchorInScope)
+    return
+
+  let anchorFound = false
+  while (parent?.parent) {
+    parent = parent.parent
+    if (!anchorFound) {
+      if (parent.tagId !== TAG_A)
+        continue
+      anchorFound = true
+    }
+    parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
+    if (!isInlineNode(parent))
+      return
+  }
 }

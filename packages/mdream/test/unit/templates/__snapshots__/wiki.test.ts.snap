@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`tables { name: 'JavaScript Engine', engine: { htmlToMarkdown: [Function htmlToMarkdown], streamHtmlToMarkdown: [Function streamHtmlToMarkdown] } } > breaking test 1`] = `
+exports[`tables { name: 'JavaScript Engine', …(1) } > breaking test 1`] = `
 "Main menu
 
 Main menu
@@ -8,13 +8,13 @@ Main menu
 move to sidebar hide"
 `;
 
-exports[`tables { name: 'JavaScript Engine', engine: { htmlToMarkdown: [Function htmlToMarkdown], streamHtmlToMarkdown: [Function streamHtmlToMarkdown] } } > headings 1`] = `
+exports[`tables { name: 'JavaScript Engine', …(1) } > headings 1`] = `
 "## Conventions
 
 \\[[edit](/w/index.php?title=List_of_chiropterans&action=edit&section=1 "Edit section: Conventions")]"
 `;
 
-exports[`tables { name: 'JavaScript Engine', engine: { htmlToMarkdown: [Function htmlToMarkdown], streamHtmlToMarkdown: [Function streamHtmlToMarkdown] } } > wikipedia 1`] = `
+exports[`tables { name: 'JavaScript Engine', …(1) } > wikipedia 1`] = `
 "Subfamily **[Emballonurinae](/wiki/Emballonurinae)** – [Gervais](/wiki/Paul_Gervais "Paul Gervais"), 1856 – twelve genera
 
 | Name | Authority and species | Range | Size and ecology |
@@ -33,7 +33,7 @@ exports[`tables { name: 'JavaScript Engine', engine: { htmlToMarkdown: [Function
 | *[Saccopteryx](/wiki/Saccopteryx)*<br>(sac-winged bat) [![Brown bats](https://upload.wikimedia.org/wikipedia/commons/thumb/7/70/Frosted_Sac-winged_Bat_imported_from_iNaturalist_photo_17543865_on_2_December_2024.jpg/250px-Frosted_Sac-winged_Bat_imported_from_iNaturalist_photo_17543865_on_2_December_2024.jpg)](/wiki/File:Frosted_Sac-winged_Bat_imported_from_iNaturalist_photo_17543865_on_2_December_2024.jpg) | [Illiger](/wiki/Johann_Karl_Wilhelm_Illiger "Johann Karl Wilhelm Illiger"), 1811 <br><br>hideFive species<ul><li>*S. antioquensis* ([Antioquian sac-winged bat](/wiki/Antioquian_sac-winged_bat))</li><li>*S. bilineata* ([Greater sac-winged bat](/wiki/Greater_sac-winged_bat))</li><li>*S. canescens* ([Frosted sac-winged bat](/wiki/Frosted_sac-winged_bat), pictured)</li><li>*S. gymnura* ([Amazonian sac-winged bat](/wiki/Amazonian_sac-winged_bat))</li><li>*S. leptura* ([Lesser sac-winged bat](/wiki/Lesser_sac-winged_bat))</li></ul> | Mexico, Central America, and South America | *Size range*: 3 cm (1 in) long, plus 1 cm (0.4 in) tail (Amazonian sac-winged bat) to 6 cm (2 in) long, plus 3 cm (1 in) tail (greater sac-winged bat)<sup>[\\[6\\]](#cite_note-EmballonuridaeSize-6)</sup><br><br>*Habitats*: Caves and forest<sup>[\\[18\\]](#cite_note-SaccopteryxHabitat-18)</sup> |"
 `;
 
-exports[`tables { name: 'Rust Engine', engine: { htmlToMarkdown: [Function rustHtmlToMarkdown], streamHtmlToMarkdown: [Function rustStreamHtmlToMarkdown] } } > breaking test 1`] = `
+exports[`tables { name: 'Rust Engine', …(1) } > breaking test 1`] = `
 "Main menu
 
 Main menu
@@ -41,13 +41,13 @@ Main menu
 move to sidebar hide"
 `;
 
-exports[`tables { name: 'Rust Engine', engine: { htmlToMarkdown: [Function rustHtmlToMarkdown], streamHtmlToMarkdown: [Function rustStreamHtmlToMarkdown] } } > headings 1`] = `
+exports[`tables { name: 'Rust Engine', …(1) } > headings 1`] = `
 "## Conventions
 
 \\[[edit](/w/index.php?title=List_of_chiropterans&action=edit&section=1 "Edit section: Conventions")]"
 `;
 
-exports[`tables { name: 'Rust Engine', engine: { htmlToMarkdown: [Function rustHtmlToMarkdown], streamHtmlToMarkdown: [Function rustStreamHtmlToMarkdown] } } > wikipedia 1`] = `
+exports[`tables { name: 'Rust Engine', …(1) } > wikipedia 1`] = `
 "Subfamily **[Emballonurinae](/wiki/Emballonurinae)** – [Gervais](/wiki/Paul_Gervais "Paul Gervais"), 1856 – twelve genera
 
 | Name | Authority and species | Range | Size and ecology |

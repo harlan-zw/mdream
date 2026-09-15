@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { MarkdownStream as BrowserMarkdownStream, createMarkdownStream } from '../../src/browser'
-import { MarkdownStream as EdgeMarkdownStream } from '../../src/edge'
+import { MarkdownStream as BrowserMarkdownStream, createMarkdownStream } from '../../src/browser.js'
+import { MarkdownStream as EdgeMarkdownStream } from '../../src/edge.js'
 
 const { control, BindingMarkdownStream } = vi.hoisted(() => {
   const control = { failProcessChunkBytes: false }

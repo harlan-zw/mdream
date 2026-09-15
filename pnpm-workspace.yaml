@@ -3,6 +3,14 @@ minimumReleaseAgeExclude:
   - c12@4.0.0-rc.1
   - confbox@0.3.1
   - pkg-types@2.3.2
+  - '@clack/core@1.5.0'
+  - '@clack/prompts@1.8.0'
+  - '@nuxt/test-utils@4.3.2'
+  - '@types/node@26.5.0'
+  - miniflare@5.20260907.0-alpha
+  - tldts-core@7.4.12
+  - tldts@7.4.12
+  - wrangler@4.129.1
 
 trustPolicy: no-downgrade
 # These versions predate npm provenance/trusted-publishing, while their newer
@@ -50,27 +58,28 @@ catalog:
   '@actions/exec': ^3.0.0
   '@antfu/eslint-config': ^9.5.1
   '@arethetypeswrong/cli': ^0.18.5
-  '@clack/prompts': ^1.7.0
+  '@clack/prompts': ^1.8.0
   '@cloudflare/vitest-pool-workers': ^0.22.0
   # napi-build 2.4 links emnapi v2 exports; keep the runtime and archive aligned.
-  '@emnapi/core': 2.0.0-alpha.4
-  '@emnapi/runtime': 2.0.0-alpha.4
-  '@emnapi/wasi-threads': ^2.0.1
+  '@emnapi/core': 2.0.0-alpha.5
+  '@emnapi/runtime': 2.0.0-alpha.5
+  '@emnapi/wasi-threads': ^2.1.0
   '@napi-rs/cli': ^3.9.0
   '@napi-rs/wasm-runtime': ^1.2.3
-  '@nuxt/devtools': 4.0.0-alpha.16
+  '@nuxt/devtools': 4.0.0-alpha.17
   '@nuxt/kit': ^4.5.2
   '@nuxt/module-builder': ^1.0.3
   '@nuxt/schema': ^4.5.2
-  '@nuxt/test-utils': ^4.2.0
+  '@nuxt/test-utils': ^4.3.2
   '@tybys/wasm-util': ^0.10.3
-  '@types/node': ^26.4.1
+  '@types/node': ^26.5.0
   '@types/picomatch': ^4.0.3
+  '@typescript/native': npm:typescript@^7.0.2
   '@vercel/ncc': ^0.45.0
   '@vitejs/plugin-vue': ^6.0.8
-  '@vitest/browser': ^4.1.11
-  '@vitest/browser-playwright': ^4.1.11
-  bumpp: ^12.2.3
+  '@vitest/browser': ^5.0.0
+  '@vitest/browser-playwright': ^5.0.0
+  bumpp: ^12.3.0
   c12: 4.0.0-rc.1
   cac: ^7.0.0
   changelogen: ^0.6.2
@@ -78,8 +87,8 @@ catalog:
   consola: ^3.4.2
   cross-env: ^10.1.0
   defu: ^6.1.7
-  emnapi: 2.0.0-alpha.4
-  eslint: ^10.9.1
+  emnapi: 2.0.0-alpha.5
+  eslint: ^10.10.0
   express: ^5.2.1
   hookable: ^6.1.1
   jsdom: ^30.0.1
@@ -91,19 +100,21 @@ catalog:
   ofetch: ^1.5.1
   pathe: ^2.0.3
   picomatch: ^4.0.7
-  playwright: ^1.62.1
+  playwright: ^1.63.0
   sirv: ^3.0.2
   tinyglobby: ^0.2.17
-  tldts: ^7.4.11
+  tldts: ^7.4.12
   tslib: ^2.8.1
-  typescript: 6.0.3
+  # ESLint and Vue tooling need the v6 API. @typescript/native supplies tsc v7.
+  typescript: npm:@typescript/typescript6@^6.0.2
   ufo: ^1.6.4
-  vite: ^8.2.1
-  vitest: ^4.1.11
+  vite: ^8.2.2
+  # eslint-disable-next-line pnpm/yaml-no-duplicate-catalog-item -- Cloudflare's worker pool requires Vitest 4.
+  vitest: ^5.0.0
   vue: ^3.5.42
   vue-router: ^5.3.1
   vue-tsc: ^3.3.11
-  wrangler: ^4.128.0
+  wrangler: ^4.129.1
 
 catalogs:
   bench:
@@ -116,3 +127,6 @@ catalogs:
     turndown: ^7.2.4
     turndown-plugin-gfm: ^1.0.2
     unified: ^11.0.5
+  # Cloudflare's worker pool supports Vitest 4.
+  workers:
+    vitest: ^4.1.11

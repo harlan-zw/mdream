@@ -980,26 +980,42 @@ impl ConvertState {
     let current_walk_index = self.stack.last().map_or(0, |n| n.current_walk_index);
     let extras = NodeExtras::for_tag(is_builtin, tag_name);
 
-    let (h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) = if let Some(h) = tag_handler
+    let (mut h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) =
+      if let Some(h) = tag_handler {
+        (
+          h.is_inline,
+          h.excludes_text_nodes,
+          h.is_non_nesting,
+          h.collapses_inner_white_space,
+          h.spacing,
+        )
+      } else if tag_id.is_none() {
+        // Truly unknown tag (not in dictionary, no override): treat as inline
+        // with zero spacing so it doesn't fragment the surrounding paragraph.
+        // `<p>before <ex>foo</ex> after</p>` becomes `before foo after`. Users
+        // opt custom elements into block semantics via `tagOverrides`.
+        (true, false, false, false, Some(NO_SPACING))
+      } else {
+        // Built-in tag without a dedicated handler (e.g. caption, span fallback):
+        // keep previous block-default behaviour.
+        (false, false, false, false, None)
+      };
+    if self.has_tag_overrides
+      && let Some(is_inline) = self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|plugins| plugins.tag_overrides.as_ref())
+        .and_then(|overrides| {
+          let override_name = tag_id
+            .filter(|_| is_builtin)
+            .map_or(tag_name, |id| TAG_NAMES[id as usize]);
+          overrides.iter().find(|(name, _)| name == override_name)
+        })
+        .and_then(|(_, config)| config.is_inline)
     {
-      (
-        h.is_inline,
-        h.excludes_text_nodes,
-        h.is_non_nesting,
-        h.collapses_inner_white_space,
-        h.spacing,
-      )
-    } else if tag_id.is_none() {
-      // Truly unknown tag (not in dictionary, no override): treat as inline
-      // with zero spacing so it doesn't fragment the surrounding paragraph.
-      // `<p>before <ex>foo</ex> after</p>` becomes `before foo after`. Users
-      // opt custom elements into block semantics via `tagOverrides`.
-      (true, false, false, false, Some(NO_SPACING))
-    } else {
-      // Built-in tag without a dedicated handler (e.g. caption, span fallback):
-      // keep previous block-default behaviour.
-      (false, false, false, false, None)
-    };
+      h_inline = is_inline;
+    }
 
     let mut tag = if let Some(mut pooled) = self.node_pool.pop() {
       pooled.extras = extras;
