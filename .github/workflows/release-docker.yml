@@ -5,14 +5,8 @@ on:
     inputs:
       tag:
         description: Release tag to build
-        required: false
-        type: string
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Tag to build and publish
         required: true
-        default: latest
+        type: string
 
 env:
   REGISTRY_DOCKERHUB: docker.io
@@ -31,6 +25,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -85,37 +81,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from tag
+      - name: Resolve release channel
         id: version
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          GH_REF: ${{ github.ref }}
-          INPUT_TAG: ${{ inputs.tag }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          if [[ -n "$INPUT_TAG" ]]; then
-            VERSION="$INPUT_TAG"
-          elif [[ "$GH_REF" == refs/tags/* ]]; then
-            VERSION="${GH_REF#refs/tags/v}"
-          elif [[ "$EVENT_NAME" == "release" ]]; then
-            VERSION="${RELEASE_TAG#v}"
-          else
-            VERSION=latest
-          fi
-          VERSION="${VERSION#v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building version: $VERSION"
-
-      - name: Check if prerelease
-        id: prerelease
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          if [[ "$VERSION" == *"-"* ]]; then
-            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: node scripts/release-channel.mjs "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Extract metadata
         id: meta
@@ -124,16 +94,16 @@ jobs:
           images: |
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
             ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-          # `latest` is kept as a back-compat alias of `crawl`; documentation
-          # points users at the explicit `crawl` tag.
+          flavor: latest=false
           tags: |
-            type=raw,value=crawl
-            type=raw,value=latest,enable=${{ steps.prerelease.outputs.is_prerelease == 'false' }}
+            type=raw,value=crawl,enable=${{ steps.version.outputs.latest == 'true' }}
+            type=raw,value=${{ steps.version.outputs.npmTag }}-crawl
+            type=raw,value=${{ steps.version.outputs.npmTag }}
             type=raw,value=${{ steps.version.outputs.version }}
             type=raw,value=${{ steps.version.outputs.version }}-crawl
             type=semver,pattern={{version}},value=v${{ steps.version.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=v${{ steps.version.outputs.version }},enable=${{ steps.prerelease.outputs.is_prerelease == 'false' }}
-            type=semver,pattern={{major}},value=v${{ steps.version.outputs.version }},enable=${{ steps.prerelease.outputs.is_prerelease == 'false' }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.prerelease == 'false' }}
+            type=semver,pattern={{major}},value=v${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.prerelease == 'false' }}
           labels: |
             org.opencontainers.image.title=mdream (crawl)
             org.opencontainers.image.description=Site crawler that generates llms.txt artifacts, with Playwright Chrome
@@ -157,7 +127,7 @@ jobs:
       - name: Test published crawl image
         run: |
           echo "Testing published crawl image..."
-          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:crawl
+          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-crawl
           docker pull "$IMAGE"
 
           echo "Testing --help..."
@@ -177,7 +147,7 @@ jobs:
 
       - name: Report crawl image size
         env:
-          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:crawl
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-crawl
         run: |
           echo "## Crawl Image Size" >> "$GITHUB_STEP_SUMMARY"
           SIZE=$(docker inspect "$IMAGE" --format='{{.Size}}' | numfmt --to=iec-i --suffix=B)
@@ -194,6 +164,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -211,26 +183,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from tag
+      - name: Resolve release channel
         id: version
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          GH_REF: ${{ github.ref }}
-          INPUT_TAG: ${{ inputs.tag }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          if [[ -n "$INPUT_TAG" ]]; then
-            VERSION="$INPUT_TAG"
-          elif [[ "$GH_REF" == refs/tags/* ]]; then
-            VERSION="${GH_REF#refs/tags/v}"
-          elif [[ "$EVENT_NAME" == "release" ]]; then
-            VERSION="${RELEASE_TAG#v}"
-          else
-            VERSION=latest
-          fi
-          VERSION="${VERSION#v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building version: $VERSION"
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: node scripts/release-channel.mjs "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Extract metadata
         id: meta
@@ -239,8 +196,10 @@ jobs:
           images: |
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
             ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          flavor: latest=false
           tags: |
-            type=raw,value=core
+            type=raw,value=core,enable=${{ steps.version.outputs.latest == 'true' }}
+            type=raw,value=${{ steps.version.outputs.npmTag }}-core
             type=raw,value=${{ steps.version.outputs.version }}-core
           labels: |
             org.opencontainers.image.title=mdream (core)
@@ -263,7 +222,7 @@ jobs:
       - name: Test published core image
         run: |
           echo "Testing published core image..."
-          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:core
+          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-core
           docker pull "$IMAGE"
 
           echo "Testing --help..."
@@ -280,7 +239,7 @@ jobs:
 
       - name: Report core image size
         env:
-          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:core
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-core
         run: |
           echo "## Core Image Size" >> "$GITHUB_STEP_SUMMARY"
           SIZE=$(docker inspect "$IMAGE" --format='{{.Size}}' | numfmt --to=iec-i --suffix=B)
@@ -294,8 +253,8 @@ jobs:
     steps:
       - name: Notify release success
         env:
-          RELEASE_REF: ${{ github.event.release.tag_name || github.ref_name }}
+          RELEASE_REF: ${{ inputs.tag }}
         run: |
           echo "Docker images for $RELEASE_REF published successfully!"
-          echo "- crawl: ${{ secrets.DOCKERHUB_USERNAME }}/mdream:crawl (and :latest)"
-          echo "- core:  ${{ secrets.DOCKERHUB_USERNAME }}/mdream:core"
+          echo "- crawl: ${{ secrets.DOCKERHUB_USERNAME }}/mdream:${RELEASE_REF#v}-crawl"
+          echo "- core: ${{ secrets.DOCKERHUB_USERNAME }}/mdream:${RELEASE_REF#v}-core"

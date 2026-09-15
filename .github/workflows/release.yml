@@ -16,16 +16,45 @@ on:
         required: true
         type: string
 
-jobs:
-  native:
-    uses: ./.github/workflows/release-native.yml
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
-  publish:
+jobs:
+  prepare:
     runs-on: ubuntu-latest
-    needs: [native]
+    outputs:
+      npmTag: ${{ steps.channel.outputs.npmTag }}
+      prerelease: ${{ steps.channel.outputs.prerelease }}
+      latest: ${{ steps.channel.outputs.latest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+      - name: Resolve release channel
+        id: channel
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: node scripts/release-channel.mjs "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      - name: Verify release branch
+        env:
+          RELEASE_BRANCH: ${{ steps.channel.outputs.branch }}
+        run: git merge-base --is-ancestor HEAD "origin/$RELEASE_BRANCH"
+
+  native:
+    needs: [prepare]
+    uses: ./.github/workflows/release-native.yml
+    with:
+      tag: ${{ inputs.tag || github.ref_name }}
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [prepare, native]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
 
       - name: Install pnpm
@@ -42,9 +71,20 @@ jobs:
 
       - name: Create GitHub release
         if: github.event_name == 'push'
-        run: npx changelogithub
         env:
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          LATEST: ${{ needs.prepare.outputs.latest }}
+        run: |
+          npx changelogithub --to "$RELEASE_TAG" --output "$RUNNER_TEMP/release-notes.md"
+          args=(--verify-tag --notes-file "$RUNNER_TEMP/release-notes.md" "--latest=$LATEST")
+          if [[ "$PRERELEASE" == true ]]; then
+            args+=(--prerelease)
+          fi
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" "${args[@]}"
+          fi
 
       - name: Install Dependencies
         run: pnpm i --frozen-lockfile
@@ -87,18 +127,6 @@ jobs:
         # generated declarations when ncc bundles the action.
         run: pnpm --filter './packages/**' run build
 
-      - name: Determine npm dist-tag
-        id: dist-tag
-        env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-        run: |
-          VERSION="${RELEASE_TAG#v}"
-          if [[ "$VERSION" == *"-"* ]]; then
-            echo "tag=--tag beta" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Publish platform packages
         run: |
           failed=""
@@ -118,7 +146,7 @@ jobs:
               fi
               # WASI bundles its runtime dependencies; pnpm requires the
               # hoisted linker while assembling that package for publish.
-              PNPM_CONFIG_NODE_LINKER=hoisted pnpm publish --access public --no-git-checks --provenance ${{ steps.dist-tag.outputs.tag }} --filter "$name" || failed="$failed $name"
+              PNPM_CONFIG_NODE_LINKER=hoisted pnpm publish --access public --no-git-checks --provenance --tag "${{ needs.prepare.outputs.npmTag }}" --filter "$name" || failed="$failed $name"
             fi
           done
           if [ -n "$failed" ]; then
@@ -141,7 +169,7 @@ jobs:
                 echo "Skipping $name@$version (already published)"
                 continue
               fi
-              pnpm publish --access public --no-git-checks --provenance ${{ steps.dist-tag.outputs.tag }} --filter "$name" || failed="$failed $name"
+              pnpm publish --access public --no-git-checks --provenance --tag "${{ needs.prepare.outputs.npmTag }}" --filter "$name" || failed="$failed $name"
             fi
           done
           if [ -n "$failed" ]; then
