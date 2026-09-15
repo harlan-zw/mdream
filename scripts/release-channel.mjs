@@ -14,7 +14,7 @@ export function resolveRelease(tag, packageVersion) {
   return {
     version,
     branch: maintenance ? '1.x' : 'main',
-    npmTag: maintenance ? '1.x' : prerelease ? 'beta' : 'latest',
+    npmTag: maintenance ? 'latest-1' : prerelease ? 'beta' : 'latest',
     prerelease,
     latest: !maintenance && !prerelease,
   }
