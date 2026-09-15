@@ -6,7 +6,7 @@ import { resolveRelease } from '../release-channel.mjs'
 
 test('maintenance releases cannot replace stable or beta tags', () => {
   const result = resolveRelease('v1.7.4', '1.7.4')
-  assert.equal(result.npmTag, '1.x')
+  assert.equal(result.npmTag, 'latest-1')
   assert.equal(result.branch, '1.x')
   assert.equal(result.latest, false)
   assert.equal(result.prerelease, false)
