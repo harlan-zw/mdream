@@ -53,7 +53,7 @@ import { createHtmlOutputState, processHtmlOutputEvent } from './html-output'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
 import { breakHandler, renderBreak, resolveUrl } from './tags'
-import { blockOpenPrefix, continuationPrefix, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, orderedItemNumber } from './utils'
+import { blockOpenPrefix, continuationPrefix, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, orderedItemNumber } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -1162,9 +1162,10 @@ function getPlainTextOutput(node: ElementNode, eventType: number, state: Markdow
         || (clean != null && clean !== false && clean.emptyImages === true)
       if (stripsEmptyImage && !(alt !== undefined && alt.trim().length > 0))
         return undefined
+      const src = node.attributes?.src || ''
       const output = alt !== undefined
         ? alt || undefined
-        : node.attributes?.title || resolveUrl(node.attributes?.src || '', state.options?.origin, state.options?.clean) || undefined
+        : node.attributes?.title || resolveUrl(isDataUrl(src) ? '' : src, state.options?.origin, state.options?.clean) || undefined
       if (output && hasNonWhitespace(output))
         markRenderedChildContent(node)
       return output

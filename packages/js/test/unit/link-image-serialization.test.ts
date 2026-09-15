@@ -23,4 +23,23 @@ describe('gfm link and image serialization', () => {
   ])('serializes a reparsable image for %s', (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)
   })
+
+  it.each([
+    ['<img src="data:image/png;base64,iVBORw0KGgo=" alt="chart">', '![chart]()'],
+    ['<img src="data:image/png;base64,iVBORw0KGgo=">', '![]()'],
+    ['<img src="data:image/png;base64,AAA=" alt="chart" title="Fig 1">', '![chart]( "Fig 1")'],
+    ['<a href="https://x.com"><img src="data:image/png;base64,AAA=" alt="linked"></a>', '[![linked]()](https://x.com)'],
+    ['<img src="/photo.png" alt="remote">', '![remote](/photo.png)'],
+  ])('drops the data URL payload for %s', (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+  })
+
+  it.each([
+    ['<img src="data:image/png;base64,AAA=" alt="Alt">', 'Alt'],
+    ['<img src="data:image/png;base64,AAA=" title="Title">', 'Title'],
+    ['<img src="data:image/png;base64,AAA=">', ''],
+    ['<img src="image.png">', 'image.png'],
+  ])('never falls back to a data URL in text output for %s', (html, expected) => {
+    expect(htmlToMarkdown(html, { format: 'text' })).toBe(expected)
+  })
 })

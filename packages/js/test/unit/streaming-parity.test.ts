@@ -69,6 +69,10 @@ describe('streaming parity with the Rust core', () => {
       `<a href=/a/b/>link</a>`,
       `[link](/a/b/)`,
     ],
+    [
+      `<p>before</p><img src="data:image/png;base64,iVBORw0KGgo=" alt="chart"><p>after</p>`,
+      `before\n\n![chart]()\n\nafter`,
+    ],
   ])('keeps malformed attribute recovery stable across every split for %s', async (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)
     await expectStreamingParity(html)

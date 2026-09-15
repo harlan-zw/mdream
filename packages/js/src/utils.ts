@@ -43,6 +43,20 @@ function schemeMatches(href: string, start: number, end: number, scheme: string)
 }
 
 /**
+ * Whether `src` is a `data:` URL, with the same preprocessing as {@link isEmptyLinkHref}.
+ */
+export function isDataUrl(src: string): boolean {
+  let start = 0
+  while (start < src.length && src.charCodeAt(start) <= 32)
+    start++
+  let end = src.length
+  while (end > start && src.charCodeAt(end - 1) <= 32)
+    end--
+
+  return schemeMatches(src, start, end, 'data:')
+}
+
+/**
  * Whether `href` cannot represent meaningful navigation: a bare `#`, or a
  * `javascript:`, `data:` or `vbscript:` URL.
  *

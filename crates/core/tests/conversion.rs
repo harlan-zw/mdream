@@ -203,6 +203,22 @@ fn plain_text_images_fall_back_to_title_then_src() {
 }
 
 #[test]
+fn plain_text_images_never_fall_back_to_a_data_url() {
+  assert_eq!(
+    convert_text(r#"<img src="data:image/png;base64,AAA=" alt="Alt">"#),
+    "Alt"
+  );
+  assert_eq!(
+    convert_text(r#"<img src="data:image/png;base64,AAA=" title="Title">"#),
+    "Title"
+  );
+  assert_eq!(
+    convert_text(r#"<img src="data:image/png;base64,AAA=">"#),
+    ""
+  );
+}
+
+#[test]
 fn plain_text_pre_preserves_content_without_synthetic_formatting() {
   assert_eq!(
     convert_text("<pre>  first line\nsecond line</pre>"),
@@ -992,6 +1008,46 @@ fn image_with_origin() {
     convert_with_origin(r#"<img src="/img.png" alt="photo">"#, "https://example.com"),
     "![photo](https://example.com/img.png)"
   );
+}
+
+#[test]
+fn data_url_images_drop_the_payload_and_keep_the_description() {
+  for (html, expected) in [
+    (
+      r#"<img src="data:image/png;base64,iVBORw0KGgo=" alt="chart">"#,
+      "![chart]()",
+    ),
+    (r#"<img src="data:image/png;base64,iVBORw0KGgo=">"#, "![]()"),
+    (
+      r#"<img src="data:image/png;base64,iVBORw0KGgo=" alt="chart" title="Fig 1">"#,
+      r#"![chart]( "Fig 1")"#,
+    ),
+    (
+      r#"<a href="https://x.com"><img src="data:image/png;base64,AAA=" alt="linked"></a>"#,
+      "[![linked]()](https://x.com)",
+    ),
+    (
+      r#"<img src="/photo.png" alt="remote">"#,
+      "![remote](/photo.png)",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn data_url_images_stream_identically_at_every_split() {
+  let input =
+    r#"<p>before</p><img src="data:image/png;base64,iVBORw0KGgo=" alt="chart"><p>after</p>"#;
+  let expected = convert(input);
+  assert_eq!(expected, "before\n\n![chart]()\n\nafter");
+  for split in 0..=input.len() {
+    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut output = stream.process_chunk(&input[..split]);
+    output.push_str(&stream.process_chunk(&input[split..]));
+    output.push_str(&stream.finish());
+    assert_eq!(output, expected, "split={split}");
+  }
 }
 
 // ── Inline formatting ──
