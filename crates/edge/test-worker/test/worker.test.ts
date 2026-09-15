@@ -59,6 +59,25 @@ describe('mdream package export in Workers runtime (#119)', () => {
 })
 
 describe('mdream WASM in Workers runtime', () => {
+  it('handles byte input through the compiled WASM binding', async () => {
+    const res = await SELF.fetch('http://localhost/bytes', { method: 'POST' })
+    const data = await res.json() as {
+      bom: string
+      bytesBom: string
+      split: string
+      invalid: string
+      mixed: string
+    }
+
+    expect(data.bom).toBe('# Title')
+    // htmlToMarkdownBytes must match MarkdownStream::process_decoded_bytes:
+    // one leading U+FEFF is stripped, not passed through to the output.
+    expect(data.bytesBom).toBe('# Title')
+    expect(data.split).toBe('Café 🌍')
+    expect(data.invalid).toBe('Bad \uFFFD byte')
+    expect(data.mixed).toBe('Mixed 🌍')
+  })
+
   it('converts basic HTML to Markdown', async () => {
     const res = await SELF.fetch('http://localhost/convert', {
       method: 'POST',

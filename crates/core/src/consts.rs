@@ -257,6 +257,26 @@ pub const ATTR_START: u16 = 1 << 10;
 pub const ATTR_COLSPAN: u16 = 1 << 11;
 pub const ATTR_ALL: u16 = u16::MAX;
 
+/// Reverse of [`attr_bit`], for re-serialisation and extraction output.
+#[inline]
+pub(crate) fn attr_name(bit: u16) -> &'static str {
+  match bit {
+    ATTR_HREF => "href",
+    ATTR_TITLE => "title",
+    ATTR_ARIA_LABEL => "aria-label",
+    ATTR_SRC => "src",
+    ATTR_ALT => "alt",
+    ATTR_CLASS => "class",
+    ATTR_ALIGN => "align",
+    ATTR_NAME => "name",
+    ATTR_PROPERTY => "property",
+    ATTR_CONTENT => "content",
+    ATTR_START => "start",
+    ATTR_COLSPAN => "colspan",
+    _ => "",
+  }
+}
+
 /// Case-insensitive, length-first so the common miss costs one compare.
 #[inline]
 pub(crate) fn attr_bit(name: &[u8]) -> u16 {

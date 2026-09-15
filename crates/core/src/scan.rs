@@ -275,18 +275,21 @@ pub(crate) fn tag_is_complete(
 }
 
 /// Scan a start tag's attribute region to its `>`, storing only the attributes
-/// `attr_mask` selects.
+/// `attr_mask` selects into `out`. `out` is cleared on entry and owned by the
+/// caller so its buffer is recycled across elements; on an incomplete tag it
+/// holds a partial capture the caller must not read.
 pub(crate) fn process_tag_attributes(
   html_chunk: &str,
   position: usize,
   tag_handler: Option<&crate::types::TagHandler>,
   attr_mask: u16,
-) -> (bool, usize, Attributes, bool) {
+  out: &mut Attributes,
+) -> (bool, usize, bool) {
   let self_closing = tag_handler.is_some_and(|h| h.is_self_closing);
   if attr_mask == ATTR_NONE {
-    scan_tag::<false>(html_chunk, position, self_closing, ATTR_NONE)
+    scan_tag::<false>(html_chunk, position, self_closing, ATTR_NONE, out)
   } else {
-    scan_tag::<true>(html_chunk, position, self_closing, attr_mask)
+    scan_tag::<true>(html_chunk, position, self_closing, attr_mask, out)
   }
 }
 
@@ -299,10 +302,11 @@ fn scan_tag<const EXTRACT: bool>(
   position: usize,
   self_closing: bool,
   attr_mask: u16,
-) -> (bool, usize, Attributes, bool) {
+  out: &mut Attributes,
+) -> (bool, usize, bool) {
   let bytes = html_chunk.as_bytes();
   let chunk_length = bytes.len();
-  let mut scan = AttrScan::new(attr_mask);
+  let mut scan = AttrScan::new(attr_mask, out);
   let mut inside_quote = false;
   let mut quote_char: u8 = 0;
   // `ATTR_NONE` compiles `AttrScan` out, but still needs the same tokenizer
@@ -313,13 +317,18 @@ fn scan_tag<const EXTRACT: bool>(
   while i < chunk_length {
     let c = bytes[i];
 
-    // A quoted value hides `>`. `EXTRACT` consumes those whole below.
+    // A quoted value hides `>`. Jump it whole; the `ATTR_NONE` scan only has to
+    // get past it, and stepping byte by byte made this the dominant cost.
     if inside_quote {
-      if c == quote_char {
-        inside_quote = false;
-        state = State::Gap;
+      match bytes[i..].iter().position(|&b| b == quote_char) {
+        Some(offset) => {
+          inside_quote = false;
+          state = State::Gap;
+          i += offset + 1;
+        }
+        // Unterminated: the tag cannot close in this chunk.
+        None => return (false, chunk_length, false),
       }
-      i += 1;
       continue;
     }
 
@@ -329,12 +338,12 @@ fn scan_tag<const EXTRACT: bool>(
       && i + 1 < chunk_length
       && bytes[i + 1] == GT_CHAR
     {
-      let attrs = scan.finish(html_chunk, i);
-      return (true, i + 2, attrs, true);
+      scan.finish(html_chunk, i);
+      return (true, i + 2, true);
     }
     if c == GT_CHAR {
-      let attrs = scan.finish(html_chunk, i);
-      return (true, i + 1, attrs, self_closing);
+      scan.finish(html_chunk, i);
+      return (true, i + 1, self_closing);
     }
 
     // Run to the closing quote without re-entering the state dispatch.
@@ -346,7 +355,7 @@ fn scan_tag<const EXTRACT: bool>(
       }
       if end == chunk_length {
         // Unterminated: the tag cannot close in this chunk.
-        return (false, chunk_length, Attributes::new(), false);
+        return (false, chunk_length, false);
       }
       scan.take_value(html_chunk, value_start, end);
       i = end + 1;
@@ -364,7 +373,7 @@ fn scan_tag<const EXTRACT: bool>(
     i += 1;
   }
 
-  (false, i, Attributes::new(), false)
+  (false, i, false)
 }
 
 /// Mask rejection happens before any lowercasing or entity decoding, so
@@ -375,18 +384,24 @@ fn push_attr(result: &mut Attributes, mask: u16, raw: &str, value: Option<&str>)
   if mask != ATTR_ALL && mask & bit == 0 {
     return;
   }
-  let name = raw.to_ascii_lowercase();
-  match value {
-    Some(value) => result.insert(name, decode_html_attribute_entities(value).into_owned()),
-    None => result.insert(name, String::new()),
+  // A known name is fully described by `bit`; only the `ATTR_ALL` long tail
+  // needs an owned, lowercased copy.
+  let value = match value {
+    Some(value) => decode_html_attribute_entities(value).into_owned(),
+    None => String::new(),
+  };
+  if bit == ATTR_NONE {
+    result.insert_custom(raw.to_ascii_lowercase().into_boxed_str(), value);
+  } else {
+    result.insert_known(bit, value);
   }
 }
 
 /// Attribute extraction fed one byte at a time by the tag scan. Offsets index
 /// the chunk itself, so nothing is allocated until a wanted attribute is whole.
-struct AttrScan {
+struct AttrScan<'a> {
   mask: u16,
-  result: Attributes,
+  result: &'a mut Attributes,
   state: State,
   name_start: usize,
   name_end: usize,
@@ -450,17 +465,17 @@ impl State {
   }
 }
 
-impl AttrScan {
+impl<'a> AttrScan<'a> {
   #[inline]
-  fn new(mask: u16) -> Self {
+  fn new(mask: u16, result: &'a mut Attributes) -> Self {
+    result.clear();
+    // A filtered mask keeps at most three names, so skip the eager reservation.
+    if mask == ATTR_ALL {
+      result.reserve(4);
+    }
     Self {
       mask,
-      // A filtered mask keeps at most three names, so skip the eager reservation.
-      result: if mask == ATTR_ALL {
-        Attributes::with_capacity(4)
-      } else {
-        Attributes::new()
-      },
+      result,
       state: State::Gap,
       name_start: 0,
       name_end: 0,
@@ -476,7 +491,7 @@ impl AttrScan {
   #[inline]
   fn take_value(&mut self, chunk: &str, value_start: usize, value_end: usize) {
     push_attr(
-      &mut self.result,
+      self.result,
       self.mask,
       &chunk[self.name_start..self.name_end],
       Some(&chunk[value_start..value_end]),
@@ -487,7 +502,7 @@ impl AttrScan {
   #[inline]
   fn take_bare_name(&mut self, chunk: &str, name_end: usize) {
     push_attr(
-      &mut self.result,
+      self.result,
       self.mask,
       &chunk[self.name_start..name_end],
       None,
@@ -540,23 +555,30 @@ impl AttrScan {
 
   /// Take the attribute still open when the tag ended at `end`.
   #[inline]
-  fn finish(mut self, chunk: &str, end: usize) -> Attributes {
+  fn finish(&mut self, chunk: &str, end: usize) {
     match self.state {
       State::Name => self.take_bare_name(chunk, end),
       State::AfterName | State::BeforeValue => self.take_bare_name(chunk, self.name_end),
       State::UnquotedValue => self.take_value(chunk, self.value_start, end),
       State::Gap => {}
     }
-    self.result
   }
 }
 
-/// Attributes of a bare region, for tests that write their input as it reads
+/// Attributes of a bare region, for tests that write input as it appears
 /// inside `<…>`.
 #[cfg(test)]
 pub(crate) fn parse_attributes(attr_str: &str, mask: u16) -> Attributes {
-  let (_, _, attrs, _) = process_tag_attributes(&format!("{attr_str}>"), 0, None, mask);
-  attrs
+  scan_attrs(&format!("{attr_str}>"), 0, mask).2
+}
+
+/// [`process_tag_attributes`] owning its capture buffer, for one-tag tests.
+#[cfg(test)]
+fn scan_attrs(html: &str, position: usize, mask: u16) -> (bool, usize, Attributes, bool) {
+  let mut attrs = Attributes::new();
+  let (complete, new_position, self_closing) =
+    process_tag_attributes(html, position, None, mask, &mut attrs);
+  (complete, new_position, attrs, self_closing)
 }
 
 #[cfg(test)]
@@ -576,8 +598,8 @@ mod tests {
   #[test]
   fn parses_quoted_and_unquoted_attributes() {
     let a = parse_attributes("href=\"/x\" id=main", ATTR_ALL);
-    assert_eq!(a.get("href").map(String::as_str), Some("/x"));
-    assert_eq!(a.get("id").map(String::as_str), Some("main"));
+    assert_eq!(a.get("href"), Some("/x"));
+    assert_eq!(a.get("id"), Some("main"));
   }
 
   /// A parse error per the spec, but the quote joins the value rather than
@@ -585,17 +607,17 @@ mod tests {
   #[test]
   fn quote_inside_an_unquoted_value_is_an_ordinary_character() {
     let a = parse_attributes("alt=Bob's src=/i.png", ATTR_ALL);
-    assert_eq!(a.get("alt").map(String::as_str), Some("Bob's"));
-    assert_eq!(a.get("src").map(String::as_str), Some("/i.png"));
+    assert_eq!(a.get("alt"), Some("Bob's"));
+    assert_eq!(a.get("src"), Some("/i.png"));
 
     let b = parse_attributes("alt=Bob\"s", ATTR_ALL);
-    assert_eq!(b.get("alt").map(String::as_str), Some("Bob\"s"));
+    assert_eq!(b.get("alt"), Some("Bob\"s"));
   }
 
   #[test]
   fn slash_inside_an_unquoted_value_is_an_ordinary_character() {
     let a = parse_attributes("href=/a/b/", ATTR_ALL);
-    assert_eq!(a.get("href").map(String::as_str), Some("/a/b/"));
+    assert_eq!(a.get("href"), Some("/a/b/"));
   }
 
   /// A repeated name is a duplicate-attribute parse error and the later one is
@@ -604,13 +626,13 @@ mod tests {
   #[test]
   fn duplicate_attribute_keeps_the_first() {
     let a = parse_attributes("href=/first href=/second", ATTR_ALL);
-    assert_eq!(a.get("href").map(String::as_str), Some("/first"));
+    assert_eq!(a.get("href"), Some("/first"));
 
     let b = parse_attributes("href=/first HREF=/second", ATTR_ALL);
-    assert_eq!(b.get("href").map(String::as_str), Some("/first"));
+    assert_eq!(b.get("href"), Some("/first"));
 
     let c = parse_attributes("href=\"/1\" href='/2' href=/3", ATTR_ALL);
-    assert_eq!(c.get("href").map(String::as_str), Some("/1"));
+    assert_eq!(c.get("href"), Some("/1"));
   }
 
   #[test]
@@ -625,16 +647,13 @@ mod tests {
   #[test]
   fn attribute_names_lowercased_values_decoded() {
     let a = parse_attributes("DATA-X='a &amp; b'", ATTR_ALL);
-    assert_eq!(a.get("data-x").map(String::as_str), Some("a & b"));
+    assert_eq!(a.get("data-x"), Some("a & b"));
   }
 
   #[test]
   fn attribute_entities_follow_ambiguous_ampersand_rules() {
     let a = parse_attributes("title='&copycat &copy=1 &copy! &copy;cat'", ATTR_ALL);
-    assert_eq!(
-      a.get("title").map(String::as_str),
-      Some("&copycat &copy=1 ©! ©cat")
-    );
+    assert_eq!(a.get("title"), Some("&copycat &copy=1 ©! ©cat"));
   }
 
   #[test]
@@ -647,7 +666,7 @@ mod tests {
     // `<a href=>` — attribute ends in `name=`, must survive as empty value
     let a = parse_attributes("href=", ATTR_ALL);
     assert!(a.contains_key("href"));
-    assert_eq!(a.get("href").map(String::as_str), Some(""));
+    assert_eq!(a.get("href"), Some(""));
   }
 
   #[test]
@@ -658,8 +677,8 @@ mod tests {
       "class=btn href=\"/x\" rel=nofollow data-id='7' TITLE=\"t\" target=_blank",
       mask,
     );
-    assert_eq!(a.get("href").map(String::as_str), Some("/x"));
-    assert_eq!(a.get("title").map(String::as_str), Some("t"));
+    assert_eq!(a.get("href"), Some("/x"));
+    assert_eq!(a.get("title"), Some("t"));
     assert!(!a.contains_key("class"));
     assert!(!a.contains_key("rel"));
     assert!(!a.contains_key("data-id"));
@@ -672,9 +691,7 @@ mod tests {
     assert!(parse_attributes("hidden href", ATTR_HREF).contains_key("href"));
     assert!(parse_attributes("hidden href=", ATTR_HREF).contains_key("href"));
     assert_eq!(
-      parse_attributes("class=c src=/i.png", ATTR_SRC)
-        .get("src")
-        .map(String::as_str),
+      parse_attributes("class=c src=/i.png", ATTR_SRC).get("src"),
       Some("/i.png")
     );
     assert!(!parse_attributes("class=c src=/i.png", ATTR_SRC).contains_key("class"));
@@ -690,7 +707,7 @@ mod tests {
   #[test]
   fn colspan_uses_the_filtered_attribute_path() {
     let attrs = parse_attributes("colspan=2 id=x", ATTR_COLSPAN);
-    assert_eq!(attrs.get("colspan").map(String::as_str), Some("2"));
+    assert_eq!(attrs.get("colspan"), Some("2"));
     assert!(!attrs.contains_key("id"));
   }
 
@@ -698,11 +715,11 @@ mod tests {
   fn process_tag_attributes_finds_close() {
     // "<a href=\"x\">" — scan from after the tag name
     let html = "a href=\"x\">rest";
-    let (complete, new_pos, attrs, self_closing) = process_tag_attributes(html, 1, None, ATTR_ALL);
+    let (complete, new_pos, attrs, self_closing) = scan_attrs(html, 1, ATTR_ALL);
     assert!(complete);
     assert!(!self_closing);
     assert_eq!(&html[new_pos..], "rest");
-    assert_eq!(attrs.get("href").map(String::as_str), Some("x"));
+    assert_eq!(attrs.get("href"), Some("x"));
   }
 
   #[test]
@@ -710,7 +727,7 @@ mod tests {
     // The closing quote may still arrive in the next chunk, so nothing is
     // reported until it does.
     let html = "a href=\"x";
-    let (complete, _, attrs, _) = process_tag_attributes(html, 1, None, ATTR_ALL);
+    let (complete, _, attrs, _) = scan_attrs(html, 1, ATTR_ALL);
     assert!(!complete);
     assert!(attrs.is_empty());
   }
@@ -718,9 +735,9 @@ mod tests {
   #[test]
   fn a_quoted_value_hides_a_tag_terminator() {
     let html = "a href=\"x>y\">rest";
-    let (complete, new_pos, attrs, _) = process_tag_attributes(html, 1, None, ATTR_ALL);
+    let (complete, new_pos, attrs, _) = scan_attrs(html, 1, ATTR_ALL);
     assert!(complete);
-    assert_eq!(attrs.get("href").map(String::as_str), Some("x>y"));
+    assert_eq!(attrs.get("href"), Some("x>y"));
     assert_eq!(&html[new_pos..], "rest");
   }
 
@@ -739,10 +756,8 @@ mod tests {
       ("a href=x='y>rest", 12),
       ("a>rest", 2),
     ] {
-      let (complete, extracted_pos, _, extracted_self_closing) =
-        process_tag_attributes(html, 1, None, ATTR_ALL);
-      let (bare_complete, bare_pos, bare_attrs, bare_self_closing) =
-        process_tag_attributes(html, 1, None, ATTR_NONE);
+      let (complete, extracted_pos, _, extracted_self_closing) = scan_attrs(html, 1, ATTR_ALL);
+      let (bare_complete, bare_pos, bare_attrs, bare_self_closing) = scan_attrs(html, 1, ATTR_NONE);
       assert!(complete, "html={html:?}");
       assert_eq!(extracted_pos, end, "html={html:?}");
       assert_eq!(complete, bare_complete, "html={html:?}");
@@ -950,9 +965,9 @@ mod tests {
         encoded /= ALPHABET.len();
       }
       let html = std::str::from_utf8(&input).expect("ASCII alphabet");
-      let (complete, position, _, self_closing) = process_tag_attributes(html, 0, None, ATTR_ALL);
+      let (complete, position, _, self_closing) = scan_attrs(html, 0, ATTR_ALL);
       let (bare_complete, bare_position, bare_attrs, bare_self_closing) =
-        process_tag_attributes(html, 0, None, ATTR_NONE);
+        scan_attrs(html, 0, ATTR_NONE);
 
       assert_eq!(complete, bare_complete, "html={html:?}");
       assert_eq!(position, bare_position, "html={html:?}");

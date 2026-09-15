@@ -54,6 +54,15 @@ export class MarkdownStream {
     }
   }
 
+  processChunkBytes(chunk: Uint8Array): string {
+    try {
+      return this._inner.processChunkBytes(chunk)
+    }
+    catch (error) {
+      throw wasmPanicError(error)
+    }
+  }
+
   finish(): string {
     try {
       return this._inner.finish()
@@ -73,22 +82,14 @@ export async function* streamHtmlToMarkdown(
   // the raw binding, wrapped once below rather than once per chunk
   const stream = new _MarkdownStream(options ? resolveOptions(options).napiOpts : undefined)
   const reader = htmlStream.getReader()
-  const decoder = new TextDecoder()
   try {
     while (true) {
       const { done, value } = await reader.read()
       if (done)
         break
-      const chunk = typeof value === 'string'
-        ? decoder.decode() + value
-        : decoder.decode(value, { stream: true })
-      const processed = stream.processChunk(chunk)
-      if (processed)
-        yield processed
-    }
-    const decoderTail = decoder.decode()
-    if (decoderTail) {
-      const processed = stream.processChunk(decoderTail)
+      const processed = typeof value === 'string'
+        ? stream.processChunk(value)
+        : stream.processChunkBytes(value)
       if (processed)
         yield processed
     }
