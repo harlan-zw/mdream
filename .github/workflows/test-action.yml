@@ -2,11 +2,11 @@ name: Test Action
 
 on:
   push:
-    branches: [main, '1.x']
+    branches: [main, 1.x]
     paths-ignore:
       - '**/*.md'
   pull_request:
-    branches: [main, '1.x']
+    branches: [main, 1.x]
     paths-ignore:
       - '**/*.md'
   workflow_dispatch:
