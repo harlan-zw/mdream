@@ -236,6 +236,21 @@ pub static TAG_NAMES: [&str; MAX_TAG_ID] = {
   names
 };
 
+/// Longest name in [`TAG_NAMES`]. A `<name` prefix longer than this cannot be a
+/// builtin, so it is a custom name and falls under the cap.
+pub const MAX_BUILTIN_TAG_NAME: usize = {
+  let mut max = 0;
+  let mut i = 0;
+  while i < MAX_TAG_ID {
+    let len = TAG_NAMES[i].len();
+    if len > max {
+      max = len;
+    }
+    i += 1;
+  }
+  max
+};
+
 pub const ELEMENT_NODE: u8 = 1;
 pub const TEXT_NODE: u8 = 2;
 
@@ -259,7 +274,7 @@ pub const ATTR_ALL: u16 = u16::MAX;
 
 /// Reverse of [`attr_bit`], for re-serialisation and extraction output.
 #[inline]
-pub(crate) fn attr_name(bit: u16) -> &'static str {
+pub(crate) const fn attr_name(bit: u16) -> &'static str {
   match bit {
     ATTR_HREF => "href",
     ATTR_TITLE => "title",
@@ -276,6 +291,22 @@ pub(crate) fn attr_name(bit: u16) -> &'static str {
     _ => "",
   }
 }
+
+/// Longest name any mask bit matches, derived from [`attr_name`] so a new
+/// attribute cannot outgrow the length at which a filtered scan stops
+/// retaining a name.
+pub(crate) const MAX_WANTED_ATTR_NAME: usize = {
+  let mut max = 0;
+  let mut bit: u16 = 1;
+  while bit != 0 {
+    let len = attr_name(bit).len();
+    if len > max {
+      max = len;
+    }
+    bit <<= 1;
+  }
+  max
+};
 
 /// Case-insensitive, length-first so the common miss costs one compare.
 #[inline]

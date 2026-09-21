@@ -311,6 +311,9 @@ fn a_rawtext_eof_residual_respects_the_text_cap() {
 #[test]
 fn text_exhaustion_ends_at_a_markup_boundary() {
   assert_capped_text("<p>aaaéz</p><p>ok</p>", 4, "aaa\n\nok", true);
+  // `<abcdefgh>` is a custom element, so its name is retained as the node's
+  // `custom_name` and charged. Eight bytes over a four byte cap drops the tag,
+  // in one shot and split alike.
   assert_capped_text("<p>aaaé<abcdefgh>ok</p>", 4, "aaa ok", true);
   assert_eq!(
     stream_parts(&["<p>aaa", "é<abc", "defgh", ">ok</p>"], 4),
@@ -399,17 +402,17 @@ fn the_default_is_inert() {
   }
 }
 
-// An unterminated tag or comment is carried raw between chunks, so it grows with
-// the token. Past the cap it must be dropped instead of carried.
+// A comment is carried raw between chunks, so it grows with the token and past
+// the cap must be dropped instead. A start tag carries only what its mask keeps,
+// so only a wanted attribute can grow one.
 #[test]
 fn an_unterminated_token_is_dropped_rather_than_carried() {
   for (name, html) in [
-    (
-      "attribute",
-      format!("<p class=\"{}\">x</p>", repeat_to("a", HUGE)),
-    ),
     ("comment", format!("<!--{}", repeat_to("a", HUGE))),
-    ("tag", format!("<p {}", repeat_to("a", HUGE))),
+    (
+      "wanted attribute",
+      format!("<a href=\"{}\">x</a>", repeat_to("a", HUGE)),
+    ),
   ] {
     let uncapped = peak(&html, 8 * 1024, 0);
     let capped = peak(&html, 8 * 1024, CAP);
@@ -421,6 +424,28 @@ fn an_unterminated_token_is_dropped_rather_than_carried() {
       capped < (HUGE / 4) as u64,
       "{name}: capped peak {capped} should be a window, not the {HUGE} byte token"
     );
+  }
+}
+
+// The mask decides before a byte is kept, so an attribute no handler asks for
+// bounds itself whatever the cap. This is what lets an element carrying a
+// megabyte of `data-*` through a far smaller cap survive intact.
+#[test]
+fn an_unwanted_attribute_is_bounded_without_a_cap() {
+  let huge = repeat_to("a", HUGE);
+  for (name, html) in [
+    ("value", format!("<p class=\"{huge}\">x</p>")),
+    ("name", format!("<p {huge}=\"v\">x</p>")),
+    ("unterminated value", format!("<p data-x=\"{huge}")),
+    ("unquoted value", format!("<p data-x={huge}>x</p>")),
+  ] {
+    for cap in [0, CAP] {
+      let observed = peak(&html, 8 * 1024, cap);
+      assert!(
+        observed < (HUGE / 8) as u64,
+        "{name}: peak {observed} at cap={cap} should not track the attribute"
+      );
+    }
   }
 }
 
@@ -1029,7 +1054,6 @@ fn truncating_fixtures() -> Vec<(&'static str, String)> {
       "text node",
       format!("<p>{}</p>", repeat_to("word ", 256 * 1024)),
     ),
-    ("attribute", format!("<p class=\"{filler}\">x</p>")),
     ("comment", format!("<!--{filler}")),
     (
       "code block",
@@ -1100,15 +1124,15 @@ fn every_kind_of_truncation_is_reported() {
 }
 
 // `true` is deliberately conservative, and this is why a byte count would lie: a
-// `class` or a comment is never emitted, so dropping it costs no output at all.
-// An `href` is emitted, so the signal cannot promise either way.
+// comment is never emitted, so dropping it costs no output at all. An `href` is
+// emitted, so the signal cannot promise either way.
 #[test]
 fn truncation_is_reported_even_when_no_output_is_lost() {
   for (name, html) in truncating_fixtures() {
     let (capped, truncated) = stream_reporting(&html, 8 * 1024, CAP);
     let (uncapped, _) = stream_reporting(&html, 8 * 1024, 0);
     assert!(truncated, "{name}");
-    if name == "attribute" || name == "comment" {
+    if name == "comment" {
       assert_eq!(capped, uncapped, "{name}: output should be unaffected");
     } else {
       assert!(
@@ -1116,6 +1140,332 @@ fn truncation_is_reported_even_when_no_output_is_lost() {
         "{name}: output should be shorter"
       );
     }
+  }
+}
+
+// The reason the cap exists is memory, and an attribute no handler asks for
+// costs none: it is scanned past and dropped. Charging the tag for it dropped
+// the element — link, heading, image — over bytes that were never kept.
+#[test]
+fn an_unwanted_attribute_never_costs_the_element() {
+  let filler = repeat_to("a", 256 * 1024);
+  for (name, html) in [
+    (
+      "link",
+      format!("<a href=\"/beer\" data-p=\"{filler}\">Beer</a>"),
+    ),
+    ("heading", format!("<h1 data-p=\"{filler}\">Title</h1>")),
+    (
+      "image",
+      format!("<img src=\"/a.png\" alt=\"pic\" data-p=\"{filler}\">"),
+    ),
+    (
+      "code block",
+      format!("<pre data-p=\"{filler}\"><code>let x = 1;</code></pre>"),
+    ),
+    (
+      "aggregate",
+      format!(
+        "<a href=\"/beer\" {}>Beer</a>",
+        repeat_to("data-p=\"aaaaaaaa\" ", 256 * 1024)
+      ),
+    ),
+  ] {
+    let (uncapped, _) = stream_reporting(&html, 8 * 1024, 0);
+    for chunk in [7, 1024, 8 * 1024, html.len()] {
+      let (capped, truncated) = stream_reporting(&html, chunk, CAP);
+      assert_eq!(capped, uncapped, "{name}: chunk={chunk}");
+      assert!(!truncated, "{name}: chunk={chunk} reported truncation");
+      assert!(
+        !capped.contains("aaaa"),
+        "{name}: the attribute leaked into the output"
+      );
+    }
+    let one_shot = html_to_markdown_result(&html, options(CAP));
+    assert_eq!(one_shot.markdown, uncapped, "{name}: one-shot");
+    assert!(!one_shot.truncated, "{name}: one-shot reported truncation");
+  }
+}
+
+// A wanted attribute is retained, so it is charged, and a tag that cannot fit
+// its own `href` is still dropped whole.
+#[test]
+fn a_wanted_attribute_past_the_cap_still_drops_the_tag() {
+  let html = format!(
+    "<p>before</p><a href=\"/{}\">Beer</a><p>after</p>",
+    repeat_to("a", 256 * 1024)
+  );
+  let expected = stream(&html, 1024, CAP);
+  assert_eq!(expected, "before\n\nBeer\n\nafter");
+  for chunk in [7, 4096, html.len()] {
+    assert_eq!(stream(&html, chunk, CAP), expected, "chunk={chunk}");
+  }
+  assert!(stream_reporting(&html, 1024, CAP).1);
+  assert!(html_to_markdown_result(&html, options(CAP)).truncated);
+}
+
+// A custom element's name is owned by the node and again by a suspended scan,
+// so an oversized one is dropped with its tag before it is normalized or
+// copied. This is the bound the raw-length check used to provide.
+#[test]
+fn a_huge_tag_name_is_charged_and_bounded() {
+  let name = repeat_to("a", HUGE);
+  let html = format!("<p>before</p><{name}>x</{name}><p>after</p>");
+  let expected = "before\n\nx\nafter";
+  for chunk in [7, 4096, html.len()] {
+    assert_eq!(stream(&html, chunk, CAP), expected, "chunk={chunk}");
+  }
+  assert_eq!(
+    html_to_markdown_result(&html, options(CAP)).markdown,
+    expected,
+    "one-shot"
+  );
+  assert!(stream_reporting(&html, 4096, CAP).1, "drop went unreported");
+
+  let observed = peak(&html, 8 * 1024, CAP);
+  assert!(
+    observed < (HUGE / 8) as u64,
+    "peak {observed} should not track the {HUGE} byte tag name"
+  );
+}
+
+// The name completes inside the chunk but the attribute region does not, so the
+// tag suspends and the pending copy used to keep the over-budget name.
+#[test]
+fn an_oversized_custom_name_is_never_copied_when_the_tag_suspends() {
+  let name = repeat_to("a", HUGE);
+  for tail in [
+    format!("<{name} data-x=\"y\""),
+    format!("<{name} data-x=\"y\">text</{name}>"),
+    format!("<{}A data-x=\"y\">text", repeat_to("a", HUGE)),
+  ] {
+    let html = format!("<p>before</p>{tail}");
+    let observed = peak(&html, 8 * 1024, CAP);
+    assert!(
+      observed < (HUGE / 8) as u64,
+      "peak {observed} should not track the {HUGE} byte name"
+    );
+  }
+}
+
+// `ATTR_ALL` wants every attribute, so a retained-byte budget undercounts `Attr`,
+// `Vec` growth and allocator overhead. The raw-length guard governs here instead.
+#[test]
+fn many_small_attributes_under_attr_all_keep_the_raw_guard() {
+  let attrs = repeat_to("data-p=\"aaaaaaaa\" ", 64 * 1024);
+  let html = format!("<p>before</p><a href=\"/b\" {attrs}>B</a><p>after</p>");
+  assert!(html.len() > CAP, "fixture must exceed the cap");
+
+  let opts = || extracting(CAP, &["a"]);
+  let observed = peak_with(&html, 8 * 1024, opts());
+  assert!(
+    observed < (4 * CAP) as u64,
+    "peak {observed} should stay a window over the cap, not the attribute set"
+  );
+
+  let result = html_to_markdown_result(&html, opts());
+  assert!(result.truncated, "an over-cap tag must stay loud");
+}
+
+// The tag's bytes are consumed into the pending scan, so `finalize` has no
+// `leftover` to measure and reports from the budget instead.
+#[test]
+fn an_unfinished_tag_at_eof_reports_only_what_the_cap_lost() {
+  let filler = repeat_to("a", HUGE);
+  let wanted = html_to_markdown_result(&format!("<p>x</p><a href=\"/{filler}"), options(CAP));
+  assert!(wanted.truncated, "a dropped retained attribute must report");
+
+  let unwanted = html_to_markdown_result(&format!("<p>x</p><a data-p=\"{filler}"), options(CAP));
+  assert!(
+    !unwanted.truncated,
+    "an unwanted attribute is absent uncapped too, so nothing was lost"
+  );
+  assert_eq!(unwanted.markdown, "x");
+}
+
+// `href` costs `4 + value`; a builtin element's own name is free.
+#[test]
+fn the_budget_boundary_is_exact() {
+  for cap in [32usize, 256, 4096] {
+    let value = repeat_to("a", cap - "href".len());
+    let exact = format!("<a href=\"{value}\">B</a>");
+    let over = format!("<a href=\"{}\">B</a>", format_args!("{value}a"));
+
+    let result = html_to_markdown_result(&exact, options(cap));
+    assert!(!result.truncated, "cap={cap}: an exact fit must be kept");
+    assert!(result.markdown.contains(&value), "cap={cap}");
+
+    let result = html_to_markdown_result(&over, options(cap));
+    assert!(result.truncated, "cap={cap}: one byte over must drop");
+    assert_eq!(result.markdown, "B", "cap={cap}");
+  }
+}
+
+// The cut is the raw tag `<name>`, not the name alone. Verified equal to
+// `upstream/main` at every point below.
+#[test]
+fn the_custom_name_boundary_matches_the_raw_tag_rule() {
+  for cap in [32usize, 256, 4096] {
+    for (len, dropped) in [
+      (cap - 3, false),
+      (cap - 2, false),
+      (cap - 1, true),
+      (cap, true),
+    ] {
+      let name = repeat_to("a", len);
+      let result = html_to_markdown_result(&format!("<{name}>x</{name}>"), options(cap));
+      assert_eq!(
+        result.truncated,
+        dropped,
+        "cap={cap} name={len} raw tag={}",
+        len + 2
+      );
+      assert_eq!(result.markdown, "x", "cap={cap} name={len}");
+    }
+  }
+}
+
+// A builtin name costs no budget, so a chunk boundary inside it must not let
+// the bytes carrying it be judged on their raw length. Below the tag's own
+// length this decided whether the element survived at all.
+#[test]
+fn a_split_builtin_name_survives_a_cap_under_its_raw_length() {
+  let html = "<em>x</em>";
+  for cap in 1..=html.len() {
+    let one_shot = html_to_markdown_result(html, options(cap));
+    assert_eq!(one_shot.markdown, "*x*", "one-shot cap={cap}");
+    for width in 1..=html.len() {
+      let parts: Vec<&str> = html
+        .as_bytes()
+        .chunks(width)
+        .map(|c| std::str::from_utf8(c).unwrap())
+        .collect();
+      assert_eq!(
+        stream_parts(&parts, cap),
+        (one_shot.markdown.clone(), one_shot.truncated),
+        "cap={cap} width={width}"
+      );
+    }
+  }
+}
+
+// The capped scan decides what a tag retains while reading it, so a chunk
+// boundary anywhere inside one must not change the result. This is the
+// deterministic counterpart of `fuzz_capped_chunking`, which does not run in
+// CI: every shape whose handling differs - builtin against custom name, wanted
+// against unwanted attribute, each quoting form, a duplicate, an over-cap value
+// and an over-cap name - at caps that cut inside the tag and past it.
+#[test]
+fn a_capped_start_tag_reads_the_same_however_the_chunks_fall() {
+  let long = repeat_to("v", 64);
+  for html in [
+    "<em>x</em>".to_string(),
+    "<em a>x</em>".to_string(),
+    "<x-custom>x</x-custom>".to_string(),
+    r#"<a href="/b">x</a>"#.to_string(),
+    "<a href=/b>x</a>".to_string(),
+    "<a href>x</a>".to_string(),
+    r#"<a href='/b' title="t">x</a>"#.to_string(),
+    r#"<a href="/b" href="/c">x</a>"#.to_string(),
+    r#"<p data-x="a>b">x</p>"#.to_string(),
+    r#"<img src="/s" alt="a"/>"#.to_string(),
+    format!(r#"<a href="/{long}">x</a>"#),
+    format!(r#"<p data-x="{long}">x</p>"#),
+    format!("<x-{long}>x</x-{long}>"),
+  ] {
+    for cap in [0usize, 1, 2, 4, 8, 16, 64, 4096] {
+      let one_shot = html_to_markdown_result(&html, options(cap));
+      let expected = (one_shot.markdown.clone(), one_shot.truncated);
+      for split in (1..html.len()).filter(|&split| html.is_char_boundary(split)) {
+        assert_eq!(
+          stream_parts(&[&html[..split], &html[split..]], cap),
+          expected,
+          "cap={cap} split={split} html={html:?}"
+        );
+      }
+      for width in [1usize, 2, 3, 5, 8] {
+        let parts: Vec<&str> = html
+          .as_bytes()
+          .chunks(width)
+          .map(|c| std::str::from_utf8(c).unwrap())
+          .collect();
+        assert_eq!(
+          stream_parts(&parts, cap),
+          expected,
+          "cap={cap} width={width} html={html:?}"
+        );
+      }
+    }
+  }
+}
+
+// An end tag holds nothing but its name, so a builtin one is never measured:
+// one-shot conversion keeps `</blockquote>` at any cap. Streaming dropped the
+// bytes carrying it on their raw length, merging the quote with the text after
+// it. A custom end tag stays payload and is covered above.
+#[test]
+fn a_builtin_end_tag_longer_than_the_cap_survives_every_split() {
+  // Every cap here holds the text but not the 13 byte `</blockquote>`.
+  for cap in [2usize, 4, 8, 12] {
+    assert_capped_text("<blockquote>aa</blockquote>bb", cap, "> aa\n\nbb", false);
+  }
+}
+
+// A complete oversized name with an unfinished attribute region: the tag
+// suspends, and the pending copy used to own the name.
+#[test]
+fn a_suspended_oversized_name_is_never_owned() {
+  let name = repeat_to("a", HUGE);
+  let html = format!("<p>x</p><{name} data-q=\"v\"");
+  let observed = peak_with(&html, html.len(), options(CAP));
+  assert!(
+    observed < (8 * CAP) as u64,
+    "peak {observed} tracks the {HUGE} byte name"
+  );
+  assert_eq!(html_to_markdown_result(&html, options(CAP)).markdown, "x");
+}
+
+// An unfinished quoted value used to reach the scanner's carry before the tag
+// was known to be incomplete.
+#[test]
+fn an_unfinished_attr_all_value_is_never_carried() {
+  let filler = repeat_to("a", HUGE);
+  let html = format!("<p>x</p><a href=\"/b\" data-q=\"{filler}");
+  let observed = peak_with(&html, html.len(), extracting(CAP, &["a"]));
+  assert!(
+    observed < (8 * CAP) as u64,
+    "peak {observed} tracks the {HUGE} byte value"
+  );
+}
+
+// A later duplicate is already ignored, so it must not consume budget either:
+// otherwise whether the first one survives depends on what follows it, and on
+// where a chunk boundary fell.
+#[test]
+fn a_duplicate_attribute_does_not_consume_budget() {
+  let first = repeat_to("a", 4096);
+  let html = format!(
+    "<a href=\"/{first}\" href=\"/{}\">B</a>",
+    repeat_to("b", 4096)
+  );
+  let cap = "href".len() + first.len() + 1;
+
+  let result = html_to_markdown_result(&html, options(cap));
+  assert!(
+    !result.truncated,
+    "the ignored duplicate must not push the tag over"
+  );
+  assert!(result.markdown.contains(&first), "first occurrence wins");
+  assert!(!result.markdown.contains("bbbb"), "duplicate must not win");
+
+  // Splitting just after the duplicate's opening quote is what regressed: the
+  // carried bytes were charged and dropped the whole tag.
+  let expected = result.markdown;
+  let quote = html.rfind("href=\"").unwrap() + "href=\"".len();
+  for split in [quote - 1, quote, quote + 1, quote + 4096] {
+    let (actual, truncated) = stream_parts(&[&html[..split], &html[split..]], cap);
+    assert_eq!(actual, expected, "split={split}");
+    assert!(!truncated, "split={split}");
   }
 }
 

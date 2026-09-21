@@ -52,6 +52,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fuzz_capped_chunking"
+path = "fuzz_targets/fuzz_capped_chunking.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fuzz_splitter"
 path = "fuzz_targets/fuzz_splitter.rs"
 test = false

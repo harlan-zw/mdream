@@ -100,9 +100,8 @@ pub(crate) fn process_comment_or_doctype(html_chunk: &str, position: usize) -> C
 pub(crate) struct PendingTagScan {
   /// Bytes of the attribute region already examined.
   scanned: usize,
+  /// Tokenizer position, including any quote still open at `scanned`.
   state: State,
-  /// The quote still open at `scanned`, or 0 outside a quoted value.
-  quote_char: u8,
 }
 
 impl PendingTagScan {
@@ -111,7 +110,6 @@ impl PendingTagScan {
     Self {
       scanned: 0,
       state: State::Gap,
-      quote_char: 0,
     }
   }
 
@@ -247,26 +245,12 @@ pub(crate) fn tag_is_complete(
 
   while i < bytes.len() {
     let c = bytes[i];
-
-    if pending.quote_char != 0 {
-      if c == pending.quote_char {
-        pending.quote_char = 0;
-        pending.state = State::Gap;
-      }
-      i += 1;
-      continue;
-    }
-
-    // `/>` is reached through its own `>`, so one test covers both endings.
-    if c == GT_CHAR {
+    // `/>` is reached through its own `>`, so one test covers both endings. A
+    // `>` inside a quoted value does not end the tag.
+    if c == GT_CHAR && !matches!(pending.state, State::Quoted(_)) {
       return Some(i);
     }
-
-    if pending.state == State::BeforeValue && (c == QUOTE_CHAR || c == APOS_CHAR) {
-      pending.quote_char = c;
-    } else {
-      pending.state = pending.state.step_without_extraction(c);
-    }
+    pending.state = pending.state.step_without_extraction(c);
     i += 1;
   }
 
@@ -274,22 +258,107 @@ pub(crate) fn tag_is_complete(
   None
 }
 
+/// Bytes a start tag may retain: its own name when that is kept, plus the
+/// attribute names and values its mask keeps, measured against
+/// `max_node_bytes`. Attributes the mask rejects are never charged, so a
+/// megabyte of `data-*` costs nothing and its element survives.
+#[derive(Clone, Copy)]
+pub(crate) struct AttrBudget {
+  cap: usize,
+  used: usize,
+  /// A wanted attribute did not fit, so the caller drops the whole tag — what
+  /// an over-cap tag has always done.
+  pub(crate) overflow: bool,
+}
+
+impl AttrBudget {
+  #[inline]
+  pub(crate) fn new(cap: usize) -> Self {
+    Self {
+      cap,
+      used: 0,
+      overflow: false,
+    }
+  }
+
+  #[inline]
+  fn fits(&mut self, extra: usize) -> bool {
+    if self.cap == 0 || self.used.saturating_add(extra) <= self.cap {
+      return true;
+    }
+    self.overflow = true;
+    false
+  }
+
+  #[inline]
+  fn take(&mut self, bytes: usize) -> bool {
+    if !self.fits(bytes) {
+      return false;
+    }
+    self.used += bytes;
+    true
+  }
+
+  /// Charge bytes retained outside the attribute scan — the tag's own name,
+  /// which the node keeps for a custom element and the scanner keeps whenever
+  /// the name spans chunks.
+  #[inline]
+  pub(crate) fn charge(&mut self, bytes: usize) -> bool {
+    self.take(bytes)
+  }
+}
+
+/// Outcome of scanning a start tag's attribute region.
+pub(crate) struct TagScan {
+  pub(crate) complete: bool,
+  pub(crate) new_position: usize,
+  pub(crate) self_closing: bool,
+  pub(crate) overflow: bool,
+  /// Scanner state for the next chunk, set only when the tag is incomplete.
+  pub(crate) carry: Option<Box<TagCarry>>,
+}
+
+impl TagScan {
+  #[inline]
+  fn done(new_position: usize, self_closing: bool, overflow: bool) -> Self {
+    Self {
+      complete: true,
+      new_position,
+      self_closing,
+      overflow,
+      carry: None,
+    }
+  }
+
+  #[inline]
+  fn suspended(new_position: usize, carry: Box<TagCarry>) -> Self {
+    Self {
+      complete: false,
+      new_position,
+      self_closing: false,
+      overflow: carry.budget.overflow,
+      carry: Some(carry),
+    }
+  }
+}
+
 /// Scan a start tag's attribute region to its `>`, storing only the attributes
 /// `attr_mask` selects into `out`. `out` is cleared on entry and owned by the
 /// caller so its buffer is recycled across elements; on an incomplete tag it
-/// holds a partial capture the caller must not read.
+/// holds the attributes read so far, which the returned carry continues.
 pub(crate) fn process_tag_attributes(
   html_chunk: &str,
   position: usize,
   tag_handler: Option<&crate::types::TagHandler>,
   attr_mask: u16,
+  budget: AttrBudget,
   out: &mut Attributes,
-) -> (bool, usize, bool) {
+) -> TagScan {
   let self_closing = tag_handler.is_some_and(|h| h.is_self_closing);
   if attr_mask == ATTR_NONE {
-    scan_tag::<false>(html_chunk, position, self_closing, ATTR_NONE, out)
+    scan_tag::<false>(html_chunk, position, self_closing, ATTR_NONE, budget, out)
   } else {
-    scan_tag::<true>(html_chunk, position, self_closing, attr_mask, out)
+    scan_tag::<true>(html_chunk, position, self_closing, attr_mask, budget, out)
   }
 }
 
@@ -302,13 +371,12 @@ fn scan_tag<const EXTRACT: bool>(
   position: usize,
   self_closing: bool,
   attr_mask: u16,
+  budget: AttrBudget,
   out: &mut Attributes,
-) -> (bool, usize, bool) {
+) -> TagScan {
   let bytes = html_chunk.as_bytes();
   let chunk_length = bytes.len();
-  let mut scan = AttrScan::new(attr_mask, out);
-  let mut inside_quote = false;
-  let mut quote_char: u8 = 0;
+  let mut scan = AttrScan::new(attr_mask, budget, out);
   // `ATTR_NONE` compiles `AttrScan` out, but still needs the same tokenizer
   // state to distinguish a quoted value from a quote inside an unquoted one.
   let mut state = State::Gap;
@@ -319,31 +387,41 @@ fn scan_tag<const EXTRACT: bool>(
 
     // A quoted value hides `>`. Jump it whole; the `ATTR_NONE` scan only has to
     // get past it, and stepping byte by byte made this the dominant cost.
-    if inside_quote {
-      match bytes[i..].iter().position(|&b| b == quote_char) {
+    if let State::Quoted(quote) = state {
+      match bytes[i..].iter().position(|&b| b == quote) {
         Some(offset) => {
-          inside_quote = false;
           state = State::Gap;
           i += offset + 1;
         }
         // Unterminated: the tag cannot close in this chunk.
-        None => return (false, chunk_length, false),
+        None => {
+          return TagScan::suspended(chunk_length, Box::new(TagCarry::opaque(state, scan.budget)));
+        }
       }
       continue;
     }
 
     let attribute_state = if EXTRACT { scan.state } else { state };
-    if attribute_state != State::UnquotedValue
-      && c == SLASH_CHAR
-      && i + 1 < chunk_length
-      && bytes[i + 1] == GT_CHAR
-    {
-      scan.finish(html_chunk, i);
-      return (true, i + 2, true);
+    if attribute_state != State::UnquotedValue && c == SLASH_CHAR {
+      // The `>` that would make this self-closing is in the next chunk. Feeding
+      // the `/` to the tokenizer now would bury it in an attribute name.
+      if i + 1 == chunk_length {
+        let mut carry = if EXTRACT {
+          scan.suspend(html_chunk, i)
+        } else {
+          Box::new(TagCarry::opaque(state, scan.budget))
+        };
+        carry.slash = true;
+        return TagScan::suspended(chunk_length, carry);
+      }
+      if bytes[i + 1] == GT_CHAR {
+        scan.finish(html_chunk, i);
+        return TagScan::done(i + 2, true, scan.budget.overflow);
+      }
     }
     if c == GT_CHAR {
       scan.finish(html_chunk, i);
-      return (true, i + 1, self_closing);
+      return TagScan::done(i + 1, self_closing, scan.budget.overflow);
     }
 
     // Run to the closing quote without re-entering the state dispatch.
@@ -354,8 +432,11 @@ fn scan_tag<const EXTRACT: bool>(
         end += 1;
       }
       if end == chunk_length {
-        // Unterminated: the tag cannot close in this chunk.
-        return (false, chunk_length, false);
+        // Unterminated: the tag cannot close in this chunk. `state` carries the
+        // open quote, so the resume ends the value on the matching delimiter.
+        scan.state = State::Quoted(c);
+        scan.value_start = value_start;
+        return TagScan::suspended(chunk_length, scan.suspend(html_chunk, end));
       }
       scan.take_value(html_chunk, value_start, end);
       i = end + 1;
@@ -364,24 +445,39 @@ fn scan_tag<const EXTRACT: bool>(
 
     if EXTRACT {
       scan.step(html_chunk, c, i);
-    } else if state == State::BeforeValue && (c == QUOTE_CHAR || c == APOS_CHAR) {
-      inside_quote = true;
-      quote_char = c;
     } else {
       state = state.step_without_extraction(c);
     }
     i += 1;
   }
 
-  (false, i, false)
+  let carry = if EXTRACT {
+    scan.suspend(html_chunk, chunk_length)
+  } else {
+    Box::new(TagCarry::opaque(state, scan.budget))
+  };
+  TagScan::suspended(chunk_length, carry)
 }
 
-/// Mask rejection happens before any lowercasing or entity decoding, so
-/// unwanted attributes cost no allocations.
+/// Mask rejection happens before any lowercasing, entity decoding or budget
+/// charge, so unwanted attributes cost nothing at all.
 #[inline]
-fn push_attr(result: &mut Attributes, mask: u16, raw: &str, value: Option<&str>) {
+fn push_attr(
+  result: &mut Attributes,
+  mask: u16,
+  budget: &mut AttrBudget,
+  raw: &str,
+  value: Option<&str>,
+) {
   let bit = attr_bit(raw.as_bytes());
   if mask != ATTR_ALL && mask & bit == 0 {
+    return;
+  }
+  // First occurrence wins, so a later duplicate is ignored and must not charge.
+  if bit != ATTR_NONE && result.contains_bit(bit) {
+    return;
+  }
+  if !budget.take(raw.len() + value.map_or(0, str::len)) {
     return;
   }
   // A known name is fully described by `bit`; only the `ATTR_ALL` long tail
@@ -401,6 +497,7 @@ fn push_attr(result: &mut Attributes, mask: u16, raw: &str, value: Option<&str>)
 /// the chunk itself, so nothing is allocated until a wanted attribute is whole.
 struct AttrScan<'a> {
   mask: u16,
+  budget: AttrBudget,
   result: &'a mut Attributes,
   state: State,
   name_start: usize,
@@ -408,7 +505,8 @@ struct AttrScan<'a> {
   value_start: usize,
 }
 
-/// Where the scan sits within one `name="value"` triple.
+/// Where the scan sits within one `name="value"` triple. `Quoted` owns its
+/// delimiter, so saving the state always saves the open quote with it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {
   Gap,
@@ -416,6 +514,7 @@ enum State {
   AfterName,
   BeforeValue,
   UnquotedValue,
+  Quoted(u8),
 }
 
 impl State {
@@ -448,7 +547,9 @@ impl State {
         }
       }
       Self::BeforeValue => {
-        if is_whitespace(c) {
+        if c == QUOTE_CHAR || c == APOS_CHAR {
+          Self::Quoted(c)
+        } else if is_whitespace(c) {
           Self::BeforeValue
         } else {
           Self::UnquotedValue
@@ -461,13 +562,20 @@ impl State {
           Self::UnquotedValue
         }
       }
+      Self::Quoted(quote) => {
+        if c == quote {
+          Self::Gap
+        } else {
+          Self::Quoted(quote)
+        }
+      }
     }
   }
 }
 
 impl<'a> AttrScan<'a> {
   #[inline]
-  fn new(mask: u16, result: &'a mut Attributes) -> Self {
+  fn new(mask: u16, budget: AttrBudget, result: &'a mut Attributes) -> Self {
     result.clear();
     // A filtered mask keeps at most three names, so skip the eager reservation.
     if mask == ATTR_ALL {
@@ -475,6 +583,7 @@ impl<'a> AttrScan<'a> {
     }
     Self {
       mask,
+      budget,
       result,
       state: State::Gap,
       name_start: 0,
@@ -493,6 +602,7 @@ impl<'a> AttrScan<'a> {
     push_attr(
       self.result,
       self.mask,
+      &mut self.budget,
       &chunk[self.name_start..self.name_end],
       Some(&chunk[value_start..value_end]),
     );
@@ -504,6 +614,7 @@ impl<'a> AttrScan<'a> {
     push_attr(
       self.result,
       self.mask,
+      &mut self.budget,
       &chunk[self.name_start..name_end],
       None,
     );
@@ -550,6 +661,13 @@ impl<'a> AttrScan<'a> {
           self.take_value(chunk, self.value_start, index);
         }
       }
+      // Only entered as the tag suspends: `scan_tag` runs a quoted value to its
+      // delimiter without stepping.
+      State::Quoted(quote) => {
+        if c == quote {
+          self.take_value(chunk, self.value_start, index);
+        }
+      }
     }
   }
 
@@ -559,10 +677,364 @@ impl<'a> AttrScan<'a> {
     match self.state {
       State::Name => self.take_bare_name(chunk, end),
       State::AfterName | State::BeforeValue => self.take_bare_name(chunk, self.name_end),
-      State::UnquotedValue => self.take_value(chunk, self.value_start, end),
+      State::UnquotedValue | State::Quoted(_) => self.take_value(chunk, self.value_start, end),
       State::Gap => {}
     }
   }
+
+  /// Freeze the in-flight attribute so the next chunk continues it. Only bytes
+  /// the mask wants are copied, which is why an unwanted value of any size
+  /// never survives the chunk it arrived in.
+  ///
+  /// Boxed because that is the storage form everywhere downstream — `TagScan`
+  /// and `PendingStartTag` both hold the carry behind a pointer, so returning
+  /// it unboxed would only add a move of two `String`s to the scan's hot exit.
+  #[allow(
+    clippy::unnecessary_box_returns,
+    reason = "the carry is stored boxed; unboxing moves it twice"
+  )]
+  fn suspend(&self, chunk: &str, end: usize) -> Box<TagCarry> {
+    let mut carry = Box::new(TagCarry::opaque(self.state, self.budget));
+    match self.state {
+      State::Name => carry.push_name(self.mask, &chunk[self.name_start..end]),
+      State::AfterName | State::BeforeValue => {
+        carry.push_name(self.mask, &chunk[self.name_start..self.name_end]);
+        carry.close_name(self.result);
+      }
+      // The two differ only in how they end, which `state` already records.
+      State::UnquotedValue | State::Quoted(_) => {
+        carry.push_name(self.mask, &chunk[self.name_start..self.name_end]);
+        carry.close_name(self.result);
+        carry.push_value(self.mask, &chunk[self.value_start..end]);
+      }
+      State::Gap => {}
+    }
+    carry
+  }
+}
+
+/// A start tag whose bytes ran out mid-tag. Holds the tokenizer position and
+/// the in-flight attribute, never the raw tag: the caller consumes the chunk
+/// rather than buffering it, so an unwanted attribute costs no memory however
+/// many chunks it spans.
+pub(crate) struct TagCarry {
+  /// Tokenizer position, including any quote still open around the value.
+  state: State,
+  /// A `/` that ended the chunk, still waiting to see whether a `>` follows.
+  slash: bool,
+  name: String,
+  value: String,
+  /// The in-flight attribute is not retained: its name cannot match the mask,
+  /// or it did not fit the budget.
+  dropped: bool,
+  pub(crate) budget: AttrBudget,
+}
+
+impl TagCarry {
+  #[inline]
+  fn opaque(state: State, budget: AttrBudget) -> Self {
+    Self {
+      state,
+      slash: false,
+      name: String::new(),
+      value: String::new(),
+      dropped: false,
+      budget,
+    }
+  }
+
+  /// Whether the in-flight attribute, whose name is complete, is retained.
+  #[inline]
+  fn wanted(&self, mask: u16) -> bool {
+    !self.dropped && (mask == ATTR_ALL || mask & attr_bit(self.name.as_bytes()) != 0)
+  }
+
+  #[inline]
+  fn start(&mut self) {
+    self.name.clear();
+    self.value.clear();
+    self.dropped = false;
+  }
+
+  /// `ATTR_ALL` keeps every name, so names are charged there; a filtered mask
+  /// cannot want a name longer than its longest bit, so that one is dropped
+  /// unread and costs no budget.
+  fn push_name(&mut self, mask: u16, text: &str) {
+    if mask == ATTR_NONE || self.dropped || text.is_empty() {
+      return;
+    }
+    let len = self.name.len() + text.len();
+    let rejected = if mask == ATTR_ALL {
+      !self.budget.fits(len)
+    } else {
+      len > MAX_WANTED_ATTR_NAME
+    };
+    if rejected {
+      self.dropped = true;
+      self.name.clear();
+      return;
+    }
+    self.name.push_str(text);
+  }
+
+  /// Called once the in-flight name is complete. A duplicate is ignored anyway,
+  /// so drop it before its value is accumulated or charged: otherwise whether
+  /// the *first* occurrence survives depends on what follows it, and on where a
+  /// chunk boundary fell.
+  #[inline]
+  fn close_name(&mut self, out: &Attributes) {
+    if self.dropped || self.name.is_empty() {
+      return;
+    }
+    let bit = attr_bit(self.name.as_bytes());
+    if bit != ATTR_NONE && out.contains_bit(bit) {
+      self.dropped = true;
+      self.name.clear();
+    }
+  }
+
+  fn push_value(&mut self, mask: u16, text: &str) {
+    if text.is_empty() || !self.wanted(mask) {
+      return;
+    }
+    if !self
+      .budget
+      .fits(self.name.len() + self.value.len() + text.len())
+    {
+      self.dropped = true;
+      self.name.clear();
+      self.value.clear();
+      return;
+    }
+    self.value.push_str(text);
+  }
+
+  fn emit(&mut self, mask: u16, out: &mut Attributes, with_value: bool) {
+    if !self.dropped && !self.name.is_empty() {
+      let value = if with_value {
+        Some(self.value.as_str())
+      } else {
+        None
+      };
+      push_attr(out, mask, &mut self.budget, &self.name, value);
+    }
+    self.start();
+  }
+
+  /// Take the attribute still open when the tag ended.
+  fn finish(&mut self, mask: u16, out: &mut Attributes) {
+    match self.state {
+      State::Name | State::AfterName | State::BeforeValue => self.emit(mask, out, false),
+      State::UnquotedValue | State::Quoted(_) => self.emit(mask, out, true),
+      State::Gap => {}
+    }
+    self.state = State::Gap;
+  }
+
+  /// The `/` held over from the previous chunk was not part of `/>`, so feed it
+  /// through the tokenizer as the ordinary byte it is.
+  fn replay_slash(&mut self, mask: u16, out: &mut Attributes) {
+    match self.state {
+      State::Gap => {
+        self.start();
+        self.state = State::Name;
+        self.push_name(mask, "/");
+      }
+      State::Name => self.push_name(mask, "/"),
+      State::AfterName => {
+        self.emit(mask, out, false);
+        self.state = State::Name;
+        self.push_name(mask, "/");
+      }
+      State::BeforeValue => {
+        self.state = State::UnquotedValue;
+        self.push_value(mask, "/");
+      }
+      State::UnquotedValue | State::Quoted(_) => self.push_value(mask, "/"),
+    }
+  }
+
+  /// Consume the name run starting at `from`, whose first byte is known not to
+  /// end it. Runs stop on ASCII delimiters, so every slice is char-aligned.
+  fn run_name(&mut self, mask: u16, chunk: &str, from: usize) -> usize {
+    let bytes = chunk.as_bytes();
+    let mut end = from + 1;
+    while end < bytes.len() && !ends_name(bytes[end]) {
+      end += 1;
+    }
+    self.push_name(mask, &chunk[from..end]);
+    end
+  }
+
+  /// Consume the unquoted-value run starting at `from`.
+  fn run_value(&mut self, mask: u16, chunk: &str, from: usize) -> usize {
+    let bytes = chunk.as_bytes();
+    let mut end = from + 1;
+    while end < bytes.len() && !ends_unquoted_value(bytes[end]) {
+      end += 1;
+    }
+    self.push_value(mask, &chunk[from..end]);
+    end
+  }
+}
+
+#[inline]
+fn ends_name(c: u8) -> bool {
+  is_whitespace(c) || c == EQUALS_CHAR || c == GT_CHAR || c == SLASH_CHAR
+}
+
+/// `/` and quotes are ordinary bytes inside an unquoted value.
+#[inline]
+fn ends_unquoted_value(c: u8) -> bool {
+  is_whitespace(c) || c == GT_CHAR
+}
+
+pub(crate) struct TagResume {
+  pub(crate) complete: bool,
+  pub(crate) new_position: usize,
+  pub(crate) self_closing: bool,
+}
+
+impl TagResume {
+  #[inline]
+  fn incomplete(new_position: usize) -> Self {
+    Self {
+      complete: false,
+      new_position,
+      self_closing: false,
+    }
+  }
+
+  #[inline]
+  fn done(new_position: usize, self_closing: bool) -> Self {
+    Self {
+      complete: true,
+      new_position,
+      self_closing,
+    }
+  }
+}
+
+/// Continue a start tag from a previous chunk's [`TagCarry`], appending to the
+/// attributes it already collected. Runs the same tokenizer as [`scan_tag`], so
+/// a tag split across chunks yields the attributes of one read whole.
+pub(crate) fn resume_tag_attributes(
+  html_chunk: &str,
+  self_closing: bool,
+  mask: u16,
+  carry: &mut TagCarry,
+  out: &mut Attributes,
+) -> TagResume {
+  let bytes = html_chunk.as_bytes();
+  let chunk_length = bytes.len();
+  let mut i = 0;
+
+  if carry.slash {
+    if i == chunk_length {
+      return TagResume::incomplete(chunk_length);
+    }
+    carry.slash = false;
+    if bytes[i] == GT_CHAR {
+      carry.finish(mask, out);
+      return TagResume::done(i + 1, true);
+    }
+    carry.replay_slash(mask, out);
+  }
+
+  while i < chunk_length {
+    let c = bytes[i];
+
+    // Inside a quoted value nothing is markup.
+    if !matches!(carry.state, State::Quoted(_)) {
+      if carry.state != State::UnquotedValue && c == SLASH_CHAR {
+        if i + 1 == chunk_length {
+          carry.slash = true;
+          return TagResume::incomplete(chunk_length);
+        }
+        if bytes[i + 1] == GT_CHAR {
+          carry.finish(mask, out);
+          return TagResume::done(i + 2, true);
+        }
+      }
+      if c == GT_CHAR {
+        carry.finish(mask, out);
+        return TagResume::done(i + 1, self_closing);
+      }
+    }
+
+    match carry.state {
+      State::Gap => {
+        if is_whitespace(c) {
+          i += 1;
+        } else {
+          carry.start();
+          carry.state = State::Name;
+          i = carry.run_name(mask, html_chunk, i);
+        }
+      }
+      State::Name => {
+        if c == EQUALS_CHAR {
+          carry.close_name(out);
+          carry.state = State::BeforeValue;
+          i += 1;
+        } else if is_whitespace(c) {
+          carry.close_name(out);
+          carry.state = State::AfterName;
+          i += 1;
+        } else {
+          i = carry.run_name(mask, html_chunk, i);
+        }
+      }
+      State::AfterName => {
+        if c == EQUALS_CHAR {
+          carry.state = State::BeforeValue;
+          i += 1;
+        } else if is_whitespace(c) {
+          i += 1;
+        } else {
+          carry.emit(mask, out, false);
+          carry.state = State::Name;
+          i = carry.run_name(mask, html_chunk, i);
+        }
+      }
+      State::BeforeValue => {
+        if is_whitespace(c) {
+          i += 1;
+        } else if c == QUOTE_CHAR || c == APOS_CHAR {
+          carry.state = State::Quoted(c);
+          i += 1;
+        } else {
+          carry.state = State::UnquotedValue;
+          i = carry.run_value(mask, html_chunk, i);
+        }
+      }
+      State::UnquotedValue => {
+        if is_whitespace(c) {
+          carry.emit(mask, out, true);
+          carry.state = State::Gap;
+          i += 1;
+        } else {
+          i = carry.run_value(mask, html_chunk, i);
+        }
+      }
+      // Open from an earlier chunk, or opened in this one.
+      State::Quoted(quote) => {
+        let mut end = i;
+        while end < chunk_length && bytes[end] != quote {
+          end += 1;
+        }
+        carry.push_value(mask, &html_chunk[i..end]);
+        if end == chunk_length {
+          return TagResume::incomplete(chunk_length);
+        }
+        carry.emit(mask, out, true);
+        carry.state = State::Gap;
+        i = end + 1;
+      }
+    }
+  }
+
+  TagResume::incomplete(chunk_length)
 }
 
 /// Attributes of a bare region, for tests that write input as it appears
@@ -576,9 +1048,8 @@ pub(crate) fn parse_attributes(attr_str: &str, mask: u16) -> Attributes {
 #[cfg(test)]
 fn scan_attrs(html: &str, position: usize, mask: u16) -> (bool, usize, Attributes, bool) {
   let mut attrs = Attributes::new();
-  let (complete, new_position, self_closing) =
-    process_tag_attributes(html, position, None, mask, &mut attrs);
-  (complete, new_position, attrs, self_closing)
+  let scan = process_tag_attributes(html, position, None, mask, AttrBudget::new(0), &mut attrs);
+  (scan.complete, scan.new_position, attrs, scan.self_closing)
 }
 
 #[cfg(test)]
@@ -593,6 +1064,25 @@ mod tests {
     for c in [b'a', b'0', b'-', 0u8] {
       assert!(!is_whitespace(c));
     }
+  }
+
+  /// The bound is derived from `attr_name`, so it only covers `attr_bit` while
+  /// the two describe the same set: a name only `attr_bit` knows would be
+  /// retained past the bound and silently truncated.
+  #[test]
+  fn every_masked_name_round_trips_within_the_retention_bound() {
+    let mut bit: u16 = 1;
+    while bit != 0 {
+      let name = attr_name(bit);
+      if !name.is_empty() {
+        assert_eq!(attr_bit(name.as_bytes()), bit, "{name}");
+        assert!(name.len() <= MAX_WANTED_ATTR_NAME, "{name}");
+      }
+      bit <<= 1;
+    }
+    // A filtered scan keeps the longest name whole rather than stopping short.
+    let a = parse_attributes("aria-label=\"x\"", ATTR_ARIA_LABEL);
+    assert_eq!(a.get("aria-label"), Some("x"));
   }
 
   #[test]
