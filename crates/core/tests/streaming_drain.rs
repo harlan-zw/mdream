@@ -2814,3 +2814,20 @@ fn long_links_still_get_every_bracket_anchored_rewrite() {
     }
   }
 }
+
+// A quote opened by the chunk's last byte never reaches the scan's jump over
+// the quoted value, so it is still open when the scan exits. Losing it let the
+// resume read the closing quote as an opening one and swallow the rest of the
+// document. Only an unwanted attribute takes this path: `href` is read on `<a>`
+// but nothing on `<p>` is, so the extraction-free scan runs there.
+#[test]
+fn streaming_carries_an_unwanted_value_quote_opened_at_a_chunk_edge() {
+  for html in [
+    r#"<p href="">text</p>"#,
+    r#"<p class="v">text</p>"#,
+    "<p data-x='v'>text</p>",
+    r#"<p data-x="a>b">text</p>"#,
+  ] {
+    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}

@@ -1,9 +1,9 @@
 use crate::consts::*;
 use crate::entities::{decode_html_entities, decode_html_entities_for_markdown};
 use crate::scan::{
-  DiscardedCloseTag, DiscardedCommentState, PendingTagScan, discarded_cdata_end,
-  discarded_close_tag_end, discarded_comment_end, discarded_gt, is_whitespace,
-  process_comment_or_doctype, process_tag_attributes, tag_is_complete,
+  AttrBudget, DiscardedCloseTag, DiscardedCommentState, PendingTagScan, TagCarry,
+  discarded_cdata_end, discarded_close_tag_end, discarded_comment_end, discarded_gt, is_whitespace,
+  process_comment_or_doctype, process_tag_attributes, resume_tag_attributes, tag_is_complete,
 };
 use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selector_list};
 use crate::tags::get_tag_handler;
@@ -584,8 +584,12 @@ pub struct ConvertState {
   first_block_parent_index: Option<usize>,
   block_parent_indices: Vec<usize>,
   parse_text_buffer: String,
-  /// Set while a start tag is known to span chunks, holding how far its `>`
-  /// search reached so the next chunk resumes instead of restarting it.
+  /// Fixed-mask path: a start tag whose bytes ran out mid-tag, holding the
+  /// attributes retained so far and the scanner state, so the raw tag is never
+  /// buffered.
+  pending_start: Option<Box<PendingStartTag>>,
+  /// `ATTR_ALL` path: how far the `>` search reached, so the next chunk resumes
+  /// it. The raw tag is carried by the caller.
   pending_tag: Option<PendingTagScan>,
   discard: Discard,
   script_text_buffer: String,
@@ -814,6 +818,7 @@ impl ConvertState {
       first_block_parent_index: None,
       block_parent_indices: Vec::with_capacity(16),
       parse_text_buffer: String::new(),
+      pending_start: None,
       pending_tag: None,
       discard: Discard::No,
       script_text_buffer: String::new(),
@@ -1125,6 +1130,10 @@ impl ConvertState {
     // and escaped `text_buffer` (which would be re-escaped, multiplying `\`).
     let mut run_start = 0usize;
     let mut carry = false;
+    // Set with `carry` when the carried prefix is inherently short - a
+    // declaration opener, or a name that could still be a builtin - so the cap
+    // does not drop a token holding no payload yet.
+    let mut carry_bounded = false;
 
     // Mid-token from a previous chunk: keep dropping until its end is found.
     if !matches!(self.discard, Discard::No) {
@@ -1150,6 +1159,43 @@ impl ConvertState {
       i = end;
     }
 
+    // A start tag that ran past the end of the previous chunk. Its bytes were
+    // consumed there, so it continues from the carried scanner state rather
+    // than being re-read from `<`.
+    if let Some(mut pending) = self.pending_start.take() {
+      let tag_handler = pending.tag_id.and_then(get_tag_handler);
+      let resume = resume_tag_attributes(
+        chunk,
+        tag_handler.is_some_and(|handler| handler.is_self_closing),
+        self.attr_mask(tag_handler),
+        &mut pending.carry,
+        &mut pending.attrs,
+      );
+      if !resume.complete {
+        self.pending_start = Some(pending);
+        self.parse_text_buffer = text_buffer;
+        return chunk_length;
+      }
+      i = resume.new_position;
+      self.attr_scratch = std::mem::take(&mut pending.attrs);
+      let result = self.apply_opening_tag(
+        pending.name(),
+        pending.tag_id,
+        pending.is_builtin,
+        i,
+        resume.self_closing,
+        pending.carry.budget.overflow,
+      );
+      if !result.skip {
+        if result.self_closing {
+          self.close_node();
+          self.just_closed_tag = true;
+        } else {
+          self.is_first_text_in_element = true;
+        }
+      }
+    }
+
     if self
       .stack
       .last()
@@ -1157,9 +1203,11 @@ impl ConvertState {
     {
       match self.process_script_chunk(chunk, i) {
         ScriptChunk::Closed(close_index) => i = close_index,
+        // Only the partial `</scr…` is carried, never the script text.
         ScriptChunk::Carry(from) => {
           run_start = from;
           carry = true;
+          carry_bounded = true;
           i = chunk_length;
         }
       }
@@ -1361,6 +1409,7 @@ impl ConvertState {
             // Text before the `<` is already buffered; carry only the partial close.
             run_start = i;
             carry = true;
+            carry_bounded = true;
             break;
           }
           if raw_name.eq_ignore_ascii_case(peek_name) {
@@ -1372,6 +1421,7 @@ impl ConvertState {
             } else {
               self.rawtext_end_tag_pending = true;
               carry = true;
+              carry_bounded = result.bounded_prefix;
               break;
             }
             continue;
@@ -1411,6 +1461,7 @@ impl ConvertState {
           {
             run_start = i;
             carry = true;
+            carry_bounded = true;
             break;
           }
           let peek_tag_id = crate::consts::get_tag_id_ci_bytes(peek_name.as_bytes());
@@ -1424,6 +1475,7 @@ impl ConvertState {
             } else {
               self.rawtext_end_tag_pending = true;
               carry = true;
+              carry_bounded = result.bounded_prefix;
               break;
             }
             continue;
@@ -1479,6 +1531,7 @@ impl ConvertState {
           // Chunk boundary fell inside the `<![CDATA[` opener.
           run_start = i;
           carry = true;
+          carry_bounded = true;
           break;
         }
         self.complete_text_node(&mut text_buffer);
@@ -1490,6 +1543,8 @@ impl ConvertState {
           }
           i = result.new_position;
         } else {
+          // An ambiguous `<!--` opener is kept; a comment body is payload.
+          carry_bounded = remaining.len() < "<!--".len() && "<!--".starts_with(remaining);
           carry = true;
           break;
         }
@@ -1501,6 +1556,7 @@ impl ConvertState {
           i = result.new_position;
         } else {
           carry = true;
+          carry_bounded = result.bounded_prefix;
           break;
         }
       } else if !next.is_ascii_alphabetic() && next != QUESTION_CHAR {
@@ -1535,6 +1591,9 @@ impl ConvertState {
         let Some(tag_name_end) = tag_name_end else {
           run_start = i;
           carry = true;
+          // A builtin start tag is kept whatever the cap; a longer name is
+          // provably custom, so it is payload.
+          carry_bounded = chunk_length - tag_name_start <= MAX_BUILTIN_TAG_NAME;
           break;
         };
         let tag_name_raw = &chunk[tag_name_start..tag_name_end];
@@ -1543,7 +1602,12 @@ impl ConvertState {
         // lowercase allocation entirely. Only fall back to a Cow when
         // the override path actually needs the lowercased name.
         let builtin_tag_id = crate::consts::get_tag_id_ci_bytes(tag_name_raw.as_bytes());
-        let tag_name: Cow<str> = if builtin_tag_id.is_some() {
+        // Dropped with its tag before it is normalized or owned. Measured as the
+        // raw tag `<name>`, so the cut matches the uncapped raw-length rule.
+        let oversized_name = max_node_bytes != 0
+          && builtin_tag_id.is_none()
+          && tag_name_raw.len() + "<>".len() > max_node_bytes;
+        let tag_name: Cow<str> = if builtin_tag_id.is_some() || oversized_name {
           Cow::Borrowed(tag_name_raw)
         } else if tag_name_raw.bytes().any(|b| b.is_ascii_uppercase()) {
           Cow::Owned(tag_name_raw.to_ascii_lowercase())
@@ -1571,33 +1635,27 @@ impl ConvertState {
         self.complete_text_node(&mut text_buffer);
         run_start = i;
 
-        // `process_opening_tag` throws away everything it parsed when the tag
-        // is incomplete, so resume the `>` search instead of re-parsing it.
-        let mut tag_end = if let Some(mut pending) = self.pending_tag {
-          let Some(gt) = tag_is_complete(chunk, i2, &mut pending) else {
-            self.pending_tag = Some(pending);
+        // Under `ATTR_ALL` nothing is unwanted, so a retained-byte budget would
+        // undercount; an oversized custom name is itself the payload. Both fall
+        // back to measuring the raw tag. Uncapped there is nothing to measure,
+        // so the pre-scan would only re-read what the parser is about to.
+        let raw_guard = max_node_bytes != 0 && (self.attrs_force_all || oversized_name);
+        // No tag outruns the bytes left in the chunk, so a cap at or above that
+        // remainder cannot fire. A parked scan still resumes.
+        if raw_guard && (self.pending_tag.is_some() || chunk_length - i > max_node_bytes) {
+          // Classify before the retaining parser runs: it accumulates a wanted
+          // value as it goes, so an incomplete tag would build payload-sized
+          // state only to discard it. This scan retains nothing.
+          let mut scan = self.pending_tag.unwrap_or_else(PendingTagScan::new);
+          let Some(gt) = tag_is_complete(chunk, i2, &mut scan) else {
+            self.pending_tag = Some(scan);
             carry = true;
             break;
           };
           self.pending_tag = None;
-          Some(gt)
-        } else {
-          None
-        };
-
-        // Drop a tag past the cap on its own length, not on whether a chunk
-        // boundary happened to split it: an emitted attribute like `href` must
-        // not survive whole in one chunk yet vanish in two. No tag can outrun the
-        // bytes left in the chunk, so that comparison keeps the scan off the hot
-        // path whenever the cap exceeds the chunk size.
-        if max_node_bytes != 0 && chunk_length - i > max_node_bytes {
-          if tag_end.is_none() {
-            let mut scan = PendingTagScan::new();
-            tag_end = tag_is_complete(chunk, i2, &mut scan);
-          }
-          if let Some(gt) = tag_end
-            && gt + 1 - i > max_node_bytes
-          {
+          // Measured on the tag's own length so a chunk boundary cannot decide
+          // whether an `href` survives.
+          if gt + 1 - i > max_node_bytes {
             self.truncated = true;
             i = gt + 1;
             continue;
@@ -1618,21 +1676,28 @@ impl ConvertState {
             if builtin_tag_id == Some(TAG_SCRIPT) {
               match self.process_script_chunk(chunk, i) {
                 ScriptChunk::Closed(close_index) => i = close_index,
+                // Only the partial `</scr…` is carried, never the script text.
                 ScriptChunk::Carry(from) => {
-                  // Carry the raw script tail (from the partial close tag, or
-                  // nothing when fully consumed) into the next chunk.
                   run_start = from;
                   carry = true;
+                  carry_bounded = true;
                   break;
                 }
               }
             }
           }
-        } else {
-          // Incomplete opening tag. The next chunk resumes the `>` search from
-          // here rather than re-parsing the tag from '<'.
+        } else if raw_guard {
+          // Unmeasured, so the raw tag goes back to the caller and what the
+          // parser retained is dropped rather than carried twice.
+          if let Some(pending) = self.pending_start.take() {
+            self.attr_scratch = pending.attrs;
+            self.attr_scratch.clear();
+          }
           self.pending_tag = Some(PendingTagScan::new());
           carry = true;
+          break;
+        } else {
+          // The scan is parked in `pending_start`; the bytes are consumed.
           break;
         }
       }
@@ -1643,12 +1708,7 @@ impl ConvertState {
     // run is kept in `text_buffer` instead, so it is parsed once however many
     // chunks it spans.
     let consumed = if carry {
-      let carried = &chunk[run_start..];
-      // Keep an ambiguous markup-declaration opener until it can be classified.
-      // Both prefixes are fixed-size, so this retains at most eight bytes.
-      let partial_declaration = (carried.len() < "<!--".len() && "<!--".starts_with(carried))
-        || (carried.len() < "<![CDATA[".len() && "<![CDATA[".starts_with(carried));
-      if max_node_bytes != 0 && chunk_length - run_start > max_node_bytes && !partial_declaration {
+      if max_node_bytes != 0 && chunk_length - run_start > max_node_bytes && !carry_bounded {
         self.complete_text_node(&mut text_buffer);
         self.start_discard(chunk, run_start);
         chunk_length
@@ -1920,12 +1980,15 @@ impl ConvertState {
   /// end tag, so the residual is text unless it is an appropriate end tag that
   /// already reached a tag state.
   pub fn finalize(&mut self, leftover: &str) {
-    // A token still being dropped at EOF never completed. An uncapped parse
-    // ends such a token at EOF with its own truncation report, so a dropped
-    // one that found its end earlier stays unflagged and this is the only
-    // place the abandoned ones are reported.
+    // Tokens abandoned at EOF are only reported here. A parked start tag counts
+    // just when the cap fired on it: a mask-rejected attribute is absent from an
+    // uncapped parse too, so losing it loses nothing.
     if !matches!(self.discard, Discard::No)
       || (self.options.max_node_bytes != 0 && leftover.len() > self.options.max_node_bytes)
+      || self
+        .pending_start
+        .as_ref()
+        .is_some_and(|pending| pending.carry.budget.overflow)
     {
       self.truncated = true;
     }
@@ -2439,6 +2502,31 @@ pub(crate) struct OpeningTagResult {
   skip: bool,
 }
 
+/// A start tag suspended at a chunk boundary. Its identity and the attributes
+/// the mask kept are owned here; the raw tag is not, so an unwanted attribute
+/// spanning any number of chunks costs nothing to carry.
+pub(crate) struct PendingStartTag {
+  /// Only a custom name needs owning. A builtin one is recovered from
+  /// `tag_id`, so the common split tag allocates nothing for its identity.
+  pub(crate) custom_name: Option<String>,
+  pub(crate) tag_id: Option<u8>,
+  pub(crate) is_builtin: bool,
+  pub(crate) carry: Box<TagCarry>,
+  pub(crate) attrs: crate::types::Attributes,
+}
+
+impl PendingStartTag {
+  /// The tag name, borrowed from the static table whenever it is builtin.
+  #[inline]
+  pub(crate) fn name(&self) -> &str {
+    match &self.custom_name {
+      Some(name) => name,
+      // `is_builtin` is set from `tag_id.is_some()`, so this always resolves.
+      None => TAG_NAMES[self.tag_id.unwrap_or(0) as usize],
+    }
+  }
+}
+
 /// A token that outgrew `max_node_bytes` is being dropped byte by byte; only the
 /// scanner state that finds its end is kept, so nothing accumulates.
 #[derive(Clone, Copy)]
@@ -2460,6 +2548,9 @@ enum Discard {
 pub(crate) struct CloseTagResult {
   complete: bool,
   new_position: usize,
+  /// The chunk ended inside a name short enough to be a builtin, so the
+  /// carried bytes hold no payload yet.
+  bounded_prefix: bool,
 }
 
 /// Longest prefix of `text` that fits `max` bytes without splitting a char.
