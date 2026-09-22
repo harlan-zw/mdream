@@ -212,7 +212,7 @@ function elementOutput(node: ElementNode, eventType: number, state: TextState): 
       return output
     }
     if (node.tagId === TAG_Q)
-      return '"'
+      return lastOutputChar(state.buffer) > 32 ? ' "' : '"'
   }
   else if (node.tagId === TAG_Q) {
     return '"'
@@ -326,6 +326,10 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
   function pushCaptionBoundary(newlines: number): boolean {
     if (state.buffer.length === 0 || newlines === 0)
       return false
+    const tail = state.buffer[state.buffer.length - 1]!
+    const trimmed = trimSpacesEnd(tail)
+    if (trimmed.length !== tail.length)
+      state.buffer[state.buffer.length - 1] = trimmed
     const missing = newlines - trailingNewlines(state.buffer)
     if (missing > 0)
       state.buffer.push('\n'.repeat(missing))
@@ -364,7 +368,7 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     }
     if (state.depthMap[TAG_PRE] && state.buffer.length === 0)
       preserveLeadingWhitespace = true
-    if (node.value === ' ' && ' \n\t\r'.includes(last))
+    if (node.value === ' ' && last !== '' && ' \n\t\r'.includes(last))
       return
     if (!state.depthMap[TAG_PRE] && shouldAddSpacingBeforeText(last, lastNode, node))
       node.value = ` ${node.value}`
@@ -410,6 +414,13 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
       if (!state.depthMap[TAG_PRE] && currentNewlines >= 2)
         output = undefined
       state.pendingInlineWhitespace = false
+      // The break owns the line end, so the space before it goes too.
+      if (output && !state.depthMap[TAG_PRE] && state.buffer.length > 0) {
+        const tail = state.buffer[state.buffer.length - 1]!
+        const trimmed = trimSpacesEnd(tail)
+        if (trimmed.length !== tail.length)
+          state.buffer[state.buffer.length - 1] = trimmed
+      }
       // A break inside an unopened caption serves as its boundary.
       if (output && captionOpen > 0 && !captionContent)
         captionBreakRun++
