@@ -2831,3 +2831,27 @@ fn streaming_carries_an_unwanted_value_quote_opened_at_a_chunk_edge() {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
   }
 }
+
+// A clean flag routes an anchor exit through the bracket rewrite, which used to
+// return before the exit's whitespace trim. One-shot kept whitespace no stream
+// could reach back for, so every chunk width disagreed with it.
+#[test]
+fn a_cleaned_anchor_exit_still_trims_like_an_uncleaned_one() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      fragments: false,
+      ..CleanConfig::all()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<pre>x\t<a>",
+    "<pre>x\n<a>",
+    "<a>[",
+    "x <a>[",
+    "<pre>\u{c}<a>",
+  ] {
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
+  }
+}

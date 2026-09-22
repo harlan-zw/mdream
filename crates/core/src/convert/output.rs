@@ -1189,6 +1189,7 @@ impl ConvertState {
         buf_len
       };
       self.begin_link(bracket_pos, false);
+      self.link.bracket_emitted = emitted_bracket;
       // Avoid the href lookup and hold bookkeeping for one-shot conversion.
       if self.streaming {
         let has_rewrite_anchor = emitted_bracket && !exit_is_overridden;
@@ -1490,30 +1491,28 @@ impl ConvertState {
         return;
       }
 
-      // Released links skip bracket-anchored rewrites; the ordinary close remains.
-      if !self.plain_text
+      // Rewrites are anchored on the `[` this anchor wrote. An anchor that
+      // wrote none (inside `<pre>`, say) still owes the exit below its
+      // whitespace trim and fence close, so only the rewrites are skipped.
+      let rewrite_bracket = if !self.plain_text
         && self.clean_flags != 0
         && tag_id == Some(TAG_A)
         && !has_override
         && !raw_html_anchor
         && !self.link.hold_released
+        && self.link.bracket_emitted
       {
-        // Find actual [ position: scan from recorded pos (write_output may have inserted newlines before it)
-        let buf_len = self.buffer.len();
-        let bracket_pos = {
-          let mut pos = self.link.bracket_pos;
-          let buf = self.buffer.as_bytes();
-          while pos < buf.len() && buf[pos] != b'[' {
-            pos += 1;
-          }
-          pos
-        };
-        // Guard: if bracket not found, bracket_pos == buf_len; text_start would overflow
-        if bracket_pos >= buf_len {
-          self.end_link();
-          self.last_node_is_inline = is_inline;
-          return;
+        let buf = self.buffer.as_bytes();
+        let mut pos = self.link.bracket_pos;
+        while pos < buf.len() && buf[pos] != b'[' {
+          pos += 1;
         }
+        (pos < buf.len()).then_some(pos)
+      } else {
+        None
+      };
+      if let Some(bracket_pos) = rewrite_bracket {
+        let buf_len = self.buffer.len();
         let text_start = bracket_pos + 1;
         let link_text = if text_start <= buf_len && self.buffer.is_char_boundary(text_start) {
           &self.buffer[text_start..buf_len]

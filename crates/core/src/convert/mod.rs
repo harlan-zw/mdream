@@ -199,6 +199,9 @@ struct LinkOutputState {
   hold_forever: bool,
   hold_released: bool,
   empty_text_pending: bool,
+  /// This anchor wrote its own `[`. Without it the exit's forward scan reaches
+  /// past the link into the text and rewrites whatever bracket it finds there.
+  bracket_emitted: bool,
   /// A link `begin_link` opened and its `end_link` has not run yet. The default
   /// (and a popped-when-empty result) is `false`, so a closed link can never be
   /// mistaken for an enclosing one when the next link opens.
