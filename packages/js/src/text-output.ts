@@ -431,8 +431,8 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
       && figcaptionOwnsBlockSpacing(element, true)
     if (ownsCaptionSpace && event.type === NodeEventEnter) {
       // An override owns the caption spacing; otherwise a caption opens a block.
-      const override = state.options.tagOverrides?.[element.name]
-      const spacing = override && typeof override !== 'string' ? override.spacing : undefined
+      // Read the resolved handler, so a string alias override counts too.
+      const spacing = element.tagHandler?.spacing
       captionEnterSpacing = spacing ? spacing[0] : CAPTION_SPACING
       captionExitSpacing = spacing ? spacing[1] : CAPTION_SPACING
       captionOpen++

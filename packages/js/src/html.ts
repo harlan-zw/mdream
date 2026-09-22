@@ -13,7 +13,8 @@ function createProcessor(options: MdreamOptions): OutputProcessor {
     outputFormat: 'html',
     buffer: [],
     depthMap: new Uint16Array(MAX_TAG_ID),
-    plainText: false,
+    // Matches the parse state below: no Markdown escaping on this path.
+    plainText: true,
   }
 
   return {
