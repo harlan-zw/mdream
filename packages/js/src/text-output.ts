@@ -133,6 +133,10 @@ function canWrapHere(depthMap: Uint16Array): boolean {
 
 function newlineConfig(node: ElementNode, depthMap: Uint16Array): readonly [number, number] {
   const tagId = node.tagId
+  // A caption's boundary is deferred until it emits content, so its own
+  // enter and exit spacing stay at zero.
+  if (tagId === TAG_FIGCAPTION)
+    return NO_SPACING
   if ((tagId !== TAG_LI && depthMap[TAG_LI])
     || (tagId !== TAG_BLOCKQUOTE && depthMap[TAG_BLOCKQUOTE])) {
     return tagId === TAG_PRE ? [1, 1] : NO_SPACING

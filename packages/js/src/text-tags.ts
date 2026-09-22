@@ -1,17 +1,23 @@
 import type { TagHandler } from './types'
 import {
+  DEFAULT_BLOCK_SPACING,
   LIST_ITEM_SPACING,
   NO_SPACING,
   TABLE_ROW_SPACING,
   TAG_A,
   TAG_ABBR,
+  TAG_ADDRESS,
   TAG_AREA,
+  TAG_ASIDE,
+  TAG_AUDIO,
   TAG_B,
   TAG_BASE,
   TAG_BDO,
+  TAG_BLOCKQUOTE,
   TAG_BODY,
   TAG_BR,
   TAG_BUTTON,
+  TAG_CANVAS,
   TAG_CENTER,
   TAG_CITE,
   TAG_CODE,
@@ -20,14 +26,24 @@ import {
   TAG_DD,
   TAG_DEL,
   TAG_DFN,
+  TAG_DIALOG,
+  TAG_DL,
+  TAG_DT,
   TAG_EM,
   TAG_EMBED,
   TAG_FIELDSET,
   TAG_FIGCAPTION,
   TAG_FOOTER,
   TAG_FORM,
+  TAG_H1,
+  TAG_H2,
+  TAG_H3,
+  TAG_H4,
+  TAG_H5,
+  TAG_H6,
   TAG_HEAD,
   TAG_I,
+  TAG_IFRAME,
   TAG_IMG,
   TAG_INPUT,
   TAG_INS,
@@ -37,14 +53,18 @@ import {
   TAG_LEGEND,
   TAG_LI,
   TAG_LINK,
+  TAG_MAP,
   TAG_MARK,
   TAG_META,
+  TAG_METER,
   TAG_NOEMBED,
   TAG_NOFRAMES,
   TAG_NOSCRIPT,
   TAG_OPTGROUP,
   TAG_OPTION,
   TAG_PARAM,
+  TAG_PLAINTEXT,
+  TAG_PROGRESS,
   TAG_Q,
   TAG_RP,
   TAG_RT,
@@ -62,6 +82,8 @@ import {
   TAG_SVG,
   TAG_TBODY,
   TAG_TD,
+  TAG_TEMPLATE,
+  TAG_TEXTAREA,
   TAG_TFOOT,
   TAG_TH,
   TAG_THEAD,
@@ -71,7 +93,9 @@ import {
   TAG_TRACK,
   TAG_U,
   TAG_VAR,
+  TAG_VIDEO,
   TAG_WBR,
+  TAG_XMP,
 } from './const'
 import { parserTagHandlers } from './parser-tags'
 
@@ -120,8 +144,10 @@ assign([
   TAG_RUBY,
   TAG_RT,
   TAG_RP,
-  TAG_FIGCAPTION,
 ], inline)
+
+// A caption owns its own block boundary, so it carries no fixed spacing.
+assign([TAG_FIGCAPTION], { collapsesInnerWhiteSpace: true, isInline: true })
 
 assign([
   TAG_HEAD,
@@ -156,3 +182,39 @@ assign([
 assign([TAG_THEAD, TAG_TR, TAG_TFOOT], { spacing: TABLE_ROW_SPACING })
 assign([TAG_LI], { spacing: LIST_ITEM_SPACING })
 assign([TAG_DD], { spacing: [0, 1] })
+
+// Whitespace and spacing metadata the markdown table already carried. Plain
+// text reads the same fields, so both formats break a document the same way.
+assign([TAG_BR, TAG_LINK], { collapsesInnerWhiteSpace: true, isInline: true })
+assign([
+  TAG_ASIDE,
+  TAG_AUDIO,
+  TAG_CANVAS,
+  TAG_DIALOG,
+  TAG_DL,
+  TAG_IFRAME,
+  TAG_MAP,
+  TAG_METER,
+  TAG_PLAINTEXT,
+  TAG_PROGRESS,
+  TAG_TEMPLATE,
+  TAG_TEXTAREA,
+  TAG_VIDEO,
+  TAG_XMP,
+], { spacing: NO_SPACING })
+assign([TAG_ADDRESS], { collapsesInnerWhiteSpace: true, spacing: NO_SPACING })
+assign([
+  TAG_H1,
+  TAG_H2,
+  TAG_H3,
+  TAG_H4,
+  TAG_H5,
+  TAG_H6,
+  TAG_HEAD,
+  TAG_META,
+  TAG_TD,
+  TAG_TH,
+  TAG_TITLE,
+], { collapsesInnerWhiteSpace: true })
+assign([TAG_BLOCKQUOTE], { spacing: DEFAULT_BLOCK_SPACING })
+assign([TAG_DT], { collapsesInnerWhiteSpace: true, spacing: [0, 1] })
