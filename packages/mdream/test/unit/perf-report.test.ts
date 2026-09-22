@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { renderPerfReport } from '../../../../bench/bundle/perf-report.ts'
+import { renderPerfReport } from '../../../../bench/bundle/perf-report'
 
 describe('renderPerfReport', () => {
   it('uses paired uncertainty for a paired timing comparison', () => {

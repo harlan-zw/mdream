@@ -5,6 +5,7 @@ import {
   ELEMENT_NODE,
   isInsideRawHtmlBlock,
   MARKDOWN_CODE_BLOCK,
+  MARKDOWN_EMPHASIS,
   MARKDOWN_INLINE_CODE,
   MAX_TAG_ID,
   NO_SPACING,
@@ -27,6 +28,7 @@ import {
   TAG_H6,
   TAG_HR,
   TAG_I,
+  TAG_IMG,
   TAG_INS,
   TAG_KBD,
   TAG_LI,
@@ -50,7 +52,7 @@ import {
 import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
 import { breakHandler, renderBreak, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, listMarkerLineStart, orderedItemNumber } from './utils'
+import { blockOpenPrefix, continuationPrefix, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -137,12 +139,17 @@ interface GfmLifecycleState {
 // Marker kind per tag id for inline tags that wrap content in a symmetric
 // delimiter (0 = none); indexed like depthMap for O(1) lookup on emitted tags.
 const INLINE_MARKER_TYPE = new Uint8Array(MAX_TAG_ID)
+const MARKER_TYPE_MASK = 7
+const CAPTION_FRAME_SIZE = 4
+const CAPTION_OPEN = 1
+const CAPTION_INTERNAL_BREAK = 2
+const CAPTION_DEFAULT_SPACING = -1
+const CAPTION_NO_ANCHOR = -1
 INLINE_MARKER_TYPE[TAG_STRONG] = 1 // **
 INLINE_MARKER_TYPE[TAG_B] = 1 // **
 INLINE_MARKER_TYPE[TAG_DFN] = 1 // **
 INLINE_MARKER_TYPE[TAG_EM] = 2 // _
 INLINE_MARKER_TYPE[TAG_I] = 2 // _
-INLINE_MARKER_TYPE[TAG_FIGCAPTION] = 2 // _
 INLINE_MARKER_TYPE[TAG_DEL] = 3 // ~~
 INLINE_MARKER_TYPE[TAG_S] = 3 // ~~
 INLINE_MARKER_TYPE[TAG_STRIKE] = 3 // ~~
@@ -161,6 +168,7 @@ function suppressesFormattingInPre(tagId: number): boolean {
     || tagId === TAG_KBD
     || tagId === TAG_S
     || tagId === TAG_STRIKE
+    || tagId === TAG_FIGCAPTION
     || (tagId >= TAG_STRONG && tagId <= TAG_INS)
     || (tagId >= TAG_ABBR && tagId <= TAG_SMALL)
     || (tagId >= TAG_U && tagId <= TAG_BDO)
@@ -180,6 +188,31 @@ function newlineRunBefore(buffer: string[], index: number): number {
     }
   }
   return run
+}
+
+function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string): number {
+  let fragment = index - 1
+  let offset = fragment >= 0 ? buffer[fragment]!.length : 0
+  for (let prefixIndex = prefix.length - 1; prefixIndex >= 0; prefixIndex--) {
+    while (offset === 0) {
+      if (--fragment < 0)
+        return newlineRunBefore(buffer, index)
+      offset = buffer[fragment]!.length
+    }
+    if (buffer[fragment]!.charCodeAt(--offset) !== prefix.charCodeAt(prefixIndex))
+      return newlineRunBefore(buffer, index)
+  }
+  let run = 0
+  for (;;) {
+    while (offset === 0) {
+      if (--fragment < 0)
+        return run
+      offset = buffer[fragment]!.length
+    }
+    if (buffer[fragment]!.charCodeAt(--offset) !== 10)
+      return run
+    run++
+  }
 }
 
 /**
@@ -204,7 +237,7 @@ function recordItemMarker(state: MarkdownState, index: number): void {
  * been written since the marker the answer is still open, so only the `<li>` exit
  * forces one.
  */
-function resolveItemMarker(state: MarkdownState, atExit: boolean): void {
+function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCaptionFragment = -1): void {
   const fragment = state.emptyItemFragment
   if (fragment === undefined)
     return
@@ -222,6 +255,17 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean): void {
   }
   if (first === -1 && !atExit)
     return
+  if (!atExit && unresolvedCaptionFragment !== -1) {
+    let captionOpensItem = true
+    for (let index = fragment + 1; index < unresolvedCaptionFragment; index++) {
+      if (hasNonWhitespace(buffer[index]!)) {
+        captionOpensItem = false
+        break
+      }
+    }
+    if (captionOpensItem)
+      return
+  }
   state.emptyItemFragment = undefined
   if (first !== -1 && first !== 10)
     return
@@ -353,9 +397,8 @@ function foldPreLinesToBr(value: string): string {
   return out
 }
 
-function escapeRawHtmlText(value: string, depthMap: Uint16Array): string {
+function escapeRawHtmlText(value: string, depthMap: Uint16Array, protectLinkText: boolean): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
-  const inLink = Boolean(depthMap[TAG_A])
   let escaped = ''
   let copiedUntil = 0
 
@@ -375,9 +418,9 @@ function escapeRawHtmlText(value: string, depthMap: Uint16Array): string {
       replacement = '&#13;'
     else if (inTable && code === 124)
       replacement = '&#124;'
-    else if (inLink && code === 91)
+    else if (protectLinkText && code === 91)
       replacement = '&#91;'
-    else if (inLink && code === 93)
+    else if (protectLinkText && code === 93)
       replacement = '&#93;'
 
     if (replacement) {
@@ -736,7 +779,7 @@ function calculateNewLineConfig(node: ElementNode, depthMap: Uint16Array): reado
   // Adjust for inline elements
   // Block elements preserve spacing even inside span elements (presentational containers)
   // because spans shouldn't affect block-level semantics of their children
-  const isBlockElement = tagId !== undefined && ((tagId >= TAG_H1 && tagId <= TAG_H6) || tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_LI)
+  const isBlockElement = tagId !== undefined && ((tagId >= TAG_H1 && tagId <= TAG_H6) || tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_LI || tagId === TAG_FIGCAPTION)
   let currParent = node.parent
   while (currParent) {
     if (currParent.tagHandler?.collapsesInnerWhiteSpace) {
@@ -763,13 +806,13 @@ function calculateNewLineConfig(node: ElementNode, depthMap: Uint16Array): reado
 }
 
 /**
- * Whether a string contains any non-whitespace character (space, tab, CR, LF).
+ * Whether a string contains any non-whitespace character (space, tab, LF, FF, CR).
  * Used to decide if a <pre>'s content warrants opening a fenced code block.
  */
 function hasNonWhitespace(value: string): boolean {
   for (let i = 0; i < value.length; i++) {
     const c = value.charCodeAt(i)
-    if (c !== 32 && c !== 9 && c !== 10 && c !== 13) {
+    if (c !== 32 && c !== 9 && c !== 10 && c !== 12 && c !== 13) {
       return true
     }
   }
@@ -808,16 +851,41 @@ function trimBufferedWhitespacePosition(content: string, position: number): numb
 /** Drop the top marker when every following fragment is whitespace. */
 function dropEmptyMarker(buffer: string[], packed: number, markerType: number): number {
   const idx = packed >> 3
-  if ((packed & 7) === markerType && idx < buffer.length) {
-    for (let i = idx + 1; i < buffer.length; i++) {
-      const fragment = buffer[i]!
-      if (fragment && hasNonWhitespace(fragment))
-        return -1
-    }
-    buffer.length = idx
-    return idx
+  if ((packed & MARKER_TYPE_MASK) === markerType && idx < buffer.length) {
+    return dropEmptyLinkText(buffer, idx) ? idx : -1
   }
   return -1
+}
+
+function resetRetractedCaptionFrames(frames: number[] | undefined, count: number, fragment: number): void {
+  if (!frames)
+    return
+  for (let index = 0; index < count; index++) {
+    const offset = index * CAPTION_FRAME_SIZE
+    if (frames[offset + 3]! >= fragment) {
+      frames[offset + 2] = frames[offset + 2]! & ~CAPTION_OPEN
+      frames[offset + 3] = CAPTION_NO_ANCHOR
+    }
+  }
+}
+
+function dropEmptyLinkText(buffer: string[], openFragment: number): boolean {
+  for (let index = openFragment + 1; index < buffer.length; index++) {
+    if (hasNonWhitespace(buffer[index]!))
+      return false
+  }
+  buffer.length = openFragment
+  return true
+}
+
+function restoreCaptionBreakFlags(frames: number[] | undefined, snapshot: Uint8Array | undefined, count: number): void {
+  if (!frames || !snapshot)
+    return
+  const end = Math.min(count, snapshot.length)
+  for (let index = 0; index < end; index++) {
+    const offset = index * CAPTION_FRAME_SIZE + 2
+    frames[offset] = frames[offset]! & ~CAPTION_INTERNAL_BREAK | snapshot[index]!
+  }
 }
 
 function maxBacktickRun(value: string): number {
@@ -954,18 +1022,24 @@ function flushPreFence(state: MarkdownState): void {
   state.lastContentCache = fence
 }
 
-function consumePendingPreChild(state: MarkdownState, node: Node, eventType: number): boolean {
+function consumePendingPreChild(state: MarkdownState, node: Node, eventType: number, beforeFlush: () => void): boolean {
   if (eventType !== NodeEventEnter)
     return false
   if (node.type === ELEMENT_NODE) {
     const element = node as ElementNode
-    if (element.tagId === TAG_CODE && element.parent?.tagId === TAG_PRE)
+    if (element.tagId === TAG_CODE && element.parent?.tagId === TAG_PRE) {
       state.preFencePending = false
-    else if (element.tagId !== TAG_PRE)
+    }
+    else if (element.tagId !== TAG_PRE
+      && element.tagId !== TAG_FIGCAPTION
+      && !suppressesFormattingInPre(element.tagId!)) {
+      beforeFlush()
       flushPreFence(state)
+    }
     return false
   }
   if (hasNonWhitespace((node as TextNode).value)) {
+    beforeFlush()
     flushPreFence(state)
     return false
   }
@@ -1065,16 +1139,224 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
   let openMarkerCount = 0
+  let captionFrames: number[] | undefined
+  let captionFrameCount = 0
+  // 1 needs a boundary; 2 emitted one and still owns the next source space.
+  let captionBoundary = 0
+  let captionBoundarySpacing = 0
+  let captionBreakRun = 0
   const gfmLifecycle: GfmLifecycleState = { openCodeSpans: [] }
   let openLinkFragment = -1
+  let openLinkCaptionBreakRun = 0
+  let openLinkCaptionFlags: Uint8Array | undefined
+  const clean = options.clean
+  const cleanEmptyLinkText = clean === true || (clean !== null && typeof clean === 'object' && clean.emptyLinkText === true)
+  let rawHtmlLink: ElementNode | undefined
 
   let lastYieldedLength = 0
   let hasYieldedContent = false
+
+  function captionNeedsPreparation(): boolean {
+    return captionBoundary !== 0
+      || (captionFrameCount !== 0
+        && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0)
+  }
+
+  function pushCaptionFrame(element: ElementNode, handler: TagHandler | undefined): void {
+    let enterSpacing = 0
+    let exitSpacing = 0
+    if (!state.depthMap[TAG_PRE] && figcaptionOwnsBlockSpacing(element, false)) {
+      const spacing = handler?.spacing
+      if (spacing) {
+        enterSpacing = spacing[0]
+        exitSpacing = spacing[1]
+      }
+      else {
+        enterSpacing = CAPTION_DEFAULT_SPACING
+        exitSpacing = CAPTION_DEFAULT_SPACING
+      }
+    }
+    const frames = captionFrames || (captionFrames = [])
+    const offset = captionFrameCount * CAPTION_FRAME_SIZE
+    frames[offset] = enterSpacing
+    frames[offset + 1] = exitSpacing
+    frames[offset + 2] = 0
+    frames[offset + 3] = CAPTION_NO_ANCHOR
+    captionFrameCount++
+  }
+
+  function captionSpacingPrefix(spacing: number, includeListIndent: boolean, beforeFragment: number): string {
+    if (spacing === 0)
+      return ''
+    if (spacing === CAPTION_DEFAULT_SPACING)
+      spacing = DEFAULT_BLOCK_SPACING[0]
+    const indent = includeListIndent ? state.listIndent : ''
+    const blockPrefix = blockOpenPrefix(state.buffer, indent, beforeFragment)
+    const trailingNewLines = newlineRunBeforePrefix(state.buffer, beforeFragment, indent)
+    if (blockPrefix === undefined && trailingNewLines === 0)
+      return ''
+
+    const missingNewLines = Math.max(0, spacing - trailingNewLines)
+    const prefix = missingNewLines === 0 ? blockPrefix || '' : `${'\n'.repeat(missingNewLines)}${indent}`
+    if (!prefix)
+      return ''
+
+    const lastIndex = beforeFragment - 1
+    const last = state.buffer[lastIndex]
+    if (prefix.charCodeAt(0) === 10 && last?.endsWith(' ')) {
+      const trimmed = last.slice(0, -1)
+      state.buffer[lastIndex] = trimmed
+      if (state.lastContentCache === last)
+        state.lastContentCache = trimmed
+      state.lastTextNode = undefined
+    }
+    return prefix
+  }
+
+  function appendCaptionSpacing(spacing: number, includeListIndent: boolean): boolean {
+    const prefix = captionSpacingPrefix(spacing, includeListIndent, state.buffer.length)
+    if (!prefix)
+      return false
+    state.buffer.push(prefix)
+    state.lastContentCache = prefix
+    state.pendingInlineWhitespace = false
+    return true
+  }
+
+  function prepareCaptionOutput(explicitTop: boolean, includeBoundaryListIndent = true): boolean {
+    let changed = false
+    if (captionBoundary === 1)
+      changed = appendCaptionSpacing(captionBoundarySpacing, includeBoundaryListIndent)
+
+    const frames = captionFrames
+    if (frames) {
+      for (let index = 0; index < captionFrameCount; index++) {
+        const offset = index * CAPTION_FRAME_SIZE
+        let flags = frames[offset + 2]!
+        if (flags & CAPTION_OPEN)
+          continue
+        const anchor = frames[offset + 3]!
+        const beforeFragment = anchor === CAPTION_NO_ANCHOR ? state.buffer.length : anchor
+        let opening = flags & CAPTION_INTERNAL_BREAK
+          ? ''
+          : captionSpacingPrefix(frames[offset]!, true, beforeFragment)
+        flags |= CAPTION_OPEN
+        if (!explicitTop || index !== captionFrameCount - 1)
+          opening += MARKDOWN_EMPHASIS
+        if (opening) {
+          if (beforeFragment === state.buffer.length) {
+            state.buffer.push(opening)
+            state.lastContentCache = opening
+          }
+          else {
+            const anchored = state.buffer[beforeFragment]!
+            const replacement = opening + anchored
+            state.buffer[beforeFragment] = replacement
+            const codeSpan = gfmLifecycle.openCodeSpans.at(-1)
+            if (codeSpan?.fragment === beforeFragment)
+              codeSpan.prefix = opening + codeSpan.prefix
+            if (state.lastContentCache === anchored)
+              state.lastContentCache = replacement
+          }
+          changed = true
+        }
+        frames[offset + 2] = flags
+      }
+    }
+    return changed
+  }
+
+  function consumeCaptionTransition(isInlineElement: boolean, tagId: number): void {
+    captionBoundary = isInlineElement && tagId !== TAG_IMG && tagId !== TAG_BR ? 2 : 0
+  }
+
+  function anchorPendingCaptions(fragment: number): void {
+    const frames = captionFrames
+    if (!frames)
+      return
+    for (let index = 0; index < captionFrameCount; index++) {
+      const offset = index * CAPTION_FRAME_SIZE
+      if ((frames[offset + 2]! & CAPTION_OPEN) === 0 && frames[offset + 3] === CAPTION_NO_ANCHOR)
+        frames[offset + 3] = fragment
+    }
+  }
+
+  function commitCaptionFrames(): void {
+    const frames = captionFrames
+    if (!frames)
+      return
+    for (let index = 0; index < captionFrameCount; index++) {
+      const offset = index * CAPTION_FRAME_SIZE
+      if (frames[offset + 2]! & CAPTION_OPEN)
+        frames[offset + 3] = CAPTION_NO_ANCHOR
+    }
+  }
+
+  function flushCaptionBreakRun(): boolean {
+    if (captionBreakRun === 0)
+      return false
+    let index = state.buffer.length
+    while (index !== 0) {
+      const value = state.buffer[--index]!
+      let end = value.length
+      while (end !== 0 && value.charCodeAt(end - 1) === 32)
+        end--
+      if (end === value.length)
+        break
+      if (end !== 0) {
+        state.buffer[index] = value.slice(0, end)
+        state.buffer.length = index + 1
+        break
+      }
+      state.buffer.length = index
+    }
+    const output = `  \n${state.listIndent}`.repeat(captionBreakRun)
+    captionBreakRun = 0
+    state.buffer.push(output)
+    state.lastContentCache = output
+    return true
+  }
+
+  function finishCaptionFrame(): void {
+    if (captionFrameCount === 0)
+      return
+    const offset = (captionFrameCount - 1) * CAPTION_FRAME_SIZE
+    const frames = captionFrames!
+    const exitSpacing = frames[offset + 1]!
+    const opened = (frames[offset + 2]! & CAPTION_OPEN) !== 0
+    const anchor = frames[offset + 3]!
+    frames.length = offset
+    captionFrameCount--
+    if (opened) {
+      captionBoundary = exitSpacing === 0 ? 0 : 1
+      captionBoundarySpacing = exitSpacing
+    }
+    else if (anchor !== CAPTION_NO_ANCHOR) {
+      state.buffer.length = anchor
+      state.lastContentCache = state.buffer.at(-1)
+      state.lastTextNode = undefined
+    }
+    else if (captionBreakRun !== 0 && captionFrameCount === 0) {
+      captionBoundary = 2
+    }
+  }
 
   function processTextNode(textNode: TextNode, lastNode: ElementNode | TextNode | undefined, lastChar: string): void {
     if (textNode.value) {
       if (textNode.excludedFromMarkdown)
         return
+
+      const ownsCaptionSpace = captionNeedsPreparation()
+      if (ownsCaptionSpace) {
+        if (textNode.value.charCodeAt(0) === 32)
+          textNode.value = textNode.value.slice(1)
+        if (!hasNonWhitespace(textNode.value))
+          return
+        flushCaptionBreakRun()
+        prepareCaptionOutput(false)
+        commitCaptionFrames()
+        captionBoundary = 0
+      }
 
       if (state.pendingInlineWhitespace) {
         if (!textNode.value.trim())
@@ -1087,7 +1369,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       if (textNode.value === ' ' && (lastChar === ' ' || lastChar === '\n' || lastChar === '\t' || lastChar === '\r'))
         return
 
-      if (shouldAddSpacingBeforeText(lastChar, lastNode, textNode))
+      if (!ownsCaptionSpace && shouldAddSpacingBeforeText(lastChar, lastNode, textNode))
         textNode.value = ` ${textNode.value}`
 
       if ((state.depthMap[TAG_PRE] || 0) > 0 && (state.depthMap[TAG_LI] || 0) > 0) {
@@ -1108,7 +1390,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         rawHtmlMarkdown = trackRawHtmlMarkdownContext(state.buffer, bufferScan)
       if (!state.depthMap[TAG_PRE]
         && insideRawHtmlBlock) {
-        textNode.value = escapeRawHtmlText(textNode.value, state.depthMap)
+        let parent = rawHtmlLink ? textNode.parent : undefined
+        while (parent && parent !== rawHtmlLink)
+          parent = parent.parent
+        textNode.value = escapeRawHtmlText(textNode.value, state.depthMap, rawHtmlLink !== undefined && parent === rawHtmlLink)
       }
 
       if (!state.depthMap[TAG_PRE]
@@ -1141,8 +1426,15 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         state.lastContentCache = textNode.value
       }
 
-      if (openMarkerCount && hasNonWhitespace(textNode.value))
-        openMarkerCount = 0
+      if (openMarkerCount || openLinkFragment >= 0) {
+        const hasVisibleText = textNode.containsWhitespace === false || hasNonWhitespace(textNode.value)
+        if (openLinkFragment >= 0 && hasVisibleText)
+          openLinkFragment = -openLinkFragment - 2
+        if (openMarkerCount && hasVisibleText) {
+          openMarkerCount = 0
+          commitCaptionFrames()
+        }
+      }
     }
     state.lastTextNode = textNode
   }
@@ -1193,11 +1485,42 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // before its first non-whitespace child so empty/whitespace-only blocks emit
     // nothing. A direct <code> child keeps fence ownership (handled in tags.ts).
     // Runs before lastChar is read so the fence is reflected in spacing checks.
-    if (state.preFencePending && consumePendingPreChild(state, node, eventType))
-      return
+    if (state.preFencePending) {
+      const preparePendingPreFence = () => {
+        if (captionNeedsPreparation()) {
+          flushCaptionBreakRun()
+          prepareCaptionOutput(false)
+          captionBoundary = 0
+        }
+      }
+      if (node.type === ELEMENT_NODE) {
+        const pendingElement = node as ElementNode
+        const pendingHandler = pendingElement.tagHandler
+        const literalOverride = eventType === NodeEventEnter
+          ? pendingHandler?.literalEnter
+          : pendingHandler?.literalExit
+        if (literalOverride && pendingElement.tagId === TAG_CODE && pendingElement.parent?.tagId === TAG_PRE)
+          state.preFenceLang = getLanguageFromClass(pendingElement.attributes?.class)
+        if (pendingElement.pluginOutput?.length || literalOverride) {
+          preparePendingPreFence()
+          flushPreFence(state)
+        }
+        else if (consumePendingPreChild(state, node, eventType, preparePendingPreFence)) {
+          return
+        }
+      }
+      else if (consumePendingPreChild(state, node, eventType, preparePendingPreFence)) {
+        return
+      }
+    }
 
     let lastBuffEntry = buff.at(-1)!
     let lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
+    if (!lastChar && state.pendingInlineWhitespace && eventType === NodeEventEnter) {
+      const code = lastOutputChar(buff)
+      if (code !== -1)
+        lastChar = String.fromCharCode(code)
+    }
 
     if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
       processTextNode(node as TextNode, lastNode, lastChar)
@@ -1210,6 +1533,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     const element = node as ElementNode
     const handler = node.tagHandler
+    const tagId = element.tagId!
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
     if (insideRawHtmlRegion && !inRawHtmlRegion) {
       bufferScan[0] = false
@@ -1223,7 +1547,30 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     if (eventType === NodeEventEnter
       && handler === breakHandler
       && !element.pluginOutput?.length) {
-      const breakOutput = renderBreak(element, state)
+      const inPre = state.depthMap[TAG_PRE] !== 0
+      let breakOutput: string | undefined = renderBreak(element, state)
+
+      if (captionBoundary !== 0 || captionFrameCount !== 0) {
+        const pendingCaption = captionFrameCount !== 0
+          && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
+        if (!inPre
+          && breakOutput
+          && !hasNonWhitespace(breakOutput)
+          && buff.length === 0
+          && !hasYieldedContent
+          && state.blockquotes.length === 0
+          && pendingCaption) {
+          breakOutput = undefined
+        }
+        if (breakOutput && hasNonWhitespace(breakOutput) && captionNeedsPreparation()) {
+          flushCaptionBreakRun()
+          prepareCaptionOutput(false)
+          commitCaptionFrames()
+          consumeCaptionTransition(false, TAG_BR)
+          lastBuffEntry = buff.at(-1)!
+          lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
+        }
+      }
 
       if (state.pendingInlineWhitespace)
         state.pendingInlineWhitespace = false
@@ -1250,25 +1597,23 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         }
       }
 
-      if (breakOutput) {
+      const pendingCaption = captionFrameCount !== 0
+        && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
+      if (breakOutput && pendingCaption && !hasNonWhitespace(breakOutput)) {
+        for (let index = 0; index < captionFrameCount; index++) {
+          const offset = index * CAPTION_FRAME_SIZE + 2
+          if ((captionFrames![offset]! & CAPTION_OPEN) === 0)
+            captionFrames![offset] = captionFrames![offset]! | CAPTION_INTERNAL_BREAK
+        }
+        captionBreakRun++
+      }
+      else if (breakOutput) {
         buff.push(breakOutput)
         state.lastContentCache = breakOutput
         if (openMarkerCount && hasNonWhitespace(breakOutput))
           openMarkerCount = 0
       }
       return
-    }
-
-    // The generic element pipeline needs two trailing characters for newline
-    // normalization. Text nodes and built-in breaks return before this work.
-    let secondLastChar
-    if (lastBuffEntry && lastBuffEntry.length > 1) {
-      secondLastChar = lastBuffEntry.charAt(lastBuffEntry.length - 2)
-    }
-    else if (buff.length > 1) {
-      const prevBuff = buff[buff.length - 2]
-      if (prevBuff)
-        secondLastChar = prevBuff.charAt(prevBuff.length - 1)
     }
 
     // Keep the common no-output path allocation-free. Most structural and
@@ -1280,16 +1625,31 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       element.pluginOutput = undefined
     }
 
-    // Get last content from buffer regions
-    let lastFragment = state.lastContentCache
+    let captionBufferChanged = false
 
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
     const isInlineElement = handler?.isInline === true
     let gfmAction: GfmAction | undefined
     let handlerOutput: string | undefined
     const suppressedInPre = (state.depthMap[TAG_PRE] || 0) > 0
-      && suppressesFormattingInPre(element.tagId!)
+      && suppressesFormattingInPre(tagId)
+      && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
     if (!output && !suppressedInPre && handler?.[eventFn]) {
+      if (openLinkFragment >= 0
+        && eventType === NodeEventExit
+        && tagId === TAG_A) {
+        if (dropEmptyLinkText(buff, openLinkFragment)) {
+          if (captionFrameCount !== 0) {
+            captionBreakRun = openLinkCaptionBreakRun
+            restoreCaptionBreakFlags(captionFrames, openLinkCaptionFlags, captionFrameCount)
+            resetRetractedCaptionFrames(captionFrames, captionFrameCount, openLinkFragment)
+          }
+          state.lastContentCache = buff.at(-1)
+          state.lastTextNode = undefined
+          openLinkFragment = -1
+          return
+        }
+      }
       const res = handler[eventFn]({ node: element, state })
       if (typeof res === 'string') {
         if (res) {
@@ -1302,17 +1662,105 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         handlerOutput = consumeGfmAction(res, state, gfmLifecycle)
         if (handlerOutput)
           output = [handlerOutput]
-        if (res._tag === 'BlockquoteExit') {
-          lastFragment = state.lastContentCache
-          lastBuffEntry = buff.at(-1)!
-          lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
-          secondLastChar = lastBuffEntry && lastBuffEntry.length > 1
-            ? lastBuffEntry.charAt(lastBuffEntry.length - 2)
-            : buff.length > 1
-              ? buff[buff.length - 2]?.at(-1)
-              : undefined
+        if (res._tag === 'BlockquoteExit')
+          captionBufferChanged = true
+      }
+    }
+    if (captionBreakRun
+      && !(tagId === TAG_FIGCAPTION && eventType === NodeEventExit)
+      && output) {
+      flushCaptionBreakRun()
+      if (gfmAction?._tag !== 'BlockquoteEnter')
+        anchorPendingCaptions(state.buffer.length)
+      captionBufferChanged = true
+    }
+
+    const captionEvent = tagId === TAG_FIGCAPTION
+    let captionTransition = false
+    if (captionEvent || captionBoundary !== 0 || captionFrameCount !== 0) {
+      const captionEnter = captionEvent && eventType === NodeEventEnter && !state.depthMap[TAG_PRE]
+      const captionExit = captionEvent && eventType === NodeEventExit && !state.depthMap[TAG_PRE]
+      if (captionEnter)
+        pushCaptionFrame(element, handler)
+
+      let dropBlockquoteOutput = false
+      if (captionBoundary === 1 && eventType === NodeEventEnter && tagId === TAG_BLOCKQUOTE) {
+        captionBufferChanged = appendCaptionSpacing(captionBoundarySpacing, false) || captionBufferChanged
+        captionTransition = true
+        captionBoundary = 0
+        dropBlockquoteOutput = true
+        output = undefined
+        handlerOutput = undefined
+      }
+
+      let meaningfulOutput = !dropBlockquoteOutput && output?.some(hasNonWhitespace) === true
+      if (meaningfulOutput && handlerOutput !== undefined) {
+        const markerType = INLINE_MARKER_TYPE[tagId]!
+        const literal = eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit
+        if ((markerType || (tagId === TAG_A && eventType === NodeEventEnter)) && !literal) {
+          if (captionBoundary === 1) {
+            captionBufferChanged = appendCaptionSpacing(captionBoundarySpacing, true) || captionBufferChanged
+            captionTransition = true
+            captionBoundary = 2
+          }
+          if (eventType === NodeEventEnter) {
+            anchorPendingCaptions(state.buffer.length)
+            captionTransition = true
+          }
+          meaningfulOutput = false
         }
       }
+
+      const defaultCaptionExit = captionExit
+        && handlerOutput !== undefined
+        && !handler?.literalExit
+      if (defaultCaptionExit)
+        meaningfulOutput = false
+
+      if (captionExit && captionFrameCount !== 0) {
+        const offset = (captionFrameCount - 1) * CAPTION_FRAME_SIZE
+        const opened = (captionFrames![offset + 2]! & CAPTION_OPEN) !== 0
+        if (!opened && defaultCaptionExit) {
+          output = undefined
+          handlerOutput = undefined
+        }
+        else if (meaningfulOutput && captionNeedsPreparation()) {
+          if (flushCaptionBreakRun())
+            captionBufferChanged = true
+          captionBufferChanged = prepareCaptionOutput(false) || captionBufferChanged
+          captionTransition = true
+          consumeCaptionTransition(isInlineElement, tagId)
+        }
+        finishCaptionFrame()
+        if (!opened && flushCaptionBreakRun())
+          captionBufferChanged = true
+      }
+      else if (meaningfulOutput && captionNeedsPreparation()) {
+        captionBufferChanged = prepareCaptionOutput(captionEnter, tagId !== TAG_LI) || captionBufferChanged
+        captionTransition = true
+        consumeCaptionTransition(isInlineElement, tagId)
+      }
+      if (meaningfulOutput)
+        commitCaptionFrames()
+    }
+
+    const lastFragment = state.lastContentCache
+    if (captionBufferChanged) {
+      lastBuffEntry = buff.at(-1)!
+      lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
+    }
+    // Read the trailing characters after handlers and captions finish rewriting.
+    const secondLastChar = lastBuffEntry && lastBuffEntry.length > 1
+      ? lastBuffEntry.charAt(lastBuffEntry.length - 2)
+      : buff.length > 1
+        ? buff[buff.length - 2]?.at(-1)
+        : undefined
+
+    if (element.tagId === TAG_A) {
+      if (eventType === NodeEventEnter)
+        rawHtmlLink = insideRawHtmlRegion && handlerOutput !== undefined && !handler?.literalExit ? element : undefined
+      else
+        rawHtmlLink = undefined
     }
 
     let lastNewLines = 0
@@ -1323,13 +1771,14 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     if (eventType === NodeEventExit && openMarkerCount) {
       // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
-      const markerType = handlerOutput === undefined ? 0 : INLINE_MARKER_TYPE[element.tagId!]!
+      const markerType = handlerOutput === undefined ? 0 : INLINE_MARKER_TYPE[tagId]!
       if (markerType
-        && (element.tagId !== TAG_CODE
+        && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && !handler?.literalExit) {
         const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType)
         if (idx >= 0) {
+          resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
           return
         }
@@ -1339,19 +1788,21 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     // A <br> can introduce one blank line, but never needs 3+ consecutive
     // newlines in normalized prose. Preserve every newline inside <pre>.
-    if (element.tagId === TAG_BR && !state.depthMap[TAG_PRE]
+    if (tagId === TAG_BR && !state.depthMap[TAG_PRE]
       && output?.length === 1 && output[0] === '\n'
       && lastChar === '\n' && secondLastChar === '\n') {
       output = undefined
     }
 
     // Handle newlines
-    const newLineConfig = calculateNewLineConfig(node as ElementNode, state.depthMap)
+    const newLineConfig = suppressedInPre
+      ? NO_SPACING
+      : calculateNewLineConfig(node as ElementNode, state.depthMap)
     const quoteAtStart = eventType === NodeEventEnter
       && state.blockquotes.at(-1)?.fragment === state.buffer.length
-    const configuredNewLines = quoteAtStart
+    const configuredNewLines = quoteAtStart || captionEvent || captionTransition
       ? 0
-      : eventType === NodeEventExit && element.tagId === TAG_HR && state.blockquotes.length > 0
+      : eventType === NodeEventExit && tagId === TAG_HR && state.blockquotes.length > 0
         ? Math.min(1, newLineConfig[eventType] || 0)
         : newLineConfig[eventType] || 0
     // A closing code fence's block-spacing newlines are appended AFTER the
@@ -1373,17 +1824,22 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         }
       }
     }
-    const newLines = Math.max(0, configuredNewLines - effectiveLastNewLines)
+    let newLines = Math.max(0, configuredNewLines - effectiveLastNewLines)
+    if (newLines > 0 && buff.length === 0 && !hasYieldedContent)
+      newLines = 0
 
     if (state.pendingInlineWhitespace) {
       const firstOutput = output?.[0]?.[0] || ''
       if (eventType === NodeEventEnter) {
-        if (!isInlineElement || element.tagId === TAG_BR || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
+        if (!isInlineElement || tagId === TAG_BR || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
           state.pendingInlineWhitespace = false
         }
         else if (firstOutput) {
-          if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput))
+          if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput)) {
             state.buffer.push(' ')
+            state.lastContentCache = ' '
+            lastChar = ' '
+          }
           state.pendingInlineWhitespace = false
         }
       }
@@ -1393,8 +1849,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     }
 
     if (newLines > 0) {
-      // If the buffer has no content, add the current content (without new lines)
-      if (!buff.length) {
+      if (!buff.length && !captionEvent && !captionTransition) {
         if (output) {
           for (const fragment of output) {
             if (fragment) {
@@ -1420,16 +1875,20 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
 
       if (eventType === NodeEventEnter) {
-        if (output)
+        if (output) {
           output.unshift(newlinesStr)
-        else
+        }
+        else {
           output = [newlinesStr]
+        }
       }
       else {
-        if (output)
+        if (output) {
           output.push(newlinesStr)
-        else
+        }
+        else {
           output = [newlinesStr]
+        }
       }
     }
     else {
@@ -1457,7 +1916,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           // At a quote's content start the last fragment is the sibling separator,
           // not trailing whitespace; trimming it would glue adjacent quotes.
           const shouldTrim = !quoteAtStart
-            && ((element.tagId === TAG_BR && output?.[0]?.endsWith('\n') && !parentInPre)
+            && ((tagId === TAG_BR && output?.[0]?.endsWith('\n') && !parentInPre)
               || ((!isInlineElement || eventType === NodeEventExit) && !isBlockElement && !(collapsesWhiteSpace && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter)))
 
           if (shouldTrim) {
@@ -1481,7 +1940,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     }
 
     // Add spacing between inline elements if needed
-    if (element.tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !node.tagHandler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
+    if (!captionTransition && tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
       state.buffer.push(' ')
       state.lastContentCache = ' '
     }
@@ -1501,39 +1960,58 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     if (gfmAction)
       commitGfmAction(gfmAction, state, gfmLifecycle, outputStart)
 
-    if (element.tagId === TAG_LI && !isInsideTableCell(state)) {
+    if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)
         recordItemMarker(state, element.index)
       else
         resolveItemMarker(state, true)
     }
 
-    if (eventType === NodeEventEnter && element.tagId === TAG_A && handlerOutput === '[' && buff.at(-1) === '[')
-      openLinkFragment = buff.length - 1
+    if (eventType === NodeEventEnter
+      && tagId === TAG_A
+      && outputStart < buff.length
+      && buff.at(-1) === '[') {
+      const fragment = buff.length - 1
+      const cleanCaptionLink = captionFrameCount !== 0 && cleanEmptyLinkText
+      openLinkFragment = cleanCaptionLink ? fragment : -fragment - 2
+      if (cleanCaptionLink) {
+        openLinkCaptionBreakRun = captionBreakRun
+        const snapshot = openLinkCaptionFlags?.length === captionFrameCount
+          ? openLinkCaptionFlags
+          : new Uint8Array(captionFrameCount)
+        for (let index = 0; index < captionFrameCount; index++)
+          snapshot[index] = captionFrames![index * CAPTION_FRAME_SIZE + 2]! & CAPTION_INTERNAL_BREAK
+        openLinkCaptionFlags = snapshot
+      }
+    }
 
     // Track open inline markers for empty pair detection. Inline code in a
     // list may own a leading separator (" `"), so retain the whole output
     // fragment as the drop boundary.
     if (eventType === NodeEventEnter && handlerOutput !== undefined && isInlineElement && !handler?.literalEnter) {
-      const markerType = INLINE_MARKER_TYPE[element.tagId!]!
+      const markerType = INLINE_MARKER_TYPE[tagId]!
       if (markerType
-        && (element.tagId !== TAG_CODE
+        && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && buff[buff.length - 1] === handlerOutput) {
         openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
       }
-      else if (openMarkerCount && hasNonWhitespace(handlerOutput)) {
+      else if (openMarkerCount
+        && !(tagId === TAG_A && cleanEmptyLinkText)
+        && hasNonWhitespace(handlerOutput)) {
         openMarkerCount = 0
+        commitCaptionFrames()
       }
     }
-    else if (openMarkerCount && (handler?.literalExit || (element.tagId !== -1 && !isInlineElement) || output?.some(hasNonWhitespace))) {
+    else if (openMarkerCount && ((eventType === NodeEventExit && handler?.literalExit) || (tagId !== -1 && !isInlineElement) || output?.some(hasNonWhitespace))) {
       // Literal overrides, plugin output, and block boundaries make all open
       // markers permanent, allowing streaming to release buffered content.
       openMarkerCount = 0
     }
 
-    if (eventType === NodeEventExit && element.tagId === TAG_A)
+    if (eventType === NodeEventExit && tagId === TAG_A) {
       openLinkFragment = -1
+    }
 
     updateListIndent(state, element, eventType)
 
@@ -1581,17 +2059,28 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   function getMarkdownChunk(): string {
     // Settle an open marker-line guard when the item's first content already
     // answers it, so the hold below never outlives the marker's own line.
-    resolveItemMarker(state, false)
+    let unresolvedCaptionFragment = -1
+    if (state.emptyItemFragment !== undefined && captionFrames) {
+      for (let index = 0; index < captionFrameCount; index++) {
+        const offset = index * CAPTION_FRAME_SIZE
+        const anchor = captionFrames[offset + 3]!
+        if (anchor !== CAPTION_NO_ANCHOR) {
+          unresolvedCaptionFragment = anchor
+          break
+        }
+      }
+    }
+    resolveItemMarker(state, false, unresolvedCaptionFragment)
     const content = state.buffer.join('')
     const currentContent = hasYieldedContent ? content : content.trimStart()
     const inPre = state.depthMap[TAG_PRE] !== 0
-    const trailingCode = currentContent.charCodeAt(currentContent.length - 1)
-    let trailingSpaceEnd = currentContent.length
-    while (trailingSpaceEnd > 0 && currentContent.charCodeAt(trailingSpaceEnd - 1) === 32)
-      trailingSpaceEnd--
-    let stableLength = trailingSpaceEnd
-    let retainMutableFragments = stableLength < currentContent.length
+    let stableLength = currentContent.length
+    let retainMutableFragments = false
     if (inPre) {
+      const trailingCode = currentContent.charCodeAt(stableLength - 1)
+      while (stableLength > 0 && currentContent.charCodeAt(stableLength - 1) === 32)
+        stableLength--
+      retainMutableFragments = stableLength < currentContent.length
       if (state.lastTextNode?.containsWhitespace && isAsciiWhitespace(trailingCode)) {
         stableLength = trimAsciiWhitespaceEnd(currentContent).length
         retainMutableFragments = stableLength < currentContent.length
@@ -1608,77 +2097,41 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       // Block spacing and trailing spaces can still be trimmed by a later
       // element close or by finalization. Keep them buffered until following
       // content makes them stable.
-      while (stableLength > 0 && (currentContent[stableLength - 1] === ' ' || currentContent[stableLength - 1] === '\n'))
+      while (stableLength > 0) {
+        const code = currentContent.charCodeAt(stableLength - 1)
+        if (code !== 32 && code !== 10)
+          break
         stableLength--
+      }
       retainMutableFragments = stableLength < currentContent.length
     }
 
     const leadingTrimmed = content.length - currentContent.length
 
-    // An open inline marker may still be dropped if its element closes empty in a later chunk;
-    // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
-    const markerHeld = openMarkerCount > 0
-    if (markerHeld) {
-      const openFragment = openMarkers[0]! >> 3
-      const markerPos = Math.max(
-        lastYieldedLength,
-        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, openFragment) - leadingTrimmed),
-      )
-      if (markerPos < stableLength)
-        stableLength = markerPos
+    // Each owner can rewrite its opening fragment. The earliest one bounds
+    // every hold, so scan and trim that position once.
+    let heldFragment = Math.min(
+      openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
+      gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
+      state.emptyItemFragment ?? Infinity,
+      state.codeFence?.fragment ?? Infinity,
+      state.blockquotes[0]?.fragment ?? Infinity,
+      openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
+    )
+    for (let index = 0; index < captionFrameCount; index++) {
+      const offset = index * CAPTION_FRAME_SIZE
+      const anchor = captionFrames![offset + 3]!
+      if ((captionFrames![offset + 2]! & CAPTION_OPEN) === 0 && anchor !== CAPTION_NO_ANCHOR) {
+        heldFragment = Math.min(heldFragment, anchor)
+        break
+      }
     }
-    const codeSpanHeld = gfmLifecycle.openCodeSpans.length > 0
-    if (codeSpanHeld) {
-      const spanPos = Math.max(
-        lastYieldedLength,
-        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, gfmLifecycle.openCodeSpans[0]!.fragment) - leadingTrimmed),
-      )
-      if (spanPos < stableLength)
-        stableLength = spanPos
-    }
-    // An empty `<li>` rewrites its own marker fragment on exit.
-    const emptyItemFragment = state.emptyItemFragment
-    const emptyItemHeld = emptyItemFragment !== undefined
-    if (emptyItemHeld) {
-      const itemPos = Math.max(
-        lastYieldedLength,
-        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, emptyItemFragment) - leadingTrimmed),
-      )
-      if (itemPos < stableLength)
-        stableLength = itemPos
-    }
-    const codeFenceHeld = state.codeFence !== undefined
-    if (codeFenceHeld) {
-      const fencePos = Math.max(
-        lastYieldedLength,
-        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, state.codeFence!.fragment) - leadingTrimmed),
-      )
-      if (fencePos < stableLength)
-        stableLength = fencePos
-    }
-    const blockquoteHeld = state.blockquotes.length > 0
-    if (blockquoteHeld) {
-      const blockquotePos = Math.max(
-        lastYieldedLength,
-        trimBufferedWhitespacePosition(
-          currentContent,
-          fragmentPosition(state.buffer, state.blockquotes[0]!.fragment) - leadingTrimmed,
-        ),
-      )
-      if (blockquotePos < stableLength)
-        stableLength = blockquotePos
-    }
-
-    // An open link can rewrite its opening bracket and all link text when it
-    // closes as a GFM autolink. Hold that region until the close is final.
-    const linkHeld = openLinkFragment >= 0
-    if (linkHeld) {
-      const linkPos = Math.max(
-        lastYieldedLength,
-        trimBufferedWhitespacePosition(currentContent, fragmentPosition(state.buffer, openLinkFragment) - leadingTrimmed),
-      )
-      if (linkPos < stableLength)
-        stableLength = linkPos
+    const fragmentHeld = heldFragment !== Infinity
+    if (fragmentHeld) {
+      stableLength = Math.min(stableLength, trimBufferedWhitespacePosition(
+        currentContent,
+        fragmentPosition(state.buffer, heldFragment) - leadingTrimmed,
+      ))
     }
 
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
@@ -1713,8 +2166,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // from joining and slicing the entire cumulative output. Plugin, wrapping,
     // and open-link paths retain the full buffer because they can inspect or
     // rewrite earlier content.
-    if (!markerHeld && !codeSpanHeld && !codeFenceHeld && !blockquoteHeld && !linkHeld && !emptyItemHeld && !headingHeld && (!retainMutableFragments || !inPre)) {
-      if (!resolvedPlugins.length && !options.wrapWidth && !state.depthMap[TAG_A]) {
+    if (!fragmentHeld && !headingHeld && (!retainMutableFragments || !inPre)) {
+      if (!resolvedPlugins.length && !options.wrapWidth) {
         if (retainMutableFragments && leadingTrimmed === 0) {
           // Preserve the final fragment as a separate value: close handlers
           // identify and trim it by reference equality with lastContentCache.

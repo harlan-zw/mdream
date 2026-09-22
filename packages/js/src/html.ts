@@ -3,7 +3,7 @@ import type { MdreamOptions } from './types'
 import { ELEMENT_NODE, MAX_TAG_ID } from './const'
 import { createHtmlOutputState, processHtmlOutputEvent } from './html-output'
 import { processHtmlOutput, streamHtmlOutput } from './output-runner'
-import { parserTagHandlers } from './parser-tags'
+import { htmlTagHandlers } from './parser-tags'
 import { buildTagOverrideHandlers } from './tag-overrides'
 
 function createProcessor(options: MdreamOptions): OutputProcessor {
@@ -37,9 +37,9 @@ function createProcessor(options: MdreamOptions): OutputProcessor {
 function resolveOutputOptions(options: MdreamOptions) {
   return {
     plugins: options.plugins,
-    tagHandlers: parserTagHandlers,
+    tagHandlers: htmlTagHandlers,
     tagOverrideHandlers: options.tagOverrides
-      ? buildTagOverrideHandlers(options.tagOverrides, parserTagHandlers)
+      ? buildTagOverrideHandlers(options.tagOverrides, htmlTagHandlers)
       : undefined,
     plainText: true,
   }

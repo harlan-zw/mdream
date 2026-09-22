@@ -84,6 +84,24 @@ fn write_image_description(output: &mut String, alt: &str) {
   write_ascii_escaped(output, alt, &IMAGE_DESCRIPTION_ESCAPES);
 }
 
+#[inline]
+fn is_ecmascript_whitespace(character: char) -> bool {
+  matches!(
+    character,
+    '\u{0009}'..='\u{000D}'
+      | '\u{0020}'
+      | '\u{00A0}'
+      | '\u{1680}'
+      | '\u{2000}'..='\u{200A}'
+      | '\u{2028}'
+      | '\u{2029}'
+      | '\u{202F}'
+      | '\u{205F}'
+      | '\u{3000}'
+      | '\u{FEFF}'
+  )
+}
+
 #[inline(never)]
 #[allow(clippy::cast_possible_truncation)] // `parsed` is bounded by the `u32` maximum argument.
 pub(super) fn parse_bounded_u32(value: &str, max: u32) -> Option<u32> {
@@ -109,6 +127,63 @@ pub(super) fn parse_bounded_u32(value: &str, max: u32) -> Option<u32> {
 }
 
 impl ConvertState {
+  fn begin_link(&mut self, bracket_pos: usize, skipped: bool) {
+    // `self.link` describes a live enclosing `<a>` only when `open` is set; an
+    // implied close (a nested `<a>` start) resets it to the default, and pushing
+    // that phantom would poison the bracket floor the streaming guards read.
+    if self.link.open {
+      self.parent_links.push(self.link);
+    }
+    self.link = LinkOutputState {
+      bracket_pos,
+      skipped,
+      open: true,
+      begin_depth: self.depth,
+      ..Default::default()
+    };
+  }
+
+  fn end_link(&mut self) {
+    self.link = self.parent_links.pop().unwrap_or_default();
+  }
+
+  #[inline]
+  pub(super) fn mark_rendered_child_content(&mut self) {
+    let image_index = self.stack.len().saturating_sub(1);
+    let mut scope_start = self.first_block_parent_index.unwrap_or(0);
+    if scope_start >= image_index {
+      scope_start = if self.block_parent_indices.len() > 1 {
+        self.block_parent_indices[self.block_parent_indices.len() - 2]
+      } else {
+        0
+      };
+    }
+
+    let mut anchor_in_scope = false;
+    for parent in &mut self.stack[scope_start..image_index] {
+      parent.child_text_node_index += 1;
+      if parent.tag_id == Some(TAG_A) {
+        anchor_in_scope = true;
+      }
+    }
+    if anchor_in_scope {
+      return;
+    }
+    let mut anchor_found = false;
+    for parent in self.stack[..scope_start].iter_mut().rev() {
+      if !anchor_found {
+        if parent.tag_id != Some(TAG_A) {
+          continue;
+        }
+        anchor_found = true;
+      }
+      parent.child_text_node_index += 1;
+      if !parent.is_inline {
+        return;
+      }
+    }
+  }
+
   #[inline]
   fn has_flushed_tail(&self) -> bool {
     self.cut_line_lead != CutLineLead::Uncut
@@ -116,15 +191,13 @@ impl ConvertState {
 
   #[inline]
   fn inline_marker_type(tag_id: u8) -> Option<u8> {
-    // The kind is the delimiter identity: one value per distinct delimiter
-    // string, so tags sharing a delimiter share a kind.
     match tag_id {
-      TAG_STRONG | TAG_B | TAG_DFN => Some(0),
-      TAG_EM | TAG_I | TAG_FIGCAPTION => Some(1),
-      TAG_DEL | TAG_S | TAG_STRIKE => Some(2),
-      TAG_CITE => Some(3),
-      TAG_KBD | TAG_CODE | TAG_SAMP | TAG_VAR => Some(4),
-      TAG_Q => Some(5),
+      TAG_STRONG | TAG_B | TAG_DFN => Some(1),
+      TAG_EM | TAG_I => Some(2),
+      TAG_DEL | TAG_S | TAG_STRIKE => Some(3),
+      TAG_CITE => Some(4),
+      TAG_KBD | TAG_CODE | TAG_SAMP | TAG_VAR => Some(5),
+      TAG_Q => Some(6),
       _ => None,
     }
   }
@@ -307,11 +380,33 @@ impl ConvertState {
       Self::max_line_leading_run(&self.buffer[fence.content_start..], marker, &fence.indent);
     let delimiter = (marker as char).to_string().repeat((max_run + 1).max(3));
     let marker_start = fence.output_start + fence.marker_offset;
-    self.replace_code_span_content(
+    if self.replace_code_span_content(
       marker_start..marker_start + MARKDOWN_CODE_BLOCK.len(),
       &delimiter,
-    );
+    ) {
+      self.shift_fragment_links_after(
+        marker_start + MARKDOWN_CODE_BLOCK.len(),
+        delimiter.len() as isize - MARKDOWN_CODE_BLOCK.len() as isize,
+      );
+    }
     Some(delimiter)
+  }
+
+  fn shift_fragment_links_after(&mut self, offset: usize, amount: isize) {
+    if amount == 0 {
+      return;
+    }
+    for link in &mut self.fragment_links {
+      if link.bracket_start >= offset {
+        link.bracket_start = link.bracket_start.saturating_add_signed(amount);
+      }
+      if link.text_end >= offset {
+        link.text_end = link.text_end.saturating_add_signed(amount);
+      }
+      if link.link_end >= offset {
+        link.link_end = link.link_end.saturating_add_signed(amount);
+      }
+    }
   }
 
   fn blockquote_offset(content: &str, list_indent: &str, offset: usize) -> usize {
@@ -392,16 +487,26 @@ impl ConvertState {
       }
     }
 
-    for (bracket_start, link_end) in &mut self.fragment_links {
-      if *bracket_start >= frame.content_start && *link_end <= content_end {
-        *bracket_start = frame.content_start
+    for link in &mut self.fragment_links {
+      if link.bracket_start >= frame.content_start && link.link_end <= content_end {
+        link.bracket_start = frame.content_start
           + Self::blockquote_offset(
             content,
             &frame.list_indent,
-            *bracket_start - frame.content_start,
+            link.bracket_start - frame.content_start,
           );
-        *link_end = frame.content_start
-          + Self::blockquote_offset(content, &frame.list_indent, *link_end - frame.content_start);
+        link.text_end = frame.content_start
+          + Self::blockquote_offset(
+            content,
+            &frame.list_indent,
+            link.text_end - frame.content_start,
+          );
+        link.link_end = frame.content_start
+          + Self::blockquote_offset(
+            content,
+            &frame.list_indent,
+            link.link_end - frame.content_start,
+          );
       }
     }
 
@@ -427,6 +532,17 @@ impl ConvertState {
         *offset = remap(*offset);
       }
     }
+    for frame in &mut self.caption_frames {
+      if let CaptionState::Tentative {
+        output_start,
+        content_start,
+        ..
+      } = &mut frame.state
+      {
+        *output_start = remap(*output_start);
+        *content_start = remap(*content_start);
+      }
+    }
     if let Some(fence) = &mut self.code_fence {
       // Held relative to `output_start`, and a prefix can land between the two,
       // so the marker is remapped on its own and the offset rebuilt from it.
@@ -446,7 +562,7 @@ impl ConvertState {
     }
 
     self.scan_before_requote(content_end);
-    self.buffer.truncate(frame.content_start);
+    self.truncate_buffer(frame.content_start);
     self.buffer.push_str(&quoted);
     self.shift_raw_html_scan(content_end, quoted_end);
     self.last_content_cache_len = quoted.len();
@@ -485,6 +601,7 @@ impl ConvertState {
       // These pending rewrites keep absolute buffer offsets. Quoting content
       // before them shifts those offsets, so wait until each rewrite settles.
       || !self.open_markers.is_empty()
+      || self.first_tentative_caption_start().is_some()
       || self.code_fence.is_some()
       || !self.code_spans.is_empty()
       || self.depth_map[TAG_A as usize] > 0
@@ -658,20 +775,6 @@ impl ConvertState {
       self.flush_list_rule();
     }
 
-    // Deferred <pre> code fence (issue #97): open a bare <pre>'s fence right
-    // before its first non-whitespace child. A direct <code> child keeps
-    // fence ownership; a deeper/other first child opens the <pre>'s own fence.
-    if !self.plain_text && self.pre_fence_pending {
-      let tid = self.stack[stack_len - 1].tag_id;
-      if tid == Some(TAG_CODE)
-        && stack_len >= 2
-        && self.stack[stack_len - 2].tag_id == Some(TAG_PRE)
-      {
-        self.pre_fence_pending = false;
-      } else if tid != Some(TAG_PRE) {
-        self.flush_pre_fence();
-      }
-    }
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
     // language) is emitted lazily above for the no-<code> case. Skipped inside
     // a table cell, where the <pre> is emitted as raw HTML instead (issue #147).
@@ -690,6 +793,7 @@ impl ConvertState {
     let tag_id: Option<u8>;
     let is_inline: bool;
     let node_spacing: Option<[u8; 2]>;
+    let caption_spacing: [u8; 2];
     let mut output: Option<Cow<'static, str>>;
     let exit_is_overridden: bool;
     // True when `output` is a user-supplied override enter string — emit it
@@ -701,7 +805,6 @@ impl ConvertState {
 
       tag_id = node.tag_id;
 
-      // Check override is_inline
       let override_config = if self.has_tag_overrides {
         let ovs = self
           .options
@@ -712,10 +815,15 @@ impl ConvertState {
       } else {
         None
       };
-      is_inline = override_config
-        .and_then(|ov| ov.is_inline)
-        .unwrap_or(node.is_inline);
+      is_inline = node.is_inline;
       node_spacing = override_config.and_then(|ov| ov.spacing).or(node.spacing);
+      caption_spacing = if tag_id == Some(TAG_FIGCAPTION) {
+        override_config
+          .and_then(|ov| ov.spacing)
+          .unwrap_or(DEFAULT_BLOCK_SPACING)
+      } else {
+        NO_SPACING
+      };
       exit_is_overridden = override_config.is_some_and(|ov| ov.exit.is_some());
 
       // Table state reads (tag_id.is_some() is sufficient — all table tags have handlers)
@@ -767,44 +875,110 @@ impl ConvertState {
     }
     // Phase 1 ends — self.stack borrow released
 
+    // A literal override is code content inside `<pre>`, even when the tag's
+    // built-in formatting would be suppressed there.
+    if !self.plain_text && self.pre_fence_pending {
+      if code_owns_pending_pre_fence(&self.stack) && !enter_is_literal {
+        self.pre_fence_pending = false;
+      } else if tag_id != Some(TAG_PRE)
+        && (!tag_id.is_some_and(suppresses_formatting_in_pre) || enter_is_literal)
+      {
+        if enter_is_literal && code_owns_pending_pre_fence(&self.stack) {
+          self.pre_fence_lang =
+            Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
+              .to_string();
+        }
+        self.flush_pre_fence();
+        if tag_id == Some(TAG_CODE) && !enter_is_literal {
+          output = None;
+        }
+      }
+    }
+
+    if self.clean_flags & CLEAN_EMPTY_IMAGES != 0
+      && tag_id == Some(TAG_IMG)
+      && self.stack[stack_len - 1]
+        .attributes
+        .get("alt")
+        .is_none_or(|alt| alt.chars().all(is_ecmascript_whitespace))
+    {
+      self.last_node_is_inline = is_inline;
+      return;
+    }
+
     // Phase 2: calculate new lines + write buffer
+    let caption_enter = tag_id == Some(TAG_FIGCAPTION) && self.depth_map[TAG_PRE as usize] == 0;
+    if caption_enter {
+      self.caption_frames.push(CaptionFrame {
+        state: CaptionState::Pending,
+        spacing: if self.figcaption_owns_block_spacing() {
+          caption_spacing
+        } else {
+          NO_SPACING
+        },
+        deferred_breaks: None,
+        has_internal_break: false,
+      });
+    }
+
+    let caption_active =
+      self.caption_boundary != CaptionBoundary::None || !self.caption_frames.is_empty();
+    let visible_output = caption_active
+      && output
+        .as_deref()
+        .is_some_and(|value| value.bytes().any(|byte| !is_whitespace(byte)));
+    let default_inline_marker =
+      !enter_is_literal && visible_output && tag_id.and_then(Self::inline_marker_type).is_some();
+    let tentative_caption_output =
+      default_inline_marker || (!enter_is_literal && tag_id == Some(TAG_A));
+    if visible_output || tag_id == Some(TAG_BLOCKQUOTE) {
+      self.expand_deferred_caption_breaks();
+    }
+    let consumes_caption_boundary = if visible_output || tag_id == Some(TAG_BLOCKQUOTE) {
+      self.prepare_caption_boundary(!matches!(tag_id, Some(TAG_BLOCKQUOTE | TAG_LI)))
+    } else {
+      false
+    };
+    if visible_output && (tag_id != Some(TAG_BLOCKQUOTE) || enter_is_literal) {
+      self.materialize_caption_frames(if caption_enter && enter_is_literal {
+        CaptionMaterialization::ExplicitCommit
+      } else if tentative_caption_output {
+        CaptionMaterialization::Tentative
+      } else {
+        CaptionMaterialization::Commit
+      });
+    }
     let new_line_config = self.calculate_new_line_config(tag_id, node_spacing);
     let quote_at_start = self
       .blockquotes
       .last()
       .is_some_and(|frame| frame.content_start == self.buffer.len());
-    let configured_new_lines = if quote_at_start {
+    let configured_new_lines = if quote_at_start || consumes_caption_boundary || caption_enter {
       0
     } else {
       new_line_config[0]
     };
 
+    if tag_id == Some(TAG_A) {
+      self.raw_html_link_open = false;
+    }
+
     // Clean mode — single guard for all clean checks
     if self.clean_flags != 0
       && let Some(id) = tag_id
+      && id == TAG_A
     {
-      if id == TAG_A {
-        // emptyLinks: skip hrefs that cannot represent meaningful navigation.
-        if self.clean_flags & CLEAN_EMPTY_LINKS != 0 {
-          let node = &self.stack[self.stack.len() - 1];
-          if let Some(href) = node.attributes.get_bit(ATTR_HREF)
-            && is_empty_link_href(href)
-          {
-            self.skip_current_link = true;
-            if self.streaming {
-              self.link_hold_forever = false;
-              self.link_hold_released = true;
-              self.link_empty_text_pending = false;
-            }
-            self.last_node_is_inline = is_inline;
-            return;
-          }
-          self.skip_current_link = false;
-        }
-      } else if id == TAG_IMG && self.clean_flags & CLEAN_EMPTY_IMAGES != 0 {
+      // emptyLinks: skip hrefs that cannot represent meaningful navigation.
+      if self.clean_flags & CLEAN_EMPTY_LINKS != 0 {
         let node = &self.stack[self.stack.len() - 1];
-        let alt = node.attributes.get_bit(ATTR_ALT).unwrap_or("");
-        if alt.is_empty() {
+        if let Some(href) = node.attributes.get_bit(ATTR_HREF)
+          && is_empty_link_href(href)
+        {
+          self.begin_link(self.buffer.len(), true);
+          self.reset_empty_tentative_caption_frames();
+          if self.streaming {
+            self.link.hold_released = true;
+          }
           self.last_node_is_inline = is_inline;
           return;
         }
@@ -822,6 +996,50 @@ impl ConvertState {
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
         output = None;
       }
+    }
+    if !self.plain_text
+      && !enter_is_literal
+      && tag_id == Some(TAG_BR)
+      && configured_new_lines == 0
+      && let Some(fragment) = output.as_deref()
+      && !fragment.is_empty()
+      && fragment.bytes().all(is_whitespace)
+      && self.defer_caption_break(fragment)
+    {
+      self.pending_inline_whitespace = false;
+      self.last_text_node_contains_whitespace = false;
+      self.has_last_text_node = false;
+      self.last_node_is_inline = is_inline;
+      return;
+    }
+    if self.plain_text
+      && !enter_is_literal
+      && tag_id == Some(TAG_BR)
+      && configured_new_lines == 0
+      && output
+        .as_deref()
+        .is_some_and(|fragment| fragment.bytes().all(is_whitespace))
+    {
+      for frame in &mut self.caption_frames {
+        if !matches!(frame.state, CaptionState::Committed) {
+          frame.has_internal_break = true;
+        }
+      }
+    }
+    if !self.plain_text
+      && !enter_is_literal
+      && tag_id == Some(TAG_BR)
+      && configured_new_lines == 0
+      && let Some(fragment) = output.as_deref()
+      && !fragment.is_empty()
+      && fragment.bytes().all(is_whitespace)
+      && self.defer_streaming_break(fragment)
+    {
+      self.pending_inline_whitespace = false;
+      self.last_text_node_contains_whitespace = false;
+      self.has_last_text_node = false;
+      self.last_node_is_inline = is_inline;
+      return;
     }
 
     // Finalize completed quote lines before recording a new code offset. A
@@ -846,7 +1064,31 @@ impl ConvertState {
       enter_is_literal,
     );
 
-    if self.link_empty_text_pending
+    if tag_id == Some(TAG_IMG)
+      && !enter_is_literal
+      && output.as_deref().is_some_and(|emitted| {
+        self.buffer.len() > output_start
+          && self.last_content_cache_len == emitted.len()
+          && (!self.plain_text || emitted.as_bytes().iter().any(|&byte| !is_whitespace(byte)))
+      })
+    {
+      self.mark_rendered_child_content();
+    }
+
+    if tag_id == Some(TAG_A) {
+      // Escaping matters only while the anchor's *exit* will still build a
+      // Markdown close (`](url)`), which happens exactly when the exit is not
+      // overridden. A literal enter override still gets that default exit, so
+      // its link text must keep the bracket escaping.
+      self.raw_html_link_open = !exit_is_overridden
+        && self.in_raw_html_block()
+        && self.buffer.len() > output_start
+        && output
+          .as_deref()
+          .is_some_and(|emitted| !emitted.is_empty() && self.buffer.ends_with(emitted));
+    }
+
+    if self.link.empty_text_pending
       && tag_id != Some(TAG_A)
       && tag_id != Some(TAG_CODE)
       && tag_id.and_then(Self::inline_marker_type).is_none()
@@ -855,7 +1097,7 @@ impl ConvertState {
         .get(output_start..)
         .is_some_and(|content| !content.trim().is_empty())
     {
-      self.link_empty_text_pending = false;
+      self.link.empty_text_pending = false;
     }
 
     if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
@@ -877,7 +1119,7 @@ impl ConvertState {
 
     if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
       if !self.blockquotes.is_empty() && self.buffer.ends_with("\n\n") {
-        self.buffer.pop();
+        self.truncate_buffer(self.buffer.len() - 1);
         // Frames anchored at the old end move with the popped byte. Siblings can
         // share an offset, so this is not only the innermost. See `trim_floor`.
         for frame in &mut self.blockquotes {
@@ -941,22 +1183,23 @@ impl ConvertState {
         .as_deref()
         .is_some_and(|o| o.as_bytes().last() == Some(&b'['))
         && self.buffer.len() > output_start;
-      self.link_bracket_pos = if emitted_bracket {
+      let bracket_pos = if emitted_bracket {
         buf_len - 1
       } else {
         buf_len
       };
+      self.begin_link(bracket_pos, false);
       // Avoid the href lookup and hold bookkeeping for one-shot conversion.
       if self.streaming {
         let has_rewrite_anchor = emitted_bracket && !exit_is_overridden;
-        self.link_hold_released = !has_rewrite_anchor;
-        self.link_empty_text_pending =
+        self.link.hold_released = !has_rewrite_anchor;
+        self.link.empty_text_pending =
           has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
         let href = self.stack[stack_len - 1].attributes.get("href");
-        self.link_url_max_len = href.map_or(0, |href| {
+        self.link.url_max_len = href.map_or(0, |href| {
           6 + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
         });
-        self.link_hold_forever = has_rewrite_anchor
+        self.link.hold_forever = has_rewrite_anchor
           && href.is_some_and(|href| {
             href.starts_with('#')
               && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
@@ -975,12 +1218,13 @@ impl ConvertState {
       && self.buffer.len() > output_start
       && self.buffer.ends_with(emitted)
     {
-      self.open_markers.push((
-        inline_marker_type,
-        self.buffer.len() - emitted.len(),
-        self.buffer.len(),
-      ));
+      self.open_markers.push(OpenMarker {
+        output_start: self.buffer.len() - emitted.len(),
+        content_start: self.buffer.len(),
+        kind: inline_marker_type,
+      });
     } else if !self.open_markers.is_empty()
+      && !(tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0)
       && output
         .as_deref()
         .is_some_and(|o| o.as_bytes().iter().any(|&b| !is_whitespace(b)))
@@ -992,6 +1236,10 @@ impl ConvertState {
     // the block has not emitted content yet. Release streamed output promptly.
     if tag_id.is_some() && !is_inline && !self.open_markers.is_empty() {
       self.open_markers.clear();
+    }
+
+    if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
+      self.caption_boundary = CaptionBoundary::None;
     }
 
     // Clean: track heading start for slug collection
@@ -1019,6 +1267,9 @@ impl ConvertState {
     }
 
     let tag_id = node.tag_id;
+    if tag_id == Some(TAG_A) {
+      self.raw_html_link_open = false;
+    }
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
     }
@@ -1036,9 +1287,10 @@ impl ConvertState {
       None
     };
 
-    let is_inline = override_config
-      .and_then(|ov| ov.is_inline)
-      .unwrap_or(node.is_inline);
+    let is_inline = node.is_inline;
+    let raw_html_anchor = tag_id == Some(TAG_A)
+      && self.in_raw_html_block()
+      && override_config.is_none_or(|ov| ov.enter.is_none());
 
     let cell_span =
       if matches!(tag_id, Some(TAG_TH | TAG_TD)) && self.depth_map[TAG_TABLE as usize] <= 1 {
@@ -1070,6 +1322,7 @@ impl ConvertState {
     } else {
       false
     };
+    let node_spacing = override_config.and_then(|ov| ov.spacing).or(node.spacing);
 
     if !has_override {
       // Special case: TR table separator
@@ -1104,9 +1357,12 @@ impl ConvertState {
         } else {
           output = self.get_exit_output(node, cell_span);
         }
-      } else if self.plain_text || tag_id != Some(TAG_A) {
+      } else if self.plain_text || tag_id != Some(TAG_A) || raw_html_anchor {
         output = self.get_exit_output(node, cell_span);
       }
+    }
+    if !self.plain_text && self.pre_fence_pending && tag_id != Some(TAG_PRE) && has_override {
+      self.flush_pre_fence();
     }
     // Pop for every inline <code> exit that could have pushed: the enter push
     // ignores overrides, so an exit-only override that skipped the pop leaked
@@ -1120,11 +1376,80 @@ impl ConvertState {
       None
     };
 
-    let node_spacing = if let Some(ov) = override_config {
-      ov.spacing.or(node.spacing)
-    } else {
-      node.spacing
-    };
+    let caption_exit = tag_id == Some(TAG_FIGCAPTION) && self.depth_map[TAG_PRE as usize] == 0;
+    if tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT == 0 {
+      self.expand_deferred_caption_breaks();
+    }
+    let caption_active = caption_exit
+      || self.caption_boundary != CaptionBoundary::None
+      || !self.caption_frames.is_empty();
+    let visible_output = caption_active
+      && table_separator
+        .as_deref()
+        .or(output.as_deref())
+        .is_some_and(|value| value.bytes().any(|byte| !is_whitespace(byte)));
+    let default_inline_marker =
+      !has_override && visible_output && tag_id.and_then(Self::inline_marker_type).is_some();
+    let mut consumes_caption_boundary = false;
+    if !caption_exit {
+      if visible_output {
+        self.expand_deferred_caption_breaks();
+        consumes_caption_boundary =
+          self.prepare_caption_boundary(!matches!(tag_id, Some(TAG_BLOCKQUOTE | TAG_LI)));
+        self.materialize_caption_frames(if default_inline_marker {
+          CaptionMaterialization::Tentative
+        } else {
+          CaptionMaterialization::Commit
+        });
+      }
+    } else if has_override && visible_output {
+      self.expand_deferred_caption_breaks();
+      consumes_caption_boundary = self.prepare_caption_boundary(true);
+      self.materialize_caption_frames(CaptionMaterialization::Commit);
+    }
+
+    let mut caption_exit_spacing = 0;
+    if caption_exit {
+      let top = self.caption_frames.len().saturating_sub(1);
+      self.expand_deferred_caption_breaks_until(top);
+    }
+    if caption_exit && let Some(frame) = self.caption_frames.pop() {
+      let deferred_breaks = frame.deferred_breaks;
+      match frame.state {
+        CaptionState::Pending => {
+          if !has_override {
+            output = None;
+          }
+        }
+        CaptionState::Tentative {
+          output_start,
+          content_start,
+          restore_space,
+        } => {
+          if self.buffer[content_start..]
+            .bytes()
+            .any(|byte| !is_whitespace(byte))
+          {
+            caption_exit_spacing = frame.spacing[1];
+          } else {
+            self.truncate_buffer(output_start);
+            if restore_space {
+              self.buffer.push(' ');
+              self.last_content_cache_len = 1;
+            } else {
+              self.last_content_cache_len = 0;
+            }
+            if !has_override {
+              output = None;
+            }
+          }
+        }
+        CaptionState::Committed => {
+          caption_exit_spacing = frame.spacing[1];
+        }
+      }
+      self.write_deferred_break_run(deferred_breaks);
+    }
 
     if !has_override
       && !self.plain_text
@@ -1139,77 +1464,130 @@ impl ConvertState {
       self.finalize_blockquote();
     }
 
-    let new_line_config = self.calculate_new_line_config(tag_id, node_spacing);
-    let configured_new_lines = if tag_id == Some(TAG_HR) && !self.blockquotes.is_empty() {
+    let new_line_config = if caption_exit {
+      NO_SPACING
+    } else {
+      self.calculate_new_line_config(tag_id, node_spacing)
+    };
+    let configured_new_lines = if consumes_caption_boundary {
+      0
+    } else if tag_id == Some(TAG_HR) && !self.blockquotes.is_empty() {
       new_line_config[1].min(1)
     } else {
       new_line_config[1]
     };
     if tag_id == Some(TAG_A) {
-      self.link_empty_text_pending = false;
+      self.link.empty_text_pending = false;
     }
 
-    // A skipped link has no bracket for the clean rewrites below.
-    if !self.plain_text
-      && self.clean_flags != 0
-      && tag_id == Some(TAG_A)
-      && !has_override
-      && self.skip_current_link
-    {
-      self.skip_current_link = false;
-      self.last_node_is_inline = is_inline;
-      return;
-    }
+    // Clean mode exit — single guard. Skipped for overridden anchors,
+    // whose custom exit output isn't the default `[…](…)` shape.
+    if !self.plain_text && self.clean_flags != 0 && tag_id == Some(TAG_A) && !has_override {
+      // emptyLinks: skip exit for skipped links
+      if self.link.skipped {
+        self.end_link();
+        self.last_node_is_inline = is_inline;
+        return;
+      }
 
-    // Released links skip bracket-anchored rewrites; the ordinary close remains.
-    if !self.plain_text
-      && self.clean_flags != 0
-      && tag_id == Some(TAG_A)
-      && !has_override
-      && !self.link_hold_released
-    {
-      // Find actual [ position: scan from recorded pos (write_output may have inserted newlines before it)
-      let buf_len = self.buffer.len();
-      let bracket_pos = {
-        let mut pos = self.link_bracket_pos;
-        let buf = self.buffer.as_bytes();
-        while pos < buf.len() && buf[pos] != b'[' {
-          pos += 1;
+      // Released links skip bracket-anchored rewrites; the ordinary close remains.
+      if !self.plain_text
+        && self.clean_flags != 0
+        && tag_id == Some(TAG_A)
+        && !has_override
+        && !raw_html_anchor
+        && !self.link.hold_released
+      {
+        // Find actual [ position: scan from recorded pos (write_output may have inserted newlines before it)
+        let buf_len = self.buffer.len();
+        let bracket_pos = {
+          let mut pos = self.link.bracket_pos;
+          let buf = self.buffer.as_bytes();
+          while pos < buf.len() && buf[pos] != b'[' {
+            pos += 1;
+          }
+          pos
+        };
+        // Guard: if bracket not found, bracket_pos == buf_len; text_start would overflow
+        if bracket_pos >= buf_len {
+          self.end_link();
+          self.last_node_is_inline = is_inline;
+          return;
         }
-        pos
-      };
-      // Guard: if bracket not found, bracket_pos == buf_len; text_start would overflow
-      if bracket_pos >= buf_len {
-        self.last_node_is_inline = is_inline;
-        return;
-      }
-      let text_start = bracket_pos + 1;
-      let link_text = if text_start <= buf_len && self.buffer.is_char_boundary(text_start) {
-        &self.buffer[text_start..buf_len]
-      } else {
-        ""
-      };
-      let text_len = buf_len.saturating_sub(text_start);
+        let text_start = bracket_pos + 1;
+        let link_text = if text_start <= buf_len && self.buffer.is_char_boundary(text_start) {
+          &self.buffer[text_start..buf_len]
+        } else {
+          ""
+        };
+        let text_len = buf_len.saturating_sub(text_start);
 
-      // emptyLinkText: [](url) → drop entirely
-      if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
-        self.buffer.truncate(bracket_pos);
-        self.last_node_is_inline = is_inline;
-        return;
-      }
+        // emptyLinkText: [](url) → drop entirely
+        if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
+          self.truncate_buffer(bracket_pos);
+          for (frame, &(count, has_internal_break)) in self
+            .caption_frames
+            .iter_mut()
+            .zip(&self.link_caption_break_snapshot)
+          {
+            frame.has_internal_break = has_internal_break;
+            if count == 0 {
+              frame.deferred_breaks = None;
+            } else if let Some(run) = &mut frame.deferred_breaks {
+              run.count = count;
+            }
+          }
+          self.reset_empty_tentative_caption_frames();
+          self.link_caption_break_snapshot_active = false;
+          self.link_caption_break_snapshot.clear();
+          self.end_link();
+          self.last_node_is_inline = is_inline;
+          return;
+        }
 
-      // selfLinkHeadings: ## [Title](#slug) → ## Title
-      if self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 {
-        let in_heading = (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0);
-        if in_heading
+        // selfLinkHeadings: ## [Title](#slug) → ## Title
+        if self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 {
+          let in_heading = (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0);
+          if in_heading
+            && let Some(href) = node.attributes.get_bit(ATTR_HREF)
+            && href.starts_with('#')
+            && text_len > 0
+          {
+            // Remove [ and keep text only — use truncate+copy without intermediate String
+            let new_len = bracket_pos + text_len;
+            // SAFETY: bracket_pos < text_start are within buffer bounds (guarded above).
+            // We copy link text backwards over "[", then truncate. Preserves valid UTF-8.
+            #[allow(unsafe_code)]
+            unsafe {
+              let buf = self.buffer.as_mut_vec();
+              std::ptr::copy(
+                buf.as_ptr().add(text_start),
+                buf.as_mut_ptr().add(bracket_pos),
+                text_len,
+              );
+              buf.set_len(new_len);
+            }
+            self.last_content_cache_len = text_len;
+            self.end_link();
+            self.last_node_is_inline = is_inline;
+            return;
+          }
+        }
+
+        // redundantLinks: [url](url) → url
+        if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0
           && let Some(href) = node.attributes.get_bit(ATTR_HREF)
-          && href.starts_with('#')
+          && let resolved = resolve_url(
+            href,
+            self.options.origin.as_deref(),
+            self.options.clean_urls,
+          )
+          && link_text == resolved.as_ref()
           && text_len > 0
         {
           // Remove [ and keep text only — use truncate+copy without intermediate String
           let new_len = bracket_pos + text_len;
-          // SAFETY: bracket_pos < text_start are within buffer bounds (guarded above).
-          // We copy link text backwards over "[", then truncate. Preserves valid UTF-8.
+          // SAFETY: same invariants as self-link heading case. Preserves valid UTF-8.
           #[allow(unsafe_code)]
           unsafe {
             let buf = self.buffer.as_mut_vec();
@@ -1221,38 +1599,10 @@ impl ConvertState {
             buf.set_len(new_len);
           }
           self.last_content_cache_len = text_len;
+          self.end_link();
           self.last_node_is_inline = is_inline;
           return;
         }
-      }
-
-      // redundantLinks: [url](url) → url
-      if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0
-        && let Some(href) = node.attributes.get_bit(ATTR_HREF)
-        && let resolved = resolve_url(
-          href,
-          self.options.origin.as_deref(),
-          self.options.clean_urls,
-        )
-        && link_text == resolved.as_ref()
-        && text_len > 0
-      {
-        // Remove [ and keep text only — use truncate+copy without intermediate String
-        let new_len = bracket_pos + text_len;
-        // SAFETY: same invariants as self-link heading case. Preserves valid UTF-8.
-        #[allow(unsafe_code)]
-        unsafe {
-          let buf = self.buffer.as_mut_vec();
-          std::ptr::copy(
-            buf.as_ptr().add(text_start),
-            buf.as_mut_ptr().add(bracket_pos),
-            text_len,
-          );
-          buf.set_len(new_len);
-        }
-        self.last_content_cache_len = text_len;
-        self.last_node_is_inline = is_inline;
-        return;
       }
     }
 
@@ -1285,11 +1635,13 @@ impl ConvertState {
     if !self.plain_text
       && !has_override
       && tag_id == Some(TAG_A)
+      && !raw_html_anchor
       && table_separator.is_none()
       && self.depth_map[TAG_PRE as usize] == 0
     {
       // Handle whitespace trimming (write_output with None)
       self.write_output(false, is_inline, configured_new_lines, None, false);
+      let link_text_end = self.buffer.len();
       // Write link close directly
       if let Some(href) = node.attributes.get_bit(ATTR_HREF) {
         let capped_code_span = self.options.max_node_bytes != 0 && !self.code_spans.is_empty();
@@ -1311,8 +1663,8 @@ impl ConvertState {
           }
         }
         // A released link no longer has a valid bracket anchor.
-        if title.is_empty() && is_autolink_uri(resolved) && !self.link_hold_released {
-          let bp = self.link_bracket_pos;
+        if title.is_empty() && is_autolink_uri(resolved) && !self.link.hold_released {
+          let bp = self.link.bracket_pos;
           let buf_bytes = self.buffer.as_bytes();
           if bp < buf_bytes.len() && buf_bytes[bp] == b'[' && &self.buffer[bp + 1..] == resolved {
             if capped_code_span {
@@ -1320,15 +1672,17 @@ impl ConvertState {
               if self.replace_code_span_content(end..end, ">") {
                 self.buffer.replace_range(bp..bp + 1, "<");
                 self.last_content_cache_len = self.buffer.len() - bp;
+                self.end_link();
                 self.last_node_is_inline = is_inline;
                 return;
               }
             } else {
-              self.buffer.truncate(bp);
+              self.truncate_buffer(bp);
               self.buffer.push('<');
               self.buffer.push_str(resolved);
               self.buffer.push('>');
               self.last_content_cache_len = self.buffer.len() - bp;
+              self.end_link();
               self.last_node_is_inline = is_inline;
               return;
             }
@@ -1350,19 +1704,28 @@ impl ConvertState {
         // The cache is a length, not an offset: the link starts at its `[`.
         // Saturating because `link_bracket_pos` is `buffer.len()` when no `[`
         // was emitted.
-        self.last_content_cache_len = self.buffer.len().saturating_sub(self.link_bracket_pos);
+        self.last_content_cache_len = self.buffer.len().saturating_sub(self.link.bracket_pos);
+        if self.clean_flags & CLEAN_FRAGMENTS != 0
+          && self.depth_map[TAG_CODE as usize] == 0
+          // An anchor whose enter was skipped never began a link of its own;
+          // `self.link` then still holds an enclosing anchor's state, and its
+          // bracket belongs to that ancestor. Recording it would let the
+          // cleanup splice one link's target into the other's text, so only a
+          // begin at this anchor's own depth may record.
+          && self.link.begin_depth == self.depth
+          && let Some(fragment) = resolved.strip_prefix('#')
+          && !fragment.is_empty()
+        {
+          self.fragment_links.push(FragmentLink {
+            bracket_start: self.link.bracket_pos,
+            text_end: link_text_end,
+            link_end: self.buffer.len(),
+            fragment: fragment.to_string(),
+            has_title: !title.is_empty(),
+          });
+        }
       }
-      // Record fragment link position for deferred fixup
-      if self.clean_flags & CLEAN_FRAGMENTS != 0
-        && let Some(href) = node.attributes.get_bit(ATTR_HREF)
-        && href.starts_with('#')
-        && href.len() > 1
-      {
-        // link_bracket_pos now points exactly at `[` (set in emit_enter_element).
-        self
-          .fragment_links
-          .push((self.link_bracket_pos, self.buffer.len()));
-      }
+      self.end_link();
       self.last_node_is_inline = is_inline;
       return;
     }
@@ -1373,19 +1736,20 @@ impl ConvertState {
       && (id != TAG_CODE || (self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block()))
       && let Some(inline_marker_type) = Self::inline_marker_type(id)
       && output.as_deref().is_some_and(|emitted| !emitted.is_empty())
-      && let Some((open_type, output_start, content_start)) = self.open_markers.pop()
+      && let Some(open_marker) = self.open_markers.pop()
     {
-      if open_type == inline_marker_type
-        && content_start <= self.buffer.len()
-        && self.buffer.as_bytes()[content_start..]
+      if open_marker.kind == inline_marker_type
+        && open_marker.content_start <= self.buffer.len()
+        && self.buffer.as_bytes()[open_marker.content_start..]
           .iter()
           .all(|&b| is_whitespace(b))
       {
         // `output_start` includes a separator owned by the opener (inline
         // code in a list can emit " `"), but excludes normal surrounding
         // spacing synthesized by write_output.
-        self.buffer.truncate(output_start);
+        self.truncate_buffer(open_marker.output_start);
         self.last_content_cache_len = 0;
+        self.reset_empty_tentative_caption_frames();
         self.last_node_is_inline = is_inline;
         return;
       }
@@ -1410,7 +1774,7 @@ impl ConvertState {
       // the span state is still popped and discarded above.
       if !has_override {
         if span.opener_emitted && span.exhausted && self.buffer.len() == span.content_start {
-          self.buffer.truncate(span.output_start);
+          self.truncate_buffer(span.output_start);
           output = None;
         } else if span.opener_emitted {
           output = Some(Cow::Owned(self.finalize_code_span(&span)));
@@ -1444,13 +1808,19 @@ impl ConvertState {
 
     let output_start = self.buffer.len();
     self.write_output(false, is_inline, configured_new_lines, effective, false);
-    if self.link_empty_text_pending
+    if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
+      self.caption_boundary = CaptionBoundary::None;
+    }
+    if caption_exit_spacing > 0 {
+      self.caption_boundary = CaptionBoundary::Pending(caption_exit_spacing);
+    }
+    if self.link.empty_text_pending
       && self
         .buffer
         .get(output_start..)
         .is_some_and(|content| !content.trim().is_empty())
     {
-      self.link_empty_text_pending = false;
+      self.link.empty_text_pending = false;
     }
 
     // Reset <pre> fence deferral once the element closes (issue #97).
@@ -1464,18 +1834,13 @@ impl ConvertState {
       self.pre_fence_pending = false;
       self.pre_fence_open = false;
     }
+    if tag_id == Some(TAG_A) && self.link_caption_break_snapshot_active {
+      self.link_caption_break_snapshot_active = false;
+      self.link_caption_break_snapshot.clear();
+    }
 
-    // Record fragment link position for deferred fixup (no String alloc)
-    if !self.plain_text
-      && self.clean_flags & CLEAN_FRAGMENTS != 0
-      && tag_id == Some(TAG_A)
-      && let Some(href) = node.attributes.get_bit(ATTR_HREF)
-      && href.starts_with('#')
-      && href.len() > 1
-    {
-      self
-        .fragment_links
-        .push((self.link_bracket_pos, self.buffer.len()));
+    if tag_id == Some(TAG_A) {
+      self.end_link();
     }
   }
 
@@ -1564,6 +1929,34 @@ impl ConvertState {
     // Clamped to the room left rather than rejected whole, or a node arriving just
     // under the cap would take the block to twice it.
     let mut text = text;
+    let caption_active =
+      self.caption_boundary != CaptionBoundary::None || !self.caption_frames.is_empty();
+    let mut owns_leading_space = false;
+    if caption_active {
+      owns_leading_space = self.caption_boundary != CaptionBoundary::None
+        || self
+          .caption_frames
+          .iter()
+          .any(|frame| !matches!(frame.state, CaptionState::Committed));
+      if owns_leading_space && text.as_bytes().first() == Some(&b' ') {
+        text = &text[1..];
+        if text.is_empty() {
+          return;
+        }
+      }
+      let visible = text.bytes().any(|byte| !is_whitespace(byte))
+        || generated_prefix.is_some_and(|value| value.bytes().any(|byte| !is_whitespace(byte)))
+        || generated_suffix.is_some_and(|value| value.bytes().any(|byte| !is_whitespace(byte)));
+      if owns_leading_space && !visible {
+        return;
+      }
+      if visible {
+        self.expand_deferred_caption_breaks();
+        self.prepare_caption_boundary(true);
+        self.materialize_caption_frames(CaptionMaterialization::Commit);
+        self.caption_boundary = CaptionBoundary::None;
+      }
+    }
     if self.options.max_node_bytes != 0
       && let Some(content_start) = self.code_fence.as_ref().map(|fence| fence.content_start)
     {
@@ -1769,7 +2162,7 @@ impl ConvertState {
 
     if self.wrap_width != 0 && self.can_wrap_here() {
       self.push_text_wrapped(text, last_char);
-    } else if !(self.plain_text && self.depth_map[TAG_PRE as usize] > 0)
+    } else if !(owns_leading_space || (self.plain_text && self.depth_map[TAG_PRE as usize] > 0))
       && self.should_add_spacing_before_text(last_char, text)
     {
       if self.options.max_node_bytes == 0 {
@@ -2055,10 +2448,11 @@ impl ConvertState {
       && (self
         .open_markers
         .first()
-        .is_some_and(|&(_, position, _)| opens_the_item(position))
-        || (self.depth_map[TAG_A as usize] > 0
-          && !self.link_hold_released
-          && opens_the_item(self.link_bracket_pos)))
+        .is_some_and(|marker| opens_the_item(marker.output_start))
+        || self.open_link_hold_floor().is_some_and(opens_the_item)
+        || self
+          .first_tentative_caption_start()
+          .is_some_and(opens_the_item))
     {
       return;
     }
@@ -2088,12 +2482,35 @@ impl ConvertState {
     // rather than its child. `link_bracket_pos` needs no shift either — a pending
     // `[` is the tail this function has already returned on.
     let at = self.empty_item_line_start;
-    for (_, output_start, content_start) in &mut self.open_markers {
-      if *output_start >= at {
-        *output_start += 1;
+    for marker in &mut self.open_markers {
+      if marker.output_start >= at {
+        marker.output_start += 1;
       }
-      if *content_start >= at {
-        *content_start += 1;
+      if marker.content_start >= at {
+        marker.content_start += 1;
+      }
+    }
+    for run in &mut self.streaming_break_runs {
+      if run.output_start >= at {
+        run.output_start += 1;
+      }
+      if run.output_end >= at {
+        run.output_end += 1;
+      }
+    }
+    for frame in &mut self.caption_frames {
+      if let CaptionState::Tentative {
+        output_start,
+        content_start,
+        ..
+      } = &mut frame.state
+      {
+        if *output_start >= at {
+          *output_start += 1;
+        }
+        if *content_start >= at {
+          *content_start += 1;
+        }
       }
     }
     // A code span or fence measures and rewrites itself through these offsets,
@@ -2259,7 +2676,6 @@ impl ConvertState {
 
   fn escape_raw_html_text<'a>(&self, value: &'a str) -> Cow<'a, str> {
     let in_table = self.depth_map[TAG_TABLE as usize] > 0;
-    let in_link = self.depth_map[TAG_A as usize] > 0;
     let mut output: Option<String> = None;
     let mut copied_until = 0usize;
 
@@ -2274,8 +2690,8 @@ impl ConvertState {
         b'\n' => Some("&#10;"),
         b'\r' => Some("&#13;"),
         b'|' if in_table => Some("&#124;"),
-        b'[' if in_link => Some("&#91;"),
-        b']' if in_link => Some("&#93;"),
+        b'[' if self.raw_html_link_open => Some("&#91;"),
+        b']' if self.raw_html_link_open => Some("&#93;"),
         _ => None,
       };
       if let Some(replacement) = replacement {
@@ -2337,6 +2753,36 @@ impl ConvertState {
   }
 
   #[inline]
+  pub(super) fn truncate_buffer(&mut self, len: usize) {
+    self.buffer.truncate(len);
+    while self
+      .streaming_break_runs
+      .last()
+      .is_some_and(|run| run.output_start > len)
+    {
+      self.streaming_break_runs.pop();
+    }
+    if let Some(run) = self.streaming_break_runs.last_mut()
+      && run.output_start == len
+    {
+      if run.count == 1 {
+        self.streaming_break_runs.pop();
+      } else {
+        run.count -= 1;
+        self.buffer.push_str(&run.unit);
+        run.output_end = self.buffer.len();
+      }
+      return;
+    }
+    if let Some(run) = self.streaming_break_runs.last_mut()
+      && run.output_end > len
+    {
+      run.output_end = len;
+    }
+  }
+
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
+  #[cfg_attr(not(target_arch = "wasm32"), inline)]
   fn trim_trailing_spaces(&mut self) {
     let floor = self.trim_floor();
     if self.buffer.len() > floor {
@@ -2349,8 +2795,265 @@ impl ConvertState {
         .last_content_cache_len
         .saturating_sub(self.buffer.len() - trimmed_len);
       self.clamp_item_marker_end(trimmed_len);
-      self.buffer.truncate(trimmed_len);
+      self.truncate_buffer(trimmed_len);
     }
+  }
+
+  fn defer_streaming_break(&mut self, fragment: &str) -> bool {
+    if !self.streaming
+      || !self.blockquotes.is_empty()
+      || self.clean_flags & CLEAN_FRAGMENTS != 0
+      || self.has_frontmatter
+      || self.has_extraction
+      || self.depth_map[TAG_PRE as usize] != 0
+      || self.depth_map[TAG_CODE as usize] != 0
+    {
+      return false;
+    }
+
+    if fragment.is_empty() {
+      return false;
+    }
+    if let Some(run) = self.streaming_break_runs.last_mut()
+      && run.output_end == self.buffer.len()
+      && run.unit == fragment
+      && self.buffer[run.output_start..run.output_end] == *fragment
+    {
+      run.count += 1;
+      self.last_content_cache_len = fragment.len();
+      return true;
+    }
+
+    let output_start = self.buffer.len();
+    self.write_output(true, true, 0, Some(fragment), false);
+    if self.buffer.len() == output_start + fragment.len() {
+      self.streaming_break_runs.push(StreamingBreakRun {
+        output_start,
+        output_end: self.buffer.len(),
+        unit: fragment.to_string(),
+        count: 1,
+      });
+    }
+    true
+  }
+
+  // Keep caption appends shared without adding calls to ordinary text output.
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  fn push_caption_content(&mut self, value: &str) {
+    self.last_content_cache_len = self.push_code_span_content(value, true);
+  }
+
+  fn caption_open_prefix(
+    &self,
+    prefix: &str,
+    configured_new_lines: u8,
+  ) -> Option<Cow<'static, str>> {
+    if configured_new_lines == 0 {
+      return None;
+    }
+    let open = self.block_open_prefix(prefix);
+    let content = self.buffer.strip_suffix(prefix).unwrap_or(&self.buffer);
+    let trailing_new_lines = content
+      .as_bytes()
+      .iter()
+      .rev()
+      .take_while(|&&byte| byte == b'\n')
+      .count();
+    if open.is_none() && trailing_new_lines == 0 {
+      return None;
+    }
+    let missing = usize::from(configured_new_lines).saturating_sub(trailing_new_lines);
+    if missing == 0 {
+      return open.filter(|value| !value.is_empty());
+    }
+    let mut output = "\n".repeat(missing);
+    output.push_str(prefix);
+    Some(Cow::Owned(output))
+  }
+
+  #[inline]
+  fn write_caption_boundary(&mut self, configured_new_lines: u8, include_list_indent: bool) {
+    let prefix = if include_list_indent {
+      self.list_indent.as_str()
+    } else {
+      ""
+    };
+    if let Some(prefix) = self.caption_open_prefix(prefix, configured_new_lines) {
+      self.push_caption_content(prefix.as_ref());
+    }
+  }
+
+  #[inline]
+  fn prepare_caption_boundary(&mut self, include_list_indent: bool) -> bool {
+    let consumes_boundary = self.caption_boundary != CaptionBoundary::None;
+    if let CaptionBoundary::Pending(configured_new_lines) = self.caption_boundary {
+      self.write_caption_boundary(configured_new_lines, include_list_indent);
+      self.caption_boundary = CaptionBoundary::ConsumeSpace;
+    }
+    consumes_boundary
+  }
+
+  fn defer_caption_break(&mut self, fragment: &str) -> bool {
+    let Some(frame) = self.caption_frames.last() else {
+      return false;
+    };
+    if matches!(frame.state, CaptionState::Committed) {
+      return false;
+    }
+
+    if !self.link_caption_break_snapshot_active
+      && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0
+      && self.depth_map[TAG_A as usize] > 0
+    {
+      self.link_caption_break_snapshot.clear();
+      self
+        .link_caption_break_snapshot
+        .extend(self.caption_frames.iter().map(|frame| {
+          (
+            frame.deferred_breaks.as_ref().map_or(0, |run| run.count),
+            frame.has_internal_break,
+          )
+        }));
+      self.link_caption_break_snapshot_active = true;
+    }
+
+    for frame in &mut self.caption_frames {
+      if !matches!(frame.state, CaptionState::Committed) {
+        frame.has_internal_break = true;
+      }
+    }
+
+    if self.caption_frames.last().is_some_and(|frame| {
+      frame
+        .deferred_breaks
+        .as_ref()
+        .is_some_and(|run| run.fragment != fragment)
+    }) {
+      self.expand_deferred_caption_breaks();
+    }
+    let frame = self
+      .caption_frames
+      .last_mut()
+      .expect("caption checked above");
+    if let Some(run) = &mut frame.deferred_breaks {
+      run.count += 1;
+    } else {
+      frame.deferred_breaks = Some(DeferredBreakRun {
+        fragment: fragment.to_string(),
+        count: 1,
+      });
+    }
+    true
+  }
+
+  fn write_deferred_break_run(&mut self, run: Option<DeferredBreakRun>) {
+    if let Some(run) = run {
+      self.trim_trailing_spaces();
+      for _ in 0..run.count {
+        if run.fragment == "\n" && self.buffer.ends_with("\n\n") {
+          continue;
+        }
+        self.write_output(true, true, 0, Some(&run.fragment), false);
+      }
+    }
+  }
+
+  fn expand_deferred_caption_breaks_until(&mut self, end: usize) {
+    for index in 0..end.min(self.caption_frames.len()) {
+      let run = self.caption_frames[index].deferred_breaks.take();
+      self.write_deferred_break_run(run);
+    }
+  }
+
+  fn expand_deferred_caption_breaks(&mut self) {
+    self.expand_deferred_caption_breaks_until(self.caption_frames.len());
+  }
+
+  fn materialize_caption_frames(&mut self, mode: CaptionMaterialization) {
+    let explicit_top = matches!(mode, CaptionMaterialization::ExplicitCommit);
+    let commit = !matches!(mode, CaptionMaterialization::Tentative);
+    let top = self.caption_frames.len().saturating_sub(1);
+    for index in 0..self.caption_frames.len() {
+      if matches!(self.caption_frames[index].state, CaptionState::Committed) {
+        continue;
+      }
+      if matches!(
+        self.caption_frames[index].state,
+        CaptionState::Tentative { .. }
+      ) {
+        if commit {
+          self.caption_frames[index].state = CaptionState::Committed;
+        }
+        continue;
+      }
+      let prefix = if self.caption_frames[index].has_internal_break {
+        None
+      } else {
+        self.caption_open_prefix(&self.list_indent, self.caption_frames[index].spacing[0])
+      };
+      let trimmed_space = prefix.is_some() && self.buffer.ends_with(' ');
+      if trimmed_space {
+        self.trim_trailing_spaces();
+        self.last_text_node_contains_whitespace = false;
+        self.has_last_text_node = false;
+      }
+      let output_start = self.buffer.len();
+      if let Some(prefix) = prefix {
+        self.push_caption_content(prefix.as_ref());
+      }
+      if !self.plain_text && (!explicit_top || index != top) {
+        self.push_caption_content(MARKDOWN_EMPHASIS);
+      }
+      self.caption_frames[index].state = if commit {
+        CaptionState::Committed
+      } else {
+        CaptionState::Tentative {
+          output_start,
+          content_start: self.buffer.len(),
+          restore_space: trimmed_space,
+        }
+      };
+    }
+  }
+
+  fn reset_empty_tentative_caption_frames(&mut self) {
+    for index in (0..self.caption_frames.len()).rev() {
+      let CaptionState::Tentative {
+        output_start,
+        content_start,
+        restore_space,
+      } = self.caption_frames[index].state
+      else {
+        continue;
+      };
+      if content_start < self.buffer.len()
+        && self.buffer[content_start..]
+          .bytes()
+          .any(|byte| !is_whitespace(byte))
+      {
+        continue;
+      }
+      self.caption_frames[index].state = CaptionState::Pending;
+      self.truncate_buffer(output_start);
+      self.last_content_cache_len = 0;
+      if restore_space {
+        self.buffer.push(' ');
+        self.last_content_cache_len = 1;
+      }
+    }
+  }
+
+  #[inline]
+  pub(super) fn first_tentative_caption_start(&self) -> Option<usize> {
+    let mut index = 0;
+    while index < self.caption_frames.len() {
+      if let CaptionState::Tentative { output_start, .. } = self.caption_frames[index].state {
+        return Some(output_start);
+      }
+      index += 1;
+    }
+    None
   }
 
   // The blank-line scan holds an absolute buffer offset, so quoting has to scan
@@ -2746,7 +3449,9 @@ impl ConvertState {
       TAG_BLOCKQUOTE => {
         // The completed subtree receives quote prefixes once every structural
         // newline is known. Preserve the list marker's trailing space here.
-        (self.depth_map[TAG_LI as usize] > 0).then_some(Cow::Borrowed("\n"))
+        (self.depth_map[TAG_LI as usize] > 0
+          && !matches!(self.caption_boundary, CaptionBoundary::Pending(_)))
+        .then_some(Cow::Borrowed("\n"))
       }
       TAG_CODE => {
         if self.depth_map[TAG_PRE as usize] > 0 {
@@ -2851,7 +3556,9 @@ impl ConvertState {
         Some(Cow::Owned(s))
       }
       TAG_A => {
-        if node.attributes.contains_bit(ATTR_HREF) {
+        if self.in_raw_html_block() {
+          self.html_element_output(node, true, true).map(Cow::Owned)
+        } else if node.attributes.contains_bit(ATTR_HREF) {
           Some(Cow::Borrowed("["))
         } else {
           None
@@ -2859,7 +3566,12 @@ impl ConvertState {
       }
       TAG_IMG => {
         let alt = node.attributes.get_bit(ATTR_ALT).unwrap_or("");
-        let src = node.attributes.get_bit(ATTR_SRC).unwrap_or("");
+        // A data URL is unreadable and can be megabytes of base64; keep only the alt.
+        let src = node
+          .attributes
+          .get_bit(ATTR_SRC)
+          .filter(|src| !is_data_url(src))
+          .unwrap_or("");
         let resolved_src =
           resolve_url(src, self.options.origin.as_deref(), self.options.clean_urls);
         {
@@ -2954,7 +3666,7 @@ impl ConvertState {
       TAG_Q => Some(Cow::Borrowed("\"")),
       TAG_U => Some(Cow::Borrowed("<u>")),
       TAG_CITE => Some(Cow::Borrowed("*")),
-      TAG_FIGCAPTION => Some(Cow::Borrowed(MARKDOWN_EMPHASIS)),
+      TAG_FIGCAPTION => None,
       TAG_DFN => Some(Cow::Borrowed("**")),
       TAG_ADDRESS => Some(Cow::Borrowed("<address>")),
       TAG_DL => Some(Cow::Borrowed("<dl>")),
@@ -3014,6 +3726,9 @@ impl ConvertState {
       TAG_SUB => Some(Cow::Borrowed("</sub>")),
       TAG_SUP => Some(Cow::Borrowed("</sup>")),
       TAG_INS => Some(Cow::Borrowed("</ins>")),
+      TAG_A if self.in_raw_html_block() => {
+        self.html_element_output(node, false, true).map(Cow::Owned)
+      }
       TAG_CODE => {
         if self.depth_map[TAG_PRE as usize] > 0 {
           // Raw <code> close inside a table cell (issue #147).
@@ -3174,7 +3889,7 @@ impl ConvertState {
         let src = node
           .attributes
           .get_bit(ATTR_SRC)
-          .filter(|src| !src.is_empty())?;
+          .filter(|src| !src.is_empty() && !is_data_url(src))?;
         Some(Cow::Owned(
           resolve_url(src, self.options.origin.as_deref(), self.options.clean_urls).into_owned(),
         ))
@@ -3364,7 +4079,7 @@ impl ConvertState {
             let trimmed_len = trim_ascii_whitespace_end(frag);
             if start + trimmed_len < buf_len {
               self.clamp_item_marker_end(start + trimmed_len);
-              self.buffer.truncate(start + trimmed_len);
+              self.truncate_buffer(start + trimmed_len);
               // The run just shrank; a stale length lets the next trim start
               // behind it and reach into spacing no text node wrote.
               self.last_content_cache_len = trimmed_len;
@@ -3471,10 +4186,10 @@ impl ConvertState {
     }
     // A heading normally keeps its block spacing inside a collapsing parent, but
     // in a table cell that newline would end the row.
-    let current_heading_owns_collapse = tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id))
+    let current_node_owns_collapse = tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id))
       && self.collapse_non_span_depth == 1
       && !self.in_table_cell();
-    if self.collapse_non_span_depth > 0 && !current_heading_owns_collapse {
+    if self.collapse_non_span_depth > 0 && !current_node_owns_collapse {
       return NO_SPACING;
     }
     if self.collapse_span_depth > 0 {
@@ -3485,21 +4200,12 @@ impl ConvertState {
         return NO_SPACING;
       }
     }
-    if self.has_tag_overrides
-      && let Some(id) = tag_id
-    {
-      let ovs = self
-        .options
-        .plugins
-        .as_ref()
-        .and_then(|p| p.tag_overrides.as_ref());
-      if let Some(sp) =
-        Self::override_by_id(ovs, self.override_idx.as_deref(), id).and_then(|ov| ov.spacing)
-      {
-        return sp;
-      }
-    }
     node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)
+  }
+
+  #[inline]
+  fn figcaption_owns_block_spacing(&self) -> bool {
+    !self.in_table_cell() && (self.plain_text || self.collapse_non_span_depth == 1)
   }
 
   #[inline]
@@ -3602,7 +4308,7 @@ impl ConvertState {
 
 #[cfg(test)]
 mod tests {
-  use super::{ConvertState, CutLineLead};
+  use super::{ConvertState, CutLineLead, TAG_A};
   use crate::types::{HTMLToMarkdownOptions, OutputFormat};
 
   #[test]
@@ -3674,5 +4380,28 @@ mod tests {
 
     assert_eq!(state.gfm_escape_slow_path_calls, 2);
     assert_eq!(state.get_markdown(), "\\* literal\n\n\\* decoded");
+  }
+
+  #[test]
+  fn atomic_image_marks_content_only_when_written() {
+    let html = format!(
+      r#"<code>{}<a href="/x" title="Title"><img src="/i" alt="Alt">"#,
+      "x".repeat(63)
+    );
+    for (cap, expected) in [(64, 0), (128, 1)] {
+      let mut state = ConvertState::new(
+        HTMLToMarkdownOptions::default().with_max_node_bytes(cap),
+        64,
+        OutputFormat::Markdown,
+      );
+      assert_eq!(state.process_html(&html), html.len());
+
+      let anchor = state
+        .stack
+        .iter()
+        .find(|node| node.tag_id == Some(TAG_A))
+        .unwrap();
+      assert_eq!(anchor.child_text_node_index, expected, "cap={cap}");
+    }
   }
 }

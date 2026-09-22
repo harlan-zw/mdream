@@ -1,8 +1,35 @@
-import type { MdreamOptions } from '../../src/types'
+import type { ElementNode, MdreamOptions } from '../../src/types'
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
+import { htmlToMarkdown, NodeEventExit, streamHtmlToMarkdown } from '../../src/index'
+import { createPlugin } from '../../src/plugins'
+import { htmlToText, streamHtmlToText } from '../../src/text'
 
-async function streamConvert(html: string, chunkSize: number, options: Partial<MdreamOptions> = {}): Promise<string> {
+type ParityFormat = 'markdown' | 'html' | 'text'
+type ParityOptions = Partial<MdreamOptions> & { format?: ParityFormat }
+
+function convertOnce(html: string, options: ParityOptions = {}): string {
+  const { format, ...rest } = options
+  if (format === 'text')
+    return htmlToText(html, rest)
+  if (format === 'html')
+    return htmlToSafeHtml(html, rest)
+  return htmlToMarkdown(html, rest)
+}
+
+function convertStream(
+  htmlStream: ReadableStream<string>,
+  options: ParityOptions,
+): AsyncIterable<string> {
+  const { format, ...rest } = options
+  if (format === 'text')
+    return streamHtmlToText(htmlStream, rest)
+  if (format === 'html')
+    return streamHtmlToSafeHtml(htmlStream, rest)
+  return streamHtmlToMarkdown(htmlStream, rest)
+}
+
+async function streamConvert(html: string, chunkSize: number, options: ParityOptions = {}): Promise<string> {
   const stream = new ReadableStream<string>({
     start(controller) {
       for (let index = 0; index < html.length; index += chunkSize)
@@ -11,18 +38,42 @@ async function streamConvert(html: string, chunkSize: number, options: Partial<M
     },
   })
   let output = ''
-  for await (const chunk of streamHtmlToMarkdown(stream, options))
+  for await (const chunk of convertStream(stream, options))
     output += chunk
   return output
 }
 
-async function expectStreamingParity(html: string, options: Partial<MdreamOptions> = {}): Promise<void> {
-  const expected = htmlToMarkdown(html, options)
+async function streamConvertAtSplit(html: string, split: number, options: ParityOptions = {}): Promise<string> {
+  const stream = new ReadableStream<string>({
+    start(controller) {
+      if (split > 0)
+        controller.enqueue(html.slice(0, split))
+      if (split < html.length)
+        controller.enqueue(html.slice(split))
+      controller.close()
+    },
+  })
+  let output = ''
+  for await (const chunk of convertStream(stream, options))
+    output += chunk
+  return output
+}
+
+async function expectStreamingParity(html: string, options: ParityOptions = {}): Promise<void> {
+  const expected = convertOnce(html, options)
   const wholeStream = await streamConvert(html, html.length || 1, options)
   expect(wholeStream.trimEnd(), 'whole stream differs from one shot').toBe(expected)
 
-  for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {
+  for (let chunkSize = 1; chunkSize < html.length; chunkSize++) {
     expect(await streamConvert(html, chunkSize, options), `chunk size ${chunkSize}`)
+      .toBe(wholeStream)
+  }
+}
+
+async function expectEverySplitParity(html: string, options: ParityOptions = {}): Promise<void> {
+  const wholeStream = await streamConvert(html, html.length || 1, options)
+  for (let split = 1; split < html.length; split++) {
+    expect(await streamConvertAtSplit(html, split, options), `split ${split}`)
       .toBe(wholeStream)
   }
 }
@@ -45,8 +96,12 @@ describe('streaming parity with the Rust core', () => {
       `<a href=/a/b/>link</a>`,
       `[link](/a/b/)`,
     ],
+    [
+      `<p>before</p><img src="data:image/png;base64,iVBORw0KGgo=" alt="chart"><p>after</p>`,
+      `before\n\n![chart]()\n\nafter`,
+    ],
   ])('keeps malformed attribute recovery stable across every split for %s', async (html, expected) => {
-    expect(htmlToMarkdown(html)).toBe(expected)
+    expect(convertOnce(html)).toBe(expected)
     await expectStreamingParity(html)
   })
 
@@ -100,8 +155,469 @@ describe('streaming parity with the Rust core', () => {
     await expectStreamingParity(html)
   })
 
+  it.each([
+    [
+      '<figure><img src="/i.png" alt="Alt"><figcaption>Caption</figcaption></figure>',
+      '![Alt](/i.png)\n\n*Caption*',
+    ],
+    ['<figcaption></figcaption>', ''],
+    ['<figcaption><div></div></figcaption>', ''],
+    ['Before <figcaption><strong></strong></figcaption>After', 'Before After'],
+    ['a<figcaption><br></figcaption>b', 'a  \nb'],
+    ['<figcaption><br>x</figcaption>', '*x*'],
+    ['<pre><figcaption>text</figcaption></pre>', '```\ntext\n```'],
+    ['<pre><figcaption> \n </figcaption></pre>', ''],
+    ['<blockquote><figcaption><br>x</figcaption></blockquote>', '>   \n> *x*'],
+    ['Before<figcaption></figcaption>After', 'BeforeAfter'],
+    ['Before<figcaption></figcaption> After', 'Before After'],
+    ['Before <figcaption></figcaption>After', 'Before After'],
+    ['<p>Before</p><figcaption></figcaption>After', 'Before\n\nAfter'],
+    [
+      '<ul><li><figure><img src="/i" alt="A"><figcaption>Caption</figcaption></figure></li></ul>',
+      '- ![A](/i)\n\n  *Caption*',
+    ],
+    [
+      '<ul><li>Before<figure><figcaption></figcaption></figure>After</li></ul>',
+      '- Before After',
+    ],
+    [
+      '<ul><li><figcaption>One</figcaption></li><li>Two</li></ul>',
+      '- *One*\n\n- Two',
+    ],
+    [
+      '<ul><li><figcaption>One</figcaption></li></ul><p>After</p>',
+      '- *One*\n\nAfter',
+    ],
+    [
+      '<ul><li><figcaption>One</figcaption><blockquote>Quote</blockquote></li></ul>',
+      '- *One*\n\n  > Quote',
+    ],
+    [
+      '<ul><li><figcaption>Outer</figcaption><ul><li>Inner</li></ul></li></ul>',
+      '- *Outer*\n\n  - Inner',
+    ],
+    [
+      '<ul><li>Before<figcaption> Caption </figcaption>After</li></ul>',
+      '- Before\n\n  *Caption*\n\n  After',
+    ],
+    [
+      '<ul><li>Before <figcaption> Caption </figcaption> After</li></ul>',
+      '- Before\n\n  *Caption*\n\n  After',
+    ],
+    [
+      '<ul><li><figcaption>x</figcaption><span> After</span></li></ul>',
+      '- *x*\n\n  After',
+    ],
+    ['<figcaption><span> Caption</span></figcaption>', '*Caption*'],
+    ['<figcaption><em>x</em></figcaption>', '**x**'],
+    ['<figcaption><code>x</code></figcaption>', '*`x`*'],
+    ['<figcaption><em></em></figcaption>', ''],
+    ['<figcaption><code></code></figcaption>', ''],
+    ['a<br><figcaption>b</figcaption>', 'a  \n\n*b*'],
+    ['Before<figcaption><em></em><br>x</figcaption>', 'Before  \n*x*'],
+    ['<figcaption><a href="/x"></a> x</figcaption>', '*[](/x)x*'],
+    ['<figcaption><a href="/x">a</a> x</figcaption>', '*[a](/x) x*'],
+    ['<pre><figcaption><code>x</code></figcaption></pre>', '```\nx\n```'],
+    ['Before<figcaption><em><div></div></em></figcaption>After', 'BeforeAfter'],
+    ['Before<figcaption><em></em><br></figcaption>After', 'Before  \nAfter'],
+    [
+      '<ul><li><figure>Before<figcaption><br><blockquote>x</blockquote></figcaption>After</figure></li></ul>',
+      '- Before  \n  \n  > *x*\n\n  After',
+    ],
+    ['<figcaption><div> Caption</div></figcaption>', '*Caption*'],
+    ['<em><figcaption><div>x</div></figcaption></em>', '**x**'],
+    ['<figcaption>One*<span> Two</span></figcaption>', String.raw`*One\* Two*`],
+    [
+      '<blockquote>Before <figcaption> Caption </figcaption> After</blockquote>',
+      '> Before\n>\n> *Caption*\n>\n> After',
+    ],
+    [
+      '<ul><li><a href="/x"><figure><img src="/i" alt="A"><figcaption>Caption</figcaption></figure></a></li></ul>',
+      '- [![A](/i)*Caption*](/x)',
+    ],
+  ])('keeps figcaption spacing stable across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
+  })
+
+  it.each([
+    ['Before<figcaption></figcaption>After', 'BeforeAfter'],
+    ['Before <figcaption> \n </figcaption>After', 'Before After'],
+    ['Before<figcaption>One</figcaption><figcaption></figcaption>After', 'Before\n\nOne\n\nAfter'],
+    ['<ul><li><figure><img alt=A><figcaption>Caption</figcaption></figure></li></ul>', 'A\n\nCaption'],
+    ['<ul><li><figcaption>Caption</figcaption><img alt=A></li></ul>', 'Caption\n\nA'],
+    ['<ul><li>Before<figcaption> Caption </figcaption>After</li></ul>', 'Before\n\nCaption\n\nAfter'],
+    ['<blockquote>Before<span><figcaption><span> Caption</span></figcaption></span>After</blockquote>', 'Before\n\nCaption\n\nAfter'],
+    ['Before<figcaption><br><br><br></figcaption>After', 'Before\n\nAfter'],
+    ['A<figcaption><br>x</figcaption>', 'A\nx'],
+  ])('keeps plain-text figcaption boundaries stable across every split for %s', async (html, expected) => {
+    const options = { format: 'text' as const }
+    expect(convertOnce(html, options)).toBe(expected)
+    await expectStreamingParity(html, options)
+    await expectEverySplitParity(html, options)
+  })
+
+  it('opens a caption for child exit-only hook output', async () => {
+    const html = '<figcaption><span></span></figcaption>'
+    const options = {
+      plugins: [createPlugin({
+        onNodeExit(node: ElementNode) {
+          return node.name === 'span' ? 'TAIL' : undefined
+        },
+      })],
+    }
+    expect(convertOnce(html, options)).toBe('*TAIL*')
+    await expectEverySplitParity(html, options)
+  })
+
+  it('honors a zero-spacing figcaption override', async () => {
+    const html = 'Before <figcaption> Caption </figcaption> After'
+    const options = {
+      tagOverrides: {
+        figcaption: { spacing: [0, 0] as [number, number] },
+      },
+    }
+    expect(convertOnce(html, options)).toBe('Before *Caption* After')
+    await expectEverySplitParity(html, options)
+  })
+
+  it('opens a plain-text caption through a formatting wrapper', async () => {
+    const html = '<figure><img alt=A><figcaption><strong> Caption </strong></figcaption></figure>'
+    const options = { format: 'text' as const }
+    expect(convertOnce(html, options)).toBe('A\n\nCaption')
+    await expectEverySplitParity(html, options)
+  })
+
+  it.each([
+    '<em><figcaption>Caption</figcaption></em>',
+    '<a href="/x"><figcaption>Caption</figcaption></a>',
+    '<strong><span><figcaption>Caption</figcaption></span></strong>',
+  ])('keeps plain-text caption spacing through formatting ancestors for %s', async (html) => {
+    const options = { format: 'text' as const }
+    expect(convertOnce(`Before${html}After`, options)).toBe('Before\n\nCaption\n\nAfter')
+    await expectEverySplitParity(`Before${html}After`, options)
+  })
+
+  it('suppresses plain-text caption spacing in table cells', async () => {
+    const html = '<table><tr><td>Before<strong><figcaption>Caption</figcaption></strong>After</td></tr></table>'
+    const options = { format: 'text' as const }
+    expect(convertOnce(html, options)).toBe('BeforeCaptionAfter')
+    await expectEverySplitParity(html, options)
+  })
+
+  it.each([
+    '<a href="/x">Before<figcaption>Caption</figcaption>After</a>',
+    '<em>Before<figcaption>Caption</figcaption>After</em>',
+    '<table><tr><td>Before<figcaption>Caption</figcaption>After</td></tr></table>',
+  ])('suppresses explicit caption spacing in structural inline contexts for %s', async (html) => {
+    const options = {
+      tagOverrides: {
+        figcaption: { spacing: [3, 3] as [number, number] },
+      },
+    }
+    const defaultOutput = convertOnce(html)
+    expect(convertOnce(html, options)).toBe(defaultOutput)
+    await expectEverySplitParity(html, options)
+  })
+
+  it('honors explicit caption spacing through a transparent span', async () => {
+    const html = '<span>Before<figcaption>Caption</figcaption>After</span>'
+    const options = {
+      tagOverrides: {
+        figcaption: { spacing: [3, 3] as [number, number] },
+      },
+    }
+    expect(convertOnce(html, options)).toBe('Before\n\n\n*Caption*\n\n\nAfter')
+    await expectEverySplitParity(html, options)
+  })
+
+  it.each(['onNodeEnter', 'onNodeExit'] as const)('flushes a pending pre fence before figcaption %s output', async (hook) => {
+    const html = '<pre><figcaption></figcaption></pre>'
+    const options = {
+      plugins: [createPlugin({
+        [hook](node: ElementNode) {
+          return node.name === 'figcaption' ? 'HOOK' : undefined
+        },
+      })],
+    }
+    expect(convertOnce(html, options)).toBe('```\nHOOK\n```')
+    await expectEverySplitParity(html, options)
+  })
+
+  it('preserves literal figcaption overrides inside pre', async () => {
+    const html = '<pre><figcaption></figcaption>x</pre>'
+    const options = {
+      tagOverrides: { figcaption: { enter: '^' } },
+    }
+    expect(convertOnce(html, options)).toBe('```\n^x\n```')
+    await expectEverySplitParity(html, options)
+  })
+
+  it('preserves literal code overrides inside pre', async () => {
+    for (const [html, options, expected] of [
+      [
+        '<pre><code>x</code></pre>',
+        { tagOverrides: { code: { enter: '^' } } },
+        '```\n^x\n```',
+      ],
+      [
+        '<pre><code class="language-js">x</code></pre>',
+        { tagOverrides: { code: { enter: '^', exit: '$' } } },
+        '```js\n^x$\n```',
+      ],
+    ] as const) {
+      expect(convertOnce(html, options)).toBe(expected)
+      await expectEverySplitParity(html, options)
+    }
+  })
+
+  it('retracts an empty cleaned link before caption block content', async () => {
+    const html = '<figcaption><a href="/x"></a><blockquote>x</blockquote></figcaption>'
+    const options = { clean: { emptyLinkText: true } }
+    expect(convertOnce(html, options)).toBe('> *x*')
+    await expectEverySplitParity(html, options)
+  })
+
+  it('does not insert inline spacing after an anchored caption opener', async () => {
+    const html = '<figure><img src="i" alt="A"><figcaption><a href="x">Source</a></figcaption></figure>'
+    expect(convertOnce(html)).toBe('![A](i)\n\n*[Source](x)*')
+    await expectEverySplitParity(html)
+  })
+
+  it.each([
+    [
+      '<ul><li><figcaption><code>a`b</code><a href="https://x.com">https://x.com</a></figcaption></li></ul>',
+      '- *``a`b``<https://x.com>*',
+    ],
+    [
+      '<blockquote><figcaption><em></em><code>a`b</code></figcaption></blockquote>',
+      '> *``a`b``*',
+    ],
+  ])('holds nested caption output across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    for (let split = 1; split < html.length; split++)
+      expect(await streamConvertAtSplit(html, split), `split ${split}`).toBe(expected)
+  })
+
+  it('collapses an autolink after an anchored caption opener', async () => {
+    const html = '<figcaption><a href="https://x.com">https://x.com</a></figcaption>'
+    expect(convertOnce(html)).toBe('*<https://x.com>*')
+    await expectEverySplitParity(html)
+  })
+
+  it('does not reopen a committed caption after a streamed empty marker', async () => {
+    const first = 'Before<figcaption><a href="x">x</a>'
+    const html = `${first}<em></em>y</figcaption>After`
+    const expected = 'Before\n\n*[x](x)y*\n\nAfter'
+    expect(convertOnce(html)).toBe(expected)
+    expect(await streamConvertAtSplit(html, first.length)).toBe(expected)
+    await expectEverySplitParity(html)
+  })
+
+  it('rolls back deferred breaks inside a cleaned empty link', async () => {
+    const html = '<figure><img src="i" alt="A"><figcaption><a href="x"><br></a>Caption</figcaption></figure>'
+    const options = { clean: { emptyLinkText: true } }
+    expect(convertOnce(html, options)).toBe('![A](i)\n\n*Caption*')
+    await expectEverySplitParity(html, options)
+  })
+
+  it('retracts clean-dropped caption children', async () => {
+    const emptyImage = 'A<figcaption><img src="i"></figcaption>B'
+    const emptyImageOptions = { clean: { emptyImages: true } }
+    expect(convertOnce(emptyImage, emptyImageOptions)).toBe('AB')
+    await expectEverySplitParity(emptyImage, emptyImageOptions)
+    const whitespaceImage = 'A<figcaption><img src="i" alt=" "></figcaption>B'
+    expect(convertOnce(whitespaceImage, emptyImageOptions)).toBe('AB')
+    await expectEverySplitParity(whitespaceImage, emptyImageOptions)
+
+    const emptyLink = '<figcaption><em><a href="x"><br></a></em></figcaption>'
+    const emptyLinkOptions = { clean: { emptyLinkText: true } }
+    expect(convertOnce(emptyLink, emptyLinkOptions)).toBe('')
+    await expectEverySplitParity(emptyLink, emptyLinkOptions)
+    const followedEmptyLink = '<figcaption><em><a href="x"></a></em>x</figcaption>'
+    expect(convertOnce(followedEmptyLink, emptyLinkOptions)).toBe('*x*')
+    await expectEverySplitParity(followedEmptyLink, emptyLinkOptions)
+  })
+
+  it('keeps a deferred caption break inside its link', async () => {
+    const html = '<figcaption><a href="x"><br></a>x</figcaption>'
+    expect(convertOnce(html)).toBe('*[  \n](x)x*')
+    await expectEverySplitParity(html)
+  })
+
+  it('normalizes spaces around deferred caption breaks', async () => {
+    for (const [html, expected] of [
+      ['a <figcaption><br>x</figcaption>', 'a  \n*x*'],
+      ['a<figcaption><br></figcaption> b', 'a  \nb'],
+    ] as const) {
+      expect(convertOnce(html)).toBe(expected)
+      await expectEverySplitParity(html)
+    }
+  })
+
+  it('defers pre fences through captions and suppressed wrappers', async () => {
+    for (const [html, expected] of [
+      ['<figcaption><pre>x</pre></figcaption>', '*```\nx\n```*'],
+      ['<pre><figcaption><em></em></figcaption></pre>', ''],
+    ] as const) {
+      expect(convertOnce(html)).toBe(expected)
+      await expectEverySplitParity(html)
+    }
+  })
+
+  it('holds empty list spacing behind a tentative caption marker', async () => {
+    const html = '<img alt="x"><menu><li><figcaption><em></em></figcaption></li></menu>'
+    expect(convertOnce(html)).toBe('![x]()\n\n-')
+    await expectEverySplitParity(html)
+  })
+
+  it('holds deferred caption breaks until later visible content commits the opener', async () => {
+    let controller!: ReadableStreamDefaultController<string>
+    const stream = new ReadableStream<string>({
+      start(value) {
+        controller = value
+      },
+    })
+    const iterator = streamHtmlToMarkdown(stream)[Symbol.asyncIterator]()
+    controller.enqueue('Before<figcaption><br><br>')
+    const first = await iterator.next()
+    expect(first).toEqual({ value: 'Before', done: false })
+
+    controller.enqueue('x</figcaption>After')
+    controller.close()
+    let output = first.value || ''
+    for (;;) {
+      const result = await iterator.next()
+      if (result.done)
+        break
+      output += result.value
+    }
+    expect(output).toBe(convertOnce('Before<figcaption><br><br>x</figcaption>After'))
+  })
+
+  it('holds an anchored caption opener until a block child commits it', async () => {
+    const html = 'Before<figcaption><em><div>x</div></em></figcaption>After'
+    expect(convertOnce(html)).toBe('Before\n\n**x**\n\nAfter')
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
+  })
+
+  it('does not mistake emphasis before an empty block for a caption suffix', async () => {
+    const html = '<ul><li><em>x</em><p></p><blockquote>q</blockquote></li></ul>'
+    expect(convertOnce(html)).toBe('- *x*\n\n  \n  > q')
+    await expectEverySplitParity(html)
+  })
+
+  it('does not treat hook output as an empty figcaption marker', async () => {
+    const html = 'Before<figcaption></figcaption>After'
+    const options = {
+      plugins: [createPlugin({
+        onNodeEnter(node: ElementNode) {
+          return node.name === 'figcaption' ? 'HOOK' : undefined
+        },
+      })],
+    }
+    expect(convertOnce(html, options)).toBe('Before\n\nHOOK*\n\nAfter')
+    await expectEverySplitParity(html, options)
+  })
+
+  it('places wrapper exit output after the caption boundary', async () => {
+    const html = '<ul><li><figure><figcaption>x</figcaption></figure>After</li></ul>'
+    const options = {
+      plugins: [createPlugin({
+        onNodeExit(node: ElementNode) {
+          return node.name === 'figure' ? 'TAIL' : undefined
+        },
+      })],
+    }
+    expect(convertOnce(html, options)).toBe('- *x*\n\n  TAIL After')
+    await expectEverySplitParity(html, options)
+  })
+
+  it('keeps the default opener with an exit-only caption override', async () => {
+    const html = '<figcaption>x</figcaption>'
+    const options = {
+      tagOverrides: {
+        figcaption: { exit: ')' },
+      },
+    }
+    expect(convertOnce(html, options)).toBe('*x)')
+    await expectEverySplitParity(html, options)
+  })
+
+  it('keeps blockquote exit output after a caption boundary', async () => {
+    const html = '<blockquote><figcaption>x</figcaption></blockquote>'
+    const options = {
+      tagOverrides: {
+        blockquote: { exit: 'TAIL' },
+      },
+    }
+    expect(convertOnce(html, options)).toBe('*x*\n\nTAIL')
+    await expectEverySplitParity(html, options)
+  })
+
   it('does not emit link syntax before an autolink rewrite is final', async () => {
     await expectStreamingParity('<a href="https://example.com">https://example.com</a>')
+  })
+
+  it('does not emit an enter-only link override before the built-in exit', async () => {
+    await expectStreamingParity('<a href="https://example.com">https://example.com</a>', {
+      tagOverrides: { a: { enter: '[' } },
+    })
+  })
+
+  it('does not emit a hook link opener before the built-in autolink rewrite', async () => {
+    await expectStreamingParity('<a href="https://example.com">https://example.com</a>', {
+      plugins: [createPlugin({
+        onNodeEnter(node) {
+          return node.name === 'a' ? '[' : undefined
+        },
+      })],
+    })
+  })
+
+  it('keeps bracket text literal when hooks replace the raw link tags', async () => {
+    const html = '<details><a href="/x">a[b]</a></details>'
+    const options: Partial<MdreamOptions> = {
+      plugins: [createPlugin({
+        onNodeEnter(node) {
+          return node.name === 'a' ? '{' : undefined
+        },
+        onNodeExit(node) {
+          return node.name === 'a' ? '}' : undefined
+        },
+      })],
+    }
+    expect(convertOnce(html, options)).toBe('<details>{a[b]}</details>')
+    await expectStreamingParity(html, options)
+  })
+
+  it('does not carry raw link protection past a skipped exit', async () => {
+    const html = '<details><a href="/x">first</a></details><details>a[b]</details>'
+    const options: Partial<MdreamOptions> = {
+      plugins: [createPlugin({
+        beforeNodeProcess(event) {
+          return { skip: event.type === NodeEventExit && 'name' in event.node && event.node.name === 'a' }
+        },
+      })],
+    }
+    const output = convertOnce(html, options)
+    expect(output).toContain('<details>a[b]</details>')
+    expect(output).not.toContain('&#91;')
+    await expectStreamingParity(html, options)
+  })
+
+  it('protects raw link text when an empty-buffer path emits the opener', async () => {
+    const html = '<details><a href="/x">a[b]</a></details>'
+    const options: Partial<MdreamOptions> = {
+      tagOverrides: {
+        details: { enter: '', exit: '' },
+        a: { spacing: [1, 0] },
+      },
+    }
+    expect(convertOnce(html, options)).toBe('<a href="/x">a&#91;b&#93;</a>')
+    await expectStreamingParity(html, options)
   })
 
   it.each([
@@ -109,10 +625,65 @@ describe('streaming parity with the Rust core', () => {
     '<a href="docs/a b">text</a>',
     String.raw`<a href="docs/(a)\file">text</a>`,
     String.raw`<a href="/x" title="say &quot;hi&quot; \ path">text</a>`,
+    '<details><a href="/&#91;x&#93;" title="[Title] &amp; &amp;#91;">text</a></details>',
     String.raw`<img src="/x.png" alt="a ] \ *bold* _em_ &#96;code&#96;">`,
     String.raw`<img src="/x.png" alt="alt" title="say &quot;hi&quot; \ path">`,
   ])('keeps serialized link and image output stable for %s', async (html) => {
     await expectStreamingParity(html)
+  })
+
+  it.each([
+    '<a href="/edit" title="Edit"><img src="/edit.svg" alt="Edit"></a>',
+    '<a href="/x" aria-label="Open"><img src="/i" alt="Alt"></a>',
+    '<a href="/x" title="Title"><span><span><img src="/i" alt="Alt"></span></span></a>',
+    '<a href="/x"><img src="/i" alt="A"> </a>Caption',
+    '<div><a href="/x"><x-wrap><img src="/i" alt="A"></x-wrap></a> Caption</div>',
+  ])('keeps linked-image content stable across every split for %s', async (html) => {
+    await expectStreamingParity(html)
+  })
+
+  it.each(['html', 'text'] as const)('keeps linked-image %s output stable across every split', async (format) => {
+    await expectStreamingParity(
+      '<a href="/x" title="Title"><img src="/i" alt="Alt"></a>',
+      { format },
+    )
+  })
+
+  it('keeps deferred linked-image whitespace across every split', async () => {
+    const html = '<div><a href="/x"><span><img src="/i" alt="Alt"> </span></a>Caption</div>'
+    expect(htmlToText(html)).toBe('Alt Caption')
+    await expectStreamingParity(html, { format: 'text' })
+
+    const imageSibling = '<div><a href="/x"><span><img src="/i" alt="Alt"> </span></a><img src="/caption" alt="Caption"></div>'
+    expect(convertOnce(imageSibling)).toBe('[![Alt](/i)](/x) ![Caption](/caption)')
+    expect(htmlToText(imageSibling)).toBe('Alt Caption')
+    await expectStreamingParity(imageSibling)
+    await expectStreamingParity(imageSibling, { format: 'text' })
+  })
+
+  it('keeps block-overridden image scopes across every split', async () => {
+    const html = '<div><a href="/x"><img src="/i" alt="Alt"></a> Caption</div>'
+    const tagOverrides = {
+      img: { spacing: [0, 0] as [number, number], isInline: false },
+    }
+    expect(convertOnce(html, { tagOverrides })).toBe('[![Alt](/i)](/x) Caption')
+    expect(htmlToText(html, { tagOverrides })).toBe('Alt Caption')
+    await expectStreamingParity(html, { tagOverrides })
+    await expectStreamingParity(html, { tagOverrides, format: 'text' })
+
+    const wrapperHtml = '<div><a href="/x"><x-block><img src="/i" alt="Alt"></x-block></a> <span>after</span></div>'
+    const wrapperOverrides = {
+      'x-block': { enter: '', exit: '', spacing: [0, 0] as [number, number], isInline: false },
+    }
+    expect(convertOnce(wrapperHtml, { tagOverrides: wrapperOverrides })).toBe('[![Alt](/i)](/x) after')
+    await expectStreamingParity(wrapperHtml, { tagOverrides: wrapperOverrides })
+  })
+
+  it('keeps whitespace-only text fallback stable across every split', async () => {
+    await expectStreamingParity(
+      '<a href="/x" title="Title"><img src="/i" alt=" "></a>',
+      { format: 'text' },
+    )
   })
 
   it.each([
@@ -122,6 +693,16 @@ describe('streaming parity with the Rust core', () => {
     '<details><p>a</p>\n\n<p>b</p></details><dl><dd>~tilde~</dd></dl>',
     '<details><p>a</p>\n\n<p>b</p></details><dl>a<span>b</span>~tilde~</dl>',
   ])('keeps raw HTML block closes stable for %s', async (html) => {
+    await expectStreamingParity(html)
+  })
+
+  it.each([
+    '<details><a href="/x">a[b]</a></details>',
+    '<dl><dt>Term <a href="/term">link</a></dt><dd>Definition</dd></dl>',
+    '<details><a href="/x?a=1&amp;b=2" title="say &quot;hi&quot; &amp; bye">link</a></details>',
+    '<details><a href="javascript:alert(1)">a[b]</a></details>',
+    '<details><a href="/x">before 🙂 after</a></details>',
+  ])('keeps raw HTML links stable across every split for %s', async (html) => {
     await expectStreamingParity(html)
   })
 

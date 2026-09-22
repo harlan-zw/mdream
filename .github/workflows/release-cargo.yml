@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to resume
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -15,9 +20,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Resolve release channel
+        id: channel
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: node scripts/release-channel.mjs "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Verify release branch
+        env:
+          RELEASE_BRANCH: ${{ steps.channel.outputs.branch }}
+        run: git merge-base --is-ancestor HEAD "origin/$RELEASE_BRANCH"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -26,16 +45,15 @@ jobs:
       - name: Resolve crate version
         id: version
         working-directory: crates
+        env:
+          TAG_VERSION: ${{ steps.channel.outputs.version }}
         run: |
           CRATE_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "mdream") | .version')
           echo "crate=$CRATE_VERSION" >> "$GITHUB_OUTPUT"
 
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            TAG_VERSION=${GITHUB_REF#refs/tags/v}
-            if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
-              echo "::error::Tag v$TAG_VERSION does not match crate version $CRATE_VERSION. Did the version bump run scripts/sync-cargo-version.mjs?"
-              exit 1
-            fi
+          if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
+            echo "::error::Tag v$TAG_VERSION does not match crate version $CRATE_VERSION. Did the version bump run scripts/sync-cargo-version.mjs?"
+            exit 1
           fi
 
           if curl -sf "https://crates.io/api/v1/crates/mdream/$CRATE_VERSION" >/dev/null; then

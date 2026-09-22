@@ -12,6 +12,25 @@ fn convert(html: &str) -> String {
   html_to_markdown(html, HTMLToMarkdownOptions::default())
 }
 
+fn transparent_override(name: &str, is_inline: bool) -> HTMLToMarkdownOptions {
+  HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        name.to_string(),
+        TagOverrideConfig {
+          enter: Some(String::new()),
+          exit: Some(String::new()),
+          spacing: Some([0, 0]),
+          is_inline: Some(is_inline),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  }
+}
+
 fn convert_with_origin(html: &str, origin: &str) -> String {
   html_to_markdown(
     html,
@@ -118,6 +137,47 @@ fn plain_text_output_preserves_readable_separators() {
     convert_text("<ul><li>text<hr>after</li></ul>"),
     "text after"
   );
+  assert_eq!(
+    convert_text("<ul><li><figure><img alt=A><figcaption>Caption</figcaption></figure></li></ul>"),
+    "A\n\nCaption"
+  );
+  assert_eq!(
+    convert_text("<ul><li><figcaption>Caption</figcaption><img alt=A></li></ul>"),
+    "Caption\n\nA"
+  );
+  assert_eq!(
+    convert_text("<ul><li>Before<figcaption> Caption </figcaption>After</li></ul>"),
+    "Before\n\nCaption\n\nAfter"
+  );
+  assert_eq!(
+    convert_text(
+      "<blockquote>Before<span><figcaption><span> Caption</span></figcaption></span>After</blockquote>"
+    ),
+    "Before\n\nCaption\n\nAfter"
+  );
+  assert_eq!(
+    convert_text("Before<figcaption></figcaption>After"),
+    "BeforeAfter"
+  );
+  assert_eq!(
+    convert_text("Before <figcaption> \n </figcaption>After"),
+    "Before After"
+  );
+  assert_eq!(
+    convert_text("Before<figcaption>One</figcaption><figcaption></figcaption>After"),
+    "Before\n\nOne\n\nAfter"
+  );
+}
+
+#[test]
+fn plain_text_figcaption_ignores_formatting_wrappers() {
+  for html in [
+    "Before<em><figcaption>Caption</figcaption></em>After",
+    "Before<a href=/x><figcaption>Caption</figcaption></a>After",
+    "Before<strong><span><figcaption>Caption</figcaption></span></strong>After",
+  ] {
+    assert_eq!(convert_text(html), "Before\n\nCaption\n\nAfter");
+  }
 }
 
 #[test]
@@ -140,6 +200,22 @@ fn plain_text_images_fall_back_to_title_then_src() {
     ""
   );
   assert_eq!(convert_text("<img>"), "");
+}
+
+#[test]
+fn plain_text_images_never_fall_back_to_a_data_url() {
+  assert_eq!(
+    convert_text(r#"<img src="data:image/png;base64,AAA=" alt="Alt">"#),
+    "Alt"
+  );
+  assert_eq!(
+    convert_text(r#"<img src="data:image/png;base64,AAA=" title="Title">"#),
+    "Title"
+  );
+  assert_eq!(
+    convert_text(r#"<img src="data:image/png;base64,AAA=">"#),
+    ""
+  );
 }
 
 #[test]
@@ -360,11 +436,13 @@ fn decoded_text_is_serialized_for_its_output_context() {
     "decoded code became active raw HTML: {raw_code}"
   );
   assert!(
-    convert(r#"<details><a href="/x">a[b]</a></details>"#).contains("[a&#91;b&#93;](/x)"),
+    convert(r#"<details><a href="/x">a[b]</a></details>"#)
+      .contains(r#"<a href="/x">a&#91;b&#93;</a>"#),
     "parser-added escapes must not become visible raw-HTML text"
   );
   assert!(
-    convert(r#"<details><a href="/x">&#92;&#91;</a></details>"#).contains(r"[\&#91;](/x)"),
+    convert(r#"<details><a href="/x">&#92;&#91;</a></details>"#)
+      .contains(r#"<a href="/x">\&#91;</a>"#),
     "decoded backslashes must remain visible raw-HTML text"
   );
   assert!(
@@ -389,10 +467,364 @@ fn simple_link() {
 }
 
 #[test]
+fn links_inside_raw_html_blocks_are_safe_html() {
+  for (html, expected) in [
+    (
+      r#"<details><a href="/x">a[b]</a></details>"#,
+      r#"<details><a href="/x">a&#91;b&#93;</a></details>"#,
+    ),
+    (
+      r#"<dl><dt>Term <a href="/term">link</a></dt><dd>Definition</dd></dl>"#,
+      "<dl><dt>Term <a href=\"/term\">link</a></dt>\n<dd>Definition</dd>\n</dl>",
+    ),
+    (
+      r#"<details><a href="/x?a=1&amp;b=2" title="say &quot;hi&quot; &amp; bye">link</a></details>"#,
+      r#"<details><a href="/x?a=1&amp;b=2" title="say &quot;hi&quot; &amp; bye">link</a></details>"#,
+    ),
+    (
+      r#"<details><a href="javascript:alert(1)">visible</a></details>"#,
+      "<details>visible</details>",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn raw_html_links_keep_source_and_markdown_cleaning_boundaries() {
+  assert_eq!(
+    html_to_markdown(
+      r#"<details><a href="/x?utm_source=test&amp;keep=1">Link</a></details>"#,
+      HTMLToMarkdownOptions::default().with_clean(mdream::types::CleanConfig {
+        urls: true,
+        ..Default::default()
+      }),
+    ),
+    r#"<details><a href="/x?keep=1">Link</a></details>"#,
+  );
+  assert_eq!(
+    convert_with_clean(
+      r##"<details><a href="#">Link</a></details>"##,
+      mdream::types::CleanConfig {
+        empty_links: true,
+        ..Default::default()
+      },
+    ),
+    "<details>Link</details>",
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"<details><a href="/x"></a></details>"#,
+      mdream::types::CleanConfig {
+        empty_link_text: true,
+        ..Default::default()
+      },
+    ),
+    r#"<details><a href="/x"></a></details>"#,
+  );
+  assert_eq!(
+    convert_with_clean(
+      r##"<details><a href="#missing">Link</a></details>"##,
+      mdream::types::CleanConfig {
+        fragments: true,
+        ..Default::default()
+      },
+    ),
+    r##"<details><a href="#missing">Link</a></details>"##,
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"<details><a href="https://example.com">https://example.com</a></details>"#,
+      mdream::types::CleanConfig {
+        redundant_links: true,
+        ..Default::default()
+      },
+    ),
+    r#"<details><a href="https://example.com">https://example.com</a></details>"#,
+  );
+  assert_eq!(
+    convert_with_clean(
+      r##"<details><h2><a href="#section">Section</a></h2></details>"##,
+      mdream::types::CleanConfig {
+        self_link_headings: true,
+        ..Default::default()
+      },
+    ),
+    "<details>\n\n## <a href=\"#section\">Section</a>\n\n</details>",
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"<details><a href="/x">Visible</a></details>"#,
+      clean_all(),
+    ),
+    r#"<details><a href="/x">Visible</a></details>"#,
+  );
+}
+
+#[test]
+fn raw_html_link_tag_overrides_still_own_their_output() {
+  for (override_config, expected) in [
+    (
+      TagOverrideConfig {
+        enter: Some("{".to_string()),
+        exit: Some("}".to_string()),
+        ..Default::default()
+      },
+      "<details>{Link}</details>",
+    ),
+    (
+      TagOverrideConfig {
+        enter: Some("[".to_string()),
+        ..Default::default()
+      },
+      "<details>[Link](/x)</details>",
+    ),
+    (
+      TagOverrideConfig {
+        exit: Some("}".to_string()),
+        ..Default::default()
+      },
+      "<details><a href=\"/x\">Link}</details>",
+    ),
+  ] {
+    let output = html_to_markdown(
+      r#"<details><a href="/x">Link</a></details>"#,
+      HTMLToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          tag_overrides: Some(vec![("a".to_string(), override_config)]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    );
+    assert_eq!(output, expected);
+  }
+}
+
+#[test]
 fn link_with_title() {
   assert_eq!(
     convert(r#"<a href="https://example.com" title="Example Site">Example</a>"#),
     r#"[Example](https://example.com "Example Site")"#
+  );
+}
+
+#[test]
+fn rendered_images_count_as_link_content() {
+  for (html, expected) in [
+    (
+      r#"<a href="/edit" title="Edit"><img src="/edit.svg" alt="Edit"></a>"#,
+      r#"[![Edit](/edit.svg)](/edit "Edit")"#,
+    ),
+    (
+      r#"<a href="/x" title="Title"><img src="/i" alt="Alt"></a>"#,
+      r#"[![Alt](/i)](/x "Title")"#,
+    ),
+    (
+      r#"<a href="/x" aria-label="Open"><img src="/i" alt="Alt"></a>"#,
+      "[![Alt](/i)](/x)",
+    ),
+    (
+      r#"<a href="/x" title="Title"><span><span><img src="/i" alt="Alt"></span></span></a>"#,
+      r#"[![Alt](/i)](/x "Title")"#,
+    ),
+    (
+      r#"<div><a href="/x"><span><img src="/i" alt="Alt"> </span></a>Caption</div>"#,
+      "[![Alt](/i)](/x) Caption",
+    ),
+    (
+      r#"<div><a href="/x"><x-wrap><img src="/i" alt="A"></x-wrap></a> Caption</div>"#,
+      "[![A](/i)](/x) Caption",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn rendered_images_mark_block_and_anchor_scopes() {
+  assert_eq!(
+    convert(r#"<a href="/x" title="Title"><div><img src="/i" alt="Alt"> after</div></a>"#),
+    r#"[![Alt](/i) after](/x "Title")"#
+  );
+
+  let markdown = html_to_markdown(
+    r#"<div><a href="/x" title="Title"><x-block><img src="/i" alt="Alt"> after</x-block></a></div>"#,
+    transparent_override("x-block", false),
+  );
+  assert_eq!(markdown, r#"[![Alt](/i) after](/x "Title")"#);
+
+  let outer_scope = html_to_markdown(
+    r#"<div><a href="/x"><x-block><img src="/i" alt="Alt"></x-block></a> <span>after</span></div>"#,
+    transparent_override("x-block", false),
+  );
+  assert_eq!(outer_scope, "[![Alt](/i)](/x) after");
+}
+
+#[test]
+fn linked_images_respect_mixed_case_builtin_override_scopes() {
+  for (html, name, is_inline, expected) in [
+    (
+      r#"<section><a href="/x"><DIV><img src="/i" alt="A"></DIV></a> Caption</section>"#,
+      "div",
+      true,
+      "[![A](/i)](/x) Caption",
+    ),
+    (
+      r#"<div><a href="/x"><SPAN><img src="/i" alt="A"></SPAN></a> Caption</div>"#,
+      "span",
+      false,
+      "[![A](/i)](/x) Caption",
+    ),
+  ] {
+    let markdown = html_to_markdown(html, transparent_override(name, is_inline));
+    assert_eq!(markdown, expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn whitespace_after_a_linked_image_remains_a_separator() {
+  assert_eq!(
+    convert(r#"<a href="/x"><img src="/i" alt="A"> </a>Caption"#),
+    "[![A](/i)](/x) Caption"
+  );
+}
+
+#[test]
+fn linked_image_empty_fallbacks_and_cleaning_are_preserved() {
+  assert_eq!(
+    convert(r#"<a href="/x" aria-label="label"><span></span></a>"#),
+    "[label](/x)"
+  );
+
+  let html = r#"<a href="/file" title="File:Photo"><img src="/photo.jpg" alt=""></a>"#;
+  assert_eq!(convert_with_clean(html, clean_all()), "[File:Photo](/file)");
+  for alt in [" ", "\t", "\n", "\u{000C}", "\r", "\u{00A0}", "\u{FEFF}"] {
+    let whitespace_alt =
+      format!(r#"<a href="/file" title="File:Photo"><img src="/photo.jpg" alt="{alt}"></a>"#);
+    assert_eq!(
+      convert_with_clean(&whitespace_alt, clean_all()),
+      "[File:Photo](/file)",
+      "alt={alt:?}"
+    );
+  }
+  let nel_alt = format!(
+    r#"<a href="/file" title="File:Photo"><img src="/photo.jpg" alt="{}"></a>"#,
+    '\u{0085}'
+  );
+  assert_eq!(
+    convert_with_clean(&nel_alt, clean_all()),
+    "[![\u{0085}](/photo.jpg)](/file \"File:Photo\")"
+  );
+  let mut keep_empty_image = clean_all();
+  keep_empty_image.empty_images = false;
+  assert_eq!(
+    convert_with_clean(html, keep_empty_image),
+    r#"[![](/photo.jpg)](/file "File:Photo")"#
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"<a href="/file"><img src="/photo.jpg" alt=""></a>"#,
+      clean_all()
+    ),
+    ""
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"<a href="/file"><img src="/photo.jpg" alt="Photo"></a>"#,
+      clean_all()
+    ),
+    "[![Photo](/photo.jpg)](/file)"
+  );
+}
+
+#[test]
+fn linked_images_count_only_when_builtin_output_is_emitted() {
+  assert_eq!(
+    html_to_html(
+      r#"<a href="/x" title="Title"><img src="/i" alt="Alt"></a>"#,
+      HTMLToMarkdownOptions::default()
+    ),
+    r#"<a href="/x" title="Title"><img src="/i" alt="Alt"></a>"#
+  );
+  assert_eq!(
+    html_to_html(
+      r#"<a href="/x" title="Title"><img src="data:text/html,bad" alt="Alt"></a>"#,
+      HTMLToMarkdownOptions::default()
+    ),
+    r#"<a href="/x" title="Title">Title</a>"#
+  );
+  assert_eq!(
+    html_to_text(
+      r#"<a href="/x" title="Title"><img src="/i" alt="Alt"></a>"#,
+      HTMLToMarkdownOptions::default()
+    ),
+    "Alt"
+  );
+  assert_eq!(
+    html_to_text(
+      r#"<a href="/x" title="Title"><img src="/i" alt=""></a>"#,
+      HTMLToMarkdownOptions::default()
+    ),
+    "Title"
+  );
+  assert_eq!(
+    html_to_text(
+      r#"<a href="/x" title="Title"><img src="/i" alt=" "></a>"#,
+      HTMLToMarkdownOptions::default()
+    ),
+    "Title"
+  );
+
+  let overridden = html_to_markdown(
+    r#"<a href="/x" title="Title"><img src="/i" alt="Alt"></a>"#,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "img".to_string(),
+          TagOverrideConfig {
+            enter: Some("custom".to_string()),
+            exit: Some(String::new()),
+            spacing: Some([0, 0]),
+            is_inline: Some(true),
+            is_self_closing: Some(true),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert_eq!(overridden, "[customTitle](/x)");
+}
+
+#[test]
+fn block_overridden_images_mark_their_parent_scope() {
+  let html = r#"<div><a href="/x"><img src="/i" alt="Alt"></a> Caption</div>"#;
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "img".to_string(),
+        TagOverrideConfig {
+          spacing: Some([0, 0]),
+          is_inline: Some(false),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+
+  assert_eq!(
+    html_to_markdown(html, options.clone()),
+    "[![Alt](/i)](/x) Caption"
+  );
+  assert_eq!(html_to_text(html, options.clone()), "Alt Caption");
+  assert_eq!(
+    html_to_html(html, options),
+    r#"<div><a href="/x"><img src="/i" alt="Alt"></a> Caption</div>"#
   );
 }
 
@@ -576,6 +1008,46 @@ fn image_with_origin() {
     convert_with_origin(r#"<img src="/img.png" alt="photo">"#, "https://example.com"),
     "![photo](https://example.com/img.png)"
   );
+}
+
+#[test]
+fn data_url_images_drop_the_payload_and_keep_the_description() {
+  for (html, expected) in [
+    (
+      r#"<img src="data:image/png;base64,iVBORw0KGgo=" alt="chart">"#,
+      "![chart]()",
+    ),
+    (r#"<img src="data:image/png;base64,iVBORw0KGgo=">"#, "![]()"),
+    (
+      r#"<img src="data:image/png;base64,iVBORw0KGgo=" alt="chart" title="Fig 1">"#,
+      r#"![chart]( "Fig 1")"#,
+    ),
+    (
+      r#"<a href="https://x.com"><img src="data:image/png;base64,AAA=" alt="linked"></a>"#,
+      "[![linked]()](https://x.com)",
+    ),
+    (
+      r#"<img src="/photo.png" alt="remote">"#,
+      "![remote](/photo.png)",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn data_url_images_stream_identically_at_every_split() {
+  let input =
+    r#"<p>before</p><img src="data:image/png;base64,iVBORw0KGgo=" alt="chart"><p>after</p>"#;
+  let expected = convert(input);
+  assert_eq!(expected, "before\n\n![chart]()\n\nafter");
+  for split in 0..=input.len() {
+    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut output = stream.process_chunk(&input[..split]);
+    output.push_str(&stream.process_chunk(&input[split..]));
+    output.push_str(&stream.finish());
+    assert_eq!(output, expected, "split={split}");
+  }
 }
 
 // ── Inline formatting ──
@@ -781,7 +1253,426 @@ fn nested_empty_emphasis_fully_dropped() {
 
 #[test]
 fn empty_figcaption_emits_no_markers() {
+  assert_eq!(convert("<figcaption></figcaption>"), "");
+  assert_eq!(convert("<figcaption><div></div></figcaption>"), "");
   assert_eq!(convert("<figure><figcaption></figcaption></figure>"), "");
+  assert_eq!(
+    convert("Before<figcaption></figcaption>After"),
+    "BeforeAfter"
+  );
+  assert_eq!(
+    convert("Before<figcaption></figcaption> After"),
+    "Before After"
+  );
+  assert_eq!(
+    convert("Before <figcaption></figcaption>After"),
+    "Before After"
+  );
+  assert_eq!(
+    convert("<p>Before</p><figcaption></figcaption>After"),
+    "Before\n\nAfter"
+  );
+  assert_eq!(
+    convert("<ul><li>Before<figure><figcaption></figcaption></figure>After</li></ul>"),
+    "- Before After"
+  );
+}
+
+#[test]
+fn figcaption_starts_a_separate_block() {
+  assert_eq!(
+    convert("<figure><img src=\"/i.png\" alt=\"Alt\"><figcaption>Caption</figcaption></figure>"),
+    "![Alt](/i.png)\n\n*Caption*"
+  );
+  assert_eq!(
+    convert(
+      "<figure><img src=\"/i.png\" alt=\"Alt\"><span><figcaption>Caption</figcaption></span></figure>"
+    ),
+    "![Alt](/i.png)\n\n*Caption*"
+  );
+  assert_eq!(
+    convert("<ul><li><figcaption>One</figcaption></li><li>Two</li></ul>"),
+    "- *One*\n\n- Two"
+  );
+  assert_eq!(
+    convert("<ul><li><figcaption>One</figcaption></li></ul><p>After</p>"),
+    "- *One*\n\nAfter"
+  );
+  assert_eq!(
+    convert("<ul><li><figcaption>One</figcaption><blockquote>Quote</blockquote></li></ul>"),
+    "- *One*\n\n  > Quote"
+  );
+  assert_eq!(
+    convert(
+      "<ul><li><figure><figcaption>Caption</figcaption><img src=\"/i\" alt=\"A\"></figure></li></ul>"
+    ),
+    "- *Caption*\n\n  ![A](/i)"
+  );
+  assert_eq!(
+    convert("<ul><li><figcaption>Outer</figcaption><ul><li>Inner</li></ul></li></ul>"),
+    "- *Outer*\n\n  - Inner"
+  );
+  assert_eq!(
+    convert("<ul><li>Before<figcaption> Caption </figcaption>After</li></ul>"),
+    "- Before\n\n  *Caption*\n\n  After"
+  );
+  assert_eq!(
+    convert("<ul><li>Before <figcaption> Caption </figcaption> After</li></ul>"),
+    "- Before\n\n  *Caption*\n\n  After"
+  );
+  assert_eq!(
+    convert("<ul><li><figcaption>x</figcaption><span> After</span></li></ul>"),
+    "- *x*\n\n  After"
+  );
+  assert_eq!(
+    convert("Before <figcaption> Caption </figcaption> After"),
+    "Before\n\n*Caption*\n\nAfter"
+  );
+  assert_eq!(
+    convert("<blockquote>Before <figcaption> Caption </figcaption> After</blockquote>"),
+    "> Before\n>\n> *Caption*\n>\n> After"
+  );
+  assert_eq!(
+    convert("<blockquote>x<p></p> After</blockquote>"),
+    "> x\n>\n>  After"
+  );
+  assert_eq!(
+    convert("<figcaption><span> Caption</span></figcaption>"),
+    "*Caption*"
+  );
+  assert_eq!(
+    convert("<figcaption><div> Caption</div></figcaption>"),
+    "*Caption*"
+  );
+  assert_eq!(
+    convert("<figcaption>One*<span> Two</span></figcaption>"),
+    "*One\\* Two*"
+  );
+  assert_eq!(convert("<figcaption><br>x</figcaption>"), "*x*");
+  assert_eq!(convert_text("A<figcaption><br>x</figcaption>"), "A\nx");
+  assert_eq!(
+    convert("<figcaption><blockquote>x</blockquote></figcaption>"),
+    "> *x*"
+  );
+  assert_eq!(
+    convert("<pre><figcaption>text</figcaption></pre>"),
+    "```\ntext\n```"
+  );
+  assert_eq!(convert("<pre><figcaption> \n </figcaption></pre>"), "");
+  assert_eq!(
+    convert("<pre><figcaption><code>x</code></figcaption></pre>"),
+    "```\nx\n```"
+  );
+  assert_eq!(
+    html_to_markdown(
+      "<pre><code class=\"language-js\">x</code></pre>",
+      HTMLToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          tag_overrides: Some(vec![(
+            "code".to_string(),
+            TagOverrideConfig {
+              enter: Some("^".to_string()),
+              exit: Some("$".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+    "```js\n^x$\n```"
+  );
+  assert_eq!(convert("a<br><figcaption>b</figcaption>"), "a  \n\n*b*");
+  assert_eq!(
+    convert("<figcaption>x</figcaption><em>b</em>"),
+    "*x*\n\n*b*"
+  );
+  assert_eq!(
+    convert(
+      r#"<figure><img src="i" alt="A"><figcaption><a href="x">Source</a></figcaption></figure>"#
+    ),
+    "![A](i)\n\n*[Source](x)*"
+  );
+  assert_eq!(
+    convert("Before<figcaption><em></em><br>x</figcaption>"),
+    "Before  \n*x*"
+  );
+  assert_eq!(
+    convert("<figcaption><a href=\"/x\"></a> x</figcaption>"),
+    "*[](/x)x*"
+  );
+  assert_eq!(
+    convert("<figcaption><a href=\"/x\">a</a> x</figcaption>"),
+    "*[a](/x) x*"
+  );
+  assert_eq!(
+    convert_with_clean(
+      r##"<figcaption><a href="#"></a><blockquote>x</blockquote></figcaption>"##,
+      mdream::types::CleanConfig {
+        empty_links: true,
+        ..Default::default()
+      },
+    ),
+    "> *x*"
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"<figure><img src="i" alt="A"><figcaption><a href="x"><br></a>Caption</figcaption></figure>"#,
+      mdream::types::CleanConfig {
+        empty_link_text: true,
+        ..Default::default()
+      },
+    ),
+    "![A](i)\n\n*Caption*"
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"A<figcaption><img src="i"></figcaption>B"#,
+      mdream::types::CleanConfig {
+        empty_images: true,
+        ..Default::default()
+      },
+    ),
+    "AB"
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"A<figcaption><img src="i" alt=" "></figcaption>B"#,
+      mdream::types::CleanConfig {
+        empty_images: true,
+        ..Default::default()
+      },
+    ),
+    "AB"
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"<figcaption><em><a href="x"><br></a></em></figcaption>"#,
+      mdream::types::CleanConfig {
+        empty_link_text: true,
+        ..Default::default()
+      },
+    ),
+    ""
+  );
+  assert_eq!(
+    convert_with_clean(
+      r#"<figcaption><em><a href="x"></a></em>x</figcaption>"#,
+      mdream::types::CleanConfig {
+        empty_link_text: true,
+        ..Default::default()
+      },
+    ),
+    "*x*"
+  );
+  assert_eq!(
+    convert(r#"<figcaption><a href="x"><br></a>x</figcaption>"#),
+    "*[  \n](x)x*"
+  );
+  assert_eq!(convert("a <figcaption><br>x</figcaption>"), "a  \n*x*");
+  assert_eq!(convert("a<figcaption><br></figcaption> b"), "a  \nb");
+  assert_eq!(
+    convert("<figcaption><pre>x</pre></figcaption>"),
+    "*```\nx\n```*"
+  );
+  assert_eq!(convert("<pre><figcaption><em></em></figcaption></pre>"), "");
+  assert_eq!(
+    convert_with_clean(
+      r#"<figcaption><a href="/x"></a><blockquote>x</blockquote></figcaption>"#,
+      mdream::types::CleanConfig {
+        empty_link_text: true,
+        ..Default::default()
+      },
+    ),
+    "> *x*"
+  );
+  assert_eq!(
+    convert("<blockquote><figcaption><br>x</figcaption></blockquote>"),
+    ">   \n> *x*"
+  );
+  assert_eq!(
+    convert("<table><tr><td><figure><figcaption><br>x</figcaption></figure></td></tr></table>"),
+    "| *<br>x* |\n| --- |"
+  );
+  assert_eq!(
+    convert("<ul><li><em>x</em><p></p><blockquote>q</blockquote></li></ul>"),
+    "- *x*\n\n  \n  > q"
+  );
+}
+
+#[test]
+fn figcaption_does_not_split_an_enclosing_link() {
+  let figure = "<a href=\"/x\"><figure><img src=\"/i\" alt=\"A\"><figcaption>Caption</figcaption></figure></a>";
+  assert_eq!(convert(figure), "[![A](/i)*Caption*](/x)");
+  assert_eq!(
+    convert(&format!("<ul><li>{figure}</li></ul>")),
+    "- [![A](/i)*Caption*](/x)"
+  );
+}
+
+#[test]
+fn figcaption_materializes_before_exit_only_child_output() {
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "div".to_string(),
+        TagOverrideConfig {
+          exit: Some("X".to_string()),
+          spacing: Some([0, 0]),
+          is_inline: Some(true),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown("Before<figcaption><div></div></figcaption>After", options,),
+    "Before\n\n*X*\n\nAfter"
+  );
+}
+
+#[test]
+fn figcaption_honors_spacing_override() {
+  for (spacing, expected) in [
+    ([0, 0], "Before*Caption*After"),
+    ([1, 1], "Before\n*Caption*\nAfter"),
+  ] {
+    let options = HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "figcaption".to_string(),
+          TagOverrideConfig {
+            spacing: Some(spacing),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown("Before<figcaption>Caption</figcaption>After", options,),
+      expected,
+      "spacing={spacing:?}"
+    );
+  }
+}
+
+#[test]
+fn literal_figcaption_override_uses_caption_spacing_lifecycle() {
+  for (spacing, expected) in [
+    ([0, 0], "Before^Caption$After"),
+    ([1, 1], "Before\n^Caption$\nAfter"),
+  ] {
+    let options = HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "figcaption".to_string(),
+          TagOverrideConfig {
+            enter: Some("^".to_string()),
+            exit: Some("$".to_string()),
+            spacing: Some(spacing),
+            is_inline: Some(true),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown("Before<figcaption>Caption</figcaption>After", options),
+      expected,
+      "spacing={spacing:?}"
+    );
+  }
+}
+
+#[test]
+fn literal_figcaption_spacing_is_suppressed_by_owners() {
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "figcaption".to_string(),
+        TagOverrideConfig {
+          enter: Some("^".to_string()),
+          exit: Some("$".to_string()),
+          spacing: Some([1, 1]),
+          is_inline: Some(true),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      "<a href=/x>Before<figcaption>Caption</figcaption>After</a>",
+      "[Before^Caption$After](/x)",
+    ),
+    (
+      "<em>Before<figcaption>Caption</figcaption>After</em>",
+      "*Before^Caption$After*",
+    ),
+    (
+      "<table><tr><td>Before<figcaption>Caption</figcaption>After</td></tr></table>",
+      "| Before^Caption$After |\n| --- |",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+  }
+}
+
+#[test]
+fn literal_overrides_flush_pending_pre_fence() {
+  for (tag, config, expected) in [
+    (
+      "em",
+      TagOverrideConfig {
+        enter: Some("^".to_string()),
+        ..Default::default()
+      },
+      "```\n^x\n```",
+    ),
+    (
+      "em",
+      TagOverrideConfig {
+        exit: Some("$".to_string()),
+        ..Default::default()
+      },
+      "```\n$x\n```",
+    ),
+    (
+      "figcaption",
+      TagOverrideConfig {
+        enter: Some("^".to_string()),
+        ..Default::default()
+      },
+      "```\n^x\n```",
+    ),
+    (
+      "figcaption",
+      TagOverrideConfig {
+        exit: Some("$".to_string()),
+        ..Default::default()
+      },
+      "```\n$x\n```",
+    ),
+  ] {
+    let options = HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(tag.to_string(), config)]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let html = format!("<pre><{tag}></{tag}>x</pre>");
+    assert_eq!(html_to_markdown(&html, options), expected, "{html}");
+  }
 }
 
 #[test]
@@ -1616,6 +2507,16 @@ fn pre_code_block_unchanged() {
   assert_eq!(
     convert(r#"<pre><code class="language-js">const x = 1</code></pre>"#),
     "```js\nconst x = 1\n```"
+  );
+  assert_eq!(
+    convert(r#"<pre class="language-py"><span><code class="language-js">x</code></span></pre>"#),
+    "```py\nx\n```"
+  );
+  assert_eq!(
+    convert(
+      r#"<pre class="language-py"><figcaption><code class="language-js">x</code></figcaption></pre>"#
+    ),
+    "```py\nx\n```"
   );
 }
 
@@ -2634,6 +3535,14 @@ fn clean_strips_broken_fragment() {
 }
 
 #[test]
+fn clean_strips_broken_titled_fragment() {
+  assert_eq!(
+    convert_with_clean(r##"<a href="#missing" title="T">x</a>"##, clean_all()),
+    "x"
+  );
+}
+
+#[test]
 fn clean_keeps_valid_fragment() {
   assert_eq!(
     convert_with_clean(
@@ -2645,6 +3554,17 @@ fn clean_keeps_valid_fragment() {
 }
 
 #[test]
+fn clean_keeps_valid_fragment_with_title() {
+  assert_eq!(
+    convert_with_clean(
+      r##"<h2>My Section</h2><a href="#my-section" title="Jump">Link</a>"##,
+      clean_all(),
+    ),
+    "## My Section\n\n[Link](#my-section \"Jump\")",
+  );
+}
+
+#[test]
 fn clean_keeps_valid_strips_broken() {
   assert_eq!(
     convert_with_clean(
@@ -2652,6 +3572,129 @@ fn clean_keeps_valid_strips_broken() {
       clean_all()
     ),
     "## Introduction\n\n[Intro](#introduction) and Missing"
+  );
+}
+
+#[test]
+fn clean_fragments_survive_output_rewrites() {
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+
+  assert_eq!(
+    convert_with_clean(
+      r##"<h2 id="b">b</h2><a href="#a"><blockquote>e<a href="#b">x</a></blockquote></a>"##,
+      clean.clone(),
+    ),
+    "## b\n\n> e [x](#b)",
+  );
+  assert_eq!(
+    convert_with_clean(
+      r##"<a href="#a"><blockquote>é<a href="#b">x</a></blockquote></a>"##,
+      clean.clone(),
+    ),
+    "> é x",
+  );
+  let html = r##"<code><pre>”yy<a href="#a"><img alt=z>"##;
+  assert_eq!(convert_with_clean(html, clean), convert(html));
+}
+
+#[test]
+fn streaming_clean_fragments_matches_one_shot() {
+  let html = r##"<h2>Section</h2><a href="#section">keep</a><a href="#missing">drop</a>"##;
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  let expected = convert_with_clean(html, clean.clone());
+
+  for split in 0..=html.len() {
+    let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+      clean: Some(clean.clone()),
+      ..Default::default()
+    });
+    let mut output = processor.process_chunk(&html[..split]);
+    output.push_str(&processor.process_chunk(&html[split..]));
+    output.push_str(&processor.finish());
+    assert_eq!(output, expected, "split={split}");
+  }
+}
+
+#[test]
+fn clean_fragments_preserve_code_text_that_looks_like_a_link() {
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  let html = r##"<pre><code><a href="#missing">[x](#y)</a></code></pre>"##;
+  assert_eq!(convert_with_clean(html, clean), convert(html));
+
+  let html = r##"<code><a href="#missing">[x](#y)</a></code>"##;
+  assert_eq!(
+    convert_with_clean(
+      html,
+      mdream::types::CleanConfig {
+        fragments: true,
+        ..Default::default()
+      }
+    ),
+    convert(html),
+  );
+}
+
+#[test]
+fn clean_fragments_scales_with_many_broken_links() {
+  let mut html = "<h2>section</h2>".repeat(20_000);
+  html.push_str(&r##"<a href="#missing">x</a>"##.repeat(20_000));
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  let started = std::time::Instant::now();
+
+  let _ = convert_with_clean(&html, clean);
+
+  // Generous because the gate is complexity, not speed: the quadratic scan this
+  // replaces takes minutes on this input, so a slow shared runner cannot flake.
+  assert!(
+    started.elapsed() < std::time::Duration::from_secs(10),
+    "fragment cleanup took {:?}",
+    started.elapsed(),
+  );
+}
+
+#[test]
+fn clean_fragments_ignore_link_syntax_in_the_link_text() {
+  let clean = mdream::types::CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  // The text carries its own `](#`, so a fixup that searched the emitted link
+  // for that marker cut the wrapper at the wrong offset.
+  assert_eq!(
+    convert_with_clean(r##"<a href="#missing">a](#b) c</a>"##, clean.clone()),
+    "a\\](#b) c",
+  );
+  assert_eq!(
+    convert_with_clean(r##"<h2>keep</h2><a href="#keep">a](#b) c</a>"##, clean),
+    "## keep\n\n[a\\](#b) c](#keep)",
+  );
+}
+
+#[test]
+fn clean_nested_anchor_state_is_independent() {
+  let clean = mdream::types::CleanConfig {
+    empty_links: true,
+    ..Default::default()
+  };
+
+  assert_eq!(
+    convert_with_clean(
+      r##"<a href="#"><blockquote>x<a href="/b">y</a></blockquote></a>"##,
+      clean,
+    ),
+    "> x [y](/b)",
   );
 }
 

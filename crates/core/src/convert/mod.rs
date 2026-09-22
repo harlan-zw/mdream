@@ -1,9 +1,9 @@
 use crate::consts::*;
 use crate::entities::{decode_html_entities, decode_html_entities_for_markdown};
 use crate::scan::{
-  DiscardedCloseTag, DiscardedCommentState, PendingTagScan, discarded_cdata_end,
-  discarded_close_tag_end, discarded_comment_end, discarded_gt, is_whitespace,
-  process_comment_or_doctype, process_tag_attributes, tag_is_complete,
+  AttrBudget, DiscardedCloseTag, DiscardedCommentState, PendingTagScan, TagCarry,
+  discarded_cdata_end, discarded_close_tag_end, discarded_comment_end, discarded_gt, is_whitespace,
+  process_comment_or_doctype, process_tag_attributes, resume_tag_attributes, tag_is_complete,
 };
 use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selector_list};
 use crate::tags::get_tag_handler;
@@ -13,7 +13,7 @@ use crate::types::{
   TagOverrideConfig, TailwindData,
 };
 use crate::url::{
-  is_autolink_uri, is_empty_link_href, is_safe_html_url, resolve_url, slugify_heading,
+  is_autolink_uri, is_data_url, is_empty_link_href, is_safe_html_url, resolve_url, slugify_heading,
 };
 use std::borrow::Cow;
 
@@ -132,12 +132,92 @@ struct CodeSpanState {
   exhausted: bool,
 }
 
+#[derive(Clone, Copy)]
+struct OpenMarker {
+  output_start: usize,
+  content_start: usize,
+  kind: u8,
+}
+
+#[derive(Clone, Copy)]
+enum CaptionState {
+  Pending,
+  Tentative {
+    output_start: usize,
+    content_start: usize,
+    restore_space: bool,
+  },
+  Committed,
+}
+
+struct DeferredBreakRun {
+  fragment: String,
+  count: usize,
+}
+
+struct StreamingBreakRun {
+  output_start: usize,
+  output_end: usize,
+  unit: String,
+  count: usize,
+}
+
+#[derive(Clone, Copy)]
+enum CaptionMaterialization {
+  Tentative,
+  Commit,
+  ExplicitCommit,
+}
+
+struct CaptionFrame {
+  state: CaptionState,
+  spacing: [u8; 2],
+  deferred_breaks: Option<DeferredBreakRun>,
+  has_internal_break: bool,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum CaptionBoundary {
+  None,
+  Pending(u8),
+  ConsumeSpace,
+}
+
 struct CodeFenceState {
   output_start: usize,
   marker_offset: usize,
   content_start: usize,
   indent: String,
   language: String,
+}
+
+#[derive(Clone, Copy, Default)]
+struct LinkOutputState {
+  bracket_pos: usize,
+  skipped: bool,
+  url_max_len: usize,
+  hold_forever: bool,
+  hold_released: bool,
+  empty_text_pending: bool,
+  /// A link `begin_link` opened and its `end_link` has not run yet. The default
+  /// (and a popped-when-empty result) is `false`, so a closed link can never be
+  /// mistaken for an enclosing one when the next link opens.
+  open: bool,
+  /// The `depth` this link's own `begin_link` ran at. An anchor exit that
+  /// never began (its enter was skipped) reads an ancestor's state instead;
+  /// the depth mismatch identifies the stale state so its bracket is never
+  /// treated as this anchor's own.
+  begin_depth: usize,
+}
+
+struct FragmentLink {
+  bracket_start: usize,
+  text_end: usize,
+  link_end: usize,
+  fragment: String,
+  /// The close was written as `](#frag "title")` instead of `](#frag)`, so the
+  /// drift check must accept a quoted title between the fragment and `)`.
+  has_title: bool,
 }
 
 #[derive(Clone)]
@@ -149,13 +229,21 @@ struct BlockquoteFrame {
 static HEADING_PREFIXES: [&str; 6] = ["# ", "## ", "### ", "#### ", "##### ", "###### "];
 
 /// Inline tags whose delimiters are suppressed inside `<pre>` (content only).
-/// The tag ids form three dense ranges plus four exceptions.
+/// The tag ids form three dense ranges plus five exceptions.
 #[inline]
 fn suppresses_formatting_in_pre(tag_id: u8) -> bool {
-  matches!(tag_id, TAG_A | TAG_KBD | TAG_S | TAG_STRIKE)
-    || (TAG_STRONG..=TAG_INS).contains(&tag_id)
+  matches!(
+    tag_id,
+    TAG_A | TAG_KBD | TAG_S | TAG_STRIKE | TAG_FIGCAPTION
+  ) || (TAG_STRONG..=TAG_INS).contains(&tag_id)
     || (TAG_ABBR..=TAG_SMALL).contains(&tag_id)
     || (TAG_U..=TAG_BDO).contains(&tag_id)
+}
+
+fn code_owns_pending_pre_fence(stack: &[ElementNode]) -> bool {
+  stack.len() >= 2
+    && stack.last().and_then(|node| node.tag_id) == Some(TAG_CODE)
+    && stack[stack.len() - 2].tag_id == Some(TAG_PRE)
 }
 
 #[inline]
@@ -496,8 +584,12 @@ pub struct ConvertState {
   first_block_parent_index: Option<usize>,
   block_parent_indices: Vec<usize>,
   parse_text_buffer: String,
-  /// Set while a start tag is known to span chunks, holding how far its `>`
-  /// search reached so the next chunk resumes instead of restarting it.
+  /// Fixed-mask path: a start tag whose bytes ran out mid-tag, holding the
+  /// attributes retained so far and the scanner state, so the raw tag is never
+  /// buffered.
+  pending_start: Option<Box<PendingStartTag>>,
+  /// `ATTR_ALL` path: how far the `>` search reached, so the next chunk resumes
+  /// it. The raw tag is carried by the caller.
   pending_tag: Option<PendingTagScan>,
   discard: Discard,
   script_text_buffer: String,
@@ -572,6 +664,8 @@ pub struct ConvertState {
   /// delimiters close before the separator and streaming output has no
   /// speculative trailing whitespace.
   pending_inline_whitespace: bool,
+  /// Deferred spacing after a committed figcaption.
+  caption_boundary: CaptionBoundary,
 
   // Streaming
   last_yielded_length: usize,
@@ -599,22 +693,21 @@ pub struct ConvertState {
 
   // Clean mode — bitmask for zero-cost when disabled
   clean_flags: u8,
-  /// Set when current TAG_A has a meaningless href and should be rendered as plain text
-  skip_current_link: bool,
-  /// Buffer position of the `[` character written for TAG_A enter
-  link_bracket_pos: usize,
-  /// Upper bound on the resolved href length used by equality rewrites.
-  /// Overestimation delays release; underestimation could change output.
-  link_url_max_len: usize,
-  /// A close-time rewrite can reach back without a bounded distance.
-  link_hold_forever: bool,
-  /// A yield or drain boundary has passed `link_bracket_pos`.
-  link_hold_released: bool,
-  /// Closing the link may still truncate an empty label at its bracket.
-  link_empty_text_pending: bool,
+  /// The current raw-HTML anchor emitted its built-in safe opening tag.
+  raw_html_link_open: bool,
+  /// Output state for the active anchor and its malformed nested parents.
+  link: LinkOutputState,
+  parent_links: Vec<LinkOutputState>,
+  /// Deferred caption break counts/flags before an empty-text-cleanable link.
+  link_caption_break_snapshot: Vec<(usize, bool)>,
+  link_caption_break_snapshot_active: bool,
   pub(crate) streaming: bool,
-  /// Open inline markers as (kind, output start, content start); lets the exit drop empty pairs.
-  open_markers: Vec<(u8, usize, usize)>,
+  /// Open inline markers retained until visible content makes them permanent.
+  open_markers: Vec<OpenMarker>,
+  /// Figcaptions defer their opener until content commits the caption.
+  caption_frames: Vec<CaptionFrame>,
+  /// Unresolved trailing hard breaks retain one physical representative.
+  streaming_break_runs: Vec<StreamingBreakRun>,
   /// Open code spans and fenced blocks stay buffered until their closing
   /// delimiter can be chosen from the complete literal content.
   code_spans: Vec<CodeSpanState>,
@@ -627,9 +720,8 @@ pub struct ConvertState {
   blockquote_scratch: String,
   /// Heading slugs collected during conversion for fragment validation
   heading_slugs: Vec<String>,
-  /// Fragment link locations: (bracket_start, link_end)
-  /// Fragment slug is derived from buffer at fixup time
-  fragment_links: Vec<(usize, usize)>,
+  /// Emitted fragment links retained until all heading slugs are known.
+  fragment_links: Vec<FragmentLink>,
   /// Whether we're inside a heading (for slug collection)
   in_heading: bool,
   /// Buffer position at heading start (for extracting heading text)
@@ -726,6 +818,7 @@ impl ConvertState {
       first_block_parent_index: None,
       block_parent_indices: Vec::with_capacity(16),
       parse_text_buffer: String::new(),
+      pending_start: None,
       pending_tag: None,
       discard: Discard::No,
       script_text_buffer: String::new(),
@@ -783,6 +876,7 @@ impl ConvertState {
       has_last_text_node: false,
       last_node_is_inline: false,
       pending_inline_whitespace: false,
+      caption_boundary: CaptionBoundary::None,
       last_yielded_length: 0,
       has_streamed_output: false,
       flushed_tail: [b'\n'; 2],
@@ -796,14 +890,15 @@ impl ConvertState {
       plain_text,
       preserve_leading_whitespace: false,
       clean_flags: 0,
-      skip_current_link: false,
-      link_bracket_pos: 0,
-      link_url_max_len: 0,
-      link_hold_forever: false,
-      link_hold_released: false,
-      link_empty_text_pending: false,
+      raw_html_link_open: false,
+      link: LinkOutputState::default(),
+      parent_links: Vec::new(),
+      link_caption_break_snapshot: Vec::new(),
+      link_caption_break_snapshot_active: false,
       streaming: false,
       open_markers: Vec::new(),
+      caption_frames: Vec::new(),
+      streaming_break_runs: Vec::new(),
       code_spans: Vec::new(),
       code_fence: None,
       blockquotes: Vec::with_capacity(4),
@@ -1035,6 +1130,10 @@ impl ConvertState {
     // and escaped `text_buffer` (which would be re-escaped, multiplying `\`).
     let mut run_start = 0usize;
     let mut carry = false;
+    // Set with `carry` when the carried prefix is inherently short - a
+    // declaration opener, or a name that could still be a builtin - so the cap
+    // does not drop a token holding no payload yet.
+    let mut carry_bounded = false;
 
     // Mid-token from a previous chunk: keep dropping until its end is found.
     if !matches!(self.discard, Discard::No) {
@@ -1060,6 +1159,43 @@ impl ConvertState {
       i = end;
     }
 
+    // A start tag that ran past the end of the previous chunk. Its bytes were
+    // consumed there, so it continues from the carried scanner state rather
+    // than being re-read from `<`.
+    if let Some(mut pending) = self.pending_start.take() {
+      let tag_handler = pending.tag_id.and_then(get_tag_handler);
+      let resume = resume_tag_attributes(
+        chunk,
+        tag_handler.is_some_and(|handler| handler.is_self_closing),
+        self.attr_mask(tag_handler),
+        &mut pending.carry,
+        &mut pending.attrs,
+      );
+      if !resume.complete {
+        self.pending_start = Some(pending);
+        self.parse_text_buffer = text_buffer;
+        return chunk_length;
+      }
+      i = resume.new_position;
+      self.attr_scratch = std::mem::take(&mut pending.attrs);
+      let result = self.apply_opening_tag(
+        pending.name(),
+        pending.tag_id,
+        pending.is_builtin,
+        i,
+        resume.self_closing,
+        pending.carry.budget.overflow,
+      );
+      if !result.skip {
+        if result.self_closing {
+          self.close_node();
+          self.just_closed_tag = true;
+        } else {
+          self.is_first_text_in_element = true;
+        }
+      }
+    }
+
     if self
       .stack
       .last()
@@ -1067,9 +1203,11 @@ impl ConvertState {
     {
       match self.process_script_chunk(chunk, i) {
         ScriptChunk::Closed(close_index) => i = close_index,
+        // Only the partial `</scr…` is carried, never the script text.
         ScriptChunk::Carry(from) => {
           run_start = from;
           carry = true;
+          carry_bounded = true;
           i = chunk_length;
         }
       }
@@ -1271,6 +1409,7 @@ impl ConvertState {
             // Text before the `<` is already buffered; carry only the partial close.
             run_start = i;
             carry = true;
+            carry_bounded = true;
             break;
           }
           if raw_name.eq_ignore_ascii_case(peek_name) {
@@ -1282,6 +1421,7 @@ impl ConvertState {
             } else {
               self.rawtext_end_tag_pending = true;
               carry = true;
+              carry_bounded = result.bounded_prefix;
               break;
             }
             continue;
@@ -1321,6 +1461,7 @@ impl ConvertState {
           {
             run_start = i;
             carry = true;
+            carry_bounded = true;
             break;
           }
           let peek_tag_id = crate::consts::get_tag_id_ci_bytes(peek_name.as_bytes());
@@ -1334,6 +1475,7 @@ impl ConvertState {
             } else {
               self.rawtext_end_tag_pending = true;
               carry = true;
+              carry_bounded = result.bounded_prefix;
               break;
             }
             continue;
@@ -1389,6 +1531,7 @@ impl ConvertState {
           // Chunk boundary fell inside the `<![CDATA[` opener.
           run_start = i;
           carry = true;
+          carry_bounded = true;
           break;
         }
         self.complete_text_node(&mut text_buffer);
@@ -1400,6 +1543,8 @@ impl ConvertState {
           }
           i = result.new_position;
         } else {
+          // An ambiguous `<!--` opener is kept; a comment body is payload.
+          carry_bounded = remaining.len() < "<!--".len() && "<!--".starts_with(remaining);
           carry = true;
           break;
         }
@@ -1411,6 +1556,7 @@ impl ConvertState {
           i = result.new_position;
         } else {
           carry = true;
+          carry_bounded = result.bounded_prefix;
           break;
         }
       } else if !next.is_ascii_alphabetic() && next != QUESTION_CHAR {
@@ -1445,6 +1591,9 @@ impl ConvertState {
         let Some(tag_name_end) = tag_name_end else {
           run_start = i;
           carry = true;
+          // A builtin start tag is kept whatever the cap; a longer name is
+          // provably custom, so it is payload.
+          carry_bounded = chunk_length - tag_name_start <= MAX_BUILTIN_TAG_NAME;
           break;
         };
         let tag_name_raw = &chunk[tag_name_start..tag_name_end];
@@ -1453,7 +1602,12 @@ impl ConvertState {
         // lowercase allocation entirely. Only fall back to a Cow when
         // the override path actually needs the lowercased name.
         let builtin_tag_id = crate::consts::get_tag_id_ci_bytes(tag_name_raw.as_bytes());
-        let tag_name: Cow<str> = if builtin_tag_id.is_some() {
+        // Dropped with its tag before it is normalized or owned. Measured as the
+        // raw tag `<name>`, so the cut matches the uncapped raw-length rule.
+        let oversized_name = max_node_bytes != 0
+          && builtin_tag_id.is_none()
+          && tag_name_raw.len() + "<>".len() > max_node_bytes;
+        let tag_name: Cow<str> = if builtin_tag_id.is_some() || oversized_name {
           Cow::Borrowed(tag_name_raw)
         } else if tag_name_raw.bytes().any(|b| b.is_ascii_uppercase()) {
           Cow::Owned(tag_name_raw.to_ascii_lowercase())
@@ -1481,33 +1635,27 @@ impl ConvertState {
         self.complete_text_node(&mut text_buffer);
         run_start = i;
 
-        // `process_opening_tag` throws away everything it parsed when the tag
-        // is incomplete, so resume the `>` search instead of re-parsing it.
-        let mut tag_end = if let Some(mut pending) = self.pending_tag {
-          let Some(gt) = tag_is_complete(chunk, i2, &mut pending) else {
-            self.pending_tag = Some(pending);
+        // Under `ATTR_ALL` nothing is unwanted, so a retained-byte budget would
+        // undercount; an oversized custom name is itself the payload. Both fall
+        // back to measuring the raw tag. Uncapped there is nothing to measure,
+        // so the pre-scan would only re-read what the parser is about to.
+        let raw_guard = max_node_bytes != 0 && (self.attrs_force_all || oversized_name);
+        // No tag outruns the bytes left in the chunk, so a cap at or above that
+        // remainder cannot fire. A parked scan still resumes.
+        if raw_guard && (self.pending_tag.is_some() || chunk_length - i > max_node_bytes) {
+          // Classify before the retaining parser runs: it accumulates a wanted
+          // value as it goes, so an incomplete tag would build payload-sized
+          // state only to discard it. This scan retains nothing.
+          let mut scan = self.pending_tag.unwrap_or_else(PendingTagScan::new);
+          let Some(gt) = tag_is_complete(chunk, i2, &mut scan) else {
+            self.pending_tag = Some(scan);
             carry = true;
             break;
           };
           self.pending_tag = None;
-          Some(gt)
-        } else {
-          None
-        };
-
-        // Drop a tag past the cap on its own length, not on whether a chunk
-        // boundary happened to split it: an emitted attribute like `href` must
-        // not survive whole in one chunk yet vanish in two. No tag can outrun the
-        // bytes left in the chunk, so that comparison keeps the scan off the hot
-        // path whenever the cap exceeds the chunk size.
-        if max_node_bytes != 0 && chunk_length - i > max_node_bytes {
-          if tag_end.is_none() {
-            let mut scan = PendingTagScan::new();
-            tag_end = tag_is_complete(chunk, i2, &mut scan);
-          }
-          if let Some(gt) = tag_end
-            && gt + 1 - i > max_node_bytes
-          {
+          // Measured on the tag's own length so a chunk boundary cannot decide
+          // whether an `href` survives.
+          if gt + 1 - i > max_node_bytes {
             self.truncated = true;
             i = gt + 1;
             continue;
@@ -1528,21 +1676,28 @@ impl ConvertState {
             if builtin_tag_id == Some(TAG_SCRIPT) {
               match self.process_script_chunk(chunk, i) {
                 ScriptChunk::Closed(close_index) => i = close_index,
+                // Only the partial `</scr…` is carried, never the script text.
                 ScriptChunk::Carry(from) => {
-                  // Carry the raw script tail (from the partial close tag, or
-                  // nothing when fully consumed) into the next chunk.
                   run_start = from;
                   carry = true;
+                  carry_bounded = true;
                   break;
                 }
               }
             }
           }
-        } else {
-          // Incomplete opening tag. The next chunk resumes the `>` search from
-          // here rather than re-parsing the tag from '<'.
+        } else if raw_guard {
+          // Unmeasured, so the raw tag goes back to the caller and what the
+          // parser retained is dropped rather than carried twice.
+          if let Some(pending) = self.pending_start.take() {
+            self.attr_scratch = pending.attrs;
+            self.attr_scratch.clear();
+          }
           self.pending_tag = Some(PendingTagScan::new());
           carry = true;
+          break;
+        } else {
+          // The scan is parked in `pending_start`; the bytes are consumed.
           break;
         }
       }
@@ -1553,12 +1708,7 @@ impl ConvertState {
     // run is kept in `text_buffer` instead, so it is parsed once however many
     // chunks it spans.
     let consumed = if carry {
-      let carried = &chunk[run_start..];
-      // Keep an ambiguous markup-declaration opener until it can be classified.
-      // Both prefixes are fixed-size, so this retains at most eight bytes.
-      let partial_declaration = (carried.len() < "<!--".len() && "<!--".starts_with(carried))
-        || (carried.len() < "<![CDATA[".len() && "<![CDATA[".starts_with(carried));
-      if max_node_bytes != 0 && chunk_length - run_start > max_node_bytes && !partial_declaration {
+      if max_node_bytes != 0 && chunk_length - run_start > max_node_bytes && !carry_bounded {
         self.complete_text_node(&mut text_buffer);
         self.start_discard(chunk, run_start);
         chunk_length
@@ -1651,7 +1801,7 @@ impl ConvertState {
     // ASCII whitespace only, as everywhere else: U+00A0 is content, and the
     // streaming path cannot un-send a nbsp it has already yielded.
     let trimmed_end_len = trim_ascii_whitespace_end(&self.buffer);
-    self.buffer.truncate(trimmed_end_len);
+    self.truncate_buffer(trimmed_end_len);
     let start = if self.preserve_leading_whitespace {
       0
     } else {
@@ -1659,28 +1809,33 @@ impl ConvertState {
     };
     if start > 0 {
       self.buffer.drain(..start);
+      self
+        .streaming_break_runs
+        .retain(|run| run.output_end > start);
+      for run in &mut self.streaming_break_runs {
+        run.output_start = run.output_start.saturating_sub(start);
+        run.output_end -= start;
+      }
     }
 
-    // Apply clean.fragments using recorded positions: a link whose #fragment
-    // matches no heading keeps its text and loses its target.
+    // Apply clean.fragments using recorded positions. Removing only each broken
+    // link's wrappers preserves nested link text without repeatedly shifting the
+    // whole output buffer.
     if self.clean_flags & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
       let trim_offset = start;
       // A specialized heap sort avoids pulling Rust's larger generic sort into WASM.
       heap_sort_heading_slugs(&mut self.heading_slugs);
 
-      // Only deletes, so it compacts in place: `write` trails `read` by bytes
-      // dropped so far. A clean document never writes a byte; rebuilding into
-      // a second String cost 7.2 MB on the spec page.
-      let buf_len = self.buffer.len();
-      let mut read = 0usize;
-      let mut write = 0usize;
-
       // A nested `<a>` across a block boundary reuses the outer anchor's
-      // link_bracket_pos instead of getting its own `[`, so two
+      // bracket position instead of getting its own `[`, so two
       // fragment_links entries can point at the same bracket. Rewriting
       // either one then risks corrupting the other's text. Skip any bracket
       // used more than once.
-      let mut bracket_starts: Vec<usize> = self.fragment_links.iter().map(|&(b, _)| b).collect();
+      let mut bracket_starts: Vec<usize> = self
+        .fragment_links
+        .iter()
+        .map(|link| link.bracket_start)
+        .collect();
       bracket_starts.sort_unstable();
       let has_aliased_bracket = |bracket_start: usize| {
         let Ok(idx) = bracket_starts.binary_search(&bracket_start) else {
@@ -1690,70 +1845,120 @@ impl ConvertState {
           || (idx + 1 < bracket_starts.len() && bracket_starts[idx + 1] == bracket_start)
       };
 
-      for &(bracket_start, link_end) in &self.fragment_links {
-        let adj_start = bracket_start.saturating_sub(trim_offset);
-        let adj_end = link_end.saturating_sub(trim_offset);
-        // `read > adj_start` would mean overlapping links (anchors can't
-        // nest); skipping keeps the compaction from reading overwritten bytes.
-        if adj_end > buf_len || adj_start >= adj_end || read > adj_start {
+      let mut removals = Vec::with_capacity(self.fragment_links.len());
+      for link in &self.fragment_links {
+        if has_aliased_bracket(link.bracket_start) {
           continue;
         }
-        if has_aliased_bracket(bracket_start) {
+        let bracket_start = link.bracket_start.saturating_sub(trim_offset);
+        let text_end = link.text_end.saturating_sub(trim_offset);
+        let link_end = link.link_end.saturating_sub(trim_offset);
+        // A shifted buffer can leave a recorded range pointing at bytes that
+        // still look like `[..]..)` without belonging to this link. Only an
+        // exact `](#fragment)` tail proves the entry survived every rewrite
+        // intact; anything else is left untouched so the normal cursor flow
+        // copies its bytes verbatim instead of deleting them.
+        if link_end > self.buffer.len()
+          || bracket_start >= text_end
+          || text_end >= link_end
+          || !self.buffer.is_char_boundary(bracket_start)
+          || !self.buffer.is_char_boundary(text_end)
+          || !self.buffer.is_char_boundary(link_end)
+          || self.buffer.as_bytes().get(bracket_start) != Some(&b'[')
+          || !self.buffer[text_end..link_end].starts_with("](")
+          || !self.buffer[text_end..link_end].ends_with(')')
+        {
           continue;
         }
-        if !self.buffer.is_char_boundary(adj_start) || !self.buffer.is_char_boundary(adj_end) {
-          continue;
-        }
-
-        let range = &self.buffer[adj_start..adj_end];
-        let Some(hash_pos) = range.find("](#") else {
-          continue; // not a fragment link pattern, keep as-is
+        // `](#fragment)` exactly, or the titled close `](#fragment "title")`
+        // recorded by `has_title`: fragment bytes followed by a space, an open
+        // quote and a closing quote before the final `)`. The title itself is
+        // not compared, only its shape, so escaped titles still match.
+        let fragment = link.fragment.as_str();
+        let fragment_end = text_end + 3 + fragment.len();
+        let matched = if link.has_title {
+          let bytes = self.buffer.as_bytes();
+          Some(&b' ') == bytes.get(fragment_end)
+            && Some(&b'"') == bytes.get(fragment_end + 1)
+            && Some(&b'"') == bytes.get(link_end - 2)
+            && &self.buffer[text_end + 3..fragment_end] == fragment
+        } else {
+          link_end - text_end == fragment.len() + 4
+            && &self.buffer[text_end + 3..link_end - 1] == fragment
         };
-        // A link with no text has nothing to rewrite to, so leave it whole.
-        if hash_pos == 0 {
+        if !matched {
           continue;
         }
-        let frag_start = hash_pos + 3; // skip ](#
-        let frag_end = range.len() - 1; // skip trailing )
-        if frag_start < frag_end {
-          let fragment = &range[frag_start..frag_end];
-          if contains_sorted_heading_slug(&self.heading_slugs, fragment) {
-            continue; // resolves to a heading, keep the link whole
-          }
+        if contains_sorted_heading_slug(&self.heading_slugs, fragment) {
+          continue; // resolves to a heading, keep the link whole
         }
-
-        // The recorded start can drift off the `[` when other rewrites shift
-        // the buffer; only a real `[text](#frag)` shape is safe to slice and
-        // rewrite. A drifted entry is left untouched: skipping it here lets
-        // the normal cursor flow copy its bytes verbatim instead of deleting
-        // them.
-        if !range.starts_with('[') {
-          continue;
-        }
-        // SAFETY: both moved runs are whole slices delimited by the ASCII
-        // `[` and `](#` markers, so every char boundary is preserved.
-        #[allow(unsafe_code)]
-        let bytes = unsafe { self.buffer.as_mut_vec() };
-        if read < adj_start {
-          bytes.copy_within(read..adj_start, write);
-          write += adj_start - read;
-        }
-        bytes.copy_within(adj_start + 1..adj_start + hash_pos, write);
-        write += hash_pos - 1;
-        read = adj_end;
+        removals.push((bracket_start, bracket_start + 1));
+        removals.push((text_end, link_end));
       }
 
-      // `read` only advances past a dropped link, so zero means nothing changed.
+      // Links are recorded at their close, so a link lands after the ones
+      // it wraps. Only nesting breaks the ascending order, and element depth
+      // is capped, so this insertion pass costs one comparison per entry on
+      // flat documents. It also keeps the generic sort, ~11 kB of wasm, out
+      // of the binary.
+      for index in 1..removals.len() {
+        let entry = removals[index];
+        let mut slot = index;
+        while slot > 0 && removals[slot - 1].0 > entry.0 {
+          removals[slot] = removals[slot - 1];
+          slot -= 1;
+        }
+        removals[slot] = entry;
+      }
+
+      // Only deletes, so it compacts in place: `write` trails `read` by bytes
+      // dropped so far. A clean document never writes a byte; rebuilding into
+      // a second String cost 7.2 MB on the spec page.
+      let buf_len = self.buffer.len();
+      let mut read = 0usize;
+      let mut write = 0usize;
+      // SAFETY: every removal boundary sits on validated ASCII `[`, `]` or `)`
+      // delimiters, so moving whole runs cannot split a UTF-8 sequence.
+      #[allow(unsafe_code)]
+      let bytes = unsafe { self.buffer.as_mut_vec() };
+      for (remove_start, remove_end) in &removals {
+        // A duplicate range (an aliased bracket shared with a nested anchor)
+        // is already dropped; skip it without copying.
+        if *remove_end <= read {
+          continue;
+        }
+        if *remove_start > read {
+          bytes.copy_within(read..*remove_start, write);
+          write += *remove_start - read;
+        }
+        read = *remove_end;
+      }
+      // `read` only advances past a dropped run, so zero means nothing changed.
       if read > 0 {
-        // SAFETY: as above; the surviving tail is moved whole.
-        #[allow(unsafe_code)]
-        let bytes = unsafe { self.buffer.as_mut_vec() };
         if read < buf_len {
           bytes.copy_within(read..buf_len, write);
           write += buf_len - read;
         }
         bytes.truncate(write);
       }
+    }
+    if !self.streaming_break_runs.is_empty() {
+      let extra_len = self.streaming_break_runs.iter().fold(0usize, |total, run| {
+        total.saturating_add(run.unit.len().saturating_mul(run.count.saturating_sub(1)))
+      });
+      let source = std::mem::take(&mut self.buffer);
+      let mut output = String::with_capacity(source.len() + extra_len);
+      let mut cursor = 0usize;
+      for run in &self.streaming_break_runs {
+        output.push_str(&source[cursor..run.output_start]);
+        for _ in 1..run.count {
+          output.push_str(&run.unit);
+        }
+        cursor = run.output_start;
+      }
+      output.push_str(&source[cursor..]);
+      self.streaming_break_runs.clear();
+      self.buffer = output;
     }
     std::mem::take(&mut self.buffer)
   }
@@ -1775,12 +1980,15 @@ impl ConvertState {
   /// end tag, so the residual is text unless it is an appropriate end tag that
   /// already reached a tag state.
   pub fn finalize(&mut self, leftover: &str) {
-    // A token still being dropped at EOF never completed. An uncapped parse
-    // ends such a token at EOF with its own truncation report, so a dropped
-    // one that found its end earlier stays unflagged and this is the only
-    // place the abandoned ones are reported.
+    // Tokens abandoned at EOF are only reported here. A parked start tag counts
+    // just when the cap fired on it: a mask-rejected attribute is absent from an
+    // uncapped parse too, so losing it loses nothing.
     if !matches!(self.discard, Discard::No)
       || (self.options.max_node_bytes != 0 && leftover.len() > self.options.max_node_bytes)
+      || self
+        .pending_start
+        .as_ref()
+        .is_some_and(|pending| pending.carry.budget.overflow)
     {
       self.truncated = true;
     }
@@ -1847,32 +2055,34 @@ impl ConvertState {
   }
 
   #[inline]
-  fn link_hold_required(&self) -> bool {
-    if self.depth_map[TAG_A as usize] == 0 {
+  fn link_hold_required(&self, link: &LinkOutputState) -> bool {
+    if !link.open || link.hold_released {
       return false;
     }
-    if self.link_hold_released {
-      return false;
-    }
-    if self.link_hold_forever {
+    if link.hold_forever {
       return true;
     }
-    if self.link_empty_text_pending {
+    if link.empty_text_pending {
       return true;
     }
     // These may still truncate link text below the release threshold.
     if !self.open_markers.is_empty() || !self.code_spans.is_empty() {
       return true;
     }
-    let text_start = self.link_bracket_pos + 1;
+    let text_start = link.bracket_pos + 1;
     let text_end = trim_ascii_whitespace_end(&self.buffer);
-    text_end.saturating_sub(text_start) <= self.link_url_max_len
+    text_end.saturating_sub(text_start) <= link.url_max_len
   }
 
   #[inline]
   fn note_link_release(&mut self, boundary: usize) {
-    if self.depth_map[TAG_A as usize] > 0 && boundary > self.link_bracket_pos {
-      self.link_hold_released = true;
+    if self.link.open && boundary > self.link.bracket_pos {
+      self.link.hold_released = true;
+    }
+    for parent in &mut self.parent_links {
+      if boundary > parent.bracket_pos {
+        parent.hold_released = true;
+      }
     }
   }
 
@@ -1880,14 +2090,20 @@ impl ConvertState {
     if self.format == OutputFormat::Html {
       return std::mem::take(&mut self.buffer);
     }
+    if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+      return String::new();
+    }
     // Quote only what this chunk could already hand out. The tail past here is
     // still open to the trims below and to a reach-back rewrite from the next
     // chunk, and a quote prefix committed over it cannot be withdrawn. Guarded
     // so a document with no open quote does not pay for the limit every chunk.
     if self.streaming_flush_possible() {
       let mut flush_limit = trim_ascii_whitespace_end(&self.buffer);
-      if let Some(&(_, p, _)) = self.open_markers.first() {
-        flush_limit = flush_limit.min(hold_before(&self.buffer, p));
+      if let Some(marker) = self.open_markers.first() {
+        flush_limit = flush_limit.min(hold_before(&self.buffer, marker.output_start));
+      }
+      if let Some(output_start) = self.first_tentative_caption_start() {
+        flush_limit = flush_limit.min(hold_before(&self.buffer, output_start));
       }
       self.flush_streaming_blockquote_lines_upto(flush_limit);
     }
@@ -1939,8 +2155,11 @@ impl ConvertState {
     // The spaces immediately before it belong to the preceding text node: if the marker is
     // dropped (empty element) and a block boundary then trims that trailing space, a yielded
     // space would be silently removed and shift every later byte. Hold those spaces back too.
-    if let Some(&(_, p, _)) = self.open_markers.first() {
-      stable_end = stable_end.min(hold_before(&self.buffer, p));
+    if let Some(marker) = self.open_markers.first() {
+      stable_end = stable_end.min(hold_before(&self.buffer, marker.output_start));
+    }
+    if let Some(output_start) = self.first_tentative_caption_start() {
+      stable_end = stable_end.min(hold_before(&self.buffer, output_start));
     }
     if let Some(span) = self.code_spans.first() {
       stable_end = stable_end.min(hold_before(&self.buffer, span.output_start));
@@ -1952,8 +2171,8 @@ impl ConvertState {
       stable_end = stable_end.min(hold_before(&self.buffer, frame.content_start));
     }
     // Hold the bracket and preceding spaces while the close can rewrite them.
-    if self.link_hold_required() {
-      stable_end = stable_end.min(hold_before(&self.buffer, self.link_bracket_pos));
+    if let Some(bracket_pos) = self.open_link_hold_floor() {
+      stable_end = stable_end.min(hold_before(&self.buffer, bracket_pos));
     }
     // A marker still alone on its line has its separating newline inserted at
     // the line start when the item resolves, so the line stays mutable.
@@ -1977,6 +2196,16 @@ impl ConvertState {
       }
       stable_end = end;
     }
+    for run in &self.streaming_break_runs {
+      if run.output_end > stable_end
+        || !self.buffer[run.output_end..stable_end]
+          .bytes()
+          .any(|byte| !is_whitespace(byte))
+      {
+        stable_end = stable_end.min(run.output_start);
+        break;
+      }
+    }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
     let mut start = self.last_yielded_length.max(leading);
     if start >= stable_end {
@@ -1997,11 +2226,58 @@ impl ConvertState {
       return String::new();
     }
     self.note_link_release(stable_end);
-    let new_content = self.buffer[start..stable_end].to_string();
+    let extra_len = self
+      .streaming_break_runs
+      .iter()
+      .filter(|run| run.output_start >= start && run.output_end <= stable_end)
+      .fold(0usize, |total, run| {
+        total.saturating_add(run.unit.len().saturating_mul(run.count.saturating_sub(1)))
+      });
+    let new_content = if extra_len == 0 {
+      self.buffer[start..stable_end].to_string()
+    } else {
+      let mut output = String::with_capacity(stable_end - start + extra_len);
+      let mut cursor = start;
+      for run in &self.streaming_break_runs {
+        if run.output_start < start || run.output_end > stable_end {
+          continue;
+        }
+        output.push_str(&self.buffer[cursor..run.output_start]);
+        for _ in 1..run.count {
+          output.push_str(&run.unit);
+        }
+        cursor = run.output_start;
+      }
+      output.push_str(&self.buffer[cursor..stable_end]);
+      output
+    };
+    self
+      .streaming_break_runs
+      .retain(|run| run.output_end > stable_end);
     self.has_streamed_output = true;
     self.last_yielded_length = stable_end;
     self.drain_streamed_prefix();
     new_content
+  }
+
+  pub fn get_final_markdown_chunk(&mut self) -> String {
+    if !self.plain_text
+      && self.format != OutputFormat::Html
+      && self.clean_flags & CLEAN_FRAGMENTS != 0
+    {
+      self.get_markdown()
+    } else {
+      self.get_markdown_chunk()
+    }
+  }
+
+  #[inline]
+  fn open_link_hold_floor(&self) -> Option<usize> {
+    std::iter::once(&self.link)
+      .chain(&self.parent_links)
+      .filter(|link| self.link_hold_required(link))
+      .map(|link| link.bracket_pos)
+      .min()
   }
 
   /// Free already-yielded output so streaming memory stays O(window), not
@@ -2040,11 +2316,11 @@ impl ConvertState {
     }
     let mut drain_end = self.last_yielded_length.min(retained_tail_start);
     // Preserve newline context before every live reach-back point.
-    if self.link_hold_required() {
-      drain_end = drain_end.min(keep_two_before(&self.buffer, self.link_bracket_pos));
+    if let Some(bracket_pos) = self.open_link_hold_floor() {
+      drain_end = drain_end.min(keep_two_before(&self.buffer, bracket_pos));
     }
-    if let Some(&(_, output_start, _)) = self.open_markers.first() {
-      drain_end = drain_end.min(keep_two_before(&self.buffer, output_start));
+    if let Some(marker) = self.open_markers.first() {
+      drain_end = drain_end.min(keep_two_before(&self.buffer, marker.output_start));
     }
     if let Some(span) = self.code_spans.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, span.output_start));
@@ -2096,10 +2372,28 @@ impl ConvertState {
     self.note_link_release(drain_end);
     self.buffer.drain(..drain_end);
     self.last_yielded_length -= drain_end;
-    self.link_bracket_pos = self.link_bracket_pos.saturating_sub(drain_end);
-    for (_, output_start, content_start) in &mut self.open_markers {
-      *output_start -= drain_end;
-      *content_start -= drain_end;
+    self.link.bracket_pos = self.link.bracket_pos.saturating_sub(drain_end);
+    for parent in &mut self.parent_links {
+      parent.bracket_pos = parent.bracket_pos.saturating_sub(drain_end);
+    }
+    for marker in &mut self.open_markers {
+      marker.output_start -= drain_end;
+      marker.content_start -= drain_end;
+    }
+    for frame in &mut self.caption_frames {
+      if let CaptionState::Tentative {
+        output_start,
+        content_start,
+        ..
+      } = &mut frame.state
+      {
+        *output_start -= drain_end;
+        *content_start -= drain_end;
+      }
+    }
+    for run in &mut self.streaming_break_runs {
+      run.output_start -= drain_end;
+      run.output_end -= drain_end;
     }
     for span in &mut self.code_spans {
       span.output_start -= drain_end;
@@ -2208,6 +2502,31 @@ pub(crate) struct OpeningTagResult {
   skip: bool,
 }
 
+/// A start tag suspended at a chunk boundary. Its identity and the attributes
+/// the mask kept are owned here; the raw tag is not, so an unwanted attribute
+/// spanning any number of chunks costs nothing to carry.
+pub(crate) struct PendingStartTag {
+  /// Only a custom name needs owning. A builtin one is recovered from
+  /// `tag_id`, so the common split tag allocates nothing for its identity.
+  pub(crate) custom_name: Option<String>,
+  pub(crate) tag_id: Option<u8>,
+  pub(crate) is_builtin: bool,
+  pub(crate) carry: Box<TagCarry>,
+  pub(crate) attrs: crate::types::Attributes,
+}
+
+impl PendingStartTag {
+  /// The tag name, borrowed from the static table whenever it is builtin.
+  #[inline]
+  pub(crate) fn name(&self) -> &str {
+    match &self.custom_name {
+      Some(name) => name,
+      // `is_builtin` is set from `tag_id.is_some()`, so this always resolves.
+      None => TAG_NAMES[self.tag_id.unwrap_or(0) as usize],
+    }
+  }
+}
+
 /// A token that outgrew `max_node_bytes` is being dropped byte by byte; only the
 /// scanner state that finds its end is kept, so nothing accumulates.
 #[derive(Clone, Copy)]
@@ -2229,6 +2548,9 @@ enum Discard {
 pub(crate) struct CloseTagResult {
   complete: bool,
   new_position: usize,
+  /// The chunk ended inside a name short enough to be a builtin, so the
+  /// carried bytes hold no payload yet.
+  bounded_prefix: bool,
 }
 
 /// Longest prefix of `text` that fits `max` bytes without splitting a char.

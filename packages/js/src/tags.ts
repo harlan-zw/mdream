@@ -123,8 +123,8 @@ import {
   TAG_WBR,
   TAG_XMP,
 } from './const'
-import { resolveUrl } from './url'
-import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, orderedItemNumber, parseUnsignedInteger } from './utils'
+import { resolveUrl, safeAnchorOutput } from './url'
+import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
   if (!/[\t\n\f\r ()\\<>]/.test(destination))
@@ -638,6 +638,8 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (node.attributes?.href !== undefined) {
         if (stripsEmptyLink(state, node.attributes.href))
           return
+        if (isInsideRawHtmlBlock(state.depthMap!))
+          return safeAnchorOutput(node, state.options, true, true)
         return '['
       }
     },
@@ -647,6 +649,8 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
       if (stripsEmptyLink(state, node.attributes.href))
         return ''
+      if (isInsideRawHtmlBlock(state.depthMap!) && !node.tagHandler?.literalEnter)
+        return safeAnchorOutput(node, state.options, false, true)
       const href = resolveUrl(node.attributes.href, state.options?.origin, state.options?.clean)
       let title = node.attributes?.title
       // Check if title matches the last content to avoid duplication
@@ -663,15 +667,28 @@ export const tagHandlers: Record<number, TagHandler> = {
         // Sum the link-text length while scanning back for `[`, so the
         // slice/join allocation only happens when the text could equal href.
         let textLen = 0
+        let captionBracket = -1
+        let captionTextLen = 0
         while (i >= 0) {
           const entry = buf[i]!
           if (entry === '[')
             break
+          if (captionBracket < 0 && state.depthMap?.[TAG_FIGCAPTION] && entry.endsWith('*[')) {
+            captionBracket = i
+            captionTextLen = textLen
+          }
           textLen += entry.length
           i--
         }
+        const captionLink = i < 0 && captionBracket >= 0
+        if (captionLink) {
+          i = captionBracket
+          textLen = captionTextLen
+        }
         if (i >= 0 && textLen === href.length && buf.slice(i + 1).join('') === href) {
-          buf.length = i
+          if (captionLink)
+            buf[i] = buf[i]!.slice(0, -1)
+          buf.length = i + (captionLink ? 1 : 0)
           const auto = `<${href}>`
           buf.push(auto)
           state.lastContentCache = auto
@@ -687,7 +704,19 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_IMG]: {
     enter: ({ node, state }) => {
       const alt = node.attributes?.alt || ''
-      const src = resolveUrl(node.attributes?.src || '', state.options?.origin, state.options?.clean)
+      const rawSrc = node.attributes?.src || ''
+      // A data URL is unreadable and can be megabytes of base64; keep only the alt.
+      const src = isDataUrl(rawSrc) ? '' : resolveUrl(rawSrc, state.options?.origin, state.options?.clean)
+      const clean = state.options?.clean
+      const stripsEmptyImage = clean === true
+        || (clean !== undefined && clean !== false && clean.emptyImages === true)
+      if (stripsEmptyImage && !alt.trim()) {
+        if (state.depthMap?.[TAG_FIGCAPTION])
+          return undefined
+      }
+      else {
+        markRenderedChildContent(node)
+      }
       return `![${serializeImageDescription(alt)}]${serializeMarkdownResource(src, node.attributes?.title)}`
     },
     collapsesInnerWhiteSpace: true,
@@ -1144,10 +1173,8 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_FIGURE]: {},
 
   [TAG_FIGCAPTION]: {
-    enter: () => MARKDOWN_EMPHASIS,
     exit: () => MARKDOWN_EMPHASIS,
     collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
     isInline: true,
   },
 }

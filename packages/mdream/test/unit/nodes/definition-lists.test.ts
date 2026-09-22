@@ -62,6 +62,6 @@ describe.each(engines)('definition lists $name', (engineConfig) => {
         </dd>
       </dl>
     `, { engine })
-    expect(result).toBe('<dl><dt>Term with **formatting**</dt>\n<dd>Definition with [link](https://example.com)</dd>\n<dt>Another Term</dt>\n<dd>\n\nParagraph in definition\n\n- List item in definition\n\n</dd></dl>')
+    expect(result).toBe('<dl><dt>Term with **formatting**</dt>\n<dd>Definition with <a href="https://example.com">link</a></dd>\n<dt>Another Term</dt>\n<dd>\n\nParagraph in definition\n\n- List item in definition\n\n</dd></dl>')
   })
 })

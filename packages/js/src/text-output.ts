@@ -11,6 +11,7 @@ import {
   TAG_BR,
   TAG_CODE,
   TAG_DIV,
+  TAG_FIGCAPTION,
   TAG_H1,
   TAG_H6,
   TAG_IMG,
@@ -25,7 +26,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { resolveUrl } from './url'
-import { isInsideHeading, isInsideTableCell } from './utils'
+import { figcaptionOwnsBlockSpacing, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent } from './utils'
 
 interface TextState extends MdreamRuntimeState {
   options: EngineOptions
@@ -101,6 +102,29 @@ function wrapText(value: string, column: number, width: number): string {
   return output || (leading || trailing ? ' ' : '')
 }
 
+/** Blank line a caption opens and closes with, when nothing overrides it. */
+const CAPTION_SPACING = 2
+
+function trimAsciiWhitespaceStart(value: string): string {
+  let start = 0
+  while (start < value.length && value.charCodeAt(start) <= 32)
+    start++
+  return start === 0 ? value : value.slice(start)
+}
+
+function hasVisibleContent(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    if (value.charCodeAt(index) > 32)
+      return true
+  }
+  return false
+}
+
+/** Last emitted character, skipping fragments a trim emptied. */
+function charOf(code: number): string {
+  return code === -1 ? '' : String.fromCharCode(code)
+}
+
 function canWrapHere(depthMap: Uint16Array): boolean {
   if (depthMap[TAG_PRE] || depthMap[TAG_CODE] || depthMap[TAG_TD] || depthMap[TAG_TH])
     return false
@@ -144,19 +168,32 @@ function elementOutput(node: ElementNode, eventType: number, state: TextState): 
     if (node.tagId === TAG_BR)
       return '\n'
     if (node.tagId === TAG_P && (state.depthMap[TAG_BLOCKQUOTE] || (state.depthMap[TAG_LI] && !isInsideTableCell(state)))) {
-      const last = state.buffer.at(-1)?.at(-1)
-      if (last && last !== ' ' && last !== '\n')
+      const lastCode = lastOutputChar(state.buffer)
+      if (lastCode !== -1 && lastCode !== 32 && lastCode !== 10)
         return '\n\n'
     }
     if (node.tagId === TAG_TD || node.tagId === TAG_TH)
       return state.depthMap[TAG_TABLE]! > 1 || node.index === 0 ? undefined : '\t'
     if (node.tagId === TAG_IMG) {
       const alt = node.attributes.alt
-      if (alt !== undefined)
-        return alt || undefined
-      return node.attributes.title
-        || resolveUrl(node.attributes.src || '', state.options.origin, state.options.clean)
-        || undefined
+      const clean = state.options.clean
+      const stripsEmptyImage = clean === true || (clean != null && clean !== false && clean.emptyImages === true)
+      if (stripsEmptyImage && !(alt !== undefined && alt.trim().length > 0))
+        return undefined
+      const src = node.attributes.src || ''
+      // A data URL carries no readable text, so it never becomes the fallback.
+      const output = alt !== undefined
+        ? alt || undefined
+        : node.attributes.title
+          || resolveUrl(isDataUrl(src) ? '' : src, state.options.origin, state.options.clean)
+          || undefined
+      if (output && hasVisibleContent(output)) {
+        markRenderedChildContent(node)
+        // Alt text reads as its own word, so it never runs into the text before it.
+        if (lastOutputChar(state.buffer) > 32)
+          return ` ${output}`
+      }
+      return output
     }
     if (node.tagId === TAG_Q)
       return '"'
@@ -198,7 +235,7 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
         state.pendingInlineWhitespace = false
       }
       else if (firstOutput) {
-        const last = buffer.at(-1)?.at(-1)
+        const last = charOf(lastOutputChar(buffer))
         if (last && !' \n\t\r'.includes(last) && !' \n\t\r'.includes(firstOutput))
           buffer.push(' ')
         state.pendingInlineWhitespace = false
@@ -246,11 +283,47 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
   }
   let preserveLeadingWhitespace = false
   let yieldedLength = 0
+  // A caption only earns its blank-line boundary once it emits visible
+  // content, so an empty `<figcaption>` leaves the text unchanged.
+  let captionOpen = 0
+  let captionContent = false
+  let captionBreakRun = 0
+  let captionEnterSpacing = CAPTION_SPACING
+  let captionExitSpacing = CAPTION_SPACING
+  let captionClosedSpacing = 0
+
+  function pushCaptionBoundary(newlines: number): boolean {
+    if (state.buffer.length === 0 || newlines === 0)
+      return false
+    const missing = newlines - trailingNewlines(state.buffer)
+    if (missing > 0)
+      state.buffer.push('\n'.repeat(missing))
+    return true
+  }
+
+  /** True when a boundary was emitted, so the content drops its own leading space. */
+  function openCaptionBoundary(): boolean {
+    let emitted = false
+    if (captionClosedSpacing !== 0) {
+      emitted = pushCaptionBoundary(captionClosedSpacing)
+      captionClosedSpacing = 0
+    }
+    if (captionOpen > 0 && !captionContent) {
+      captionContent = true
+      if (captionBreakRun === 0)
+        emitted = pushCaptionBoundary(captionEnterSpacing) || emitted
+    }
+    return emitted
+  }
 
   function processTextNode(node: TextNode, lastNode: ElementNode | TextNode | undefined): void {
     if (node.excludedFromMarkdown || !node.value)
       return
-    const last = state.buffer.at(-1)?.at(-1) || ''
+    if (hasVisibleContent(node.value) && openCaptionBoundary()) {
+      node.value = trimAsciiWhitespaceStart(node.value)
+      state.pendingInlineWhitespace = false
+    }
+    const last = charOf(lastOutputChar(state.buffer))
     if (state.pendingInlineWhitespace) {
       if (!node.value.trim())
         return
@@ -306,8 +379,37 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
       if (!state.depthMap[TAG_PRE] && currentNewlines >= 2)
         output = undefined
       state.pendingInlineWhitespace = false
+      // A break inside an unopened caption serves as its boundary.
+      if (output && captionOpen > 0 && !captionContent)
+        captionBreakRun++
     }
+
+    const ownsCaptionSpace = element.tagId === TAG_FIGCAPTION
+      && figcaptionOwnsBlockSpacing(element, true)
+    if (ownsCaptionSpace && event.type === NodeEventEnter) {
+      // An override owns the caption spacing; otherwise a caption opens a block.
+      const override = state.options.tagOverrides?.[element.name]
+      const spacing = override && typeof override !== 'string' ? override.spacing : undefined
+      captionEnterSpacing = spacing ? spacing[0] : CAPTION_SPACING
+      captionExitSpacing = spacing ? spacing[1] : CAPTION_SPACING
+      captionOpen++
+      captionContent = false
+      captionBreakRun = 0
+    }
+    if (!ownsCaptionSpace && output && hasVisibleContent(output) && openCaptionBoundary()) {
+      output = trimAsciiWhitespaceStart(output)
+      state.pendingInlineWhitespace = false
+    }
+
     appendOutput(state, element, event.type, output)
+
+    if (ownsCaptionSpace && event.type === NodeEventExit) {
+      captionOpen--
+      if (captionContent)
+        captionClosedSpacing = captionExitSpacing
+      captionContent = false
+      captionBreakRun = 0
+    }
     state.lastNode = element
   }
 

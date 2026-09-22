@@ -435,8 +435,9 @@ impl MarkdownStream {
     };
 
     let out = self.process_decoded_bytes(&String::from_utf8_lossy(&buffer[..split]));
-    // A trailing incomplete UTF-8 sequence has at most three bytes.
-    self.tail = buffer[split..].to_vec();
+    // Drain rather than reallocate, so the tail keeps its capacity.
+    buffer.drain(..split);
+    self.tail = buffer;
     out
   }
 }

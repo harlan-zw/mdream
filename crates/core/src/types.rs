@@ -179,6 +179,7 @@ pub struct ElementNode {
   pub depth: usize,
   pub index: u32,
   pub current_walk_index: u32,
+  /// Child-content counter used by whitespace and empty-link handling.
   pub child_text_node_index: u32,
   // Small fields grouped to minimize padding
   pub tag_id: Option<u8>,
@@ -567,6 +568,10 @@ pub struct CleanConfig {
   /// Strip tracking query parameters from URLs (utm_*, fbclid, gclid, …).
   pub urls: bool,
   /// Strip fragment-only links that don't match any heading slug.
+  ///
+  /// A link can only be judged once every heading is known, so streaming holds
+  /// the whole document and returns it from `finish` instead of yielding it
+  /// chunk by chunk.
   pub fragments: bool,
   /// Strip links with meaningless or executable hrefs → plain text.
   pub empty_links: bool,
@@ -639,10 +644,19 @@ pub struct HTMLToMarkdownOptions {
   /// Cap on the bytes one construct may buffer — a text node, a tag, a comment, an
   /// open code block or inline code span, a table row's columns, or the script text
   /// an extraction reads; `0` (the default) is unlimited. Content past the cap is
-  /// **dropped**, bounding memory on adversarial input at the cost of that content,
-  /// an over-long tag entirely (attributes included), and a row's extra columns. A
-  /// tag is measured by its own length, so the result does not depend on chunking,
-  /// and the cap applies to one-shot conversion as well as streaming.
+  /// **dropped**, bounding memory on adversarial input. The result never depends on
+  /// chunking, and the cap applies to one-shot conversion as well as streaming.
+  ///
+  /// A start tag is measured against what conversion *retains*. Attributes it
+  /// cannot use are scanned and discarded as they stream past, costing no budget
+  /// however large: a megabyte of `data-*` leaves its element, and any `href` on
+  /// it, intact. A retained attribute that does not fit drops the whole tag, as
+  /// does a custom element whose minimal `<name>` token would exceed the cap.
+  ///
+  /// A `plugins` filter, extraction, or Tailwind config makes every attribute
+  /// readable, so none can be classified as unused; there the cap is measured
+  /// against the tag's raw length and an over-long tag is dropped whole.
+  ///
   /// [`MdreamResult::truncated`] reports whether it fired.
   pub max_node_bytes: usize,
 }

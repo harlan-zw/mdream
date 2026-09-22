@@ -587,8 +587,8 @@ impl ConvertState {
         .last()
         .map_or(0, |n| n.current_walk_index as usize);
       self.text_buffer_has_inline_gfm_hazard = has_inline_gfm_hazard;
-      if self.link_empty_text_pending && !text.trim().is_empty() {
-        self.link_empty_text_pending = false;
+      if self.link.empty_text_pending && !text.trim().is_empty() {
+        self.link.empty_text_pending = false;
       }
       self.emit_text_with_generated_markdown(
         &text,
@@ -757,25 +757,83 @@ impl ConvertState {
     position: usize,
   ) -> OpeningTagResult {
     let tag_handler = tag_id.and_then(get_tag_handler);
-    let attr_mask = if self.attrs_force_all {
-      ATTR_ALL
-    } else {
-      tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
-    };
-    let (complete, new_position, self_closing) = process_tag_attributes(
+    // A custom name is owned by the node and by any suspended scan, so it is
+    // charged; the `#cdata-section` pseudo-tag is a literal, not document bytes.
+    let mut budget = AttrBudget::new(self.options.max_node_bytes);
+    if !is_builtin && tag_name.as_bytes().first() != Some(&b'#') {
+      budget.charge(tag_name.len());
+    }
+    let scan = process_tag_attributes(
       html_chunk,
       position,
       tag_handler,
-      attr_mask,
+      self.attr_mask(tag_handler),
+      budget,
       &mut self.attr_scratch,
     );
 
-    if !complete {
+    if !scan.complete {
+      // Park what the scan retained, never the raw tag, so the caller consumes
+      // these bytes instead of buffering them.
+      self.pending_start = Some(Box::new(PendingStartTag {
+        custom_name: (!is_builtin).then(|| tag_name.to_string()),
+        tag_id,
+        is_builtin,
+        carry: scan.carry.expect("an incomplete scan carries its state"),
+        attrs: std::mem::take(&mut self.attr_scratch),
+      }));
       return OpeningTagResult {
         complete: false,
         new_position: position,
         self_closing: false,
         skip: false,
+      };
+    }
+
+    self.apply_opening_tag(
+      tag_name,
+      tag_id,
+      is_builtin,
+      scan.new_position,
+      scan.self_closing,
+      scan.overflow,
+    )
+  }
+
+  /// The attributes this tag's handler asks for, or all of them when a plugin
+  /// reads attributes the handlers do not.
+  #[inline]
+  pub(crate) fn attr_mask(&self, tag_handler: Option<&crate::types::TagHandler>) -> u16 {
+    if self.attrs_force_all {
+      ATTR_ALL
+    } else {
+      tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
+    }
+  }
+
+  /// Open an element whose attributes are already scanned into `attr_scratch`:
+  /// tree recovery, overflow handling and node creation.
+  pub(crate) fn apply_opening_tag(
+    &mut self,
+    tag_name: &str,
+    tag_id: Option<u8>,
+    is_builtin: bool,
+    new_position: usize,
+    self_closing: bool,
+    overflow: bool,
+  ) -> OpeningTagResult {
+    let tag_handler = tag_id.and_then(get_tag_handler);
+
+    // A retained attribute outgrew `max_node_bytes`. Drop the tag whole, as an
+    // over-cap tag always has; the children it would have wrapped still parse.
+    if overflow {
+      self.truncated = true;
+      self.attr_scratch.clear();
+      return OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing: false,
+        skip: true,
       };
     }
 
@@ -980,26 +1038,42 @@ impl ConvertState {
     let current_walk_index = self.stack.last().map_or(0, |n| n.current_walk_index);
     let extras = NodeExtras::for_tag(is_builtin, tag_name);
 
-    let (h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) = if let Some(h) = tag_handler
+    let (mut h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) =
+      if let Some(h) = tag_handler {
+        (
+          h.is_inline,
+          h.excludes_text_nodes,
+          h.is_non_nesting,
+          h.collapses_inner_white_space,
+          h.spacing,
+        )
+      } else if tag_id.is_none() {
+        // Truly unknown tag (not in dictionary, no override): treat as inline
+        // with zero spacing so it doesn't fragment the surrounding paragraph.
+        // `<p>before <ex>foo</ex> after</p>` becomes `before foo after`. Users
+        // opt custom elements into block semantics via `tagOverrides`.
+        (true, false, false, false, Some(NO_SPACING))
+      } else {
+        // Built-in tag without a dedicated handler (e.g. caption, span fallback):
+        // keep previous block-default behaviour.
+        (false, false, false, false, None)
+      };
+    if self.has_tag_overrides
+      && let Some(is_inline) = self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|plugins| plugins.tag_overrides.as_ref())
+        .and_then(|overrides| {
+          let override_name = tag_id
+            .filter(|_| is_builtin)
+            .map_or(tag_name, |id| TAG_NAMES[id as usize]);
+          overrides.iter().find(|(name, _)| name == override_name)
+        })
+        .and_then(|(_, config)| config.is_inline)
     {
-      (
-        h.is_inline,
-        h.excludes_text_nodes,
-        h.is_non_nesting,
-        h.collapses_inner_white_space,
-        h.spacing,
-      )
-    } else if tag_id.is_none() {
-      // Truly unknown tag (not in dictionary, no override): treat as inline
-      // with zero spacing so it doesn't fragment the surrounding paragraph.
-      // `<p>before <ex>foo</ex> after</p>` becomes `before foo after`. Users
-      // opt custom elements into block semantics via `tagOverrides`.
-      (true, false, false, false, Some(NO_SPACING))
-    } else {
-      // Built-in tag without a dedicated handler (e.g. caption, span fallback):
-      // keep previous block-default behaviour.
-      (false, false, false, false, None)
-    };
+      h_inline = is_inline;
+    }
 
     let mut tag = if let Some(mut pooled) = self.node_pool.pop() {
       pooled.extras = extras;
@@ -1487,6 +1561,10 @@ impl ConvertState {
       return CloseTagResult {
         complete: false,
         new_position: position,
+        // A builtin end tag is never measured; past the name, parse-error
+        // attributes are payload.
+        bounded_prefix: tag_name_end == chunk_length
+          && chunk_length - tag_name_start <= MAX_BUILTIN_TAG_NAME,
       };
     }
 
@@ -1497,11 +1575,15 @@ impl ConvertState {
       return CloseTagResult {
         complete: false,
         new_position: position,
+        // The whole tag is here, re-fed only so an implied end tag closes
+        // first, and it carries whatever attributes it has.
+        bounded_prefix: false,
       };
     }
     CloseTagResult {
       complete: true,
       new_position: i + 1,
+      bounded_prefix: false,
     }
   }
 

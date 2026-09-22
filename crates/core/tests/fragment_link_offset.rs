@@ -38,12 +38,14 @@ fn drifted_fragment_offset_keeps_balanced_link_markers() {
   assert_eq!(markdown.matches('[').count(), markdown.matches(']').count());
 }
 
+// The outer `#a` matches no heading, so cleanup unwraps it. The inner `#b`
+// resolves to a heading, so it survives the rewrite intact.
 #[test]
 fn valid_heading_fragment_survives_a_drifted_offset() {
   let html = "<h2 id=\"b\">b</h2><a href=\"#a\"><blockquote>e<a href=\"#b\">x</a></blockquote></a>";
   let clean = convert_fragments(html);
-  let unchanged = mdream::html_to_markdown(html, HTMLToMarkdownOptions::default());
-  assert_eq!(clean, unchanged);
+  assert!(clean.contains("[x](#b)"), "inner fragment lost in {clean:?}");
+  assert!(!clean.contains("(#a)"), "unmatched fragment kept in {clean:?}");
 }
 
 #[test]
@@ -68,12 +70,14 @@ fn fragment_rewrite_survives_drifted_link_offset() {
   let _ = mdream::html_to_markdown(html, options);
 }
 
-// A drifted entry whose range no longer starts at `[` must be left untouched.
-// The rewrite path used to advance the cursor past `[adj_start..adj_end)`
-// without pushing those bytes, silently deleting the whole span from the
-// output instead of leaving it as-is for the normal cursor copy.
+// Accurate offset tracking keeps the recorded bracket start on the `[` even
+// when the `> ` quote prefix inserted at blockquote close rewrites the buffer
+// around it, so cleanup sees a genuine `[text](#frag)` shape and strips the
+// broken wrapper instead of bailing. This pins the fixed behaviour: before the
+// per-offset tracking, the drifted entry was either deleted outright or left
+// whole, never cleanly unwrapped.
 #[test]
-fn drifted_invalid_fragment_link_is_left_as_is() {
+fn drifted_fragment_link_is_unwrapped_after_blockquote_rewrite() {
   let clean = CleanConfig {
     urls: true,
     fragments: true,
@@ -91,12 +95,10 @@ fn drifted_invalid_fragment_link_is_left_as_is() {
     ..Default::default()
   };
   // The anchor opens before the blockquote, so the `> ` quote prefix inserted
-  // at blockquote close shifts the recorded bracket start off the `[`. The
-  // recorded range then holds `> []()](#p)`: not a `[text](#frag)` shape, so
-  // every byte of it has to survive into the markdown.
+  // at blockquote close shifts the recorded bracket start off the `[`.
   let html = "<a href=#p><blockquote><a href>";
   let markdown = mdream::html_to_markdown(html, options);
-  assert_eq!(markdown, "[> []()](#p)");
+  assert_eq!(markdown, "> []()");
 }
 
 // Two fragment_links entries can share a bracket_start when an `<a>` nested
