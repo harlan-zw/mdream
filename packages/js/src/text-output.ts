@@ -235,7 +235,16 @@ function trailingNewlines(buffer: string[]): number {
 function appendOutput(state: TextState, element: ElementNode, eventType: number, output: string | undefined): void {
   const buffer = state.buffer
   const config = newlineConfig(element, state.depthMap)
-  const missingNewlines = Math.max(0, (config[eventType] || 0) - trailingNewlines(buffer))
+  const wantedNewlines = config[eventType] || 0
+  // An empty inline element between the text and a block boundary clears
+  // `lastTextNode`, so the boundary itself drops the space it sits on.
+  if (wantedNewlines > 0 && buffer.length > 0 && !(state.depthMap[TAG_PRE]! > 0 && element.tagId !== TAG_PRE)) {
+    const tail = buffer[buffer.length - 1]!
+    const trimmed = trimSpacesEnd(tail)
+    if (trimmed.length !== tail.length)
+      buffer[buffer.length - 1] = trimmed
+  }
+  const missingNewlines = Math.max(0, wantedNewlines - trailingNewlines(buffer))
   const isInline = element.tagHandler?.isInline === true
 
   if (buffer.length === 0) {
