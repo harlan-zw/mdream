@@ -41,11 +41,10 @@ fn drifted_fragment_offset_keeps_balanced_link_markers() {
 // The outer `#a` matches no heading, so cleanup unwraps it. The inner `#b`
 // resolves to a heading, so it survives the rewrite intact.
 #[test]
-fn valid_heading_fragment_survives_a_drifted_offset() {
+fn valid_nested_fragment_survives_broken_outer_link_cleanup() {
   let html = "<h2 id=\"b\">b</h2><a href=\"#a\"><blockquote>e<a href=\"#b\">x</a></blockquote></a>";
   let clean = convert_fragments(html);
-  assert!(clean.contains("[x](#b)"), "inner fragment lost in {clean:?}");
-  assert!(!clean.contains("(#a)"), "unmatched fragment kept in {clean:?}");
+  assert_eq!(clean, "## b\n\n> e [x](#b)");
 }
 
 #[test]
