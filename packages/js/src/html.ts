@@ -2,8 +2,8 @@ import type { OutputProcessor } from './output-runner'
 import type { MdreamOptions } from './types'
 import { ELEMENT_NODE, MAX_TAG_ID } from './const'
 import { createHtmlOutputState, processHtmlOutputEvent } from './html-output'
+import { htmlTagHandlers } from './html-tags'
 import { processHtmlOutput, streamHtmlOutput } from './output-runner'
-import { htmlTagHandlers } from './parser-tags'
 import { buildTagOverrideHandlers } from './tag-overrides'
 
 function createProcessor(options: MdreamOptions): OutputProcessor {

@@ -105,6 +105,18 @@ function wrapText(value: string, column: number, width: number): string {
 /** Blank line a caption opens and closes with, when nothing overrides it. */
 const CAPTION_SPACING = 2
 
+/** Drops a trailing space and tab run, stopping at a newline. */
+function trimSpacesEnd(value: string): string {
+  let end = value.length
+  while (end > 0) {
+    const code = value.charCodeAt(end - 1)
+    if (code !== 32 && code !== 9)
+      break
+    end--
+  }
+  return end === value.length ? value : value.slice(0, end)
+}
+
 function trimAsciiWhitespaceStart(value: string): string {
   let start = 0
   while (start < value.length && value.charCodeAt(start) <= 32)
@@ -250,15 +262,21 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
     }
   }
 
-  if (buffer.length && state.lastTextNode?.containsWhitespace) {
+  // Preformatted content keeps its trailing bytes. Closing the block drops a
+  // trailing space run, but never the newlines the block ends on.
+  const closesPre = element.tagId === TAG_PRE
+  const inPre = state.depthMap[TAG_PRE]! > 0 && !closesPre
+  if (buffer.length && state.lastTextNode?.containsWhitespace && !inPre) {
     const isBlock = !isInline && missingNewlines > 0
     const collapses = element.tagHandler?.collapsesInnerWhiteSpace
     const hasSpacing = Array.isArray(element.tagHandler?.spacing)
+    // A block boundary owns the line, so the space before it goes too.
     const trim = (element.tagId === TAG_BR && output?.endsWith('\n'))
-      || ((!isInline || eventType === NodeEventExit) && !isBlock && !(collapses && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter))
+      || isBlock
+      || ((!isInline || eventType === NodeEventExit) && !(collapses && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter))
     if (trim) {
       const last = buffer.at(-1)!
-      const trimmed = trimAsciiWhitespaceEnd(last)
+      const trimmed = closesPre ? trimSpacesEnd(last) : trimAsciiWhitespaceEnd(last)
       if (trimmed.length !== last.length) {
         buffer[buffer.length - 1] = trimmed
         if (eventType === NodeEventExit && isInline)
@@ -389,6 +407,7 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     }
 
     const ownsCaptionSpace = element.tagId === TAG_FIGCAPTION
+      && !state.depthMap[TAG_PRE]
       && figcaptionOwnsBlockSpacing(element, true)
     if (ownsCaptionSpace && event.type === NodeEventEnter) {
       // An override owns the caption spacing; otherwise a caption opens a block.
@@ -400,7 +419,8 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
       captionContent = false
       captionBreakRun = 0
     }
-    if (!ownsCaptionSpace && output && hasVisibleContent(output) && openCaptionBoundary()) {
+    // A caption's own output is caption content, so it lands after the boundary.
+    if (output && hasVisibleContent(output) && openCaptionBoundary()) {
       output = trimAsciiWhitespaceStart(output)
       state.pendingInlineWhitespace = false
     }
