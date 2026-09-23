@@ -997,6 +997,22 @@ fn heading_inside_a_link_adds_no_blank_line_to_the_link_text() {
   }
 }
 
+#[test]
+fn heading_inside_a_markerless_wrapper_keeps_its_trailing_blank_line() {
+  // Wrappers that write no inline Markdown must not glue following text into
+  // the heading's line: only marker-emitting wrappers (b, em, code, a, …) do.
+  for (html, expected) in [
+    ("<label><h4>t</h4>x</label>", "#### t\n\nx"),
+    ("<small><h4>t</h4>x</small>", "#### t\n\nx"),
+    ("<abbr><h4>t</h4>x</abbr>", "#### t\n\nx"),
+    ("<time><h4>t</h4>x</time>", "#### t\n\nx"),
+    ("<bdo><h4>t</h4>x</bdo>", "#### t\n\nx"),
+    ("<ruby><h4>t</h4>x</ruby>", "#### t\n\nx"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
 // ── Images ──
 
 #[test]

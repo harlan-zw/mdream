@@ -4200,12 +4200,22 @@ impl ConvertState {
     // A heading's own collapse keeps its block spacing, but in a table cell that
     // newline would end the row. The count holds the heading only while it is
     // open: at its exit the heading is already popped, so a count of 1 there is
-    // a collapsing ancestor (`<a>`, `<b>`), whose inline text a blank line ends.
-    let current_node_owns_collapse = is_enter
-      && tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id))
+    // a collapsing ancestor. Only an ancestor writing visible inline Markdown
+    // (`<a>`, `<b>`, `<code>`) suppresses the blank line, since its text
+    // continues inline; a marker-less wrapper (label, small, abbr, time, bdo,
+    // ruby, rt, rp) lets the heading close its block.
+    let is_heading = matches!(tag_id, Some(id) if (TAG_H1..=TAG_H6).contains(&id));
+    let heading_owns_collapse =
+      is_enter && is_heading && self.collapse_non_span_depth == 1 && !self.in_table_cell();
+    let heading_exit_in_markerless_collapse = !is_enter
+      && is_heading
       && self.collapse_non_span_depth == 1
-      && !self.in_table_cell();
-    if self.collapse_non_span_depth > 0 && !current_node_owns_collapse {
+      && !self.in_table_cell()
+      && !self.collapse_wrapper_emits_inline_markdown();
+    if self.collapse_non_span_depth > 0
+      && !heading_owns_collapse
+      && !heading_exit_in_markerless_collapse
+    {
       return NO_SPACING;
     }
     if self.collapse_span_depth > 0 {
@@ -4217,6 +4227,55 @@ impl ConvertState {
       }
     }
     node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)
+  }
+
+  /// Whether the tag writes visible inline Markdown around its content:
+  /// emphasis, code ticks, raw-tag wrappers, or an anchor. A heading nested in
+  /// one must not end its line, or the wrapper's remaining text splits off.
+  #[inline]
+  fn wrapper_emits_inline_markdown(tag_id: Option<u8>) -> bool {
+    tag_id.is_some_and(|id| {
+      matches!(
+        id,
+        TAG_STRONG
+          | TAG_B
+          | TAG_EM
+          | TAG_I
+          | TAG_DEL
+          | TAG_S
+          | TAG_STRIKE
+          | TAG_INS
+          | TAG_SUB
+          | TAG_SUP
+          | TAG_CODE
+          | TAG_KBD
+          | TAG_SAMP
+          | TAG_VAR
+          | TAG_MARK
+          | TAG_U
+          | TAG_CITE
+          | TAG_DFN
+          | TAG_Q
+          | TAG_A
+      )
+    })
+  }
+
+  /// The depth-1 collapsing ancestor at a heading's exit is the only open
+  /// non-span contributor, so the innermost match is it. Returns `false` when
+  /// none is found, keeping the previous suppression.
+  #[inline]
+  fn collapse_wrapper_emits_inline_markdown(&self) -> bool {
+    self
+      .stack
+      .iter()
+      .rev()
+      .find(|node| {
+        node.collapses_inner_white_space
+          && !node.excluded_from_markdown
+          && node.tag_id != Some(TAG_SPAN)
+      })
+      .is_some_and(|node| Self::wrapper_emits_inline_markdown(node.tag_id))
   }
 
   #[inline]
