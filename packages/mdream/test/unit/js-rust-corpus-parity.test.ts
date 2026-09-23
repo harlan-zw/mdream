@@ -26,8 +26,6 @@ const KNOWN_DIFFERENCES = new Set<string>([
   ['markdown', '<pre>a<b>bold</b>\n<br>after br</pre>'],
   ['text', '<pre>a<b>bold</b>\n<br>after br</pre>'],
   ['text', '<pre>x\n  </pre><p>After</p>'],
-  ['markdown', 'a<br> b'],
-  ['text', 'a<br> b'],
   ['text', '<html><head><title>A</title><meta name="description" content="da"></head><body><header>x</header><h1>A</h1><p>a</p><footer>f</footer></body></html>'],
   // Rust leaves `<` in rawtext unescaped in Markdown.
   ['markdown', '<textarea>a</tx>b'],

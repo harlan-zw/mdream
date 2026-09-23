@@ -26,7 +26,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { resolveUrl } from './url'
-import { figcaptionOwnsBlockSpacing, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, trimOutputStart } from './utils'
+import { figcaptionOwnsBlockSpacing, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, trimOutputStart, trimTextAtLineStart } from './utils'
 
 interface TextState extends MdreamRuntimeState {
   options: EngineOptions
@@ -373,6 +373,8 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
   }
 
   function processTextNode(node: TextNode, lastNode: ElementNode | TextNode | undefined): void {
+    if (node.trimsAtLineStart)
+      trimTextAtLineStart(node, state.buffer)
     if (node.excludedFromMarkdown || !node.value)
       return
     if (hasVisibleContent(node.value) && openCaptionBoundary()) {

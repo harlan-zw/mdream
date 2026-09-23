@@ -1,4 +1,4 @@
-import type { ElementNode, Node } from './types'
+import type { ElementNode, Node, TextNode } from './types'
 import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_BLOCKQUOTE, TAG_H1, TAG_H6, TAG_LI, TAG_SPAN, TAG_TD, TAG_TH } from './const'
 import {
   HTML_ENTITIES,
@@ -292,6 +292,27 @@ export function trimOutputStart(value: string): string {
     start++
   }
   return start === 0 ? value : value.slice(start)
+}
+
+/**
+ * Drop the leading whitespace of text flagged `trimsAtLineStart` when the
+ * output is empty or ends a line. Parity with the Rust engine, which trims the
+ * first text of a block that way when the text has no block ancestor.
+ */
+export function trimTextAtLineStart(node: TextNode, buffer: readonly string[]): void {
+  const last = lastOutputChar(buffer)
+  if (last !== -1 && last !== 10)
+    return
+  const value = node.value
+  let start = 0
+  while (start < value.length) {
+    const code = value.charCodeAt(start)
+    if (code !== 32 && code !== 10 && code !== 9 && code !== 13 && code !== 12)
+      break
+    start++
+  }
+  if (start !== 0)
+    node.value = value.slice(start)
 }
 
 /**

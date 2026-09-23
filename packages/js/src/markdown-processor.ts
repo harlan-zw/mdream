@@ -52,7 +52,7 @@ import {
 import { finalizeParse, parseHtmlStream } from './parse'
 import { endPlugins, processPluginsForEvent } from './plugin-processor'
 import { breakHandler, renderBreak, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart } from './utils'
+import { blockOpenPrefix, continuationPrefix, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -1430,6 +1430,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   }
 
   function processTextNode(textNode: TextNode, lastNode: ElementNode | TextNode | undefined, lastChar: string): void {
+    if (textNode.trimsAtLineStart)
+      trimTextAtLineStart(textNode, state.buffer)
     if (textNode.value) {
       if (textNode.excludedFromMarkdown)
         return

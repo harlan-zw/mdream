@@ -33,6 +33,13 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<p>a <x>c</x></p>',
     '<p>a <x></x>c</p>',
   ],
+  'root inline text drops its leading space only at a line start': [
+    'a<x> b',
+    'a(<span> b',
+    '<p>a</p><span> b</span>',
+    'a<br><span> b</span>',
+    'a<br> b',
+  ],
   'table rows outside a table': [
     '<tr><td>a</td><td>b</td></tr>',
     '<th>',

@@ -1216,6 +1216,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
       containsWhitespace,
       excludedFromMarkdown: false,
       joinsPrevious: state.endTagClosedNothing === true,
+      trimsAtLineStart: containsWhitespace === true,
     }
     state.endTagClosedNothing = false
     handleEvent({ type: NodeEventEnter, node: rootTextNode })
@@ -1241,10 +1242,15 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   }
 
   const parentsToIncrement = traverseUpToFirstBlockNode(state.currentNode)
-  const firstBlockParent = parentsToIncrement.at(-1)
+  const firstBlockParent = parentsToIncrement.at(-1)!
 
-  // Handle whitespace trimming
-  if (containsWhitespace && !firstBlockParent?.childTextNodeIndex) {
+  // The first text of a block drops its leading whitespace. With no block
+  // ancestor the text is inline at the root: like root text it drops the
+  // space only where the output is at a line start, which the output decides.
+  const firstInBlock = containsWhitespace && !firstBlockParent.childTextNodeIndex
+  const inlineAtRoot = !firstBlockParent.parent
+    && (firstBlockParent.tagHandler?.isInline ?? firstBlockParent.tagId === -1)
+  if (firstInBlock && !inlineAtRoot) {
     let start = 0
     while (start < text.length && (inPreTag ? (text.charCodeAt(start) === NEWLINE_CHAR || text.charCodeAt(start) === CARRIAGE_RETURN_CHAR) : isWhitespace(text.charCodeAt(start)))) {
       start++
@@ -1269,6 +1275,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     containsWhitespace,
     excludedFromMarkdown: excludesTextNodes,
     joinsPrevious: state.endTagClosedNothing === true,
+    trimsAtLineStart: firstInBlock && inlineAtRoot,
   }
   state.endTagClosedNothing = false
 
