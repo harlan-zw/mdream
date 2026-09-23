@@ -135,6 +135,16 @@ function hasVisibleContent(value: string): boolean {
   return false
 }
 
+/** Whether `value` holds anything but HTML whitespace. */
+function hasNonWhitespace(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+    if (code !== 32 && code !== 10 && code !== 9 && code !== 13 && code !== 12)
+      return true
+  }
+  return false
+}
+
 /** Last emitted character, skipping fragments a trim emptied. */
 function charOf(code: number): string {
   return code === -1 ? '' : String.fromCharCode(code)
@@ -329,8 +339,10 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
   let captionClosedSpacing = 0
   // A caption that held only breaks owns the next line start.
   let captionBreakOwnsLine = false
-  // A quotation opener the exit may still retract, so a stream holds it back.
-  let quoteOpenerPending = false
+  // Buffer indexes of quotation openers whose quotation has no content yet.
+  // The exit retracts such an opener, so a stream holds it back. Parity with
+  // the Rust engine's open inline markers.
+  const openQuotes: number[] = []
 
   function pushCaptionBoundary(newlines: number): boolean {
     if (state.buffer.length === 0 || newlines === 0)
@@ -394,6 +406,8 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     state.buffer.push(value)
     state.lastContentCache = value
     state.lastTextNode = node
+    if (openQuotes.length !== 0 && hasNonWhitespace(value))
+      openQuotes.length = 0
   }
 
   function processEvent(event: NodeEvent): void {
@@ -415,18 +429,27 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
 
     const element = event.node as ElementNode
     let output: string | undefined
-    quoteOpenerPending = false
-    // An empty quotation emits nothing, but keeps the space its opener added.
-    if (element.tagId === TAG_Q && event.type === NodeEventExit && lastNode === element && !element.pluginOutput?.length) {
-      const tail = state.buffer.at(-1)
-      if (tail === '"')
-        state.buffer.pop()
-      else if (tail === ' "')
-        state.buffer[state.buffer.length - 1] = ' '
-      if (tail === '"' || tail === ' "') {
+    // A quotation with only whitespace since its opener emits nothing, but
+    // keeps the space its opener added.
+    if (element.tagId === TAG_Q && event.type === NodeEventExit && openQuotes.length !== 0 && !element.pluginOutput?.length) {
+      const opener = openQuotes.pop()!
+      const buffer = state.buffer
+      let empty = true
+      for (let index = opener + 1; index < buffer.length; index++) {
+        if (hasNonWhitespace(buffer[index]!)) {
+          empty = false
+          break
+        }
+      }
+      if (empty) {
+        const openerOutput = buffer[opener]
+        buffer.length = opener
+        if (openerOutput === ' "')
+          buffer.push(' ')
         state.lastNode = element
         return
       }
+      openQuotes.length = 0
     }
     if (element.pluginOutput?.length) {
       output = element.pluginOutput.join('')
@@ -473,8 +496,15 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     }
 
     appendOutput(state, element, event.type, output)
-    if (element.tagId === TAG_Q && event.type === NodeEventEnter && (output === '"' || output === ' "'))
-      quoteOpenerPending = state.buffer.at(-1) === output
+    if (element.tagId === TAG_Q && event.type === NodeEventEnter && (output === '"' || output === ' "') && state.buffer.at(-1) === output) {
+      openQuotes.push(state.buffer.length - 1)
+    }
+    else if (openQuotes.length !== 0) {
+      // Content, or a block boundary, makes every open quotation permanent.
+      const isInline = element.tagHandler ? element.tagHandler.isInline === true : element.tagId === -1
+      if ((output && hasNonWhitespace(output)) || (element.tagId !== -1 && !isInline))
+        openQuotes.length = 0
+    }
 
     if (ownsCaptionSpace && event.type === NodeEventExit) {
       captionOpen--
@@ -496,8 +526,14 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
       const normalized = preserveLeadingWhitespace ? content : trimOutputStart(content)
       // Hold back the tail a later event may still trim: trailing whitespace,
       // and a quotation opener that an empty quotation retracts.
-      const held = quoteOpenerPending ? normalized.slice(0, -1) : normalized
-      let stableLength = trimAsciiWhitespaceEnd(held).length
+      let stableLength = trimAsciiWhitespaceEnd(normalized).length
+      if (openQuotes.length !== 0) {
+        let opener = normalized.length - content.length
+        for (let index = 0; index < openQuotes[0]!; index++)
+          opener += state.buffer[index]!.length
+        if (opener < stableLength)
+          stableLength = Math.max(0, opener)
+      }
       if (stableLength < yieldedLength)
         stableLength = yieldedLength
       const output = normalized.slice(yieldedLength, stableLength)

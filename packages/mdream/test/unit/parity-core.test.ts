@@ -73,6 +73,12 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<a title="k" href="ea"><div>I<!> ',
     '<b><div>I<!-- --> </div>k</b>',
   ],
+  'quotation with only empty children': [
+    '<p>x<q><span></span></q>y</p>',
+    '<p>x<q><q></q></q>y</p>',
+    '<p>a<q><br></q>b</p>',
+    '<p>x<q><q>a</q></q>y</p>',
+  ],
 }
 
 describe('javaScript engine matches Rust output', () => {
