@@ -35,6 +35,11 @@ export interface TransformPlugin {
     node: TextNode,
     state: MdreamRuntimeState,
   ) => { content: string, skip: boolean } | undefined
+
+  /**
+   * Runs once after the whole document is converted, including for streams.
+   */
+  onDocumentEnd?: (state: MdreamRuntimeState) => void
 }
 
 /**

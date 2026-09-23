@@ -103,7 +103,7 @@ In v1, the built-in plugins always ran first, in this order: frontmatter, isolat
 
 ### Callback changes
 
-- `frontmatterPlugin({ onExtract })` runs when `</head>` closes. In v1, it ran after the conversion finished. It now also runs for streams.
+- `frontmatterPlugin({ onExtract })` runs once after the conversion finishes, as in v1. It now also runs for streams, when the stream ends.
 - `onExtract` now removes the YAML escape from backslashes. In v1, the title `a \ b` came back as `a \\ b`.
 - `extractionPlugin` callbacks run when each matching element closes. In v1, the declarative `extraction` callbacks ran after the conversion finished.
 - `extractionPlugin` callbacks receive the parsed element and the runtime state. The element does not have `selector` or `tagName`. Use `element.name` for the tag name. Use the object key or a separate callback to identify the selector.
@@ -354,6 +354,7 @@ const myPlugin = createPlugin({
 | `onNodeExit` | `(element: ElementNode, state)` | `string \| void` | Called when exiting an element. Return a string to inject markdown. |
 | `processAttributes` | `(element: ElementNode, state)` | `void` | Called to inspect or modify element attributes. |
 | `processTextNode` | `(textNode: TextNode, state)` | `{ content: string, skip: boolean } \| void` | Called for each text node. Return an object to transform text or skip it. |
+| `onDocumentEnd` | `(state)` | `void` | Called once after the whole document is converted, including for streams. |
 
 #### Plugins with per-document state
 
@@ -423,7 +424,7 @@ const plugin = frontmatterPlugin({
 |---|---|---|
 | `additionalFields` | `Record<string, string>` | Extra fields to add to the frontmatter |
 | `metaFields` | `string[]` | Meta tag names to extract in addition to the defaults |
-| `onExtract` | `(frontmatter: Record<string, string>) => void` | Receives the structured frontmatter when `</head>` closes. Runs for all formats and for streams. |
+| `onExtract` | `(frontmatter: Record<string, string>) => void` | Receives the structured frontmatter once the conversion finishes. Runs for all formats and for streams. |
 
 Default meta fields extracted: `description`, `keywords`, `author`, `date`, `og:title`, `og:description`, `twitter:title`, `twitter:description`.
 

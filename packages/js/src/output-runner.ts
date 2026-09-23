@@ -1,7 +1,7 @@
 import type { ParseState } from './parse'
 import type { MdreamRuntimeState, NodeEvent, TagHandler, TransformPlugin } from './types'
 import { finalizeParse, parseHtmlStream } from './parse'
-import { processPluginsForEvent } from './plugin-processor'
+import { endPlugins, processPluginsForEvent } from './plugin-processor'
 
 export interface OutputProcessor {
   state: MdreamRuntimeState & { depthMap: Uint16Array }
@@ -39,6 +39,7 @@ export function processHtmlOutput(html: string, processor: OutputProcessor, opti
   const handleEvent = createEventHandler(processor, plugins)
   const leftover = parseHtmlStream(html, parseState, handleEvent)
   finalizeParse(leftover, parseState, handleEvent)
+  endPlugins(plugins, processor.state)
   return processor.takeOutput()
 }
 
@@ -76,6 +77,7 @@ export async function* streamHtmlOutput(
     const finalHtml = remainingHtml + decoder.decode()
     const leftover = finalHtml ? parseHtmlStream(finalHtml, parseState, handleEvent) : ''
     finalizeParse(leftover, parseState, handleEvent)
+    endPlugins(plugins, processor.state)
 
     const finalChunk = processor.takeOutput()
     if (finalChunk)

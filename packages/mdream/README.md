@@ -647,6 +647,11 @@ interface TransformPlugin {
     node: TextNode,
     state: MdreamRuntimeState,
   ) => { content: string, skip: boolean } | undefined
+
+  /**
+   * Called once after the whole document is converted, including for streams.
+   */
+  onDocumentEnd?: (state: MdreamRuntimeState) => void
 }
 ```
 

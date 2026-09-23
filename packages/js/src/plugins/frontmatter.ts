@@ -1,5 +1,5 @@
 import type { ElementNode, PluginSetup, TextNode, TransformPlugin } from '../types'
-import { ELEMENT_NODE, TAG_HEAD, TAG_HTML, TAG_META, TAG_TITLE } from '../const'
+import { ELEMENT_NODE, TAG_HEAD, TAG_META, TAG_TITLE } from '../const'
 import { createPlugin } from '../pluggable/plugin'
 
 const BACKSLASH_RE = /\\/g
@@ -10,7 +10,7 @@ export interface FrontmatterPluginOptions {
   additionalFields?: Record<string, string>
   /** Meta tag names to extract (beyond the standard ones) */
   metaFields?: string[]
-  /** Receive structured frontmatter when the document head closes. */
+  /** Receive structured frontmatter once the document is converted. */
   onExtract?: (frontmatter: Record<string, string>) => void
 }
 
@@ -97,19 +97,16 @@ function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlu
     return Object.keys(result).length > 0 ? result : undefined
   }
 
-  let sawHead = false
-  let extracted = false
-
-  function extract(): void {
-    if (extracted)
-      return
-    extracted = true
-    const structured = getStructuredData()
-    if (structured)
-      options.onExtract?.(structured)
-  }
-
   const plugin = createPlugin({
+    // Report once the document ends, so every head and late metadata counts.
+    onDocumentEnd() {
+      if (!options.onExtract)
+        return
+      const structured = getStructuredData()
+      if (structured)
+        options.onExtract(structured)
+    },
+
     onNodeEnter(node: any): string | undefined {
       if (node.excludedFromMarkdown)
         return
@@ -117,13 +114,8 @@ function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlu
       // Track when we enter the head section
       if (node.tagId === TAG_HEAD) {
         inHead = true
-        sawHead = true
         return
       }
-
-      // A document without a head still reports its additional fields.
-      if (!sawHead && !extracted && node.type === ELEMENT_NODE && node.tagId !== TAG_HTML)
-        extract()
 
       // Process title tag inside head
       if (inHead && node.type === ELEMENT_NODE && node.tagId === TAG_TITLE) {
@@ -154,7 +146,6 @@ function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlu
       // Handle exiting the head tag
       if (node.type === ELEMENT_NODE && node.tagId === TAG_HEAD) {
         inHead = false
-        extract()
         if (state.outputFormat !== 'markdown')
           return undefined
 
