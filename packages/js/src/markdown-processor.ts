@@ -2183,13 +2183,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         stableLength = trimAsciiWhitespaceEnd(currentContent).length
         retainMutableFragments = stableLength < currentContent.length
       }
-      else if (stableLength < currentContent.length) {
-        const lineLeading = stableLength === 0 || currentContent.charCodeAt(stableLength - 1) === 10
-        if (!lineLeading) {
-          stableLength = currentContent.length
-          retainMutableFragments = false
-        }
-      }
+      // A handler-written trailing space (a list marker opened before this
+      // <pre>) is retracted by the next block boundary, so it stays buffered
+      // mid-line exactly like the non-pre branch: yielding it as stable would
+      // strand the boundary newline behind the monotonic yield cursor.
     }
     else {
       // Block spacing and trailing spaces can still be trimmed by a later
