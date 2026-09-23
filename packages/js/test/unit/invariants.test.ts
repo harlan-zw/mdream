@@ -1,6 +1,7 @@
 import type { MdreamOptions } from '../../src/types'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { clean } from '../../src/clean'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { extractionPlugin, frontmatterPlugin } from '../../src/plugins'
@@ -58,10 +59,17 @@ function streamSplits(html: string): (Uint8Array | string)[][] {
   return splits
 }
 
-// Stream output skips the post-processing clean pass, so compare without it.
+// Every rule but `fragments`, which holds a stream back to the end: these
+// rewrite links while the stream still yields output.
+function incrementalCleanup(): MdreamOptions {
+  return { clean: clean({ urls: true, emptyLinks: true, redundantLinks: true, selfLinkHeadings: true, emptyImages: true, emptyLinkText: true }) }
+}
+
 const OPTION_SETS: { name: string, options: () => MdreamOptions }[] = [
   { name: 'no options', options: () => ({}) },
   { name: 'minimal preset', options: () => withMinimalPreset({ clean: false, origin: 'https://example.com' }) },
+  { name: 'minimal preset with cleanup', options: () => withMinimalPreset({ origin: 'https://example.com' }) },
+  { name: 'cleanup without fragments', options: incrementalCleanup },
   { name: 'wrap width', options: () => ({ wrapWidth: 20 }) },
 ]
 
@@ -80,11 +88,13 @@ describe('stream output equals one-shot output', () => {
     }
 
     it(`${format.name}, fixtures in 64 and 4096 byte chunks`, async () => {
-      for (const html of FIXTURES) {
-        const expected = format.convert(html)
-        const bytes = encoder.encode(html)
-        for (const size of [64, 4096])
-          expect(await drain(format.stream(chunkStream(bySize(bytes, size))))).toBe(expected)
+      for (const options of [undefined, incrementalCleanup()]) {
+        for (const html of FIXTURES) {
+          const expected = format.convert(html, options)
+          const bytes = encoder.encode(html)
+          for (const size of [64, 4096])
+            expect(await drain(format.stream(chunkStream(bySize(bytes, size)), options))).toBe(expected)
+        }
       }
     })
   }

@@ -119,7 +119,7 @@ describe('streaming drain parity', () => {
     }
 
     finalizeParse(remainingHtml, parseState, processor.processEvent)
-    const finalChunk = processor.getMarkdownChunk()
+    const finalChunk = processor.getMarkdownChunk(true)
     emittedLength += finalChunk.length
     emittedHash = hashChunk(emittedHash, finalChunk)
 

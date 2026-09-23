@@ -82,11 +82,8 @@ function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlu
       result.title = rawValue(raw)
     }
     for (const [k, v] of Object.entries(frontmatter.meta)) {
-      // Strip wrapping quotes from key (e.g. '"og:title"' → 'og:title')
-      const cleanKey = k.startsWith('"') && k.endsWith('"') ? k.slice(1, -1) : k
       // Strip wrapping quotes from value
-      const cleanVal = rawValue(String(v))
-      result[cleanKey] = cleanVal
+      result[k] = rawValue(String(v))
     }
     if (additionalFields) {
       for (const [k, v] of Object.entries(additionalFields)) {
@@ -131,7 +128,7 @@ function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlu
         // Check for valid meta tags
         const metaName = property || name
         if (metaName && content && metaFields.has(metaName)) {
-          frontmatter.meta[metaName.includes(':') ? `"${metaName}"` : metaName] = formatValue(metaName, content)
+          frontmatter.meta[metaName] = formatValue(metaName, content)
         }
 
         // Don't output anything for meta tags
@@ -191,7 +188,7 @@ function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlu
     }
 
     // Process entries, handling 'meta' specially
-    let yamlLines: string[] = []
+    const yamlLines: string[] = []
 
     // Sort frontmatter keys to put title and description first
     const entries = Object.entries(frontmatter)
@@ -214,10 +211,11 @@ function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlu
         // Add meta key
         yamlLines.push('meta:')
 
-        // Sort meta entries alphabetically and add with indentation
+        // Sort by the raw key in code unit order, as Rust does, and quote a
+        // key that holds `:` only when printing it.
         const metaEntries = Object.entries(value)
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([metaKey, metaValue]) => `  ${metaKey}: ${metaValue}`)
+          .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+          .map(([metaKey, metaValue]) => `  ${metaKey.includes(':') ? `"${metaKey}"` : metaKey}: ${metaValue}`)
 
         yamlLines.push(...metaEntries)
       }
@@ -227,10 +225,9 @@ function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlu
       }
     }
 
-    // Remove meta if empty
-    if (Object.keys(frontmatter.meta).length === 0) {
-      yamlLines = yamlLines.filter(line => !line.startsWith('meta:'))
-    }
+    // A head with no fields writes no block.
+    if (yamlLines.length === 0)
+      return ''
 
     return `---\n${yamlLines.join('\n')}\n---\n\n`
   }
