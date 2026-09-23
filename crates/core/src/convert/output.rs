@@ -2438,11 +2438,10 @@ impl ConvertState {
     if tail.is_empty() && !at_exit {
       return;
     }
-    // An open inline marker, and an open `<a>`'s `[`, are rewritten away if the
-    // element closes empty, so neither is content the item can be decided on —
-    // only its exit is. It must open exactly at the item's content start;
-    // anything earlier is content that already settles the question.
-    let opens_the_item = |position: usize| position == end;
+    // An open inline marker or link bracket can disappear when it closes empty.
+    // Its recorded position can precede or follow separating spaces.
+    let item_content_start = self.buffer.len() - tail.len();
+    let opens_the_item = |position: usize| position >= end && position <= item_content_start;
     if !at_exit
       && (self
         .open_markers

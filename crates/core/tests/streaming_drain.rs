@@ -1979,6 +1979,27 @@ fn streaming_empty_item_with_open_marker_matches_one_shot() {
   }
 }
 
+// A dropped image removes the marker's trailing space; an empty inline marker
+// may add that space back without making the list item nonempty.
+#[test]
+fn streaming_dropped_image_before_empty_marker_keeps_list_separation() {
+  let options = HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_images: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    ("a b<li><img/><strong></strong></li>", "a b\n\n-"),
+    ("a b<li><img/><strong>x</strong></li>", "a b\n- **x**"),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options.clone());
+  }
+}
+
 // Past a blank line a raw-HTML region is Markdown again, tracked by scanning the
 // buffer for that blank line. A drain can carry those bytes away before the scan
 // reaches them, leaving the region suspended forever: streaming then omits every
