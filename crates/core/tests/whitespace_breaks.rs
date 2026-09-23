@@ -92,3 +92,17 @@ fn figcaption_with_only_markers_emits_nothing() {
     assert_eq!(md_streamed(html, chunk), "eA", "chunk={chunk}");
   }
 }
+
+// ── wrapWidth in a figcaption ──
+
+#[test]
+fn wrapped_caption_text_owns_no_leading_space() {
+  // `* C*` at a line start is a list item, not emphasis.
+  assert_eq!(
+    md_wrapped("<figcaption><div>C</div></figcaption>", 40),
+    "*C*"
+  );
+  assert_eq!(md_wrapped("<figcaption><blockquote>x", 40), "> *x*");
+  // Unwrapped output is the reference.
+  assert_eq!(md("<figcaption><div>C</div></figcaption>"), "*C*");
+}
