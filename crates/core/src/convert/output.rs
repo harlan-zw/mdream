@@ -948,7 +948,11 @@ impl ConvertState {
         CaptionMaterialization::Commit
       });
     }
-    let new_line_config = self.calculate_new_line_config(tag_id, node_spacing);
+    let new_line_config = self.calculate_new_line_config(
+      tag_id,
+      node_spacing,
+      self.stack[stack_len - 1].collapses_inner_white_space,
+    );
     let quote_at_start = self
       .blockquotes
       .last()
@@ -1471,7 +1475,7 @@ impl ConvertState {
     let new_line_config = if caption_exit {
       NO_SPACING
     } else {
-      self.calculate_new_line_config(tag_id, node_spacing)
+      self.calculate_new_line_config(tag_id, node_spacing, false)
     };
     let configured_new_lines = if consumes_caption_boundary {
       0
@@ -4201,6 +4205,7 @@ impl ConvertState {
     &self,
     tag_id: Option<u8>,
     node_spacing: Option<[u8; 2]>,
+    counted_self: bool,
   ) -> [u8; 2] {
     if self.plain_text
       && tag_id == Some(TAG_PRE)
@@ -4219,13 +4224,23 @@ impl ConvertState {
     }
     // A heading normally keeps its block spacing inside a collapsing parent, but
     // in a table cell that newline would end the row.
-    let current_node_owns_collapse = tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id))
-      && self.collapse_non_span_depth == 1
-      && !self.in_table_cell();
-    if self.collapse_non_span_depth > 0 && !current_node_owns_collapse {
+    let is_heading = tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id));
+    let current_node_owns_collapse =
+      is_heading && self.collapse_non_span_depth == 1 && !self.in_table_cell();
+    // On enter the node is already counted as a collapsing ancestor of itself.
+    // Only real ancestors collapse its spacing, or a tag override that makes an
+    // inline tag a block loses its spacing. Headings keep the rule above.
+    let is_span = tag_id == Some(TAG_SPAN);
+    let non_span_depth = self
+      .collapse_non_span_depth
+      .saturating_sub(u8::from(counted_self && !is_span && !is_heading));
+    let span_depth = self
+      .collapse_span_depth
+      .saturating_sub(u8::from(counted_self && is_span));
+    if non_span_depth > 0 && !current_node_owns_collapse {
       return NO_SPACING;
     }
-    if self.collapse_span_depth > 0 {
+    if span_depth > 0 {
       let is_block = tag_id.is_some_and(|id| {
         (TAG_H1..=TAG_H6).contains(&id) || matches!(id, TAG_P | TAG_DIV | TAG_LI)
       });

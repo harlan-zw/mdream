@@ -106,3 +106,33 @@ fn wrapped_caption_text_owns_no_leading_space() {
   // Unwrapped output is the reference.
   assert_eq!(md("<figcaption><div>C</div></figcaption>"), "*C*");
 }
+
+// ── tagOverrides spacing on a built-in inline tag ──
+
+fn md_block_override(html: &str, tag: &str) -> String {
+  html_to_markdown(
+    html,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          tag.to_string(),
+          TagOverrideConfig {
+            is_inline: Some(false),
+            spacing: Some([2, 2]),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  )
+}
+
+#[test]
+fn block_override_on_inline_tag_keeps_its_spacing() {
+  assert_eq!(md_block_override("e<span>m</span>", "span"), "e\n\nm");
+  assert_eq!(md_block_override("e<span>m</span>x", "span"), "e\n\nm\n\nx");
+  // A custom element with the same override already worked.
+  assert_eq!(md_block_override("e<x-foo>m</x-foo>", "x-foo"), "e\n\nm");
+}
