@@ -683,8 +683,8 @@ pub struct ConvertState {
   /// Output column immediately before `buffer[0]`. Draining may remove the
   /// beginning of the current line, but wrapping still needs its full column.
   buffer_start_column: usize,
-  /// Test-only: disables draining to prove it never alters streamed bytes.
-  #[cfg(test)]
+  /// Test/fuzz-only: disables draining to prove it never alters streamed bytes.
+  #[cfg(any(test, fuzzing))]
   pub(crate) disable_drain: bool,
 
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
@@ -747,11 +747,12 @@ pub struct ConvertState {
   /// nothing. `pre_fence_pending`: inside a `<pre>` whose fence is undecided.
   /// `pre_fence_lang`: language resolved from the `<pre>`'s own class.
   pre_fence_pending: bool,
+  /// Depth of the `<pre>` whose fence is pending; nested `<pre>`s defer to it.
+  pre_fence_pending_depth: u16,
   pre_fence_lang: String,
-  /// A fence is open for the current `<pre>`, however it was opened. The `<pre>`
-  /// exit owns the closer, so a `<code>` child's trailing siblings stay in the
-  /// block instead of landing on the fence line.
-  pre_fence_open: bool,
+  /// Depth of the `<pre>` owning the open fence; zero when none. Its exit
+  /// closes the fence after any trailing siblings of a `<code>` child.
+  pre_fence_owner_depth: u16,
   /// The open `<li>` wrote its marker onto a line that continues the paragraph
   /// above, so an empty item would read as a setext underline. `empty_item_len`
   /// is the buffer length that still means "nothing written since the marker",
@@ -885,7 +886,7 @@ impl ConvertState {
       flushed_tail: [b'\n'; 2],
       cut_line_lead: CutLineLead::Uncut,
       buffer_start_column: 0,
-      #[cfg(test)]
+      #[cfg(any(test, fuzzing))]
       disable_drain: false,
 
       wrap_width: options_wrap_width,
@@ -916,8 +917,9 @@ impl ConvertState {
       list_indent_widths: Vec::with_capacity(8),
 
       pre_fence_pending: false,
+      pre_fence_pending_depth: 0,
       pre_fence_lang: String::new(),
-      pre_fence_open: false,
+      pre_fence_owner_depth: 0,
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
@@ -2123,7 +2125,7 @@ impl ConvertState {
     // no content and the buffer tail is still the block spacing its own open
     // wrote. Finalize trims that, so it has to stay held back like any other
     // block's; only past the fence is trailing whitespace significant code.
-    let in_pre = self.depth_map[TAG_PRE as usize] != 0 && self.pre_fence_open;
+    let in_pre = self.depth_map[TAG_PRE as usize] != 0 && self.pre_fence_owner_depth != 0;
     let mut stable_end = self.buffer.trim_end_matches(' ').len();
     if in_pre {
       if self.last_text_node_contains_whitespace {
@@ -2296,7 +2298,7 @@ impl ConvertState {
   /// streaming API and diverge from one-shot regardless of drain. The
   /// `disable_drain` equivalence test guards this without enumerating rewrites.
   fn drain_streamed_prefix(&mut self) {
-    #[cfg(test)]
+    #[cfg(any(test, fuzzing))]
     if self.disable_drain {
       return;
     }

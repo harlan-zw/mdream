@@ -775,17 +775,19 @@ impl ConvertState {
       self.flush_list_rule();
     }
 
-    // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
-    // language) is emitted lazily above for the no-<code> case. Skipped inside
-    // a table cell, where the <pre> is emitted as raw HTML instead (issue #147).
+    // A nested `<pre>` stays inside an ancestor's open or pending fence; it
+    // must not replace that fence's owner with a new deferred opener.
     if !self.plain_text
       && self.stack[stack_len - 1].tag_id == Some(TAG_PRE)
+      && self.pre_fence_owner_depth == 0
+      && !self.pre_fence_pending
       && !self.in_table_cell()
     {
       let lang =
         Self::get_language_from_class(self.stack[stack_len - 1].attributes.get_bit(ATTR_CLASS))
           .to_string();
       self.pre_fence_pending = true;
+      self.pre_fence_pending_depth = self.depth_map[TAG_PRE as usize];
       self.pre_fence_lang = lang;
     }
 
@@ -878,12 +880,14 @@ impl ConvertState {
     // A literal override is code content inside `<pre>`, even when the tag's
     // built-in formatting would be suppressed there.
     if !self.plain_text && self.pre_fence_pending {
-      if code_owns_pending_pre_fence(&self.stack) && !enter_is_literal {
+      let code_owns_fence = code_owns_pending_pre_fence(&self.stack)
+        && self.depth_map[TAG_PRE as usize] == self.pre_fence_pending_depth;
+      if code_owns_fence && !enter_is_literal {
         self.pre_fence_pending = false;
       } else if tag_id != Some(TAG_PRE)
         && (!tag_id.is_some_and(suppresses_formatting_in_pre) || enter_is_literal)
       {
-        if enter_is_literal && code_owns_pending_pre_fence(&self.stack) {
+        if enter_is_literal && code_owns_fence {
           self.pre_fence_lang =
             Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
               .to_string();
@@ -1050,7 +1054,9 @@ impl ConvertState {
       && tag_id == Some(TAG_CODE)
       && output.is_some()
       && ((self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block())
-        || (self.depth_map[TAG_PRE as usize] > 0 && !self.pre_fence_open && !self.in_table_cell()))
+        || (self.depth_map[TAG_PRE as usize] > 0
+          && self.pre_fence_owner_depth == 0
+          && !self.in_table_cell()))
     {
       self.flush_streaming_blockquote_lines();
     }
@@ -1150,7 +1156,7 @@ impl ConvertState {
             exhausted: false,
           });
         }
-      } else if !self.pre_fence_open
+      } else if self.pre_fence_owner_depth == 0
         && !self.in_table_cell()
         && let Some(emitted) = output.as_deref()
         && self.buffer.len() > output_start
@@ -1166,7 +1172,7 @@ impl ConvertState {
           language,
           self.list_indent.clone(),
         );
-        self.pre_fence_open = true;
+        self.pre_fence_owner_depth = self.depth_map[TAG_PRE as usize];
       }
     }
 
@@ -1257,7 +1263,12 @@ impl ConvertState {
   /// Emit markdown for exiting an element (node already popped from stack).
   #[inline]
   pub(crate) fn emit_exit_element(&mut self, node: &ElementNode) {
-    if node.excluded_from_markdown || node.enter_skipped {
+    // A skipped <pre> can still own the fence opened by an eligible <code> child.
+    if node.excluded_from_markdown
+      || (node.enter_skipped
+        && (node.tag_id != Some(TAG_PRE)
+          || self.pre_fence_owner_depth != self.depth_map[TAG_PRE as usize]))
+    {
       self.last_node_is_inline = node.is_inline;
       return;
     }
@@ -1274,10 +1285,14 @@ impl ConvertState {
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
     }
-    let closes_own_pre_fence = tag_id == Some(TAG_PRE) && self.pre_fence_open;
+    let closes_own_pre_fence =
+      tag_id == Some(TAG_PRE) && self.pre_fence_owner_depth == self.depth_map[TAG_PRE as usize];
 
-    // Check override
-    let override_config = if self.has_tag_overrides {
+    // A skipped node must never emit its own override exit. The only output
+    // allowed below is the matching close for a fence opened by its child.
+    let override_config = if node.enter_skipped {
+      None
+    } else if self.has_tag_overrides {
       let ovs = self
         .options
         .plugins
@@ -1826,12 +1841,14 @@ impl ConvertState {
     if tag_id == Some(TAG_PRE) {
       // The closing fence consumed the trailing newline; clear the whitespace
       // flags too, or the next node trims the blank line through the fence.
-      if self.pre_fence_open {
+      if closes_own_pre_fence {
         self.last_text_node_contains_whitespace = false;
         self.has_last_text_node = false;
+        self.pre_fence_owner_depth = 0;
       }
-      self.pre_fence_pending = false;
-      self.pre_fence_open = false;
+      if self.pre_fence_pending_depth == self.depth_map[TAG_PRE as usize] {
+        self.pre_fence_pending = false;
+      }
     }
     if tag_id == Some(TAG_A) && self.link_caption_break_snapshot_active {
       self.link_caption_break_snapshot_active = false;
@@ -1859,7 +1876,7 @@ impl ConvertState {
     self.flush_streaming_blockquote_lines();
 
     self.pre_fence_pending = false;
-    self.pre_fence_open = true;
+    self.pre_fence_owner_depth = self.pre_fence_pending_depth;
     let li_depth = self.depth_map[TAG_LI as usize];
     let fence = if li_depth > 0 {
       // A blank line between the marker and the fence ends the item, leaving the
@@ -1873,7 +1890,7 @@ impl ConvertState {
     let output_start = self.buffer.len();
     self.last_content_cache_len = self.push_code_span_content(&fence, true);
     if self.last_content_cache_len != fence.len() {
-      self.pre_fence_open = false;
+      self.pre_fence_owner_depth = 0;
       return;
     }
     self.start_code_fence(
@@ -3460,7 +3477,7 @@ impl ConvertState {
           }
           // A fence is already open for this <pre> — the <pre> opened it (mixed
           // text + <code> children) or an earlier <code> sibling did.
-          if self.pre_fence_open {
+          if self.pre_fence_owner_depth != 0 {
             return None;
           }
           let lang = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS));
@@ -3744,11 +3761,10 @@ impl ConvertState {
       }
       // Raw <pre> close inside a table cell (issue #147).
       TAG_PRE if self.in_table_cell() => Some(Cow::Borrowed("</pre>")),
-      // Bare <pre> (no <code> child) closing fence (issue #97). Only emitted
-      // when the <pre> opened its own fence; otherwise a <code> child or an
-      // empty/whitespace-only <pre> means there is nothing to close.
+      // Only the `<pre>` owning the open fence emits the closer; a nested
+      // `<pre>` cannot close its ancestor's fence.
       TAG_PRE => {
-        if !self.pre_fence_open {
+        if self.pre_fence_owner_depth != self.depth_map[TAG_PRE as usize] {
           return None;
         }
         let li_depth = self.depth_map[TAG_LI as usize] as usize;
