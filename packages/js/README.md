@@ -31,6 +31,128 @@ yarn add @mdream/js@beta
 | `@mdream/js/splitter` | Single-pass markdown splitter: `htmlToMarkdownSplitChunks`, `htmlToMarkdownSplitChunksStream` |
 | `@mdream/js/llms-txt` | llms.txt artifact generation: `generateLlmsTxtArtifacts`, `createLlmsTxtStream` |
 
+## Migrating from v1
+
+In v2, each output format and each plugin is a separate import.
+Your bundle contains only the code that you import.
+The Rust engine (`mdream`) keeps its v1 options. This guide applies to `@mdream/js` only.
+
+### Output formats
+
+The `format` option is removed. Import the converter for the format.
+
+| v1 | v2 |
+|---|---|
+| `htmlToMarkdown(html, { format: 'text' })` | `htmlToText(html)` from `@mdream/js/text` |
+| `htmlToMarkdown(html, { format: 'html' })` | `htmlToSafeHtml(html)` from `@mdream/js/html` |
+| `streamHtmlToMarkdown(stream, { format: 'text' })` | `streamHtmlToText(stream)` from `@mdream/js/text` |
+| `streamHtmlToMarkdown(stream, { format: 'html' })` | `streamHtmlToSafeHtml(stream)` from `@mdream/js/html` |
+
+The text and HTML converters accept `origin`, `plugins`, and `tagOverrides`.
+`htmlToText` also accepts `wrapWidth`. Both ignore `clean`, as in v1.
+The CLI `--format` flag is unchanged.
+`frontmatterPlugin` now writes YAML frontmatter to Markdown output only.
+In v1, safe HTML output started with a YAML block. This also applies to `--preset minimal --format html`.
+To read the metadata in any format, use `onExtract`.
+
+```diff
+- import { htmlToMarkdown } from '@mdream/js'
+- const text = htmlToMarkdown(html, { format: 'text' })
++ import { htmlToText } from '@mdream/js/text'
++ const text = htmlToText(html)
+```
+
+### Plugins
+
+The declarative `plugins` object and the `hooks` option are removed.
+`plugins` is now an array of plugin instances. Import each factory from `@mdream/js/plugins`.
+
+| v1 | v2 |
+|---|---|
+| `plugins: { frontmatter: true }` | `plugins: [frontmatterPlugin()]` |
+| `plugins: { frontmatter: fm => {} }` | `plugins: [frontmatterPlugin({ onExtract: fm => {} })]` |
+| `plugins: { frontmatter: { additionalFields, metaFields, onExtract } }` | `plugins: [frontmatterPlugin({ additionalFields, metaFields, onExtract })]` |
+| `plugins: { isolateMain: true }` | `plugins: [isolateMainPlugin()]` |
+| `plugins: { tailwind: true }` | `plugins: [tailwindPlugin()]` |
+| `plugins: { filter: { exclude, include, processChildren } }` | `plugins: [filterPlugin({ exclude, include, processChildren })]` |
+| `plugins: { extraction: { selector: fn } }` | `plugins: [extractionPlugin({ selector: fn })]` (see below) |
+| `plugins: { tagOverrides }` | top-level `tagOverrides` |
+| `hooks: [myPlugin]` | `plugins: [myPlugin]` |
+
+```diff
+  import { htmlToMarkdown } from '@mdream/js'
++ import { filterPlugin, frontmatterPlugin } from '@mdream/js/plugins'
+
+  htmlToMarkdown(html, {
+-   plugins: {
+-     frontmatter: true,
+-     filter: { exclude: ['nav'] },
+-     tagOverrides: { 'x-heading': 'h2' },
+-   },
+-   hooks: [myPlugin],
++   plugins: [frontmatterPlugin(), filterPlugin({ exclude: ['nav'] }), myPlugin],
++   tagOverrides: { 'x-heading': 'h2' },
+  })
+```
+
+Plugins run in array order.
+In v1, the built-in plugins always ran first, in this order: frontmatter, isolateMain, tailwind, filter, extraction.
+`hooks` ran after them. To keep the v1 result, use the same order.
+
+### Callback changes
+
+- `frontmatterPlugin({ onExtract })` runs when `</head>` closes. In v1, it ran after the conversion finished. It now also runs for streams.
+- `onExtract` now removes the YAML escape from backslashes. In v1, the title `a \ b` came back as `a \\ b`.
+- `extractionPlugin` callbacks run when each matching element closes. In v1, the declarative `extraction` callbacks ran after the conversion finished.
+- `extractionPlugin` callbacks receive the parsed element and the runtime state. The element does not have `selector` or `tagName`. Use `element.name` for the tag name. Use the object key or a separate callback to identify the selector.
+
+```diff
+- plugins: {
+-   extraction: {
+-     'img[alt]': el => images.push({ tag: el.tagName, src: el.attributes.src }),
+-   },
+- },
++ plugins: [
++   extractionPlugin({
++     'img[alt]': el => images.push({ tag: el.name, src: el.attributes.src }),
++   }),
++ ],
+```
+
+### Plugin instances
+
+You can create plugins once and reuse them for many conversions.
+Each conversion gets fresh state from the built-in plugins.
+If your own plugin keeps state for one document, use the setup form of `createPlugin`. See [Plugins with per-document state](#plugins-with-per-document-state).
+
+### Minimal preset
+
+- Import `withMinimalPreset` from `@mdream/js/preset/minimal`. The root export is removed.
+- The preset returns plugin instances. Plugins that you pass are added after the preset plugins.
+- You cannot disable or reconfigure one preset plugin through the preset. To do that, compose the plugins yourself:
+
+```ts
+import { htmlToMarkdown } from '@mdream/js'
+import { filterPlugin, isolateMainPlugin, tailwindPlugin } from '@mdream/js/plugins'
+
+// Minimal preset without frontmatter, with a custom filter
+htmlToMarkdown(html, {
+  clean: true,
+  plugins: [isolateMainPlugin(), tailwindPlugin(), filterPlugin({ exclude: ['nav', 'footer'] })],
+})
+```
+
+### Removed exports
+
+| v1 | v2 |
+|---|---|
+| `@mdream/js/core` | `@mdream/js`. The root entry is now tree-shakable. |
+| `withMinimalPreset` from `@mdream/js` | `withMinimalPreset` from `@mdream/js/preset/minimal` |
+| `extractionCollectorPlugin` | `extractionPlugin` |
+| `BuiltinPlugins` type | `Plugin[]` |
+| `FrontmatterConfig` type | `FrontmatterPluginOptions` from `@mdream/js/plugins` |
+| `CoreOptions` type | `MdreamOptions` |
+
 ## API Reference
 
 Each output format has its own entry point. Import only the format and plugins
@@ -102,6 +224,8 @@ for await (const chunk of stream) {
 | `options` | `Partial<MdreamOptions>` | Optional configuration (see [MdreamOptions](#mdreamoptions)) |
 
 **Returns:** `AsyncIterable<string>`
+
+`streamHtmlToText` from `@mdream/js/text` and `streamHtmlToSafeHtml` from `@mdream/js/html` take the same parameters.
 
 ### Optional plugins
 
@@ -199,6 +323,28 @@ const myPlugin = createPlugin({
 | `processAttributes` | `(element: ElementNode, state)` | `void` | Called to inspect or modify element attributes. |
 | `processTextNode` | `(textNode: TextNode, state)` | `{ content: string, skip: boolean } \| void` | Called for each text node. Return an object to transform text or skip it. |
 
+#### Plugins with per-document state
+
+If a plugin keeps state for one document, pass a setup function to `createPlugin`.
+Each conversion calls it once and uses the hooks that it returns.
+Then you can reuse one plugin array for many conversions, including concurrent streams.
+
+```typescript
+import { createPlugin } from '@mdream/js/plugins'
+
+const headingCounter = createPlugin(() => {
+  let headings = 0
+  return {
+    onNodeEnter(element) {
+      if (element.name === 'h2')
+        headings++
+    },
+  }
+})
+```
+
+The built-in `frontmatterPlugin`, `isolateMainPlugin`, and `extractionPlugin` use this form.
+
 ### `filterPlugin(options)`
 
 Filters elements by CSS selectors, tag names, or TAG_* constants.
@@ -235,8 +381,17 @@ import { frontmatterPlugin } from '@mdream/js/plugins'
 const plugin = frontmatterPlugin({
   additionalFields: { source: 'crawler' },
   metaFields: ['robots', 'viewport'],
+  onExtract: (frontmatter) => {
+    console.log(frontmatter.title)
+  },
 })
 ```
+
+| Option | Type | Description |
+|---|---|---|
+| `additionalFields` | `Record<string, string>` | Extra fields to add to the frontmatter |
+| `metaFields` | `string[]` | Meta tag names to extract in addition to the defaults |
+| `onExtract` | `(frontmatter: Record<string, string>) => void` | Receives the structured frontmatter when `</head>` closes. Runs for all formats and for streams. |
 
 Default meta fields extracted: `description`, `keywords`, `author`, `date`, `og:title`, `og:description`, `twitter:title`, `twitter:description`.
 
@@ -274,9 +429,10 @@ const plugin = tailwindPlugin()
 
 ### `extractionPlugin(selectors)`
 
-Extracts elements with explicit callbacks.
-
-Extracts elements matching CSS selectors during conversion. Callbacks receive matching elements with their accumulated text content.
+Extracts elements that match CSS selectors during conversion.
+Each callback runs when a matching element closes.
+It receives the parsed element with its trimmed `textContent`, and the runtime state.
+Use `element.name` for the tag name and `element.attributes` for the attributes.
 
 ```typescript
 import { extractionPlugin } from '@mdream/js/plugins'
