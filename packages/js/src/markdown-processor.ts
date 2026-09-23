@@ -2159,8 +2159,13 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     const newContent = currentContent.slice(lastYieldedLength, stableLength)
     lastYieldedLength = stableLength
-    if (newContent)
+    if (newContent && !hasYieldedContent) {
       hasYieldedContent = true
+      // Later calls stop trimming the leading whitespace, so move the cursor
+      // from trimmed offsets to buffer offsets. Otherwise it points into
+      // already-yielded bytes and they are emitted again.
+      lastYieldedLength += leadingTrimmed
+    }
 
     // Keep only enough emitted context for spacing/newline decisions, plus any
     // trailing spaces that are still mutable. This prevents every stream chunk
@@ -2197,6 +2202,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         state.buffer.length = 0
         resetBufferScanCursors(bufferScan)
         state.buffer.push(currentContent)
+        lastYieldedLength = stableLength
       }
     }
     return newContent

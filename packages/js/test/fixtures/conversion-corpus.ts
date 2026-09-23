@@ -88,4 +88,8 @@ export const CONVERSION_CORPUS: string[] = [
   `<html></html>`,
   `<html><head><title>A</title><meta name="description" content="da"></head><body><header>x</header><h1>A</h1><p>a</p><footer>f</footer></body></html>`,
   `<html><head><title>B</title></head><body><main><h1>B</h1><p>b</p></main></body></html>`,
+  // Rust parity: streaming
+  `<script></script>\n<p>abc</p>`,
+  `<b></b>\n<p>abc</p>`,
+  `<br>\n<p>abc</p>`,
 ]
