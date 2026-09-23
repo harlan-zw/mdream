@@ -2780,6 +2780,35 @@ impl ConvertState {
     }
   }
 
+  /// Newlines (at most two) that end the output, counted as one contiguous
+  /// run and read through a drain via `flushed_tail`.
+  #[inline]
+  fn trailing_new_lines(&self) -> u8 {
+    let bytes = self.buffer.as_bytes();
+    let len = bytes.len();
+    let tail_known = self.has_flushed_tail();
+    let last = if len > 0 {
+      bytes[len - 1]
+    } else if tail_known {
+      self.flushed_tail[1]
+    } else {
+      0
+    };
+    if last != b'\n' {
+      return 0;
+    }
+    let second = if len > 1 {
+      bytes[len - 2]
+    } else if len == 1 && tail_known {
+      self.flushed_tail[1]
+    } else if tail_known {
+      self.flushed_tail[0]
+    } else {
+      0
+    };
+    1 + u8::from(second == b'\n')
+  }
+
   #[cfg_attr(target_arch = "wasm32", inline(never))]
   #[cfg_attr(not(target_arch = "wasm32"), inline)]
   fn trim_trailing_spaces(&mut self) {
@@ -4001,7 +4030,7 @@ impl ConvertState {
       }
     }
 
-    let new_lines = configured_new_lines.saturating_sub(last_new_lines);
+    let mut new_lines = configured_new_lines.saturating_sub(last_new_lines);
 
     if new_lines > 0 {
       // An empty buffer at true document start has no preceding block to
@@ -4024,6 +4053,11 @@ impl ConvertState {
         // let its state leak into a later inline event and trim that output.
         self.last_text_node_contains_whitespace = false;
         self.has_last_text_node = false;
+        // The trimmed spaces hid the newlines before them (a blank image alt
+        // leaves `\n\n `), so count again or the boundary adds a blank line.
+        if !measure_from_output_tail {
+          new_lines = configured_new_lines.saturating_sub(self.trailing_new_lines());
+        }
       }
 
       if is_enter {
