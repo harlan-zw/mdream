@@ -20,6 +20,60 @@ where
   }
 }
 
+/// Format `val` as a YAML scalar that reads back as `val`.
+///
+/// A plain scalar takes every byte literally, including a backslash, so it is
+/// kept when YAML reads it as written. An empty value reads as null, and an
+/// indicator first byte starts other syntax. A space, `:`, `#`, `"` or line break
+/// also forces quotes. Inside double quotes a backslash starts an escape, so
+/// backslashes, quotes and line breaks are escaped there, and only there.
+fn yaml_scalar(val: &str) -> String {
+  let bytes = val.as_bytes();
+  let quote = match bytes.first() {
+    None => true,
+    Some(&first) => {
+      matches!(
+        first,
+        b'-'
+          | b'?'
+          | b','
+          | b'['
+          | b']'
+          | b'{'
+          | b'}'
+          | b'&'
+          | b'*'
+          | b'!'
+          | b'|'
+          | b'>'
+          | b'\''
+          | b'%'
+          | b'@'
+          | b'`'
+      ) || bytes
+        .iter()
+        .any(|&b| matches!(b, b'\n' | b'\r' | b':' | b'#' | b' ' | b'"'))
+    }
+  };
+  if !quote {
+    return val.to_string();
+  }
+  let mut out = String::with_capacity(val.len() + 2);
+  out.push('"');
+  for ch in val.chars() {
+    match ch {
+      '\\' => out.push_str("\\\\"),
+      '"' => out.push_str("\\\""),
+      // A raw break folds to a space, and under `meta:` it ends the mapping.
+      '\n' => out.push_str("\\n"),
+      '\r' => out.push_str("\\r"),
+      _ => out.push(ch),
+    }
+  }
+  out.push('"');
+  out
+}
+
 impl ConvertState {
   pub(crate) fn generate_frontmatter_yaml(&mut self) {
     if self.format != OutputFormat::Markdown {
@@ -32,14 +86,7 @@ impl ConvertState {
       .as_ref()
       .and_then(|p| p.frontmatter.as_ref());
 
-    let format_val = |val: &str| -> String {
-      let v = val.replace('"', "\\\"");
-      if v.contains('\n') || v.contains(':') || v.contains('#') || v.contains(' ') {
-        format!("\"{v}\"")
-      } else {
-        v
-      }
-    };
+    let format_val = yaml_scalar;
 
     let mut yaml_out = Vec::new();
     if let Some(t) = &self.frontmatter_title {

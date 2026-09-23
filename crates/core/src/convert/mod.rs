@@ -1437,7 +1437,11 @@ impl ConvertState {
           max_node_bytes,
           &mut self.text_node_exhausted,
         );
-        self.text_buffer_contains_non_whitespace |= text_buffer.len() != before_len;
+        if text_buffer.len() != before_len {
+          // RCDATA text is DOM text: its `<` must be escaped like any other.
+          self.text_buffer_contains_non_whitespace = true;
+          self.text_buffer_has_inline_gfm_hazard = true;
+        }
         self.last_char_was_whitespace = false;
         self.just_closed_tag = false;
         i += 1;
@@ -1492,7 +1496,11 @@ impl ConvertState {
           max_node_bytes,
           &mut self.text_node_exhausted,
         );
-        self.text_buffer_contains_non_whitespace |= text_buffer.len() != before_len;
+        if text_buffer.len() != before_len {
+          // RCDATA text is DOM text: its `<` must be escaped like any other.
+          self.text_buffer_contains_non_whitespace = true;
+          self.text_buffer_has_inline_gfm_hazard = true;
+        }
         self.last_char_was_whitespace = false;
         self.just_closed_tag = false;
         i += 1;
@@ -2025,8 +2033,6 @@ impl ConvertState {
         // generated Markdown escapes remain safe.
         self.text_buffer_has_inline_gfm_hazard |= kept
           .as_bytes()
-          .get(1..)
-          .unwrap_or_default()
           .iter()
           .any(|&c| GFM_BYTE_FLAGS[c as usize] & GFM_HAZARD_BIT != 0);
         if self.depth_map[TAG_STYLE as usize] == 0 && kept.as_bytes().contains(&AMPERSAND_CHAR) {
