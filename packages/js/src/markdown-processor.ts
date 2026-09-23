@@ -3,6 +3,8 @@ import type { Cleaner, ElementNode, EngineOptions, GfmAction, Node, NodeEvent, P
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
+  FRAGMENT_LINK_CLOSE_CODE,
+  FRAGMENT_LINK_OPEN_CODE,
   isInsideRawHtmlBlock,
   MARKDOWN_CODE_BLOCK,
   MARKDOWN_EMPHASIS,
@@ -708,11 +710,26 @@ function currentColumn(buffer: string[]): number {
     const s = buffer[i]!
     const nl = s.lastIndexOf('\n')
     if (nl >= 0) {
-      return col + [...s.slice(nl + 1)].length
+      return col + columnWidth(s, nl + 1)
     }
-    col += [...s].length
+    col += columnWidth(s, 0)
   }
   return col
+}
+
+/**
+ * Code points in `value` from `start`. The fragment link markers `clean`
+ * writes are removed before output, so they take no column.
+ */
+function columnWidth(value: string, start: number): number {
+  let width = 0
+  for (let i = start; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    // A low surrogate completes a pair already counted.
+    if ((code & 0xFC00) !== 0xDC00 && code !== FRAGMENT_LINK_OPEN_CODE && code !== FRAGMENT_LINK_CLOSE_CODE)
+      width++
+  }
+  return width
 }
 
 /**

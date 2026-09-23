@@ -279,5 +279,7 @@ export const TABLE_ROW_SPACING: readonly [number, number] = [0, 1]
  * `clean.fragments` is on. `clean().apply` removes them. Both are Unicode
  * noncharacters, reserved for internal use.
  */
-export const FRAGMENT_LINK_OPEN = '﷐'
-export const FRAGMENT_LINK_CLOSE = '﷑'
+export const FRAGMENT_LINK_OPEN = '\uFDD0'
+export const FRAGMENT_LINK_CLOSE = '\uFDD1'
+export const FRAGMENT_LINK_OPEN_CODE = 0xFDD0
+export const FRAGMENT_LINK_CLOSE_CODE = 0xFDD1

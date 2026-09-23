@@ -24,6 +24,7 @@ const CONFIGS = {
   isolateMain: { rust: { isolateMain: true }, js: () => ({ plugins: [isolateMainPlugin()] }) },
   tailwind: { rust: { tailwind: true }, js: () => ({ plugins: [tailwindPlugin()] }) },
   clean: { rust: { clean: true }, js: () => ({ clean: clean() }) },
+  cleanWrap: { rust: { clean: true, wrapWidth: 20 }, js: () => ({ clean: clean(), wrapWidth: 20 }) },
   minimal: { rust: { minimal: true }, js: () => withMinimalPreset() },
 } satisfies Record<string, Config>
 
@@ -84,6 +85,8 @@ const CASES: { group: string, config: keyof typeof CONFIGS, formats?: Format[], 
     '<h3>Composition API<a href="#composition-api">\u200B',
     '<h2>Q<a href="#q">x</a></h2>',
   ] },
+  // The fragment link markers must not count toward the wrap column.
+  { group: 'clean-fragments', config: 'cleanWrap', html: ['<p>Chernasky; <a href="#x">Motis; Burgin</a>, pp. 489</p>'] },
   { group: 'clean-fragments', config: 'clean', html: [
     '<h2>Intro</h2><p><a href="#intro">up</a> <a href="#nope">gone</a></p>',
     '<p><a href="#later">fwd</a></p><h2>Later</h2>',
