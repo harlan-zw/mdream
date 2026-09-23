@@ -1948,22 +1948,22 @@ fn blockquote_keeps_block_children_inside_the_quote() {
     (
       "section surrounded by text",
       "<blockquote>lead<section>x</section>tail</blockquote>",
-      "> lead\n>\n> x\n> tail",
+      "> lead\n>\n> x\n>\n> tail",
     ),
     (
       "article surrounded by text",
       "<blockquote>lead<article>x</article>tail</blockquote>",
-      "> lead\n>\n> x\n> tail",
+      "> lead\n>\n> x\n>\n> tail",
     ),
     (
       "nav surrounded by text",
       "<blockquote>lead<nav>x</nav>tail</blockquote>",
-      "> lead\n>\n> x\n> tail",
+      "> lead\n>\n> x\n>\n> tail",
     ),
     (
       "figure surrounded by text",
       "<blockquote>lead<figure>x</figure>tail</blockquote>",
-      "> lead\n>\n> x\n> tail",
+      "> lead\n>\n> x\n>\n> tail",
     ),
     (
       "nested list",

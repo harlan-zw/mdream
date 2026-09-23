@@ -130,6 +130,10 @@ struct CodeSpanState {
   content_start: usize,
   opener_emitted: bool,
   exhausted: bool,
+  /// `after_hard_break` as it stood before the opener's own enter write. A
+  /// truncation that rewinds that write must rewind the flag with it, or a
+  /// retracted no-output opener retires a pending hard-break state.
+  after_hard_break: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -137,6 +141,9 @@ struct OpenMarker {
   output_start: usize,
   content_start: usize,
   kind: u8,
+  /// `after_hard_break` as it stood before the opener's own enter write; see
+  /// `CodeSpanState::after_hard_break`.
+  after_hard_break: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -761,6 +768,10 @@ pub struct ConvertState {
   empty_item_len: usize,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
+  /// The last write ended its line with a `<br>` hard break, so a following
+  /// `<p>`/`<div>` boundary inside a list item still owes the paragraph
+  /// blank line that the item's collapsed block spacing removes.
+  after_hard_break: bool,
   /// What leads the current line when draining has removed that line's start.
   /// `Uncut` also says `flushed_tail` still holds its document-start sentinel;
   /// yielding alone does not make that context valid.
@@ -922,6 +933,7 @@ impl ConvertState {
       empty_item_line_start: 0,
       empty_item_len: 0,
       list_rule_pending: false,
+      after_hard_break: false,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
     };

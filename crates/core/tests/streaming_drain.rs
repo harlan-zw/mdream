@@ -1603,18 +1603,15 @@ fn streaming_holds_full_whitespace_run_before_a_droppable_marker() {
 
 // A block boundary trims the trailing spaces of the run before it, and the
 // cached run length has to shrink with them. Left stale, it outruns the buffer
-// wherever a drain has already cut the front, and the reach-back trim's
-// `cache_len <= buf_len` guard then skips the retraction entirely -- so the
-// block spacing the empty `<ol/>` wrote survived as `\n\n` where one-shot
-// retracts it to the pending space of the run it replaced. One-shot escapes the
-// stale length only because nothing has left its buffer, leaving the count exact
-// by coincidence.
+// wherever a drain has already cut the front, and a later reach-back trim then
+// disagrees with one-shot. The lone space after `<ol/>` collapses and writes
+// nothing, so it does not retract the list's block spacing.
 #[test]
-fn streaming_retracts_empty_block_spacing_after_a_space_trim() {
+fn streaming_keeps_block_spacing_after_a_space_trim() {
   let html = "<pre>ace><source>tity;      <ol/> <d/>*";
   let expected =
     html_to_format_result(html, HTMLToMarkdownOptions::default(), OutputFormat::Text).markdown;
-  assert_eq!(expected, "ace>tity; *");
+  assert_eq!(expected, "ace>tity;\n\n*");
   for chunk in 1..=html.len() {
     let mut p = MarkdownStreamProcessor::new_with_format(
       HTMLToMarkdownOptions::default(),
@@ -1679,8 +1676,8 @@ fn streaming_keeps_inter_token_space_across_drain() {
 // bytes. When an empty list item renders a lone `-` marker and the block spacing
 // before it has been drained away, the `-` sits alone at the buffer start and
 // the byte before it (a newline) is gone; the boundary then miscounted and
-// emitted an extra blank line (`-\n\n[link]` instead of `-\n[link]`). Newline
-// counting now consults the last flushed byte so the count survives the drain.
+// streaming disagreed with one-shot. Newline counting now consults the last
+// flushed byte so the count survives the drain.
 // The nested `div > form` and the ragged inline whitespace reproduce the exact
 // buffer state; every small chunk size lands a boundary that triggers it.
 #[test]
@@ -1697,8 +1694,8 @@ fn streaming_keeps_block_newline_count_across_drain() {
     <div class=\"badges\"><a href=\"/other-link/\" target=\"_blank\" class=\"bp\"> Delta</a></div></div>";
   let expected = html_to_markdown(html, opts.clone());
   assert!(
-    expected.contains("-\n[Delta]"),
-    "one-shot tightens the list/block gap: {expected:?}"
+    expected.contains("-\n\n[Delta]"),
+    "one-shot separates the list from the next block: {expected:?}"
   );
   for chunk in 1..=40usize {
     assert_eq!(
