@@ -150,6 +150,20 @@ impl MarkdownStreamProcessor {
   }
 }
 
+#[cfg(fuzzing)]
+pub mod fuzz_bridge {
+  use super::{HTMLToMarkdownOptions, MarkdownStreamProcessor, OutputFormat};
+
+  pub fn new_drain_disabled(
+    options: HTMLToMarkdownOptions,
+    format: OutputFormat,
+  ) -> MarkdownStreamProcessor {
+    let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
+    processor.state.disable_drain = true;
+    processor
+  }
+}
+
 #[cfg(test)]
 mod drain_equiv {
   //! Draining must be byte-transparent: same streamed output with it on or off,

@@ -52,7 +52,11 @@ fuzz_target!(|input: Input| {
       .use_origin
       .then(|| "https://example.com/base/".to_string()),
     clean_urls: input.clean_all,
-    clean: input.clean_all.then(CleanConfig::all),
+    // In Markdown, fragment cleanup buffers until finish; test incremental drains.
+    clean: input.clean_all.then(|| CleanConfig {
+      fragments: false,
+      ..CleanConfig::all()
+    }),
     plugins: Some(plugins),
     wrap_width: input.wrap_width as usize,
     max_node_bytes: 0,
@@ -64,20 +68,54 @@ fuzz_target!(|input: Input| {
     OutputFormat::Markdown
   };
 
-  // One-shot, same options.
-  let _ = html_to_format_result(&input.html, options.clone(), format);
+  // Full-document buffering prevents a later link rewrite from touching bytes
+  // that the streaming API has already returned.
+  let mut parity_options = options.clone();
+  if format == OutputFormat::Markdown {
+    parity_options
+      .clean
+      .get_or_insert_with(CleanConfig::default)
+      .fragments = true;
+  }
+  let one_shot = html_to_format_result(&input.html, parity_options.clone(), format).markdown;
 
   // Streamed at a fixed chunk width, rounded up to char boundaries.
   let width = (input.chunk_width as usize).max(1);
-  let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
+  let mut streamed = String::new();
+  let mut processor = MarkdownStreamProcessor::new_with_format(parity_options, format);
+  let mut incremental = (format == OutputFormat::Markdown).then(|| {
+    (
+      MarkdownStreamProcessor::new_with_format(options.clone(), format),
+      mdream::fuzz_bridge::new_drain_disabled(options, format),
+    )
+  });
+  let mut drained_output = String::new();
+  let mut undrained_output = String::new();
   let mut start = 0;
   while start < input.html.len() {
     let mut end = (start + width).min(input.html.len());
     while end < input.html.len() && !input.html.is_char_boundary(end) {
       end += 1;
     }
-    let _ = processor.process_chunk(&input.html[start..end]);
+    let chunk = &input.html[start..end];
+    streamed.push_str(&processor.process_chunk(chunk));
+    if let Some((drained, undrained)) = &mut incremental {
+      drained_output.push_str(&drained.process_chunk(chunk));
+      undrained_output.push_str(&undrained.process_chunk(chunk));
+    }
     start = end;
   }
-  let _ = processor.finish();
+  streamed.push_str(&processor.finish());
+  if let Some((drained, undrained)) = &mut incremental {
+    drained_output.push_str(&drained.finish());
+    undrained_output.push_str(&undrained.finish());
+    assert_eq!(
+      drained_output, undrained_output,
+      "draining changed output: input={input:?}"
+    );
+  }
+  assert_eq!(
+    streamed, one_shot,
+    "streaming diverged from one-shot: input={input:?}"
+  );
 });

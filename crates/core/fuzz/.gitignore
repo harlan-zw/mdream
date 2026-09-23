@@ -6,5 +6,9 @@ corpus/fuzz_streaming_chunks/*
 !corpus/fuzz_streaming_options/
 corpus/fuzz_streaming_options/*
 !corpus/fuzz_streaming_options/heading-slug-start-past-buffer
+!corpus/fuzz_streaming_widths/
+corpus/fuzz_streaming_widths/*
+!corpus/fuzz_streaming_widths/nested-list-table
+!corpus/fuzz_streaming_widths/utf8-link
 artifacts
 coverage

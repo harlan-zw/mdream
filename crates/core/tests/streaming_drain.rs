@@ -7,7 +7,8 @@ use std::fmt::Write as _;
 
 use mdream::MarkdownStreamProcessor;
 use mdream::types::{
-  CleanConfig, HTMLToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
+  CleanConfig, HTMLToMarkdownOptions, IsolateMainConfig, OutputFormat, PluginConfig,
+  TagOverrideConfig, TailwindConfig,
 };
 use mdream::{html_to_format_result, html_to_markdown};
 
@@ -1551,6 +1552,91 @@ fn streaming_drops_block_separator_before_empty_trailing_marker() {
       "chunk={chunk}"
     );
   }
+}
+
+#[test]
+fn skipped_pre_closes_surviving_child_fence_without_leaking_its_own_exit() {
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      isolate_main: Some(IsolateMainConfig),
+      tailwind: Some(TailwindConfig),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+
+  let unopened = "<pre id=><h4 id=>";
+  assert_eq!(html_to_markdown(unopened, options.clone()), "####");
+  assert_eq!(stream_chunks(unopened, 3, options.clone()), "####");
+
+  for html in [
+    "<pre id=><h4 id=><code id=>",
+    "<pre id=><h4 id=><code id=></code></h4></pre><p>after</p>",
+  ] {
+    let expected = html_to_markdown(html, options.clone());
+    assert_eq!(
+      expected.matches("```").count(),
+      2,
+      "html={html:?}: {expected:?}"
+    );
+    for chunk in [1, 3, html.len()] {
+      assert_eq!(
+        stream_chunks(html, chunk, options.clone()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+  }
+
+  let nested = "<pre id=><h4 id=><code id=>x</code><pre class=hidden>inert</pre>y</pre>";
+  let nested_output = html_to_markdown(nested, options.clone());
+  let closer = nested_output.rfind("```").expect("child fence opens");
+  assert!(
+    nested_output.find('y').is_some_and(|at| at < closer),
+    "nested skipped pre closed its ancestor's fence: {nested_output:?}"
+  );
+  assert_eq!(stream_chunks(nested, 3, options.clone()), nested_output);
+
+  let mut overridden = options;
+  overridden.plugins.as_mut().unwrap().tag_overrides = Some(vec![(
+    "pre".to_string(),
+    TagOverrideConfig {
+      exit: Some("UNMATCHED".to_string()),
+      ..Default::default()
+    },
+  )]);
+  let html = "<pre id=><h4 id=><code id=>";
+  let expected = html_to_markdown(html, overridden.clone());
+  assert!(
+    !expected.contains("UNMATCHED"),
+    "skipped pre exit leaked: {expected:?}"
+  );
+  assert_eq!(expected.matches("```").count(), 2);
+  assert_eq!(stream_chunks(html, 3, overridden), expected);
+}
+
+#[test]
+fn nested_pre_does_not_replace_or_close_outer_code_fence() {
+  for html in [
+    "<pre><code>x</code><pre></pre>y</pre>",
+    "<pre><code>x</code><pre>inner</pre>y</pre>",
+    "<pre><pre></pre>y</pre>",
+    "<pre><pre>inner</pre>y</pre>",
+    "<pre><pre><code>x</code></pre>y</pre>",
+  ] {
+    let output = html_to_markdown(html, HTMLToMarkdownOptions::default());
+    assert_eq!(output.matches("```").count(), 2, "{output:?}");
+    let closer = output.rfind("```").unwrap();
+    assert!(output.find('y').is_some_and(|at| at < closer), "{output:?}");
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  }
+
+  let html = "<pre class=language-rs><pre class=language-js></pre>y</pre>";
+  assert_eq!(
+    html_to_markdown(html, HTMLToMarkdownOptions::default()),
+    "```rs\ny\n```"
+  );
+  assert_stream_matches(html, HTMLToMarkdownOptions::default());
 }
 
 // A trailing whitespace run inside `<pre>` is still mutable until the code

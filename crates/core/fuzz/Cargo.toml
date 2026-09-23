@@ -71,3 +71,10 @@ path = "fuzz_targets/fuzz_options.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_streaming_widths"
+path = "fuzz_targets/fuzz_streaming_widths.rs"
+test = false
+doc = false
+bench = false
