@@ -44,3 +44,16 @@ fn whitespace_after_br_keeps_the_hard_break() {
   assert_eq!(md("<li>ew<br> <div>D"), "- ew  \n  D");
   assert_eq!(md("<li>ew<br>\n<div>D"), "- ew  \n  D");
 }
+
+// ── <br> inside <pre> ──
+
+#[test]
+fn br_after_whitespace_in_pre_stays_a_line_break() {
+  assert_eq!(md("<pre>a <br>b</pre>"), "```\na \nb\n```");
+  assert_eq!(md("<pre>t  <br>s</pre>"), "```\nt  \ns\n```");
+  assert_eq!(text("<pre>a <br>b</pre>"), "a \nb");
+  assert_eq!(md("<pre>a\n<br>b</pre>"), "```\na\n\nb\n```");
+  assert_eq!(md("<pre>a <b><br></b>c</pre>"), "```\na \nc\n```");
+  // Without the whitespace the break already worked.
+  assert_eq!(md("<pre>a<br>b</pre>"), "```\na\nb\n```");
+}

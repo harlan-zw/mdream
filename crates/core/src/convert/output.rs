@@ -4069,7 +4069,15 @@ impl ConvertState {
           || self
             .stack
             .last()
-            .is_some_and(|parent| parent.tag_id == Some(TAG_PRE)))
+            .is_some_and(|parent| parent.tag_id == Some(TAG_PRE))
+          // A `<br>` inside `<pre>` settles the whitespace state on enter (the
+          // `<br>` itself is on top of the stack then). Left set, a later exit
+          // reaches back and trims the break's own newline.
+          || (is_enter
+            && self
+              .stack
+              .last()
+              .is_some_and(|node| node.tag_id == Some(TAG_BR))))
       {
         let h_is_inline = is_inline;
         let collapses = self
