@@ -3976,6 +3976,54 @@ fn isolate_main_finds_deeply_nested_main() {
   assert!(!result.contains("Footer"));
 }
 
+fn isolate_main_options() -> HTMLToMarkdownOptions {
+  HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      isolate_main: Some(IsolateMainConfig {}),
+      ..Default::default()
+    }),
+    ..Default::default()
+  }
+}
+
+// A node whose start isolateMain skipped must not emit its end: the closer
+// would have no opener in the output.
+#[test]
+fn isolate_main_skipped_elements_emit_no_closers() {
+  let html = "<p>Hello <strong>world</strong>!</p>";
+  assert_eq!(convert_with_isolate_main(html), "");
+  assert_eq!(html_to_text(html, isolate_main_options()), "");
+  assert_eq!(html_to_html(html, isolate_main_options()), "");
+  assert_eq!(convert_with_isolate_main("<b>"), "");
+  assert_eq!(convert_with_isolate_main("<i>"), "");
+}
+
+#[test]
+fn isolate_main_skipped_empty_link_emits_no_label_or_tail() {
+  let html = r#"<a href="/x" title="Home"></a><h1>Title</h1><p>Body</p>"#;
+  assert_eq!(convert_with_isolate_main(html), "# Title\n\nBody");
+  assert_eq!(
+    html_to_html(html, isolate_main_options()),
+    r#"<h1 id="title">Title</h1><p>Body</p>"#
+  );
+}
+
+#[test]
+fn isolate_main_keeps_a_heading_inside_a_skipped_container() {
+  let html = "<div><nav><b>Menu</b></nav><h1>Title</h1><p>Body <em>here</em></p></div>";
+  assert_eq!(convert_with_isolate_main(html), "# Title\n\nBody *here*");
+  assert_eq!(
+    html_to_html(html, isolate_main_options()),
+    r#"<h1 id="title">Title</h1><p>Body <em>here</em></p>"#
+  );
+}
+
+#[test]
+fn isolate_main_skipped_footer_emits_no_closers() {
+  let html = "<h1>Title</h1><p>Body</p><footer><p><b>Foot</b></p></footer>";
+  assert_eq!(convert_with_isolate_main(html), "# Title\n\nBody");
+}
+
 // ── Script non-nesting: less-than operator ──
 
 #[test]

@@ -185,6 +185,9 @@ pub struct ElementNode {
   pub tag_id: Option<u8>,
   pub contains_whitespace: bool,
   pub excluded_from_markdown: bool,
+  /// A plugin skipped this node's start, so its end must not be emitted either.
+  /// Unlike `excluded_from_markdown`, the node's descendants stay eligible.
+  pub enter_skipped: bool,
   /// Cached from tag handler - avoids repeated get_tag_handler lookups
   pub is_inline: bool,
   pub excludes_text_nodes: bool,
