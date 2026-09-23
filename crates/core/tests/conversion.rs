@@ -976,6 +976,27 @@ fn autolink_not_collapsed_for_relative_href() {
   assert_eq!(convert(r#"<a href="/page">/page</a>"#), "[/page](/page)");
 }
 
+#[test]
+fn heading_inside_a_link_adds_no_blank_line_to_the_link_text() {
+  // A blank line ends the paragraph, so the link text never closes and the
+  // `](url)` is printed as literal text.
+  for (html, expected) in [
+    (r#"<a href="/x"><h4></h4></a>"#, "[<h4></h4>](/x)"),
+    (
+      r#"<a href="/x"><h2>Title</h2></a><p>next</p>"#,
+      "[<h2>Title</h2>](/x)\n\nnext",
+    ),
+    (
+      r#"<div><a href="/x"><h3>Card</h3><p>desc</p></a></div>"#,
+      "[<h3>Card</h3>desc](/x)",
+    ),
+    ("<b><h4>t</h4></b>x", "**#### t**x"),
+    ("<p>a</p><h2>t</h2><p>b</p>", "a\n\n## t\n\nb"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
 // ── Images ──
 
 #[test]
@@ -2297,6 +2318,59 @@ fn table_with_formatting() {
   assert!(md.contains("[link](https://example.com)"));
 }
 
+#[test]
+fn table_row_without_cells_writes_nothing() {
+  // GFM has no zero-column delimiter row, and a browser draws nothing for an
+  // empty `<tr>`. The first row with a cell becomes the header instead.
+  for (html, expected) in [
+    ("<table><tr></tr></table>", ""),
+    ("<p>x</p><table><tr></tr></table><p>y</p>", "x\n\ny"),
+    (
+      "<table><tr></tr><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></table>",
+      "| a | b |\n| --- | --- |\n| c |",
+    ),
+    (
+      "<table><thead><tr></tr></thead><tbody><tr><td>a</td></tr></tbody></table>",
+      "| a |\n| --- |",
+    ),
+    (
+      "<blockquote><table><tr></tr><tr><td>a</td></tr></table></blockquote>",
+      "> | a |\n> | --- |",
+    ),
+    (
+      "<ul><li>x<table><tr></tr><tr><td>a</td></tr></table></li></ul>",
+      "- x\n\n  | a |\n  | --- |",
+    ),
+    // Content outside any cell is not a column; it precedes the table, as a
+    // browser renders it.
+    (
+      "<table><tr><b>x</b><td>a</td></tr></table>",
+      "**x**\n\n| a |\n| --- |",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+  assert_eq!(
+    convert("<ul><li><table><tr></tr></table></li></ul>"),
+    convert("<ul><li></li></ul>")
+  );
+}
+
+#[test]
+fn table_row_without_cells_streams_identically_at_every_split() {
+  let input =
+    "<p>x</p><table><tr></tr><tr><th>a</th><th>b</th></tr><tr><td>c</td></tr></table><p>y</p>";
+  let expected = convert(input);
+  assert_eq!(expected, "x\n\n| a | b |\n| --- | --- |\n| c |\n\ny");
+  for split in 0..=input.len() {
+    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut output = stream.process_chunk(&input[..split]);
+    output.push_str(&stream.process_chunk(&input[split..]));
+    output.push_str(&stream.finish());
+    assert_eq!(output, expected, "split={split}");
+  }
+}
+
 // ── Code blocks ──
 
 #[test]
@@ -2320,6 +2394,22 @@ fn code_block_preserves_newlines() {
   let html = "<pre><code>Line 1\n\n\nLine 2</code></pre>";
   let md = convert(html);
   assert!(md.contains("Line 1\n\n\nLine 2"));
+}
+
+#[test]
+fn pre_nested_in_a_fenced_pre_leaves_the_fence_to_the_outer_pre() {
+  // Only the outermost `<pre>` owns the fence. An inner one closing it left the
+  // outer fence unclosed or reopened, swallowing the rest of the document.
+  for (html, expected) in [
+    ("<pre><td><pre>", "```\n<pre></pre>\n```"),
+    (
+      "<pre>a<table><tr><td><pre>b</pre></td></tr></table>c</pre>d",
+      "```\na\n| <pre>b</pre> |\n| --- |\n\nc\n```\n\nd",
+    ),
+    ("<pre>a<pre>b</pre>c</pre>d", "```\na\nb\nc\n```\n\nd"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
 }
 
 // ── HTML entities ──
