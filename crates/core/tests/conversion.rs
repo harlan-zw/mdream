@@ -1013,6 +1013,22 @@ fn heading_inside_a_markerless_wrapper_keeps_its_trailing_blank_line() {
   }
 }
 
+#[test]
+fn heading_inside_an_hrefless_anchor_keeps_its_trailing_blank_line() {
+  // An anchor without href emits no markup at all, so it counts as a
+  // marker-less wrapper: the heading must close its block instead of gluing
+  // the following text into its raw-HTML line. A literal `*` stays escaped.
+  for (html, expected) in [
+    (
+      "<a><h4>t</h4></a>see *this*",
+      "<h4>t</h4>\n\nsee \\*this\\*",
+    ),
+    ("<a><h4>t</h4>x</a>", "<h4>t</h4>\n\nx"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
 // ── Images ──
 
 #[test]
@@ -2369,6 +2385,31 @@ fn table_row_without_cells_writes_nothing() {
   assert_eq!(
     convert("<ul><li><table><tr></tr></table></li></ul>"),
     convert("<ul><li></li></ul>")
+  );
+}
+
+#[test]
+fn table_row_without_cells_ignores_an_override_without_output() {
+  // A <tr> override carrying neither enter nor exit output renders the row
+  // like the built-in handler, so the empty first row must still be deferred
+  // instead of writing a zero-column header.
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "tr".to_string(),
+        TagOverrideConfig {
+          // Same spacing the built-in <tr> handler uses.
+          spacing: Some([0, 1]),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown("<table><tr></tr><tr><td>a</td></tr></table>", options),
+    "| a |\n| --- |"
   );
 }
 

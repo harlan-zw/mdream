@@ -839,10 +839,14 @@ impl ConvertState {
         } else if tag_id == Some(TAG_TR) {
           self.table_current_row_cells = 0;
           // A nested table's row must not clear an outer header row's pending
-          // opener, or that row's first cell would open no row.
+          // opener, or that row's first cell would open no row. An override
+          // with neither enter nor exit output renders the row like the
+          // built-in handler, so it keeps the empty-row deferral too; only an
+          // explicit-output override takes over the row's own edges.
           if self.depth_map[TAG_TABLE as usize] <= 1 && !self.in_table_cell() {
-            self.table_row_opener_pending =
-              !self.plain_text && !self.table_rendered_table && override_config.is_none();
+            self.table_row_opener_pending = !self.plain_text
+              && !self.table_rendered_table
+              && override_config.is_none_or(|ov| ov.enter.is_none() && ov.exit.is_none());
           }
         } else if tag_id == Some(TAG_TH) {
           let align_val = node.attributes.get_bit(ATTR_ALIGN).map_or(0u8, |s| {
@@ -4230,12 +4234,17 @@ impl ConvertState {
   }
 
   /// Whether the tag writes visible inline Markdown around its content:
-  /// emphasis, code ticks, raw-tag wrappers, or an anchor. A heading nested in
-  /// one must not end its line, or the wrapper's remaining text splits off.
+  /// emphasis, code ticks, raw-tag wrappers, or an anchor that emits markup.
+  /// A heading nested in one must not end its line, or the wrapper's remaining
+  /// text splits off.
   #[inline]
-  fn wrapper_emits_inline_markdown(tag_id: Option<u8>) -> bool {
-    tag_id.is_some_and(|id| {
-      matches!(
+  fn wrapper_emits_inline_markdown(&self, node: &ElementNode) -> bool {
+    match node.tag_id {
+      // The enter handler writes `[` only for an href anchor, and its raw tag
+      // inside a raw-HTML block; any other anchor emits nothing at either
+      // edge, so it counts as a marker-less wrapper.
+      Some(TAG_A) => self.in_raw_html_block() || node.attributes.contains_bit(ATTR_HREF),
+      Some(id) => matches!(
         id,
         TAG_STRONG
           | TAG_B
@@ -4256,9 +4265,9 @@ impl ConvertState {
           | TAG_CITE
           | TAG_DFN
           | TAG_Q
-          | TAG_A
-      )
-    })
+      ),
+      None => false,
+    }
   }
 
   /// The depth-1 collapsing ancestor at a heading's exit is the only open
@@ -4275,7 +4284,7 @@ impl ConvertState {
           && !node.excluded_from_markdown
           && node.tag_id != Some(TAG_SPAN)
       })
-      .is_some_and(|node| Self::wrapper_emits_inline_markdown(node.tag_id))
+      .is_some_and(|node| self.wrapper_emits_inline_markdown(node))
   }
 
   #[inline]
