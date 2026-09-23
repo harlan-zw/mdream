@@ -5529,6 +5529,12 @@ fn frontmatter_skips_meta_with_empty_content() {
     frontmatter_md(r#"<head><meta name="description" content="d&#9;"></head>"#),
     "---\nmeta:\n  description: \"d\\t\"\n---"
   );
+  // An interior tab reaches the reader raw in a plain scalar, where it is
+  // rejected outright or folded to a space, so any tab forces quotes.
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content="a&#9;b"></head>"#),
+    "---\nmeta:\n  description: \"a\\tb\"\n---"
+  );
 }
 
 // Configured fields are written by the caller, who may mean `draft: true` as a

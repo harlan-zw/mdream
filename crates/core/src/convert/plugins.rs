@@ -29,9 +29,9 @@ const YAML_IMPLICIT_WORDS: [&str; 10] = [
 ///
 /// A plain scalar takes every byte literally, including a backslash, so it is
 /// kept when YAML reads it as written. An empty value reads as null, and an
-/// indicator first byte starts other syntax. A space, `:`, `#`, `"`, line break
-/// or control character also forces quotes, and so do edge tabs: a reader
-/// strips the separation whitespace after `:`, strips a plain scalar's
+/// indicator first byte starts other syntax. A space, `:`, `#`, `"`, line break,
+/// tab or control character also forces quotes: a reader rejects or folds a raw
+/// tab, strips the separation whitespace after `:`, strips a plain scalar's
 /// trailing whitespace, and resolves a whitespace-only value to null. Inside
 /// double quotes a backslash starts an escape, so backslashes, quotes and
 /// characters a reader does not keep as written are escaped there, and only
@@ -69,10 +69,9 @@ fn yaml_scalar(val: &str, as_string: bool) -> String {
         || bytes
           .iter()
           .any(|&b| matches!(b, b':' | b'#' | b' ' | b'"'))
-        || val.chars().any(|c| {
-          (c.is_control() && c != '\t')
-            || matches!(c, '\u{fffe}' | '\u{ffff}' | '\u{2028}' | '\u{2029}')
-        })
+        || val
+          .chars()
+          .any(|c| c.is_control() || matches!(c, '\u{fffe}' | '\u{ffff}' | '\u{2028}' | '\u{2029}'))
         || (as_string
           // Numbers, dates, `.inf` and `.nan` start with one of these.
           && (matches!(first, b'0'..=b'9' | b'.' | b'+')

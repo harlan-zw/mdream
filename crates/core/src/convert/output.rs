@@ -3416,13 +3416,13 @@ impl ConvertState {
       TAG_SUP => Some(Cow::Borrowed("<sup>")),
       TAG_INS => Some(Cow::Borrowed("<ins>")),
       TAG_P => {
+        // A drain can empty the buffer mid-document, so the check reads the
+        // flushed tail like the close-side twin below, not just the buffer.
         if self.depth_map[TAG_LI as usize] > 0
           && !self.in_table_cell()
           && self
-            .buffer
-            .as_bytes()
-            .last()
-            .is_some_and(|&last_char| last_char != b' ' && last_char != b'\n')
+            .last_output_byte()
+            .is_some_and(|last_char| last_char != b' ' && last_char != b'\n')
         {
           let indent = self.list_indent.as_str();
           let mut s = String::with_capacity(2 + indent.len());
@@ -3494,7 +3494,7 @@ impl ConvertState {
           // separated with a space so CommonMark parses them as two
           // code spans rather than merging into one (` `a``b` ` →
           // single span with literal content ``a``b``).
-          if self.buffer.as_bytes().last().is_some_and(|&last_char| {
+          if self.last_output_byte().is_some_and(|last_char| {
             !matches!(
               last_char,
               b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
@@ -4301,7 +4301,7 @@ impl ConvertState {
 
 #[cfg(test)]
 mod tests {
-  use super::{ConvertState, CutLineLead, TAG_A};
+  use super::{ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_LI, TAG_P};
   use crate::types::{HTMLToMarkdownOptions, OutputFormat};
 
   #[test]
@@ -4348,6 +4348,63 @@ mod tests {
 
     state.buffer.push('z');
     assert_eq!(state.last_output_byte(), Some(b'z'));
+  }
+
+  /// An open list item whose buffer a drain emptied: the item's content line
+  /// was cut away, a trim removed the retained tail, and `y` is the byte the
+  /// output last followed, reachable only through `flushed_tail`.
+  fn drained_open_list_item() -> ConvertState {
+    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.depth_map[TAG_LI as usize] = 1;
+    state.list_indent = "  ".to_string();
+    state.has_streamed_output = true;
+    state.cut_line_lead = CutLineLead::Content;
+    state.flushed_tail = *b"xy";
+    state
+  }
+
+  fn entering_node(tag_id: u8, is_inline: bool) -> super::ElementNode {
+    super::ElementNode {
+      attributes: crate::types::Attributes::default(),
+      extras: None,
+      depth: 1,
+      index: 0,
+      current_walk_index: 0,
+      child_text_node_index: 0,
+      tag_id: Some(tag_id),
+      contains_whitespace: false,
+      excluded_from_markdown: false,
+      is_inline,
+      excludes_text_nodes: false,
+      is_non_nesting: false,
+      collapses_inner_white_space: false,
+      spacing: None,
+    }
+  }
+
+  // One-shot sees the `x` in its buffer and opens the block with the blank
+  // line plus continuation indent; the open-side check must read the flushed
+  // tail the same way, or streaming drops the separator one-shot keeps.
+  #[test]
+  fn drained_buffer_p_open_keeps_the_list_separator() {
+    let mut state = drained_open_list_item();
+    state.stack.push(entering_node(TAG_P, false));
+
+    state.emit_enter_element();
+
+    assert_eq!(state.buffer, "\n\n  ");
+  }
+
+  // A code span after drained content glues with a separator space, the way
+  // it does after visible content in one-shot.
+  #[test]
+  fn drained_buffer_code_open_keeps_the_glue_space() {
+    let mut state = drained_open_list_item();
+    state.stack.push(entering_node(TAG_CODE, true));
+
+    state.emit_enter_element();
+
+    assert_eq!(state.buffer, " `");
   }
 
   #[test]
