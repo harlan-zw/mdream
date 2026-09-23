@@ -95,4 +95,10 @@ export const CONVERSION_CORPUS: string[] = [
   `<h3>a #<em>`,
   `<li><h3><em>`,
   `<h2>x # <b></b></h2>`,
+  `S<pre>`,
+  `><pre>`,
+  `S<pre></pre>`,
+  `S<pre>  </pre>`,
+  `S<pre></pre><pre>`,
+  `a<pre> <b></b> </pre>`,
 ]

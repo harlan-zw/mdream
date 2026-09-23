@@ -2074,7 +2074,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     resolveItemMarker(state, false, unresolvedCaptionFragment)
     const content = state.buffer.join('')
     const currentContent = hasYieldedContent ? content : content.trimStart()
-    const inPre = state.depthMap[TAG_PRE] !== 0
+    // A <pre> whose fence is still pending has written only block spacing,
+    // which finalization trims when the block stays empty. Hold that spacing
+    // like any other trailing spacing.
+    const inPre = state.depthMap[TAG_PRE] !== 0 && !state.preFencePending
     let stableLength = currentContent.length
     let retainMutableFragments = false
     if (inPre) {
