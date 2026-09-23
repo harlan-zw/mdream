@@ -5443,11 +5443,27 @@ fn frontmatter_values_are_valid_yaml_scalars() {
     ("\"q\" x", "title: \"\\\"q\\\" x\""),
     ("'q'", "title: \"'q'\""),
     ("[x]", "title: \"[x]\""),
-    ("-x", "title: \"-x\""),
+    ("-x", "title: -x"),
+    ("-", "title: \"-\""),
+    ("-5", "title: \"-5\""),
     ("*x", "title: \"*x\""),
     ("a-b", "title: a-b"),
     ("plain", "title: plain"),
     ("a: b", "title: \"a: b\""),
+    // Implicitly typed values stay strings.
+    ("2024", "title: \"2024\""),
+    ("1.5", "title: \"1.5\""),
+    ("2024-01-02", "title: \"2024-01-02\""),
+    (".inf", "title: \".inf\""),
+    ("true", "title: \"true\""),
+    ("No", "title: \"No\""),
+    ("NULL", "title: \"NULL\""),
+    ("~", "title: \"~\""),
+    ("v1.0", "title: v1.0"),
+    ("nothing", "title: nothing"),
+    // YAML allows no raw control character, U+0000 included.
+    ("a\0b", "title: \"a\\x00b\""),
+    ("a\u{7f}b", "title: \"a\\x7fb\""),
   ] {
     let md = frontmatter_md(&format!("<head><title>{title}</title></head>"));
     assert_eq!(md, format!("---\n{expected}\n---"), "title={title:?}");
@@ -5466,7 +5482,7 @@ fn frontmatter_skips_meta_with_empty_content() {
     frontmatter_md(
       r#"<head><meta name="description" content=.><meta name="og:title" content=D><meta name="og:description" content></head>"#
     ),
-    "---\nmeta:\n  description: .\n  \"og:title\": D\n---"
+    "---\nmeta:\n  description: \".\"\n  \"og:title\": D\n---"
   );
   // A later empty duplicate does not erase an earlier value.
   assert_eq!(
@@ -5490,4 +5506,31 @@ fn frontmatter_skips_meta_with_empty_content() {
     },
   );
   assert_eq!(md, "---\ncustom: \"\"\n---");
+}
+
+// Configured fields are written by the caller, who may mean `draft: true` as a
+// boolean, so only text read from the page is forced to stay a string.
+#[test]
+fn frontmatter_additional_fields_keep_yaml_typing() {
+  let md = html_to_markdown(
+    "<head><title>2024</title></head>",
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        frontmatter: Some(FrontmatterConfig {
+          additional_fields: Some(vec![
+            ("date".to_string(), "2025-05-10".to_string()),
+            ("draft".to_string(), "true".to_string()),
+            ("path".to_string(), "C:\\dir".to_string()),
+          ]),
+          meta_fields: None,
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert_eq!(
+    md,
+    "---\ntitle: \"2024\"\ndate: 2025-05-10\ndraft: true\npath: \"C:\\\\dir\"\n---"
+  );
 }

@@ -20,23 +20,31 @@ where
   }
 }
 
-/// Format `val` as a YAML scalar that reads back as `val`.
+/// Words a YAML 1.1 or 1.2 reader resolves to null or a boolean.
+const YAML_IMPLICIT_WORDS: [&str; 10] = [
+  "null", "true", "false", "yes", "no", "on", "off", "y", "n", "~",
+];
+
+/// Format `val` as a YAML scalar.
 ///
 /// A plain scalar takes every byte literally, including a backslash, so it is
 /// kept when YAML reads it as written. An empty value reads as null, and an
-/// indicator first byte starts other syntax. A space, `:`, `#`, `"` or line break
-/// also forces quotes. Inside double quotes a backslash starts an escape, so
-/// backslashes, quotes and line breaks are escaped there, and only there.
-fn yaml_scalar(val: &str) -> String {
+/// indicator first byte starts other syntax. A space, `:`, `#`, `"`, line break
+/// or control character also forces quotes. Inside double quotes a backslash
+/// starts an escape, so backslashes, quotes and non-printable characters are
+/// escaped there, and only there.
+///
+/// Text read from the page is a string, so with `as_string` a value a reader
+/// would resolve to a number, date, boolean or null is quoted too. Configured
+/// fields keep that typing: `draft: true` is meant as a boolean.
+fn yaml_scalar(val: &str, as_string: bool) -> String {
   let bytes = val.as_bytes();
-  let quote = match bytes.first() {
-    None => true,
-    Some(&first) => {
+  let quote = match bytes {
+    [] => true,
+    [first, rest @ ..] => {
       matches!(
         first,
-        b'-'
-          | b'?'
-          | b','
+        b','
           | b'['
           | b']'
           | b'{'
@@ -50,9 +58,18 @@ fn yaml_scalar(val: &str) -> String {
           | b'%'
           | b'@'
           | b'`'
-      ) || bytes
-        .iter()
-        .any(|&b| matches!(b, b'\n' | b'\r' | b':' | b'#' | b' ' | b'"'))
+      ) || (rest.is_empty() && matches!(first, b'-' | b'?'))
+        || bytes
+          .iter()
+          .any(|&b| matches!(b, b':' | b'#' | b' ' | b'"'))
+        || val.chars().any(|c| c.is_control() && c != '\t')
+        || (as_string
+          // Numbers, dates, `.inf` and `.nan` start with one of these.
+          && (matches!(first, b'0'..=b'9' | b'.' | b'+')
+            || (*first == b'-' && matches!(rest.first(), Some(b'0'..=b'9' | b'.')))
+            || YAML_IMPLICIT_WORDS
+              .iter()
+              .any(|word| val.eq_ignore_ascii_case(word))))
     }
   };
   if !quote {
@@ -67,6 +84,14 @@ fn yaml_scalar(val: &str) -> String {
       // A raw break folds to a space, and under `meta:` it ends the mapping.
       '\n' => out.push_str("\\n"),
       '\r' => out.push_str("\\r"),
+      '\t' => out.push('\t'),
+      // YAML allows no other control character in a scalar, U+0000 included.
+      _ if ch.is_control() => {
+        let code = ch as u32;
+        out.push_str("\\x");
+        out.push(char::from_digit(code >> 4, 16).unwrap_or('0'));
+        out.push(char::from_digit(code & 0xF, 16).unwrap_or('0'));
+      }
       _ => out.push(ch),
     }
   }
@@ -86,11 +111,9 @@ impl ConvertState {
       .as_ref()
       .and_then(|p| p.frontmatter.as_ref());
 
-    let format_val = yaml_scalar;
-
     let mut yaml_out = Vec::new();
     if let Some(t) = &self.frontmatter_title {
-      yaml_out.push(format!("title: {}", format_val(t)));
+      yaml_out.push(format!("title: {}", yaml_scalar(t, true)));
     }
 
     if let Some(f) = f_opts
@@ -100,7 +123,7 @@ impl ConvertState {
       sort_fields_by_key(&mut sorted, |(key, _)| key);
       for (key, val) in sorted {
         if key != "title" && key != "description" {
-          yaml_out.push(format!("{}: {}", key, format_val(val)));
+          yaml_out.push(format!("{}: {}", key, yaml_scalar(val, false)));
         }
       }
     }
@@ -114,7 +137,7 @@ impl ConvertState {
         } else {
           key.clone()
         };
-        yaml_out.push(format!("  {}: {}", k_fmt, format_val(val)));
+        yaml_out.push(format!("  {}: {}", k_fmt, yaml_scalar(val, true)));
       }
     }
 
