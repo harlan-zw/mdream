@@ -1,5 +1,6 @@
 import { htmlToMarkdown as _htmlToMarkdown, MarkdownStream as _MarkdownStream } from '../napi/index.mjs'
 import { resolveOptions } from './resolve-options.js'
+import { createSurrogateCarry } from './surrogate-carry.js'
 
 export interface CleanOptions {
   /** Strip tracking query parameters (utm_*, fbclid, gclid, etc.) from URLs */
@@ -107,19 +108,22 @@ export async function* streamHtmlToMarkdown(
   const stream = new _MarkdownStream(napiOpts)
   const reader = htmlStream.getReader()
   const decoder = new TextDecoder()
+  const carry = createSurrogateCarry()
   try {
     while (true) {
       const { done, value } = await reader.read()
       if (done)
         break
+      // Only one of the byte tail and the surrogate carry can be pending: each
+      // chunk type flushes the other's.
       const chunk = typeof value === 'string'
-        ? decoder.decode() + value
-        : decoder.decode(value, { stream: true })
+        ? carry.take(decoder.decode() + value)
+        : carry.flush() + decoder.decode(value, { stream: true })
       const processed = stream.processChunk(chunk)
       if (processed)
         yield processed
     }
-    const decoderTail = decoder.decode()
+    const decoderTail = carry.flush() + decoder.decode()
     if (decoderTail) {
       const processed = stream.processChunk(decoderTail)
       if (processed)
