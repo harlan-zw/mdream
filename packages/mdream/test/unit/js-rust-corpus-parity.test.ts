@@ -39,6 +39,8 @@ const KNOWN_DIFFERENCES = new Set<string>([
   ['markdown', 'a<br> b'],
   ['text', 'a<br> b'],
   ['text', '<html><head><title>A</title><meta name="description" content="da"></head><body><header>x</header><h1>A</h1><p>a</p><footer>f</footer></body></html>'],
+  // Rust keeps the whitespace after a discarded <script> (html-head-whitespace).
+  ['html', '<script></script>\n<p>abc</p>'],
 ].map(([format, html]) => `${format}\u0000${html}`))
 
 describe('javaScript and Rust engines agree on the corpus', () => {
