@@ -12,16 +12,30 @@ use crate::types::{
   ElementNode, ExtractedElement, HTMLToMarkdownOptions, NodeExtras, OutputFormat, TagHandler,
   TagOverrideConfig, TailwindData,
 };
-use crate::url::{
-  is_autolink_uri, is_data_url, is_empty_link_href, is_safe_html_url, resolve_url, slugify_heading,
-};
+use crate::url::{is_autolink_uri, is_data_url, is_empty_link_href, resolve_url, slugify_heading};
 use std::borrow::Cow;
+
+/// Whether the conversion writes plain text. A macro rather than a method: a
+/// method call changes MIR shape and grew the all-format WASM build by 50 B.
+#[cfg(feature = "text")]
+macro_rules! plain_text {
+  ($state:expr) => {
+    ($state.plain_text | !MULTI_FORMAT)
+  };
+}
+#[cfg(not(feature = "text"))]
+macro_rules! plain_text {
+  ($state:expr) => {
+    false
+  };
+}
 
 mod html_output;
 mod output;
 mod parse;
 mod plugins;
 
+#[cfg(feature = "html")]
 use html_output::HtmlFrame;
 
 /// Tracked element during extraction — maps stack depth to accumulator
@@ -687,7 +701,12 @@ pub struct ConvertState {
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
   /// hot path — a single integer compare). Code/tables/headings are exempt.
   wrap_width: usize,
+  // A text-only build reads `plain_text` instead.
+  #[cfg_attr(not(any(feature = "markdown", feature = "html")), allow(dead_code))]
   format: OutputFormat,
+  /// Cached `format == Text`. The hot text path reads a bool instead of
+  /// comparing the enum, which keeps the WASM build the same size.
+  #[cfg(feature = "text")]
   plain_text: bool,
   preserve_leading_whitespace: bool,
 
@@ -726,6 +745,7 @@ pub struct ConvertState {
   in_heading: bool,
   /// Buffer position at heading start (for extracting heading text)
   heading_buffer_start: usize,
+  #[cfg(feature = "html")]
   html_frames: Vec<HtmlFrame>,
 
   /// Cumulative indent string for list-item continuation content. Grows by
@@ -771,11 +791,43 @@ pub struct ConvertState {
   override_idx: Option<Box<[u8; MAX_TAG_ID]>>,
 }
 
+/// Whether the build enables more than one output format. With exactly one,
+/// every format check folds to a constant and the other renderers drop out.
+const MULTI_FORMAT: bool =
+  cfg!(feature = "markdown") as u8 + cfg!(feature = "text") as u8 + cfg!(feature = "html") as u8
+    > 1;
+
 /// `override_idx` slot for a tag no override key names. Doubles as the
 /// exclusive upper bound on indices the table can hold.
 pub(crate) const NO_OVERRIDE: u8 = u8::MAX;
 
 impl ConvertState {
+  /// Whether this conversion writes Markdown. Constant in a single-format build.
+  #[inline(always)]
+  #[cfg_attr(not(feature = "markdown"), allow(clippy::unused_self))]
+  pub(crate) fn is_markdown(&self) -> bool {
+    #[cfg(feature = "markdown")]
+    {
+      !MULTI_FORMAT || self.format == OutputFormat::Markdown
+    }
+    #[cfg(not(feature = "markdown"))]
+    {
+      false
+    }
+  }
+  /// Whether this conversion writes safe HTML. Constant in a single-format build.
+  #[inline(always)]
+  #[cfg_attr(not(feature = "html"), allow(clippy::unused_self))]
+  pub(crate) fn is_html(&self) -> bool {
+    #[cfg(feature = "html")]
+    {
+      !MULTI_FORMAT || self.format == OutputFormat::Html
+    }
+    #[cfg(not(feature = "html"))]
+    {
+      false
+    }
+  }
   /// Check if we're inside a table cell (either `<td>` or `<th>`).
   #[inline]
   pub(crate) fn in_table_cell(&self) -> bool {
@@ -786,7 +838,6 @@ impl ConvertState {
     // Read wrap width before `options` is moved into the struct below.
     let options_wrap_width = options.wrap_width;
     let options_max_node_bytes = options.max_node_bytes;
-    let plain_text = format == OutputFormat::Text;
     let mut s = Self {
       depth_map: [0; MAX_TAG_ID],
       depth: 0,
@@ -886,8 +937,9 @@ impl ConvertState {
       disable_drain: false,
 
       wrap_width: options_wrap_width,
+      #[cfg(feature = "text")]
+      plain_text: format == OutputFormat::Text,
       format,
-      plain_text,
       preserve_leading_whitespace: false,
       clean_flags: 0,
       raw_html_link_open: false,
@@ -907,6 +959,7 @@ impl ConvertState {
       fragment_links: Vec::new(),
       in_heading: false,
       heading_buffer_start: 0,
+      #[cfg(feature = "html")]
       html_frames: Vec::new(),
 
       list_indent: String::new(),
@@ -1795,7 +1848,7 @@ impl ConvertState {
   }
 
   pub fn get_markdown(&mut self) -> String {
-    if self.format == OutputFormat::Html {
+    if self.is_html() {
       return std::mem::take(&mut self.buffer);
     }
     // ASCII whitespace only, as everywhere else: U+00A0 is content, and the
@@ -2087,10 +2140,10 @@ impl ConvertState {
   }
 
   pub fn get_markdown_chunk(&mut self) -> String {
-    if self.format == OutputFormat::Html {
+    if self.is_html() {
       return std::mem::take(&mut self.buffer);
     }
-    if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+    if !plain_text!(self) && self.clean_flags & CLEAN_FRAGMENTS != 0 {
       return String::new();
     }
     // Quote only what this chunk could already hand out. The tail past here is
@@ -2261,10 +2314,7 @@ impl ConvertState {
   }
 
   pub fn get_final_markdown_chunk(&mut self) -> String {
-    if !self.plain_text
-      && self.format != OutputFormat::Html
-      && self.clean_flags & CLEAN_FRAGMENTS != 0
-    {
+    if !plain_text!(self) && !self.is_html() && self.clean_flags & CLEAN_FRAGMENTS != 0 {
       self.get_markdown()
     } else {
       self.get_markdown_chunk()

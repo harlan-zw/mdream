@@ -1,0 +1,13 @@
+[package]
+name = "baseline"
+
+version.workspace = true
+
+edition.workspace = true
+
+rust-version.workspace = true
+
+publish.workspace = true
+
+[dependencies]
+mdream-rust-bundle = { path = "../common" }

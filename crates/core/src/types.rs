@@ -754,14 +754,33 @@ pub struct MdreamResult {
   pub truncated: bool,
 }
 
-/// Output format for conversion.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[cfg(not(any(feature = "markdown", feature = "text", feature = "html")))]
+compile_error!("mdream needs at least one output format feature: `markdown`, `text`, or `html`.");
+
+/// Output format for conversion. Each variant exists only when its cargo
+/// feature is enabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
   /// Markdown output (default).
-  #[default]
+  #[cfg(feature = "markdown")]
   Markdown,
   /// Plain text output with Markdown/HTML syntax omitted.
+  #[cfg(feature = "text")]
   Text,
   /// Allowlisted semantic HTML output.
+  #[cfg(feature = "html")]
   Html,
+}
+
+#[cfg(any(feature = "markdown", feature = "text", feature = "html"))]
+impl Default for OutputFormat {
+  /// Markdown, or the first enabled format when the build omits Markdown.
+  fn default() -> Self {
+    #[cfg(feature = "markdown")]
+    return Self::Markdown;
+    #[cfg(all(not(feature = "markdown"), feature = "text"))]
+    return Self::Text;
+    #[cfg(all(not(feature = "markdown"), not(feature = "text"), feature = "html"))]
+    return Self::Html;
+  }
 }

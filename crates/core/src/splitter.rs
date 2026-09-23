@@ -452,6 +452,7 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
 }
 
 /// Convert HTML to Markdown and split into chunks in one call.
+#[cfg(feature = "markdown")]
 pub fn html_to_markdown_chunks(
   html: &str,
   md_opts: HTMLToMarkdownOptions,

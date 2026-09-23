@@ -22,7 +22,7 @@ where
 
 impl ConvertState {
   pub(crate) fn generate_frontmatter_yaml(&mut self) {
-    if self.format != OutputFormat::Markdown {
+    if !self.is_markdown() {
       return;
     }
 

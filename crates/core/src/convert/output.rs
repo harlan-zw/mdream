@@ -766,7 +766,8 @@ impl ConvertState {
       return;
     }
 
-    if self.format == OutputFormat::Html {
+    #[cfg(feature = "html")]
+    if self.is_html() {
       self.emit_html_enter();
       return;
     }
@@ -778,7 +779,7 @@ impl ConvertState {
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
     // language) is emitted lazily above for the no-<code> case. Skipped inside
     // a table cell, where the <pre> is emitted as raw HTML instead (issue #147).
-    if !self.plain_text
+    if !plain_text!(self)
       && self.stack[stack_len - 1].tag_id == Some(TAG_PRE)
       && !self.in_table_cell()
     {
@@ -877,7 +878,7 @@ impl ConvertState {
 
     // A literal override is code content inside `<pre>`, even when the tag's
     // built-in formatting would be suppressed there.
-    if !self.plain_text && self.pre_fence_pending {
+    if !plain_text!(self) && self.pre_fence_pending {
       if code_owns_pending_pre_fence(&self.stack) && !enter_is_literal {
         self.pre_fence_pending = false;
       } else if tag_id != Some(TAG_PRE)
@@ -997,7 +998,7 @@ impl ConvertState {
         output = None;
       }
     }
-    if !self.plain_text
+    if !plain_text!(self)
       && !enter_is_literal
       && tag_id == Some(TAG_BR)
       && configured_new_lines == 0
@@ -1012,7 +1013,7 @@ impl ConvertState {
       self.last_node_is_inline = is_inline;
       return;
     }
-    if self.plain_text
+    if plain_text!(self)
       && !enter_is_literal
       && tag_id == Some(TAG_BR)
       && configured_new_lines == 0
@@ -1026,7 +1027,7 @@ impl ConvertState {
         }
       }
     }
-    if !self.plain_text
+    if !plain_text!(self)
       && !enter_is_literal
       && tag_id == Some(TAG_BR)
       && configured_new_lines == 0
@@ -1045,7 +1046,7 @@ impl ConvertState {
     // Finalize completed quote lines before recording a new code offset. A
     // later flush must stop at that offset, but the prefix before it is safe to
     // quote and yield now even when both arrive in one large input chunk.
-    if !self.plain_text
+    if !plain_text!(self)
       && !enter_is_literal
       && tag_id == Some(TAG_CODE)
       && output.is_some()
@@ -1069,7 +1070,7 @@ impl ConvertState {
       && output.as_deref().is_some_and(|emitted| {
         self.buffer.len() > output_start
           && self.last_content_cache_len == emitted.len()
-          && (!self.plain_text || emitted.as_bytes().iter().any(|&byte| !is_whitespace(byte)))
+          && (!plain_text!(self) || emitted.as_bytes().iter().any(|&byte| !is_whitespace(byte)))
       })
     {
       self.mark_rendered_child_content();
@@ -1100,7 +1101,7 @@ impl ConvertState {
       self.link.empty_text_pending = false;
     }
 
-    if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
+    if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
       self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
     }
 
@@ -1109,7 +1110,7 @@ impl ConvertState {
     // before the region began and earlier block spacing is read as if inside,
     // escaping text that is passed through verbatim: `\*` reaches the reader as a
     // literal backslash.
-    if !self.plain_text
+    if !plain_text!(self)
       && tag_id.is_some_and(Self::is_raw_html_block_tag)
       && self.raw_html_block_depth() == 1
     {
@@ -1117,7 +1118,7 @@ impl ConvertState {
       self.raw_html_scanned_to = self.buffer.len();
     }
 
-    if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
+    if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
       if !self.blockquotes.is_empty() && self.buffer.ends_with("\n\n") {
         self.truncate_buffer(self.buffer.len() - 1);
         // Frames anchored at the old end move with the popped byte. Siblings can
@@ -1261,7 +1262,8 @@ impl ConvertState {
       return;
     }
 
-    if self.format == OutputFormat::Html {
+    #[cfg(feature = "html")]
+    if self.is_html() {
       self.emit_html_exit(node);
       return;
     }
@@ -1326,7 +1328,7 @@ impl ConvertState {
 
     if !has_override {
       // Special case: TR table separator
-      if tag_id == Some(TAG_TR) && !self.plain_text {
+      if tag_id == Some(TAG_TR) && !plain_text!(self) {
         if !self.table_rendered_table && self.depth_map[TAG_TABLE as usize] <= 1 {
           self.table_rendered_table = true;
           let col_count = self
@@ -1357,11 +1359,11 @@ impl ConvertState {
         } else {
           output = self.get_exit_output(node, cell_span);
         }
-      } else if self.plain_text || tag_id != Some(TAG_A) || raw_html_anchor {
+      } else if plain_text!(self) || tag_id != Some(TAG_A) || raw_html_anchor {
         output = self.get_exit_output(node, cell_span);
       }
     }
-    if !self.plain_text && self.pre_fence_pending && tag_id != Some(TAG_PRE) && has_override {
+    if !plain_text!(self) && self.pre_fence_pending && tag_id != Some(TAG_PRE) && has_override {
       self.flush_pre_fence();
     }
     // Pop for every inline <code> exit that could have pushed: the enter push
@@ -1452,7 +1454,7 @@ impl ConvertState {
     }
 
     if !has_override
-      && !self.plain_text
+      && !plain_text!(self)
       && tag_id == Some(TAG_HR)
       && !self.in_table_cell()
       && self.depth_map[TAG_LI as usize] > 0
@@ -1460,7 +1462,7 @@ impl ConvertState {
       self.list_rule_pending = true;
     }
 
-    if !self.plain_text && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty() {
+    if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty() {
       self.finalize_blockquote();
     }
 
@@ -1482,7 +1484,7 @@ impl ConvertState {
 
     // Clean mode exit — single guard. Skipped for overridden anchors,
     // whose custom exit output isn't the default `[…](…)` shape.
-    if !self.plain_text && self.clean_flags != 0 && tag_id == Some(TAG_A) && !has_override {
+    if !plain_text!(self) && self.clean_flags != 0 && tag_id == Some(TAG_A) && !has_override {
       // emptyLinks: skip exit for skipped links
       if self.link.skipped {
         self.end_link();
@@ -1491,7 +1493,7 @@ impl ConvertState {
       }
 
       // Released links skip bracket-anchored rewrites; the ordinary close remains.
-      if !self.plain_text
+      if !plain_text!(self)
         && self.clean_flags != 0
         && tag_id == Some(TAG_A)
         && !has_override
@@ -1626,13 +1628,13 @@ impl ConvertState {
       }
       // Raw `<hN>` in a table cell and plain text both write no ATX prefix, so
       // there is no closing sequence to protect.
-      if !self.plain_text && !self.in_table_cell() {
+      if !plain_text!(self) && !self.in_table_cell() {
         self.escape_trailing_heading_hashes();
       }
     }
 
     // TAG_A exit: write ](url) directly to buffer — zero allocation
-    if !self.plain_text
+    if !plain_text!(self)
       && !has_override
       && tag_id == Some(TAG_A)
       && !raw_html_anchor
@@ -1802,7 +1804,7 @@ impl ConvertState {
       output.as_deref()
     };
 
-    if tag_id == Some(TAG_LI) && !self.plain_text {
+    if tag_id == Some(TAG_LI) && !plain_text!(self) {
       self.resolve_item_marker(true);
     }
 
@@ -1850,7 +1852,7 @@ impl ConvertState {
   /// the fence so a nested <code> does not double up and the <pre> exit emits
   /// the matching closing fence.
   fn flush_pre_fence(&mut self) {
-    if self.plain_text {
+    if plain_text!(self) {
       self.pre_fence_pending = false;
       return;
     }
@@ -1895,7 +1897,8 @@ impl ConvertState {
     depth: usize,
     index: usize,
   ) {
-    if self.format == OutputFormat::Html {
+    #[cfg(feature = "html")]
+    if self.is_html() {
       self.emit_html_text(text);
       return;
     }
@@ -1915,7 +1918,8 @@ impl ConvertState {
     generated_prefix: Option<&str>,
     generated_suffix: Option<&str>,
   ) {
-    if self.format == OutputFormat::Html {
+    #[cfg(feature = "html")]
+    if self.is_html() {
       self.emit_html_text(text);
       return;
     }
@@ -2012,7 +2016,7 @@ impl ConvertState {
       return;
     }
 
-    if self.plain_text && self.depth_map[TAG_PRE as usize] > 0 && self.buffer.is_empty() {
+    if plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0 && self.buffer.is_empty() {
       self.preserve_leading_whitespace = true;
     }
 
@@ -2048,7 +2052,7 @@ impl ConvertState {
     // alone so they stay blank.
     let li_depth = self.depth_map[TAG_LI as usize] as usize;
     let indented_storage;
-    let text = if !self.plain_text
+    let text = if !plain_text!(self)
       && self.depth_map[TAG_PRE as usize] > 0
       && li_depth > 0
       && (text.contains('\n') || last_char == b'\n')
@@ -2087,7 +2091,8 @@ impl ConvertState {
     // line breaks folded into <br> (issue #147). Runs on all such text, not
     // only text with newlines, since escaping is always required.
     let cell_storage;
-    let text = if !self.plain_text && self.depth_map[TAG_PRE as usize] > 0 && self.in_table_cell() {
+    let text = if !plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0 && self.in_table_cell()
+    {
       cell_storage = Self::fold_pre_lines_to_br(text);
       cell_storage.as_str()
     } else {
@@ -2102,13 +2107,13 @@ impl ConvertState {
       self.raw_html_scanned_to = self.buffer.len();
     }
     let raw_html_storage;
-    let text = if !self.plain_text && self.depth_map[TAG_PRE as usize] == 0 && inside_raw_html_block
-    {
-      raw_html_storage = self.escape_raw_html_text(text);
-      raw_html_storage.as_ref()
-    } else {
-      text
-    };
+    let text =
+      if !plain_text!(self) && self.depth_map[TAG_PRE as usize] == 0 && inside_raw_html_block {
+        raw_html_storage = self.escape_raw_html_text(text);
+        raw_html_storage.as_ref()
+      } else {
+        text
+      };
 
     // Loop-invariant container tests, behind a closure so the byte scan runs
     // only when no cheaper test already decided.
@@ -2126,7 +2131,7 @@ impl ConvertState {
         })
     };
     let escaped_storage;
-    let text = if !self.plain_text
+    let text = if !plain_text!(self)
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
       && (has_inline_gfm_hazard
@@ -2162,7 +2167,7 @@ impl ConvertState {
 
     if self.wrap_width != 0 && self.can_wrap_here() {
       self.push_text_wrapped(text, last_char);
-    } else if !(owns_leading_space || (self.plain_text && self.depth_map[TAG_PRE as usize] > 0))
+    } else if !(owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0))
       && self.should_add_spacing_before_text(last_char, text)
     {
       if self.options.max_node_bytes == 0 {
@@ -3002,7 +3007,7 @@ impl ConvertState {
       if let Some(prefix) = prefix {
         self.push_caption_content(prefix.as_ref());
       }
-      if !self.plain_text && (!explicit_top || index != top) {
+      if !plain_text!(self) && (!explicit_top || index != top) {
         self.push_caption_content(MARKDOWN_EMPHASIS);
       }
       self.caption_frames[index].state = if commit {
@@ -3248,7 +3253,7 @@ impl ConvertState {
   /// `  > `, `<blockquote><li>` → `>   `. A flat "all quotes then all indent"
   /// prefix would corrupt the Markdown structure of nested blocks.
   fn continuation_prefix(&self) -> String {
-    if self.plain_text {
+    if plain_text!(self) {
       return String::new();
     }
 
@@ -3336,7 +3341,7 @@ impl ConvertState {
 
   /// Emit frontmatter content.
   pub(crate) fn emit_frontmatter(&mut self, content: &str) {
-    if self.format == OutputFormat::Markdown && !content.is_empty() {
+    if self.is_markdown() && !content.is_empty() {
       self.last_content_cache_len = self.push_code_span_content(content, true);
     }
   }
@@ -3347,7 +3352,7 @@ impl ConvertState {
     node: &ElementNode,
     _ancestors: &[ElementNode],
   ) -> Option<Cow<'static, str>> {
-    if self.plain_text {
+    if plain_text!(self) {
       return self.get_text_enter_output(node);
     }
 
@@ -3682,7 +3687,7 @@ impl ConvertState {
     node: &ElementNode,
     cell_span: u8,
   ) -> Option<Cow<'static, str>> {
-    if self.plain_text {
+    if plain_text!(self) {
       return Self::get_text_exit_output(node);
     }
 
@@ -4169,7 +4174,7 @@ impl ConvertState {
     tag_id: Option<u8>,
     node_spacing: Option<[u8; 2]>,
   ) -> [u8; 2] {
-    if self.plain_text
+    if plain_text!(self)
       && tag_id == Some(TAG_PRE)
       && (self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0)
     {
@@ -4177,7 +4182,9 @@ impl ConvertState {
     }
     if let Some(id) = tag_id {
       if (id != TAG_LI && self.depth_map[TAG_LI as usize] > 0)
-        || (self.plain_text && id != TAG_BLOCKQUOTE && self.depth_map[TAG_BLOCKQUOTE as usize] > 0)
+        || (plain_text!(self)
+          && id != TAG_BLOCKQUOTE
+          && self.depth_map[TAG_BLOCKQUOTE as usize] > 0)
       {
         return NO_SPACING;
       }
@@ -4205,7 +4212,7 @@ impl ConvertState {
 
   #[inline]
   fn figcaption_owns_block_spacing(&self) -> bool {
-    !self.in_table_cell() && (self.plain_text || self.collapse_non_span_depth == 1)
+    !self.in_table_cell() && (plain_text!(self) || self.collapse_non_span_depth == 1)
   }
 
   #[inline]

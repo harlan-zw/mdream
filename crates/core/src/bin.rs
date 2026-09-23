@@ -2,12 +2,22 @@ use mdream::MarkdownStreamProcessor;
 use mdream::types::{HTMLToMarkdownOptions, OutputFormat};
 use std::io::{self, Read, Write};
 
+/// Output formats this build accepts, in `--format` spelling.
+const FORMATS: &[&str] = &[
+  #[cfg(feature = "markdown")]
+  "markdown",
+  #[cfg(feature = "text")]
+  "text",
+  #[cfg(feature = "html")]
+  "html",
+];
+
 fn main() -> io::Result<()> {
   let args: Vec<String> = std::env::args().collect();
   let mut origin: Option<String> = None;
   let mut verbose = false;
   let mut clean_urls = false;
-  let mut format = OutputFormat::Markdown;
+  let mut format = OutputFormat::default();
 
   let mut i = 1;
   while i < args.len() {
@@ -24,8 +34,11 @@ fn main() -> io::Result<()> {
         i += 1;
         if i < args.len() {
           format = match args[i].as_str() {
+            #[cfg(feature = "markdown")]
             "markdown" => OutputFormat::Markdown,
+            #[cfg(feature = "text")]
             "text" => OutputFormat::Text,
+            #[cfg(feature = "html")]
             "html" => OutputFormat::Html,
             other => {
               eprintln!("Unknown format: {other}");
@@ -33,20 +46,25 @@ fn main() -> io::Result<()> {
             }
           };
         } else {
-          eprintln!("--format requires a value: markdown, text, or html");
+          eprintln!("--format requires a value: {}", FORMATS.join(", "));
           std::process::exit(1);
         }
       }
+      #[cfg(feature = "text")]
       "--text" => format = OutputFormat::Text,
       "--help" | "-h" => {
         eprintln!("Usage: mdream [OPTIONS]");
-        eprintln!("  Reads HTML from stdin, outputs Markdown, plain text, or safe HTML");
+        eprintln!("  Reads HTML from stdin and writes the converted output to stdout");
         eprintln!();
         eprintln!("Options:");
         eprintln!("  -o, --origin <URL>  Base URL for resolving relative links");
         eprintln!("  -v, --verbose       Print conversion stats to stderr");
         eprintln!("  --clean-urls        Strip tracking query params (utm_*, fbclid, etc.)");
-        eprintln!("  --format <format>   Output format: markdown, text, html");
+        eprintln!(
+          "  --format <format>   Output format: {}",
+          FORMATS.join(", ")
+        );
+        #[cfg(feature = "text")]
         eprintln!("  --text              Alias for --format text");
         eprintln!("  -h, --help          Show this help");
         return Ok(());
