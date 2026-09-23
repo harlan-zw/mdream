@@ -113,6 +113,29 @@ fn html_output_stream_matches_batch_at_every_split() {
   }
 }
 
+// Discarded script data is not text, so whitespace after the script is still
+// inter-element whitespace and drops as it would with no script at all.
+#[test]
+fn html_output_drops_whitespace_after_discarded_script_data() {
+  let options = HTMLToMarkdownOptions::default;
+  let input = "<x><script>;</script> <link> ";
+  assert_eq!(html_to_html(input, options()), "");
+  assert_eq!(
+    html_to_html(
+      "<d><title>n</title><script>;</script>\n</>\n<link>\n",
+      options()
+    ),
+    "n"
+  );
+  for split in 0..=input.len() {
+    let mut processor = MarkdownStreamProcessor::new_with_format(options(), OutputFormat::Html);
+    let mut output = processor.process_chunk(&input[..split]);
+    output.push_str(&processor.process_chunk(&input[split..]));
+    output.push_str(&processor.finish());
+    assert_eq!(output, "", "split={split}");
+  }
+}
+
 // ── Plain text output ──
 
 #[test]

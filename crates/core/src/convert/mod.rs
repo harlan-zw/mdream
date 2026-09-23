@@ -1024,8 +1024,10 @@ impl ConvertState {
         &mut self.text_node_exhausted,
       );
       self.truncated |= clamped;
+      // Only buffered data is flushed as a text node. Unbuffered data sets no
+      // flag, or the flag outlives it and keeps the next whitespace-only text.
+      self.text_buffer_contains_non_whitespace = true;
     }
-    self.text_buffer_contains_non_whitespace = true;
     self.last_char_was_whitespace = false;
     self.just_closed_tag = false;
   }
