@@ -52,6 +52,10 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
   // Open anchors and the buffer index of the `[` each wrote, or -1.
   const links: ElementNode[] = []
   const brackets: number[] = []
+  // The exact Markdown each marked link produced, so `finish` drops only
+  // markers the pass itself wrote instead of guessing from the characters
+  // a source marker happens to sit next to.
+  const spans: string[] = []
   // The `[` of the anchor now closing, set by `exit` for `unwrap` and `closed`.
   let closing = -1
   // Raw Markdown of each heading, for `fragments` to resolve slugs against.
@@ -144,6 +148,7 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
       buffer[index] = marked
       if (target.lastContentCache === close)
         target.lastContentCache = marked
+      spans.push(`${FRAGMENT_LINK_OPEN}[${buffer.slice(bracket + 1, index).join('')}${marked}`)
     },
 
     held() {
@@ -155,7 +160,7 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
     },
 
     finish(markdown) {
-      return fragments ? applyFragments(markdown, headings) : markdown
+      return fragments ? applyFragments(markdown, headings, spans) : markdown
     },
   }
 }
@@ -370,10 +375,11 @@ function headingSlug(text: string): string {
  * The converter writes `OPEN[` and `CLOSE](#slug)` around each fragment link
  * it emits, so only real links are touched: escaped brackets and code keep
  * their text. A broken link loses only its wrappers, so a link nested in its
- * text is judged on its own. Every marker written by the pass is removed; a
- * marker character the source itself carried is kept.
+ * text is judged on its own. A marker is dropped only when its pair spells a
+ * span the pass itself wrote, so a marker character the source carried is
+ * kept, even next to link syntax.
  */
-function applyFragments(markdown: string, headings: readonly string[]): string {
+function applyFragments(markdown: string, headings: readonly string[], spans: readonly string[]): string {
   let next = markdown.indexOf(FRAGMENT_LINK_OPEN)
   if (next === -1)
     return markdown
@@ -384,6 +390,10 @@ function applyFragments(markdown: string, headings: readonly string[]): string {
     if (slug)
       slugs.add(slug)
   }
+
+  // The pass wrote every span above, so only these bytes qualify for the
+  // drop; source text shaped like a marked link never matches.
+  const written = new Set(spans)
 
   const open = FRAGMENT_LINK_OPEN.charCodeAt(0)
   const closeCode = FRAGMENT_LINK_CLOSE.charCodeAt(0)
@@ -399,7 +409,6 @@ function applyFragments(markdown: string, headings: readonly string[]): string {
         opens.push(i)
     }
     else if (code === closeCode && opens.length && markdown.startsWith('](#', i + 1)) {
-      const start = opens.pop()!
       // The destination is written bare, so it ends at `)` or at the space
       // before a title.
       let end = i + 4
@@ -414,6 +423,22 @@ function applyFragments(markdown: string, headings: readonly string[]): string {
       }
       if (markdown.charCodeAt(end) !== 41 /* ) */)
         continue
+      // Pair the close with the nearest open whose span the pass wrote. A
+      // source open has no partner, so dropping a failed candidate keeps it
+      // from stealing a later close.
+      let paired = -1
+      let depth = opens.length
+      while (depth > 0) {
+        depth--
+        if (written.has(markdown.slice(opens[depth]!, end + 1))) {
+          paired = depth
+          break
+        }
+      }
+      if (paired === -1)
+        continue
+      const start = opens[paired]!
+      opens.length = paired
       const broken = !slugs.has(fragment)
       dropAt.set(start, broken ? 2 : 1)
       dropAt.set(i, broken ? end + 1 - i : 1)
@@ -422,18 +447,13 @@ function applyFragments(markdown: string, headings: readonly string[]): string {
 
   // Pass 2: copy everything between the dropped runs. U+FDD0 and U+FDD1 are
   // noncharacters reserved for internal use, but the source may still carry
-  // one: only a marker this pass wrote sits next to its `[` or `](#`, so any
-  // other occurrence is source text and is copied verbatim.
+  // one: only markers paired with a span the pass wrote are in `dropAt`, so
+  // any other occurrence is source text and is copied verbatim.
   let result = ''
   let copied = 0
   while (next !== -1 && next < len) {
     result += markdown.slice(copied, next)
-    // An unpaired written marker lost its partner to a later rewrite; drop
-    // it alone.
-    const written = markdown.charCodeAt(next) === closeCode
-      ? markdown.startsWith('](#', next + 1)
-      : markdown.charCodeAt(next + 1) === 91 /* [ */
-    copied = next + (written ? (dropAt.get(next) ?? 1) : 0)
+    copied = next + (dropAt.get(next) ?? 0)
     const nextOpen = markdown.indexOf(FRAGMENT_LINK_OPEN, next + 1)
     const nextClose = markdown.indexOf(FRAGMENT_LINK_CLOSE, next + 1)
     next = nextOpen === -1 ? nextClose : nextClose === -1 ? nextOpen : Math.min(nextOpen, nextClose)

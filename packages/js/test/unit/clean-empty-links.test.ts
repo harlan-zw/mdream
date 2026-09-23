@@ -70,4 +70,22 @@ describe('clean.fragments source marker characters', () => {
     const html = '<p>a&#xFDD0;b <a href="#missing">gone</a> <a href="#real">kept</a></p><h1>Real</h1>'
     expect(htmlToMarkdown(html, { clean: clean({ fragments: true }) })).toBe('a\uFDD0b gone [kept](#real)\n\n# Real')
   })
+
+  it('keeps a source open marker before link syntax in code output', () => {
+    const html = '<pre><code>&#xFDD0;[x](#y)</code></pre>'
+    expect(htmlToMarkdown(html, { clean: clean({ fragments: true }) })).toContain('\uFDD0')
+  })
+
+  it('keeps a source close marker next to link syntax in code output', () => {
+    const html = '<p><a href="#zz">g</a></p><pre><code>&#xFDD1;](#x)</code></pre>'
+    expect(htmlToMarkdown(html, { clean: clean({ fragments: true }) })).toContain('\uFDD1')
+  })
+
+  it('keeps source markers in code while still dropping the written ones', () => {
+    const html = '<pre><code>&#xFDD0;[x](#y)</code></pre><p><a href="#real">kept</a></p><h1>Real</h1>'
+    const md = htmlToMarkdown(html, { clean: clean({ fragments: true }) })
+    expect(md).toContain('\uFDD0[x](#y)')
+    expect(md).toContain('[kept](#real)')
+    expect(md).not.toContain('\uFDD1')
+  })
 })
