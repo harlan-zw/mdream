@@ -52,10 +52,12 @@ function shouldSplitOnHeader(tagId: number, options: ReturnType<typeof createOpt
 }
 
 /**
- * Get current markdown content WITHOUT clearing buffers
+ * Get current markdown content WITHOUT clearing buffers. A held clean pass
+ * finishes the view so its fragment-link markers never reach a chunk.
  */
-function getCurrentMarkdown(state: { buffer: string[] }): string {
-  return state.buffer.join('').trimStart()
+function getCurrentMarkdown(state: { buffer: string[] }, finishOutput?: (markdown: string) => string): string {
+  const markdown = state.buffer.join('').trimStart()
+  return finishOutput ? finishOutput(markdown) : markdown
 }
 
 /**
@@ -95,7 +97,7 @@ export function* htmlToMarkdownSplitChunksStream(
   let lastSplitPosition = 0
 
   function* flushChunk(endPosition?: number, applyOverlap = false): Generator<MarkdownChunk, void, undefined> {
-    const currentMd = getCurrentMarkdown(processor.state)
+    const currentMd = getCurrentMarkdown(processor.state, processor.finishOutput)
     const chunkEnd = endPosition ?? currentMd.length
     const originalChunkContent = currentMd.slice(lastChunkEndPosition, chunkEnd)
 
@@ -236,7 +238,7 @@ export function* htmlToMarkdownSplitChunksStream(
     processResolvedEvent(event)
 
     if (!opts.returnEachLine) {
-      const currentMd = getCurrentMarkdown(processor.state)
+      const currentMd = getCurrentMarkdown(processor.state, processor.finishOutput)
       const currentChunkSize = opts.lengthFunction(currentMd.slice(lastChunkEndPosition))
 
       if (currentChunkSize > opts.chunkSize) {

@@ -2386,5 +2386,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     getMarkdown,
     getMarkdownChunk,
     state,
+    // Markers the fragments pass writes are only resolved on the finished
+    // whole document, which `holdsOutput` gates. Output readers that bypass
+    // getMarkdown, like the splitter, finish their views through this.
+    finishOutput: cleanPass?.holdsOutput
+      ? (markdown: string) => cleanPass.finish(markdown)
+      : undefined,
   }
 }

@@ -1,4 +1,5 @@
-import { TAG_H1, TAG_H2 } from '@mdream/js'
+import { htmlToMarkdown, TAG_H1, TAG_H2 } from '@mdream/js'
+import { clean } from '@mdream/js/clean'
 import { withMinimalPreset } from '@mdream/js/preset/minimal'
 import { htmlToMarkdownSplitChunks, htmlToMarkdownSplitChunksStream } from '@mdream/js/splitter'
 import { describe, expect, it } from 'vitest'
@@ -288,6 +289,28 @@ describe('htmlToMarkdownSplitChunks', () => {
   it('handles empty HTML', () => {
     const chunks = htmlToMarkdownSplitChunks('')
     expect(chunks).toEqual([])
+  })
+
+  it('finishes fragment links through the clean pass', () => {
+    const options = { clean: clean() }
+
+    const brokenHtml = '<p><a href="#nope">f</a></p>'
+    expect(htmlToMarkdown(brokenHtml, options)).toBe('f')
+    const brokenChunks = htmlToMarkdownSplitChunks(brokenHtml, options)
+    expect(brokenChunks.map(chunk => chunk.content).join('')).toBe('f')
+    for (const chunk of brokenChunks) {
+      expect(chunk.content).not.toContain('\uFDD0')
+      expect(chunk.content).not.toContain('\uFDD1')
+    }
+
+    const resolvedHtml = '<p><a href="#real">f</a></p><h1>Real</h1>'
+    const resolvedOptions = { ...options, stripHeaders: false }
+    const resolvedChunks = htmlToMarkdownSplitChunks(resolvedHtml, resolvedOptions)
+    expect(resolvedChunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(resolvedHtml, resolvedOptions))
+    for (const chunk of resolvedChunks) {
+      expect(chunk.content).not.toContain('\uFDD0')
+      expect(chunk.content).not.toContain('\uFDD1')
+    }
   })
 
   // Edge Cases
