@@ -370,7 +370,8 @@ function headingSlug(text: string): string {
  * The converter writes `OPEN[` and `CLOSE](#slug)` around each fragment link
  * it emits, so only real links are touched: escaped brackets and code keep
  * their text. A broken link loses only its wrappers, so a link nested in its
- * text is judged on its own. Every marker is removed.
+ * text is judged on its own. Every marker written by the pass is removed; a
+ * marker character the source itself carried is kept.
  */
 function applyFragments(markdown: string, headings: readonly string[]): string {
   let next = markdown.indexOf(FRAGMENT_LINK_OPEN)
@@ -420,13 +421,19 @@ function applyFragments(markdown: string, headings: readonly string[]): string {
   }
 
   // Pass 2: copy everything between the dropped runs. U+FDD0 and U+FDD1 are
-  // noncharacters reserved for internal use, so no real text carries them.
+  // noncharacters reserved for internal use, but the source may still carry
+  // one: only a marker this pass wrote sits next to its `[` or `](#`, so any
+  // other occurrence is source text and is copied verbatim.
   let result = ''
   let copied = 0
   while (next !== -1 && next < len) {
-    // An unpaired marker lost its partner to a later rewrite; drop it alone.
     result += markdown.slice(copied, next)
-    copied = next + (dropAt.get(next) ?? 1)
+    // An unpaired written marker lost its partner to a later rewrite; drop
+    // it alone.
+    const written = markdown.charCodeAt(next) === closeCode
+      ? markdown.startsWith('](#', next + 1)
+      : markdown.charCodeAt(next + 1) === 91 /* [ */
+    copied = next + (written ? (dropAt.get(next) ?? 1) : 0)
     const nextOpen = markdown.indexOf(FRAGMENT_LINK_OPEN, next + 1)
     const nextClose = markdown.indexOf(FRAGMENT_LINK_CLOSE, next + 1)
     next = nextOpen === -1 ? nextClose : nextClose === -1 ? nextOpen : Math.min(nextOpen, nextClose)
