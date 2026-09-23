@@ -54,6 +54,7 @@ describe('text conversion', () => {
     ['adds no space before an underscore after a block element', '<p>snake<x-v>_case</x-v></p>', 'snake_case'],
     ['drops an empty quotation', '<p>a<q></q>b</p>', 'a b'],
     ['drops the space after an empty caption break', 'a<figcaption><br></figcaption> b', 'a\nb'],
+    ['keeps the space after a break', '<p>a<br> b</p>', 'a\n b'],
   ])('%s', (_name, html, expected) => {
     expect(htmlToText(html)).toBe(expected)
   })

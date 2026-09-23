@@ -324,6 +324,10 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
   let captionEnterSpacing = CAPTION_SPACING
   let captionExitSpacing = CAPTION_SPACING
   let captionClosedSpacing = 0
+  // A caption that held only breaks owns the next line start.
+  let captionBreakOwnsLine = false
+  // A quotation opener the exit may still retract, so a stream holds it back.
+  let quoteOpenerPending = false
 
   function pushCaptionBoundary(newlines: number): boolean {
     if (state.buffer.length === 0 || newlines === 0)
@@ -372,9 +376,11 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
       preserveLeadingWhitespace = true
     if (node.value === ' ' && last !== '' && ' \n\t\r'.includes(last))
       return
-    // A line break owns the line start, so collapsed prose drops its leading space.
-    if (last === '\n' && node.value.charCodeAt(0) === 32 && !state.depthMap[TAG_PRE])
-      node.value = trimAsciiWhitespaceStart(node.value)
+    if (captionBreakOwnsLine) {
+      captionBreakOwnsLine = false
+      if (last === '\n' && !state.depthMap[TAG_PRE])
+        node.value = trimAsciiWhitespaceStart(node.value)
+    }
     if (!state.depthMap[TAG_PRE] && shouldAddSpacingBeforeText(last, lastNode, node))
       node.value = ` ${node.value}`
 
@@ -406,6 +412,7 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
 
     const element = event.node as ElementNode
     let output: string | undefined
+    quoteOpenerPending = false
     // An empty quotation emits nothing, but keeps the space its opener added.
     if (element.tagId === TAG_Q && event.type === NodeEventExit && lastNode === element && !element.pluginOutput?.length) {
       const tail = state.buffer.at(-1)
@@ -463,11 +470,15 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     }
 
     appendOutput(state, element, event.type, output)
+    if (element.tagId === TAG_Q && event.type === NodeEventEnter && (output === '"' || output === ' "'))
+      quoteOpenerPending = state.buffer.at(-1) === output
 
     if (ownsCaptionSpace && event.type === NodeEventExit) {
       captionOpen--
       if (captionContent)
         captionClosedSpacing = captionExitSpacing
+      else if (captionBreakRun > 0)
+        captionBreakOwnsLine = true
       captionContent = false
       captionBreakRun = 0
     }
@@ -480,11 +491,10 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     takeOutput() {
       const content = state.buffer.join('')
       const normalized = preserveLeadingWhitespace ? content : content.trimStart()
-      // Hold back the tail a later boundary may still trim: all trailing
-      // whitespace, or the space and tab run that closing a pre drops.
-      let stableLength = state.depthMap[TAG_PRE]
-        ? trimSpacesEnd(normalized).length
-        : trimAsciiWhitespaceEnd(normalized).length
+      // Hold back the tail a later event may still trim: trailing whitespace,
+      // and a quotation opener that an empty quotation retracts.
+      const held = quoteOpenerPending ? normalized.slice(0, -1) : normalized
+      let stableLength = trimAsciiWhitespaceEnd(held).length
       if (stableLength < yieldedLength)
         stableLength = yieldedLength
       const output = normalized.slice(yieldedLength, stableLength)

@@ -724,4 +724,12 @@ describe('streaming parity with the Rust core', () => {
     await expectStreamingParity('<pre>x\n  </pre><p>After</p>', { format: 'text' })
     await expectStreamingParity('<pre><code>x\n  </code></pre><h2>Advanced</h2>', { format: 'text' })
   })
+
+  it('keeps text after an empty quotation split across chunks', async () => {
+    await expectStreamingParity('<p>a<q></q>b</p>', { format: 'text' })
+  })
+
+  it('drops the trailing newlines of a final pre in a text stream', async () => {
+    await expectStreamingParity('<pre><code>alpha\n\n</code></pre>', { format: 'text' })
+  })
 })
