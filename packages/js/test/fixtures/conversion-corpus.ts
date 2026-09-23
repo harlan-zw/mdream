@@ -88,4 +88,10 @@ export const CONVERSION_CORPUS: string[] = [
   `<html></html>`,
   `<html><head><title>A</title><meta name="description" content="da"></head><body><header>x</header><h1>A</h1><p>a</p><footer>f</footer></body></html>`,
   `<html><head><title>B</title></head><body><main><h1>B</h1><p>b</p></main></body></html>`,
+  // Rust parity: core
+  `a\nb`,
+  `<p>a\nb`,
+  `<textarea>a</tx>b`,
+  `<textarea>a</textarea`,
+  `<textarea>a</textarea `,
 ]

@@ -493,11 +493,23 @@ export function finalizeParse(
     }
   }
   else if (leftover.length > 0) {
-    const incompleteTagIndex = findIncompleteTagResidualIndex(leftover)
-    const text = incompleteTagIndex === -1 ? leftover : leftover.slice(0, incompleteTagIndex)
+    const trailing = state.trailingText || ''
+    let text = trailing
+    // Rawtext (textarea, title, xmp) opens nothing but its own end tag, so an
+    // unfinished `</t` is text unless it already entered that end tag.
+    if (state.currentNode?.tagHandler?.isNonNesting) {
+      if (state.rawtextEndTagPending)
+        text = ''
+    }
+    else {
+      const incompleteTagIndex = findIncompleteTagResidualIndex(trailing)
+      if (incompleteTagIndex !== -1)
+        text = trailing.slice(0, incompleteTagIndex)
+    }
     if (text)
       processTextBuffer(text, state, handleEvent)
   }
+  state.trailingText = undefined
   while (state.currentNode) {
     closeNode(state.currentNode, state, handleEvent)
   }
@@ -622,6 +634,14 @@ export interface ParseState {
   tagOverrideHandlers?: Map<string, TagHandler>
   /** Whether emitted text should skip Markdown-only escaping */
   plainText?: boolean
+  /**
+   * Parsed (whitespace-collapsed) form of the raw run the last parse returned.
+   * At end of input it is committed instead of the raw run, so trailing text
+   * collapses whitespace like any other text.
+   */
+  trailingText?: string
+  /** The trailing run is an unfinished end tag of the open rawtext element. */
+  rawtextEndTagPending?: boolean
 }
 
 export interface ParseResult {
@@ -862,6 +882,7 @@ function parseHtmlInternal(
   state.justClosedTag ??= false
   state.isFirstTextInElement ??= false
   state.scriptDataState ??= SCRIPT_DATA
+  state.rawtextEndTagPending = false
   // Process chunk character by character
   let i = 0
   const chunkLength = htmlChunk.length
@@ -1019,6 +1040,14 @@ function parseHtmlInternal(
             break
           peekEnd++
         }
+        // An end tag name cut off by the input end is still text of this run:
+        // it closes nothing yet, and at end of input it stays literal.
+        if (peekEnd === chunkLength) {
+          state.textBufferContainsNonWhitespace = true
+          state.lastCharWasWhitespace = false
+          textBuffer += htmlChunk.substring(i)
+          break
+        }
         const peekTagName = normalizeTagName(htmlChunk.substring(i + 2, peekEnd))
         const peekHandler = state.tagOverrideHandlers?.get(peekTagName)
         const peekTagId = effectiveTagId(peekTagName, TagIdMap[peekTagName] ?? -1, state)
@@ -1040,6 +1069,7 @@ function parseHtmlInternal(
         runStart = i
       }
       else {
+        state.rawtextEndTagPending = !!state.currentNode?.tagHandler?.isNonNesting
         textBuffer += result.remainingText
         break
       }
@@ -1148,6 +1178,7 @@ function parseHtmlInternal(
   const remainingHtml = textBuffer.length > 0 ? htmlChunk.substring(runStart) : ''
   if (remainingHtml.length > 0 && isWhitespace(remainingHtml.charCodeAt(0)))
     state.lastCharWasWhitespace = false
+  state.trailingText = textBuffer
 
   return remainingHtml
 }
