@@ -2174,40 +2174,41 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     // Keep only enough emitted context for spacing/newline decisions, plus any
     // trailing spaces that are still mutable. This prevents every stream chunk
-    // from joining and slicing the entire cumulative output. Plugin, wrapping,
-    // and open-link paths retain the full buffer because they can inspect or
-    // rewrite earlier content.
-    if (!fragmentHeld && !headingHeld && (!retainMutableFragments || !inPre)) {
-      if (!resolvedPlugins.length && !options.wrapWidth) {
-        if (retainMutableFragments && leadingTrimmed === 0) {
-          // Preserve the final fragment as a separate value: close handlers
-          // identify and trim it by reference equality with lastContentCache.
-          const lastFragment = state.buffer.at(-1)!
-          const fragmentStart = currentContent.length - lastFragment.length
-          const tailStart = Math.max(0, Math.min(stableLength - 2, fragmentStart))
-          const emittedTail = currentContent.slice(tailStart, fragmentStart)
-          state.buffer.length = 0
-          resetBufferScanCursors(bufferScan)
-          if (emittedTail)
-            state.buffer.push(emittedTail)
-          state.buffer.push(lastFragment)
-          lastYieldedLength = stableLength - tailStart
-        }
-        else if (!retainMutableFragments) {
-          const tailStart = Math.max(0, stableLength - 2)
-          const emittedTail = currentContent.slice(tailStart, stableLength)
-          state.buffer.length = 0
-          resetBufferScanCursors(bufferScan)
-          if (emittedTail)
-            state.buffer.push(emittedTail)
-          lastYieldedLength = emittedTail.length
-        }
+    // from joining and slicing the entire cumulative output: a yielded slice
+    // keeps its whole parent string alive, so a caller that holds the chunks
+    // would otherwise hold one copy of the output per chunk. Wrapping reads the
+    // current column, so it keeps the whole current line and waits until the
+    // leading trim no longer moves that column.
+    const wrapping = !!options.wrapWidth
+    if (!fragmentHeld && !headingHeld && (!retainMutableFragments || !inPre) && (!wrapping || leadingTrimmed === 0)) {
+      let contextStart = stableLength - 2
+      if (wrapping) {
+        const lineStart = currentContent.lastIndexOf('\n', stableLength - 1)
+        if (lineStart < contextStart)
+          contextStart = lineStart
       }
-      else if (!retainMutableFragments && state.buffer.length > 1) {
+      if (retainMutableFragments && leadingTrimmed === 0) {
+        // Preserve the final fragment as a separate value: close handlers
+        // identify and trim it by reference equality with lastContentCache.
+        const lastFragment = state.buffer.at(-1)!
+        const fragmentStart = currentContent.length - lastFragment.length
+        const tailStart = Math.max(0, Math.min(contextStart, fragmentStart))
+        const emittedTail = currentContent.slice(tailStart, fragmentStart)
         state.buffer.length = 0
         resetBufferScanCursors(bufferScan)
-        state.buffer.push(currentContent)
-        lastYieldedLength = stableLength
+        if (emittedTail)
+          state.buffer.push(emittedTail)
+        state.buffer.push(lastFragment)
+        lastYieldedLength = stableLength - tailStart
+      }
+      else if (!retainMutableFragments) {
+        const tailStart = Math.max(0, contextStart)
+        const emittedTail = currentContent.slice(tailStart, stableLength)
+        state.buffer.length = 0
+        resetBufferScanCursors(bufferScan)
+        if (emittedTail)
+          state.buffer.push(emittedTail)
+        lastYieldedLength = emittedTail.length
       }
     }
     return newContent
