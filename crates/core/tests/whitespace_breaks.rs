@@ -74,6 +74,25 @@ fn paragraph_after_a_hard_break_in_a_list_item_keeps_the_blank_line() {
   }
 }
 
+#[test]
+fn retracted_inline_marker_after_a_hard_break_keeps_the_blank_line() {
+  // An empty inline pair or a truncated empty code span rewinds the buffer to
+  // the break's line-end state, so the hard-break state must survive it too.
+  assert_eq!(md("<li>q<br><em></em><p>X"), "- q  \n\n  X");
+  assert_eq!(md("<li>q<br><code></code><p>X"), "- q  \n\n  X");
+  assert_eq!(md("<li>q<br><strong></strong><div>X"), "- q  \n\n  X");
+  // The separator also survives streaming chunk boundaries.
+  for html in ["<li>q<br><em></em><p>X", "<li>q<br><code></code><p>X"] {
+    for chunk in [3, 7, html.len()] {
+      assert_eq!(
+        md_streamed(html, chunk),
+        "- q  \n\n  X",
+        "html={html} chunk={chunk}"
+      );
+    }
+  }
+}
+
 // ── <br> inside <pre> ──
 
 #[test]

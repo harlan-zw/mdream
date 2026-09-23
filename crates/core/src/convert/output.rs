@@ -1086,6 +1086,10 @@ impl ConvertState {
     }
 
     let output_start = self.buffer.len();
+    // The enter write below retires any pending hard-break state, and the
+    // openers recorded after it may later be truncated back to here; remember
+    // the pre-write value so that rewind can restore the state with the bytes.
+    let enter_after_hard_break = self.after_hard_break;
     self.write_output(
       true,
       is_inline,
@@ -1178,6 +1182,7 @@ impl ConvertState {
             content_start,
             opener_emitted,
             exhausted: false,
+            after_hard_break: enter_after_hard_break,
           });
         }
       } else if !self.pre_fence_open
@@ -1253,6 +1258,7 @@ impl ConvertState {
         output_start: self.buffer.len() - emitted.len(),
         content_start: self.buffer.len(),
         kind: inline_marker_type,
+        after_hard_break: enter_after_hard_break,
       });
     } else if !self.open_markers.is_empty()
       && !(tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0)
@@ -1780,6 +1786,9 @@ impl ConvertState {
         // code in a list can emit " `"), but excludes normal surrounding
         // spacing synthesized by write_output.
         self.truncate_buffer(open_marker.output_start);
+        // The retracted write never reached the reader, so it must not retire
+        // a hard-break state the buffer still ends with.
+        self.after_hard_break = open_marker.after_hard_break;
         self.last_content_cache_len = 0;
         self.reset_empty_tentative_caption_frames();
         self.last_node_is_inline = is_inline;
@@ -1807,6 +1816,9 @@ impl ConvertState {
       if !has_override {
         if span.opener_emitted && span.exhausted && self.buffer.len() == span.content_start {
           self.truncate_buffer(span.output_start);
+          // The retracted write never reached the reader, so it must not retire
+          // a hard-break state the buffer still ends with.
+          self.after_hard_break = span.after_hard_break;
           output = None;
         } else if span.opener_emitted {
           output = Some(Cow::Owned(self.finalize_code_span(&span)));

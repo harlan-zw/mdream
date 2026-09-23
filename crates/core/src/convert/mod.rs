@@ -130,6 +130,10 @@ struct CodeSpanState {
   content_start: usize,
   opener_emitted: bool,
   exhausted: bool,
+  /// `after_hard_break` as it stood before the opener's own enter write. A
+  /// truncation that rewinds that write must rewind the flag with it, or a
+  /// retracted no-output opener retires a pending hard-break state.
+  after_hard_break: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -137,6 +141,9 @@ struct OpenMarker {
   output_start: usize,
   content_start: usize,
   kind: u8,
+  /// `after_hard_break` as it stood before the opener's own enter write; see
+  /// `CodeSpanState::after_hard_break`.
+  after_hard_break: bool,
 }
 
 #[derive(Clone, Copy)]
