@@ -30,9 +30,12 @@ const YAML_IMPLICIT_WORDS: [&str; 10] = [
 /// A plain scalar takes every byte literally, including a backslash, so it is
 /// kept when YAML reads it as written. An empty value reads as null, and an
 /// indicator first byte starts other syntax. A space, `:`, `#`, `"`, line break
-/// or control character also forces quotes. Inside double quotes a backslash
-/// starts an escape, so backslashes, quotes and non-printable characters are
-/// escaped there, and only there.
+/// or control character also forces quotes, and so do edge tabs: a reader
+/// strips the separation whitespace after `:`, strips a plain scalar's
+/// trailing whitespace, and resolves a whitespace-only value to null. Inside
+/// double quotes a backslash starts an escape, so backslashes, quotes and
+/// characters outside YAML's printable set (controls, plus the noncharacters
+/// U+FFFE and U+FFFF) are escaped there, and only there.
 ///
 /// Text read from the page is a string, so with `as_string` a value a reader
 /// would resolve to a number, date, boolean or null is quoted too. Configured
@@ -58,11 +61,15 @@ fn yaml_scalar(val: &str, as_string: bool) -> String {
           | b'%'
           | b'@'
           | b'`'
+          | b'\t'
       ) || (rest.is_empty() && matches!(first, b'-' | b'?'))
+        || matches!(rest.last(), Some(b'\t'))
         || bytes
           .iter()
           .any(|&b| matches!(b, b':' | b'#' | b' ' | b'"'))
-        || val.chars().any(|c| c.is_control() && c != '\t')
+        || val
+          .chars()
+          .any(|c| (c.is_control() && c != '\t') || matches!(c, '\u{fffe}' | '\u{ffff}'))
         || (as_string
           // Numbers, dates, `.inf` and `.nan` start with one of these.
           && (matches!(first, b'0'..=b'9' | b'.' | b'+')
@@ -84,13 +91,23 @@ fn yaml_scalar(val: &str, as_string: bool) -> String {
       // A raw break folds to a space, and under `meta:` it ends the mapping.
       '\n' => out.push_str("\\n"),
       '\r' => out.push_str("\\r"),
-      '\t' => out.push('\t'),
-      // YAML allows no other control character in a scalar, U+0000 included.
-      _ if ch.is_control() => {
+      // A raw tab survives inside quotes, but the escape reads as written.
+      '\t' => out.push_str("\\t"),
+      // YAML's printable set excludes control characters, U+0000 included,
+      // and the noncharacters U+FFFE/U+FFFF that `is_control` misses.
+      _ if ch.is_control() || matches!(ch, '\u{fffe}' | '\u{ffff}') => {
         let code = ch as u32;
-        out.push_str("\\x");
-        out.push(char::from_digit(code >> 4, 16).unwrap_or('0'));
-        out.push(char::from_digit(code & 0xF, 16).unwrap_or('0'));
+        if code < 0x100 {
+          out.push_str("\\x");
+          out.push(char::from_digit(code >> 4, 16).unwrap_or('0'));
+          out.push(char::from_digit(code & 0xF, 16).unwrap_or('0'));
+        } else {
+          out.push_str("\\u");
+          out.push(char::from_digit(code >> 12, 16).unwrap_or('0'));
+          out.push(char::from_digit((code >> 8) & 0xF, 16).unwrap_or('0'));
+          out.push(char::from_digit((code >> 4) & 0xF, 16).unwrap_or('0'));
+          out.push(char::from_digit(code & 0xF, 16).unwrap_or('0'));
+        }
       }
       _ => out.push(ch),
     }

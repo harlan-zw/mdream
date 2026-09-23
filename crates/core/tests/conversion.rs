@@ -5464,6 +5464,10 @@ fn frontmatter_values_are_valid_yaml_scalars() {
     // YAML allows no raw control character, U+0000 included.
     ("a\0b", "title: \"a\\x00b\""),
     ("a\u{7f}b", "title: \"a\\x7fb\""),
+    // U+FFFE and U+FFFF are noncharacters: no control, but outside YAML's
+    // printable set, so a stream carrying them raw is rejected outright.
+    ("\u{fffe}", "title: \"\\ufffe\""),
+    ("x\u{ffff}", "title: \"x\\uffff\""),
   ] {
     let md = frontmatter_md(&format!("<head><title>{title}</title></head>"));
     assert_eq!(md, format!("---\n{expected}\n---"), "title={title:?}");
@@ -5506,6 +5510,21 @@ fn frontmatter_skips_meta_with_empty_content() {
     },
   );
   assert_eq!(md, "---\ncustom: \"\"\n---");
+  // A value whose only content is whitespace reads back as null from a plain
+  // scalar, and a reader strips an edge tab as separation or trailing
+  // whitespace, so tab content forces quotes.
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content="&#9;"></head>"#),
+    "---\nmeta:\n  description: \"\\t\"\n---"
+  );
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content="&#9;d"></head>"#),
+    "---\nmeta:\n  description: \"\\td\"\n---"
+  );
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content="d&#9;"></head>"#),
+    "---\nmeta:\n  description: \"d\\t\"\n---"
+  );
 }
 
 // Configured fields are written by the caller, who may mean `draft: true` as a
