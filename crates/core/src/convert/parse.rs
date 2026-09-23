@@ -400,6 +400,7 @@ impl ConvertState {
       tag_id,
       contains_whitespace: false,
       excluded_from_markdown: false,
+      enter_skipped: false,
       is_inline: handler.is_inline,
       excludes_text_nodes: handler.excludes_text_nodes,
       is_non_nesting: handler.is_non_nesting,
@@ -1086,6 +1087,7 @@ impl ConvertState {
       pooled.child_text_node_index = 0;
       pooled.contains_whitespace = false;
       pooled.excluded_from_markdown = false;
+      pooled.enter_skipped = false;
       pooled.is_inline = h_inline;
       pooled.excludes_text_nodes = h_excludes;
       pooled.is_non_nesting = h_non_nesting;
@@ -1104,6 +1106,7 @@ impl ConvertState {
         child_text_node_index: 0,
         contains_whitespace: false,
         excluded_from_markdown: false,
+        enter_skipped: false,
         is_inline: h_inline,
         excludes_text_nodes: h_excludes,
         is_non_nesting: h_non_nesting,
@@ -1268,6 +1271,7 @@ impl ConvertState {
     tag.excluded_from_markdown = in_template
       || filter_excluded
       || (skip_node && (!self.has_isolate_main || self.isolate_main_found));
+    tag.enter_skipped = skip_node;
 
     if tag.collapses_inner_white_space && !tag.excluded_from_markdown {
       if tag.tag_id == Some(TAG_SPAN) {
@@ -1443,7 +1447,10 @@ impl ConvertState {
     }
 
     // Special: empty links — synthesize text from title/aria-label
-    if node.tag_id == Some(TAG_A) && node.child_text_node_index == 0 && !node.excluded_from_markdown
+    if node.tag_id == Some(TAG_A)
+      && node.child_text_node_index == 0
+      && !node.excluded_from_markdown
+      && !node.enter_skipped
     {
       let prefix = node
         .attributes

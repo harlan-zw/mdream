@@ -1257,7 +1257,7 @@ impl ConvertState {
   /// Emit markdown for exiting an element (node already popped from stack).
   #[inline]
   pub(crate) fn emit_exit_element(&mut self, node: &ElementNode) {
-    if node.excluded_from_markdown {
+    if node.excluded_from_markdown || node.enter_skipped {
       self.last_node_is_inline = node.is_inline;
       return;
     }
