@@ -34,8 +34,10 @@ const YAML_IMPLICIT_WORDS: [&str; 10] = [
 /// strips the separation whitespace after `:`, strips a plain scalar's
 /// trailing whitespace, and resolves a whitespace-only value to null. Inside
 /// double quotes a backslash starts an escape, so backslashes, quotes and
-/// characters outside YAML's printable set (controls, plus the noncharacters
-/// U+FFFE and U+FFFF) are escaped there, and only there.
+/// characters a reader does not keep as written are escaped there, and only
+/// there: controls and the noncharacters U+FFFE/U+FFFF fall outside YAML's
+/// printable set, and the line separators U+2028/U+2029 are folded to a space
+/// even inside quotes.
 ///
 /// Text read from the page is a string, so with `as_string` a value a reader
 /// would resolve to a number, date, boolean or null is quoted too. Configured
@@ -67,9 +69,10 @@ fn yaml_scalar(val: &str, as_string: bool) -> String {
         || bytes
           .iter()
           .any(|&b| matches!(b, b':' | b'#' | b' ' | b'"'))
-        || val
-          .chars()
-          .any(|c| (c.is_control() && c != '\t') || matches!(c, '\u{fffe}' | '\u{ffff}'))
+        || val.chars().any(|c| {
+          (c.is_control() && c != '\t')
+            || matches!(c, '\u{fffe}' | '\u{ffff}' | '\u{2028}' | '\u{2029}')
+        })
         || (as_string
           // Numbers, dates, `.inf` and `.nan` start with one of these.
           && (matches!(first, b'0'..=b'9' | b'.' | b'+')
@@ -94,8 +97,10 @@ fn yaml_scalar(val: &str, as_string: bool) -> String {
       // A raw tab survives inside quotes, but the escape reads as written.
       '\t' => out.push_str("\\t"),
       // YAML's printable set excludes control characters, U+0000 included,
-      // and the noncharacters U+FFFE/U+FFFF that `is_control` misses.
-      _ if ch.is_control() || matches!(ch, '\u{fffe}' | '\u{ffff}') => {
+      // and the noncharacters U+FFFE/U+FFFF that `is_control` misses. The
+      // line separators U+2028/U+2029 are printable but a reader folds them
+      // to a space even inside quotes, so they escape too.
+      _ if ch.is_control() || matches!(ch, '\u{fffe}' | '\u{ffff}' | '\u{2028}' | '\u{2029}') => {
         let code = ch as u32;
         if code < 0x100 {
           out.push_str("\\x");

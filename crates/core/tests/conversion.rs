@@ -5468,6 +5468,10 @@ fn frontmatter_values_are_valid_yaml_scalars() {
     // printable set, so a stream carrying them raw is rejected outright.
     ("\u{fffe}", "title: \"\\ufffe\""),
     ("x\u{ffff}", "title: \"x\\uffff\""),
+    // U+2028/U+2029 are line separators, not controls. A reader folds them to
+    // a space even inside double quotes, so they must be escaped.
+    ("a\u{2028}b", "title: \"a\\u2028b\""),
+    ("x\u{2029}y", "title: \"x\\u2029y\""),
   ] {
     let md = frontmatter_md(&format!("<head><title>{title}</title></head>"));
     assert_eq!(md, format!("---\n{expected}\n---"), "title={title:?}");
