@@ -4235,10 +4235,25 @@ impl ConvertState {
 
   /// Whether the tag writes visible inline Markdown around its content:
   /// emphasis, code ticks, raw-tag wrappers, or an anchor that emits markup.
-  /// A heading nested in one must not end its line, or the wrapper's remaining
-  /// text splits off.
+  /// An override carrying non-empty enter or exit output counts too, since its
+  /// markers sit inline around the wrapped content (the same ownership rule
+  /// `raw_html_anchor` applies at exit). A heading nested in one must not end
+  /// its line, or the wrapper's remaining text splits off.
   #[inline]
   fn wrapper_emits_inline_markdown(&self, node: &ElementNode) -> bool {
+    if self.has_tag_overrides {
+      let ovs = self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|p| p.tag_overrides.as_ref());
+      if let Some(ov) = Self::override_for_node(ovs, self.override_idx.as_deref(), node)
+        && (ov.enter.as_ref().is_some_and(|s| !s.is_empty())
+          || ov.exit.as_ref().is_some_and(|s| !s.is_empty()))
+      {
+        return true;
+      }
+    }
     match node.tag_id {
       // The enter handler writes `[` only for an href anchor, and its raw tag
       // inside a raw-HTML block; any other anchor emits nothing at either

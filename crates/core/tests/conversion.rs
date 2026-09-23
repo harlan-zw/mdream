@@ -1029,6 +1029,30 @@ fn heading_inside_an_hrefless_anchor_keeps_its_trailing_blank_line() {
   }
 }
 
+#[test]
+fn heading_inside_an_overridden_wrapper_stays_inline_with_it() {
+  // An override's enter/exit output wraps the content inline, so the heading
+  // must not break the wrapper open with a blank line.
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "a".to_string(),
+        TagOverrideConfig {
+          enter: Some("{{".to_string()),
+          exit: Some("}}".to_string()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown("<a><h4>t</h4>x</a>", options),
+    "{{<h4>t</h4>x}}"
+  );
+}
+
 // ── Images ──
 
 #[test]
