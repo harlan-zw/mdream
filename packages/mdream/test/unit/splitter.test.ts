@@ -313,6 +313,15 @@ describe('htmlToMarkdownSplitChunks', () => {
     }
   })
 
+  it('does not split on a view a pending fragment link still rewrites', () => {
+    const options = { clean: clean(), stripHeaders: false }
+    const html = '<p><a href="#s2">go</a></p><h2>One</h2><p>a</p><h2>S2</h2><p>y</p>'
+
+    expect(htmlToMarkdown(html, options)).toBe('[go](#s2)\n\n## One\n\na\n\n## S2\n\ny')
+    const chunks = htmlToMarkdownSplitChunks(html, options)
+    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, options))
+  })
+
   // Edge Cases
   describe('edge cases', () => {
     it('handles consecutive headers with no content', () => {

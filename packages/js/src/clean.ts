@@ -56,6 +56,8 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
   // markers the pass itself wrote instead of guessing from the characters
   // a source marker happens to sit next to.
   const spans: string[] = []
+  // The buffer index each span in `spans` starts at, parallel to it.
+  const spanStarts: number[] = []
   // The `[` of the anchor now closing, set by `exit` for `unwrap` and `closed`.
   let closing = -1
   // Raw Markdown of each heading, for `fragments` to resolve slugs against.
@@ -149,6 +151,7 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
       if (target.lastContentCache === close)
         target.lastContentCache = marked
       spans.push(`${FRAGMENT_LINK_OPEN}[${buffer.slice(bracket + 1, index).join('')}${marked}`)
+      spanStarts.push(bracket)
     },
 
     held() {
@@ -157,6 +160,29 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
           return brackets[index]!
       }
       return Infinity
+    },
+
+    settled() {
+      if (spans.length === 0)
+        return -1
+      const slugs = new Set<string>()
+      for (const heading of headings) {
+        const slug = headingSlug(heading)
+        if (slug)
+          slugs.add(slug)
+      }
+      for (let index = 0; index < spans.length; index++) {
+        const span = spans[index]!
+        // A span is `OPEN[textCLOSE](#fragment)`, so the destination starts
+        // four code points past the close marker and runs to `)` or a title.
+        const close = span.indexOf(FRAGMENT_LINK_CLOSE)
+        let end = close + 4
+        while (end < span.length && span.charCodeAt(end) !== 41 && span.charCodeAt(end) !== 32)
+          end++
+        if (!slugs.has(span.slice(close + 4, end)))
+          return spanStarts[index]!
+      }
+      return -1
     },
 
     finish(markdown) {

@@ -113,6 +113,12 @@ export interface CleanPass {
   closed: (element: ElementNode, outputStart: number, close: string) => void
   /** The earliest buffer index a later hook may rewrite, or Infinity. */
   held: () => number
+  /**
+   * Buffer index of the earliest marked link no heading matches yet, or -1
+   * when every marked link is resolved. A still-unresolved link regrows when
+   * a later heading matches its slug, moving every later position.
+   */
+  settled: () => number
   /** Apply the rules that need the whole document to the finished Markdown. */
   finish: (markdown: string) => string
 }

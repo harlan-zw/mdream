@@ -2392,5 +2392,17 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     finishOutput: cleanPass?.holdsOutput
       ? (markdown: string) => cleanPass.finish(markdown)
       : undefined,
+    // Character position in the joined buffer through which output can no
+    // longer change: a link no heading matches yet regrows when one arrives,
+    // moving every later position. Position-based readers must not cut past
+    // it. -1 when nothing written can still change.
+    settledOutput: cleanPass?.holdsOutput
+      ? () => {
+          const fragment = cleanPass.settled()
+          return fragment < 0 || fragment > state.buffer.length
+            ? -1
+            : fragmentPosition(state.buffer, fragment)
+        }
+      : undefined,
   }
 }

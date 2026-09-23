@@ -95,10 +95,27 @@ export function* htmlToMarkdownSplitChunksStream(
   let lineNumber = 1
   let lastChunkEndPosition = 0
   let lastSplitPosition = 0
+  // The last flush runs against the finished document, where the clean pass
+  // has resolved every fragment link, so no position can go stale.
+  let outputFinal = false
 
   function* flushChunk(endPosition?: number, applyOverlap = false): Generator<MarkdownChunk, void, undefined> {
-    const currentMd = getCurrentMarkdown(processor.state, processor.finishOutput)
-    const chunkEnd = endPosition ?? currentMd.length
+    const rawFull = processor.state.buffer.join('')
+    const rawMd = rawFull.trimStart()
+    const currentMd = processor.finishOutput ? processor.finishOutput(rawMd) : rawMd
+    let chunkEnd = endPosition ?? currentMd.length
+    // A fragment link no heading matches yet regrows when a later heading
+    // resolves it, so the finished view under every recorded position moves.
+    // Only a chunk ending before the earliest such link is settled; later
+    // content waits for the final view.
+    if (!outputFinal && processor.settledOutput) {
+      const floor = processor.settledOutput()
+      if (floor !== -1) {
+        const settled = floor - (rawFull.length - rawMd.length)
+        if (settled < chunkEnd)
+          chunkEnd = Math.max(settled, lastChunkEndPosition)
+      }
+    }
     const originalChunkContent = currentMd.slice(lastChunkEndPosition, chunkEnd)
 
     if (!originalChunkContent.trim()) {
@@ -279,6 +296,7 @@ export function* htmlToMarkdownSplitChunksStream(
   }
 
   endPlugins(opts.resolvedPlugins, processor.state)
+  outputFinal = true
   yield* flushChunk()
 }
 
