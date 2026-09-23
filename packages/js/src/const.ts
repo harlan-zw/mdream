@@ -273,3 +273,11 @@ export const DEFAULT_BLOCK_SPACING: readonly [number, number] = [2, 2]
 export const BLOCKQUOTE_SPACING: readonly [number, number] = [2, 2]
 export const LIST_ITEM_SPACING: readonly [number, number] = [1, 0]
 export const TABLE_ROW_SPACING: readonly [number, number] = [0, 1]
+
+/**
+ * Markers the converter writes before a fragment link's `[` and `]` when
+ * `clean.fragments` is on. `clean().apply` removes them. Both are Unicode
+ * noncharacters, reserved for internal use.
+ */
+export const FRAGMENT_LINK_OPEN = '﷐'
+export const FRAGMENT_LINK_CLOSE = '﷑'

@@ -1,5 +1,5 @@
 import type { ParseState } from './parse'
-import type { ElementNode, EngineOptions, GfmAction, Node, NodeEvent, PluginContext, TagHandler, TextNode, TransformPlugin } from './types'
+import type { Cleaner, ElementNode, EngineOptions, GfmAction, Node, NodeEvent, PluginContext, TagHandler, TextNode, TransformPlugin } from './types'
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
@@ -1150,7 +1150,13 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   let openLinkCaptionBreakRun = 0
   let openLinkCaptionFlags: Uint8Array | undefined
   const clean = options.clean
-  const cleanEmptyLinkText = clean === true || (clean !== null && typeof clean === 'object' && clean.emptyLinkText === true)
+  const cleanRules = typeof clean === 'object' && clean !== null ? clean : undefined
+  const cleanEmptyLinkText = clean === true || cleanRules?.emptyLinkText === true
+  // The rules that rewrite links after they are written live in the Cleaner,
+  // so they stay out of bundles that never import `clean()`.
+  const cleanPass = typeof (cleanRules as Cleaner | undefined)?.apply === 'function'
+    ? (cleanRules as Cleaner).apply(state)
+    : undefined
   let rawHtmlLink: ElementNode | undefined
 
   let lastYieldedLength = 0
@@ -1160,6 +1166,22 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     return captionBoundary !== 0
       || (captionFrameCount !== 0
         && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0)
+  }
+
+  /** Track a link whose `[` sits at buffer index `fragment`. */
+  function openLink(fragment: number): void {
+    if (!cleanEmptyLinkText) {
+      openLinkFragment = -fragment - 2
+      return
+    }
+    openLinkFragment = fragment
+    openLinkCaptionBreakRun = captionBreakRun
+    const snapshot = openLinkCaptionFlags?.length === captionFrameCount
+      ? openLinkCaptionFlags
+      : new Uint8Array(captionFrameCount)
+    for (let index = 0; index < captionFrameCount; index++)
+      snapshot[index] = captionFrames![index * CAPTION_FRAME_SIZE + 2]! & CAPTION_INTERNAL_BREAK
+    openLinkCaptionFlags = snapshot
   }
 
   function pushCaptionFrame(element: ElementNode, handler: TagHandler | undefined): void {
@@ -1634,6 +1656,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     const suppressedInPre = (state.depthMap[TAG_PRE] || 0) > 0
       && suppressesFormattingInPre(tagId)
       && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
+    if (cleanPass && eventType === NodeEventExit)
+      cleanPass.exit(element)
     if (!output && !suppressedInPre && handler?.[eventFn]) {
       if (openLinkFragment >= 0
         && eventType === NodeEventExit
@@ -1649,6 +1673,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           openLinkFragment = -1
           return
         }
+      }
+      if (cleanPass && eventType === NodeEventExit && tagId === TAG_A && cleanPass.unwrap(element)) {
+        openLinkFragment = -1
+        return
       }
       const res = handler[eventFn]({ node: element, state })
       if (typeof res === 'string') {
@@ -1971,18 +1999,13 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       && tagId === TAG_A
       && outputStart < buff.length
       && buff.at(-1) === '[') {
-      const fragment = buff.length - 1
-      const cleanCaptionLink = captionFrameCount !== 0 && cleanEmptyLinkText
-      openLinkFragment = cleanCaptionLink ? fragment : -fragment - 2
-      if (cleanCaptionLink) {
-        openLinkCaptionBreakRun = captionBreakRun
-        const snapshot = openLinkCaptionFlags?.length === captionFrameCount
-          ? openLinkCaptionFlags
-          : new Uint8Array(captionFrameCount)
-        for (let index = 0; index < captionFrameCount; index++)
-          snapshot[index] = captionFrames![index * CAPTION_FRAME_SIZE + 2]! & CAPTION_INTERNAL_BREAK
-        openLinkCaptionFlags = snapshot
-      }
+      openLink(buff.length - 1)
+    }
+    if (cleanPass) {
+      if (eventType === NodeEventEnter)
+        cleanPass.enter(element, outputStart)
+      else if (handlerOutput)
+        cleanPass.closed(element, outputStart, handlerOutput)
     }
 
     // Track open inline markers for empty pair detection. Inline code in a
@@ -2049,15 +2072,19 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
    */
   function getMarkdown(): string {
     const content = state.buffer.join('')
-    const result = content.trimStart()
+    const result = content.trimStart().trimEnd()
     state.buffer.length = 0
-    return result.trimEnd()
+    return cleanPass ? cleanPass.finish(result) : result
   }
 
   /**
    * Get new markdown content since the last call (for streaming)
    */
-  function getMarkdownChunk(): string {
+  function getMarkdownChunk(final = false): string {
+    // A fragment link resolves against headings that may come later, so
+    // `fragments` holds the whole document back, as Rust does.
+    if (cleanPass?.holdsOutput)
+      return final ? getMarkdown() : ''
     // Settle an open marker-line guard when the item's first content already
     // answers it, so the hold below never outlives the marker's own line.
     let unresolvedCaptionFragment = -1
@@ -2119,6 +2146,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       state.blockquotes[0]?.fragment ?? Infinity,
       openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
     )
+    // An open link can still be unwrapped at its close.
+    if (cleanPass)
+      heldFragment = Math.min(heldFragment, cleanPass.held())
     for (let index = 0; index < captionFrameCount; index++) {
       const offset = index * CAPTION_FRAME_SIZE
       const anchor = captionFrames![offset + 3]!

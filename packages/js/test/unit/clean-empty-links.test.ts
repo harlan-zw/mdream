@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clean, cleanEmptyLinks, cleanFragments, cleanRedundantLinks, cleanSelfLinkHeadings } from '../../src/clean'
+import { clean, slugify, stripHeadingFormatting } from '../../src/clean'
 import { htmlToMarkdown } from '../../src/index'
 
 const executableHrefs = [
@@ -14,60 +14,46 @@ describe('clean.emptyLinks executable schemes', () => {
       clean: clean({ emptyLinks: true }),
     })).toBe('Click')
   })
+})
 
-  it.each(executableHrefs)('strips %s during post-processing', (href) => {
-    expect(cleanEmptyLinks(`[Click](${href})`)).toBe('Click')
+// Expected slugs come from the Rust core's `slugify_heading` tests.
+describe('heading slugs match Rust', () => {
+  it.each([
+    ['Hello World', 'hello-world'],
+    ['  Trim Me  ', 'trim-me'],
+    ['Keep_Underscore', 'keepunderscore'],
+    ['a -- b', 'a-b'],
+    ['What\'s New?!', 'whats-new'],
+    ['See [the docs](https://x.com)', 'see-the-docs'],
+    ['*bold* and `code`', 'bold-and-code'],
+    ['<a href="#section">Section</a>', 'section'],
+    ['<http://x>', 'httpx'],
+    [String.raw`\<span\>`, 'span'],
+    ['`<span>`', 'span'],
+    ['`foo_bar', 'foobar'],
+    ['``foo_bar`', 'foobar'],
+    ['``foo_bar``', 'foo_bar'],
+    ['`` `foo_bar`', 'foo_bar'],
+    ['`foo_bar<span title="`"></span>', 'foobar'],
+    ['`foo_bar\\<span title="`"></span>', 'foo_barspan-title'],
+    ['`foo_bar\\\\<span title="`"></span>', 'foobar'],
+    ['\\`foo_bar', 'foobar'],
+    ['`foo\\_bar', 'foo_bar'],
+    ['`foo_bar\\`', 'foo_bar'],
+    ['`foo_bar\\` baz_qux`', 'foo_bar-bazqux'],
+  ])('%s', (heading, slug) => {
+    expect(slugify(stripHeadingFormatting(heading))).toBe(slug)
+  })
+
+  it('handles repeated malformed tag starts', () => {
+    expect(slugify(stripHeadingFormatting(`${'<a '.repeat(16 * 1024)}>`))).toMatch(/^[a-]+$/)
   })
 })
 
 describe('raw HTML cleaner boundaries', () => {
-  it('requires an exact closing backtick run before preserving code content', () => {
-    expect(cleanFragments('## `foo_bar\n\n[jump](#foobar)'))
-      .toBe('## `foo_bar\n\n[jump](#foobar)')
-    expect(cleanFragments('## ``foo_bar`\n\n[jump](#foobar)'))
-      .toBe('## ``foo_bar`\n\n[jump](#foobar)')
-    expect(cleanFragments('## ``foo_bar``\n\n[jump](#foo_bar)'))
-      .toBe('## ``foo_bar``\n\n[jump](#foo_bar)')
-    expect(cleanFragments('## `` `foo_bar`\n\n[jump](#foo_bar)'))
-      .toContain('[jump](#foo_bar)')
-    expect(cleanFragments('## `foo_bar<span title="`"></span>\n\n[jump](#foobar)'))
-      .toContain('[jump](#foobar)')
-    expect(cleanFragments('## `foo_bar\\<span title="`"></span>\n\n[jump](#foo_barspan-title)'))
-      .toContain('[jump](#foo_barspan-title)')
-    expect(cleanFragments('## `foo_bar\\\\<span title="`"></span>\n\n[jump](#foobar)'))
-      .toContain('[jump](#foobar)')
-    expect(cleanFragments('## \\`foo_bar\n\n[jump](#foobar)'))
-      .toContain('[jump](#foobar)')
-    expect(cleanFragments('## `foo\\_bar\n\n[jump](#foo_bar)'))
-      .toContain('[jump](#foo_bar)')
-    expect(cleanFragments('## `foo_bar\\`\n\n[jump](#foo_bar)'))
-      .toContain('[jump](#foo_bar)')
-    expect(cleanFragments('## `foo_bar\\` baz_qux`\n\n[jump](#foo_bar-bazqux)'))
-      .toContain('[jump](#foo_bar-bazqux)')
-  })
-
-  it('cleans Markdown inside escaped tag-shaped text outside raw HTML', () => {
-    expect(cleanFragments(String.raw`\<a title="[jump](#missing)">`))
-      .toBe(String.raw`\<a title="jump">`)
-    expect(cleanRedundantLinks(String.raw`\<https://example.com>`))
-      .toBe(String.raw`\<https://example.com>`)
-  })
-
-  it('cleans a self-link heading inside escaped tag-shaped text', () => {
-    const markdown = String.raw`\<a title="line one
-## [Title](#title)">Click</a>`
-    expect(cleanSelfLinkHeadings(markdown)).toBe(String.raw`\<a title="line one
-## Title">Click</a>`)
-  })
-
   it('encodes Markdown brackets in raw anchor attributes before cleanup', () => {
     expect(htmlToMarkdown(String.raw`<details>\<a href="[javascript:alert(1)](#)" title="[Title]">Click</a></details>`, {
       clean: clean(),
     })).toBe(String.raw`<details>\<a href="&#91;javascript:alert(1)&#93;(#)" title="&#91;Title&#93;">Click</a></details>`)
-  })
-
-  it('handles repeated malformed tag starts', () => {
-    const markdown = `${'<a '.repeat(16 * 1024)}>`
-    expect(cleanEmptyLinks(markdown)).toBe(markdown)
   })
 })
