@@ -1,4 +1,5 @@
-import type { MdreamOptions } from '../types'
+import type { Cleaner, MdreamOptions } from '../types'
+import { clean } from '../clean'
 import {
   TAG_ASIDE,
   TAG_BUTTON,
@@ -21,10 +22,11 @@ import { tailwindPlugin } from '../plugins/tailwind'
 /**
  * Compose the minimal plugin set with explicit user plugins.
  */
-export function withMinimalPreset(options: MdreamOptions = {}): MdreamOptions {
+export function withMinimalPreset(options: Omit<MdreamOptions, 'clean'> & { clean?: Cleaner | false } = {}): MdreamOptions {
   return {
     ...options,
-    clean: options.clean ?? true,
+    // Pass `clean: false` to turn off the default cleanup.
+    clean: options.clean === false ? undefined : options.clean ?? clean(),
     plugins: [
       frontmatterPlugin(),
       isolateMainPlugin(),

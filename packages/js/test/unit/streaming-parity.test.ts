@@ -1,5 +1,6 @@
 import type { ElementNode, MdreamOptions } from '../../src/types'
 import { describe, expect, it } from 'vitest'
+import { clean } from '../../src/clean'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { htmlToMarkdown, NodeEventExit, streamHtmlToMarkdown } from '../../src/index'
 import { createPlugin } from '../../src/plugins'
@@ -374,7 +375,7 @@ describe('streaming parity with the Rust core', () => {
 
   it('retracts an empty cleaned link before caption block content', async () => {
     const html = '<figcaption><a href="/x"></a><blockquote>x</blockquote></figcaption>'
-    const options = { clean: { emptyLinkText: true } }
+    const options = { clean: clean({ emptyLinkText: true }) }
     expect(convertOnce(html, options)).toBe('> *x*')
     await expectEverySplitParity(html, options)
   })
@@ -417,14 +418,14 @@ describe('streaming parity with the Rust core', () => {
 
   it('rolls back deferred breaks inside a cleaned empty link', async () => {
     const html = '<figure><img src="i" alt="A"><figcaption><a href="x"><br></a>Caption</figcaption></figure>'
-    const options = { clean: { emptyLinkText: true } }
+    const options = { clean: clean({ emptyLinkText: true }) }
     expect(convertOnce(html, options)).toBe('![A](i)\n\n*Caption*')
     await expectEverySplitParity(html, options)
   })
 
   it('retracts clean-dropped caption children', async () => {
     const emptyImage = 'A<figcaption><img src="i"></figcaption>B'
-    const emptyImageOptions = { clean: { emptyImages: true } }
+    const emptyImageOptions = { clean: clean({ emptyImages: true }) }
     expect(convertOnce(emptyImage, emptyImageOptions)).toBe('AB')
     await expectEverySplitParity(emptyImage, emptyImageOptions)
     const whitespaceImage = 'A<figcaption><img src="i" alt=" "></figcaption>B'
@@ -432,7 +433,7 @@ describe('streaming parity with the Rust core', () => {
     await expectEverySplitParity(whitespaceImage, emptyImageOptions)
 
     const emptyLink = '<figcaption><em><a href="x"><br></a></em></figcaption>'
-    const emptyLinkOptions = { clean: { emptyLinkText: true } }
+    const emptyLinkOptions = { clean: clean({ emptyLinkText: true }) }
     expect(convertOnce(emptyLink, emptyLinkOptions)).toBe('')
     await expectEverySplitParity(emptyLink, emptyLinkOptions)
     const followedEmptyLink = '<figcaption><em><a href="x"></a></em>x</figcaption>'

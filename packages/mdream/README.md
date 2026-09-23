@@ -252,7 +252,8 @@ interface MdreamOptions extends EngineOptions {
 
 interface EngineOptions {
   origin?: string
-  clean?: boolean | CleanOptions
+  /** Cleanup rules from clean() in @mdream/js/clean */
+  clean?: Cleaner
   tagOverrides?: Record<string, TagOverride | string>
 
   /**
@@ -270,6 +271,8 @@ Use `@mdream/js/text` for plain text. Use `@mdream/js/html` for safe HTML.
 ### CleanOptions
 
 Post-processing cleanup applied to the final Markdown output. All options default to `false` unless `clean: true` is set.
+
+With `@mdream/js`, pass these rules to `clean()` from `@mdream/js/clean`, for example `clean: clean({ urls: true })`.
 
 ```ts
 interface CleanOptions {
@@ -778,8 +781,8 @@ interface SplitterOptions {
   /** Custom tag output or aliases */
   tagOverrides?: Record<string, TagOverride | string>
 
-  /** Post-processing cleanup */
-  clean?: boolean | CleanOptions
+  /** Cleanup rules from clean() in @mdream/js/clean */
+  clean?: Cleaner
 }
 ```
 

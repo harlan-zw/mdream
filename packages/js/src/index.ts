@@ -1,5 +1,4 @@
 import type { MdreamOptions } from './types'
-import { applyClean, resolveClean } from './clean'
 import { createMarkdownProcessor } from './markdown-processor'
 import { resolvePlugins } from './pluggable/plugin'
 import { streamHtmlToMarkdown as _streamHtmlToMarkdown } from './stream'
@@ -17,9 +16,12 @@ function convert(html: string, options: MdreamOptions): string {
 
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
   const markdown = convert(html, options)
-  if (options.clean)
-    return applyClean(markdown, resolveClean(options.clean))
-  return markdown
+  const clean = options.clean
+  if (!clean)
+    return markdown
+  if (typeof clean.apply !== 'function')
+    throw new TypeError('The clean option needs cleanup rules from clean(). Import it from \'@mdream/js/clean\'.')
+  return clean.apply(markdown)
 }
 
 export function streamHtmlToMarkdown(
@@ -37,6 +39,7 @@ export { createPlugin } from './pluggable/plugin'
 export type { ExtractedElement } from './plugins/extraction'
 export type { MdreamOptions } from './types'
 export type {
+  Cleaner,
   CleanOptions,
   ElementNode,
   EngineOptions,

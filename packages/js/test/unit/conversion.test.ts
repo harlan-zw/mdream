@@ -29,6 +29,10 @@ describe('root conversion', () => {
     })).toBe('[Guide](https://example.com/guide)')
   })
 
+  it('rejects clean rules that did not come from clean()', () => {
+    expect(() => htmlToMarkdown('<p>x</p>', { clean: true as any })).toThrow('@mdream/js/clean')
+  })
+
   it('streams without optional plugins', async () => {
     const html = '<h1>Hello</h1>'
     const stream = new ReadableStream<string>({

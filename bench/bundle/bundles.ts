@@ -10,6 +10,7 @@ export interface BundleSpec {
 export const BUNDLES: BundleSpec[] = [
   { id: 'core', name: 'JavaScript Root', file: 'core/fixtures/core.mjs' },
   { id: 'filter', name: 'JavaScript + Filter', file: 'filter/fixtures/filter.mjs' },
+  { id: 'clean', name: 'JavaScript + Clean', file: 'clean/fixtures/clean.mjs' },
   { id: 'text', name: 'JavaScript Text', file: 'text/fixtures/text.mjs' },
   { id: 'html', name: 'JavaScript Safe HTML', file: 'html/fixtures/html.mjs' },
   { id: 'minimal', name: 'JavaScript Minimal Preset', file: 'minimal/fixtures/minimal.mjs' },

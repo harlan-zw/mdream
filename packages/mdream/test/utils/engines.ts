@@ -2,6 +2,7 @@ import type { EngineOptions, MdreamOptions, TagOverride, TransformPlugin } from 
 import type { FrontmatterPluginOptions } from '@mdream/js/plugins'
 import type { ExtractedElement, MdreamOptions as RustMdreamOptions } from '../../src'
 import { htmlToMarkdown as jsHtmlToMarkdown, streamHtmlToMarkdown as jsStreamHtmlToMarkdown } from '@mdream/js'
+import { clean } from '@mdream/js/clean'
 import { htmlToSafeHtml as jsHtmlToSafeHtml, streamHtmlToSafeHtml as jsStreamHtmlToSafeHtml } from '@mdream/js/html'
 import { extractionPlugin, filterPlugin, frontmatterPlugin, isolateMainPlugin, tailwindPlugin } from '@mdream/js/plugins'
 import { htmlToText as jsHtmlToText, streamHtmlToText as jsStreamHtmlToText } from '@mdream/js/text'
@@ -224,8 +225,10 @@ function toJsOptions(options?: TestOptions): MdreamOptions {
   if (hooks)
     plugins.push(...hooks)
 
+  const { clean: cleanOption, ...rest } = conversionOptions
   return {
-    ...conversionOptions,
+    ...rest,
+    clean: cleanOption ? clean(cleanOption === true ? undefined : cleanOption) : undefined,
     plugins,
     tagOverrides: builtinPlugins?.tagOverrides ?? conversionOptions.tagOverrides,
   }

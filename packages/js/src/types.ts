@@ -60,7 +60,7 @@ export interface TagOverride {
   collapsesInnerWhiteSpace?: boolean
 }
 
-/** Core conversion options. */
+/** Cleanup rules. */
 export interface CleanOptions {
   /** Strip tracking query parameters (utm_*, fbclid, gclid, etc.) from URLs */
   urls?: boolean
@@ -80,6 +80,16 @@ export interface CleanOptions {
   emptyLinkText?: boolean
 }
 
+/**
+ * Cleanup rules with the Markdown post-processing pass that applies them.
+ * Create one with `clean()` from `@mdream/js/clean`.
+ */
+export interface Cleaner extends CleanOptions {
+  /** Apply the post-processing rules to converted Markdown. */
+  apply: (markdown: string) => string
+}
+
+/** Core conversion options. */
 export interface EngineOptions {
   /**
    * Origin URL for resolving relative image paths and internal links.
@@ -387,7 +397,12 @@ export interface PluginContext {
 }
 
 /** Top-level options for the mdream JavaScript engine. */
-export interface MdreamOptions extends EngineOptions {
+export interface MdreamOptions extends Omit<EngineOptions, 'clean'> {
+  /**
+   * Cleanup rules from `clean()` in `@mdream/js/clean`. Import it only when
+   * you use it, so the post-processing pass stays out of other bundles.
+   */
+  clean?: Cleaner
   /** Explicit plugins, applied in array order. */
   plugins?: Plugin[]
 }

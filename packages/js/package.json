@@ -40,6 +40,14 @@
       },
       "default": "./dist/html.mjs"
     },
+    "./clean": {
+      "types": "./dist/clean.d.mts",
+      "import": {
+        "types": "./dist/clean.d.mts",
+        "default": "./dist/clean.mjs"
+      },
+      "default": "./dist/clean.mjs"
+    },
     "./negotiate": {
       "types": "./dist/negotiate.d.mts",
       "import": {

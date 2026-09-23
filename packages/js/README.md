@@ -24,6 +24,7 @@ yarn add @mdream/js@beta
 | `@mdream/js` | Tree-shakable Markdown conversion and streaming |
 | `@mdream/js/text` | Tree-shakable plain text conversion and streaming |
 | `@mdream/js/html` | Tree-shakable safe HTML conversion and streaming |
+| `@mdream/js/clean` | `clean()` cleanup rules for the `clean` option |
 | `@mdream/js/plugins` | Optional plugin factories |
 | `@mdream/js/preset/minimal` | Explicit composition of the minimal plugin set |
 | `@mdream/js/negotiate` | HTTP content negotiation: `shouldServeMarkdown`, `parseAcceptHeader` |
@@ -49,7 +50,8 @@ The `format` option is removed. Import the converter for the format.
 | `streamHtmlToMarkdown(stream, { format: 'html' })` | `streamHtmlToSafeHtml(stream)` from `@mdream/js/html` |
 
 The text and HTML converters accept `origin`, `plugins`, and `tagOverrides`.
-`htmlToText` also accepts `wrapWidth`. Both ignore `clean`, as in v1.
+`htmlToText` also accepts `wrapWidth`.
+Both apply the `urls` and `emptyImages` rules from `clean`. They skip the Markdown post-processing pass, as in v1.
 The CLI `--format` flag is unchanged.
 `frontmatterPlugin` now writes YAML frontmatter to Markdown output only.
 In v1, safe HTML output started with a YAML block. This also applies to `--preset minimal --format html`.
@@ -119,6 +121,27 @@ In v1, the built-in plugins always ran first, in this order: frontmatter, isolat
 + ],
 ```
 
+### Cleanup
+
+The `clean` option now takes the result of `clean()` from `@mdream/js/clean`.
+The Markdown cleanup pass is only in your bundle when you import it.
+
+| v1 | v2 |
+|---|---|
+| `clean: true` | `clean: clean()` |
+| `clean: { urls: true, fragments: true }` | `clean: clean({ urls: true, fragments: true })` |
+
+```diff
+  import { htmlToMarkdown } from '@mdream/js'
++ import { clean } from '@mdream/js/clean'
+
+- htmlToMarkdown(html, { clean: true })
++ htmlToMarkdown(html, { clean: clean() })
+```
+
+If `htmlToMarkdown` gets `clean: true` or a plain rules object, it throws a `TypeError`.
+`withMinimalPreset` still enables all cleanup by default. To turn it off, pass `clean: false`.
+
 ### Plugin instances
 
 You can create plugins once and reuse them for many conversions.
@@ -133,11 +156,12 @@ If your own plugin keeps state for one document, use the setup form of `createPl
 
 ```ts
 import { htmlToMarkdown } from '@mdream/js'
+import { clean } from '@mdream/js/clean'
 import { filterPlugin, isolateMainPlugin, tailwindPlugin } from '@mdream/js/plugins'
 
 // Minimal preset without frontmatter, with a custom filter
 htmlToMarkdown(html, {
-  clean: true,
+  clean: clean(),
   plugins: [isolateMainPlugin(), tailwindPlugin(), filterPlugin({ exclude: ['nav', 'footer'] })],
 })
 ```
@@ -251,7 +275,7 @@ const markdown = htmlToMarkdown(html, {
 | `origin` | `string` | `undefined` | Origin URL for resolving relative image paths and internal links |
 | `plugins` | `Plugin[]` | `undefined` | Explicit conversion plugins, applied in array order |
 | `tagOverrides` | `Record<string, TagOverride \| string>` | `undefined` | Custom tag output or aliases |
-| `clean` | `boolean \| CleanOptions` | `undefined` | Post-processing cleanup. Pass `true` for all cleanup rules or an object for specific features (see [CleanOptions](#cleanoptions)). Sync API only for `fragments`. |
+| `clean` | `Cleaner` | `undefined` | Cleanup rules from `clean()` in `@mdream/js/clean` (see [CleanOptions](#cleanoptions)). The post-processing rules run in the sync API only. |
 | `wrapWidth` | `number` | `undefined` | Hard-wrap prose at this many characters on word boundaries |
 
 ### `TagOverride`
@@ -267,7 +291,15 @@ const markdown = htmlToMarkdown(html, {
 
 ### `CleanOptions`
 
-Post-processing cleanup options. Pass `true` to `clean` to enable all of these.
+Cleanup rules. Pass them to `clean()` from `@mdream/js/clean`:
+
+```typescript
+import { htmlToMarkdown } from '@mdream/js'
+import { clean } from '@mdream/js/clean'
+
+htmlToMarkdown(html, { clean: clean() }) // all rules
+htmlToMarkdown(html, { clean: clean({ urls: true, fragments: true }) })
+```
 
 | Option | Type | Default | Description |
 |---|---|---|---|
@@ -280,7 +312,7 @@ Post-processing cleanup options. Pass `true` to `clean` to enable all of these.
 | `emptyImages` | `boolean` | `false` | Strip images with no alt text (decorative images, tracking pixels) |
 | `emptyLinkText` | `boolean` | `false` | Drop links that produce no visible text: `[](url)` is removed entirely |
 
-When `clean: true` is passed, all options except `urls` and `blankLines` are enabled.
+`clean()` without rules enables all options except `blankLines`.
 
 ---
 
@@ -453,7 +485,7 @@ const plugin = extractionPlugin({
 
 ### `withMinimalPreset(options?)`
 
-Returns explicit frontmatter, isolate, Tailwind, and filter plugins. It enables `clean: true` by default.
+Returns explicit frontmatter, isolate, Tailwind, and filter plugins. It enables all cleanup rules by default. Pass `clean: false` to turn cleanup off.
 
 ```typescript
 import { htmlToMarkdown } from '@mdream/js'
@@ -471,7 +503,7 @@ You can append custom plugins:
 ```typescript
 const md = htmlToMarkdown(html, withMinimalPreset({
   origin: 'https://example.com',
-  clean: { urls: true, fragments: true },
+  clean: clean({ urls: true, fragments: true }),
   plugins: [myPlugin],
 }))
 ```
