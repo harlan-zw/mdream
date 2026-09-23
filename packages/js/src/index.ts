@@ -1,66 +1,55 @@
-import type { EngineOptions, MdreamOptions, TransformPlugin } from './types'
-import { applyClean, resolveClean } from './clean'
+import type { MdreamOptions } from './types'
 import { createMarkdownProcessor } from './markdown-processor'
-import { resolvePlugins } from './resolve-plugins'
+import { resolvePlugins } from './pluggable/plugin'
 import { streamHtmlToMarkdown as _streamHtmlToMarkdown } from './stream'
-import { buildTagOverrideHandlers } from './tags'
+import { buildTagOverrideHandlers } from './tag-overrides'
+import { tagHandlers } from './tags'
 
-function resolveHooks(options: Partial<MdreamOptions>): TransformPlugin[] | undefined {
-  return options.hooks?.length ? options.hooks : undefined
-}
-
-function convert(html: string, options: EngineOptions, hooks?: TransformPlugin[]): string {
-  const { plugins, callExtractionHandlers, getFrontmatter, frontmatterCallback } = resolvePlugins(options, hooks)
-  const tagOverrideHandlers = options.plugins?.tagOverrides
-    ? buildTagOverrideHandlers(options.plugins.tagOverrides)
+function convert(html: string, options: MdreamOptions): string {
+  const tagOverrideHandlers = options.tagOverrides
+    ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
     : undefined
-  const processor = createMarkdownProcessor(options, plugins, tagOverrideHandlers)
+  const processor = createMarkdownProcessor(options, resolvePlugins(options.plugins), tagOverrideHandlers)
   processor.processHtml(html)
-  if (getFrontmatter && frontmatterCallback) {
-    const fm = getFrontmatter()
-    if (fm)
-      frontmatterCallback(fm)
-  }
-  callExtractionHandlers?.()
   return processor.getMarkdown()
 }
 
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
-  const hooks = resolveHooks(options)
-  const markdown = convert(html, options, hooks)
-  if (options.clean && (options.format === undefined || options.format === 'markdown'))
-    return applyClean(markdown, resolveClean(options.clean))
-  return markdown
+  const markdown = convert(html, options)
+  const clean = options.clean
+  if (!clean)
+    return markdown
+  if (typeof clean.apply !== 'function')
+    throw new TypeError('The clean option needs cleanup rules from clean(). Import it from \'@mdream/js/clean\'.')
+  return clean.apply(markdown)
 }
 
 export function streamHtmlToMarkdown(
   htmlStream: ReadableStream<Uint8Array | string> | null,
   options: Partial<MdreamOptions> = {},
 ): AsyncIterable<string> {
-  const hooks = resolveHooks(options)
-  const { plugins } = resolvePlugins(options, hooks)
-  const tagOverrideHandlers = options.plugins?.tagOverrides
-    ? buildTagOverrideHandlers(options.plugins.tagOverrides)
+  const tagOverrideHandlers = options.tagOverrides
+    ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
     : undefined
-  return _streamHtmlToMarkdown(htmlStream, options, plugins, tagOverrideHandlers)
+  return _streamHtmlToMarkdown(htmlStream, options, resolvePlugins(options.plugins), tagOverrideHandlers)
 }
 
 export { ELEMENT_NODE, NodeEventEnter, NodeEventExit, TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6, TEXT_NODE } from './const'
 export { createPlugin } from './pluggable/plugin'
-export { withMinimalPreset } from './preset/minimal'
+export type { ExtractedElement } from './plugins/extraction'
 export type { MdreamOptions } from './types'
 export type {
-  BuiltinPlugins,
+  Cleaner,
   CleanOptions,
   ElementNode,
   EngineOptions,
-  ExtractedElement,
-  FrontmatterConfig,
   MarkdownChunk,
   Node,
   NodeEvent,
-
+  OutputFormat,
+  Plugin,
   PluginContext,
+  PluginSetup,
   SplitterOptions,
   TagOverride,
   TextNode,

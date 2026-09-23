@@ -49,15 +49,16 @@ import {
   TAG_VAR,
   TEXT_NODE,
 } from './const'
-import { createHtmlOutputState, processHtmlOutputEvent } from './html-output'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
-import { breakHandler, renderBreak, resolveUrl } from './tags'
-import { blockOpenPrefix, continuationPrefix, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, orderedItemNumber } from './utils'
+import { breakHandler, renderBreak, tagHandlers } from './tags'
+import { blockOpenPrefix, continuationPrefix, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
   options?: EngineOptions
+  /** Active output format for plugins. */
+  outputFormat: 'markdown'
   /** Content buffer for markdown output */
   buffer: string[]
   /** Performance cache for last content to avoid iteration */
@@ -112,8 +113,6 @@ export interface MarkdownState {
   emptyItemFragment?: number
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
-  /** Whether output should omit Markdown/HTML markup */
-  plainText?: boolean
 }
 
 interface CodeSpan {
@@ -286,9 +285,7 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
     return
   if (eventType === NodeEventEnter) {
     const isOrdered = element.parent?.tagId === TAG_OL
-    const width = state.plainText
-      ? 0
-      : (isOrdered ? String(orderedItemNumber(element.parent, element.index)).length + 2 : 2)
+    const width = isOrdered ? String(orderedItemNumber(element.parent, element.index)).length + 2 : 2
     state.listIndentWidths.push(width)
     state.listIndent += ' '.repeat(width)
   }
@@ -769,22 +766,13 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
 /**
  * Calculate newline configuration based on tag handler spacing config
  */
-function calculateNewLineConfig(node: ElementNode, depthMap: Uint16Array, plainText: boolean): readonly [number, number] {
+function calculateNewLineConfig(node: ElementNode, depthMap: Uint16Array): readonly [number, number] {
   const tagId = node.tagId
-
-  if (plainText && tagId === TAG_FIGCAPTION)
-    return NO_SPACING
 
   // List-item descendants own their structural indentation. Markdown
   // blockquotes are buffered and prefixed after their children serialize, so
   // their normal block spacing must remain intact.
-  if ((tagId !== TAG_LI && (depthMap[TAG_LI] || 0) > 0)
-    || (plainText && tagId !== TAG_BLOCKQUOTE && (depthMap[TAG_BLOCKQUOTE] || 0) > 0)) {
-    // Markdown suppresses nested block spacing because the surrounding list or
-    // quote handler owns its prefixes. Plain text has no such prefixes, so a
-    // nested <pre> still needs a line boundary around its literal contents.
-    if (plainText && tagId === TAG_PRE)
-      return [1, 1]
+  if (tagId !== TAG_LI && (depthMap[TAG_LI] || 0) > 0) {
     return NO_SPACING
   }
 
@@ -1020,10 +1008,6 @@ function collapseNestedBlockquoteSeparator(buffer: string[]): void {
  * nested <code> does not double up and the <pre> exit emits the closing fence.
  */
 function flushPreFence(state: MarkdownState): void {
-  if (state.plainText) {
-    state.preFencePending = false
-    return
-  }
   state.preFencePending = false
   state.preFenceOpen = true
   const lang = state.preFenceLang || ''
@@ -1134,67 +1118,19 @@ function commitGfmAction(
   }
 }
 
-function getPlainTextOutput(node: ElementNode, eventType: number, state: MarkdownState): string | undefined {
-  const override = state.options?.plugins?.tagOverrides?.[node.name]
-  if (override && typeof override !== 'string') {
-    const explicitOutput = eventType === NodeEventEnter ? override.enter : override.exit
-    if (explicitOutput !== undefined)
-      return explicitOutput
-  }
-
-  const tagId = node.tagId
-  const depthMap = state.depthMap
-  if (eventType === NodeEventEnter) {
-    if (tagId === TAG_BR)
-      return '\n'
-    if (tagId === TAG_P && ((depthMap[TAG_BLOCKQUOTE] || 0) > 0 || ((depthMap[TAG_LI] || 0) > 0 && !isInsideTableCell(state)))) {
-      const lastEntry = state.buffer.at(-1)
-      const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
-      if (lastChar && lastChar !== ' ' && lastChar !== '\n')
-        return '\n\n'
-    }
-    if (tagId === TAG_TD || tagId === TAG_TH)
-      return (depthMap[TAG_TABLE] || 0) > 1 || node.index === 0 ? '' : '\t'
-    if (tagId === TAG_IMG) {
-      const alt = node.attributes?.alt
-      const clean = state.options?.clean
-      const stripsEmptyImage = clean === true
-        || (clean != null && clean !== false && clean.emptyImages === true)
-      if (stripsEmptyImage && !(alt !== undefined && alt.trim().length > 0))
-        return undefined
-      const src = node.attributes?.src || ''
-      const output = alt !== undefined
-        ? alt || undefined
-        : node.attributes?.title || resolveUrl(isDataUrl(src) ? '' : src, state.options?.origin, state.options?.clean) || undefined
-      if (output && hasNonWhitespace(output))
-        markRenderedChildContent(node)
-      return output
-    }
-    if (tagId === TAG_Q)
-      return '"'
-    return undefined
-  }
-  if (tagId === TAG_Q)
-    return '"'
-  return undefined
-}
-
 /**
  * Creates a markdown processor that consumes DOM events and generates markdown
  */
 export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlugins: TransformPlugin[] = [], tagOverrideHandlers?: Map<string, TagHandler>) {
-  const outputFormat = options.format === 'html' || options.format === 'text' ? options.format : 'markdown'
-  const plainText = outputFormat === 'text'
-  const htmlState = outputFormat === 'html' ? createHtmlOutputState() : undefined
   const state: MarkdownState = {
     options,
+    outputFormat: 'markdown',
     buffer: [],
     depthMap: new Uint16Array(MAX_TAG_ID),
     listIndent: '',
     listIndentWidths: [],
     blockquotes: [],
     bufferedBlockquoteDepth: 0,
-    plainText,
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
   }
@@ -1219,7 +1155,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
   let lastYieldedLength = 0
   let hasYieldedContent = false
-  let preserveLeadingWhitespace = false
 
   function captionNeedsPreparation(): boolean {
     return captionBoundary !== 0
@@ -1230,7 +1165,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   function pushCaptionFrame(element: ElementNode, handler: TagHandler | undefined): void {
     let enterSpacing = 0
     let exitSpacing = 0
-    if (!state.depthMap[TAG_PRE] && figcaptionOwnsBlockSpacing(element, plainText)) {
+    if (!state.depthMap[TAG_PRE] && figcaptionOwnsBlockSpacing(element, false)) {
       const spacing = handler?.spacing
       if (spacing) {
         enterSpacing = spacing[0]
@@ -1306,7 +1241,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           ? ''
           : captionSpacingPrefix(frames[offset]!, true, beforeFragment)
         flags |= CAPTION_OPEN
-        if (!plainText && (!explicitTop || index !== captionFrameCount - 1))
+        if (!explicitTop || index !== captionFrameCount - 1)
           opening += MARKDOWN_EMPHASIS
         if (opening) {
           if (beforeFragment === state.buffer.length) {
@@ -1375,9 +1310,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       }
       state.buffer.length = index
     }
-    const output = plainText
-      ? '\n'.repeat(captionBreakRun)
-      : `  \n${state.listIndent}`.repeat(captionBreakRun)
+    const output = `  \n${state.listIndent}`.repeat(captionBreakRun)
     captionBreakRun = 0
     state.buffer.push(output)
     state.lastContentCache = output
@@ -1433,13 +1366,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         state.pendingInlineWhitespace = false
       }
 
-      if (plainText && state.depthMap[TAG_PRE] && state.buffer.length === 0)
-        preserveLeadingWhitespace = true
-
       if (textNode.value === ' ' && (lastChar === ' ' || lastChar === '\n' || lastChar === '\t' || lastChar === '\r'))
         return
 
-      if (!ownsCaptionSpace && !(plainText && state.depthMap[TAG_PRE]) && shouldAddSpacingBeforeText(lastChar, lastNode, textNode))
+      if (!ownsCaptionSpace && shouldAddSpacingBeforeText(lastChar, lastNode, textNode))
         textNode.value = ` ${textNode.value}`
 
       if ((state.depthMap[TAG_PRE] || 0) > 0 && (state.depthMap[TAG_LI] || 0) > 0) {
@@ -1458,8 +1388,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       let rawHtmlMarkdown = false
       if (insideRawHtmlBlock)
         rawHtmlMarkdown = trackRawHtmlMarkdownContext(state.buffer, bufferScan)
-      if (!plainText
-        && !state.depthMap[TAG_PRE]
+      if (!state.depthMap[TAG_PRE]
         && insideRawHtmlBlock) {
         let parent = rawHtmlLink ? textNode.parent : undefined
         while (parent && parent !== rawHtmlLink)
@@ -1467,8 +1396,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         textNode.value = escapeRawHtmlText(textNode.value, state.depthMap, rawHtmlLink !== undefined && parent === rawHtmlLink)
       }
 
-      if (!plainText
-        && !state.depthMap[TAG_PRE]
+      if (!state.depthMap[TAG_PRE]
         && !state.depthMap[TAG_CODE]
         // Inside a raw-HTML region only text past a blank line is Markdown
         // again. That test is O(1), so it goes before the text scans; the line
@@ -1528,11 +1456,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     if (inTemplate)
       return
 
-    if (htmlState) {
-      processHtmlOutputEvent(event, htmlState, state.buffer, options)
-      return
-    }
-
     if (state.listRulePending !== undefined) {
       const isVisibleText = node.type === TEXT_NODE
         && eventType === NodeEventEnter
@@ -1562,7 +1485,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // before its first non-whitespace child so empty/whitespace-only blocks emit
     // nothing. A direct <code> child keeps fence ownership (handled in tags.ts).
     // Runs before lastChar is read so the fence is reflected in spacing checks.
-    if (!plainText && state.preFencePending) {
+    if (state.preFencePending) {
       const preparePendingPreFence = () => {
         if (captionNeedsPreparation()) {
           flushCaptionBreakRun()
@@ -1625,7 +1548,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       && handler === breakHandler
       && !element.pluginOutput?.length) {
       const inPre = state.depthMap[TAG_PRE] !== 0
-      let breakOutput: string | undefined = plainText ? '\n' : renderBreak(element, state)
+      let breakOutput: string | undefined = renderBreak(element, state)
 
       if (captionBoundary !== 0 || captionFrameCount !== 0) {
         const pendingCaption = captionFrameCount !== 0
@@ -1647,24 +1570,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           lastBuffEntry = buff.at(-1)!
           lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
         }
-      }
-
-      // Plain-text breaks normalize at three consecutive newlines. Markdown
-      // hard breaks and literal pre newlines remain exact.
-      if (plainText && !inPre) {
-        let trailingNewLines = captionBreakRun
-        if (lastChar === '\n') {
-          trailingNewLines++
-          const previousChar = lastBuffEntry.length > 1
-            ? lastBuffEntry.charAt(lastBuffEntry.length - 2)
-            : buff.length > 1
-              ? buff[buff.length - 2]?.at(-1)
-              : undefined
-          if (previousChar === '\n')
-            trailingNewLines++
-        }
-        if (trailingNewLines >= 2)
-          breakOutput = undefined
       }
 
       if (state.pendingInlineWhitespace)
@@ -1726,8 +1631,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     const isInlineElement = handler?.isInline === true
     let gfmAction: GfmAction | undefined
     let handlerOutput: string | undefined
-    const suppressedInPre = !plainText
-      && (state.depthMap[TAG_PRE] || 0) > 0
+    const suppressedInPre = (state.depthMap[TAG_PRE] || 0) > 0
       && suppressesFormattingInPre(tagId)
       && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
     if (!output && !suppressedInPre && handler?.[eventFn]) {
@@ -1746,9 +1650,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           return
         }
       }
-      const res = plainText
-        ? getPlainTextOutput(element, eventType, state)
-        : handler[eventFn]({ node: element, state })
+      const res = handler[eventFn]({ node: element, state })
       if (typeof res === 'string') {
         if (res) {
           output = [res]
@@ -1895,7 +1797,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // Handle newlines
     const newLineConfig = suppressedInPre
       ? NO_SPACING
-      : calculateNewLineConfig(node as ElementNode, state.depthMap, plainText)
+      : calculateNewLineConfig(node as ElementNode, state.depthMap)
     const quoteAtStart = eventType === NodeEventEnter
       && state.blockquotes.at(-1)?.fragment === state.buffer.length
     const configuredNewLines = quoteAtStart || captionEvent || captionTransition
@@ -2058,7 +1960,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     if (gfmAction)
       commitGfmAction(gfmAction, state, gfmLifecycle, outputStart)
 
-    if (tagId === TAG_LI && !plainText && !isInsideTableCell(state)) {
+    if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)
         recordItemMarker(state, element.index)
       else
@@ -2128,8 +2030,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       depthMap: state.depthMap,
       depth: 0,
       resolvedPlugins,
+      tagHandlers,
       tagOverrideHandlers,
-      plainText: outputFormat !== 'markdown',
+      plainText: false,
     }
 
     const handleEvent: (event: NodeEvent) => void = resolvedPlugins.length
@@ -2145,13 +2048,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
    */
   function getMarkdown(): string {
     const content = state.buffer.join('')
-    if (htmlState) {
-      state.buffer.length = 0
-      return content
-    }
-    const result = plainText && preserveLeadingWhitespace ? content : content.trimStart()
+    const result = content.trimStart()
     state.buffer.length = 0
-    preserveLeadingWhitespace = false
     return result.trimEnd()
   }
 
@@ -2159,11 +2057,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
    * Get new markdown content since the last call (for streaming)
    */
   function getMarkdownChunk(): string {
-    if (htmlState) {
-      const chunk = state.buffer.join('')
-      state.buffer.length = 0
-      return chunk
-    }
     // Settle an open marker-line guard when the item's first content already
     // answers it, so the hold below never outlives the marker's own line.
     let unresolvedCaptionFragment = -1
@@ -2179,9 +2072,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     }
     resolveItemMarker(state, false, unresolvedCaptionFragment)
     const content = state.buffer.join('')
-    const currentContent = hasYieldedContent || (plainText && preserveLeadingWhitespace)
-      ? content
-      : content.trimStart()
+    const currentContent = hasYieldedContent ? content : content.trimStart()
     const inPre = state.depthMap[TAG_PRE] !== 0
     let stableLength = currentContent.length
     let retainMutableFragments = false

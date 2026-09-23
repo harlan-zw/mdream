@@ -16,6 +16,8 @@ export interface PerfBench {
   samples?: number[]
   // Paired runs measure relative uncertainty directly.
   comparisonRme?: number
+  // Mean paired PR/base ratio used to express comparisonRme against the base.
+  comparisonRatio?: number
   // reported for reference but excluded from the verdict (e.g. wall time)
   informational?: boolean
 }
@@ -61,7 +63,10 @@ function classify(pr: PerfBench, base?: PerfBench): Row {
   const deltaPct = base.value !== 0 ? (delta / Math.abs(base.value)) * 100 : 0
   let significant: boolean
   if (pr.kind === 'time') {
-    const uncertainty = pr.comparisonRme ?? ((base.rme || 0) + (pr.rme || 0))
+    const fallbackRatio = base.value === 0 ? 1 : Math.abs(pr.value / base.value)
+    const uncertainty = pr.comparisonRme != null
+      ? pr.comparisonRme * Math.abs(pr.comparisonRatio ?? fallbackRatio)
+      : (base.rme || 0) + (pr.rme || 0)
     const threshold = Math.max(TIME_FLOOR_PCT, 2 * uncertainty)
     significant = Math.abs(deltaPct) > threshold
   }

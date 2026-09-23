@@ -3,6 +3,7 @@ import type { EngineOptions, NodeEvent, TagHandler, TransformPlugin } from './ty
 import { createMarkdownProcessor } from './markdown-processor'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { processPluginsForEvent } from './plugin-processor'
+import { tagHandlers } from './tags'
 
 /**
  * Creates a markdown stream from an HTML stream
@@ -29,8 +30,9 @@ export async function* streamHtmlToMarkdown(
     depthMap: processor.state.depthMap,
     depth: 0,
     resolvedPlugins,
+    tagHandlers,
     tagOverrideHandlers,
-    plainText: options.format === 'text' || options.format === 'html',
+    plainText: false,
   }
   const handleEvent: (event: NodeEvent) => void = resolvedPlugins.length
     ? event => processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)

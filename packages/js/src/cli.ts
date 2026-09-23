@@ -4,9 +4,10 @@ import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { cac } from 'cac'
 import { dirname, join } from 'pathe'
+import { streamHtmlToSafeHtml } from './html'
 import { streamHtmlToMarkdown } from './index'
-
 import { withMinimalPreset } from './preset/minimal'
+import { streamHtmlToText } from './text'
 
 interface CliOptions {
   origin?: string
@@ -27,18 +28,22 @@ async function streamingConvert(options: CliOptions = {}) {
   let conversionOptions: Partial<MdreamOptions> = {
     origin: options.origin,
     wrapWidth: options.wrapWidth ? Number(options.wrapWidth) || undefined : undefined,
-    format,
   }
 
   if (options.preset === 'minimal') {
     conversionOptions = withMinimalPreset(conversionOptions)
   }
 
-  const markdownGenerator = streamHtmlToMarkdown(Readable.toWeb(process.stdin) as any, conversionOptions)
+  const convert = format === 'text'
+    ? streamHtmlToText
+    : format === 'html'
+      ? streamHtmlToSafeHtml
+      : streamHtmlToMarkdown
+  const output = convert(Readable.toWeb(process.stdin) as any, conversionOptions)
 
-  for await (const markdownChunk of markdownGenerator) {
-    if (markdownChunk && markdownChunk.length > 0) {
-      process.stdout.write(markdownChunk)
+  for await (const chunk of output) {
+    if (chunk && chunk.length > 0) {
+      process.stdout.write(chunk)
     }
   }
 }

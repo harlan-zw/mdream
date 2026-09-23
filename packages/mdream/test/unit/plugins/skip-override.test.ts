@@ -1,5 +1,6 @@
 import type { ElementNode } from '@mdream/js'
-import { ELEMENT_NODE, htmlToMarkdown, withMinimalPreset } from '@mdream/js'
+import { ELEMENT_NODE, htmlToMarkdown } from '@mdream/js'
+import { withMinimalPreset } from '@mdream/js/preset/minimal'
 import { describe, expect, it } from 'vitest'
 
 describe('plugin skip override', () => {
@@ -7,7 +8,7 @@ describe('plugin skip override', () => {
     const seen: string[] = []
     const html = '<html><body><main><figure><img src="x.jpg" alt="test"></figure></main></body></html>'
     const options = withMinimalPreset({
-      hooks: [{
+      plugins: [{
         beforeNodeProcess(event) {
           if (event.node.type === ELEMENT_NODE) {
             seen.push((event.node as ElementNode).name)
@@ -30,7 +31,7 @@ describe('plugin skip override', () => {
     const figures: string[] = []
     const html = '<html><body><main><figure><img src="photo.jpg" alt="test"></figure></main></body></html>'
     const options = withMinimalPreset({
-      hooks: [{
+      plugins: [{
         onNodeEnter(node) {
           if (node.name === 'figure') {
             figures.push(node.name)

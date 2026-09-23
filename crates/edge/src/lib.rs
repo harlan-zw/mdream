@@ -351,6 +351,9 @@ impl MarkdownStream {
   /// flushed first. Byte and string chunks may be mixed freely.
   #[wasm_bindgen(js_name = "processChunk")]
   pub fn process_chunk(&mut self, chunk: &str) -> String {
+    if !chunk.is_empty() {
+      self.at_start = false;
+    }
     if self.tail.is_empty() {
       return self.inner.process_chunk(chunk);
     }
@@ -523,6 +526,19 @@ mod tests {
     assert!(
       !out.contains('\u{FFFD}'),
       "replacement char leaked into {out:?}"
+    );
+  }
+
+  #[test]
+  fn byte_bom_after_string_content_is_preserved() {
+    let mut stream = test_stream();
+    let mut out = stream.process_chunk("<p>before");
+    out += &stream.process_chunk_bytes(b"\xEF\xBB\xBFafter</p>");
+    out += &stream.finish();
+
+    assert!(
+      out.contains("before\u{FEFF}after"),
+      "mid-stream BOM was removed in {out:?}"
     );
   }
 }
