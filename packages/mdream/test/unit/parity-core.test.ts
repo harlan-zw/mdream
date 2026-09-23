@@ -53,6 +53,10 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     'x</span>y',
     'g t</>x',
   ],
+  'empty blockquote after content': [
+    'a<blockquote><blockquote></blockquote></blockquote>',
+    '<li><blockquote>',
+  ],
 }
 
 describe('javaScript engine matches Rust output', () => {
@@ -65,4 +69,13 @@ describe('javaScript engine matches Rust output', () => {
       }
     })
   }
+
+  // The fence opens inside a quote and closes after it. The lines before the
+  // quote differ through the separate pre-in-pre difference.
+  it('code fence in a quote inside pre', () => {
+    const html = '<pre><li><pre><li><blockquote>x<code>'
+    const rust = htmlToMarkdown(html)
+    const js = jsHtmlToMarkdown(html)
+    expect(js.slice(js.indexOf('> x'))).toBe(rust.slice(rust.indexOf('> x')))
+  })
 })

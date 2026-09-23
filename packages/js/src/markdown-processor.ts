@@ -972,13 +972,43 @@ function stripBlockquoteListIndent(line: string, listIndent: string): string {
     : line
 }
 
+/**
+ * Where `offset` into a quote's content lands once every line gains its `>`
+ * prefix. Parity with the Rust engine's `blockquote_offset`.
+ */
+function quotedOffset(content: string, listIndent: string, offset: number): number {
+  if (offset > content.length)
+    return -1
+  let sourceStart = 0
+  let outputStart = 0
+  while (true) {
+    const newline = content.indexOf('\n', sourceStart)
+    const lineEnd = newline === -1 ? content.length : newline
+    const removed = listIndent && content.startsWith(listIndent, sourceStart) ? listIndent.length : 0
+    const unindentedLength = Math.max(0, lineEnd - sourceStart - removed)
+    const prefixLength = listIndent.length + 1 + (unindentedLength > 0 ? 1 : 0)
+    if (offset <= lineEnd)
+      return outputStart + prefixLength + Math.max(0, offset - sourceStart - removed)
+    outputStart += prefixLength + unindentedLength + 1
+    sourceStart = lineEnd + 1
+  }
+}
+
 function finalizeBlockquote(state: MarkdownState): void {
   const frame = state.blockquotes.pop()
   if (!frame)
     return
   state.bufferedBlockquoteDepth = state.blockquotes.length
 
-  const content = state.buffer.slice(frame.fragment).join('').replace(/[ \t\r\n]+$/, '')
+  const buffer = state.buffer
+  const content = trimAsciiWhitespaceEnd(buffer.slice(frame.fragment).join(''))
+  // An empty quote whose trailing whitespace reaches back before its start
+  // follows content already ended by a block separator: it writes nothing.
+  if (!content) {
+    const before = lastOutputChar(buffer, frame.fragment)
+    if (before !== -1 && isAsciiWhitespace(before))
+      return
+  }
   const prefix = `${frame.listIndent}>`
   const quoted = content
     .split('\n')
@@ -988,7 +1018,33 @@ function finalizeBlockquote(state: MarkdownState): void {
     })
     .join('\n')
 
-  state.buffer.splice(frame.fragment, state.buffer.length - frame.fragment, quoted)
+  // A fence opened inside the quote rewrites its opener later through buffer
+  // positions, so keep the opener its own fragment at its quoted position.
+  const fence = state.codeFence
+  if (fence && fence.fragment >= frame.fragment) {
+    let openerStart = 0
+    for (let index = frame.fragment; index < fence.fragment; index++)
+      openerStart += buffer[index]!.length
+    const openerEnd = openerStart + buffer[fence.fragment]!.length
+    const remap = (offset: number): number => {
+      const mapped = quotedOffset(content, frame.listIndent, offset)
+      return mapped === -1 ? quoted.length : mapped
+    }
+    const start = remap(openerStart)
+    const end = remap(openerEnd)
+    fence.markerOffset = remap(openerStart + fence.markerOffset) - start
+    buffer.length = frame.fragment
+    if (start > 0)
+      buffer.push(quoted.slice(0, start))
+    fence.fragment = buffer.length
+    buffer.push(quoted.slice(start, end))
+    if (end < quoted.length)
+      buffer.push(quoted.slice(end))
+    state.lastContentCache = buffer.at(-1)
+    return
+  }
+
+  buffer.splice(frame.fragment, buffer.length - frame.fragment, quoted)
   state.lastContentCache = quoted
 }
 

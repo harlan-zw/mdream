@@ -34,6 +34,8 @@ const KNOWN_DIFFERENCES = new Set<string>([
   // Rust leaves `<` in rawtext unescaped in Markdown.
   ['markdown', '<textarea>a</tx>b'],
   ['markdown', '<textarea>a</textarea'],
+  // Rust closes the outer fence at a <pre> nested in a <pre>.
+  ['markdown', '<pre><li><pre><li><blockquote>x<code>'],
 ].map(([format, html]) => `${format}\u0000${html}`))
 
 describe('javaScript and Rust engines agree on the corpus', () => {
