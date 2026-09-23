@@ -75,6 +75,60 @@ fn paragraph_after_a_hard_break_in_a_list_item_keeps_the_blank_line() {
 }
 
 #[test]
+fn fenced_block_after_a_hard_break_in_a_list_item_keeps_the_blank_line() {
+  // A fence cannot interrupt a paragraph, so it must not share the break's
+  // line: the separator precedes the fence opener instead of replacing it.
+  assert_eq!(md("<li>q<br> <pre>x</pre>"), "- q  \n\n  ```\n  x\n  ```");
+  assert_eq!(md("<li>q<br><pre>x</pre>"), "- q  \n\n  ```\n  x\n  ```");
+  // A code fence opened by <code> behaves the same.
+  assert_eq!(
+    md("<li>q<br> <pre><code>x</code></pre>"),
+    "- q  \n\n  ```\n  x\n  ```"
+  );
+  // The separator survives streaming chunk boundaries.
+  for html in [
+    "<li>q<br> <pre>x</pre>",
+    "<li>q<br><pre>x</pre>",
+    "<li>q<br> <pre><code>x</code></pre>",
+  ] {
+    for chunk in [3, 7, html.len()] {
+      assert_eq!(
+        md_streamed(html, chunk),
+        "- q  \n\n  ```\n  x\n  ```",
+        "html={html} chunk={chunk}"
+      );
+    }
+  }
+}
+
+#[test]
+fn table_after_a_hard_break_in_a_list_item_keeps_the_blank_line() {
+  // A GFM table cannot interrupt a paragraph either, so the row marker must
+  // not share the break's line.
+  assert_eq!(
+    md("<li>q<br> <table><tr><td>X</td></tr></table>"),
+    "- q  \n\n  | X |\n  | --- |"
+  );
+  assert_eq!(
+    md("<li>q<br><table><tr><td>X</td></tr></table>"),
+    "- q  \n\n  | X |\n  | --- |"
+  );
+  // The separator survives streaming chunk boundaries.
+  for html in [
+    "<li>q<br> <table><tr><td>X</td></tr></table>",
+    "<li>q<br><table><tr><td>X</td></tr></table>",
+  ] {
+    for chunk in [3, 7, html.len()] {
+      assert_eq!(
+        md_streamed(html, chunk),
+        "- q  \n\n  | X |\n  | --- |",
+        "html={html} chunk={chunk}"
+      );
+    }
+  }
+}
+
+#[test]
 fn retracted_inline_marker_after_a_hard_break_keeps_the_blank_line() {
   // An empty inline pair or a truncated empty code span rewinds the buffer to
   // the break's line-end state, so the hard-break state must survive it too.

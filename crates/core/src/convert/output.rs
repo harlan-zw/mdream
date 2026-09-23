@@ -900,15 +900,19 @@ impl ConvertState {
     // break's own newline. Inside a list item every non-`<li>` spacing is
     // collapsed and the break's continuation indent already ended the line, so
     // the separator is written here or the paragraph boundary disappears
-    // (`- q  \n  X`). The break's indent spaces are trimmed first; whatever
-    // line break remains counts toward the two the separator needs.
+    // (`- q  \n  X`). Pre/table joins the set: a fence or GFM table cannot
+    // interrupt a paragraph, so sharing the break's line would render both as
+    // literal text. The break's indent spaces are trimmed first; whatever line
+    // break remains counts toward the two the separator needs.
     if !self.plain_text
       && self.after_hard_break
       && !enter_is_literal
-      && matches!(tag_id, Some(TAG_P | TAG_DIV))
+      && matches!(tag_id, Some(TAG_P | TAG_DIV | TAG_PRE | TAG_TABLE))
       && self.depth_map[TAG_LI as usize] > 0
       && !self.in_table_cell()
-      && self.depth_map[TAG_PRE as usize] == 0
+      // At a <pre>'s own enter the parser has already counted it (depth 1);
+      // any deeper this boundary sits inside literal fence content.
+      && self.depth_map[TAG_PRE as usize] <= u16::from(tag_id == Some(TAG_PRE))
     {
       self.after_hard_break = false;
       self.trim_trailing_spaces();
@@ -918,7 +922,12 @@ impl ConvertState {
         separator.push('\n');
       }
       separator.push_str(&self.list_indent);
-      output = Some(Cow::Owned(separator));
+      // Prepend rather than replace: a pre/table enter fragment can carry its
+      // own opener (fence, row marker), which must follow the separator.
+      output = Some(match output {
+        Some(fragment) => Cow::Owned(format!("{separator}{fragment}")),
+        None => Cow::Owned(separator),
+      });
     }
 
     if self.clean_flags & CLEAN_EMPTY_IMAGES != 0
