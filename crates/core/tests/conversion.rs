@@ -5383,7 +5383,7 @@ fn rawtext_eof_residual_is_text_not_a_dropped_tag() {
   }
 
   // An unterminated name is still text, even where it names this element.
-  assert_eq!(convert("<textarea>a</textarea"), "a</textarea");
+  assert_eq!(convert("<textarea>a</textarea"), "a\\</textarea");
 
   // Elements whose text is excluded keep emitting nothing.
   for html in ["<script>a</", "<style>a</", "<iframe>a</", "<noscript>a</"] {
@@ -5434,5 +5434,203 @@ fn a_clean_flag_leaves_content_outside_the_link_alone() {
   assert_eq!(
     convert_with_clean("<a href=\"https://e.com/\">https://e.com/</a>", clean_all()),
     "https://e.com/"
+  );
+}
+
+// RCDATA and RAWTEXT content is text in the DOM, so a `<` inside it has to stay
+// literal in Markdown. Left unescaped, `<textarea><b>x</b></textarea>` turned the
+// text into live inline HTML. The same text reached through `&lt;` was escaped.
+#[test]
+fn rcdata_less_than_is_escaped_like_any_text() {
+  for (html, expected) in [
+    ("<textarea><b>x</b></textarea>", "\\<b>x\\</b>"),
+    ("<textarea>&lt;b>x&lt;/b></textarea>", "\\<b>x\\</b>"),
+    ("<title><b>x</b></title>", "\\<b>x\\</b>"),
+    ("<xmp>a<b></xmp>", "a\\<b>"),
+    ("<textarea>a<z</textarea>", "a\\<z"),
+    ("<textarea>a < b</textarea>", "a < b"),
+    // EOF residuals take the carried path rather than the byte loop.
+    ("<title>a<z", "a\\<z"),
+    ("<textarea>a</textarea", "a\\</textarea"),
+    ("<xmp>a</", "a\\</"),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+    for split in 1..html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let mut out = stream.process_chunk(&html[..split]);
+      out.push_str(&stream.process_chunk(&html[split..]));
+      out.push_str(&stream.finish());
+      assert_eq!(out, expected, "html={html:?} split={split}");
+    }
+  }
+  // Excluded rawtext stays excluded.
+  assert_eq!(convert("<script><b>x</b></script>"), "");
+}
+
+// U+0000 is an ordinary character in the output buffer. Using `0` as the "buffer
+// is empty" sentinel made a trailing NUL suppress the separator that any other
+// byte gets, so `x\0` joined the following link where `x\u{1}` did not.
+#[test]
+fn nul_is_not_an_empty_buffer() {
+  for (html, expected) in [
+    ("x\0<a href=\"/y\">y</a>", "x\0 [y](/y)"),
+    ("\0\0<a href>", "\0\0 []()"),
+    ("<ul><li>x\0<code>y</code></li></ul>", "- x\0 `y`"),
+    ("<ul><li>x\0<p>y</p></li></ul>", "- x\0\n\n  y"),
+    ("<blockquote>x\0<p>y</p></blockquote>", "> x\0\n>\n> y"),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+    // Same result as any other non-space byte in that position.
+    let control = html.replace('\0', "\u{1}");
+    assert_eq!(
+      convert(&control),
+      expected.replace('\0', "\u{1}"),
+      "html={control:?}"
+    );
+  }
+}
+
+fn frontmatter_md(html: &str) -> String {
+  html_to_markdown(
+    html,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig::frontmatter()),
+      ..Default::default()
+    },
+  )
+}
+
+// Frontmatter values must read back as the source text under a YAML parser. A
+// backslash inside a double-quoted scalar starts an escape (`"C:\dir"` is
+// invalid), while a plain scalar takes `\` and `"` literally, so escaping has to
+// follow the quoting decision rather than precede it.
+#[test]
+fn frontmatter_values_are_valid_yaml_scalars() {
+  for (title, expected) in [
+    ("C:\\dir", "title: \"C:\\\\dir\""),
+    ("\\", "title: \\"),
+    ("a\\b", "title: a\\b"),
+    ("a\"b", "title: \"a\\\"b\""),
+    ("\"q\" x", "title: \"\\\"q\\\" x\""),
+    ("'q'", "title: \"'q'\""),
+    ("[x]", "title: \"[x]\""),
+    ("-x", "title: -x"),
+    ("-", "title: \"-\""),
+    ("-5", "title: \"-5\""),
+    ("*x", "title: \"*x\""),
+    ("a-b", "title: a-b"),
+    ("plain", "title: plain"),
+    ("a: b", "title: \"a: b\""),
+    // Implicitly typed values stay strings.
+    ("2024", "title: \"2024\""),
+    ("1.5", "title: \"1.5\""),
+    ("2024-01-02", "title: \"2024-01-02\""),
+    (".inf", "title: \".inf\""),
+    ("true", "title: \"true\""),
+    ("No", "title: \"No\""),
+    ("NULL", "title: \"NULL\""),
+    ("~", "title: \"~\""),
+    ("v1.0", "title: v1.0"),
+    ("nothing", "title: nothing"),
+    // YAML allows no raw control character, U+0000 included.
+    ("a\0b", "title: \"a\\x00b\""),
+    ("a\u{7f}b", "title: \"a\\x7fb\""),
+    // U+FFFE and U+FFFF are noncharacters: no control, but outside YAML's
+    // printable set, so a stream carrying them raw is rejected outright.
+    ("\u{fffe}", "title: \"\\ufffe\""),
+    ("x\u{ffff}", "title: \"x\\uffff\""),
+    // U+2028/U+2029 are line separators, not controls. A reader folds them to
+    // a space even inside double quotes, so they must be escaped.
+    ("a\u{2028}b", "title: \"a\\u2028b\""),
+    ("x\u{2029}y", "title: \"x\\u2029y\""),
+  ] {
+    let md = frontmatter_md(&format!("<head><title>{title}</title></head>"));
+    assert_eq!(md, format!("---\n{expected}\n---"), "title={title:?}");
+  }
+}
+
+// An empty `content` carries no value. Printed as `description: ` it reads back
+// as YAML null, not an empty string, so the entry is skipped.
+#[test]
+fn frontmatter_skips_meta_with_empty_content() {
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content=""></head>"#),
+    ""
+  );
+  assert_eq!(
+    frontmatter_md(
+      r#"<head><meta name="description" content=.><meta name="og:title" content=D><meta name="og:description" content></head>"#
+    ),
+    "---\nmeta:\n  description: \".\"\n  \"og:title\": D\n---"
+  );
+  // A later empty duplicate does not erase an earlier value.
+  assert_eq!(
+    frontmatter_md(
+      r#"<head><meta name="description" content="d"><meta name="description" content=""></head>"#
+    ),
+    "---\nmeta:\n  description: d\n---"
+  );
+  // A configured value that is empty is still a string.
+  let md = html_to_markdown(
+    "<head></head>",
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        frontmatter: Some(FrontmatterConfig {
+          additional_fields: Some(vec![("custom".to_string(), String::new())]),
+          meta_fields: None,
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert_eq!(md, "---\ncustom: \"\"\n---");
+  // A value whose only content is whitespace reads back as null from a plain
+  // scalar, and a reader strips an edge tab as separation or trailing
+  // whitespace, so tab content forces quotes.
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content="&#9;"></head>"#),
+    "---\nmeta:\n  description: \"\\t\"\n---"
+  );
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content="&#9;d"></head>"#),
+    "---\nmeta:\n  description: \"\\td\"\n---"
+  );
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content="d&#9;"></head>"#),
+    "---\nmeta:\n  description: \"d\\t\"\n---"
+  );
+  // An interior tab reaches the reader raw in a plain scalar, where it is
+  // rejected outright or folded to a space, so any tab forces quotes.
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content="a&#9;b"></head>"#),
+    "---\nmeta:\n  description: \"a\\tb\"\n---"
+  );
+}
+
+// Configured fields are written by the caller, who may mean `draft: true` as a
+// boolean, so only text read from the page is forced to stay a string.
+#[test]
+fn frontmatter_additional_fields_keep_yaml_typing() {
+  let md = html_to_markdown(
+    "<head><title>2024</title></head>",
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        frontmatter: Some(FrontmatterConfig {
+          additional_fields: Some(vec![
+            ("date".to_string(), "2025-05-10".to_string()),
+            ("draft".to_string(), "true".to_string()),
+            ("path".to_string(), "C:\\dir".to_string()),
+          ]),
+          meta_fields: None,
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert_eq!(
+    md,
+    "---\ntitle: \"2024\"\ndate: 2025-05-10\ndraft: true\npath: \"C:\\\\dir\"\n---"
   );
 }

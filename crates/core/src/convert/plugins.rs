@@ -20,6 +20,106 @@ where
   }
 }
 
+/// Words a YAML 1.1 or 1.2 reader resolves to null or a boolean.
+const YAML_IMPLICIT_WORDS: [&str; 10] = [
+  "null", "true", "false", "yes", "no", "on", "off", "y", "n", "~",
+];
+
+/// Format `val` as a YAML scalar.
+///
+/// A plain scalar takes every byte literally, including a backslash, so it is
+/// kept when YAML reads it as written. An empty value reads as null, and an
+/// indicator first byte starts other syntax. A space, `:`, `#`, `"`, line break,
+/// tab or control character also forces quotes: a reader rejects or folds a raw
+/// tab, strips the separation whitespace after `:`, strips a plain scalar's
+/// trailing whitespace, and resolves a whitespace-only value to null. Inside
+/// double quotes a backslash starts an escape, so backslashes, quotes and
+/// characters a reader does not keep as written are escaped there, and only
+/// there: controls and the noncharacters U+FFFE/U+FFFF fall outside YAML's
+/// printable set, and the line separators U+2028/U+2029 are folded to a space
+/// even inside quotes.
+///
+/// Text read from the page is a string, so with `as_string` a value a reader
+/// would resolve to a number, date, boolean or null is quoted too. Configured
+/// fields keep that typing: `draft: true` is meant as a boolean.
+fn yaml_scalar(val: &str, as_string: bool) -> String {
+  let bytes = val.as_bytes();
+  let quote = match bytes {
+    [] => true,
+    [first, rest @ ..] => {
+      matches!(
+        first,
+        b','
+          | b'['
+          | b']'
+          | b'{'
+          | b'}'
+          | b'&'
+          | b'*'
+          | b'!'
+          | b'|'
+          | b'>'
+          | b'\''
+          | b'%'
+          | b'@'
+          | b'`'
+          | b'\t'
+      ) || (rest.is_empty() && matches!(first, b'-' | b'?'))
+        || matches!(rest.last(), Some(b'\t'))
+        || bytes
+          .iter()
+          .any(|&b| matches!(b, b':' | b'#' | b' ' | b'"'))
+        || val
+          .chars()
+          .any(|c| c.is_control() || matches!(c, '\u{fffe}' | '\u{ffff}' | '\u{2028}' | '\u{2029}'))
+        || (as_string
+          // Numbers, dates, `.inf` and `.nan` start with one of these.
+          && (matches!(first, b'0'..=b'9' | b'.' | b'+')
+            || (*first == b'-' && matches!(rest.first(), Some(b'0'..=b'9' | b'.')))
+            || YAML_IMPLICIT_WORDS
+              .iter()
+              .any(|word| val.eq_ignore_ascii_case(word))))
+    }
+  };
+  if !quote {
+    return val.to_string();
+  }
+  let mut out = String::with_capacity(val.len() + 2);
+  out.push('"');
+  for ch in val.chars() {
+    match ch {
+      '\\' => out.push_str("\\\\"),
+      '"' => out.push_str("\\\""),
+      // A raw break folds to a space, and under `meta:` it ends the mapping.
+      '\n' => out.push_str("\\n"),
+      '\r' => out.push_str("\\r"),
+      // A raw tab survives inside quotes, but the escape reads as written.
+      '\t' => out.push_str("\\t"),
+      // YAML's printable set excludes control characters, U+0000 included,
+      // and the noncharacters U+FFFE/U+FFFF that `is_control` misses. The
+      // line separators U+2028/U+2029 are printable but a reader folds them
+      // to a space even inside quotes, so they escape too.
+      _ if ch.is_control() || matches!(ch, '\u{fffe}' | '\u{ffff}' | '\u{2028}' | '\u{2029}') => {
+        let code = ch as u32;
+        if code < 0x100 {
+          out.push_str("\\x");
+          out.push(char::from_digit(code >> 4, 16).unwrap_or('0'));
+          out.push(char::from_digit(code & 0xF, 16).unwrap_or('0'));
+        } else {
+          out.push_str("\\u");
+          out.push(char::from_digit(code >> 12, 16).unwrap_or('0'));
+          out.push(char::from_digit((code >> 8) & 0xF, 16).unwrap_or('0'));
+          out.push(char::from_digit((code >> 4) & 0xF, 16).unwrap_or('0'));
+          out.push(char::from_digit(code & 0xF, 16).unwrap_or('0'));
+        }
+      }
+      _ => out.push(ch),
+    }
+  }
+  out.push('"');
+  out
+}
+
 impl ConvertState {
   pub(crate) fn generate_frontmatter_yaml(&mut self) {
     if self.format != OutputFormat::Markdown {
@@ -32,18 +132,9 @@ impl ConvertState {
       .as_ref()
       .and_then(|p| p.frontmatter.as_ref());
 
-    let format_val = |val: &str| -> String {
-      let v = val.replace('"', "\\\"");
-      if v.contains('\n') || v.contains(':') || v.contains('#') || v.contains(' ') {
-        format!("\"{v}\"")
-      } else {
-        v
-      }
-    };
-
     let mut yaml_out = Vec::new();
     if let Some(t) = &self.frontmatter_title {
-      yaml_out.push(format!("title: {}", format_val(t)));
+      yaml_out.push(format!("title: {}", yaml_scalar(t, true)));
     }
 
     if let Some(f) = f_opts
@@ -53,7 +144,7 @@ impl ConvertState {
       sort_fields_by_key(&mut sorted, |(key, _)| key);
       for (key, val) in sorted {
         if key != "title" && key != "description" {
-          yaml_out.push(format!("{}: {}", key, format_val(val)));
+          yaml_out.push(format!("{}: {}", key, yaml_scalar(val, false)));
         }
       }
     }
@@ -67,7 +158,7 @@ impl ConvertState {
         } else {
           key.clone()
         };
-        yaml_out.push(format!("  {}: {}", k_fmt, format_val(val)));
+        yaml_out.push(format!("  {}: {}", k_fmt, yaml_scalar(val, true)));
       }
     }
 

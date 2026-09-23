@@ -1238,7 +1238,8 @@ impl ConvertState {
             .get_bit(ATTR_NAME)
             .or_else(|| tag.attributes.get_bit(ATTR_PROPERTY));
           let content = tag.attributes.get_bit(ATTR_CONTENT);
-          if let (Some(n), Some(c)) = (name, content) {
+          // An empty `content` carries no value; `key: ` would read as null.
+          if let (Some(n), Some(c)) = (name, content.filter(|c| !c.is_empty())) {
             let is_allowed = match n {
               "description"
               | "keywords"

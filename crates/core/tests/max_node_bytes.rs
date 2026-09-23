@@ -343,7 +343,7 @@ fn a_fragmented_non_matching_rawtext_close_does_not_end_exhaustion() {
 #[test]
 fn a_fragmented_rawtext_candidate_consumes_the_text_cap() {
   let html = "<textarea>aa</abcdefghijklmnop>z</textarea>";
-  let expected = "aa</abcdefghijkl";
+  let expected = "aa\\</abcdefghijkl";
   assert_capped_text(html, 16, expected, true);
   assert_eq!(
     stream_parts(&["<textarea>aa</abcdefgh", "ijklmnop", ">z</textarea>"], 16,),

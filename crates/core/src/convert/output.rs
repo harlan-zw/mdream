@@ -2015,22 +2015,14 @@ impl ConvertState {
       self.preserve_leading_whitespace = true;
     }
 
-    let buf_bytes = self.buffer.as_bytes();
-    let buf_len = buf_bytes.len();
-    let last_char = if buf_len > 0 {
-      buf_bytes[buf_len - 1]
-    } else if self.has_flushed_tail() {
-      // The buffer was drained (and possibly trimmed) empty, but earlier output
-      // ended with this byte. Spacing must be decided against it, not `0`, so a
-      // word separator that one-shot keeps is not dropped across the boundary.
-      self.flushed_tail[1]
-    } else {
-      0
-    };
+    // `None` only when nothing precedes this text. A drained buffer still ends
+    // with the flushed tail's byte, so a word separator that one-shot keeps is
+    // not dropped across the boundary. U+0000 is ordinary output here.
+    let last_char = self.last_output_byte();
 
     if text.len() == 1
       && text.as_bytes()[0] == b' '
-      && matches!(last_char, b' ' | b'\n' | b'\t' | b'\r')
+      && matches!(last_char, Some(b' ' | b'\n' | b'\t' | b'\r'))
     {
       self.last_text_node_contains_whitespace = contains_whitespace;
       self.has_last_text_node = true;
@@ -2050,18 +2042,15 @@ impl ConvertState {
     let text = if !self.plain_text
       && self.depth_map[TAG_PRE as usize] > 0
       && li_depth > 0
-      && (text.contains('\n') || last_char == b'\n')
+      && (text.contains('\n') || last_char == Some(b'\n'))
     {
       let indent = self.list_indent.as_str();
       let mut out = String::with_capacity(text.len() + indent.len() * 2);
       let bytes = text.as_bytes();
       // Prepend indent for the first line when the buffer ended with a
       // newline (code fence opener). Blank first line stays blank.
-      if last_char == b'\n' {
-        let first = bytes.first().copied().unwrap_or(0);
-        if first != b'\n' && first != 0 {
-          out.push_str(indent);
-        }
+      if last_char == Some(b'\n') && bytes.first().is_some_and(|&first| first != b'\n') {
+        out.push_str(indent);
       }
       let mut prev = 0usize;
       for (i, &b) in bytes.iter().enumerate() {
@@ -3289,7 +3278,7 @@ impl ConvertState {
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
   /// A break only ever replaces an inter-word space, so words joined across
   /// inline boundaries (e.g. `foo**bar**`) stay intact.
-  fn push_text_wrapped(&mut self, text: &str, last_char: u8) {
+  fn push_text_wrapped(&mut self, text: &str, last_char: Option<u8>) {
     let width = self.wrap_width;
     // A leading/trailing space in `text` is significant inter-word separation
     // across an inline boundary (e.g. `… </a> now`); the non-wrap path keeps
@@ -3426,15 +3415,19 @@ impl ConvertState {
       TAG_SUP => Some(Cow::Borrowed("<sup>")),
       TAG_INS => Some(Cow::Borrowed("<ins>")),
       TAG_P => {
-        if self.depth_map[TAG_LI as usize] > 0 && !self.in_table_cell() {
-          let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
-          if last_char != 0 && last_char != b' ' && last_char != b'\n' {
-            let indent = self.list_indent.as_str();
-            let mut s = String::with_capacity(2 + indent.len());
-            s.push_str("\n\n");
-            s.push_str(indent);
-            return Some(Cow::Owned(s));
-          }
+        // A drain can empty the buffer mid-document, so the check reads the
+        // flushed tail like the close-side twin below, not just the buffer.
+        if self.depth_map[TAG_LI as usize] > 0
+          && !self.in_table_cell()
+          && self
+            .last_output_byte()
+            .is_some_and(|last_char| last_char != b' ' && last_char != b'\n')
+        {
+          let indent = self.list_indent.as_str();
+          let mut s = String::with_capacity(2 + indent.len());
+          s.push_str("\n\n");
+          s.push_str(indent);
+          return Some(Cow::Owned(s));
         }
         None
       }
@@ -3500,13 +3493,12 @@ impl ConvertState {
           // separated with a space so CommonMark parses them as two
           // code spans rather than merging into one (` `a``b` ` →
           // single span with literal content ``a``b``).
-          let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
-          if last_char != 0
-            && !matches!(
+          if self.last_output_byte().is_some_and(|last_char| {
+            !matches!(
               last_char,
               b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
             )
-          {
+          }) {
             Some(Cow::Borrowed(" `"))
           } else {
             Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
@@ -3848,13 +3840,13 @@ impl ConvertState {
     match tag_id {
       TAG_BR => Some(Cow::Borrowed("\n")),
       TAG_P => {
-        if self.depth_map[TAG_BLOCKQUOTE as usize] > 0
-          || (self.depth_map[TAG_LI as usize] > 0 && !self.in_table_cell())
+        if (self.depth_map[TAG_BLOCKQUOTE as usize] > 0
+          || (self.depth_map[TAG_LI as usize] > 0 && !self.in_table_cell()))
+          && self
+            .last_output_byte()
+            .is_some_and(|last_char| last_char != b' ' && last_char != b'\n')
         {
-          let last_char = self.last_output_byte().unwrap_or(0);
-          if last_char != 0 && last_char != b' ' && last_char != b'\n' {
-            return Some(Cow::Borrowed("\n\n"));
-          }
+          return Some(Cow::Borrowed("\n\n"));
         }
         None
       }
@@ -4095,7 +4087,7 @@ impl ConvertState {
         && !literal
         && !output_is_line_boundary
         && !output_str.is_empty()
-        && last_char != 0
+        && (buf_len > 0 || tail_known)
         && self.needs_spacing(last_char, output_str.as_bytes()[0])
       {
         self.last_content_cache_len = self.push_code_span_content(" ", true);
@@ -4131,9 +4123,11 @@ impl ConvertState {
   }
 
   #[inline]
-  pub(crate) fn should_add_spacing_before_text(&self, last_byte: u8, text: &str) -> bool {
-    if last_byte == 0
-      || last_byte == b'\n'
+  pub(crate) fn should_add_spacing_before_text(&self, last_byte: Option<u8>, text: &str) -> bool {
+    let Some(last_byte) = last_byte else {
+      return false;
+    };
+    if last_byte == b'\n'
       || last_byte == b' '
       || last_byte == b'\t'
       || last_byte == b'['
@@ -4306,7 +4300,7 @@ impl ConvertState {
 
 #[cfg(test)]
 mod tests {
-  use super::{ConvertState, CutLineLead, TAG_A};
+  use super::{ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_LI, TAG_P};
   use crate::types::{HTMLToMarkdownOptions, OutputFormat};
 
   #[test]
@@ -4353,6 +4347,63 @@ mod tests {
 
     state.buffer.push('z');
     assert_eq!(state.last_output_byte(), Some(b'z'));
+  }
+
+  /// An open list item whose buffer a drain emptied: the item's content line
+  /// was cut away, a trim removed the retained tail, and `y` is the byte the
+  /// output last followed, reachable only through `flushed_tail`.
+  fn drained_open_list_item() -> ConvertState {
+    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.depth_map[TAG_LI as usize] = 1;
+    state.list_indent = "  ".to_string();
+    state.has_streamed_output = true;
+    state.cut_line_lead = CutLineLead::Content;
+    state.flushed_tail = *b"xy";
+    state
+  }
+
+  fn entering_node(tag_id: u8, is_inline: bool) -> super::ElementNode {
+    super::ElementNode {
+      attributes: crate::types::Attributes::default(),
+      extras: None,
+      depth: 1,
+      index: 0,
+      current_walk_index: 0,
+      child_text_node_index: 0,
+      tag_id: Some(tag_id),
+      contains_whitespace: false,
+      excluded_from_markdown: false,
+      is_inline,
+      excludes_text_nodes: false,
+      is_non_nesting: false,
+      collapses_inner_white_space: false,
+      spacing: None,
+    }
+  }
+
+  // One-shot sees the `x` in its buffer and opens the block with the blank
+  // line plus continuation indent; the open-side check must read the flushed
+  // tail the same way, or streaming drops the separator one-shot keeps.
+  #[test]
+  fn drained_buffer_p_open_keeps_the_list_separator() {
+    let mut state = drained_open_list_item();
+    state.stack.push(entering_node(TAG_P, false));
+
+    state.emit_enter_element();
+
+    assert_eq!(state.buffer, "\n\n  ");
+  }
+
+  // A code span after drained content glues with a separator space, the way
+  // it does after visible content in one-shot.
+  #[test]
+  fn drained_buffer_code_open_keeps_the_glue_space() {
+    let mut state = drained_open_list_item();
+    state.stack.push(entering_node(TAG_CODE, true));
+
+    state.emit_enter_element();
+
+    assert_eq!(state.buffer, " `");
   }
 
   #[test]
