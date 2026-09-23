@@ -33,6 +33,8 @@ const KNOWN_DIFFERENCES = new Set<string>([
   // Rust closes the outer fence at a <pre> nested in a <pre>.
   ['markdown', '<pre><li><pre><li><blockquote>x<code>'],
   ['markdown', '<pre><li><pre><li><blockquote>x<li>'],
+  // Rust keeps the whitespace after a discarded <script> (html-head-whitespace).
+  ['html', '<script></script>\n<p>abc</p>'],
 ].map(([format, html]) => `${format}\u0000${html}`))
 
 describe('javaScript and Rust engines agree on the corpus', () => {

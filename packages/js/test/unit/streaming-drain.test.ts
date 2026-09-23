@@ -1,8 +1,11 @@
 import type { ParseState } from '../../src/parse'
+import type { TransformPlugin } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createMarkdownProcessor } from '../../src/markdown-processor'
 import { finalizeParse, parseHtmlStream } from '../../src/parse'
+import { processPluginsForEvent } from '../../src/plugin-processor'
+import { filterPlugin } from '../../src/plugins'
 import { tagHandlers } from '../../src/tags'
 
 function chunkedStream(html: string, chunkSize: number): ReadableStream<string> {
@@ -143,6 +146,46 @@ describe('streaming drain parity', () => {
 
     expect(emittedLength).toBe(expectedLength)
     expect(emittedHash).toBe(expectedHash)
+    expect(peakRetainedLength).toBeLessThan(chunkSize)
+  })
+
+  // A yielded chunk is a slice of the joined buffer, and a slice keeps its
+  // whole parent string alive. If the buffer is never drained, a caller that
+  // holds the chunks holds one copy of the output per chunk.
+  it.each<[string, { wrapWidth?: number }, TransformPlugin[]]>([
+    ['a plugin', {}, [filterPlugin({ exclude: ['nav'] })]],
+    ['wrapWidth', { wrapWidth: 40 }, []],
+  ])('bounds retained output with %s', (_, options, plugins) => {
+    const html = '<p>A paragraph of words that runs well past forty columns before it ends.</p>'.repeat(2048)
+    const processor = createMarkdownProcessor(options, plugins)
+    const parseState: ParseState = {
+      depthMap: processor.state.depthMap,
+      depth: 0,
+      resolvedPlugins: plugins,
+      tagHandlers,
+      plainText: false,
+    }
+    const handleEvent = plugins.length
+      ? (event: Parameters<typeof processor.processEvent>[0]) => processPluginsForEvent(event, plugins, processor.state, processor.processEvent)
+      : processor.processEvent
+    const chunkSize = 4 * 1024
+    let remainingHtml = ''
+    let markdown = ''
+    let peakRetainedLength = 0
+
+    for (let offset = 0; offset < html.length; offset += chunkSize) {
+      remainingHtml = parseHtmlStream(remainingHtml + html.slice(offset, offset + chunkSize), parseState, handleEvent)
+      markdown += processor.getMarkdownChunk()
+      let retainedLength = 0
+      for (let i = 0; i < processor.state.buffer.length; i++)
+        retainedLength += processor.state.buffer[i]!.length
+      if (retainedLength > peakRetainedLength)
+        peakRetainedLength = retainedLength
+    }
+    finalizeParse(remainingHtml, parseState, handleEvent)
+    markdown += processor.getMarkdownChunk()
+
+    expect(markdown).toBe(htmlToMarkdown(html, { ...options, plugins }))
     expect(peakRetainedLength).toBeLessThan(chunkSize)
   })
 })
