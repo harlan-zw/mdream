@@ -642,6 +642,8 @@ export interface ParseState {
   trailingText?: string
   /** The trailing run is an unfinished end tag of the open rawtext element. */
   rawtextEndTagPending?: boolean
+  /** The last token was an end tag that closed nothing; the next text joins. */
+  endTagClosedNothing?: boolean
 }
 
 export interface ParseResult {
@@ -1213,7 +1215,9 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
       depth: state.depth,
       containsWhitespace,
       excludedFromMarkdown: false,
+      joinsPrevious: state.endTagClosedNothing === true,
     }
+    state.endTagClosedNothing = false
     handleEvent({ type: NodeEventEnter, node: rootTextNode })
     state.lastTextNode = rootTextNode
     return
@@ -1264,7 +1268,9 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     depth: state.depth,
     containsWhitespace,
     excludedFromMarkdown: excludesTextNodes,
+    joinsPrevious: state.endTagClosedNothing === true,
   }
+  state.endTagClosedNothing = false
 
   for (const parent of parentsToIncrement) {
     parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
@@ -1437,6 +1443,10 @@ function processClosingTag(
       closeNode(state.currentNode, state, handleEvent)
     closeNode(curr, state, handleEvent)
   }
+  else {
+    // The ignored token is no boundary between the text on either side.
+    state.endTagClosedNothing = true
+  }
 
   state.justClosedTag = true
 
@@ -1481,6 +1491,7 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
   }
 
   state.depth--
+  state.endTagClosedNothing = false
   handleEvent({ type: NodeEventExit, node })
   state.currentNode = state.currentNode!.parent!
   state.hasEncodedHtmlEntity = false
@@ -1890,6 +1901,7 @@ function processOpeningTag(
     tag.excludedFromMarkdown = true
 
   state.lastTextNode = tag
+  state.endTagClosedNothing = false
 
   // processAttributes hooks are handled at the processor level
 

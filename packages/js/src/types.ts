@@ -150,6 +150,8 @@ export interface TextNode extends Node {
   }
   /** Custom data added by plugins */
   context?: PluginContext
+  /** Follows an end tag that closed nothing, so it gets no separator. */
+  joinsPrevious?: boolean
 }
 
 /**

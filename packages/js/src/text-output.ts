@@ -52,7 +52,9 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
   // Parity with the Rust engine's `should_add_spacing_before_text`.
   if (!lastChar || '\n \t[>'.includes(lastChar) || textNode.value[0] === ' ')
     return false
-  if (lastNode?.tagHandler?.isInline)
+  // Unknown tags are inline, as in the Rust engine; an end tag that closed
+  // nothing is no boundary.
+  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline : (lastNode as ElementNode).tagId === -1)))
     return false
   const firstChar = textNode.value[0]
   return Boolean(firstChar && !'.,!?:;_*`)]'.includes(firstChar))
@@ -247,7 +249,8 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
       buffer[buffer.length - 1] = trimmed
   }
   const missingNewlines = Math.max(0, wantedNewlines - trailingNewlines(buffer))
-  const isInline = element.tagHandler?.isInline === true
+  // An unknown tag with no handler is inline, as in the Rust engine.
+  const isInline = element.tagHandler ? element.tagHandler.isInline === true : element.tagId === -1
 
   if (buffer.length === 0) {
     if (output)

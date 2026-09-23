@@ -26,6 +26,13 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '* |\n|',
     'I\r>',
   ],
+  'unknown tags are inline': [
+    'A<x>B',
+    'x<v>>',
+    '<p>m<x>h</x> t</p>',
+    '<p>a <x>c</x></p>',
+    '<p>a <x></x>c</p>',
+  ],
   'rawtext keeps an unfinished end tag at EOF': [[
     '<textarea>a</t',
     '<textarea>a</tx>b',
@@ -35,6 +42,12 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<xmp>a</',
     '<title>a</x',
   ], TEXT_AND_HTML],
+  'stray end tags add no separator': [
+    'b</>c',
+    'a<div>b</>c',
+    'x</span>y',
+    'g t</>x',
+  ],
 }
 
 describe('javaScript engine matches Rust output', () => {

@@ -318,7 +318,9 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
   if (!lastChar || '\n \t[>'.includes(lastChar)) {
     return false
   }
-  if (lastNode?.tagHandler?.isInline) {
+  // Unknown tags are inline, as in the Rust engine; an end tag that closed
+  // nothing is no boundary.
+  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline : (lastNode as ElementNode).tagId === -1))) {
     return false
   }
   const firstChar = textNode.value[0]
@@ -1628,7 +1630,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     let captionBufferChanged = false
 
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
-    const isInlineElement = handler?.isInline === true
+    // An unknown tag with no handler is inline, as in the Rust engine.
+    const isInlineElement = handler ? handler.isInline === true : tagId === -1
     let gfmAction: GfmAction | undefined
     let handlerOutput: string | undefined
     const suppressedInPre = (state.depthMap[TAG_PRE] || 0) > 0

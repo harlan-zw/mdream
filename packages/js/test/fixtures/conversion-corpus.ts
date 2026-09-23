@@ -94,4 +94,9 @@ export const CONVERSION_CORPUS: string[] = [
   `<textarea>a</tx>b`,
   `<textarea>a</textarea`,
   `<textarea>a</textarea `,
+  `A<x>B`,
+  `b</>c`,
+  `a<div>b</>c`,
+  `x</span>y`,
+  `<p>a <x>c</x></p>`,
 ]
