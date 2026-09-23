@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { htmlToText } from '../../src/text'
 
 const HARD_BREAK = '  \n'
 
@@ -44,7 +45,7 @@ describe('gfm hard breaks', () => {
 
   it('preserves plugin output in place of the built-in break', () => {
     expect(htmlToMarkdown('<p>first<br>second</p>', {
-      hooks: [{
+      plugins: [{
         onNodeEnter(node) {
           return node.name === 'br' ? '<plugin-break>' : undefined
         },
@@ -54,18 +55,16 @@ describe('gfm hard breaks', () => {
 
   it('preserves literal tag overrides in place of the built-in break', () => {
     expect(htmlToMarkdown('<p>first<br>second</p>', {
-      plugins: {
-        tagOverrides: {
-          br: { enter: '<literal-break>' },
-        },
+      tagOverrides: {
+        br: { enter: '<literal-break>' },
       },
     })).toBe('first<literal-break>second')
   })
 
   it('normalizes plain-text breaks while preserving pre newlines', () => {
-    expect(htmlToMarkdown('<p>first<br><br><br>second</p>', { format: 'text' }))
+    expect(htmlToText('<p>first<br><br><br>second</p>'))
       .toBe('first\n\nsecond')
-    expect(htmlToMarkdown('<pre>first<br><br><br>second</pre>', { format: 'text' }))
+    expect(htmlToText('<pre>first<br><br><br>second</pre>'))
       .toBe('first\n\n\nsecond')
   })
 

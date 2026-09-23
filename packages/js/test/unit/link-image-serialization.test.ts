@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown } from '../../src/index'
+import { htmlToText } from '../../src/text'
 
 describe('gfm link and image serialization', () => {
   it.each([
@@ -40,6 +41,6 @@ describe('gfm link and image serialization', () => {
     ['<img src="data:image/png;base64,AAA=">', ''],
     ['<img src="image.png">', 'image.png'],
   ])('never falls back to a data URL in text output for %s', (html, expected) => {
-    expect(htmlToMarkdown(html, { format: 'text' })).toBe(expected)
+    expect(htmlToText(html)).toBe(expected)
   })
 })

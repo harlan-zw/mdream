@@ -65,7 +65,7 @@ import {
   TagIdMap,
   TEXT_NODE,
 } from './const'
-import { tagHandlers } from './tags'
+import { parserTagHandlers } from './parser-tags'
 import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
 
 // Cache frequently used character codes
@@ -563,6 +563,7 @@ class ParsedElementNode implements ElementNode {
 
 export interface ParseOptions {
   resolvedPlugins?: TransformPlugin[]
+  tagHandlers?: Record<number, TagHandler>
 }
 
 export interface ParseState {
@@ -615,6 +616,8 @@ export interface ParseState {
   lastCharWasBackslash?: boolean
   /** Resolved plugin instances for event processing */
   resolvedPlugins?: TransformPlugin[]
+  /** Output-specific tag behavior. Parsing metadata is used when absent. */
+  tagHandlers?: Record<number, TagHandler>
   /** Tag override handlers built from declarative tagOverrides config */
   tagOverrideHandlers?: Map<string, TagHandler>
   /** Whether emitted text should skip Markdown-only escaping */
@@ -815,6 +818,7 @@ export function parseHtml(html: string, options: ParseOptions = {}): ParseResult
     depthMap: new Uint16Array(MAX_TAG_ID),
     depth: 0,
     resolvedPlugins: options.resolvedPlugins || [],
+    tagHandlers: options.tagHandlers,
   }
 
   let remainingHtml = parseHtmlInternal(html, state, (event) => {
@@ -1650,7 +1654,7 @@ function processOpeningTag(
     closeNode(state.currentNode, state, handleEvent)
   }
 
-  const tagHandler = state.tagOverrideHandlers?.get(tagName) ?? tagHandlers[tagId]
+  const tagHandler = state.tagOverrideHandlers?.get(tagName) ?? state.tagHandlers?.[tagId] ?? parserTagHandlers[tagId]
   const result = scanTagAttributes(htmlChunk, i, tagHandler)
 
   if (result._tag === 'incomplete') {

@@ -83,3 +83,11 @@ export function processPluginsForEvent(
   processEvent(event)
   return false
 }
+
+/** Tell each plugin that the document ended. */
+export function endPlugins(plugins: TransformPlugin[] | undefined, state: MdreamRuntimeState): void {
+  if (!plugins)
+    return
+  for (let index = 0; index < plugins.length; index++)
+    plugins[index]!.onDocumentEnd?.(state)
+}

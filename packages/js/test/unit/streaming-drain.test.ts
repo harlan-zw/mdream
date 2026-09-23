@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createMarkdownProcessor } from '../../src/markdown-processor'
 import { finalizeParse, parseHtmlStream } from '../../src/parse'
+import { tagHandlers } from '../../src/tags'
 
 function chunkedStream(html: string, chunkSize: number): ReadableStream<string> {
   return new ReadableStream({
@@ -88,6 +89,7 @@ describe('streaming drain parity', () => {
       depthMap: processor.state.depthMap,
       depth: 0,
       resolvedPlugins: [],
+      tagHandlers,
       plainText: false,
     }
     const text = '0123456789abcdef'

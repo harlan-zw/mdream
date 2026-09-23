@@ -1,16 +1,17 @@
-import type { ElementNode, TextNode } from '../types'
+import type { ElementNode, PluginSetup, TextNode, TransformPlugin } from '../types'
 import { ELEMENT_NODE, TAG_HEAD, TAG_META, TAG_TITLE } from '../const'
 import { createPlugin } from '../pluggable/plugin'
 
 const BACKSLASH_RE = /\\/g
 const DOUBLE_QUOTE_RE = /"/g
-const ESCAPED_DOUBLE_QUOTE_RE = /\\"/g
 
 export interface FrontmatterPluginOptions {
   /** Additional frontmatter fields to include */
   additionalFields?: Record<string, string>
   /** Meta tag names to extract (beyond the standard ones) */
   metaFields?: string[]
+  /** Receive structured frontmatter once the document is converted. */
+  onExtract?: (frontmatter: Record<string, string>) => void
 }
 
 interface FrontmatterData {
@@ -23,7 +24,12 @@ interface FrontmatterData {
  * A plugin that manages frontmatter generation from HTML head elements
  * Extracts metadata from meta tags and title and generates YAML frontmatter
  */
-export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
+export function frontmatterPlugin(options: FrontmatterPluginOptions = {}): PluginSetup {
+  return createPlugin(() => createFrontmatterHooks(options))
+}
+
+/** Fresh hooks for one conversion: collected metadata belongs to one document. */
+function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlugin {
   const additionalFields = options.additionalFields || {}
   const metaFields = new Set([
     'description',
@@ -49,22 +55,37 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
     return value
   }
 
+  function rawValue(value: string): string {
+    const content = value.startsWith('"') && value.endsWith('"')
+      ? value.slice(1, -1)
+      : value
+    let result = ''
+    for (let index = 0; index < content.length; index++) {
+      const character = content[index]
+      const next = content[index + 1]
+      if (character === '\\' && (next === '\\' || next === '"')) {
+        result += next
+        index++
+      }
+      else {
+        result += character
+      }
+    }
+    return result
+  }
+
   function getStructuredData(): Record<string, string> | undefined {
     const result: Record<string, string> = {}
     if (frontmatter.title) {
       // Strip quotes that formatValue adds
       const raw = frontmatter.title
-      result.title = raw.startsWith('"') && raw.endsWith('"')
-        ? raw.slice(1, -1).replace(ESCAPED_DOUBLE_QUOTE_RE, '"')
-        : raw
+      result.title = rawValue(raw)
     }
     for (const [k, v] of Object.entries(frontmatter.meta)) {
       // Strip wrapping quotes from key (e.g. '"og:title"' → 'og:title')
       const cleanKey = k.startsWith('"') && k.endsWith('"') ? k.slice(1, -1) : k
       // Strip wrapping quotes from value
-      const cleanVal = typeof v === 'string' && v.startsWith('"') && v.endsWith('"')
-        ? v.slice(1, -1).replace(ESCAPED_DOUBLE_QUOTE_RE, '"')
-        : String(v)
+      const cleanVal = rawValue(String(v))
       result[cleanKey] = cleanVal
     }
     if (additionalFields) {
@@ -77,6 +98,15 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
   }
 
   const plugin = createPlugin({
+    // Report once the document ends, so every head and late metadata counts.
+    onDocumentEnd() {
+      if (!options.onExtract)
+        return
+      const structured = getStructuredData()
+      if (structured)
+        options.onExtract(structured)
+    },
+
     onNodeEnter(node: any): string | undefined {
       if (node.excludedFromMarkdown)
         return
@@ -116,7 +146,7 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
       // Handle exiting the head tag
       if (node.type === ELEMENT_NODE && node.tagId === TAG_HEAD) {
         inHead = false
-        if (state.options?.format === 'text')
+        if (state.outputFormat !== 'markdown')
           return undefined
 
         // Generate frontmatter as we exit the head
@@ -149,9 +179,6 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
       }
     },
   } as any)
-
-  // Attach getter to the plugin for structured data access
-  ;(plugin as any).getFrontmatter = getStructuredData
 
   return plugin
 

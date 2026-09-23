@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cleanEmptyLinks, cleanFragments, cleanRedundantLinks, cleanSelfLinkHeadings } from '../../src/clean'
+import { clean, cleanEmptyLinks, cleanFragments, cleanRedundantLinks, cleanSelfLinkHeadings } from '../../src/clean'
 import { htmlToMarkdown } from '../../src/index'
 
 const executableHrefs = [
@@ -11,7 +11,7 @@ const executableHrefs = [
 describe('clean.emptyLinks executable schemes', () => {
   it.each(executableHrefs)('strips %s while serializing', (href) => {
     expect(htmlToMarkdown(`<a href="${href}">Click</a>`, {
-      clean: { emptyLinks: true },
+      clean: clean({ emptyLinks: true }),
     })).toBe('Click')
   })
 
@@ -62,7 +62,7 @@ describe('raw HTML cleaner boundaries', () => {
 
   it('encodes Markdown brackets in raw anchor attributes before cleanup', () => {
     expect(htmlToMarkdown(String.raw`<details>\<a href="[javascript:alert(1)](#)" title="[Title]">Click</a></details>`, {
-      clean: true,
+      clean: clean(),
     })).toBe(String.raw`<details>\<a href="&#91;javascript:alert(1)&#93;(#)" title="&#91;Title&#93;">Click</a></details>`)
   })
 
