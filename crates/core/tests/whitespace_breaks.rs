@@ -34,3 +34,13 @@ fn block_after_one_character_line_gets_full_spacing() {
 fn blank_image_alt_adds_no_blank_line() {
   assert_eq!(text("A<p><img alt=\" \"><p>B"), "A\n\nB");
 }
+
+// ── Whitespace after <br> ──
+
+#[test]
+fn whitespace_after_br_keeps_the_hard_break() {
+  assert_eq!(md("<p><span>x<br> </span>a</p>"), "x  \na");
+  assert_eq!(text("<p><span>x<br> </span>a</p>"), "x\na");
+  assert_eq!(md("<li>ew<br> <div>D"), "- ew  \n  D");
+  assert_eq!(md("<li>ew<br>\n<div>D"), "- ew  \n  D");
+}

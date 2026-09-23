@@ -2032,11 +2032,9 @@ impl ConvertState {
       && text.as_bytes()[0] == b' '
       && matches!(last_char, b' ' | b'\n' | b'\t' | b'\r')
     {
-      self.last_text_node_contains_whitespace = contains_whitespace;
-      self.has_last_text_node = true;
-      self.last_text_node_depth = depth;
-      self.last_text_node_index = index;
-      self.last_node_is_inline = false;
+      // The space collapses into the whitespace before it and writes nothing,
+      // so it must not arm the reach-back trim: that trim would cut the
+      // previous output (a `<br>` hard break) instead.
       return;
     }
 
