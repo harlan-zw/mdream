@@ -77,21 +77,29 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
     [
       'section surrounded by text',
       '<blockquote>lead<section>x</section>tail</blockquote>',
+      '> lead\n>\n> x\n>\n> tail',
+      // The JS engine still miscounts newlines after a one-character line.
       '> lead\n>\n> x\n> tail',
     ],
     [
       'article surrounded by text',
       '<blockquote>lead<article>x</article>tail</blockquote>',
+      '> lead\n>\n> x\n>\n> tail',
+      // The JS engine still miscounts newlines after a one-character line.
       '> lead\n>\n> x\n> tail',
     ],
     [
       'nav surrounded by text',
       '<blockquote>lead<nav>x</nav>tail</blockquote>',
+      '> lead\n>\n> x\n>\n> tail',
+      // The JS engine still miscounts newlines after a one-character line.
       '> lead\n>\n> x\n> tail',
     ],
     [
       'figure surrounded by text',
       '<blockquote>lead<figure>x</figure>tail</blockquote>',
+      '> lead\n>\n> x\n>\n> tail',
+      // The JS engine still miscounts newlines after a one-character line.
       '> lead\n>\n> x\n> tail',
     ],
     [
@@ -104,9 +112,10 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
       '<ul><li><blockquote><ul><li>x</li><li>y</li></ul></blockquote></li></ul>',
       '- \n  > - x\n  > - y',
     ],
-  ])('keeps %s inside the quote', async (_name, html, expected) => {
+  ] as Array<[string, string, string, string?]>)('keeps %s inside the quote', async (_name, html, expected, jsExpected) => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    const want = engineConfig.name === 'JavaScript Engine' && jsExpected !== undefined ? jsExpected : expected
+    expect(htmlToMarkdown(html, { engine })).toBe(want)
   })
 
   it.each([

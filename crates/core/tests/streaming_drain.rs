@@ -1679,8 +1679,8 @@ fn streaming_keeps_inter_token_space_across_drain() {
 // bytes. When an empty list item renders a lone `-` marker and the block spacing
 // before it has been drained away, the `-` sits alone at the buffer start and
 // the byte before it (a newline) is gone; the boundary then miscounted and
-// emitted an extra blank line (`-\n\n[link]` instead of `-\n[link]`). Newline
-// counting now consults the last flushed byte so the count survives the drain.
+// streaming disagreed with one-shot. Newline counting now consults the last
+// flushed byte so the count survives the drain.
 // The nested `div > form` and the ragged inline whitespace reproduce the exact
 // buffer state; every small chunk size lands a boundary that triggers it.
 #[test]
@@ -1697,8 +1697,8 @@ fn streaming_keeps_block_newline_count_across_drain() {
     <div class=\"badges\"><a href=\"/other-link/\" target=\"_blank\" class=\"bp\"> Delta</a></div></div>";
   let expected = html_to_markdown(html, opts.clone());
   assert!(
-    expected.contains("-\n[Delta]"),
-    "one-shot tightens the list/block gap: {expected:?}"
+    expected.contains("-\n\n[Delta]"),
+    "one-shot separates the list from the next block: {expected:?}"
   );
   for chunk in 1..=40usize {
     assert_eq!(

@@ -1211,7 +1211,7 @@ fn a_wanted_attribute_past_the_cap_still_drops_the_tag() {
 fn a_huge_tag_name_is_charged_and_bounded() {
   let name = repeat_to("a", HUGE);
   let html = format!("<p>before</p><{name}>x</{name}><p>after</p>");
-  let expected = "before\n\nx\nafter";
+  let expected = "before\n\nx\n\nafter";
   for chunk in [7, 4096, html.len()] {
     assert_eq!(stream(&html, chunk, CAP), expected, "chunk={chunk}");
   }

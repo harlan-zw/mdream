@@ -3999,15 +3999,6 @@ impl ConvertState {
     } else {
       0
     };
-    let second_last_char = if buf_len > 1 {
-      buf_bytes[buf_len - 2]
-    } else if buf_len == 1 && tail_known {
-      self.flushed_tail[1]
-    } else if tail_known {
-      self.flushed_tail[0]
-    } else {
-      0
-    };
 
     // A closing code fence's block-spacing newlines are appended AFTER the
     // backtick or tilde delimiter, so
@@ -4020,15 +4011,13 @@ impl ConvertState {
     let measure_from_output_tail =
       !is_enter && (output_str.ends_with("```") || output_str.ends_with("~~~"));
 
-    let mut last_new_lines: u8 = 0;
-    if !measure_from_output_tail {
-      if last_char == b'\n' {
-        last_new_lines += 1;
-      }
-      if second_last_char == b'\n' {
-        last_new_lines += 1;
-      }
-    }
+    // Only a contiguous run counts: after a one-character line (`a\n\nb`) the
+    // newline before `b` must not reduce the separator the next block needs.
+    let last_new_lines = if measure_from_output_tail || last_char != b'\n' {
+      0
+    } else {
+      self.trailing_new_lines()
+    };
 
     let mut new_lines = configured_new_lines.saturating_sub(last_new_lines);
 

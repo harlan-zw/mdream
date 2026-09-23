@@ -11,7 +11,21 @@ fn text(html: &str) -> String {
 }
 
 fn md_wrapped(html: &str, width: usize) -> String {
-  html_to_markdown(html, HTMLToMarkdownOptions::default().with_wrap_width(width))
+  html_to_markdown(
+    html,
+    HTMLToMarkdownOptions::default().with_wrap_width(width),
+  )
+}
+
+// ── Block spacing after a one-character line ──
+
+#[test]
+fn block_after_one_character_line_gets_full_spacing() {
+  assert_eq!(text("<p>a</p><ul><li>b</li><li>c</li></ul>"), "a\n\nb\nc");
+  assert_eq!(text("a<li>b<li>c"), "a\nb\nc");
+  assert_eq!(md("<p>a</p><span>b</span><p>c</p>"), "a\n\nb\n\nc");
+  // Longer lines already worked; keep them equal.
+  assert_eq!(text("<p>a</p><ul><li>bb</li><li>c</li></ul>"), "a\n\nbb\nc");
 }
 
 // ── Blank image alt in text output ──
