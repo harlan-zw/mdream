@@ -1,0 +1,1463 @@
+a<br> bkeeps <br> in a %s  <span>One</span>  <span>x = 1;</span>
+c
+
+| <dd>*</dd>
+ |
+|[link](<c:\path\> "t")<span>let x = 1;</span>
+| h |
+| --- |
+| <h3>H</h3> |<div>One</div> <div>Two</div><div>Alpha</div><em></em> taila<figcaption><br></figcaption> b<strong>a</strong> and <em>b</em><span>One</span> <span>Two</span>| <pre>a&#124;b&#124;c</pre> | x |<b><b>Incredibly</b> <b>Bold</b></b>Before<figcaption></figcaption> After<span>inline</span> <span>spans</span>| h |
+| --- |
+| <h3>Ends with #</h3> |<strong>bold</strong> and <em>italic</em>should not break on </span> inside script<button>One</button> <button>Two</button><strong>One</strong>
+<strong>Two</strong><span>One</span> </bogus> <span>Two</span><span>a</span><span>b</span> <span>c</span><figcaption><a href="/x"></a> x</figcaption><figcaption><a href="/x">a</a> x</figcaption>| <pre>x<br>y<br>z</pre> | ok |
+| --- | --- |<figcaption>One*<span> Two</span></figcaption><span>Alpha Beta Gamma</a>
+<li>
+ </li>
+</form>Before <figcaption> Caption </figcaption> After<a href="/x"><img src="/i" alt="A"> </a>Caption| <pre>a&#124;b&#124;c</pre> | x |
+| --- | --- |## `foo_bar<span title="`"></span>
+
+[jump](#foobar)
+        <pre><code>const x = 1;</code></pre>
+      <blockquote>a</blockquote>
+<blockquote>b</blockquote>| <pre><code>a<br>b</code></pre> | ok |
+| --- | --- |## `foo_bar\\<span title="`"></span>
+
+[jump](#foobar)
+      <h2>Section</h2>
+      <p>Content here</p>
+    should not break on </div> inside script outside quotes| <details><summary>s</summary>d</details> | ok |
+| --- | --- |## `foo_bar\<span title="`"></span>
+
+[jump](#foo_barspan-title)<blockquote>A quote.</blockquote>
+<blockquote><p>b</p></blockquote><blockquote>A quote.</blockquote>
+<blockquote><h2>H</h2></blockquote>
+        <p>Line 1
+Line 2
+Line 3</p>
+
+        <p>Paragraph 2</p>
+      
+<p>
+  Output a message: <br/>
+  <code>console.log("hello")</code>
+</p>
+
+        <h2>Section</h2>
+        <p>Line 1</p>
+        <p>Line 2</p>
+      
+        <h1>Title</h1>
+        <h2>Section</h2>
+        <p>Content</p>
+      
+        <h2>Section &amp; Title &lt;tag&gt;</h2>
+        <p>Content</p>
+      | <table><tr><td>inner</td></tr><tr><td>b</td></tr></table> |
+| --- |
+| outer |
+        <div>Word1 Word2 Word3
+Word4 Word5 Word6
+Word7 Word8 Word9</div>
+      
+        <h1>Title</h1>
+        <h2>Section 1</h2>
+        <h2>Section 2</h2>
+      
+        <h2>Section 1</h2>
+        <hr>
+        <h2>Section 2</h2>
+        <hr>
+      
+      <p>Line 1</p>
+      <p>Line 2</p>
+      <h2>Section</h2>
+      <p>Line 4</p>
+    | <pre><code>&lt;script&gt;alert(1)&amp;2&lt;/script&gt;</code></pre> | ok |
+| --- | --- |
+        <p>Line one<br>Line two<br>Line three</p>
+        <p>New paragraph here</p>
+      
+      <pre><code class="language-javascript">
+        const x = 1;
+      </code></pre>
+    <a href="/rel?utm_source=x&id=2#h">link</a> <a href="javascript:alert(1)">bad</a> <a>noh</a><a href="/post">
+    Line 1 <br/>
+    <strong>Line 2</strong> <br/>
+    Line 3 <br/>
+    </a>
+      <h1>Title</h1>
+      <h2>Section</h2>
+      <h3>Subsection</h3>
+      <p>Content</p>
+    
+      <p>Section 1</p>
+      <hr>
+      <p>Section 2</p>
+      <hr>
+      <p>Section 3</p>
+    
+        <h2>Section</h2>
+        <p>   </p>
+        <p>Content</p>
+        <p>
+        </p>
+      
+<ol>
+<li>
+<p>text</p>
+<pre><code>text</code></pre>
+<p>text</p>
+</li>
+<li>
+<p>text</p>
+</li>
+</ol>
+
+        <h2>Section</h2>
+        <p></p>
+        <p>Content</p>
+        <p></p>
+        <p>More</p>
+      
+        <h2>Preformatted</h2>
+        <pre>This is preformatted text
+with preserved   spacing</pre>
+      
+      <address>
+        John Doe<br>
+        123 Main St<br>
+        Anytown, CA 12345
+      </address>
+    
+      <html>
+        <head><title>Page</title></head>
+        <body><p>Content</p></body>
+      </html>
+    
+      <h2>Code Example</h2>
+      <pre><code class="language-typescript">type Foo = string;</code></pre>
+    
+        <p>Short paragraph one</p>
+        <p>Short paragraph two</p>
+        <p>Short paragraph three</p>
+      | Subscript | `<sub> </sub>` | None | `This is a <sub>subscript</sub> text` | This is a <sub>subscript</sub> text |
+
+      <p>Visible content</p>
+      <p class="hidden">This should be hidden</p>
+      <p>More visible content</p>
+    | Underline | `<ins> </ins>` | None | `This is an <ins>underlined</ins> text` | This is an <ins>underlined</ins> text || Superscript | `<sup> </sup>` | None | `This is a <sup>superscript</sup> text` | This is a <sup>superscript</sup> text |
+<style>
+      .class:before { content: "</style>"; }
+      .other { color: red; }
+    </style>
+    <p>This should be rendered</p>
+        <h2>Images</h2>
+        <p>Check this out:</p>
+        <img src="/test.png" alt="Test Image">
+        <p>Nice!</p>
+      
+        <p>Line 1</p>
+        <h2>Split here</h2>
+        <p>Line 3</p>
+        <h2>Split again</h2>
+        <p>Line 5</p>
+      
+      <pre><code>
+function example() {
+  // Look at this markdown code block:
+  ```js
+  const x = 42;
+  ```
+}
+      </code></pre>
+    <script>
+      const html = "<script>alert('test')</script>";
+      console.log(html);
+    </script>
+    <p>This should be rendered</p><script>
+      const html = '<script>alert("test")</script>';
+      console.log(html);
+    </script>
+    <p>This should be rendered</p>
+        <p>Some text before</p>
+        <pre><code>code line 1
+code line 2
+code line 3</code></pre>
+        <p>Text after code</p>
+      
+    <div>Normal content</div>
+    <div class="filtered" id="remove-me">This should be filtered out</div>
+    <p>Regular paragraph</p>
+    
+      <p>Regular content</p>
+      <p class="fixed">This is fixed positioned and should be hidden</p>
+      <p>More regular content</p>
+    
+      <p>Regular content</p>
+      <p class="sticky">This is sticky positioned and should be hidden</p>
+      <p>More regular content</p>
+    <script>
+      const template = `<script>alert("test")</script>`;
+      console.log(template);
+    </script>
+    <p>This should be rendered</p>
+        <p>Short.</p>
+        <p>This is a medium length paragraph with several words.</p>
+        <p>Another medium paragraph here.</p>
+      
+        <h2>Quotes</h2>
+        <blockquote>
+          <p>This is a quote</p>
+          <p>Multiple paragraphs</p>
+        </blockquote>
+      
+        <h2>
+          <span>Nested</span>
+          <strong>Bold</strong>
+          <em>Italic</em>
+        </h2>
+        <p>Content</p>
+      
+      <div>
+        <div class="absolute">
+          <span>Hidden span text</span>
+        </div>
+        <p>Normal content</p>
+      </div>
+    
+<ol>
+    <li>
+        <p><strong>text</strong>:</p>
+        <p>text</p>
+        <p>text</p>
+        <pre><code>text</code></pre>
+    </li>
+</ol>
+
+        <h1>Title</h1>
+        <h2>Section 1</h2>
+        <h2>Section 2</h2>
+        <h2>Section 3</h2>
+        <p>Finally some content</p>
+      
+      <p>Regular content</p>
+      <p class="absolute">This is absolutely positioned and should be hidden</p>
+      <p>More regular content</p>
+    
+        <p>Content before first HR</p>
+        <hr>
+        <p>Content after first HR</p>
+        <hr>
+        <p>Content after second HR</p>
+      
+      <h2>Section 1</h2>
+      <p>Content 1</p>
+      <h2>Section 2</h2>
+      <p>Content 2</p>
+      <h2>Section 3</h2>
+      <p>Content 3</p>
+    
+      <div>
+        <p>Regular text with <span class="font-bold">bold</span> word</p>
+        <p class="italic">Italic paragraph</p>
+      </div>
+    <script type="application/json">
+      {"message": "He said \"<script>alert('test')</script>\" to me"}
+    </script>
+    <p>This should be rendered</p><script>
+      const html = "He said \"<script>alert('test')</script>\" to me";
+      console.log(html);
+    </script>
+    <p>This should be rendered</p>
+      <dl>
+        <dt>HTML</dt>
+        <dd>HyperText Markup Language</dd>
+        <dt>CSS</dt>
+        <dd>Cascading Style Sheets</dd>
+      </dl>
+    
+      <html>
+        <head>
+          <title>Test Page</title>
+        </head>
+        <body>
+          <p>Content</p>
+        </body>
+      </html>
+    
+        <h2>Section & Title with "quotes" and 'apostrophes'</h2>
+        <p>Content</p>
+        <h2>Math: 2 &lt; 3 &gt; 1</h2>
+        <p>More</p>
+      <script>
+      const multiline = `
+        <script>
+          alert('nested');
+        </script>
+      `;
+    </script>
+    <p>This should be rendered</p>
+      <pre><code>
+function example() {
+  // Has exactly these newlines
+  // And this indentation
+
+  if (true) {
+    return 42;
+  }
+}
+      </code></pre>
+    
+        <ul>
+          <li>Item one with content</li>
+          <li>Item two with content</li>
+          <li>Item three with content</li>
+        </ul>
+      
+        <h1>Level 1</h1>
+        <h3>Level 3 (skipped h2)</h3>
+        <p>Content</p>
+        <h5>Level 5 (skipped h4)</h5>
+        <p>More content</p>
+      
+        <h2>Section 1</h2>
+        <pre><code class="language-javascript">const x = 1;</code></pre>
+        <h2>Section 2</h2>
+        <p>No code here</p>
+      
+        <h1>Title</h1>
+        <h2>Section</h2>
+        <h3>Subsection A</h3>
+        <p>Content A</p>
+        <h3>Subsection B</h3>
+        <p>Content B</p>
+      
+        <main>
+          <h1>Article</h1>
+          <p>Check out <a href="/page">this page</a></p>
+          <img src="/image.png" alt="Test">
+        </main>
+      
+      <h1>Level 1</h1>
+      <h2>Level 2A</h2>
+      <p>Content A</p>
+      <h3>Level 3</h3>
+      <p>Content 3</p>
+      <h2>Level 2B</h2>
+      <p>Content B</p>
+    
+      <html><body>
+        <a href="/page1">Page 1</a>
+        <a href="/page2">Page 2</a>
+        <a href="https://external.com">External</a>
+      </body></html>
+    
+        <h1>First Title</h1>
+        <p>Content 1</p>
+        <h1>Second Title</h1>
+        <p>Content 2</p>
+        <h1>Third Title</h1>
+        <p>Content 3</p>
+      
+      <nav>Navigation</nav>
+      <main>
+        <h1>Article</h1>
+        <h2>Section 1</h2>
+        <p>Content here</p>
+      </main>
+      <footer>Footer</footer>
+    
+      <div>This should be excluded</div>
+      <div id="main">This main div should be included</div>
+      <div id="content">This content div should be included</div>
+    
+        <p>First paragraph with some content here.</p>
+        <p>Second paragraph with more content here.</p>
+        <p>Third paragraph with even more content.</p>
+      
+        <h3>Starting at h3</h3>
+        <p>Content 1</p>
+        <h1>Going back to h1</h1>
+        <p>Content 2</p>
+        <h2>Then h2</h2>
+        <p>Content 3</p>
+      
+        <h2>Section</h2>
+        <div>
+          <div>
+            <div>
+              <p>Deeply nested content</p>
+            </div>
+          </div>
+        </div>
+      
+        <h2>Definitions</h2>
+        <dl>
+          <dt>Term 1</dt>
+          <dd>Definition 1</dd>
+          <dt>Term 2</dt>
+          <dd>Definition 2</dd>
+        </dl>
+      
+      <div>
+        <div class="hidden">
+          <div>
+            <p>Deeply nested hidden text</p>
+          </div>
+        </div>
+        <p>Visible text</p>
+      </div>
+    
+      <html>
+        <body>
+          <h1>Main Title</h1>
+          <h2>Section 1</h2>
+          <h2>Section 2</h2>
+          <p>Some content</p>
+        </body>
+      </html>
+    
+      <body>
+        <nav>Navigation content</nav>
+        <p>Regular paragraph</p>
+        <div>Regular div content</div>
+        <footer>Footer content</footer>
+      </body>
+    
+      <p>Always visible</p>
+      <p class="hidden md:block">Hidden on mobile, visible on md and up</p>
+      <p class="block md:hidden">Visible on mobile, hidden on md and up</p>
+    
+      <div>
+        <div class="fixed">
+          <h5>Sidebar Title</h5>
+          <ul><li><a href="/">Link</a></li></ul>
+        </div>
+        <p>Visible content</p>
+      </div>
+    
+      <body>
+        <nav>Before (excluded)</nav>
+        <h1>Title</h1>
+        <footer>Adjacent footer (excluded)</footer>
+        <div>After footer (excluded)</div>
+      </body>
+    
+      <div>
+        <h1>Main Heading</h1>
+        <pre><code class="language-js">console.log('Hello');</code></pre>
+        <aside>This aside should be excluded</aside>
+      </div>
+    
+        <aside>Sidebar content</aside>
+        <main>
+          <h1>Article Title</h1>
+          <p>Article content here</p>
+        </main>
+        <aside>Another sidebar</aside>
+      
+      <div>This should be excluded</div>
+      <h1>This heading should be included</h1>
+      <p>This paragraph should be included</p>
+      <aside>This aside should be excluded</aside>
+    
+      <body>
+        <div>Before content (excluded)</div>
+        <h3>Starting with H3</h3>
+        <p>Main content paragraph</p>
+        <footer>Footer (excluded)</footer>
+      </body>
+    
+      <h1>Title</h1>
+      <p>Content</p>
+      <form>
+        <input type="text" />
+        <button>Submit</button>
+      </form>
+      <nav>Navigation</nav>
+      <footer>Footer</footer>
+    
+      <table>
+        <tr>
+          <th>Header 1</th>
+          <th>Header 2</th>
+        </tr>
+        <tr>
+          <td>Value 1</td>
+          <td>Value 2</td>
+        </tr>
+      </table>
+    
+      <table>
+        <tr>
+          <th>Line 1<br>Line 2</th>
+          <th>Header</th>
+        </tr>
+        <tr>
+          <td>Value</td>
+          <td>Data</td>
+        </tr>
+      </table>
+    
+        <h2>Section 1</h2>
+        <p>Content for section 1</p>
+        <h2>Section 2</h2>
+        <p>Content for section 2</p>
+        <h2>Section 3</h2>
+        <p>Content for section 3</p>
+      
+      <html>
+        <body>
+          <div id="header">Header content</div>
+          <div id="main">Main content</div>
+          <div id="footer">Footer content</div>
+        </body>
+      </html>
+    
+        <nav>Skip this</nav>
+        <main>
+          <h1>Title</h1>
+          <h2>Section 1</h2>
+          <p>Content 1</p>
+          <h2>Section 2</h2>
+          <p>Content 2</p>
+        </main>
+      
+      <table>
+        <tr>
+          <th><ul><li>A</li><li>B</li></ul></th>
+          <th>Normal</th>
+        </tr>
+        <tr>
+          <td>Value</td>
+          <td>Text</td>
+        </tr>
+      </table>
+    
+      <div>Regular div</div>
+      <header>
+        <h1>Page Header</h1>
+        <nav>Navigation links</nav>
+      </header>
+      <main>
+        <p>Main content</p>
+      </main>
+      <footer>Page footer</footer>
+    
+        <h2>Todo List</h2>
+        <ul>
+          <li>Item 1
+            <ul>
+              <li>Nested 1</li>
+              <li>Nested 2</li>
+            </ul>
+          </li>
+          <li>Item 2</li>
+        </ul>
+      
+      <p>This should be excluded</p>
+      <a href="https://example.com">This link should be included</a>
+      <p>This link without href should be excluded <a>No href here</a></p>
+      <img src="image.png" alt="Image">
+    
+      <html>
+        <head>
+          <title>Test Page</title>
+          <meta name="description" content="Test description" />
+        </head>
+        <body>
+          <h1>Main Content</h1>
+        </body>
+      </html>
+    
+      <div>This should be included</div>
+      <div class="ad">This ad should be excluded</div>
+      <div class="sidebar">This sidebar should be excluded</div>
+      <div class="footer">This footer should be excluded</div>
+    
+      <p>Here's a code block:</p>
+      <pre><code class="language-javascript">
+        // This shows a nested markdown block:
+        ```python
+        def hello():
+            print("world")
+        ```
+      </code></pre>
+    
+        <p>Paragraph before list.</p>
+        <ul>
+          <li>First item with text</li>
+          <li>Second item with text</li>
+          <li>Third item with text</li>
+        </ul>
+        <p>Paragraph after list.</p>
+      
+      <div>
+        <p>A paragraph with <img src="/image1.jpg" alt="Inline image"> in the middle.</p>
+        <div>
+          <img src="https://example.com/absolute-image.jpg" alt="Absolute image">
+        </div>
+      </div>
+    
+      <table>
+        <tr>
+          <th>Header</th>
+          <th>Image</th>
+        </tr>
+        <tr>
+          <td>Data</td>
+          <td><img src="/path/to/image.png" alt="Table image"></td>
+        </tr>
+      </table>
+    
+      <body>
+        <nav>Navigation (excluded)</nav>
+        <h1>Article Title</h1>
+        <p>Main content paragraph 1</p>
+        <p>Main content paragraph 2</p>
+        <div>More content without footer</div>
+      </body>
+    
+      <html>
+        <body>
+          <div class="content">Main content here</div>
+          <div class="sidebar">Sidebar content</div>
+          <div class="content special">Another content div</div>
+        </body>
+      </html>
+    
+      <html>
+        <head>
+          <title>My Page</title>
+          <meta name="description" content="A test page">
+          <meta name="author" content="Jane">
+        </head>
+        <body><p>Content</p></body>
+      </html>
+    
+      <div>This should be included</div>
+      <h1>This heading should be included</h1>
+      <p>This paragraph should be included</p>
+      <aside>This aside should be excluded</aside>
+      <nav>This nav should be excluded</nav>
+    
+        <h2>Code Examples</h2>
+        <pre><code class="language-javascript">const x = 1;</code></pre>
+        <pre><code class="language-python">x = 1</code></pre>
+        <pre><code class="language-rust">let x = 1;</code></pre>
+      
+      <table>
+        <tr>
+          <th>Header 1</th>
+          <th colspan="2">Header 2-3</th>
+        </tr>
+        <tr>
+          <td>Value 1</td>
+          <td>Value 2</td>
+          <td>Value 3</td>
+        </tr>
+      </table>
+    
+      <div class="content">This plain content div should be excluded</div>
+      <div id="main" class="content">This main content div should be included</div>
+      <div class="sidebar" id="right">This sidebar should be excluded</div>
+    
+      <html>
+        <body>
+          <div class="empty"></div>
+          <div class="whitespace">   </div>
+          <div class="newlines">
+
+          </div>
+          <div class="mixed">  Some text  </div>
+        </body>
+      </html>
+    
+      <div>
+        <article>
+          <h1>Article Heading</h1>
+          <p>Article paragraph</p>
+          <aside>
+            <h2>Aside Heading</h2>
+            <p>Aside paragraph</p>
+          </aside>
+        </article>
+      </div>
+    
+      <html>
+        <head>
+          <title>My Page</title>
+          <meta name="description" content="A cool page" />
+          <meta property="og:title" content="OG Title" />
+        </head>
+        <body><p>Content</p></body>
+      </html>
+    
+        <h1>Title</h1>
+        <p>First paragraph with some text.</p>
+        <p>Second paragraph with more text here.</p>
+        <ul>
+          <li>List item 1</li>
+          <li>List item 2</li>
+        </ul>
+        <p>Final paragraph.</p>
+      
+      <table>
+        <tr>
+          <th>Header 1</th>
+          <th>Header 2</th>
+        </tr>
+        <tr>
+          <td>Value 1</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>Value 4</td>
+        </tr>
+      </table>
+    
+      <table>
+        <tr>
+          <th align="left">Left</th>
+          <th align="center">Center</th>
+          <th align="right">Right</th>
+        </tr>
+        <tr>
+          <td>1</td>
+          <td>2</td>
+          <td>3</td>
+        </tr>
+      </table>
+    
+      <html>
+        <head><meta name="keywords" content="alpha,beta" /></head>
+        <body>
+          <h1 id="alpha">Alpha</h1>
+          <h2 data-section="beta">Beta</h2>
+          <p class="summary">Gamma</p>
+          <li>Delta</li>
+        </body>
+      </html>
+    
+      <html>
+        <head>
+          <title>Title with "quotes"</title>
+          <meta name="keywords" content="key1, key2, key3">
+          <meta name="author" content="John Doe">
+        </head>
+        <body>
+          <p>Content</p>
+        </body>
+      </html>
+    
+        <h2>Data Table</h2>
+        <table>
+          <thead>
+            <tr><th>Name</th><th>Value</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>A</td><td>1</td></tr>
+            <tr><td>B</td><td>2</td></tr>
+          </tbody>
+        </table>
+      
+      <html>
+        <head>
+          <title>Test Page</title>
+          <meta name="custom-field" content="Custom Value">
+          <meta name="another-field" content="Another Value">
+        </head>
+        <body>
+          <p>Content</p>
+        </body>
+      </html>
+    
+      <body>
+        <nav>Before (excluded)</nav>
+        <h1>Main Title</h1>
+        <p>Main content</p>
+        <footer>First footer (excluded)</footer>
+        <p>Content after first footer (excluded)</p>
+        <footer>Second footer (excluded)</footer>
+      </body>
+    
+      <div data-type="header">This header should be included</div>
+      <div data-type="content">This content should be included</div>
+      <div data-type="sidebar">This sidebar should be excluded</div>
+      <div data-type="footer">This footer should be excluded</div>
+    
+        <nav>
+          <a href="/home">Home</a>
+          <a href="/about">About</a>
+        </nav>
+        <main>
+          <h1>Main Content</h1>
+          <p>This is the actual content</p>
+        </main>
+        <footer>
+          <p>Copyright 2024</p>
+        </footer>
+      
+        <main>
+          <h1 class="text-3xl font-bold">Heading with Tailwind</h1>
+          <p class="text-gray-600 mb-4">Paragraph with classes</p>
+          <div class="flex gap-4">
+            <span class="font-semibold">Bold text</span>
+          </div>
+        </main>
+      
+      <body>
+        Text before header (excluded)
+        <h1>Main Title</h1>
+        Text after header (included)
+        <p>Paragraph content</p>
+        More text content (included)
+        <footer>Footer (excluded)</footer>
+        Text after footer (excluded)
+      </body>
+    
+      <html>
+        <body>
+          <img src="image1.jpg" alt="First image" />
+          <img src="image2.jpg" alt="Second image" />
+          <div data-testid="component">Component content</div>
+          <button data-testid="submit">Submit</button>
+        </body>
+      </html>
+    
+      <html>
+        <body>
+          <div class="card featured">Featured Card</div>
+          <div class="card">Regular Card</div>
+          <div class="featured">Featured Non-Card</div>
+          <section id="main" class="content">Main Section</section>
+        </body>
+      </html>
+    
+      <body>
+        <nav>Before first header (excluded)</nav>
+        <h2>First Header (included)</h2>
+        <p>Content after first header</p>
+        <h1>Second Header (included)</h1>
+        <p>Content after second header</p>
+        <footer>Footer (excluded)</footer>
+      </body>
+    
+        <main>
+          <h1>Sign Up</h1>
+          <p>Join our newsletter</p>
+          <form>
+            <input type="email" placeholder="Email">
+            <button>Submit</button>
+          </form>
+          <h2>More Content</h2>
+          <p>Additional information</p>
+        </main>
+      
+      <html>
+        <head>
+          <title>Test Page Title</title>
+          <meta name="description" content="This is a test page description">
+        </head>
+        <body>
+          <h1>Main Content</h1>
+          <p>This is the main content of the page.</p>
+        </body>
+      </html>
+    
+      <body>
+        <nav>Before content (excluded)</nav>
+        <div>
+          <div>
+            <main>
+              <h1>Nested Main Title</h1>
+              <p>Nested main content</p>
+            </main>
+          </div>
+        </div>
+        <footer>Footer (excluded)</footer>
+      </body>
+    
+      <dl>
+        <dt>Web Languages</dt>
+        <dd>
+          <dl>
+            <dt>HTML</dt>
+            <dd>HyperText Markup Language</dd>
+            <dt>CSS</dt>
+            <dd>Cascading Style Sheets</dd>
+          </dl>
+        </dd>
+        <dt>Runtime</dt>
+        <dd>JavaScript</dd>
+      </dl>
+    
+      <table>
+        <tr>
+          <th>Formatting</th>
+          <th>Example</th>
+        </tr>
+        <tr>
+          <td>Bold</td>
+          <td><strong>bold text</strong></td>
+        </tr>
+        <tr>
+          <td>Link</td>
+          <td><a href="https://example.com">link</a></td>
+        </tr>
+      </table>
+    
+      <div>
+        <h1>Main Title</h1>
+        <p>This is a paragraph with <em>emphasis</em> and <a href="/test">a link</a>.</p>
+        <ul>
+          <li>Item 1</li>
+          <li>Item 2 with <code>code</code></li>
+        </ul>
+        <blockquote>
+          <p>This is a quote</p>
+        </blockquote>
+      </div>
+    
+      <dl>
+        <dt>Term with <strong>formatting</strong></dt>
+        <dd>Definition with <a href="https://example.com">link</a></dd>
+        <dt>Another Term</dt>
+        <dd>
+          <p>Paragraph in definition</p>
+          <ul>
+            <li>List item in definition</li>
+          </ul>
+        </dd>
+      </dl>
+    
+      <html>
+        <body>
+          <article>
+            <h1>Article Title</h1>
+            <p>Paragraph content</p>
+          </article>
+          <nav>
+            <ul>
+              <li><a href="/page1">Page 1</a></li>
+              <li><a href="/page2">Page 2</a></li>
+            </ul>
+          </nav>
+        </body>
+      </html>
+    
+      <body>
+        <nav>Before (excluded)</nav>
+        <main>
+          <h1>First Main Title</h1>
+          <p>First main content</p>
+        </main>
+        <p>Between mains (excluded)</p>
+        <main>
+          <h1>Second Main Title</h1>
+          <p>Second main content</p>
+        </main>
+        <footer>Footer (excluded)</footer>
+      </body>
+    
+      <table>
+        <thead>
+          <tr>
+            <th>Header 1</th>
+            <th>Header 2</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Value 1</td>
+            <td>Value 2</td>
+          </tr>
+          <tr>
+            <td>Value 3</td>
+            <td>Value 4</td>
+          </tr>
+        </tbody>
+      </table>
+    
+      <div>
+        <div id="main">
+          <h1>Main Heading</h1>
+          <p>Main paragraph</p>
+          <div class="subsection">
+            <h2>Subsection Heading</h2>
+            <p>Subsection paragraph</p>
+          </div>
+        </div>
+        <div id="sidebar">
+          <h2>Sidebar Heading</h2>
+          <p>Sidebar content</p>
+        </div>
+      </div>
+    
+      <body>
+        <main>
+          <h1>Article Title</h1>
+          <p>Main content here.</p>
+        </main>
+        <div class="sticky-header">
+          <a href="#">
+            <span class="icon"></span>
+          </a>
+          <a href="#">
+            <svg><path d="M0 0"></path></svg>
+          </a>
+        </div>
+        <footer>Footer content</footer>
+      </body>
+    
+      <div>Outside text</div>
+      <article>
+        <h1>Article Title</h1>
+        <p>First paragraph</p>
+        <div class="content">
+          <h2>Subheading</h2>
+          <p>More content here</p>
+          <ul>
+            <li>Item 1</li>
+            <li>Item 2</li>
+          </ul>
+        </div>
+        <div class="footer">Article footer</div>
+      </article>
+      <div>More outside text</div>
+    
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Test Page Title</title>
+          <meta name="description" content="Test page description">
+          <meta property="og:image" content="https://example.com/image.png">
+        </head>
+        <body>
+          <main>
+            <h1>Main Heading</h1>
+            <p>Content here</p>
+          </main>
+        </body>
+        </html>
+      
+        <header>
+          <nav>
+            <a href="/">Home</a>
+          </nav>
+        </header>
+        <main>
+          <article>
+            <h1>Important Article</h1>
+            <p>This is important content.</p>
+            <h2>Subsection</h2>
+            <p>More important information.</p>
+          </article>
+        </main>
+        <aside>Advertisement</aside>
+        <footer>© 2024</footer>
+      
+      <html>
+        <head>
+          <title>Page Title</title>
+          <meta property="og:title" content="OG Title">
+          <meta property="og:description" content="OG Description">
+          <meta name="twitter:title" content="Twitter Title">
+          <meta name="twitter:description" content="Twitter Description">
+        </head>
+        <body>
+          <p>Content</p>
+        </body>
+      </html>
+    
+      <html>
+        <body>
+          <article>
+            <h2>Article Title</h2>
+            <p>First paragraph with <strong>bold text</strong> and <em>italic text</em>.</p>
+            <p>Second paragraph with <a href="/link">a link</a>.</p>
+            <ul>
+              <li>First item</li>
+              <li>Second item with <code>inline code</code></li>
+            </ul>
+          </article>
+        </body>
+      </html>
+    
+      <html>
+        <head>
+          <title>Page Title</title>
+          <meta name="description" content="Page description" />
+        </head>
+        <body>
+          <h1>Main Heading</h1>
+          <nav class="navigation">
+            <a href="/home">Home</a>
+            <a href="/about">About</a>
+          </nav>
+          <main>
+            <h2>Content Section</h2>
+            <p>Content paragraph</p>
+          </main>
+        </body>
+      </html>
+    
+      <h1>Documentation</h1>
+      <p>Introduction text</p>
+
+      <h2>Installation</h2>
+      <p>Install via npm:</p>
+      <pre><code class="language-bash">npm install mdream</code></pre>
+
+      <h2>Usage</h2>
+      <p>Basic example:</p>
+      <pre><code class="language-javascript">
+        import { htmlToMarkdown } from 'mdream'
+        const md = htmlToMarkdown(html)
+      </code></pre>
+
+      <hr>
+
+      <h2>Advanced</h2>
+      <p>More advanced features</p>
+    
+        <h1>Documentation</h1>
+        <p>Introduction with <strong>bold</strong> and <em>italic</em></p>
+
+        <h2>Section 1</h2>
+        <ul>
+          <li>Item 1</li>
+          <li>Item 2</li>
+        </ul>
+
+        <h2>Section 2</h2>
+        <blockquote>Important note</blockquote>
+        <pre><code class="language-js">const x = 1;</code></pre>
+
+        <hr>
+
+        <h2>Section 3</h2>
+        <table>
+          <tr><td>A</td><td>1</td></tr>
+        </table>
+      
+      <h1>Document Title</h1>
+      <p>This is a <strong>bold</strong> and <em>important</em> paragraph with a <a href="https://example.com">link</a>.</p>
+      <ul>
+        <li>Item with <code>inline code</code></li>
+        <li>Item with <a href="https://example.org">another link</a></li>
+      </ul>
+      <blockquote>
+        <p>A quote with an <img src="image.jpg" alt="image"> inside.</p>
+      </blockquote>
+      <pre><code class="language-js">console.log("Hello world!");</code></pre>
+    
+      <body>
+        <header>Site header (excluded)</header>
+        <main>
+          <article>
+            <header>
+              <h1>Article Header</h1>
+              <p>Article subtitle</p>
+            </header>
+            <section>
+              <h2>Section Title</h2>
+              <p>Section content</p>
+            </section>
+            <footer>Article footer (included - inside main)</footer>
+          </article>
+        </main>
+        <footer>Site footer (excluded)</footer>
+      </body>
+    
+      <html>
+        <body>
+          <nav>Navigation content (should be excluded)</nav>
+          <div class="header-ads">Ad content (should be excluded)</div>
+          <h1>Main Article Title</h1>
+          <p>This is the main content that should be included.</p>
+          <h2>Subsection</h2>
+          <p>More main content here.</p>
+          <footer>Footer content (should be excluded)</footer>
+          <div class="related">Related articles (should be excluded)</div>
+        </body>
+      </html>
+    
+      <html>
+        <body>
+          <nav>Navigation content (should be excluded)</nav>
+          <h1>Page Title (should be excluded - outside main)</h1>
+          <main>
+            <h1>Article Title (should be included)</h1>
+            <p>This is the main content that should be included.</p>
+            <h2>Subsection</h2>
+            <p>More main content here.</p>
+          </main>
+          <footer>Footer content (should be excluded)</footer>
+          <div class="related">Related articles (should be excluded)</div>
+        </body>
+      </html>
+    
+      <body>
+        <nav>Before content (excluded)</nav>
+        <h1>Header Title</h1>
+        <p>Content after header</p>
+        <div>
+          <div>
+            <div>
+              <div>
+                <div>
+                  <div>
+                    <main>
+                      <h2>Deep Main Title (should be excluded - too deep)</h2>
+                      <p>Deep main content</p>
+                    </main>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <footer>Footer (excluded)</footer>
+      </body>
+    
+      <body>
+        <header class="site-header">
+          <nav>Site navigation (excluded)</nav>
+        </header>
+
+        <main>
+          <article>
+            <h1>Article Title</h1>
+            <div class="content">
+              <p>Article paragraph 1</p>
+              <h2>Section Title</h2>
+              <p>Article paragraph 2</p>
+              <ul>
+                <li>List item 1</li>
+                <li>List item 2</li>
+              </ul>
+            </div>
+          </article>
+        </main>
+
+        <footer class="site-footer">
+          <p>Copyright notice (excluded)</p>
+        </footer>
+      </body>
+    
+      <body>
+        <nav>Before (excluded)</nav>
+        <h1>Main Title</h1>
+        <p>Content before deep footer</p>
+        <div>
+          <div>
+            <div>
+              <div>
+                <div>
+                  <div>
+                    <footer>Deep footer (should NOT be excluded - too deep)</footer>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p>Content after deep footer (should be included)</p>
+        <footer>Shallow footer (should be excluded)</footer>
+        <div>After shallow footer (excluded)</div>
+      </body>
+    <p>This is a test for image with origin option:</p>
+<img src="/assets/cb-13462/images/help/writing/quoted-text-rendered.png" alt="Test image">
+<p>Another paragraph with non-absolute path image:</p>
+<img src="./local-image.png" alt="Local image">
+<p>Let's try one in a table:</p>
+<table>
+  <tr>
+    <th>Type</th>
+    <th>Image</th>
+  </tr>
+  <tr>
+    <td>Absolute path</td>
+    <td><img src="/assets/image-table.png" alt="Table image"></td>
+  </tr>
+</table>
+<p>And a more complex example with multiple images:</p>
+<div>
+  <p>Here's an image <img src="/images/first.png" alt="First"> in a paragraph.</p>
+  <table>
+    <tr>
+      <th>Header 1</th>
+      <th>Header 2 <img src="/images/header.png" alt="Header image"></th>
+    </tr>
+    <tr>
+      <td>Data with <img src="/images/inline.png" alt="Inline"> image</td>
+      <td>More data</td>
+    </tr>
+  </table>
+</div>
+      <div style="padding: 20px; font-family: Arial, sans-serif;">
+        <h2>Interactive HTML to Markdown Converter</h2>
+        <div>
+          <label for="html-input">HTML Input:</label>
+          <textarea id="html-input" rows="8" cols="50" placeholder="Enter HTML here...">
+<article>
+  <h1>Sample Blog Post</h1>
+  <p>This is a <strong>sample</strong> blog post with <em>various</em> formatting.</p>
+  <ul>
+    <li>List item 1</li>
+    <li>List item 2 with <code>code</code></li>
+  </ul>
+  <blockquote>
+    <p>A wise quote goes here.</p>
+  </blockquote>
+</article>
+          </textarea>
+        </div>
+        <button id="convert-btn">Convert to Markdown</button>
+        <div>
+          <label for="markdown-output">Markdown Output:</label>
+          <pre id="markdown-output" style="border: 1px solid #ccc; padding: 10px; background: #f5f5f5; white-space: pre-wrap;"></pre>
+        </div>
+      </div>
+    
+      <html lang="en">
+        <head>
+          <title>Example Page</title>
+          <meta name="description" content="This is an example page for testing" />
+          <meta name="robots" content="index,follow" />
+          <meta property="og:title" content="Example Page OG Title" />
+          <meta property="og:description" content="Example OG Description" />
+          <meta property="og:image" content="https://example.com/image.jpg" />
+          <link rel="canonical" href="https://example.com/page" />
+          <script type="application/ld+json">
+            {"@type": "WebPage", "name": "Example"}
+          </script>
+        </head>
+        <body>
+          <h1>Main Page Heading</h1>
+          <img src="/image.jpg" alt="Example image" width="400" height="300" />
+          <a href="/about" title="About page">About Us</a>
+          <script src="/app.js"></script>
+          <style>.example { color: red; }</style>
+        </body>
+      </html>
+    <span class="vector-dropdown-label-text">Main menu</span>
+	</label>
+	<div class="vector-dropdown-content">
+
+
+				<div id="vector-main-menu-unpinned-container" class="vector-unpinned-container">
+		
+<div id="vector-main-menu" class="vector-main-menu vector-pinnable-element">
+	<div
+	class="vector-pinnable-header vector-main-menu-pinnable-header vector-pinnable-header-unpinned"
+	data-feature-name="main-menu-pinned"
+	data-pinnable-element-id="vector-main-menu"
+	data-pinned-container-id="vector-main-menu-pinned-container"
+	data-unpinned-container-id="vector-main-menu-unpinned-container"
+>
+	<div class="vector-pinnable-header-label">Main menu</div>
+	<button class="vector-pinnable-header-toggle-button vector-pinnable-header-pin-button" data-event-name="pinnable-header.vector-main-menu.pin">move to sidebar</button>
+	<button class="vector-pinnable-header-toggle-button vector-pinnable-header-unpin-button" data-event-name="pinnable-header.vector-main-menu.unpin">hide</button>
+</div>
+
+      "| Style | Syntax | Keyboard shortcut | Example | Output |
+      | --- | --- | --- | --- | --- |
+      | Bold | `** **` or `__ __` | `Command`+`B` (Mac) or `Ctrl`+`B` (Windows/Linux) | `**This is bold text**` | **This is bold text** |
+      | Italic | `* *` or `_ _` &emsp;&emsp;&emsp;&emsp; | `Command`+`I` (Mac) or `Ctrl`+`I` (Windows/Linux) | `_This text is italicized_` | *This text is italicized* |
+      | Strikethrough | `~~ ~~` or `~ ~` | None | `~~This was mistaken text~~` | ~~This was mistaken text~~ |
+      | Bold and nested italic | `** **` and `_ _` | None | `**This text is _extremely_ important**` | **This text is *extremely* important** |
+      | All bold and italic | `*** ***` | None | `***All this text is important***` | ***All this text is important*** |
+      | Subscript | `<sub> </sub>` | None | `This is a <sub>subscript</sub> text` | This is a <sub>subscript</sub> text |
+      | Superscript | `<sup> </sup>` | None | `This is a <sup>superscript</sup> text` | This is a <sup>superscript</sup> text |
+      | Underline | `<ins> </ins>` | None | `This is an <ins>underlined</ins> text` | This is an <ins>underlined</ins> text |"
+    <h2 class="mm-recipes-nutrition-facts-summary__heading text-headline-300" colspan="2">Nutrition Facts <span class="mm-recipes-nutrition-facts-summary__heading-aside text-body-100">(per serving)</h2>
+<table class="mm-recipes-nutrition-facts-summary__table">
+<tbody class="mm-recipes-nutrition-facts-summary__table-body">
+<tr class="mm-recipes-nutrition-facts-summary__table-row">
+<td class="mm-recipes-nutrition-facts-summary__table-cell text-body-100-prominent">366</td>
+<td class="mm-recipes-nutrition-facts-summary__table-cell text-body-100">Calories</td>
+</tr>
+<tr class="mm-recipes-nutrition-facts-summary__table-row">
+<td class="mm-recipes-nutrition-facts-summary__table-cell text-body-100-prominent">7g </td>
+<td class="mm-recipes-nutrition-facts-summary__table-cell text-body-100">Fat</td>
+</tr>
+<tr class="mm-recipes-nutrition-facts-summary__table-row">
+<td class="mm-recipes-nutrition-facts-summary__table-cell text-body-100-prominent">68g </td>
+<td class="mm-recipes-nutrition-facts-summary__table-cell text-body-100">Carbs</td>
+</tr>
+<tr class="mm-recipes-nutrition-facts-summary__table-row">
+<td class="mm-recipes-nutrition-facts-summary__table-cell text-body-100-prominent">9g </td>
+<td class="mm-recipes-nutrition-facts-summary__table-cell text-body-100">Protein</td>
+</tr>
+</tbody>
+</table>
+</div>
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Blog Post - Example Site</title>
+          <meta name="description" content="An example blog post">
+        </head>
+        <body>
+          <nav class="navbar">
+            <a href="/">Home</a>
+            <a href="/blog">Blog</a>
+          </nav>
+
+          <main class="container mx-auto px-4">
+            <article>
+              <h1 class="text-4xl font-bold mb-4">My Blog Post</h1>
+              <p class="text-gray-600">Published on Jan 1, 2024</p>
+
+              <h2 class="text-2xl mt-8">Introduction</h2>
+              <p>This is the introduction paragraph with some <strong>bold text</strong>.</p>
+
+              <h2 class="text-2xl mt-8">Main Content</h2>
+              <p>Here's the main content of the post.</p>
+              <pre><code class="language-javascript">const example = true;</code></pre>
+
+              <h2 class="text-2xl mt-8">Conclusion</h2>
+              <p>Final thoughts here.</p>
+            </article>
+          </main>
+
+          <aside class="sidebar">
+            <h3>Related Posts</h3>
+            <ul>
+              <li><a href="/post1">Post 1</a></li>
+            </ul>
+          </aside>
+
+          <footer class="bg-gray-800 text-white">
+            <p>© 2024 Example Site</p>
+          </footer>
+        </body>
+        </html>
+      <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script type="importmap">{"imports":{"#entry":"/_nuxt/CpEeH-BX.js"}}</script><title>Features - MDream Conversion Capabilities</title><link rel="preload" as="fetch" crossorigin="anonymous" href="/features/_payload.json?28509730-1088-47eb-8c08-44fb33c5a94b"><link rel="modulepreload" as="script" crossorigin href="/_nuxt/CpEeH-BX.js"><link rel="modulepreload" as="script" crossorigin href="/_nuxt/CucccGVB.js"><link rel="preload" as="fetch" fetchpriority="low" crossorigin="anonymous" href="/_nuxt/builds/meta/28509730-1088-47eb-8c08-44fb33c5a94b.json"><link rel="prefetch" as="script" crossorigin href="/_nuxt/5HBwg5oN.js"><link rel="prefetch" as="script" crossorigin href="/_nuxt/CAtBrQSo.js"><meta name="description" content="Explore MDream's powerful features including streaming API, plugin system, custom tag handlers, and performance optimizations for HTML to Markdown conversion."><script type="module" src="/_nuxt/CpEeH-BX.js" crossorigin></script></head><body><div id="__nuxt"><div><div><h1>Features</h1><p> MDream offers a comprehensive set of features designed to make HTML to Markdown conversion efficient, flexible, and easy to integrate into your applications. From basic conversions to advanced streaming and plugin support, MDream has everything you need. </p><h2>Streaming Architecture</h2><p> The streaming API allows you to process HTML incrementally, which is perfect for large documents or real-time content. Instead of loading the entire HTML into memory, MDream processes content in chunks, emitting Markdown as soon as each chunk is ready. This approach significantly reduces memory usage and provides better performance for large documents. </p><h2>Plugin System</h2><p> Create custom plugins to extend MDream&#39;s functionality. Plugins can intercept the conversion process at multiple stages, allowing you to filter content, transform elements, or extract data. The plugin API is simple yet powerful, supporting hooks like beforeNodeProcess, onNodeEnter, onNodeExit, and processTextNode. </p><h2>Performance Optimizations</h2><p> MDream is built with performance in mind. It uses a custom HTML parser optimized for speed, avoids unnecessary allocations, and employs V8-friendly patterns throughout the codebase. String concatenation is minimized, regex usage is carefully controlled, and the parser uses a stack-based approach to handle deeply nested structures efficiently. </p><h2>Table Support</h2><p> Full support for HTML tables with proper alignment detection, colspan handling, and header formatting. MDream converts complex table structures into clean Markdown tables that preserve the original layout and content structure as closely as possible. </p></div></div></div><div id="teleports"></div><script type="application/json" data-nuxt-data="nuxt-app" data-ssr="true" id="__NUXT_DATA__" data-src="/features/_payload.json?28509730-1088-47eb-8c08-44fb33c5a94b">[{"state":1,"once":10,"_errors":11,"serverRendered":13,"path":14,"prerenderedAt":15},["Reactive",2],{"$ssite-config":3},{"_priority":4,"description":7,"env":8,"name":9},{"name":5,"env":6,"description":5},-10,-15,"Nuxt module for converting HTML pages to Markdown using mdream","production","@mdream/nuxt",["Set"],["ShallowReactive",12],{},true,"/features",1759307267984]</script><script>window.__NUXT__={};window.__NUXT__.config={public:{},app:{baseURL:"/",buildId:"28509730-1088-47eb-8c08-44fb33c5a94b",buildAssetsDir:"/_nuxt/",cdnURL:""}}</script></body></html>
+
+      "Subfamily **[Emballonurinae](/wiki/Emballonurinae)** â [Gervais](/wiki/Paul_Gervais "Paul Gervais"), 1856 â twelve genera
+
+      | Name | Authority and species | Range | Size and ecology |
+      | --- | --- | --- | --- |
+      | _[Balantiopteryx](/wiki/Balantiopteryx)_(sac-winged bat) [![Brown bat](https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Gray_Sac-winged_Bat_%28Balantiopteryx_plicata%29_%2824776812271%29.jpg/250px-Gray_Sac-winged_Bat_%28Balantiopteryx_plicata%29_%2824776812271%29.jpg)](/wiki/File:Gray_Sac-winged_Bat_(Balantiopteryx_plicata)_(24776812271).jpg) | [Peters](/wiki/Wilhelm_Peters "Wilhelm Peters"), 1867 <br><br>hide Three species<ul><li>_B. infusca_ ([Ecuadorian sac-winged bat](/wiki/Ecuadorian_sac-winged_bat))</li><li>_B. io_ ([Thomas's sac-winged bat](/wiki/Thomas%27s_sac-winged_bat))</li><li>_B. plicata_ ([Gray sac-winged bat](/wiki/Gray_sac-winged_bat), pictured)</li></ul> | Mexico, Central America, and northwestern South America | _Size range_: 3 cm (1 in) long, plus 1 cm (0.4 in) tail (Ecuadorian sac-winged bat) to 6 cm (2 in) long, plus 3 cm (1 in) tail (gray sac-winged bat)<sup>[\[6\]](#cite_note-EmballonuridaeSize-6)</sup><br><br>_Habitats_: Caves, shrubland, and forest<sup>[\[7\]](#cite_note-BalantiopteryxHabitat-7)</sup> |
+      | _[Centronycteris](/wiki/Centronycteris)_(shaggy bat) [![Brown bat](https://upload.wikimedia.org/wikipedia/commons/thumb/c/c4/Centronycteris_centralis_31737818.jpg/250px-Centronycteris_centralis_31737818.jpg)](/wiki/File:Centronycteris_centralis_31737818.jpg) | [Gray](/wiki/John_Edward_Gray "John Edward Gray"), 1838 <br><br>hide Two species<ul><li>_C. centralis_ ([Thomas's shaggy bat](/wiki/Thomas%27s_shaggy_bat), pictured)</li><li>_C. maximiliani_ ([Shaggy bat](/wiki/Shaggy_bat))</li></ul> | Mexico, Central America, and northern and eastern South America | _Size range_: 4 cm (2 in) long, plus 1 cm (0.4 in) tail (Thomas's shaggy bat) to 7 cm (3 in) long, plus 3 cm (1 in) tail (shaggy bat)<sup>[\[6\]](#cite_note-EmballonuridaeSize-6)</sup><br><br>_Habitat_: Forest<sup>[\[8\]](#cite_note-CentronycterisHabitat-8)</sup> |
+      | _[Coleura](/wiki/Coleura)_(sheath-tailed bat) [![Brown bat head](https://upload.wikimedia.org/wikipedia/commons/thumb/5/51/Coleura_afra_2021.jpg/250px-Coleura_afra_2021.jpg)](/wiki/File:Coleura_afra_2021.jpg) | [Peters](/wiki/Wilhelm_Peters "Wilhelm Peters"), 1867 <br><br>hide Three species<ul><li>_C. afra_ ([African sheath-tailed bat](/wiki/African_sheath-tailed_bat), pictured)</li><li>_C. kibomalandy_ ([Madagascar sheath-tailed bat](/wiki/Madagascar_sheath-tailed_bat))</li><li>_C. seychellensis_ ([Seychelles sheath-tailed bat](/wiki/Seychelles_sheath-tailed_bat))</li></ul> | Africa | _Size range_: 5â7 cm (2â3 in) long, plus 1â2 cm (0.4â0.8 in) tail (multiple)<sup>[\[6\]](#cite_note-EmballonuridaeSize-6)</sup><br><br>_Habitats_: Shrubland, forest, caves, savanna, inland wetlands, and desert<sup>[\[9\]](#cite_note-ColeuraHabitat-9)</sup> |
+      | _[Cormura](/wiki/Cormura)_[![Brown bat](https://upload.wikimedia.org/wikipedia/commons/thumb/d/d2/Naturalis_Biodiversity_Center_-_RMNH.MAM.24346.b_ven_-_Cormura_brevirostris_-_skin.jpeg/250px-Naturalis_Biodiversity_Center_-_RMNH.MAM.24346.b_ven_-_Cormura_brevirostris_-_skin.jpeg)](/wiki/File:Naturalis_Biodiversity_Center_-_RMNH.MAM.24346.b_ven_-_Cormura_brevirostris_-_skin.jpeg) | [Peters](/wiki/Wilhelm_Peters "Wilhelm Peters"), 1867 <br><br>hide One species<ul><li>_C. brevirostris_ ([Chestnut sac-winged bat](/wiki/Chestnut_sac-winged_bat))</li></ul> | Central America and northern South America<br>[![Map of range](https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Chestnut_Sac-Winged_Bat_area.png/120px-Chestnut_Sac-Winged_Bat_area.png)](/wiki/File:Chestnut_Sac-Winged_Bat_area.png) | _Size_: 4â6 cm (2â2 in) long, plus 1â2 cm (0.4â0.8 in) tail<sup>[\[6\]](#cite_note-EmballonuridaeSize-6)</sup><br><br>_Habitat_: Forest<sup>[\[10\]](#cite_note-IUCNChestnutsac-wingedbat-10)</sup> |
+      | _[Cyttarops](/wiki/Cyttarops)_ | [Thomas](/wiki/Oldfield_Thomas "Oldfield Thomas"), 1913 <br><br>hide One species<ul><li>_C. alecto_ ([Short-eared bat](/wiki/Short-eared_bat))</li></ul> | Central America and northern South America<br>[![Map of range](https://upload.wikimedia.org/wikipedia/commons/thumb/7/7a/Short-eared_Bat_area.png/120px-Short-eared_Bat_area.png)](/wiki/File:Short-eared_Bat_area.png) | _Size_: 4â6 cm (2â2 in) long, plus 2â3 cm (1â1 in) tail<sup>[\[6\]](#cite_note-EmballonuridaeSize-6)</sup><br><br>_Habitat_: Forest<sup>[\[11\]](#cite_note-IUCNShort-earedbat-11)</sup> |
+      | _[Diclidurus](/wiki/Diclidurus)_(ghost bat) [![White bat](https://upload.wikimedia.org/wikipedia/commons/thumb/9/9b/P1070111-Northern-Ghost-Bat-%28diclidurus-albus%29.jpg/250px-P1070111-Northern-Ghost-Bat-%28diclidurus-albus%29.jpg)](/wiki/File:P1070111-Northern-Ghost-Bat-(diclidurus-albus).jpg) | [Wied-Neuwied](/wiki/Prince_Maximilian_of_Wied-Neuwied "Prince Maximilian of Wied-Neuwied"), 1820 <br><br>hide Four species<ul><li>_D. albus_ ([Northern ghost bat](/wiki/Northern_ghost_bat), pictured)</li><li>_D. ingens_ ([Greater ghost bat](/wiki/Greater_ghost_bat))</li><li>_D. isabellus_ ([Isabelle's ghost bat](/wiki/Isabelle%27s_ghost_bat))</li><li>_D. scutatus_ ([Lesser ghost bat](/wiki/Lesser_ghost_bat))</li></ul> | Mexico, Central America, and South America | _Size range_: 5 cm (2 in) long, plus 1 cm (0.4 in) tail (lesser ghost bat) to 9 cm (4 in) long, plus 8 cm (3 in) tail (northern ghost bat)<sup>[\[6\]](#cite_note-EmballonuridaeSize-6)</sup><br><br>_Habitat_: Forest<sup>[\[12\]](#cite_note-DiclidurusHabitat-12)</sup> |
+      | _[Emballonura](/wiki/Emballonura)_(sheath-tailed bat) [![Brown bat](https://upload.wikimedia.org/wikipedia/commons/thumb/2/2c/Emballonura_semicaudata%2C_Ovalau_Island_-_Joanne_Malotaux_%2822057146275%29.jpg/250px-Emballonura_semicaudata%2C_Ovalau_Island_-_Joanne_Malotaux_%2822057146275%29.jpg)](/wiki/File:Emballonura_semicaudata,_Ovalau_Island_-_Joanne_Malotaux_(22057146275).jpg) | [Temminck](/wiki/Coenraad_Jacob_Temminck "Coenraad Jacob Temminck"), 1838 <br><br>show Eight species<ul><li>_E. alecto_ ([Small Asian sheath-tailed bat](/wiki/Small_Asian_sheath-tailed_bat))</li><li>_E. beccarii_ ([Beccari's sheath-tailed bat](/wiki/Beccari%27s_sheath-tailed_bat))</li><li>_E. dianae_ ([Large-eared sheath-tailed bat](/wiki/Large-eared_sheath-tailed_bat))</li><li>_E. furax_ ([Greater sheath-tailed bat](/wiki/Greater_sheath-tailed_bat))</li><li>_E. monticola_ ([Lesser sheath-tailed bat](/wiki/Lesser_sheath-tailed_bat))</li><li>_E. raffrayana_ ([Raffray's sheath-tailed bat](/wiki/Raffray%27s_sheath-tailed_bat))</li><li>_E. semicaudata_ ([Pacific sheath-tailed bat](/wiki/Pacific_sheath-tailed_bat), pictured)</li><li>_E. serii_ ([Seri's sheath-tailed bat](/wiki/Seri%27s_sheath-tailed_bat))</li></ul> | Southeastern Asia | _Size range_: 3 cm (1 in) long, plus 1 cm (0.4 in) tail (Beccari's sheath-tailed bat) to 7 cm (3 in) long, plus 2 cm (1 in) tail (greater sheath-tailed bat)<sup>[\[6\]](#cite_note-EmballonuridaeSize-6)</sup><br><br>_Habitats_: Rocky areas, caves, and forest<sup>[\[13\]](#cite_note-EmballonuraHabitat-13)</sup> |
+      | _[Mosia](/wiki/Mosia)_[![Brown bats](https://upload.wikimedia.org/wikipedia/commons/thumb/b/b1/Dark_Sheath-tailed_Bat_imported_from_iNaturalist_photo_451989042_on_2_December_2024.jpg/250px-Dark_Sheath-tailed_Bat_imported_from_iNaturalist_photo_451989042_on_2_December_2024.jpg)](/wiki/File:Dark_Sheath-tailed_Bat_imported_from_iNaturalist_photo_451989042_on_2_December_2024.jpg) | [Gray](/wiki/John_Edward_Gray "John Edward Gray"), 1843 <br><br>hide One species<ul><li>_M. nigrescens_ ([Dark sheath-tailed bat](/wiki/Dark_sheath-tailed_bat))</li></ul> | Indonesia, Papua New Guinea, and the Solomon Islands<br>[![Map of range](https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/Mosia_nigrescens_distribution.png/250px-Mosia_nigrescens_distribution.png)](/wiki/File:Mosia_nigrescens_distribution.png) | _Size_: 3â5 cm (1â2 in) long, plus 1â2 cm (0.4â0.8 in) tail<sup>[\[6\]](#cite_note-EmballonuridaeSize-6)</sup><br><br>_Habitats_: Forest, rocky areas, and caves<sup>[\[14\]](#cite_note-IUCNDarksheath-tailedbat-14)</sup> |
+      | _[Paremballonura](/wiki/Paremballonura)_(false sheath-tailed bat) [![Brown bat](https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Paremballonura_atrata.jpg/250px-Paremballonura_atrata.jpg)](/wiki/File:Paremballonura_atrata.jpg) | [Goodman](/wiki/Steven_M._Goodman "Steven M. Goodman"), [Puechmaille](/w/index.php?title=S%C3%A9bastien_J._Puechmaille&action=edit&redlink=1 "Sébastien J. Puechmaille (page does not exist)"), [Friedli-Weyeneth](/w/index.php?title=Nicole_Friedli-Weyeneth&action=edit&redlink=1 "Nicole Friedli-Weyeneth (page does not exist)"), [Gerlach](/wiki/Justin_Gerlach "Justin Gerlach"), [Ruedi](/w/index.php?title=Manuel_Ruedi&action=edit&redlink=1 "Manuel Ruedi (page does not exist)"), [Schoeman](/w/index.php?title=M._Corrie_Schoeman&action=edit&redlink=1 "M. Corrie Schoeman (page does not exist)"), [Stanley](/wiki/Bill_Stanley_(mammalogist) "Bill Stanley (mammalogist)"), & [Teeling](/wiki/Emma_Teeling "Emma Teeling"), 2012 <br><br>hide Two species<ul><li>_P. atrata_ ([Peters's sheath-tailed bat](/wiki/Peters%27s_sheath-tailed_bat))</li><li>_P. tiavato_ ([Western sheath-tailed bat](/wiki/Western_sheath-tailed_bat))</li></ul> | Madagascar | _Size range_: 4â5 cm (2 in), plus 1â2 cm (0.4â0.8 in) tail (multiple)<sup>[\[6\]](#cite_note-EmballonuridaeSize-6)</sup><br><br>_Habitats_: Caves and forest<sup>[\[15\]](#cite_note-ParemballonuraHabitat-15)</sup> |
+      | _[Peropteryx](/wiki/Peropteryx)_(dog-like bat) [![Brown bat](https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Lesser_Dog-like_Bat_imported_from_iNaturalist_photo_129124225_on_2_December_2024.jpg/250px-Lesser_Dog-like_Bat_imported_from_iNaturalist_photo_129124225_on_2_December_2024.jpg)](/wiki/File:Lesser_Dog-like_Bat_imported_from_iNaturalist_photo_129124225_on_2_December_2024.jpg) | [Peters](/wiki/Wilhelm_Peters "Wilhelm Peters"), 1867 <br><br>hide Five species<ul><li>_P. kappleri_ ([Greater dog-like bat](/wiki/Greater_dog-like_bat))</li><li>_P. leucoptera_ ([White-winged dog-like bat](/wiki/White-winged_dog-like_bat))</li><li>_P. macrotis_ ([Lesser dog-like bat](/wiki/Lesser_dog-like_bat), pictured)</li><li>_P. pallidoptera_ ([Pale-winged dog-like bat](/wiki/Pale-winged_dog-like_bat))</li><li>_P. trinitatis_ ([Trinidad dog-like bat](/wiki/Trinidad_dog-like_bat))</li></ul> | Mexico, Central America, and South America | _Size range_: 4 cm (2 in) long, plus 1 cm (0.4 in) tail (lesser dog-like bat) to 8 cm (3 in) long, plus 2 cm (1 in) tail (greater dog-like bat)<sup>[\[6\]](#cite_note-EmballonuridaeSize-6)</sup><br><br>_Habitats_: Caves, shrubland, and forest<sup>[\[16\]](#cite_note-PeropteryxHabitat-16)</sup> |
+      | _[Rhynchonycteris](/wiki/Rhynchonycteris)_[![Brown bats](https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/Long-nosed_proboscis_bats.JPG/250px-Long-nosed_proboscis_bats.JPG)](/wiki/File:Long-nosed_proboscis_bats.JPG) | [Peters](/wiki/Wilhelm_Peters "Wilhelm Peters"), 1867 <br><br>hide One species<ul><li>_R. naso_ ([Proboscis bat](/wiki/Proboscis_bat))</li></ul> | Mexico, Central America, and South America<br>[![Map of range](https://upload.wikimedia.org/wikipedia/commons/thumb/0/0a/Proboscis_Bat_area.png/120px-Proboscis_Bat_area.png)](/wiki/File:Proboscis_Bat_area.png) | _Size_: 3â5 cm (1â2 in) long, plus 1â2 cm (0.4â0.8 in) tail<sup>[\[6\]](#cite_note-EmballonuridaeSize-6)</sup><br><br>_Habitats_: Forest and caves<sup>[\[17\]](#cite_note-IUCNProboscisbat-17)</sup> |
+      | _[Saccopteryx](/wiki/Saccopteryx)_(sac-winged bat) [![Brown bats](https://upload.wikimedia.org/wikipedia/commons/thumb/7/70/Frosted_Sac-winged_Bat_imported_from_iNaturalist_photo_17543865_on_2_December_2024.jpg/250px-Frosted_Sac-winged_Bat_imported_from_iNaturalist_photo_17543865_on_2_December_2024.jpg)](/wiki/File:Frosted_Sac-winged_Bat_imported_from_iNaturalist_photo_17543865_on_2_December_2024.jpg) | [Illiger](/wiki/Johann_Karl_Wilhelm_Illiger "Johann Karl Wilhelm Illiger"), 1811 <br><br>hide Five species<ul><li>_S. antioquensis_ ([Antioquian sac-winged bat](/wiki/Antioquian_sac-winged_bat))</li><li>_S. bilineata_ ([Greater sac-winged bat](/wiki/Greater_sac-winged_bat))</li><li>_S. canescens_ ([Frosted sac-winged bat](/wiki/Frosted_sac-winged_bat), pictured)</li><li>_S. gymnura_ ([Amazonian sac-winged bat](/wiki/Amazonian_sac-winged_bat))</li><li>_S. leptura_ ([Lesser sac-winged bat](/wiki/Lesser_sac-winged_bat))</li></ul> | Mexico, Central America, and South America | _Size range_: 3 cm (1 in) long, plus 1 cm (0.4 in) tail (Amazonian sac-winged bat) to 6 cm (2 in) long, plus 3 cm (1 in) tail (greater sac-winged bat)<sup>[\[6\]](#cite_note-EmballonuridaeSize-6)</sup><br><br>_Habitats_: Caves and forest<sup>[\[18\]](#cite_note-SaccopteryxHabitat-18)</sup> |"
+    
+      "| <table><tr><td>[![](y18.svg)](https://news.ycombinator.com)</td><td>**[Hacker News](news)** [new](newest) \| [past](front) \| [comments](newcomments) \| [ask](ask) \| [show](show) \| [jobs](jobs) \| [submit](submit)</td><td>[login](login?goto=news)</td></tr></table> |
+      | --- |
+      | |
+      | <table><tr><td>1.</td><td><center>[](vote?id=43873531&how=up&goto=news)</center></td><td>[Old Soviet Venus descent craft nearing Earth reentry](https://www.leonarddavid.com/old-soviet-venus-descent-craft-nearing-earth-reentry/) ([leonarddavid.com](from?site=leonarddavid.com))</td></tr><tr><td></td><td>266 points by [Wingman4l7](user?id=Wingman4l7) [6 hours ago](item?id=43873531)  \| [hide](hide?id=43873531&goto=news) \| [113 comments](item?id=43873531)</td></tr><tr></tr><tr><td>2.</td><td><center>[](vote?id=43875416&how=up&goto=news)</center></td><td>[GitDroid: A third party Android app manager for apps uploaded to GitHub releases](https://github.com/TechnicJelle/GitDroid) ([github.com/technicjelle](from?site=github.com/technicjelle))</td></tr><tr><td></td><td>35 points by [amadeuspagel](user?id=amadeuspagel) [2 hours ago](item?id=43875416)  \| [hide](hide?id=43875416&goto=news) \| [9 comments](item?id=43875416)</td></tr><tr></tr><tr><td>3.</td><td><center>[](vote?id=43873074&how=up&goto=news)</center></td><td>[Show HN: I built a synthesizer based on 3D physics](https://anukari.com) ([anukari.com](from?site=anukari.com))</td></tr><tr><td></td><td>289 points by [humbledrone](user?id=humbledrone) [7 hours ago](item?id=43873074)  \| [hide](hide?id=43873074&goto=news) \| [77 comments](item?id=43873074)</td></tr><tr></tr><tr><td>4.</td><td><center>[](vote?id=43861207&how=up&goto=news)</center></td><td>[Achieving Human Level Competitive Robot Table Tennis](https://sites.google.com/view/competitive-robot-table-tennis/home?pli=1) ([sites.google.com](from?site=sites.google.com))</td></tr><tr><td></td><td>42 points by [badmonster](user?id=badmonster) [3 hours ago](item?id=43861207)  \| [hide](hide?id=43861207&goto=news) \| [9 comments](item?id=43861207)</td></tr><tr></tr><tr><td>5.</td><td><center>[](vote?id=43863414&how=up&goto=news)</center></td><td>[Derivation and Intuition behind Poisson distribution](https://antaripasaha.notion.site/Derivation-and-Intuition-behind-Poisson-distribution-1255314a56398062bf9dd9049fb1c396) ([antaripasaha.notion.site](from?site=antaripasaha.notion.site))</td></tr><tr><td></td><td>49 points by [sebg](user?id=sebg) [5 hours ago](item?id=43863414)  \| [hide](hide?id=43863414&goto=news) \| [8 comments](item?id=43863414)</td></tr><tr></tr><tr><td>6.</td><td><center>[](vote?id=43870998&how=up&goto=news)</center></td><td>[Show HN: GPT-2 implemented using graphics shaders](https://github.com/nathan-barry/gpt2-webgl) ([github.com/nathan-barry](from?site=github.com/nathan-barry))</td></tr><tr><td></td><td>164 points by [nathan-barry](user?id=nathan-barry) [10 hours ago](item?id=43870998)  \| [hide](hide?id=43870998&goto=news) \| [22 comments](item?id=43870998)</td></tr><tr></tr><tr><td>7.</td><td><center>[](vote?id=43872990&how=up&goto=news)</center></td><td>[Driverless semis have started running regular longhaul routes](https://www.cnn.com/2025/05/01/business/first-driverless-semis-started-regular-routes) ([cnn.com](from?site=cnn.com))</td></tr><tr><td></td><td>96 points by [harambae](user?id=harambae) [7 hours ago](item?id=43872990)  \| [hide](hide?id=43872990&goto=news) \| [158 comments](item?id=43872990)</td></tr><tr></tr><tr><td>8.</td><td><center>[](vote?id=43854337&how=up&goto=news)</center></td><td>[Strings Just Got Faster](https://inside.java/2025/05/01/strings-just-got-faster/) ([inside.java](from?site=inside.java))</td></tr><tr><td></td><td>135 points by [Tomte](user?id=Tomte) [11 hours ago](item?id=43854337)  \| [hide](hide?id=43854337&goto=news) \| [67 comments](item?id=43854337)</td></tr><tr></tr><tr><td>9.</td><td><center>[](vote?id=43872094&how=up&goto=news)</center></td><td>[Building Burstables: CPU slicing with cgroups](https://www.ubicloud.com/blog/building-burstables-cpu-slicing-with-cgroups) ([ubicloud.com](from?site=ubicloud.com))</td></tr><tr><td></td><td>90 points by [msarnowicz](user?id=msarnowicz) [8 hours ago](item?id=43872094)  \| [hide](hide?id=43872094&goto=news) \| [12 comments](item?id=43872094)</td></tr><tr></tr><tr><td>10.</td><td><center>[](vote?id=43872625&how=up&goto=news)</center></td><td>[The History of Album Art](https://matthewstrom.com/writing/album-art/) ([matthewstrom.com](from?site=matthewstrom.com))</td></tr><tr><td></td><td>72 points by [tobr](user?id=tobr) [8 hours ago](item?id=43872625)  \| [hide](hide?id=43872625&goto=news) \| [12 comments](item?id=43872625)</td></tr><tr></tr><tr><td>11.</td><td><center>[](vote?id=43872761&how=up&goto=news)</center></td><td>[Show HN: Blast â Fast, multi-threaded serving engine for web browsing AI agents](https://github.com/stanford-mast/blast) ([github.com/stanford-mast](from?site=github.com/stanford-mast))</td></tr><tr><td></td><td>97 points by [calebhwin](user?id=calebhwin) [7 hours ago](item?id=43872761)  \| [hide](hide?id=43872761&goto=news) \| [35 comments](item?id=43872761)</td></tr><tr></tr><tr><td>12.</td><td><center>[](vote?id=43858183&how=up&goto=news)</center></td><td>[Doom GPU Flame Graphs](https://www.brendangregg.com/blog/2025-05-01/doom-gpu-flame-graphs.html) ([brendangregg.com](from?site=brendangregg.com))</td></tr><tr><td></td><td>54 points by [zdw](user?id=zdw) [6 hours ago](item?id=43858183)  \| [hide](hide?id=43858183&goto=news) \| [11 comments](item?id=43858183)</td></tr><tr></tr><tr><td>13.</td><td><center>[](vote?id=43861189&how=up&goto=news)</center></td><td>[You could just choose optimism](https://quarter--mile.com/You-Could-Just-Choose-Optimism) ([quarter--mile.com](from?site=quarter--mile.com))</td></tr><tr><td></td><td>11 points by [surprisetalk](user?id=surprisetalk) [1 hour ago](item?id=43861189)  \| [hide](hide?id=43861189&goto=news) \| [5 comments](item?id=43861189)</td></tr><tr></tr><tr><td>14.</td><td>![](s.gif)</td><td>[OneText (YC W23) Is Hiring a DevOps/DBA Lead Engineer](item?id=43874534)</td></tr><tr><td></td><td>[4 hours ago](item?id=43874534) \| [hide](hide?id=43874534&goto=news)</td></tr><tr></tr><tr><td>15.</td><td><center>[](vote?id=43869353&how=up&goto=news)</center></td><td>[Suno v4.5](https://suno.com/explore/) ([suno.com](from?site=suno.com))</td></tr><tr><td></td><td>223 points by [platers](user?id=platers) [12 hours ago](item?id=43869353)  \| [hide](hide?id=43869353&goto=news) \| [152 comments](item?id=43869353)</td></tr><tr></tr><tr><td>16.</td><td><center>[](vote?id=43867403&how=up&goto=news)</center></td><td>[What I've learned from jj](https://zerowidth.com/2025/what-ive-learned-from-jj/) ([zerowidth.com](from?site=zerowidth.com))</td></tr><tr><td></td><td>96 points by [eproxus](user?id=eproxus) [9 hours ago](item?id=43867403)  \| [hide](hide?id=43867403&goto=news) \| [35 comments](item?id=43867403)</td></tr><tr></tr><tr><td>17.</td><td><center>[](vote?id=43873679&how=up&goto=news)</center></td><td>[VR Design Unpacked: The secret to Beat Saber's fun](https://www.roadtovr.com/beat-saber-instructed-motion-until-you-fall-inside-xr-design/) ([roadtovr.com](from?site=roadtovr.com))</td></tr><tr><td></td><td>81 points by [stevenalowe](user?id=stevenalowe) [5 hours ago](item?id=43873679)  \| [hide](hide?id=43873679&goto=news) \| [65 comments](item?id=43873679)</td></tr><tr></tr><tr><td>18.</td><td><center>[](vote?id=43869288&how=up&goto=news)</center></td><td>[The Cannae Problem](https://www.joanwestenberg.com/the-cannae-problem/) ([joanwestenberg.com](from?site=joanwestenberg.com))</td></tr><tr><td></td><td>124 points by [flobosg](user?id=flobosg) [12 hours ago](item?id=43869288)  \| [hide](hide?id=43869288&goto=news) \| [81 comments](item?id=43869288)</td></tr><tr></tr><tr><td>19.</td><td><center>[](vote?id=43875505&how=up&goto=news)</center></td><td>[ePub-utils: a Python library and CLI tool for inspecting ePub from the terminal](https://github.com/ernestofgonzalez/epub-utils) ([github.com/ernestofgonzalez](from?site=github.com/ernestofgonzalez))</td></tr><tr><td></td><td>6 points by [ernstgnzlz](user?id=ernstgnzlz) [2 hours ago](item?id=43875505)  \| [hide](hide?id=43875505&goto=news) \| [discuss](item?id=43875505)</td></tr><tr></tr><tr><td>20.</td><td><center>[](vote?id=43868737&how=up&goto=news)</center></td><td>[A Common Lisp jq replacement](https://world-playground-deceit.net/blog/2025/03/a-common-lisp-jq-replacement.html) ([world-playground-deceit.net](from?site=world-playground-deceit.net))</td></tr><tr><td></td><td>132 points by [tmtvl](user?id=tmtvl) [13 hours ago](item?id=43868737)  \| [hide](hide?id=43868737&goto=news) \| [43 comments](item?id=43868737)</td></tr><tr></tr><tr><td>21.</td><td><center>[](vote?id=43866303&how=up&goto=news)</center></td><td>[Don't watermark your legal PDFs with purple dragons in suits](https://arstechnica.com/tech-policy/2025/05/dont-watermark-your-legal-pdfs-with-purple-dragons-in-suits/) ([arstechnica.com](from?site=arstechnica.com))</td></tr><tr><td></td><td>249 points by [Tomte](user?id=Tomte) [20 hours ago](item?id=43866303)  \| [hide](hide?id=43866303&goto=news) \| [237 comments](item?id=43866303)</td></tr><tr></tr><tr><td>22.</td><td><center>[](vote?id=43870819&how=up&goto=news)</center></td><td>[Expanding on what we missed with sycophancy](https://openai.com/index/expanding-on-sycophancy/) ([openai.com](from?site=openai.com))</td></tr><tr><td></td><td>167 points by [synthwave](user?id=synthwave) [10 hours ago](item?id=43870819)  \| [hide](hide?id=43870819&goto=news) \| [167 comments](item?id=43870819)</td></tr><tr></tr><tr><td>23.</td><td><center>[](vote?id=43867211&how=up&goto=news)</center></td><td>[Just redesigned my personal site with a TTY-style interface](https://www.abdisa.me/) ([abdisa.me](from?site=abdisa.me))</td></tr><tr><td></td><td>225 points by [abdisaDev](user?id=abdisaDev) [17 hours ago](item?id=43867211)  \| [hide](hide?id=43867211&goto=news) \| [100 comments](item?id=43867211)</td></tr><tr></tr><tr><td>24.</td><td><center>[](vote?id=43868192&how=up&goto=news)</center></td><td>[How to live an intellectually rich life](https://utsavmamoria.substack.com/p/how-to-live-an-intellectually-rich) ([utsavmamoria.substack.com](from?site=utsavmamoria.substack.com))</td></tr><tr><td></td><td>472 points by [TheLadyParadox](user?id=TheLadyParadox) [14 hours ago](item?id=43868192)  \| [hide](hide?id=43868192&goto=news) \| [266 comments](item?id=43868192)</td></tr><tr></tr><tr><td>25.</td><td><center>[](vote?id=43870969&how=up&goto=news)</center></td><td>[The language brain matters more for programming than the math brain? (2020)](https://massivesci.com/articles/programming-math-language-python-women-in-science/) ([massivesci.com](from?site=massivesci.com))</td></tr><tr><td></td><td>301 points by [smusamashah](user?id=smusamashah) [10 hours ago](item?id=43870969)  \| [hide](hide?id=43870969&goto=news) \| [319 comments](item?id=43870969)</td></tr><tr></tr><tr><td>26.</td><td><center>[](vote?id=43868273&how=up&goto=news)</center></td><td>[Webflow makes GSAP 100% free â plus more updates](https://webflow.com/blog/gsap-becomes-free) ([webflow.com](from?site=webflow.com))</td></tr><tr><td></td><td>106 points by [mefengl](user?id=mefengl) [14 hours ago](item?id=43868273)  \| [hide](hide?id=43868273&goto=news) \| [37 comments](item?id=43868273)</td></tr><tr></tr><tr><td>27.</td><td><center>[](vote?id=43873604&how=up&goto=news)</center></td><td>[A proof of concept tool to verify estimates](https://terrytao.wordpress.com/2025/05/01/a-proof-of-concept-tool-to-verify-estimates/) ([terrytao.wordpress.com](from?site=terrytao.wordpress.com))</td></tr><tr><td></td><td>44 points by [jjgreen](user?id=jjgreen) [6 hours ago](item?id=43873604)  \| [hide](hide?id=43873604&goto=news) \| [6 comments](item?id=43873604)</td></tr><tr></tr><tr><td>28.</td><td><center>[](vote?id=43824297&how=up&goto=news)</center></td><td>[Relational Graph Transformers](https://kumo.ai/research/relational-graph-transformers/) ([kumo.ai](from?site=kumo.ai))</td></tr><tr><td></td><td>58 points by [gk1](user?id=gk1) [9 hours ago](item?id=43824297)  \| [hide](hide?id=43824297&goto=news) \| [3 comments](item?id=43824297)</td></tr><tr></tr><tr><td>29.</td><td><center>[](vote?id=43868130&how=up&goto=news)</center></td><td>[The Totalitarian Buddhist Who Beat SIM City (2010)](https://web.archive.org/web/20211117094441/https://www.vice.com/en/article/4w4kg3/the-totalitarian-buddhist-who-beat-sim-city) ([archive.org](from?site=archive.org))</td></tr><tr><td></td><td>59 points by [Tomte](user?id=Tomte) [9 hours ago](item?id=43868130)  \| [hide](hide?id=43868130&goto=news) \| [14 comments](item?id=43868130)</td></tr><tr></tr><tr><td>30.</td><td><center>[](vote?id=43859446&how=up&goto=news)</center></td><td>[Redis is open source again](https://antirez.com/news/151) ([antirez.com](from?site=antirez.com))</td></tr><tr><td></td><td>1783 points by [antirez](user?id=antirez) [1 day ago](item?id=43859446)  \| [hide](hide?id=43859446&goto=news) \| [706 comments](item?id=43859446)</td></tr><tr></tr><tr></tr><tr><td></td><td>[More](?p=2)</td></tr></table> |
+      | ![](s.gif)<table><tr><td></td></tr></table><br>Join us for [<u>AI Startup School</u>](https://events.ycombinator.com/ai-sus) this June 16-17 in San Francisco!<br>[Guidelines](newsguidelines.html) \| [FAQ](newsfaq.html) \| [Lists](lists) \| [API](https://github.com/HackerNews/API) \| [Security](security.html) \| [Legal](https://www.ycombinator.com/legal/) \| [Apply to YC](https://www.ycombinator.com/apply/) \| [Contact](mailto:hn@ycombinator.com)<br><br> Search: |"
+    
