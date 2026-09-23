@@ -322,6 +322,18 @@ describe('htmlToMarkdownSplitChunks', () => {
     expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, options))
   })
 
+  it('measures settled flush floors in the finished fragment view', () => {
+    const options = { clean: clean({ fragments: true }), chunkSize: 30, chunkOverlap: 0, stripHeaders: false }
+    const html = `<h2>A</h2><p><a href="#a">x</a></p><p><a href="#b">z</a>${'p'.repeat(80)}</p><h2>B</h2>`
+
+    const expected = htmlToMarkdown(html, options)
+    expect(expected).toContain('[z](#b)')
+    const joined = htmlToMarkdownSplitChunks(html, options).map(chunk => chunk.content).join('')
+    expect(joined).toBe(expected)
+    expect(joined.split('[z](#b)')).toHaveLength(2)
+    expect(joined.split('](#b)')).toHaveLength(2)
+  })
+
   // Edge Cases
   describe('edge cases', () => {
     it('handles consecutive headers with no content', () => {

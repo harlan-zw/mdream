@@ -89,6 +89,19 @@ describe('clean.fragments source marker characters', () => {
     expect(md).not.toContain('\uFDD1')
   })
 
+  it('keeps code whose bytes match a span the pass wrote', () => {
+    const html = '<pre><code>&#xFDD0;[x&#xFDD1;](#y)</code></pre><p><a href="#y">x</a></p>'
+    const md = htmlToMarkdown(html, { clean: clean({ fragments: true }) })
+    expect(md).toContain('```\n\uFDD0[x\uFDD1](#y)\n```')
+    expect(md).not.toContain('```\nx\n```')
+  })
+
+  it('keeps inline code whose bytes match a span the pass wrote', () => {
+    const html = '<p><code>&#xFDD0;[x&#xFDD1;](#y)</code></p><p><a href="#y">x</a></p>'
+    const md = htmlToMarkdown(html, { clean: clean({ fragments: true }) })
+    expect(md).toContain('`\uFDD0[x\uFDD1](#y)`')
+  })
+
   it('drops a broken link whose destination carries a source marker whole', () => {
     const html = '<p><a href="#a\uFDD1b">x</a></p>'
     expect(htmlToMarkdown(html, { clean: clean({ fragments: true }) })).toBe('x')

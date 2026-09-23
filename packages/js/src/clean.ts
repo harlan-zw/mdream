@@ -171,6 +171,7 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
         if (slug)
           slugs.add(slug)
       }
+      let unresolved = -1
       for (let index = 0; index < spans.length; index++) {
         const span = spans[index]!
         // A span is `OPEN[textCLOSE](#fragment)`, so the destination starts
@@ -179,10 +180,26 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
         let end = close + 4
         while (end < span.length && span.charCodeAt(end) !== 41 && span.charCodeAt(end) !== 32)
           end++
-        if (!slugs.has(span.slice(close + 4, end)))
-          return spanStarts[index]!
+        if (!slugs.has(span.slice(close + 4, end))) {
+          unresolved = index
+          break
+        }
       }
-      return -1
+      if (unresolved === -1)
+        return -1
+      const start = spanStarts[unresolved]!
+      if (start > buffer.length)
+        return -1
+      // Character position of the span's `[` in the joined buffer. Earlier
+      // spans are all resolved, so the finished view keeps this prefix except
+      // for the leading whitespace it trims and the two markers each earlier
+      // span loses, which rebases the floor into view coordinates.
+      let position = 0
+      for (let index = 0; index < start; index++)
+        position += buffer[index]!.length
+      position -= leadingTrimmedLength(buffer)
+      position -= unresolved * 2
+      return position > 0 ? position : 0
     },
 
     finish(markdown) {
@@ -395,6 +412,89 @@ function headingSlug(text: string): string {
 
 // ── Fragments ──
 
+/** Whether `code` is whitespace `String.prototype.trimStart` removes. */
+function isTrimWhitespace(code: number): boolean {
+  return code === 32 || (code >= 9 && code <= 13) || code === 0xA0 || code === 0xFEFF
+    || code === 0x1680 || (code >= 0x2000 && code <= 0x200A) || code === 0x2028 || code === 0x2029
+    || code === 0x202F || code === 0x205F || code === 0x3000
+}
+
+/** Length of the joined prefix `trimStart` removes. */
+function leadingTrimmedLength(buffer: string[]): number {
+  let leading = 0
+  for (let index = 0; index < buffer.length; index++) {
+    const entry = buffer[index]!
+    let cursor = 0
+    while (cursor < entry.length && isTrimWhitespace(entry.charCodeAt(cursor)))
+      cursor++
+    leading += cursor
+    if (cursor < entry.length)
+      break
+  }
+  return leading
+}
+
+/** Whether `index` sits right after a newline or at the string start. */
+function isLineStart(markdown: string, index: number): boolean {
+  return index === 0 || markdown.charCodeAt(index - 1) === 10
+}
+
+/** Backtick run at a line start that opens a fence, or 0. */
+function fenceOpeningRun(markdown: string, start: number, len: number): number {
+  let i = start
+  while (i < len && markdown.charCodeAt(i) === 32)
+    i++
+  if (markdown.charCodeAt(i) !== 96)
+    return 0
+  let end = i
+  while (end < len && markdown.charCodeAt(end) === 96)
+    end++
+  return end - i >= 3 ? end - i : 0
+}
+
+/** Whether a fence opened by `run` closes on the line at `start`. */
+function fenceCloses(markdown: string, start: number, run: number, len: number): boolean {
+  let i = start
+  while (i < len && markdown.charCodeAt(i) === 32)
+    i++
+  if (markdown.charCodeAt(i) !== 96)
+    return false
+  let end = i
+  while (end < len && markdown.charCodeAt(end) === 96)
+    end++
+  if (end - i < run)
+    return false
+  while (end < len) {
+    const code = markdown.charCodeAt(end)
+    if (code === 10)
+      return true
+    if (code !== 32 && code !== 9)
+      return false
+    end++
+  }
+  return true
+}
+
+/** Position past the run of exactly `run` backticks closing a code span, or -1. */
+function inlineCodeEnd(markdown: string, from: number, run: number, len: number): number {
+  let search = from
+  while (search < len) {
+    if (markdown.charCodeAt(search) !== 96) {
+      const next = markdown.indexOf('`', search)
+      if (next === -1)
+        return -1
+      search = next
+    }
+    let end = search
+    while (end < len && markdown.charCodeAt(end) === 96)
+      end++
+    if (end - search === run)
+      return end
+    search = end
+  }
+  return -1
+}
+
 /**
  * Remove fragment links that resolve to no heading.
  *
@@ -424,12 +524,58 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
   const open = FRAGMENT_LINK_OPEN.charCodeAt(0)
   const closeCode = FRAGMENT_LINK_CLOSE.charCodeAt(0)
   const len = markdown.length
-  // Pass 1: pair markers. For each pair, the number of characters to drop
-  // from the open marker and the end of the close.
+  // Pass 1: pair markers the pass wrote. Code escapes no brackets, so a code
+  // block or span can carry bytes identical to a written span; the pass never
+  // marks links in code and code output never wraps a marked link, so markers
+  // inside a fence or code span are source bytes and pair nothing. Inside a
+  // `](...)` destination, backticks are literal, not span delimiters.
   const opens: number[] = []
   const dropAt = new Map<number, number>()
-  for (let i = next; i < len; i++) {
+  let fenceRun = 0
+  let inDestination = false
+  let i = 0
+  while (i < len) {
+    if (fenceRun > 0) {
+      // Fence content is code: scan line by line for the closing fence.
+      const newline = markdown.indexOf('\n', i)
+      const lineEnd = newline === -1 ? len : newline + 1
+      if (isLineStart(markdown, i) && fenceCloses(markdown, i, fenceRun, len))
+        fenceRun = 0
+      i = lineEnd
+      continue
+    }
     const code = markdown.charCodeAt(i)
+    if (code === 10 /* \n */) {
+      i++
+      continue
+    }
+    if (isLineStart(markdown, i)) {
+      const run = fenceOpeningRun(markdown, i, len)
+      if (run > 0) {
+        fenceRun = run
+        const newline = markdown.indexOf('\n', i)
+        i = newline === -1 ? len : newline + 1
+        continue
+      }
+    }
+    if (code === 96 /* ` */) {
+      let end = i
+      while (end < len && markdown.charCodeAt(end) === 96)
+        end++
+      const closed = inDestination ? -1 : inlineCodeEnd(markdown, end, end - i, len)
+      i = closed === -1 ? end : closed
+      continue
+    }
+    if (code === 93 /* ] */ && markdown.charCodeAt(i + 1) === 40 /* ( */) {
+      inDestination = true
+      i += 2
+      continue
+    }
+    if (inDestination && code === 41 /* ) */) {
+      inDestination = false
+      i++
+      continue
+    }
     if (code === open) {
       if (markdown.charCodeAt(i + 1) === 91 /* [ */)
         opens.push(i)
@@ -447,8 +593,10 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
           end += markdown.charCodeAt(end) === 92 /* \ */ ? 2 : 1
         end++
       }
-      if (markdown.charCodeAt(end) !== 41 /* ) */)
+      if (markdown.charCodeAt(end) !== 41 /* ) */) {
+        i++
         continue
+      }
       // Pair the close with the nearest open whose span the pass wrote. A
       // source open has no partner, so dropping a failed candidate keeps it
       // from stealing a later close.
@@ -461,14 +609,17 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
           break
         }
       }
-      if (paired === -1)
+      if (paired === -1) {
+        i++
         continue
+      }
       const start = opens[paired]!
       opens.length = paired
       const broken = !slugs.has(fragment)
       dropAt.set(start, broken ? 2 : 1)
       dropAt.set(i, broken ? end + 1 - i : 1)
     }
+    i++
   }
 
   // Pass 2: copy everything between the dropped runs. U+FDD0 and U+FDD1 are

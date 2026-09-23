@@ -51,6 +51,11 @@ function shouldSplitOnHeader(tagId: number, options: ReturnType<typeof createOpt
   return options.headersToSplitOn.includes(tagId)
 }
 
+/** Whether `code` is whitespace the converter writes between blocks. */
+function isOutputWhitespace(code: number): boolean {
+  return code === 32 || (code >= 9 && code <= 13)
+}
+
 /**
  * Get current markdown content WITHOUT clearing buffers. A held clean pass
  * finishes the view so its fragment-link markers never reach a chunk.
@@ -100,26 +105,28 @@ export function* htmlToMarkdownSplitChunksStream(
   let outputFinal = false
 
   function* flushChunk(endPosition?: number, applyOverlap = false): Generator<MarkdownChunk, void, undefined> {
-    const rawFull = processor.state.buffer.join('')
-    const rawMd = rawFull.trimStart()
-    const currentMd = processor.finishOutput ? processor.finishOutput(rawMd) : rawMd
+    const currentMd = getCurrentMarkdown(processor.state, processor.finishOutput)
     let chunkEnd = endPosition ?? currentMd.length
     // A fragment link no heading matches yet regrows when a later heading
     // resolves it, so the finished view under every recorded position moves.
     // Only a chunk ending before the earliest such link is settled; later
     // content waits for the final view.
     if (!outputFinal && processor.settledOutput) {
-      const floor = processor.settledOutput()
-      if (floor !== -1) {
-        const settled = floor - (rawFull.length - rawMd.length)
-        if (settled < chunkEnd)
-          chunkEnd = Math.max(settled, lastChunkEndPosition)
+      const settled = processor.settledOutput()
+      if (settled !== -1 && settled <= chunkEnd) {
+        chunkEnd = Math.max(settled, lastChunkEndPosition)
+        // A clamped cut keeps its trailing whitespace unconsumed: content a
+        // chunk yields is trimmed at its end, so whitespace it swallows is
+        // lost, while left in place it leads the next chunk instead.
+        while (chunkEnd > lastChunkEndPosition && isOutputWhitespace(currentMd.charCodeAt(chunkEnd - 1)))
+          chunkEnd--
       }
     }
     const originalChunkContent = currentMd.slice(lastChunkEndPosition, chunkEnd)
 
     if (!originalChunkContent.trim()) {
-      lastChunkEndPosition = chunkEnd
+      // Leave whitespace-only output unconsumed: consuming it would drop it
+      // from the chunks' join, while the next flush yields it with content.
       return
     }
 
