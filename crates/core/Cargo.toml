@@ -54,7 +54,11 @@ name = "diff_output"
 harness = false
 
 [features]
-default = ["markdown", "text", "html"]
+default = [
+  "markdown",
+  "text",
+  "html"
+]
 # Each output format is a feature. A build with one format lets the compiler
 # fold every format check to a constant and drop the other renderers.
 markdown = []
