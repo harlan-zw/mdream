@@ -1,8 +1,10 @@
 import type { ParseState } from './parse'
-import type { ElementNode, EngineOptions, GfmAction, Node, NodeEvent, PluginContext, TagHandler, TextNode, TransformPlugin } from './types'
+import type { Cleaner, ElementNode, EngineOptions, GfmAction, Node, NodeEvent, PluginContext, TagHandler, TextNode, TransformPlugin } from './types'
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
+  FRAGMENT_LINK_CLOSE_CODE,
+  FRAGMENT_LINK_OPEN_CODE,
   isInsideRawHtmlBlock,
   MARKDOWN_CODE_BLOCK,
   MARKDOWN_EMPHASIS,
@@ -716,11 +718,26 @@ function currentColumn(buffer: string[]): number {
     const s = buffer[i]!
     const nl = s.lastIndexOf('\n')
     if (nl >= 0) {
-      return col + [...s.slice(nl + 1)].length
+      return col + columnWidth(s, nl + 1)
     }
-    col += [...s].length
+    col += columnWidth(s, 0)
   }
   return col
+}
+
+/**
+ * Code points in `value` from `start`. The fragment link markers `clean`
+ * writes are removed before output, so they take no column.
+ */
+function columnWidth(value: string, start: number): number {
+  let width = 0
+  for (let i = start; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    // A low surrogate completes a pair already counted.
+    if ((code & 0xFC00) !== 0xDC00 && code !== FRAGMENT_LINK_OPEN_CODE && code !== FRAGMENT_LINK_CLOSE_CODE)
+      width++
+  }
+  return width
 }
 
 /**
@@ -1226,7 +1243,13 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   let openLinkCaptionBreakRun = 0
   let openLinkCaptionFlags: Uint8Array | undefined
   const clean = options.clean
-  const cleanEmptyLinkText = clean === true || (clean !== null && typeof clean === 'object' && clean.emptyLinkText === true)
+  const cleanRules = typeof clean === 'object' && clean !== null ? clean : undefined
+  const cleanEmptyLinkText = clean === true || cleanRules?.emptyLinkText === true
+  // The rules that rewrite links after they are written live in the Cleaner,
+  // so they stay out of bundles that never import `clean()`.
+  const cleanPass = typeof (cleanRules as Cleaner | undefined)?.apply === 'function'
+    ? (cleanRules as Cleaner).apply(state)
+    : undefined
   let rawHtmlLink: ElementNode | undefined
 
   let lastYieldedLength = 0
@@ -1236,6 +1259,22 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     return captionBoundary !== 0
       || (captionFrameCount !== 0
         && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0)
+  }
+
+  /** Track a link whose `[` sits at buffer index `fragment`. */
+  function openLink(fragment: number): void {
+    if (!cleanEmptyLinkText) {
+      openLinkFragment = -fragment - 2
+      return
+    }
+    openLinkFragment = fragment
+    openLinkCaptionBreakRun = captionBreakRun
+    const snapshot = openLinkCaptionFlags?.length === captionFrameCount
+      ? openLinkCaptionFlags
+      : new Uint8Array(captionFrameCount)
+    for (let index = 0; index < captionFrameCount; index++)
+      snapshot[index] = captionFrames![index * CAPTION_FRAME_SIZE + 2]! & CAPTION_INTERNAL_BREAK
+    openLinkCaptionFlags = snapshot
   }
 
   function pushCaptionFrame(element: ElementNode, handler: TagHandler | undefined): void {
@@ -1740,6 +1779,8 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     const suppressedInPre = (state.depthMap[TAG_PRE] || 0) > 0
       && suppressesFormattingInPre(tagId)
       && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
+    if (cleanPass && eventType === NodeEventExit)
+      cleanPass.exit(element)
     if (!output && !suppressedInPre && handler?.[eventFn]) {
       if (openLinkFragment >= 0
         && eventType === NodeEventExit
@@ -1755,6 +1796,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           openLinkFragment = -1
           return
         }
+      }
+      if (cleanPass && eventType === NodeEventExit && tagId === TAG_A && cleanPass.unwrap(element)) {
+        openLinkFragment = -1
+        return
       }
       const res = handler[eventFn]({ node: element, state })
       if (typeof res === 'string') {
@@ -2077,18 +2122,13 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       && tagId === TAG_A
       && outputStart < buff.length
       && buff.at(-1) === '[') {
-      const fragment = buff.length - 1
-      const cleanCaptionLink = captionFrameCount !== 0 && cleanEmptyLinkText
-      openLinkFragment = cleanCaptionLink ? fragment : -fragment - 2
-      if (cleanCaptionLink) {
-        openLinkCaptionBreakRun = captionBreakRun
-        const snapshot = openLinkCaptionFlags?.length === captionFrameCount
-          ? openLinkCaptionFlags
-          : new Uint8Array(captionFrameCount)
-        for (let index = 0; index < captionFrameCount; index++)
-          snapshot[index] = captionFrames![index * CAPTION_FRAME_SIZE + 2]! & CAPTION_INTERNAL_BREAK
-        openLinkCaptionFlags = snapshot
-      }
+      openLink(buff.length - 1)
+    }
+    if (cleanPass) {
+      if (eventType === NodeEventEnter)
+        cleanPass.enter(element, outputStart)
+      else if (handlerOutput)
+        cleanPass.closed(element, outputStart, handlerOutput)
     }
 
     // Track open inline markers for empty pair detection. Inline code in a
@@ -2158,7 +2198,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // and a stream cannot take back a nbsp it already yielded.
     const result = trimAsciiWhitespaceEnd(trimOutputStart(state.buffer.join('')))
     state.buffer.length = 0
-    return result
+    return cleanPass ? cleanPass.finish(result) : result
   }
 
   /**
@@ -2168,6 +2208,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
    * getMarkdown's hold-free join.
    */
   function getMarkdownChunk(final = false): string {
+    // A fragment link resolves against headings that may come later, so
+    // `fragments` holds the whole document back, as Rust does.
+    if (cleanPass?.holdsOutput)
+      return final ? getMarkdown() : ''
     // Settle an open marker-line guard when the item's first content already
     // answers it, so the hold below never outlives the marker's own line.
     let unresolvedCaptionFragment = -1
@@ -2181,6 +2225,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         }
       }
     }
+    // A link with no visible text yet may still be dropped by
+    // `emptyLinkText`, leaving the item empty, so it cannot answer the guard.
+    if (openLinkFragment >= 0 && (unresolvedCaptionFragment === -1 || openLinkFragment < unresolvedCaptionFragment))
+      unresolvedCaptionFragment = openLinkFragment
     resolveItemMarker(state, false, unresolvedCaptionFragment)
     const content = state.buffer.join('')
     const currentContent = hasYieldedContent ? content : trimOutputStart(content)
@@ -2229,6 +2277,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           state.codeFence?.fragment ?? Infinity,
           openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
         )
+    // An open link can still be unwrapped at its close.
+    if (cleanPass && !final)
+      heldFragment = Math.min(heldFragment, cleanPass.held())
     // Every open quote rewrites from its own fragment at exit, so the earliest
     // frame bounds the hold. Malformed trees can push a later frame at a
     // smaller fragment, so scan rather than reading the first frame only.
@@ -2265,7 +2316,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // closes) until the heading is complete.
     const headingHeld = !final && isInsideHeading(state.depthMap)
     if (headingHeld) {
-      let headingPos = currentContent.length
+      // Scan back from what would be released: held content after it, such
+      // as a link `emptyLinkText` may drop, can leave the run at the end.
+      let headingPos = stableLength
       while (headingPos > 0) {
         const code = currentContent.charCodeAt(headingPos - 1)
         if (code !== 35 && code !== 32 && code !== 9) // # space tab
@@ -2333,5 +2386,18 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     getMarkdown,
     getMarkdownChunk,
     state,
+    // Markers the fragments pass writes are only resolved on the finished
+    // whole document, which `holdsOutput` gates. Output readers that bypass
+    // getMarkdown, like the splitter, finish their views through this.
+    finishOutput: cleanPass?.holdsOutput
+      ? (markdown: string) => cleanPass.finish(markdown)
+      : undefined,
+    // Position in the finished view through which output can no longer
+    // change: a link no heading matches yet regrows when one arrives, moving
+    // every later position. Position-based readers must not cut past it.
+    // -1 when nothing written can still change.
+    settledOutput: cleanPass?.holdsOutput
+      ? () => cleanPass.settled()
+      : undefined,
   }
 }

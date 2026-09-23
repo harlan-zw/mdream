@@ -1,4 +1,5 @@
-import { TAG_H1, TAG_H2 } from '@mdream/js'
+import { htmlToMarkdown, TAG_H1, TAG_H2 } from '@mdream/js'
+import { clean } from '@mdream/js/clean'
 import { withMinimalPreset } from '@mdream/js/preset/minimal'
 import { htmlToMarkdownSplitChunks, htmlToMarkdownSplitChunksStream } from '@mdream/js/splitter'
 import { describe, expect, it } from 'vitest'
@@ -288,6 +289,49 @@ describe('htmlToMarkdownSplitChunks', () => {
   it('handles empty HTML', () => {
     const chunks = htmlToMarkdownSplitChunks('')
     expect(chunks).toEqual([])
+  })
+
+  it('finishes fragment links through the clean pass', () => {
+    const options = { clean: clean() }
+
+    const brokenHtml = '<p><a href="#nope">f</a></p>'
+    expect(htmlToMarkdown(brokenHtml, options)).toBe('f')
+    const brokenChunks = htmlToMarkdownSplitChunks(brokenHtml, options)
+    expect(brokenChunks.map(chunk => chunk.content).join('')).toBe('f')
+    for (const chunk of brokenChunks) {
+      expect(chunk.content).not.toContain('\uFDD0')
+      expect(chunk.content).not.toContain('\uFDD1')
+    }
+
+    const resolvedHtml = '<p><a href="#real">f</a></p><h1>Real</h1>'
+    const resolvedOptions = { ...options, stripHeaders: false }
+    const resolvedChunks = htmlToMarkdownSplitChunks(resolvedHtml, resolvedOptions)
+    expect(resolvedChunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(resolvedHtml, resolvedOptions))
+    for (const chunk of resolvedChunks) {
+      expect(chunk.content).not.toContain('\uFDD0')
+      expect(chunk.content).not.toContain('\uFDD1')
+    }
+  })
+
+  it('does not split on a view a pending fragment link still rewrites', () => {
+    const options = { clean: clean(), stripHeaders: false }
+    const html = '<p><a href="#s2">go</a></p><h2>One</h2><p>a</p><h2>S2</h2><p>y</p>'
+
+    expect(htmlToMarkdown(html, options)).toBe('[go](#s2)\n\n## One\n\na\n\n## S2\n\ny')
+    const chunks = htmlToMarkdownSplitChunks(html, options)
+    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, options))
+  })
+
+  it('measures settled flush floors in the finished fragment view', () => {
+    const options = { clean: clean({ fragments: true }), chunkSize: 30, chunkOverlap: 0, stripHeaders: false }
+    const html = `<h2>A</h2><p><a href="#a">x</a></p><p><a href="#b">z</a>${'p'.repeat(80)}</p><h2>B</h2>`
+
+    const expected = htmlToMarkdown(html, options)
+    expect(expected).toContain('[z](#b)')
+    const joined = htmlToMarkdownSplitChunks(html, options).map(chunk => chunk.content).join('')
+    expect(joined).toBe(expected)
+    expect(joined.split('[z](#b)')).toHaveLength(2)
+    expect(joined.split('](#b)')).toHaveLength(2)
   })
 
   // Edge Cases

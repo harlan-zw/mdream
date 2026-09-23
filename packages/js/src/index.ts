@@ -5,7 +5,16 @@ import { streamHtmlToMarkdown as _streamHtmlToMarkdown } from './stream'
 import { buildTagOverrideHandlers } from './tag-overrides'
 import { tagHandlers } from './tags'
 
-function convert(html: string, options: MdreamOptions): string {
+// `clean: true` and plain rule objects were the v1 API. Fail loudly instead
+// of silently skipping the `fragments` pass they cannot run.
+function checkClean(options: Partial<MdreamOptions>): void {
+  const clean = options.clean
+  if (clean && typeof clean.apply !== 'function')
+    throw new TypeError('The clean option needs cleanup rules from clean(). Import it from \'@mdream/js/clean\'.')
+}
+
+export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
+  checkClean(options)
   const tagOverrideHandlers = options.tagOverrides
     ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
     : undefined
@@ -14,20 +23,11 @@ function convert(html: string, options: MdreamOptions): string {
   return processor.getMarkdown()
 }
 
-export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
-  const markdown = convert(html, options)
-  const clean = options.clean
-  if (!clean)
-    return markdown
-  if (typeof clean.apply !== 'function')
-    throw new TypeError('The clean option needs cleanup rules from clean(). Import it from \'@mdream/js/clean\'.')
-  return clean.apply(markdown)
-}
-
 export function streamHtmlToMarkdown(
   htmlStream: ReadableStream<Uint8Array | string> | null,
   options: Partial<MdreamOptions> = {},
 ): AsyncIterable<string> {
+  checkClean(options)
   const tagOverrideHandlers = options.tagOverrides
     ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
     : undefined

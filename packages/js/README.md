@@ -51,7 +51,7 @@ The `format` option is removed. Import the converter for the format.
 
 The text and HTML converters accept `origin`, `plugins`, and `tagOverrides`.
 `htmlToText` also accepts `wrapWidth`.
-Both apply the `urls` and `emptyImages` rules from `clean`. They skip the Markdown post-processing pass, as in v1.
+Both apply the `urls` and `emptyImages` rules from `clean`. The other rules change Markdown links, so these converters skip them, as in v1.
 The CLI `--format` flag is unchanged.
 `frontmatterPlugin` now writes YAML frontmatter to Markdown output only.
 In v1, safe HTML output started with a YAML block. This also applies to `--preset minimal --format html`.
@@ -124,7 +124,7 @@ In v1, the built-in plugins always ran first, in this order: frontmatter, isolat
 ### Cleanup
 
 The `clean` option now takes the result of `clean()` from `@mdream/js/clean`.
-The Markdown cleanup pass is only in your bundle when you import it.
+The cleanup code is only in your bundle when you import it.
 
 | v1 | v2 |
 |---|---|
@@ -139,7 +139,11 @@ The Markdown cleanup pass is only in your bundle when you import it.
 + htmlToMarkdown(html, { clean: clean() })
 ```
 
-If `htmlToMarkdown` gets `clean: true` or a plain rules object, it throws a `TypeError`.
+The rules now act on the links and images that the converter writes, as in the Rust engine.
+Escaped brackets and code keep their text, and `streamHtmlToMarkdown` applies the rules too.
+With `fragments`, a stream yields all output when the document ends, because a link can point to a later heading.
+
+If `htmlToMarkdown` or `streamHtmlToMarkdown` gets `clean: true` or a plain rules object, it throws a `TypeError`.
 `withMinimalPreset` still enables all cleanup by default. To turn it off, pass `clean: false`.
 
 ### Plugin instances
@@ -275,7 +279,7 @@ const markdown = htmlToMarkdown(html, {
 | `origin` | `string` | `undefined` | Origin URL for resolving relative image paths and internal links |
 | `plugins` | `Plugin[]` | `undefined` | Explicit conversion plugins, applied in array order |
 | `tagOverrides` | `Record<string, TagOverride \| string>` | `undefined` | Custom tag output or aliases |
-| `clean` | `Cleaner` | `undefined` | Cleanup rules from `clean()` in `@mdream/js/clean` (see [CleanOptions](#cleanoptions)). The post-processing rules run in the sync API only. |
+| `clean` | `Cleaner` | `undefined` | Cleanup rules from `clean()` in `@mdream/js/clean` (see [CleanOptions](#cleanoptions)). Streams apply them too. With `fragments`, a stream yields all output at the end. |
 | `wrapWidth` | `number` | `undefined` | Hard-wrap prose at this many characters on word boundaries |
 
 ### `TagOverride`
@@ -307,8 +311,8 @@ htmlToMarkdown(html, { clean: clean({ urls: true, fragments: true }) })
 | `fragments` | `boolean` | `false` | Strip fragment-only links that do not match any heading slug in the output |
 | `emptyLinks` | `boolean` | `false` | Strip links with meaningless hrefs (`#`, `javascript:void(0)`, `data:`, `vbscript:`) and replace with plain text |
 | `blankLines` | `boolean` | `false` | Collapse 3+ consecutive blank lines to 2 |
-| `redundantLinks` | `boolean` | `false` | Strip links where text equals URL: `[https://x.com](https://x.com)` becomes `https://x.com` |
-| `selfLinkHeadings` | `boolean` | `false` | Strip self-referencing heading anchors: `## [Title](#title)` becomes `## Title` |
+| `redundantLinks` | `boolean` | `false` | Strip links where text equals URL, with or without a title: `[https://x.com](https://x.com)` becomes `https://x.com` |
+| `selfLinkHeadings` | `boolean` | `false` | Strip fragment links inside headings, such as permalink anchors: `## [Title](#title)` becomes `## Title` |
 | `emptyImages` | `boolean` | `false` | Strip images with no alt text (decorative images, tracking pixels) |
 | `emptyLinkText` | `boolean` | `false` | Drop links that produce no visible text: `[](url)` is removed entirely |
 

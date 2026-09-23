@@ -710,13 +710,10 @@ export const tagHandlers: Record<number, TagHandler> = {
       const clean = state.options?.clean
       const stripsEmptyImage = clean === true
         || (clean !== undefined && clean !== false && clean.emptyImages === true)
-      if (stripsEmptyImage && !alt.trim()) {
-        if (state.depthMap?.[TAG_FIGCAPTION])
-          return undefined
-      }
-      else {
-        markRenderedChildContent(node)
-      }
+      // Like Rust, an image with no alt text writes nothing, not even spacing.
+      if (stripsEmptyImage && !alt.trim())
+        return undefined
+      markRenderedChildContent(node)
       return `![${serializeImageDescription(alt)}]${serializeMarkdownResource(src, node.attributes?.title)}`
     },
     collapsesInnerWhiteSpace: true,

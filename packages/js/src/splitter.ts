@@ -51,11 +51,18 @@ function shouldSplitOnHeader(tagId: number, options: ReturnType<typeof createOpt
   return options.headersToSplitOn.includes(tagId)
 }
 
+/** Whether `code` is whitespace the converter writes between blocks. */
+function isOutputWhitespace(code: number): boolean {
+  return code === 32 || (code >= 9 && code <= 13)
+}
+
 /**
- * Get current markdown content WITHOUT clearing buffers
+ * Get current markdown content WITHOUT clearing buffers. A held clean pass
+ * finishes the view so its fragment-link markers never reach a chunk.
  */
-function getCurrentMarkdown(state: { buffer: string[] }): string {
-  return state.buffer.join('').trimStart()
+function getCurrentMarkdown(state: { buffer: string[] }, finishOutput?: (markdown: string) => string): string {
+  const markdown = state.buffer.join('').trimStart()
+  return finishOutput ? finishOutput(markdown) : markdown
 }
 
 /**
@@ -93,14 +100,33 @@ export function* htmlToMarkdownSplitChunksStream(
   let lineNumber = 1
   let lastChunkEndPosition = 0
   let lastSplitPosition = 0
+  // The last flush runs against the finished document, where the clean pass
+  // has resolved every fragment link, so no position can go stale.
+  let outputFinal = false
 
   function* flushChunk(endPosition?: number, applyOverlap = false): Generator<MarkdownChunk, void, undefined> {
-    const currentMd = getCurrentMarkdown(processor.state)
-    const chunkEnd = endPosition ?? currentMd.length
+    const currentMd = getCurrentMarkdown(processor.state, processor.finishOutput)
+    let chunkEnd = endPosition ?? currentMd.length
+    // A fragment link no heading matches yet regrows when a later heading
+    // resolves it, so the finished view under every recorded position moves.
+    // Only a chunk ending before the earliest such link is settled; later
+    // content waits for the final view.
+    if (!outputFinal && processor.settledOutput) {
+      const settled = processor.settledOutput()
+      if (settled !== -1 && settled <= chunkEnd) {
+        chunkEnd = Math.max(settled, lastChunkEndPosition)
+        // A clamped cut keeps its trailing whitespace unconsumed: content a
+        // chunk yields is trimmed at its end, so whitespace it swallows is
+        // lost, while left in place it leads the next chunk instead.
+        while (chunkEnd > lastChunkEndPosition && isOutputWhitespace(currentMd.charCodeAt(chunkEnd - 1)))
+          chunkEnd--
+      }
+    }
     const originalChunkContent = currentMd.slice(lastChunkEndPosition, chunkEnd)
 
     if (!originalChunkContent.trim()) {
-      lastChunkEndPosition = chunkEnd
+      // Leave whitespace-only output unconsumed: consuming it would drop it
+      // from the chunks' join, while the next flush yields it with content.
       return
     }
 
@@ -236,7 +262,7 @@ export function* htmlToMarkdownSplitChunksStream(
     processResolvedEvent(event)
 
     if (!opts.returnEachLine) {
-      const currentMd = getCurrentMarkdown(processor.state)
+      const currentMd = getCurrentMarkdown(processor.state, processor.finishOutput)
       const currentChunkSize = opts.lengthFunction(currentMd.slice(lastChunkEndPosition))
 
       if (currentChunkSize > opts.chunkSize) {
@@ -277,6 +303,7 @@ export function* htmlToMarkdownSplitChunksStream(
   }
 
   endPlugins(opts.resolvedPlugins, processor.state)
+  outputFinal = true
   yield* flushChunk()
 }
 

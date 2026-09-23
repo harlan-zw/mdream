@@ -85,13 +85,52 @@ export interface CleanOptions {
   emptyLinkText?: boolean
 }
 
+/** Converter state a `CleanPass` reads and rewrites. */
+export interface CleanTarget {
+  /** Markdown written so far, one entry per write. */
+  buffer: string[]
+  /** Open element count per tag id. */
+  depthMap: Uint16Array
+  /** The last buffer entry the converter wrote. */
+  lastContentCache?: string
+  options?: EngineOptions
+}
+
 /**
- * Cleanup rules with the Markdown post-processing pass that applies them.
+ * Cleanup for one conversion. The converter calls these hooks; they rewrite
+ * links after the converter writes them.
+ */
+export interface CleanPass {
+  /** Output waits for the whole document, because `fragments` needs every heading. */
+  holdsOutput: boolean
+  /** An element's enter output starts at `outputStart` in the buffer. */
+  enter: (element: ElementNode, outputStart: number) => void
+  /** An element exits; called before its exit output. */
+  exit: (element: ElementNode) => void
+  /** Rewrite the closing anchor to its text and skip its close. Returns true when it did. */
+  unwrap: (element: ElementNode) => boolean
+  /** An element wrote its exit output `close` at `outputStart`. */
+  closed: (element: ElementNode, outputStart: number, close: string) => void
+  /** The earliest buffer index a later hook may rewrite, or Infinity. */
+  held: () => number
+  /**
+   * Position in the finished view (the Markdown `finish` produces from the
+   * trimmed buffer) of the earliest marked link no heading matches yet, or
+   * -1 when every marked link is resolved. A still-unresolved link regrows
+   * when a later heading matches its slug, moving every later position.
+   */
+  settled: () => number
+  /** Apply the rules that need the whole document to the finished Markdown. */
+  finish: (markdown: string) => string
+}
+
+/**
+ * Cleanup rules and the pass that applies them.
  * Create one with `clean()` from `@mdream/js/clean`.
  */
 export interface Cleaner extends CleanOptions {
-  /** Apply the post-processing rules to converted Markdown. */
-  apply: (markdown: string) => string
+  /** Start cleanup for one conversion. Returns nothing when no rule rewrites links. */
+  apply: (target: CleanTarget) => CleanPass | undefined
 }
 
 /** Core conversion options. */
@@ -106,8 +145,8 @@ export interface EngineOptions {
 
   /**
    * Clean up the markdown output. Pass `true` for all cleanup or an object
-   * to enable specific features. Operates as a post-processing step on the
-   * final markdown (sync API only for `fragments`).
+   * to enable specific features. The rules apply to the link and image nodes
+   * as they convert; `fragments` also needs `apply` from a `Cleaner`.
    */
   clean?: boolean | CleanOptions
 
@@ -412,7 +451,7 @@ export interface PluginContext {
 export interface MdreamOptions extends Omit<EngineOptions, 'clean'> {
   /**
    * Cleanup rules from `clean()` in `@mdream/js/clean`. Import it only when
-   * you use it, so the post-processing pass stays out of other bundles.
+   * you use it, so the cleanup pass stays out of other bundles.
    */
   clean?: Cleaner
   /** Explicit plugins, applied in array order. */
