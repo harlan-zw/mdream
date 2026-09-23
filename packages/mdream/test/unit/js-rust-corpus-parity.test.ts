@@ -19,26 +19,20 @@ const JS: Record<Format, (html: string) => string> = {
 const KNOWN_DIFFERENCES = new Set<string>([
   ['text', '<ul><li>a<ul><li>b<ol><li>c</li><li>d<p>para</p></li></ol></li></ul></li><li>e</li></ul>'],
   ['text', '<blockquote><p>q1</p><blockquote><p>q2</p><pre>p</pre></blockquote><p>q3</p></blockquote>'],
-  ['markdown', '<pre>  lead\n\ttab\n\n  end  </pre>'],
-  ['markdown', '<div><p>a</div>b</p>c'],
-  ['text', '<div><p>a</div>b</p>c'],
   ['text', '<p>a</x></p><<p>>b</p><p attr="unterminated>c</p>'],
   ['markdown', '<select><option>a</option><option>b</option></select><textarea>t <b>x</b></textarea><button>btn</button><input value="v">'],
   ['text', '<html><head><title>T: "q" \\ b</title><meta name="description" content="Desc # x"><meta property="og:title" content="OG"></head><body><header>hdr</header><main><h1>M</h1><p class="font-bold">bold tw</p><form>f</form></main><aside>as</aside></body></html>'],
-  ['markdown', '<svg><text>svg text</text></svg><math><mi>x</mi></math>'],
-  ['text', '<svg><text>svg text</text></svg><math><mi>x</mi></math>'],
-  ['markdown', '<custom-el>custom</custom-el><x-heading>xh</x-heading>'],
-  ['text', '<custom-el>custom</custom-el><x-heading>xh</x-heading>'],
   ['text', '<table><caption>Cap</caption><tr><th>h</th></tr><tr><td>|pipe|</td></tr></table>'],
   ['markdown', '<pre>a<b>bold</b>\n<br>after br</pre>'],
   ['text', '<pre>a<b>bold</b>\n<br>after br</pre>'],
-  ['markdown', '<pre>x\n  </pre><p>After</p>'],
   ['text', '<pre>x\n  </pre><p>After</p>'],
-  ['markdown', '<p>x<x-v>>y</x-v></p>'],
-  ['text', '<p>x<x-v>>y</x-v></p>'],
-  ['markdown', 'a<br> b'],
-  ['text', 'a<br> b'],
   ['text', '<html><head><title>A</title><meta name="description" content="da"></head><body><header>x</header><h1>A</h1><p>a</p><footer>f</footer></body></html>'],
+  // Rust leaves `<` in rawtext unescaped in Markdown.
+  ['markdown', '<textarea>a</tx>b'],
+  ['markdown', '<textarea>a</textarea'],
+  // Rust closes the outer fence at a <pre> nested in a <pre>.
+  ['markdown', '<pre><li><pre><li><blockquote>x<code>'],
+  ['markdown', '<pre><li><pre><li><blockquote>x<li>'],
 ].map(([format, html]) => `${format}\u0000${html}`))
 
 describe('javaScript and Rust engines agree on the corpus', () => {

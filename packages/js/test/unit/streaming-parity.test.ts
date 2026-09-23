@@ -729,6 +729,14 @@ describe('streaming parity with the Rust core', () => {
     await expectStreamingParity('<p>a<q></q>b</p>', { format: 'text' })
   })
 
+  it('holds the whitespace before a retracting quotation opener in a text stream', async () => {
+    const html = 'a <q></q>'
+    const expected = htmlToText(html)
+    expect(expected).toBe('a')
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize, { format: 'text' }), `chunk size ${chunkSize}`).toBe(expected)
+  })
+
   it('drops the trailing newlines of a final pre in a text stream', async () => {
     await expectStreamingParity('<pre><code>alpha\n\n</code></pre>', { format: 'text' })
   })

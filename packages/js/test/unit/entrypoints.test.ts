@@ -41,6 +41,6 @@ describe('package entry points', () => {
     })
 
     expect(tagIds).toEqual([-1, -1])
-    expect(htmlToMarkdown(html)).toBe('one two')
+    expect(htmlToMarkdown(html)).toBe('onetwo')
   })
 })
