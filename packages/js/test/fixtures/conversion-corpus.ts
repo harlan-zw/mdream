@@ -103,4 +103,7 @@ export const CONVERSION_CORPUS: string[] = [
   `<h2>Q<a href="#q">#</a></h2>`,
   `<p>x <a href="/a?utm_source=1">l</a> <a href="#nope">f</a></p>`,
   `<h2>Intro</h2><p><a href="#intro">up</a> <a href="#nope">gone</a></p>`,
+  `<li><h3><a href=/u>`,
+  `<li><li><a href="x"></li>`,
+  `<h3>a #<em>`,
 ]

@@ -2098,6 +2098,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         }
       }
     }
+    // A link with no visible text yet may still be dropped by
+    // `emptyLinkText`, leaving the item empty, so it cannot answer the guard.
+    if (openLinkFragment >= 0 && (unresolvedCaptionFragment === -1 || openLinkFragment < unresolvedCaptionFragment))
+      unresolvedCaptionFragment = openLinkFragment
     resolveItemMarker(state, false, unresolvedCaptionFragment)
     const content = state.buffer.join('')
     const currentContent = hasYieldedContent ? content : content.trimStart()
@@ -2170,7 +2174,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // closes) until the heading is complete.
     const headingHeld = isInsideHeading(state.depthMap)
     if (headingHeld) {
-      let headingPos = currentContent.length
+      // Scan back from what would be released: held content after it, such
+      // as a link `emptyLinkText` may drop, can leave the run at the end.
+      let headingPos = stableLength
       while (headingPos > 0) {
         const code = currentContent.charCodeAt(headingPos - 1)
         if (code !== 35 && code !== 32 && code !== 9) // # space tab
