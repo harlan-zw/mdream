@@ -522,10 +522,14 @@ impl ConvertState {
     let mut text = std::mem::take(text_buffer);
     let mut tailwind_prefix = None;
     let mut tailwind_suffix = None;
+    // An `html` stream hands out its whole buffer each chunk, so an empty buffer
+    // there only means a document start when nothing was yielded before it.
     let is_first_text_in_block = first_block_child_text_count == 0
       && (first_block_parent_index.is_some()
-        || self.buffer.is_empty()
-        || self.buffer.as_bytes().last() == Some(&b'\n'));
+        || match self.buffer.as_bytes().last() {
+          Some(&last) => last == b'\n',
+          None => self.format != OutputFormat::Html || self.flushed_tail[1] == b'\n',
+        });
     if contains_whitespace && is_first_text_in_block {
       let mut start = 0;
       let bytes = text.as_bytes();

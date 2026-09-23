@@ -2,6 +2,7 @@ import type { HtmlToMarkdownOptions } from '../napi/index.js'
 import { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream, initSync } from '../wasm/mdream_edge.js'
 import wasmModule from '../wasm/mdream_edge_bg.wasm'
 import { resolveOptions } from './resolve-options.js'
+import { createSurrogateCarry } from './surrogate-carry.js'
 import { wasmPanicError } from './wasm-panic.js'
 
 // Edge runtimes (workerd, edge-light) resolve `.wasm` imports to a compiled
@@ -35,6 +36,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): s
 
 export class MarkdownStream {
   private _inner: _MarkdownStream
+  private _carry = createSurrogateCarry()
 
   constructor(options?: HtmlToMarkdownOptions) {
     try {
@@ -47,7 +49,7 @@ export class MarkdownStream {
 
   processChunk(chunk: string): string {
     try {
-      return this._inner.processChunk(chunk)
+      return this._inner.processChunk(this._carry.take(chunk))
     }
     catch (error) {
       throw wasmPanicError(error)
@@ -56,7 +58,10 @@ export class MarkdownStream {
 
   processChunkBytes(chunk: Uint8Array): string {
     try {
-      return this._inner.processChunkBytes(chunk)
+      const held = this._carry.flush()
+      return held
+        ? this._inner.processChunk(held) + this._inner.processChunkBytes(chunk)
+        : this._inner.processChunkBytes(chunk)
     }
     catch (error) {
       throw wasmPanicError(error)
@@ -65,7 +70,10 @@ export class MarkdownStream {
 
   finish(): string {
     try {
-      return this._inner.finish()
+      const held = this._carry.flush()
+      return held
+        ? this._inner.processChunk(held) + this._inner.finish()
+        : this._inner.finish()
     }
     catch (error) {
       throw wasmPanicError(error)
@@ -82,18 +90,25 @@ export async function* streamHtmlToMarkdown(
   // the raw binding, wrapped once below rather than once per chunk
   const stream = new _MarkdownStream(options ? resolveOptions(options).napiOpts : undefined)
   const reader = htmlStream.getReader()
+  const carry = createSurrogateCarry()
   try {
     while (true) {
       const { done, value } = await reader.read()
       if (done)
         break
-      const processed = typeof value === 'string'
-        ? stream.processChunk(value)
-        : stream.processChunkBytes(value)
+      let processed: string
+      if (typeof value === 'string') {
+        processed = stream.processChunk(carry.take(value))
+      }
+      else {
+        const held = carry.flush()
+        processed = (held ? stream.processChunk(held) : '') + stream.processChunkBytes(value)
+      }
       if (processed)
         yield processed
     }
-    const final_ = stream.finish()
+    const held = carry.flush()
+    const final_ = (held ? stream.processChunk(held) : '') + stream.finish()
     if (final_)
       yield final_
   }

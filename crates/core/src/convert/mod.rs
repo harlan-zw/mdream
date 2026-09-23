@@ -678,7 +678,8 @@ pub struct ConvertState {
   has_streamed_output: bool,
   /// Two bytes immediately before the retained buffer, initialized as virtual
   /// newlines at the document start. When a later rewrite trims the buffer
-  /// empty, spacing and newline counts still see the one-shot context.
+  /// empty, spacing and newline counts still see the one-shot context. An
+  /// `html` stream keeps its last yielded byte in `[1]` for the same reason.
   flushed_tail: [u8; 2],
   /// Output column immediately before `buffer[0]`. Draining may remove the
   /// beginning of the current line, but wrapping still needs its full column.
@@ -2091,6 +2092,9 @@ impl ConvertState {
 
   pub fn get_markdown_chunk(&mut self) -> String {
     if self.format == OutputFormat::Html {
+      if let Some(&last) = self.buffer.as_bytes().last() {
+        self.flushed_tail[1] = last;
+      }
       return std::mem::take(&mut self.buffer);
     }
     if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 {
