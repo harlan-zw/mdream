@@ -88,4 +88,19 @@ describe('clean.fragments source marker characters', () => {
     expect(md).toContain('[kept](#real)')
     expect(md).not.toContain('\uFDD1')
   })
+
+  it('drops a broken link whose destination carries a source marker whole', () => {
+    const html = '<p><a href="#a\uFDD1b">x</a></p>'
+    expect(htmlToMarkdown(html, { clean: clean({ fragments: true }) })).toBe('x')
+  })
+
+  it('drops a broken link whose destination carries a source open marker whole', () => {
+    const html = '<p><a href="#a\uFDD0b">x</a></p>'
+    expect(htmlToMarkdown(html, { clean: clean({ fragments: true }) })).toBe('x')
+  })
+
+  it('drops a broken link whose title carries a source marker whole', () => {
+    const html = '<p><a href="#a" title="t\uFDD1b">x</a></p>'
+    expect(htmlToMarkdown(html, { clean: clean({ fragments: true }) })).toBe('x')
+  })
 })

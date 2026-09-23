@@ -452,8 +452,13 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
   let result = ''
   let copied = 0
   while (next !== -1 && next < len) {
-    result += markdown.slice(copied, next)
-    copied = next + (dropAt.get(next) ?? 0)
+    // A marker a dropped run already swallowed is source text pass 1 never
+    // paired: skip it, else `copied` moves backwards and resurrects the tail
+    // of a dropped destination or title.
+    if (next >= copied) {
+      result += markdown.slice(copied, next)
+      copied = next + (dropAt.get(next) ?? 0)
+    }
     const nextOpen = markdown.indexOf(FRAGMENT_LINK_OPEN, next + 1)
     const nextClose = markdown.indexOf(FRAGMENT_LINK_CLOSE, next + 1)
     next = nextOpen === -1 ? nextClose : nextClose === -1 ? nextOpen : Math.min(nextOpen, nextClose)

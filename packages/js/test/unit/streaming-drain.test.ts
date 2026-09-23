@@ -56,6 +56,7 @@ describe('streaming drain parity', () => {
     '<p>text with <a href="/x">a [bracket] link</a> end</p>',
     '<ol><li>one<pre><code>cmd</code></pre></li><li>two</li></ol>',
     '<ul><li>one<pre><code>cmd</code></pre></li><li>two</li></ul>',
+    '<ul><li><pre><li><blockquote>x<code>',
     '<summary>text <svg></svg></summary>',
     '<details><summary>text <svg><polyline points="1 2"></polyline></svg></summary><p>b</p></details>',
     '<h3>Set priority</h3><a class="anchor-link" href="#x"></a><p>The value.</p>',
