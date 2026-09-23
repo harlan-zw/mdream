@@ -1,6 +1,7 @@
 import type { MdreamOptions } from './types'
 import { applyClean, resolveClean } from './clean'
 import { createMarkdownProcessor } from './markdown-processor'
+import { resolvePlugins } from './pluggable/plugin'
 import { streamHtmlToMarkdown as _streamHtmlToMarkdown } from './stream'
 import { buildTagOverrideHandlers } from './tag-overrides'
 import { tagHandlers } from './tags'
@@ -9,7 +10,7 @@ function convert(html: string, options: MdreamOptions): string {
   const tagOverrideHandlers = options.tagOverrides
     ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
     : undefined
-  const processor = createMarkdownProcessor(options, options.plugins, tagOverrideHandlers)
+  const processor = createMarkdownProcessor(options, resolvePlugins(options.plugins), tagOverrideHandlers)
   processor.processHtml(html)
   return processor.getMarkdown()
 }
@@ -28,23 +29,24 @@ export function streamHtmlToMarkdown(
   const tagOverrideHandlers = options.tagOverrides
     ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
     : undefined
-  return _streamHtmlToMarkdown(htmlStream, options, options.plugins, tagOverrideHandlers)
+  return _streamHtmlToMarkdown(htmlStream, options, resolvePlugins(options.plugins), tagOverrideHandlers)
 }
 
 export { ELEMENT_NODE, NodeEventEnter, NodeEventExit, TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6, TEXT_NODE } from './const'
 export { createPlugin } from './pluggable/plugin'
+export type { ExtractedElement } from './plugins/extraction'
 export type { MdreamOptions } from './types'
 export type {
   CleanOptions,
   ElementNode,
   EngineOptions,
-  ExtractedElement,
   MarkdownChunk,
   Node,
   NodeEvent,
   OutputFormat,
   Plugin,
   PluginContext,
+  PluginSetup,
   SplitterOptions,
   TagOverride,
   TextNode,

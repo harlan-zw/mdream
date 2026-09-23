@@ -1,6 +1,6 @@
-import type { EngineOptions, ExtractedElement, MdreamOptions, TagOverride, TransformPlugin } from '@mdream/js'
+import type { EngineOptions, MdreamOptions, TagOverride, TransformPlugin } from '@mdream/js'
 import type { FrontmatterPluginOptions } from '@mdream/js/plugins'
-import type { MdreamOptions as RustMdreamOptions } from '../../src'
+import type { ExtractedElement, MdreamOptions as RustMdreamOptions } from '../../src'
 import { htmlToMarkdown as jsHtmlToMarkdown, streamHtmlToMarkdown as jsStreamHtmlToMarkdown } from '@mdream/js'
 import { htmlToSafeHtml as jsHtmlToSafeHtml, streamHtmlToSafeHtml as jsStreamHtmlToSafeHtml } from '@mdream/js/html'
 import { extractionPlugin, filterPlugin, frontmatterPlugin, isolateMainPlugin, tailwindPlugin } from '@mdream/js/plugins'
@@ -193,7 +193,7 @@ function toJsOptions(options?: TestOptions): MdreamOptions {
 
   const { format: _format, hooks, plugins: configuredPlugins, ...conversionOptions } = options
   const builtinPlugins = Array.isArray(configuredPlugins) ? undefined : configuredPlugins
-  const plugins = [...(hooks ?? []), ...(Array.isArray(configuredPlugins) ? configuredPlugins : [])]
+  const plugins = Array.isArray(configuredPlugins) ? [...configuredPlugins] : []
 
   if (builtinPlugins?.frontmatter) {
     const frontmatter = builtinPlugins.frontmatter
@@ -220,6 +220,9 @@ function toJsOptions(options?: TestOptions): MdreamOptions {
     ]))
     plugins.push(extractionPlugin(selectors))
   }
+  // v1 ran hooks after the declarative built-ins.
+  if (hooks)
+    plugins.push(...hooks)
 
   return {
     ...conversionOptions,

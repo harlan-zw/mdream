@@ -37,7 +37,14 @@ export interface TransformPlugin {
   ) => { content: string, skip: boolean } | undefined
 }
 
-export type Plugin = TransformPlugin
+/**
+ * Creates fresh hooks for one conversion. Use it for a plugin that keeps
+ * per-document state, so a reused or concurrent plugin never shares that state.
+ */
+export type PluginSetup = () => TransformPlugin
+
+/** Hooks shared by every conversion, or a setup that creates them per conversion. */
+export type Plugin = TransformPlugin | PluginSetup
 export type OutputFormat = 'markdown' | 'text' | 'html'
 
 /**
@@ -377,20 +384,6 @@ export interface PluginContext {
   tailwind?: TailwindContext
   // Allow additional plugin-specific data
   [key: string]: unknown
-}
-
-/**
- * Element extracted during conversion by the extraction plugin.
- */
-export interface ExtractedElement {
-  /** The CSS selector that matched this element */
-  selector: string
-  /** The HTML tag name */
-  tagName: string
-  /** Accumulated text content of the element */
-  textContent: string
-  /** HTML attributes of the element */
-  attributes: Record<string, string>
 }
 
 /** Top-level options for the mdream JavaScript engine. */

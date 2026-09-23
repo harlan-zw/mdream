@@ -1,5 +1,5 @@
-import type { ElementNode, TextNode } from '../types'
-import { ELEMENT_NODE, TAG_HEAD, TAG_META, TAG_TITLE } from '../const'
+import type { ElementNode, PluginSetup, TextNode, TransformPlugin } from '../types'
+import { ELEMENT_NODE, TAG_HEAD, TAG_HTML, TAG_META, TAG_TITLE } from '../const'
 import { createPlugin } from '../pluggable/plugin'
 
 const BACKSLASH_RE = /\\/g
@@ -24,7 +24,12 @@ interface FrontmatterData {
  * A plugin that manages frontmatter generation from HTML head elements
  * Extracts metadata from meta tags and title and generates YAML frontmatter
  */
-export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
+export function frontmatterPlugin(options: FrontmatterPluginOptions = {}): PluginSetup {
+  return createPlugin(() => createFrontmatterHooks(options))
+}
+
+/** Fresh hooks for one conversion: collected metadata belongs to one document. */
+function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlugin {
   const additionalFields = options.additionalFields || {}
   const metaFields = new Set([
     'description',
@@ -92,6 +97,18 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
     return Object.keys(result).length > 0 ? result : undefined
   }
 
+  let sawHead = false
+  let extracted = false
+
+  function extract(): void {
+    if (extracted)
+      return
+    extracted = true
+    const structured = getStructuredData()
+    if (structured)
+      options.onExtract?.(structured)
+  }
+
   const plugin = createPlugin({
     onNodeEnter(node: any): string | undefined {
       if (node.excludedFromMarkdown)
@@ -100,8 +117,13 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
       // Track when we enter the head section
       if (node.tagId === TAG_HEAD) {
         inHead = true
+        sawHead = true
         return
       }
+
+      // A document without a head still reports its additional fields.
+      if (!sawHead && !extracted && node.type === ELEMENT_NODE && node.tagId !== TAG_HTML)
+        extract()
 
       // Process title tag inside head
       if (inHead && node.type === ELEMENT_NODE && node.tagId === TAG_TITLE) {
@@ -132,9 +154,7 @@ export function frontmatterPlugin(options: FrontmatterPluginOptions = {}) {
       // Handle exiting the head tag
       if (node.type === ELEMENT_NODE && node.tagId === TAG_HEAD) {
         inHead = false
-        const structured = getStructuredData()
-        if (structured)
-          options.onExtract?.(structured)
+        extract()
         if (state.outputFormat !== 'markdown')
           return undefined
 

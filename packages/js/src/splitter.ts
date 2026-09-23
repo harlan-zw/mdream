@@ -15,6 +15,7 @@ import {
 } from './const'
 import { createMarkdownProcessor } from './markdown-processor'
 import { parseHtmlStream } from './parse'
+import { resolvePlugins } from './pluggable/plugin'
 import { processPluginsForEvent } from './plugin-processor'
 import { buildTagOverrideHandlers } from './tag-overrides'
 import { tagHandlers } from './tags'
@@ -39,7 +40,7 @@ function createOptions(options: SplitterOptions) {
     chunkOverlap: options.chunkOverlap ?? 200,
     lengthFunction: options.lengthFunction ?? ((text: string) => text.length),
     keepSeparator: options.keepSeparator ?? false,
-    resolvedPlugins: options.plugins ?? [],
+    resolvedPlugins: resolvePlugins(options.plugins),
     tagOverrideHandlers: options.tagOverrides
       ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
       : undefined,

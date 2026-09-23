@@ -4,6 +4,7 @@ import { ELEMENT_NODE, MAX_TAG_ID } from './const'
 import { createHtmlOutputState, processHtmlOutputEvent } from './html-output'
 import { htmlTagHandlers } from './html-tags'
 import { processHtmlOutput, streamHtmlOutput } from './output-runner'
+import { resolvePlugins } from './pluggable/plugin'
 import { buildTagOverrideHandlers } from './tag-overrides'
 
 function createProcessor(options: MdreamOptions): OutputProcessor {
@@ -37,7 +38,7 @@ function createProcessor(options: MdreamOptions): OutputProcessor {
 
 function resolveOutputOptions(options: MdreamOptions) {
   return {
-    plugins: options.plugins,
+    plugins: resolvePlugins(options.plugins),
     tagHandlers: htmlTagHandlers,
     tagOverrideHandlers: options.tagOverrides
       ? buildTagOverrideHandlers(options.tagOverrides, htmlTagHandlers)

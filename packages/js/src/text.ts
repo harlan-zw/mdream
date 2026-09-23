@@ -1,12 +1,13 @@
 import type { MdreamOptions } from './types'
 import { processHtmlOutput, streamHtmlOutput } from './output-runner'
+import { resolvePlugins } from './pluggable/plugin'
 import { buildTagOverrideHandlers } from './tag-overrides'
 import { createTextOutputProcessor } from './text-output'
 import { textTagHandlers } from './text-tags'
 
 function resolveOutputOptions(options: MdreamOptions) {
   return {
-    plugins: options.plugins,
+    plugins: resolvePlugins(options.plugins),
     tagHandlers: textTagHandlers,
     tagOverrideHandlers: options.tagOverrides
       ? buildTagOverrideHandlers(options.tagOverrides, textTagHandlers)

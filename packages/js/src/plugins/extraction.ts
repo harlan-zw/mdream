@@ -1,4 +1,4 @@
-import type { ElementNode, MdreamRuntimeState, TransformPlugin } from '../types'
+import type { ElementNode, MdreamRuntimeState, PluginSetup, TransformPlugin } from '../types'
 import { parseSelector } from '../libs/query-selector'
 import { createPlugin } from '../pluggable/plugin'
 
@@ -9,13 +9,17 @@ export interface ExtractedElement extends ElementNode {
 type ExtractionCallback = (element: ExtractedElement, state: MdreamRuntimeState) => void
 
 /** Extract matching elements through the composable JavaScript plugin interface. */
-export function extractionPlugin(selectors: Record<string, ExtractionCallback>): TransformPlugin {
+export function extractionPlugin(selectors: Record<string, ExtractionCallback>): PluginSetup {
   // Parse selectors and create matcher-callback pairs
   const matcherCallbacks = Object.entries(selectors).map(([selector, callback]) => ({
     matcher: parseSelector(selector),
     callback,
   }))
+  return createPlugin(() => createExtractionHooks(matcherCallbacks))
+}
 
+/** Fresh hooks for one conversion: tracked elements belong to one document. */
+function createExtractionHooks(matcherCallbacks: { matcher: ReturnType<typeof parseSelector>, callback: ExtractionCallback }[]): TransformPlugin {
   // Track elements we're currently collecting content for
   const trackedElements = new Map<ElementNode, { textContent: string, callbacks: ExtractionCallback[] }>()
 

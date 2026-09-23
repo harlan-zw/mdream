@@ -15,4 +15,20 @@ describe('frontmatter plugin', () => {
     expect(extracted?.title).toBe(value)
     expect(extracted?.description).toBe(value)
   })
+
+  it('passes additional fields to onExtract when the document has no head', () => {
+    const calls: Record<string, string>[] = []
+    htmlToMarkdown('<p>x</p>', {
+      plugins: [frontmatterPlugin({ additionalFields: { site: 'S' }, onExtract: fm => calls.push(fm) })],
+    })
+    expect(calls).toEqual([{ site: 'S' }])
+  })
+
+  it('calls onExtract once for a document with a head', () => {
+    const calls: Record<string, string>[] = []
+    htmlToMarkdown('<html><head><title>T</title></head><body><p>x</p></body></html>', {
+      plugins: [frontmatterPlugin({ onExtract: fm => calls.push(fm) })],
+    })
+    expect(calls).toEqual([{ title: 'T' }])
+  })
 })
