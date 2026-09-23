@@ -1,6 +1,6 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
 use mdream::types::{HTMLToMarkdownOptions, PluginConfig, TagOverrideConfig};
-use mdream::{html_to_markdown, html_to_text};
+use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
 fn md(html: &str) -> String {
   html_to_markdown(html, HTMLToMarkdownOptions::default())
@@ -8,6 +8,16 @@ fn md(html: &str) -> String {
 
 fn text(html: &str) -> String {
   html_to_text(html, HTMLToMarkdownOptions::default())
+}
+
+fn md_streamed(html: &str, chunk: usize) -> String {
+  let mut p = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut out = String::new();
+  for c in html.as_bytes().chunks(chunk) {
+    out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+  }
+  out.push_str(&p.finish());
+  out
 }
 
 fn md_wrapped(html: &str, width: usize) -> String {
@@ -56,4 +66,29 @@ fn br_after_whitespace_in_pre_stays_a_line_break() {
   assert_eq!(md("<pre>a <b><br></b>c</pre>"), "```\na \nc\n```");
   // Without the whitespace the break already worked.
   assert_eq!(md("<pre>a<br>b</pre>"), "```\na\nb\n```");
+}
+
+// ── Empty figcaption ──
+
+#[test]
+fn figcaption_with_only_markers_emits_nothing() {
+  // `****` alone on a line is a thematic break; an empty caption must not
+  // invent one. An empty caption is dropped like `<figcaption></figcaption>`.
+  assert_eq!(md("e<figcaption><em><div></div></em></figcaption>A"), "eA");
+  assert_eq!(md("e<figcaption><em><div></figcaption>A"), "eA");
+  assert_eq!(md("<figcaption><em><div></div></em></figcaption>"), "");
+  assert_eq!(md("e<figcaption><em></em></figcaption>A"), "eA");
+  assert_eq!(
+    md("e<figcaption><b><del><div></div></del></b></figcaption>A"),
+    "eA"
+  );
+  // A link is content even when empty.
+  assert_eq!(
+    md("<figcaption><a href=\"/x\"><br></a></figcaption>"),
+    "*[  \n](/x)*"
+  );
+  let html = "e<figcaption><em><div></div></em></figcaption>A";
+  for chunk in 1..=html.len() {
+    assert_eq!(md_streamed(html, chunk), "eA", "chunk={chunk}");
+  }
 }

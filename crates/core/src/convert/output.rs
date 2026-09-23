@@ -1427,9 +1427,12 @@ impl ConvertState {
           content_start,
           restore_space,
         } => {
+          // Text commits the frame, so `*`, `~`, a backtick, or `"` here is a
+          // marker, not content. A marker pair around an empty block survives the
+          // empty-pair drop; kept, it would write `****`, a thematic break.
           if self.buffer[content_start..]
             .bytes()
-            .any(|byte| !is_whitespace(byte))
+            .any(|byte| !is_whitespace(byte) && !matches!(byte, b'*' | b'~' | b'`' | b'"'))
           {
             caption_exit_spacing = frame.spacing[1];
           } else {
