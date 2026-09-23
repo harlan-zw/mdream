@@ -182,6 +182,13 @@ export interface TextNode extends Node {
   }
   /** Custom data added by plugins */
   context?: PluginContext
+  /** Follows an end tag that closed nothing, so it gets no separator. */
+  joinsPrevious?: boolean
+  /**
+   * First text with no block ancestor: it drops its leading whitespace when
+   * the output is at the start of a line.
+   */
+  trimsAtLineStart?: boolean
 }
 
 /**
