@@ -69,6 +69,10 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<img alt=\u0085>',
     '\uFEFFa',
   ],
+  'whitespace after a comment keeps the word separator': [
+    '<a title="k" href="ea"><div>I<!> ',
+    '<b><div>I<!-- --> </div>k</b>',
+  ],
 }
 
 describe('javaScript engine matches Rust output', () => {

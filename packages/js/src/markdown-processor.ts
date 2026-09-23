@@ -1604,7 +1604,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     let lastBuffEntry = buff.at(-1)!
     let lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
-    if (!lastChar && state.pendingInlineWhitespace && eventType === NodeEventEnter) {
+    // An emptied trailing fragment is not the start of output: read the last
+    // character actually written, as the Rust engine reads its last byte.
+    if (!lastChar && buff.length > 1) {
       const code = lastOutputChar(buff)
       if (code !== -1)
         lastChar = String.fromCharCode(code)
