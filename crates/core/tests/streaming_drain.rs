@@ -2204,7 +2204,7 @@ fn raw_html_region_text_is_not_gfm_escaped() {
   for (html, expected) in [
     (".<ul><li><dd>*", ".\n\n- <dd>*</dd>"),
     ("<p>x</p><li><dd>_", "x\n\n- <dd>_</dd>"),
-    ("<caption>c</caption><tr><dd>*", "c\n\n| <dd>*</dd>\n |\n|"),
+    ("<caption>c</caption><tr><dd>*", "c\n\n<dd>*</dd>"),
     // Only inside the region: the leading `*` is still escaped.
     ("*<ul><li><dd>_", "\\*\n\n- <dd>_</dd>"),
   ] {

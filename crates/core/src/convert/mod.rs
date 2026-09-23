@@ -636,6 +636,10 @@ pub struct ConvertState {
   pub buffer: String,
   last_content_cache_len: usize,
   table_rendered_table: bool,
+  /// The header row writes its `| ` opener at its first cell, not at `<tr>`: a
+  /// row with no cells then leaves nothing behind, and the next row becomes the
+  /// header. A zero-column delimiter row does not exist in GFM.
+  table_row_opener_pending: bool,
   table_current_row_cells: usize,
   /// A raw-HTML region (`<details>`, `<dl>`, …) stops being raw at the first
   /// blank line: CommonMark ends an HTML block there and reads what follows as
@@ -860,6 +864,7 @@ impl ConvertState {
       buffer: String::with_capacity(capacity.max(1024)),
       last_content_cache_len: 0,
       table_rendered_table: false,
+      table_row_opener_pending: false,
       table_current_row_cells: 0,
       raw_html_markdown: false,
       raw_html_scanned_to: 0,
