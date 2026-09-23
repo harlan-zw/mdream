@@ -26,7 +26,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { resolveUrl } from './url'
-import { figcaptionOwnsBlockSpacing, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent } from './utils'
+import { figcaptionOwnsBlockSpacing, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, trimOutputStart } from './utils'
 
 interface TextState extends MdreamRuntimeState {
   options: EngineOptions
@@ -493,7 +493,7 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     processEvent,
     takeOutput() {
       const content = state.buffer.join('')
-      const normalized = preserveLeadingWhitespace ? content : content.trimStart()
+      const normalized = preserveLeadingWhitespace ? content : trimOutputStart(content)
       // Hold back the tail a later event may still trim: trailing whitespace,
       // and a quotation opener that an empty quotation retracts.
       const held = quoteOpenerPending ? normalized.slice(0, -1) : normalized

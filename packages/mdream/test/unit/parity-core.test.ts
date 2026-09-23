@@ -62,6 +62,13 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     'a<blockquote><blockquote></blockquote></blockquote>',
     '<li><blockquote>',
   ],
+  'final trim keeps non-ASCII spaces': [
+    '<p>a&nbsp;</p>',
+    'd&nbsp',
+    'x<p>&nbsp',
+    '<img alt=\u0085>',
+    '\uFEFFa',
+  ],
 }
 
 describe('javaScript engine matches Rust output', () => {

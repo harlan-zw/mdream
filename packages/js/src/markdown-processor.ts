@@ -52,7 +52,7 @@ import {
 import { finalizeParse, parseHtmlStream } from './parse'
 import { endPlugins, processPluginsForEvent } from './plugin-processor'
 import { breakHandler, renderBreak, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber } from './utils'
+import { blockOpenPrefix, continuationPrefix, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -2137,10 +2137,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
    * Get the final markdown output
    */
   function getMarkdown(): string {
-    const content = state.buffer.join('')
-    const result = content.trimStart()
+    // Only ASCII whitespace ends the output, as in Rust: U+00A0 is content,
+    // and a stream cannot take back a nbsp it already yielded.
+    const result = trimAsciiWhitespaceEnd(trimOutputStart(state.buffer.join('')))
     state.buffer.length = 0
-    return result.trimEnd()
+    return result
   }
 
   /**
@@ -2162,7 +2163,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     }
     resolveItemMarker(state, false, unresolvedCaptionFragment)
     const content = state.buffer.join('')
-    const currentContent = hasYieldedContent ? content : content.trimStart()
+    const currentContent = hasYieldedContent ? content : trimOutputStart(content)
     const inPre = state.depthMap[TAG_PRE] !== 0
     let stableLength = currentContent.length
     let retainMutableFragments = false

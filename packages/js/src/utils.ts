@@ -274,6 +274,27 @@ export function parseUnsignedInteger(raw: string | undefined): number | undefine
 }
 
 /**
+ * Drop leading whitespace as the Rust engine's `str::trim_start` does: Unicode
+ * White_Space, which counts U+0085 but not the U+FEFF that `trimStart` strips.
+ */
+export function trimOutputStart(value: string): string {
+  let start = 0
+  while (start < value.length) {
+    const code = value.charCodeAt(start)
+    if (code === 32 || (code >= 9 && code <= 13)) {
+      start++
+      continue
+    }
+    if (code < 0x85 || !(code === 0x85 || code === 0xA0 || code === 0x1680 || (code >= 0x2000 && code <= 0x200A)
+      || code === 0x2028 || code === 0x2029 || code === 0x202F || code === 0x205F || code === 0x3000)) {
+      break
+    }
+    start++
+  }
+  return start === 0 ? value : value.slice(start)
+}
+
+/**
  * Code unit last written to the buffer, or -1 when nothing has been. Handlers
  * legitimately return `''`, so the last *fragment* is not always the last
  * character.
