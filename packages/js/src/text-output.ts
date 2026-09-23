@@ -49,12 +49,13 @@ function trimAsciiWhitespaceEnd(value: string): string {
 }
 
 function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | TextNode | undefined, textNode: TextNode): boolean {
-  if (!lastChar || '\n \t['.includes(lastChar) || textNode.value[0] === ' ')
+  // Parity with the Rust engine's `should_add_spacing_before_text`.
+  if (!lastChar || '\n \t[>'.includes(lastChar) || textNode.value[0] === ' ')
     return false
   if (lastNode?.tagHandler?.isInline)
     return false
   const firstChar = textNode.value[0]
-  return Boolean(firstChar && !'.,!?:;)]'.includes(firstChar))
+  return Boolean(firstChar && !'.,!?:;_*`)]'.includes(firstChar))
 }
 
 function currentColumn(buffer: string[]): number {
@@ -106,11 +107,11 @@ function wrapText(value: string, column: number, width: number): string {
 const CAPTION_SPACING = 2
 
 /** Drops a trailing space and tab run, stopping at a newline. */
-function trimSpacesEnd(value: string): string {
+function trimSpacesEnd(value: string, keepTabs = false): string {
   let end = value.length
   while (end > 0) {
     const code = value.charCodeAt(end - 1)
-    if (code !== 32 && code !== 9)
+    if (code !== 32 && (keepTabs || code !== 9))
       break
     end--
   }
@@ -240,7 +241,8 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
   // `lastTextNode`, so the boundary itself drops the space it sits on.
   if (wantedNewlines > 0 && buffer.length > 0 && !(state.depthMap[TAG_PRE]! > 0 && element.tagId !== TAG_PRE)) {
     const tail = buffer[buffer.length - 1]!
-    const trimmed = trimSpacesEnd(tail)
+    // A row keeps the tab that separates an empty trailing cell.
+    const trimmed = trimSpacesEnd(tail, state.depthMap[TAG_TABLE]! > 0)
     if (trimmed.length !== tail.length)
       buffer[buffer.length - 1] = trimmed
   }
@@ -370,6 +372,9 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
       preserveLeadingWhitespace = true
     if (node.value === ' ' && last !== '' && ' \n\t\r'.includes(last))
       return
+    // A line break owns the line start, so collapsed prose drops its leading space.
+    if (last === '\n' && node.value.charCodeAt(0) === 32 && !state.depthMap[TAG_PRE])
+      node.value = trimAsciiWhitespaceStart(node.value)
     if (!state.depthMap[TAG_PRE] && shouldAddSpacingBeforeText(last, lastNode, node))
       node.value = ` ${node.value}`
 
@@ -401,6 +406,18 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
 
     const element = event.node as ElementNode
     let output: string | undefined
+    // An empty quotation emits nothing, but keeps the space its opener added.
+    if (element.tagId === TAG_Q && event.type === NodeEventExit && lastNode === element && !element.pluginOutput?.length) {
+      const tail = state.buffer.at(-1)
+      if (tail === '"')
+        state.buffer.pop()
+      else if (tail === ' "')
+        state.buffer[state.buffer.length - 1] = ' '
+      if (tail === '"' || tail === ' "') {
+        state.lastNode = element
+        return
+      }
+    }
     if (element.pluginOutput?.length) {
       output = element.pluginOutput.join('')
       element.pluginOutput = undefined
@@ -463,9 +480,11 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     takeOutput() {
       const content = state.buffer.join('')
       const normalized = preserveLeadingWhitespace ? content : content.trimStart()
-      let stableLength = normalized.length
-      if (!state.depthMap[TAG_PRE])
-        stableLength = trimAsciiWhitespaceEnd(normalized).length
+      // Hold back the tail a later boundary may still trim: all trailing
+      // whitespace, or the space and tab run that closing a pre drops.
+      let stableLength = state.depthMap[TAG_PRE]
+        ? trimSpacesEnd(normalized).length
+        : trimAsciiWhitespaceEnd(normalized).length
       if (stableLength < yieldedLength)
         stableLength = yieldedLength
       const output = normalized.slice(yieldedLength, stableLength)

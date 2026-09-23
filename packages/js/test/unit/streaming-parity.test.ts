@@ -718,4 +718,9 @@ describe('streaming parity with the Rust core', () => {
   it('keeps a meaningful non breaking space before an inline sibling', async () => {
     await expectStreamingParity('<p>answered on <span>03 Apr 2013,&nbsp;</span><span>09:53 AM</span></p>')
   })
+
+  it('keeps text after a pre whose trailing spaces end a chunk', async () => {
+    await expectStreamingParity('<pre>x\n  </pre><p>After</p>', { format: 'text' })
+    await expectStreamingParity('<pre><code>x\n  </code></pre><h2>Advanced</h2>', { format: 'text' })
+  })
 })
