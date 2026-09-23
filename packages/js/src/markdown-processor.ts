@@ -1135,6 +1135,11 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     bufferedBlockquoteDepth: 0,
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
+    // A row or cell with no <table> ancestor still writes a table, as in Rust.
+    tableRenderedTable: false,
+    tableCurrentRowCells: 0,
+    tableColumnAlignments: [],
+    tableHeaderCells: 0,
   }
   const bufferScan: BufferScanState = [false, 0, 0, 0, 0]
   let inRawHtmlRegion = false

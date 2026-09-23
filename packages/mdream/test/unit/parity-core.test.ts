@@ -33,6 +33,11 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<p>a <x>c</x></p>',
     '<p>a <x></x>c</p>',
   ],
+  'table rows outside a table': [
+    '<tr><td>a</td><td>b</td></tr>',
+    '<th>',
+    '<tr><th align="right">a</th><td>b</td></tr><tr><td>c</td></tr>',
+  ],
   'rawtext keeps an unfinished end tag at EOF': [[
     '<textarea>a</t',
     '<textarea>a</tx>b',
