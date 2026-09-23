@@ -57,6 +57,8 @@ describe('streaming drain parity', () => {
     '<ol><li>one<pre><code>cmd</code></pre></li><li>two</li></ol>',
     '<ul><li>one<pre><code>cmd</code></pre></li><li>two</li></ul>',
     '<ul><li><pre><li><blockquote>x<code>',
+    '<li><blockquote><l></li><blockquote><v><blockquote>',
+    '<br><blockquote>',
     '<summary>text <svg></svg></summary>',
     '<details><summary>text <svg><polyline points="1 2"></polyline></svg></summary><p>b</p></details>',
     '<h3>Set priority</h3><a class="anchor-link" href="#x"></a><p>The value.</p>',
@@ -82,6 +84,19 @@ describe('streaming drain parity', () => {
 
     for (const chunkSize of [1, 3, 7, 16, 40])
       expect(await streamConvert(BLOCK_NEWLINE_HTML, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
+
+  it('streams a malformed quote list without throwing when compaction drops hold fragments', async () => {
+    const html = '<li><blockquote><l></li><blockquote><v><blockquote>'
+    const expected = htmlToMarkdown(html)
+    expect(await streamConvert(html, 1)).toBe(expected)
+  })
+
+  it('drops an empty quote whose prefix context was already streamed', async () => {
+    const html = '<br><blockquote>'
+    const expected = htmlToMarkdown(html)
+    expect(expected).toBe('')
+    expect(await streamConvert(html, 1)).toBe(expected)
   })
 
   it('bounds retained output while streaming a raw HTML anchor body', () => {

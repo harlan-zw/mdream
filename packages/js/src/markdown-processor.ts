@@ -132,6 +132,12 @@ interface CodeFence {
 interface BlockquoteFrame {
   fragment: number
   listIndent: string
+  /**
+   * Whether the output before the quote ended in whitespace, recorded at enter.
+   * An empty quote drops itself through this flag because streaming compaction
+   * can flush the pre-quote context before the exit reads it.
+   */
+  followsWhitespace: boolean
 }
 
 interface GfmLifecycleState {
@@ -1019,13 +1025,11 @@ function finalizeBlockquote(state: MarkdownState): void {
 
   const buffer = state.buffer
   const content = trimAsciiWhitespaceEnd(buffer.slice(frame.fragment).join(''))
-  // An empty quote whose trailing whitespace reaches back before its start
-  // follows content already ended by a block separator: it writes nothing.
-  if (!content) {
-    const before = lastOutputChar(buffer, frame.fragment)
-    if (before !== -1 && isAsciiWhitespace(before))
-      return
-  }
+  // An empty quote whose start followed terminated output writes nothing.
+  // The context is the enter-time snapshot: streaming may have already
+  // yielded and compacted the characters this decision used to read back.
+  if (!content && frame.followsWhitespace)
+    return
   const prefix = `${frame.listIndent}>`
   const quoted = content
     .split('\n')
@@ -1166,15 +1170,24 @@ function commitGfmAction(
   outputStart: number,
 ): void {
   switch (action._tag) {
-    case 'BlockquoteEnter':
+    case 'BlockquoteEnter': {
       if (state.blockquotes.length > 0)
         collapseNestedBlockquoteSeparator(state.buffer)
+      const before = lastOutputChar(state.buffer)
       state.blockquotes.push({
         fragment: state.buffer.length,
         listIndent: state.listIndent,
+        // Snapshot the pre-quote context now: streaming can flush these
+        // characters before the quote's exit needs them. When the buffer is
+        // empty the last written content stands in for compacted output.
+        followsWhitespace: before === -1
+          ? state.lastContentCache !== undefined
+          && isAsciiWhitespace(state.lastContentCache.charCodeAt(state.lastContentCache.length - 1))
+          : isAsciiWhitespace(before),
       })
       state.bufferedBlockquoteDepth = state.blockquotes.length
       break
+    }
     case 'CodeSpanEnter':
       lifecycle.openCodeSpans.push({
         fragment: outputStart,
@@ -2262,12 +2275,19 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
           gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
           state.emptyItemFragment ?? Infinity,
           state.codeFence?.fragment ?? Infinity,
-          state.blockquotes[0]?.fragment ?? Infinity,
           openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
         )
     // An open link can still be unwrapped at its close.
     if (cleanPass && !final)
       heldFragment = Math.min(heldFragment, cleanPass.held())
+    // Every open quote rewrites from its own fragment at exit, so the earliest
+    // frame bounds the hold. Malformed trees can push a later frame at a
+    // smaller fragment, so scan rather than reading the first frame only.
+    for (let index = 0; index < state.blockquotes.length; index++) {
+      const fragment = state.blockquotes[index]!.fragment
+      if (fragment < heldFragment)
+        heldFragment = fragment
+    }
     const captionHoldCount = final ? 0 : captionFrameCount
     for (let index = 0; index < captionHoldCount; index++) {
       const offset = index * CAPTION_FRAME_SIZE
@@ -2277,6 +2297,12 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         break
       }
     }
+    // A rewrite can shrink the buffer below a recorded hold (a nested quote
+    // collapsing its separator, a dropped link text, a truncated caption).
+    // Such a hold points at output that is already gone: it protects nothing
+    // and indexing it would read past the buffer.
+    if (heldFragment > state.buffer.length)
+      heldFragment = Infinity
     const fragmentHeld = heldFragment !== Infinity
     if (fragmentHeld) {
       stableLength = Math.min(stableLength, trimBufferedWhitespacePosition(
