@@ -2149,9 +2149,12 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   }
 
   /**
-   * Get new markdown content since the last call (for streaming)
+   * Get new markdown content since the last call (for streaming). The final
+   * call after input ends passes `final` to release every fragment hold: no
+   * later event can rewrite the buffer, so the tail must flush exactly like
+   * getMarkdown's hold-free join.
    */
-  function getMarkdownChunk(): string {
+  function getMarkdownChunk(final = false): string {
     // Settle an open marker-line guard when the item's first content already
     // answers it, so the hold below never outlives the marker's own line.
     let unresolvedCaptionFragment = -1
@@ -2204,16 +2207,21 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     const leadingTrimmed = content.length - currentContent.length
 
     // Each owner can rewrite its opening fragment. The earliest one bounds
-    // every hold, so scan and trim that position once.
-    let heldFragment = Math.min(
-      openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
-      gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
-      state.emptyItemFragment ?? Infinity,
-      state.codeFence?.fragment ?? Infinity,
-      state.blockquotes[0]?.fragment ?? Infinity,
-      openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
-    )
-    for (let index = 0; index < captionFrameCount; index++) {
+    // every hold, so scan and trim that position once. The final call drops
+    // every hold: a fence whose owner reset the open flag before exiting can
+    // never be rewritten, and holding it suppressed the whole output.
+    let heldFragment = final
+      ? Infinity
+      : Math.min(
+          openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
+          gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
+          state.emptyItemFragment ?? Infinity,
+          state.codeFence?.fragment ?? Infinity,
+          state.blockquotes[0]?.fragment ?? Infinity,
+          openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
+        )
+    const captionHoldCount = final ? 0 : captionFrameCount
+    for (let index = 0; index < captionHoldCount; index++) {
       const offset = index * CAPTION_FRAME_SIZE
       const anchor = captionFrames![offset + 3]!
       if ((captionFrames![offset + 2]! & CAPTION_OPEN) === 0 && anchor !== CAPTION_NO_ANCHOR) {
@@ -2232,7 +2240,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
     // closing sequence, so hold the run (and the spacing that decides whether it
     // closes) until the heading is complete.
-    const headingHeld = isInsideHeading(state.depthMap)
+    const headingHeld = !final && isInsideHeading(state.depthMap)
     if (headingHeld) {
       let headingPos = currentContent.length
       while (headingPos > 0) {
