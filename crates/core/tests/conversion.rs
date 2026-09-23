@@ -5336,3 +5336,32 @@ fn blockquote_quoting_keeps_escaping_a_later_line() {
     "<dd>\n\n## - \n  > a\n  >\n  > <code></code>\n  >\n  > &gt;aa&lt;&lt; - \\`\n\n</dd>"
   );
 }
+
+// A link rewrite is anchored on the `[` the anchor itself wrote. An anchor that
+// writes none -- no href, or suppressed inside `<pre>` -- used to abort its exit
+// and let the rewrite scan reach forward into the text, which dropped a literal
+// `[` behind its own escape and left the fence's trailing whitespace untrimmed.
+#[test]
+fn a_clean_flag_leaves_content_outside_the_link_alone() {
+  for (html, expected) in [
+    ("<a>[", "\\["),
+    ("x <a>[", "x \\["),
+    ("<p><a>[</p>", "\\["),
+    ("<pre>x\t<a>", "```\nx\n```"),
+    ("<pre>x\n<a>", "```\nx\n```"),
+  ] {
+    assert_eq!(
+      convert_with_clean(html, clean_all()),
+      expected,
+      "html={html:?}"
+    );
+    assert_eq!(convert(html), expected, "unclean html={html:?}");
+  }
+
+  // The rewrites the flags exist for still fire.
+  assert_eq!(convert_with_clean("<a href=\"#\">t</a>", clean_all()), "t");
+  assert_eq!(
+    convert_with_clean("<a href=\"https://e.com/\">https://e.com/</a>", clean_all()),
+    "https://e.com/"
+  );
+}
