@@ -2137,10 +2137,12 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
 
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
     // closing sequence, so hold the run (and the spacing that decides whether it
-    // closes) until the heading is complete.
+    // closes) until the heading is complete. Scan from the stable cut: held
+    // bytes after it, such as an empty emphasis marker, can still vanish and
+    // leave the run trailing.
     const headingHeld = isInsideHeading(state.depthMap)
     if (headingHeld) {
-      let headingPos = currentContent.length
+      let headingPos = stableLength
       while (headingPos > 0) {
         const code = currentContent.charCodeAt(headingPos - 1)
         if (code !== 35 && code !== 32 && code !== 9) // # space tab

@@ -92,4 +92,7 @@ export const CONVERSION_CORPUS: string[] = [
   `<script></script>\n<p>abc</p>`,
   `<b></b>\n<p>abc</p>`,
   `<br>\n<p>abc</p>`,
+  `<h3>a #<em>`,
+  `<li><h3><em>`,
+  `<h2>x # <b></b></h2>`,
 ]
