@@ -895,6 +895,32 @@ impl ConvertState {
       }
     }
 
+    // A block boundary directly after a hard break keeps the paragraph blank
+    // line at the top level (`q  \n\nX`), where the exit spacing pays for the
+    // break's own newline. Inside a list item every non-`<li>` spacing is
+    // collapsed and the break's continuation indent already ended the line, so
+    // the separator is written here or the paragraph boundary disappears
+    // (`- q  \n  X`). The break's indent spaces are trimmed first; whatever
+    // line break remains counts toward the two the separator needs.
+    if !self.plain_text
+      && self.after_hard_break
+      && !enter_is_literal
+      && matches!(tag_id, Some(TAG_P | TAG_DIV))
+      && self.depth_map[TAG_LI as usize] > 0
+      && !self.in_table_cell()
+      && self.depth_map[TAG_PRE as usize] == 0
+    {
+      self.after_hard_break = false;
+      self.trim_trailing_spaces();
+      let new_lines = 2usize.saturating_sub(self.trailing_new_lines() as usize);
+      let mut separator = String::with_capacity(new_lines + self.list_indent.len());
+      for _ in 0..new_lines {
+        separator.push('\n');
+      }
+      separator.push_str(&self.list_indent);
+      output = Some(Cow::Owned(separator));
+    }
+
     if self.clean_flags & CLEAN_EMPTY_IMAGES != 0
       && tag_id == Some(TAG_IMG)
       && self.stack[stack_len - 1]
@@ -4142,6 +4168,21 @@ impl ConvertState {
 
       if !output_str.is_empty() {
         self.last_content_cache_len = self.push_code_span_content(output_str, true);
+      }
+    }
+
+    // A `<br>` hard break is the one enter write that ends its line while
+    // leaving the paragraph open, so a following block boundary inside a list
+    // item still owes the paragraph separator. Its fragment always starts with
+    // the two-space break marker (`  \n`, plus the continuation indent); a
+    // bare `\n` is a structural boundary, which closes the line for good. A
+    // no-op write (spacing reset only) changes nothing; any other completed
+    // write supersedes the state.
+    if is_enter && !literal {
+      if output_str.starts_with("  \n") {
+        self.after_hard_break = true;
+      } else if configured_new_lines > 0 || !output_str.is_empty() {
+        self.after_hard_break = false;
       }
     }
     self.last_node_is_inline = is_inline;

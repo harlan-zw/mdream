@@ -761,6 +761,10 @@ pub struct ConvertState {
   empty_item_len: usize,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
+  /// The last write ended its line with a `<br>` hard break, so a following
+  /// `<p>`/`<div>` boundary inside a list item still owes the paragraph
+  /// blank line that the item's collapsed block spacing removes.
+  after_hard_break: bool,
   /// What leads the current line when draining has removed that line's start.
   /// `Uncut` also says `flushed_tail` still holds its document-start sentinel;
   /// yielding alone does not make that context valid.
@@ -922,6 +926,7 @@ impl ConvertState {
       empty_item_line_start: 0,
       empty_item_len: 0,
       list_rule_pending: false,
+      after_hard_break: false,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
     };

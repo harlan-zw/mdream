@@ -51,8 +51,27 @@ fn blank_image_alt_adds_no_blank_line() {
 fn whitespace_after_br_keeps_the_hard_break() {
   assert_eq!(md("<p><span>x<br> </span>a</p>"), "x  \na");
   assert_eq!(text("<p><span>x<br> </span>a</p>"), "x\na");
-  assert_eq!(md("<li>ew<br> <div>D"), "- ew  \n  D");
-  assert_eq!(md("<li>ew<br>\n<div>D"), "- ew  \n  D");
+  assert_eq!(md("<li>ew<br> <div>D"), "- ew  \n\n  D");
+  assert_eq!(md("<li>ew<br>\n<div>D"), "- ew  \n\n  D");
+}
+
+// ── Paragraph boundary after a hard break in a list item ──
+
+#[test]
+fn paragraph_after_a_hard_break_in_a_list_item_keeps_the_blank_line() {
+  // Outside a list item the block boundary after a hard break keeps the
+  // paragraph blank line; list-item boundaries must not lose it.
+  assert_eq!(md("<p>q<br></p><p>X"), "q  \n\nX");
+  assert_eq!(md("<li><p>q<br> <p>X"), "- q  \n\n  X");
+  assert_eq!(md("<li><p>q<br><p>X"), "- q  \n\n  X");
+  // A div boundary behaves the same, in one-shot and streaming.
+  assert_eq!(md("<li>q<br><div>X"), "- q  \n\n  X");
+  assert_eq!(md_streamed("<li>q<br><div>X", 4), "- q  \n\n  X");
+  // The separator survives streaming chunk boundaries.
+  let html = "<li><p>q<br> <p>X";
+  for chunk in [3, 7, html.len()] {
+    assert_eq!(md_streamed(html, chunk), "- q  \n\n  X", "chunk={chunk}");
+  }
 }
 
 // ── <br> inside <pre> ──
