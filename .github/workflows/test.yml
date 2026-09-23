@@ -60,6 +60,15 @@ jobs:
         run: cargo clippy --workspace --exclude mdream-edge --locked -- -D warnings -A
           clippy::pedantic -A clippy::nursery
 
+      # Each output format is a cargo feature. Lint every single-format build
+      # so a format check that assumes the others exist fails here.
+      - name: Run clippy (single output format)
+        working-directory: crates
+        run: |
+          for format in markdown text html; do
+            cargo clippy -p mdream --no-default-features --features "$format" --lib --bins --locked -- -D warnings -A clippy::pedantic -A clippy::nursery
+          done
+
       - name: Run clippy (edge, wasm target)
         working-directory: crates
         run: cargo clippy -p mdream-edge --target wasm32-unknown-unknown --locked -- -D

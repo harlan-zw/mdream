@@ -24,16 +24,19 @@ pub use types::{
 pub use consts::get_tag_id;
 
 /// Convert HTML to Markdown in a single pass.
+#[cfg(feature = "markdown")]
 pub fn html_to_markdown(html: &str, options: HTMLToMarkdownOptions) -> String {
   html_to_format(html, options, OutputFormat::Markdown)
 }
 
 /// Convert HTML to readable plain text in a single pass.
+#[cfg(feature = "text")]
 pub fn html_to_text(html: &str, options: HTMLToMarkdownOptions) -> String {
   html_to_format(html, options, OutputFormat::Text)
 }
 
 /// Convert HTML to allowlisted semantic HTML in a single pass.
+#[cfg(feature = "html")]
 pub fn html_to_html(html: &str, options: HTMLToMarkdownOptions) -> String {
   html_to_format(html, options, OutputFormat::Html)
 }
@@ -44,11 +47,13 @@ pub fn html_to_format(html: &str, options: HTMLToMarkdownOptions, format: Output
 }
 
 /// Convert HTML to Markdown with full results (extraction, frontmatter).
+#[cfg(feature = "markdown")]
 pub fn html_to_markdown_result(html: &str, options: HTMLToMarkdownOptions) -> MdreamResult {
   html_to_format_result(html, options, OutputFormat::Markdown)
 }
 
 /// Convert HTML to plain text with full results (extraction, frontmatter).
+#[cfg(feature = "text")]
 pub fn html_to_text_result(html: &str, options: HTMLToMarkdownOptions) -> MdreamResult {
   html_to_format_result(html, options, OutputFormat::Text)
 }
@@ -94,6 +99,7 @@ pub struct MarkdownStreamProcessor {
 }
 
 impl MarkdownStreamProcessor {
+  #[cfg(feature = "markdown")]
   pub fn new(options: HTMLToMarkdownOptions) -> Self {
     Self::new_with_format(options, OutputFormat::Markdown)
   }

@@ -7,7 +7,7 @@ fn main() -> io::Result<()> {
   let mut origin: Option<String> = None;
   let mut verbose = false;
   let mut clean_urls = false;
-  let mut format = OutputFormat::Markdown;
+  let mut format = OutputFormat::default();
 
   let mut i = 1;
   while i < args.len() {
@@ -24,8 +24,11 @@ fn main() -> io::Result<()> {
         i += 1;
         if i < args.len() {
           format = match args[i].as_str() {
+            #[cfg(feature = "markdown")]
             "markdown" => OutputFormat::Markdown,
+            #[cfg(feature = "text")]
             "text" => OutputFormat::Text,
+            #[cfg(feature = "html")]
             "html" => OutputFormat::Html,
             other => {
               eprintln!("Unknown format: {other}");
@@ -37,6 +40,7 @@ fn main() -> io::Result<()> {
           std::process::exit(1);
         }
       }
+      #[cfg(feature = "text")]
       "--text" => format = OutputFormat::Text,
       "--help" | "-h" => {
         eprintln!("Usage: mdream [OPTIONS]");
