@@ -47,6 +47,11 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<xmp>a</',
     '<title>a</x',
   ], TEXT_AND_HTML],
+  'block boundary trims the whole trailing space run': [
+    '<ul><li><br></li><li>b</li></ul>',
+    '<pre>nd  ',
+    '<pre>x\n  ',
+  ],
   'stray end tags add no separator': [
     'b</>c',
     'a<div>b</>c',

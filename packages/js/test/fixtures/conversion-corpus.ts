@@ -104,4 +104,6 @@ export const CONVERSION_CORPUS: string[] = [
   `<pre><li><pre><li><blockquote>x<code>`,
   `a<blockquote><blockquote></blockquote></blockquote>`,
   `<li><blockquote>`,
+  `<ul><li><br></li><li>b</li></ul>`,
+  `<pre>nd  `,
 ]

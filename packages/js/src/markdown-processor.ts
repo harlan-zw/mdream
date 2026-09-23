@@ -1329,6 +1329,31 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     return changed
   }
 
+  /**
+   * Drop the trailing space run a block boundary consumes, never reaching into
+   * an open fence opener, code span opener, or quote start. Parity with the
+   * Rust engine's `trim_trailing_spaces`.
+   */
+  function trimTrailingSpaces(buff: string[]): void {
+    let floor = state.codeFence ? state.codeFence.fragment + 1 : 0
+    const span = gfmLifecycle.openCodeSpans.at(-1)
+    if (span && span.fragment >= floor)
+      floor = span.fragment + 1
+    const quote = state.blockquotes.at(-1)
+    if (quote && quote.fragment > floor)
+      floor = quote.fragment
+    for (let index = buff.length - 1; index >= floor; index--) {
+      const fragment = buff[index]!
+      let end = fragment.length
+      while (end > 0 && fragment.charCodeAt(end - 1) === 32)
+        end--
+      if (end !== fragment.length)
+        buff[index] = fragment.slice(0, end)
+      if (end > 0)
+        break
+    }
+  }
+
   function consumeCaptionTransition(isInlineElement: boolean, tagId: number): void {
     captionBoundary = isInlineElement && tagId !== TAG_IMG && tagId !== TAG_BR ? 2 : 0
   }
@@ -1932,7 +1957,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       const newlinesStr = '\n'.repeat(newLines)
       // Trim only whitespace
       if (lastChar === ' ' && buff?.length) {
-        buff[buff.length - 1] = buff.at(-1)!.substring(0, buff.at(-1)!.length - 1)
+        trimTrailingSpaces(buff)
         // This source whitespace was consumed by the block boundary; do not
         // let its state leak into a later inline event and trim that output.
         state.lastTextNode = undefined
