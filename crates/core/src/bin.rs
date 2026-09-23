@@ -2,6 +2,16 @@ use mdream::MarkdownStreamProcessor;
 use mdream::types::{HTMLToMarkdownOptions, OutputFormat};
 use std::io::{self, Read, Write};
 
+/// Output formats this build accepts, in `--format` spelling.
+const FORMATS: &[&str] = &[
+  #[cfg(feature = "markdown")]
+  "markdown",
+  #[cfg(feature = "text")]
+  "text",
+  #[cfg(feature = "html")]
+  "html",
+];
+
 fn main() -> io::Result<()> {
   let args: Vec<String> = std::env::args().collect();
   let mut origin: Option<String> = None;
@@ -36,7 +46,7 @@ fn main() -> io::Result<()> {
             }
           };
         } else {
-          eprintln!("--format requires a value: markdown, text, or html");
+          eprintln!("--format requires a value: {}", FORMATS.join(", "));
           std::process::exit(1);
         }
       }
@@ -44,13 +54,17 @@ fn main() -> io::Result<()> {
       "--text" => format = OutputFormat::Text,
       "--help" | "-h" => {
         eprintln!("Usage: mdream [OPTIONS]");
-        eprintln!("  Reads HTML from stdin, outputs Markdown, plain text, or safe HTML");
+        eprintln!("  Reads HTML from stdin and writes the converted output to stdout");
         eprintln!();
         eprintln!("Options:");
         eprintln!("  -o, --origin <URL>  Base URL for resolving relative links");
         eprintln!("  -v, --verbose       Print conversion stats to stderr");
         eprintln!("  --clean-urls        Strip tracking query params (utm_*, fbclid, etc.)");
-        eprintln!("  --format <format>   Output format: markdown, text, html");
+        eprintln!(
+          "  --format <format>   Output format: {}",
+          FORMATS.join(", ")
+        );
+        #[cfg(feature = "text")]
         eprintln!("  --text              Alias for --format text");
         eprintln!("  -h, --help          Show this help");
         return Ok(());
