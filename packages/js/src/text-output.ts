@@ -527,14 +527,18 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
       const content = state.buffer.join('')
       const normalized = preserveLeadingWhitespace ? content : trimOutputStart(content)
       // Hold back the tail a later event may still trim: trailing whitespace,
-      // and a quotation opener that an empty quotation retracts.
-      let stableLength = trimAsciiWhitespaceEnd(normalized).length
+      // and a quotation opener that an empty quotation retracts. With an open
+      // quotation the boundary is trimmed on the string cut at the opener, so
+      // the whitespace before a retractable opener stays mutable too.
+      let stableLength
       if (openQuotes.length !== 0) {
         let opener = normalized.length - content.length
         for (let index = 0; index < openQuotes[0]!; index++)
           opener += state.buffer[index]!.length
-        if (opener < stableLength)
-          stableLength = Math.max(0, opener)
+        stableLength = trimAsciiWhitespaceEnd(normalized.slice(0, opener)).length
+      }
+      else {
+        stableLength = trimAsciiWhitespaceEnd(normalized).length
       }
       if (stableLength < yieldedLength)
         stableLength = yieldedLength
