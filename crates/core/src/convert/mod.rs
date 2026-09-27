@@ -650,10 +650,6 @@ pub struct ConvertState {
   /// it. Recomputing walks the whole line, which is quadratic over a long one.
   line_start: usize,
   line_start_scanned_to: usize,
-  /// The same cache for `held_output_exceeds_cap`, kept apart so it cannot
-  /// disturb the raw-HTML scan's own.
-  held_line_start: usize,
-  held_line_scanned_to: usize,
   /// Length of the `#`/space run a heading holds back for its closing-sequence
   /// escape, counted as text is written.
   heading_hash_run: usize,
@@ -877,8 +873,6 @@ impl ConvertState {
       raw_html_scanned_to: 0,
       line_start: 0,
       line_start_scanned_to: 0,
-      held_line_start: 0,
-      held_line_scanned_to: 0,
       heading_hash_run: 0,
       held_output_exceeded: false,
       table_header_cells: 0,
@@ -2174,9 +2168,6 @@ impl ConvertState {
     {
       floor = floor.min(bracket_pos);
     }
-    if let Some(output_start) = self.first_tentative_caption_start() {
-      floor = floor.min(output_start);
-    }
     // A quote releases completed lines only, and none while a blocker is open.
     if !self.retains_whole_document()
       && let Some(content_start) = self.blockquotes.first().map(|frame| frame.content_start)
@@ -2184,31 +2175,11 @@ impl ConvertState {
     {
       let reach = match self.blockquote_flush_blocker() {
         Some(blocker) => blocker,
-        None => self.held_line_start(),
+        None => self.current_line_start(),
       };
       floor = floor.min(content_start.max(reach));
     }
     len - floor > cap
-  }
-
-  /// Offset just past the buffer's last `\n`, scanning only bytes appended since
-  /// the last call unless a rewrite has moved the line behind it.
-  fn held_line_start(&mut self) -> usize {
-    let bytes = self.buffer.as_bytes();
-    let len = bytes.len();
-    let from = if self.held_line_start > len
-      || (self.held_line_start > 0 && bytes[self.held_line_start - 1] != b'\n')
-    {
-      self.held_line_start = 0;
-      0
-    } else {
-      self.held_line_scanned_to.min(len)
-    };
-    if let Some(i) = bytes[from..len].iter().rposition(|&byte| byte == b'\n') {
-      self.held_line_start = from + i + 1;
-    }
-    self.held_line_scanned_to = len;
-    self.held_line_start
   }
 
   pub fn get_markdown_chunk(&mut self) -> String {
@@ -2538,8 +2509,6 @@ impl ConvertState {
     self.raw_html_scanned_to = self.raw_html_scanned_to.saturating_sub(drain_end);
     self.line_start = self.line_start.saturating_sub(drain_end);
     self.line_start_scanned_to = self.line_start_scanned_to.saturating_sub(drain_end);
-    self.held_line_start = self.held_line_start.saturating_sub(drain_end);
-    self.held_line_scanned_to = self.held_line_scanned_to.saturating_sub(drain_end);
   }
 }
 

@@ -1668,9 +1668,9 @@ fn a_dropped_header_does_not_align_a_retained_column() {
 
 // Short nodes can still pin the buffer when an open construct keeps its output
 // from being yielded: a quote releases completed lines only and none past an open
-// link, a heading holds its trailing `#` run, and a self-link heading holds its
-// text. The cap charges that held output and cuts the document at the token where
-// it passes.
+// link or caption, a heading holds its trailing `#` run, and a self-link heading
+// holds its text. The cap charges that held output and cuts the document at the
+// token where it passes.
 #[test]
 fn held_back_output_is_capped() {
   let self_links = || HTMLToMarkdownOptions {
@@ -1699,6 +1699,14 @@ fn held_back_output_is_capped() {
       "link in quote",
       quoted(&format!(
         "<a href=\"/x\"><ul>{}</ul></a>",
+        repeat_to("<li>item</li>", HUGE)
+      )),
+      options(CAP),
+    ),
+    (
+      "caption in quote",
+      quoted(&format!(
+        "<figure><figcaption><ul>{}</ul></figcaption></figure>",
         repeat_to("<li>item</li>", HUGE)
       )),
       options(CAP),

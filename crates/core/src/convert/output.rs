@@ -3150,13 +3150,10 @@ impl ConvertState {
   #[inline]
   fn invalidate_line_start(&mut self) {
     self.line_start_scanned_to = usize::MAX;
-    self.held_line_scanned_to = 0;
-    self.held_line_start = 0;
   }
 
-  /// Whether the current line opens a raw HTML block, which suspends Markdown
-  /// again until the next blank line.
-  fn line_opens_raw_html_block(&mut self) -> bool {
+  /// Offset just past the buffer's last `\n`.
+  pub(super) fn current_line_start(&mut self) -> usize {
     let len = self.buffer.len();
     let bytes = self.buffer.as_bytes();
     // Only bytes appended since the last call can move the line start; a buffer
@@ -3173,6 +3170,15 @@ impl ConvertState {
       self.line_start = self.line_start_scanned_to + i + 1;
     }
     self.line_start_scanned_to = len;
+    self.line_start
+  }
+
+  /// Whether the current line opens a raw HTML block, which suspends Markdown
+  /// again until the next blank line.
+  fn line_opens_raw_html_block(&mut self) -> bool {
+    self.current_line_start();
+    let len = self.buffer.len();
+    let bytes = self.buffer.as_bytes();
 
     // A `line_start` of zero is the drained buffer's front, not the line's, once
     // a drain has taken this line's beginning: the fragment left behind can open
