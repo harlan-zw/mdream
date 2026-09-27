@@ -9,7 +9,8 @@
 //! Four more grow with a whole element rather than one node: open code fences and
 //! inline code spans pin the output buffer until their delimiter is known, a row's
 //! width forces a delimiter row of 7 bytes a column, and script text is retained
-//! whole for an extraction that reads it (~4x).
+//! whole for an extraction that reads it (~4x). An open quote or heading can also
+//! hold back output built from nodes of any size.
 //!
 //! The cap must bound memory, stay inert by default, and — since it changes what
 //! is emitted — cut at a point that depends only on content, never on chunking.
@@ -17,7 +18,9 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use mdream::types::{ExtractionConfig, HTMLToMarkdownOptions, PluginConfig, TagOverrideConfig};
+use mdream::types::{
+  CleanConfig, ExtractionConfig, HTMLToMarkdownOptions, PluginConfig, TagOverrideConfig,
+};
 use mdream::{MarkdownStreamProcessor, html_to_markdown_result};
 
 // Peak-allocation tracker, per-thread so parallel tests do not pollute each other.
@@ -1661,4 +1664,107 @@ fn a_dropped_header_does_not_align_a_retained_column() {
   let uncapped = delimiter(&stream(html, 4096, 0));
   assert_eq!(uncapped.matches("---").count(), 10, "{uncapped}");
   assert_eq!(uncapped.matches("---:").count(), 1, "{uncapped}");
+}
+
+// Short nodes can still pin the buffer when an open construct keeps its output
+// from being yielded: a quote releases completed lines only and none past an open
+// link, a heading holds its trailing `#` run, and a self-link heading holds its
+// text. The cap charges that held output and cuts the document at the token where
+// it passes.
+#[test]
+fn held_back_output_is_capped() {
+  let self_links = || HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      self_link_headings: true,
+      ..Default::default()
+    }),
+    ..options(CAP)
+  };
+  let quoted = |body: &str| format!("<p>before</p><blockquote>{body}</blockquote><p>after</p>");
+  for (name, html, opts) in [
+    (
+      "inline quote",
+      quoted(&repeat_to("word <em>e</em> ", HUGE)),
+      options(CAP),
+    ),
+    (
+      "strong in quote",
+      quoted(&format!(
+        "<strong>{}</strong>",
+        repeat_to("<p>para text</p>", HUGE)
+      )),
+      options(CAP),
+    ),
+    (
+      "link in quote",
+      quoted(&format!(
+        "<a href=\"/x\"><ul>{}</ul></a>",
+        repeat_to("<li>item</li>", HUGE)
+      )),
+      options(CAP),
+    ),
+    (
+      "heading hashes",
+      format!(
+        "<p>before</p><h1>{}</h1><p>after</p>",
+        repeat_to("#<span></span>", HUGE)
+      ),
+      options(CAP),
+    ),
+    (
+      "self-link heading",
+      format!(
+        "<p>before</p><h1><a href=\"#a\">{}</a></h1><p>after</p>",
+        repeat_to("word <em>e</em> ", HUGE)
+      ),
+      self_links(),
+    ),
+  ] {
+    let batch = html_to_markdown_result(&html, opts.clone());
+    assert!(batch.truncated, "{name}");
+    assert!(batch.markdown.starts_with("before"), "{name}");
+    assert!(!batch.markdown.contains("after"), "{name}");
+    for chunk in [37, 8 * 1024, 128 * 1024, html.len()] {
+      let mut p = MarkdownStreamProcessor::new(opts.clone());
+      let mut out = String::new();
+      for c in html.as_bytes().chunks(chunk) {
+        out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+      }
+      out.push_str(&p.finish());
+      assert_eq!(
+        (out, p.truncated()),
+        (batch.markdown.clone(), true),
+        "{name} chunk={chunk}"
+      );
+    }
+    let uncapped = peak_with(
+      &html,
+      8 * 1024,
+      HTMLToMarkdownOptions {
+        max_node_bytes: 0,
+        ..opts.clone()
+      },
+    );
+    let capped = peak_with(&html, 8 * 1024, opts);
+    assert!(
+      capped * 2 < uncapped,
+      "{name}: capped peak {capped} should be a window, uncapped {uncapped}"
+    );
+    assert!(capped < (8 * CAP) as u64, "{name}: capped peak {capped}");
+  }
+}
+
+#[test]
+fn a_long_quote_of_short_lines_is_not_held_back() {
+  let html = format!(
+    "<blockquote>{}</blockquote>",
+    repeat_to("<p>quoted <em>paragraph</em> text</p>", HUGE)
+  );
+  let uncapped = stream(&html, 8 * 1024, 0);
+  assert_eq!(
+    stream_reporting(&html, 8 * 1024, CAP),
+    (uncapped.clone(), false)
+  );
+  let batch = html_to_markdown_result(&html, options(CAP));
+  assert_eq!((batch.markdown, batch.truncated), (uncapped, false));
 }
