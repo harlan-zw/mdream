@@ -650,7 +650,7 @@ pub struct ConvertState {
   /// it. Recomputing walks the whole line, which is quadratic over a long one.
   line_start: usize,
   line_start_scanned_to: usize,
-  /// Length of the `#`/space run a heading holds back for its closing-sequence
+  /// Upper bound on the `#`/space run a heading holds back for its closing-sequence
   /// escape, counted as text is written.
   heading_hash_run: usize,
   /// `max_node_bytes` fired on held-back output: input past that point is dropped.
@@ -2151,8 +2151,29 @@ impl ConvertState {
   /// flush happened to release, so chunking cannot move where it fires.
   fn held_output_exceeds_cap(&mut self) -> bool {
     let cap = self.options.max_node_bytes;
+    // The counter only bounds the run from above: output that survives between
+    // two runs (`<br>`, an image) breaks it without resetting the count. Past the
+    // cap the buffer decides, and the count drops to what it shows only once no
+    // open element can still retract output and rejoin the run.
     if self.heading_hash_run > cap {
-      return true;
+      let run = self
+        .buffer
+        .as_bytes()
+        .iter()
+        .rev()
+        .take(cap + 1)
+        .take_while(|&&byte| matches!(byte, b'#' | b' ' | b'\t'))
+        .count();
+      if run > cap {
+        return true;
+      }
+      if self.open_markers.is_empty()
+        && self.code_spans.is_empty()
+        && self.depth_map[TAG_A as usize] == 0
+        && self.first_tentative_caption_start().is_none()
+      {
+        self.heading_hash_run = run;
+      }
     }
     let len = self.buffer.len();
     if len <= cap {

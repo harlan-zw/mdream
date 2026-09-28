@@ -1720,6 +1720,28 @@ fn held_back_output_is_capped() {
       options(CAP),
     ),
     (
+      "heading hashes behind an empty emphasis",
+      format!(
+        "<p>before</p><h1>{}</h1><p>after</p>",
+        repeat_to("#<em> </em>", HUGE)
+      ),
+      options(CAP),
+    ),
+    (
+      "heading hashes behind an empty link",
+      format!(
+        "<p>before</p><h1>{}</h1><p>after</p>",
+        repeat_to("####<a href=\"/x\"> </a>", HUGE)
+      ),
+      HTMLToMarkdownOptions {
+        clean: Some(CleanConfig {
+          empty_link_text: true,
+          ..Default::default()
+        }),
+        ..options(CAP)
+      },
+    ),
+    (
       "self-link heading",
       format!(
         "<p>before</p><h1><a href=\"#a\">{}</a></h1><p>after</p>",
@@ -1775,4 +1797,27 @@ fn a_long_quote_of_short_lines_is_not_held_back() {
   );
   let batch = html_to_markdown_result(&html, options(CAP));
   assert_eq!((batch.markdown, batch.truncated), (uncapped, false));
+}
+
+// Output that stays between two short `#` runs splits them, however much `#`
+// the heading holds in total.
+#[test]
+fn heading_hashes_split_by_kept_output_are_not_held_back() {
+  for unit in [" ##<br>", "##<img src=\"/i.png\">"] {
+    let html = format!("<h2>{}</h2><p>after</p>", repeat_to(unit, HUGE));
+    let uncapped = html_to_markdown_result(&html, options(0));
+    let batch = html_to_markdown_result(&html, options(CAP));
+    assert_eq!(
+      (batch.markdown.as_str(), batch.truncated),
+      (uncapped.markdown.as_str(), false),
+      "{unit}"
+    );
+    for chunk in [37, 8 * 1024, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, chunk, CAP),
+        (uncapped.markdown.clone(), false),
+        "{unit} chunk={chunk}"
+      );
+    }
+  }
 }
