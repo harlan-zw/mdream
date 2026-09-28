@@ -96,6 +96,10 @@ enum Tag {
   Img,
   Div,
   Blockquote,
+  Noscript,
+  Iframe,
+  Style,
+  Datalist,
   Custom(u8),
 }
 
@@ -108,6 +112,10 @@ impl Tag {
       Self::Img => "img".into(),
       Self::Div => "div".into(),
       Self::Blockquote => "blockquote".into(),
+      Self::Noscript => "noscript".into(),
+      Self::Iframe => "iframe".into(),
+      Self::Style => "style".into(),
+      Self::Datalist => "datalist".into(),
       Self::Custom(len) => {
         let mut name = String::from("x-");
         for _ in 0..*len {
@@ -173,7 +181,7 @@ fn options(input: &Input) -> HTMLToMarkdownOptions {
       frontmatter: None,
       tailwind: input.tailwind.then_some(TailwindConfig),
       extraction: input.extraction.then(|| ExtractionConfig {
-        selectors: vec!["a".into()],
+        selectors: vec!["a".into(), "noscript".into()],
       }),
       tag_overrides: None,
     }),
