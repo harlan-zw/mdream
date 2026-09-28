@@ -508,6 +508,11 @@ fn links_inside_raw_html_blocks_are_safe_html() {
       r#"<details><a href="javascript:alert(1)">visible</a></details>"#,
       "<details>visible</details>",
     ),
+    // Closing the inner link must not end escaping for the rest of the outer one.
+    (
+      r#"<details><a href="/o">[pre]<div><a href="/i">[in]</a>[after]</div></a></details>"#,
+      r#"<details><a href="/o">&#91;pre&#93;<a href="/i">&#91;in&#93;</a>&#91;after&#93;</a></details>"#,
+    ),
   ] {
     assert_eq!(convert(html), expected, "html={html:?}");
   }
