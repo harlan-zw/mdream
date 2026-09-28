@@ -135,7 +135,7 @@ impl MarkdownStreamProcessor {
 
   /// Whether [`HTMLToMarkdownOptions::max_node_bytes`] has fired so far. `false`
   /// guarantees the output matches an uncapped conversion; `true` is conservative,
-  /// since dropping a comment or an unemitted attribute costs no output.
+  /// since dropping an unemitted attribute costs no output.
   pub fn truncated(&self) -> bool {
     self.state.truncated
   }
@@ -349,6 +349,100 @@ mod dropped_raw_text {
           stream(&parts, true),
           "html={html:?} split={split}"
         );
+      }
+    }
+  }
+}
+
+#[cfg(test)]
+mod ignored_declarations {
+  use super::MarkdownStreamProcessor;
+  use super::types::HTMLToMarkdownOptions;
+
+  fn stream(parts: &[&str], cap: usize) -> (String, bool, usize) {
+    let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+      max_node_bytes: cap,
+      ..Default::default()
+    });
+    let mut out = String::new();
+    let mut carried = 0;
+    for part in parts {
+      out.push_str(&processor.process_chunk(part));
+      carried = carried.max(processor.buffer.len());
+    }
+    out.push_str(&processor.finish());
+    (out, processor.truncated(), carried)
+  }
+
+  // Carrying the declaration would make every chunk re-read it from `<!`.
+  #[test]
+  fn a_huge_declaration_is_not_carried() {
+    let body = "x".repeat(1536 * 1024);
+    for (open, close) in [
+      ("<!--", "-->"),
+      ("<!DOCTYPE ", ">"),
+      ("<!x", ">"),
+      ("<![CDATA[", "]]>"),
+    ] {
+      let html = format!("<p>a</p>{open}{body}{close}<p>b</p>");
+      for cap in [0, 1024 * 1024] {
+        for chunk in [1000, 4096] {
+          let parts: Vec<&str> = html
+            .as_bytes()
+            .chunks(chunk)
+            .map(|c| std::str::from_utf8(c).unwrap())
+            .collect();
+          let (out, truncated, carried) = stream(&parts, cap);
+          let case = format!("{open} cap={cap} chunk={chunk}");
+          assert_eq!(out, "a\n\nb", "{case}");
+          assert!(!truncated, "{case}");
+          assert!(carried <= "<![CDATA".len(), "{case}: carried {carried}");
+        }
+      }
+    }
+  }
+
+  // Skipping resumes a different scanner than a one-shot parse, so every split
+  // of every short body must end the declaration at the same byte.
+  #[test]
+  fn a_declaration_ends_at_the_same_byte_at_every_split() {
+    for (open, alphabet) in [("<!--", "-!>a"), ("<!x", "-!>a"), ("<![CDATA[", "]>a-")] {
+      let mut bodies = vec![String::new()];
+      let mut last = bodies.clone();
+      for _ in 0..6 {
+        last = last
+          .iter()
+          .flat_map(|b| alphabet.chars().map(move |c| format!("{b}{c}")))
+          .collect();
+        bodies.extend(last.iter().cloned());
+      }
+      for body in &bodies {
+        let html = format!("a{open}{body}b");
+        let expected = stream(&[&html], 0);
+        for split in 0..=html.len() {
+          let actual = stream(&[&html[..split], &html[split..]], 0);
+          assert_eq!(actual.0, expected.0, "html={html:?} split={split}");
+          assert!(!actual.1, "html={html:?} split={split}");
+        }
+      }
+    }
+  }
+
+  #[test]
+  fn comment_text_inside_rawtext_stays_text() {
+    for html in [
+      "<textarea>a<!--b</textarea>c",
+      "<textarea>a<!--b-->c</textarea>d",
+    ] {
+      let expected = stream(&[html], 0);
+      assert!(
+        expected.0.contains("<!--b"),
+        "html={html:?}: {:?}",
+        expected.0
+      );
+      for split in 0..=html.len() {
+        let actual = stream(&[&html[..split], &html[split..]], 0);
+        assert_eq!(actual.0, expected.0, "html={html:?} split={split}");
       }
     }
   }
