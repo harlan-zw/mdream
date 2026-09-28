@@ -581,6 +581,36 @@ impl ConvertState {
     self.buffer.len() >= STREAMING_FLUSH_THRESHOLD && !self.blockquotes.is_empty()
   }
 
+  /// These options rewrite across the whole document, so nothing streams early.
+  pub(super) fn retains_whole_document(&self) -> bool {
+    self.clean_flags & CLEAN_FRAGMENTS != 0 || self.has_frontmatter || self.has_extraction
+  }
+
+  /// Where the earliest construct keeping quoted lines from being flushed began:
+  /// each is a pending rewrite at an absolute buffer offset, which quoting the
+  /// content before it would shift.
+  pub(super) fn blockquote_flush_blocker(&self) -> Option<usize> {
+    let link_start = (self.depth_map[TAG_A as usize] > 0).then(|| {
+      let outermost = self.parent_links.first().unwrap_or(&self.link);
+      if outermost.open {
+        outermost.bracket_pos
+      } else {
+        0
+      }
+    });
+    [
+      self.open_markers.first().map(|marker| marker.output_start),
+      self.first_tentative_caption_start(),
+      self.code_fence.as_ref().map(|fence| fence.output_start),
+      self.code_spans.first().map(|span| span.output_start),
+      link_start,
+      self.empty_item_hazard.then_some(self.empty_item_line_start),
+    ]
+    .into_iter()
+    .flatten()
+    .min()
+  }
+
   pub(crate) fn flush_streaming_blockquote_lines(&mut self) {
     self.flush_streaming_blockquote_lines_upto(usize::MAX);
   }
@@ -595,17 +625,8 @@ impl ConvertState {
   /// only lines it would already release get quoted.
   pub(crate) fn flush_streaming_blockquote_lines_upto(&mut self, limit: usize) {
     if !self.streaming_flush_possible()
-      || self.clean_flags & CLEAN_FRAGMENTS != 0
-      || self.has_frontmatter
-      || self.has_extraction
-      // These pending rewrites keep absolute buffer offsets. Quoting content
-      // before them shifts those offsets, so wait until each rewrite settles.
-      || !self.open_markers.is_empty()
-      || self.first_tentative_caption_start().is_some()
-      || self.code_fence.is_some()
-      || !self.code_spans.is_empty()
-      || self.depth_map[TAG_A as usize] > 0
-      || self.empty_item_hazard
+      || self.retains_whole_document()
+      || self.blockquote_flush_blocker().is_some()
     {
       return;
     }
@@ -1190,23 +1211,27 @@ impl ConvertState {
       };
       self.begin_link(bracket_pos, false);
       self.link.bracket_emitted = emitted_bracket;
-      // Avoid the href lookup and hold bookkeeping for one-shot conversion.
-      if self.streaming {
+      // Avoid the href lookup and hold bookkeeping for one-shot conversion, unless
+      // `max_node_bytes` has to charge what the link holds back.
+      if self.streaming || self.options.max_node_bytes != 0 {
         let has_rewrite_anchor = emitted_bracket && !exit_is_overridden;
-        self.link.hold_released = !has_rewrite_anchor;
-        self.link.empty_text_pending =
-          has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
         let href = self.stack[stack_len - 1].attributes.get("href");
-        self.link.url_max_len = href.map_or(0, |href| {
-          6 + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
-        });
-        self.link.hold_forever = has_rewrite_anchor
+        self.link.pins_output = has_rewrite_anchor
           && href.is_some_and(|href| {
             href.starts_with('#')
               && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
                 || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0
                   && (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0)))
           });
+        if self.streaming {
+          self.link.hold_forever = self.link.pins_output;
+          self.link.hold_released = !has_rewrite_anchor;
+          self.link.empty_text_pending =
+            has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
+          self.link.url_max_len = href.map_or(0, |href| {
+            6 + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
+          });
+        }
       }
     }
 
@@ -1605,6 +1630,9 @@ impl ConvertState {
       }
     }
 
+    if tag_id.is_some_and(|id| id.wrapping_sub(TAG_H1) < 6) {
+      self.heading_hash_run = 0;
+    }
     if let Some(id) = tag_id
       && id.wrapping_sub(TAG_H1) < 6
       && self.depth_map[TAG_A as usize] == 0
@@ -2159,6 +2187,7 @@ impl ConvertState {
       text
     };
 
+    let written_from = self.buffer.len();
     if self.wrap_width != 0 && self.can_wrap_here() {
       self.push_text_wrapped(text, last_char);
     } else if !(owns_leading_space || (self.plain_text && self.depth_map[TAG_PRE as usize] > 0))
@@ -2181,6 +2210,22 @@ impl ConvertState {
 
     if !self.open_markers.is_empty() && text.as_bytes().iter().any(|&b| !is_whitespace(b)) {
       self.open_markers.clear();
+    }
+
+    if self.options.max_node_bytes != 0
+      && self.in_heading()
+      && let Some(written) = self.buffer.as_bytes().get(written_from..)
+    {
+      let run = written
+        .iter()
+        .rev()
+        .take_while(|&&byte| matches!(byte, b'#' | b' ' | b'\t'))
+        .count();
+      self.heading_hash_run = if run == written.len() {
+        self.heading_hash_run + run
+      } else {
+        run
+      };
     }
 
     self.last_text_node_contains_whitespace = contains_whitespace;
@@ -3107,9 +3152,8 @@ impl ConvertState {
     self.line_start_scanned_to = usize::MAX;
   }
 
-  /// Whether the current line opens a raw HTML block, which suspends Markdown
-  /// again until the next blank line.
-  fn line_opens_raw_html_block(&mut self) -> bool {
+  /// Offset just past the buffer's last `\n`.
+  pub(super) fn current_line_start(&mut self) -> usize {
     let len = self.buffer.len();
     let bytes = self.buffer.as_bytes();
     // Only bytes appended since the last call can move the line start; a buffer
@@ -3126,6 +3170,15 @@ impl ConvertState {
       self.line_start = self.line_start_scanned_to + i + 1;
     }
     self.line_start_scanned_to = len;
+    self.line_start
+  }
+
+  /// Whether the current line opens a raw HTML block, which suspends Markdown
+  /// again until the next blank line.
+  fn line_opens_raw_html_block(&mut self) -> bool {
+    self.current_line_start();
+    let len = self.buffer.len();
+    let bytes = self.buffer.as_bytes();
 
     // A `line_start` of zero is the drained buffer's front, not the line's, once
     // a drain has taken this line's beginning: the fragment left behind can open

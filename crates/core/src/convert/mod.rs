@@ -197,6 +197,9 @@ struct LinkOutputState {
   skipped: bool,
   url_max_len: usize,
   hold_forever: bool,
+  /// What makes a streamed link `hold_forever`, set in one-shot conversion too so
+  /// `max_node_bytes` measures the hold the same way in both.
+  pins_output: bool,
   hold_released: bool,
   empty_text_pending: bool,
   /// This anchor wrote its own `[`. Without it the exit's forward scan reaches
@@ -647,6 +650,11 @@ pub struct ConvertState {
   /// it. Recomputing walks the whole line, which is quadratic over a long one.
   line_start: usize,
   line_start_scanned_to: usize,
+  /// Upper bound on the `#`/space run a heading holds back for its closing-sequence
+  /// escape, counted as text is written.
+  heading_hash_run: usize,
+  /// `max_node_bytes` fired on held-back output: input past that point is dropped.
+  held_output_exceeded: bool,
   /// Columns the delimiter row promised; cells past it would be dropped by GFM.
   table_header_cells: usize,
   /// Widest row `max_node_bytes` allows, chosen so the delimiter row it forces
@@ -865,6 +873,8 @@ impl ConvertState {
       raw_html_scanned_to: 0,
       line_start: 0,
       line_start_scanned_to: 0,
+      heading_hash_run: 0,
+      held_output_exceeded: false,
       table_header_cells: 0,
       truncated: false,
       table_column_cap: if options_max_node_bytes == 0 {
@@ -1056,6 +1066,15 @@ impl ConvertState {
     if exhausted {
       self.text_node_exhausted = false;
     }
+    // Every markup token completes the text before it, so this sees the same
+    // states whatever the chunking. The parser stops before that token.
+    if self.options.max_node_bytes != 0
+      && !self.held_output_exceeded
+      && self.held_output_exceeds_cap()
+    {
+      self.held_output_exceeded = true;
+      self.truncated = true;
+    }
   }
 
   fn process_script_chunk(&mut self, chunk: &str, start: usize) -> ScriptChunk {
@@ -1119,6 +1138,9 @@ impl ConvertState {
   /// caller keeps the rest; returning an owned tail instead would copy a token
   /// that spans many chunks once per chunk, which is quadratic.
   pub fn process_html(&mut self, chunk: &str) -> usize {
+    if self.held_output_exceeded {
+      return self.drop_after_held_output_exceeded(String::new(), chunk.len());
+    }
     self.rawtext_end_tag_pending = false;
     // Non-empty only when the previous chunk ended mid-text: that run continues
     // here instead of being re-fed as raw input. Every flush leaves it empty.
@@ -1419,6 +1441,9 @@ impl ConvertState {
           }
           if raw_name.eq_ignore_ascii_case(peek_name) {
             self.complete_text_node(&mut text_buffer);
+            if self.held_output_exceeded {
+              return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+            }
             run_start = i;
             let result = self.process_closing_tag(chunk, i);
             if result.complete {
@@ -1473,6 +1498,9 @@ impl ConvertState {
           if current_tag_id.is_some_and(|tag_id| Some(tag_id) == peek_tag_id) {
             // Matching closing tag: fall through to normal closing tag processing
             self.complete_text_node(&mut text_buffer);
+            if self.held_output_exceeded {
+              return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+            }
             run_start = i;
             let result = self.process_closing_tag(chunk, i);
             if result.complete {
@@ -1516,6 +1544,9 @@ impl ConvertState {
           if let Some(rel) = after_open.find("]]>") {
             let token_len = "<![CDATA[".len() + rel + 3;
             self.complete_text_node(&mut text_buffer);
+            if self.held_output_exceeded {
+              return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+            }
             run_start = i;
             if max_node_bytes != 0 && token_len > max_node_bytes {
               if self.has_surfaced_cdata() {
@@ -1540,6 +1571,9 @@ impl ConvertState {
           break;
         }
         self.complete_text_node(&mut text_buffer);
+        if self.held_output_exceeded {
+          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+        }
         run_start = i;
         let result = process_comment_or_doctype(chunk, i);
         if result.complete {
@@ -1555,6 +1589,9 @@ impl ConvertState {
         }
       } else if next == SLASH_CHAR {
         self.complete_text_node(&mut text_buffer);
+        if self.held_output_exceeded {
+          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+        }
         run_start = i;
         let result = self.process_closing_tag(chunk, i);
         if result.complete {
@@ -1638,6 +1675,9 @@ impl ConvertState {
         i2 = tag_name_end;
 
         self.complete_text_node(&mut text_buffer);
+        if self.held_output_exceeded {
+          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+        }
         run_start = i;
 
         // Under `ATTR_ALL` nothing is unwanted, so a retained-byte budget would
@@ -1725,6 +1765,21 @@ impl ConvertState {
     };
     self.parse_text_buffer = text_buffer;
     consumed
+  }
+
+  /// Input past the token where held-back output outgrew the cap is dropped, so
+  /// the result is the document cut there, however it was chunked.
+  fn drop_after_held_output_exceeded(
+    &mut self,
+    mut text_buffer: String,
+    chunk_length: usize,
+  ) -> usize {
+    text_buffer.clear();
+    self.parse_text_buffer = text_buffer;
+    self.pending_start = None;
+    self.pending_tag = None;
+    self.discard = Discard::No;
+    chunk_length
   }
 
   /// Drop a token that outgrew the cap instead of carrying it. The element is
@@ -2089,6 +2144,63 @@ impl ConvertState {
         parent.hold_released = true;
       }
     }
+  }
+
+  /// Whether output held back behind an open construct has outgrown
+  /// `max_node_bytes`. Measured from the construct's structure, never from what a
+  /// flush happened to release, so chunking cannot move where it fires.
+  fn held_output_exceeds_cap(&mut self) -> bool {
+    let cap = self.options.max_node_bytes;
+    // The counter only bounds the run from above: output that survives between
+    // two runs (`<br>`, an image) breaks it without resetting the count. Past the
+    // cap the buffer decides, and the count drops to what it shows only once no
+    // open element can still retract output and rejoin the run.
+    if self.heading_hash_run > cap {
+      let run = self
+        .buffer
+        .as_bytes()
+        .iter()
+        .rev()
+        .take(cap + 1)
+        .take_while(|&&byte| matches!(byte, b'#' | b' ' | b'\t'))
+        .count();
+      if run > cap {
+        return true;
+      }
+      if self.open_markers.is_empty()
+        && self.code_spans.is_empty()
+        && self.depth_map[TAG_A as usize] == 0
+        && self.first_tentative_caption_start().is_none()
+      {
+        self.heading_hash_run = run;
+      }
+    }
+    let len = self.buffer.len();
+    if len <= cap {
+      return false;
+    }
+    let mut floor = len;
+    // Other link holds end within the link's URL length.
+    if let Some(bracket_pos) = std::iter::once(&self.link)
+      .chain(&self.parent_links)
+      .filter(|link| link.open && link.pins_output)
+      .map(|link| link.bracket_pos)
+      .min()
+    {
+      floor = floor.min(bracket_pos);
+    }
+    // A quote releases completed lines only, and none while a blocker is open.
+    if !self.retains_whole_document()
+      && let Some(content_start) = self.blockquotes.first().map(|frame| frame.content_start)
+      && len.saturating_sub(content_start) > cap
+    {
+      let reach = match self.blockquote_flush_blocker() {
+        Some(blocker) => blocker,
+        None => self.current_line_start(),
+      };
+      floor = floor.min(content_start.max(reach));
+    }
+    len - floor > cap
   }
 
   pub fn get_markdown_chunk(&mut self) -> String {

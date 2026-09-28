@@ -660,6 +660,12 @@ pub struct HTMLToMarkdownOptions {
   /// readable, so none can be classified as unused; there the cap is measured
   /// against the tag's raw length and an over-long tag is dropped whole.
   ///
+  /// Output an open construct holds back from streaming is charged too: a quote's
+  /// unfinished line (or all of it while a link inside is open), a heading's
+  /// trailing `#` run, a self-link heading's text. Past the cap nothing can be
+  /// dropped without breaking the construct, so the document is cut before the
+  /// next tag.
+  ///
   /// [`MdreamResult::truncated`] reports whether it fired.
   pub max_node_bytes: usize,
 }
