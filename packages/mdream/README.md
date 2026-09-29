@@ -99,7 +99,7 @@ externals: ['mdream']
 
 ### `htmlToMarkdown()`
 
-Converts a complete HTML string to Markdown, plain text, or HTML synchronously.
+Converts a complete HTML string to Markdown, plain text, or HTML. It is synchronous in Node and on edge runtimes.
 
 **Rust engine** (`mdream`):
 
@@ -107,6 +107,9 @@ Converts a complete HTML string to Markdown, plain text, or HTML synchronously.
 import { htmlToMarkdown } from 'mdream'
 
 function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): string
+
+// Browser bundles and the CDN script load the WASM binary first
+function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): Promise<string>
 ```
 
 **JS engine** (`@mdream/js`):
@@ -228,7 +231,7 @@ interface MdreamOptions {
   tailwind?: boolean
 
   /** Filter elements by CSS selectors. Default when minimal: excludes form, nav, footer, etc. */
-  filter?: { include?: string[], exclude?: string[], processChildren?: boolean }
+  filter?: false | { include?: string[], exclude?: string[], processChildren?: boolean }
 
   /** Extract elements matching CSS selectors during conversion. */
   extraction?: Record<string, (element: ExtractedElement) => void>
@@ -275,7 +278,7 @@ interface EngineOptions {
 }
 
 interface BuiltinPlugins {
-  filter?: { include?: (string | number)[], exclude?: (string | number)[], processChildren?: boolean }
+  filter?: false | { include?: (string | number)[], exclude?: (string | number)[], processChildren?: boolean }
   frontmatter?: boolean | ((fm: Record<string, string>) => void) | FrontmatterConfig
   isolateMain?: boolean
   tailwind?: boolean
