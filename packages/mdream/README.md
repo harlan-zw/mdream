@@ -176,7 +176,7 @@ import { htmlToMarkdown } from '@mdream/js'
 import { htmlToMarkdown } from 'mdream'
 ```
 
-Both engines accept the same declarative plugin configuration (`origin`, `minimal`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, `extraction`, `tagOverrides`, `clean`). The JS engine additionally supports `hooks` for imperative plugin transforms.
+Both engines support the same declarative plugins, but the option shape differs. The Rust engine takes `minimal`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, `extraction`, and `tagOverrides` at the top level. The JS engine reads the plugins from `options.plugins` and has no `minimal` option: use `withMinimalPreset()` from `@mdream/js/preset/minimal`. The JS engine also supports `hooks` for imperative plugin transforms.
 
 ## Options
 
@@ -336,7 +336,7 @@ Override how specific HTML tags are rendered in Markdown. String values act as a
 >
 > ```ts
 > htmlToMarkdown('<my-em>hi</my-em>', { tagOverrides: { 'my-em': 'em' } })
-> // → "_hi_"
+> // → "*hi*"
 > ```
 
 ```ts
@@ -375,12 +375,12 @@ const markdown = htmlToMarkdown(html, {
 })
 ```
 
-**Output is GitHub Flavored Markdown.** Mdream emits a fixed GFM dialect tuned for LLM input: ATX headings (`#`), fenced code blocks (` ``` `), `-` bullets, `_` emphasis, `**` strong, `---` horizontal rules, inline links. These are not configurable. For simple delimiter swaps you can use `tagOverrides`:
+**Output is GitHub Flavored Markdown.** Mdream emits a fixed GFM dialect tuned for LLM input: ATX headings (`#`), fenced code blocks (` ``` `), `-` bullets, `*` emphasis, `**` strong, `---` horizontal rules, inline links. These are not configurable. For simple delimiter swaps you can use `tagOverrides`:
 
 ```ts
 htmlToMarkdown(html, {
   tagOverrides: {
-    em: { enter: '*', exit: '*', isInline: true }, // _x_  →  *x*
+    em: { enter: '_', exit: '_', isInline: true }, // *x*  →  _x_
     strong: { enter: '__', exit: '__', isInline: true }, // **x** →  __x__
     hr: { enter: '* * *', exit: '' }, // ---  →  * * *
   },
@@ -957,7 +957,7 @@ catch (error) {
 }
 ```
 
-If your toolchain doesn't resolve the export conditions, the raw wasm-bindgen build (web target) is exposed at `mdream/wasm` for manual initialization:
+If your toolchain doesn't resolve the export conditions, the raw wasm-bindgen build (web target) is exposed at `mdream/wasm` for manual initialization. It is the engine binding: it takes the engine option shape (`{ plugins: { frontmatter: {} } }`), not `MdreamOptions`.
 
 ```ts
 import init, { htmlToMarkdown } from 'mdream/wasm'
@@ -967,49 +967,18 @@ await init({ module_or_path: wasmModule })
 const markdown = htmlToMarkdown('<h1>Hello</h1>', {})
 ```
 
-You can also import the edge entry point directly:
-
-```ts
-import { htmlToMarkdown } from 'mdream/worker'
-```
-
-The `mdream/worker` entry provides an async API since WASM must be initialized first:
-
-```ts
-import { htmlToMarkdown, initWorker, terminateWorker } from 'mdream/worker'
-
-// Initialize once with the WASM URL
-await initWorker('https://cdn.example.com/mdream_edge_bg.wasm')
-
-// Convert (returns Promise<string>)
-const markdown = await htmlToMarkdown('<h1>Hello</h1>')
-
-// Clean up when done
-terminateWorker()
-```
+`mdream/worker` is not an edge entry. It runs the conversion in a browser Web Worker; see [Web Worker](#web-worker).
 
 ### Browser CDN (IIFE)
 
-Use mdream directly via CDN with no build step. Call `init()` once to load the WASM binary, then use `htmlToMarkdown()` synchronously.
+Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It returns a result object: read the Markdown from `.markdown`. It takes the engine option shape, the same as `mdream/wasm`.
 
 ```html
 <script src="https://unpkg.com/mdream/dist/iife.js"></script>
 <script>
-  await window.mdream.init()
-  const markdown = window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
+  const { markdown } = window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
   console.log(markdown) // # Hello\n\nWorld
 </script>
-```
-
-You can pass a custom WASM URL or `ArrayBuffer` to `init()`:
-
-```js
-// Custom URL
-await window.mdream.init('https://cdn.example.com/mdream_edge_bg.wasm')
-
-// Pre-loaded ArrayBuffer
-const wasmBytes = await fetch('/wasm/mdream_edge_bg.wasm').then(r => r.arrayBuffer())
-await window.mdream.init(wasmBytes)
 ```
 
 **CDN Options:**
@@ -1051,10 +1020,10 @@ if (article) {
 
 ## llms.txt Generation
 
-For llms.txt artifact generation, use the separate `@mdream/llms-txt` package. It accepts pre-converted Markdown and generates `llms.txt` and `llms-full.txt` artifacts.
+For llms.txt artifact generation, use `@mdream/js/llms-txt` from the `@mdream/js` package. It accepts pre-converted Markdown and generates `llms.txt` and `llms-full.txt` artifacts.
 
 ```ts
-import { generateLlmsTxtArtifacts } from '@mdream/llms-txt'
+import { generateLlmsTxtArtifacts } from '@mdream/js/llms-txt'
 import { htmlToMarkdown } from 'mdream'
 
 const result = await generateLlmsTxtArtifacts({
@@ -1076,8 +1045,7 @@ console.log(result.llmsFullTxt) // llms-full.txt content
 | Package | Description |
 |---------|-------------|
 | [`mdream`](https://npmjs.com/package/mdream) | Core HTML to Markdown converter (Rust + WASM engine) |
-| [`@mdream/js`](https://npmjs.com/package/@mdream/js) | JavaScript engine with hook-based plugins and splitter |
-| [`@mdream/llms-txt`](https://github.com/harlan-zw/mdream/tree/main/packages/llms-txt) | Engine-agnostic llms.txt artifact generation |
+| [`@mdream/js`](https://npmjs.com/package/@mdream/js) | JavaScript engine with hook-based plugins, splitter, and llms.txt generation (`@mdream/js/llms-txt`) |
 | [`@mdream/crawl`](https://github.com/harlan-zw/mdream/tree/main/packages/crawl) | Site-wide crawler for llms.txt generation |
 | [`@mdream/vite`](https://github.com/harlan-zw/mdream/tree/main/packages/vite) | Vite plugin integration |
 | [`@mdream/nuxt`](https://github.com/harlan-zw/mdream/tree/main/packages/nuxt) | Nuxt module integration |

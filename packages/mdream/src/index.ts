@@ -49,8 +49,8 @@ export interface MdreamOptions {
   origin?: string
   /**
    * Clean up the markdown output. Pass `true` for all cleanup or an object
-   * to enable specific features. `clean.urls` is handled during conversion;
-   * other options are post-processing steps (sync API only).
+   * to enable specific features. Both `htmlToMarkdown` and
+   * `streamHtmlToMarkdown` apply it.
    */
   clean?: boolean | CleanOptions
   /** Enable minimal preset (frontmatter, isolateMain, tailwind, filter). Default: false */
