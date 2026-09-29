@@ -51,6 +51,7 @@
     "bin",
     "dist",
     "napi/",
+    "skills",
     "wasm-bundler/",
     "wasm/"
   ],
