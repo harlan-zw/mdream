@@ -694,6 +694,9 @@ pub struct ConvertState {
   /// Test/fuzz-only: disables draining to prove it never alters streamed bytes.
   #[cfg(any(test, fuzzing))]
   pub(crate) disable_drain: bool,
+  /// Test-only: buffers dropped raw text to prove skipping it never alters output.
+  #[cfg(test)]
+  pub(crate) keep_dropped_raw_text: bool,
 
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
   /// hot path — a single integer compare). Code/tables/headings are exempt.
@@ -898,6 +901,8 @@ impl ConvertState {
       buffer_start_column: 0,
       #[cfg(any(test, fuzzing))]
       disable_drain: false,
+      #[cfg(test)]
+      keep_dropped_raw_text: false,
 
       wrap_width: options_wrap_width,
       format,
@@ -1329,6 +1334,15 @@ impl ConvertState {
           continue;
         }
 
+        if self.in_non_nesting && self.drops_raw_text() {
+          while i < chunk_length && bytes[i] != LT_CHAR {
+            i += 1;
+          }
+          self.last_char_was_whitespace = false;
+          self.just_closed_tag = false;
+          continue;
+        }
+
         // Script/style rawtext is excluded from output. Scan directly to the
         // next potential tag instead of routing every byte through the general
         // text path. Quotes are ordinary rawtext bytes; HTML closes these
@@ -1517,14 +1531,16 @@ impl ConvertState {
           }
         }
         // Not a matching closing tag: treat '<' as literal text
-        let before_len = text_buffer.len();
-        self.truncated |= push_capped_text_node(
-          &mut text_buffer,
-          "<",
-          max_node_bytes,
-          &mut self.text_node_exhausted,
-        );
-        self.text_buffer_contains_non_whitespace |= text_buffer.len() != before_len;
+        if !self.drops_raw_text() {
+          let before_len = text_buffer.len();
+          self.truncated |= push_capped_text_node(
+            &mut text_buffer,
+            "<",
+            max_node_bytes,
+            &mut self.text_node_exhausted,
+          );
+          self.text_buffer_contains_non_whitespace |= text_buffer.len() != before_len;
+        }
         self.last_char_was_whitespace = false;
         self.just_closed_tag = false;
         i += 1;
@@ -1844,6 +1860,20 @@ impl ConvertState {
     };
   }
 
+  /// Raw text its element drops and no extraction reads, so it can be skipped
+  /// like unread script data.
+  fn drops_raw_text(&self) -> bool {
+    #[cfg(test)]
+    if self.keep_dropped_raw_text {
+      return false;
+    }
+    self.extraction_tracked.is_empty()
+      && self
+        .stack
+        .last()
+        .is_some_and(|node| node.excludes_text_nodes)
+  }
+
   /// Whether CDATA sections surface as output through a `#cdata-section`
   /// override, making a dropped one a lost-output truncation.
   fn has_surfaced_cdata(&self) -> bool {
@@ -2042,11 +2072,25 @@ impl ConvertState {
   /// end tag, so the residual is text unless it is an appropriate end tag that
   /// already reached a tag state.
   pub fn finalize(&mut self, leftover: &str) {
+    let in_script = self
+      .stack
+      .last()
+      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none());
+    // A rawtext residual continues the text run already pending, so it has to
+    // join that buffer rather than be flushed as a second text node: two nodes
+    // are separated by a space this text never contained.
+    let rawtext_text = !in_script
+      && leftover.as_bytes().first() == Some(&LT_CHAR)
+      && self.in_non_nesting
+      && !self.rawtext_end_tag_pending;
+    let dropped = rawtext_text && self.drops_raw_text();
     // Tokens abandoned at EOF are only reported here. A parked start tag counts
     // just when the cap fired on it: a mask-rejected attribute is absent from an
     // uncapped parse too, so losing it loses nothing.
     if !matches!(self.discard, Discard::No)
-      || (self.options.max_node_bytes != 0 && leftover.len() > self.options.max_node_bytes)
+      || (self.options.max_node_bytes != 0
+        && leftover.len() > self.options.max_node_bytes
+        && !dropped)
       || self
         .pending_start
         .as_ref()
@@ -2054,22 +2098,12 @@ impl ConvertState {
     {
       self.truncated = true;
     }
-    let in_script = self
-      .stack
-      .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none());
     if in_script {
       self.push_script_text(leftover);
       self.flush_script_text();
       self.script_data_state = SCRIPT_DATA;
     } else {
-      // A rawtext residual continues the text run already pending, so it has to
-      // join that buffer rather than be flushed as a second text node: two nodes
-      // are separated by a space this text never contained.
-      let rawtext_text = leftover.as_bytes().first() == Some(&LT_CHAR)
-        && self.in_non_nesting
-        && !self.rawtext_end_tag_pending;
-      if rawtext_text {
+      if rawtext_text && !dropped {
         let before_len = self.parse_text_buffer.len();
         self.truncated |= push_capped_text_node(
           &mut self.parse_text_buffer,

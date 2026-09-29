@@ -1495,6 +1495,42 @@ fn an_extracted_script_is_capped_like_any_text() {
   );
 }
 
+// Text these elements drop is never output, so unless an extraction reads it,
+// it is neither buffered nor charged to the cap.
+#[test]
+fn dropped_raw_text_is_not_buffered() {
+  let body = repeat_to("hello <b>world</b> &amp; ", HUGE);
+  for tag in [
+    "noscript", "iframe", "noframes", "noembed", "datalist", "style",
+  ] {
+    let html = format!("<p>a</p><{tag}>{body}</{tag}><p>b</p>");
+    for cap in [0, CAP] {
+      let observed = peak(&html, 8 * 1024, cap);
+      assert!(
+        observed < (HUGE / 8) as u64,
+        "{tag} cap={cap}: peak {observed} should not track the body"
+      );
+      let (out, truncated) = stream_reporting(&html, 8 * 1024, cap);
+      assert_eq!(out, "a\n\nb", "{tag} cap={cap}");
+      assert!(!truncated, "{tag} cap={cap}");
+    }
+    let unterminated = format!("<p>a</p><{tag}>body</{}", &tag[..tag.len() - 1]);
+    assert!(
+      !html_to_markdown_result(&unterminated, options(4)).truncated,
+      "{tag} unterminated"
+    );
+  }
+}
+
+#[test]
+fn extracted_raw_text_is_still_read_and_capped() {
+  let body = repeat_to("x", 200);
+  let html = format!("<noscript>{body}</noscript>");
+  let read = html_to_markdown_result(&html, extracting(0, &["noscript"]));
+  assert_eq!(read.extracted.unwrap()[0].text_content, body);
+  assert!(html_to_markdown_result(&html, extracting(64, &["noscript"])).truncated);
+}
+
 // A node arriving while the fence sits just under the cap used to be appended
 // whole, taking the block to twice the cap.
 #[test]
