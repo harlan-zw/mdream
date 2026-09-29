@@ -26,7 +26,7 @@ await wasm.default()
 const entries: { name: string, convert: Convert, stream: Stream }[] = [
   { name: 'node', convert: async (html, options) => node.htmlToMarkdown(html, options), stream: node.streamHtmlToMarkdown },
   { name: 'edge', convert: async (html, options) => edge.htmlToMarkdown(html, options), stream: edge.streamHtmlToMarkdown },
-  { name: 'browser', convert: async (html, options) => (await browser.htmlToMarkdown(html, options)).markdown, stream: browser.streamHtmlToMarkdown },
+  { name: 'browser', convert: async (html, options) => browser.htmlToMarkdown(html, options), stream: browser.streamHtmlToMarkdown },
   { name: 'wasm', convert: async (html, options) => wasm.htmlToMarkdown(html, options), stream: (htmlStream, options) => streamWith(wasm.MarkdownStream, htmlStream, options) },
 ]
 
@@ -69,6 +69,14 @@ const optionCases: [string, Partial<MdreamOptions>][] = [
   ['tagOverrides', { tagOverrides: { 'x-note': 'strong' } }],
   ['clean', { clean: true, origin: 'https://example.com' }],
 ]
+
+// Every entry returns what the one set of types (dist/index.d.mts) promises.
+describe('return contract', () => {
+  it('returns a Markdown string synchronously from every sync entry', () => {
+    for (const convert of [node.htmlToMarkdown, edge.htmlToMarkdown, browser.htmlToMarkdown, wasm.htmlToMarkdown])
+      expect(convert('<h1>Hi</h1>', {})).toBe('# Hi')
+  })
+})
 
 describe.each(entries)('$name entry', ({ name, convert, stream }) => {
   it.each(optionCases)('resolves %s the same way as the Node entry', async (_, options) => {

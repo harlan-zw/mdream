@@ -16,8 +16,8 @@ describe('cDN build (dist/iife.js)', () => {
 
   it('is ready at load and resolves options like the Node entry', () => {
     const mdream = loadIife()
-    expect(mdream.htmlToMarkdown(html, { minimal: true }).markdown).toBe(nodeHtmlToMarkdown(html, { minimal: true }))
-    expect(mdream.htmlToMarkdown(html, { tagOverrides: { h1: 'h2' } }).markdown).toBe(nodeHtmlToMarkdown(html, { tagOverrides: { h1: 'h2' } }))
+    expect(mdream.htmlToMarkdown(html, { minimal: true })).toBe(nodeHtmlToMarkdown(html, { minimal: true }))
+    expect(mdream.htmlToMarkdown(html, { tagOverrides: { h1: 'h2' } })).toBe(nodeHtmlToMarkdown(html, { tagOverrides: { h1: 'h2' } }))
   })
 
   it('calls the frontmatter callback and extraction handlers', () => {

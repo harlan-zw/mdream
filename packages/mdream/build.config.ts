@@ -44,15 +44,40 @@ const rolldownWasm = {
   external: [/\.\.\/wasm\//, /\.\.\/wasm-bundler\//, /\.\.\/napi\//],
 }
 
+const WASM_BYTES_MODULE_RE = /[\\/]src[\\/]wasm-bytes\.ts$/
+
+/**
+ * Replaces src/wasm-bytes.ts with the WASM binary inlined as base64, so the
+ * browser entry and the CDN script initialize synchronously at import.
+ */
+const inlineWasm = {
+  name: 'mdream:inline-wasm',
+  load(id: string) {
+    if (!WASM_BYTES_MODULE_RE.test(id))
+      return
+    const base64 = readFileSync(new URL('./wasm/mdream_edge_bg.wasm', import.meta.url)).toString('base64')
+    return `const base64 = ${JSON.stringify(base64)}
+export function wasmBytes() {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++)
+    bytes[i] = binary.charCodeAt(i)
+  return bytes
+}`
+  },
+}
+
+const rolldownBrowser = { ...rolldownWasm, plugins: [inlineWasm] }
+
 export default defineBuildConfig({
   entries: [
     { type: 'bundle', input: './src/index.ts', rolldown },
-    { type: 'bundle', input: './src/browser.ts', rolldown: rolldownWasm },
+    { type: 'bundle', input: './src/browser.ts', rolldown: rolldownBrowser },
     { type: 'bundle', input: './src/edge.ts', rolldown: rolldownWasm },
     { type: 'bundle', input: './src/wasm.ts', rolldown: rolldownWasm },
     { type: 'bundle', input: './src/worker.ts' },
     // Bundled as ESM with the WASM bindings external; the end hook inlines them.
-    { type: 'bundle', input: './src/iife.ts', rolldown: rolldownWasm, dts: false },
+    { type: 'bundle', input: './src/iife.ts', rolldown: rolldownBrowser, dts: false },
   ],
   hooks: {
     end(ctx) {
@@ -70,8 +95,6 @@ export default defineBuildConfig({
       const iifeMjsPath = resolve(cwd, 'dist/iife.mjs')
       try {
         const wasmBindingsJs = readFileSync(resolve(cwd, 'wasm/mdream_edge.js'), 'utf-8')
-        const wasmBinary = readFileSync(resolve(cwd, 'wasm/mdream_edge_bg.wasm'))
-        const wasmBase64 = wasmBinary.toString('base64')
 
         // Strip exports, async init (uses import.meta.url), and load helper from wasm-bindgen JS
         const bindingsCode = wasmBindingsJs
@@ -84,15 +107,11 @@ export default defineBuildConfig({
 
         const apiCode = toScriptBody(readFileSync(iifeMjsPath, 'utf-8'))
 
+        // The API code carries the inlined binary and calls initSync itself.
         const iifeContent = `(function(){
 'use strict';
-// Inline WASM binary (base64)
-var _wasmBase64="${wasmBase64}";
-function _decodeBase64(s){var e=atob(s),n=e.length,a=new Uint8Array(n);for(var i=0;i<n;i++)a[i]=e.charCodeAt(i);return a.buffer}
 // wasm-bindgen runtime
 ${bindingsCode}
-// Auto-init with inlined WASM
-initSync({module:_decodeBase64(_wasmBase64)});
 // Public API (src/iife.ts), in its own scope so its names cannot clash with the runtime's
 (function(){
 ${apiCode}

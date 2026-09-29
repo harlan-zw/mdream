@@ -178,7 +178,7 @@ import { htmlToMarkdown } from '@mdream/js'
 import { htmlToMarkdown } from 'mdream'
 ```
 
-Both engines support the same declarative plugins, but the option shape differs. The Rust engine takes `minimal`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, `extraction`, and `tagOverrides` at the top level. The JS engine reads the plugins from `options.plugins` and has no `minimal` option: use `withMinimalPreset()` from `@mdream/js/preset/minimal`. The JS engine also supports `hooks` for imperative plugin transforms.
+Both engines support the same declarative plugins, but the option shape differs. The Rust engine takes `minimal`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, `extraction`, and `tagOverrides` at the top level. The JS engine reads the plugins from `options.plugins` and has no `minimal` option: use `withMinimalPreset()` from `@mdream/js/preset/minimal`. If the JS engine gets one of these options at the top level, it throws a `TypeError` that names the fix. The JS engine also supports `hooks` for imperative plugin transforms.
 
 ## Options
 
@@ -416,6 +416,16 @@ The `minimal` preset enables the following plugins together:
 - **filter**: Excludes `form`, `fieldset`, `object`, `embed`, `footer`, `aside`, `iframe`, `input`, `textarea`, `select`, `button`, `nav`
 - **clean**: All post-processing cleanup enabled
 
+A `filter` passed with `minimal` adds to the preset's excludes. It does not replace them. To turn the preset's filter off, pass `filter: false`. `withMinimalPreset()` in the JS engine works the same way.
+
+```ts
+// Excludes h1 as well as form, nav, footer, and the rest
+htmlToMarkdown(html, { minimal: true, filter: { exclude: ['h1'] } })
+
+// Keeps forms and nav
+htmlToMarkdown(html, { minimal: true, filter: false })
+```
+
 **Rust engine:**
 
 ```ts
@@ -438,13 +448,13 @@ const markdown = htmlToMarkdown(html, withMinimalPreset({
 }))
 ```
 
-`withMinimalPreset()` returns an `EngineOptions` object with all plugin defaults applied. You can override individual plugins:
+`withMinimalPreset()` returns an `EngineOptions` object with all plugin defaults applied. You can override individual plugins. A `filter` adds to the preset's excludes:
 
 ```ts
 const markdown = htmlToMarkdown(html, withMinimalPreset({
   plugins: {
     frontmatter: false,
-    filter: { exclude: ['nav'] },
+    filter: { exclude: ['.cookie-banner'] },
   },
 }))
 ```
@@ -929,6 +939,8 @@ The CLI reads HTML from stdin and writes Markdown, plain text, or HTML to stdout
 
 ## Browser and Edge Usage
 
+Every entry takes the same `MdreamOptions`. In Node, edge runtimes, and browser bundles, `htmlToMarkdown` is synchronous and returns a string. The browser build inlines the WASM binary, so it needs no `await` and no WASM file to serve. Only `mdream/worker` is async, because the conversion runs on another thread.
+
 ### Edge / Cloudflare Workers
 
 For edge runtimes (Cloudflare Workers, Vercel Edge), `mdream` automatically selects the WASM build via export conditions (`workerd`, `edge-light`). Both `htmlToMarkdown` and `streamHtmlToMarkdown` are available:
@@ -973,12 +985,12 @@ const markdown = htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 
 ### Browser CDN (IIFE)
 
-Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It returns a result object: read the Markdown from `.markdown`. It takes the same `MdreamOptions` as the `mdream` entry.
+Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It takes the same `MdreamOptions` as the `mdream` entry and returns a string.
 
 ```html
 <script src="https://unpkg.com/mdream/dist/iife.js"></script>
 <script>
-  const { markdown } = window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
+  const markdown = window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
   console.log(markdown) // # Hello\n\nWorld
 </script>
 ```
