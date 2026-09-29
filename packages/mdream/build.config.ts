@@ -44,6 +44,9 @@ const rolldownWasm = {
   external: [/\.\.\/wasm\//, /\.\.\/wasm-bundler\//, /\.\.\/napi\//],
 }
 
+// `obuild --stub` (dev:prepare) runs before the WASM exists, so it skips the IIFE.
+let stub = false
+
 export default defineBuildConfig({
   entries: [
     { type: 'bundle', input: './src/index.ts', rolldown },
@@ -55,6 +58,9 @@ export default defineBuildConfig({
     { type: 'bundle', input: './src/iife.ts', rolldown: rolldownWasm, dts: false },
   ],
   hooks: {
+    entries(entries) {
+      stub = entries.every(entry => entry.stub)
+    },
     end(ctx) {
       const cwd = ctx?.cwd || process.cwd()
 
@@ -66,6 +72,9 @@ export default defineBuildConfig({
         }
         catch {}
       }
+
+      if (stub)
+        return
 
       const iifeMjsPath = resolve(cwd, 'dist/iife.mjs')
       try {
