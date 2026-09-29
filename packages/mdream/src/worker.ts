@@ -1,18 +1,30 @@
+import type { HtmlToMarkdownOptions, MdreamNapiResult } from '../napi/index.js'
 import type { MdreamOptions } from './index.js'
+import type { ResolvedOptions } from './resolve-options.js'
+import { deliverPluginData } from './convert.js'
+import { resolveOptions } from './resolve-options.js'
 
+// Options resolve on this thread: callbacks cannot cross `postMessage`, and the
+// worker then runs the same engine options as every other entry point.
 type WorkerMessage
-  = | { id: number, type: 'convert', html: string, options?: Partial<MdreamOptions> }
+  = | { id: number, type: 'convert', html: string, options: HtmlToMarkdownOptions }
     | { type: 'init', wasmUrl: string }
 
 type WorkerResponse
-  = | { id: number, type: 'result', data: string }
+  = | { id: number, type: 'result', data: MdreamNapiResult }
     | { id: number, type: 'error', message: string }
     | { type: 'ready' }
+
+interface Pending {
+  resolve: (markdown: string) => void
+  reject: (e: Error) => void
+  callbacks: Pick<ResolvedOptions, 'frontmatterCallback' | 'extractionHandlers'>
+}
 
 let _worker: Worker | null = null
 let _ready: Promise<void> | null = null
 let _idCounter = 0
-const _pending = new Map<number, { resolve: (v: string) => void, reject: (e: Error) => void }>()
+const _pending = new Map<number, Pending>()
 const WASM_RE = /\.wasm$/
 
 function getWorkerBlob(wasmUrl: string): Blob {
@@ -42,7 +54,7 @@ self.onmessage = function(e) {
     }
     try {
       const result = htmlToMarkdownResult(msg.html, msg.options || {});
-      self.postMessage({ id: msg.id, type: 'result', data: result.markdown || '' });
+      self.postMessage({ id: msg.id, type: 'result', data: result });
     } catch (err) {
       // WASM aborts on panic (#195): the message is stashed by the panic hook
       const panic = engine.__mdreamTakePanicMessage?.();
@@ -62,10 +74,18 @@ function onMessage(e: MessageEvent<WorkerResponse>) {
     if (!pending)
       return
     _pending.delete(msg.id)
-    if (msg.type === 'result')
-      pending.resolve(msg.data)
-    else
+    if (msg.type === 'result') {
+      try {
+        deliverPluginData(msg.data, pending.callbacks)
+        pending.resolve(msg.data.markdown || '')
+      }
+      catch (error) {
+        pending.reject(error as Error)
+      }
+    }
+    else {
       pending.reject(new Error(msg.message))
+    }
   }
 }
 
@@ -108,10 +128,11 @@ export function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): 
     return Promise.reject(new Error('Call initWorker() before htmlToMarkdown()'))
 
   return _ready.then(() => {
+    const { napiOpts, frontmatterCallback, extractionHandlers } = resolveOptions(options ?? {})
     const id = _idCounter++
     return new Promise<string>((resolve, reject) => {
-      _pending.set(id, { resolve, reject })
-      _worker!.postMessage({ id, type: 'convert', html, options } satisfies WorkerMessage)
+      _pending.set(id, { resolve, reject, callbacks: { frontmatterCallback, extractionHandlers } })
+      _worker!.postMessage({ id, type: 'convert', html, options: napiOpts } satisfies WorkerMessage)
     })
   })
 }

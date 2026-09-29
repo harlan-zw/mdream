@@ -65,3 +65,20 @@ describe('block element followed by inline sibling (#148)', () => {
     }
   })
 })
+
+describe('unknown tags', () => {
+  // Unknown elements are inline, as in the Rust engine: adjacent ones must not
+  // gain a space between them.
+  it('keeps adjacent unknown elements joined', async () => {
+    const cases: [string, string][] = [
+      ['<x-a>X</x-a><x-h>H</x-h><x-c>C</x-c>', 'XHC'],
+      ['<p><foo>X</foo><bar>H</bar><baz>C</baz></p>', 'XHC'],
+      ['<p>before <ex>foo</ex> after</p>', 'before foo after'],
+      ['<p><ex>foo</ex>, bar</p>', 'foo, bar'],
+    ]
+    for (const [html, expected] of cases) {
+      expect(htmlToMarkdown(html), html).toBe(expected)
+      expect(await streamConvert([html]), html).toBe(expected)
+    }
+  })
+})

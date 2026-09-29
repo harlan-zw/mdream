@@ -380,13 +380,12 @@ See the [Nuxt Module README](./packages/nuxt/README.md) for usage and configurat
 
 ## Browser CDN Usage
 
-Use mdream directly via CDN with no build step. Call `init()` once to load the WASM binary, then use `htmlToMarkdown()` synchronously:
+Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load. `htmlToMarkdown()` returns a result object; read the Markdown from `.markdown`:
 
 ```html
 <script src="https://unpkg.com/mdream/dist/iife.js"></script>
 <script>
-  await window.mdream.init()
-  const markdown = window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
+  const { markdown } = window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
   console.log(markdown) // # Hello\n\nWorld
 </script>
 ```
