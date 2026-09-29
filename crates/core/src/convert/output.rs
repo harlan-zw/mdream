@@ -581,6 +581,36 @@ impl ConvertState {
     self.buffer.len() >= STREAMING_FLUSH_THRESHOLD && !self.blockquotes.is_empty()
   }
 
+  /// These options rewrite across the whole document, so nothing streams early.
+  pub(super) fn retains_whole_document(&self) -> bool {
+    self.clean_flags & CLEAN_FRAGMENTS != 0 || self.has_frontmatter || self.has_extraction
+  }
+
+  /// Where the earliest construct keeping quoted lines from being flushed began:
+  /// each is a pending rewrite at an absolute buffer offset, which quoting the
+  /// content before it would shift.
+  pub(super) fn blockquote_flush_blocker(&self) -> Option<usize> {
+    let link_start = (self.depth_map[TAG_A as usize] > 0).then(|| {
+      let outermost = self.parent_links.first().unwrap_or(&self.link);
+      if outermost.open {
+        outermost.bracket_pos
+      } else {
+        0
+      }
+    });
+    [
+      self.open_markers.first().map(|marker| marker.output_start),
+      self.first_tentative_caption_start(),
+      self.code_fence.as_ref().map(|fence| fence.output_start),
+      self.code_spans.first().map(|span| span.output_start),
+      link_start,
+      self.empty_item_hazard.then_some(self.empty_item_line_start),
+    ]
+    .into_iter()
+    .flatten()
+    .min()
+  }
+
   pub(crate) fn flush_streaming_blockquote_lines(&mut self) {
     self.flush_streaming_blockquote_lines_upto(usize::MAX);
   }
@@ -595,17 +625,8 @@ impl ConvertState {
   /// only lines it would already release get quoted.
   pub(crate) fn flush_streaming_blockquote_lines_upto(&mut self, limit: usize) {
     if !self.streaming_flush_possible()
-      || self.clean_flags & CLEAN_FRAGMENTS != 0
-      || self.has_frontmatter
-      || self.has_extraction
-      // These pending rewrites keep absolute buffer offsets. Quoting content
-      // before them shifts those offsets, so wait until each rewrite settles.
-      || !self.open_markers.is_empty()
-      || self.first_tentative_caption_start().is_some()
-      || self.code_fence.is_some()
-      || !self.code_spans.is_empty()
-      || self.depth_map[TAG_A as usize] > 0
-      || self.empty_item_hazard
+      || self.retains_whole_document()
+      || self.blockquote_flush_blocker().is_some()
     {
       return;
     }
@@ -777,17 +798,20 @@ impl ConvertState {
 
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
     // language) is emitted lazily above for the no-<code> case. Skipped inside
-    // a table cell, where the <pre> is emitted as raw HTML instead (issue #147),
-    // and for a <pre> nested in another: only the outermost one owns the fence.
+    // a table cell, where the <pre> is emitted as raw HTML instead (issue #147).
+    // A nested `<pre>` stays inside an ancestor's open or pending fence; it
+    // must not replace that fence's owner with a new deferred opener.
     if !self.plain_text
       && self.stack[stack_len - 1].tag_id == Some(TAG_PRE)
-      && self.depth_map[TAG_PRE as usize] == 1
+      && self.pre_fence_owner_depth == 0
+      && !self.pre_fence_pending
       && !self.in_table_cell()
     {
       let lang =
         Self::get_language_from_class(self.stack[stack_len - 1].attributes.get_bit(ATTR_CLASS))
           .to_string();
       self.pre_fence_pending = true;
+      self.pre_fence_pending_depth = self.depth_map[TAG_PRE as usize];
       self.pre_fence_lang = lang;
     }
 
@@ -906,12 +930,14 @@ impl ConvertState {
     // A literal override is code content inside `<pre>`, even when the tag's
     // built-in formatting would be suppressed there.
     if !self.plain_text && self.pre_fence_pending {
-      if code_owns_pending_pre_fence(&self.stack) && !enter_is_literal {
+      let code_owns_fence = code_owns_pending_pre_fence(&self.stack)
+        && self.depth_map[TAG_PRE as usize] == self.pre_fence_pending_depth;
+      if code_owns_fence && !enter_is_literal {
         self.pre_fence_pending = false;
       } else if tag_id != Some(TAG_PRE)
         && (!tag_id.is_some_and(suppresses_formatting_in_pre) || enter_is_literal)
       {
-        if enter_is_literal && code_owns_pending_pre_fence(&self.stack) {
+        if enter_is_literal && code_owns_fence {
           self.pre_fence_lang =
             Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
               .to_string();
@@ -1078,7 +1104,9 @@ impl ConvertState {
       && tag_id == Some(TAG_CODE)
       && output.is_some()
       && ((self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block())
-        || (self.depth_map[TAG_PRE as usize] > 0 && !self.pre_fence_open && !self.in_table_cell()))
+        || (self.depth_map[TAG_PRE as usize] > 0
+          && self.pre_fence_owner_depth == 0
+          && !self.in_table_cell()))
     {
       self.flush_streaming_blockquote_lines();
     }
@@ -1178,7 +1206,7 @@ impl ConvertState {
             exhausted: false,
           });
         }
-      } else if !self.pre_fence_open
+      } else if self.pre_fence_owner_depth == 0
         && !self.in_table_cell()
         && let Some(emitted) = output.as_deref()
         && self.buffer.len() > output_start
@@ -1194,7 +1222,7 @@ impl ConvertState {
           language,
           self.list_indent.clone(),
         );
-        self.pre_fence_open = true;
+        self.pre_fence_owner_depth = self.depth_map[TAG_PRE as usize];
       }
     }
 
@@ -1218,23 +1246,27 @@ impl ConvertState {
       };
       self.begin_link(bracket_pos, false);
       self.link.bracket_emitted = emitted_bracket;
-      // Avoid the href lookup and hold bookkeeping for one-shot conversion.
-      if self.streaming {
+      // Avoid the href lookup and hold bookkeeping for one-shot conversion, unless
+      // `max_node_bytes` has to charge what the link holds back.
+      if self.streaming || self.options.max_node_bytes != 0 {
         let has_rewrite_anchor = emitted_bracket && !exit_is_overridden;
-        self.link.hold_released = !has_rewrite_anchor;
-        self.link.empty_text_pending =
-          has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
         let href = self.stack[stack_len - 1].attributes.get("href");
-        self.link.url_max_len = href.map_or(0, |href| {
-          6 + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
-        });
-        self.link.hold_forever = has_rewrite_anchor
+        self.link.pins_output = has_rewrite_anchor
           && href.is_some_and(|href| {
             href.starts_with('#')
               && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
                 || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0
                   && (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0)))
           });
+        if self.streaming {
+          self.link.hold_forever = self.link.pins_output;
+          self.link.hold_released = !has_rewrite_anchor;
+          self.link.empty_text_pending =
+            has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
+          self.link.url_max_len = href.map_or(0, |href| {
+            6 + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
+          });
+        }
       }
     }
 
@@ -1285,7 +1317,12 @@ impl ConvertState {
   /// Emit markdown for exiting an element (node already popped from stack).
   #[inline]
   pub(crate) fn emit_exit_element(&mut self, node: &ElementNode) {
-    if node.excluded_from_markdown {
+    // A skipped <pre> can still own the fence opened by an eligible <code> child.
+    if node.excluded_from_markdown
+      || (node.enter_skipped
+        && (node.tag_id != Some(TAG_PRE)
+          || self.pre_fence_owner_depth != self.depth_map[TAG_PRE as usize]))
+    {
       self.last_node_is_inline = node.is_inline;
       return;
     }
@@ -1302,13 +1339,18 @@ impl ConvertState {
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
     }
-    // Only the outermost <pre> owns the fence; a nested one closing it would
-    // leave the outer <pre> nothing to close, and the fence would run on.
-    let owns_pre_fence = tag_id == Some(TAG_PRE) && self.depth_map[TAG_PRE as usize] == 1;
-    let closes_own_pre_fence = owns_pre_fence && self.pre_fence_open;
+    let owns_pre_fence = tag_id == Some(TAG_PRE);
+    // Only the <pre> owning the open fence may close it; a nested one closing
+    // its ancestor's fence would leave the outer <pre> nothing to close, and
+    // the fence would run on.
+    let closes_own_pre_fence =
+      tag_id == Some(TAG_PRE) && self.pre_fence_owner_depth == self.depth_map[TAG_PRE as usize];
 
-    // Check override
-    let override_config = if self.has_tag_overrides {
+    // A skipped node must never emit its own override exit. The only output
+    // allowed below is the matching close for a fence opened by its child.
+    let override_config = if node.enter_skipped {
+      None
+    } else if self.has_tag_overrides {
       let ovs = self
         .options
         .plugins
@@ -1640,6 +1682,9 @@ impl ConvertState {
       }
     }
 
+    if tag_id.is_some_and(|id| id.wrapping_sub(TAG_H1) < 6) {
+      self.heading_hash_run = 0;
+    }
     if let Some(id) = tag_id
       && id.wrapping_sub(TAG_H1) < 6
       && self.depth_map[TAG_A as usize] == 0
@@ -1861,12 +1906,14 @@ impl ConvertState {
     if owns_pre_fence {
       // The closing fence consumed the trailing newline; clear the whitespace
       // flags too, or the next node trims the blank line through the fence.
-      if self.pre_fence_open {
+      if closes_own_pre_fence {
         self.last_text_node_contains_whitespace = false;
         self.has_last_text_node = false;
+        self.pre_fence_owner_depth = 0;
       }
-      self.pre_fence_pending = false;
-      self.pre_fence_open = false;
+      if self.pre_fence_pending_depth == self.depth_map[TAG_PRE as usize] {
+        self.pre_fence_pending = false;
+      }
     }
     if tag_id == Some(TAG_A) && self.link_caption_break_snapshot_active {
       self.link_caption_break_snapshot_active = false;
@@ -1894,7 +1941,7 @@ impl ConvertState {
     self.flush_streaming_blockquote_lines();
 
     self.pre_fence_pending = false;
-    self.pre_fence_open = true;
+    self.pre_fence_owner_depth = self.pre_fence_pending_depth;
     let li_depth = self.depth_map[TAG_LI as usize];
     let fence = if li_depth > 0 {
       // A blank line between the marker and the fence ends the item, leaving the
@@ -1908,7 +1955,7 @@ impl ConvertState {
     let output_start = self.buffer.len();
     self.last_content_cache_len = self.push_code_span_content(&fence, true);
     if self.last_content_cache_len != fence.len() {
-      self.pre_fence_open = false;
+      self.pre_fence_owner_depth = 0;
       return;
     }
     self.start_code_fence(
@@ -2194,6 +2241,7 @@ impl ConvertState {
       text
     };
 
+    let written_from = self.buffer.len();
     if self.wrap_width != 0 && self.can_wrap_here() {
       self.push_text_wrapped(text, last_char);
     } else if !(owns_leading_space || (self.plain_text && self.depth_map[TAG_PRE as usize] > 0))
@@ -2216,6 +2264,22 @@ impl ConvertState {
 
     if !self.open_markers.is_empty() && text.as_bytes().iter().any(|&b| !is_whitespace(b)) {
       self.open_markers.clear();
+    }
+
+    if self.options.max_node_bytes != 0
+      && self.in_heading()
+      && let Some(written) = self.buffer.as_bytes().get(written_from..)
+    {
+      let run = written
+        .iter()
+        .rev()
+        .take_while(|&&byte| matches!(byte, b'#' | b' ' | b'\t'))
+        .count();
+      self.heading_hash_run = if run == written.len() {
+        self.heading_hash_run + run
+      } else {
+        run
+      };
     }
 
     self.last_text_node_contains_whitespace = contains_whitespace;
@@ -2473,11 +2537,10 @@ impl ConvertState {
     if tail.is_empty() && !at_exit {
       return;
     }
-    // An open inline marker, and an open `<a>`'s `[`, are rewritten away if the
-    // element closes empty, so neither is content the item can be decided on —
-    // only its exit is. It must open exactly at the item's content start;
-    // anything earlier is content that already settles the question.
-    let opens_the_item = |position: usize| position == end;
+    // An open inline marker or link bracket can disappear when it closes empty.
+    // Its recorded position can precede or follow separating spaces.
+    let item_content_start = self.buffer.len() - tail.len();
+    let opens_the_item = |position: usize| position >= end && position <= item_content_start;
     if !at_exit
       && (self
         .open_markers
@@ -3143,9 +3206,8 @@ impl ConvertState {
     self.line_start_scanned_to = usize::MAX;
   }
 
-  /// Whether the current line opens a raw HTML block, which suspends Markdown
-  /// again until the next blank line.
-  fn line_opens_raw_html_block(&mut self) -> bool {
+  /// Offset just past the buffer's last `\n`.
+  pub(super) fn current_line_start(&mut self) -> usize {
     let len = self.buffer.len();
     let bytes = self.buffer.as_bytes();
     // Only bytes appended since the last call can move the line start; a buffer
@@ -3162,6 +3224,15 @@ impl ConvertState {
       self.line_start = self.line_start_scanned_to + i + 1;
     }
     self.line_start_scanned_to = len;
+    self.line_start
+  }
+
+  /// Whether the current line opens a raw HTML block, which suspends Markdown
+  /// again until the next blank line.
+  fn line_opens_raw_html_block(&mut self) -> bool {
+    self.current_line_start();
+    let len = self.buffer.len();
+    let bytes = self.buffer.as_bytes();
 
     // A `line_start` of zero is the drained buffer's front, not the line's, once
     // a drain has taken this line's beginning: the fragment left behind can open
@@ -3496,7 +3567,7 @@ impl ConvertState {
           }
           // A fence is already open for this <pre> — the <pre> opened it (mixed
           // text + <code> children) or an earlier <code> sibling did.
-          if self.pre_fence_open {
+          if self.pre_fence_owner_depth != 0 {
             return None;
           }
           let lang = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS));
@@ -3762,11 +3833,10 @@ impl ConvertState {
       }
       // Raw <pre> close inside a table cell (issue #147).
       TAG_PRE if self.in_table_cell() => Some(Cow::Borrowed("</pre>")),
-      // Bare <pre> (no <code> child) closing fence (issue #97). Only emitted
-      // when the <pre> opened its own fence; otherwise a <code> child or an
-      // empty/whitespace-only <pre> means there is nothing to close.
+      // Only the `<pre>` owning the open fence emits the closer; a nested
+      // `<pre>` cannot close its ancestor's fence.
       TAG_PRE => {
-        if !self.pre_fence_open || self.depth_map[TAG_PRE as usize] > 1 {
+        if self.pre_fence_owner_depth != self.depth_map[TAG_PRE as usize] {
           return None;
         }
         let li_depth = self.depth_map[TAG_LI as usize] as usize;

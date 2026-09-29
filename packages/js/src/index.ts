@@ -38,11 +38,25 @@ export function streamHtmlToMarkdown(
   options: Partial<MdreamOptions> = {},
 ): AsyncIterable<string> {
   const hooks = resolveHooks(options)
-  const { plugins } = resolvePlugins(options, hooks)
+  const { plugins, callExtractionHandlers, getFrontmatter, frontmatterCallback } = resolvePlugins(options, hooks)
   const tagOverrideHandlers = options.plugins?.tagOverrides
     ? buildTagOverrideHandlers(options.plugins.tagOverrides)
     : undefined
-  return _streamHtmlToMarkdown(htmlStream, options, plugins, tagOverrideHandlers)
+  const stream = _streamHtmlToMarkdown(htmlStream, options, plugins, tagOverrideHandlers)
+  if (!callExtractionHandlers && !frontmatterCallback)
+    return stream
+  return withCallbacks(stream, () => {
+    const fm = getFrontmatter?.()
+    if (fm && frontmatterCallback)
+      frontmatterCallback(fm)
+    callExtractionHandlers?.()
+  })
+}
+
+// Runs the callbacks once the whole document is read, as one-shot conversion does.
+async function* withCallbacks(stream: AsyncIterable<string>, onEnd: () => void): AsyncIterable<string> {
+  yield* stream
+  onEnd()
 }
 
 export { ELEMENT_NODE, NodeEventEnter, NodeEventExit, TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6, TEXT_NODE } from './const'

@@ -185,6 +185,9 @@ pub struct ElementNode {
   pub tag_id: Option<u8>,
   pub contains_whitespace: bool,
   pub excluded_from_markdown: bool,
+  /// A plugin skipped this node's start, so its end must not be emitted either.
+  /// Unlike `excluded_from_markdown`, the node's descendants stay eligible.
+  pub(crate) enter_skipped: bool,
   /// Cached from tag handler - avoids repeated get_tag_handler lookups
   pub is_inline: bool,
   pub excludes_text_nodes: bool,
@@ -656,6 +659,12 @@ pub struct HTMLToMarkdownOptions {
   /// A `plugins` filter, extraction, or Tailwind config makes every attribute
   /// readable, so none can be classified as unused; there the cap is measured
   /// against the tag's raw length and an over-long tag is dropped whole.
+  ///
+  /// Output an open construct holds back from streaming is charged too: a quote's
+  /// unfinished line (or all of it while a link inside is open), a heading's
+  /// trailing `#` run, a self-link heading's text. Past the cap nothing can be
+  /// dropped without breaking the construct, so the document is cut before the
+  /// next tag.
   ///
   /// [`MdreamResult::truncated`] reports whether it fired.
   pub max_node_bytes: usize,

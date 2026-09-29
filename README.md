@@ -3,6 +3,13 @@
 [![npm version](https://img.shields.io/npm/v/mdream?color=yellow)](https://npmjs.com/package/mdream)
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
+<a href="https://skilld.dev/gh/harlan-zw/mdream">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://skilld.dev/b/harlan-zw/mdream?theme=dark">
+    <source media="(prefers-color-scheme: light)" srcset="https://skilld.dev/b/harlan-zw/mdream?theme=light">
+    <img alt="Skill repository on skilld.dev" src="https://skilld.dev/b/harlan-zw/mdream?theme=light">
+  </picture>
+</a>
 
 > ☁️ The fastest HTML to markdown converter on GitHub. Optimized for LLMs and supports streaming.
 
@@ -239,10 +246,7 @@ pnpm add mdream
 ```
 
 > [!TIP]
-> Generate an Agent Skill for this package using [skilld](https://github.com/harlan-zw/skilld):
-> ```bash
-> npx skilld add mdream
-> ```
+> Using an AI agent? Get the mdream Skill on [skilld.dev/gh/harlan-zw/mdream](https://skilld.dev/gh/harlan-zw/mdream).
 
 ### Bundler Compatibility
 
@@ -376,13 +380,12 @@ See the [Nuxt Module README](./packages/nuxt/README.md) for usage and configurat
 
 ## Browser CDN Usage
 
-Use mdream directly via CDN with no build step. Call `init()` once to load the WASM binary, then use `htmlToMarkdown()` synchronously:
+Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load. `htmlToMarkdown()` returns a result object; read the Markdown from `.markdown`:
 
 ```html
 <script src="https://unpkg.com/mdream/dist/iife.js"></script>
 <script>
-  await window.mdream.init()
-  const markdown = window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
+  const { markdown } = window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
   console.log(markdown) // # Hello\n\nWorld
 </script>
 ```

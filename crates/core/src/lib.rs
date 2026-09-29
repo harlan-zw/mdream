@@ -64,17 +64,7 @@ pub fn html_to_format_result(
   let consumed = state.process_html(html);
   state.finalize(&html[consumed..]);
 
-  let extracted = if state.has_extraction {
-    let results = std::mem::take(&mut state.extraction_results);
-    if results.is_empty() {
-      None
-    } else {
-      Some(results)
-    }
-  } else {
-    None
-  };
-
+  let extracted = take_extracted(&mut state);
   let frontmatter = state.frontmatter();
 
   MdreamResult {
@@ -82,6 +72,18 @@ pub fn html_to_format_result(
     extracted,
     frontmatter,
     truncated: state.truncated,
+  }
+}
+
+fn take_extracted(state: &mut ConvertState) -> Option<Vec<types::ExtractedElement>> {
+  if !state.has_extraction {
+    return None;
+  }
+  let results = std::mem::take(&mut state.extraction_results);
+  if results.is_empty() {
+    None
+  } else {
+    Some(results)
   }
 }
 
@@ -138,6 +140,18 @@ impl MarkdownStreamProcessor {
     self.state.truncated
   }
 
+  /// Frontmatter entries the frontmatter plugin collected. `None` when the
+  /// plugin is off. Complete once `finish()` returns.
+  pub fn frontmatter(&self) -> Option<Vec<(String, String)>> {
+    self.state.frontmatter()
+  }
+
+  /// Elements the extraction plugin matched, drained on each call. `None`
+  /// when nothing matched. Complete once `finish()` returns.
+  pub fn take_extracted(&mut self) -> Option<Vec<types::ExtractedElement>> {
+    take_extracted(&mut self.state)
+  }
+
   pub fn finish(&mut self) -> String {
     let buffer = std::mem::take(&mut self.buffer);
     let consumed = if buffer.is_empty() {
@@ -147,6 +161,20 @@ impl MarkdownStreamProcessor {
     };
     self.state.finalize(&buffer[consumed..]);
     self.state.get_final_markdown_chunk()
+  }
+}
+
+#[cfg(fuzzing)]
+pub mod fuzz_bridge {
+  use super::{HTMLToMarkdownOptions, MarkdownStreamProcessor, OutputFormat};
+
+  pub fn new_drain_disabled(
+    options: HTMLToMarkdownOptions,
+    format: OutputFormat,
+  ) -> MarkdownStreamProcessor {
+    let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
+    processor.state.disable_drain = true;
+    processor
   }
 }
 
