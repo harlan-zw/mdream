@@ -6,6 +6,8 @@ import { convertResult, deliverPluginData, pumpStream } from './convert.js'
 import { resolveOptions } from './resolve-options.js'
 import { wasmPanicError } from './wasm-panic.js'
 
+export type { CleanOptions, ExtractedElement, FrontmatterConfig, MdreamOptions, TagOverride } from './index.js'
+
 let _initPromise: Promise<unknown>
 
 function ensureInit(): Promise<unknown> {
@@ -28,9 +30,13 @@ function convert(html: string, napiOpts: HtmlToMarkdownOptions): MdreamNapiResul
   }
 }
 
-export async function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): Promise<MdreamNapiResult> {
+/**
+ * Browser builds fetch the WASM binary on first use, so this returns a
+ * Promise. The `browser` export condition ships types that say so.
+ */
+export async function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): Promise<string> {
   await ensureInit()
-  return convertResult(convert, html, options)
+  return convertResult(convert, html, options).markdown || ''
 }
 
 export async function createMarkdownStream(options?: Partial<MdreamOptions>): Promise<MarkdownStream> {

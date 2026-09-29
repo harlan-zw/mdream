@@ -482,20 +482,20 @@ impl ConvertState {
       }
     }
 
-    if self.has_frontmatter
-      && self.frontmatter_in_head
-      && !excludes_text_nodes
-      && self
-        .stack
-        .last()
-        .is_some_and(|p| p.tag_id == Some(TAG_TITLE))
-    {
+    let in_title = self
+      .stack
+      .last()
+      .is_some_and(|p| p.tag_id == Some(TAG_TITLE));
+    if in_title && self.has_frontmatter && self.frontmatter_in_head && !excludes_text_nodes {
       let val = text_buffer.trim().to_string();
       if !val.is_empty() {
         self.frontmatter_title = Some(val);
       }
-      text_buffer.clear();
-      return;
+    }
+    // `<title>` is document metadata that browsers never render. Its text
+    // still reaches frontmatter and extraction, but never the output.
+    if in_title {
+      excludes_text_nodes = true;
     }
 
     let in_pre_tag = self.in_pre;

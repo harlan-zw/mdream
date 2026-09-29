@@ -7,6 +7,8 @@ import { convertResult, deliverPluginData, pumpStream } from './convert.js'
 import { resolveOptions } from './resolve-options.js'
 import { wasmPanicError } from './wasm-panic.js'
 
+export type { CleanOptions, ExtractedElement, FrontmatterConfig, MdreamOptions, TagOverride } from './index.js'
+
 // Edge runtimes (workerd, edge-light) resolve `.wasm` imports to a compiled
 // WebAssembly.Module that must be instantiated manually (#119).
 initSync({ module: wasmModule })

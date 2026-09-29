@@ -25,8 +25,12 @@ function convert(html: string, napiOpts: HtmlToMarkdownOptions): MdreamNapiResul
   }
 }
 
-export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): MdreamNapiResult {
-  return convertResult(convert, html, options)
+/**
+ * Returns a Promise, the same as the `browser` entry, so code moves between the
+ * CDN script and a bundle unchanged. The inlined binary is ready at load.
+ */
+export async function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): Promise<string> {
+  return convertResult(convert, html, options).markdown || ''
 }
 
 if (typeof window !== 'undefined')
