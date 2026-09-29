@@ -132,6 +132,8 @@ const html = htmlToMarkdown('<h1>Hello <strong>World</strong></h1>', {
 
 Converts an HTML `ReadableStream` to Markdown, plain text, or HTML incrementally. Returns an `AsyncIterable<string>` that yields output chunks as they are processed.
 
+It takes the same options as `htmlToMarkdown()`. The `frontmatter` callback and the `extraction` handlers run once, after the stream ends and before the last chunk is yielded.
+
 
 ```ts
 import { streamHtmlToMarkdown } from 'mdream'
@@ -957,21 +959,21 @@ catch (error) {
 }
 ```
 
-If your toolchain doesn't resolve the export conditions, the raw wasm-bindgen build (web target) is exposed at `mdream/wasm` for manual initialization. It is the engine binding: it takes the engine option shape (`{ plugins: { frontmatter: {} } }`), not `MdreamOptions`.
+If your toolchain doesn't resolve the export conditions, the wasm-bindgen build (web target) is exposed at `mdream/wasm` for manual initialization. Its `htmlToMarkdown` takes the same `MdreamOptions` as the `mdream` entry. Its `MarkdownStream` runs the callbacks in `finish()`.
 
 ```ts
 import init, { htmlToMarkdown } from 'mdream/wasm'
 import wasmModule from 'mdream/wasm/mdream_edge_bg.wasm'
 
 await init({ module_or_path: wasmModule })
-const markdown = htmlToMarkdown('<h1>Hello</h1>', {})
+const markdown = htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 ```
 
 `mdream/worker` is not an edge entry. It runs the conversion in a browser Web Worker; see [Web Worker](#web-worker).
 
 ### Browser CDN (IIFE)
 
-Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It returns a result object: read the Markdown from `.markdown`. It takes the engine option shape, the same as `mdream/wasm`.
+Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It returns a result object: read the Markdown from `.markdown`. It takes the same `MdreamOptions` as the `mdream` entry.
 
 ```html
 <script src="https://unpkg.com/mdream/dist/iife.js"></script>
@@ -994,7 +996,8 @@ import { htmlToMarkdown, initWorker, terminateWorker } from 'mdream/worker'
 
 await initWorker('/path/to/mdream_edge_bg.wasm')
 
-const markdown = await htmlToMarkdown('<h1>Hello</h1>')
+// Takes the same options as the mdream entry. Callbacks run on this thread.
+const markdown = await htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 
 // Clean up
 terminateWorker()

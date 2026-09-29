@@ -1,12 +1,12 @@
 import type { HtmlToMarkdownOptions, PluginOptions, TagOverrideNapi } from '../napi/index.js'
 import type { CleanOptions, ExtractedElement, MdreamOptions } from './index.js'
 
-interface ResolvableOptions extends Partial<MdreamOptions> {
+export interface ResolvableOptions extends Partial<MdreamOptions> {
   cleanUrls?: boolean
   plugins?: PluginOptions | unknown[]
 }
 
-interface ResolvedOptions {
+export interface ResolvedOptions {
   napiOpts: HtmlToMarkdownOptions
   extractionHandlers?: Record<string, (el: ExtractedElement) => void>
   frontmatterCallback?: (fm: Record<string, string>) => void
