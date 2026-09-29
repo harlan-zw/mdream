@@ -296,19 +296,21 @@ fn a_literal_lt_respects_the_text_cap() {
   for (html, expected) in [("<p>aaaa<3z</p>", "aaaa"), ("<p>aaa<3z</p>", "aaa<")] {
     assert_capped_text(html, 4, expected, true);
   }
-  for html in [
+  assert_capped_text(
     "<textarea>aaaaaaaaaaaaaaaa<z</textarea>",
-    "<title>aaaaaaaaaaaaaaaa<z</title>",
-  ] {
-    assert_capped_text(html, 16, "aaaaaaaaaaaaaaaa", true);
-  }
+    16,
+    "aaaaaaaaaaaaaaaa",
+    true,
+  );
+  // `<title>` text never reaches the output, but the cap still counts it.
+  assert_capped_text("<title>aaaaaaaaaaaaaaaa<z</title>", 16, "", true);
 }
 
 #[test]
 fn a_rawtext_eof_residual_respects_the_text_cap() {
-  for html in ["<textarea>aaaaaaaaaaaaaaa</x", "<title>aaaaaaaaaaaaaaa</x"] {
-    assert_capped_text(html, 16, "aaaaaaaaaaaaaaa<", true);
-  }
+  assert_capped_text("<textarea>aaaaaaaaaaaaaaa</x", 16, "aaaaaaaaaaaaaaa<", true);
+  // `<title>` text never reaches the output, but the cap still counts it.
+  assert_capped_text("<title>aaaaaaaaaaaaaaa</x", 16, "", true);
 }
 
 #[test]
