@@ -75,3 +75,21 @@ fn extraction_still_reads_the_title() {
     "Page"
   );
 }
+
+#[test]
+fn extraction_reads_the_title_with_frontmatter_on() {
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      frontmatter: Some(FrontmatterConfig::default()),
+      extraction: Some(mdream::ExtractionConfig::new(&["title"])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let result = mdream::html_to_markdown_result(PAGE, options);
+  assert_eq!(result.markdown, "---\ntitle: Page\n---\n\nBody");
+  assert_eq!(
+    result.extracted.expect("title extracted")[0].text_content,
+    "Page"
+  );
+}

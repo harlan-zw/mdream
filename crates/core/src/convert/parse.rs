@@ -491,11 +491,9 @@ impl ConvertState {
       if !val.is_empty() {
         self.frontmatter_title = Some(val);
       }
-      text_buffer.clear();
-      return;
     }
     // `<title>` is document metadata that browsers never render. Its text
-    // still reaches extraction, but never the output.
+    // still reaches frontmatter and extraction, but never the output.
     if in_title {
       excludes_text_nodes = true;
     }
