@@ -115,7 +115,9 @@ ${apiCode}
         console.log(`Browser IIFE bundle (wasm inlined): ${outputPath} (${Math.round(iifeContent.length / 1024)}kB, ${Math.round(gzSize / 1024 * 10) / 10}kB gzip)`)
       }
       catch (e: any) {
-        console.warn('Could not create IIFE bundle:', e.message)
+        // A missing or stale dist/iife.js must fail the build, not ship.
+        console.error('Could not create IIFE bundle:', e.message)
+        throw e
       }
     },
   },
