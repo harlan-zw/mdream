@@ -1,15 +1,15 @@
 # mdream outside Node
 
-`mdream` picks an entry by export condition. Only two entries resolve the full option set.
+`mdream` picks an entry by export condition. Every entry takes the same `MdreamOptions`: `minimal`, `frontmatter`, `filter`, `extraction`, `tagOverrides`, and the callbacks work everywhere. The return shape differs.
 
-| Import | Resolved by | Returns | Resolves `minimal` and callbacks |
-|---|---|---|---|
-| `mdream` | Node | `string` | Yes |
-| `mdream` | `workerd`, `edge-light` | `string` | Yes |
-| `mdream` | `browser` | `Promise<{ markdown }>` | No |
-| `mdream/worker` | direct import | `Promise<string>` | No |
-| `mdream/wasm` | direct import | `string` | No |
-| `dist/iife.js` (CDN) | script tag | `{ markdown }` | No |
+| Import | Resolved by | Returns |
+|---|---|---|
+| `mdream` | Node | `string` |
+| `mdream` | `workerd`, `edge-light` | `string` |
+| `mdream` | `browser` | `Promise<{ markdown, frontmatter?, extracted? }>` |
+| `mdream/worker` | direct import | `Promise<string>` |
+| `mdream/wasm` | direct import | `string`, after `init()` |
+| `dist/iife.js` (CDN) | script tag | `{ markdown, frontmatter?, extracted? }` |
 
 The TypeScript types always describe the Node entry. A browser build type checks as a synchronous string, but it gets a Promise at runtime.
 
@@ -32,15 +32,18 @@ A Rust panic becomes a normal `Error` with the message `mdream WASM panic, pleas
 
 ## Browser bundles
 
-In a Vite, webpack, or esbuild client build, `import { htmlToMarkdown } from 'mdream'` resolves the `browser` entry. That entry:
+In a Vite, webpack, or esbuild client build, `import { htmlToMarkdown } from 'mdream'` resolves the `browser` entry. That entry returns `Promise<{ markdown, frontmatter?, extracted? }>`, so `await` it and read `.markdown`. The options and callbacks work as in Node. The cast is needed because the types describe the Node entry.
 
-- returns `Promise<{ markdown, frontmatter?, extracted? }>`, so `await` it and read `.markdown`;
-- ignores `minimal`, `frontmatter`, `isolateMain`, `filter`, `extraction`, and `tagOverrides` at the top level.
+```ts
+import { htmlToMarkdown } from 'mdream'
 
-For browser code, prefer `@mdream/js`. It is synchronous, returns a string, and has no WASM.
+const { markdown } = await (htmlToMarkdown(html, { minimal: true }) as unknown as Promise<{ markdown: string }>)
+```
+
+For browser code that wants a plain string with no WASM, `@mdream/js` is synchronous. Its options nest under `plugins`.
 
 ## Web Worker, raw WASM, and CDN
 
-- `mdream/worker`: call `initWorker(wasmUrl)` first, then `await htmlToMarkdown(html)`. Call `terminateWorker()` when done. Options go to the engine as is, so `minimal` has no effect.
-- `mdream/wasm`: the raw wasm-bindgen build. Await the default export `init({ module_or_path })` before the first `htmlToMarkdown(html)` call.
+- `mdream/worker`: call `initWorker(wasmUrl)` first, then `await htmlToMarkdown(html, options)`. Call `terminateWorker()` when done. Options resolve on the main thread, and the callbacks run there.
+- `mdream/wasm`: the wasm-bindgen build. Await the default export `init({ module_or_path })` before the first `htmlToMarkdown(html, options)` call. Its `MarkdownStream` runs the callbacks in `finish()`.
 - `https://unpkg.com/mdream/dist/iife.js`: the WASM is inlined and ready at load. `window.mdream` has only `htmlToMarkdown`. There is no `init()`. The call returns `{ markdown }`, not a string.

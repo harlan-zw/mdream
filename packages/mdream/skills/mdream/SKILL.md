@@ -57,14 +57,19 @@ const markdown = htmlToMarkdown('<html><head><title>T</title></head><body><a hre
 })
 ```
 
-Stream a large response:
+Stream a large response. The stream takes the same options, and the callbacks run once, after the last chunk is read:
 
 ```ts
 import { streamHtmlToMarkdown } from 'mdream'
 
 const response = await fetch('https://example.com')
 let markdown = ''
-for await (const chunk of streamHtmlToMarkdown(response.body, { origin: 'https://example.com', minimal: true })) {
+let title = ''
+for await (const chunk of streamHtmlToMarkdown(response.body, {
+  origin: 'https://example.com',
+  minimal: true,
+  frontmatter: (fm) => { title = fm.title ?? '' },
+})) {
   markdown += chunk
 }
 ```
@@ -89,13 +94,12 @@ CLI: `curl -s URL | mdream --origin URL --preset minimal`. It streams stdin to s
 
 ## Traps
 
-- **The stream API never calls callbacks.** `streamHtmlToMarkdown` ignores the `frontmatter` function and the `extraction` handlers. The frontmatter still appears in the output. Use `htmlToMarkdown` when you need the data.
 - **A `filter` replaces the `minimal` exclude list.** `{ minimal: true, filter: { exclude: ['h1'] } }` keeps forms and `nav` again. Repeat the default tags in your list.
 - **Hook plugins are not in this package.** An array in `plugins` throws `Custom hook plugins require @mdream/js`. Use `@mdream/js` with `hooks: [createPlugin({...})]` from `@mdream/js/plugins`.
 - **`@mdream/js` nests options under `plugins`.** It ignores `minimal`, `frontmatter`, `filter`, and `isolateMain` at the top level, with no error in JavaScript. Use `withMinimalPreset()` from `@mdream/js/preset/minimal`, or `{ plugins: { frontmatter: true } }`.
 - **Emphasis is `*`, not `_`.** Headings are ATX, bullets are `-`, rules are `---`. Only `tagOverrides` changes a delimiter, for example `em: { enter: '_', exit: '_', isInline: true }`.
 - **Filter selectors also drop inline `position: absolute` and `position: fixed` elements.**
-- **Browser, worker, CDN, and raw WASM entries differ from the Node API.** They return a Promise or an object, and they ignore `minimal`. Read [references/runtimes.md](references/runtimes.md) before you use `mdream` outside Node or a Cloudflare Worker.
+- **Browser and CDN entries return a different shape.** Every entry takes the same options, but the browser bundle returns `Promise<{ markdown }>` and the CDN script returns `{ markdown }`. The types say `string`. Read [references/runtimes.md](references/runtimes.md) before you use `mdream` outside Node or a Cloudflare Worker.
 
 ## Version limits
 
