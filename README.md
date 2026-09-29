@@ -3,6 +3,13 @@
 [![npm version](https://img.shields.io/npm/v/mdream?color=yellow)](https://npmjs.com/package/mdream)
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
+<a href="https://skilld.dev/gh/harlan-zw/mdream/mdream">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://skilld.dev/b/harlan-zw/mdream/mdream?theme=dark">
+    <source media="(prefers-color-scheme: light)" srcset="https://skilld.dev/b/harlan-zw/mdream/mdream?theme=light">
+    <img alt="Skill repository on skilld.dev" src="https://skilld.dev/b/harlan-zw/mdream/mdream?theme=light">
+  </picture>
+</a>
 
 > ☁️ The fastest HTML to markdown converter on GitHub. Optimized for LLMs and supports streaming.
 
@@ -239,10 +246,7 @@ pnpm add mdream
 ```
 
 > [!TIP]
-> Generate an Agent Skill for this package using [skilld](https://github.com/harlan-zw/skilld):
-> ```bash
-> npx skilld add mdream
-> ```
+> Using an AI agent? Get the mdream Skill on [skilld.dev/gh/harlan-zw/mdream/mdream](https://skilld.dev/gh/harlan-zw/mdream/mdream).
 
 ### Bundler Compatibility
 
