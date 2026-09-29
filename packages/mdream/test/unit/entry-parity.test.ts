@@ -26,7 +26,7 @@ await wasm.default()
 const entries: { name: string, convert: Convert, stream: Stream }[] = [
   { name: 'node', convert: async (html, options) => node.htmlToMarkdown(html, options), stream: node.streamHtmlToMarkdown },
   { name: 'edge', convert: async (html, options) => edge.htmlToMarkdown(html, options), stream: edge.streamHtmlToMarkdown },
-  { name: 'browser', convert: async (html, options) => browser.htmlToMarkdown(html, options), stream: browser.streamHtmlToMarkdown },
+  { name: 'browser', convert: (html, options) => browser.htmlToMarkdown(html, options), stream: browser.streamHtmlToMarkdown },
   { name: 'wasm', convert: async (html, options) => wasm.htmlToMarkdown(html, options), stream: (htmlStream, options) => streamWith(wasm.MarkdownStream, htmlStream, options) },
 ]
 
@@ -70,11 +70,15 @@ const optionCases: [string, Partial<MdreamOptions>][] = [
   ['clean', { clean: true, origin: 'https://example.com' }],
 ]
 
-// Every entry returns what the one set of types (dist/index.d.mts) promises.
+// Node, edge, and raw WASM return a string; the browser entry returns a
+// Promise of the same string. export-types.test.ts checks the types match.
 describe('return contract', () => {
-  it('returns a Markdown string synchronously from every sync entry', () => {
-    for (const convert of [node.htmlToMarkdown, edge.htmlToMarkdown, browser.htmlToMarkdown, wasm.htmlToMarkdown])
+  it('returns the Markdown string', async () => {
+    for (const convert of [node.htmlToMarkdown, edge.htmlToMarkdown, wasm.htmlToMarkdown])
       expect(convert('<h1>Hi</h1>', {})).toBe('# Hi')
+    const pending = browser.htmlToMarkdown('<h1>Hi</h1>', {})
+    expect(pending).toBeInstanceOf(Promise)
+    expect(await pending).toBe('# Hi')
   })
 })
 

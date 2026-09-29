@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { MarkdownStream as BrowserMarkdownStream } from '../../src/browser.js'
+import { MarkdownStream as BrowserMarkdownStream, createMarkdownStream } from '../../src/browser.js'
 import { MarkdownStream as EdgeMarkdownStream } from '../../src/edge.js'
 
 const { control, BindingMarkdownStream } = vi.hoisted(() => {
@@ -37,7 +37,7 @@ vi.mock('../../wasm/mdream_edge.js', () => ({
 vi.mock('../../wasm/mdream_edge_bg.wasm', () => ({ default: {} }))
 
 const engines = [
-  { name: 'browser', make: async () => new BrowserMarkdownStream(), StreamClass: BrowserMarkdownStream },
+  { name: 'browser', make: () => createMarkdownStream(), StreamClass: BrowserMarkdownStream },
   { name: 'edge', make: async () => new EdgeMarkdownStream(), StreamClass: EdgeMarkdownStream },
 ] as const
 

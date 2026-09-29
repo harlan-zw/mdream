@@ -16,10 +16,19 @@
   },
   "exports": {
     ".": {
+      "workerd": {
+        "types": "./dist/edge.d.mts",
+        "default": "./dist/edge.mjs"
+      },
+      "edge-light": {
+        "types": "./dist/edge.d.mts",
+        "default": "./dist/edge.mjs"
+      },
+      "browser": {
+        "types": "./dist/browser.d.mts",
+        "default": "./dist/browser.mjs"
+      },
       "types": "./dist/index.d.mts",
-      "workerd": "./dist/edge.mjs",
-      "edge-light": "./dist/edge.mjs",
-      "browser": "./dist/browser.mjs",
       "import": {
         "types": "./dist/index.d.mts",
         "default": "./dist/index.mjs"

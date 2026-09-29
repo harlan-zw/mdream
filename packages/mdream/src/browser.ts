@@ -1,15 +1,24 @@
 import type { HtmlToMarkdownOptions, MdreamNapiResult } from '../napi/index.js'
 import type { MdreamOptions } from './index.js'
 import type { ResolvedOptions } from './resolve-options.js'
-import { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream, initSync } from '../wasm/mdream_edge.js'
+import init, { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream } from '../wasm/mdream_edge.js'
 import { convertResult, deliverPluginData, pumpStream } from './convert.js'
 import { resolveOptions } from './resolve-options.js'
-import { wasmBytes } from './wasm-bytes.js'
 import { wasmPanicError } from './wasm-panic.js'
 
-// The binary is inlined, so the engine is ready at import and the API matches
-// the Node entry: htmlToMarkdown returns a string, not a Promise.
-initSync({ module: wasmBytes() })
+export type { CleanOptions, ExtractedElement, FrontmatterConfig, MdreamOptions, TagOverride } from './index.js'
+
+let _initPromise: Promise<unknown>
+
+function ensureInit(): Promise<unknown> {
+  if (!_initPromise) {
+    _initPromise = init()
+  }
+  return _initPromise
+}
+
+// Eagerly start WASM initialization
+ensureInit()
 
 function convert(html: string, napiOpts: HtmlToMarkdownOptions): MdreamNapiResult {
   try {
@@ -21,8 +30,18 @@ function convert(html: string, napiOpts: HtmlToMarkdownOptions): MdreamNapiResul
   }
 }
 
-export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
+/**
+ * Browser builds fetch the WASM binary on first use, so this returns a
+ * Promise. The `browser` export condition ships types that say so.
+ */
+export async function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): Promise<string> {
+  await ensureInit()
   return convertResult(convert, html, options).markdown || ''
+}
+
+export async function createMarkdownStream(options?: Partial<MdreamOptions>): Promise<MarkdownStream> {
+  await ensureInit()
+  return new MarkdownStream(options)
 }
 
 /** Streaming converter. Runs the frontmatter and extraction callbacks in `finish()`. */
@@ -78,6 +97,7 @@ export async function* streamHtmlToMarkdown(
 ): AsyncIterable<string> {
   if (!htmlStream)
     throw new Error('Invalid HTML stream provided')
+  await ensureInit()
   const resolved = resolveOptions(options)
   // the raw binding, wrapped once in pumpStream rather than once per chunk
   let stream: _MarkdownStream

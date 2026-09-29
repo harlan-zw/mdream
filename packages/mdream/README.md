@@ -939,7 +939,14 @@ The CLI reads HTML from stdin and writes Markdown, plain text, or HTML to stdout
 
 ## Browser and Edge Usage
 
-Every entry takes the same `MdreamOptions`. In Node, edge runtimes, and browser bundles, `htmlToMarkdown` is synchronous and returns a string. The browser build inlines the WASM binary, so it needs no `await` and no WASM file to serve. Only `mdream/worker` is async, because the conversion runs on another thread.
+Every entry takes the same `MdreamOptions` and produces the same Markdown string. In Node and edge runtimes, `htmlToMarkdown` is synchronous. In browser bundles, the CDN script, and `mdream/worker`, it returns `Promise<string>`, because the WASM binary loads first. Each export condition ships its own types, so TypeScript shows the right return type when it resolves the `browser` condition (for example, with `customConditions: ["browser"]`).
+
+```ts
+import { htmlToMarkdown } from 'mdream'
+
+// In a browser bundle
+const markdown = await htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
+```
 
 ### Edge / Cloudflare Workers
 
@@ -985,13 +992,13 @@ const markdown = htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 
 ### Browser CDN (IIFE)
 
-Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It takes the same `MdreamOptions` as the `mdream` entry and returns a string.
+Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It takes the same `MdreamOptions` as the `mdream` entry and returns `Promise<string>`, the same as the browser bundle.
 
 ```html
 <script src="https://unpkg.com/mdream/dist/iife.js"></script>
 <script>
-  const markdown = window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
-  console.log(markdown) // # Hello\n\nWorld
+  window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
+    .then(markdown => console.log(markdown)) // # Hello\n\nWorld
 </script>
 ```
 
