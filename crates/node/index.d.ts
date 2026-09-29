@@ -5,6 +5,11 @@ export declare class MarkdownStream {
   processChunk(chunk: string): string
   processChunkBytes(chunk: Uint8Array): string
   finish(): string
+  /**
+   * Frontmatter and extracted elements collected so far. Call after
+   * `finish()` for the complete data. Extracted elements drain on each call.
+   */
+  takeData(): MdreamStreamData
 }
 
 export interface ChunkLocNapi {
@@ -73,6 +78,12 @@ export interface MarkdownChunkNapi {
 
 export interface MdreamNapiResult {
   markdown: string
+  extracted?: Array<ExtractedElementNapi>
+  frontmatter?: Record<string, string>
+}
+
+/** Plugin data a stream collected: frontmatter and extracted elements. */
+export interface MdreamStreamData {
   extracted?: Array<ExtractedElementNapi>
   frontmatter?: Record<string, string>
 }
