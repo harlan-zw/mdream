@@ -1,9 +1,9 @@
 import type { ElementNode, Node, NodeEvent, TagHandler, TextNode, TransformPlugin } from './types'
 import {
   ELEMENT_NODE,
-  NO_SPACING,
   isInsideRawHtmlBlock,
   MAX_TAG_ID,
+  NO_SPACING,
   NodeEventEnter,
   NodeEventExit,
   TAG_A,
