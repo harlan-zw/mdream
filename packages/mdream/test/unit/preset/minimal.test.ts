@@ -243,3 +243,20 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
     expect(markdown).toContain('Test')
   })
 })
+
+// A filter passed with the minimal preset extends its exclude list; it does not
+// replace it. `filter: false` turns the preset's filter off.
+describe('minimal preset with a custom filter', () => {
+  const html = '<main><nav>Nav</nav><form>Form</form><h1>Title</h1><aside>Aside</aside><p>Body</p></main>'
+
+  it('mdream: filter extends the minimal excludes', async () => {
+    const { htmlToMarkdown: rustHtmlToMarkdown } = await import('../../../src')
+    expect(rustHtmlToMarkdown(html, { minimal: true, filter: { exclude: ['h1'] } })).toBe('Body')
+    expect(rustHtmlToMarkdown(html, { minimal: true, filter: false })).toBe('Nav\n\nForm\n\n# Title\n\nAside\n\nBody')
+  })
+
+  it('@mdream/js: withMinimalPreset filter extends the minimal excludes', () => {
+    expect(jsHtmlToMarkdown(html, withMinimalPreset({ plugins: { filter: { exclude: ['h1'] } } }))).toBe('Body')
+    expect(jsHtmlToMarkdown(html, withMinimalPreset({ plugins: { filter: false } }))).toBe('Nav\n\nForm\n\n# Title\n\nAside\n\nBody')
+  })
+})

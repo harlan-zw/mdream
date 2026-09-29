@@ -400,6 +400,7 @@ impl ConvertState {
       tag_id,
       contains_whitespace: false,
       excluded_from_markdown: false,
+      enter_skipped: false,
       is_inline: handler.is_inline,
       excludes_text_nodes: handler.excludes_text_nodes,
       is_non_nesting: handler.is_non_nesting,
@@ -481,20 +482,20 @@ impl ConvertState {
       }
     }
 
-    if self.has_frontmatter
-      && self.frontmatter_in_head
-      && !excludes_text_nodes
-      && self
-        .stack
-        .last()
-        .is_some_and(|p| p.tag_id == Some(TAG_TITLE))
-    {
+    let in_title = self
+      .stack
+      .last()
+      .is_some_and(|p| p.tag_id == Some(TAG_TITLE));
+    if in_title && self.has_frontmatter && self.frontmatter_in_head && !excludes_text_nodes {
       let val = text_buffer.trim().to_string();
       if !val.is_empty() {
         self.frontmatter_title = Some(val);
       }
-      text_buffer.clear();
-      return;
+    }
+    // `<title>` is document metadata that browsers never render. Its text
+    // still reaches frontmatter and extraction, but never the output.
+    if in_title {
+      excludes_text_nodes = true;
     }
 
     let in_pre_tag = self.in_pre;
@@ -1086,6 +1087,7 @@ impl ConvertState {
       pooled.child_text_node_index = 0;
       pooled.contains_whitespace = false;
       pooled.excluded_from_markdown = false;
+      pooled.enter_skipped = false;
       pooled.is_inline = h_inline;
       pooled.excludes_text_nodes = h_excludes;
       pooled.is_non_nesting = h_non_nesting;
@@ -1104,6 +1106,7 @@ impl ConvertState {
         child_text_node_index: 0,
         contains_whitespace: false,
         excluded_from_markdown: false,
+        enter_skipped: false,
         is_inline: h_inline,
         excludes_text_nodes: h_excludes,
         is_non_nesting: h_non_nesting,
@@ -1269,6 +1272,7 @@ impl ConvertState {
     tag.excluded_from_markdown = in_template
       || filter_excluded
       || (skip_node && (!self.has_isolate_main || self.isolate_main_found));
+    tag.enter_skipped = skip_node;
 
     if tag.collapses_inner_white_space && !tag.excluded_from_markdown {
       if tag.tag_id == Some(TAG_SPAN) {
@@ -1444,7 +1448,10 @@ impl ConvertState {
     }
 
     // Special: empty links — synthesize text from title/aria-label
-    if node.tag_id == Some(TAG_A) && node.child_text_node_index == 0 && !node.excluded_from_markdown
+    if node.tag_id == Some(TAG_A)
+      && node.child_text_node_index == 0
+      && !node.excluded_from_markdown
+      && !node.enter_skipped
     {
       let prefix = node
         .attributes

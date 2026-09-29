@@ -562,7 +562,9 @@ export const tagHandlers: Record<number, TagHandler> = {
     exit: ({ state }) => isInsideTableCell(state) ? '</summary>' : '</summary>\n\n',
   },
   [TAG_TITLE]: {
-    // No special handling for title - plugins will handle frontmatter
+    // Document metadata that browsers never render. Its text still reaches
+    // plugins, so the frontmatter plugin can read it.
+    excludesTextNodes: true,
     collapsesInnerWhiteSpace: true,
     isNonNesting: true,
     spacing: NO_SPACING,

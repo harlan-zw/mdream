@@ -72,8 +72,12 @@ export interface FrontmatterConfig {
  * Works with both the JavaScript and Rust engines.
  */
 export interface BuiltinPlugins {
-  /** Filter elements by CSS selectors, tag names, or TAG_* constants */
-  filter?: {
+  /**
+   * Filter elements by CSS selectors, tag names, or TAG_* constants. With
+   * `withMinimalPreset()`, a filter adds to the preset's excludes; `false`
+   * turns filtering off.
+   */
+  filter?: false | {
     include?: (string | number)[]
     exclude?: (string | number)[]
     processChildren?: boolean

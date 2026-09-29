@@ -64,17 +64,7 @@ pub fn html_to_format_result(
   let consumed = state.process_html(html);
   state.finalize(&html[consumed..]);
 
-  let extracted = if state.has_extraction {
-    let results = std::mem::take(&mut state.extraction_results);
-    if results.is_empty() {
-      None
-    } else {
-      Some(results)
-    }
-  } else {
-    None
-  };
-
+  let extracted = take_extracted(&mut state);
   let frontmatter = state.frontmatter();
 
   MdreamResult {
@@ -82,6 +72,18 @@ pub fn html_to_format_result(
     extracted,
     frontmatter,
     truncated: state.truncated,
+  }
+}
+
+fn take_extracted(state: &mut ConvertState) -> Option<Vec<types::ExtractedElement>> {
+  if !state.has_extraction {
+    return None;
+  }
+  let results = std::mem::take(&mut state.extraction_results);
+  if results.is_empty() {
+    None
+  } else {
+    Some(results)
   }
 }
 
@@ -138,6 +140,18 @@ impl MarkdownStreamProcessor {
     self.state.truncated
   }
 
+  /// Frontmatter entries the frontmatter plugin collected. `None` when the
+  /// plugin is off. Complete once `finish()` returns.
+  pub fn frontmatter(&self) -> Option<Vec<(String, String)>> {
+    self.state.frontmatter()
+  }
+
+  /// Elements the extraction plugin matched, drained on each call. `None`
+  /// when nothing matched. Complete once `finish()` returns.
+  pub fn take_extracted(&mut self) -> Option<Vec<types::ExtractedElement>> {
+    take_extracted(&mut self.state)
+  }
+
   pub fn finish(&mut self) -> String {
     let buffer = std::mem::take(&mut self.buffer);
     let consumed = if buffer.is_empty() {
@@ -147,6 +161,20 @@ impl MarkdownStreamProcessor {
     };
     self.state.finalize(&buffer[consumed..]);
     self.state.get_final_markdown_chunk()
+  }
+}
+
+#[cfg(fuzzing)]
+pub mod fuzz_bridge {
+  use super::{HTMLToMarkdownOptions, MarkdownStreamProcessor, OutputFormat};
+
+  pub fn new_drain_disabled(
+    options: HTMLToMarkdownOptions,
+    format: OutputFormat,
+  ) -> MarkdownStreamProcessor {
+    let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
+    processor.state.disable_drain = true;
+    processor
   }
 }
 
@@ -251,5 +279,77 @@ mod drain_equiv {
       "yielded skipped links accumulated {} buffered bytes",
       processor.state.buffer.len()
     );
+  }
+}
+
+#[cfg(test)]
+mod dropped_raw_text {
+  use super::MarkdownStreamProcessor;
+  use super::types::HTMLToMarkdownOptions;
+
+  fn stream(parts: &[&str], keep: bool) -> String {
+    let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    processor.state.keep_dropped_raw_text = keep;
+    let mut out = String::new();
+    for part in parts {
+      out.push_str(&processor.process_chunk(part));
+    }
+    out.push_str(&processor.finish());
+    out
+  }
+
+  // Skipping means the text node a buffered run would complete never exists;
+  // its absence must not reach the output.
+  #[test]
+  fn skipping_dropped_raw_text_never_changes_output() {
+    let bodies = [
+      "",
+      " ",
+      " \n\t ",
+      "x",
+      " x ",
+      "a &amp; b",
+      "é",
+      " é ",
+      "1 < 2",
+      "</x>",
+      "<p>t</p>",
+    ];
+    let wrappers = [
+      ("", ""),
+      ("x", "y"),
+      ("<p>a ", " b</p>"),
+      ("<p>", "</p>"),
+      ("<li>", "c</li>"),
+      ("<pre>", "\nx</pre>"),
+      ("<blockquote>", " q</blockquote>"),
+      ("<a href=\"/x\">", "t</a>"),
+      ("<h2>", " h</h2>"),
+      ("<table><tr><td>", " c</td></tr></table>"),
+    ];
+    let mut docs = Vec::new();
+    for tag in [
+      "noscript", "iframe", "noframes", "noembed", "datalist", "style",
+    ] {
+      for body in bodies {
+        for (open, close) in wrappers {
+          docs.push(format!("{open}<{tag}>{body}</{tag}>{close}<p> after</p>"));
+        }
+      }
+      docs.push(format!("<p>a<{tag}>x</{}  >b</p>", tag.to_uppercase()));
+      docs.push(format!("<p>a <{tag}> </{tag}><{tag}>x</{tag}> b</p>"));
+      docs.push(format!("<p>a<{tag}>x</{tag}x>y"));
+      docs.push(format!("<p>a<{tag}>x</{}", &tag[..tag.len() - 1]));
+    }
+    for html in &docs {
+      for split in (0..=html.len()).filter(|&split| html.is_char_boundary(split)) {
+        let parts = [&html[..split], &html[split..]];
+        assert_eq!(
+          stream(&parts, false),
+          stream(&parts, true),
+          "html={html:?} split={split}"
+        );
+      }
+    }
   }
 }

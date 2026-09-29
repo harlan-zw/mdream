@@ -195,8 +195,14 @@ struct CodeFenceState {
 struct LinkOutputState {
   bracket_pos: usize,
   skipped: bool,
+  /// This raw-HTML anchor emitted its built-in safe opening tag, so its text
+  /// escapes brackets. Held per link so an enclosing one gets it back.
+  raw_html_open: bool,
   url_max_len: usize,
   hold_forever: bool,
+  /// What makes a streamed link `hold_forever`, set in one-shot conversion too so
+  /// `max_node_bytes` measures the hold the same way in both.
+  pins_output: bool,
   hold_released: bool,
   empty_text_pending: bool,
   /// This anchor wrote its own `[`. Without it the exit's forward scan reaches
@@ -647,6 +653,11 @@ pub struct ConvertState {
   /// it. Recomputing walks the whole line, which is quadratic over a long one.
   line_start: usize,
   line_start_scanned_to: usize,
+  /// Upper bound on the `#`/space run a heading holds back for its closing-sequence
+  /// escape, counted as text is written.
+  heading_hash_run: usize,
+  /// `max_node_bytes` fired on held-back output: input past that point is dropped.
+  held_output_exceeded: bool,
   /// Columns the delimiter row promised; cells past it would be dropped by GFM.
   table_header_cells: usize,
   /// Widest row `max_node_bytes` allows, chosen so the delimiter row it forces
@@ -683,9 +694,12 @@ pub struct ConvertState {
   /// Output column immediately before `buffer[0]`. Draining may remove the
   /// beginning of the current line, but wrapping still needs its full column.
   buffer_start_column: usize,
-  /// Test-only: disables draining to prove it never alters streamed bytes.
-  #[cfg(test)]
+  /// Test/fuzz-only: disables draining to prove it never alters streamed bytes.
+  #[cfg(any(test, fuzzing))]
   pub(crate) disable_drain: bool,
+  /// Test-only: buffers dropped raw text to prove skipping it never alters output.
+  #[cfg(test)]
+  pub(crate) keep_dropped_raw_text: bool,
 
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
   /// hot path — a single integer compare). Code/tables/headings are exempt.
@@ -696,8 +710,6 @@ pub struct ConvertState {
 
   // Clean mode — bitmask for zero-cost when disabled
   clean_flags: u8,
-  /// The current raw-HTML anchor emitted its built-in safe opening tag.
-  raw_html_link_open: bool,
   /// Output state for the active anchor and its malformed nested parents.
   link: LinkOutputState,
   parent_links: Vec<LinkOutputState>,
@@ -747,11 +759,12 @@ pub struct ConvertState {
   /// nothing. `pre_fence_pending`: inside a `<pre>` whose fence is undecided.
   /// `pre_fence_lang`: language resolved from the `<pre>`'s own class.
   pre_fence_pending: bool,
+  /// Depth of the `<pre>` whose fence is pending; nested `<pre>`s defer to it.
+  pre_fence_pending_depth: u16,
   pre_fence_lang: String,
-  /// A fence is open for the current `<pre>`, however it was opened. The `<pre>`
-  /// exit owns the closer, so a `<code>` child's trailing siblings stay in the
-  /// block instead of landing on the fence line.
-  pre_fence_open: bool,
+  /// Depth of the `<pre>` owning the open fence; zero when none. Its exit
+  /// closes the fence after any trailing siblings of a `<code>` child.
+  pre_fence_owner_depth: u16,
   /// The open `<li>` wrote its marker onto a line that continues the paragraph
   /// above, so an empty item would read as a setext underline. `empty_item_len`
   /// is the buffer length that still means "nothing written since the marker",
@@ -865,6 +878,8 @@ impl ConvertState {
       raw_html_scanned_to: 0,
       line_start: 0,
       line_start_scanned_to: 0,
+      heading_hash_run: 0,
+      held_output_exceeded: false,
       table_header_cells: 0,
       truncated: false,
       table_column_cap: if options_max_node_bytes == 0 {
@@ -885,15 +900,16 @@ impl ConvertState {
       flushed_tail: [b'\n'; 2],
       cut_line_lead: CutLineLead::Uncut,
       buffer_start_column: 0,
-      #[cfg(test)]
+      #[cfg(any(test, fuzzing))]
       disable_drain: false,
+      #[cfg(test)]
+      keep_dropped_raw_text: false,
 
       wrap_width: options_wrap_width,
       format,
       plain_text,
       preserve_leading_whitespace: false,
       clean_flags: 0,
-      raw_html_link_open: false,
       link: LinkOutputState::default(),
       parent_links: Vec::new(),
       link_caption_break_snapshot: Vec::new(),
@@ -916,8 +932,9 @@ impl ConvertState {
       list_indent_widths: Vec::with_capacity(8),
 
       pre_fence_pending: false,
+      pre_fence_pending_depth: 0,
       pre_fence_lang: String::new(),
-      pre_fence_open: false,
+      pre_fence_owner_depth: 0,
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
@@ -1024,8 +1041,10 @@ impl ConvertState {
         &mut self.text_node_exhausted,
       );
       self.truncated |= clamped;
+      // Only buffered data is flushed as a text node. Unbuffered data sets no
+      // flag, or the flag outlives it and keeps the next whitespace-only text.
+      self.text_buffer_contains_non_whitespace = true;
     }
-    self.text_buffer_contains_non_whitespace = true;
     self.last_char_was_whitespace = false;
     self.just_closed_tag = false;
   }
@@ -1053,6 +1072,15 @@ impl ConvertState {
     }
     if exhausted {
       self.text_node_exhausted = false;
+    }
+    // Every markup token completes the text before it, so this sees the same
+    // states whatever the chunking. The parser stops before that token.
+    if self.options.max_node_bytes != 0
+      && !self.held_output_exceeded
+      && self.held_output_exceeds_cap()
+    {
+      self.held_output_exceeded = true;
+      self.truncated = true;
     }
   }
 
@@ -1117,6 +1145,9 @@ impl ConvertState {
   /// caller keeps the rest; returning an owned tail instead would copy a token
   /// that spans many chunks once per chunk, which is quadratic.
   pub fn process_html(&mut self, chunk: &str) -> usize {
+    if self.held_output_exceeded {
+      return self.drop_after_held_output_exceeded(String::new(), chunk.len());
+    }
     self.rawtext_end_tag_pending = false;
     // Non-empty only when the previous chunk ended mid-text: that run continues
     // here instead of being re-fed as raw input. Every flush leaves it empty.
@@ -1303,6 +1334,15 @@ impl ConvertState {
           continue;
         }
 
+        if self.in_non_nesting && self.drops_raw_text() {
+          while i < chunk_length && bytes[i] != LT_CHAR {
+            i += 1;
+          }
+          self.last_char_was_whitespace = false;
+          self.just_closed_tag = false;
+          continue;
+        }
+
         // Script/style rawtext is excluded from output. Scan directly to the
         // next potential tag instead of routing every byte through the general
         // text path. Quotes are ordinary rawtext bytes; HTML closes these
@@ -1417,6 +1457,9 @@ impl ConvertState {
           }
           if raw_name.eq_ignore_ascii_case(peek_name) {
             self.complete_text_node(&mut text_buffer);
+            if self.held_output_exceeded {
+              return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+            }
             run_start = i;
             let result = self.process_closing_tag(chunk, i);
             if result.complete {
@@ -1475,6 +1518,9 @@ impl ConvertState {
           if current_tag_id.is_some_and(|tag_id| Some(tag_id) == peek_tag_id) {
             // Matching closing tag: fall through to normal closing tag processing
             self.complete_text_node(&mut text_buffer);
+            if self.held_output_exceeded {
+              return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+            }
             run_start = i;
             let result = self.process_closing_tag(chunk, i);
             if result.complete {
@@ -1489,17 +1535,19 @@ impl ConvertState {
           }
         }
         // Not a matching closing tag: treat '<' as literal text
-        let before_len = text_buffer.len();
-        self.truncated |= push_capped_text_node(
-          &mut text_buffer,
-          "<",
-          max_node_bytes,
-          &mut self.text_node_exhausted,
-        );
-        if text_buffer.len() != before_len {
-          // RCDATA text is DOM text: its `<` must be escaped like any other.
-          self.text_buffer_contains_non_whitespace = true;
-          self.text_buffer_has_inline_gfm_hazard = true;
+        if !self.drops_raw_text() {
+          let before_len = text_buffer.len();
+          self.truncated |= push_capped_text_node(
+            &mut text_buffer,
+            "<",
+            max_node_bytes,
+            &mut self.text_node_exhausted,
+          );
+          if text_buffer.len() != before_len {
+            // RCDATA text is DOM text: its `<` must be escaped like any other.
+            self.text_buffer_contains_non_whitespace = true;
+            self.text_buffer_has_inline_gfm_hazard = true;
+          }
         }
         self.last_char_was_whitespace = false;
         self.just_closed_tag = false;
@@ -1522,6 +1570,9 @@ impl ConvertState {
           if let Some(rel) = after_open.find("]]>") {
             let token_len = "<![CDATA[".len() + rel + 3;
             self.complete_text_node(&mut text_buffer);
+            if self.held_output_exceeded {
+              return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+            }
             run_start = i;
             if max_node_bytes != 0 && token_len > max_node_bytes {
               if self.has_surfaced_cdata() {
@@ -1546,6 +1597,9 @@ impl ConvertState {
           break;
         }
         self.complete_text_node(&mut text_buffer);
+        if self.held_output_exceeded {
+          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+        }
         run_start = i;
         let result = process_comment_or_doctype(chunk, i);
         if result.complete {
@@ -1561,6 +1615,9 @@ impl ConvertState {
         }
       } else if next == SLASH_CHAR {
         self.complete_text_node(&mut text_buffer);
+        if self.held_output_exceeded {
+          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+        }
         run_start = i;
         let result = self.process_closing_tag(chunk, i);
         if result.complete {
@@ -1644,6 +1701,9 @@ impl ConvertState {
         i2 = tag_name_end;
 
         self.complete_text_node(&mut text_buffer);
+        if self.held_output_exceeded {
+          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+        }
         run_start = i;
 
         // Under `ATTR_ALL` nothing is unwanted, so a retained-byte budget would
@@ -1733,6 +1793,21 @@ impl ConvertState {
     consumed
   }
 
+  /// Input past the token where held-back output outgrew the cap is dropped, so
+  /// the result is the document cut there, however it was chunked.
+  fn drop_after_held_output_exceeded(
+    &mut self,
+    mut text_buffer: String,
+    chunk_length: usize,
+  ) -> usize {
+    text_buffer.clear();
+    self.parse_text_buffer = text_buffer;
+    self.pending_start = None;
+    self.pending_tag = None;
+    self.discard = Discard::No;
+    chunk_length
+  }
+
   /// Drop a token that outgrew the cap instead of carrying it. The element is
   /// lost, but scanning its bytes here leaves the quote/dash state that finds its
   /// end, so the raw input buffer stops growing.
@@ -1791,6 +1866,20 @@ impl ConvertState {
       tag_is_complete(chunk, run_start, &mut pending);
       Discard::Tag(pending)
     };
+  }
+
+  /// Raw text its element drops and no extraction reads, so it can be skipped
+  /// like unread script data.
+  fn drops_raw_text(&self) -> bool {
+    #[cfg(test)]
+    if self.keep_dropped_raw_text {
+      return false;
+    }
+    self.extraction_tracked.is_empty()
+      && self
+        .stack
+        .last()
+        .is_some_and(|node| node.excludes_text_nodes)
   }
 
   /// Whether CDATA sections surface as output through a `#cdata-section`
@@ -1991,11 +2080,25 @@ impl ConvertState {
   /// end tag, so the residual is text unless it is an appropriate end tag that
   /// already reached a tag state.
   pub fn finalize(&mut self, leftover: &str) {
+    let in_script = self
+      .stack
+      .last()
+      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none());
+    // A rawtext residual continues the text run already pending, so it has to
+    // join that buffer rather than be flushed as a second text node: two nodes
+    // are separated by a space this text never contained.
+    let rawtext_text = !in_script
+      && leftover.as_bytes().first() == Some(&LT_CHAR)
+      && self.in_non_nesting
+      && !self.rawtext_end_tag_pending;
+    let dropped = rawtext_text && self.drops_raw_text();
     // Tokens abandoned at EOF are only reported here. A parked start tag counts
     // just when the cap fired on it: a mask-rejected attribute is absent from an
     // uncapped parse too, so losing it loses nothing.
     if !matches!(self.discard, Discard::No)
-      || (self.options.max_node_bytes != 0 && leftover.len() > self.options.max_node_bytes)
+      || (self.options.max_node_bytes != 0
+        && leftover.len() > self.options.max_node_bytes
+        && !dropped)
       || self
         .pending_start
         .as_ref()
@@ -2003,22 +2106,12 @@ impl ConvertState {
     {
       self.truncated = true;
     }
-    let in_script = self
-      .stack
-      .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none());
     if in_script {
       self.push_script_text(leftover);
       self.flush_script_text();
       self.script_data_state = SCRIPT_DATA;
     } else {
-      // A rawtext residual continues the text run already pending, so it has to
-      // join that buffer rather than be flushed as a second text node: two nodes
-      // are separated by a space this text never contained.
-      let rawtext_text = leftover.as_bytes().first() == Some(&LT_CHAR)
-        && self.in_non_nesting
-        && !self.rawtext_end_tag_pending;
-      if rawtext_text {
+      if rawtext_text && !dropped {
         let before_len = self.parse_text_buffer.len();
         self.truncated |= push_capped_text_node(
           &mut self.parse_text_buffer,
@@ -2095,6 +2188,63 @@ impl ConvertState {
     }
   }
 
+  /// Whether output held back behind an open construct has outgrown
+  /// `max_node_bytes`. Measured from the construct's structure, never from what a
+  /// flush happened to release, so chunking cannot move where it fires.
+  fn held_output_exceeds_cap(&mut self) -> bool {
+    let cap = self.options.max_node_bytes;
+    // The counter only bounds the run from above: output that survives between
+    // two runs (`<br>`, an image) breaks it without resetting the count. Past the
+    // cap the buffer decides, and the count drops to what it shows only once no
+    // open element can still retract output and rejoin the run.
+    if self.heading_hash_run > cap {
+      let run = self
+        .buffer
+        .as_bytes()
+        .iter()
+        .rev()
+        .take(cap + 1)
+        .take_while(|&&byte| matches!(byte, b'#' | b' ' | b'\t'))
+        .count();
+      if run > cap {
+        return true;
+      }
+      if self.open_markers.is_empty()
+        && self.code_spans.is_empty()
+        && self.depth_map[TAG_A as usize] == 0
+        && self.first_tentative_caption_start().is_none()
+      {
+        self.heading_hash_run = run;
+      }
+    }
+    let len = self.buffer.len();
+    if len <= cap {
+      return false;
+    }
+    let mut floor = len;
+    // Other link holds end within the link's URL length.
+    if let Some(bracket_pos) = std::iter::once(&self.link)
+      .chain(&self.parent_links)
+      .filter(|link| link.open && link.pins_output)
+      .map(|link| link.bracket_pos)
+      .min()
+    {
+      floor = floor.min(bracket_pos);
+    }
+    // A quote releases completed lines only, and none while a blocker is open.
+    if !self.retains_whole_document()
+      && let Some(content_start) = self.blockquotes.first().map(|frame| frame.content_start)
+      && len.saturating_sub(content_start) > cap
+    {
+      let reach = match self.blockquote_flush_blocker() {
+        Some(blocker) => blocker,
+        None => self.current_line_start(),
+      };
+      floor = floor.min(content_start.max(reach));
+    }
+    len - floor > cap
+  }
+
   pub fn get_markdown_chunk(&mut self) -> String {
     if self.format == OutputFormat::Html {
       return std::mem::take(&mut self.buffer);
@@ -2127,7 +2277,7 @@ impl ConvertState {
     // no content and the buffer tail is still the block spacing its own open
     // wrote. Finalize trims that, so it has to stay held back like any other
     // block's; only past the fence is trailing whitespace significant code.
-    let in_pre = self.depth_map[TAG_PRE as usize] != 0 && self.pre_fence_open;
+    let in_pre = self.depth_map[TAG_PRE as usize] != 0 && self.pre_fence_owner_depth != 0;
     let mut stable_end = self.buffer.trim_end_matches(' ').len();
     if in_pre {
       if self.last_text_node_contains_whitespace {
@@ -2300,7 +2450,7 @@ impl ConvertState {
   /// streaming API and diverge from one-shot regardless of drain. The
   /// `disable_drain` equivalence test guards this without enumerating rewrites.
   fn drain_streamed_prefix(&mut self) {
-    #[cfg(test)]
+    #[cfg(any(test, fuzzing))]
     if self.disable_drain {
       return;
     }

@@ -16,10 +16,19 @@
   },
   "exports": {
     ".": {
+      "workerd": {
+        "types": "./dist/edge.d.mts",
+        "default": "./dist/edge.mjs"
+      },
+      "edge-light": {
+        "types": "./dist/edge.d.mts",
+        "default": "./dist/edge.mjs"
+      },
+      "browser": {
+        "types": "./dist/browser.d.mts",
+        "default": "./dist/browser.mjs"
+      },
       "types": "./dist/index.d.mts",
-      "workerd": "./dist/edge.mjs",
-      "edge-light": "./dist/edge.mjs",
-      "browser": "./dist/browser.mjs",
       "import": {
         "types": "./dist/index.d.mts",
         "default": "./dist/index.mjs"
@@ -35,8 +44,8 @@
       "default": "./dist/worker.mjs"
     },
     "./wasm": {
-      "types": "./wasm/mdream_edge.d.ts",
-      "default": "./wasm/mdream_edge.js"
+      "types": "./dist/wasm.d.mts",
+      "default": "./dist/wasm.mjs"
     },
     "./wasm/*": "./wasm/*"
   },
@@ -51,6 +60,7 @@
     "bin",
     "dist",
     "napi/",
+    "skills",
     "wasm-bundler/",
     "wasm/"
   ],
@@ -69,7 +79,7 @@
     "test:wiki:file": "pnpm build && cat test/fixtures/wikipedia-largest.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "test:wiki-small:file": "cat test/fixtures/wikipedia-small.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "build": "obuild",
-    "build:native": "cd ../../crates/node && napi build --platform --release",
+    "build:native": "pnpm --dir ../../crates/node run build:platform",
     "build:edge": "cd ../../crates/edge && CARGO_PROFILE_RELEASE_OPT_LEVEL=s wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge && wasm-opt -O3 --converge --low-memory-unused --enable-bulk-memory --enable-nontrapping-float-to-int --strip-producers ../../packages/mdream/wasm/mdream_edge_bg.wasm -o ../../packages/mdream/wasm/mdream_edge_bg.wasm && CARGO_PROFILE_RELEASE_OPT_LEVEL=s wasm-pack build --target bundler --out-dir ../../packages/mdream/wasm-bundler --out-name mdream_edge && wasm-opt -O3 --converge --low-memory-unused --enable-bulk-memory --enable-nontrapping-float-to-int --strip-producers ../../packages/mdream/wasm-bundler/mdream_edge_bg.wasm -o ../../packages/mdream/wasm-bundler/mdream_edge_bg.wasm",
     "typecheck": "tsc --noEmit",
     "dev:prepare": "obuild --stub",
