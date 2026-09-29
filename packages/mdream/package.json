@@ -35,8 +35,8 @@
       "default": "./dist/worker.mjs"
     },
     "./wasm": {
-      "types": "./wasm/mdream_edge.d.ts",
-      "default": "./wasm/mdream_edge.js"
+      "types": "./dist/wasm.d.mts",
+      "default": "./dist/wasm.mjs"
     },
     "./wasm/*": "./wasm/*"
   },
