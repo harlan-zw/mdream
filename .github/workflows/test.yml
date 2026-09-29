@@ -10,10 +10,8 @@ on:
       - 1.x
     paths-ignore:
       - '**/*.md'
+  # Every base, so stacked pull requests are tested too.
   pull_request:
-    branches:
-      - main
-      - 1.x
     paths-ignore:
       - '**/*.md'
 
