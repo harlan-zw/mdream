@@ -5444,17 +5444,19 @@ fn a_clean_flag_leaves_content_outside_the_link_alone() {
 // RCDATA and RAWTEXT content is text in the DOM, so a `<` inside it has to stay
 // literal in Markdown. Left unescaped, `<textarea><b>x</b></textarea>` turned the
 // text into live inline HTML. The same text reached through `&lt;` was escaped.
+// `<title>` is the exception: its text is document metadata the title contract
+// drops, so its RCDATA content must not surface either.
 #[test]
 fn rcdata_less_than_is_escaped_like_any_text() {
   for (html, expected) in [
     ("<textarea><b>x</b></textarea>", "\\<b>x\\</b>"),
     ("<textarea>&lt;b>x&lt;/b></textarea>", "\\<b>x\\</b>"),
-    ("<title><b>x</b></title>", "\\<b>x\\</b>"),
+    ("<title><b>x</b></title>", ""),
     ("<xmp>a<b></xmp>", "a\\<b>"),
     ("<textarea>a<z</textarea>", "a\\<z"),
     ("<textarea>a < b</textarea>", "a < b"),
     // EOF residuals take the carried path rather than the byte loop.
-    ("<title>a<z", "a\\<z"),
+    ("<title>a<z", ""),
     ("<textarea>a</textarea", "a\\</textarea"),
     ("<xmp>a</", "a\\</"),
   ] {

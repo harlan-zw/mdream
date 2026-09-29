@@ -4435,6 +4435,7 @@ mod tests {
       tag_id: Some(tag_id),
       contains_whitespace: false,
       excluded_from_markdown: false,
+      enter_skipped: false,
       is_inline,
       excludes_text_nodes: false,
       is_non_nesting: false,
