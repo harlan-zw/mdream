@@ -1,4 +1,5 @@
 import { htmlToMarkdown as _htmlToMarkdown, MarkdownStream as _MarkdownStream } from '../napi/index.mjs'
+import { convertResult, pumpStream } from './convert.js'
 import { resolveOptions } from './resolve-options.js'
 import { createSurrogateCarry } from './surrogate-carry.js'
 
@@ -50,8 +51,8 @@ export interface MdreamOptions {
   origin?: string
   /**
    * Clean up the markdown output. Pass `true` for all cleanup or an object
-   * to enable specific features. `clean.urls` is handled during conversion;
-   * other options are post-processing steps (sync API only).
+   * to enable specific features. Both `htmlToMarkdown` and
+   * `streamHtmlToMarkdown` apply it.
    */
   clean?: boolean | CleanOptions
   /** Enable minimal preset (frontmatter, isolateMain, tailwind, filter). Default: false */
@@ -87,15 +88,7 @@ export interface MdreamOptions {
 }
 
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
-  const { napiOpts, extractionHandlers, frontmatterCallback } = resolveOptions(options)
-  const napiResult = _htmlToMarkdown(html, napiOpts)
-  if (napiResult.frontmatter && frontmatterCallback)
-    frontmatterCallback(napiResult.frontmatter)
-  if (napiResult.extracted?.length && extractionHandlers) {
-    for (const el of napiResult.extracted)
-      extractionHandlers[el.selector]?.(el)
-  }
-  return napiResult.markdown
+  return convertResult(_htmlToMarkdown, html, options).markdown
 }
 
 export async function* streamHtmlToMarkdown(
@@ -104,36 +97,16 @@ export async function* streamHtmlToMarkdown(
 ): AsyncIterable<string> {
   if (!htmlStream)
     throw new Error('Invalid HTML stream provided')
-  const { napiOpts } = resolveOptions(options)
-  const stream = new _MarkdownStream(napiOpts)
-  const reader = htmlStream.getReader()
-  const decoder = new TextDecoder()
+  const resolved = resolveOptions(options)
   const carry = createSurrogateCarry()
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done)
-        break
-      // Only one of the byte tail and the surrogate carry can be pending: each
-      // chunk type flushes the other's.
-      const chunk = typeof value === 'string'
-        ? carry.take(decoder.decode() + value)
-        : carry.flush() + decoder.decode(value, { stream: true })
-      const processed = stream.processChunk(chunk)
-      if (processed)
-        yield processed
-    }
-    const decoderTail = carry.flush() + decoder.decode()
-    if (decoderTail) {
-      const processed = stream.processChunk(decoderTail)
-      if (processed)
-        yield processed
-    }
-    const final_ = stream.finish()
-    if (final_)
-      yield final_
-  }
-  finally {
-    reader.releaseLock()
-  }
+  const stream = new _MarkdownStream(resolved.napiOpts)
+  yield* pumpStream({
+    processChunk: chunk => stream.processChunk(carry.take(chunk)),
+    processChunkBytes: chunk => stream.processChunkBytes(chunk),
+    finish: () => {
+      const held = carry.flush()
+      return held ? stream.processChunk(held) + stream.finish() : stream.finish()
+    },
+    takeData: () => stream.takeData(),
+  }, htmlStream, resolved, { decodeInJs: true })
 }

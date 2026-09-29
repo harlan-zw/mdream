@@ -1,6 +1,9 @@
 import type { HtmlToMarkdownOptions } from '../napi/index.js'
+import type { MdreamOptions } from './index.js'
+import type { ResolvedOptions } from './resolve-options.js'
 import { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream, initSync } from '../wasm/mdream_edge.js'
 import wasmModule from '../wasm/mdream_edge_bg.wasm'
+import { convertResult, deliverPluginData, pumpStream } from './convert.js'
 import { resolveOptions } from './resolve-options.js'
 import { createSurrogateCarry } from './surrogate-carry.js'
 import { wasmPanicError } from './wasm-panic.js'
@@ -9,7 +12,7 @@ import { wasmPanicError } from './wasm-panic.js'
 // WebAssembly.Module that must be instantiated manually (#119).
 initSync({ module: wasmModule })
 
-function convert(html: string, napiOpts: HtmlToMarkdownOptions | undefined) {
+function convert(html: string, napiOpts: HtmlToMarkdownOptions) {
   try {
     return _htmlToMarkdownResult(html, napiOpts)
   }
@@ -19,28 +22,21 @@ function convert(html: string, napiOpts: HtmlToMarkdownOptions | undefined) {
   }
 }
 
-export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): string {
-  if (!options)
-    return convert(html, undefined).markdown || ''
-
-  const { napiOpts, extractionHandlers, frontmatterCallback } = resolveOptions(options)
-  const result = convert(html, napiOpts)
-  if (result.frontmatter && frontmatterCallback)
-    frontmatterCallback(result.frontmatter)
-  if (result.extracted?.length && extractionHandlers) {
-    for (const element of result.extracted)
-      extractionHandlers[element.selector]?.(element)
-  }
-  return result.markdown || ''
+export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
+  return convertResult(convert, html, options).markdown || ''
 }
 
+/** Streaming converter. Runs the frontmatter and extraction callbacks in `finish()`. */
 export class MarkdownStream {
   private _inner: _MarkdownStream
   private _carry = createSurrogateCarry()
+  private _callbacks: Pick<ResolvedOptions, 'frontmatterCallback' | 'extractionHandlers'>
 
-  constructor(options?: HtmlToMarkdownOptions) {
+  constructor(options: Partial<MdreamOptions> = {}) {
+    const resolved = resolveOptions(options)
+    this._callbacks = resolved
     try {
-      this._inner = new _MarkdownStream(options)
+      this._inner = new _MarkdownStream(resolved.napiOpts)
     }
     catch (error) {
       throw wasmPanicError(error)
@@ -69,53 +65,50 @@ export class MarkdownStream {
   }
 
   finish(): string {
+    let markdown: string
     try {
       const held = this._carry.flush()
-      return held
+      markdown = held
         ? this._inner.processChunk(held) + this._inner.finish()
         : this._inner.finish()
     }
     catch (error) {
       throw wasmPanicError(error)
     }
+    if (this._callbacks.frontmatterCallback || this._callbacks.extractionHandlers)
+      deliverPluginData(this._inner.takeData(), this._callbacks)
+    return markdown
   }
 }
 
 export async function* streamHtmlToMarkdown(
   htmlStream: ReadableStream<Uint8Array | string> | null,
-  options?: HtmlToMarkdownOptions,
+  options: Partial<MdreamOptions> = {},
 ): AsyncIterable<string> {
   if (!htmlStream)
     throw new Error('Invalid HTML stream provided')
-  // the raw binding, wrapped once below rather than once per chunk
-  const stream = new _MarkdownStream(options ? resolveOptions(options).napiOpts : undefined)
-  const reader = htmlStream.getReader()
+  const resolved = resolveOptions(options)
   const carry = createSurrogateCarry()
+  // the raw binding, wrapped once in pumpStream rather than once per chunk
+  let stream: _MarkdownStream
   try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done)
-        break
-      let processed: string
-      if (typeof value === 'string') {
-        processed = stream.processChunk(carry.take(value))
-      }
-      else {
-        const held = carry.flush()
-        processed = (held ? stream.processChunk(held) : '') + stream.processChunkBytes(value)
-      }
-      if (processed)
-        yield processed
-    }
-    const held = carry.flush()
-    const final_ = (held ? stream.processChunk(held) : '') + stream.finish()
-    if (final_)
-      yield final_
+    stream = new _MarkdownStream(resolved.napiOpts)
   }
   catch (error) {
     throw wasmPanicError(error)
   }
-  finally {
-    reader.releaseLock()
-  }
+  yield* pumpStream({
+    processChunk: chunk => stream.processChunk(carry.take(chunk)),
+    processChunkBytes: (chunk) => {
+      const held = carry.flush()
+      return held
+        ? stream.processChunk(held) + stream.processChunkBytes(chunk)
+        : stream.processChunkBytes(chunk)
+    },
+    finish: () => {
+      const held = carry.flush()
+      return held ? stream.processChunk(held) + stream.finish() : stream.finish()
+    },
+    takeData: () => stream.takeData(),
+  }, htmlStream, resolved, { mapError: wasmPanicError })
 }

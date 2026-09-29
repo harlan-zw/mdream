@@ -113,6 +113,29 @@ fn html_output_stream_matches_batch_at_every_split() {
   }
 }
 
+// Discarded script data is not text, so whitespace after the script is still
+// inter-element whitespace and drops as it would with no script at all.
+#[test]
+fn html_output_drops_whitespace_after_discarded_script_data() {
+  let options = HTMLToMarkdownOptions::default;
+  let input = "<x><script>;</script> <link> ";
+  assert_eq!(html_to_html(input, options()), "");
+  assert_eq!(
+    html_to_html(
+      "<d><title>n</title><script>;</script>\n</>\n<link>\n",
+      options()
+    ),
+    "n"
+  );
+  for split in 0..=input.len() {
+    let mut processor = MarkdownStreamProcessor::new_with_format(options(), OutputFormat::Html);
+    let mut output = processor.process_chunk(&input[..split]);
+    output.push_str(&processor.process_chunk(&input[split..]));
+    output.push_str(&processor.finish());
+    assert_eq!(output, "", "split={split}");
+  }
+}
+
 // ── Plain text output ──
 
 #[test]
@@ -3974,6 +3997,54 @@ fn isolate_main_finds_deeply_nested_main() {
   assert!(result.contains("Deep content"));
   assert!(!result.contains("Nav"));
   assert!(!result.contains("Footer"));
+}
+
+fn isolate_main_options() -> HTMLToMarkdownOptions {
+  HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      isolate_main: Some(IsolateMainConfig {}),
+      ..Default::default()
+    }),
+    ..Default::default()
+  }
+}
+
+// A node whose start isolateMain skipped must not emit its end: the closer
+// would have no opener in the output.
+#[test]
+fn isolate_main_skipped_elements_emit_no_closers() {
+  let html = "<p>Hello <strong>world</strong>!</p>";
+  assert_eq!(convert_with_isolate_main(html), "");
+  assert_eq!(html_to_text(html, isolate_main_options()), "");
+  assert_eq!(html_to_html(html, isolate_main_options()), "");
+  assert_eq!(convert_with_isolate_main("<b>"), "");
+  assert_eq!(convert_with_isolate_main("<i>"), "");
+}
+
+#[test]
+fn isolate_main_skipped_empty_link_emits_no_label_or_tail() {
+  let html = r#"<a href="/x" title="Home"></a><h1>Title</h1><p>Body</p>"#;
+  assert_eq!(convert_with_isolate_main(html), "# Title\n\nBody");
+  assert_eq!(
+    html_to_html(html, isolate_main_options()),
+    r#"<h1 id="title">Title</h1><p>Body</p>"#
+  );
+}
+
+#[test]
+fn isolate_main_keeps_a_heading_inside_a_skipped_container() {
+  let html = "<div><nav><b>Menu</b></nav><h1>Title</h1><p>Body <em>here</em></p></div>";
+  assert_eq!(convert_with_isolate_main(html), "# Title\n\nBody *here*");
+  assert_eq!(
+    html_to_html(html, isolate_main_options()),
+    r#"<h1 id="title">Title</h1><p>Body <em>here</em></p>"#
+  );
+}
+
+#[test]
+fn isolate_main_skipped_footer_emits_no_closers() {
+  let html = "<h1>Title</h1><p>Body</p><footer><p><b>Foot</b></p></footer>";
+  assert_eq!(convert_with_isolate_main(html), "# Title\n\nBody");
 }
 
 // ── Script non-nesting: less-than operator ──

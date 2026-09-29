@@ -111,10 +111,9 @@ fn aliased_bracket_from_unclosed_nested_anchor_is_not_rewritten() {
     ..Default::default()
   };
   let markdown = mdream::html_to_markdown(html, options);
-  // Neither fragment resolves to a heading, so leaving them unstripped is
-  // correct here; giving each nested anchor its own bracket is a separate fix.
+  // Tailwind skips both nested anchors, so neither may leave a `](#...)` tail.
   assert_eq!(
     markdown,
-    "###\n\n[text-decoration-thickness](#examples)](#basic-example)](/docs/text-decoration-thickness)"
+    "###\n\n[text-decoration-thickness](/docs/text-decoration-thickness)"
   );
 }
