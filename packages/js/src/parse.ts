@@ -1,6 +1,7 @@
 import type { ElementNode, Node, NodeEvent, TagHandler, TextNode, TransformPlugin } from './types'
 import {
   ELEMENT_NODE,
+  NO_SPACING,
   isInsideRawHtmlBlock,
   MAX_TAG_ID,
   NodeEventEnter,
@@ -67,6 +68,10 @@ import {
 } from './const'
 import { tagHandlers } from './tags'
 import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
+
+// A tag outside the dictionary with no override renders only its text, inline
+// with zero spacing, as in the Rust engine: `<x>X</x><y>Y</y>` is `XY`.
+const UNKNOWN_TAG_HANDLER: TagHandler = { isInline: true, spacing: NO_SPACING }
 
 // Cache frequently used character codes
 const LT_CHAR = 60 // '<'
@@ -1650,7 +1655,7 @@ function processOpeningTag(
     closeNode(state.currentNode, state, handleEvent)
   }
 
-  const tagHandler = state.tagOverrideHandlers?.get(tagName) ?? tagHandlers[tagId]
+  const tagHandler = state.tagOverrideHandlers?.get(tagName) ?? (tagId === -1 ? UNKNOWN_TAG_HANDLER : tagHandlers[tagId])
   const result = scanTagAttributes(htmlChunk, i, tagHandler)
 
   if (result._tag === 'incomplete') {
