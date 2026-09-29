@@ -5,6 +5,27 @@ import { resolvePlugins } from './resolve-plugins'
 import { streamHtmlToMarkdown as _streamHtmlToMarkdown } from './stream'
 import { buildTagOverrideHandlers } from './tags'
 
+// Plugin options the mdream (Rust) entry takes at the top level. Here they
+// live under `plugins`, so a top-level one would silently do nothing.
+const TOP_LEVEL_PLUGIN_KEYS = ['frontmatter', 'isolateMain', 'tailwind', 'filter', 'extraction', 'tagOverrides'] as const
+
+function assertEngineOptions(options: Record<string, unknown>): void {
+  if ('minimal' in options) {
+    throw new TypeError(
+      '@mdream/js has no `minimal` option. '
+      + 'Use withMinimalPreset() from \'@mdream/js/preset/minimal\': htmlToMarkdown(html, withMinimalPreset({ origin })).',
+    )
+  }
+  for (const key of TOP_LEVEL_PLUGIN_KEYS) {
+    if (key in options) {
+      throw new TypeError(
+        `@mdream/js reads \`${key}\` from \`plugins\`. `
+        + `Pass { plugins: { ${key} } } instead of { ${key} }.`,
+      )
+    }
+  }
+}
+
 function resolveHooks(options: Partial<MdreamOptions>): TransformPlugin[] | undefined {
   return options.hooks?.length ? options.hooks : undefined
 }
@@ -26,6 +47,7 @@ function convert(html: string, options: EngineOptions, hooks?: TransformPlugin[]
 }
 
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
+  assertEngineOptions(options)
   const hooks = resolveHooks(options)
   const markdown = convert(html, options, hooks)
   if (options.clean && (options.format === undefined || options.format === 'markdown'))
@@ -37,6 +59,7 @@ export function streamHtmlToMarkdown(
   htmlStream: ReadableStream<Uint8Array | string> | null,
   options: Partial<MdreamOptions> = {},
 ): AsyncIterable<string> {
+  assertEngineOptions(options)
   const hooks = resolveHooks(options)
   const { plugins, callExtractionHandlers, getFrontmatter, frontmatterCallback } = resolvePlugins(options, hooks)
   const tagOverrideHandlers = options.plugins?.tagOverrides
