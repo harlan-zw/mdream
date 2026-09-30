@@ -26,19 +26,20 @@ const markdown = htmlToMarkdown('<main><h1>Docs</h1></main>', {
 ## Automatic behaviour
 
 Default output keeps everything: navigation, forms, footers, and text hidden with CSS classes.
-The `<title>` text appears as the first line of plain text when frontmatter is off.
+The `<title>` text never appears in the body. Read it with `frontmatter` or `extraction`.
 
 `minimal: true` turns on these options. Each one is off without it.
 
 | Option | Effect under `minimal` |
 |---|---|
-| `frontmatter` | YAML frontmatter from `<title>` and `<meta>`. The title line leaves the body. |
+| `frontmatter` | YAML frontmatter from `<title>` and `<meta>`. |
 | `isolateMain` | Keeps `<main>`, else the content from the first heading to the first `<footer>`. |
 | `tailwind` | `font-bold` becomes `**bold**`. `hidden` and `absolute` content is dropped. |
 | `filter` | Excludes `form`, `fieldset`, `object`, `embed`, `footer`, `aside`, `iframe`, `input`, `textarea`, `select`, `button`, `nav`. |
 | `clean` | All cleanup: tracking parameters, `#` links, images without alt, and more. |
 
 To turn one off, pass it as `false`: `{ minimal: true, frontmatter: false, clean: false }`.
+A `filter` under `minimal` adds to the excludes above: `{ minimal: true, filter: { exclude: ['h1'] } }` drops `h1` and every default tag. `filter: false` keeps forms and `nav`.
 
 ## Common tasks
 
@@ -94,12 +95,11 @@ CLI: `curl -s URL | mdream --origin URL --preset minimal`. It streams stdin to s
 
 ## Traps
 
-- **A `filter` replaces the `minimal` exclude list.** `{ minimal: true, filter: { exclude: ['h1'] } }` keeps forms and `nav` again. Repeat the default tags in your list.
 - **Hook plugins are not in this package.** An array in `plugins` throws `Custom hook plugins require @mdream/js`. Use `@mdream/js` with `hooks: [createPlugin({...})]` from `@mdream/js/plugins`.
-- **`@mdream/js` nests options under `plugins`.** It ignores `minimal`, `frontmatter`, `filter`, and `isolateMain` at the top level, with no error in JavaScript. Use `withMinimalPreset()` from `@mdream/js/preset/minimal`, or `{ plugins: { frontmatter: true } }`.
+- **`@mdream/js` nests options under `plugins`.** It throws a `TypeError` on `minimal`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, `extraction`, or `tagOverrides` at the top level. Use `withMinimalPreset()` from `@mdream/js/preset/minimal`, or `{ plugins: { frontmatter: true } }`.
 - **Emphasis is `*`, not `_`.** Headings are ATX, bullets are `-`, rules are `---`. Only `tagOverrides` changes a delimiter, for example `em: { enter: '_', exit: '_', isInline: true }`.
 - **Filter selectors also drop inline `position: absolute` and `position: fixed` elements.**
-- **Browser and CDN entries return a different shape.** Every entry takes the same options, but the browser bundle returns `Promise<{ markdown }>` and the CDN script returns `{ markdown }`. The types say `string`. Read [references/runtimes.md](references/runtimes.md) before you use `mdream` outside Node or a Cloudflare Worker.
+- **Browser and CDN entries are async.** Every entry takes the same options and produces the same string. The browser bundle and the CDN script return `Promise<string>`, so `await` them. Read [references/runtimes.md](references/runtimes.md) before you use `mdream` outside Node or a Cloudflare Worker.
 
 ## Version limits
 

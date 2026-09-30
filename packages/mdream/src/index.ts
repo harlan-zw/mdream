@@ -68,8 +68,12 @@ export interface MdreamOptions {
   isolateMain?: boolean
   /** Convert Tailwind utility classes. Default when minimal: true */
   tailwind?: boolean
-  /** Filter elements. Default when minimal: excludes form, nav, footer, etc. */
-  filter?: { include?: string[], exclude?: string[], processChildren?: boolean }
+  /**
+   * Filter elements by CSS selector. `minimal` excludes form, nav, footer, and
+   * similar; a filter passed with `minimal` adds to those excludes. `false`
+   * turns filtering off, including the `minimal` one.
+   */
+  filter?: false | { include?: string[], exclude?: string[], processChildren?: boolean }
   /** Extract elements matching CSS selectors */
   extraction?: Record<string, (element: ExtractedElement) => void>
   /** Tag overrides. String values act as aliases */

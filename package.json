@@ -38,6 +38,7 @@
     "node-html-markdown": "catalog:bench",
     "obuild": "catalog:",
     "pathe": "catalog:",
+    "pkg-pr-new": "catalog:",
     "playwright": "catalog:",
     "rehype-parse": "catalog:bench",
     "rehype-remark": "catalog:bench",

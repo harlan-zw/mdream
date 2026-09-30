@@ -127,7 +127,7 @@ pub(super) fn parse_bounded_u32(value: &str, max: u32) -> Option<u32> {
 }
 
 impl ConvertState {
-  fn begin_link(&mut self, bracket_pos: usize, skipped: bool) {
+  fn begin_link(&mut self, bracket_pos: usize, skipped: bool, raw_html_open: bool) {
     // `self.link` describes a live enclosing `<a>` only when `open` is set; an
     // implied close (a nested `<a>` start) resets it to the default, and pushing
     // that phantom would poison the bracket floor the streaming guards read.
@@ -137,6 +137,7 @@ impl ConvertState {
     self.link = LinkOutputState {
       bracket_pos,
       skipped,
+      raw_html_open,
       open: true,
       begin_depth: self.depth,
       ..Default::default()
@@ -984,10 +985,6 @@ impl ConvertState {
       new_line_config[0]
     };
 
-    if tag_id == Some(TAG_A) {
-      self.raw_html_link_open = false;
-    }
-
     // Clean mode — single guard for all clean checks
     if self.clean_flags != 0
       && let Some(id) = tag_id
@@ -999,7 +996,7 @@ impl ConvertState {
         if let Some(href) = node.attributes.get_bit(ATTR_HREF)
           && is_empty_link_href(href)
         {
-          self.begin_link(self.buffer.len(), true);
+          self.begin_link(self.buffer.len(), true, false);
           self.reset_empty_tentative_caption_frames();
           if self.streaming {
             self.link.hold_released = true;
@@ -1102,18 +1099,17 @@ impl ConvertState {
       self.mark_rendered_child_content();
     }
 
-    if tag_id == Some(TAG_A) {
-      // Escaping matters only while the anchor's *exit* will still build a
-      // Markdown close (`](url)`), which happens exactly when the exit is not
-      // overridden. A literal enter override still gets that default exit, so
-      // its link text must keep the bracket escaping.
-      self.raw_html_link_open = !exit_is_overridden
-        && self.in_raw_html_block()
-        && self.buffer.len() > output_start
-        && output
-          .as_deref()
-          .is_some_and(|emitted| !emitted.is_empty() && self.buffer.ends_with(emitted));
-    }
+    // Escaping matters only while the anchor's *exit* will still build a
+    // Markdown close (`](url)`), which happens exactly when the exit is not
+    // overridden. A literal enter override still gets that default exit, so
+    // its link text must keep the bracket escaping.
+    let raw_html_link_open = tag_id == Some(TAG_A)
+      && !exit_is_overridden
+      && self.in_raw_html_block()
+      && self.buffer.len() > output_start
+      && output
+        .as_deref()
+        .is_some_and(|emitted| !emitted.is_empty() && self.buffer.ends_with(emitted));
 
     if self.link.empty_text_pending
       && tag_id != Some(TAG_A)
@@ -1215,7 +1211,7 @@ impl ConvertState {
       } else {
         buf_len
       };
-      self.begin_link(bracket_pos, false);
+      self.begin_link(bracket_pos, false, raw_html_link_open);
       self.link.bracket_emitted = emitted_bracket;
       // Avoid the href lookup and hold bookkeeping for one-shot conversion, unless
       // `max_node_bytes` has to charge what the link holds back.
@@ -1304,9 +1300,6 @@ impl ConvertState {
     }
 
     let tag_id = node.tag_id;
-    if tag_id == Some(TAG_A) {
-      self.raw_html_link_open = false;
-    }
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
     }
@@ -2750,8 +2743,8 @@ impl ConvertState {
         b'\n' => Some("&#10;"),
         b'\r' => Some("&#13;"),
         b'|' if in_table => Some("&#124;"),
-        b'[' if self.raw_html_link_open => Some("&#91;"),
-        b']' if self.raw_html_link_open => Some("&#93;"),
+        b'[' if self.link.raw_html_open => Some("&#91;"),
+        b']' if self.link.raw_html_open => Some("&#93;"),
         _ => None,
       };
       if let Some(replacement) = replacement {

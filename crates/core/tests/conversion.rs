@@ -125,7 +125,7 @@ fn html_output_drops_whitespace_after_discarded_script_data() {
       "<d><title>n</title><script>;</script>\n</>\n<link>\n",
       options()
     ),
-    "n"
+    ""
   );
   for split in 0..=input.len() {
     let mut processor = MarkdownStreamProcessor::new_with_format(options(), OutputFormat::Html);
@@ -507,6 +507,11 @@ fn links_inside_raw_html_blocks_are_safe_html() {
     (
       r#"<details><a href="javascript:alert(1)">visible</a></details>"#,
       "<details>visible</details>",
+    ),
+    // Closing the inner link must not end escaping for the rest of the outer one.
+    (
+      r#"<details><a href="/o">[pre]<div><a href="/i">[in]</a>[after]</div></a></details>"#,
+      r#"<details><a href="/o">&#91;pre&#93;<a href="/i">&#91;in&#93;</a>&#91;after&#93;</a></details>"#,
     ),
   ] {
     assert_eq!(convert(html), expected, "html={html:?}");
@@ -5366,7 +5371,6 @@ fn rawtext_eof_residual_is_text_not_a_dropped_tag() {
     ("<textarea>a</foo ", "<textarea>a</foo </textarea>"),
     ("<textarea>></", "<textarea>></</textarea>"),
     ("<xmp>a</", "<xmp>a</</xmp>"),
-    ("<title>a</", "<title>a</</title>"),
   ] {
     assert_eq!(
       convert(truncated),

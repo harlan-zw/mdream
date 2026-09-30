@@ -4,7 +4,7 @@
 //! `max_node_bytes` drops content past a per-construct byte cap so adversarial
 //! input cannot balloon the streamer. Two buffers grow with a single node: the
 //! text buffered for one text node (~5x its size in peak heap), and the raw bytes
-//! of a tag or comment the parser cannot consume yet (~3x).
+//! of a tag the parser cannot consume yet (~3x).
 //!
 //! Four more grow with a whole element rather than one node: open code fences and
 //! inline code spans pin the output buffer until their delimiter is known, a row's
@@ -296,19 +296,21 @@ fn a_literal_lt_respects_the_text_cap() {
   for (html, expected) in [("<p>aaaa<3z</p>", "aaaa"), ("<p>aaa<3z</p>", "aaa<")] {
     assert_capped_text(html, 4, expected, true);
   }
-  for html in [
+  assert_capped_text(
     "<textarea>aaaaaaaaaaaaaaaa<z</textarea>",
-    "<title>aaaaaaaaaaaaaaaa<z</title>",
-  ] {
-    assert_capped_text(html, 16, "aaaaaaaaaaaaaaaa", true);
-  }
+    16,
+    "aaaaaaaaaaaaaaaa",
+    true,
+  );
+  // `<title>` text never reaches the output, but the cap still counts it.
+  assert_capped_text("<title>aaaaaaaaaaaaaaaa<z</title>", 16, "", true);
 }
 
 #[test]
 fn a_rawtext_eof_residual_respects_the_text_cap() {
-  for html in ["<textarea>aaaaaaaaaaaaaaa</x", "<title>aaaaaaaaaaaaaaa</x"] {
-    assert_capped_text(html, 16, "aaaaaaaaaaaaaaa<", true);
-  }
+  assert_capped_text("<textarea>aaaaaaaaaaaaaaa</x", 16, "aaaaaaaaaaaaaaa<", true);
+  // `<title>` text never reaches the output, but the cap still counts it.
+  assert_capped_text("<title>aaaaaaaaaaaaaaa</x", 16, "", true);
 }
 
 #[test]
@@ -405,29 +407,21 @@ fn the_default_is_inert() {
   }
 }
 
-// A comment is carried raw between chunks, so it grows with the token and past
-// the cap must be dropped instead. A start tag carries only what its mask keeps,
-// so only a wanted attribute can grow one.
+// A start tag carries only what its mask keeps, so only a wanted attribute can
+// grow one, and past the cap it must be dropped instead.
 #[test]
-fn an_unterminated_token_is_dropped_rather_than_carried() {
-  for (name, html) in [
-    ("comment", format!("<!--{}", repeat_to("a", HUGE))),
-    (
-      "wanted attribute",
-      format!("<a href=\"{}\">x</a>", repeat_to("a", HUGE)),
-    ),
-  ] {
-    let uncapped = peak(&html, 8 * 1024, 0);
-    let capped = peak(&html, 8 * 1024, CAP);
-    assert!(
-      uncapped > HUGE as u64,
-      "{name}: fixture should be pathological uncapped, got {uncapped}"
-    );
-    assert!(
-      capped < (HUGE / 4) as u64,
-      "{name}: capped peak {capped} should be a window, not the {HUGE} byte token"
-    );
-  }
+fn a_large_wanted_attribute_is_bounded_by_the_cap() {
+  let html = format!("<a href=\"{}\">x</a>", repeat_to("a", HUGE));
+  let uncapped = peak(&html, 8 * 1024, 0);
+  let capped = peak(&html, 8 * 1024, CAP);
+  assert!(
+    uncapped > HUGE as u64,
+    "fixture should be pathological uncapped, got {uncapped}"
+  );
+  assert!(
+    capped < (HUGE / 4) as u64,
+    "capped peak {capped} should be a window, not the {HUGE} byte token"
+  );
 }
 
 // The mask decides before a byte is kept, so an attribute no handler asks for
@@ -478,16 +472,13 @@ fn dropping_a_token_keeps_the_surrounding_document() {
   }
 }
 
+// A comment is never emitted or buffered, so its length cannot fire the cap.
 #[test]
-fn an_oversized_complete_comment_reports_truncation() {
+fn an_oversized_complete_comment_does_not_report_truncation() {
   for html in ["<!-->x", "<!--->x", "<!--x-->x", "<!--x--!>x"] {
     let result = html_to_markdown_result(html, options(3));
     assert_eq!(result.markdown, "x", "html={html:?}");
-    assert!(result.truncated, "html={html:?}");
-
-    let exact = html_to_markdown_result(html, options(html.len() - 1));
-    assert_eq!(exact.markdown, "x", "html={html:?}");
-    assert!(!exact.truncated, "html={html:?}");
+    assert!(!result.truncated, "html={html:?}");
   }
 }
 
@@ -500,7 +491,7 @@ fn a_discarded_comment_preserves_its_start_state() {
       out.push_str(&processor.process_chunk(&html[split..]));
       out.push_str(&processor.finish());
       assert_eq!(out, "x", "html={html:?} split={split}");
-      assert!(processor.truncated(), "html={html:?} split={split}");
+      assert!(!processor.truncated(), "html={html:?} split={split}");
     }
   }
 }
@@ -515,18 +506,18 @@ fn a_partial_comment_opener_is_not_discarded_as_a_bogus_comment() {
       out.push_str(&processor.process_chunk(&html[split..]));
       out.push_str(&processor.finish());
       assert_eq!(out, "x", "cap={cap} split={split}");
-      assert!(processor.truncated(), "cap={cap} split={split}");
+      assert!(!processor.truncated(), "cap={cap} split={split}");
     }
   }
 }
 
 #[test]
-fn an_oversized_complete_markup_declaration_reports_truncation() {
+fn an_oversized_complete_markup_declaration_does_not_report_truncation() {
   for html in ["<!x>x", "<!DOCTYPE html>x"] {
     for cap in 1..=3 {
       let result = html_to_markdown_result(html, options(cap));
       assert_eq!(result.markdown, "x", "html={html:?} cap={cap}");
-      assert!(result.truncated, "html={html:?} cap={cap}");
+      assert!(!result.truncated, "html={html:?} cap={cap}");
 
       for split in 0..=html.len() {
         let mut processor = MarkdownStreamProcessor::new(options(cap));
@@ -585,15 +576,14 @@ fn a_dropped_matching_close_tag_still_closes_its_element() {
   assert_capped_text(&html, 64, "ab\n\ncd", false);
 }
 
-// Oversized ignored declarations preserve output. Comments and doctypes report
-// conservative truncation; unsurfaced CDATA does not.
+// Oversized ignored declarations preserve output and report no truncation.
 #[test]
 fn a_dropped_ignored_token_preserves_the_truncation_contract() {
   assert_capped_text(
     &format!("<p>ab<!--{}-->cd</p>", repeat_to("x", 200)),
     64,
     "ab cd",
-    true,
+    false,
   );
   assert_capped_text(
     &format!("<p>ab<![CDATA[{}]]>cd</p>", repeat_to("x", 200)),
@@ -605,14 +595,22 @@ fn a_dropped_ignored_token_preserves_the_truncation_contract() {
     &format!("<!DOCTYPE {}><p>ab</p>", repeat_to("x", 200)),
     64,
     "ab",
-    true,
+    false,
   );
 }
 
 #[test]
 fn a_dropped_comment_keeps_its_abrupt_end_state() {
-  assert_capped_text("<!-->z", 1, "z", true);
-  assert_capped_text("<!--->z", 1, "z", true);
+  assert_capped_text("<!-->z", 1, "z", false);
+  assert_capped_text("<!--->z", 1, "z", false);
+}
+
+#[test]
+fn an_oversized_ignored_declaration_at_eof_is_not_truncated() {
+  for opener in ["<!--", "<!DOCTYPE ", "<!x", "<![CDATA["] {
+    let html = format!("{opener}{}", repeat_to("x", 200));
+    assert_capped_text(&html, 64, "", false);
+  }
 }
 
 #[test]
@@ -1057,7 +1055,6 @@ fn truncating_fixtures() -> Vec<(&'static str, String)> {
       "text node",
       format!("<p>{}</p>", repeat_to("word ", 256 * 1024)),
     ),
-    ("comment", format!("<!--{filler}")),
     (
       "code block",
       format!(
@@ -1126,23 +1123,15 @@ fn every_kind_of_truncation_is_reported() {
   }
 }
 
-// `true` is deliberately conservative, and this is why a byte count would lie: a
-// comment is never emitted, so dropping it costs no output at all. An `href` is
-// emitted, so the signal cannot promise either way.
 #[test]
-fn truncation_is_reported_even_when_no_output_is_lost() {
+fn truncation_shortens_the_output() {
   for (name, html) in truncating_fixtures() {
-    let (capped, truncated) = stream_reporting(&html, 8 * 1024, CAP);
+    let (capped, _) = stream_reporting(&html, 8 * 1024, CAP);
     let (uncapped, _) = stream_reporting(&html, 8 * 1024, 0);
-    assert!(truncated, "{name}");
-    if name == "comment" {
-      assert_eq!(capped, uncapped, "{name}: output should be unaffected");
-    } else {
-      assert!(
-        capped.len() < uncapped.len(),
-        "{name}: output should be shorter"
-      );
-    }
+    assert!(
+      capped.len() < uncapped.len(),
+      "{name}: output should be shorter"
+    );
   }
 }
 
@@ -1491,6 +1480,42 @@ fn an_extracted_script_is_capped_like_any_text() {
     "capped peak {capped} should be a window, not the {} byte script",
     html.len()
   );
+}
+
+// Text these elements drop is never output, so unless an extraction reads it,
+// it is neither buffered nor charged to the cap.
+#[test]
+fn dropped_raw_text_is_not_buffered() {
+  let body = repeat_to("hello <b>world</b> &amp; ", HUGE);
+  for tag in [
+    "noscript", "iframe", "noframes", "noembed", "datalist", "style",
+  ] {
+    let html = format!("<p>a</p><{tag}>{body}</{tag}><p>b</p>");
+    for cap in [0, CAP] {
+      let observed = peak(&html, 8 * 1024, cap);
+      assert!(
+        observed < (HUGE / 8) as u64,
+        "{tag} cap={cap}: peak {observed} should not track the body"
+      );
+      let (out, truncated) = stream_reporting(&html, 8 * 1024, cap);
+      assert_eq!(out, "a\n\nb", "{tag} cap={cap}");
+      assert!(!truncated, "{tag} cap={cap}");
+    }
+    let unterminated = format!("<p>a</p><{tag}>body</{}", &tag[..tag.len() - 1]);
+    assert!(
+      !html_to_markdown_result(&unterminated, options(4)).truncated,
+      "{tag} unterminated"
+    );
+  }
+}
+
+#[test]
+fn extracted_raw_text_is_still_read_and_capped() {
+  let body = repeat_to("x", 200);
+  let html = format!("<noscript>{body}</noscript>");
+  let read = html_to_markdown_result(&html, extracting(0, &["noscript"]));
+  assert_eq!(read.extracted.unwrap()[0].text_content, body);
+  assert!(html_to_markdown_result(&html, extracting(64, &["noscript"])).truncated);
 }
 
 // A node arriving while the fence sits just under the cap used to be appended

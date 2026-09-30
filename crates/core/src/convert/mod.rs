@@ -195,6 +195,9 @@ struct CodeFenceState {
 struct LinkOutputState {
   bracket_pos: usize,
   skipped: bool,
+  /// This raw-HTML anchor emitted its built-in safe opening tag, so its text
+  /// escapes brackets. Held per link so an enclosing one gets it back.
+  raw_html_open: bool,
   url_max_len: usize,
   hold_forever: bool,
   /// What makes a streamed link `hold_forever`, set in one-shot conversion too so
@@ -695,6 +698,9 @@ pub struct ConvertState {
   /// Test/fuzz-only: disables draining to prove it never alters streamed bytes.
   #[cfg(any(test, fuzzing))]
   pub(crate) disable_drain: bool,
+  /// Test-only: buffers dropped raw text to prove skipping it never alters output.
+  #[cfg(test)]
+  pub(crate) keep_dropped_raw_text: bool,
 
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
   /// hot path — a single integer compare). Code/tables/headings are exempt.
@@ -705,8 +711,6 @@ pub struct ConvertState {
 
   // Clean mode — bitmask for zero-cost when disabled
   clean_flags: u8,
-  /// The current raw-HTML anchor emitted its built-in safe opening tag.
-  raw_html_link_open: bool,
   /// Output state for the active anchor and its malformed nested parents.
   link: LinkOutputState,
   parent_links: Vec<LinkOutputState>,
@@ -899,13 +903,14 @@ impl ConvertState {
       buffer_start_column: 0,
       #[cfg(any(test, fuzzing))]
       disable_drain: false,
+      #[cfg(test)]
+      keep_dropped_raw_text: false,
 
       wrap_width: options_wrap_width,
       format,
       plain_text,
       preserve_leading_whitespace: false,
       clean_flags: 0,
-      raw_html_link_open: false,
       link: LinkOutputState::default(),
       parent_links: Vec::new(),
       link_caption_break_snapshot: Vec::new(),
@@ -1330,6 +1335,15 @@ impl ConvertState {
           continue;
         }
 
+        if self.in_non_nesting && self.drops_raw_text() {
+          while i < chunk_length && bytes[i] != LT_CHAR {
+            i += 1;
+          }
+          self.last_char_was_whitespace = false;
+          self.just_closed_tag = false;
+          continue;
+        }
+
         // Script/style rawtext is excluded from output. Scan directly to the
         // next potential tag instead of routing every byte through the general
         // text path. Quotes are ordinary rawtext bytes; HTML closes these
@@ -1518,14 +1532,16 @@ impl ConvertState {
           }
         }
         // Not a matching closing tag: treat '<' as literal text
-        let before_len = text_buffer.len();
-        self.truncated |= push_capped_text_node(
-          &mut text_buffer,
-          "<",
-          max_node_bytes,
-          &mut self.text_node_exhausted,
-        );
-        self.text_buffer_contains_non_whitespace |= text_buffer.len() != before_len;
+        if !self.drops_raw_text() {
+          let before_len = text_buffer.len();
+          self.truncated |= push_capped_text_node(
+            &mut text_buffer,
+            "<",
+            max_node_bytes,
+            &mut self.text_node_exhausted,
+          );
+          self.text_buffer_contains_non_whitespace |= text_buffer.len() != before_len;
+        }
         self.last_char_was_whitespace = false;
         self.just_closed_tag = false;
         i += 1;
@@ -1543,7 +1559,8 @@ impl ConvertState {
         // `<!`, so only the `[CDATA[` tail is checked; `strip_prefix`
         // short-circuits on the third byte for the common comment and
         // doctype cases.
-        if let Some(after_open) = chunk[i + 2..].strip_prefix("[CDATA[") {
+        let cdata = chunk[i + 2..].strip_prefix("[CDATA[");
+        if let Some(after_open) = cdata {
           if let Some(rel) = after_open.find("]]>") {
             let token_len = "<![CDATA[".len() + rel + 3;
             self.complete_text_node(&mut text_buffer);
@@ -1561,12 +1578,13 @@ impl ConvertState {
             i += token_len;
             continue;
           }
-          // Unterminated CDATA: re-parse from '<' in the next chunk.
-          run_start = i;
-          carry = true;
-          break;
-        }
-        if remaining.len() < "<![CDATA[".len() && "<![CDATA[".starts_with(remaining) {
+          if self.has_surfaced_cdata() {
+            // Unterminated surfaced CDATA: re-parse from '<' in the next chunk.
+            run_start = i;
+            carry = true;
+            break;
+          }
+        } else if remaining.len() < "<![CDATA[".len() && "<![CDATA[".starts_with(remaining) {
           // Chunk boundary fell inside the `<![CDATA[` opener.
           run_start = i;
           carry = true;
@@ -1578,16 +1596,20 @@ impl ConvertState {
           return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
         }
         run_start = i;
+        if cdata.is_some() {
+          self.discard_declaration(remaining);
+          break;
+        }
         let result = process_comment_or_doctype(chunk, i);
         if result.complete {
-          if max_node_bytes != 0 && result.new_position - i > max_node_bytes {
-            self.truncated = true;
-          }
           i = result.new_position;
-        } else {
-          // An ambiguous `<!--` opener is kept; a comment body is payload.
-          carry_bounded = remaining.len() < "<!--".len() && "<!--".starts_with(remaining);
+        } else if remaining.len() < "<!--".len() && "<!--".starts_with(remaining) {
+          // An ambiguous `<!-` opener is kept until it is classified.
           carry = true;
+          carry_bounded = true;
+          break;
+        } else {
+          self.discard_declaration(remaining);
           break;
         }
       } else if next == SLASH_CHAR {
@@ -1791,10 +1813,10 @@ impl ConvertState {
   ///
   /// Semantics stay aligned with an uncapped parse, which processes each of
   /// these tokens whole with no length check: an end tag closes its element or
-  /// is an ignored token, a comment, doctype and unsurfaced CDATA are ignored,
-  /// and none of that reports truncation. Only a start tag (checked at its `>`
-  /// on completion) and surfaced CDATA (emitted, so dropping it loses output)
-  /// flag here; a dropped token abandoned at EOF is flagged by `finalize`.
+  /// is an ignored token, and neither reports truncation. Only a start tag
+  /// (checked at its `>` on completion) and surfaced CDATA (emitted, so dropping
+  /// it loses output) flag here; a dropped token abandoned at EOF is flagged by
+  /// `finalize`.
   #[cold]
   #[inline(never)]
   fn start_discard(&mut self, chunk: &str, run_start: usize) {
@@ -1806,22 +1828,13 @@ impl ConvertState {
     // a comment and a `>` inside CDATA each end the token in one scanner and not
     // in another. Picking the owning one here is what keeps a dropped token
     // ending where an uncapped parse ends it, so the document resumes in step.
-    self.discard = if let Some(body) = rest.strip_prefix("<!--") {
+    if rest.starts_with("<!") {
+      // Only surfaced CDATA is still carried here; other declarations never are.
       self.truncated = true;
-      let mut state = DiscardedCommentState::new();
-      discarded_comment_end(body, &mut state);
-      Discard::Comment(state)
-    } else if let Some(body) = rest.strip_prefix("<![CDATA[") {
-      let mut brackets = 0;
-      discarded_cdata_end(body, &mut brackets);
-      if self.has_surfaced_cdata() {
-        self.truncated = true;
-      }
-      Discard::Cdata(brackets)
-    } else if rest.starts_with("<!") {
-      self.truncated = true;
-      Discard::Doctype
-    } else if let Some(body) = rest.strip_prefix("</") {
+      self.discard_declaration(rest);
+      return;
+    }
+    self.discard = if let Some(body) = rest.strip_prefix("</") {
       let mut state = DiscardedCloseTag::default();
       discarded_close_tag_end(body, &mut state);
       // Dropped end tags must still update stack state once their name has ended.
@@ -1842,6 +1855,43 @@ impl ConvertState {
       let mut pending = PendingTagScan::new();
       tag_is_complete(chunk, run_start, &mut pending);
       Discard::Tag(pending)
+    };
+  }
+
+  /// Raw text its element drops and no extraction reads, so it can be skipped
+  /// like unread script data.
+  fn drops_raw_text(&self) -> bool {
+    #[cfg(test)]
+    if self.keep_dropped_raw_text {
+      return false;
+    }
+    self.extraction_tracked.is_empty()
+      && self
+        .stack
+        .last()
+        .is_some_and(|node| node.excludes_text_nodes)
+  }
+
+  /// Drop the rest of an unterminated `<!…>` declaration, keeping only the
+  /// scanner state that finds its end, so its bytes are neither carried nor
+  /// re-scanned by the next chunk.
+  fn discard_declaration(&mut self, rest: &str) {
+    self.discard = if let Some(body) = rest.strip_prefix("<!--") {
+      let mut state = DiscardedCommentState::new();
+      let end = discarded_comment_end(body, &mut state);
+      debug_assert!(end.is_none(), "comment ended inside the chunk");
+      Discard::Comment(state)
+    } else if let Some(body) = rest.strip_prefix("<![CDATA[") {
+      let mut brackets = 0;
+      let end = discarded_cdata_end(body, &mut brackets);
+      debug_assert!(end.is_none(), "CDATA ended inside the chunk");
+      Discard::Cdata(brackets)
+    } else {
+      debug_assert!(
+        discarded_gt(rest).is_none(),
+        "declaration ended inside the chunk"
+      );
+      Discard::Doctype
     };
   }
 
@@ -2043,11 +2093,31 @@ impl ConvertState {
   /// end tag, so the residual is text unless it is an appropriate end tag that
   /// already reached a tag state.
   pub fn finalize(&mut self, leftover: &str) {
+    let in_script = self
+      .stack
+      .last()
+      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none());
+    // A rawtext residual continues the text run already pending, so it has to
+    // join that buffer rather than be flushed as a second text node: two nodes
+    // are separated by a space this text never contained.
+    let rawtext_text = !in_script
+      && leftover.as_bytes().first() == Some(&LT_CHAR)
+      && self.in_non_nesting
+      && !self.rawtext_end_tag_pending;
+    let dropped = rawtext_text && self.drops_raw_text();
     // Tokens abandoned at EOF are only reported here. A parked start tag counts
     // just when the cap fired on it: a mask-rejected attribute is absent from an
-    // uncapped parse too, so losing it loses nothing.
-    if !matches!(self.discard, Discard::No)
-      || (self.options.max_node_bytes != 0 && leftover.len() > self.options.max_node_bytes)
+    // uncapped parse too, so losing it loses nothing. The same holds for an
+    // unterminated ignored declaration.
+    let discard_loses_output = match self.discard {
+      Discard::No | Discard::Comment(_) | Discard::Doctype => false,
+      Discard::Cdata(_) => self.has_surfaced_cdata(),
+      Discard::Tag(_) | Discard::CloseTag(_) => true,
+    };
+    if discard_loses_output
+      || (self.options.max_node_bytes != 0
+        && leftover.len() > self.options.max_node_bytes
+        && !dropped)
       || self
         .pending_start
         .as_ref()
@@ -2055,22 +2125,12 @@ impl ConvertState {
     {
       self.truncated = true;
     }
-    let in_script = self
-      .stack
-      .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none());
     if in_script {
       self.push_script_text(leftover);
       self.flush_script_text();
       self.script_data_state = SCRIPT_DATA;
     } else {
-      // A rawtext residual continues the text run already pending, so it has to
-      // join that buffer rather than be flushed as a second text node: two nodes
-      // are separated by a space this text never contained.
-      let rawtext_text = leftover.as_bytes().first() == Some(&LT_CHAR)
-        && self.in_non_nesting
-        && !self.rawtext_end_tag_pending;
-      if rawtext_text {
+      if rawtext_text && !dropped {
         let before_len = self.parse_text_buffer.len();
         self.truncated |= push_capped_text_node(
           &mut self.parse_text_buffer,
