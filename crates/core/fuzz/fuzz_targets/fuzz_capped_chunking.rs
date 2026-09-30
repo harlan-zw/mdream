@@ -14,7 +14,8 @@ use mdream::{MarkdownStreamProcessor, html_to_markdown_result};
 // all text, and the paths at issue are names, attribute sets, duplicates and
 // quoting. Plugin toggles matter because a filter, extraction or tailwind
 // config makes every attribute readable and switches the tag from the
-// retained-byte budget to the raw-length guard.
+// retained-byte budget to the raw-length guard. Declarations exercise the
+// scanners that skip them, and an untruncated result must match an uncapped one.
 
 #[derive(Arbitrary, Debug)]
 enum Quote {
@@ -127,8 +128,56 @@ impl Tag {
   }
 }
 
+// Pieces chosen to form and split the terminators the declaration scanners
+// disagree on: `-->`, `--!>`, `]]>` and a bare `>`.
+#[derive(Arbitrary, Debug)]
+enum Piece {
+  Dash,
+  Bang,
+  Gt,
+  Bracket,
+  Text(u8),
+}
+
+#[derive(Arbitrary, Debug)]
+enum Opener {
+  Comment,
+  Doctype,
+  Cdata,
+}
+
+#[derive(Arbitrary, Debug)]
+struct Decl {
+  opener: Opener,
+  body: Vec<Piece>,
+}
+
+impl Decl {
+  fn render(&self, out: &mut String) {
+    out.push_str(match self.opener {
+      Opener::Comment => "<!--",
+      Opener::Doctype => "<!DOCTYPE ",
+      Opener::Cdata => "<![CDATA[",
+    });
+    for piece in &self.body {
+      match piece {
+        Piece::Dash => out.push('-'),
+        Piece::Bang => out.push('!'),
+        Piece::Gt => out.push('>'),
+        Piece::Bracket => out.push(']'),
+        Piece::Text(len) => {
+          for _ in 0..*len {
+            out.push('c');
+          }
+        }
+      }
+    }
+  }
+}
+
 #[derive(Arbitrary, Debug)]
 struct Elem {
+  decl: Option<Decl>,
   tag: Tag,
   attrs: Vec<Attr>,
   text_len: u8,
@@ -143,11 +192,15 @@ struct Input {
   filter_exclude: bool,
   extraction: bool,
   tailwind: bool,
+  surfaced_cdata: bool,
 }
 
 fn render(input: &Input) -> String {
   let mut html = String::new();
   for elem in &input.elems {
+    if let Some(decl) = &elem.decl {
+      decl.render(&mut html);
+    }
     let name = elem.tag.name();
     html.push('<');
     html.push_str(&name);
@@ -169,7 +222,7 @@ fn render(input: &Input) -> String {
   html
 }
 
-fn options(input: &Input) -> HTMLToMarkdownOptions {
+fn options(input: &Input, cap: usize) -> HTMLToMarkdownOptions {
   HTMLToMarkdownOptions {
     plugins: Some(PluginConfig {
       filter: input.filter_exclude.then(|| FilterConfig {
@@ -183,9 +236,11 @@ fn options(input: &Input) -> HTMLToMarkdownOptions {
       extraction: input.extraction.then(|| ExtractionConfig {
         selectors: vec!["a".into(), "noscript".into()],
       }),
-      tag_overrides: None,
+      tag_overrides: input
+        .surfaced_cdata
+        .then(|| vec![("#cdata-section".into(), TagOverrideConfig::default())]),
     }),
-    max_node_bytes: input.cap as usize,
+    max_node_bytes: cap,
     ..Default::default()
   }
 }
@@ -195,10 +250,11 @@ fuzz_target!(|input: Input| {
   if html.is_empty() {
     return;
   }
-  let one_shot = html_to_markdown_result(&html, options(&input));
+  let cap = input.cap as usize;
+  let one_shot = html_to_markdown_result(&html, options(&input, cap));
 
   let width = (input.chunk_width as usize).max(1);
-  let mut processor = MarkdownStreamProcessor::new(options(&input));
+  let mut processor = MarkdownStreamProcessor::new(options(&input, cap));
   let mut streamed = String::new();
   let mut start = 0;
   while start < html.len() {
@@ -219,4 +275,12 @@ fuzz_target!(|input: Input| {
     "cap={} width={width} html={html:?}",
     input.cap
   );
+  if !one_shot.truncated {
+    let uncapped = html_to_markdown_result(&html, options(&input, 0));
+    assert_eq!(
+      one_shot.markdown, uncapped.markdown,
+      "untruncated output differs from uncapped: cap={} html={html:?}",
+      input.cap
+    );
+  }
 });

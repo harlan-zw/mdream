@@ -1558,7 +1558,8 @@ impl ConvertState {
         // `<!`, so only the `[CDATA[` tail is checked; `strip_prefix`
         // short-circuits on the third byte for the common comment and
         // doctype cases.
-        if let Some(after_open) = chunk[i + 2..].strip_prefix("[CDATA[") {
+        let cdata = chunk[i + 2..].strip_prefix("[CDATA[");
+        if let Some(after_open) = cdata {
           if let Some(rel) = after_open.find("]]>") {
             let token_len = "<![CDATA[".len() + rel + 3;
             self.complete_text_node(&mut text_buffer);
@@ -1576,12 +1577,13 @@ impl ConvertState {
             i += token_len;
             continue;
           }
-          // Unterminated CDATA: re-parse from '<' in the next chunk.
-          run_start = i;
-          carry = true;
-          break;
-        }
-        if remaining.len() < "<![CDATA[".len() && "<![CDATA[".starts_with(remaining) {
+          if self.has_surfaced_cdata() {
+            // Unterminated surfaced CDATA: re-parse from '<' in the next chunk.
+            run_start = i;
+            carry = true;
+            break;
+          }
+        } else if remaining.len() < "<![CDATA[".len() && "<![CDATA[".starts_with(remaining) {
           // Chunk boundary fell inside the `<![CDATA[` opener.
           run_start = i;
           carry = true;
@@ -1593,16 +1595,20 @@ impl ConvertState {
           return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
         }
         run_start = i;
+        if cdata.is_some() {
+          self.discard_declaration(remaining);
+          break;
+        }
         let result = process_comment_or_doctype(chunk, i);
         if result.complete {
-          if max_node_bytes != 0 && result.new_position - i > max_node_bytes {
-            self.truncated = true;
-          }
           i = result.new_position;
-        } else {
-          // An ambiguous `<!--` opener is kept; a comment body is payload.
-          carry_bounded = remaining.len() < "<!--".len() && "<!--".starts_with(remaining);
+        } else if remaining.len() < "<!--".len() && "<!--".starts_with(remaining) {
+          // An ambiguous `<!-` opener is kept until it is classified.
           carry = true;
+          carry_bounded = true;
+          break;
+        } else {
+          self.discard_declaration(remaining);
           break;
         }
       } else if next == SLASH_CHAR {
@@ -1806,10 +1812,10 @@ impl ConvertState {
   ///
   /// Semantics stay aligned with an uncapped parse, which processes each of
   /// these tokens whole with no length check: an end tag closes its element or
-  /// is an ignored token, a comment, doctype and unsurfaced CDATA are ignored,
-  /// and none of that reports truncation. Only a start tag (checked at its `>`
-  /// on completion) and surfaced CDATA (emitted, so dropping it loses output)
-  /// flag here; a dropped token abandoned at EOF is flagged by `finalize`.
+  /// is an ignored token, and neither reports truncation. Only a start tag
+  /// (checked at its `>` on completion) and surfaced CDATA (emitted, so dropping
+  /// it loses output) flag here; a dropped token abandoned at EOF is flagged by
+  /// `finalize`.
   #[cold]
   #[inline(never)]
   fn start_discard(&mut self, chunk: &str, run_start: usize) {
@@ -1821,22 +1827,13 @@ impl ConvertState {
     // a comment and a `>` inside CDATA each end the token in one scanner and not
     // in another. Picking the owning one here is what keeps a dropped token
     // ending where an uncapped parse ends it, so the document resumes in step.
-    self.discard = if let Some(body) = rest.strip_prefix("<!--") {
+    if rest.starts_with("<!") {
+      // Only surfaced CDATA is still carried here; other declarations never are.
       self.truncated = true;
-      let mut state = DiscardedCommentState::new();
-      discarded_comment_end(body, &mut state);
-      Discard::Comment(state)
-    } else if let Some(body) = rest.strip_prefix("<![CDATA[") {
-      let mut brackets = 0;
-      discarded_cdata_end(body, &mut brackets);
-      if self.has_surfaced_cdata() {
-        self.truncated = true;
-      }
-      Discard::Cdata(brackets)
-    } else if rest.starts_with("<!") {
-      self.truncated = true;
-      Discard::Doctype
-    } else if let Some(body) = rest.strip_prefix("</") {
+      self.discard_declaration(rest);
+      return;
+    }
+    self.discard = if let Some(body) = rest.strip_prefix("</") {
       let mut state = DiscardedCloseTag::default();
       discarded_close_tag_end(body, &mut state);
       // Dropped end tags must still update stack state once their name has ended.
@@ -1872,6 +1869,29 @@ impl ConvertState {
         .stack
         .last()
         .is_some_and(|node| node.excludes_text_nodes)
+  }
+
+  /// Drop the rest of an unterminated `<!…>` declaration, keeping only the
+  /// scanner state that finds its end, so its bytes are neither carried nor
+  /// re-scanned by the next chunk.
+  fn discard_declaration(&mut self, rest: &str) {
+    self.discard = if let Some(body) = rest.strip_prefix("<!--") {
+      let mut state = DiscardedCommentState::new();
+      let end = discarded_comment_end(body, &mut state);
+      debug_assert!(end.is_none(), "comment ended inside the chunk");
+      Discard::Comment(state)
+    } else if let Some(body) = rest.strip_prefix("<![CDATA[") {
+      let mut brackets = 0;
+      let end = discarded_cdata_end(body, &mut brackets);
+      debug_assert!(end.is_none(), "CDATA ended inside the chunk");
+      Discard::Cdata(brackets)
+    } else {
+      debug_assert!(
+        discarded_gt(rest).is_none(),
+        "declaration ended inside the chunk"
+      );
+      Discard::Doctype
+    };
   }
 
   /// Whether CDATA sections surface as output through a `#cdata-section`
@@ -2086,8 +2106,14 @@ impl ConvertState {
     let dropped = rawtext_text && self.drops_raw_text();
     // Tokens abandoned at EOF are only reported here. A parked start tag counts
     // just when the cap fired on it: a mask-rejected attribute is absent from an
-    // uncapped parse too, so losing it loses nothing.
-    if !matches!(self.discard, Discard::No)
+    // uncapped parse too, so losing it loses nothing. The same holds for an
+    // unterminated ignored declaration.
+    let discard_loses_output = match self.discard {
+      Discard::No | Discard::Comment(_) | Discard::Doctype => false,
+      Discard::Cdata(_) => self.has_surfaced_cdata(),
+      Discard::Tag(_) | Discard::CloseTag(_) => true,
+    };
+    if discard_loses_output
       || (self.options.max_node_bytes != 0
         && leftover.len() > self.options.max_node_bytes
         && !dropped)
