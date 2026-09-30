@@ -46,7 +46,7 @@ jobs:
           node --input-type=module <<'JS'
           import { strict as assert } from 'node:assert'
           import { htmlToMarkdown } from './packages/mdream/napi/index.mjs'
-          assert.equal(htmlToMarkdown('<h1>Preview</h1>', {}), '# Preview')
+          assert.equal(htmlToMarkdown('<h1>Preview</h1>', {}).markdown, '# Preview')
           JS
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
