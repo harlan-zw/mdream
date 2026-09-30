@@ -1,7 +1,7 @@
 import type { HtmlToMarkdownOptions, MdreamNapiResult } from '../napi/index.js'
 import type { MdreamOptions } from './index.js'
 import type { ResolvedOptions } from './resolve-options.js'
-import init, { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream } from '../wasm/mdream_edge.js'
+import init, { __mdreamTakePanicMessage, htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream } from '../wasm/mdream_edge.js'
 import { convertResult, deliverPluginData, pumpStream } from './convert.js'
 import { resolveOptions } from './resolve-options.js'
 import { wasmPanicError } from './wasm-panic.js'
@@ -26,7 +26,7 @@ function convert(html: string, napiOpts: HtmlToMarkdownOptions): MdreamNapiResul
   }
   catch (error) {
     // A Rust panic aborts the WASM instance; surface its message (#195).
-    throw wasmPanicError(error)
+    throw wasmPanicError(error, __mdreamTakePanicMessage)
   }
 }
 
@@ -56,7 +56,7 @@ export class MarkdownStream {
       this._inner = new _MarkdownStream(resolved.napiOpts)
     }
     catch (error) {
-      throw wasmPanicError(error)
+      throw wasmPanicError(error, __mdreamTakePanicMessage)
     }
   }
 
@@ -65,7 +65,7 @@ export class MarkdownStream {
       return this._inner.processChunk(chunk)
     }
     catch (error) {
-      throw wasmPanicError(error)
+      throw wasmPanicError(error, __mdreamTakePanicMessage)
     }
   }
 
@@ -74,7 +74,7 @@ export class MarkdownStream {
       return this._inner.processChunkBytes(chunk)
     }
     catch (error) {
-      throw wasmPanicError(error)
+      throw wasmPanicError(error, __mdreamTakePanicMessage)
     }
   }
 
@@ -84,7 +84,7 @@ export class MarkdownStream {
       markdown = this._inner.finish()
     }
     catch (error) {
-      throw wasmPanicError(error)
+      throw wasmPanicError(error, __mdreamTakePanicMessage)
     }
     deliverPluginData(this._inner.takeData(), this._callbacks)
     return markdown
@@ -105,7 +105,7 @@ export async function* streamHtmlToMarkdown(
     stream = new _MarkdownStream(resolved.napiOpts)
   }
   catch (error) {
-    throw wasmPanicError(error)
+    throw wasmPanicError(error, __mdreamTakePanicMessage)
   }
-  yield* pumpStream(stream, htmlStream, resolved, { mapError: wasmPanicError })
+  yield* pumpStream(stream, htmlStream, resolved, { mapError: error => wasmPanicError(error, __mdreamTakePanicMessage) })
 }

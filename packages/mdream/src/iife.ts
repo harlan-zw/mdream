@@ -1,6 +1,6 @@
 import type { HtmlToMarkdownOptions, MdreamNapiResult } from '../napi/index.js'
 import type { MdreamOptions } from './index.js'
-import { htmlToMarkdownResult as _htmlToMarkdownResult } from '../wasm/mdream_edge.js'
+import { __mdreamTakePanicMessage, htmlToMarkdownResult as _htmlToMarkdownResult } from '../wasm/mdream_edge.js'
 import { convertResult } from './convert.js'
 import { wasmPanicError } from './wasm-panic.js'
 
@@ -21,7 +21,7 @@ function convert(html: string, napiOpts: HtmlToMarkdownOptions): MdreamNapiResul
     return _htmlToMarkdownResult(html, napiOpts)
   }
   catch (error) {
-    throw wasmPanicError(error)
+    throw wasmPanicError(error, __mdreamTakePanicMessage)
   }
 }
 

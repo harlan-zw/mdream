@@ -31,17 +31,21 @@ vi.mock('../../wasm/mdream_edge.js', () => ({
   default: () => Promise.resolve(),
   initSync: () => {},
   htmlToMarkdownResult: () => ({ markdown: '' }),
-  __mdreamTakePanicMessage: () => 'synthetic panic',
+  __mdreamTakePanicMessage: () => 'browser panic',
   MarkdownStream: BindingMarkdownStream,
 }))
-vi.mock('../../wasm/mdream_edge_bg.wasm', () => ({ default: {} }))
+vi.mock('../../wasm-bundler/mdream_edge.js', () => ({
+  htmlToMarkdownResult: () => ({ markdown: '' }),
+  __mdreamTakePanicMessage: () => 'edge panic',
+  MarkdownStream: BindingMarkdownStream,
+}))
 
 const engines = [
-  { name: 'browser', make: () => createMarkdownStream(), StreamClass: BrowserMarkdownStream },
-  { name: 'edge', make: async () => new EdgeMarkdownStream(), StreamClass: EdgeMarkdownStream },
+  { name: 'browser', panicMessage: 'browser panic', make: () => createMarkdownStream(), StreamClass: BrowserMarkdownStream },
+  { name: 'edge', panicMessage: 'edge panic', make: async () => new EdgeMarkdownStream(), StreamClass: EdgeMarkdownStream },
 ] as const
 
-describe.each(engines)('$name MarkdownStream wrapper', ({ make }) => {
+describe.each(engines)('$name MarkdownStream wrapper', ({ make, panicMessage }) => {
   it('delegates processChunkBytes and returns the converted markdown', async () => {
     control.failProcessChunkBytes = false
     const stream = await make()
@@ -53,7 +57,7 @@ describe.each(engines)('$name MarkdownStream wrapper', ({ make }) => {
     control.failProcessChunkBytes = true
     try {
       const stream = await make()
-      expect(() => stream.processChunkBytes(new Uint8Array([0x3C]))).toThrow(/mdream WASM panic[\s\S]*synthetic panic/)
+      expect(() => stream.processChunkBytes(new Uint8Array([0x3C]))).toThrow(new RegExp(`mdream WASM panic[\\s\\S]*${panicMessage}`))
     }
     finally {
       control.failProcessChunkBytes = false

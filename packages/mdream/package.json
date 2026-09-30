@@ -80,7 +80,7 @@
     "test:wiki-small:file": "cat test/fixtures/wikipedia-small.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "build": "obuild",
     "build:native": "pnpm --dir ../../crates/node run build:platform",
-    "build:edge": "cd ../../crates/edge && CARGO_PROFILE_RELEASE_OPT_LEVEL=s wasm-pack build --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge && wasm-opt -O3 --converge --low-memory-unused --enable-bulk-memory --enable-nontrapping-float-to-int --strip-producers ../../packages/mdream/wasm/mdream_edge_bg.wasm -o ../../packages/mdream/wasm/mdream_edge_bg.wasm && CARGO_PROFILE_RELEASE_OPT_LEVEL=s wasm-pack build --target bundler --out-dir ../../packages/mdream/wasm-bundler --out-name mdream_edge && wasm-opt -O3 --converge --low-memory-unused --enable-bulk-memory --enable-nontrapping-float-to-int --strip-producers ../../packages/mdream/wasm-bundler/mdream_edge_bg.wasm -o ../../packages/mdream/wasm-bundler/mdream_edge_bg.wasm",
+    "build:edge": "node ../../scripts/build-wasm-edge.mjs --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge && node ../../scripts/build-wasm-edge.mjs --target bundler --out-dir ../../packages/mdream/wasm-bundler --out-name mdream_edge",
     "typecheck": "tsc --noEmit",
     "dev:prepare": "obuild --stub",
     "test": "vitest test",
