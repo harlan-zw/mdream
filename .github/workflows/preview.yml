@@ -87,5 +87,7 @@ jobs:
       - run: node scripts/verify-npm-artifacts.mjs linux-x64-gnu linux-arm64-gnu
       - run: pnpm --filter mdream build:edge
       - run: pnpm --filter @mdream/js build && pnpm --filter mdream build
+      - run: node scripts/pack-previews.mjs "$RUNNER_TEMP/mdream-previews"
+      - run: node scripts/verify-previews.mjs "$RUNNER_TEMP/mdream-previews"
       - name: Publish immutable previews
-        run: pnpm exec pkg-pr-new publish --pnpm ./packages/mdream ./packages/js ./crates/node/npm/linux-x64-gnu ./crates/node/npm/linux-arm64-gnu
+        run: pnpm exec pkg-pr-new publish "$RUNNER_TEMP"/mdream-previews/*.tgz
