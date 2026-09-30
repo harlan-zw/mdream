@@ -244,6 +244,7 @@ jobs:
           # packaged artifact stays exactly what we release
           node scripts/build-wasm-edge.mjs --target web --out-dir crates/edge/test-worker/wasm --features panic-probe
           node scripts/build-wasm-edge.mjs --target web --out-dir packages/mdream/wasm
+          node scripts/build-wasm-edge.mjs --target bundler --out-dir packages/mdream/wasm-bundler
 
       - run: pnpm install
 

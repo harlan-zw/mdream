@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { build, createNitro } from 'nitropack/core'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { unstable_dev } from 'wrangler'
 
@@ -34,6 +35,7 @@ describe('mdream npm tarball in wrangler dev (#119)', () => {
       'name = "mdream-workerd-repro"',
       'main = "src/index.mjs"',
       'compatibility_date = "2025-03-14"',
+      'compatibility_flags = ["nodejs_compat"]',
     ].join('\n'))
     writeFileSync(join(tmp, 'src/index.mjs'), `
 import { htmlToMarkdown, streamHtmlToMarkdown } from 'mdream'
@@ -71,6 +73,58 @@ export default {
     expect(tarballFiles).toContain('package/dist/edge.mjs')
     expect(tarballFiles).toContain('package/wasm/mdream_edge.js')
     expect(tarballFiles).toContain('package/wasm/mdream_edge_bg.wasm')
+  })
+
+  it('converts HTML after Nitro bundles the packaged edge entry', async () => {
+    const handler = join(tmp, 'src/nitro-handler.mjs')
+    writeFileSync(handler, `
+import { htmlToMarkdown, streamHtmlToMarkdown } from 'mdream'
+export default async (event) => {
+  if (event.path.endsWith('/stream')) {
+    const html = new ReadableStream({ start(controller) {
+      controller.enqueue('<h1>Stream</h1><ul><li>One</li><li>Two</li></ul>')
+      controller.close()
+    } })
+    let markdown = ''
+    for await (const chunk of streamHtmlToMarkdown(html)) markdown += chunk
+    return markdown
+  }
+  return htmlToMarkdown('<h1>Hello</h1><p>World</p>')
+}
+`)
+    const warnings: string[] = []
+    const nitro = await createNitro({
+      rootDir: tmp,
+      preset: 'cloudflare_module',
+      compatibilityDate: '2025-03-14',
+      experimental: { wasm: true },
+      cloudflare: { nodeCompat: true },
+      handlers: [{ route: '/api/**', handler }],
+      rollupConfig: { onwarn(warning, handler) {
+        warnings.push(warning.message)
+        handler(warning)
+      } },
+    })
+    try {
+      await build(nitro)
+    }
+    finally {
+      await nitro.close()
+    }
+    expect(warnings).not.toContainEqual(expect.stringContaining('Failed to load the WebAssembly module'))
+    const worker = await unstable_dev(join(tmp, '.output/server/index.mjs'), {
+      config: join(tmp, 'wrangler.toml'),
+      experimental: { disableExperimentalWarning: true },
+    })
+    try {
+      const res = await worker.fetch('/api/convert', { signal: AbortSignal.timeout(15000) })
+      expect(await res.text()).toBe('# Hello\n\nWorld')
+      const streamRes = await worker.fetch('/api/stream', { signal: AbortSignal.timeout(15000) })
+      expect(await streamRes.text()).toBe('# Stream\n\n- One\n- Two')
+    }
+    finally {
+      await worker.stop()
+    }
   })
 
   it('converts and streams HTML in workerd via the workerd export condition', async () => {

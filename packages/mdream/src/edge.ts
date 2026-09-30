@@ -1,17 +1,12 @@
 import type { HtmlToMarkdownOptions } from '../napi/index.js'
 import type { MdreamOptions } from './index.js'
 import type { ResolvedOptions } from './resolve-options.js'
-import { htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream, initSync } from '../wasm/mdream_edge.js'
-import wasmModule from '../wasm/mdream_edge_bg.wasm'
+import { __mdreamTakePanicMessage, htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream } from '../wasm-bundler/mdream_edge.js'
 import { convertResult, deliverPluginData, pumpStream } from './convert.js'
 import { resolveOptions } from './resolve-options.js'
 import { wasmPanicError } from './wasm-panic.js'
 
 export type { CleanOptions, ExtractedElement, FrontmatterConfig, MdreamOptions, TagOverride } from './index.js'
-
-// Edge runtimes (workerd, edge-light) resolve `.wasm` imports to a compiled
-// WebAssembly.Module that must be instantiated manually (#119).
-initSync({ module: wasmModule })
 
 function convert(html: string, napiOpts: HtmlToMarkdownOptions) {
   try {
@@ -19,7 +14,7 @@ function convert(html: string, napiOpts: HtmlToMarkdownOptions) {
   }
   catch (error) {
     // A Rust panic aborts the WASM instance; surface its message (#195).
-    throw wasmPanicError(error)
+    throw wasmPanicError(error, __mdreamTakePanicMessage)
   }
 }
 
@@ -39,7 +34,7 @@ export class MarkdownStream {
       this._inner = new _MarkdownStream(resolved.napiOpts)
     }
     catch (error) {
-      throw wasmPanicError(error)
+      throw wasmPanicError(error, __mdreamTakePanicMessage)
     }
   }
 
@@ -48,7 +43,7 @@ export class MarkdownStream {
       return this._inner.processChunk(chunk)
     }
     catch (error) {
-      throw wasmPanicError(error)
+      throw wasmPanicError(error, __mdreamTakePanicMessage)
     }
   }
 
@@ -57,7 +52,7 @@ export class MarkdownStream {
       return this._inner.processChunkBytes(chunk)
     }
     catch (error) {
-      throw wasmPanicError(error)
+      throw wasmPanicError(error, __mdreamTakePanicMessage)
     }
   }
 
@@ -67,7 +62,7 @@ export class MarkdownStream {
       markdown = this._inner.finish()
     }
     catch (error) {
-      throw wasmPanicError(error)
+      throw wasmPanicError(error, __mdreamTakePanicMessage)
     }
     deliverPluginData(this._inner.takeData(), this._callbacks)
     return markdown
@@ -87,7 +82,7 @@ export async function* streamHtmlToMarkdown(
     stream = new _MarkdownStream(resolved.napiOpts)
   }
   catch (error) {
-    throw wasmPanicError(error)
+    throw wasmPanicError(error, __mdreamTakePanicMessage)
   }
-  yield* pumpStream(stream, htmlStream, resolved, { mapError: wasmPanicError })
+  yield* pumpStream(stream, htmlStream, resolved, { mapError: error => wasmPanicError(error, __mdreamTakePanicMessage) })
 }

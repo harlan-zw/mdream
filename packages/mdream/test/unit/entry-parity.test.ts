@@ -11,6 +11,10 @@ vi.mock('../../wasm/mdream_edge_bg.wasm', async () => {
   const { readFileSync } = await import('node:fs')
   return { default: new WebAssembly.Module(readFileSync(new URL('../../wasm/mdream_edge_bg.wasm', import.meta.url))) }
 })
+vi.mock('../../wasm-bundler/mdream_edge_bg.wasm', async () => {
+  const { readFileSync } = await import('node:fs')
+  return { default: new WebAssembly.Module(readFileSync(new URL('../../wasm-bundler/mdream_edge_bg.wasm', import.meta.url))) }
+})
 vi.mock('../../wasm/mdream_edge.js', async (importOriginal) => {
   const { readFileSync } = await import('node:fs')
   const bindings = await importOriginal<typeof import('../../wasm/mdream_edge.js')>()
