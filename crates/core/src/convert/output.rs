@@ -2083,6 +2083,16 @@ impl ConvertState {
       && (text.contains('\n') || last_char == Some(b'\n'))
     {
       let indent = self.list_indent.as_str();
+      // The fence holds what is written, indentation included, so that is what
+      // its cap measures. A deep list's indent multiplies each line, and the
+      // check above saw only the raw text: stop building once past the cap.
+      let budget = match &self.code_fence {
+        Some(fence) if self.options.max_node_bytes != 0 => self
+          .options
+          .max_node_bytes
+          .saturating_sub(self.buffer.len().saturating_sub(fence.content_start)),
+        _ => usize::MAX,
+      };
       let mut out = String::with_capacity(text.len() + indent.len() * 2);
       let bytes = text.as_bytes();
       // Prepend indent for the first line when the buffer ended with a
@@ -2099,9 +2109,22 @@ impl ConvertState {
             out.push_str(indent);
           }
           prev = next;
+          if out.len() > budget {
+            break;
+          }
         }
       }
-      out.push_str(&text[prev..]);
+      if out.len() <= budget {
+        out.push_str(&text[prev..]);
+      }
+      if out.len() > budget {
+        self.truncated = true;
+        let kept = clamp_to_char_boundary(&out, budget).len();
+        if kept == 0 {
+          return;
+        }
+        out.truncate(kept);
+      }
       indented_storage = out;
       indented_storage.as_str()
     } else {
