@@ -783,6 +783,10 @@ pub struct ConvertState {
   cut_line_lead: CutLineLead,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
+  /// Bytes written by quoting, to check each line is quoted a bounded number of
+  /// times rather than once per nesting level.
+  #[cfg(test)]
+  quoted_bytes: usize,
   /// tag_id -> index into `tag_overrides`; `NO_OVERRIDE` means no key. Boxed:
   /// held inline it costs the override-free path more than the scan it replaces.
   override_idx: Option<Box<[u8; MAX_TAG_ID]>>,
@@ -942,6 +946,8 @@ impl ConvertState {
       list_rule_pending: false,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
+      #[cfg(test)]
+      quoted_bytes: 0,
     };
     // Resolve clean config into bitmask
     let effective_clean_urls;
@@ -2272,20 +2278,11 @@ impl ConvertState {
     len - floor > cap
   }
 
-  pub fn get_markdown_chunk(&mut self) -> String {
-    if self.format == OutputFormat::Html {
-      if let Some(&last) = self.buffer.as_bytes().last() {
-        self.flushed_tail[1] = last;
-      }
-      return std::mem::take(&mut self.buffer);
-    }
-    if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 {
-      return String::new();
-    }
-    // Quote only what this chunk could already hand out. The tail past here is
-    // still open to the trims below and to a reach-back rewrite from the next
-    // chunk, and a quote prefix committed over it cannot be withdrawn. Guarded
-    // so a document with no open quote does not pay for the limit every chunk.
+  /// Quote only what a chunk could already hand out. The tail past here is
+  /// still open to the trims below and to a reach-back rewrite from the next
+  /// chunk, and a quote prefix committed over it cannot be withdrawn. Guarded
+  /// so a document with no open quote does not pay for the limit.
+  pub(crate) fn flush_settled_blockquote_lines(&mut self) {
     if self.streaming_flush_possible() {
       let mut flush_limit = trim_ascii_whitespace_end(&self.buffer);
       if let Some(marker) = self.open_markers.first() {
@@ -2296,6 +2293,19 @@ impl ConvertState {
       }
       self.flush_streaming_blockquote_lines_upto(flush_limit);
     }
+  }
+
+  pub fn get_markdown_chunk(&mut self) -> String {
+    if self.format == OutputFormat::Html {
+      if let Some(&last) = self.buffer.as_bytes().last() {
+        self.flushed_tail[1] = last;
+      }
+      return std::mem::take(&mut self.buffer);
+    }
+    if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+      return String::new();
+    }
+    self.flush_settled_blockquote_lines();
     let buf_len = self.buffer.len();
     // Trailing spaces at the buffer end are never final outside <pre>: a later
     // block close (or a dropped empty element followed by a block) trims them,

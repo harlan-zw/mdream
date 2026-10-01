@@ -562,6 +562,10 @@ impl ConvertState {
       ];
     }
 
+    #[cfg(test)]
+    {
+      self.quoted_bytes += quoted.len();
+    }
     self.scan_before_requote(content_end);
     self.truncate_buffer(frame.content_start);
     self.buffer.push_str(&quoted);
@@ -677,6 +681,10 @@ impl ConvertState {
         }
         quoted.push('\n');
       }
+      #[cfg(test)]
+      {
+        self.quoted_bytes += quoted.len();
+      }
       self.scan_before_requote(flush_end);
       self.buffer.replace_range(shared_start..flush_end, &quoted);
       let quoted_end = shared_start + quoted.len();
@@ -716,6 +724,10 @@ impl ConvertState {
           quoted.push_str(unindented);
         }
         quoted.push('\n');
+      }
+      #[cfg(test)]
+      {
+        self.quoted_bytes += quoted.len();
       }
       self
         .buffer
@@ -4492,6 +4504,30 @@ mod tests {
 
     assert_eq!(state.gfm_escape_slow_path_calls, 2);
     assert_eq!(state.get_markdown(), "\\* literal\n\n\\* decoded");
+  }
+
+  // Each quote re-quoted whatever was still unflushed when it closed, so a deep
+  // nest closed within one chunk copied every line once per level.
+  #[test]
+  fn closing_a_deep_quote_nest_quotes_each_line_a_bounded_number_of_times() {
+    let open = "<blockquote>".repeat(64);
+    let body = "<p>x</p>".repeat(4096);
+    for close in ["</blockquote>".repeat(64), String::new()] {
+      let mut state =
+        ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+      let html = format!("{open}{body}{close}");
+      assert_eq!(state.process_html(&html), html.len());
+      state.finalize("");
+      let out = state.get_markdown();
+      assert!(out.starts_with(&"> ".repeat(64)), "{:.140}", out);
+      assert!(
+        state.quoted_bytes <= 2 * out.len(),
+        "closed={}: quoted {} bytes for {} of output",
+        !close.is_empty(),
+        state.quoted_bytes,
+        out.len()
+      );
+    }
   }
 
   #[test]
