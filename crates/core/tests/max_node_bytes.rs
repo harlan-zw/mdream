@@ -1846,3 +1846,49 @@ fn heading_hashes_split_by_kept_output_are_not_held_back() {
     }
   }
 }
+
+// A `<br>` run held for content to follow it is kept as one copy and a count, and
+// expands to the count times the item's indent only when yielded: a few KB of
+// breaks in a deep list became megabytes in one chunk. The cap charges every
+// break written since the last text, so runs that each fit but are held together
+// are cut too.
+#[test]
+fn held_break_runs_are_capped() {
+  let nest = "<ol start=999999999><li>".repeat(64);
+  let breaks = "<br>".repeat(4000);
+  let falling = format!("{}</li></ol>", "<br>".repeat(80)).repeat(64);
+  let split = format!("{}<b><br></b><span> </span>", "<br>".repeat(80)).repeat(64);
+  for (name, html) in [
+    ("list item", format!("{nest}x{breaks}y<p>after</p>")),
+    (
+      "caption",
+      format!("{nest}<figure><figcaption>x{breaks}y</figcaption></figure><p>after</p>"),
+    ),
+    ("falling depth", format!("{nest}x{falling}y<p>after</p>")),
+    ("split by markup", format!("{nest}x{split}y<p>after</p>")),
+  ] {
+    let batch = html_to_markdown_result(&html, options(CAP));
+    assert!(batch.truncated, "{name}");
+    assert!(!batch.markdown.contains("after"), "{name}");
+    for chunk in [37, 4096, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, chunk, CAP),
+        (batch.markdown.clone(), true),
+        "{name} chunk={chunk}"
+      );
+    }
+    let capped = peak(&html, 4096, CAP);
+    assert!(capped < (8 * CAP) as u64, "{name}: capped peak {capped}");
+  }
+  // Text ends the runs before it, however many breaks the document holds.
+  let html = format!("{nest}{}z", format!("x{}", "<br>".repeat(80)).repeat(64));
+  let uncapped = html_to_markdown_result(&html, options(0)).markdown;
+  let batch = html_to_markdown_result(&html, options(CAP));
+  assert_eq!((batch.markdown, batch.truncated), (uncapped.clone(), false));
+  for chunk in [37, 4096] {
+    assert_eq!(
+      stream_reporting(&html, chunk, CAP),
+      (uncapped.clone(), false)
+    );
+  }
+}

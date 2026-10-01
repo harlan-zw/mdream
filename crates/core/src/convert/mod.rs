@@ -656,6 +656,9 @@ pub struct ConvertState {
   /// Upper bound on the `#`/space run a heading holds back for its closing-sequence
   /// escape, counted as text is written.
   heading_hash_run: usize,
+  /// Upper bound on the `<br>` output held until text follows it, counted as
+  /// breaks are deferred.
+  held_break_bytes: usize,
   /// `max_node_bytes` fired on held-back output: input past that point is dropped.
   held_output_exceeded: bool,
   /// Columns the delimiter row promised; cells past it would be dropped by GFM.
@@ -880,6 +883,7 @@ impl ConvertState {
       line_start: 0,
       line_start_scanned_to: 0,
       heading_hash_run: 0,
+      held_break_bytes: 0,
       held_output_exceeded: false,
       table_header_cells: 0,
       truncated: false,
@@ -2243,6 +2247,12 @@ impl ConvertState {
       {
         self.heading_hash_run = run;
       }
+    }
+    // A streaming `<br>` run is held as one copy and a count until content
+    // follows it, then expanded whole into the chunk that yields it. Counting
+    // every break since the last text also adds up runs split by other markup.
+    if self.held_break_bytes > cap {
+      return true;
     }
     let len = self.buffer.len();
     if len <= cap {

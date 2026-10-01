@@ -2210,6 +2210,14 @@ impl ConvertState {
     if !self.open_markers.is_empty() && text.as_bytes().iter().any(|&b| !is_whitespace(b)) {
       self.open_markers.clear();
     }
+    // Text ends the breaks held before it, unless a tentative caption can still
+    // retract it and rejoin them.
+    if self.held_break_bytes != 0
+      && self.first_tentative_caption_start().is_none()
+      && text.as_bytes().iter().any(|&b| !is_whitespace(b))
+    {
+      self.held_break_bytes = 0;
+    }
 
     if self.options.max_node_bytes != 0
       && self.in_heading()
@@ -2842,8 +2850,7 @@ impl ConvertState {
   }
 
   fn defer_streaming_break(&mut self, fragment: &str) -> bool {
-    if !self.streaming
-      || !self.blockquotes.is_empty()
+    if !self.blockquotes.is_empty()
       || self.clean_flags & CLEAN_FRAGMENTS != 0
       || self.has_frontmatter
       || self.has_extraction
@@ -2854,6 +2861,11 @@ impl ConvertState {
     }
 
     if fragment.is_empty() {
+      return false;
+    }
+    // Counted in one-shot conversion too, so the cap cuts both at the same tag.
+    self.held_break_bytes = self.held_break_bytes.saturating_add(fragment.len());
+    if !self.streaming {
       return false;
     }
     if let Some(run) = self.streaming_break_runs.last_mut()
@@ -2986,6 +2998,7 @@ impl ConvertState {
         count: 1,
       });
     }
+    self.held_break_bytes = self.held_break_bytes.saturating_add(fragment.len());
     true
   }
 
