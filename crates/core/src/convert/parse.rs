@@ -1577,6 +1577,7 @@ impl ConvertState {
         // attributes are payload.
         bounded_prefix: tag_name_end == chunk_length
           && chunk_length - tag_name_start <= MAX_BUILTIN_TAG_NAME,
+        name_ended: tag_name_end != chunk_length,
       };
     }
 
@@ -1590,12 +1591,14 @@ impl ConvertState {
         // The whole tag is here, re-fed only so an implied end tag closes
         // first, and it carries whatever attributes it has.
         bounded_prefix: false,
+        name_ended: false,
       };
     }
     CloseTagResult {
       complete: true,
       new_position: i + 1,
       bounded_prefix: false,
+      name_ended: false,
     }
   }
 
