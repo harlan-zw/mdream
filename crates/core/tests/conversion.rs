@@ -2391,6 +2391,12 @@ fn an_empty_list_item_does_not_underline_the_text_above() {
     "- a\n-\n- b"
   );
   assert_eq!(convert("<ul><li></li><li>a</li></ul>"), "-\n- a");
+  // A block opening the item settles the blank line before a nested list's
+  // first marker can drop it.
+  assert_eq!(
+    convert("<ul><li>a<ul><li><blockquote>q</blockquote><ul><li>b</li></ul></li></ul></li></ul>"),
+    "- a\n\n  - \n    > q\n    - b"
+  );
 }
 
 #[test]
