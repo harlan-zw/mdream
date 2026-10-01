@@ -663,16 +663,38 @@ impl ConvertState {
     if self
       .blockquotes
       .iter()
-      .all(|frame| frame.content_start == shared_start && frame.list_indent.is_empty())
+      .all(|frame| frame.content_start == shared_start)
     {
       let content = &self.buffer[shared_start..flush_end];
-      let quoted_prefix = "> ".repeat(self.blockquotes.len());
-      let blank_prefix = quoted_prefix.trim_end();
+      // Quoting frame by frame, each frame strips its list indent from the line
+      // the frame inside it wrote, then writes that indent and `>`. Indents are
+      // spaces, and each written line starts with its frame's indent and `>`, so
+      // whether a strip fits depends on the indents alone: every line gets the
+      // same prefix, and only the innermost frame strips from the content.
+      let mut quoted_prefix = String::new();
+      let mut outer_indent = 0;
+      for frame in &self.blockquotes {
+        debug_assert!(frame.list_indent.bytes().all(|byte| byte == b' '));
+        let indent = frame.list_indent.len();
+        let kept = if outer_indent <= indent {
+          indent - outer_indent
+        } else {
+          indent
+        };
+        quoted_prefix.extend(std::iter::repeat_n(' ', kept));
+        quoted_prefix.push_str("> ");
+        outer_indent = indent;
+      }
+      let blank_prefix = &quoted_prefix[..quoted_prefix.len() - 1];
+      let innermost_indent = self.blockquotes[self.blockquotes.len() - 1]
+        .list_indent
+        .as_str();
       let mut quoted = core::mem::take(&mut self.blockquote_scratch);
       quoted.clear();
       quoted.reserve(content.len() + quoted_prefix.len() * content.matches('\n').count());
       for line in content.split_inclusive('\n') {
         let line = line.strip_suffix('\n').unwrap_or(line);
+        let line = line.strip_prefix(innermost_indent).unwrap_or(line);
         if line.is_empty() {
           quoted.push_str(blank_prefix);
         } else {
@@ -4528,6 +4550,31 @@ mod tests {
         out.len()
       );
     }
+  }
+
+  // Inside list items each frame also strips and writes its indent, which sent
+  // every flush between chunks down the frame-by-frame requote, so each line
+  // cost the square of the depth.
+  #[test]
+  fn flushing_quotes_nested_in_list_items_quotes_each_line_a_bounded_number_of_times() {
+    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    let open = "<blockquote><ul><li>".repeat(32);
+    assert_eq!(state.process_html(&open), open.len());
+    let mut out = String::new();
+    let paragraphs = "<p>para</p>".repeat(400);
+    for _ in 0..100 {
+      assert_eq!(state.process_html(&paragraphs), paragraphs.len());
+      out.push_str(&state.get_markdown_chunk());
+    }
+    state.finalize("");
+    out.push_str(&state.get_final_markdown_chunk());
+    assert!(out.contains(">   >   > - "), "{:.200}", out);
+    assert!(
+      state.quoted_bytes <= 2 * out.len(),
+      "quoted {} bytes for {} of output",
+      state.quoted_bytes,
+      out.len()
+    );
   }
 
   #[test]
