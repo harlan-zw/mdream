@@ -783,6 +783,9 @@ pub struct ConvertState {
   cut_line_lead: CutLineLead,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
+  /// Bytes a table row read back to classify the line it follows.
+  #[cfg(test)]
+  row_line_scanned: std::cell::Cell<usize>,
   /// tag_id -> index into `tag_overrides`; `NO_OVERRIDE` means no key. Boxed:
   /// held inline it costs the override-free path more than the scan it replaces.
   override_idx: Option<Box<[u8; MAX_TAG_ID]>>,
@@ -942,6 +945,8 @@ impl ConvertState {
       list_rule_pending: false,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
+      #[cfg(test)]
+      row_line_scanned: std::cell::Cell::new(0),
     };
     // Resolve clean config into bitmask
     let effective_clean_urls;
