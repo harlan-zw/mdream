@@ -1460,9 +1460,12 @@ impl ConvertState {
           content_start,
           restore_space,
         } => {
-          if self.buffer[content_start..]
-            .bytes()
-            .any(|byte| !is_whitespace(byte))
+          // In a code span past its cap the caption's `*` is dropped, so a trim
+          // can take its content start with it.
+          if content_start < self.buffer.len()
+            && self.buffer[content_start..]
+              .bytes()
+              .any(|byte| !is_whitespace(byte))
           {
             caption_exit_spacing = frame.spacing[1];
           } else {
