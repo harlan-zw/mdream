@@ -1225,11 +1225,11 @@ impl ConvertState {
                 || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0
                   && (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0)))
           });
+        self.link.empty_text_pending =
+          has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
         if self.streaming {
           self.link.hold_forever = self.link.pins_output;
           self.link.hold_released = !has_rewrite_anchor;
-          self.link.empty_text_pending =
-            has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
           self.link.url_max_len = href.map_or(0, |href| {
             6 + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
           });

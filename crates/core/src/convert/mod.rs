@@ -204,6 +204,7 @@ struct LinkOutputState {
   /// `max_node_bytes` measures the hold the same way in both.
   pins_output: bool,
   hold_released: bool,
+  /// Set in one-shot conversion too, like `pins_output`.
   empty_text_pending: bool,
   /// This anchor wrote its own `[`. Without it the exit's forward scan reaches
   /// past the link into the text and rewrites whatever bracket it finds there.
@@ -2249,10 +2250,11 @@ impl ConvertState {
       return false;
     }
     let mut floor = len;
+    // A link holds while its text is blank, since its close may still drop it.
     // Other link holds end within the link's URL length.
     if let Some(bracket_pos) = std::iter::once(&self.link)
       .chain(&self.parent_links)
-      .filter(|link| link.open && link.pins_output)
+      .filter(|link| link.open && (link.pins_output || link.empty_text_pending))
       .map(|link| link.bracket_pos)
       .min()
     {
