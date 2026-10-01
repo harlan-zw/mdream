@@ -1809,6 +1809,65 @@ fn held_back_output_is_capped() {
   }
 }
 
+// A run with no tag in it is emitted in pieces past the flush threshold. Inside
+// a construct holding its output those pieces piled up uncapped until it closed,
+// so a run above the cap cost a multiple of the document.
+#[test]
+fn a_long_text_run_held_back_is_capped() {
+  let cap = 2 * CAP;
+  let self_links = HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      self_link_headings: true,
+      ..Default::default()
+    }),
+    ..options(cap)
+  };
+  for (name, html, opts) in [
+    (
+      "quote",
+      format!("<blockquote>{}</blockquote>", repeat_to("a b ", HUGE)),
+      options(cap),
+    ),
+    (
+      "escaped quote",
+      format!(
+        "<blockquote><ul><li>{}</li></ul></blockquote>",
+        repeat_to("> ", HUGE)
+      ),
+      options(cap),
+    ),
+    (
+      "heading hashes",
+      format!("<h2>x {}</h2>", repeat_to("#", HUGE)),
+      options(cap),
+    ),
+    (
+      "self-link heading",
+      format!("<h2><a href=\"#x\">{}</a></h2>", repeat_to("a b ", HUGE)),
+      self_links,
+    ),
+  ] {
+    // Measured 2-5x the document before, a quarter to a half of it now.
+    let capped = peak_with(&html, 4096, opts.clone());
+    assert!(capped < HUGE as u64, "{name}: capped peak {capped}");
+    let batch = html_to_markdown_result(&html, opts.clone());
+    assert!(batch.truncated, "{name}");
+    for chunk in [4096, 64 * 1024] {
+      let mut p = MarkdownStreamProcessor::new(opts.clone());
+      let mut out = String::new();
+      for c in html.as_bytes().chunks(chunk) {
+        out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+      }
+      out.push_str(&p.finish());
+      assert_eq!(
+        (out, p.truncated()),
+        (batch.markdown.clone(), true),
+        "{name} chunk={chunk}"
+      );
+    }
+  }
+}
+
 #[test]
 fn a_long_quote_of_short_lines_is_not_held_back() {
   let html = format!(

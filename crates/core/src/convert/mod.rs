@@ -1119,6 +1119,15 @@ impl ConvertState {
     if self.wrap_width != 0 || self.in_raw_html_block() {
       return false;
     }
+    // Pieces of a run inside a quote or a heading pile up in the output those
+    // hold back (an unfinished quote line, a trailing `#` run, a self-link),
+    // where neither the node cap nor the held-output check sees them. Left
+    // whole, the node cap bounds the run and cuts it where one-shot conversion
+    // does. Not splitting there uncapped either keeps the output of a cap that
+    // never fires identical to the uncapped one.
+    if !self.blockquotes.is_empty() || self.in_heading() {
+      return false;
+    }
     // A link's title is dropped when it repeats the link text, which is decided
     // by comparing the title against the *last* text node, so a piece boundary
     // inside such a link would change that decision. A link carrying no title
