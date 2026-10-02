@@ -126,6 +126,8 @@ const GFM_BYTE_FLAGS: [u8; 256] = {
 };
 
 struct CodeSpanState {
+  /// Depth of the `<code>` that opened the span, which alone closes it.
+  depth: usize,
   output_start: usize,
   content_start: usize,
   opener_emitted: bool,
@@ -824,6 +826,10 @@ pub struct ConvertState {
   /// Bytes read to decide whether held line-break runs are final.
   #[cfg(test)]
   break_run_scanned: usize,
+  /// Bytes behind a code span's opener when the span closes, which closing
+  /// reads and moves.
+  #[cfg(test)]
+  code_span_closed_bytes: usize,
   #[cfg(test)]
   heading_run_bytes_read: usize,
   /// tag_id -> index into `tag_overrides`; `NO_OVERRIDE` means no key. Boxed:
@@ -997,6 +1003,8 @@ impl ConvertState {
       quoted_bytes: 0,
       #[cfg(test)]
       break_run_scanned: 0,
+      #[cfg(test)]
+      code_span_closed_bytes: 0,
       #[cfg(test)]
       heading_run_bytes_read: 0,
     };

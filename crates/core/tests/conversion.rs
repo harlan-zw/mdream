@@ -1240,6 +1240,144 @@ b
   );
 }
 
+// A <code> inside an inline code span is part of that span, as other inline
+// formatting inside it is. A span per level only lengthened the delimiter.
+#[test]
+fn nested_inline_code_is_one_span() {
+  for (html, expected) in [
+    ("<p><code>a<code>b</code>c</code></p>", "`abc`"),
+    ("<p><code>`a<code>`b`</code>c`</code></p>", "`` `a`b`c` ``"),
+    ("<p><em><code>a<code>b</code>c</code></em></p>", "*`abc`*"),
+    (
+      "<ul><li>x<code>a<code>b</code>c</code></li></ul>",
+      "- x `abc`",
+    ),
+    (
+      "<table><tr><td><code>a|<code>b|</code>c</code></td></tr></table>",
+      "| `a\\|b\\|c` |\n| --- |",
+    ),
+    ("<pre><code>a<code>b</code>c</code></pre>", "```\nabc\n```"),
+    (
+      "<details><code>a<code>b</code></code></details>",
+      "<details><code>a<code>b</code></code></details>",
+    ),
+    // Closed by the end of input.
+    ("<p><code>a<code>b", "`ab`"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+// Only the element that opened a span closes it, whichever of the two an
+// override or alias reaches.
+#[test]
+fn nested_inline_code_keeps_one_owner_under_overrides() {
+  let with = |name: &str, config: TagOverrideConfig| HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(name.to_string(), config)]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let braces = TagOverrideConfig {
+    enter: Some("{".to_string()),
+    exit: Some("}".to_string()),
+    ..Default::default()
+  };
+  let exit_only = TagOverrideConfig {
+    exit: Some("}".to_string()),
+    ..Default::default()
+  };
+  let alias = TagOverrideConfig {
+    alias_tag_id: mdream::consts::get_tag_id("code"),
+    ..Default::default()
+  };
+  for (html, options, expected) in [
+    // An override owns its own output at every level.
+    (
+      "<p><code>a<code>b</code>c</code></p>",
+      with("code", braces),
+      "{a{b}c}",
+    ),
+    // The inner default opener belongs to the outer span; each override exit stays.
+    (
+      "<p><code>a<code>b</code>c</code></p>",
+      with("code", exit_only.clone()),
+      "`ab}c}",
+    ),
+    ("<p><code>a<code>b", with("code", exit_only), "`ab}}"),
+    // An alias opens a span like the built-in, so it nests like one either way.
+    (
+      "<p><code>a<x-code>b</x-code>c</code></p>",
+      with("x-code", alias.clone()),
+      "`abc`",
+    ),
+    (
+      "<p><x-code>a<code>b</code>c</x-code></p>",
+      with("x-code", alias.clone()),
+      "`abc`",
+    ),
+    (
+      "<p><code>a<x-code>b`c</x-code>d</code>e</p>",
+      with("x-code", alias),
+      "``ab`cd``e",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    for chunk in [1, 3, 4096] {
+      let mut stream = MarkdownStreamProcessor::new(options.clone());
+      let mut out = String::new();
+      for piece in html.as_bytes().chunks(chunk) {
+        out.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+      }
+      out.push_str(&stream.finish());
+      assert_eq!(out, expected, "{html} chunk={chunk}");
+    }
+  }
+}
+
+#[test]
+fn nested_inline_code_streams_like_one_shot() {
+  let open = "<code>".repeat(508);
+  for html in [
+    format!("<p>{open}x</p>").repeat(4),
+    format!(
+      "<p>a<code>b<code>c</code>d</code>e</p><p>{open}x{}</p>",
+      "</code>".repeat(508)
+    ),
+    format!(
+      "<table><tr><td>{open}{}</td></tr></table>",
+      "a|".repeat(400)
+    ),
+    format!("{open}{}", "x`".repeat(4096)),
+  ] {
+    for max_node_bytes in [0, 1024 * 1024, 64] {
+      let options = HTMLToMarkdownOptions::default().with_max_node_bytes(max_node_bytes);
+      let expected = html_to_markdown_result(&html, options.clone());
+      if !expected.truncated {
+        assert_eq!(expected.markdown, convert(&html), "cap={max_node_bytes}");
+      }
+      for chunk in [1, 7, 64, 4096] {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut out = String::new();
+        for piece in html.as_bytes().chunks(chunk) {
+          out.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        out.push_str(&stream.finish());
+        assert_eq!(
+          out, expected.markdown,
+          "cap={max_node_bytes} chunk={chunk} {html:.40}"
+        );
+        assert_eq!(
+          stream.truncated(),
+          expected.truncated,
+          "cap={max_node_bytes} chunk={chunk}"
+        );
+      }
+    }
+  }
+}
+
 #[test]
 fn code_language_metadata_is_validated() {
   for (class, language) in [
