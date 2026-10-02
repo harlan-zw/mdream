@@ -843,6 +843,9 @@ impl ConvertState {
       self.flush_list_rule();
     }
 
+    // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
+    // language) is emitted lazily above for the no-<code> case. Skipped inside
+    // a table cell, where the <pre> is emitted as raw HTML instead (issue #147).
     // A nested `<pre>` stays inside an ancestor's open or pending fence; it
     // must not replace that fence's owner with a new deferred opener.
     if !self.plain_text
@@ -906,6 +909,16 @@ impl ConvertState {
           self.table_column_alignments.clear();
         } else if tag_id == Some(TAG_TR) {
           self.table_current_row_cells = 0;
+          // A nested table's row must not clear an outer header row's pending
+          // opener, or that row's first cell would open no row. An override
+          // with neither enter nor exit output renders the row like the
+          // built-in handler, so it keeps the empty-row deferral too; only an
+          // explicit-output override takes over the row's own edges.
+          if self.depth_map[TAG_TABLE as usize] <= 1 && !self.in_table_cell() {
+            self.table_row_opener_pending = !self.plain_text
+              && !self.table_rendered_table
+              && override_config.is_none_or(|ov| ov.enter.is_none() && ov.exit.is_none());
+          }
         } else if tag_id == Some(TAG_TH) {
           let align_val = node.attributes.get_bit(ATTR_ALIGN).map_or(0u8, |s| {
             match s.as_bytes().first().copied().unwrap_or(0) | 0x20 {
@@ -944,6 +957,22 @@ impl ConvertState {
       };
     }
     // Phase 1 ends — self.stack borrow released
+
+    if self.table_row_opener_pending
+      && matches!(tag_id, Some(TAG_TH | TAG_TD))
+      && self.depth_map[TAG_TABLE as usize] <= 1
+    {
+      self.table_row_opener_pending = false;
+      let opener = self.table_row_opener(is_inline);
+      // The first cell written takes the opener's `| ` in place of its own
+      // separator, even when content outside any cell came before it: that
+      // content is not a column, and an extra `|` would widen the header row
+      // past its delimiter row.
+      output = Some(match output {
+        Some(cell) if enter_is_literal && !cell.is_empty() => Cow::Owned(format!("{opener}{cell}")),
+        _ => opener,
+      });
+    }
 
     // A literal override is code content inside `<pre>`, even when the tag's
     // built-in formatting would be suppressed there.
@@ -1020,7 +1049,7 @@ impl ConvertState {
         CaptionMaterialization::Commit
       });
     }
-    let new_line_config = self.calculate_new_line_config(tag_id, node_spacing);
+    let new_line_config = self.calculate_new_line_config(tag_id, node_spacing, true);
     let quote_at_start = self
       .blockquotes
       .last()
@@ -1349,6 +1378,10 @@ impl ConvertState {
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
     }
+    let owns_pre_fence = tag_id == Some(TAG_PRE);
+    // Only the <pre> owning the open fence may close it; a nested one closing
+    // its ancestor's fence would leave the outer <pre> nothing to close, and
+    // the fence would run on.
     let closes_own_pre_fence =
       tag_id == Some(TAG_PRE) && self.pre_fence_owner_depth == self.depth_map[TAG_PRE as usize];
 
@@ -1407,7 +1440,11 @@ impl ConvertState {
     if !has_override {
       // Special case: TR table separator
       if tag_id == Some(TAG_TR) && !self.plain_text {
-        if !self.table_rendered_table && self.depth_map[TAG_TABLE as usize] <= 1 {
+        if self.table_row_opener_pending && self.depth_map[TAG_TABLE as usize] <= 1 {
+          // No cell opened the row, so nothing was written for it. It must not
+          // become the header either: the delimiter row would have no columns.
+          self.table_row_opener_pending = false;
+        } else if !self.table_rendered_table && self.depth_map[TAG_TABLE as usize] <= 1 {
           self.table_rendered_table = true;
           let col_count = self
             .table_current_row_cells
@@ -1550,7 +1587,7 @@ impl ConvertState {
     let new_line_config = if caption_exit {
       NO_SPACING
     } else {
-      self.calculate_new_line_config(tag_id, node_spacing)
+      self.calculate_new_line_config(tag_id, node_spacing, false)
     };
     let configured_new_lines = if consumes_caption_boundary {
       0
@@ -1911,7 +1948,7 @@ impl ConvertState {
     }
 
     // Reset <pre> fence deferral once the element closes (issue #97).
-    if tag_id == Some(TAG_PRE) {
+    if owns_pre_fence {
       // The closing fence consumed the trailing newline; clear the whitespace
       // flags too, or the next node trims the blank line through the fence.
       if closes_own_pre_fence {
@@ -3767,33 +3804,10 @@ impl ConvertState {
         if self.in_table_cell() {
           return Some(Cow::Borrowed("<tr>"));
         }
-        // Inside a code span past its cap nothing more is written, so classifying
-        // the line only re-read it: one that never ends, once per row.
-        if !node.is_inline && self.drops_code_span_content() {
-          return Some(Cow::Borrowed("| "));
+        if self.table_row_opener_pending {
+          return None;
         }
-        let indent = if self.depth_map[TAG_LI as usize] > 0 {
-          self.list_indent.as_str()
-        } else {
-          ""
-        };
-        // A row must open its own line at the item's content column: sharing one
-        // with preceding content (a `<caption>`) leaves the header as prose and
-        // the delimiter row never forms a table.
-        match self.line_state_before_row() {
-          LineBeforeRow::Row if indent.is_empty() => Some(Cow::Borrowed("\n| ")),
-          LineBeforeRow::Content if indent.is_empty() => Some(Cow::Borrowed("\n\n| ")),
-          LineBeforeRow::Row => Some(Cow::Owned(format!("\n{indent}| "))),
-          LineBeforeRow::Content => Some(Cow::Owned(format!("\n\n{indent}| "))),
-          // A pending list marker already supplies the column; only a fresh line
-          // needs the indent written.
-          LineBeforeRow::Open
-            if !indent.is_empty() && self.buffer.as_bytes().last() == Some(&b'\n') =>
-          {
-            Some(Cow::Owned(format!("{indent}| ")))
-          }
-          LineBeforeRow::Open => Some(Cow::Borrowed("| ")),
-        }
+        Some(self.table_row_opener(node.is_inline))
       }
       TAG_TH | TAG_TD => {
         if self.depth_map[TAG_TABLE as usize] > 1 {
@@ -4337,6 +4351,7 @@ impl ConvertState {
     &self,
     tag_id: Option<u8>,
     node_spacing: Option<[u8; 2]>,
+    is_enter: bool,
   ) -> [u8; 2] {
     if self.plain_text
       && tag_id == Some(TAG_PRE)
@@ -4353,12 +4368,25 @@ impl ConvertState {
     } else if self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0 {
       return NO_SPACING;
     }
-    // A heading normally keeps its block spacing inside a collapsing parent, but
-    // in a table cell that newline would end the row.
-    let current_node_owns_collapse = tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id))
+    // A heading's own collapse keeps its block spacing, but in a table cell that
+    // newline would end the row. The count holds the heading only while it is
+    // open: at its exit the heading is already popped, so a count of 1 there is
+    // a collapsing ancestor. Only an ancestor writing visible inline Markdown
+    // (`<a>`, `<b>`, `<code>`) suppresses the blank line, since its text
+    // continues inline; a marker-less wrapper (label, small, abbr, time, bdo,
+    // ruby, rt, rp) lets the heading close its block.
+    let is_heading = matches!(tag_id, Some(id) if (TAG_H1..=TAG_H6).contains(&id));
+    let heading_owns_collapse =
+      is_enter && is_heading && self.collapse_non_span_depth == 1 && !self.in_table_cell();
+    let heading_exit_in_markerless_collapse = !is_enter
+      && is_heading
       && self.collapse_non_span_depth == 1
-      && !self.in_table_cell();
-    if self.collapse_non_span_depth > 0 && !current_node_owns_collapse {
+      && !self.in_table_cell()
+      && !self.collapse_wrapper_emits_inline_markdown();
+    if self.collapse_non_span_depth > 0
+      && !heading_owns_collapse
+      && !heading_exit_in_markerless_collapse
+    {
       return NO_SPACING;
     }
     if self.collapse_span_depth > 0 {
@@ -4370,6 +4398,75 @@ impl ConvertState {
       }
     }
     node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)
+  }
+
+  /// Whether the tag writes visible inline Markdown around its content:
+  /// emphasis, code ticks, raw-tag wrappers, or an anchor that emits markup.
+  /// An override carrying non-empty enter or exit output counts too, since its
+  /// markers sit inline around the wrapped content (the same ownership rule
+  /// `raw_html_anchor` applies at exit). A heading nested in one must not end
+  /// its line, or the wrapper's remaining text splits off.
+  #[inline]
+  fn wrapper_emits_inline_markdown(&self, node: &ElementNode) -> bool {
+    if self.has_tag_overrides {
+      let ovs = self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|p| p.tag_overrides.as_ref());
+      if let Some(ov) = Self::override_for_node(ovs, self.override_idx.as_deref(), node)
+        && (ov.enter.as_ref().is_some_and(|s| !s.is_empty())
+          || ov.exit.as_ref().is_some_and(|s| !s.is_empty()))
+      {
+        return true;
+      }
+    }
+    match node.tag_id {
+      // The enter handler writes `[` only for an href anchor, and its raw tag
+      // inside a raw-HTML block; any other anchor emits nothing at either
+      // edge, so it counts as a marker-less wrapper.
+      Some(TAG_A) => self.in_raw_html_block() || node.attributes.contains_bit(ATTR_HREF),
+      Some(id) => matches!(
+        id,
+        TAG_STRONG
+          | TAG_B
+          | TAG_EM
+          | TAG_I
+          | TAG_DEL
+          | TAG_S
+          | TAG_STRIKE
+          | TAG_INS
+          | TAG_SUB
+          | TAG_SUP
+          | TAG_CODE
+          | TAG_KBD
+          | TAG_SAMP
+          | TAG_VAR
+          | TAG_MARK
+          | TAG_U
+          | TAG_CITE
+          | TAG_DFN
+          | TAG_Q
+      ),
+      None => false,
+    }
+  }
+
+  /// The depth-1 collapsing ancestor at a heading's exit is the only open
+  /// non-span contributor, so the innermost match is it. Returns `false` when
+  /// none is found, keeping the previous suppression.
+  #[inline]
+  fn collapse_wrapper_emits_inline_markdown(&self) -> bool {
+    self
+      .stack
+      .iter()
+      .rev()
+      .find(|node| {
+        node.collapses_inner_white_space
+          && !node.excluded_from_markdown
+          && node.tag_id != Some(TAG_SPAN)
+      })
+      .is_some_and(|node| self.wrapper_emits_inline_markdown(node))
   }
 
   #[inline]
@@ -4390,6 +4487,39 @@ impl ConvertState {
       }
     }
     ""
+  }
+
+  /// The `| ` that opens a top-level row, preceded by whatever line break puts
+  /// it on its own line at the list item's content column. `is_inline` is the
+  /// node whose enter writes it: the `<tr>`, or a header row's first cell.
+  fn table_row_opener(&self, is_inline: bool) -> Cow<'static, str> {
+    // Inside a code span past its cap nothing more is written, so classifying
+    // the line only re-read it: one that never ends, once per row.
+    if !is_inline && self.drops_code_span_content() {
+      return Cow::Borrowed("| ");
+    }
+    let indent = if self.depth_map[TAG_LI as usize] > 0 {
+      self.list_indent.as_str()
+    } else {
+      ""
+    };
+    // A row must open its own line at the item's content column: sharing one
+    // with preceding content (a `<caption>`) leaves the header as prose and
+    // the delimiter row never forms a table.
+    match self.line_state_before_row() {
+      LineBeforeRow::Row if indent.is_empty() => Cow::Borrowed("\n| "),
+      LineBeforeRow::Content if indent.is_empty() => Cow::Borrowed("\n\n| "),
+      LineBeforeRow::Row => Cow::Owned(format!("\n{indent}| ")),
+      LineBeforeRow::Content => Cow::Owned(format!("\n\n{indent}| ")),
+      // A pending list marker already supplies the column; only a fresh line
+      // needs the indent written.
+      LineBeforeRow::Open
+        if !indent.is_empty() && self.buffer.as_bytes().last() == Some(&b'\n') =>
+      {
+        Cow::Owned(format!("{indent}| "))
+      }
+      LineBeforeRow::Open => Cow::Borrowed("| "),
+    }
   }
 
   fn line_state_before_row(&self) -> LineBeforeRow {
@@ -4624,6 +4754,26 @@ mod tests {
       "<code>{}<table>{}",
       "a".repeat(2048),
       "<tr><td>x</td></tr>".repeat(1000)
+    );
+    assert_eq!(state.process_html(&html), html.len());
+    assert!(state.truncated);
+    assert!(
+      state.row_line_scanned.get() < 16 * 1024,
+      "rows read {} bytes",
+      state.row_line_scanned.get()
+    );
+  }
+
+  // A header row opens at its first cell, so every table classifies the line
+  // there once; past the cap that re-read the same unending line per table.
+  #[test]
+  fn tables_in_an_exhausted_code_span_do_not_reread_the_line() {
+    let options = HTMLToMarkdownOptions::default().with_max_node_bytes(1024);
+    let mut state = ConvertState::new(options, 64, OutputFormat::Markdown);
+    let html = format!(
+      "<code>{}{}",
+      "a".repeat(2048),
+      "<table><tr><td>x</td></tr></table>".repeat(1000)
     );
     assert_eq!(state.process_html(&html), html.len());
     assert!(state.truncated);
