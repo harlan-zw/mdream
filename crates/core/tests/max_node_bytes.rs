@@ -1712,9 +1712,9 @@ fn a_dropped_header_does_not_align_a_retained_column() {
 
 // Short nodes can still pin the buffer when an open construct keeps its output
 // from being yielded: a quote releases completed lines only and none past an open
-// link or caption, a heading holds its trailing `#` run, and a self-link heading
-// holds its text. The cap charges that held output and cuts the document at the
-// token where it passes.
+// link or caption, a heading holds its trailing `#` run, a self-link heading
+// holds its text, and so does a link while that text is blank. The cap charges
+// that held output and cuts the document at the token where it passes.
 #[test]
 fn held_back_output_is_capped() {
   let self_links = || HTMLToMarkdownOptions {
@@ -1786,6 +1786,20 @@ fn held_back_output_is_capped() {
       },
     ),
     (
+      "blank link text",
+      format!(
+        "<p>before</p><p><a href=\"/x\">{}</a></p><p>after</p>",
+        repeat_to("&#x3000;<!---->&nbsp;<span></span>", HUGE)
+      ),
+      HTMLToMarkdownOptions {
+        clean: Some(CleanConfig {
+          empty_link_text: true,
+          ..Default::default()
+        }),
+        ..options(CAP)
+      },
+    ),
+    (
       "self-link heading",
       format!(
         "<p>before</p><h1><a href=\"#a\">{}</a></h1><p>after</p>",
@@ -1841,6 +1855,38 @@ fn a_long_quote_of_short_lines_is_not_held_back() {
   );
   let batch = html_to_markdown_result(&html, options(CAP));
   assert_eq!((batch.markdown, batch.truncated), (uncapped, false));
+}
+
+// A link stops holding once its text is not blank, however long it gets.
+#[test]
+fn a_link_with_text_is_not_held_back() {
+  let opts = |cap| HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_link_text: true,
+      ..Default::default()
+    }),
+    ..options(cap)
+  };
+  let html = format!(
+    "<p><a href=\"/x\">&#x3000;<!---->{}</a></p><p>after</p>",
+    repeat_to("word&#x3000;<!---->", HUGE)
+  );
+  let uncapped = html_to_markdown_result(&html, opts(0)).markdown;
+  let batch = html_to_markdown_result(&html, opts(CAP));
+  assert_eq!((batch.markdown, batch.truncated), (uncapped.clone(), false));
+  for chunk in [37, 8 * 1024] {
+    let mut p = MarkdownStreamProcessor::new(opts(CAP));
+    let mut out = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(
+      (out, p.truncated()),
+      (uncapped.clone(), false),
+      "chunk={chunk}"
+    );
+  }
 }
 
 // Output that stays between two short `#` runs splits them, however much `#`
