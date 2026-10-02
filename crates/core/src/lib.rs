@@ -359,7 +359,7 @@ mod ignored_declarations {
   use super::MarkdownStreamProcessor;
   use super::types::HTMLToMarkdownOptions;
 
-  fn stream(parts: &[&str], cap: usize) -> (String, bool, usize) {
+  pub(super) fn stream(parts: &[&str], cap: usize) -> (String, bool, usize) {
     let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
       max_node_bytes: cap,
       ..Default::default()
@@ -443,6 +443,66 @@ mod ignored_declarations {
       for split in 0..=html.len() {
         let actual = stream(&[&html[..split], &html[split..]], 0);
         assert_eq!(actual.0, expected.0, "html={html:?} split={split}");
+      }
+    }
+  }
+}
+
+#[cfg(test)]
+mod end_tag_junk {
+  use super::ignored_declarations::stream;
+
+  fn parts(html: &str, chunk: usize) -> Vec<&str> {
+    html
+      .as_bytes()
+      .chunks(chunk)
+      .map(|c| std::str::from_utf8(c).unwrap())
+      .collect()
+  }
+
+  // Past its name an end tag is waiting only for `>`, so carrying it would make
+  // every chunk re-read it from `</`.
+  #[test]
+  fn junk_after_an_end_tag_name_is_not_carried() {
+    let junk = "x".repeat(1536 * 1024);
+    for html in [
+      format!("<p>a</p {junk}>b"),
+      format!("<p>a</p q=\"{junk}>\">b"),
+      format!("<div><p>a</div {junk}>b"),
+      format!("<textarea>a</textarea {junk}>b"),
+    ] {
+      let expected = stream(&[&html], 0).0;
+      for cap in [0, 1024 * 1024] {
+        for chunk in [1000, 4096] {
+          let (out, truncated, carried) = stream(&parts(&html, chunk), cap);
+          let case = format!("{:.24} cap={cap} chunk={chunk}", html);
+          assert_eq!(out, expected, "{case}");
+          assert!(!truncated, "{case}");
+          assert!(carried <= "</textarea".len(), "{case}: carried {carried}");
+        }
+      }
+    }
+  }
+
+  // Dropping resumes a different scanner than a one-shot parse, so every split
+  // must end the tag at the same byte, and input ending inside it loses nothing.
+  #[test]
+  fn an_end_tag_ends_at_the_same_byte_at_every_split() {
+    for (open, close) in [
+      ("<p>", "</p"),
+      ("<div><p>", "</div"),
+      ("<textarea>", "</textarea"),
+    ] {
+      for junk in ["", " ", "/", " a", " a=\">\"", " a='>'", " \"", "/ '>"] {
+        for tail in [">b", ""] {
+          let html = format!("{open}a{close}{junk}{tail}");
+          let expected = stream(&[&html], 0);
+          for split in 0..=html.len() {
+            let actual = stream(&[&html[..split], &html[split..]], 0);
+            assert_eq!(actual.0, expected.0, "html={html:?} split={split}");
+            assert!(!actual.1, "html={html:?} split={split}");
+          }
+        }
       }
     }
   }

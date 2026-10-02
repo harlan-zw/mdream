@@ -1178,6 +1178,9 @@ impl ConvertState {
     // declaration opener, or a name that could still be a builtin - so the cap
     // does not drop a token holding no payload yet.
     let mut carry_bounded = false;
+    // Set with `carry` when an end tag stopped past its name. Only its `>` is
+    // still to come, so it is dropped like an over-cap one instead of carried.
+    let mut discard_end_tag = false;
 
     // Mid-token from a previous chunk: keep dropping until its end is found.
     if !matches!(self.discard, Discard::No) {
@@ -1478,6 +1481,7 @@ impl ConvertState {
               self.rawtext_end_tag_pending = true;
               carry = true;
               carry_bounded = result.bounded_prefix;
+              discard_end_tag = result.name_ended;
               break;
             }
             continue;
@@ -1539,6 +1543,7 @@ impl ConvertState {
               self.rawtext_end_tag_pending = true;
               carry = true;
               carry_bounded = result.bounded_prefix;
+              discard_end_tag = result.name_ended;
               break;
             }
             continue;
@@ -1641,6 +1646,7 @@ impl ConvertState {
         } else {
           carry = true;
           carry_bounded = result.bounded_prefix;
+          discard_end_tag = result.name_ended;
           break;
         }
       } else if !next.is_ascii_alphabetic() && next != QUESTION_CHAR {
@@ -1795,7 +1801,9 @@ impl ConvertState {
     // run is kept in `text_buffer` instead, so it is parsed once however many
     // chunks it spans.
     let consumed = if carry {
-      if max_node_bytes != 0 && chunk_length - run_start > max_node_bytes && !carry_bounded {
+      if discard_end_tag
+        || (max_node_bytes != 0 && chunk_length - run_start > max_node_bytes && !carry_bounded)
+      {
         self.complete_text_node(&mut text_buffer);
         self.start_discard(chunk, run_start);
         chunk_length
@@ -1824,9 +1832,9 @@ impl ConvertState {
     chunk_length
   }
 
-  /// Drop a token that outgrew the cap instead of carrying it. The element is
-  /// lost, but scanning its bytes here leaves the quote/dash state that finds its
-  /// end, so the raw input buffer stops growing.
+  /// Drop a token that outgrew the cap, or an end tag past its name, instead of
+  /// carrying it. The element is lost, but scanning its bytes here leaves the
+  /// quote/dash state that finds its end, so the raw input buffer stops growing.
   ///
   /// Semantics stay aligned with an uncapped parse, which processes each of
   /// these tokens whole with no length check: an end tag closes its element or
@@ -2125,11 +2133,12 @@ impl ConvertState {
     // Tokens abandoned at EOF are only reported here. A parked start tag counts
     // just when the cap fired on it: a mask-rejected attribute is absent from an
     // uncapped parse too, so losing it loses nothing. The same holds for an
-    // unterminated ignored declaration.
+    // unterminated ignored declaration, and for an end tag: an uncapped parse
+    // drops it too, and whatever it would close the end of input closes.
     let discard_loses_output = match self.discard {
-      Discard::No | Discard::Comment(_) | Discard::Doctype => false,
+      Discard::No | Discard::Comment(_) | Discard::Doctype | Discard::CloseTag(_) => false,
       Discard::Cdata(_) => self.has_surfaced_cdata(),
-      Discard::Tag(_) | Discard::CloseTag(_) => true,
+      Discard::Tag(_) => true,
     };
     if discard_loses_output
       || (self.options.max_node_bytes != 0
@@ -2757,6 +2766,8 @@ pub(crate) struct CloseTagResult {
   /// The chunk ended inside a name short enough to be a builtin, so the
   /// carried bytes hold no payload yet.
   bounded_prefix: bool,
+  /// The chunk ended past the name, in the ignored rest of the tag.
+  name_ended: bool,
 }
 
 /// Longest prefix of `text` that fits `max` bytes without splitting a char.
