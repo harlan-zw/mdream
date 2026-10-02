@@ -951,6 +951,7 @@ impl ConvertState {
       gfm_escape_slow_path_calls: 0,
       #[cfg(test)]
       quoted_bytes: 0,
+      #[cfg(test)]
       break_run_scanned: 0,
     };
     // Resolve clean config into bitmask
