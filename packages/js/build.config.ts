@@ -8,6 +8,7 @@ export default defineBuildConfig({
         './src/index.ts',
         './src/text.ts',
         './src/html.ts',
+        './src/clean.ts',
         './src/negotiate.ts',
         './src/plugins.ts',
         './src/preset/minimal.ts',

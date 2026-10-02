@@ -3,33 +3,26 @@
  * Character-scan approach — no regex. All operate on the final markdown string.
  */
 
+import type { Cleaner, CleanOptions } from './types'
 import { isEmptyLinkHref } from './utils'
 
-export interface CleanOptions {
-  /** Strip tracking query parameters (utm_*, fbclid, gclid, etc.) from URLs */
-  urls?: boolean
-  /** Strip fragment-only links that don't match any heading slug */
-  fragments?: boolean
-  /** Strip links with meaningless hrefs (#, javascript:, empty) → plain text */
-  emptyLinks?: boolean
-  /** Collapse 3+ consecutive blank lines to 2 */
-  blankLines?: boolean
-  /** Strip links where text equals URL: [https://x.com](https://x.com) → https://x.com */
-  redundantLinks?: boolean
-  /** Strip self-referencing heading anchors: ## [Title](#title) → ## Title */
-  selfLinkHeadings?: boolean
-  /** Strip images with no alt text (decorative/tracking pixels) */
-  emptyImages?: boolean
-  /** Drop links that produce no visible text: [](url) → nothing */
-  emptyLinkText?: boolean
+const ALL_RULES: CleanOptions = {
+  urls: true,
+  fragments: true,
+  emptyLinks: true,
+  redundantLinks: true,
+  selfLinkHeadings: true,
+  emptyImages: true,
+  emptyLinkText: true,
 }
 
-export function resolveClean(clean: boolean | CleanOptions): CleanOptions {
-  if (clean === true)
-    return { urls: true, fragments: true, emptyLinks: true, redundantLinks: true, selfLinkHeadings: true, emptyImages: true, emptyLinkText: true }
-  if (clean === false)
-    return {}
-  return clean
+/**
+ * Create cleanup rules for the `clean` option. Omit `rules` to enable all of them.
+ * Import this only when you use it, so other bundles do not include the cleanup pass.
+ */
+export function clean(rules: CleanOptions = ALL_RULES): Cleaner {
+  const resolved = { ...rules }
+  return { ...resolved, apply: markdown => applyClean(markdown, resolved) }
 }
 
 // ── Shared: parse markdown link at position ──

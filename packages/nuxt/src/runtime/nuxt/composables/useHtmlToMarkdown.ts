@@ -17,8 +17,8 @@ export function useHtmlToMarkdown(html?: MaybeRefOrGetter<string | undefined>, o
     error.value = null
     const mdream = await import('mdream')
     const result: any = mdream.htmlToMarkdown(src, { ...options, ...overrides } as any)
-    // browser WASM build returns Promise<{ markdown }>, node NAPI returns string
-    const resolved = typeof result === 'string' ? result : (await result).markdown
+    // browser entry returns Promise<string>, node entry returns string
+    const resolved = typeof result === 'string' ? result : await result
     markdown.value = resolved
     pending.value = false
     return resolved

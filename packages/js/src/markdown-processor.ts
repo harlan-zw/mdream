@@ -50,7 +50,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { finalizeParse, parseHtmlStream } from './parse'
-import { processPluginsForEvent } from './plugin-processor'
+import { endPlugins, processPluginsForEvent } from './plugin-processor'
 import { breakHandler, renderBreak, tagHandlers } from './tags'
 import { blockOpenPrefix, continuationPrefix, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber } from './utils'
 
@@ -2041,6 +2041,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     const leftover = parseHtmlStream(html, parseState, handleEvent)
     // Commit trailing text and close unclosed elements at end of input.
     finalizeParse(leftover, parseState, handleEvent)
+    endPlugins(resolvedPlugins, state)
   }
 
   /**

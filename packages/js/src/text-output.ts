@@ -58,7 +58,8 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
   return Boolean(firstChar && !'.,!?:;_*`)]'.includes(firstChar))
 }
 
-function currentColumn(buffer: string[]): number {
+/** `base` is the column the first fragment starts at. */
+function currentColumn(buffer: string[], base: number): number {
   let column = 0
   for (let index = buffer.length - 1; index >= 0; index--) {
     const value = buffer[index]!
@@ -67,8 +68,35 @@ function currentColumn(buffer: string[]): number {
       return column + [...value.slice(newline + 1)].length
     column += [...value].length
   }
+  return column + base
+}
+
+/**
+ * Column at `end` in `value`, counted in code points like `currentColumn`.
+ * `column` is the column `value` starts at.
+ */
+function columnAt(value: string, end: number, column: number): number {
+  const newline = end > 0 ? value.lastIndexOf('\n', end - 1) : -1
+  let index = 0
+  if (newline >= 0) {
+    index = newline + 1
+    column = 0
+  }
+  for (; index < end; index++) {
+    const code = value.charCodeAt(index)
+    // A surrogate pair is one code point.
+    if (code >= 0xD800 && code <= 0xDBFF && index + 1 < end) {
+      const next = value.charCodeAt(index + 1)
+      if (next >= 0xDC00 && next <= 0xDFFF)
+        index++
+    }
+    column++
+  }
   return column
 }
+
+/** Yielded characters a stream keeps before its unstable tail, for `trailingNewlines` and `lastOutputChar`. */
+const YIELDED_CONTEXT = 2
 
 function wrapText(value: string, column: number, width: number): string {
   const leading = value.charCodeAt(0) === 32
@@ -315,7 +343,12 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     plainText: true,
   }
   let preserveLeadingWhitespace = false
+  // Offset in the joined buffer up to which output is yielded, once started.
   let yieldedLength = 0
+  // Leading whitespace drops only until the first yield.
+  let started = false
+  // Column the first buffer fragment starts at, once yielded output is dropped.
+  let bufferColumn = 0
   // A caption only earns its blank-line boundary once it emits visible
   // content, so an empty `<figcaption>` leaves the text unchanged.
   let captionOpen = 0
@@ -324,6 +357,10 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
   let captionEnterSpacing = CAPTION_SPACING
   let captionExitSpacing = CAPTION_SPACING
   let captionClosedSpacing = 0
+  // A caption that held only breaks owns the next line start.
+  let captionBreakOwnsLine = false
+  // A quotation opener the exit may still retract, so a stream holds it back.
+  let quoteOpenerPending = false
 
   function pushCaptionBoundary(newlines: number): boolean {
     if (state.buffer.length === 0 || newlines === 0)
@@ -372,15 +409,17 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
       preserveLeadingWhitespace = true
     if (node.value === ' ' && last !== '' && ' \n\t\r'.includes(last))
       return
-    // A line break owns the line start, so collapsed prose drops its leading space.
-    if (last === '\n' && node.value.charCodeAt(0) === 32 && !state.depthMap[TAG_PRE])
-      node.value = trimAsciiWhitespaceStart(node.value)
+    if (captionBreakOwnsLine) {
+      captionBreakOwnsLine = false
+      if (last === '\n' && !state.depthMap[TAG_PRE])
+        node.value = trimAsciiWhitespaceStart(node.value)
+    }
     if (!state.depthMap[TAG_PRE] && shouldAddSpacingBeforeText(last, lastNode, node))
       node.value = ` ${node.value}`
 
     const width = state.options.wrapWidth
     const value = width && canWrapHere(state.depthMap)
-      ? wrapText(node.value, currentColumn(state.buffer), width)
+      ? wrapText(node.value, currentColumn(state.buffer, bufferColumn), width)
       : node.value
     state.buffer.push(value)
     state.lastContentCache = value
@@ -406,6 +445,7 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
 
     const element = event.node as ElementNode
     let output: string | undefined
+    quoteOpenerPending = false
     // An empty quotation emits nothing, but keeps the space its opener added.
     if (element.tagId === TAG_Q && event.type === NodeEventExit && lastNode === element && !element.pluginOutput?.length) {
       const tail = state.buffer.at(-1)
@@ -463,15 +503,53 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     }
 
     appendOutput(state, element, event.type, output)
+    if (element.tagId === TAG_Q && event.type === NodeEventEnter && (output === '"' || output === ' "'))
+      quoteOpenerPending = state.buffer.at(-1) === output
 
     if (ownsCaptionSpace && event.type === NodeEventExit) {
       captionOpen--
       if (captionContent)
         captionClosedSpacing = captionExitSpacing
+      else if (captionBreakRun > 0)
+        captionBreakOwnsLine = true
       captionContent = false
       captionBreakRun = 0
     }
     state.lastNode = element
+  }
+
+  /**
+   * Drops yielded fragments, so a stream holds only its unstable tail. Later
+   * events trim or retract only the last fragment, so every fragment from the
+   * one that holds `stableEnd` stays intact. Backward scans read at most
+   * `YIELDED_CONTEXT` characters before it, and `bufferColumn` stands in for
+   * the dropped part of the line.
+   */
+  function dropYielded(content: string, stableEnd: number): void {
+    const buffer = state.buffer
+    // Walk back over the unstable tail, which is only a few fragments. The
+    // walk stops at the fragment that holds `stableEnd` and keeps it whole.
+    let keepFrom = buffer.length
+    let keptStart = content.length
+    while (keepFrom > 0 && keptStart > stableEnd) {
+      keepFrom--
+      keptStart -= buffer[keepFrom]!.length
+    }
+    let contextStart = keptStart > YIELDED_CONTEXT ? keptStart - YIELDED_CONTEXT : 0
+    // Never split a surrogate pair, so the column count stays the same.
+    const first = content.charCodeAt(contextStart)
+    if (contextStart > 0 && first >= 0xDC00 && first <= 0xDFFF)
+      contextStart--
+    if (contextStart === 0)
+      return
+    if (state.options.wrapWidth)
+      bufferColumn = columnAt(content, contextStart, bufferColumn)
+    const kept = buffer.slice(keepFrom)
+    buffer.length = 0
+    buffer.push(content.slice(contextStart, keptStart))
+    for (let index = 0; index < kept.length; index++)
+      buffer.push(kept[index]!)
+    yieldedLength = stableEnd - contextStart
   }
 
   return {
@@ -479,16 +557,25 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     processEvent,
     takeOutput() {
       const content = state.buffer.join('')
-      const normalized = preserveLeadingWhitespace ? content : content.trimStart()
-      // Hold back the tail a later boundary may still trim: all trailing
-      // whitespace, or the space and tab run that closing a pre drops.
-      let stableLength = state.depthMap[TAG_PRE]
-        ? trimSpacesEnd(normalized).length
-        : trimAsciiWhitespaceEnd(normalized).length
-      if (stableLength < yieldedLength)
-        stableLength = yieldedLength
-      const output = normalized.slice(yieldedLength, stableLength)
-      yieldedLength = stableLength
+      const leading = started || preserveLeadingWhitespace ? 0 : content.length - content.trimStart().length
+      // Hold back the tail a later event may still trim: trailing whitespace,
+      // and a quotation opener that an empty quotation retracts.
+      let stableEnd = quoteOpenerPending ? content.length - 1 : content.length
+      while (stableEnd > leading) {
+        const code = content.charCodeAt(stableEnd - 1)
+        if (code !== 32 && (code < 9 || code > 13))
+          break
+        stableEnd--
+      }
+      const yieldedEnd = started ? yieldedLength : leading
+      if (stableEnd < yieldedEnd)
+        stableEnd = yieldedEnd
+      const output = content.slice(yieldedEnd, stableEnd)
+      if (output) {
+        started = true
+        yieldedLength = stableEnd
+        dropYielded(content, stableEnd)
+      }
       return output
     },
   }

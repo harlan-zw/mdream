@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { clean } from '../../src/clean'
 import { htmlToMarkdown } from '../../src/index'
 
 describe('gfm autolink shorthand', () => {
@@ -43,7 +44,7 @@ describe('gfm autolink shorthand', () => {
   })
 
   it('clean mode strips the autolink to bare text via redundantLinks', () => {
-    expect(htmlToMarkdown('<a href="https://example.com">https://example.com</a>', { clean: true }))
+    expect(htmlToMarkdown('<a href="https://example.com">https://example.com</a>', { clean: clean() }))
       .toBe('https://example.com')
   })
 })

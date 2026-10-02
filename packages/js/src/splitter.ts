@@ -16,7 +16,7 @@ import {
 import { createMarkdownProcessor } from './markdown-processor'
 import { parseHtmlStream } from './parse'
 import { resolvePlugins } from './pluggable/plugin'
-import { processPluginsForEvent } from './plugin-processor'
+import { endPlugins, processPluginsForEvent } from './plugin-processor'
 import { buildTagOverrideHandlers } from './tag-overrides'
 import { tagHandlers } from './tags'
 
@@ -276,6 +276,7 @@ export function* htmlToMarkdownSplitChunksStream(
     }
   }
 
+  endPlugins(opts.resolvedPlugins, processor.state)
   yield* flushChunk()
 }
 

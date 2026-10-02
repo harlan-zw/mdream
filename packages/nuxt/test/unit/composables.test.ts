@@ -106,6 +106,20 @@ describe('useHtmlToMarkdown', () => {
     expect(markdown.value).toBe('')
   })
 
+  it('should resolve the browser Promise<string> contract', async () => {
+    const mdream = await import('mdream')
+    const browserEntry = mdream.htmlToMarkdown as unknown as (html: string) => Promise<string>
+    vi.mocked(browserEntry).mockImplementationOnce(
+      async (html: string) => `# browser ${html}`,
+    )
+
+    const { markdown, convert } = useHtmlToMarkdown()
+    const result = await convert('<p>Browser</p>')
+
+    expect(result).toBe('# browser <p>Browser</p>')
+    expect(markdown.value).toBe('# browser <p>Browser</p>')
+  })
+
   it('should set error on failure', async () => {
     const mdream = await import('mdream')
     vi.mocked(mdream.htmlToMarkdown).mockImplementationOnce(() => {

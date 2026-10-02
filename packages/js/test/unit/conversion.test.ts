@@ -29,6 +29,10 @@ describe('root conversion', () => {
     })).toBe('[Guide](https://example.com/guide)')
   })
 
+  it('rejects clean rules that did not come from clean()', () => {
+    expect(() => htmlToMarkdown('<p>x</p>', { clean: true as any })).toThrow('@mdream/js/clean')
+  })
+
   it('streams without optional plugins', async () => {
     const html = '<h1>Hello</h1>'
     const stream = new ReadableStream<string>({
@@ -50,6 +54,7 @@ describe('text conversion', () => {
     ['adds no space before an underscore after a block element', '<p>snake<x-v>_case</x-v></p>', 'snake_case'],
     ['drops an empty quotation', '<p>a<q></q>b</p>', 'a b'],
     ['drops the space after an empty caption break', 'a<figcaption><br></figcaption> b', 'a\nb'],
+    ['keeps the space after a break', '<p>a<br> b</p>', 'a\n b'],
   ])('%s', (_name, html, expected) => {
     expect(htmlToText(html)).toBe(expected)
   })

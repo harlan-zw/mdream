@@ -45,6 +45,14 @@ export default defineBuildConfig({
     },
     {
       type: 'bundle',
+      input: './fixtures/clean.ts',
+      outDir: './dist/clean',
+      minify: true,
+      dts: false,
+      license: false,
+    },
+    {
+      type: 'bundle',
       input: './fixtures/stream.ts',
       outDir: './dist/stream',
       minify: true,
