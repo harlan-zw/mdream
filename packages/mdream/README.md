@@ -27,7 +27,7 @@ yarn add mdream
 > [!TIP]
 > Using an AI agent? Get the mdream Skill on [skilld.dev/gh/harlan-zw/mdream](https://skilld.dev/gh/harlan-zw/mdream).
 
-For the JavaScript-only engine (hook-based plugins, splitter, pure HTML parser):
+For the JavaScript-only engine with explicit plugins, formats, splitter, and parser:
 
 ```bash
 pnpm add @mdream/js
@@ -77,7 +77,7 @@ externals: ['mdream']
   - [Tailwind](#tailwind-plugin)
   - [Filter](#filter-plugin)
   - [Extraction](#extraction-plugin)
-- [Hook-Based Plugins (JS Engine)](#hook-based-plugins-js-engine)
+- [Plugins (JS Engine)](#plugins-js-engine)
   - [Plugin Hooks](#plugin-hooks)
   - [createPlugin()](#createplugin)
 - [Markdown Splitting (JS Engine)](#markdown-splitting-js-engine)
@@ -112,12 +112,16 @@ function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): string
 function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): Promise<string>
 ```
 
-**JS engine** (`@mdream/js`):
+**JS engine** (`@mdream/js`) uses a separate entry point for each format:
 
 ```ts
 import { htmlToMarkdown } from '@mdream/js'
+import { htmlToSafeHtml } from '@mdream/js/html'
+import { htmlToText } from '@mdream/js/text'
 
 function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): string
+function htmlToText(html: string, options?: Partial<MdreamOptions>): string
+function htmlToSafeHtml(html: string, options?: Partial<MdreamOptions>): string
 ```
 
 **Example:**
@@ -181,17 +185,17 @@ Mdream includes two rendering engines, automatically selecting the best one for 
 |--------|---------|---------|----------|
 | **Rust** (NAPI) | `mdream` | Declarative config only | Node.js (default) |
 | **Rust** (WASM) | `mdream` | Declarative config only | Edge, browser |
-| **JavaScript** | `@mdream/js` | Hook-based + declarative | Custom plugins, splitter |
+| **JavaScript** | `@mdream/js` | Explicit plugin arrays | Small bundles, custom plugins, splitter |
 
 ```ts
-// JavaScript engine (required for hook-based plugins)
+// JavaScript engine for explicit plugins and smaller bundles
 import { htmlToMarkdown } from '@mdream/js'
 
 // Rust NAPI engine (auto-selected in Node.js)
 import { htmlToMarkdown } from 'mdream'
 ```
 
-Both engines support the same declarative plugins, but the option shape differs. The Rust engine takes `minimal`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, `extraction`, and `tagOverrides` at the top level. The JS engine reads the plugins from `options.plugins` and has no `minimal` option: use `withMinimalPreset()` from `@mdream/js/preset/minimal`. If the JS engine gets one of these options at the top level, it throws a `TypeError` that names the fix. The JS engine also supports `hooks` for imperative plugin transforms.
+The Rust engine accepts declarative plugin options. The JS engine composes explicit plugin factories, so the option shape differs. The Rust engine takes `minimal`, `format`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, and `extraction` at the top level. The JS engine takes an array of plugins in `options.plugins`, has no `minimal` option, and has one entry point for each format. Use `withMinimalPreset()` from `@mdream/js/preset/minimal`. If the JS engine gets one of these options at the top level, it throws a `TypeError` that names the fix.
 
 ## Options
 
@@ -253,18 +257,19 @@ interface MdreamOptions {
 
 ### MdreamOptions (JS engine)
 
-The JS engine extends the shared `EngineOptions` with hook-based plugin support:
+The JS engine uses explicit plugins. Each output format has its own entry point.
 
 ```ts
 interface MdreamOptions extends EngineOptions {
-  /** Imperative hook-based transform plugins. JS engine only. */
-  hooks?: TransformPlugin[]
+  /** Explicit plugins, applied in array order. */
+  plugins?: Plugin[]
 }
 
 interface EngineOptions {
   origin?: string
-  clean?: boolean | CleanOptions
-  plugins?: BuiltinPlugins
+  /** Cleanup rules from clean() in @mdream/js/clean */
+  clean?: Cleaner
+  tagOverrides?: Record<string, TagOverride | string>
 
   /**
    * Hard-wrap prose at this many characters, breaking on word boundaries.
@@ -273,25 +278,16 @@ interface EngineOptions {
    */
   wrapWidth?: number
 
-  /** Output Markdown, plain text, or HTML. Default: 'markdown' */
-  format?: 'markdown' | 'text' | 'html'
-}
-
-interface BuiltinPlugins {
-  filter?: false | { include?: (string | number)[], exclude?: (string | number)[], processChildren?: boolean }
-  frontmatter?: boolean | ((fm: Record<string, string>) => void) | FrontmatterConfig
-  isolateMain?: boolean
-  tailwind?: boolean
-  extraction?: Record<string, (element: ExtractedElement) => void>
-  tagOverrides?: Record<string, TagOverride | string>
 }
 ```
 
-Note: The JS engine uses `options.plugins.filter` while the Rust engine uses `options.filter` directly.
+Use `@mdream/js/text` for plain text. Use `@mdream/js/html` for safe HTML.
 
 ### CleanOptions
 
 Post-processing cleanup applied to the final Markdown output. All options default to `false` unless `clean: true` is set.
+
+With `@mdream/js`, pass these rules to `clean()` from `@mdream/js/clean`, for example `clean: clean({ urls: true })`.
 
 ```ts
 interface CleanOptions {
@@ -429,7 +425,7 @@ The `minimal` preset enables the following plugins together:
 - **filter**: Excludes `form`, `fieldset`, `object`, `embed`, `footer`, `aside`, `iframe`, `input`, `textarea`, `select`, `button`, `nav`
 - **clean**: All post-processing cleanup enabled
 
-A `filter` passed with `minimal` adds to the preset's excludes. It does not replace them. To turn the preset's filter off, pass `filter: false`. `withMinimalPreset()` in the JS engine works the same way.
+A `filter` passed with `minimal` adds to the preset's excludes. It does not replace them. To turn the preset's filter off, pass `filter: false`. In the JS engine, a `filterPlugin()` appended to `withMinimalPreset()` also adds to the excludes.
 
 ```ts
 // Excludes h1 as well as form, nav, footer, and the rest
@@ -461,20 +457,19 @@ const markdown = htmlToMarkdown(html, withMinimalPreset({
 }))
 ```
 
-`withMinimalPreset()` returns an `EngineOptions` object with all plugin defaults applied. You can override individual plugins. A `filter` adds to the preset's excludes:
+`withMinimalPreset()` returns explicit plugin defaults. You can append custom plugins. An appended `filterPlugin()` adds to the preset's excludes:
 
 ```ts
+import { filterPlugin } from '@mdream/js/plugins'
+
 const markdown = htmlToMarkdown(html, withMinimalPreset({
-  plugins: {
-    frontmatter: false,
-    filter: { exclude: ['.cookie-banner'] },
-  },
+  plugins: [filterPlugin({ exclude: ['.cookie-banner'] }), myPlugin],
 }))
 ```
 
 ## Built-in Plugins
 
-All built-in plugins work with both the Rust and JS engines through declarative configuration.
+The Rust engine uses declarative options. The JS engine exports matching plugin factories.
 
 ### Frontmatter Plugin
 
@@ -570,11 +565,10 @@ The JS engine also supports `TAG_*` integer constants for filtering:
 
 ```ts
 import { TAG_FOOTER, TAG_NAV } from '@mdream/js'
+import { filterPlugin } from '@mdream/js/plugins'
 
 htmlToMarkdown(html, {
-  plugins: {
-    filter: { exclude: [TAG_NAV, TAG_FOOTER] },
-  },
+  plugins: [filterPlugin({ exclude: [TAG_NAV, TAG_FOOTER] })],
 })
 ```
 
@@ -611,9 +605,9 @@ interface ExtractedElement {
 }
 ```
 
-## Hook-Based Plugins (JS Engine)
+## Plugins (JS Engine)
 
-The JS engine (`@mdream/js`) supports imperative hook-based plugins for custom transform logic. These allow you to intercept and modify the conversion pipeline at multiple stages.
+The JS engine composes plugins in an explicit array.
 
 ```ts
 import { htmlToMarkdown } from '@mdream/js'
@@ -631,7 +625,7 @@ const myPlugin = createPlugin({
   },
 })
 
-const markdown = htmlToMarkdown(html, { hooks: [myPlugin] })
+const markdown = htmlToMarkdown(html, { plugins: [myPlugin] })
 ```
 
 ### Plugin Hooks
@@ -680,6 +674,11 @@ interface TransformPlugin {
     node: TextNode,
     state: MdreamRuntimeState,
   ) => { content: string, skip: boolean } | undefined
+
+  /**
+   * Called once after the whole document is converted, including for streams.
+   */
+  onDocumentEnd?: (state: MdreamRuntimeState) => void
 }
 ```
 
@@ -707,7 +706,6 @@ The following plugin factory functions are available from `@mdream/js/plugins`:
 ```ts
 import {
   createPlugin,
-  extractionCollectorPlugin,
   extractionPlugin,
   filterPlugin,
   frontmatterPlugin,
@@ -809,14 +807,14 @@ interface SplitterOptions {
   /** Base URL for resolving relative links/images */
   origin?: string
 
-  /** Declarative built-in plugin config */
-  plugins?: BuiltinPlugins
+  /** Explicit plugins, applied in array order */
+  plugins?: Plugin[]
 
-  /** Hook-based plugins (JS engine only) */
-  hooks?: TransformPlugin[]
+  /** Custom tag output or aliases */
+  tagOverrides?: Record<string, TagOverride | string>
 
-  /** Post-processing cleanup */
-  clean?: boolean | CleanOptions
+  /** Cleanup rules from clean() in @mdream/js/clean */
+  clean?: Cleaner
 }
 ```
 
@@ -1080,7 +1078,7 @@ console.log(result.llmsFullTxt) // llms-full.txt content
 | Package | Description |
 |---------|-------------|
 | [`mdream`](https://npmjs.com/package/mdream) | Core HTML to Markdown converter (Rust + WASM engine) |
-| [`@mdream/js`](https://npmjs.com/package/@mdream/js) | JavaScript engine with hook-based plugins, splitter, and llms.txt generation (`@mdream/js/llms-txt`) |
+| [`@mdream/js`](https://npmjs.com/package/@mdream/js) | JavaScript engine with tree-shakable formats, plugins, splitter, and llms.txt generation (`@mdream/js/llms-txt`) |
 | [`@mdream/crawl`](https://github.com/harlan-zw/mdream/tree/main/packages/crawl) | Site-wide crawler for llms.txt generation |
 | [`@mdream/vite`](https://github.com/harlan-zw/mdream/tree/main/packages/vite) | Vite plugin integration |
 | [`@mdream/nuxt`](https://github.com/harlan-zw/mdream/tree/main/packages/nuxt) | Nuxt module integration |

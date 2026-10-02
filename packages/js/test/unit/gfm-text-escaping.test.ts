@@ -61,11 +61,11 @@ describe('gfm text escaping', () => {
       },
     })
 
-    expect(htmlToMarkdown('<p>safe</p>', { hooks: [replaceText] }))
+    expect(htmlToMarkdown('<p>safe</p>', { plugins: [replaceText] }))
       .toBe('\\# plugin \\*text\\*')
-    expect(htmlToMarkdown('<p>safe</p>', { hooks: [mutateText] }))
+    expect(htmlToMarkdown('<p>safe</p>', { plugins: [mutateText] }))
       .toBe('1\\. plugin item')
-    expect(await streamConvert('<p>safe</p>', 1, { hooks: [replaceText] }))
+    expect(await streamConvert('<p>safe</p>', 1, { plugins: [replaceText] }))
       .toBe('\\# plugin \\*text\\*')
   })
 

@@ -1,4 +1,4 @@
-import type { ElementNode, TransformPlugin } from '../types'
+import type { ElementNode, PluginSetup, TransformPlugin } from '../types'
 import { ELEMENT_NODE, TAG_FOOTER, TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6, TAG_HEAD, TAG_HEADER, TAG_MAIN, TEXT_NODE } from '../const'
 import { createPlugin } from '../pluggable/plugin'
 
@@ -31,7 +31,12 @@ import { createPlugin } from '../pluggable/plugin'
  * </body>
  * ```
  */
-export function isolateMainPlugin(): TransformPlugin {
+export function isolateMainPlugin(): PluginSetup {
+  return createPlugin(createIsolateMainHooks)
+}
+
+/** Fresh hooks for one conversion: the main boundary is per document. */
+function createIsolateMainHooks(): TransformPlugin {
   let mainElement: ElementNode | null = null
   let firstHeaderElement: ElementNode | null = null
   let afterFooter = false

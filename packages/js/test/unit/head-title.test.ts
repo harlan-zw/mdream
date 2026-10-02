@@ -1,18 +1,24 @@
 import { describe, expect, it } from 'vitest'
+import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { frontmatterPlugin } from '../../src/plugins/frontmatter'
+import { htmlToText, streamHtmlToText } from '../../src/text'
 
-async function streamConvert(chunks: string[]): Promise<string> {
-  const stream = new ReadableStream<string>({
+async function drain(output: AsyncIterable<string>): Promise<string> {
+  let result = ''
+  for await (const chunk of output)
+    result += chunk
+  return result
+}
+
+function chunked(chunks: string[]): ReadableStream<string> {
+  return new ReadableStream<string>({
     start(controller) {
       for (const chunk of chunks)
         controller.enqueue(chunk)
       controller.close()
     },
   })
-  let output = ''
-  for await (const chunk of streamHtmlToMarkdown(stream))
-    output += chunk
-  return output
 }
 
 // `<title>` is document metadata that browsers never render. The frontmatter
@@ -22,14 +28,18 @@ describe('<title>', () => {
 
   it('is dropped without frontmatter', async () => {
     expect(htmlToMarkdown(page)).toBe('Body')
-    expect(htmlToMarkdown(page, { format: 'text' })).toBe('Body')
-    expect(htmlToMarkdown(page, { format: 'html' })).toBe('<p>Body</p>')
+    expect(htmlToText(page)).toBe('Body')
+    expect(htmlToSafeHtml(page)).toBe('<p>Body</p>')
     expect(htmlToMarkdown('<p>a</p><title>T</title><p>b</p>')).toBe('a\n\nb')
-    for (const split of [1, 5, 20])
-      expect(await streamConvert([page.slice(0, split), page.slice(split)])).toBe('Body')
+    for (const split of [1, 5, 20]) {
+      const chunks = [page.slice(0, split), page.slice(split)]
+      expect(await drain(streamHtmlToMarkdown(chunked(chunks)))).toBe('Body')
+      expect(await drain(streamHtmlToText(chunked(chunks)))).toBe('Body')
+      expect(await drain(streamHtmlToSafeHtml(chunked(chunks)))).toBe('<p>Body</p>')
+    }
   })
 
   it('still feeds the frontmatter title', () => {
-    expect(htmlToMarkdown(page, { plugins: { frontmatter: true } })).toBe('---\ntitle: Page\n---\n\nBody')
+    expect(htmlToMarkdown(page, { plugins: [frontmatterPlugin()] })).toBe('---\ntitle: Page\n---\n\nBody')
   })
 })

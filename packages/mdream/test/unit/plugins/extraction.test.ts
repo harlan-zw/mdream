@@ -14,7 +14,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown('<h1>Title</h1>', {
-      hooks: [plugin],
+      plugins: [plugin],
     })
 
     expect(calls).toEqual([
@@ -35,7 +35,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown('<h1 class="featured">Title</h1>', {
-      hooks: [plugin],
+      plugins: [plugin],
     })
 
     expect(observedAttributes).toEqual([{ class: 'featured' }])
@@ -61,7 +61,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      hooks: [plugin],
+      plugins: [plugin],
     })
 
     expect(extractedH2s).toHaveLength(2)
@@ -89,7 +89,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      hooks: [plugin],
+      plugins: [plugin],
     })
 
     expect(extractedContent).toHaveLength(2)
@@ -118,7 +118,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      hooks: [plugin],
+      plugins: [plugin],
     })
 
     expect(extractedHeader).toHaveLength(1)
@@ -151,7 +151,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      hooks: [plugin],
+      plugins: [plugin],
     })
 
     expect(extractedImages).toHaveLength(2)
@@ -196,7 +196,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      hooks: [plugin],
+      plugins: [plugin],
     })
 
     expect(extractedArticles).toHaveLength(1)
@@ -251,7 +251,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      hooks: [plugin],
+      plugins: [plugin],
     })
 
     expect(results.titles).toHaveLength(1)
@@ -300,7 +300,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      hooks: [plugin],
+      plugins: [plugin],
     })
 
     expect(extractedFeaturedCards).toHaveLength(1)
@@ -335,7 +335,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      hooks: [plugin],
+      plugins: [plugin],
     })
 
     expect(extractedDivs).toHaveLength(4)
@@ -394,7 +394,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      hooks: [plugin],
+      plugins: [plugin],
     })
 
     // Verify title
@@ -487,7 +487,7 @@ describe('extraction plugin', () => {
     })
 
     htmlToMarkdown(html, {
-      hooks: [plugin],
+      plugins: [plugin],
     })
 
     expect(extractedElements).toHaveLength(4) // 1 h1, 1 p, 2 a tags
@@ -518,7 +518,7 @@ describe('extraction plugin', () => {
   it ('link stylesheet crossorigin', async () => {
     let link
     htmlToMarkdown('<head><link rel="stylesheet" href="/_nuxt/entry.BqmaZWpx.css" crossorigin></head>', {
-      hooks: [
+      plugins: [
         extractionPlugin({
           link: (_link) => {
             link = _link
@@ -541,7 +541,7 @@ describe('extraction plugin', () => {
     let title: string | undefined
     let description: string | undefined
     htmlToMarkdown(fixtureHtml, {
-      hooks: [
+      plugins: [
         extractionPlugin({
           title(el) {
             title = el.textContent

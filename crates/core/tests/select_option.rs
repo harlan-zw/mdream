@@ -62,9 +62,7 @@ fn nested_select_start_closes_the_open_select() {
 #[test]
 fn select_recovery_does_not_cross_a_template_boundary() {
   assert_eq!(
-    convert(
-      "<select><option>outer<template><option>hidden</template><option>after</select>",
-    ),
+    convert("<select><option>outer<template><option>hidden</template><option>after</select>",),
     "outer after",
   );
   assert_eq!(

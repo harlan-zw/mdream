@@ -1,6 +1,8 @@
 import type { ElementNode } from '../../src/types'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '@mdream/js'
-import { htmlToMarkdown as htmlToMarkdownCore, streamHtmlToMarkdown as streamHtmlToMarkdownCore } from '@mdream/js/core'
+import { htmlToSafeHtml, streamHtmlToSafeHtml } from '@mdream/js/html'
+import { filterPlugin, frontmatterPlugin } from '@mdream/js/plugins'
+import { htmlToText, streamHtmlToText } from '@mdream/js/text'
 import { describe, expect, it } from 'vitest'
 import { ELEMENT_NODE, NodeEventEnter } from '../../src/const'
 import { parseHtml } from '../../src/parse'
@@ -11,14 +13,22 @@ describe('package entry points', () => {
     expect(streamHtmlToMarkdown).toBeTypeOf('function')
   })
 
-  it('exposes the tree-shakable conversion names from the core subpath', () => {
-    expect(htmlToMarkdownCore).toBeTypeOf('function')
-    expect(streamHtmlToMarkdownCore).toBeTypeOf('function')
+  it('exposes each output format from its own entry point', () => {
+    expect(htmlToText('<strong>plain</strong>')).toBe('plain')
+    expect(htmlToSafeHtml('<strong>safe</strong>')).toBe('<strong>safe</strong>')
+    expect(streamHtmlToText).toBeTypeOf('function')
+    expect(streamHtmlToSafeHtml).toBeTypeOf('function')
   })
 
-  it('retains declarative plugin behavior at the package root', () => {
+  it('keeps Markdown-producing plugins out of safe HTML', () => {
+    expect(htmlToSafeHtml('<head><title>Title</title></head><p>Body</p>', {
+      plugins: [frontmatterPlugin()],
+    })).toBe('<p>Body</p>')
+  })
+
+  it('composes explicitly imported plugins at the package root', () => {
     expect(htmlToMarkdown('<nav>hidden</nav><p>shown</p>', {
-      plugins: { filter: { exclude: ['nav'] } },
+      plugins: [filterPlugin({ exclude: ['nav'] })],
     })).toBe('shown')
   })
 

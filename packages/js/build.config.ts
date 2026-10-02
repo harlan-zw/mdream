@@ -4,7 +4,19 @@ export default defineBuildConfig({
   entries: [
     {
       type: 'bundle',
-      input: ['./src/index.ts', './src/core.ts', './src/negotiate.ts', './src/plugins.ts', './src/preset/minimal.ts', './src/splitter.ts', './src/parse.ts', './src/cli.ts', './src/llms-txt.ts'],
+      input: [
+        './src/index.ts',
+        './src/text.ts',
+        './src/html.ts',
+        './src/clean.ts',
+        './src/negotiate.ts',
+        './src/plugins.ts',
+        './src/preset/minimal.ts',
+        './src/splitter.ts',
+        './src/parse.ts',
+        './src/cli.ts',
+        './src/llms-txt.ts',
+      ],
     },
   ],
 })

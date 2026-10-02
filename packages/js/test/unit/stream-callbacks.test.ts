@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { extractionPlugin } from '../../src/plugins/extraction'
+import { frontmatterPlugin } from '../../src/plugins/frontmatter'
 
 describe('stream callbacks', () => {
   it('calls the frontmatter callback and extraction handlers like one-shot', async () => {
@@ -14,9 +16,10 @@ describe('stream callbacks', () => {
       },
     })
     let output = ''
-    for await (const chunk of streamHtmlToMarkdown(stream, { plugins: { frontmatter, extraction: { 'a[href]': link } } }))
+    const plugins = [frontmatterPlugin({ onExtract: frontmatter }), extractionPlugin({ 'a[href]': link })]
+    for await (const chunk of streamHtmlToMarkdown(stream, { plugins }))
       output += chunk
-    expect(output).toBe(htmlToMarkdown(html, { plugins: { frontmatter: true } }))
+    expect(output).toBe(htmlToMarkdown(html, { plugins: [frontmatterPlugin()] }))
     expect(frontmatter).toHaveBeenCalledWith({ title: 'Page' })
     expect(link).toHaveBeenCalledOnce()
   })

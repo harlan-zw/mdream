@@ -1,6 +1,25 @@
-import { htmlToMarkdown as jsHtmlToMarkdown, withMinimalPreset } from '@mdream/js'
+import { htmlToMarkdown as jsHtmlToMarkdown } from '@mdream/js'
+import { clean } from '@mdream/js/clean'
+import { filterPlugin, frontmatterPlugin, isolateMainPlugin, tailwindPlugin } from '@mdream/js/plugins'
+import { withMinimalPreset } from '@mdream/js/preset/minimal'
 import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
+
+const rustMinimalOptions = {
+  clean: true,
+  plugins: {
+    frontmatter: true,
+    isolateMain: true,
+    tailwind: true,
+    filter: {
+      exclude: ['form', 'fieldset', 'object', 'embed', 'footer', 'aside', 'iframe', 'input', 'textarea', 'select', 'button', 'nav'],
+    },
+  },
+}
+
+function minimalOptions(engineName: string) {
+  return engineName === 'Rust Engine' ? rustMinimalOptions : withMinimalPreset()
+}
 
 describe('withMinimalPreset cross-engine parity', () => {
   async function bothEngines() {
@@ -18,9 +37,8 @@ describe('withMinimalPreset cross-engine parity', () => {
       '<h1>Title</h1><ul><li>one</li><li>two</li></ul><p>After list.</p>',
     ]
     for (const html of cases) {
-      const opts = withMinimalPreset()
-      const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
-      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
+      const jsResult = htmlToMarkdown(html, { ...withMinimalPreset(), engine: js })
+      const rustResult = htmlToMarkdown(html, { ...rustMinimalOptions, engine: rust })
       expect(rustResult, `Parity mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -37,9 +55,8 @@ describe('withMinimalPreset cross-engine parity', () => {
       '<h1>Title</h1><embed src="/e" /><object data="/o">obj</object><p>Content</p>',
     ]
     for (const html of cases) {
-      const opts = withMinimalPreset()
-      const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
-      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
+      const jsResult = htmlToMarkdown(html, { ...withMinimalPreset(), engine: js })
+      const rustResult = htmlToMarkdown(html, { ...rustMinimalOptions, engine: rust })
       expect(rustResult, `Filter parity mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -57,9 +74,8 @@ describe('withMinimalPreset cross-engine parity', () => {
       '<main><p>a</p><div style="position:absolute"><p>H</p></div><p>b</p></main>',
     ]
     for (const html of hidden) {
-      const opts = withMinimalPreset()
-      const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
-      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
+      const jsResult = htmlToMarkdown(html, { ...withMinimalPreset(), engine: js })
+      const rustResult = htmlToMarkdown(html, { ...rustMinimalOptions, engine: rust })
       expect(rustResult, `Hidden parity mismatch for: ${html}`).toBe(jsResult)
       expect(jsResult, `Hidden content leaked for: ${html}`).toBe('a\n\nb')
     }
@@ -75,9 +91,8 @@ describe('withMinimalPreset cross-engine parity', () => {
       ['<main><p>a</p><div style="display:flex;gap:4px">KEEP</div><p>b</p></main>', 'a\n\nKEEP\n\nb'],
     ]
     for (const [html, expected] of cases) {
-      const opts = withMinimalPreset()
-      const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
-      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
+      const jsResult = htmlToMarkdown(html, { ...withMinimalPreset(), engine: js })
+      const rustResult = htmlToMarkdown(html, { ...rustMinimalOptions, engine: rust })
       expect(rustResult).toBe(jsResult)
       expect(jsResult).toBe(expected)
     }
@@ -86,9 +101,8 @@ describe('withMinimalPreset cross-engine parity', () => {
   it('frontmatter produces identical output', async () => {
     const [js, rust] = await bothEngines()
     const html = `<html><head><title>My Page</title><meta name="description" content="A page about things" /><meta name="author" content="Alice" /></head><body><h1>Content</h1><p>Text</p></body></html>`
-    const opts = withMinimalPreset()
-    const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
-    const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
+    const jsResult = htmlToMarkdown(html, { ...withMinimalPreset(), engine: js })
+    const rustResult = htmlToMarkdown(html, { ...rustMinimalOptions, engine: rust })
     expect(rustResult).toBe(jsResult)
   })
 
@@ -100,9 +114,8 @@ describe('withMinimalPreset cross-engine parity', () => {
       '<main><h1>In Main</h1><p>Paragraph</p></main><div>Outside</div>',
     ]
     for (const html of cases) {
-      const opts = withMinimalPreset()
-      const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
-      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
+      const jsResult = htmlToMarkdown(html, { ...withMinimalPreset(), engine: js })
+      const rustResult = htmlToMarkdown(html, { ...rustMinimalOptions, engine: rust })
       expect(rustResult, `IsolateMain parity mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -116,9 +129,8 @@ describe('withMinimalPreset cross-engine parity', () => {
       '<h1>Title</h1><div class="hidden">hidden content</div><p>visible</p>',
     ]
     for (const html of cases) {
-      const opts = withMinimalPreset()
-      const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
-      const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
+      const jsResult = htmlToMarkdown(html, { ...withMinimalPreset(), engine: js })
+      const rustResult = htmlToMarkdown(html, { ...rustMinimalOptions, engine: rust })
       expect(rustResult, `Tailwind parity mismatch for: ${html}`).toBe(jsResult)
     }
   })
@@ -142,9 +154,8 @@ describe('withMinimalPreset cross-engine parity', () => {
         <footer><p>Copyright 2024</p></footer>
       </body>
     </html>`
-    const opts = withMinimalPreset()
-    const jsResult = htmlToMarkdown(html, { ...opts, engine: js })
-    const rustResult = htmlToMarkdown(html, { ...opts, engine: rust })
+    const jsResult = htmlToMarkdown(html, { ...withMinimalPreset(), engine: js })
+    const rustResult = htmlToMarkdown(html, { ...rustMinimalOptions, engine: rust })
     expect(rustResult).toBe(jsResult)
   })
 })
@@ -153,7 +164,7 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
   it('should convert basic HTML to markdown', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<h1>Hello World</h1><p>This is a paragraph.</p>'
-    const options = withMinimalPreset()
+    const options = minimalOptions(engineConfig.name)
     const markdown = htmlToMarkdown(html, { ...options, engine })
     expect(markdown).toBe('# Hello World\n\nThis is a paragraph.')
   })
@@ -170,7 +181,7 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
       <nav>Navigation</nav>
       <footer>Footer</footer>
     `
-    const options = withMinimalPreset()
+    const options = minimalOptions(engineConfig.name)
     const markdown = htmlToMarkdown(html, { ...options, engine })
     expect(markdown).not.toContain('Submit')
     expect(markdown).not.toContain('Navigation')
@@ -183,7 +194,7 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     // Test filtering functionality
     const html = `<h1>Title</h1><form><button>Submit</button></form><p>Content</p>`
-    const options = withMinimalPreset()
+    const options = minimalOptions(engineConfig.name)
     const markdown = htmlToMarkdown(html, { ...options, engine })
 
     // Should filter out form elements
@@ -205,7 +216,7 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
         </body>
       </html>
     `
-    const options = withMinimalPreset()
+    const options = minimalOptions(engineConfig.name)
     const markdown = htmlToMarkdown(html, { ...options, engine })
 
     expect(markdown).toContain('---')
@@ -217,7 +228,7 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
   it('should isolate main content', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<header>Header</header><h1>Main Title</h1><p>Content</p><footer>Footer</footer>`
-    const options = withMinimalPreset()
+    const options = minimalOptions(engineConfig.name)
     const markdown = htmlToMarkdown(html, { ...options, engine })
 
     expect(markdown).toContain('Main Title')
@@ -237,7 +248,7 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
       },
     }
 
-    const options = withMinimalPreset({ hooks: [customPlugin] })
+    const options = withMinimalPreset({ plugins: [customPlugin] })
     const markdown = jsHtmlToMarkdown('<h1>Test</h1>', options)
     expect(customPluginCalled).toBe(true)
     expect(markdown).toContain('Test')
@@ -245,7 +256,9 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
 })
 
 // A filter passed with the minimal preset extends its exclude list; it does not
-// replace it. `filter: false` turns the preset's filter off.
+// replace it. `filter: false` turns the preset's filter off. In @mdream/js, an
+// appended filterPlugin() extends it, and leaving the filter out of an explicit
+// plugin list turns it off.
 describe('minimal preset with a custom filter', () => {
   const html = '<main><nav>Nav</nav><form>Form</form><h1>Title</h1><aside>Aside</aside><p>Body</p></main>'
 
@@ -255,8 +268,9 @@ describe('minimal preset with a custom filter', () => {
     expect(rustHtmlToMarkdown(html, { minimal: true, filter: false })).toBe('Nav\n\nForm\n\n# Title\n\nAside\n\nBody')
   })
 
-  it('@mdream/js: withMinimalPreset filter extends the minimal excludes', () => {
-    expect(jsHtmlToMarkdown(html, withMinimalPreset({ plugins: { filter: { exclude: ['h1'] } } }))).toBe('Body')
-    expect(jsHtmlToMarkdown(html, withMinimalPreset({ plugins: { filter: false } }))).toBe('Nav\n\nForm\n\n# Title\n\nAside\n\nBody')
+  it('@mdream/js: an appended filterPlugin extends the minimal excludes', () => {
+    expect(jsHtmlToMarkdown(html, withMinimalPreset({ plugins: [filterPlugin({ exclude: ['h1'] })] }))).toBe('Body')
+    const unfiltered = { clean: clean(), plugins: [frontmatterPlugin(), isolateMainPlugin(), tailwindPlugin()] }
+    expect(jsHtmlToMarkdown(html, unfiltered)).toBe('Nav\n\nForm\n\n# Title\n\nAside\n\nBody')
   })
 })
