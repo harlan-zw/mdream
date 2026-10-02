@@ -1543,6 +1543,25 @@ fn a_code_fence_holds_at_most_the_cap() {
   }
 }
 
+// Past an inline code span's cap a caption's `*` is dropped, which left a trim
+// free to take the caption's content start and panicked its close.
+#[test]
+fn a_caption_in_an_exhausted_code_span_closes() {
+  let tail = "<br>&#32;<br><figcaption></span>&nbsp;</figcaption><td><img src=/i alt=a>&#32;</td><figcaption><em><br></figcaption>";
+  for (cap, fill) in [(16, 0), (16, 7), (4096, 4078), (4096, 4087)] {
+    let html = format!("<code>{}{tail}", "a".repeat(fill));
+    for chunk in [1, 7, 4096, html.len()] {
+      let mut p = MarkdownStreamProcessor::new(options(cap));
+      for c in html.as_bytes().chunks(chunk) {
+        p.process_chunk(std::str::from_utf8(c).unwrap());
+      }
+      p.finish();
+      assert!(p.truncated(), "cap={cap} fill={fill} chunk={chunk}");
+    }
+    assert!(html_to_markdown_result(&html, options(cap)).truncated);
+  }
+}
+
 #[test]
 fn inline_code_from_many_small_nodes_stays_bounded() {
   let html = format!("<code>{}</code>", repeat_to("<span>abcdefgh</span>", HUGE));
@@ -1693,9 +1712,9 @@ fn a_dropped_header_does_not_align_a_retained_column() {
 
 // Short nodes can still pin the buffer when an open construct keeps its output
 // from being yielded: a quote releases completed lines only and none past an open
-// link or caption, a heading holds its trailing `#` run, and a self-link heading
-// holds its text. The cap charges that held output and cuts the document at the
-// token where it passes.
+// link or caption, a heading holds its trailing `#` run, a self-link heading
+// holds its text, and so does a link while that text is blank. The cap charges
+// that held output and cuts the document at the token where it passes.
 #[test]
 fn held_back_output_is_capped() {
   let self_links = || HTMLToMarkdownOptions {
@@ -1757,6 +1776,20 @@ fn held_back_output_is_capped() {
       format!(
         "<p>before</p><h1>{}</h1><p>after</p>",
         repeat_to("####<a href=\"/x\"> </a>", HUGE)
+      ),
+      HTMLToMarkdownOptions {
+        clean: Some(CleanConfig {
+          empty_link_text: true,
+          ..Default::default()
+        }),
+        ..options(CAP)
+      },
+    ),
+    (
+      "blank link text",
+      format!(
+        "<p>before</p><p><a href=\"/x\">{}</a></p><p>after</p>",
+        repeat_to("&#x3000;<!---->&nbsp;<span></span>", HUGE)
       ),
       HTMLToMarkdownOptions {
         clean: Some(CleanConfig {
@@ -1869,6 +1902,38 @@ fn an_item_opened_by_a_block_is_not_held_back() {
   }
 }
 
+// A link stops holding once its text is not blank, however long it gets.
+#[test]
+fn a_link_with_text_is_not_held_back() {
+  let opts = |cap| HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_link_text: true,
+      ..Default::default()
+    }),
+    ..options(cap)
+  };
+  let html = format!(
+    "<p><a href=\"/x\">&#x3000;<!---->{}</a></p><p>after</p>",
+    repeat_to("word&#x3000;<!---->", HUGE)
+  );
+  let uncapped = html_to_markdown_result(&html, opts(0)).markdown;
+  let batch = html_to_markdown_result(&html, opts(CAP));
+  assert_eq!((batch.markdown, batch.truncated), (uncapped.clone(), false));
+  for chunk in [37, 8 * 1024] {
+    let mut p = MarkdownStreamProcessor::new(opts(CAP));
+    let mut out = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(
+      (out, p.truncated()),
+      (uncapped.clone(), false),
+      "chunk={chunk}"
+    );
+  }
+}
+
 // Output that stays between two short `#` runs splits them, however much `#`
 // the heading holds in total.
 #[test]
@@ -1889,5 +1954,51 @@ fn heading_hashes_split_by_kept_output_are_not_held_back() {
         "{unit} chunk={chunk}"
       );
     }
+  }
+}
+
+// A `<br>` run held for content to follow it is kept as one copy and a count, and
+// expands to the count times the item's indent only when yielded: a few KB of
+// breaks in a deep list became megabytes in one chunk. The cap charges every
+// break written since the last text, so runs that each fit but are held together
+// are cut too.
+#[test]
+fn held_break_runs_are_capped() {
+  let nest = "<ol start=999999999><li>".repeat(64);
+  let breaks = "<br>".repeat(4000);
+  let falling = format!("{}</li></ol>", "<br>".repeat(80)).repeat(64);
+  let split = format!("{}<b><br></b><span> </span>", "<br>".repeat(80)).repeat(64);
+  for (name, html) in [
+    ("list item", format!("{nest}x{breaks}y<p>after</p>")),
+    (
+      "caption",
+      format!("{nest}<figure><figcaption>x{breaks}y</figcaption></figure><p>after</p>"),
+    ),
+    ("falling depth", format!("{nest}x{falling}y<p>after</p>")),
+    ("split by markup", format!("{nest}x{split}y<p>after</p>")),
+  ] {
+    let batch = html_to_markdown_result(&html, options(CAP));
+    assert!(batch.truncated, "{name}");
+    assert!(!batch.markdown.contains("after"), "{name}");
+    for chunk in [37, 4096, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, chunk, CAP),
+        (batch.markdown.clone(), true),
+        "{name} chunk={chunk}"
+      );
+    }
+    let capped = peak(&html, 4096, CAP);
+    assert!(capped < (8 * CAP) as u64, "{name}: capped peak {capped}");
+  }
+  // Text ends the runs before it, however many breaks the document holds.
+  let html = format!("{nest}{}z", format!("x{}", "<br>".repeat(80)).repeat(64));
+  let uncapped = html_to_markdown_result(&html, options(0)).markdown;
+  let batch = html_to_markdown_result(&html, options(CAP));
+  assert_eq!((batch.markdown, batch.truncated), (uncapped.clone(), false));
+  for chunk in [37, 4096] {
+    assert_eq!(
+      stream_reporting(&html, chunk, CAP),
+      (uncapped.clone(), false)
+    );
   }
 }
