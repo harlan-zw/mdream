@@ -1,0 +1,93 @@
+name: Package Preview
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-preview-${{ github.event.number }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Preview native (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64-gnu
+            runner: ubuntu-24.04
+          - platform: linux-arm64-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: crates -> target
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir crates/node build:platform
+      - run: node scripts/verify-npm-artifacts.mjs ${{ matrix.platform }}
+      - name: Verify native conversion
+        run: |
+          node --input-type=module <<'JS'
+          import { strict as assert } from 'node:assert'
+          import { htmlToMarkdown } from './packages/mdream/napi/index.mjs'
+          assert.equal(htmlToMarkdown('<h1>Preview</h1>', {}).markdown, '# Preview')
+          JS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: preview-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            crates/node/npm/${{ matrix.platform }}/*.node
+            packages/mdream/napi/index.*
+
+  publish:
+    name: Publish package previews
+    needs: native
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: crates -> target
+      - uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2.87.8
+        with:
+          tool: wasm-pack,wasm-opt
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: preview-*
+          merge-multiple: true
+      - run: node scripts/verify-npm-artifacts.mjs linux-x64-gnu linux-arm64-gnu
+      - run: pnpm --filter mdream build:edge
+      - run: pnpm --filter @mdream/js build && pnpm --filter mdream build
+      - run: node scripts/pack-previews.mjs "$RUNNER_TEMP/mdream-previews"
+      - run: node scripts/verify-previews.mjs "$RUNNER_TEMP/mdream-previews"
+      - name: Publish immutable previews
+        run: pnpm exec pkg-pr-new publish "$RUNNER_TEMP"/mdream-previews/*.tgz

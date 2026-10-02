@@ -97,12 +97,17 @@ export interface MarkdownState {
    * becomes a fenced code block, but the opening fence is deferred until the
    * first non-whitespace content so empty/whitespace-only blocks emit nothing.
    * `preFencePending`: inside a <pre> whose fence is not yet decided.
+   * `preFencePendingDepth`: <pre> depth of that <pre>; nested ones defer to it.
    * `preFenceLang`: language resolved from the <pre>'s own class.
    */
   preFencePending?: boolean
+  preFencePendingDepth?: number
   preFenceLang?: string
-  /** A fence is open for the current <pre>, whoever wrote its opener. */
-  preFenceOpen?: boolean
+  /**
+   * <pre> depth of the <pre> that owns the open fence, whoever wrote its
+   * opener; 0 when none. Only that <pre>'s exit closes the fence.
+   */
+  preFenceOwnerDepth?: number
   /** Open fenced block whose delimiter is finalized after its content is known. */
   codeFence?: CodeFence
   /** Internal observer used by the splitter to track the fence actually opened. */
@@ -1088,7 +1093,7 @@ function collapseNestedBlockquoteSeparator(buffer: string[]): void {
  */
 function flushPreFence(state: MarkdownState): void {
   state.preFencePending = false
-  state.preFenceOpen = true
+  state.preFenceOwnerDepth = state.preFencePendingDepth
   const lang = state.preFenceLang || ''
   const liDepth = state.depthMap[TAG_LI] || 0
   // A blank line between the marker and the fence ends the item, leaving the block
@@ -1101,12 +1106,19 @@ function flushPreFence(state: MarkdownState): void {
   state.lastContentCache = fence
 }
 
+/** A <code> that is the direct child of the <pre> whose fence is pending opens that fence. */
+function codeOwnsPendingPreFence(state: MarkdownState, element: ElementNode): boolean {
+  return element.tagId === TAG_CODE
+    && element.parent?.tagId === TAG_PRE
+    && state.depthMap[TAG_PRE] === state.preFencePendingDepth
+}
+
 function consumePendingPreChild(state: MarkdownState, node: Node, eventType: number, beforeFlush: () => void): boolean {
   if (eventType !== NodeEventEnter)
     return false
   if (node.type === ELEMENT_NODE) {
     const element = node as ElementNode
-    if (element.tagId === TAG_CODE && element.parent?.tagId === TAG_PRE) {
+    if (codeOwnsPendingPreFence(state, element)) {
       state.preFencePending = false
     }
     else if (element.tagId !== TAG_PRE
@@ -1133,16 +1145,22 @@ function consumeGfmAction(action: GfmAction, state: MarkdownState, lifecycle: Gf
       finalizeBlockquote(state)
       return undefined
     case 'PreEnter':
-      state.preFencePending = true
-      state.preFenceOpen = false
-      state.preFenceLang = action.language
+      // A nested <pre> stays inside its ancestor's open or pending fence.
+      if (!state.preFenceOwnerDepth && !state.preFencePending) {
+        state.preFencePending = true
+        state.preFencePendingDepth = state.depthMap[TAG_PRE]
+        state.preFenceLang = action.language
+      }
       return undefined
     case 'PreExit': {
-      const fenceOpen = state.preFenceOpen
-      state.preFencePending = false
-      state.preFenceOpen = false
-      if (!fenceOpen)
+      // The parser already counted this <pre> out of the depth map.
+      const depth = state.depthMap[TAG_PRE]! + 1
+      if (state.preFencePendingDepth === depth)
+        state.preFencePending = false
+      // Only the <pre> that owns the fence closes it.
+      if (state.preFenceOwnerDepth !== depth)
         return undefined
+      state.preFenceOwnerDepth = 0
       const indent = state.listIndent
       const output = (state.depthMap[TAG_LI] || 0) > 0
         ? `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
@@ -1158,7 +1176,7 @@ function consumeGfmAction(action: GfmAction, state: MarkdownState, lifecycle: Gf
     }
     case 'CodeFenceEnter':
       state.preFencePending = false
-      state.preFenceOpen = true
+      state.preFenceOwnerDepth = state.depthMap[TAG_PRE]
       return action.output
   }
 }
@@ -1226,6 +1244,9 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     tableCurrentRowCells: 0,
     tableColumnAlignments: [],
     tableHeaderCells: 0,
+    preFencePending: false,
+    preFencePendingDepth: 0,
+    preFenceOwnerDepth: 0,
   }
   const bufferScan: BufferScanState = [false, 0, 0, 0, 0]
   let inRawHtmlRegion = false
@@ -1641,7 +1662,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         const literalOverride = eventType === NodeEventEnter
           ? pendingHandler?.literalEnter
           : pendingHandler?.literalExit
-        if (literalOverride && pendingElement.tagId === TAG_CODE && pendingElement.parent?.tagId === TAG_PRE)
+        if (literalOverride && codeOwnsPendingPreFence(state, pendingElement))
           state.preFenceLang = getLanguageFromClass(pendingElement.attributes?.class)
         if (pendingElement.pluginOutput?.length || literalOverride) {
           preparePendingPreFence()
@@ -2232,7 +2253,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     resolveItemMarker(state, false, unresolvedCaptionFragment)
     const content = state.buffer.join('')
     const currentContent = hasYieldedContent ? content : trimOutputStart(content)
-    const inPre = state.depthMap[TAG_PRE] !== 0
+    // Before a <pre> opens its fence, its tail is still the block spacing its
+    // own enter wrote, which finalization trims. Only past the fence is
+    // trailing whitespace code.
+    const inPre = state.depthMap[TAG_PRE] !== 0 && state.preFenceOwnerDepth !== 0
     let stableLength = currentContent.length
     let retainMutableFragments = false
     if (inPre) {
@@ -2282,8 +2306,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
       heldFragment = Math.min(heldFragment, cleanPass.held())
     // Every open quote rewrites from its own fragment at exit, so the earliest
     // frame bounds the hold. Malformed trees can push a later frame at a
-    // smaller fragment, so scan rather than reading the first frame only.
-    for (let index = 0; index < state.blockquotes.length; index++) {
+    // smaller fragment, so scan rather than reading the first frame only. A
+    // frame left open at the final call lost its exit to a plugin.
+    const quoteHoldCount = final ? 0 : state.blockquotes.length
+    for (let index = 0; index < quoteHoldCount; index++) {
       const fragment = state.blockquotes[index]!.fragment
       if (fragment < heldFragment)
         heldFragment = fragment

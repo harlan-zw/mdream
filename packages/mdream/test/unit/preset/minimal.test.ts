@@ -1,4 +1,6 @@
 import { htmlToMarkdown as jsHtmlToMarkdown } from '@mdream/js'
+import { clean } from '@mdream/js/clean'
+import { filterPlugin, frontmatterPlugin, isolateMainPlugin, tailwindPlugin } from '@mdream/js/plugins'
 import { withMinimalPreset } from '@mdream/js/preset/minimal'
 import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
@@ -250,5 +252,25 @@ describe.each(engines)('withMinimalPreset $name', (engineConfig) => {
     const markdown = jsHtmlToMarkdown('<h1>Test</h1>', options)
     expect(customPluginCalled).toBe(true)
     expect(markdown).toContain('Test')
+  })
+})
+
+// A filter passed with the minimal preset extends its exclude list; it does not
+// replace it. `filter: false` turns the preset's filter off. In @mdream/js, an
+// appended filterPlugin() extends it, and leaving the filter out of an explicit
+// plugin list turns it off.
+describe('minimal preset with a custom filter', () => {
+  const html = '<main><nav>Nav</nav><form>Form</form><h1>Title</h1><aside>Aside</aside><p>Body</p></main>'
+
+  it('mdream: filter extends the minimal excludes', async () => {
+    const { htmlToMarkdown: rustHtmlToMarkdown } = await import('../../../src')
+    expect(rustHtmlToMarkdown(html, { minimal: true, filter: { exclude: ['h1'] } })).toBe('Body')
+    expect(rustHtmlToMarkdown(html, { minimal: true, filter: false })).toBe('Nav\n\nForm\n\n# Title\n\nAside\n\nBody')
+  })
+
+  it('@mdream/js: an appended filterPlugin extends the minimal excludes', () => {
+    expect(jsHtmlToMarkdown(html, withMinimalPreset({ plugins: [filterPlugin({ exclude: ['h1'] })] }))).toBe('Body')
+    const unfiltered = { clean: clean(), plugins: [frontmatterPlugin(), isolateMainPlugin(), tailwindPlugin()] }
+    expect(jsHtmlToMarkdown(html, unfiltered)).toBe('Nav\n\nForm\n\n# Title\n\nAside\n\nBody')
   })
 })

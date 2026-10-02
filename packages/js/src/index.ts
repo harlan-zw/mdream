@@ -1,5 +1,6 @@
 import type { MdreamOptions } from './types'
 import { createMarkdownProcessor } from './markdown-processor'
+import { assertEngineOptions } from './option-shape'
 import { resolvePlugins } from './pluggable/plugin'
 import { streamHtmlToMarkdown as _streamHtmlToMarkdown } from './stream'
 import { buildTagOverrideHandlers } from './tag-overrides'
@@ -14,6 +15,7 @@ function checkClean(options: Partial<MdreamOptions>): void {
 }
 
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
+  assertEngineOptions(options)
   checkClean(options)
   const tagOverrideHandlers = options.tagOverrides
     ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
@@ -27,6 +29,7 @@ export function streamHtmlToMarkdown(
   htmlStream: ReadableStream<Uint8Array | string> | null,
   options: Partial<MdreamOptions> = {},
 ): AsyncIterable<string> {
+  assertEngineOptions(options)
   checkClean(options)
   const tagOverrideHandlers = options.tagOverrides
     ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
