@@ -1090,6 +1090,9 @@ impl ConvertState {
     }
     // Every markup token completes the text before it, so this sees the same
     // states whatever the chunking. The parser stops before that token.
+    if self.empty_item_hazard {
+      self.settle_item_marker();
+    }
     if self.options.max_node_bytes != 0
       && !self.held_output_exceeded
       && self.held_output_exceeds_cap()

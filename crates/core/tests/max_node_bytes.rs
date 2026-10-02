@@ -1857,6 +1857,51 @@ fn a_long_quote_of_short_lines_is_not_held_back() {
   assert_eq!((batch.markdown, batch.truncated), (uncapped, false));
 }
 
+// A first item whose marker sits right under its parent's line owes a blank line
+// when a block opens it on the next line. That is known once the block writes,
+// yet the marker's line was held until the item's exit, pinning everything the
+// item wrote outside the cap. Text on the marker line settles it the other way,
+// but only a drain did, so one-shot kept a quote after it held and truncated.
+#[test]
+fn an_item_opened_by_a_block_is_not_held_back() {
+  let paras = repeat_to("<p>para</p>", HUGE);
+  for (name, html) in [
+    (
+      "under text",
+      format!("<ul><li>text<ul><li><blockquote>q</blockquote>{paras}</li></ul></li></ul>"),
+    ),
+    (
+      "under a bare marker",
+      format!("<ul><li><ul><li><blockquote>q</blockquote>{paras}</li></ul></li></ul>"),
+    ),
+    (
+      "table",
+      format!("<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table>{paras}"),
+    ),
+    (
+      "quote after text",
+      format!("<ul><li><ul><li>t<blockquote>{paras}</blockquote></li></ul></li></ul>"),
+    ),
+  ] {
+    let uncapped = stream(&html, 8 * 1024, 0);
+    let batch = html_to_markdown_result(&html, options(CAP));
+    assert_eq!(
+      (batch.markdown.as_str(), batch.truncated),
+      (uncapped.as_str(), false),
+      "{name}"
+    );
+    for chunk in [37, 8 * 1024, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, chunk, CAP),
+        (uncapped.clone(), false),
+        "{name} chunk={chunk}"
+      );
+    }
+    let capped = peak(&html, 8 * 1024, CAP);
+    assert!(capped < (8 * CAP) as u64, "{name}: capped peak {capped}");
+  }
+}
+
 // A link stops holding once its text is not blank, however long it gets.
 #[test]
 fn a_link_with_text_is_not_held_back() {
