@@ -283,6 +283,7 @@ impl ConvertState {
         return false;
       }
     }
+    self.note_buffer_rewrite(range.start);
     self.buffer.replace_range(range, value);
     true
   }
@@ -717,6 +718,7 @@ impl ConvertState {
         self.quoted_bytes += quoted.len();
       }
       self.scan_before_requote(flush_end);
+      self.note_buffer_rewrite(shared_start);
       self.buffer.replace_range(shared_start..flush_end, &quoted);
       let quoted_end = shared_start + quoted.len();
       self.shift_raw_html_scan(flush_end, quoted_end);
@@ -737,6 +739,7 @@ impl ConvertState {
     // Taken once for the whole walk: every frame rewrites the same region again,
     // so without this each nesting level allocates its own copy of it per flush.
     let mut quoted = core::mem::take(&mut self.blockquote_scratch);
+    self.note_buffer_rewrite(shared_start);
     for frame in self.blockquotes.iter().rev() {
       let content = &self.buffer[frame.content_start..flush_end];
       quoted.clear();
@@ -1635,6 +1638,7 @@ impl ConvertState {
             let new_len = bracket_pos + text_len;
             // SAFETY: bracket_pos < text_start are within buffer bounds (guarded above).
             // We copy link text backwards over "[", then truncate. Preserves valid UTF-8.
+            self.note_buffer_rewrite(bracket_pos);
             #[allow(unsafe_code)]
             unsafe {
               let buf = self.buffer.as_mut_vec();
@@ -1666,6 +1670,7 @@ impl ConvertState {
           // Remove [ and keep text only — use truncate+copy without intermediate String
           let new_len = bracket_pos + text_len;
           // SAFETY: same invariants as self-link heading case. Preserves valid UTF-8.
+          self.note_buffer_rewrite(bracket_pos);
           #[allow(unsafe_code)]
           unsafe {
             let buf = self.buffer.as_mut_vec();
@@ -1751,6 +1756,7 @@ impl ConvertState {
             if capped_code_span {
               let end = self.buffer.len();
               if self.replace_code_span_content(end..end, ">") {
+                self.note_buffer_rewrite(bp);
                 self.buffer.replace_range(bp..bp + 1, "<");
                 self.last_content_cache_len = self.buffer.len() - bp;
                 self.end_link();
@@ -2898,6 +2904,7 @@ impl ConvertState {
 
   #[inline]
   pub(super) fn truncate_buffer(&mut self, len: usize) {
+    self.note_buffer_rewrite(len);
     self.buffer.truncate(len);
     while self
       .streaming_break_runs
