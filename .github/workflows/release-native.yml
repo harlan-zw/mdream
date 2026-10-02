@@ -123,8 +123,10 @@ jobs:
         if: ${{ !matrix.use_zigbuild && !matrix.use_napi_cross &&
           !startsWith(matrix.target, 'wasm') }}
         working-directory: crates/node
-        run: pnpm exec napi build --platform --release --esm --target ${{ matrix.target
-          }}
+        # Invoke the CLI with Node because the Windows executable shim exits
+        # successfully without running the build.
+        run: node ./node_modules/@napi-rs/cli/dist/cli.js build --platform --release
+          --esm --target ${{ matrix.target }}
 
       - name: Move artifacts
         working-directory: crates/node
