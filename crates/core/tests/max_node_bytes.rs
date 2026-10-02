@@ -1578,6 +1578,25 @@ fn list_indentation_counts_against_a_code_fence_cap() {
   );
 }
 
+// Past an inline code span's cap a caption's `*` is dropped, which left a trim
+// free to take the caption's content start and panicked its close.
+#[test]
+fn a_caption_in_an_exhausted_code_span_closes() {
+  let tail = "<br>&#32;<br><figcaption></span>&nbsp;</figcaption><td><img src=/i alt=a>&#32;</td><figcaption><em><br></figcaption>";
+  for (cap, fill) in [(16, 0), (16, 7), (4096, 4078), (4096, 4087)] {
+    let html = format!("<code>{}{tail}", "a".repeat(fill));
+    for chunk in [1, 7, 4096, html.len()] {
+      let mut p = MarkdownStreamProcessor::new(options(cap));
+      for c in html.as_bytes().chunks(chunk) {
+        p.process_chunk(std::str::from_utf8(c).unwrap());
+      }
+      p.finish();
+      assert!(p.truncated(), "cap={cap} fill={fill} chunk={chunk}");
+    }
+    assert!(html_to_markdown_result(&html, options(cap)).truncated);
+  }
+}
+
 #[test]
 fn inline_code_from_many_small_nodes_stays_bounded() {
   let html = format!("<code>{}</code>", repeat_to("<span>abcdefgh</span>", HUGE));
