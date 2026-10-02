@@ -1046,10 +1046,24 @@ fn data_url_images_drop_the_payload_and_keep_the_description() {
       "![chart]()",
     ),
     (r#"<img src="data:image/png;base64,iVBORw0KGgo=">"#, "![]()"),
+    // A bare title would parse as the destination, so an empty one is `<>`.
     (
       r#"<img src="data:image/png;base64,iVBORw0KGgo=" alt="chart" title="Fig 1">"#,
-      r#"![chart]( "Fig 1")"#,
+      r#"![chart](<> "Fig 1")"#,
     ),
+    (
+      r#"<img src="data:image/png;base64,iVBORw0KGgo=" title="Fig 1">"#,
+      r#"![](<> "Fig 1")"#,
+    ),
+    (
+      r#"<a href="https://x.com"><img src="data:image/png;base64,AAA=" alt="linked" title="Fig 1"></a>"#,
+      r#"[![linked](<> "Fig 1")](https://x.com)"#,
+    ),
+    (
+      r#"<img src="" alt="alt" title="T x">"#,
+      r#"![alt](<> "T x")"#,
+    ),
+    (r#"<a href="" title="T x">text</a>"#, r#"[text](<> "T x")"#),
     (
       r#"<a href="https://x.com"><img src="data:image/png;base64,AAA=" alt="linked"></a>"#,
       "[![linked]()](https://x.com)",

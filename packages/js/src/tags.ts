@@ -150,8 +150,11 @@ function serializeMarkdownTitle(title: string): string {
 }
 
 function serializeMarkdownResource(destination: string, title?: string): string {
-  const serializedTitle = title ? ` "${serializeMarkdownTitle(title)}"` : ''
-  return `(${serializeMarkdownDestination(destination)}${serializedTitle})`
+  if (!title)
+    return `(${serializeMarkdownDestination(destination)})`
+  // A bare title would parse as the destination, so an empty one is `<>`.
+  const serializedDestination = destination ? serializeMarkdownDestination(destination) : '<>'
+  return `(${serializedDestination} "${serializeMarkdownTitle(title)}")`
 }
 
 function serializeImageDescription(alt: string): string {
