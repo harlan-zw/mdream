@@ -657,6 +657,12 @@ pub struct ConvertState {
   /// Upper bound on the `#`/space run a heading holds back for its closing-sequence
   /// escape, counted as text is written.
   heading_hash_run: usize,
+  /// `(end, len)` of `#`/space runs measured in the buffer: the latest, and the
+  /// longest other still known. A check reads only past the nearest one, and an
+  /// empty tag whose opener comes and goes cannot make it forget a long run.
+  heading_runs: [(usize, usize); 2],
+  /// Lowest buffer offset rewritten or removed since `heading_runs` was measured.
+  heading_run_dirty_from: usize,
   /// Upper bound on the `<br>` output held until text follows it, counted as
   /// breaks are deferred.
   held_break_bytes: usize,
@@ -800,6 +806,8 @@ pub struct ConvertState {
   /// Bytes read to decide whether held line-break runs are final.
   #[cfg(test)]
   break_run_scanned: usize,
+  #[cfg(test)]
+  heading_run_bytes_read: usize,
   /// tag_id -> index into `tag_overrides`; `NO_OVERRIDE` means no key. Boxed:
   /// held inline it costs the override-free path more than the scan it replaces.
   override_idx: Option<Box<[u8; MAX_TAG_ID]>>,
@@ -897,6 +905,8 @@ impl ConvertState {
       line_start: 0,
       line_start_scanned_to: 0,
       heading_hash_run: 0,
+      heading_runs: [(0, 0); 2],
+      heading_run_dirty_from: usize::MAX,
       held_break_bytes: 0,
       held_output_exceeded: false,
       table_header_cells: 0,
@@ -967,6 +977,8 @@ impl ConvertState {
       quoted_bytes: 0,
       #[cfg(test)]
       break_run_scanned: 0,
+      #[cfg(test)]
+      heading_run_bytes_read: 0,
     };
     // Resolve clean config into bitmask
     let effective_clean_urls;
@@ -1961,6 +1973,7 @@ impl ConvertState {
   }
 
   pub fn get_markdown(&mut self) -> String {
+    self.note_buffer_rewrite(0);
     if self.format == OutputFormat::Html {
       return std::mem::take(&mut self.buffer);
     }
@@ -1975,6 +1988,7 @@ impl ConvertState {
     };
     if start > 0 {
       self.buffer.drain(..start);
+      self.note_buffer_drain(start);
       self
         .streaming_break_runs
         .retain(|run| run.output_end > start);
@@ -2261,6 +2275,59 @@ impl ConvertState {
     }
   }
 
+  /// The buffer's trailing `#`/space run. Bytes of a measured run that no
+  /// rewrite has touched since are not read again, so an unchanged buffer costs
+  /// nothing, however many tags go by.
+  fn trailing_heading_run(&mut self, cap: usize) -> usize {
+    let bytes = self.buffer.as_bytes();
+    let len = bytes.len();
+    let intact = self.heading_run_dirty_from.min(len);
+    let is_run = |byte: &&u8| matches!(**byte, b'#' | b' ' | b'\t');
+    // A run is still known while its start, and the byte before it, are intact.
+    let known = self.heading_runs.map(|(end, run)| {
+      let start = end - run;
+      (start <= intact).then(|| (end.min(intact), end.min(intact) - start))
+    });
+    let (end, run) = known.iter().flatten().copied().max().unwrap_or((0, 0));
+    let tail = bytes[end..].iter().rev().take_while(is_run).count();
+    #[cfg(test)]
+    {
+      self.heading_run_bytes_read += (tail + 1).min(len - end);
+    }
+    let current = if tail == len - end { run + tail } else { tail };
+    // A rewrite that skips `note_buffer_rewrite` would leave the carried run
+    // stale; checked in place so every real mutation site is covered.
+    debug_assert_eq!(
+      current.min(cap + 1),
+      bytes.iter().rev().take(cap + 1).take_while(is_run).count()
+    );
+    let longest_other = known
+      .iter()
+      .flatten()
+      .copied()
+      .filter(|&(end, run)| end - run < len - current)
+      .max_by_key(|&(_, run)| run)
+      .unwrap_or((0, 0));
+    self.heading_runs = [(len, current), longest_other];
+    self.heading_run_dirty_from = usize::MAX;
+    current
+  }
+
+  /// Record that buffer bytes from `offset` on were rewritten or removed.
+  #[inline]
+  pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
+    self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
+  }
+
+  /// Shift the measured run after `removed` bytes left the front of the buffer.
+  fn note_buffer_drain(&mut self, removed: usize) {
+    for (end, run) in &mut self.heading_runs {
+      *end = end.saturating_sub(removed);
+      *run = (*run).min(*end);
+    }
+    self.heading_run_dirty_from = self.heading_run_dirty_from.saturating_sub(removed);
+  }
+
   /// Whether output held back behind an open construct has outgrown
   /// `max_node_bytes`. Measured from the construct's structure, never from what a
   /// flush happened to release, so chunking cannot move where it fires.
@@ -2268,27 +2335,9 @@ impl ConvertState {
     let cap = self.options.max_node_bytes;
     // The counter only bounds the run from above: output that survives between
     // two runs (`<br>`, an image) breaks it without resetting the count. Past the
-    // cap the buffer decides, and the count drops to what it shows only once no
-    // open element can still retract output and rejoin the run.
-    if self.heading_hash_run > cap {
-      let run = self
-        .buffer
-        .as_bytes()
-        .iter()
-        .rev()
-        .take(cap + 1)
-        .take_while(|&&byte| matches!(byte, b'#' | b' ' | b'\t'))
-        .count();
-      if run > cap {
-        return true;
-      }
-      if self.open_markers.is_empty()
-        && self.code_spans.is_empty()
-        && self.depth_map[TAG_A as usize] == 0
-        && self.first_tentative_caption_start().is_none()
-      {
-        self.heading_hash_run = run;
-      }
+    // cap the buffer's actual run decides.
+    if self.heading_hash_run > cap && self.trailing_heading_run(cap) > cap {
+      return true;
     }
     // A streaming `<br>` run is held as one copy and a count until content
     // follows it, then expanded whole into the chunk that yields it. Counting
@@ -2347,6 +2396,7 @@ impl ConvertState {
       if let Some(&last) = self.buffer.as_bytes().last() {
         self.flushed_tail[1] = last;
       }
+      self.note_buffer_rewrite(0);
       return std::mem::take(&mut self.buffer);
     }
     if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 {
@@ -2625,6 +2675,7 @@ impl ConvertState {
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.note_link_release(drain_end);
     self.buffer.drain(..drain_end);
+    self.note_buffer_drain(drain_end);
     self.last_yielded_length -= drain_end;
     self.link.bracket_pos = self.link.bracket_pos.saturating_sub(drain_end);
     for parent in &mut self.parent_links {
@@ -2878,6 +2929,115 @@ mod tests {
       processor.state.extraction_results[0].text_content,
       "aaaaaaa"
     );
+  }
+
+  // Tags that leave the output unchanged must not re-read a long run held by a
+  // heading while an open link keeps the counter past the cap.
+  #[test]
+  fn an_unchanged_heading_run_is_not_read_again() {
+    let cap = 4096;
+    let hashes = "#".repeat(cap);
+    for filler in ["<span></span>", "<em></em>", "<em> </em>", "<code></code>"] {
+      let html = format!(
+        "<h2><a href=\"/x\">{hashes}<br>{hashes}{}</a></h2><p>after</p>",
+        filler.repeat(2_000)
+      );
+      let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+        max_node_bytes: cap,
+        ..Default::default()
+      });
+      let mut markdown = String::new();
+      for chunk in html.as_bytes().chunks(8 * 1024) {
+        markdown.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      markdown.push_str(&processor.finish());
+
+      assert!(!processor.truncated(), "{filler}");
+      assert!(markdown.ends_with("after"), "{filler}");
+      let read = processor.state.heading_run_bytes_read;
+      assert!(
+        read <= 2 * html.len(),
+        "{filler}: read {read} bytes of a {}-byte input",
+        html.len()
+      );
+    }
+  }
+
+  #[test]
+  fn heading_run_cache_matches_buffer_after_mutations() {
+    fn check(state: &mut ConvertState) {
+      let expected = state
+        .buffer
+        .bytes()
+        .rev()
+        .take_while(|byte| matches!(byte, b'#' | b' ' | b'\t'))
+        .count();
+      assert_eq!(state.trailing_heading_run(1 << 20), expected);
+    }
+
+    let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let state = &mut processor.state;
+    state.buffer.push_str(&"#".repeat(512));
+    check(state);
+    state.buffer.push_str("<br>");
+    check(state);
+    state.buffer.push_str(&"#".repeat(256));
+    check(state);
+    state.note_buffer_rewrite(512);
+    state.buffer.replace_range(512..516, "####");
+    check(state);
+    state.buffer.drain(..500);
+    state.note_buffer_drain(500);
+    check(state);
+    state.note_buffer_rewrite(100);
+    state.buffer.truncate(100);
+    check(state);
+
+    let mut seed = 0x1234_5678_9abc_def0_u64;
+    for _ in 0..20_000 {
+      seed ^= seed << 13;
+      seed ^= seed >> 7;
+      seed ^= seed << 17;
+      match seed % 5 {
+        0 | 1 => state
+          .buffer
+          .push([b'#', b' ', b'\t', b'x'][(seed as usize >> 8) % 4] as char),
+        2 if !state.buffer.is_empty() => {
+          let at = (seed as usize >> 8) % state.buffer.len();
+          state.note_buffer_rewrite(at);
+          state.buffer.replace_range(at..at + 1, "#");
+        }
+        3 if !state.buffer.is_empty() => {
+          let at = (seed as usize >> 8) % state.buffer.len();
+          state.note_buffer_rewrite(at);
+          state.buffer.truncate(at);
+        }
+        4 if !state.buffer.is_empty() => {
+          let removed = (seed as usize >> 8) % (state.buffer.len() + 1);
+          state.buffer.drain(..removed);
+          state.note_buffer_drain(removed);
+        }
+        _ => {}
+      }
+      check(state);
+    }
+  }
+
+  #[test]
+  fn requote_with_list_indent_invalidates_heading_run() {
+    let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let state = &mut processor.state;
+    state.buffer = format!("{}\n{}", "a".repeat(8192), "#".repeat(64));
+    state.blockquotes.push(BlockquoteFrame {
+      content_start: 0,
+      list_indent: "  ".to_string(),
+    });
+    assert_eq!(state.trailing_heading_run(1 << 20), 64);
+
+    state.flush_streaming_blockquote_lines_upto(8193);
+
+    assert!(state.buffer.starts_with("  > "));
+    assert_eq!(state.trailing_heading_run(1 << 20), 64);
   }
 
   #[test]
