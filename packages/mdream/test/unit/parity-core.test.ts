@@ -13,8 +13,6 @@ const JS: Record<Format, (html: string) => string> = {
 }
 
 const ALL: Format[] = ['markdown', 'text', 'html']
-// Markdown escaping of `<` in rawtext is a separate, open difference.
-const TEXT_AND_HTML: Format[] = ['text', 'html']
 
 // The Rust engine is the output reference. Each group lists inputs where the
 // JavaScript engine used to differ from it.
@@ -45,7 +43,7 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<th>',
     '<tr><th align="right">a</th><td>b</td></tr><tr><td>c</td></tr>',
   ],
-  'rawtext keeps an unfinished end tag at EOF': [[
+  'rawtext keeps an unfinished end tag at EOF': [
     '<textarea>a</t',
     '<textarea>a</tx>b',
     '<textarea>a</textarea',
@@ -53,7 +51,7 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<textarea>a</TEXTAREA x',
     '<xmp>a</',
     '<title>a</x',
-  ], TEXT_AND_HTML],
+  ],
   'block boundary trims the whole trailing space run': [
     '<ul><li><br></li><li>b</li></ul>',
     '<pre>nd  ',

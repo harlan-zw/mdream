@@ -37,6 +37,8 @@ yarn add @mdream/js@beta
 In v2, each output format and each plugin is a separate import.
 Your bundle contains only the code that you import.
 The Rust engine (`mdream`) keeps its v1 options. This guide applies to `@mdream/js` only.
+If a converter gets a removed option, such as `format`, `hooks`, or a `plugins` object, it throws a `TypeError` that names the fix.
+It also throws for the top-level `mdream` options `minimal`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, and `extraction`.
 
 ### Output formats
 

@@ -76,6 +76,14 @@ pub struct MdreamNapiResult {
   pub frontmatter: Option<std::collections::HashMap<String, String>>,
 }
 
+/// Plugin data a stream collected: frontmatter and extracted elements.
+#[napi(object)]
+pub struct MdreamStreamData {
+  pub extracted: Option<Vec<ExtractedElementNapi>>,
+  #[napi(ts_type = "Record<string, string>")]
+  pub frontmatter: Option<std::collections::HashMap<String, String>>,
+}
+
 #[napi(object)]
 pub struct CleanOptionsNapi {
   pub urls: Option<bool>,
@@ -207,20 +215,26 @@ fn to_core_opts(
 
 // ── Helpers ──
 
+fn extracted_to_napi(
+  extracted: Option<Vec<mdream::types::ExtractedElement>>,
+) -> Option<Vec<ExtractedElementNapi>> {
+  extracted.map(|elems| {
+    elems
+      .into_iter()
+      .map(|e| ExtractedElementNapi {
+        selector: e.selector,
+        tag_name: e.tag_name,
+        text_content: e.text_content,
+        attributes: e.attributes.into_iter().collect(),
+      })
+      .collect()
+  })
+}
+
 fn result_to_napi(result: mdream::types::MdreamResult) -> MdreamNapiResult {
   MdreamNapiResult {
     markdown: result.markdown,
-    extracted: result.extracted.map(|elems| {
-      elems
-        .into_iter()
-        .map(|e| ExtractedElementNapi {
-          selector: e.selector,
-          tag_name: e.tag_name,
-          text_content: e.text_content,
-          attributes: e.attributes.into_iter().collect(),
-        })
-        .collect()
-    }),
+    extracted: extracted_to_napi(result.extracted),
     frontmatter: result.frontmatter.map(|v| v.into_iter().collect()),
   }
 }
@@ -354,6 +368,16 @@ impl MarkdownStream {
       ));
     }
     Ok(self.inner.finish())
+  }
+
+  /// Frontmatter and extracted elements collected so far. Call after
+  /// `finish()` for the complete data. Extracted elements drain on each call.
+  #[napi(js_name = "takeData")]
+  pub fn take_data(&mut self) -> MdreamStreamData {
+    MdreamStreamData {
+      extracted: extracted_to_napi(self.inner.take_extracted()),
+      frontmatter: self.inner.frontmatter().map(|v| v.into_iter().collect()),
+    }
   }
 }
 

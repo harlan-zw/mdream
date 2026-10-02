@@ -150,8 +150,11 @@ function serializeMarkdownTitle(title: string): string {
 }
 
 function serializeMarkdownResource(destination: string, title?: string): string {
-  const serializedTitle = title ? ` "${serializeMarkdownTitle(title)}"` : ''
-  return `(${serializeMarkdownDestination(destination)}${serializedTitle})`
+  if (!title)
+    return `(${serializeMarkdownDestination(destination)})`
+  // A bare title would parse as the destination, so an empty one is `<>`.
+  const serializedDestination = destination ? serializeMarkdownDestination(destination) : '<>'
+  return `(${serializedDestination} "${serializeMarkdownTitle(title)}")`
 }
 
 function serializeImageDescription(alt: string): string {
@@ -421,7 +424,9 @@ export const tagHandlers: Record<number, TagHandler> = {
     exit: ({ state }) => isInsideTableCell(state) ? '</summary>' : '</summary>\n\n',
   },
   [TAG_TITLE]: {
-    // No special handling for title - plugins will handle frontmatter
+    // Document metadata that browsers never render. Its text still reaches
+    // plugins, so the frontmatter plugin can read it.
+    excludesTextNodes: true,
     collapsesInnerWhiteSpace: true,
     isNonNesting: true,
     spacing: NO_SPACING,

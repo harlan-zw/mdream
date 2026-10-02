@@ -60,7 +60,8 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
   return Boolean(firstChar && !'.,!?:;_*`)]'.includes(firstChar))
 }
 
-function currentColumn(buffer: string[]): number {
+/** `base` is the column the first fragment starts at. */
+function currentColumn(buffer: string[], base: number): number {
   let column = 0
   for (let index = buffer.length - 1; index >= 0; index--) {
     const value = buffer[index]!
@@ -69,8 +70,35 @@ function currentColumn(buffer: string[]): number {
       return column + [...value.slice(newline + 1)].length
     column += [...value].length
   }
+  return column + base
+}
+
+/**
+ * Column at `end` in `value`, counted in code points like `currentColumn`.
+ * `column` is the column `value` starts at.
+ */
+function columnAt(value: string, end: number, column: number): number {
+  const newline = end > 0 ? value.lastIndexOf('\n', end - 1) : -1
+  let index = 0
+  if (newline >= 0) {
+    index = newline + 1
+    column = 0
+  }
+  for (; index < end; index++) {
+    const code = value.charCodeAt(index)
+    // A surrogate pair is one code point.
+    if (code >= 0xD800 && code <= 0xDBFF && index + 1 < end) {
+      const next = value.charCodeAt(index + 1)
+      if (next >= 0xDC00 && next <= 0xDFFF)
+        index++
+    }
+    column++
+  }
   return column
 }
+
+/** Yielded characters a stream keeps before its unstable tail, for `trailingNewlines` and `lastOutputChar`. */
+const YIELDED_CONTEXT = 2
 
 function wrapText(value: string, column: number, width: number): string {
   const leading = value.charCodeAt(0) === 32
@@ -328,7 +356,12 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     plainText: true,
   }
   let preserveLeadingWhitespace = false
+  // Offset in the joined buffer up to which output is yielded, once started.
   let yieldedLength = 0
+  // Leading whitespace drops only until the first yield.
+  let started = false
+  // Column the first buffer fragment starts at, once yielded output is dropped.
+  let bufferColumn = 0
   // A caption only earns its blank-line boundary once it emits visible
   // content, so an empty `<figcaption>` leaves the text unchanged.
   let captionOpen = 0
@@ -403,7 +436,7 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
 
     const width = state.options.wrapWidth
     const value = width && canWrapHere(state.depthMap)
-      ? wrapText(node.value, currentColumn(state.buffer), width)
+      ? wrapText(node.value, currentColumn(state.buffer, bufferColumn), width)
       : node.value
     state.buffer.push(value)
     state.lastContentCache = value
@@ -520,30 +553,76 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     state.lastNode = element
   }
 
+  /**
+   * Drops yielded fragments, so a stream holds only its unstable tail. Later
+   * events trim only the last fragment and retract only from an open
+   * quotation opener, which sits at or after `stableEnd`, so every fragment
+   * from the one that holds `stableEnd` stays intact. Backward scans read at
+   * most `YIELDED_CONTEXT` characters before it, and `bufferColumn` stands in
+   * for the dropped part of the line.
+   */
+  function dropYielded(content: string, stableEnd: number): void {
+    const buffer = state.buffer
+    // Walk back over the unstable tail, which is only a few fragments. The
+    // walk stops at the fragment that holds `stableEnd` and keeps it whole.
+    let keepFrom = buffer.length
+    let keptStart = content.length
+    while (keepFrom > 0 && keptStart > stableEnd) {
+      keepFrom--
+      keptStart -= buffer[keepFrom]!.length
+    }
+    let contextStart = keptStart > YIELDED_CONTEXT ? keptStart - YIELDED_CONTEXT : 0
+    // Never split a surrogate pair, so the column count stays the same.
+    const first = content.charCodeAt(contextStart)
+    if (contextStart > 0 && first >= 0xDC00 && first <= 0xDFFF)
+      contextStart--
+    if (contextStart === 0)
+      return
+    if (state.options.wrapWidth)
+      bufferColumn = columnAt(content, contextStart, bufferColumn)
+    const kept = buffer.slice(keepFrom)
+    buffer.length = 0
+    buffer.push(content.slice(contextStart, keptStart))
+    for (let index = 0; index < kept.length; index++)
+      buffer.push(kept[index]!)
+    // The context fragment replaces fragments `0..keepFrom`.
+    const shift = keepFrom - 1
+    for (let index = 0; index < openQuotes.length; index++)
+      openQuotes[index]! -= shift
+    yieldedLength = stableEnd - contextStart
+  }
+
   return {
     state,
     processEvent,
     takeOutput() {
       const content = state.buffer.join('')
-      const normalized = preserveLeadingWhitespace ? content : trimOutputStart(content)
+      const leading = started || preserveLeadingWhitespace ? 0 : content.length - trimOutputStart(content).length
       // Hold back the tail a later event may still trim: trailing whitespace,
       // and a quotation opener that an empty quotation retracts. With an open
-      // quotation the boundary is trimmed on the string cut at the opener, so
-      // the whitespace before a retractable opener stays mutable too.
-      let stableLength
+      // quotation the hold starts at the opener, and the whitespace before a
+      // retractable opener stays mutable too.
+      let stableEnd = content.length
       if (openQuotes.length !== 0) {
-        let opener = normalized.length - content.length
+        stableEnd = 0
         for (let index = 0; index < openQuotes[0]!; index++)
-          opener += state.buffer[index]!.length
-        stableLength = trimAsciiWhitespaceEnd(normalized.slice(0, opener)).length
+          stableEnd += state.buffer[index]!.length
       }
-      else {
-        stableLength = trimAsciiWhitespaceEnd(normalized).length
+      while (stableEnd > leading) {
+        const code = content.charCodeAt(stableEnd - 1)
+        if (code !== 32 && (code < 9 || code > 13))
+          break
+        stableEnd--
       }
-      if (stableLength < yieldedLength)
-        stableLength = yieldedLength
-      const output = normalized.slice(yieldedLength, stableLength)
-      yieldedLength = stableLength
+      const yieldedEnd = started ? yieldedLength : leading
+      if (stableEnd < yieldedEnd)
+        stableEnd = yieldedEnd
+      const output = content.slice(yieldedEnd, stableEnd)
+      if (output) {
+        started = true
+        yieldedLength = stableEnd
+        dropYielded(content, stableEnd)
+      }
       return output
     },
   }

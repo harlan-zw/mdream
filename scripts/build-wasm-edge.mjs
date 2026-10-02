@@ -13,7 +13,7 @@
  * x86_64, so a local x86 run reads as noise.
  */
 import { execFileSync } from 'node:child_process'
-import { statSync } from 'node:fs'
+import { readFileSync, statSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
 
@@ -59,3 +59,21 @@ execFileSync('wasm-opt', [
 
 const optSize = statSync(wasmFile).size
 console.log(`${wasmFile}: ${rawSize} -> ${optSize} bytes (wasm-opt ${OPT_FLAGS.join(' ')})`)
+
+// Nitro imports instantiated exports. Wrangler imports a compiled Module.
+// Keep the bundler sidecar available for Nitro and initialize either form.
+if (target === 'bundler') {
+  const entryFile = resolve(outDir, `${outName}.js`)
+  const wasmPath = `./${outName}_bg.wasm`
+  const gluePath = `./${outName}_bg.js`
+  const source = readFileSync(entryFile, 'utf8')
+  const originalImport = `import * as wasm from "${wasmPath}";`
+  if (!source.includes(originalImport))
+    throw new Error(`Unexpected wasm-bindgen entry import in ${entryFile}`)
+  const moduleImport = `import wasmModule from "${wasmPath}";
+import * as imports from "${gluePath}";
+const wasm = wasmModule instanceof WebAssembly.Module
+  ? new WebAssembly.Instance(wasmModule, { "${gluePath}": imports }).exports
+  : wasmModule;`
+  writeFileSync(entryFile, source.replace(originalImport, moduleImport))
+}
