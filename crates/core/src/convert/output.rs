@@ -3599,13 +3599,9 @@ impl ConvertState {
         let ordered = _ancestors.last().filter(|p| p.tag_id == Some(TAG_OL));
         let mut s = String::with_capacity(self.list_indent.len() + 6);
         s.push_str(&self.list_indent);
-        if let Some(list) = ordered {
+        if ordered.is_some() {
           use std::fmt::Write;
-          let _ = write!(
-            s,
-            "{}. ",
-            Self::ordered_item_number(list, node.index as usize)
-          );
+          let _ = write!(s, "{}. ", self.ordered_item_number(node.index as usize));
         } else {
           s.push_str("- ");
         }
@@ -4350,13 +4346,14 @@ impl ConvertState {
     }
   }
 
-  /// Marker number for an `<ol>`'s nth item. GFM numbers a list from its first
-  /// item's marker, so only that one has to carry `start`.
-  pub(crate) fn ordered_item_number(list: &ElementNode, index: usize) -> u32 {
-    list
-      .attributes
-      .get_bit(ATTR_START)
-      .and_then(|value| parse_bounded_u32(value, MAX_ORDERED_START))
+  /// Marker number for the innermost `<ol>`'s nth item. GFM numbers a list from
+  /// its first item's marker, so only that one has to carry `start`.
+  pub(crate) fn ordered_item_number(&self, index: usize) -> u32 {
+    self
+      .ordered_starts
+      .last()
+      .copied()
+      .flatten()
       .unwrap_or(1)
       .saturating_add(u32::try_from(index).unwrap_or(u32::MAX))
       .min(MAX_ORDERED_START)
