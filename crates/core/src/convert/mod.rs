@@ -790,6 +790,9 @@ pub struct ConvertState {
   cut_line_lead: CutLineLead,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
+  /// Bytes a table row read back to classify the line it follows.
+  #[cfg(test)]
+  row_line_scanned: std::cell::Cell<usize>,
   /// Bytes written by quoting, to check each line is quoted a bounded number of
   /// times rather than once per nesting level.
   #[cfg(test)]
@@ -958,6 +961,8 @@ impl ConvertState {
       list_rule_pending: false,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
+      #[cfg(test)]
+      row_line_scanned: std::cell::Cell::new(0),
       #[cfg(test)]
       quoted_bytes: 0,
       #[cfg(test)]

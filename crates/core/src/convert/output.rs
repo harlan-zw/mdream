@@ -235,6 +235,15 @@ impl ConvertState {
     self.push_capped_code_span_content(value, atomic, cap)
   }
 
+  /// Whether [`Self::push_code_span_content`] drops everything it is given.
+  fn drops_code_span_content(&self) -> bool {
+    self.options.max_node_bytes != 0
+      && self
+        .code_spans
+        .first()
+        .is_some_and(|span| !span.opener_emitted || span.exhausted)
+  }
+
   #[cold]
   #[inline(never)]
   fn push_capped_code_span_content(&mut self, value: &str, atomic: bool, cap: usize) -> usize {
@@ -3751,6 +3760,11 @@ impl ConvertState {
         if self.in_table_cell() {
           return Some(Cow::Borrowed("<tr>"));
         }
+        // Inside a code span past its cap nothing more is written, so classifying
+        // the line only re-read it: one that never ends, once per row.
+        if !node.is_inline && self.drops_code_span_content() {
+          return Some(Cow::Borrowed("| "));
+        }
         let indent = if self.depth_map[TAG_LI as usize] > 0 {
           self.list_indent.as_str()
         } else {
@@ -4387,6 +4401,10 @@ impl ConvertState {
       index -= 1;
     }
     let line = &bytes[index..];
+    #[cfg(test)]
+    self
+      .row_line_scanned
+      .set(self.row_line_scanned.get() + line.len());
     let start = line
       .iter()
       .position(|byte| !matches!(byte, b' ' | b'\t'))
@@ -4587,6 +4605,26 @@ mod tests {
 
     assert_eq!(state.gfm_escape_slow_path_calls, 2);
     assert_eq!(state.get_markdown(), "\\* literal\n\n\\* decoded");
+  }
+
+  // Past an exhausted code span's cap a row writes nothing, so the line before
+  // it never ends; classifying that line again for every row was quadratic.
+  #[test]
+  fn rows_in_an_exhausted_code_span_do_not_reread_the_line() {
+    let options = HTMLToMarkdownOptions::default().with_max_node_bytes(1024);
+    let mut state = ConvertState::new(options, 64, OutputFormat::Markdown);
+    let html = format!(
+      "<code>{}<table>{}",
+      "a".repeat(2048),
+      "<tr><td>x</td></tr>".repeat(1000)
+    );
+    assert_eq!(state.process_html(&html), html.len());
+    assert!(state.truncated);
+    assert!(
+      state.row_line_scanned.get() < 16 * 1024,
+      "rows read {} bytes",
+      state.row_line_scanned.get()
+    );
   }
 
   // Each quote re-quoted whatever was still unflushed when it closed, so a deep
