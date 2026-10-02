@@ -1296,6 +1296,14 @@ impl ConvertState {
       self.block_parent_indices.push(idx);
     }
 
+    if tag_id == Some(TAG_OL) {
+      self.ordered_starts.push(
+        tag
+          .attributes
+          .get_bit(ATTR_START)
+          .and_then(|value| super::output::parse_bounded_u32(value, MAX_ORDERED_START)),
+      );
+    }
     self.stack.push(tag);
 
     // Extraction
@@ -1342,7 +1350,7 @@ impl ConvertState {
         if parent_is_ordered {
           // Must match the marker actually written, `start` included, or the
           // item's continuation content drifts out of it.
-          let n = Self::ordered_item_number(&self.stack[stack_len - 2], li.index as usize).max(1);
+          let n = self.ordered_item_number(li.index as usize).max(1);
           // n >= 1 so ilog10 never panics; +1 converts floor(log10) to digit count.
           let digits = (n.ilog10() + 1) as usize;
           digits + 2
@@ -1490,6 +1498,9 @@ impl ConvertState {
             self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
           }
           self.update_in_pre_on_close(id);
+          if id == TAG_OL {
+            self.ordered_starts.pop();
+          }
           if id == TAG_LI
             && let Some(w) = self.list_indent_widths.pop()
           {
@@ -1520,6 +1531,9 @@ impl ConvertState {
         self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
       }
       self.update_in_pre_on_close(id);
+      if id == TAG_OL {
+        self.ordered_starts.pop();
+      }
       if id == TAG_LI
         && let Some(w) = self.list_indent_widths.pop()
       {
@@ -1591,6 +1605,7 @@ impl ConvertState {
         // attributes are payload.
         bounded_prefix: tag_name_end == chunk_length
           && chunk_length - tag_name_start <= MAX_BUILTIN_TAG_NAME,
+        name_ended: tag_name_end != chunk_length,
       };
     }
 
@@ -1604,12 +1619,14 @@ impl ConvertState {
         // The whole tag is here, re-fed only so an implied end tag closes
         // first, and it carries whatever attributes it has.
         bounded_prefix: false,
+        name_ended: false,
       };
     }
     CloseTagResult {
       complete: true,
       new_position: i + 1,
       bounded_prefix: false,
+      name_ended: false,
     }
   }
 
