@@ -66,6 +66,12 @@ jobs:
           echo "=== napi directory contents ==="
           ls -la packages/mdream/napi/
 
+      - name: Stage WASM edge artifacts for Docker build
+        run: |
+          mkdir -p packages/mdream/wasm packages/mdream/wasm-bundler
+          cp -v artifacts/wasm-edge/wasm/* packages/mdream/wasm/
+          cp -v artifacts/wasm-edge/wasm-bundler/* packages/mdream/wasm-bundler/
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
