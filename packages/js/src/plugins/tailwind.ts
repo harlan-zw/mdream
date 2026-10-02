@@ -3,39 +3,6 @@ import { ELEMENT_NODE } from '../const'
 import { createPlugin } from '../pluggable/plugin'
 
 /**
- * Type definition for Tailwind mapping
- */
-interface TailwindMarkdownFormat {
-  prefix?: string
-  suffix?: string
-  hidden?: boolean
-}
-
-/**
- * Mapping of Tailwind classes to Markdown formatting
- */
-const TAILWIND_TO_MARKDOWN_MAP: Record<string, TailwindMarkdownFormat> = {
-  // Typography
-  'font-bold': { prefix: '**', suffix: '**' },
-  'font-semibold': { prefix: '**', suffix: '**' },
-  'font-black': { prefix: '**', suffix: '**' },
-  'font-extrabold': { prefix: '**', suffix: '**' },
-  'font-medium': { prefix: '**', suffix: '**' },
-  'font-italic': { prefix: '*', suffix: '*' },
-  'italic': { prefix: '*', suffix: '*' },
-  'line-through': { prefix: '~~', suffix: '~~' },
-
-  // Display properties - hide elements
-  'hidden': { hidden: true },
-  'invisible': { hidden: true },
-
-  // Position properties - hide positioned elements
-  'absolute': { hidden: true },
-  'fixed': { hidden: true },
-  'sticky': { hidden: true },
-}
-
-/**
  * Interface for storing Tailwind data on nodes
  */
 interface TailwindNodeData {
@@ -44,192 +11,123 @@ interface TailwindNodeData {
   hidden: boolean
 }
 
-/**
- * Extract base class name from a responsive breakpoint variant
- */
-function extractBaseClass(className: string): {
-  baseClass: string
-  breakpoint: string
-} {
-  const breakpoints = ['sm:', 'md:', 'lg:', 'xl:', '2xl:']
+// Each utility group keeps its winning value packed as `breakpoint << 1 | enabled`;
+// -1 means no class in the group was seen.
+const UNSET = -1
 
-  for (const bp of breakpoints) {
-    if (className.startsWith(bp)) {
-      return {
-        baseClass: className.substring(bp.length),
-        breakpoint: bp,
-      }
-    }
-  }
+function breakpointOf(cls: string): number {
+  const c = cls.charCodeAt(0)
+  if (c === 115 /* s */ && cls.startsWith('sm:'))
+    return 1
+  if (c === 109 /* m */ && cls.startsWith('md:'))
+    return 2
+  if (c === 108 /* l */ && cls.startsWith('lg:'))
+    return 3
+  if (c === 120 /* x */ && cls.startsWith('xl:'))
+    return 4
+  if (c === 50 /* 2 */ && cls.startsWith('2xl:'))
+    return 5
+  return 0
+}
 
-  return {
-    baseClass: className,
-    breakpoint: '', // Base/mobile class (no breakpoint)
-  }
+const BREAKPOINT_PREFIX_LENGTH = [0, 3, 3, 3, 3, 4]
+
+/** A class at an equal or wider breakpoint replaces the group's current value. */
+function supersede(current: number, breakpoint: number, enabled: boolean): number {
+  return current === UNSET || breakpoint >= current >> 1
+    ? breakpoint << 1 | (enabled ? 1 : 0)
+    : current
 }
 
 /**
- * Sort classes by breakpoint for mobile-first processing
+ * Resolve Tailwind utility classes to Markdown emphasis and visibility. Mirrors
+ * the Rust core (crates/core/src/tailwind.rs): within each group the class at
+ * the widest breakpoint wins, and source order breaks ties, so `hidden md:block`
+ * stays visible.
  */
-function sortByBreakpoint(classes: string[]): string[] {
-  const breakpointOrder: Record<string, number> = {
-    '': 0, // Base/mobile (no breakpoint)
-    'sm:': 1,
-    'md:': 2,
-    'lg:': 3,
-    'xl:': 4,
-    '2xl:': 5,
+function processTailwindClasses(classAttr: string): TailwindNodeData {
+  let weight = UNSET
+  let emphasis = UNSET
+  let decoration = UNSET
+  let displayHidden = UNSET
+  let positionHidden = UNSET
+
+  const length = classAttr.length
+  let index = 0
+  while (index < length) {
+    while (index < length && classAttr.charCodeAt(index) <= 32)
+      index++
+    if (index >= length)
+      break
+    const start = index
+    while (index < length && classAttr.charCodeAt(index) > 32)
+      index++
+    const cls = classAttr.slice(start, index)
+    const breakpoint = breakpointOf(cls)
+    const base = breakpoint ? cls.slice(BREAKPOINT_PREFIX_LENGTH[breakpoint]) : cls
+    switch (base) {
+      case 'italic':
+        emphasis = supersede(emphasis, breakpoint, true)
+        break
+      case 'not-italic':
+        emphasis = supersede(emphasis, breakpoint, false)
+        break
+      case 'font-bold':
+      case 'font-semibold':
+      case 'font-black':
+      case 'font-extrabold':
+      case 'font-medium':
+      case 'bold':
+        weight = supersede(weight, breakpoint, true)
+        break
+      case 'line-through':
+      case 'underline':
+        decoration = supersede(decoration, breakpoint, true)
+        break
+      case 'no-underline':
+        decoration = supersede(decoration, breakpoint, false)
+        break
+      case 'hidden':
+        displayHidden = supersede(displayHidden, breakpoint, true)
+        break
+      case 'block':
+      case 'flex':
+      case 'inline':
+        displayHidden = supersede(displayHidden, breakpoint, false)
+        break
+      case 'absolute':
+      case 'fixed':
+      case 'sticky':
+        positionHidden = supersede(positionHidden, breakpoint, true)
+        break
+      case 'static':
+      case 'relative':
+        positionHidden = supersede(positionHidden, breakpoint, false)
+        break
+      default:
+        if (base.includes('font-'))
+          weight = supersede(weight, breakpoint, false)
+        else if (base.includes('invisible'))
+          displayHidden = supersede(displayHidden, breakpoint, true)
+    }
   }
 
-  return classes.toSorted((a, b) => {
-    const aBreakpoint = extractBaseClass(a).breakpoint
-    const bBreakpoint = extractBaseClass(b).breakpoint
-    return (breakpointOrder[aBreakpoint] || 0) - (breakpointOrder[bBreakpoint] || 0)
-  })
-}
-
-/**
- * Group classes by their formatting type to handle overrides
- */
-function groupByFormattingType(classes: string[]): Record<string, string[]> {
-  const sorted = sortByBreakpoint(classes)
-  const groups: Record<string, string[]> = {
-    emphasis: [], // italic, etc.
-    weight: [], // bold, etc.
-    decoration: [], // strikethrough, etc.
-    display: [], // hidden, etc.
-    position: [], // absolute, fixed, etc.
-    other: [],
-  }
-
-  for (const cls of sorted) {
-    const { baseClass } = extractBaseClass(cls)
-
-    if (baseClass.includes('italic')) {
-      groups.emphasis?.push(cls)
-    }
-    else if (baseClass.includes('font-') || baseClass === 'bold') {
-      groups.weight?.push(cls)
-    }
-    else if (baseClass.includes('line-through') || baseClass.includes('underline')) {
-      groups.decoration?.push(cls)
-    }
-    else if (baseClass === 'hidden' || baseClass.includes('invisible')) {
-      groups.display?.push(cls)
-    }
-    else if (['absolute', 'fixed', 'sticky'].includes(baseClass)) {
-      groups.position?.push(cls)
-    }
-    else {
-      groups.other?.push(cls)
-    }
-  }
-
-  return groups
-}
-
-/**
- * Normalizes a list of Tailwind classes by processing breakpoints and resolving conflicts
- */
-function normalizeClasses(classes: string[]): string[] {
-  // Track which classes we want to include in our final set
-  const result: string[] = []
-
-  // Process non-breakpoint classes first (mobile-first)
-  const mobileClasses = classes.filter(cls => !hasBreakpoint(cls))
-  const breakpointClasses = classes.filter(cls => hasBreakpoint(cls))
-
-  // Add all mobile classes first
-  result.push(...mobileClasses)
-
-  // Then add breakpoint classes
-  result.push(...breakpointClasses)
-
-  return result
-}
-
-/**
- * Check if a class has a breakpoint prefix
- */
-function hasBreakpoint(className: string): boolean {
-  const { breakpoint } = extractBaseClass(className)
-  return breakpoint !== ''
-}
-
-/**
- * Process Tailwind classes for an element with mobile-first approach
- */
-function processTailwindClasses(classes: string[]): TailwindNodeData {
   let prefix = ''
   let suffix = ''
-  let hidden = false
-
-  // Normalize the class list to resolve conflicts and apply mobile-first approach
-  const normalizedClasses = normalizeClasses(classes)
-
-  // Group classes by function
-  const grouped = groupByFormattingType(normalizedClasses)
-
-  // Process weight (bold) classes
-  if (grouped.weight && grouped.weight.length > 0) {
-    const { baseClass } = extractBaseClass(grouped.weight[0]!)
-    const mapping = TAILWIND_TO_MARKDOWN_MAP[baseClass]
-    if (mapping) {
-      if (mapping.prefix)
-        prefix += mapping.prefix
-      if (mapping.suffix)
-        suffix = mapping.suffix + suffix
-    }
+  if (weight !== UNSET && weight & 1) {
+    prefix += '**'
+    suffix += '**'
   }
-
-  // Process emphasis (italic) classes
-  if (grouped.emphasis && grouped.emphasis.length > 0) {
-    const { baseClass } = extractBaseClass(grouped.emphasis[0]!)
-    const mapping = TAILWIND_TO_MARKDOWN_MAP[baseClass]
-    if (mapping) {
-      if (mapping.prefix)
-        prefix += mapping.prefix
-      if (mapping.suffix)
-        suffix = mapping.suffix + suffix
-    }
+  if (emphasis !== UNSET && emphasis & 1) {
+    prefix += '*'
+    suffix = `*${suffix}`
   }
-
-  // Process decoration (strikethrough) classes
-  if (grouped.decoration && grouped.decoration.length > 0) {
-    const { baseClass } = extractBaseClass(grouped.decoration[0]!)
-    const mapping = TAILWIND_TO_MARKDOWN_MAP[baseClass]
-    if (mapping) {
-      if (mapping.prefix)
-        prefix += mapping.prefix
-      if (mapping.suffix)
-        suffix = mapping.suffix + suffix
-    }
+  if (decoration !== UNSET && decoration & 1) {
+    prefix += '~~'
+    suffix = `~~${suffix}`
   }
-
-  // Process display classes (hidden)
-  if (grouped.display) {
-    for (const cls of grouped.display) {
-      const { baseClass } = extractBaseClass(cls)
-      const mapping = TAILWIND_TO_MARKDOWN_MAP[baseClass]
-      if (mapping && mapping.hidden) {
-        hidden = true
-        break
-      }
-    }
-  }
-
-  // Process position classes (absolute, fixed, sticky)
-  if (grouped.position) {
-    for (const cls of grouped.position) {
-      const { baseClass } = extractBaseClass(cls)
-      const mapping = TAILWIND_TO_MARKDOWN_MAP[baseClass]
-      if (mapping && mapping.hidden) {
-        hidden = true
-        break
-      }
-    }
-  }
-
+  const hidden = (displayHidden !== UNSET && (displayHidden & 1) === 1)
+    || (positionHidden !== UNSET && (positionHidden & 1) === 1)
   return { prefix, suffix, hidden }
 }
 
@@ -241,8 +139,8 @@ export function tailwindPlugin(): TransformPlugin {
     excludesOverflowSubtree(node) {
       if ((node.parent as ElementNode | undefined)?.context?.tailwind?.hidden)
         return true
-      const classes = node.attributes?.class?.trim().split(' ').filter(Boolean)
-      return classes ? processTailwindClasses(classes).hidden : false
+      const classAttr = node.attributes?.class
+      return classAttr ? processTailwindClasses(classAttr).hidden : false
     },
 
     // Process node attributes to extract Tailwind classes
@@ -258,8 +156,7 @@ export function tailwindPlugin(): TransformPlugin {
       let suffix = ''
       let hidden = false
       if (classAttr) {
-        const classes = classAttr.trim().split(' ').filter(Boolean)
-        const result = processTailwindClasses(classes)
+        const result = processTailwindClasses(classAttr)
         prefix = result.prefix
         suffix = result.suffix
         hidden = result.hidden

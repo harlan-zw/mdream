@@ -57,8 +57,9 @@ function createIsolateMainHooks(): TransformPlugin {
       if (node.type === ELEMENT_NODE) {
         const element = node as ElementNode
 
-        // Priority 1: Look for explicit <main> element first (within 5 depth)
-        if (!mainElement && element.tagId === TAG_MAIN && element.depth <= 5) {
+        // Priority 1: an explicit <main> element within 50 levels, as in Rust.
+        // Wikipedia nests its <main> about 36 levels deep.
+        if (!mainElement && element.tagId === TAG_MAIN && element.depth <= 50) {
           mainElement = element
           return // Include the main element
         }
