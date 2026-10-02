@@ -67,6 +67,11 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     'a<blockquote><blockquote></blockquote></blockquote>',
     '<li><blockquote>',
   ],
+  'a nested pre stays inside the outer fence': [
+    '<pre><li><pre><li><blockquote>x<code>',
+    '<pre><li><pre><li><blockquote>x<li>',
+    '<pre><pre><code>x</code></pre>y</pre>',
+  ],
   'final trim keeps non-ASCII spaces': [
     '<p>a&nbsp;</p>',
     'd&nbsp',
@@ -96,13 +101,4 @@ describe('javaScript engine matches Rust output', () => {
       }
     })
   }
-
-  // The fence opens inside a quote and closes after it. The lines before the
-  // quote differ through the separate pre-in-pre difference.
-  it('code fence in a quote inside pre', () => {
-    const html = '<pre><li><pre><li><blockquote>x<code>'
-    const rust = htmlToMarkdown(html)
-    const js = jsHtmlToMarkdown(html)
-    expect(js.slice(js.indexOf('> x'))).toBe(rust.slice(rust.indexOf('> x')))
-  })
 })

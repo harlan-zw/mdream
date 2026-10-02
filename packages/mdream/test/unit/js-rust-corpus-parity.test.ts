@@ -26,9 +26,6 @@ const KNOWN_DIFFERENCES = new Set<string>([
   ['text', '<pre>a<b>bold</b>\n<br>after br</pre>'],
   ['text', '<pre>x\n  </pre><p>After</p>'],
   ['text', '<html><head><title>A</title><meta name="description" content="da"></head><body><header>x</header><h1>A</h1><p>a</p><footer>f</footer></body></html>'],
-  // Rust closes the outer fence at a <pre> nested in a <pre>.
-  ['markdown', '<pre><li><pre><li><blockquote>x<code>'],
-  ['markdown', '<pre><li><pre><li><blockquote>x<li>'],
 ].map(([format, html]) => `${format}\u0000${html}`))
 
 describe('javaScript and Rust engines agree on the corpus', () => {

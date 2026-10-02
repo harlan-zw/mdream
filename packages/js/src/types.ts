@@ -297,8 +297,9 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
    * <pre> fenced-code deferral (issue #97). See MarkdownState for semantics.
    */
   preFencePending?: boolean
+  preFencePendingDepth?: number
   preFenceLang?: string
-  preFenceOpen?: boolean
+  preFenceOwnerDepth?: number
   /** Number of default blockquotes currently buffered for line prefixing. */
   bufferedBlockquoteDepth?: number
   /** Content-column prefix deferred after a list item rule. */
