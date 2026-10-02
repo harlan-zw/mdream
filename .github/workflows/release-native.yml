@@ -50,6 +50,10 @@ jobs:
 
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # The Windows PowerShell pnpm shim silently skips install and exec.
+        shell: bash
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
