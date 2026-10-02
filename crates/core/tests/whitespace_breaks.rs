@@ -1,5 +1,5 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
-use mdream::types::{HTMLToMarkdownOptions, PluginConfig, TagOverrideConfig};
+use mdream::types::{CleanConfig, HTMLToMarkdownOptions, PluginConfig, TagOverrideConfig};
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
 fn md(html: &str) -> String {
@@ -145,6 +145,59 @@ fn retracted_inline_marker_after_a_hard_break_keeps_the_blank_line() {
       );
     }
   }
+}
+
+/// One-shot output, and streamed output at every chunk size, equal `expected`.
+fn assert_every_chunking(html: &str, options: &HTMLToMarkdownOptions, expected: &str) {
+  assert_eq!(
+    html_to_markdown(html, options.clone()),
+    expected,
+    "html={html}"
+  );
+  for chunk in 1..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "html={html} chunk={chunk}");
+  }
+}
+
+#[test]
+fn output_after_a_hard_break_leaves_one_paragraph_separator() {
+  // Output after the break reopens its line, so a block inside the item gets
+  // the separator it gets without the break, never a second one.
+  let options = HTMLToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<li>q<br>t<p>X", "- q  \n  t\n\n  X"),
+    ("<li><p>q<br>t</p><p>X", "- q  \n  t\n\n  X"),
+    ("<li>q<br><span>t</span><p>X", "- q  \n  t\n\n  X"),
+    ("<li>q<br>t<div>X", "- q  \n  t X"),
+    ("<li><b>q<br></b><p>X", "- **q  \n  **\n\n  X"),
+    ("<li><a href=\"/x\">q<br></a><p>X", "- [q  \n  ](/x)\n\n  X"),
+    ("<li><blockquote>q<br></blockquote><p>X", "- \n  > q\n\n  X"),
+    (
+      "<li>q<br><figcaption>c</figcaption><p>X",
+      "- q  \n\n  *c*\n\n  X",
+    ),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+  // A skipped link writes no brackets, but its text still follows the break.
+  let empty_links = HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_links: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_every_chunking(
+    "<li>q<br><a href=\"javascript:void(0)\">t</a><p>X",
+    &empty_links,
+    "- q  \n  t\n\n  X",
+  );
 }
 
 // ── <br> inside <pre> ──

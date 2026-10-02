@@ -669,6 +669,9 @@ impl ConvertState {
       return;
     }
 
+    // Quoting rewrites only lines before `flush_end` and keeps the tail after
+    // it, so a hard break the output ends with still ends it afterwards.
+    let break_at_end = self.hard_break_end == self.buffer.len();
     let shared_start = self.blockquotes[0].content_start;
     if self
       .blockquotes
@@ -729,6 +732,9 @@ impl ConvertState {
       }
       self.last_content_cache_len = self.buffer.len() - flush_end;
       self.invalidate_line_start();
+      if break_at_end {
+        self.hard_break_end = self.buffer.len();
+      }
       return;
     }
 
@@ -776,6 +782,9 @@ impl ConvertState {
     }
     self.last_content_cache_len = self.buffer.len() - flush_end;
     self.invalidate_line_start();
+    if break_at_end {
+      self.hard_break_end = self.buffer.len();
+    }
   }
 
   /// Override keyed by built-in tag id, via the precomputed table. `idx` is
@@ -977,7 +986,7 @@ impl ConvertState {
     // literal text. The break's indent spaces are trimmed first; whatever line
     // break remains counts toward the two the separator needs.
     if !self.plain_text
-      && self.after_hard_break
+      && self.hard_break_end == self.buffer.len()
       && !enter_is_literal
       && matches!(tag_id, Some(TAG_P | TAG_DIV | TAG_PRE | TAG_TABLE))
       && self.depth_map[TAG_LI as usize] > 0
@@ -986,7 +995,7 @@ impl ConvertState {
       // any deeper this boundary sits inside literal fence content.
       && self.depth_map[TAG_PRE as usize] <= u16::from(tag_id == Some(TAG_PRE))
     {
-      self.after_hard_break = false;
+      self.hard_break_end = usize::MAX;
       self.trim_trailing_spaces();
       let new_lines = 2usize.saturating_sub(self.trailing_new_lines() as usize);
       let mut separator = String::with_capacity(new_lines + self.list_indent.len());
@@ -1165,10 +1174,6 @@ impl ConvertState {
     }
 
     let output_start = self.buffer.len();
-    // The enter write below retires any pending hard-break state, and the
-    // openers recorded after it may later be truncated back to here; remember
-    // the pre-write value so that rewind can restore the state with the bytes.
-    let enter_after_hard_break = self.after_hard_break;
     self.write_output(
       true,
       is_inline,
@@ -1260,7 +1265,6 @@ impl ConvertState {
             content_start,
             opener_emitted,
             exhausted: false,
-            after_hard_break: enter_after_hard_break,
           });
         }
       } else if self.pre_fence_owner_depth == 0
@@ -1336,11 +1340,12 @@ impl ConvertState {
       && self.buffer.len() > output_start
       && self.buffer.ends_with(emitted)
     {
+      let marker_start = self.buffer.len() - emitted.len();
       self.open_markers.push(OpenMarker {
-        output_start: self.buffer.len() - emitted.len(),
+        output_start: marker_start,
         content_start: self.buffer.len(),
         kind: inline_marker_type,
-        after_hard_break: enter_after_hard_break,
+        starts_at_hard_break: self.hard_break_end == marker_start,
       });
     } else if !self.open_markers.is_empty()
       && !(tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0)
@@ -1883,9 +1888,9 @@ impl ConvertState {
         // code in a list can emit " `"), but excludes normal surrounding
         // spacing synthesized by write_output.
         self.truncate_buffer(open_marker.output_start);
-        // The retracted write never reached the reader, so it must not retire
-        // a hard-break state the buffer still ends with.
-        self.after_hard_break = open_marker.after_hard_break;
+        if open_marker.starts_at_hard_break {
+          self.hard_break_end = open_marker.output_start;
+        }
         self.last_content_cache_len = 0;
         self.reset_empty_tentative_caption_frames();
         self.last_node_is_inline = is_inline;
@@ -1913,9 +1918,6 @@ impl ConvertState {
       if !has_override {
         if span.opener_emitted && span.exhausted && self.buffer.len() == span.content_start {
           self.truncate_buffer(span.output_start);
-          // The retracted write never reached the reader, so it must not retire
-          // a hard-break state the buffer still ends with.
-          self.after_hard_break = span.after_hard_break;
           output = None;
         } else if span.opener_emitted {
           output = Some(Cow::Owned(self.finalize_code_span(&span)));
@@ -4364,15 +4366,9 @@ impl ConvertState {
     // leaving the paragraph open, so a following block boundary inside a list
     // item still owes the paragraph separator. Its fragment always starts with
     // the two-space break marker (`  \n`, plus the continuation indent); a
-    // bare `\n` is a structural boundary, which closes the line for good. A
-    // no-op write (spacing reset only) changes nothing; any other completed
-    // write supersedes the state.
-    if is_enter && !literal {
-      if output_str.starts_with("  \n") {
-        self.after_hard_break = true;
-      } else if configured_new_lines > 0 || !output_str.is_empty() {
-        self.after_hard_break = false;
-      }
+    // bare `\n` is a structural boundary, which closes the line for good.
+    if is_enter && !literal && output_str.starts_with("  \n") {
+      self.hard_break_end = self.buffer.len();
     }
     self.last_node_is_inline = is_inline;
   }
