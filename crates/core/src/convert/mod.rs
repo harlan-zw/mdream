@@ -789,6 +789,9 @@ pub struct ConvertState {
   cut_line_lead: CutLineLead,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
+  /// Bytes read to decide whether held line-break runs are final.
+  #[cfg(test)]
+  break_run_scanned: usize,
   #[cfg(test)]
   heading_run_bytes_read: usize,
   /// tag_id -> index into `tag_overrides`; `NO_OVERRIDE` means no key. Boxed:
@@ -952,6 +955,9 @@ impl ConvertState {
       list_rule_pending: false,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
+      #[cfg(test)]
+      #[cfg(test)]
+      break_run_scanned: 0,
       #[cfg(test)]
       heading_run_bytes_read: 0,
     };
@@ -2435,14 +2441,22 @@ impl ConvertState {
       }
       stable_end = end;
     }
-    for run in &self.streaming_break_runs {
-      if run.output_end > stable_end
-        || !self.buffer[run.output_end..stable_end]
-          .bytes()
-          .any(|byte| !is_whitespace(byte))
+    if !self.streaming_break_runs.is_empty() {
+      // A run is final once content follows it. Find the last content byte once:
+      // rescanning the tail after every run cost the square of a long run of
+      // breaks separated only by whitespace.
+      let content_end = self.buffer.as_bytes()[..stable_end]
+        .iter()
+        .rposition(|&byte| !is_whitespace(byte));
+      #[cfg(test)]
       {
-        stable_end = stable_end.min(run.output_start);
-        break;
+        self.break_run_scanned += stable_end - content_end.map_or(0, |end| end);
+      }
+      for run in &self.streaming_break_runs {
+        if run.output_end > stable_end || content_end.is_none_or(|end| end < run.output_end) {
+          stable_end = stable_end.min(run.output_start);
+          break;
+        }
       }
     }
     // `last_yielded_length` is an absolute buffer offset (see drain below).
