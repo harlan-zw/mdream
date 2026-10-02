@@ -2205,7 +2205,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     resolveItemMarker(state, false, unresolvedCaptionFragment)
     const content = state.buffer.join('')
     const currentContent = hasYieldedContent ? content : trimOutputStart(content)
-    const inPre = state.depthMap[TAG_PRE] !== 0
+    // Before a <pre> opens its fence, its tail is still the block spacing its
+    // own enter wrote, which finalization trims. Only past the fence is
+    // trailing whitespace code.
+    const inPre = state.depthMap[TAG_PRE] !== 0 && state.preFenceOwnerDepth !== 0
     let stableLength = currentContent.length
     let retainMutableFragments = false
     if (inPre) {

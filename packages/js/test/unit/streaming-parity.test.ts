@@ -750,6 +750,10 @@ describe('streaming parity with the Rust core', () => {
       expect(await streamConvert(html, chunkSize, { format: 'text' }), `chunk size ${chunkSize}`).toBe(expected)
   })
 
+  it.each(['a <pre></pre>', '#<pre>', '<p>a</p><pre> </pre><p>b</p>'])('holds the spacing before an unopened pre fence in %s', async (html) => {
+    await expectStreamingParity(html)
+  })
+
   it('drops the trailing newlines of a final pre in a text stream', async () => {
     await expectStreamingParity('<pre><code>alpha\n\n</code></pre>', { format: 'text' })
   })
