@@ -609,6 +609,19 @@ describe('streaming parity with the Rust core', () => {
     await expectStreamingParity(html, options)
   })
 
+  it('streams the content of a blockquote whose exit a plugin skips', async () => {
+    const html = 'a <blockquote>x'
+    const options: Partial<MdreamOptions> = {
+      plugins: [createPlugin({
+        beforeNodeProcess(event) {
+          return { skip: event.type === NodeEventExit && 'name' in event.node && event.node.name === 'blockquote' }
+        },
+      })],
+    }
+    expect(convertOnce(html, options)).toContain('x')
+    await expectStreamingParity(html, options)
+  })
+
   it('protects raw link text when an empty-buffer path emits the opener', async () => {
     const html = '<details><a href="/x">a[b]</a></details>'
     const options: Partial<MdreamOptions> = {
@@ -727,6 +740,18 @@ describe('streaming parity with the Rust core', () => {
 
   it('keeps text after an empty quotation split across chunks', async () => {
     await expectStreamingParity('<p>a<q></q>b</p>', { format: 'text' })
+  })
+
+  it('holds the whitespace before a retracting quotation opener in a text stream', async () => {
+    const html = 'a <q></q>'
+    const expected = htmlToText(html)
+    expect(expected).toBe('a')
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize, { format: 'text' }), `chunk size ${chunkSize}`).toBe(expected)
+  })
+
+  it.each(['a <pre></pre>', '#<pre>', '<p>a</p><pre> </pre><p>b</p>'])('holds the spacing before an unopened pre fence in %s', async (html) => {
+    await expectStreamingParity(html)
   })
 
   it('drops the trailing newlines of a final pre in a text stream', async () => {

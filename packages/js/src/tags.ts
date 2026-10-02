@@ -550,7 +550,7 @@ export const tagHandlers: Record<number, TagHandler> = {
         }
         // A fence is already open for this <pre>: the <pre> opened it (mixed text
         // + <code> children) or an earlier <code> sibling did.
-        if (state.preFenceOpen) {
+        if (state.preFenceOwnerDepth) {
           return undefined
         }
         const language = getLanguageFromClass(node.attributes?.class)
