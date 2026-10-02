@@ -2231,8 +2231,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
         )
     // Every open quote rewrites from its own fragment at exit, so the earliest
     // frame bounds the hold. Malformed trees can push a later frame at a
-    // smaller fragment, so scan rather than reading the first frame only.
-    for (let index = 0; index < state.blockquotes.length; index++) {
+    // smaller fragment, so scan rather than reading the first frame only. A
+    // frame left open at the final call lost its exit to a plugin.
+    const quoteHoldCount = final ? 0 : state.blockquotes.length
+    for (let index = 0; index < quoteHoldCount; index++) {
       const fragment = state.blockquotes[index]!.fragment
       if (fragment < heldFragment)
         heldFragment = fragment

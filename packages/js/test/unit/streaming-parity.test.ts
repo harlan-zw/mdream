@@ -609,6 +609,19 @@ describe('streaming parity with the Rust core', () => {
     await expectStreamingParity(html, options)
   })
 
+  it('streams the content of a blockquote whose exit a plugin skips', async () => {
+    const html = 'a <blockquote>x'
+    const options: Partial<MdreamOptions> = {
+      plugins: [createPlugin({
+        beforeNodeProcess(event) {
+          return { skip: event.type === NodeEventExit && 'name' in event.node && event.node.name === 'blockquote' }
+        },
+      })],
+    }
+    expect(convertOnce(html, options)).toContain('x')
+    await expectStreamingParity(html, options)
+  })
+
   it('protects raw link text when an empty-buffer path emits the opener', async () => {
     const html = '<details><a href="/x">a[b]</a></details>'
     const options: Partial<MdreamOptions> = {
