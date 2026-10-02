@@ -200,6 +200,29 @@ fn output_after_a_hard_break_leaves_one_paragraph_separator() {
   );
 }
 
+#[test]
+fn dropped_construct_after_a_hard_break_keeps_the_blank_line() {
+  // Dropping an empty link rewinds the output to the break's line end, as an
+  // empty inline pair does, even when the dropped part held a break of its own.
+  let empty_link_text = HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_link_text: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<li>q<br><a href=\"/x\"></a><p>X",
+    "<li>q<br><a href=\"/x\"> </a><div>X",
+    "<li>q<br><a href=\"/x\"><em></em></a><p>X",
+    "<li>q<br><a href=\"/x\"><br></a><p>X",
+    "<li>q<br><em><br></em><p>X",
+    "<li>q<br><em><br><br></em><p>X",
+  ] {
+    assert_every_chunking(html, &empty_link_text, "- q  \n\n  X");
+  }
+}
+
 // ── <br> inside <pre> ──
 
 #[test]

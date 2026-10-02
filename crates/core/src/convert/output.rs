@@ -140,6 +140,7 @@ impl ConvertState {
       raw_html_open,
       open: true,
       begin_depth: self.depth,
+      starts_at_hard_break: self.hard_break_end == bracket_pos,
       ..Default::default()
     };
   }
@@ -1659,6 +1660,9 @@ impl ConvertState {
         // emptyLinkText: [](url) → drop entirely
         if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
           self.truncate_buffer(bracket_pos);
+          if self.link.starts_at_hard_break {
+            self.hard_break_end = self.link.bracket_pos;
+          }
           for (frame, &(count, has_internal_break)) in self
             .caption_frames
             .iter_mut()

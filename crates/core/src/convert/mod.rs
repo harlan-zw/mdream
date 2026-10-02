@@ -222,6 +222,9 @@ struct LinkOutputState {
   /// the depth mismatch identifies the stale state so its bracket is never
   /// treated as this anchor's own.
   begin_depth: usize,
+  /// The `[` starts where the latest hard break ends; see
+  /// `OpenMarker::starts_at_hard_break`.
+  starts_at_hard_break: bool,
 }
 
 struct FragmentLink {
