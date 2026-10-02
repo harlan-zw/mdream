@@ -1543,6 +1543,41 @@ fn a_code_fence_holds_at_most_the_cap() {
   }
 }
 
+// Inside a list item every fence line also carries the list indent. A single
+// node within the cap used to be charged only for its raw text, so a deep list
+// multiplied it into a fence many times the cap.
+#[test]
+fn list_indentation_counts_against_a_code_fence_cap() {
+  let html = format!(
+    "{}<pre><code>{}</code></pre><p>after</p>",
+    "<ul><li>".repeat(100),
+    "a\n".repeat(CAP / 4)
+  );
+  let uncapped = peak(&html, 8 * 1024, 0);
+  let capped = peak(&html, 8 * 1024, CAP);
+  assert!(
+    uncapped > (32 * CAP) as u64,
+    "fixture should expand the fence uncapped, got {uncapped}"
+  );
+  assert!(
+    capped < (8 * CAP) as u64,
+    "capped peak {capped} should be a window, not the expanded fence"
+  );
+  let mut p = MarkdownStreamProcessor::new(options(CAP));
+  let out = p.process_chunk(&html) + &p.finish();
+  assert!(p.truncated());
+  assert!(
+    out.len() < 2 * CAP,
+    "output {} should stay near the cap",
+    out.len()
+  );
+  assert!(
+    out.ends_with("after"),
+    "{}",
+    &out[out.len().saturating_sub(40)..]
+  );
+}
+
 // Past an inline code span's cap a caption's `*` is dropped, which left a trim
 // free to take the caption's content start and panicked its close.
 #[test]
@@ -1712,9 +1747,9 @@ fn a_dropped_header_does_not_align_a_retained_column() {
 
 // Short nodes can still pin the buffer when an open construct keeps its output
 // from being yielded: a quote releases completed lines only and none past an open
-// link or caption, a heading holds its trailing `#` run, and a self-link heading
-// holds its text. The cap charges that held output and cuts the document at the
-// token where it passes.
+// link or caption, a heading holds its trailing `#` run, a self-link heading
+// holds its text, and so does a link while that text is blank. The cap charges
+// that held output and cuts the document at the token where it passes.
 #[test]
 fn held_back_output_is_capped() {
   let self_links = || HTMLToMarkdownOptions {
@@ -1786,6 +1821,20 @@ fn held_back_output_is_capped() {
       },
     ),
     (
+      "blank link text",
+      format!(
+        "<p>before</p><p><a href=\"/x\">{}</a></p><p>after</p>",
+        repeat_to("&#x3000;<!---->&nbsp;<span></span>", HUGE)
+      ),
+      HTMLToMarkdownOptions {
+        clean: Some(CleanConfig {
+          empty_link_text: true,
+          ..Default::default()
+        }),
+        ..options(CAP)
+      },
+    ),
+    (
       "self-link heading",
       format!(
         "<p>before</p><h1><a href=\"#a\">{}</a></h1><p>after</p>",
@@ -1828,6 +1877,65 @@ fn held_back_output_is_capped() {
   }
 }
 
+// A run with no tag in it is emitted in pieces past the flush threshold. Inside
+// a construct holding its output those pieces piled up uncapped until it closed,
+// so a run above the cap cost a multiple of the document.
+#[test]
+fn a_long_text_run_held_back_is_capped() {
+  let cap = 2 * CAP;
+  let self_links = HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      self_link_headings: true,
+      ..Default::default()
+    }),
+    ..options(cap)
+  };
+  for (name, html, opts) in [
+    (
+      "quote",
+      format!("<blockquote>{}</blockquote>", repeat_to("a b ", HUGE)),
+      options(cap),
+    ),
+    (
+      "escaped quote",
+      format!(
+        "<blockquote><ul><li>{}</li></ul></blockquote>",
+        repeat_to("> ", HUGE)
+      ),
+      options(cap),
+    ),
+    (
+      "heading hashes",
+      format!("<h2>x {}</h2>", repeat_to("#", HUGE)),
+      options(cap),
+    ),
+    (
+      "self-link heading",
+      format!("<h2><a href=\"#x\">{}</a></h2>", repeat_to("a b ", HUGE)),
+      self_links,
+    ),
+  ] {
+    // Measured 2-5x the document before, a quarter to a half of it now.
+    let capped = peak_with(&html, 4096, opts.clone());
+    assert!(capped < HUGE as u64, "{name}: capped peak {capped}");
+    let batch = html_to_markdown_result(&html, opts.clone());
+    assert!(batch.truncated, "{name}");
+    for chunk in [4096, 64 * 1024] {
+      let mut p = MarkdownStreamProcessor::new(opts.clone());
+      let mut out = String::new();
+      for c in html.as_bytes().chunks(chunk) {
+        out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+      }
+      out.push_str(&p.finish());
+      assert_eq!(
+        (out, p.truncated()),
+        (batch.markdown.clone(), true),
+        "{name} chunk={chunk}"
+      );
+    }
+  }
+}
+
 #[test]
 fn a_long_quote_of_short_lines_is_not_held_back() {
   let html = format!(
@@ -1841,6 +1949,83 @@ fn a_long_quote_of_short_lines_is_not_held_back() {
   );
   let batch = html_to_markdown_result(&html, options(CAP));
   assert_eq!((batch.markdown, batch.truncated), (uncapped, false));
+}
+
+// A first item whose marker sits right under its parent's line owes a blank line
+// when a block opens it on the next line. That is known once the block writes,
+// yet the marker's line was held until the item's exit, pinning everything the
+// item wrote outside the cap. Text on the marker line settles it the other way,
+// but only a drain did, so one-shot kept a quote after it held and truncated.
+#[test]
+fn an_item_opened_by_a_block_is_not_held_back() {
+  let paras = repeat_to("<p>para</p>", HUGE);
+  for (name, html) in [
+    (
+      "under text",
+      format!("<ul><li>text<ul><li><blockquote>q</blockquote>{paras}</li></ul></li></ul>"),
+    ),
+    (
+      "under a bare marker",
+      format!("<ul><li><ul><li><blockquote>q</blockquote>{paras}</li></ul></li></ul>"),
+    ),
+    (
+      "table",
+      format!("<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table>{paras}"),
+    ),
+    (
+      "quote after text",
+      format!("<ul><li><ul><li>t<blockquote>{paras}</blockquote></li></ul></li></ul>"),
+    ),
+  ] {
+    let uncapped = stream(&html, 8 * 1024, 0);
+    let batch = html_to_markdown_result(&html, options(CAP));
+    assert_eq!(
+      (batch.markdown.as_str(), batch.truncated),
+      (uncapped.as_str(), false),
+      "{name}"
+    );
+    for chunk in [37, 8 * 1024, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, chunk, CAP),
+        (uncapped.clone(), false),
+        "{name} chunk={chunk}"
+      );
+    }
+    let capped = peak(&html, 8 * 1024, CAP);
+    assert!(capped < (8 * CAP) as u64, "{name}: capped peak {capped}");
+  }
+}
+
+// A link stops holding once its text is not blank, however long it gets.
+#[test]
+fn a_link_with_text_is_not_held_back() {
+  let opts = |cap| HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_link_text: true,
+      ..Default::default()
+    }),
+    ..options(cap)
+  };
+  let html = format!(
+    "<p><a href=\"/x\">&#x3000;<!---->{}</a></p><p>after</p>",
+    repeat_to("word&#x3000;<!---->", HUGE)
+  );
+  let uncapped = html_to_markdown_result(&html, opts(0)).markdown;
+  let batch = html_to_markdown_result(&html, opts(CAP));
+  assert_eq!((batch.markdown, batch.truncated), (uncapped.clone(), false));
+  for chunk in [37, 8 * 1024] {
+    let mut p = MarkdownStreamProcessor::new(opts(CAP));
+    let mut out = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(
+      (out, p.truncated()),
+      (uncapped.clone(), false),
+      "chunk={chunk}"
+    );
+  }
 }
 
 // Output that stays between two short `#` runs splits them, however much `#`
@@ -1863,5 +2048,51 @@ fn heading_hashes_split_by_kept_output_are_not_held_back() {
         "{unit} chunk={chunk}"
       );
     }
+  }
+}
+
+// A `<br>` run held for content to follow it is kept as one copy and a count, and
+// expands to the count times the item's indent only when yielded: a few KB of
+// breaks in a deep list became megabytes in one chunk. The cap charges every
+// break written since the last text, so runs that each fit but are held together
+// are cut too.
+#[test]
+fn held_break_runs_are_capped() {
+  let nest = "<ol start=999999999><li>".repeat(64);
+  let breaks = "<br>".repeat(4000);
+  let falling = format!("{}</li></ol>", "<br>".repeat(80)).repeat(64);
+  let split = format!("{}<b><br></b><span> </span>", "<br>".repeat(80)).repeat(64);
+  for (name, html) in [
+    ("list item", format!("{nest}x{breaks}y<p>after</p>")),
+    (
+      "caption",
+      format!("{nest}<figure><figcaption>x{breaks}y</figcaption></figure><p>after</p>"),
+    ),
+    ("falling depth", format!("{nest}x{falling}y<p>after</p>")),
+    ("split by markup", format!("{nest}x{split}y<p>after</p>")),
+  ] {
+    let batch = html_to_markdown_result(&html, options(CAP));
+    assert!(batch.truncated, "{name}");
+    assert!(!batch.markdown.contains("after"), "{name}");
+    for chunk in [37, 4096, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, chunk, CAP),
+        (batch.markdown.clone(), true),
+        "{name} chunk={chunk}"
+      );
+    }
+    let capped = peak(&html, 4096, CAP);
+    assert!(capped < (8 * CAP) as u64, "{name}: capped peak {capped}");
+  }
+  // Text ends the runs before it, however many breaks the document holds.
+  let html = format!("{nest}{}z", format!("x{}", "<br>".repeat(80)).repeat(64));
+  let uncapped = html_to_markdown_result(&html, options(0)).markdown;
+  let batch = html_to_markdown_result(&html, options(CAP));
+  assert_eq!((batch.markdown, batch.truncated), (uncapped.clone(), false));
+  for chunk in [37, 4096] {
+    assert_eq!(
+      stream_reporting(&html, chunk, CAP),
+      (uncapped.clone(), false)
+    );
   }
 }

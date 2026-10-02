@@ -235,6 +235,15 @@ impl ConvertState {
     self.push_capped_code_span_content(value, atomic, cap)
   }
 
+  /// Whether [`Self::push_code_span_content`] drops everything it is given.
+  fn drops_code_span_content(&self) -> bool {
+    self.options.max_node_bytes != 0
+      && self
+        .code_spans
+        .first()
+        .is_some_and(|span| !span.opener_emitted || span.exhausted)
+  }
+
   #[cold]
   #[inline(never)]
   fn push_capped_code_span_content(&mut self, value: &str, atomic: bool, cap: usize) -> usize {
@@ -563,6 +572,10 @@ impl ConvertState {
       ];
     }
 
+    #[cfg(test)]
+    {
+      self.quoted_bytes += quoted.len();
+    }
     self.scan_before_requote(content_end);
     self.truncate_buffer(frame.content_start);
     self.buffer.push_str(&quoted);
@@ -660,16 +673,38 @@ impl ConvertState {
     if self
       .blockquotes
       .iter()
-      .all(|frame| frame.content_start == shared_start && frame.list_indent.is_empty())
+      .all(|frame| frame.content_start == shared_start)
     {
       let content = &self.buffer[shared_start..flush_end];
-      let quoted_prefix = "> ".repeat(self.blockquotes.len());
-      let blank_prefix = quoted_prefix.trim_end();
+      // Quoting frame by frame, each frame strips its list indent from the line
+      // the frame inside it wrote, then writes that indent and `>`. Indents are
+      // spaces, and each written line starts with its frame's indent and `>`, so
+      // whether a strip fits depends on the indents alone: every line gets the
+      // same prefix, and only the innermost frame strips from the content.
+      let mut quoted_prefix = String::new();
+      let mut outer_indent = 0;
+      for frame in &self.blockquotes {
+        debug_assert!(frame.list_indent.bytes().all(|byte| byte == b' '));
+        let indent = frame.list_indent.len();
+        let kept = if outer_indent <= indent {
+          indent - outer_indent
+        } else {
+          indent
+        };
+        quoted_prefix.extend(std::iter::repeat_n(' ', kept));
+        quoted_prefix.push_str("> ");
+        outer_indent = indent;
+      }
+      let blank_prefix = &quoted_prefix[..quoted_prefix.len() - 1];
+      let innermost_indent = self.blockquotes[self.blockquotes.len() - 1]
+        .list_indent
+        .as_str();
       let mut quoted = core::mem::take(&mut self.blockquote_scratch);
       quoted.clear();
       quoted.reserve(content.len() + quoted_prefix.len() * content.matches('\n').count());
       for line in content.split_inclusive('\n') {
         let line = line.strip_suffix('\n').unwrap_or(line);
+        let line = line.strip_prefix(innermost_indent).unwrap_or(line);
         if line.is_empty() {
           quoted.push_str(blank_prefix);
         } else {
@@ -677,6 +712,10 @@ impl ConvertState {
           quoted.push_str(line);
         }
         quoted.push('\n');
+      }
+      #[cfg(test)]
+      {
+        self.quoted_bytes += quoted.len();
       }
       self.scan_before_requote(flush_end);
       self.note_buffer_rewrite(shared_start);
@@ -719,6 +758,10 @@ impl ConvertState {
           quoted.push_str(unindented);
         }
         quoted.push('\n');
+      }
+      #[cfg(test)]
+      {
+        self.quoted_bytes += quoted.len();
       }
       self
         .buffer
@@ -1228,11 +1271,11 @@ impl ConvertState {
                 || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0
                   && (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0)))
           });
+        self.link.empty_text_pending =
+          has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
         if self.streaming {
           self.link.hold_forever = self.link.pins_output;
           self.link.hold_released = !has_rewrite_anchor;
-          self.link.empty_text_pending =
-            has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
           self.link.url_max_len = href.map_or(0, |href| {
             6 + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
           });
@@ -2092,6 +2135,16 @@ impl ConvertState {
       && (text.contains('\n') || last_char == Some(b'\n'))
     {
       let indent = self.list_indent.as_str();
+      // The fence holds what is written, indentation included, so that is what
+      // its cap measures. A deep list's indent multiplies each line, and the
+      // check above saw only the raw text: stop building once past the cap.
+      let budget = match &self.code_fence {
+        Some(fence) if self.options.max_node_bytes != 0 => self
+          .options
+          .max_node_bytes
+          .saturating_sub(self.buffer.len().saturating_sub(fence.content_start)),
+        _ => usize::MAX,
+      };
       let mut out = String::with_capacity(text.len() + indent.len() * 2);
       let bytes = text.as_bytes();
       // Prepend indent for the first line when the buffer ended with a
@@ -2108,9 +2161,22 @@ impl ConvertState {
             out.push_str(indent);
           }
           prev = next;
+          if out.len() > budget {
+            break;
+          }
         }
       }
-      out.push_str(&text[prev..]);
+      if out.len() <= budget {
+        out.push_str(&text[prev..]);
+      }
+      if out.len() > budget {
+        self.truncated = true;
+        let kept = clamp_to_char_boundary(&out, budget).len();
+        if kept == 0 {
+          return;
+        }
+        out.truncate(kept);
+      }
       indented_storage = out;
       indented_storage.as_str()
     } else {
@@ -2218,6 +2284,14 @@ impl ConvertState {
 
     if !self.open_markers.is_empty() && text.as_bytes().iter().any(|&b| !is_whitespace(b)) {
       self.open_markers.clear();
+    }
+    // Text ends the breaks held before it, unless a tentative caption can still
+    // retract it and rejoin them.
+    if self.held_break_bytes != 0
+      && self.first_tentative_caption_start().is_none()
+      && text.as_bytes().iter().any(|&b| !is_whitespace(b))
+    {
+      self.held_break_bytes = 0;
     }
 
     if self.options.max_node_bytes != 0
@@ -2471,6 +2545,31 @@ impl ConvertState {
     self.empty_item_hazard = !starts_document && !blank_above;
     self.empty_item_line_start = line_start;
     self.empty_item_len = self.buffer.len();
+  }
+
+  /// Answer the guard between tokens, where the buffer reads the same whatever
+  /// the chunking, once the item's first byte is final: settled content ends
+  /// the buffer and no open construct can take it back. The exit would answer
+  /// the same, and waiting for it pins the marker's line and everything the
+  /// item writes after it, uncharged to `max_node_bytes`. Answered here, the
+  /// blank line also survives a nested list whose first `<li>` dropped it.
+  pub(crate) fn settle_item_marker(&mut self) {
+    if self.buffer.len() > self.empty_item_len
+      && self.buffer.as_bytes().last().is_some_and(|byte| !byte.is_ascii_whitespace())
+      && self.open_markers.is_empty()
+      && self.code_spans.is_empty()
+      && self.code_fence.is_none()
+      && self.depth_map[TAG_A as usize] == 0
+      && self.first_tentative_caption_start().is_none()
+      // The blank line leaves quote frames where they are, right only for those
+      // the item sits in.
+      && self
+        .blockquotes
+        .last()
+        .is_none_or(|frame| frame.content_start <= self.empty_item_line_start)
+    {
+      self.resolve_item_marker(true);
+    }
   }
 
   /// Give a marker that ended up alone on its line the blank line it needs: the
@@ -2852,8 +2951,7 @@ impl ConvertState {
   }
 
   fn defer_streaming_break(&mut self, fragment: &str) -> bool {
-    if !self.streaming
-      || !self.blockquotes.is_empty()
+    if !self.blockquotes.is_empty()
       || self.clean_flags & CLEAN_FRAGMENTS != 0
       || self.has_frontmatter
       || self.has_extraction
@@ -2864,6 +2962,11 @@ impl ConvertState {
     }
 
     if fragment.is_empty() {
+      return false;
+    }
+    // Counted in one-shot conversion too, so the cap cuts both at the same tag.
+    self.held_break_bytes = self.held_break_bytes.saturating_add(fragment.len());
+    if !self.streaming {
       return false;
     }
     if let Some(run) = self.streaming_break_runs.last_mut()
@@ -2996,6 +3099,7 @@ impl ConvertState {
         count: 1,
       });
     }
+    self.held_break_bytes = self.held_break_bytes.saturating_add(fragment.len());
     true
   }
 
@@ -3606,13 +3710,9 @@ impl ConvertState {
         let ordered = _ancestors.last().filter(|p| p.tag_id == Some(TAG_OL));
         let mut s = String::with_capacity(self.list_indent.len() + 6);
         s.push_str(&self.list_indent);
-        if let Some(list) = ordered {
+        if ordered.is_some() {
           use std::fmt::Write;
-          let _ = write!(
-            s,
-            "{}. ",
-            Self::ordered_item_number(list, node.index as usize)
-          );
+          let _ = write!(s, "{}. ", self.ordered_item_number(node.index as usize));
         } else {
           s.push_str("- ");
         }
@@ -3666,6 +3766,11 @@ impl ConvertState {
       TAG_TR => {
         if self.in_table_cell() {
           return Some(Cow::Borrowed("<tr>"));
+        }
+        // Inside a code span past its cap nothing more is written, so classifying
+        // the line only re-read it: one that never ends, once per row.
+        if !node.is_inline && self.drops_code_span_content() {
+          return Some(Cow::Borrowed("| "));
         }
         let indent = if self.depth_map[TAG_LI as usize] > 0 {
           self.list_indent.as_str()
@@ -4303,6 +4408,10 @@ impl ConvertState {
       index -= 1;
     }
     let line = &bytes[index..];
+    #[cfg(test)]
+    self
+      .row_line_scanned
+      .set(self.row_line_scanned.get() + line.len());
     let start = line
       .iter()
       .position(|byte| !matches!(byte, b' ' | b'\t'))
@@ -4357,13 +4466,14 @@ impl ConvertState {
     }
   }
 
-  /// Marker number for an `<ol>`'s nth item. GFM numbers a list from its first
-  /// item's marker, so only that one has to carry `start`.
-  pub(crate) fn ordered_item_number(list: &ElementNode, index: usize) -> u32 {
-    list
-      .attributes
-      .get_bit(ATTR_START)
-      .and_then(|value| parse_bounded_u32(value, MAX_ORDERED_START))
+  /// Marker number for the innermost `<ol>`'s nth item. GFM numbers a list from
+  /// its first item's marker, so only that one has to carry `start`.
+  pub(crate) fn ordered_item_number(&self, index: usize) -> u32 {
+    self
+      .ordered_starts
+      .last()
+      .copied()
+      .flatten()
       .unwrap_or(1)
       .saturating_add(u32::try_from(index).unwrap_or(u32::MAX))
       .min(MAX_ORDERED_START)
@@ -4502,6 +4612,75 @@ mod tests {
 
     assert_eq!(state.gfm_escape_slow_path_calls, 2);
     assert_eq!(state.get_markdown(), "\\* literal\n\n\\* decoded");
+  }
+
+  // Past an exhausted code span's cap a row writes nothing, so the line before
+  // it never ends; classifying that line again for every row was quadratic.
+  #[test]
+  fn rows_in_an_exhausted_code_span_do_not_reread_the_line() {
+    let options = HTMLToMarkdownOptions::default().with_max_node_bytes(1024);
+    let mut state = ConvertState::new(options, 64, OutputFormat::Markdown);
+    let html = format!(
+      "<code>{}<table>{}",
+      "a".repeat(2048),
+      "<tr><td>x</td></tr>".repeat(1000)
+    );
+    assert_eq!(state.process_html(&html), html.len());
+    assert!(state.truncated);
+    assert!(
+      state.row_line_scanned.get() < 16 * 1024,
+      "rows read {} bytes",
+      state.row_line_scanned.get()
+    );
+  }
+
+  // Each quote re-quoted whatever was still unflushed when it closed, so a deep
+  // nest closed within one chunk copied every line once per level.
+  #[test]
+  fn closing_a_deep_quote_nest_quotes_each_line_a_bounded_number_of_times() {
+    let open = "<blockquote>".repeat(64);
+    let body = "<p>x</p>".repeat(4096);
+    for close in ["</blockquote>".repeat(64), String::new()] {
+      let mut state =
+        ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+      let html = format!("{open}{body}{close}");
+      assert_eq!(state.process_html(&html), html.len());
+      state.finalize("");
+      let out = state.get_markdown();
+      assert!(out.starts_with(&"> ".repeat(64)), "{:.140}", out);
+      assert!(
+        state.quoted_bytes <= 2 * out.len(),
+        "closed={}: quoted {} bytes for {} of output",
+        !close.is_empty(),
+        state.quoted_bytes,
+        out.len()
+      );
+    }
+  }
+
+  // Inside list items each frame also strips and writes its indent, which sent
+  // every flush between chunks down the frame-by-frame requote, so each line
+  // cost the square of the depth.
+  #[test]
+  fn flushing_quotes_nested_in_list_items_quotes_each_line_a_bounded_number_of_times() {
+    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    let open = "<blockquote><ul><li>".repeat(32);
+    assert_eq!(state.process_html(&open), open.len());
+    let mut out = String::new();
+    let paragraphs = "<p>para</p>".repeat(400);
+    for _ in 0..100 {
+      assert_eq!(state.process_html(&paragraphs), paragraphs.len());
+      out.push_str(&state.get_markdown_chunk());
+    }
+    state.finalize("");
+    out.push_str(&state.get_final_markdown_chunk());
+    assert!(out.contains(">   >   > - "), "{:.200}", out);
+    assert!(
+      state.quoted_bytes <= 2 * out.len(),
+      "quoted {} bytes for {} of output",
+      state.quoted_bytes,
+      out.len()
+    );
   }
 
   // Each held line-break run used to rescan the whitespace after it for content,
