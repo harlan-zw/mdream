@@ -140,6 +140,7 @@ impl ConvertState {
       raw_html_open,
       open: true,
       begin_depth: self.depth,
+      starts_at_hard_break: self.hard_break_end == bracket_pos,
       ..Default::default()
     };
   }
@@ -669,6 +670,9 @@ impl ConvertState {
       return;
     }
 
+    // Quoting rewrites only lines before `flush_end` and keeps the tail after
+    // it, so a hard break the output ends with still ends it afterwards.
+    let break_at_end = self.hard_break_end == self.buffer.len();
     let shared_start = self.blockquotes[0].content_start;
     if self
       .blockquotes
@@ -729,6 +733,9 @@ impl ConvertState {
       }
       self.last_content_cache_len = self.buffer.len() - flush_end;
       self.invalidate_line_start();
+      if break_at_end {
+        self.hard_break_end = self.buffer.len();
+      }
       return;
     }
 
@@ -776,6 +783,9 @@ impl ConvertState {
     }
     self.last_content_cache_len = self.buffer.len() - flush_end;
     self.invalidate_line_start();
+    if break_at_end {
+      self.hard_break_end = self.buffer.len();
+    }
   }
 
   /// Override keyed by built-in tag id, via the precomputed table. `idx` is
@@ -994,6 +1004,41 @@ impl ConvertState {
           output = None;
         }
       }
+    }
+
+    // A block boundary directly after a hard break keeps the paragraph blank
+    // line at the top level (`q  \n\nX`), where the exit spacing pays for the
+    // break's own newline. Inside a list item every non-`<li>` spacing is
+    // collapsed and the break's continuation indent already ended the line, so
+    // the separator is written here or the paragraph boundary disappears
+    // (`- q  \n  X`). Pre/table joins the set: a fence or GFM table cannot
+    // interrupt a paragraph, so sharing the break's line would render both as
+    // literal text. The break's indent spaces are trimmed first; whatever line
+    // break remains counts toward the two the separator needs.
+    if !self.plain_text
+      && self.hard_break_end == self.buffer.len()
+      && !enter_is_literal
+      && matches!(tag_id, Some(TAG_P | TAG_DIV | TAG_PRE | TAG_TABLE))
+      && self.depth_map[TAG_LI as usize] > 0
+      && !self.in_table_cell()
+      // At a <pre>'s own enter the parser has already counted it (depth 1);
+      // any deeper this boundary sits inside literal fence content.
+      && self.depth_map[TAG_PRE as usize] <= u16::from(tag_id == Some(TAG_PRE))
+    {
+      self.hard_break_end = usize::MAX;
+      self.trim_trailing_spaces();
+      let new_lines = 2usize.saturating_sub(self.trailing_new_lines() as usize);
+      let mut separator = String::with_capacity(new_lines + self.list_indent.len());
+      for _ in 0..new_lines {
+        separator.push('\n');
+      }
+      separator.push_str(&self.list_indent);
+      // Prepend rather than replace: a pre/table enter fragment can carry its
+      // own opener (fence, row marker), which must follow the separator.
+      output = Some(match output {
+        Some(fragment) => Cow::Owned(format!("{separator}{fragment}")),
+        None => Cow::Owned(separator),
+      });
     }
 
     if self.clean_flags & CLEAN_EMPTY_IMAGES != 0
@@ -1321,10 +1366,12 @@ impl ConvertState {
       && self.buffer.len() > output_start
       && self.buffer.ends_with(emitted)
     {
+      let marker_start = self.buffer.len() - emitted.len();
       self.open_markers.push(OpenMarker {
-        output_start: self.buffer.len() - emitted.len(),
+        output_start: marker_start,
         content_start: self.buffer.len(),
         kind: inline_marker_type,
+        starts_at_hard_break: self.hard_break_end == marker_start,
       });
     } else if !self.open_markers.is_empty()
       && !(tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0)
@@ -1543,12 +1590,15 @@ impl ConvertState {
           content_start,
           restore_space,
         } => {
+          // Text commits the frame, so `*`, `~`, a backtick, or `"` here is a
+          // marker, not content. A marker pair around an empty block survives the
+          // empty-pair drop; kept, it would write `****`, a thematic break.
           // In a code span past its cap the caption's `*` is dropped, so a trim
           // can take its content start with it.
           if content_start < self.buffer.len()
             && self.buffer[content_start..]
               .bytes()
-              .any(|byte| !is_whitespace(byte))
+              .any(|byte| !is_whitespace(byte) && !matches!(byte, b'*' | b'~' | b'`' | b'"'))
           {
             caption_exit_spacing = frame.spacing[1];
           } else {
@@ -1643,6 +1693,9 @@ impl ConvertState {
         // emptyLinkText: [](url) → drop entirely
         if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
           self.truncate_buffer(bracket_pos);
+          if self.link.starts_at_hard_break {
+            self.hard_break_end = self.link.bracket_pos;
+          }
           for (frame, &(count, has_internal_break)) in self
             .caption_frames
             .iter_mut()
@@ -1872,6 +1925,9 @@ impl ConvertState {
         // code in a list can emit " `"), but excludes normal surrounding
         // spacing synthesized by write_output.
         self.truncate_buffer(open_marker.output_start);
+        if open_marker.starts_at_hard_break {
+          self.hard_break_end = open_marker.output_start;
+        }
         self.last_content_cache_len = 0;
         self.reset_empty_tentative_caption_frames();
         self.last_node_is_inline = is_inline;
@@ -2151,11 +2207,9 @@ impl ConvertState {
       && text.as_bytes()[0] == b' '
       && matches!(last_char, Some(b' ' | b'\n' | b'\t' | b'\r'))
     {
-      self.last_text_node_contains_whitespace = contains_whitespace;
-      self.has_last_text_node = true;
-      self.last_text_node_depth = depth;
-      self.last_text_node_index = index;
-      self.last_node_is_inline = false;
+      // The space collapses into the whitespace before it and writes nothing,
+      // so it must not arm the reach-back trim: that trim would cut the
+      // previous output (a `<br>` hard break) instead.
       return;
     }
 
@@ -2300,7 +2354,7 @@ impl ConvertState {
 
     let written_from = self.buffer.len();
     if self.wrap_width != 0 && self.can_wrap_here() {
-      self.push_text_wrapped(text, last_char);
+      self.push_text_wrapped(text, last_char, owns_leading_space);
     } else if !(owns_leading_space || (self.plain_text && self.depth_map[TAG_PRE as usize] > 0))
       && self.should_add_spacing_before_text(last_char, text)
     {
@@ -2969,6 +3023,35 @@ impl ConvertState {
     }
   }
 
+  /// Newlines (at most two) that end the output, counted as one contiguous
+  /// run and read through a drain via `flushed_tail`.
+  #[inline]
+  fn trailing_new_lines(&self) -> u8 {
+    let bytes = self.buffer.as_bytes();
+    let len = bytes.len();
+    let tail_known = self.has_flushed_tail();
+    let last = if len > 0 {
+      bytes[len - 1]
+    } else if tail_known {
+      self.flushed_tail[1]
+    } else {
+      0
+    };
+    if last != b'\n' {
+      return 0;
+    }
+    let second = if len > 1 {
+      bytes[len - 2]
+    } else if len == 1 && tail_known {
+      self.flushed_tail[1]
+    } else if tail_known {
+      self.flushed_tail[0]
+    } else {
+      0
+    };
+    1 + u8::from(second == b'\n')
+  }
+
   #[cfg_attr(target_arch = "wasm32", inline(never))]
   #[cfg_attr(not(target_arch = "wasm32"), inline)]
   fn trim_trailing_spaces(&mut self) {
@@ -3492,7 +3575,7 @@ impl ConvertState {
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
   /// A break only ever replaces an inter-word space, so words joined across
   /// inline boundaries (e.g. `foo**bar**`) stay intact.
-  fn push_text_wrapped(&mut self, text: &str, last_char: Option<u8>) {
+  fn push_text_wrapped(&mut self, text: &str, last_char: Option<u8>, owns_leading_space: bool) {
     let width = self.wrap_width;
     // A leading/trailing space in `text` is significant inter-word separation
     // across an inline boundary (e.g. `… </a> now`); the non-wrap path keeps
@@ -3500,7 +3583,9 @@ impl ConvertState {
     // would otherwise discard it as an empty segment.
     let leading_space = text.starts_with(' ');
     let trailing_space = text.ends_with(' ');
-    let first_needs_space = leading_space || self.should_add_spacing_before_text(last_char, text);
+    // A caption owns the space before its first text, as on the unwrapped path.
+    let first_needs_space = leading_space
+      || (!owns_leading_space && self.should_add_spacing_before_text(last_char, text));
     let prefix = self.continuation_prefix();
     let prefix_len = prefix.chars().count();
     let buf_start = self.buffer.len();
@@ -4152,15 +4237,6 @@ impl ConvertState {
     } else {
       0
     };
-    let second_last_char = if buf_len > 1 {
-      buf_bytes[buf_len - 2]
-    } else if buf_len == 1 && tail_known {
-      self.flushed_tail[1]
-    } else if tail_known {
-      self.flushed_tail[0]
-    } else {
-      0
-    };
 
     // A closing code fence's block-spacing newlines are appended AFTER the
     // backtick or tilde delimiter, so
@@ -4173,17 +4249,15 @@ impl ConvertState {
     let measure_from_output_tail =
       !is_enter && (output_str.ends_with("```") || output_str.ends_with("~~~"));
 
-    let mut last_new_lines: u8 = 0;
-    if !measure_from_output_tail {
-      if last_char == b'\n' {
-        last_new_lines += 1;
-      }
-      if second_last_char == b'\n' {
-        last_new_lines += 1;
-      }
-    }
+    // Only a contiguous run counts: after a one-character line (`a\n\nb`) the
+    // newline before `b` must not reduce the separator the next block needs.
+    let last_new_lines = if measure_from_output_tail || last_char != b'\n' {
+      0
+    } else {
+      self.trailing_new_lines()
+    };
 
-    let new_lines = configured_new_lines.saturating_sub(last_new_lines);
+    let mut new_lines = configured_new_lines.saturating_sub(last_new_lines);
 
     if new_lines > 0 {
       // An empty buffer at true document start has no preceding block to
@@ -4206,6 +4280,11 @@ impl ConvertState {
         // let its state leak into a later inline event and trim that output.
         self.last_text_node_contains_whitespace = false;
         self.has_last_text_node = false;
+        // The trimmed spaces hid the newlines before them (a blank image alt
+        // leaves `\n\n `), so count again or the boundary adds a blank line.
+        if !measure_from_output_tail {
+          new_lines = configured_new_lines.saturating_sub(self.trailing_new_lines());
+        }
       }
 
       if is_enter {
@@ -4230,7 +4309,15 @@ impl ConvertState {
           || self
             .stack
             .last()
-            .is_some_and(|parent| parent.tag_id == Some(TAG_PRE)))
+            .is_some_and(|parent| parent.tag_id == Some(TAG_PRE))
+          // A `<br>` inside `<pre>` settles the whitespace state on enter (the
+          // `<br>` itself is on top of the stack then). Left set, a later exit
+          // reaches back and trims the break's own newline.
+          || (is_enter
+            && self
+              .stack
+              .last()
+              .is_some_and(|node| node.tag_id == Some(TAG_BR))))
       {
         let h_is_inline = is_inline;
         let collapses = self
@@ -4287,6 +4374,15 @@ impl ConvertState {
       if !output_str.is_empty() {
         self.last_content_cache_len = self.push_code_span_content(output_str, true);
       }
+    }
+
+    // A `<br>` hard break is the one enter write that ends its line while
+    // leaving the paragraph open, so a following block boundary inside a list
+    // item still owes the paragraph separator. Its fragment always starts with
+    // the two-space break marker (`  \n`, plus the continuation indent); a
+    // bare `\n` is a structural boundary, which closes the line for good.
+    if is_enter && !literal && output_str.starts_with("  \n") {
+      self.hard_break_end = self.buffer.len();
     }
     self.last_node_is_inline = is_inline;
   }
@@ -4383,13 +4479,22 @@ impl ConvertState {
       && self.collapse_non_span_depth == 1
       && !self.in_table_cell()
       && !self.collapse_wrapper_emits_inline_markdown();
-    if self.collapse_non_span_depth > 0
-      && !heading_owns_collapse
-      && !heading_exit_in_markerless_collapse
-    {
+    // On enter the node is already counted as a collapsing ancestor of itself.
+    // Only real ancestors collapse its spacing, or a tag override that makes an
+    // inline tag a block loses its spacing. Headings keep the rules above.
+    let counted_self =
+      is_enter && self.stack.last().is_some_and(|node| node.collapses_inner_white_space);
+    let is_span = tag_id == Some(TAG_SPAN);
+    let non_span_depth = self
+      .collapse_non_span_depth
+      .saturating_sub(u8::from(counted_self && !is_span && !is_heading));
+    let span_depth = self
+      .collapse_span_depth
+      .saturating_sub(u8::from(counted_self && is_span));
+    if non_span_depth > 0 && !heading_owns_collapse && !heading_exit_in_markerless_collapse {
       return NO_SPACING;
     }
-    if self.collapse_span_depth > 0 {
+    if span_depth > 0 {
       let is_block = tag_id.is_some_and(|id| {
         (TAG_H1..=TAG_H6).contains(&id) || matches!(id, TAG_P | TAG_DIV | TAG_LI)
       });

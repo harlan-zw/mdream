@@ -2030,22 +2030,22 @@ fn blockquote_keeps_block_children_inside_the_quote() {
     (
       "section surrounded by text",
       "<blockquote>lead<section>x</section>tail</blockquote>",
-      "> lead\n>\n> x\n> tail",
+      "> lead\n>\n> x\n>\n> tail",
     ),
     (
       "article surrounded by text",
       "<blockquote>lead<article>x</article>tail</blockquote>",
-      "> lead\n>\n> x\n> tail",
+      "> lead\n>\n> x\n>\n> tail",
     ),
     (
       "nav surrounded by text",
       "<blockquote>lead<nav>x</nav>tail</blockquote>",
-      "> lead\n>\n> x\n> tail",
+      "> lead\n>\n> x\n>\n> tail",
     ),
     (
       "figure surrounded by text",
       "<blockquote>lead<figure>x</figure>tail</blockquote>",
-      "> lead\n>\n> x\n> tail",
+      "> lead\n>\n> x\n>\n> tail",
     ),
     (
       "nested list",
@@ -2513,9 +2513,9 @@ fn pre_nested_in_a_fenced_pre_leaves_the_fence_to_the_outer_pre() {
     ("<pre><td><pre>", "```\n<pre></pre>\n```"),
     (
       "<pre>a<table><tr><td><pre>b</pre></td></tr></table>c</pre>d",
-      "```\na\n| <pre>b</pre> |\n| --- |\n\nc\n```\n\nd",
+      "```\na\n\n| <pre>b</pre> |\n| --- |\n\nc\n```\n\nd",
     ),
-    ("<pre>a<pre>b</pre>c</pre>d", "```\na\nb\nc\n```\n\nd"),
+    ("<pre>a<pre>b</pre>c</pre>d", "```\na\n\nb\n\nc\n```\n\nd"),
   ] {
     assert_eq!(convert(html), expected, "{html}");
   }
