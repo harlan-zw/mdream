@@ -12,16 +12,38 @@ use crate::types::{
   ElementNode, ExtractedElement, HTMLToMarkdownOptions, NodeExtras, OutputFormat, TagHandler,
   TagOverrideConfig, TailwindData,
 };
-use crate::url::{
-  is_autolink_uri, is_data_url, is_empty_link_href, is_safe_html_url, resolve_url, slugify_heading,
-};
+use crate::url::{is_autolink_uri, is_data_url, is_empty_link_href, resolve_url, slugify_heading};
 use std::borrow::Cow;
+
+/// Whether the conversion writes plain text. A macro rather than a method: a
+/// method call changes MIR shape and grew the all-format WASM build by 50 B.
+/// A build with other formats reads the cached bool, the same expression as a
+/// build without format features. A single-format build gets a constant.
+#[cfg(all(feature = "text", any(feature = "markdown", feature = "html")))]
+macro_rules! plain_text {
+  ($state:expr) => {
+    ($state.plain_text)
+  };
+}
+#[cfg(all(feature = "text", not(any(feature = "markdown", feature = "html"))))]
+macro_rules! plain_text {
+  ($state:expr) => {
+    true
+  };
+}
+#[cfg(not(feature = "text"))]
+macro_rules! plain_text {
+  ($state:expr) => {
+    false
+  };
+}
 
 mod html_output;
 mod output;
 mod parse;
 mod plugins;
 
+#[cfg(feature = "html")]
 use html_output::HtmlFrame;
 
 /// Tracked element during extraction — maps stack depth to accumulator
@@ -726,7 +748,19 @@ pub struct ConvertState {
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
   /// hot path — a single integer compare). Code/tables/headings are exempt.
   wrap_width: usize,
+  // A single-format build folds every format check to a constant.
+  #[cfg_attr(
+    not(any(
+      all(feature = "markdown", feature = "text"),
+      all(feature = "markdown", feature = "html"),
+      all(feature = "text", feature = "html")
+    )),
+    allow(dead_code)
+  )]
   format: OutputFormat,
+  /// Cached `format == Text`. The hot text path reads a bool instead of
+  /// comparing the enum, which keeps the WASM build the same size.
+  #[cfg(all(feature = "text", any(feature = "markdown", feature = "html")))]
   plain_text: bool,
   preserve_leading_whitespace: bool,
 
@@ -763,6 +797,7 @@ pub struct ConvertState {
   in_heading: bool,
   /// Buffer position at heading start (for extracting heading text)
   heading_buffer_start: usize,
+  #[cfg(feature = "html")]
   html_frames: Vec<HtmlFrame>,
 
   /// Cumulative indent string for list-item continuation content. Grows by
@@ -836,6 +871,40 @@ pub struct ConvertState {
 pub(crate) const NO_OVERRIDE: u8 = u8::MAX;
 
 impl ConvertState {
+  /// Whether this conversion writes Markdown. A build with exactly one format
+  /// folds the check to a constant, so the other renderers drop out.
+  #[inline(always)]
+  #[cfg_attr(
+    not(all(feature = "markdown", any(feature = "text", feature = "html"))),
+    allow(clippy::unused_self)
+  )]
+  pub(crate) fn is_markdown(&self) -> bool {
+    #[cfg(all(feature = "markdown", any(feature = "text", feature = "html")))]
+    {
+      self.format == OutputFormat::Markdown
+    }
+    #[cfg(not(all(feature = "markdown", any(feature = "text", feature = "html"))))]
+    {
+      cfg!(feature = "markdown")
+    }
+  }
+  /// Whether this conversion writes safe HTML. A build with exactly one format
+  /// folds the check to a constant, so the other renderers drop out.
+  #[inline(always)]
+  #[cfg_attr(
+    not(all(feature = "html", any(feature = "markdown", feature = "text"))),
+    allow(clippy::unused_self)
+  )]
+  pub(crate) fn is_html(&self) -> bool {
+    #[cfg(all(feature = "html", any(feature = "markdown", feature = "text")))]
+    {
+      self.format == OutputFormat::Html
+    }
+    #[cfg(not(all(feature = "html", any(feature = "markdown", feature = "text"))))]
+    {
+      cfg!(feature = "html")
+    }
+  }
   /// Check if we're inside a table cell (either `<td>` or `<th>`).
   #[inline]
   pub(crate) fn in_table_cell(&self) -> bool {
@@ -846,7 +915,6 @@ impl ConvertState {
     // Read wrap width before `options` is moved into the struct below.
     let options_wrap_width = options.wrap_width;
     let options_max_node_bytes = options.max_node_bytes;
-    let plain_text = format == OutputFormat::Text;
     let mut s = Self {
       depth_map: [0; MAX_TAG_ID],
       depth: 0,
@@ -954,8 +1022,9 @@ impl ConvertState {
       keep_dropped_raw_text: false,
 
       wrap_width: options_wrap_width,
+      #[cfg(all(feature = "text", any(feature = "markdown", feature = "html")))]
+      plain_text: format == OutputFormat::Text,
       format,
-      plain_text,
       preserve_leading_whitespace: false,
       clean_flags: 0,
       link: LinkOutputState::default(),
@@ -974,6 +1043,7 @@ impl ConvertState {
       fragment_links: Vec::new(),
       in_heading: false,
       heading_buffer_start: 0,
+      #[cfg(feature = "html")]
       html_frames: Vec::new(),
 
       list_indent: String::new(),
@@ -1994,7 +2064,7 @@ impl ConvertState {
 
   pub fn get_markdown(&mut self) -> String {
     self.note_buffer_rewrite(0);
-    if self.format == OutputFormat::Html {
+    if self.is_html() {
       return std::mem::take(&mut self.buffer);
     }
     // ASCII whitespace only, as everywhere else: U+00A0 is content, and the
@@ -2423,14 +2493,14 @@ impl ConvertState {
   }
 
   pub fn get_markdown_chunk(&mut self) -> String {
-    if self.format == OutputFormat::Html {
+    if self.is_html() {
       if let Some(&last) = self.buffer.as_bytes().last() {
         self.flushed_tail[1] = last;
       }
       self.note_buffer_rewrite(0);
       return std::mem::take(&mut self.buffer);
     }
-    if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+    if !plain_text!(self) && self.clean_flags & CLEAN_FRAGMENTS != 0 {
       return String::new();
     }
     self.flush_settled_blockquote_lines();
@@ -2596,10 +2666,7 @@ impl ConvertState {
   }
 
   pub fn get_final_markdown_chunk(&mut self) -> String {
-    if !self.plain_text
-      && self.format != OutputFormat::Html
-      && self.clean_flags & CLEAN_FRAGMENTS != 0
-    {
+    if !plain_text!(self) && !self.is_html() && self.clean_flags & CLEAN_FRAGMENTS != 0 {
       self.get_markdown()
     } else {
       self.get_markdown_chunk()

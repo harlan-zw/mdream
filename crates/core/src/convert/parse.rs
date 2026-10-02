@@ -529,7 +529,7 @@ impl ConvertState {
       && (first_block_parent_index.is_some()
         || match self.buffer.as_bytes().last() {
           Some(&last) => last == b'\n',
-          None => self.format != OutputFormat::Html || self.flushed_tail[1] == b'\n',
+          None => !self.is_html() || self.flushed_tail[1] == b'\n',
         });
     if contains_whitespace && is_first_text_in_block {
       let mut start = 0;
@@ -549,7 +549,7 @@ impl ConvertState {
     }
 
     if self.has_encoded_html_entity {
-      let protect_decoded_entity_references = self.format == OutputFormat::Markdown
+      let protect_decoded_entity_references = self.is_markdown()
         && self.depth_map[TAG_PRE as usize] == 0
         && self.depth_map[TAG_CODE as usize] == 0
         && !self.in_raw_html_block();
@@ -1133,7 +1133,7 @@ impl ConvertState {
 
         if let Some(class_attr) = tag.attributes.get_bit(ATTR_CLASS) {
           let (mut prefix, mut suffix, hidden) = process_tailwind_classes(class_attr);
-          if self.plain_text {
+          if plain_text!(self) {
             prefix = None;
             suffix = None;
           }
@@ -1344,7 +1344,7 @@ impl ConvertState {
     if tag_id == Some(TAG_LI)
       && let Some(li) = self.stack.last()
     {
-      let width: usize = if !skip_node && !self.in_table_cell() && !self.plain_text {
+      let width: usize = if !skip_node && !self.in_table_cell() && !plain_text!(self) {
         let stack_len = self.stack.len();
         let parent_is_ordered = stack_len >= 2 && self.stack[stack_len - 2].tag_id == Some(TAG_OL);
         if parent_is_ordered {
