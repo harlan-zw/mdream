@@ -4497,6 +4497,24 @@ mod tests {
     assert_eq!(state.get_markdown(), "\\* literal\n\n\\* decoded");
   }
 
+  // Each held line-break run used to rescan the whitespace after it for content,
+  // so breaks separated only by whitespace cost their square in one chunk.
+  #[test]
+  fn resolving_held_break_runs_reads_the_tail_once() {
+    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.streaming = true;
+    let html = format!("<p>x{}y</p>", "<br>&#9;".repeat(4096));
+    assert_eq!(state.process_html(&html), html.len());
+    let out = state.get_markdown_chunk();
+    assert!(out.starts_with("x  \n\t"), "{:.20}", out);
+    assert!(
+      state.break_run_scanned <= html.len(),
+      "read {} bytes for {} of input",
+      state.break_run_scanned,
+      html.len()
+    );
+  }
+
   #[test]
   fn atomic_image_marks_content_only_when_written() {
     let html = format!(
