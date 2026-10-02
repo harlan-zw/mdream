@@ -1,5 +1,6 @@
-import type { MdreamOptions } from '../../src/types'
+import type { ElementNode, MdreamOptions } from '../../src/types'
 import { describe, expect, it } from 'vitest'
+import { ELEMENT_NODE, NodeEventEnter, NodeEventExit } from '../../src/index'
 import { createPlugin } from '../../src/pluggable/plugin'
 import { htmlToText, streamHtmlToText } from '../../src/text'
 
@@ -55,4 +56,44 @@ describe('text stream', () => {
       expect(probe.largest).toBeLessThan(4096)
     })
   }
+})
+
+// A plugin can skip one side of a quotation, so its opener and exit no longer
+// pair up. Output then keeps whatever the processor wrote.
+const skipQuoteExit = createPlugin({
+  beforeNodeProcess(event) {
+    if (event.type === NodeEventExit && 'name' in event.node && event.node.name === 'q')
+      return { skip: true }
+  },
+})
+const spaceForQuoteExit = createPlugin({
+  onNodeExit(element) {
+    if (element.name === 'q')
+      return ' '
+  },
+})
+const skipMarkedQuoteEnter = createPlugin({
+  beforeNodeProcess(event) {
+    if (event.type === NodeEventEnter && event.node.type === ELEMENT_NODE && (event.node as ElementNode).attributes['data-skip'] !== undefined)
+      return { skip: true }
+  },
+})
+
+describe('text quotation without a paired exit', () => {
+  it.each([
+    ['an exit a plugin skips', 'a <q></q>', skipQuoteExit, 'a "'],
+    ['an exit a plugin skips, with whitespace after the opener', 'a <q> </q> ', skipQuoteExit, 'a "'],
+    ['an exit a plugin skips, at the end of input', 'a <q>', skipQuoteExit, 'a "'],
+    ['an exit a plugin writes', 'a <q></q>', spaceForQuoteExit, 'a "'],
+    ['an inner exit whose enter a plugin skips', 'a <q><q data-skip></q></q>', skipMarkedQuoteEnter, 'a """'],
+  ])('keeps the opener of %s', async (_name, html, plugin, expected) => {
+    const options = { plugins: [plugin] }
+    expect(htmlToText(html, options)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {
+      let output = ''
+      for await (const chunk of streamHtmlToText(chunkedStream(html, chunkSize), options))
+        output += chunk
+      expect(output, `chunk size ${chunkSize}`).toBe(expected)
+    }
+  })
 })
