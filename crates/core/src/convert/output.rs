@@ -25,6 +25,9 @@ const STREAMING_FLUSH_THRESHOLD: usize = 8 * 1024;
 const DESTINATION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 80, 0, 0, 0, 16, 0, 0, 0, 0];
 const TITLE_ESCAPES: [u8; 16] = [0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0];
 const IMAGE_DESCRIPTION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 64, 4, 0, 16, 0, 0, 0, 184, 1, 0, 0, 64];
+/// Whitespace, and the bytes an inline marker pair writes (`*`, `~`, a
+/// backtick, `"`): a caption holding only these has no content of its own.
+const CAPTION_FILLER: [u8; 16] = [0, 54, 0, 0, 5, 4, 0, 0, 0, 0, 0, 0, 1, 0, 0, 64];
 
 #[inline(always)]
 fn in_byte_set(byte: u8, set: &[u8; 16]) -> bool {
@@ -140,11 +143,11 @@ impl ConvertState {
       raw_html_open,
       open: true,
       begin_depth: self.depth,
-      starts_at_hard_break: self.hard_break_end == bracket_pos,
       ..Default::default()
     };
   }
 
+  #[inline(never)]
   fn end_link(&mut self) {
     self.link = self.parent_links.pop().unwrap_or_default();
   }
@@ -670,9 +673,6 @@ impl ConvertState {
       return;
     }
 
-    // Quoting rewrites only lines before `flush_end` and keeps the tail after
-    // it, so a hard break the output ends with still ends it afterwards.
-    let break_at_end = self.hard_break_end == self.buffer.len();
     let shared_start = self.blockquotes[0].content_start;
     if self
       .blockquotes
@@ -733,9 +733,6 @@ impl ConvertState {
       }
       self.last_content_cache_len = self.buffer.len() - flush_end;
       self.invalidate_line_start();
-      if break_at_end {
-        self.hard_break_end = self.buffer.len();
-      }
       return;
     }
 
@@ -783,9 +780,6 @@ impl ConvertState {
     }
     self.last_content_cache_len = self.buffer.len() - flush_end;
     self.invalidate_line_start();
-    if break_at_end {
-      self.hard_break_end = self.buffer.len();
-    }
   }
 
   /// Override keyed by built-in tag id, via the precomputed table. `idx` is
@@ -1011,12 +1005,11 @@ impl ConvertState {
     // break's own newline. Inside a list item every non-`<li>` spacing is
     // collapsed and the break's continuation indent already ended the line, so
     // the separator is written here or the paragraph boundary disappears
-    // (`- q  \n  X`). Pre/table joins the set: a fence or GFM table cannot
-    // interrupt a paragraph, so sharing the break's line would render both as
-    // literal text. The break's indent spaces are trimmed first; whatever line
-    // break remains counts toward the two the separator needs.
+    // (`- q  \n  X`). Pre and table join the set: without the break they get
+    // the blank line already (`- q\n\n  ````), and the break must not take it
+    // away. The indent is trimmed first, so the break's own newline is the
+    // first of the two.
     if !self.plain_text
-      && self.hard_break_end == self.buffer.len()
       && !enter_is_literal
       && matches!(tag_id, Some(TAG_P | TAG_DIV | TAG_PRE | TAG_TABLE))
       && self.depth_map[TAG_LI as usize] > 0
@@ -1024,21 +1017,17 @@ impl ConvertState {
       // At a <pre>'s own enter the parser has already counted it (depth 1);
       // any deeper this boundary sits inside literal fence content.
       && self.depth_map[TAG_PRE as usize] <= u16::from(tag_id == Some(TAG_PRE))
+      && self.ends_with_hard_break()
     {
-      self.hard_break_end = usize::MAX;
       self.trim_trailing_spaces();
-      let new_lines = 2usize.saturating_sub(self.trailing_new_lines() as usize);
-      let mut separator = String::with_capacity(new_lines + self.list_indent.len());
-      for _ in 0..new_lines {
-        separator.push('\n');
-      }
+      let mut separator = String::from("\n");
       separator.push_str(&self.list_indent);
       // Prepend rather than replace: a pre/table enter fragment can carry its
       // own opener (fence, row marker), which must follow the separator.
-      output = Some(match output {
-        Some(fragment) => Cow::Owned(format!("{separator}{fragment}")),
-        None => Cow::Owned(separator),
-      });
+      if let Some(fragment) = output {
+        separator.push_str(&fragment);
+      }
+      output = Some(Cow::Owned(separator));
     }
 
     if self.clean_flags & CLEAN_EMPTY_IMAGES != 0
@@ -1366,12 +1355,10 @@ impl ConvertState {
       && self.buffer.len() > output_start
       && self.buffer.ends_with(emitted)
     {
-      let marker_start = self.buffer.len() - emitted.len();
       self.open_markers.push(OpenMarker {
-        output_start: marker_start,
+        output_start: self.buffer.len() - emitted.len(),
         content_start: self.buffer.len(),
         kind: inline_marker_type,
-        starts_at_hard_break: self.hard_break_end == marker_start,
       });
     } else if !self.open_markers.is_empty()
       && !(tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0)
@@ -1598,7 +1585,7 @@ impl ConvertState {
           if content_start < self.buffer.len()
             && self.buffer[content_start..]
               .bytes()
-              .any(|byte| !is_whitespace(byte) && !matches!(byte, b'*' | b'~' | b'`' | b'"'))
+              .any(|byte| !in_byte_set(byte, &CAPTION_FILLER))
           {
             caption_exit_spacing = frame.spacing[1];
           } else {
@@ -1693,9 +1680,6 @@ impl ConvertState {
         // emptyLinkText: [](url) → drop entirely
         if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
           self.truncate_buffer(bracket_pos);
-          if self.link.starts_at_hard_break {
-            self.hard_break_end = self.link.bracket_pos;
-          }
           for (frame, &(count, has_internal_break)) in self
             .caption_frames
             .iter_mut()
@@ -1925,9 +1909,6 @@ impl ConvertState {
         // code in a list can emit " `"), but excludes normal surrounding
         // spacing synthesized by write_output.
         self.truncate_buffer(open_marker.output_start);
-        if open_marker.starts_at_hard_break {
-          self.hard_break_end = open_marker.output_start;
-        }
         self.last_content_cache_len = 0;
         self.reset_empty_tentative_caption_frames();
         self.last_node_is_inline = is_inline;
@@ -2983,6 +2964,22 @@ impl ConvertState {
     }
   }
 
+  /// Whether the output ends as a `<br>` in a list item leaves it: the `  \n`
+  /// break, then at least the item's continuation indent. A longer indent is a
+  /// nested item's that has closed since. Streaming never yields trailing
+  /// whitespace outside `<pre>`, so that tail is whole in the buffer, and output
+  /// dropped after it (an empty pair or link) restores it.
+  #[inline]
+  fn ends_with_hard_break(&self) -> bool {
+    let bytes = self.buffer.as_bytes();
+    let mut end = bytes.len();
+    while end > 0 && bytes[end - 1] == b' ' {
+      end -= 1;
+    }
+    let indent = bytes.len() - end;
+    indent != 0 && indent >= self.list_indent.len() && bytes[..end].ends_with(b"  \n")
+  }
+
   /// Note that the buffer has been shortened to `len`. A list marker's recorded
   /// end is a length, and the space a trim takes is the marker's own: left past
   /// the content it reads the element that opens the item as content.
@@ -3025,7 +3022,8 @@ impl ConvertState {
 
   /// Newlines (at most two) that end the output, counted as one contiguous
   /// run and read through a drain via `flushed_tail`.
-  #[inline]
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
+  #[cfg_attr(not(target_arch = "wasm32"), inline)]
   fn trailing_new_lines(&self) -> u8 {
     let bytes = self.buffer.as_bytes();
     let len = bytes.len();
@@ -4375,15 +4373,6 @@ impl ConvertState {
         self.last_content_cache_len = self.push_code_span_content(output_str, true);
       }
     }
-
-    // A `<br>` hard break is the one enter write that ends its line while
-    // leaving the paragraph open, so a following block boundary inside a list
-    // item still owes the paragraph separator. Its fragment always starts with
-    // the two-space break marker (`  \n`, plus the continuation indent); a
-    // bare `\n` is a structural boundary, which closes the line for good.
-    if is_enter && !literal && output_str.starts_with("  \n") {
-      self.hard_break_end = self.buffer.len();
-    }
     self.last_node_is_inline = is_inline;
   }
 
@@ -4442,7 +4431,7 @@ impl ConvertState {
     true
   }
 
-  #[inline]
+  #[inline(always)]
   pub(crate) fn calculate_new_line_config(
     &self,
     tag_id: Option<u8>,

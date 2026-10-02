@@ -137,10 +137,6 @@ struct OpenMarker {
   output_start: usize,
   content_start: usize,
   kind: u8,
-  /// The opener starts where the latest hard break ends. A break inside the
-  /// pair replaces that one as the latest, so dropping the empty pair has to
-  /// make the outer break the latest again.
-  starts_at_hard_break: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -222,9 +218,6 @@ struct LinkOutputState {
   /// the depth mismatch identifies the stale state so its bracket is never
   /// treated as this anchor's own.
   begin_depth: usize,
-  /// The `[` starts where the latest hard break ends; see
-  /// `OpenMarker::starts_at_hard_break`.
-  starts_at_hard_break: bool,
 }
 
 struct FragmentLink {
@@ -799,13 +792,6 @@ pub struct ConvertState {
   empty_item_len: usize,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
-  /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
-  /// The output ends with that break exactly while the buffer length equals
-  /// it, so no writer has to clear it: any later output moves the end past it,
-  /// and `note_buffer_rewrite` clears it when bytes before it change. A block
-  /// boundary inside a list item then still owes the paragraph blank line that
-  /// the item's collapsed block spacing removes.
-  hard_break_end: usize,
   /// What leads the current line when draining has removed that line's start.
   /// `Uncut` also says `flushed_tail` still holds its document-start sentinel;
   /// yielding alone does not make that context valid.
@@ -988,7 +974,6 @@ impl ConvertState {
       empty_item_line_start: 0,
       empty_item_len: 0,
       list_rule_pending: false,
-      hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
       #[cfg(test)]
@@ -2337,11 +2322,6 @@ impl ConvertState {
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
-    // Bytes before the break changed, so the output no longer ends with it.
-    // A truncation to the break end (an empty construct dropped) keeps it.
-    if offset < self.hard_break_end {
-      self.hard_break_end = usize::MAX;
-    }
   }
 
   /// Shift the measured run after `removed` bytes left the front of the buffer.
@@ -2351,12 +2331,6 @@ impl ConvertState {
       *run = (*run).min(*end);
     }
     self.heading_run_dirty_from = self.heading_run_dirty_from.saturating_sub(removed);
-    if self.hard_break_end != usize::MAX {
-      self.hard_break_end = self
-        .hard_break_end
-        .checked_sub(removed)
-        .unwrap_or(usize::MAX);
-    }
   }
 
   /// Whether output held back behind an open construct has outgrown
