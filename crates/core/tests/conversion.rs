@@ -113,6 +113,29 @@ fn html_output_stream_matches_batch_at_every_split() {
   }
 }
 
+// Discarded script data is not text, so whitespace after the script is still
+// inter-element whitespace and drops as it would with no script at all.
+#[test]
+fn html_output_drops_whitespace_after_discarded_script_data() {
+  let options = HTMLToMarkdownOptions::default;
+  let input = "<x><script>;</script> <link> ";
+  assert_eq!(html_to_html(input, options()), "");
+  assert_eq!(
+    html_to_html(
+      "<d><title>n</title><script>;</script>\n</>\n<link>\n",
+      options()
+    ),
+    ""
+  );
+  for split in 0..=input.len() {
+    let mut processor = MarkdownStreamProcessor::new_with_format(options(), OutputFormat::Html);
+    let mut output = processor.process_chunk(&input[..split]);
+    output.push_str(&processor.process_chunk(&input[split..]));
+    output.push_str(&processor.finish());
+    assert_eq!(output, "", "split={split}");
+  }
+}
+
 // ── Plain text output ──
 
 #[test]
@@ -484,6 +507,11 @@ fn links_inside_raw_html_blocks_are_safe_html() {
     (
       r#"<details><a href="javascript:alert(1)">visible</a></details>"#,
       "<details>visible</details>",
+    ),
+    // Closing the inner link must not end escaping for the rest of the outer one.
+    (
+      r#"<details><a href="/o">[pre]<div><a href="/i">[in]</a>[after]</div></a></details>"#,
+      r#"<details><a href="/o">&#91;pre&#93;<a href="/i">&#91;in&#93;</a>&#91;after&#93;</a></details>"#,
     ),
   ] {
     assert_eq!(convert(html), expected, "html={html:?}");
@@ -2363,6 +2391,12 @@ fn an_empty_list_item_does_not_underline_the_text_above() {
     "- a\n-\n- b"
   );
   assert_eq!(convert("<ul><li></li><li>a</li></ul>"), "-\n- a");
+  // A block opening the item settles the blank line before a nested list's
+  // first marker can drop it.
+  assert_eq!(
+    convert("<ul><li>a<ul><li><blockquote>q</blockquote><ul><li>b</li></ul></li></ul></li></ul>"),
+    "- a\n\n  - \n    > q\n    - b"
+  );
 }
 
 #[test]
@@ -3976,6 +4010,54 @@ fn isolate_main_finds_deeply_nested_main() {
   assert!(!result.contains("Footer"));
 }
 
+fn isolate_main_options() -> HTMLToMarkdownOptions {
+  HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      isolate_main: Some(IsolateMainConfig {}),
+      ..Default::default()
+    }),
+    ..Default::default()
+  }
+}
+
+// A node whose start isolateMain skipped must not emit its end: the closer
+// would have no opener in the output.
+#[test]
+fn isolate_main_skipped_elements_emit_no_closers() {
+  let html = "<p>Hello <strong>world</strong>!</p>";
+  assert_eq!(convert_with_isolate_main(html), "");
+  assert_eq!(html_to_text(html, isolate_main_options()), "");
+  assert_eq!(html_to_html(html, isolate_main_options()), "");
+  assert_eq!(convert_with_isolate_main("<b>"), "");
+  assert_eq!(convert_with_isolate_main("<i>"), "");
+}
+
+#[test]
+fn isolate_main_skipped_empty_link_emits_no_label_or_tail() {
+  let html = r#"<a href="/x" title="Home"></a><h1>Title</h1><p>Body</p>"#;
+  assert_eq!(convert_with_isolate_main(html), "# Title\n\nBody");
+  assert_eq!(
+    html_to_html(html, isolate_main_options()),
+    r#"<h1 id="title">Title</h1><p>Body</p>"#
+  );
+}
+
+#[test]
+fn isolate_main_keeps_a_heading_inside_a_skipped_container() {
+  let html = "<div><nav><b>Menu</b></nav><h1>Title</h1><p>Body <em>here</em></p></div>";
+  assert_eq!(convert_with_isolate_main(html), "# Title\n\nBody *here*");
+  assert_eq!(
+    html_to_html(html, isolate_main_options()),
+    r#"<h1 id="title">Title</h1><p>Body <em>here</em></p>"#
+  );
+}
+
+#[test]
+fn isolate_main_skipped_footer_emits_no_closers() {
+  let html = "<h1>Title</h1><p>Body</p><footer><p><b>Foot</b></p></footer>";
+  assert_eq!(convert_with_isolate_main(html), "# Title\n\nBody");
+}
+
 // ── Script non-nesting: less-than operator ──
 
 #[test]
@@ -4879,6 +4961,27 @@ fn ordered_lists_honor_the_start_attribute() {
 }
 
 #[test]
+fn each_ordered_list_numbers_from_its_own_start() {
+  // An inner list's `start` must not leak into its parent's later items, nor
+  // into a sibling list.
+  assert_eq!(
+    convert(
+      "<ol start=\"5\"><li>a<ol start=\"20\"><li>b</li></ol></li><li>c<ul><li>d</li></ul></li><li>e</li></ol><ol><li>f</li></ol>"
+    ),
+    "5. a\n   20. b\n6. c\n   - d\n7. e\n\n1. f"
+  );
+  // Read once per list, so a padded value costs its length once, not per item.
+  let html = format!(
+    "<ol start=\"{}7\">{}</ol>",
+    " ".repeat(64 * 1024),
+    "<li>x</li>".repeat(20_000)
+  );
+  let out = convert(&html);
+  assert!(out.starts_with("7. x\n8. x\n"), "{:.40}", out);
+  assert!(out.ends_with("20006. x"), "{}", &out[out.len() - 20..]);
+}
+
+#[test]
 fn ordered_start_wider_than_a_marker_falls_back_to_default_numbering() {
   // An ordered marker is at most nine digits, so a wider `start` is not a marker
   // at all: it must not emit a ten-digit number GFM would read as a paragraph.
@@ -5295,7 +5398,6 @@ fn rawtext_eof_residual_is_text_not_a_dropped_tag() {
     ("<textarea>a</foo ", "<textarea>a</foo </textarea>"),
     ("<textarea>></", "<textarea>></</textarea>"),
     ("<xmp>a</", "<xmp>a</</xmp>"),
-    ("<title>a</", "<title>a</</title>"),
   ] {
     assert_eq!(
       convert(truncated),
@@ -5312,7 +5414,7 @@ fn rawtext_eof_residual_is_text_not_a_dropped_tag() {
   }
 
   // An unterminated name is still text, even where it names this element.
-  assert_eq!(convert("<textarea>a</textarea"), "a</textarea");
+  assert_eq!(convert("<textarea>a</textarea"), "a\\</textarea");
 
   // Elements whose text is excluded keep emitting nothing.
   for html in ["<script>a</", "<style>a</", "<iframe>a</", "<noscript>a</"] {
@@ -5334,5 +5436,234 @@ fn blockquote_quoting_keeps_escaping_a_later_line() {
   assert_eq!(
     convert("<dd><h2><li><blockquote>a<p><code><p>>aa<<a><<li>`"),
     "<dd>\n\n## - \n  > a\n  >\n  > <code></code>\n  >\n  > &gt;aa&lt;&lt; - \\`\n\n</dd>"
+  );
+}
+
+// A link rewrite is anchored on the `[` the anchor itself wrote. An anchor that
+// writes none -- no href, or suppressed inside `<pre>` -- used to abort its exit
+// and let the rewrite scan reach forward into the text, which dropped a literal
+// `[` behind its own escape and left the fence's trailing whitespace untrimmed.
+#[test]
+fn a_clean_flag_leaves_content_outside_the_link_alone() {
+  for (html, expected) in [
+    ("<a>[", "\\["),
+    ("x <a>[", "x \\["),
+    ("<p><a>[</p>", "\\["),
+    ("<pre>x\t<a>", "```\nx\n```"),
+    ("<pre>x\n<a>", "```\nx\n```"),
+  ] {
+    assert_eq!(
+      convert_with_clean(html, clean_all()),
+      expected,
+      "html={html:?}"
+    );
+    assert_eq!(convert(html), expected, "unclean html={html:?}");
+  }
+
+  // The rewrites the flags exist for still fire.
+  assert_eq!(convert_with_clean("<a href=\"#\">t</a>", clean_all()), "t");
+  assert_eq!(
+    convert_with_clean("<a href=\"https://e.com/\">https://e.com/</a>", clean_all()),
+    "https://e.com/"
+  );
+}
+
+// RCDATA and RAWTEXT content is text in the DOM, so a `<` inside it has to stay
+// literal in Markdown. Left unescaped, `<textarea><b>x</b></textarea>` turned the
+// text into live inline HTML. The same text reached through `&lt;` was escaped.
+// `<title>` is the exception: its text is document metadata the title contract
+// drops, so its RCDATA content must not surface either.
+#[test]
+fn rcdata_less_than_is_escaped_like_any_text() {
+  for (html, expected) in [
+    ("<textarea><b>x</b></textarea>", "\\<b>x\\</b>"),
+    ("<textarea>&lt;b>x&lt;/b></textarea>", "\\<b>x\\</b>"),
+    ("<title><b>x</b></title>", ""),
+    ("<xmp>a<b></xmp>", "a\\<b>"),
+    ("<textarea>a<z</textarea>", "a\\<z"),
+    ("<textarea>a < b</textarea>", "a < b"),
+    // EOF residuals take the carried path rather than the byte loop.
+    ("<title>a<z", ""),
+    ("<textarea>a</textarea", "a\\</textarea"),
+    ("<xmp>a</", "a\\</"),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+    for split in 1..html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let mut out = stream.process_chunk(&html[..split]);
+      out.push_str(&stream.process_chunk(&html[split..]));
+      out.push_str(&stream.finish());
+      assert_eq!(out, expected, "html={html:?} split={split}");
+    }
+  }
+  // Excluded rawtext stays excluded.
+  assert_eq!(convert("<script><b>x</b></script>"), "");
+}
+
+// U+0000 is an ordinary character in the output buffer. Using `0` as the "buffer
+// is empty" sentinel made a trailing NUL suppress the separator that any other
+// byte gets, so `x\0` joined the following link where `x\u{1}` did not.
+#[test]
+fn nul_is_not_an_empty_buffer() {
+  for (html, expected) in [
+    ("x\0<a href=\"/y\">y</a>", "x\0 [y](/y)"),
+    ("\0\0<a href>", "\0\0 []()"),
+    ("<ul><li>x\0<code>y</code></li></ul>", "- x\0 `y`"),
+    ("<ul><li>x\0<p>y</p></li></ul>", "- x\0\n\n  y"),
+    ("<blockquote>x\0<p>y</p></blockquote>", "> x\0\n>\n> y"),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+    // Same result as any other non-space byte in that position.
+    let control = html.replace('\0', "\u{1}");
+    assert_eq!(
+      convert(&control),
+      expected.replace('\0', "\u{1}"),
+      "html={control:?}"
+    );
+  }
+}
+
+fn frontmatter_md(html: &str) -> String {
+  html_to_markdown(
+    html,
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig::frontmatter()),
+      ..Default::default()
+    },
+  )
+}
+
+// Frontmatter values must read back as the source text under a YAML parser. A
+// backslash inside a double-quoted scalar starts an escape (`"C:\dir"` is
+// invalid), while a plain scalar takes `\` and `"` literally, so escaping has to
+// follow the quoting decision rather than precede it.
+#[test]
+fn frontmatter_values_are_valid_yaml_scalars() {
+  for (title, expected) in [
+    ("C:\\dir", "title: \"C:\\\\dir\""),
+    ("\\", "title: \\"),
+    ("a\\b", "title: a\\b"),
+    ("a\"b", "title: \"a\\\"b\""),
+    ("\"q\" x", "title: \"\\\"q\\\" x\""),
+    ("'q'", "title: \"'q'\""),
+    ("[x]", "title: \"[x]\""),
+    ("-x", "title: -x"),
+    ("-", "title: \"-\""),
+    ("-5", "title: \"-5\""),
+    ("*x", "title: \"*x\""),
+    ("a-b", "title: a-b"),
+    ("plain", "title: plain"),
+    ("a: b", "title: \"a: b\""),
+    // Implicitly typed values stay strings.
+    ("2024", "title: \"2024\""),
+    ("1.5", "title: \"1.5\""),
+    ("2024-01-02", "title: \"2024-01-02\""),
+    (".inf", "title: \".inf\""),
+    ("true", "title: \"true\""),
+    ("No", "title: \"No\""),
+    ("NULL", "title: \"NULL\""),
+    ("~", "title: \"~\""),
+    ("v1.0", "title: v1.0"),
+    ("nothing", "title: nothing"),
+    // YAML allows no raw control character, U+0000 included.
+    ("a\0b", "title: \"a\\x00b\""),
+    ("a\u{7f}b", "title: \"a\\x7fb\""),
+    // U+FFFE and U+FFFF are noncharacters: no control, but outside YAML's
+    // printable set, so a stream carrying them raw is rejected outright.
+    ("\u{fffe}", "title: \"\\ufffe\""),
+    ("x\u{ffff}", "title: \"x\\uffff\""),
+    // U+2028/U+2029 are line separators, not controls. A reader folds them to
+    // a space even inside double quotes, so they must be escaped.
+    ("a\u{2028}b", "title: \"a\\u2028b\""),
+    ("x\u{2029}y", "title: \"x\\u2029y\""),
+  ] {
+    let md = frontmatter_md(&format!("<head><title>{title}</title></head>"));
+    assert_eq!(md, format!("---\n{expected}\n---"), "title={title:?}");
+  }
+}
+
+// An empty `content` carries no value. Printed as `description: ` it reads back
+// as YAML null, not an empty string, so the entry is skipped.
+#[test]
+fn frontmatter_skips_meta_with_empty_content() {
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content=""></head>"#),
+    ""
+  );
+  assert_eq!(
+    frontmatter_md(
+      r#"<head><meta name="description" content=.><meta name="og:title" content=D><meta name="og:description" content></head>"#
+    ),
+    "---\nmeta:\n  description: \".\"\n  \"og:title\": D\n---"
+  );
+  // A later empty duplicate does not erase an earlier value.
+  assert_eq!(
+    frontmatter_md(
+      r#"<head><meta name="description" content="d"><meta name="description" content=""></head>"#
+    ),
+    "---\nmeta:\n  description: d\n---"
+  );
+  // A configured value that is empty is still a string.
+  let md = html_to_markdown(
+    "<head></head>",
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        frontmatter: Some(FrontmatterConfig {
+          additional_fields: Some(vec![("custom".to_string(), String::new())]),
+          meta_fields: None,
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert_eq!(md, "---\ncustom: \"\"\n---");
+  // A value whose only content is whitespace reads back as null from a plain
+  // scalar, and a reader strips an edge tab as separation or trailing
+  // whitespace, so tab content forces quotes.
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content="&#9;"></head>"#),
+    "---\nmeta:\n  description: \"\\t\"\n---"
+  );
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content="&#9;d"></head>"#),
+    "---\nmeta:\n  description: \"\\td\"\n---"
+  );
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content="d&#9;"></head>"#),
+    "---\nmeta:\n  description: \"d\\t\"\n---"
+  );
+  // An interior tab reaches the reader raw in a plain scalar, where it is
+  // rejected outright or folded to a space, so any tab forces quotes.
+  assert_eq!(
+    frontmatter_md(r#"<head><meta name="description" content="a&#9;b"></head>"#),
+    "---\nmeta:\n  description: \"a\\tb\"\n---"
+  );
+}
+
+// Configured fields are written by the caller, who may mean `draft: true` as a
+// boolean, so only text read from the page is forced to stay a string.
+#[test]
+fn frontmatter_additional_fields_keep_yaml_typing() {
+  let md = html_to_markdown(
+    "<head><title>2024</title></head>",
+    HTMLToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        frontmatter: Some(FrontmatterConfig {
+          additional_fields: Some(vec![
+            ("date".to_string(), "2025-05-10".to_string()),
+            ("draft".to_string(), "true".to_string()),
+            ("path".to_string(), "C:\\dir".to_string()),
+          ]),
+          meta_fields: None,
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  );
+  assert_eq!(
+    md,
+    "---\ntitle: \"2024\"\ndate: 2025-05-10\ndraft: true\npath: \"C:\\\\dir\"\n---"
   );
 }

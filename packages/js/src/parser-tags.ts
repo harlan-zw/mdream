@@ -39,7 +39,9 @@ const inertRawText = { isNonNesting: true, excludesTextNodes: true }
 
 /** HTML parsing metadata with no output-format behavior. */
 export const parserTagHandlers: Record<number, TagHandler> = {
-  [TAG_TITLE]: rawText,
+  // Document metadata that browsers never render. Its text still reaches
+  // plugins, so the frontmatter plugin can read it.
+  [TAG_TITLE]: inertRawText,
   [TAG_SCRIPT]: inertRawText,
   [TAG_STYLE]: inertRawText,
   [TAG_META]: selfClosing,

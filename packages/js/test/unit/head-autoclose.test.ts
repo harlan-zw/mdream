@@ -28,14 +28,14 @@ describe('unclosed <head> auto-close', () => {
   })
 
   it('keeps head metadata in head until flow content appears', () => {
-    const html = '<head><title>t</title><link rel="x"><style>a{}</style><p>body text</p>'
-    expect(htmlToMarkdown(html)).toBe('t\n\nbody text')
+    const html = '<head><title>t</title><link rel="x"><style>a{}</style><p>body text</p><p>more</p>'
+    expect(htmlToMarkdown(html)).toBe('body text\n\nmore')
   })
 
   it('does not keep body in head context for duplicated <head>', () => {
     // A second <head> closes the first, so the trailing <p> is body flow.
-    const html = '<head><head><title>t</title><p>body text</p>'
-    expect(htmlToMarkdown(html)).toBe('t\n\nbody text')
+    const html = '<head><head><title>t</title><p>body text</p><p>more</p>'
+    expect(htmlToMarkdown(html)).toBe('body text\n\nmore')
   })
 
   it('keeps <head> open across a chunk boundary that splits the triggering tag', async () => {
