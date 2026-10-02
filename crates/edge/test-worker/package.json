@@ -8,6 +8,7 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",
     "mdream": "workspace:*",
+    "nitropack": "catalog:",
     "vitest": "catalog:workers",
     "wrangler": "catalog:"
   }

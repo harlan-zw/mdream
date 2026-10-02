@@ -11,6 +11,10 @@ vi.mock('../../wasm/mdream_edge_bg.wasm', async () => {
   const { readFileSync } = await import('node:fs')
   return { default: new WebAssembly.Module(readFileSync(new URL('../../wasm/mdream_edge_bg.wasm', import.meta.url))) }
 })
+vi.mock('../../wasm-bundler/mdream_edge_bg.wasm', async () => {
+  const { readFileSync } = await import('node:fs')
+  return { default: new WebAssembly.Module(readFileSync(new URL('../../wasm-bundler/mdream_edge_bg.wasm', import.meta.url))) }
+})
 vi.mock('../../wasm/mdream_edge.js', async (importOriginal) => {
   const { readFileSync } = await import('node:fs')
   const bindings = await importOriginal<typeof import('../../wasm/mdream_edge.js')>()
@@ -26,7 +30,7 @@ await wasm.default()
 const entries: { name: string, convert: Convert, stream: Stream }[] = [
   { name: 'node', convert: async (html, options) => node.htmlToMarkdown(html, options), stream: node.streamHtmlToMarkdown },
   { name: 'edge', convert: async (html, options) => edge.htmlToMarkdown(html, options), stream: edge.streamHtmlToMarkdown },
-  { name: 'browser', convert: async (html, options) => (await browser.htmlToMarkdown(html, options)).markdown, stream: browser.streamHtmlToMarkdown },
+  { name: 'browser', convert: (html, options) => browser.htmlToMarkdown(html, options), stream: browser.streamHtmlToMarkdown },
   { name: 'wasm', convert: async (html, options) => wasm.htmlToMarkdown(html, options), stream: (htmlStream, options) => streamWith(wasm.MarkdownStream, htmlStream, options) },
 ]
 
@@ -69,6 +73,18 @@ const optionCases: [string, Partial<MdreamOptions>][] = [
   ['tagOverrides', { tagOverrides: { 'x-note': 'strong' } }],
   ['clean', { clean: true, origin: 'https://example.com' }],
 ]
+
+// Node, edge, and raw WASM return a string; the browser entry returns a
+// Promise of the same string. export-types.test.ts checks the types match.
+describe('return contract', () => {
+  it('returns the Markdown string', async () => {
+    for (const convert of [node.htmlToMarkdown, edge.htmlToMarkdown, wasm.htmlToMarkdown])
+      expect(convert('<h1>Hi</h1>', {})).toBe('# Hi')
+    const pending = browser.htmlToMarkdown('<h1>Hi</h1>', {})
+    expect(pending).toBeInstanceOf(Promise)
+    expect(await pending).toBe('# Hi')
+  })
+})
 
 describe.each(entries)('$name entry', ({ name, convert, stream }) => {
   it.each(optionCases)('resolves %s the same way as the Node entry', async (_, options) => {

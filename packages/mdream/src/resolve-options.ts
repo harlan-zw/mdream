@@ -13,7 +13,6 @@ export interface ResolvedOptions {
 }
 
 const MINIMAL_FILTER_EXCLUDE = ['form', 'fieldset', 'object', 'embed', 'footer', 'aside', 'iframe', 'input', 'textarea', 'select', 'button', 'nav'] as const
-const MINIMAL_FILTER_DEFAULT = { exclude: MINIMAL_FILTER_EXCLUDE as unknown as string[] }
 const CLEAN_ALL: CleanOptions = { urls: true, fragments: true, emptyLinks: true, redundantLinks: true, selfLinkHeadings: true, emptyImages: true, emptyLinkText: true }
 
 function resolveCleanConfig(options: ResolvableOptions, minimal: boolean): { cleanUrls: boolean, clean?: CleanOptions } {
@@ -80,8 +79,12 @@ export function resolveOptions(options: ResolvableOptions): ResolvedOptions {
   else if (tailwindDisabled)
     delete plugins.tailwind
 
-  if (minimal)
-    plugins.filter = options.filter || MINIMAL_FILTER_DEFAULT
+  // Under `minimal`, a filter extends the preset's excludes rather than
+  // replacing them. `filter: false` turns filtering off.
+  if (options.filter === false)
+    delete plugins.filter
+  else if (minimal)
+    plugins.filter = { ...options.filter, exclude: [...MINIMAL_FILTER_EXCLUDE, ...(options.filter?.exclude ?? [])] }
   else if (options.filter)
     plugins.filter = options.filter
 

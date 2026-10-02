@@ -644,11 +644,12 @@ pub struct HTMLToMarkdownOptions {
   /// set to `0`. Code (`<pre>`/`<code>`), tables, and headings are never
   /// wrapped.
   pub wrap_width: usize,
-  /// Cap on the bytes one construct may buffer — a text node, a tag, a comment, an
-  /// open code block or inline code span, a table row's columns, or the script text
-  /// an extraction reads; `0` (the default) is unlimited. Content past the cap is
+  /// Cap on the bytes one construct may buffer — a text node, a tag, an open code
+  /// block or inline code span, a table row's columns, or the script text an
+  /// extraction reads; `0` (the default) is unlimited. Content past the cap is
   /// **dropped**, bounding memory on adversarial input. The result never depends on
   /// chunking, and the cap applies to one-shot conversion as well as streaming.
+  /// Comments, doctypes and unsurfaced CDATA are never buffered, so never capped.
   ///
   /// A start tag is measured against what conversion *retains*. Attributes it
   /// cannot use are scanned and discarded as they stream past, costing no budget
@@ -662,9 +663,9 @@ pub struct HTMLToMarkdownOptions {
   ///
   /// Output an open construct holds back from streaming is charged too: a quote's
   /// unfinished line (or all of it while a link inside is open), a heading's
-  /// trailing `#` run, a self-link heading's text. Past the cap nothing can be
-  /// dropped without breaking the construct, so the document is cut before the
-  /// next tag.
+  /// trailing `#` run, a self-link heading's text, the `<br>` breaks written since
+  /// the last text. Past the cap nothing can be dropped without breaking the
+  /// construct, so the document is cut before the next tag.
   ///
   /// [`MdreamResult::truncated`] reports whether it fired.
   pub max_node_bytes: usize,
@@ -758,8 +759,8 @@ pub struct MdreamResult {
   pub extracted: Option<Vec<ExtractedElement>>,
   pub frontmatter: Option<Vec<(String, String)>>,
   /// Whether `max_node_bytes` fired. `false` guarantees the output is exactly what
-  /// an uncapped conversion produces. `true` is conservative: dropping a comment or
-  /// an unemitted attribute costs no output, so the markdown may still be identical.
+  /// an uncapped conversion produces. `true` is conservative: dropping an unemitted
+  /// attribute costs no output, so the markdown may still be identical.
   pub truncated: bool,
 }
 

@@ -145,7 +145,19 @@ pub(crate) fn discarded_comment_end(
   chunk: &str,
   state: &mut DiscardedCommentState,
 ) -> Option<usize> {
-  for (index, &c) in chunk.as_bytes().iter().enumerate() {
+  let bytes = chunk.as_bytes();
+  let mut index = 0;
+  while index < bytes.len() {
+    // Only a dash moves a comment body towards its end.
+    if matches!(*state, DiscardedCommentState::Comment) {
+      while index < bytes.len() && bytes[index] != DASH_CHAR {
+        index += 1;
+      }
+      if index == bytes.len() {
+        return None;
+      }
+    }
+    let c = bytes[index];
     if c == GT_CHAR
       && matches!(
         *state,
@@ -171,7 +183,8 @@ pub(crate) fn discarded_comment_end(
         DiscardedCommentState::EndBang
       }
       _ => DiscardedCommentState::Comment,
-    }
+    };
+    index += 1;
   }
   None
 }

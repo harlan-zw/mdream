@@ -1,5 +1,3 @@
-import { __mdreamTakePanicMessage } from '../wasm/mdream_edge.js'
-
 /**
  * WASM aborts on panic (wasm32-unknown-unknown has no unwinding), so a Rust
  * panic reaches JS as a bare `RuntimeError: unreachable` with no message. The
@@ -8,10 +6,9 @@ import { __mdreamTakePanicMessage } from '../wasm/mdream_edge.js'
  *
  * The instance stays usable after an abort, so callers may keep converting.
  *
- * `takeMessage` defaults to the bundled instance; tests pass their own so a
- * probe build can be checked against the same reporting path.
+ * Each entry passes its own instance so panic messages stay with that instance.
  */
-export function wasmPanicError(error: unknown, takeMessage: () => string | undefined = __mdreamTakePanicMessage): unknown {
+export function wasmPanicError(error: unknown, takeMessage: () => string | undefined): unknown {
   // An abort always surfaces as a trap. Anything else (a TypeError from the
   // bindings, a rejected stream read) must not be labelled with a message left
   // behind by a panic someone else caught.

@@ -1,6 +1,7 @@
 import { htmlToMarkdown as _htmlToMarkdown, MarkdownStream as _MarkdownStream } from '../napi/index.mjs'
 import { convertResult, pumpStream } from './convert.js'
 import { resolveOptions } from './resolve-options.js'
+import { createSurrogateCarry } from './surrogate-carry.js'
 
 export interface CleanOptions {
   /** Strip tracking query parameters (utm_*, fbclid, gclid, etc.) from URLs */
@@ -67,8 +68,12 @@ export interface MdreamOptions {
   isolateMain?: boolean
   /** Convert Tailwind utility classes. Default when minimal: true */
   tailwind?: boolean
-  /** Filter elements. Default when minimal: excludes form, nav, footer, etc. */
-  filter?: { include?: string[], exclude?: string[], processChildren?: boolean }
+  /**
+   * Filter elements by CSS selector. `minimal` excludes form, nav, footer, and
+   * similar; a filter passed with `minimal` adds to those excludes. `false`
+   * turns filtering off, including the `minimal` one.
+   */
+  filter?: false | { include?: string[], exclude?: string[], processChildren?: boolean }
   /** Extract elements matching CSS selectors */
   extraction?: Record<string, (element: ExtractedElement) => void>
   /** Tag overrides. String values act as aliases */
@@ -97,5 +102,15 @@ export async function* streamHtmlToMarkdown(
   if (!htmlStream)
     throw new Error('Invalid HTML stream provided')
   const resolved = resolveOptions(options)
-  yield* pumpStream(new _MarkdownStream(resolved.napiOpts), htmlStream, resolved, { decodeInJs: true })
+  const carry = createSurrogateCarry()
+  const stream = new _MarkdownStream(resolved.napiOpts)
+  yield* pumpStream({
+    processChunk: chunk => stream.processChunk(carry.take(chunk)),
+    processChunkBytes: chunk => stream.processChunkBytes(chunk),
+    finish: () => {
+      const held = carry.flush()
+      return held ? stream.processChunk(held) + stream.finish() : stream.finish()
+    },
+    takeData: () => stream.takeData(),
+  }, htmlStream, resolved, { decodeInJs: true })
 }
