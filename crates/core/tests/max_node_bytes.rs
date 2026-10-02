@@ -1543,6 +1543,41 @@ fn a_code_fence_holds_at_most_the_cap() {
   }
 }
 
+// Inside a list item every fence line also carries the list indent. A single
+// node within the cap used to be charged only for its raw text, so a deep list
+// multiplied it into a fence many times the cap.
+#[test]
+fn list_indentation_counts_against_a_code_fence_cap() {
+  let html = format!(
+    "{}<pre><code>{}</code></pre><p>after</p>",
+    "<ul><li>".repeat(100),
+    "a\n".repeat(CAP / 4)
+  );
+  let uncapped = peak(&html, 8 * 1024, 0);
+  let capped = peak(&html, 8 * 1024, CAP);
+  assert!(
+    uncapped > (32 * CAP) as u64,
+    "fixture should expand the fence uncapped, got {uncapped}"
+  );
+  assert!(
+    capped < (8 * CAP) as u64,
+    "capped peak {capped} should be a window, not the expanded fence"
+  );
+  let mut p = MarkdownStreamProcessor::new(options(CAP));
+  let out = p.process_chunk(&html) + &p.finish();
+  assert!(p.truncated());
+  assert!(
+    out.len() < 2 * CAP,
+    "output {} should stay near the cap",
+    out.len()
+  );
+  assert!(
+    out.ends_with("after"),
+    "{}",
+    &out[out.len().saturating_sub(40)..]
+  );
+}
+
 // Past an inline code span's cap a caption's `*` is dropped, which left a trim
 // free to take the caption's content start and panicked its close.
 #[test]
