@@ -1,5 +1,5 @@
 import type { ParseState } from './parse'
-import type { ElementNode, MarkdownChunk, NodeEvent, SplitterOptions, TextNode } from './types'
+import type { CleanView, ElementNode, MarkdownChunk, NodeEvent, SplitterOptions, TextNode } from './types'
 import {
   ELEMENT_NODE,
   NodeEventEnter,
@@ -60,9 +60,9 @@ function isOutputWhitespace(code: number): boolean {
  * Get current markdown content WITHOUT clearing buffers. A held clean pass
  * finishes the view so its fragment-link markers never reach a chunk.
  */
-function getCurrentMarkdown(state: { buffer: string[] }, finishOutput?: (markdown: string) => string): string {
+function getCurrentMarkdown(state: { buffer: string[] }, finishOutput?: (markdown: string) => CleanView): CleanView {
   const markdown = state.buffer.join('').trimStart()
-  return finishOutput ? finishOutput(markdown) : markdown
+  return finishOutput ? finishOutput(markdown) : { markdown, settled: -1 }
 }
 
 /**
@@ -105,14 +105,15 @@ export function* htmlToMarkdownSplitChunksStream(
   let outputFinal = false
 
   function* flushChunk(endPosition?: number, applyOverlap = false): Generator<MarkdownChunk, void, undefined> {
-    const currentMd = getCurrentMarkdown(processor.state, processor.finishOutput)
+    const view = getCurrentMarkdown(processor.state, processor.finishOutput)
+    const currentMd = view.markdown
     let chunkEnd = endPosition ?? currentMd.length
     // A fragment link no heading matches yet regrows when a later heading
     // resolves it, so the finished view under every recorded position moves.
     // Only a chunk ending before the earliest such link is settled; later
     // content waits for the final view.
-    if (!outputFinal && processor.settledOutput) {
-      const settled = processor.settledOutput()
+    if (!outputFinal) {
+      const settled = view.settled
       if (settled !== -1 && settled <= chunkEnd) {
         chunkEnd = Math.max(settled, lastChunkEndPosition)
         // A clamped cut keeps its trailing whitespace unconsumed: content a
@@ -262,7 +263,7 @@ export function* htmlToMarkdownSplitChunksStream(
     processResolvedEvent(event)
 
     if (!opts.returnEachLine) {
-      const currentMd = getCurrentMarkdown(processor.state, processor.finishOutput)
+      const currentMd = getCurrentMarkdown(processor.state, processor.finishOutput).markdown
       const currentChunkSize = opts.lengthFunction(currentMd.slice(lastChunkEndPosition))
 
       if (currentChunkSize > opts.chunkSize) {

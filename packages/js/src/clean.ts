@@ -10,7 +10,7 @@
  * headings that may come later.
  */
 
-import type { Cleaner, CleanOptions, CleanPass, CleanTarget, ElementNode } from './types'
+import type { Cleaner, CleanOptions, CleanPass, CleanTarget, CleanView, ElementNode } from './types'
 import { FRAGMENT_LINK_CLOSE, FRAGMENT_LINK_OPEN, TAG_A, TAG_CODE, TAG_H1, TAG_H6 } from './const'
 import { resolveUrl } from './url'
 import { isInsideHeading } from './utils'
@@ -52,12 +52,13 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
   // Open anchors and the buffer index of the `[` each wrote, or -1.
   const links: ElementNode[] = []
   const brackets: number[] = []
-  // The exact Markdown each marked link produced, so `finish` drops only
-  // markers the pass itself wrote instead of guessing from the characters
-  // a source marker happens to sit next to.
+  // The exact Markdown each marked link produced, in the order the links
+  // closed, which is the order of their close markers in the output. When
+  // the source carries marker characters too, `finish` drops only markers
+  // whose pair spells one of these spans.
   const spans: string[] = []
-  // The buffer index each span in `spans` starts at, parallel to it.
-  const spanStarts: number[] = []
+  // The `#fragment` each span links to, parallel to `spans`.
+  const spanFragments: string[] = []
   // The `[` of the anchor now closing, set by `exit` for `unwrap` and `closed`.
   let closing = -1
   // Raw Markdown of each heading, for `fragments` to resolve slugs against.
@@ -151,7 +152,7 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
       if (target.lastContentCache === close)
         target.lastContentCache = marked
       spans.push(`${FRAGMENT_LINK_OPEN}[${buffer.slice(bracket + 1, index).join('')}${marked}`)
-      spanStarts.push(bracket)
+      spanFragments.push(close.slice(3, destinationEnd(close, 3)))
     },
 
     held() {
@@ -162,48 +163,8 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
       return Infinity
     },
 
-    settled() {
-      if (spans.length === 0)
-        return -1
-      const slugs = new Set<string>()
-      for (const heading of headings) {
-        const slug = headingSlug(heading)
-        if (slug)
-          slugs.add(slug)
-      }
-      let unresolved = -1
-      for (let index = 0; index < spans.length; index++) {
-        const span = spans[index]!
-        // A span is `OPEN[textCLOSE](#fragment)`, so the destination starts
-        // four code points past the close marker and runs to `)` or a title.
-        const close = span.indexOf(FRAGMENT_LINK_CLOSE)
-        let end = close + 4
-        while (end < span.length && span.charCodeAt(end) !== 41 && span.charCodeAt(end) !== 32)
-          end++
-        if (!slugs.has(span.slice(close + 4, end))) {
-          unresolved = index
-          break
-        }
-      }
-      if (unresolved === -1)
-        return -1
-      const start = spanStarts[unresolved]!
-      if (start > buffer.length)
-        return -1
-      // Character position of the span's `[` in the joined buffer. Earlier
-      // spans are all resolved, so the finished view keeps this prefix except
-      // for the leading whitespace it trims and the two markers each earlier
-      // span loses, which rebases the floor into view coordinates.
-      let position = 0
-      for (let index = 0; index < start; index++)
-        position += buffer[index]!.length
-      position -= leadingTrimmedLength(buffer)
-      position -= unresolved * 2
-      return position > 0 ? position : 0
-    },
-
     finish(markdown) {
-      return fragments ? applyFragments(markdown, headings, spans) : markdown
+      return fragments ? applyFragments(markdown, headings, spans, spanFragments) : { markdown, settled: -1 }
     },
   }
 }
@@ -412,26 +373,63 @@ function headingSlug(text: string): string {
 
 // ── Fragments ──
 
-/** Whether `code` is whitespace `String.prototype.trimStart` removes. */
-function isTrimWhitespace(code: number): boolean {
-  return code === 32 || (code >= 9 && code <= 13) || code === 0xA0 || code === 0xFEFF
-    || code === 0x1680 || (code >= 0x2000 && code <= 0x200A) || code === 0x2028 || code === 0x2029
-    || code === 0x202F || code === 0x205F || code === 0x3000
+const OPEN_CODE = FRAGMENT_LINK_OPEN.charCodeAt(0)
+const CLOSE_CODE = FRAGMENT_LINK_CLOSE.charCodeAt(0)
+
+/** End of the bare destination starting at `from`: the `)`, or the space before a title. */
+function destinationEnd(markdown: string, from: number): number {
+  let end = from
+  while (end < markdown.length && markdown.charCodeAt(end) !== 41 /* ) */ && markdown.charCodeAt(end) !== 32)
+    end++
+  return end
 }
 
-/** Length of the joined prefix `trimStart` removes. */
-function leadingTrimmedLength(buffer: string[]): number {
-  let leading = 0
-  for (let index = 0; index < buffer.length; index++) {
-    const entry = buffer[index]!
-    let cursor = 0
-    while (cursor < entry.length && isTrimWhitespace(entry.charCodeAt(cursor)))
-      cursor++
-    leading += cursor
-    if (cursor < entry.length)
-      break
+/** Position past the `](#fragment)` or `](#fragment "title")` at `start`, or -1. */
+function linkCloseEnd(markdown: string, start: number): number {
+  if (markdown.charCodeAt(start) !== 93 /* ] */ || markdown.charCodeAt(start + 1) !== 40 /* ( */ || markdown.charCodeAt(start + 2) !== 35 /* # */)
+    return -1
+  let end = destinationEnd(markdown, start + 3)
+  if (markdown.charCodeAt(end) === 32 && markdown.charCodeAt(end + 1) === 34 /* " */) {
+    end += 2
+    while (end < markdown.length && markdown.charCodeAt(end) !== 34)
+      end += markdown.charCodeAt(end) === 92 /* \ */ ? 2 : 1
+    end++
   }
-  return leading
+  return markdown.charCodeAt(end) === 41 ? end + 1 : -1
+}
+
+/**
+ * Pair the markers when the pass wrote every marker in `markdown`. The pass
+ * writes one open and one close marker per span, and spans nest, so the k-th
+ * close marker belongs to the k-th span and pairs with the open marker on top
+ * of the stack. No Markdown around the markers takes part, so code spans,
+ * escapes and quote prefixes in link text cannot hide a marker. Returns false
+ * when `markdown` holds other marker characters, which come from the source.
+ */
+function pairWrittenMarkers(markdown: string, count: number, opens: number[], closes: number[]): boolean {
+  const stack: number[] = []
+  let opened = 0
+  let closed = 0
+  let nextOpen = markdown.indexOf(FRAGMENT_LINK_OPEN)
+  let nextClose = markdown.indexOf(FRAGMENT_LINK_CLOSE)
+  while (nextOpen !== -1 || nextClose !== -1) {
+    if (nextOpen !== -1 && (nextClose === -1 || nextOpen < nextClose)) {
+      if (opened === count || markdown.charCodeAt(nextOpen + 1) !== 91 /* [ */)
+        return false
+      stack.push(nextOpen)
+      opened++
+      nextOpen = markdown.indexOf(FRAGMENT_LINK_OPEN, nextOpen + 1)
+    }
+    else {
+      if (closed === count || stack.length === 0)
+        return false
+      opens[closed] = stack.pop()!
+      closes[closed] = nextClose
+      closed++
+      nextClose = markdown.indexOf(FRAGMENT_LINK_CLOSE, nextClose + 1)
+    }
+  }
+  return opened === count && closed === count
 }
 
 /** Whether `index` sits right after a newline or at the string start. */
@@ -496,41 +494,27 @@ function inlineCodeEnd(markdown: string, from: number, run: number, len: number)
 }
 
 /**
- * Remove fragment links that resolve to no heading.
- *
- * The converter writes `OPEN[` and `CLOSE](#slug)` around each fragment link
- * it emits, so only real links are touched: escaped brackets and code keep
- * their text. A broken link loses only its wrappers, so a link nested in its
- * text is judged on its own. A marker is dropped only when its pair spells a
- * span the pass itself wrote, so a marker character the source carried is
- * kept, even next to link syntax.
+ * Pair the markers when the source carries marker characters too. Only a pair
+ * that spells a span the pass wrote qualifies. Code can carry bytes identical
+ * to a written span, since code escapes no brackets; the pass never marks
+ * links in code and code output never wraps a marked link, so markers inside
+ * a fence or code span are source bytes and pair nothing. Inside a `](...)`
+ * destination, backticks are literal, not span delimiters, and an escaped
+ * backtick opens no code span.
  */
-function applyFragments(markdown: string, headings: readonly string[], spans: readonly string[]): string {
-  let next = markdown.indexOf(FRAGMENT_LINK_OPEN)
-  if (next === -1)
-    return markdown
-
-  const slugs = new Set<string>()
-  for (const heading of headings) {
-    const slug = headingSlug(heading)
-    if (slug)
-      slugs.add(slug)
+function pairSpelledMarkers(markdown: string, spans: readonly string[], opens: number[], closes: number[]): void {
+  // Spans with the same Markdown link to the same fragment, so any of them
+  // takes a matching pair.
+  const unpaired = new Map<string, number[]>()
+  for (let index = spans.length - 1; index >= 0; index--) {
+    const list = unpaired.get(spans[index]!)
+    if (list)
+      list.push(index)
+    else
+      unpaired.set(spans[index]!, [index])
   }
-
-  // The pass wrote every span above, so only these bytes qualify for the
-  // drop; source text shaped like a marked link never matches.
-  const written = new Set(spans)
-
-  const open = FRAGMENT_LINK_OPEN.charCodeAt(0)
-  const closeCode = FRAGMENT_LINK_CLOSE.charCodeAt(0)
   const len = markdown.length
-  // Pass 1: pair markers the pass wrote. Code escapes no brackets, so a code
-  // block or span can carry bytes identical to a written span; the pass never
-  // marks links in code and code output never wraps a marked link, so markers
-  // inside a fence or code span are source bytes and pair nothing. Inside a
-  // `](...)` destination, backticks are literal, not span delimiters.
-  const opens: number[] = []
-  const dropAt = new Map<number, number>()
+  const candidates: number[] = []
   let fenceRun = 0
   let inDestination = false
   let i = 0
@@ -558,7 +542,7 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
         continue
       }
     }
-    if (code === 96 /* ` */) {
+    if (code === 96 /* ` */ && !isEscaped(markdown, i)) {
       let end = i
       while (end < len && markdown.charCodeAt(end) === 96)
         end++
@@ -576,69 +560,116 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
       i++
       continue
     }
-    if (code === open) {
+    if (code === OPEN_CODE) {
       if (markdown.charCodeAt(i + 1) === 91 /* [ */)
-        opens.push(i)
+        candidates.push(i)
     }
-    else if (code === closeCode && opens.length && markdown.startsWith('](#', i + 1)) {
-      // The destination is written bare, so it ends at `)` or at the space
-      // before a title.
-      let end = i + 4
-      while (end < len && markdown.charCodeAt(end) !== 41 && markdown.charCodeAt(end) !== 32)
-        end++
-      const fragment = markdown.slice(i + 4, end)
-      if (markdown.charCodeAt(end) === 32 && markdown.charCodeAt(end + 1) === 34 /* " */) {
-        end += 2
-        while (end < len && markdown.charCodeAt(end) !== 34)
-          end += markdown.charCodeAt(end) === 92 /* \ */ ? 2 : 1
-        end++
-      }
-      if (markdown.charCodeAt(end) !== 41 /* ) */) {
-        i++
-        continue
-      }
-      // Pair the close with the nearest open whose span the pass wrote. A
-      // source open has no partner, so dropping a failed candidate keeps it
-      // from stealing a later close.
-      let paired = -1
-      let depth = opens.length
-      while (depth > 0) {
-        depth--
-        if (written.has(markdown.slice(opens[depth]!, end + 1))) {
-          paired = depth
-          break
+    else if (code === CLOSE_CODE && candidates.length) {
+      const end = linkCloseEnd(markdown, i + 1)
+      if (end !== -1) {
+        // Pair the close with the nearest open whose span the pass wrote. A
+        // source open has no partner, so dropping a failed candidate keeps
+        // it from stealing a later close.
+        let depth = candidates.length
+        while (depth > 0) {
+          depth--
+          const list = unpaired.get(markdown.slice(candidates[depth]!, end))
+          if (list?.length) {
+            const span = list.pop()!
+            opens[span] = candidates[depth]!
+            closes[span] = i
+            candidates.length = depth
+            break
+          }
         }
       }
-      if (paired === -1) {
-        i++
-        continue
-      }
-      const start = opens[paired]!
-      opens.length = paired
-      const broken = !slugs.has(fragment)
-      dropAt.set(start, broken ? 2 : 1)
-      dropAt.set(i, broken ? end + 1 - i : 1)
     }
     i++
   }
+}
 
-  // Pass 2: copy everything between the dropped runs. U+FDD0 and U+FDD1 are
-  // noncharacters reserved for internal use, but the source may still carry
-  // one: only markers paired with a span the pass wrote are in `dropAt`, so
-  // any other occurrence is source text and is copied verbatim.
+/**
+ * Remove fragment links that resolve to no heading.
+ *
+ * The converter writes `OPEN[` and `CLOSE](#slug)` around each fragment link
+ * it emits, so only real links are touched: escaped brackets and code keep
+ * their text. A broken link loses only its wrappers, so a link nested in its
+ * text is judged on its own. U+FDD0 and U+FDD1 are noncharacters reserved for
+ * internal use, but the source may still carry one; only markers paired with
+ * a span the pass wrote are dropped, and any other one is copied verbatim.
+ */
+function applyFragments(markdown: string, headings: readonly string[], spans: readonly string[], spanFragments: readonly string[]): CleanView {
+  const count = spans.length
+  if (count === 0)
+    return { markdown, settled: -1 }
+
+  const slugs = new Set<string>()
+  for (const heading of headings) {
+    const slug = headingSlug(heading)
+    if (slug)
+      slugs.add(slug)
+  }
+
+  // Positions of each span's open and close marker, or -1 when unpaired.
+  const opens: number[] = []
+  const closes: number[] = []
+  for (let span = 0; span < count; span++) {
+    opens.push(-1)
+    closes.push(-1)
+  }
+  const written = pairWrittenMarkers(markdown, count, opens, closes)
+  if (!written) {
+    opens.fill(-1)
+    closes.fill(-1)
+    pairSpelledMarkers(markdown, spans, opens, closes)
+  }
+
+  // Each pair drops its markers, and a broken link also drops its `[` and
+  // its `](#slug)`. The earliest broken link starts the part of the view a
+  // later heading can still change.
+  const dropAt = new Map<number, number>()
+  let floor = -1
+  for (let span = 0; span < count; span++) {
+    const open = opens[span]!
+    if (open === -1)
+      continue
+    const close = closes[span]!
+    const closeEnd = linkCloseEnd(markdown, close + 1)
+    const broken = closeEnd !== -1 && !slugs.has(spanFragments[span]!)
+    if (broken && (floor === -1 || open < floor))
+      floor = open
+    dropAt.set(open, broken ? 2 : 1)
+    dropAt.set(close, broken ? closeEnd - close : 1)
+  }
+
+  // Copy everything between the dropped runs, walking the markers in order.
   let result = ''
   let copied = 0
-  while (next !== -1 && next < len) {
-    // A marker a dropped run already swallowed is source text pass 1 never
-    // paired: skip it, else `copied` moves backwards and resurrects the tail
-    // of a dropped destination or title.
-    if (next >= copied) {
-      result += markdown.slice(copied, next)
-      copied = next + (dropAt.get(next) ?? 0)
+  let settled = -1
+  let nextOpen = markdown.indexOf(FRAGMENT_LINK_OPEN)
+  let nextClose = markdown.indexOf(FRAGMENT_LINK_CLOSE)
+  while (nextOpen !== -1 || nextClose !== -1) {
+    let next
+    if (nextOpen !== -1 && (nextClose === -1 || nextOpen < nextClose)) {
+      next = nextOpen
+      nextOpen = markdown.indexOf(FRAGMENT_LINK_OPEN, next + 1)
     }
-    const nextOpen = markdown.indexOf(FRAGMENT_LINK_OPEN, next + 1)
-    const nextClose = markdown.indexOf(FRAGMENT_LINK_CLOSE, next + 1)
-    next = nextOpen === -1 ? nextClose : nextClose === -1 ? nextOpen : Math.min(nextOpen, nextClose)
+    else {
+      next = nextClose
+      nextClose = markdown.indexOf(FRAGMENT_LINK_CLOSE, next + 1)
+    }
+    // A marker inside a dropped run was never paired: the run already
+    // removed it, so it must not move `copied` backwards.
+    const drop = dropAt.get(next)
+    if (drop === undefined || next < copied)
+      continue
+    result += markdown.slice(copied, next)
+    if (next === floor)
+      settled = result.length
+    copied = next + drop
   }
-  return result + markdown.slice(copied)
+  result += markdown.slice(copied)
+  // Spelled pairs can change as later output closes a code span, so a view
+  // whose source carries markers settles nothing before the end.
+  return { markdown: result, settled: written ? settled : 0 }
 }

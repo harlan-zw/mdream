@@ -2219,7 +2219,7 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     // and a stream cannot take back a nbsp it already yielded.
     const result = trimAsciiWhitespaceEnd(trimOutputStart(state.buffer.join('')))
     state.buffer.length = 0
-    return cleanPass ? cleanPass.finish(result) : result
+    return cleanPass ? cleanPass.finish(result).markdown : result
   }
 
   /**
@@ -2414,16 +2414,10 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     state,
     // Markers the fragments pass writes are only resolved on the finished
     // whole document, which `holdsOutput` gates. Output readers that bypass
-    // getMarkdown, like the splitter, finish their views through this.
+    // getMarkdown, like the splitter, finish their views through this, and
+    // must not cut a view past its `settled` position.
     finishOutput: cleanPass?.holdsOutput
       ? (markdown: string) => cleanPass.finish(markdown)
-      : undefined,
-    // Position in the finished view through which output can no longer
-    // change: a link no heading matches yet regrows when one arrives, moving
-    // every later position. Position-based readers must not cut past it.
-    // -1 when nothing written can still change.
-    settledOutput: cleanPass?.holdsOutput
-      ? () => cleanPass.settled()
       : undefined,
   }
 }

@@ -5,6 +5,7 @@ import { htmlToMarkdownSplitChunks, htmlToMarkdownSplitChunksStream } from '@mdr
 import { describe, expect, it } from 'vitest'
 
 const RE_WHITESPACE = /\s+/
+const RE_WHITESPACE_GLOBAL = /\s+/g
 
 describe('htmlToMarkdownSplitChunks', () => {
   it('tracks header hierarchy in metadata', () => {
@@ -332,6 +333,21 @@ describe('htmlToMarkdownSplitChunks', () => {
     expect(joined).toBe(expected)
     expect(joined.split('[z](#b)')).toHaveLength(2)
     expect(joined.split('](#b)')).toHaveLength(2)
+  })
+
+  it.each([
+    ['an unresolved link inside a resolved one', `<h2>A</h2><div><a href="#a">x <div><a href="#b">z</a> ${'r'.repeat(60)}</div></a></div><h2>B</h2>`],
+    ['an unresolved link inside an unresolved one', `<div><a href="#a">x <div><a href="#b">z</a> ${'r'.repeat(60)}</div></a></div><h2>B</h2><h2>A</h2>`],
+    ['a resolved link inside an unresolved one', `<h2>B</h2><div><a href="#a">x <div><a href="#b">z</a> ${'r'.repeat(60)}</div></a></div><h2>A</h2>`],
+  ])('cuts chunks before %s', (_name, html) => {
+    const options = { clean: clean({ fragments: true }), chunkOverlap: 0, stripHeaders: false }
+    // Chunks drop the whitespace at their cuts, so compare the rest.
+    const squash = (text: string) => text.replace(RE_WHITESPACE_GLOBAL, '')
+    const expected = squash(htmlToMarkdown(html, options))
+    for (let chunkSize = 5; chunkSize <= 120; chunkSize++) {
+      const joined = htmlToMarkdownSplitChunks(html, { ...options, chunkSize }).map(chunk => chunk.content).join('')
+      expect(squash(joined), `chunk size ${chunkSize}`).toBe(expected)
+    }
   })
 
   // Edge Cases
