@@ -204,6 +204,7 @@ struct LinkOutputState {
   /// `max_node_bytes` measures the hold the same way in both.
   pins_output: bool,
   hold_released: bool,
+  /// Set in one-shot conversion too, like `pins_output`.
   empty_text_pending: bool,
   /// This anchor wrote its own `[`. Without it the exit's forward scan reaches
   /// past the link into the text and rewrites whatever bracket it finds there.
@@ -656,6 +657,9 @@ pub struct ConvertState {
   /// Upper bound on the `#`/space run a heading holds back for its closing-sequence
   /// escape, counted as text is written.
   heading_hash_run: usize,
+  /// Upper bound on the `<br>` output held until text follows it, counted as
+  /// breaks are deferred.
+  held_break_bytes: usize,
   /// `max_node_bytes` fired on held-back output: input past that point is dropped.
   held_output_exceeded: bool,
   /// Columns the delimiter row promised; cells past it would be dropped by GFM.
@@ -753,6 +757,9 @@ pub struct ConvertState {
   /// Per-`<li>` contribution width stack, parallel to `list_indent`. Used to
   /// truncate the correct number of bytes on close without re-walking ancestors.
   list_indent_widths: Vec<u8>,
+  /// Parsed `start` of each open `<ol>`, innermost last. Every item numbers
+  /// itself from it, so the attribute is read once rather than once per item.
+  ordered_starts: Vec<Option<u32>>,
 
   /// `<pre>` fenced-code deferral (issue #97). A bare `<pre>` (no `<code>`
   /// child) becomes a fenced code block, but the opening fence is deferred
@@ -786,6 +793,10 @@ pub struct ConvertState {
   /// Bytes a table row read back to classify the line it follows.
   #[cfg(test)]
   row_line_scanned: std::cell::Cell<usize>,
+  /// Bytes written by quoting, to check each line is quoted a bounded number of
+  /// times rather than once per nesting level.
+  #[cfg(test)]
+  quoted_bytes: usize,
   /// Bytes read to decide whether held line-break runs are final.
   #[cfg(test)]
   break_run_scanned: usize,
@@ -886,6 +897,7 @@ impl ConvertState {
       line_start: 0,
       line_start_scanned_to: 0,
       heading_hash_run: 0,
+      held_break_bytes: 0,
       held_output_exceeded: false,
       table_header_cells: 0,
       truncated: false,
@@ -937,6 +949,7 @@ impl ConvertState {
 
       list_indent: String::new(),
       list_indent_widths: Vec::with_capacity(8),
+      ordered_starts: Vec::new(),
 
       pre_fence_pending: false,
       pre_fence_pending_depth: 0,
@@ -950,6 +963,8 @@ impl ConvertState {
       gfm_escape_slow_path_calls: 0,
       #[cfg(test)]
       row_line_scanned: std::cell::Cell::new(0),
+      #[cfg(test)]
+      quoted_bytes: 0,
       #[cfg(test)]
       break_run_scanned: 0,
     };
@@ -1086,6 +1101,9 @@ impl ConvertState {
     }
     // Every markup token completes the text before it, so this sees the same
     // states whatever the chunking. The parser stops before that token.
+    if self.empty_item_hazard {
+      self.settle_item_marker();
+    }
     if self.options.max_node_bytes != 0
       && !self.held_output_exceeded
       && self.held_output_exceeds_cap()
@@ -1179,6 +1197,9 @@ impl ConvertState {
     // declaration opener, or a name that could still be a builtin - so the cap
     // does not drop a token holding no payload yet.
     let mut carry_bounded = false;
+    // Set with `carry` when an end tag stopped past its name. Only its `>` is
+    // still to come, so it is dropped like an over-cap one instead of carried.
+    let mut discard_end_tag = false;
 
     // Mid-token from a previous chunk: keep dropping until its end is found.
     if !matches!(self.discard, Discard::No) {
@@ -1479,6 +1500,7 @@ impl ConvertState {
               self.rawtext_end_tag_pending = true;
               carry = true;
               carry_bounded = result.bounded_prefix;
+              discard_end_tag = result.name_ended;
               break;
             }
             continue;
@@ -1540,6 +1562,7 @@ impl ConvertState {
               self.rawtext_end_tag_pending = true;
               carry = true;
               carry_bounded = result.bounded_prefix;
+              discard_end_tag = result.name_ended;
               break;
             }
             continue;
@@ -1642,6 +1665,7 @@ impl ConvertState {
         } else {
           carry = true;
           carry_bounded = result.bounded_prefix;
+          discard_end_tag = result.name_ended;
           break;
         }
       } else if !next.is_ascii_alphabetic() && next != QUESTION_CHAR {
@@ -1796,7 +1820,9 @@ impl ConvertState {
     // run is kept in `text_buffer` instead, so it is parsed once however many
     // chunks it spans.
     let consumed = if carry {
-      if max_node_bytes != 0 && chunk_length - run_start > max_node_bytes && !carry_bounded {
+      if discard_end_tag
+        || (max_node_bytes != 0 && chunk_length - run_start > max_node_bytes && !carry_bounded)
+      {
         self.complete_text_node(&mut text_buffer);
         self.start_discard(chunk, run_start);
         chunk_length
@@ -1825,9 +1851,9 @@ impl ConvertState {
     chunk_length
   }
 
-  /// Drop a token that outgrew the cap instead of carrying it. The element is
-  /// lost, but scanning its bytes here leaves the quote/dash state that finds its
-  /// end, so the raw input buffer stops growing.
+  /// Drop a token that outgrew the cap, or an end tag past its name, instead of
+  /// carrying it. The element is lost, but scanning its bytes here leaves the
+  /// quote/dash state that finds its end, so the raw input buffer stops growing.
   ///
   /// Semantics stay aligned with an uncapped parse, which processes each of
   /// these tokens whole with no length check: an end tag closes its element or
@@ -2126,11 +2152,12 @@ impl ConvertState {
     // Tokens abandoned at EOF are only reported here. A parked start tag counts
     // just when the cap fired on it: a mask-rejected attribute is absent from an
     // uncapped parse too, so losing it loses nothing. The same holds for an
-    // unterminated ignored declaration.
+    // unterminated ignored declaration, and for an end tag: an uncapped parse
+    // drops it too, and whatever it would close the end of input closes.
     let discard_loses_output = match self.discard {
-      Discard::No | Discard::Comment(_) | Discard::Doctype => false,
+      Discard::No | Discard::Comment(_) | Discard::Doctype | Discard::CloseTag(_) => false,
       Discard::Cdata(_) => self.has_surfaced_cdata(),
-      Discard::Tag(_) | Discard::CloseTag(_) => true,
+      Discard::Tag(_) => true,
     };
     if discard_loses_output
       || (self.options.max_node_bytes != 0
@@ -2254,15 +2281,22 @@ impl ConvertState {
         self.heading_hash_run = run;
       }
     }
+    // A streaming `<br>` run is held as one copy and a count until content
+    // follows it, then expanded whole into the chunk that yields it. Counting
+    // every break since the last text also adds up runs split by other markup.
+    if self.held_break_bytes > cap {
+      return true;
+    }
     let len = self.buffer.len();
     if len <= cap {
       return false;
     }
     let mut floor = len;
+    // A link holds while its text is blank, since its close may still drop it.
     // Other link holds end within the link's URL length.
     if let Some(bracket_pos) = std::iter::once(&self.link)
       .chain(&self.parent_links)
-      .filter(|link| link.open && link.pins_output)
+      .filter(|link| link.open && (link.pins_output || link.empty_text_pending))
       .map(|link| link.bracket_pos)
       .min()
     {
@@ -2282,20 +2316,11 @@ impl ConvertState {
     len - floor > cap
   }
 
-  pub fn get_markdown_chunk(&mut self) -> String {
-    if self.format == OutputFormat::Html {
-      if let Some(&last) = self.buffer.as_bytes().last() {
-        self.flushed_tail[1] = last;
-      }
-      return std::mem::take(&mut self.buffer);
-    }
-    if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 {
-      return String::new();
-    }
-    // Quote only what this chunk could already hand out. The tail past here is
-    // still open to the trims below and to a reach-back rewrite from the next
-    // chunk, and a quote prefix committed over it cannot be withdrawn. Guarded
-    // so a document with no open quote does not pay for the limit every chunk.
+  /// Quote only what a chunk could already hand out. The tail past here is
+  /// still open to the trims below and to a reach-back rewrite from the next
+  /// chunk, and a quote prefix committed over it cannot be withdrawn. Guarded
+  /// so a document with no open quote does not pay for the limit.
+  pub(crate) fn flush_settled_blockquote_lines(&mut self) {
     if self.streaming_flush_possible() {
       let mut flush_limit = trim_ascii_whitespace_end(&self.buffer);
       if let Some(marker) = self.open_markers.first() {
@@ -2306,6 +2331,19 @@ impl ConvertState {
       }
       self.flush_streaming_blockquote_lines_upto(flush_limit);
     }
+  }
+
+  pub fn get_markdown_chunk(&mut self) -> String {
+    if self.format == OutputFormat::Html {
+      if let Some(&last) = self.buffer.as_bytes().last() {
+        self.flushed_tail[1] = last;
+      }
+      return std::mem::take(&mut self.buffer);
+    }
+    if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+      return String::new();
+    }
+    self.flush_settled_blockquote_lines();
     let buf_len = self.buffer.len();
     // Trailing spaces at the buffer end are never final outside <pre>: a later
     // block close (or a dropped empty element followed by a block) trims them,
@@ -2758,6 +2796,8 @@ pub(crate) struct CloseTagResult {
   /// The chunk ended inside a name short enough to be a builtin, so the
   /// carried bytes hold no payload yet.
   bounded_prefix: bool,
+  /// The chunk ended past the name, in the ignored rest of the tag.
+  name_ended: bool,
 }
 
 /// Longest prefix of `text` that fits `max` bytes without splitting a char.

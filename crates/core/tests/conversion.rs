@@ -2391,6 +2391,12 @@ fn an_empty_list_item_does_not_underline_the_text_above() {
     "- a\n-\n- b"
   );
   assert_eq!(convert("<ul><li></li><li>a</li></ul>"), "-\n- a");
+  // A block opening the item settles the blank line before a nested list's
+  // first marker can drop it.
+  assert_eq!(
+    convert("<ul><li>a<ul><li><blockquote>q</blockquote><ul><li>b</li></ul></li></ul></li></ul>"),
+    "- a\n\n  - \n    > q\n    - b"
+  );
 }
 
 #[test]
@@ -4952,6 +4958,27 @@ fn ordered_lists_honor_the_start_attribute() {
   );
   assert_eq!(convert("<ol start=\" 7 \"><li>a</li></ol>"), "7. a");
   assert_eq!(convert("<ol start=\"+7\"><li>a</li></ol>"), "7. a");
+}
+
+#[test]
+fn each_ordered_list_numbers_from_its_own_start() {
+  // An inner list's `start` must not leak into its parent's later items, nor
+  // into a sibling list.
+  assert_eq!(
+    convert(
+      "<ol start=\"5\"><li>a<ol start=\"20\"><li>b</li></ol></li><li>c<ul><li>d</li></ul></li><li>e</li></ol><ol><li>f</li></ol>"
+    ),
+    "5. a\n   20. b\n6. c\n   - d\n7. e\n\n1. f"
+  );
+  // Read once per list, so a padded value costs its length once, not per item.
+  let html = format!(
+    "<ol start=\"{}7\">{}</ol>",
+    " ".repeat(64 * 1024),
+    "<li>x</li>".repeat(20_000)
+  );
+  let out = convert(&html);
+  assert!(out.starts_with("7. x\n8. x\n"), "{:.40}", out);
+  assert!(out.ends_with("20006. x"), "{}", &out[out.len() - 20..]);
 }
 
 #[test]
