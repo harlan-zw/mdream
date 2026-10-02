@@ -663,9 +663,9 @@ pub struct HTMLToMarkdownOptions {
   ///
   /// Output an open construct holds back from streaming is charged too: a quote's
   /// unfinished line (or all of it while a link inside is open), a heading's
-  /// trailing `#` run, a self-link heading's text. Past the cap nothing can be
-  /// dropped without breaking the construct, so the document is cut before the
-  /// next tag.
+  /// trailing `#` run, a self-link heading's text, the `<br>` breaks written since
+  /// the last text. Past the cap nothing can be dropped without breaking the
+  /// construct, so the document is cut before the next tag.
   ///
   /// [`MdreamResult::truncated`] reports whether it fired.
   pub max_node_bytes: usize,
