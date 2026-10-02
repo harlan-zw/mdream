@@ -1546,6 +1546,20 @@ impl ConvertState {
     self.depth -= 1;
     self.has_encoded_html_entity = false;
     self.just_closed_tag = true;
+
+    // Each enclosing quote re-quotes whatever content is still unflushed when it
+    // closes, so a deep nest closed within one chunk copied its content once per
+    // level. Quote the settled lines now, as a chunk boundary here would. A quote
+    // inside a list item is re-quoted frame by frame by the flush too, so there
+    // it would only add work.
+    if node_tag_id == Some(TAG_BLOCKQUOTE)
+      && self
+        .blockquotes
+        .iter()
+        .all(|frame| frame.list_indent.is_empty())
+    {
+      self.flush_settled_blockquote_lines();
+    }
   }
 
   pub(crate) fn process_closing_tag(
