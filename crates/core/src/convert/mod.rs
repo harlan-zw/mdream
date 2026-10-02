@@ -17,10 +17,18 @@ use std::borrow::Cow;
 
 /// Whether the conversion writes plain text. A macro rather than a method: a
 /// method call changes MIR shape and grew the all-format WASM build by 50 B.
-#[cfg(feature = "text")]
+/// A build with other formats reads the cached bool, the same expression as a
+/// build without format features. A single-format build gets a constant.
+#[cfg(all(feature = "text", any(feature = "markdown", feature = "html")))]
 macro_rules! plain_text {
   ($state:expr) => {
-    ($state.plain_text | !MULTI_FORMAT)
+    ($state.plain_text)
+  };
+}
+#[cfg(all(feature = "text", not(any(feature = "markdown", feature = "html"))))]
+macro_rules! plain_text {
+  ($state:expr) => {
+    true
   };
 }
 #[cfg(not(feature = "text"))]
@@ -729,12 +737,19 @@ pub struct ConvertState {
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
   /// hot path — a single integer compare). Code/tables/headings are exempt.
   wrap_width: usize,
-  // A text-only build reads `plain_text` instead.
-  #[cfg_attr(not(any(feature = "markdown", feature = "html")), allow(dead_code))]
+  // A single-format build folds every format check to a constant.
+  #[cfg_attr(
+    not(any(
+      all(feature = "markdown", feature = "text"),
+      all(feature = "markdown", feature = "html"),
+      all(feature = "text", feature = "html")
+    )),
+    allow(dead_code)
+  )]
   format: OutputFormat,
   /// Cached `format == Text`. The hot text path reads a bool instead of
   /// comparing the enum, which keeps the WASM build the same size.
-  #[cfg(feature = "text")]
+  #[cfg(all(feature = "text", any(feature = "markdown", feature = "html")))]
   plain_text: bool,
   preserve_leading_whitespace: bool,
 
@@ -833,41 +848,43 @@ pub struct ConvertState {
   override_idx: Option<Box<[u8; MAX_TAG_ID]>>,
 }
 
-/// Whether the build enables more than one output format. With exactly one,
-/// every format check folds to a constant and the other renderers drop out.
-const MULTI_FORMAT: bool =
-  cfg!(feature = "markdown") as u8 + cfg!(feature = "text") as u8 + cfg!(feature = "html") as u8
-    > 1;
-
 /// `override_idx` slot for a tag no override key names. Doubles as the
 /// exclusive upper bound on indices the table can hold.
 pub(crate) const NO_OVERRIDE: u8 = u8::MAX;
 
 impl ConvertState {
-  /// Whether this conversion writes Markdown. Constant in a single-format build.
+  /// Whether this conversion writes Markdown. A build with exactly one format
+  /// folds the check to a constant, so the other renderers drop out.
   #[inline(always)]
-  #[cfg_attr(not(feature = "markdown"), allow(clippy::unused_self))]
+  #[cfg_attr(
+    not(all(feature = "markdown", any(feature = "text", feature = "html"))),
+    allow(clippy::unused_self)
+  )]
   pub(crate) fn is_markdown(&self) -> bool {
-    #[cfg(feature = "markdown")]
+    #[cfg(all(feature = "markdown", any(feature = "text", feature = "html")))]
     {
-      !MULTI_FORMAT || self.format == OutputFormat::Markdown
+      self.format == OutputFormat::Markdown
     }
-    #[cfg(not(feature = "markdown"))]
+    #[cfg(not(all(feature = "markdown", any(feature = "text", feature = "html"))))]
     {
-      false
+      cfg!(feature = "markdown")
     }
   }
-  /// Whether this conversion writes safe HTML. Constant in a single-format build.
+  /// Whether this conversion writes safe HTML. A build with exactly one format
+  /// folds the check to a constant, so the other renderers drop out.
   #[inline(always)]
-  #[cfg_attr(not(feature = "html"), allow(clippy::unused_self))]
+  #[cfg_attr(
+    not(all(feature = "html", any(feature = "markdown", feature = "text"))),
+    allow(clippy::unused_self)
+  )]
   pub(crate) fn is_html(&self) -> bool {
-    #[cfg(feature = "html")]
+    #[cfg(all(feature = "html", any(feature = "markdown", feature = "text")))]
     {
-      !MULTI_FORMAT || self.format == OutputFormat::Html
+      self.format == OutputFormat::Html
     }
-    #[cfg(not(feature = "html"))]
+    #[cfg(not(all(feature = "html", any(feature = "markdown", feature = "text"))))]
     {
-      false
+      cfg!(feature = "html")
     }
   }
   /// Check if we're inside a table cell (either `<td>` or `<th>`).
@@ -986,7 +1003,7 @@ impl ConvertState {
       keep_dropped_raw_text: false,
 
       wrap_width: options_wrap_width,
-      #[cfg(feature = "text")]
+      #[cfg(all(feature = "text", any(feature = "markdown", feature = "html")))]
       plain_text: format == OutputFormat::Text,
       format,
       preserve_leading_whitespace: false,
