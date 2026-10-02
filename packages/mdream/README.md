@@ -3,6 +3,13 @@
 [![npm version](https://img.shields.io/npm/v/mdream?color=yellow)](https://npmjs.com/package/mdream)
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
+<a href="https://skilld.dev/gh/harlan-zw/mdream">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://skilld.dev/b/harlan-zw/mdream?theme=dark">
+    <source media="(prefers-color-scheme: light)" srcset="https://skilld.dev/b/harlan-zw/mdream?theme=light">
+    <img alt="Skill repository on skilld.dev" src="https://skilld.dev/b/harlan-zw/mdream?theme=light">
+  </picture>
+</a>
 
 ## Installation
 
@@ -16,6 +23,9 @@ pnpm add mdream
 # yarn
 yarn add mdream
 ```
+
+> [!TIP]
+> Using an AI agent? Get the mdream Skill on [skilld.dev/gh/harlan-zw/mdream](https://skilld.dev/gh/harlan-zw/mdream).
 
 For the JavaScript-only engine (hook-based plugins, splitter, pure HTML parser):
 
@@ -89,7 +99,7 @@ externals: ['mdream']
 
 ### `htmlToMarkdown()`
 
-Converts a complete HTML string to Markdown, plain text, or HTML synchronously.
+Converts a complete HTML string to Markdown, plain text, or HTML. It is synchronous in Node and on edge runtimes.
 
 **Rust engine** (`mdream`):
 
@@ -97,6 +107,9 @@ Converts a complete HTML string to Markdown, plain text, or HTML synchronously.
 import { htmlToMarkdown } from 'mdream'
 
 function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): string
+
+// Browser bundles and the CDN script load the WASM binary first
+function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): Promise<string>
 ```
 
 **JS engine** (`@mdream/js`):
@@ -131,6 +144,8 @@ const html = htmlToMarkdown('<h1>Hello <strong>World</strong></h1>', {
 ### `streamHtmlToMarkdown()`
 
 Converts an HTML `ReadableStream` to Markdown, plain text, or HTML incrementally. Returns an `AsyncIterable<string>` that yields output chunks as they are processed.
+
+It takes the same options as `htmlToMarkdown()`. The `frontmatter` callback and the `extraction` handlers run once, after the stream ends and before the last chunk is yielded.
 
 
 ```ts
@@ -176,7 +191,7 @@ import { htmlToMarkdown } from '@mdream/js'
 import { htmlToMarkdown } from 'mdream'
 ```
 
-Both engines accept the same declarative plugin configuration (`origin`, `minimal`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, `extraction`, `tagOverrides`, `clean`). The JS engine additionally supports `hooks` for imperative plugin transforms.
+Both engines support the same declarative plugins, but the option shape differs. The Rust engine takes `minimal`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, `extraction`, and `tagOverrides` at the top level. The JS engine reads the plugins from `options.plugins` and has no `minimal` option: use `withMinimalPreset()` from `@mdream/js/preset/minimal`. If the JS engine gets one of these options at the top level, it throws a `TypeError` that names the fix. The JS engine also supports `hooks` for imperative plugin transforms.
 
 ## Options
 
@@ -216,7 +231,7 @@ interface MdreamOptions {
   tailwind?: boolean
 
   /** Filter elements by CSS selectors. Default when minimal: excludes form, nav, footer, etc. */
-  filter?: { include?: string[], exclude?: string[], processChildren?: boolean }
+  filter?: false | { include?: string[], exclude?: string[], processChildren?: boolean }
 
   /** Extract elements matching CSS selectors during conversion. */
   extraction?: Record<string, (element: ExtractedElement) => void>
@@ -263,7 +278,7 @@ interface EngineOptions {
 }
 
 interface BuiltinPlugins {
-  filter?: { include?: (string | number)[], exclude?: (string | number)[], processChildren?: boolean }
+  filter?: false | { include?: (string | number)[], exclude?: (string | number)[], processChildren?: boolean }
   frontmatter?: boolean | ((fm: Record<string, string>) => void) | FrontmatterConfig
   isolateMain?: boolean
   tailwind?: boolean
@@ -336,7 +351,7 @@ Override how specific HTML tags are rendered in Markdown. String values act as a
 >
 > ```ts
 > htmlToMarkdown('<my-em>hi</my-em>', { tagOverrides: { 'my-em': 'em' } })
-> // → "_hi_"
+> // → "*hi*"
 > ```
 
 ```ts
@@ -375,12 +390,12 @@ const markdown = htmlToMarkdown(html, {
 })
 ```
 
-**Output is GitHub Flavored Markdown.** Mdream emits a fixed GFM dialect tuned for LLM input: ATX headings (`#`), fenced code blocks (` ``` `), `-` bullets, `_` emphasis, `**` strong, `---` horizontal rules, inline links. These are not configurable. For simple delimiter swaps you can use `tagOverrides`:
+**Output is GitHub Flavored Markdown.** Mdream emits a fixed GFM dialect tuned for LLM input: ATX headings (`#`), fenced code blocks (` ``` `), `-` bullets, `*` emphasis, `**` strong, `---` horizontal rules, inline links. These are not configurable. For simple delimiter swaps you can use `tagOverrides`:
 
 ```ts
 htmlToMarkdown(html, {
   tagOverrides: {
-    em: { enter: '*', exit: '*', isInline: true }, // _x_  →  *x*
+    em: { enter: '_', exit: '_', isInline: true }, // *x*  →  _x_
     strong: { enter: '__', exit: '__', isInline: true }, // **x** →  __x__
     hr: { enter: '* * *', exit: '' }, // ---  →  * * *
   },
@@ -414,6 +429,16 @@ The `minimal` preset enables the following plugins together:
 - **filter**: Excludes `form`, `fieldset`, `object`, `embed`, `footer`, `aside`, `iframe`, `input`, `textarea`, `select`, `button`, `nav`
 - **clean**: All post-processing cleanup enabled
 
+A `filter` passed with `minimal` adds to the preset's excludes. It does not replace them. To turn the preset's filter off, pass `filter: false`. `withMinimalPreset()` in the JS engine works the same way.
+
+```ts
+// Excludes h1 as well as form, nav, footer, and the rest
+htmlToMarkdown(html, { minimal: true, filter: { exclude: ['h1'] } })
+
+// Keeps forms and nav
+htmlToMarkdown(html, { minimal: true, filter: false })
+```
+
 **Rust engine:**
 
 ```ts
@@ -436,13 +461,13 @@ const markdown = htmlToMarkdown(html, withMinimalPreset({
 }))
 ```
 
-`withMinimalPreset()` returns an `EngineOptions` object with all plugin defaults applied. You can override individual plugins:
+`withMinimalPreset()` returns an `EngineOptions` object with all plugin defaults applied. You can override individual plugins. A `filter` adds to the preset's excludes:
 
 ```ts
 const markdown = htmlToMarkdown(html, withMinimalPreset({
   plugins: {
     frontmatter: false,
-    filter: { exclude: ['nav'] },
+    filter: { exclude: ['.cookie-banner'] },
   },
 }))
 ```
@@ -927,6 +952,15 @@ The CLI reads HTML from stdin and writes Markdown, plain text, or HTML to stdout
 
 ## Browser and Edge Usage
 
+Every entry takes the same `MdreamOptions` and produces the same Markdown string. In Node and edge runtimes, `htmlToMarkdown` is synchronous. In browser bundles, the CDN script, and `mdream/worker`, it returns `Promise<string>`, because the WASM binary loads first. Each export condition ships its own types, so TypeScript shows the right return type when it resolves the `browser` condition (for example, with `customConditions: ["browser"]`).
+
+```ts
+import { htmlToMarkdown } from 'mdream'
+
+// In a browser bundle
+const markdown = await htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
+```
+
 ### Edge / Cloudflare Workers
 
 For edge runtimes (Cloudflare Workers, Vercel Edge), `mdream` automatically selects the WASM build via export conditions (`workerd`, `edge-light`). Both `htmlToMarkdown` and `streamHtmlToMarkdown` are available:
@@ -957,59 +991,28 @@ catch (error) {
 }
 ```
 
-If your toolchain doesn't resolve the export conditions, the raw wasm-bindgen build (web target) is exposed at `mdream/wasm` for manual initialization:
+If your toolchain doesn't resolve the export conditions, the wasm-bindgen build (web target) is exposed at `mdream/wasm` for manual initialization. Its `htmlToMarkdown` takes the same `MdreamOptions` as the `mdream` entry. Its `MarkdownStream` runs the callbacks in `finish()`.
 
 ```ts
 import init, { htmlToMarkdown } from 'mdream/wasm'
 import wasmModule from 'mdream/wasm/mdream_edge_bg.wasm'
 
 await init({ module_or_path: wasmModule })
-const markdown = htmlToMarkdown('<h1>Hello</h1>', {})
+const markdown = htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 ```
 
-You can also import the edge entry point directly:
-
-```ts
-import { htmlToMarkdown } from 'mdream/worker'
-```
-
-The `mdream/worker` entry provides an async API since WASM must be initialized first:
-
-```ts
-import { htmlToMarkdown, initWorker, terminateWorker } from 'mdream/worker'
-
-// Initialize once with the WASM URL
-await initWorker('https://cdn.example.com/mdream_edge_bg.wasm')
-
-// Convert (returns Promise<string>)
-const markdown = await htmlToMarkdown('<h1>Hello</h1>')
-
-// Clean up when done
-terminateWorker()
-```
+`mdream/worker` is not an edge entry. It runs the conversion in a browser Web Worker; see [Web Worker](#web-worker).
 
 ### Browser CDN (IIFE)
 
-Use mdream directly via CDN with no build step. Call `init()` once to load the WASM binary, then use `htmlToMarkdown()` synchronously.
+Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It takes the same `MdreamOptions` as the `mdream` entry and returns `Promise<string>`, the same as the browser bundle.
 
 ```html
 <script src="https://unpkg.com/mdream/dist/iife.js"></script>
 <script>
-  await window.mdream.init()
-  const markdown = window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
-  console.log(markdown) // # Hello\n\nWorld
+  window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
+    .then(markdown => console.log(markdown)) // # Hello\n\nWorld
 </script>
-```
-
-You can pass a custom WASM URL or `ArrayBuffer` to `init()`:
-
-```js
-// Custom URL
-await window.mdream.init('https://cdn.example.com/mdream_edge_bg.wasm')
-
-// Pre-loaded ArrayBuffer
-const wasmBytes = await fetch('/wasm/mdream_edge_bg.wasm').then(r => r.arrayBuffer())
-await window.mdream.init(wasmBytes)
 ```
 
 **CDN Options:**
@@ -1025,7 +1028,8 @@ import { htmlToMarkdown, initWorker, terminateWorker } from 'mdream/worker'
 
 await initWorker('/path/to/mdream_edge_bg.wasm')
 
-const markdown = await htmlToMarkdown('<h1>Hello</h1>')
+// Takes the same options as the mdream entry. Callbacks run on this thread.
+const markdown = await htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 
 // Clean up
 terminateWorker()
@@ -1051,10 +1055,10 @@ if (article) {
 
 ## llms.txt Generation
 
-For llms.txt artifact generation, use the separate `@mdream/llms-txt` package. It accepts pre-converted Markdown and generates `llms.txt` and `llms-full.txt` artifacts.
+For llms.txt artifact generation, use `@mdream/js/llms-txt` from the `@mdream/js` package. It accepts pre-converted Markdown and generates `llms.txt` and `llms-full.txt` artifacts.
 
 ```ts
-import { generateLlmsTxtArtifacts } from '@mdream/llms-txt'
+import { generateLlmsTxtArtifacts } from '@mdream/js/llms-txt'
 import { htmlToMarkdown } from 'mdream'
 
 const result = await generateLlmsTxtArtifacts({
@@ -1076,8 +1080,7 @@ console.log(result.llmsFullTxt) // llms-full.txt content
 | Package | Description |
 |---------|-------------|
 | [`mdream`](https://npmjs.com/package/mdream) | Core HTML to Markdown converter (Rust + WASM engine) |
-| [`@mdream/js`](https://npmjs.com/package/@mdream/js) | JavaScript engine with hook-based plugins and splitter |
-| [`@mdream/llms-txt`](https://github.com/harlan-zw/mdream/tree/main/packages/llms-txt) | Engine-agnostic llms.txt artifact generation |
+| [`@mdream/js`](https://npmjs.com/package/@mdream/js) | JavaScript engine with hook-based plugins, splitter, and llms.txt generation (`@mdream/js/llms-txt`) |
 | [`@mdream/crawl`](https://github.com/harlan-zw/mdream/tree/main/packages/crawl) | Site-wide crawler for llms.txt generation |
 | [`@mdream/vite`](https://github.com/harlan-zw/mdream/tree/main/packages/vite) | Vite plugin integration |
 | [`@mdream/nuxt`](https://github.com/harlan-zw/mdream/tree/main/packages/nuxt) | Nuxt module integration |

@@ -93,6 +93,7 @@ catalog:
   hookable: ^6.1.1
   jsdom: ^30.0.1
   knip: ^6.34.0
+  nitropack: 2.13.4
   nuxt: ^4.5.2
   nuxt-site-config: ^4.2.3
   nypm: ^0.6.9
@@ -100,6 +101,7 @@ catalog:
   ofetch: ^1.5.1
   pathe: ^2.0.3
   picomatch: ^4.0.7
+  pkg-pr-new: 0.0.88
   playwright: ^1.63.0
   sirv: ^3.0.2
   tinyglobby: ^0.2.17
