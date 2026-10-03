@@ -311,6 +311,10 @@ impl ConvertState {
   #[cold]
   #[inline(never)]
   fn finalize_code_span(&mut self, span: &CodeSpanState) -> String {
+    #[cfg(test)]
+    {
+      self.code_span_closed_bytes += self.buffer.len() - span.output_start;
+    }
     // A pipe splits the row even inside a code span; `\|` is GFM's escape and is
     // honoured there. Its expanded form still has to fit the aggregate budget.
     if self.depth_map[TAG_TABLE as usize] > 0 && self.buffer[span.content_start..].contains('|') {
@@ -1283,6 +1287,7 @@ impl ConvertState {
           let opener_emitted = self.buffer.len() > output_start && self.buffer.ends_with(emitted);
           let content_start = self.buffer.len();
           self.code_spans.push(CodeSpanState {
+            depth: self.stack[stack_len - 1].depth,
             output_start: if opener_emitted {
               content_start - emitted.len()
             } else {
@@ -1528,14 +1533,14 @@ impl ConvertState {
     if !self.plain_text && self.pre_fence_pending && tag_id != Some(TAG_PRE) && has_override {
       self.flush_pre_fence();
     }
-    // Pop for every inline <code> exit that could have pushed: the enter push
-    // ignores overrides, so an exit-only override that skipped the pop leaked
-    // the span, whose exhausted flag then capped the rest of the document.
+    // Pop at the exit of the inline <code> that pushed: the enter push ignores
+    // exit overrides, so an exit-only override that skipped the pop leaked the
+    // span, whose exhausted flag then capped the rest of the document.
     let closing_code_span = if tag_id == Some(TAG_CODE)
       && self.depth_map[TAG_PRE as usize] == 0
       && !self.in_raw_html_block()
     {
-      self.code_spans.pop()
+      self.code_spans.pop_if(|span| span.depth == node.depth)
     } else {
       None
     };
@@ -3780,6 +3785,10 @@ impl ConvertState {
           }
         } else if self.in_raw_html_block() {
           Some(Cow::Borrowed("<code>"))
+        } else if !self.code_spans.is_empty() {
+          // Code inside a code span is part of it. A span of its own would
+          // only add a longer delimiter per level, each rescanning the rest.
+          None
         } else if self.depth_map[TAG_LI as usize] > 0 {
           // Inline code inside a list item: collapse the paragraph
           // boundary with a separator space when following text, but
@@ -4007,6 +4016,12 @@ impl ConvertState {
           None
         } else if self.in_raw_html_block() {
           Some(Cow::Borrowed("</code>"))
+        } else if self
+          .code_spans
+          .last()
+          .is_some_and(|span| span.depth != node.depth)
+        {
+          None
         } else {
           Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
         }
@@ -4976,6 +4991,43 @@ mod tests {
         .find(|node| node.tag_id == Some(TAG_A))
         .unwrap();
       assert_eq!(anchor.child_text_node_index, expected, "cap={cap}");
+    }
+  }
+
+  // Each nested <code> opened a span of its own, whose close picked a longer
+  // delimiter and rewrote everything inside it, so a nest cost the cube of its
+  // depth. A pipe in a table cell was also escaped again at every level.
+  #[test]
+  fn nested_code_closes_each_byte_a_bounded_number_of_times() {
+    let open = "<code>".repeat(508);
+    let close = "</code>".repeat(508);
+    for html in [
+      format!("<p>{open}x</p>").repeat(8),
+      format!("<p>{open}x{close}</p>").repeat(8),
+      format!(
+        "<table><tr><td>{open}{}{close}</td></tr></table>",
+        "a|".repeat(400)
+      ),
+      // Closed by the end of input.
+      format!("{open}{}", "x`".repeat(4096)),
+    ] {
+      for chunk in [4096, html.len()] {
+        let options = HTMLToMarkdownOptions::default().with_max_node_bytes(1024 * 1024);
+        let mut processor = crate::MarkdownStreamProcessor::new(options);
+        let mut out = String::new();
+        for piece in html.as_bytes().chunks(chunk) {
+          out.push_str(&processor.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        out.push_str(&processor.finish());
+        assert!(!processor.truncated(), "{:.80}", html);
+        assert!(out.starts_with(['`', '|']), "{:.80}", out);
+        assert!(
+          processor.state.code_span_closed_bytes <= html.len(),
+          "chunk={chunk}: closing read {} bytes for {} of input",
+          processor.state.code_span_closed_bytes,
+          html.len()
+        );
+      }
     }
   }
 }
