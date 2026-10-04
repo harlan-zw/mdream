@@ -156,7 +156,7 @@ npx @mdream/crawl@beta https://spa-site.com --driver playwright
 Outputs:
 - `output/llms.txt` - Optimized for LLM consumption
 - `output/llms-full.txt` - Complete content with metadata
-- `output/md/` - Individual markdown files per page
+- `output/<page>.md` - Individual Markdown files, preserving each URL path
 </details>
 
 <details>
@@ -324,7 +324,7 @@ The `@mdream/crawl` package crawls an entire site generating LLM artifacts using
 
 - [llms.txt](https://llmstxt.org/): A consolidated text file optimized for LLM consumption.
 - [llms-full.txt](https://llmstxt.org/): An extended format with comprehensive metadata and full content.
-- Individual Markdown Files: Each crawled page is saved as a separate Markdown file in the `md/` directory.
+- Individual Markdown Files: Each crawled page is saved in the output directory, preserving its URL path.
 
 ### Usage
 
