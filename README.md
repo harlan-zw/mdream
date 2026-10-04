@@ -131,6 +131,8 @@ diff <(curl -s https://vuejs.org/guide/introduction | npx mdream@beta --preset m
   | claude -p "compare these two frameworks based on their intro docs"
 
 # JavaScript/SPA sites (React, Vue, Angular)
+npm install @mdream/crawl@beta crawlee playwright
+npx playwright install chromium
 npx @mdream/crawl@beta https://spa-site.com --driver playwright
 cat output/llms-full.txt | claude -p "what features does this app have"
 ```
@@ -146,7 +148,9 @@ Generate llms.txt to help AI tools understand your site:
 npx @mdream/crawl@beta https://yoursite.com
 
 # JavaScript/SPA sites (React, Vue, Angular)
-npx -p playwright -p @mdream/crawl@beta crawl https://spa-site.com --driver playwright
+npm install @mdream/crawl@beta crawlee playwright
+npx playwright install chromium
+npx @mdream/crawl@beta https://spa-site.com --driver playwright
 ```
 
 Outputs:

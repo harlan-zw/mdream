@@ -12,6 +12,7 @@ For JavaScript-heavy sites that require browser rendering, install the optional 
 
 ```bash
 npm install crawlee playwright
+npx playwright install chromium
 ```
 
 ## CLI Usage

@@ -25,7 +25,8 @@ export default defineNuxtConfig({
 })
 ```
 
-Once registered, every route is available as markdown by appending `.md` to the path (e.g., `/about.md`). LLM bots automatically receive markdown responses without the `.md` extension.
+Once registered, indexable pages are available as Markdown by appending `.md` to the path, such as `/about.md`.
+Bots can omit `.md` when their `Accept` header ranks `text/markdown` or `text/plain` above HTML.
 
 ## Configuration
 
