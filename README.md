@@ -1,6 +1,6 @@
 <h1>mdream</h1>
 
-[![npm version](https://img.shields.io/npm/v/mdream?color=yellow)](https://npmjs.com/package/mdream)
+[![npm beta version](https://img.shields.io/npm/v/mdream/beta?color=yellow)](https://npmjs.com/package/mdream/v/beta)
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 <a href="https://skilld.dev/gh/harlan-zw/mdream">
@@ -14,7 +14,7 @@
 > ☁️ The fastest HTML to markdown converter on GitHub. Optimized for LLMs and supports streaming.
 
 > [!TIP]
-> 🎉 **Mdream v1 is here!** Read the [v1 release notes](https://github.com/harlan-zw/mdream/releases/tag/v1.0.0).
+> 🎉 **Try Mdream v2 beta!** Install `mdream@beta` to use the APIs in this README. Read the [v2 beta release notes](https://github.com/harlan-zw/mdream/releases/tag/v2.0.0-beta.1).
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
@@ -30,9 +30,10 @@
 
 ## Features
 
+- ☁️ Powering Cloudflare Browser Run's [/markdown](https://developers.cloudflare.com/browser-run/quick-actions/markdown-endpoint/) and [/crawl](https://developers.cloudflare.com/browser-run/quick-actions/crawl-endpoint/) endpoints.
 - 🧠 #1 Token Optimizer: [Up to 2x fewer tokens](#benchmarks) than [Turndown](https://github.com/mixmark-io/turndown), node-html-markdown, and html-to-markdown. 70-99% fewer tokens than raw HTML.
 - 🚀 #1 Fastest: [Fastest pure JS & native Rust](#benchmarks) converter. Up to 37x faster than Turndown (Rust NAPI vs JS), 4.6x, 5x faster than htmd (Rust vs Rust). Converts 1.8MB HTML in ~5.2ms (Rust).
-- 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
+- 🔍 Generates [Minimal](./packages/js/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
 - 🌊 Streamable: Memory efficient streaming for large documents and real-time pipelines.
 - ⚡ Tiny: 10kB gzip JS core, 60kB gzip with Rust WASM engine. Zero dependencies.
 - ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [Docker](#docker), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), & more.
@@ -63,7 +64,7 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 Pipe any HTML into `mdream` to get clean, LLM-ready Markdown:
 
 ```bash
-curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream --preset minimal
+curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream@beta --preset minimal
 ```
 
 <details>
@@ -73,7 +74,7 @@ Fetches the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown) an
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream --origin https://en.wikipedia.org --preset minimal \
+ | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
   | tee streaming.md
 ```
 
@@ -83,7 +84,7 @@ Want to make it look nice? Use [glow](https://github.com/charmbracelet/glow).
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream --origin https://en.wikipedia.org --preset minimal \
+ | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
    | glow
 ```
 
@@ -96,7 +97,7 @@ Converts a local HTML file to a Markdown file, using `tee` to write the output t
 
 ```bash
 cat index.html \
- | npx mdream --preset minimal \
+ | npx mdream@beta --preset minimal \
   | tee streaming.md
 ```
 
@@ -104,7 +105,7 @@ Want to make it look nice? Use [glow](https://github.com/charmbracelet/glow).
 
 ```bash
 cat index.html \
- | npx mdream --preset minimal \
+ | npx mdream@beta --preset minimal \
   | glow
 ```
 
@@ -117,7 +118,7 @@ Pipe web content straight into Claude, GPT, or any LLM CLI:
 
 ```bash
 # Single page → Claude
-curl -s https://react.dev/learn | npx mdream --origin https://react.dev --preset minimal \
+curl -s https://react.dev/learn | npx mdream@beta --origin https://react.dev --preset minimal \
   | claude -p "explain the key concepts on this page"
 
 # Crawl entire docs → summarize
@@ -125,11 +126,13 @@ npx @mdream/crawl@beta "https://nuxt.com/docs/getting-started/**"
 cat output/llms-full.txt | claude -p "write a getting started guide from these docs"
 
 # Compare two frameworks
-diff <(curl -s https://vuejs.org/guide/introduction | npx mdream --preset minimal) \
-     <(curl -s https://react.dev/learn | npx mdream --preset minimal) \
+diff <(curl -s https://vuejs.org/guide/introduction | npx mdream@beta --preset minimal) \
+     <(curl -s https://react.dev/learn | npx mdream@beta --preset minimal) \
   | claude -p "compare these two frameworks based on their intro docs"
 
 # JavaScript/SPA sites (React, Vue, Angular)
+npm install @mdream/crawl@beta crawlee playwright
+npx playwright install chromium
 npx @mdream/crawl@beta https://spa-site.com --driver playwright
 cat output/llms-full.txt | claude -p "what features does this app have"
 ```
@@ -145,19 +148,27 @@ Generate llms.txt to help AI tools understand your site:
 npx @mdream/crawl@beta https://yoursite.com
 
 # JavaScript/SPA sites (React, Vue, Angular)
-npx -p playwright -p @mdream/crawl@beta crawl https://spa-site.com --driver playwright
+npm install @mdream/crawl@beta crawlee playwright
+npx playwright install chromium
+npx @mdream/crawl@beta https://spa-site.com --driver playwright
 ```
 
 Outputs:
 - `output/llms.txt` - Optimized for LLM consumption
 - `output/llms-full.txt` - Complete content with metadata
-- `output/md/` - Individual markdown files per page
+- `output/<page>.md` - Individual Markdown files, preserving each URL path
 </details>
 
 <details>
 <summary><b>🗄️ Build RAG Systems from Websites</b></summary>
 
-Crawl websites and generate embeddings for vector databases:
+Crawl websites and generate embeddings for vector databases.
+Install the beta packages and [configure an AI Gateway API key](https://ai-sdk.dev/providers/ai-sdk-providers/ai-gateway):
+
+```bash
+pnpm add @mdream/crawl@beta @mdream/js@beta ai
+export AI_GATEWAY_API_KEY="your-api-key"
+```
 
 ```ts
 import { crawlAndGenerate } from '@mdream/crawl'
@@ -165,24 +176,24 @@ import { withMinimalPreset } from '@mdream/js/preset/minimal'
 import { htmlToMarkdownSplitChunks } from '@mdream/js/splitter'
 import { embed } from 'ai'
 
-const { createTransformersJS } = await import('@built-in-ai/transformers-js')
-const embeddingModel = createTransformersJS().textEmbeddingModel('Xenova/bge-base-en-v1.5')
-
-const embeddings = []
+const embeddings: { url: string, title: string, content: string, embedding: number[] }[] = []
 
 await crawlAndGenerate({
   urls: ['https://example.com'],
-  onPage: async ({ url, html, title, origin }) => {
-    const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
-      chunkSize: 1000,
-      chunkOverlap: 200,
-      origin,
-    }))
+  outputDir: './output',
+  hooks: {
+    'crawl:page': async ({ url, html, title, origin }) => {
+      const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+        chunkSize: 1000,
+        chunkOverlap: 200,
+        origin,
+      }))
 
-    for (const chunk of chunks) {
-      const { embedding } = await embed({ model: embeddingModel, value: chunk.content })
-      embeddings.push({ url, title, content: chunk.content, embedding })
-    }
+      for (const chunk of chunks) {
+        const { embedding } = await embed({ model: 'openai/text-embedding-3-small', value: chunk.content })
+        embeddings.push({ url, title, content: chunk.content, embedding })
+      }
+    },
   },
 })
 
@@ -242,7 +253,7 @@ htmlToMarkdown(html, {
 ### Installation
 
 ```bash
-pnpm add mdream
+pnpm add mdream@beta
 ```
 
 > [!TIP]
@@ -313,7 +324,7 @@ The `@mdream/crawl` package crawls an entire site generating LLM artifacts using
 
 - [llms.txt](https://llmstxt.org/): A consolidated text file optimized for LLM consumption.
 - [llms-full.txt](https://llmstxt.org/): An extended format with comprehensive metadata and full content.
-- Individual Markdown Files: Each crawled page is saved as a separate Markdown file in the `md/` directory.
+- Individual Markdown Files: Each crawled page is saved in the output directory, preserving its URL path.
 
 ### Usage
 
@@ -334,17 +345,17 @@ Two images for two jobs:
 
 ```bash
 # core — convert HTML to Markdown (native Rust binary, ~600KB, no Node)
-curl -s https://example.com | docker run -i --rm harlanzw/mdream:core --origin https://example.com
+curl -s https://example.com | docker run -i --rm harlanzw/mdream:beta-core --origin https://example.com
 
 # crawl — crawl a site / generate llms.txt (Playwright Chrome included)
-docker run harlanzw/mdream:crawl site.com/docs/**
-docker run harlanzw/mdream:crawl spa-site.com --driver playwright
+docker run harlanzw/mdream:beta-crawl "https://site.com/docs/**"
+docker run harlanzw/mdream:beta-crawl spa-site.com --driver playwright
 ```
 
 **Available Images** (Docker Hub `harlanzw/mdream`, also on `ghcr.io/harlan-zw/mdream`):
-- `:core` - native Rust HTML-to-Markdown converter (stdin → stdout)
-- `:crawl` - site crawler with Playwright Chrome
-- `:latest` - back-compat alias of `:crawl`
+- `:beta-core` - v2 beta native Rust HTML-to-Markdown converter (stdin → stdout)
+- `:beta-crawl` - v2 beta site crawler with Playwright Chrome
+- `:beta` - alias of `:beta-crawl`
 
 See [DOCKER.md](./DOCKER.md) for complete usage, configuration, and building instructions.
 
@@ -383,7 +394,7 @@ See the [Nuxt Module README](./packages/nuxt/README.md) for usage and configurat
 Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load. `htmlToMarkdown()` returns `Promise<string>`, the same as the browser bundle:
 
 ```html
-<script src="https://unpkg.com/mdream/dist/iife.js"></script>
+<script src="https://unpkg.com/mdream@beta/dist/iife.js"></script>
 <script>
   window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
     .then(markdown => console.log(markdown)) // # Hello\n\nWorld
@@ -391,8 +402,8 @@ Use mdream directly via CDN with no build step. The script inlines the WASM bina
 ```
 
 **CDN Options:**
-- **unpkg**: `https://unpkg.com/mdream/dist/iife.js`
-- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/iife.js`
+- **unpkg**: `https://unpkg.com/mdream@beta/dist/iife.js`
+- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream@beta/dist/iife.js`
 
 ## Benchmarks
 

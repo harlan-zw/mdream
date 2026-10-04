@@ -5,13 +5,13 @@ Fastest HTML-to-Markdown converter. Zero dependencies, streaming support.
 ## Install
 
 ```sh
-cargo add mdream
+cargo add mdream@2.0.0-beta.1
 ```
 
 Or as a CLI:
 
 ```sh
-cargo install mdream
+cargo install mdream --version 2.0.0-beta.1
 ```
 
 ## Usage

@@ -8,6 +8,16 @@
     "email": "harlan@harlanzw.com",
     "url": "https://harlanzw.com/"
   },
+  "contributors": [
+    {
+      "name": "André Cruz",
+      "url": "https://github.com/edevil"
+    },
+    {
+      "name": "Bernardo Pereira",
+      "url": "https://github.com/BernardoPe"
+    }
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
