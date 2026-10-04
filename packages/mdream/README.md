@@ -109,20 +109,19 @@ Converts a complete HTML string to Markdown, plain text, or HTML. It is synchron
 **Rust engine** (`mdream`):
 
 ```ts
-import { htmlToMarkdown } from 'mdream'
+import type { MdreamOptions } from 'mdream'
 
-function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): string
+declare function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): string
 
-// Browser bundles and the CDN script load the WASM binary first
-function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): Promise<string>
+// Browser bundles and the CDN script return Promise<string> instead.
 ```
 
 **JS engine** (`@mdream/js`):
 
 ```ts
-import { htmlToMarkdown } from '@mdream/js'
+import type { MdreamOptions } from '@mdream/js'
 
-function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): string
+declare function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): string
 ```
 
 **Example:**
@@ -154,9 +153,9 @@ It takes the same options as `htmlToMarkdown()`. The `frontmatter` callback and 
 
 
 ```ts
-import { streamHtmlToMarkdown } from 'mdream'
+import type { MdreamOptions } from 'mdream'
 
-function streamHtmlToMarkdown(
+declare function streamHtmlToMarkdown(
   htmlStream: ReadableStream<Uint8Array | string> | null,
   options?: Partial<MdreamOptions>,
 ): AsyncIterable<string>
@@ -190,10 +189,10 @@ Mdream includes two rendering engines, automatically selecting the best one for 
 
 ```ts
 // JavaScript engine (required for hook-based plugins)
-import { htmlToMarkdown } from '@mdream/js'
+import { htmlToMarkdown as htmlToMarkdownJs } from '@mdream/js'
 
 // Rust NAPI engine (auto-selected in Node.js)
-import { htmlToMarkdown } from 'mdream'
+import { htmlToMarkdown as htmlToMarkdownRust } from 'mdream'
 ```
 
 Both engines support the same declarative plugins, but the option shape differs. The Rust engine takes `minimal`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, `extraction`, and `tagOverrides` at the top level. The JS engine reads the plugins from `options.plugins` and has no `minimal` option: use `withMinimalPreset()` from `@mdream/js/preset/minimal`. If the JS engine gets one of these options at the top level, it throws a `TypeError` that names the fix. The JS engine also supports `hooks` for imperative plugin transforms.
@@ -322,6 +321,8 @@ interface CleanOptions {
 **Example:**
 
 ```ts
+import { htmlToMarkdown } from 'mdream'
+
 const markdown = htmlToMarkdown(html, {
   clean: {
     urls: true,
@@ -381,6 +382,8 @@ interface TagOverride {
 **Example:**
 
 ```ts
+import { htmlToMarkdown } from 'mdream'
+
 const markdown = htmlToMarkdown(html, {
   tagOverrides: {
     // Treat <x-heading> like <h2>
@@ -398,6 +401,8 @@ const markdown = htmlToMarkdown(html, {
 **Output is GitHub Flavored Markdown.** Mdream emits a fixed GFM dialect tuned for LLM input: ATX headings (`#`), fenced code blocks (` ``` `), `-` bullets, `*` emphasis, `**` strong, `---` horizontal rules, inline links. These are not configurable. For simple delimiter swaps you can use `tagOverrides`:
 
 ```ts
+import { htmlToMarkdown } from 'mdream'
+
 htmlToMarkdown(html, {
   tagOverrides: {
     em: { enter: '_', exit: '_', isInline: true }, // *x*  →  _x_
@@ -437,6 +442,8 @@ The `minimal` preset enables the following plugins together:
 A `filter` passed with `minimal` adds to the preset's excludes. It does not replace them. To turn the preset's filter off, pass `filter: false`. `withMinimalPreset()` in the JS engine works the same way.
 
 ```ts
+import { htmlToMarkdown } from 'mdream'
+
 // Excludes h1 as well as form, nav, footer, and the rest
 htmlToMarkdown(html, { minimal: true, filter: { exclude: ['h1'] } })
 
@@ -469,6 +476,9 @@ const markdown = htmlToMarkdown(html, withMinimalPreset({
 `withMinimalPreset()` returns an `EngineOptions` object with all plugin defaults applied. You can override individual plugins. A `filter` adds to the preset's excludes:
 
 ```ts
+import { htmlToMarkdown } from '@mdream/js'
+import { withMinimalPreset } from '@mdream/js/preset/minimal'
+
 const markdown = htmlToMarkdown(html, withMinimalPreset({
   plugins: {
     frontmatter: false,
@@ -488,6 +498,8 @@ Extracts metadata from the HTML `<head>` element and generates YAML frontmatter.
 **Extracted fields by default:** `title`, `description`, `keywords`, `author`, `date`, `og:title`, `og:description`, `twitter:title`, `twitter:description`.
 
 ```ts
+import { htmlToMarkdown } from 'mdream'
+
 // Enable with defaults
 htmlToMarkdown(html, { frontmatter: true })
 
@@ -530,6 +542,8 @@ Isolates the main content area using the following priority:
 4. The `<head>` section is always passed through for other plugins (e.g., frontmatter)
 
 ```ts
+import { htmlToMarkdown } from 'mdream'
+
 htmlToMarkdown(html, { isolateMain: true })
 ```
 
@@ -548,6 +562,8 @@ Converts Tailwind CSS utility classes to semantic Markdown formatting:
 Supports responsive breakpoint prefixes (`sm:`, `md:`, `lg:`, `xl:`, `2xl:`) with mobile-first resolution.
 
 ```ts
+import { htmlToMarkdown } from 'mdream'
+
 htmlToMarkdown(html, { tailwind: true })
 ```
 
@@ -556,6 +572,8 @@ htmlToMarkdown(html, { tailwind: true })
 Filters HTML elements by CSS selectors, tag names, or `TAG_*` constants.
 
 ```ts
+import { htmlToMarkdown } from 'mdream'
+
 // Exclude navigation, sidebar, footer
 htmlToMarkdown(html, {
   filter: {
@@ -571,14 +589,14 @@ htmlToMarkdown(html, {
 })
 ```
 
-The JS engine also supports `TAG_*` integer constants for filtering:
+Use tag names or CSS selectors with the JS engine:
 
 ```ts
-import { TAG_FOOTER, TAG_NAV } from '@mdream/js'
+import { htmlToMarkdown } from '@mdream/js'
 
 htmlToMarkdown(html, {
   plugins: {
-    filter: { exclude: [TAG_NAV, TAG_FOOTER] },
+    filter: { exclude: ['nav', 'footer'] },
   },
 })
 ```
@@ -590,6 +608,8 @@ Elements with `style="position: absolute"` or `style="position: fixed"` are also
 Extracts elements matching CSS selectors during conversion. Callbacks receive the matched element with its accumulated text content and attributes.
 
 ```ts
+import { htmlToMarkdown } from 'mdream'
+
 htmlToMarkdown(html, {
   extraction: {
     'h2': (el) => {
@@ -693,13 +713,18 @@ interface TransformPlugin {
 A typed identity function for creating plugins with full TypeScript inference:
 
 ```ts
+import type { ElementNode } from '@mdream/js'
+import { ELEMENT_NODE } from '@mdream/js'
 import { createPlugin } from '@mdream/js/plugins'
 
 const plugin = createPlugin({
   beforeNodeProcess({ node }) {
     // Skip all div elements with class "ad"
-    if (node.type === 1 && node.attributes?.class?.includes('ad')) {
-      return { skip: true }
+    if (node.type === ELEMENT_NODE) {
+      const element = node as ElementNode
+      if (element.name === 'div' && element.attributes.class?.split(/\s+/).includes('ad')) {
+        return { skip: true }
+      }
     }
   },
 })
@@ -866,18 +891,17 @@ const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
 The `@mdream/js/negotiate` module provides HTTP content negotiation utilities for serving Markdown to LLM clients:
 
 ```ts
-import { parseAcceptHeader, shouldServeMarkdown } from '@mdream/js/negotiate'
+import { shouldServeMarkdown } from '@mdream/js/negotiate'
 
-// Check if client prefers markdown
-const serveMarkdown = shouldServeMarkdown(
-  request.headers.get('accept'),
-  request.headers.get('sec-fetch-dest'),
-)
-
-if (serveMarkdown) {
-  return new Response(markdown, {
-    headers: { 'Content-Type': 'text/markdown' },
-  })
+export function markdownResponse(request: Request, markdown: string): Response | undefined {
+  if (shouldServeMarkdown(
+    request.headers.get('accept') ?? undefined,
+    request.headers.get('sec-fetch-dest') ?? undefined,
+  )) {
+    return new Response(markdown, {
+      headers: { 'Content-Type': 'text/markdown' },
+    })
+  }
 }
 ```
 
@@ -888,14 +912,16 @@ if (serveMarkdown) {
 If you only need to parse HTML into a DOM-like event stream without converting to Markdown, use `parseHtml` from the JS engine:
 
 ```ts
+import type { ElementNode } from '@mdream/js'
+import { ELEMENT_NODE, NodeEventEnter } from '@mdream/js'
 import { parseHtml } from '@mdream/js/parse'
 
 const html = '<div><h1>Title</h1><p>Content</p></div>'
 const { events, remainingHtml } = parseHtml(html)
 
 events.forEach((event) => {
-  if (event.type === 0 && event.node.type === 1) { // Enter + Element
-    console.log('Entering element:', event.node.name)
+  if (event.type === NodeEventEnter && event.node.type === ELEMENT_NODE) {
+    console.log('Entering element:', (event.node as ElementNode).name)
   }
 })
 ```
@@ -986,17 +1012,22 @@ for await (const chunk of streamHtmlToMarkdown(response.body)) {
 Conversion errors are catchable. WASM has no unwinding, so an internal Rust panic aborts the call, but the message is preserved and re-thrown as a normal `Error` (with the raw WASM trap as `cause`), and the instance keeps working for later requests:
 
 ```ts
-try {
-  return new Response(htmlToMarkdown(html))
-}
-catch (error) {
-  // "mdream WASM panic, please report this at ...\npanicked at ..."
-  console.error(error)
-  return new Response('conversion failed', { status: 500 })
+import { htmlToMarkdown } from 'mdream'
+
+export function convertResponse(html: string): Response {
+  try {
+    return new Response(htmlToMarkdown(html))
+  }
+  catch (error) {
+    console.error(error)
+    return new Response('Conversion failed', { status: 500 })
+  }
 }
 ```
 
 If your toolchain doesn't resolve the export conditions, the wasm-bindgen build (web target) is exposed at `mdream/wasm` for manual initialization. Its `htmlToMarkdown` takes the same `MdreamOptions` as the `mdream` entry. Its `MarkdownStream` runs the callbacks in `finish()`.
+
+Your bundler must support `.wasm` imports and provide their TypeScript declarations.
 
 ```ts
 import init, { htmlToMarkdown } from 'mdream/wasm'
@@ -1052,7 +1083,7 @@ import { htmlToMarkdown } from 'mdream'
 const dom = new JSDOM(html, { url: 'https://example.com' })
 const article = new Readability(dom.window.document).parse()
 
-if (article) {
+if (article?.content) {
   const markdown = htmlToMarkdown(article.content)
   // article.title, article.excerpt, article.byline also available
 }

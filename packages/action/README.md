@@ -4,15 +4,20 @@ GitHub Action that processes prerendered HTML files into `llms.txt` artifacts fo
 
 ## Setup
 
-Add the action to any workflow step after your site build completes. Requires Node.js to be available in the runner environment.
+Run the published v2 beta package after your site build completes. Use Node.js 24 on the runner.
+These examples run the npm distribution directly with `@mdream/action@beta`.
+Inputs use `INPUT_` environment variables. Output names stay the same.
 
 ```yaml
-- uses: harlan-zw/mdream@v1
-  with:
-    glob: 'dist/**/*.html'
-    site-name: My Documentation
-    description: Technical documentation and guides
-    origin: 'https://mydocs.com'
+- name: Generate llms.txt artifacts
+  run: |
+    npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action@beta
+    node "$RUNNER_TEMP/mdream-action/node_modules/@mdream/action/dist/index.js"
+  env:
+    INPUT_GLOB: 'dist/**/*.html'
+    INPUT_SITE-NAME: My Documentation
+    INPUT_DESCRIPTION: Technical documentation and guides
+    INPUT_ORIGIN: 'https://mydocs.com'
 ```
 
 ## Usage
@@ -21,12 +26,14 @@ Add the action to any workflow step after your site build completes. Requires No
 
 ```yaml
 - name: Generate llms.txt artifacts
-  uses: harlan-zw/mdream@v1
-  with:
-    glob: 'dist/**/*.html'
-    site-name: My Documentation
-    description: Technical documentation and guides
-    origin: 'https://mydocs.com'
+  run: |
+    npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action@beta
+    node "$RUNNER_TEMP/mdream-action/node_modules/@mdream/action/dist/index.js"
+  env:
+    INPUT_GLOB: 'dist/**/*.html'
+    INPUT_SITE-NAME: My Documentation
+    INPUT_DESCRIPTION: Technical documentation and guides
+    INPUT_ORIGIN: 'https://mydocs.com'
 ```
 
 Generates `llms.txt`, `llms-full.txt`, and a `md/` directory in the current working directory.
@@ -45,6 +52,8 @@ on:
 jobs:
   generate-llms-txt:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -63,13 +72,15 @@ jobs:
 
       - name: Generate llms.txt artifacts
         id: llms
-        uses: harlan-zw/mdream@v1
-        with:
-          glob: 'dist/**/*.html'
-          site-name: My Documentation
-          description: Technical documentation and guides
-          origin: 'https://mydocs.com'
-          output: dist
+        run: |
+          npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action@beta
+          node "$RUNNER_TEMP/mdream-action/node_modules/@mdream/action/dist/index.js"
+        env:
+          INPUT_GLOB: 'dist/**/*.html'
+          INPUT_SITE-NAME: My Documentation
+          INPUT_DESCRIPTION: Technical documentation and guides
+          INPUT_ORIGIN: 'https://mydocs.com'
+          INPUT_OUTPUT: dist
 
       - name: Upload llms.txt artifacts
         uses: actions/upload-artifact@v4
@@ -95,13 +106,15 @@ Reference the action outputs in subsequent steps:
 ```yaml
 - name: Generate llms.txt artifacts
   id: llms
-  uses: harlan-zw/mdream@v1
-  with:
-    glob: 'dist/**/*.html'
-    site-name: My Docs
-    description: My documentation site
-    origin: 'https://mydocs.com'
-    output: dist
+  run: |
+    npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action@beta
+    node "$RUNNER_TEMP/mdream-action/node_modules/@mdream/action/dist/index.js"
+  env:
+    INPUT_GLOB: 'dist/**/*.html'
+    INPUT_SITE-NAME: My Docs
+    INPUT_DESCRIPTION: My documentation site
+    INPUT_ORIGIN: 'https://mydocs.com'
+    INPUT_OUTPUT: dist
 
 - name: Print generated file paths
   run: |
@@ -114,13 +127,15 @@ Reference the action outputs in subsequent steps:
 
 ```yaml
 - name: Generate llms.txt artifacts
-  uses: harlan-zw/mdream@v1
-  with:
-    glob: 'dist/**/*.html'
-    site-name: My Docs
-    description: My documentation site
-    origin: 'https://mydocs.com'
-    verbose: 'true'
+  run: |
+    npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action@beta
+    node "$RUNNER_TEMP/mdream-action/node_modules/@mdream/action/dist/index.js"
+  env:
+    INPUT_GLOB: 'dist/**/*.html'
+    INPUT_SITE-NAME: My Docs
+    INPUT_DESCRIPTION: My documentation site
+    INPUT_ORIGIN: 'https://mydocs.com'
+    INPUT_VERBOSE: 'true'
 ```
 
 ## API Reference

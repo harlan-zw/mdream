@@ -158,7 +158,13 @@ Outputs:
 <details>
 <summary><b>🗄️ Build RAG Systems from Websites</b></summary>
 
-Crawl websites and generate embeddings for vector databases:
+Crawl websites and generate embeddings for vector databases.
+Install the beta packages and [configure an AI Gateway API key](https://ai-sdk.dev/providers/ai-sdk-providers/ai-gateway):
+
+```bash
+pnpm add @mdream/crawl@beta @mdream/js@beta ai
+export AI_GATEWAY_API_KEY="your-api-key"
+```
 
 ```ts
 import { crawlAndGenerate } from '@mdream/crawl'
@@ -166,24 +172,24 @@ import { withMinimalPreset } from '@mdream/js/preset/minimal'
 import { htmlToMarkdownSplitChunks } from '@mdream/js/splitter'
 import { embed } from 'ai'
 
-const { createTransformersJS } = await import('@built-in-ai/transformers-js')
-const embeddingModel = createTransformersJS().textEmbeddingModel('Xenova/bge-base-en-v1.5')
-
-const embeddings = []
+const embeddings: { url: string, title: string, content: string, embedding: number[] }[] = []
 
 await crawlAndGenerate({
   urls: ['https://example.com'],
-  onPage: async ({ url, html, title, origin }) => {
-    const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
-      chunkSize: 1000,
-      chunkOverlap: 200,
-      origin,
-    }))
+  outputDir: './output',
+  hooks: {
+    'crawl:page': async ({ url, html, title, origin }) => {
+      const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
+        chunkSize: 1000,
+        chunkOverlap: 200,
+        origin,
+      }))
 
-    for (const chunk of chunks) {
-      const { embedding } = await embed({ model: embeddingModel, value: chunk.content })
-      embeddings.push({ url, title, content: chunk.content, embedding })
-    }
+      for (const chunk of chunks) {
+        const { embedding } = await embed({ model: 'openai/text-embedding-3-small', value: chunk.content })
+        embeddings.push({ url, title, content: chunk.content, embedding })
+      }
+    },
   },
 })
 
@@ -338,7 +344,7 @@ Two images for two jobs:
 curl -s https://example.com | docker run -i --rm harlanzw/mdream:beta-core --origin https://example.com
 
 # crawl — crawl a site / generate llms.txt (Playwright Chrome included)
-docker run harlanzw/mdream:beta-crawl site.com/docs/**
+docker run harlanzw/mdream:beta-crawl "https://site.com/docs/**"
 docker run harlanzw/mdream:beta-crawl spa-site.com --driver playwright
 ```
 

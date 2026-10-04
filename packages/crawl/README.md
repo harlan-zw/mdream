@@ -5,7 +5,7 @@ Multi-page website crawler that generates [llms.txt](https://llmstxt.org/) files
 ## Setup
 
 ```bash
-npm install @mdream/crawl
+npm install @mdream/crawl@beta
 ```
 
 For JavaScript-heavy sites that require browser rendering, install the optional Playwright dependencies:
@@ -21,7 +21,7 @@ npm install crawlee playwright
 Run without arguments to start the interactive prompt-based interface:
 
 ```bash
-npx @mdream/crawl
+npx @mdream/crawl@beta
 ```
 
 ### Direct Mode
@@ -29,7 +29,7 @@ npx @mdream/crawl
 Pass arguments directly to skip interactive prompts:
 
 ```bash
-npx @mdream/crawl -u https://docs.example.com
+npx @mdream/crawl@beta -u https://docs.example.com
 ```
 
 ### CLI Options
@@ -59,28 +59,28 @@ npx @mdream/crawl -u https://docs.example.com
 
 ```bash
 # Basic crawl with specific artifacts
-npx @mdream/crawl -u harlanzw.com --artifacts "llms.txt,markdown"
+npx @mdream/crawl@beta -u harlanzw.com --artifacts "llms.txt,markdown"
 
 # Shallow crawl (depth 2) with only llms-full.txt output
-npx @mdream/crawl --url https://docs.example.com --depth 2 --artifacts "llms-full.txt"
+npx @mdream/crawl@beta --url https://docs.example.com --depth 2 --artifacts "llms-full.txt"
 
 # Exclude admin and API routes
-npx @mdream/crawl -u example.com --exclude "*/admin/*" --exclude "*/api/*"
+npx @mdream/crawl@beta -u example.com --exclude "*/admin/*" --exclude "*/api/*"
 
 # Single page mode (no link following)
-npx @mdream/crawl -u example.com/pricing --single-page
+npx @mdream/crawl@beta -u example.com/pricing --single-page
 
 # Use Playwright for JavaScript-heavy sites
-npx @mdream/crawl -u example.com --driver playwright
+npx @mdream/crawl@beta -u example.com --driver playwright
 
 # Skip sitemap discovery with verbose output
-npx @mdream/crawl -u example.com --skip-sitemap --verbose
+npx @mdream/crawl@beta -u example.com --skip-sitemap --verbose
 
 # Crawl across subdomains (docs.example.com, blog.example.com, etc.)
-npx @mdream/crawl -u example.com --allow-subdomains
+npx @mdream/crawl@beta -u example.com --allow-subdomains
 
 # Override site metadata
-npx @mdream/crawl -u example.com --site-name "My Company" --description "Company documentation"
+npx @mdream/crawl@beta -u example.com --site-name "My Company" --description "Company documentation"
 ```
 
 ## Glob Patterns
@@ -89,10 +89,10 @@ URLs support glob patterns for targeted crawling. When a glob pattern is provide
 
 ```bash
 # Crawl only the /docs/ section
-npx @mdream/crawl -u "docs.example.com/docs/**"
+npx @mdream/crawl@beta -u "docs.example.com/docs/**"
 
 # Crawl pages matching a prefix
-npx @mdream/crawl -u "example.com/blog/2024*"
+npx @mdream/crawl@beta -u "example.com/blog/2024*"
 ```
 
 Patterns are matched against the URL pathname using [picomatch](https://github.com/micromatch/picomatch) syntax. A trailing single `*` (e.g. `/fieldtypes*`) automatically expands to match both the path itself and all subdirectories.
@@ -202,7 +202,7 @@ await crawlAndGenerate(options, (progress) => {
 
 ### Examples
 
-#### Custom page processing with `onPage`
+#### Custom page processing with `crawl:page`
 
 ```typescript
 import { crawlAndGenerate } from '@mdream/crawl'
@@ -214,12 +214,14 @@ await crawlAndGenerate({
   outputDir: './output',
   generateIndividualMd: false,
   generateLlmsTxt: false,
-  onPage: (page) => {
-    pages.push({
-      url: page.url,
-      title: page.title,
-      description: page.metadata.description,
-    })
+  hooks: {
+    'crawl:page': (page) => {
+      pages.push({
+        url: page.url,
+        title: page.title,
+        description: page.metadata.description,
+      })
+    },
   },
 })
 
@@ -422,7 +424,7 @@ Uses [`ofetch`](https://github.com/unjs/ofetch) for page fetching with up to 20 
 For sites that require a browser to render content. Requires `crawlee` and `playwright` as peer dependencies (see [Setup](#setup)).
 
 ```bash
-npx @mdream/crawl -u example.com --driver playwright
+npx @mdream/crawl@beta -u example.com --driver playwright
 ```
 
 ```typescript
@@ -458,10 +460,10 @@ When a site keeps its sitemap at a non-standard URL, or splits it across several
 
 ```bash
 # Single non-standard location
-npx @mdream/crawl -u example.com --sitemap https://example.com/custom/sitemap.xml
+npx @mdream/crawl@beta -u example.com --sitemap https://example.com/custom/sitemap.xml
 
 # Multiple parts (repeatable), all loaded and merged
-npx @mdream/crawl -u example.com \
+npx @mdream/crawl@beta -u example.com \
   --sitemap https://example.com/sitemap-posts.xml \
   --sitemap https://example.com/sitemap-pages.xml
 ```
