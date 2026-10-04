@@ -13,6 +13,9 @@
 
 > ☁️ The fastest HTML to markdown converter on GitHub. Optimized for LLMs and supports streaming.
 
+[Cloudflare uses mdream](https://github.com/harlan-zw/mdream/issues/280) in Browser Run's [/markdown](https://developers.cloudflare.com/browser-run/quick-actions/markdown-endpoint/) and [/crawl](https://developers.cloudflare.com/browser-run/quick-actions/crawl-endpoint/) endpoints.
+Cloudflare is also integrating mdream with [Markdown for Agents](https://developers.cloudflare.com/fundamentals/reference/markdown-for-agents/).
+
 > [!TIP]
 > 🎉 **Mdream v1 is here!** Read the [v1 release notes](https://github.com/harlan-zw/mdream/releases/tag/v1.0.0).
 

@@ -2,6 +2,16 @@
   "type": "module",
   "private": true,
   "packageManager": "pnpm@12.3.4",
+  "contributors": [
+    {
+      "name": "André Cruz",
+      "url": "https://github.com/edevil"
+    },
+    {
+      "name": "Bernardo Pereira",
+      "url": "https://github.com/BernardoPe"
+    }
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",

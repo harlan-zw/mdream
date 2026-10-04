@@ -11,6 +11,9 @@
   </picture>
 </a>
 
+[Cloudflare uses mdream](https://github.com/harlan-zw/mdream/issues/280) in Browser Run's [/markdown](https://developers.cloudflare.com/browser-run/quick-actions/markdown-endpoint/) and [/crawl](https://developers.cloudflare.com/browser-run/quick-actions/crawl-endpoint/) endpoints.
+Cloudflare is also integrating mdream with [Markdown for Agents](https://developers.cloudflare.com/fundamentals/reference/markdown-for-agents/).
+
 ## Installation
 
 ```bash
