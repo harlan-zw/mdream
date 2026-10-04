@@ -1057,12 +1057,22 @@ Use mdream directly via CDN with no build step. The script inlines the WASM bina
 
 ### Web Worker
 
-For browser environments, `mdream/worker` runs conversions off the main thread using a Web Worker:
+For browser environments, `mdream/worker` runs conversions off the main thread using a Web Worker.
+Serve the WASM binary and its JavaScript loader from your site.
+The beta worker expects both files to have the same basename.
+If your framework serves `public/` at the site root, copy these assets:
+
+```bash
+mkdir -p public/mdream
+cp node_modules/mdream/wasm/mdream_edge_bg.wasm public/mdream/
+cp node_modules/mdream/wasm/mdream_edge.js public/mdream/mdream_edge_bg.js
+```
 
 ```ts
 import { htmlToMarkdown, initWorker, terminateWorker } from 'mdream/worker'
 
-await initWorker('/path/to/mdream_edge_bg.wasm')
+const wasmUrl = new URL('/mdream/mdream_edge_bg.wasm', window.location.href).href
+await initWorker(wasmUrl)
 
 // Takes the same options as the mdream entry. Callbacks run on this thread.
 const markdown = await htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
