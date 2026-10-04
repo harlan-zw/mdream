@@ -1,6 +1,6 @@
 # mdream
 
-[![npm version](https://img.shields.io/npm/v/mdream?color=yellow)](https://npmjs.com/package/mdream)
+[![npm beta version](https://img.shields.io/npm/v/mdream/beta?color=yellow)](https://npmjs.com/package/mdream/v/beta)
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 <a href="https://skilld.dev/gh/harlan-zw/mdream">
@@ -11,20 +11,22 @@
   </picture>
 </a>
 
-[Cloudflare uses mdream](https://github.com/harlan-zw/mdream/issues/280) in Browser Run's [/markdown](https://developers.cloudflare.com/browser-run/quick-actions/markdown-endpoint/) and [/crawl](https://developers.cloudflare.com/browser-run/quick-actions/crawl-endpoint/) endpoints.
-Cloudflare is also integrating mdream with [Markdown for Agents](https://developers.cloudflare.com/fundamentals/reference/markdown-for-agents/).
+Powering Cloudflare Browser Run's [/markdown](https://developers.cloudflare.com/browser-run/quick-actions/markdown-endpoint/) and [/crawl](https://developers.cloudflare.com/browser-run/quick-actions/crawl-endpoint/) endpoints. [Confirmed by Cloudflare engineers](https://github.com/harlan-zw/mdream/issues/280).
+
+> [!TIP]
+> 🎉 **Try Mdream v2 beta!** Install `mdream@beta` to use the APIs in this README. Read the [v2 beta release notes](https://github.com/harlan-zw/mdream/releases/tag/v2.0.0-beta.1).
 
 ## Installation
 
 ```bash
 # npm
-npm install mdream
+npm install mdream@beta
 
 # pnpm
-pnpm add mdream
+pnpm add mdream@beta
 
 # yarn
-yarn add mdream
+yarn add mdream@beta
 ```
 
 > [!TIP]
@@ -33,7 +35,7 @@ yarn add mdream
 For the JavaScript-only engine (hook-based plugins, splitter, pure HTML parser):
 
 ```bash
-pnpm add @mdream/js
+pnpm add @mdream/js@beta
 ```
 
 ### Bundler Compatibility
@@ -912,7 +914,7 @@ Mdream provides a CLI that works with Unix pipes.
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
-  | npx mdream --origin https://en.wikipedia.org --preset minimal \
+  | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
   | tee output.md
 ```
 
@@ -920,7 +922,7 @@ curl -s https://en.wikipedia.org/wiki/Markdown \
 
 ```bash
 cat index.html \
-  | npx mdream --preset minimal \
+  | npx mdream@beta --preset minimal \
   | tee output.md
 ```
 
@@ -928,7 +930,7 @@ cat index.html \
 
 ```bash
 cat index.html \
-  | npx mdream --format text \
+  | npx mdream@beta --format text \
   | tee output.txt
 ```
 
@@ -936,7 +938,7 @@ cat index.html \
 
 ```bash
 cat index.html \
-  | npx mdream --format html \
+  | npx mdream@beta --format html \
   | tee output.html
 ```
 
@@ -1011,7 +1013,7 @@ const markdown = htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It takes the same `MdreamOptions` as the `mdream` entry and returns `Promise<string>`, the same as the browser bundle.
 
 ```html
-<script src="https://unpkg.com/mdream/dist/iife.js"></script>
+<script src="https://unpkg.com/mdream@beta/dist/iife.js"></script>
 <script>
   window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
     .then(markdown => console.log(markdown)) // # Hello\n\nWorld
@@ -1019,8 +1021,8 @@ Use mdream directly via CDN with no build step. The script inlines the WASM bina
 ```
 
 **CDN Options:**
-- **unpkg**: `https://unpkg.com/mdream/dist/iife.js`
-- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/iife.js`
+- **unpkg**: `https://unpkg.com/mdream@beta/dist/iife.js`
+- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream@beta/dist/iife.js`
 
 ### Web Worker
 

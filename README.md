@@ -1,6 +1,6 @@
 <h1>mdream</h1>
 
-[![npm version](https://img.shields.io/npm/v/mdream?color=yellow)](https://npmjs.com/package/mdream)
+[![npm beta version](https://img.shields.io/npm/v/mdream/beta?color=yellow)](https://npmjs.com/package/mdream/v/beta)
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 <a href="https://skilld.dev/gh/harlan-zw/mdream">
@@ -13,11 +13,8 @@
 
 > ☁️ The fastest HTML to markdown converter on GitHub. Optimized for LLMs and supports streaming.
 
-[Cloudflare uses mdream](https://github.com/harlan-zw/mdream/issues/280) in Browser Run's [/markdown](https://developers.cloudflare.com/browser-run/quick-actions/markdown-endpoint/) and [/crawl](https://developers.cloudflare.com/browser-run/quick-actions/crawl-endpoint/) endpoints.
-Cloudflare is also integrating mdream with [Markdown for Agents](https://developers.cloudflare.com/fundamentals/reference/markdown-for-agents/).
-
 > [!TIP]
-> 🎉 **Mdream v1 is here!** Read the [v1 release notes](https://github.com/harlan-zw/mdream/releases/tag/v1.0.0).
+> 🎉 **Try Mdream v2 beta!** Install `mdream@beta` to use the APIs in this README. Read the [v2 beta release notes](https://github.com/harlan-zw/mdream/releases/tag/v2.0.0-beta.1).
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
@@ -33,6 +30,7 @@ Cloudflare is also integrating mdream with [Markdown for Agents](https://develop
 
 ## Features
 
+- ☁️ Powering Cloudflare Browser Run's [/markdown](https://developers.cloudflare.com/browser-run/quick-actions/markdown-endpoint/) and [/crawl](https://developers.cloudflare.com/browser-run/quick-actions/crawl-endpoint/) endpoints. [Confirmed by Cloudflare engineers](https://github.com/harlan-zw/mdream/issues/280).
 - 🧠 #1 Token Optimizer: [Up to 2x fewer tokens](#benchmarks) than [Turndown](https://github.com/mixmark-io/turndown), node-html-markdown, and html-to-markdown. 70-99% fewer tokens than raw HTML.
 - 🚀 #1 Fastest: [Fastest pure JS & native Rust](#benchmarks) converter. Up to 37x faster than Turndown (Rust NAPI vs JS), 4.6x, 5x faster than htmd (Rust vs Rust). Converts 1.8MB HTML in ~5.2ms (Rust).
 - 🔍 Generates [Minimal](./packages/mdream/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
@@ -66,7 +64,7 @@ Mdream is built to run anywhere for all projects and use cases and is available 
 Pipe any HTML into `mdream` to get clean, LLM-ready Markdown:
 
 ```bash
-curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream --preset minimal
+curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream@beta --preset minimal
 ```
 
 <details>
@@ -76,7 +74,7 @@ Fetches the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown) an
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream --origin https://en.wikipedia.org --preset minimal \
+ | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
   | tee streaming.md
 ```
 
@@ -86,7 +84,7 @@ Want to make it look nice? Use [glow](https://github.com/charmbracelet/glow).
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream --origin https://en.wikipedia.org --preset minimal \
+ | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
    | glow
 ```
 
@@ -99,7 +97,7 @@ Converts a local HTML file to a Markdown file, using `tee` to write the output t
 
 ```bash
 cat index.html \
- | npx mdream --preset minimal \
+ | npx mdream@beta --preset minimal \
   | tee streaming.md
 ```
 
@@ -107,7 +105,7 @@ Want to make it look nice? Use [glow](https://github.com/charmbracelet/glow).
 
 ```bash
 cat index.html \
- | npx mdream --preset minimal \
+ | npx mdream@beta --preset minimal \
   | glow
 ```
 
@@ -120,7 +118,7 @@ Pipe web content straight into Claude, GPT, or any LLM CLI:
 
 ```bash
 # Single page → Claude
-curl -s https://react.dev/learn | npx mdream --origin https://react.dev --preset minimal \
+curl -s https://react.dev/learn | npx mdream@beta --origin https://react.dev --preset minimal \
   | claude -p "explain the key concepts on this page"
 
 # Crawl entire docs → summarize
@@ -128,8 +126,8 @@ npx @mdream/crawl@beta "https://nuxt.com/docs/getting-started/**"
 cat output/llms-full.txt | claude -p "write a getting started guide from these docs"
 
 # Compare two frameworks
-diff <(curl -s https://vuejs.org/guide/introduction | npx mdream --preset minimal) \
-     <(curl -s https://react.dev/learn | npx mdream --preset minimal) \
+diff <(curl -s https://vuejs.org/guide/introduction | npx mdream@beta --preset minimal) \
+     <(curl -s https://react.dev/learn | npx mdream@beta --preset minimal) \
   | claude -p "compare these two frameworks based on their intro docs"
 
 # JavaScript/SPA sites (React, Vue, Angular)
@@ -245,7 +243,7 @@ htmlToMarkdown(html, {
 ### Installation
 
 ```bash
-pnpm add mdream
+pnpm add mdream@beta
 ```
 
 > [!TIP]
@@ -337,17 +335,17 @@ Two images for two jobs:
 
 ```bash
 # core — convert HTML to Markdown (native Rust binary, ~600KB, no Node)
-curl -s https://example.com | docker run -i --rm harlanzw/mdream:core --origin https://example.com
+curl -s https://example.com | docker run -i --rm harlanzw/mdream:beta-core --origin https://example.com
 
 # crawl — crawl a site / generate llms.txt (Playwright Chrome included)
-docker run harlanzw/mdream:crawl site.com/docs/**
-docker run harlanzw/mdream:crawl spa-site.com --driver playwright
+docker run harlanzw/mdream:beta-crawl site.com/docs/**
+docker run harlanzw/mdream:beta-crawl spa-site.com --driver playwright
 ```
 
 **Available Images** (Docker Hub `harlanzw/mdream`, also on `ghcr.io/harlan-zw/mdream`):
-- `:core` - native Rust HTML-to-Markdown converter (stdin → stdout)
-- `:crawl` - site crawler with Playwright Chrome
-- `:latest` - back-compat alias of `:crawl`
+- `:beta-core` - v2 beta native Rust HTML-to-Markdown converter (stdin → stdout)
+- `:beta-crawl` - v2 beta site crawler with Playwright Chrome
+- `:beta` - alias of `:beta-crawl`
 
 See [DOCKER.md](./DOCKER.md) for complete usage, configuration, and building instructions.
 
@@ -386,7 +384,7 @@ See the [Nuxt Module README](./packages/nuxt/README.md) for usage and configurat
 Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load. `htmlToMarkdown()` returns `Promise<string>`, the same as the browser bundle:
 
 ```html
-<script src="https://unpkg.com/mdream/dist/iife.js"></script>
+<script src="https://unpkg.com/mdream@beta/dist/iife.js"></script>
 <script>
   window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
     .then(markdown => console.log(markdown)) // # Hello\n\nWorld
@@ -394,8 +392,8 @@ Use mdream directly via CDN with no build step. The script inlines the WASM bina
 ```
 
 **CDN Options:**
-- **unpkg**: `https://unpkg.com/mdream/dist/iife.js`
-- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/iife.js`
+- **unpkg**: `https://unpkg.com/mdream@beta/dist/iife.js`
+- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream@beta/dist/iife.js`
 
 ## Benchmarks
 
