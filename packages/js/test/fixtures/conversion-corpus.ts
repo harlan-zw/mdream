@@ -135,4 +135,16 @@ export const CONVERSION_CORPUS: string[] = [
   `<li><h3><a href=/u>`,
   `<li><li><a href="x"></li>`,
   `<h3>a #<em>`,
+  // Rust parity: streaming
+  `<script></script>\n<p>abc</p>`,
+  `<b></b>\n<p>abc</p>`,
+  `<br>\n<p>abc</p>`,
+  `<li><h3><em>`,
+  `<h2>x # <b></b></h2>`,
+  `S<pre>`,
+  `><pre>`,
+  `S<pre></pre>`,
+  `S<pre>  </pre>`,
+  `S<pre></pre><pre>`,
+  `a<pre> <b></b> </pre>`,
 ]

@@ -1,11 +1,12 @@
 import type { ParseState } from '../../src/parse'
-import type { MdreamOptions } from '../../src/types'
+import type { MdreamOptions, TransformPlugin } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createMarkdownProcessor } from '../../src/markdown-processor'
 import { createMarkdownDrain } from '../../src/markdown-stream'
 import { finalizeParse, parseHtmlStream } from '../../src/parse'
-import { createPlugin } from '../../src/plugins'
+import { processPluginsForEvent } from '../../src/plugin-processor'
+import { createPlugin, filterPlugin } from '../../src/plugins'
 import { tagHandlers } from '../../src/tags'
 
 function chunkedStream(html: string, chunkSize: number): ReadableStream<string> {
@@ -18,7 +19,7 @@ function chunkedStream(html: string, chunkSize: number): ReadableStream<string> 
   })
 }
 
-async function streamConvert(html: string, chunkSize: number, options: MdreamOptions = {}): Promise<string> {
+async function streamConvert(html: string, chunkSize: number, options?: MdreamOptions): Promise<string> {
   let markdown = ''
   for await (const chunk of streamHtmlToMarkdown(chunkedStream(html, chunkSize), options))
     markdown += chunk
@@ -40,6 +41,36 @@ const BLOCK_NEWLINE_HTML = [
 ].join('')
 
 describe('streaming drain parity', () => {
+  it.each([
+    '<b>*<li><li><ul>#</b></li></dl>',
+    '\uFEFF<em></dl>#</blockquote><p>&nbsp;</a><li>#',
+    '<b>prefix</b><ol start="999999999"><li>#</li></ol>',
+    '<ol start="999999999"><li>#</li></ol>',
+  ])('keeps list-marker escape context across compaction: %s', async (html) => {
+    const plugins = [createPlugin({ processTextNode() {} })]
+    for (const options of [{}, { plugins }, { wrapWidth: 20 }]) {
+      const expected = htmlToMarkdown(html, options)
+      for (const chunkSize of [1, 2, 3, 7, html.length])
+        expect(await streamConvert(html, chunkSize, options), `chunkSize=${chunkSize}`).toBe(expected)
+    }
+  })
+  it.each(['<li><li><br><ol><li>', '_<li><br><ol><li>', '<dl><li><blockquote><ol><li>'])('preserves malformed list spacing after drained markers: %s', async (html) => {
+    const expected = htmlToMarkdown(html)
+    for (const chunkSize of [1, 3, 7])
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
+  it.each(['*<details>_', '<br><details>[', '<details><ol><br>['])('keeps raw HTML line openers across compaction: %s', async (html) => {
+    const expected = htmlToMarkdown(html)
+    for (const chunkSize of [1, 3, 7])
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
+  it('keeps raw HTML Markdown context across drained empty list boundaries', async () => {
+    const html = '<dd><ol><i><ol>_'
+    const expected = '<dd>\n\n*\\_*\n\n</dd>'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const chunkSize of [1, 3, 7])
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
   it('does not repeat a BOM-prefixed paragraph during finalization', async () => {
     const html = '\uFEFF<p>x</p>'
     const expected = '\uFEFF\n\nx'
@@ -87,6 +118,20 @@ describe('streaming drain parity', () => {
     }
     expect(outputs).toEqual(expected)
   })
+  it.each([
+    ['&nbsp;<b></b>#', '#'],
+    ['<br>x<p>y</p>', 'x\n\ny'],
+    ['<br>x<blockquote>y</blockquote>', 'x\n\n> y'],
+    ['&nbsp;<p>x</p>y', 'x\n\ny'],
+    ['a<li><q></q></li>b', 'a\n\n- b'],
+  ])('preserves semantic context at every chunk width: %s', async (html, expected) => {
+    for (const options of [{}, { plugins: [filterPlugin({ exclude: ['nav'] })] }]) {
+      expect(htmlToMarkdown(html, options)).toBe(expected)
+      for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+        expect(await streamConvert(html, chunkSize, options), `chunkSize=${chunkSize}`).toBe(expected)
+    }
+  })
+
   it.each([
     '<div>Alpha</div>',
     '<div>Alpha</div><div>Beta</div>',
@@ -193,6 +238,46 @@ describe('streaming drain parity', () => {
 
     expect(emittedLength).toBe(expectedLength)
     expect(emittedHash).toBe(expectedHash)
+    expect(peakRetainedLength).toBeLessThan(chunkSize)
+  })
+
+  // A yielded chunk is a slice of the joined buffer, and a slice keeps its
+  // whole parent string alive. If the buffer is never drained, a caller that
+  // holds the chunks holds one copy of the output per chunk.
+  it.each<[string, { wrapWidth?: number }, TransformPlugin[]]>([
+    ['a plugin', {}, [filterPlugin({ exclude: ['nav'] })]],
+    ['wrapWidth', { wrapWidth: 40 }, []],
+  ])('bounds retained output with %s', (_, options, plugins) => {
+    const html = '<p>A paragraph of words that runs well past forty columns before it ends.</p>'.repeat(2048)
+    const processor = createMarkdownProcessor(options, context => createMarkdownDrain(context, plugins.length > 0))
+    const parseState: ParseState = {
+      depthMap: processor.state.depthMap,
+      depth: 0,
+      resolvedPlugins: plugins,
+      tagHandlers,
+      plainText: false,
+    }
+    const handleEvent = plugins.length
+      ? (event: Parameters<typeof processor.processEvent>[0]) => processPluginsForEvent(event, plugins, processor.state, processor.processEvent)
+      : processor.processEvent
+    const chunkSize = 4 * 1024
+    let remainingHtml = ''
+    let markdown = ''
+    let peakRetainedLength = 0
+
+    for (let offset = 0; offset < html.length; offset += chunkSize) {
+      remainingHtml = parseHtmlStream(remainingHtml + html.slice(offset, offset + chunkSize), parseState, handleEvent)
+      markdown += processor.getMarkdownChunk()
+      let retainedLength = 0
+      for (let i = 0; i < processor.state.buffer.length; i++)
+        retainedLength += processor.state.buffer[i]!.length
+      if (retainedLength > peakRetainedLength)
+        peakRetainedLength = retainedLength
+    }
+    finalizeParse(remainingHtml, parseState, handleEvent)
+    markdown += processor.getMarkdownChunk(true)
+
+    expect(markdown).toBe(htmlToMarkdown(html, { ...options, plugins }))
     expect(peakRetainedLength).toBeLessThan(chunkSize)
   })
 })

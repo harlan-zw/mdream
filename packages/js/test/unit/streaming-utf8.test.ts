@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { htmlToMarkdown as nativeHtmlToMarkdown } from '../../../mdream/src'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { htmlToText, streamHtmlToText } from '../../src/text'
@@ -19,11 +20,73 @@ async function streamBytes(html: string): Promise<string> {
 }
 
 describe('streaming UTF-8', () => {
+  it.each(['\uFEFF<p>x</p>', '\uFEFF<p>é漢字🎉</p>', '\uFEFF<h2>Title</h2><p>tail</p>'])('preserves a leading BOM across byte boundaries: %s', async (html) => {
+    const bytes = new TextEncoder().encode(html)
+    for (const size of [1, 2, 3, 7, bytes.length]) {
+      const input = new ReadableStream<Uint8Array | string>({
+        start(controller) {
+          controller.enqueue('')
+          for (let index = 0; index < bytes.length; index += size) {
+            controller.enqueue(bytes.subarray(index, index + size))
+            controller.enqueue(new Uint8Array())
+            controller.enqueue('')
+          }
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input))
+        output += chunk
+      expect(output).toBe(htmlToMarkdown(html))
+      expect(output).toBe(nativeHtmlToMarkdown(html))
+    }
+  })
+
+  it('keeps replacement characters after a split BOM and invalid UTF-8', async () => {
+    const bytes = new Uint8Array([239, 187, 191, 60, 112, 62, 195, 40, 255, 60, 47, 112, 62])
+    const input = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const byte of bytes)
+          controller.enqueue(new Uint8Array([byte]))
+        controller.close()
+      },
+    })
+    let output = ''
+    for await (const chunk of streamHtmlToMarkdown(input))
+      output += chunk
+    expect(output).toBe(htmlToMarkdown('\uFEFF<p>\uFFFD(\uFFFD</p>'))
+  })
   const formats = [
     ['markdown', htmlToMarkdown, streamHtmlToMarkdown],
     ['text', htmlToText, streamHtmlToText],
     ['html', htmlToSafeHtml, streamHtmlToSafeHtml],
   ] as const
+
+  it.each(formats)('preserves a BOM in byte and string streams in %s', async (_name, convert, streamConvert) => {
+    const html = '\uFEFF<p>é漢字🎉</p>'
+    const expected = convert(html)
+    expect(expected).toBe(nativeHtmlToMarkdown(html, { format: _name }))
+    const bytes = new TextEncoder().encode(html)
+    for (const content of [html, bytes]) {
+      for (const size of [1, 2, 3, 7, content.length]) {
+        const input = new ReadableStream<Uint8Array | string>({
+          start(controller) {
+            controller.enqueue('')
+            for (let index = 0; index < content.length; index += size) {
+              controller.enqueue(content.slice(index, index + size))
+              controller.enqueue(new Uint8Array())
+              controller.enqueue('')
+            }
+            controller.close()
+          },
+        })
+        let output = ''
+        for await (const chunk of streamConvert(input))
+          output += chunk
+        expect(output).toBe(expected)
+      }
+    }
+  })
 
   it.each(formats)('preserves split UTF-8 around empty strings in %s', async (_name, convert, streamConvert) => {
     const bytes = new TextEncoder().encode('<p>é</p>')

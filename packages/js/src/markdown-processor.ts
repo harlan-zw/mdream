@@ -275,6 +275,10 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
   }
   if (first === -1 && !atExit)
     return
+  // A later nested item can replace this guard before its owner closes.
+  // A newline alone cannot commit the separator during a stream drain.
+  if (first === 10 && !atExit)
+    return
   if (!atExit && unresolvedCaptionFragment !== -1) {
     let captionOpensItem = true
     for (let index = fragment + 1; index < unresolvedCaptionFragment; index++) {
@@ -465,6 +469,8 @@ export type BufferScanState = [
   lineScannedTo: number,
   lineStartFragment: number,
   lineStartOffset: number,
+  compactedLineOpensRawHtml: boolean | undefined,
+  pendingLineSpaces: number,
 ]
 
 function trackRawHtmlMarkdownContext(buffer: string[], scan: BufferScanState): boolean {
@@ -493,23 +499,29 @@ function trackRawHtmlMarkdownContext(buffer: string[], scan: BufferScanState): b
  * since the last call can move the line start, so a line spanning many
  * fragments is walked once instead of once per text node.
  */
-function lineOpensRawHtmlBlock(buffer: string[], scan: BufferScanState): boolean {
+function lineOpensRawHtmlBlock(buffer: string[], scan: BufferScanState): boolean | undefined {
   let scanned = scan[2]
   if (scanned > buffer.length) {
     scanned = 0
     scan[3] = 0
     scan[4] = 0
+    scan[5] = undefined
+    scan[6] = 0
   }
   for (let index = scanned; index < buffer.length; index++) {
     const newline = buffer[index]!.lastIndexOf('\n')
     if (newline !== -1) {
       scan[3] = index
       scan[4] = newline + 1
+      scan[5] = undefined
+      scan[6] = 0
     }
   }
   scan[2] = buffer.length
+  if (scan[5] !== undefined)
+    return scan[5]
 
-  let spaces = 0
+  let spaces = scan[6]
   let offset = scan[4]
   for (let index = scan[3]; index < buffer.length; index++) {
     const fragment = buffer[index]!
@@ -523,7 +535,10 @@ function lineOpensRawHtmlBlock(buffer: string[], scan: BufferScanState): boolean
     }
     offset = 0
   }
-  return false
+  scan[6] = spaces
+  scan[3] = buffer.length
+  scan[4] = 0
+  return undefined
 }
 
 /**
@@ -1290,6 +1305,7 @@ export interface MarkdownStreamContext {
   options: EngineOptions
   bufferScan: BufferScanState
   prepareDrain: (final: boolean) => number
+  observeStableOutput: (content: string, end: number) => void
   markYielded: () => void
   getMarkdown: () => string
   holdsOutput: boolean
@@ -1327,7 +1343,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     preFencePendingDepth: 0,
     preFenceOwnerDepth: 0,
   }
-  const bufferScan: BufferScanState = [false, 0, 0, 0, 0]
+  const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0]
   let inRawHtmlRegion = false
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
@@ -2429,6 +2445,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     bufferScan,
     getMarkdown,
     holdsOutput: !!cleanPass?.holdsOutput,
+    observeStableOutput(content, end) {
+      // Keep the current line's first-byte decision when compaction drops it.
+      // A new newline clears this decision; an empty line stays undecided.
+      bufferScan[5] = lineOpensRawHtmlBlock(state.buffer, bufferScan)
+      if (!inRawHtmlRegion || bufferScan[0])
+        return
+      // The raw region starts at its scan cursor. Earlier blank lines belong
+      // to the preceding block and must not activate Markdown in this region.
+      let start = 0
+      const scannedTo = bufferScan[1] > state.buffer.length ? 0 : bufferScan[1]
+      for (let index = 0; index < scannedTo; index++)
+        start += state.buffer[index]!.length
+      const blankLine = content.indexOf('\n\n', Math.max(0, start - 1))
+      if (blankLine !== -1 && blankLine + 2 <= end)
+        bufferScan[0] = true
+    },
     prepareDrain(final) {
       // Settle an open marker-line guard when the item's first content already
       // answers it, so the hold below never outlives the marker's own line.
@@ -2447,6 +2479,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       // `emptyLinkText`, leaving the item empty, so it cannot answer the guard.
       if (openLinkFragment >= 0 && (unresolvedCaptionFragment === -1 || openLinkFragment < unresolvedCaptionFragment))
         unresolvedCaptionFragment = openLinkFragment
+      // An empty inline pair may disappear before the item closes. Its opener
+      // cannot decide whether the marker shares a line with visible content.
+      if (openMarkerCount) {
+        const markerFragment = openMarkers[0]! >> 3
+        if (unresolvedCaptionFragment === -1 || markerFragment < unresolvedCaptionFragment)
+          unresolvedCaptionFragment = markerFragment
+      }
+      const codeSpanFragment = gfmLifecycle.openCodeSpans[0]?.fragment
+      if (codeSpanFragment !== undefined && (unresolvedCaptionFragment === -1 || codeSpanFragment < unresolvedCaptionFragment))
+        unresolvedCaptionFragment = codeSpanFragment
       resolveItemMarker(state, false, unresolvedCaptionFragment)
       return getHeldOutputFragment(final)
     },

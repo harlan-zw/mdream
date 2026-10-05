@@ -24,7 +24,6 @@ export async function* streamHtmlToMarkdown(
     throw new Error('Invalid HTML stream provided')
   }
   const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
-  let hasDecodedContent = false
   const reader = htmlStream.getReader()
 
   const processor = createMarkdownProcessor(options, context => createMarkdownDrain(context, resolvedPlugins.length > 0))
@@ -55,14 +54,9 @@ export async function* streamHtmlToMarkdown(
         continue
 
       // Process the HTML chunk
-      let decoded = typeof value === 'string'
+      const decoded = typeof value === 'string'
         ? decoder.decode() + value
         : decoder.decode(value, { stream: true })
-      if (decoded && !hasDecodedContent) {
-        hasDecodedContent = true
-        if (typeof value !== 'string' && decoded.charCodeAt(0) === 0xFEFF)
-          decoded = decoded.slice(1)
-      }
       const htmlContent = `${remainingHtml}${decoded}`
 
       remainingHtml = parseHtmlStream(htmlContent, parseState, handleEvent)
