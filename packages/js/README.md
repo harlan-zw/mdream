@@ -54,7 +54,7 @@ The `format` option is removed. Import the converter for the format.
 The text and HTML converters accept `origin`, `plugins`, and `tagOverrides`.
 `htmlToText` also accepts `wrapWidth`.
 Both apply the `urls` rule from `clean`. `htmlToText` also applies `emptyImages`.
-The other rules change Markdown links, so these converters skip them, as in v1.
+They skip the Markdown post-processing pass, as in v1.
 The CLI `--format` flag is unchanged.
 `frontmatterPlugin` now writes YAML frontmatter to Markdown output only.
 In v1, safe HTML output started with a YAML block. This also applies to `--preset minimal --format html`.
@@ -313,10 +313,10 @@ htmlToMarkdown(html, { clean: clean({ urls: true, fragments: true }) })
 | `urls` | `boolean` | `false` | Strip tracking query parameters (`utm_*`, `fbclid`, `gclid`, etc.) from URLs |
 | `fragments` | `boolean` | `false` | Strip fragment-only links that do not match any heading slug in the output |
 | `emptyLinks` | `boolean` | `false` | Strip links with meaningless hrefs (`#`, `javascript:void(0)`, `data:`, `vbscript:`) and replace with plain text |
-| `blankLines` | `boolean` | `false` | Collapse 3+ consecutive blank lines to 2 |
+| `blankLines` | `boolean` | `false` | No effect in the JavaScript engine |
 | `redundantLinks` | `boolean` | `false` | Strip links where text equals URL, with or without a title: `[https://x.com](https://x.com)` becomes `https://x.com` |
 | `selfLinkHeadings` | `boolean` | `false` | Strip fragment links inside headings, such as permalink anchors: `## [Title](#title)` becomes `## Title` |
-| `emptyImages` | `boolean` | `false` | Strip images with no alt text (decorative images, tracking pixels) |
+| `emptyImages` | `boolean` | `false` | Drop images with missing, empty, or whitespace-only alt text |
 | `emptyLinkText` | `boolean` | `false` | Drop links that produce no visible text: `[](url)` is removed entirely |
 
 `clean()` without rules enables all options except `blankLines`.

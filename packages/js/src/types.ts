@@ -73,13 +73,13 @@ export interface CleanOptions {
   fragments?: boolean
   /** Strip links with meaningless hrefs (#, javascript:void(0)) → plain text */
   emptyLinks?: boolean
-  /** Collapse 3+ consecutive blank lines to 2 */
+  /** No effect in the JavaScript engine */
   blankLines?: boolean
   /** Strip links where text equals URL: [https://x.com](https://x.com) → https://x.com */
   redundantLinks?: boolean
   /** Strip self-referencing heading anchors: ## [Title](#title) → ## Title */
   selfLinkHeadings?: boolean
-  /** Strip images with no alt text (decorative/tracking pixels) */
+  /** Drop images with missing, empty, or whitespace-only alt text */
   emptyImages?: boolean
   /** Drop links that produce no visible text: [](url) → nothing */
   emptyLinkText?: boolean
