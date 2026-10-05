@@ -12,7 +12,7 @@ Nuxt module for converting HTML pages to Markdown using [mdream](https://github.
 ### Installation
 
 ```bash
-pnpm add @mdream/nuxt
+pnpm add @mdream/nuxt@beta
 ```
 
 Requires Nuxt 3.0.0 or later.
@@ -25,7 +25,8 @@ export default defineNuxtConfig({
 })
 ```
 
-Once registered, every route is available as markdown by appending `.md` to the path (e.g., `/about.md`). LLM bots automatically receive markdown responses without the `.md` extension.
+Once registered, indexable pages are available as Markdown by appending `.md` to the path, such as `/about.md`.
+Bots can omit `.md` when their `Accept` header ranks `text/markdown` or `text/plain` above HTML.
 
 ## Configuration
 
@@ -85,10 +86,10 @@ These are passed directly to `htmlToMarkdown` from the `mdream` package.
 
 The middleware uses content negotiation to decide whether to serve markdown or HTML:
 
-- Serves markdown when the `Accept` header contains `*/*` or `text/markdown` (but not `text/html`).
-- Serves HTML when the `Accept` header contains `text/html` or `sec-fetch-dest` is `document`.
+- Serves markdown when `text/markdown` or `text/plain` ranks above HTML in the `Accept` header.
+- Serves HTML for wildcard headers, missing headers, or browser navigation (`sec-fetch-dest: document`).
 
-Standard browsers always receive HTML. LLM bots and API clients that do not explicitly request HTML receive markdown.
+Use the `.md` extension or explicitly request Markdown. Unsupported media types receive HTTP 406 on HTML routes.
 
 #### Excluded Paths
 
@@ -104,7 +105,7 @@ The middleware skips these paths:
 Pages with a `noindex` robots meta tag return a 404 when accessed as markdown:
 
 ```vue
-<script setup>
+<script setup lang="ts">
 useHead({
   meta: [
     { name: 'robots', content: 'noindex' }
@@ -275,7 +276,7 @@ Streaming is also available:
 ```ts
 // server/api/stream.post.ts
 export default defineEventHandler(async (event) => {
-  const stream = getRequestWebStream(event)
+  const stream = getRequestWebStream(event) ?? null
   const chunks = []
   for await (const chunk of streamHtmlToMarkdown(stream)) {
     chunks.push(chunk)
@@ -289,7 +290,7 @@ export default defineEventHandler(async (event) => {
 `useHtmlToMarkdown` provides a reactive wrapper for client-side conversion (uses the WASM build automatically). The first argument accepts a string, a ref, or a getter. When the source changes, the markdown is re-converted automatically.
 
 ```vue
-<script setup>
+<script setup lang="ts">
 const html = ref('<h1>Hello</h1>')
 const { markdown, pending, error } = useHtmlToMarkdown(html)
 </script>
@@ -302,7 +303,7 @@ const { markdown, pending, error } = useHtmlToMarkdown(html)
 On-demand conversion:
 
 ```vue
-<script setup>
+<script setup lang="ts">
 const { markdown, pending, convert } = useHtmlToMarkdown()
 
 async function onPaste(html: string) {
@@ -355,8 +356,8 @@ Augmented modules:
 
 [MIT License](./LICENSE)
 
-[npm-version-src]: https://img.shields.io/npm/v/@mdream/nuxt/latest.svg?style=flat&colorA=020420&colorB=00DC82
-[npm-version-href]: https://npmjs.com/package/@mdream/nuxt
+[npm-version-src]: https://img.shields.io/npm/v/@mdream/nuxt/beta.svg?style=flat&colorA=020420&colorB=00DC82
+[npm-version-href]: https://npmjs.com/package/@mdream/nuxt/v/beta
 [npm-downloads-src]: https://img.shields.io/npm/dm/@mdream/nuxt.svg?style=flat&colorA=020420&colorB=00DC82
 [npm-downloads-href]: https://npm.chart.dev/@mdream/nuxt
 [license-src]: https://img.shields.io/npm/l/@mdream/nuxt.svg?style=flat&colorA=020420&colorB=00DC82

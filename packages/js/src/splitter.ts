@@ -78,7 +78,7 @@ export function* htmlToMarkdownSplitChunksStream(
   let currentChunkCodeLanguage = ''
 
   // Create processor
-  const processor = createMarkdownProcessor(options, opts.resolvedPlugins, opts.tagOverrideHandlers)
+  const processor = createMarkdownProcessor(options)
   processor.state.onCodeFenceOpen = (language) => {
     if (language && !currentChunkCodeLanguage)
       currentChunkCodeLanguage = language

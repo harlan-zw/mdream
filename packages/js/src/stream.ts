@@ -1,6 +1,7 @@
 import type { ParseState } from './parse'
 import type { EngineOptions, NodeEvent, TagHandler, TransformPlugin } from './types'
 import { createMarkdownProcessor } from './markdown-processor'
+import { createMarkdownDrain } from './markdown-stream'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { endPlugins, processPluginsForEvent } from './plugin-processor'
 import { tagHandlers } from './tags'
@@ -22,10 +23,10 @@ export async function* streamHtmlToMarkdown(
   if (!htmlStream) {
     throw new Error('Invalid HTML stream provided')
   }
-  const decoder = new TextDecoder()
+  let decoder = new TextDecoder()
   const reader = htmlStream.getReader()
 
-  const processor = createMarkdownProcessor(options, resolvedPlugins, tagOverrideHandlers)
+  const processor = createMarkdownProcessor(options, context => createMarkdownDrain(context, resolvedPlugins.length > 0))
   const parseState: ParseState = {
     depthMap: processor.state.depthMap,
     depth: 0,
@@ -49,9 +50,18 @@ export async function* streamHtmlToMarkdown(
       }
 
       // Process the HTML chunk
-      const decoded = typeof value === 'string'
-        ? decoder.decode() + value
-        : decoder.decode(value, { stream: true })
+      let decoded: string
+      if (typeof value === 'string') {
+        if (!value)
+          continue
+        decoded = decoder.decode() + value
+        // A string ends the byte run, but only the stream's first BOM is metadata.
+        if (!decoder.ignoreBOM)
+          decoder = new TextDecoder('utf-8', { ignoreBOM: true })
+      }
+      else {
+        decoded = decoder.decode(value, { stream: true })
+      }
       const htmlContent = `${remainingHtml}${decoded}`
 
       remainingHtml = parseHtmlStream(htmlContent, parseState, handleEvent)

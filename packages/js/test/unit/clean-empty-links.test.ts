@@ -9,6 +9,13 @@ const executableHrefs = [
 ]
 
 describe('clean.emptyLinks executable schemes', () => {
+  it('uses updated cleanup rules in serialization and post-processing', () => {
+    const cleaner = clean({ emptyLinks: true })
+    cleaner.emptyLinks = false
+    expect(htmlToMarkdown('<a href="#">Click</a>', { clean: cleaner })).toBe('[Click](#)')
+    cleaner.emptyLinks = true
+    expect(htmlToMarkdown('<a href="#">Click</a>', { clean: cleaner })).toBe('Click')
+  })
   it.each(executableHrefs)('strips %s while serializing', (href) => {
     expect(htmlToMarkdown(`<a href="${href}">Click</a>`, {
       clean: clean({ emptyLinks: true }),

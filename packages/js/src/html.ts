@@ -22,6 +22,7 @@ function createProcessor(options: MdreamOptions): OutputProcessor {
   return {
     state,
     processEvent(event) {
+      state.depth = event.node.depth
       const inTemplate = event.node.type === ELEMENT_NODE
         ? event.node.excludedFromMarkdown
         : event.node.parent?.excludedFromMarkdown

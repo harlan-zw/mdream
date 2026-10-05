@@ -2,6 +2,7 @@ import type { ParseState } from '../../src/parse'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createMarkdownProcessor } from '../../src/markdown-processor'
+import { createMarkdownDrain } from '../../src/markdown-stream.ts'
 import { finalizeParse, parseHtmlStream } from '../../src/parse'
 import { tagHandlers } from '../../src/tags'
 
@@ -37,6 +38,26 @@ const BLOCK_NEWLINE_HTML = [
 ].join('')
 
 describe('streaming drain parity', () => {
+  it('keeps interleaved drain cursors independent of one-shot conversions', async () => {
+    const inputs = [
+      '<p>left</p><figure><figcaption>caption <em>one</em></figcaption></figure><p>end</p>',
+      '<h2>right #</h2><p><a href="/right">link <strong>two</strong></a></p>',
+    ]
+    const expected = inputs.map(html => htmlToMarkdown(html))
+    const outputs = ['', '']
+    const iterators = inputs.map(html => streamHtmlToMarkdown(chunkedStream(html, 7))[Symbol.asyncIterator]())
+    while (true) {
+      const chunks = await Promise.all(iterators.map(iterator => iterator.next()))
+      for (let index = 0; index < chunks.length; index++) {
+        if (!chunks[index]!.done)
+          outputs[index] += chunks[index]!.value
+      }
+      if (chunks.every(chunk => chunk.done))
+        break
+      expect(htmlToMarkdown('<p>between <code>a`b</code></p>')).toBe('between ``a`b``')
+    }
+    expect(outputs).toEqual(expected)
+  })
   it.each([
     '<div>Alpha</div>',
     '<div>Alpha</div><div>Beta</div>',
@@ -84,7 +105,7 @@ describe('streaming drain parity', () => {
   })
 
   it('bounds retained output while streaming a raw HTML anchor body', () => {
-    const processor = createMarkdownProcessor()
+    const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, false))
     const parseState: ParseState = {
       depthMap: processor.state.depthMap,
       depth: 0,

@@ -12,16 +12,38 @@ use crate::types::{
   ElementNode, ExtractedElement, HTMLToMarkdownOptions, NodeExtras, OutputFormat, TagHandler,
   TagOverrideConfig, TailwindData,
 };
-use crate::url::{
-  is_autolink_uri, is_data_url, is_empty_link_href, is_safe_html_url, resolve_url, slugify_heading,
-};
+use crate::url::{is_autolink_uri, is_data_url, is_empty_link_href, resolve_url, slugify_heading};
 use std::borrow::Cow;
+
+/// Whether the conversion writes plain text. A macro rather than a method: a
+/// method call changes MIR shape and grew the all-format WASM build by 50 B.
+/// A build with other formats reads the cached bool, the same expression as a
+/// build without format features. A single-format build gets a constant.
+#[cfg(all(feature = "text", any(feature = "markdown", feature = "html")))]
+macro_rules! plain_text {
+  ($state:expr) => {
+    ($state.plain_text)
+  };
+}
+#[cfg(all(feature = "text", not(any(feature = "markdown", feature = "html"))))]
+macro_rules! plain_text {
+  ($state:expr) => {
+    true
+  };
+}
+#[cfg(not(feature = "text"))]
+macro_rules! plain_text {
+  ($state:expr) => {
+    false
+  };
+}
 
 mod html_output;
 mod output;
 mod parse;
 mod plugins;
 
+#[cfg(feature = "html")]
 use html_output::HtmlFrame;
 
 /// Tracked element during extraction — maps stack depth to accumulator
@@ -126,6 +148,8 @@ const GFM_BYTE_FLAGS: [u8; 256] = {
 };
 
 struct CodeSpanState {
+  /// Depth of the `<code>` that opened the span, which alone closes it.
+  depth: usize,
   output_start: usize,
   content_start: usize,
   opener_emitted: bool,
@@ -137,6 +161,10 @@ struct OpenMarker {
   output_start: usize,
   content_start: usize,
   kind: u8,
+  /// The opener starts where the latest hard break ends. A break inside the
+  /// pair replaces that one as the latest, so dropping the empty pair has to
+  /// make the outer break the latest again.
+  starts_at_hard_break: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -218,6 +246,9 @@ struct LinkOutputState {
   /// the depth mismatch identifies the stale state so its bracket is never
   /// treated as this anchor's own.
   begin_depth: usize,
+  /// The `[` starts where the latest hard break ends; see
+  /// `OpenMarker::starts_at_hard_break`.
+  starts_at_hard_break: bool,
 }
 
 struct FragmentLink {
@@ -643,6 +674,10 @@ pub struct ConvertState {
   pub buffer: String,
   last_content_cache_len: usize,
   table_rendered_table: bool,
+  /// The header row writes its `| ` opener at its first cell, not at `<tr>`: a
+  /// row with no cells then leaves nothing behind, and the next row becomes the
+  /// header. A zero-column delimiter row does not exist in GFM.
+  table_row_opener_pending: bool,
   table_current_row_cells: usize,
   /// A raw-HTML region (`<details>`, `<dl>`, …) stops being raw at the first
   /// blank line: CommonMark ends an HTML block there and reads what follows as
@@ -715,7 +750,19 @@ pub struct ConvertState {
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
   /// hot path — a single integer compare). Code/tables/headings are exempt.
   wrap_width: usize,
+  // A single-format build folds every format check to a constant.
+  #[cfg_attr(
+    not(any(
+      all(feature = "markdown", feature = "text"),
+      all(feature = "markdown", feature = "html"),
+      all(feature = "text", feature = "html")
+    )),
+    allow(dead_code)
+  )]
   format: OutputFormat,
+  /// Cached `format == Text`. The hot text path reads a bool instead of
+  /// comparing the enum, which keeps the WASM build the same size.
+  #[cfg(all(feature = "text", any(feature = "markdown", feature = "html")))]
   plain_text: bool,
   preserve_leading_whitespace: bool,
 
@@ -752,6 +799,7 @@ pub struct ConvertState {
   in_heading: bool,
   /// Buffer position at heading start (for extracting heading text)
   heading_buffer_start: usize,
+  #[cfg(feature = "html")]
   html_frames: Vec<HtmlFrame>,
 
   /// Cumulative indent string for list-item continuation content. Grows by
@@ -788,6 +836,13 @@ pub struct ConvertState {
   empty_item_len: usize,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
+  /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
+  /// The output ends with that break exactly while the buffer length equals
+  /// it, so no writer has to clear it: any later output moves the end past it,
+  /// and `note_buffer_rewrite` clears it when bytes before it change. A block
+  /// boundary inside a list item then still owes the paragraph blank line that
+  /// the item's collapsed block spacing removes.
+  hard_break_end: usize,
   /// What leads the current line when draining has removed that line's start.
   /// `Uncut` also says `flushed_tail` still holds its document-start sentinel;
   /// yielding alone does not make that context valid.
@@ -806,6 +861,10 @@ pub struct ConvertState {
   /// Bytes read to decide whether held line-break runs are final.
   #[cfg(test)]
   break_run_scanned: usize,
+  /// Bytes behind a code span's opener when the span closes, which closing
+  /// reads and moves.
+  #[cfg(test)]
+  code_span_closed_bytes: usize,
   #[cfg(test)]
   heading_run_bytes_read: usize,
   /// tag_id -> index into `tag_overrides`; `NO_OVERRIDE` means no key. Boxed:
@@ -818,6 +877,40 @@ pub struct ConvertState {
 pub(crate) const NO_OVERRIDE: u8 = u8::MAX;
 
 impl ConvertState {
+  /// Whether this conversion writes Markdown. A build with exactly one format
+  /// folds the check to a constant, so the other renderers drop out.
+  #[inline(always)]
+  #[cfg_attr(
+    not(all(feature = "markdown", any(feature = "text", feature = "html"))),
+    allow(clippy::unused_self)
+  )]
+  pub(crate) fn is_markdown(&self) -> bool {
+    #[cfg(all(feature = "markdown", any(feature = "text", feature = "html")))]
+    {
+      self.format == OutputFormat::Markdown
+    }
+    #[cfg(not(all(feature = "markdown", any(feature = "text", feature = "html"))))]
+    {
+      cfg!(feature = "markdown")
+    }
+  }
+  /// Whether this conversion writes safe HTML. A build with exactly one format
+  /// folds the check to a constant, so the other renderers drop out.
+  #[inline(always)]
+  #[cfg_attr(
+    not(all(feature = "html", any(feature = "markdown", feature = "text"))),
+    allow(clippy::unused_self)
+  )]
+  pub(crate) fn is_html(&self) -> bool {
+    #[cfg(all(feature = "html", any(feature = "markdown", feature = "text")))]
+    {
+      self.format == OutputFormat::Html
+    }
+    #[cfg(not(all(feature = "html", any(feature = "markdown", feature = "text"))))]
+    {
+      cfg!(feature = "html")
+    }
+  }
   /// Check if we're inside a table cell (either `<td>` or `<th>`).
   #[inline]
   pub(crate) fn in_table_cell(&self) -> bool {
@@ -828,7 +921,6 @@ impl ConvertState {
     // Read wrap width before `options` is moved into the struct below.
     let options_wrap_width = options.wrap_width;
     let options_max_node_bytes = options.max_node_bytes;
-    let plain_text = format == OutputFormat::Text;
     let mut s = Self {
       depth_map: [0; MAX_TAG_ID],
       depth: 0,
@@ -899,6 +991,7 @@ impl ConvertState {
       buffer: String::with_capacity(capacity.max(1024)),
       last_content_cache_len: 0,
       table_rendered_table: false,
+      table_row_opener_pending: false,
       table_current_row_cells: 0,
       raw_html_markdown: false,
       raw_html_scanned_to: 0,
@@ -935,8 +1028,9 @@ impl ConvertState {
       keep_dropped_raw_text: false,
 
       wrap_width: options_wrap_width,
+      #[cfg(all(feature = "text", any(feature = "markdown", feature = "html")))]
+      plain_text: format == OutputFormat::Text,
       format,
-      plain_text,
       preserve_leading_whitespace: false,
       clean_flags: 0,
       link: LinkOutputState::default(),
@@ -955,6 +1049,7 @@ impl ConvertState {
       fragment_links: Vec::new(),
       in_heading: false,
       heading_buffer_start: 0,
+      #[cfg(feature = "html")]
       html_frames: Vec::new(),
 
       list_indent: String::new(),
@@ -969,6 +1064,7 @@ impl ConvertState {
       empty_item_line_start: 0,
       empty_item_len: 0,
       list_rule_pending: false,
+      hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
       #[cfg(test)]
@@ -977,6 +1073,8 @@ impl ConvertState {
       quoted_bytes: 0,
       #[cfg(test)]
       break_run_scanned: 0,
+      #[cfg(test)]
+      code_span_closed_bytes: 0,
       #[cfg(test)]
       heading_run_bytes_read: 0,
     };
@@ -1974,7 +2072,7 @@ impl ConvertState {
 
   pub fn get_markdown(&mut self) -> String {
     self.note_buffer_rewrite(0);
-    if self.format == OutputFormat::Html {
+    if self.is_html() {
       return std::mem::take(&mut self.buffer);
     }
     // ASCII whitespace only, as everywhere else: U+00A0 is content, and the
@@ -2317,6 +2415,11 @@ impl ConvertState {
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
+    // Bytes before the break changed, so the output no longer ends with it.
+    // A truncation to the break end (an empty construct dropped) keeps it.
+    if offset < self.hard_break_end {
+      self.hard_break_end = usize::MAX;
+    }
   }
 
   /// Shift the measured run after `removed` bytes left the front of the buffer.
@@ -2326,6 +2429,12 @@ impl ConvertState {
       *run = (*run).min(*end);
     }
     self.heading_run_dirty_from = self.heading_run_dirty_from.saturating_sub(removed);
+    if self.hard_break_end != usize::MAX {
+      self.hard_break_end = self
+        .hard_break_end
+        .checked_sub(removed)
+        .unwrap_or(usize::MAX);
+    }
   }
 
   /// Whether output held back behind an open construct has outgrown
@@ -2392,14 +2501,14 @@ impl ConvertState {
   }
 
   pub fn get_markdown_chunk(&mut self) -> String {
-    if self.format == OutputFormat::Html {
+    if self.is_html() {
       if let Some(&last) = self.buffer.as_bytes().last() {
         self.flushed_tail[1] = last;
       }
       self.note_buffer_rewrite(0);
       return std::mem::take(&mut self.buffer);
     }
-    if !self.plain_text && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+    if !plain_text!(self) && self.clean_flags & CLEAN_FRAGMENTS != 0 {
       return String::new();
     }
     self.flush_settled_blockquote_lines();
@@ -2565,10 +2674,7 @@ impl ConvertState {
   }
 
   pub fn get_final_markdown_chunk(&mut self) -> String {
-    if !self.plain_text
-      && self.format != OutputFormat::Html
-      && self.clean_flags & CLEAN_FRAGMENTS != 0
-    {
+    if !plain_text!(self) && !self.is_html() && self.clean_flags & CLEAN_FRAGMENTS != 0 {
       self.get_markdown()
     } else {
       self.get_markdown_chunk()

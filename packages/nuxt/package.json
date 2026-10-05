@@ -1,8 +1,18 @@
 {
   "name": "@mdream/nuxt",
   "type": "module",
-  "version": "2.0.0-beta.0",
+  "version": "2.0.0-beta.1",
   "description": "Nuxt module for converting HTML pages to Markdown using mdream",
+  "contributors": [
+    {
+      "name": "André Cruz",
+      "url": "https://github.com/edevil"
+    },
+    {
+      "name": "Bernardo Pereira",
+      "url": "https://github.com/BernardoPe"
+    }
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
