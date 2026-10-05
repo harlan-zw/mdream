@@ -2959,3 +2959,105 @@ fn a_cleaned_anchor_exit_still_trims_like_an_uncleaned_one() {
     assert_stream_matches_every_split(html, opts.clone());
   }
 }
+
+#[test]
+fn metadata_plugins_do_not_retain_emitted_document() {
+  use mdream::types::{ExtractionConfig, FrontmatterConfig};
+
+  let mut maximum_peak = 0;
+  // Generate input lazily and drop output and extracted records each chunk.
+  // Only the processor's live allocations contribute to the retained peak.
+  for format in [
+    OutputFormat::Markdown,
+    OutputFormat::Text,
+    OutputFormat::Html,
+  ] {
+    for (frontmatter, extraction) in [(true, false), (false, true), (true, true)] {
+      let options = HTMLToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          frontmatter: frontmatter.then(FrontmatterConfig::default),
+          extraction: extraction.then(|| ExtractionConfig::new(&["p"])),
+          ..Default::default()
+        }),
+        ..Default::default()
+      };
+      ACCT.set(Acct {
+        on: true,
+        live: 0,
+        peak: 0,
+      });
+      let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
+      let mut bytes = processor
+        .process_chunk("<head><title>Example</title></head><body>")
+        .len();
+      let mut extracted = 0;
+      for _ in 0..32768 {
+        bytes += processor
+          .process_chunk("<p>Small streamed paragraph.</p>")
+          .len();
+        extracted += processor.take_extracted().map_or(0, |items| items.len());
+      }
+      bytes += processor.process_chunk("</body>").len();
+      bytes += processor.finish().len();
+      let mut acct = ACCT.get();
+      acct.on = false;
+      ACCT.set(acct);
+      eprintln!(
+        "{format:?}, frontmatter={frontmatter}, extraction={extraction}: peak={} bytes, output={bytes}",
+        acct.peak
+      );
+      assert!(bytes > 32768 * 24);
+      assert_eq!(extracted, if extraction { 32768 } else { 0 });
+      maximum_peak = maximum_peak.max(acct.peak);
+    }
+  }
+  assert!(maximum_peak < 64 * 1024, "metadata peak={maximum_peak}");
+}
+
+#[test]
+fn metadata_plugins_preserve_streamed_output_and_records() {
+  use mdream::types::{ExtractionConfig, FrontmatterConfig};
+
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      frontmatter: Some(FrontmatterConfig::default()),
+      extraction: Some(ExtractionConfig::new(&["p", "strong", "script"])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<head><title>Example</title><meta name=description content='A page'></head><body><p>A <strong>bold</strong> paragraph.</p><p><a href='/x'>link</a></p><script>ignored text</script></body>",
+    "<p>Before</p><head><title>Late</title></head><p>After <em>nested</em> output.</p>",
+    "<head><title>Unclosed</title><p>content",
+  ] {
+    for format in [
+      OutputFormat::Markdown,
+      OutputFormat::Text,
+      OutputFormat::Html,
+    ] {
+      let expected = html_to_format_result(html, options.clone(), format);
+      for chunk_size in [1, 7, 31, 4096] {
+        let mut processor = MarkdownStreamProcessor::new_with_format(options.clone(), format);
+        let mut output = String::new();
+        let mut records = Vec::new();
+        for chunk in html.as_bytes().chunks(chunk_size) {
+          output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+          records.extend(processor.take_extracted().unwrap_or_default());
+        }
+        output.push_str(&processor.finish());
+        records.extend(processor.take_extracted().unwrap_or_default());
+        assert_eq!(output, expected.markdown, "{format:?}, chunk={chunk_size}");
+        let expected_records = expected.extracted.as_deref().unwrap_or_default();
+        assert_eq!(records.len(), expected_records.len());
+        for (actual, expected) in records.iter().zip(expected_records) {
+          assert_eq!(actual.selector, expected.selector);
+          assert_eq!(actual.tag_name, expected.tag_name);
+          assert_eq!(actual.text_content, expected.text_content);
+          assert_eq!(actual.attributes, expected.attributes);
+        }
+        assert_eq!(processor.frontmatter(), expected.frontmatter);
+      }
+    }
+  }
+}
