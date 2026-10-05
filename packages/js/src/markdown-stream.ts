@@ -71,6 +71,9 @@ export function createMarkdownDrain(context: MarkdownStreamContext, hasPlugins: 
     }
 
     const leadingTrimmed = content.length - currentContent.length
+    // Keep the cursor in buffer coordinates. The first drain trims its view,
+    // but later drains can retain that same buffer without the leading trim.
+    const yieldedLength = Math.max(0, lastYieldedLength - leadingTrimmed)
 
     const fragmentHeld = heldFragment !== Infinity
     if (fragmentHeld) {
@@ -99,11 +102,12 @@ export function createMarkdownDrain(context: MarkdownStreamContext, hasPlugins: 
     // A later mutable tail can move the stable boundary behind bytes already
     // returned to the caller. Keep the cursor monotonic so those bytes are not
     // emitted a second time once following content makes the tail stable.
-    if (stableLength < lastYieldedLength)
-      stableLength = lastYieldedLength
+    if (stableLength < yieldedLength)
+      stableLength = yieldedLength
 
-    const newContent = currentContent.slice(lastYieldedLength, stableLength)
-    lastYieldedLength = stableLength
+    const newContent = currentContent.slice(yieldedLength, stableLength)
+    if (newContent || hasYieldedContent)
+      lastYieldedLength = stableLength + leadingTrimmed
     if (newContent && !hasYieldedContent) {
       hasYieldedContent = true
       context.markYielded()
@@ -144,6 +148,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, hasPlugins: 
         state.buffer.length = 0
         resetBufferScanCursors(bufferScan)
         state.buffer.push(currentContent)
+        lastYieldedLength = stableLength
       }
     }
     return newContent
