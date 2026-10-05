@@ -2696,8 +2696,8 @@ impl ConvertState {
   }
 
   /// Free already-yielded output so streaming memory stays O(window), not
-  /// O(document). Skipped when a whole-document feature (fragment cleaning,
-  /// frontmatter, extraction) still needs the full buffer.
+  /// O(document). Fragment cleaning still needs the full output buffer.
+  /// Frontmatter and extraction keep their metadata separately.
   ///
   /// Must never change the emitted bytes. In-buffer rewrites reach back at most
   /// to `link_bracket_pos` (open `<a>`) or `buffer.len() - last_content_cache_len`;
@@ -2710,7 +2710,7 @@ impl ConvertState {
     if self.disable_drain {
       return;
     }
-    if self.clean_flags & CLEAN_FRAGMENTS != 0 || self.has_frontmatter || self.has_extraction {
+    if self.retains_whole_document() {
       return;
     }
     // Keep the tail a late rewrite may still touch, and never drop the `[` of an
