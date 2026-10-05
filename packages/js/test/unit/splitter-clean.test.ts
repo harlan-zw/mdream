@@ -29,14 +29,18 @@ describe('incremental link cleanup in the splitter', () => {
     }
   })
 
-  it.each(['Title', 'Title #', 'Title <b>bold</b>'])('holds rewritten heading links: %s', (title) => {
+  it.each([
+    ['Title', 'Title'],
+    ['Title #', 'Title #'],
+    ['Title <b>bold</b>', 'Title bold'],
+  ])('holds rewritten heading links: %s', (title, expectedHeader) => {
     const html = `<h2><a href="#title">${title}</a></h2><p>after</p><h2>Next</h2><p>tail</p>`
     const options = { clean: clean({ selfLinkHeadings: true }), chunkOverlap: 0, stripHeaders: false }
     const expected = htmlToMarkdown(html, options).replace(/\s+/g, '')
     for (const chunkSize of [4, 8, 20]) {
       const chunks = htmlToMarkdownSplitChunks(html, { ...options, chunkSize })
       expect(chunks.map(chunk => chunk.content).join('').replace(/\s+/g, '')).toBe(expected)
-      expect(chunks.find(chunk => chunk.content.includes('after'))?.metadata.headers?.h2).toBe(title.replace(/<[^>]*>/g, ''))
+      expect(chunks.find(chunk => chunk.content.includes('after'))?.metadata.headers?.h2).toBe(expectedHeader)
       expect(chunks.find(chunk => chunk.content.includes('tail'))?.metadata.headers?.h2).toBe('Next')
     }
   })
