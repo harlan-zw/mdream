@@ -144,6 +144,10 @@ jobs:
           mkdir -p "$REPORT_DIR"
           node bench/bundle/analyze.ts | tee "$REPORT_DIR/report.md"
           cat "$REPORT_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"
+          # Preserve first-output observations and raw samples outside the report.
+          cp /tmp/base-perf.json /tmp/pr-perf.json \
+            /tmp/base-paired-perf.json /tmp/pr-paired-perf.json \
+            /tmp/base-alloc.json /tmp/pr-alloc.json "$REPORT_DIR/"
           printf '%s\n' "$PR_NUMBER" > "$REPORT_DIR/pr-number.txt"
           printf '%s\n' "$HEAD_SHA" > "$REPORT_DIR/head-sha.txt"
 
