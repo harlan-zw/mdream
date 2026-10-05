@@ -52,7 +52,7 @@ import {
   TAG_VAR,
   TEXT_NODE,
 } from './const'
-import { breakHandler, renderBreak, rowMarker } from './tags'
+import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
 import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
@@ -1772,7 +1772,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // unknown elements only affect spacing, so allocating an empty array for
     // every enter/exit event adds pure GC pressure.
     let output: string[] | undefined
-    if (element.pluginOutput?.length) {
+    const hasPluginOutput = !!element.pluginOutput?.length
+    if (hasPluginOutput) {
       output = element.pluginOutput
       element.pluginOutput = undefined
     }
@@ -1847,8 +1848,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     if (emptyTableRow)
       return
-    if (eventType === NodeEventEnter && output && handler?.collapsesInnerWhiteSpace)
+    // Built-in wrapper identities already prove their output. Cache the
+    // other cases, avoiding a property allocation on each common inline node.
+    if (eventType === NodeEventEnter && output && handler?.collapsesInnerWhiteSpace
+      && (hasPluginOutput || handler !== tagHandlers[tagId] || (!INLINE_MARKER_TYPE[tagId] && tagId !== TAG_A))) {
       element.hasEnterOutput = output.some(fragment => fragment.length > 0)
+    }
     if (captionBreakRun
       && !(tagId === TAG_FIGCAPTION && eventType === NodeEventExit)
       && output) {
