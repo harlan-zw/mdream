@@ -7,7 +7,8 @@ use std::fmt::Write as _;
 
 use mdream::MarkdownStreamProcessor;
 use mdream::types::{
-  CleanConfig, HTMLToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
+  CleanConfig, HTMLToMarkdownOptions, IsolateMainConfig, OutputFormat, PluginConfig,
+  TagOverrideConfig, TailwindConfig,
 };
 use mdream::{html_to_format_result, html_to_markdown};
 
@@ -1553,6 +1554,91 @@ fn streaming_drops_block_separator_before_empty_trailing_marker() {
   }
 }
 
+#[test]
+fn skipped_pre_closes_surviving_child_fence_without_leaking_its_own_exit() {
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      isolate_main: Some(IsolateMainConfig),
+      tailwind: Some(TailwindConfig),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+
+  let unopened = "<pre id=><h4 id=>";
+  assert_eq!(html_to_markdown(unopened, options.clone()), "####");
+  assert_eq!(stream_chunks(unopened, 3, options.clone()), "####");
+
+  for html in [
+    "<pre id=><h4 id=><code id=>",
+    "<pre id=><h4 id=><code id=></code></h4></pre><p>after</p>",
+  ] {
+    let expected = html_to_markdown(html, options.clone());
+    assert_eq!(
+      expected.matches("```").count(),
+      2,
+      "html={html:?}: {expected:?}"
+    );
+    for chunk in [1, 3, html.len()] {
+      assert_eq!(
+        stream_chunks(html, chunk, options.clone()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+  }
+
+  let nested = "<pre id=><h4 id=><code id=>x</code><pre class=hidden>inert</pre>y</pre>";
+  let nested_output = html_to_markdown(nested, options.clone());
+  let closer = nested_output.rfind("```").expect("child fence opens");
+  assert!(
+    nested_output.find('y').is_some_and(|at| at < closer),
+    "nested skipped pre closed its ancestor's fence: {nested_output:?}"
+  );
+  assert_eq!(stream_chunks(nested, 3, options.clone()), nested_output);
+
+  let mut overridden = options;
+  overridden.plugins.as_mut().unwrap().tag_overrides = Some(vec![(
+    "pre".to_string(),
+    TagOverrideConfig {
+      exit: Some("UNMATCHED".to_string()),
+      ..Default::default()
+    },
+  )]);
+  let html = "<pre id=><h4 id=><code id=>";
+  let expected = html_to_markdown(html, overridden.clone());
+  assert!(
+    !expected.contains("UNMATCHED"),
+    "skipped pre exit leaked: {expected:?}"
+  );
+  assert_eq!(expected.matches("```").count(), 2);
+  assert_eq!(stream_chunks(html, 3, overridden), expected);
+}
+
+#[test]
+fn nested_pre_does_not_replace_or_close_outer_code_fence() {
+  for html in [
+    "<pre><code>x</code><pre></pre>y</pre>",
+    "<pre><code>x</code><pre>inner</pre>y</pre>",
+    "<pre><pre></pre>y</pre>",
+    "<pre><pre>inner</pre>y</pre>",
+    "<pre><pre><code>x</code></pre>y</pre>",
+  ] {
+    let output = html_to_markdown(html, HTMLToMarkdownOptions::default());
+    assert_eq!(output.matches("```").count(), 2, "{output:?}");
+    let closer = output.rfind("```").unwrap();
+    assert!(output.find('y').is_some_and(|at| at < closer), "{output:?}");
+    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  }
+
+  let html = "<pre class=language-rs><pre class=language-js></pre>y</pre>";
+  assert_eq!(
+    html_to_markdown(html, HTMLToMarkdownOptions::default()),
+    "```rs\ny\n```"
+  );
+  assert_stream_matches(html, HTMLToMarkdownOptions::default());
+}
+
 // A trailing whitespace run inside `<pre>` is still mutable until the code
 // element closes. Streaming must not emit bytes that one-shot trims before
 // writing the closing fence.
@@ -1603,18 +1689,15 @@ fn streaming_holds_full_whitespace_run_before_a_droppable_marker() {
 
 // A block boundary trims the trailing spaces of the run before it, and the
 // cached run length has to shrink with them. Left stale, it outruns the buffer
-// wherever a drain has already cut the front, and the reach-back trim's
-// `cache_len <= buf_len` guard then skips the retraction entirely -- so the
-// block spacing the empty `<ol/>` wrote survived as `\n\n` where one-shot
-// retracts it to the pending space of the run it replaced. One-shot escapes the
-// stale length only because nothing has left its buffer, leaving the count exact
-// by coincidence.
+// wherever a drain has already cut the front, and a later reach-back trim then
+// disagrees with one-shot. The lone space after `<ol/>` collapses and writes
+// nothing, so it does not retract the list's block spacing.
 #[test]
-fn streaming_retracts_empty_block_spacing_after_a_space_trim() {
+fn streaming_keeps_block_spacing_after_a_space_trim() {
   let html = "<pre>ace><source>tity;      <ol/> <d/>*";
   let expected =
     html_to_format_result(html, HTMLToMarkdownOptions::default(), OutputFormat::Text).markdown;
-  assert_eq!(expected, "ace>tity; *");
+  assert_eq!(expected, "ace>tity;\n\n*");
   for chunk in 1..=html.len() {
     let mut p = MarkdownStreamProcessor::new_with_format(
       HTMLToMarkdownOptions::default(),
@@ -1679,8 +1762,8 @@ fn streaming_keeps_inter_token_space_across_drain() {
 // bytes. When an empty list item renders a lone `-` marker and the block spacing
 // before it has been drained away, the `-` sits alone at the buffer start and
 // the byte before it (a newline) is gone; the boundary then miscounted and
-// emitted an extra blank line (`-\n\n[link]` instead of `-\n[link]`). Newline
-// counting now consults the last flushed byte so the count survives the drain.
+// streaming disagreed with one-shot. Newline counting now consults the last
+// flushed byte so the count survives the drain.
 // The nested `div > form` and the ragged inline whitespace reproduce the exact
 // buffer state; every small chunk size lands a boundary that triggers it.
 #[test]
@@ -1697,8 +1780,8 @@ fn streaming_keeps_block_newline_count_across_drain() {
     <div class=\"badges\"><a href=\"/other-link/\" target=\"_blank\" class=\"bp\"> Delta</a></div></div>";
   let expected = html_to_markdown(html, opts.clone());
   assert!(
-    expected.contains("-\n[Delta]"),
-    "one-shot tightens the list/block gap: {expected:?}"
+    expected.contains("-\n\n[Delta]"),
+    "one-shot separates the list from the next block: {expected:?}"
   );
   for chunk in 1..=40usize {
     assert_eq!(
@@ -1979,6 +2062,27 @@ fn streaming_empty_item_with_open_marker_matches_one_shot() {
   }
 }
 
+// A dropped image removes the marker's trailing space; an empty inline marker
+// may add that space back without making the list item nonempty.
+#[test]
+fn streaming_dropped_image_before_empty_marker_keeps_list_separation() {
+  let options = HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_images: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    ("a b<li><img/><strong></strong></li>", "a b\n\n-"),
+    ("a b<li><img/><strong>x</strong></li>", "a b\n- **x**"),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options.clone());
+  }
+}
+
 // Past a blank line a raw-HTML region is Markdown again, tracked by scanning the
 // buffer for that blank line. A drain can carry those bytes away before the scan
 // reaches them, leaving the region suspended forever: streaming then omits every
@@ -2183,7 +2287,7 @@ fn raw_html_region_text_is_not_gfm_escaped() {
   for (html, expected) in [
     (".<ul><li><dd>*", ".\n\n- <dd>*</dd>"),
     ("<p>x</p><li><dd>_", "x\n\n- <dd>_</dd>"),
-    ("<caption>c</caption><tr><dd>*", "c\n\n| <dd>*</dd>\n |\n|"),
+    ("<caption>c</caption><tr><dd>*", "c\n\n<dd>*</dd>"),
     // Only inside the region: the leading `*` is still escaped.
     ("*<ul><li><dd>_", "\\*\n\n- <dd>_</dd>"),
   ] {
@@ -2829,5 +2933,29 @@ fn streaming_carries_an_unwanted_value_quote_opened_at_a_chunk_edge() {
     r#"<p data-x="a>b">text</p>"#,
   ] {
     assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  }
+}
+
+// A clean flag routes an anchor exit through the bracket rewrite, which used to
+// return before the exit's whitespace trim. One-shot kept whitespace no stream
+// could reach back for, so every chunk width disagreed with it.
+#[test]
+fn a_cleaned_anchor_exit_still_trims_like_an_uncleaned_one() {
+  let opts = HTMLToMarkdownOptions {
+    clean: Some(CleanConfig {
+      fragments: false,
+      ..CleanConfig::all()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<pre>x\t<a>",
+    "<pre>x\n<a>",
+    "<a>[",
+    "x <a>[",
+    "<pre>\u{c}<a>",
+  ] {
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
   }
 }

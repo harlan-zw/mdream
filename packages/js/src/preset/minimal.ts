@@ -20,7 +20,9 @@ import { isolateMainPlugin } from '../plugins/isolate-main'
 import { tailwindPlugin } from '../plugins/tailwind'
 
 /**
- * Compose the minimal plugin set with explicit user plugins.
+ * Compose the minimal plugin set with explicit user plugins. An appended
+ * `filterPlugin()` adds to the preset's excludes. To leave out a default
+ * plugin, pass your own `plugins` array instead of using the preset.
  */
 export function withMinimalPreset(options: Omit<MdreamOptions, 'clean'> & { clean?: Cleaner | false } = {}): MdreamOptions {
   return {

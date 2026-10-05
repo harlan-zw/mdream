@@ -17,6 +17,7 @@ export function processPluginsForEvent(
   state: MdreamRuntimeState,
   processEvent: (event: NodeEvent) => void,
 ): boolean {
+  state.depth = event.node.depth
   // Process plugins with full state access
   if (plugins?.length) {
     // Run processAttributes BEFORE beforeNodeProcess so that

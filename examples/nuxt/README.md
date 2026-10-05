@@ -13,6 +13,9 @@ A minimal example demonstrating the `@mdream/nuxt` module functionality.
 ## Quick Start
 
 ```bash
+# From the repository root
+cd examples/nuxt
+
 # Install dependencies
 pnpm install
 
@@ -20,7 +23,7 @@ pnpm install
 pnpm dev
 
 # Build for production
-pnpm build
+pnpm run _build
 
 # Generate static site
 pnpm generate
@@ -42,7 +45,7 @@ Once the development server is running, test these URLs:
 
 When you run `pnpm generate`, the module will:
 
-1. Generate `.md` files for all indexable pages in the `dist/` directory
+1. Generate `.md` files for all indexable pages in the `.output/public/` directory
 2. Create `llms.txt` and `llms-full.txt` files
 3. Respect robots meta tags during generation
 

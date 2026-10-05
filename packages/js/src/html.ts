@@ -3,6 +3,7 @@ import type { MdreamOptions } from './types'
 import { ELEMENT_NODE, MAX_TAG_ID } from './const'
 import { createHtmlOutputState, processHtmlOutputEvent } from './html-output'
 import { htmlTagHandlers } from './html-tags'
+import { assertEngineOptions } from './option-shape'
 import { processHtmlOutput, streamHtmlOutput } from './output-runner'
 import { resolvePlugins } from './pluggable/plugin'
 import { buildTagOverrideHandlers } from './tag-overrides'
@@ -21,6 +22,7 @@ function createProcessor(options: MdreamOptions): OutputProcessor {
   return {
     state,
     processEvent(event) {
+      state.depth = event.node.depth
       const inTemplate = event.node.type === ELEMENT_NODE
         ? event.node.excludedFromMarkdown
         : event.node.parent?.excludedFromMarkdown
@@ -30,6 +32,8 @@ function createProcessor(options: MdreamOptions): OutputProcessor {
     },
     takeOutput() {
       const output = state.buffer.join('')
+      if (output)
+        outputState.hasOutput = true
       state.buffer.length = 0
       return output
     },
@@ -37,6 +41,7 @@ function createProcessor(options: MdreamOptions): OutputProcessor {
 }
 
 function resolveOutputOptions(options: MdreamOptions) {
+  assertEngineOptions(options)
   return {
     plugins: resolvePlugins(options.plugins),
     tagHandlers: htmlTagHandlers,

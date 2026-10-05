@@ -69,13 +69,19 @@ fn write_markdown_destination(output: &mut String, destination: &str) {
 
 fn write_markdown_resource(output: &mut String, destination: &str, title: Option<&str>) {
   output.push('(');
-  write_markdown_destination(output, destination);
-  if let Some(title) = title
-    && !title.is_empty()
-  {
-    output.push_str(" \"");
-    write_ascii_escaped(output, title, &TITLE_ESCAPES);
-    output.push('"');
+  match title {
+    Some(title) if !title.is_empty() => {
+      // A bare title would parse as the destination, so an empty one is `<>`.
+      if destination.is_empty() {
+        output.push_str("<>");
+      } else {
+        write_markdown_destination(output, destination);
+      }
+      output.push_str(" \"");
+      write_ascii_escaped(output, title, &TITLE_ESCAPES);
+      output.push('"');
+    }
+    _ => write_markdown_destination(output, destination),
   }
   output.push(')');
 }
@@ -127,7 +133,7 @@ pub(super) fn parse_bounded_u32(value: &str, max: u32) -> Option<u32> {
 }
 
 impl ConvertState {
-  fn begin_link(&mut self, bracket_pos: usize, skipped: bool) {
+  fn begin_link(&mut self, bracket_pos: usize, skipped: bool, raw_html_open: bool) {
     // `self.link` describes a live enclosing `<a>` only when `open` is set; an
     // implied close (a nested `<a>` start) resets it to the default, and pushing
     // that phantom would poison the bracket floor the streaming guards read.
@@ -137,8 +143,10 @@ impl ConvertState {
     self.link = LinkOutputState {
       bracket_pos,
       skipped,
+      raw_html_open,
       open: true,
       begin_depth: self.depth,
+      starts_at_hard_break: self.hard_break_end == bracket_pos,
       ..Default::default()
     };
   }
@@ -234,6 +242,15 @@ impl ConvertState {
     self.push_capped_code_span_content(value, atomic, cap)
   }
 
+  /// Whether [`Self::push_code_span_content`] drops everything it is given.
+  fn drops_code_span_content(&self) -> bool {
+    self.options.max_node_bytes != 0
+      && self
+        .code_spans
+        .first()
+        .is_some_and(|span| !span.opener_emitted || span.exhausted)
+  }
+
   #[cold]
   #[inline(never)]
   fn push_capped_code_span_content(&mut self, value: &str, atomic: bool, cap: usize) -> usize {
@@ -273,6 +290,7 @@ impl ConvertState {
         return false;
       }
     }
+    self.note_buffer_rewrite(range.start);
     self.buffer.replace_range(range, value);
     true
   }
@@ -299,6 +317,10 @@ impl ConvertState {
   #[cold]
   #[inline(never)]
   fn finalize_code_span(&mut self, span: &CodeSpanState) -> String {
+    #[cfg(test)]
+    {
+      self.code_span_closed_bytes += self.buffer.len() - span.output_start;
+    }
     // A pipe splits the row even inside a code span; `\|` is GFM's escape and is
     // honoured there. Its expanded form still has to fit the aggregate budget.
     if self.depth_map[TAG_TABLE as usize] > 0 && self.buffer[span.content_start..].contains('|') {
@@ -561,6 +583,10 @@ impl ConvertState {
       ];
     }
 
+    #[cfg(test)]
+    {
+      self.quoted_bytes += quoted.len();
+    }
     self.scan_before_requote(content_end);
     self.truncate_buffer(frame.content_start);
     self.buffer.push_str(&quoted);
@@ -581,6 +607,36 @@ impl ConvertState {
     self.buffer.len() >= STREAMING_FLUSH_THRESHOLD && !self.blockquotes.is_empty()
   }
 
+  /// These options rewrite across the whole document, so nothing streams early.
+  pub(super) fn retains_whole_document(&self) -> bool {
+    self.clean_flags & CLEAN_FRAGMENTS != 0 || self.has_frontmatter || self.has_extraction
+  }
+
+  /// Where the earliest construct keeping quoted lines from being flushed began:
+  /// each is a pending rewrite at an absolute buffer offset, which quoting the
+  /// content before it would shift.
+  pub(super) fn blockquote_flush_blocker(&self) -> Option<usize> {
+    let link_start = (self.depth_map[TAG_A as usize] > 0).then(|| {
+      let outermost = self.parent_links.first().unwrap_or(&self.link);
+      if outermost.open {
+        outermost.bracket_pos
+      } else {
+        0
+      }
+    });
+    [
+      self.open_markers.first().map(|marker| marker.output_start),
+      self.first_tentative_caption_start(),
+      self.code_fence.as_ref().map(|fence| fence.output_start),
+      self.code_spans.first().map(|span| span.output_start),
+      link_start,
+      self.empty_item_hazard.then_some(self.empty_item_line_start),
+    ]
+    .into_iter()
+    .flatten()
+    .min()
+  }
+
   pub(crate) fn flush_streaming_blockquote_lines(&mut self) {
     self.flush_streaming_blockquote_lines_upto(usize::MAX);
   }
@@ -595,17 +651,8 @@ impl ConvertState {
   /// only lines it would already release get quoted.
   pub(crate) fn flush_streaming_blockquote_lines_upto(&mut self, limit: usize) {
     if !self.streaming_flush_possible()
-      || self.clean_flags & CLEAN_FRAGMENTS != 0
-      || self.has_frontmatter
-      || self.has_extraction
-      // These pending rewrites keep absolute buffer offsets. Quoting content
-      // before them shifts those offsets, so wait until each rewrite settles.
-      || !self.open_markers.is_empty()
-      || self.first_tentative_caption_start().is_some()
-      || self.code_fence.is_some()
-      || !self.code_spans.is_empty()
-      || self.depth_map[TAG_A as usize] > 0
-      || self.empty_item_hazard
+      || self.retains_whole_document()
+      || self.blockquote_flush_blocker().is_some()
     {
       return;
     }
@@ -633,20 +680,45 @@ impl ConvertState {
       return;
     }
 
+    // Quoting rewrites only lines before `flush_end` and keeps the tail after
+    // it, so a hard break the output ends with still ends it afterwards.
+    let break_at_end = self.hard_break_end == self.buffer.len();
     let shared_start = self.blockquotes[0].content_start;
     if self
       .blockquotes
       .iter()
-      .all(|frame| frame.content_start == shared_start && frame.list_indent.is_empty())
+      .all(|frame| frame.content_start == shared_start)
     {
       let content = &self.buffer[shared_start..flush_end];
-      let quoted_prefix = "> ".repeat(self.blockquotes.len());
-      let blank_prefix = quoted_prefix.trim_end();
+      // Quoting frame by frame, each frame strips its list indent from the line
+      // the frame inside it wrote, then writes that indent and `>`. Indents are
+      // spaces, and each written line starts with its frame's indent and `>`, so
+      // whether a strip fits depends on the indents alone: every line gets the
+      // same prefix, and only the innermost frame strips from the content.
+      let mut quoted_prefix = String::new();
+      let mut outer_indent = 0;
+      for frame in &self.blockquotes {
+        debug_assert!(frame.list_indent.bytes().all(|byte| byte == b' '));
+        let indent = frame.list_indent.len();
+        let kept = if outer_indent <= indent {
+          indent - outer_indent
+        } else {
+          indent
+        };
+        quoted_prefix.extend(std::iter::repeat_n(' ', kept));
+        quoted_prefix.push_str("> ");
+        outer_indent = indent;
+      }
+      let blank_prefix = &quoted_prefix[..quoted_prefix.len() - 1];
+      let innermost_indent = self.blockquotes[self.blockquotes.len() - 1]
+        .list_indent
+        .as_str();
       let mut quoted = core::mem::take(&mut self.blockquote_scratch);
       quoted.clear();
       quoted.reserve(content.len() + quoted_prefix.len() * content.matches('\n').count());
       for line in content.split_inclusive('\n') {
         let line = line.strip_suffix('\n').unwrap_or(line);
+        let line = line.strip_prefix(innermost_indent).unwrap_or(line);
         if line.is_empty() {
           quoted.push_str(blank_prefix);
         } else {
@@ -655,7 +727,12 @@ impl ConvertState {
         }
         quoted.push('\n');
       }
+      #[cfg(test)]
+      {
+        self.quoted_bytes += quoted.len();
+      }
       self.scan_before_requote(flush_end);
+      self.note_buffer_rewrite(shared_start);
       self.buffer.replace_range(shared_start..flush_end, &quoted);
       let quoted_end = shared_start + quoted.len();
       self.shift_raw_html_scan(flush_end, quoted_end);
@@ -666,6 +743,9 @@ impl ConvertState {
       }
       self.last_content_cache_len = self.buffer.len() - flush_end;
       self.invalidate_line_start();
+      if break_at_end {
+        self.hard_break_end = self.buffer.len();
+      }
       return;
     }
 
@@ -676,6 +756,7 @@ impl ConvertState {
     // Taken once for the whole walk: every frame rewrites the same region again,
     // so without this each nesting level allocates its own copy of it per flush.
     let mut quoted = core::mem::take(&mut self.blockquote_scratch);
+    self.note_buffer_rewrite(shared_start);
     for frame in self.blockquotes.iter().rev() {
       let content = &self.buffer[frame.content_start..flush_end];
       quoted.clear();
@@ -695,6 +776,10 @@ impl ConvertState {
         }
         quoted.push('\n');
       }
+      #[cfg(test)]
+      {
+        self.quoted_bytes += quoted.len();
+      }
       self
         .buffer
         .replace_range(frame.content_start..flush_end, &quoted);
@@ -708,6 +793,9 @@ impl ConvertState {
     }
     self.last_content_cache_len = self.buffer.len() - flush_end;
     self.invalidate_line_start();
+    if break_at_end {
+      self.hard_break_end = self.buffer.len();
+    }
   }
 
   /// Override keyed by built-in tag id, via the precomputed table. `idx` is
@@ -766,7 +854,8 @@ impl ConvertState {
       return;
     }
 
-    if self.format == OutputFormat::Html {
+    #[cfg(feature = "html")]
+    if self.is_html() {
       self.emit_html_enter();
       return;
     }
@@ -778,14 +867,19 @@ impl ConvertState {
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
     // language) is emitted lazily above for the no-<code> case. Skipped inside
     // a table cell, where the <pre> is emitted as raw HTML instead (issue #147).
-    if !self.plain_text
+    // A nested `<pre>` stays inside an ancestor's open or pending fence; it
+    // must not replace that fence's owner with a new deferred opener.
+    if !plain_text!(self)
       && self.stack[stack_len - 1].tag_id == Some(TAG_PRE)
+      && self.pre_fence_owner_depth == 0
+      && !self.pre_fence_pending
       && !self.in_table_cell()
     {
       let lang =
         Self::get_language_from_class(self.stack[stack_len - 1].attributes.get_bit(ATTR_CLASS))
           .to_string();
       self.pre_fence_pending = true;
+      self.pre_fence_pending_depth = self.depth_map[TAG_PRE as usize];
       self.pre_fence_lang = lang;
     }
 
@@ -836,6 +930,16 @@ impl ConvertState {
           self.table_column_alignments.clear();
         } else if tag_id == Some(TAG_TR) {
           self.table_current_row_cells = 0;
+          // A nested table's row must not clear an outer header row's pending
+          // opener, or that row's first cell would open no row. An override
+          // with neither enter nor exit output renders the row like the
+          // built-in handler, so it keeps the empty-row deferral too; only an
+          // explicit-output override takes over the row's own edges.
+          if self.depth_map[TAG_TABLE as usize] <= 1 && !self.in_table_cell() {
+            self.table_row_opener_pending = !plain_text!(self)
+              && !self.table_rendered_table
+              && override_config.is_none_or(|ov| ov.enter.is_none() && ov.exit.is_none());
+          }
         } else if tag_id == Some(TAG_TH) {
           let align_val = node.attributes.get_bit(ATTR_ALIGN).map_or(0u8, |s| {
             match s.as_bytes().first().copied().unwrap_or(0) | 0x20 {
@@ -875,15 +979,33 @@ impl ConvertState {
     }
     // Phase 1 ends — self.stack borrow released
 
+    if self.table_row_opener_pending
+      && matches!(tag_id, Some(TAG_TH | TAG_TD))
+      && self.depth_map[TAG_TABLE as usize] <= 1
+    {
+      self.table_row_opener_pending = false;
+      let opener = self.table_row_opener(is_inline);
+      // The first cell written takes the opener's `| ` in place of its own
+      // separator, even when content outside any cell came before it: that
+      // content is not a column, and an extra `|` would widen the header row
+      // past its delimiter row.
+      output = Some(match output {
+        Some(cell) if enter_is_literal && !cell.is_empty() => Cow::Owned(format!("{opener}{cell}")),
+        _ => opener,
+      });
+    }
+
     // A literal override is code content inside `<pre>`, even when the tag's
     // built-in formatting would be suppressed there.
-    if !self.plain_text && self.pre_fence_pending {
-      if code_owns_pending_pre_fence(&self.stack) && !enter_is_literal {
+    if !plain_text!(self) && self.pre_fence_pending {
+      let code_owns_fence = code_owns_pending_pre_fence(&self.stack)
+        && self.depth_map[TAG_PRE as usize] == self.pre_fence_pending_depth;
+      if code_owns_fence && !enter_is_literal {
         self.pre_fence_pending = false;
       } else if tag_id != Some(TAG_PRE)
         && (!tag_id.is_some_and(suppresses_formatting_in_pre) || enter_is_literal)
       {
-        if enter_is_literal && code_owns_pending_pre_fence(&self.stack) {
+        if enter_is_literal && code_owns_fence {
           self.pre_fence_lang =
             Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
               .to_string();
@@ -893,6 +1015,41 @@ impl ConvertState {
           output = None;
         }
       }
+    }
+
+    // A block boundary directly after a hard break keeps the paragraph blank
+    // line at the top level (`q  \n\nX`), where the exit spacing pays for the
+    // break's own newline. Inside a list item every non-`<li>` spacing is
+    // collapsed and the break's continuation indent already ended the line, so
+    // the separator is written here or the paragraph boundary disappears
+    // (`- q  \n  X`). Pre/table joins the set: a fence or GFM table cannot
+    // interrupt a paragraph, so sharing the break's line would render both as
+    // literal text. The break's indent spaces are trimmed first; whatever line
+    // break remains counts toward the two the separator needs.
+    if !plain_text!(self)
+      && self.hard_break_end == self.buffer.len()
+      && !enter_is_literal
+      && matches!(tag_id, Some(TAG_P | TAG_DIV | TAG_PRE | TAG_TABLE))
+      && self.depth_map[TAG_LI as usize] > 0
+      && !self.in_table_cell()
+      // At a <pre>'s own enter the parser has already counted it (depth 1);
+      // any deeper this boundary sits inside literal fence content.
+      && self.depth_map[TAG_PRE as usize] <= u16::from(tag_id == Some(TAG_PRE))
+    {
+      self.hard_break_end = usize::MAX;
+      self.trim_trailing_spaces();
+      let new_lines = 2usize.saturating_sub(self.trailing_new_lines() as usize);
+      let mut separator = String::with_capacity(new_lines + self.list_indent.len());
+      for _ in 0..new_lines {
+        separator.push('\n');
+      }
+      separator.push_str(&self.list_indent);
+      // Prepend rather than replace: a pre/table enter fragment can carry its
+      // own opener (fence, row marker), which must follow the separator.
+      output = Some(match output {
+        Some(fragment) => Cow::Owned(format!("{separator}{fragment}")),
+        None => Cow::Owned(separator),
+      });
     }
 
     if self.clean_flags & CLEAN_EMPTY_IMAGES != 0
@@ -948,7 +1105,7 @@ impl ConvertState {
         CaptionMaterialization::Commit
       });
     }
-    let new_line_config = self.calculate_new_line_config(tag_id, node_spacing);
+    let new_line_config = self.calculate_new_line_config(tag_id, node_spacing, true);
     let quote_at_start = self
       .blockquotes
       .last()
@@ -958,10 +1115,6 @@ impl ConvertState {
     } else {
       new_line_config[0]
     };
-
-    if tag_id == Some(TAG_A) {
-      self.raw_html_link_open = false;
-    }
 
     // Clean mode — single guard for all clean checks
     if self.clean_flags != 0
@@ -974,7 +1127,7 @@ impl ConvertState {
         if let Some(href) = node.attributes.get_bit(ATTR_HREF)
           && is_empty_link_href(href)
         {
-          self.begin_link(self.buffer.len(), true);
+          self.begin_link(self.buffer.len(), true, false);
           self.reset_empty_tentative_caption_frames();
           if self.streaming {
             self.link.hold_released = true;
@@ -997,7 +1150,7 @@ impl ConvertState {
         output = None;
       }
     }
-    if !self.plain_text
+    if !plain_text!(self)
       && !enter_is_literal
       && tag_id == Some(TAG_BR)
       && configured_new_lines == 0
@@ -1012,7 +1165,7 @@ impl ConvertState {
       self.last_node_is_inline = is_inline;
       return;
     }
-    if self.plain_text
+    if plain_text!(self)
       && !enter_is_literal
       && tag_id == Some(TAG_BR)
       && configured_new_lines == 0
@@ -1026,7 +1179,7 @@ impl ConvertState {
         }
       }
     }
-    if !self.plain_text
+    if !plain_text!(self)
       && !enter_is_literal
       && tag_id == Some(TAG_BR)
       && configured_new_lines == 0
@@ -1045,12 +1198,14 @@ impl ConvertState {
     // Finalize completed quote lines before recording a new code offset. A
     // later flush must stop at that offset, but the prefix before it is safe to
     // quote and yield now even when both arrive in one large input chunk.
-    if !self.plain_text
+    if !plain_text!(self)
       && !enter_is_literal
       && tag_id == Some(TAG_CODE)
       && output.is_some()
       && ((self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block())
-        || (self.depth_map[TAG_PRE as usize] > 0 && !self.pre_fence_open && !self.in_table_cell()))
+        || (self.depth_map[TAG_PRE as usize] > 0
+          && self.pre_fence_owner_depth == 0
+          && !self.in_table_cell()))
     {
       self.flush_streaming_blockquote_lines();
     }
@@ -1069,24 +1224,23 @@ impl ConvertState {
       && output.as_deref().is_some_and(|emitted| {
         self.buffer.len() > output_start
           && self.last_content_cache_len == emitted.len()
-          && (!self.plain_text || emitted.as_bytes().iter().any(|&byte| !is_whitespace(byte)))
+          && (!plain_text!(self) || emitted.as_bytes().iter().any(|&byte| !is_whitespace(byte)))
       })
     {
       self.mark_rendered_child_content();
     }
 
-    if tag_id == Some(TAG_A) {
-      // Escaping matters only while the anchor's *exit* will still build a
-      // Markdown close (`](url)`), which happens exactly when the exit is not
-      // overridden. A literal enter override still gets that default exit, so
-      // its link text must keep the bracket escaping.
-      self.raw_html_link_open = !exit_is_overridden
-        && self.in_raw_html_block()
-        && self.buffer.len() > output_start
-        && output
-          .as_deref()
-          .is_some_and(|emitted| !emitted.is_empty() && self.buffer.ends_with(emitted));
-    }
+    // Escaping matters only while the anchor's *exit* will still build a
+    // Markdown close (`](url)`), which happens exactly when the exit is not
+    // overridden. A literal enter override still gets that default exit, so
+    // its link text must keep the bracket escaping.
+    let raw_html_link_open = tag_id == Some(TAG_A)
+      && !exit_is_overridden
+      && self.in_raw_html_block()
+      && self.buffer.len() > output_start
+      && output
+        .as_deref()
+        .is_some_and(|emitted| !emitted.is_empty() && self.buffer.ends_with(emitted));
 
     if self.link.empty_text_pending
       && tag_id != Some(TAG_A)
@@ -1100,7 +1254,7 @@ impl ConvertState {
       self.link.empty_text_pending = false;
     }
 
-    if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
+    if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
       self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
     }
 
@@ -1109,7 +1263,7 @@ impl ConvertState {
     // before the region began and earlier block spacing is read as if inside,
     // escaping text that is passed through verbatim: `\*` reaches the reader as a
     // literal backslash.
-    if !self.plain_text
+    if !plain_text!(self)
       && tag_id.is_some_and(Self::is_raw_html_block_tag)
       && self.raw_html_block_depth() == 1
     {
@@ -1117,7 +1271,7 @@ impl ConvertState {
       self.raw_html_scanned_to = self.buffer.len();
     }
 
-    if !self.plain_text && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
+    if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
       if !self.blockquotes.is_empty() && self.buffer.ends_with("\n\n") {
         self.truncate_buffer(self.buffer.len() - 1);
         // Frames anchored at the old end move with the popped byte. Siblings can
@@ -1140,6 +1294,7 @@ impl ConvertState {
           let opener_emitted = self.buffer.len() > output_start && self.buffer.ends_with(emitted);
           let content_start = self.buffer.len();
           self.code_spans.push(CodeSpanState {
+            depth: self.stack[stack_len - 1].depth,
             output_start: if opener_emitted {
               content_start - emitted.len()
             } else {
@@ -1150,7 +1305,7 @@ impl ConvertState {
             exhausted: false,
           });
         }
-      } else if !self.pre_fence_open
+      } else if self.pre_fence_owner_depth == 0
         && !self.in_table_cell()
         && let Some(emitted) = output.as_deref()
         && self.buffer.len() > output_start
@@ -1166,7 +1321,7 @@ impl ConvertState {
           language,
           self.list_indent.clone(),
         );
-        self.pre_fence_open = true;
+        self.pre_fence_owner_depth = self.depth_map[TAG_PRE as usize];
       }
     }
 
@@ -1188,24 +1343,29 @@ impl ConvertState {
       } else {
         buf_len
       };
-      self.begin_link(bracket_pos, false);
-      // Avoid the href lookup and hold bookkeeping for one-shot conversion.
-      if self.streaming {
+      self.begin_link(bracket_pos, false, raw_html_link_open);
+      self.link.bracket_emitted = emitted_bracket;
+      // Avoid the href lookup and hold bookkeeping for one-shot conversion, unless
+      // `max_node_bytes` has to charge what the link holds back.
+      if self.streaming || self.options.max_node_bytes != 0 {
         let has_rewrite_anchor = emitted_bracket && !exit_is_overridden;
-        self.link.hold_released = !has_rewrite_anchor;
-        self.link.empty_text_pending =
-          has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
         let href = self.stack[stack_len - 1].attributes.get("href");
-        self.link.url_max_len = href.map_or(0, |href| {
-          6 + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
-        });
-        self.link.hold_forever = has_rewrite_anchor
+        self.link.pins_output = has_rewrite_anchor
           && href.is_some_and(|href| {
             href.starts_with('#')
               && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
                 || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0
                   && (TAG_H1..=TAG_H6).any(|h| self.depth_map[h as usize] > 0)))
           });
+        self.link.empty_text_pending =
+          has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
+        if self.streaming {
+          self.link.hold_forever = self.link.pins_output;
+          self.link.hold_released = !has_rewrite_anchor;
+          self.link.url_max_len = href.map_or(0, |href| {
+            6 + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
+          });
+        }
       }
     }
 
@@ -1218,10 +1378,12 @@ impl ConvertState {
       && self.buffer.len() > output_start
       && self.buffer.ends_with(emitted)
     {
+      let marker_start = self.buffer.len() - emitted.len();
       self.open_markers.push(OpenMarker {
-        output_start: self.buffer.len() - emitted.len(),
+        output_start: marker_start,
         content_start: self.buffer.len(),
         kind: inline_marker_type,
+        starts_at_hard_break: self.hard_break_end == marker_start,
       });
     } else if !self.open_markers.is_empty()
       && !(tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0)
@@ -1256,27 +1418,38 @@ impl ConvertState {
   /// Emit markdown for exiting an element (node already popped from stack).
   #[inline]
   pub(crate) fn emit_exit_element(&mut self, node: &ElementNode) {
-    if node.excluded_from_markdown {
+    // A skipped <pre> can still own the fence opened by an eligible <code> child.
+    if node.excluded_from_markdown
+      || (node.enter_skipped
+        && (node.tag_id != Some(TAG_PRE)
+          || self.pre_fence_owner_depth != self.depth_map[TAG_PRE as usize]))
+    {
       self.last_node_is_inline = node.is_inline;
       return;
     }
 
-    if self.format == OutputFormat::Html {
+    #[cfg(feature = "html")]
+    if self.is_html() {
       self.emit_html_exit(node);
       return;
     }
 
     let tag_id = node.tag_id;
-    if tag_id == Some(TAG_A) {
-      self.raw_html_link_open = false;
-    }
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
     }
-    let closes_own_pre_fence = tag_id == Some(TAG_PRE) && self.pre_fence_open;
+    let owns_pre_fence = tag_id == Some(TAG_PRE);
+    // Only the <pre> owning the open fence may close it; a nested one closing
+    // its ancestor's fence would leave the outer <pre> nothing to close, and
+    // the fence would run on.
+    let closes_own_pre_fence =
+      tag_id == Some(TAG_PRE) && self.pre_fence_owner_depth == self.depth_map[TAG_PRE as usize];
 
-    // Check override
-    let override_config = if self.has_tag_overrides {
+    // A skipped node must never emit its own override exit. The only output
+    // allowed below is the matching close for a fence opened by its child.
+    let override_config = if node.enter_skipped {
+      None
+    } else if self.has_tag_overrides {
       let ovs = self
         .options
         .plugins
@@ -1326,8 +1499,12 @@ impl ConvertState {
 
     if !has_override {
       // Special case: TR table separator
-      if tag_id == Some(TAG_TR) && !self.plain_text {
-        if !self.table_rendered_table && self.depth_map[TAG_TABLE as usize] <= 1 {
+      if tag_id == Some(TAG_TR) && !plain_text!(self) {
+        if self.table_row_opener_pending && self.depth_map[TAG_TABLE as usize] <= 1 {
+          // No cell opened the row, so nothing was written for it. It must not
+          // become the header either: the delimiter row would have no columns.
+          self.table_row_opener_pending = false;
+        } else if !self.table_rendered_table && self.depth_map[TAG_TABLE as usize] <= 1 {
           self.table_rendered_table = true;
           let col_count = self
             .table_current_row_cells
@@ -1357,21 +1534,21 @@ impl ConvertState {
         } else {
           output = self.get_exit_output(node, cell_span);
         }
-      } else if self.plain_text || tag_id != Some(TAG_A) || raw_html_anchor {
+      } else if plain_text!(self) || tag_id != Some(TAG_A) || raw_html_anchor {
         output = self.get_exit_output(node, cell_span);
       }
     }
-    if !self.plain_text && self.pre_fence_pending && tag_id != Some(TAG_PRE) && has_override {
+    if !plain_text!(self) && self.pre_fence_pending && tag_id != Some(TAG_PRE) && has_override {
       self.flush_pre_fence();
     }
-    // Pop for every inline <code> exit that could have pushed: the enter push
-    // ignores overrides, so an exit-only override that skipped the pop leaked
-    // the span, whose exhausted flag then capped the rest of the document.
+    // Pop at the exit of the inline <code> that pushed: the enter push ignores
+    // exit overrides, so an exit-only override that skipped the pop leaked the
+    // span, whose exhausted flag then capped the rest of the document.
     let closing_code_span = if tag_id == Some(TAG_CODE)
       && self.depth_map[TAG_PRE as usize] == 0
       && !self.in_raw_html_block()
     {
-      self.code_spans.pop()
+      self.code_spans.pop_if(|span| span.depth == node.depth)
     } else {
       None
     };
@@ -1426,9 +1603,15 @@ impl ConvertState {
           content_start,
           restore_space,
         } => {
-          if self.buffer[content_start..]
-            .bytes()
-            .any(|byte| !is_whitespace(byte))
+          // Text commits the frame, so `*`, `~`, a backtick, or `"` here is a
+          // marker, not content. A marker pair around an empty block survives the
+          // empty-pair drop; kept, it would write `****`, a thematic break.
+          // In a code span past its cap the caption's `*` is dropped, so a trim
+          // can take its content start with it.
+          if content_start < self.buffer.len()
+            && self.buffer[content_start..]
+              .bytes()
+              .any(|byte| !is_whitespace(byte) && !matches!(byte, b'*' | b'~' | b'`' | b'"'))
           {
             caption_exit_spacing = frame.spacing[1];
           } else {
@@ -1452,7 +1635,7 @@ impl ConvertState {
     }
 
     if !has_override
-      && !self.plain_text
+      && !plain_text!(self)
       && tag_id == Some(TAG_HR)
       && !self.in_table_cell()
       && self.depth_map[TAG_LI as usize] > 0
@@ -1460,14 +1643,14 @@ impl ConvertState {
       self.list_rule_pending = true;
     }
 
-    if !self.plain_text && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty() {
+    if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty() {
       self.finalize_blockquote();
     }
 
     let new_line_config = if caption_exit {
       NO_SPACING
     } else {
-      self.calculate_new_line_config(tag_id, node_spacing)
+      self.calculate_new_line_config(tag_id, node_spacing, false)
     };
     let configured_new_lines = if consumes_caption_boundary {
       0
@@ -1482,7 +1665,7 @@ impl ConvertState {
 
     // Clean mode exit — single guard. Skipped for overridden anchors,
     // whose custom exit output isn't the default `[…](…)` shape.
-    if !self.plain_text && self.clean_flags != 0 && tag_id == Some(TAG_A) && !has_override {
+    if !plain_text!(self) && self.clean_flags != 0 && tag_id == Some(TAG_A) && !has_override {
       // emptyLinks: skip exit for skipped links
       if self.link.skipped {
         self.end_link();
@@ -1490,30 +1673,28 @@ impl ConvertState {
         return;
       }
 
-      // Released links skip bracket-anchored rewrites; the ordinary close remains.
-      if !self.plain_text
+      // Rewrites are anchored on the `[` this anchor wrote. An anchor that
+      // wrote none (inside `<pre>`, say) still owes the exit below its
+      // whitespace trim and fence close, so only the rewrites are skipped.
+      let rewrite_bracket = if !plain_text!(self)
         && self.clean_flags != 0
         && tag_id == Some(TAG_A)
         && !has_override
         && !raw_html_anchor
         && !self.link.hold_released
+        && self.link.bracket_emitted
       {
-        // Find actual [ position: scan from recorded pos (write_output may have inserted newlines before it)
-        let buf_len = self.buffer.len();
-        let bracket_pos = {
-          let mut pos = self.link.bracket_pos;
-          let buf = self.buffer.as_bytes();
-          while pos < buf.len() && buf[pos] != b'[' {
-            pos += 1;
-          }
-          pos
-        };
-        // Guard: if bracket not found, bracket_pos == buf_len; text_start would overflow
-        if bracket_pos >= buf_len {
-          self.end_link();
-          self.last_node_is_inline = is_inline;
-          return;
+        let buf = self.buffer.as_bytes();
+        let mut pos = self.link.bracket_pos;
+        while pos < buf.len() && buf[pos] != b'[' {
+          pos += 1;
         }
+        (pos < buf.len()).then_some(pos)
+      } else {
+        None
+      };
+      if let Some(bracket_pos) = rewrite_bracket {
+        let buf_len = self.buffer.len();
         let text_start = bracket_pos + 1;
         let link_text = if text_start <= buf_len && self.buffer.is_char_boundary(text_start) {
           &self.buffer[text_start..buf_len]
@@ -1525,6 +1706,9 @@ impl ConvertState {
         // emptyLinkText: [](url) → drop entirely
         if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
           self.truncate_buffer(bracket_pos);
+          if self.link.starts_at_hard_break {
+            self.hard_break_end = self.link.bracket_pos;
+          }
           for (frame, &(count, has_internal_break)) in self
             .caption_frames
             .iter_mut()
@@ -1557,6 +1741,7 @@ impl ConvertState {
             let new_len = bracket_pos + text_len;
             // SAFETY: bracket_pos < text_start are within buffer bounds (guarded above).
             // We copy link text backwards over "[", then truncate. Preserves valid UTF-8.
+            self.note_buffer_rewrite(bracket_pos);
             #[allow(unsafe_code)]
             unsafe {
               let buf = self.buffer.as_mut_vec();
@@ -1588,6 +1773,7 @@ impl ConvertState {
           // Remove [ and keep text only — use truncate+copy without intermediate String
           let new_len = bracket_pos + text_len;
           // SAFETY: same invariants as self-link heading case. Preserves valid UTF-8.
+          self.note_buffer_rewrite(bracket_pos);
           #[allow(unsafe_code)]
           unsafe {
             let buf = self.buffer.as_mut_vec();
@@ -1606,6 +1792,9 @@ impl ConvertState {
       }
     }
 
+    if tag_id.is_some_and(|id| id.wrapping_sub(TAG_H1) < 6) {
+      self.heading_hash_run = 0;
+    }
     if let Some(id) = tag_id
       && id.wrapping_sub(TAG_H1) < 6
       && self.depth_map[TAG_A as usize] == 0
@@ -1626,13 +1815,13 @@ impl ConvertState {
       }
       // Raw `<hN>` in a table cell and plain text both write no ATX prefix, so
       // there is no closing sequence to protect.
-      if !self.plain_text && !self.in_table_cell() {
+      if !plain_text!(self) && !self.in_table_cell() {
         self.escape_trailing_heading_hashes();
       }
     }
 
     // TAG_A exit: write ](url) directly to buffer — zero allocation
-    if !self.plain_text
+    if !plain_text!(self)
       && !has_override
       && tag_id == Some(TAG_A)
       && !raw_html_anchor
@@ -1670,6 +1859,7 @@ impl ConvertState {
             if capped_code_span {
               let end = self.buffer.len();
               if self.replace_code_span_content(end..end, ">") {
+                self.note_buffer_rewrite(bp);
                 self.buffer.replace_range(bp..bp + 1, "<");
                 self.last_content_cache_len = self.buffer.len() - bp;
                 self.end_link();
@@ -1748,6 +1938,9 @@ impl ConvertState {
         // code in a list can emit " `"), but excludes normal surrounding
         // spacing synthesized by write_output.
         self.truncate_buffer(open_marker.output_start);
+        if open_marker.starts_at_hard_break {
+          self.hard_break_end = open_marker.output_start;
+        }
         self.last_content_cache_len = 0;
         self.reset_empty_tentative_caption_frames();
         self.last_node_is_inline = is_inline;
@@ -1802,7 +1995,7 @@ impl ConvertState {
       output.as_deref()
     };
 
-    if tag_id == Some(TAG_LI) && !self.plain_text {
+    if tag_id == Some(TAG_LI) && !plain_text!(self) {
       self.resolve_item_marker(true);
     }
 
@@ -1824,15 +2017,17 @@ impl ConvertState {
     }
 
     // Reset <pre> fence deferral once the element closes (issue #97).
-    if tag_id == Some(TAG_PRE) {
+    if owns_pre_fence {
       // The closing fence consumed the trailing newline; clear the whitespace
       // flags too, or the next node trims the blank line through the fence.
-      if self.pre_fence_open {
+      if closes_own_pre_fence {
         self.last_text_node_contains_whitespace = false;
         self.has_last_text_node = false;
+        self.pre_fence_owner_depth = 0;
       }
-      self.pre_fence_pending = false;
-      self.pre_fence_open = false;
+      if self.pre_fence_pending_depth == self.depth_map[TAG_PRE as usize] {
+        self.pre_fence_pending = false;
+      }
     }
     if tag_id == Some(TAG_A) && self.link_caption_break_snapshot_active {
       self.link_caption_break_snapshot_active = false;
@@ -1850,7 +2045,7 @@ impl ConvertState {
   /// the fence so a nested <code> does not double up and the <pre> exit emits
   /// the matching closing fence.
   fn flush_pre_fence(&mut self) {
-    if self.plain_text {
+    if plain_text!(self) {
       self.pre_fence_pending = false;
       return;
     }
@@ -1860,7 +2055,7 @@ impl ConvertState {
     self.flush_streaming_blockquote_lines();
 
     self.pre_fence_pending = false;
-    self.pre_fence_open = true;
+    self.pre_fence_owner_depth = self.pre_fence_pending_depth;
     let li_depth = self.depth_map[TAG_LI as usize];
     let fence = if li_depth > 0 {
       // A blank line between the marker and the fence ends the item, leaving the
@@ -1874,7 +2069,7 @@ impl ConvertState {
     let output_start = self.buffer.len();
     self.last_content_cache_len = self.push_code_span_content(&fence, true);
     if self.last_content_cache_len != fence.len() {
-      self.pre_fence_open = false;
+      self.pre_fence_owner_depth = 0;
       return;
     }
     self.start_code_fence(
@@ -1895,7 +2090,8 @@ impl ConvertState {
     depth: usize,
     index: usize,
   ) {
-    if self.format == OutputFormat::Html {
+    #[cfg(feature = "html")]
+    if self.is_html() {
       self.emit_html_text(text);
       return;
     }
@@ -1915,7 +2111,8 @@ impl ConvertState {
     generated_prefix: Option<&str>,
     generated_suffix: Option<&str>,
   ) {
-    if self.format == OutputFormat::Html {
+    #[cfg(feature = "html")]
+    if self.is_html() {
       self.emit_html_text(text);
       return;
     }
@@ -2012,32 +2209,22 @@ impl ConvertState {
       return;
     }
 
-    if self.plain_text && self.depth_map[TAG_PRE as usize] > 0 && self.buffer.is_empty() {
+    if plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0 && self.buffer.is_empty() {
       self.preserve_leading_whitespace = true;
     }
 
-    let buf_bytes = self.buffer.as_bytes();
-    let buf_len = buf_bytes.len();
-    let last_char = if buf_len > 0 {
-      buf_bytes[buf_len - 1]
-    } else if self.has_flushed_tail() {
-      // The buffer was drained (and possibly trimmed) empty, but earlier output
-      // ended with this byte. Spacing must be decided against it, not `0`, so a
-      // word separator that one-shot keeps is not dropped across the boundary.
-      self.flushed_tail[1]
-    } else {
-      0
-    };
+    // `None` only when nothing precedes this text. A drained buffer still ends
+    // with the flushed tail's byte, so a word separator that one-shot keeps is
+    // not dropped across the boundary. U+0000 is ordinary output here.
+    let last_char = self.last_output_byte();
 
     if text.len() == 1
       && text.as_bytes()[0] == b' '
-      && matches!(last_char, b' ' | b'\n' | b'\t' | b'\r')
+      && matches!(last_char, Some(b' ' | b'\n' | b'\t' | b'\r'))
     {
-      self.last_text_node_contains_whitespace = contains_whitespace;
-      self.has_last_text_node = true;
-      self.last_text_node_depth = depth;
-      self.last_text_node_index = index;
-      self.last_node_is_inline = false;
+      // The space collapses into the whitespace before it and writes nothing,
+      // so it must not arm the reach-back trim: that trim would cut the
+      // previous output (a `<br>` hard break) instead.
       return;
     }
 
@@ -2048,21 +2235,28 @@ impl ConvertState {
     // alone so they stay blank.
     let li_depth = self.depth_map[TAG_LI as usize] as usize;
     let indented_storage;
-    let text = if !self.plain_text
+    let text = if !plain_text!(self)
       && self.depth_map[TAG_PRE as usize] > 0
       && li_depth > 0
-      && (text.contains('\n') || last_char == b'\n')
+      && (text.contains('\n') || last_char == Some(b'\n'))
     {
       let indent = self.list_indent.as_str();
+      // The fence holds what is written, indentation included, so that is what
+      // its cap measures. A deep list's indent multiplies each line, and the
+      // check above saw only the raw text: stop building once past the cap.
+      let budget = match &self.code_fence {
+        Some(fence) if self.options.max_node_bytes != 0 => self
+          .options
+          .max_node_bytes
+          .saturating_sub(self.buffer.len().saturating_sub(fence.content_start)),
+        _ => usize::MAX,
+      };
       let mut out = String::with_capacity(text.len() + indent.len() * 2);
       let bytes = text.as_bytes();
       // Prepend indent for the first line when the buffer ended with a
       // newline (code fence opener). Blank first line stays blank.
-      if last_char == b'\n' {
-        let first = bytes.first().copied().unwrap_or(0);
-        if first != b'\n' && first != 0 {
-          out.push_str(indent);
-        }
+      if last_char == Some(b'\n') && bytes.first().is_some_and(|&first| first != b'\n') {
+        out.push_str(indent);
       }
       let mut prev = 0usize;
       for (i, &b) in bytes.iter().enumerate() {
@@ -2073,9 +2267,22 @@ impl ConvertState {
             out.push_str(indent);
           }
           prev = next;
+          if out.len() > budget {
+            break;
+          }
         }
       }
-      out.push_str(&text[prev..]);
+      if out.len() <= budget {
+        out.push_str(&text[prev..]);
+      }
+      if out.len() > budget {
+        self.truncated = true;
+        let kept = clamp_to_char_boundary(&out, budget).len();
+        if kept == 0 {
+          return;
+        }
+        out.truncate(kept);
+      }
       indented_storage = out;
       indented_storage.as_str()
     } else {
@@ -2087,7 +2294,8 @@ impl ConvertState {
     // line breaks folded into <br> (issue #147). Runs on all such text, not
     // only text with newlines, since escaping is always required.
     let cell_storage;
-    let text = if !self.plain_text && self.depth_map[TAG_PRE as usize] > 0 && self.in_table_cell() {
+    let text = if !plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0 && self.in_table_cell()
+    {
       cell_storage = Self::fold_pre_lines_to_br(text);
       cell_storage.as_str()
     } else {
@@ -2102,13 +2310,13 @@ impl ConvertState {
       self.raw_html_scanned_to = self.buffer.len();
     }
     let raw_html_storage;
-    let text = if !self.plain_text && self.depth_map[TAG_PRE as usize] == 0 && inside_raw_html_block
-    {
-      raw_html_storage = self.escape_raw_html_text(text);
-      raw_html_storage.as_ref()
-    } else {
-      text
-    };
+    let text =
+      if !plain_text!(self) && self.depth_map[TAG_PRE as usize] == 0 && inside_raw_html_block {
+        raw_html_storage = self.escape_raw_html_text(text);
+        raw_html_storage.as_ref()
+      } else {
+        text
+      };
 
     // Loop-invariant container tests, behind a closure so the byte scan runs
     // only when no cheaper test already decided.
@@ -2126,7 +2334,7 @@ impl ConvertState {
         })
     };
     let escaped_storage;
-    let text = if !self.plain_text
+    let text = if !plain_text!(self)
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
       && (has_inline_gfm_hazard
@@ -2160,9 +2368,10 @@ impl ConvertState {
       text
     };
 
+    let written_from = self.buffer.len();
     if self.wrap_width != 0 && self.can_wrap_here() {
-      self.push_text_wrapped(text, last_char);
-    } else if !(owns_leading_space || (self.plain_text && self.depth_map[TAG_PRE as usize] > 0))
+      self.push_text_wrapped(text, last_char, owns_leading_space);
+    } else if !(owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0))
       && self.should_add_spacing_before_text(last_char, text)
     {
       if self.options.max_node_bytes == 0 {
@@ -2182,6 +2391,30 @@ impl ConvertState {
 
     if !self.open_markers.is_empty() && text.as_bytes().iter().any(|&b| !is_whitespace(b)) {
       self.open_markers.clear();
+    }
+    // Text ends the breaks held before it, unless a tentative caption can still
+    // retract it and rejoin them.
+    if self.held_break_bytes != 0
+      && self.first_tentative_caption_start().is_none()
+      && text.as_bytes().iter().any(|&b| !is_whitespace(b))
+    {
+      self.held_break_bytes = 0;
+    }
+
+    if self.options.max_node_bytes != 0
+      && self.in_heading()
+      && let Some(written) = self.buffer.as_bytes().get(written_from..)
+    {
+      let run = written
+        .iter()
+        .rev()
+        .take_while(|&&byte| matches!(byte, b'#' | b' ' | b'\t'))
+        .count();
+      self.heading_hash_run = if run == written.len() {
+        self.heading_hash_run + run
+      } else {
+        run
+      };
     }
 
     self.last_text_node_contains_whitespace = contains_whitespace;
@@ -2421,6 +2654,31 @@ impl ConvertState {
     self.empty_item_len = self.buffer.len();
   }
 
+  /// Answer the guard between tokens, where the buffer reads the same whatever
+  /// the chunking, once the item's first byte is final: settled content ends
+  /// the buffer and no open construct can take it back. The exit would answer
+  /// the same, and waiting for it pins the marker's line and everything the
+  /// item writes after it, uncharged to `max_node_bytes`. Answered here, the
+  /// blank line also survives a nested list whose first `<li>` dropped it.
+  pub(crate) fn settle_item_marker(&mut self) {
+    if self.buffer.len() > self.empty_item_len
+      && self.buffer.as_bytes().last().is_some_and(|byte| !byte.is_ascii_whitespace())
+      && self.open_markers.is_empty()
+      && self.code_spans.is_empty()
+      && self.code_fence.is_none()
+      && self.depth_map[TAG_A as usize] == 0
+      && self.first_tentative_caption_start().is_none()
+      // The blank line leaves quote frames where they are, right only for those
+      // the item sits in.
+      && self
+        .blockquotes
+        .last()
+        .is_none_or(|frame| frame.content_start <= self.empty_item_line_start)
+    {
+      self.resolve_item_marker(true);
+    }
+  }
+
   /// Give a marker that ended up alone on its line the blank line it needs: the
   /// item is empty, or opened with a block starting on the next line. While
   /// nothing has been written since the marker the answer is still open, so only
@@ -2439,11 +2697,10 @@ impl ConvertState {
     if tail.is_empty() && !at_exit {
       return;
     }
-    // An open inline marker, and an open `<a>`'s `[`, are rewritten away if the
-    // element closes empty, so neither is content the item can be decided on —
-    // only its exit is. It must open exactly at the item's content start;
-    // anything earlier is content that already settles the question.
-    let opens_the_item = |position: usize| position == end;
+    // An open inline marker or link bracket can disappear when it closes empty.
+    // Its recorded position can precede or follow separating spaces.
+    let item_content_start = self.buffer.len() - tail.len();
+    let opens_the_item = |position: usize| position >= end && position <= item_content_start;
     if !at_exit
       && (self
         .open_markers
@@ -2690,8 +2947,8 @@ impl ConvertState {
         b'\n' => Some("&#10;"),
         b'\r' => Some("&#13;"),
         b'|' if in_table => Some("&#124;"),
-        b'[' if self.raw_html_link_open => Some("&#91;"),
-        b']' if self.raw_html_link_open => Some("&#93;"),
+        b'[' if self.link.raw_html_open => Some("&#91;"),
+        b']' if self.link.raw_html_open => Some("&#93;"),
         _ => None,
       };
       if let Some(replacement) = replacement {
@@ -2754,6 +3011,7 @@ impl ConvertState {
 
   #[inline]
   pub(super) fn truncate_buffer(&mut self, len: usize) {
+    self.note_buffer_rewrite(len);
     self.buffer.truncate(len);
     while self
       .streaming_break_runs
@@ -2781,6 +3039,35 @@ impl ConvertState {
     }
   }
 
+  /// Newlines (at most two) that end the output, counted as one contiguous
+  /// run and read through a drain via `flushed_tail`.
+  #[inline]
+  fn trailing_new_lines(&self) -> u8 {
+    let bytes = self.buffer.as_bytes();
+    let len = bytes.len();
+    let tail_known = self.has_flushed_tail();
+    let last = if len > 0 {
+      bytes[len - 1]
+    } else if tail_known {
+      self.flushed_tail[1]
+    } else {
+      0
+    };
+    if last != b'\n' {
+      return 0;
+    }
+    let second = if len > 1 {
+      bytes[len - 2]
+    } else if len == 1 && tail_known {
+      self.flushed_tail[1]
+    } else if tail_known {
+      self.flushed_tail[0]
+    } else {
+      0
+    };
+    1 + u8::from(second == b'\n')
+  }
+
   #[cfg_attr(target_arch = "wasm32", inline(never))]
   #[cfg_attr(not(target_arch = "wasm32"), inline)]
   fn trim_trailing_spaces(&mut self) {
@@ -2800,8 +3087,7 @@ impl ConvertState {
   }
 
   fn defer_streaming_break(&mut self, fragment: &str) -> bool {
-    if !self.streaming
-      || !self.blockquotes.is_empty()
+    if !self.blockquotes.is_empty()
       || self.clean_flags & CLEAN_FRAGMENTS != 0
       || self.has_frontmatter
       || self.has_extraction
@@ -2812,6 +3098,11 @@ impl ConvertState {
     }
 
     if fragment.is_empty() {
+      return false;
+    }
+    // Counted in one-shot conversion too, so the cap cuts both at the same tag.
+    self.held_break_bytes = self.held_break_bytes.saturating_add(fragment.len());
+    if !self.streaming {
       return false;
     }
     if let Some(run) = self.streaming_break_runs.last_mut()
@@ -2944,6 +3235,7 @@ impl ConvertState {
         count: 1,
       });
     }
+    self.held_break_bytes = self.held_break_bytes.saturating_add(fragment.len());
     true
   }
 
@@ -3002,7 +3294,7 @@ impl ConvertState {
       if let Some(prefix) = prefix {
         self.push_caption_content(prefix.as_ref());
       }
-      if !self.plain_text && (!explicit_top || index != top) {
+      if !plain_text!(self) && (!explicit_top || index != top) {
         self.push_caption_content(MARKDOWN_EMPHASIS);
       }
       self.caption_frames[index].state = if commit {
@@ -3109,9 +3401,8 @@ impl ConvertState {
     self.line_start_scanned_to = usize::MAX;
   }
 
-  /// Whether the current line opens a raw HTML block, which suspends Markdown
-  /// again until the next blank line.
-  fn line_opens_raw_html_block(&mut self) -> bool {
+  /// Offset just past the buffer's last `\n`.
+  pub(super) fn current_line_start(&mut self) -> usize {
     let len = self.buffer.len();
     let bytes = self.buffer.as_bytes();
     // Only bytes appended since the last call can move the line start; a buffer
@@ -3128,6 +3419,15 @@ impl ConvertState {
       self.line_start = self.line_start_scanned_to + i + 1;
     }
     self.line_start_scanned_to = len;
+    self.line_start
+  }
+
+  /// Whether the current line opens a raw HTML block, which suspends Markdown
+  /// again until the next blank line.
+  fn line_opens_raw_html_block(&mut self) -> bool {
+    self.current_line_start();
+    let len = self.buffer.len();
+    let bytes = self.buffer.as_bytes();
 
     // A `line_start` of zero is the drained buffer's front, not the line's, once
     // a drain has taken this line's beginning: the fragment left behind can open
@@ -3248,7 +3548,7 @@ impl ConvertState {
   /// `  > `, `<blockquote><li>` → `>   `. A flat "all quotes then all indent"
   /// prefix would corrupt the Markdown structure of nested blocks.
   fn continuation_prefix(&self) -> String {
-    if self.plain_text {
+    if plain_text!(self) {
       return String::new();
     }
 
@@ -3291,7 +3591,7 @@ impl ConvertState {
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
   /// A break only ever replaces an inter-word space, so words joined across
   /// inline boundaries (e.g. `foo**bar**`) stay intact.
-  fn push_text_wrapped(&mut self, text: &str, last_char: u8) {
+  fn push_text_wrapped(&mut self, text: &str, last_char: Option<u8>, owns_leading_space: bool) {
     let width = self.wrap_width;
     // A leading/trailing space in `text` is significant inter-word separation
     // across an inline boundary (e.g. `… </a> now`); the non-wrap path keeps
@@ -3299,7 +3599,9 @@ impl ConvertState {
     // would otherwise discard it as an empty segment.
     let leading_space = text.starts_with(' ');
     let trailing_space = text.ends_with(' ');
-    let first_needs_space = leading_space || self.should_add_spacing_before_text(last_char, text);
+    // A caption owns the space before its first text, as on the unwrapped path.
+    let first_needs_space = leading_space
+      || (!owns_leading_space && self.should_add_spacing_before_text(last_char, text));
     let prefix = self.continuation_prefix();
     let prefix_len = prefix.chars().count();
     let buf_start = self.buffer.len();
@@ -3336,7 +3638,7 @@ impl ConvertState {
 
   /// Emit frontmatter content.
   pub(crate) fn emit_frontmatter(&mut self, content: &str) {
-    if self.format == OutputFormat::Markdown && !content.is_empty() {
+    if self.is_markdown() && !content.is_empty() {
       self.last_content_cache_len = self.push_code_span_content(content, true);
     }
   }
@@ -3347,7 +3649,7 @@ impl ConvertState {
     node: &ElementNode,
     _ancestors: &[ElementNode],
   ) -> Option<Cow<'static, str>> {
-    if self.plain_text {
+    if plain_text!(self) {
       return self.get_text_enter_output(node);
     }
 
@@ -3428,15 +3730,19 @@ impl ConvertState {
       TAG_SUP => Some(Cow::Borrowed("<sup>")),
       TAG_INS => Some(Cow::Borrowed("<ins>")),
       TAG_P => {
-        if self.depth_map[TAG_LI as usize] > 0 && !self.in_table_cell() {
-          let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
-          if last_char != 0 && last_char != b' ' && last_char != b'\n' {
-            let indent = self.list_indent.as_str();
-            let mut s = String::with_capacity(2 + indent.len());
-            s.push_str("\n\n");
-            s.push_str(indent);
-            return Some(Cow::Owned(s));
-          }
+        // A drain can empty the buffer mid-document, so the check reads the
+        // flushed tail like the close-side twin below, not just the buffer.
+        if self.depth_map[TAG_LI as usize] > 0
+          && !self.in_table_cell()
+          && self
+            .last_output_byte()
+            .is_some_and(|last_char| last_char != b' ' && last_char != b'\n')
+        {
+          let indent = self.list_indent.as_str();
+          let mut s = String::with_capacity(2 + indent.len());
+          s.push_str("\n\n");
+          s.push_str(indent);
+          return Some(Cow::Owned(s));
         }
         None
       }
@@ -3462,7 +3768,7 @@ impl ConvertState {
           }
           // A fence is already open for this <pre> — the <pre> opened it (mixed
           // text + <code> children) or an earlier <code> sibling did.
-          if self.pre_fence_open {
+          if self.pre_fence_owner_depth != 0 {
             return None;
           }
           let lang = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS));
@@ -3490,6 +3796,10 @@ impl ConvertState {
           }
         } else if self.in_raw_html_block() {
           Some(Cow::Borrowed("<code>"))
+        } else if !self.code_spans.is_empty() {
+          // Code inside a code span is part of it. A span of its own would
+          // only add a longer delimiter per level, each rescanning the rest.
+          None
         } else if self.depth_map[TAG_LI as usize] > 0 {
           // Inline code inside a list item: collapse the paragraph
           // boundary with a separator space when following text, but
@@ -3502,13 +3812,12 @@ impl ConvertState {
           // separated with a space so CommonMark parses them as two
           // code spans rather than merging into one (` `a``b` ` →
           // single span with literal content ``a``b``).
-          let last_char = self.buffer.as_bytes().last().copied().unwrap_or(0);
-          if last_char != 0
-            && !matches!(
+          if self.last_output_byte().is_some_and(|last_char| {
+            !matches!(
               last_char,
               b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
             )
-          {
+          }) {
             Some(Cow::Borrowed(" `"))
           } else {
             Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
@@ -3543,13 +3852,9 @@ impl ConvertState {
         let ordered = _ancestors.last().filter(|p| p.tag_id == Some(TAG_OL));
         let mut s = String::with_capacity(self.list_indent.len() + 6);
         s.push_str(&self.list_indent);
-        if let Some(list) = ordered {
+        if ordered.is_some() {
           use std::fmt::Write;
-          let _ = write!(
-            s,
-            "{}. ",
-            Self::ordered_item_number(list, node.index as usize)
-          );
+          let _ = write!(s, "{}. ", self.ordered_item_number(node.index as usize));
         } else {
           s.push_str("- ");
         }
@@ -3604,28 +3909,10 @@ impl ConvertState {
         if self.in_table_cell() {
           return Some(Cow::Borrowed("<tr>"));
         }
-        let indent = if self.depth_map[TAG_LI as usize] > 0 {
-          self.list_indent.as_str()
-        } else {
-          ""
-        };
-        // A row must open its own line at the item's content column: sharing one
-        // with preceding content (a `<caption>`) leaves the header as prose and
-        // the delimiter row never forms a table.
-        match self.line_state_before_row() {
-          LineBeforeRow::Row if indent.is_empty() => Some(Cow::Borrowed("\n| ")),
-          LineBeforeRow::Content if indent.is_empty() => Some(Cow::Borrowed("\n\n| ")),
-          LineBeforeRow::Row => Some(Cow::Owned(format!("\n{indent}| "))),
-          LineBeforeRow::Content => Some(Cow::Owned(format!("\n\n{indent}| "))),
-          // A pending list marker already supplies the column; only a fresh line
-          // needs the indent written.
-          LineBeforeRow::Open
-            if !indent.is_empty() && self.buffer.as_bytes().last() == Some(&b'\n') =>
-          {
-            Some(Cow::Owned(format!("{indent}| ")))
-          }
-          LineBeforeRow::Open => Some(Cow::Borrowed("| ")),
+        if self.table_row_opener_pending {
+          return None;
         }
+        Some(self.table_row_opener(node.is_inline))
       }
       TAG_TH | TAG_TD => {
         if self.depth_map[TAG_TABLE as usize] > 1 {
@@ -3682,7 +3969,7 @@ impl ConvertState {
     node: &ElementNode,
     cell_span: u8,
   ) -> Option<Cow<'static, str>> {
-    if self.plain_text {
+    if plain_text!(self) {
       return Self::get_text_exit_output(node);
     }
 
@@ -3740,17 +4027,22 @@ impl ConvertState {
           None
         } else if self.in_raw_html_block() {
           Some(Cow::Borrowed("</code>"))
+        } else if self
+          .code_spans
+          .last()
+          .is_some_and(|span| span.depth != node.depth)
+        {
+          None
         } else {
           Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
         }
       }
       // Raw <pre> close inside a table cell (issue #147).
       TAG_PRE if self.in_table_cell() => Some(Cow::Borrowed("</pre>")),
-      // Bare <pre> (no <code> child) closing fence (issue #97). Only emitted
-      // when the <pre> opened its own fence; otherwise a <code> child or an
-      // empty/whitespace-only <pre> means there is nothing to close.
+      // Only the `<pre>` owning the open fence emits the closer; a nested
+      // `<pre>` cannot close its ancestor's fence.
       TAG_PRE => {
-        if !self.pre_fence_open {
+        if self.pre_fence_owner_depth != self.depth_map[TAG_PRE as usize] {
           return None;
         }
         let li_depth = self.depth_map[TAG_LI as usize] as usize;
@@ -3850,13 +4142,13 @@ impl ConvertState {
     match tag_id {
       TAG_BR => Some(Cow::Borrowed("\n")),
       TAG_P => {
-        if self.depth_map[TAG_BLOCKQUOTE as usize] > 0
-          || (self.depth_map[TAG_LI as usize] > 0 && !self.in_table_cell())
+        if (self.depth_map[TAG_BLOCKQUOTE as usize] > 0
+          || (self.depth_map[TAG_LI as usize] > 0 && !self.in_table_cell()))
+          && self
+            .last_output_byte()
+            .is_some_and(|last_char| last_char != b' ' && last_char != b'\n')
         {
-          let last_char = self.last_output_byte().unwrap_or(0);
-          if last_char != 0 && last_char != b' ' && last_char != b'\n' {
-            return Some(Cow::Borrowed("\n\n"));
-          }
+          return Some(Cow::Borrowed("\n\n"));
         }
         None
       }
@@ -3971,15 +4263,6 @@ impl ConvertState {
     } else {
       0
     };
-    let second_last_char = if buf_len > 1 {
-      buf_bytes[buf_len - 2]
-    } else if buf_len == 1 && tail_known {
-      self.flushed_tail[1]
-    } else if tail_known {
-      self.flushed_tail[0]
-    } else {
-      0
-    };
 
     // A closing code fence's block-spacing newlines are appended AFTER the
     // backtick or tilde delimiter, so
@@ -3992,17 +4275,15 @@ impl ConvertState {
     let measure_from_output_tail =
       !is_enter && (output_str.ends_with("```") || output_str.ends_with("~~~"));
 
-    let mut last_new_lines: u8 = 0;
-    if !measure_from_output_tail {
-      if last_char == b'\n' {
-        last_new_lines += 1;
-      }
-      if second_last_char == b'\n' {
-        last_new_lines += 1;
-      }
-    }
+    // Only a contiguous run counts: after a one-character line (`a\n\nb`) the
+    // newline before `b` must not reduce the separator the next block needs.
+    let last_new_lines = if measure_from_output_tail || last_char != b'\n' {
+      0
+    } else {
+      self.trailing_new_lines()
+    };
 
-    let new_lines = configured_new_lines.saturating_sub(last_new_lines);
+    let mut new_lines = configured_new_lines.saturating_sub(last_new_lines);
 
     if new_lines > 0 {
       // An empty buffer at true document start has no preceding block to
@@ -4025,6 +4306,11 @@ impl ConvertState {
         // let its state leak into a later inline event and trim that output.
         self.last_text_node_contains_whitespace = false;
         self.has_last_text_node = false;
+        // The trimmed spaces hid the newlines before them (a blank image alt
+        // leaves `\n\n `), so count again or the boundary adds a blank line.
+        if !measure_from_output_tail {
+          new_lines = configured_new_lines.saturating_sub(self.trailing_new_lines());
+        }
       }
 
       if is_enter {
@@ -4049,7 +4335,15 @@ impl ConvertState {
           || self
             .stack
             .last()
-            .is_some_and(|parent| parent.tag_id == Some(TAG_PRE)))
+            .is_some_and(|parent| parent.tag_id == Some(TAG_PRE))
+          // A `<br>` inside `<pre>` settles the whitespace state on enter (the
+          // `<br>` itself is on top of the stack then). Left set, a later exit
+          // reaches back and trims the break's own newline.
+          || (is_enter
+            && self
+              .stack
+              .last()
+              .is_some_and(|node| node.tag_id == Some(TAG_BR))))
       {
         let h_is_inline = is_inline;
         let collapses = self
@@ -4097,7 +4391,7 @@ impl ConvertState {
         && !literal
         && !output_is_line_boundary
         && !output_str.is_empty()
-        && last_char != 0
+        && (buf_len > 0 || tail_known)
         && self.needs_spacing(last_char, output_str.as_bytes()[0])
       {
         self.last_content_cache_len = self.push_code_span_content(" ", true);
@@ -4106,6 +4400,15 @@ impl ConvertState {
       if !output_str.is_empty() {
         self.last_content_cache_len = self.push_code_span_content(output_str, true);
       }
+    }
+
+    // A `<br>` hard break is the one enter write that ends its line while
+    // leaving the paragraph open, so a following block boundary inside a list
+    // item still owes the paragraph separator. Its fragment always starts with
+    // the two-space break marker (`  \n`, plus the continuation indent); a
+    // bare `\n` is a structural boundary, which closes the line for good.
+    if is_enter && !literal && output_str.starts_with("  \n") {
+      self.hard_break_end = self.buffer.len();
     }
     self.last_node_is_inline = is_inline;
   }
@@ -4133,9 +4436,11 @@ impl ConvertState {
   }
 
   #[inline]
-  pub(crate) fn should_add_spacing_before_text(&self, last_byte: u8, text: &str) -> bool {
-    if last_byte == 0
-      || last_byte == b'\n'
+  pub(crate) fn should_add_spacing_before_text(&self, last_byte: Option<u8>, text: &str) -> bool {
+    let Some(last_byte) = last_byte else {
+      return false;
+    };
+    if last_byte == b'\n'
       || last_byte == b' '
       || last_byte == b'\t'
       || last_byte == b'['
@@ -4168,8 +4473,9 @@ impl ConvertState {
     &self,
     tag_id: Option<u8>,
     node_spacing: Option<[u8; 2]>,
+    is_enter: bool,
   ) -> [u8; 2] {
-    if self.plain_text
+    if plain_text!(self)
       && tag_id == Some(TAG_PRE)
       && (self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0)
     {
@@ -4177,22 +4483,46 @@ impl ConvertState {
     }
     if let Some(id) = tag_id {
       if (id != TAG_LI && self.depth_map[TAG_LI as usize] > 0)
-        || (self.plain_text && id != TAG_BLOCKQUOTE && self.depth_map[TAG_BLOCKQUOTE as usize] > 0)
+        || (plain_text!(self)
+          && id != TAG_BLOCKQUOTE
+          && self.depth_map[TAG_BLOCKQUOTE as usize] > 0)
       {
         return NO_SPACING;
       }
     } else if self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0 {
       return NO_SPACING;
     }
-    // A heading normally keeps its block spacing inside a collapsing parent, but
-    // in a table cell that newline would end the row.
-    let current_node_owns_collapse = tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id))
+    // A heading's own collapse keeps its block spacing, but in a table cell that
+    // newline would end the row. The count holds the heading only while it is
+    // open: at its exit the heading is already popped, so a count of 1 there is
+    // a collapsing ancestor. Only an ancestor writing visible inline Markdown
+    // (`<a>`, `<b>`, `<code>`) suppresses the blank line, since its text
+    // continues inline; a marker-less wrapper (label, small, abbr, time, bdo,
+    // ruby, rt, rp) lets the heading close its block.
+    let is_heading = matches!(tag_id, Some(id) if (TAG_H1..=TAG_H6).contains(&id));
+    let heading_owns_collapse =
+      is_enter && is_heading && self.collapse_non_span_depth == 1 && !self.in_table_cell();
+    let heading_exit_in_markerless_collapse = !is_enter
+      && is_heading
       && self.collapse_non_span_depth == 1
-      && !self.in_table_cell();
-    if self.collapse_non_span_depth > 0 && !current_node_owns_collapse {
+      && !self.in_table_cell()
+      && !self.collapse_wrapper_emits_inline_markdown();
+    // On enter the node is already counted as a collapsing ancestor of itself.
+    // Only real ancestors collapse its spacing, or a tag override that makes an
+    // inline tag a block loses its spacing. Headings keep the rules above.
+    let counted_self =
+      is_enter && self.stack.last().is_some_and(|node| node.collapses_inner_white_space);
+    let is_span = tag_id == Some(TAG_SPAN);
+    let non_span_depth = self
+      .collapse_non_span_depth
+      .saturating_sub(u8::from(counted_self && !is_span && !is_heading));
+    let span_depth = self
+      .collapse_span_depth
+      .saturating_sub(u8::from(counted_self && is_span));
+    if non_span_depth > 0 && !heading_owns_collapse && !heading_exit_in_markerless_collapse {
       return NO_SPACING;
     }
-    if self.collapse_span_depth > 0 {
+    if span_depth > 0 {
       let is_block = tag_id.is_some_and(|id| {
         (TAG_H1..=TAG_H6).contains(&id) || matches!(id, TAG_P | TAG_DIV | TAG_LI)
       });
@@ -4203,9 +4533,78 @@ impl ConvertState {
     node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)
   }
 
+  /// Whether the tag writes visible inline Markdown around its content:
+  /// emphasis, code ticks, raw-tag wrappers, or an anchor that emits markup.
+  /// An override carrying non-empty enter or exit output counts too, since its
+  /// markers sit inline around the wrapped content (the same ownership rule
+  /// `raw_html_anchor` applies at exit). A heading nested in one must not end
+  /// its line, or the wrapper's remaining text splits off.
+  #[inline]
+  fn wrapper_emits_inline_markdown(&self, node: &ElementNode) -> bool {
+    if self.has_tag_overrides {
+      let ovs = self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|p| p.tag_overrides.as_ref());
+      if let Some(ov) = Self::override_for_node(ovs, self.override_idx.as_deref(), node)
+        && (ov.enter.as_ref().is_some_and(|s| !s.is_empty())
+          || ov.exit.as_ref().is_some_and(|s| !s.is_empty()))
+      {
+        return true;
+      }
+    }
+    match node.tag_id {
+      // The enter handler writes `[` only for an href anchor, and its raw tag
+      // inside a raw-HTML block; any other anchor emits nothing at either
+      // edge, so it counts as a marker-less wrapper.
+      Some(TAG_A) => self.in_raw_html_block() || node.attributes.contains_bit(ATTR_HREF),
+      Some(id) => matches!(
+        id,
+        TAG_STRONG
+          | TAG_B
+          | TAG_EM
+          | TAG_I
+          | TAG_DEL
+          | TAG_S
+          | TAG_STRIKE
+          | TAG_INS
+          | TAG_SUB
+          | TAG_SUP
+          | TAG_CODE
+          | TAG_KBD
+          | TAG_SAMP
+          | TAG_VAR
+          | TAG_MARK
+          | TAG_U
+          | TAG_CITE
+          | TAG_DFN
+          | TAG_Q
+      ),
+      None => false,
+    }
+  }
+
+  /// The depth-1 collapsing ancestor at a heading's exit is the only open
+  /// non-span contributor, so the innermost match is it. Returns `false` when
+  /// none is found, keeping the previous suppression.
+  #[inline]
+  fn collapse_wrapper_emits_inline_markdown(&self) -> bool {
+    self
+      .stack
+      .iter()
+      .rev()
+      .find(|node| {
+        node.collapses_inner_white_space
+          && !node.excluded_from_markdown
+          && node.tag_id != Some(TAG_SPAN)
+      })
+      .is_some_and(|node| self.wrapper_emits_inline_markdown(node))
+  }
+
   #[inline]
   fn figcaption_owns_block_spacing(&self) -> bool {
-    !self.in_table_cell() && (self.plain_text || self.collapse_non_span_depth == 1)
+    !self.in_table_cell() && (plain_text!(self) || self.collapse_non_span_depth == 1)
   }
 
   #[inline]
@@ -4221,6 +4620,39 @@ impl ConvertState {
       }
     }
     ""
+  }
+
+  /// The `| ` that opens a top-level row, preceded by whatever line break puts
+  /// it on its own line at the list item's content column. `is_inline` is the
+  /// node whose enter writes it: the `<tr>`, or a header row's first cell.
+  fn table_row_opener(&self, is_inline: bool) -> Cow<'static, str> {
+    // Inside a code span past its cap nothing more is written, so classifying
+    // the line only re-read it: one that never ends, once per row.
+    if !is_inline && self.drops_code_span_content() {
+      return Cow::Borrowed("| ");
+    }
+    let indent = if self.depth_map[TAG_LI as usize] > 0 {
+      self.list_indent.as_str()
+    } else {
+      ""
+    };
+    // A row must open its own line at the item's content column: sharing one
+    // with preceding content (a `<caption>`) leaves the header as prose and
+    // the delimiter row never forms a table.
+    match self.line_state_before_row() {
+      LineBeforeRow::Row if indent.is_empty() => Cow::Borrowed("\n| "),
+      LineBeforeRow::Content if indent.is_empty() => Cow::Borrowed("\n\n| "),
+      LineBeforeRow::Row => Cow::Owned(format!("\n{indent}| ")),
+      LineBeforeRow::Content => Cow::Owned(format!("\n\n{indent}| ")),
+      // A pending list marker already supplies the column; only a fresh line
+      // needs the indent written.
+      LineBeforeRow::Open
+        if !indent.is_empty() && self.buffer.as_bytes().last() == Some(&b'\n') =>
+      {
+        Cow::Owned(format!("{indent}| "))
+      }
+      LineBeforeRow::Open => Cow::Borrowed("| "),
+    }
   }
 
   fn line_state_before_row(&self) -> LineBeforeRow {
@@ -4239,6 +4671,10 @@ impl ConvertState {
       index -= 1;
     }
     let line = &bytes[index..];
+    #[cfg(test)]
+    self
+      .row_line_scanned
+      .set(self.row_line_scanned.get() + line.len());
     let start = line
       .iter()
       .position(|byte| !matches!(byte, b' ' | b'\t'))
@@ -4293,13 +4729,14 @@ impl ConvertState {
     }
   }
 
-  /// Marker number for an `<ol>`'s nth item. GFM numbers a list from its first
-  /// item's marker, so only that one has to carry `start`.
-  pub(crate) fn ordered_item_number(list: &ElementNode, index: usize) -> u32 {
-    list
-      .attributes
-      .get_bit(ATTR_START)
-      .and_then(|value| parse_bounded_u32(value, MAX_ORDERED_START))
+  /// Marker number for the innermost `<ol>`'s nth item. GFM numbers a list from
+  /// its first item's marker, so only that one has to carry `start`.
+  pub(crate) fn ordered_item_number(&self, index: usize) -> u32 {
+    self
+      .ordered_starts
+      .last()
+      .copied()
+      .flatten()
       .unwrap_or(1)
       .saturating_add(u32::try_from(index).unwrap_or(u32::MAX))
       .min(MAX_ORDERED_START)
@@ -4308,7 +4745,7 @@ impl ConvertState {
 
 #[cfg(test)]
 mod tests {
-  use super::{ConvertState, CutLineLead, TAG_A};
+  use super::{ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_LI, TAG_P};
   use crate::types::{HTMLToMarkdownOptions, OutputFormat};
 
   #[test]
@@ -4357,6 +4794,64 @@ mod tests {
     assert_eq!(state.last_output_byte(), Some(b'z'));
   }
 
+  /// An open list item whose buffer a drain emptied: the item's content line
+  /// was cut away, a trim removed the retained tail, and `y` is the byte the
+  /// output last followed, reachable only through `flushed_tail`.
+  fn drained_open_list_item() -> ConvertState {
+    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.depth_map[TAG_LI as usize] = 1;
+    state.list_indent = "  ".to_string();
+    state.has_streamed_output = true;
+    state.cut_line_lead = CutLineLead::Content;
+    state.flushed_tail = *b"xy";
+    state
+  }
+
+  fn entering_node(tag_id: u8, is_inline: bool) -> super::ElementNode {
+    super::ElementNode {
+      attributes: crate::types::Attributes::default(),
+      extras: None,
+      depth: 1,
+      index: 0,
+      current_walk_index: 0,
+      child_text_node_index: 0,
+      tag_id: Some(tag_id),
+      contains_whitespace: false,
+      excluded_from_markdown: false,
+      enter_skipped: false,
+      is_inline,
+      excludes_text_nodes: false,
+      is_non_nesting: false,
+      collapses_inner_white_space: false,
+      spacing: None,
+    }
+  }
+
+  // One-shot sees the `x` in its buffer and opens the block with the blank
+  // line plus continuation indent; the open-side check must read the flushed
+  // tail the same way, or streaming drops the separator one-shot keeps.
+  #[test]
+  fn drained_buffer_p_open_keeps_the_list_separator() {
+    let mut state = drained_open_list_item();
+    state.stack.push(entering_node(TAG_P, false));
+
+    state.emit_enter_element();
+
+    assert_eq!(state.buffer, "\n\n  ");
+  }
+
+  // A code span after drained content glues with a separator space, the way
+  // it does after visible content in one-shot.
+  #[test]
+  fn drained_buffer_code_open_keeps_the_glue_space() {
+    let mut state = drained_open_list_item();
+    state.stack.push(entering_node(TAG_CODE, true));
+
+    state.emit_enter_element();
+
+    assert_eq!(state.buffer, " `");
+  }
+
   #[test]
   fn safe_prose_skips_the_gfm_escape_slow_path() {
     let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
@@ -4382,6 +4877,113 @@ mod tests {
     assert_eq!(state.get_markdown(), "\\* literal\n\n\\* decoded");
   }
 
+  // Past an exhausted code span's cap a row writes nothing, so the line before
+  // it never ends; classifying that line again for every row was quadratic.
+  #[test]
+  fn rows_in_an_exhausted_code_span_do_not_reread_the_line() {
+    let options = HTMLToMarkdownOptions::default().with_max_node_bytes(1024);
+    let mut state = ConvertState::new(options, 64, OutputFormat::Markdown);
+    let html = format!(
+      "<code>{}<table>{}",
+      "a".repeat(2048),
+      "<tr><td>x</td></tr>".repeat(1000)
+    );
+    assert_eq!(state.process_html(&html), html.len());
+    assert!(state.truncated);
+    assert!(
+      state.row_line_scanned.get() < 16 * 1024,
+      "rows read {} bytes",
+      state.row_line_scanned.get()
+    );
+  }
+
+  // A header row opens at its first cell, so every table classifies the line
+  // there once; past the cap that re-read the same unending line per table.
+  #[test]
+  fn tables_in_an_exhausted_code_span_do_not_reread_the_line() {
+    let options = HTMLToMarkdownOptions::default().with_max_node_bytes(1024);
+    let mut state = ConvertState::new(options, 64, OutputFormat::Markdown);
+    let html = format!(
+      "<code>{}{}",
+      "a".repeat(2048),
+      "<table><tr><td>x</td></tr></table>".repeat(1000)
+    );
+    assert_eq!(state.process_html(&html), html.len());
+    assert!(state.truncated);
+    assert!(
+      state.row_line_scanned.get() < 16 * 1024,
+      "rows read {} bytes",
+      state.row_line_scanned.get()
+    );
+  }
+
+  // Each quote re-quoted whatever was still unflushed when it closed, so a deep
+  // nest closed within one chunk copied every line once per level.
+  #[test]
+  fn closing_a_deep_quote_nest_quotes_each_line_a_bounded_number_of_times() {
+    let open = "<blockquote>".repeat(64);
+    let body = "<p>x</p>".repeat(4096);
+    for close in ["</blockquote>".repeat(64), String::new()] {
+      let mut state =
+        ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+      let html = format!("{open}{body}{close}");
+      assert_eq!(state.process_html(&html), html.len());
+      state.finalize("");
+      let out = state.get_markdown();
+      assert!(out.starts_with(&"> ".repeat(64)), "{:.140}", out);
+      assert!(
+        state.quoted_bytes <= 2 * out.len(),
+        "closed={}: quoted {} bytes for {} of output",
+        !close.is_empty(),
+        state.quoted_bytes,
+        out.len()
+      );
+    }
+  }
+
+  // Inside list items each frame also strips and writes its indent, which sent
+  // every flush between chunks down the frame-by-frame requote, so each line
+  // cost the square of the depth.
+  #[test]
+  fn flushing_quotes_nested_in_list_items_quotes_each_line_a_bounded_number_of_times() {
+    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    let open = "<blockquote><ul><li>".repeat(32);
+    assert_eq!(state.process_html(&open), open.len());
+    let mut out = String::new();
+    let paragraphs = "<p>para</p>".repeat(400);
+    for _ in 0..100 {
+      assert_eq!(state.process_html(&paragraphs), paragraphs.len());
+      out.push_str(&state.get_markdown_chunk());
+    }
+    state.finalize("");
+    out.push_str(&state.get_final_markdown_chunk());
+    assert!(out.contains(">   >   > - "), "{:.200}", out);
+    assert!(
+      state.quoted_bytes <= 2 * out.len(),
+      "quoted {} bytes for {} of output",
+      state.quoted_bytes,
+      out.len()
+    );
+  }
+
+  // Each held line-break run used to rescan the whitespace after it for content,
+  // so breaks separated only by whitespace cost their square in one chunk.
+  #[test]
+  fn resolving_held_break_runs_reads_the_tail_once() {
+    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.streaming = true;
+    let html = format!("<p>x{}y</p>", "<br>&#9;".repeat(4096));
+    assert_eq!(state.process_html(&html), html.len());
+    let out = state.get_markdown_chunk();
+    assert!(out.starts_with("x  \n\t"), "{:.20}", out);
+    assert!(
+      state.break_run_scanned <= html.len(),
+      "read {} bytes for {} of input",
+      state.break_run_scanned,
+      html.len()
+    );
+  }
+
   #[test]
   fn atomic_image_marks_content_only_when_written() {
     let html = format!(
@@ -4402,6 +5004,43 @@ mod tests {
         .find(|node| node.tag_id == Some(TAG_A))
         .unwrap();
       assert_eq!(anchor.child_text_node_index, expected, "cap={cap}");
+    }
+  }
+
+  // Each nested <code> opened a span of its own, whose close picked a longer
+  // delimiter and rewrote everything inside it, so a nest cost the cube of its
+  // depth. A pipe in a table cell was also escaped again at every level.
+  #[test]
+  fn nested_code_closes_each_byte_a_bounded_number_of_times() {
+    let open = "<code>".repeat(508);
+    let close = "</code>".repeat(508);
+    for html in [
+      format!("<p>{open}x</p>").repeat(8),
+      format!("<p>{open}x{close}</p>").repeat(8),
+      format!(
+        "<table><tr><td>{open}{}{close}</td></tr></table>",
+        "a|".repeat(400)
+      ),
+      // Closed by the end of input.
+      format!("{open}{}", "x`".repeat(4096)),
+    ] {
+      for chunk in [4096, html.len()] {
+        let options = HTMLToMarkdownOptions::default().with_max_node_bytes(1024 * 1024);
+        let mut processor = crate::MarkdownStreamProcessor::new(options);
+        let mut out = String::new();
+        for piece in html.as_bytes().chunks(chunk) {
+          out.push_str(&processor.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        out.push_str(&processor.finish());
+        assert!(!processor.truncated(), "{:.80}", html);
+        assert!(out.starts_with(['`', '|']), "{:.80}", out);
+        assert!(
+          processor.state.code_span_closed_bytes <= html.len(),
+          "chunk={chunk}: closing read {} bytes for {} of input",
+          processor.state.code_span_closed_bytes,
+          html.len()
+        );
+      }
     }
   }
 }

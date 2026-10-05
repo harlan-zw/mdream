@@ -63,13 +63,13 @@ When you finish a task, always run `pnpm typecheck` to ensure that the code is t
 
 This is a pnpm monorepo with multiple packages:
 - `packages/mdream`: Core HTML to Markdown converter (zero dependencies)
-- `packages/llms-txt`: Engine-agnostic llms.txt artifact generation (no mdream dependency)
+- `packages/js`: Pure JS engine (`@mdream/js`) with hook plugins, the splitter, and llms.txt generation (`@mdream/js/llms-txt`)
 - `packages/crawl`: Site-wide crawler for llms.txt generation
 - `packages/vite`: Vite plugin integration
 - `packages/nuxt`: Nuxt module integration
 - `packages/action`: GitHub Actions integration
 
-### Core Architecture (packages/mdream/src/)
+### Core Architecture (packages/js/src/)
 - `index.ts`: Main entry point with `htmlToMarkdown` and `streamHtmlToMarkdown` APIs
 - `parse.ts`: Manual HTML parsing into DOM-like structure for performance
 - `markdown-processor.ts`: DOM node to Markdown transformation logic with state management

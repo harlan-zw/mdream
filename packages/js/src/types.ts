@@ -113,8 +113,25 @@ export interface CleanPass {
   closed: (element: ElementNode, outputStart: number, close: string) => void
   /** The earliest buffer index a later hook may rewrite, or Infinity. */
   held: () => number
-  /** Apply the rules that need the whole document to the finished Markdown. */
-  finish: (markdown: string) => string
+  /** Apply the rules that need the whole document to the trimmed Markdown so far. */
+  finish: (markdown: string) => CleanView
+}
+
+/** Markdown a `CleanPass` finished, and the part of it no later heading changes. */
+export interface CleanView {
+  markdown: string
+  /**
+   * Map a raw Markdown offset through this view's removal runs.
+   * @internal
+   */
+  mapPosition?: (position: number) => number
+  /**
+   * Position in `markdown` of the earliest marked link no heading matches
+   * yet, or -1 when every marked link is resolved. A still-unresolved link
+   * regrows when a later heading matches its slug, moving every later
+   * position.
+   */
+  settled: number
 }
 
 /**
@@ -170,6 +187,8 @@ export interface ElementNode extends Node {
   depthMap: Uint16Array
   /** Plugin outputs collected during processing */
   pluginOutput?: string[]
+  /** Whether this element's enter event wrote an inline wrapper. */
+  hasEnterOutput?: boolean
 }
 
 export interface TextNode extends Node {
@@ -299,6 +318,8 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   /** Table processing state - specialized for Markdown tables */
   tableRenderedTable?: boolean
   tableCurrentRowCells?: number
+  /** A built-in row waits for its first cell before writing its opener. */
+  tableRowOpenerPending?: boolean
   tableColumnAlignments?: string[]
   /** See MarkdownState for semantics. */
   tableHeaderCells?: number
@@ -329,8 +350,9 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
    * <pre> fenced-code deferral (issue #97). See MarkdownState for semantics.
    */
   preFencePending?: boolean
+  preFencePendingDepth?: number
   preFenceLang?: string
-  preFenceOpen?: boolean
+  preFenceOwnerDepth?: number
   /** Number of default blockquotes currently buffered for line prefixing. */
   bufferedBlockquoteDepth?: number
   /** Content-column prefix deferred after a list item rule. */
@@ -405,6 +427,8 @@ export interface TagHandler {
   literalEnter?: boolean
   /** When true, the `exit` string is a user-supplied tagOverride, exempt from empty-pair cleanup. */
   literalExit?: boolean
+  /** Whether a declarative literal exit string writes output. */
+  literalExitHasOutput?: boolean
   /**
    * Built-in tag id used by declarative string aliases.
    * @internal

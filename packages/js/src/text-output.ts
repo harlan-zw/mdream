@@ -60,17 +60,46 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
   return Boolean(firstChar && !'.,!?:;_*`)]'.includes(firstChar))
 }
 
-function currentColumn(buffer: string[]): number {
-  let column = 0
-  for (let index = buffer.length - 1; index >= 0; index--) {
-    const value = buffer[index]!
-    const newline = value.lastIndexOf('\n')
-    if (newline >= 0)
-      return column + [...value.slice(newline + 1)].length
-    column += [...value].length
+/** `base` is the column the first fragment starts at. */
+function currentColumn(buffer: string[], base: number, scan: [fragments: number, column: number]): number {
+  if (scan[0] >= buffer.length) {
+    scan[0] = 0
+    scan[1] = base
+  }
+  for (; scan[0] < buffer.length - 1; scan[0]++) {
+    const value = buffer[scan[0]]!
+    scan[1] = columnAt(value, value.length, scan[1])
+  }
+  const tail = buffer.at(-1)
+  return tail ? columnAt(tail, tail.length, scan[1]) : base
+}
+
+/**
+ * Column at `end` in `value`, counted in code points like `currentColumn`.
+ * `column` is the column `value` starts at.
+ */
+function columnAt(value: string, end: number, column: number): number {
+  const newline = end > 0 ? value.lastIndexOf('\n', end - 1) : -1
+  let index = 0
+  if (newline >= 0) {
+    index = newline + 1
+    column = 0
+  }
+  for (; index < end; index++) {
+    const code = value.charCodeAt(index)
+    // A surrogate pair is one code point.
+    if (code >= 0xD800 && code <= 0xDBFF && index + 1 < end) {
+      const next = value.charCodeAt(index + 1)
+      if (next >= 0xDC00 && next <= 0xDFFF)
+        index++
+    }
+    column++
   }
   return column
 }
+
+/** Yielded characters a stream keeps before its unstable tail, for `trailingNewlines` and `lastOutputChar`. */
+const YIELDED_CONTEXT = 2
 
 function wrapText(value: string, column: number, width: number): string {
   const leading = value.charCodeAt(0) === 32
@@ -84,7 +113,7 @@ function wrapText(value: string, column: number, width: number): string {
       next = value.length
     if (next > index) {
       const word = value.slice(index, next)
-      const wordLength = [...word].length
+      const wordLength = columnAt(word, word.length, 0)
       const needsSpace = first ? leading : true
       if (needsSpace && column > 0 && column + 1 + wordLength > width) {
         output += '\n'
@@ -319,7 +348,7 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
     buffer.push(newline)
 }
 
-export function createTextOutputProcessor(options: EngineOptions): OutputProcessor {
+export function createTextOutputProcessor(options: EngineOptions, hasPlugins = false): OutputProcessor {
   const state: TextState = {
     options,
     outputFormat: 'text',
@@ -328,7 +357,13 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     plainText: true,
   }
   let preserveLeadingWhitespace = false
+  // Offset in the joined buffer up to which output is yielded, once started.
   let yieldedLength = 0
+  // Leading whitespace drops only until the first yield.
+  let started = false
+  // Column the first buffer fragment starts at, once yielded output is dropped.
+  let bufferColumn = 0
+  const columnScan: [fragments: number, column: number] = [0, 0]
   // A caption only earns its blank-line boundary once it emits visible
   // content, so an empty `<figcaption>` leaves the text unchanged.
   let captionOpen = 0
@@ -339,10 +374,13 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
   let captionClosedSpacing = 0
   // A caption that held only breaks owns the next line start.
   let captionBreakOwnsLine = false
-  // Buffer indexes of quotation openers whose quotation has no content yet.
-  // The exit retracts such an opener, so a stream holds it back. Parity with
-  // the Rust engine's open inline markers.
+  // Buffer indexes of quotation openers whose quotation has no content yet,
+  // and their elements at the same positions. The exit retracts such an
+  // opener, so a stream holds it back. Parity with the Rust engine's open
+  // inline markers. A plugin can skip an enter or an exit, so an exit
+  // matches its own element, and the final output drops the hold.
   const openQuotes: number[] = []
+  const openQuoteNodes: ElementNode[] = []
 
   function pushCaptionBoundary(newlines: number): boolean {
     if (state.buffer.length === 0 || newlines === 0)
@@ -402,14 +440,20 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
       node.value = ` ${node.value}`
 
     const width = state.options.wrapWidth
+    if (hasPlugins) {
+      columnScan[0] = 0
+      columnScan[1] = bufferColumn
+    }
     const value = width && canWrapHere(state.depthMap)
-      ? wrapText(node.value, currentColumn(state.buffer), width)
+      ? wrapText(node.value, currentColumn(state.buffer, bufferColumn, columnScan), width)
       : node.value
     state.buffer.push(value)
     state.lastContentCache = value
     state.lastTextNode = node
-    if (openQuotes.length !== 0 && hasNonWhitespace(value))
+    if (openQuotes.length !== 0 && hasNonWhitespace(value)) {
       openQuotes.length = 0
+      openQuoteNodes.length = 0
+    }
   }
 
   function processEvent(event: NodeEvent): void {
@@ -432,26 +476,38 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     const element = event.node as ElementNode
     let output: string | undefined
     // A quotation with only whitespace since its opener emits nothing, but
-    // keeps the space its opener added.
-    if (element.tagId === TAG_Q && event.type === NodeEventExit && openQuotes.length !== 0 && !element.pluginOutput?.length) {
-      const opener = openQuotes.pop()!
-      const buffer = state.buffer
-      let empty = true
-      for (let index = opener + 1; index < buffer.length; index++) {
-        if (hasNonWhitespace(buffer[index]!)) {
-          empty = false
-          break
+    // keeps the space its opener added. Openers above this one belong to
+    // quotations inside it whose exit never came.
+    if (element.tagId === TAG_Q && event.type === NodeEventExit && openQuotes.length !== 0) {
+      let record = openQuoteNodes.length - 1
+      while (record >= 0 && openQuoteNodes[record] !== element)
+        record--
+      if (record >= 0) {
+        const opener = openQuotes[record]!
+        openQuotes.length = record
+        openQuoteNodes.length = record
+        // Output a plugin writes for the exit keeps the opener.
+        if (!element.pluginOutput?.length) {
+          const buffer = state.buffer
+          let empty = true
+          for (let index = opener + 1; index < buffer.length; index++) {
+            if (hasNonWhitespace(buffer[index]!)) {
+              empty = false
+              break
+            }
+          }
+          if (empty) {
+            const openerOutput = buffer[opener]
+            buffer.length = opener
+            if (openerOutput === ' "')
+              buffer.push(' ')
+            state.lastNode = element
+            return
+          }
+          openQuotes.length = 0
+          openQuoteNodes.length = 0
         }
       }
-      if (empty) {
-        const openerOutput = buffer[opener]
-        buffer.length = opener
-        if (openerOutput === ' "')
-          buffer.push(' ')
-        state.lastNode = element
-        return
-      }
-      openQuotes.length = 0
     }
     if (element.pluginOutput?.length) {
       output = element.pluginOutput.join('')
@@ -500,12 +556,15 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     appendOutput(state, element, event.type, output)
     if (element.tagId === TAG_Q && event.type === NodeEventEnter && (output === '"' || output === ' "') && state.buffer.at(-1) === output) {
       openQuotes.push(state.buffer.length - 1)
+      openQuoteNodes.push(element)
     }
     else if (openQuotes.length !== 0) {
       // Content, or a block boundary, makes every open quotation permanent.
       const isInline = element.tagHandler ? element.tagHandler.isInline === true : element.tagId === -1
-      if ((output && hasNonWhitespace(output)) || (element.tagId !== -1 && !isInline))
+      if ((output && hasNonWhitespace(output)) || (element.tagId !== -1 && !isInline)) {
         openQuotes.length = 0
+        openQuoteNodes.length = 0
+      }
     }
 
     if (ownsCaptionSpace && event.type === NodeEventExit) {
@@ -520,26 +579,79 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     state.lastNode = element
   }
 
+  /**
+   * Drops yielded fragments, so a stream holds only its unstable tail. Later
+   * events trim only the last fragment and retract only from an open
+   * quotation opener, which sits at or after `stableEnd`, so every fragment
+   * from the one that holds `stableEnd` stays intact. Backward scans read at
+   * most `YIELDED_CONTEXT` characters before it, and `bufferColumn` stands in
+   * for the dropped part of the line.
+   */
+  function dropYielded(content: string, stableEnd: number): void {
+    const buffer = state.buffer
+    // Walk back over the unstable tail, which is only a few fragments. The
+    // walk stops at the fragment that holds `stableEnd` and keeps it whole.
+    let keepFrom = buffer.length
+    let keptStart = content.length
+    while (keepFrom > 0 && keptStart > stableEnd) {
+      keepFrom--
+      keptStart -= buffer[keepFrom]!.length
+    }
+    let contextStart = keptStart > YIELDED_CONTEXT ? keptStart - YIELDED_CONTEXT : 0
+    // Never split a surrogate pair, so the column count stays the same.
+    const first = content.charCodeAt(contextStart)
+    if (contextStart > 0 && first >= 0xDC00 && first <= 0xDFFF)
+      contextStart--
+    if (contextStart === 0)
+      return
+    if (state.options.wrapWidth)
+      bufferColumn = columnAt(content, contextStart, bufferColumn)
+    const kept = buffer.slice(keepFrom)
+    buffer.length = 0
+    buffer.push(content.slice(contextStart, keptStart))
+    for (let index = 0; index < kept.length; index++)
+      buffer.push(kept[index]!)
+    columnScan[0] = 0
+    columnScan[1] = bufferColumn
+    // The context fragment replaces fragments `0..keepFrom`.
+    const shift = keepFrom - 1
+    for (let index = 0; index < openQuotes.length; index++)
+      openQuotes[index]! -= shift
+    yieldedLength = stableEnd - contextStart
+  }
+
   return {
     state,
     processEvent,
-    takeOutput() {
+    takeOutput(final) {
       const content = state.buffer.join('')
-      const normalized = preserveLeadingWhitespace ? content : trimOutputStart(content)
+      const leading = started || preserveLeadingWhitespace ? 0 : content.length - trimOutputStart(content).length
       // Hold back the tail a later event may still trim: trailing whitespace,
-      // and a quotation opener that an empty quotation retracts.
-      let stableLength = trimAsciiWhitespaceEnd(normalized).length
-      if (openQuotes.length !== 0) {
-        let opener = normalized.length - content.length
+      // and a quotation opener that an empty quotation retracts. With an open
+      // quotation the hold starts at the opener, and the whitespace before a
+      // retractable opener stays mutable too. No event follows the final
+      // call, so an opener whose exit a plugin skipped is output.
+      let stableEnd = content.length
+      if (openQuotes.length !== 0 && !final) {
+        stableEnd = 0
         for (let index = 0; index < openQuotes[0]!; index++)
-          opener += state.buffer[index]!.length
-        if (opener < stableLength)
-          stableLength = Math.max(0, opener)
+          stableEnd += state.buffer[index]!.length
       }
-      if (stableLength < yieldedLength)
-        stableLength = yieldedLength
-      const output = normalized.slice(yieldedLength, stableLength)
-      yieldedLength = stableLength
+      while (stableEnd > leading) {
+        const code = content.charCodeAt(stableEnd - 1)
+        if (code !== 32 && (code < 9 || code > 13))
+          break
+        stableEnd--
+      }
+      const yieldedEnd = started ? yieldedLength : leading
+      if (stableEnd < yieldedEnd)
+        stableEnd = yieldedEnd
+      const output = content.slice(yieldedEnd, stableEnd)
+      if (output) {
+        started = true
+        yieldedLength = stableEnd
+        dropYielded(content, stableEnd)
+      }
       return output
     },
   }

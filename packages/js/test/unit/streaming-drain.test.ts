@@ -1,8 +1,9 @@
 import type { ParseState } from '../../src/parse'
-import type { TransformPlugin } from '../../src/types'
+import type { MdreamOptions, TransformPlugin } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createMarkdownProcessor } from '../../src/markdown-processor'
+import { createMarkdownDrain } from '../../src/markdown-stream'
 import { finalizeParse, parseHtmlStream } from '../../src/parse'
 import { processPluginsForEvent } from '../../src/plugin-processor'
 import { filterPlugin } from '../../src/plugins'
@@ -18,9 +19,9 @@ function chunkedStream(html: string, chunkSize: number): ReadableStream<string> 
   })
 }
 
-async function streamConvert(html: string, chunkSize: number): Promise<string> {
+async function streamConvert(html: string, chunkSize: number, options?: MdreamOptions): Promise<string> {
   let markdown = ''
-  for await (const chunk of streamHtmlToMarkdown(chunkedStream(html, chunkSize)))
+  for await (const chunk of streamHtmlToMarkdown(chunkedStream(html, chunkSize), options))
     markdown += chunk
   return markdown
 }
@@ -40,6 +41,57 @@ const BLOCK_NEWLINE_HTML = [
 ].join('')
 
 describe('streaming drain parity', () => {
+  it.each(['<li><li><br><ol><li>', '_<li><br><ol><li>', '<dl><li><blockquote><ol><li>'])('preserves malformed list spacing after drained markers: %s', async (html) => {
+    const expected = htmlToMarkdown(html)
+    for (const chunkSize of [1, 3, 7])
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
+  it.each(['*<details>_', '<br><details>[', '<details><ol><br>['])('keeps raw HTML line openers across compaction: %s', async (html) => {
+    const expected = htmlToMarkdown(html)
+    for (const chunkSize of [1, 3, 7])
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
+  it('keeps raw HTML Markdown context across drained empty list boundaries', async () => {
+    const html = '<dd><ol><i><ol>_'
+    const expected = '<dd>\n\n*\\_*\n\n</dd>'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const chunkSize of [1, 3, 7])
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
+  it('keeps interleaved drain cursors independent of one-shot conversions', async () => {
+    const inputs = [
+      '<p>left</p><figure><figcaption>caption <em>one</em></figcaption></figure><p>end</p>',
+      '<h2>right #</h2><p><a href="/right">link <strong>two</strong></a></p>',
+    ]
+    const expected = inputs.map(html => htmlToMarkdown(html))
+    const outputs = ['', '']
+    const iterators = inputs.map(html => streamHtmlToMarkdown(chunkedStream(html, 7))[Symbol.asyncIterator]())
+    while (true) {
+      const chunks = await Promise.all(iterators.map(iterator => iterator.next()))
+      for (let index = 0; index < chunks.length; index++) {
+        if (!chunks[index]!.done)
+          outputs[index] += chunks[index]!.value
+      }
+      if (chunks.every(chunk => chunk.done))
+        break
+      expect(htmlToMarkdown('<p>between <code>a`b</code></p>')).toBe('between ``a`b``')
+    }
+    expect(outputs).toEqual(expected)
+  })
+  it.each([
+    ['&nbsp;<b></b>#', '#'],
+    ['<br>x<p>y</p>', 'x\n\ny'],
+    ['<br>x<blockquote>y</blockquote>', 'x\n\n> y'],
+    ['&nbsp;<p>x</p>y', 'x\n\ny'],
+    ['a<li><q></q></li>b', 'a\n\n- b'],
+  ])('preserves semantic context at every chunk width: %s', async (html, expected) => {
+    for (const options of [{}, { plugins: [filterPlugin({ exclude: ['nav'] })] }]) {
+      expect(htmlToMarkdown(html, options)).toBe(expected)
+      for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+        expect(await streamConvert(html, chunkSize, options), `chunkSize=${chunkSize}`).toBe(expected)
+    }
+  })
+
   it.each([
     '<div>Alpha</div>',
     '<div>Alpha</div><div>Beta</div>',
@@ -59,6 +111,9 @@ describe('streaming drain parity', () => {
     '<p>text with <a href="/x">a [bracket] link</a> end</p>',
     '<ol><li>one<pre><code>cmd</code></pre></li><li>two</li></ol>',
     '<ul><li>one<pre><code>cmd</code></pre></li><li>two</li></ul>',
+    '<ul><li><pre><li><blockquote>x<code>',
+    '<li><blockquote><l></li><blockquote><v><blockquote>',
+    '<br><blockquote>',
     '<summary>text <svg></svg></summary>',
     '<details><summary>text <svg><polyline points="1 2"></polyline></svg></summary><p>b</p></details>',
     '<h3>Set priority</h3><a class="anchor-link" href="#x"></a><p>The value.</p>',
@@ -86,8 +141,21 @@ describe('streaming drain parity', () => {
       expect(await streamConvert(BLOCK_NEWLINE_HTML, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
   })
 
+  it('streams a malformed quote list without throwing when compaction drops hold fragments', async () => {
+    const html = '<li><blockquote><l></li><blockquote><v><blockquote>'
+    const expected = htmlToMarkdown(html)
+    expect(await streamConvert(html, 1)).toBe(expected)
+  })
+
+  it('drops an empty quote whose prefix context was already streamed', async () => {
+    const html = '<br><blockquote>'
+    const expected = htmlToMarkdown(html)
+    expect(expected).toBe('')
+    expect(await streamConvert(html, 1)).toBe(expected)
+  })
+
   it('bounds retained output while streaming a raw HTML anchor body', () => {
-    const processor = createMarkdownProcessor()
+    const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, false))
     const parseState: ParseState = {
       depthMap: processor.state.depthMap,
       depth: 0,
@@ -141,7 +209,7 @@ describe('streaming drain parity', () => {
     ['wrapWidth', { wrapWidth: 40 }, []],
   ])('bounds retained output with %s', (_, options, plugins) => {
     const html = '<p>A paragraph of words that runs well past forty columns before it ends.</p>'.repeat(2048)
-    const processor = createMarkdownProcessor(options, plugins)
+    const processor = createMarkdownProcessor(options, context => createMarkdownDrain(context, plugins.length > 0))
     const parseState: ParseState = {
       depthMap: processor.state.depthMap,
       depth: 0,

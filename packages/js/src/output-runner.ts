@@ -6,7 +6,8 @@ import { endPlugins, processPluginsForEvent } from './plugin-processor'
 export interface OutputProcessor {
   state: MdreamRuntimeState & { depthMap: Uint16Array }
   processEvent: (event: NodeEvent) => void
-  takeOutput: () => string
+  /** Output that no later event can change. `final` drops every hold. */
+  takeOutput: (final: boolean) => string
 }
 
 interface OutputOptions {
@@ -40,7 +41,7 @@ export function processHtmlOutput(html: string, processor: OutputProcessor, opti
   const leftover = parseHtmlStream(html, parseState, handleEvent)
   finalizeParse(leftover, parseState, handleEvent)
   endPlugins(plugins, processor.state)
-  return processor.takeOutput()
+  return processor.takeOutput(true)
 }
 
 export async function* streamHtmlOutput(
@@ -54,7 +55,8 @@ export async function* streamHtmlOutput(
   const plugins = options.plugins ?? []
   const parseState = createParseState(processor, options)
   const handleEvent = createEventHandler(processor, plugins)
-  const decoder = new TextDecoder()
+  const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
+  let hasDecodedContent = false
   const reader = htmlStream.getReader()
   let remainingHtml = ''
 
@@ -64,12 +66,20 @@ export async function* streamHtmlOutput(
       if (done)
         break
 
-      const decoded = typeof value === 'string'
+      if (value === '')
+        continue
+
+      let decoded = typeof value === 'string'
         ? decoder.decode() + value
         : decoder.decode(value, { stream: true })
+      if (decoded && !hasDecodedContent) {
+        hasDecodedContent = true
+        if (typeof value !== 'string' && decoded.charCodeAt(0) === 0xFEFF)
+          decoded = decoded.slice(1)
+      }
       remainingHtml = parseHtmlStream(`${remainingHtml}${decoded}`, parseState, handleEvent)
 
-      const chunk = processor.takeOutput()
+      const chunk = processor.takeOutput(false)
       if (chunk)
         yield chunk
     }
@@ -79,7 +89,7 @@ export async function* streamHtmlOutput(
     finalizeParse(leftover, parseState, handleEvent)
     endPlugins(plugins, processor.state)
 
-    const finalChunk = processor.takeOutput()
+    const finalChunk = processor.takeOutput(true)
     if (finalChunk)
       yield finalChunk
   }

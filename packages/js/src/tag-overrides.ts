@@ -32,6 +32,7 @@ export function buildTagOverrideHandlers(
       const output = override.exit
       handler.exit = () => output
       handler.literalExit = true
+      handler.literalExitHasOutput = output.length > 0
     }
     if (override.spacing !== undefined)
       handler.spacing = override.spacing

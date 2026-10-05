@@ -8,7 +8,7 @@ exclude = [ "core/fuzz" ]
 resolver = "2"
 
 [workspace.package]
-version = "2.0.0-beta.0"
+version = "2.0.0-beta.1"
 edition = "2024"
 license = "MIT"
 rust-version = "1.95"
@@ -16,6 +16,7 @@ repository = "https://github.com/harlan-zw/mdream"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = [ 'cfg(fuzzing)' ] }
 
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }

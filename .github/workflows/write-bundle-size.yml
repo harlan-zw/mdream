@@ -14,6 +14,7 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   update-stats:
@@ -32,7 +33,7 @@ jobs:
           cache: pnpm
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
@@ -42,7 +43,7 @@ jobs:
           workspaces: crates -> target
 
       - name: Install wasm-pack and wasm-opt
-        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2.87.8
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: wasm-pack,wasm-opt
 
@@ -57,14 +58,19 @@ jobs:
       - name: Update stats
         run: node bench/bundle/update.ts
 
-      - name: Commit changes
+      - name: Configure git
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add bench/bundle/last.json
-          if git diff --staged --quiet; then
-            echo "No bundle stat changes to commit."
-          else
-            git commit -m "chore: update bundle stats [skip ci]"
-            git push
-          fi
+
+      # Repository rules require changes to main to go through a pull request.
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          add-paths: bench/bundle/last.json
+          base: ${{ github.ref_name }}
+          commit-message: 'chore: update bundle stats [skip ci]'
+          title: 'chore: update bundle stats'
+          body: Automated bundle size stats update produced by the Update Bundle Stats workflow.
+          branch: chore/update-bundle-stats
+          delete-branch: true

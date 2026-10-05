@@ -15,6 +15,13 @@ interface TailwindNodeData {
 // -1 means no class in the group was seen.
 const UNSET = -1
 
+/** Unicode White_Space, matching Rust's split_whitespace. */
+function isClassSeparator(code: number): boolean {
+  return code === 32 || (code >= 9 && code <= 13) || code === 0x85
+    || code === 0xA0 || code === 0x1680 || (code >= 0x2000 && code <= 0x200A)
+    || code === 0x2028 || code === 0x2029 || code === 0x202F || code === 0x205F || code === 0x3000
+}
+
 function breakpointOf(cls: string): number {
   const c = cls.charCodeAt(0)
   if (c === 115 /* s */ && cls.startsWith('sm:'))
@@ -55,12 +62,12 @@ function processTailwindClasses(classAttr: string): TailwindNodeData {
   const length = classAttr.length
   let index = 0
   while (index < length) {
-    while (index < length && classAttr.charCodeAt(index) <= 32)
+    while (index < length && isClassSeparator(classAttr.charCodeAt(index)))
       index++
     if (index >= length)
       break
     const start = index
-    while (index < length && classAttr.charCodeAt(index) > 32)
+    while (index < length && !isClassSeparator(classAttr.charCodeAt(index)))
       index++
     const cls = classAttr.slice(start, index)
     const breakpoint = breakpointOf(cls)

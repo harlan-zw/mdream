@@ -296,8 +296,17 @@ pub fn html_to_markdown_result(html: &str, options: JsValue) -> JsValue {
 
   let obj = js_sys::Object::new();
   js_sys::Reflect::set(&obj, &"markdown".into(), &result.markdown.into()).unwrap_or_default();
+  set_plugin_data(&obj, result.extracted, result.frontmatter);
+  obj.into()
+}
 
-  if let Some(extracted) = result.extracted {
+/// Sets `extracted` and `frontmatter` on `obj` when the plugins produced them.
+fn set_plugin_data(
+  obj: &js_sys::Object,
+  extracted: Option<Vec<mdream::types::ExtractedElement>>,
+  frontmatter: Option<Vec<(String, String)>>,
+) {
+  if let Some(extracted) = extracted {
     let arr = js_sys::Array::new();
     for e in extracted {
       let elem = js_sys::Object::new();
@@ -312,18 +321,16 @@ pub fn html_to_markdown_result(html: &str, options: JsValue) -> JsValue {
       js_sys::Reflect::set(&elem, &"attributes".into(), &attrs).unwrap_or_default();
       arr.push(&elem);
     }
-    js_sys::Reflect::set(&obj, &"extracted".into(), &arr).unwrap_or_default();
+    js_sys::Reflect::set(obj, &"extracted".into(), &arr).unwrap_or_default();
   }
 
-  if let Some(frontmatter) = result.frontmatter {
+  if let Some(frontmatter) = frontmatter {
     let fm = js_sys::Object::new();
     for (k, v) in frontmatter {
       js_sys::Reflect::set(&fm, &k.into(), &v.into()).unwrap_or_default();
     }
-    js_sys::Reflect::set(&obj, &"frontmatter".into(), &fm).unwrap_or_default();
+    js_sys::Reflect::set(obj, &"frontmatter".into(), &fm).unwrap_or_default();
   }
-
-  obj.into()
 }
 
 #[wasm_bindgen]
@@ -369,6 +376,16 @@ impl MarkdownStream {
     let mut out = self.flush_tail();
     out.push_str(&self.inner.finish());
     out
+  }
+
+  /// Frontmatter and extracted elements collected so far, as
+  /// `{ frontmatter?, extracted? }`. Call after `finish()` for the complete
+  /// data. Extracted elements drain on each call.
+  #[wasm_bindgen(js_name = "takeData")]
+  pub fn take_data(&mut self) -> JsValue {
+    let obj = js_sys::Object::new();
+    set_plugin_data(&obj, self.inner.take_extracted(), self.inner.frontmatter());
+    obj.into()
   }
 
   /// Byte chunk in, string out, skipping the transcode per chunk. A sequence

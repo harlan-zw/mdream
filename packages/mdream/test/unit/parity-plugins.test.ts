@@ -87,6 +87,15 @@ const CASES: { group: string, config: keyof typeof CONFIGS, formats?: Format[], 
   ] },
   // The fragment link markers must not count toward the wrap column.
   { group: 'clean-fragments', config: 'cleanWrap', html: ['<p>Chernasky; <a href="#x">Motis; Burgin</a>, pp. 489</p>'] },
+  // A backtick in link text and a quote prefix inside link text both change
+  // the Markdown around a marked link after the link closed.
+  { group: 'clean-fragment-markers', config: 'clean', html: [
+    '<a href="#x">a`b</a> c `d`',
+    '<p><a href="#x">a`b</a> and `c`</p>',
+    '<h2>X</h2><a href="#x">a`b</a> `c`',
+    '<blockquote><a href="#x">a<br>b</a></blockquote>',
+    '<blockquote><h2>X</h2><a href="#x">a<br>b</a></blockquote>',
+  ] },
   { group: 'clean-fragments', config: 'clean', html: [
     '<h2>Intro</h2><p><a href="#intro">up</a> <a href="#nope">gone</a></p>',
     '<p><a href="#later">fwd</a></p><h2>Later</h2>',

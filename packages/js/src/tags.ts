@@ -150,8 +150,11 @@ function serializeMarkdownTitle(title: string): string {
 }
 
 function serializeMarkdownResource(destination: string, title?: string): string {
-  const serializedTitle = title ? ` "${serializeMarkdownTitle(title)}"` : ''
-  return `(${serializeMarkdownDestination(destination)}${serializedTitle})`
+  if (!title)
+    return `(${serializeMarkdownDestination(destination)})`
+  // A bare title would parse as the destination, so an empty one is `<>`.
+  const serializedDestination = destination ? serializeMarkdownDestination(destination) : '<>'
+  return `(${serializedDestination} "${serializeMarkdownTitle(title)}")`
 }
 
 function serializeImageDescription(alt: string): string {
@@ -311,6 +314,10 @@ const MAX_CELL_SPAN = 64
 // GFM has no `colspan`: a spanned cell is written as its content followed by empty
 // cells, or the delimiter row is too narrow and GFM drops every cell past it.
 function cellEnter(node: HandlerContext['node'], state: HandlerContext['state']): string {
+  if (state.tableRowOpenerPending) {
+    state.tableRowOpenerPending = false
+    return rowMarker(state)
+  }
   if (node.index === 0)
     return ''
   // GFM discards cells past the delimiter row's width, so this one folds into
@@ -421,7 +428,9 @@ export const tagHandlers: Record<number, TagHandler> = {
     exit: ({ state }) => isInsideTableCell(state) ? '</summary>' : '</summary>\n\n',
   },
   [TAG_TITLE]: {
-    // No special handling for title - plugins will handle frontmatter
+    // Document metadata that browsers never render. Its text still reaches
+    // plugins, so the frontmatter plugin can read it.
+    excludesTextNodes: true,
     collapsesInnerWhiteSpace: true,
     isNonNesting: true,
     spacing: NO_SPACING,
@@ -545,7 +554,7 @@ export const tagHandlers: Record<number, TagHandler> = {
         }
         // A fence is already open for this <pre>: the <pre> opened it (mixed text
         // + <code> children) or an earlier <code> sibling did.
-        if (state.preFenceOpen) {
+        if (state.preFenceOwnerDepth) {
           return undefined
         }
         const language = getLanguageFromClass(node.attributes?.class)
@@ -756,16 +765,24 @@ export const tagHandlers: Record<number, TagHandler> = {
     excludesTextNodes: true,
   },
   [TAG_TR]: {
-    enter: ({ state }) => {
+    enter: ({ node, state }) => {
       if (isInsideTableCell(state)) {
         return '<tr>'
       }
       state.tableCurrentRowCells = 0
+      state.tableRowOpenerPending = !state.tableRenderedTable
+        && !node.tagHandler?.literalEnter && !node.tagHandler?.literalExit
+      if (state.tableRowOpenerPending)
+        return undefined
       return rowMarker(state)
     },
     exit: ({ state }) => {
       if (isInsideTableCell(state) || (state.depthMap?.[TAG_TABLE] || 0) > 1) {
         return '</tr>'
+      }
+      if (state.tableRowOpenerPending) {
+        state.tableRowOpenerPending = false
+        return undefined
       }
 
       // Handle header row separator

@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
-import { MarkdownStream as BrowserMarkdownStream, createMarkdownStream } from '../../src/browser.js'
-import { MarkdownStream as EdgeMarkdownStream } from '../../src/edge.js'
+import { MarkdownStream as BrowserMarkdownStream, streamHtmlToMarkdown as browserStream, createMarkdownStream } from '../../src/browser.js'
+import { MarkdownStream as EdgeMarkdownStream, streamHtmlToMarkdown as edgeStream } from '../../src/edge.js'
 
 const { control, BindingMarkdownStream } = vi.hoisted(() => {
   const control = { failProcessChunkBytes: false }
 
   class BindingMarkdownStream {
+    // wasm-bindgen encodes a string argument to UTF-8, so a lone surrogate
+    // arrives as U+FFFD.
     processChunk(chunk: string): string {
-      return `chunk:${chunk}`
+      return `chunk:${new TextDecoder().decode(new TextEncoder().encode(chunk))}`
     }
 
     processChunkBytes(chunk: Uint8Array): string {
@@ -31,17 +33,21 @@ vi.mock('../../wasm/mdream_edge.js', () => ({
   default: () => Promise.resolve(),
   initSync: () => {},
   htmlToMarkdownResult: () => ({ markdown: '' }),
-  __mdreamTakePanicMessage: () => 'synthetic panic',
+  __mdreamTakePanicMessage: () => 'browser panic',
   MarkdownStream: BindingMarkdownStream,
 }))
-vi.mock('../../wasm/mdream_edge_bg.wasm', () => ({ default: {} }))
+vi.mock('../../wasm-bundler/mdream_edge.js', () => ({
+  htmlToMarkdownResult: () => ({ markdown: '' }),
+  __mdreamTakePanicMessage: () => 'edge panic',
+  MarkdownStream: BindingMarkdownStream,
+}))
 
 const engines = [
-  { name: 'browser', make: () => createMarkdownStream(), StreamClass: BrowserMarkdownStream },
-  { name: 'edge', make: async () => new EdgeMarkdownStream(), StreamClass: EdgeMarkdownStream },
+  { name: 'browser', panicMessage: 'browser panic', make: () => createMarkdownStream(), StreamClass: BrowserMarkdownStream, stream: browserStream },
+  { name: 'edge', panicMessage: 'edge panic', make: async () => new EdgeMarkdownStream(), StreamClass: EdgeMarkdownStream, stream: edgeStream },
 ] as const
 
-describe.each(engines)('$name MarkdownStream wrapper', ({ make }) => {
+describe.each(engines)('$name MarkdownStream wrapper', ({ make, panicMessage, stream: streamHtml }) => {
   it('delegates processChunkBytes and returns the converted markdown', async () => {
     control.failProcessChunkBytes = false
     const stream = await make()
@@ -53,10 +59,39 @@ describe.each(engines)('$name MarkdownStream wrapper', ({ make }) => {
     control.failProcessChunkBytes = true
     try {
       const stream = await make()
-      expect(() => stream.processChunkBytes(new Uint8Array([0x3C]))).toThrow(/mdream WASM panic[\s\S]*synthetic panic/)
+      expect(() => stream.processChunkBytes(new Uint8Array([0x3C]))).toThrow(new RegExp(`mdream WASM panic[\\s\\S]*${panicMessage}`))
     }
     finally {
       control.failProcessChunkBytes = false
     }
+  })
+
+  it('keeps a surrogate pair split across string chunks', async () => {
+    const stream = await make()
+    const out = stream.processChunk('<p>\uD83C') + stream.processChunk('\uDF89</p>') + stream.finish()
+    expect(out).toBe('chunk:<p>chunk:🎉</p>')
+  })
+
+  it('flushes a lone high surrogate before bytes and at finish', async () => {
+    const stream = await make()
+    const out = stream.processChunk('a\uD83C')
+      + stream.processChunkBytes(new TextEncoder().encode('b'))
+      + stream.processChunk('c\uD83C')
+      + stream.finish()
+    expect(out).toBe('chunk:achunk:\uFFFDbytes:bchunk:cchunk:\uFFFD')
+  })
+
+  it('keeps a surrogate pair split across stream string chunks', async () => {
+    const html = new ReadableStream<string>({
+      start(controller) {
+        for (const unit of '<p>🎉</p>'.split(''))
+          controller.enqueue(unit)
+        controller.close()
+      },
+    })
+    let out = ''
+    for await (const chunk of streamHtml(html))
+      out += chunk
+    expect(out).toBe('chunk:<chunk:pchunk:>chunk:chunk:🎉chunk:<chunk:/chunk:pchunk:>')
   })
 })

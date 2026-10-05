@@ -400,6 +400,7 @@ impl ConvertState {
       tag_id,
       contains_whitespace: false,
       excluded_from_markdown: false,
+      enter_skipped: false,
       is_inline: handler.is_inline,
       excludes_text_nodes: handler.excludes_text_nodes,
       is_non_nesting: handler.is_non_nesting,
@@ -481,20 +482,20 @@ impl ConvertState {
       }
     }
 
-    if self.has_frontmatter
-      && self.frontmatter_in_head
-      && !excludes_text_nodes
-      && self
-        .stack
-        .last()
-        .is_some_and(|p| p.tag_id == Some(TAG_TITLE))
-    {
+    let in_title = self
+      .stack
+      .last()
+      .is_some_and(|p| p.tag_id == Some(TAG_TITLE));
+    if in_title && self.has_frontmatter && self.frontmatter_in_head && !excludes_text_nodes {
       let val = text_buffer.trim().to_string();
       if !val.is_empty() {
         self.frontmatter_title = Some(val);
       }
-      text_buffer.clear();
-      return;
+    }
+    // `<title>` is document metadata that browsers never render. Its text
+    // still reaches frontmatter and extraction, but never the output.
+    if in_title {
+      excludes_text_nodes = true;
     }
 
     let in_pre_tag = self.in_pre;
@@ -522,10 +523,14 @@ impl ConvertState {
     let mut text = std::mem::take(text_buffer);
     let mut tailwind_prefix = None;
     let mut tailwind_suffix = None;
+    // An `html` stream hands out its whole buffer each chunk, so an empty buffer
+    // there only means a document start when nothing was yielded before it.
     let is_first_text_in_block = first_block_child_text_count == 0
       && (first_block_parent_index.is_some()
-        || self.buffer.is_empty()
-        || self.buffer.as_bytes().last() == Some(&b'\n'));
+        || match self.buffer.as_bytes().last() {
+          Some(&last) => last == b'\n',
+          None => !self.is_html() || self.flushed_tail[1] == b'\n',
+        });
     if contains_whitespace && is_first_text_in_block {
       let mut start = 0;
       let bytes = text.as_bytes();
@@ -544,7 +549,7 @@ impl ConvertState {
     }
 
     if self.has_encoded_html_entity {
-      let protect_decoded_entity_references = self.format == OutputFormat::Markdown
+      let protect_decoded_entity_references = self.is_markdown()
         && self.depth_map[TAG_PRE as usize] == 0
         && self.depth_map[TAG_CODE as usize] == 0
         && !self.in_raw_html_block();
@@ -1086,6 +1091,7 @@ impl ConvertState {
       pooled.child_text_node_index = 0;
       pooled.contains_whitespace = false;
       pooled.excluded_from_markdown = false;
+      pooled.enter_skipped = false;
       pooled.is_inline = h_inline;
       pooled.excludes_text_nodes = h_excludes;
       pooled.is_non_nesting = h_non_nesting;
@@ -1104,6 +1110,7 @@ impl ConvertState {
         child_text_node_index: 0,
         contains_whitespace: false,
         excluded_from_markdown: false,
+        enter_skipped: false,
         is_inline: h_inline,
         excludes_text_nodes: h_excludes,
         is_non_nesting: h_non_nesting,
@@ -1126,7 +1133,7 @@ impl ConvertState {
 
         if let Some(class_attr) = tag.attributes.get_bit(ATTR_CLASS) {
           let (mut prefix, mut suffix, hidden) = process_tailwind_classes(class_attr);
-          if self.plain_text {
+          if plain_text!(self) {
             prefix = None;
             suffix = None;
           }
@@ -1235,7 +1242,8 @@ impl ConvertState {
             .get_bit(ATTR_NAME)
             .or_else(|| tag.attributes.get_bit(ATTR_PROPERTY));
           let content = tag.attributes.get_bit(ATTR_CONTENT);
-          if let (Some(n), Some(c)) = (name, content) {
+          // An empty `content` carries no value; `key: ` would read as null.
+          if let (Some(n), Some(c)) = (name, content.filter(|c| !c.is_empty())) {
             let is_allowed = match n {
               "description"
               | "keywords"
@@ -1268,6 +1276,7 @@ impl ConvertState {
     tag.excluded_from_markdown = in_template
       || filter_excluded
       || (skip_node && (!self.has_isolate_main || self.isolate_main_found));
+    tag.enter_skipped = skip_node;
 
     if tag.collapses_inner_white_space && !tag.excluded_from_markdown {
       if tag.tag_id == Some(TAG_SPAN) {
@@ -1287,6 +1296,14 @@ impl ConvertState {
       self.block_parent_indices.push(idx);
     }
 
+    if tag_id == Some(TAG_OL) {
+      self.ordered_starts.push(
+        tag
+          .attributes
+          .get_bit(ATTR_START)
+          .and_then(|value| super::output::parse_bounded_u32(value, MAX_ORDERED_START)),
+      );
+    }
     self.stack.push(tag);
 
     // Extraction
@@ -1327,13 +1344,13 @@ impl ConvertState {
     if tag_id == Some(TAG_LI)
       && let Some(li) = self.stack.last()
     {
-      let width: usize = if !skip_node && !self.in_table_cell() && !self.plain_text {
+      let width: usize = if !skip_node && !self.in_table_cell() && !plain_text!(self) {
         let stack_len = self.stack.len();
         let parent_is_ordered = stack_len >= 2 && self.stack[stack_len - 2].tag_id == Some(TAG_OL);
         if parent_is_ordered {
           // Must match the marker actually written, `start` included, or the
           // item's continuation content drifts out of it.
-          let n = Self::ordered_item_number(&self.stack[stack_len - 2], li.index as usize).max(1);
+          let n = self.ordered_item_number(li.index as usize).max(1);
           // n >= 1 so ilog10 never panics; +1 converts floor(log10) to digit count.
           let digits = (n.ilog10() + 1) as usize;
           digits + 2
@@ -1443,7 +1460,10 @@ impl ConvertState {
     }
 
     // Special: empty links — synthesize text from title/aria-label
-    if node.tag_id == Some(TAG_A) && node.child_text_node_index == 0 && !node.excluded_from_markdown
+    if node.tag_id == Some(TAG_A)
+      && node.child_text_node_index == 0
+      && !node.excluded_from_markdown
+      && !node.enter_skipped
     {
       let prefix = node
         .attributes
@@ -1478,6 +1498,9 @@ impl ConvertState {
             self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
           }
           self.update_in_pre_on_close(id);
+          if id == TAG_OL {
+            self.ordered_starts.pop();
+          }
           if id == TAG_LI
             && let Some(w) = self.list_indent_widths.pop()
           {
@@ -1508,6 +1531,9 @@ impl ConvertState {
         self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
       }
       self.update_in_pre_on_close(id);
+      if id == TAG_OL {
+        self.ordered_starts.pop();
+      }
       if id == TAG_LI
         && let Some(w) = self.list_indent_widths.pop()
       {
@@ -1520,6 +1546,20 @@ impl ConvertState {
     self.depth -= 1;
     self.has_encoded_html_entity = false;
     self.just_closed_tag = true;
+
+    // Each enclosing quote re-quotes whatever content is still unflushed when it
+    // closes, so a deep nest closed within one chunk copied its content once per
+    // level. Quote the settled lines now, as a chunk boundary here would. A quote
+    // inside a list item is re-quoted frame by frame by the flush too, so there
+    // it would only add work.
+    if node_tag_id == Some(TAG_BLOCKQUOTE)
+      && self
+        .blockquotes
+        .iter()
+        .all(|frame| frame.list_indent.is_empty())
+    {
+      self.flush_settled_blockquote_lines();
+    }
   }
 
   pub(crate) fn process_closing_tag(
@@ -1565,6 +1605,7 @@ impl ConvertState {
         // attributes are payload.
         bounded_prefix: tag_name_end == chunk_length
           && chunk_length - tag_name_start <= MAX_BUILTIN_TAG_NAME,
+        name_ended: tag_name_end != chunk_length,
       };
     }
 
@@ -1578,12 +1619,14 @@ impl ConvertState {
         // The whole tag is here, re-fed only so an implied end tag closes
         // first, and it carries whatever attributes it has.
         bounded_prefix: false,
+        name_ended: false,
       };
     }
     CloseTagResult {
       complete: true,
       new_position: i + 1,
       bounded_prefix: false,
+      name_ended: false,
     }
   }
 
