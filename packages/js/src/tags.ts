@@ -1,3 +1,4 @@
+import type { OutputPositions } from './output-positions'
 import type { HandlerContext, TagHandler } from './types'
 import {
   BLOCKQUOTE_SPACING,
@@ -207,7 +208,7 @@ export const breakHandler: TagHandler = {
 
 // A `#` run closing a heading is an ATX closing sequence and is dropped by the
 // renderer, so the last one is escaped back into content.
-function escapeTrailingHeadingHashes(buffer: string[]): void {
+function escapeTrailingHeadingHashes(buffer: string[], positions?: OutputPositions): void {
   let index = buffer.length - 1
   while (index >= 0 && buffer[index] === '')
     index--
@@ -231,7 +232,9 @@ function escapeTrailingHeadingHashes(buffer: string[]): void {
   if (before !== ' ' && before !== '\t')
     return
 
-  buffer[index] = `${entry.slice(0, run)}\\${entry.slice(run)}`
+  const replacement = `${entry.slice(0, run)}\\${entry.slice(run)}`
+  positions?.replace(index, index + 1, [replacement], offset => offset > run ? offset + 1 : offset)
+  buffer[index] = replacement
 }
 
 // What the current output line holds where a table row is about to be written.
@@ -345,7 +348,7 @@ function handleHeading(depth: number): TagHandler {
       if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {
         return `</h${depth}>`
       }
-      escapeTrailingHeadingHashes(state.buffer)
+      escapeTrailingHeadingHashes(state.buffer, state.outputPositions)
     },
     collapsesInnerWhiteSpace: true,
   }
@@ -718,13 +721,10 @@ export const tagHandlers: Record<number, TagHandler> = {
       const clean = state.options?.clean
       const stripsEmptyImage = clean === true
         || (clean !== undefined && clean !== false && clean.emptyImages === true)
-      if (stripsEmptyImage && !alt.trim()) {
-        if (state.depthMap?.[TAG_FIGCAPTION])
-          return undefined
-      }
-      else {
-        markRenderedChildContent(node)
-      }
+      // Like Rust, an image with no alt text writes nothing, not even spacing.
+      if (stripsEmptyImage && !alt.trim())
+        return undefined
+      markRenderedChildContent(node)
       return `![${serializeImageDescription(alt)}]${serializeMarkdownResource(src, node.attributes?.title)}`
     },
     collapsesInnerWhiteSpace: true,

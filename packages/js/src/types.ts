@@ -1,3 +1,5 @@
+import type { OutputPositions } from './output-positions'
+
 /** Composable JavaScript conversion plugin. */
 export interface TransformPlugin {
   /**
@@ -73,25 +75,69 @@ export interface CleanOptions {
   fragments?: boolean
   /** Strip links with meaningless hrefs (#, javascript:void(0)) → plain text */
   emptyLinks?: boolean
-  /** Collapse 3+ consecutive blank lines to 2 */
+  /** No effect in the JavaScript engine */
   blankLines?: boolean
   /** Strip links where text equals URL: [https://x.com](https://x.com) → https://x.com */
   redundantLinks?: boolean
   /** Strip self-referencing heading anchors: ## [Title](#title) → ## Title */
   selfLinkHeadings?: boolean
-  /** Strip images with no alt text (decorative/tracking pixels) */
+  /** Drop images with missing, empty, or whitespace-only alt text */
   emptyImages?: boolean
   /** Drop links that produce no visible text: [](url) → nothing */
   emptyLinkText?: boolean
 }
 
+/** Converter state a `CleanPass` reads and rewrites. */
+export interface CleanTarget {
+  /** Markdown written so far, one entry per write. */
+  buffer: string[]
+  /** Open element count per tag id. */
+  depthMap: Uint16Array
+  /** The last buffer entry the converter wrote. */
+  lastContentCache?: string
+  options?: EngineOptions
+  /** @internal */
+  outputPositions?: OutputPositions
+}
+
 /**
- * Cleanup rules with the Markdown post-processing pass that applies them.
+ * Cleanup for one conversion. The converter calls these hooks; they rewrite
+ * links after the converter writes them.
+ */
+export interface CleanPass {
+  /** Output waits for the whole document, because `fragments` needs every heading. */
+  holdsOutput: boolean
+  /** An element's enter output starts at `outputStart` in the buffer. */
+  enter: (element: ElementNode, outputStart: number) => void
+  /** An element exits; called before its exit output. */
+  exit: (element: ElementNode) => void
+  /** Rewrite the closing anchor to its text and skip its close. Returns true when it did. */
+  unwrap: (element: ElementNode) => boolean
+  /** An element wrote its exit output `close` at `outputStart`. */
+  closed: (element: ElementNode, outputStart: number, close: string) => void
+  /** The earliest buffer index a later hook may rewrite, or Infinity. */
+  held: () => number
+  /** Apply the rules that need the whole document to the trimmed Markdown so far. */
+  finish: (markdown: string) => CleanView
+}
+
+/** Markdown a `CleanPass` finished, with optional source position mapping. */
+export interface CleanView {
+  markdown: string
+  /**
+   * Map a raw Markdown offset through this view's removal runs.
+   * @internal
+   */
+  mapPosition?: (position: number) => number
+}
+
+/**
+ * Cleanup rules and the pass that applies them.
  * Create one with `clean()` from `@mdream/js/clean`.
  */
 export interface Cleaner extends CleanOptions {
-  /** Apply the post-processing rules to converted Markdown. */
-  apply: (markdown: string) => string
+  /** Start cleanup for one conversion. Returns nothing when no rule rewrites links. */
+  apply: (target: CleanTarget) => CleanPass | undefined
 }
 
 /** Core conversion options. */
@@ -106,8 +152,8 @@ export interface EngineOptions {
 
   /**
    * Clean up the markdown output. Pass `true` for all cleanup or an object
-   * to enable specific features. Operates as a post-processing step on the
-   * final markdown (sync API only for `fragments`).
+   * to enable specific features. The rules apply to the link and image nodes
+   * as they convert; `fragments` also needs `apply` from a `Cleaner`.
    */
   clean?: boolean | CleanOptions
 
@@ -257,6 +303,8 @@ export interface MdreamProcessingState {
  * Extended state that includes output tracking and options
  */
 export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
+  /** @internal */
+  outputPositions?: OutputPositions
   /** Active output format for format-aware plugins. */
   outputFormat?: OutputFormat
 
@@ -419,7 +467,7 @@ export interface PluginContext {
 export interface MdreamOptions extends Omit<EngineOptions, 'clean'> {
   /**
    * Cleanup rules from `clean()` in `@mdream/js/clean`. Import it only when
-   * you use it, so the post-processing pass stays out of other bundles.
+   * you use it, so the cleanup pass stays out of other bundles.
    */
   clean?: Cleaner
   /** Explicit plugins, applied in array order. */

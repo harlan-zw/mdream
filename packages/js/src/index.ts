@@ -1,16 +1,17 @@
 import type { ParseState } from './parse'
 import type { MdreamOptions, NodeEvent } from './types'
-import { createMarkdownProcessor, trimAsciiWhitespaceEnd } from './markdown-processor'
-import { assertEngineOptions } from './option-shape'
+import { createMarkdownProcessor } from './markdown-processor'
+import { assertEngineOptions, checkClean } from './option-shape'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { resolvePlugins } from './pluggable/plugin'
 import { endPlugins, processPluginsForEvent } from './plugin-processor'
 import { streamHtmlToMarkdown as _streamHtmlToMarkdown } from './stream'
 import { buildTagOverrideHandlers } from './tag-overrides'
 import { tagHandlers } from './tags'
-import { trimOutputStart } from './utils'
 
-function convert(html: string, options: MdreamOptions): string {
+export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
+  assertEngineOptions(options)
+  checkClean(options)
   const tagOverrideHandlers = options.tagOverrides
     ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
     : undefined
@@ -30,22 +31,7 @@ function convert(html: string, options: MdreamOptions): string {
   const leftover = parseHtmlStream(html, parseState, handleEvent)
   finalizeParse(leftover, parseState, handleEvent)
   endPlugins(plugins, processor.state)
-  // Only ASCII whitespace ends the output, as in Rust: U+00A0 is content,
-  // and a stream cannot take back a nbsp it already yielded.
-  const markdown = trimAsciiWhitespaceEnd(trimOutputStart(processor.state.buffer.join('')))
-  processor.state.buffer.length = 0
-  return markdown
-}
-
-export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
-  assertEngineOptions(options)
-  const markdown = convert(html, options)
-  const clean = options.clean
-  if (!clean)
-    return markdown
-  if (typeof clean.apply !== 'function')
-    throw new TypeError('The clean option needs cleanup rules from clean(). Import it from \'@mdream/js/clean\'.')
-  return clean.apply(markdown)
+  return processor.getMarkdown()
 }
 
 export function streamHtmlToMarkdown(
@@ -53,6 +39,7 @@ export function streamHtmlToMarkdown(
   options: Partial<MdreamOptions> = {},
 ): AsyncIterable<string> {
   assertEngineOptions(options)
+  checkClean(options)
   const tagOverrideHandlers = options.tagOverrides
     ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
     : undefined

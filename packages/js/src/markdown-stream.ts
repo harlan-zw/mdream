@@ -34,6 +34,10 @@ export function createMarkdownDrain(context: MarkdownStreamContext, hasPlugins: 
   let lastYieldedLength = 0
   let hasYieldedContent = false
   function getMarkdownChunk(final = false): string {
+    // A fragment link resolves against headings that may come later, so
+    // `fragments` holds the whole document back, as Rust does.
+    if (context.holdsOutput)
+      return final ? context.getMarkdown() : ''
     const heldFragment = context.prepareDrain(final)
     const content = state.buffer.join('')
     const currentContent = hasYieldedContent ? content : trimOutputStart(content)
@@ -85,11 +89,12 @@ export function createMarkdownDrain(context: MarkdownStreamContext, hasPlugins: 
 
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
     // closing sequence, so hold the run (and the spacing that decides whether it
-    // closes) until the heading is complete. The final call drops the hold: no
-    // later event can complete the heading.
+    // closes) until the heading is complete.
     const headingHeld = !final && isInsideHeading(state.depthMap)
     if (headingHeld) {
-      let headingPos = currentContent.length
+      // Scan back from what would be released: held content after it, such
+      // as a link `emptyLinkText` may drop, can leave the run at the end.
+      let headingPos = stableLength
       while (headingPos > 0) {
         const code = currentContent.charCodeAt(headingPos - 1)
         if (code !== 35 && code !== 32 && code !== 9) // # space tab
