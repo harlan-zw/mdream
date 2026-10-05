@@ -88,13 +88,9 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       context.markYielded()
     }
 
-    // Keep only enough emitted context for spacing/newline decisions, plus any
-    // trailing spaces that are still mutable. This prevents every stream chunk
-    // from joining and slicing the entire cumulative output: a yielded slice
-    // keeps its whole parent string alive, so a caller that holds the chunks
-    // would otherwise hold one copy of the output per chunk. Wrapping reads the
-    // current column, so it keeps the whole current line and waits until the
-    // leading trim no longer moves that column.
+    // Retain spacing context and mutable spaces instead of the cumulative output.
+    // Yielded slices otherwise retain one full parent string per chunk.
+    // Wrapping also needs the current line until leading trim stops changing it.
     const wrapping = !!options.wrapWidth
     if (hasYieldedContent && !fragmentHeld && !headingHeld && (!retainMutableFragments || !inPre) && (!wrapping || leadingTrimmed === 0)) {
       // A raw region resumes Markdown after a blank line. Remember that

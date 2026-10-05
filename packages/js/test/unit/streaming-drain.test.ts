@@ -262,7 +262,7 @@ describe('streaming drain parity', () => {
         peakRetainedLength = retainedLength
     }
     finalizeParse(remainingHtml, parseState, handleEvent)
-    markdown += processor.getMarkdownChunk()
+    markdown += processor.getMarkdownChunk(true)
 
     expect(markdown).toBe(htmlToMarkdown(html, { ...options, plugins }))
     expect(peakRetainedLength).toBeLessThan(chunkSize)
