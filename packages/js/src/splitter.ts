@@ -1,3 +1,4 @@
+import type { MarkdownState } from './markdown-processor'
 import type { ParseState } from './parse'
 import type { CleanView, ElementNode, MarkdownChunk, NodeEvent, SplitterOptions, TextNode } from './types'
 import {
@@ -15,11 +16,12 @@ import {
 } from './const'
 import { createMarkdownProcessor } from './markdown-processor'
 import { assertEngineOptions } from './option-shape'
-import { parseHtmlStream } from './parse'
+import { finalizeParse, parseHtmlStream } from './parse'
 import { resolvePlugins } from './pluggable/plugin'
 import { endPlugins, processPluginsForEvent } from './plugin-processor'
 import { buildTagOverrideHandlers } from './tag-overrides'
 import { tagHandlers } from './tags'
+import { isInsideHeading } from './utils'
 
 const MARKDOWN_HEADER_LINE_RE = /^#{1,6}\s+/
 const NEWLINE_RE = /\n/g
@@ -58,9 +60,9 @@ function isOutputWhitespace(code: number): boolean {
 }
 
 /** Match complete fences by their line prefix, marker, and opening run. */
-function codeRegions(markdown: string): { start: number, end: number }[] {
-  const regions: { start: number, end: number }[] = []
-  let open: { start: number, marker: number, run: number, prefix: string } | undefined
+function codeRegions(markdown: string): { start: number, end: number, markerStart: number }[] {
+  const regions: { start: number, end: number, markerStart: number }[] = []
+  let open: { start: number, markerStart: number, marker: number, run: number, prefix: string } | undefined
   let lineStart = 0
   while (lineStart < markdown.length) {
     const newline = markdown.indexOf('\n', lineStart)
@@ -99,7 +101,7 @@ function codeRegions(markdown: string): { start: number, end: number }[] {
         markerEnd++
       const run = markerEnd - markerStart
       if (!open && run >= 3) {
-        open = { start: lineStart, marker, run, prefix }
+        open = { start: lineStart, markerStart, marker, run, prefix }
       }
       else if (open && marker === open.marker && run >= open.run
         && prefix === open.prefix) {
@@ -107,7 +109,7 @@ function codeRegions(markdown: string): { start: number, end: number }[] {
         while (tail < lineEnd && isOutputWhitespace(markdown.charCodeAt(tail)))
           tail++
         if (tail === lineEnd) {
-          regions.push({ start: open.start, end: lineEnd })
+          regions.push({ start: open.start, end: lineEnd, markerStart: open.markerStart })
           open = undefined
         }
       }
@@ -115,7 +117,7 @@ function codeRegions(markdown: string): { start: number, end: number }[] {
     lineStart = lineEnd + 1
   }
   if (open)
-    regions.push({ start: open.start, end: markdown.length })
+    regions.push({ start: open.start, end: markdown.length, markerStart: open.markerStart })
   return regions
 }
 
@@ -123,8 +125,23 @@ function codeRegions(markdown: string): { start: number, end: number }[] {
  * Get current markdown content WITHOUT clearing buffers. A held clean pass
  * finishes the view so its fragment-link markers never reach a chunk.
  */
-function getCurrentMarkdown(state: { buffer: string[] }, finishOutput?: (markdown: string) => CleanView): CleanView {
-  const markdown = state.buffer.join('').trimStart()
+function getCurrentMarkdown(state: MarkdownState, finishOutput?: (markdown: string) => CleanView, heldFragment = Infinity, holdHeadingTail = false): CleanView {
+  // Join only the stable prefix. Open writers can retract or replace every
+  // later fragment, even after the link that triggered cleanup has closed.
+  let markdown = heldFragment === Infinity
+    ? state.buffer.join('')
+    : state.buffer.slice(0, heldFragment).join('')
+  markdown = markdown.trimStart()
+  if (holdHeadingTail && isInsideHeading(state.depthMap)) {
+    let end = markdown.length
+    while (end > 0) {
+      const code = markdown.charCodeAt(end - 1)
+      if (code !== 35 && code !== 32 && code !== 9)
+        break
+      end--
+    }
+    markdown = markdown.slice(0, end)
+  }
   return finishOutput ? finishOutput(markdown) : { markdown, settled: -1 }
 }
 
@@ -219,6 +236,15 @@ export function* htmlToMarkdownSplitChunksStream(
     return next > lastChunkEndPosition ? next : end
   }
 
+  function getStableMarkdown(): CleanView {
+    return getCurrentMarkdown(
+      processor.state,
+      processor.finishOutput,
+      outputFinal ? Infinity : processor.getHeldOutputFragment?.(),
+      !outputFinal && !!processor.getHeldOutputFragment,
+    )
+  }
+
   function* flushChunk(endPosition?: number, applyOverlap = false): Generator<MarkdownChunk, void, undefined> {
     if (processor.finishOutput && !outputFinal) {
       deferredSections.push({
@@ -230,10 +256,10 @@ export function* htmlToMarkdownSplitChunksStream(
       return
     }
     const view = finishedMarkdown === undefined
-      ? getCurrentMarkdown(processor.state, processor.finishOutput)
+      ? getStableMarkdown()
       : { markdown: finishedMarkdown, settled: -1 }
     const currentMd = view.markdown
-    let chunkEnd = endPosition ?? currentMd.length
+    let chunkEnd = Math.min(endPosition ?? currentMd.length, currentMd.length)
     // Keep separator whitespace at the next chunk's start. Cleanup resolves
     // once, so these cuts must not remove bytes from the finished document.
     if (finishedMarkdown !== undefined) {
@@ -288,13 +314,16 @@ export function* htmlToMarkdownSplitChunksStream(
       if (code)
         chunk.metadata.code = code.language
     }
-    else if (currentChunkCodeLanguage) {
+    else if (currentChunkCodeLanguage
+      && (!processor.getHeldOutputFragment
+        || codeRegions(currentMd).some(region => region.markerStart >= lastChunkEndPosition && region.markerStart < chunkEnd))) {
       chunk.metadata.code = currentChunkCodeLanguage
     }
 
     yield chunk
 
-    currentChunkCodeLanguage = ''
+    if (!processor.getHeldOutputFragment || chunk.metadata.code)
+      currentChunkCodeLanguage = ''
     lastSplitPosition = chunkEnd
 
     if (applyOverlap && opts.chunkOverlap > 0) {
@@ -330,9 +359,11 @@ export function* htmlToMarkdownSplitChunksStream(
     ? event => processPluginsForEvent(event, opts.resolvedPlugins, processor.state, processor.processEvent)
     : processor.processEvent
 
-  parseHtmlStream(html, parseState, (event: NodeEvent) => {
+  const collectEvent = (event: NodeEvent) => {
     eventBuffer.push(event)
-  })
+  }
+  const leftover = parseHtmlStream(html, parseState, collectEvent)
+  finalizeParse(leftover, parseState, collectEvent)
 
   for (const event of eventBuffer) {
     const { type: eventType, node } = event
@@ -393,8 +424,11 @@ export function* htmlToMarkdownSplitChunksStream(
 
     processResolvedEvent(event)
 
-    if (!opts.returnEachLine && !processor.finishOutput) {
-      const currentMd = getCurrentMarkdown(processor.state, processor.finishOutput).markdown
+    // Final parser whitespace adds no chunk content. It must not trigger an
+    // extra overlap split of the preceding text.
+    if (!opts.returnEachLine && !processor.finishOutput
+      && (node.type !== TEXT_NODE || (node as TextNode).value.trim())) {
+      const currentMd = getStableMarkdown().markdown
       const currentChunkSize = opts.lengthFunction(currentMd.slice(lastChunkEndPosition))
 
       if (currentChunkSize > opts.chunkSize) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { TAG_NAV } from '../../src/const'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { createPlugin } from '../../src/pluggable/plugin'
 import { filterPlugin } from '../../src/plugins/filter'
 import { withMinimalPreset } from '../../src/preset/minimal'
 import { htmlToText } from '../../src/text'
@@ -169,6 +170,59 @@ describe('writer ownership', () => {
     expect(htmlToMarkdown('<table><tr></tr><tr><td>a</td></tr></table>', {
       tagOverrides: { tr: { spacing: [0, 1] } },
     })).toBe('| a |\n| --- |')
+  })
+
+  it.each(['td', 'th'])('keeps the owning row when %s enter output is overridden', async (cell) => {
+    const html = `<table><tr></tr><tr><${cell}>a</${cell}></tr></table>`
+    for (const enter of ['', '[']) {
+      const options = { tagOverrides: { [cell]: { enter } } }
+      const expected = `| ${enter}a |\n| --- |`
+      expect(htmlToMarkdown(html, options)).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const input = new ReadableStream<string>({
+          start(controller) {
+            for (let offset = 0; offset < html.length; offset += width)
+              controller.enqueue(html.slice(offset, offset + width))
+            controller.close()
+          },
+        })
+        let output = ''
+        for await (const chunk of streamHtmlToMarkdown(input, options))
+          output += chunk
+        expect(output, `width=${width}`).toBe(expected)
+      }
+    }
+  })
+
+  it.each(['td', 'th'])('keeps the owning row when a plugin writes %s enter output', async (cell) => {
+    let enters = 0
+    const plugin = createPlugin({
+      onNodeEnter(node) {
+        if (node.name === cell) {
+          enters++
+          return '['
+        }
+      },
+    })
+    const html = `<table><tr><${cell}>a</${cell}></tr></table>`
+    expect(htmlToMarkdown(html, { plugins: [plugin] }))
+      .toBe('| [a |\n| --- |')
+    expect(enters).toBe(1)
+    for (let width = 1; width <= html.length; width++) {
+      enters = 0
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { plugins: [plugin] }))
+        output += chunk
+      expect(output, `width=${width}`).toBe('| [a |\n| --- |')
+      expect(enters).toBe(1)
+    }
   })
 
   it('gives sibling code spans separate owners under an exit-only override', () => {
