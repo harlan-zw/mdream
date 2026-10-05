@@ -1128,7 +1128,7 @@ with preserved   spacing</pre>
       }))
 
       expect(chunks.length).toBe(3) // Split on each h2
-      expect(chunks).toMatchSnapshot()
+      expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, withMinimalPreset()))
 
       // Check headers
       expect(chunks[0].metadata.headers?.h1).toBe('My Blog Post')

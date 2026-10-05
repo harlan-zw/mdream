@@ -1004,6 +1004,83 @@ fn autolink_not_collapsed_for_relative_href() {
   assert_eq!(convert(r#"<a href="/page">/page</a>"#), "[/page](/page)");
 }
 
+#[test]
+fn heading_inside_a_link_adds_no_blank_line_to_the_link_text() {
+  // A blank line ends the paragraph, so the link text never closes and the
+  // `](url)` is printed as literal text.
+  for (html, expected) in [
+    (r#"<a href="/x"><h4></h4></a>"#, "[<h4></h4>](/x)"),
+    (
+      r#"<a href="/x"><h2>Title</h2></a><p>next</p>"#,
+      "[<h2>Title</h2>](/x)\n\nnext",
+    ),
+    (
+      r#"<div><a href="/x"><h3>Card</h3><p>desc</p></a></div>"#,
+      "[<h3>Card</h3>desc](/x)",
+    ),
+    ("<b><h4>t</h4></b>x", "**#### t**x"),
+    ("<p>a</p><h2>t</h2><p>b</p>", "a\n\n## t\n\nb"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
+fn heading_inside_a_markerless_wrapper_keeps_its_trailing_blank_line() {
+  // Wrappers that write no inline Markdown must not glue following text into
+  // the heading's line: only marker-emitting wrappers (b, em, code, a, …) do.
+  for (html, expected) in [
+    ("<label><h4>t</h4>x</label>", "#### t\n\nx"),
+    ("<small><h4>t</h4>x</small>", "#### t\n\nx"),
+    ("<abbr><h4>t</h4>x</abbr>", "#### t\n\nx"),
+    ("<time><h4>t</h4>x</time>", "#### t\n\nx"),
+    ("<bdo><h4>t</h4>x</bdo>", "#### t\n\nx"),
+    ("<ruby><h4>t</h4>x</ruby>", "#### t\n\nx"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
+fn heading_inside_an_hrefless_anchor_keeps_its_trailing_blank_line() {
+  // An anchor without href emits no markup at all, so it counts as a
+  // marker-less wrapper: the heading must close its block instead of gluing
+  // the following text into its raw-HTML line. A literal `*` stays escaped.
+  for (html, expected) in [
+    (
+      "<a><h4>t</h4></a>see *this*",
+      "<h4>t</h4>\n\nsee \\*this\\*",
+    ),
+    ("<a><h4>t</h4>x</a>", "<h4>t</h4>\n\nx"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
+fn heading_inside_an_overridden_wrapper_stays_inline_with_it() {
+  // An override's enter/exit output wraps the content inline, so the heading
+  // must not break the wrapper open with a blank line.
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "a".to_string(),
+        TagOverrideConfig {
+          enter: Some("{{".to_string()),
+          exit: Some("}}".to_string()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown("<a><h4>t</h4>x</a>", options),
+    "{{<h4>t</h4>x}}"
+  );
+}
+
 // ── Images ──
 
 #[test]
@@ -1175,6 +1252,144 @@ b
     ),
     "```\na\nb\n\n\n```\n\n[link](#x)"
   );
+}
+
+// A <code> inside an inline code span is part of that span, as other inline
+// formatting inside it is. A span per level only lengthened the delimiter.
+#[test]
+fn nested_inline_code_is_one_span() {
+  for (html, expected) in [
+    ("<p><code>a<code>b</code>c</code></p>", "`abc`"),
+    ("<p><code>`a<code>`b`</code>c`</code></p>", "`` `a`b`c` ``"),
+    ("<p><em><code>a<code>b</code>c</code></em></p>", "*`abc`*"),
+    (
+      "<ul><li>x<code>a<code>b</code>c</code></li></ul>",
+      "- x `abc`",
+    ),
+    (
+      "<table><tr><td><code>a|<code>b|</code>c</code></td></tr></table>",
+      "| `a\\|b\\|c` |\n| --- |",
+    ),
+    ("<pre><code>a<code>b</code>c</code></pre>", "```\nabc\n```"),
+    (
+      "<details><code>a<code>b</code></code></details>",
+      "<details><code>a<code>b</code></code></details>",
+    ),
+    // Closed by the end of input.
+    ("<p><code>a<code>b", "`ab`"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+// Only the element that opened a span closes it, whichever of the two an
+// override or alias reaches.
+#[test]
+fn nested_inline_code_keeps_one_owner_under_overrides() {
+  let with = |name: &str, config: TagOverrideConfig| HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(name.to_string(), config)]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let braces = TagOverrideConfig {
+    enter: Some("{".to_string()),
+    exit: Some("}".to_string()),
+    ..Default::default()
+  };
+  let exit_only = TagOverrideConfig {
+    exit: Some("}".to_string()),
+    ..Default::default()
+  };
+  let alias = TagOverrideConfig {
+    alias_tag_id: mdream::consts::get_tag_id("code"),
+    ..Default::default()
+  };
+  for (html, options, expected) in [
+    // An override owns its own output at every level.
+    (
+      "<p><code>a<code>b</code>c</code></p>",
+      with("code", braces),
+      "{a{b}c}",
+    ),
+    // The inner default opener belongs to the outer span; each override exit stays.
+    (
+      "<p><code>a<code>b</code>c</code></p>",
+      with("code", exit_only.clone()),
+      "`ab}c}",
+    ),
+    ("<p><code>a<code>b", with("code", exit_only), "`ab}}"),
+    // An alias opens a span like the built-in, so it nests like one either way.
+    (
+      "<p><code>a<x-code>b</x-code>c</code></p>",
+      with("x-code", alias.clone()),
+      "`abc`",
+    ),
+    (
+      "<p><x-code>a<code>b</code>c</x-code></p>",
+      with("x-code", alias.clone()),
+      "`abc`",
+    ),
+    (
+      "<p><code>a<x-code>b`c</x-code>d</code>e</p>",
+      with("x-code", alias),
+      "``ab`cd``e",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    for chunk in [1, 3, 4096] {
+      let mut stream = MarkdownStreamProcessor::new(options.clone());
+      let mut out = String::new();
+      for piece in html.as_bytes().chunks(chunk) {
+        out.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+      }
+      out.push_str(&stream.finish());
+      assert_eq!(out, expected, "{html} chunk={chunk}");
+    }
+  }
+}
+
+#[test]
+fn nested_inline_code_streams_like_one_shot() {
+  let open = "<code>".repeat(508);
+  for html in [
+    format!("<p>{open}x</p>").repeat(4),
+    format!(
+      "<p>a<code>b<code>c</code>d</code>e</p><p>{open}x{}</p>",
+      "</code>".repeat(508)
+    ),
+    format!(
+      "<table><tr><td>{open}{}</td></tr></table>",
+      "a|".repeat(400)
+    ),
+    format!("{open}{}", "x`".repeat(4096)),
+  ] {
+    for max_node_bytes in [0, 1024 * 1024, 64] {
+      let options = HTMLToMarkdownOptions::default().with_max_node_bytes(max_node_bytes);
+      let expected = html_to_markdown_result(&html, options.clone());
+      if !expected.truncated {
+        assert_eq!(expected.markdown, convert(&html), "cap={max_node_bytes}");
+      }
+      for chunk in [1, 7, 64, 4096] {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut out = String::new();
+        for piece in html.as_bytes().chunks(chunk) {
+          out.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        out.push_str(&stream.finish());
+        assert_eq!(
+          out, expected.markdown,
+          "cap={max_node_bytes} chunk={chunk} {html:.40}"
+        );
+        assert_eq!(
+          stream.truncated(),
+          expected.truncated,
+          "cap={max_node_bytes} chunk={chunk}"
+        );
+      }
+    }
+  }
 }
 
 #[test]
@@ -1967,22 +2182,22 @@ fn blockquote_keeps_block_children_inside_the_quote() {
     (
       "section surrounded by text",
       "<blockquote>lead<section>x</section>tail</blockquote>",
-      "> lead\n>\n> x\n> tail",
+      "> lead\n>\n> x\n>\n> tail",
     ),
     (
       "article surrounded by text",
       "<blockquote>lead<article>x</article>tail</blockquote>",
-      "> lead\n>\n> x\n> tail",
+      "> lead\n>\n> x\n>\n> tail",
     ),
     (
       "nav surrounded by text",
       "<blockquote>lead<nav>x</nav>tail</blockquote>",
-      "> lead\n>\n> x\n> tail",
+      "> lead\n>\n> x\n>\n> tail",
     ),
     (
       "figure surrounded by text",
       "<blockquote>lead<figure>x</figure>tail</blockquote>",
-      "> lead\n>\n> x\n> tail",
+      "> lead\n>\n> x\n>\n> tail",
     ),
     (
       "nested list",
@@ -2339,6 +2554,84 @@ fn table_with_formatting() {
   assert!(md.contains("[link](https://example.com)"));
 }
 
+#[test]
+fn table_row_without_cells_writes_nothing() {
+  // GFM has no zero-column delimiter row, and a browser draws nothing for an
+  // empty `<tr>`. The first row with a cell becomes the header instead.
+  for (html, expected) in [
+    ("<table><tr></tr></table>", ""),
+    ("<p>x</p><table><tr></tr></table><p>y</p>", "x\n\ny"),
+    (
+      "<table><tr></tr><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></table>",
+      "| a | b |\n| --- | --- |\n| c |",
+    ),
+    (
+      "<table><thead><tr></tr></thead><tbody><tr><td>a</td></tr></tbody></table>",
+      "| a |\n| --- |",
+    ),
+    (
+      "<blockquote><table><tr></tr><tr><td>a</td></tr></table></blockquote>",
+      "> | a |\n> | --- |",
+    ),
+    (
+      "<ul><li>x<table><tr></tr><tr><td>a</td></tr></table></li></ul>",
+      "- x\n\n  | a |\n  | --- |",
+    ),
+    // Content outside any cell is not a column; it precedes the table, as a
+    // browser renders it.
+    (
+      "<table><tr><b>x</b><td>a</td></tr></table>",
+      "**x**\n\n| a |\n| --- |",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+  assert_eq!(
+    convert("<ul><li><table><tr></tr></table></li></ul>"),
+    convert("<ul><li></li></ul>")
+  );
+}
+
+#[test]
+fn table_row_without_cells_ignores_an_override_without_output() {
+  // A <tr> override carrying neither enter nor exit output renders the row
+  // like the built-in handler, so the empty first row must still be deferred
+  // instead of writing a zero-column header.
+  let options = HTMLToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "tr".to_string(),
+        TagOverrideConfig {
+          // Same spacing the built-in <tr> handler uses.
+          spacing: Some([0, 1]),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown("<table><tr></tr><tr><td>a</td></tr></table>", options),
+    "| a |\n| --- |"
+  );
+}
+
+#[test]
+fn table_row_without_cells_streams_identically_at_every_split() {
+  let input =
+    "<p>x</p><table><tr></tr><tr><th>a</th><th>b</th></tr><tr><td>c</td></tr></table><p>y</p>";
+  let expected = convert(input);
+  assert_eq!(expected, "x\n\n| a | b |\n| --- | --- |\n| c |\n\ny");
+  for split in 0..=input.len() {
+    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut output = stream.process_chunk(&input[..split]);
+    output.push_str(&stream.process_chunk(&input[split..]));
+    output.push_str(&stream.finish());
+    assert_eq!(output, expected, "split={split}");
+  }
+}
+
 // ── Code blocks ──
 
 #[test]
@@ -2362,6 +2655,22 @@ fn code_block_preserves_newlines() {
   let html = "<pre><code>Line 1\n\n\nLine 2</code></pre>";
   let md = convert(html);
   assert!(md.contains("Line 1\n\n\nLine 2"));
+}
+
+#[test]
+fn pre_nested_in_a_fenced_pre_leaves_the_fence_to_the_outer_pre() {
+  // Only the outermost `<pre>` owns the fence. An inner one closing it left the
+  // outer fence unclosed or reopened, swallowing the rest of the document.
+  for (html, expected) in [
+    ("<pre><td><pre>", "```\n<pre></pre>\n```"),
+    (
+      "<pre>a<table><tr><td><pre>b</pre></td></tr></table>c</pre>d",
+      "```\na\n\n| <pre>b</pre> |\n| --- |\n\nc\n```\n\nd",
+    ),
+    ("<pre>a<pre>b</pre>c</pre>d", "```\na\n\nb\n\nc\n```\n\nd"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
 }
 
 // ── HTML entities ──

@@ -30,9 +30,13 @@ const ALL_RULES: CleanOptions = {
  * Import this only when you use it, so other bundles do not include the cleanup pass.
  */
 export function clean(rules: CleanOptions = ALL_RULES): Cleaner {
-  const resolved = { ...rules }
-  const rewritesLinks = resolved.fragments || resolved.redundantLinks || resolved.selfLinkHeadings
-  return { ...resolved, apply: target => rewritesLinks ? startPass(resolved, target) : undefined }
+  const resolved: Cleaner = {
+    ...rules,
+    apply: target => resolved.fragments || resolved.redundantLinks || resolved.selfLinkHeadings
+      ? startPass(resolved, target)
+      : undefined,
+  }
+  return resolved
 }
 
 // ── Link rewrites ──
@@ -507,11 +511,12 @@ function pairSpelledMarkers(markdown: string, spans: readonly string[], opens: n
   // takes a matching pair.
   const unpaired = new Map<string, number[]>()
   for (let index = spans.length - 1; index >= 0; index--) {
-    const list = unpaired.get(spans[index]!)
+    const spelling = stripQuotePrefixes(spans[index]!)
+    const list = unpaired.get(spelling)
     if (list)
       list.push(index)
     else
-      unpaired.set(spans[index]!, [index])
+      unpaired.set(spelling, [index])
   }
   const len = markdown.length
   const candidates: number[] = []
@@ -533,7 +538,7 @@ function pairSpelledMarkers(markdown: string, spans: readonly string[], opens: n
       i++
       continue
     }
-    if (isLineStart(markdown, i)) {
+    if (candidates.length === 0 && isLineStart(markdown, i)) {
       const run = fenceOpeningRun(markdown, i, len)
       if (run > 0) {
         fenceRun = run
@@ -542,7 +547,7 @@ function pairSpelledMarkers(markdown: string, spans: readonly string[], opens: n
         continue
       }
     }
-    if (code === 96 /* ` */ && !isEscaped(markdown, i)) {
+    if (candidates.length === 0 && code === 96 /* ` */ && !isEscaped(markdown, i)) {
       let end = i
       while (end < len && markdown.charCodeAt(end) === 96)
         end++
@@ -573,7 +578,7 @@ function pairSpelledMarkers(markdown: string, spans: readonly string[], opens: n
         let depth = candidates.length
         while (depth > 0) {
           depth--
-          const list = unpaired.get(markdown.slice(candidates[depth]!, end))
+          const list = unpaired.get(stripQuotePrefixes(markdown.slice(candidates[depth]!, end)))
           if (list?.length) {
             const span = list.pop()!
             opens[span] = candidates[depth]!
@@ -586,6 +591,29 @@ function pairSpelledMarkers(markdown: string, spans: readonly string[], opens: n
     }
     i++
   }
+}
+
+/** Quotes and lists indent child lines after an anchor records its spelling. */
+function stripQuotePrefixes(value: string): string {
+  let result = ''
+  let copied = 0
+  let newline = value.indexOf('\n')
+  while (newline !== -1) {
+    let end = newline + 1
+    while (value.charCodeAt(end) === 32)
+      end++
+    while (value.charCodeAt(end) === 62) {
+      end++
+      if (value.charCodeAt(end) === 32)
+        end++
+    }
+    if (end > newline + 1) {
+      result += value.slice(copied, newline + 1)
+      copied = end
+    }
+    newline = value.indexOf('\n', end)
+  }
+  return copied ? result + value.slice(copied) : value
 }
 
 /**
@@ -601,7 +629,7 @@ function pairSpelledMarkers(markdown: string, spans: readonly string[], opens: n
 function applyFragments(markdown: string, headings: readonly string[], spans: readonly string[], spanFragments: readonly string[]): CleanView {
   const count = spans.length
   if (count === 0)
-    return { markdown, settled: -1 }
+    return { markdown, settled: -1, mapPosition: position => position }
 
   const slugs = new Set<string>()
   for (const heading of headings) {
@@ -671,5 +699,46 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
   result += markdown.slice(copied)
   // Spelled pairs can change as later output closes a code span, so a view
   // whose source carries markers settles nothing before the end.
-  return { markdown: result, settled: written ? settled : 0 }
+  let positionMap: ((position: number) => number) | undefined
+  return {
+    markdown: result,
+    settled: written ? settled : 0,
+    mapPosition(position) {
+      positionMap ??= createPositionMap(dropAt)
+      return positionMap(position)
+    },
+  }
+}
+
+/** Build only when a reader needs offsets; ordinary conversion uses no map. */
+function createPositionMap(drops: ReadonlyMap<number, number>): (position: number) => number {
+  const starts: number[] = []
+  const ends: number[] = []
+  const totals: number[] = []
+  let removed = 0
+  let copied = 0
+  for (const start of [...drops.keys()].sort((a, b) => a - b)) {
+    if (start < copied)
+      continue
+    const length = drops.get(start)!
+    copied = start + length
+    removed += length
+    starts.push(start)
+    ends.push(copied)
+    totals.push(removed)
+  }
+  return (position) => {
+    let lower = 0
+    let upper = ends.length
+    while (lower < upper) {
+      const middle = (lower + upper) >>> 1
+      if (ends[middle]! <= position)
+        lower = middle + 1
+      else
+        upper = middle
+    }
+    const completed = lower > 0 ? totals[lower - 1]! : 0
+    const partial = lower < starts.length ? Math.max(0, position - starts[lower]!) : 0
+    return position - completed - partial
+  }
 }

@@ -329,6 +329,35 @@ export function lastOutputChar(buffer: readonly string[], end = buffer.length): 
   return -1
 }
 
+/** Whether only indentation follows a prose hard break. */
+export function endsAtHardBreak(buffer: readonly string[]): boolean {
+  let fragment = buffer.length - 1
+  let index = fragment >= 0 ? buffer[fragment]!.length : 0
+  let sawNewline = false
+  let breakSpaces = 0
+  for (;;) {
+    while (index === 0) {
+      if (--fragment < 0)
+        return false
+      index = buffer[fragment]!.length
+    }
+    const code = buffer[fragment]!.charCodeAt(--index)
+    if (!sawNewline) {
+      if (code === NEWLINE_CHAR)
+        sawNewline = true
+      else if (code !== SPACE_CHAR)
+        return false
+    }
+    else if (code === SPACE_CHAR) {
+      if (++breakSpaces === 2)
+        return true
+    }
+    else {
+      return false
+    }
+  }
+}
+
 /**
  * Separation a block needs to open at the content column `prefix` describes, or
  * `undefined` when the buffer already sits there.

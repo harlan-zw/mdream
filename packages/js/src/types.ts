@@ -121,6 +121,11 @@ export interface CleanPass {
 export interface CleanView {
   markdown: string
   /**
+   * Map a raw Markdown offset through this view's removal runs.
+   * @internal
+   */
+  mapPosition?: (position: number) => number
+  /**
    * Position in `markdown` of the earliest marked link no heading matches
    * yet, or -1 when every marked link is resolved. A still-unresolved link
    * regrows when a later heading matches its slug, moving every later
@@ -182,6 +187,8 @@ export interface ElementNode extends Node {
   depthMap: Uint16Array
   /** Plugin outputs collected during processing */
   pluginOutput?: string[]
+  /** Whether this element's enter event wrote an inline wrapper. */
+  hasEnterOutput?: boolean
 }
 
 export interface TextNode extends Node {
@@ -311,6 +318,8 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   /** Table processing state - specialized for Markdown tables */
   tableRenderedTable?: boolean
   tableCurrentRowCells?: number
+  /** A built-in row waits for its first cell before writing its opener. */
+  tableRowOpenerPending?: boolean
   tableColumnAlignments?: string[]
   /** See MarkdownState for semantics. */
   tableHeaderCells?: number
@@ -418,6 +427,8 @@ export interface TagHandler {
   literalEnter?: boolean
   /** When true, the `exit` string is a user-supplied tagOverride, exempt from empty-pair cleanup. */
   literalExit?: boolean
+  /** Whether a declarative literal exit string writes output. */
+  literalExitHasOutput?: boolean
   /**
    * Built-in tag id used by declarative string aliases.
    * @internal

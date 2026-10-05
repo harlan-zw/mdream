@@ -32,6 +32,29 @@ function bufferProbe() {
 }
 
 describe('text stream', () => {
+  it('wraps after a plugin rewrites earlier output', () => {
+    const plugin = createPlugin({
+      onNodeEnter(node, state) {
+        if (node.name === 'x-rewrite')
+          state.buffer[0] = ''
+      },
+    })
+    const html = '<p>aa<span>bb</span><span>dd</span><x-rewrite></x-rewrite> cc</p>'
+    expect(htmlToText(html, { wrapWidth: 8, plugins: [plugin] })).toBe('bbdd cc')
+  })
+
+  it.each([
+    ['<p><b>😀</b><span> abc</span><i> def</i></p>', '😀 abc\ndef'],
+    ['<p>ab <q></q><b>cd</b><i> ef</i></p>', 'ab cd\nef'],
+    ['<p>abcd</p><p><b>ef</b><span> gh</span></p>', 'abcd\n\nef gh'],
+  ])('keeps wrap columns after inline and block boundaries: %s', async (html, expected) => {
+    expect(htmlToText(html, { wrapWidth: 6 })).toBe(expected)
+    let output = ''
+    for await (const chunk of streamHtmlToText(chunkedStream(html, 1), { wrapWidth: 6 }))
+      output += chunk
+    expect(output).toBe(expected)
+  })
+
   const pages = [
     ['paragraphs', '<p>Some <b>bold</b> text, a <q>quote</q> and a <a href="/x">link</a>.</p>'.repeat(4000)],
     ['one long line', `<p>${'alpha <b>beta</b> gamma <i>delta</i> '.repeat(4000)}</p>`],

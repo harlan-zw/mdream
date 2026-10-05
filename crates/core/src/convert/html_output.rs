@@ -1,6 +1,8 @@
 use super::output::parse_bounded_u32;
 use super::*;
+use crate::url::is_safe_html_url;
 
+#[cfg(feature = "html")]
 pub(super) enum HtmlFrame {
   Heading {
     level: u8,
@@ -85,6 +87,7 @@ impl ConvertState {
     is_safe_html_url(resolved.as_ref(), image).then_some(resolved)
   }
 
+  #[cfg(feature = "html")]
   fn html_output_mut(&mut self) -> &mut String {
     match self.html_frames.last_mut() {
       Some(HtmlFrame::Heading { output, .. } | HtmlFrame::Pre { output, .. }) => output,
@@ -92,10 +95,12 @@ impl ConvertState {
     }
   }
 
+  #[cfg(feature = "html")]
   fn push_html(&mut self, value: &str) {
     self.html_output_mut().push_str(value);
   }
 
+  #[cfg(feature = "html")]
   fn push_html_text(&mut self, value: &str) {
     for frame in self.html_frames.iter_mut().rev() {
       if let HtmlFrame::Heading { text, .. } = frame {
@@ -201,6 +206,7 @@ impl ConvertState {
     Some(output)
   }
 
+  #[cfg(feature = "html")]
   pub(super) fn emit_html_enter(&mut self) {
     let Some(node) = self.stack.last() else {
       return;
@@ -275,6 +281,7 @@ impl ConvertState {
     }
   }
 
+  #[cfg(feature = "html")]
   pub(super) fn emit_html_exit(&mut self, node: &ElementNode) {
     if let Some(frame) = self.html_frames.last() {
       let in_pre = matches!(frame, HtmlFrame::Pre { .. });
@@ -330,6 +337,7 @@ impl ConvertState {
     }
   }
 
+  #[cfg(feature = "html")]
   pub(super) fn emit_html_text(&mut self, text: &str) {
     if !text.is_empty() {
       self.push_html_text(text);

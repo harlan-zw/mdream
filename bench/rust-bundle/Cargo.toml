@@ -1,0 +1,26 @@
+# Each consumer is its own package so cargo resolves mdream's features per
+# binary. One package with several bins would unify the features and link every
+# output format into all of them.
+[workspace]
+members = [
+  "common",
+  "baseline",
+  "markdown",
+  "text",
+  "safe-html",
+  "runtime-format"
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

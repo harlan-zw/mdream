@@ -20,7 +20,8 @@ function resolveOutputOptions(options: MdreamOptions) {
 
 /** Convert HTML to readable plain text. */
 export function htmlToText(html: string, options: Partial<MdreamOptions> = {}): string {
-  return processHtmlOutput(html, createTextOutputProcessor(options), resolveOutputOptions(options))
+  const outputOptions = resolveOutputOptions(options)
+  return processHtmlOutput(html, createTextOutputProcessor(options, outputOptions.plugins.length !== 0), outputOptions)
 }
 
 /** Stream HTML as readable plain text. */
@@ -28,7 +29,8 @@ export function streamHtmlToText(
   htmlStream: ReadableStream<Uint8Array | string> | null,
   options: Partial<MdreamOptions> = {},
 ): AsyncIterable<string> {
-  return streamHtmlOutput(htmlStream, createTextOutputProcessor(options), resolveOutputOptions(options))
+  const outputOptions = resolveOutputOptions(options)
+  return streamHtmlOutput(htmlStream, createTextOutputProcessor(options, outputOptions.plugins.length !== 0), outputOptions)
 }
 
 export type { MdreamOptions } from './types'

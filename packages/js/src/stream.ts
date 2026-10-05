@@ -1,6 +1,7 @@
 import type { ParseState } from './parse'
 import type { EngineOptions, NodeEvent, TagHandler, TransformPlugin } from './types'
 import { createMarkdownProcessor } from './markdown-processor'
+import { createMarkdownDrain } from './markdown-stream'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { endPlugins, processPluginsForEvent } from './plugin-processor'
 import { tagHandlers } from './tags'
@@ -22,10 +23,11 @@ export async function* streamHtmlToMarkdown(
   if (!htmlStream) {
     throw new Error('Invalid HTML stream provided')
   }
-  const decoder = new TextDecoder()
+  const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
+  let hasDecodedContent = false
   const reader = htmlStream.getReader()
 
-  const processor = createMarkdownProcessor(options, resolvedPlugins, tagOverrideHandlers)
+  const processor = createMarkdownProcessor(options, context => createMarkdownDrain(context, resolvedPlugins.length > 0))
   const parseState: ParseState = {
     depthMap: processor.state.depthMap,
     depth: 0,
@@ -48,10 +50,19 @@ export async function* streamHtmlToMarkdown(
         break
       }
 
+      // An empty string does not end a pending UTF-8 byte sequence.
+      if (value === '')
+        continue
+
       // Process the HTML chunk
-      const decoded = typeof value === 'string'
+      let decoded = typeof value === 'string'
         ? decoder.decode() + value
         : decoder.decode(value, { stream: true })
+      if (decoded && !hasDecodedContent) {
+        hasDecodedContent = true
+        if (typeof value !== 'string' && decoded.charCodeAt(0) === 0xFEFF)
+          decoded = decoded.slice(1)
+      }
       const htmlContent = `${remainingHtml}${decoded}`
 
       remainingHtml = parseHtmlStream(htmlContent, parseState, handleEvent)

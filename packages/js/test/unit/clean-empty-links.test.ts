@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { clean, slugify, stripHeadingFormatting } from '../../src/clean'
 import { htmlToMarkdown } from '../../src/index'
+import { tailwindPlugin } from '../../src/plugins/tailwind'
 import { withMinimalPreset } from '../../src/preset/minimal'
 
 const executableHrefs = [
@@ -10,6 +11,14 @@ const executableHrefs = [
 ]
 
 describe('clean.emptyLinks executable schemes', () => {
+  it('uses updated cleanup rules in serialization and post-processing', () => {
+    const cleaner = clean({ emptyLinks: true })
+    cleaner.emptyLinks = false
+    expect(htmlToMarkdown('<a href="#">Click</a>', { clean: cleaner })).toBe('[Click](#)')
+    cleaner.emptyLinks = true
+    expect(htmlToMarkdown('<a href="#">Click</a>', { clean: cleaner })).toBe('Click')
+  })
+
   it.each(executableHrefs)('strips %s while serializing', (href) => {
     expect(htmlToMarkdown(`<a href="${href}">Click</a>`, {
       clean: clean({ emptyLinks: true }),
@@ -60,6 +69,20 @@ describe('raw HTML cleaner boundaries', () => {
 })
 
 describe('clean.fragments source marker characters', () => {
+  it.each([
+    '<blockquote><blockquote><a href="#x">a<br>b</a></blockquote></blockquote>',
+    '<ul><li><blockquote><a href="#x">a<br>b</a></blockquote></li></ul>',
+    '<blockquote><a href="#x"><code>a`b</code><br>c</a></blockquote>',
+  ])('keeps cleanup independent of a source marker beside %s', (body) => {
+    const options = { clean: clean({ fragments: true }) }
+    expect(htmlToMarkdown(`<p>&#xFDD0;</p>${body}`, options)).toBe(htmlToMarkdown(`<p>z</p>${body}`, options).replace('z', '\uFDD0'))
+  })
+  it.each([
+    ['<blockquote><a href="#x">a<br>b</a></blockquote>', '\uFDD0\n\n> a  \n> b'],
+    ['<blockquote><h2>X</h2><a href="#x">a<br>b</a></blockquote>', '\uFDD0\n\n> ## X\n>\n> [a  \n> b](#x)'],
+  ])('resolves transformed links beside source markers: %s', (body, expected) => {
+    expect(htmlToMarkdown(`<p>&#xFDD0;</p>${body}`, { clean: clean({ fragments: true }) })).toBe(expected)
+  })
   it.each(['\uFDD0', '\uFDD1'])('keeps a source %s the pass did not write', (marker) => {
     const html = `<main><p>a&#x${marker.charCodeAt(0).toString(16).toUpperCase()};b</p></main>`
     expect(htmlToMarkdown(html, { clean: clean({ fragments: true }) })).toBe(`a${marker}b`)
@@ -115,5 +138,11 @@ describe('clean.fragments source marker characters', () => {
   it('drops a broken link whose title carries a source marker whole', () => {
     const html = '<p><a href="#a" title="t\uFDD1b">x</a></p>'
     expect(htmlToMarkdown(html, { clean: clean({ fragments: true }) })).toBe('x')
+  })
+})
+
+describe('tailwind Unicode class separators', () => {
+  it.each(['\u0085', '\u00A0', '\u1680', '\u2000', '\u2007', '\u2028', '\u2029', '\u202F', '\u205F', '\u3000'])('splits classes on U+%s', (separator) => {
+    expect(htmlToMarkdown(`<p class="font-bold${separator}italic">x</p>`, { plugins: [tailwindPlugin()] })).toBe('***x***')
   })
 })

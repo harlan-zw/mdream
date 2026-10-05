@@ -6,6 +6,12 @@ import { withMinimalPreset } from '../../src/preset/minimal'
 import { htmlToText } from '../../src/text'
 
 describe('root conversion', () => {
+  it.each(['../../guide', '/../../guide', './../../../guide'])('clamps %s to the origin root', (href) => {
+    expect(htmlToMarkdown(`<a href="${href}">Guide</a>`, {
+      origin: 'https://example.com/docs/',
+    })).toBe('[Guide](https://example.com/guide)')
+  })
+
   it('converts without loading optional plugins', () => {
     const html = '<main><h1>Hello</h1><p>A <strong>small</strong> test.</p></main>'
     expect(htmlToMarkdown(html)).toBe('# Hello\n\nA **small** test.')
@@ -91,5 +97,174 @@ describe('plugin reuse', () => {
     }
     const outputs = await Promise.all(pages.map(collect))
     expect(outputs).toEqual(pages.map(page => htmlToMarkdown(page, withMinimalPreset({ clean: false }))))
+  })
+})
+
+describe('writer ownership', () => {
+  const cases: [string, string][] = [
+    ['<table><tr></tr></table>', ''],
+    ['<p>x</p><table><tr></tr></table><p>y</p>', 'x\n\ny'],
+    ['<table><tr></tr><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></table>', '| a | b |\n| --- | --- |\n| c |'],
+    ['<table><tr><b>x</b><td>a</td></tr></table>', '**x**\n\n| a |\n| --- |'],
+    ['<p><code>a<code>b</code>c</code></p>', '`abc`'],
+    ['<p><code>`a<code>`b`</code>c`</code></p>', '`` `a`b`c` ``'],
+    ['<ul><li>x<code>a<code>b</code>c</code></li></ul>', '- x `abc`'],
+    ['<table><tr><td><code>a|<code>b|</code>c</code></td></tr></table>', '| `a\\|b\\|c` |\n| --- |'],
+    ['<p><code>a<code>b', '`ab`'],
+    ['<pre><td><pre>', '```\n<pre></pre>\n```'],
+    ['<pre>a<pre>b</pre>c</pre>d', '```\na\n\nb\n\nc\n```\n\nd'],
+    ['<pre>a<table><tr><td><pre>b</pre></td></tr></table>c</pre>d', '```\na\n\n| <pre>b</pre> |\n| --- |\n\nc\n```\n\nd'],
+    ['<label><h4>t</h4>x</label>', '#### t\n\nx'],
+    ['<small><h4>t</h4>x</small>', '#### t\n\nx'],
+    ['<a><h4>t</h4>x</a>', '<h4>t</h4>\n\nx'],
+    ['<a href="/x"><h2>Title</h2></a><p>next</p>', '[<h2>Title</h2>](/x)\n\nnext'],
+    ['<b><h4>t</h4></b>x', '**#### t**x'],
+  ]
+
+  it.each(cases)('serializes %s', (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+  })
+
+  it.each(cases)('streams %s at every split', async (html, expected) => {
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input))
+        output += chunk
+      expect(output, `split=${split}`).toBe(expected)
+    }
+  })
+
+  it.each([
+    [{ code: { enter: '{', exit: '}' } }, '{a{b}c}'],
+    [{ code: { exit: '}' } }, '`ab}c}'],
+    [{ 'x-code': 'code' }, '`abc`'],
+  ])('preserves nested code overrides %j', async (tagOverrides, expected) => {
+    const html = 'x-code' in tagOverrides
+      ? '<p><code>a<x-code>b</x-code>c</code></p>'
+      : '<p><code>a<code>b</code>c</code></p>'
+    expect(htmlToMarkdown(html, { tagOverrides })).toBe(expected)
+    for (const size of [1, 3, html.length]) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let index = 0; index < html.length; index += size)
+            controller.enqueue(html.slice(index, index + size))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { tagOverrides }))
+        output += chunk
+      expect(output, `size=${size}`).toBe(expected)
+    }
+  })
+
+  it('keeps a first row deferred under a spacing-only override', () => {
+    expect(htmlToMarkdown('<table><tr></tr><tr><td>a</td></tr></table>', {
+      tagOverrides: { tr: { spacing: [0, 1] } },
+    })).toBe('| a |\n| --- |')
+  })
+
+  it('gives sibling code spans separate owners under an exit-only override', () => {
+    expect(htmlToMarkdown('<code>a</code><code>b</code>', {
+      tagOverrides: { code: { exit: '}' } },
+    })).toBe('`a}`b}')
+  })
+
+  it.each([
+    ['<code>x</code>', '[x`'],
+    ['<code>a<code>b</code>c</code>d', '[a[b`c`d'],
+  ])('keeps default exits under an enter-only code override: %s', async (html, expected) => {
+    const options = { tagOverrides: { code: { enter: '[' } } }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let size = 1; size <= html.length; size++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let index = 0; index < html.length; index += size)
+            controller.enqueue(html.slice(index, index + size))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `size=${size}`).toBe(expected)
+    }
+  })
+
+  it('calls literal wrapper handlers only on their matching events', () => {
+    let enters = 0
+    let exits = 0
+    const output = htmlToMarkdown('<label><h2>T</h2>x</label>', {
+      plugins: [{
+        processAttributes(node) {
+          if (node.name === 'label') {
+            node.tagHandler = {
+              ...node.tagHandler,
+              literalEnter: true,
+              literalExit: true,
+              enter: () => {
+                enters++
+                return '['
+              },
+              exit: () => {
+                exits++
+                return ']'
+              },
+            }
+          }
+        },
+      }],
+    })
+    expect(output).toBe('[## T x]')
+    expect(enters).toBe(1)
+    expect(exits).toBe(1)
+  })
+
+  it.each([
+    ['<p><x-code>a<code>b</code>c</x-code></p>', '`abc`'],
+    ['<p><code>a<x-code>b`c</x-code>d</code>e</p>', '``ab`cd``e'],
+  ])('streams a code alias with one owner: %s', async (html, expected) => {
+    const options = { tagOverrides: { 'x-code': 'code' } }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let size = 1; size <= html.length; size++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let index = 0; index < html.length; index += size)
+            controller.enqueue(html.slice(index, index + size))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `size=${size}`).toBe(expected)
+    }
+  })
+
+  it('keeps deeply nested code in one span across small stream chunks', async () => {
+    const payload = 'x`'.repeat(128)
+    const html = `<p>${'<code>'.repeat(508)}${payload}${'</code>'.repeat(508)}</p>`
+    const expected = `\`\` ${payload} \`\``
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const size of [1, 7, 64, html.length]) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let index = 0; index < html.length; index += size)
+            controller.enqueue(html.slice(index, index + size))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input))
+        output += chunk
+      expect(output, `size=${size}`).toBe(expected)
+    }
   })
 })

@@ -14,30 +14,13 @@ const JS: Record<Format, (html: string) => string> = {
   html: html => htmlToSafeHtml(html),
 }
 
-// Inputs where the engines differ today. Most also differ in v1. Remove an
-// entry once the engines agree; the test fails until you do.
-const KNOWN_DIFFERENCES = new Set<string>([
-  ['text', '<ul><li>a<ul><li>b<ol><li>c</li><li>d<p>para</p></li></ol></li></ul></li><li>e</li></ul>'],
-  ['text', '<blockquote><p>q1</p><blockquote><p>q2</p><pre>p</pre></blockquote><p>q3</p></blockquote>'],
-  ['text', '<p>a</x></p><<p>>b</p><p attr="unterminated>c</p>'],
-  ['text', '<html><head><title>T: "q" \\ b</title><meta name="description" content="Desc # x"><meta property="og:title" content="OG"></head><body><header>hdr</header><main><h1>M</h1><p class="font-bold">bold tw</p><form>f</form></main><aside>as</aside></body></html>'],
-  ['text', '<table><caption>Cap</caption><tr><th>h</th></tr><tr><td>|pipe|</td></tr></table>'],
-  ['markdown', '<pre>a<b>bold</b>\n<br>after br</pre>'],
-  ['text', '<pre>a<b>bold</b>\n<br>after br</pre>'],
-  ['text', '<pre>x\n  </pre><p>After</p>'],
-  ['text', '<html><head><title>A</title><meta name="description" content="da"></head><body><header>x</header><h1>A</h1><p>a</p><footer>f</footer></body></html>'],
-].map(([format, html]) => `${format}\u0000${html}`))
-
 describe('javaScript and Rust engines agree on the corpus', () => {
   for (const format of ['markdown', 'text', 'html'] as const) {
     it(format, () => {
       for (const html of CONVERSION_CORPUS) {
         const rust = htmlToMarkdown(html, { format })
         const js = JS[format](html)
-        if (KNOWN_DIFFERENCES.has(`${format}\u0000${html}`))
-          expect(js, `remove the fixed known difference for ${JSON.stringify(html)}`).not.toBe(rust)
-        else
-          expect(js, JSON.stringify(html)).toBe(rust)
+        expect(js, JSON.stringify(html)).toBe(rust)
       }
     })
   }
