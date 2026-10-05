@@ -290,7 +290,7 @@ function lineStateBeforeRow(buffer: string[]): number {
 
 // A row's own line at the enclosing list item's content column. Outside a list
 // the marker is constant, which covers most tables.
-function rowMarker(state: HandlerContext['state']): string {
+export function rowMarker(state: HandlerContext['state']): string {
   const indent = state.listIndent
   const lineState = lineStateBeforeRow(state.buffer)
   if (!indent) {
@@ -315,8 +315,7 @@ const MAX_CELL_SPAN = 64
 // cells, or the delimiter row is too narrow and GFM drops every cell past it.
 function cellEnter(node: HandlerContext['node'], state: HandlerContext['state']): string {
   if (state.tableRowOpenerPending) {
-    state.tableRowOpenerPending = false
-    return rowMarker(state)
+    return ''
   }
   if (node.index === 0)
     return ''

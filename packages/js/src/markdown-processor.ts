@@ -52,7 +52,7 @@ import {
   TAG_VAR,
   TEXT_NODE,
 } from './const'
-import { breakHandler, renderBreak } from './tags'
+import { breakHandler, renderBreak, rowMarker } from './tags'
 import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
@@ -1833,6 +1833,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (res._tag === 'BlockquoteExit')
           captionBufferChanged = true
       }
+    }
+    // The row owns its deferred opener. Cell overrides and plugin output
+    // replace only the cell's enter output, so they cannot suppress the row.
+    if (eventType === NodeEventEnter && (tagId === TAG_TD || tagId === TAG_TH)
+      && state.tableRowOpenerPending && state.depthMap[TAG_TABLE]! <= 1) {
+      state.tableRowOpenerPending = false
+      const opener = rowMarker(state)
+      if (output)
+        output.unshift(opener)
+      else
+        output = [opener]
     }
     if (emptyTableRow)
       return

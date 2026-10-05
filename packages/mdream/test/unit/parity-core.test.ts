@@ -14,6 +14,16 @@ const JS: Record<Format, (html: string) => string> = {
 
 const ALL: Format[] = ['markdown', 'text', 'html']
 
+it.each(['td', 'th'])('keeps table ownership under a %s enter override', (cell) => {
+  const html = `<table><tr></tr><tr><${cell}>a</${cell}></tr></table>`
+  for (const enter of ['', '[']) {
+    const options = { tagOverrides: { [cell]: { enter } } }
+    const expected = htmlToMarkdown(html, options)
+    expect(expected).toBe(`| ${enter}a |\n| --- |`)
+    expect(jsHtmlToMarkdown(html, options)).toBe(expected)
+  }
+})
+
 // The Rust engine is the output reference. Each group lists inputs where the
 // JavaScript engine used to differ from it.
 const GROUPS: Record<string, string[] | [string[], Format[]]> = {
