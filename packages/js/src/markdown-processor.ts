@@ -1704,6 +1704,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (inTemplate)
       return
 
+    // A plugin can skip the first cell's enter while accepting its contents
+    // or exit. Those events still need the row-owned opener. Fully excluded
+    // cells never reach this path, so an empty excluded row stays empty.
+    if (state.tableRowOpenerPending && state.depthMap[TAG_TABLE]! <= 1) {
+      const tagId = node.type === ELEMENT_NODE ? (node as ElementNode).tagId : undefined
+      const cellEvent = tagId === TAG_TD || tagId === TAG_TH
+      if (!(cellEvent && eventType === NodeEventEnter)
+        && (state.depthMap[TAG_TD] || state.depthMap[TAG_TH] || cellEvent)) {
+        state.tableRowOpenerPending = false
+        const opener = rowMarker(state)
+        state.buffer.push(opener)
+        state.lastContentCache = opener
+        state.lastTextNode = undefined
+      }
+    }
+
     if (state.listRulePending !== undefined) {
       const isVisibleText = node.type === TEXT_NODE
         && eventType === NodeEventEnter

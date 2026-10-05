@@ -1,9 +1,11 @@
+import type { ElementNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
-import { TAG_NAV } from '../../src/const'
+import { ELEMENT_NODE, NodeEventEnter, TAG_NAV } from '../../src/const'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createPlugin } from '../../src/pluggable/plugin'
 import { filterPlugin } from '../../src/plugins/filter'
 import { withMinimalPreset } from '../../src/preset/minimal'
+import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText } from '../../src/text'
 
 describe('root conversion', () => {
@@ -222,6 +224,91 @@ describe('writer ownership', () => {
         output += chunk
       expect(output, `width=${width}`).toBe('| [a |\n| --- |')
       expect(enters).toBe(1)
+    }
+  })
+
+  it.each(['td', 'th'])('keeps row ownership when a plugin skips the first %s enter', async (cell) => {
+    for (const [content, expectedContent] of [
+      ['a', 'a'],
+      ['', ''],
+      ['<b>a</b>', '**a**'],
+      ['<p>a</p>', 'a'],
+      ['<h2>a</h2>', '<h2>a</h2>'],
+      ['<code>a</code>', '`a`'],
+      ['<ul><li>a</li></ul>', '<ul><li>a</li></ul>'],
+      ['<pre><code>a</code></pre>', '<pre><code>a</code></pre>'],
+    ]) {
+      for (const single of [false, true]) {
+        let beforeCalls = 0
+        let skippedEnterCalls = 0
+        const html = `<table><tr><${cell} id="skip">${content}</${cell}>${single ? '' : `<${cell}>b</${cell}>`}</tr></table>`
+        const expected = single && !expectedContent
+          ? '| |\n| --- |'
+          : `| ${expectedContent}${single ? ' |\n| --- |' : ' | b |\n| --- | --- |'}`
+        const options = {
+          ...(single ? { tagOverrides: { [cell]: { enter: '[' } } } : {}),
+          plugins: [createPlugin({
+            beforeNodeProcess(event) {
+              if (event.type === NodeEventEnter && event.node.type === ELEMENT_NODE && (event.node as ElementNode).attributes?.id === 'skip') {
+                beforeCalls++
+                return { skip: true }
+              }
+            },
+          }), createPlugin({
+            beforeNodeProcess(event) {
+              if (event.type === NodeEventEnter && event.node.type === ELEMENT_NODE && (event.node as ElementNode).attributes?.id === 'skip')
+                beforeCalls++
+            },
+            onNodeEnter(node) {
+              if (node.attributes?.id === 'skip')
+                skippedEnterCalls++
+            },
+          })],
+        }
+        expect(htmlToMarkdown(html, options)).toBe(expected)
+        expect(beforeCalls).toBe(2)
+        expect(skippedEnterCalls).toBe(0)
+        expect(htmlToMarkdownSplitChunks(html, { ...options, chunkSize: 1000, chunkOverlap: 0 }).map(chunk => chunk.content).join('')).toBe(expected)
+        expect(beforeCalls).toBe(4)
+        expect(skippedEnterCalls).toBe(0)
+        for (let width = 1; width <= html.length; width++) {
+          beforeCalls = 0
+          const input = new ReadableStream<string>({
+            start(controller) {
+              for (let offset = 0; offset < html.length; offset += width)
+                controller.enqueue(html.slice(offset, offset + width))
+              controller.close()
+            },
+          })
+          let output = ''
+          for await (const chunk of streamHtmlToMarkdown(input, options))
+            output += chunk
+          expect(output, `width=${width}`).toBe(expected)
+          expect(beforeCalls).toBe(2)
+          expect(skippedEnterCalls).toBe(0)
+        }
+      }
+    }
+  })
+
+  it.each(['td', 'th', 'tr', 'table'] as const)('keeps entirely excluded %s output empty', async (excluded) => {
+    const cell = excluded === 'th' ? 'th' : 'td'
+    const html = `<table><tr><${cell}>a</${cell}><${cell}>b</${cell}></tr></table>`
+    const options = { plugins: [filterPlugin({ exclude: [excluded] })] }
+    expect(htmlToMarkdown(html, options)).toBe('')
+    expect(htmlToMarkdownSplitChunks(html, { ...options, chunkSize: 1000 }).map(chunk => chunk.content).join('')).toBe('')
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `width=${width}`).toBe('')
     }
   })
 
