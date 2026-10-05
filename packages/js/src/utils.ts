@@ -1,4 +1,4 @@
-import type { ElementNode, Node } from './types'
+import type { ElementNode, Node, TextNode } from './types'
 import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_BLOCKQUOTE, TAG_H1, TAG_H6, TAG_LI, TAG_SPAN, TAG_TD, TAG_TH } from './const'
 import {
   HTML_ENTITIES,
@@ -274,6 +274,48 @@ export function parseUnsignedInteger(raw: string | undefined): number | undefine
 }
 
 /**
+ * Drop leading whitespace as the Rust engine's `str::trim_start` does: Unicode
+ * White_Space, which counts U+0085 but not the U+FEFF that `trimStart` strips.
+ */
+export function trimOutputStart(value: string): string {
+  let start = 0
+  while (start < value.length) {
+    const code = value.charCodeAt(start)
+    if (code === 32 || (code >= 9 && code <= 13)) {
+      start++
+      continue
+    }
+    if (code < 0x85 || !(code === 0x85 || code === 0xA0 || code === 0x1680 || (code >= 0x2000 && code <= 0x200A)
+      || code === 0x2028 || code === 0x2029 || code === 0x202F || code === 0x205F || code === 0x3000)) {
+      break
+    }
+    start++
+  }
+  return start === 0 ? value : value.slice(start)
+}
+
+/**
+ * Drop the leading whitespace of text flagged `trimsAtLineStart` when the
+ * output is empty or ends a line. Parity with the Rust engine, which trims the
+ * first text of a block that way when the text has no block ancestor.
+ */
+export function trimTextAtLineStart(node: TextNode, buffer: readonly string[]): void {
+  const last = lastOutputChar(buffer)
+  if (last !== -1 && last !== 10)
+    return
+  const value = node.value
+  let start = 0
+  while (start < value.length) {
+    const code = value.charCodeAt(start)
+    if (code !== 32 && code !== 10 && code !== 9 && code !== 13 && code !== 12)
+      break
+    start++
+  }
+  if (start !== 0)
+    node.value = value.slice(start)
+}
+
+/**
  * Code unit last written to the buffer, or -1 when nothing has been. Handlers
  * legitimately return `''`, so the last *fragment* is not always the last
  * character.
@@ -285,6 +327,35 @@ export function lastOutputChar(buffer: readonly string[], end = buffer.length): 
       return fragment.charCodeAt(fragment.length - 1)
   }
   return -1
+}
+
+/** Whether only indentation follows a prose hard break. */
+export function endsAtHardBreak(buffer: readonly string[]): boolean {
+  let fragment = buffer.length - 1
+  let index = fragment >= 0 ? buffer[fragment]!.length : 0
+  let sawNewline = false
+  let breakSpaces = 0
+  for (;;) {
+    while (index === 0) {
+      if (--fragment < 0)
+        return false
+      index = buffer[fragment]!.length
+    }
+    const code = buffer[fragment]!.charCodeAt(--index)
+    if (!sawNewline) {
+      if (code === NEWLINE_CHAR)
+        sawNewline = true
+      else if (code !== SPACE_CHAR)
+        return false
+    }
+    else if (code === SPACE_CHAR) {
+      if (++breakSpaces === 2)
+        return true
+    }
+    else {
+      return false
+    }
+  }
 }
 
 /**

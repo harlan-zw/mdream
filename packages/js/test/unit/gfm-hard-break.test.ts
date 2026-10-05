@@ -91,3 +91,26 @@ describe('gfm hard breaks', () => {
     }
   })
 })
+
+describe('hard-break boundaries', () => {
+  it.each([
+    ['<ul><li><br></li><li>b</li></ul>', '-   \n- b'],
+    ['<ul><li>q<br></li><li>b</li></ul>', '- q  \n- b'],
+    ['<ul><li>q<br> </li><li>b</li></ul>', '- q  \n- b'],
+    ['<p><span>x<br> </span>a</p>', 'x  \na'],
+    ['<li>q<br> <p>X', '- q  \n\n  X'],
+    ['<li>q<br><div>X', '- q  \n\n  X'],
+    ['<li>q<br> <pre>x</pre>', '- q  \n\n  ```\n  x\n  ```'],
+    ['<li>q<br><pre><code>x</code></pre>', '- q  \n\n  ```\n  x\n  ```'],
+    ['<li>q<br> <table><tr><td>X</td></tr></table>', '- q  \n\n  | X |\n  | --- |'],
+    ['<li>q<br><em></em><p>X', '- q  \n\n  X'],
+    ['<li>q<br><code></code><p>X', '- q  \n\n  X'],
+    ['<li>q<br>t<p>X', '- q  \n  t\n\n  X'],
+    ['<pre>a <br>b</pre>', '```\na \nb\n```'],
+  ])('keeps spacing for %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+    }
+  })
+})

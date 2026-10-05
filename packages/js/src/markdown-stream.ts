@@ -1,7 +1,7 @@
 import type { BufferScanState, MarkdownStreamContext } from './markdown-processor'
 import { TAG_PRE } from './const'
 import { isAsciiWhitespace, trimAsciiWhitespaceEnd } from './markdown-processor'
-import { isInsideHeading } from './utils'
+import { isInsideHeading, trimOutputStart } from './utils'
 
 function resetBufferScanCursors(scan: BufferScanState): void {
   scan[1] = 0
@@ -33,11 +33,14 @@ export function createMarkdownDrain(context: MarkdownStreamContext, hasPlugins: 
   const { state, options, bufferScan } = context
   let lastYieldedLength = 0
   let hasYieldedContent = false
-  function getMarkdownChunk(): string {
-    const heldFragment = context.prepareDrain()
+  function getMarkdownChunk(final = false): string {
+    const heldFragment = context.prepareDrain(final)
     const content = state.buffer.join('')
-    const currentContent = hasYieldedContent ? content : content.trimStart()
-    const inPre = state.depthMap[TAG_PRE] !== 0
+    const currentContent = hasYieldedContent ? content : trimOutputStart(content)
+    // Before a <pre> opens its fence, its tail is still the block spacing its
+    // own enter wrote, which finalization trims. Only past the fence is
+    // trailing whitespace code.
+    const inPre = state.depthMap[TAG_PRE] !== 0 && state.preFenceOwnerDepth !== 0
     let stableLength = currentContent.length
     let retainMutableFragments = false
     if (inPre) {
@@ -49,13 +52,10 @@ export function createMarkdownDrain(context: MarkdownStreamContext, hasPlugins: 
         stableLength = trimAsciiWhitespaceEnd(currentContent).length
         retainMutableFragments = stableLength < currentContent.length
       }
-      else if (stableLength < currentContent.length) {
-        const lineLeading = stableLength === 0 || currentContent.charCodeAt(stableLength - 1) === 10
-        if (!lineLeading) {
-          stableLength = currentContent.length
-          retainMutableFragments = false
-        }
-      }
+      // A handler-written trailing space (a list marker opened before this
+      // <pre>) is retracted by the next block boundary, so it stays buffered
+      // mid-line exactly like the non-pre branch: yielding it as stable would
+      // strand the boundary newline behind the monotonic yield cursor.
     }
     else {
       // Block spacing and trailing spaces can still be trimmed by a later
@@ -85,8 +85,9 @@ export function createMarkdownDrain(context: MarkdownStreamContext, hasPlugins: 
 
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
     // closing sequence, so hold the run (and the spacing that decides whether it
-    // closes) until the heading is complete.
-    const headingHeld = isInsideHeading(state.depthMap)
+    // closes) until the heading is complete. The final call drops the hold: no
+    // later event can complete the heading.
+    const headingHeld = !final && isInsideHeading(state.depthMap)
     if (headingHeld) {
       let headingPos = currentContent.length
       while (headingPos > 0) {

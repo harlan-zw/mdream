@@ -1,6 +1,6 @@
 import type { ParseState } from './parse'
 import type { MdreamOptions, NodeEvent } from './types'
-import { createMarkdownProcessor } from './markdown-processor'
+import { createMarkdownProcessor, trimAsciiWhitespaceEnd } from './markdown-processor'
 import { assertEngineOptions } from './option-shape'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { resolvePlugins } from './pluggable/plugin'
@@ -8,6 +8,7 @@ import { endPlugins, processPluginsForEvent } from './plugin-processor'
 import { streamHtmlToMarkdown as _streamHtmlToMarkdown } from './stream'
 import { buildTagOverrideHandlers } from './tag-overrides'
 import { tagHandlers } from './tags'
+import { trimOutputStart } from './utils'
 
 function convert(html: string, options: MdreamOptions): string {
   const tagOverrideHandlers = options.tagOverrides
@@ -29,7 +30,9 @@ function convert(html: string, options: MdreamOptions): string {
   const leftover = parseHtmlStream(html, parseState, handleEvent)
   finalizeParse(leftover, parseState, handleEvent)
   endPlugins(plugins, processor.state)
-  const markdown = processor.state.buffer.join('').trim()
+  // Only ASCII whitespace ends the output, as in Rust: U+00A0 is content,
+  // and a stream cannot take back a nbsp it already yielded.
+  const markdown = trimAsciiWhitespaceEnd(trimOutputStart(processor.state.buffer.join('')))
   processor.state.buffer.length = 0
   return markdown
 }

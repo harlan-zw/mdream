@@ -42,8 +42,10 @@ const BLOCK_NEWLINE_HTML = [
 describe('streaming drain parity', () => {
   it('does not repeat a BOM-prefixed paragraph during finalization', async () => {
     const html = '\uFEFF<p>x</p>'
-    expect(htmlToMarkdown(html)).toBe('x')
-    expect(await streamConvert(html, html.length)).toBe('x')
+    const expected = '\uFEFF\n\nx'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize)).toBe(expected)
   })
 
   it.each(['\uFEFF', '\u00A0', '\u2003', '\u2028', ' \uFEFF\u00A0\n'])('emits content once after leading whitespace %j', async (leading) => {
@@ -104,6 +106,9 @@ describe('streaming drain parity', () => {
     '<p>text with <a href="/x">a [bracket] link</a> end</p>',
     '<ol><li>one<pre><code>cmd</code></pre></li><li>two</li></ol>',
     '<ul><li>one<pre><code>cmd</code></pre></li><li>two</li></ul>',
+    '<ul><li><pre><li><blockquote>x<code>',
+    '<li><blockquote><l></li><blockquote><v><blockquote>',
+    '<br><blockquote>',
     '<summary>text <svg></svg></summary>',
     '<details><summary>text <svg><polyline points="1 2"></polyline></svg></summary><p>b</p></details>',
     '<h3>Set priority</h3><a class="anchor-link" href="#x"></a><p>The value.</p>',
@@ -129,6 +134,19 @@ describe('streaming drain parity', () => {
 
     for (const chunkSize of [1, 3, 7, 16, 40])
       expect(await streamConvert(BLOCK_NEWLINE_HTML, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
+
+  it('streams a malformed quote list without throwing when compaction drops hold fragments', async () => {
+    const html = '<li><blockquote><l></li><blockquote><v><blockquote>'
+    const expected = htmlToMarkdown(html)
+    expect(await streamConvert(html, 1)).toBe(expected)
+  })
+
+  it('drops an empty quote whose prefix context was already streamed', async () => {
+    const html = '<br><blockquote>'
+    const expected = htmlToMarkdown(html)
+    expect(expected).toBe('')
+    expect(await streamConvert(html, 1)).toBe(expected)
   })
 
   it('bounds retained output while streaming a raw HTML anchor body', () => {
@@ -164,7 +182,7 @@ describe('streaming drain parity', () => {
     }
 
     finalizeParse(remainingHtml, parseState, processor.processEvent)
-    const finalChunk = processor.getMarkdownChunk()
+    const finalChunk = processor.getMarkdownChunk(true)
     emittedLength += finalChunk.length
     emittedHash = hashChunk(emittedHash, finalChunk)
 

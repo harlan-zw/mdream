@@ -138,6 +138,8 @@ export interface ElementNode extends Node {
   depthMap: Uint16Array
   /** Plugin outputs collected during processing */
   pluginOutput?: string[]
+  /** Whether this element's enter event wrote an inline wrapper. */
+  hasEnterOutput?: boolean
 }
 
 export interface TextNode extends Node {
@@ -150,6 +152,13 @@ export interface TextNode extends Node {
   }
   /** Custom data added by plugins */
   context?: PluginContext
+  /** Follows an end tag that closed nothing, so it gets no separator. */
+  joinsPrevious?: boolean
+  /**
+   * First text with no block ancestor: it drops its leading whitespace when
+   * the output is at the start of a line.
+   */
+  trimsAtLineStart?: boolean
 }
 
 /**
@@ -260,6 +269,8 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
   /** Table processing state - specialized for Markdown tables */
   tableRenderedTable?: boolean
   tableCurrentRowCells?: number
+  /** A built-in row waits for its first cell before writing its opener. */
+  tableRowOpenerPending?: boolean
   tableColumnAlignments?: string[]
   /** See MarkdownState for semantics. */
   tableHeaderCells?: number
@@ -290,8 +301,9 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
    * <pre> fenced-code deferral (issue #97). See MarkdownState for semantics.
    */
   preFencePending?: boolean
+  preFencePendingDepth?: number
   preFenceLang?: string
-  preFenceOpen?: boolean
+  preFenceOwnerDepth?: number
   /** Number of default blockquotes currently buffered for line prefixing. */
   bufferedBlockquoteDepth?: number
   /** Content-column prefix deferred after a list item rule. */
@@ -366,6 +378,8 @@ export interface TagHandler {
   literalEnter?: boolean
   /** When true, the `exit` string is a user-supplied tagOverride, exempt from empty-pair cleanup. */
   literalExit?: boolean
+  /** Whether a declarative literal exit string writes output. */
+  literalExitHasOutput?: boolean
   /**
    * Built-in tag id used by declarative string aliases.
    * @internal

@@ -6,7 +6,8 @@ import { endPlugins, processPluginsForEvent } from './plugin-processor'
 export interface OutputProcessor {
   state: MdreamRuntimeState & { depthMap: Uint16Array }
   processEvent: (event: NodeEvent) => void
-  takeOutput: () => string
+  /** Output that no later event can change. `final` drops every hold. */
+  takeOutput: (final: boolean) => string
 }
 
 interface OutputOptions {
@@ -40,7 +41,7 @@ export function processHtmlOutput(html: string, processor: OutputProcessor, opti
   const leftover = parseHtmlStream(html, parseState, handleEvent)
   finalizeParse(leftover, parseState, handleEvent)
   endPlugins(plugins, processor.state)
-  return processor.takeOutput()
+  return processor.takeOutput(true)
 }
 
 export async function* streamHtmlOutput(
@@ -78,7 +79,7 @@ export async function* streamHtmlOutput(
       }
       remainingHtml = parseHtmlStream(`${remainingHtml}${decoded}`, parseState, handleEvent)
 
-      const chunk = processor.takeOutput()
+      const chunk = processor.takeOutput(false)
       if (chunk)
         yield chunk
     }
@@ -88,7 +89,7 @@ export async function* streamHtmlOutput(
     finalizeParse(leftover, parseState, handleEvent)
     endPlugins(plugins, processor.state)
 
-    const finalChunk = processor.takeOutput()
+    const finalChunk = processor.takeOutput(true)
     if (finalChunk)
       yield finalChunk
   }

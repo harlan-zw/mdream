@@ -83,7 +83,7 @@ export async function* streamHtmlToMarkdown(
     endPlugins(resolvedPlugins, processor.state)
 
     // Emit any final content
-    const finalChunk = processor.getMarkdownChunk()
+    const finalChunk = processor.getMarkdownChunk(true)
     if (finalChunk) {
       yield finalChunk
     }
