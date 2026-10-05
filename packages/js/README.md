@@ -6,6 +6,9 @@
 
 ## Installation
 
+The examples below follow the API from [#224](https://github.com/harlan-zw/mdream/pull/224).
+For `2.0.0-beta.1`, read the version note in [Migrating from v1](#migrating-from-v1) first.
+
 ```bash
 # pnpm
 pnpm add @mdream/js@beta
@@ -34,9 +37,15 @@ yarn add @mdream/js@beta
 
 ## Migrating from v1
 
+This guide covers the API from [#224](https://github.com/harlan-zw/mdream/pull/224), merged after `2.0.0-beta.1`.
+`@mdream/js@2.0.0-beta.1` uses the declarative plugin object, `hooks`, and `format` option.
+For that release's examples, use the [beta.1 README](https://github.com/harlan-zw/mdream/blob/v2.0.0-beta.1/packages/js/README.md).
+Match your installed version to its release notes before applying these changes.
+
 In v2, each output format and each plugin is a separate import.
 Your bundle contains only the code that you import.
-The Rust engine (`mdream`) keeps its v1 options. This guide applies to `@mdream/js` only.
+This guide applies to `@mdream/js` only.
+For the Rust engine, see the [`mdream` migration guide](../mdream/README.md#migrating-from-v1).
 If a converter gets a removed option, such as `format`, `hooks`, or a `plugins` object, it throws a `TypeError` that names the fix.
 It also throws for the top-level `mdream` options `minimal`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, and `extraction`.
 
@@ -159,6 +168,7 @@ If your own plugin keeps state for one document, use the setup form of `createPl
 
 - Import `withMinimalPreset` from `@mdream/js/preset/minimal`. The root export is removed.
 - The preset returns plugin instances. Plugins that you pass are added after the preset plugins.
+- An appended `filterPlugin()` adds exclusions. It cannot restore elements excluded by the preset.
 - You cannot disable or reconfigure one preset plugin through the preset. To do that, compose the plugins yourself:
 
 ```ts
@@ -172,6 +182,18 @@ htmlToMarkdown(html, {
   plugins: [isolateMainPlugin(), tailwindPlugin(), filterPlugin({ exclude: ['nav', 'footer'] })],
 })
 ```
+
+### Output changes
+
+`<title>` text no longer appears in the body, in any format.
+Use `frontmatterPlugin()` for Markdown metadata, or its `onExtract` callback to read the title separately.
+
+Streams now join to the same output as one-shot conversion.
+Chunk boundaries can change. Join chunks before comparing a complete document.
+The parser also preserves emoji split between chunks and decodes byte chunks across UTF-8 boundaries.
+Review saved output for parser, whitespace, plugin, and cleanup fixes from
+[#242](https://github.com/harlan-zw/mdream/pull/242), [#243](https://github.com/harlan-zw/mdream/pull/243),
+and [#241](https://github.com/harlan-zw/mdream/pull/241).
 
 ### Removed exports
 
