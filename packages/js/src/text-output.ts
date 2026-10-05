@@ -611,12 +611,12 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     buffer.push(content.slice(contextStart, keptStart))
     for (let index = 0; index < kept.length; index++)
       buffer.push(kept[index]!)
-    columnScan[0] = 0
-    columnScan[1] = bufferColumn
     // The context fragment replaces fragments `0..keepFrom`.
     const shift = keepFrom - 1
     for (let index = 0; index < openQuotes.length; index++)
       openQuotes[index]! -= shift
+    columnScan[0] = 0
+    columnScan[1] = bufferColumn
     yieldedLength = stableEnd - contextStart
   }
 

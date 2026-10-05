@@ -2013,10 +2013,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     let lastNewLines = 0
-    if (lastChar === '\n')
+    if (lastChar === '\n') {
       lastNewLines++
-    if (lastChar === '\n' && secondLastChar === '\n')
-      lastNewLines++
+      if (secondLastChar === '\n')
+        lastNewLines++
+    }
 
     if (eventType === NodeEventExit && openMarkerCount) {
       // Empty pair: only the enter marker was written, so drop it instead of emitting a close.

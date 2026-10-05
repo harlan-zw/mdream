@@ -122,10 +122,14 @@ declare function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>):
 import { htmlToMarkdown } from '@mdream/js'
 import { htmlToSafeHtml } from '@mdream/js/html'
 import { htmlToText } from '@mdream/js/text'
+```
 
-function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): string
-function htmlToText(html: string, options?: Partial<MdreamOptions>): string
-function htmlToSafeHtml(html: string, options?: Partial<MdreamOptions>): string
+```ts
+import type { MdreamOptions } from '@mdream/js'
+
+declare function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): string
+declare function htmlToText(html: string, options?: Partial<MdreamOptions>): string
+declare function htmlToSafeHtml(html: string, options?: Partial<MdreamOptions>): string
 ```
 
 **Example:**
@@ -472,7 +476,9 @@ const markdown = htmlToMarkdown(html, withMinimalPreset({
 `withMinimalPreset()` returns explicit plugin defaults. You can append custom plugins. An appended `filterPlugin()` adds to the preset's excludes:
 
 ```ts
+import { htmlToMarkdown } from '@mdream/js'
 import { filterPlugin } from '@mdream/js/plugins'
+import { withMinimalPreset } from '@mdream/js/preset/minimal'
 
 const markdown = htmlToMarkdown(html, withMinimalPreset({
   plugins: [filterPlugin({ exclude: ['.cookie-banner'] }), myPlugin],
@@ -584,11 +590,11 @@ htmlToMarkdown(html, {
 Use tag names or CSS selectors with the JS engine:
 
 ```ts
-import { TAG_FOOTER, TAG_NAV } from '@mdream/js'
+import { htmlToMarkdown } from '@mdream/js'
 import { filterPlugin } from '@mdream/js/plugins'
 
 htmlToMarkdown(html, {
-  plugins: [filterPlugin({ exclude: [TAG_NAV, TAG_FOOTER] })],
+  plugins: [filterPlugin({ exclude: ['nav', 'footer'] })],
 })
 ```
 

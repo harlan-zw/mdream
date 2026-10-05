@@ -11,6 +11,13 @@ const executableHrefs = [
 ]
 
 describe('clean.emptyLinks executable schemes', () => {
+  it('uses the current cleanup rules for each conversion', () => {
+    const cleaner = clean({ fragments: true })
+    expect(htmlToMarkdown('<a href="#missing">x</a>', { clean: cleaner })).toBe('x')
+    cleaner.fragments = false
+    expect(htmlToMarkdown('<a href="#missing">x</a>', { clean: cleaner })).toBe('[x](#missing)')
+  })
+
   it('uses updated cleanup rules in serialization and post-processing', () => {
     const cleaner = clean({ emptyLinks: true })
     cleaner.emptyLinks = false
