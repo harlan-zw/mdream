@@ -54,6 +54,7 @@ export async function* streamHtmlOutput(
 
   const plugins = options.plugins ?? []
   const parseState = createParseState(processor, options)
+  parseState.discardExcludedText = plugins.length === 0
   const handleEvent = createEventHandler(processor, plugins)
   const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
   const reader = htmlStream.getReader()

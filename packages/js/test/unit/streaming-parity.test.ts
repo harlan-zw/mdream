@@ -758,3 +758,132 @@ describe('streaming parity with the Rust core', () => {
     await expectStreamingParity('<pre><code>alpha\n\n</code></pre>', { format: 'text' })
   })
 })
+
+describe('excluded stream bodies', () => {
+  it.each(['markdown', 'html', 'text'] as const)('preserves %s output at every excluded boundary', async (format) => {
+    for (const body of [
+      '<style>é漢🎉 a < b &amp;</style>',
+      '<style>x</style attr="<">',
+      '<style>x</STYLEfoo>ignored</STYLE >',
+      '<!--unterminated --!',
+      '<![CDATA[unterminated ]',
+      '<!DOCTYPE unterminated',
+      '<iframe>é漢🎉 <p>ignored</p></iframe>',
+      '<noembed>ignored &amp; <b>x</b></noembed>',
+      '<!--body <b>ignored</b>-->',
+      '<!--body --!>',
+      '<!-->',
+      '<!--->',
+      '<![CDATA[ignored <b>x</b> ]]>',
+      '<!DOCTYPE anything>',
+    ]) {
+      const html = `<p>before ${body} after <a href="/x">link</a></p>`
+      const options = { format }
+      const expected = convertOnce(html, options)
+      for (let size = 1; size <= html.length; size++)
+        expect(await streamConvert(html, size, options), `${body} size=${size}`).toBe(expected)
+    }
+  })
+  it.each(['markdown', 'html', 'text'] as const)('preserves %s output after long excluded bodies', async (format) => {
+    for (const [open, close] of [['<script>', '</script>'], ['<style>', '</style>'], ['<!--', '-->'], ['<![CDATA[', ']]>']]) {
+      const html = `<p>before</p>${open}${'xé漢🎉 &amp; '.repeat(16384)}${close}<p>after</p>`
+      expect(await streamConvert(html, 4096, { format })).toBe(convertOnce(html, { format }))
+    }
+  })
+  it('preserves script and CDATA overrides', async () => {
+    const overrides: ParityOptions[] = [
+      { tagOverrides: { script: 'p' } },
+      { tagOverrides: { '#cdata-section': { enter: 'begin:', exit: ':end' } } },
+    ]
+    for (const options of overrides) {
+      const html = '<script>visible é漢🎉</script><p>before <![CDATA[visible x]]> after</p>'
+      const expected = convertOnce(html, options)
+      for (let size = 1; size <= html.length; size++)
+        expect(await streamConvert(html, size, options)).toBe(expected)
+    }
+  })
+})
+
+describe('discarded input boundary recovery', () => {
+  it.each(['markdown', 'html', 'text'] as const)('preserves %s malformed comment start states', async (format) => {
+    for (const comment of [
+      '<!--!>',
+      '<!---!>',
+      '<!-->',
+      '<!--->',
+      '<!---->',
+      '<!--x--!>',
+      '<!--!>ignored-->',
+      '<!---!>ignored-->',
+      '<!--x--!ignored-->',
+    ]) {
+      const html = `<p>before</p>${comment}<p>after</p>`
+      const options = { format }
+      const expected = convertOnce(html, options)
+      for (let split = 0; split <= html.length; split++)
+        expect(await streamConvertAtSplit(html, split, options), `${comment} split=${split}`).toBe(expected)
+      for (const size of [1, 2, 3, 4, 7])
+        expect(await streamConvert(html, size, options), `${comment} size=${size}`).toBe(expected)
+    }
+  })
+
+  it.each(['markdown', 'html', 'text'] as const)('preserves %s raw-text closes across the depth limit', async (format) => {
+    for (const tag of ['style', 'iframe', 'noembed']) {
+      for (const depth of [511, 512, 513]) {
+        const before = `${'<div>'.repeat(depth)}<${tag}>ignored`
+        const close = `</${tag} attr="<">`
+        const after = `<p>visible</p>${'</div>'.repeat(depth)}<p>tail</p>`
+        const html = before + close + after
+        const options = { format }
+        const expected = convertOnce(html, options)
+        for (let offset = 0; offset <= close.length; offset++) {
+          const split = before.length + offset
+          expect(await streamConvertAtSplit(html, split, options), `${tag} depth=${depth} offset=${offset}`).toBe(expected)
+        }
+      }
+    }
+  })
+})
+
+describe('visible raw-text declaration carry', () => {
+  it.each(['markdown', 'html', 'text'] as const)('preserves %s text after unterminated declarations', async (format) => {
+    for (const tag of ['textarea', 'xmp', 'plaintext', 'title', 'style', 'iframe', 'noembed']) {
+      for (const declaration of ['<!--body that remains visible', '<!DOCTYPE unfinished body', '<![CDATA[unfinished body']) {
+        for (const tail of ['', `</${tag}><p>after</p>`]) {
+          const html = `<${tag}>before ${declaration}${tail}`
+          const options = { format }
+          const expected = convertOnce(html, options)
+          for (let split = 0; split <= html.length; split++)
+            expect(await streamConvertAtSplit(html, split, options), `${tag} ${declaration} split=${split}`).toBe(expected)
+          for (const size of [1, 2, 3, 5, 8, 13, 4096])
+            expect(await streamConvert(html, size, options), `${tag} size=${size}`).toBe(expected)
+        }
+      }
+    }
+  })
+
+  it('preserves visible raw-text declarations through aliases and plugins', async () => {
+    const html = '<style>before <!--unfinished body</style><p>after</p>'
+    for (const plugins of [[], [createPlugin({ processTextNode() {} })]]) {
+      const options: ParityOptions = { tagOverrides: { style: 'textarea' }, plugins }
+      const expected = convertOnce(html, options)
+      for (let split = 0; split <= html.length; split++)
+        expect(await streamConvertAtSplit(html, split, options)).toBe(expected)
+    }
+  })
+})
+
+describe('flattened declaration carry', () => {
+  it.each(['markdown', 'html', 'text'] as const)('preserves %s raw-text declaration boundaries after flattening', async (format) => {
+    for (const tag of ['textarea', 'style', 'title']) {
+      for (const declaration of ['<!--unfinished', '<![CDATA[unfinished']) {
+        const before = `${'<div>'.repeat(512)}<${tag}>before `
+        const html = `${before + declaration}</${tag}><p>after</p>${'</div>'.repeat(512)}`
+        const options = { format }
+        const expected = convertOnce(html, options)
+        for (let offset = 0; offset <= declaration.length; offset++)
+          expect(await streamConvertAtSplit(html, before.length + offset, options)).toBe(expected)
+      }
+    }
+  })
+})
