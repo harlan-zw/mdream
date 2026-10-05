@@ -1230,6 +1230,58 @@ function flushBlockquoteLines(state: MarkdownState): boolean {
   return true
 }
 
+function prepareQuoteOutput(state: MarkdownState, bufferScan: BufferScanState, quoteScan: QuoteScan | undefined): QuoteScan | undefined {
+  const owner = state.blockquotes[0]!
+  let start = owner.fragment
+  for (let index = 1; index < state.blockquotes.length; index++)
+    start = Math.min(start, state.blockquotes[index]!.fragment)
+  if (!quoteScan || quoteScan.owner !== owner || quoteScan.depth !== state.blockquotes.length
+    || quoteScan.start !== start || state.buffer[quoteScan.fragment - 1] !== quoteScan.lastFragment) {
+    quoteScan = {
+      owner,
+      depth: state.blockquotes.length,
+      start,
+      fragment: start,
+      lastFragment: undefined,
+      length: 0,
+      newline: -1,
+      settledEnd: -1,
+      attemptedEnd: -1,
+    }
+  }
+  // Scan only new fragments. A long line has no settled boundary and
+  // must not be joined and rescanned after every input chunk.
+  for (; quoteScan.fragment < state.buffer.length; quoteScan.fragment++) {
+    const fragment = state.buffer[quoteScan.fragment]!
+    const lastNewline = fragment.lastIndexOf('\n')
+    const contentEnd = trimAsciiWhitespaceEnd(fragment).length
+    if (contentEnd > 0) {
+      const settled = lastNewline < contentEnd
+        ? lastNewline
+        : fragment.lastIndexOf('\n', contentEnd - 1)
+      quoteScan.settledEnd = settled === -1 ? quoteScan.newline : quoteScan.length + settled
+    }
+    if (lastNewline !== -1)
+      quoteScan.newline = quoteScan.length + lastNewline
+    quoteScan.length += fragment.length
+    quoteScan.lastFragment = fragment
+  }
+  // Observe raw-HTML context before quote prefixes rewrite line leads.
+  if (quoteScan.length >= 8192 && quoteScan.settledEnd > quoteScan.attemptedEnd) {
+    quoteScan.attemptedEnd = quoteScan.settledEnd
+    const lineLead = lineOpensRawHtmlBlock(state.buffer, bufferScan)
+    if (flushBlockquoteLines(state)) {
+      quoteScan = undefined
+      bufferScan[5] = lineLead
+      bufferScan[1] = 0
+      bufferScan[2] = 0
+      bufferScan[3] = 0
+      bufferScan[4] = 0
+    }
+  }
+  return quoteScan
+}
+
 function collapseNestedBlockquoteSeparator(buffer: string[], positions?: OutputPositions): void {
   if (newlineRunBefore(buffer, buffer.length) < 2)
     return
@@ -2580,54 +2632,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       resolveItemMarker(state, false, unresolvedCaptionFragment)
       if (!final && state.blockquotes.length > 0 && !state.outputPositions
         && !cleanPass?.holdsOutput && getHeldOutputFragment(false, false) === Infinity) {
-        const owner = state.blockquotes[0]!
-        let start = owner.fragment
-        for (let index = 1; index < state.blockquotes.length; index++)
-          start = Math.min(start, state.blockquotes[index]!.fragment)
-        if (!quoteScan || quoteScan.owner !== owner || quoteScan.depth !== state.blockquotes.length
-          || quoteScan.start !== start || state.buffer[quoteScan.fragment - 1] !== quoteScan.lastFragment) {
-          quoteScan = {
-            owner,
-            depth: state.blockquotes.length,
-            start,
-            fragment: start,
-            lastFragment: undefined,
-            length: 0,
-            newline: -1,
-            settledEnd: -1,
-            attemptedEnd: -1,
-          }
-        }
-        // Scan only new fragments. A long line has no settled boundary and
-        // must not be joined and rescanned after every input chunk.
-        for (; quoteScan.fragment < state.buffer.length; quoteScan.fragment++) {
-          const fragment = state.buffer[quoteScan.fragment]!
-          const lastNewline = fragment.lastIndexOf('\n')
-          const contentEnd = trimAsciiWhitespaceEnd(fragment).length
-          if (contentEnd > 0) {
-            const settled = lastNewline < contentEnd
-              ? lastNewline
-              : fragment.lastIndexOf('\n', contentEnd - 1)
-            quoteScan.settledEnd = settled === -1 ? quoteScan.newline : quoteScan.length + settled
-          }
-          if (lastNewline !== -1)
-            quoteScan.newline = quoteScan.length + lastNewline
-          quoteScan.length += fragment.length
-          quoteScan.lastFragment = fragment
-        }
-        // Observe raw-HTML context before quote prefixes rewrite line leads.
-        if (quoteScan.length >= 8192 && quoteScan.settledEnd > quoteScan.attemptedEnd) {
-          quoteScan.attemptedEnd = quoteScan.settledEnd
-          const lineLead = lineOpensRawHtmlBlock(state.buffer, bufferScan)
-          if (flushBlockquoteLines(state)) {
-            quoteScan = undefined
-            bufferScan[5] = lineLead
-            bufferScan[1] = 0
-            bufferScan[2] = 0
-            bufferScan[3] = 0
-            bufferScan[4] = 0
-          }
-        }
+        quoteScan = prepareQuoteOutput(state, bufferScan, quoteScan)
       }
       else {
         quoteScan = undefined
