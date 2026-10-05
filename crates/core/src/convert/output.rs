@@ -662,9 +662,18 @@ impl ConvertState {
     while ceiling > 0 && !self.buffer.is_char_boundary(ceiling) {
       ceiling -= 1;
     }
-    let Some(mut flush_end) = self.buffer[..ceiling].rfind('\n').map(|index| index + 1) else {
+    if self.blockquote_line_scanned_to > ceiling {
+      self.blockquote_line_scanned_to = 0;
+      self.blockquote_line_end = 0;
+    }
+    if let Some(index) = self.buffer[self.blockquote_line_scanned_to..ceiling].rfind('\n') {
+      self.blockquote_line_end = self.blockquote_line_scanned_to + index + 1;
+    }
+    self.blockquote_line_scanned_to = ceiling;
+    let mut flush_end = self.blockquote_line_end;
+    if flush_end == 0 {
       return;
-    };
+    }
     // A blank line at the tail is not final: whether it keeps a `>` depends on
     // content that has not arrived, and `finalize_blockquote` trims it off the
     // buffer end when none does. Quoting it here commits a prefix one-shot never

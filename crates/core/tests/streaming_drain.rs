@@ -3244,3 +3244,55 @@ fn metadata_pending_output_cap_matches_one_shot() {
     }
   }
 }
+
+#[test]
+fn quote_long_line_waits_for_a_completed_line() {
+  let span = format!("<span>{}</span>", "x".repeat(1024));
+  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  assert_eq!(processor.process_chunk("<blockquote>"), "");
+  for _ in 0..1024 {
+    assert_eq!(processor.process_chunk(&span), "");
+  }
+  let mut output = processor.process_chunk("</blockquote>");
+  output.push_str(&processor.finish());
+  assert_eq!(output, format!("> {}", "x".repeat(1024 * 1024)));
+}
+
+#[test]
+fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
+  let span = format!("<span>{}</span>", "é".repeat(512));
+  let prefix = format!("<blockquote>{}", span.repeat(16));
+  for tail in [
+    "<p>after</p></blockquote>",
+    "<blockquote><p>inside</p></blockquote></blockquote>",
+    "<ul><li><blockquote><p>inside</p></blockquote></li></ul></blockquote>",
+    "<em> </em><p>after</p></blockquote>",
+    "<a href='x'> </a><p>after</p></blockquote>",
+    "<figcaption><br><br> <a href='x'></a></figcaption><p>after</p></blockquote>",
+    "<pre><code>literal````\n</code></pre><p>after</p></blockquote>",
+    "<h2>heading ### </h2><p>after</p></blockquote>",
+    "<table><tr><td>cell</td></tr><tr><th>head</th></tr></table></blockquote>",
+    "<div>raw<br><br>* next</div></blockquote>",
+    "<br><br> </blockquote><p>outside</p>",
+  ] {
+    let html = format!("{prefix}{tail}");
+    for options in [
+      HTMLToMarkdownOptions::default(),
+      HTMLToMarkdownOptions::default().with_wrap_width(40),
+    ] {
+      let expected = html_to_markdown(&html, options.clone());
+      let mut processor = MarkdownStreamProcessor::new(options);
+      let mut output = processor.process_chunk("<blockquote>");
+      for _ in 0..16 {
+        output.push_str(&processor.process_chunk(&span));
+      }
+      for byte in tail.as_bytes() {
+        output.push_str(
+          &processor.process_chunk(std::str::from_utf8(std::slice::from_ref(byte)).unwrap()),
+        );
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "tail={tail}");
+    }
+  }
+}
