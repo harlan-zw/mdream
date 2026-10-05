@@ -92,6 +92,14 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     // Yielded slices otherwise retain one full parent string per chunk.
     // Wrapping also needs the current line until leading trim stops changing it.
     const wrapping = !!options.wrapWidth
+    if (hasYieldedContent && fragmentHeld && state.blockquotes.length > 0 && !headingHeld && !inPre && (!wrapping || leadingTrimmed === 0)) {
+      context.observeStableOutput(content, stableLength + leadingTrimmed)
+      let retainedStart = stableLength + leadingTrimmed - 17
+      if (wrapping)
+        retainedStart = Math.min(retainedStart, content.lastIndexOf('\n', stableLength + leadingTrimmed - 1))
+      const removed = context.compactQuotePrefix(heldFragment, content, Math.max(0, retainedStart))
+      lastYieldedLength -= removed
+    }
     if (hasYieldedContent && !fragmentHeld && !headingHeld && (!retainMutableFragments || !inPre) && (!wrapping || leadingTrimmed === 0)) {
       // A raw region resumes Markdown after a blank line. Remember that
       // transition before compaction drops the bytes that established it.

@@ -152,6 +152,18 @@ interface BlockquoteFrame {
   followsWhitespace: boolean
 }
 
+interface QuoteScan {
+  owner: BlockquoteFrame
+  depth: number
+  start: number
+  fragment: number
+  lastFragment: string | undefined
+  length: number
+  newline: number
+  settledEnd: number
+  attemptedEnd: number
+}
+
 interface GfmLifecycleState {
   openCodeSpans: CodeSpan[]
 }
@@ -1144,6 +1156,132 @@ function finalizeBlockquote(state: MarkdownState): void {
   state.lastContentCache = quoted
 }
 
+/** Quote completed lines while leaving the final line mutable. */
+function flushBlockquoteLines(state: MarkdownState): boolean {
+  const buffer = state.buffer
+  const frames = state.blockquotes
+  let start = buffer.length
+  let previous = -1
+  for (const frame of frames) {
+    // Rewrites before an earlier frame need the existing exit finalizer.
+    if (frame.fragment < previous)
+      return false
+    start = Math.min(start, frame.fragment)
+    previous = frame.fragment
+  }
+  let length = 0
+  for (let index = start; index < buffer.length; index++)
+    length += buffer[index]!.length
+  if (length < 8192)
+    return false
+
+  const content = buffer.slice(start).join('')
+  const stableEnd = trimAsciiWhitespaceEnd(content).length
+  let end = content.lastIndexOf('\n', stableEnd - 1) + 1
+  while (end >= 2 && content.charCodeAt(end - 2) === 10)
+    end--
+  if (end === 0)
+    return false
+
+  const starts: number[] = []
+  for (const frame of frames) {
+    let offset = 0
+    for (let index = start; index < frame.fragment; index++)
+      offset += buffer[index]!.length
+    if (offset >= end || (starts.length > 0 && offset < starts[starts.length - 1]!))
+      return false
+    starts.push(offset)
+  }
+
+  let quoted = content.slice(0, end)
+  for (let index = frames.length - 1; index >= 0; index--) {
+    const frame = frames[index]!
+    const offset = starts[index]!
+    const prefix = `${frame.listIndent}>`
+    const body = quoted.slice(offset, -1)
+    quoted = `${quoted.slice(0, offset) + body.split('\n').map((line) => {
+      const unindented = stripBlockquoteListIndent(line, frame.listIndent)
+      return unindented ? `${prefix} ${unindented}` : prefix
+    }).join('\n')}\n`
+  }
+
+  // Keep untouched tail fragments, including lastContentCache identity.
+  let cut = start
+  let remaining = end
+  while (remaining >= buffer[cut]!.length) {
+    remaining -= buffer[cut]!.length
+    cut++
+  }
+  const tail = buffer.slice(cut)
+  if (remaining !== 0) {
+    const original = tail[0]!
+    tail[0] = original.slice(remaining)
+    if (cut === buffer.length - 1 && state.lastContentCache === original)
+      state.lastContentCache = tail[0]
+  }
+  buffer.length = start
+  buffer.push(quoted)
+  for (const fragment of tail)
+    buffer.push(fragment)
+  for (const frame of frames) {
+    frame.fragment = start + 1
+    frame.followsWhitespace = true
+  }
+  return true
+}
+
+function prepareQuoteOutput(state: MarkdownState, bufferScan: BufferScanState, quoteScan: QuoteScan | undefined): QuoteScan | undefined {
+  const owner = state.blockquotes[0]!
+  let start = owner.fragment
+  for (let index = 1; index < state.blockquotes.length; index++)
+    start = Math.min(start, state.blockquotes[index]!.fragment)
+  if (!quoteScan || quoteScan.owner !== owner || quoteScan.depth !== state.blockquotes.length
+    || quoteScan.start !== start || state.buffer[quoteScan.fragment - 1] !== quoteScan.lastFragment) {
+    quoteScan = {
+      owner,
+      depth: state.blockquotes.length,
+      start,
+      fragment: start,
+      lastFragment: undefined,
+      length: 0,
+      newline: -1,
+      settledEnd: -1,
+      attemptedEnd: -1,
+    }
+  }
+  // Scan only new fragments. A long line has no settled boundary and
+  // must not be joined and rescanned after every input chunk.
+  for (; quoteScan.fragment < state.buffer.length; quoteScan.fragment++) {
+    const fragment = state.buffer[quoteScan.fragment]!
+    const lastNewline = fragment.lastIndexOf('\n')
+    const contentEnd = trimAsciiWhitespaceEnd(fragment).length
+    if (contentEnd > 0) {
+      const settled = lastNewline < contentEnd
+        ? lastNewline
+        : fragment.lastIndexOf('\n', contentEnd - 1)
+      quoteScan.settledEnd = settled === -1 ? quoteScan.newline : quoteScan.length + settled
+    }
+    if (lastNewline !== -1)
+      quoteScan.newline = quoteScan.length + lastNewline
+    quoteScan.length += fragment.length
+    quoteScan.lastFragment = fragment
+  }
+  // Observe raw-HTML context before quote prefixes rewrite line leads.
+  if (quoteScan.length >= 8192 && quoteScan.settledEnd > quoteScan.attemptedEnd) {
+    quoteScan.attemptedEnd = quoteScan.settledEnd
+    const lineLead = lineOpensRawHtmlBlock(state.buffer, bufferScan)
+    if (flushBlockquoteLines(state)) {
+      quoteScan = undefined
+      bufferScan[5] = lineLead
+      bufferScan[1] = 0
+      bufferScan[2] = 0
+      bufferScan[3] = 0
+      bufferScan[4] = 0
+    }
+  }
+  return quoteScan
+}
+
 function collapseNestedBlockquoteSeparator(buffer: string[], positions?: OutputPositions): void {
   if (newlineRunBefore(buffer, buffer.length) < 2)
     return
@@ -1309,6 +1447,7 @@ export interface MarkdownStreamContext {
   markYielded: () => void
   getMarkdown: () => string
   holdsOutput: boolean
+  compactQuotePrefix: (fragment: number, content: string, start: number) => number
 }
 
 interface MarkdownProcessor {
@@ -1369,6 +1508,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let rawHtmlLink: ElementNode | undefined
 
   let hasYieldedContent = false
+  let quoteScan: QuoteScan | undefined
 
   function captionNeedsPreparation(): boolean {
     return captionBoundary !== 0
@@ -2380,7 +2520,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     return cleanPass ? cleanPass.finish(result).markdown : result
   }
 
-  function getHeldOutputFragment(final = false): number {
+  function getNonQuoteHeldOutputFragment(final = false): number {
     // Each owner can rewrite its opening fragment. The earliest one bounds
     // every hold, so scan and trim that position once. The final call drops
     // every hold: a fence whose owner reset the open flag before exiting can
@@ -2397,16 +2537,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // An open link can still be unwrapped at its close.
     if (cleanPass && !final)
       heldFragment = Math.min(heldFragment, cleanPass.held())
-    // Every open quote rewrites from its own fragment at exit, so the earliest
-    // frame bounds the hold. Malformed trees can push a later frame at a
-    // smaller fragment, so scan rather than reading the first frame only. A
-    // frame left open at the final call lost its exit to a plugin.
-    const quoteHoldCount = final ? 0 : state.blockquotes.length
-    for (let index = 0; index < quoteHoldCount; index++) {
-      const fragment = state.blockquotes[index]!.fragment
-      if (fragment < heldFragment)
-        heldFragment = fragment
-    }
     const captionHoldCount = final ? 0 : captionFrameCount
     for (let index = 0; index < captionHoldCount; index++) {
       const offset = index * CAPTION_FRAME_SIZE
@@ -2423,6 +2553,21 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (heldFragment > state.buffer.length)
       heldFragment = Infinity
     return heldFragment
+  }
+
+  function getHeldOutputFragment(final = false): number {
+    let heldFragment = getNonQuoteHeldOutputFragment(final)
+    // Every open quote rewrites from its own fragment at exit, so the earliest
+    // frame bounds the hold. Malformed trees can push a later frame at a
+    // smaller fragment, so scan rather than reading the first frame only. A
+    // frame left open at the final call lost its exit to a plugin.
+    const quoteHoldCount = final ? 0 : state.blockquotes.length
+    for (let index = 0; index < quoteHoldCount; index++) {
+      const fragment = state.blockquotes[index]!.fragment
+      if (fragment < heldFragment)
+        heldFragment = fragment
+    }
+    return heldFragment > state.buffer.length ? Infinity : heldFragment
   }
 
   const processor = {
@@ -2490,7 +2635,30 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (codeSpanFragment !== undefined && (unresolvedCaptionFragment === -1 || codeSpanFragment < unresolvedCaptionFragment))
         unresolvedCaptionFragment = codeSpanFragment
       resolveItemMarker(state, false, unresolvedCaptionFragment)
+      if (!final && state.blockquotes.length > 0 && !state.outputPositions
+        && !cleanPass?.holdsOutput && getNonQuoteHeldOutputFragment() === Infinity) {
+        quoteScan = prepareQuoteOutput(state, bufferScan, quoteScan)
+      }
+      else {
+        quoteScan = undefined
+      }
       return getHeldOutputFragment(final)
+    },
+    compactQuotePrefix(fragment, content, start) {
+      if (state.blockquotes.length === 0 || start <= 0 || state.outputPositions
+        || getNonQuoteHeldOutputFragment() !== Infinity) {
+        return 0
+      }
+      const retained = content.slice(start)
+      state.buffer.splice(0, fragment, retained)
+      for (const frame of state.blockquotes)
+        frame.fragment -= fragment - 1
+      quoteScan = undefined
+      bufferScan[1] = 0
+      bufferScan[2] = 1
+      bufferScan[3] = bufferScan[5] === undefined ? 1 : 0
+      bufferScan[4] = 0
+      return start
     },
     markYielded() { hasYieldedContent = true },
   }) }
