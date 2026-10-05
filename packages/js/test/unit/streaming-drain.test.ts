@@ -6,7 +6,7 @@ import { createMarkdownProcessor } from '../../src/markdown-processor'
 import { createMarkdownDrain } from '../../src/markdown-stream'
 import { finalizeParse, parseHtmlStream } from '../../src/parse'
 import { processPluginsForEvent } from '../../src/plugin-processor'
-import { filterPlugin } from '../../src/plugins'
+import { createPlugin, filterPlugin } from '../../src/plugins'
 import { tagHandlers } from '../../src/tags'
 
 function chunkedStream(html: string, chunkSize: number): ReadableStream<string> {
@@ -58,6 +58,32 @@ describe('streaming drain parity', () => {
     for (const chunkSize of [1, 3, 7])
       expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
   })
+  it('does not repeat a BOM-prefixed paragraph during finalization', async () => {
+    const html = '\uFEFF<p>x</p>'
+    const expected = '\uFEFF\n\nx'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    expect(await streamConvert(html, html.length)).toBe(expected)
+  })
+
+  it.each(['\uFEFF', '\u00A0', '\u2003', '\u2028', ' \uFEFF\u00A0\n'])('emits content once after leading whitespace %j', async (leading) => {
+    for (const body of [
+      '<p>first</p><p>before\uFEFFafter and more words</p>',
+      '<h2>first #</h2><p><a href="/x">before\uFEFFafter</a> and more words</p>',
+      '<pre><code>first\n  second</code></pre><p>before\uFEFFafter</p>',
+    ]) {
+      const html = leading + body
+      for (const options of [
+        {},
+        { wrapWidth: 12 },
+        { plugins: [createPlugin({ processTextNode: node => ({ content: node.value, skip: false }) })] },
+      ]) {
+        const expected = htmlToMarkdown(html, options)
+        for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+          expect(await streamConvert(html, chunkSize, options), `chunkSize=${chunkSize}`).toBe(expected)
+      }
+    }
+  })
+
   it('keeps interleaved drain cursors independent of one-shot conversions', async () => {
     const inputs = [
       '<p>left</p><figure><figcaption>caption <em>one</em></figcaption></figure><p>end</p>',

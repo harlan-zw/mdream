@@ -29,6 +29,8 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     const content = fragmentHeld ? state.buffer.slice(0, heldFragment).join('') : state.buffer.join('')
     const currentContent = hasYieldedContent ? content : trimOutputStart(content)
     const leadingTrimmed = content.length - currentContent.length
+    // Keep the cursor in buffer coordinates across the initial leading trim.
+    const yieldedLength = Math.max(0, lastYieldedLength - leadingTrimmed)
     const inPre = state.depthMap[TAG_PRE] !== 0 && state.preFenceOwnerDepth !== 0
     let stableLength = currentContent.length
     let retainMutableFragments = false
@@ -75,18 +77,15 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     // A later mutable tail can move the stable boundary behind bytes already
     // returned to the caller. Keep the cursor monotonic so those bytes are not
     // emitted a second time once following content makes the tail stable.
-    if (stableLength < lastYieldedLength)
-      stableLength = lastYieldedLength
+    if (stableLength < yieldedLength)
+      stableLength = yieldedLength
 
-    const newContent = currentContent.slice(lastYieldedLength, stableLength)
-    lastYieldedLength = stableLength
+    const newContent = currentContent.slice(yieldedLength, stableLength)
+    if (newContent || hasYieldedContent)
+      lastYieldedLength = stableLength + leadingTrimmed
     if (newContent && !hasYieldedContent) {
       hasYieldedContent = true
       context.markYielded()
-      // Later calls stop trimming the leading whitespace, so move the cursor
-      // from trimmed offsets to buffer offsets. Otherwise it points into
-      // already-yielded bytes and they are emitted again.
-      lastYieldedLength += leadingTrimmed
     }
 
     // Keep only enough emitted context for spacing/newline decisions, plus any
