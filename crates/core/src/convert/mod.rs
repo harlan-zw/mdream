@@ -2705,7 +2705,7 @@ impl ConvertState {
     if self.disable_drain {
       return;
     }
-    if self.clean_flags & CLEAN_FRAGMENTS != 0 {
+    if self.retains_whole_document() {
       return;
     }
     // Keep the tail a late rewrite may still touch, and never drop the `[` of an

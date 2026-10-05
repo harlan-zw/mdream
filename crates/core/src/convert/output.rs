@@ -608,8 +608,9 @@ impl ConvertState {
   }
 
   /// These options rewrite across the whole document, so nothing streams early.
+  #[inline]
   pub(super) fn retains_whole_document(&self) -> bool {
-    self.clean_flags & CLEAN_FRAGMENTS != 0 || self.has_frontmatter || self.has_extraction
+    self.clean_flags & CLEAN_FRAGMENTS != 0
   }
 
   /// Where the earliest construct keeping quoted lines from being flushed began:
@@ -3088,9 +3089,7 @@ impl ConvertState {
 
   fn defer_streaming_break(&mut self, fragment: &str) -> bool {
     if !self.blockquotes.is_empty()
-      || self.clean_flags & CLEAN_FRAGMENTS != 0
-      || self.has_frontmatter
-      || self.has_extraction
+      || self.retains_whole_document()
       || self.depth_map[TAG_PRE as usize] != 0
       || self.depth_map[TAG_CODE as usize] != 0
     {

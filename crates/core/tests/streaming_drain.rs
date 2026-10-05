@@ -3061,3 +3061,186 @@ fn metadata_plugins_preserve_streamed_output_and_records() {
     }
   }
 }
+
+#[test]
+fn metadata_plugins_bound_pending_quotes_and_breaks() {
+  use mdream::types::{ExtractionConfig, FrontmatterConfig};
+
+  let mut maximum_peak = 0;
+  for format in [
+    OutputFormat::Markdown,
+    OutputFormat::Text,
+    OutputFormat::Html,
+  ] {
+    for (frontmatter, extraction) in [(true, false), (false, true), (true, true)] {
+      for (open, unit) in [
+        ("<blockquote>", "<p>Small streamed paragraph.</p>"),
+        (
+          "<blockquote><blockquote>",
+          "<p>Small streamed paragraph.</p>",
+        ),
+        ("", "<br>"),
+      ] {
+        let options = HTMLToMarkdownOptions {
+          plugins: Some(PluginConfig {
+            frontmatter: frontmatter.then(FrontmatterConfig::default),
+            extraction: extraction.then(|| ExtractionConfig::new(&["p"])),
+            ..Default::default()
+          }),
+          ..Default::default()
+        };
+        ACCT.set(Acct {
+          on: true,
+          live: 0,
+          peak: 0,
+        });
+        let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
+        let mut output = processor
+          .process_chunk("<head><title>Example</title></head>")
+          .len();
+        output += processor.process_chunk(open).len();
+        let mut extracted = 0;
+        for _ in 0..32768 {
+          output += processor.process_chunk(unit).len();
+          extracted += processor.take_extracted().map_or(0, |items| items.len());
+        }
+        let mut acct = ACCT.get();
+        acct.on = false;
+        ACCT.set(acct);
+        eprintln!(
+          "{format:?}, frontmatter={frontmatter}, extraction={extraction}, open={open:?}: pending peak={}, emitted={output}",
+          acct.peak
+        );
+        maximum_peak = maximum_peak.max(acct.peak);
+        assert_eq!(
+          extracted,
+          if extraction && !open.is_empty() {
+            32768
+          } else {
+            0
+          }
+        );
+        // Finishing expands a deferred break run into one returned String.
+        // Measure pending retention separately from that unavoidable output.
+        let _ = processor.finish();
+      }
+    }
+  }
+  assert!(
+    maximum_peak < 128 * 1024,
+    "metadata pending peak={maximum_peak}"
+  );
+}
+
+#[test]
+fn metadata_quote_flush_and_break_deferral_preserve_output() {
+  use mdream::types::{ExtractionConfig, FrontmatterConfig};
+
+  for fragments in [false, true] {
+    let options = HTMLToMarkdownOptions {
+      clean: Some(CleanConfig {
+        fragments,
+        ..Default::default()
+      }),
+      plugins: Some(PluginConfig {
+        frontmatter: Some(FrontmatterConfig::default()),
+        extraction: Some(ExtractionConfig::new(&["p", "strong"])),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    for html in [
+      format!(
+        "<head><title>Page</title></head><blockquote><blockquote>{}</blockquote></blockquote><p>after</p>",
+        "<p>A <strong>bold</strong> paragraph.</p>".repeat(2048)
+      ),
+      format!(
+        "<p>Before</p><blockquote>{}</blockquote><head><title>Late</title></head><p>After</p>",
+        "<p>quote</p>".repeat(4096)
+      ),
+      format!(
+        "<head><title>Page</title></head><p>Before</p>{}<p>after <a href='#missing'>fragment</a></p>",
+        "<br>".repeat(8192)
+      ),
+    ] {
+      for format in [
+        OutputFormat::Markdown,
+        OutputFormat::Text,
+        OutputFormat::Html,
+      ] {
+        let expected = html_to_format_result(&html, options.clone(), format);
+        for chunk_size in [31, 8192] {
+          let mut processor = MarkdownStreamProcessor::new_with_format(options.clone(), format);
+          let mut output = String::new();
+          let mut records = Vec::new();
+          for chunk in html.as_bytes().chunks(chunk_size) {
+            output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+            records.extend(processor.take_extracted().unwrap_or_default());
+          }
+          output.push_str(&processor.finish());
+          records.extend(processor.take_extracted().unwrap_or_default());
+          assert_eq!(
+            output, expected.markdown,
+            "{format:?}, fragments={fragments}, chunk={chunk_size}"
+          );
+          let expected_records = expected.extracted.as_deref().unwrap_or_default();
+          assert_eq!(records.len(), expected_records.len());
+          for (actual, expected) in records.iter().zip(expected_records) {
+            assert_eq!(actual.text_content, expected.text_content);
+            assert_eq!(actual.attributes, expected.attributes);
+          }
+          assert_eq!(processor.frontmatter(), expected.frontmatter);
+          assert_eq!(processor.truncated(), expected.truncated);
+        }
+      }
+    }
+  }
+}
+
+#[test]
+fn metadata_pending_output_cap_matches_one_shot() {
+  use mdream::types::{ExtractionConfig, FrontmatterConfig};
+
+  let options = HTMLToMarkdownOptions {
+    max_node_bytes: 128,
+    plugins: Some(PluginConfig {
+      frontmatter: Some(FrontmatterConfig::default()),
+      extraction: Some(ExtractionConfig::new(&["p"])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    format!(
+      "<head><title>Page</title></head><blockquote>{}</blockquote>",
+      "<p>Small paragraph.</p>".repeat(1024)
+    ),
+    format!(
+      "<blockquote><strong>{}</strong></blockquote>",
+      "word ".repeat(256)
+    ),
+    format!(
+      "<head><title>Page</title></head>{}<p>after</p>",
+      "<br>".repeat(256)
+    ),
+  ] {
+    for format in [
+      OutputFormat::Markdown,
+      OutputFormat::Text,
+      OutputFormat::Html,
+    ] {
+      let expected = html_to_format_result(&html, options.clone(), format);
+      for chunk_size in [1, 31, 8192] {
+        let mut processor = MarkdownStreamProcessor::new_with_format(options.clone(), format);
+        let mut output = String::new();
+        for chunk in html.as_bytes().chunks(chunk_size) {
+          output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+          let _ = processor.take_extracted();
+        }
+        output.push_str(&processor.finish());
+        assert_eq!(output, expected.markdown, "{format:?}, chunk={chunk_size}");
+        assert_eq!(processor.truncated(), expected.truncated);
+      }
+    }
+  }
+}
