@@ -14,9 +14,12 @@ import {
   TEXT_NODE,
 } from './const'
 import { createMarkdownProcessor } from './markdown-processor'
+import { assertEngineOptions } from './option-shape'
 import { parseHtmlStream } from './parse'
-import { processPluginsForEvent } from './plugin-processor'
-import { resolvePlugins } from './resolve-plugins'
+import { resolvePlugins } from './pluggable/plugin'
+import { endPlugins, processPluginsForEvent } from './plugin-processor'
+import { buildTagOverrideHandlers } from './tag-overrides'
+import { tagHandlers } from './tags'
 
 const MARKDOWN_HEADER_LINE_RE = /^#{1,6}\s+/
 const NEWLINE_RE = /\n/g
@@ -38,7 +41,10 @@ function createOptions(options: SplitterOptions) {
     chunkOverlap: options.chunkOverlap ?? 200,
     lengthFunction: options.lengthFunction ?? ((text: string) => text.length),
     keepSeparator: options.keepSeparator ?? false,
-    resolvedPlugins: resolvePlugins(options).plugins,
+    resolvedPlugins: resolvePlugins(options.plugins),
+    tagOverrideHandlers: options.tagOverrides
+      ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
+      : undefined,
   }
 }
 
@@ -64,6 +70,7 @@ export function* htmlToMarkdownSplitChunksStream(
   html: string,
   options: SplitterOptions = {},
 ): Generator<MarkdownChunk, void, undefined> {
+  assertEngineOptions(options)
   const opts = createOptions(options)
 
   if (opts.chunkOverlap >= opts.chunkSize) {
@@ -73,7 +80,7 @@ export function* htmlToMarkdownSplitChunksStream(
   let currentChunkCodeLanguage = ''
 
   // Create processor
-  const processor = createMarkdownProcessor(options, opts.resolvedPlugins)
+  const processor = createMarkdownProcessor(options)
   processor.state.onCodeFenceOpen = (language) => {
     if (language && !currentChunkCodeLanguage)
       currentChunkCodeLanguage = language
@@ -158,6 +165,8 @@ export function* htmlToMarkdownSplitChunksStream(
     depthMap: processor.state.depthMap,
     depth: 0,
     resolvedPlugins: opts.resolvedPlugins,
+    tagHandlers,
+    tagOverrideHandlers: opts.tagOverrideHandlers,
   }
 
   const eventBuffer: NodeEvent[] = []
@@ -269,6 +278,7 @@ export function* htmlToMarkdownSplitChunksStream(
     }
   }
 
+  endPlugins(opts.resolvedPlugins, processor.state)
   yield* flushChunk()
 }
 
@@ -283,7 +293,6 @@ export function htmlToMarkdownSplitChunks(
   html: string,
   options: SplitterOptions = {},
 ): MarkdownChunk[] {
-  const opts = createOptions(options)
   const chunks: MarkdownChunk[] = []
 
   for (const chunk of htmlToMarkdownSplitChunksStream(html, options)) {
@@ -291,7 +300,7 @@ export function htmlToMarkdownSplitChunks(
   }
 
   // Handle returnEachLine mode - split chunks into individual lines
-  if (opts.returnEachLine && chunks.length > 0) {
+  if (options.returnEachLine && chunks.length > 0) {
     const lineChunks: MarkdownChunk[] = []
 
     for (const chunk of chunks) {

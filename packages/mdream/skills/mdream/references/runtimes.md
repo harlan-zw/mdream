@@ -40,7 +40,7 @@ import { htmlToMarkdown } from 'mdream'
 const markdown = await htmlToMarkdown(html, { minimal: true })
 ```
 
-For browser code that wants a plain string with no WASM, `@mdream/js` is synchronous. Its options nest under `plugins`.
+For browser code that wants a plain string with no WASM, `@mdream/js` is synchronous. It takes plugins as an array of imports from `@mdream/js/plugins`.
 
 ## Web Worker, raw WASM, and CDN
 

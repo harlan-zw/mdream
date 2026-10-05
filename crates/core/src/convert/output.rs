@@ -69,13 +69,19 @@ fn write_markdown_destination(output: &mut String, destination: &str) {
 
 fn write_markdown_resource(output: &mut String, destination: &str, title: Option<&str>) {
   output.push('(');
-  write_markdown_destination(output, destination);
-  if let Some(title) = title
-    && !title.is_empty()
-  {
-    output.push_str(" \"");
-    write_ascii_escaped(output, title, &TITLE_ESCAPES);
-    output.push('"');
+  match title {
+    Some(title) if !title.is_empty() => {
+      // A bare title would parse as the destination, so an empty one is `<>`.
+      if destination.is_empty() {
+        output.push_str("<>");
+      } else {
+        write_markdown_destination(output, destination);
+      }
+      output.push_str(" \"");
+      write_ascii_escaped(output, title, &TITLE_ESCAPES);
+      output.push('"');
+    }
+    _ => write_markdown_destination(output, destination),
   }
   output.push(')');
 }

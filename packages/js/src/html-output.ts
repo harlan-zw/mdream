@@ -42,7 +42,7 @@ import {
   TagIdMap,
   TEXT_NODE,
 } from './const'
-import { resolveUrl, safeAnchorOutput } from './tags'
+import { resolveUrl, safeAnchorOutput } from './url'
 import { escapeHtml, getLanguageFromClass, isSafeHtmlUrl, markRenderedChildContent, parseUnsignedInteger } from './utils'
 
 interface HeadingFrame {
@@ -63,10 +63,11 @@ type HtmlFrame = HeadingFrame | PreFrame
 
 export interface HtmlOutputState {
   frames: HtmlFrame[]
+  hasOutput: boolean
 }
 
 export function createHtmlOutputState(): HtmlOutputState {
-  return { frames: [] }
+  return { frames: [], hasOutput: false }
 }
 
 function slugifyHeading(text: string): string {
@@ -143,23 +144,45 @@ function safeAttributes(node: ElementNode, tagId: number): string | undefined {
 
 function append(state: HtmlOutputState, output: string[], value: string): void {
   const frame = state.frames.at(-1)
-  if (frame)
+  if (frame) {
     frame.output += value
-  else
+  }
+  else {
     output.push(value)
+    if (value)
+      state.hasOutput = true
+  }
 }
 
 function processText(node: TextNode, state: HtmlOutputState, output: string[]): void {
   if (node.excludedFromMarkdown || !node.value)
     return
+  let value = node.value
+  if (!state.frames.length && !state.hasOutput) {
+    // Plugins can write output before this event. Stream drains must not reset
+    // the document's first-output boundary, or later inline spaces disappear.
+    state.hasOutput = output.some(fragment => fragment.length > 0)
+    if (!state.hasOutput) {
+      let start = 0
+      while (start < value.length) {
+        const code = value.charCodeAt(start)
+        if (code !== 32 && code !== 9 && code !== 10 && code !== 12 && code !== 13)
+          break
+        start++
+      }
+      value = value.slice(start)
+      if (!value)
+        return
+    }
+  }
   for (let index = state.frames.length - 1; index >= 0; index--) {
     const frame = state.frames[index]!
     if (frame._tag === 0) {
-      frame.text += node.value
+      frame.text += value
       break
     }
   }
-  append(state, output, escapeHtml(node.value))
+  append(state, output, escapeHtml(value))
 }
 
 function closeFrame(state: HtmlOutputState, output: string[], frame: HtmlFrame): void {

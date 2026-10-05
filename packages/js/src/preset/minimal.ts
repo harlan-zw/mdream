@@ -1,4 +1,5 @@
-import type { EngineOptions } from '../types'
+import type { Cleaner, MdreamOptions } from '../types'
+import { clean } from '../clean'
 import {
   TAG_ASIDE,
   TAG_BUTTON,
@@ -13,45 +14,42 @@ import {
   TAG_SELECT,
   TAG_TEXTAREA,
 } from '../const'
-
-const MINIMAL_EXCLUDE = [
-  TAG_FORM,
-  TAG_FIELDSET,
-  TAG_OBJECT,
-  TAG_EMBED,
-  TAG_FOOTER,
-  TAG_ASIDE,
-  TAG_IFRAME,
-  TAG_INPUT,
-  TAG_TEXTAREA,
-  TAG_SELECT,
-  TAG_BUTTON,
-  TAG_NAV,
-]
+import { filterPlugin } from '../plugins/filter'
+import { frontmatterPlugin } from '../plugins/frontmatter'
+import { isolateMainPlugin } from '../plugins/isolate-main'
+import { tailwindPlugin } from '../plugins/tailwind'
 
 /**
- * Creates a configurable minimal preset with advanced options.
- * Returns declarative plugin config that works with both JS and Rust engines.
+ * Compose the minimal plugin set with explicit user plugins. An appended
+ * `filterPlugin()` adds to the preset's excludes. To leave out a default
+ * plugin, pass your own `plugins` array instead of using the preset.
  */
-export function withMinimalPreset<T extends EngineOptions>(
-  options: T = {} as T,
-): T {
-  // A filter adds to the preset's excludes rather than replacing them.
-  // `filter: false` turns filtering off.
-  const filter = options.plugins?.filter
+export function withMinimalPreset(options: Omit<MdreamOptions, 'clean'> & { clean?: Cleaner | false } = {}): MdreamOptions {
   return {
-    // Default clean: true unless explicitly overridden
-    clean: options.clean !== undefined ? options.clean : true,
     ...options,
-    plugins: {
-      frontmatter: true,
-      isolateMain: true,
-      tailwind: true,
-      // Allow user overrides
-      ...options.plugins,
-      filter: filter === false
-        ? false
-        : { ...filter, exclude: [...MINIMAL_EXCLUDE, ...(filter?.exclude ?? [])] },
-    },
+    // Pass `clean: false` to turn off the default cleanup.
+    clean: options.clean === false ? undefined : options.clean ?? clean(),
+    plugins: [
+      frontmatterPlugin(),
+      isolateMainPlugin(),
+      tailwindPlugin(),
+      filterPlugin({
+        exclude: [
+          TAG_FORM,
+          TAG_FIELDSET,
+          TAG_OBJECT,
+          TAG_EMBED,
+          TAG_FOOTER,
+          TAG_ASIDE,
+          TAG_IFRAME,
+          TAG_INPUT,
+          TAG_TEXTAREA,
+          TAG_SELECT,
+          TAG_BUTTON,
+          TAG_NAV,
+        ],
+      }),
+      ...(options.plugins ?? []),
+    ],
   }
 }

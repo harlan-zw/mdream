@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { filterPlugin } from '../../src/plugins/filter'
+import { tailwindPlugin } from '../../src/plugins/tailwind'
 
 const LIMIT = 512
 
@@ -80,10 +82,8 @@ describe('element depth limit', () => {
   it('does not emit or pop a parent for a skipped CDATA override', () => {
     const html = `${'<div>'.repeat(LIMIT)}<![CDATA[hidden]]><p>visible</p>${'</div>'.repeat(LIMIT)}`
     expect(htmlToMarkdown(html, {
-      plugins: {
-        tagOverrides: {
-          '#cdata-section': { enter: '[', exit: ']', isInline: true, spacing: [0, 0] },
-        },
+      tagOverrides: {
+        '#cdata-section': { enter: '[', exit: ']', isInline: true, spacing: [0, 0] },
       },
     })).toBe('visible')
   })
@@ -127,19 +127,19 @@ describe('element depth limit', () => {
 
   it('keeps filtered content hidden in overflow', () => {
     const html = `${'<div>'.repeat(LIMIT)}<div style="display:none"></span><img src="x" alt="secret"></div>${'</div>'.repeat(LIMIT)}<p>after</p>`
-    expect(htmlToMarkdown(html, { plugins: { filter: {} } })).toBe('after')
+    expect(htmlToMarkdown(html, { plugins: [filterPlugin()] })).toBe('after')
   })
 
   it('scans a hidden raw overflow root as raw text', () => {
     const html = `${'<div>'.repeat(LIMIT)}<script hidden>let x = "<script>"</script>${'</div>'.repeat(LIMIT)}<p>after</p>`
-    expect(htmlToMarkdown(html, { plugins: { filter: {} } })).toBe('after')
-    expect(htmlToMarkdown(html, { plugins: { tailwind: true } })).toBe('after')
+    expect(htmlToMarkdown(html, { plugins: [filterPlugin()] })).toBe('after')
+    expect(htmlToMarkdown(html, { plugins: [tailwindPlugin()] })).toBe('after')
   })
 
   it('keeps visible overflow content with output-neutral plugins', () => {
     const html = `${'<div>'.repeat(LIMIT)}<span>visible</span>${'</div>'.repeat(LIMIT)}<p>after</p>`
-    expect(htmlToMarkdown(html, { plugins: { filter: {} } })).toBe('visible\n\nafter')
-    expect(htmlToMarkdown(html, { plugins: { tailwind: true } })).toBe('visible\n\nafter')
+    expect(htmlToMarkdown(html, { plugins: [filterPlugin()] })).toBe('visible\n\nafter')
+    expect(htmlToMarkdown(html, { plugins: [tailwindPlugin()] })).toBe('visible\n\nafter')
   })
 
   it('keeps self-closing content inert inside overflow templates', () => {
@@ -150,17 +150,17 @@ describe('element depth limit', () => {
   it('keeps excluded raw aliases inert in overflow', () => {
     const html = `${'<div>'.repeat(LIMIT)}<x-raw>secret</y-raw>still secret</x-raw>${'</div>'.repeat(LIMIT)}<p>after</p>`
     expect(htmlToMarkdown(html, {
-      plugins: { tagOverrides: { 'x-raw': 'script', 'y-raw': 'script' } },
+      tagOverrides: { 'x-raw': 'script', 'y-raw': 'script' },
     })).toBe('after')
   })
 
   it('starts opaque overflow only for plugin-hidden subtrees', () => {
     const html = `${'<div>'.repeat(LIMIT)}<span class="secret hidden"><img src="x" alt="secret"></span>${'</div>'.repeat(LIMIT)}<p>after</p>`
     expect(htmlToMarkdown(html, {
-      plugins: { filter: { exclude: ['.secret'] } },
+      plugins: [filterPlugin({ exclude: ['.secret'] })],
     })).toBe('after')
     expect(htmlToMarkdown(html, {
-      plugins: { tailwind: true },
+      plugins: [tailwindPlugin()],
     })).toBe('after')
   })
 })

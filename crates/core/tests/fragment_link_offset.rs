@@ -12,6 +12,41 @@ use mdream::types::{
   PluginConfig, TailwindConfig,
 };
 
+fn convert_fragments(html: &str) -> String {
+  mdream::html_to_markdown(
+    html,
+    HTMLToMarkdownOptions {
+      clean: Some(CleanConfig {
+        fragments: true,
+        ..Default::default()
+      }),
+      ..Default::default()
+    },
+  )
+}
+
+#[test]
+fn multibyte_fragment_offset_never_panics() {
+  let html = "<a href=\"#a\"><blockquote>é<a href=\"#b\">x</a></blockquote></a>";
+  let _ = convert_fragments(html);
+}
+
+#[test]
+fn drifted_fragment_offset_keeps_balanced_link_markers() {
+  let html = "<a href=\"#a\"><blockquote>e<a href=\"#b\">x</a></blockquote></a>";
+  let markdown = convert_fragments(html);
+  assert_eq!(markdown.matches('[').count(), markdown.matches(']').count());
+}
+
+// The outer `#a` matches no heading, so cleanup unwraps it. The inner `#b`
+// resolves to a heading, so it survives the rewrite intact.
+#[test]
+fn valid_nested_fragment_survives_broken_outer_link_cleanup() {
+  let html = "<h2 id=\"b\">b</h2><a href=\"#a\"><blockquote>e<a href=\"#b\">x</a></blockquote></a>";
+  let clean = convert_fragments(html);
+  assert_eq!(clean, "## b\n\n> e [x](#b)");
+}
+
 #[test]
 fn fragment_rewrite_survives_drifted_link_offset() {
   let clean = CleanConfig {

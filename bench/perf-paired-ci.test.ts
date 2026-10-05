@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assertPairedOutputEquivalence, drainByteChunks } from './perf-paired-ci.mjs'
+import { assertPairedOutputEquivalence, drainByteChunks, perfRun } from './perf-paired-ci.mjs'
 
 const textChunks = ['<p>alpha</p>', '<p>beta</p>']
 const byteChunks = textChunks.map(chunk => new TextEncoder().encode(chunk))
@@ -38,4 +38,14 @@ describe.each([
   it('passes identical output', () => {
     expect(paired(['gamma one', 'delta two'], ['gamma one', 'delta two'], bytes)).not.toThrow()
   })
+})
+
+it('records the paired mean ratio with its relative uncertainty', () => {
+  const run = perfRun(
+    { cpu: [9, 11], wall: [18, 22] },
+    { cpu: [0.5, 0.75], wall: [0.8, 1] },
+  )
+
+  expect(run.benches[0].comparisonRatio).toBe(0.625)
+  expect(run.benches[1].comparisonRatio).toBe(0.9)
 })

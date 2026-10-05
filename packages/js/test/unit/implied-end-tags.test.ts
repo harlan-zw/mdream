@@ -175,8 +175,8 @@ describe('tag nesting depth', () => {
 
   it('matches distinct custom elements by name', () => {
     const inline = (enter: string, exit: string) => ({ enter, exit, spacing: [0, 0] as [number, number], isInline: true })
-    const plugins = { tagOverrides: { 'x-a': inline('[', ']'), 'x-b': inline('(', ')') } }
-    expect(htmlToMarkdown('<x-a><x-b>X</x-a>Y</x-b>', { plugins }))
+    const tagOverrides = { 'x-a': inline('[', ']'), 'x-b': inline('(', ')') }
+    expect(htmlToMarkdown('<x-a><x-b>X</x-a>Y</x-b>', { tagOverrides }))
       .toBe('[(X)]Y')
   })
 })
