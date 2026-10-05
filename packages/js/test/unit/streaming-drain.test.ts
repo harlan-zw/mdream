@@ -41,6 +41,19 @@ const BLOCK_NEWLINE_HTML = [
 ].join('')
 
 describe('streaming drain parity', () => {
+  it.each([
+    '<b>*<li><li><ul>#</b></li></dl>',
+    '\uFEFF<em></dl>#</blockquote><p>&nbsp;</a><li>#',
+    '<b>prefix</b><ol start="999999999"><li>#</li></ol>',
+    '<ol start="999999999"><li>#</li></ol>',
+  ])('keeps list-marker escape context across compaction: %s', async (html) => {
+    const plugins = [createPlugin({ processTextNode() {} })]
+    for (const options of [{}, { plugins }, { wrapWidth: 20 }]) {
+      const expected = htmlToMarkdown(html, options)
+      for (const chunkSize of [1, 2, 3, 7, html.length])
+        expect(await streamConvert(html, chunkSize, options), `chunkSize=${chunkSize}`).toBe(expected)
+    }
+  })
   it.each(['<li><li><br><ol><li>', '_<li><br><ol><li>', '<dl><li><blockquote><ol><li>'])('preserves malformed list spacing after drained markers: %s', async (html) => {
     const expected = htmlToMarkdown(html)
     for (const chunkSize of [1, 3, 7])
