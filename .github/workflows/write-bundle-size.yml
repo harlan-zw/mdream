@@ -14,6 +14,7 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   update-stats:
@@ -57,14 +58,19 @@ jobs:
       - name: Update stats
         run: node bench/bundle/update.ts
 
-      - name: Commit changes
+      - name: Configure git
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add bench/bundle/last.json
-          if git diff --staged --quiet; then
-            echo "No bundle stat changes to commit."
-          else
-            git commit -m "chore: update bundle stats [skip ci]"
-            git push
-          fi
+
+      # Repository rules require changes to main to go through a pull request.
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          add-paths: bench/bundle/last.json
+          base: ${{ github.ref_name }}
+          commit-message: 'chore: update bundle stats [skip ci]'
+          title: 'chore: update bundle stats'
+          body: Automated bundle size stats update produced by the Update Bundle Stats workflow.
+          branch: chore/update-bundle-stats
+          delete-branch: true
