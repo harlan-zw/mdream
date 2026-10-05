@@ -53,7 +53,8 @@ The `format` option is removed. Import the converter for the format.
 
 The text and HTML converters accept `origin`, `plugins`, and `tagOverrides`.
 `htmlToText` also accepts `wrapWidth`.
-Both apply the `urls` and `emptyImages` rules from `clean`. They skip the Markdown post-processing pass, as in v1.
+Both apply the `urls` rule from `clean`. `htmlToText` also applies `emptyImages`.
+They skip the Markdown post-processing pass, as in v1.
 The CLI `--format` flag is unchanged.
 `frontmatterPlugin` now writes YAML frontmatter to Markdown output only.
 In v1, safe HTML output started with a YAML block. This also applies to `--preset minimal --format html`.
