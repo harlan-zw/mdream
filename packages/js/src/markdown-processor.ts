@@ -2520,7 +2520,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     return cleanPass ? cleanPass.finish(result).markdown : result
   }
 
-  function getHeldOutputFragment(final = false, includeQuotes = true): number {
+  function getNonQuoteHeldOutputFragment(final = false): number {
     // Each owner can rewrite its opening fragment. The earliest one bounds
     // every hold, so scan and trim that position once. The final call drops
     // every hold: a fence whose owner reset the open flag before exiting can
@@ -2537,16 +2537,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // An open link can still be unwrapped at its close.
     if (cleanPass && !final)
       heldFragment = Math.min(heldFragment, cleanPass.held())
-    // Every open quote rewrites from its own fragment at exit, so the earliest
-    // frame bounds the hold. Malformed trees can push a later frame at a
-    // smaller fragment, so scan rather than reading the first frame only. A
-    // frame left open at the final call lost its exit to a plugin.
-    const quoteHoldCount = final || !includeQuotes ? 0 : state.blockquotes.length
-    for (let index = 0; index < quoteHoldCount; index++) {
-      const fragment = state.blockquotes[index]!.fragment
-      if (fragment < heldFragment)
-        heldFragment = fragment
-    }
     const captionHoldCount = final ? 0 : captionFrameCount
     for (let index = 0; index < captionHoldCount; index++) {
       const offset = index * CAPTION_FRAME_SIZE
@@ -2563,6 +2553,21 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (heldFragment > state.buffer.length)
       heldFragment = Infinity
     return heldFragment
+  }
+
+  function getHeldOutputFragment(final = false): number {
+    let heldFragment = getNonQuoteHeldOutputFragment(final)
+    // Every open quote rewrites from its own fragment at exit, so the earliest
+    // frame bounds the hold. Malformed trees can push a later frame at a
+    // smaller fragment, so scan rather than reading the first frame only. A
+    // frame left open at the final call lost its exit to a plugin.
+    const quoteHoldCount = final ? 0 : state.blockquotes.length
+    for (let index = 0; index < quoteHoldCount; index++) {
+      const fragment = state.blockquotes[index]!.fragment
+      if (fragment < heldFragment)
+        heldFragment = fragment
+    }
+    return heldFragment > state.buffer.length ? Infinity : heldFragment
   }
 
   const processor = {
@@ -2631,7 +2636,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         unresolvedCaptionFragment = codeSpanFragment
       resolveItemMarker(state, false, unresolvedCaptionFragment)
       if (!final && state.blockquotes.length > 0 && !state.outputPositions
-        && !cleanPass?.holdsOutput && getHeldOutputFragment(false, false) === Infinity) {
+        && !cleanPass?.holdsOutput && getNonQuoteHeldOutputFragment() === Infinity) {
         quoteScan = prepareQuoteOutput(state, bufferScan, quoteScan)
       }
       else {
@@ -2641,7 +2646,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     },
     compactQuotePrefix(fragment, content, start) {
       if (state.blockquotes.length === 0 || start <= 0 || state.outputPositions
-        || getHeldOutputFragment(false, false) !== Infinity) {
+        || getNonQuoteHeldOutputFragment() !== Infinity) {
         return 0
       }
       const retained = content.slice(start)
