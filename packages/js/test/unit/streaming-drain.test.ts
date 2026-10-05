@@ -42,8 +42,10 @@ const BLOCK_NEWLINE_HTML = [
 describe('streaming drain parity', () => {
   it('does not repeat a BOM-prefixed paragraph during finalization', async () => {
     const html = '\uFEFF<p>x</p>'
-    expect(htmlToMarkdown(html)).toBe('x')
-    expect(await streamConvert(html, html.length)).toBe('x')
+    const expected = '\uFEFF\n\nx'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize)).toBe(expected)
   })
 
   it.each(['\uFEFF', '\u00A0', '\u2003', '\u2028', ' \uFEFF\u00A0\n'])('emits content once after leading whitespace %j', async (leading) => {

@@ -6,6 +6,13 @@ import { htmlToMarkdown } from '../../src'
 
 type Format = 'markdown' | 'text' | 'html'
 
+it('preserves leading Unicode whitespace before a paragraph', () => {
+  const html = '\uFEFF<p>x</p>'
+  const expected = '\uFEFF\n\nx'
+  expect(htmlToMarkdown(html)).toBe(expected)
+  expect(jsHtmlToMarkdown(html)).toBe(expected)
+})
+
 const JS: Record<Format, (html: string) => string> = {
   markdown: html => jsHtmlToMarkdown(html),
   text: html => htmlToText(html),
