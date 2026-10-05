@@ -56,6 +56,31 @@ describe('streaming UTF-8', () => {
     expect(output.trim()).toBe(convert(html).trim())
   })
   it.each([
+    [htmlToMarkdown, streamHtmlToMarkdown],
+    [htmlToText, streamHtmlToText],
+    [htmlToSafeHtml, streamHtmlToSafeHtml],
+  ])('preserves BOM characters after mixed chunk boundaries', async (convert, streamConvert) => {
+    const bom = new Uint8Array([239, 187, 191])
+    for (const chunks of [
+      ['<p>a', bom, 'b</p>'],
+      [new TextEncoder().encode('<p>a'), '', bom, 'b</p>'],
+      ['<p>a', bom.subarray(0, 1), bom.subarray(1), 'b</p>'],
+    ]) {
+      const stream = new ReadableStream<string | Uint8Array>({
+        start(controller) {
+          for (const chunk of chunks)
+            controller.enqueue(chunk)
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamConvert(stream))
+        output += chunk
+      expect(output).toBe(convert('<p>a\uFEFFb</p>'))
+    }
+  })
+
+  it.each([
     '<blockquote>”<br>\n</><p>🎉',
     '<a href="/x">link</a>“<strong></strong>—漢字',
     '<ul><li>é<a href="/x"></a>…</li></ul>🎉&mdash;',

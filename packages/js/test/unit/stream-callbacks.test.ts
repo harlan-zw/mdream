@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { TAG_P } from '../../src/const'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { extractionPlugin } from '../../src/plugins/extraction'
@@ -36,6 +37,14 @@ describe('stream callbacks', () => {
     expect(entered).toEqual([1, 2, 1, 2])
     expect(depths).toEqual([1, 1])
   })
+  it('exposes parsed element depth to extraction callbacks', () => {
+    let depth = 0
+    htmlToMarkdown('<p>x</p>', {
+      plugins: [extractionPlugin({ p: element => depth = element.depthMap[TAG_P]! })],
+    })
+    expect(depth).toBe(1)
+  })
+
   it('calls the frontmatter callback and extraction handlers like one-shot', async () => {
     const html = '<html><head><title>Page</title></head><body><p><a href="/a">A</a></p></body></html>'
     const frontmatter = vi.fn()

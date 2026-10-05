@@ -54,7 +54,8 @@ export async function* streamHtmlOutput(
   const plugins = options.plugins ?? []
   const parseState = createParseState(processor, options)
   const handleEvent = createEventHandler(processor, plugins)
-  let decoder = new TextDecoder()
+  const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
+  let hasDecodedContent = false
   const reader = htmlStream.getReader()
   let remainingHtml = ''
 
@@ -64,17 +65,16 @@ export async function* streamHtmlOutput(
       if (done)
         break
 
-      let decoded: string
-      if (typeof value === 'string') {
-        if (!value)
-          continue
-        decoded = decoder.decode() + value
-        // A string ends the byte run, but only the stream's first BOM is metadata.
-        if (!decoder.ignoreBOM)
-          decoder = new TextDecoder('utf-8', { ignoreBOM: true })
-      }
-      else {
-        decoded = decoder.decode(value, { stream: true })
+      if (value === '')
+        continue
+
+      let decoded = typeof value === 'string'
+        ? decoder.decode() + value
+        : decoder.decode(value, { stream: true })
+      if (decoded && !hasDecodedContent) {
+        hasDecodedContent = true
+        if (typeof value !== 'string' && decoded.charCodeAt(0) === 0xFEFF)
+          decoded = decoded.slice(1)
       }
       remainingHtml = parseHtmlStream(`${remainingHtml}${decoded}`, parseState, handleEvent)
 

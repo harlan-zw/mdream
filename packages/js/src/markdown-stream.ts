@@ -1,7 +1,14 @@
-import type { BufferScanState, MarkdownStreamContext } from './markdown-processor.ts'
+import type { BufferScanState, MarkdownStreamContext } from './markdown-processor'
 import { TAG_PRE } from './const'
-import { isAsciiWhitespace, trimAsciiWhitespaceEnd } from './markdown-processor.ts'
+import { isAsciiWhitespace, trimAsciiWhitespaceEnd } from './markdown-processor'
 import { isInsideHeading } from './utils'
+
+function resetBufferScanCursors(scan: BufferScanState): void {
+  scan[1] = 0
+  scan[2] = 0
+  scan[3] = 0
+  scan[4] = 0
+}
 
 function fragmentPosition(buffer: string[], fragment: number): number {
   let position = 0
@@ -9,6 +16,7 @@ function fragmentPosition(buffer: string[], fragment: number): number {
     position += buffer[index]!.length
   return position
 }
+
 function trimBufferedWhitespacePosition(content: string, position: number): number {
   let end = Math.max(0, position)
   while (end > 0) {
@@ -19,14 +27,12 @@ function trimBufferedWhitespacePosition(content: string, position: number): numb
   }
   return end
 }
+
 /** Drain stable Markdown while retaining mutable fragments. */
 export function createMarkdownDrain(context: MarkdownStreamContext, hasPlugins: boolean) {
   const { state, options, bufferScan } = context
   let lastYieldedLength = 0
   let hasYieldedContent = false
-  /**
-   * Get new markdown content since the last call (for streaming)
-   */
   function getMarkdownChunk(): string {
     const heldFragment = context.prepareDrain()
     const content = state.buffer.join('')
@@ -66,8 +72,6 @@ export function createMarkdownDrain(context: MarkdownStreamContext, hasPlugins: 
 
     const leadingTrimmed = content.length - currentContent.length
 
-    // Each owner can rewrite its opening fragment. The earliest one bounds
-    // every hold, so scan and trim that position once.
     const fragmentHeld = heldFragment !== Infinity
     if (fragmentHeld) {
       stableLength = Math.min(stableLength, trimBufferedWhitespacePosition(
@@ -146,11 +150,4 @@ export function createMarkdownDrain(context: MarkdownStreamContext, hasPlugins: 
   }
 
   return { getMarkdownChunk }
-}
-// Keep the raw HTML latch when fragment scan positions restart.
-function resetBufferScanCursors(scan: BufferScanState): void {
-  scan[1] = 0
-  scan[2] = 0
-  scan[3] = 0
-  scan[4] = 0
 }

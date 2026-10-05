@@ -73,6 +73,13 @@ describe('raw HTML cleaner boundaries', () => {
     })).toBe(String.raw`<details>\<a href="&#91;javascript:alert(1)&#93;(#)" title="&#91;Title&#93;">Click</a></details>`)
   })
 
+  it('uses the current cleanup rules for each conversion', () => {
+    const cleaner = clean({ fragments: true })
+    expect(htmlToMarkdown('<a href="#missing">x</a>', { clean: cleaner })).toBe('x')
+    cleaner.fragments = false
+    expect(htmlToMarkdown('<a href="#missing">x</a>', { clean: cleaner })).toBe('[x](#missing)')
+  })
+
   it('handles repeated malformed tag starts', () => {
     const markdown = `${'<a '.repeat(16 * 1024)}>`
     expect(cleanEmptyLinks(markdown)).toBe(markdown)

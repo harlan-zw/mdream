@@ -32,6 +32,8 @@ function createProcessor(options: MdreamOptions): OutputProcessor {
     },
     takeOutput() {
       const output = state.buffer.join('')
+      if (output)
+        outputState.hasOutput = true
       state.buffer.length = 0
       return output
     },

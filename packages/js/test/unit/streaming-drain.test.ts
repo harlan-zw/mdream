@@ -2,7 +2,7 @@ import type { ParseState } from '../../src/parse'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createMarkdownProcessor } from '../../src/markdown-processor'
-import { createMarkdownDrain } from '../../src/markdown-stream.ts'
+import { createMarkdownDrain } from '../../src/markdown-stream'
 import { finalizeParse, parseHtmlStream } from '../../src/parse'
 import { tagHandlers } from '../../src/tags'
 

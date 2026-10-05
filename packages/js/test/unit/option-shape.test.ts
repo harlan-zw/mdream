@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { createPlugin } from '../../src/pluggable/plugin'
 import { frontmatterPlugin } from '../../src/plugins/frontmatter'
+import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText, streamHtmlToText } from '../../src/text'
 
 const converters = [
@@ -14,6 +16,26 @@ const converters = [
 // v1 took `format`, `hooks`, and a `plugins` object. @mdream/js reads none of
 // them, so each would silently do nothing.
 describe('options @mdream/js does not read', () => {
+  it('rejects removed splitter options before setting up plugins', () => {
+    let calls = 0
+    const plugin = createPlugin(() => {
+      calls++
+      return {}
+    })
+    expect(() => htmlToMarkdownSplitChunks('<p>x</p>', { format: 'text', plugins: [plugin] } as any)).toThrow('format')
+    expect(calls).toBe(0)
+  })
+
+  it('sets up each splitter plugin once per conversion', () => {
+    let calls = 0
+    const plugin = createPlugin(() => {
+      calls++
+      return {}
+    })
+    expect(htmlToMarkdownSplitChunks('<p>x</p>', { plugins: [plugin] }).map(chunk => chunk.content)).toEqual(['x'])
+    expect(calls).toBe(1)
+  })
+
   const rejected: Record<string, unknown>[] = [
     { minimal: true },
     { format: 'text' },

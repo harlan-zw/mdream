@@ -14,6 +14,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { createMarkdownProcessor } from './markdown-processor'
+import { assertEngineOptions } from './option-shape'
 import { parseHtmlStream } from './parse'
 import { resolvePlugins } from './pluggable/plugin'
 import { endPlugins, processPluginsForEvent } from './plugin-processor'
@@ -69,6 +70,7 @@ export function* htmlToMarkdownSplitChunksStream(
   html: string,
   options: SplitterOptions = {},
 ): Generator<MarkdownChunk, void, undefined> {
+  assertEngineOptions(options)
   const opts = createOptions(options)
 
   if (opts.chunkOverlap >= opts.chunkSize) {
@@ -291,7 +293,6 @@ export function htmlToMarkdownSplitChunks(
   html: string,
   options: SplitterOptions = {},
 ): MarkdownChunk[] {
-  const opts = createOptions(options)
   const chunks: MarkdownChunk[] = []
 
   for (const chunk of htmlToMarkdownSplitChunksStream(html, options)) {
@@ -299,7 +300,7 @@ export function htmlToMarkdownSplitChunks(
   }
 
   // Handle returnEachLine mode - split chunks into individual lines
-  if (opts.returnEachLine && chunks.length > 0) {
+  if (options.returnEachLine && chunks.length > 0) {
     const lineChunks: MarkdownChunk[] = []
 
     for (const chunk of chunks) {
