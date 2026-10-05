@@ -791,6 +791,10 @@ pub struct ConvertState {
   /// a flush, which can run once per 8KB and once per open frame, reuses the
   /// capacity instead of allocating a fresh copy of the region each time.
   blockquote_scratch: String,
+  /// Completed-line lookup through the settled prefix. Appending a long line
+  /// must not search every preceding byte again after each input chunk.
+  blockquote_line_scanned_to: usize,
+  blockquote_line_end: usize,
   /// Heading slugs collected during conversion for fragment validation
   heading_slugs: Vec<String>,
   /// Emitted fragment links retained until all heading slugs are known.
@@ -1045,6 +1049,8 @@ impl ConvertState {
       code_fence: None,
       blockquotes: Vec::with_capacity(4),
       blockquote_scratch: String::new(),
+      blockquote_line_scanned_to: 0,
+      blockquote_line_end: 0,
       heading_slugs: Vec::new(),
       fragment_links: Vec::new(),
       in_heading: false,
@@ -2420,6 +2426,10 @@ impl ConvertState {
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
+    if offset < self.blockquote_line_scanned_to {
+      self.blockquote_line_scanned_to = 0;
+      self.blockquote_line_end = 0;
+    }
     // Bytes before the break changed, so the output no longer ends with it.
     // A truncation to the break end (an empty construct dropped) keeps it.
     if offset < self.hard_break_end {
@@ -2429,6 +2439,10 @@ impl ConvertState {
 
   /// Shift the measured run after `removed` bytes left the front of the buffer.
   fn note_buffer_drain(&mut self, removed: usize) {
+    if self.blockquote_line_scanned_to != 0 {
+      self.blockquote_line_scanned_to = self.blockquote_line_scanned_to.saturating_sub(removed);
+      self.blockquote_line_end = self.blockquote_line_end.saturating_sub(removed);
+    }
     for (end, run) in &mut self.heading_runs {
       *end = end.saturating_sub(removed);
       *run = (*run).min(*end);
