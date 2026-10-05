@@ -2400,8 +2400,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     getHeldOutputFragment: cleanPass ? getHeldOutputFragment : undefined,
     // Markers the fragments pass writes are only resolved on the finished
     // whole document, which `holdsOutput` gates. Output readers that bypass
-    // getMarkdown, like the splitter, finish their views through this, and
-    // must not cut a view past its `settled` position.
+    // getMarkdown, like the splitter, finish their views through this.
     finishOutput: cleanPass?.holdsOutput
       ? (markdown: string) => cleanPass.finish(markdown)
       : undefined,

@@ -144,7 +144,7 @@ function getCurrentMarkdown(state: MarkdownState, finishOutput?: (markdown: stri
     }
     markdown = markdown.slice(0, end)
   }
-  return finishOutput ? finishOutput(markdown) : { markdown, settled: -1 }
+  return finishOutput ? finishOutput(markdown) : { markdown }
 }
 
 /**
@@ -264,7 +264,7 @@ export function* htmlToMarkdownSplitChunksStream(
     }
     const view = finishedMarkdown === undefined
       ? getStableMarkdown()
-      : { markdown: finishedMarkdown, settled: -1 }
+      : { markdown: finishedMarkdown }
     const currentMd = view.markdown
     let chunkEnd = Math.min(endPosition ?? currentMd.length, currentMd.length)
     // Keep separator whitespace at the next chunk's start. Cleanup resolves
