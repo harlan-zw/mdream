@@ -1,9 +1,11 @@
 import type { ParseState } from '../../src/parse'
+import type { MdreamOptions } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createMarkdownProcessor } from '../../src/markdown-processor'
 import { createMarkdownDrain } from '../../src/markdown-stream'
 import { finalizeParse, parseHtmlStream } from '../../src/parse'
+import { createPlugin } from '../../src/plugins'
 import { tagHandlers } from '../../src/tags'
 
 function chunkedStream(html: string, chunkSize: number): ReadableStream<string> {
@@ -16,9 +18,9 @@ function chunkedStream(html: string, chunkSize: number): ReadableStream<string> 
   })
 }
 
-async function streamConvert(html: string, chunkSize: number): Promise<string> {
+async function streamConvert(html: string, chunkSize: number, options: MdreamOptions = {}): Promise<string> {
   let markdown = ''
-  for await (const chunk of streamHtmlToMarkdown(chunkedStream(html, chunkSize)))
+  for await (const chunk of streamHtmlToMarkdown(chunkedStream(html, chunkSize), options))
     markdown += chunk
   return markdown
 }
@@ -38,6 +40,31 @@ const BLOCK_NEWLINE_HTML = [
 ].join('')
 
 describe('streaming drain parity', () => {
+  it('does not repeat a BOM-prefixed paragraph during finalization', async () => {
+    const html = '\uFEFF<p>x</p>'
+    expect(htmlToMarkdown(html)).toBe('x')
+    expect(await streamConvert(html, html.length)).toBe('x')
+  })
+
+  it.each(['\uFEFF', '\u00A0', '\u2003', '\u2028', ' \uFEFF\u00A0\n'])('emits content once after leading whitespace %j', async (leading) => {
+    for (const body of [
+      '<p>first</p><p>before\uFEFFafter and more words</p>',
+      '<h2>first #</h2><p><a href="/x">before\uFEFFafter</a> and more words</p>',
+      '<pre><code>first\n  second</code></pre><p>before\uFEFFafter</p>',
+    ]) {
+      const html = leading + body
+      for (const options of [
+        {},
+        { wrapWidth: 12 },
+        { plugins: [createPlugin({ processTextNode: node => ({ content: node.value, skip: false }) })] },
+      ]) {
+        const expected = htmlToMarkdown(html, options)
+        for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+          expect(await streamConvert(html, chunkSize, options), `chunkSize=${chunkSize}`).toBe(expected)
+      }
+    }
+  })
+
   it('keeps interleaved drain cursors independent of one-shot conversions', async () => {
     const inputs = [
       '<p>left</p><figure><figcaption>caption <em>one</em></figcaption></figure><p>end</p>',
