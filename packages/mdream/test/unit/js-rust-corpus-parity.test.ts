@@ -14,25 +14,13 @@ const JS: Record<Format, (html: string) => string> = {
   html: html => htmlToSafeHtml(html),
 }
 
-// Inputs where the engines differ today. Most also differ in v1. Remove an
-// entry once the engines agree; the test fails until you do.
-const KNOWN_DIFFERENCES = new Set<string>([
-  ['markdown', '<p>a</x></p><<p>>b</p><p attr="unterminated>c</p>'],
-  ['markdown', '<dl><dt>term</dt><dd>def</dd><dt>t2</dt><dd>d2<p>p</p></dd></dl>'],
-  ['markdown', '<html><head><title>T: "q" \\ b</title><meta name="description" content="Desc # x"><meta property="og:title" content="OG"></head><body><header>hdr</header><main><h1>M</h1><p class="font-bold">bold tw</p><form>f</form></main><aside>as</aside></body></html>'],
-  ['markdown', '<html><head><title>A</title><meta name="description" content="da"></head><body><header>x</header><h1>A</h1><p>a</p><footer>f</footer></body></html>'],
-].map(([format, html]) => `${format}\u0000${html}`))
-
 describe('javaScript and Rust engines agree on the corpus', () => {
   for (const format of ['markdown', 'text', 'html'] as const) {
     it(format, () => {
       for (const html of CONVERSION_CORPUS) {
         const rust = htmlToMarkdown(html, { format })
         const js = JS[format](html)
-        if (KNOWN_DIFFERENCES.has(`${format}\u0000${html}`))
-          expect(js, `remove the fixed known difference for ${JSON.stringify(html)}`).not.toBe(rust)
-        else
-          expect(js, JSON.stringify(html)).toBe(rust)
+        expect(js, JSON.stringify(html)).toBe(rust)
       }
     })
   }

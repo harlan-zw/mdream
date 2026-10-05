@@ -31,6 +31,7 @@ import {
   TAG_INS,
   TAG_KBD,
   TAG_LI,
+  TAG_MARK,
   TAG_OL,
   TAG_P,
   TAG_PRE,
@@ -41,15 +42,18 @@ import {
   TAG_SPAN,
   TAG_STRIKE,
   TAG_STRONG,
+  TAG_SUB,
+  TAG_SUP,
   TAG_TABLE,
   TAG_TD,
   TAG_TH,
+  TAG_TR,
   TAG_U,
   TAG_VAR,
   TEXT_NODE,
 } from './const'
 import { breakHandler, renderBreak } from './tags'
-import { blockOpenPrefix, continuationPrefix, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -69,6 +73,8 @@ export interface MarkdownState {
   /** Table processing state - specialized for Markdown tables */
   tableRenderedTable?: boolean
   tableCurrentRowCells?: number
+  /** A built-in row writes its opener only when its first cell enters. */
+  tableRowOpenerPending?: boolean
   tableColumnAlignments?: string[]
   /** Column count the delimiter row promised; cells past it are folded in. */
   tableHeaderCells?: number
@@ -118,6 +124,7 @@ export interface MarkdownState {
 }
 
 interface CodeSpan {
+  owner: ElementNode
   fragment: number
   prefix: string
 }
@@ -767,7 +774,8 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
 /**
  * Calculate newline configuration based on tag handler spacing config
  */
-function calculateNewLineConfig(node: ElementNode, depthMap: Uint16Array): readonly [number, number] {
+function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventType: number): readonly [number, number] {
+  const depthMap = state.depthMap
   const tagId = node.tagId
 
   // List-item descendants own their structural indentation. Markdown
@@ -789,6 +797,13 @@ function calculateNewLineConfig(node: ElementNode, depthMap: Uint16Array): reado
         currParent = currParent.parent
         continue
       }
+      // A markerless inline wrapper cannot continue an ATX heading's line.
+      if (eventType === NodeEventExit && tagId !== undefined && tagId >= TAG_H1 && tagId <= TAG_H6
+        && !isInsideTableCell(state)
+        && !wrapperEmitsInlineMarkdown(currParent, state)) {
+        currParent = currParent.parent
+        continue
+      }
       return NO_SPACING
     }
     currParent = currParent.parent
@@ -804,6 +819,19 @@ function calculateNewLineConfig(node: ElementNode, depthMap: Uint16Array): reado
     return NO_SPACING
   }
   return DEFAULT_BLOCK_SPACING
+}
+
+function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): boolean {
+  const handler = node.tagHandler
+  // Custom exits have not run yet. Treat them as wrappers unless a
+  // declarative override records that its exit string is empty.
+  if (node.hasEnterOutput || (handler?.literalExit && handler.literalExitHasOutput !== false)) {
+    return true
+  }
+  const tagId = node.tagId!
+  return (INLINE_MARKER_TYPE[tagId] !== undefined && INLINE_MARKER_TYPE[tagId] !== 0)
+    || (tagId === TAG_A && (node.attributes?.href !== undefined || isInsideRawHtmlBlock(state.depthMap)))
+    || tagId === TAG_SUB || tagId === TAG_SUP || tagId === TAG_INS || tagId === TAG_U || tagId === TAG_MARK
 }
 
 /**
@@ -1139,6 +1167,7 @@ function commitGfmAction(
   state: MarkdownState,
   lifecycle: GfmLifecycleState,
   outputStart: number,
+  owner: ElementNode,
 ): void {
   switch (action._tag) {
     case 'BlockquoteEnter': {
@@ -1161,6 +1190,7 @@ function commitGfmAction(
     }
     case 'CodeSpanEnter':
       lifecycle.openCodeSpans.push({
+        owner,
         fragment: outputStart,
         prefix: action.output.slice(0, -MARKDOWN_INLINE_CODE.length),
       })
@@ -1644,6 +1674,19 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const handler = node.tagHandler
     const tagId = element.tagId!
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
+    // A hard break ends a line, while a following block also ends the
+    // paragraph. Preserve that extra boundary inside a list's content column.
+    if (eventType === NodeEventEnter && state.depthMap[TAG_LI] && !insideRawHtmlRegion
+      && (tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_PRE || tagId === TAG_TABLE)
+      && !handler?.literalEnter && endsAtHardBreak(buff)) {
+      trimTrailingSpaces(buff)
+      const separator = tagId === TAG_P || tagId === TAG_DIV ? `\n${state.listIndent}` : '\n'
+      buff.push(separator)
+      state.lastContentCache = separator
+      state.lastTextNode = undefined
+      lastBuffEntry = separator
+      lastChar = separator.charAt(separator.length - 1)
+    }
     if (insideRawHtmlRegion && !inRawHtmlRegion) {
       bufferScan[0] = false
       bufferScan[1] = state.buffer.length
@@ -1744,6 +1787,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const suppressedInPre = (state.depthMap[TAG_PRE] || 0) > 0
       && suppressesFormattingInPre(tagId)
       && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
+    const emptyTableRow = eventType === NodeEventExit && tagId === TAG_TR
+      && state.tableRowOpenerPending && !output && !handler?.literalExit
+    if (eventType === NodeEventExit && (handler?.literalExit || output)
+      && gfmLifecycle.openCodeSpans.at(-1)?.owner === element) {
+      gfmLifecycle.openCodeSpans.pop()
+    }
     if (!output && !suppressedInPre && handler?.[eventFn]) {
       if (openLinkFragment >= 0
         && eventType === NodeEventExit
@@ -1768,14 +1817,27 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
       else if (res) {
-        gfmAction = res
-        handlerOutput = consumeGfmAction(res, state, gfmLifecycle)
+        const span = gfmLifecycle.openCodeSpans.at(-1)
+        // Nested built-in code shares one owner. Literal overrides retain
+        // their own edges and aliases reach these same actions.
+        if ((res._tag === 'CodeSpanEnter' && span)
+          || (res._tag === 'CodeSpanExit' && span && span.owner !== element)) {
+          handlerOutput = undefined
+        }
+        else {
+          gfmAction = res
+          handlerOutput = consumeGfmAction(res, state, gfmLifecycle)
+        }
         if (handlerOutput)
           output = [handlerOutput]
         if (res._tag === 'BlockquoteExit')
           captionBufferChanged = true
       }
     }
+    if (emptyTableRow)
+      return
+    if (eventType === NodeEventEnter && output && handler?.collapsesInnerWhiteSpace)
+      element.hasEnterOutput = output.some(fragment => fragment.length > 0)
     if (captionBreakRun
       && !(tagId === TAG_FIGCAPTION && eventType === NodeEventExit)
       && output) {
@@ -1854,6 +1916,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         commitCaptionFrames()
     }
 
+    // A hard break already supplies the item boundary. Its continuation
+    // indentation takes no part in counting the newlines before a sibling.
+    if (eventType === NodeEventExit && tagId === TAG_LI && !state.depthMap[TAG_PRE]
+      && !isInsideTableCell(state) && !handler?.literalExit && endsAtHardBreak(buff)) {
+      trimTrailingSpaces(buff)
+      state.lastContentCache = buff.at(-1)
+      state.lastTextNode = undefined
+      lastBuffEntry = buff.at(-1)!
+      const lastCode = lastOutputChar(buff)
+      lastChar = lastCode === -1 ? '' : String.fromCharCode(lastCode)
+    }
     const lastFragment = state.lastContentCache
     if (captionBufferChanged) {
       lastBuffEntry = buff.at(-1)!
@@ -1874,10 +1947,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     let lastNewLines = 0
-    if (lastChar === '\n')
+    if (lastChar === '\n') {
       lastNewLines++
-    if (secondLastChar === '\n')
-      lastNewLines++
+      if (secondLastChar === '\n')
+        lastNewLines++
+    }
 
     if (eventType === NodeEventExit && openMarkerCount) {
       // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
@@ -1907,7 +1981,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // Handle newlines
     const newLineConfig = suppressedInPre
       ? NO_SPACING
-      : calculateNewLineConfig(node as ElementNode, state.depthMap)
+      : calculateNewLineConfig(node as ElementNode, state, eventType)
     const quoteAtStart = eventType === NodeEventEnter
       && state.blockquotes.at(-1)?.fragment === state.buffer.length
     const configuredNewLines = quoteAtStart || captionEvent || captionTransition
@@ -1969,7 +2043,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           }
         }
         if (gfmAction)
-          commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length)
+          commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element)
         updateListIndent(state, element, eventType)
         return
       }
@@ -2068,7 +2142,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (gfmAction)
-      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart)
+      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element)
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)
