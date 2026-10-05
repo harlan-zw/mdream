@@ -1220,9 +1220,11 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
       depth: state.depth,
       containsWhitespace,
       excludedFromMarkdown: false,
-      joinsPrevious: state.endTagClosedNothing === true,
-      trimsAtLineStart: containsWhitespace === true,
     }
+    if (state.endTagClosedNothing)
+      rootTextNode.joinsPrevious = true
+    if (containsWhitespace)
+      rootTextNode.trimsAtLineStart = true
     state.endTagClosedNothing = false
     handleEvent({ type: NodeEventEnter, node: rootTextNode })
     state.lastTextNode = rootTextNode
@@ -1253,7 +1255,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   // ancestor the text is inline at the root: like root text it drops the
   // space only where the output is at a line start, which the output decides.
   const firstInBlock = containsWhitespace && !firstBlockParent.childTextNodeIndex
-  const inlineAtRoot = !firstBlockParent.parent
+  const inlineAtRoot = firstInBlock && !firstBlockParent.parent
     && (firstBlockParent.tagHandler?.isInline ?? firstBlockParent.tagId === -1)
   if (firstInBlock && !inlineAtRoot) {
     let start = 0
@@ -1279,9 +1281,11 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     depth: state.depth,
     containsWhitespace,
     excludedFromMarkdown: excludesTextNodes,
-    joinsPrevious: state.endTagClosedNothing === true,
-    trimsAtLineStart: firstInBlock && inlineAtRoot,
   }
+  if (state.endTagClosedNothing)
+    textNode.joinsPrevious = true
+  if (inlineAtRoot)
+    textNode.trimsAtLineStart = true
   state.endTagClosedNothing = false
 
   for (const parent of parentsToIncrement) {

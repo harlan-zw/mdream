@@ -124,6 +124,7 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
       // Everything past the `[` belongs to this link and is closed, so folding
       // it into one entry moves no index another open element holds.
       const unwrapped = opener.slice(0, -1) + buffer.slice(bracket + 1).join('')
+      target.outputPositions?.replace(bracket, buffer.length, [unwrapped], offset => offset > opener.length - 1 ? offset - 1 : offset)
       buffer.length = bracket
       buffer.push(unwrapped)
       target.lastContentCache = unwrapped
@@ -150,8 +151,11 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
         index++
       if (index === buffer.length)
         return
-      buffer[bracket] = `${opener.slice(0, -1)}${FRAGMENT_LINK_OPEN}[`
+      const markedOpener = `${opener.slice(0, -1)}${FRAGMENT_LINK_OPEN}[`
+      target.outputPositions?.replace(bracket, bracket + 1, [markedOpener], offset => offset > opener.length - 1 ? offset + FRAGMENT_LINK_OPEN.length : offset)
+      buffer[bracket] = markedOpener
       const marked = `${FRAGMENT_LINK_CLOSE}${close}`
+      target.outputPositions?.replace(index, index + 1, [marked], offset => offset > 0 ? offset + FRAGMENT_LINK_CLOSE.length : offset)
       buffer[index] = marked
       if (target.lastContentCache === close)
         target.lastContentCache = marked

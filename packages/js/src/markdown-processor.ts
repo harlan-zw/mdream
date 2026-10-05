@@ -1,3 +1,4 @@
+import type { OutputPositions } from './output-positions'
 import type { Cleaner, CleanView, ElementNode, EngineOptions, GfmAction, Node, NodeEvent, PluginContext, TagHandler, TextNode } from './types'
 import {
   DEFAULT_BLOCK_SPACING,
@@ -54,7 +55,7 @@ import {
   TAG_VAR,
   TEXT_NODE,
 } from './const'
-import { breakHandler, renderBreak, rowMarker } from './tags'
+import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
 import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
@@ -64,6 +65,8 @@ export interface MarkdownState {
   outputFormat: 'markdown'
   /** Content buffer for markdown output */
   buffer: string[]
+  /** @internal */
+  outputPositions?: OutputPositions
   /** Performance cache for last content to avoid iteration */
   lastContentCache?: string
   /** Reference to the last processed node */
@@ -290,7 +293,9 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
   state.emptyItemFragment = undefined
   if (first !== -1 && first !== 10)
     return
-  buffer[fragment] = `\n${buffer[fragment]}`
+  const replacement = `\n${buffer[fragment]}`
+  state.outputPositions?.replace(fragment, fragment + 1, [replacement], offset => offset + 1)
+  buffer[fragment] = replacement
 }
 
 /**
@@ -892,10 +897,10 @@ export function trimAsciiWhitespaceEnd(value: string): string {
 }
 
 /** Drop the top marker when every following fragment is whitespace. */
-function dropEmptyMarker(buffer: string[], packed: number, markerType: number): number {
+function dropEmptyMarker(buffer: string[], packed: number, markerType: number, positions?: OutputPositions): number {
   const idx = packed >> 3
   if ((packed & MARKER_TYPE_MASK) === markerType && idx < buffer.length) {
-    return dropEmptyLinkText(buffer, idx) ? idx : -1
+    return dropEmptyLinkText(buffer, idx, positions) ? idx : -1
   }
   return -1
 }
@@ -912,11 +917,12 @@ function resetRetractedCaptionFrames(frames: number[] | undefined, count: number
   }
 }
 
-function dropEmptyLinkText(buffer: string[], openFragment: number): boolean {
+function dropEmptyLinkText(buffer: string[], openFragment: number, positions?: OutputPositions): boolean {
   for (let index = openFragment + 1; index < buffer.length; index++) {
     if (hasNonWhitespace(buffer[index]!))
       return false
   }
+  positions?.replace(openFragment, buffer.length, [])
   buffer.length = openFragment
   return true
 }
@@ -977,13 +983,25 @@ function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
   // A pipe splits the row even inside a code span; `\|` is GFM's escape and is
   // honoured there. The span is the buffer tail, so rewriting it moves nothing.
   if ((state.depthMap[TAG_TABLE] || 0) > 0 && content.includes('|')) {
+    const original = content
     content = content.replaceAll('|', '\\|')
+    state.outputPositions?.replace(span.fragment + 1, state.buffer.length, [content], (offset) => {
+      let added = 0
+      for (let index = 0; index < offset; index++) {
+        if (original.charCodeAt(index) === 124)
+          added++
+      }
+      return offset + added
+    })
     state.buffer.length = span.fragment + 1
     state.buffer.push(content)
   }
   const delimiter = '`'.repeat(Math.max(1, maxBacktickRun(content) + 1))
   const padded = content.startsWith('`') || content.endsWith('`')
-  state.buffer[span.fragment] = `${span.prefix}${delimiter}${padded ? ' ' : ''}`
+  const opening = `${span.prefix}${delimiter}${padded ? ' ' : ''}`
+  if (state.outputPositions && opening !== state.buffer[span.fragment])
+    state.outputPositions?.replace(span.fragment, span.fragment + 1, [opening])
+  state.buffer[span.fragment] = opening
   return `${padded ? ' ' : ''}${delimiter}`
 }
 
@@ -1003,7 +1021,13 @@ function finalizeCodeFence(state: MarkdownState): string | undefined {
   const content = state.buffer.slice(fence.fragment + 1).join('')
   const delimiter = marker.repeat(Math.max(3, maxLineLeadingRun(content, markerCode, fence.indent) + 1))
   const opening = state.buffer[fence.fragment]!
-  state.buffer[fence.fragment] = `${opening.slice(0, fence.markerOffset)}${delimiter}${opening.slice(fence.markerOffset + MARKDOWN_CODE_BLOCK.length)}`
+  const replacement = `${opening.slice(0, fence.markerOffset)}${delimiter}${opening.slice(fence.markerOffset + MARKDOWN_CODE_BLOCK.length)}`
+  if (state.outputPositions && replacement !== opening) {
+    state.outputPositions?.replace(fence.fragment, fence.fragment + 1, [replacement], offset => offset <= fence.markerOffset
+      ? offset
+      : offset + delimiter.length - MARKDOWN_CODE_BLOCK.length)
+  }
+  state.buffer[fence.fragment] = replacement
   return delimiter
 }
 
@@ -1057,6 +1081,30 @@ function finalizeBlockquote(state: MarkdownState): void {
     })
     .join('\n')
 
+  // Captured boundaries are ordered. Walk the quote's lines once when its
+  // writer prefixes them, including nested quotes and list indentation.
+  let sourceStart = 0
+  let quotedStart = 0
+  const mapPosition = state.outputPositions
+    ? (position: number, kind: 'boundary' | 'content'): number => {
+        const offset = Math.min(position, content.length)
+        while (true) {
+          const newline = content.indexOf('\n', sourceStart)
+          const lineEnd = newline === -1 ? content.length : newline
+          const removed = frame.listIndent && content.startsWith(frame.listIndent, sourceStart) ? frame.listIndent.length : 0
+          const lineLength = Math.max(0, lineEnd - sourceStart - removed)
+          const prefixLength = frame.listIndent.length + 1 + (lineLength > 0 ? 1 : 0)
+          if (offset <= lineEnd) {
+            return kind === 'boundary' && offset === sourceStart
+              ? quotedStart
+              : quotedStart + prefixLength + Math.max(0, offset - sourceStart - removed)
+          }
+          quotedStart += prefixLength + lineLength + 1
+          sourceStart = lineEnd + 1
+        }
+      }
+    : undefined
+
   // A fence opened inside the quote rewrites its opener later through buffer
   // positions, so keep the opener its own fragment at its quoted position.
   const fence = state.codeFence
@@ -1072,6 +1120,14 @@ function finalizeBlockquote(state: MarkdownState): void {
     const start = remap(openerStart)
     const end = remap(openerEnd)
     fence.markerOffset = remap(openerStart + fence.markerOffset) - start
+    if (state.outputPositions) {
+      const replacement = [quoted.slice(start, end)]
+      if (start > 0)
+        replacement.unshift(quoted.slice(0, start))
+      if (end < quoted.length)
+        replacement.push(quoted.slice(end))
+      state.outputPositions.replace(frame.fragment, buffer.length, replacement, mapPosition)
+    }
     buffer.length = frame.fragment
     if (start > 0)
       buffer.push(quoted.slice(0, start))
@@ -1083,15 +1139,17 @@ function finalizeBlockquote(state: MarkdownState): void {
     return
   }
 
+  state.outputPositions?.replace(frame.fragment, buffer.length, [quoted], mapPosition)
   buffer.splice(frame.fragment, buffer.length - frame.fragment, quoted)
   state.lastContentCache = quoted
 }
 
-function collapseNestedBlockquoteSeparator(buffer: string[]): void {
+function collapseNestedBlockquoteSeparator(buffer: string[], positions?: OutputPositions): void {
   if (newlineRunBefore(buffer, buffer.length) < 2)
     return
 
   const last = buffer.at(-1)!
+  positions?.replace(buffer.length - 1, buffer.length, last.length === 1 ? [] : [last.slice(0, -1)])
   if (last.length === 1)
     buffer.pop()
   else
@@ -1204,7 +1262,7 @@ function commitGfmAction(
   switch (action._tag) {
     case 'BlockquoteEnter': {
       if (state.blockquotes.length > 0)
-        collapseNestedBlockquoteSeparator(state.buffer)
+        collapseNestedBlockquoteSeparator(state.buffer, state.outputPositions)
       const before = lastOutputChar(state.buffer)
       state.blockquotes.push({
         fragment: state.buffer.length,
@@ -1268,6 +1326,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     options,
     outputFormat: 'markdown',
     buffer: [],
+    outputPositions: undefined,
     depthMap: new Uint16Array(MAX_TAG_ID),
     listIndent: '',
     listIndentWidths: [],
@@ -1376,6 +1435,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const last = state.buffer[lastIndex]
     if (prefix.charCodeAt(0) === 10 && last?.endsWith(' ')) {
       const trimmed = last.slice(0, -1)
+      state.outputPositions?.replace(lastIndex, lastIndex + 1, [trimmed])
       state.buffer[lastIndex] = trimmed
       if (state.lastContentCache === last)
         state.lastContentCache = trimmed
@@ -1422,6 +1482,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           else {
             const anchored = state.buffer[beforeFragment]!
             const replacement = opening + anchored
+            state.outputPositions?.replace(beforeFragment, beforeFragment + 1, [replacement], offset => offset + opening.length)
             state.buffer[beforeFragment] = replacement
             const codeSpan = gfmLifecycle.openCodeSpans.at(-1)
             if (codeSpan?.fragment === beforeFragment)
@@ -1455,8 +1516,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       let end = fragment.length
       while (end > 0 && fragment.charCodeAt(end - 1) === 32)
         end--
-      if (end !== fragment.length)
+      if (end !== fragment.length) {
+        state.outputPositions?.replace(index, index + 1, [fragment.slice(0, end)])
         buff[index] = fragment.slice(0, end)
+      }
       if (end > 0)
         break
     }
@@ -1500,10 +1563,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (end === value.length)
         break
       if (end !== 0) {
+        state.outputPositions?.replace(index, state.buffer.length, [value.slice(0, end)])
         state.buffer[index] = value.slice(0, end)
         state.buffer.length = index + 1
         break
       }
+      state.outputPositions?.replace(index, state.buffer.length, [])
       state.buffer.length = index
     }
     const output = `  \n${state.listIndent}`.repeat(captionBreakRun)
@@ -1528,6 +1593,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       captionBoundarySpacing = exitSpacing
     }
     else if (anchor !== CAPTION_NO_ANCHOR) {
+      state.outputPositions?.replace(anchor, state.buffer.length, [])
       state.buffer.length = anchor
       state.lastContentCache = state.buffer.at(-1)
       state.lastTextNode = undefined
@@ -1803,8 +1869,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (!parentInPre || element.parent?.tagId === TAG_PRE) {
           if (breakOutput?.endsWith('\n') && !parentInPre) {
             const trimmed = trimAsciiWhitespaceEnd(lastFragment)
-            if (trimmed.length !== lastFragment.length && buff.at(-1) === lastFragment)
+            if (trimmed.length !== lastFragment.length && buff.at(-1) === lastFragment) {
+              state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
               buff[buff.length - 1] = trimmed
+            }
           }
           state.lastTextNode = undefined
         }
@@ -1833,7 +1901,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // unknown elements only affect spacing, so allocating an empty array for
     // every enter/exit event adds pure GC pressure.
     let output: string[] | undefined
-    if (element.pluginOutput?.length) {
+    const hasPluginOutput = !!element.pluginOutput?.length
+    if (hasPluginOutput) {
       output = element.pluginOutput
       element.pluginOutput = undefined
     }
@@ -1860,7 +1929,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (openLinkFragment >= 0
         && eventType === NodeEventExit
         && tagId === TAG_A) {
-        if (dropEmptyLinkText(buff, openLinkFragment)) {
+        if (dropEmptyLinkText(buff, openLinkFragment, state.outputPositions)) {
           if (captionFrameCount !== 0) {
             captionBreakRun = openLinkCaptionBreakRun
             restoreCaptionBreakFlags(captionFrames, openLinkCaptionFlags, captionFrameCount)
@@ -1914,8 +1983,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     if (emptyTableRow)
       return
-    if (eventType === NodeEventEnter && output && handler?.collapsesInnerWhiteSpace)
+    // Built-in wrapper identities already prove their output. Cache the
+    // other cases, avoiding a property allocation on each common inline node.
+    if (eventType === NodeEventEnter && output && handler?.collapsesInnerWhiteSpace
+      && (hasPluginOutput || handler !== tagHandlers[tagId] || (!INLINE_MARKER_TYPE[tagId] && tagId !== TAG_A))) {
       element.hasEnterOutput = output.some(fragment => fragment.length > 0)
+    }
     if (captionBreakRun
       && !(tagId === TAG_FIGCAPTION && eventType === NodeEventExit)
       && output) {
@@ -2038,7 +2111,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && !handler?.literalExit) {
-        const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType)
+        const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType, state.outputPositions)
         if (idx >= 0) {
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
@@ -2189,6 +2262,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             // Update the last content in buffer regions with trimmed content
             if (trimmedChars > 0) {
               if (buff?.length && buff.at(-1) === lastFragment) {
+                state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
                 buff[buff.length - 1] = trimmed
               }
               if (eventType === NodeEventExit && isInlineElement)
