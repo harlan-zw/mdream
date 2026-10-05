@@ -844,3 +844,46 @@ describe('discarded input boundary recovery', () => {
     }
   })
 })
+
+describe('visible raw-text declaration carry', () => {
+  it.each(['markdown', 'html', 'text'] as const)('preserves %s text after unterminated declarations', async (format) => {
+    for (const tag of ['textarea', 'xmp', 'plaintext', 'title', 'style', 'iframe', 'noembed']) {
+      for (const declaration of ['<!--body that remains visible', '<!DOCTYPE unfinished body', '<![CDATA[unfinished body']) {
+        for (const tail of ['', `</${tag}><p>after</p>`]) {
+          const html = `<${tag}>before ${declaration}${tail}`
+          const options = { format }
+          const expected = convertOnce(html, options)
+          for (let split = 0; split <= html.length; split++)
+            expect(await streamConvertAtSplit(html, split, options), `${tag} ${declaration} split=${split}`).toBe(expected)
+          for (const size of [1, 2, 3, 5, 8, 13, 4096])
+            expect(await streamConvert(html, size, options), `${tag} size=${size}`).toBe(expected)
+        }
+      }
+    }
+  })
+
+  it('preserves visible raw-text declarations through aliases and plugins', async () => {
+    const html = '<style>before <!--unfinished body</style><p>after</p>'
+    for (const plugins of [[], [createPlugin({ processTextNode() {} })]]) {
+      const options: ParityOptions = { tagOverrides: { style: 'textarea' }, plugins }
+      const expected = convertOnce(html, options)
+      for (let split = 0; split <= html.length; split++)
+        expect(await streamConvertAtSplit(html, split, options)).toBe(expected)
+    }
+  })
+})
+
+describe('flattened declaration carry', () => {
+  it.each(['markdown', 'html', 'text'] as const)('preserves %s raw-text declaration boundaries after flattening', async (format) => {
+    for (const tag of ['textarea', 'style', 'title']) {
+      for (const declaration of ['<!--unfinished', '<![CDATA[unfinished']) {
+        const before = `${'<div>'.repeat(512)}<${tag}>before `
+        const html = `${before + declaration}</${tag}><p>after</p>${'</div>'.repeat(512)}`
+        const options = { format }
+        const expected = convertOnce(html, options)
+        for (let offset = 0; offset <= declaration.length; offset++)
+          expect(await streamConvertAtSplit(html, before.length + offset, options)).toBe(expected)
+      }
+    }
+  })
+})

@@ -885,6 +885,7 @@ function parseHtmlInternal(
   // bytes from here, since textBuffer may already contain decoded or escaped
   // Markdown that would be transformed again on the next chunk.
   let runStart = 0
+  let declarationPending = false
 
   // Initialize state
   state.depthMap ??= new Uint16Array(MAX_TAG_ID)
@@ -992,6 +993,13 @@ function parseHtmlInternal(
 
     // COMMENT, DOCTYPE or CDATA
     if (nextCharCode === EXCLAMATION_CHAR) {
+      // EOF emits an unfinished declaration inside visible raw text. Keep
+      // those bytes, including aliases and depth-flattened raw-text elements.
+      const handler = state.currentNode?.tagHandler
+      const visibleRawText = state.flattenedRawTagName !== undefined
+        ? !state.flattenedRawExcludesText
+        : handler?.isNonNesting && !handler.excludesTextNodes
+      const discardDeclaration = state.discardExcludedText && !visibleRawText
       // Discriminate on the third char: '[' is a CDATA section, anything else
       // is a comment/doctype. Only the rare '[' case pays for the string work.
       if (htmlChunk.charCodeAt(i + 2) === OPEN_BRACKET_CHAR) {
@@ -1003,13 +1011,14 @@ function parseHtmlInternal(
           const end = htmlChunk.indexOf(']]>', i + 9)
           if (end === -1) {
             // Unterminated CDATA: re-parse from '<' in the next chunk.
-            if (state.discardExcludedText && !state.tagOverrideHandlers?.has('#cdata-section')) {
+            if (discardDeclaration && !state.tagOverrideHandlers?.has('#cdata-section')) {
               if (textBuffer.length > 0)
                 processTextBuffer(textBuffer, state, handleEvent)
               const boundary = `<![CDATA[${htmlChunk.slice(-2)}`
               state.trailingText = boundary
               return boundary
             }
+            declarationPending = true
             textBuffer += htmlChunk.substring(i)
             break
           }
@@ -1025,6 +1034,7 @@ function parseHtmlInternal(
         }
         if (chunkLength - i < 9 && '<![CDATA['.startsWith(htmlChunk.substring(i))) {
           // Chunk boundary fell inside the `<![CDATA[` opener.
+          declarationPending = true
           textBuffer += htmlChunk.substring(i)
           break
         }
@@ -1043,7 +1053,8 @@ function parseHtmlInternal(
         runStart = i
       }
       else {
-        if (state.discardExcludedText && htmlChunk.length - i >= 4) {
+        declarationPending = true
+        if (discardDeclaration && htmlChunk.length - i >= 4) {
           const comment = htmlChunk.charCodeAt(i + 2) === DASH_CHAR && htmlChunk.charCodeAt(i + 3) === DASH_CHAR
           // Preserve initial comment states. Later overlap comes only from
           // body bytes, so opener dashes cannot form a false terminator.
@@ -1206,7 +1217,7 @@ function parseHtmlInternal(
   let remainingHtml = textBuffer.length > 0 ? htmlChunk.substring(runStart) : ''
   const excludedRawText = state.discardExcludedText
     && (state.flattenedRawExcludesText || (state.currentNode?.tagHandler?.isNonNesting && state.currentNode.tagHandler.excludesTextNodes))
-  if (excludedRawText && remainingHtml && !(state.currentNode && isScriptElement(state.currentNode))) {
+  if (excludedRawText && remainingHtml && !declarationPending && !(state.currentNode && isScriptElement(state.currentNode))) {
     // Only a possible end tag can affect the next chunk. Body bytes are
     // excluded, and no plugin observes their text events on this path.
     const boundary = state.rawtextEndTagPending ? 0 : remainingHtml.lastIndexOf('<')
