@@ -53,6 +53,18 @@ curl -s https://example.com | mdream
 curl -s https://example.com | mdream --format html
 ```
 
+## Output format features
+
+Each output format is a cargo feature: `markdown`, `text`, and `html`. All three are on by default.
+
+If you need one format, turn off the defaults to build a smaller binary:
+
+```sh
+cargo add mdream --no-default-features --features markdown
+```
+
+A build with one format drops the code for the others. `OutputFormat` keeps only the variants you enable.
+
 ## License
 
 MIT

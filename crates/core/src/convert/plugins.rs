@@ -122,7 +122,7 @@ fn yaml_scalar(val: &str, as_string: bool) -> String {
 
 impl ConvertState {
   pub(crate) fn generate_frontmatter_yaml(&mut self) {
-    if self.format != OutputFormat::Markdown {
+    if !self.is_markdown() {
       return;
     }
 
