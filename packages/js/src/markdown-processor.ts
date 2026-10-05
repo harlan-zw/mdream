@@ -1242,6 +1242,7 @@ interface MarkdownProcessor {
   processEvent: (event: NodeEvent) => void
   getMarkdown: () => string
   finishOutput?: (markdown: string) => CleanView
+  getHeldOutputFragment?: () => number
 }
 
 export function createMarkdownProcessor(options?: EngineOptions): MarkdownProcessor
@@ -2262,10 +2263,56 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     return cleanPass ? cleanPass.finish(result).markdown : result
   }
 
+  function getHeldOutputFragment(final = false): number {
+    // Each owner can rewrite its opening fragment. The earliest one bounds
+    // every hold, so scan and trim that position once. The final call drops
+    // every hold: a fence whose owner reset the open flag before exiting can
+    // never be rewritten, and holding it suppressed the whole output.
+    let heldFragment = final
+      ? Infinity
+      : Math.min(
+          openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
+          gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
+          state.emptyItemFragment ?? Infinity,
+          state.codeFence?.fragment ?? Infinity,
+          openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
+        )
+    // An open link can still be unwrapped at its close.
+    if (cleanPass && !final)
+      heldFragment = Math.min(heldFragment, cleanPass.held())
+    // Every open quote rewrites from its own fragment at exit, so the earliest
+    // frame bounds the hold. Malformed trees can push a later frame at a
+    // smaller fragment, so scan rather than reading the first frame only. A
+    // frame left open at the final call lost its exit to a plugin.
+    const quoteHoldCount = final ? 0 : state.blockquotes.length
+    for (let index = 0; index < quoteHoldCount; index++) {
+      const fragment = state.blockquotes[index]!.fragment
+      if (fragment < heldFragment)
+        heldFragment = fragment
+    }
+    const captionHoldCount = final ? 0 : captionFrameCount
+    for (let index = 0; index < captionHoldCount; index++) {
+      const offset = index * CAPTION_FRAME_SIZE
+      const anchor = captionFrames![offset + 3]!
+      if ((captionFrames![offset + 2]! & CAPTION_OPEN) === 0 && anchor !== CAPTION_NO_ANCHOR) {
+        heldFragment = Math.min(heldFragment, anchor)
+        break
+      }
+    }
+    // A rewrite can shrink the buffer below a recorded hold (a nested quote
+    // collapsing its separator, a dropped link text, a truncated caption).
+    // Such a hold points at output that is already gone: it protects nothing
+    // and indexing it would read past the buffer.
+    if (heldFragment > state.buffer.length)
+      heldFragment = Infinity
+    return heldFragment
+  }
+
   const processor = {
     processEvent,
     getMarkdown,
     state,
+    getHeldOutputFragment: cleanPass ? getHeldOutputFragment : undefined,
     // Markers the fragments pass writes are only resolved on the finished
     // whole document, which `holdsOutput` gates. Output readers that bypass
     // getMarkdown, like the splitter, finish their views through this, and
@@ -2301,48 +2348,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (openLinkFragment >= 0 && (unresolvedCaptionFragment === -1 || openLinkFragment < unresolvedCaptionFragment))
         unresolvedCaptionFragment = openLinkFragment
       resolveItemMarker(state, false, unresolvedCaptionFragment)
-      // Each owner can rewrite its opening fragment. The earliest one bounds
-      // every hold, so scan and trim that position once. The final call drops
-      // every hold: a fence whose owner reset the open flag before exiting can
-      // never be rewritten, and holding it suppressed the whole output.
-      let heldFragment = final
-        ? Infinity
-        : Math.min(
-            openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
-            gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
-            state.emptyItemFragment ?? Infinity,
-            state.codeFence?.fragment ?? Infinity,
-            openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
-          )
-      // An open link can still be unwrapped at its close.
-      if (cleanPass && !final)
-        heldFragment = Math.min(heldFragment, cleanPass.held())
-      // Every open quote rewrites from its own fragment at exit, so the earliest
-      // frame bounds the hold. Malformed trees can push a later frame at a
-      // smaller fragment, so scan rather than reading the first frame only. A
-      // frame left open at the final call lost its exit to a plugin.
-      const quoteHoldCount = final ? 0 : state.blockquotes.length
-      for (let index = 0; index < quoteHoldCount; index++) {
-        const fragment = state.blockquotes[index]!.fragment
-        if (fragment < heldFragment)
-          heldFragment = fragment
-      }
-      const captionHoldCount = final ? 0 : captionFrameCount
-      for (let index = 0; index < captionHoldCount; index++) {
-        const offset = index * CAPTION_FRAME_SIZE
-        const anchor = captionFrames![offset + 3]!
-        if ((captionFrames![offset + 2]! & CAPTION_OPEN) === 0 && anchor !== CAPTION_NO_ANCHOR) {
-          heldFragment = Math.min(heldFragment, anchor)
-          break
-        }
-      }
-      // A rewrite can shrink the buffer below a recorded hold (a nested quote
-      // collapsing its separator, a dropped link text, a truncated caption).
-      // Such a hold points at output that is already gone: it protects nothing
-      // and indexing it would read past the buffer.
-      if (heldFragment > state.buffer.length)
-        heldFragment = Infinity
-      return heldFragment
+      return getHeldOutputFragment(final)
     },
     markYielded() { hasYieldedContent = true },
   }) }
