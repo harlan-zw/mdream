@@ -24,11 +24,13 @@
 // The pinned semi-space keeps the biggest single run (a stream drain allocates
 // ~156 MB) inside new-space so no scavenge fires mid-run, making heapUsed delta ==
 // bytes allocated. Output is a single JSON line; keep stdout clean.
+import { createHash } from 'node:crypto'
 import { accessSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import v8 from 'node:v8'
+import { EXCLUDED_BODY_SIZES, observeJsStream, STREAM_BODY_SIZES, streamFixture } from './perf-fixtures.ts'
 
 if (typeof globalThis.gc !== 'function')
   throw new TypeError('Run with node --expose-gc so allocation can be measured.')
@@ -220,6 +222,46 @@ async function rustBenches() {
   const { glue: streamWikiGlue, instance: streamWikiInstance } = await loadRust('stream-wiki-memory')
   drainRustChunks(streamWikiGlue, htmlAnchorChunks)
 
+  const metadataMemory = []
+  for (const kind of ['metadata', 'metadata-quote']) {
+    for (const bodyBytes of STREAM_BODY_SIZES) {
+      const id = `rust-stream-${kind}-${bodyBytes / (1024 * 1024)}mib`
+      const { glue: metadataGlue, instance: metadataInstance } = await loadRust(id)
+      const fixture = streamFixture(kind, bodyBytes)
+      const stream = new metadataGlue.MarkdownStream({ plugins: { frontmatter: true, extraction: { selectors: ['h2'] } } })
+      let outputLength = 0
+      let title = ''
+      let heading = ''
+      function discardMetadata() {
+        const data = stream.takeData()
+        title = data.frontmatter?.title ?? title
+        for (const element of data.extracted ?? [])
+          heading = element.textContent
+      }
+      try {
+        for (const chunk of fixture.chunks()) {
+          outputLength += stream.processChunk(chunk).length
+          discardMetadata()
+        }
+        outputLength += stream.finish().length
+        discardMetadata()
+        if (title !== 'Benchmark title' || heading !== 'Intro')
+          throw new TypeError('The metadata fixture lost its title or heading extraction.')
+        if (outputLength < bodyBytes / 2)
+          throw new TypeError('The metadata fixture dropped its paragraph output.')
+      }
+      finally {
+        stream.free()
+      }
+      metadataMemory.push({
+        id: `${id}-mem`,
+        name: `Rust stream (WASM) · ${kind} · ${bodyBytes / (1024 * 1024)} MiB linear memory (peak)`,
+        kind: 'alloc',
+        value: metadataInstance.memory.buffer.byteLength,
+      })
+    }
+  }
+
   // linear memory only grows, and after the timed warm runs it has hit its plateau,
   // so this is a deterministic peak (exact byte-for-byte across runs), not a sample
   return [
@@ -227,16 +269,90 @@ async function rustBenches() {
     ...textTimes,
     ...styleTimes,
     ...anchorStreamTimes,
+    ...metadataMemory,
     { id: 'rust-wiki-mem', name: 'Rust edge (WASM) · wiki linear memory (peak)', kind: 'alloc', value: wikiMemory },
     { id: 'rust-stream-script-mem', name: 'Rust stream (WASM) · excluded 8 MiB script memory (peak)', kind: 'alloc', value: scriptInstance.memory.buffer.byteLength },
     { id: 'rust-stream-wiki-anchors-mem', name: 'Rust stream (WASM) · wiki at link boundaries memory (peak)', kind: 'alloc', value: streamWikiInstance.memory.buffer.byteLength },
   ]
 }
 
+const streamClock = {
+  wall: () => performance.now(),
+  cpu: () => {
+    const usage = process.threadCpuUsage()
+    return (usage.user + usage.system) / 1000
+  },
+}
+
+// Live JS heap after collection is distinct from allocation volume. The input
+// feeds reuse small chunks, and converted output is hashed rather than retained.
+async function retainedJsStream(convertStream, fixture) {
+  const samples = []
+  let observation
+  for (let repetition = 0; repetition < 2; repetition++) {
+    forceGC()
+    const before = process.memoryUsage().heapUsed
+    let peak = 0
+    observation = await observeJsStream(convertStream, fixture.chunks(), {
+      clock: streamClock,
+      beforeInput(inputChunks) {
+        // One collection per MiB keeps the probe bounded while exposing growth.
+        if (inputChunks === 0 || inputChunks > fixture.bodyChunks + 1)
+          return
+        if (inputChunks % 128 !== 0 && inputChunks !== fixture.bodyChunks + 1)
+          return
+        forceGC()
+        peak = Math.max(peak, process.memoryUsage().heapUsed - before)
+      },
+    })
+    samples.push(Math.max(0, peak))
+  }
+  return { peak: Math.min(...samples), samples, observation }
+}
+
+async function jsStreamMemoryBenches(convertStream, kinds = ['style', 'comment', 'cdata', 'quote']) {
+  const benches = []
+  const observations = []
+  for (const kind of kinds) {
+    for (const bodyBytes of kind === 'quote' ? STREAM_BODY_SIZES : EXCLUDED_BODY_SIZES) {
+      const fixture = streamFixture(kind, bodyBytes)
+      const result = await retainedJsStream(convertStream, fixture)
+      const size = bodyBytes < 1024 * 1024 ? `${bodyBytes / 1024}kib` : `${bodyBytes / (1024 * 1024)}mib`
+      const sizeLabel = bodyBytes < 1024 * 1024 ? `${bodyBytes / 1024} KiB` : `${bodyBytes / (1024 * 1024)} MiB`
+      const id = `js-stream-${kind}-${size}`
+      benches.push({
+        id: `${id}-retained`,
+        name: `JS stream · ${kind} · ${sizeLabel} retained heap (sampled peak)`,
+        kind: 'alloc',
+        value: result.peak,
+        samples: result.samples,
+        // Keep noisy live-heap samples visible without driving the verdict.
+        informational: Math.max(...result.samples) - Math.min(...result.samples) > 64 * 1024,
+      })
+      const firstOutput = result.observation.firstOutput._tag === 'Emitted'
+        ? { _tag: 'Emitted', inputChunks: result.observation.firstOutput.inputChunks }
+        : { _tag: 'None' }
+      observations.push({ id, bodyBytes: fixture.bodyBytes, firstOutput, inputChunks: result.observation.inputChunks })
+      if (kind !== 'quote') {
+        const expected = createHash('sha256').update('after').digest()
+        if (result.observation.length !== 5 || !result.observation.digest.equals(expected))
+          throw new TypeError(`The ${kind} fixture produced unexpected output.`)
+      }
+    }
+  }
+  return { benches, observations }
+}
+
 async function main() {
   const { convert } = await bundle('core/fixtures/core.mjs')
   const { convert: convertMinimal } = await bundle('minimal/fixtures/minimal.mjs')
   const { convertStream } = await bundle('stream/fixtures/stream.mjs')
+
+  if (process.argv.includes('--excluded-memory-only')) {
+    const streams = await jsStreamMemoryBenches(convertStream, ['style', 'comment', 'cdata'])
+    process.stdout.write(`${JSON.stringify(streams)}\n`)
+    return
+  }
 
   async function drainStream() {
     let offset = 0
@@ -280,8 +396,10 @@ async function main() {
   for (const [id, name, fn, timeOpts] of JS_BENCHES)
     benches.push(...await bench(id, name, fn, timeOpts))
   benches.push(...await rustBenches())
+  const streams = await jsStreamMemoryBenches(convertStream)
+  benches.push(...streams.benches)
 
-  process.stdout.write(`${JSON.stringify({ benches })}\n`)
+  process.stdout.write(`${JSON.stringify({ benches, observations: streams.observations })}\n`)
 }
 
 main()
