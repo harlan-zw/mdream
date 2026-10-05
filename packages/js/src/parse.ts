@@ -930,7 +930,10 @@ function parseHtmlInternal(
 
         // Preserve original whitespace in pre tags
         if (inPreTag) {
-          textBuffer += htmlChunk[i]
+          const whitespaceStart = i
+          while (i + 1 < chunkLength && isWhitespace(htmlChunk.charCodeAt(i + 1)))
+            i++
+          textBuffer += htmlChunk.substring(whitespaceStart, i + 1)
         }
         else {
           if (currentCharCode === SPACE_CHAR || !state.lastCharWasWhitespace) {
@@ -948,7 +951,18 @@ function parseHtmlInternal(
         // context) is applied at output time in escapeGfmText, which also
         // covers characters produced by decoded entities that never pass
         // through this parse loop.
-        textBuffer += htmlChunk[i]
+        // Append a source run instead of allocating one rope node per character.
+        const textStart = i++
+        while (i < chunkLength) {
+          const code = htmlChunk.charCodeAt(i)
+          if (code === LT_CHAR || isWhitespace(code))
+            break
+          if (code === AMPERSAND_CHAR)
+            state.hasEncodedHtmlEntity = true
+          i++
+        }
+        textBuffer += htmlChunk.substring(textStart, i)
+        continue
       }
       i++
       continue

@@ -9,6 +9,30 @@ import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText } from '../../src/text'
 
 describe('root conversion', () => {
+  it.each([
+    ['<p>alpha&amp;beta&#32;gamma</p>', 'alpha&beta gamma'],
+    ['<p>alpha\t\n\r\f beta 🦊終</p>', 'alpha beta 🦊終'],
+    ['<pre>alpha\t\n\r\f beta</pre>', '```\nalpha\t\n\r\f beta\n```'],
+    ['<p>alpha&lt;3 <strong>beta&amp;gamma</strong>end</p>', 'alpha<3 **beta&gamma**end'],
+  ])('preserves text runs and entity boundaries for %s', (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+  })
+
+  it('preserves text runs split inside entities and surrogate pairs', async () => {
+    const html = '<p>alpha&amp;beta 🦊終<strong>gamma</strong>end</p>'
+    const stream = new ReadableStream<string>({
+      start(controller) {
+        for (let i = 0; i < html.length; i++)
+          controller.enqueue(html[i]!)
+        controller.close()
+      },
+    })
+    let output = ''
+    for await (const chunk of streamHtmlToMarkdown(stream))
+      output += chunk
+    expect(output).toBe('alpha&beta 🦊終**gamma**end')
+  })
+
   it.each(['../../guide', '/../../guide', './../../../guide'])('clamps %s to the origin root', (href) => {
     expect(htmlToMarkdown(`<a href="${href}">Guide</a>`, {
       origin: 'https://example.com/docs/',
