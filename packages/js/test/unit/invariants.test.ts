@@ -21,8 +21,8 @@ const FORMATS: { name: string, convert: Convert, stream: Stream }[] = [
   { name: 'html', convert: htmlToSafeHtml, stream: streamHtmlToSafeHtml },
 ]
 
-const FIXTURES = ['github-markdown-complete.html', 'nuxt-example.html', 'wikipedia-small.html']
-  .map(name => readFileSync(new URL(`../../../mdream/test/fixtures/${name}`, import.meta.url), 'utf8'))
+const FIXTURE_NAMES = ['github-markdown-complete.html', 'nuxt-example.html', 'wikipedia-small.html']
+const FIXTURES = FIXTURE_NAMES.map(name => readFileSync(new URL(`../../../mdream/test/fixtures/${name}`, import.meta.url), 'utf8'))
 
 const encoder = new TextEncoder()
 
@@ -87,16 +87,16 @@ describe('stream output equals one-shot output', () => {
       })
     }
 
-    it(`${format.name}, fixtures in 64 and 4096 byte chunks`, async () => {
-      for (const options of [undefined, incrementalCleanup()]) {
-        for (const html of FIXTURES) {
+    for (const cleanup of [false, true]) {
+      for (const [index, html] of FIXTURES.entries()) {
+        it.each([64, 4096])(`${format.name}, ${FIXTURE_NAMES[index]}, cleanup=${cleanup}, %i byte chunks`, async (size) => {
+          const options = cleanup ? incrementalCleanup() : undefined
           const expected = format.convert(html, options)
           const bytes = encoder.encode(html)
-          for (const size of [64, 4096])
-            expect(await drain(format.stream(chunkStream(bySize(bytes, size)), options))).toBe(expected)
-        }
+          expect(await drain(format.stream(chunkStream(bySize(bytes, size)), options))).toBe(expected)
+        })
       }
-    })
+    }
   }
 })
 
