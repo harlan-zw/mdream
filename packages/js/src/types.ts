@@ -121,7 +121,7 @@ export interface CleanPass {
   finish: (markdown: string) => CleanView
 }
 
-/** Markdown a `CleanPass` finished, and the part of it no later heading changes. */
+/** Markdown a `CleanPass` finished, with optional source position mapping. */
 export interface CleanView {
   markdown: string
   /**
@@ -129,13 +129,6 @@ export interface CleanView {
    * @internal
    */
   mapPosition?: (position: number) => number
-  /**
-   * Position in `markdown` of the earliest marked link no heading matches
-   * yet, or -1 when every marked link is resolved. A still-unresolved link
-   * regrows when a later heading matches its slug, moving every later
-   * position.
-   */
-  settled: number
 }
 
 /**

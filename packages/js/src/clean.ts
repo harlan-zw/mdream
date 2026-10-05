@@ -172,7 +172,7 @@ function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
     },
 
     finish(markdown) {
-      return fragments ? applyFragments(markdown, headings, spans, spanFragments) : { markdown, settled: -1 }
+      return fragments ? applyFragments(markdown, headings, spans, spanFragments) : { markdown }
     },
   }
 }
@@ -633,7 +633,7 @@ function stripQuotePrefixes(value: string): string {
 function applyFragments(markdown: string, headings: readonly string[], spans: readonly string[], spanFragments: readonly string[]): CleanView {
   const count = spans.length
   if (count === 0)
-    return { markdown, settled: -1, mapPosition: position => position }
+    return { markdown, mapPosition: position => position }
 
   const slugs = new Set<string>()
   for (const heading of headings) {
@@ -657,10 +657,8 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
   }
 
   // Each pair drops its markers, and a broken link also drops its `[` and
-  // its `](#slug)`. The earliest broken link starts the part of the view a
-  // later heading can still change.
+  // its `](#slug)`.
   const dropAt = new Map<number, number>()
-  let floor = -1
   for (let span = 0; span < count; span++) {
     const open = opens[span]!
     if (open === -1)
@@ -668,8 +666,6 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
     const close = closes[span]!
     const closeEnd = linkCloseEnd(markdown, close + 1)
     const broken = closeEnd !== -1 && !slugs.has(spanFragments[span]!)
-    if (broken && (floor === -1 || open < floor))
-      floor = open
     dropAt.set(open, broken ? 2 : 1)
     dropAt.set(close, broken ? closeEnd - close : 1)
   }
@@ -677,7 +673,6 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
   // Copy everything between the dropped runs, walking the markers in order.
   let result = ''
   let copied = 0
-  let settled = -1
   let nextOpen = markdown.indexOf(FRAGMENT_LINK_OPEN)
   let nextClose = markdown.indexOf(FRAGMENT_LINK_CLOSE)
   while (nextOpen !== -1 || nextClose !== -1) {
@@ -696,17 +691,12 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
     if (drop === undefined || next < copied)
       continue
     result += markdown.slice(copied, next)
-    if (next === floor)
-      settled = result.length
     copied = next + drop
   }
   result += markdown.slice(copied)
-  // Spelled pairs can change as later output closes a code span, so a view
-  // whose source carries markers settles nothing before the end.
   let positionMap: ((position: number) => number) | undefined
   return {
     markdown: result,
-    settled: written ? settled : 0,
     mapPosition(position) {
       positionMap ??= createPositionMap(dropAt)
       return positionMap(position)
