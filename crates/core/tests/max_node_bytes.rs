@@ -2096,3 +2096,58 @@ fn held_break_runs_are_capped() {
     );
   }
 }
+
+#[test]
+fn mixed_text_runs_keep_utf8_cap_and_report_truncation_across_chunks() {
+  for (html, expected) in [
+    ("<p>é*東京_🙂&amp;x</p><p>end</p>", "é\\*東京\n\nend"),
+    (
+      "<pre>é*東京_🙂&amp;x</pre><p>end</p>",
+      "```\né*東京\n```\n\nend",
+    ),
+  ] {
+    let batch = html_to_markdown_result(html, options(9));
+    assert_eq!(batch.markdown, expected);
+    assert!(batch.truncated);
+    for split in (1..html.len()).filter(|&index| html.is_char_boundary(index)) {
+      let mut processor = MarkdownStreamProcessor::new(options(9));
+      let mut actual = processor.process_chunk(&html[..split]);
+      actual.push_str(&processor.process_chunk(&html[split..]));
+      actual.push_str(&processor.finish());
+      assert_eq!(actual, expected, "split={split}: {html}");
+      assert!(processor.truncated(), "split={split}: {html}");
+    }
+  }
+}
+
+#[test]
+fn mixed_text_runs_do_not_fill_rejected_utf8_slack_with_ascii() {
+  let html = "<p>é*東京_z</p>";
+  let batch = html_to_markdown_result(html, options(8));
+  assert_eq!(batch.markdown, "é\\*東");
+  assert!(batch.truncated);
+  for split in (1..html.len()).filter(|&index| html.is_char_boundary(index)) {
+    let mut processor = MarkdownStreamProcessor::new(options(8));
+    let mut actual = processor.process_chunk(&html[..split]);
+    actual.push_str(&processor.process_chunk(&html[split..]));
+    actual.push_str(&processor.finish());
+    assert_eq!(actual, batch.markdown, "split={split}");
+    assert!(processor.truncated());
+  }
+}
+
+#[test]
+fn preformatted_whitespace_runs_obey_the_text_byte_cap() {
+  let html = "<pre>ab\n\t   cdEF</pre>";
+  let batch = html_to_markdown_result(html, options(9));
+  assert_eq!(batch.markdown, "```\nab\n\t   cd\n```");
+  assert!(batch.truncated);
+  for split in 1..html.len() {
+    let mut processor = MarkdownStreamProcessor::new(options(9));
+    let mut actual = processor.process_chunk(&html[..split]);
+    actual.push_str(&processor.process_chunk(&html[split..]));
+    actual.push_str(&processor.finish());
+    assert_eq!(actual, batch.markdown, "split={split}");
+    assert!(processor.truncated());
+  }
+}

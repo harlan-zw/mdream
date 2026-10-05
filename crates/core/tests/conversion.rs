@@ -5990,3 +5990,70 @@ fn frontmatter_additional_fields_keep_yaml_typing() {
     "---\ntitle: \"2024\"\ndate: 2025-05-10\ndraft: true\npath: \"C:\\\\dir\"\n---"
   );
 }
+
+#[test]
+fn text_runs_keep_unicode_entities_and_gfm_context_across_chunks() {
+  for html in [
+    "<p>é*東京_🙂&amp;x</p><p>next</p>",
+    "<pre><code>é*東京_🙂&amp;x\r\n\t  y</code></pre><p>next</p>",
+    "<textarea>é*東京_🙂&amp;x\n  y</textarea><p>next</p>",
+    "<blockquote><a href='/x'>é[東京]🙂&amp;x</a></blockquote>",
+    "<table><tr><td>é|東京_🙂&amp;x</td></tr></table>",
+  ] {
+    for format in [
+      OutputFormat::Markdown,
+      OutputFormat::Text,
+      OutputFormat::Html,
+    ] {
+      let options = HTMLToMarkdownOptions::default();
+      let expected = match format {
+        OutputFormat::Markdown => html_to_markdown(html, options.clone()),
+        OutputFormat::Text => html_to_text(html, options.clone()),
+        OutputFormat::Html => html_to_html(html, options.clone()),
+      };
+      for split in (1..html.len()).filter(|&index| html.is_char_boundary(index)) {
+        let mut processor = MarkdownStreamProcessor::new_with_format(options.clone(), format);
+        let mut actual = processor.process_chunk(&html[..split]);
+        actual.push_str(&processor.process_chunk(&html[split..]));
+        actual.push_str(&processor.finish());
+        assert_eq!(actual, expected, "{format:?} split={split}: {html}");
+      }
+    }
+  }
+  assert_eq!(convert("<p>é*東京_🙂&amp;x</p>"), "é\\*東京\\_🙂&x");
+  assert_eq!(
+    convert("<pre><code>é*東京_🙂&amp;x\n\t  y</code></pre>"),
+    "```\né*東京_🙂&x\n\t  y\n```"
+  );
+}
+
+#[test]
+fn unicode_runs_stop_at_utf8_caps_in_every_output_format_and_chunk_width() {
+  let html = "<p>é*東京_z&amp;q</p><p>end</p>";
+  for (format, expected) in [
+    (OutputFormat::Markdown, "é\\*東\n\nend"),
+    (OutputFormat::Text, "é*東\n\nend"),
+    (OutputFormat::Html, "<p>é*東</p><p>end</p>"),
+  ] {
+    let options = HTMLToMarkdownOptions::default().with_max_node_bytes(8);
+    let batch = mdream::html_to_format_result(html, options.clone(), format);
+    assert_eq!(batch.markdown, expected);
+    assert!(batch.truncated);
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new_with_format(options.clone(), format);
+      let mut actual = String::new();
+      let mut start = 0;
+      while start < html.len() {
+        let mut end = (start + width).min(html.len());
+        while !html.is_char_boundary(end) {
+          end += 1;
+        }
+        actual.push_str(&processor.process_chunk(&html[start..end]));
+        start = end;
+      }
+      actual.push_str(&processor.finish());
+      assert_eq!(actual, expected, "{format:?} width={width}");
+      assert!(processor.truncated(), "{format:?} width={width}");
+    }
+  }
+}

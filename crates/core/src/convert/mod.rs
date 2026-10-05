@@ -1553,8 +1553,13 @@ impl ConvertState {
           let before_len = text_buffer.len();
           if cc < 0x80 {
             text_buffer.push(cc as char);
-          } else if let Some(ch) = chunk[i..].chars().next() {
-            let end = i + ch.len_utf8();
+          } else {
+            // ASCII delimiters cannot occur inside UTF-8 code points. Copy the
+            // whole non-ASCII run without decoding and pushing each character.
+            let mut end = i + 1;
+            while end < chunk_length && bytes[end] >= 0x80 {
+              end += 1;
+            }
             self.truncated |= push_capped_text_node(
               &mut text_buffer,
               &chunk[i..end],
