@@ -21,13 +21,13 @@ yarn add @mdream/vite@beta
 
 ### Peer Dependencies
 
-- `vite` ^4.0.0, ^5.0.0, ^6.0.0, or ^7.0.0
+- `vite` ^4.0.0, ^5.0.0, ^6.0.0, ^7.0.0, or ^8.0.0
 
 The plugin depends on `mdream` and `@mdream/js` (installed automatically as transitive dependencies).
 
 ## Setup
 
-Add the plugin to your `vite.config.ts`:
+Add the plugin to your `vite.config.ts`. Set `enforce: 'post'` so HTML assets exist before Markdown generation:
 
 ```ts
 import { viteHtmlToMarkdownPlugin } from '@mdream/vite'
@@ -35,7 +35,10 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    viteHtmlToMarkdownPlugin()
+    {
+      ...viteHtmlToMarkdownPlugin(),
+      enforce: 'post',
+    }
   ]
 })
 ```
@@ -44,10 +47,14 @@ A default export is also available:
 
 ```ts
 import htmlToMarkdown from '@mdream/vite'
+import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    htmlToMarkdown()
+    {
+      ...htmlToMarkdown(),
+      enforce: 'post',
+    }
   ]
 })
 ```
@@ -249,12 +256,15 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    viteHtmlToMarkdownPlugin({
-      mdreamOptions: {
-        minimal: true,
-        origin: 'https://example.com',
-      }
-    })
+    {
+      ...viteHtmlToMarkdownPlugin({
+        mdreamOptions: {
+          minimal: true,
+          origin: 'https://example.com',
+        }
+      }),
+      enforce: 'post',
+    }
   ]
 })
 ```
@@ -269,16 +279,19 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    viteHtmlToMarkdownPlugin({
-      include: ['docs/**/*.html'],
-      exclude: ['docs/internal/**'],
-      outputDir: 'markdown',
-      mdreamOptions: {
-        minimal: true,
-        origin: 'https://docs.example.com',
-        clean: true,
-      }
-    })
+    {
+      ...viteHtmlToMarkdownPlugin({
+        include: ['docs/*.html', 'docs/*/*.html'],
+        exclude: ['docs/internal/*'],
+        outputDir: 'markdown',
+        mdreamOptions: {
+          minimal: true,
+          origin: 'https://docs.example.com',
+          clean: true,
+        }
+      }),
+      enforce: 'post',
+    }
   ]
 })
 ```
@@ -291,10 +304,13 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    viteHtmlToMarkdownPlugin({
-      verbose: true,
-      cacheEnabled: false,
-    })
+    {
+      ...viteHtmlToMarkdownPlugin({
+        verbose: true,
+        cacheEnabled: false,
+      }),
+      enforce: 'post',
+    }
   ]
 })
 ```
@@ -307,25 +323,28 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    viteHtmlToMarkdownPlugin({
-      mdreamOptions: {
-        frontmatter: {
-          metaFields: ['description', 'author', 'keywords'],
-          onExtract(fm) {
-            console.log('Extracted frontmatter:', fm)
-          }
-        },
-        filter: {
-          exclude: ['nav', 'footer', 'aside', 'form'],
-        },
-      }
-    })
+    {
+      ...viteHtmlToMarkdownPlugin({
+        mdreamOptions: {
+          frontmatter: {
+            metaFields: ['description', 'author', 'keywords'],
+            onExtract(fm) {
+              console.log('Extracted frontmatter:', fm)
+            }
+          },
+          filter: {
+            exclude: ['nav', 'footer', 'aside', 'form'],
+          },
+        }
+      }),
+      enforce: 'post',
+    }
   ]
 })
 ```
 
-[npm-version-src]: https://img.shields.io/npm/v/@mdream/vite/latest.svg?style=flat&colorA=18181B&colorB=4C9BE0
-[npm-version-href]: https://npmjs.com/package/@mdream/vite
+[npm-version-src]: https://img.shields.io/npm/v/@mdream/vite/beta.svg?style=flat&colorA=18181B&colorB=4C9BE0
+[npm-version-href]: https://npmjs.com/package/@mdream/vite/v/beta
 [npm-downloads-src]: https://img.shields.io/npm/dm/@mdream/vite.svg?style=flat&colorA=18181B&colorB=4C9BE0
 [npm-downloads-href]: https://npm.chart.dev/@mdream/vite
 [license-src]: https://img.shields.io/npm/l/@mdream/vite.svg?style=flat&colorA=18181B&colorB=4C9BE0

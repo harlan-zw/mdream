@@ -1,18 +1,40 @@
-import type { MdreamOptions } from './types'
-import { createMarkdownProcessor } from './markdown-processor'
+import type { ParseState } from './parse'
+import type { MdreamOptions, NodeEvent } from './types'
+import { createMarkdownProcessor, trimAsciiWhitespaceEnd } from './markdown-processor'
 import { assertEngineOptions } from './option-shape'
+import { finalizeParse, parseHtmlStream } from './parse'
 import { resolvePlugins } from './pluggable/plugin'
+import { endPlugins, processPluginsForEvent } from './plugin-processor'
 import { streamHtmlToMarkdown as _streamHtmlToMarkdown } from './stream'
 import { buildTagOverrideHandlers } from './tag-overrides'
 import { tagHandlers } from './tags'
+import { trimOutputStart } from './utils'
 
 function convert(html: string, options: MdreamOptions): string {
   const tagOverrideHandlers = options.tagOverrides
     ? buildTagOverrideHandlers(options.tagOverrides, tagHandlers)
     : undefined
-  const processor = createMarkdownProcessor(options, resolvePlugins(options.plugins), tagOverrideHandlers)
-  processor.processHtml(html)
-  return processor.getMarkdown()
+  const plugins = resolvePlugins(options.plugins)
+  const processor = createMarkdownProcessor(options)
+  const parseState: ParseState = {
+    depthMap: processor.state.depthMap,
+    depth: 0,
+    resolvedPlugins: plugins,
+    tagHandlers,
+    tagOverrideHandlers,
+    plainText: false,
+  }
+  const handleEvent: (event: NodeEvent) => void = plugins.length
+    ? event => processPluginsForEvent(event, plugins, processor.state, processor.processEvent)
+    : processor.processEvent
+  const leftover = parseHtmlStream(html, parseState, handleEvent)
+  finalizeParse(leftover, parseState, handleEvent)
+  endPlugins(plugins, processor.state)
+  // Only ASCII whitespace ends the output, as in Rust: U+00A0 is content,
+  // and a stream cannot take back a nbsp it already yielded.
+  const markdown = trimAsciiWhitespaceEnd(trimOutputStart(processor.state.buffer.join('')))
+  processor.state.buffer.length = 0
+  return markdown
 }
 
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {

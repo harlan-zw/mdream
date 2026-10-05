@@ -21,8 +21,8 @@ const ALL_RULES: CleanOptions = {
  * Import this only when you use it, so other bundles do not include the cleanup pass.
  */
 export function clean(rules: CleanOptions = ALL_RULES): Cleaner {
-  const resolved = { ...rules }
-  return { ...resolved, apply: markdown => applyClean(markdown, resolved) }
+  const cleaner: Cleaner = { ...rules, apply: markdown => applyClean(markdown, cleaner) }
+  return cleaner
 }
 
 // ── Shared: parse markdown link at position ──

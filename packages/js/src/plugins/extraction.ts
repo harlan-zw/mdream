@@ -60,6 +60,7 @@ function createExtractionHooks(matcherCallbacks: { matcher: ReturnType<typeof pa
           // Each matching handler receives its own extracted element object.
           const extractedElement: ExtractedElement = {
             ...element,
+            depthMap: element.depthMap,
             attributes: { ...element.attributes },
             textContent: tracked.textContent.trim(),
           }

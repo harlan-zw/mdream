@@ -6,8 +6,8 @@ This document describes how mdream benchmarks are conducted to ensure transparen
 
 | Library | Version | Language | Notes |
 |---------|---------|----------|-------|
-| [mdream (JS)](https://github.com/harlan-zw/mdream) | latest | JavaScript | Base `htmlToMarkdown()` with the default JS engine |
-| [mdream (Rust)](https://github.com/harlan-zw/mdream) | latest | Rust | Base `htmlToMarkdown()` with the native Rust engine via NAPI |
+| [mdream (JS)](https://github.com/harlan-zw/mdream) | workspace | JavaScript | Base `htmlToMarkdown()` with the default JS engine |
+| [mdream (Rust)](https://github.com/harlan-zw/mdream) | workspace | Rust | Base `htmlToMarkdown()` with the native Rust engine via NAPI |
 | [html-to-markdown](https://github.com/nickmass/html2md-rs) | 2.20.0 | Rust (native) | Via `@kreuzberg/html-to-markdown-node` napi-rs bindings |
 | [turndown](https://github.com/mixmark-io/turndown) | 7.2.2 | JavaScript | With [GFM plugin](https://github.com/mixmark-io/turndown-plugin-gfm) (tables, strikethrough, task lists) |
 | [node-html-markdown](https://github.com/crosstype/node-html-markdown) | 2.0.0 | JavaScript | Default settings |

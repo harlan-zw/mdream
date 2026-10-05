@@ -17,15 +17,10 @@ const JS: Record<Format, (html: string) => string> = {
 // Inputs where the engines differ today. Most also differ in v1. Remove an
 // entry once the engines agree; the test fails until you do.
 const KNOWN_DIFFERENCES = new Set<string>([
-  ['text', '<ul><li>a<ul><li>b<ol><li>c</li><li>d<p>para</p></li></ol></li></ul></li><li>e</li></ul>'],
-  ['text', '<blockquote><p>q1</p><blockquote><p>q2</p><pre>p</pre></blockquote><p>q3</p></blockquote>'],
-  ['text', '<p>a</x></p><<p>>b</p><p attr="unterminated>c</p>'],
-  ['text', '<html><head><title>T: "q" \\ b</title><meta name="description" content="Desc # x"><meta property="og:title" content="OG"></head><body><header>hdr</header><main><h1>M</h1><p class="font-bold">bold tw</p><form>f</form></main><aside>as</aside></body></html>'],
-  ['text', '<table><caption>Cap</caption><tr><th>h</th></tr><tr><td>|pipe|</td></tr></table>'],
-  ['markdown', '<pre>a<b>bold</b>\n<br>after br</pre>'],
-  ['text', '<pre>a<b>bold</b>\n<br>after br</pre>'],
-  ['text', '<pre>x\n  </pre><p>After</p>'],
-  ['text', '<html><head><title>A</title><meta name="description" content="da"></head><body><header>x</header><h1>A</h1><p>a</p><footer>f</footer></body></html>'],
+  ['markdown', '<p>a</x></p><<p>>b</p><p attr="unterminated>c</p>'],
+  ['markdown', '<dl><dt>term</dt><dd>def</dd><dt>t2</dt><dd>d2<p>p</p></dd></dl>'],
+  ['markdown', '<html><head><title>T: "q" \\ b</title><meta name="description" content="Desc # x"><meta property="og:title" content="OG"></head><body><header>hdr</header><main><h1>M</h1><p class="font-bold">bold tw</p><form>f</form></main><aside>as</aside></body></html>'],
+  ['markdown', '<html><head><title>A</title><meta name="description" content="da"></head><body><header>x</header><h1>A</h1><p>a</p><footer>f</footer></body></html>'],
 ].map(([format, html]) => `${format}\u0000${html}`))
 
 describe('javaScript and Rust engines agree on the corpus', () => {

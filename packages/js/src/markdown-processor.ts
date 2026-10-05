@@ -1,5 +1,4 @@
-import type { ParseState } from './parse'
-import type { ElementNode, EngineOptions, GfmAction, Node, NodeEvent, PluginContext, TagHandler, TextNode, TransformPlugin } from './types'
+import type { ElementNode, EngineOptions, GfmAction, Node, NodeEvent, PluginContext, TagHandler, TextNode } from './types'
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
@@ -49,10 +48,8 @@ import {
   TAG_VAR,
   TEXT_NODE,
 } from './const'
-import { finalizeParse, parseHtmlStream } from './parse'
-import { endPlugins, processPluginsForEvent } from './plugin-processor'
-import { breakHandler, renderBreak, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
+import { breakHandler, renderBreak } from './tags'
+import { blockOpenPrefix, continuationPrefix, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -448,22 +445,13 @@ function escapeRawHtmlText(value: string, depthMap: Uint16Array, protectLinkText
 
 // Private scan state stays outside the handler-facing MarkdownState interface.
 // Tuple labels retain meaning in source while minifying to compact indexes.
-type BufferScanState = [
+export type BufferScanState = [
   rawHtmlMarkdown: boolean,
   rawHtmlScannedTo: number,
   lineScannedTo: number,
   lineStartFragment: number,
   lineStartOffset: number,
 ]
-
-// The streaming drain replaces the buffer, so fragment-indexed scan cursors
-// start over while the raw-HTML Markdown latch survives.
-function resetBufferScanCursors(scan: BufferScanState): void {
-  scan[1] = 0
-  scan[2] = 0
-  scan[3] = 0
-  scan[4] = 0
-}
 
 function trackRawHtmlMarkdownContext(buffer: string[], scan: BufferScanState): boolean {
   if (scan[0])
@@ -832,33 +820,15 @@ function hasNonWhitespace(value: string): boolean {
   return false
 }
 
-function isAsciiWhitespace(code: number): boolean {
+export function isAsciiWhitespace(code: number): boolean {
   return code === 32 || (code >= 9 && code <= 13)
 }
 
-function trimAsciiWhitespaceEnd(value: string): string {
+export function trimAsciiWhitespaceEnd(value: string): string {
   let end = value.length
   while (end > 0 && isAsciiWhitespace(value.charCodeAt(end - 1)))
     end--
   return end === value.length ? value : value.slice(0, end)
-}
-
-function fragmentPosition(buffer: string[], fragment: number): number {
-  let position = 0
-  for (let index = 0; index < fragment; index++)
-    position += buffer[index]!.length
-  return position
-}
-
-function trimBufferedWhitespacePosition(content: string, position: number): number {
-  let end = Math.max(0, position)
-  while (end > 0) {
-    const code = content.charCodeAt(end - 1)
-    if (code !== 32 && code !== 10)
-      break
-    end--
-  }
-  return end
 }
 
 /** Drop the top marker when every following fragment is whitespace. */
@@ -1207,10 +1177,24 @@ function commitGfmAction(
   }
 }
 
-/**
- * Creates a markdown processor that consumes DOM events and generates markdown
- */
-export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlugins: TransformPlugin[] = [], tagOverrideHandlers?: Map<string, TagHandler>) {
+export interface MarkdownStreamContext {
+  state: MarkdownState
+  options: EngineOptions
+  bufferScan: BufferScanState
+  /** Earliest fragment a later event can still rewrite. `final` drops every hold. */
+  prepareDrain: (final: boolean) => number
+  markYielded: () => void
+}
+
+interface MarkdownProcessor {
+  state: MarkdownState
+  processEvent: (event: NodeEvent) => void
+}
+
+/** Consume parsed events with shared Markdown state. */
+export function createMarkdownProcessor(options?: EngineOptions): MarkdownProcessor
+export function createMarkdownProcessor<T>(options: EngineOptions, createStream: (context: MarkdownStreamContext) => T): MarkdownProcessor & T
+export function createMarkdownProcessor<T>(options: EngineOptions = {}, createStream?: (context: MarkdownStreamContext) => T) {
   const state: MarkdownState = {
     options,
     outputFormat: 'markdown',
@@ -1250,7 +1234,6 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
   const cleanEmptyLinkText = clean === true || (clean !== null && typeof clean === 'object' && clean.emptyLinkText === true)
   let rawHtmlLink: ElementNode | undefined
 
-  let lastYieldedLength = 0
   let hasYieldedContent = false
 
   function captionNeedsPreparation(): boolean {
@@ -2149,215 +2132,68 @@ export function createMarkdownProcessor(options: EngineOptions = {}, resolvedPlu
     }
   }
 
-  /**
-   * Process HTML string and generate events
-   */
-  function processHtml(html: string): void {
-    const parseState: ParseState = {
-      depthMap: state.depthMap,
-      depth: 0,
-      resolvedPlugins,
-      tagHandlers,
-      tagOverrideHandlers,
-      plainText: false,
-    }
-
-    const handleEvent: (event: NodeEvent) => void = resolvedPlugins.length
-      ? event => processPluginsForEvent(event, resolvedPlugins, state, processEvent)
-      : processEvent
-    const leftover = parseHtmlStream(html, parseState, handleEvent)
-    // Commit trailing text and close unclosed elements at end of input.
-    finalizeParse(leftover, parseState, handleEvent)
-    endPlugins(resolvedPlugins, state)
-  }
-
-  /**
-   * Get the final markdown output
-   */
-  function getMarkdown(): string {
-    // Only ASCII whitespace ends the output, as in Rust: U+00A0 is content,
-    // and a stream cannot take back a nbsp it already yielded.
-    const result = trimAsciiWhitespaceEnd(trimOutputStart(state.buffer.join('')))
-    state.buffer.length = 0
-    return result
-  }
-
-  /**
-   * Get new markdown content since the last call (for streaming). The final
-   * call after input ends passes `final` to release every fragment hold: no
-   * later event can rewrite the buffer, so the tail must flush exactly like
-   * getMarkdown's hold-free join.
-   */
-  function getMarkdownChunk(final = false): string {
-    // Settle an open marker-line guard when the item's first content already
-    // answers it, so the hold below never outlives the marker's own line.
-    let unresolvedCaptionFragment = -1
-    if (state.emptyItemFragment !== undefined && captionFrames) {
-      for (let index = 0; index < captionFrameCount; index++) {
-        const offset = index * CAPTION_FRAME_SIZE
-        const anchor = captionFrames[offset + 3]!
-        if (anchor !== CAPTION_NO_ANCHOR) {
-          unresolvedCaptionFragment = anchor
-          break
-        }
-      }
-    }
-    resolveItemMarker(state, false, unresolvedCaptionFragment)
-    const content = state.buffer.join('')
-    const currentContent = hasYieldedContent ? content : trimOutputStart(content)
-    // Before a <pre> opens its fence, its tail is still the block spacing its
-    // own enter wrote, which finalization trims. Only past the fence is
-    // trailing whitespace code.
-    const inPre = state.depthMap[TAG_PRE] !== 0 && state.preFenceOwnerDepth !== 0
-    let stableLength = currentContent.length
-    let retainMutableFragments = false
-    if (inPre) {
-      const trailingCode = currentContent.charCodeAt(stableLength - 1)
-      while (stableLength > 0 && currentContent.charCodeAt(stableLength - 1) === 32)
-        stableLength--
-      retainMutableFragments = stableLength < currentContent.length
-      if (state.lastTextNode?.containsWhitespace && isAsciiWhitespace(trailingCode)) {
-        stableLength = trimAsciiWhitespaceEnd(currentContent).length
-        retainMutableFragments = stableLength < currentContent.length
-      }
-      // A handler-written trailing space (a list marker opened before this
-      // <pre>) is retracted by the next block boundary, so it stays buffered
-      // mid-line exactly like the non-pre branch: yielding it as stable would
-      // strand the boundary newline behind the monotonic yield cursor.
-    }
-    else {
-      // Block spacing and trailing spaces can still be trimmed by a later
-      // element close or by finalization. Keep them buffered until following
-      // content makes them stable.
-      while (stableLength > 0) {
-        const code = currentContent.charCodeAt(stableLength - 1)
-        if (code !== 32 && code !== 10)
-          break
-        stableLength--
-      }
-      retainMutableFragments = stableLength < currentContent.length
-    }
-
-    const leadingTrimmed = content.length - currentContent.length
-
-    // Each owner can rewrite its opening fragment. The earliest one bounds
-    // every hold, so scan and trim that position once. The final call drops
-    // every hold: a fence whose owner reset the open flag before exiting can
-    // never be rewritten, and holding it suppressed the whole output.
-    let heldFragment = final
-      ? Infinity
-      : Math.min(
-          openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
-          gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
-          state.emptyItemFragment ?? Infinity,
-          state.codeFence?.fragment ?? Infinity,
-          openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
-        )
-    // Every open quote rewrites from its own fragment at exit, so the earliest
-    // frame bounds the hold. Malformed trees can push a later frame at a
-    // smaller fragment, so scan rather than reading the first frame only. A
-    // frame left open at the final call lost its exit to a plugin.
-    const quoteHoldCount = final ? 0 : state.blockquotes.length
-    for (let index = 0; index < quoteHoldCount; index++) {
-      const fragment = state.blockquotes[index]!.fragment
-      if (fragment < heldFragment)
-        heldFragment = fragment
-    }
-    const captionHoldCount = final ? 0 : captionFrameCount
-    for (let index = 0; index < captionHoldCount; index++) {
-      const offset = index * CAPTION_FRAME_SIZE
-      const anchor = captionFrames![offset + 3]!
-      if ((captionFrames![offset + 2]! & CAPTION_OPEN) === 0 && anchor !== CAPTION_NO_ANCHOR) {
-        heldFragment = Math.min(heldFragment, anchor)
-        break
-      }
-    }
-    // A rewrite can shrink the buffer below a recorded hold (a nested quote
-    // collapsing its separator, a dropped link text, a truncated caption).
-    // Such a hold points at output that is already gone: it protects nothing
-    // and indexing it would read past the buffer.
-    if (heldFragment > state.buffer.length)
-      heldFragment = Infinity
-    const fragmentHeld = heldFragment !== Infinity
-    if (fragmentHeld) {
-      stableLength = Math.min(stableLength, trimBufferedWhitespacePosition(
-        currentContent,
-        fragmentPosition(state.buffer, heldFragment) - leadingTrimmed,
-      ))
-    }
-
-    // A heading's exit escapes the trailing `#` run GFM would read as an ATX
-    // closing sequence, so hold the run (and the spacing that decides whether it
-    // closes) until the heading is complete.
-    const headingHeld = !final && isInsideHeading(state.depthMap)
-    if (headingHeld) {
-      let headingPos = currentContent.length
-      while (headingPos > 0) {
-        const code = currentContent.charCodeAt(headingPos - 1)
-        if (code !== 35 && code !== 32 && code !== 9) // # space tab
-          break
-        headingPos--
-      }
-      if (headingPos < stableLength)
-        stableLength = headingPos
-    }
-
-    // A later mutable tail can move the stable boundary behind bytes already
-    // returned to the caller. Keep the cursor monotonic so those bytes are not
-    // emitted a second time once following content makes the tail stable.
-    if (stableLength < lastYieldedLength)
-      stableLength = lastYieldedLength
-
-    const newContent = currentContent.slice(lastYieldedLength, stableLength)
-    lastYieldedLength = stableLength
-    if (newContent)
-      hasYieldedContent = true
-
-    // Keep only enough emitted context for spacing/newline decisions, plus any
-    // trailing spaces that are still mutable. This prevents every stream chunk
-    // from joining and slicing the entire cumulative output. Plugin, wrapping,
-    // and open-link paths retain the full buffer because they can inspect or
-    // rewrite earlier content.
-    if (!fragmentHeld && !headingHeld && (!retainMutableFragments || !inPre)) {
-      if (!resolvedPlugins.length && !options.wrapWidth) {
-        if (retainMutableFragments && leadingTrimmed === 0) {
-          // Preserve the final fragment as a separate value: close handlers
-          // identify and trim it by reference equality with lastContentCache.
-          const lastFragment = state.buffer.at(-1)!
-          const fragmentStart = currentContent.length - lastFragment.length
-          const tailStart = Math.max(0, Math.min(stableLength - 2, fragmentStart))
-          const emittedTail = currentContent.slice(tailStart, fragmentStart)
-          state.buffer.length = 0
-          resetBufferScanCursors(bufferScan)
-          if (emittedTail)
-            state.buffer.push(emittedTail)
-          state.buffer.push(lastFragment)
-          lastYieldedLength = stableLength - tailStart
-        }
-        else if (!retainMutableFragments) {
-          const tailStart = Math.max(0, stableLength - 2)
-          const emittedTail = currentContent.slice(tailStart, stableLength)
-          state.buffer.length = 0
-          resetBufferScanCursors(bufferScan)
-          if (emittedTail)
-            state.buffer.push(emittedTail)
-          lastYieldedLength = emittedTail.length
-        }
-      }
-      else if (!retainMutableFragments && state.buffer.length > 1) {
-        state.buffer.length = 0
-        resetBufferScanCursors(bufferScan)
-        state.buffer.push(currentContent)
-      }
-    }
-    return newContent
-  }
-
-  return {
-    processEvent,
-    processHtml,
-    getMarkdown,
-    getMarkdownChunk,
+  const processor = { processEvent, state }
+  if (!createStream)
+    return processor
+  return { ...processor, ...createStream({
     state,
-  }
+    options,
+    bufferScan,
+    prepareDrain(final) {
+      // A pending caption can still retract the item marker.
+      let unresolvedCaptionFragment = -1
+      if (state.emptyItemFragment !== undefined && captionFrames) {
+        for (let index = 0; index < captionFrameCount; index++) {
+          const offset = index * CAPTION_FRAME_SIZE
+          const anchor = captionFrames[offset + 3]!
+          if (anchor !== CAPTION_NO_ANCHOR) {
+            unresolvedCaptionFragment = anchor
+            break
+          }
+        }
+      }
+      resolveItemMarker(state, false, unresolvedCaptionFragment)
+      // Each owner can rewrite its opening fragment, so the earliest one
+      // bounds every hold. The final call drops every hold: a fence whose
+      // owner reset the open flag before exiting can never be rewritten, and
+      // holding it suppressed the whole output.
+      let heldFragment = final
+        ? Infinity
+        : Math.min(
+            openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
+            gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
+            state.emptyItemFragment ?? Infinity,
+            state.codeFence?.fragment ?? Infinity,
+            openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
+          )
+      // Every open quote rewrites from its own fragment at exit, so the
+      // earliest frame bounds the hold. Malformed trees can push a later
+      // frame at a smaller fragment, so scan rather than reading the first
+      // frame only. A frame left open at the final call lost its exit to a
+      // plugin.
+      const quoteHoldCount = final ? 0 : state.blockquotes.length
+      for (let index = 0; index < quoteHoldCount; index++) {
+        const fragment = state.blockquotes[index]!.fragment
+        if (fragment < heldFragment)
+          heldFragment = fragment
+      }
+      const captionHoldCount = final ? 0 : captionFrameCount
+      for (let index = 0; index < captionHoldCount; index++) {
+        const offset = index * CAPTION_FRAME_SIZE
+        const anchor = captionFrames![offset + 3]!
+        if ((captionFrames![offset + 2]! & CAPTION_OPEN) === 0 && anchor !== CAPTION_NO_ANCHOR) {
+          heldFragment = Math.min(heldFragment, anchor)
+          break
+        }
+      }
+      // A rewrite can shrink the buffer below a recorded hold (a nested quote
+      // collapsing its separator, a dropped link text, a truncated caption).
+      // Such a hold points at output that is already gone: it protects
+      // nothing and indexing it would read past the buffer.
+      if (heldFragment > state.buffer.length)
+        heldFragment = Infinity
+      return heldFragment
+    },
+    markYielded() { hasYieldedContent = true },
+  }) }
 }

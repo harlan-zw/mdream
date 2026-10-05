@@ -58,6 +58,15 @@ jobs:
         run: cargo clippy --workspace --exclude mdream-edge --locked -- -D warnings -A
           clippy::pedantic -A clippy::nursery
 
+      # Each output format is a cargo feature. Lint every single-format build
+      # so a format check that assumes the others exist fails here.
+      - name: Run clippy (single output format)
+        working-directory: crates
+        run: |
+          for format in markdown text html; do
+            cargo clippy -p mdream --no-default-features --features "$format" --lib --bins --locked -- -D warnings -A clippy::pedantic -A clippy::nursery
+          done
+
       - name: Run clippy (edge, wasm target)
         working-directory: crates
         run: cargo clippy -p mdream-edge --target wasm32-unknown-unknown --locked -- -D
@@ -134,7 +143,7 @@ jobs:
         run: cargo build -p mdream-edge --target wasm32-unknown-unknown
 
       - name: Install wasm-pack and wasm-opt
-        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2.87.8
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: wasm-pack,wasm-opt
 
@@ -166,7 +175,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           targets: wasm32-wasip1-threads
 
@@ -197,7 +206,7 @@ jobs:
           workspaces: crates -> target
 
       - name: Install wasm-pack
-        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2.87.8
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: wasm-pack
 
@@ -234,7 +243,7 @@ jobs:
           workspaces: crates -> target
 
       - name: Install wasm-pack and wasm-opt
-        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2.87.8
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: wasm-pack,wasm-opt
 
@@ -295,7 +304,7 @@ jobs:
           workspaces: crates -> target
 
       - name: Install wasm-pack and wasm-opt
-        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2.87.8
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: wasm-pack,wasm-opt
 

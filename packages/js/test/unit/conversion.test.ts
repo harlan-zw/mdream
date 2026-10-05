@@ -29,6 +29,12 @@ describe('root conversion', () => {
     })).toBe('[Guide](https://example.com/guide)')
   })
 
+  it.each(['../../guide', '/../../guide', './../../../guide'])('clamps %s to the origin root', (href) => {
+    expect(htmlToMarkdown(`<a href="${href}">Guide</a>`, {
+      origin: 'https://example.com/docs/',
+    })).toBe('[Guide](https://example.com/guide)')
+  })
+
   it('rejects clean rules that did not come from clean()', () => {
     expect(() => htmlToMarkdown('<p>x</p>', { clean: true as any })).toThrow('@mdream/js/clean')
   })

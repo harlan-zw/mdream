@@ -53,7 +53,8 @@ The `format` option is removed. Import the converter for the format.
 
 The text and HTML converters accept `origin`, `plugins`, and `tagOverrides`.
 `htmlToText` also accepts `wrapWidth`.
-Both apply the `urls` and `emptyImages` rules from `clean`. They skip the Markdown post-processing pass, as in v1.
+Both apply the `urls` rule from `clean`. `htmlToText` also applies `emptyImages`.
+They skip the Markdown post-processing pass, as in v1.
 The CLI `--format` flag is unchanged.
 `frontmatterPlugin` now writes YAML frontmatter to Markdown output only.
 In v1, safe HTML output started with a YAML block. This also applies to `--preset minimal --format html`.
@@ -385,12 +386,11 @@ The built-in `frontmatterPlugin`, `isolateMainPlugin`, and `extractionPlugin` us
 Filters elements by CSS selectors, tag names, or TAG_* constants.
 
 ```typescript
-import { TAG_FOOTER, TAG_NAV } from '@mdream/js'
 import { filterPlugin } from '@mdream/js/plugins'
 
 // Exclude navigation and footer
 const plugin = filterPlugin({
-  exclude: [TAG_NAV, TAG_FOOTER, '.sidebar', '#ads'],
+  exclude: ['nav', 'footer', '.sidebar', '#ads'],
 })
 
 // Include only specific elements
@@ -524,13 +524,18 @@ Determines if a client prefers Markdown over HTML using HTTP content negotiation
 - Bare wildcards (`*/*`) do not trigger Markdown (prevents breaking OG crawlers).
 - `sec-fetch-dest: document` always returns `false` (browser navigation).
 
-```typescript
+```ts
 import { shouldServeMarkdown } from '@mdream/js/negotiate'
 
-if (shouldServeMarkdown(request.headers.accept, request.headers['sec-fetch-dest'])) {
-  return new Response(markdown, {
-    headers: { 'content-type': 'text/markdown' },
-  })
+export function markdownResponse(request: Request, markdown: string): Response | undefined {
+  if (shouldServeMarkdown(
+    request.headers.get('accept') ?? undefined,
+    request.headers.get('sec-fetch-dest') ?? undefined,
+  )) {
+    return new Response(markdown, {
+      headers: { 'Content-Type': 'text/markdown' },
+    })
+  }
 }
 ```
 
@@ -740,12 +745,19 @@ const { events, remainingHtml } = parseHtml('<p>Hello</p>')
 Streaming parser that calls `onEvent` for each DOM event. Returns any remaining unparsed HTML (useful for processing partial chunks).
 
 ```typescript
-import { parseHtmlStream } from '@mdream/js/parse'
+import type { NodeEvent } from '@mdream/js'
+import { finalizeParse, parseHtmlStream } from '@mdream/js/parse'
 
-const state = { depthMap: new Uint8Array(1024), depth: 0 }
-const remaining = parseHtmlStream(htmlChunk, state, (event) => {
-  // Process each event
-})
+const state = { depthMap: new Uint16Array(1024), depth: 0 }
+const onEvent = (event: NodeEvent) => console.log(event)
+const chunks = ['<p>Hello ', 'world</p>']
+let remaining = ''
+
+for (const chunk of chunks) {
+  remaining = parseHtmlStream(remaining + chunk, state, onEvent)
+}
+// Flush trailing text and close open elements at the end of the input.
+finalizeParse(remaining, state, onEvent)
 ```
 
 **Returns:** `string` (remaining unparsed HTML)
@@ -758,19 +770,19 @@ Reads HTML from stdin and writes the selected format to stdout.
 
 ```bash
 # Basic conversion
-curl -s https://example.com | npx @mdream/js
+curl -s https://example.com | npx @mdream/js@beta
 
 # With origin URL for resolving relative paths
-curl -s https://example.com | npx @mdream/js --origin https://example.com
+curl -s https://example.com | npx @mdream/js@beta --origin https://example.com
 
 # With minimal preset
-curl -s https://example.com | npx @mdream/js --origin https://example.com --preset minimal
+curl -s https://example.com | npx @mdream/js@beta --origin https://example.com --preset minimal
 
 # Plain text output
-curl -s https://example.com | npx @mdream/js --format text
+curl -s https://example.com | npx @mdream/js@beta --format text
 
 # HTML output
-curl -s https://example.com | npx @mdream/js --format html
+curl -s https://example.com | npx @mdream/js@beta --format html
 ```
 
 ### CLI Options
@@ -952,8 +964,8 @@ import {
 ```
 
 
-[npm-version-src]: https://img.shields.io/npm/v/@mdream/js/latest.svg?style=flat&colorA=18181B&colorB=4C9BE0
-[npm-version-href]: https://npmjs.com/package/@mdream/js
+[npm-version-src]: https://img.shields.io/npm/v/@mdream/js/beta.svg?style=flat&colorA=18181B&colorB=4C9BE0
+[npm-version-href]: https://npmjs.com/package/@mdream/js/v/beta
 [npm-downloads-src]: https://img.shields.io/npm/dm/@mdream/js.svg?style=flat&colorA=18181B&colorB=4C9BE0
 [npm-downloads-href]: https://npm.chart.dev/@mdream/js
 [license-src]: https://img.shields.io/npm/l/@mdream/js.svg?style=flat&colorA=18181B&colorB=4C9BE0

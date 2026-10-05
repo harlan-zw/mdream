@@ -61,16 +61,17 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
 }
 
 /** `base` is the column the first fragment starts at. */
-function currentColumn(buffer: string[], base: number): number {
-  let column = 0
-  for (let index = buffer.length - 1; index >= 0; index--) {
-    const value = buffer[index]!
-    const newline = value.lastIndexOf('\n')
-    if (newline >= 0)
-      return column + [...value.slice(newline + 1)].length
-    column += [...value].length
+function currentColumn(buffer: string[], base: number, scan: [fragments: number, column: number]): number {
+  if (scan[0] >= buffer.length) {
+    scan[0] = 0
+    scan[1] = base
   }
-  return column + base
+  for (; scan[0] < buffer.length - 1; scan[0]++) {
+    const value = buffer[scan[0]]!
+    scan[1] = columnAt(value, value.length, scan[1])
+  }
+  const tail = buffer.at(-1)
+  return tail ? columnAt(tail, tail.length, scan[1]) : base
 }
 
 /**
@@ -112,7 +113,7 @@ function wrapText(value: string, column: number, width: number): string {
       next = value.length
     if (next > index) {
       const word = value.slice(index, next)
-      const wordLength = [...word].length
+      const wordLength = columnAt(word, word.length, 0)
       const needsSpace = first ? leading : true
       if (needsSpace && column > 0 && column + 1 + wordLength > width) {
         output += '\n'
@@ -347,7 +348,7 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
     buffer.push(newline)
 }
 
-export function createTextOutputProcessor(options: EngineOptions): OutputProcessor {
+export function createTextOutputProcessor(options: EngineOptions, hasPlugins = false): OutputProcessor {
   const state: TextState = {
     options,
     outputFormat: 'text',
@@ -362,6 +363,7 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
   let started = false
   // Column the first buffer fragment starts at, once yielded output is dropped.
   let bufferColumn = 0
+  const columnScan: [fragments: number, column: number] = [0, 0]
   // A caption only earns its blank-line boundary once it emits visible
   // content, so an empty `<figcaption>` leaves the text unchanged.
   let captionOpen = 0
@@ -438,8 +440,12 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
       node.value = ` ${node.value}`
 
     const width = state.options.wrapWidth
+    if (hasPlugins) {
+      columnScan[0] = 0
+      columnScan[1] = bufferColumn
+    }
     const value = width && canWrapHere(state.depthMap)
-      ? wrapText(node.value, currentColumn(state.buffer, bufferColumn), width)
+      ? wrapText(node.value, currentColumn(state.buffer, bufferColumn, columnScan), width)
       : node.value
     state.buffer.push(value)
     state.lastContentCache = value
@@ -609,6 +615,8 @@ export function createTextOutputProcessor(options: EngineOptions): OutputProcess
     const shift = keepFrom - 1
     for (let index = 0; index < openQuotes.length; index++)
       openQuotes[index]! -= shift
+    columnScan[0] = 0
+    columnScan[1] = bufferColumn
     yieldedLength = stableEnd - contextStart
   }
 

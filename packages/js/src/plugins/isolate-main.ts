@@ -1,5 +1,5 @@
 import type { ElementNode, PluginSetup, TransformPlugin } from '../types'
-import { ELEMENT_NODE, TAG_FOOTER, TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6, TAG_HEAD, TAG_HEADER, TAG_MAIN, TEXT_NODE } from '../const'
+import { ELEMENT_NODE, TAG_FOOTER, TAG_H1, TAG_H6, TAG_HEAD, TAG_HEADER, TAG_MAIN, TEXT_NODE } from '../const'
 import { createPlugin } from '../pluggable/plugin'
 
 /**
@@ -40,9 +40,6 @@ function createIsolateMainHooks(): TransformPlugin {
   let mainElement: ElementNode | null = null
   let firstHeaderElement: ElementNode | null = null
   let afterFooter = false
-
-  // Header tag IDs for quick lookup
-  const headerTagIds = new Set([TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6])
 
   return createPlugin({
     beforeNodeProcess(event: any) {
@@ -86,7 +83,7 @@ function createIsolateMainHooks(): TransformPlugin {
 
         // Priority 2: Fallback to header-footer heuristic if no main element
         // Look for first header that's NOT inside a <header> tag
-        if (!firstHeaderElement && element.tagId !== undefined && headerTagIds.has(element.tagId)) {
+        if (!firstHeaderElement && element.tagId !== undefined && element.tagId >= TAG_H1 && element.tagId <= TAG_H6) {
           // Check if this heading is inside a <header> tag
           let current = element.parent
           let isInHeaderTag = false

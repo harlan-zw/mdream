@@ -101,6 +101,8 @@ enum Tag {
   Iframe,
   Style,
   Datalist,
+  Code,
+  Pre,
   Custom(u8),
 }
 
@@ -117,6 +119,8 @@ impl Tag {
       Self::Iframe => "iframe".into(),
       Self::Style => "style".into(),
       Self::Datalist => "datalist".into(),
+      Self::Code => "code".into(),
+      Self::Pre => "pre".into(),
       Self::Custom(len) => {
         let mut name = String::from("x-");
         for _ in 0..*len {
