@@ -1045,8 +1045,11 @@ function parseHtmlInternal(
       else {
         if (state.discardExcludedText && htmlChunk.length - i >= 4) {
           const comment = htmlChunk.charCodeAt(i + 2) === DASH_CHAR && htmlChunk.charCodeAt(i + 3) === DASH_CHAR
-          // Keep only the terminator overlap, never the ignored body.
-          const boundary = comment ? `<!--x${result.remainingText.slice(-3)}` : '<!x'
+          // Preserve initial comment states. Later overlap comes only from
+          // body bytes, so opener dashes cannot form a false terminator.
+          const boundary = comment
+            ? (result.remainingText.length <= 7 ? result.remainingText : `<!--x${result.remainingText.slice(-3)}`)
+            : '<!x'
           state.trailingText = boundary
           return boundary
         }
@@ -1094,7 +1097,7 @@ function parseHtmlInternal(
         runStart = i
       }
       else {
-        state.rawtextEndTagPending = !!state.currentNode?.tagHandler?.isNonNesting
+        state.rawtextEndTagPending = state.flattenedRawTagName !== undefined || !!state.currentNode?.tagHandler?.isNonNesting
         textBuffer += result.remainingText
         break
       }

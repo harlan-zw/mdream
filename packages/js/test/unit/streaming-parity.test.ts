@@ -803,3 +803,44 @@ describe('excluded stream bodies', () => {
     }
   })
 })
+
+describe('discarded input boundary recovery', () => {
+  it.each(['markdown', 'html', 'text'] as const)('preserves %s malformed comment start states', async (format) => {
+    for (const comment of [
+      '<!--!>',
+      '<!---!>',
+      '<!-->',
+      '<!--->',
+      '<!---->',
+      '<!--x--!>',
+      '<!--!>ignored-->',
+      '<!---!>ignored-->',
+      '<!--x--!ignored-->',
+    ]) {
+      const html = `<p>before</p>${comment}<p>after</p>`
+      const options = { format }
+      const expected = convertOnce(html, options)
+      for (let split = 0; split <= html.length; split++)
+        expect(await streamConvertAtSplit(html, split, options), `${comment} split=${split}`).toBe(expected)
+      for (const size of [1, 2, 3, 4, 7])
+        expect(await streamConvert(html, size, options), `${comment} size=${size}`).toBe(expected)
+    }
+  })
+
+  it.each(['markdown', 'html', 'text'] as const)('preserves %s raw-text closes across the depth limit', async (format) => {
+    for (const tag of ['style', 'iframe', 'noembed']) {
+      for (const depth of [511, 512, 513]) {
+        const before = `${'<div>'.repeat(depth)}<${tag}>ignored`
+        const close = `</${tag} attr="<">`
+        const after = `<p>visible</p>${'</div>'.repeat(depth)}<p>tail</p>`
+        const html = before + close + after
+        const options = { format }
+        const expected = convertOnce(html, options)
+        for (let offset = 0; offset <= close.length; offset++) {
+          const split = before.length + offset
+          expect(await streamConvertAtSplit(html, split, options), `${tag} depth=${depth} offset=${offset}`).toBe(expected)
+        }
+      }
+    }
+  })
+})
