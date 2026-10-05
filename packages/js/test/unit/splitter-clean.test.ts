@@ -55,15 +55,17 @@ describe('incremental link cleanup in the splitter', () => {
     expect(chunks.find(chunk => chunk.content.includes('tail'))?.metadata.headers?.h2).toBe('Next')
   })
 
-  it('keeps pending code language when a stable prefix flushes first', () => {
-    const html = `<p>${'prefix '.repeat(7)}</p><pre class="language-js">body</pre><p>tail</p>`
+  it.each([
+    `<p>${'prefix '.repeat(7)}</p><pre class="language-js">body</pre><p>tail</p>`,
+    '<p>prefix prefix</p><blockquote><pre class="language-js">body</pre></blockquote><p>tail</p>',
+  ])('keeps pending code language when a stable prefix flushes first: %s', (html) => {
     const chunks = htmlToMarkdownSplitChunks(html, {
       clean: clean({ redundantLinks: true }),
-      chunkSize: 20,
+      chunkSize: 7,
       chunkOverlap: 0,
       stripHeaders: false,
     })
-    expect(chunks.filter(chunk => chunk.content.includes('prefix')).every(chunk => chunk.metadata.code === undefined)).toBe(true)
+    expect(chunks.filter(chunk => !chunk.content.includes('```js')).every(chunk => chunk.metadata.code === undefined)).toBe(true)
     expect(chunks.find(chunk => chunk.content.includes('body'))?.metadata.code).toBe('js')
   })
 

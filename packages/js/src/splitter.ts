@@ -60,9 +60,9 @@ function isOutputWhitespace(code: number): boolean {
 }
 
 /** Match complete fences by their line prefix, marker, and opening run. */
-function codeRegions(markdown: string): { start: number, end: number }[] {
-  const regions: { start: number, end: number }[] = []
-  let open: { start: number, marker: number, run: number, prefix: string } | undefined
+function codeRegions(markdown: string): { start: number, end: number, markerStart: number }[] {
+  const regions: { start: number, end: number, markerStart: number }[] = []
+  let open: { start: number, markerStart: number, marker: number, run: number, prefix: string } | undefined
   let lineStart = 0
   while (lineStart < markdown.length) {
     const newline = markdown.indexOf('\n', lineStart)
@@ -101,7 +101,7 @@ function codeRegions(markdown: string): { start: number, end: number }[] {
         markerEnd++
       const run = markerEnd - markerStart
       if (!open && run >= 3) {
-        open = { start: lineStart, marker, run, prefix }
+        open = { start: lineStart, markerStart, marker, run, prefix }
       }
       else if (open && marker === open.marker && run >= open.run
         && prefix === open.prefix) {
@@ -109,7 +109,7 @@ function codeRegions(markdown: string): { start: number, end: number }[] {
         while (tail < lineEnd && isOutputWhitespace(markdown.charCodeAt(tail)))
           tail++
         if (tail === lineEnd) {
-          regions.push({ start: open.start, end: lineEnd })
+          regions.push({ start: open.start, end: lineEnd, markerStart: open.markerStart })
           open = undefined
         }
       }
@@ -117,7 +117,7 @@ function codeRegions(markdown: string): { start: number, end: number }[] {
     lineStart = lineEnd + 1
   }
   if (open)
-    regions.push({ start: open.start, end: markdown.length })
+    regions.push({ start: open.start, end: markdown.length, markerStart: open.markerStart })
   return regions
 }
 
@@ -316,7 +316,7 @@ export function* htmlToMarkdownSplitChunksStream(
     }
     else if (currentChunkCodeLanguage
       && (!processor.getHeldOutputFragment
-        || codeRegions(currentMd).some(region => region.start >= lastChunkEndPosition && region.start < chunkEnd))) {
+        || codeRegions(currentMd).some(region => region.markerStart >= lastChunkEndPosition && region.markerStart < chunkEnd))) {
       chunk.metadata.code = currentChunkCodeLanguage
     }
 
