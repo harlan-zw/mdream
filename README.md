@@ -287,7 +287,7 @@ externals: ['mdream']
 ```ts
 import { htmlToMarkdown } from 'mdream'
 
-// Rust NAPI engine in Node.js, WASM in edge/browser runtimes
+// Rust NAPI engine in Node.js, WASM in edge runtimes
 const markdown = htmlToMarkdown('<h1>Hello World</h1>')
 console.log(markdown) // # Hello World
 
@@ -314,7 +314,21 @@ for await (const chunk of streamHtmlToMarkdown(response.body, {
 }
 ```
 
-See the [mdream docs](./packages/mdream/README.md#api-usage) for complete details.
+In browser bundles, use `await htmlToMarkdown(html)`. The result is a string.
+
+See the [mdream docs](./packages/mdream/README.md#api-reference) for complete details.
+
+### Migrating from v1
+
+Use the guide for your engine:
+
+- [`mdream`](./packages/mdream/README.md#migrating-from-v1): browser and CDN returns, minimal filtering, and page titles.
+- [`@mdream/js`](./packages/js/README.md#migrating-from-v1): format imports, plugin arrays, cleanup, and callback changes.
+- [Rust crate](./crates/core/README.md#migrating-from-v1): attribute storage and node accessors.
+
+The JS guide covers the API from [#224](https://github.com/harlan-zw/mdream/pull/224), merged after `2.0.0-beta.1`.
+That release uses the declarative JS plugin object and `format` option.
+Match your installed version to its release notes before changing those calls.
 
 ## Mdream Crawl
 

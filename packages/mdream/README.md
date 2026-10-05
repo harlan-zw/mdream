@@ -63,6 +63,7 @@ externals: ['mdream']
 
 ## Table of Contents
 
+- [Migrating from v1](#migrating-from-v1)
 - [API Reference](#api-reference)
   - [htmlToMarkdown()](#htmltomarkdown)
   - [streamHtmlToMarkdown()](#streamhtmltomarkdown)
@@ -99,6 +100,64 @@ externals: ['mdream']
   - [Web Worker](#web-worker)
 - [llms.txt Generation](#llmstxt-generation)
 - [Related Packages](#related-packages)
+
+## Migrating from v1
+
+Install `mdream@beta` for the Rust engine.
+Node and edge conversions still return a string synchronously.
+The `format`, `clean`, and top-level plugin options remain available.
+Custom hook plugins use `@mdream/js`; follow its [migration guide](../js/README.md#migrating-from-v1).
+That guide covers the JS API from [#224](https://github.com/harlan-zw/mdream/pull/224), merged after `2.0.0-beta.1`.
+
+### Browser and CDN returns
+
+Both entries return `Promise<string>` in v2.
+Remove `.markdown` and await the conversion:
+
+```diff
+  import { htmlToMarkdown } from 'mdream'
+- const markdown = (await htmlToMarkdown(html)).markdown
++ const markdown = await htmlToMarkdown(html)
+```
+
+For a CDN script:
+
+```diff
+- const markdown = window.mdream.htmlToMarkdown(html).markdown
++ const markdown = await window.mdream.htmlToMarkdown(html)
+```
+
+Use the CDN example inside an async function or a `<script type="module">` block.
+For browser types, set TypeScript's `customConditions` to `["browser"]` when your toolchain does not select it.
+See [Browser and Edge Usage](#browser-and-edge-usage) for initialization and worker assets.
+
+### Minimal filtering
+
+With `minimal: true`, a custom `filter` adds to the preset's excludes.
+In v1, it replaced them and could restore forms and navigation.
+To keep those elements in v2, disable the preset filter.
+To apply only your own excludes, use `minimal: false` and compose the options:
+
+```ts
+import { htmlToMarkdown } from 'mdream'
+
+htmlToMarkdown(html, { minimal: true, filter: false })
+
+htmlToMarkdown(html, {
+  frontmatter: true,
+  isolateMain: true,
+  tailwind: true,
+  clean: true,
+  filter: { exclude: ['footer'] },
+})
+```
+
+### Page titles
+
+`<title>` text no longer appears in the body, in any output format.
+To include it in Markdown metadata, enable `frontmatter: true`.
+To read it separately, use `extraction: { title: element => console.log(element.textContent) }`.
+Review saved output or snapshots that relied on a leading title line.
 
 ## API Reference
 

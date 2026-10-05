@@ -55,15 +55,37 @@ curl -s https://example.com | mdream --format html
 
 ## Output format features
 
+These features come from [#276](https://github.com/harlan-zw/mdream/pull/276), merged after `2.0.0-beta.1`.
+For dependency builds, select a release that includes that change.
+
 Each output format is a cargo feature: `markdown`, `text`, and `html`. All three are on by default.
 
-If you need one format, turn off the defaults to build a smaller binary:
+From the repository root, turn off the defaults to build a smaller Markdown-only binary:
 
 ```sh
-cargo add mdream --no-default-features --features markdown
+cargo build --manifest-path crates/core/Cargo.toml --release --no-default-features --features markdown
 ```
 
 A build with one format drops the code for the others. `OutputFormat` keeps only the variants you enable.
+
+## Migrating from v1
+
+The v2 crate changes `Attributes` and `ElementNode` in [#216](https://github.com/harlan-zw/mdream/pull/216).
+Conversion functions keep their options. If you access parser nodes directly, update these calls:
+
+| v1 access | v2 access |
+|---|---|
+| Attribute capacity allocation | `Attributes::new()`, then `reserve(capacity)` |
+| Insert a known attribute by name | `insert_known(ATTR_HREF, value)` using the matching `ATTR_*` constant |
+| Insert a custom attribute | `insert_custom(name.into(), value)` with a lowercase name |
+| Attribute iteration | `iter()` yields `(&str, &str)` |
+| `node.custom_name` | `node.custom_name()` |
+| `node.tailwind` | `node.tailwind()`; write with `node.set_tailwind(data)` |
+| `usize` node indices | `index`, `current_walk_index`, and `child_text_node_index` use `u32` |
+
+`<title>` text no longer appears in the body. Enable frontmatter or extraction to read it.
+Review snapshots that relied on the title as visible text.
+For optional format builds, see [Output format features](#output-format-features).
 
 ## License
 
