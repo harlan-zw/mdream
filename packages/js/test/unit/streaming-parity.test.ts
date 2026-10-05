@@ -758,3 +758,48 @@ describe('streaming parity with the Rust core', () => {
     await expectStreamingParity('<pre><code>alpha\n\n</code></pre>', { format: 'text' })
   })
 })
+
+describe('excluded stream bodies', () => {
+  it.each(['markdown', 'html', 'text'] as const)('preserves %s output at every excluded boundary', async (format) => {
+    for (const body of [
+      '<style>é漢🎉 a < b &amp;</style>',
+      '<style>x</style attr="<">',
+      '<style>x</STYLEfoo>ignored</STYLE >',
+      '<!--unterminated --!',
+      '<![CDATA[unterminated ]',
+      '<!DOCTYPE unterminated',
+      '<iframe>é漢🎉 <p>ignored</p></iframe>',
+      '<noembed>ignored &amp; <b>x</b></noembed>',
+      '<!--body <b>ignored</b>-->',
+      '<!--body --!>',
+      '<!-->',
+      '<!--->',
+      '<![CDATA[ignored <b>x</b> ]]>',
+      '<!DOCTYPE anything>',
+    ]) {
+      const html = `<p>before ${body} after <a href="/x">link</a></p>`
+      const options = { format }
+      const expected = convertOnce(html, options)
+      for (let size = 1; size <= html.length; size++)
+        expect(await streamConvert(html, size, options), `${body} size=${size}`).toBe(expected)
+    }
+  })
+  it.each(['markdown', 'html', 'text'] as const)('preserves %s output after long excluded bodies', async (format) => {
+    for (const [open, close] of [['<script>', '</script>'], ['<style>', '</style>'], ['<!--', '-->'], ['<![CDATA[', ']]>']]) {
+      const html = `<p>before</p>${open}${'xé漢🎉 &amp; '.repeat(16384)}${close}<p>after</p>`
+      expect(await streamConvert(html, 4096, { format })).toBe(convertOnce(html, { format }))
+    }
+  })
+  it('preserves script and CDATA overrides', async () => {
+    const overrides: ParityOptions[] = [
+      { tagOverrides: { script: 'p' } },
+      { tagOverrides: { '#cdata-section': { enter: 'begin:', exit: ':end' } } },
+    ]
+    for (const options of overrides) {
+      const html = '<script>visible é漢🎉</script><p>before <![CDATA[visible x]]> after</p>'
+      const expected = convertOnce(html, options)
+      for (let size = 1; size <= html.length; size++)
+        expect(await streamConvert(html, size, options)).toBe(expected)
+    }
+  })
+})

@@ -42,6 +42,49 @@ const BLOCK_NEWLINE_HTML = [
 
 describe('streaming drain parity', () => {
   it.each([
+    '<p>before</p><script>é漢🎉 &amp; if (a < b) x()</script><p>after</p>',
+    '<p>before</p><script><!--<script>nested</script>--></script><p>after</p>',
+    '<p>before</p><script>x</scriptx>y</SCRIPT ><p>after</p>',
+    '<p>before</p><script>unterminated </scr',
+    '<details><script>x</script><a href="/x">link</a></details>',
+    '<table><tr><td>before<script>x</script>after</td></tr></table>',
+  ])('preserves excluded script boundaries: %s', async (html) => {
+    const expected = htmlToMarkdown(html)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+    const bytes = new TextEncoder().encode(html)
+    let output = ''
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const byte of bytes)
+          controller.enqueue(new Uint8Array([byte]))
+        controller.close()
+      },
+    })
+    for await (const chunk of streamHtmlToMarkdown(stream))
+      output += chunk
+    expect(output).toBe(expected)
+  })
+
+  it('preserves script text events for streaming plugins', async () => {
+    const body = 'é漢🎉 if (a < b) x(); '.repeat(2048)
+    const html = `<p>before</p><script>${body}</script><p>after</p>`
+    const seen: string[] = []
+    const plugins = [createPlugin({
+      processTextNode(node) {
+        seen.push(node.value)
+      },
+    })]
+    expect(await streamConvert(html, 127, { plugins })).toBe(htmlToMarkdown(html))
+    expect(seen).toEqual(['before', body, 'after'])
+  })
+
+  it('discards a long excluded script without changing following Markdown', async () => {
+    const html = `<p>before</p><script>${'x<&amp;é漢🎉 '.repeat(32768)}</script><p><a href="/end">after</a></p>`
+    expect(await streamConvert(html, 4096)).toBe('before\n\n[after](/end)')
+  })
+
+  it.each([
     '<b>*<li><li><ul>#</b></li></dl>',
     '\uFEFF<em></dl>#</blockquote><p>&nbsp;</a><li>#',
     '<b>prefix</b><ol start="999999999"><li>#</li></ol>',

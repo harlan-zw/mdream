@@ -619,6 +619,8 @@ export interface ParseState {
   scriptDataState?: number
   /** Consumed script chunks retained for extraction/plugin text events. */
   scriptTextChunks?: string[]
+  /** Output streams may discard excluded raw text when no plugin needs events. */
+  discardExcludedText?: boolean
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
   /** @deprecated No longer read or written. Retained for source compatibility. */
@@ -779,7 +781,7 @@ function findScriptEndTag(html: string, start: number, parseState: ParseState): 
 }
 
 function pushScriptTextChunk(state: ParseState, text: string): void {
-  if (!text)
+  if (!text || (state.discardExcludedText && state.currentNode?.tagHandler?.excludesTextNodes))
     return
   const chunks = state.scriptTextChunks ??= []
   chunks.push(text)
@@ -790,6 +792,8 @@ function pushScriptTextChunk(state: ParseState, text: string): void {
 
 function scanScriptChunk(html: string, start: number, state: ParseState): number {
   const result = findScriptEndTag(html, start, state)
+  if (state.discardExcludedText && state.currentNode?.tagHandler?.excludesTextNodes)
+    return result
   if (result === SCRIPT_SCAN_COMPLETE) {
     pushScriptTextChunk(state, html.substring(start))
   }
@@ -999,6 +1003,13 @@ function parseHtmlInternal(
           const end = htmlChunk.indexOf(']]>', i + 9)
           if (end === -1) {
             // Unterminated CDATA: re-parse from '<' in the next chunk.
+            if (state.discardExcludedText && !state.tagOverrideHandlers?.has('#cdata-section')) {
+              if (textBuffer.length > 0)
+                processTextBuffer(textBuffer, state, handleEvent)
+              const boundary = `<![CDATA[${htmlChunk.slice(-2)}`
+              state.trailingText = boundary
+              return boundary
+            }
             textBuffer += htmlChunk.substring(i)
             break
           }
@@ -1032,6 +1043,13 @@ function parseHtmlInternal(
         runStart = i
       }
       else {
+        if (state.discardExcludedText && htmlChunk.length - i >= 4) {
+          const comment = htmlChunk.charCodeAt(i + 2) === DASH_CHAR && htmlChunk.charCodeAt(i + 3) === DASH_CHAR
+          // Keep only the terminator overlap, never the ignored body.
+          const boundary = comment ? `<!--x${result.remainingText.slice(-3)}` : '<!x'
+          state.trailingText = boundary
+          return boundary
+        }
         textBuffer += result.remainingText
         break
       }
@@ -1182,7 +1200,39 @@ function parseHtmlInternal(
   // Returning textBuffer would reprocess decoded and escaped Markdown. A
   // leading whitespace character in the raw remainder was accepted from a
   // non-whitespace state, so restore that state before the re-scan.
-  const remainingHtml = textBuffer.length > 0 ? htmlChunk.substring(runStart) : ''
+  let remainingHtml = textBuffer.length > 0 ? htmlChunk.substring(runStart) : ''
+  const excludedRawText = state.discardExcludedText
+    && (state.flattenedRawExcludesText || (state.currentNode?.tagHandler?.isNonNesting && state.currentNode.tagHandler.excludesTextNodes))
+  if (excludedRawText && remainingHtml && !(state.currentNode && isScriptElement(state.currentNode))) {
+    // Only a possible end tag can affect the next chunk. Body bytes are
+    // excluded, and no plugin observes their text events on this path.
+    const boundary = state.rawtextEndTagPending ? 0 : remainingHtml.lastIndexOf('<')
+    const tagName = state.flattenedRawTagName || state.currentNode!.name
+    let keepBoundary = boundary >= 0 && remainingHtml.charCodeAt(boundary + 1) === SLASH_CHAR
+    if (boundary === remainingHtml.length - 1) {
+      keepBoundary = true
+    }
+    else if (keepBoundary && !state.rawtextEndTagPending) {
+      const available = remainingHtml.length - boundary - 2
+      const nameLength = Math.min(available, tagName.length)
+      for (let offset = 0; offset < nameLength; offset++) {
+        const code = remainingHtml.charCodeAt(boundary + 2 + offset)
+        if ((code >= 65 && code <= 90 ? code + 32 : code) !== tagName.charCodeAt(offset)) {
+          keepBoundary = false
+          break
+        }
+      }
+      if (available > tagName.length) {
+        const delimiter = remainingHtml.charCodeAt(boundary + 2 + tagName.length)
+        keepBoundary = keepBoundary && (delimiter === GT_CHAR || delimiter === SLASH_CHAR || isWhitespace(delimiter))
+      }
+    }
+    remainingHtml = keepBoundary ? remainingHtml.substring(boundary) : ''
+    textBuffer = remainingHtml
+    state.textBufferContainsWhitespace = false
+    state.textBufferContainsNonWhitespace = false
+    state.hasEncodedHtmlEntity = false
+  }
   if (remainingHtml.length > 0 && isWhitespace(remainingHtml.charCodeAt(0)))
     state.lastCharWasWhitespace = false
   state.trailingText = textBuffer
