@@ -62,6 +62,32 @@ describe('streaming UTF-8', () => {
     ['html', htmlToSafeHtml, streamHtmlToSafeHtml],
   ] as const
 
+  it.each(formats)('preserves a BOM in byte and string streams in %s', async (_name, convert, streamConvert) => {
+    const html = '\uFEFF<p>é漢字🎉</p>'
+    const expected = convert(html)
+    expect(expected).toBe(nativeHtmlToMarkdown(html, { format: _name }))
+    const bytes = new TextEncoder().encode(html)
+    for (const content of [html, bytes]) {
+      for (const size of [1, 2, 3, 7, content.length]) {
+        const input = new ReadableStream<Uint8Array | string>({
+          start(controller) {
+            controller.enqueue('')
+            for (let index = 0; index < content.length; index += size) {
+              controller.enqueue(content.slice(index, index + size))
+              controller.enqueue(new Uint8Array())
+              controller.enqueue('')
+            }
+            controller.close()
+          },
+        })
+        let output = ''
+        for await (const chunk of streamConvert(input))
+          output += chunk
+        expect(output).toBe(expected)
+      }
+    }
+  })
+
   it.each(formats)('preserves split UTF-8 around empty strings in %s', async (_name, convert, streamConvert) => {
     const bytes = new TextEncoder().encode('<p>é</p>')
     const input = new ReadableStream<Uint8Array | string>({
