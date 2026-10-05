@@ -86,6 +86,52 @@ describe('incremental link cleanup in the splitter', () => {
   })
 })
 
+describe('splitter cleanup boundaries and options', () => {
+  it('retains section ownership when a quote prefixes its completed lines', () => {
+    const html = '<blockquote><h2>One</h2><p>x</p><h2>Two</h2><p>y</p></blockquote><p>end</p>'
+    const chunks = htmlToMarkdownSplitChunks(html, { clean: clean({ fragments: true }), chunkSize: 100, chunkOverlap: 0, stripHeaders: false })
+    expect(chunks).toHaveLength(2)
+    expect(chunks[0]?.content).toContain('> x')
+    expect(chunks[0]?.metadata.headers?.h2).toBe('One')
+    expect(chunks[1]?.content.trimStart()).toMatch(/^> ## Two/)
+    expect(chunks[1]?.metadata.headers?.h2).toBe('Two')
+    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, { clean: clean({ fragments: true }) }))
+  })
+
+  it.each([
+    '<blockquote><blockquote><h2>One</h2><p>x</p><h2>Two</h2><p>y</p></blockquote></blockquote>',
+    '<ul><li><blockquote><h2>One</h2><p>x</p><h2>Two</h2><p>y</p></blockquote></li></ul>',
+    '<a href="#missing"><h2>One</h2><p>x</p><h2>Two</h2><p>y</p></a>',
+    '<figcaption><h2>One</h2><p>x</p><h2>Two</h2><p>y</p></figcaption>',
+  ])('retains section ownership across nested writer rewrites: %s', (html) => {
+    const options = { clean: clean({ fragments: true, selfLinkHeadings: true }), chunkSize: 1000, chunkOverlap: 0, stripHeaders: false }
+    const chunks = htmlToMarkdownSplitChunks(html, options)
+    expect(chunks.find(chunk => chunk.content.includes('x'))?.metadata.headers?.h2).toBe('One')
+    expect(chunks.find(chunk => chunk.content.includes('y'))?.metadata.headers?.h2).toBe('Two')
+    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, options))
+  })
+
+  it('keeps an HR boundary before the quote writer prefixes its lines', () => {
+    const html = '<blockquote><h2>One</h2><p>x</p><hr><p>y</p></blockquote><h2>Two</h2><p>z</p>'
+    const options = { clean: clean({ fragments: true }), chunkSize: 1000, chunkOverlap: 0, stripHeaders: false }
+    const chunks = htmlToMarkdownSplitChunks(html, options)
+    const before = chunks.findIndex(chunk => chunk.content.includes('x'))
+    const after = chunks.findIndex(chunk => chunk.content.includes('y'))
+    expect(after).toBeGreaterThan(before)
+    expect(chunks[before]?.metadata.headers?.h2).toBe('One')
+    expect(chunks[after]?.metadata.headers?.h2).toBe('One')
+    expect(chunks.find(chunk => chunk.content.includes('z'))?.metadata.headers?.h2).toBe('Two')
+    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, options))
+  })
+
+  it.each([true, { fragments: true }])('rejects unsupported cleanup configuration: %j', (invalidClean) => {
+    const options = { clean: invalidClean as any, chunkSize: 100, chunkOverlap: 0 }
+    expect(() => htmlToMarkdown('<p>x</p>', options)).toThrow('@mdream/js/clean')
+    expect(() => htmlToMarkdownSplitChunks('<p>x</p>', options)).toThrow('@mdream/js/clean')
+    expect(() => htmlToMarkdownSplitChunksStream('<p>x</p>', options).next()).toThrow('@mdream/js/clean')
+  })
+})
+
 describe('fragment cleanup in the splitter', () => {
   it.each([
     ['list', '<ul><li>', '</li></ul>'],

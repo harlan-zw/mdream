@@ -1,21 +1,13 @@
 import type { ParseState } from './parse'
 import type { MdreamOptions, NodeEvent } from './types'
 import { createMarkdownProcessor } from './markdown-processor'
-import { assertEngineOptions } from './option-shape'
+import { assertEngineOptions, checkClean } from './option-shape'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { resolvePlugins } from './pluggable/plugin'
 import { endPlugins, processPluginsForEvent } from './plugin-processor'
 import { streamHtmlToMarkdown as _streamHtmlToMarkdown } from './stream'
 import { buildTagOverrideHandlers } from './tag-overrides'
 import { tagHandlers } from './tags'
-
-// `clean: true` and plain rule objects were the v1 API. Fail loudly instead
-// of silently skipping the `fragments` pass they cannot run.
-function checkClean(options: Partial<MdreamOptions>): void {
-  const clean = options.clean
-  if (clean && typeof clean.apply !== 'function')
-    throw new TypeError('The clean option needs cleanup rules from clean(). Import it from \'@mdream/js/clean\'.')
-}
 
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
   assertEngineOptions(options)

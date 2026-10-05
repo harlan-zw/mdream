@@ -1,4 +1,5 @@
 import type { MarkdownState } from './markdown-processor'
+import type { OutputPosition } from './output-positions'
 import type { ParseState } from './parse'
 import type { CleanView, ElementNode, MarkdownChunk, NodeEvent, SplitterOptions, TextNode } from './types'
 import {
@@ -15,7 +16,8 @@ import {
   TEXT_NODE,
 } from './const'
 import { createMarkdownProcessor } from './markdown-processor'
-import { assertEngineOptions } from './option-shape'
+import { assertEngineOptions, checkClean } from './option-shape'
+import { createOutputPositions } from './output-positions'
 import { finalizeParse, parseHtmlStream } from './parse'
 import { resolvePlugins } from './pluggable/plugin'
 import { endPlugins, processPluginsForEvent } from './plugin-processor'
@@ -158,6 +160,7 @@ export function* htmlToMarkdownSplitChunksStream(
   options: SplitterOptions = {},
 ): Generator<MarkdownChunk, void, undefined> {
   assertEngineOptions(options)
+  checkClean(options)
   const opts = createOptions(options)
 
   if (opts.chunkOverlap >= opts.chunkSize) {
@@ -165,16 +168,20 @@ export function* htmlToMarkdownSplitChunksStream(
   }
 
   let currentChunkCodeLanguage = ''
-  const deferredCodes: { rawStart: number, language: string }[] = []
+  const deferredCodes: { position: OutputPosition, language: string }[] = []
   const finishedCodes: { start: number, language: string }[] = []
 
   // Create processor
   const processor = createMarkdownProcessor(options)
+  const positions = processor.finishOutput ? createOutputPositions(processor.state.buffer) : undefined
+  processor.state.outputPositions = positions
   processor.state.onCodeFenceOpen = (language) => {
     if (language && !currentChunkCodeLanguage)
       currentChunkCodeLanguage = language
-    if (language && processor.finishOutput)
-      deferredCodes.push({ rawStart: getCurrentMarkdown(processor.state).markdown.length, language })
+    if (language && positions) {
+      const fence = processor.state.codeFence!
+      deferredCodes.push({ position: positions.capture(fence.fragment, fence.markerOffset, 'content'), language })
+    }
   }
 
   // Chunking state
@@ -191,7 +198,7 @@ export function* htmlToMarkdownSplitChunksStream(
   let outputFinal = false
   let finishedMarkdown: string | undefined
   let finishedCodeRegions: { start: number, end: number }[] = []
-  const deferredSections: { rawEnd: number, headers: Map<number, string>, language: string }[] = []
+  const deferredSections: { position: OutputPosition, headers: Map<number, string>, language: string }[] = []
 
   function codeRegionAt(position: number): { start: number, end: number } | undefined {
     let lower = 0
@@ -248,7 +255,7 @@ export function* htmlToMarkdownSplitChunksStream(
   function* flushChunk(endPosition?: number, applyOverlap = false): Generator<MarkdownChunk, void, undefined> {
     if (processor.finishOutput && !outputFinal) {
       deferredSections.push({
-        rawEnd: getCurrentMarkdown(processor.state).markdown.length,
+        position: positions!.capture(),
         headers: new Map(headerHierarchy),
         language: currentChunkCodeLanguage,
       })
@@ -471,24 +478,33 @@ export function* htmlToMarkdownSplitChunksStream(
   endPlugins(opts.resolvedPlugins, processor.state)
   outputFinal = true
   if (processor.finishOutput) {
+    const positionOffset = positions!.finish()
+    let leadingTrim = 0
+    for (const fragment of processor.state.buffer) {
+      const trimmed = fragment.trimStart()
+      leadingTrim += fragment.length - trimmed.length
+      if (trimmed.length)
+        break
+    }
     const raw = getCurrentMarkdown(processor.state).markdown
     const view = processor.finishOutput(raw)
     finishedMarkdown = view.markdown
     const mapPosition = view.mapPosition ?? ((position: number) => processor.finishOutput!(raw.slice(0, position)).markdown.length)
     for (const code of deferredCodes) {
       finishedCodes.push({
-        start: mapPosition(code.rawStart),
+        start: mapPosition(Math.max(0, positionOffset(code.position) - leadingTrim)),
         language: code.language,
       })
     }
     finishedCodeRegions = codeRegions(finishedMarkdown)
-    deferredSections.push({ rawEnd: raw.length, headers: new Map(headerHierarchy), language: currentChunkCodeLanguage })
+    deferredSections.push({ position: positions!.capture(), headers: new Map(headerHierarchy), language: currentChunkCodeLanguage })
     // Section checkpoints are recorded before headings update the hierarchy.
     // Resolve their offsets with the same pass after every heading is known.
     for (const section of deferredSections) {
-      const sectionEnd = section.rawEnd === raw.length
+      const rawEnd = Math.max(0, positionOffset(section.position) - leadingTrim)
+      const sectionEnd = rawEnd === raw.length
         ? finishedMarkdown.length
-        : mapPosition(section.rawEnd)
+        : mapPosition(rawEnd)
       headerHierarchy.clear()
       for (const [tagId, text] of section.headers)
         headerHierarchy.set(tagId, text)

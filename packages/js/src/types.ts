@@ -1,3 +1,5 @@
+import type { OutputPositions } from './output-positions'
+
 /** Composable JavaScript conversion plugin. */
 export interface TransformPlugin {
   /**
@@ -94,6 +96,8 @@ export interface CleanTarget {
   /** The last buffer entry the converter wrote. */
   lastContentCache?: string
   options?: EngineOptions
+  /** @internal */
+  outputPositions?: OutputPositions
 }
 
 /**
@@ -306,6 +310,8 @@ export interface MdreamProcessingState {
  * Extended state that includes output tracking and options
  */
 export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
+  /** @internal */
+  outputPositions?: OutputPositions
   /** Active output format for format-aware plugins. */
   outputFormat?: OutputFormat
 
