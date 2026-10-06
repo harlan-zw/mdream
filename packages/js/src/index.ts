@@ -62,6 +62,7 @@ export type {
   Plugin,
   PluginContext,
   PluginSetup,
+  PluginState,
   SplitterOptions,
   TagOverride,
   TextNode,

@@ -354,6 +354,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     outputFormat: 'text',
     buffer: [],
     depthMap: new Uint16Array(MAX_TAG_ID),
+    depth: 0,
     plainText: true,
   }
   let preserveLeadingWhitespace = false

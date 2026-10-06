@@ -1,4 +1,4 @@
-import type { ElementNode, PluginSetup, TextNode, TransformPlugin } from '../types'
+import type { MdreamRuntimeState, PluginSetup, TextNode, TransformPlugin } from '../types'
 import { ELEMENT_NODE, TAG_HEAD, TAG_META, TAG_TITLE } from '../const'
 import { createPlugin } from '../pluggable/plugin'
 
@@ -104,7 +104,7 @@ function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlu
         options.onExtract(structured)
     },
 
-    onNodeEnter(node: any): string | undefined {
+    onNodeEnter(node): string | undefined {
       if (node.excludedFromMarkdown)
         return
 
@@ -122,8 +122,7 @@ function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlu
 
       // Process meta tags inside head
       if (inHead && node.type === ELEMENT_NODE && node.tagId === TAG_META) {
-        const elementNode = node as ElementNode
-        const { name, property, content } = elementNode.attributes || {}
+        const { name, property, content } = node.attributes || {}
 
         // Check for valid meta tags
         const metaName = property || name
@@ -136,7 +135,7 @@ function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlu
       }
     },
 
-    onNodeExit(node: any, state: any) {
+    onNodeExit(node, state) {
       if (node.excludedFromMarkdown)
         return undefined
 
@@ -150,8 +149,11 @@ function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlu
         if (Object.keys(frontmatter).length > 0) {
           const frontmatterContent = generateFrontmatter()
           if (frontmatterContent) {
-            state.buffer.push(frontmatterContent)
-            state.lastContentCache = frontmatterContent
+            // PluginState is read-only. The frontmatter block goes straight
+            // into the Markdown buffer, so this hook writes the converter state.
+            const output = state as MdreamRuntimeState
+            output.buffer.push(frontmatterContent)
+            output.lastContentCache = frontmatterContent
           }
         }
       }
@@ -175,7 +177,7 @@ function createFrontmatterHooks(options: FrontmatterPluginOptions): TransformPlu
         return { content: '', skip: true }
       }
     },
-  } as any)
+  })
 
   return plugin
 

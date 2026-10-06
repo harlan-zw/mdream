@@ -1,4 +1,4 @@
-import type { ElementNode, MdreamRuntimeState, NodeEvent, TextNode, TransformPlugin } from './types'
+import type { ElementNode, MdreamRuntimeState, NodeEvent, PluginState, TextNode, TransformPlugin } from './types'
 import { ELEMENT_NODE, NodeEventEnter, TEXT_NODE } from './const'
 
 /**
@@ -86,7 +86,7 @@ export function processPluginsForEvent(
 }
 
 /** Tell each plugin that the document ended. */
-export function endPlugins(plugins: TransformPlugin[] | undefined, state: MdreamRuntimeState): void {
+export function endPlugins(plugins: TransformPlugin[] | undefined, state: PluginState): void {
   if (!plugins)
     return
   for (let index = 0; index < plugins.length; index++)
