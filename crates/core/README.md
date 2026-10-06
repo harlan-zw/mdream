@@ -19,15 +19,15 @@ cargo install mdream --version 2.0.0-beta.1
 ### Library
 
 ```rust
-use mdream::{html_to_html, html_to_markdown, types::HTMLToMarkdownOptions};
+use mdream::{html_to_html, html_to_markdown, types::HtmlToMarkdownOptions};
 
 let html = "<h1>Hello</h1><p>World</p>";
-let md = html_to_markdown(html, HTMLToMarkdownOptions::default());
+let md = html_to_markdown(html, HtmlToMarkdownOptions::default());
 assert_eq!(md, "# Hello\n\nWorld");
 
 let html_output = html_to_html(
     "<h1>Hello</h1><p>World</p>",
-    HTMLToMarkdownOptions::default(),
+    HtmlToMarkdownOptions::default(),
 );
 assert_eq!(html_output, "<h1 id=\"hello\">Hello</h1><p>World</p>");
 ```
@@ -36,9 +36,9 @@ assert_eq!(html_output, "<h1 id=\"hello\">Hello</h1><p>World</p>");
 
 ```rust
 use mdream::MarkdownStreamProcessor;
-use mdream::types::HTMLToMarkdownOptions;
+use mdream::types::HtmlToMarkdownOptions;
 
-let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
 let chunk1 = stream.process_chunk("<h1>Hello</h1>");
 let chunk2 = stream.process_chunk("<p>World</p>");
 let remaining = stream.finish();
@@ -75,10 +75,11 @@ These changes also apply when you upgrade from `2.0.0-beta.1`.
 
 | v1 code | v2 code |
 |---|---|
+| `HTMLToMarkdownOptions` | `HtmlToMarkdownOptions` |
 | `mdream::consts::get_tag_id("em")` | `mdream::get_tag_id("em")` |
 | `mdream::consts::TAG_*`, `ATTR_*`, and the other constants | No replacement. Resolve a tag name with `get_tag_id`. |
 | `ElementNode`, `Attributes`, `Attr`, `TagHandler`, `NodeExtras`, `TailwindData`, `ParsedSelector` | No replacement. The parser types are private. |
-| `HTMLToMarkdownOptions { clean_urls: true, .. }` | `HTMLToMarkdownOptions { clean: Some(CleanConfig { urls: true, ..Default::default() }), .. }` |
+| `HTMLToMarkdownOptions { clean_urls: true, .. }` | `HtmlToMarkdownOptions { clean: Some(CleanConfig { urls: true, ..Default::default() }), .. }` |
 | `.with_clean_urls()` | `.with_clean(CleanConfig { urls: true, ..Default::default() })` |
 | `CleanConfig { blank_lines: true, .. }` | Delete the field. It had no effect. |
 | `SplitterOptions { headers_to_split_on: vec![TAG_H2, TAG_H3], .. }` | `SplitterOptions { headers_to_split_on: vec![2, 3], .. }` |

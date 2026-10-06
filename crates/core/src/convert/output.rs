@@ -4748,11 +4748,11 @@ impl ConvertState {
 #[cfg(test)]
 mod tests {
   use super::{ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_LI, TAG_P};
-  use crate::types::{HTMLToMarkdownOptions, OutputFormat};
+  use crate::types::{HtmlToMarkdownOptions, OutputFormat};
 
   #[test]
   fn empty_drained_buffer_counts_two_flushed_newlines() {
-    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
     state.has_streamed_output = true;
     // A drain is what puts bytes behind `buffer[0]`; yielding alone does not, and
     // the counting below may only read `flushed_tail` once one has happened.
@@ -4769,7 +4769,7 @@ mod tests {
   // suppresses half of every following block separator.
   #[test]
   fn undrained_buffer_counts_no_flushed_newlines() {
-    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
     state.has_streamed_output = true;
     state.buffer.push('c');
 
@@ -4783,7 +4783,7 @@ mod tests {
   // start of output.
   #[test]
   fn last_output_byte_sees_through_a_drain() {
-    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
     assert_eq!(state.last_output_byte(), None);
 
     state.has_streamed_output = true;
@@ -4800,7 +4800,7 @@ mod tests {
   /// was cut away, a trim removed the retained tail, and `y` is the byte the
   /// output last followed, reachable only through `flushed_tail`.
   fn drained_open_list_item() -> ConvertState {
-    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
     state.depth_map[TAG_LI as usize] = 1;
     state.list_indent = "  ".to_string();
     state.has_streamed_output = true;
@@ -4856,7 +4856,7 @@ mod tests {
 
   #[test]
   fn safe_prose_skips_the_gfm_escape_slow_path() {
-    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
 
     let html = "<p>ordinary prose with 123 numbers and punctuation.</p>";
     assert_eq!(state.process_html(html), html.len());
@@ -4870,7 +4870,7 @@ mod tests {
 
   #[test]
   fn syntax_and_entities_use_the_gfm_escape_slow_path() {
-    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
 
     let html = "<p>* literal</p><p>&#42; decoded</p>";
     assert_eq!(state.process_html(html), html.len());
@@ -4883,7 +4883,7 @@ mod tests {
   // it never ends; classifying that line again for every row was quadratic.
   #[test]
   fn rows_in_an_exhausted_code_span_do_not_reread_the_line() {
-    let options = HTMLToMarkdownOptions::default().with_max_node_bytes(1024);
+    let options = HtmlToMarkdownOptions::default().with_max_node_bytes(1024);
     let mut state = ConvertState::new(options, 64, OutputFormat::Markdown);
     let html = format!(
       "<code>{}<table>{}",
@@ -4903,7 +4903,7 @@ mod tests {
   // there once; past the cap that re-read the same unending line per table.
   #[test]
   fn tables_in_an_exhausted_code_span_do_not_reread_the_line() {
-    let options = HTMLToMarkdownOptions::default().with_max_node_bytes(1024);
+    let options = HtmlToMarkdownOptions::default().with_max_node_bytes(1024);
     let mut state = ConvertState::new(options, 64, OutputFormat::Markdown);
     let html = format!(
       "<code>{}{}",
@@ -4927,7 +4927,7 @@ mod tests {
     let body = "<p>x</p>".repeat(4096);
     for close in ["</blockquote>".repeat(64), String::new()] {
       let mut state =
-        ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+        ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
       let html = format!("{open}{body}{close}");
       assert_eq!(state.process_html(&html), html.len());
       state.finalize("");
@@ -4948,7 +4948,7 @@ mod tests {
   // cost the square of the depth.
   #[test]
   fn flushing_quotes_nested_in_list_items_quotes_each_line_a_bounded_number_of_times() {
-    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
     let open = "<blockquote><ul><li>".repeat(32);
     assert_eq!(state.process_html(&open), open.len());
     let mut out = String::new();
@@ -4972,7 +4972,7 @@ mod tests {
   // so breaks separated only by whitespace cost their square in one chunk.
   #[test]
   fn resolving_held_break_runs_reads_the_tail_once() {
-    let mut state = ConvertState::new(HTMLToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
     state.streaming = true;
     let html = format!("<p>x{}y</p>", "<br>&#9;".repeat(4096));
     assert_eq!(state.process_html(&html), html.len());
@@ -4994,7 +4994,7 @@ mod tests {
     );
     for (cap, expected) in [(64, 0), (128, 1)] {
       let mut state = ConvertState::new(
-        HTMLToMarkdownOptions::default().with_max_node_bytes(cap),
+        HtmlToMarkdownOptions::default().with_max_node_bytes(cap),
         64,
         OutputFormat::Markdown,
       );
@@ -5027,7 +5027,7 @@ mod tests {
       format!("{open}{}", "x`".repeat(4096)),
     ] {
       for chunk in [4096, html.len()] {
-        let options = HTMLToMarkdownOptions::default().with_max_node_bytes(1024 * 1024);
+        let options = HtmlToMarkdownOptions::default().with_max_node_bytes(1024 * 1024);
         let mut processor = crate::MarkdownStreamProcessor::new(options);
         let mut out = String::new();
         for piece in html.as_bytes().chunks(chunk) {

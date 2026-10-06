@@ -1,10 +1,10 @@
 //! A stream collects the same frontmatter and extracted elements as a one-shot
 //! conversion, so bindings can hand them to callbacks after `finish()`.
-use mdream::types::{ExtractionConfig, FrontmatterConfig, HTMLToMarkdownOptions, PluginConfig};
+use mdream::types::{ExtractionConfig, FrontmatterConfig, HtmlToMarkdownOptions, PluginConfig};
 use mdream::{MarkdownStreamProcessor, html_to_markdown_result};
 
-fn options() -> HTMLToMarkdownOptions {
-  HTMLToMarkdownOptions {
+fn options() -> HtmlToMarkdownOptions {
+  HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       frontmatter: Some(FrontmatterConfig::default()),
       extraction: Some(ExtractionConfig::new(&["a[href]"])),
@@ -50,7 +50,7 @@ fn stream_plugin_data_matches_one_shot() {
 
 #[test]
 fn stream_plugin_data_is_none_without_plugins() {
-  let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   stream.process_chunk("<head><title>T</title></head><p>x</p>");
   stream.finish();
   assert!(stream.frontmatter().is_none());

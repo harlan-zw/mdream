@@ -226,8 +226,8 @@ fn render(input: &Input) -> String {
   html
 }
 
-fn options(input: &Input, cap: usize) -> HTMLToMarkdownOptions {
-  HTMLToMarkdownOptions {
+fn options(input: &Input, cap: usize) -> HtmlToMarkdownOptions {
+  HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       filter: input.filter_exclude.then(|| FilterConfig {
         include: None,

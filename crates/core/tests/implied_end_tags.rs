@@ -2,14 +2,14 @@
 //! tree-construction). Malformed-but-valid markup that omits end tags must
 //! recover the same way browsers do, so the missing close does not nest or drop
 //! content. Mirrors the JS engine's `implied-end-tags.test.ts`.
-use mdream::{MarkdownStreamProcessor, html_to_markdown, types::HTMLToMarkdownOptions};
+use mdream::{MarkdownStreamProcessor, html_to_markdown, types::HtmlToMarkdownOptions};
 
 fn convert(html: &str) -> String {
-  html_to_markdown(html, HTMLToMarkdownOptions::default())
+  html_to_markdown(html, HtmlToMarkdownOptions::default())
 }
 
 fn stream(chunks: &[&str]) -> String {
-  let mut p = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut out = String::new();
   for c in chunks {
     out.push_str(&p.process_chunk(c));

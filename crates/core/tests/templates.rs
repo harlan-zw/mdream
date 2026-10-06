@@ -1,8 +1,8 @@
 use mdream::html_to_markdown;
-use mdream::types::HTMLToMarkdownOptions;
+use mdream::types::HtmlToMarkdownOptions;
 
 fn convert(html: &str) -> String {
-  html_to_markdown(html, HTMLToMarkdownOptions::default())
+  html_to_markdown(html, HtmlToMarkdownOptions::default())
 }
 
 // ── Wikipedia ──

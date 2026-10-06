@@ -8,14 +8,14 @@
 // headings, with every clean flag on except `empty_link_text`.
 
 use mdream::types::{
-  CleanConfig, FilterConfig, FrontmatterConfig, HTMLToMarkdownOptions, IsolateMainConfig,
+  CleanConfig, FilterConfig, FrontmatterConfig, HtmlToMarkdownOptions, IsolateMainConfig,
   PluginConfig, TailwindConfig,
 };
 
 fn convert_fragments(html: &str) -> String {
   mdream::html_to_markdown(
     html,
-    HTMLToMarkdownOptions {
+    HtmlToMarkdownOptions {
       clean: Some(CleanConfig {
         fragments: true,
         ..Default::default()
@@ -58,7 +58,7 @@ fn fragment_rewrite_survives_drifted_link_offset() {
     empty_images: true,
     empty_link_text: false,
   };
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     origin: Some("https://example.com/".to_string()),
     clean: Some(clean),
     ..Default::default()
@@ -84,7 +84,7 @@ fn drifted_fragment_link_is_unwrapped_after_blockquote_rewrite() {
     empty_images: true,
     empty_link_text: false,
   };
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     origin: Some("https://example.com/".to_string()),
     clean: Some(clean),
     ..Default::default()
@@ -134,7 +134,7 @@ fn aliased_bracket_from_unclosed_nested_anchor_is_not_rewritten() {
     extraction: None,
     tag_overrides: None,
   };
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     clean: Some(clean),
     plugins: Some(plugins),
     ..Default::default()

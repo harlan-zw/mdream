@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 
 use mdream::MarkdownStreamProcessor;
 use mdream::types::{
-  CleanConfig, HTMLToMarkdownOptions, IsolateMainConfig, OutputFormat, PluginConfig,
+  CleanConfig, HtmlToMarkdownOptions, IsolateMainConfig, OutputFormat, PluginConfig,
   TagOverrideConfig, TailwindConfig,
 };
 use mdream::{html_to_format_result, html_to_markdown};
@@ -72,14 +72,14 @@ static ALLOC: Tracking = Tracking;
 
 /// Peak live bytes while `feed` runs, and the total output it produced. The
 /// output is dropped as it arrives, the way a wire consumer would.
-fn measure_peak(html: &str, chunk: usize, opts: HTMLToMarkdownOptions) -> (u64, u64) {
+fn measure_peak(html: &str, chunk: usize, opts: HtmlToMarkdownOptions) -> (u64, u64) {
   measure_peak_format(html, chunk, opts, OutputFormat::Markdown)
 }
 
 fn measure_peak_format(
   html: &str,
   chunk: usize,
-  opts: HTMLToMarkdownOptions,
+  opts: HtmlToMarkdownOptions,
   format: OutputFormat,
 ) -> (u64, u64) {
   ACCT.set(Acct {
@@ -107,7 +107,7 @@ fn measure_peak_unfinished(html: &str, chunk: usize) -> (u64, u64) {
     live: 0,
     peak: 0,
   });
-  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut total_out = 0u64;
   for part in html.as_bytes().chunks(chunk) {
     total_out += processor
@@ -133,7 +133,7 @@ fn safe_clean() -> CleanConfig {
   }
 }
 
-fn stream_chunks(html: &str, chunk: usize, opts: HTMLToMarkdownOptions) -> String {
+fn stream_chunks(html: &str, chunk: usize, opts: HtmlToMarkdownOptions) -> String {
   let mut p = MarkdownStreamProcessor::new(opts);
   let mut out = String::new();
   for c in html.as_bytes().chunks(chunk) {
@@ -144,7 +144,7 @@ fn stream_chunks(html: &str, chunk: usize, opts: HTMLToMarkdownOptions) -> Strin
 }
 
 // Splits on char boundaries so multibyte input can be fed in small chunks.
-fn stream_chars(html: &str, max_bytes: usize, opts: HTMLToMarkdownOptions) -> String {
+fn stream_chars(html: &str, max_bytes: usize, opts: HtmlToMarkdownOptions) -> String {
   let mut p = MarkdownStreamProcessor::new(opts);
   let mut out = String::new();
   let mut start = 0;
@@ -180,8 +180,8 @@ const CORPUS: &[&str] = &[
 fn streamed_output_matches_one_shot() {
   for &html in CORPUS {
     for opts in [
-      HTMLToMarkdownOptions::default(),
-      HTMLToMarkdownOptions {
+      HtmlToMarkdownOptions::default(),
+      HtmlToMarkdownOptions {
         clean: Some(safe_clean()),
         ..Default::default()
       },
@@ -199,7 +199,7 @@ fn streamed_output_matches_one_shot() {
 // Each asserts across chunk sizes so a boundary landing anywhere is covered.
 // Owned options keep the many test call sites concise while this helper clones them.
 #[allow(clippy::needless_pass_by_value)]
-fn assert_stream_matches(html: &str, opts: HTMLToMarkdownOptions) {
+fn assert_stream_matches(html: &str, opts: HtmlToMarkdownOptions) {
   let expected = html_to_markdown(html, opts.clone());
   for chunk in 1..=html.len().max(1) {
     assert_eq!(
@@ -212,7 +212,7 @@ fn assert_stream_matches(html: &str, opts: HTMLToMarkdownOptions) {
 
 // Owned options keep the many test call sites concise while this helper clones them.
 #[allow(clippy::needless_pass_by_value)]
-fn assert_stream_matches_every_split(html: &str, opts: HTMLToMarkdownOptions) {
+fn assert_stream_matches_every_split(html: &str, opts: HtmlToMarkdownOptions) {
   let expected = html_to_markdown(html, opts.clone());
   for split in (1..html.len()).filter(|&split| html.is_char_boundary(split)) {
     let mut stream = MarkdownStreamProcessor::new(opts.clone());
@@ -226,7 +226,7 @@ fn assert_stream_matches_every_split(html: &str, opts: HTMLToMarkdownOptions) {
 fn assert_text_stream_matches_every_split(html: &str, expected: &str) {
   for split in (1..html.len()).filter(|&split| html.is_char_boundary(split)) {
     let mut stream = MarkdownStreamProcessor::new_with_format(
-      HTMLToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default(),
       OutputFormat::Text,
     );
     let mut actual = stream.process_chunk(&html[..split]);
@@ -238,7 +238,7 @@ fn assert_text_stream_matches_every_split(html: &str, expected: &str) {
 
 #[test]
 fn streaming_every_split_supports_multibyte_html() {
-  assert_stream_matches_every_split("<p>café 😀</p>", HTMLToMarkdownOptions::default());
+  assert_stream_matches_every_split("<p>café 😀</p>", HtmlToMarkdownOptions::default());
 }
 
 #[test]
@@ -374,7 +374,7 @@ fn figcaption_streaming_matches_one_shot() {
   ];
 
   for (html, expected) in cases {
-    let opts = HTMLToMarkdownOptions::default();
+    let opts = HtmlToMarkdownOptions::default();
     assert_eq!(html_to_markdown(html, opts.clone()), expected);
     for chunk in [1, 2, 7, 31] {
       assert_eq!(
@@ -386,7 +386,7 @@ fn figcaption_streaming_matches_one_shot() {
     assert_stream_matches_every_split(html, opts);
   }
 
-  let clean_empty_links = HTMLToMarkdownOptions {
+  let clean_empty_links = HtmlToMarkdownOptions {
     clean: Some(mdream::types::CleanConfig {
       empty_links: true,
       ..Default::default()
@@ -397,7 +397,7 @@ fn figcaption_streaming_matches_one_shot() {
     r##"<figcaption><a href="#"></a><blockquote>x</blockquote></figcaption>"##,
     clean_empty_links,
   );
-  let clean_empty_link_text = HTMLToMarkdownOptions {
+  let clean_empty_link_text = HtmlToMarkdownOptions {
     clean: Some(mdream::types::CleanConfig {
       empty_link_text: true,
       ..Default::default()
@@ -420,7 +420,7 @@ fn figcaption_streaming_matches_one_shot() {
     r#"<figcaption><em><a href="x"></a></em>x</figcaption>"#,
     clean_empty_link_text,
   );
-  let clean_empty_images = HTMLToMarkdownOptions {
+  let clean_empty_images = HtmlToMarkdownOptions {
     clean: Some(mdream::types::CleanConfig {
       empty_images: true,
       ..Default::default()
@@ -439,7 +439,7 @@ fn figcaption_streaming_matches_one_shot() {
 
 #[test]
 fn figcaption_override_streaming_matches_one_shot() {
-  let exit_only_child = HTMLToMarkdownOptions {
+  let exit_only_child = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       tag_overrides: Some(vec![(
         "div".to_string(),
@@ -460,7 +460,7 @@ fn figcaption_override_streaming_matches_one_shot() {
   );
 
   for spacing in [[0, 0], [1, 1]] {
-    let options = HTMLToMarkdownOptions {
+    let options = HtmlToMarkdownOptions {
       plugins: Some(PluginConfig {
         tag_overrides: Some(vec![(
           "figcaption".to_string(),
@@ -506,7 +506,7 @@ fn figcaption_override_streaming_matches_one_shot() {
       },
     ),
   ] {
-    let options = HTMLToMarkdownOptions {
+    let options = HtmlToMarkdownOptions {
       plugins: Some(PluginConfig {
         tag_overrides: Some(vec![(tag.to_string(), config)]),
         ..Default::default()
@@ -517,7 +517,7 @@ fn figcaption_override_streaming_matches_one_shot() {
     assert_stream_matches_every_split(&html, options);
   }
 
-  let literal_code = HTMLToMarkdownOptions {
+  let literal_code = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       tag_overrides: Some(vec![(
         "code".to_string(),
@@ -531,7 +531,7 @@ fn figcaption_override_streaming_matches_one_shot() {
     ..Default::default()
   };
   assert_stream_matches_every_split("<pre><code>x</code></pre>", literal_code);
-  let literal_code_with_language = HTMLToMarkdownOptions {
+  let literal_code_with_language = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       tag_overrides: Some(vec![(
         "code".to_string(),
@@ -550,7 +550,7 @@ fn figcaption_override_streaming_matches_one_shot() {
     literal_code_with_language,
   );
 
-  let literal_caption = HTMLToMarkdownOptions {
+  let literal_caption = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       tag_overrides: Some(vec![(
         "figcaption".to_string(),
@@ -587,10 +587,10 @@ fn deferred_caption_breaks_preserve_late_content_output() {
     format!("<ul><li>Before<figcaption>{breaks}Late</figcaption>After</li></ul>"),
     format!("<blockquote>Before<figcaption>{breaks}Late</figcaption>After</blockquote>"),
   ] {
-    let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+    let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
     for chunk in [1, 7, 127, 4096] {
       assert_eq!(
-        stream_chunks(&html, chunk, HTMLToMarkdownOptions::default()),
+        stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
         expected,
         "chunk={chunk} html={html:?}"
       );
@@ -600,13 +600,13 @@ fn deferred_caption_breaks_preserve_late_content_output() {
 
 #[test]
 fn streaming_break_only_pending_figcaption_stays_bounded_before_finish() {
-  let mut visible_break = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut visible_break = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   assert_eq!(
     visible_break.process_chunk("<table><tr><td><figcaption><br>"),
     "| *<br>"
   );
 
-  let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   assert_eq!(stream.process_chunk("Before<figcaption><br><br>"), "Before");
 
   const TARGET: usize = 1024 * 1024;
@@ -651,8 +651,8 @@ fn streaming_compacted_break_runs_preserve_late_output() {
   for (open, close) in [("Before", "Late"), ("<ul><li>Before", "Late</li></ul>")] {
     let prefix = format!("{open}{breaks}");
     let html = format!("{prefix}{close}");
-    let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
-    let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+    let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
     let mut actual = String::new();
     for chunk in prefix.as_bytes().chunks(8 * 1024) {
       actual.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
@@ -679,7 +679,7 @@ fn streaming_compacted_break_runs_preserve_late_output() {
     "<ul><li>x<br><br> </li><li>y</li></ul>",
     "<ul><li>a<ul><li><br><br>x</li></ul></li></ul>",
   ] {
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -731,8 +731,8 @@ fn plain_text_figcaption_streaming_matches_one_shot() {
 // of its carry paths (a boundary inside the `<![CDATA[` opener, and an
 // unterminated section) hold text in the buffer while carrying only the token,
 // so a leading text run is the case that would duplicate if they disagreed.
-fn cdata_emitted() -> HTMLToMarkdownOptions {
-  HTMLToMarkdownOptions {
+fn cdata_emitted() -> HtmlToMarkdownOptions {
+  HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       tag_overrides: Some(vec![(
         "#cdata-section".to_string(),
@@ -777,7 +777,7 @@ fn streaming_gfm_hard_break_matches_every_split() {
     "<address>first<br>second</address>",
     "<code>first<br>second</code>",
   ] {
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -789,7 +789,7 @@ fn streaming_blockquote_structure_matches_every_split() {
     "<blockquote><ul><li>one<ul><li>sub</li></ul></li></ul></blockquote>",
     "<ul><li><blockquote><ul><li>x</li><li>y</li></ul></blockquote></li></ul>",
   ] {
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -811,10 +811,10 @@ fn streaming_nested_blockquote_separator_collapse_matches_one_shot() {
     // A list indent makes `content_start` non-zero within the line.
     "<ul><li>a<blockquote><blockquote>x</blockquote></blockquote></li></ul>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches(
       html,
-      HTMLToMarkdownOptions {
+      HtmlToMarkdownOptions {
         clean: Some(safe_clean()),
         ..Default::default()
       },
@@ -830,10 +830,10 @@ fn streaming_large_nested_blockquote_drains_without_changing_output() {
   }
   html.push_str("</blockquote></blockquote></blockquote>");
 
-  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
   for chunk in [97usize, 1024, 8192] {
     assert_eq!(
-      stream_chunks(&html, chunk, HTMLToMarkdownOptions::default()),
+      stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
       expected,
       "chunk={chunk}"
     );
@@ -851,7 +851,7 @@ fn streaming_does_not_re_escape_carried_text() {
     "<table><tr><td>a`b</td><td>c\\d</td></tr></table>",
     r#"<p>text with <a href="/x">a [bracket] link</a> end</p>"#,
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -861,7 +861,7 @@ fn streaming_gfm_text_escaping_matches_every_split() {
     r"<p>&#35; heading [label](url) and *bar* ~~baz~~ `qux` &amp;copy;</p><p>> quote</p><p>1. item</p><p>---</p>",
     r#"<ol start="10"><li>> quote</li><li>after</li></ol>"#,
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -872,7 +872,7 @@ fn streaming_cmark_block_structure_matches_every_split() {
     "<ul><li><blockquote>text<hr></blockquote>after</li></ul>",
     "<ol><li><span>parent<ul><li>child</li><li>child 2</li></ul></span></li></ol>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -886,7 +886,7 @@ fn streaming_gfm_link_and_image_serialization_matches_every_split() {
     r#"<img src="/x.png" alt="a ] \ *bold* _em_ &#96;code&#96;">"#,
     r#"<img src="/x.png" alt="alt" title="say &quot;hi&quot; \ path">"#,
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -899,12 +899,12 @@ fn linked_images_match_one_shot_with_cleaning_and_draining() {
     r#"<div><a href="/x"><span><img src="/i" alt="Alt"> </span></a>Caption</div>"#,
     r#"<div><a href="/x"><x-wrap><img src="/i" alt="A"></x-wrap></a> Caption</div>"#,
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
   }
 
   let mixed_case =
     r#"<section><a href="/x"><DIV><img src="/i" alt="A"></DIV></a> Caption</section>"#;
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       tag_overrides: Some(vec![(
         "div".to_string(),
@@ -927,7 +927,7 @@ fn linked_images_match_one_shot_with_cleaning_and_draining() {
   assert_stream_matches(mixed_case, options);
 
   let block_image = r#"<div><a href="/x"><img src="/i" alt="Alt"></a> Caption</div>"#;
-  let block_image_options = HTMLToMarkdownOptions {
+  let block_image_options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       tag_overrides: Some(vec![(
         "img".to_string(),
@@ -959,7 +959,7 @@ fn linked_images_match_one_shot_with_cleaning_and_draining() {
 
   for alt in [" ", "\u{00A0}"] {
     let whitespace_alt = format!(r#"<a href="/x" title="Title"><img src="/i" alt="{alt}"></a>"#);
-    let options = HTMLToMarkdownOptions {
+    let options = HtmlToMarkdownOptions {
       clean: Some(safe_clean()),
       ..Default::default()
     };
@@ -978,11 +978,11 @@ fn linked_images_match_one_shot_with_cleaning_and_draining() {
   keep_empty_image.empty_images = false;
 
   for opts in [
-    HTMLToMarkdownOptions {
+    HtmlToMarkdownOptions {
       clean: Some(safe_clean()),
       ..Default::default()
     },
-    HTMLToMarkdownOptions {
+    HtmlToMarkdownOptions {
       clean: Some(keep_empty_image),
       ..Default::default()
     },
@@ -1016,10 +1016,10 @@ fn linked_images_match_one_shot_with_cleaning_and_draining() {
     ),
   ] {
     let expected =
-      html_to_format_result(linked_image, HTMLToMarkdownOptions::default(), format).markdown;
+      html_to_format_result(linked_image, HtmlToMarkdownOptions::default(), format).markdown;
     for chunk in [1usize, 2, 7, 31, linked_image.len()] {
       let mut processor =
-        MarkdownStreamProcessor::new_with_format(HTMLToMarkdownOptions::default(), format);
+        MarkdownStreamProcessor::new_with_format(HtmlToMarkdownOptions::default(), format);
       let mut actual = String::new();
       for input in linked_image.as_bytes().chunks(chunk) {
         actual.push_str(&processor.process_chunk(std::str::from_utf8(input).unwrap()));
@@ -1038,10 +1038,10 @@ fn streaming_raw_html_links_match_one_shot() {
     r#"<details><a href="/x?a=1&amp;b=2" title="say &quot;hi&quot; &amp; bye">link</a></details>"#,
     r#"<details><a href="javascript:alert(1)">visible</a></details>"#,
   ] {
-    let expected = html_to_markdown(html, HTMLToMarkdownOptions::default());
+    let expected = html_to_markdown(html, HtmlToMarkdownOptions::default());
     for chunk in [1usize, 2, 7, 31, html.len()] {
       assert_eq!(
-        stream_chunks(html, chunk, HTMLToMarkdownOptions::default()),
+        stream_chunks(html, chunk, HtmlToMarkdownOptions::default()),
         expected,
         "chunk={chunk} html={html:?}"
       );
@@ -1055,7 +1055,7 @@ fn streaming_code_delimiter_widening_matches_every_split() {
     "<p>before <code>a `b` c</code> after</p>",
     "<pre><code>before\n```line-leading\n````\nafter</code></pre>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -1068,13 +1068,13 @@ fn streaming_keeps_list_marker_after_code_block() {
     "<ul><li>one<pre><code>cmd</code></pre></li><li>two</li></ul>",
     "<ol><li>one<pre><code>a</code></pre></li><li>two</li><li>three</li></ol>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
   }
 }
 
 #[test]
 fn streaming_keeps_closing_fence_after_cleaned_empty_link_in_pre() {
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     clean: Some(safe_clean()),
     ..Default::default()
   };
@@ -1092,7 +1092,7 @@ fn streaming_keeps_raw_close_tag_after_foreign_child() {
     "<summary>text <svg></svg></summary>",
     "<details><summary>text <svg><polyline points=\"1 2\"></polyline></svg></summary><p>b</p></details>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -1108,7 +1108,7 @@ fn streaming_drops_script_without_disturbing_neighbors() {
     r#"<p>x</p><script>let s = "</scr" + "ipt>end";</script><p>y</p>"#,
     "<p>one</p><script>\n  line1\n  line2\n</script><p>two</p>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -1118,7 +1118,7 @@ fn streaming_drops_script_without_disturbing_neighbors() {
 fn multibyte_drain_matches_one_shot() {
   const UNIT: &str = r#"<div><a href="/a">link</a> <span>&ldquo;Create&rdquo;</span></div>"#;
   let doc = format!("<article>{}</article>", UNIT.repeat(40));
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     clean: Some(safe_clean()),
     ..Default::default()
   };
@@ -1146,7 +1146,7 @@ fn streaming_multibyte_never_panics() {
   ];
   for &html in CASES {
     for max_bytes in [1usize, 2, 3, 4, 5, 7, 11] {
-      let _ = stream_chars(html, max_bytes, HTMLToMarkdownOptions::default());
+      let _ = stream_chars(html, max_bytes, HtmlToMarkdownOptions::default());
     }
   }
 }
@@ -1165,7 +1165,7 @@ fn streaming_dropped_empty_element_keeps_block_spacing() {
     // before the dropped `[` leaked, then the following block trimmed it.
     r##"<ul><li><h3>NetSparkle</h3><a class="anchor-link" href="#x"><span><svg></svg></span></a></li></ul><p>Copyright.</p>"##,
   ];
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     clean: Some(safe_clean()),
     ..Default::default()
   };
@@ -1190,7 +1190,7 @@ fn streaming_dropped_empty_element_keeps_block_spacing() {
 // the outer bracket reachable by a chunk boundary.
 #[test]
 fn streaming_holds_outer_nested_link_bracket_through_clean_drop() {
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     clean: Some(safe_clean()),
     ..Default::default()
   };
@@ -1222,7 +1222,7 @@ fn streaming_holds_outer_nested_link_bracket_through_clean_drop() {
 #[test]
 fn streaming_wrap_preserves_the_full_current_column() {
   let html = "<p>alpha <span>beta</span> <span>gamma</span> delta</p>";
-  let options = HTMLToMarkdownOptions::default().with_wrap_width(12);
+  let options = HtmlToMarkdownOptions::default().with_wrap_width(12);
   let expected = html_to_markdown(html, options.clone());
   let mut processor = MarkdownStreamProcessor::new(options);
 
@@ -1241,8 +1241,8 @@ fn streaming_retains_two_newlines_of_block_context() {
     "<link rel=\"stylesheet\"><div role=\"note\" class=\"hatnote navigation-not-searchable\">",
     "Main article: <a href=\"/list\">List</a></div><p>Members</p>"
   );
-  let expected = html_to_markdown(html, HTMLToMarkdownOptions::default());
-  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let expected = html_to_markdown(html, HtmlToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
 
   let mut actual = processor.process_chunk(concat!(
     "<div><h5>Family Pteropodidae</h5><span>[<a href=\"/edit\">edit</a>]</span></div>",
@@ -1264,8 +1264,8 @@ fn streaming_only_trims_whitespace_at_the_document_start() {
     "<ul><li><i>M. gigas</i> (<a href=\"/ghost\">Ghost bat</a>)</li></ul>",
     "</div></small>\n </td><td>Northern Australia</td></tr></table>"
   );
-  let expected = html_to_markdown(html, HTMLToMarkdownOptions::default());
-  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let expected = html_to_markdown(html, HtmlToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
 
   let mut actual = processor.process_chunk(concat!(
     "<table><tr><td>Miller<br><br><small><div><div><div>One species</div></div>",
@@ -1298,7 +1298,7 @@ fn one_long_text_run(open: &str, close: &str, target: usize) -> String {
 fn streaming_memory_is_bounded_for_one_long_text_run() {
   const TARGET: usize = 2 * 1024 * 1024;
   let html = one_long_text_run("<p>", "</p>", TARGET);
-  let opts = HTMLToMarkdownOptions::default();
+  let opts = HtmlToMarkdownOptions::default();
 
   let (peak, total_out) = measure_peak(&html, 8 * 1024, opts.clone());
 
@@ -1321,7 +1321,7 @@ fn streaming_single_token_uses_a_bounded_window() {
   const TARGET: usize = 2 * 1024 * 1024;
   let token = "a".repeat(TARGET);
   let html = format!("<p>{token}</p>");
-  let opts = HTMLToMarkdownOptions::default();
+  let opts = HtmlToMarkdownOptions::default();
 
   let output = stream_chunks(&html, 8 * 1024, opts.clone());
   assert_eq!(output.len(), token.len());
@@ -1343,14 +1343,14 @@ fn streaming_single_token_uses_a_bounded_window() {
 #[test]
 fn a_long_text_run_streams_identically_to_one_shot_in_every_context() {
   const TARGET: usize = 200 * 1024;
-  let cases: &[(&str, &str, &str, HTMLToMarkdownOptions)] = &[
-    ("plain", "<p>", "</p>", HTMLToMarkdownOptions::default()),
+  let cases: &[(&str, &str, &str, HtmlToMarkdownOptions)] = &[
+    ("plain", "<p>", "</p>", HtmlToMarkdownOptions::default()),
     // No title, so the title-vs-text comparison never runs and this one splits.
     (
       "untitled link",
       "<a href=\"/u\">",
       "</a><p>after</p>",
-      HTMLToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default(),
     ),
     // A title is dropped when it repeats the link text, decided against the
     // *last* text node.
@@ -1358,35 +1358,35 @@ fn a_long_text_run_streams_identically_to_one_shot_in_every_context() {
       "titled link",
       "<a href=\"/u\" title=\"t\">",
       "</a><p>after</p>",
-      HTMLToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default(),
     ),
     // Wrapping measures its column per text node.
     (
       "wrapped",
       "<p>",
       "</p>",
-      HTMLToMarkdownOptions::default().with_wrap_width(40),
+      HtmlToMarkdownOptions::default().with_wrap_width(40),
     ),
     // `<title>` text is assigned to the frontmatter title, not appended.
     (
       "title element",
       "<html><head><title>",
       "</title></head><body><p>after</p></body></html>",
-      HTMLToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default(),
     ),
     // Preformatted text keeps its own whitespace and fence handling.
     (
       "pre",
       "<pre><code>",
       "</code></pre><p>after</p>",
-      HTMLToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default(),
     ),
     // Escaping inside a raw HTML block depends on whether the line opens one.
     (
       "raw html block",
       "<details><summary>s</summary>",
       "</details>",
-      HTMLToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default(),
     ),
   ];
 
@@ -1415,7 +1415,7 @@ fn streaming_memory_is_bounded_not_document_sized() {
     html.push_str("<p>x</p>");
   }
 
-  let (peak, total_out) = measure_peak(&html, 8 * 1024, HTMLToMarkdownOptions::default());
+  let (peak, total_out) = measure_peak(&html, 8 * 1024, HtmlToMarkdownOptions::default());
 
   // Amplification really happened...
   assert!(
@@ -1440,7 +1440,7 @@ fn streaming_keeps_trailing_nbsp_before_sibling() {
     r"<p>answered on <span>03 Apr 2013,&nbsp;</span><span>09:53 AM</span></p>",
     r"<p><span>a b,&nbsp;</span><span>0</span></p>",
   ];
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     clean: Some(safe_clean()),
     ..Default::default()
   };
@@ -1474,7 +1474,7 @@ fn streaming_keeps_raw_block_close_after_drain() {
     "<dl><dt>MPN:</dt><dd>D100-V36-PBO-1WZ</dd>\
      <dt>Availability:</dt><dd>Ships in 2-3 days</dd></dl></article>",
   );
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     clean: Some(safe_clean()),
     ..Default::default()
   };
@@ -1507,7 +1507,7 @@ fn drain_filler() -> String {
 // open link bracket, so the orphan `\n\n` is never emitted.
 #[test]
 fn streaming_drops_block_separator_before_empty_trailing_link() {
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     clean: Some(safe_clean()),
     ..Default::default()
   };
@@ -1534,7 +1534,7 @@ fn streaming_drops_block_separator_before_empty_trailing_link() {
 // (`<em></em>`): the newlines before its open `_`/`*` marker must also be held.
 #[test]
 fn streaming_drops_block_separator_before_empty_trailing_marker() {
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     clean: Some(safe_clean()),
     ..Default::default()
   };
@@ -1555,7 +1555,7 @@ fn streaming_drops_block_separator_before_empty_trailing_marker() {
 
 #[test]
 fn skipped_pre_closes_surviving_child_fence_without_leaking_its_own_exit() {
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       isolate_main: Some(IsolateMainConfig),
       tailwind: Some(TailwindConfig),
@@ -1623,19 +1623,19 @@ fn nested_pre_does_not_replace_or_close_outer_code_fence() {
     "<pre><pre>inner</pre>y</pre>",
     "<pre><pre><code>x</code></pre>y</pre>",
   ] {
-    let output = html_to_markdown(html, HTMLToMarkdownOptions::default());
+    let output = html_to_markdown(html, HtmlToMarkdownOptions::default());
     assert_eq!(output.matches("```").count(), 2, "{output:?}");
     let closer = output.rfind("```").unwrap();
     assert!(output.find('y').is_some_and(|at| at < closer), "{output:?}");
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
   }
 
   let html = "<pre class=language-rs><pre class=language-js></pre>y</pre>";
   assert_eq!(
-    html_to_markdown(html, HTMLToMarkdownOptions::default()),
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
     "```rs\ny\n```"
   );
-  assert_stream_matches(html, HTMLToMarkdownOptions::default());
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
 }
 
 // A trailing whitespace run inside `<pre>` is still mutable until the code
@@ -1648,10 +1648,10 @@ fn streaming_holds_mutable_trailing_pre_whitespace() {
     "<pre><code>alpha\n\n</code></pre>",
     "<pre><code>alpha  </code></pre>",
   ] {
-    let expected = html_to_markdown(html, HTMLToMarkdownOptions::default());
+    let expected = html_to_markdown(html, HtmlToMarkdownOptions::default());
     for chunk in 1..=html.len() {
       assert_eq!(
-        stream_chunks(html, chunk, HTMLToMarkdownOptions::default()),
+        stream_chunks(html, chunk, HtmlToMarkdownOptions::default()),
         expected,
         "chunk={chunk} html={html:?}"
       );
@@ -1670,10 +1670,10 @@ fn streaming_holds_mutable_trailing_pre_whitespace() {
 fn streaming_holds_full_whitespace_run_before_a_droppable_marker() {
   for html in ["<pre>a\r<q>", "<pre>a\t<q>", "<pre>a \r<q>", "<pre>a\r<em>"] {
     let expected =
-      html_to_format_result(html, HTMLToMarkdownOptions::default(), OutputFormat::Text).markdown;
+      html_to_format_result(html, HtmlToMarkdownOptions::default(), OutputFormat::Text).markdown;
     for chunk in 1..=html.len() {
       let mut p = MarkdownStreamProcessor::new_with_format(
-        HTMLToMarkdownOptions::default(),
+        HtmlToMarkdownOptions::default(),
         OutputFormat::Text,
       );
       let mut actual = String::new();
@@ -1695,11 +1695,11 @@ fn streaming_holds_full_whitespace_run_before_a_droppable_marker() {
 fn streaming_keeps_block_spacing_after_a_space_trim() {
   let html = "<pre>ace><source>tity;      <ol/> <d/>*";
   let expected =
-    html_to_format_result(html, HTMLToMarkdownOptions::default(), OutputFormat::Text).markdown;
+    html_to_format_result(html, HtmlToMarkdownOptions::default(), OutputFormat::Text).markdown;
   assert_eq!(expected, "ace>tity;\n\n*");
   for chunk in 1..=html.len() {
     let mut p = MarkdownStreamProcessor::new_with_format(
-      HTMLToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default(),
       OutputFormat::Text,
     );
     let mut actual = String::new();
@@ -1725,8 +1725,8 @@ fn streaming_holds_heading_hashes_behind_a_droppable_marker() {
     "<h3>a #<em>",
     "<li><h3><a href=/u>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -1737,7 +1737,7 @@ fn streaming_holds_heading_hashes_behind_a_droppable_marker() {
 // now consults the last flushed byte so the separator survives the drain.
 #[test]
 fn streaming_keeps_inter_token_space_across_drain() {
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     clean: Some(safe_clean()),
     ..Default::default()
   };
@@ -1767,7 +1767,7 @@ fn streaming_keeps_inter_token_space_across_drain() {
 // buffer state; every small chunk size lands a boundary that triggers it.
 #[test]
 fn streaming_keeps_block_newline_count_across_drain() {
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     clean: Some(safe_clean()),
     ..Default::default()
   };
@@ -1810,10 +1810,10 @@ fn streaming_long_text_run_matches_one_shot() {
     format!("<!--{long}--><p>after</p>"),
     format!("<p>café {long} 😀</p>"),
   ] {
-    let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+    let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
     for chunk in [1usize, 2, 3, 7, 64, 997, 8192] {
       assert_eq!(
-        stream_chars(&html, chunk, HTMLToMarkdownOptions::default()),
+        stream_chars(&html, chunk, HtmlToMarkdownOptions::default()),
         expected,
         "chunk={chunk} len={}",
         html.len()
@@ -1833,7 +1833,7 @@ fn streaming_text_run_spanning_chunks_matches_every_split() {
     "<p>trailing whitespace sensitive run ending in a space <em>x</em></p>",
     "<pre>preformatted  run   keeping    spacing across a chunk boundary</pre>",
   ] {
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -1856,7 +1856,7 @@ fn streaming_blockquote_flush_holds_unstable_tail() {
   // indentation, which is the unstable tail this fuzz regression exercises.
   html.push_str(&"0123456789abcdef".repeat(32));
   html.push_str("<p>");
-  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
   assert!(
     expected.len() > 8 * 1024,
     "fixture must outgrow the flush threshold, got {}",
@@ -1864,7 +1864,7 @@ fn streaming_blockquote_flush_holds_unstable_tail() {
   );
   for chunk in [7usize, 64, 512, 4096] {
     assert_eq!(
-      stream_chars(&html, chunk, HTMLToMarkdownOptions::default()),
+      stream_chars(&html, chunk, HtmlToMarkdownOptions::default()),
       expected,
       "diverged at chunk={chunk}"
     );
@@ -1879,8 +1879,8 @@ fn streaming_blockquote_flush_preserves_an_open_link_offset() {
     "<p>line</p>".repeat(2048)
   );
   let split = html.find("</a>").unwrap();
-  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
-  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut actual = processor.process_chunk(&html[..split]);
   actual.push_str(&processor.process_chunk(&html[split..]));
   actual.push_str(&processor.finish());
@@ -1895,8 +1895,8 @@ fn streaming_blockquote_flush_preserves_an_open_marker_offset() {
     "<p>line</p>".repeat(2048)
   );
   let split = html.find("</em>").unwrap();
-  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
-  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut actual = processor.process_chunk(&html[..split]);
   actual.push_str(&processor.process_chunk(&html[split..]));
   actual.push_str(&processor.finish());
@@ -1921,8 +1921,8 @@ fn streaming_matches_one_shot_on_fixtures() {
   ];
   for (name, html) in FIXTURES {
     for opts in [
-      HTMLToMarkdownOptions::default(),
-      HTMLToMarkdownOptions {
+      HtmlToMarkdownOptions::default(),
+      HtmlToMarkdownOptions {
         clean: Some(safe_clean()),
         ..Default::default()
       },
@@ -1958,7 +1958,7 @@ fn streaming_text_whitespace_batching_matches_every_split() {
     "<pre>keep  double   spaces</pre>",
     "<p>trailing space before tag <em>x</em></p>",
   ] {
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -1976,8 +1976,8 @@ fn streaming_pending_space_after_drained_hard_break_matches_one_shot() {
     // A link's `[` is generated markdown, resolved at the other call site.
     "<p><span><em>x</em><br /> </span><a href=\"u\">a",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -1996,8 +1996,8 @@ fn streaming_heading_trailing_hashes_matches_one_shot() {
     "<h2>foo #</h2><p>after</p>",
     "<h2>a</h2><h2>b #</h2>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -2012,8 +2012,8 @@ fn streaming_empty_nested_item_marker_matches_one_shot() {
     "<ul><li></li></ul>",
     "<ul><li>a<ul><li></li><li>b</li></ul></li></ul>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -2038,8 +2038,8 @@ fn streaming_table_row_after_drained_line_matches_one_shot() {
     // otherwise be the first byte drained.
     "<ol><li><table><i></table><tr>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -2056,8 +2056,8 @@ fn streaming_empty_item_with_open_marker_matches_one_shot() {
     "<li><li><em></li>",
     "<ul><li><li><i></li></ul>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -2065,7 +2065,7 @@ fn streaming_empty_item_with_open_marker_matches_one_shot() {
 // may add that space back without making the list item nonempty.
 #[test]
 fn streaming_dropped_image_before_empty_marker_keeps_list_separation() {
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     clean: Some(CleanConfig {
       empty_images: true,
       ..Default::default()
@@ -2092,23 +2092,23 @@ fn streaming_raw_html_blank_line_drained_matches_one_shot() {
     "<dd><p>.<br />*<Foo/Bar>",
     "<dd><tr><a href=\"u\" title=\"t\">_</html>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
 #[test]
 fn streaming_raw_html_ignores_rewritable_blockquote_separator() {
   let html = "<dd>*<blockquote><blockquote>_";
-  assert_stream_matches(html, HTMLToMarkdownOptions::default());
-  assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
 }
 
 #[test]
 fn streaming_raw_html_keeps_stable_blank_line_context() {
   let html = "<dd><ol><i><ol>_";
-  assert_stream_matches(html, HTMLToMarkdownOptions::default());
-  assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
 }
 
 // Every item's marker is immediately followed by a link and an emphasis, the
@@ -2124,7 +2124,7 @@ fn streaming_memory_bounded_with_empty_item_marker_holds() {
   }
   html.push_str("</ul>");
 
-  let (peak, total_out) = measure_peak(&html, 8 * 1024, HTMLToMarkdownOptions::default());
+  let (peak, total_out) = measure_peak(&html, 8 * 1024, HtmlToMarkdownOptions::default());
 
   // The conversion really ran...
   assert!(
@@ -2187,8 +2187,8 @@ fn streaming_block_separator_after_undrained_yield_matches_one_shot() {
     "<td>d</td><table><tr>",
     "<table><p>x</p><dd>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -2203,8 +2203,8 @@ fn streaming_block_open_after_drained_line_matches_one_shot() {
     "<i><ul><li>.<br />\n<table><caption>c</caption><tr><td>d</td></tr></table>",
     "<ul><li>t<ul><li>.<br />\n<table><caption>c</caption><tr><td>d</td></tr></table>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -2222,8 +2222,8 @@ fn streaming_open_marker_across_item_newline_matches_one_shot() {
     ".<li><br /><i>",
     "<ul><li><blockquote><ul><li>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 
   // The blockquote frames must NOT be shifted with the rest: their
@@ -2233,7 +2233,7 @@ fn streaming_open_marker_across_item_newline_matches_one_shot() {
   assert_eq!(
     html_to_markdown(
       "<ul><li><blockquote><ul><li>",
-      HTMLToMarkdownOptions::default()
+      HtmlToMarkdownOptions::default()
     ),
     "- \n  >\n  > -"
   );
@@ -2251,13 +2251,13 @@ fn streaming_empty_blockquote_marker_matches_one_shot() {
     "<table><dt><blockquote>",
     "<tr><a href=\"u\"><blockquote>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
   // Parity alone cannot see this: both sides agreeing on a dropped `>` would
   // pass. Pin the marker itself.
   assert_eq!(
-    html_to_markdown("<i><blockquote>", HTMLToMarkdownOptions::default()),
+    html_to_markdown("<i><blockquote>", HtmlToMarkdownOptions::default()),
     "*>*"
   );
 }
@@ -2273,8 +2273,8 @@ fn streaming_marker_guard_defers_to_item_exit_matches_one_shot() {
     "<tr><li><br /><ul><li>",
     "<td>d</td><li><br /><ul><li>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -2291,12 +2291,12 @@ fn raw_html_region_text_is_not_gfm_escaped() {
     ("*<ul><li><dd>_", "\\*\n\n- <dd>_</dd>"),
   ] {
     assert_eq!(
-      html_to_markdown(html, HTMLToMarkdownOptions::default()),
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
       expected,
       "one-shot for {html:?}"
     );
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -2312,12 +2312,12 @@ fn trailing_nbsp_is_content_and_matches_one_shot() {
     ("<p>hello&nbsp;world&nbsp;</p>", "hello\u{a0}world\u{a0}"),
   ] {
     assert_eq!(
-      html_to_markdown(html, HTMLToMarkdownOptions::default()),
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
       expected,
       "one-shot for {html:?}"
     );
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -2327,8 +2327,8 @@ fn trailing_nbsp_is_content_and_matches_one_shot() {
 #[test]
 fn trailing_tab_is_held_back_like_a_space() {
   for html in ["$&#9", "$&#9;", "a&#9;&#9;", "x&Tab;"] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -2344,8 +2344,8 @@ fn empty_pre_does_not_yield_block_spacing_finalize_trims() {
     "S<pre>  </pre>",
     "S<pre></pre><pre>",
   ] {
-    assert_stream_matches(html, HTMLToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -2355,7 +2355,7 @@ fn empty_pre_does_not_yield_block_spacing_finalize_trims() {
 // left its backslash stranded.
 #[test]
 fn empty_link_text_drop_keeps_a_preceding_escaped_bracket() {
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     clean: Some(CleanConfig {
       empty_link_text: true,
       ..CleanConfig::default()
@@ -2377,8 +2377,8 @@ fn empty_link_text_drop_keeps_a_preceding_escaped_bracket() {
 #[test]
 fn streaming_counts_raw_html_indent_across_a_drain() {
   let html = "<lI><dd/L><oL><lI><oL><I><hr><dd/L>%%&<lI><<o>[";
-  assert_stream_matches(html, HTMLToMarkdownOptions::default());
-  assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
 }
 
 // Inside a raw-HTML region Markdown escaping is suspended until a blank line
@@ -2402,8 +2402,8 @@ fn raw_html_escape_suspension_survives_a_drain() {
     "L>/[\u{18}\u{7}]",
   ];
   let html: String = chunks.concat();
-  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
-  let mut p = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+  let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut actual = String::new();
   for c in chunks {
     actual.push_str(&p.process_chunk(c));
@@ -2423,7 +2423,7 @@ fn streaming_survives_two_reach_back_trims_over_one_run() {
     // Second trim is a block exit, which drops the spacing outright.
     (
       "through\"><=>><h><pre>     \n\n\r\n\r\n\r\n\r\n<source> <source>>".to_string(),
-      HTMLToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default(),
     ),
     // Second trim is an inline exit, which leaves a pending space behind: the
     // stream kept a bare `\r` where one-shot wrote that space. Straight from
@@ -2436,7 +2436,7 @@ fn streaming_survives_two_reach_back_trims_over_one_run() {
          <pre>\r\n\r\n<source> <source>       \n\n<source> </DIV><h1 src=>\r\n\r\n<DIV></main>\r\n\r\n\
          {long}\r\n\r\n</pre>"
       ),
-      HTMLToMarkdownOptions {
+      HtmlToMarkdownOptions {
         origin: Some("https://example.com/base/".to_string()),
         clean: Some(safe_clean()),
         wrap_width: 123,
@@ -2482,10 +2482,10 @@ fn rawtext_close_tag_split_across_chunks_is_carried_without_its_text() {
     let html = format!("{}{tail}", "<s><Q>".repeat(400));
     for format in [OutputFormat::Text, OutputFormat::Markdown] {
       let expected =
-        html_to_format_result(&html, HTMLToMarkdownOptions::default(), format).markdown;
+        html_to_format_result(&html, HtmlToMarkdownOptions::default(), format).markdown;
       for chunk in 1..=3 {
         let mut p =
-          MarkdownStreamProcessor::new_with_format(HTMLToMarkdownOptions::default(), format);
+          MarkdownStreamProcessor::new_with_format(HtmlToMarkdownOptions::default(), format);
         let mut actual = String::new();
         let mut start = 0;
         while start < html.len() {
@@ -2517,24 +2517,24 @@ fn streaming_matches_one_shot_on_a_rawtext_eof_residual() {
     ("<xmp>a</", "<xmp>a</</xmp>"),
     ("<title>a</", "<title>a</</title>"),
   ] {
-    let expected = html_to_markdown(closed, HTMLToMarkdownOptions::default());
+    let expected = html_to_markdown(closed, HtmlToMarkdownOptions::default());
     for chunk in 1..=truncated.len() {
       assert_eq!(
-        stream_chunks(truncated, chunk, HTMLToMarkdownOptions::default()),
+        stream_chunks(truncated, chunk, HtmlToMarkdownOptions::default()),
         expected,
         "chunk={chunk} truncated={truncated:?}"
       );
     }
-    assert_stream_matches_every_split(truncated, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(truncated, HtmlToMarkdownOptions::default());
   }
 
   // The one residual EOF still discards: an appropriate end tag already delimited.
-  assert_stream_matches("<textarea>a</textarea ", HTMLToMarkdownOptions::default());
+  assert_stream_matches("<textarea>a</textarea ", HtmlToMarkdownOptions::default());
   assert_eq!(
     stream_chunks(
       "<textarea>a</textarea ",
       1,
-      HTMLToMarkdownOptions::default()
+      HtmlToMarkdownOptions::default()
     ),
     "a"
   );
@@ -2551,10 +2551,10 @@ fn streaming_matches_one_shot_on_a_rawtext_eof_residual() {
 fn streaming_holds_a_blockquote_blank_line_until_content_follows() {
   for tail in ["<p>", "<div>", "<html>", "<blockquote>", "<p>y</p>", "<p>y"] {
     let html = format!("a<blockquote>{}{tail}", "x".repeat(8192));
-    let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+    let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
     for chunk in [1usize, 7, 64, 4096] {
       assert_eq!(
-        stream_chunks(&html, chunk, HTMLToMarkdownOptions::default()),
+        stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
         expected,
         "chunk={chunk} tail={tail:?}"
       );
@@ -2566,7 +2566,7 @@ fn streaming_holds_a_blockquote_blank_line_until_content_follows() {
 fn streaming_matches_one_shot_across_blockquote_quoting() {
   assert_stream_matches_every_split(
     "<dd><h2><li><blockquote>a<p><code><p>>aa<<a><<li>`",
-    HTMLToMarkdownOptions::default(),
+    HtmlToMarkdownOptions::default(),
   );
 }
 
@@ -2579,12 +2579,12 @@ fn streaming_matches_one_shot_across_blockquote_quoting() {
 // paragraph above.
 #[test]
 fn streaming_keeps_an_empty_items_blank_line_across_a_code_span() {
-  assert_stream_matches_every_split("a a<li><p><code>", HTMLToMarkdownOptions::default());
+  assert_stream_matches_every_split("a a<li><p><code>", HtmlToMarkdownOptions::default());
 }
 
 #[test]
 fn streaming_keeps_an_empty_items_blank_line_across_an_inline_marker() {
-  assert_stream_matches_every_split("a a<li><html><strong>", HTMLToMarkdownOptions::default());
+  assert_stream_matches_every_split("a a<li><html><strong>", HtmlToMarkdownOptions::default());
 }
 
 // A code span or fence measures and rewrites itself through buffer offsets, and
@@ -2595,10 +2595,10 @@ fn streaming_keeps_an_empty_items_blank_line_across_an_inline_marker() {
 #[test]
 fn streaming_defers_the_blockquote_flush_while_a_fence_is_open() {
   let html = format!("<blockquote><pre>{}", "\u{e9}\n<br>".repeat(3000));
-  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
   for chunk in [512, 4096] {
     assert_eq!(
-      stream_chars(&html, chunk, HTMLToMarkdownOptions::default()),
+      stream_chars(&html, chunk, HtmlToMarkdownOptions::default()),
       expected,
       "chunk={chunk}"
     );
@@ -2616,8 +2616,8 @@ fn streaming_releases_a_completed_blockquote_prefix_before_open_code() {
         "{container}{}{open_code}",
         "<p>quoted line</p>".repeat(1024)
       );
-      let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
-      let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+      let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+      let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
       let first = stream.process_chunk(&html);
 
       assert!(
@@ -2643,10 +2643,10 @@ fn streaming_releases_a_completed_blockquote_prefix_before_open_code() {
 fn streaming_separates_a_paragraph_from_text_it_has_already_yielded() {
   let html = "<li><pre>a<!>              <!><h3><h3><p>a";
   let expected =
-    html_to_format_result(html, HTMLToMarkdownOptions::default(), OutputFormat::Text).markdown;
+    html_to_format_result(html, HtmlToMarkdownOptions::default(), OutputFormat::Text).markdown;
   for chunk in 1..=html.len() {
     let mut p = MarkdownStreamProcessor::new_with_format(
-      HTMLToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default(),
       OutputFormat::Text,
     );
     let mut actual = String::new();
@@ -2670,10 +2670,10 @@ fn streaming_keeps_the_raw_html_blank_line_scan_aligned_across_quoting() {
     "{}<blockquote>xxxxxxxx>xxxxxxxxxxxxxxxxxx>xxxxxxxxxxxxxxxx>xxx>xxx>xxx<h3>xx><h3><h3><h3><dl>xxxxxxxx><x>[",
     "x".repeat(8100)
   );
-  let expected = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
   for chunk in [512, 4096] {
     assert_eq!(
-      stream_chars(&html, chunk, HTMLToMarkdownOptions::default()),
+      stream_chars(&html, chunk, HtmlToMarkdownOptions::default()),
       expected,
       "chunk={chunk}"
     );
@@ -2688,7 +2688,7 @@ fn streaming_keeps_the_raw_html_blank_line_scan_aligned_across_quoting() {
 #[test]
 fn streaming_does_not_invent_a_newline_behind_a_single_byte_cut() {
   let html = "<li><pre>x<x>              <x><li>x";
-  let opts = HTMLToMarkdownOptions::default();
+  let opts = HtmlToMarkdownOptions::default();
   let expected = html_to_format_result(html, opts.clone(), OutputFormat::Text).markdown;
   for chunk in 1..=html.len() {
     let mut p = MarkdownStreamProcessor::new_with_format(opts.clone(), OutputFormat::Text);
@@ -2711,7 +2711,7 @@ fn streaming_memory_is_bounded_for_a_link_wrapping_the_document() {
   const TARGET: usize = 2 * 1024 * 1024;
   let html = one_long_text_run("<a href=\"/x\">", "</a>", TARGET);
 
-  let (peak, total_out) = measure_peak(&html, 8 * 1024, HTMLToMarkdownOptions::default());
+  let (peak, total_out) = measure_peak(&html, 8 * 1024, HtmlToMarkdownOptions::default());
 
   assert!(
     total_out > TARGET as u64 - 4096,
@@ -2731,19 +2731,19 @@ fn streaming_memory_is_bounded_without_a_link_rewrite_anchor() {
     (
       "missing href",
       one_long_text_run("<a>", "</a>", TARGET),
-      HTMLToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default(),
       OutputFormat::Markdown,
     ),
     (
       "cleaned href",
       one_long_text_run("<a href=\"#\">", "</a>", TARGET),
-      HTMLToMarkdownOptions::default().with_clean(safe_clean()),
+      HtmlToMarkdownOptions::default().with_clean(safe_clean()),
       OutputFormat::Markdown,
     ),
     (
       "plain text",
       one_long_text_run("<a href=\"/x\">", "</a>", TARGET),
-      HTMLToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default(),
       OutputFormat::Text,
     ),
   ];
@@ -2760,7 +2760,7 @@ fn streaming_memory_is_bounded_without_a_link_rewrite_anchor() {
 
 #[test]
 fn unicode_whitespace_does_not_settle_empty_link_text() {
-  let opts = HTMLToMarkdownOptions::default().with_clean(safe_clean());
+  let opts = HtmlToMarkdownOptions::default().with_clean(safe_clean());
   let first = "before<a href=\"/x\">&nbsp;<!>&nbsp;<!>&nbsp;<!>&nbsp;<!>&nbsp;<!>&#9;";
   let second = "</a>after";
   let expected = html_to_markdown(&format!("{first}{second}"), opts.clone());
@@ -2774,7 +2774,7 @@ fn unicode_whitespace_does_not_settle_empty_link_text() {
 fn enter_only_link_override_keeps_clean_rewrites() {
   let path = format!("/{}", "a".repeat(70 * 1024));
   let html = format!("<a href=\"{path}\">{path}</a>");
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     clean: Some(safe_clean()),
     plugins: Some(PluginConfig {
       tag_overrides: Some(vec![(
@@ -2810,7 +2810,7 @@ fn generated_link_content_releases_the_hold() {
   ];
 
   for (name, html) in cases {
-    let opts = HTMLToMarkdownOptions::default().with_clean(safe_clean());
+    let opts = HtmlToMarkdownOptions::default().with_clean(safe_clean());
     let (peak, total_out) = measure_peak(&html, 8 * 1024, opts);
     assert!(total_out > 300_000, "case={name} output={total_out}");
     assert!(peak < LINK_STREAM_PEAK_LIMIT, "case={name} peak={peak}");
@@ -2822,9 +2822,9 @@ fn a_released_link_still_writes_its_target() {
   let html = one_long_text_run("<p><a href=\"/examples/\">", "</a></p>", 256 * 1024);
   for clean in [false, true] {
     let opts = if clean {
-      HTMLToMarkdownOptions::default().with_clean(safe_clean())
+      HtmlToMarkdownOptions::default().with_clean(safe_clean())
     } else {
-      HTMLToMarkdownOptions::default()
+      HtmlToMarkdownOptions::default()
     };
     let expected = html_to_markdown(&html, opts.clone());
     assert!(
@@ -2844,7 +2844,7 @@ fn a_released_link_still_writes_its_target() {
   let href = "a".repeat(70 * 1024);
   let resolved = format!("https://example.com/a/b/{href}");
   let html = format!("<a href=\"{href}\">{resolved}</a>");
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     origin: Some("https://example.com/a/b/document.html".to_string()),
     clean: Some(safe_clean()),
     ..Default::default()
@@ -2900,9 +2900,9 @@ fn long_links_still_get_every_bracket_anchored_rewrite() {
 
   for clean in [false, true] {
     let opts = if clean {
-      HTMLToMarkdownOptions::default().with_clean(safe_clean())
+      HtmlToMarkdownOptions::default().with_clean(safe_clean())
     } else {
-      HTMLToMarkdownOptions::default()
+      HtmlToMarkdownOptions::default()
     };
     for (name, html) in &cases {
       let expected = html_to_markdown(html, opts.clone());
@@ -2930,7 +2930,7 @@ fn streaming_carries_an_unwanted_value_quote_opened_at_a_chunk_edge() {
     "<p data-x='v'>text</p>",
     r#"<p data-x="a>b">text</p>"#,
   ] {
-    assert_stream_matches_every_split(html, HTMLToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
@@ -2939,7 +2939,7 @@ fn streaming_carries_an_unwanted_value_quote_opened_at_a_chunk_edge() {
 // could reach back for, so every chunk width disagreed with it.
 #[test]
 fn a_cleaned_anchor_exit_still_trims_like_an_uncleaned_one() {
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     clean: Some(CleanConfig {
       fragments: false,
       ..CleanConfig::all()
@@ -2971,7 +2971,7 @@ fn metadata_plugins_do_not_retain_emitted_document() {
     OutputFormat::Html,
   ] {
     for (frontmatter, extraction) in [(true, false), (false, true), (true, true)] {
-      let options = HTMLToMarkdownOptions {
+      let options = HtmlToMarkdownOptions {
         plugins: Some(PluginConfig {
           frontmatter: frontmatter.then(FrontmatterConfig::default),
           extraction: extraction.then(|| ExtractionConfig::new(&["p"])),
@@ -3016,7 +3016,7 @@ fn metadata_plugins_do_not_retain_emitted_document() {
 fn metadata_plugins_preserve_streamed_output_and_records() {
   use mdream::types::{ExtractionConfig, FrontmatterConfig};
 
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       frontmatter: Some(FrontmatterConfig::default()),
       extraction: Some(ExtractionConfig::new(&["p", "strong", "script"])),
@@ -3079,7 +3079,7 @@ fn metadata_plugins_bound_pending_quotes_and_breaks() {
         ),
         ("", "<br>"),
       ] {
-        let options = HTMLToMarkdownOptions {
+        let options = HtmlToMarkdownOptions {
           plugins: Some(PluginConfig {
             frontmatter: frontmatter.then(FrontmatterConfig::default),
             extraction: extraction.then(|| ExtractionConfig::new(&["p"])),
@@ -3135,7 +3135,7 @@ fn metadata_quote_flush_and_break_deferral_preserve_output() {
   use mdream::types::{ExtractionConfig, FrontmatterConfig};
 
   for fragments in [false, true] {
-    let options = HTMLToMarkdownOptions {
+    let options = HtmlToMarkdownOptions {
       clean: Some(CleanConfig {
         fragments,
         ..Default::default()
@@ -3199,7 +3199,7 @@ fn metadata_quote_flush_and_break_deferral_preserve_output() {
 fn metadata_pending_output_cap_matches_one_shot() {
   use mdream::types::{ExtractionConfig, FrontmatterConfig};
 
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     max_node_bytes: 128,
     plugins: Some(PluginConfig {
       frontmatter: Some(FrontmatterConfig::default()),
@@ -3246,7 +3246,7 @@ fn metadata_pending_output_cap_matches_one_shot() {
 #[test]
 fn quote_long_line_waits_for_a_completed_line() {
   let span = format!("<span>{}</span>", "x".repeat(1024));
-  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   assert_eq!(processor.process_chunk("<blockquote>"), "");
   for _ in 0..1024 {
     assert_eq!(processor.process_chunk(&span), "");
@@ -3275,8 +3275,8 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
   ] {
     let html = format!("{prefix}{tail}");
     for options in [
-      HTMLToMarkdownOptions::default(),
-      HTMLToMarkdownOptions::default().with_wrap_width(40),
+      HtmlToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default().with_wrap_width(40),
     ] {
       let expected = html_to_markdown(&html, options.clone());
       let mut processor = MarkdownStreamProcessor::new(options);

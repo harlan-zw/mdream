@@ -1,17 +1,17 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
-use mdream::types::{CleanConfig, HTMLToMarkdownOptions, PluginConfig, TagOverrideConfig};
+use mdream::types::{CleanConfig, HtmlToMarkdownOptions, PluginConfig, TagOverrideConfig};
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
 fn md(html: &str) -> String {
-  html_to_markdown(html, HTMLToMarkdownOptions::default())
+  html_to_markdown(html, HtmlToMarkdownOptions::default())
 }
 
 fn text(html: &str) -> String {
-  html_to_text(html, HTMLToMarkdownOptions::default())
+  html_to_text(html, HtmlToMarkdownOptions::default())
 }
 
 fn md_streamed(html: &str, chunk: usize) -> String {
-  let mut p = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut out = String::new();
   for c in html.as_bytes().chunks(chunk) {
     out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
@@ -23,7 +23,7 @@ fn md_streamed(html: &str, chunk: usize) -> String {
 fn md_wrapped(html: &str, width: usize) -> String {
   html_to_markdown(
     html,
-    HTMLToMarkdownOptions::default().with_wrap_width(width),
+    HtmlToMarkdownOptions::default().with_wrap_width(width),
   )
 }
 
@@ -148,7 +148,7 @@ fn retracted_inline_marker_after_a_hard_break_keeps_the_blank_line() {
 }
 
 /// One-shot output, and streamed output at every chunk size, equal `expected`.
-fn assert_every_chunking(html: &str, options: &HTMLToMarkdownOptions, expected: &str) {
+fn assert_every_chunking(html: &str, options: &HtmlToMarkdownOptions, expected: &str) {
   assert_eq!(
     html_to_markdown(html, options.clone()),
     expected,
@@ -169,7 +169,7 @@ fn assert_every_chunking(html: &str, options: &HTMLToMarkdownOptions, expected: 
 fn output_after_a_hard_break_leaves_one_paragraph_separator() {
   // Output after the break reopens its line, so a block inside the item gets
   // the separator it gets without the break, never a second one.
-  let options = HTMLToMarkdownOptions::default();
+  let options = HtmlToMarkdownOptions::default();
   for (html, expected) in [
     ("<li>q<br>t<p>X", "- q  \n  t\n\n  X"),
     ("<li><p>q<br>t</p><p>X", "- q  \n  t\n\n  X"),
@@ -186,7 +186,7 @@ fn output_after_a_hard_break_leaves_one_paragraph_separator() {
     assert_every_chunking(html, &options, expected);
   }
   // A skipped link writes no brackets, but its text still follows the break.
-  let empty_links = HTMLToMarkdownOptions {
+  let empty_links = HtmlToMarkdownOptions {
     clean: Some(CleanConfig {
       empty_links: true,
       ..Default::default()
@@ -204,7 +204,7 @@ fn output_after_a_hard_break_leaves_one_paragraph_separator() {
 fn dropped_construct_after_a_hard_break_keeps_the_blank_line() {
   // Dropping an empty link rewinds the output to the break's line end, as an
   // empty inline pair does, even when the dropped part held a break of its own.
-  let empty_link_text = HTMLToMarkdownOptions {
+  let empty_link_text = HtmlToMarkdownOptions {
     clean: Some(CleanConfig {
       empty_link_text: true,
       ..Default::default()
@@ -280,7 +280,7 @@ fn wrapped_caption_text_owns_no_leading_space() {
 fn md_block_override(html: &str, tag: &str) -> String {
   html_to_markdown(
     html,
-    HTMLToMarkdownOptions {
+    HtmlToMarkdownOptions {
       plugins: Some(PluginConfig {
         tag_overrides: Some(vec![(
           tag.to_string(),

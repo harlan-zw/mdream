@@ -2,7 +2,7 @@
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
 use mdream::splitter::{split_markdown, html_to_markdown_chunks, SplitterOptions};
-use mdream::types::HTMLToMarkdownOptions;
+use mdream::types::HtmlToMarkdownOptions;
 
 #[derive(Arbitrary, Debug)]
 struct SplitterInput {
@@ -28,5 +28,5 @@ fuzz_target!(|input: SplitterInput| {
     let _ = split_markdown(&input.html, &split_opts);
 
     // Fuzz html_to_markdown_chunks end-to-end
-    let _ = html_to_markdown_chunks(&input.html, HTMLToMarkdownOptions::default(), &split_opts);
+    let _ = html_to_markdown_chunks(&input.html, HtmlToMarkdownOptions::default(), &split_opts);
 });

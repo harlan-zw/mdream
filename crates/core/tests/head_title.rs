@@ -1,12 +1,12 @@
 //! `<title>` is document metadata that browsers never render. The frontmatter
 //! plugin reads it; without the plugin it leaves no text in the output.
-use mdream::types::{FrontmatterConfig, HTMLToMarkdownOptions, PluginConfig};
+use mdream::types::{FrontmatterConfig, HtmlToMarkdownOptions, PluginConfig};
 use mdream::{MarkdownStreamProcessor, OutputFormat, html_to_format};
 
 const PAGE: &str = "<html><head><title>Page</title></head><body><p>Body</p></body></html>";
 
 fn stream(html: &str, chunk: usize) -> String {
-  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut out = String::new();
   for piece in html.as_bytes().chunks(chunk) {
     out.push_str(&processor.process_chunk(std::str::from_utf8(piece).unwrap()));
@@ -17,7 +17,7 @@ fn stream(html: &str, chunk: usize) -> String {
 
 #[test]
 fn title_text_is_dropped_without_frontmatter() {
-  let options = HTMLToMarkdownOptions::default;
+  let options = HtmlToMarkdownOptions::default;
   assert_eq!(
     html_to_format(PAGE, options(), OutputFormat::Markdown),
     "Body"
@@ -37,7 +37,7 @@ fn title_outside_head_is_dropped() {
   assert_eq!(
     html_to_format(
       "<p>a</p><title>T</title><p>b</p>",
-      HTMLToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default(),
       OutputFormat::Markdown
     ),
     "a\n\nb"
@@ -46,7 +46,7 @@ fn title_outside_head_is_dropped() {
 
 #[test]
 fn frontmatter_still_reads_the_title() {
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       frontmatter: Some(FrontmatterConfig::default()),
       ..Default::default()
@@ -61,7 +61,7 @@ fn frontmatter_still_reads_the_title() {
 
 #[test]
 fn extraction_still_reads_the_title() {
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       extraction: Some(mdream::ExtractionConfig::new(&["title"])),
       ..Default::default()
@@ -78,7 +78,7 @@ fn extraction_still_reads_the_title() {
 
 #[test]
 fn extraction_reads_the_title_with_frontmatter_on() {
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       frontmatter: Some(FrontmatterConfig::default()),
       extraction: Some(mdream::ExtractionConfig::new(&["title"])),

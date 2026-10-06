@@ -84,12 +84,12 @@ fn analyze(label: &str, html: &str) {
   let html_kb = usize_as_f64(html.len()) / 1024.0;
   let html_tokens = count_tokens_approx(html);
 
-  let default_md = mdream::html_to_markdown(html, mdream::types::HTMLToMarkdownOptions::default());
+  let default_md = mdream::html_to_markdown(html, mdream::types::HtmlToMarkdownOptions::default());
   let default_tokens = count_tokens_approx(&default_md);
 
   let minimal_clean_md = mdream::html_to_markdown(
     html,
-    mdream::types::HTMLToMarkdownOptions {
+    mdream::types::HtmlToMarkdownOptions {
       clean: Some(make_clean()),
       plugins: Some(make_minimal_plugins()),
       ..Default::default()

@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use mdream::MarkdownStreamProcessor;
 use mdream::html_to_markdown;
-use mdream::types::HTMLToMarkdownOptions;
+use mdream::types::HtmlToMarkdownOptions;
 
 // Counts every allocation request. `realloc` is deliberately left to the trait
 // default, which routes through `alloc`, so buffer growth is visible here.
@@ -56,7 +56,7 @@ const MAX_ALLOCATION_PER_BYTE: f64 = 64.0;
 /// Splits on char boundaries, so the helper stays valid if a case gains
 /// multibyte input. Each yielded chunk is dropped, as a wire consumer would.
 fn stream(html: &str) -> usize {
-  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut bytes = 0;
   let mut start = 0;
   while start < html.len() {
@@ -157,7 +157,7 @@ fn fastest<F: FnMut() -> usize>(mut run: F) -> Duration {
 fn streaming_cost_vs_one_shot() {
   for (label, html) in cases() {
     let streamed = fastest(|| stream(&html));
-    let one_shot = fastest(|| html_to_markdown(&html, HTMLToMarkdownOptions::default()).len());
+    let one_shot = fastest(|| html_to_markdown(&html, HtmlToMarkdownOptions::default()).len());
     let overhead = streamed.as_secs_f64() / one_shot.as_secs_f64().max(f64::MIN_POSITIVE);
     eprintln!("{label}: streamed {streamed:?}, one-shot {one_shot:?} ({overhead:.1}x)");
   }

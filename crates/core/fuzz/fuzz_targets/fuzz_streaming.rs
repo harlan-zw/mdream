@@ -3,7 +3,7 @@ use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
 use mdream::{
   MarkdownStreamProcessor, html_to_markdown,
-  types::{CleanConfig, HTMLToMarkdownOptions},
+  types::{CleanConfig, HtmlToMarkdownOptions},
 };
 
 #[derive(Arbitrary, Debug)]
@@ -14,7 +14,7 @@ struct StreamInput {
 fuzz_target!(|input: StreamInput| {
   // Fragment cleanup holds Markdown until finish, making one-shot parity valid.
   // The default streams below also check that draining never changes output.
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     clean: Some(CleanConfig {
       fragments: true,
       ..Default::default()
@@ -22,9 +22,9 @@ fuzz_target!(|input: StreamInput| {
     ..Default::default()
   };
   let mut processor = MarkdownStreamProcessor::new(options.clone());
-  let mut incremental = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut incremental = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut undrained = mdream::fuzz_bridge::new_drain_disabled(
-    HTMLToMarkdownOptions::default(),
+    HtmlToMarkdownOptions::default(),
     mdream::OutputFormat::Markdown,
   );
   let mut drained_output = String::new();

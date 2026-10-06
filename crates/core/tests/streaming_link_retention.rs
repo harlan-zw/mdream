@@ -16,7 +16,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mdream::MarkdownStreamProcessor;
-use mdream::types::{CleanConfig, HTMLToMarkdownOptions};
+use mdream::types::{CleanConfig, HtmlToMarkdownOptions};
 
 struct Tracking;
 
@@ -54,7 +54,7 @@ fn safe_clean() -> CleanConfig {
   }
 }
 
-fn assert_released(label: &str, unit: &str, iterations: usize, opts: HTMLToMarkdownOptions) {
+fn assert_released(label: &str, unit: &str, iterations: usize, opts: HtmlToMarkdownOptions) {
   let mut p = MarkdownStreamProcessor::new(opts);
   // Keep LIVE as the allocator's true process-wide total; resetting it would
   // make deallocations for pre-existing allocations underflow.
@@ -81,7 +81,7 @@ fn assert_released(label: &str, unit: &str, iterations: usize, opts: HTMLToMarkd
 fn completed_links_do_not_pin_yielded_output() {
   const ITERATIONS: usize = 50_000;
 
-  let clean = HTMLToMarkdownOptions {
+  let clean = HtmlToMarkdownOptions {
     clean: Some(safe_clean()),
     ..Default::default()
   };
@@ -96,7 +96,7 @@ fn completed_links_do_not_pin_yielded_output() {
       r#"<a href="https://example.com">https://example.com</a>"#,
     ),
   ] {
-    assert_released(label, unit, ITERATIONS, HTMLToMarkdownOptions::default());
+    assert_released(label, unit, ITERATIONS, HtmlToMarkdownOptions::default());
     assert_released(label, unit, ITERATIONS, clean.clone());
   }
 }

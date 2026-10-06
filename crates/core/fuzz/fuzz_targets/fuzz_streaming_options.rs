@@ -4,7 +4,7 @@ use libfuzzer_sys::fuzz_target;
 use mdream::types::*;
 use mdream::{MarkdownStreamProcessor, html_to_format_result};
 
-// The other streaming targets pin `HTMLToMarkdownOptions::default()`. This one
+// The other streaming targets pin `HtmlToMarkdownOptions::default()`. This one
 // drives the option-dependent rewrite paths (wrap, clean, plugins, plain text)
 // through chunk boundaries, where stored buffer offsets are rebased by the
 // drain and can drift relative to in-buffer rewrites.
@@ -47,7 +47,7 @@ fuzz_target!(|input: Input| {
     tag_overrides: None,
   };
 
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     origin: input
       .use_origin
       .then(|| "https://example.com/base/".to_string()),

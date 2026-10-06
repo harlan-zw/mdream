@@ -171,6 +171,50 @@ fn backtick_safety_prevents_code_block_split() {
   assert!(!chunks.is_empty());
 }
 
+#[test]
+fn size_splits_skip_separators_inside_fences() {
+  // The leading blank lines shift every offset after the splitter trims them.
+  // Each block holds a blank line, so the nearest `\n\n` is often inside a fence.
+  // A four-backtick fence holds one ``` run, plus one backtick that starts no run.
+  let md = "\n\n  Intro text before any code.\n\n```rust\nfn a() {}\n\nfn b() {}\n```\n\n\
+    Between the first two blocks.\n\n````md\n```\nnested\n```\n````\n\n\
+    An inline ``` marker in prose.\n\n```js\nlet x = 1;\n\nlet y = 2;\n```\n\n\
+    Closing words after the last block.\n```\nopen at the end\n\nstill open\n";
+  let opts = SplitterOptions {
+    chunk_size: 40,
+    chunk_overlap: 0,
+    ..default_opts()
+  };
+  let chunks: Vec<_> = split_markdown(md, &opts)
+    .iter()
+    .map(|c| {
+      let loc = c.metadata.loc.as_ref().unwrap();
+      (c.content.clone(), c.metadata.code.clone(), loc.from, loc.to)
+    })
+    .collect();
+  let expected = [
+    ("Intro text before any code.", Some("rust"), 1, 3),
+    ("```rust\nfn a() {}\n\nfn b() {}\n```", None, 3, 9),
+    ("Between the first two blocks.", Some("`md"), 9, 11),
+    ("````md\n```\nnested\n```\n````", None, 11, 17),
+    (
+      "An inline ``` marker in prose.\n\n```js",
+      Some("js"),
+      17,
+      20,
+    ),
+    (
+      "let x = 1;\n\nlet y = 2;\n```\n\nClosing words after the last block.",
+      None,
+      20,
+      26,
+    ),
+    ("```\nopen at the end\n\nstill open", None, 26, 30),
+  ]
+  .map(|(content, code, from, to)| (content.to_string(), code.map(str::to_string), from, to));
+  assert_eq!(chunks, expected);
+}
+
 // ── HR splitting ──
 
 #[test]
@@ -401,7 +445,7 @@ fn mixed_header_levels() {
 #[test]
 fn html_to_markdown_chunks_convenience() {
   let html = "<h2>Section A</h2><p>Content A</p><h2>Section B</h2><p>Content B</p>";
-  let md_opts = mdream::types::HTMLToMarkdownOptions::default();
+  let md_opts = mdream::types::HtmlToMarkdownOptions::default();
   let split_opts = default_opts();
   let chunks = mdream::splitter::html_to_markdown_chunks(html, md_opts, &split_opts);
   assert!(chunks.len() >= 2);

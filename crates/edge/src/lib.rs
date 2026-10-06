@@ -124,12 +124,12 @@ fn parse_clean(v: &JsValue) -> Option<mdream::types::CleanConfig> {
 fn parse_options(
   options: &JsValue,
 ) -> (
-  mdream::types::HTMLToMarkdownOptions,
+  mdream::types::HtmlToMarkdownOptions,
   mdream::types::OutputFormat,
 ) {
   if options.is_undefined() || options.is_null() {
     return (
-      mdream::types::HTMLToMarkdownOptions::default(),
+      mdream::types::HtmlToMarkdownOptions::default(),
       mdream::types::OutputFormat::Markdown,
     );
   }
@@ -162,7 +162,7 @@ fn parse_options(
     _ => mdream::types::OutputFormat::Markdown,
   };
 
-  let core_options = mdream::types::HTMLToMarkdownOptions {
+  let core_options = mdream::types::HtmlToMarkdownOptions {
     origin,
     clean,
     plugins,
@@ -459,11 +459,11 @@ impl MarkdownStream {
 #[cfg(test)]
 mod tests {
   use super::MarkdownStream;
-  use mdream::types::HTMLToMarkdownOptions;
+  use mdream::types::HtmlToMarkdownOptions;
 
   fn test_stream() -> MarkdownStream {
     MarkdownStream {
-      inner: mdream::MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default()),
+      inner: mdream::MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default()),
       tail: Vec::new(),
       at_start: true,
     }

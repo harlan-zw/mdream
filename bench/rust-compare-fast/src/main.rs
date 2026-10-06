@@ -51,7 +51,7 @@ fn main() {
         println!("--- {} ({} bytes) ---", label, html.len());
 
         let mdream_ms = bench("mdream", &html, |h| {
-            mdream::html_to_markdown(h, mdream::types::HTMLToMarkdownOptions::default())
+            mdream::html_to_markdown(h, mdream::types::HtmlToMarkdownOptions::default())
         }, *iterations).unwrap();
 
         let fast_ms = bench("fast_html2md", &html, |h| {

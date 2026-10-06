@@ -15,7 +15,7 @@ use convert::ConvertState;
 // pulls in everything needed to call `html_to_markdown` without reaching into
 // the `types` module.
 pub use types::{
-  CleanConfig, ExtractionConfig, FilterConfig, FrontmatterConfig, HTMLToMarkdownOptions,
+  CleanConfig, ExtractionConfig, FilterConfig, FrontmatterConfig, HtmlToMarkdownOptions,
   IsolateMainConfig, MdreamResult, OutputFormat, PluginConfig, TagOverrideConfig, TailwindConfig,
 };
 
@@ -25,43 +25,43 @@ pub use consts::get_tag_id;
 
 /// Convert HTML to Markdown in a single pass.
 #[cfg(feature = "markdown")]
-pub fn html_to_markdown(html: &str, options: HTMLToMarkdownOptions) -> String {
+pub fn html_to_markdown(html: &str, options: HtmlToMarkdownOptions) -> String {
   html_to_format(html, options, OutputFormat::Markdown)
 }
 
 /// Convert HTML to readable plain text in a single pass.
 #[cfg(feature = "text")]
-pub fn html_to_text(html: &str, options: HTMLToMarkdownOptions) -> String {
+pub fn html_to_text(html: &str, options: HtmlToMarkdownOptions) -> String {
   html_to_format(html, options, OutputFormat::Text)
 }
 
 /// Convert HTML to allowlisted semantic HTML in a single pass.
 #[cfg(feature = "html")]
-pub fn html_to_html(html: &str, options: HTMLToMarkdownOptions) -> String {
+pub fn html_to_html(html: &str, options: HtmlToMarkdownOptions) -> String {
   html_to_format(html, options, OutputFormat::Html)
 }
 
 /// Convert HTML to the requested output format in a single pass.
-pub fn html_to_format(html: &str, options: HTMLToMarkdownOptions, format: OutputFormat) -> String {
+pub fn html_to_format(html: &str, options: HtmlToMarkdownOptions, format: OutputFormat) -> String {
   html_to_format_result(html, options, format).markdown
 }
 
 /// Convert HTML to Markdown with full results (extraction, frontmatter).
 #[cfg(feature = "markdown")]
-pub fn html_to_markdown_result(html: &str, options: HTMLToMarkdownOptions) -> MdreamResult {
+pub fn html_to_markdown_result(html: &str, options: HtmlToMarkdownOptions) -> MdreamResult {
   html_to_format_result(html, options, OutputFormat::Markdown)
 }
 
 /// Convert HTML to plain text with full results (extraction, frontmatter).
 #[cfg(feature = "text")]
-pub fn html_to_text_result(html: &str, options: HTMLToMarkdownOptions) -> MdreamResult {
+pub fn html_to_text_result(html: &str, options: HtmlToMarkdownOptions) -> MdreamResult {
   html_to_format_result(html, options, OutputFormat::Text)
 }
 
 /// Convert HTML to the requested format with full results (extraction, frontmatter).
 pub fn html_to_format_result(
   html: &str,
-  options: HTMLToMarkdownOptions,
+  options: HtmlToMarkdownOptions,
   format: OutputFormat,
 ) -> MdreamResult {
   let capacity = (html.len() / 3).clamp(1024, 256 * 1024);
@@ -102,12 +102,12 @@ pub struct MarkdownStreamProcessor {
 
 impl MarkdownStreamProcessor {
   #[cfg(feature = "markdown")]
-  pub fn new(options: HTMLToMarkdownOptions) -> Self {
+  pub fn new(options: HtmlToMarkdownOptions) -> Self {
     Self::new_with_format(options, OutputFormat::Markdown)
   }
 
   /// Create a streaming converter for the requested output format.
-  pub fn new_with_format(options: HTMLToMarkdownOptions, format: OutputFormat) -> Self {
+  pub fn new_with_format(options: HtmlToMarkdownOptions, format: OutputFormat) -> Self {
     let mut state = ConvertState::new(options, 4096, format);
     // One-shot conversion does not pay for link hold bookkeeping.
     state.streaming = true;
@@ -119,7 +119,7 @@ impl MarkdownStreamProcessor {
 
   /// Like `new`, but with draining disabled (drain-transparency test only).
   #[cfg(test)]
-  pub(crate) fn new_drain_disabled(options: HTMLToMarkdownOptions) -> Self {
+  pub(crate) fn new_drain_disabled(options: HtmlToMarkdownOptions) -> Self {
     let mut me = Self::new(options);
     me.state.disable_drain = true;
     me
@@ -139,7 +139,7 @@ impl MarkdownStreamProcessor {
     self.state.get_markdown_chunk()
   }
 
-  /// Whether [`HTMLToMarkdownOptions::max_node_bytes`] has fired so far. `false`
+  /// Whether [`HtmlToMarkdownOptions::max_node_bytes`] has fired so far. `false`
   /// guarantees the output matches an uncapped conversion; `true` is conservative,
   /// since dropping an unemitted attribute costs no output.
   pub fn truncated(&self) -> bool {
@@ -172,10 +172,10 @@ impl MarkdownStreamProcessor {
 
 #[cfg(fuzzing)]
 pub mod fuzz_bridge {
-  use super::{HTMLToMarkdownOptions, MarkdownStreamProcessor, OutputFormat};
+  use super::{HtmlToMarkdownOptions, MarkdownStreamProcessor, OutputFormat};
 
   pub fn new_drain_disabled(
-    options: HTMLToMarkdownOptions,
+    options: HtmlToMarkdownOptions,
     format: OutputFormat,
   ) -> MarkdownStreamProcessor {
     let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
@@ -192,7 +192,7 @@ mod drain_equiv {
   //! that diverge from one-shot but must stay drain-invariant.
 
   use super::MarkdownStreamProcessor;
-  use super::types::{CleanConfig, HTMLToMarkdownOptions};
+  use super::types::{CleanConfig, HtmlToMarkdownOptions};
 
   const CORPUS: &[&str] = &[
     // Breadth: chunk-invariant cases.
@@ -216,7 +216,7 @@ mod drain_equiv {
     "<li><ul><li><ul><li><ul><li><ul><li><ul><li><p>q<br>\n<p>X",
   ];
 
-  fn stream(html: &str, chunk: usize, opts: HTMLToMarkdownOptions, disable_drain: bool) -> String {
+  fn stream(html: &str, chunk: usize, opts: HtmlToMarkdownOptions, disable_drain: bool) -> String {
     let mut p = if disable_drain {
       MarkdownStreamProcessor::new_drain_disabled(opts)
     } else {
@@ -247,9 +247,9 @@ mod drain_equiv {
   fn drain_is_byte_transparent() {
     for &html in CORPUS {
       for opts in [
-        HTMLToMarkdownOptions::default(),
-        HTMLToMarkdownOptions::default().with_wrap_width(12),
-        HTMLToMarkdownOptions {
+        HtmlToMarkdownOptions::default(),
+        HtmlToMarkdownOptions::default().with_wrap_width(12),
+        HtmlToMarkdownOptions {
           clean: Some(safe_clean()),
           ..Default::default()
         },
@@ -268,7 +268,7 @@ mod drain_equiv {
 
   #[test]
   fn closing_a_skipped_link_releases_the_yielded_prefix() {
-    let options = HTMLToMarkdownOptions {
+    let options = HtmlToMarkdownOptions {
       clean: Some(safe_clean()),
       ..Default::default()
     };
@@ -290,10 +290,10 @@ mod drain_equiv {
 #[cfg(test)]
 mod dropped_raw_text {
   use super::MarkdownStreamProcessor;
-  use super::types::HTMLToMarkdownOptions;
+  use super::types::HtmlToMarkdownOptions;
 
   fn stream(parts: &[&str], keep: bool) -> String {
-    let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
     processor.state.keep_dropped_raw_text = keep;
     let mut out = String::new();
     for part in parts {
@@ -362,10 +362,10 @@ mod dropped_raw_text {
 #[cfg(test)]
 mod ignored_declarations {
   use super::MarkdownStreamProcessor;
-  use super::types::HTMLToMarkdownOptions;
+  use super::types::HtmlToMarkdownOptions;
 
   pub(super) fn stream(parts: &[&str], cap: usize) -> (String, bool, usize) {
-    let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions {
       max_node_bytes: cap,
       ..Default::default()
     });
