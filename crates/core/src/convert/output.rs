@@ -1836,6 +1836,19 @@ impl ConvertState {
     {
       // Handle whitespace trimming (write_output with None)
       self.write_output(false, is_inline, configured_new_lines, None, false);
+      // That trim misses a space before an empty element (`<a>A <span></span></a>`).
+      let text_end = self.buffer.trim_end_matches(' ').len();
+      if self.link.bracket_emitted
+        && text_end > self.link.bracket_pos + 1
+        && text_end < self.buffer.len()
+        && !is_whitespace(self.buffer.as_bytes()[text_end - 1])
+        && self.code_spans.is_empty()
+      {
+        let removed = self.buffer.len() - text_end;
+        self.last_content_cache_len = self.last_content_cache_len.saturating_sub(removed);
+        self.truncate_buffer(text_end);
+        self.pending_inline_whitespace = true;
+      }
       let link_text_end = self.buffer.len();
       // Write link close directly
       if let Some(href) = node.attributes.get_bit(ATTR_HREF) {
@@ -1848,7 +1861,7 @@ impl ConvertState {
           let start = buf_len.saturating_sub(self.last_content_cache_len);
           if self.buffer.is_char_boundary(start) {
             let cache = &self.buffer[start..];
-            if cache == title {
+            if cache == title.trim_ascii_end() {
               title = "";
             }
           }
