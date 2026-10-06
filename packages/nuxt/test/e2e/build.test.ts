@@ -20,4 +20,12 @@ describe('nuxt-mdream build mode', async () => {
     expect(markdown).toContain('# Test Fixture')
     expect(markdown).toContain('test fixture for the mdream module')
   })
+
+  // The module default is { minimal: true }. Before v2 the default was
+  // { preset: 'minimal' }, which mdream never read.
+  it('applies the minimal preset by default', async () => {
+    const markdown = await $fetch<string>('/index.md')
+    expect(markdown).toMatch(/^---\ntitle: "Test Fixture"\n/)
+    expect(markdown).not.toContain('Fixture Nav Link')
+  })
 })

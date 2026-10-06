@@ -15,12 +15,8 @@ export default defineNuxtConfig({
   mdream: {
     enabled: true,
     mdreamOptions: {
-      // Use minimal preset with frontmatter extraction
-      preset: 'minimal',
-    },
-    cache: {
-      maxAge: 3600, // 1 hour
-      swr: true,
+      // Minimal preset with frontmatter extraction (the module default)
+      minimal: true,
     },
   },
 

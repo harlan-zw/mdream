@@ -12,10 +12,6 @@ declare module '@nuxt/schema' {
     mdream: {
       enabled: boolean
       mdreamOptions: Record<string, any>
-      cache: {
-        maxAge: number
-        swr: boolean
-      }
     }
   }
 
