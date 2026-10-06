@@ -17,6 +17,7 @@ import { resolve } from 'node:path'
 import htmlToMarkdownNode from '@kreuzberg/html-to-markdown-node'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '@mdream/js'
 import { withMinimalPreset } from '@mdream/js/preset/minimal'
+import { htmlToMarkdownSplitChunks } from '@mdream/js/splitter'
 import { htmlToMarkdown as mdreamRust, streamHtmlToMarkdown as mdreamRustStream_ } from 'mdream'
 import { NodeHtmlMarkdown } from 'node-html-markdown'
 import rehypeParse from 'rehype-parse'
@@ -206,6 +207,24 @@ it('with LLM Preset - Large HTML (1.8 MB)', async ({ bench }) => {
     }),
 
     bench('mdream (no plugins)', () => {
+      htmlToMarkdown(wikiLarge)
+    }),
+  )
+})
+
+// The splitter converts and then chunks, so compare it with conversion alone.
+// A chunk pass that grows faster than the document shows here first.
+it('splitter - Large HTML (1.8 MB)', async ({ bench }) => {
+  await bench.compare(
+    bench('mdream (split chunks)', () => {
+      htmlToMarkdownSplitChunks(wikiLarge)
+    }),
+
+    bench('mdream (split chunks, minimal preset)', () => {
+      htmlToMarkdownSplitChunks(wikiLarge, minimalOptions)
+    }),
+
+    bench('mdream (convert only)', () => {
       htmlToMarkdown(wikiLarge)
     }),
   )
