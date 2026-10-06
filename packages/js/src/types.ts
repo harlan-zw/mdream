@@ -503,11 +503,11 @@ export interface MarkdownChunk {
  */
 export interface SplitterOptions extends MdreamOptions {
   /**
-   * Header tag IDs to split on (TAG_H1, TAG_H2, etc.)
-   * @example [TAG_H1, TAG_H2]
-   * @default [TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6]
+   * Heading levels that start a new chunk, from 1 (`<h1>`) to 6 (`<h6>`).
+   * @example [1, 2]
+   * @default [2, 3, 4, 5, 6]
    */
-  headersToSplitOn?: number[]
+  headersToSplitOn?: (1 | 2 | 3 | 4 | 5 | 6)[]
 
   /**
    * Return each line as individual chunk

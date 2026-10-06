@@ -46,7 +46,7 @@ export function streamHtmlToMarkdown(
   return _streamHtmlToMarkdown(htmlStream, options, resolvePlugins(options.plugins), tagOverrideHandlers)
 }
 
-export { ELEMENT_NODE, NodeEventEnter, NodeEventExit, TAG_H1, TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6, TEXT_NODE } from './const'
+export { ELEMENT_NODE, NodeEventEnter, NodeEventExit, TEXT_NODE } from './const'
 export { createPlugin } from './pluggable/plugin'
 export type { ExtractedElement } from './plugins/extraction'
 export type { MdreamOptions } from './types'
