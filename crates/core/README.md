@@ -70,18 +70,26 @@ A build with one format drops the code for the others. `OutputFormat` keeps only
 
 ## Migrating from v1
 
-The v2 crate changes `Attributes` and `ElementNode` in [#216](https://github.com/harlan-zw/mdream/pull/216).
-Conversion functions keep their options. If you access parser nodes directly, update these calls:
+Conversion functions keep their signatures. Update code that uses the items below.
+These changes also apply when you upgrade from `2.0.0-beta.1`.
 
-| v1 access | v2 access |
+| v1 code | v2 code |
 |---|---|
-| Attribute capacity allocation | `Attributes::new()`, then `reserve(capacity)` |
-| Insert a known attribute by name | `insert_known(ATTR_HREF, value)` using the matching `ATTR_*` constant |
-| Insert a custom attribute | `insert_custom(name.into(), value)` with a lowercase name |
-| Attribute iteration | `iter()` yields `(&str, &str)` |
-| `node.custom_name` | `node.custom_name()` |
-| `node.tailwind` | `node.tailwind()`; write with `node.set_tailwind(data)` |
-| `usize` node indices | `index`, `current_walk_index`, and `child_text_node_index` use `u32` |
+| `mdream::consts::get_tag_id("em")` | `mdream::get_tag_id("em")` |
+| `mdream::consts::TAG_*`, `ATTR_*`, and the other constants | No replacement. Resolve a tag name with `get_tag_id`. |
+| `ElementNode`, `Attributes`, `Attr`, `TagHandler`, `NodeExtras`, `TailwindData`, `ParsedSelector` | No replacement. The parser types are private. |
+| `HTMLToMarkdownOptions { clean_urls: true, .. }` | `HTMLToMarkdownOptions { clean: Some(CleanConfig { urls: true, ..Default::default() }), .. }` |
+| `.with_clean_urls()` | `.with_clean(CleanConfig { urls: true, ..Default::default() })` |
+| `CleanConfig { blank_lines: true, .. }` | Delete the field. It had no effect. |
+| `SplitterOptions { headers_to_split_on: vec![TAG_H2, TAG_H3], .. }` | `SplitterOptions { headers_to_split_on: vec![2, 3], .. }` |
+
+`headers_to_split_on` takes heading levels 1 to 6. The splitter ignores other values, so an old heading tag ID splits nothing.
+
+`OutputFormat` is `#[non_exhaustive]`, so a `match` on it needs a `_` arm.
+Each variant follows a cargo feature, and another crate in your build can turn a feature on.
+
+`MdreamResult`, `ExtractedElement`, `MarkdownChunk`, `ChunkMetadata`, and `ChunkLoc` are `#[non_exhaustive]`.
+You can read their fields. You cannot build them with a struct literal, and a pattern that destructures them needs `..`.
 
 `<title>` text no longer appears in the body. Enable frontmatter or extraction to read it.
 Review snapshots that relied on the title as visible text.
