@@ -151,7 +151,6 @@ Reference the action outputs in subsequent steps:
 | `description` | Yes | | Description of your site content. Rendered as a blockquote below the site name. |
 | `origin` | Yes | | Base URL of your site (e.g., `https://mysite.com`). Used to construct full page URLs. |
 | `output` | No | `.` | Output directory for generated files. Created recursively if it does not exist. |
-| `chunk-size` | No | `4096` | Chunk size for streaming processing. |
 | `verbose` | No | `false` | Enable verbose logging. Prints configuration values to the action log. |
 
 ### Outputs
