@@ -6,10 +6,6 @@ import {
   NodeEventEnter,
   NodeEventExit,
   TAG_H1,
-  TAG_H2,
-  TAG_H3,
-  TAG_H4,
-  TAG_H5,
   TAG_H6,
   TAG_HR,
   TEXT_NODE,
@@ -26,17 +22,33 @@ import { trimOutputStart } from './utils'
 
 const MARKDOWN_HEADER_LINE_RE = /^#{1,6}\s+/
 
-const DEFAULT_HEADERS_TO_SPLIT_ON: number[] = [
-  TAG_H2,
-  TAG_H3,
-  TAG_H4,
-  TAG_H5,
-  TAG_H6,
-]
+// Bit `level - 1` is set for each heading level that starts a new chunk.
+// TAG_H1 to TAG_H6 are consecutive, so bit `tagId - TAG_H1` is the same bit.
+const DEFAULT_SPLIT_HEADINGS = 0b111110
+
+const HEADING_LEVELS_ERROR = 'headersToSplitOn takes heading levels from 1 to 6, such as [2, 3]. '
+  + '@mdream/js no longer exports the TAG_H* constants.'
+
+/** Parse heading levels once, so a stale TAG_H* id fails before conversion. */
+function headingSplitMask(levels: unknown): number {
+  if (levels == null)
+    return DEFAULT_SPLIT_HEADINGS
+  if (!Array.isArray(levels))
+    throw new TypeError(HEADING_LEVELS_ERROR)
+  let mask = 0
+  for (let index = 0; index < levels.length; index++) {
+    const level = levels[index]
+    if (!Number.isInteger(level) || level < 1 || level > 6)
+      throw new TypeError(HEADING_LEVELS_ERROR)
+    mask |= 1 << (level - 1)
+  }
+  return mask
+}
 
 function createOptions(options: SplitterOptions) {
   return {
-    headersToSplitOn: options.headersToSplitOn ?? DEFAULT_HEADERS_TO_SPLIT_ON,
+    // Parsed first, so a bad level throws before any plugin setup runs.
+    splitHeadings: headingSplitMask(options.headersToSplitOn),
     returnEachLine: options.returnEachLine ?? false,
     stripHeaders: options.stripHeaders ?? true,
     chunkSize: options.chunkSize ?? 1000,
@@ -50,8 +62,9 @@ function createOptions(options: SplitterOptions) {
   }
 }
 
+/** `tagId` is a heading tag id, from TAG_H1 to TAG_H6. */
 function shouldSplitOnHeader(tagId: number, options: ReturnType<typeof createOptions>): boolean {
-  return options.headersToSplitOn.includes(tagId)
+  return (options.splitHeadings & (1 << (tagId - TAG_H1))) !== 0
 }
 
 /** Whether `code` is whitespace the converter writes between blocks. */

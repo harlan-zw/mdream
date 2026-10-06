@@ -1,4 +1,4 @@
-import type { ElementNode, MdreamOptions } from '../../src/types'
+import type { ElementNode, MdreamOptions, MdreamRuntimeState } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { ELEMENT_NODE, NodeEventEnter, NodeEventExit } from '../../src/index'
 import { createPlugin } from '../../src/pluggable/plugin'
@@ -14,14 +14,14 @@ function chunkedStream(html: string, chunkSize: number): ReadableStream<string> 
   })
 }
 
-// Plugins receive the runtime state, so a plugin can see how much output the
-// stream still holds when each text node arrives.
+// At runtime, hooks get the converter's own state. Through the internal type,
+// a probe can see how much output the stream still holds at each text node.
 function bufferProbe() {
   const probe = { largest: 0 }
   const plugin = createPlugin({
     processTextNode(_node, state) {
       let size = 0
-      for (const fragment of state.buffer)
+      for (const fragment of (state as MdreamRuntimeState).buffer)
         size += fragment.length
       if (size > probe.largest)
         probe.largest = size
@@ -36,7 +36,7 @@ describe('text stream', () => {
     const plugin = createPlugin({
       onNodeEnter(node, state) {
         if (node.name === 'x-rewrite')
-          state.buffer[0] = ''
+          (state as MdreamRuntimeState).buffer[0] = ''
       },
     })
     const html = '<p>aa<span>bb</span><span>dd</span><x-rewrite></x-rewrite> cc</p>'

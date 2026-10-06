@@ -1,4 +1,5 @@
-import { htmlToMarkdown, TAG_H1, TAG_H2 } from '@mdream/js'
+import type { SplitterOptions } from '@mdream/js/splitter'
+import { htmlToMarkdown } from '@mdream/js'
 import { clean } from '@mdream/js/clean'
 import { withMinimalPreset } from '@mdream/js/preset/minimal'
 import { htmlToMarkdownSplitChunks, htmlToMarkdownSplitChunksStream } from '@mdream/js/splitter'
@@ -20,7 +21,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     `
 
     const chunks = htmlToMarkdownSplitChunks(html, {
-      headersToSplitOn: [TAG_H2],
+      headersToSplitOn: [2],
     })
 
     expect(chunks.length).toBeGreaterThan(0)
@@ -31,6 +32,21 @@ describe('htmlToMarkdownSplitChunks', () => {
     expect(lastChunk.metadata.headers?.h3).toBe('Subsection')
   })
 
+  it('splits on the heading levels it gets', () => {
+    const html = '<h1>A</h1><p>a</p><h1>B</h1><p>b</p><h6>C</h6><p>c</p><h6>D</h6><p>d</p>'
+    const contents = (options?: SplitterOptions) => htmlToMarkdownSplitChunks(html, options).map(chunk => chunk.content)
+
+    expect(contents()).toEqual(['a\n\n\nb\n\n\nc', 'd'])
+    expect(contents({ headersToSplitOn: [1] })).toEqual(['a', 'b\n\n\nc\n\n\nd'])
+  })
+
+  it.each([8, 0, 7, 2.5, '2', null])('rejects %j as a heading level', (level) => {
+    const split = () => htmlToMarkdownSplitChunks('<h2>A</h2>', { headersToSplitOn: [level as 2] })
+
+    expect(split).toThrow(TypeError)
+    expect(split).toThrow('headersToSplitOn takes heading levels from 1 to 6, such as [2, 3].')
+  })
+
   it('strips headers from content when stripHeaders is true', () => {
     const html = `
       <h2>Section</h2>
@@ -39,7 +55,7 @@ describe('htmlToMarkdownSplitChunks', () => {
 
     const chunks = htmlToMarkdownSplitChunks(html, {
       stripHeaders: true,
-      headersToSplitOn: [TAG_H2],
+      headersToSplitOn: [2],
     })
 
     expect(chunks.length).toBeGreaterThan(0)
@@ -55,7 +71,7 @@ describe('htmlToMarkdownSplitChunks', () => {
 
     const chunks = htmlToMarkdownSplitChunks(html, {
       stripHeaders: false,
-      headersToSplitOn: [TAG_H2],
+      headersToSplitOn: [2],
     })
 
     expect(chunks.length).toBeGreaterThan(0)
@@ -202,7 +218,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     `
 
     const chunks = htmlToMarkdownSplitChunks(html, {
-      headersToSplitOn: [TAG_H2],
+      headersToSplitOn: [2],
     })
 
     expect(chunks.length).toBeGreaterThan(0)
@@ -225,7 +241,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     `
 
     const chunks = htmlToMarkdownSplitChunks(html, {
-      headersToSplitOn: [TAG_H2],
+      headersToSplitOn: [2],
     })
 
     expect(chunks.length).toBeGreaterThan(1)
@@ -264,7 +280,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     `
 
     const chunks = htmlToMarkdownSplitChunks(html, {
-      headersToSplitOn: [TAG_H2],
+      headersToSplitOn: [2],
     })
 
     expect(chunks.length).toBeGreaterThan(2)
@@ -363,7 +379,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         stripHeaders: false,
       })
 
@@ -385,7 +401,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       expect(chunks[0].metadata.headers?.h1).toBe('Level 1')
@@ -404,7 +420,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         stripHeaders: false,
       })
 
@@ -480,7 +496,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       expect(chunks.length).toBe(2)
@@ -495,7 +511,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       expect(chunks[0].metadata.headers?.h2).toBe('Section & Title <tag>')
@@ -516,7 +532,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       expect(chunks.length).toBeGreaterThan(0)
@@ -538,7 +554,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         stripHeaders: false,
       })
 
@@ -555,7 +571,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         stripHeaders: false,
       })
 
@@ -572,7 +588,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       expect(chunks.length).toBeGreaterThan(0)
@@ -587,7 +603,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         stripHeaders: false,
       })
 
@@ -607,7 +623,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         stripHeaders: false,
       })
 
@@ -638,7 +654,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       expect(chunks.length).toBeGreaterThan(2)
@@ -661,7 +677,7 @@ describe('htmlToMarkdownSplitChunks', () => {
 
       const chunks = htmlToMarkdownSplitChunks(html, {
         returnEachLine: true,
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         stripHeaders: false,
       })
 
@@ -693,7 +709,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H1],
+        headersToSplitOn: [1],
       })
 
       expect(chunks.length).toBe(3)
@@ -713,7 +729,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       expect(chunks[0].metadata.headers?.h2).toBe('Nested Bold Italic')
@@ -730,7 +746,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       // Should have h1, h2, and both h3s in metadata
@@ -749,7 +765,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         origin: 'https://example.com',
       })
 
@@ -768,7 +784,7 @@ describe('htmlToMarkdownSplitChunks', () => {
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       expect(chunks[0].content).toContain('Term 1')
@@ -783,7 +799,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       expect(chunks[0].content).toContain('This is preformatted text')
@@ -798,7 +814,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       expect(chunks.length).toBe(2)
@@ -816,7 +832,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       expect(chunks.length).toBe(2)
@@ -833,8 +849,8 @@ with preserved   spacing</pre>
         <p>Content</p>
       `
 
-      const chunks1 = htmlToMarkdownSplitChunks(html, { headersToSplitOn: [TAG_H2] })
-      const chunks2 = htmlToMarkdownSplitChunks(html, { headersToSplitOn: [TAG_H2] })
+      const chunks1 = htmlToMarkdownSplitChunks(html, { headersToSplitOn: [2] })
+      const chunks2 = htmlToMarkdownSplitChunks(html, { headersToSplitOn: [2] })
 
       expect(chunks1).toEqual(chunks2)
     })
@@ -849,7 +865,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       expect(chunks[0].content.trim()).toBe('Content')
@@ -868,7 +884,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       })
 
       expect(chunks[0].content).toContain('Deeply nested content')
@@ -892,7 +908,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         stripHeaders: false,
       }))
 
@@ -914,7 +930,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         stripHeaders: false,
       }))
 
@@ -940,7 +956,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         stripHeaders: false,
       }))
 
@@ -970,7 +986,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         stripHeaders: false,
       }))
 
@@ -993,7 +1009,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         stripHeaders: false,
       }))
 
@@ -1016,7 +1032,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         chunkSize: 100,
         chunkOverlap: 20,
       }))
@@ -1037,7 +1053,7 @@ with preserved   spacing</pre>
 
       const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
         origin: 'https://example.com',
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
       }))
 
       expect(chunks.length).toBeGreaterThan(0)
@@ -1065,7 +1081,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         stripHeaders: false,
       }))
 
@@ -1123,7 +1139,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         origin: 'https://example.com',
         stripHeaders: false,
       }))
@@ -1189,7 +1205,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         chunkOverlap: 100, // Large overlap
         stripHeaders: false,
       })
@@ -1263,7 +1279,7 @@ with preserved   spacing</pre>
       `
 
       const chunks = htmlToMarkdownSplitChunks(html, {
-        headersToSplitOn: [TAG_H2],
+        headersToSplitOn: [2],
         chunkSize: 1000,
         chunkOverlap: 100,
         stripHeaders: false,
@@ -1350,7 +1366,7 @@ describe('htmlToMarkdownSplitChunksStream', () => {
 
     const chunks = []
     for (const chunk of htmlToMarkdownSplitChunksStream(html, {
-      headersToSplitOn: [TAG_H2],
+      headersToSplitOn: [2],
     })) {
       chunks.push(chunk)
     }
@@ -1371,14 +1387,14 @@ describe('htmlToMarkdownSplitChunksStream', () => {
     `
 
     const arrayChunks = htmlToMarkdownSplitChunks(html, {
-      headersToSplitOn: [TAG_H2],
+      headersToSplitOn: [2],
       chunkSize: 500,
       chunkOverlap: 50,
     })
 
     const streamChunks = []
     for (const chunk of htmlToMarkdownSplitChunksStream(html, {
-      headersToSplitOn: [TAG_H2],
+      headersToSplitOn: [2],
       chunkSize: 500,
       chunkOverlap: 50,
     })) {
@@ -1400,7 +1416,7 @@ describe('htmlToMarkdownSplitChunksStream', () => {
 
     const chunks = []
     for (const chunk of htmlToMarkdownSplitChunksStream(html, {
-      headersToSplitOn: [TAG_H2],
+      headersToSplitOn: [2],
     })) {
       chunks.push(chunk)
       if (chunks.length === 2) {
@@ -1438,7 +1454,7 @@ describe('htmlToMarkdownSplitChunksStream', () => {
 
     const chunks = []
     for (const chunk of htmlToMarkdownSplitChunksStream(html, {
-      headersToSplitOn: [TAG_H2],
+      headersToSplitOn: [2],
     })) {
       chunks.push(chunk)
     }
@@ -1459,7 +1475,7 @@ describe('htmlToMarkdownSplitChunksStream', () => {
 
     const chunks = []
     for (const chunk of htmlToMarkdownSplitChunksStream(html, withMinimalPreset({
-      headersToSplitOn: [TAG_H2],
+      headersToSplitOn: [2],
     }))) {
       chunks.push(chunk)
     }

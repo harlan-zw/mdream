@@ -4,6 +4,7 @@ import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { extractionPlugin } from '../../src/plugins/extraction'
 import { frontmatterPlugin } from '../../src/plugins/frontmatter'
+import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText, streamHtmlToText } from '../../src/text'
 
 describe('stream callbacks', () => {
@@ -36,6 +37,28 @@ describe('stream callbacks', () => {
     expect(output).toBe(expected)
     expect(entered).toEqual([1, 2, 1, 2])
     expect(depths).toEqual([1, 1])
+  })
+
+  it.each([
+    ['markdown', htmlToMarkdown, streamHtmlToMarkdown],
+    ['text', htmlToText, streamHtmlToText],
+    ['html', htmlToSafeHtml, streamHtmlToSafeHtml],
+  ] as const)('gives %s plugins the whole state for an empty document', async (format, convert, streamConvert) => {
+    const seen: unknown[] = []
+    const plugins = [createPlugin({
+      onDocumentEnd(state) {
+        seen.push({ origin: state.options.origin, outputFormat: state.outputFormat, depth: state.depth })
+      },
+    })]
+    const options = { origin: 'https://example.com', plugins }
+    convert('', options)
+    for await (const _chunk of streamConvert(new ReadableStream<string>({ start: controller => controller.close() }), options)) {
+      // An empty document yields nothing.
+    }
+    if (format === 'markdown')
+      htmlToMarkdownSplitChunks('', options)
+    const state = { origin: 'https://example.com', outputFormat: format, depth: 0 }
+    expect(seen).toEqual(format === 'markdown' ? [state, state, state] : [state, state])
   })
   it('exposes parsed element depth to extraction callbacks', () => {
     let depth = 0

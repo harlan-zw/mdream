@@ -1,4 +1,4 @@
-import type { ElementNode, MdreamRuntimeState, PluginSetup, TransformPlugin } from '../types'
+import type { ElementNode, PluginSetup, PluginState, TransformPlugin } from '../types'
 import { parseSelector } from '../libs/query-selector'
 import { createPlugin } from '../pluggable/plugin'
 
@@ -6,7 +6,7 @@ export interface ExtractedElement extends ElementNode {
   textContent: string
 }
 
-type ExtractionCallback = (element: ExtractedElement, state: MdreamRuntimeState) => void
+type ExtractionCallback = (element: ExtractedElement, state: PluginState) => void
 
 /** Extract matching elements through the composable JavaScript plugin interface. */
 export function extractionPlugin(selectors: Record<string, ExtractionCallback>): PluginSetup {

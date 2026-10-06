@@ -1,6 +1,6 @@
 import type { ElementNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
-import { ELEMENT_NODE, NodeEventEnter, TAG_NAV } from '../../src/const'
+import { ELEMENT_NODE, NodeEventEnter } from '../../src/const'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createPlugin } from '../../src/pluggable/plugin'
 import { filterPlugin } from '../../src/plugins/filter'
@@ -52,7 +52,7 @@ describe('root conversion', () => {
 
   it('applies explicit plugins', () => {
     expect(htmlToMarkdown('<nav>hidden</nav><p>shown</p>', {
-      plugins: [filterPlugin({ exclude: [TAG_NAV] })],
+      plugins: [filterPlugin({ exclude: ['nav'] })],
     })).toBe('shown')
   })
 
@@ -105,6 +105,15 @@ describe('plugin reuse', () => {
     const shared = withMinimalPreset()
     for (const page of pages)
       expect(htmlToMarkdown(page, shared)).toBe(htmlToMarkdown(page, withMinimalPreset()))
+  })
+
+  it('passes splitter options through the preset', () => {
+    const chunks = htmlToMarkdownSplitChunks(
+      '<nav>menu</nav><h2>One</h2><p>first</p><h2>Two</h2><p>second</p>',
+      withMinimalPreset({ headersToSplitOn: [2], stripHeaders: false }),
+    )
+    expect(chunks.map(chunk => chunk.metadata.headers)).toEqual([{ h2: 'One' }, { h2: 'Two' }])
+    expect(chunks.some(chunk => chunk.content.includes('menu'))).toBe(false)
   })
 
   it('keeps concurrent streams that share plugins apart', async () => {

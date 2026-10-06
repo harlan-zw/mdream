@@ -10,8 +10,8 @@ import { htmlToMarkdown as _rustHtmlToMarkdown, streamHtmlToMarkdown as _rustStr
 
 interface TestBuiltinPlugins {
   filter?: {
-    include?: (string | number)[]
-    exclude?: (string | number)[]
+    include?: string[]
+    exclude?: string[]
     processChildren?: boolean
   }
   frontmatter?: boolean | ((frontmatter: Record<string, string>) => void) | FrontmatterPluginOptions
@@ -25,139 +25,6 @@ interface TestOptions extends EngineOptions {
   format?: 'markdown' | 'text' | 'html'
   plugins?: TestBuiltinPlugins | TransformPlugin[]
   hooks?: TransformPlugin[]
-}
-
-// Reverse map: TAG_* integer → tag name string (for Rust engine compatibility)
-const TAG_ID_TO_NAME: string[] = [
-  'html',
-  'head',
-  'details',
-  'summary',
-  'title',
-  'meta',
-  'br',
-  'h1',
-  'h2',
-  'h3',
-  'h4',
-  'h5',
-  'h6',
-  'hr',
-  'strong',
-  'b',
-  'em',
-  'i',
-  'del',
-  'sub',
-  'sup',
-  'ins',
-  'blockquote',
-  'code',
-  'ul',
-  'li',
-  'a',
-  'img',
-  'table',
-  'thead',
-  'tr',
-  'th',
-  'td',
-  'ol',
-  'pre',
-  'p',
-  'div',
-  'span',
-  'tbody',
-  'tfoot',
-  'form',
-  'nav',
-  'label',
-  'button',
-  'body',
-  'center',
-  'kbd',
-  'footer',
-  'path',
-  'svg',
-  'article',
-  'section',
-  'script',
-  'style',
-  'link',
-  'area',
-  'base',
-  'col',
-  'embed',
-  'input',
-  'keygen',
-  'param',
-  'source',
-  'track',
-  'wbr',
-  'select',
-  'textarea',
-  'option',
-  'fieldset',
-  'legend',
-  'audio',
-  'video',
-  'canvas',
-  'iframe',
-  'map',
-  'dialog',
-  'meter',
-  'progress',
-  'template',
-  'abbr',
-  'mark',
-  'q',
-  'samp',
-  'small',
-  'noscript',
-  'noframes',
-  'xmp',
-  'plaintext',
-  'aside',
-  'u',
-  'cite',
-  'dfn',
-  'var',
-  'time',
-  'bdo',
-  'ruby',
-  'rt',
-  'rp',
-  'dd',
-  'dt',
-  'address',
-  'dl',
-  'figure',
-  'object',
-  'main',
-  'header',
-  'figcaption',
-  'caption',
-  'datalist',
-  'optgroup',
-  's',
-  'strike',
-]
-
-function convertFilterForRust(filter: any): RustMdreamOptions['filter'] {
-  const result: any = {}
-  if (filter.exclude) {
-    result.exclude = filter.exclude.map((v: number | string) =>
-      typeof v === 'number' ? (TAG_ID_TO_NAME[v] || String(v)) : v,
-    )
-  }
-  if (filter.include) {
-    result.include = filter.include.map((v: number | string) =>
-      typeof v === 'number' ? (TAG_ID_TO_NAME[v] || String(v)) : v,
-    )
-  }
-  if (filter.processChildren != null)
-    result.processChildren = filter.processChildren
-  return result
 }
 
 // Convert EngineOptions (plugins-based) to flat RustMdreamOptions
@@ -177,7 +44,7 @@ function toFlatOptions(options?: TestOptions): Partial<RustMdreamOptions> {
     if (p.tailwind != null)
       flat.tailwind = p.tailwind
     if (p.filter != null)
-      flat.filter = convertFilterForRust(p.filter)
+      flat.filter = p.filter
     if (p.extraction != null)
       flat.extraction = p.extraction as RustMdreamOptions['extraction']
     if (p.tagOverrides != null)

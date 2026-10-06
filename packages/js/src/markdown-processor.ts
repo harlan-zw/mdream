@@ -60,7 +60,7 @@ import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlo
 
 export interface MarkdownState {
   /** Configuration options for conversion */
-  options?: EngineOptions
+  options: EngineOptions
   /** Active output format for plugins. */
   outputFormat: 'markdown'
   /** Content buffer for markdown output */
@@ -85,8 +85,8 @@ export interface MarkdownState {
   tableHeaderCells?: number
   /** Map of tag names to their current nesting depth */
   depthMap: Uint16Array
-  /** Current depth for plugin access */
-  depth?: number
+  /** Nesting depth of the current node, for plugins. */
+  depth: number
   /** Context for additional data */
   context?: PluginContext
   /**
@@ -1334,6 +1334,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     buffer: [],
     outputPositions: undefined,
     depthMap: new Uint16Array(MAX_TAG_ID),
+    depth: 0,
     listIndent: '',
     listIndentWidths: [],
     blockquotes: [],

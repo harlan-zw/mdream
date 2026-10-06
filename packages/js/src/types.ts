@@ -1,5 +1,18 @@
 import type { OutputPositions } from './output-positions'
 
+/**
+ * Conversion state that each plugin hook receives. The converter owns it:
+ * read it in a hook, and keep plugin data on `node.context` or in the plugin.
+ */
+export interface PluginState {
+  /** Options passed to the converter. */
+  readonly options: Readonly<EngineOptions>
+  /** Output that the running converter writes. */
+  readonly outputFormat: OutputFormat
+  /** Nesting depth of the current node. It is 0 before the first node. */
+  readonly depth: number
+}
+
 /** Composable JavaScript conversion plugin. */
 export interface TransformPlugin {
   /**
@@ -11,23 +24,23 @@ export interface TransformPlugin {
   /**
    * Process a node before it's handled by the parser
    */
-  beforeNodeProcess?: (event: NodeEvent, state: MdreamRuntimeState) => undefined | void | { skip: boolean }
+  beforeNodeProcess?: (event: NodeEvent, state: PluginState) => undefined | void | { skip: boolean }
 
   /**
    * Hook that runs when entering a node
    * @returns String to add to the output, or PluginHookResult with content
    */
-  onNodeEnter?: (node: ElementNode, state: MdreamRuntimeState) => string | undefined | void
+  onNodeEnter?: (node: ElementNode, state: PluginState) => string | undefined | void
 
   /**
    * Hook that runs when exiting a node
    */
-  onNodeExit?: (node: ElementNode, state: MdreamRuntimeState) => string | undefined | void
+  onNodeExit?: (node: ElementNode, state: PluginState) => string | undefined | void
 
   /**
    * Process attributes for a node
    */
-  processAttributes?: (node: ElementNode, state: MdreamRuntimeState) => void
+  processAttributes?: (node: ElementNode, state: PluginState) => void
 
   /**
    * Process a text node before it's added to the output
@@ -35,13 +48,13 @@ export interface TransformPlugin {
    */
   processTextNode?: (
     node: TextNode,
-    state: MdreamRuntimeState,
+    state: PluginState,
   ) => { content: string, skip: boolean } | undefined
 
   /**
    * Runs once after the whole document is converted, including for streams.
    */
-  onDocumentEnd?: (state: MdreamRuntimeState) => void
+  onDocumentEnd?: (state: PluginState) => void
 }
 
 /**
@@ -248,6 +261,7 @@ export interface Node {
 /**
  * State interface for HTML parsing and processing
  * Contains parsing state that's maintained during HTML traversal
+ * @internal
  */
 export interface MdreamProcessingState {
   /** Map of tag names to their current nesting depth - uses TypedArray for performance */
@@ -282,15 +296,6 @@ export interface MdreamProcessingState {
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
 
-  /** @deprecated No longer read or written. Retained for source compatibility. */
-  inSingleQuote?: boolean
-  /** @deprecated No longer read or written. Retained for source compatibility. */
-  inDoubleQuote?: boolean
-  /** @deprecated No longer read or written. Retained for source compatibility. */
-  inBacktick?: boolean
-  /** @deprecated No longer read or written. Retained for source compatibility. */
-  lastCharWasBackslash?: boolean
-
   /** Resolved plugin instances for efficient iteration */
   resolvedPlugins?: TransformPlugin[]
 
@@ -299,20 +304,24 @@ export interface MdreamProcessingState {
 }
 
 /**
- * Runtime state for markdown generation
- * Extended state that includes output tracking and options
+ * Writable converter state. Plugin hooks see it as `PluginState`; tag
+ * handlers and the built-in plugins that write output read the rest.
+ * @internal
  */
-export interface MdreamRuntimeState extends Partial<MdreamProcessingState> {
+export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, PluginState {
   /** @internal */
   outputPositions?: OutputPositions
   /** Active output format for format-aware plugins. */
-  outputFormat?: OutputFormat
+  outputFormat: OutputFormat
+
+  /** Nesting depth of the current node. */
+  depth: number
 
   /** Number of newlines at end of most recent output */
   lastNewLines?: number
 
   /** Configuration options for conversion */
-  options?: EngineOptions
+  options: EngineOptions
 
   /** Table processing state - specialized for Markdown tables */
   tableRenderedTable?: boolean
@@ -436,14 +445,6 @@ export interface TagHandler {
 }
 
 // Plugin-specific context interfaces
-export interface ReadabilityContext {
-  score?: number
-  tagCount?: number
-  linkTextLength?: number
-  textLength?: number
-  isHighLinkDensity?: boolean
-}
-
 export interface TailwindContext {
   hidden?: boolean
   prefix?: string
@@ -451,12 +452,6 @@ export interface TailwindContext {
 }
 
 export interface PluginContext {
-  // Readability plugin data
-  score?: number
-  tagCount?: number
-  linkTextLength?: number
-  textLength?: number
-  isHighLinkDensity?: boolean
   // Tailwind plugin data
   tailwind?: TailwindContext
   // Allow additional plugin-specific data
@@ -503,11 +498,11 @@ export interface MarkdownChunk {
  */
 export interface SplitterOptions extends MdreamOptions {
   /**
-   * Header tag IDs to split on (TAG_H1, TAG_H2, etc.)
-   * @example [TAG_H1, TAG_H2]
-   * @default [TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6]
+   * Heading levels that start a new chunk, from 1 (`<h1>`) to 6 (`<h6>`).
+   * @example [1, 2]
+   * @default [2, 3, 4, 5, 6]
    */
-  headersToSplitOn?: number[]
+  headersToSplitOn?: (1 | 2 | 3 | 4 | 5 | 6)[]
 
   /**
    * Return each line as individual chunk

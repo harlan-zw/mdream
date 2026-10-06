@@ -623,16 +623,6 @@ export interface ParseState {
   discardExcludedText?: boolean
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
-  /** @deprecated No longer read or written. Retained for source compatibility. */
-  inSingleQuote?: boolean
-  /** @deprecated No longer read or written. Retained for source compatibility. */
-  inDoubleQuote?: boolean
-  /** @deprecated No longer read or written. Retained for source compatibility. */
-  inBacktick?: boolean
-  /** @deprecated Rawtext parsing is no longer quote-aware. Retained for source compatibility. */
-  inRawTextQuoteAware?: boolean
-  /** @deprecated No longer read or written. Retained for source compatibility. */
-  lastCharWasBackslash?: boolean
   /** Resolved plugin instances for event processing */
   resolvedPlugins?: TransformPlugin[]
   /** Output-specific tag behavior. Parsing metadata is used when absent. */
