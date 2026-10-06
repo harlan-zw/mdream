@@ -25,6 +25,22 @@ yarn add @mdream/vite@beta
 
 The plugin depends on `mdream` and `@mdream/js` (installed automatically as transitive dependencies).
 
+## Migrating from v1
+
+- The plugin sets `enforce: 'post'` itself. The spread and the `enforce` line still work, but you can remove them:
+
+  ```diff
+    plugins: [
+  -   {
+  -     ...viteHtmlToMarkdownPlugin(),
+  -     enforce: 'post',
+  -   }
+  +   viteHtmlToMarkdownPlugin()
+    ]
+  ```
+
+- `@mdream/vite` no longer re-exports `htmlToMarkdown` and `streamHtmlToMarkdown`. Install `mdream` and import them from it.
+
 ## Setup
 
 Add the plugin to your `vite.config.ts`:
@@ -201,40 +217,20 @@ The middleware sets the following headers on Markdown responses:
 
 ### Programmatic Usage
 
-The package re-exports `htmlToMarkdown` and `streamHtmlToMarkdown` from `mdream`, so you can use them directly without adding `mdream` as a separate dependency:
-
-```ts
-import { htmlToMarkdown } from '@mdream/vite'
-
-const markdown = htmlToMarkdown('<h1>Hello</h1>', {
-  origin: 'https://example.com',
-  clean: true,
-})
-```
-
-Streaming conversion:
-
-```ts
-import { streamHtmlToMarkdown } from '@mdream/vite'
-
-for await (const chunk of streamHtmlToMarkdown(htmlStream)) {
-  process.stdout.write(chunk)
-}
-```
+To convert HTML in your own code, install `mdream` and import `htmlToMarkdown` or `streamHtmlToMarkdown` from it.
+See the [mdream README](../mdream/README.md#api-reference).
 
 ### Exported Functions
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `viteHtmlToMarkdownPlugin` | `(options?: ViteHtmlToMarkdownOptions) => Plugin` | Vite plugin for automatic HTML to markdown conversion |
-| `htmlToMarkdown` | `(html: string, options?: Partial<MdreamOptions>) => string` | Convert an HTML string to markdown |
-| `streamHtmlToMarkdown` | `(stream: ReadableStream, options?: Partial<MdreamOptions>) => AsyncIterable<string>` | Stream HTML to markdown |
 
 ### Exported Types
 
 The package exports the following TypeScript types from `@mdream/vite`:
 
-- `MdreamOptions`: Options for `htmlToMarkdown` and `streamHtmlToMarkdown`.
+- `MdreamOptions`: The type of the `mdreamOptions` plugin option.
 - `ViteHtmlToMarkdownOptions`: Plugin configuration options.
 - `CacheEntry`: Internal cache entry shape (`content`, `timestamp`, `ttl`).
 - `MarkdownConversionResult`: Result object with `content`, `cached`, and `source` fields.
