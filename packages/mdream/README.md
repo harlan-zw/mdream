@@ -477,10 +477,10 @@ Structural style differences (setext headings, indented code blocks, reference-s
 
 ```ts
 interface FilterOptions {
-  /** CSS selectors, tag names, or TAG_* constants for elements to include (all others excluded) */
-  include?: (string | number)[]
-  /** CSS selectors, tag names, or TAG_* constants for elements to exclude */
-  exclude?: (string | number)[]
+  /** CSS selectors or tag names for elements to include (all others excluded) */
+  include?: string[]
+  /** CSS selectors or tag names for elements to exclude */
+  exclude?: string[]
   /** Whether to also process children of matched elements. Default: true */
   processChildren?: boolean
 }
@@ -626,7 +626,7 @@ htmlToMarkdown(html, { tailwind: true })
 
 ### Filter Plugin
 
-Filters HTML elements by CSS selectors, tag names, or `TAG_*` constants.
+Filters HTML elements by CSS selectors or tag names.
 
 ```ts
 import { htmlToMarkdown } from 'mdream'
@@ -646,7 +646,7 @@ htmlToMarkdown(html, {
 })
 ```
 
-Use tag names or CSS selectors with the JS engine:
+The JS engine takes the same strings in `filterPlugin`. If an entry is not a string, `filterPlugin` throws a `TypeError`.
 
 ```ts
 import { htmlToMarkdown } from '@mdream/js'
@@ -717,14 +717,25 @@ const markdown = htmlToMarkdown(html, { plugins: [myPlugin] })
 
 ### Plugin Hooks
 
+Each hook gets a read-only `PluginState`. To keep data for a node, set it on `node.context`.
+
 ```ts
+interface PluginState {
+  /** Options passed to the converter. */
+  readonly options: Readonly<EngineOptions>
+  /** Output that the running converter writes. */
+  readonly outputFormat: 'markdown' | 'text' | 'html'
+  /** Nesting depth of the current node. It is 0 before the first node. */
+  readonly depth: number
+}
+
 interface TransformPlugin {
   /**
    * Called before any node processing. Return { skip: true } to skip the node.
    */
   beforeNodeProcess?: (
     event: NodeEvent,
-    state: MdreamRuntimeState,
+    state: PluginState,
   ) => undefined | void | { skip: boolean }
 
   /**
@@ -733,7 +744,7 @@ interface TransformPlugin {
    */
   onNodeEnter?: (
     node: ElementNode,
-    state: MdreamRuntimeState,
+    state: PluginState,
   ) => string | undefined | void
 
   /**
@@ -742,7 +753,7 @@ interface TransformPlugin {
    */
   onNodeExit?: (
     node: ElementNode,
-    state: MdreamRuntimeState,
+    state: PluginState,
   ) => string | undefined | void
 
   /**
@@ -750,7 +761,7 @@ interface TransformPlugin {
    */
   processAttributes?: (
     node: ElementNode,
-    state: MdreamRuntimeState,
+    state: PluginState,
   ) => void
 
   /**
@@ -759,13 +770,13 @@ interface TransformPlugin {
    */
   processTextNode?: (
     node: TextNode,
-    state: MdreamRuntimeState,
+    state: PluginState,
   ) => { content: string, skip: boolean } | undefined
 
   /**
    * Called once after the whole document is converted, including for streams.
    */
-  onDocumentEnd?: (state: MdreamRuntimeState) => void
+  onDocumentEnd?: (state: PluginState) => void
 }
 ```
 
@@ -815,7 +826,6 @@ Available from `@mdream/js/splitter`.
 ### Basic Chunking
 
 ```ts
-import { TAG_H2 } from '@mdream/js'
 import { htmlToMarkdownSplitChunks } from '@mdream/js/splitter'
 
 const html = `
@@ -827,7 +837,7 @@ const html = `
 `
 
 const chunks = htmlToMarkdownSplitChunks(html, {
-  headersToSplitOn: [TAG_H2],
+  headersToSplitOn: [2],
   chunkSize: 1000,
   chunkOverlap: 200,
   stripHeaders: true,
@@ -864,10 +874,10 @@ interface SplitterOptions {
   // --- Structural splitting ---
 
   /**
-   * Header tag IDs to split on (TAG_H1 through TAG_H6).
-   * Default: [TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6]
+   * Heading levels that start a new chunk, from 1 (<h1>) to 6 (<h6>).
+   * Another value throws a TypeError. Default: [2, 3, 4, 5, 6]
    */
-  headersToSplitOn?: number[]
+  headersToSplitOn?: (1 | 2 | 3 | 4 | 5 | 6)[]
 
   // --- Size-based splitting ---
 
@@ -935,12 +945,11 @@ interface MarkdownChunk {
 Combine splitting with presets:
 
 ```ts
-import { TAG_H2 } from '@mdream/js'
 import { withMinimalPreset } from '@mdream/js/preset/minimal'
 import { htmlToMarkdownSplitChunks } from '@mdream/js/splitter'
 
 const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
-  headersToSplitOn: [TAG_H2],
+  headersToSplitOn: [2],
   chunkSize: 500,
   origin: 'https://example.com',
 }))

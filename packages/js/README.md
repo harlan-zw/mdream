@@ -118,7 +118,7 @@ In v1, the built-in plugins always ran first, in this order: frontmatter, isolat
 - `frontmatterPlugin({ onExtract })` runs once after the conversion finishes, as in v1. It now also runs for streams, when the stream ends.
 - `onExtract` now removes the YAML escape from backslashes. In v1, the title `a \ b` came back as `a \\ b`.
 - `extractionPlugin` callbacks run when each matching element closes. In v1, the declarative `extraction` callbacks ran after the conversion finished.
-- `extractionPlugin` callbacks receive the parsed element and the runtime state. The element does not have `selector` or `tagName`. Use `element.name` for the tag name. Use the object key or a separate callback to identify the selector.
+- `extractionPlugin` callbacks receive the parsed element and the `PluginState`. The element does not have `selector` or `tagName`. Use `element.name` for the tag name. Use the object key or a separate callback to identify the selector.
 
 ```diff
 - plugins: {
@@ -132,6 +132,29 @@ In v1, the built-in plugins always ran first, in this order: frontmatter, isolat
 +   }),
 + ],
 ```
+
+### Splitter headings, filter selectors, and hook state
+
+| v1 | v2 |
+|---|---|
+| `import { TAG_H2, TAG_H3 } from '@mdream/js'` | Remove the import. The root export has no `TAG_H1` to `TAG_H6`. |
+| `headersToSplitOn: [TAG_H2, TAG_H3]` | `headersToSplitOn: [2, 3]` |
+| A tag id number in `filterPlugin` `include` or `exclude` | The tag name, such as `filterPlugin({ exclude: ['form'] })` |
+| Hook `state` with the converter's internal fields | Hook `state` typed as `PluginState` |
+
+`headersToSplitOn` takes heading levels from 1 to 6.
+If it gets another value, the splitter throws a `TypeError`. A stale `TAG_H2` (8) fails this way.
+`filterPlugin` takes only strings in `include` and `exclude`.
+A tag name compiles to the same fast tag match that a tag id gave.
+If an entry is not a string, `filterPlugin` throws a `TypeError`.
+
+Each hook gets a read-only [`PluginState`](#pluginstate) with `options`, `outputFormat`, and `depth`.
+The hook type no longer shows the converter's internal fields, such as `buffer` and `depthMap`.
+To keep data for a node, use `node.context`. To keep data for one document, use a [setup function](#plugins-with-per-document-state).
+
+`ParseState` from `@mdream/js/parse` no longer has the quote fields that the parser stopped using.
+These are `inSingleQuote`, `inDoubleQuote`, `inBacktick`, `inRawTextQuoteAware`, and `lastCharWasBackslash`.
+`PluginContext` no longer has the fields of the removed readability plugin.
 
 ### Cleanup
 
@@ -350,6 +373,7 @@ htmlToMarkdown(html, { clean: clean({ urls: true, fragments: true }) })
 ### `createPlugin(plugin)`
 
 Factory function for creating type-safe transform plugins. All hooks are optional.
+Each hook gets the read-only [`PluginState`](#pluginstate) of the conversion.
 
 ```typescript
 import { createPlugin } from '@mdream/js/plugins'
@@ -378,12 +402,22 @@ const myPlugin = createPlugin({
 
 | Hook | Parameters | Return Type | Description |
 |---|---|---|---|
-| `beforeNodeProcess` | `(event: NodeEvent, state)` | `{ skip: boolean } \| void` | Called before any node processing. Return `{ skip: true }` to skip the node. |
-| `onNodeEnter` | `(element: ElementNode, state)` | `string \| void` | Called when entering an element. Return a string to inject markdown. |
-| `onNodeExit` | `(element: ElementNode, state)` | `string \| void` | Called when exiting an element. Return a string to inject markdown. |
-| `processAttributes` | `(element: ElementNode, state)` | `void` | Called to inspect or modify element attributes. |
-| `processTextNode` | `(textNode: TextNode, state)` | `{ content: string, skip: boolean } \| void` | Called for each text node. Return an object to transform text or skip it. |
-| `onDocumentEnd` | `(state)` | `void` | Called once after the whole document is converted, including for streams. |
+| `beforeNodeProcess` | `(event: NodeEvent, state: PluginState)` | `{ skip: boolean } \| void` | Called before any node processing. Return `{ skip: true }` to skip the node. |
+| `onNodeEnter` | `(element: ElementNode, state: PluginState)` | `string \| void` | Called when entering an element. Return a string to inject markdown. |
+| `onNodeExit` | `(element: ElementNode, state: PluginState)` | `string \| void` | Called when exiting an element. Return a string to inject markdown. |
+| `processAttributes` | `(element: ElementNode, state: PluginState)` | `void` | Called to inspect or modify element attributes. |
+| `processTextNode` | `(textNode: TextNode, state: PluginState)` | `{ content: string, skip: boolean } \| void` | Called for each text node. Return an object to transform text or skip it. |
+| `onDocumentEnd` | `(state: PluginState)` | `void` | Called once after the whole document is converted, including for streams. |
+
+#### `PluginState`
+
+| Field | Type | Description |
+|---|---|---|
+| `options` | `Readonly<EngineOptions>` | The options passed to the converter |
+| `outputFormat` | `'markdown' \| 'text' \| 'html'` | The output that the running converter writes |
+| `depth` | `number` | The nesting depth of the current node. It is `0` before the first node. |
+
+The state is read-only. To keep data for a node, set it on `node.context`.
 
 #### Plugins with per-document state
 
@@ -409,7 +443,9 @@ The built-in `frontmatterPlugin`, `isolateMainPlugin`, and `extractionPlugin` us
 
 ### `filterPlugin(options)`
 
-Filters elements by CSS selectors, tag names, or TAG_* constants.
+Filters elements by CSS selectors or tag names.
+A tag name, such as `'nav'`, compiles to a fast tag match when you create the plugin.
+If an entry is not a string, `filterPlugin` throws a `TypeError`.
 
 ```typescript
 import { filterPlugin } from '@mdream/js/plugins'
@@ -428,8 +464,8 @@ const plugin2 = filterPlugin({
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `include` | `(string \| number)[]` | `[]` | CSS selectors, tag names, or TAG_* constants for elements to include (all others excluded) |
-| `exclude` | `(string \| number)[]` | `[]` | CSS selectors, tag names, or TAG_* constants for elements to exclude |
+| `include` | `string[]` | `[]` | CSS selectors or tag names for elements to include (all others excluded) |
+| `exclude` | `string[]` | `[]` | CSS selectors or tag names for elements to exclude |
 | `processChildren` | `boolean` | `true` | Whether to also process children of matching elements |
 
 ### `frontmatterPlugin(options?)`
@@ -492,7 +528,7 @@ const plugin = tailwindPlugin()
 
 Extracts elements that match CSS selectors during conversion.
 Each callback runs when a matching element closes.
-It receives the parsed element with its trimmed `textContent`, and the runtime state.
+It receives the parsed element with its trimmed `textContent`, and the [`PluginState`](#pluginstate).
 Use `element.name` for the tag name and `element.attributes` for the attributes.
 
 ```typescript
@@ -634,7 +670,7 @@ Extends `EngineOptions` with chunking-specific settings.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `headersToSplitOn` | `number[]` | `[TAG_H2, TAG_H3, TAG_H4, TAG_H5, TAG_H6]` | TAG_* header constants to split on |
+| `headersToSplitOn` | `(1 \| 2 \| 3 \| 4 \| 5 \| 6)[]` | `[2, 3, 4, 5, 6]` | Heading levels that start a new chunk, from 1 (`<h1>`) to 6 (`<h6>`). Another value throws a `TypeError`. |
 | `returnEachLine` | `boolean` | `false` | Return each non-empty line as an individual chunk |
 | `stripHeaders` | `boolean` | `true` | Strip header lines from chunk content |
 | `chunkSize` | `number` | `1000` | Maximum chunk size (measured by `lengthFunction`) |
@@ -965,6 +1001,7 @@ import type {
   OutputFormat,
   Plugin,
   PluginContext,
+  PluginState,
   SplitterOptions,
   TagOverride,
   TextNode,
@@ -979,12 +1016,6 @@ import {
   ELEMENT_NODE, // Node type for HTML elements (1)
   NodeEventEnter, // Event type for entering a node (0)
   NodeEventExit, // Event type for exiting a node (1)
-  TAG_H1, // Tag ID constant for <h1>
-  TAG_H2, // Tag ID constant for <h2>
-  TAG_H3, // Tag ID constant for <h3>
-  TAG_H4, // Tag ID constant for <h4>
-  TAG_H5, // Tag ID constant for <h5>
-  TAG_H6, // Tag ID constant for <h6>
   TEXT_NODE, // Node type for text content (3)
 } from '@mdream/js'
 ```
