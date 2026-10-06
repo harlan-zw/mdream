@@ -1,5 +1,5 @@
 import type { MdreamOptions } from './types'
-import { assertEngineOptions } from './option-shape'
+import { assertEngineOptions, checkClean } from './option-shape'
 import { processHtmlOutput, streamHtmlOutput } from './output-runner'
 import { resolvePlugins } from './pluggable/plugin'
 import { buildTagOverrideHandlers } from './tag-overrides'
@@ -8,6 +8,7 @@ import { textTagHandlers } from './text-tags'
 
 function resolveOutputOptions(options: MdreamOptions) {
   assertEngineOptions(options)
+  checkClean(options)
   return {
     plugins: resolvePlugins(options.plugins),
     tagHandlers: textTagHandlers,
