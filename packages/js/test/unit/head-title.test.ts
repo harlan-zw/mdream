@@ -1,3 +1,4 @@
+import type { MdreamRuntimeState } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
@@ -51,8 +52,9 @@ describe('safe HTML leading output', () => {
     const options = {
       plugins: [createPlugin({
         onNodeEnter(node, state) {
+          // Writes output the way frontmatterPlugin does, through the internal state.
           if (node.name === 'x-output')
-            state.buffer.push('prefix')
+            (state as MdreamRuntimeState).buffer.push('prefix')
         },
       })],
     }
