@@ -1,17 +1,18 @@
 import type { ProcessedFile } from '@mdream/js/llms-txt'
 import type { PlaywrightCrawlerOptions } from 'crawlee'
-import type { CrawlHooks, CrawlOptions, CrawlResult, PageData, PageMetadata } from './types.ts'
+import type { ResolvedCrawlOptions } from './options.ts'
+import type { CrawlHooks, CrawlOptions, CrawlProgress, CrawlResult, PageData, PageMetadata } from './types.ts'
 import { mkdirSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { generateLlmsTxtArtifacts } from '@mdream/js/llms-txt'
 import { createHooks } from 'hookable'
 import { htmlToMarkdown } from 'mdream'
 import { ofetch } from 'ofetch'
-import { dirname, join, normalize, resolve } from 'pathe'
+import { dirname, join, normalize } from 'pathe'
 import { withHttps } from 'ufo'
 import { stripBoilerplateFromCorpus } from './boilerplate.js'
-import { getRegistrableDomain, getStartingUrl, isUrlExcluded, isValidSitemapXml, matchesGlobPattern, parseUrlPattern } from './glob-utils.js'
-import { resolveLogger } from './logger.js'
+import { getRegistrableDomain, getStartingUrl, isUrlExcluded, isValidSitemapXml, matchesGlobPattern } from './glob-utils.js'
+import { resolveCrawlOptions } from './options.js'
 
 const SITEMAP_INDEX_LOC_RE = /<sitemap[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/sitemap>/gs
 const SITEMAP_URL_LOC_RE = /<url[^>]*>.*?<loc>(.*?)<\/loc>.*?<\/url>/gs
@@ -189,27 +190,6 @@ async function loadSitemap(sitemapUrl: string, visited: Set<string> = new Set())
   return urls
 }
 
-export interface CrawlProgress {
-  sitemap: {
-    status: 'discovering' | 'processing' | 'completed'
-    found: number
-    processed: number
-  }
-  crawling: {
-    status: 'starting' | 'processing' | 'completed'
-    total: number
-    processed: number
-    failed: number
-    currentUrl?: string
-    /** Page fetch latency stats in ms */
-    latency: { total: number, min: number, max: number, count: number }
-  }
-  generation: {
-    status: 'idle' | 'generating' | 'completed'
-    current?: string
-  }
-}
-
 // Metadata extraction merged into htmlToMarkdown call
 function extractMetadataInline(parsedUrl: URL, allowedDomains?: Set<string>): {
   extraction: Record<string, (el: { textContent: string, attributes: Record<string, string> }) => void>
@@ -285,7 +265,7 @@ function filterSitemapUrls(
   sitemapUrls: string[],
   hasGlobPatterns: boolean,
   exclude: string[],
-  allPatterns: ReturnType<typeof parseUrlPattern>[],
+  allPatterns: ResolvedCrawlOptions['patterns'],
   allowSubdomains = false,
 ): string[] {
   if (hasGlobPatterns) {
@@ -312,58 +292,54 @@ async function runConcurrent<T>(
   await Promise.all(workers)
 }
 
+/**
+ * Crawl a site and write the requested artifacts. Options are parsed once with
+ * `resolveCrawlOptions`; an unknown key or an invalid value throws a `TypeError`
+ * before any request is sent.
+ */
 export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (progress: CrawlProgress) => void): Promise<CrawlResult[]> {
+  return runCrawl(resolveCrawlOptions(options), onProgress)
+}
+
+/** Run a crawl with options from `resolveCrawlOptions`. The CLI calls it after it merges the config file. */
+export async function runCrawl(options: ResolvedCrawlOptions, onProgress?: (progress: CrawlProgress) => void): Promise<CrawlResult[]> {
   const {
     urls,
-    outputDir: rawOutputDir,
-    maxRequestsPerCrawl = Number.MAX_SAFE_INTEGER,
-    generateLlmsTxt = true,
-    generateLlmsFullTxt = false,
-    generateIndividualMd = true,
+    patterns,
+    output: outputDir,
+    depth: maxDepth,
+    maxPages,
+    artifacts,
     origin,
-    driver = 'http',
+    driver,
     useChrome,
-    followLinks = false,
-    maxDepth = 1,
-    globPatterns = [],
-    crawlDelay: userCrawlDelay,
-    exclude = [],
-    siteNameOverride,
-    descriptionOverride,
-    verbose = false,
-    skipSitemap = false,
-    sitemapUrls: explicitSitemapUrls,
-    allowSubdomains = false,
-    stripBoilerplate = true,
+    exclude,
+    siteName: siteNameOption,
+    description: descriptionOption,
+    verbose,
+    skipSitemap,
+    sitemap: explicitSitemapUrls,
+    allowSubdomains,
+    stripBoilerplate,
     boilerplateThreshold,
     hooks: hooksConfig,
-    onPage,
+    // Single seam for all diagnostic/progress output (issue #100).
+    logger,
   } = options
 
-  // Single seam for all diagnostic/progress output (issue #100).
-  const logger = resolveLogger(options)
+  const writeLlmsTxt = artifacts.includes('llms.txt')
+  const writeLlmsFullTxt = artifacts.includes('llms-full.txt')
+  const writeMarkdown = artifacts.includes('markdown')
 
   // Set up hooks
   const hooks = createHooks<CrawlHooks>()
   if (hooksConfig)
     hooks.addHooks(hooksConfig)
-  // Backwards compat: convert onPage to crawl:page hook
-  if (onPage)
-    hooks.hook('crawl:page', onPage)
 
-  // Single-page mode: maxDepth 0 means just process the given URLs directly
+  // Depth 0 processes only the given URLs: no discovery, no link following.
   const singlePageMode = maxDepth === 0
 
-  const outputDir = resolve(normalize(rawOutputDir))
-  let crawlDelay = userCrawlDelay
-
-  let patterns
-  try {
-    patterns = globPatterns.length > 0 ? globPatterns : urls.map(parseUrlPattern)
-  }
-  catch (error) {
-    throw new Error(`Invalid URL pattern: ${error instanceof Error ? error.message : 'Unknown error'}`)
-  }
+  let crawlDelay = options.crawlDelay
 
   let startingUrls = patterns.map(getStartingUrl)
   const hasGlobPatterns = patterns.some(p => p.isGlob)
@@ -380,7 +356,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
   if (startingUrls.length > 0 && !skipSitemap && !singlePageMode) {
     const baseUrl = new URL(startingUrls[0]).origin
     const homePageUrl = baseUrl
-    const hasExplicitSitemaps = !!explicitSitemapUrls && explicitSitemapUrls.length > 0
+    const hasExplicitSitemaps = explicitSitemapUrls.length > 0
 
     onProgress?.(progress)
 
@@ -650,7 +626,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
     let filePath: string | undefined
 
-    if (shouldProcessMarkdown && generateIndividualMd) {
+    if (shouldProcessMarkdown && writeMarkdown) {
       const urlPath = parsedUrl.pathname === '/' ? '/index' : parsedUrl.pathname
       // Namespace by hostname when subdomains are enabled to avoid path collisions
       const hostPrefix = allowSubdomains ? [parsedUrl.hostname.replace(URL_PATH_UNSAFE_CHARS_RE, '-')] : []
@@ -684,8 +660,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       onProgress?.(progress)
     }
 
-    // Follow links if enabled, within depth limit, and sitemap didn't already define the crawl surface
-    if (followLinks && !singlePageMode && !sitemapProvidedUrls && depth < maxDepth) {
+    // Follow links within the depth limit, unless the sitemap already defined the crawl surface
+    if (!singlePageMode && !sitemapProvidedUrls && depth < maxDepth) {
       const filteredLinks = metadata.links.filter(link => shouldCrawlUrl(link) && isContentUrl(link))
       for (const link of filteredLinks) {
         if (processedUrls.has(link))
@@ -705,8 +681,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     }
   }
 
-  // Limit URLs to maxRequestsPerCrawl
-  const urlsToProcess = startingUrls.slice(0, maxRequestsPerCrawl)
+  // Limit URLs to maxPages
+  const urlsToProcess = startingUrls.slice(0, maxPages)
 
   // Mark starting URLs as processed to avoid re-crawling (normalize for dedup)
   for (const url of urlsToProcess)
@@ -763,7 +739,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
           depth: request.userData?.depth || 0,
         })
       },
-      maxRequestsPerCrawl,
+      // Crawlee treats undefined as no limit.
+      maxRequestsPerCrawl: Number.isFinite(maxPages) ? maxPages : undefined,
       respectRobotsTxtFile: false,
     }
 
@@ -794,8 +771,8 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
       // BFS: process discovered links in waves
       totalProcessed += urlsToProcess.length
-      while (pendingUrls.length > 0 && totalProcessed < maxRequestsPerCrawl) {
-        const batch = pendingUrls.splice(0, maxRequestsPerCrawl - totalProcessed)
+      while (pendingUrls.length > 0 && totalProcessed < maxPages) {
+        const batch = pendingUrls.splice(0, maxPages - totalProcessed)
         progress.crawling.total += batch.length
         onProgress?.(progress)
         const batchRequests = batch.map(item => ({
@@ -898,9 +875,9 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     await runConcurrent(urlsToProcess, DEFAULT_CONCURRENCY, url => fetchPage(url, 0))
     totalProcessed += urlsToProcess.length
 
-    // BFS: process discovered links in waves until maxDepth or maxRequests
-    while (pendingUrls.length > 0 && totalProcessed < maxRequestsPerCrawl) {
-      const batch = pendingUrls.splice(0, maxRequestsPerCrawl - totalProcessed)
+    // BFS: process discovered links in waves until the depth or page limit
+    while (pendingUrls.length > 0 && totalProcessed < maxPages) {
+      const batch = pendingUrls.splice(0, maxPages - totalProcessed)
       progress.crawling.total += batch.length
       onProgress?.(progress)
       await runConcurrent(batch, DEFAULT_CONCURRENCY, item => fetchPage(item.url, item.depth))
@@ -931,7 +908,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
     if (stripBoilerplate && !singlePageMode) {
       const cleaned = stripBoilerplateFromCorpus(
         successfulResults.map(r => r.content),
-        boilerplateThreshold !== undefined ? { threshold: boilerplateThreshold } : {},
+        { threshold: boilerplateThreshold },
       )
       for (let i = 0; i < successfulResults.length; i++)
         successfulResults[i].content = cleaned[i]
@@ -939,7 +916,7 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
 
     // Write per-page markdown now that content is finalized. The crawl:content
     // hook fires here (deferred from processPage) so it sees the stripped content.
-    if (generateIndividualMd) {
+    if (writeMarkdown) {
       for (const result of successfulResults) {
         if (!result.filePath)
           continue
@@ -964,10 +941,10 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
       return resultUrl.href === originUrl || resultUrl.href === `${originUrl}/`
     })
 
-    const siteName = siteNameOverride || homePageResult?.metadata?.title || homePageResult?.title || firstUrl.hostname
-    const description = descriptionOverride || homePageResult?.metadata?.description || successfulResults[0]?.metadata?.description
+    const siteName = siteNameOption || homePageResult?.metadata?.title || homePageResult?.title || firstUrl.hostname
+    const description = descriptionOption || homePageResult?.metadata?.description || successfulResults[0]?.metadata?.description
 
-    if (generateLlmsTxt || generateLlmsFullTxt) {
+    if (writeLlmsTxt || writeLlmsFullTxt) {
       progress.generation.current = 'Generating llms.txt files'
       onProgress?.(progress)
 
@@ -1000,17 +977,17 @@ export async function crawlAndGenerate(options: CrawlOptions, onProgress?: (prog
         siteName,
         description,
         origin: originUrl || firstUrl.origin,
-        generateFull: generateLlmsFullTxt,
+        generateFull: writeLlmsFullTxt,
         outputDir,
       })
 
-      if (generateLlmsTxt) {
+      if (writeLlmsTxt) {
         progress.generation.current = 'Writing llms.txt'
         onProgress?.(progress)
         await writeFile(join(outputDir, 'llms.txt'), llmsResult.llmsTxt, 'utf-8')
       }
 
-      if (generateLlmsFullTxt && llmsResult.llmsFullTxt) {
+      if (writeLlmsFullTxt && llmsResult.llmsFullTxt) {
         progress.generation.current = 'Writing llms-full.txt'
         onProgress?.(progress)
         await writeFile(join(outputDir, 'llms-full.txt'), llmsResult.llmsFullTxt, 'utf-8')

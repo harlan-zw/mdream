@@ -1,7 +1,6 @@
 import type { CrawlHooks, CrawlResult, PageData } from '../../src/types.js'
 import { createHooks } from 'hookable'
 import { describe, expect, it } from 'vitest'
-import { defineConfig } from '../../src/types.js'
 
 describe('hooks', () => {
   describe('crawl:url', () => {
@@ -109,65 +108,6 @@ describe('hooks', () => {
       await hooks.callHook('crawl:done', { results })
       expect(results).toHaveLength(2)
       expect(results.every(r => r.success)).toBe(true)
-    })
-  })
-
-  describe('onPage backwards compatibility', () => {
-    it('should work when registered as crawl:page hook', async () => {
-      const pages: string[] = []
-      const hooks = createHooks<CrawlHooks>()
-
-      // Simulate what crawl.ts does with onPage
-      const onPage = (page: PageData) => {
-        pages.push(page.url)
-      }
-      hooks.hook('crawl:page', onPage)
-
-      const page: PageData = {
-        url: 'https://example.com/test',
-        html: '',
-        title: 'Test',
-        metadata: { title: 'Test', links: [] },
-        origin: 'https://example.com',
-      }
-
-      await hooks.callHook('crawl:page', page)
-      expect(pages).toEqual(['https://example.com/test'])
-    })
-  })
-
-  describe('defineConfig', () => {
-    it('should return the config as-is (identity function)', () => {
-      const config = defineConfig({
-        exclude: ['*/admin/*'],
-        hooks: {
-          'crawl:page': (page) => {
-            page.title = page.title.replace(/ \| Brand$/, '')
-          },
-        },
-      })
-
-      expect(config.exclude).toEqual(['*/admin/*'])
-      expect(config.hooks).toBeDefined()
-      expect(config.hooks!['crawl:page']).toBeTypeOf('function')
-    })
-
-    it('should accept all config options', () => {
-      const config = defineConfig({
-        driver: 'playwright',
-        maxDepth: 5,
-        maxPages: 100,
-        crawlDelay: 2,
-        skipSitemap: true,
-        allowSubdomains: true,
-        verbose: true,
-        artifacts: ['llms.txt', 'markdown'],
-        exclude: ['*/private/*'],
-      })
-
-      expect(config.driver).toBe('playwright')
-      expect(config.maxDepth).toBe(5)
-      expect(config.artifacts).toEqual(['llms.txt', 'markdown'])
     })
   })
 })

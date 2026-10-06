@@ -71,11 +71,8 @@ afterEach(() => {
 })
 
 const baseOpts = {
-  maxDepth: 1,
-  followLinks: false,
-  generateLlmsTxt: false,
-  generateLlmsFullTxt: false,
-  generateIndividualMd: false,
+  depth: 1,
+  artifacts: [],
 }
 
 describe('sitemap override (#116)', () => {
@@ -90,8 +87,8 @@ describe('sitemap override (#116)', () => {
     const results = await crawlAndGenerate({
       ...baseOpts,
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
-      sitemapUrls: ['https://example.com/custom/sitemap.xml'],
+      output: tmpOut(),
+      sitemap: ['https://example.com/custom/sitemap.xml'],
     })
 
     const successPaths = results.filter(r => r.success).map(r => new URL(r.url).pathname)
@@ -109,8 +106,8 @@ describe('sitemap override (#116)', () => {
     const results = await crawlAndGenerate({
       ...baseOpts,
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
-      sitemapUrls: [
+      output: tmpOut(),
+      sitemap: [
         'https://example.com/sitemap-1.xml',
         'https://example.com/sitemap-2.xml',
       ],
@@ -129,7 +126,7 @@ describe('sitemap override (#116)', () => {
     await crawlAndGenerate({
       ...baseOpts,
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
+      output: tmpOut(),
     })
 
     // The decoded URL should be fetched, not the literal &amp; form.
@@ -146,7 +143,7 @@ describe('sitemap override (#116)', () => {
     const results = await crawlAndGenerate({
       ...baseOpts,
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
+      output: tmpOut(),
     })
 
     const successPaths = results.filter(r => r.success).map(r => new URL(r.url).pathname)
@@ -171,8 +168,8 @@ describe('sitemap override (#116)', () => {
     const results = await crawlAndGenerate({
       ...baseOpts,
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
-      sitemapUrls: ['https://example.com/sitemap-a.xml'],
+      output: tmpOut(),
+      sitemap: ['https://example.com/sitemap-a.xml'],
     })
 
     const successPaths = results.filter(r => r.success).map(r => new URL(r.url).pathname)
@@ -192,7 +189,7 @@ describe('sitemap override (#116)', () => {
     await crawlAndGenerate({
       ...baseOpts,
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
+      output: tmpOut(),
     })
 
     expect(fetchedUrls).toContain('https://example.com/path?a=1&amp;b=2')

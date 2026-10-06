@@ -1,8 +1,9 @@
-import type { MdreamCrawlConfig } from './types.js'
+import type { CrawlOptions } from './types.ts'
 import { loadConfig } from 'c12'
 
-export async function loadMdreamConfig(cwd?: string): Promise<MdreamCrawlConfig> {
-  const { config } = await loadConfig<MdreamCrawlConfig>({
+/** Load `mdream.config.*` from `cwd`. Returns an empty object when no file exists. */
+export async function loadMdreamConfig(cwd?: string): Promise<Partial<CrawlOptions>> {
+  const { config } = await loadConfig<Partial<CrawlOptions>>({
     name: 'mdream',
     cwd,
   })

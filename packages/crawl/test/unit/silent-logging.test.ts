@@ -67,11 +67,9 @@ describe('crawl logging (issue #100)', () => {
     const messages: string[] = []
     await crawlAndGenerate({
       urls: ['https://example.com/'],
-      outputDir: tmpOut(),
-      maxDepth: 1,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      output: tmpOut(),
+      depth: 1,
+      artifacts: [],
       logger: recordingLogger(messages),
     })
 
@@ -82,11 +80,9 @@ describe('crawl logging (issue #100)', () => {
     clackInfo.mockClear()
     const results = await crawlAndGenerate({
       urls: ['https://example.com/'],
-      outputDir: tmpOut(),
-      maxDepth: 1,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      output: tmpOut(),
+      depth: 1,
+      artifacts: [],
       silent: true,
     })
 
