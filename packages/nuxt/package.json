@@ -84,6 +84,7 @@
     "jsdom": "catalog:",
     "nuxt": "catalog:",
     "typescript": "catalog:",
+    "vue": "catalog:",
     "vue-tsc": "catalog:"
   }
 }

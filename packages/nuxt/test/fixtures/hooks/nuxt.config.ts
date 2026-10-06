@@ -13,10 +13,8 @@ export default defineNuxtConfig({
     },
   },
   hooks: {
-    // Note: Hook types are auto-generated in .nuxt/module/nuxt-mdream.d.ts
-    // @ts-expect-error hook type generated at build time
-    'mdream:llms-txt:generate': (payload: MdreamLlmsTxtGeneratePayload) => {
-      console.log('[Hook] mdream:llms-txt:generate called')
+    'mdream:llms-txt': (payload: MdreamLlmsTxtGeneratePayload) => {
+      console.log('[Hook] mdream:llms-txt called')
       console.log('[Hook] Pages count:', payload.pages.length)
 
       // Example: Add custom section to llms.txt using mutable pattern
