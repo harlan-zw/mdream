@@ -280,6 +280,9 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
   return {
     name: 'vite-html-to-markdown',
+    // Vite emits HTML assets in its own generateBundle hook, which runs after
+    // normal user plugins. Without `post`, this plugin finds no HTML to convert.
+    enforce: 'post',
 
     // Development server integration - intercept .md requests or Accept header markdown requests
     configureServer(server) {

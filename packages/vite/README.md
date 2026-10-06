@@ -27,7 +27,7 @@ The plugin depends on `mdream` and `@mdream/js` (installed automatically as tran
 
 ## Setup
 
-Add the plugin to your `vite.config.ts`. Set `enforce: 'post'` so HTML assets exist before Markdown generation:
+Add the plugin to your `vite.config.ts`:
 
 ```ts
 import { viteHtmlToMarkdownPlugin } from '@mdream/vite'
@@ -35,10 +35,7 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    {
-      ...viteHtmlToMarkdownPlugin(),
-      enforce: 'post',
-    }
+    viteHtmlToMarkdownPlugin()
   ]
 })
 ```
@@ -46,15 +43,12 @@ export default defineConfig({
 A default export is also available:
 
 ```ts
-import htmlToMarkdown from '@mdream/vite'
+import mdream from '@mdream/vite'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    {
-      ...htmlToMarkdown(),
-      enforce: 'post',
-    }
+    mdream()
   ]
 })
 ```
@@ -256,15 +250,12 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    {
-      ...viteHtmlToMarkdownPlugin({
-        mdreamOptions: {
-          minimal: true,
-          origin: 'https://example.com',
-        }
-      }),
-      enforce: 'post',
-    }
+    viteHtmlToMarkdownPlugin({
+      mdreamOptions: {
+        minimal: true,
+        origin: 'https://example.com',
+      }
+    })
   ]
 })
 ```
@@ -279,19 +270,16 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    {
-      ...viteHtmlToMarkdownPlugin({
-        include: ['docs/*.html', 'docs/*/*.html'],
-        exclude: ['docs/internal/*'],
-        outputDir: 'markdown',
-        mdreamOptions: {
-          minimal: true,
-          origin: 'https://docs.example.com',
-          clean: true,
-        }
-      }),
-      enforce: 'post',
-    }
+    viteHtmlToMarkdownPlugin({
+      include: ['docs/*.html', 'docs/*/*.html'],
+      exclude: ['docs/internal/*'],
+      outputDir: 'markdown',
+      mdreamOptions: {
+        minimal: true,
+        origin: 'https://docs.example.com',
+        clean: true,
+      }
+    })
   ]
 })
 ```
@@ -304,13 +292,10 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    {
-      ...viteHtmlToMarkdownPlugin({
-        verbose: true,
-        cacheEnabled: false,
-      }),
-      enforce: 'post',
-    }
+    viteHtmlToMarkdownPlugin({
+      verbose: true,
+      cacheEnabled: false,
+    })
   ]
 })
 ```
@@ -323,22 +308,19 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    {
-      ...viteHtmlToMarkdownPlugin({
-        mdreamOptions: {
-          frontmatter: {
-            metaFields: ['description', 'author', 'keywords'],
-            onExtract(fm) {
-              console.log('Extracted frontmatter:', fm)
-            }
-          },
-          filter: {
-            exclude: ['nav', 'footer', 'aside', 'form'],
-          },
-        }
-      }),
-      enforce: 'post',
-    }
+    viteHtmlToMarkdownPlugin({
+      mdreamOptions: {
+        frontmatter: {
+          metaFields: ['description', 'author', 'keywords'],
+          onExtract(fm) {
+            console.log('Extracted frontmatter:', fm)
+          }
+        },
+        filter: {
+          exclude: ['nav', 'footer', 'aside', 'form'],
+        },
+      }
+    })
   ]
 })
 ```
