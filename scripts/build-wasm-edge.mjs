@@ -60,6 +60,29 @@ execFileSync('wasm-opt', [
 const optSize = statSync(wasmFile).size
 console.log(`${wasmFile}: ${rawSize} -> ${optSize} bytes (wasm-opt ${OPT_FLAGS.join(' ')})`)
 
+// wasm-bindgen attaches `Symbol.dispose` to each class in a top-level
+// statement after the class. A bundler must keep that statement, so it keeps
+// the class in every bundle, even a bundle that never uses it. A class method
+// does the same job and lets an unused class tree-shake. On a runtime without
+// `Symbol.dispose`, the method key becomes the string "undefined". Class
+// methods are not enumerable and `using` does not exist there, so that extra
+// method is harmless.
+const DISPOSE_ASSIGN_RE = /^if \(Symbol\.dispose\) (\w+)\.prototype\[Symbol\.dispose\] = \1\.prototype\.free;\n/gm
+const glueFile = resolve(outDir, target === 'bundler' ? `${outName}_bg.js` : `${outName}.js`)
+let glue = readFileSync(glueFile, 'utf8')
+const disposeClasses = Array.from(glue.matchAll(DISPOSE_ASSIGN_RE), match => match[1])
+// A wasm-bindgen upgrade that changes this statement must fail the build.
+if (!disposeClasses.length)
+  throw new Error(`No wasm-bindgen Symbol.dispose assignment in ${glueFile}`)
+glue = glue.replace(DISPOSE_ASSIGN_RE, '')
+for (const name of disposeClasses) {
+  const classHead = `export class ${name} {\n`
+  if (!glue.includes(classHead))
+    throw new Error(`No \`${classHead.trim()}\` in ${glueFile}`)
+  glue = glue.replace(classHead, `${classHead}    [Symbol.dispose]() {\n        this.free();\n    }\n`)
+}
+writeFileSync(glueFile, glue)
+
 // Nitro imports instantiated exports. Wrangler imports a compiled Module.
 // Keep the bundler sidecar available for Nitro and initialize either form.
 if (target === 'bundler') {
