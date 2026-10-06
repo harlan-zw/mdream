@@ -109,16 +109,23 @@ The `format`, `clean`, and top-level plugin options remain available.
 Custom hook plugins use `@mdream/js`; follow its [migration guide](../js/README.md#migrating-from-v1).
 That guide covers the JS API from [#224](https://github.com/harlan-zw/mdream/pull/224), merged after `2.0.0-beta.1`.
 
-### Browser and CDN returns
+### Browser imports and returns
 
-Both entries return `Promise<string>` in v2.
+In a browser bundle, import from `mdream/browser`.
+Its `htmlToMarkdown` returns `Promise<string>`.
 Remove `.markdown` and await the conversion:
 
 ```diff
-  import { htmlToMarkdown } from 'mdream'
+- import { htmlToMarkdown } from 'mdream'
 - const markdown = (await htmlToMarkdown(html)).markdown
++ import { htmlToMarkdown } from 'mdream/browser'
 + const markdown = await htmlToMarkdown(html)
 ```
+
+In a browser bundle, the root `mdream` entry throws a `TypeError` when you call it.
+The import itself does not throw.
+A module that runs on the server and the client can import `mdream` and call it only on the server.
+The `mdream/browser` types need no TypeScript `customConditions` setting.
 
 For a CDN script:
 
@@ -128,8 +135,7 @@ For a CDN script:
 ```
 
 Use the CDN example inside an async function or a `<script type="module">` block.
-For browser types, set TypeScript's `customConditions` to `["browser"]` when your toolchain does not select it.
-See [Browser and Edge Usage](#browser-and-edge-usage) for initialization and worker assets.
+See [Browser and Edge Usage](#browser-and-edge-usage) for edge runtimes and the CDN script.
 
 ### Minimal filtering
 
@@ -172,7 +178,7 @@ import type { MdreamOptions } from 'mdream'
 
 declare function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): string
 
-// Browser bundles and the CDN script return Promise<string> instead.
+// `mdream/browser` and the CDN script return Promise<string> instead.
 ```
 
 **JS engine** (`@mdream/js`) uses a separate entry point for each format:
@@ -251,7 +257,7 @@ Mdream includes two rendering engines, automatically selecting the best one for 
 | Engine | Package | Plugins | Use case |
 |--------|---------|---------|----------|
 | **Rust** (NAPI) | `mdream` | Declarative config only | Node.js (default) |
-| **Rust** (WASM) | `mdream` | Declarative config only | Edge, browser |
+| **Rust** (WASM) | `mdream`, `mdream/browser` | Declarative config only | Edge, browser |
 | **JavaScript** | `@mdream/js` | Explicit plugin arrays | Small bundles, custom plugins, splitter |
 
 ```ts
@@ -1043,14 +1049,21 @@ The CLI reads HTML from stdin and writes Markdown, plain text, or HTML to stdout
 
 ## Browser and Edge Usage
 
-Every entry takes the same `MdreamOptions` and produces the same Markdown string. In Node and edge runtimes, `htmlToMarkdown` is synchronous. In browser bundles, the CDN script, and `mdream/worker`, it returns `Promise<string>`, because the WASM binary loads first. Each export condition ships its own types, so TypeScript shows the right return type when it resolves the `browser` condition (for example, with `customConditions: ["browser"]`).
+Every entry takes the same `MdreamOptions` and produces the same Markdown string.
+In Node and edge runtimes, `htmlToMarkdown` from `mdream` is synchronous.
+In a browser bundle, import from `mdream/browser`.
+Its `htmlToMarkdown` returns `Promise<string>`, because the WASM binary loads first.
+The CDN script also returns `Promise<string>`.
 
 ```ts
-import { htmlToMarkdown } from 'mdream'
+import { htmlToMarkdown } from 'mdream/browser'
 
-// In a browser bundle
 const markdown = await htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 ```
+
+In a browser bundle, the root `mdream` entry throws a `TypeError` when you call it.
+The `mdream` types always describe the synchronous API.
+To convert off the main thread, see [Web Worker](#web-worker).
 
 ### Edge / Cloudflare Workers
 
@@ -1101,7 +1114,7 @@ const markdown = htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 
 ### Browser CDN (IIFE)
 
-Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It takes the same `MdreamOptions` as the `mdream` entry and returns `Promise<string>`, the same as the browser bundle.
+Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It takes the same `MdreamOptions` as the `mdream` entry and returns `Promise<string>`, the same as `mdream/browser`.
 
 ```html
 <script src="https://unpkg.com/mdream@beta/dist/iife.js"></script>
