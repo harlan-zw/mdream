@@ -55,7 +55,6 @@ export async function main() {
     const description = getInput('description', { required: true })
     const origin = getInput('origin', { required: true })
     const output = getInput('output') || '.'
-    const chunkSize = getInput('chunk-size') || '4096'
     const verbose = getInput('verbose') === 'true'
 
     if (verbose) {
@@ -64,7 +63,6 @@ export async function main() {
       info(`Description: ${description}`)
       info(`Origin: ${origin}`)
       info(`Output directory: ${output}`)
-      info(`Chunk size: ${chunkSize}`)
     }
 
     // Process HTML files into markdown using mdream engine
