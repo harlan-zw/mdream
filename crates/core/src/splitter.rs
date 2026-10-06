@@ -28,12 +28,14 @@ impl Default for SplitterOptions {
 }
 
 /// A single chunk of split markdown with metadata.
+#[non_exhaustive]
 pub struct MarkdownChunk {
   pub content: String,
   pub metadata: ChunkMetadata,
 }
 
 /// Metadata for a markdown chunk.
+#[non_exhaustive]
 pub struct ChunkMetadata {
   /// Header hierarchy at this chunk position (e.g. "h1" -> "Title").
   pub headers: Option<Vec<(String, String)>>,
@@ -44,6 +46,7 @@ pub struct ChunkMetadata {
 }
 
 /// Line location range.
+#[non_exhaustive]
 pub struct ChunkLoc {
   pub from: usize,
   pub to: usize,

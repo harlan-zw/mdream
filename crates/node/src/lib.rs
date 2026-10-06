@@ -178,10 +178,7 @@ fn to_core_opts(
           overrides
             .into_iter()
             .map(|(tag_name, ov)| {
-              let alias_tag_id = ov
-                .alias
-                .as_ref()
-                .and_then(|a| mdream::consts::get_tag_id(a));
+              let alias_tag_id = ov.alias.as_ref().and_then(|a| mdream::get_tag_id(a));
               let config = mdream::types::TagOverrideConfig {
                 enter: ov.enter,
                 exit: ov.exit,

@@ -1306,7 +1306,7 @@ fn nested_inline_code_keeps_one_owner_under_overrides() {
     ..Default::default()
   };
   let alias = TagOverrideConfig {
-    alias_tag_id: mdream::consts::get_tag_id("code"),
+    alias_tag_id: mdream::get_tag_id("code"),
     ..Default::default()
   };
   for (html, options, expected) in [
@@ -3557,7 +3557,7 @@ fn tag_override_enter_exit() {
       is_inline: Some(true),
       is_self_closing: None,
       collapses_inner_white_space: None,
-      alias_tag_id: Some(mdream::consts::TAG_SPAN),
+      alias_tag_id: mdream::get_tag_id("span"),
     },
   )];
   let md = html_to_markdown(
@@ -4560,7 +4560,7 @@ fn cdata_emitted_via_tag_override() {
       is_inline: None,
       is_self_closing: None,
       collapses_inner_white_space: None,
-      alias_tag_id: Some(mdream::consts::TAG_PRE),
+      alias_tag_id: mdream::get_tag_id("pre"),
     },
   )];
   let md = html_to_markdown(
@@ -4734,7 +4734,7 @@ fn tag_override_alias_preserves_trailing_siblings() {
           is_inline: None,
           is_self_closing: None,
           collapses_inner_white_space: None,
-          alias_tag_id: mdream::consts::get_tag_id("em"),
+          alias_tag_id: mdream::get_tag_id("em"),
         },
       )]),
       ..Default::default()
@@ -5994,17 +5994,15 @@ fn text_runs_keep_unicode_entities_and_gfm_context_across_chunks() {
     "<blockquote><a href='/x'>é[東京]🙂&amp;x</a></blockquote>",
     "<table><tr><td>é|東京_🙂&amp;x</td></tr></table>",
   ] {
-    for format in [
-      OutputFormat::Markdown,
-      OutputFormat::Text,
-      OutputFormat::Html,
-    ] {
+    // `OutputFormat` is non-exhaustive, so pair each format with its converter.
+    let converters: [(OutputFormat, fn(&str, HTMLToMarkdownOptions) -> String); 3] = [
+      (OutputFormat::Markdown, html_to_markdown),
+      (OutputFormat::Text, html_to_text),
+      (OutputFormat::Html, html_to_html),
+    ];
+    for (format, convert_one) in converters {
       let options = HTMLToMarkdownOptions::default();
-      let expected = match format {
-        OutputFormat::Markdown => html_to_markdown(html, options.clone()),
-        OutputFormat::Text => html_to_text(html, options.clone()),
-        OutputFormat::Html => html_to_html(html, options.clone()),
-      };
+      let expected = convert_one(html, options.clone());
       for split in (1..html.len()).filter(|&index| html.is_char_boundary(index)) {
         let mut processor = MarkdownStreamProcessor::new_with_format(options.clone(), format);
         let mut actual = processor.process_chunk(&html[..split]);

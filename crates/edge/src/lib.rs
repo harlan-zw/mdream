@@ -229,7 +229,7 @@ fn parse_plugins(p: &JsValue) -> mdream::types::PluginConfig {
         .into_iter()
         .map(|(tag_name, ov)| {
           let alias = as_string(&get_prop(&ov, "alias"));
-          let alias_tag_id = alias.as_ref().and_then(|a| mdream::consts::get_tag_id(a));
+          let alias_tag_id = alias.as_ref().and_then(|a| mdream::get_tag_id(a));
           let spacing_vec = as_u8_vec(&get_prop(&ov, "spacing"));
           let config = mdream::types::TagOverrideConfig {
             enter: as_string(&get_prop(&ov, "enter")),

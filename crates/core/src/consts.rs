@@ -251,9 +251,6 @@ pub const MAX_BUILTIN_TAG_NAME: usize = {
   max
 };
 
-pub const ELEMENT_NODE: u8 = 1;
-pub const TEXT_NODE: u8 = 2;
-
 /// Attribute bitmask: which attribute names a tag's rendering actually reads.
 /// Each stored value costs an owned `String`, the dominant allocation during
 /// parsing, yet a built-in tag reads at most three.
@@ -395,18 +392,23 @@ pub const APOS_CHAR: u8 = 39; // '\''
 pub const EXCLAMATION_CHAR: u8 = 33; // '!'
 pub const QUESTION_CHAR: u8 = 63; // '?'
 pub const AMPERSAND_CHAR: u8 = 38; // '&'
-pub const BACKSLASH_CHAR: u8 = 92; // '\'
 pub const DASH_CHAR: u8 = 45; // '-'
 pub const SPACE_CHAR: u8 = 32; // ' '
-pub const TAB_CHAR: u8 = 9; // '\t'
 pub const NEWLINE_CHAR: u8 = 10; // '\n'
 pub const CARRIAGE_RETURN_CHAR: u8 = 13; // '\r'
-pub const BACKTICK_CHAR: u8 = 96; // '`'
 
 /// Longest built-in HTML tag name (`blockquote`, `figcaption`); also the size
 /// of the stack buffer used for the case-insensitive lookup.
 const MAX_BUILTIN_TAG_LEN: usize = 10;
 
+/// Resolve a lowercase built-in tag name to the ID that
+/// [`TagOverrideConfig::alias_tag_id`](crate::TagOverrideConfig::alias_tag_id)
+/// takes. A name outside the built-in set returns `None`.
+///
+/// ```rust
+/// assert!(mdream::get_tag_id("em").is_some());
+/// assert_eq!(mdream::get_tag_id("my-element"), None);
+/// ```
 #[inline]
 pub fn get_tag_id(name: &str) -> Option<u8> {
   get_tag_id_bytes(name.as_bytes())

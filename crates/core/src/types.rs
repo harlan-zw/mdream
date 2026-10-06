@@ -2,7 +2,7 @@ use crate::consts::{ATTR_NONE, attr_bit, attr_name};
 
 /// One attribute: a known name interned to its bit, or an owned lowercase name.
 #[derive(Debug, Clone)]
-pub struct Attr {
+pub(crate) struct Attr {
   bit: u16,
   /// `Some` only when `bit == ATTR_NONE`; a known name comes back from the bit.
   name: Option<Box<str>>,
@@ -38,7 +38,7 @@ const _: () = assert!(size_of::<ElementNode>() == 64);
 /// costing no allocation; only `ATTR_ALL` long-tail names keep an owned
 /// string. Splitting known/custom into two Vecs measured 4-6% slower.
 #[derive(Debug, Clone, Default)]
-pub struct Attributes {
+pub(crate) struct Attributes {
   inner: Vec<Attr>,
 }
 
@@ -86,11 +86,6 @@ impl Attributes {
     self.inner.iter().any(|attr| attr.bit == bit)
   }
 
-  #[inline]
-  pub fn contains_key(&self, key: &str) -> bool {
-    self.get(key).is_some()
-  }
-
   /// Store a known-set attribute by its `attr_bit`; the name is never
   /// allocated. First occurrence wins, per the HTML duplicate-attribute rule:
   /// `<a href=/first href=/second>` links to `/first`.
@@ -126,11 +121,6 @@ impl Attributes {
   }
 
   #[inline]
-  pub fn is_empty(&self) -> bool {
-    self.inner.is_empty()
-  }
-
-  #[inline]
   pub fn clear(&mut self) {
     self.inner.clear();
   }
@@ -142,7 +132,7 @@ impl Attributes {
 }
 
 #[derive(Debug, Clone)]
-pub struct TailwindData {
+pub(crate) struct TailwindData {
   pub prefix: Option<String>,
   pub suffix: Option<String>,
   pub hidden: bool,
@@ -151,7 +141,7 @@ pub struct TailwindData {
 /// The two rare per-node fields, boxed together: held inline they cost every
 /// node 24 bytes, and padding `ElementNode` by 24 measured 3.3-7.8% slower.
 #[derive(Debug, Clone, Default)]
-pub struct NodeExtras {
+pub(crate) struct NodeExtras {
   /// Only set for custom (non-builtin) tags; built-in names come from `tag_id`.
   pub custom_name: Option<Box<str>>,
   pub tailwind: Option<TailwindData>,
@@ -172,7 +162,7 @@ impl NodeExtras {
 }
 
 #[derive(Debug, Clone)]
-pub struct ElementNode {
+pub(crate) struct ElementNode {
   // Pointer-sized fields first (8 bytes each on 64-bit)
   pub attributes: Attributes,
   pub extras: Option<Box<NodeExtras>>,
@@ -227,7 +217,7 @@ impl ElementNode {
 }
 
 #[derive(Clone, Copy)]
-pub struct TagHandler {
+pub(crate) struct TagHandler {
   pub is_self_closing: bool,
   pub is_non_nesting: bool,
   pub collapses_inner_white_space: bool,
@@ -360,7 +350,7 @@ impl ExtractionConfig {
 
 /// Pre-parsed selector for efficient matching during parsing
 #[derive(Debug, Clone)]
-pub enum ParsedSelector {
+pub(crate) enum ParsedSelector {
   Tag(String),
   Class(String),
   Id(String),
@@ -374,6 +364,7 @@ pub enum ParsedSelector {
 
 /// Result element from extraction
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ExtractedElement {
   pub selector: String,
   pub tag_name: String,
@@ -416,10 +407,10 @@ pub struct TagOverrideConfig {
   /// Whether runs of whitespace inside the tag collapse to a single space.
   pub collapses_inner_white_space: Option<bool>,
   /// Tag ID to alias this tag to, making it render exactly like a built-in
-  /// tag. Resolve a name to its numeric ID with [`crate::consts::get_tag_id`]:
+  /// tag. Resolve a name to its numeric ID with [`crate::get_tag_id`]:
   ///
   /// ```rust
-  /// use mdream::{TagOverrideConfig, consts::get_tag_id};
+  /// use mdream::{TagOverrideConfig, get_tag_id};
   ///
   /// let cfg = TagOverrideConfig {
   ///     alias_tag_id: get_tag_id("em"),
@@ -739,6 +730,7 @@ impl HTMLToMarkdownOptions {
 }
 
 /// Result from html_to_markdown conversion with extraction/frontmatter data
+#[non_exhaustive]
 pub struct MdreamResult {
   pub markdown: String,
   pub extracted: Option<Vec<ExtractedElement>>,
@@ -752,9 +744,13 @@ pub struct MdreamResult {
 #[cfg(not(any(feature = "markdown", feature = "text", feature = "html")))]
 compile_error!("mdream needs at least one output format feature: `markdown`, `text`, or `html`.");
 
-/// Output format for conversion. Each variant exists only when its cargo
-/// feature is enabled.
+/// Output format for conversion.
+///
+/// Each variant exists only when its cargo feature is enabled. Cargo unifies
+/// features across a build, so another crate can add a variant to yours. A
+/// `match` on this enum needs a `_` arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum OutputFormat {
   /// Markdown output (default).
   #[cfg(feature = "markdown")]

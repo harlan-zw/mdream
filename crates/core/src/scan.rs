@@ -1141,10 +1141,10 @@ mod tests {
   #[test]
   fn parses_valueless_and_empty_attributes() {
     let a = parse_attributes("disabled checked", ATTR_ALL);
-    assert!(a.contains_key("disabled"));
-    assert!(a.contains_key("checked"));
+    assert!(a.get("disabled").is_some());
+    assert!(a.get("checked").is_some());
     let empty = parse_attributes("", ATTR_ALL);
-    assert!(empty.is_empty());
+    assert!(empty.iter().next().is_none());
   }
 
   #[test]
@@ -1168,7 +1168,7 @@ mod tests {
   fn valueless_equals_attribute_kept_as_empty() {
     // `<a href=>` — attribute ends in `name=`, must survive as empty value
     let a = parse_attributes("href=", ATTR_ALL);
-    assert!(a.contains_key("href"));
+    assert!(a.get("href").is_some());
     assert_eq!(a.get("href"), Some(""));
   }
 
@@ -1182,36 +1182,53 @@ mod tests {
     );
     assert_eq!(a.get("href"), Some("/x"));
     assert_eq!(a.get("title"), Some("t"));
-    assert!(!a.contains_key("class"));
-    assert!(!a.contains_key("rel"));
-    assert!(!a.contains_key("data-id"));
-    assert!(!a.contains_key("target"));
+    assert!(a.get("class").is_none());
+    assert!(a.get("rel").is_none());
+    assert!(a.get("data-id").is_none());
+    assert!(a.get("target").is_none());
   }
 
   #[test]
   fn a_filtered_mask_keeps_trailing_and_valueless_forms() {
     // Tail states (bare name, `name=`, unquoted final value) honour the mask.
-    assert!(parse_attributes("hidden href", ATTR_HREF).contains_key("href"));
-    assert!(parse_attributes("hidden href=", ATTR_HREF).contains_key("href"));
+    assert!(
+      parse_attributes("hidden href", ATTR_HREF)
+        .get("href")
+        .is_some()
+    );
+    assert!(
+      parse_attributes("hidden href=", ATTR_HREF)
+        .get("href")
+        .is_some()
+    );
     assert_eq!(
       parse_attributes("class=c src=/i.png", ATTR_SRC).get("src"),
       Some("/i.png")
     );
-    assert!(!parse_attributes("class=c src=/i.png", ATTR_SRC).contains_key("class"));
+    assert!(
+      parse_attributes("class=c src=/i.png", ATTR_SRC)
+        .get("class")
+        .is_none()
+    );
   }
 
   #[test]
   fn attr_mask_none_stores_nothing_and_all_stores_everything() {
-    assert!(parse_attributes("href=/x class=c", ATTR_NONE).is_empty());
+    assert!(
+      parse_attributes("href=/x class=c", ATTR_NONE)
+        .iter()
+        .next()
+        .is_none()
+    );
     let all = parse_attributes("href=/x class=c", ATTR_ALL);
-    assert!(all.contains_key("href") && all.contains_key("class"));
+    assert!(all.get("href").is_some() && all.get("class").is_some());
   }
 
   #[test]
   fn colspan_uses_the_filtered_attribute_path() {
     let attrs = parse_attributes("colspan=2 id=x", ATTR_COLSPAN);
     assert_eq!(attrs.get("colspan"), Some("2"));
-    assert!(!attrs.contains_key("id"));
+    assert!(attrs.get("id").is_none());
   }
 
   #[test]
@@ -1232,7 +1249,7 @@ mod tests {
     let html = "a href=\"x";
     let (complete, _, attrs, _) = scan_attrs(html, 1, ATTR_ALL);
     assert!(!complete);
-    assert!(attrs.is_empty());
+    assert!(attrs.iter().next().is_none());
   }
 
   #[test]
@@ -1266,7 +1283,7 @@ mod tests {
       assert_eq!(complete, bare_complete, "html={html:?}");
       assert_eq!(extracted_pos, bare_pos, "html={html:?}");
       assert_eq!(extracted_self_closing, bare_self_closing, "html={html:?}");
-      assert!(bare_attrs.is_empty(), "html={html:?}");
+      assert!(bare_attrs.iter().next().is_none(), "html={html:?}");
     }
   }
 
@@ -1475,7 +1492,7 @@ mod tests {
       assert_eq!(complete, bare_complete, "html={html:?}");
       assert_eq!(position, bare_position, "html={html:?}");
       assert_eq!(self_closing, bare_self_closing, "html={html:?}");
-      assert!(bare_attrs.is_empty(), "html={html:?}");
+      assert!(bare_attrs.iter().next().is_none(), "html={html:?}");
     }
   }
 }
