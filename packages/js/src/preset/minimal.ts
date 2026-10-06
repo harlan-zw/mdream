@@ -1,19 +1,5 @@
 import type { Cleaner, MdreamOptions } from '../types'
 import { clean } from '../clean'
-import {
-  TAG_ASIDE,
-  TAG_BUTTON,
-  TAG_EMBED,
-  TAG_FIELDSET,
-  TAG_FOOTER,
-  TAG_FORM,
-  TAG_IFRAME,
-  TAG_INPUT,
-  TAG_NAV,
-  TAG_OBJECT,
-  TAG_SELECT,
-  TAG_TEXTAREA,
-} from '../const'
 import { filterPlugin } from '../plugins/filter'
 import { frontmatterPlugin } from '../plugins/frontmatter'
 import { isolateMainPlugin } from '../plugins/isolate-main'
@@ -35,18 +21,18 @@ export function withMinimalPreset(options: Omit<MdreamOptions, 'clean'> & { clea
       tailwindPlugin(),
       filterPlugin({
         exclude: [
-          TAG_FORM,
-          TAG_FIELDSET,
-          TAG_OBJECT,
-          TAG_EMBED,
-          TAG_FOOTER,
-          TAG_ASIDE,
-          TAG_IFRAME,
-          TAG_INPUT,
-          TAG_TEXTAREA,
-          TAG_SELECT,
-          TAG_BUTTON,
-          TAG_NAV,
+          'form',
+          'fieldset',
+          'object',
+          'embed',
+          'footer',
+          'aside',
+          'iframe',
+          'input',
+          'textarea',
+          'select',
+          'button',
+          'nav',
         ],
       }),
       ...(options.plugins ?? []),

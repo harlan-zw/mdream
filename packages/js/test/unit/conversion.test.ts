@@ -1,6 +1,6 @@
 import type { ElementNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
-import { ELEMENT_NODE, NodeEventEnter, TAG_NAV } from '../../src/const'
+import { ELEMENT_NODE, NodeEventEnter } from '../../src/const'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createPlugin } from '../../src/pluggable/plugin'
 import { filterPlugin } from '../../src/plugins/filter'
@@ -52,7 +52,7 @@ describe('root conversion', () => {
 
   it('applies explicit plugins', () => {
     expect(htmlToMarkdown('<nav>hidden</nav><p>shown</p>', {
-      plugins: [filterPlugin({ exclude: [TAG_NAV] })],
+      plugins: [filterPlugin({ exclude: ['nav'] })],
     })).toBe('shown')
   })
 

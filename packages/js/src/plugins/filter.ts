@@ -5,20 +5,31 @@ import { parseSelector } from '../libs/query-selector'
 import { createPlugin } from '../pluggable/plugin'
 
 /**
- * Compiles a selector (string or TAG_* number) into a fast matcher.
+ * Compiles a selector into a fast matcher.
  * String tag names (e.g. 'form') are compiled to TAG_* ID comparisons at creation time,
  * avoiding per-element string comparison. CSS selectors (e.g. '.class', '#id') use parseSelector.
  */
-function compileSelector(selector: string | number): SelectorMatcher {
-  if (typeof selector === 'number') {
-    return { matches: (element: ElementNode) => element.tagId === selector, toString: () => String(selector) }
-  }
+function compileSelector(selector: string): SelectorMatcher {
   // Check if it's a simple tag name that can be compiled to a TAG_* ID
   const tagId = (TagIdMap as Record<string, number>)[selector]
   if (tagId !== undefined) {
     return { matches: (element: ElementNode) => element.tagId === tagId, toString: () => selector }
   }
   return parseSelector(selector)
+}
+
+/** Compile one option's selectors once, when the plugin is created. */
+function compileSelectors(key: 'include' | 'exclude', selectors: string[] | undefined): SelectorMatcher[] {
+  if (!selectors)
+    return []
+  const matchers: SelectorMatcher[] = []
+  for (const selector of selectors) {
+    // v1 also took internal tag ids. Only names and selectors are public now.
+    if (typeof selector !== 'string')
+      throw new TypeError(`filterPlugin takes \`${key}\` entries as strings. Pass the tag name or a CSS selector, such as 'form'.`)
+    matchers.push(compileSelector(selector))
+  }
+  return matchers
 }
 
 /**
@@ -59,17 +70,17 @@ function isHidden(element: ElementNode): boolean {
  * withQuerySelectorPlugin({ exclude: ['nav', '#sidebar', '.footer'] })
  */
 export function filterPlugin(options: {
-  /** CSS selectors, tag names, or TAG_* constants for elements to include (all others will be excluded) */
-  include?: (string | number)[]
-  /** CSS selectors, tag names, or TAG_* constants for elements to exclude */
-  exclude?: (string | number)[]
+  /** CSS selectors or tag names for elements to include (all others will be excluded) */
+  include?: string[]
+  /** CSS selectors or tag names for elements to exclude */
+  exclude?: string[]
   /** Whether to also process the children of matching elements */
   processChildren?: boolean
   keepAbsolute?: boolean
 } = {}): TransformPlugin {
-  // Parse selectors — compile string tag names to TAG_* IDs for fast numeric matching
-  const includeSelectors = options.include?.map(selector => compileSelector(selector)) || []
-  const excludeSelectors = options.exclude?.map(selector => compileSelector(selector)) || []
+  // Compile tag names to TAG_* ids once, for fast numeric matching.
+  const includeSelectors = compileSelectors('include', options.include)
+  const excludeSelectors = compileSelectors('exclude', options.exclude)
   const processChildren = options.processChildren !== false // Default to true
 
   // Tracks elements whose subtree is hidden. Hidden-ness propagates O(1) from
