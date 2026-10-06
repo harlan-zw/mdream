@@ -24,7 +24,9 @@
     "url": "https://github.com/harlan-zw/mdream",
     "directory": "packages/mdream"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "./wasm-bundler/mdream_edge.js"
+  ],
   "exports": {
     ".": {
       "workerd": {
