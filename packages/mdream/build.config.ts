@@ -55,7 +55,6 @@ export default defineBuildConfig({
     { type: 'bundle', input: './src/browser-stub.ts', dts: false },
     { type: 'bundle', input: './src/edge.ts', rolldown: rolldownWasm },
     { type: 'bundle', input: './src/wasm.ts', rolldown: rolldownWasm },
-    { type: 'bundle', input: './src/worker.ts', rolldown },
     // Bundled as ESM with the WASM bindings external; the end hook inlines them.
     { type: 'bundle', input: './src/iife.ts', rolldown: rolldownWasm, dts: false },
   ],

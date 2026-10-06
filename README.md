@@ -322,7 +322,7 @@ See the [mdream docs](./packages/mdream/README.md#api-reference) for complete de
 
 Use the guide for your engine:
 
-- [`mdream`](./packages/mdream/README.md#migrating-from-v1): browser imports and returns, minimal filtering, and page titles.
+- [`mdream`](./packages/mdream/README.md#migrating-from-v1): browser imports and returns, Web Workers, minimal filtering, and page titles.
 - [`@mdream/js`](./packages/js/README.md#migrating-from-v1): format imports, plugin arrays, cleanup, and callback changes.
 - [Rust crate](./crates/core/README.md#migrating-from-v1): attribute storage and node accessors.
 

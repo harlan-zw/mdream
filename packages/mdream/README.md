@@ -97,7 +97,6 @@ externals: ['mdream']
 - [Browser and Edge Usage](#browser-and-edge-usage)
   - [Edge / Cloudflare Workers](#edge--cloudflare-workers)
   - [Browser CDN (IIFE)](#browser-cdn-iife)
-  - [Web Worker](#web-worker)
 - [llms.txt Generation](#llmstxt-generation)
 - [Related Packages](#related-packages)
 
@@ -136,6 +135,31 @@ For a CDN script:
 
 Use the CDN example inside an async function or a `<script type="module">` block.
 See [Browser and Edge Usage](#browser-and-edge-usage) for edge runtimes and the CDN script.
+
+### Web Worker
+
+v2 removes `mdream/worker`.
+To convert off the main thread, write a module worker that imports `mdream/browser`:
+
+```ts
+// md.worker.ts
+import { htmlToMarkdown } from 'mdream/browser'
+
+addEventListener('message', async (event: MessageEvent<string>) => {
+  postMessage(await htmlToMarkdown(event.data, { minimal: true }))
+})
+```
+
+```ts
+// main.ts
+const worker = new Worker(new URL('./md.worker.ts', import.meta.url), { type: 'module' })
+worker.onmessage = (event: MessageEvent<string>) => console.log(event.data)
+worker.postMessage('<h1>Hello</h1>')
+```
+
+Your bundler builds the worker and copies the WASM binary.
+Functions cannot cross `postMessage`.
+To use callbacks such as `frontmatter`, set them inside the worker.
 
 ### Minimal filtering
 
@@ -1110,8 +1134,6 @@ await init({ module_or_path: wasmModule })
 const markdown = htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 ```
 
-`mdream/worker` is not an edge entry. It runs the conversion in a browser Web Worker; see [Web Worker](#web-worker).
-
 ### Browser CDN (IIFE)
 
 Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It takes the same `MdreamOptions` as the `mdream` entry and returns `Promise<string>`, the same as `mdream/browser`.
@@ -1127,32 +1149,6 @@ Use mdream directly via CDN with no build step. The script inlines the WASM bina
 **CDN Options:**
 - **unpkg**: `https://unpkg.com/mdream@beta/dist/iife.js`
 - **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream@beta/dist/iife.js`
-
-### Web Worker
-
-For browser environments, `mdream/worker` runs conversions off the main thread using a Web Worker.
-Serve the WASM binary and its JavaScript loader from your site.
-The beta worker expects both files to have the same basename.
-If your framework serves `public/` at the site root, copy these assets:
-
-```bash
-mkdir -p public/mdream
-cp node_modules/mdream/wasm/mdream_edge_bg.wasm public/mdream/
-cp node_modules/mdream/wasm/mdream_edge.js public/mdream/mdream_edge_bg.js
-```
-
-```ts
-import { htmlToMarkdown, initWorker, terminateWorker } from 'mdream/worker'
-
-const wasmUrl = new URL('/mdream/mdream_edge_bg.wasm', window.location.href).href
-await initWorker(wasmUrl)
-
-// Takes the same options as the mdream entry. Callbacks run on this thread.
-const markdown = await htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
-
-// Clean up
-terminateWorker()
-```
 
 ## Content Extraction with Readability
 

@@ -8,7 +8,6 @@
 | `mdream` | `workerd`, `edge-light` | `string` |
 | `mdream` | `browser` | throws a `TypeError` when called |
 | `mdream/browser` | direct import | `Promise<string>` |
-| `mdream/worker` | direct import | `Promise<string>` |
 | `mdream/wasm` | direct import | `string`, after `init()` |
 | `dist/iife.js` (CDN) | script tag | `Promise<string>` |
 
@@ -47,6 +46,6 @@ For browser code that wants a plain string with no WASM, `@mdream/js` is synchro
 
 ## Web Worker, raw WASM, and CDN
 
-- `mdream/worker`: call `initWorker(wasmUrl)` first, then `await htmlToMarkdown(html, options)`. Call `terminateWorker()` when done. Options resolve on the main thread, and the callbacks run there.
+- Web Worker: v2 has no worker entry. Write a module worker that imports `mdream/browser`, and start it with `new Worker(new URL('./md.worker.ts', import.meta.url), { type: 'module' })`. Functions cannot cross `postMessage`, so set callbacks inside the worker.
 - `mdream/wasm`: the wasm-bindgen build. Await the default export `init({ module_or_path })` before the first `htmlToMarkdown(html, options)` call. Its `MarkdownStream` runs the callbacks in `finish()`.
 - `https://unpkg.com/mdream/dist/iife.js`: the WASM is inlined and ready at load. `window.mdream` has only `htmlToMarkdown`. There is no `init()`. The call returns `Promise<string>`, the same as `mdream/browser`.

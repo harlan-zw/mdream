@@ -46,14 +46,6 @@
       "types": "./dist/browser.d.mts",
       "default": "./dist/browser.mjs"
     },
-    "./worker": {
-      "types": "./dist/worker.d.mts",
-      "import": {
-        "types": "./dist/worker.d.mts",
-        "default": "./dist/worker.mjs"
-      },
-      "default": "./dist/worker.mjs"
-    },
     "./wasm": {
       "types": "./dist/wasm.d.mts",
       "default": "./dist/wasm.mjs"
