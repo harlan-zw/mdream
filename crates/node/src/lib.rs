@@ -90,8 +90,6 @@ pub struct CleanOptionsNapi {
   pub fragments: Option<bool>,
   #[napi(js_name = "emptyLinks")]
   pub empty_links: Option<bool>,
-  #[napi(js_name = "blankLines")]
-  pub blank_lines: Option<bool>,
   #[napi(js_name = "redundantLinks")]
   pub redundant_links: Option<bool>,
   #[napi(js_name = "selfLinkHeadings")]
@@ -105,8 +103,6 @@ pub struct CleanOptionsNapi {
 #[napi(object)]
 pub struct HtmlToMarkdownOptions {
   pub origin: Option<String>,
-  #[napi(js_name = "cleanUrls")]
-  pub clean_urls: Option<bool>,
   pub clean: Option<CleanOptionsNapi>,
   pub plugins: Option<PluginOptions>,
   #[napi(js_name = "wrapWidth")]
@@ -130,7 +126,6 @@ fn to_core_opts(
       urls: c.urls.unwrap_or(false),
       fragments: c.fragments.unwrap_or(false),
       empty_links: c.empty_links.unwrap_or(false),
-      blank_lines: c.blank_lines.unwrap_or(false),
       redundant_links: c.redundant_links.unwrap_or(false),
       self_link_headings: c.self_link_headings.unwrap_or(false),
       empty_images: c.empty_images.unwrap_or(false),
@@ -144,7 +139,6 @@ fn to_core_opts(
 
   let core_options = mdream::types::HTMLToMarkdownOptions {
     origin: options.as_ref().and_then(|o| o.origin.clone()),
-    clean_urls: options.as_ref().and_then(|o| o.clean_urls).unwrap_or(false),
     clean,
     wrap_width: options
       .as_ref()

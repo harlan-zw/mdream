@@ -1,8 +1,8 @@
 use std::fmt::Write as _;
 
 use mdream::types::{
-  ExtractionConfig, FilterConfig, FrontmatterConfig, HTMLToMarkdownOptions, IsolateMainConfig,
-  OutputFormat, PluginConfig, TagOverrideConfig,
+  CleanConfig, ExtractionConfig, FilterConfig, FrontmatterConfig, HTMLToMarkdownOptions,
+  IsolateMainConfig, OutputFormat, PluginConfig, TagOverrideConfig,
 };
 use mdream::{
   MarkdownStreamProcessor, html_to_html, html_to_markdown, html_to_markdown_result, html_to_text,
@@ -61,7 +61,10 @@ fn convert_text_with_origin(html: &str, origin: &str) -> String {
 fn html_output_is_semantic_and_safe() {
   let options = HTMLToMarkdownOptions {
     origin: Some("https://mdream.dev".to_string()),
-    clean_urls: true,
+    clean: Some(CleanConfig {
+      urls: true,
+      ..Default::default()
+    }),
     ..Default::default()
   };
   assert_eq!(
@@ -3650,7 +3653,10 @@ fn convert_clean(html: &str) -> String {
   html_to_markdown(
     html,
     HTMLToMarkdownOptions {
-      clean_urls: true,
+      clean: Some(CleanConfig {
+        urls: true,
+        ..Default::default()
+      }),
       ..Default::default()
     },
   )
@@ -3661,7 +3667,10 @@ fn convert_clean_with_origin(html: &str, origin: &str) -> String {
     html,
     HTMLToMarkdownOptions {
       origin: Some(origin.to_string()),
-      clean_urls: true,
+      clean: Some(CleanConfig {
+        urls: true,
+        ..Default::default()
+      }),
       ..Default::default()
     },
   )
@@ -3769,7 +3778,6 @@ fn clean_all() -> mdream::types::CleanConfig {
     urls: true,
     fragments: true,
     empty_links: true,
-    blank_lines: false,
     redundant_links: true,
     self_link_headings: true,
     empty_images: true,
@@ -4075,20 +4083,6 @@ fn clean_self_referencing_heading_link() {
     ),
     "## New Project"
   );
-}
-
-#[test]
-fn clean_collapses_blank_lines() {
-  let md = convert_with_clean(
-    r"<p>First</p><br><br><br><br><br><p>Second</p>",
-    clean_all(),
-  );
-  assert!(
-    !md.contains("\n\n\n"),
-    "Should not have 3+ consecutive newlines"
-  );
-  assert!(md.contains("First"));
-  assert!(md.contains("Second"));
 }
 
 #[test]

@@ -236,7 +236,6 @@ mod drain_equiv {
       urls: true,
       fragments: false,
       empty_links: true,
-      blank_lines: true,
       redundant_links: true,
       self_link_headings: true,
       empty_images: true,

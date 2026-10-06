@@ -126,7 +126,6 @@ fn safe_clean() -> CleanConfig {
     urls: true,
     fragments: false,
     empty_links: true,
-    blank_lines: true,
     redundant_links: true,
     self_link_headings: true,
     empty_images: true,
@@ -2439,7 +2438,6 @@ fn streaming_survives_two_reach_back_trims_over_one_run() {
       ),
       HTMLToMarkdownOptions {
         origin: Some("https://example.com/base/".to_string()),
-        clean_urls: true,
         clean: Some(safe_clean()),
         wrap_width: 123,
         ..Default::default()

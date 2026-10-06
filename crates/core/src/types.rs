@@ -578,8 +578,6 @@ pub struct CleanConfig {
   pub fragments: bool,
   /// Strip links with meaningless or executable hrefs → plain text.
   pub empty_links: bool,
-  /// Collapse 3+ consecutive blank lines to 2.
-  pub blank_lines: bool,
   /// Strip links where text == URL: `[https://x.com](https://x.com)` → `https://x.com`.
   pub redundant_links: bool,
   /// Strip self-referencing heading anchors: `## [Title](#title)` → `## Title`.
@@ -604,7 +602,6 @@ impl CleanConfig {
       urls: true,
       fragments: true,
       empty_links: true,
-      blank_lines: true,
       redundant_links: true,
       self_link_headings: true,
       empty_images: true,
@@ -631,9 +628,6 @@ impl CleanConfig {
 pub struct HTMLToMarkdownOptions {
   /// Base URL used to resolve relative links and image sources.
   pub origin: Option<String>,
-  /// Strip common tracking query parameters (utm_*, fbclid, gclid, …) from URLs.
-  /// Shorthand for `clean: Some(CleanConfig { urls: true, ..Default::default() })`.
-  pub clean_urls: bool,
   /// Fine-grained post-processing cleanup rules.
   pub clean: Option<CleanConfig>,
   /// Plugin configuration (filters, frontmatter, extraction, tag overrides, …).
@@ -685,25 +679,16 @@ impl HTMLToMarkdownOptions {
     self
   }
 
-  /// Enable tracking-URL cleanup (`utm_*`, `fbclid`, `gclid`, …).
-  ///
-  /// ```rust
-  /// use mdream::HTMLToMarkdownOptions;
-  ///
-  /// let opts = HTMLToMarkdownOptions::default().with_clean_urls();
-  /// ```
-  #[must_use]
-  pub fn with_clean_urls(mut self) -> Self {
-    self.clean_urls = true;
-    self
-  }
-
   /// Apply a [`CleanConfig`] cleanup preset.
   ///
   /// ```rust
   /// use mdream::{HTMLToMarkdownOptions, CleanConfig};
   ///
   /// let opts = HTMLToMarkdownOptions::default().with_clean(CleanConfig::all());
+  ///
+  /// // Strip tracking query parameters only.
+  /// let opts = HTMLToMarkdownOptions::default()
+  ///     .with_clean(CleanConfig { urls: true, ..Default::default() });
   /// ```
   #[must_use]
   pub fn with_clean(mut self, clean: CleanConfig) -> Self {

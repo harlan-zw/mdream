@@ -768,6 +768,8 @@ pub struct ConvertState {
 
   // Clean mode — bitmask for zero-cost when disabled
   clean_flags: u8,
+  /// Cached `CleanConfig::urls`. URL resolution reads this bool, not the options.
+  clean_urls: bool,
   /// Output state for the active anchor and its malformed nested parents.
   link: LinkOutputState,
   parent_links: Vec<LinkOutputState>,
@@ -1037,6 +1039,7 @@ impl ConvertState {
       format,
       preserve_leading_whitespace: false,
       clean_flags: 0,
+      clean_urls: false,
       link: LinkOutputState::default(),
       parent_links: Vec::new(),
       link_caption_break_snapshot: Vec::new(),
@@ -1085,9 +1088,8 @@ impl ConvertState {
       heading_run_bytes_read: 0,
     };
     // Resolve clean config into bitmask
-    let effective_clean_urls;
     if let Some(ref clean) = s.options.clean {
-      effective_clean_urls = clean.urls || s.options.clean_urls;
+      s.clean_urls = clean.urls;
       let mut flags = 0u8;
       if clean.empty_links {
         flags |= CLEAN_EMPTY_LINKS;
@@ -1108,10 +1110,7 @@ impl ConvertState {
         flags |= CLEAN_EMPTY_LINK_TEXT;
       }
       s.clean_flags = flags;
-    } else {
-      effective_clean_urls = s.options.clean_urls;
     }
-    s.options.clean_urls = effective_clean_urls;
 
     if let Some(plugins) = &s.options.plugins {
       s.has_plugins = true;

@@ -36,7 +36,6 @@ export interface CleanOptionsNapi {
   urls?: boolean
   fragments?: boolean
   emptyLinks?: boolean
-  blankLines?: boolean
   redundantLinks?: boolean
   selfLinkHeadings?: boolean
   emptyImages?: boolean
@@ -73,7 +72,6 @@ export declare function htmlToMarkdownChunks(html: string, options?: HtmlToMarkd
 
 export interface HtmlToMarkdownOptions {
   origin?: string
-  cleanUrls?: boolean
   clean?: CleanOptionsNapi
   plugins?: PluginOptions
   wrapWidth?: number

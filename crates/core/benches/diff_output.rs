@@ -35,7 +35,6 @@ fn make_opts(clean: bool) -> mdream::types::HTMLToMarkdownOptions {
       urls: true,
       fragments: true,
       empty_links: true,
-      blank_lines: false,
       redundant_links: true,
       self_link_headings: true,
       empty_images: true,

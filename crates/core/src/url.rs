@@ -5,7 +5,7 @@
 
 use std::borrow::Cow;
 
-/// Known tracking query parameter prefixes to strip when clean_urls is enabled.
+/// Tracking query parameter prefixes that `CleanConfig::urls` strips.
 const TRACKING_PREFIXES: [&str; 6] = ["utm_", "fbclid", "gclid", "mc_eid", "msclkid", "oly_"];
 
 /// Whether `s` looks like a bare absolute URI suitable for GFM autolink
