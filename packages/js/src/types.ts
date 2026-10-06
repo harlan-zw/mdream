@@ -296,15 +296,6 @@ export interface MdreamProcessingState {
   /** Reference to the last processed text node - for context tracking */
   lastTextNode?: Node
 
-  /** @deprecated No longer read or written. Retained for source compatibility. */
-  inSingleQuote?: boolean
-  /** @deprecated No longer read or written. Retained for source compatibility. */
-  inDoubleQuote?: boolean
-  /** @deprecated No longer read or written. Retained for source compatibility. */
-  inBacktick?: boolean
-  /** @deprecated No longer read or written. Retained for source compatibility. */
-  lastCharWasBackslash?: boolean
-
   /** Resolved plugin instances for efficient iteration */
   resolvedPlugins?: TransformPlugin[]
 
@@ -454,14 +445,6 @@ export interface TagHandler {
 }
 
 // Plugin-specific context interfaces
-export interface ReadabilityContext {
-  score?: number
-  tagCount?: number
-  linkTextLength?: number
-  textLength?: number
-  isHighLinkDensity?: boolean
-}
-
 export interface TailwindContext {
   hidden?: boolean
   prefix?: string
@@ -469,12 +452,6 @@ export interface TailwindContext {
 }
 
 export interface PluginContext {
-  // Readability plugin data
-  score?: number
-  tagCount?: number
-  linkTextLength?: number
-  textLength?: number
-  isHighLinkDensity?: boolean
   // Tailwind plugin data
   tailwind?: TailwindContext
   // Allow additional plugin-specific data
