@@ -5,9 +5,6 @@ extern crate napi_derive;
 
 use napi::bindgen_prelude::*;
 
-// Re-export core types for the binary
-pub use mdream::types::HTMLToMarkdownOptions;
-
 // ── NAPI types (thin wrappers over mdream types) ──
 
 #[napi(object)]
@@ -116,7 +113,7 @@ pub struct HtmlToMarkdownOptions {
 fn to_core_opts(
   options: Option<HtmlToMarkdownOptions>,
 ) -> (
-  mdream::types::HTMLToMarkdownOptions,
+  mdream::types::HtmlToMarkdownOptions,
   mdream::types::OutputFormat,
 ) {
   let clean = options
@@ -137,7 +134,7 @@ fn to_core_opts(
     _ => mdream::types::OutputFormat::Markdown,
   };
 
-  let core_options = mdream::types::HTMLToMarkdownOptions {
+  let core_options = mdream::types::HtmlToMarkdownOptions {
     origin: options.as_ref().and_then(|o| o.origin.clone()),
     clean,
     wrap_width: options

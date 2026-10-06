@@ -7,7 +7,7 @@ fn usize_as_f64(value: usize) -> f64 {
 fn bench(
   label: &str,
   html: &str,
-  opts: &mdream::types::HTMLToMarkdownOptions,
+  opts: &mdream::types::HtmlToMarkdownOptions,
   iterations: u32,
 ) -> f64 {
   let size_kb = usize_as_f64(html.len()) / 1024.0;
@@ -47,7 +47,7 @@ fn utf8_chunks(s: &str, target: usize) -> Vec<&str> {
 }
 
 /// Stream `html` in `chunk`-sized pieces, discarding output like the wire.
-fn run_stream(html: &str, opts: &mdream::types::HTMLToMarkdownOptions, chunk: usize) -> usize {
+fn run_stream(html: &str, opts: &mdream::types::HtmlToMarkdownOptions, chunk: usize) -> usize {
   let mut p = mdream::MarkdownStreamProcessor::new(opts.clone());
   let mut produced = 0usize;
   for piece in utf8_chunks(html, chunk) {
@@ -59,7 +59,7 @@ fn run_stream(html: &str, opts: &mdream::types::HTMLToMarkdownOptions, chunk: us
 fn bench_stream(
   label: &str,
   html: &str,
-  opts: &mdream::types::HTMLToMarkdownOptions,
+  opts: &mdream::types::HtmlToMarkdownOptions,
   chunk: usize,
   iterations: u32,
 ) {
@@ -131,8 +131,8 @@ fn main() {
     ),
   ];
 
-  let default_opts = mdream::types::HTMLToMarkdownOptions::default();
-  let clean_opts = mdream::types::HTMLToMarkdownOptions {
+  let default_opts = mdream::types::HtmlToMarkdownOptions::default();
+  let clean_opts = mdream::types::HtmlToMarkdownOptions {
     clean: Some(clean_all()),
     ..Default::default()
   };
@@ -163,7 +163,7 @@ fn main() {
 
   // Streaming must not regress one-shot throughput. Draining is off when
   // `fragments` cleaning is on, so the clean set here omits it.
-  let stream_clean_opts = mdream::types::HTMLToMarkdownOptions {
+  let stream_clean_opts = mdream::types::HtmlToMarkdownOptions {
     clean: Some(mdream::types::CleanConfig {
       fragments: false,
       ..clean_all()

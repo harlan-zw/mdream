@@ -11,7 +11,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mdream::MarkdownStreamProcessor;
-use mdream::types::{ExtractionConfig, HTMLToMarkdownOptions, PluginConfig};
+use mdream::types::{ExtractionConfig, HtmlToMarkdownOptions, PluginConfig};
 
 struct Tracking;
 
@@ -46,10 +46,10 @@ fn excluded_script_data_is_not_retained() {
   html.push_str("</script><p>after</p>");
 
   for (label, options) in [
-    ("without extraction", HTMLToMarkdownOptions::default()),
+    ("without extraction", HtmlToMarkdownOptions::default()),
     (
       "without an active extraction",
-      HTMLToMarkdownOptions {
+      HtmlToMarkdownOptions {
         plugins: Some(PluginConfig {
           extraction: Some(ExtractionConfig::new(&["p"])),
           ..Default::default()

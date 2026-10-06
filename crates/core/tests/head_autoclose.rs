@@ -1,10 +1,10 @@
 //! Browser recovery: an unclosed <head> (no </head>/<body>) must not swallow body
 //! content. Body-level start tags auto-close head so block spacing is preserved.
 //! Regression for marketingexamples.com pages collapsing to a single line.
-use mdream::{html_to_markdown, types::HTMLToMarkdownOptions};
+use mdream::{html_to_markdown, types::HtmlToMarkdownOptions};
 
 fn convert(html: &str) -> String {
-  html_to_markdown(html, HTMLToMarkdownOptions::default())
+  html_to_markdown(html, HtmlToMarkdownOptions::default())
 }
 
 #[test]

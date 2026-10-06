@@ -1,14 +1,14 @@
 use mdream::types::{
-  ExtractionConfig, FrontmatterConfig, HTMLToMarkdownOptions, IsolateMainConfig, PluginConfig,
+  ExtractionConfig, FrontmatterConfig, HtmlToMarkdownOptions, IsolateMainConfig, PluginConfig,
 };
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_markdown_result};
 
 fn convert(html: &str) -> String {
-  html_to_markdown(html, HTMLToMarkdownOptions::default())
+  html_to_markdown(html, HtmlToMarkdownOptions::default())
 }
 
 fn stream(chunks: &[&str]) -> String {
-  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut output = String::new();
   for chunk in chunks {
     output.push_str(&processor.process_chunk(chunk));
@@ -53,7 +53,7 @@ fn flow_content_in_template_does_not_close_outer_head() {
 fn extraction_sees_parsed_template_content_without_rendering_it() {
   let result = html_to_markdown_result(
     "<template><strong class=\"target\">hidden</strong></template><p>after</p>",
-    HTMLToMarkdownOptions {
+    HtmlToMarkdownOptions {
       plugins: Some(PluginConfig {
         extraction: Some(ExtractionConfig::new(&[".target"])),
         ..Default::default()
@@ -74,7 +74,7 @@ fn inert_content_does_not_affect_isolate_main_or_frontmatter_state() {
   let html = "<head><template><title>Hidden</title><meta name=\"description\" content=\"Hidden description\"></template><title>Visible</title></head><template><main>Hidden main</main></template><main><p>Visible body</p></main>";
   let result = html_to_markdown(
     html,
-    HTMLToMarkdownOptions {
+    HtmlToMarkdownOptions {
       plugins: Some(PluginConfig {
         frontmatter: Some(FrontmatterConfig::default()),
         isolate_main: Some(IsolateMainConfig),

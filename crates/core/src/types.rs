@@ -459,7 +459,7 @@ impl TagOverrideConfig {
   }
 }
 
-/// Plugin configuration bundled into [`HTMLToMarkdownOptions`].
+/// Plugin configuration bundled into [`HtmlToMarkdownOptions`].
 ///
 /// Every field is optional; only set the plugins you need. All unset fields
 /// leave the corresponding feature disabled.
@@ -607,16 +607,16 @@ impl CleanConfig {
 /// options you need:
 ///
 /// ```rust
-/// use mdream::{HTMLToMarkdownOptions, CleanConfig};
+/// use mdream::{HtmlToMarkdownOptions, CleanConfig};
 ///
-/// let opts = HTMLToMarkdownOptions {
+/// let opts = HtmlToMarkdownOptions {
 ///     origin: Some("https://example.com".into()),
 ///     clean: Some(CleanConfig::all()),
 ///     ..Default::default()
 /// };
 /// ```
 #[derive(Debug, Clone, Default)]
-pub struct HTMLToMarkdownOptions {
+pub struct HtmlToMarkdownOptions {
   /// Base URL used to resolve relative links and image sources.
   pub origin: Option<String>,
   /// Fine-grained post-processing cleanup rules.
@@ -656,13 +656,13 @@ pub struct HTMLToMarkdownOptions {
   pub max_node_bytes: usize,
 }
 
-impl HTMLToMarkdownOptions {
+impl HtmlToMarkdownOptions {
   /// Set the base URL for resolving relative links and images.
   ///
   /// ```rust
-  /// use mdream::HTMLToMarkdownOptions;
+  /// use mdream::HtmlToMarkdownOptions;
   ///
-  /// let opts = HTMLToMarkdownOptions::default().with_origin("https://example.com");
+  /// let opts = HtmlToMarkdownOptions::default().with_origin("https://example.com");
   /// ```
   #[must_use]
   pub fn with_origin(mut self, origin: impl Into<String>) -> Self {
@@ -673,12 +673,12 @@ impl HTMLToMarkdownOptions {
   /// Apply a [`CleanConfig`] cleanup preset.
   ///
   /// ```rust
-  /// use mdream::{HTMLToMarkdownOptions, CleanConfig};
+  /// use mdream::{HtmlToMarkdownOptions, CleanConfig};
   ///
-  /// let opts = HTMLToMarkdownOptions::default().with_clean(CleanConfig::all());
+  /// let opts = HtmlToMarkdownOptions::default().with_clean(CleanConfig::all());
   ///
   /// // Strip tracking query parameters only.
-  /// let opts = HTMLToMarkdownOptions::default()
+  /// let opts = HtmlToMarkdownOptions::default()
   ///     .with_clean(CleanConfig { urls: true, ..Default::default() });
   /// ```
   #[must_use]
@@ -690,9 +690,9 @@ impl HTMLToMarkdownOptions {
   /// Enable plugins via a [`PluginConfig`].
   ///
   /// ```rust
-  /// use mdream::{HTMLToMarkdownOptions, PluginConfig};
+  /// use mdream::{HtmlToMarkdownOptions, PluginConfig};
   ///
-  /// let opts = HTMLToMarkdownOptions::default()
+  /// let opts = HtmlToMarkdownOptions::default()
   ///     .with_plugins(PluginConfig::isolate_main());
   /// ```
   #[must_use]
@@ -704,9 +704,9 @@ impl HTMLToMarkdownOptions {
   /// Hard-wrap prose at `width` characters on word boundaries.
   ///
   /// ```rust
-  /// use mdream::HTMLToMarkdownOptions;
+  /// use mdream::HtmlToMarkdownOptions;
   ///
-  /// let opts = HTMLToMarkdownOptions::default().with_wrap_width(80);
+  /// let opts = HtmlToMarkdownOptions::default().with_wrap_width(80);
   /// ```
   #[must_use]
   pub fn with_wrap_width(mut self, width: usize) -> Self {
@@ -718,9 +718,9 @@ impl HTMLToMarkdownOptions {
   /// token, code block, or inline code span. Applies to one-shot and streaming conversion.
   ///
   /// ```rust
-  /// use mdream::HTMLToMarkdownOptions;
+  /// use mdream::HtmlToMarkdownOptions;
   ///
-  /// let opts = HTMLToMarkdownOptions::default().with_max_node_bytes(64 * 1024);
+  /// let opts = HtmlToMarkdownOptions::default().with_max_node_bytes(64 * 1024);
   /// ```
   #[must_use]
   pub fn with_max_node_bytes(mut self, bytes: usize) -> Self {

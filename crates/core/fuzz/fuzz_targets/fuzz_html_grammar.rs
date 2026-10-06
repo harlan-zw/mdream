@@ -225,7 +225,7 @@ fuzz_target!(|input: Input| {
     tag_overrides: None,
   });
 
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     origin: Some("https://example.com/base/".to_string()),
     // In Markdown, fragment cleanup buffers until finish; test incremental drains.
     clean: input.clean_all.then(|| CleanConfig {

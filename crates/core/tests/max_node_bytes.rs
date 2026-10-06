@@ -19,7 +19,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use mdream::types::{
-  CleanConfig, ExtractionConfig, HTMLToMarkdownOptions, PluginConfig, TagOverrideConfig,
+  CleanConfig, ExtractionConfig, HtmlToMarkdownOptions, PluginConfig, TagOverrideConfig,
 };
 use mdream::{MarkdownStreamProcessor, html_to_markdown_result};
 
@@ -71,8 +71,8 @@ unsafe impl GlobalAlloc for Tracking {
 #[global_allocator]
 static ALLOC: Tracking = Tracking;
 
-fn options(cap: usize) -> HTMLToMarkdownOptions {
-  let opts = HTMLToMarkdownOptions::default();
+fn options(cap: usize) -> HtmlToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions::default();
   if cap == 0 {
     opts
   } else {
@@ -80,8 +80,8 @@ fn options(cap: usize) -> HTMLToMarkdownOptions {
   }
 }
 
-fn surfaced_cdata_options(cap: usize) -> HTMLToMarkdownOptions {
-  HTMLToMarkdownOptions {
+fn surfaced_cdata_options(cap: usize) -> HtmlToMarkdownOptions {
+  HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       tag_overrides: Some(vec![(
         "#cdata-section".to_string(),
@@ -103,7 +103,7 @@ fn stream(html: &str, chunk: usize, cap: usize) -> String {
   out
 }
 
-fn stream_parts_with_options(parts: &[&str], options: HTMLToMarkdownOptions) -> (String, bool) {
+fn stream_parts_with_options(parts: &[&str], options: HtmlToMarkdownOptions) -> (String, bool) {
   let mut p = MarkdownStreamProcessor::new(options);
   let mut out = String::new();
   for part in parts {
@@ -134,7 +134,7 @@ fn assert_capped_inline_code(html: &str, cap: usize, expected: &str, truncated: 
 
 fn assert_capped_inline_code_with_options(
   html: &str,
-  options: HTMLToMarkdownOptions,
+  options: HtmlToMarkdownOptions,
   expected: &str,
   truncated: bool,
 ) {
@@ -148,8 +148,8 @@ fn assert_capped_inline_code_with_options(
   }
 }
 
-fn extracting(cap: usize, selectors: &[&str]) -> HTMLToMarkdownOptions {
-  HTMLToMarkdownOptions {
+fn extracting(cap: usize, selectors: &[&str]) -> HtmlToMarkdownOptions {
+  HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       extraction: Some(ExtractionConfig::new(selectors)),
       ..Default::default()
@@ -163,7 +163,7 @@ fn peak(html: &str, chunk: usize, cap: usize) -> u64 {
   peak_with(html, chunk, options(cap))
 }
 
-fn peak_with(html: &str, chunk: usize, opts: HTMLToMarkdownOptions) -> u64 {
+fn peak_with(html: &str, chunk: usize, opts: HtmlToMarkdownOptions) -> u64 {
   ACCT.set(Acct {
     on: true,
     live: 0,
@@ -828,7 +828,7 @@ fn link_output_cannot_grow_an_inline_code_span_past_the_cap() {
 
 #[test]
 fn override_output_consumes_the_inline_code_span_cap() {
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       tag_overrides: Some(vec![(
         "x".to_string(),
@@ -851,7 +851,7 @@ fn override_output_consumes_the_inline_code_span_cap() {
 // first inline code element, and streaming held its output at the leaked span.
 #[test]
 fn an_exit_only_override_still_pops_the_inline_code_span() {
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       tag_overrides: Some(vec![(
         "code".to_string(),
@@ -874,7 +874,7 @@ fn an_exit_only_override_still_pops_the_inline_code_span() {
 
 #[test]
 fn frontmatter_output_cannot_escape_an_inline_code_span_cap() {
-  let opts = HTMLToMarkdownOptions {
+  let opts = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig::frontmatter()),
     ..options(8)
   };
@@ -1752,7 +1752,7 @@ fn a_dropped_header_does_not_align_a_retained_column() {
 // that held output and cuts the document at the token where it passes.
 #[test]
 fn held_back_output_is_capped() {
-  let self_links = || HTMLToMarkdownOptions {
+  let self_links = || HtmlToMarkdownOptions {
     clean: Some(CleanConfig {
       self_link_headings: true,
       ..Default::default()
@@ -1812,7 +1812,7 @@ fn held_back_output_is_capped() {
         "<p>before</p><h1>{}</h1><p>after</p>",
         repeat_to("####<a href=\"/x\"> </a>", HUGE)
       ),
-      HTMLToMarkdownOptions {
+      HtmlToMarkdownOptions {
         clean: Some(CleanConfig {
           empty_link_text: true,
           ..Default::default()
@@ -1826,7 +1826,7 @@ fn held_back_output_is_capped() {
         "<p>before</p><p><a href=\"/x\">{}</a></p><p>after</p>",
         repeat_to("&#x3000;<!---->&nbsp;<span></span>", HUGE)
       ),
-      HTMLToMarkdownOptions {
+      HtmlToMarkdownOptions {
         clean: Some(CleanConfig {
           empty_link_text: true,
           ..Default::default()
@@ -1863,7 +1863,7 @@ fn held_back_output_is_capped() {
     let uncapped = peak_with(
       &html,
       8 * 1024,
-      HTMLToMarkdownOptions {
+      HtmlToMarkdownOptions {
         max_node_bytes: 0,
         ..opts.clone()
       },
@@ -1883,7 +1883,7 @@ fn held_back_output_is_capped() {
 #[test]
 fn a_long_text_run_held_back_is_capped() {
   let cap = 2 * CAP;
-  let self_links = HTMLToMarkdownOptions {
+  let self_links = HtmlToMarkdownOptions {
     clean: Some(CleanConfig {
       self_link_headings: true,
       ..Default::default()
@@ -1999,7 +1999,7 @@ fn an_item_opened_by_a_block_is_not_held_back() {
 // A link stops holding once its text is not blank, however long it gets.
 #[test]
 fn a_link_with_text_is_not_held_back() {
-  let opts = |cap| HTMLToMarkdownOptions {
+  let opts = |cap| HtmlToMarkdownOptions {
     clean: Some(CleanConfig {
       empty_link_text: true,
       ..Default::default()

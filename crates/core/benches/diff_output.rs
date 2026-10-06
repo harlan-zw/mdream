@@ -1,5 +1,5 @@
-fn make_opts(clean: bool) -> mdream::types::HTMLToMarkdownOptions {
-  let mut opts = mdream::types::HTMLToMarkdownOptions {
+fn make_opts(clean: bool) -> mdream::types::HtmlToMarkdownOptions {
+  let mut opts = mdream::types::HtmlToMarkdownOptions {
     plugins: Some(mdream::types::PluginConfig {
       isolate_main: Some(mdream::types::IsolateMainConfig {}),
       filter: Some(mdream::types::FilterConfig {

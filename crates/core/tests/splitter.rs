@@ -401,7 +401,7 @@ fn mixed_header_levels() {
 #[test]
 fn html_to_markdown_chunks_convenience() {
   let html = "<h2>Section A</h2><p>Content A</p><h2>Section B</h2><p>Content B</p>";
-  let md_opts = mdream::types::HTMLToMarkdownOptions::default();
+  let md_opts = mdream::types::HtmlToMarkdownOptions::default();
   let split_opts = default_opts();
   let chunks = mdream::splitter::html_to_markdown_chunks(html, md_opts, &split_opts);
   assert!(chunks.len() >= 2);

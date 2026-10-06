@@ -1,5 +1,5 @@
 use mdream::{
-  FilterConfig, HTMLToMarkdownOptions, MarkdownStreamProcessor, PluginConfig, TagOverrideConfig,
+  FilterConfig, HtmlToMarkdownOptions, MarkdownStreamProcessor, PluginConfig, TagOverrideConfig,
   TailwindConfig, html_to_markdown,
 };
 
@@ -9,7 +9,7 @@ const LIMIT: usize = 512;
 fn content_below_the_limit_is_unchanged() {
   let html = format!("{}deep{}", "<div>".repeat(LIMIT), "</div>".repeat(LIMIT));
   assert_eq!(
-    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&html, HtmlToMarkdownOptions::default()),
     "deep"
   );
 }
@@ -22,7 +22,7 @@ fn conversion_continues_when_nesting_exceeds_the_materialized_limit() {
     "</div>".repeat(100_000),
   );
   assert_eq!(
-    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&html, HtmlToMarkdownOptions::default()),
     "before\n\ninside\n\nafter",
   );
 }
@@ -34,14 +34,14 @@ fn self_closing_elements_at_the_limit_do_not_stop_conversion() {
     "<div>".repeat(LIMIT),
     "</div>".repeat(LIMIT),
   );
-  let output = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  let output = html_to_markdown(&html, HtmlToMarkdownOptions::default());
   assert!(output.contains("kept"), "got: {output:?}");
 }
 
 #[test]
 fn implied_end_recovery_does_not_trigger_the_limit() {
   let html = "<p>item".repeat(1_000);
-  let output = html_to_markdown(&html, HTMLToMarkdownOptions::default());
+  let output = html_to_markdown(&html, HtmlToMarkdownOptions::default());
   assert_eq!(output.matches("item").count(), 1_000);
 }
 
@@ -53,7 +53,7 @@ fn later_siblings_survive_implied_ends_in_overflow() {
     "</div>".repeat(LIMIT),
   );
   assert_eq!(
-    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&html, HtmlToMarkdownOptions::default()),
     "one two\n\nafter"
   );
 }
@@ -62,7 +62,7 @@ fn later_siblings_survive_implied_ends_in_overflow() {
 fn implied_ends_recover_across_the_overflow_boundary() {
   let html = format!("<p>A{}<em>B<div>C", "<span>".repeat(LIMIT - 1));
   assert_eq!(
-    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&html, HtmlToMarkdownOptions::default()),
     "AB\n\nC"
   );
 }
@@ -71,13 +71,13 @@ fn implied_ends_recover_across_the_overflow_boundary() {
 fn links_and_list_items_recover_across_the_overflow_boundary() {
   let link = format!("<a href=\"x\">A{}<em>B</a>C", "<span>".repeat(LIMIT - 1));
   assert_eq!(
-    html_to_markdown(&link, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&link, HtmlToMarkdownOptions::default()),
     "[AB](x)C"
   );
 
   let list = format!("<ul><li>A{}<em>B<li>C</ul>", "<span>".repeat(LIMIT - 2));
   assert_eq!(
-    html_to_markdown(&list, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&list, HtmlToMarkdownOptions::default()),
     "- AB\n- C"
   );
 }
@@ -90,14 +90,14 @@ fn mismatched_builtin_closes_inside_overflow_are_ignored() {
     "</div>".repeat(LIMIT),
   );
   assert_eq!(
-    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&html, HtmlToMarkdownOptions::default()),
     "inside\n\nafter"
   );
 }
 
 #[test]
 fn streaming_continues_after_the_limit() {
-  let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut output = stream.process_chunk("<p>before</p>");
   for _ in 0..10_000 {
     output.push_str(&stream.process_chunk("<div>"));
@@ -119,7 +119,7 @@ fn content_hidden_at_the_limit_cannot_leak() {
     "</div>".repeat(LIMIT - 1),
   );
   assert_eq!(
-    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&html, HtmlToMarkdownOptions::default()),
     "visible"
   );
 }
@@ -131,7 +131,7 @@ fn skipped_cdata_override_does_not_emit_or_pop_its_parent() {
     "<div>".repeat(LIMIT),
     "</div>".repeat(LIMIT),
   );
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       tag_overrides: Some(vec![(
         "#cdata-section".to_string(),
@@ -156,7 +156,7 @@ fn raw_text_stays_hidden_beyond_the_materialized_limit() {
     "</div>".repeat(LIMIT),
   );
   assert_eq!(
-    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&html, HtmlToMarkdownOptions::default()),
     "visible"
   );
 }
@@ -169,7 +169,7 @@ fn visible_table_and_image_content_survives_overflow() {
     "</div>".repeat(LIMIT),
   );
   assert_eq!(
-    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&html, HtmlToMarkdownOptions::default()),
     "cell![image](x)\n\nafter"
   );
 }
@@ -182,14 +182,14 @@ fn builtin_closes_are_case_insensitive_in_overflow() {
     "</div>".repeat(LIMIT),
   );
   assert_eq!(
-    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&html, HtmlToMarkdownOptions::default()),
     "visible"
   );
 }
 
 #[test]
 fn streamed_raw_text_close_can_split_across_chunks() {
-  let mut stream = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut output = stream.process_chunk(&format!("{}<script>hidden</scr", "<div>".repeat(LIMIT)));
   output.push_str(&stream.process_chunk(&format!(
     "ipt><p>visible</p>{}<p>tail</p>",
@@ -207,7 +207,7 @@ fn matching_tag_depth_context_survives_255() {
     "</blockquote>".repeat(255),
     "</blockquote>".repeat(45),
   );
-  assert!(html_to_markdown(&html, HTMLToMarkdownOptions::default()).contains("\\>"));
+  assert!(html_to_markdown(&html, HtmlToMarkdownOptions::default()).contains("\\>"));
 }
 
 #[test]
@@ -218,7 +218,7 @@ fn structural_ancestors_survive_the_overflow_boundary() {
     "</div>".repeat(LIMIT),
   );
   assert_eq!(
-    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&html, HtmlToMarkdownOptions::default()),
     "> > ALPHA\n> >\n> > X\n> >\n> > OMEGA\n\nZED"
   );
 }
@@ -233,7 +233,7 @@ fn template_content_stays_inert_inside_the_flattened_subtree() {
     "</div>".repeat(LIMIT),
   );
   assert_eq!(
-    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&html, HtmlToMarkdownOptions::default()),
     "after"
   );
 }
@@ -245,7 +245,7 @@ fn filtered_content_stays_hidden_in_overflow() {
     "<div>".repeat(LIMIT),
     "</div>".repeat(LIMIT),
   );
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       filter: Some(FilterConfig::default()),
       ..Default::default()
@@ -262,7 +262,7 @@ fn included_flattened_root_overrides_excluded_ancestors() {
     "<div>".repeat(LIMIT),
     "</div>".repeat(LIMIT),
   );
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       filter: Some(FilterConfig::include(&["nav"])),
       ..Default::default()
@@ -279,7 +279,7 @@ fn included_flattened_root_stays_hidden_under_a_hidden_ancestor() {
     "<div>".repeat(LIMIT - 1),
     "</div>".repeat(LIMIT - 1),
   );
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       filter: Some(FilterConfig::include(&["nav"])),
       ..Default::default()
@@ -306,7 +306,7 @@ fn output_neutral_plugins_keep_visible_overflow_content() {
       ..Default::default()
     },
   ] {
-    let options = HTMLToMarkdownOptions {
+    let options = HtmlToMarkdownOptions {
       plugins: Some(plugins),
       ..Default::default()
     };
@@ -322,7 +322,7 @@ fn self_closing_content_stays_inert_inside_overflow_templates() {
     "</div>".repeat(LIMIT),
   );
   assert_eq!(
-    html_to_markdown(&html, HTMLToMarkdownOptions::default()),
+    html_to_markdown(&html, HtmlToMarkdownOptions::default()),
     "after"
   );
 }
@@ -334,7 +334,7 @@ fn excluded_raw_aliases_stay_inert_in_overflow() {
     "<div>".repeat(LIMIT),
     "</div>".repeat(LIMIT),
   );
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
       tag_overrides: Some(vec![
         ("x-raw".to_string(), TagOverrideConfig::alias("script")),
@@ -364,7 +364,7 @@ fn hidden_raw_overflow_root_scans_as_raw_text() {
       ..Default::default()
     },
   ] {
-    let options = HTMLToMarkdownOptions {
+    let options = HtmlToMarkdownOptions {
       plugins: Some(plugins),
       ..Default::default()
     };
@@ -392,7 +392,7 @@ fn only_plugin_hidden_subtrees_start_opaque_overflow() {
       ..Default::default()
     },
   ] {
-    let options = HTMLToMarkdownOptions {
+    let options = HtmlToMarkdownOptions {
       plugins: Some(plugins),
       ..Default::default()
     };

@@ -1,12 +1,12 @@
 //! Select insertion-mode recovery for optional option/optgroup end tags.
-use mdream::{MarkdownStreamProcessor, html_to_markdown, types::HTMLToMarkdownOptions};
+use mdream::{MarkdownStreamProcessor, html_to_markdown, types::HtmlToMarkdownOptions};
 
 fn convert(html: &str) -> String {
-  html_to_markdown(html, HTMLToMarkdownOptions::default())
+  html_to_markdown(html, HtmlToMarkdownOptions::default())
 }
 
 fn stream(chunks: &[&str]) -> String {
-  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut out = String::new();
   for chunk in chunks {
     out.push_str(&processor.process_chunk(chunk));

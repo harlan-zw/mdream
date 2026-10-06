@@ -1,6 +1,6 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
-use mdream::{MarkdownStreamProcessor, types::HTMLToMarkdownOptions};
+use mdream::{MarkdownStreamProcessor, types::HtmlToMarkdownOptions};
 
 // Feeds one HTML document through the streaming processor split into small,
 // fixed-width chunks (rounded up to char boundaries). Unlike `fuzz_streaming`
@@ -19,7 +19,7 @@ fuzz_target!(|data: &[u8]| {
   };
   let html = String::from_utf8_lossy(html_bytes);
 
-  let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+  let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let mut start = 0;
   while start < html.len() {
     let mut end = (start + width).min(html.len());

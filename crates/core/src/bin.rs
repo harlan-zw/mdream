@@ -1,5 +1,5 @@
 use mdream::MarkdownStreamProcessor;
-use mdream::types::{CleanConfig, HTMLToMarkdownOptions, OutputFormat};
+use mdream::types::{CleanConfig, HtmlToMarkdownOptions, OutputFormat};
 use std::io::{self, Read, Write};
 
 /// Output formats this build accepts, in `--format` spelling.
@@ -77,7 +77,7 @@ fn main() -> io::Result<()> {
     i += 1;
   }
 
-  let options = HTMLToMarkdownOptions {
+  let options = HtmlToMarkdownOptions {
     origin,
     clean: clean_urls.then(|| CleanConfig {
       urls: true,

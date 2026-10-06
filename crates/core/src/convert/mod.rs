@@ -9,7 +9,7 @@ use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selec
 use crate::tags::get_tag_handler;
 use crate::tailwind::process_tailwind_classes;
 use crate::types::{
-  ElementNode, ExtractedElement, HTMLToMarkdownOptions, NodeExtras, OutputFormat, TagHandler,
+  ElementNode, ExtractedElement, HtmlToMarkdownOptions, NodeExtras, OutputFormat, TagHandler,
   TagOverrideConfig, TailwindData,
 };
 use crate::url::{is_autolink_uri, is_data_url, is_empty_link_href, resolve_url, slugify_heading};
@@ -670,7 +670,7 @@ pub struct ConvertState {
   filter_process_children: bool,
 
   // === Markdown output state ===
-  pub options: HTMLToMarkdownOptions,
+  pub options: HtmlToMarkdownOptions,
   pub buffer: String,
   last_content_cache_len: usize,
   table_rendered_table: bool,
@@ -923,7 +923,7 @@ impl ConvertState {
     self.depth_map[TAG_TD as usize] > 0 || self.depth_map[TAG_TH as usize] > 0
   }
 
-  pub fn new(options: HTMLToMarkdownOptions, capacity: usize, format: OutputFormat) -> Self {
+  pub fn new(options: HtmlToMarkdownOptions, capacity: usize, format: OutputFormat) -> Self {
     // Read wrap width before `options` is moved into the struct below.
     let options_wrap_width = options.wrap_width;
     let options_max_node_bytes = options.max_node_bytes;
@@ -3034,7 +3034,7 @@ mod tests {
 
   #[test]
   fn extracted_script_does_not_backfill_rejected_utf8_slack() {
-    let options = HTMLToMarkdownOptions {
+    let options = HtmlToMarkdownOptions {
       max_node_bytes: 8,
       plugins: Some(PluginConfig {
         extraction: Some(ExtractionConfig::new(&["script"])),
@@ -3066,7 +3066,7 @@ mod tests {
         "<h2><a href=\"/x\">{hashes}<br>{hashes}{}</a></h2><p>after</p>",
         filler.repeat(2_000)
       );
-      let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions {
         max_node_bytes: cap,
         ..Default::default()
       });
@@ -3099,7 +3099,7 @@ mod tests {
       assert_eq!(state.trailing_heading_run(1 << 20), expected);
     }
 
-    let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
     let state = &mut processor.state;
     state.buffer.push_str(&"#".repeat(512));
     check(state);
@@ -3149,7 +3149,7 @@ mod tests {
 
   #[test]
   fn requote_with_list_indent_invalidates_heading_run() {
-    let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions::default());
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
     let state = &mut processor.state;
     state.buffer = format!("{}\n{}", "a".repeat(8192), "#".repeat(64));
     state.blockquotes.push(BlockquoteFrame {
@@ -3167,7 +3167,7 @@ mod tests {
   #[test]
   fn rejected_utf8_does_not_mark_text_non_whitespace() {
     fn check(parts: &[&str]) {
-      let mut processor = MarkdownStreamProcessor::new(HTMLToMarkdownOptions {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions {
         max_node_bytes: 4,
         ..Default::default()
       });

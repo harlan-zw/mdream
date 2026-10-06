@@ -4,7 +4,7 @@
 
 use mdream::MarkdownStreamProcessor;
 use mdream::html_to_html;
-use mdream::types::{HTMLToMarkdownOptions, OutputFormat};
+use mdream::types::{HtmlToMarkdownOptions, OutputFormat};
 
 /// Inputs separated by U+001E, so trailing newlines stay part of each input.
 const SWEEP: &str = include_str!("fixtures/html-stream-parity.txt");
@@ -15,7 +15,7 @@ const EVERY_SPLIT_MAX_LEN: usize = 2048;
 
 fn stream_at(html: &str, splits: &[usize]) -> String {
   let mut p =
-    MarkdownStreamProcessor::new_with_format(HTMLToMarkdownOptions::default(), OutputFormat::Html);
+    MarkdownStreamProcessor::new_with_format(HtmlToMarkdownOptions::default(), OutputFormat::Html);
   let mut out = String::new();
   let mut start = 0;
   for &end in splits.iter().chain(std::iter::once(&html.len())) {
@@ -27,7 +27,7 @@ fn stream_at(html: &str, splits: &[usize]) -> String {
 }
 
 fn assert_stream_matches(html: &str) {
-  let expected = html_to_html(html, HTMLToMarkdownOptions::default());
+  let expected = html_to_html(html, HtmlToMarkdownOptions::default());
   let boundaries: Vec<usize> = (1..html.len())
     .filter(|&i| html.is_char_boundary(i))
     .collect();
@@ -83,7 +83,7 @@ fn html_stream_matches_one_shot_on_fixtures() {
       include_str!("fixtures/github-markdown-complete.html"),
     ),
   ] {
-    let expected = html_to_html(html, HTMLToMarkdownOptions::default());
+    let expected = html_to_html(html, HtmlToMarkdownOptions::default());
     for chunk in [1usize, 7, 64, 4096] {
       let mut splits = Vec::new();
       let mut at = chunk;

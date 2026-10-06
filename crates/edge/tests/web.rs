@@ -3,13 +3,13 @@ use wasm_bindgen_test::*;
 wasm_bindgen_test_configure!(run_in_browser);
 
 fn convert(html: &str) -> String {
-  mdream::html_to_markdown(html, mdream::types::HTMLToMarkdownOptions::default())
+  mdream::html_to_markdown(html, mdream::types::HtmlToMarkdownOptions::default())
 }
 
 fn convert_with_origin(html: &str, origin: &str) -> String {
   mdream::html_to_markdown(
     html,
-    mdream::types::HTMLToMarkdownOptions {
+    mdream::types::HtmlToMarkdownOptions {
       origin: Some(origin.to_string()),
       ..Default::default()
     },
@@ -87,7 +87,7 @@ fn extraction() {
   use mdream::types::*;
   let result = mdream::html_to_markdown_result(
     "<h1>Title</h1><p>Content</p>",
-    HTMLToMarkdownOptions {
+    HtmlToMarkdownOptions {
       plugins: Some(PluginConfig {
         extraction: Some(ExtractionConfig {
           selectors: vec!["h1".to_string()],
@@ -107,7 +107,7 @@ fn extraction() {
 #[wasm_bindgen_test]
 fn streaming() {
   let mut stream =
-    mdream::MarkdownStreamProcessor::new(mdream::types::HTMLToMarkdownOptions::default());
+    mdream::MarkdownStreamProcessor::new(mdream::types::HtmlToMarkdownOptions::default());
   let chunk1 = stream.process_chunk("<h1>He");
   let chunk2 = stream.process_chunk("llo</h1><p>World</p>");
   let final_chunk = stream.finish();

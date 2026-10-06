@@ -87,7 +87,7 @@ fuzz_target!(|input: FuzzInput| {
         })
     };
 
-    let options = HTMLToMarkdownOptions {
+    let options = HtmlToMarkdownOptions {
         origin: if input.use_origin { Some(input.origin) } else { None },
         clean,
         plugins,
