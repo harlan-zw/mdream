@@ -21,7 +21,8 @@ for (let i = 0; i < args.length; i++) {
   const flag = eq === -1 ? arg : arg.slice(0, eq)
   const takeValue = () => {
     const value = eq === -1 ? args[++i] : arg.slice(eq + 1)
-    if (!value || (eq === -1 && value.startsWith('--')))
+    // A following flag, such as `--text` or `-h`, is not a value.
+    if (!value || (eq === -1 && (value.startsWith('--') || value === '-h')))
       fail(`The ${flag} option needs a value.`)
     return value
   }

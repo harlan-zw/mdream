@@ -14,6 +14,7 @@ describe('mdream-js CLI', () => {
     [['--clean-urls'], 'Unknown option: --clean-urls. Run mdream-js --help to list the options.\n'],
     [['--cleanUrls=true'], 'Unknown option: --cleanUrls. Run mdream-js --help to list the options.\n'],
     [['--origin'], 'The --origin option needs a value.\n'],
+    [['--no-origin'], 'Unknown option: --no-origin. Run mdream-js --help to list the options.\n'],
     [['--preset', 'full'], 'Unknown preset: full. Use --preset minimal.\n'],
   ])('exits 1 on %o with one line on stderr', (args, message) => {
     expect(run(args)).toEqual({ status: 1, stdout: '', stderr: message })

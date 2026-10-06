@@ -16,6 +16,7 @@ describe('mdream CLI', () => {
     [['index.html'], 'Unknown argument: index.html. Pipe the HTML to mdream on stdin.\n'],
     [['--origin'], 'The --origin option needs a value.\n'],
     [['--origin', '--text'], 'The --origin option needs a value.\n'],
+    [['--origin', '-h'], 'The --origin option needs a value.\n'],
     [['--preset=full'], 'Unknown preset: full. Use --preset minimal.\n'],
     [['--format', 'pdf'], 'Unknown format: pdf. Use markdown, text, or html.\n'],
   ])('exits 1 on %o with one line on stderr', (args, message) => {

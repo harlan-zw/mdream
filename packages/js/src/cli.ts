@@ -90,7 +90,12 @@ function usageError(cli: CAC, argv: readonly string[]): string | undefined {
   }
   for (const option of command.options) {
     const value = cli.options[option.name]
-    if (option.required && (value === true || value === ''))
+    if (!option.required)
+      continue
+    // cac reads `--no-origin` as `origin: false`. A value option has no negated form.
+    if (value === false)
+      return `Unknown option: ${typedFlag(option.name, argv)}. Run mdream-js --help to list the options.`
+    if (value === true || value === '')
       return `The ${typedFlag(option.name, argv)} option needs a value.`
   }
 }
