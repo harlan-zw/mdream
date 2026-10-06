@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { MarkdownStream as BrowserMarkdownStream, streamHtmlToMarkdown as browserStream, createMarkdownStream } from '../../src/browser.js'
 import { MarkdownStream as EdgeMarkdownStream, streamHtmlToMarkdown as edgeStream } from '../../src/edge.js'
@@ -93,5 +94,21 @@ describe.each(engines)('$name MarkdownStream wrapper', ({ make, panicMessage, st
     for await (const chunk of streamHtml(html))
       out += chunk
     expect(out).toBe('chunk:<chunk:pchunk:>chunk:chunk:🎉chunk:<chunk:/chunk:pchunk:>')
+  })
+})
+
+// build-wasm-edge.mjs moves the glue's `Symbol.dispose` hook into the class
+// body. `mdream/wasm` streams inherit it, so `using` must still free them.
+describe('wasm-bindgen MarkdownStream glue', () => {
+  it('frees the stream at the end of a `using` block', async () => {
+    const glue = await vi.importActual<typeof import('../../wasm/mdream_edge.js')>('../../wasm/mdream_edge.js')
+    glue.initSync({ module: readFileSync(new URL('../../wasm/mdream_edge_bg.wasm', import.meta.url)) })
+    let stream: InstanceType<typeof glue.MarkdownStream>
+    {
+      using scoped = new glue.MarkdownStream({})
+      expect(scoped.processChunk('<p>live</p>')).toBe('live')
+      stream = scoped
+    }
+    expect(() => stream.processChunk('<p>freed</p>')).toThrow('null pointer passed to rust')
   })
 })

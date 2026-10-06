@@ -105,6 +105,7 @@
   },
   "devDependencies": {
     "@mdream/js": "workspace:*",
-    "@mdream/rust-build": "workspace:*"
+    "@mdream/rust-build": "workspace:*",
+    "rolldown": "catalog:"
   }
 }

@@ -279,6 +279,9 @@ catalogs:
     playwright:
       specifier: ^1.63.0
       version: 1.63.0
+    rolldown:
+      specifier: ^1.2.12
+      version: 1.2.12
     sirv:
       specifier: ^3.0.2
       version: 3.0.2
@@ -624,6 +627,9 @@ importers:
       '@mdream/rust-build':
         specifier: workspace:*
         version: link:../../crates/node
+      rolldown:
+        specifier: 'catalog:'
+        version: 1.2.12
     optionalDependencies:
       '@mdream/rust-android-arm-eabi':
         specifier: workspace:*
