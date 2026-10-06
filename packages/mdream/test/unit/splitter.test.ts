@@ -7,6 +7,9 @@ import { describe, expect, it } from 'vitest'
 const RE_WHITESPACE = /\s+/
 const RE_WHITESPACE_GLOBAL = /\s+/g
 
+// Chunks drop the separators at their cuts, so compare the rest.
+const squash = (text: string) => text.replace(RE_WHITESPACE_GLOBAL, '')
+
 describe('htmlToMarkdownSplitChunks', () => {
   it('tracks header hierarchy in metadata', () => {
     const html = `
@@ -111,7 +114,7 @@ describe('htmlToMarkdownSplitChunks', () => {
   it('does not treat fence-like code content as chunk metadata', () => {
     for (const chunkOverlap of [0, 10]) {
       const chunks = htmlToMarkdownSplitChunks(
-        `<pre><code class="language-js">first\n\`\`\`rust\n${'content '.repeat(30)}</code></pre>`,
+        `<pre><code class="language-js">first\n\`\`\`rust\n${'content '.repeat(30)}</code></pre><p>${'after '.repeat(30)}</p>`,
         { chunkSize: 40, chunkOverlap },
       )
 
@@ -320,7 +323,7 @@ describe('htmlToMarkdownSplitChunks', () => {
 
     expect(htmlToMarkdown(html, options)).toBe('[go](#s2)\n\n## One\n\na\n\n## S2\n\ny')
     const chunks = htmlToMarkdownSplitChunks(html, options)
-    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, options))
+    expect(chunks.map(chunk => chunk.content)).toEqual(['[go](#s2)\n\n## One\n\na', '## S2\n\ny'])
   })
 
   it('measures settled flush floors in the finished fragment view', () => {
@@ -330,7 +333,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     const expected = htmlToMarkdown(html, options)
     expect(expected).toContain('[z](#b)')
     const joined = htmlToMarkdownSplitChunks(html, options).map(chunk => chunk.content).join('')
-    expect(joined).toBe(expected)
+    expect(squash(joined)).toBe(squash(expected))
     expect(joined.split('[z](#b)')).toHaveLength(2)
     expect(joined.split('](#b)')).toHaveLength(2)
   })
@@ -341,8 +344,6 @@ describe('htmlToMarkdownSplitChunks', () => {
     ['a resolved link inside an unresolved one', `<h2>B</h2><div><a href="#a">x <div><a href="#b">z</a> ${'r'.repeat(60)}</div></a></div><h2>A</h2>`],
   ])('cuts chunks before %s', (_name, html) => {
     const options = { clean: clean({ fragments: true }), chunkOverlap: 0, stripHeaders: false }
-    // Chunks drop the whitespace at their cuts, so compare the rest.
-    const squash = (text: string) => text.replace(RE_WHITESPACE_GLOBAL, '')
     const expected = squash(htmlToMarkdown(html, options))
     for (let chunkSize = 5; chunkSize <= 120; chunkSize++) {
       const joined = htmlToMarkdownSplitChunks(html, { ...options, chunkSize }).map(chunk => chunk.content).join('')
@@ -1128,7 +1129,7 @@ with preserved   spacing</pre>
       }))
 
       expect(chunks.length).toBe(3) // Split on each h2
-      expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, withMinimalPreset()))
+      expect(squash(chunks.map(chunk => chunk.content).join(''))).toBe(squash(htmlToMarkdown(html, withMinimalPreset())))
 
       // Check headers
       expect(chunks[0].metadata.headers?.h1).toBe('My Blog Post')

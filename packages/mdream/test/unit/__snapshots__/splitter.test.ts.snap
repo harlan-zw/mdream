@@ -51,8 +51,8 @@ npm install mdream
       },
       "loc": {
         "lines": {
-          "from": 1,
-          "to": 13,
+          "from": 3,
+          "to": 11,
         },
       },
     },
@@ -72,8 +72,8 @@ npm install mdream
       },
       "loc": {
         "lines": {
-          "from": 13,
-          "to": 22,
+          "from": 15,
+          "to": 20,
         },
       },
     },
@@ -88,7 +88,7 @@ npm install mdream
       "loc": {
         "lines": {
           "from": 22,
-          "to": 24,
+          "to": 22,
         },
       },
     },
@@ -102,8 +102,8 @@ npm install mdream
       },
       "loc": {
         "lines": {
-          "from": 24,
-          "to": 28,
+          "from": 26,
+          "to": 26,
         },
       },
     },
@@ -125,7 +125,7 @@ exports[`htmlToMarkdownSplitChunks > maintains chunk overlap 1`] = `
     },
   },
   {
-    "content": "t. Line one content. Line one content. Line one content. Line one content. Line one content. Line",
+    "content": "content. Line one content. Line one content. Line one content. Line one content. Line one content.",
     "metadata": {
       "loc": {
         "lines": {
@@ -136,7 +136,20 @@ exports[`htmlToMarkdownSplitChunks > maintains chunk overlap 1`] = `
     },
   },
   {
-    "content": "ntent. Line one content. Line one content.",
+    "content": "one content. Line one content. Line one content.",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 1,
+          "to": 1,
+        },
+      },
+    },
+  },
+  {
+    "content": "one content. Line one content.
+
+Line two content. Line two content. Line two content. Line two",
     "metadata": {
       "loc": {
         "lines": {
@@ -147,9 +160,31 @@ exports[`htmlToMarkdownSplitChunks > maintains chunk overlap 1`] = `
     },
   },
   {
-    "content": "e content. Line one content.
+    "content": "content. Line two content. Line two content. Line two content. Line two content. Line two content.",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 3,
+          "to": 3,
+        },
+      },
+    },
+  },
+  {
+    "content": "two content. Line two content. Line two content. Line two content. Line two content.",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 3,
+          "to": 3,
+        },
+      },
+    },
+  },
+  {
+    "content": "two content. Line two content.
 
-Line two content. Line two content. Line two content. Line two",
+Line three content. Line three content. Line three content. Line",
     "metadata": {
       "loc": {
         "lines": {
@@ -160,7 +195,7 @@ Line two content. Line two content. Line two content. Line two",
     },
   },
   {
-    "content": "t. Line two content. Line two content. Line two content. Line two content. Line two content. Line",
+    "content": "content. Line three content. Line three content. Line three content. Line three content. Line three",
     "metadata": {
       "loc": {
         "lines": {
@@ -171,36 +206,12 @@ Line two content. Line two content. Line two content. Line two",
     },
   },
   {
-    "content": "ntent. Line two content. Line two content. Line two content. Line two content.",
+    "content": "Line three content. Line three content. Line three content. Line three content. Line three content.",
     "metadata": {
       "loc": {
         "lines": {
           "from": 5,
-          "to": 7,
-        },
-      },
-    },
-  },
-  {
-    "content": "o content. Line two content.
-
-Line three content. Line three content. Line three content. Line three",
-    "metadata": {
-      "loc": {
-        "lines": {
-          "from": 7,
-          "to": 9,
-        },
-      },
-    },
-  },
-  {
-    "content": "ine three content. Line three content. Line three content. Line three content. Line three content. Line three content. Line three content. Line three content.",
-    "metadata": {
-      "loc": {
-        "lines": {
-          "from": 9,
-          "to": 11,
+          "to": 5,
         },
       },
     },
@@ -233,12 +244,12 @@ exports[`htmlToMarkdownSplitChunks > overlap behavior > applies correct overlap 
     },
   },
   {
-    "content": "test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test",
+    "content": "test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test test",
     "metadata": {
       "loc": {
         "lines": {
           "from": 1,
-          "to": 3,
+          "to": 1,
         },
       },
     },
@@ -260,7 +271,20 @@ exports[`htmlToMarkdownSplitChunks > overlap behavior > applies overlap only on 
     },
   },
   {
-    "content": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+    "content": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+    "metadata": {
+      "loc": {
+        "lines": {
+          "from": 1,
+          "to": 1,
+        },
+      },
+    },
+  },
+  {
+    "content": "word word word word word word word word word word word word word word word word word word word word word
+
+word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
     "metadata": {
       "loc": {
         "lines": {
@@ -271,25 +295,23 @@ exports[`htmlToMarkdownSplitChunks > overlap behavior > applies overlap only on 
     },
   },
   {
-    "content": "ord word word word word word word word word word word word word word word word word word word word
-
-word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+    "content": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
     "metadata": {
       "loc": {
         "lines": {
           "from": 3,
-          "to": 5,
+          "to": 3,
         },
       },
     },
   },
   {
-    "content": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+    "content": "word word word word word word word word word word word word word word word word word word word word word word word",
     "metadata": {
       "loc": {
         "lines": {
-          "from": 5,
-          "to": 7,
+          "from": 3,
+          "to": 3,
         },
       },
     },
