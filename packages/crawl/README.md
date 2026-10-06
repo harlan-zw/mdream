@@ -2,11 +2,15 @@
 
 Multi-page website crawler that generates [llms.txt](https://llmstxt.org/) files. Follows internal links and converts HTML to Markdown using [mdream](../mdream).
 
+Upgrading from v1? Read [Migrating from v1](#migrating-from-v1).
+
 ## Setup
 
 ```bash
 npm install @mdream/crawl@beta
 ```
+
+After a global install (`npm install -g @mdream/crawl@beta`), run the `mdream-crawl` command. With `npx`, use the package name: `npx @mdream/crawl@beta`.
 
 For JavaScript-heavy sites that require browser rendering, install the optional Playwright dependencies:
 
@@ -35,26 +39,35 @@ npx @mdream/crawl@beta -u https://docs.example.com
 
 ### CLI Options
 
+Most flags set the [option](#crawloptions) with the same name in camelCase. For example, `--max-pages` sets `maxPages`.
+
 | Flag | Alias | Description | Default |
 |------|-------|-------------|---------|
-| `--url <url>` | `-u` | Website URL to crawl (supports glob patterns) | Required |
+| `--url <url>` | `-u` | URL to crawl. Accepts glob patterns. Repeatable. You can also pass URLs without a flag | Required |
 | `--output <dir>` | `-o` | Output directory | `output` |
-| `--depth <number>` | `-d` | Crawl depth (0 for single page, max 10) | `3` |
-| `--single-page` | | Only process the given URL(s), no crawling. Alias for `--depth 0` | |
+| `--depth <number>` | `-d` | Link depth from 0 to 10. See [Depth](#depth) | `3` |
+| `--single-page` | | Same as `--depth 0`. It takes precedence over `--depth` | |
 | `--driver <type>` | | Crawler driver: `http` or `playwright` | `http` |
-| `--artifacts <list>` | | Comma-separated output formats: `llms.txt`, `llms-full.txt`, `markdown` | all three |
-| `--origin <url>` | | Origin URL for resolving relative paths (overrides auto-detection) | auto-detected |
-| `--site-name <name>` | | Override the auto-extracted site name used in llms.txt | auto-extracted |
-| `--description <desc>` | | Override the auto-extracted site description used in llms.txt | auto-extracted |
-| `--max-pages <number>` | | Maximum pages to crawl | unlimited |
-| `--crawl-delay <seconds>` | | Delay between requests in seconds | from `robots.txt` or none |
-| `--exclude <pattern>` | | Exclude URLs matching glob patterns (repeatable) | none |
+| `--artifacts <list>` | | Comma-separated list of `llms.txt`, `llms-full.txt`, `markdown` | all three |
+| `--origin <url>` | | Origin for relative links in page Markdown | the origin of each page |
+| `--site-name <name>` | | Site name in llms.txt | the home page title |
+| `--description <text>` | | Site description in llms.txt | the home page description |
+| `--max-pages <number>` | | Maximum number of pages to fetch | no limit |
+| `--crawl-delay <seconds>` | | Delay between requests in seconds | the `robots.txt` `Crawl-delay`, or none |
+| `--exclude <pattern>` | | Skip URLs that match a glob pattern. Repeatable | none |
 | `--skip-sitemap` | | Skip `sitemap.xml` and `robots.txt` discovery | `false` |
-| `--sitemap <url>` | | Use an explicit sitemap URL instead of auto-discovery (repeatable for multi-part sitemaps) | auto-discovered |
-| `--allow-subdomains` | | Crawl across subdomains of the same root domain | `false` |
-| `--verbose` | `-v` | Enable verbose logging | `false` |
-| `--help` | `-h` | Show help message | |
-| `--version` | | Show version number | |
+| `--sitemap <url>` | | Use this sitemap instead of auto-discovery. Repeatable for multi-part sitemaps | auto-discovered |
+| `--allow-subdomains` | | Crawl other subdomains of the same root domain | `false` |
+| `--keep-boilerplate` | | Keep repeated navigation and footers in page Markdown. Sets `stripBoilerplate: false` | `false` |
+| `--boilerplate-threshold <n>` | | Fraction of pages that a block must appear in to count as boilerplate. Greater than 0 and at most 1 | `0.5` |
+| `--verbose` | `-v` | Log details for each failed URL | `false` |
+| `--quiet` | `-q`, `--silent` | Drop all logs. Use it to keep stdout clean for JSON-RPC or MCP | `false` |
+| `--help` | `-h` | Show the help message | |
+| `--version` | | Show the version number | |
+
+A flag can also take its value as `--flag=value`. If a flag is unknown, the CLI exits with code 1. A long flag needs two dashes: `-url` is an error.
+
+Flags override values from the [config file](#config-file). Config values override the defaults.
 
 ### CLI Examples
 
@@ -109,37 +122,49 @@ import { crawlAndGenerate } from '@mdream/crawl'
 
 const results = await crawlAndGenerate({
   urls: ['https://docs.example.com'],
-  outputDir: './output',
+  output: './output',
 })
 ```
 
 ### `CrawlOptions`
 
+`crawlAndGenerate`, the [config file](#config-file), and the [CLI](#cli-options) use the same options and the same defaults. Only `urls` is required.
+
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `urls` | `string[]` | Required | Starting URLs for crawling |
-| `outputDir` | `string` | Required | Directory to write output files |
-| `driver` | `'http' \| 'playwright'` | `'http'` | Crawler driver to use |
-| `maxRequestsPerCrawl` | `number` | `Number.MAX_SAFE_INTEGER` | Maximum total pages to crawl |
-| `followLinks` | `boolean` | `false` | Whether to follow internal links discovered on pages |
-| `maxDepth` | `number` | `1` | Maximum link-following depth. `0` enables single-page mode |
-| `generateLlmsTxt` | `boolean` | `true` | Generate an `llms.txt` file |
-| `generateLlmsFullTxt` | `boolean` | `false` | Generate an `llms-full.txt` file with full page content |
-| `generateIndividualMd` | `boolean` | `true` | Write individual `.md` files for each page |
-| `origin` | `string` | auto-detected | Origin URL for resolving relative paths in HTML |
-| `siteNameOverride` | `string` | auto-extracted | Override the site name in the generated `llms.txt` |
-| `descriptionOverride` | `string` | auto-extracted | Override the site description in the generated `llms.txt` |
-| `globPatterns` | `ParsedUrlPattern[]` | `[]` | Pre-parsed URL glob patterns (advanced usage) |
-| `exclude` | `string[]` | `[]` | Glob patterns for URLs to exclude |
-| `crawlDelay` | `number` | from `robots.txt` | Delay between requests in seconds |
+| `urls` | `string[]` | Required | Starting URLs. Glob patterns limit the crawl |
+| `output` | `string` | `'output'` | Output directory, relative to the working directory |
+| `depth` | `number` | `3` | Link depth from 0 to 10. See [Depth](#depth) |
+| `maxPages` | `number` | no limit | Maximum number of pages to fetch |
+| `artifacts` | `('llms.txt' \| 'llms-full.txt' \| 'markdown')[]` | all three | Files to write. `[]` writes no files, for example when only [hooks](#hooks) consume the pages |
+| `driver` | `'http' \| 'playwright'` | `'http'` | Crawler driver |
+| `sitemap` | `string \| string[]` | auto-discovered | Sitemap URLs to use instead of auto-discovery. All parts are loaded and merged. Ignored when `skipSitemap` is set |
 | `skipSitemap` | `boolean` | `false` | Skip `sitemap.xml` and `robots.txt` discovery |
-| `sitemapUrls` | `string[]` | auto-discovered | Explicit sitemap URL(s) to use instead of auto-discovery. Supports non-standard locations and multiple parts (all loaded and merged). Ignored when `skipSitemap` is set |
-| `allowSubdomains` | `boolean` | `false` | Crawl across subdomains of the same root domain (e.g. `docs.example.com` + `blog.example.com`). Output files are namespaced by hostname to avoid collisions |
-| `useChrome` | `boolean` | `false` | Use system Chrome instead of Playwright's bundled browser (Playwright driver only) |
-| `chunkSize` | `number` | | Chunk size passed to mdream for markdown conversion |
-| `verbose` | `boolean` | `false` | Enable verbose error logging |
-| `hooks` | `Partial<CrawlHooks>` | | Hook functions for the crawl pipeline (see [Hooks](#hooks)) |
-| `onPage` | `(page: PageData) => Promise<void> \| void` | | **Deprecated.** Use `hooks['crawl:page']` instead. Still works for backwards compatibility |
+| `siteName` | `string` | the home page title | Site name in `llms.txt` |
+| `description` | `string` | the home page description | Site description in `llms.txt` |
+| `origin` | `string` | the origin of each page | Origin for relative links in page Markdown. The page path stays the same |
+| `exclude` | `string[]` | `[]` | Glob patterns for URLs to skip |
+| `crawlDelay` | `number` | the `robots.txt` `Crawl-delay` | Delay between requests in seconds |
+| `allowSubdomains` | `boolean` | `false` | Crawl other subdomains of the same root domain, for example `docs.example.com` and `blog.example.com`. Output paths start with the hostname, so files do not collide |
+| `stripBoilerplate` | `boolean` | `true` | Remove repeated navigation and footers from page Markdown and `llms-full.txt`. Needs at least 3 pages. Does not run at depth 0 |
+| `boilerplateThreshold` | `number` | `0.5` | Fraction of pages that a block must appear in to count as boilerplate. Greater than 0 and at most 1 |
+| `useChrome` | `boolean` | `false` | Use the system Chrome with the Playwright driver. The CLI turns it on when it finds Chrome, unless you set it to `false` |
+| `verbose` | `boolean` | `false` | Log details for each failed URL |
+| `silent` | `boolean` | `false` | Drop all diagnostic and progress logs. A `logger` takes precedence |
+| `logger` | `CrawlLogger` | `@clack/prompts` on stdout | Sink for diagnostic and progress logs, for example one that writes to stderr |
+| `hooks` | `Partial<CrawlHooks>` | | Functions for each stage of the crawl. See [Hooks](#hooks) |
+| `globPatterns` | `ParsedUrlPattern[]` | parsed from `urls` | Parsed URL patterns that replace the patterns from `urls`. Advanced |
+
+`crawlAndGenerate` checks the options before it sends a request. An unknown key or an invalid value throws a `TypeError`. A removed v1 key, such as `maxDepth`, gives an error that names its replacement.
+
+### Depth
+
+`depth` sets how far the crawler follows links from the starting URLs.
+
+- `0`: The crawler processes only the given URLs. It does not read `robots.txt` or the sitemap, and it does not follow links.
+- `1` or more: Unless `skipSitemap` is set, the crawler reads `robots.txt` and the sitemap first. If the sitemap gives URLs, the crawler fetches those URLs and does not follow links. If not, the crawler follows links up to `depth` hops from the starting URLs.
+
+The maximum is 10. Use `maxPages` to limit the total number of pages.
 
 ### `CrawlResult`
 
@@ -148,7 +173,7 @@ interface CrawlResult {
   url: string
   title: string
   content: string
-  filePath?: string // Set when generateIndividualMd is true
+  filePath?: string // Set when artifacts include 'markdown'
   timestamp: number // Unix timestamp of processing time
   success: boolean
   error?: string // Set when success is false
@@ -167,7 +192,7 @@ interface PageMetadata {
 
 ### `PageData`
 
-The shape passed to the `onPage` callback:
+The shape passed to the `crawl:page` hook:
 
 ```typescript
 interface PageData {
@@ -212,9 +237,7 @@ const pages = []
 
 await crawlAndGenerate({
   urls: ['https://docs.example.com'],
-  outputDir: './output',
-  generateIndividualMd: false,
-  generateLlmsTxt: false,
+  artifacts: [],
   hooks: {
     'crawl:page': (page) => {
       pages.push({
@@ -236,10 +259,9 @@ import { crawlAndGenerate } from '@mdream/crawl'
 
 await crawlAndGenerate({
   urls: ['https://example.com/docs/**'],
-  outputDir: './docs-output',
+  output: './docs-output',
   exclude: ['/docs/deprecated/*', '/docs/internal/*'],
-  followLinks: true,
-  maxDepth: 2,
+  depth: 2,
 })
 ```
 
@@ -248,36 +270,34 @@ await crawlAndGenerate({
 ```typescript
 await crawlAndGenerate({
   urls: ['https://example.com'],
-  outputDir: './output',
   allowSubdomains: true, // Will also crawl docs.example.com, blog.example.com, etc.
-  followLinks: true,
-  maxDepth: 2,
+  depth: 2,
 })
 ```
 
 #### Single-page mode
 
-Set `maxDepth: 0` to process only the provided URLs without crawling or link following:
+Set `depth: 0` to process only the given URLs, with no discovery and no link following:
 
 ```typescript
 await crawlAndGenerate({
   urls: ['https://example.com/pricing', 'https://example.com/about'],
-  outputDir: './output',
-  maxDepth: 0,
+  depth: 0,
 })
 ```
 
 ## Config File
 
-Create a `mdream.config.ts` (or `.js`, `.mjs`) in your project root to set defaults and register hooks. Loaded via [c12](https://github.com/unjs/c12).
+Create a `mdream.config.ts` (or `.js`, `.mjs`) in the directory where you run the CLI, to set options and register hooks. The CLI loads it with [c12](https://github.com/unjs/c12), in direct mode and in interactive mode.
 
 ```typescript
 import { defineConfig } from '@mdream/crawl'
 
 export default defineConfig({
   exclude: ['*/admin/*', '*/internal/*'],
-  driver: 'http',
-  maxDepth: 3,
+  depth: 2,
+  maxPages: 500,
+  artifacts: ['llms.txt', 'markdown'],
   hooks: {
     'crawl:page': (page) => {
       // Strip branding from all page titles
@@ -287,27 +307,19 @@ export default defineConfig({
 })
 ```
 
-CLI arguments override config file values. Array options like `exclude` are concatenated (config + CLI).
+The config file accepts every [`CrawlOptions`](#crawloptions) key, and every key is optional. If you set `urls`, you can run the CLI without a URL. Interactive mode uses the config values as its initial answers.
 
-### Config Options
+The CLI resolves each option in this order:
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `exclude` | `string[]` | Glob patterns for URLs to exclude |
-| `driver` | `'http' \| 'playwright'` | Crawler driver |
-| `maxDepth` | `number` | Maximum crawl depth |
-| `maxPages` | `number` | Maximum pages to crawl |
-| `crawlDelay` | `number` | Delay between requests (seconds) |
-| `skipSitemap` | `boolean` | Skip sitemap discovery |
-| `sitemap` | `string \| string[]` | Explicit sitemap URL(s) to use instead of auto-discovery |
-| `allowSubdomains` | `boolean` | Crawl across subdomains |
-| `verbose` | `boolean` | Enable verbose logging |
-| `artifacts` | `string[]` | Output formats: `llms.txt`, `llms-full.txt`, `markdown` |
-| `hooks` | `object` | Hook functions (see below) |
+1. A CLI flag, or an answer in interactive mode
+2. The config file
+3. The default
+
+`exclude` is the exception: the CLI adds its patterns to the config patterns. An unknown key in the config file stops the CLI with an error.
 
 ## Hooks
 
-Six hooks let you intercept and transform data at each stage of the crawl pipeline. Hooks receive mutable objects. Mutate in-place to transform output.
+Five hooks let you intercept and transform data at each stage of the crawl pipeline. Hooks receive mutable objects. Mutate in-place to transform output.
 
 ### `crawl:url`
 
@@ -342,7 +354,7 @@ defineConfig({
 
 ### `crawl:page`
 
-Called after HTML-to-Markdown conversion, before storage. Mutate `page.title` or other fields. This replaces the `onPage` callback (which still works for backwards compatibility).
+Called after HTML-to-Markdown conversion, before storage. Mutate `page.title` or other fields. This hook replaces the v1 `onPage` option.
 
 ```typescript
 defineConfig({
@@ -397,7 +409,7 @@ import { crawlAndGenerate } from '@mdream/crawl'
 
 await crawlAndGenerate({
   urls: ['https://example.com'],
-  outputDir: './output',
+  output: './output',
   hooks: {
     'crawl:page': (page) => {
       page.title = page.title.replace(/ \| Brand$/, '')
@@ -431,7 +443,7 @@ npx @mdream/crawl@beta -u example.com --driver playwright
 ```typescript
 await crawlAndGenerate({
   urls: ['https://spa-app.example.com'],
-  outputDir: './output',
+  output: './output',
   driver: 'playwright',
 })
 ```
@@ -484,13 +496,15 @@ export default defineConfig({
 
 An explicit sitemap replaces auto-discovery entirely (`robots.txt` is still read for `Crawl-delay`).
 
-## Output Formats
+## Artifacts
 
-### Individual Markdown Files
+Choose the files with the `artifacts` option or the `--artifacts` flag. By default, the crawler writes all three.
+
+### `markdown`
 
 One `.md` file per crawled page, written to the output directory preserving the URL path structure. For example, `https://example.com/docs/getting-started` becomes `output/docs/getting-started.md`.
 
-### llms.txt
+### `llms.txt`
 
 A site overview file following the [llms.txt specification](https://llmstxt.org/), listing all crawled pages with titles and links to their markdown files.
 
@@ -503,6 +517,65 @@ A site overview file following the [llms.txt specification](https://llmstxt.org/
 - [About Us](about.md): https://example.com/about
 ```
 
-### llms-full.txt
+### `llms-full.txt`
 
 Same structure as `llms.txt` but includes the full markdown content of every page inline.
+
+## Migrating from v1
+
+In v2, `crawlAndGenerate`, the config file, and the CLI share one option shape and one set of defaults.
+The library uses the names of the CLI flags.
+
+### Renamed options
+
+| v1 | v2 |
+|----|----|
+| `outputDir` | `output`. It is optional now, and the default is `'output'` |
+| `maxRequestsPerCrawl` | `maxPages` |
+| `maxDepth` and `followLinks` | `depth`. See [Depth](#depth) |
+| `sitemapUrls` | `sitemap`. It also accepts one string |
+| `generateLlmsTxt`, `generateLlmsFullTxt`, `generateIndividualMd` | `artifacts: ['llms.txt', 'llms-full.txt', 'markdown']` |
+| `siteNameOverride` | `siteName` |
+| `descriptionOverride` | `description` |
+| `onPage: fn` | `hooks: { 'crawl:page': fn }` |
+| `chunkSize` | Remove it. It had no effect |
+| `maxDepth` in `mdream.config` | `depth` |
+| `MdreamCrawlConfig` type | `Partial<CrawlOptions>` |
+| `crawl` command after a global install | `mdream-crawl` |
+
+```diff
+  await crawlAndGenerate({
+    urls: ['https://example.com'],
+-   outputDir: './output',
+-   maxRequestsPerCrawl: 100,
+-   followLinks: true,
+-   maxDepth: 2,
+-   generateLlmsFullTxt: true,
+-   onPage: page => console.log(page.url),
++   output: './output',
++   maxPages: 100,
++   depth: 2,
++   artifacts: ['llms.txt', 'llms-full.txt', 'markdown'],
++   hooks: { 'crawl:page': page => console.log(page.url) },
+  })
+```
+
+A v1 key now throws a `TypeError` that names its replacement. A key with the value `undefined` is ignored.
+The library also checks values the same way as the CLI. For example, `depth` must be an integer from 0 to 10.
+
+### New library defaults
+
+The library defaults are now the CLI defaults:
+
+- `depth` is `3`, so the crawler follows links when the sitemap gives no URLs. By default, the v1 library did not follow links.
+- `artifacts` includes `llms-full.txt`. By default, the v1 library did not write it. To keep the v1 output, set `artifacts: ['llms.txt', 'markdown']`.
+- `output` is `'output'`. In v1, `outputDir` was required.
+
+v1 with `followLinks: false` used the sitemap and did not follow links. v2 has no exact match. Use `depth: 0` to process only the given URLs, or `depth: 1` to follow links one hop when there is no sitemap.
+
+### CLI changes
+
+- Config values for `maxPages`, `artifacts`, `driver`, and `depth` now apply. In v1, the CLI ignored them.
+- Interactive mode loads the config file and its hooks.
+- An unknown flag or a single-dash long flag, such as `-url`, stops the CLI with exit code 1.
+- `--crawl-delay` accepts decimal values, such as `0.5`.
