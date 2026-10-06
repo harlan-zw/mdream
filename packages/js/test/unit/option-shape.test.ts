@@ -46,6 +46,10 @@ describe('options @mdream/js does not read', () => {
     { filter: { exclude: ['nav'] } },
     { extraction: {} },
     { plugins: { frontmatter: true } },
+    { preset: 'minimal' },
+    { cleanUrls: true },
+    { isolatemain: true },
+    { chunkSize: 100 },
   ]
 
   it.each(converters)('%s rejects them', (_name, convert, stream) => {
@@ -60,6 +64,22 @@ describe('options @mdream/js does not read', () => {
     expect(() => htmlToMarkdown('<p>x</p>', { frontmatter: true } as any)).toThrow('{ plugins: [frontmatterPlugin()] }')
     expect(() => htmlToMarkdown('<p>x</p>', { format: 'text' } as any)).toThrow('@mdream/js/text')
     expect(() => htmlToMarkdown('<p>x</p>', { plugins: { frontmatter: true } } as any)).toThrow('as an array')
+    expect(() => htmlToMarkdown('<p>x</p>', { preset: 'minimal' } as any)).toThrow('@mdream/js has no `preset` option. Use withMinimalPreset()')
+    expect(() => htmlToMarkdown('<p>x</p>', { cleanUrls: true } as any)).toThrow('{ clean: clean({ urls: true }) }')
+    expect(() => htmlToMarkdown('<p>x</p>', { isolatemain: true } as any)).toThrow('@mdream/js has no `isolatemain` option. Valid options: origin, tagOverrides, clean, wrapWidth, plugins.')
+  })
+
+  it.each(converters)('%s ignores keys whose value is undefined', (_name, convert) => {
+    expect(convert('<p>x</p>', { minimal: undefined, preset: undefined, plugins: undefined } as any)).toBe(convert('<p>x</p>'))
+  })
+
+  it('accepts splitter options only in the splitter', () => {
+    const html = '<h2>One</h2><p>Alpha beta gamma.</p><h2>Two</h2><p>Delta.</p>'
+    const chunks = htmlToMarkdownSplitChunks(html, { chunkSize: 1000, chunkOverlap: 0, stripHeaders: false, minimal: undefined } as any)
+    expect(chunks.map(chunk => chunk.content)).toEqual(['## One\n\nAlpha beta gamma.', '## Two\n\nDelta.'])
+    expect(() => htmlToMarkdownSplitChunks(html, { chunksize: 20 } as any)).toThrow('@mdream/js has no `chunksize` option.')
+    expect(() => htmlToMarkdownSplitChunks(html, { chunksize: 20 } as any)).toThrow('chunkSize')
+    expect(() => htmlToMarkdown(html, { chunkSize: 20 } as any)).toThrow('@mdream/js has no `chunkSize` option.')
   })
 
   it('accepts a plugin array and top-level tag overrides', () => {

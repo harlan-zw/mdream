@@ -307,7 +307,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     const resolvedHtml = '<p><a href="#real">f</a></p><h1>Real</h1>'
     const resolvedOptions = { ...options, stripHeaders: false }
     const resolvedChunks = htmlToMarkdownSplitChunks(resolvedHtml, resolvedOptions)
-    expect(resolvedChunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(resolvedHtml, resolvedOptions))
+    expect(resolvedChunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(resolvedHtml, options))
     for (const chunk of resolvedChunks) {
       expect(chunk.content).not.toContain('\uFDD0')
       expect(chunk.content).not.toContain('\uFDD1')
@@ -318,16 +318,16 @@ describe('htmlToMarkdownSplitChunks', () => {
     const options = { clean: clean(), stripHeaders: false }
     const html = '<p><a href="#s2">go</a></p><h2>One</h2><p>a</p><h2>S2</h2><p>y</p>'
 
-    expect(htmlToMarkdown(html, options)).toBe('[go](#s2)\n\n## One\n\na\n\n## S2\n\ny')
+    expect(htmlToMarkdown(html, { clean: options.clean })).toBe('[go](#s2)\n\n## One\n\na\n\n## S2\n\ny')
     const chunks = htmlToMarkdownSplitChunks(html, options)
-    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, options))
+    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, { clean: options.clean }))
   })
 
   it('measures settled flush floors in the finished fragment view', () => {
     const options = { clean: clean({ fragments: true }), chunkSize: 30, chunkOverlap: 0, stripHeaders: false }
     const html = `<h2>A</h2><p><a href="#a">x</a></p><p><a href="#b">z</a>${'p'.repeat(80)}</p><h2>B</h2>`
 
-    const expected = htmlToMarkdown(html, options)
+    const expected = htmlToMarkdown(html, { clean: options.clean })
     expect(expected).toContain('[z](#b)')
     const joined = htmlToMarkdownSplitChunks(html, options).map(chunk => chunk.content).join('')
     expect(joined).toBe(expected)
@@ -343,7 +343,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     const options = { clean: clean({ fragments: true }), chunkOverlap: 0, stripHeaders: false }
     // Chunks drop the whitespace at their cuts, so compare the rest.
     const squash = (text: string) => text.replace(RE_WHITESPACE_GLOBAL, '')
-    const expected = squash(htmlToMarkdown(html, options))
+    const expected = squash(htmlToMarkdown(html, { clean: options.clean }))
     for (let chunkSize = 5; chunkSize <= 120; chunkSize++) {
       const joined = htmlToMarkdownSplitChunks(html, { ...options, chunkSize }).map(chunk => chunk.content).join('')
       expect(squash(joined), `chunk size ${chunkSize}`).toBe(expected)

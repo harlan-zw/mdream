@@ -46,8 +46,14 @@ In v2, each output format and each plugin is a separate import.
 Your bundle contains only the code that you import.
 This guide applies to `@mdream/js` only.
 For the Rust engine, see the [`mdream` migration guide](../mdream/README.md#migrating-from-v1).
-If a converter gets a removed option, such as `format`, `hooks`, or a `plugins` object, it throws a `TypeError` that names the fix.
-It also throws for the top-level `mdream` options `minimal`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, and `extraction`.
+Each converter throws a `TypeError` for an option that it does not read, such as a typo.
+In v1, it ignored these options.
+For a removed option, such as `format`, `hooks`, or a `plugins` object, the error names the fix.
+The top-level `mdream` options `minimal`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, and `extraction` also throw.
+`cleanUrls` throws too. Pass `clean: clean({ urls: true })` with `clean` from `@mdream/js/clean`.
+An option set to `undefined` does not throw.
+The splitter also reads its chunk options, such as `chunkSize`.
+The `blankLines` cleanup rule is removed. It had no effect, so delete it.
 
 ### Output formats
 
@@ -307,6 +313,8 @@ const markdown = htmlToMarkdown(html, {
 | `clean` | `Cleaner` | `undefined` | Cleanup rules from `clean()` in `@mdream/js/clean` (see [CleanOptions](#cleanoptions)). Streams apply them too. With `fragments`, a stream yields all output at the end. |
 | `wrapWidth` | `number` | `undefined` | Hard-wrap prose at this many characters on word boundaries |
 
+Any other key throws a `TypeError` that names the key.
+
 ### `TagOverride`
 
 | Option | Type | Description |
@@ -335,13 +343,12 @@ htmlToMarkdown(html, { clean: clean({ urls: true, fragments: true }) })
 | `urls` | `boolean` | `false` | Strip tracking query parameters (`utm_*`, `fbclid`, `gclid`, etc.) from URLs |
 | `fragments` | `boolean` | `false` | Strip fragment-only links that do not match any heading slug in the output |
 | `emptyLinks` | `boolean` | `false` | Strip links with meaningless hrefs (`#`, `javascript:void(0)`, `data:`, `vbscript:`) and replace with plain text |
-| `blankLines` | `boolean` | `false` | No effect in the JavaScript engine |
 | `redundantLinks` | `boolean` | `false` | Strip links where text equals URL, with or without a title: `[https://x.com](https://x.com)` becomes `https://x.com` |
 | `selfLinkHeadings` | `boolean` | `false` | Strip fragment links inside headings, such as permalink anchors: `## [Title](#title)` becomes `## Title` |
 | `emptyImages` | `boolean` | `false` | Drop images with missing, empty, or whitespace-only alt text |
 | `emptyLinkText` | `boolean` | `false` | Drop links that produce no visible text: `[](url)` is removed entirely |
 
-`clean()` without rules enables all options except `blankLines`.
+`clean()` without rules enables all options.
 
 ---
 
@@ -822,6 +829,8 @@ curl -s https://example.com | npx @mdream/js@beta --format html
 | `--text` | Alias for `--format text` |
 | `-v, --version` | Show version number |
 | `-h, --help` | Show help |
+
+If you pass an unknown flag, a flag without a value, or an unknown preset, the CLI writes one line to stderr and exits with code 1.
 
 ---
 

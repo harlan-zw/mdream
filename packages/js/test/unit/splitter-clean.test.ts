@@ -17,14 +17,14 @@ describe('incremental link cleanup in the splitter', () => {
     `<code><a href="${url}">${url}</a> tail</code>`,
   ])('holds rewritten links and their enclosing writers: %s', (html) => {
     const options = { clean: clean({ redundantLinks: true }), chunkOverlap: 0, stripHeaders: false }
-    const expected = htmlToMarkdown(html, options).replace(/\s+/g, '')
+    const expected = htmlToMarkdown(html, { clean: options.clean }).replace(/\s+/g, '')
     for (const chunkSize of [8, 20, 40]) {
       for (const returnEachLine of [false, true]) {
         const chunks = htmlToMarkdownSplitChunks(html, { ...options, chunkSize, returnEachLine })
         const actual = chunks.map(chunk => chunk.content).join('')
         expect(actual.replace(/\s+/g, '')).toBe(expected)
         if (!html.includes('<blockquote>') && !html.includes('<ul>') && !html.includes('<figure>'))
-          expect(actual).toBe(htmlToMarkdown(html, options))
+          expect(actual).toBe(htmlToMarkdown(html, { clean: options.clean }))
       }
     }
   })
@@ -36,7 +36,7 @@ describe('incremental link cleanup in the splitter', () => {
   ])('holds rewritten heading links: %s', (title, expectedHeader) => {
     const html = `<h2><a href="#title">${title}</a></h2><p>after</p><h2>Next</h2><p>tail</p>`
     const options = { clean: clean({ selfLinkHeadings: true }), chunkOverlap: 0, stripHeaders: false }
-    const expected = htmlToMarkdown(html, options).replace(/\s+/g, '')
+    const expected = htmlToMarkdown(html, { clean: options.clean }).replace(/\s+/g, '')
     for (const chunkSize of [4, 8, 20]) {
       const chunks = htmlToMarkdownSplitChunks(html, { ...options, chunkSize })
       expect(chunks.map(chunk => chunk.content).join('').replace(/\s+/g, '')).toBe(expected)
@@ -108,7 +108,7 @@ describe('splitter cleanup boundaries and options', () => {
     const chunks = htmlToMarkdownSplitChunks(html, options)
     expect(chunks.find(chunk => chunk.content.includes('x'))?.metadata.headers?.h2).toBe('One')
     expect(chunks.find(chunk => chunk.content.includes('y'))?.metadata.headers?.h2).toBe('Two')
-    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, options))
+    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, { clean: options.clean }))
   })
 
   it('keeps an HR boundary before the quote writer prefixes its lines', () => {
@@ -121,12 +121,12 @@ describe('splitter cleanup boundaries and options', () => {
     expect(chunks[before]?.metadata.headers?.h2).toBe('One')
     expect(chunks[after]?.metadata.headers?.h2).toBe('One')
     expect(chunks.find(chunk => chunk.content.includes('z'))?.metadata.headers?.h2).toBe('Two')
-    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, options))
+    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, { clean: options.clean }))
   })
 
   it.each([true, { fragments: true }])('rejects unsupported cleanup configuration: %j', (invalidClean) => {
     const options = { clean: invalidClean as any, chunkSize: 100, chunkOverlap: 0 }
-    expect(() => htmlToMarkdown('<p>x</p>', options)).toThrow('@mdream/js/clean')
+    expect(() => htmlToMarkdown('<p>x</p>', { clean: options.clean })).toThrow('@mdream/js/clean')
     expect(() => htmlToMarkdownSplitChunks('<p>x</p>', options)).toThrow('@mdream/js/clean')
     expect(() => htmlToMarkdownSplitChunksStream('<p>x</p>', options).next()).toThrow('@mdream/js/clean')
   })
@@ -144,7 +144,7 @@ describe('fragment cleanup in the splitter', () => {
       const marker = '`'.repeat(ticks + 1)
       const html = `<p><a href="#missing">intro</a></p>${start}<pre class="language-js">aaa\n${'`'.repeat(ticks)}\nbbb\nccc\nddd\neee</pre>${end}<p>tail</p>`
       const options = { clean: clean({ fragments: true }), stripHeaders: false }
-      const markdown = htmlToMarkdown(html, options)
+      const markdown = htmlToMarkdown(html, { clean: options.clean })
       const fence = markdown.slice(markdown.indexOf(`${marker}js`), markdown.lastIndexOf(marker) + marker.length)
       for (const chunkSize of [10, 20, 40]) {
         for (const chunkOverlap of [0, 5]) {
@@ -175,7 +175,7 @@ describe('fragment cleanup in the splitter', () => {
     const options = { clean: clean({ fragments: true }), chunkSize: 100, chunkOverlap: 0, stripHeaders: false }
     const chunks = htmlToMarkdownSplitChunks(html, options)
     expect(Math.max(...chunks.map(chunk => chunk.content.length))).toBeLessThanOrEqual(100)
-    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, options))
+    expect(chunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(html, { clean: options.clean }))
   })
 
   it('keeps header provenance when a later heading resolves a link', () => {
