@@ -63,11 +63,11 @@ function isHidden(element: ElementNode): boolean {
  *
  * @example
  * // Include only heading elements and their children
- * withQuerySelectorPlugin({ include: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] })
+ * filterPlugin({ include: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] })
  *
  * @example
  * // Exclude navigation, sidebar, and footer
- * withQuerySelectorPlugin({ exclude: ['nav', '#sidebar', '.footer'] })
+ * filterPlugin({ exclude: ['nav', '#sidebar', '.footer'] })
  */
 export function filterPlugin(options: {
   /** CSS selectors or tag names for elements to include (all others will be excluded) */
@@ -76,7 +76,6 @@ export function filterPlugin(options: {
   exclude?: string[]
   /** Whether to also process the children of matching elements */
   processChildren?: boolean
-  keepAbsolute?: boolean
 } = {}): TransformPlugin {
   // Compile tag names to TAG_* ids once, for fast numeric matching.
   const includeSelectors = compileSelectors('include', options.include)
