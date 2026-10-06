@@ -99,7 +99,7 @@ CLI: `curl -s URL | mdream --origin URL --preset minimal`. It streams stdin to s
 - **`@mdream/js` takes plugins as an array.** It throws a `TypeError` on `minimal`, `format`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, or `extraction` at the top level. Use `withMinimalPreset()` from `@mdream/js/preset/minimal`, or `{ plugins: [frontmatterPlugin()] }` from `@mdream/js/plugins`. For text or HTML output, use `@mdream/js/text` or `@mdream/js/html`.
 - **Emphasis is `*`, not `_`.** Headings are ATX, bullets are `-`, rules are `---`. Only `tagOverrides` changes a delimiter, for example `em: { enter: '_', exit: '_', isInline: true }`.
 - **Filter selectors also drop inline `position: absolute` and `position: fixed` elements.**
-- **Browser and CDN entries are async.** Every entry takes the same options and produces the same string. The browser bundle and the CDN script return `Promise<string>`, so `await` them. Read [references/runtimes.md](references/runtimes.md) before you use `mdream` outside Node or a Cloudflare Worker.
+- **Browser bundles import `mdream/browser`.** In a browser bundle, the root `mdream` entry throws a `TypeError` when called. Every entry takes the same options and produces the same string. `mdream/browser` and the CDN script return `Promise<string>`, so `await` them. Read [references/runtimes.md](references/runtimes.md) before you use `mdream` outside Node or a Cloudflare Worker.
 
 ## Version limits
 

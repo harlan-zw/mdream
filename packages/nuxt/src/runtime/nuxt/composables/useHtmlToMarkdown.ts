@@ -15,10 +15,9 @@ export function useHtmlToMarkdown(html?: MaybeRefOrGetter<string | undefined>, o
     }
     pending.value = true
     error.value = null
-    const mdream = await import('mdream')
-    const result: any = mdream.htmlToMarkdown(src, { ...options, ...overrides } as any)
-    // browser entry returns Promise<string>, node entry returns string
-    const resolved = typeof result === 'string' ? result : await result
+    // The browser entry returns Promise<string>; the Node entry returns a string.
+    const { htmlToMarkdown } = import.meta.client ? await import('mdream/browser') : await import('mdream')
+    const resolved = await htmlToMarkdown(src, { ...options, ...overrides })
     markdown.value = resolved
     pending.value = false
     return resolved

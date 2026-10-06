@@ -24,6 +24,9 @@
     "url": "https://github.com/harlan-zw/mdream",
     "directory": "packages/mdream"
   },
+  "sideEffects": [
+    "./wasm-bundler/mdream_edge.js"
+  ],
   "exports": {
     ".": {
       "workerd": {
@@ -34,24 +37,17 @@
         "types": "./dist/edge.d.mts",
         "default": "./dist/edge.mjs"
       },
-      "browser": {
-        "types": "./dist/browser.d.mts",
-        "default": "./dist/browser.mjs"
-      },
       "types": "./dist/index.d.mts",
+      "browser": "./dist/browser-stub.mjs",
       "import": {
         "types": "./dist/index.d.mts",
         "default": "./dist/index.mjs"
       },
       "default": "./dist/index.mjs"
     },
-    "./worker": {
-      "types": "./dist/worker.d.mts",
-      "import": {
-        "types": "./dist/worker.d.mts",
-        "default": "./dist/worker.mjs"
-      },
-      "default": "./dist/worker.mjs"
+    "./browser": {
+      "types": "./dist/browser.d.mts",
+      "default": "./dist/browser.mjs"
     },
     "./wasm": {
       "types": "./dist/wasm.d.mts",
@@ -74,7 +70,6 @@
     "wasm-bundler/",
     "wasm/"
   ],
-  "browser": "./dist/browser.mjs",
   "scripts": {
     "ts": "node  --experimental-strip-types",
     "test:live": "curl -s https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax | node ./bin/mdream.mjs --origin https://docs.github.com | tee test/github-markdown.md",

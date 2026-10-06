@@ -314,7 +314,7 @@ for await (const chunk of streamHtmlToMarkdown(response.body, {
 }
 ```
 
-In browser bundles, use `await htmlToMarkdown(html)`. The result is a string.
+In a browser bundle, import `htmlToMarkdown` from `mdream/browser` and `await` it. The result is a string.
 
 See the [mdream docs](./packages/mdream/README.md#api-reference) for complete details.
 
@@ -322,7 +322,7 @@ See the [mdream docs](./packages/mdream/README.md#api-reference) for complete de
 
 Use the guide for your engine:
 
-- [`mdream`](./packages/mdream/README.md#migrating-from-v1): browser and CDN returns, minimal filtering, and page titles.
+- [`mdream`](./packages/mdream/README.md#migrating-from-v1): browser imports and returns, Web Workers, minimal filtering, and page titles.
 - [`@mdream/js`](./packages/js/README.md#migrating-from-v1): format imports, plugin arrays, cleanup, and callback changes.
 - [Rust crate](./crates/core/README.md#migrating-from-v1): attribute storage and node accessors.
 
@@ -405,7 +405,7 @@ See the [Nuxt Module README](./packages/nuxt/README.md) for usage and configurat
 
 ## Browser CDN Usage
 
-Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load. `htmlToMarkdown()` returns `Promise<string>`, the same as the browser bundle:
+Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load. `htmlToMarkdown()` returns `Promise<string>`, the same as `mdream/browser`:
 
 ```html
 <script src="https://unpkg.com/mdream@beta/dist/iife.js"></script>

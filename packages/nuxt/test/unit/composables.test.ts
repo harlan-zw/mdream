@@ -3,8 +3,11 @@ import { ref } from 'vue'
 
 import { useHtmlToMarkdown } from '../../src/runtime/nuxt/composables/useHtmlToMarkdown'
 
+vi.mock('mdream/browser', () => ({
+  htmlToMarkdown: vi.fn(async (html: string, _opts?: any) => `# ${html}`),
+}))
 vi.mock('mdream', () => ({
-  htmlToMarkdown: vi.fn((html: string, _opts?: any) => `# ${html}`),
+  htmlToMarkdown: vi.fn((html: string, _opts?: any) => `# node ${html}`),
 }))
 
 describe('useHtmlToMarkdown', () => {
@@ -75,7 +78,7 @@ describe('useHtmlToMarkdown', () => {
   })
 
   it('should accept options', async () => {
-    const mdream = await import('mdream')
+    const mdream = await import('mdream/browser')
     const { convert } = useHtmlToMarkdown(undefined, { origin: 'https://example.com' })
 
     await convert('<a href="/page">Link</a>')
@@ -87,7 +90,7 @@ describe('useHtmlToMarkdown', () => {
   })
 
   it('should merge per-call overrides with base options', async () => {
-    const mdream = await import('mdream')
+    const mdream = await import('mdream/browser')
     const { convert } = useHtmlToMarkdown(undefined, { origin: 'https://example.com' })
 
     await convert('<p>Test</p>', { clean: true })
@@ -106,23 +109,19 @@ describe('useHtmlToMarkdown', () => {
     expect(markdown.value).toBe('')
   })
 
-  it('should resolve the browser Promise<string> contract', async () => {
-    const mdream = await import('mdream')
-    const browserEntry = mdream.htmlToMarkdown as unknown as (html: string) => Promise<string>
-    vi.mocked(browserEntry).mockImplementationOnce(
-      async (html: string) => `# browser ${html}`,
-    )
-
+  it('should convert with mdream/browser on the client', async () => {
+    const node = await import('mdream')
     const { markdown, convert } = useHtmlToMarkdown()
     const result = await convert('<p>Browser</p>')
 
-    expect(result).toBe('# browser <p>Browser</p>')
-    expect(markdown.value).toBe('# browser <p>Browser</p>')
+    expect(result).toBe('# <p>Browser</p>')
+    expect(markdown.value).toBe('# <p>Browser</p>')
+    expect(node.htmlToMarkdown).not.toHaveBeenCalled()
   })
 
   it('should set error on failure', async () => {
-    const mdream = await import('mdream')
-    vi.mocked(mdream.htmlToMarkdown).mockImplementationOnce(() => {
+    const mdream = await import('mdream/browser')
+    vi.mocked(mdream.htmlToMarkdown).mockImplementationOnce(async () => {
       throw new Error('conversion failed')
     })
 
