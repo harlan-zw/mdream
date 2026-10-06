@@ -112,7 +112,6 @@ fn parse_clean(v: &JsValue) -> Option<mdream::types::CleanConfig> {
     urls: as_bool(&get_prop(v, "urls")).unwrap_or(false),
     fragments: as_bool(&get_prop(v, "fragments")).unwrap_or(false),
     empty_links: as_bool(&get_prop(v, "emptyLinks")).unwrap_or(false),
-    blank_lines: as_bool(&get_prop(v, "blankLines")).unwrap_or(false),
     redundant_links: as_bool(&get_prop(v, "redundantLinks")).unwrap_or(false),
     self_link_headings: as_bool(&get_prop(v, "selfLinkHeadings")).unwrap_or(false),
     empty_images: as_bool(&get_prop(v, "emptyImages")).unwrap_or(false),
@@ -144,7 +143,6 @@ fn parse_options(
     panic!("panic probe: intentional panic");
   }
 
-  let clean_urls = as_bool(&get_prop(options, "cleanUrls")).unwrap_or(false);
   let clean = parse_clean(&get_prop(options, "clean"));
 
   let plugins_val = get_prop(options, "plugins");
@@ -166,7 +164,6 @@ fn parse_options(
 
   let core_options = mdream::types::HTMLToMarkdownOptions {
     origin,
-    clean_urls,
     clean,
     plugins,
     wrap_width,
@@ -232,7 +229,7 @@ fn parse_plugins(p: &JsValue) -> mdream::types::PluginConfig {
         .into_iter()
         .map(|(tag_name, ov)| {
           let alias = as_string(&get_prop(&ov, "alias"));
-          let alias_tag_id = alias.as_ref().and_then(|a| mdream::consts::get_tag_id(a));
+          let alias_tag_id = alias.as_ref().and_then(|a| mdream::get_tag_id(a));
           let spacing_vec = as_u8_vec(&get_prop(&ov, "spacing"));
           let config = mdream::types::TagOverrideConfig {
             enter: as_string(&get_prop(&ov, "enter")),

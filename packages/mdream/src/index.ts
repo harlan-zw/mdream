@@ -104,11 +104,10 @@ export async function* streamHtmlToMarkdown(
   const stream = new _MarkdownStream(resolved.napiOpts)
   yield* pumpStream({
     processChunk: chunk => stream.processChunk(carry.take(chunk)),
-    processChunkBytes: chunk => stream.processChunkBytes(chunk),
     finish: () => {
       const held = carry.flush()
       return held ? stream.processChunk(held) + stream.finish() : stream.finish()
     },
     takeData: () => stream.takeData(),
-  }, htmlStream, resolved, { decodeInJs: true })
+  }, htmlStream, resolved)
 }

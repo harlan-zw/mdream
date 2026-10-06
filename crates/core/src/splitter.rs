@@ -1,9 +1,9 @@
-use crate::consts::{TAG_H1, TAG_H2};
 use crate::types::{HTMLToMarkdownOptions, OutputFormat};
 
 /// Options for splitting markdown into chunks.
 pub struct SplitterOptions {
-  /// Header tag IDs to split on (TAG_H2..TAG_H6 by default).
+  /// Heading levels to split on, from 1 (`#`) to 6 (`######`). The default is
+  /// `[2, 3, 4, 5, 6]`. The splitter ignores a level outside 1 to 6.
   pub headers_to_split_on: Vec<u8>,
   /// Return each line as an individual chunk.
   pub return_each_line: bool,
@@ -18,7 +18,7 @@ pub struct SplitterOptions {
 impl Default for SplitterOptions {
   fn default() -> Self {
     Self {
-      headers_to_split_on: vec![TAG_H2, TAG_H2 + 1, TAG_H2 + 2, TAG_H2 + 3, TAG_H2 + 4],
+      headers_to_split_on: vec![2, 3, 4, 5, 6],
       return_each_line: false,
       strip_headers: true,
       chunk_size: 1000,
@@ -28,12 +28,14 @@ impl Default for SplitterOptions {
 }
 
 /// A single chunk of split markdown with metadata.
+#[non_exhaustive]
 pub struct MarkdownChunk {
   pub content: String,
   pub metadata: ChunkMetadata,
 }
 
 /// Metadata for a markdown chunk.
+#[non_exhaustive]
 pub struct ChunkMetadata {
   /// Header hierarchy at this chunk position (e.g. "h1" -> "Title").
   pub headers: Option<Vec<(String, String)>>,
@@ -44,6 +46,7 @@ pub struct ChunkMetadata {
 }
 
 /// Line location range.
+#[non_exhaustive]
 pub struct ChunkLoc {
   pub from: usize,
   pub to: usize,
@@ -112,6 +115,18 @@ fn detect_header(line: &str) -> Option<(u8, &str)> {
     return None;
   }
   Some((level, &line[text_start..]))
+}
+
+/// Bit `level - 1` for each heading level in 1 to 6. Other values set no bit.
+#[inline]
+fn heading_level_mask(levels: &[u8]) -> u8 {
+  let mut mask = 0u8;
+  for &level in levels {
+    if (1..=6).contains(&level) {
+      mask |= 1 << (level - 1);
+    }
+  }
+  mask
 }
 
 /// Check if line is an HR (---, ***, ___) but not a frontmatter marker.
@@ -184,9 +199,12 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
     }
   }
 
+  // Built once per call, so each heading line costs one mask test.
+  let split_levels = heading_level_mask(&opts.headers_to_split_on);
+
   // State
   let mut header_hierarchy: Vec<(u8, String)> = Vec::new();
-  let mut seen_split_headers: u8 = 0; // bitfield: bit (tag_id - TAG_H1)
+  let mut seen_split_headers: u8 = 0; // bitfield: bit (level - 1)
   let mut current_chunk_code_language = String::new();
   let mut in_code_block = false;
   let mut line_number: usize = 1;
@@ -243,8 +261,7 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
 
     if !header_hierarchy.is_empty() {
       let mut headers = Vec::new();
-      for &(tag_id, ref text) in header_hierarchy {
-        let level = tag_id - TAG_H1 + 1;
+      for &(level, ref text) in header_hierarchy {
         headers.push((format!("h{level}"), text.clone()));
       }
       metadata.headers = Some(headers);
@@ -306,11 +323,10 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
       };
 
       if let Some((level, header_text)) = header_match {
-        let tag_id = TAG_H1 + level - 1;
         let stripped_text = strip_markdown_formatting(header_text);
+        let bit = 1u8 << (level - 1);
 
-        if opts.headers_to_split_on.contains(&tag_id) {
-          let bit = 1u8 << (tag_id - TAG_H1);
+        if split_levels & bit != 0 {
           if seen_split_headers & bit != 0 {
             flush_chunk(
               &mut chunks,
@@ -325,14 +341,14 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
               opts.chunk_overlap,
             );
             // Clear hierarchy at this level and below
-            header_hierarchy.retain(|(k, _)| *k < tag_id);
+            header_hierarchy.retain(|(k, _)| *k < level);
           }
           seen_split_headers |= bit;
         }
-        if let Some(entry) = header_hierarchy.iter_mut().find(|(k, _)| *k == tag_id) {
+        if let Some(entry) = header_hierarchy.iter_mut().find(|(k, _)| *k == level) {
           entry.1 = stripped_text;
         } else {
-          header_hierarchy.push((tag_id, stripped_text));
+          header_hierarchy.push((level, stripped_text));
         }
       }
 

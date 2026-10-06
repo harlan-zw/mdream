@@ -1772,11 +1772,7 @@ impl ConvertState {
         // redundantLinks: [url](url) → url
         if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0
           && let Some(href) = node.attributes.get_bit(ATTR_HREF)
-          && let resolved = resolve_url(
-            href,
-            self.options.origin.as_deref(),
-            self.options.clean_urls,
-          )
+          && let resolved = resolve_url(href, self.options.origin.as_deref(), self.clean_urls)
           && link_text == resolved.as_ref()
           && text_len > 0
         {
@@ -1844,11 +1840,7 @@ impl ConvertState {
       // Write link close directly
       if let Some(href) = node.attributes.get_bit(ATTR_HREF) {
         let capped_code_span = self.options.max_node_bytes != 0 && !self.code_spans.is_empty();
-        let resolved = resolve_url(
-          href,
-          self.options.origin.as_deref(),
-          self.options.clean_urls,
-        );
+        let resolved = resolve_url(href, self.options.origin.as_deref(), self.clean_urls);
         let resolved = resolved.as_ref();
         let mut title = node.attributes.get_bit(ATTR_TITLE).unwrap_or("");
         if !title.is_empty() && self.last_content_cache_len > 0 {
@@ -3885,8 +3877,7 @@ impl ConvertState {
           .get_bit(ATTR_SRC)
           .filter(|src| !is_data_url(src))
           .unwrap_or("");
-        let resolved_src =
-          resolve_url(src, self.options.origin.as_deref(), self.options.clean_urls);
+        let resolved_src = resolve_url(src, self.options.origin.as_deref(), self.clean_urls);
         {
           let title = node.attributes.get_bit(ATTR_TITLE);
           let mut s = String::with_capacity(
@@ -4191,7 +4182,7 @@ impl ConvertState {
           .get_bit(ATTR_SRC)
           .filter(|src| !src.is_empty() && !is_data_url(src))?;
         Some(Cow::Owned(
-          resolve_url(src, self.options.origin.as_deref(), self.options.clean_urls).into_owned(),
+          resolve_url(src, self.options.origin.as_deref(), self.clean_urls).into_owned(),
         ))
       }
       TAG_Q => Some(Cow::Borrowed("\"")),
@@ -4518,8 +4509,11 @@ impl ConvertState {
     // On enter the node is already counted as a collapsing ancestor of itself.
     // Only real ancestors collapse its spacing, or a tag override that makes an
     // inline tag a block loses its spacing. Headings keep the rules above.
-    let counted_self =
-      is_enter && self.stack.last().is_some_and(|node| node.collapses_inner_white_space);
+    let counted_self = is_enter
+      && self
+        .stack
+        .last()
+        .is_some_and(|node| node.collapses_inner_white_space);
     let is_span = tag_id == Some(TAG_SPAN);
     let non_span_depth = self
       .collapse_non_span_depth

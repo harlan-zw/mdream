@@ -83,7 +83,7 @@ impl ConvertState {
     if !is_safe_html_url(url, image) {
       return None;
     }
-    let resolved = resolve_url(url, self.options.origin.as_deref(), self.options.clean_urls);
+    let resolved = resolve_url(url, self.options.origin.as_deref(), self.clean_urls);
     is_safe_html_url(resolved.as_ref(), image).then_some(resolved)
   }
 

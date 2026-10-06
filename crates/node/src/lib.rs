@@ -90,8 +90,6 @@ pub struct CleanOptionsNapi {
   pub fragments: Option<bool>,
   #[napi(js_name = "emptyLinks")]
   pub empty_links: Option<bool>,
-  #[napi(js_name = "blankLines")]
-  pub blank_lines: Option<bool>,
   #[napi(js_name = "redundantLinks")]
   pub redundant_links: Option<bool>,
   #[napi(js_name = "selfLinkHeadings")]
@@ -105,8 +103,6 @@ pub struct CleanOptionsNapi {
 #[napi(object)]
 pub struct HtmlToMarkdownOptions {
   pub origin: Option<String>,
-  #[napi(js_name = "cleanUrls")]
-  pub clean_urls: Option<bool>,
   pub clean: Option<CleanOptionsNapi>,
   pub plugins: Option<PluginOptions>,
   #[napi(js_name = "wrapWidth")]
@@ -130,7 +126,6 @@ fn to_core_opts(
       urls: c.urls.unwrap_or(false),
       fragments: c.fragments.unwrap_or(false),
       empty_links: c.empty_links.unwrap_or(false),
-      blank_lines: c.blank_lines.unwrap_or(false),
       redundant_links: c.redundant_links.unwrap_or(false),
       self_link_headings: c.self_link_headings.unwrap_or(false),
       empty_images: c.empty_images.unwrap_or(false),
@@ -144,7 +139,6 @@ fn to_core_opts(
 
   let core_options = mdream::types::HTMLToMarkdownOptions {
     origin: options.as_ref().and_then(|o| o.origin.clone()),
-    clean_urls: options.as_ref().and_then(|o| o.clean_urls).unwrap_or(false),
     clean,
     wrap_width: options
       .as_ref()
@@ -184,10 +178,7 @@ fn to_core_opts(
           overrides
             .into_iter()
             .map(|(tag_name, ov)| {
-              let alias_tag_id = ov
-                .alias
-                .as_ref()
-                .and_then(|a| mdream::consts::get_tag_id(a));
+              let alias_tag_id = ov.alias.as_ref().and_then(|a| mdream::get_tag_id(a));
               let config = mdream::types::TagOverrideConfig {
                 enter: ov.enter,
                 exit: ov.exit,
@@ -269,25 +260,9 @@ pub fn html_to_markdown(
   })
 }
 
-#[napi(js_name = "htmlToMarkdownBytes")]
-pub fn html_to_markdown_bytes(
-  html: &[u8],
-  options: Option<HtmlToMarkdownOptions>,
-) -> Result<MdreamNapiResult> {
-  let text = std::str::from_utf8(html)
-    .map_err(|e| napi::Error::new(napi::Status::InvalidArg, format!("Invalid UTF-8: {e}")))?;
-  let text = text.to_string();
-  catch_panic(move || {
-    let (opts, format) = to_core_opts(options);
-    let result = mdream::html_to_format_result(&text, opts, format);
-    Ok(result_to_napi(result))
-  })
-}
-
 #[napi]
 pub struct MarkdownStream {
   inner: mdream::MarkdownStreamProcessor,
-  utf8_carry: Vec<u8>,
 }
 
 #[napi]
@@ -297,77 +272,18 @@ impl MarkdownStream {
     let (opts, format) = to_core_opts(options);
     Self {
       inner: mdream::MarkdownStreamProcessor::new_with_format(opts, format),
-      utf8_carry: Vec::new(),
     }
   }
 
   #[napi]
   #[allow(clippy::needless_pass_by_value)]
-  pub fn process_chunk(&mut self, chunk: String) -> Result<String> {
-    if !self.utf8_carry.is_empty() {
-      return Err(napi::Error::new(
-        napi::Status::InvalidArg,
-        "Cannot process a string chunk while an incomplete UTF-8 byte sequence is buffered",
-      ));
-    }
-    Ok(self.inner.process_chunk(&chunk))
-  }
-
-  #[napi(js_name = "processChunkBytes")]
-  pub fn process_chunk_bytes(&mut self, chunk: &[u8]) -> Result<String> {
-    if self.utf8_carry.is_empty() {
-      return match std::str::from_utf8(chunk) {
-        Ok(text) => Ok(self.inner.process_chunk(text)),
-        Err(error) if error.error_len().is_none() => {
-          let valid_up_to = error.valid_up_to();
-          if valid_up_to == 0 {
-            self.utf8_carry.extend_from_slice(chunk);
-            return Ok(String::new());
-          }
-          let text = std::str::from_utf8(&chunk[..valid_up_to])
-            .expect("valid_up_to must end at a UTF-8 boundary");
-          let markdown = self.inner.process_chunk(text);
-          self.utf8_carry.extend_from_slice(&chunk[valid_up_to..]);
-          Ok(markdown)
-        }
-        Err(error) => Err(napi::Error::new(
-          napi::Status::InvalidArg,
-          format!("Invalid UTF-8: {error}"),
-        )),
-      };
-    }
-
-    self.utf8_carry.extend_from_slice(chunk);
-    let valid_up_to = match std::str::from_utf8(&self.utf8_carry) {
-      Ok(text) => text.len(),
-      Err(error) if error.error_len().is_none() => error.valid_up_to(),
-      Err(error) => {
-        return Err(napi::Error::new(
-          napi::Status::InvalidArg,
-          format!("Invalid UTF-8: {error}"),
-        ));
-      }
-    };
-    if valid_up_to == 0 {
-      return Ok(String::new());
-    }
-
-    let text = std::str::from_utf8(&self.utf8_carry[..valid_up_to])
-      .expect("valid_up_to must end at a UTF-8 boundary");
-    let markdown = self.inner.process_chunk(text);
-    self.utf8_carry.drain(..valid_up_to);
-    Ok(markdown)
+  pub fn process_chunk(&mut self, chunk: String) -> String {
+    self.inner.process_chunk(&chunk)
   }
 
   #[napi]
-  pub fn finish(&mut self) -> Result<String> {
-    if !self.utf8_carry.is_empty() {
-      return Err(napi::Error::new(
-        napi::Status::InvalidArg,
-        "Stream ended with an incomplete UTF-8 byte sequence",
-      ));
-    }
-    Ok(self.inner.finish())
+  pub fn finish(&mut self) -> String {
+    self.inner.finish()
   }
 
   /// Frontmatter and extracted elements collected so far. Call after
@@ -379,114 +295,4 @@ impl MarkdownStream {
       frontmatter: self.inner.frontmatter().map(|v| v.into_iter().collect()),
     }
   }
-}
-
-// ── Splitter types ──
-
-#[napi(object)]
-pub struct ChunkLocNapi {
-  pub from: u32,
-  pub to: u32,
-}
-
-#[napi(object)]
-pub struct ChunkMetadataNapi {
-  #[napi(ts_type = "Record<string, string>")]
-  pub headers: Option<std::collections::HashMap<String, String>>,
-  pub code: Option<String>,
-  pub loc: Option<ChunkLocNapi>,
-}
-
-#[napi(object)]
-pub struct MarkdownChunkNapi {
-  pub content: String,
-  pub metadata: ChunkMetadataNapi,
-}
-
-#[napi(object)]
-pub struct SplitterOptionsNapi {
-  #[napi(js_name = "headersToSplitOn")]
-  pub headers_to_split_on: Option<Vec<u32>>,
-  #[napi(js_name = "returnEachLine")]
-  pub return_each_line: Option<bool>,
-  #[napi(js_name = "stripHeaders")]
-  pub strip_headers: Option<bool>,
-  #[napi(js_name = "chunkSize")]
-  pub chunk_size: Option<u32>,
-  #[napi(js_name = "chunkOverlap")]
-  pub chunk_overlap: Option<u32>,
-}
-
-fn to_core_splitter_opts(
-  options: Option<SplitterOptionsNapi>,
-) -> Result<mdream::splitter::SplitterOptions> {
-  let defaults = mdream::splitter::SplitterOptions::default();
-  match options {
-    None => Ok(defaults),
-    Some(opts) => Ok(mdream::splitter::SplitterOptions {
-      headers_to_split_on: opts
-        .headers_to_split_on
-        .map(|v| {
-          v.into_iter()
-            .map(|x| {
-              u8::try_from(x).map_err(|_| {
-                napi::Error::new(
-                  napi::Status::InvalidArg,
-                  format!("headersToSplitOn value {x} exceeds u8 range (0-255)"),
-                )
-              })
-            })
-            .collect::<Result<Vec<u8>>>()
-        })
-        .transpose()?
-        .unwrap_or(defaults.headers_to_split_on),
-      return_each_line: opts.return_each_line.unwrap_or(defaults.return_each_line),
-      strip_headers: opts.strip_headers.unwrap_or(defaults.strip_headers),
-      chunk_size: opts.chunk_size.map_or(defaults.chunk_size, |v| v as usize),
-      chunk_overlap: opts
-        .chunk_overlap
-        .map_or(defaults.chunk_overlap, |v| v as usize),
-    }),
-  }
-}
-
-#[allow(clippy::cast_possible_truncation)]
-fn chunk_to_napi(chunk: mdream::splitter::MarkdownChunk) -> MarkdownChunkNapi {
-  MarkdownChunkNapi {
-    content: chunk.content,
-    metadata: ChunkMetadataNapi {
-      headers: chunk.metadata.headers.map(|v| v.into_iter().collect()),
-      code: chunk.metadata.code,
-      loc: chunk.metadata.loc.map(|loc| ChunkLocNapi {
-        from: loc.from as u32,
-        to: loc.to as u32,
-      }),
-    },
-  }
-}
-
-#[napi(js_name = "splitMarkdown")]
-pub fn split_markdown(
-  markdown: String,
-  options: Option<SplitterOptionsNapi>,
-) -> Result<Vec<MarkdownChunkNapi>> {
-  catch_panic(move || {
-    let opts = to_core_splitter_opts(options)?;
-    let chunks = mdream::splitter::split_markdown(&markdown, &opts);
-    Ok(chunks.into_iter().map(chunk_to_napi).collect())
-  })
-}
-
-#[napi(js_name = "htmlToMarkdownChunks")]
-pub fn html_to_markdown_chunks(
-  html: String,
-  options: Option<HtmlToMarkdownOptions>,
-  splitter_options: Option<SplitterOptionsNapi>,
-) -> Result<Vec<MarkdownChunkNapi>> {
-  catch_panic(move || {
-    let (md_opts, format) = to_core_opts(options);
-    let split_opts = to_core_splitter_opts(splitter_options)?;
-    let chunks = mdream::splitter::html_to_format_chunks(&html, md_opts, &split_opts, format);
-    Ok(chunks.into_iter().map(chunk_to_napi).collect())
-  })
 }

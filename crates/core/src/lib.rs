@@ -1,4 +1,4 @@
-pub mod consts;
+pub(crate) mod consts;
 pub(crate) mod convert;
 pub(crate) mod entities;
 pub(crate) mod scan;
@@ -19,8 +19,8 @@ pub use types::{
   IsolateMainConfig, MdreamResult, OutputFormat, PluginConfig, TagOverrideConfig, TailwindConfig,
 };
 
-// Re-export `get_tag_id` so callers can resolve tag names to IDs (for
-// `TagOverrideConfig::alias_tag_id`) without reaching into `consts` directly.
+// `consts` is private. `get_tag_id` is its one public item: it resolves a tag
+// name to the ID that `TagOverrideConfig::alias_tag_id` takes.
 pub use consts::get_tag_id;
 
 /// Convert HTML to Markdown in a single pass.
@@ -236,7 +236,6 @@ mod drain_equiv {
       urls: true,
       fragments: false,
       empty_links: true,
-      blank_lines: true,
       redundant_links: true,
       self_link_headings: true,
       empty_images: true,

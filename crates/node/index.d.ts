@@ -12,7 +12,6 @@ export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-was
 export declare class MarkdownStream {
   constructor(options?: HtmlToMarkdownOptions | undefined | null)
   processChunk(chunk: string): string
-  processChunkBytes(chunk: Uint8Array): string
   finish(): string
   /**
    * Frontmatter and extracted elements collected so far. Call after
@@ -21,22 +20,10 @@ export declare class MarkdownStream {
   takeData(): MdreamStreamData
 }
 
-export interface ChunkLocNapi {
-  from: number
-  to: number
-}
-
-export interface ChunkMetadataNapi {
-  headers?: Record<string, string>
-  code?: string
-  loc?: ChunkLocNapi
-}
-
 export interface CleanOptionsNapi {
   urls?: boolean
   fragments?: boolean
   emptyLinks?: boolean
-  blankLines?: boolean
   redundantLinks?: boolean
   selfLinkHeadings?: boolean
   emptyImages?: boolean
@@ -67,22 +54,12 @@ export interface FrontmatterOptions {
 
 export declare function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions | undefined | null): MdreamNapiResult
 
-export declare function htmlToMarkdownBytes(html: Uint8Array, options?: HtmlToMarkdownOptions | undefined | null): MdreamNapiResult
-
-export declare function htmlToMarkdownChunks(html: string, options?: HtmlToMarkdownOptions | undefined | null, splitterOptions?: SplitterOptionsNapi | undefined | null): Array<MarkdownChunkNapi>
-
 export interface HtmlToMarkdownOptions {
   origin?: string
-  cleanUrls?: boolean
   clean?: CleanOptionsNapi
   plugins?: PluginOptions
   wrapWidth?: number
   format?: "markdown" | "text" | "html"
-}
-
-export interface MarkdownChunkNapi {
-  content: string
-  metadata: ChunkMetadataNapi
 }
 
 export interface MdreamNapiResult {
@@ -104,16 +81,6 @@ export interface PluginOptions {
   tailwind?: boolean
   extraction?: ExtractionOptions
   tagOverrides?: Record<string, TagOverrideNapi>
-}
-
-export declare function splitMarkdown(markdown: string, options?: SplitterOptionsNapi | undefined | null): Array<MarkdownChunkNapi>
-
-export interface SplitterOptionsNapi {
-  headersToSplitOn?: Array<number>
-  returnEachLine?: boolean
-  stripHeaders?: boolean
-  chunkSize?: number
-  chunkOverlap?: number
 }
 
 export interface TagOverrideNapi {

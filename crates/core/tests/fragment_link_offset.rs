@@ -53,7 +53,6 @@ fn fragment_rewrite_survives_drifted_link_offset() {
     urls: true,
     fragments: true,
     empty_links: true,
-    blank_lines: true,
     redundant_links: true,
     self_link_headings: true,
     empty_images: true,
@@ -61,7 +60,6 @@ fn fragment_rewrite_survives_drifted_link_offset() {
   };
   let options = HTMLToMarkdownOptions {
     origin: Some("https://example.com/".to_string()),
-    clean_urls: true,
     clean: Some(clean),
     ..Default::default()
   };
@@ -81,7 +79,6 @@ fn drifted_fragment_link_is_unwrapped_after_blockquote_rewrite() {
     urls: true,
     fragments: true,
     empty_links: true,
-    blank_lines: true,
     redundant_links: true,
     self_link_headings: true,
     empty_images: true,
@@ -89,7 +86,6 @@ fn drifted_fragment_link_is_unwrapped_after_blockquote_rewrite() {
   };
   let options = HTMLToMarkdownOptions {
     origin: Some("https://example.com/".to_string()),
-    clean_urls: true,
     clean: Some(clean),
     ..Default::default()
   };
@@ -113,7 +109,6 @@ fn aliased_bracket_from_unclosed_nested_anchor_is_not_rewritten() {
     urls: true,
     fragments: true,
     empty_links: true,
-    blank_lines: false,
     redundant_links: true,
     self_link_headings: true,
     empty_images: true,
@@ -140,7 +135,6 @@ fn aliased_bracket_from_unclosed_nested_anchor_is_not_rewritten() {
     tag_overrides: None,
   };
   let options = HTMLToMarkdownOptions {
-    clean_urls: true,
     clean: Some(clean),
     plugins: Some(plugins),
     ..Default::default()

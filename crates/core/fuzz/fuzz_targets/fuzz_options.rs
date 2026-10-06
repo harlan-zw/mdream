@@ -12,7 +12,6 @@ struct FuzzInput {
     use_clean: bool,
     clean_fragments: bool,
     clean_empty_links: bool,
-    clean_blank_lines: bool,
     clean_redundant_links: bool,
     clean_self_link_headings: bool,
     clean_empty_images: bool,
@@ -32,7 +31,6 @@ fuzz_target!(|input: FuzzInput| {
             urls: input.clean_urls,
             fragments: input.clean_fragments,
             empty_links: input.clean_empty_links,
-            blank_lines: input.clean_blank_lines,
             redundant_links: input.clean_redundant_links,
             self_link_headings: input.clean_self_link_headings,
             empty_images: input.clean_empty_images,
@@ -91,7 +89,6 @@ fuzz_target!(|input: FuzzInput| {
 
     let options = HTMLToMarkdownOptions {
         origin: if input.use_origin { Some(input.origin) } else { None },
-        clean_urls: input.clean_urls,
         clean,
         plugins,
         ..Default::default()

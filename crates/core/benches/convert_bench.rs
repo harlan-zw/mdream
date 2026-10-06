@@ -88,7 +88,6 @@ fn clean_all() -> mdream::types::CleanConfig {
     urls: true,
     fragments: true,
     empty_links: true,
-    blank_lines: false,
     redundant_links: true,
     self_link_headings: true,
     empty_images: true,
