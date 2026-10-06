@@ -95,6 +95,7 @@ CLI: `curl -s URL | mdream --origin URL --preset minimal`. It streams stdin to s
 
 ## Traps
 
+- **Unknown options throw.** A key outside the [Config](#config) list throws a `TypeError` that names the fix. Pass `{ minimal: true }`, not `preset`. Pass `clean: { urls: true }`, not `cleanUrls`. Pass plugin options at the top level, not in a `plugins` object. A key set to `undefined` does not throw. The CLI exits with code 1 on an unknown flag.
 - **Hook plugins are not in this package.** An array in `plugins` throws `Custom hook plugins require @mdream/js`. Use `@mdream/js` with `plugins: [createPlugin({...})]` from `@mdream/js/plugins`.
 - **`@mdream/js` takes plugins as an array.** It throws a `TypeError` on `minimal`, `format`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, or `extraction` at the top level. Use `withMinimalPreset()` from `@mdream/js/preset/minimal`, or `{ plugins: [frontmatterPlugin()] }` from `@mdream/js/plugins`. For text or HTML output, use `@mdream/js/text` or `@mdream/js/html`.
 - **Emphasis is `*`, not `_`.** Headings are ATX, bullets are `-`, rules are `---`. Only `tagOverrides` changes a delimiter, for example `em: { enter: '_', exit: '_', isInline: true }`.

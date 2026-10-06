@@ -1,15 +1,63 @@
 import { describe, expect, it, vi } from 'vitest'
-import { htmlToMarkdown } from '../../src'
+import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src'
 import { resolveOptions } from '../../src/resolve-options'
 
-describe('htmlToMarkdown resolve options', () => {
-  it('throws TypeError when plugins array is passed', () => {
-    expect(() => htmlToMarkdown('<p>test</p>', { plugins: [] } as any))
-      .toThrow(TypeError)
-    expect(() => htmlToMarkdown('<p>test</p>', { plugins: [{}] } as any))
-      .toThrow('Custom hook plugins require @mdream/js')
+async function collect(html: string, options: object): Promise<string> {
+  let markdown = ''
+  for await (const chunk of streamHtmlToMarkdown(new Response(html).body, options))
+    markdown += chunk
+  return markdown
+}
+
+describe('unknown options', () => {
+  const page = '<html><head><title>Page</title></head><body><nav>Menu</nav><main><h1>Hi</h1></main></body></html>'
+
+  it.each([
+    [{ preset: 'minimal' }, 'mdream has no `preset` option. Pass { minimal: true }.'],
+    [{ cleanUrls: true }, 'mdream has no `cleanUrls` option. Pass { clean: { urls: true } }.'],
+    [{ plugins: { frontmatter: true } }, 'mdream takes plugin options at the top level, such as { frontmatter: true }.'],
+    [{ plugins: [{}] }, 'Custom hook plugins require @mdream/js.'],
+    [{ plugins: [] }, 'https://github.com/harlan-zw/mdream/tree/main/packages/js#migrating-from-v1'],
+    [{ isolatemain: true }, 'mdream has no `isolatemain` option.'],
+  ])('rejects %o and names the fix', (options, message) => {
+    expect(() => htmlToMarkdown(page, options as any)).toThrow(TypeError)
+    expect(() => htmlToMarkdown(page, options as any)).toThrow(message)
   })
 
+  it('lists the valid options for a misspelled key', () => {
+    expect(() => htmlToMarkdown(page, { wrapwidth: 80 } as any)).toThrow('isolateMain')
+  })
+
+  it('rejects them on the stream entry', async () => {
+    await expect(collect(page, { preset: 'minimal' })).rejects.toThrow('Pass { minimal: true }')
+  })
+
+  it('ignores keys whose value is undefined', async () => {
+    const options = { minimal: true, preset: undefined, cleanUrls: undefined, plugins: undefined }
+    const expected = '---\ntitle: Page\n---\n\n# Hi'
+    expect(htmlToMarkdown(page, options as any)).toBe(expected)
+    expect(await collect(page, options)).toBe(expected)
+  })
+})
+
+describe('url cleanup', () => {
+  const html = '<main><p><a href="https://example.com/?utm_source=x&id=1">Link</a></p></main>'
+
+  it.each([
+    { clean: { urls: true } },
+    { clean: true },
+    { minimal: true },
+  ])('%o strips tracking parameters', async (options) => {
+    expect(htmlToMarkdown(html, options)).toBe('[Link](https://example.com/?id=1)')
+    expect(await collect(html, options)).toBe('[Link](https://example.com/?id=1)')
+  })
+
+  it('keeps tracking parameters without clean', () => {
+    expect(htmlToMarkdown(html)).toBe('[Link](https://example.com/?utm_source=x&id=1)')
+  })
+})
+
+describe('htmlToMarkdown resolve options', () => {
   it('minimal enables frontmatter, isolateMain, tailwind, filter', () => {
     const html = '<!DOCTYPE html><html><head><title>Edge Options</title></head><body><div>Outside chrome</div><main><nav>Inside nav</nav><h1>Real Content</h1><p><a href="#">Empty link</a></p></main><footer>Footer junk</footer></body></html>'
     const md = htmlToMarkdown(html, {
@@ -38,12 +86,6 @@ describe('htmlToMarkdown resolve options', () => {
     // redundantLinks should simplify [url](url) to just url
     expect(md).toContain('https://example.com')
     expect(md).not.toContain('[https://example.com](https://example.com)')
-  })
-
-  it('clean: partial enables specific cleanup', () => {
-    const html = `<p><a href="https://example.com?utm_source=test">Link</a></p>`
-    const md = htmlToMarkdown(html, { clean: { urls: true } })
-    expect(md).not.toContain('utm_source')
   })
 
   it('frontmatter callback receives extracted data', () => {

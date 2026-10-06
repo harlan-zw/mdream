@@ -1,6 +1,6 @@
 import type { HtmlToMarkdownOptions, MdreamNapiResult } from '../napi/index.js'
-import type { ExtractedElement } from './index.js'
-import type { ResolvableOptions, ResolvedOptions } from './resolve-options.js'
+import type { ExtractedElement, MdreamOptions } from './index.js'
+import type { ResolvedOptions } from './resolve-options.js'
 import { resolveOptions } from './resolve-options.js'
 
 /**
@@ -42,7 +42,7 @@ function hasCallbacks({ frontmatterCallback, extractionHandlers }: Callbacks): b
 export function convertResult(
   convert: (html: string, napiOpts: HtmlToMarkdownOptions) => MdreamNapiResult,
   html: string,
-  options: ResolvableOptions = {},
+  options: Partial<MdreamOptions> = {},
 ): MdreamNapiResult {
   const resolved = resolveOptions(options)
   const result = convert(html, resolved.napiOpts)
