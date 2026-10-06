@@ -13,6 +13,15 @@ export default defineConfig({
         },
       }),
       defineProject({
+        // Nuxt sets this flag in every build. The composables run on the client.
+        define: { 'import.meta.client': 'true' },
+        test: {
+          name: 'nuxt',
+          environment: 'node',
+          include: ['./packages/nuxt/test/unit/**/*.test.ts'],
+        },
+      }),
+      defineProject({
         test: {
           name: 'browser',
           browser: {

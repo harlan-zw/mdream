@@ -33,7 +33,7 @@ function convert(html: string, napiOpts: HtmlToMarkdownOptions): MdreamNapiResul
 
 /**
  * Browser builds fetch the WASM binary on first use, so this returns a
- * Promise. The `browser` export condition ships types that say so.
+ * Promise. `mdream/browser` ships types that say so.
  */
 export async function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): Promise<string> {
   await ensureInit()

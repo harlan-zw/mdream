@@ -34,17 +34,21 @@ Never add files to git or make a commit. This will be done by a human.
 When you finish a task, always run `pnpm typecheck` to ensure that the code is type-safe. If you see any errors, fix them before proceeding.
 
 ## Build/Lint/Test Commands
-- Build all packages: `pnpm build` (root)
-- Build mdream only: `pnpm build` (in packages/mdream/)
+- Build all packages: `pnpm build` (root). This includes the NAPI and WASI builds in `crates/node`.
+- Build the Rust bindings that `packages/mdream` needs, then the JS packages:
+  - NAPI: `pnpm --dir crates/node run build:platform`
+  - Edge WASM: `node scripts/build-wasm-edge.mjs --target web --out-dir packages/mdream/wasm --out-name mdream_edge`, and again with `--target bundler --out-dir packages/mdream/wasm-bundler`
+  - JS packages: `pnpm -r --filter './packages/**' run build`
+  - `.github/workflows/test.yml` (Node Tests job) is the reference sequence.
 - Test all: `pnpm test` (root - installs playwright first)
 - Test single file: `pnpm test path/to/test.ts`
 - Test with pattern: `pnpm test -t "test pattern"`
-- Test folder: `pnpm test test/unit/plugins/`
-- Test browser/Playwright: `pnpm test:browser` (in packages/mdream/)
+- Test folder: `pnpm test packages/js/test/unit/`
+- Test browser/Playwright: `pnpm exec vitest run --project browser` (root)
+- Rust: `cargo test --workspace --exclude mdream-edge` and `cargo clippy --workspace --exclude mdream-edge -- -D warnings` (in crates/)
 - Development build (stub): `pnpm dev:prepare` (in packages/mdream/)
 - Live test with real sites: `pnpm test:github:live`, `pnpm test:wiki:file` (in packages/mdream/)
-- Benchmarking: `pnpm bench:stream`, `pnpm bench:string`, `pnpm bench:await` (in packages/mdream/)
-- Performance profiling: `pnpm flame` (in packages/mdream/ - creates flame graph)
+- Benchmarking: `pnpm bench` (root, see `bench/README.md`)
 - Typecheck all: `pnpm typecheck` (root - runs across all packages)
 
 ## Code Style Guidelines
@@ -61,29 +65,36 @@ When you finish a task, always run `pnpm typecheck` to ensure that the code is t
 
 ## Project Architecture
 
-This is a pnpm monorepo with multiple packages:
-- `packages/mdream`: Core HTML to Markdown converter (zero dependencies)
+This is a pnpm monorepo with two engines and their integrations:
+- `crates/core`: The Rust converter. It is also the `mdream` crate on crates.io, with a CLI in `src/bin.rs`.
+- `crates/node`: NAPI binding for Node.js. `crates/edge`: WASM binding for edge runtimes and browsers.
+- `packages/mdream`: The `mdream` npm package. It wraps the Rust engine (NAPI in Node, WASM elsewhere) and takes declarative options such as `{ minimal: true, frontmatter: true }`. It has no runtime dependencies.
 - `packages/js`: Pure JS engine (`@mdream/js`) with hook plugins, the splitter, and llms.txt generation (`@mdream/js/llms-txt`)
 - `packages/crawl`: Site-wide crawler for llms.txt generation
 - `packages/vite`: Vite plugin integration
 - `packages/nuxt`: Nuxt module integration
-- `packages/action`: GitHub Actions integration
+- `packages/action`: llms.txt generation for CI, run from its npm build
 
-### Core Architecture (packages/js/src/)
-- `index.ts`: Main entry point with `htmlToMarkdown` and `streamHtmlToMarkdown` APIs
+The two engines must produce the same output. Cross-engine parity tests live in `packages/mdream/test/unit/`.
+
+### JS Engine Architecture (packages/js/src/)
+- `index.ts`: Markdown entry with `htmlToMarkdown` and `streamHtmlToMarkdown`
+- `text.ts`, `html.ts`: Plain text and allowlisted HTML entries
 - `parse.ts`: Manual HTML parsing into DOM-like structure for performance
 - `markdown-processor.ts`: DOM node to Markdown transformation logic with state management
-- `stream.ts`: Streaming HTML processing with content-based buffering
+- `stream.ts`: Streaming HTML processing
 - `types.ts`: Core TypeScript interfaces for nodes, plugins, and state management
 - `tags.ts`: HTML tag handlers for Markdown conversion
-- `buffer-region.ts`: Streaming buffer management for optimal chunk boundaries
 - `const.ts`: TAG_* constant IDs for fast tag lookups (avoids string comparison)
+- `option-shape.ts`: Option validation shared by every entry
+- `clean.ts`: Cleanup rules for the `clean` option
 - `splitter.ts`: Single-pass Markdown text splitter (LangChain compatible)
 - `preset/minimal.ts`: Preset combining frontmatter, isolate-main, tailwind, and filter plugins
 
 ### Plugin System
 
-The plugin system allows you to customize HTML to Markdown conversion by hooking into the processing pipeline. Plugins can filter content, extract data, transform nodes, or add custom behavior.
+Hook plugins exist only in the JS engine (`@mdream/js`). The Rust engine (`mdream`) takes declarative options instead.
+The plugin system allows you to customize HTML to Markdown conversion by hooking into the processing pipeline. Plugins can filter content, extract data, transform nodes, or add custom behavior. Pass them in order as `htmlToMarkdown(html, { plugins: [myPlugin()] })`.
 
 #### Plugin Hooks
 
@@ -98,7 +109,7 @@ The plugin system allows you to customize HTML to Markdown conversion by hooking
 Use `createPlugin()` to create a plugin with type safety:
 
 ```typescript
-import { createPlugin } from 'mdream/plugins'
+import { createPlugin } from '@mdream/js/plugins'
 
 export function myPlugin() {
   return createPlugin({
@@ -121,23 +132,19 @@ export function myPlugin() {
 #### Example: Header Extraction Plugin
 
 ```typescript
-export function headerExtractPlugin() {
-  const headers: string[] = []
+import { createPlugin } from '@mdream/js/plugins'
 
+const HEADINGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+
+export function headerExtractPlugin(headers: string[]) {
   return createPlugin({
-    onNodeEnter(element, state) {
-      if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(element.name)) {
-        // Will collect text in processTextNode
-        // Can access state.depth for nesting level information
-      }
-    },
-
     processTextNode(textNode, state) {
       const parent = textNode.parent
-      if (parent && parent.name?.match(/^h[1-6]$/)) {
+      if (parent && HEADINGS.has(parent.name)) {
         headers.push(textNode.value.trim())
-        // Access state.options or state.context for additional context
+        // state.depth is the nesting depth; state.options holds the conversion options
       }
+      return undefined
     }
   })
 }
@@ -148,7 +155,7 @@ export function headerExtractPlugin() {
 The `extractionPlugin` provides a specialized way to extract elements using CSS selectors. All callbacks receive both the element and runtime state:
 
 ```typescript
-import { extractionPlugin } from '../plugins/extraction.ts'
+import { extractionPlugin } from '@mdream/js/plugins'
 
 const plugin = extractionPlugin({
   'h2': (element, state) => {
@@ -165,6 +172,9 @@ const plugin = extractionPlugin({
 #### Example: Content Filter Plugin
 
 ```typescript
+import type { ElementNode } from '@mdream/js'
+import { createPlugin, ELEMENT_NODE } from '@mdream/js'
+
 export function adBlockPlugin() {
   return createPlugin({
     beforeNodeProcess(event) {
@@ -185,20 +195,21 @@ export function adBlockPlugin() {
 ```
 
 ### Built-in Plugins
+Import these from `@mdream/js/plugins`. The Rust engine has the same features as declarative options.
 - `frontmatterPlugin()`: Extracts metadata from HTML `<head>` into YAML frontmatter
 - `isolateMainPlugin()`: Isolates main content area using semantic HTML
 - `tailwindPlugin()`: Converts Tailwind utility classes to semantic Markdown
-- `filterPlugin({ exclude: [...] })`: Filters out unwanted HTML elements by TAG_* constant
+- `filterPlugin({ exclude: [...] })`: Filters out unwanted HTML elements by tag name or CSS selector
 - `extractionPlugin({ 'selector': callback })`: Extracts elements using CSS selectors during conversion
 
 ### Key Concepts
 - **Node Types**: ElementNode (HTML elements) and TextNode (text content) with parent/child relationships
-- **TAG_* Constants**: Integer IDs in `const.ts` for fast tag lookups without string comparison (101 constants defined for all standard HTML tags)
-- **Streaming Architecture**: Processes HTML incrementally using buffer regions and optimal chunk boundaries
+- **TAG_* Constants**: Integer IDs in `const.ts` for fast tag lookups without string comparison. Rust uses the same values in `crates/core/src/consts.rs`.
+- **Streaming Architecture**: Processes HTML incrementally. A stream joins to the same output as one-shot conversion.
 - **Plugin Pipeline**: Each plugin can intercept and transform content at different processing stages
 - **Memory Efficiency**: Immediate processing and callback patterns to avoid collecting large data structures
 - **CSS Query Selector**: Custom CSS selector implementation in `libs/query-selector.ts` for element matching
-- **depthMap**: Uint8Array tracking nesting depth for each tag type on ElementNode (performance optimization)
+- **depthMap**: Uint16Array tracking nesting depth for each tag type (performance optimization)
 
 ## Technical Details
 - Parser: Manual HTML parsing for performance, doesn't use browser DOM
@@ -206,20 +217,17 @@ export function adBlockPlugin() {
 - Streaming: Chunks content using optimal breakpoints (paragraphs, lines)
 - HTML entities: Custom decoder with performance optimizations
 - Markdown generation: Tag handlers for each HTML element type accessed via TAG_* constants
-- State management: MdreamRuntimeState tracks context during conversion
+- State management: A runtime state object tracks context during conversion
 - Tables: Special handling for alignment, colspan, and header formatting
 - Lists: Support for nested ordered/unordered lists with proper indentation
 - Blockquotes: Handles proper nesting and continuations
 
 ## Module Exports & Entry Points
 
-The package provides multiple entry points for different use cases:
+Read the `exports` field of each `package.json` for the current entry points. It is the source of truth.
 
-- `mdream` - Main API (`htmlToMarkdown`, `streamHtmlToMarkdown`, `parseHtml`)
-- `mdream/plugins` - Plugin utilities (`createPlugin`, `extractionPlugin`, etc.)
-- `mdream/preset/minimal` - Preset configurations (`withMinimalPreset`)
-- `mdream/splitter` - Markdown text splitter (`htmlToMarkdownSplitChunks`)
-- `mdream/cli` - CLI entry point
+- `mdream`: `htmlToMarkdown` and `streamHtmlToMarkdown`. Export conditions pick NAPI in Node and WASM in edge runtimes (`workerd`, `edge-light`).
+- `@mdream/js`: `.` (Markdown), `/text`, `/html`, `/clean`, `/plugins`, `/preset/minimal`, `/splitter`, `/parse`, `/negotiate`, `/llms-txt`
 
 ## CLI and Testing
 
@@ -227,19 +235,21 @@ The package provides multiple entry points for different use cases:
 - Entry: `node ./bin/mdream.mjs` (also via `mdream` when installed globally)
 - Processes HTML from stdin, outputs Markdown to stdout
 - Test with live sites: `curl -s https://example.com | node ./bin/mdream.mjs --origin https://example.com`
-- Key CLI options: `--origin <url>`, `-v/--verbose`, `--chunk-size <size>`, `--preset minimal`
+- Options: run `node ./bin/mdream.mjs --help`. `@mdream/js` has the same CLI as `mdream-js`.
 
-### Testing Strategy (packages/mdream/test/)
-- Unit tests in `test/unit/` organized by feature:
+### Testing Strategy
+- `packages/js/test/unit/`: JS engine tests (parser, streaming, splitter, options, `libs/` query selector)
+- `packages/mdream/test/unit/`: Rust engine and cross-engine parity tests, organized by feature:
   - `nodes/` - HTML element conversion tests
   - `plugins/` - plugin functionality tests
   - `templates/` - real-world site template tests (NASA, HackerNews, Wikipedia, etc.)
-  - `libs/` - utility library tests (query selector, etc.)
   - `preset/` - preset configuration tests
-- Integration tests in `test/integration/` for end-to-end streaming
-- Test fixtures in `test/fixtures/` with real HTML from GitHub, Wikipedia
-- Always add tests for new plugins in `test/unit/plugins/`
-- Run specific test categories: `pnpm test test/unit/plugins/`
+  - `streaming/` - stream and one-shot equivalence
+- `packages/mdream/test/integration/`: end-to-end and browser tests
+- `packages/mdream/test/fixtures/`: real HTML from GitHub and Wikipedia
+- `crates/core/tests/`: Rust conversion tests
+- Add tests for a new plugin in `packages/mdream/test/unit/plugins/`
+- Run specific test categories: `pnpm test packages/mdream/test/unit/plugins/`
 
 ## Important Instruction Reminders
 Do what has been asked; nothing more, nothing less.

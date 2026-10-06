@@ -59,15 +59,16 @@ jobs:
       - name: Build packages
         run: pnpm build
 
+      # Runs the npm distribution, the way packages/action/README.md documents it.
       - name: Test action with basic glob
-        uses: ./
-        with:
-          glob: '.github/fixtures/**/*.html'
-          site-name: Test Site
-          description: Test site for mdream action
-          origin: 'https://example.com'
-          output: ./test-output
-          verbose: 'true'
+        run: node packages/action/dist/index.js
+        env:
+          INPUT_GLOB: '.github/fixtures/**/*.html'
+          INPUT_SITE-NAME: Test Site
+          INPUT_DESCRIPTION: Test site for mdream action
+          INPUT_ORIGIN: 'https://example.com'
+          INPUT_OUTPUT: ./test-output
+          INPUT_VERBOSE: 'true'
 
       - name: Verify outputs
         run: |
@@ -141,13 +142,13 @@ jobs:
         run: pnpm build
 
       - name: Test action with existing test fixtures
-        uses: ./
-        with:
-          glob: 'packages/mdream/test/fixtures/**/*.html'
-          site-name: mdream Test Fixtures
-          description: Test fixtures from mdream test suite
-          origin: 'https://github.com/harlan-zw/mdream'
-          output: ./fixtures-output
+        run: node packages/action/dist/index.js
+        env:
+          INPUT_GLOB: 'packages/mdream/test/fixtures/**/*.html'
+          INPUT_SITE-NAME: mdream Test Fixtures
+          INPUT_DESCRIPTION: Test fixtures from mdream test suite
+          INPUT_ORIGIN: 'https://github.com/harlan-zw/mdream'
+          INPUT_OUTPUT: ./fixtures-output
 
       - name: Verify fixture outputs
         run: |

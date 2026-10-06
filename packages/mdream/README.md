@@ -97,7 +97,6 @@ externals: ['mdream']
 - [Browser and Edge Usage](#browser-and-edge-usage)
   - [Edge / Cloudflare Workers](#edge--cloudflare-workers)
   - [Browser CDN (IIFE)](#browser-cdn-iife)
-  - [Web Worker](#web-worker)
 - [llms.txt Generation](#llmstxt-generation)
 - [Related Packages](#related-packages)
 
@@ -128,16 +127,23 @@ An option set to `undefined` does not throw.
 The `mdream` CLI exits with code 1 on an unknown flag, a flag without a value, or an unknown `--preset` value.
 In v1, the CLI ignored them.
 
-### Browser and CDN returns
+### Browser imports and returns
 
-Both entries return `Promise<string>` in v2.
+In a browser bundle, import from `mdream/browser`.
+Its `htmlToMarkdown` returns `Promise<string>`.
 Remove `.markdown` and await the conversion:
 
 ```diff
-  import { htmlToMarkdown } from 'mdream'
+- import { htmlToMarkdown } from 'mdream'
 - const markdown = (await htmlToMarkdown(html)).markdown
++ import { htmlToMarkdown } from 'mdream/browser'
 + const markdown = await htmlToMarkdown(html)
 ```
+
+In a browser bundle, the root `mdream` entry throws a `TypeError` when you call it.
+The import itself does not throw.
+A module that runs on the server and the client can import `mdream` and call it only on the server.
+The `mdream/browser` types need no TypeScript `customConditions` setting.
 
 For a CDN script:
 
@@ -147,8 +153,32 @@ For a CDN script:
 ```
 
 Use the CDN example inside an async function or a `<script type="module">` block.
-For browser types, set TypeScript's `customConditions` to `["browser"]` when your toolchain does not select it.
-See [Browser and Edge Usage](#browser-and-edge-usage) for initialization and worker assets.
+See [Browser and Edge Usage](#browser-and-edge-usage) for edge runtimes and the CDN script.
+
+### Web Worker
+
+v2 removes `mdream/worker`.
+To convert off the main thread, write a module worker that imports `mdream/browser`:
+
+```ts
+// md.worker.ts
+import { htmlToMarkdown } from 'mdream/browser'
+
+addEventListener('message', async (event: MessageEvent<string>) => {
+  postMessage(await htmlToMarkdown(event.data, { minimal: true }))
+})
+```
+
+```ts
+// main.ts
+const worker = new Worker(new URL('./md.worker.ts', import.meta.url), { type: 'module' })
+worker.onmessage = (event: MessageEvent<string>) => console.log(event.data)
+worker.postMessage('<h1>Hello</h1>')
+```
+
+Your bundler builds the worker and copies the WASM binary.
+Functions cannot cross `postMessage`.
+To use callbacks such as `frontmatter`, set them inside the worker.
 
 ### Minimal filtering
 
@@ -191,7 +221,7 @@ import type { MdreamOptions } from 'mdream'
 
 declare function htmlToMarkdown(html: string, options?: Partial<MdreamOptions>): string
 
-// Browser bundles and the CDN script return Promise<string> instead.
+// `mdream/browser` and the CDN script return Promise<string> instead.
 ```
 
 **JS engine** (`@mdream/js`) uses a separate entry point for each format:
@@ -270,7 +300,7 @@ Mdream includes two rendering engines, automatically selecting the best one for 
 | Engine | Package | Plugins | Use case |
 |--------|---------|---------|----------|
 | **Rust** (NAPI) | `mdream` | Declarative config only | Node.js (default) |
-| **Rust** (WASM) | `mdream` | Declarative config only | Edge, browser |
+| **Rust** (WASM) | `mdream`, `mdream/browser` | Declarative config only | Edge, browser |
 | **JavaScript** | `@mdream/js` | Explicit plugin arrays | Small bundles, custom plugins, splitter |
 
 ```ts
@@ -1065,14 +1095,21 @@ If you pass an unknown flag, a flag without a value, or an unknown preset, the C
 
 ## Browser and Edge Usage
 
-Every entry takes the same `MdreamOptions` and produces the same Markdown string. In Node and edge runtimes, `htmlToMarkdown` is synchronous. In browser bundles, the CDN script, and `mdream/worker`, it returns `Promise<string>`, because the WASM binary loads first. Each export condition ships its own types, so TypeScript shows the right return type when it resolves the `browser` condition (for example, with `customConditions: ["browser"]`).
+Every entry takes the same `MdreamOptions` and produces the same Markdown string.
+In Node and edge runtimes, `htmlToMarkdown` from `mdream` is synchronous.
+In a browser bundle, import from `mdream/browser`.
+Its `htmlToMarkdown` returns `Promise<string>`, because the WASM binary loads first.
+The CDN script also returns `Promise<string>`.
 
 ```ts
-import { htmlToMarkdown } from 'mdream'
+import { htmlToMarkdown } from 'mdream/browser'
 
-// In a browser bundle
 const markdown = await htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 ```
+
+In a browser bundle, the root `mdream` entry throws a `TypeError` when you call it.
+The `mdream` types always describe the synchronous API.
+To convert off the main thread, see [Web Worker](#web-worker).
 
 ### Edge / Cloudflare Workers
 
@@ -1119,11 +1156,9 @@ await init({ module_or_path: wasmModule })
 const markdown = htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 ```
 
-`mdream/worker` is not an edge entry. It runs the conversion in a browser Web Worker; see [Web Worker](#web-worker).
-
 ### Browser CDN (IIFE)
 
-Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It takes the same `MdreamOptions` as the `mdream` entry and returns `Promise<string>`, the same as the browser bundle.
+Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It takes the same `MdreamOptions` as the `mdream` entry and returns `Promise<string>`, the same as `mdream/browser`.
 
 ```html
 <script src="https://unpkg.com/mdream@beta/dist/iife.js"></script>
@@ -1136,32 +1171,6 @@ Use mdream directly via CDN with no build step. The script inlines the WASM bina
 **CDN Options:**
 - **unpkg**: `https://unpkg.com/mdream@beta/dist/iife.js`
 - **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream@beta/dist/iife.js`
-
-### Web Worker
-
-For browser environments, `mdream/worker` runs conversions off the main thread using a Web Worker.
-Serve the WASM binary and its JavaScript loader from your site.
-The beta worker expects both files to have the same basename.
-If your framework serves `public/` at the site root, copy these assets:
-
-```bash
-mkdir -p public/mdream
-cp node_modules/mdream/wasm/mdream_edge_bg.wasm public/mdream/
-cp node_modules/mdream/wasm/mdream_edge.js public/mdream/mdream_edge_bg.js
-```
-
-```ts
-import { htmlToMarkdown, initWorker, terminateWorker } from 'mdream/worker'
-
-const wasmUrl = new URL('/mdream/mdream_edge_bg.wasm', window.location.href).href
-await initWorker(wasmUrl)
-
-// Takes the same options as the mdream entry. Callbacks run on this thread.
-const markdown = await htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
-
-// Clean up
-terminateWorker()
-```
 
 ## Content Extraction with Readability
 

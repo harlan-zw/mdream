@@ -62,14 +62,12 @@ afterEach(() => {
 })
 
 describe('single-page mode via crawlAndGenerate', () => {
-  it('skips sitemap and robots.txt discovery when maxDepth is 0', async () => {
+  it('skips sitemap and robots.txt discovery at depth 0', async () => {
     const results = await crawlAndGenerate({
       urls: ['https://example.com/page'],
-      outputDir: tmpOut(),
-      maxDepth: 0,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      output: tmpOut(),
+      depth: 0,
+      artifacts: [],
     })
 
     // Should NOT have fetched robots.txt or sitemap.xml
@@ -85,12 +83,9 @@ describe('single-page mode via crawlAndGenerate', () => {
   it('does not follow links found on the page', async () => {
     const results = await crawlAndGenerate({
       urls: ['https://example.com/page'],
-      outputDir: tmpOut(),
-      maxDepth: 0,
-      followLinks: true, // even with followLinks true, singlePageMode should override
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      output: tmpOut(),
+      depth: 0,
+      artifacts: [],
     })
 
     // Should only fetch the one URL, not follow any discovered links
@@ -103,11 +98,9 @@ describe('single-page mode via crawlAndGenerate', () => {
 
     await crawlAndGenerate({
       urls: ['https://example.com/page'],
-      outputDir: tmpOut(),
-      maxDepth: 0,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      output: tmpOut(),
+      depth: 0,
+      artifacts: [],
     }, (progress) => {
       progressUpdates.push(JSON.parse(JSON.stringify(progress)))
     })
@@ -119,14 +112,25 @@ describe('single-page mode via crawlAndGenerate', () => {
     expect(firstUpdate.sitemap.processed).toBe(0)
   })
 
+  it('passes each page to the crawl:page hook that replaces onPage', async () => {
+    const pages: string[] = []
+    await crawlAndGenerate({
+      urls: ['https://example.com/page'],
+      output: tmpOut(),
+      depth: 0,
+      artifacts: [],
+      hooks: { 'crawl:page': page => void pages.push(page.url) },
+    })
+
+    expect(pages).toEqual(['https://example.com/page'])
+  })
+
   it('processes only the given URLs without adding home page', async () => {
     const results = await crawlAndGenerate({
       urls: ['https://example.com/specific-page'],
-      outputDir: tmpOut(),
-      maxDepth: 0,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      output: tmpOut(),
+      depth: 0,
+      artifacts: [],
     })
 
     // Should not add the home page URL (which normal mode does)
@@ -137,15 +141,13 @@ describe('single-page mode via crawlAndGenerate', () => {
   })
 })
 
-describe('normal crawl mode (maxDepth > 0) attempts sitemap discovery', () => {
-  it('fetches robots.txt and sitemap.xml when maxDepth > 0', async () => {
+describe('depth above 0 attempts sitemap discovery', () => {
+  it('fetches robots.txt and sitemap.xml at depth 1', async () => {
     await crawlAndGenerate({
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
-      maxDepth: 1,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      output: tmpOut(),
+      depth: 1,
+      artifacts: [],
     })
 
     expect(fetchedUrls.some(u => u.includes('robots.txt'))).toBe(true)
@@ -155,55 +157,13 @@ describe('normal crawl mode (maxDepth > 0) attempts sitemap discovery', () => {
   it('skipSitemap also bypasses discovery', async () => {
     await crawlAndGenerate({
       urls: ['https://example.com/page'],
-      outputDir: tmpOut(),
-      maxDepth: 2,
+      output: tmpOut(),
+      depth: 2,
       skipSitemap: true,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      artifacts: [],
     })
 
     expect(fetchedUrls.some(u => u.includes('robots.txt'))).toBe(false)
     expect(fetchedUrls.some(u => u.includes('sitemap'))).toBe(false)
-  })
-})
-
-describe('cLI --single-page flag derivation', () => {
-  // These test the actual CLI arg parsing logic from cli.ts parseCliArgs (lines 371-377, 455)
-  it('--single-page sets depth to 0 and disables followLinks', () => {
-    const args = ['--single-page', '-u', 'example.com']
-    const singlePage = args.includes('--single-page')
-    const depthStr = singlePage ? '0' : '3'
-    const depth = Number(depthStr)
-    const followLinks = depth > 0
-
-    expect(depth).toBe(0)
-    expect(followLinks).toBe(false)
-  })
-
-  it('without --single-page, depth defaults to 3 with followLinks enabled', () => {
-    const args = ['-u', 'example.com']
-    const singlePage = args.includes('--single-page')
-    const depthStr = singlePage ? '0' : '3'
-    const depth = Number(depthStr)
-    const followLinks = depth > 0
-
-    expect(depth).toBe(3)
-    expect(followLinks).toBe(true)
-  })
-
-  it('explicit --depth 0 also disables followLinks', () => {
-    const args = ['-u', 'example.com', '--depth', '0']
-    const singlePage = args.includes('--single-page')
-    const getArgValue = (flag: string) => {
-      const idx = args.indexOf(flag)
-      return idx >= 0 && idx + 1 < args.length ? args[idx + 1] : undefined
-    }
-    const depthStr = singlePage ? '0' : (getArgValue('--depth') || '3')
-    const depth = Number(depthStr)
-    const followLinks = depth > 0
-
-    expect(depth).toBe(0)
-    expect(followLinks).toBe(false)
   })
 })

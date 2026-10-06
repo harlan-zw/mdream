@@ -1,23 +1,8 @@
-import type { ElementNode, EngineOptions } from './types'
+import type { Cleaner, ElementNode, EngineOptions } from './types'
 import { escapeHtml, isSafeHtmlUrl } from './utils'
 
-const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
 const URL_SCHEME_RE = /^[A-Z][\dA-Z+.-]*:/i
 const SLASH_CHAR = 47
-
-function stripTrackingParams(url: string): string {
-  const queryStart = url.indexOf('?')
-  const fragmentStart = url.indexOf('#')
-  if (queryStart === -1 || (fragmentStart !== -1 && fragmentStart < queryStart))
-    return url
-
-  const queryEnd = fragmentStart === -1 ? url.length : fragmentStart
-  const query = url.slice(queryStart + 1, queryEnd)
-    .split('&')
-    .filter(parameter => !TRACKING_PARAM_RE.test(parameter))
-    .join('&')
-  return `${url.slice(0, queryStart)}${query ? `?${query}` : ''}${url.slice(queryEnd)}`
-}
 
 function pathEnd(value: string, from: number): number {
   const query = value.indexOf('?', from)
@@ -111,8 +96,9 @@ export function resolveUrl(url: string, origin?: string, clean?: EngineOptions['
     resolved = resolveAgainstBase(origin, url)
   }
 
-  const cleansUrls = clean === true || Boolean(clean && clean.urls)
-  return cleansUrls && resolved.includes('?') ? stripTrackingParams(resolved) : resolved
+  // `clean()` sets `url` when `urls` is on, so its rule stays out of other bundles.
+  const rewrite = (clean as Cleaner | undefined)?.url
+  return rewrite ? rewrite(resolved) : resolved
 }
 
 export function safeAnchorOutput(node: ElementNode, options: EngineOptions | undefined, entering: boolean, protectMarkdown = false): string | undefined {

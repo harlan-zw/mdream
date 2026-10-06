@@ -1,7 +1,6 @@
-import type { MarkdownState } from './markdown-processor'
 import type { OutputPosition } from './output-positions'
 import type { ParseState } from './parse'
-import type { CleanView, ElementNode, MarkdownChunk, NodeEvent, SplitterOptions, TextNode } from './types'
+import type { ElementNode, MarkdownChunk, NodeEvent, SplitterOptions, TextNode } from './types'
 import {
   ELEMENT_NODE,
   NodeEventEnter,
@@ -15,7 +14,7 @@ import {
   TAG_HR,
   TEXT_NODE,
 } from './const'
-import { createMarkdownProcessor } from './markdown-processor'
+import { createMarkdownProcessor, trimAsciiWhitespaceEnd } from './markdown-processor'
 import { assertEngineOptions, checkClean } from './option-shape'
 import { createOutputPositions } from './output-positions'
 import { finalizeParse, parseHtmlStream } from './parse'
@@ -23,10 +22,9 @@ import { resolvePlugins } from './pluggable/plugin'
 import { endPlugins, processPluginsForEvent } from './plugin-processor'
 import { buildTagOverrideHandlers } from './tag-overrides'
 import { tagHandlers } from './tags'
-import { isInsideHeading } from './utils'
+import { trimOutputStart } from './utils'
 
 const MARKDOWN_HEADER_LINE_RE = /^#{1,6}\s+/
-const NEWLINE_RE = /\n/g
 
 const DEFAULT_HEADERS_TO_SPLIT_ON: number[] = [
   TAG_H2,
@@ -59,6 +57,42 @@ function shouldSplitOnHeader(tagId: number, options: ReturnType<typeof createOpt
 /** Whether `code` is whitespace the converter writes between blocks. */
 function isOutputWhitespace(code: number): boolean {
   return code === 32 || (code >= 9 && code <= 13)
+}
+
+/** Separators a size cut prefers, best first. */
+const SEPARATORS = ['\n\n', '```\n', '\n', ' ']
+
+/**
+ * Where content starts at or after `start`. Blank lines are skipped, and a
+ * line that starts in range keeps its indent. Returns `end` for whitespace.
+ */
+function contentStart(markdown: string, start: number, end: number): number {
+  let lineStart = start === 0 || markdown.charCodeAt(start - 1) === 10 ? start : -1
+  for (let index = start; index < end; index++) {
+    const code = markdown.charCodeAt(index)
+    if (code === 10)
+      lineStart = index + 1
+    else if (!isOutputWhitespace(code))
+      return lineStart === -1 ? index : lineStart
+  }
+  return end
+}
+
+/** Where content ends before `end`, not before `start`. */
+function contentEnd(markdown: string, start: number, end: number): number {
+  while (end > start && isOutputWhitespace(markdown.charCodeAt(end - 1)))
+    end--
+  return end
+}
+
+/** `markdown.lastIndexOf(separator, from)`, without matches that start before `floor`. */
+function lastIndexBetween(markdown: string, separator: string, floor: number, from: number): number {
+  if (from < floor)
+    return -1
+  // The slice bounds the scan. An unbounded search can walk back to the
+  // document start for every cut.
+  const index = markdown.slice(floor, from + separator.length).lastIndexOf(separator)
+  return index === -1 ? -1 : floor + index
 }
 
 /** Match complete fences by their line prefix, marker, and opening run. */
@@ -124,33 +158,16 @@ function codeRegions(markdown: string): { start: number, end: number, markerStar
 }
 
 /**
- * Get current markdown content WITHOUT clearing buffers. A held clean pass
- * finishes the view so its fragment-link markers never reach a chunk.
- */
-function getCurrentMarkdown(state: MarkdownState, finishOutput?: (markdown: string) => CleanView, heldFragment = Infinity, holdHeadingTail = false): CleanView {
-  // Join only the stable prefix. Open writers can retract or replace every
-  // later fragment, even after the link that triggered cleanup has closed.
-  let markdown = heldFragment === Infinity
-    ? state.buffer.join('')
-    : state.buffer.slice(0, heldFragment).join('')
-  markdown = markdown.trimStart()
-  if (holdHeadingTail && isInsideHeading(state.depthMap)) {
-    let end = markdown.length
-    while (end > 0) {
-      const code = markdown.charCodeAt(end - 1)
-      if (code !== 35 && code !== 32 && code !== 9)
-        break
-      end--
-    }
-    markdown = markdown.slice(0, end)
-  }
-  return finishOutput ? finishOutput(markdown) : { markdown }
-}
-
-/**
- * Convert HTML to Markdown and split into chunks in single pass.
- * Yields chunks during HTML event processing for better memory efficiency.
- * Fragment cleanup waits until all headings are known.
+ * Convert HTML to Markdown and split it into chunks.
+ *
+ * The whole document converts before the first chunk. Open writers, such as
+ * a blockquote or fragment cleanup, can rewrite earlier output until the
+ * document ends. The generator then yields one chunk at a time, so a caller
+ * that stops early skips the remaining chunk work.
+ *
+ * Chunks drop the separators between them. A chunk's `content` has no blank
+ * first or last line, and `metadata.loc` gives the lines it spans in the
+ * converted Markdown.
  *
  * **JavaScript engine only** — uses the JS engine's internal processing pipeline.
  * Not compatible with the Rust engine.
@@ -167,234 +184,38 @@ export function* htmlToMarkdownSplitChunksStream(
     throw new Error('chunkOverlap must be less than chunkSize')
   }
 
-  let currentChunkCodeLanguage = ''
-  const deferredCodes: { position: OutputPosition, language: string }[] = []
-  const finishedCodes: { start: number, language: string }[] = []
-
-  // Create processor
   const processor = createMarkdownProcessor(options)
-  const positions = processor.finishOutput ? createOutputPositions(processor.state.buffer) : undefined
+  // Writers rewrite earlier fragments, so cut points are buffer positions
+  // that follow each rewrite, resolved once the document is finished.
+  const positions = createOutputPositions(processor.state.buffer)
   processor.state.outputPositions = positions
+  const codePositions: { position: OutputPosition, language: string }[] = []
   processor.state.onCodeFenceOpen = (language) => {
-    if (language && !currentChunkCodeLanguage)
-      currentChunkCodeLanguage = language
-    if (language && positions) {
+    if (language) {
       const fence = processor.state.codeFence!
-      deferredCodes.push({ position: positions.capture(fence.fragment, fence.markerOffset, 'content'), language })
+      codePositions.push({ position: positions.capture(fence.fragment, fence.markerOffset, 'content'), language })
     }
   }
 
-  // Chunking state
   const headerHierarchy = new Map<number, string>()
   const seenSplitHeaders = new Set<number>()
   let collectingHeaderText = false
   let currentHeaderTagId: number | null = null
   let currentHeaderText = ''
-  let lineNumber = 1
-  let lastChunkEndPosition = 0
-  let lastSplitPosition = 0
-  // The last flush runs against the finished document, where the clean pass
-  // has resolved every fragment link, so no position can go stale.
-  let outputFinal = false
-  let finishedMarkdown: string | undefined
-  let finishedCodeRegions: { start: number, end: number }[] = []
-  const deferredSections: { position: OutputPosition, headers: Map<number, string>, language: string }[] = []
-
-  function codeRegionAt(position: number): { start: number, end: number } | undefined {
-    let lower = 0
-    let upper = finishedCodeRegions.length
-    while (lower < upper) {
-      const middle = (lower + upper) >>> 1
-      if (finishedCodeRegions[middle]!.start < position)
-        lower = middle + 1
-      else
-        upper = middle
-    }
-    const region = lower > 0 ? finishedCodeRegions[lower - 1] : undefined
-    return region && position < region.end ? region : undefined
+  // Section ends are recorded before a split heading updates the hierarchy.
+  const sectionEnds: { position: OutputPosition, headers: Map<number, string> }[] = []
+  const endSection = () => {
+    sectionEnds.push({ position: positions.capture(), headers: new Map(headerHierarchy) })
   }
 
-  function splitPosition(currentMd: string, end: number): number {
-    const idealSplitPos = Math.min(end, lastChunkEndPosition + opts.chunkSize)
-    let heldRegion: { start: number, end: number } | undefined
-    for (const separator of ['\n\n', '```\n', '\n', ' ']) {
-      const index = currentMd.lastIndexOf(separator, idealSplitPos)
-      const candidate = index + separator.length
-      if (index < 0 || candidate <= lastSplitPosition || candidate <= lastChunkEndPosition || candidate > end)
-        continue
-      let contentEnd = candidate
-      while (contentEnd > lastChunkEndPosition && isOutputWhitespace(currentMd.charCodeAt(contentEnd - 1)))
-        contentEnd--
-      if (contentEnd <= lastChunkEndPosition || contentEnd <= lastSplitPosition)
-        continue
-      const region = codeRegionAt(candidate)
-      if (!region)
-        return candidate
-      heldRegion = region
-    }
-    heldRegion ??= codeRegionAt(idealSplitPos)
-    if (heldRegion)
-      return Math.min(heldRegion.end, end)
-    // An oversized word stays whole. Release it at the next separator rather
-    // than folding the rest of the document into the same chunk.
-    const space = currentMd.indexOf(' ', idealSplitPos)
-    const newline = currentMd.indexOf('\n', idealSplitPos)
-    const next = Math.min(space < 0 ? end : space, newline < 0 ? end : newline)
-    return next > lastChunkEndPosition ? next : end
-  }
-
-  function getStableMarkdown(): CleanView {
-    return getCurrentMarkdown(
-      processor.state,
-      processor.finishOutput,
-      outputFinal ? Infinity : processor.getHeldOutputFragment?.(),
-      !outputFinal && !!processor.getHeldOutputFragment,
-    )
-  }
-
-  function* flushChunk(endPosition?: number, applyOverlap = false): Generator<MarkdownChunk, void, undefined> {
-    if (processor.finishOutput && !outputFinal) {
-      deferredSections.push({
-        position: positions!.capture(),
-        headers: new Map(headerHierarchy),
-        language: currentChunkCodeLanguage,
-      })
-      currentChunkCodeLanguage = ''
-      return
-    }
-    const view = finishedMarkdown === undefined
-      ? getStableMarkdown()
-      : { markdown: finishedMarkdown }
-    const currentMd = view.markdown
-    let chunkEnd = Math.min(endPosition ?? currentMd.length, currentMd.length)
-    // Keep separator whitespace at the next chunk's start. Cleanup resolves
-    // once, so these cuts must not remove bytes from the finished document.
-    if (finishedMarkdown !== undefined) {
-      while (chunkEnd > lastChunkEndPosition && isOutputWhitespace(currentMd.charCodeAt(chunkEnd - 1)))
-        chunkEnd--
-    }
-    const originalChunkContent = currentMd.slice(lastChunkEndPosition, chunkEnd)
-
-    if (!originalChunkContent.trim()) {
-      // Leave whitespace-only output unconsumed: consuming it would drop it
-      // from the chunks' join, while the next flush yields it with content.
-      return
-    }
-
-    // Strip headers if requested
-    let chunkContent = originalChunkContent
-    if (opts.stripHeaders) {
-      chunkContent = chunkContent
-        .split('\n')
-        .filter(line => !MARKDOWN_HEADER_LINE_RE.test(line))
-        .join('\n')
-        .trim()
-
-      if (!chunkContent) {
-        lastChunkEndPosition = chunkEnd
-        return
-      }
-    }
-
-    const chunk: MarkdownChunk = {
-      content: chunkContent.trimEnd(),
-      metadata: {
-        loc: {
-          lines: {
-            from: lineNumber,
-            to: lineNumber + (originalChunkContent.match(NEWLINE_RE) || []).length,
-          },
-        },
-      },
-    }
-
-    if (headerHierarchy.size > 0) {
-      chunk.metadata.headers = {}
-      for (const [tagId, text] of headerHierarchy.entries()) {
-        const level = `h${tagId - TAG_H1 + 1}`
-        chunk.metadata.headers[level] = text
-      }
-    }
-
-    if (finishedMarkdown !== undefined) {
-      const code = finishedCodes.find(code => code.start >= lastChunkEndPosition && code.start < chunkEnd)
-      if (code)
-        chunk.metadata.code = code.language
-    }
-    else if (currentChunkCodeLanguage
-      && (!processor.getHeldOutputFragment
-        || codeRegions(currentMd).some(region => region.markerStart >= lastChunkEndPosition && region.markerStart < chunkEnd))) {
-      chunk.metadata.code = currentChunkCodeLanguage
-    }
-
-    yield chunk
-
-    if (!processor.getHeldOutputFragment || chunk.metadata.code)
-      currentChunkCodeLanguage = ''
-    lastSplitPosition = chunkEnd
-
-    if (applyOverlap && opts.chunkOverlap > 0) {
-      const maxOverlap = Math.max(0, originalChunkContent.length - 1)
-      const actualOverlap = Math.min(opts.chunkOverlap, maxOverlap)
-      let overlapStart = chunkEnd - actualOverlap
-      if (finishedMarkdown !== undefined) {
-        while (overlapStart > lastChunkEndPosition + 1 && !isOutputWhitespace(currentMd.charCodeAt(overlapStart - 1)))
-          overlapStart--
-        const region = codeRegionAt(overlapStart)
-        if (region)
-          overlapStart = Math.min(region.end, chunkEnd)
-      }
-      lastChunkEndPosition = overlapStart
-    }
-    else {
-      lastChunkEndPosition = chunkEnd
-    }
-
-    lineNumber += (originalChunkContent.match(NEWLINE_RE) || []).length
-  }
-
-  const parseState: ParseState = {
-    depthMap: processor.state.depthMap,
-    depth: 0,
-    resolvedPlugins: opts.resolvedPlugins,
-    tagHandlers,
-    tagOverrideHandlers: opts.tagOverrideHandlers,
-  }
-
-  const eventBuffer: NodeEvent[] = []
   const processResolvedEvent: (event: NodeEvent) => void = opts.resolvedPlugins?.length
     ? event => processPluginsForEvent(event, opts.resolvedPlugins, processor.state, processor.processEvent)
     : processor.processEvent
 
-  const collectEvent = (event: NodeEvent) => {
-    eventBuffer.push(event)
-  }
-  const leftover = parseHtmlStream(html, parseState, collectEvent)
-  finalizeParse(leftover, parseState, collectEvent)
-
-  for (const event of eventBuffer) {
+  const handleEvent = (event: NodeEvent) => {
     const { type: eventType, node } = event
-
-    // Parsing finishes before this generator replays its buffered events, so
-    // the shared parser depth map is back at zero here. Restore the live depth
-    // for each event from its parent chain; exit handlers observe the element
-    // after its own depth has been decremented, matching the streaming parser.
-    const eventDepthMap = node.type === ELEMENT_NODE
-      ? (node as ElementNode).depthMap
-      : node.parent?.depthMap
-    if (eventDepthMap)
-      processor.state.depthMap.set(eventDepthMap)
-    else
-      processor.state.depthMap.fill(0)
-    if (eventType === NodeEventExit && node.type === ELEMENT_NODE) {
-      const tagId = (node as ElementNode).tagId
-      if (tagId !== undefined && tagId >= 0 && tagId < processor.state.depthMap.length)
-        processor.state.depthMap[tagId] = Math.max(0, processor.state.depthMap[tagId]! - 1)
-    }
-
     if (node.type === ELEMENT_NODE) {
-      const element = node as ElementNode
-      const tagId = element.tagId
+      const tagId = (node as ElementNode).tagId
 
       if (tagId && tagId >= TAG_H1 && tagId <= TAG_H6) {
         if (eventType === NodeEventEnter) {
@@ -404,7 +225,7 @@ export function* htmlToMarkdownSplitChunksStream(
 
           if (shouldSplitOnHeader(tagId, opts)) {
             if (seenSplitHeaders.has(tagId)) {
-              yield* flushChunk()
+              endSection()
               for (let i = tagId; i <= TAG_H6; i++) {
                 headerHierarchy.delete(i)
               }
@@ -419,114 +240,265 @@ export function* htmlToMarkdownSplitChunksStream(
         }
       }
 
-      if (tagId === TAG_HR && eventType === NodeEventEnter) {
-        yield* flushChunk()
-      }
+      if (tagId === TAG_HR && eventType === NodeEventEnter)
+        endSection()
     }
-
-    if (collectingHeaderText && node.type === TEXT_NODE) {
-      const textNode = node as TextNode
-      currentHeaderText += textNode.value
+    else if (collectingHeaderText && node.type === TEXT_NODE) {
+      currentHeaderText += (node as TextNode).value
     }
 
     processResolvedEvent(event)
-
-    // Final parser whitespace adds no chunk content. It must not trigger an
-    // extra overlap split of the preceding text.
-    if (!opts.returnEachLine && !processor.finishOutput
-      && (node.type !== TEXT_NODE || (node as TextNode).value.trim())) {
-      const currentMd = getStableMarkdown().markdown
-      const currentChunkSize = opts.lengthFunction(currentMd.slice(lastChunkEndPosition))
-
-      if (currentChunkSize > opts.chunkSize) {
-        const idealSplitPos = lastChunkEndPosition + opts.chunkSize
-        const separators = ['\n\n', '```\n', '\n', ' ']
-        let splitPosition = -1
-
-        for (const sep of separators) {
-          const idx = currentMd.lastIndexOf(sep, idealSplitPos)
-          const candidateSplitPos = idx + sep.length
-
-          if (idx >= 0) {
-            const beforeSplit = currentMd.slice(0, candidateSplitPos)
-            let backtickCount = 0
-            let pos = beforeSplit.indexOf('```', 0)
-            while (pos !== -1) {
-              backtickCount++
-              pos = beforeSplit.indexOf('```', pos + 3)
-            }
-            if (backtickCount % 2 === 1) {
-              continue
-            }
-          }
-
-          if (idx >= 0 && candidateSplitPos > lastSplitPosition) {
-            splitPosition = candidateSplitPos
-            break
-          }
-        }
-
-        if (splitPosition === -1 || splitPosition <= lastChunkEndPosition) {
-          splitPosition = currentMd.length
-        }
-
-        yield* flushChunk(splitPosition, true)
-      }
-    }
   }
 
+  const parseState: ParseState = {
+    depthMap: processor.state.depthMap,
+    depth: 0,
+    resolvedPlugins: opts.resolvedPlugins,
+    tagHandlers,
+    tagOverrideHandlers: opts.tagOverrideHandlers,
+  }
+  const leftover = parseHtmlStream(html, parseState, handleEvent)
+  finalizeParse(leftover, parseState, handleEvent)
   endPlugins(opts.resolvedPlugins, processor.state)
-  outputFinal = true
-  if (processor.finishOutput) {
-    const positionOffset = positions!.finish()
-    let leadingTrim = 0
-    for (const fragment of processor.state.buffer) {
-      const trimmed = fragment.trimStart()
-      leadingTrim += fragment.length - trimmed.length
-      if (trimmed.length)
-        break
-    }
-    const raw = getCurrentMarkdown(processor.state).markdown
-    const view = processor.finishOutput(raw)
-    finishedMarkdown = view.markdown
-    const mapPosition = view.mapPosition ?? ((position: number) => processor.finishOutput!(raw.slice(0, position)).markdown.length)
-    for (const code of deferredCodes) {
-      finishedCodes.push({
-        start: mapPosition(Math.max(0, positionOffset(code.position) - leadingTrim)),
-        language: code.language,
-      })
-    }
-    finishedCodeRegions = codeRegions(finishedMarkdown)
-    deferredSections.push({ position: positions!.capture(), headers: new Map(headerHierarchy), language: currentChunkCodeLanguage })
-    // Section checkpoints are recorded before headings update the hierarchy.
-    // Resolve their offsets with the same pass after every heading is known.
-    for (const section of deferredSections) {
-      const rawEnd = Math.max(0, positionOffset(section.position) - leadingTrim)
-      const sectionEnd = rawEnd === raw.length
-        ? finishedMarkdown.length
-        : mapPosition(rawEnd)
-      headerHierarchy.clear()
-      for (const [tagId, text] of section.headers)
-        headerHierarchy.set(tagId, text)
-      currentChunkCodeLanguage = section.language
-      if (!opts.returnEachLine) {
-        while (opts.lengthFunction(finishedMarkdown.slice(lastChunkEndPosition, sectionEnd)) > opts.chunkSize) {
-          const previousEnd = lastChunkEndPosition
-          yield* flushChunk(splitPosition(finishedMarkdown, sectionEnd), true)
-          if (lastChunkEndPosition <= previousEnd)
-            break
-        }
-      }
-      yield* flushChunk(sectionEnd)
-    }
-    return
+  endSection()
+
+  // Trim and finish the buffer as `htmlToMarkdown` does, so chunks are
+  // slices of the same document.
+  const positionOffset = positions.finish()
+  const joined = processor.state.buffer.join('')
+  const started = trimOutputStart(joined)
+  const leadingTrim = joined.length - started.length
+  const raw = trimAsciiWhitespaceEnd(started)
+  const view = processor.finishOutput?.(raw)
+  const markdown = view ? view.markdown : raw
+  const mapPosition = view
+    ? view.mapPosition ?? ((position: number) => processor.finishOutput!(raw.slice(0, position)).markdown.length)
+    : undefined
+  const offsetOf = (position: OutputPosition): number => {
+    const offset = Math.min(Math.max(0, positionOffset(position) - leadingTrim), raw.length)
+    return offset === raw.length ? markdown.length : mapPosition ? mapPosition(offset) : offset
   }
-  yield* flushChunk()
+
+  const sections: Section[] = []
+  for (const { position, headers } of sectionEnds)
+    sections.push({ end: offsetOf(position), headers })
+  const codes: CodeStart[] = []
+  for (const { position, language } of codePositions)
+    codes.push({ start: offsetOf(position), language })
+  codes.sort((a, b) => a.start - b.start)
+
+  const lengthFunction = options.lengthFunction
+  const measure = lengthFunction
+    ? (start: number, end: number) => lengthFunction(markdown.slice(start, end))
+    : (start: number, end: number) => end - start
+  yield* chunkSections(markdown, sections, codes, opts, measure)
+}
+
+/** Content between two split points, with the heading hierarchy that owns it. */
+interface Section {
+  /** Offset in the finished Markdown where the section ends. */
+  end: number
+  headers: Map<number, string>
+}
+
+/** A code fence opener in the finished Markdown. */
+interface CodeStart {
+  start: number
+  language: string
 }
 
 /**
- * Convert HTML to Markdown and split into chunks in single pass.
- * Chunks are created during HTML event processing.
+ * Split finished Markdown at every section end, and inside a section where
+ * its rest is longer than `chunkSize`. Every cut is a position in this one
+ * document, so a chunk is always a slice of it.
+ */
+function* chunkSections(
+  markdown: string,
+  sections: Section[],
+  codes: CodeStart[],
+  opts: ReturnType<typeof createOptions>,
+  measure: (start: number, end: number) => number,
+): Generator<MarkdownChunk, void, undefined> {
+  const regions = codeRegions(markdown)
+  const newlines: number[] = []
+  for (let index = markdown.indexOf('\n'); index !== -1; index = markdown.indexOf('\n', index + 1))
+    newlines.push(index)
+  // Where the next chunk starts. It always sits at content, so a chunk has
+  // no leading blank line.
+  let chunkStart = 0
+  // Where the last chunk's content ends. A chunk must end past it, so an
+  // overlap never yields text the previous chunk already holds.
+  let lastEnd = 0
+  let codeIndex = 0
+  let headers = new Map<number, string>()
+
+  function lineAt(offset: number): number {
+    let lower = 0
+    let upper = newlines.length
+    while (lower < upper) {
+      const middle = (lower + upper) >>> 1
+      if (newlines[middle]! < offset)
+        lower = middle + 1
+      else
+        upper = middle
+    }
+    return lower + 1
+  }
+
+  function codeRegionAt(position: number): { start: number, end: number } | undefined {
+    let lower = 0
+    let upper = regions.length
+    while (lower < upper) {
+      const middle = (lower + upper) >>> 1
+      if (regions[middle]!.start < position)
+        lower = middle + 1
+      else
+        upper = middle
+    }
+    const region = lower > 0 ? regions[lower - 1] : undefined
+    return region && position < region.end ? region : undefined
+  }
+
+  function advanceTo(position: number): void {
+    const next = contentStart(markdown, position, markdown.length)
+    if (next > chunkStart)
+      chunkStart = next
+  }
+
+  function splitPosition(sectionEnd: number): number {
+    const idealSplitPos = Math.min(sectionEnd, chunkStart + opts.chunkSize)
+    const floor = Math.max(chunkStart, lastEnd)
+    let heldRegion: { start: number, end: number } | undefined
+    for (const separator of SEPARATORS) {
+      // A cut must hold content past the previous one, so search no further back.
+      const index = lastIndexBetween(markdown, separator, Math.max(0, floor - separator.length + 1), idealSplitPos)
+      const candidate = index + separator.length
+      if (index < 0 || candidate > sectionEnd || contentEnd(markdown, floor, candidate) <= floor)
+        continue
+      const region = codeRegionAt(candidate)
+      if (!region)
+        return candidate
+      heldRegion = region
+    }
+    heldRegion ??= codeRegionAt(idealSplitPos)
+    if (heldRegion)
+      return Math.min(heldRegion.end, sectionEnd)
+    // An oversized word stays whole. Release it at the next separator rather
+    // than folding the rest of the section into the same chunk.
+    let next = idealSplitPos
+    while (next < sectionEnd) {
+      const code = markdown.charCodeAt(next)
+      if (code === 32 || code === 10)
+        break
+      next++
+    }
+    return next > chunkStart ? next : sectionEnd
+  }
+
+  function* flush(endPosition: number, applyOverlap: boolean): Generator<MarkdownChunk, void, undefined> {
+    const chunkEnd = Math.min(endPosition, markdown.length)
+    const start = chunkStart
+    const end = contentEnd(markdown, start, chunkEnd)
+    if (end <= start || end <= lastEnd) {
+      // Whitespace only, or overlap text the previous chunk holds already.
+      advanceTo(chunkEnd)
+      return
+    }
+
+    let content = markdown.slice(start, end)
+    let contentFrom = start
+    let contentTo = end
+    if (opts.stripHeaders && (content.charCodeAt(0) === 35 || content.includes('\n#'))) {
+      const kept: string[] = []
+      let firstKept = -1
+      let lastKept = -1
+      let offset = 0
+      for (const line of content.split('\n')) {
+        if (line.charCodeAt(0) !== 35 || !MARKDOWN_HEADER_LINE_RE.test(line)) {
+          const lineEnd = contentEnd(line, 0, line.length)
+          if (lineEnd > 0) {
+            if (firstKept === -1) {
+              firstKept = kept.length
+              contentFrom = start + offset
+            }
+            lastKept = kept.length
+            contentTo = start + offset + lineEnd
+          }
+          kept.push(line)
+        }
+        offset += line.length + 1
+      }
+      if (firstKept === -1) {
+        lastEnd = end
+        advanceTo(chunkEnd)
+        return
+      }
+      const lastLine = kept[lastKept]!
+      kept[lastKept] = lastLine.slice(0, contentEnd(lastLine, 0, lastLine.length))
+      content = kept.slice(firstKept, lastKept + 1).join('\n')
+    }
+
+    const chunk: MarkdownChunk = {
+      content,
+      metadata: {
+        loc: {
+          lines: {
+            from: lineAt(contentFrom),
+            to: lineAt(contentTo - 1),
+          },
+        },
+      },
+    }
+
+    if (headers.size > 0) {
+      chunk.metadata.headers = {}
+      for (const [tagId, text] of headers.entries()) {
+        const level = `h${tagId - TAG_H1 + 1}`
+        chunk.metadata.headers[level] = text
+      }
+    }
+
+    while (codeIndex < codes.length && codes[codeIndex]!.start < start)
+      codeIndex++
+    if (codeIndex < codes.length && codes[codeIndex]!.start < end)
+      chunk.metadata.code = codes[codeIndex]!.language
+
+    yield chunk
+
+    lastEnd = end
+    let next = chunkEnd
+    if (applyOverlap && opts.chunkOverlap > 0) {
+      let overlapStart = end - Math.min(opts.chunkOverlap, end - start - 1)
+      while (overlapStart > start + 1 && !isOutputWhitespace(markdown.charCodeAt(overlapStart - 1)))
+        overlapStart--
+      const region = codeRegionAt(overlapStart)
+      if (region)
+        overlapStart = Math.min(region.end, end)
+      // A word longer than the overlap leaves no word start to overlap from.
+      // Restarting one character later would yield a chunk per character.
+      if (overlapStart > start + 1)
+        next = overlapStart
+    }
+    advanceTo(next)
+  }
+
+  for (const section of sections) {
+    headers = section.headers
+    if (!opts.returnEachLine) {
+      while (measure(chunkStart, section.end) > opts.chunkSize) {
+        const previousStart = chunkStart
+        yield* flush(splitPosition(section.end), true)
+        if (chunkStart <= previousStart)
+          break
+      }
+    }
+    yield* flush(section.end, false)
+  }
+}
+
+/**
+ * Convert HTML to Markdown and split it into chunks.
+ * See `htmlToMarkdownSplitChunksStream` for the chunk contract.
  *
  * **JavaScript engine only** — uses the JS engine's internal processing pipeline.
  * Not compatible with the Rust engine.

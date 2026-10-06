@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { clean } from '../../src/clean'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createPlugin } from '../../src/pluggable/plugin'
@@ -87,5 +88,21 @@ describe('options @mdream/js does not read', () => {
     const options = { plugins: [frontmatterPlugin()], tagOverrides: { 'x-h': 'h2' } }
     expect(htmlToMarkdown(page, options)).toBe('---\ntitle: T\n---\n\n## Hi')
     expect(htmlToText(page, options)).toBe('Hi')
+  })
+})
+
+describe('clean urls in text and safe HTML', () => {
+  it('drops tracking parameters and keeps the others', () => {
+    const options = { clean: clean({ urls: true }), origin: 'https://example.com' }
+    expect(htmlToText('<img src="/i.png?utm_source=a&amp;w=10&amp;fbclid=b">', options)).toBe('https://example.com/i.png?w=10')
+    expect(htmlToSafeHtml('<a href="/x?utm_medium=b&amp;id=2">x</a>', options)).toBe('<a href="https://example.com/x?id=2">x</a>')
+  })
+
+  // URL cleanup lives in clean(), so a plain rules object would silently
+  // skip it. Every entry names the fix instead.
+  it.each(converters)('%s rejects rules that did not come from clean()', (_name, convert, stream) => {
+    const options = { clean: { urls: true } as any }
+    expect(() => convert('<p>x</p>', options)).toThrow('@mdream/js/clean')
+    expect(() => stream(new ReadableStream(), options)).toThrow('@mdream/js/clean')
   })
 })

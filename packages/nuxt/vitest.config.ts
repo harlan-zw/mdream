@@ -4,6 +4,8 @@ export default defineConfig({
   test: {
     projects: [
       defineProject({
+        // Nuxt sets this flag in every build. The composables run client side.
+        define: { 'import.meta.client': 'true' },
         test: {
           name: 'unit',
           environment: 'node',

@@ -72,16 +72,13 @@ afterEach(() => {
 })
 
 describe('follow links (BFS crawling)', () => {
-  it('discovers and crawls linked pages when followLinks is enabled', async () => {
+  it('follows links one level deep at depth 1', async () => {
     const results = await crawlAndGenerate({
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
-      maxDepth: 1,
-      followLinks: true,
+      output: tmpOut(),
+      depth: 1,
       skipSitemap: true,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      artifacts: [],
     })
 
     // Should have crawled home + discovered /about and /blog at depth 1
@@ -95,16 +92,13 @@ describe('follow links (BFS crawling)', () => {
     expect(results.length).toBeGreaterThanOrEqual(3)
   })
 
-  it('respects maxDepth=2 and crawls two levels deep', async () => {
+  it('follows links two levels deep at depth 2', async () => {
     const results = await crawlAndGenerate({
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
-      maxDepth: 2,
-      followLinks: true,
+      output: tmpOut(),
+      depth: 2,
       skipSitemap: true,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      artifacts: [],
     })
 
     const crawledPaths = fetchedUrls.map(u => new URL(u).pathname)
@@ -118,34 +112,26 @@ describe('follow links (BFS crawling)', () => {
     expect(results.length).toBeGreaterThanOrEqual(5)
   })
 
-  it('does not follow links when followLinks is false', async () => {
+  it('follows links three levels deep by default', async () => {
     await crawlAndGenerate({
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
-      maxDepth: 3,
-      followLinks: false,
+      output: tmpOut(),
       skipSitemap: true,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      artifacts: [],
     })
 
     const crawledPaths = fetchedUrls.map(u => new URL(u).pathname)
-    expect(crawledPaths).toContain('/')
-    expect(crawledPaths).not.toContain('/about')
-    expect(crawledPaths).not.toContain('/blog')
+    expect(crawledPaths).toContain('/about/team')
+    expect(crawledPaths).toContain('/about/team/alice')
   })
 
   it('does not crawl duplicate URLs', async () => {
     await crawlAndGenerate({
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
-      maxDepth: 3,
-      followLinks: true,
+      output: tmpOut(),
+      depth: 3,
       skipSitemap: true,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      artifacts: [],
     })
 
     // Count occurrences of each path
@@ -160,17 +146,14 @@ describe('follow links (BFS crawling)', () => {
     }
   })
 
-  it('respects maxRequestsPerCrawl limit across BFS waves', async () => {
+  it('respects the maxPages limit across BFS waves', async () => {
     await crawlAndGenerate({
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
-      maxDepth: 3,
-      maxRequestsPerCrawl: 3,
-      followLinks: true,
+      output: tmpOut(),
+      depth: 3,
+      maxPages: 3,
       skipSitemap: true,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      artifacts: [],
     })
 
     // Should process at most 3 URLs total

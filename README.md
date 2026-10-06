@@ -180,7 +180,7 @@ const embeddings: { url: string, title: string, content: string, embedding: numb
 
 await crawlAndGenerate({
   urls: ['https://example.com'],
-  outputDir: './output',
+  output: './output',
   hooks: {
     'crawl:page': async ({ url, html, title, origin }) => {
       const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
@@ -314,17 +314,18 @@ for await (const chunk of streamHtmlToMarkdown(response.body, {
 }
 ```
 
-In browser bundles, use `await htmlToMarkdown(html)`. The result is a string.
+In a browser bundle, import `htmlToMarkdown` from `mdream/browser` and `await` it. The result is a string.
 
 See the [mdream docs](./packages/mdream/README.md#api-reference) for complete details.
 
 ### Migrating from v1
 
-Use the guide for your engine:
+Use the guide for each package:
 
-- [`mdream`](./packages/mdream/README.md#migrating-from-v1): browser and CDN returns, minimal filtering, and page titles.
+- [`mdream`](./packages/mdream/README.md#migrating-from-v1): browser imports and returns, Web Workers, minimal filtering, and page titles.
 - [`@mdream/js`](./packages/js/README.md#migrating-from-v1): format imports, plugin arrays, cleanup, and callback changes.
 - [Rust crate](./crates/core/README.md#migrating-from-v1): attribute storage and node accessors.
+- [`@mdream/crawl`](./packages/crawl/README.md#migrating-from-v1): renamed options, shared defaults, and the `mdream-crawl` command.
 
 The JS guide covers the API from [#224](https://github.com/harlan-zw/mdream/pull/224), merged after `2.0.0-beta.1`.
 That release uses the declarative JS plugin object and `format` option.
@@ -405,7 +406,7 @@ See the [Nuxt Module README](./packages/nuxt/README.md) for usage and configurat
 
 ## Browser CDN Usage
 
-Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load. `htmlToMarkdown()` returns `Promise<string>`, the same as the browser bundle:
+Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load. `htmlToMarkdown()` returns `Promise<string>`, the same as `mdream/browser`:
 
 ```html
 <script src="https://unpkg.com/mdream@beta/dist/iife.js"></script>

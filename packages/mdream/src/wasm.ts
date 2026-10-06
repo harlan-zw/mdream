@@ -12,8 +12,8 @@ import { resolveOptions } from './resolve-options.js'
 // `mdream/wasm`: the wasm-bindgen build for manual initialization. Await the
 // default export `init()` (or call `initSync()`) before converting. The
 // conversion exports take `MdreamOptions`, the same as the `mdream` entry.
-export * from '../wasm/mdream_edge.js'
-export { default } from '../wasm/mdream_edge.js'
+export type { InitInput, InitOutput, SyncInitInput } from '../wasm/mdream_edge.js'
+export { default, initSync } from '../wasm/mdream_edge.js'
 
 export function htmlToMarkdownResult(html: string, options: Partial<MdreamOptions> = {}): MdreamNapiResult {
   return convertResult(_htmlToMarkdownResult, html, options)

@@ -1,5 +1,11 @@
 import type { CrawlLogger } from './logger.ts'
 
+/** An output file the crawler can write. */
+export type CrawlArtifact = 'llms.txt' | 'llms-full.txt' | 'markdown'
+
+/** How the crawler fetches pages. */
+export type CrawlDriver = 'http' | 'playwright'
+
 export interface PageData {
   url: string
   html: string
@@ -16,85 +22,80 @@ export interface CrawlHooks {
   'crawl:done': (ctx: { results: CrawlResult[] }) => void | Promise<void>
 }
 
+/**
+ * Options for `crawlAndGenerate`, the `mdream.config.*` file, and the CLI.
+ * The CLI flag for each option is its kebab-case name (`maxPages` is `--max-pages`).
+ */
 export interface CrawlOptions {
+  /** Starting URLs. Glob patterns such as `example.com/docs/**` limit the crawl. */
   urls: string[]
-  outputDir: string
-  maxRequestsPerCrawl?: number
-  generateLlmsTxt?: boolean
-  generateLlmsFullTxt?: boolean
-  generateIndividualMd?: boolean
-  origin?: string
-  chunkSize?: number
-  driver?: 'http' | 'playwright'
-  useChrome?: boolean
-  followLinks?: boolean
-  maxDepth?: number
-  globPatterns?: ParsedUrlPattern[]
-  crawlDelay?: number
-  exclude?: string[]
-  siteNameOverride?: string
-  descriptionOverride?: string
-  verbose?: boolean
-  skipSitemap?: boolean
+  /** Output directory. Defaults to `output`. */
+  output?: string
   /**
-   * Explicit sitemap URL(s) to use instead of auto-discovery (robots.txt +
-   * well-known paths). Accepts non-standard locations and multiple parts, which
-   * are all loaded and merged. Ignored when `skipSitemap` is set.
+   * Link depth. `0` processes only the given URLs: no sitemap or robots.txt
+   * discovery and no link following. `1` or more discovers the sitemap. If the
+   * sitemap gives no URLs, the crawler follows links up to `depth` hops from
+   * the starting URLs. Integer from 0 to 10. Defaults to `3`.
    */
-  sitemapUrls?: string[]
+  depth?: number
+  /** Maximum number of pages to fetch. Defaults to no limit. */
+  maxPages?: number
+  /**
+   * Sitemap URL or URLs to use instead of auto-discovery. All parts are loaded
+   * and merged. Ignored when `skipSitemap` is set.
+   */
+  sitemap?: string | string[]
+  /** Files to write. Defaults to all three. An empty array writes no files. */
+  artifacts?: CrawlArtifact[]
+  /** Site name in llms.txt. Defaults to the home page title. */
+  siteName?: string
+  /** Site description in llms.txt. Defaults to the home page description. */
+  description?: string
+  /** Origin for relative links in page Markdown. Defaults to each page's own origin. */
+  origin?: string
+  /** Defaults to `http`. */
+  driver?: CrawlDriver
+  /** Use the system Chrome with the Playwright driver. Defaults to `false`. */
+  useChrome?: boolean
+  /** Glob patterns for URLs to skip. */
+  exclude?: string[]
+  /** Delay between requests in seconds. Defaults to the robots.txt `Crawl-delay`. */
+  crawlDelay?: number
+  /** Skip sitemap and robots.txt discovery. Defaults to `false`. */
+  skipSitemap?: boolean
+  /** Crawl other subdomains of the same registrable domain. Defaults to `false`. */
   allowSubdomains?: boolean
   /**
-   * Strip repeated site chrome (top nav, footer, newsletter walls) from per-page
-   * markdown and llms-full.txt page sections. Implemented as a post-processing
-   * pass over the generated markdown: blocks that repeat across the corpus are
-   * detected by frequency and removed only from the wrapping (leading/trailing)
-   * run of each page, so a page's main content is preserved. Does not affect the
-   * llms.txt link index. Defaults to true. Needs a corpus (>= 3 pages) to run, so
-   * single-page crawls are left unchanged.
+   * Remove repeated site chrome (navigation, footers) from page Markdown and
+   * llms-full.txt. Blocks that repeat across the corpus are removed only from
+   * the start and end of each page. The llms.txt link index does not change.
+   * Needs at least 3 pages. Defaults to `true`.
    */
   stripBoilerplate?: boolean
   /**
-   * Fraction of crawled pages a block must appear in to count as chrome (0..1).
-   * Higher is stricter. Defaults to `DEFAULT_BOILERPLATE_THRESHOLD` (0.5).
+   * Fraction of pages a block must appear in to count as chrome. Greater than
+   * 0 and at most 1. Higher is stricter. Defaults to `0.5`.
    */
   boilerplateThreshold?: number
+  /** Log errors for each failed URL. Defaults to `false`. */
+  verbose?: boolean
   /**
-   * Suppress all diagnostic/progress logging. Use when stdout must stay clean,
-   * e.g. an MCP server that only emits JSON-RPC (issue #100). Ignored when an
-   * explicit `logger` is provided.
+   * Drop all diagnostic and progress logs. Use it when stdout must stay clean,
+   * for example in an MCP server. An explicit `logger` takes precedence.
    */
   silent?: boolean
-  /**
-   * Custom sink for diagnostic/progress messages. Route logs anywhere (e.g.
-   * stderr) instead of the default `@clack/prompts` stdout output.
-   */
+  /** Sink for diagnostic and progress logs. Defaults to `@clack/prompts` on stdout. */
   logger?: CrawlLogger
   hooks?: Partial<{ [K in keyof CrawlHooks]: CrawlHooks[K] | CrawlHooks[K][] }>
-  onPage?: (page: PageData) => Promise<void> | void
+  /**
+   * Parsed URL patterns that replace the patterns parsed from `urls`.
+   * Advanced: `urls` covers most needs.
+   */
+  globPatterns?: ParsedUrlPattern[]
 }
 
-export interface MdreamCrawlConfig {
-  exclude?: string[]
-  driver?: 'http' | 'playwright'
-  maxDepth?: number
-  maxPages?: number
-  crawlDelay?: number
-  skipSitemap?: boolean
-  /** Explicit sitemap URL(s) to use instead of auto-discovery. Supports non-standard locations and multiple parts. */
-  sitemap?: string | string[]
-  allowSubdomains?: boolean
-  /** Strip repeated site chrome from per-page output. Defaults to true. */
-  stripBoilerplate?: boolean
-  /** Fraction of pages a block must repeat in to count as chrome (0..1). Defaults to 0.5. */
-  boilerplateThreshold?: number
-  verbose?: boolean
-  /** Suppress all diagnostic/progress logging (issue #100). */
-  silent?: boolean
-  artifacts?: ('llms.txt' | 'llms-full.txt' | 'markdown')[]
-  hooks?: Partial<{ [K in keyof CrawlHooks]: CrawlHooks[K] | CrawlHooks[K][] }>
-}
-
-export function defineConfig(config: MdreamCrawlConfig): MdreamCrawlConfig {
+/** Type helper for `mdream.config.*`. Every option is optional in the config file. */
+export function defineConfig(config: Partial<CrawlOptions>): Partial<CrawlOptions> {
   return config
 }
 
@@ -122,4 +123,25 @@ export interface CrawlResult {
   error?: string
   metadata?: PageMetadata
   depth?: number
+}
+
+export interface CrawlProgress {
+  sitemap: {
+    status: 'discovering' | 'processing' | 'completed'
+    found: number
+    processed: number
+  }
+  crawling: {
+    status: 'starting' | 'processing' | 'completed'
+    total: number
+    processed: number
+    failed: number
+    currentUrl?: string
+    /** Page fetch latency stats in ms */
+    latency: { total: number, min: number, max: number, count: number }
+  }
+  generation: {
+    status: 'idle' | 'generating' | 'completed'
+    current?: string
+  }
 }

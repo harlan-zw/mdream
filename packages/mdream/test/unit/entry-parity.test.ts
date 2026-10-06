@@ -1,5 +1,6 @@
 import type { MdreamOptions } from '../../src'
 import { describe, expect, it, vi } from 'vitest'
+import * as browserStub from '../../src/browser-stub.js'
 import * as browser from '../../src/browser.js'
 import * as edge from '../../src/edge.js'
 import * as node from '../../src/index.js'
@@ -107,5 +108,19 @@ describe.each(entries)('$name entry', ({ name, convert, stream }) => {
     expect(markdown).toBe(node.htmlToMarkdown(PAGE, { minimal: true }))
     expect(frontmatter).toHaveBeenCalledWith({ title: 'Page', description: 'About' })
     expect(link).toHaveBeenCalledOnce()
+  })
+})
+
+// The root `mdream` entry under the `browser` condition. It must offer every
+// runtime name the Node entry offers, so a browser bundle that imports one
+// still builds, and each call points the caller to `mdream/browser`.
+describe('root entry in a browser bundle', () => {
+  it('exports the same runtime names as the Node entry', () => {
+    expect(Object.keys(browserStub).sort()).toEqual(Object.keys(node).sort())
+  })
+
+  it.each(Object.entries(browserStub))('%s throws a TypeError that names mdream/browser', (name, call) => {
+    expect(call).toThrow(TypeError)
+    expect(call).toThrow(`import ${name} from 'mdream/browser'`)
   })
 })

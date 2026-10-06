@@ -3,9 +3,10 @@
  *
  * The rules act on the link and image nodes that produce Markdown, as in Rust,
  * so literal text such as `\[x](#y)` or code is never rewritten. The
- * converter handles `urls`, `emptyLinks`, `emptyImages` and `emptyLinkText`
- * itself. The rules that rewrite a link after it is written live here, in the
- * pass `apply` starts, so they stay out of bundles that do not import `clean()`.
+ * converter handles `emptyLinks`, `emptyImages` and `emptyLinkText` itself.
+ * `urls` and the rules that rewrite a link after it is written live here, in
+ * `url` and in the pass `apply` starts, so they stay out of bundles that do
+ * not import `clean()`.
  * `fragments` needs the whole document: whether `#slug` resolves depends on
  * headings that may come later.
  */
@@ -35,8 +36,29 @@ export function clean(rules: CleanOptions = ALL_RULES): Cleaner {
     apply: target => resolved.fragments || resolved.redundantLinks || resolved.selfLinkHeadings
       ? startPass(resolved, target)
       : undefined,
+    url: rules.urls ? stripTrackingParams : undefined,
   }
   return resolved
+}
+
+// ── Tracking parameters ──
+
+const TRACKING_PARAM_RE = /^(?:utm_|fbclid|gclid|mc_eid|msclkid|oly_)/
+
+function stripTrackingParams(url: string): string {
+  const queryStart = url.indexOf('?')
+  if (queryStart === -1)
+    return url
+  const fragmentStart = url.indexOf('#')
+  if (fragmentStart !== -1 && fragmentStart < queryStart)
+    return url
+
+  const queryEnd = fragmentStart === -1 ? url.length : fragmentStart
+  const query = url.slice(queryStart + 1, queryEnd)
+    .split('&')
+    .filter(parameter => !TRACKING_PARAM_RE.test(parameter))
+    .join('&')
+  return `${url.slice(0, queryStart)}${query ? `?${query}` : ''}${url.slice(queryEnd)}`
 }
 
 // ── Link rewrites ──
@@ -47,7 +69,7 @@ export function clean(rules: CleanOptions = ALL_RULES): Cleaner {
  * `selfLinkHeadings`, then `redundantLinks`; a fragment link is recorded
  * last, and `finish` drops it if no heading has its slug.
  */
-function startPass(rules: CleanOptions, target: CleanTarget): CleanPass {
+function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
   const fragments = rules.fragments === true
   const selfLinkHeadings = rules.selfLinkHeadings === true
   const redundantLinks = rules.redundantLinks === true

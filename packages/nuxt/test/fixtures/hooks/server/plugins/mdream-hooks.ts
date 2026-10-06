@@ -3,6 +3,8 @@ export default defineNitroPlugin((nitroApp) => {
   // Uses filter to exclude <p> elements, proving the hook modified options
   nitroApp.hooks.hook('mdream:config', (options) => {
     options.filter = { exclude: ['p'] }
+    // Replaces `extraction`. The module must still read the page title and description for llms.txt.
+    options.extraction = { h1: () => {} }
   })
 
   // mdream:negotiate hook - override content negotiation based on custom headers
