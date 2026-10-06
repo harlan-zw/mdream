@@ -25,9 +25,25 @@ yarn add @mdream/vite@beta
 
 The plugin depends on `mdream` and `@mdream/js` (installed automatically as transitive dependencies).
 
+## Migrating from v1
+
+- The plugin sets `enforce: 'post'` itself. The spread and the `enforce` line still work, but you can remove them:
+
+  ```diff
+    plugins: [
+  -   {
+  -     ...viteHtmlToMarkdownPlugin(),
+  -     enforce: 'post',
+  -   }
+  +   viteHtmlToMarkdownPlugin()
+    ]
+  ```
+
+- `@mdream/vite` no longer re-exports `htmlToMarkdown` and `streamHtmlToMarkdown`. Install `mdream` and import them from it.
+
 ## Setup
 
-Add the plugin to your `vite.config.ts`. Set `enforce: 'post'` so HTML assets exist before Markdown generation:
+Add the plugin to your `vite.config.ts`:
 
 ```ts
 import { viteHtmlToMarkdownPlugin } from '@mdream/vite'
@@ -35,10 +51,7 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    {
-      ...viteHtmlToMarkdownPlugin(),
-      enforce: 'post',
-    }
+    viteHtmlToMarkdownPlugin()
   ]
 })
 ```
@@ -46,15 +59,12 @@ export default defineConfig({
 A default export is also available:
 
 ```ts
-import htmlToMarkdown from '@mdream/vite'
+import mdream from '@mdream/vite'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    {
-      ...htmlToMarkdown(),
-      enforce: 'post',
-    }
+    mdream()
   ]
 })
 ```
@@ -207,40 +217,20 @@ The middleware sets the following headers on Markdown responses:
 
 ### Programmatic Usage
 
-The package re-exports `htmlToMarkdown` and `streamHtmlToMarkdown` from `mdream`, so you can use them directly without adding `mdream` as a separate dependency:
-
-```ts
-import { htmlToMarkdown } from '@mdream/vite'
-
-const markdown = htmlToMarkdown('<h1>Hello</h1>', {
-  origin: 'https://example.com',
-  clean: true,
-})
-```
-
-Streaming conversion:
-
-```ts
-import { streamHtmlToMarkdown } from '@mdream/vite'
-
-for await (const chunk of streamHtmlToMarkdown(htmlStream)) {
-  process.stdout.write(chunk)
-}
-```
+To convert HTML in your own code, install `mdream` and import `htmlToMarkdown` or `streamHtmlToMarkdown` from it.
+See the [mdream README](../mdream/README.md#api-reference).
 
 ### Exported Functions
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `viteHtmlToMarkdownPlugin` | `(options?: ViteHtmlToMarkdownOptions) => Plugin` | Vite plugin for automatic HTML to markdown conversion |
-| `htmlToMarkdown` | `(html: string, options?: Partial<MdreamOptions>) => string` | Convert an HTML string to markdown |
-| `streamHtmlToMarkdown` | `(stream: ReadableStream, options?: Partial<MdreamOptions>) => AsyncIterable<string>` | Stream HTML to markdown |
 
 ### Exported Types
 
 The package exports the following TypeScript types from `@mdream/vite`:
 
-- `MdreamOptions`: Options for `htmlToMarkdown` and `streamHtmlToMarkdown`.
+- `MdreamOptions`: The type of the `mdreamOptions` plugin option.
 - `ViteHtmlToMarkdownOptions`: Plugin configuration options.
 - `CacheEntry`: Internal cache entry shape (`content`, `timestamp`, `ttl`).
 - `MarkdownConversionResult`: Result object with `content`, `cached`, and `source` fields.
@@ -256,15 +246,12 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    {
-      ...viteHtmlToMarkdownPlugin({
-        mdreamOptions: {
-          minimal: true,
-          origin: 'https://example.com',
-        }
-      }),
-      enforce: 'post',
-    }
+    viteHtmlToMarkdownPlugin({
+      mdreamOptions: {
+        minimal: true,
+        origin: 'https://example.com',
+      }
+    })
   ]
 })
 ```
@@ -279,19 +266,16 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    {
-      ...viteHtmlToMarkdownPlugin({
-        include: ['docs/*.html', 'docs/*/*.html'],
-        exclude: ['docs/internal/*'],
-        outputDir: 'markdown',
-        mdreamOptions: {
-          minimal: true,
-          origin: 'https://docs.example.com',
-          clean: true,
-        }
-      }),
-      enforce: 'post',
-    }
+    viteHtmlToMarkdownPlugin({
+      include: ['docs/*.html', 'docs/*/*.html'],
+      exclude: ['docs/internal/*'],
+      outputDir: 'markdown',
+      mdreamOptions: {
+        minimal: true,
+        origin: 'https://docs.example.com',
+        clean: true,
+      }
+    })
   ]
 })
 ```
@@ -304,13 +288,10 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    {
-      ...viteHtmlToMarkdownPlugin({
-        verbose: true,
-        cacheEnabled: false,
-      }),
-      enforce: 'post',
-    }
+    viteHtmlToMarkdownPlugin({
+      verbose: true,
+      cacheEnabled: false,
+    })
   ]
 })
 ```
@@ -323,22 +304,19 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    {
-      ...viteHtmlToMarkdownPlugin({
-        mdreamOptions: {
-          frontmatter: {
-            metaFields: ['description', 'author', 'keywords'],
-            onExtract(fm) {
-              console.log('Extracted frontmatter:', fm)
-            }
-          },
-          filter: {
-            exclude: ['nav', 'footer', 'aside', 'form'],
-          },
-        }
-      }),
-      enforce: 'post',
-    }
+    viteHtmlToMarkdownPlugin({
+      mdreamOptions: {
+        frontmatter: {
+          metaFields: ['description', 'author', 'keywords'],
+          onExtract(fm) {
+            console.log('Extracted frontmatter:', fm)
+          }
+        },
+        filter: {
+          exclude: ['nav', 'footer', 'aside', 'form'],
+        },
+      }
+    })
   ]
 })
 ```
