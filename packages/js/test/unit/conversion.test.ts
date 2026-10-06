@@ -107,6 +107,15 @@ describe('plugin reuse', () => {
       expect(htmlToMarkdown(page, shared)).toBe(htmlToMarkdown(page, withMinimalPreset()))
   })
 
+  it('passes splitter options through the preset', () => {
+    const chunks = htmlToMarkdownSplitChunks(
+      '<nav>menu</nav><h2>One</h2><p>first</p><h2>Two</h2><p>second</p>',
+      withMinimalPreset({ headersToSplitOn: [2], stripHeaders: false }),
+    )
+    expect(chunks.map(chunk => chunk.metadata.headers)).toEqual([{ h2: 'One' }, { h2: 'Two' }])
+    expect(chunks.some(chunk => chunk.content.includes('menu'))).toBe(false)
+  })
+
   it('keeps concurrent streams that share plugins apart', async () => {
     const shared = withMinimalPreset()
     const stream = (html: string) => new ReadableStream<string>({
