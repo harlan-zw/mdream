@@ -19,7 +19,8 @@ type Callbacks = Pick<ResolvedOptions, 'frontmatterCallback' | 'extractionHandle
 
 export interface EngineStream {
   processChunk: (chunk: string) => string
-  processChunkBytes: (chunk: Uint8Array) => string
+  /** Takes raw UTF-8 bytes. If absent, `pumpStream` decodes bytes with `TextDecoder` and calls `processChunk`. */
+  processChunkBytes?: (chunk: Uint8Array) => string
   finish: () => string
   takeData: () => PluginData
 }
@@ -51,8 +52,6 @@ export function convertResult(
 }
 
 export interface PumpOptions {
-  /** Decode bytes with `TextDecoder` and feed strings, instead of `processChunkBytes`. */
-  decodeInJs?: boolean
   /** Maps an engine error before it is thrown, for example a WASM panic. */
   mapError?: (error: unknown) => unknown
 }
@@ -65,10 +64,10 @@ export async function* pumpStream(
   stream: EngineStream,
   htmlStream: ReadableStream<Uint8Array | string>,
   callbacks: Callbacks,
-  { decodeInJs = false, mapError = error => error }: PumpOptions = {},
+  { mapError = error => error }: PumpOptions = {},
 ): AsyncIterable<string> {
   const reader = htmlStream.getReader()
-  const decoder = decodeInJs ? new TextDecoder() : undefined
+  const decoder = stream.processChunkBytes ? undefined : new TextDecoder()
   try {
     while (true) {
       const { done, value } = await reader.read()
@@ -78,7 +77,7 @@ export async function* pumpStream(
       if (typeof value === 'string')
         processed = stream.processChunk(decoder ? decoder.decode() + value : value)
       else
-        processed = decoder ? stream.processChunk(decoder.decode(value, { stream: true })) : stream.processChunkBytes(value)
+        processed = decoder ? stream.processChunk(decoder.decode(value, { stream: true })) : stream.processChunkBytes!(value)
       if (processed)
         yield processed
     }

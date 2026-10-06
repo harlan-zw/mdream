@@ -1,6 +1,5 @@
 import { ReadableStream } from 'node:stream/web'
 import { describe, expect, it, vi } from 'vitest'
-import { MarkdownStream as NativeMarkdownStream } from '../../../napi/index.mjs'
 import { engines, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
 
 const RE_BOLD_TEXT = /\*\*bold text\*\*/
@@ -52,34 +51,6 @@ describe('cross-engine streaming byte parity', () => {
     }
 
     expect(engineOutputs[1]).toBe(engineOutputs[0])
-  })
-})
-
-describe('native byte streaming', () => {
-  it('carries incomplete UTF-8 across byte chunks', () => {
-    const bytes = new TextEncoder().encode('<p>🎉</p>')
-    const stream = new NativeMarkdownStream()
-    let markdown = ''
-
-    for (let index = 0; index < bytes.length; index++)
-      markdown += stream.processChunkBytes(bytes.subarray(index, index + 1))
-    markdown += stream.finish()
-
-    expect(markdown.trim()).toBe('🎉')
-  })
-
-  it('rejects an incomplete UTF-8 sequence at the end of a byte stream', () => {
-    const stream = new NativeMarkdownStream()
-    stream.processChunkBytes(new Uint8Array([0xF0]))
-
-    expect(() => stream.finish()).toThrow('incomplete UTF-8 byte sequence')
-  })
-
-  it('rejects string chunks while an incomplete byte sequence is buffered', () => {
-    const stream = new NativeMarkdownStream()
-    stream.processChunkBytes(new Uint8Array([0xF0]))
-
-    expect(() => stream.processChunk('text')).toThrow('incomplete UTF-8 byte sequence')
   })
 })
 

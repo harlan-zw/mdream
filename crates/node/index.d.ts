@@ -12,7 +12,6 @@ export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-was
 export declare class MarkdownStream {
   constructor(options?: HtmlToMarkdownOptions | undefined | null)
   processChunk(chunk: string): string
-  processChunkBytes(chunk: Uint8Array): string
   finish(): string
   /**
    * Frontmatter and extracted elements collected so far. Call after
@@ -54,8 +53,6 @@ export interface FrontmatterOptions {
 }
 
 export declare function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions | undefined | null): MdreamNapiResult
-
-export declare function htmlToMarkdownBytes(html: Uint8Array, options?: HtmlToMarkdownOptions | undefined | null): MdreamNapiResult
 
 export interface HtmlToMarkdownOptions {
   origin?: string
