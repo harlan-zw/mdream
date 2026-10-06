@@ -43,6 +43,11 @@ describe('mdream hooks e2e', async () => {
       // Paragraph content filtered out on this route too
       expect(aboutMarkdown).not.toContain('testing hooks')
     })
+
+    it('keeps the page title and description when the hook replaces extraction', async () => {
+      const llmsTxt = await $fetch<string>('/llms.txt')
+      expect(llmsTxt).toMatch(/- \[Hooks Home\]\(\S+\): Home page of the hooks fixture\./)
+    })
   })
 
   describe('mdream:negotiate hook', () => {
