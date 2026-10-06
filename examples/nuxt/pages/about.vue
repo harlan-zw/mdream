@@ -74,10 +74,7 @@ useSeoMeta({
     enabled: true,
     mdreamOptions: {
       // mdream conversion options
-    },
-    cache: {
-      maxAge: 3600, // 1 hour
-      swr: true
+      minimal: true
     }
   }
 })</code></pre>

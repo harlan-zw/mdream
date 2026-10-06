@@ -61,10 +61,7 @@ export default defineNuxtConfig({
     enabled: true,
     mdreamOptions: {
       // You can add mdream-specific options here
-    },
-    cache: {
-      maxAge: 3600, // 1 hour
-      swr: true
+      minimal: true
     }
   }
 })

@@ -75,8 +75,6 @@ export interface CleanOptions {
   fragments?: boolean
   /** Strip links with meaningless hrefs (#, javascript:void(0)) → plain text */
   emptyLinks?: boolean
-  /** No effect in the JavaScript engine */
-  blankLines?: boolean
   /** Strip links where text equals URL: [https://x.com](https://x.com) → https://x.com */
   redundantLinks?: boolean
   /** Strip self-referencing heading anchors: ## [Title](#title) → ## Title */

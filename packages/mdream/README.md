@@ -108,6 +108,25 @@ The `format`, `clean`, and top-level plugin options remain available.
 Custom hook plugins use `@mdream/js`; follow its [migration guide](../js/README.md#migrating-from-v1).
 That guide covers the JS API from [#224](https://github.com/harlan-zw/mdream/pull/224), merged after `2.0.0-beta.1`.
 
+### Unknown options
+
+Every entry throws a `TypeError` for an option that it does not read.
+In v1, mdream ignored an unknown option, so a typo gave no error.
+The error names the fix.
+An option set to `undefined` does not throw.
+
+| Old option | v2 option |
+|------------|-----------|
+| `preset: 'minimal'` | `minimal: true` |
+| `cleanUrls: true` | `clean: { urls: true }` |
+| `plugins: { frontmatter: true }` | `frontmatter: true`, at the top level |
+| `plugins: [myPlugin]` | `@mdream/js` with `plugins: [myPlugin]` |
+
+`clean.blankLines` is removed. It had no effect in either engine, so delete it.
+
+The `mdream` CLI exits with code 1 on an unknown flag, a flag without a value, or an unknown `--preset` value.
+In v1, the CLI ignored them.
+
 ### Browser imports and returns
 
 In a browser bundle, import from `mdream/browser`.
@@ -352,6 +371,8 @@ interface MdreamOptions {
 }
 ```
 
+Any other key throws a `TypeError` that names the key and the fix.
+
 ### MdreamOptions (JS engine)
 
 The JS engine uses explicit plugins. Each output format has its own entry point.
@@ -379,6 +400,7 @@ interface EngineOptions {
 ```
 
 Use `@mdream/js/text` for plain text. Use `@mdream/js/html` for safe HTML.
+Any other key throws a `TypeError` that names the key and the fix.
 
 ### CleanOptions
 
@@ -394,8 +416,6 @@ interface CleanOptions {
   fragments?: boolean
   /** Strip links with meaningless hrefs (#, javascript:void(0)) to plain text */
   emptyLinks?: boolean
-  /** Collapse 3+ consecutive blank lines to 2 */
-  blankLines?: boolean
   /** Strip links where text equals URL: [https://x.com](https://x.com) becomes https://x.com */
   redundantLinks?: boolean
   /** Strip self-referencing heading anchors: ## [Title](#title) becomes ## Title */
@@ -1070,6 +1090,8 @@ cat index.html \
 | `-h`, `--help` | Display help information |
 
 The CLI reads HTML from stdin and writes Markdown, plain text, or HTML to stdout. It uses the streaming API internally.
+A value option also accepts the `--origin=<url>` form.
+If you pass an unknown flag, a flag without a value, or an unknown preset, the CLI writes one line to stderr and exits with code 1.
 
 ## Browser and Edge Usage
 

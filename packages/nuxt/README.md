@@ -28,6 +28,19 @@ export default defineNuxtConfig({
 Once registered, indexable pages are available as Markdown by appending `.md` to the path, such as `/about.md`.
 Bots can omit `.md` when their `Accept` header ranks `text/markdown` or `text/plain` above HTML.
 
+## Migrating from v1
+
+- The `mdreamOptions` default is now `{ minimal: true }`.
+  The v1 default was `{ preset: 'minimal' }`. mdream never read `preset`, so the minimal preset did not apply.
+- Your `.md` output changes because the minimal preset now applies.
+  The output starts with YAML frontmatter.
+  The preset removes navigation, footers, forms, and similar elements, and cleans up links.
+  The auto-imported `htmlToMarkdown` and `streamHtmlToMarkdown` use the same default.
+  To turn the preset off, set `mdreamOptions: { minimal: false }`.
+- `mdreamOptions.preset` is removed. If you set it, the build fails. Pass `mdreamOptions: { minimal: true }`.
+- The `cache` option is removed. It had no effect, so delete `cache.maxAge` and `cache.swr`.
+- An unknown key in `mdreamOptions` throws a `TypeError` when a page converts.
+
 ## Configuration
 
 All options are configured under the `mdream` key in `nuxt.config.ts`:
@@ -39,17 +52,9 @@ export default defineNuxtConfig({
   mdream: {
     enabled: true,
     mdreamOptions: {
-      preset: 'minimal',
+      minimal: true,
       origin: 'https://example.com',
-      clean: true,
-      frontmatter: true,
-      isolateMain: true,
-      tailwind: true,
-      filter: { exclude: ['nav', 'footer'] },
-    },
-    cache: {
-      maxAge: 3600,
-      swr: true,
+      filter: { exclude: ['header'] },
     },
   },
 })
@@ -60,17 +65,16 @@ export default defineNuxtConfig({
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable or disable the module entirely. |
-| `mdreamOptions` | `Partial<MdreamOptions> & { preset?: 'minimal' }` | `{ preset: 'minimal' }` | Options passed to `htmlToMarkdown`. See below. |
-| `cache.maxAge` | `number` | `3600` | Cache duration in seconds (production only). |
-| `cache.swr` | `boolean` | `true` | Enable stale-while-revalidate caching (production only). |
+| `mdreamOptions` | `Partial<MdreamOptions>` | `{ minimal: true }` | Options passed to `htmlToMarkdown`. See below. |
 
 ### mdreamOptions
 
 These are passed directly to `htmlToMarkdown` from the `mdream` package.
+An unknown key throws a `TypeError` when a page converts.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `preset` | `'minimal'` | `'minimal'` | Apply the minimal preset (enables frontmatter, isolateMain, tailwind, and filter). |
+| `minimal` | `boolean` | `true` | Apply the minimal preset. It enables frontmatter, isolateMain, tailwind, filter, and clean. |
 | `origin` | `string` | Site URL from `nuxt-site-config` | Origin URL for resolving relative image paths and internal links. |
 | `clean` | `boolean \| CleanOptions` | `undefined` | Clean up markdown output. Pass `true` for all cleanup or an object for specific features. |
 | `frontmatter` | `boolean \| function \| FrontmatterConfig` | `undefined` | Extract frontmatter from the HTML `<head>`. |

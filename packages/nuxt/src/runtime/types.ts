@@ -2,13 +2,7 @@ import type { MdreamOptions } from 'mdream'
 
 export interface ModuleRuntimeConfig {
   enabled: boolean
-  mdreamOptions?: Partial<MdreamOptions> & {
-    preset?: 'minimal'
-  }
-  cache: {
-    maxAge: number
-    swr: boolean
-  }
+  mdreamOptions?: Partial<MdreamOptions>
 }
 
 export interface MdreamPage {

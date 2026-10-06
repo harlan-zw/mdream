@@ -22,7 +22,6 @@ describe('server utils', () => {
         mdream: {
           enabled: true,
           mdreamOptions: { origin: 'https://example.com', minimal: true },
-          cache: { maxAge: 3600, swr: true },
         },
       } as any)
 
@@ -39,7 +38,6 @@ describe('server utils', () => {
         mdream: {
           enabled: true,
           mdreamOptions: { origin: 'https://example.com', minimal: true },
-          cache: { maxAge: 3600, swr: true },
         },
       } as any)
 
@@ -55,7 +53,6 @@ describe('server utils', () => {
       vi.mocked(useRuntimeConfig).mockReturnValue({
         mdream: {
           enabled: true,
-          cache: { maxAge: 3600, swr: true },
         },
       } as any)
 
@@ -71,7 +68,6 @@ describe('server utils', () => {
       vi.mocked(useRuntimeConfig).mockReturnValue({
         mdream: {
           enabled: true,
-          cache: { maxAge: 3600, swr: true },
         },
       } as any)
 
@@ -82,7 +78,7 @@ describe('server utils', () => {
 
     it('should return the conversion result', () => {
       vi.mocked(useRuntimeConfig).mockReturnValue({
-        mdream: { enabled: true, cache: { maxAge: 3600, swr: true } },
+        mdream: { enabled: true },
       } as any)
 
       const result = htmlToMarkdown('<h1>Hello</h1>')
@@ -97,7 +93,6 @@ describe('server utils', () => {
         mdream: {
           enabled: true,
           mdreamOptions: { origin: 'https://example.com' },
-          cache: { maxAge: 3600, swr: true },
         },
       } as any)
 
@@ -112,7 +107,7 @@ describe('server utils', () => {
 
     it('should return an async iterable', async () => {
       vi.mocked(useRuntimeConfig).mockReturnValue({
-        mdream: { enabled: true, cache: { maxAge: 3600, swr: true } },
+        mdream: { enabled: true },
       } as any)
 
       const result = streamHtmlToMarkdown(new ReadableStream())

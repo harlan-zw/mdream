@@ -1,11 +1,6 @@
 import type { HtmlToMarkdownOptions, PluginOptions, TagOverrideNapi } from '../napi/index.js'
 import type { CleanOptions, ExtractedElement, MdreamOptions } from './index.js'
 
-export interface ResolvableOptions extends Partial<MdreamOptions> {
-  cleanUrls?: boolean
-  plugins?: PluginOptions | unknown[]
-}
-
 export interface ResolvedOptions {
   napiOpts: HtmlToMarkdownOptions
   extractionHandlers?: Record<string, (el: ExtractedElement) => void>
@@ -14,22 +9,55 @@ export interface ResolvedOptions {
 
 const MINIMAL_FILTER_EXCLUDE = ['form', 'fieldset', 'object', 'embed', 'footer', 'aside', 'iframe', 'input', 'textarea', 'select', 'button', 'nav'] as const
 const CLEAN_ALL: CleanOptions = { urls: true, fragments: true, emptyLinks: true, redundantLinks: true, selfLinkHeadings: true, emptyImages: true, emptyLinkText: true }
+const VALID_OPTIONS = 'origin, clean, minimal, frontmatter, isolateMain, tailwind, filter, extraction, tagOverrides, wrapWidth, format'
 
-function resolveCleanConfig(options: ResolvableOptions, minimal: boolean): { cleanUrls: boolean, clean?: CleanOptions } {
-  const cleanUrls = options.cleanUrls === true
-  let cleanOpt = options.clean
-  if (cleanOpt === undefined) {
-    if (!minimal)
-      return { cleanUrls }
-    cleanOpt = true
+function unknownOptionMessage(key: string, value: unknown): string {
+  switch (key) {
+    case 'preset':
+      return 'mdream has no `preset` option. Pass { minimal: true }.'
+    case 'cleanUrls':
+      return 'mdream has no `cleanUrls` option. Pass { clean: { urls: true } }.'
+    case 'plugins':
+      return Array.isArray(value)
+        ? 'Custom hook plugins require @mdream/js. '
+        + 'Pass declarative config (e.g. { frontmatter: true }) to the Rust engine, '
+        + 'or import { htmlToMarkdown } from \'@mdream/js\' for hook-based plugins. '
+        + 'See https://github.com/harlan-zw/mdream/tree/main/packages/js#migrating-from-v1'
+        : 'mdream takes plugin options at the top level, such as { frontmatter: true }.'
   }
-  if (!cleanOpt)
-    return { cleanUrls }
-  const resolved = cleanOpt === true ? CLEAN_ALL : cleanOpt
-  return {
-    cleanUrls: cleanUrls || resolved.urls === true,
-    clean: resolved,
+  return `mdream has no \`${key}\` option. Valid options: ${VALID_OPTIONS}.`
+}
+
+// An unknown key would silently do nothing, so every entry rejects it and
+// names the fix. A key set to `undefined` passes, as an absent key does.
+function assertKnownOptions(options: Partial<MdreamOptions>): void {
+  for (const key in options) {
+    switch (key) {
+      case 'origin':
+      case 'clean':
+      case 'minimal':
+      case 'frontmatter':
+      case 'isolateMain':
+      case 'tailwind':
+      case 'filter':
+      case 'extraction':
+      case 'tagOverrides':
+      case 'wrapWidth':
+      case 'format':
+        continue
+    }
+    const value = (options as Record<string, unknown>)[key]
+    if (value !== undefined)
+      throw new TypeError(unknownOptionMessage(key, value))
   }
+}
+
+function resolveClean(clean: MdreamOptions['clean'], minimal: boolean): CleanOptions | undefined {
+  if (clean === undefined)
+    return minimal ? CLEAN_ALL : undefined
+  if (!clean)
+    return undefined
+  return clean === true ? CLEAN_ALL : clean
 }
 
 function resolveFrontmatter(opt: MdreamOptions['frontmatter']): { config?: object, callback?: (fm: Record<string, string>) => void } {
@@ -42,48 +70,28 @@ function resolveFrontmatter(opt: MdreamOptions['frontmatter']): { config?: objec
   return { config: {} }
 }
 
-export function resolveOptions(options: ResolvableOptions): ResolvedOptions {
-  if (Array.isArray(options.plugins)) {
-    throw new TypeError(
-      'Custom hook plugins require @mdream/js. '
-      + 'Pass declarative config (e.g. { frontmatter: true }) to the Rust engine, '
-      + 'or import { htmlToMarkdown } from \'@mdream/js\' for hook-based plugins. '
-      + 'See https://mdream.dev/v1-migration#custom-plugins',
-    )
-  }
+export function resolveOptions(options: Partial<MdreamOptions>): ResolvedOptions {
+  assertKnownOptions(options)
 
   const minimal = options.minimal === true
-  const plugins: PluginOptions = options.plugins ? { ...options.plugins } : {}
+  const plugins: PluginOptions = {}
   let frontmatterCallback: ((fm: Record<string, string>) => void) | undefined
 
-  const frontmatterDisabled = options.frontmatter === false
-  const enableFm = minimal ? !frontmatterDisabled : !!options.frontmatter
-  if (enableFm) {
+  if (minimal ? options.frontmatter !== false : options.frontmatter) {
     const fm = resolveFrontmatter(options.frontmatter)
     plugins.frontmatter = fm.config
     frontmatterCallback = fm.callback
   }
-  else if (frontmatterDisabled) {
-    delete plugins.frontmatter
-  }
 
-  const isolateMainDisabled = options.isolateMain === false
-  if (minimal ? !isolateMainDisabled : options.isolateMain)
+  if (minimal ? options.isolateMain !== false : options.isolateMain)
     plugins.isolateMain = true
-  else if (isolateMainDisabled)
-    delete plugins.isolateMain
 
-  const tailwindDisabled = options.tailwind === false
-  if (minimal ? !tailwindDisabled : options.tailwind)
+  if (minimal ? options.tailwind !== false : options.tailwind)
     plugins.tailwind = true
-  else if (tailwindDisabled)
-    delete plugins.tailwind
 
   // Under `minimal`, a filter extends the preset's excludes rather than
   // replacing them. `filter: false` turns filtering off.
-  if (options.filter === false)
-    delete plugins.filter
-  else if (minimal)
+  if (minimal && options.filter !== false)
     plugins.filter = { ...options.filter, exclude: [...MINIMAL_FILTER_EXCLUDE, ...(options.filter?.exclude ?? [])] }
   else if (options.filter)
     plugins.filter = options.filter
@@ -106,10 +114,8 @@ export function resolveOptions(options: ResolvableOptions): ResolvedOptions {
     plugins.tagOverrides = overrides
   }
 
-  const { cleanUrls, clean } = resolveCleanConfig(options, minimal)
-
   return {
-    napiOpts: { origin: options.origin, cleanUrls, clean, plugins, wrapWidth: options.wrapWidth, format: options.format },
+    napiOpts: { origin: options.origin, clean: resolveClean(options.clean, minimal), plugins, wrapWidth: options.wrapWidth, format: options.format },
     extractionHandlers,
     frontmatterCallback,
   }

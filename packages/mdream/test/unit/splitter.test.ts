@@ -310,7 +310,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     const resolvedHtml = '<p><a href="#real">f</a></p><h1>Real</h1>'
     const resolvedOptions = { ...options, stripHeaders: false }
     const resolvedChunks = htmlToMarkdownSplitChunks(resolvedHtml, resolvedOptions)
-    expect(resolvedChunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(resolvedHtml, resolvedOptions))
+    expect(resolvedChunks.map(chunk => chunk.content).join('')).toBe(htmlToMarkdown(resolvedHtml, options))
     for (const chunk of resolvedChunks) {
       expect(chunk.content).not.toContain('\uFDD0')
       expect(chunk.content).not.toContain('\uFDD1')
@@ -321,7 +321,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     const options = { clean: clean(), stripHeaders: false }
     const html = '<p><a href="#s2">go</a></p><h2>One</h2><p>a</p><h2>S2</h2><p>y</p>'
 
-    expect(htmlToMarkdown(html, options)).toBe('[go](#s2)\n\n## One\n\na\n\n## S2\n\ny')
+    expect(htmlToMarkdown(html, { clean: options.clean })).toBe('[go](#s2)\n\n## One\n\na\n\n## S2\n\ny')
     const chunks = htmlToMarkdownSplitChunks(html, options)
     expect(chunks.map(chunk => chunk.content)).toEqual(['[go](#s2)\n\n## One\n\na', '## S2\n\ny'])
   })
@@ -330,7 +330,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     const options = { clean: clean({ fragments: true }), chunkSize: 30, chunkOverlap: 0, stripHeaders: false }
     const html = `<h2>A</h2><p><a href="#a">x</a></p><p><a href="#b">z</a>${'p'.repeat(80)}</p><h2>B</h2>`
 
-    const expected = htmlToMarkdown(html, options)
+    const expected = htmlToMarkdown(html, { clean: options.clean })
     expect(expected).toContain('[z](#b)')
     const joined = htmlToMarkdownSplitChunks(html, options).map(chunk => chunk.content).join('')
     expect(squash(joined)).toBe(squash(expected))
@@ -344,7 +344,7 @@ describe('htmlToMarkdownSplitChunks', () => {
     ['a resolved link inside an unresolved one', `<h2>B</h2><div><a href="#a">x <div><a href="#b">z</a> ${'r'.repeat(60)}</div></a></div><h2>A</h2>`],
   ])('cuts chunks before %s', (_name, html) => {
     const options = { clean: clean({ fragments: true }), chunkOverlap: 0, stripHeaders: false }
-    const expected = squash(htmlToMarkdown(html, options))
+    const expected = squash(htmlToMarkdown(html, { clean: options.clean }))
     for (let chunkSize = 5; chunkSize <= 120; chunkSize++) {
       const joined = htmlToMarkdownSplitChunks(html, { ...options, chunkSize }).map(chunk => chunk.content).join('')
       expect(squash(joined), `chunk size ${chunkSize}`).toBe(expected)

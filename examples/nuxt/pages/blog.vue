@@ -100,16 +100,10 @@ useSeoMeta({
                 <td>Enable/disable the module</td>
               </tr>
               <tr>
-                <td><code>cache.maxAge</code></td>
-                <td>number</td>
-                <td>3600</td>
-                <td>Cache duration in seconds</td>
-              </tr>
-              <tr>
-                <td><code>cache.swr</code></td>
-                <td>boolean</td>
-                <td>true</td>
-                <td>Enable stale-while-revalidate</td>
+                <td><code>mdreamOptions</code></td>
+                <td>object</td>
+                <td>{ minimal: true }</td>
+                <td>Options passed to mdream</td>
               </tr>
             </tbody>
           </table>

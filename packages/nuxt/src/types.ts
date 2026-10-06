@@ -11,27 +11,7 @@ export interface ModuleOptions {
 
   /**
    * Options to pass to mdream htmlToMarkdown function
+   * @default { minimal: true }
    */
-  mdreamOptions?: Partial<MdreamOptions> & {
-    /**
-     * Preset to apply to the htmlToMarkdown function
-     */
-    preset?: 'minimal'
-  }
-
-  /**
-   * Cache configuration
-   */
-  cache?: {
-    /**
-     * Cache duration in seconds
-     * @default 3600 (1 hour)
-     */
-    maxAge?: number
-    /**
-     * Enable stale-while-revalidate
-     * @default true
-     */
-    swr?: boolean
-  }
+  mdreamOptions?: Partial<MdreamOptions>
 }

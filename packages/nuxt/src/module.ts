@@ -20,14 +20,14 @@ export default defineNuxtModule<ModuleOptions>({
   defaults: {
     enabled: true,
     mdreamOptions: {
-      preset: 'minimal',
-    },
-    cache: {
-      maxAge: 3600, // 1 hour
-      swr: true,
+      minimal: true,
     },
   },
   async setup(options, nuxt) {
+    // mdream rejects `preset`. Fail the build here, not every request.
+    if ((options.mdreamOptions as { preset?: unknown } | undefined)?.preset !== undefined)
+      throw new TypeError('@mdream/nuxt has no `mdreamOptions.preset` option. Pass mdreamOptions: { minimal: true }.')
+
     if (!options.enabled) {
       return
     }
@@ -87,10 +87,6 @@ export default defineNuxtModule<ModuleOptions>({
     const runtimeConfig: ModuleRuntimeConfig = {
       enabled: options.enabled,
       mdreamOptions: options.mdreamOptions,
-      cache: defu(options.cache, {
-        maxAge: 3600,
-        swr: true,
-      }) as Required<NonNullable<ModuleOptions['cache']>>,
     }
 
     // Add runtime config

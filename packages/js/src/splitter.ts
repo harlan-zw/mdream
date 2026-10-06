@@ -176,7 +176,7 @@ export function* htmlToMarkdownSplitChunksStream(
   html: string,
   options: SplitterOptions = {},
 ): Generator<MarkdownChunk, void, undefined> {
-  assertEngineOptions(options)
+  assertEngineOptions(options, 'splitter')
   checkClean(options)
   const opts = createOptions(options)
 
