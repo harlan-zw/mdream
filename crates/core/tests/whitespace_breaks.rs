@@ -304,3 +304,25 @@ fn block_override_on_inline_tag_keeps_its_spacing() {
   // A custom element with the same override already worked.
   assert_eq!(md_block_override("e<x-foo>m</x-foo>", "x-foo"), "e\n\nm");
 }
+
+// ── Link text before an empty element ──
+
+#[test]
+fn link_text_drops_the_space_before_an_empty_element() {
+  assert_eq!(md(r#"<a href="/x">A <span></span> </a>"#), "[A](/x)");
+  assert_eq!(md(r#"x <a href="/x">A <i></i></a>y"#), "x [A](/x) y");
+  assert_eq!(
+    md_streamed(r#"<a href="/x">A <svg></svg> </a> b"#, 1),
+    "[A](/x) b"
+  );
+  // The title still matches the trimmed text.
+  assert_eq!(
+    md(r#"<a href="/x" title="Ab ">Ab <span></span></a>"#),
+    "[Ab](/x)"
+  );
+  // A hard break's continuation indent stays.
+  assert_eq!(
+    md(r#"<ul><li><a href="/x">q<br> </a></li></ul>"#),
+    "- [q  \n  ](/x)"
+  );
+}
