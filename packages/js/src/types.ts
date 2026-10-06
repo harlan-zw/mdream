@@ -138,6 +138,8 @@ export interface CleanView {
 export interface Cleaner extends CleanOptions {
   /** Start cleanup for one conversion. Returns nothing when no rule rewrites links. */
   apply: (target: CleanTarget) => CleanPass | undefined
+  /** Rewrite a resolved link or image URL. Set when `urls` is on. */
+  url?: (url: string) => string
 }
 
 /** Core conversion options. */

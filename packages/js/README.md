@@ -155,7 +155,7 @@ The rules now act on the links and images that the converter writes, as in the R
 Escaped brackets and code keep their text, and `streamHtmlToMarkdown` applies the rules too.
 With `fragments`, a stream yields all output when the document ends, because a link can point to a later heading.
 
-If `htmlToMarkdown` or `streamHtmlToMarkdown` gets `clean: true` or a plain rules object, it throws a `TypeError`.
+If a converter gets `clean: true` or a plain rules object, it throws a `TypeError`.
 `withMinimalPreset` still enables all cleanup by default. To turn it off, pass `clean: false`.
 
 ### Plugin instances
