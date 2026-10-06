@@ -1,16 +1,15 @@
-import type { CrawlProgress } from './crawl.js'
 import type { CrawlLogger } from './logger.js'
-import type { CrawlOptions } from './types.js'
+import type { ResolvedCrawlOptions } from './options.js'
+import type { CrawlArtifact, CrawlDriver, CrawlOptions, CrawlProgress } from './types.js'
 import { accessSync, constants, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as p from '@clack/prompts'
-import { dirname, join, relative, resolve } from 'pathe'
-import { withHttps } from 'ufo'
-import { DEFAULT_BOILERPLATE_THRESHOLD } from './boilerplate.js'
+import { dirname, join, relative } from 'pathe'
+import { parseCrawlArgs } from './cli-args.js'
 import { loadMdreamConfig } from './config.js'
-import { crawlAndGenerate } from './crawl.js'
-import { parseUrlPattern, validateGlobPattern } from './glob-utils.js'
+import { runCrawl } from './crawl.js'
 import { resolveLogger } from './logger.js'
+import { assertCrawlOptionKeys, CRAWL_ARTIFACTS, CRAWL_DEFAULTS, MAX_CRAWL_DEPTH, mergeCrawlOptions, resolveCrawlOptions, validateCrawlUrl } from './options.js'
 
 const QUIET_FLAGS = new Set(['--silent', '--quiet', '-q'])
 
@@ -31,6 +30,56 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const packageJsonPath = join(__dirname, '..', 'package.json')
 const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
 const version = packageJson.version
+
+const HELP = `
+@mdream/crawl v${version}
+
+Crawl a website and generate llms.txt, llms-full.txt, and Markdown files.
+
+Usage:
+  mdream-crawl [options] <url>     Crawl a website
+  mdream-crawl                     Start interactive mode
+  npx @mdream/crawl [options] <url>
+
+Options:
+  -u, --url <url>               URL to crawl. Accepts glob patterns. Repeatable
+  -o, --output <dir>            Output directory (default: ${CRAWL_DEFAULTS.output})
+  -d, --depth <number>          Link depth from 0 to ${MAX_CRAWL_DEPTH}. 0 processes only the given URLs (default: ${CRAWL_DEFAULTS.depth})
+  --single-page                 Same as --depth 0
+  --driver <http|playwright>    Crawler driver (default: ${CRAWL_DEFAULTS.driver})
+  --artifacts <list>            Comma-separated list of ${CRAWL_ARTIFACTS.join(', ')} (default: all)
+  --origin <url>                Origin for relative links in page Markdown (default: the page origin)
+  --site-name <name>            Site name in llms.txt (default: the home page title)
+  --description <text>          Site description in llms.txt (default: the home page description)
+  --max-pages <number>          Maximum number of pages to fetch (default: no limit)
+  --crawl-delay <seconds>       Delay between requests (default: the robots.txt Crawl-delay)
+  --exclude <pattern>           Skip URLs that match a glob pattern. Repeatable
+  --skip-sitemap                Skip sitemap and robots.txt discovery
+  --sitemap <url>               Use this sitemap instead of auto-discovery. Repeatable
+  --allow-subdomains            Crawl other subdomains of the same domain
+  --keep-boilerplate            Keep repeated navigation and footers in page Markdown
+  --boilerplate-threshold <n>   Fraction of pages that a block must appear in to count as boilerplate (default: ${CRAWL_DEFAULTS.boilerplateThreshold})
+  -v, --verbose                 Log details for each failed URL
+  -q, --quiet, --silent         Drop all logs. Use it to keep stdout clean for JSON-RPC or MCP
+  -h, --help                    Show this help
+  --version                     Show the version
+
+A flag can also take its value as --flag=value.
+Flags override mdream.config.* values. Config values override the defaults.
+
+Examples:
+  mdream-crawl harlanzw.com --artifacts "llms.txt,markdown"
+  mdream-crawl https://docs.example.com --depth 2 --artifacts llms-full.txt
+  mdream-crawl example.com --exclude "*/admin/*" --exclude "*/api/*"
+  mdream-crawl example.com --sitemap https://example.com/custom/sitemap.xml
+  mdream-crawl example.com/pricing --driver playwright --single-page
+`
+
+/** Print a usage error on stderr and exit 1. Stdout stays clean. */
+function exitWithError(message: string): never {
+  console.error(`Error: ${message}`)
+  process.exit(1)
+}
 
 function checkOutputDirectoryPermissions(outputDir: string): { success: boolean, error?: string } {
   try {
@@ -75,46 +124,31 @@ function checkOutputDirectoryPermissions(outputDir: string): { success: boolean,
   }
 }
 
-async function interactiveCrawl(): Promise<CrawlOptions | null> {
+function splitUrls(input: string): string[] {
+  return input.split(',').map(url => url.trim()).filter(Boolean)
+}
+
+/**
+ * Ask for the URL, driver, artifacts, and sitemap discovery. The config file
+ * gives the initial answers. Returns null when the user cancels.
+ */
+async function interactiveCrawl(config: Partial<CrawlOptions>): Promise<Partial<CrawlOptions> | null> {
   console.clear()
 
   p.intro(`☁️  @mdream/crawl v${version}`)
 
-  // Get URLs
   const urlsInput = await p.text({
     message: 'Enter starting URL for crawling (supports glob patterns):',
     placeholder: 'e.g. docs.example.com, site.com/docs/**',
+    initialValue: config.urls?.join(', '),
     validate: (value) => {
-      if (!value)
-        return 'Please enter at least one URL'
-
-      const urls = value.split(',').map(url => url.trim())
-
+      const urls = splitUrls(value ?? '')
+      if (urls.length === 0)
+        return 'Enter at least one URL.'
       for (const url of urls) {
-        // First validate glob pattern syntax
-        const globError = validateGlobPattern(url)
-        if (globError) {
-          return globError
-        }
-
-        // Parse the URL pattern
-        try {
-          const parsed = parseUrlPattern(url)
-
-          // If it's not a glob, validate as regular URL
-          if (!parsed.isGlob) {
-            try {
-              // eslint-disable-next-line no-new
-              new URL(withHttps(url))
-            }
-            catch {
-              return `Invalid URL: ${withHttps(url)}`
-            }
-          }
-        }
-        catch (error) {
-          return error instanceof Error ? error.message : 'Invalid URL pattern'
-        }
+        const error = validateCrawlUrl(url)
+        if (error)
+          return error
       }
     },
   })
@@ -124,56 +158,28 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
     return null
   }
 
-  const urls = urlsInput.split(',').map(url => url.trim())
-
-  let globPatterns
-  try {
-    globPatterns = urls.map(parseUrlPattern)
-  }
-  catch (error) {
-    p.cancel(error instanceof Error ? error.message : 'Invalid URL pattern')
-    return null
-  }
-
-  // Set default output directory
-  const outputDir = 'output'
-
-  // Crawler configuration
-  const crawlerOptions = await p.group(
+  const answers = await p.group(
     {
-      driver: () => p.select({
+      driver: () => p.select<CrawlDriver>({
         message: 'Select crawler driver:',
         options: [
           { value: 'http', label: 'HTTP Crawler (Fast, for static content)', hint: 'Recommended' },
           { value: 'playwright', label: 'Playwright (Slower, supports JavaScript)' },
         ],
-        initialValue: 'http',
+        initialValue: config.driver ?? CRAWL_DEFAULTS.driver,
       }),
-
-    },
-    {
-      onCancel: () => {
-        p.cancel('Operation cancelled.')
-        process.exit(0)
-      },
-    },
-  )
-
-  // Advanced options
-  const advancedOptions = await p.group(
-    {
-      outputFormats: () => p.multiselect({
-        message: 'Select output formats:',
+      artifacts: () => p.multiselect<CrawlArtifact>({
+        message: 'Select artifacts:',
         options: [
-          { value: 'llms.txt', label: 'llms.txt (basic format)', hint: 'Recommended' },
-          { value: 'llms-full.txt', label: 'llms-full.txt (extended format)' },
-          { value: 'markdown', label: 'Individual Markdown files' },
+          { value: 'llms.txt', label: 'llms.txt (link index)', hint: 'Recommended' },
+          { value: 'llms-full.txt', label: 'llms-full.txt (full content)' },
+          { value: 'markdown', label: 'Markdown file for each page' },
         ],
-        initialValues: ['llms.txt', 'llms-full.txt', 'markdown'],
+        initialValues: config.artifacts ?? [...CRAWL_DEFAULTS.artifacts],
       }),
       skipSitemap: () => p.confirm({
         message: 'Skip sitemap.xml and robots.txt discovery?',
-        initialValue: false,
+        initialValue: config.skipSitemap ?? false,
       }),
     },
     {
@@ -184,61 +190,28 @@ async function interactiveCrawl(): Promise<CrawlOptions | null> {
     },
   )
 
-  // Auto-infer origin URL from first URL
-  const firstUrl = urls[0]
-  const inferredOrigin = (() => {
-    try {
-      const url = new URL(withHttps(firstUrl))
-      return `${url.protocol}//${url.host}`
-    }
-    catch {
-      return undefined
-    }
-  })()
-
-  // Show summary
-  const outputFormats = advancedOptions.outputFormats.map((f) => {
-    switch (f) {
-      case 'llms.txt': return 'llms.txt'
-      case 'llms-full.txt': return 'llms-full.txt'
-      case 'markdown': return 'Individual MD files'
-      default: return f
-    }
-  })
-
-  const summary = [
-    `URLs: ${urls.join(', ')}`,
-    `Output: ${relative(process.cwd(), outputDir) || outputDir}`,
-    `Driver: ${crawlerOptions.driver}`,
-    `Max pages: Unlimited`,
-    `Follow links: Yes (depth 3)`,
-    `Output formats: ${outputFormats.join(', ')}`,
-    `Sitemap discovery: ${advancedOptions.skipSitemap ? 'Skipped' : 'Automatic'}`,
-    inferredOrigin && `Origin: ${inferredOrigin}`,
-  ].filter(Boolean)
-
-  p.note(summary.join('\n'), 'Crawl Configuration')
-
-  // Warn if using skip-sitemap with wildcard URLs in interactive mode
-  if (advancedOptions.skipSitemap && globPatterns.some(p => p.isGlob)) {
-    p.log.warn('Warning: Using --skip-sitemap with glob URLs may not discover all matching pages.')
-  }
-
   return {
-    urls,
-    outputDir: resolve(outputDir),
-    driver: crawlerOptions.driver as 'http' | 'playwright',
-    maxRequestsPerCrawl: Number.MAX_SAFE_INTEGER, // Unlimited pages
-    followLinks: true, // Always follow links
-    generateLlmsTxt: advancedOptions.outputFormats.includes('llms.txt'),
-    generateLlmsFullTxt: advancedOptions.outputFormats.includes('llms-full.txt'),
-    generateIndividualMd: advancedOptions.outputFormats.includes('markdown'),
-    origin: inferredOrigin,
-    globPatterns,
-    verbose: false,
-    maxDepth: 3,
-    skipSitemap: advancedOptions.skipSitemap,
+    urls: splitUrls(urlsInput),
+    driver: answers.driver,
+    artifacts: answers.artifacts,
+    skipSitemap: answers.skipSitemap,
   }
+}
+
+function summarize(options: ResolvedCrawlOptions): string {
+  const maxPages = Number.isFinite(options.maxPages) ? String(options.maxPages) : 'no limit'
+  return [
+    `URL: ${options.urls.join(', ')}`,
+    `Output: ${relative(process.cwd(), options.output) || '.'}`,
+    `Driver: ${options.driver} · Depth: ${options.depth} · Max pages: ${maxPages}`,
+    `Artifacts: ${options.artifacts.length > 0 ? options.artifacts.join(', ') : 'none'}`,
+    options.origin && `Origin: ${options.origin}`,
+    options.exclude.length > 0 && `Exclude: ${options.exclude.join(', ')}`,
+    options.skipSitemap && `Skip sitemap: yes`,
+    options.sitemap.length > 0 && `Sitemap: ${options.sitemap.join(', ')}`,
+    options.allowSubdomains && `Allow subdomains: yes`,
+    options.verbose && `Verbose: on`,
+  ].filter(Boolean).join('\n')
 }
 
 interface LatencyStats { total: number, min: number, max: number, count: number }
@@ -253,365 +226,69 @@ async function showCrawlResults(logger: CrawlLogger, successful: number, failed:
     const avg = Math.round(latency.total / latency.count)
     const min = latency.min === Infinity ? 0 : Math.round(latency.min)
     const max = Math.round(latency.max)
-    line += ` \u00B7 HTTP Latency: avg ${avg}ms, min ${min}ms, max ${max}ms`
+    line += ` · HTTP Latency: avg ${avg}ms, min ${min}ms, max ${max}ms`
   }
 
   logger.success(line)
-  logger.info(`${generatedFiles.join(', ')} \u2192 ${relative(process.cwd(), outputDir) || '.'}`)
-}
-
-function parseCliArgs(): CrawlOptions | null {
-  const args = process.argv.slice(2)
-  const silent = isSilentArgv(args)
-  const logger = resolveLogger({ silent })
-
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(`
-@mdream/crawl v${version}
-
-Multi-page website crawler that generates comprehensive llms.txt files
-
-Usage:
-  @mdream/crawl [options] <url>             Crawl a website with CLI flags
-  @mdream/crawl                             Start interactive mode
-
-Options:
-  -u, --url <url>              Website URL to crawl
-  -o, --output <dir>           Output directory (default: output)
-  -d, --depth <number>         Crawl depth, 0 for single page (default: 3)
-  --single-page                Only process the given URL(s), no crawling (alias for --depth 0)
-  --driver <http|playwright>   Crawler driver (default: http)
-  --artifacts <list>           Comma-separated list of artifacts: llms.txt,llms-full.txt,markdown (default: all)
-  --origin <url>               Origin URL for resolving relative paths (overrides auto-detection)
-  --site-name <name>           Override site name (overrides auto-extracted title)
-  --description <desc>         Override site description (overrides auto-extracted description)
-  --max-pages <number>        Maximum pages to crawl (default: unlimited)
-  --crawl-delay <seconds>     Crawl delay in seconds
-  --exclude <pattern>         Exclude URLs matching glob patterns (can be used multiple times)
-  --skip-sitemap              Skip sitemap.xml and robots.txt discovery
-  --sitemap <url>             Use an explicit sitemap URL instead of auto-discovery (repeatable for multi-part sitemaps)
-  --allow-subdomains          Crawl across subdomains of the same root domain
-  --keep-boilerplate          Keep repeated site chrome (nav/footer) in per-page output (default: stripped)
-  --boilerplate-threshold <n> Fraction of pages a block must repeat in to count as chrome (0-1, default: ${DEFAULT_BOILERPLATE_THRESHOLD})
-  -v, --verbose               Enable verbose logging
-  -q, --quiet, --silent       Suppress all logs (clean stdout for JSON-RPC/MCP)
-  -h, --help                  Show this help message
-  --version                   Show version number
-
-Note: Sitemap discovery and robots.txt checking are automatic unless --skip-sitemap is used.
-
-Examples:
-  @mdream/crawl -u harlanzw.com --artifacts "llms.txt,markdown"
-  @mdream/crawl --url https://docs.example.com --depth 2 --artifacts "llms-full.txt"
-  @mdream/crawl -u example.com --exclude "*/admin/*" --exclude "*/api/*"
-  @mdream/crawl -u example.com --verbose
-  @mdream/crawl -u example.com --skip-sitemap
-  @mdream/crawl -u example.com --sitemap https://example.com/custom/sitemap.xml
-  @mdream/crawl -u example.com --driver playwright --single-page
-`)
-    process.exit(0)
-  }
-
-  if (args.includes('--version')) {
-    console.log(`@mdream/crawl v${version}`)
-    process.exit(0)
-  }
-
-  // If no arguments provided at all, return null for interactive mode
-  if (args.length === 0) {
-    return null
-  }
-
-  // Parse CLI arguments
-  const getArgValue = (flag: string): string | undefined => {
-    const index = args.findIndex(arg => arg === flag || arg === flag.replace('--', '-'))
-    return index >= 0 && index + 1 < args.length ? args[index + 1] : undefined
-  }
-
-  const getArgValues = (flag: string): string[] => {
-    const values: string[] = []
-    for (let i = 0; i < args.length; i++) {
-      if (args[i] === flag || args[i] === flag.replace('--', '-')) {
-        if (i + 1 < args.length && !args[i + 1].startsWith('-')) {
-          values.push(args[i + 1])
-        }
-      }
-    }
-    return values
-  }
-
-  // Get URL from -u/--url flag or first non-flag argument
-  const urlFromFlag = getArgValue('--url') || getArgValue('-u')
-  const urlFromArgs = args.find(arg => !arg.startsWith('-') && !args[args.indexOf(arg) - 1]?.startsWith('-'))
-  const url = urlFromFlag || urlFromArgs
-
-  // If arguments were provided but no URL, this is an error
-  if (!url) {
-    logger.error('Error: URL is required when using CLI arguments')
-    logger.info('Use --help for usage information or run without arguments for interactive mode')
-    process.exit(1)
-  }
-
-  // Validate URL pattern
-  const globError = validateGlobPattern(url)
-  if (globError) {
-    logger.error(`Error: ${globError}`)
-    process.exit(1)
-  }
-
-  let parsed
-  try {
-    parsed = parseUrlPattern(url)
-  }
-  catch (error) {
-    logger.error(`Error: ${error instanceof Error ? error.message : 'Invalid URL pattern'}`)
-    process.exit(1)
-  }
-
-  if (!parsed.isGlob) {
-    try {
-      // eslint-disable-next-line no-new
-      new URL(withHttps(url))
-    }
-    catch {
-      logger.error(`Error: Invalid URL: ${withHttps(url)}`)
-      process.exit(1)
-    }
-  }
-
-  // Validate exclude patterns
-  const excludePatterns = getArgValues('--exclude')
-  for (const pattern of excludePatterns) {
-    const excludeError = validateGlobPattern(pattern)
-    if (excludeError) {
-      logger.error(`Error in exclude pattern: ${excludeError}`)
-      process.exit(1)
-    }
-  }
-
-  // Validate depth (--single-page is alias for --depth 0)
-  const singlePage = args.includes('--single-page')
-  const depthStr = singlePage ? '0' : (getArgValue('--depth') || getArgValue('-d') || '3')
-  const depth = Number(depthStr)
-  if (!Number.isInteger(depth) || depth < 0 || depth > 10) {
-    logger.error('Error: Depth must be an integer between 0 and 10')
-    process.exit(1)
-  }
-
-  // Validate driver
-  const driver = getArgValue('--driver')
-  if (driver && driver !== 'http' && driver !== 'playwright') {
-    logger.error('Error: Driver must be either "http" or "playwright"')
-    process.exit(1)
-  }
-
-  // Validate max-pages
-  const maxPagesStr = getArgValue('--max-pages')
-  if (maxPagesStr) {
-    const maxPages = Number.parseInt(maxPagesStr)
-    if (Number.isNaN(maxPages) || maxPages < 1) {
-      logger.error('Error: Max pages must be a positive number')
-      process.exit(1)
-    }
-  }
-
-  // Validate crawl-delay
-  const crawlDelayStr = getArgValue('--crawl-delay')
-  if (crawlDelayStr) {
-    const crawlDelay = Number.parseInt(crawlDelayStr)
-    if (Number.isNaN(crawlDelay) || crawlDelay < 0) {
-      logger.error('Error: Crawl delay must be a non-negative number')
-      process.exit(1)
-    }
-  }
-
-  // Parse artifacts
-  const artifactsStr = getArgValue('--artifacts')
-  const artifacts = artifactsStr ? artifactsStr.split(',').map(a => a.trim()) : ['llms.txt', 'llms-full.txt', 'markdown']
-
-  // Validate artifacts
-  const validArtifacts = ['llms.txt', 'llms-full.txt', 'markdown']
-  for (const artifact of artifacts) {
-    if (!validArtifacts.includes(artifact)) {
-      logger.error(`Error: Invalid artifact '${artifact}'. Valid options: ${validArtifacts.join(', ')}`)
-      process.exit(1)
-    }
-  }
-
-  // Get origin URL (allow override of auto-detection)
-  const originOverride = getArgValue('--origin')
-  const inferredOrigin = (() => {
-    if (originOverride)
-      return originOverride
-    try {
-      const urlObj = new URL(withHttps(url))
-      return `${urlObj.protocol}//${urlObj.host}`
-    }
-    catch {
-      return undefined
-    }
-  })()
-
-  // Get metadata overrides
-  const siteNameOverride = getArgValue('--site-name')
-  const descriptionOverride = getArgValue('--description')
-
-  const patterns = [parsed]
-
-  // Check for verbose flag
-  const verbose = args.includes('--verbose') || args.includes('-v')
-
-  // Check for skip-sitemap flag
-  const skipSitemap = args.includes('--skip-sitemap')
-
-  // Explicit sitemap override(s). Repeatable; each is normalized to https.
-  const sitemapUrls = getArgValues('--sitemap').map(u => withHttps(u))
-  // getArgValues drops a --sitemap with no following value; catch that so a
-  // typo can't silently fall through to auto-discovery.
-  const sitemapFlagCount = args.filter(a => a === '--sitemap' || a === '-sitemap').length
-  if (sitemapFlagCount > sitemapUrls.length) {
-    logger.error('Error: --sitemap requires a URL value')
-    process.exit(1)
-  }
-  for (const sitemapUrl of sitemapUrls) {
-    try {
-      // eslint-disable-next-line no-new
-      new URL(sitemapUrl)
-    }
-    catch {
-      logger.error(`Error: Invalid sitemap URL: ${sitemapUrl}`)
-      process.exit(1)
-    }
-  }
-
-  // Check for allow-subdomains flag
-  const allowSubdomains = args.includes('--allow-subdomains')
-
-  // Boilerplate stripping is on by default; --keep-boilerplate opts out. Left
-  // undefined unless explicitly opted out, so a config-file value can still apply.
-  const stripBoilerplate = args.includes('--keep-boilerplate') ? false : undefined
-
-  // Validate boilerplate threshold
-  const boilerplateThresholdStr = getArgValue('--boilerplate-threshold')
-  let boilerplateThreshold: number | undefined
-  if (boilerplateThresholdStr !== undefined) {
-    boilerplateThreshold = Number(boilerplateThresholdStr)
-    if (Number.isNaN(boilerplateThreshold) || boilerplateThreshold <= 0 || boilerplateThreshold > 1) {
-      logger.error('Error: Boilerplate threshold must be a number between 0 (exclusive) and 1')
-      process.exit(1)
-    }
-  }
-
-  // Warn if using skip-sitemap with wildcard URLs
-  if (skipSitemap && parsed.isGlob) {
-    logger.warn('Warning: Using --skip-sitemap with glob URLs may not discover all matching pages.')
-  }
-
-  return {
-    urls: [url],
-    outputDir: resolve(getArgValue('--output') || getArgValue('-o') || 'output'),
-    driver: (driver as 'http' | 'playwright') || 'http',
-    maxRequestsPerCrawl: Number.parseInt(maxPagesStr || String(Number.MAX_SAFE_INTEGER)),
-    followLinks: depth > 0,
-    maxDepth: depth,
-    generateLlmsTxt: artifacts.includes('llms.txt'),
-    generateLlmsFullTxt: artifacts.includes('llms-full.txt'),
-    generateIndividualMd: artifacts.includes('markdown'),
-    siteNameOverride,
-    descriptionOverride,
-    origin: inferredOrigin,
-    globPatterns: patterns,
-    crawlDelay: crawlDelayStr ? Number.parseInt(crawlDelayStr) : undefined,
-    exclude: excludePatterns.length > 0 ? excludePatterns : undefined,
-    verbose,
-    skipSitemap,
-    sitemapUrls: sitemapUrls.length > 0 ? sitemapUrls : undefined,
-    allowSubdomains,
-    stripBoilerplate,
-    boilerplateThreshold,
-    silent,
-  }
+  if (generatedFiles.length > 0)
+    logger.info(`${generatedFiles.join(', ')} → ${relative(process.cwd(), outputDir) || '.'}`)
 }
 
 async function main() {
-  // Try to parse CLI arguments first
-  const cliOptions = parseCliArgs()
-
-  // Load config file (mdream.config.ts)
-  const fileConfig = await loadMdreamConfig()
-
-  // Single logging seam for the whole CLI run. Resolved from the CLI flag or
-  // config so a quiet run keeps stdout clean (issue #100). Interactive mode is
-  // never silent.
-  const silent = (cliOptions?.silent ?? false) || (fileConfig.silent ?? false)
-  const logger = resolveLogger({ silent })
-  // Upgrade the run-wide logger now that config-driven silent is resolved, so an
-  // unhandled error below is muted too when silent is set via config (not argv).
-  runLogger = logger
-
-  let options: CrawlOptions | null
-
-  if (cliOptions) {
-    // Merge: CLI args override config file, arrays concatenate
-    const configExclude = fileConfig.exclude || []
-    const cliExclude = cliOptions.exclude || []
-    options = {
-      ...cliOptions,
-      driver: cliOptions.driver || fileConfig.driver || 'http',
-      maxDepth: cliOptions.maxDepth ?? fileConfig.maxDepth,
-      crawlDelay: cliOptions.crawlDelay ?? fileConfig.crawlDelay,
-      skipSitemap: cliOptions.skipSitemap || fileConfig.skipSitemap || false,
-      sitemapUrls: cliOptions.sitemapUrls
-        ?? (fileConfig.sitemap
-          ? (Array.isArray(fileConfig.sitemap) ? fileConfig.sitemap : [fileConfig.sitemap])
-          : undefined),
-      allowSubdomains: cliOptions.allowSubdomains || fileConfig.allowSubdomains || false,
-      stripBoilerplate: cliOptions.stripBoilerplate ?? fileConfig.stripBoilerplate ?? true,
-      boilerplateThreshold: cliOptions.boilerplateThreshold ?? fileConfig.boilerplateThreshold,
-      verbose: cliOptions.verbose || fileConfig.verbose || false,
-      silent,
-      exclude: configExclude.length > 0 || cliExclude.length > 0
-        ? [...configExclude, ...cliExclude]
-        : undefined,
-      hooks: fileConfig.hooks,
-    }
-
-    // Show non-interactive summary when using CLI args
-    logger.intro(`☁️  mdream v${version}`)
-
-    const formats = []
-    if (options.generateLlmsTxt)
-      formats.push('llms.txt')
-    if (options.generateLlmsFullTxt)
-      formats.push('llms-full.txt')
-    if (options.generateIndividualMd)
-      formats.push('Individual MD files')
-
-    const summary = [
-      `URL: ${options.urls.join(', ')}`,
-      `Output: ${relative(process.cwd(), options.outputDir) || '.'}`,
-      `Driver: ${options.driver} \u00B7 Depth: ${options.maxDepth}`,
-      `Formats: ${formats.join(', ')}`,
-      options.exclude && options.exclude.length > 0 && `Exclude: ${options.exclude.join(', ')}`,
-      options.skipSitemap && `Skip sitemap: Yes`,
-      options.sitemapUrls && options.sitemapUrls.length > 0 && `Sitemap: ${options.sitemapUrls.join(', ')}`,
-      options.allowSubdomains && `Allow subdomains: Yes`,
-      options.verbose && `Verbose: Enabled`,
-    ].filter(Boolean)
-
-    logger.note(summary.join('\n'), 'Configuration')
-  }
-  else {
-    // Fall back to interactive mode
-    options = await interactiveCrawl()
-  }
-
-  if (!options) {
+  const command = parseCrawlArgs(process.argv.slice(2))
+  if (command._tag === 'Help') {
+    console.log(HELP)
     process.exit(0)
   }
+  if (command._tag === 'Version') {
+    console.log(`@mdream/crawl v${version}`)
+    process.exit(0)
+  }
+  if (command._tag === 'Invalid')
+    exitWithError(command.message)
+
+  // Load config file (mdream.config.ts). Check its keys before any prompt.
+  const fileConfig = await loadMdreamConfig()
+  try {
+    assertCrawlOptionKeys(fileConfig)
+  }
+  catch (error) {
+    exitWithError(`mdream.config: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  const interactive = command._tag === 'Interactive'
+  const layer = interactive ? await interactiveCrawl(fileConfig) : command.options
+  if (!layer)
+    process.exit(0)
+
+  // Precedence: CLI flags or prompt answers, then the config file, then the library defaults.
+  const input = mergeCrawlOptions(fileConfig, layer)
+  if (!input.urls || input.urls.length === 0)
+    exitWithError('A URL is required. Pass it as an argument, with --url, or as "urls" in mdream.config. Run without arguments for interactive mode.')
+
+  let options: ResolvedCrawlOptions
+  try {
+    options = resolveCrawlOptions(input)
+  }
+  catch (error) {
+    exitWithError(error instanceof Error ? error.message : String(error))
+  }
+
+  // Single logging seam for the whole run, resolved from the flags and the
+  // config file, so a quiet run keeps stdout clean (issue #100). Upgrade the
+  // run-wide logger so an unhandled error below is muted too.
+  const logger = options.logger
+  runLogger = logger
+
+  if (!interactive)
+    logger.intro(`☁️  mdream v${version}`)
+  logger.note(summarize(options), 'Configuration')
+
+  if (options.skipSitemap && options.patterns.some(pattern => pattern.isGlob))
+    logger.warn('Sitemap discovery is off. A glob URL can miss pages that no link reaches.')
 
   // Check output directory permissions before proceeding
-  const permCheck = checkOutputDirectoryPermissions(options.outputDir)
+  const permCheck = checkOutputDirectoryPermissions(options.output)
   if (!permCheck.success) {
     logger.error(permCheck.error!)
     if (permCheck.error?.includes('Permission denied')) {
@@ -632,10 +309,9 @@ async function main() {
     }
 
     const { ensurePlaywrightInstalled, isUseChromeSupported } = await import('./playwright-utils.js')
-    // Check Chrome support and configure if available
-    const chromeSupported = await isUseChromeSupported()
-    if (chromeSupported) {
-      options.useChrome = true
+    // Use system Chrome when available, unless the options turn it off.
+    if (input.useChrome !== false && await isUseChromeSupported()) {
+      options = { ...options, useChrome: true }
       logger.info('System Chrome detected and enabled.')
     }
     else {
@@ -654,7 +330,7 @@ async function main() {
   const startTime = Date.now()
   let crawlStartTime = 0
   let lastProgress: CrawlProgress | undefined
-  const results = await crawlAndGenerate(options, (progress: CrawlProgress) => {
+  const results = await runCrawl(options, (progress: CrawlProgress) => {
     lastProgress = progress
     if (progress.sitemap.status === 'discovering') {
       s.message('Discovering sitemaps')
@@ -677,9 +353,9 @@ async function main() {
         : `Crawling ${processed}/${total}`
 
       if (rate > 0)
-        msg += ` \u00B7 ${rate}/s`
+        msg += ` · ${rate}/s`
       if (failed > 0)
-        msg += ` \u00B7 ${failed} failed`
+        msg += ` · ${failed} failed`
 
       s.message(msg)
     }
@@ -690,41 +366,25 @@ async function main() {
 
   s.stop()
 
-  const endTime = Date.now()
-  const durationMs = endTime - startTime
-  const durationSeconds = durationMs / 1000
+  const durationSeconds = (Date.now() - startTime) / 1000
 
   const successful = results.filter(r => r.success).length
-  const failed = results.filter(r => !r.success).length
   const failedResults = results.filter(r => !r.success)
 
-  // Show failed results details if any
-  if (failed > 0 && cliOptions) {
+  if (failedResults.length > 0) {
     logger.error('Failed URLs:')
-    failedResults.forEach((result) => {
+    for (const result of failedResults)
       logger.error(`  ${result.url}: ${result.error || 'Unknown error'}`)
-    })
-  }
-  else if (failed > 0) {
-    console.log('\nFailed URLs:')
-    failedResults.forEach((result) => {
-      console.log(`  - ${result.url}: ${result.error || 'Unknown error'}`)
-    })
   }
 
   // Build list of generated files
-  const generatedFiles = []
+  const generatedFiles: string[] = []
   if (successful > 0) {
-    if (options.generateLlmsTxt)
-      generatedFiles.push('llms.txt')
-    if (options.generateLlmsFullTxt)
-      generatedFiles.push('llms-full.txt')
-    if (options.generateIndividualMd)
-      generatedFiles.push(`${successful} MD files`)
+    for (const artifact of options.artifacts)
+      generatedFiles.push(artifact === 'markdown' ? `${successful} MD files` : artifact)
   }
 
-  // Only show interactive results for interactive mode
-  await showCrawlResults(logger, successful, failed, options.outputDir, generatedFiles, durationSeconds, lastProgress?.crawling.latency)
+  await showCrawlResults(logger, successful, failedResults.length, options.output, generatedFiles, durationSeconds, lastProgress?.crawling.latency)
   process.exit(0)
 }
 

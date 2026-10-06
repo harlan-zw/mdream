@@ -77,14 +77,11 @@ describe('sitemap link skip', () => {
   it('does not follow discovered links when sitemap provides URLs', async () => {
     const results = await crawlAndGenerate({
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
-      maxDepth: 3,
-      followLinks: true,
+      output: tmpOut(),
+      depth: 3,
       // sitemap discovery is NOT skipped, so it will find sitemap.xml
       skipSitemap: false,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      artifacts: [],
     })
 
     // Should only crawl the URLs from the sitemap: /, /about, /blog

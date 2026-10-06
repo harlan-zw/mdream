@@ -71,13 +71,10 @@ describe('query param loop prevention', () => {
   it('caps query param variants per pathname at 5', async () => {
     await crawlAndGenerate({
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
-      maxDepth: 2,
-      followLinks: true,
+      output: tmpOut(),
+      depth: 2,
       skipSitemap: true,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      artifacts: [],
     })
 
     // Home page generates 20 links to /products?page=N&sort=asc
@@ -100,13 +97,10 @@ describe('query param loop prevention', () => {
 
     await crawlAndGenerate({
       urls: ['https://example.com'],
-      outputDir: tmpOut(),
-      maxDepth: 1,
-      followLinks: true,
+      output: tmpOut(),
+      depth: 1,
       skipSitemap: true,
-      generateLlmsTxt: false,
-      generateLlmsFullTxt: false,
-      generateIndividualMd: false,
+      artifacts: [],
     })
 
     // All 4 links should normalize to the same /about URL, fetched only once

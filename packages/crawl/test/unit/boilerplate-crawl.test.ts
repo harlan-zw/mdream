@@ -66,13 +66,10 @@ describe('boilerplate stripping across a crawled corpus', () => {
 
     await crawlAndGenerate({
       urls: ['https://site.test'],
-      outputDir,
-      maxDepth: 1,
-      followLinks: true,
+      output: outputDir,
+      depth: 1,
       skipSitemap: true,
-      generateLlmsTxt: true,
-      generateLlmsFullTxt: true,
-      generateIndividualMd: true,
+      artifacts: ['llms.txt', 'llms-full.txt', 'markdown'],
       silent: true,
     })
 
@@ -118,11 +115,10 @@ describe('boilerplate stripping across a crawled corpus', () => {
 
     await crawlAndGenerate({
       urls: ['https://site.test'],
-      outputDir,
-      maxDepth: 1,
-      followLinks: true,
+      output: outputDir,
+      depth: 1,
       skipSitemap: true,
-      generateIndividualMd: true,
+      artifacts: ['markdown'],
       stripBoilerplate: false,
       silent: true,
     })

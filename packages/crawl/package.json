@@ -45,7 +45,7 @@
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "bin": {
-    "@mdream/crawl": "./bin/mdream-crawl.mjs"
+    "mdream-crawl": "./bin/mdream-crawl.mjs"
   },
   "files": [
     "bin",

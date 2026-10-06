@@ -1,3 +1,4 @@
+import type { ParsedUrlPattern } from './types.ts'
 import picomatch from 'picomatch'
 import { getDomain } from 'tldts'
 import { withHttps } from 'ufo'
@@ -15,12 +16,6 @@ const GLOB_CHAR_RE = /[*?[]/
  */
 export function getRegistrableDomain(hostname: string): string {
   return getDomain(hostname, { allowPrivateDomains: true }) || hostname
-}
-
-export interface ParsedUrlPattern {
-  baseUrl: string
-  pattern: string
-  isGlob: boolean
 }
 
 /**

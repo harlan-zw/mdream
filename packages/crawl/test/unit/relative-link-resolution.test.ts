@@ -43,10 +43,10 @@ async function crawlIntro(origin?: string): Promise<string> {
   const outputDir = tmpOut()
   await crawlAndGenerate({
     urls: [PAGE_URL],
-    outputDir,
-    maxDepth: 0,
+    output: outputDir,
+    depth: 0,
     skipSitemap: true,
-    generateIndividualMd: true,
+    artifacts: ['markdown'],
     silent: true,
     origin,
   })

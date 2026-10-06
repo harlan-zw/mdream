@@ -180,7 +180,7 @@ const embeddings: { url: string, title: string, content: string, embedding: numb
 
 await crawlAndGenerate({
   urls: ['https://example.com'],
-  outputDir: './output',
+  output: './output',
   hooks: {
     'crawl:page': async ({ url, html, title, origin }) => {
       const chunks = htmlToMarkdownSplitChunks(html, withMinimalPreset({
@@ -320,11 +320,12 @@ See the [mdream docs](./packages/mdream/README.md#api-reference) for complete de
 
 ### Migrating from v1
 
-Use the guide for your engine:
+Use the guide for each package:
 
 - [`mdream`](./packages/mdream/README.md#migrating-from-v1): browser imports and returns, Web Workers, minimal filtering, and page titles.
 - [`@mdream/js`](./packages/js/README.md#migrating-from-v1): format imports, plugin arrays, cleanup, and callback changes.
 - [Rust crate](./crates/core/README.md#migrating-from-v1): attribute storage and node accessors.
+- [`@mdream/crawl`](./packages/crawl/README.md#migrating-from-v1): renamed options, shared defaults, and the `mdream-crawl` command.
 
 The JS guide covers the API from [#224](https://github.com/harlan-zw/mdream/pull/224), merged after `2.0.0-beta.1`.
 That release uses the declarative JS plugin object and `format` option.
