@@ -394,8 +394,17 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
           while search_end < current_md.len() && !current_md.is_char_boundary(search_end) {
             search_end += 1;
           }
-          let search_region = &current_md[..search_end];
-          if let Some(idx) = search_region.rfind(sep) {
+          // A match that ends at or before the last split is rejected below, so
+          // the search starts where a match can first end after it.
+          let mut search_start = (last_split_position + 1)
+            .saturating_sub(sep.len())
+            .min(search_end);
+          while !current_md.is_char_boundary(search_start) {
+            search_start -= 1;
+          }
+          let search_region = &current_md[search_start..search_end];
+          if let Some(rel) = search_region.rfind(sep) {
+            let idx = search_start + rel;
             let candidate_split_pos = idx + sep.len();
 
             // Don't split inside code blocks (odd backtick fence count)
