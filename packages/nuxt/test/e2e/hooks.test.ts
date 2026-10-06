@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url'
-import { $fetch, setup } from '@nuxt/test-utils/e2e'
+import { $fetch, fetch, setup } from '@nuxt/test-utils/e2e'
 import { describe, expect, it } from 'vitest'
 
 describe('mdream hooks e2e', async () => {
@@ -43,24 +43,31 @@ describe('mdream hooks e2e', async () => {
       // Paragraph content filtered out on this route too
       expect(aboutMarkdown).not.toContain('testing hooks')
     })
+
+    it('keeps the page title and description when the hook replaces extraction', async () => {
+      const llmsTxt = await $fetch<string>('/llms.txt')
+      expect(llmsTxt).toMatch(/- \[Hooks Home\]\(\S+\): Home page of the hooks fixture\./)
+    })
   })
 
+  // `/` is prerendered, so Nitro serves it as a static file and the middleware does not run.
+  // These tests use `/about`, which renders on each request.
   describe('mdream:negotiate hook', () => {
     it('should force markdown serving via X-Force-Markdown header', async () => {
       // Request without .md extension but with X-Force-Markdown header
       // The negotiate hook should override and serve markdown
-      const response = await $fetch.raw('/', {
+      const response = await fetch('/about', {
         headers: {
           'x-force-markdown': 'true',
         },
       })
       expect(response.headers.get('content-type')).toContain('text/markdown')
-      expect(response._data).toContain('# Home Page')
+      expect(await response.text()).toContain('# About Page')
     })
 
     it('should block markdown serving via X-Block-Markdown header', async () => {
       // Request with accept header preferring markdown but blocked by hook
-      const response = await $fetch.raw('/', {
+      const response = await fetch('/about', {
         headers: {
           'accept': 'text/markdown',
           'x-block-markdown': 'true',
@@ -72,18 +79,18 @@ describe('mdream hooks e2e', async () => {
 
     it('should not affect .md extension requests', async () => {
       // .md extension bypass negotiate entirely (hasMarkdownExtension check)
-      const response = await $fetch.raw('/index.md', {
+      const response = await fetch('/about.md', {
         headers: {
           'x-block-markdown': 'true',
         },
       })
       // .md requests always serve markdown regardless of negotiate hook
       expect(response.headers.get('content-type')).toContain('text/markdown')
-      expect(response._data).toContain('# Home Page')
+      expect(await response.text()).toContain('# About Page')
     })
   })
 
-  describe('mdream:llms-txt:generate hook', () => {
+  describe('mdream:llms-txt hook', () => {
     it('should generate llms.txt with hook modifications', async () => {
       const llmsTxt = await $fetch('/llms.txt')
       expect(llmsTxt).toBeTruthy()

@@ -1,5 +1,4 @@
 import type { H3Event } from 'h3'
-import type { MdreamOptions } from 'mdream'
 import type { MdreamMarkdownContext, MdreamNegotiateContext, ModuleRuntimeConfig } from '../../types.js'
 import { negotiateContent } from '@mdream/js/negotiate'
 import { consola } from 'consola'
@@ -7,6 +6,7 @@ import { appendHeader, createError, defineEventHandler, getHeader, setHeader } f
 import { htmlToMarkdown } from 'mdream'
 import { useNitroApp, useRuntimeConfig } from 'nitropack/runtime'
 import { withSiteUrl } from '#site-config/server/composables/utils'
+import { createConfigHookOptions, withPageMetadata } from '../conversion-options.js'
 
 const logger = consola.withTag('nuxt-mdream')
 
@@ -21,22 +21,12 @@ function negotiate(event: H3Event) {
 async function convertHtmlToMarkdown(html: string, url: string, config: ModuleRuntimeConfig, route: string, event: H3Event) {
   const nitroApp = useNitroApp()
 
-  let title = ''
-  let description = ''
-
-  const options: MdreamOptions = {
-    origin: url,
-    ...config.mdreamOptions,
-  } as MdreamOptions
-
-  // Add declarative extraction for title/description
-  options.extraction = {
-    'title': (el) => { title = el.textContent },
-    'meta[name="description"]': (el) => { description = el.attributes.content || '' },
-  }
-
-  await nitroApp.hooks.callHook('mdream:config', options)
+  const hookOptions = createConfigHookOptions(url, config.mdreamOptions)
+  await nitroApp.hooks.callHook('mdream:config', hookOptions)
+  // Add the title and description handlers after the hook, so a hook that replaces `extraction` keeps them.
+  const { options, metadata } = withPageMetadata(hookOptions)
   let markdown = htmlToMarkdown(html, options)
+  const { title, description } = metadata
 
   // Create hook context for mdream:markdown (Nitro hook)
   const context: MdreamMarkdownContext = {
