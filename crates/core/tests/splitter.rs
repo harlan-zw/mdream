@@ -1,4 +1,3 @@
-use mdream::consts::{TAG_H1, TAG_H2, TAG_H3, TAG_H4};
 use mdream::splitter::{SplitterOptions, split_markdown};
 
 fn default_opts() -> SplitterOptions {
@@ -25,7 +24,7 @@ fn splits_on_repeated_h2() {
 fn tracks_header_hierarchy() {
   let md = "## Parent\nSome text\n### Child\nChild text\n## Another Parent\nMore text\n";
   let opts = SplitterOptions {
-    headers_to_split_on: vec![TAG_H2, TAG_H3],
+    headers_to_split_on: vec![2, 3],
     strip_headers: false,
     ..default_opts()
   };
@@ -57,7 +56,7 @@ fn does_not_split_on_first_occurrence() {
 fn splits_on_h1_when_configured() {
   let md = "# Title A\nContent A\n# Title B\nContent B\n";
   let opts = SplitterOptions {
-    headers_to_split_on: vec![TAG_H1],
+    headers_to_split_on: vec![1],
     ..default_opts()
   };
   let chunks = split_markdown(md, &opts);
@@ -65,10 +64,24 @@ fn splits_on_h1_when_configured() {
 }
 
 #[test]
+fn ignores_levels_outside_one_to_six() {
+  // 8 is the old `h2` tag ID. As a level, it is out of range.
+  let md = "## Section A\nContent A\n## Section B\nContent B\n";
+  let opts = SplitterOptions {
+    headers_to_split_on: vec![0, 7, 8, 255],
+    ..default_opts()
+  };
+  let chunks = split_markdown(md, &opts);
+  assert_eq!(chunks.len(), 1);
+  assert!(chunks[0].content.contains("Content A"));
+  assert!(chunks[0].content.contains("Content B"));
+}
+
+#[test]
 fn clears_child_headers_on_parent_split() {
   let md = "## Sec 1\n### Sub 1\nText\n## Sec 2\nText 2\n";
   let opts = SplitterOptions {
-    headers_to_split_on: vec![TAG_H2, TAG_H3],
+    headers_to_split_on: vec![2, 3],
     ..default_opts()
   };
   let chunks = split_markdown(md, &opts);
@@ -126,7 +139,7 @@ fn extracts_code_language() {
 fn no_split_inside_code_block() {
   let md = "## Before\nText\n```\n## Fake Header Inside Code\nmore code\n```\n## After\nEnd text\n";
   let opts = SplitterOptions {
-    headers_to_split_on: vec![TAG_H2],
+    headers_to_split_on: vec![2],
     strip_headers: false,
     ..default_opts()
   };
@@ -377,7 +390,7 @@ fn loc_line_numbers() {
 fn mixed_header_levels() {
   let md = "# Title\n## Section 1\n### Sub 1.1\nText\n## Section 2\n#### Deep\nMore text\n";
   let opts = SplitterOptions {
-    headers_to_split_on: vec![TAG_H2, TAG_H3, TAG_H4],
+    headers_to_split_on: vec![2, 3, 4],
     strip_headers: false,
     ..default_opts()
   };

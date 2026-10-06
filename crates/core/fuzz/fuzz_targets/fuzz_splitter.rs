@@ -9,6 +9,8 @@ struct SplitterInput {
     html: String,
     chunk_size: u16,
     chunk_overlap: u16,
+    // Any byte: levels outside 1 to 6 must be ignored, never panic.
+    levels: Vec<u8>,
 }
 
 fuzz_target!(|input: SplitterInput| {
@@ -16,6 +18,7 @@ fuzz_target!(|input: SplitterInput| {
     let chunk_overlap = (input.chunk_overlap as usize) % chunk_size;
 
     let split_opts = SplitterOptions {
+        headers_to_split_on: input.levels,
         chunk_size,
         chunk_overlap,
         ..Default::default()
