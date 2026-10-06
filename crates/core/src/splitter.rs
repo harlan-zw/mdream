@@ -147,22 +147,26 @@ fn is_header_line(line: &str) -> bool {
   detect_header(line).is_some()
 }
 
-/// Count occurrences of ``` in a string.
-#[inline]
-fn count_backtick_fences(s: &str) -> usize {
+/// End offsets of the ``` runs in `s`, matched left to right without overlap.
+/// The scan of `s[..p]` makes the same matches up to `p`, so its ``` count is
+/// the number of ends at or before `p`.
+fn backtick_fence_ends(s: &str) -> Vec<usize> {
   let bytes = s.as_bytes();
   let len = bytes.len();
-  let mut count = 0;
+  let mut ends = Vec::new();
   let mut i = 0;
   while i + 2 < len {
-    if bytes[i] == b'`' && bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
-      count += 1;
+    if bytes[i + 2] != b'`' {
+      // Every run that starts at i, i + 1, or i + 2 needs this byte.
       i += 3;
+    } else if bytes[i] == b'`' && bytes[i + 1] == b'`' {
+      i += 3;
+      ends.push(i);
     } else {
       i += 1;
     }
   }
-  count
+  ends
 }
 
 /// Split markdown text into chunks based on headers, HRs, and size limits.
@@ -211,6 +215,9 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
   let mut last_chunk_end_position: usize = 0;
   let mut last_split_position: usize = 0;
   let mut chunks: Vec<MarkdownChunk> = Vec::new();
+  // Built on the first size split, so each split position costs one binary
+  // search instead of a rescan from byte 0.
+  let mut fence_ends: Option<Vec<usize>> = None;
 
   // Inline flush function equivalent
   let flush_chunk = |chunks: &mut Vec<MarkdownChunk>,
@@ -377,6 +384,7 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
       if current_chunk_size > opts.chunk_size {
         let ideal_split_pos = last_chunk_end_position + opts.chunk_size;
         let current_md = &markdown[..line_end.min(markdown.len())];
+        let fence_ends: &[usize] = fence_ends.get_or_insert_with(|| backtick_fence_ends(markdown));
         let separators: [&str; 4] = ["\n\n", "```\n", "\n", " "];
         let mut split_position: isize = -1;
 
@@ -391,8 +399,7 @@ pub fn split_markdown(markdown: &str, opts: &SplitterOptions) -> Vec<MarkdownChu
             let candidate_split_pos = idx + sep.len();
 
             // Don't split inside code blocks (odd backtick fence count)
-            let before_split = &current_md[..candidate_split_pos];
-            if count_backtick_fences(before_split) % 2 == 1 {
+            if fence_ends.partition_point(|&end| end <= candidate_split_pos) % 2 == 1 {
               continue;
             }
 
@@ -486,4 +493,48 @@ pub fn html_to_format_chunks(
 ) -> Vec<MarkdownChunk> {
   let output = crate::html_to_format(html, md_opts, format);
   split_markdown(&output, split_opts)
+}
+
+#[cfg(test)]
+mod fence_count {
+  //! `split_markdown` used to rescan `s[..p]` for every split position `p`.
+  //! A binary search over the fence ends must give the same count everywhere.
+  use super::backtick_fence_ends;
+
+  /// The rescan from byte 0 that the fence ends replace.
+  fn count_backtick_fences(s: &str) -> usize {
+    let bytes = s.as_bytes();
+    let mut count = 0;
+    let mut i = 0;
+    while i + 2 < bytes.len() {
+      if bytes[i] == b'`' && bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
+        count += 1;
+        i += 3;
+      } else {
+        i += 1;
+      }
+    }
+    count
+  }
+
+  #[test]
+  fn count_before_every_position_matches_the_rescan() {
+    // Every string of up to 12 bytes over "`" and "a": runs of each length at
+    // each alignment, at the start, in the middle, and at the end.
+    for len in 0..=12u32 {
+      for bits in 0..1u32 << len {
+        let doc: String = (0..len)
+          .map(|i| if bits >> i & 1 == 1 { '`' } else { 'a' })
+          .collect();
+        let ends = backtick_fence_ends(&doc);
+        for p in 0..=doc.len() {
+          assert_eq!(
+            ends.partition_point(|&end| end <= p),
+            count_backtick_fences(&doc[..p]),
+            "{doc:?} before {p}"
+          );
+        }
+      }
+    }
+  }
 }
