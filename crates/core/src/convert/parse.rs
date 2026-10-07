@@ -553,13 +553,13 @@ impl ConvertState {
         && self.depth_map[TAG_PRE as usize] == 0
         && self.depth_map[TAG_CODE as usize] == 0
         && !self.in_raw_html_block();
-      let decoded = if protect_decoded_entity_references {
-        decode_html_entities_for_markdown(&text)
-      } else {
-        decode_html_entities(&text)
-      };
-      if let Cow::Owned(decoded) = decoded {
-        text = decoded;
+      if decode_html_entities_into(
+        &text,
+        false,
+        protect_decoded_entity_references,
+        &mut self.entity_buffer,
+      ) {
+        std::mem::swap(&mut text, &mut self.entity_buffer);
       }
       self.has_encoded_html_entity = false;
     }
@@ -813,6 +813,11 @@ impl ConvertState {
       ATTR_ALL
     } else {
       tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
+        | if self.has_tailwind {
+          ATTR_CLASS
+        } else {
+          ATTR_NONE
+        }
     }
   }
 

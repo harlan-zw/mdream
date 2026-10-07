@@ -316,7 +316,7 @@ impl ConvertState {
 
   #[cold]
   #[inline(never)]
-  fn finalize_code_span(&mut self, span: &CodeSpanState) -> String {
+  fn finalize_code_span(&mut self, span: &CodeSpanState) -> Cow<'static, str> {
     #[cfg(test)]
     {
       self.code_span_closed_bytes += self.buffer.len() - span.output_start;
@@ -349,6 +349,11 @@ impl ConvertState {
       self.replace_code_span_content(span.content_start..content_end, &escaped);
     }
     let max_run = Self::max_backtick_run(&self.buffer[span.content_start..]);
+    // Blockquote rewriting can move the original opener. Only skip its
+    // replacement when the recorded delimiter still occupies this position.
+    if max_run == 0 && self.buffer.as_bytes()[span.content_start - 1] == b'`' {
+      return Cow::Borrowed("`");
+    }
     let delimiter = "`".repeat((max_run + 1).max(1));
     let content = &self.buffer[span.content_start..];
     let padded = content.starts_with('`') || content.ends_with('`');
@@ -362,9 +367,9 @@ impl ConvertState {
     }
     self.replace_code_span_content(span.output_start..span.content_start, &opening);
     if padded {
-      format!(" {delimiter}")
+      Cow::Owned(format!(" {delimiter}"))
     } else {
-      delimiter
+      Cow::Owned(delimiter)
     }
   }
 
@@ -1395,8 +1400,8 @@ impl ConvertState {
         kind: inline_marker_type,
         starts_at_hard_break: self.hard_break_end == marker_start,
       });
-    } else if !self.open_markers.is_empty()
-      && !(tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0)
+      } else if !(self.open_markers.is_empty()
+        || tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0)
       && output
         .as_deref()
         .is_some_and(|o| o.as_bytes().iter().any(|&b| !is_whitespace(b)))
@@ -1673,6 +1678,7 @@ impl ConvertState {
       self.link.empty_text_pending = false;
     }
 
+    let mut resolved_href = None;
     // Clean mode exit — single guard. Skipped for overridden anchors,
     // whose custom exit output isn't the default `[…](…)` shape.
     if !plain_text!(self) && self.clean_flags != 0 && tag_id == Some(TAG_A) && !has_override {
@@ -1772,7 +1778,11 @@ impl ConvertState {
         // redundantLinks: [url](url) → url
         if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0
           && let Some(href) = node.attributes.get_bit(ATTR_HREF)
-          && let resolved = resolve_url(href, self.options.origin.as_deref(), self.clean_urls)
+          && let resolved = resolved_href.insert(resolve_url(
+            href,
+            self.options.origin.as_deref(),
+            self.clean_urls,
+          ))
           && link_text == resolved.as_ref()
           && text_len > 0
         {
@@ -1853,7 +1863,8 @@ impl ConvertState {
       // Write link close directly
       if let Some(href) = node.attributes.get_bit(ATTR_HREF) {
         let capped_code_span = self.options.max_node_bytes != 0 && !self.code_spans.is_empty();
-        let resolved = resolve_url(href, self.options.origin.as_deref(), self.clean_urls);
+        let resolved = resolved_href
+          .unwrap_or_else(|| resolve_url(href, self.options.origin.as_deref(), self.clean_urls));
         let resolved = resolved.as_ref();
         let mut title = node.attributes.get_bit(ATTR_TITLE).unwrap_or("");
         if !title.is_empty() && self.last_content_cache_len > 0 {
@@ -1875,7 +1886,7 @@ impl ConvertState {
               let end = self.buffer.len();
               if self.replace_code_span_content(end..end, ">") {
                 self.note_buffer_rewrite(bp);
-                self.buffer.replace_range(bp..bp + 1, "<");
+                self.buffer.replace_range(bp..=bp, "<");
                 self.last_content_cache_len = self.buffer.len() - bp;
                 self.end_link();
                 self.last_node_is_inline = is_inline;
@@ -1985,7 +1996,7 @@ impl ConvertState {
           self.truncate_buffer(span.output_start);
           output = None;
         } else if span.opener_emitted {
-          output = Some(Cow::Owned(self.finalize_code_span(&span)));
+          output = Some(self.finalize_code_span(&span));
         } else {
           output = None;
         }

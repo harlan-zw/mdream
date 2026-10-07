@@ -6049,3 +6049,36 @@ fn unicode_runs_stop_at_utf8_caps_in_every_output_format_and_chunk_width() {
     }
   }
 }
+
+#[test]
+fn clean_relative_queries_preserve_empty_fields_and_unicode() {
+  for (query, expected) in [
+    ("?q=ok", "?q=ok"),
+    ("?&&q=ok&&", "?q=ok&&"),
+    ("?utm_source=x&名=值&&#章", "?名=值&&#章"),
+    ("?名=値&utm_source=x&末=終#節", "?名=値&末=終#節"),
+    ("?utm_source=x&&#章", "#章"),
+    ("?#章", "#章"),
+    ("#章?utm_source=x", "#章?utm_source=x"),
+  ] {
+    let html = format!("<a href='/guide{query}'>Link</a>");
+    assert_eq!(
+      convert_clean_with_origin(&html, "https://example.com"),
+      format!("[Link](https://example.com/guide{expected})"),
+    );
+  }
+}
+
+#[test]
+fn code_span_restores_an_opener_moved_by_a_blockquote() {
+  let html = concat!(
+    "</blockquote>A & B<br></a><table><tr><td>",
+    "<a href='../x?utm_source=a&amp;名=值&amp;#章'><code><blockquote>",
+    "&amp;copy; &nLt; &#x80;&bogus;</li></ul><table><tr><td><code>",
+    "</td></tr></table></li></ul><div class=hidden></pre></div></pre></pre>",
+  );
+  assert_eq!(
+    convert_with_origin(html, "https://example.com/docs/page"),
+    "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
+  );
+}

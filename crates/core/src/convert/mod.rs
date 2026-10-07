@@ -1,5 +1,5 @@
 use crate::consts::*;
-use crate::entities::{decode_html_entities, decode_html_entities_for_markdown};
+use crate::entities::decode_html_entities_into;
 use crate::scan::{
   AttrBudget, DiscardedCloseTag, DiscardedCommentState, PendingTagScan, TagCarry,
   discarded_cdata_end, discarded_close_tag_end, discarded_comment_end, discarded_gt, is_whitespace,
@@ -625,6 +625,7 @@ pub struct ConvertState {
   first_block_parent_index: Option<usize>,
   block_parent_indices: Vec<usize>,
   parse_text_buffer: String,
+  entity_buffer: String,
   /// Fixed-mask path: a start tag whose bytes ran out mid-tag, holding the
   /// attributes retained so far and the scanner state, so the raw tag is never
   /// buffered.
@@ -958,6 +959,7 @@ impl ConvertState {
       first_block_parent_index: None,
       block_parent_indices: Vec::with_capacity(16),
       parse_text_buffer: String::new(),
+      entity_buffer: String::new(),
       pending_start: None,
       pending_tag: None,
       discard: Discard::No,
@@ -1159,7 +1161,10 @@ impl ConvertState {
         }
         s.filter_process_children = filter.process_children.unwrap_or(true);
       }
-      s.attrs_force_all = s.has_tailwind || s.has_filter || s.has_extraction;
+      // Capped parsing keeps its existing attribute budget, including names
+      // that Tailwind does not read.
+      s.attrs_force_all =
+        s.has_filter || s.has_extraction || (s.has_tailwind && s.options.max_node_bytes != 0);
     }
     s
   }
