@@ -523,10 +523,10 @@ Same structure as `llms.txt` but includes the full markdown content of every pag
 
 ## Migrating from v1
 
-These docs follow the repository API, including changes merged after `2.0.0-beta.1`.
-For an installed beta, use the README at its release tag.
+These docs describe the code in this repository, including changes merged after `2.0.0-beta.1`.
+If you use a published beta, read the README at its release tag.
 
-In v2, `crawlAndGenerate`, the config file, and the CLI share one option shape and one set of defaults.
+In v2, `crawlAndGenerate`, the config file, and the CLI accept the same options and defaults.
 The library uses the names of the CLI flags.
 
 ### Renamed options
@@ -576,7 +576,7 @@ The library defaults are now the CLI defaults:
 
 v1 with `followLinks: false` used the sitemap and did not follow links. v2 has no exact match. Use `depth: 0` to process only the given URLs, or `depth: 1` to follow links one hop when there is no sitemap.
 
-For a bounded first run, set the crawl scope and artifacts explicitly:
+For your first v2 crawl, process only the supplied URLs and write to a separate directory:
 
 ```ts
 import { crawlAndGenerate } from '@mdream/crawl'
@@ -590,10 +590,9 @@ await crawlAndGenerate({
 })
 ```
 
-This processes only the supplied URLs and writes to a separate output directory.
 Review the generated files before replacing the previous artifacts.
-Increase `depth` explicitly when you want to follow links.
-This example does not reproduce v1 sitemap-only crawling.
+To follow links, increase `depth`.
+This example skips sitemap discovery.
 
 ### CLI changes
 

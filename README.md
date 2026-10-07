@@ -18,8 +18,8 @@
 
 ## Migrating to v2
 
-These docs follow the repository API, including changes merged after `2.0.0-beta.1`.
-For an installed beta, use the docs at its release tag.
+These docs describe the code in this repository, including changes merged after `2.0.0-beta.1`.
+If you use a published beta, read the docs at its release tag.
 The migration guides also cover upgrades from an earlier v2 beta.
 
 | Package | Migration guide |
@@ -32,9 +32,9 @@ The migration guides also cover upgrades from an earlier v2 beta.
 | `@mdream/action` | [Workflow steps and inputs](./packages/action/README.md#migrating-from-v1) |
 | Rust crate | [Types, features, and splitter options](./crates/core/README.md#migrating-from-v1) |
 
-Before switching production, convert representative pages with your real options and compare the output.
-If you use the JS splitter, rebuild stored chunks and embeddings before switching their readers.
-Set crawler `depth`, `maxPages`, and `artifacts` explicitly to control the first upgraded crawl.
+Before deploying v2, convert sample pages with your application's options and compare the output.
+If you use the JS splitter, rebuild stored chunks and embeddings before your application reads them.
+For your first v2 crawl, set `depth`, `maxPages`, and `artifacts` to limit pages and output files.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 

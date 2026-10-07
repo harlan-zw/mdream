@@ -6,7 +6,7 @@
 
 ## Installation
 
-The examples below follow the repository API, including changes merged after `2.0.0-beta.1`.
+These examples use the code in this repository, including changes merged after `2.0.0-beta.1`.
 For `2.0.0-beta.1`, read the version note in [Migrating from v1](#migrating-from-v1) first.
 
 ```bash
@@ -37,7 +37,7 @@ yarn add @mdream/js@beta
 
 ## Migrating from v1
 
-This guide covers the repository API, including changes merged after `2.0.0-beta.1`.
+This guide describes the code in this repository, including changes merged after `2.0.0-beta.1`.
 `@mdream/js@2.0.0-beta.1` uses the declarative plugin object, `hooks`, and `format` option.
 For that release's examples, use the [beta.1 README](https://github.com/harlan-zw/mdream/blob/v2.0.0-beta.1/packages/js/README.md).
 Match your installed version to its release notes before applying these changes.
@@ -165,21 +165,23 @@ These are `inSingleQuote`, `inDoubleQuote`, `inBacktick`, `inRawTextQuoteAware`,
 ### Splitter output and timing
 
 The splitter changes from [#316](https://github.com/harlan-zw/mdream/pull/316) also affect earlier v2 betas.
-Rebuild stored chunks and embeddings from the original HTML.
-Replace the stored chunk text and `metadata.loc` together before switching readers to the rebuilt index.
 Old chunk IDs and line ranges may identify different text after this upgrade.
 
+1. Rebuild stored chunks and embeddings from the original HTML.
+2. Replace the stored chunk text and `metadata.loc` together.
+3. Switch your application to the rebuilt index.
+
 - Overlap starts at a word boundary. Chunk text and boundaries can change.
-- Code fences stay in one chunk, which can exceed `chunkSize`.
+- A fenced code block stays in one chunk, even if it exceeds `chunkSize`.
 - Chunks omit separators and leading or trailing blank lines, including with `clean()` or `withMinimalPreset()`.
 - With `stripHeaders: true`, `metadata.loc` covers the kept content lines, excluding the removed heading.
 - `htmlToMarkdownSplitChunksStream` converts the whole document before yielding its first chunk.
 
 The generator keeps the converted Markdown in memory.
-Stopping it early skips the remaining chunk work, but does not skip HTML conversion.
-If you need incremental conversion output, use `streamHtmlToMarkdown` instead.
-Its output pieces are not splitter chunks and have no chunk metadata.
-`keepSeparator` is accepted, but does not preserve whitespace between chunks.
+Stopping it early skips the remaining chunk work. HTML conversion has already finished.
+If you need output during conversion, use `streamHtmlToMarkdown`.
+It yields Markdown pieces without chunk metadata.
+The splitter accepts `keepSeparator`, but drops whitespace between chunks.
 
 ### Cleanup
 
@@ -242,7 +244,7 @@ The parser also preserves emoji split between chunks and decodes byte chunks acr
 Review saved output for parser, whitespace, plugin, and cleanup fixes from
 [#242](https://github.com/harlan-zw/mdream/pull/242), [#243](https://github.com/harlan-zw/mdream/pull/243),
 and [#241](https://github.com/harlan-zw/mdream/pull/241).
-Link text also loses trailing spaces before empty elements, as fixed in [#318](https://github.com/harlan-zw/mdream/pull/318).
+The converter also removes trailing spaces from link text before empty elements. See [#318](https://github.com/harlan-zw/mdream/pull/318).
 Regenerate snapshots from reviewed output; do not depend on individual stream boundaries.
 
 ### Removed exports
@@ -706,7 +708,7 @@ Extends `EngineOptions` with chunking-specific settings.
 | `chunkSize` | `number` | `1000` | Target chunk size, measured by `lengthFunction`. Complete code fences can exceed it. |
 | `chunkOverlap` | `number` | `200` | Overlap between chunks for context preservation. Must be less than `chunkSize`. |
 | `lengthFunction` | `(text: string) => number` | `(text) => text.length` | Function to measure chunk length. Replace with a token counter for LLM applications. |
-| `keepSeparator` | `boolean` | `false` | Accepted, but chunks omit whitespace separators regardless of this value. |
+| `keepSeparator` | `boolean` | `false` | The splitter drops whitespace between chunks for either value. |
 
 ### `MarkdownChunk`
 

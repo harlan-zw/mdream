@@ -103,8 +103,8 @@ externals: ['mdream']
 ## Migrating from v1
 
 Install `mdream@beta` for the Rust engine.
-This guide follows the repository API, including changes merged after `2.0.0-beta.1`.
-For an installed beta, use the README at its release tag.
+This guide describes the code in this repository, including changes merged after `2.0.0-beta.1`.
+If you use a published beta, read the README at its release tag.
 Node and edge conversions still return a string synchronously.
 The `format`, `clean`, and top-level plugin options remain available.
 Custom hook plugins use `@mdream/js`; follow its [migration guide](../js/README.md#migrating-from-v1).
@@ -209,8 +209,8 @@ htmlToMarkdown(html, {
 To include it in Markdown metadata, enable `frontmatter: true`.
 To read it separately, use `extraction: { title: element => console.log(element.textContent) }`.
 Review saved output or snapshots that relied on a leading title line.
-Link text also loses trailing spaces before empty elements, as fixed in [#318](https://github.com/harlan-zw/mdream/pull/318).
-Join streaming output before comparing snapshots, because individual output boundaries can change.
+The converter also removes trailing spaces from link text before empty elements. See [#318](https://github.com/harlan-zw/mdream/pull/318).
+Stream boundaries can change. Join the output before comparing snapshots.
 
 ### Markdown splitting
 
@@ -220,7 +220,7 @@ See [Splitter output and timing](../js/README.md#splitter-output-and-timing) for
 
 ### Direct native binding access
 
-The npm public API is the `exports` map, which does not expose `napi/`.
+The package's `exports` map defines its public API. It does not expose `napi/`.
 If you loaded the native binding by file path, replace these removed exports:
 
 | Removed native API | Public API |
@@ -928,7 +928,7 @@ chunks.forEach((chunk) => {
 
 The generator converts the whole document before yielding its first chunk.
 It keeps the converted Markdown in memory, but avoids collecting the chunk array.
-Stopping early skips the remaining chunk work, not HTML conversion.
+Stopping early skips the remaining chunk work. HTML conversion has already finished.
 See [Splitter output and timing](../js/README.md#splitter-output-and-timing) for migration details.
 
 ```ts
@@ -977,7 +977,7 @@ interface SplitterOptions {
   /** Split into individual lines. Default: false */
   returnEachLine?: boolean
 
-  /** Accepted, but chunks omit whitespace separators regardless of this value. */
+  /** The splitter drops whitespace between chunks for either value. */
   keepSeparator?: boolean
 
   // --- Standard options ---

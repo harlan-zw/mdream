@@ -27,8 +27,8 @@ The plugin depends on `mdream` and `@mdream/js` (installed automatically as tran
 
 ## Migrating from v1
 
-These docs follow the repository API, including changes merged after `2.0.0-beta.1`.
-For an installed beta, use the README at its release tag.
+These docs describe the code in this repository, including changes merged after `2.0.0-beta.1`.
+If you use a published beta, read the README at its release tag.
 
 - The plugin sets `enforce: 'post'` itself. The spread and the `enforce` line still work, but you can remove them:
 
@@ -49,12 +49,12 @@ For an installed beta, use the README at its release tag.
   + import { htmlToMarkdown, streamHtmlToMarkdown } from 'mdream'
   ```
 
-- `mdreamOptions` uses the Rust engine's option shape.
+- Pass the Rust engine's options in `mdreamOptions`.
   Unknown options now throw a `TypeError` during conversion.
   Replace `preset: 'minimal'` with `minimal: true`, and move declarative plugin options to the top level.
   See the [mdream migration guide](../mdream/README.md#migrating-from-v1) for all option changes.
 
-After upgrading, run your site build and check that the expected `.md` files appear beside the emitted HTML.
+After upgrading, build your site and check for `.md` files beside the emitted HTML.
 
 ## Setup
 
