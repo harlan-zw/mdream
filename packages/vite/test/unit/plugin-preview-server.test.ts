@@ -38,7 +38,7 @@ it.each(['default', 'relative', 'absolute'])('serves preview Markdown with a cus
     expect(await missing.text()).toBe('HTML content not found for /missing.md')
   }
   finally {
-    await new Promise<void>((resolve, reject) => server.httpServer.close(error => error ? reject(error) : resolve()))
+    await server.close()
     await rm(root, { recursive: true, force: true })
   }
 })
