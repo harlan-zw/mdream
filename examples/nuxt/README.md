@@ -1,14 +1,12 @@
 # @mdream/nuxt Example
 
-A minimal example demonstrating the `@mdream/nuxt` module functionality.
+This example serves Nuxt pages as Markdown with `@mdream/nuxt`.
 
 ## Features Demonstrated
 
-- ✨ HTML to Markdown conversion via `.md` extension
-- 🤖 Robots meta tag respect (noindex pages return 404)
-- 📄 Multiple page types (home, about, blog, noindex)
-- 🎨 Clean, responsive design
-- 📝 Real-world content examples
+- HTML to Markdown conversion through the `.md` extension.
+- HTTP 404 responses for pages with a `noindex` robots meta tag.
+- Home, about, blog, and noindex pages.
 
 ## Quick Start
 
@@ -34,12 +32,14 @@ pnpm generate
 Once the development server is running, test these URLs:
 
 ### ✅ Working Markdown Conversions
-- [http://localhost:3000/index.md](http://localhost:3000/index.md) - Home page as Markdown
-- [http://localhost:3000/about.md](http://localhost:3000/about.md) - About page as Markdown
-- [http://localhost:3000/blog.md](http://localhost:3000/blog.md) - Blog page as Markdown
+
+- [http://localhost:3000/index.md](http://localhost:3000/index.md): Home page as Markdown.
+- [http://localhost:3000/about.md](http://localhost:3000/about.md): About page as Markdown.
+- [http://localhost:3000/blog.md](http://localhost:3000/blog.md): Blog page as Markdown.
 
 ### ❌ Expected 404 (Noindex)
-- [http://localhost:3000/noindex.md](http://localhost:3000/noindex.md) - Should return 404
+
+- [http://localhost:3000/noindex.md](http://localhost:3000/noindex.md): Returns HTTP 404.
 
 ## Static Generation
 
@@ -84,6 +84,5 @@ export default defineNuxtConfig({
 ## What to Expect
 
 - **Development**: Markdown is generated dynamically on each request
-- **Production**: Static markdown files are generated during build
-- **Robots Compliance**: Pages with `noindex` meta tags return 404 for `.md` requests
-- **Clean Output**: Well-formatted markdown with proper headings, lists, and formatting
+- **Static generation**: `pnpm generate` writes Markdown files to `.output/public/`.
+- **Robots metadata**: Pages with `noindex` meta tags return HTTP 404 for `.md` requests.

@@ -117,7 +117,7 @@ jobs:
 
 ### Using Outputs
 
-Reference the action outputs in subsequent steps:
+Use the action outputs in later steps:
 
 ```yaml
 - name: Generate llms.txt artifacts
@@ -194,7 +194,9 @@ HTML file paths are converted to URL paths automatically:
 | `dist/docs/getting-started.html` | `/docs/getting-started` |
 | `dist/blog/2024/post.html` | `/blog/2024/post` |
 
-The `.html` extension is stripped. `index.html` files resolve to their parent directory path. The `origin` input is prepended to construct full URLs in the output.
+The action removes the `.html` extension.
+It maps `index.html` files to their parent directory path.
+It adds the `origin` input before each path to form a full URL.
 
 ### Metadata Extraction
 
@@ -203,7 +205,8 @@ Metadata is extracted from each HTML file in the following priority order:
 **Title:** `<title>` tag, then `<meta property="og:title">`.
 **Description:** `<meta name="description">`, then `<meta property="og:description">`.
 
-Descriptions are truncated to 100 characters in the `llms.txt` listing. Full metadata is embedded as YAML frontmatter in `llms-full.txt`.
+The `llms.txt` listing limits descriptions to 100 characters.
+The `llms-full.txt` file includes full metadata as YAML frontmatter.
 
 ## License
 

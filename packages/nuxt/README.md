@@ -236,7 +236,9 @@ export default defineNitroPlugin((nitroApp) => {
 
 **Type:** `(payload: MdreamLlmsTxtGeneratePayload) => void | Promise<void>`
 
-Modify `llms.txt` and `llms-full.txt` content before they are written to disk. Called once during prerendering after all routes have been processed. Mutate the payload properties directly.
+Modify `llms.txt` and `llms-full.txt` content before the module writes them to disk.
+The hook runs once during prerendering, after all routes have been processed.
+Mutate the payload properties directly.
 
 ```ts
 interface MdreamLlmsTxtGeneratePayload {
@@ -275,7 +277,10 @@ export default defineNuxtConfig({
 
 ## Programmatic Usage
 
-The module auto-imports `htmlToMarkdown` and `streamHtmlToMarkdown` for server routes, and the `useHtmlToMarkdown` composable for client components. Both inherit your module's `mdreamOptions` as defaults.
+The module auto-imports `htmlToMarkdown` and `streamHtmlToMarkdown` for server routes.
+These server utilities use your module's `mdreamOptions` as defaults.
+It also auto-imports `useHtmlToMarkdown` for client components.
+Pass options to the composable directly.
 
 ### Server Routes
 

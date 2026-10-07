@@ -580,7 +580,9 @@ const plugin = extractionPlugin({
 
 ### `withMinimalPreset(options?)`
 
-Returns explicit frontmatter, isolate, Tailwind, and filter plugins. It enables all cleanup rules by default. Pass `clean: false` to turn cleanup off.
+Returns frontmatter, isolate-main, Tailwind, and filter plugin instances.
+It enables all cleanup rules by default.
+To turn cleanup off, pass `clean: false`.
 
 ```typescript
 import { htmlToMarkdown } from '@mdream/js'
@@ -797,7 +799,9 @@ const result = await generateLlmsTxtArtifacts({
 
 ### `createLlmsTxtStream(options)`
 
-Creates a `WritableStream<ProcessedFile>` that generates llms.txt artifacts incrementally. Writes files to disk as pages are streamed in, never keeping full content in memory. Pages in llms.txt are sorted by URL path hierarchy on close.
+Creates a `WritableStream<ProcessedFile>` that generates llms.txt artifacts as pages arrive.
+It writes full page content to disk and keeps page metadata in memory.
+When the stream closes, it sorts the llms.txt listing by URL path hierarchy.
 
 ```typescript
 import { createLlmsTxtStream } from '@mdream/js/llms-txt'
