@@ -30,6 +30,9 @@ Bots can omit `.md` when their `Accept` header ranks `text/markdown` or `text/pl
 
 ## Migrating from v1
 
+These docs follow the repository API, including changes merged after `2.0.0-beta.1`.
+For an installed beta, use the README at its release tag.
+
 - The `mdreamOptions` default is now `{ minimal: true }`.
   The v1 default was `{ preset: 'minimal' }`. mdream never read `preset`, so the minimal preset did not apply.
 - Your `.md` output changes because the minimal preset now applies.
@@ -40,6 +43,26 @@ Bots can omit `.md` when their `Accept` header ranks `text/markdown` or `text/pl
 - `mdreamOptions.preset` is removed. If you set it, the build fails. Pass `mdreamOptions: { minimal: true }`.
 - The `cache` option is removed. It had no effect, so delete `cache.maxAge` and `cache.swr`.
 - An unknown key in `mdreamOptions` throws a `TypeError` when a page converts.
+
+`mdreamOptions` uses the Rust engine's option shape.
+For browser imports, filtering, and other option changes, see the [mdream migration guide](../mdream/README.md#migrating-from-v1).
+The client composable handles `mdream/browser` and its Promise return for you.
+Calls to `convert()` still return `Promise<string>`.
+
+To preserve the previous unfiltered output, disable the minimal preset explicitly:
+
+```ts
+export default defineNuxtConfig({
+  modules: ['@mdream/nuxt'],
+  mdream: {
+    mdreamOptions: { minimal: false },
+  },
+})
+```
+
+If a `mdream:config` hook sets `options.extraction`, the module still extracts page titles and descriptions.
+If your hook handles the same selector, both handlers run.
+Rebuild prerendered `.md` files and llms.txt artifacts, then review their titles and content before deploying.
 
 ## Configuration
 
@@ -137,6 +160,7 @@ Three Nitro runtime hooks (available in server plugins) and one Nuxt build hook 
 **Type:** `(options: MdreamOptions) => void | Promise<void>`
 
 Modify mdream options before HTML-to-Markdown conversion. Mutate the received object directly.
+The module adds its title and description extraction handlers after this hook, alongside your handlers.
 
 ```ts
 // server/plugins/mdream-config.ts

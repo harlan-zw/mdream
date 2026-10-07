@@ -6,7 +6,7 @@
 
 ## Installation
 
-The examples below follow the API from [#224](https://github.com/harlan-zw/mdream/pull/224).
+The examples below follow the repository API, including changes merged after `2.0.0-beta.1`.
 For `2.0.0-beta.1`, read the version note in [Migrating from v1](#migrating-from-v1) first.
 
 ```bash
@@ -37,7 +37,7 @@ yarn add @mdream/js@beta
 
 ## Migrating from v1
 
-This guide covers the API from [#224](https://github.com/harlan-zw/mdream/pull/224), merged after `2.0.0-beta.1`.
+This guide covers the repository API, including changes merged after `2.0.0-beta.1`.
 `@mdream/js@2.0.0-beta.1` uses the declarative plugin object, `hooks`, and `format` option.
 For that release's examples, use the [beta.1 README](https://github.com/harlan-zw/mdream/blob/v2.0.0-beta.1/packages/js/README.md).
 Match your installed version to its release notes before applying these changes.
@@ -162,6 +162,25 @@ To keep data for a node, use `node.context`. To keep data for one document, use 
 These are `inSingleQuote`, `inDoubleQuote`, `inBacktick`, `inRawTextQuoteAware`, and `lastCharWasBackslash`.
 `PluginContext` no longer has the fields of the removed readability plugin.
 
+### Splitter output and timing
+
+The splitter changes from [#316](https://github.com/harlan-zw/mdream/pull/316) also affect earlier v2 betas.
+Rebuild stored chunks and embeddings from the original HTML.
+Replace the stored chunk text and `metadata.loc` together before switching readers to the rebuilt index.
+Old chunk IDs and line ranges may identify different text after this upgrade.
+
+- Overlap starts at a word boundary. Chunk text and boundaries can change.
+- Code fences stay in one chunk, which can exceed `chunkSize`.
+- Chunks omit separators and leading or trailing blank lines, including with `clean()` or `withMinimalPreset()`.
+- With `stripHeaders: true`, `metadata.loc` covers the kept content lines, excluding the removed heading.
+- `htmlToMarkdownSplitChunksStream` converts the whole document before yielding its first chunk.
+
+The generator keeps the converted Markdown in memory.
+Stopping it early skips the remaining chunk work, but does not skip HTML conversion.
+If you need incremental conversion output, use `streamHtmlToMarkdown` instead.
+Its output pieces are not splitter chunks and have no chunk metadata.
+`keepSeparator` is accepted, but does not preserve whitespace between chunks.
+
 ### Cleanup
 
 The `clean` option now takes the result of `clean()` from `@mdream/js/clean`.
@@ -223,6 +242,8 @@ The parser also preserves emoji split between chunks and decodes byte chunks acr
 Review saved output for parser, whitespace, plugin, and cleanup fixes from
 [#242](https://github.com/harlan-zw/mdream/pull/242), [#243](https://github.com/harlan-zw/mdream/pull/243),
 and [#241](https://github.com/harlan-zw/mdream/pull/241).
+Link text also loses trailing spaces before empty elements, as fixed in [#318](https://github.com/harlan-zw/mdream/pull/318).
+Regenerate snapshots from reviewed output; do not depend on individual stream boundaries.
 
 ### Removed exports
 
@@ -659,7 +680,9 @@ for (const chunk of chunks) {
 
 ### `htmlToMarkdownSplitChunksStream(html, options?)`
 
-Generator version that yields chunks during processing for better memory efficiency.
+Converts the whole document, then yields chunks one at a time.
+It keeps the converted Markdown in memory, but avoids collecting the chunk array.
+See [Splitter output and timing](#splitter-output-and-timing) before upgrading a stored index.
 
 ```typescript
 import { htmlToMarkdownSplitChunksStream } from '@mdream/js/splitter'
@@ -680,10 +703,10 @@ Extends `EngineOptions` with chunking-specific settings.
 | `headersToSplitOn` | `(1 \| 2 \| 3 \| 4 \| 5 \| 6)[]` | `[2, 3, 4, 5, 6]` | Heading levels that start a new chunk, from 1 (`<h1>`) to 6 (`<h6>`). Another value throws a `TypeError`. |
 | `returnEachLine` | `boolean` | `false` | Return each non-empty line as an individual chunk |
 | `stripHeaders` | `boolean` | `true` | Strip header lines from chunk content |
-| `chunkSize` | `number` | `1000` | Maximum chunk size (measured by `lengthFunction`) |
+| `chunkSize` | `number` | `1000` | Target chunk size, measured by `lengthFunction`. Complete code fences can exceed it. |
 | `chunkOverlap` | `number` | `200` | Overlap between chunks for context preservation. Must be less than `chunkSize`. |
 | `lengthFunction` | `(text: string) => number` | `(text) => text.length` | Function to measure chunk length. Replace with a token counter for LLM applications. |
-| `keepSeparator` | `boolean` | `false` | Keep separators in the split chunks |
+| `keepSeparator` | `boolean` | `false` | Accepted, but chunks omit whitespace separators regardless of this value. |
 
 ### `MarkdownChunk`
 
@@ -692,7 +715,7 @@ Extends `EngineOptions` with chunking-specific settings.
 | `content` | `string` | The markdown content of the chunk |
 | `metadata.headers` | `Record<string, string> \| undefined` | Header hierarchy at this chunk position (e.g., `{ h2: 'API', h3: 'Methods' }`) |
 | `metadata.code` | `string \| undefined` | Code block language if chunk contains code |
-| `metadata.loc` | `{ lines: { from: number, to: number } } \| undefined` | Line number range in original document |
+| `metadata.loc` | `{ lines: { from: number, to: number } } \| undefined` | Inclusive, one-based line range in converted Markdown, excluding stripped headings. |
 
 ---
 

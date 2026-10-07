@@ -14,7 +14,27 @@
 > ☁️ The fastest HTML to markdown converter on GitHub. Optimized for LLMs and supports streaming.
 
 > [!TIP]
-> 🎉 **Try Mdream v2 beta!** Install `mdream@beta` to use the APIs in this README. Read the [v2 beta release notes](https://github.com/harlan-zw/mdream/releases/tag/v2.0.0-beta.1).
+> 🎉 **Try Mdream v2 beta!** Install `mdream@beta`. Use the docs at your installed release tag, or follow [Migrating to v2](#migrating-to-v2).
+
+## Migrating to v2
+
+These docs follow the repository API, including changes merged after `2.0.0-beta.1`.
+For an installed beta, use the docs at its release tag.
+The migration guides also cover upgrades from an earlier v2 beta.
+
+| Package | Migration guide |
+|---|---|
+| `mdream`, browser, edge, and CDN | [Imports, returns, options, and workers](./packages/mdream/README.md#migrating-from-v1) |
+| `@mdream/js` | [Formats, plugins, cleanup, and splitter changes](./packages/js/README.md#migrating-from-v1) |
+| `@mdream/crawl` | [Option renames and crawl defaults](./packages/crawl/README.md#migrating-from-v1) |
+| `@mdream/vite` | [Converter imports and plugin order](./packages/vite/README.md#migrating-from-v1) |
+| `@mdream/nuxt` | [Preset defaults and runtime options](./packages/nuxt/README.md#migrating-from-v1) |
+| `@mdream/action` | [Workflow steps and inputs](./packages/action/README.md#migrating-from-v1) |
+| Rust crate | [Types, features, and splitter options](./crates/core/README.md#migrating-from-v1) |
+
+Before switching production, convert representative pages with your real options and compare the output.
+If you use the JS splitter, rebuild stored chunks and embeddings before switching their readers.
+Set crawler `depth`, `maxPages`, and `artifacts` explicitly to control the first upgraded crawl.
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 

@@ -16,6 +16,10 @@ cargo install mdream --version 2.0.0-beta.1
 
 ## Usage
 
+The examples follow the repository API, including changes merged after `2.0.0-beta.1`.
+For an installed release, use the README at its release tag.
+In `2.0.0-beta.1`, the options type is still `HTMLToMarkdownOptions`.
+
 ### Library
 
 ```rust
@@ -70,7 +74,7 @@ A build with one format drops the code for the others. `OutputFormat` keeps only
 
 ## Migrating from v1
 
-Conversion functions keep their signatures. Update code that uses the items below.
+Conversion functions still take HTML and options. Update code that uses the items below.
 These changes also apply when you upgrade from `2.0.0-beta.1`.
 
 | v1 code | v2 code |
@@ -92,8 +96,12 @@ Each variant follows a cargo feature, and another crate in your build can turn a
 `MdreamResult`, `ExtractedElement`, `MarkdownChunk`, `ChunkMetadata`, and `ChunkLoc` are `#[non_exhaustive]`.
 You can read their fields. You cannot build them with a struct literal, and a pattern that destructures them needs `..`.
 
+Use a conversion function to obtain `MdreamResult`, or a splitter function to obtain chunks.
+If your own data model needs struct literals, define your own result type and copy the public fields.
+
 `<title>` text no longer appears in the body. Enable frontmatter or extraction to read it.
 Review snapshots that relied on the title as visible text.
+Link text also loses trailing spaces before empty elements, as fixed in [#318](https://github.com/harlan-zw/mdream/pull/318).
 For optional format builds, see [Output format features](#output-format-features).
 
 ## License

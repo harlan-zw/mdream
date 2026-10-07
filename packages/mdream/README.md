@@ -14,7 +14,7 @@
 Powering Cloudflare Browser Run's [/markdown](https://developers.cloudflare.com/browser-run/quick-actions/markdown-endpoint/) and [/crawl](https://developers.cloudflare.com/browser-run/quick-actions/crawl-endpoint/) endpoints.
 
 > [!TIP]
-> 🎉 **Try Mdream v2 beta!** Install `mdream@beta` to use the APIs in this README. Read the [v2 beta release notes](https://github.com/harlan-zw/mdream/releases/tag/v2.0.0-beta.1).
+> 🎉 **Try Mdream v2 beta!** Install `mdream@beta`. Use the docs at your installed release tag, or follow [Migrating from v1](#migrating-from-v1).
 
 ## Installation
 
@@ -103,10 +103,12 @@ externals: ['mdream']
 ## Migrating from v1
 
 Install `mdream@beta` for the Rust engine.
+This guide follows the repository API, including changes merged after `2.0.0-beta.1`.
+For an installed beta, use the README at its release tag.
 Node and edge conversions still return a string synchronously.
 The `format`, `clean`, and top-level plugin options remain available.
 Custom hook plugins use `@mdream/js`; follow its [migration guide](../js/README.md#migrating-from-v1).
-That guide covers the JS API from [#224](https://github.com/harlan-zw/mdream/pull/224), merged after `2.0.0-beta.1`.
+That guide also covers upgrades from an earlier v2 beta.
 
 ### Unknown options
 
@@ -207,6 +209,27 @@ htmlToMarkdown(html, {
 To include it in Markdown metadata, enable `frontmatter: true`.
 To read it separately, use `extraction: { title: element => console.log(element.textContent) }`.
 Review saved output or snapshots that relied on a leading title line.
+Link text also loses trailing spaces before empty elements, as fixed in [#318](https://github.com/harlan-zw/mdream/pull/318).
+Join streaming output before comparing snapshots, because individual output boundaries can change.
+
+### Markdown splitting
+
+The JS splitter changes its chunk text, line ranges, overlap, and first-chunk timing.
+If you store chunks or embeddings, rebuild them from the original HTML.
+See [Splitter output and timing](../js/README.md#splitter-output-and-timing) for the upgrade steps.
+
+### Direct native binding access
+
+The npm public API is the `exports` map, which does not expose `napi/`.
+If you loaded the native binding by file path, replace these removed exports:
+
+| Removed native API | Public API |
+|---|---|
+| `splitMarkdown`, `htmlToMarkdownChunks` | `htmlToMarkdownSplitChunks` from `@mdream/js/splitter`, with the original HTML input |
+| `htmlToMarkdownBytes` | Decode complete HTML bytes with `TextDecoder`, then call `htmlToMarkdown` from `mdream` |
+| `MarkdownStream.processChunkBytes` | `streamHtmlToMarkdown` from `mdream`, which still accepts byte streams |
+
+For direct Markdown splitting in Rust, use `mdream::splitter::split_markdown`.
 
 ## API Reference
 
@@ -903,7 +926,10 @@ chunks.forEach((chunk) => {
 
 ### Streaming Chunks (Memory Efficient)
 
-For large documents, use the generator version to process chunks one at a time:
+The generator converts the whole document before yielding its first chunk.
+It keeps the converted Markdown in memory, but avoids collecting the chunk array.
+Stopping early skips the remaining chunk work, not HTML conversion.
+See [Splitter output and timing](../js/README.md#splitter-output-and-timing) for migration details.
 
 ```ts
 import { htmlToMarkdownSplitChunksStream } from '@mdream/js/splitter'
@@ -931,7 +957,7 @@ interface SplitterOptions {
 
   // --- Size-based splitting ---
 
-  /** Maximum chunk size in characters. Default: 1000 */
+  /** Target chunk size in characters. Complete code fences can exceed it. Default: 1000 */
   chunkSize?: number
 
   /** Overlap between chunks for context preservation. Default: 200 */
@@ -951,7 +977,7 @@ interface SplitterOptions {
   /** Split into individual lines. Default: false */
   returnEachLine?: boolean
 
-  /** Keep separators in the split chunks. Default: false */
+  /** Accepted, but chunks omit whitespace separators regardless of this value. */
   keepSeparator?: boolean
 
   // --- Standard options ---
@@ -982,7 +1008,7 @@ interface MarkdownChunk {
     headers?: Record<string, string> // { h1: "Title", h2: "Section" }
     /** Code block language if chunk contains code */
     code?: string
-    /** Line number range in the original document */
+    /** Inclusive, one-based line range in converted Markdown, excluding stripped headings */
     loc?: {
       lines: { from: number, to: number }
     }
