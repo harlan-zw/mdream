@@ -110,7 +110,7 @@ These cases measure conversion and chunk-boundary scaling.
 
 Each benchmark reports these signals:
 
-- **Main-thread CPU** (`process.threadCpuUsage()`): Controls the timing verdict. It excludes background GC/JIT threads and descheduling. In this workload, it is about 3x steadier than process-wide CPU. A change is flagged past `max(5%, 2x combined RME)`.
+- **Main-thread CPU** (`process.threadCpuUsage()`): Controls the timing verdict. It excludes background GC/JIT threads and descheduling. A change is flagged past `max(5%, 2x combined RME)`.
 - **Wall time**: informational only; never drives the verdict.
 - **Allocated bytes per convert**: Controls the memory verdict. Measurement uses `--no-opt` to exclude allocations removed by JIT optimization. Escape analysis can remove several MiB per conversion. Its results depend on code size, Node.js version, and CPU architecture. The informational "allocated (JIT)" row reports the optimized result.
   Measurement pins the semi-space with `--min/max-semi-space-size=256` to prevent scavenging during a sample. The `heapUsed` delta then measures allocated bytes. Minimum samples reproduce within about 0.03% in this workload. Gate: `max(2%, 64 KiB)`.

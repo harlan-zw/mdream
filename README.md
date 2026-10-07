@@ -55,12 +55,12 @@ For your first v2 crawl, set `depth`, `maxPages`, and `artifacts` to limit pages
 - 🚀 Conversion speed: Compare Rust and JavaScript results in the [benchmarks](#benchmarks).
 - 🔍 Markdown output: GitHub Flavored Markdown with frontmatter, lists, tables, and code blocks.
 - 🌊 Streaming: Convert HTML as input arrives and join the output to match one-shot conversion.
-- ⚡ Bundles: The JS engine lets you import formats and plugins separately. Both engines have no runtime dependencies.
+- ⚡ Bundles: The JS engine lets you import formats and plugins separately.
 - ⚙️ Integrations: [CLI Crawler](#mdream-crawl), [Docker](#docker), [GitHub Actions](#github-actions-integration), and [Vite](#vite-integration).
 
 ## What is Mdream?
 
-Mdream converts HTML to Markdown for LLM input. Both conversion engines have no runtime dependencies.
+Mdream converts HTML to Markdown for LLM input.
 The [benchmarks](#benchmarks) compare conversion speed and token counts with other libraries.
 
 Use the integration packages to generate Markdown pages and `llms.txt` files from your site.
@@ -360,7 +360,7 @@ Match your installed version to its release notes before changing those calls.
 
 The `@mdream/crawl` package fetches site pages and converts them with `mdream`.
 
-- [llms.txt](https://llmstxt.org/): An index of crawled pages with titles and links.
+- [llms.txt](https://llmstxt.org/): An index of crawled pages with titles, descriptions, and links.
 - [llms-full.txt](https://llmstxt.org/): The full Markdown content of the crawled pages.
 - Individual Markdown files: One file per page, with paths that mirror the page URLs.
 

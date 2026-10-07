@@ -88,7 +88,9 @@ For a static page where you do not need JavaScript rendering, `mdream:beta-core`
 
 ### Batch: List of URLs from a File
 
-Run the container once per URL. Each command reuses `output/` and saves a Markdown file at the page's URL path:
+Run the container once per URL. Each command reuses `output/` and saves a Markdown file at the page's URL path.
+Each successful run replaces `output/llms.txt` and `output/llms-full.txt` with content for that URL.
+These two files do not accumulate pages from earlier runs:
 
 ```bash
 # urls.txt: one URL per line
@@ -134,7 +136,7 @@ Pass crawl options after the image name. The container forwards them to `mdream-
 
 The crawler writes these files to your output directory:
 
-- `llms.txt`: An index of pages with titles and links.
+- `llms.txt`: An index of pages with titles, descriptions, and links.
 - `llms-full.txt`: The full Markdown content of the pages.
 - Individual `.md` files at paths that mirror each page's URL, such as `wiki/Markdown.md`.
 
@@ -148,7 +150,7 @@ echo '<h1>Hello</h1>' | docker run -i --rm mdream-core
 ```
 
 Before building the `crawl` image, generate the native bindings in `packages/mdream/napi/`.
-Follow the `Setup napi native bindings` step in `.github/workflows/release-docker.yml`.
+Follow the `Setup napi native bindings for Docker build context` step in `.github/workflows/release-docker.yml`.
 The release workflow runs that step before `docker build`.
 
 ## Tags
