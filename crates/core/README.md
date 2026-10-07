@@ -5,13 +5,13 @@ HTML-to-Markdown converter with no dependencies and streaming support.
 ## Install
 
 ```sh
-cargo add mdream@2
+cargo add mdream
 ```
 
 Or as a CLI:
 
 ```sh
-cargo install mdream --version 2
+cargo install mdream
 ```
 
 ## Usage
