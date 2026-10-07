@@ -10,7 +10,7 @@
 export interface PerfBench {
   id: string
   name: string
-  kind: 'time' | 'alloc'
+  kind: 'time' | 'alloc' | 'count' | 'ratio'
   value: number
   rme?: number
   samples?: number[]
@@ -49,11 +49,15 @@ function fmtBytes(bytes: number): string {
 function fmtValue(b: PerfBench): string {
   if (b.kind === 'time')
     return `${b.value.toFixed(2)} ms`
+  if (b.kind === 'count')
+    return `${b.value} calls`
+  if (b.kind === 'ratio')
+    return `${b.value.toFixed(2)}×`
   return fmtBytes(b.value)
 }
 
 function fmtPct(pct: number): string {
-  return `${pct > 0 ? '+' : '-'}${Math.abs(pct).toFixed(1)}%`
+  return `${pct >= 0 ? '+' : '-'}${Math.abs(pct).toFixed(1)}%`
 }
 
 function classify(pr: PerfBench, base?: PerfBench): Row {
@@ -70,6 +74,12 @@ function classify(pr: PerfBench, base?: PerfBench): Row {
     const threshold = Math.max(TIME_FLOOR_PCT, 2 * uncertainty)
     significant = Math.abs(deltaPct) > threshold
   }
+  else if (pr.kind === 'count') {
+    significant = Math.abs(delta) > 8 && (base.value === 0 || Math.abs(deltaPct) > ALLOC_FLOOR_PCT)
+  }
+  else if (pr.kind === 'ratio') {
+    significant = false
+  }
   else {
     // a zero baseline has no meaningful percentage; fall back to the absolute floor
     significant = Math.abs(delta) > ALLOC_FLOOR_BYTES && (base.value === 0 || Math.abs(deltaPct) > ALLOC_FLOOR_PCT)
@@ -83,16 +93,20 @@ function classify(pr: PerfBench, base?: PerfBench): Row {
 function deltaCell(row: Row): string {
   if (row.status === 'new')
     return '🆕 new'
+  if (row.bench.kind === 'ratio')
+    return `ℹ️ ${fmtPct(row.deltaPct)}`
   // informational metrics (wall time) report their delta neutrally, never as slower/faster
   if (row.bench.informational)
-    return row.status === 'same' ? '~ noise' : `ℹ️ ${fmtPct(row.deltaPct)}`
+    return row.status === 'same' ? `${fmtPct(row.deltaPct)} (within noise)` : `ℹ️ ${fmtPct(row.deltaPct)}`
   if (row.status === 'same')
-    return '~ noise'
+    return `${fmtPct(row.deltaPct)} (within noise)`
   const emoji = row.status === 'slower' ? '🔴' : '🟢'
   if (row.bench.kind === 'time')
     return `${emoji} ${fmtPct(row.deltaPct)}`
   const delta = row.bench.value - (row.base?.value ?? 0)
-  return `${emoji} ${delta > 0 ? '+' : '-'}${fmtBytes(Math.abs(delta))} (${fmtPct(row.deltaPct)})`
+  const amount = row.bench.kind === 'count' ? `${Math.abs(delta)} calls` : fmtBytes(Math.abs(delta))
+  const percent = row.base?.value === 0 ? '' : ` (${fmtPct(row.deltaPct)})`
+  return `${emoji} ${delta > 0 ? '+' : '-'}${amount}${percent}`
 }
 
 export function renderPerfReport(base: PerfRun | null, pr: PerfRun): string {
