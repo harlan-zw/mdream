@@ -80,3 +80,5 @@ crates/edge/pkg/
 crates/edge/pkg-bundler/
 crates/edge/test-worker/wasm/
 perf.data
+
+bench/rust-perf/target/

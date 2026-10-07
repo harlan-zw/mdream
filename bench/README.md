@@ -277,3 +277,42 @@ If you believe these benchmarks are unfair or misleading:
 1. [Open an issue](https://github.com/harlan-zw/mdream/issues) with specific concerns
 2. Suggest alternative configurations or fixtures
 3. Submit a PR with improved methodology
+
+## Rust CI workloads
+
+The shared suite compares native release builds and WASM using identical fixtures and options.
+It covers cleaned links, entities, inline code, Tailwind attributes, Unicode, real pages, streaming, and Markdown splitting.
+Native splitting runs separately because the edge binding does not export it.
+
+Build each revision with the PR's harness:
+
+```bash
+node bench/rust-perf/build.ts /path/to/base /tmp/base-dist/rust-perf
+node bench/rust-perf/build.ts "$PWD" bench/bundle/dist/rust-perf
+node --expose-gc bench/rust-perf/run.ts /tmp/base-dist bench/bundle/dist /tmp/rust-perf-results
+```
+
+Both dist directories need their revision's canonical WASM build under `rust/`.
+Use `--native-only` to run without WASM. Use `--full` to include all five real-page fixtures.
+`RUST_PERF_FILTER=cleaned-links` selects matching workload IDs. `RUST_PERF_SAMPLES` controls paired batches, with a default of 12.
+The build command accepts an optional fourth argument identifying an archived source revision.
+
+Run on Linux with Node.js 24 or newer and `taskset` available.
+The runner pins both revisions to the same permitted CPU.
+
+CPU runs use uninstrumented binaries. Separate binaries count successful allocation calls, reallocation calls, requested bytes, and peak live bytes.
+Requested bytes include the full requested size of each reallocation. Peak live bytes exclude prepared fixtures.
+Required option construction, output creation, and output disposal belong to the measured conversion.
+WASM reports linear memory capacity separately. That value does not measure allocation churn.
+
+The runner warms both revisions and alternates batch order. CPU time excludes process startup and fixture preparation.
+Verification compares outputs, metadata, and native truncation flags before timing. It also compares native and WASM output.
+Allocation runs must agree across repeated measurements. Any mismatch fails the job.
+
+Scaling cases use N, 2N, and 4N input sizes with fixed options and chunk widths.
+The report shows CPU per MiB and doubling ratios separately from regression verdicts. Ordered-list cases vary item count and attribute length independently.
+Every timing delta remains visible, including changes inside the noise threshold.
+Raw samples, fixture digests, build identities, verification digests, and inputs are uploaded as the `rust-performance` artifact.
+
+To validate benchmark sensitivity, run selected cases against a performance PR's parent and merged revision.
+Use identical-build comparisons to check noise before changing thresholds.
