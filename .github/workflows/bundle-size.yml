@@ -94,7 +94,8 @@ jobs:
           pnpm test:bundle-size:rust
           pnpm test:bundle-size:rust-native
           node bench/rust-perf/build.ts "$PWD" bench/bundle/dist/rust-perf
-          cargo test --locked --manifest-path bench/rust-perf/Cargo.toml --features alloc
+          # The generated lockfile matches this revision's core version.
+          cargo test --locked --manifest-path bench/bundle/dist/rust-perf/harness/Cargo.toml --features alloc
 
       - name: Run shared Rust benchmarks
         run: |
