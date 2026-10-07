@@ -13,8 +13,8 @@ license.workspace = true
 crate-type = [ "cdylib" ]
 
 [dependencies]
-napi = { version = "3.14.0", default-features = false, features = [ "napi9" ] }
-napi-derive = "3.6.10"
+napi = { version = "3.14.2", default-features = false, features = [ "napi9" ] }
+napi-derive = "3.6.12"
 mdream = { path = "../core" }
 
 [lints]

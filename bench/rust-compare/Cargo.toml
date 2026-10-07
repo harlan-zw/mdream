@@ -12,7 +12,7 @@ mdream = { path = "../../crates/core" }
 htmd = "0.5.5"
 html2md = "0.2.17"
 html2md-rs = "0.12.2"
-mdka = "3.2.0"
+mdka = "3.3.0"
 html_to_markdown = "0.1.0"
 
 [profile.release]

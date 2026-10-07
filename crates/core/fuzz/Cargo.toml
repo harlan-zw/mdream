@@ -8,7 +8,7 @@ edition = "2024"
 
 [dependencies]
 libfuzzer-sys = "0.4.13"
-arbitrary = { version = "1.4.2", features = [ "derive" ] }
+arbitrary = { version = "1.5.0", features = [ "derive" ] }
 
 [dependencies.mdream]
 path = ".."
