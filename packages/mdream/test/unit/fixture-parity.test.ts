@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { ReadableStream } from 'node:stream/web'
+import { htmlToMarkdown as jsConvert, streamHtmlToMarkdown as jsStream } from '@mdream/js'
+import { withMinimalPreset } from '@mdream/js/preset/minimal'
+import { htmlToMarkdown as rustConvert, streamHtmlToMarkdown as rustStream } from 'mdream'
 import { describe, expect, it } from 'vitest'
 import { engines, resolveEngine } from '../utils/engines'
 
@@ -61,7 +64,17 @@ for (const { name: engineName, engine: engineThunk } of engines) {
 
 describe('cross-engine parity', () => {
   for (const { name: fixtureName, label } of fixtures) {
-    it(`${label} - JS and Rust produce equivalent output`, async () => {
+    it(`${label} - minimal conversion and streaming produce identical output`, async () => {
+      const html = readFileSync(resolve(fixturesDir, fixtureName), 'utf-8')
+      const jsOptions = withMinimalPreset()
+      const rustOptions = { minimal: true }
+      const expected = rustConvert(html, rustOptions)
+      expect(jsConvert(html, jsOptions)).toBe(expected)
+      expect(await collectStream(jsStream(stringToStream(html), jsOptions))).toBe(expected)
+      expect(await collectStream(rustStream(stringToStream(html), rustOptions))).toBe(expected)
+    })
+
+    it(`${label} - JS and Rust produce identical output`, async () => {
       const html = readFileSync(resolve(fixturesDir, fixtureName), 'utf-8')
       const [jsEngine, rustEngine] = await Promise.all([
         resolveEngine(engines[0].engine),
@@ -69,13 +82,9 @@ describe('cross-engine parity', () => {
       ])
       const jsResult = jsEngine.htmlToMarkdown(html)
       const rustResult = rustEngine.htmlToMarkdown(html)
-      // Both engines should produce non-empty output
-      expect(jsResult.length).toBeGreaterThan(0)
-      expect(rustResult.length).toBeGreaterThan(0)
-      // Engines should produce near-identical output (within 1%)
-      const ratio = rustResult.length / jsResult.length
-      expect(ratio).toBeGreaterThan(0.99)
-      expect(ratio).toBeLessThan(1.01)
+      expect(rustResult).toBe(jsResult)
+      expect(await collectStream(jsEngine.streamHtmlToMarkdown(stringToStream(html)))).toBe(jsResult)
+      expect(await collectStream(rustEngine.streamHtmlToMarkdown(stringToStream(html)))).toBe(jsResult)
     })
 
     it(`${label} - heading structure matches across engines`, async () => {

@@ -1232,6 +1232,8 @@ function consumeGfmAction(action: GfmAction, state: MarkdownState, lifecycle: Gf
       if (state.preFenceOwnerDepth !== depth)
         return undefined
       state.preFenceOwnerDepth = 0
+      // The fence owns the trailing code whitespace. Later boundaries must not trim it.
+      state.lastTextNode = undefined
       const indent = state.listIndent
       const output = (state.depthMap[TAG_LI] || 0) > 0
         ? `\n${indent}${MARKDOWN_CODE_BLOCK}\n\n${indent}`
@@ -2171,17 +2173,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // closes. Measure the trailing-newline run from the fence's own tail (#148,
     // parity with Rust core). Scoped to the fence: other block closers
     // (raw-HTML </dd>/</dl>, etc.) intentionally glue.
-    let effectiveLastNewLines = lastNewLines
+    let measureFromOutputTail = false
     if (eventType === NodeEventExit && output) {
       for (let i = output.length - 1; i >= 0; i--) {
         const frag = output[i]
         if (frag) {
-          if (frag.endsWith('```') || frag.endsWith('~~~'))
-            effectiveLastNewLines = 0
+          measureFromOutputTail = frag.endsWith('```') || frag.endsWith('~~~')
           break
         }
       }
     }
+    const effectiveLastNewLines = measureFromOutputTail ? 0 : lastNewLines
     let newLines = Math.max(0, configuredNewLines - effectiveLastNewLines)
     if (newLines > 0 && buff.length === 0 && !hasYieldedContent)
       newLines = 0
@@ -2223,14 +2225,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
 
       // Add newlines
-      const newlinesStr = '\n'.repeat(newLines)
       // Trim only whitespace
       if (lastChar === ' ' && buff?.length) {
         trimTrailingSpaces(buff)
         // This source whitespace was consumed by the block boundary; do not
         // let its state leak into a later inline event and trim that output.
         state.lastTextNode = undefined
+        // Continuation indentation can hide a separator already written by a fence.
+        if (!measureFromOutputTail)
+          newLines = Math.max(0, configuredNewLines - newlineRunBefore(buff, buff.length))
       }
+      const newlinesStr = '\n'.repeat(newLines)
 
       if (eventType === NodeEventEnter) {
         if (output) {

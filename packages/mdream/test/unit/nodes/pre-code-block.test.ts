@@ -145,6 +145,23 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
     expect(htmlToMarkdown('<ul><li>item<pre>code\nblock</pre></li></ul>', { engine })).toBe('- item\n\n  ```\n  code\n  block\n  ```')
   })
 
+  it.each([
+    ['<pre>line\n</pre>', 'line\n\n'],
+    ['<pre><code>line\n</code></pre>', 'line\n'],
+    ['<pre><code>line</code></pre>', 'line\n'],
+  ])('separates list items after %s without moving code whitespace', async (pre, content) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<ul><li><p>item</p>${pre}\n    </li><li>next</li></ul><p>after</p>`
+    const expected = `- item\n\n  \`\`\`\n  ${content}  \`\`\`\n\n- next\n\nafter`
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let split = 1; split < html.length; split++) {
+      expect(await collect(streamHtmlToMarkdown(
+        chunkedStream([html.slice(0, split), html.slice(split)]),
+        { engine },
+      )), `split at ${split}`).toBe(expected)
+    }
+  })
+
   it('fences a bare <pre> split across stream chunks', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const chunks = ['<p>A</p><pre>line one\n', 'line two</pre><p>B</p>']
