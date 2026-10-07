@@ -2,6 +2,20 @@
 
 GitHub Action that processes prerendered HTML files into `llms.txt` artifacts for CI/CD workflows.
 
+## Migrating from v1
+
+The repository no longer provides `action.yml`.
+Replace `uses: harlan-zw/mdream@...` with the [npm step](#setup) below.
+Set up Node.js 24, then run the step after your site build.
+Keep the step's `id` so later `steps.<id>.outputs` references still work.
+Move each `with` input to an `INPUT_` environment variable.
+For example, `site-name` becomes `INPUT_SITE-NAME`.
+Remove `chunk-size` or `INPUT_CHUNK-SIZE`; it had no effect.
+The [output names](#outputs) remain the same.
+
+These docs describe the code in this repository, including changes merged after `2.0.0-beta.1`.
+If you use a published beta, read the README at its release tag.
+
 ## Setup
 
 Run the published v2 beta package after your site build completes. Use Node.js 24 on the runner.
