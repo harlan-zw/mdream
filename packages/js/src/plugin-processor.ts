@@ -25,7 +25,8 @@ export function processPluginsForEvent(
     // when descendant nodes check their ancestors in beforeNodeProcess.
     if (event.node.type === ELEMENT_NODE && event.type === NodeEventEnter) {
       const element = event.node as ElementNode
-      for (const plugin of plugins) {
+      for (let index = 0; index < plugins.length; index++) {
+        const plugin = plugins[index]!
         if (plugin.processAttributes) {
           plugin.processAttributes(element, state)
         }
@@ -33,7 +34,8 @@ export function processPluginsForEvent(
     }
 
     let shouldSkip = false
-    for (const plugin of plugins) {
+    for (let index = 0; index < plugins.length; index++) {
+      const plugin = plugins[index]!
       const res = plugin.beforeNodeProcess?.(event, state)
       if (typeof res === 'object') {
         // Last plugin wins - allows overriding skip decisions
@@ -50,24 +52,26 @@ export function processPluginsForEvent(
 
       // Collect plugin hook outputs
       const fn = event.type === NodeEventEnter ? 'onNodeEnter' : 'onNodeExit'
-      const pluginOutputs: string[] = []
-      for (const plugin of plugins) {
+      let pluginOutputs: string[] | undefined
+      for (let index = 0; index < plugins.length; index++) {
+        const plugin = plugins[index]!
         if (plugin[fn]) {
           const result = plugin[fn]!(element, state)
           if (result) {
-            pluginOutputs.push(result)
+            ;(pluginOutputs ??= []).push(result)
           }
         }
       }
 
       // Store plugin outputs on the element for processing
-      if (pluginOutputs.length > 0) {
-        element.pluginOutput = [...element.pluginOutput || [], ...pluginOutputs]
+      if (pluginOutputs) {
+        element.pluginOutput = element.pluginOutput ? element.pluginOutput.concat(pluginOutputs) : pluginOutputs
       }
     }
     else if (event.node.type === TEXT_NODE && event.type === NodeEventEnter) {
       const textNode = event.node as TextNode
-      for (const plugin of plugins) {
+      for (let index = 0; index < plugins.length; index++) {
+        const plugin = plugins[index]!
         if (plugin.processTextNode) {
           const result = plugin.processTextNode(textNode, state)
           if (result) {

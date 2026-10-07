@@ -8,6 +8,33 @@ import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText, streamHtmlToText } from '../../src/text'
 
 describe('stream callbacks', () => {
+  it('keeps multiple plugin outputs in order across enter and exit hooks', async () => {
+    const plugins = ['A', 'B', 'C'].map(label => createPlugin({
+      onNodeEnter(node) {
+        if (node.name === 'span')
+          return `${label}(`
+      },
+      onNodeExit(node) {
+        if (node.name === 'span')
+          return `)${label}`
+      },
+    }))
+    const html = '<span>text</span><span>next</span>'
+    const expected = 'A(B(C(text)A)B)C A(B(C(next)A)B)C'
+    expect(htmlToMarkdown(html, { plugins })).toBe(expected)
+    const input = new ReadableStream<string>({
+      start(controller) {
+        for (const character of html)
+          controller.enqueue(character)
+        controller.close()
+      },
+    })
+    let output = ''
+    for await (const chunk of streamHtmlToMarkdown(input, { plugins }))
+      output += chunk
+    expect(output).toBe(expected)
+  })
+
   it.each([
     ['markdown', htmlToMarkdown, streamHtmlToMarkdown],
     ['text', htmlToText, streamHtmlToText],
