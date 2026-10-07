@@ -37,6 +37,8 @@ yarn add @mdream/js
 
 ## Migrating from v1
 
+Using a coding agent? Give it the [v1 to v2 migration prompt](https://github.com/harlan-zw/mdream/blob/main/MIGRATION_PROMPT.md).
+
 This guide covers v2.
 `@mdream/js@2.0.0-beta.1` uses the declarative plugin object, `hooks`, and `format` option.
 For that release's examples, use the [beta.1 README](https://github.com/harlan-zw/mdream/blob/v2.0.0-beta.1/packages/js/README.md).

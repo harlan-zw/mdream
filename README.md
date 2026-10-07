@@ -489,6 +489,9 @@ Benchmarks run on real-world HTML using [Vitest bench](https://vitest.dev/guide/
 
 ## Migrating to v2
 
+Using a coding agent? Give it the [v1 to v2 migration prompt](./MIGRATION_PROMPT.md).
+The prompt covers package detection, code changes, and verification.
+
 These docs cover v2.
 For an earlier release, read the docs at its release tag.
 The migration guides also cover upgrades from an earlier v2 beta.

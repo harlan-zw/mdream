@@ -102,6 +102,8 @@ externals: ['mdream']
 
 ## Migrating from v1
 
+Using a coding agent? Give it the [v1 to v2 migration prompt](https://github.com/harlan-zw/mdream/blob/main/MIGRATION_PROMPT.md).
+
 Install `mdream` for the Rust engine.
 This guide covers v2.
 For an earlier release, read the README at its release tag.
