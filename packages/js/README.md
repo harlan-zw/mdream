@@ -6,18 +6,18 @@
 
 ## Installation
 
-These examples use the code in this repository, including changes merged after `2.0.0-beta.1`.
+These examples use v2.
 For `2.0.0-beta.1`, read the version note in [Migrating from v1](#migrating-from-v1) first.
 
 ```bash
 # pnpm
-pnpm add @mdream/js@beta
+pnpm add @mdream/js
 
 # npm
-npm install @mdream/js@beta
+npm install @mdream/js
 
 # yarn
-yarn add @mdream/js@beta
+yarn add @mdream/js
 ```
 
 ## Entry Points
@@ -37,10 +37,9 @@ yarn add @mdream/js@beta
 
 ## Migrating from v1
 
-This guide describes the code in this repository, including changes merged after `2.0.0-beta.1`.
+This guide covers v2.
 `@mdream/js@2.0.0-beta.1` uses the declarative plugin object, `hooks`, and `format` option.
 For that release's examples, use the [beta.1 README](https://github.com/harlan-zw/mdream/blob/v2.0.0-beta.1/packages/js/README.md).
-Match your installed version to its release notes before applying these changes.
 
 In v2, each output format and each plugin is a separate import.
 Your bundle contains only the code that you import.
@@ -868,19 +867,19 @@ Reads HTML from stdin and writes the selected format to stdout.
 
 ```bash
 # Basic conversion
-curl -s https://example.com | npx @mdream/js@beta
+curl -s https://example.com | npx @mdream/js
 
 # With origin URL for resolving relative paths
-curl -s https://example.com | npx @mdream/js@beta --origin https://example.com
+curl -s https://example.com | npx @mdream/js --origin https://example.com
 
 # With minimal preset
-curl -s https://example.com | npx @mdream/js@beta --origin https://example.com --preset minimal
+curl -s https://example.com | npx @mdream/js --origin https://example.com --preset minimal
 
 # Plain text output
-curl -s https://example.com | npx @mdream/js@beta --format text
+curl -s https://example.com | npx @mdream/js --format text
 
 # HTML output
-curl -s https://example.com | npx @mdream/js@beta --format html
+curl -s https://example.com | npx @mdream/js --format html
 ```
 
 ### CLI Options
@@ -1059,8 +1058,8 @@ import {
 ```
 
 
-[npm-version-src]: https://img.shields.io/npm/v/@mdream/js/beta.svg?style=flat&colorA=18181B&colorB=4C9BE0
-[npm-version-href]: https://npmjs.com/package/@mdream/js/v/beta
+[npm-version-src]: https://img.shields.io/npm/v/@mdream/js.svg?style=flat&colorA=18181B&colorB=4C9BE0
+[npm-version-href]: https://npmjs.com/package/@mdream/js
 [npm-downloads-src]: https://img.shields.io/npm/dm/@mdream/js.svg?style=flat&colorA=18181B&colorB=4C9BE0
 [npm-downloads-href]: https://npm.chart.dev/@mdream/js
 [license-src]: https://img.shields.io/npm/l/@mdream/js.svg?style=flat&colorA=18181B&colorB=4C9BE0

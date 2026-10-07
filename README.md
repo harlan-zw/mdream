@@ -1,6 +1,6 @@
 <h1>mdream</h1>
 
-[![npm beta version](https://img.shields.io/npm/v/mdream/beta?color=yellow)](https://npmjs.com/package/mdream/v/beta)
+[![npm version](https://img.shields.io/npm/v/mdream?color=yellow)](https://npmjs.com/package/mdream)
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 <a href="https://skilld.dev/gh/harlan-zw/mdream">
@@ -14,7 +14,7 @@
 > ☁️ Convert HTML to Markdown for LLMs, with Rust and JavaScript engines and streaming support.
 
 > [!TIP]
-> 🎉 **Try Mdream v2 beta!** Install `mdream@beta`. Use the docs at your installed release tag, or follow [Migrating to v2](#migrating-to-v2).
+> 🎉 **Upgrading to Mdream v2?** Follow [Migrating to v2](#migrating-to-v2).
 
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
@@ -65,7 +65,7 @@ Choose a package for your runtime or build tool:
 Pipe any HTML into `mdream` to get clean, LLM-ready Markdown:
 
 ```bash
-curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream@beta --preset minimal
+curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream --preset minimal
 ```
 
 <details>
@@ -75,7 +75,7 @@ Fetch the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown), the
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
+ | npx mdream --origin https://en.wikipedia.org --preset minimal \
   | tee streaming.md
 ```
 
@@ -85,7 +85,7 @@ Want to make it look nice? Use [glow](https://github.com/charmbracelet/glow).
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
- | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
+ | npx mdream --origin https://en.wikipedia.org --preset minimal \
    | glow
 ```
 
@@ -98,7 +98,7 @@ Convert a local HTML file. The `tee` command saves the Markdown and displays it 
 
 ```bash
 cat index.html \
- | npx mdream@beta --preset minimal \
+ | npx mdream --preset minimal \
   | tee streaming.md
 ```
 
@@ -106,7 +106,7 @@ Want to make it look nice? Use [glow](https://github.com/charmbracelet/glow).
 
 ```bash
 cat index.html \
- | npx mdream@beta --preset minimal \
+ | npx mdream --preset minimal \
   | glow
 ```
 
@@ -119,22 +119,22 @@ Pipe web content straight into Claude, GPT, or any LLM CLI:
 
 ```bash
 # Single page → Claude
-curl -s https://react.dev/learn | npx mdream@beta --origin https://react.dev --preset minimal \
+curl -s https://react.dev/learn | npx mdream --origin https://react.dev --preset minimal \
   | claude -p "explain the key concepts on this page"
 
 # Crawl entire docs → summarize
-npx @mdream/crawl@beta "https://nuxt.com/docs/getting-started/**"
+npx @mdream/crawl "https://nuxt.com/docs/getting-started/**"
 cat output/llms-full.txt | claude -p "write a getting started guide from these docs"
 
 # Compare two frameworks
-diff <(curl -s https://vuejs.org/guide/introduction | npx mdream@beta --preset minimal) \
-     <(curl -s https://react.dev/learn | npx mdream@beta --preset minimal) \
+diff <(curl -s https://vuejs.org/guide/introduction | npx mdream --preset minimal) \
+     <(curl -s https://react.dev/learn | npx mdream --preset minimal) \
   | claude -p "compare these two frameworks based on their intro docs"
 
 # JavaScript/SPA sites (React, Vue, Angular)
-npm install @mdream/crawl@beta crawlee playwright
+npm install @mdream/crawl crawlee playwright
 npx playwright install chromium
-npx @mdream/crawl@beta https://spa-site.com --driver playwright
+npx @mdream/crawl https://spa-site.com --driver playwright
 cat output/llms-full.txt | claude -p "what features does this app have"
 ```
 </details>
@@ -146,12 +146,12 @@ Generate llms.txt to help AI tools understand your site:
 
 ```bash
 # Static sites
-npx @mdream/crawl@beta https://yoursite.com
+npx @mdream/crawl https://yoursite.com
 
 # JavaScript/SPA sites (React, Vue, Angular)
-npm install @mdream/crawl@beta crawlee playwright
+npm install @mdream/crawl crawlee playwright
 npx playwright install chromium
-npx @mdream/crawl@beta https://spa-site.com --driver playwright
+npx @mdream/crawl https://spa-site.com --driver playwright
 ```
 
 Outputs:
@@ -164,10 +164,10 @@ Outputs:
 <summary><b>🗄️ Build RAG Systems from Websites</b></summary>
 
 Crawl websites and generate embeddings for vector databases.
-Install the beta packages and [configure an AI Gateway API key](https://ai-sdk.dev/providers/ai-sdk-providers/ai-gateway):
+Install the packages and [configure an AI Gateway API key](https://ai-sdk.dev/providers/ai-sdk-providers/ai-gateway):
 
 ```bash
-pnpm add @mdream/crawl@beta @mdream/js@beta ai
+pnpm add @mdream/crawl @mdream/js ai
 export AI_GATEWAY_API_KEY="your-api-key"
 ```
 
@@ -255,7 +255,7 @@ htmlToMarkdown(html, {
 ### Installation
 
 ```bash
-pnpm add mdream@beta
+pnpm add mdream
 ```
 
 > [!TIP]
@@ -330,9 +330,8 @@ Use the guide for each package:
 - [Rust crate](./crates/core/README.md#migrating-from-v1): renamed options, private parser types, and splitter heading levels.
 - [`@mdream/crawl`](./packages/crawl/README.md#migrating-from-v1): renamed options, shared defaults, and the `mdream-crawl` command.
 
-The JS guide includes changes merged after `2.0.0-beta.1`.
-That release uses the declarative JS plugin object and `format` option.
-Match your installed version to its release notes before changing those calls.
+The JS guide also covers upgrades from `2.0.0-beta.1`.
+That release used a different plugin API and `format` option.
 
 ## Mdream Crawl
 
@@ -348,13 +347,13 @@ The `@mdream/crawl` package fetches site pages and converts them with `mdream`.
 
 ```sh
 # Interactive
-npx @mdream/crawl@beta
+npx @mdream/crawl
 # Simple
-npx @mdream/crawl@beta https://harlanzw.com
+npx @mdream/crawl https://harlanzw.com
 # Glob patterns
-npx @mdream/crawl@beta "https://nuxt.com/docs/getting-started/**"
+npx @mdream/crawl "https://nuxt.com/docs/getting-started/**"
 # Get help
-npx @mdream/crawl@beta -h
+npx @mdream/crawl -h
 ```
 
 ## Docker
@@ -363,17 +362,17 @@ Two images for two jobs:
 
 ```bash
 # core — convert HTML to Markdown (native Rust binary, ~600KB, no Node)
-curl -s https://example.com | docker run -i --rm harlanzw/mdream:beta-core --origin https://example.com
+curl -s https://example.com | docker run -i --rm harlanzw/mdream:core --origin https://example.com
 
 # crawl — crawl a site / generate llms.txt (Playwright Chrome included)
-docker run harlanzw/mdream:beta-crawl "https://site.com/docs/**"
-docker run harlanzw/mdream:beta-crawl spa-site.com --driver playwright
+docker run harlanzw/mdream:crawl "https://site.com/docs/**"
+docker run harlanzw/mdream:crawl spa-site.com --driver playwright
 ```
 
 **Available Images** (Docker Hub `harlanzw/mdream`, also on `ghcr.io/harlan-zw/mdream`):
-- `:beta-core` - v2 beta native Rust HTML-to-Markdown converter (stdin → stdout)
-- `:beta-crawl` - v2 beta site crawler with Playwright Chrome
-- `:beta` - alias of `:beta-crawl`
+- `:core` - v2 native Rust HTML-to-Markdown converter (stdin → stdout)
+- `:crawl` - v2 site crawler with Playwright Chrome
+- `:latest` - alias of `:crawl`
 
 See [DOCKER.md](./DOCKER.md) for complete usage, configuration, and building instructions.
 
@@ -382,7 +381,7 @@ See [DOCKER.md](./DOCKER.md) for complete usage, configuration, and building ins
 ### Installation
 
 ```bash
-pnpm add @mdream/action@beta
+pnpm add @mdream/action
 ```
 
 See the [GitHub Actions README](./packages/action/README.md) for usage and configuration.
@@ -392,7 +391,7 @@ See the [GitHub Actions README](./packages/action/README.md) for usage and confi
 ### Installation
 
 ```bash
-pnpm install @mdream/vite@beta
+pnpm install @mdream/vite
 ```
 
 See the [Vite README](./packages/vite/README.md) for usage and configuration.
@@ -402,7 +401,7 @@ See the [Vite README](./packages/vite/README.md) for usage and configuration.
 ### Installation
 
 ```bash
-pnpm add @mdream/nuxt@beta
+pnpm add @mdream/nuxt
 ```
 
 See the [Nuxt Module README](./packages/nuxt/README.md) for usage and configuration.
@@ -414,7 +413,7 @@ The script includes the WASM binary and initializes it on load.
 Like `mdream/browser`, `htmlToMarkdown()` returns `Promise<string>`:
 
 ```html
-<script src="https://unpkg.com/mdream@beta/dist/iife.js"></script>
+<script src="https://unpkg.com/mdream/dist/iife.js"></script>
 <script>
   window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
     .then(markdown => console.log(markdown)) // # Hello\n\nWorld
@@ -422,8 +421,8 @@ Like `mdream/browser`, `htmlToMarkdown()` returns `Promise<string>`:
 ```
 
 **CDN Options:**
-- **unpkg**: `https://unpkg.com/mdream@beta/dist/iife.js`
-- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream@beta/dist/iife.js`
+- **unpkg**: `https://unpkg.com/mdream/dist/iife.js`
+- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/iife.js`
 
 ## Benchmarks
 
@@ -490,8 +489,8 @@ Benchmarks run on real-world HTML using [Vitest bench](https://vitest.dev/guide/
 
 ## Migrating to v2
 
-These docs describe the code in this repository, including changes merged after `2.0.0-beta.1`.
-If you use a published beta, read the docs at its release tag.
+These docs cover v2.
+For an earlier release, read the docs at its release tag.
 The migration guides also cover upgrades from an earlier v2 beta.
 
 | Package | Migration guide |

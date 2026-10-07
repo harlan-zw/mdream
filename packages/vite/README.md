@@ -10,13 +10,13 @@ Vite plugin for HTML to Markdown conversion. Operates at dev time, build time, a
 
 ```bash
 # pnpm
-pnpm add @mdream/vite@beta
+pnpm add @mdream/vite
 
 # npm
-npm install @mdream/vite@beta
+npm install @mdream/vite
 
 # yarn
-yarn add @mdream/vite@beta
+yarn add @mdream/vite
 ```
 
 ### Peer Dependencies
@@ -27,8 +27,8 @@ The plugin depends on `mdream` and `@mdream/js` (installed automatically as tran
 
 ## Migrating from v1
 
-These docs describe the code in this repository, including changes merged after `2.0.0-beta.1`.
-If you use a published beta, read the README at its release tag.
+These docs cover v2.
+For an earlier release, read the README at its release tag.
 
 - The plugin sets `enforce: 'post'` itself. The spread and the `enforce` line still work, but you can remove them:
 
@@ -341,8 +341,8 @@ export default defineConfig({
 })
 ```
 
-[npm-version-src]: https://img.shields.io/npm/v/@mdream/vite/beta.svg?style=flat&colorA=18181B&colorB=4C9BE0
-[npm-version-href]: https://npmjs.com/package/@mdream/vite/v/beta
+[npm-version-src]: https://img.shields.io/npm/v/@mdream/vite.svg?style=flat&colorA=18181B&colorB=4C9BE0
+[npm-version-href]: https://npmjs.com/package/@mdream/vite
 [npm-downloads-src]: https://img.shields.io/npm/dm/@mdream/vite.svg?style=flat&colorA=18181B&colorB=4C9BE0
 [npm-downloads-href]: https://npm.chart.dev/@mdream/vite
 [license-src]: https://img.shields.io/npm/l/@mdream/vite.svg?style=flat&colorA=18181B&colorB=4C9BE0

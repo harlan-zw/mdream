@@ -1,6 +1,6 @@
 # mdream
 
-[![npm beta version](https://img.shields.io/npm/v/mdream/beta?color=yellow)](https://npmjs.com/package/mdream/v/beta)
+[![npm version](https://img.shields.io/npm/v/mdream?color=yellow)](https://npmjs.com/package/mdream)
 [![npm downloads](https://img.shields.io/npm/dm/mdream?color=yellow)](https://npm.chart.dev/mdream)
 [![license](https://img.shields.io/github/license/harlan-zw/mdream?color=yellow)](https://github.com/harlan-zw/mdream/blob/main/LICENSE.md)
 <a href="https://skilld.dev/gh/harlan-zw/mdream">
@@ -14,19 +14,19 @@
 Powering Cloudflare Browser Run's [/markdown](https://developers.cloudflare.com/browser-run/quick-actions/markdown-endpoint/) and [/crawl](https://developers.cloudflare.com/browser-run/quick-actions/crawl-endpoint/) endpoints.
 
 > [!TIP]
-> 🎉 **Try Mdream v2 beta!** Install `mdream@beta`. Use the docs at your installed release tag, or follow [Migrating from v1](#migrating-from-v1).
+> 🎉 **Upgrading to Mdream v2?** Follow [Migrating from v1](#migrating-from-v1).
 
 ## Installation
 
 ```bash
 # npm
-npm install mdream@beta
+npm install mdream
 
 # pnpm
-pnpm add mdream@beta
+pnpm add mdream
 
 # yarn
-yarn add mdream@beta
+yarn add mdream
 ```
 
 > [!TIP]
@@ -35,7 +35,7 @@ yarn add mdream@beta
 For the JavaScript-only engine with explicit plugins, formats, splitter, and parser:
 
 ```bash
-pnpm add @mdream/js@beta
+pnpm add @mdream/js
 ```
 
 ### Bundler Compatibility
@@ -102,9 +102,9 @@ externals: ['mdream']
 
 ## Migrating from v1
 
-Install `mdream@beta` for the Rust engine.
-This guide describes the code in this repository, including changes merged after `2.0.0-beta.1`.
-If you use a published beta, read the README at its release tag.
+Install `mdream` for the Rust engine.
+This guide covers v2.
+For an earlier release, read the README at its release tag.
 Node and edge conversions still return a string synchronously.
 The `format`, `clean`, and top-level plugin options remain available.
 Custom hook plugins use `@mdream/js`; follow its [migration guide](../js/README.md#migrating-from-v1).
@@ -1093,7 +1093,7 @@ Mdream provides a CLI that works with Unix pipes.
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
-  | npx mdream@beta --origin https://en.wikipedia.org --preset minimal \
+  | npx mdream --origin https://en.wikipedia.org --preset minimal \
   | tee output.md
 ```
 
@@ -1101,7 +1101,7 @@ curl -s https://en.wikipedia.org/wiki/Markdown \
 
 ```bash
 cat index.html \
-  | npx mdream@beta --preset minimal \
+  | npx mdream --preset minimal \
   | tee output.md
 ```
 
@@ -1109,7 +1109,7 @@ cat index.html \
 
 ```bash
 cat index.html \
-  | npx mdream@beta --format text \
+  | npx mdream --format text \
   | tee output.txt
 ```
 
@@ -1117,7 +1117,7 @@ cat index.html \
 
 ```bash
 cat index.html \
-  | npx mdream@beta --format html \
+  | npx mdream --format html \
   | tee output.html
 ```
 
@@ -1213,7 +1213,7 @@ Call `window.mdream.htmlToMarkdown()` with the same `MdreamOptions` as `mdream`.
 Await its `Promise<string>`, as with `mdream/browser`.
 
 ```html
-<script src="https://unpkg.com/mdream@beta/dist/iife.js"></script>
+<script src="https://unpkg.com/mdream/dist/iife.js"></script>
 <script>
   window.mdream.htmlToMarkdown('<h1>Hello</h1><p>World</p>')
     .then(markdown => console.log(markdown)) // # Hello\n\nWorld
@@ -1221,8 +1221,8 @@ Await its `Promise<string>`, as with `mdream/browser`.
 ```
 
 **CDN Options:**
-- **unpkg**: `https://unpkg.com/mdream@beta/dist/iife.js`
-- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream@beta/dist/iife.js`
+- **unpkg**: `https://unpkg.com/mdream/dist/iife.js`
+- **jsDelivr**: `https://cdn.jsdelivr.net/npm/mdream/dist/iife.js`
 
 ## Content Extraction with Readability
 

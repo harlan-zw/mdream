@@ -5,19 +5,19 @@ HTML-to-Markdown converter with no dependencies and streaming support.
 ## Install
 
 ```sh
-cargo add mdream@2.0.0-beta.1
+cargo add mdream@2
 ```
 
 Or as a CLI:
 
 ```sh
-cargo install mdream --version 2.0.0-beta.1
+cargo install mdream --version 2
 ```
 
 ## Usage
 
-These examples use the code in this repository, including changes merged after `2.0.0-beta.1`.
-If you use a published release, read the README at its release tag.
+These examples use v2.
+For an earlier release, read the README at its release tag.
 In `2.0.0-beta.1`, the options type is still `HTMLToMarkdownOptions`.
 
 ### Library
@@ -58,9 +58,6 @@ curl -s https://example.com | mdream --format html
 ```
 
 ## Output format features
-
-These features come from [#276](https://github.com/harlan-zw/mdream/pull/276), merged after `2.0.0-beta.1`.
-For dependency builds, select a release that includes that change.
 
 Each output format is a cargo feature: `markdown`, `text`, and `html`. All three are on by default.
 

@@ -5,8 +5,8 @@ description: Convert HTML to Markdown, plain text, or safe HTML with mdream, the
 
 # mdream
 
-This Skill describes the code in this repository, including changes merged after `2.0.0-beta.1`.
-For a published beta, read the Skill at its release tag.
+This Skill covers v2.
+For an earlier release, read the Skill at its release tag.
 The package wraps a Rust converter: NAPI in Node, WASM on edge runtimes and in the browser.
 `@mdream/js` is a separate pure JS engine. It has hook plugins, the splitter, `llms.txt` generation, and content negotiation. Its option shape differs; see [Traps](#traps).
 

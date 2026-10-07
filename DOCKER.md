@@ -1,28 +1,28 @@
 # Docker Usage
 
-These examples use the v2 beta images:
+These examples use the v2 images:
 
 | Image | Use it for | Engine | Size |
 |-------|-----------|--------|------|
-| `harlanzw/mdream:beta-core` | Converting HTML you already have to Markdown | Native Rust binary | ~600 KB |
-| `harlanzw/mdream:beta-crawl` | Fetching/crawling URLs, `llms.txt` generation | Node + Playwright Chrome | ~1.5 GB |
+| `harlanzw/mdream:core` | Converting HTML you already have to Markdown | Native Rust binary | ~600 KB |
+| `harlanzw/mdream:crawl` | Fetching/crawling URLs, `llms.txt` generation | Node + Playwright Chrome | ~1.5 GB |
 
-`harlanzw/mdream:beta` is an alias of `:beta-crawl`. Prefer the explicit `:beta-crawl` or `:beta-core` tag.
+`harlanzw/mdream:latest` is an alias of `:crawl`. Prefer the explicit `:crawl` or `:core` tag.
 
 Both images are published to Docker Hub (`harlanzw/mdream`) and GitHub Container Registry (`ghcr.io/harlan-zw/mdream`) for `linux/amd64`.
 
-## `mdream:beta-core`: HTML to Markdown
+## `mdream:core`: HTML to Markdown
 
 This `FROM scratch` image contains one statically linked Rust binary.
 It reads HTML from stdin and writes Markdown to stdout.
 
 ```bash
 # Convert a local HTML file
-docker run -i --rm harlanzw/mdream:beta-core < page.html > page.md
+docker run -i --rm harlanzw/mdream:core < page.html > page.md
 
 # Convert a fetched page (resolve relative links against its origin)
 curl -s https://example.com \
-  | docker run -i --rm harlanzw/mdream:beta-core --origin https://example.com \
+  | docker run -i --rm harlanzw/mdream:core --origin https://example.com \
   > example.md
 ```
 
@@ -37,33 +37,33 @@ curl -s https://example.com \
 
 If you need to fetch URLs or render JavaScript, use the `crawl` image.
 
-## `mdream:beta-crawl`: crawl and llms.txt
+## `mdream:crawl`: crawl and llms.txt
 
 `@mdream/crawl` with Playwright Chrome pre-installed, for website crawling and `llms.txt` generation.
 
 ```bash
 # Basic crawling
-docker run harlanzw/mdream:beta-crawl https://example.com
+docker run harlanzw/mdream:crawl https://example.com
 
 # Interactive mode
-docker run -it harlanzw/mdream:beta-crawl
+docker run -it harlanzw/mdream:crawl
 
 # Show help
-docker run harlanzw/mdream:beta-crawl --help
+docker run harlanzw/mdream:crawl --help
 ```
 
 ### Basic Usage
 
 ```bash
 # Crawl a website with depth limit
-docker run harlanzw/mdream:beta-crawl https://example.com --depth 2
+docker run harlanzw/mdream:crawl https://example.com --depth 2
 
 # Crawl with exclusions and limits
-docker run harlanzw/mdream:beta-crawl https://large-site.com \
+docker run harlanzw/mdream:crawl https://large-site.com \
   --exclude "*/admin/*" --exclude "*/api/*" --max-pages 50
 
 # Crawl using Playwright for JavaScript sites
-docker run harlanzw/mdream:beta-crawl https://spa-site.com --driver playwright
+docker run harlanzw/mdream:crawl https://spa-site.com --driver playwright
 ```
 
 ### Single Page Conversion
@@ -72,11 +72,11 @@ To convert just one page (no crawling), use `--single-page` (alias for `--depth 
 
 ```bash
 # Convert a single article to Markdown
-docker run -v $(pwd)/output:/app/output harlanzw/mdream:beta-crawl \
+docker run -v $(pwd)/output:/app/output harlanzw/mdream:crawl \
   https://en.wikipedia.org/wiki/Markdown --single-page --output /app/output
 
 # JavaScript-rendered pages
-docker run -v $(pwd)/output:/app/output harlanzw/mdream:beta-crawl \
+docker run -v $(pwd)/output:/app/output harlanzw/mdream:crawl \
   https://www.scientificamerican.com/article/whale-songs-follow-basic-human-language-rules \
   --single-page --driver playwright --output /app/output
 ```
@@ -84,7 +84,7 @@ docker run -v $(pwd)/output:/app/output harlanzw/mdream:beta-crawl \
 The command writes a `.md` file under `output/`, with a path that mirrors the page URL.
 It also writes `output/llms.txt` and `output/llms-full.txt`.
 
-For a static page where you do not need JavaScript rendering, `mdream:beta-core` is far smaller and needs no volume mount.
+For a static page where you do not need JavaScript rendering, `mdream:core` is far smaller and needs no volume mount.
 
 ### Batch: List of URLs from a File
 
@@ -96,7 +96,7 @@ These two files do not accumulate pages from earlier runs:
 # urls.txt: one URL per line
 while IFS= read -r url; do
   [ -z "$url" ] && continue
-  docker run --rm -v $(pwd)/output:/app/output harlanzw/mdream:beta-crawl \
+  docker run --rm -v $(pwd)/output:/app/output harlanzw/mdream:crawl \
     "$url" --single-page --output /app/output
 done < urls.txt
 ```
@@ -108,7 +108,7 @@ while IFS= read -r url; do
   [ -z "$url" ] && continue
   host=$(echo "$url" | awk -F/ '{print $3}')
   mkdir -p "output/$host"
-  docker run --rm -v "$(pwd)/output/$host:/app/output" harlanzw/mdream:beta-crawl \
+  docker run --rm -v "$(pwd)/output/$host:/app/output" harlanzw/mdream:crawl \
     "$url" --single-page --output /app/output
 done < urls.txt
 ```
@@ -118,7 +118,7 @@ done < urls.txt
 To save crawled content to your local machine:
 
 ```bash
-docker run -v $(pwd)/output:/app/output harlanzw/mdream:beta-crawl \
+docker run -v $(pwd)/output:/app/output harlanzw/mdream:crawl \
   https://example.com --output /app/output
 ```
 
@@ -157,10 +157,10 @@ The release workflow runs that step before `docker build`.
 
 | Tag | Image |
 |-----|-------|
-| `beta-core` | v2 beta core converter |
+| `core` | v2 core converter |
 | `<version>-core` | core converter, version-pinned |
-| `beta-crawl` | v2 beta crawler |
-| `beta` | alias of `beta-crawl` |
+| `crawl` | v2 crawler |
+| `latest` | alias of `crawl` |
 | `<version>` / `<version>-crawl` | crawler, version-pinned |
 
 ## Base Images
