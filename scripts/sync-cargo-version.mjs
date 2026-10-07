@@ -19,6 +19,9 @@ console.log(`Updated crates/Cargo.toml to ${version}`)
 // Keep Cargo.lock in sync so --locked builds don't fail after the bump
 execSync('cargo update --workspace --offline', { cwd: 'crates', stdio: 'inherit' })
 
+// NAPI embeds the build package version in its native loader checks.
+const buildPackageFile = 'crates/node/package.json'
+
 // Sync platform package versions
 const platformDir = 'crates/node/npm'
 const platformFiles = readdirSync(platformDir)
@@ -31,12 +34,12 @@ const platformFiles = readdirSync(platformDir)
     catch { return false }
   })
 
-for (const file of platformFiles) {
+for (const file of [buildPackageFile, ...platformFiles]) {
   const pkg = JSON.parse(readFileSync(file, 'utf8'))
   pkg.version = version
   writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`)
   console.log(`Updated ${file} to ${version}`)
 }
 
-const allFiles = [...cargoFiles, ...platformFiles]
+const allFiles = [...cargoFiles, buildPackageFile, ...platformFiles]
 execSync(`git add ${allFiles.join(' ')}`, { stdio: 'inherit' })

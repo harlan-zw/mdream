@@ -1,6 +1,6 @@
 {
   "name": "@mdream/rust-build",
-  "version": "0.17.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Native Rust HTML-to-Markdown engine for mdream, built with NAPI-RS.",
   "license": "MIT",
