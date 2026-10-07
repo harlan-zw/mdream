@@ -12,6 +12,14 @@ Include browser bundles, Web Workers, CDN scripts, Docker images, and Rust crate
 Run the relevant existing checks before editing. Record existing failures separately.
 Save representative conversion output before upgrading, using the application's options.
 
+Start with these searches, or your search tool's equivalent:
+
+```sh
+rg -n 'mdream|htmlToMarkdown|streamHtmlToMarkdown|withMinimalPreset|headersToSplitOn' .
+rg -n 'cleanUrls|blankLines|tagOverrides|extractionCollectorPlugin|HTMLToMarkdownOptions' .
+rg -n 'followLinks|maxDepth|maxRequestsPerCrawl|sitemapUrls|siteNameOverride|descriptionOverride|onPage' .
+```
+
 Read the migration guides for the packages this project uses:
 
 - Rust engine, Node, browser, and edge: https://github.com/harlan-zw/mdream/blob/main/packages/mdream/README.md#migrating-from-v1
@@ -44,12 +52,24 @@ Replace `preset: 'minimal'` with `minimal: true`, and `cleanUrls: true` with `cl
 Move declarative options out of a `plugins` object. Remove `clean.blankLines`.
 For custom hook plugins, use `@mdream/js` and apply its migration rules.
 
+```diff
+- htmlToMarkdown(html, { preset: 'minimal', cleanUrls: true, plugins: { frontmatter: true } })
++ htmlToMarkdown(html, { minimal: true, clean: { urls: true }, frontmatter: true })
+```
+
 Node and edge conversion remain synchronous and return strings.
 Browser code imports `mdream/browser`, awaits conversion, and uses the returned string without `.markdown`.
 CDN calls also return promises of strings.
 Replace `mdream/worker` with a module worker importing `mdream/browser`.
 Keep callbacks inside the worker because functions cannot cross `postMessage`.
 Retain native binding externalization in server bundles.
+
+```diff
+- import { htmlToMarkdown } from 'mdream'
+- const markdown = (await htmlToMarkdown(html)).markdown
++ import { htmlToMarkdown } from 'mdream/browser'
++ const markdown = await htmlToMarkdown(html)
+```
 
 With `minimal: true`, custom filter exclusions now add to the preset's exclusions.
 Use `filter: false` to disable preset filtering, or compose options without `minimal` for a custom filter.
@@ -61,12 +81,39 @@ Import each output format separately: Markdown from `@mdream/js`, text from `/te
 Use each entry's corresponding streaming function. Remove the converter's `format` option; retain the CLI's `--format` flag.
 Replace declarative `plugins` objects and `hooks` with a single array of plugin instances from `@mdream/js/plugins`.
 Preserve the old order: frontmatter, isolateMain, tailwind, filter, extraction, then custom hooks.
-Keep `tagOverrides` at the top level.
+Move `plugins.tagOverrides` to top-level `tagOverrides`.
 
 Import `clean()` from `@mdream/js/clean` and pass its result as the `clean` option.
+Fragment cleanup delays streaming output until the document ends. This includes default `clean()` and minimal preset cleanup.
+Check first-output timing if the application sends progressive responses.
 Import `withMinimalPreset` from `@mdream/js/preset/minimal`.
+The preset appends custom plugins after its defaults. An added filter cannot restore content those defaults exclude.
+To disable or reconfigure individual preset plugins, compose an explicit plugin array instead.
 Do not pass Rust-only top-level options such as `minimal` or `frontmatter` to this engine.
 Use the guide's removed-exports table to update other imports and types.
+
+```diff
+  import { htmlToMarkdown } from '@mdream/js'
++ import { clean } from '@mdream/js/clean'
++ import { frontmatterPlugin } from '@mdream/js/plugins'
+  htmlToMarkdown(html, {
+-   clean: true,
+-   plugins: { frontmatter: true, tagOverrides },
+-   hooks: [customPlugin],
++   clean: clean(),
++   plugins: [frontmatterPlugin(), customPlugin],
++   tagOverrides,
+  })
+```
+
+```diff
+- import { htmlToMarkdown } from '@mdream/js'
+- const text = htmlToMarkdown(html, { format: 'text' })
++ import { htmlToText } from '@mdream/js/text'
++ const text = htmlToText(html)
+```
+
+Use `htmlToSafeHtml` from `@mdream/js/html` for the equivalent HTML migration.
 
 Extraction callbacks receive parsed elements and `PluginState` when each matching element closes.
 Use `element.name` instead of `tagName`; keep selector identity in the callback or its closure.
@@ -82,6 +129,18 @@ Prepare the rebuild procedure without overwriting production indexes.
 ### Integrations, CLI, and Rust
 
 For `@mdream/crawl`, migrate option names and callbacks using its guide.
+
+| v1 | v2 |
+|---|---|
+| `outputDir` | `output` |
+| `maxRequestsPerCrawl` | `maxPages` |
+| `maxDepth`, `followLinks` | Explicit `depth`, after reviewing discovery behavior below |
+| `sitemapUrls` | `sitemap` |
+| `generateLlmsTxt`, `generateLlmsFullTxt`, `generateIndividualMd` | Explicit `artifacts` array containing the requested outputs |
+| `siteNameOverride`, `descriptionOverride` | `siteName`, `description` |
+| `onPage: callback` | `hooks: { 'crawl:page': callback }` |
+| `chunkSize` | Remove; it had no effect |
+
 Set `depth`, `artifacts`, and output paths explicitly to preserve the application's intended crawl scope.
 The library now defaults to depth 3 and all three artifacts, including `llms-full.txt`.
 Do not map `followLinks: false` to depth 0 blindly: depth 0 also disables sitemap discovery.
@@ -94,11 +153,39 @@ Its default minimal preset now applies. Review removed content and frontmatter; 
 
 For GitHub Actions, replace `uses: harlan-zw/mdream@...` with the documented `@mdream/action` npm step.
 Use Node.js 24, keep the step ID, convert inputs to `INPUT_` environment variables, and remove `chunk-size`.
+
+```diff
+  - name: Generate llms.txt
+    id: llms
+-   uses: harlan-zw/mdream@v1
+-   with:
+-     glob: dist/**/*.html
++   run: |
++     npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action
++     node "$RUNNER_TEMP/mdream-action/node_modules/@mdream/action/dist/index.js"
++   env:
++     INPUT_GLOB: 'dist/**/*.html'
+```
+
+Carry over the remaining inputs, including site name, description, origin, and output directory.
+
 For Docker and CDN references, use the stable channels documented by Mdream.
 Review CLI flags: unknown flags, missing values, and unsupported presets now fail.
 
 For the Rust crate, follow its guide for `HtmlToMarkdownOptions`, private parser APIs, cleanup, and splitter heading levels.
 Respect enabled output-format features and non-exhaustive public types.
+
+| v1 | v2 |
+|---|---|
+| `HTMLToMarkdownOptions` | `HtmlToMarkdownOptions` |
+| `mdream::consts::get_tag_id(name)` | `mdream::get_tag_id(name)` |
+| `clean_urls: true` | `clean: Some(CleanConfig { urls: true, ..Default::default() })` |
+| `.with_clean_urls()` | `.with_clean(CleanConfig { urls: true, ..Default::default() })` |
+| `headers_to_split_on: vec![TAG_H2, TAG_H3]` | `headers_to_split_on: vec![2, 3]` |
+
+Remove uses of private parser types; they have no public replacement.
+For non-exhaustive result types, use conversion functions and copy fields into your own type when needed.
+Add a fallback arm when matching `OutputFormat`, and `..` when destructuring non-exhaustive public types.
 
 ## Verify the migration
 
