@@ -318,7 +318,9 @@ for await (const chunk of streamHtmlToMarkdown(stream, {
 
 ## Engines
 
-Mdream includes two rendering engines, automatically selecting the best one for your environment:
+Choose the Rust or JavaScript engine.
+The `mdream` package selects its Rust binding by runtime.
+Import `@mdream/js` to use the JavaScript engine:
 
 | Engine | Package | Plugins | Use case |
 |--------|---------|---------|----------|
@@ -334,7 +336,13 @@ import { htmlToMarkdown } from '@mdream/js'
 import { htmlToMarkdown as htmlToMarkdownRust } from 'mdream'
 ```
 
-The Rust engine accepts declarative plugin options. The JS engine composes explicit plugin factories, so the option shape differs. The Rust engine takes `minimal`, `format`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, and `extraction` at the top level. The JS engine takes an array of plugins in `options.plugins`, has no `minimal` option, and has one entry point for each format. Use `withMinimalPreset()` from `@mdream/js/preset/minimal`. If the JS engine gets one of these options at the top level, it throws a `TypeError` that names the fix.
+The Rust engine takes declarative options: `minimal`, `format`, `frontmatter`, `isolateMain`, `tailwind`, `filter`, and `extraction`.
+Pass them at the top level.
+
+The JS engine takes an array of plugin instances in `options.plugins`.
+Each output format has its own entry point.
+For its minimal preset, use `withMinimalPreset()` from `@mdream/js/preset/minimal`.
+If you pass Rust-only options to the JS engine, it throws a `TypeError` that names the fix.
 
 ## Options
 
@@ -1163,7 +1171,10 @@ for await (const chunk of streamHtmlToMarkdown(response.body)) {
 }
 ```
 
-Conversion errors are catchable. WASM has no unwinding, so an internal Rust panic aborts the call, but the message is preserved and re-thrown as a normal `Error` (with the raw WASM trap as `cause`), and the instance keeps working for later requests:
+You can catch conversion errors.
+An internal Rust panic aborts the call because WASM has no unwinding.
+The wrapper preserves the panic message in an `Error`, with the raw WASM trap as `cause`.
+The instance remains usable for later requests:
 
 ```ts
 import { htmlToMarkdown } from 'mdream'
@@ -1179,7 +1190,10 @@ export function convertResponse(html: string): Response {
 }
 ```
 
-If your toolchain doesn't resolve the export conditions, the wasm-bindgen build (web target) is exposed at `mdream/wasm` for manual initialization. Its `htmlToMarkdown` takes the same `MdreamOptions` as the `mdream` entry. Its `MarkdownStream` runs the callbacks in `finish()`.
+If your toolchain does not resolve export conditions, import the web-target wasm-bindgen build from `mdream/wasm`.
+Initialize it manually before converting.
+Its `htmlToMarkdown` takes the same `MdreamOptions` as `mdream`.
+Its `MarkdownStream` runs callbacks in `finish()`.
 
 Your bundler must support `.wasm` imports and provide their TypeScript declarations.
 
@@ -1193,7 +1207,10 @@ const markdown = htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 
 ### Browser CDN (IIFE)
 
-Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load, so `window.mdream.htmlToMarkdown()` is ready at once. It takes the same `MdreamOptions` as the `mdream` entry and returns `Promise<string>`, the same as `mdream/browser`.
+Use mdream from a CDN without a build step.
+The script includes the WASM binary and initializes it on load.
+Call `window.mdream.htmlToMarkdown()` with the same `MdreamOptions` as `mdream`.
+Await its `Promise<string>`, as with `mdream/browser`.
 
 ```html
 <script src="https://unpkg.com/mdream@beta/dist/iife.js"></script>

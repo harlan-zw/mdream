@@ -1,6 +1,9 @@
 # mdream outside Node
 
-`mdream` picks an entry by export condition. Every entry takes the same `MdreamOptions`: `minimal`, `frontmatter`, `filter`, `extraction`, `tagOverrides`, and the callbacks work everywhere. Every entry produces a Markdown string. Some return it in a Promise.
+`mdream` picks an entry by export condition.
+Its conversion entries take the same `MdreamOptions`, including `minimal`, `frontmatter`, `filter`, `extraction`, and `tagOverrides`.
+Callbacks work in every supported runtime.
+Some entries return a string; others return `Promise<string>`.
 
 | Import | Resolved by | Returns |
 |---|---|---|
@@ -32,7 +35,10 @@ A Rust panic becomes a normal `Error` with the message `mdream WASM panic, pleas
 
 ## Browser bundles
 
-In a Vite, webpack, or esbuild client build, import from `mdream/browser`. That entry fetches the WASM binary on first use and returns `Promise<string>`, so `await` it. The options and callbacks work as in Node.
+In a Vite, webpack, or esbuild client build, import from `mdream/browser`.
+This entry fetches the WASM binary on first use and returns `Promise<string>`.
+Await the result.
+Options and callbacks work as in Node.
 
 ```ts
 import { htmlToMarkdown } from 'mdream/browser'

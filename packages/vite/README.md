@@ -88,7 +88,8 @@ export default defineConfig({
 
 ### Development (`vite dev`)
 
-Registers middleware via `configureServer` that intercepts incoming requests. When a request matches (see [Request Matching](#request-matching)), the plugin:
+The `configureServer` hook registers middleware for incoming requests.
+If a request matches [Request Matching](#request-matching), the plugin:
 
 1. Resolves the corresponding HTML path by trying multiple candidates in order:
    - `<basePath>.html`
@@ -100,7 +101,9 @@ Registers middleware via `configureServer` that intercepts incoming requests. Wh
 
 ### Build (`vite build`)
 
-Uses the `generateBundle` hook to process all HTML assets in the output bundle. For each `.html` file that matches the `include` patterns and does not match `exclude` patterns, the plugin:
+The `generateBundle` hook processes HTML assets in the output bundle.
+A `.html` file must match `include` and not match `exclude`.
+For each matching file, the plugin:
 
 1. Converts the HTML source to Markdown.
 2. Emits a corresponding `.md` file into the bundle (preserving directory structure).
@@ -161,7 +164,9 @@ interface ViteHtmlToMarkdownOptions {
 - **Type:** `string[]`
 - **Default:** `['*.html', '**/*.html']`
 
-Glob patterns controlling which HTML files are processed during `vite build`. Root-level and nested HTML files are included by default. This option does not affect dev or preview middleware (those respond to any matching request).
+Glob patterns that select HTML files during `vite build`.
+The default includes root-level and nested HTML files.
+This option does not affect dev or preview middleware.
 
 #### `exclude`
 

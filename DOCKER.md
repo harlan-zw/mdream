@@ -13,7 +13,8 @@ Both images are published to Docker Hub (`harlanzw/mdream`) and GitHub Container
 
 ## `mdream:beta-core`: HTML to Markdown
 
-A `FROM scratch` image containing a single statically linked Rust binary. It reads HTML from stdin and writes Markdown to stdout. No Node, no browser, nothing to mount.
+This `FROM scratch` image contains one statically linked Rust binary.
+It reads HTML from stdin and writes Markdown to stdout.
 
 ```bash
 # Convert a local HTML file
@@ -34,7 +35,7 @@ curl -s https://example.com \
 | `--verbose` / `-v` | Print conversion stats to stderr |
 | `--help` / `-h` | Show help |
 
-The `core` image only converts HTML it is given; it does not fetch URLs or render JavaScript. For that, use `crawl`.
+If you need to fetch URLs or render JavaScript, use the `crawl` image.
 
 ## `mdream:beta-crawl`: crawl and llms.txt
 
@@ -80,16 +81,17 @@ docker run -v $(pwd)/output:/app/output harlanzw/mdream:beta-crawl \
   --single-page --driver playwright --output /app/output
 ```
 
-Output: a path-mirrored `.md` file under `output/` (e.g. `output/wiki/Markdown.md`), plus `output/llms.txt` and `output/llms-full.txt`.
+The command writes a `.md` file under `output/`, with a path that mirrors the page URL.
+It also writes `output/llms.txt` and `output/llms-full.txt`.
 
 For a static page where you do not need JavaScript rendering, `mdream:beta-core` is far smaller and needs no volume mount.
 
 ### Batch: List of URLs from a File
 
-Loop a URL list through the container, one page each. The output directory is reused so all pages collect under `output/` (each file lands at a path that mirrors its URL):
+Run the container once per URL. Each command reuses `output/` and saves a Markdown file at the page's URL path:
 
 ```bash
-# urls.txt — one URL per line
+# urls.txt: one URL per line
 while IFS= read -r url; do
   [ -z "$url" ] && continue
   docker run --rm -v $(pwd)/output:/app/output harlanzw/mdream:beta-crawl \
@@ -120,22 +122,21 @@ docker run -v $(pwd)/output:/app/output harlanzw/mdream:beta-crawl \
 
 ### How It Works
 
-The container's `ENTRYPOINT` acts directly as the `mdream-crawl` command:
-- All arguments passed to `docker run` are forwarded to `mdream-crawl`
-- No need to specify command names, just pass your crawl options
+Pass crawl options after the image name. The container forwards them to `mdream-crawl`.
 
 ### Environment Variables
 
-- `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` - Already set (browsers pre-installed)
-- `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright` - Browser location
-- `DISPLAY=:99` - Virtual display for headless browsing
+- `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`: Browsers are pre-installed, so installation skips the download.
+- `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`: Browser location.
+- `DISPLAY=:99`: Virtual display for headless browsing.
 
 ### Output Files
 
-The crawler generates these artifacts in your output directory:
-- `llms.txt` - Consolidated text file optimized for LLM consumption
-- `llms-full.txt` - Extended format with comprehensive metadata
-- Individual `.md` files at paths mirroring each page's URL (e.g. `wiki/Markdown.md`)
+The crawler writes these files to your output directory:
+
+- `llms.txt`: An index of pages with titles and links.
+- `llms-full.txt`: The full Markdown content of the pages.
+- Individual `.md` files at paths that mirror each page's URL, such as `wiki/Markdown.md`.
 
 ## Building Locally
 
@@ -146,7 +147,9 @@ docker build -f Dockerfile.core -t mdream-core .
 echo '<h1>Hello</h1>' | docker run -i --rm mdream-core
 ```
 
-The `crawl` image expects the `mdream` napi native bindings to already exist at `packages/mdream/napi/`. CI generates these in the `Setup napi native bindings` step of `.github/workflows/release-docker.yml` before running `docker build`; a clean local checkout will not have them. Reproduce that step locally, or just let CI build the image.
+Before building the `crawl` image, generate the native bindings in `packages/mdream/napi/`.
+Follow the `Setup napi native bindings` step in `.github/workflows/release-docker.yml`.
+The release workflow runs that step before `docker build`.
 
 ## Tags
 

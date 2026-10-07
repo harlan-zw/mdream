@@ -11,7 +11,7 @@
   </picture>
 </a>
 
-> ☁️ The fastest HTML to markdown converter on GitHub. Optimized for LLMs and supports streaming.
+> ☁️ Convert HTML to Markdown for LLMs, with Rust and JavaScript engines and streaming support.
 
 > [!TIP]
 > 🎉 **Try Mdream v2 beta!** Install `mdream@beta`. Use the docs at your installed release tag, or follow [Migrating to v2](#migrating-to-v2).
@@ -51,22 +51,23 @@ For your first v2 crawl, set `depth`, `maxPages`, and `artifacts` to limit pages
 ## Features
 
 - ☁️ Powering Cloudflare Browser Run's [/markdown](https://developers.cloudflare.com/browser-run/quick-actions/markdown-endpoint/) and [/crawl](https://developers.cloudflare.com/browser-run/quick-actions/crawl-endpoint/) endpoints.
-- 🧠 #1 Token Optimizer: [Up to 2x fewer tokens](#benchmarks) than [Turndown](https://github.com/mixmark-io/turndown), node-html-markdown, and html-to-markdown. 70-99% fewer tokens than raw HTML.
-- 🚀 #1 Fastest: [Fastest pure JS & native Rust](#benchmarks) converter. Up to 37x faster than Turndown (Rust NAPI vs JS), 4.6x, 5x faster than htmd (Rust vs Rust). Converts 1.8MB HTML in ~5.2ms (Rust).
-- 🔍 Generates [Minimal](./packages/js/src/preset/minimal.ts) GitHub Flavored Markdown: Frontmatter, Nested & HTML markup support.
-- 🌊 Streamable: Memory efficient streaming for large documents and real-time pipelines.
-- ⚡ Tiny: 10kB gzip JS core, 60kB gzip with Rust WASM engine. Zero dependencies.
-- ⚙️ Run anywhere: [CLI Crawler](#mdream-crawl), [Docker](#docker), [GitHub Actions](#github-actions-integration), [Vite](#vite-integration), & more.
+- 🧠 Token reduction: Up to 92% fewer tokens than raw HTML in the [measured pages](#token-efficiency).
+- 🚀 Conversion speed: Compare Rust and JavaScript results in the [benchmarks](#benchmarks).
+- 🔍 Markdown output: GitHub Flavored Markdown with frontmatter, lists, tables, and code blocks.
+- 🌊 Streaming: Convert HTML as input arrives and join the output to match one-shot conversion.
+- ⚡ Bundles: The JS engine lets you import formats and plugins separately. Both engines have no runtime dependencies.
+- ⚙️ Integrations: [CLI Crawler](#mdream-crawl), [Docker](#docker), [GitHub Actions](#github-actions-integration), and [Vite](#vite-integration).
 
 ## What is Mdream?
 
-A zero-dependency, LLM-optimized HTML to Markdown converter. Faster and leaner than [Turndown](https://github.com/mixmark-io/turndown), [node-html-markdown](https://github.com/crosstype/node-html-markdown), and [html-to-markdown](https://github.com/JohannesKaufmann/html-to-markdown), with output tuned for token efficiency and readability.
+Mdream converts HTML to Markdown for LLM input. Both conversion engines have no runtime dependencies.
+The [benchmarks](#benchmarks) compare conversion speed and token counts with other libraries.
 
-On top of the core converter, Mdream ships packages to generate LLM artifacts like `llms.txt` for your own sites or produce LLM context for any project.
+Use the integration packages to generate Markdown pages and `llms.txt` files from your site.
 
 ### Mdream Packages
 
-Mdream is built to run anywhere for all projects and use cases and is available in the following packages:
+Choose a package for your runtime or build tool:
 
 | Package                                                                                                                                                                                                  | Description                                                                                                                                                   |
 |----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -90,7 +91,7 @@ curl -s https://en.wikipedia.org/wiki/Markdown | npx mdream@beta --preset minima
 <details>
 <summary><b>📥 URL to Markdown</b></summary>
 
-Fetches the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown) and converts it to Markdown preserving the original links and images.
+Fetch the [Markdown Wikipedia page](https://en.wikipedia.org/wiki/Markdown), then convert it with the minimal preset:
 
 ```bash
 curl -s https://en.wikipedia.org/wiki/Markdown \
@@ -98,7 +99,7 @@ curl -s https://en.wikipedia.org/wiki/Markdown \
   | tee streaming.md
 ```
 
-_Tip: The `--origin` flag will fix relative image and link paths_
+The `--origin` flag resolves relative image and link paths.
 
 Want to make it look nice? Use [glow](https://github.com/charmbracelet/glow).
 
@@ -113,7 +114,7 @@ curl -s https://en.wikipedia.org/wiki/Markdown \
 <details>
 <summary><b>📄 Local HTML to Markdown</b></summary>
 
-Converts a local HTML file to a Markdown file, using `tee` to write the output to a file and display it in the terminal.
+Convert a local HTML file. The `tee` command saves the Markdown and displays it in the terminal.
 
 ```bash
 cat index.html \
@@ -244,7 +245,8 @@ htmlToMarkdown(html, {
 <details>
 <summary><b>⚡ Optimize Token Usage With Clean Mode</b></summary>
 
-Use `clean: true` (enabled by default with `minimal: true`) to automatically reduce token costs:
+Pass `clean: true` to remove empty links, tracking parameters, and other unwanted output.
+The minimal preset enables all cleanup rules by default.
 
 ```ts
 import { htmlToMarkdown } from 'mdream'
@@ -281,7 +283,8 @@ pnpm add mdream@beta
 
 ### Bundler Compatibility
 
-The `mdream` package uses native Node.js bindings (NAPI-RS) which cannot be statically bundled. If your bundler fails to resolve `mdream`, mark it as external:
+In Node.js, `mdream` loads native bindings that must remain outside the bundle.
+If your bundler fails to resolve `mdream`, mark it as external:
 
 **Next.js / Turbopack:**
 ```js
@@ -344,10 +347,10 @@ Use the guide for each package:
 
 - [`mdream`](./packages/mdream/README.md#migrating-from-v1): browser imports and returns, Web Workers, minimal filtering, and page titles.
 - [`@mdream/js`](./packages/js/README.md#migrating-from-v1): format imports, plugin arrays, cleanup, and callback changes.
-- [Rust crate](./crates/core/README.md#migrating-from-v1): attribute storage and node accessors.
+- [Rust crate](./crates/core/README.md#migrating-from-v1): renamed options, private parser types, and splitter heading levels.
 - [`@mdream/crawl`](./packages/crawl/README.md#migrating-from-v1): renamed options, shared defaults, and the `mdream-crawl` command.
 
-The JS guide covers the API from [#224](https://github.com/harlan-zw/mdream/pull/224), merged after `2.0.0-beta.1`.
+The JS guide includes changes merged after `2.0.0-beta.1`.
 That release uses the declarative JS plugin object and `format` option.
 Match your installed version to its release notes before changing those calls.
 
@@ -355,11 +358,11 @@ Match your installed version to its release notes before changing those calls.
 
 > Need something that works in the browser or an edge runtime? Use [Mdream](#mdream-usage).
 
-The `@mdream/crawl` package crawls an entire site generating LLM artifacts using `mdream` for Markdown conversion.
+The `@mdream/crawl` package fetches site pages and converts them with `mdream`.
 
-- [llms.txt](https://llmstxt.org/): A consolidated text file optimized for LLM consumption.
-- [llms-full.txt](https://llmstxt.org/): An extended format with comprehensive metadata and full content.
-- Individual Markdown Files: Each crawled page is saved in the output directory, preserving its URL path.
+- [llms.txt](https://llmstxt.org/): An index of crawled pages with titles and links.
+- [llms-full.txt](https://llmstxt.org/): The full Markdown content of the crawled pages.
+- Individual Markdown files: One file per page, with paths that mirror the page URLs.
 
 ### Usage
 
@@ -426,7 +429,9 @@ See the [Nuxt Module README](./packages/nuxt/README.md) for usage and configurat
 
 ## Browser CDN Usage
 
-Use mdream directly via CDN with no build step. The script inlines the WASM binary and initializes it on load. `htmlToMarkdown()` returns `Promise<string>`, the same as `mdream/browser`:
+Load mdream from a CDN without a build step.
+The script includes the WASM binary and initializes it on load.
+Like `mdream/browser`, `htmlToMarkdown()` returns `Promise<string>`:
 
 ```html
 <script src="https://unpkg.com/mdream@beta/dist/iife.js"></script>
@@ -482,15 +487,18 @@ End-to-end `cat file | tool > /dev/null` via [hyperfine](https://github.com/shar
 | 420 KB | **2.1ms** | 24.3ms | 5.6ms |
 | 1.8 MB | **10.1ms** | 34.8ms | 75.2ms *(7.5x)* |
 
-mdream's Rust CLI is 2.6-7.5x faster than Go [html2markdown](https://github.com/JohannesKaufmann/html-to-markdown). On the 1.8MB file, even the Node.js CLI (with ~20ms startup tax) beats Go by 2.2x. For raw conversion speed without startup overhead, see the JS and Rust tables above.
+In these results, mdream's Rust CLI is 2.6-7.5x faster than Go [html2markdown](https://github.com/JohannesKaufmann/html-to-markdown).
+On the 1.8 MB file, the Node.js CLI is 2.2x faster, including its startup time.
+For conversion speed without startup time, see the JS and Rust tables above.
 
 ### Streaming
 
-mdream is the only JavaScript HTML-to-markdown converter with streaming support. In the Go ecosystem, [JohannesKaufmann/html-to-markdown](https://github.com/JohannesKaufmann/html-to-markdown) supports streaming via `io.Reader`. No other JS, Rust, or Python converter supports streaming HTML input.
+Both mdream engines accept HTML streams and yield Markdown as conversion progresses.
+Join the output pieces to get the same result as one-shot conversion.
 
 ### Token Efficiency
 
-With `minimal: true`, mdream produces up to **92% fewer tokens** than raw HTML and up to **2x fewer tokens** than competing libraries.
+With `minimal: true`, mdream produces up to **92% fewer tokens** than raw HTML in these measured pages.
 
 | Page (HTML tokens) | mdream minimal | Turndown | node-html-markdown |
 |---------------------|----------------|----------|---------------------|

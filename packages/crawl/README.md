@@ -99,7 +99,8 @@ npx @mdream/crawl@beta -u example.com --site-name "My Company" --description "Co
 
 ## Glob Patterns
 
-URLs support glob patterns for targeted crawling. When a glob pattern is provided, the crawler uses sitemap discovery to find all matching URLs.
+Use glob patterns to select URLs.
+If you provide a pattern, the crawler uses sitemap discovery to find matching URLs.
 
 ```bash
 # Crawl only the /docs/ section
@@ -288,7 +289,9 @@ await crawlAndGenerate({
 
 ## Config File
 
-Create a `mdream.config.ts` (or `.js`, `.mjs`) in the directory where you run the CLI, to set options and register hooks. The CLI loads it with [c12](https://github.com/unjs/c12), in direct mode and in interactive mode.
+To set options and register hooks, create `mdream.config.ts` where you run the CLI.
+The file can also use `.js` or `.mjs`.
+The CLI loads it with [c12](https://github.com/unjs/c12) in direct and interactive modes.
 
 ```typescript
 import { defineConfig } from '@mdream/crawl'
@@ -307,7 +310,9 @@ export default defineConfig({
 })
 ```
 
-The config file accepts every [`CrawlOptions`](#crawloptions) key, and every key is optional. If you set `urls`, you can run the CLI without a URL. Interactive mode uses the config values as its initial answers.
+The config file accepts every [`CrawlOptions`](#crawloptions) key. Each key is optional.
+If you set `urls`, you can run the CLI without a URL argument.
+Interactive mode uses the config values as its initial answers.
 
 The CLI resolves each option in this order:
 
@@ -319,7 +324,9 @@ The CLI resolves each option in this order:
 
 ## Hooks
 
-Five hooks let you intercept and transform data at each stage of the crawl pipeline. Hooks receive mutable objects. Mutate in-place to transform output.
+Five hooks let you change data during the crawl.
+Each hook receives a mutable object.
+Change its properties to transform the output.
 
 ### `crawl:url`
 
@@ -339,7 +346,9 @@ defineConfig({
 
 ### `crawl:html`
 
-Called after fetching, before HTML-to-Markdown conversion. Mutate `ctx.html` to transform the raw HTML (strip elements, inject content) before mdream processes it. Not called when the fetched content is already markdown.
+Runs after fetching, before HTML-to-Markdown conversion.
+Change `ctx.html` to remove elements or add content before conversion.
+The hook does not run if the fetched content is already Markdown.
 
 ```typescript
 defineConfig({
@@ -469,7 +478,7 @@ Disable with `--skip-sitemap` or `skipSitemap: true`.
 
 ### Overriding the sitemap location
 
-When a site keeps its sitemap at a non-standard URL, or splits it across several links, pin the location(s) explicitly instead of relying on discovery:
+If a site uses a custom sitemap URL or several sitemap files, pass their locations explicitly:
 
 ```bash
 # Single non-standard location

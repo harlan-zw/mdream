@@ -1,6 +1,6 @@
 # mdream
 
-Fastest HTML-to-Markdown converter. Zero dependencies, streaming support.
+HTML-to-Markdown converter with no dependencies and streaming support.
 
 ## Install
 

@@ -1,6 +1,6 @@
 # Benchmark Methodology
 
-This document describes how mdream benchmarks are conducted to ensure transparency and reproducibility.
+This document explains the benchmark setup and how to reproduce the results.
 
 ## Libraries Compared
 
@@ -15,12 +15,14 @@ This document describes how mdream benchmarks are conducted to ensure transparen
 
 ### Why These Libraries?
 
-These are the most popular JavaScript HTML-to-Markdown converters:
-- **Turndown**: Industry standard, used by many projects including Obsidian
+The comparison includes these JavaScript HTML-to-Markdown converters:
+
+- **Turndown**: DOM-based conversion
 - **node-html-markdown**: Marketed as a faster alternative to Turndown
-- **rehype-remark**: Part of the unified ecosystem (~4.6M weekly downloads), AST-based transformation
+- **rehype-remark**: Part of the unified ecosystem, with AST-based transformation
 
 We excluded:
+
 - **html-to-markdown** (Go library): Not JavaScript, different runtime. Compared separately in [CLI benchmarks](./cli-compare.sh)
 - **Readability + Turndown**: Different use case (article extraction)
 
@@ -36,7 +38,7 @@ Real-world HTML documents from popular websites:
 
 ### Why These Fixtures?
 
-1. **Real HTML**: Not synthetic benchmarks - actual pages users would convert
+1. **Real HTML**: Saved pages rather than synthetic input
 2. **Varied sizes**: Tests performance scaling from small to large documents
 3. **Varied complexity**: Simple text, code blocks, tables, nested structures
 4. **Public sources**: Anyone can verify and update fixtures
@@ -74,8 +76,8 @@ await processor.process(html)
 
 ### What We're NOT Comparing
 
-- **mdream's LLM preset**: The `withMinimalPreset()` adds content filtering, frontmatter extraction, and main content isolation. This does extra work that competitors don't do, so it's benchmarked separately.
-- **Streaming performance**: mdream is the only JS converter with streaming support. In Go, [JohannesKaufmann/html-to-markdown](https://github.com/JohannesKaufmann/html-to-markdown) supports streaming via `io.Reader`. Streaming is benchmarked as a mdream-only comparison (stream vs string) to show overhead.
+- **mdream's LLM preset**: `withMinimalPreset()` adds filtering, frontmatter extraction, and main content isolation. These features run in a separate benchmark.
+- **Streaming performance**: Separate benchmarks compare mdream's stream and string APIs to measure streaming overhead.
 - **Output quality**: This benchmark measures speed only, not output quality or token efficiency.
 
 ## Benchmark Tooling
@@ -84,13 +86,13 @@ await processor.process(html)
 
 We use [Vitest's benchmark mode](https://vitest.dev/guide/features.html#benchmarking) which provides:
 
-- **Statistical rigor**: Multiple iterations with warmup
+- **Iterations**: Multiple samples after warmup
 - **Metrics**: ops/sec, mean, min, max, percentiles (p75, p99, p995, p999)
-- **Relative margin of error (rme)**: Confidence in results
+- **Relative margin of error (rme)**: Estimated measurement uncertainty
 
 ### Default Configuration
 
-Vitest bench runs each benchmark for a minimum time window, collecting enough samples for statistical significance:
+Vitest bench runs each benchmark for a minimum time window and collects samples:
 
 - Warmup iterations before measurement
 - Minimum 10 samples per benchmark
@@ -98,12 +100,21 @@ Vitest bench runs each benchmark for a minimum time window, collecting enough sa
 
 ### CI Regression Benchmarks (`perf-ci.mjs`)
 
-Every PR's Bundle Size comment includes a Performance section produced by `bench/perf-ci.mjs`. It benchmarks the built bench bundles (JS core, minimal preset, stream, Rust edge WASM), running base and PR back-to-back on the same runner so machine variance cancels. The suite converts the 1.8 MB Wikipedia fixture, streams it with link-aligned chunk boundaries, and streams synthetic long text, style, and excluded script bodies through the compiled Rust WASM API. The streaming cases exercise real conversion and chunk-boundary scaling. Signals per bench:
+The Bundle Size workflow uses `bench/perf-ci.mjs` to produce its Performance section.
+It benchmarks the built JS core, minimal preset, stream, and Rust edge WASM bundles.
+Base and PR versions run back-to-back on the same runner to reduce machine variance.
 
-- **Main-thread CPU** (`process.threadCpuUsage()`): the gated timing authority. Excludes V8's background GC/JIT threads and descheduling, which makes it ~3x steadier than process-wide CPU on this allocation-heavy workload. A change is flagged past `max(5%, 2x combined RME)`.
+The suite converts the 1.8 MB Wikipedia fixture and streams it with link-aligned chunk boundaries.
+It also streams synthetic long text, style, and excluded script bodies through the Rust WASM API.
+These cases measure conversion and chunk-boundary scaling.
+
+Each benchmark reports these signals:
+
+- **Main-thread CPU** (`process.threadCpuUsage()`): Controls the timing verdict. It excludes background GC/JIT threads and descheduling. In this workload, it is about 3x steadier than process-wide CPU. A change is flagged past `max(5%, 2x combined RME)`.
 - **Wall time**: informational only; never drives the verdict.
-- **Allocated bytes per convert**: the gated memory signal, measured under `--no-opt` so it reflects what the code semantically allocates. With the JIT on, TurboFan escape analysis can eliminate several MiB per convert and whether it does depends on inlining heuristics that flip with unrelated code-size changes, node minor, and CPU arch. The JIT-on number is still reported as an informational "allocated (JIT)" row. Measurement pins the semi-space (`--min/max-semi-space-size=256`) so no scavenge fires mid-run and heapUsed delta equals bytes allocated; the minimum over samples reproduces to ~0.03%. Gate: `max(2%, 64 KiB)`.
-- **Rust WASM linear memory**: high-water `memory.buffer.byteLength` after each fixture; isolated memory cases use a fresh WASM instance. The result is exactly deterministic.
+- **Allocated bytes per convert**: Controls the memory verdict. Measurement uses `--no-opt` to exclude allocations removed by JIT optimization. Escape analysis can remove several MiB per conversion. Its results depend on code size, Node.js version, and CPU architecture. The informational "allocated (JIT)" row reports the optimized result.
+  Measurement pins the semi-space with `--min/max-semi-space-size=256` to prevent scavenging during a sample. The `heapUsed` delta then measures allocated bytes. Minimum samples reproduce within about 0.03% in this workload. Gate: `max(2%, 64 KiB)`.
+- **Rust WASM linear memory**: Reports the high-water `memory.buffer.byteLength` after each fixture. Isolated memory cases use a fresh WASM instance.
 
 ## Running Benchmarks
 
@@ -140,7 +151,7 @@ pnpm bench
 
 ### JavaScript Performance
 
-Apples-to-apples comparison of pure JavaScript converters.
+The table compares pure JavaScript converters with the configuration above.
 
 | Input Size | mdream | Turndown | node-html-markdown | rehype-remark |
 |------------|--------|----------|---------------------|---------------|
@@ -159,27 +170,33 @@ For Node.js apps using native bindings via N-API.
 | **1.8 MB** | 🏆 **7.14ms** | 82.9ms *(11.6x)* |
 
 **Key findings:**
-- mdream (js) is 2-4x faster than Turndown, the fastest pure JS competitor
-- rehype-remark (unified ecosystem) is 10-14x slower than mdream despite being one of the most downloaded packages (~4.6M weekly npm downloads)
-- mdream (rust NAPI) is 8-12x faster than the next best Rust NAPI binding
-- node-html-markdown has O(n^2) complexity issues on large files
+
+- In these results, Turndown takes 2.1–4.6x longer than mdream (JS).
+- rehype-remark takes 9.7–14.5x longer than mdream (JS).
+- The tested Rust NAPI binding takes 7.6–11.6x longer than mdream (Rust).
+- node-html-markdown takes 26,072ms on the 1.8 MB fixture.
 
 ### Why mdream is Faster
 
-1. **Custom HTML parser**: Hand-optimized single-pass parser, no intermediate DOM tree
+The engines use these strategies to reduce conversion work.
+The timings above measure their combined effect, rather than each strategy separately.
+
+1. **Custom HTML parser**: Parses input without a browser DOM
 2. **Batch ASCII scanning**: Copies runs of plain text in bulk via `push_str` instead of byte-by-byte
-3. **Turbo-skip excluded content**: Jumps over `<script>`, `<style>`, `<noscript>` content in O(1) instead of processing every byte
+3. **Excluded content**: Scans for closing tags without converting the contents of `<script>`, `<style>`, and `<noscript>`
 4. **TAG_* constants**: Integer IDs for O(1) tag lookups (avoids string comparison)
 5. **Depth tracking array**: O(1) nesting depth lookups per tag type
 6. **Pre-computed prefixes**: Static blockquote/list/heading strings avoid allocation
 7. **Node pooling**: Reuses element allocations instead of repeated heap alloc/dealloc
 8. **Zero-copy where possible**: Cow<str> for URLs, entity decoding, tag names
 9. **Compiled with `opt-level = 3`**: Maximum speed optimization with LTO
-10. **Profile-Guided Optimization (PGO)**: ~20% additional throughput from LLVM branch prediction, inlining, and code layout tuned to real HTML workloads
+10. **Profile-Guided Optimization (PGO)**: The optional `crates/build-pgo.sh` script uses recorded HTML workloads to guide LLVM optimization
 
 ### Why node-html-markdown Degrades on Large Files
 
-The 3496x slowdown on 1.8MB files indicates O(n²) or worse algorithmic complexity, likely from repeated string concatenation or DOM tree traversal patterns. This is not a bug in our benchmark — you can verify by running it yourself.
+node-html-markdown takes about 456x longer than mdream on the 1.8 MB fixture.
+These measurements show a large slowdown, but do not establish its cause or algorithmic complexity.
+Run the benchmarks above to compare results on your machine.
 
 ## Native Rust Benchmark
 
@@ -206,8 +223,9 @@ Separate from the JavaScript benchmark, we compare mdream's Rust engine against 
 | **1.8 MB** | 🏆 **5.20ms** | 34.4ms *(6.6x)* | 💀 >30s | 35.5ms *(6.8x)* | 37.6ms *(7.2x)* | 28.5ms *(5.5x)* |
 
 **Key findings:**
-- mdream is fastest across all input sizes (4-10x faster than all competitors)
-- html2md and html2md-rs have reliability issues (>30s timeouts, panics on valid HTML)
+
+- mdream has the shortest conversion time for every fixture in this table.
+- html2md exceeds 30 seconds on the largest fixture. html2md-rs panics on the smallest fixture.
 
 ### Running Native Rust Benchmarks
 
@@ -225,12 +243,14 @@ cd crates && cargo bench --bench convert_bench
 ## Reproducing Results
 
 Results will vary based on:
+
 - **Hardware**: CPU speed, cache size, memory bandwidth
 - **Node.js version**: V8 optimizations differ between versions
-- **Rust version**: Newer compilers produce better optimized code
+- **Rust version**: Compiler changes affect generated code
 - **System load**: Other processes affect timing
 
 To get comparable results:
+
 1. Close other applications
 2. Run multiple times and compare
 3. Focus on relative performance (X times faster) not absolute times
@@ -257,5 +277,3 @@ If you believe these benchmarks are unfair or misleading:
 1. [Open an issue](https://github.com/harlan-zw/mdream/issues) with specific concerns
 2. Suggest alternative configurations or fixtures
 3. Submit a PR with improved methodology
-
-We're committed to honest, reproducible benchmarks.
