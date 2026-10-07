@@ -93,3 +93,40 @@ fn extraction_reads_the_title_with_frontmatter_on() {
     "Page"
   );
 }
+
+#[test]
+fn title_metadata_decodes_entities_once_in_all_formats_and_streams() {
+  for (encoded, decoded) in [
+    ("A &amp; B", "A & B"),
+    ("&#65; &#x1f984; &copy;", "A 🦄 ©"),
+    ("&amp;copy; &amp;#65;", "&copy; &#65;"),
+  ] {
+    let html = format!("<head><title>{encoded}</title></head><p>Body</p>");
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        frontmatter: Some(FrontmatterConfig::default()),
+        extraction: Some(mdream::ExtractionConfig::new(&["title"])),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let expected = Some(vec![("title".to_string(), decoded.to_string())]);
+    for format in [OutputFormat::Markdown, OutputFormat::Text, OutputFormat::Html] {
+      let result = mdream::html_to_format_result(&html, options.clone(), format);
+      assert_eq!(result.frontmatter, expected);
+      assert_eq!(result.extracted.unwrap()[0].text_content, decoded);
+    }
+    let markdown = mdream::html_to_markdown(&html, options.clone());
+    assert!(markdown.contains(&format!("title: \"{decoded}\"")));
+    for chunk in [1, 3, html.len()] {
+      let mut processor = MarkdownStreamProcessor::new(options.clone());
+      let mut output = String::new();
+      for piece in html.as_bytes().chunks(chunk) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(piece).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, markdown);
+      assert_eq!(processor.frontmatter(), expected);
+    }
+  }
+}

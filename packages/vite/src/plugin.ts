@@ -343,7 +343,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     configurePreviewServer(server) {
       server.middlewares.use(createMarkdownMiddleware(
         () => null,
-        () => server.config.build?.outDir || 'dist',
+        () => path.resolve(server.config.root, server.config.build.outDir),
         'public, max-age=3600',
       ))
     },

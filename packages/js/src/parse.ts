@@ -105,6 +105,7 @@ function isAsciiAlpha(code: number): boolean {
 function shouldProtectDecodedEntityReferences(state: ParseState): boolean {
   const depthMap = state.depthMap
   return !state.plainText
+    && !depthMap[TAG_TITLE]
     && !depthMap[TAG_PRE]
     && !depthMap[TAG_CODE]
     && !isInsideRawHtmlBlock(depthMap)
