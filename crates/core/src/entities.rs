@@ -8,14 +8,10 @@ use generated::{
   lookup_named_entity,
 };
 
+#[cfg(test)]
 #[inline]
 pub(crate) fn decode_html_entities(text: &str) -> Cow<'_, str> {
   decode_html_entities_in_context(text, false, false)
-}
-
-#[inline]
-pub(crate) fn decode_html_entities_for_markdown(text: &str) -> Cow<'_, str> {
-  decode_html_entities_in_context(text, false, true)
 }
 
 #[inline]
@@ -32,11 +28,17 @@ fn decode_html_entities_in_context(
   if !text.as_bytes().contains(&b'&') {
     return Cow::Borrowed(text);
   }
-  Cow::Owned(decode_html_entities_alloc(
+  let mut result = String::new();
+  if decode_html_entities_into(
     text,
     in_attribute,
     protect_decoded_entity_references,
-  ))
+    &mut result,
+  ) {
+    Cow::Owned(result)
+  } else {
+    Cow::Borrowed(text)
+  }
 }
 
 /// Resolve a numeric character reference value per the HTML standard.
@@ -108,23 +110,25 @@ fn push_decoded_reference(
   }
 }
 
-fn decode_html_entities_alloc(
+/// Decode into reusable storage. Leave it empty when no reference changes.
+/// Delaying writes keeps literal ampersands allocation-free.
+pub(crate) fn decode_html_entities_into(
   text: &str,
   in_attribute: bool,
   protect_decoded_entity_references: bool,
-) -> String {
+  result: &mut String,
+) -> bool {
   let bytes = text.as_bytes();
   let len = bytes.len();
-  let mut result = String::with_capacity(len);
+  result.clear();
+  let mut copied = 0;
   let mut i = 0;
 
   while i < len {
     if bytes[i] != b'&' {
-      let plain_start = i;
       while i < len && bytes[i] != b'&' {
         i += 1;
       }
-      result.push_str(&text[plain_start..i]);
       continue;
     }
 
@@ -158,6 +162,10 @@ fn decode_html_entities_alloc(
       }
 
       if end > digit_start {
+        if copied == 0 {
+          result.reserve(len);
+        }
+        result.push_str(&text[copied..i]);
         let replacement = decode_numeric_ref(code_point);
         let next = if end < len && bytes[end] == b';' {
           end + 1
@@ -176,6 +184,7 @@ fn decode_html_entities_alloc(
           end += 1;
         }
         i = end;
+        copied = i;
         continue;
       }
     }
@@ -194,14 +203,19 @@ fn decode_html_entities_alloc(
       && bytes[name_end] == b';'
       && let Some(replacement) = lookup_named_entity(&bytes[name_start..name_end])
     {
+      if copied == 0 {
+        result.reserve(len);
+      }
+      result.push_str(&text[copied..i]);
       push_decoded_reference(
-        &mut result,
+        result,
         replacement,
         bytes,
         name_end + 1,
         protect_decoded_entity_references,
       );
       i = name_end + 1;
+      copied = i;
       continue;
     }
 
@@ -214,14 +228,19 @@ fn decode_html_entities_alloc(
         let ambiguous_attribute =
           in_attribute && next.is_some_and(|byte| byte == b'=' || is_ascii_alphanumeric(byte));
         if !ambiguous_attribute {
+          if copied == 0 {
+            result.reserve(len);
+          }
+          result.push_str(&text[copied..i]);
           push_decoded_reference(
-            &mut result,
+            result,
             replacement,
             bytes,
             legacy_end,
             protect_decoded_entity_references,
           );
           i = legacy_end;
+          copied = i;
           decoded_legacy = true;
         }
         break;
@@ -232,11 +251,15 @@ fn decode_html_entities_alloc(
       continue;
     }
 
-    result.push('&');
     i += 1;
   }
 
-  result
+  if copied == 0 {
+    false
+  } else {
+    result.push_str(&text[copied..]);
+    true
+  }
 }
 
 #[cfg(test)]
