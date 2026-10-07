@@ -16,26 +16,6 @@
 > [!TIP]
 > 🎉 **Try Mdream v2 beta!** Install `mdream@beta`. Use the docs at your installed release tag, or follow [Migrating to v2](#migrating-to-v2).
 
-## Migrating to v2
-
-These docs describe the code in this repository, including changes merged after `2.0.0-beta.1`.
-If you use a published beta, read the docs at its release tag.
-The migration guides also cover upgrades from an earlier v2 beta.
-
-| Package | Migration guide |
-|---|---|
-| `mdream`, browser, edge, and CDN | [Imports, returns, options, and workers](./packages/mdream/README.md#migrating-from-v1) |
-| `@mdream/js` | [Formats, plugins, cleanup, and splitter changes](./packages/js/README.md#migrating-from-v1) |
-| `@mdream/crawl` | [Option renames and crawl defaults](./packages/crawl/README.md#migrating-from-v1) |
-| `@mdream/vite` | [Converter imports and plugin order](./packages/vite/README.md#migrating-from-v1) |
-| `@mdream/nuxt` | [Preset defaults and runtime options](./packages/nuxt/README.md#migrating-from-v1) |
-| `@mdream/action` | [Workflow steps and inputs](./packages/action/README.md#migrating-from-v1) |
-| Rust crate | [Types, features, and splitter options](./crates/core/README.md#migrating-from-v1) |
-
-Before deploying v2, convert sample pages with your application's options and compare the output.
-If you use the JS splitter, rebuild stored chunks and embeddings before your application reads them.
-For your first v2 crawl, set `depth`, `maxPages`, and `artifacts` to limit pages and output files.
-
 <img src=".github/logo.png" alt="mdream logo" width="200">
 
 <p align="center">
@@ -507,6 +487,26 @@ With `minimal: true`, mdream produces up to **92% fewer tokens** than raw HTML i
 | Wikipedia XL (194K) | **152,425** (-21%) | 195,978 (+1%) | 283,136 (+46%) |
 
 Benchmarks run on real-world HTML using [Vitest bench](https://vitest.dev/guide/features.html#benchmarking). See [full methodology and reproduction steps](./bench/README.md).
+
+## Migrating to v2
+
+These docs describe the code in this repository, including changes merged after `2.0.0-beta.1`.
+If you use a published beta, read the docs at its release tag.
+The migration guides also cover upgrades from an earlier v2 beta.
+
+| Package | Migration guide |
+|---|---|
+| `mdream`, browser, edge, and CDN | [Imports, returns, options, and workers](./packages/mdream/README.md#migrating-from-v1) |
+| `@mdream/js` | [Formats, plugins, cleanup, and splitter changes](./packages/js/README.md#migrating-from-v1) |
+| `@mdream/crawl` | [Option renames and crawl defaults](./packages/crawl/README.md#migrating-from-v1) |
+| `@mdream/vite` | [Converter imports and plugin order](./packages/vite/README.md#migrating-from-v1) |
+| `@mdream/nuxt` | [Preset defaults and runtime options](./packages/nuxt/README.md#migrating-from-v1) |
+| `@mdream/action` | [Workflow steps and inputs](./packages/action/README.md#migrating-from-v1) |
+| Rust crate | [Types, features, and splitter options](./crates/core/README.md#migrating-from-v1) |
+
+Before deploying v2, convert sample pages with your application's options and compare the output.
+If you use the JS splitter, rebuild stored chunks and embeddings before your application reads them.
+For your first v2 crawl, set `depth`, `maxPages`, and `artifacts` to limit pages and output files.
 
 ## Credits
 
