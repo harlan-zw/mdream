@@ -12,7 +12,7 @@ Nuxt module for converting HTML pages to Markdown using [mdream](https://github.
 ### Installation
 
 ```bash
-pnpm add @mdream/nuxt@beta
+pnpm add @mdream/nuxt
 ```
 
 Requires Nuxt 3.0.0 or later.
@@ -30,8 +30,8 @@ Bots can omit `.md` when their `Accept` header ranks `text/markdown` or `text/pl
 
 ## Migrating from v1
 
-These docs describe the code in this repository, including changes merged after `2.0.0-beta.1`.
-If you use a published beta, read the README at its release tag.
+These docs cover v2.
+For an earlier release, read the README at its release tag.
 
 - The `mdreamOptions` default is now `{ minimal: true }`.
   The v1 default was `{ preset: 'minimal' }`. mdream never read `preset`, so the minimal preset did not apply.
@@ -390,8 +390,8 @@ Augmented modules:
 
 [MIT License](./LICENSE)
 
-[npm-version-src]: https://img.shields.io/npm/v/@mdream/nuxt/beta.svg?style=flat&colorA=020420&colorB=00DC82
-[npm-version-href]: https://npmjs.com/package/@mdream/nuxt/v/beta
+[npm-version-src]: https://img.shields.io/npm/v/@mdream/nuxt.svg?style=flat&colorA=020420&colorB=00DC82
+[npm-version-href]: https://npmjs.com/package/@mdream/nuxt
 [npm-downloads-src]: https://img.shields.io/npm/dm/@mdream/nuxt.svg?style=flat&colorA=020420&colorB=00DC82
 [npm-downloads-href]: https://npm.chart.dev/@mdream/nuxt
 [license-src]: https://img.shields.io/npm/l/@mdream/nuxt.svg?style=flat&colorA=020420&colorB=00DC82

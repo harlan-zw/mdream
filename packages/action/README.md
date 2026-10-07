@@ -13,19 +13,19 @@ For example, `site-name` becomes `INPUT_SITE-NAME`.
 Remove `chunk-size` or `INPUT_CHUNK-SIZE`; it had no effect.
 The [output names](#outputs) remain the same.
 
-These docs describe the code in this repository, including changes merged after `2.0.0-beta.1`.
-If you use a published beta, read the README at its release tag.
+These docs cover v2.
+For an earlier release, read the README at its release tag.
 
 ## Setup
 
-Run the published v2 beta package after your site build completes. Use Node.js 24 on the runner.
-These examples run the npm distribution directly with `@mdream/action@beta`.
+Run the v2 package after your site build completes. Use Node.js 24 on the runner.
+These examples run the npm distribution directly with `@mdream/action`.
 Inputs use `INPUT_` environment variables. Output names stay the same.
 
 ```yaml
 - name: Generate llms.txt artifacts
   run: |
-    npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action@beta
+    npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action
     node "$RUNNER_TEMP/mdream-action/node_modules/@mdream/action/dist/index.js"
   env:
     INPUT_GLOB: 'dist/**/*.html'
@@ -41,7 +41,7 @@ Inputs use `INPUT_` environment variables. Output names stay the same.
 ```yaml
 - name: Generate llms.txt artifacts
   run: |
-    npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action@beta
+    npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action
     node "$RUNNER_TEMP/mdream-action/node_modules/@mdream/action/dist/index.js"
   env:
     INPUT_GLOB: 'dist/**/*.html'
@@ -89,7 +89,7 @@ jobs:
       - name: Generate llms.txt artifacts
         id: llms
         run: |
-          npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action@beta
+          npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action
           node "$RUNNER_TEMP/mdream-action/node_modules/@mdream/action/dist/index.js"
         env:
           INPUT_GLOB: 'dist/**/*.html'
@@ -123,7 +123,7 @@ Use the action outputs in later steps:
 - name: Generate llms.txt artifacts
   id: llms
   run: |
-    npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action@beta
+    npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action
     node "$RUNNER_TEMP/mdream-action/node_modules/@mdream/action/dist/index.js"
   env:
     INPUT_GLOB: 'dist/**/*.html'
@@ -144,7 +144,7 @@ Use the action outputs in later steps:
 ```yaml
 - name: Generate llms.txt artifacts
   run: |
-    npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action@beta
+    npm install --prefix "$RUNNER_TEMP/mdream-action" @mdream/action
     node "$RUNNER_TEMP/mdream-action/node_modules/@mdream/action/dist/index.js"
   env:
     INPUT_GLOB: 'dist/**/*.html'
