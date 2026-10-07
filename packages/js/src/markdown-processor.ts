@@ -2174,7 +2174,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // parity with Rust core). Scoped to the fence: other block closers
     // (raw-HTML </dd>/</dl>, etc.) intentionally glue.
     let measureFromOutputTail = false
-    if (eventType === NodeEventExit && output) {
+    if (eventType === NodeEventExit && gfmAction?._tag === 'PreExit' && output) {
       for (let i = output.length - 1; i >= 0; i--) {
         const frag = output[i]
         if (frag) {

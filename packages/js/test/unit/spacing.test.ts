@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 
 async function streamConvert(chunks: string[]): Promise<string> {
   const stream = new ReadableStream<string>({
@@ -41,6 +41,33 @@ describe('inline whitespace', () => {
 })
 
 describe('block element followed by inline sibling (#148)', () => {
+  it.each(['```', '~~~'])('keeps normal block spacing for plugin output ending in %s', async (marker) => {
+    const html = '<p>x<br></p><span>after</span>'
+    const options = {
+      plugins: [createPlugin({
+        onNodeExit(node) {
+          if (node.name === 'p')
+            return marker
+        },
+      })],
+    }
+    const expected = `x  \n${marker}\nafter`
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let split = 1; split < html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `split at ${split}`).toBe(expected)
+    }
+  })
+
   it('closes a trailing-blank <pre> fence before an inline link', () => {
     expect(htmlToMarkdown('<div><pre>a\nb\n\n</pre><a href="#x">link</a></div>'))
       .toBe('```\na\nb\n\n\n```\n\n[link](#x)')
