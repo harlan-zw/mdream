@@ -1,3 +1,4 @@
+import { resolve } from 'pathe'
 import { describe, expect, it, vi } from 'vitest'
 
 // Option errors must surface before any request. Fail loudly if one is sent.
@@ -80,7 +81,7 @@ describe('resolveCrawlOptions', () => {
     expect(resolved.artifacts).toEqual(['llms.txt', 'llms-full.txt', 'markdown'])
     expect(resolved.driver).toBe('http')
     expect(resolved.stripBoilerplate).toBe(true)
-    expect(resolved.output).toBe(`${process.cwd()}/output`)
+    expect(resolved.output).toBe(resolve(process.cwd(), 'output'))
   })
 
   it('accepts one sitemap string and adds the https protocol', () => {
