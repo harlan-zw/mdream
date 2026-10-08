@@ -84,10 +84,8 @@ const BATCHABLE_TEXT: [bool; 256] = {
   t
 };
 
-/// A batchable text run this long is emitted as more than one text node, so a
-/// document that is one enormous run streams in a window instead of being held
-/// whole. Only the batchable path splits, and only between words there, which is
-/// why the split cannot be observed in the output.
+/// A text run this long is emitted in pieces of the same source node, so one
+/// enormous run streams in a window instead of being held whole.
 const TEXT_RUN_FLUSH_THRESHOLD: usize = 64 * 1024;
 
 /// How far back a split looks for a usable word boundary. Prose offers one
@@ -95,12 +93,12 @@ const TEXT_RUN_FLUSH_THRESHOLD: usize = 64 * 1024;
 /// that offers none.
 const TEXT_RUN_SPLIT_SCAN: usize = 64;
 
-/// Offset after which a text run may be cut. Prefer a word boundary that keeps
-/// the next piece from looking like a Markdown block. With no such boundary,
-/// leave one byte in the buffer: that byte makes the next piece a continuation
-/// of the same source node rather than a new Markdown line.
+/// Offset after which a text run may be cut. A space settles entity decoding
+/// and escaper lookahead, so any content may be cut there; otherwise, if
+/// `hard_cut`, leave the last scalar, unless it is a space, to continue the node.
 #[inline]
-fn split_point(bytes: &[u8]) -> usize {
+fn split_point(text: &str, hard_cut: bool) -> Option<usize> {
+  let bytes = text.as_bytes();
   let floor = bytes.len().saturating_sub(TEXT_RUN_SPLIT_SCAN);
   let mut index = bytes.len().saturating_sub(1);
   while index > floor {
@@ -111,10 +109,11 @@ fn split_point(bytes: &[u8]) -> usize {
         b' ' | b'#' | b'-' | b'+' | b'>' | b'0'..=b'9'
       )
     {
-      return index;
+      return Some(index + 1);
     }
   }
-  bytes.len() - 2
+  // A tail of one space would be trimmed as the next piece's indentation.
+  Some(text.floor_char_boundary(text.len() - 1)).filter(|&cut| hard_cut && bytes[cut] != SPACE_CHAR)
 }
 
 const GFM_HAZARD_BIT: u8 = 1;
@@ -592,12 +591,13 @@ pub struct ConvertState {
   text_buffer_contains_non_whitespace: bool,
   /// Once a scalar does not fit, the rest of this source text node is dropped.
   text_node_exhausted: bool,
-  /// Bytes in the pending text run that the batchable-ASCII path appended. When
-  /// this equals the run's length the run holds nothing else, which is the only
-  /// state in which the run may be emitted in pieces: any push from another path
-  /// (an entity, a GFM hazard, a literal `<`, rawtext, collapsed whitespace)
-  /// leaves the two unequal without that path having to know about splitting.
+  /// Bytes of the pending run that a hard cut may cross: batchable ASCII,
+  /// collapsed spaces and non-ASCII scalars.
   text_buffer_batchable_len: usize,
+  /// Run length at which `flush_text_run` next looks for a cut.
+  text_run_next_flush: usize,
+  #[cfg(fuzzing)]
+  pub(crate) disable_text_run_flush: bool,
   text_buffer_has_inline_gfm_hazard: bool,
   just_closed_tag: bool,
   is_first_text_in_element: bool,
@@ -937,6 +937,9 @@ impl ConvertState {
       text_buffer_contains_non_whitespace: false,
       text_node_exhausted: false,
       text_buffer_batchable_len: 0,
+      text_run_next_flush: TEXT_RUN_FLUSH_THRESHOLD,
+      #[cfg(fuzzing)]
+      disable_text_run_flush: false,
       text_buffer_has_inline_gfm_hazard: false,
       just_closed_tag: false,
       is_first_text_in_element: false,
@@ -1205,6 +1208,7 @@ impl ConvertState {
   }
 
   fn complete_text_node(&mut self, text_buffer: &mut String) {
+    self.text_run_next_flush = TEXT_RUN_FLUSH_THRESHOLD;
     let exhausted = self.text_node_exhausted;
     if !text_buffer.is_empty() {
       self.process_text_buffer(text_buffer);
@@ -1264,7 +1268,11 @@ impl ConvertState {
   /// its column per text node, so a piece boundary would lose a wrap point.
   #[inline]
   fn text_run_splittable(&self) -> bool {
-    if self.wrap_width != 0 || self.in_raw_html_block() {
+    #[cfg(fuzzing)]
+    if self.disable_text_run_flush {
+      return false;
+    }
+    if self.in_pre || self.in_non_nesting || self.wrap_width != 0 || self.in_raw_html_block() {
       return false;
     }
     // Pieces of a run inside a quote or a heading pile up in the output those
@@ -1297,6 +1305,53 @@ impl ConvertState {
       }
       None => true,
     }
+  }
+
+  /// Bytes the run may grow before `flush_text_run` next looks for a cut.
+  #[inline(always)]
+  fn text_run_room(&self, text_buffer: &str) -> usize {
+    self
+      .text_run_next_flush
+      .saturating_sub(text_buffer.len())
+      .max(1)
+  }
+
+  #[inline(always)]
+  fn flush_text_run(&mut self, text_buffer: &mut String) {
+    if text_buffer.len() >= self.text_run_next_flush {
+      self.cut_text_run(text_buffer);
+    }
+  }
+
+  #[inline(never)]
+  fn cut_text_run(&mut self, text_buffer: &mut String) {
+    if !self.text_run_splittable() {
+      self.text_run_next_flush = text_buffer.len().saturating_add(TEXT_RUN_FLUSH_THRESHOLD);
+      return;
+    }
+    let Some(cut) = split_point(
+      text_buffer,
+      self.text_buffer_batchable_len == text_buffer.len(),
+    ) else {
+      // Retry a scan window later, not at every byte of a long token.
+      self.text_run_next_flush = text_buffer.len().saturating_add(TEXT_RUN_SPLIT_SCAN);
+      return;
+    };
+    self.text_run_next_flush = TEXT_RUN_FLUSH_THRESHOLD;
+    let tail = text_buffer.split_off(cut);
+    self.process_text_buffer_piece(text_buffer, false);
+    self.last_node_is_inline = true;
+    text_buffer.push_str(&tail);
+    self.has_encoded_html_entity = tail.as_bytes().contains(&AMPERSAND_CHAR);
+    self.text_buffer_has_inline_gfm_hazard = tail
+      .bytes()
+      .any(|byte| GFM_BYTE_FLAGS[byte as usize] & GFM_HAZARD_BIT != 0);
+    self.text_buffer_batchable_len = tail
+      .bytes()
+      .filter(|&byte| BATCHABLE_TEXT[byte as usize] || byte == SPACE_CHAR || byte >= 0x80)
+      .count();
+    self.text_buffer_contains_non_whitespace = true;
+    self.text_buffer_contains_whitespace = tail.as_bytes().contains(&SPACE_CHAR);
   }
 
   /// Consumes what it can of `chunk` and returns how many bytes that was. The
@@ -1433,18 +1488,16 @@ impl ConvertState {
         // spaces so prose is copied once per text node, not per word.
         if BATCHABLE_TEXT[cc as usize] && !self.in_non_nesting && !self.in_pre {
           let start = i;
+          let limit = chunk_length.min(i + self.text_run_room(&text_buffer));
           i += 1;
           let mut had_space = false;
           loop {
-            while i < chunk_length && BATCHABLE_TEXT[bytes[i] as usize] {
+            while i < limit && BATCHABLE_TEXT[bytes[i] as usize] {
               i += 1;
             }
             // Doubled, trailing, and pre-tag spaces leave the run to the
             // general path, which keeps its collapsing semantics.
-            if i + 1 < chunk_length
-              && bytes[i] == SPACE_CHAR
-              && BATCHABLE_TEXT[bytes[i + 1] as usize]
-            {
+            if i + 1 < limit && bytes[i] == SPACE_CHAR && BATCHABLE_TEXT[bytes[i + 1] as usize] {
               had_space = true;
               i += 2;
               continue;
@@ -1465,33 +1518,7 @@ impl ConvertState {
           }
           self.last_char_was_whitespace = false;
           self.just_closed_tag = false;
-          // A run with no tag in it would otherwise be held whole, making peak
-          // memory the length of the run rather than a window. These bytes carry
-          // no entity, no GFM hazard and no multi-byte sequence, so a piece
-          // boundary here cannot change decoding or escaping; and because the
-          // buffer is left mid-line, no piece after the first can be read as
-          // opening a block.
-          if text_buffer.len() >= TEXT_RUN_FLUSH_THRESHOLD
-            && self.text_buffer_batchable_len == text_buffer.len()
-            && self.text_run_splittable()
-          {
-            debug_assert!(
-              text_buffer
-                .bytes()
-                .all(|byte| BATCHABLE_TEXT[byte as usize] || byte == SPACE_CHAR),
-              "a run counted as batchable held a byte no split may cross"
-            );
-            let cut = split_point(text_buffer.as_bytes());
-            let tail = text_buffer.split_off(cut + 1);
-            self.process_text_buffer_piece(&mut text_buffer, false);
-            // A hard cut has no whitespace separator. The retained tail is a
-            // continuation of this text node, so it must not gain one either.
-            self.last_node_is_inline = true;
-            text_buffer.push_str(&tail);
-            self.text_buffer_batchable_len = text_buffer.len();
-            self.text_buffer_contains_non_whitespace = true;
-            self.text_buffer_contains_whitespace = tail.as_bytes().contains(&SPACE_CHAR);
-          }
+          self.flush_text_run(&mut text_buffer);
           continue;
         }
 
@@ -1566,8 +1593,10 @@ impl ConvertState {
           } else {
             // ASCII delimiters cannot occur inside UTF-8 code points. Copy the
             // whole non-ASCII run without decoding and pushing each character.
+            let limit =
+              chunk.ceil_char_boundary(chunk_length.min(i + self.text_run_room(&text_buffer)));
             let mut end = i + 1;
-            while end < chunk_length && bytes[end] >= 0x80 {
+            while end < limit && bytes[end] >= 0x80 {
               end += 1;
             }
             self.truncated |= push_capped_text_node(
@@ -1584,10 +1613,13 @@ impl ConvertState {
             self.just_closed_tag = false;
           }
           if cc >= 0x80 {
+            self.text_buffer_batchable_len += text_buffer.len() - before_len;
+            self.flush_text_run(&mut text_buffer);
             continue;
           }
         }
         i += 1;
+        self.flush_text_run(&mut text_buffer);
         continue;
       }
 
@@ -3036,6 +3068,23 @@ mod tests {
   use super::*;
   use crate::MarkdownStreamProcessor;
   use crate::types::{ExtractionConfig, PluginConfig};
+
+  #[test]
+  fn text_pieces_defer_child_counters_until_the_node_ends() {
+    let mut state = ConvertState::new(
+      HtmlToMarkdownOptions::default(),
+      4096,
+      OutputFormat::Markdown,
+    );
+    state.process_html("<p>");
+    let text = "ordinary ~ prose é &amp; text ".repeat(5000);
+    state.process_html(&text);
+    assert_eq!(state.stack[0].current_walk_index, 0);
+    assert_eq!(state.stack[0].child_text_node_index, 0);
+    state.process_html("<span>");
+    assert_eq!(state.stack[0].current_walk_index, 2);
+    assert_eq!(state.stack[0].child_text_node_index, 1);
+  }
 
   #[test]
   fn extracted_script_does_not_backfill_rejected_utf8_slack() {

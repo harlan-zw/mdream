@@ -194,14 +194,7 @@ fn repeat_to(unit: &str, target: usize) -> String {
 const HUGE: usize = 2 * 1024 * 1024;
 const CAP: usize = 64 * 1024;
 
-// The point of the option. Uncapped these cost ~10MB of peak heap for a 2MB
-// document; the cap has to make that a window instead.
-//
-// Plain ASCII prose in a `<p>` is already a window without the cap: a batchable
-// run is flushed in pieces once it passes `TEXT_RUN_FLUSH_THRESHOLD`. That flush
-// only splits a run that is batchable end to end, so a word carrying a non-ASCII
-// byte leaves the run unsplittable and the whole node buffered. The cap is what
-// bounds the runs the flush cannot reach.
+// Prose streams without a cap; preformatted text still needs one.
 #[test]
 fn one_huge_text_node_no_longer_costs_the_document() {
   for (name, html) in [
@@ -213,10 +206,17 @@ fn one_huge_text_node_no_longer_costs_the_document() {
   ] {
     let capped = peak(&html, 8 * 1024, CAP);
     let uncapped = peak(&html, 8 * 1024, 0);
-    assert!(
-      uncapped > (HUGE * 2) as u64,
-      "{name}: fixture should be pathological uncapped, got {uncapped}"
-    );
+    if name == "pre" {
+      assert!(
+        uncapped > (HUGE * 2) as u64,
+        "{name}: uncapped peak {uncapped}"
+      );
+    } else {
+      assert!(
+        uncapped < (HUGE / 4) as u64,
+        "{name}: uncapped peak {uncapped}"
+      );
+    }
     // Measures ~300KB. Loose so it tracks the ceiling, not allocator bookkeeping.
     assert!(
       capped < (HUGE / 4) as u64,
@@ -1040,8 +1040,11 @@ fn ordinary_tables_are_untouched() {
 fn stream_reporting(html: &str, chunk: usize, cap: usize) -> (String, bool) {
   let mut p = MarkdownStreamProcessor::new(options(cap));
   let mut out = String::new();
-  for c in html.as_bytes().chunks(chunk) {
-    out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+  let mut start = 0;
+  while start < html.len() {
+    let end = html.ceil_char_boundary((start + chunk).min(html.len()));
+    out.push_str(&p.process_chunk(&html[start..end]));
+    start = end;
   }
   out.push_str(&p.finish());
   (out, p.truncated())
@@ -1051,10 +1054,7 @@ fn stream_reporting(html: &str, chunk: usize, cap: usize) -> (String, bool) {
 fn truncating_fixtures() -> Vec<(&'static str, String)> {
   let filler = repeat_to("a", 256 * 1024);
   vec![
-    (
-      "text node",
-      format!("<p>{}</p>", repeat_to("word ", 256 * 1024)),
-    ),
+    ("text node", format!("<p>~{}</p>", "a".repeat(256 * 1024))),
     (
       "code block",
       format!(
@@ -2149,5 +2149,169 @@ fn preformatted_whitespace_runs_obey_the_text_byte_cap() {
     actual.push_str(&processor.finish());
     assert_eq!(actual, batch.markdown, "split={split}");
     assert!(processor.truncated());
+  }
+}
+
+#[test]
+fn unicode_prose_streams_without_changing_utf8_or_whitespace() {
+  for unit in [
+    "привет мир ",
+    "é漢😀e\u{301} ",
+    "漢😀é",
+    "word é word ",
+    "é  word\t漢\r\n😀 ",
+    "é # heading - item + item > quote 1. item ",
+  ] {
+    let text = repeat_to(unit, 1100 * 1024);
+    let html = format!("<p>{text}</p>");
+    let expected = html_to_markdown_result(&html, options(0));
+    for width in [1, 2, 3, 7, 4096, 8192, 65536] {
+      let (actual, truncated) = stream_reporting(&html, width, 1024 * 1024);
+      assert!(!truncated, "unit={unit:?} width={width}");
+      assert_eq!(actual, expected.markdown, "unit={unit:?} width={width}");
+    }
+  }
+}
+
+#[test]
+fn entities_settle_at_spaces_and_are_decoded_once() {
+  for entity in [
+    "&amp;",
+    "&copy;",
+    "&notin;",
+    "&notit;",
+    "&#65;",
+    "&#65",
+    "&#x41;",
+    "&#x41",
+    "&#128;",
+    "&amp;copy;",
+    "&#38;copy;",
+    "&",
+    "&&",
+    "&#",
+    "&#x",
+    "&#32;",
+    "&#10;",
+    "&#42;&#42;",
+    "&#95;&#95;",
+    "&#91;&#93;",
+    "&#92;",
+    "&#96;",
+    "&#126;&#126;",
+    "&#124;",
+    "&#60;tag&#62;",
+  ] {
+    let unit = format!("é {entity} ordinary words ");
+    let html = format!("<div>{}</div>", repeat_to(&unit, 160 * 1024));
+    let expected = html_to_markdown_result(&html, options(0));
+    for width in [1, 2, 3, 7, 4096, 8192, 65536] {
+      let (actual, truncated) = stream_reporting(&html, width, 128 * 1024);
+      assert!(!truncated, "entity={entity} width={width}");
+      assert_eq!(actual, expected.markdown, "entity={entity} width={width}");
+    }
+  }
+}
+
+#[test]
+fn entity_prefixes_at_eof_keep_the_original_decode_rules() {
+  let prefix = repeat_to("é ordinary words ", 70 * 1024);
+  for reference in [
+    "&amp;copy;",
+    "&#38;copy;",
+    "&notin;",
+    "&notit;",
+    "&#x80;",
+    "&#65;",
+  ] {
+    for end in 0..=reference.len() {
+      let html = format!("<p>{prefix}{}", &reference[..end]);
+      let expected = html_to_markdown_result(&html, options(0));
+      for width in [1, 3, 7, 4096] {
+        assert_eq!(
+          stream_reporting(&html, width, 128 * 1024),
+          (expected.markdown.clone(), false)
+        );
+      }
+    }
+  }
+}
+
+#[test]
+fn ambiguous_entities_and_no_space_gfm_hazards_keep_the_cap() {
+  for text in [
+    format!("&#{}", "1".repeat(160 * 1024)),
+    format!("&amp;{};", "a".repeat(160 * 1024)),
+    format!("~{}", "é".repeat(80 * 1024)),
+  ] {
+    let html = format!("<p>{text}</p><p>after</p>");
+    let expected = html_to_markdown_result(&html, options(128 * 1024));
+    assert!(expected.truncated);
+    for width in [7, 4096, 8192, 65536, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, width, 128 * 1024),
+        (expected.markdown.clone(), true)
+      );
+    }
+  }
+}
+
+#[test]
+fn hazards_at_safe_spaces_stream_including_whole_input() {
+  for unit in [
+    "ordinary ~ prose é &amp; text ",
+    "** __ ~~ \\\\ `` [[ é ",
+    "é &lt;tag &#60;tag ",
+    "é \\&amp;copy; &#92;&amp;copy; ",
+    "é ] | > # - + 1. text ",
+  ] {
+    let html = format!("<div>{}</div>", repeat_to(unit, 1200 * 1024));
+    let expected = html_to_markdown_result(&html, options(0));
+    for width in [1, 7, 4096, 8192, 65536, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, width, 1024 * 1024),
+        (expected.markdown.clone(), false),
+        "unit={unit:?} width={width}"
+      );
+    }
+  }
+}
+
+#[test]
+fn bounded_appends_keep_threshold_caps_independent_of_chunks() {
+  for unit in [
+    "word ",
+    "é漢😀e\u{301} ",
+    "é &amp;copy; word ",
+    "ordinary ~ text ",
+    "~é",
+  ] {
+    let html = format!("<p>{}</p><p>after</p>", repeat_to(unit, 140 * 1024));
+    for cap in [0, 1, 3, 7, 65535, 65536, 65537, 65599, 128 * 1024] {
+      let expected = html_to_markdown_result(&html, options(cap));
+      for width in [1, 2, 3, 7, 4096, 8192, 65536, html.len()] {
+        assert_eq!(
+          stream_reporting(&html, width, cap),
+          (expected.markdown.clone(), expected.truncated),
+          "unit={unit:?} cap={cap} width={width}"
+        );
+      }
+    }
+  }
+}
+
+#[test]
+fn hard_cuts_keep_whitespace_before_block_opening_continuations() {
+  for continuation in ["10é", "#é", "-é", "+é"] {
+    let body = format!("{}\t{continuation}", "é".repeat(32767) + "a");
+    let html = format!("<p>{body}</p>");
+    let expected = body.replace('\t', " ");
+    for width in [1, 7, 4096, 8192, 65536, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, width, 1024 * 1024),
+        (expected.clone(), false),
+        "continuation={continuation:?} width={width}"
+      );
+    }
   }
 }

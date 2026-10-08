@@ -2,7 +2,9 @@
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
 use mdream::types::*;
-use mdream::{MarkdownStreamProcessor, html_to_markdown_result};
+use mdream::{
+  MarkdownStreamProcessor, html_to_markdown_result, html_to_markdown_without_text_flush,
+};
 
 // Every other target pins `max_node_bytes: 0`, leaving the capped start-tag
 // path unfuzzed. The cap drops a construct on its own length, so one-shot and
@@ -197,6 +199,32 @@ struct Input {
   extraction: bool,
   tailwind: bool,
   surfaced_cdata: bool,
+  prose: Option<Prose>,
+}
+
+#[derive(Arbitrary, Debug)]
+struct Prose {
+  kind: u8,
+  length: u16,
+  context: u8,
+}
+
+type ExtractedFields = Vec<(String, String, String, Vec<(String, String)>)>;
+
+fn extracted_fields(items: Option<Vec<ExtractedElement>>) -> Option<ExtractedFields> {
+  items.map(|items| {
+    items
+      .into_iter()
+      .map(|item| {
+        (
+          item.selector,
+          item.tag_name,
+          item.text_content,
+          item.attributes,
+        )
+      })
+      .collect()
+  })
 }
 
 fn render(input: &Input) -> String {
@@ -222,6 +250,33 @@ fn render(input: &Input) -> String {
     html.push_str("</");
     html.push_str(&name);
     html.push('>');
+  }
+  if let Some(prose) = &input.prose {
+    let (open, close) = match prose.context % 7 {
+      0 => ("<div>", "</div>"),
+      1 => ("<p><span>", "</span></p>"),
+      2 => ("<a href='/x'>", "</a>"),
+      3 => ("<blockquote>", "</blockquote>"),
+      4 => ("<h2>", "</h2>"),
+      5 => ("<pre><code>", "</code></pre>"),
+      _ => ("<a href='/x' title='title'>", "</a>"),
+    };
+    let unit = match prose.kind % 8 {
+      0 => "ordinary words ",
+      1 => "привет é漢😀e\u{301} ",
+      2 => "ordinary ~ prose é &amp;copy; ",
+      3 => "** __ ~~ [[ \\ &#92; &#60;tag ",
+      4 => "&notit; &#x80; &#65 &#x &# ",
+      5 => "# - + > 1. words &#10; ",
+      6 => "&#111111111111111111111111111111111111111111111111111111111111111",
+      _ => "漢😀é",
+    };
+    html.push_str(open);
+    let end = html.len() + 64 * 1024 + usize::from(prose.length);
+    while html.len() < end {
+      html.push_str(unit);
+    }
+    html.push_str(close);
   }
   html
 }
@@ -254,7 +309,11 @@ fuzz_target!(|input: Input| {
   if html.is_empty() {
     return;
   }
-  let cap = input.cap as usize;
+  let cap = if input.prose.is_some() {
+    [0, 7, 65535, 65536, 65537, 65599, 128 * 1024, 1024 * 1024][usize::from(input.cap % 8)]
+  } else {
+    input.cap as usize
+  };
   let one_shot = html_to_markdown_result(&html, options(&input, cap));
 
   let width = (input.chunk_width as usize).max(1);
@@ -262,7 +321,7 @@ fuzz_target!(|input: Input| {
   let mut streamed = String::new();
   let mut start = 0;
   while start < html.len() {
-    let end = (start + width).min(html.len());
+    let end = html.ceil_char_boundary((start + width).min(html.len()));
     streamed.push_str(&processor.process_chunk(&html[start..end]));
     start = end;
   }
@@ -279,8 +338,13 @@ fuzz_target!(|input: Input| {
     "cap={} width={width} html={html:?}",
     input.cap
   );
+  assert_eq!(processor.frontmatter(), one_shot.frontmatter);
+  assert_eq!(
+    extracted_fields(processor.take_extracted()),
+    extracted_fields(one_shot.extracted)
+  );
   if !one_shot.truncated {
-    let uncapped = html_to_markdown_result(&html, options(&input, 0));
+    let uncapped = html_to_markdown_without_text_flush(&html, options(&input, 0));
     assert_eq!(
       one_shot.markdown, uncapped.markdown,
       "untruncated output differs from uncapped: cap={} html={html:?}",

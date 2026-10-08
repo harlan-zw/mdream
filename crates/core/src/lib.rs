@@ -65,7 +65,22 @@ pub fn html_to_format_result(
   format: OutputFormat,
 ) -> MdreamResult {
   let capacity = (html.len() / 3).clamp(1024, 256 * 1024);
-  let mut state = ConvertState::new(options, capacity, format);
+  let state = ConvertState::new(options, capacity, format);
+  convert_with_state(html, state)
+}
+
+// The fuzz oracle uses the same renderer, with size-driven text flushes disabled.
+#[cfg(fuzzing)]
+pub fn html_to_markdown_without_text_flush(
+  html: &str,
+  options: HtmlToMarkdownOptions,
+) -> MdreamResult {
+  let mut state = ConvertState::new(options, 4096, OutputFormat::Markdown);
+  state.disable_text_run_flush = true;
+  convert_with_state(html, state)
+}
+
+fn convert_with_state(html: &str, mut state: ConvertState) -> MdreamResult {
   let consumed = state.process_html(html);
   state.finalize(&html[consumed..]);
 
