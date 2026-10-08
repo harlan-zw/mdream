@@ -1,6 +1,8 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
-use mdream::{MarkdownStreamProcessor, types::HtmlToMarkdownOptions};
+use mdream::{
+  MarkdownStreamProcessor, html_to_markdown_without_text_flush, types::HtmlToMarkdownOptions,
+};
 
 // Feeds one HTML document through the streaming processor split into small,
 // fixed-width chunks (rounded up to char boundaries). Unlike `fuzz_streaming`
@@ -19,15 +21,41 @@ fuzz_target!(|data: &[u8]| {
   };
   let html = String::from_utf8_lossy(html_bytes);
 
-  let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+  let generated = html_bytes.first() == Some(&0xff);
+  let html = if generated {
+    let unit = String::from_utf8_lossy(&html_bytes[1..]).replace('<', "&lt;");
+    if unit.is_empty() {
+      return;
+    }
+    let mut body = String::from("<p>");
+    while body.len() < 128 * 1024 {
+      body.push_str(&unit);
+    }
+    body.push_str("</p>");
+    body
+  } else {
+    html.into_owned()
+  };
+  let cap = if generated { 1024 * 1024 } else { 0 };
+  let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions {
+    max_node_bytes: cap,
+    ..Default::default()
+  });
+  let mut streamed = String::new();
   let mut start = 0;
   while start < html.len() {
-    let mut end = (start + width).min(html.len());
-    while end < html.len() && !html.is_char_boundary(end) {
-      end += 1;
+    let end = html.ceil_char_boundary((start + width).min(html.len()));
+    let piece = processor.process_chunk(&html[start..end]);
+    if generated {
+      streamed.push_str(&piece);
     }
-    let _ = processor.process_chunk(&html[start..end]);
     start = end;
   }
-  let _ = processor.finish();
+  let last = processor.finish();
+  if generated {
+    streamed.push_str(&last);
+    let oracle = html_to_markdown_without_text_flush(&html, HtmlToMarkdownOptions::default());
+    assert!(!processor.truncated());
+    assert_eq!(streamed, oracle.markdown);
+  }
 });
