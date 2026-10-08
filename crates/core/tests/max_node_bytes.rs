@@ -2315,3 +2315,16 @@ fn hard_cuts_keep_whitespace_before_block_opening_continuations() {
     }
   }
 }
+
+#[test]
+fn every_space_is_a_cut_candidate_whatever_its_phase() {
+  // A `~` forbids hard cuts, so only a space can bound the run.
+  let period = "a".repeat(63) + " ";
+  for phase in 0..64 {
+    let html = format!("<p>~{}{}</p>", "a".repeat(phase), period.repeat(4096));
+    for width in [7, 4096] {
+      let (_, truncated) = stream_reporting(&html, width, 128 * 1024);
+      assert!(!truncated, "phase={phase} width={width}");
+    }
+  }
+}
