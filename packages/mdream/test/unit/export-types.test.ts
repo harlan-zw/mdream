@@ -6,15 +6,10 @@ import { describe, expect, it } from 'vitest'
 // `browser` condition, the root keeps the synchronous types: its stub throws
 // when called. Type checks fixtures in test/types against the built dist/*.d.mts.
 const typesDir = fileURLToPath(new URL('../types/', import.meta.url))
+const tsc = fileURLToPath(new URL('./bin/tsc', import.meta.resolve('@typescript/native/package.json')))
 
 function typecheck(condition: string): string {
-  try {
-    execFileSync('pnpm', ['exec', 'tsc', '-p', `tsconfig.${condition}.json`], { cwd: typesDir, encoding: 'utf8', stdio: 'pipe' })
-    return ''
-  }
-  catch (error: any) {
-    return `${error.stdout}${error.stderr}`
-  }
+  return execFileSync(process.execPath, [tsc, '-p', `tsconfig.${condition}.json`], { cwd: typesDir, encoding: 'utf8', stdio: 'pipe' })
 }
 
 describe('export condition types', () => {

@@ -269,16 +269,20 @@ jobs:
         working-directory: crates/edge/test-worker
         run: pnpm test
 
-  # ── Node.js integration tests (all OSes on main, Linux-only on PRs) ──
+  # ── Node.js integration tests (all OSes on main, Linux and Windows on PRs) ──
   node-test:
     strategy:
       fail-fast: false
       matrix:
         os: ${{ github.event_name == 'push' &&
           fromJSON('["ubuntu-latest","macos-latest","windows-latest"]') ||
-          fromJSON('["ubuntu-latest"]') }}
+          fromJSON('["ubuntu-latest","windows-latest"]') }}
     name: Node Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Await pnpm on Windows; the PowerShell shim leaves orphan processes.
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
