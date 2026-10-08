@@ -22,6 +22,38 @@ const ROBOTS_CRAWL_DELAY_RE = /Crawl-delay:\s*(\d+(?:\.\d+)?)/i
 const URL_TRAILING_SLASH_RE = /\/$/
 const URL_PATH_UNSAFE_CHARS_RE = /[^\w\-]/g
 const FRONTMATTER_BLOCK_RE = /^---[^\n]*\n[\s\S]*?\n---[^\n]*\n?/
+const WINDOWS_DEVICE_NAMES = new Set([
+  'con',
+  'prn',
+  'aux',
+  'nul',
+  'com1',
+  'com2',
+  'com3',
+  'com4',
+  'com5',
+  'com6',
+  'com7',
+  'com8',
+  'com9',
+  'lpt1',
+  'lpt2',
+  'lpt3',
+  'lpt4',
+  'lpt5',
+  'lpt6',
+  'lpt7',
+  'lpt8',
+  'lpt9',
+])
+
+function sanitizeOutputSegment(segment: string): string {
+  const safe = segment.replace(URL_PATH_UNSAFE_CHARS_RE, '-')
+  // A tilde cannot occur after sanitation, so escaping introduces no collision.
+  return safe.length >= 3 && safe.length <= 4 && WINDOWS_DEVICE_NAMES.has(safe.toLowerCase())
+    ? `~${safe}`
+    : safe
+}
 
 // Known tracking / session query params to strip during URL normalization
 const TRACKING_PARAMS = new Set([
@@ -629,9 +661,9 @@ export async function runCrawl(options: ResolvedCrawlOptions, onProgress?: (prog
     if (shouldProcessMarkdown && writeMarkdown) {
       const urlPath = parsedUrl.pathname === '/' ? '/index' : parsedUrl.pathname
       // Namespace by hostname when subdomains are enabled to avoid path collisions
-      const hostPrefix = allowSubdomains ? [parsedUrl.hostname.replace(URL_PATH_UNSAFE_CHARS_RE, '-')] : []
+      const hostPrefix = allowSubdomains ? [sanitizeOutputSegment(parsedUrl.hostname)] : []
       const pathSegments = urlPath.replace(URL_TRAILING_SLASH_RE, '').split('/').filter(seg => seg.length > 0)
-      const safeSegments = [...hostPrefix, ...pathSegments.map(seg => seg.replace(URL_PATH_UNSAFE_CHARS_RE, '-'))]
+      const safeSegments = [...hostPrefix, ...pathSegments.map(sanitizeOutputSegment)]
       const filename = safeSegments.length > 0 ? safeSegments.join('/') : 'index'
       const safeFilename = normalize(`${filename}.md`)
 
