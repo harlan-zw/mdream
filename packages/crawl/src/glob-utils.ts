@@ -1,7 +1,7 @@
 import type { ParsedUrlPattern } from './types.ts'
 import picomatch from 'picomatch'
 import { getDomain } from 'tldts'
-import { withHttps } from 'ufo'
+import { hasProtocol, withHttps } from 'ufo'
 
 function stripGlobTail(s: string): string {
   const idx = s.indexOf('*')
@@ -106,8 +106,9 @@ export function matchesGlobPattern(url: string, parsedPattern: ParsedUrlPattern,
  * For https://nuxtseo.com/docs/**, we want to start at https://nuxtseo.com
  */
 export function getStartingUrl(parsedPattern: ParsedUrlPattern): string {
+  const baseUrl = hasProtocol(parsedPattern.baseUrl) ? parsedPattern.baseUrl : withHttps(parsedPattern.baseUrl)
   if (!parsedPattern.isGlob) {
-    return withHttps(parsedPattern.baseUrl)
+    return baseUrl
   }
 
   // For glob patterns, start at the base URL or go up to the first non-glob directory
@@ -115,7 +116,7 @@ export function getStartingUrl(parsedPattern: ParsedUrlPattern): string {
   const firstGlobIndex = pattern.search(GLOB_CHAR_RE)
 
   if (firstGlobIndex === -1) {
-    return withHttps(parsedPattern.baseUrl + pattern)
+    return baseUrl + pattern
   }
 
   // Find the last complete directory before the glob
@@ -123,7 +124,7 @@ export function getStartingUrl(parsedPattern: ParsedUrlPattern): string {
   const lastSlash = beforeGlob.lastIndexOf('/')
   const pathBeforeGlob = lastSlash >= 0 ? beforeGlob.substring(0, lastSlash + 1) : '/'
 
-  return withHttps(parsedPattern.baseUrl + pathBeforeGlob)
+  return baseUrl + pathBeforeGlob
 }
 
 /**

@@ -486,12 +486,8 @@ impl ConvertState {
       .stack
       .last()
       .is_some_and(|p| p.tag_id == Some(TAG_TITLE));
-    if in_title && self.has_frontmatter && self.frontmatter_in_head && !excludes_text_nodes {
-      let val = text_buffer.trim().to_string();
-      if !val.is_empty() {
-        self.frontmatter_title = Some(val);
-      }
-    }
+    let capture_title =
+      in_title && self.has_frontmatter && self.frontmatter_in_head && !excludes_text_nodes;
     // `<title>` is document metadata that browsers never render. Its text
     // still reaches frontmatter and extraction, but never the output.
     if in_title {
@@ -549,7 +545,7 @@ impl ConvertState {
     }
 
     if self.has_encoded_html_entity {
-      let protect_decoded_entity_references = self.is_markdown()
+      let protect_decoded_entity_references = !in_title && self.is_markdown()
         && self.depth_map[TAG_PRE as usize] == 0
         && self.depth_map[TAG_CODE as usize] == 0
         && !self.in_raw_html_block();
@@ -562,6 +558,13 @@ impl ConvertState {
         std::mem::swap(&mut text, &mut self.entity_buffer);
       }
       self.has_encoded_html_entity = false;
+    }
+
+    if capture_title {
+      let val = text.trim();
+      if !val.is_empty() {
+        self.frontmatter_title = Some(val.to_string());
+      }
     }
 
     if self.has_tailwind
