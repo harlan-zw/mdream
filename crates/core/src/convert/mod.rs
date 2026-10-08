@@ -88,18 +88,17 @@ const BATCHABLE_TEXT: [bool; 256] = {
 /// enormous run streams in a window instead of being held whole.
 const TEXT_RUN_FLUSH_THRESHOLD: usize = 64 * 1024;
 
-/// How far back a split looks for a usable word boundary. Prose offers one
-/// within a word or two; giving up keeps the scan off the hot path for input
-/// that offers none.
+/// How much a run grows between scans for a usable word boundary. Prose offers
+/// one within a word or two; giving up keeps the scan off the hot path for
+/// input that offers none.
 const TEXT_RUN_SPLIT_SCAN: usize = 64;
 
 /// Offset after which a text run may be cut. A space settles entity decoding
 /// and escaper lookahead, so any content may be cut there; otherwise, if
 /// `hard_cut`, leave the last scalar, unless it is a space, to continue the node.
 #[inline]
-fn split_point(text: &str, hard_cut: bool) -> Option<usize> {
+fn split_point(text: &str, floor: usize, hard_cut: bool) -> Option<usize> {
   let bytes = text.as_bytes();
-  let floor = bytes.len().saturating_sub(TEXT_RUN_SPLIT_SCAN);
   let mut index = bytes.len().saturating_sub(1);
   while index > floor {
     index -= 1;
@@ -1329,8 +1328,14 @@ impl ConvertState {
       self.text_run_next_flush = text_buffer.len().saturating_add(TEXT_RUN_FLUSH_THRESHOLD);
       return;
     }
+    // Reach back to the last byte the previous scan saw, which it could not
+    // judge without the byte after it.
+    let floor = self
+      .text_run_next_flush
+      .saturating_sub(TEXT_RUN_SPLIT_SCAN + 1);
     let Some(cut) = split_point(
       text_buffer,
+      floor,
       self.text_buffer_batchable_len == text_buffer.len(),
     ) else {
       // Retry a scan window later, not at every byte of a long token.
