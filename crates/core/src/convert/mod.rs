@@ -304,6 +304,63 @@ fn trim_ascii_whitespace_end(value: &str) -> usize {
   len
 }
 
+/// A run of matching bytes at the end of the buffer's held tail, carried between chunks so a
+/// run that keeps growing is read once rather than on every chunk.
+#[derive(Clone, Copy, Debug, Default)]
+struct TailRun {
+  end: usize,
+  start: usize,
+  #[cfg(test)]
+  read: usize,
+}
+
+impl TailRun {
+  /// Start of the run of `is_run` bytes ending at `end`.
+  fn start(&mut self, bytes: &[u8], end: usize, is_run: impl Fn(u8) -> bool) -> usize {
+    let floor = if self.end <= end { self.end } else { 0 };
+    let mut start = end;
+    while start > floor && is_run(bytes[start - 1]) {
+      start -= 1;
+    }
+    #[cfg(test)]
+    {
+      self.read += end - start + 1;
+    }
+    if start == floor && floor != 0 {
+      start = self.start;
+    }
+    // A rewrite that skips `note_buffer_rewrite` would leave the carried run stale. Checked
+    // over a bounded window so debug builds stay linear.
+    debug_assert!(start == 0 || !is_run(bytes[start - 1]));
+    debug_assert_eq!(
+      (end - start).min(4096),
+      bytes[..end]
+        .iter()
+        .rev()
+        .take(4096)
+        .take_while(|&&b| is_run(b))
+        .count()
+    );
+    self.end = end;
+    self.start = start;
+    start
+  }
+
+  /// Bytes from `offset` on changed: keep only the part of the run before it.
+  fn note_rewrite(&mut self, offset: usize) {
+    if offset < self.start {
+      (self.start, self.end) = (0, 0);
+    } else {
+      self.end = self.end.min(offset);
+    }
+  }
+
+  fn note_drain(&mut self, removed: usize) {
+    self.start = self.start.saturating_sub(removed);
+    self.end = self.end.saturating_sub(removed);
+  }
+}
+
 fn heap_sort_heading_slugs(slugs: &mut [String]) {
   fn sift_down(slugs: &mut [String], mut root: usize, end: usize) {
     let mut child = root * 2 + 1;
@@ -698,6 +755,15 @@ pub struct ConvertState {
   heading_runs: [(usize, usize); 2],
   /// Lowest buffer offset rewritten or removed since `heading_runs` was measured.
   heading_run_dirty_from: usize,
+  /// The trailing whitespace, `<pre>` space and heading `#` runs `get_markdown_chunk`
+  /// holds back.
+  held_whitespace: TailRun,
+  held_spaces: TailRun,
+  held_heading_run: TailRun,
+  /// Bytes at the buffer start known to be whitespace, for the leading trim.
+  leading_whitespace: usize,
+  #[cfg(test)]
+  leading_whitespace_read: usize,
   /// Upper bound on the `<br>` output held until text follows it, counted as
   /// breaks are deferred.
   held_break_bytes: usize,
@@ -1010,6 +1076,12 @@ impl ConvertState {
       heading_hash_run: 0,
       heading_runs: [(0, 0); 2],
       heading_run_dirty_from: usize::MAX,
+      held_whitespace: TailRun::default(),
+      held_spaces: TailRun::default(),
+      held_heading_run: TailRun::default(),
+      leading_whitespace: 0,
+      #[cfg(test)]
+      leading_whitespace_read: 0,
       held_break_bytes: 0,
       held_output_exceeded: false,
       table_header_cells: 0,
@@ -2467,6 +2539,12 @@ impl ConvertState {
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
+    self.held_whitespace.note_rewrite(offset);
+    self.held_spaces.note_rewrite(offset);
+    self.held_heading_run.note_rewrite(offset);
+    if offset < self.leading_whitespace {
+      self.leading_whitespace = 0;
+    }
     if offset < self.blockquote_line_scanned_to {
       self.blockquote_line_scanned_to = 0;
       self.blockquote_line_end = 0;
@@ -2489,6 +2567,10 @@ impl ConvertState {
       *run = (*run).min(*end);
     }
     self.heading_run_dirty_from = self.heading_run_dirty_from.saturating_sub(removed);
+    self.held_whitespace.note_drain(removed);
+    self.held_spaces.note_drain(removed);
+    self.held_heading_run.note_drain(removed);
+    self.leading_whitespace = 0;
     if self.hard_break_end != usize::MAX {
       self.hard_break_end = self
         .hard_break_end
@@ -2584,36 +2666,39 @@ impl ConvertState {
     // wrote. Finalize trims that, so it has to stay held back like any other
     // block's; only past the fence is trailing whitespace significant code.
     let in_pre = self.depth_map[TAG_PRE as usize] != 0 && self.pre_fence_owner_depth != 0;
-    let mut stable_end = self.buffer.trim_end_matches(' ').len();
-    if in_pre {
-      if self.last_text_node_contains_whitespace {
-        // A trailing whitespace run in the current text node stays mutable
-        // until its inline/code element closes. That close trims ASCII
-        // whitespace, so hold the whole run rather than yielding bytes it may
-        // retract later.
-        stable_end = trim_ascii_whitespace_end(&self.buffer);
-      } else if stable_end < buf_len {
-        // Other trailing spaces inside <pre> are significant code. A
-        // line-leading run is the exception: list continuation indentation is
-        // emitted before the next sibling is known and can still be replaced
-        // by its list marker.
-        let line_leading = stable_end == 0 || self.buffer.as_bytes()[stable_end - 1] == b'\n';
-        if !line_leading {
-          stable_end = buf_len;
-        }
+    // A block close or document finalization may still trim trailing block
+    // spacing. Keep newlines buffered until following content makes them
+    // stable, since yielded bytes cannot be retracted. The trims that reach
+    // back here take the whole ASCII set, so holding only `\n` and ` ` leaks
+    // a trailing tab that a later trim then removes from the buffer alone.
+    // Inside <pre>, that holds for a trailing whitespace run in the current
+    // text node: it stays mutable until its inline/code element closes.
+    let mut stable_end = self
+      .held_whitespace
+      .start(self.buffer.as_bytes(), buf_len, |b| b.is_ascii_whitespace());
+    if in_pre && !self.last_text_node_contains_whitespace {
+      // Other trailing spaces inside <pre> are significant code. A
+      // line-leading run is the exception: list continuation indentation is
+      // emitted before the next sibling is known and can still be replaced
+      // by its list marker.
+      stable_end = self
+        .held_spaces
+        .start(self.buffer.as_bytes(), buf_len, |b| b == b' ');
+      if stable_end > 0 && self.buffer.as_bytes()[stable_end - 1] != b'\n' {
+        stable_end = buf_len;
       }
-    } else {
-      // A block close or document finalization may still trim trailing block
-      // spacing. Keep newlines buffered until following content makes them
-      // stable, since yielded bytes cannot be retracted. The trims that reach
-      // back here take the whole ASCII set, so holding only `\n` and ` ` leaks
-      // a trailing tab that a later trim then removes from the buffer alone.
-      stable_end = stable_end.min(trim_ascii_whitespace_end(&self.buffer));
     }
     let leading = if self.preserve_leading_whitespace || self.has_streamed_output {
       0
     } else {
-      buf_len - self.buffer.trim_start().len()
+      let rest = &self.buffer[self.leading_whitespace..];
+      let run = rest.len() - rest.trim_start().len();
+      #[cfg(test)]
+      {
+        self.leading_whitespace_read += run + 1;
+      }
+      self.leading_whitespace += run;
+      self.leading_whitespace
     };
     // An open inline marker may still be dropped if its element closes empty in a later chunk;
     // hold the buffer at the earliest such marker so already-yielded output is never rewritten.
@@ -2654,12 +2739,11 @@ impl ConvertState {
     // instead releases a run that the marker's own drop makes trailing again,
     // and the exit then inserts its `\` into bytes already sent.
     if self.in_heading() {
-      let bytes = self.buffer.as_bytes();
-      let mut end = stable_end.min(bytes.len());
-      while end > 0 && matches!(bytes[end - 1], b'#' | b' ' | b'\t') {
-        end -= 1;
-      }
-      stable_end = end;
+      let is_run = |b: u8| matches!(b, b'#' | b' ' | b'\t');
+      let end = stable_end.min(buf_len);
+      stable_end = self
+        .held_heading_run
+        .start(self.buffer.as_bytes(), end, is_run);
     }
     if !self.streaming_break_runs.is_empty() {
       // A run is final once content follows it. Find the last content byte once:
@@ -3141,6 +3225,33 @@ mod tests {
       assert!(
         read <= 2 * html.len(),
         "{filler}: read {read} bytes of a {}-byte input",
+        html.len()
+      );
+    }
+  }
+
+  // A held tail that only grows must not be read again on every chunk.
+  #[test]
+  fn a_growing_held_tail_is_read_once() {
+    for (name, unit, prefix) in [
+      ("trailing whitespace", "&#32;&#32;</b>", "<p>x"),
+      ("leading whitespace", "&nbsp;</b>", ""),
+      ("heading run", "#<span>#</span>", "<h2>x "),
+      ("spaces in a code block", "&#32;&#32;</b>", "<pre><code>"),
+    ] {
+      let html = format!("{prefix}{}", unit.repeat(20_000));
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      for chunk in html.as_bytes().chunks(64) {
+        processor.process_chunk(std::str::from_utf8(chunk).unwrap());
+      }
+      let state = &processor.state;
+      let read = state.held_whitespace.read
+        + state.held_spaces.read
+        + state.held_heading_run.read
+        + state.leading_whitespace_read;
+      assert!(
+        read <= 2 * html.len(),
+        "{name}: read {read} bytes of a {}-byte input",
         html.len()
       );
     }
