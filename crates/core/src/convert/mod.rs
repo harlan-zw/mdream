@@ -1299,6 +1299,10 @@ impl ConvertState {
     if self.empty_item_hazard {
       self.settle_item_marker();
     }
+    self.check_held_output();
+  }
+
+  fn check_held_output(&mut self) {
     if self.options.max_node_bytes != 0
       && !self.held_output_exceeded
       && self.held_output_exceeds_cap()
@@ -1387,11 +1391,13 @@ impl ConvertState {
       .max(1)
   }
 
+  /// Returns whether held output is past the cap.
   #[inline(always)]
-  fn flush_text_run(&mut self, text_buffer: &mut String) {
+  fn flush_text_run(&mut self, text_buffer: &mut String) -> bool {
     if text_buffer.len() >= self.text_run_next_flush {
       self.cut_text_run(text_buffer);
     }
+    self.held_output_exceeded
   }
 
   #[inline(never)]
@@ -1417,6 +1423,8 @@ impl ConvertState {
     self.text_run_next_flush = TEXT_RUN_FLUSH_THRESHOLD;
     let tail = text_buffer.split_off(cut);
     self.process_text_buffer_piece(text_buffer, false);
+    // A blank link's text can outgrow the cap within a single run.
+    self.check_held_output();
     self.last_node_is_inline = true;
     text_buffer.push_str(&tail);
     self.has_encoded_html_entity = tail.as_bytes().contains(&AMPERSAND_CHAR);
@@ -1595,7 +1603,9 @@ impl ConvertState {
           }
           self.last_char_was_whitespace = false;
           self.just_closed_tag = false;
-          self.flush_text_run(&mut text_buffer);
+          if self.flush_text_run(&mut text_buffer) {
+            return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+          }
           continue;
         }
 
@@ -1691,12 +1701,16 @@ impl ConvertState {
           }
           if cc >= 0x80 {
             self.text_buffer_batchable_len += text_buffer.len() - before_len;
-            self.flush_text_run(&mut text_buffer);
+            if self.flush_text_run(&mut text_buffer) {
+              return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+            }
             continue;
           }
         }
         i += 1;
-        self.flush_text_run(&mut text_buffer);
+        if self.flush_text_run(&mut text_buffer) {
+          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+        }
         continue;
       }
 

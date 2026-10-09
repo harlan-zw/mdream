@@ -1914,6 +1914,17 @@ fn a_long_text_run_held_back_is_capped() {
       format!("<h2><a href=\"#x\">{}</a></h2>", repeat_to("a b ", HUGE)),
       self_links,
     ),
+    (
+      "blank link text",
+      format!("<p><a href=\"/x\">{}</a></p>", repeat_to("\u{3000} ", HUGE)),
+      HtmlToMarkdownOptions {
+        clean: Some(CleanConfig {
+          empty_link_text: true,
+          ..Default::default()
+        }),
+        ..options(cap)
+      },
+    ),
   ] {
     // Measured 2-5x the document before, a quarter to a half of it now.
     let capped = peak_with(&html, 4096, opts.clone());
