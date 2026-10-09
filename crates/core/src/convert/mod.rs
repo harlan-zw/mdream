@@ -2345,10 +2345,7 @@ impl ConvertState {
       let buf_len = self.buffer.len();
       let mut read = 0usize;
       let mut write = 0usize;
-      // SAFETY: every removal boundary sits on validated ASCII `[`, `]` or `)`
-      // delimiters, so moving whole runs cannot split a UTF-8 sequence.
-      #[allow(unsafe_code)]
-      let bytes = unsafe { self.buffer.as_mut_vec() };
+      let mut bytes = std::mem::take(&mut self.buffer).into_bytes();
       for (remove_start, remove_end) in &removals {
         // A duplicate range (an aliased bracket shared with a nested anchor)
         // is already dropped; skip it without copying.
@@ -2369,6 +2366,9 @@ impl ConvertState {
         }
         bytes.truncate(write);
       }
+      // Removals end on validated ASCII delimiters, so this cannot fail.
+      self.buffer = String::from_utf8(bytes)
+        .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
     }
     if !self.streaming_break_runs.is_empty() {
       let extra_len = self.streaming_break_runs.iter().fold(0usize, |total, run| {

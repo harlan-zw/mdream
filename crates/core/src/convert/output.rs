@@ -1753,21 +1753,9 @@ impl ConvertState {
             && href.starts_with('#')
             && text_len > 0
           {
-            // Remove [ and keep text only — use truncate+copy without intermediate String
-            let new_len = bracket_pos + text_len;
-            // SAFETY: bracket_pos < text_start are within buffer bounds (guarded above).
-            // We copy link text backwards over "[", then truncate. Preserves valid UTF-8.
+            // Drop the `[`, keeping the text.
             self.note_buffer_rewrite(bracket_pos);
-            #[allow(unsafe_code)]
-            unsafe {
-              let buf = self.buffer.as_mut_vec();
-              std::ptr::copy(
-                buf.as_ptr().add(text_start),
-                buf.as_mut_ptr().add(bracket_pos),
-                text_len,
-              );
-              buf.set_len(new_len);
-            }
+            self.buffer.remove(bracket_pos);
             self.last_content_cache_len = text_len;
             self.end_link();
             self.last_node_is_inline = is_inline;
@@ -1786,20 +1774,9 @@ impl ConvertState {
           && link_text == resolved.as_ref()
           && text_len > 0
         {
-          // Remove [ and keep text only — use truncate+copy without intermediate String
-          let new_len = bracket_pos + text_len;
-          // SAFETY: same invariants as self-link heading case. Preserves valid UTF-8.
+          // Drop the `[`, keeping the text.
           self.note_buffer_rewrite(bracket_pos);
-          #[allow(unsafe_code)]
-          unsafe {
-            let buf = self.buffer.as_mut_vec();
-            std::ptr::copy(
-              buf.as_ptr().add(text_start),
-              buf.as_mut_ptr().add(bracket_pos),
-              text_len,
-            );
-            buf.set_len(new_len);
-          }
+          self.buffer.remove(bracket_pos);
           self.last_content_cache_len = text_len;
           self.end_link();
           self.last_node_is_inline = is_inline;
