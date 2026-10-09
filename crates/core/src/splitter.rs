@@ -82,11 +82,8 @@ fn strip_markdown_formatting(text: &str) -> String {
     result.push(b);
     i += 1;
   }
-  // SAFETY: result contains only bytes copied from a valid UTF-8 &str with
-  // single-byte ASCII formatting characters (*, _, `) removed. Removing
-  // single-byte ASCII from valid UTF-8 always yields valid UTF-8.
-  #[allow(unsafe_code)]
-  let s = unsafe { String::from_utf8_unchecked(result) };
+  // Removing ASCII bytes from valid UTF-8 leaves valid UTF-8, so this cannot fail.
+  let s = String::from_utf8(result).unwrap_or_default();
   let trimmed = s.trim();
   trimmed.to_string()
 }

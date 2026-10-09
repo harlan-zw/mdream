@@ -168,50 +168,47 @@ pub(crate) fn strip_tracking_params_owned(mut url: String) -> String {
     return url;
   }
   let query_start = qmark + 1;
-  let query_end = url[query_start..]
+  let mut query_end = url[query_start..]
     .find('#')
     .map_or(url.len(), |i| query_start + i);
-  // SAFETY: separators define UTF-8 boundaries. Complete runs move left,
-  // leaving unread bytes intact. Truncation restores UTF-8 before releasing
-  // the vector borrow; intermediate stale bytes are never read as strings.
-  #[allow(unsafe_code)]
-  unsafe {
-    let bytes = url.as_mut_vec();
-    let mut read = query_start;
-    let mut write = query_start;
-    loop {
-      let end = bytes[read..query_end]
-        .iter()
-        .position(|&b| b == b'&')
-        .map_or(query_end, |i| read + i);
-      let param = &bytes[read..end];
-      let key_end = param.iter().position(|&b| b == b'=').unwrap_or(param.len());
-      let key = &param[..key_end];
-      if !TRACKING_PREFIXES
-        .iter()
-        .any(|prefix| key.starts_with(prefix.as_bytes()))
-      {
-        // Leading empty fields disappear. Empty fields after content keep
-        // their separator, matching the existing cleaning behavior.
-        if write > query_start {
-          bytes[write] = b'&';
-          write += 1;
-        }
-        if write != read {
-          bytes.copy_within(read..end, write);
-        }
-        write += end - read;
-      }
-      if end == query_end {
-        break;
-      }
-      read = end + 1;
+  // Visit fields last to first, so a removal never moves one still to visit. A
+  // dropped field takes the `&` before it, or the one after it when it is first.
+  let mut end = query_end;
+  loop {
+    let bytes = url.as_bytes();
+    let start = bytes[query_start..end]
+      .iter()
+      .rposition(|&b| b == b'&')
+      .map_or(query_start, |i| query_start + i + 1);
+    let field = &bytes[start..end];
+    let key = &field[..field.iter().position(|&b| b == b'=').unwrap_or(field.len())];
+    if TRACKING_PREFIXES
+      .iter()
+      .any(|prefix| key.starts_with(prefix.as_bytes()))
+    {
+      let range = if start > query_start {
+        start - 1..end
+      } else {
+        start..(end + 1).min(query_end)
+      };
+      query_end -= range.len();
+      url.drain(range);
     }
-    if write == query_start {
-      write = qmark;
+    if start == query_start {
+      break;
     }
-    bytes.copy_within(query_end.., write);
-    bytes.truncate(write + bytes.len() - query_end);
+    end = start - 1;
+  }
+  // Leading empty fields disappear, and so does a `?` left without a query.
+  let leading = url.as_bytes()[query_start..query_end]
+    .iter()
+    .take_while(|&&b| b == b'&')
+    .count();
+  if leading > 0 {
+    url.drain(query_start..query_start + leading);
+  }
+  if query_end - leading == query_start {
+    url.remove(qmark);
   }
   url
 }
