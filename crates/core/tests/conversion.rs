@@ -5195,9 +5195,13 @@ fn lt_before_a_non_letter_is_text_not_a_tag() {
   // `_` is still escaped for Markdown; only the tag/text decision changed.
   assert_eq!(convert("<p>x <_y>z</p>"), "x <\\_y>z");
 
-  // `?` opens a bogus comment, which is discarded rather than emitted.
+  // `?` opens a bogus comment, which is discarded rather than emitted. It ends
+  // at the first `>`, so any number of them leaves no element open.
   assert_eq!(convert("<?pi?>after"), "after");
   assert_eq!(convert("<p>a <?b>c</p>"), "a c");
+  assert_eq!(convert("<p>a <? b > c ?></p>"), "a c ?>");
+  let many = format!("{}<h2>Head</h2><ul><li>a</li></ul>", "<?x?>".repeat(600));
+  assert_eq!(convert(&many), "## Head\n\n- a");
 
   // An incomplete tag at end of input is still dropped, not emitted as text.
   assert_eq!(convert("<div"), "");
