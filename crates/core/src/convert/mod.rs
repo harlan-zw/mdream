@@ -755,8 +755,10 @@ pub struct ConvertState {
   heading_runs: [(usize, usize); 2],
   /// Lowest buffer offset rewritten or removed since `heading_runs` was measured.
   heading_run_dirty_from: usize,
-  /// The trailing whitespace and heading `#` runs `get_markdown_chunk` holds back.
+  /// The trailing whitespace, `<pre>` space and heading `#` runs `get_markdown_chunk`
+  /// holds back.
   held_whitespace: TailRun,
+  held_spaces: TailRun,
   held_heading_run: TailRun,
   /// Bytes at the buffer start known to be whitespace, for the leading trim.
   leading_whitespace: usize,
@@ -1075,6 +1077,7 @@ impl ConvertState {
       heading_runs: [(0, 0); 2],
       heading_run_dirty_from: usize::MAX,
       held_whitespace: TailRun::default(),
+      held_spaces: TailRun::default(),
       held_heading_run: TailRun::default(),
       leading_whitespace: 0,
       #[cfg(test)]
@@ -2537,6 +2540,7 @@ impl ConvertState {
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
+    self.held_spaces.note_rewrite(offset);
     self.held_heading_run.note_rewrite(offset);
     if offset < self.leading_whitespace {
       self.leading_whitespace = 0;
@@ -2564,6 +2568,7 @@ impl ConvertState {
     }
     self.heading_run_dirty_from = self.heading_run_dirty_from.saturating_sub(removed);
     self.held_whitespace.note_drain(removed);
+    self.held_spaces.note_drain(removed);
     self.held_heading_run.note_drain(removed);
     self.leading_whitespace = 0;
     if self.hard_break_end != usize::MAX {
@@ -2676,7 +2681,9 @@ impl ConvertState {
       // line-leading run is the exception: list continuation indentation is
       // emitted before the next sibling is known and can still be replaced
       // by its list marker.
-      stable_end = self.buffer.trim_end_matches(' ').len();
+      stable_end = self
+        .held_spaces
+        .start(self.buffer.as_bytes(), buf_len, |b| b == b' ');
       if stable_end > 0 && self.buffer.as_bytes()[stable_end - 1] != b'\n' {
         stable_end = buf_len;
       }
@@ -3230,6 +3237,7 @@ mod tests {
       ("trailing whitespace", "&#32;&#32;</b>", "<p>x"),
       ("leading whitespace", "&nbsp;</b>", ""),
       ("heading run", "#<span>#</span>", "<h2>x "),
+      ("spaces in a code block", "&#32;&#32;</b>", "<pre><code>"),
     ] {
       let html = format!("{prefix}{}", unit.repeat(20_000));
       let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
@@ -3237,8 +3245,10 @@ mod tests {
         processor.process_chunk(std::str::from_utf8(chunk).unwrap());
       }
       let state = &processor.state;
-      let read =
-        state.held_whitespace.read + state.held_heading_run.read + state.leading_whitespace_read;
+      let read = state.held_whitespace.read
+        + state.held_spaces.read
+        + state.held_heading_run.read
+        + state.leading_whitespace_read;
       assert!(
         read <= 2 * html.len(),
         "{name}: read {read} bytes of a {}-byte input",
