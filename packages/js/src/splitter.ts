@@ -54,6 +54,9 @@ function createOptions(options: SplitterOptions) {
     chunkSize: options.chunkSize ?? 1000,
     chunkOverlap: options.chunkOverlap ?? 200,
     lengthFunction: options.lengthFunction ?? ((text: string) => text.length),
+    // With a custom function, `chunkSize` and `chunkOverlap` are not UTF-16
+    // lengths, so cut points come from measuring slices.
+    customLength: options.lengthFunction !== undefined,
     keepSeparator: options.keepSeparator ?? false,
     resolvedPlugins: resolvePlugins(options.plugins),
     tagOverrideHandlers: options.tagOverrides
@@ -106,6 +109,38 @@ function lastIndexBetween(markdown: string, separator: string, floor: number, fr
   // document start for every cut.
   const index = markdown.slice(floor, from + separator.length).lastIndexOf(separator)
   return index === -1 ? -1 : floor + index
+}
+
+/**
+ * The largest length from 0 to `max` for which `fits` holds, where `fits(0)`
+ * is true. Probes double from `firstProbe` before a binary search, so the work
+ * follows the answer and not `max`. A `fits` that is not monotonic still ends,
+ * at a length that fits, or at `max`.
+ */
+function largestFit(max: number, firstProbe: number, fits: (length: number) => boolean): number {
+  let good = 0
+  let bad = -1
+  let probe = firstProbe >= 1 ? Math.floor(firstProbe) : 1
+  while (good < max) {
+    if (probe > max)
+      probe = max
+    if (!fits(probe)) {
+      bad = probe
+      break
+    }
+    good = probe
+    probe *= 2
+  }
+  if (bad === -1)
+    return good
+  while (bad - good > 1) {
+    const middle = Math.floor((good + bad) / 2)
+    if (fits(middle))
+      good = middle
+    else
+      bad = middle
+  }
+  return good
 }
 
 /** Match complete fences by their line prefix, marker, and opening run. */
@@ -300,11 +335,7 @@ export function* htmlToMarkdownSplitChunksStream(
     codes.push({ start: offsetOf(position), language })
   codes.sort((a, b) => a.start - b.start)
 
-  const lengthFunction = options.lengthFunction
-  const measure = lengthFunction
-    ? (start: number, end: number) => lengthFunction(markdown.slice(start, end))
-    : (start: number, end: number) => end - start
-  yield* chunkSections(markdown, sections, codes, opts, measure)
+  yield* chunkSections(markdown, sections, codes, opts)
 }
 
 /** Content between two split points, with the heading hierarchy that owns it. */
@@ -330,7 +361,6 @@ function* chunkSections(
   sections: Section[],
   codes: CodeStart[],
   opts: ReturnType<typeof createOptions>,
-  measure: (start: number, end: number) => number,
 ): Generator<MarkdownChunk, void, undefined> {
   const regions = codeRegions(markdown)
   const newlines: number[] = []
@@ -372,14 +402,34 @@ function* chunkSections(
     return region && position < region.end ? region : undefined
   }
 
+  /** Length of `markdown.slice(start, end)`, by the caller's `lengthFunction`. */
+  function measure(start: number, end: number): number {
+    return opts.lengthFunction(markdown.slice(start, end))
+  }
+
   function advanceTo(position: number): void {
     const next = contentStart(markdown, position, markdown.length)
     if (next > chunkStart)
       chunkStart = next
   }
 
-  function splitPosition(sectionEnd: number): number {
-    const idealSplitPos = Math.min(sectionEnd, chunkStart + opts.chunkSize)
+  /**
+   * Where a chunk from `chunkStart` ends at `chunkSize`, or `sectionEnd` when
+   * the rest of the section fits. A custom length function has no fixed ratio
+   * to offsets, so the end is the longest slice that still measures within
+   * `chunkSize`. It always advances at least one character.
+   */
+  function sizeLimit(sectionEnd: number): number {
+    if (!opts.customLength)
+      return Math.min(sectionEnd, chunkStart + opts.chunkSize)
+    const rest = sectionEnd - chunkStart
+    if (rest <= 0)
+      return sectionEnd
+    const fit = largestFit(rest, opts.chunkSize, length => !(measure(chunkStart, chunkStart + length) > opts.chunkSize))
+    return chunkStart + Math.max(fit, 1)
+  }
+
+  function splitPosition(sectionEnd: number, idealSplitPos: number): number {
     const floor = Math.max(chunkStart, lastEnd)
     let heldRegion: { start: number, end: number } | undefined
     for (const separator of SEPARATORS) {
@@ -481,7 +531,11 @@ function* chunkSections(
     lastEnd = end
     let next = chunkEnd
     if (applyOverlap && opts.chunkOverlap > 0) {
-      let overlapStart = end - Math.min(opts.chunkOverlap, end - start - 1)
+      // Keep at least one character of the chunk out of the overlap.
+      const overlapRoom = end - start - 1
+      let overlapStart = end - (opts.customLength
+        ? largestFit(overlapRoom, opts.chunkOverlap, length => !(measure(end - length, end) > opts.chunkOverlap))
+        : Math.min(opts.chunkOverlap, overlapRoom))
       while (overlapStart > start + 1 && !isOutputWhitespace(markdown.charCodeAt(overlapStart - 1)))
         overlapStart--
       const region = codeRegionAt(overlapStart)
@@ -498,9 +552,9 @@ function* chunkSections(
   for (const section of sections) {
     headers = section.headers
     if (!opts.returnEachLine) {
-      while (measure(chunkStart, section.end) > opts.chunkSize) {
+      for (let limit = sizeLimit(section.end); limit < section.end; limit = sizeLimit(section.end)) {
         const previousStart = chunkStart
-        yield* flush(splitPosition(section.end), true)
+        yield* flush(splitPosition(section.end, limit), true)
         if (chunkStart <= previousStart)
           break
       }
