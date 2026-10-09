@@ -62,6 +62,14 @@ export function workloads(root: string, full = false): Workload[] {
   }
   for (const scale of [1, 2, 4]) {
     const size = scale * 128 * 1024
+    const fields = scale * 4096
+    for (const shape of ['alternating', 'suffix'] as const) {
+      const query = shape === 'alternating'
+        ? 'utm_x=1&id=1&'.repeat(fields)
+        : `${'utm_x=1&'.repeat(fields)}id=${'x'.repeat(fields * 8)}`
+      const html = `<a href="../guide?${query}#part">Guide</a>`
+      cases.push({ id: `tracking-${shape}-${scale}x`, name: `tracking ${shape} ${scale}x`, operation: 'convert', html, options: 'clean', format: 'markdown', inputBytes: Buffer.byteLength(html), scaling: { group: `tracking-${shape}`, size: scale } })
+    }
     const quote = `<blockquote>${`<span>${'x'.repeat(1024)}</span>`.repeat(size / 1024)}</blockquote>`
     const metadata = `<head><title>Benchmark title</title></head><h2>Intro</h2><blockquote>${'<p>Words in a paragraph.</p>'.repeat(Math.ceil(size / 28))}</blockquote>`
     const breaks = `<p>x${'<br>&#9;'.repeat(scale * 2048)}y</p>`

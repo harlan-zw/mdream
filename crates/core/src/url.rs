@@ -8,6 +8,19 @@ use std::borrow::Cow;
 /// Tracking query parameter prefixes that `CleanConfig::urls` strips.
 const TRACKING_PREFIXES: [&str; 6] = ["utm_", "fbclid", "gclid", "mc_eid", "msclkid", "oly_"];
 
+#[cfg(test)]
+std::thread_local! {
+  static TRACKING_WORK: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+#[cfg(test)]
+fn count_tracking_work(scanned: usize, moved: usize) {
+  TRACKING_WORK.with(|work| {
+    let (old_scanned, old_moved) = work.get();
+    work.set((old_scanned + scanned, old_moved + moved));
+  });
+}
+
 /// Whether `s` looks like a bare absolute URI suitable for GFM autolink
 /// shorthand (`<http://…>`). Conservative: only common web/mail schemes,
 /// no whitespace or angle brackets that would break the autolink syntax.
@@ -171,46 +184,125 @@ pub(crate) fn strip_tracking_params_owned(mut url: String) -> String {
   let mut query_end = url[query_start..]
     .find('#')
     .map_or(url.len(), |i| query_start + i);
-  // Visit fields last to first, so a removal never moves one still to visit. A
-  // dropped field takes the `&` before it, or the one after it when it is first.
-  let mut end = query_end;
-  loop {
-    let bytes = url.as_bytes();
-    let start = bytes[query_start..end]
-      .iter()
-      .rposition(|&b| b == b'&')
-      .map_or(query_start, |i| query_start + i + 1);
-    let field = &bytes[start..end];
-    let key = &field[..field.iter().position(|&b| b == b'=').unwrap_or(field.len())];
-    if TRACKING_PREFIXES
-      .iter()
-      .any(|prefix| key.starts_with(prefix.as_bytes()))
-    {
-      let range = if start > query_start {
-        start - 1..end
-      } else {
-        start..(end + 1).min(query_end)
-      };
-      query_end -= range.len();
-      url.drain(range);
+  // Long queries go straight to compaction to avoid a second scan.
+  if query_end - query_start <= 1024 {
+    let mut end = query_end;
+    let mut removed = 0;
+    let mut move_budget = url.len();
+    loop {
+      let bytes = url.as_bytes();
+      let start = bytes[query_start..end]
+        .iter()
+        .rposition(|&b| b == b'&')
+        .map_or(query_start, |i| query_start + i + 1);
+      let field = &bytes[start..end];
+      let key_end = field.iter().position(|&b| b == b'=').unwrap_or(field.len());
+      #[cfg(test)]
+      count_tracking_work(
+        field.len()
+          + usize::from(start > query_start)
+          + key_end
+          + usize::from(key_end < field.len()),
+        0,
+      );
+      if TRACKING_PREFIXES
+        .iter()
+        .any(|prefix| field[..key_end].starts_with(prefix.as_bytes()))
+      {
+        // Each drain moves the suffix: bound their count and bytes before compacting.
+        if removed == 8 {
+          break;
+        }
+        let range = if start > query_start {
+          start - 1..end
+        } else {
+          start..(end + 1).min(query_end)
+        };
+        let moved = url.len() - range.end;
+        if moved > move_budget {
+          break;
+        }
+        move_budget -= moved;
+        removed += 1;
+        #[cfg(test)]
+        count_tracking_work(0, moved);
+        query_end -= range.len();
+        url.drain(range);
+      }
+      if start == query_start {
+        let leading = url.as_bytes()[query_start..query_end]
+          .iter()
+          .take_while(|&&b| b == b'&')
+          .count();
+        #[cfg(test)]
+        count_tracking_work(leading + usize::from(query_start + leading < query_end), 0);
+        if leading > 0 {
+          #[cfg(test)]
+          count_tracking_work(0, url.len() - query_start - leading);
+          url.drain(query_start..query_start + leading);
+        }
+        if query_end - leading == query_start {
+          #[cfg(test)]
+          count_tracking_work(0, url.len() - query_start);
+          url.remove(qmark);
+        }
+        return url;
+      }
+      end = start - 1;
     }
-    if start == query_start {
+  }
+  // Compact retained fields once instead of shifting the suffix per removal.
+  let mut bytes = url.into_bytes();
+  let mut read = query_start;
+  let mut write = query_start;
+  loop {
+    let end = bytes[read..query_end]
+      .iter()
+      .position(|&b| b == b'&')
+      .map_or(query_end, |i| read + i);
+    let field = &bytes[read..end];
+    let key_end = field.iter().position(|&b| b == b'=').unwrap_or(field.len());
+    #[cfg(test)]
+    count_tracking_work(
+      field.len() + usize::from(end < query_end) + key_end + usize::from(key_end < field.len()),
+      0,
+    );
+    if !TRACKING_PREFIXES
+      .iter()
+      .any(|prefix| field[..key_end].starts_with(prefix.as_bytes()))
+    {
+      // Leading empty fields disappear; later empty fields keep their separator.
+      if write > query_start {
+        bytes[write] = b'&';
+        write += 1;
+        #[cfg(test)]
+        count_tracking_work(0, 1);
+      }
+      if write != read {
+        bytes.copy_within(read..end, write);
+        #[cfg(test)]
+        count_tracking_work(0, end - read);
+      }
+      write += end - read;
+    }
+    if end == query_end {
       break;
     }
-    end = start - 1;
+    read = end + 1;
   }
-  // Leading empty fields disappear, and so does a `?` left without a query.
-  let leading = url.as_bytes()[query_start..query_end]
-    .iter()
-    .take_while(|&&b| b == b'&')
-    .count();
-  if leading > 0 {
-    url.drain(query_start..query_start + leading);
+  if write == query_start {
+    write = qmark;
   }
-  if query_end - leading == query_start {
-    url.remove(qmark);
+  let suffix_len = bytes.len() - query_end;
+  if write != query_end {
+    bytes.copy_within(query_end.., write);
+    #[cfg(test)]
+    count_tracking_work(0, suffix_len);
   }
-  url
+  bytes.truncate(write + suffix_len);
+  // ASCII separators delimit whole UTF-8 runs, so checked conversion cannot fail.
+  String::from_utf8(bytes)
+    .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
 }
 
 #[inline]
@@ -768,6 +860,130 @@ mod tests {
       strip_tracking_params("https://x.com/a#s?utm_source=n"),
       "https://x.com/a#s?utm_source=n",
     );
+  }
+
+  #[test]
+  fn tracking_cleanup_work_is_linear() {
+    fn check(url: String, expected: String) {
+      let input_len = url.len();
+      TRACKING_WORK.set((0, 0));
+      assert_eq!(strip_tracking_params_owned(url), expected);
+      let (scanned, moved) = TRACKING_WORK.get();
+      assert!(
+        scanned <= 4 * input_len,
+        "scanned={scanned}, input={input_len}"
+      );
+      // Field drains move at most one input length; normalization adds at most two.
+      assert!(moved <= 3 * input_len, "moved={moved}, input={input_len}");
+    }
+    for count in [1, 7, 8, 9, 1024, 2048, 4096] {
+      let kept = format!("id={}", "x".repeat(count * 8));
+      for (query, expected) in [
+        ("utm_x=1&id=1&".repeat(count), "id=1&".repeat(count)),
+        (format!("{}{kept}", "utm_x=1&".repeat(count)), kept),
+      ] {
+        check(
+          format!("https://x.test/?{query}#章"),
+          format!("https://x.test/?{expected}#章"),
+        );
+      }
+    }
+    let fragment = "#章".repeat(1024);
+    for count in [0, 1, 8, 9] {
+      check(
+        format!("https://x.test/?&&{}{fragment}", "utm_x=1&".repeat(count)),
+        format!("https://x.test/{fragment}"),
+      );
+    }
+    for size in [1023, 1024, 1025] {
+      let kept = format!("id={}", "x".repeat(size - "utm_x=1&id=".len()));
+      check(
+        format!("https://x.test/?utm_x=1&{kept}#章"),
+        format!("https://x.test/?{kept}#章"),
+      );
+    }
+  }
+
+  #[test]
+  fn tracking_cleanup_preserves_fields_and_reuses_owned_storage() {
+    fn reference(url: &str) -> String {
+      let Some(qmark) = url.find('?') else {
+        return url.to_string();
+      };
+      if url[..qmark].contains('#') {
+        return url.to_string();
+      }
+      let query_start = qmark + 1;
+      let query_end = url[query_start..]
+        .find('#')
+        .map_or(url.len(), |i| query_start + i);
+      let mut kept = String::new();
+      for field in url[query_start..query_end].split('&') {
+        let key = field.split('=').next().unwrap_or_default();
+        if !is_tracking_param(key) {
+          if !kept.is_empty() {
+            kept.push('&');
+          }
+          kept.push_str(field);
+        }
+      }
+      format!(
+        "{}{}{}{}",
+        &url[..qmark],
+        if kept.is_empty() { "" } else { "?" },
+        kept,
+        &url[query_end..]
+      )
+    }
+
+    let fields = [
+      "",
+      "id=1",
+      "utm_x=1",
+      "fbclid=x",
+      "名=値",
+      "=x",
+      "id=2=3",
+      "%75tm_x=1",
+      "UTM_x=1",
+    ];
+    for prefix in ["".to_string(), "utm_x=1&".repeat(8), "utm_x=1&".repeat(9)] {
+      for left in fields {
+        for middle in fields {
+          for right in fields {
+            for fragment in ["", "#章?utm_x=keep&x=1"] {
+              let url = format!("https://x.test/路径?{prefix}{left}&{middle}&{right}{fragment}");
+              let expected = reference(&url);
+              let owned = url.clone();
+              let allocation = owned.as_ptr();
+              let cleaned = strip_tracking_params_owned(owned);
+              assert_eq!(cleaned, expected, "{url}");
+              assert_eq!(cleaned.as_ptr(), allocation, "{url}");
+
+              let has_tracking = !prefix.is_empty()
+                || [left, middle, right]
+                  .iter()
+                  .any(|field| is_tracking_param(field.split('=').next().unwrap_or_default()));
+              let borrowed = strip_tracking_params(&url);
+              if has_tracking {
+                assert_eq!(borrowed, expected, "{url}");
+              } else {
+                assert!(matches!(borrowed, Cow::Borrowed(_)), "{url}");
+                assert_eq!(borrowed, url);
+              }
+            }
+          }
+        }
+      }
+    }
+    for url in [
+      "https://x.test/路径",
+      "https://x.test/#章?utm_x=keep",
+      "https://x.test/?",
+      "https://x.test/?&&",
+    ] {
+      assert_eq!(strip_tracking_params_owned(url.to_string()), reference(url));
+    }
   }
 
   #[test]

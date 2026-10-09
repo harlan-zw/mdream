@@ -1,12 +1,35 @@
 import { createHash } from 'node:crypto'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '@mdream/js'
+import { clean } from '@mdream/js/clean'
 import { describe, expect, it } from 'vitest'
 import { countJsStream, EXCLUDED_BODY_SIZES, longLineFixture, observeJsStream, PARAGRAPH, streamFixture, unicodeHtml } from './perf-fixtures.ts'
+import { workloads } from './rust-perf/fixtures.ts'
 
 const clock = { wall: () => 0, cpu: () => 0 }
 const digest = (value: string) => createHash('sha256').update(value).digest()
 
 describe('performance fixtures through public conversion', () => {
+  it('cleans the large-query scaling workloads', () => {
+    const cases = workloads(process.cwd()).filter(fixture => fixture.scaling?.group.startsWith('tracking-'))
+    expect(cases).toHaveLength(6)
+    for (const fixture of cases) {
+      if (fixture.operation !== 'convert' || !fixture.scaling)
+        throw new Error('Tracking workloads must convert a scaling fixture.')
+      const fields = fixture.scaling.size * 4096
+      const query = fixture.scaling.group === 'tracking-alternating'
+        ? 'id=1&'.repeat(fields)
+        : `id=${'x'.repeat(fields * 8)}`
+      expect(fixture.options).toBe('clean')
+      expect(fixture.format).toBe('markdown')
+      expect(htmlToMarkdown(fixture.html, {
+        origin: 'https://example.com/docs/page',
+        clean: clean({ urls: true, redundantLinks: true }),
+      }))
+        .toBe(`[Guide](https://example.com/guide?${query}#part)`)
+      expect(fixture.inputBytes).toBe(Buffer.byteLength(fixture.html))
+    }
+  })
+
   it('converts mixed Unicode spans without changing code points', () => {
     expect(htmlToMarkdown(unicodeHtml(3))).toBe('東京日本語🙂éλληνικά'.repeat(3))
   })
