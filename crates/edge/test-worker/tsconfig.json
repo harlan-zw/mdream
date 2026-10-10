@@ -3,7 +3,7 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "types": ["@cloudflare/vitest-pool-workers"],
+    "types": ["@cloudflare/vitest-plugin/types"],
     "strict": true
   },
   "include": ["src", "test"]

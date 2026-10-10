@@ -6,10 +6,10 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/vitest-plugin": "catalog:",
     "mdream": "workspace:*",
     "nitropack": "catalog:",
-    "vitest": "catalog:workers",
+    "vitest": "catalog:",
     "wrangler": "catalog:"
   }
 }

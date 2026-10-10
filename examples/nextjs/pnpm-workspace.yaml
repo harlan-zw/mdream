@@ -1,6 +1,6 @@
 packages: []
 minimumReleaseAgeExclude:
-  - '@types/node@26.6.4'
+  - '@types/node@26.6.4 || 26.6.5'
   - '@mdream/rust-android-arm-eabi@2.0.0-beta.1'
   - '@mdream/rust-android-arm64@2.0.0-beta.1'
   - '@mdream/rust-darwin-arm64@2.0.0-beta.1'
