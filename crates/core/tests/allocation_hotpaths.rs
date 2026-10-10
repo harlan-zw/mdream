@@ -65,7 +65,8 @@ fn repeated_text_and_code_reuse_storage() {
 #[test]
 fn cleaned_links_do_not_allocate_intermediate_urls() {
   const COUNT: usize = 1024;
-  for query in ["?q=ok", "?utm_source=x&q=ok"] {
+  let long_query = format!("?{}q=ok", "utm_x=1&".repeat(256));
+  for query in ["?q=ok", "?utm_source=x&q=ok", long_query.as_str()] {
     let html = format!("<a href='../guide{query}'>Guide</a> ").repeat(COUNT);
     let options = HtmlToMarkdownOptions {
       origin: Some("https://example.com/docs/page".into()),
