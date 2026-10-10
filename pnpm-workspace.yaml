@@ -1,3 +1,6 @@
+# pkg.pr.new monorepo previews use tarball URLs for sibling dependencies.
+blockExoticSubdeps: false
+
 minimumReleaseAgeExcludePrune: true
 minimumReleaseAgeExclude:
   - confbox@0.3.1
@@ -72,18 +75,16 @@ packages:
   - examples/*
   - '!examples/nextjs'
 
-# pkg.pr.new monorepo previews use tarball URLs for sibling dependencies.
-blockExoticSubdeps: false
-
 overrides:
-  nuxtseo-shared: https://pkg.pr.new/harlan-zw/nuxt-seo/nuxtseo-shared@226c091a0744b7286ef721ac035eed53856bfaa5
-  nuxt-site-config: https://pkg.pr.new/harlan-zw/nuxt-site-config/nuxt-site-config@b8c8a6978ce818d77ecc50c679d412e748fdbdcb
-  nuxt-site-config-kit: https://pkg.pr.new/harlan-zw/nuxt-site-config/nuxt-site-config-kit@b8c8a6978ce818d77ecc50c679d412e748fdbdcb
-  site-config-stack: https://pkg.pr.new/harlan-zw/nuxt-site-config/site-config-stack@b8c8a6978ce818d77ecc50c679d412e748fdbdcb
   # fflate 0.8.3 emits a trailing empty Gunzip chunk that breaks
   # @arethetypeswrong/cli 0.18.2 tarball extraction (attw --pack crashes
   # with "Cannot read properties of undefined (reading 'filename')").
   fflate: 0.8.2
+
+  nuxt-site-config: https://pkg.pr.new/harlan-zw/nuxt-site-config/nuxt-site-config@b8c8a6978ce818d77ecc50c679d412e748fdbdcb
+  nuxt-site-config-kit: https://pkg.pr.new/harlan-zw/nuxt-site-config/nuxt-site-config-kit@b8c8a6978ce818d77ecc50c679d412e748fdbdcb
+  nuxtseo-shared: https://pkg.pr.new/harlan-zw/nuxt-seo/nuxtseo-shared@226c091a0744b7286ef721ac035eed53856bfaa5
+  site-config-stack: https://pkg.pr.new/harlan-zw/nuxt-site-config/site-config-stack@b8c8a6978ce818d77ecc50c679d412e748fdbdcb
 
 allowBuilds:
   '@parcel/watcher': true
