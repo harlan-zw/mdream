@@ -1351,6 +1351,164 @@ with preserved   spacing</pre>
       expect(chunks.length).toBeLessThan(100) // Sanity check
     })
   })
+
+  describe('lengthFunction', () => {
+    const countWords = (text: string) => text.split(RE_WHITESPACE).filter(Boolean).length
+    // A stand-in for a tokenizer: about one token per four characters.
+    const countTokens = (text: string) => Math.ceil(text.length / 4)
+    const numberedWords = (count: number) => Array.from({ length: count }, (_, index) => `w${index + 1}`)
+    const sentence = 'The quick brown fox jumps over the lazy dog while retrieval augmented generation pipelines chunk documents. '
+
+    it('cuts chunks at chunkSize as lengthFunction measures it', () => {
+      const html = `<p>${numberedWords(240).join(' ')}</p>`
+
+      const chunks = htmlToMarkdownSplitChunks(html, {
+        chunkSize: 20,
+        chunkOverlap: 0,
+        lengthFunction: countWords,
+        headersToSplitOn: [],
+      })
+
+      expect(chunks.map(chunk => countWords(chunk.content))).toEqual(Array.from({ length: 12 }).fill(20))
+      expect(chunks.map(chunk => chunk.content).join(' ')).toBe(numberedWords(240).join(' '))
+    })
+
+    it('fills chunks when the function counts fewer units than characters', () => {
+      const html = `<h2>Doc</h2><p>${sentence.repeat(60)}</p>`
+
+      const chunks = htmlToMarkdownSplitChunks(html, {
+        chunkSize: 50,
+        chunkOverlap: 0,
+        lengthFunction: countTokens,
+      })
+
+      const sizes = chunks.map(chunk => countTokens(chunk.content))
+      const total = sizes.reduce((sum, size) => sum + size, 0)
+      expect(Math.max(...sizes)).toBeLessThanOrEqual(50)
+      expect(chunks.length).toBeLessThanOrEqual(Math.ceil(total / 50) + 1)
+      // Only the last chunk may be short.
+      for (const size of sizes.slice(0, -1))
+        expect(size).toBeGreaterThanOrEqual(40)
+    })
+
+    it('measures chunkOverlap with lengthFunction', () => {
+      const html = `<p>${numberedWords(120).join(' ')}</p>`
+
+      const chunks = htmlToMarkdownSplitChunks(html, {
+        chunkSize: 20,
+        chunkOverlap: 5,
+        lengthFunction: countWords,
+        headersToSplitOn: [],
+      })
+
+      expect(chunks.length).toBeGreaterThan(1)
+      for (const chunk of chunks)
+        expect(countWords(chunk.content)).toBeLessThanOrEqual(20)
+      for (let index = 1; index < chunks.length; index++) {
+        const previous = chunks[index - 1]!.content.split(RE_WHITESPACE)
+        const next = chunks[index]!.content.split(RE_WHITESPACE)
+        // The next chunk repeats the end of this one. The overlap starts at a
+        // word boundary, so it can run one word past the five-word budget.
+        const overlap = previous.length - previous.indexOf(next[0]!)
+        expect(overlap).toBeGreaterThanOrEqual(5)
+        expect(overlap).toBeLessThanOrEqual(6)
+        expect(next.slice(0, overlap)).toEqual(previous.slice(-overlap))
+      }
+      expect(chunks.at(-1)!.content.endsWith('w120')).toBe(true)
+    })
+
+    it('matches the default output when the function is the character count', () => {
+      const html = `
+        <h1>Title</h1>
+        <p>${sentence.repeat(30)}</p>
+        <h2>Code</h2>
+        <pre><code class="language-js">${'const value = compute(input)\n'.repeat(40)}</code></pre>
+        <blockquote><p>${sentence.repeat(10)}</p></blockquote>
+      `
+
+      for (const [chunkSize, chunkOverlap] of [[100, 20], [300, 0], [1000, 200], [50, 49]]) {
+        expect(htmlToMarkdownSplitChunks(html, { chunkSize, chunkOverlap, lengthFunction: text => text.length }))
+          .toEqual(htmlToMarkdownSplitChunks(html, { chunkSize, chunkOverlap }))
+      }
+    })
+
+    it('keeps sizing chunks in characters without a lengthFunction', () => {
+      const html = `<h2>Doc</h2><p>${sentence.repeat(60)}</p>`
+
+      const chunks = htmlToMarkdownSplitChunks(html, { chunkSize: 200, chunkOverlap: 0 })
+
+      expect(chunks.map(chunk => chunk.content.length)).toEqual([
+        198,
+        194,
+        195,
+        200,
+        200,
+        199,
+        200,
+        199,
+        194,
+        199,
+        197,
+        199,
+        194,
+        199,
+        194,
+        199,
+        197,
+        199,
+        194,
+        199,
+        194,
+        199,
+        197,
+        199,
+        194,
+        199,
+        194,
+        199,
+        197,
+        199,
+        194,
+        199,
+        134,
+      ])
+    })
+
+    it('measures slices near the cut, not the rest of the section', () => {
+      const html = `<p>${sentence.repeat(600)}</p>`
+      let measured = 0
+
+      const chunks = htmlToMarkdownSplitChunks(html, {
+        chunkSize: 50,
+        chunkOverlap: 10,
+        lengthFunction: (text) => {
+          measured += text.length
+          return countTokens(text)
+        },
+        headersToSplitOn: [],
+      })
+
+      expect(chunks.length).toBeGreaterThan(100)
+      // Measuring the rest of the section for every chunk would cost about 100 times the document.
+      expect(measured).toBeLessThan(sentence.length * 600 * 40)
+    })
+
+    it('still ends when no length fits or the function is not a length', () => {
+      const html = `<p>${numberedWords(60).join(' ')}</p><p>${numberedWords(60).join(' ')}</p>`
+      const expected = squash(htmlToMarkdown(html))
+
+      for (const lengthFunction of [() => 1000, () => Number.NaN, (text: string) => (text.length * 7919) % 53]) {
+        const chunks = htmlToMarkdownSplitChunks(html, {
+          chunkSize: 10,
+          chunkOverlap: 0,
+          lengthFunction,
+          headersToSplitOn: [],
+        })
+        expect(chunks.length).toBeGreaterThan(0)
+        expect(squash(chunks.map(chunk => chunk.content).join(''))).toBe(expected)
+      }
+    })
+  })
 })
 
 describe('htmlToMarkdownSplitChunksStream', () => {
