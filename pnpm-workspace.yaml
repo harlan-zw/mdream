@@ -2,11 +2,24 @@ minimumReleaseAgeExcludePrune: true
 minimumReleaseAgeExclude:
   - confbox@0.3.1
   - '@nuxt/test-utils@4.3.2'
-  - '@types/node@26.6.4'
+  - '@types/node@26.6.4 || 26.6.5'
   - miniflare@5.20261001.0-alpha
   - wrangler@4.146.0
   - '@napi-rs/cli@3.10.6'
   - vite@8.3.2
+  - express@5.3.0
+  - knip@6.41.0
+  - '@nuxt/cli@4.0.1'
+  - '@nuxt/kit@4.6.1'
+  - '@nuxt/nitro-server@4.6.1'
+  - '@nuxt/schema@4.6.1'
+  - '@nuxt/vite-builder@4.6.1'
+  - '@nuxt/vite-server@4.6.1'
+  - cssnano-preset-default@9.5.0
+  - cssnano@9.5.0
+  - nuxt@4.6.1
+  - postcss-normalize-unicode@9.1.0
+  - postcss-normalize-whitespace@9.0.7
 
 trustPolicy: no-downgrade
 # These versions predate npm provenance/trusted-publishing, while their newer
@@ -16,6 +29,38 @@ trustPolicy: no-downgrade
 trustPolicyExclude:
   - chokidar@4.0.3
   - semver@6.3.1
+  # Exact exception for the requested Nuxt upgrade. Upstream release:
+  # https://github.com/cssnano/cssnano/releases/tag/cssnano%409.5.0
+  - cssnano@9.5.0
+  - cssnano-preset-default@9.5.0
+  - cssnano-utils@8.2.1
+  - stylehacks@9.0.8
+  - postcss-svgo@9.0.5
+  - postcss-colormin@9.0.7
+  - postcss-merge-rules@9.1.3
+  - postcss-discard-empty@9.0.7
+  - postcss-minify-params@9.0.7
+  - postcss-normalize-url@9.0.6
+  - postcss-convert-values@9.0.8
+  - postcss-merge-longhand@9.3.0
+  - postcss-ordered-values@9.0.8
+  - postcss-reduce-initial@9.0.7
+  - postcss-discard-comments@9.0.7
+  - postcss-minify-gradients@9.0.7
+  - postcss-minify-selectors@9.0.7
+  - postcss-normalize-string@9.0.6
+  - postcss-unique-selectors@9.0.6
+  - postcss-normalize-charset@9.0.6
+  - postcss-normalize-unicode@9.1.0
+  - postcss-reduce-transforms@9.0.5
+  - postcss-discard-duplicates@9.0.6
+  - postcss-discard-overridden@9.0.6
+  - postcss-minify-font-values@9.0.8
+  - postcss-normalize-positions@9.0.7
+  - postcss-normalize-whitespace@9.0.7
+  - postcss-normalize-repeat-style@9.0.6
+  - postcss-normalize-display-values@9.0.6
+  - postcss-normalize-timing-functions@9.0.6
 
 shellEmulator: true
 
@@ -55,20 +100,20 @@ catalog:
   '@antfu/eslint-config': ^9.5.1
   '@arethetypeswrong/cli': ^0.18.5
   '@clack/prompts': ^1.8.1
-  '@cloudflare/vitest-pool-workers': ^0.22.0
+  '@cloudflare/vitest-plugin': ^1.4.0
   # napi-build 2.4 links emnapi v2 exports; keep the runtime and archive aligned.
   '@emnapi/core': 2.0.0-alpha.6
   '@emnapi/runtime': 2.0.0-alpha.6
   '@emnapi/wasi-threads': ^2.2.0
   '@napi-rs/cli': ^3.10.8
   '@napi-rs/wasm-runtime': ^1.2.5
-  '@nuxt/devtools': 4.0.0-alpha.20
-  '@nuxt/kit': ^4.5.2
+  '@nuxt/devtools': 4.0.0-beta.4
+  '@nuxt/kit': ^4.6.1
   '@nuxt/module-builder': ^1.0.3
-  '@nuxt/schema': ^4.5.2
+  '@nuxt/schema': ^4.6.1
   '@nuxt/test-utils': ^4.3.3
   '@tybys/wasm-util': ^0.10.4
-  '@types/node': ^26.6.4
+  '@types/node': ^26.6.5
   '@types/picomatch': ^4.0.3
   '@typescript/native': npm:typescript@^7.0.2
   '@vercel/ncc': ^0.45.0
@@ -77,7 +122,7 @@ catalog:
   '@vitest/browser-playwright': ^5.0.3
   bumpp: ^12.3.0
   c12: 4.0.0-rc.2
-  cac: ^7.0.0
+  cac: ^7.0.1
   changelogen: ^0.6.2
   compression: ^1.8.2
   consola: ^3.4.2
@@ -85,35 +130,34 @@ catalog:
   defu: ^6.1.7
   emnapi: 2.0.0-alpha.6
   eslint: ^10.12.0
-  express: ^5.2.1
+  express: ^5.3.0
   hookable: ^6.1.2
   jsdom: ^30.1.2
-  knip: ^6.39.0
+  knip: ^6.41.0
   nitropack: 2.13.4
-  nuxt: ^4.5.2
+  nuxt: ^4.6.1
   nuxt-site-config: ^4.2.3
   nypm: ^0.6.10
-  obuild: ^0.4.43
+  obuild: ^0.4.44
   ofetch: ^1.5.1
   pathe: ^2.0.3
   picomatch: ^4.0.7
-  pkg-pr-new: 0.0.90
-  playwright: ^1.63.0
-  rolldown: ^1.2.12
+  pkg-pr-new: 0.0.91
+  playwright: ^1.64.0
+  rolldown: ^1.2.13
   sirv: ^3.0.2
   tinyglobby: ^0.2.17
-  tldts: ^7.4.16
+  tldts: ^7.4.18
   tslib: ^2.8.1
   # ESLint and Vue tooling need the v6 API. @typescript/native supplies tsc v7.
   typescript: npm:@typescript/typescript6@^6.0.2
   ufo: ^1.6.4
-  vite: ^8.3.3
-  # eslint-disable-next-line pnpm/yaml-no-duplicate-catalog-item -- Cloudflare's worker pool requires Vitest 4.
+  vite: ^8.3.4
   vitest: ^5.0.3
   vue: ^3.5.43
-  vue-router: ^5.3.1
+  vue-router: ^5.4.0
   vue-tsc: ^3.3.12
-  wrangler: ^4.147.0
+  wrangler: ^4.149.0
 
 catalogs:
   bench:
@@ -126,6 +170,3 @@ catalogs:
     turndown: ^7.2.4
     turndown-plugin-gfm: ^1.0.2
     unified: ^11.0.5
-  # Cloudflare's worker pool supports Vitest 4.
-  workers:
-    vitest: ^4.1.11

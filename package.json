@@ -44,6 +44,7 @@
     "@vitest/browser-playwright": "catalog:",
     "bumpp": "catalog:",
     "eslint": "catalog:",
+    "jsdom": "catalog:",
     "knip": "catalog:",
     "mdream": "workspace:*",
     "node-html-markdown": "catalog:bench",
