@@ -1,7 +1,7 @@
 import type { ModuleOptions, ModuleRuntimeConfig } from './types.js'
+import { fileURLToPath } from 'node:url'
 import { addImportsDir, addPlugin, addServerHandler, addServerImportsDir, createResolver, defineNuxtModule } from '@nuxt/kit'
 import { defu } from 'defu'
-import { installNuxtSiteConfig } from 'nuxt-site-config/kit'
 import { name, version } from '../package.json'
 import { setupPrerenderHandler } from './prerender.js'
 import { registerTypeTemplates } from './templates.js'
@@ -14,8 +14,11 @@ export default defineNuxtModule<ModuleOptions>({
     version,
     configKey: 'mdream',
     compatibility: {
-      nuxt: '>=3.0.0',
+      nuxt: '^4.6.0 || ^5.0.0',
     },
+  },
+  moduleDependencies: {
+    [fileURLToPath(import.meta.resolve('nuxt-site-config'))]: { version: '>=5.0.0' },
   },
   defaults: {
     enabled: true,
@@ -79,9 +82,6 @@ export default defineNuxtModule<ModuleOptions>({
           : [mdreamRe]
       }
     })
-
-    // Install site config for accessing site name and description
-    await installNuxtSiteConfig()
 
     // Prepare runtime config
     const runtimeConfig: ModuleRuntimeConfig = {
