@@ -2,7 +2,6 @@
 name: mdream
 description: Convert HTML to Markdown, plain text, or safe HTML with mdream, the Rust engine for Node, edge, and the browser. Use when a task mentions mdream, htmlToMarkdown, streamHtmlToMarkdown, the minimal preset, frontmatter or extraction callbacks, tagOverrides, clean options, the mdream CLI, or errors such as "Custom hook plugins require @mdream/js" or ERR_PACKAGE_PATH_NOT_EXPORTED for mdream/plugins.
 license: MIT
-compatibility: "Requires mdream v2. Uses native bindings in Node.js and WebAssembly in edge runtimes and browsers."
 ---
 
 # mdream
