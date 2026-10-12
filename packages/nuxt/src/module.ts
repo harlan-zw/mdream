@@ -14,13 +14,13 @@ export default defineNuxtModule<ModuleOptions>({
     version,
     configKey: 'mdream',
     compatibility: {
-      nuxt: '^4.6.0 || ^5.0.0',
+      nuxt: '^4.6.1 || ^5.0.0-0',
     },
   },
   moduleDependencies: {
     // Keep package-relative resolution until the minimum Nuxt version includes this fix:
     // https://github.com/nuxt/nuxt/pull/36542
-    [fileURLToPath(import.meta.resolve('nuxt-site-config'))]: { version: '>=5.0.0' },
+    [fileURLToPath(import.meta.resolve('nuxt-site-config'))]: { version: '>=5.0.1' },
   },
   defaults: {
     enabled: true,
