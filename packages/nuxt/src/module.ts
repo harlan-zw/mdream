@@ -18,7 +18,9 @@ export default defineNuxtModule<ModuleOptions>({
     },
   },
   moduleDependencies: {
-    [fileURLToPath(import.meta.resolve('nuxt-site-config'))]: { version: '>=5.0.0' },
+    // Keep package-relative resolution until the minimum Nuxt version includes this fix:
+    // https://github.com/nuxt/nuxt/pull/36542
+    [fileURLToPath(import.meta.resolve('nuxt-site-config'))]: { version: '^5.0.0' },
   },
   defaults: {
     enabled: true,
