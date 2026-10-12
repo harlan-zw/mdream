@@ -1,3 +1,4 @@
+import type { TransformPlugin } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { clean } from '../../src/clean'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
@@ -88,6 +89,30 @@ describe('options @mdream/js does not read', () => {
     const options = { plugins: [frontmatterPlugin()], tagOverrides: { 'x-h': 'h2' } }
     expect(htmlToMarkdown(page, options)).toBe('---\ntitle: T\n---\n\n## Hi')
     expect(htmlToText(page, options)).toBe('Hi')
+  })
+
+  it.each(converters)('%s rejects missing plugin entries', async (_name, convert, streamConvert) => {
+    const plugins: TransformPlugin[] = []
+    plugins.length = 1
+    const options = { plugins }
+    const message = 'Plugin arrays must not contain undefined entries.'
+    expect(() => convert('<p>x</p>', options)).toThrow(message)
+    expect(() => convert('', options)).toThrow(message)
+    for (const html of ['<p>x</p>', '']) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          if (html)
+            controller.enqueue(html)
+          controller.close()
+        },
+      })
+      await expect(async () => {
+        let output = ''
+        for await (const chunk of streamConvert(input, options))
+          output += chunk
+        return output
+      }).rejects.toThrow(message)
+    }
   })
 })
 

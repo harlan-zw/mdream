@@ -26,7 +26,9 @@ export function processPluginsForEvent(
     if (event.node.type === ELEMENT_NODE && event.type === NodeEventEnter) {
       const element = event.node as ElementNode
       for (let index = 0; index < plugins.length; index++) {
-        const plugin = plugins[index]!
+        const plugin = plugins[index]
+        if (plugin === undefined)
+          throw new TypeError('Plugin arrays must not contain undefined entries.')
         if (plugin.processAttributes) {
           plugin.processAttributes(element, state)
         }
@@ -35,7 +37,9 @@ export function processPluginsForEvent(
 
     let shouldSkip = false
     for (let index = 0; index < plugins.length; index++) {
-      const plugin = plugins[index]!
+      const plugin = plugins[index]
+      if (plugin === undefined)
+        throw new TypeError('Plugin arrays must not contain undefined entries.')
       const res = plugin.beforeNodeProcess?.(event, state)
       if (typeof res === 'object') {
         // Last plugin wins - allows overriding skip decisions
@@ -54,9 +58,11 @@ export function processPluginsForEvent(
       const fn = event.type === NodeEventEnter ? 'onNodeEnter' : 'onNodeExit'
       let pluginOutputs: string[] | undefined
       for (let index = 0; index < plugins.length; index++) {
-        const plugin = plugins[index]!
+        const plugin = plugins[index]
+        if (plugin === undefined)
+          throw new TypeError('Plugin arrays must not contain undefined entries.')
         if (plugin[fn]) {
-          const result = plugin[fn]!(element, state)
+          const result = plugin[fn](element, state)
           if (result) {
             ;(pluginOutputs ??= []).push(result)
           }
@@ -71,7 +77,9 @@ export function processPluginsForEvent(
     else if (event.node.type === TEXT_NODE && event.type === NodeEventEnter) {
       const textNode = event.node as TextNode
       for (let index = 0; index < plugins.length; index++) {
-        const plugin = plugins[index]!
+        const plugin = plugins[index]
+        if (plugin === undefined)
+          throw new TypeError('Plugin arrays must not contain undefined entries.')
         if (plugin.processTextNode) {
           const result = plugin.processTextNode(textNode, state)
           if (result) {
@@ -93,6 +101,10 @@ export function processPluginsForEvent(
 export function endPlugins(plugins: TransformPlugin[] | undefined, state: PluginState): void {
   if (!plugins)
     return
-  for (let index = 0; index < plugins.length; index++)
-    plugins[index]!.onDocumentEnd?.(state)
+  for (let index = 0; index < plugins.length; index++) {
+    const plugin = plugins[index]
+    if (plugin === undefined)
+      throw new TypeError('Plugin arrays must not contain undefined entries.')
+    plugin.onDocumentEnd?.(state)
+  }
 }
