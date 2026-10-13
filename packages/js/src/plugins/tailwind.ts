@@ -88,10 +88,10 @@ function processTailwindClasses(classAttr: string): TailwindNodeData {
         weight = supersede(weight, breakpoint, true)
         break
       case 'line-through':
-      case 'underline':
         decoration = supersede(decoration, breakpoint, true)
         break
       case 'no-underline':
+      case 'underline':
         decoration = supersede(decoration, breakpoint, false)
         break
       case 'hidden':

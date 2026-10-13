@@ -2,6 +2,26 @@ import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines.ts'
 
 describe.each(engines)('tailwind addon %s', ({ name: _name, engine }) => {
+  it.each([
+    ['underline', 'Read the guidance'],
+    ['line-through underline', 'Read the guidance'],
+    ['line-through md:underline', 'Read the guidance'],
+    ['md:underline lg:line-through', '~~Read the guidance~~'],
+    ['underline line-through', '~~Read the guidance~~'],
+  ])('preserves text decoration meaning for %s', async (classes, expected) => {
+    expect(htmlToMarkdown(`<p class="${classes}">Read the guidance</p>`, {
+      engine: await resolveEngine(engine),
+      plugins: { tailwind: true },
+    })).toBe(expected)
+  })
+
+  it('preserves underlined link meaning', async () => {
+    expect(htmlToMarkdown('<a class="underline" href="https://example.com/source">Source</a>', {
+      engine: await resolveEngine(engine),
+      plugins: { tailwind: true },
+    })).toBe('[Source](https://example.com/source)')
+  })
+
   it('converts font-bold to markdown bold', async () => {
     const html = '<p class="font-bold">This is bold text</p>'
     const markdown = htmlToMarkdown(html, {
