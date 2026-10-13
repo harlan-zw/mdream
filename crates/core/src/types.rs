@@ -1,4 +1,5 @@
 use crate::consts::{ATTR_NONE, attr_bit, attr_name};
+use crate::entities::decode_html_attribute_entities_into;
 
 /// One attribute: a known name interned to its bit, or an owned lowercase name.
 #[derive(Debug, Clone)]
@@ -24,8 +25,7 @@ impl Attr {
   }
 }
 
-/// Growing any of these measured slower; see the notes above and on
-/// [`NodeExtras`]. 64-bit only: wasm32 halves them.
+/// 64-bit layout; wasm32 halves these.
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(size_of::<Attr>() == 48);
 #[cfg(target_pointer_width = "64")]
@@ -33,10 +33,16 @@ const _: () = assert!(size_of::<Attributes>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(size_of::<ElementNode>() == 64);
 
+/// Marks a retired attribute slot; never a stored bit.
+const FREE_SLOT: u16 = u16::MAX - 1;
+
+/// Value buffers larger than this are released, not kept for reuse.
+const RETAINED_VALUE_CAPACITY: usize = 64;
+
 /// Compact attribute storage: one linear-scanned Vec (elements have 0-4
 /// attributes; cheaper than hashing). Known names intern to [`attr_bit`],
 /// costing no allocation; only `ATTR_ALL` long-tail names keep an owned
-/// string. Splitting known/custom into two Vecs measured 4-6% slower.
+/// string.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Attributes {
   inner: Vec<Attr>,
@@ -50,17 +56,21 @@ impl Attributes {
 
   #[inline]
   pub fn reserve(&mut self, cap: usize) {
-    self.inner.reserve(cap);
+    let free = self.inner.len() - self.live().count();
+    self.inner.reserve(cap.saturating_sub(free));
+  }
+
+  #[inline]
+  fn live(&self) -> impl Iterator<Item = &Attr> {
+    self.inner.iter().take_while(|attr| attr.bit != FREE_SLOT)
   }
 
   #[inline]
   pub fn get_bit(&self, bit: u16) -> Option<&str> {
-    for attr in &self.inner {
-      if attr.bit == bit {
-        return Some(&attr.value);
-      }
-    }
-    None
+    self
+      .locate_bit(bit)
+      .ok()
+      .map(|index| &*self.inner[index].value)
   }
 
   /// Lookup by name, for names with no bit of their own (`style`, `hidden`,
@@ -71,7 +81,7 @@ impl Attributes {
     if bit != ATTR_NONE {
       return self.get_bit(bit);
     }
-    for attr in &self.inner {
+    for attr in self.live() {
       if let Some(name) = &attr.name
         && name.eq_ignore_ascii_case(key)
       {
@@ -83,52 +93,108 @@ impl Attributes {
 
   #[inline]
   pub fn contains_bit(&self, bit: u16) -> bool {
-    self.inner.iter().any(|attr| attr.bit == bit)
+    self.get_bit(bit).is_some()
   }
 
-  /// Store a known-set attribute by its `attr_bit`; the name is never
-  /// allocated. First occurrence wins, per the HTML duplicate-attribute rule:
-  /// `<a href=/first href=/second>` links to `/first`.
+  /// The live slot for `bit`, or the slot a new attribute takes.
   #[inline]
-  pub fn insert_known(&mut self, bit: u16, value: String) {
-    debug_assert!(bit != ATTR_NONE, "a known attribute has a bit");
-    if self.contains_bit(bit) {
-      return;
+  fn locate_bit(&self, bit: u16) -> Result<usize, usize> {
+    for (index, attr) in self.inner.iter().enumerate() {
+      if attr.bit == FREE_SLOT {
+        return Err(index);
+      }
+      if attr.bit == bit {
+        return Ok(index);
+      }
     }
-    self.inner.push(Attr {
-      bit,
-      name: None,
-      value,
-    });
+    Err(self.inner.len())
+  }
+
+  #[inline]
+  fn claim_slot(&mut self, index: usize) -> &mut Attr {
+    if index == self.inner.len() {
+      self.inner.push(Attr {
+        bit: FREE_SLOT,
+        name: None,
+        value: String::new(),
+      });
+    }
+    &mut self.inner[index]
+  }
+
+  /// Store a known attribute by bit. The first occurrence wins, as in HTML.
+  #[inline]
+  pub fn insert_known(&mut self, bit: u16, value: Option<&str>) {
+    debug_assert!(bit != ATTR_NONE, "a known attribute has a bit");
+    let index = match self.locate_bit(bit) {
+      Ok(_) => return,
+      Err(index) => index,
+    };
+    let slot = self.claim_slot(index);
+    slot.bit = bit;
+    write_attribute_value(&mut slot.value, value);
   }
 
   /// Store a name outside the known set; reachable only under `ATTR_ALL`.
   /// `name` must already be lowercase. First occurrence wins, as above.
   #[inline]
-  pub fn insert_custom(&mut self, name: Box<str>, value: String) {
-    if self
-      .inner
-      .iter()
-      .any(|attr| attr.name.as_deref() == Some(&*name))
-    {
+  pub fn insert_custom(&mut self, name: Box<str>, value: Option<&str>) {
+    if self.live().any(|attr| attr.name.as_deref() == Some(&*name)) {
       return;
     }
-    self.inner.push(Attr {
-      bit: ATTR_NONE,
-      name: Some(name),
-      value,
-    });
+    let index = self.live().count();
+    let slot = self.claim_slot(index);
+    slot.bit = ATTR_NONE;
+    slot.name = Some(name);
+    write_attribute_value(&mut slot.value, value);
   }
 
   #[inline]
   pub fn clear(&mut self) {
-    self.inner.clear();
+    for attr in &mut self.inner {
+      if attr.bit == FREE_SLOT {
+        break;
+      }
+      attr.bit = FREE_SLOT;
+      attr.name = None;
+      if attr.value.capacity() > RETAINED_VALUE_CAPACITY {
+        attr.value = String::new();
+      }
+    }
   }
 
   /// Name/value pairs in source order, with a known name rebuilt from its bit.
   pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
-    self.inner.iter().map(|attr| (attr.name(), attr.value()))
+    self.live().map(|attr| (attr.name(), attr.value()))
   }
+}
+
+#[inline]
+fn write_attribute_value(buffer: &mut String, value: Option<&str>) {
+  match value {
+    Some(value) => {
+      reset_buffer(buffer, value.len());
+      decode_html_attribute_entities_into(value, buffer);
+    }
+    None => buffer.clear(),
+  }
+}
+
+/// Empty `buffer` for a rewrite of up to `capacity` bytes. A buffer that is too
+/// small is replaced, not grown: growing would copy contents that are overwritten.
+#[inline]
+pub(crate) fn reset_buffer(buffer: &mut String, capacity: usize) {
+  if buffer.capacity() < capacity {
+    replace_buffer(buffer, capacity);
+  } else {
+    buffer.clear();
+  }
+}
+
+#[cold]
+#[inline(never)]
+fn replace_buffer(buffer: &mut String, capacity: usize) {
+  *buffer = String::with_capacity(capacity);
 }
 
 #[derive(Debug, Clone)]
@@ -138,8 +204,7 @@ pub(crate) struct TailwindData {
   pub hidden: bool,
 }
 
-/// The two rare per-node fields, boxed together: held inline they cost every
-/// node 24 bytes, and padding `ElementNode` by 24 measured 3.3-7.8% slower.
+/// The two rare per-node fields, boxed together so every node stays small.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NodeExtras {
   /// Only set for custom (non-builtin) tags; built-in names come from `tag_id`.
@@ -161,7 +226,7 @@ impl NodeExtras {
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ElementNode {
   // Pointer-sized fields first (8 bytes each on 64-bit)
   pub attributes: Attributes,
@@ -213,6 +278,115 @@ impl ElementNode {
     } else {
       ""
     }
+  }
+}
+
+/// The open-element stack, with closed nodes kept in place past its end.
+///
+/// Closed nodes stay in their slots, readable through [`Self::retired`].
+/// Derefs to the live slice.
+#[derive(Debug, Default)]
+pub(crate) struct NodeStack {
+  nodes: Vec<ElementNode>,
+  len: usize,
+}
+
+impl std::ops::Deref for NodeStack {
+  type Target = [ElementNode];
+  #[inline(always)]
+  fn deref(&self) -> &[ElementNode] {
+    &self.nodes[..self.len]
+  }
+}
+
+impl std::ops::DerefMut for NodeStack {
+  #[inline(always)]
+  fn deref_mut(&mut self) -> &mut [ElementNode] {
+    &mut self.nodes[..self.len]
+  }
+}
+
+impl<'a> IntoIterator for &'a NodeStack {
+  type Item = &'a ElementNode;
+  type IntoIter = std::slice::Iter<'a, ElementNode>;
+  #[inline]
+  fn into_iter(self) -> Self::IntoIter {
+    self.iter()
+  }
+}
+
+impl NodeStack {
+  pub fn with_capacity(capacity: usize) -> Self {
+    Self {
+      nodes: Vec::with_capacity(capacity),
+      len: 0,
+    }
+  }
+
+  #[inline]
+  pub fn push_slot(&mut self) -> &mut ElementNode {
+    if self.len == self.nodes.len() {
+      self.nodes.push(ElementNode::default());
+    }
+    self.len += 1;
+    &mut self.nodes[self.len - 1]
+  }
+
+  #[inline]
+  pub fn push(&mut self, node: ElementNode) {
+    if self.len == self.nodes.len() {
+      self.nodes.push(node);
+    } else {
+      self.nodes[self.len] = node;
+    }
+    self.len += 1;
+  }
+
+  /// Close the top node in place.
+  #[inline]
+  pub fn retire(&mut self) -> bool {
+    if self.len == 0 {
+      return false;
+    }
+    self.len -= 1;
+    true
+  }
+
+  #[inline(always)]
+  pub fn retired(&self) -> &ElementNode {
+    &self.nodes[self.len]
+  }
+
+  #[inline(always)]
+  pub fn retired_mut(&mut self) -> &mut ElementNode {
+    &mut self.nodes[self.len]
+  }
+
+  /// Drop a retired node's large values and extras once its exit is emitted.
+  /// Otherwise a slot above the live depth holds them until the document ends.
+  #[inline]
+  pub fn release_retired(&mut self) {
+    let node = &mut self.nodes[self.len];
+    node.attributes.clear();
+    node.extras = None;
+  }
+
+  /// Move the retired node out, leaving an empty node in its slot.
+  #[inline]
+  pub fn take_retired(&mut self) -> ElementNode {
+    std::mem::take(&mut self.nodes[self.len])
+  }
+
+  /// Put a node taken by [`Self::take_retired`] back, so its buffers are reused.
+  #[inline]
+  pub fn restore_retired(&mut self, node: ElementNode) {
+    self.nodes[self.len] = node;
+  }
+
+  /// Retire and take the top node, for callers that need it owned.
+  #[inline]
+  pub fn pop(&mut self) -> Option<ElementNode> {
+    self.retire().then(|| self.take_retired())
   }
 }
 
@@ -773,5 +947,65 @@ impl Default for OutputFormat {
     return Self::Text;
     #[cfg(all(not(feature = "markdown"), not(feature = "text"), feature = "html"))]
     return Self::Html;
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::consts::{ATTR_HREF, ATTR_SRC, ATTR_TITLE};
+
+  fn pairs(attrs: &Attributes) -> Vec<(String, String)> {
+    attrs
+      .iter()
+      .map(|(name, value)| (name.to_string(), value.to_string()))
+      .collect()
+  }
+
+  /// Recycled slots must never leak a previous node's attributes: lookups and
+  /// iteration stop at the first retired slot even though the buffers stay.
+  #[test]
+  fn cleared_slots_are_invisible_and_reused() {
+    let mut attrs = Attributes::new();
+    // Long enough that the refill below fits this slot's buffer and reuses it.
+    attrs.insert_known(ATTR_HREF, Some("/first.html"));
+    attrs.insert_known(ATTR_TITLE, Some("Tom &amp; Jerry"));
+    attrs.insert_custom("data-x".into(), Some("1"));
+    assert_eq!(attrs.get_bit(ATTR_TITLE), Some("Tom & Jerry"));
+    assert_eq!(attrs.get("data-x"), Some("1"));
+
+    attrs.clear();
+    assert_eq!(attrs.get_bit(ATTR_HREF), None);
+    assert_eq!(attrs.get_bit(ATTR_TITLE), None);
+    assert_eq!(attrs.get("data-x"), None);
+    assert!(pairs(&attrs).is_empty());
+
+    // Refill fewer than before: the third retired slot keeps its stale value
+    // but must stay hidden.
+    let buffer = attrs.inner[0].value.as_ptr();
+    attrs.insert_known(ATTR_SRC, Some("/img.png"));
+    attrs.insert_known(ATTR_SRC, Some("/second.png"));
+    attrs.insert_known(ATTR_HREF, None);
+    assert_eq!(attrs.inner[0].value.as_ptr(), buffer, "slot buffer reused");
+    assert_eq!(
+      pairs(&attrs),
+      [
+        ("src".to_string(), "/img.png".to_string()),
+        ("href".to_string(), String::new())
+      ]
+    );
+    assert_eq!(attrs.get("data-x"), None);
+    assert_eq!(attrs.get_bit(ATTR_TITLE), None);
+  }
+
+  #[test]
+  fn oversized_value_buffers_are_released() {
+    let mut attrs = Attributes::new();
+    let big = "x".repeat(RETAINED_VALUE_CAPACITY + 1);
+    attrs.insert_known(ATTR_SRC, Some(&big));
+    attrs.insert_known(ATTR_HREF, Some("/a"));
+    attrs.clear();
+    assert_eq!(attrs.inner[0].value.capacity(), 0);
+    assert!(attrs.inner[1].value.capacity() > 0);
   }
 }

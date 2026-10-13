@@ -58,15 +58,26 @@ pub fn html_to_text_result(html: &str, options: HtmlToMarkdownOptions) -> Mdream
   html_to_format_result(html, options, OutputFormat::Text)
 }
 
+/// Input bytes per reserved output byte for a one-shot conversion.
+const OUTPUT_RESERVE_DIVISOR: usize = 3;
+/// Initial output and input capacity of a streaming converter.
+const STREAM_START_CAPACITY: usize = 4096;
+const MIN_ONE_SHOT_CAPACITY: usize = 1024;
+const MAX_ONE_SHOT_CAPACITY: usize = 256 * 1024;
+
 /// Convert HTML to the requested format with full results (extraction, frontmatter).
 pub fn html_to_format_result(
   html: &str,
   options: HtmlToMarkdownOptions,
   format: OutputFormat,
 ) -> MdreamResult {
-  let capacity = (html.len() / 3).clamp(1024, 256 * 1024);
-  let state = ConvertState::new(options, capacity, format);
+  let state = ConvertState::new(options, one_shot_capacity(html.len()), format);
   convert_with_state(html, state)
+}
+
+/// Reserve low: output runs from a tenth of the input to over half.
+fn one_shot_capacity(html_len: usize) -> usize {
+  (html_len / OUTPUT_RESERVE_DIVISOR).clamp(MIN_ONE_SHOT_CAPACITY, MAX_ONE_SHOT_CAPACITY)
 }
 
 // The fuzz oracle uses the same renderer, with size-driven text flushes disabled.
@@ -123,7 +134,7 @@ impl MarkdownStreamProcessor {
 
   /// Create a streaming converter for the requested output format.
   pub fn new_with_format(options: HtmlToMarkdownOptions, format: OutputFormat) -> Self {
-    let mut state = ConvertState::new(options, 4096, format);
+    let mut state = ConvertState::new(options, STREAM_START_CAPACITY, format);
     // One-shot conversion does not pay for link hold bookkeeping.
     state.streaming = true;
     Self {
@@ -185,8 +196,44 @@ impl MarkdownStreamProcessor {
   }
 }
 
+/// One conversion with the fast paths on or off, for differential tests.
+#[cfg(any(test, fuzzing))]
+mod fast_path_diff {
+  use super::{ConvertState, HtmlToMarkdownOptions, MarkdownStreamProcessor, OutputFormat};
+
+  pub fn convert(
+    html: &str,
+    options: HtmlToMarkdownOptions,
+    format: OutputFormat,
+    fast: bool,
+  ) -> String {
+    let mut state = ConvertState::new(options, super::one_shot_capacity(html.len()), format);
+    state.fast_paths = fast;
+    super::convert_with_state(html, state).markdown
+  }
+
+  pub fn stream(
+    chunks: &[&str],
+    options: HtmlToMarkdownOptions,
+    format: OutputFormat,
+    fast: bool,
+  ) -> String {
+    let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
+    processor.state.fast_paths = fast;
+    let mut out = String::new();
+    for chunk in chunks {
+      out.push_str(&processor.process_chunk(chunk));
+    }
+    out.push_str(&processor.finish());
+    out
+  }
+}
+
 #[cfg(fuzzing)]
 pub mod fuzz_bridge {
+  pub use super::fast_path_diff::{
+    convert as convert_with_fast_paths, stream as stream_with_fast_paths,
+  };
   use super::{HtmlToMarkdownOptions, MarkdownStreamProcessor, OutputFormat};
 
   pub fn new_drain_disabled(
@@ -524,6 +571,152 @@ mod end_tag_junk {
           }
         }
       }
+    }
+  }
+}
+
+#[cfg(test)]
+mod fast_path_parity {
+  //! Turning the fast paths off must not change a byte, in any format.
+
+  use super::fast_path_diff::{convert, stream};
+  use super::types::{
+    CleanConfig, FilterConfig, FrontmatterConfig, HtmlToMarkdownOptions, IsolateMainConfig,
+    OutputFormat, PluginConfig, TailwindConfig,
+  };
+
+  fn option_sets() -> Vec<(&'static str, HtmlToMarkdownOptions, OutputFormat)> {
+    let base = HtmlToMarkdownOptions::default;
+    let minimal = || HtmlToMarkdownOptions {
+      clean: Some(CleanConfig::all()),
+      plugins: Some(PluginConfig {
+        frontmatter: Some(FrontmatterConfig::default()),
+        isolate_main: Some(IsolateMainConfig),
+        tailwind: Some(TailwindConfig),
+        filter: Some(FilterConfig {
+          exclude: Some(vec!["nav".into(), "footer".into(), "form".into()]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    vec![
+      ("default", base(), OutputFormat::Markdown),
+      ("text", base(), OutputFormat::Text),
+      ("html", base(), OutputFormat::Html),
+      ("minimal", minimal(), OutputFormat::Markdown),
+      (
+        "clean+origin",
+        HtmlToMarkdownOptions {
+          origin: Some("https://example.com/docs/page".into()),
+          clean: Some(CleanConfig::all()),
+          ..Default::default()
+        },
+        OutputFormat::Markdown,
+      ),
+      (
+        "wrap",
+        HtmlToMarkdownOptions {
+          wrap_width: 40,
+          ..Default::default()
+        },
+        OutputFormat::Markdown,
+      ),
+      (
+        "capped",
+        HtmlToMarkdownOptions {
+          max_node_bytes: 512,
+          ..Default::default()
+        },
+        OutputFormat::Markdown,
+      ),
+    ]
+  }
+
+  const SNIPPETS: &[&str] = &[
+    "<p>a <i>b</i> c<b>d</b>e <a href=\"/x\" title=\"T\">link] text</a> f</p>",
+    "<table><tr><td>a|b</td><td> c </td></tr></table><blockquote>q > r</blockquote>",
+    "<ul><li>one <span> two </span></li><li># not heading</li><li>1. not list</li></ul>",
+    "<dl><dt>t</dt><dd>d *x*</dd></dl><details><summary>s</summary>\n\nbody _y_</details>",
+    "<pre><code>a  b</code></pre><p>x<br>y</p><figure><img alt=a><figcaption>cap</figcaption></figure>",
+    "<p>&amp; &lt;b&gt; &#91;x&#93; caf\u{e9} \u{4e2d}\u{6587}</p><h2> spaced  heading </h2><hr>",
+    "<div><p>a</p>  <p>b</p></div><p>   </p><span> </span>trailing <em> </em>end",
+  ];
+
+  fn fixtures() -> Vec<String> {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
+    let mut docs: Vec<String> = std::fs::read_dir(dir)
+      .expect("fixtures dir")
+      .filter_map(|entry| {
+        let path = entry.ok()?.path();
+        (path.extension()? == "html").then(|| std::fs::read_to_string(path).expect("fixture"))
+      })
+      .collect();
+    docs.extend(SNIPPETS.iter().map(|s| (*s).to_string()));
+    docs
+  }
+
+  fn chunks(html: &str, size: usize) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    while start < html.len() {
+      let mut end = (start + size).min(html.len());
+      while !html.is_char_boundary(end) {
+        end += 1;
+      }
+      out.push(&html[start..end]);
+      start = end;
+    }
+    out
+  }
+
+  #[test]
+  fn fast_paths_match_general_paths() {
+    let docs = fixtures();
+    assert!(docs.len() > SNIPPETS.len(), "fixtures were found");
+    for (name, options, format) in option_sets() {
+      for (i, html) in docs.iter().enumerate() {
+        let slow = convert(html, options.clone(), format, false);
+        let fast = convert(html, options.clone(), format, true);
+        assert!(slow == fast, "one-shot mismatch: options={name} doc={i}");
+        for size in [7, 4096] {
+          let parts = chunks(html, size);
+          let slow = stream(&parts, options.clone(), format, false);
+          let fast = stream(&parts, options.clone(), format, true);
+          assert!(
+            slow == fast,
+            "stream mismatch: options={name} doc={i} chunk={size}"
+          );
+        }
+      }
+    }
+  }
+}
+
+#[cfg(test)]
+mod capped_pre_text {
+  use super::types::{HtmlToMarkdownOptions, OutputFormat};
+  use super::{MarkdownStreamProcessor, html_to_format};
+
+  /// A capped `<pre>` run must not report whitespace the cap dropped.
+  #[test]
+  fn a_capped_pre_run_keeps_the_dropped_space_out_of_whitespace_state() {
+    let html = "<li><pre>H s</pre><p>T";
+    let options = || HtmlToMarkdownOptions {
+      wrap_width: 24,
+      max_node_bytes: 1,
+      ..Default::default()
+    };
+    assert_eq!(html_to_format(html, options(), OutputFormat::Text), "H\nT");
+    for size in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new_with_format(options(), OutputFormat::Text);
+      let mut out = String::new();
+      for piece in html.as_bytes().chunks(size) {
+        out.push_str(&processor.process_chunk(std::str::from_utf8(piece).unwrap()));
+      }
+      out.push_str(&processor.finish());
+      assert_eq!(out, "H\nT", "chunk={size}");
     }
   }
 }

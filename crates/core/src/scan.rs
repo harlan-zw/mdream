@@ -1,19 +1,97 @@
 //! Low-level HTML scanning primitives: whitespace, comments, tag attributes.
 
 use crate::consts::*;
-use crate::entities::decode_html_attribute_entities;
 use crate::types::Attributes;
 
 /// Whitespace check optimized for the hot character loop.
 /// Uses a 33-bit bitmap: space(32), CR(13), LF(10), TAB(9).
 #[inline(always)]
-pub(crate) fn is_whitespace(c: u8) -> bool {
+pub(crate) const fn is_whitespace(c: u8) -> bool {
   if c > 32 {
     return false;
   }
   // Bitmap: bit 9 (tab), bit 10 (LF), bit 12 (FF), bit 13 (CR), bit 32 (space)
   const MASK: u64 = (1u64 << 9) | (1u64 << 10) | (1u64 << 12) | (1u64 << 13) | (1u64 << 32);
   (MASK >> c) & 1 == 1
+}
+
+const fn whitespace_and(extra: &[u8]) -> [bool; 256] {
+  let mut table = [false; 256];
+  let mut byte = 0u8;
+  loop {
+    table[byte as usize] = is_whitespace(byte);
+    if byte == u8::MAX {
+      break;
+    }
+    byte += 1;
+  }
+  let mut k = 0usize;
+  while k < extra.len() {
+    table[extra[k] as usize] = true;
+    k += 1;
+  }
+  table
+}
+
+const ATTR_NAME_STOP: u8 = 1;
+const UNQUOTED_VALUE_STOP: u8 = 2;
+const NON_WHITESPACE_STOP: u8 = 4;
+const TAG_NAME_STOP: u8 = 8;
+
+const fn stop_bit(in_set: bool, bit: u8) -> u8 {
+  if in_set { bit } else { 0 }
+}
+
+/// Stop-set bits for every byte, packed into one table.
+static SCAN_CLASS: [u8; 256] = {
+  let (name, unquoted, tag) = (
+    whitespace_and(b"=>/"),
+    whitespace_and(b">"),
+    whitespace_and(b"/>"),
+  );
+  let mut table = [0u8; 256];
+  let mut byte = 0usize;
+  while byte < 256 {
+    table[byte] = stop_bit(name[byte], ATTR_NAME_STOP)
+      | stop_bit(unquoted[byte], UNQUOTED_VALUE_STOP)
+      | stop_bit(!is_whitespace(byte as u8), NON_WHITESPACE_STOP)
+      | stop_bit(tag[byte], TAG_NAME_STOP);
+    byte += 1;
+  }
+  table
+};
+
+/// First tag-name stop byte at or after `from`.
+#[inline]
+pub(crate) fn tag_name_end(bytes: &[u8], from: usize) -> usize {
+  let mut i = from;
+  while i < bytes.len() && SCAN_CLASS[bytes[i] as usize] & TAG_NAME_STOP == 0 {
+    i += 1;
+  }
+  i
+}
+
+const SWAR_WIDTH: usize = 8;
+
+/// The lowest set bit of the zero-byte test is exact: borrows run upward only.
+// One out-of-line copy in WASM, where each inlined loop costs bundle bytes.
+#[cfg_attr(target_arch = "wasm32", inline(never))]
+#[cfg_attr(not(target_arch = "wasm32"), inline)]
+pub(crate) fn find_byte(hay: &[u8], needle: u8) -> Option<usize> {
+  const BYTE_ONES: u64 = 0x0101_0101_0101_0101;
+  const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
+  let pattern = BYTE_ONES * u64::from(needle);
+  let (words, rest) = hay.as_chunks::<SWAR_WIDTH>();
+  let mut offset = 0usize;
+  for word in words {
+    let word = u64::from_le_bytes(*word) ^ pattern;
+    let hits = word.wrapping_sub(BYTE_ONES) & !word & HIGH_BITS;
+    if hits != 0 {
+      return Some(offset + (hits.trailing_zeros() / u8::BITS) as usize);
+    }
+    offset += SWAR_WIDTH;
+  }
+  rest.iter().position(|&b| b == needle).map(|p| offset + p)
 }
 
 pub(crate) struct CommentResult {
@@ -271,10 +349,8 @@ pub(crate) fn tag_is_complete(
   None
 }
 
-/// Bytes a start tag may retain: its own name when that is kept, plus the
-/// attribute names and values its mask keeps, measured against
-/// `max_node_bytes`. Attributes the mask rejects are never charged, so a
-/// megabyte of `data-*` costs nothing and its element survives.
+/// Bytes a start tag may retain, counted against `max_node_bytes`. Attributes
+/// the mask rejects are not charged.
 #[derive(Clone, Copy)]
 pub(crate) struct AttrBudget {
   cap: usize,
@@ -401,7 +477,7 @@ fn scan_tag<const EXTRACT: bool>(
     // A quoted value hides `>`. Jump it whole; the `ATTR_NONE` scan only has to
     // get past it, and stepping byte by byte made this the dominant cost.
     if let State::Quoted(quote) = state {
-      match bytes[i..].iter().position(|&b| b == quote) {
+      match find_byte(&bytes[i..], quote) {
         Some(offset) => {
           state = State::Gap;
           i += offset + 1;
@@ -415,6 +491,22 @@ fn scan_tag<const EXTRACT: bool>(
     }
 
     let attribute_state = if EXTRACT { scan.state } else { state };
+    // Run to the next delimiter instead of dispatching per byte.
+    let run_stop = match attribute_state {
+      State::Name => Some(ATTR_NAME_STOP),
+      State::UnquotedValue => Some(UNQUOTED_VALUE_STOP),
+      State::Gap | State::AfterName | State::BeforeValue => Some(NON_WHITESPACE_STOP),
+      State::Quoted(_) => None,
+    };
+    if let Some(stop) = run_stop
+      && SCAN_CLASS[c as usize] & stop == 0
+    {
+      i += 1;
+      while i < chunk_length && SCAN_CLASS[bytes[i] as usize] & stop == 0 {
+        i += 1;
+      }
+      continue;
+    }
     if attribute_state != State::UnquotedValue && c == SLASH_CHAR {
       // The `>` that would make this self-closing is in the next chunk. Feeding
       // the `/` to the tokenizer now would bury it in an attribute name.
@@ -440,10 +532,7 @@ fn scan_tag<const EXTRACT: bool>(
     // Run to the closing quote without re-entering the state dispatch.
     if EXTRACT && scan.opens_quoted_value(c) {
       let value_start = i + 1;
-      let mut end = value_start;
-      while end < chunk_length && bytes[end] != c {
-        end += 1;
-      }
+      let end = find_byte(&bytes[value_start..], c).map_or(chunk_length, |p| value_start + p);
       if end == chunk_length {
         // Unterminated: the tag cannot close in this chunk. `state` carries the
         // open quote, so the resume ends the value on the matching delimiter.
@@ -494,11 +583,7 @@ fn push_attr(
     return;
   }
   // A known name is fully described by `bit`; only the `ATTR_ALL` long tail
-  // needs an owned, lowercased copy.
-  let value = match value {
-    Some(value) => decode_html_attribute_entities(value).into_owned(),
-    None => String::new(),
-  };
+  // needs an owned, lowercased copy. Values decode into a recycled buffer.
   if bit == ATTR_NONE {
     result.insert_custom(raw.to_ascii_lowercase().into_boxed_str(), value);
   } else {
@@ -1076,6 +1161,35 @@ mod tests {
     }
     for c in [b'a', b'0', b'-', 0u8] {
       assert!(!is_whitespace(c));
+    }
+  }
+
+  #[test]
+  fn find_byte_matches_scalar_search() {
+    let fillers: [u8; 6] = [b'a', b'"' - 1, 0x80, 0xFF, 0x00, b'\''];
+    for needle in [b'"', b'\'', 0x00, 0x80, 0xFF] {
+      for len in 0..=100usize {
+        for &fill in &fillers {
+          if fill == needle {
+            continue;
+          }
+          let mut hay = vec![fill; len];
+          assert_eq!(find_byte(&hay, needle), None, "len {len} fill {fill:#x}");
+          for at in 0..len {
+            hay[at] = needle;
+            // A later duplicate must not win over the first match.
+            if at + 3 < len {
+              hay[at + 3] = needle;
+            }
+            assert_eq!(
+              find_byte(&hay, needle),
+              hay.iter().position(|&b| b == needle),
+              "needle {needle:#x} at {at} len {len} fill {fill:#x}"
+            );
+            hay.fill(fill);
+          }
+        }
+      }
     }
   }
 
