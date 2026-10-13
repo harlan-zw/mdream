@@ -52,7 +52,6 @@
     "dev:build": "nuxi build playground",
     "dev:prepare": "nuxt-module-build build --stub && nuxt-module-build prepare && nuxi prepare playground",
     "prepare:fixtures": "nuxi prepare test/fixtures/basic",
-    "release": "pnpm build && bumpp && pnpm -r publish",
     "test": "pnpm prepare:fixtures && vitest run",
     "test:watch": "vitest watch",
     "test:attw": "echo 'ok'",
