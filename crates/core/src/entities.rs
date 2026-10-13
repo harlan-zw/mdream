@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::borrow::Cow;
 
 #[path = "entities_generated.rs"]
@@ -14,11 +15,17 @@ pub(crate) fn decode_html_entities(text: &str) -> Cow<'_, str> {
   decode_html_entities_in_context(text, false, false)
 }
 
+/// Overwrite `out` with the decoded attribute value.
 #[inline]
-pub(crate) fn decode_html_attribute_entities(text: &str) -> Cow<'_, str> {
-  decode_html_entities_in_context(text, true, false)
+pub(crate) fn decode_html_attribute_entities_into(text: &str, out: &mut String) {
+  // `decode_html_entities_into` leaves `out` empty when nothing decodes.
+  if !decode_html_entities_into(text, true, false, out) {
+    out.clear();
+    out.push_str(text);
+  }
 }
 
+#[cfg(test)]
 #[inline]
 fn decode_html_entities_in_context(
   text: &str,
@@ -126,9 +133,7 @@ pub(crate) fn decode_html_entities_into(
 
   while i < len {
     if bytes[i] != b'&' {
-      while i < len && bytes[i] != b'&' {
-        i += 1;
-      }
+      i = crate::scan::find_byte(&bytes[i..], b'&').map_or(len, |p| i + p);
       continue;
     }
 
@@ -265,6 +270,12 @@ pub(crate) fn decode_html_entities_into(
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  fn decode_html_attribute_entities(text: &str) -> String {
+    let mut out = String::new();
+    decode_html_attribute_entities_into(text, &mut out);
+    out
+  }
 
   #[test]
   fn no_ampersand_borrows() {

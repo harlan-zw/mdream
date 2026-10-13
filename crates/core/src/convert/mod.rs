@@ -84,6 +84,10 @@ const BATCHABLE_TEXT: [bool; 256] = {
   t
 };
 
+/// Open-element depth the stack reserves up front. Deeper documents grow it,
+/// and growing copies the whole stack, so this covers typical pages.
+const TYPICAL_NESTING_DEPTH: usize = 32;
+
 /// A text run this long is emitted in pieces of the same source node, so one
 /// enormous run streams in a window instead of being held whole.
 const TEXT_RUN_FLUSH_THRESHOLD: usize = 64 * 1024;
@@ -361,33 +365,36 @@ impl TailRun {
   }
 }
 
-fn heap_sort_heading_slugs(slugs: &mut [String]) {
-  fn sift_down(slugs: &mut [String], mut root: usize, end: usize) {
+/// In-place heap sort, O(n log n) with no extra memory. Rust's generic
+/// `sort_unstable` adds about 3 KB of WASM per element type; this compiles once
+/// per type at a fraction of that.
+fn heap_sort<T: Ord>(items: &mut [T]) {
+  fn sift_down<T: Ord>(items: &mut [T], mut root: usize, end: usize) {
     let mut child = root * 2 + 1;
     while child < end {
-      if child + 1 < end && slugs[child] < slugs[child + 1] {
+      if child + 1 < end && items[child] < items[child + 1] {
         child += 1;
       }
-      if slugs[root] >= slugs[child] {
+      if items[root] >= items[child] {
         return;
       }
-      slugs.swap(root, child);
+      items.swap(root, child);
       root = child;
       child = root * 2 + 1;
     }
   }
 
-  let mut root = slugs.len() / 2;
+  let mut root = items.len() / 2;
   while root > 0 {
     root -= 1;
-    sift_down(slugs, root, slugs.len());
+    sift_down(items, root, items.len());
   }
 
-  let mut end = slugs.len();
+  let mut end = items.len();
   while end > 1 {
     end -= 1;
-    slugs.swap(0, end);
-    sift_down(slugs, 0, end);
+    items.swap(0, end);
+    sift_down(items, 0, end);
   }
 }
 
@@ -519,13 +526,12 @@ fn find_script_end_tag(bytes: &[u8], start: usize, initial_state: u8) -> ScriptS
 
   while i < bytes.len() {
     if state == SCRIPT_DATA {
-      while i < bytes.len() && bytes[i] != LT_CHAR {
-        i += 1;
-      }
+      i = crate::scan::find_byte(&bytes[i..], LT_CHAR).map_or(bytes.len(), |p| i + p);
     } else if state == SCRIPT_DATA_ESCAPED || state == SCRIPT_DATA_DOUBLE_ESCAPED {
-      while i < bytes.len() && bytes[i] != LT_CHAR && bytes[i] != b'-' {
-        i += 1;
-      }
+      i = bytes[i..]
+        .iter()
+        .position(|&b| b == LT_CHAR || b == b'-')
+        .map_or(bytes.len(), |p| i + p);
     }
     if i == bytes.len() {
       break;
@@ -634,12 +640,42 @@ fn find_script_end_tag(bytes: &[u8], start: usize, initial_state: u8) -> ScriptS
   }
 }
 
+const _: () = assert!(MAX_TAG_ID <= u128::BITS as usize);
+
+/// Bitmask of the tag ids a bare tag-name selector list matches, or `None` if any selector is not a bare tag name.
+fn exclude_tag_table(selectors: &[(String, ParsedSelectorList)]) -> Option<u128> {
+  let mut table = 0u128;
+  let mut mark = |selector: &crate::types::ParsedSelector| -> bool {
+    let crate::types::ParsedSelector::Tag(name) = selector else {
+      return false;
+    };
+    for (id, tag_name) in TAG_NAMES.iter().enumerate() {
+      if !tag_name.is_empty() && tag_name == name {
+        table |= 1 << id;
+      }
+    }
+    true
+  };
+  for (_, list) in selectors {
+    let all_tags = match list {
+      ParsedSelectorList::Single(selector) => mark(selector),
+      ParsedSelectorList::Multiple(list) => list.iter().all(&mut mark),
+    };
+    if !all_tags {
+      return None;
+    }
+  }
+  Some(table)
+}
+
 /// Unified single-pass HTML-to-Markdown converter.
 /// Merges parser state and markdown output state to eliminate callback overhead,
 /// duplicate state tracking, and enable full inlining of tag handler logic.
 pub struct ConvertState {
   // === Parser state ===
   pub depth_map: [u16; MAX_TAG_ID],
+  /// Cached [`Self::in_raw_html_block`].
+  raw_html_block_open: bool,
   pub depth: usize,
   has_encoded_html_entity: bool,
   last_char_was_whitespace: bool,
@@ -691,9 +727,7 @@ pub struct ConvertState {
   pending_tag: Option<PendingTagScan>,
   discard: Discard,
   script_text_buffer: String,
-  pub stack: Vec<ElementNode>,
-  node_pool: Vec<ElementNode>,
-  /// Scan target, swapped with the pooled node so attribute buffers recycle.
+  pub(crate) stack: crate::types::NodeStack,
   pub(crate) attr_scratch: crate::types::Attributes,
 
   // Plugin flags
@@ -724,6 +758,8 @@ pub struct ConvertState {
 
   filter_include_parsed: Vec<(String, ParsedSelectorList)>,
   filter_exclude_parsed: Vec<(String, ParsedSelectorList)>,
+  /// `filter_exclude_parsed` as a per-tag bitmask, when every selector is a bare tag name.
+  filter_exclude_tags: Option<u128>,
   filter_process_children: bool,
 
   // === Markdown output state ===
@@ -859,6 +895,8 @@ pub struct ConvertState {
   /// a flush, which can run once per 8KB and once per open frame, reuses the
   /// capacity instead of allocating a fresh copy of the region each time.
   blockquote_scratch: String,
+  /// Scratch for a text node's escaped copy.
+  pub(crate) escape_scratch: String,
   /// Completed-line lookup through the settled prefix. Appending a long line
   /// must not search every preceding byte again after each input chunk.
   blockquote_line_scanned_to: usize,
@@ -923,6 +961,9 @@ pub struct ConvertState {
   cut_line_lead: CutLineLead,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
+  /// Test/fuzz switch: `false` routes everything through the general path.
+  #[cfg(any(test, fuzzing))]
+  pub(crate) fast_paths: bool,
   /// Bytes a table row read back to classify the line it follows.
   #[cfg(test)]
   row_line_scanned: std::cell::Cell<usize>,
@@ -995,6 +1036,7 @@ impl ConvertState {
     let options_max_node_bytes = options.max_node_bytes;
     let mut s = Self {
       depth_map: [0; MAX_TAG_ID],
+      raw_html_block_open: false,
       depth: 0,
       has_encoded_html_entity: false,
       last_char_was_whitespace: true,
@@ -1032,8 +1074,7 @@ impl ConvertState {
       pending_tag: None,
       discard: Discard::No,
       script_text_buffer: String::new(),
-      stack: Vec::with_capacity(32),
-      node_pool: Vec::with_capacity(32),
+      stack: crate::types::NodeStack::with_capacity(TYPICAL_NESTING_DEPTH),
       attr_scratch: crate::types::Attributes::new(),
 
       has_plugins: false,
@@ -1061,6 +1102,7 @@ impl ConvertState {
 
       filter_include_parsed: Vec::new(),
       filter_exclude_parsed: Vec::new(),
+      filter_exclude_tags: None,
       filter_process_children: true,
 
       options,
@@ -1128,6 +1170,7 @@ impl ConvertState {
       code_fence: None,
       blockquotes: Vec::with_capacity(4),
       blockquote_scratch: String::new(),
+      escape_scratch: String::new(),
       blockquote_line_scanned_to: 0,
       blockquote_line_end: 0,
       heading_slugs: Vec::new(),
@@ -1152,6 +1195,8 @@ impl ConvertState {
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
+      #[cfg(any(test, fuzzing))]
+      fast_paths: true,
       #[cfg(test)]
       row_line_scanned: std::cell::Cell::new(0),
       #[cfg(test)]
@@ -1232,6 +1277,7 @@ impl ConvertState {
             .iter()
             .map(|sel| (sel.clone(), parse_css_selector_list(sel)))
             .collect();
+          s.filter_exclude_tags = exclude_tag_table(&s.filter_exclude_parsed);
         }
         s.filter_process_children = filter.process_children.unwrap_or(true);
       }
@@ -1302,11 +1348,17 @@ impl ConvertState {
     self.check_held_output();
   }
 
+  /// Only a byte cap can be exceeded, so the uncapped case is one inlined test.
+  #[inline(always)]
   fn check_held_output(&mut self) {
-    if self.options.max_node_bytes != 0
-      && !self.held_output_exceeded
-      && self.held_output_exceeds_cap()
-    {
+    if self.options.max_node_bytes != 0 {
+      self.check_held_output_capped();
+    }
+  }
+
+  #[inline(never)]
+  fn check_held_output_capped(&mut self) {
+    if !self.held_output_exceeded && self.held_output_exceeds_cap() {
       self.held_output_exceeded = true;
       self.truncated = true;
     }
@@ -1560,9 +1612,8 @@ impl ConvertState {
         && cc != LT_CHAR
         && (self.text_node_exhausted || text_buffer.len() >= max_node_bytes)
       {
-        while i < chunk_length && bytes[i] != LT_CHAR {
-          i += 1;
-        }
+        i =
+          crate::scan::find_byte(&bytes[i..chunk_length], LT_CHAR).map_or(chunk_length, |p| i + p);
         self.text_node_exhausted = true;
         self.truncated = true;
         continue;
@@ -1571,7 +1622,11 @@ impl ConvertState {
       if cc != LT_CHAR {
         // Batch contiguous plain ASCII text, absorbing single inter-word
         // spaces so prose is copied once per text node, not per word.
-        if BATCHABLE_TEXT[cc as usize] && !self.in_non_nesting && !self.in_pre {
+        // Uncapped `<pre>` text batches too; under a cap the per-byte path must see each byte.
+        if BATCHABLE_TEXT[cc as usize]
+          && !self.in_non_nesting
+          && (!self.in_pre || max_node_bytes == 0)
+        {
           let start = i;
           let limit = chunk_length.min(i + self.text_run_room(&text_buffer));
           i += 1;
@@ -1596,7 +1651,9 @@ impl ConvertState {
             max_node_bytes,
             &mut self.text_node_exhausted,
           );
-          self.text_buffer_batchable_len += text_buffer.len() - before_len;
+          if !self.in_pre {
+            self.text_buffer_batchable_len += text_buffer.len() - before_len;
+          }
           self.text_buffer_contains_non_whitespace = true;
           if had_space {
             self.text_buffer_contains_whitespace = true;
@@ -1610,9 +1667,8 @@ impl ConvertState {
         }
 
         if self.in_non_nesting && self.drops_raw_text() {
-          while i < chunk_length && bytes[i] != LT_CHAR {
-            i += 1;
-          }
+          i = crate::scan::find_byte(&bytes[i..chunk_length], LT_CHAR)
+            .map_or(chunk_length, |p| i + p);
           self.last_char_was_whitespace = false;
           self.just_closed_tag = false;
           continue;
@@ -1626,9 +1682,8 @@ impl ConvertState {
           && (self.depth_map[TAG_SCRIPT as usize] > 0 || self.depth_map[TAG_STYLE as usize] > 0)
         {
           let start = i;
-          while i < chunk_length && bytes[i] != LT_CHAR {
-            i += 1;
-          }
+          i = crate::scan::find_byte(&bytes[i..chunk_length], LT_CHAR)
+            .map_or(chunk_length, |p| i + p);
           self.truncated |= push_capped_text_node(
             &mut text_buffer,
             &chunk[start..i],
@@ -1675,17 +1730,14 @@ impl ConvertState {
           // covers characters produced by decoded entities that never pass
           // through this parse loop.
           let before_len = text_buffer.len();
-          if cc < 0x80 {
+          if cc.is_ascii() {
             text_buffer.push(cc as char);
           } else {
             // ASCII delimiters cannot occur inside UTF-8 code points. Copy the
             // whole non-ASCII run without decoding and pushing each character.
             let limit =
               chunk.ceil_char_boundary(chunk_length.min(i + self.text_run_room(&text_buffer)));
-            let mut end = i + 1;
-            while end < limit && bytes[end] >= 0x80 {
-              end += 1;
-            }
+            let end = non_ascii_run_end(bytes, i, limit);
             self.truncated |= push_capped_text_node(
               &mut text_buffer,
               &chunk[i..end],
@@ -1699,7 +1751,7 @@ impl ConvertState {
             self.last_char_was_whitespace = false;
             self.just_closed_tag = false;
           }
-          if cc >= 0x80 {
+          if !cc.is_ascii() {
             self.text_buffer_batchable_len += text_buffer.len() - before_len;
             if self.flush_text_run(&mut text_buffer) {
               return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
@@ -1957,16 +2009,8 @@ impl ConvertState {
       } else {
         let mut i2 = i + 1;
         let tag_name_start = i2;
-        let mut tag_name_end = None;
-        while i2 < chunk_length {
-          let c = bytes[i2];
-          if is_whitespace(c) || c == SLASH_CHAR || c == GT_CHAR {
-            tag_name_end = Some(i2);
-            break;
-          }
-          i2 += 1;
-        }
-        let Some(tag_name_end) = tag_name_end else {
+        let name_stop = crate::scan::tag_name_end(&bytes[..chunk_length], i2);
+        let Some(tag_name_end) = (name_stop < chunk_length).then_some(name_stop) else {
           run_start = i;
           carry = true;
           // A builtin start tag is kept whatever the cap; a longer name is
@@ -2251,8 +2295,7 @@ impl ConvertState {
     // whole output buffer.
     if self.clean_flags & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
       let trim_offset = start;
-      // A specialized heap sort avoids pulling Rust's larger generic sort into WASM.
-      heap_sort_heading_slugs(&mut self.heading_slugs);
+      heap_sort(&mut self.heading_slugs);
 
       // A nested `<a>` across a block boundary reuses the outer anchor's
       // bracket position instead of getting its own `[`, so two
@@ -2264,7 +2307,7 @@ impl ConvertState {
         .iter()
         .map(|link| link.bracket_start)
         .collect();
-      bracket_starts.sort_unstable();
+      heap_sort(&mut bracket_starts);
       let has_aliased_bracket = |bracket_start: usize| {
         let Ok(idx) = bracket_starts.binary_search(&bracket_start) else {
           return false;
@@ -3149,6 +3192,16 @@ pub(crate) fn clamp_to_char_boundary(text: &str, max: usize) -> &str {
   &text[..end]
 }
 
+/// End of the non-ASCII run that starts at `start`, stopping at `limit`.
+#[inline]
+fn non_ascii_run_end(bytes: &[u8], start: usize, limit: usize) -> usize {
+  let mut end = start + 1;
+  while end < limit && !bytes[end].is_ascii() {
+    end += 1;
+  }
+  end
+}
+
 fn push_capped_text_node(
   buffer: &mut String,
   text: &str,
@@ -3321,7 +3374,7 @@ mod tests {
       match seed % 5 {
         0 | 1 => state
           .buffer
-          .push([b'#', b' ', b'\t', b'x'][(seed as usize >> 8) % 4] as char),
+          .push(b"# \tx"[(seed as usize >> 8) % 4] as char),
         2 if !state.buffer.is_empty() => {
           let at = (seed as usize >> 8) % state.buffer.len();
           state.note_buffer_rewrite(at);
@@ -3378,5 +3431,57 @@ mod tests {
 
     check(&["<p><b></b> 😀"]);
     check(&["<p><b></b> ", "😀"]);
+  }
+}
+
+#[cfg(test)]
+mod exclude_tag_table_tests {
+  use super::*;
+
+  fn parsed(selectors: &[&str]) -> Vec<(String, ParsedSelectorList)> {
+    selectors
+      .iter()
+      .map(|s| ((*s).to_string(), parse_css_selector_list(s)))
+      .collect()
+  }
+
+  /// The table must agree with the selector list on every built-in tag.
+  #[test]
+  fn table_matches_selector_list_for_every_builtin_tag() {
+    for selectors in [
+      &["nav", "footer", "form"][..],
+      &["nav, aside", "button"][..],
+      &["NAV", "Footer"][..],
+      &["custom-x", "div"][..],
+    ] {
+      let list = parsed(selectors);
+      let table = exclude_tag_table(&list).expect("bare tag selectors build a table");
+      for (id, name) in TAG_NAMES.iter().enumerate().take(MAX_TAG_ID) {
+        if name.is_empty() {
+          continue;
+        }
+        let node = ElementNode {
+          tag_id: Some(u8::try_from(id).unwrap()),
+          ..Default::default()
+        };
+        let expected = list.iter().any(|(_, p)| matches_selector_list(&node, p));
+        assert_eq!(table >> id & 1 == 1, expected, "{selectors:?} tag={name}");
+      }
+    }
+  }
+
+  #[test]
+  fn non_tag_selectors_keep_the_selector_list() {
+    for selectors in [
+      &["nav", "div.x"][..],
+      &["#id"][..],
+      &["[hidden]"][..],
+      &["nav, .ad"][..],
+    ] {
+      assert!(
+        exclude_tag_table(&parsed(selectors)).is_none(),
+        "{selectors:?}"
+      );
+    }
   }
 }
