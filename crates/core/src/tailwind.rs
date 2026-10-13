@@ -50,11 +50,11 @@ pub(crate) fn process_tailwind_classes(
       if supersedes(weight) {
         weight = Some((breakpoint, false));
       }
-    } else if base == "line-through" || base == "underline" {
+    } else if base == "line-through" {
       if supersedes(decoration) {
         decoration = Some((breakpoint, true));
       }
-    } else if base == "no-underline" {
+    } else if base == "no-underline" || base == "underline" {
       if supersedes(decoration) {
         decoration = Some((breakpoint, false));
       }
@@ -124,10 +124,8 @@ mod tests {
   }
 
   #[test]
-  fn strikethrough_and_underline() {
+  fn line_through_maps_to_strikethrough() {
     let (p, _, _) = process_tailwind_classes("line-through");
-    assert_eq!(p.as_deref(), Some("~~"));
-    let (p, _, _) = process_tailwind_classes("underline");
     assert_eq!(p.as_deref(), Some("~~"));
   }
 
