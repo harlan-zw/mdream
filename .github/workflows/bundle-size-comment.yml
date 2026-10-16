@@ -47,21 +47,31 @@ jobs:
             })
             const expectedHeadRepository = run.head_repository.full_name
             const expectedBaseRepository = `${context.repo.owner}/${context.repo.repo}`
-            const matches = pullRequests.filter(pullRequest =>
+            const candidates = pullRequests.filter(pullRequest =>
               pullRequest.state === 'open'
-              && pullRequest.head.sha === run.head_sha
               && pullRequest.head.repo?.full_name === expectedHeadRepository
               && pullRequest.base.repo.full_name === expectedBaseRepository,
             )
+            const matches = candidates.filter(
+              pullRequest => pullRequest.head.sha === run.head_sha,
+            )
 
-            if (matches.length !== 1) {
-              core.setFailed(`Expected one open pull request for ${run.head_sha}, found ${matches.length}`)
+            if (matches.length === 1) {
+              core.setOutput('number', matches[0].number)
               return
             }
 
-            core.setOutput('number', matches[0].number)
+            if (matches.length === 0 && candidates.length === 1) {
+              core.notice(
+                `Pull request #${candidates[0].number} advanced after this workflow run; skipping stale comment`,
+              )
+              return
+            }
+
+            core.setFailed(`Expected one open pull request for ${run.head_sha}, found ${matches.length}`)
 
       - name: Download bundle report
+        if: steps.pull-request.outputs.number != ''
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bundle-size-report
@@ -70,6 +80,7 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
 
       - name: Validate bundle report
+        if: steps.pull-request.outputs.number != ''
         env:
           COMMENT_PATH: ${{ runner.temp }}/bundle-size-comment.md
           EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -123,6 +134,7 @@ jobs:
           sed 's/@/@<!-- -->/g' "$report" > "$COMMENT_PATH"
 
       - name: Post comment on pull request
+        if: steps.pull-request.outputs.number != ''
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           GITHUB_TOKEN: ${{ github.token }}
