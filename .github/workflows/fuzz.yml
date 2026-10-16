@@ -18,6 +18,7 @@ jobs:
       matrix:
         target:
           - fuzz_capped_chunking
+          - fuzz_fast_paths
           - fuzz_html_to_markdown
           - fuzz_html_grammar
           - fuzz_options

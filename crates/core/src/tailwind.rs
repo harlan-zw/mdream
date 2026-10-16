@@ -2,13 +2,23 @@
 
 #[inline]
 fn extract_base_class(class: &str) -> (&str, u8) {
-  let breakpoints = [("sm:", 1), ("md:", 2), ("lg:", 3), ("xl:", 4), ("2xl:", 5)];
-  for (bp, priority) in breakpoints {
-    if let Some(rest) = class.strip_prefix(bp) {
-      return (rest, priority);
-    }
+  match class.as_bytes() {
+    [b's', b'm', b':', ..] => (&class[3..], 1),
+    [b'm', b'd', b':', ..] => (&class[3..], 2),
+    [b'l', b'g', b':', ..] => (&class[3..], 3),
+    [b'x', b'l', b':', ..] => (&class[3..], 4),
+    [b'2', b'x', b'l', b':', ..] => (&class[4..], 5),
+    _ => (class, 0),
   }
-  (class, 0)
+}
+
+/// Substring test for the keyword probes; a window scan beats the searcher's setup.
+#[inline]
+fn has_infix(haystack: &str, needle: &[u8]) -> bool {
+  haystack
+    .as_bytes()
+    .windows(needle.len())
+    .any(|window| window == needle)
 }
 
 pub(crate) fn process_tailwind_classes(
@@ -28,50 +38,25 @@ pub(crate) fn process_tailwind_classes(
     let supersedes = |current: Option<(u8, bool)>| {
       current.is_none_or(|(current_breakpoint, _)| breakpoint >= current_breakpoint)
     };
-    if base == "italic" {
-      if supersedes(emphasis) {
-        emphasis = Some((breakpoint, true));
+    // Exact names first; the infix probes below would match them too.
+    let (slot, value) = match base {
+      "italic" => (&mut emphasis, true),
+      "not-italic" => (&mut emphasis, false),
+      "font-bold" | "font-semibold" | "font-black" | "font-extrabold" | "font-medium" | "bold" => {
+        (&mut weight, true)
       }
-    } else if base == "not-italic" {
-      if supersedes(emphasis) {
-        emphasis = Some((breakpoint, false));
-      }
-    } else if base == "font-bold"
-      || base == "font-semibold"
-      || base == "font-black"
-      || base == "font-extrabold"
-      || base == "font-medium"
-      || base == "bold"
-    {
-      if supersedes(weight) {
-        weight = Some((breakpoint, true));
-      }
-    } else if base.contains("font-") {
-      if supersedes(weight) {
-        weight = Some((breakpoint, false));
-      }
-    } else if base == "line-through" {
-      if supersedes(decoration) {
-        decoration = Some((breakpoint, true));
-      }
-    } else if base == "no-underline" || base == "underline" {
-      if supersedes(decoration) {
-        decoration = Some((breakpoint, false));
-      }
-    } else if base == "hidden" || base.contains("invisible") {
-      if supersedes(display_hidden) {
-        display_hidden = Some((breakpoint, true));
-      }
-    } else if base == "block" || base == "flex" || base == "inline" {
-      if supersedes(display_hidden) {
-        display_hidden = Some((breakpoint, false));
-      }
-    } else if base == "absolute" || base == "fixed" || base == "sticky" {
-      if supersedes(position_hidden) {
-        position_hidden = Some((breakpoint, true));
-      }
-    } else if (base == "static" || base == "relative") && supersedes(position_hidden) {
-      position_hidden = Some((breakpoint, false));
+      "line-through" => (&mut decoration, true),
+      "no-underline" | "underline" => (&mut decoration, false),
+      "hidden" => (&mut display_hidden, true),
+      "block" | "flex" | "inline" => (&mut display_hidden, false),
+      "absolute" | "fixed" | "sticky" => (&mut position_hidden, true),
+      "static" | "relative" => (&mut position_hidden, false),
+      _ if has_infix(base, b"font-") => (&mut weight, false),
+      _ if has_infix(base, b"invisible") => (&mut display_hidden, true),
+      _ => continue,
+    };
+    if supersedes(*slot) {
+      *slot = Some((breakpoint, value));
     }
   }
 
@@ -219,5 +204,141 @@ mod tests {
     let (p, s, _) = process_tailwind_classes("not-italic");
     assert!(p.is_none());
     assert!(s.is_none());
+  }
+
+  /// Reference if-chain: the behaviour `process_tailwind_classes` must match.
+  fn reference(classes_attr: &str) -> (Option<String>, Option<String>, bool) {
+    fn base_of(class: &str) -> (&str, u8) {
+      for (bp, priority) in [("sm:", 1), ("md:", 2), ("lg:", 3), ("xl:", 4), ("2xl:", 5)] {
+        if let Some(rest) = class.strip_prefix(bp) {
+          return (rest, priority);
+        }
+      }
+      (class, 0)
+    }
+    let (mut w, mut e, mut d, mut dh, mut ph) = (None::<(u8, bool)>, None, None, None, None);
+    for cls in classes_attr.split_whitespace() {
+      let (base, bp) = base_of(cls);
+      let sup = |c: Option<(u8, bool)>| c.is_none_or(|(cb, _)| bp >= cb);
+      if base == "italic" {
+        if sup(e) {
+          e = Some((bp, true));
+        }
+      } else if base == "not-italic" {
+        if sup(e) {
+          e = Some((bp, false));
+        }
+      } else if [
+        "font-bold",
+        "font-semibold",
+        "font-black",
+        "font-extrabold",
+        "font-medium",
+        "bold",
+      ]
+      .contains(&base)
+      {
+        if sup(w) {
+          w = Some((bp, true));
+        }
+      } else if base.contains("font-") {
+        if sup(w) {
+          w = Some((bp, false));
+        }
+      } else if base == "line-through" {
+        if sup(d) {
+          d = Some((bp, true));
+        }
+      } else if base == "no-underline" || base == "underline" {
+        if sup(d) {
+          d = Some((bp, false));
+        }
+      } else if base == "hidden" || base.contains("invisible") {
+        if sup(dh) {
+          dh = Some((bp, true));
+        }
+      } else if base == "block" || base == "flex" || base == "inline" {
+        if sup(dh) {
+          dh = Some((bp, false));
+        }
+      } else if base == "absolute" || base == "fixed" || base == "sticky" {
+        if sup(ph) {
+          ph = Some((bp, true));
+        }
+      } else if (base == "static" || base == "relative") && sup(ph) {
+        ph = Some((bp, false));
+      }
+    }
+    let (mut p, mut s) = (String::new(), String::new());
+    if w.is_some_and(|(_, v)| v) {
+      p.push_str("**");
+      s.push_str("**");
+    }
+    if e.is_some_and(|(_, v)| v) {
+      p.push('*');
+      s.insert(0, '*');
+    }
+    if d.is_some_and(|(_, v)| v) {
+      p.push_str("~~");
+      s.insert_str(0, "~~");
+    }
+    (
+      (!p.is_empty()).then_some(p),
+      (!s.is_empty()).then_some(s),
+      dh.is_some_and(|(_, h)| h) || ph.is_some_and(|(_, h)| h),
+    )
+  }
+
+  #[test]
+  fn table_dispatch_matches_reference() {
+    let words = [
+      "italic",
+      "not-italic",
+      "font-bold",
+      "font-semibold",
+      "font-black",
+      "font-extrabold",
+      "font-medium",
+      "bold",
+      "font-light",
+      "xfont-y",
+      "line-through",
+      "underline",
+      "no-underline",
+      "hidden",
+      "invisible",
+      "md:invisible-x",
+      "block",
+      "flex",
+      "inline",
+      "absolute",
+      "fixed",
+      "sticky",
+      "static",
+      "relative",
+      "headerlink",
+      "",
+      "sm:",
+      "2xl:bold",
+      "xl:hidden",
+    ];
+    let prefixes = ["", "sm:", "md:", "lg:", "xl:", "2xl:", "3xl:", "s:"];
+    let mut classes = Vec::new();
+    for p in prefixes {
+      for w in words {
+        classes.push(format!("{p}{w}"));
+      }
+    }
+    for a in &classes {
+      assert_eq!(process_tailwind_classes(a), reference(a), "{a:?}");
+      for b in classes.iter().step_by(7) {
+        let pair = format!("{a} {b}");
+        assert_eq!(
+          process_tailwind_classes(&pair),
+          reference(&pair),
+          "{pair:?}"
+        );
+      }
+    }
   }
 }

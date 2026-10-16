@@ -446,7 +446,8 @@ pub fn get_tag_id_ci_bytes(name: &[u8]) -> Option<u8> {
 /// literals; the compiler lowers this to a length + first-byte decision tree
 /// with fixed-size `memcmp` leaves. Returns `None` for any tag not in the
 /// built-in set; callers can opt those tags into a rendering via `tagOverrides`.
-#[inline]
+// One out-of-line copy in WASM, where each inlined match costs bundle bytes.
+#[cfg_attr(target_arch = "wasm32", inline(never))]
 fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
   Some(match bytes {
     b"figcaption" => TAG_FIGCAPTION,
