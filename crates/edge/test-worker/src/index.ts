@@ -15,7 +15,7 @@ const isolationOptions = {
 
 async function ensureInit() {
   if (!initialized) {
-    await init(wasmModule)
+    await init({ module_or_path: wasmModule })
     initialized = true
   }
 }
