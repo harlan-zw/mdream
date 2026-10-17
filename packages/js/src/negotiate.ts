@@ -28,7 +28,14 @@ export function parseAcceptHeader(accept: string): AcceptEntry[] {
     else {
       type = part.slice(0, semicolonIdx).trim()
       const paramStr = part.slice(semicolonIdx + 1)
-      const qIdx = paramStr.indexOf('q=')
+      let qIdx = -1
+      for (let j = 0; j < paramStr.length - 1; j++) {
+        const c = paramStr.charCodeAt(j)
+        if ((c === 113 || c === 81) && paramStr.charCodeAt(j + 1) === 61) {
+          qIdx = j
+          break
+        }
+      }
       if (qIdx !== -1) {
         const qStart = qIdx + 2
         let qEnd = qStart

@@ -19,8 +19,8 @@ describe('parseAcceptHeader', () => {
     expect(result[2]).toEqual({ type: 'text/plain', q: 1, position: 2 })
   })
 
-  it('parses quality values', () => {
-    const result = parseAcceptHeader('text/html;q=0.9, text/markdown;q=0.5')
+  it.each(['q', 'Q'])('parses quality values with %s', (parameter) => {
+    const result = parseAcceptHeader(`text/html;${parameter}=0.9, text/markdown;${parameter}=0.5`)
     expect(result[0]!.q).toBe(0.9)
     expect(result[1]!.q).toBe(0.5)
   })
@@ -42,8 +42,8 @@ describe('parseAcceptHeader', () => {
     expect(result).toHaveLength(2)
   })
 
-  it('handles q=0 (explicitly rejected)', () => {
-    const result = parseAcceptHeader('text/html;q=0')
+  it.each(['q', 'Q'])('handles %s=0 (explicitly rejected)', (parameter) => {
+    const result = parseAcceptHeader(`text/html;${parameter}=0`)
     expect(result[0]!.q).toBe(0)
   })
 
