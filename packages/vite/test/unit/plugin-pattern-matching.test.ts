@@ -102,6 +102,7 @@ describe('viteHtmlToMarkdownPlugin - Pattern Matching', () => {
       'page2.html': { type: 'asset', source: '<html><body>Page2</body></html>' },
       'pageAB.html': { type: 'asset', source: '<html><body>PageAB</body></html>' },
       'page.html': { type: 'asset', source: '<html><body>Page</body></html>' },
+      'page/.html': { type: 'asset', source: '<html><body>Nested</body></html>' },
     }
 
     const mockEmitFile = vi.fn()
@@ -113,6 +114,49 @@ describe('viteHtmlToMarkdownPlugin - Pattern Matching', () => {
     expect(mockEmitFile).toHaveBeenCalledTimes(2)
     expect(mockEmitFile).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'page1.md' }))
     expect(mockEmitFile).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'page2.md' }))
+  })
+
+  it('does not let ? cross directories in exclude patterns', () => {
+    const plugin = viteHtmlToMarkdownPlugin({ exclude: ['docs?page.html'] }) as any
+    const mockBundle = {
+      'docs/page.html': { type: 'asset', source: '<h1>Nested</h1>' },
+      'docs-page.html': { type: 'asset', source: '<h1>Root</h1>' },
+    }
+    const emitFile = vi.fn()
+
+    plugin.generateBundle.call({ emitFile }, {}, mockBundle)
+
+    expect(emitFile.mock.calls.map(([file]) => file.fileName)).toEqual(['docs/page.md'])
+  })
+
+  it.each([
+    ['c++.html', 'cc.html'],
+    ['page(1).html', 'page1.html'],
+    ['page[1].html', 'page1.html'],
+    ['page{2}.html', 'pagee.html'],
+    ['^page.html', 'page.html'],
+    ['page$.html', 'page.html'],
+    ['page|other.html', 'other.html'],
+    ['page(.html', 'page.html'],
+    ['page[.html', 'page.html'],
+  ])('treats %s literally in include and exclude patterns', (literal, other) => {
+    for (const shouldExclude of [false, true]) {
+      const plugin = viteHtmlToMarkdownPlugin({
+        include: shouldExclude ? ['*.html'] : [literal],
+        exclude: shouldExclude ? [literal] : [],
+      }) as any
+      const mockBundle = {
+        [literal]: { type: 'asset', source: '<h1>Literal</h1>' },
+        [other]: { type: 'asset', source: '<h1>Other</h1>' },
+      }
+      const emitFile = vi.fn()
+
+      plugin.generateBundle.call({ emitFile }, {}, mockBundle)
+
+      expect(emitFile.mock.calls.map(([file]) => file.fileName)).toEqual([
+        (shouldExclude ? other : literal).replace('.html', '.md'),
+      ])
+    }
   })
 
   it('should respect exclude patterns', () => {
