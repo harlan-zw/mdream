@@ -31,6 +31,19 @@ export function createIdSelector(selector: string): SelectorMatcher {
   }
 }
 
+function containsWhitespaceSeparatedToken(value: string, token: string): boolean {
+  let start = 0
+  for (let i = 0; i <= value.length; i++) {
+    const char = value.charCodeAt(i)
+    if (i === value.length || char === 32 || char === 9 || char === 10 || char === 12 || char === 13) {
+      if (i > start && i - start === token.length && value.startsWith(token, start))
+        return true
+      start = i + 1
+    }
+  }
+  return false
+}
+
 /**
  * Creates a class selector matcher (e.g., '.container', '.header')
  */
@@ -40,8 +53,7 @@ export function createClassSelector(selector: string): SelectorMatcher {
     matches: (element: ElementNode) => {
       if (!element.attributes?.class)
         return false
-      const classes = element.attributes.class.trim().split(' ').filter(Boolean)
-      return classes.includes(className)
+      return containsWhitespaceSeparatedToken(element.attributes.class, className)
     },
     toString: () => `.${className}`,
   }
@@ -124,7 +136,7 @@ export function createAttributeSelector(selector: string): SelectorMatcher {
         case '*=': // Contains
           return value.includes(attrValue)
         case '~=': // Contains word
-          return value.trim().split(' ').filter(Boolean).includes(attrValue)
+          return containsWhitespaceSeparatedToken(value, attrValue)
         case '|=': // Starts with prefix
           return value === attrValue || value.startsWith(`${attrValue}-`)
         default:
