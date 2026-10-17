@@ -145,25 +145,37 @@ fn parse_simple_selector(s: &str) -> ParsedSelector {
   }
 }
 
+fn trim_css_whitespace(value: &str) -> &str {
+  value.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c'))
+}
+
 fn parse_attr_selector(s: &str) -> ParsedSelector {
   if s.len() < 2 {
     return ParsedSelector::Tag(s.to_string());
   }
-  let inner = &s[1..s.len() - 1];
-  let operators = ["^=", "$=", "*=", "~=", "|=", "="];
-  for op in &operators {
-    if let Some(pos) = inner.find(op) {
-      let name = inner[..pos].trim().to_string();
-      let val = inner[pos + op.len()..]
-        .trim()
-        .trim_matches(|c| c == '"' || c == '\'')
-        .to_string();
-      return ParsedSelector::Attribute {
-        name,
-        operator: Some((*op).to_string()),
-        value: Some(val),
-      };
+  let inner = trim_css_whitespace(&s[1..s.len() - 1]);
+  if let Some(eq_index) = inner.find('=') {
+    let op_start = if eq_index > 0
+      && matches!(
+        inner.as_bytes()[eq_index - 1],
+        b'^' | b'$' | b'*' | b'~' | b'|'
+      ) {
+      eq_index - 1
+    } else {
+      eq_index
+    };
+    let mut val = trim_css_whitespace(&inner[eq_index + 1..]);
+    if val.len() >= 2
+      && matches!(val.as_bytes()[0], b'"' | b'\'')
+      && val.as_bytes()[0] == val.as_bytes()[val.len() - 1]
+    {
+      val = &val[1..val.len() - 1];
     }
+    return ParsedSelector::Attribute {
+      name: trim_css_whitespace(&inner[..op_start]).to_string(),
+      operator: Some(inner[op_start..=eq_index].to_string()),
+      value: Some(val.to_string()),
+    };
   }
   ParsedSelector::Attribute {
     name: inner.to_string(),
@@ -268,6 +280,68 @@ mod tests {
     match parse_css_selector("[alt=\"hello\"]") {
       ParsedSelector::Attribute { value, .. } => assert_eq!(value.as_deref(), Some("hello")),
       _ => panic!("expected attribute selector"),
+    }
+  }
+
+  #[test]
+  fn parses_operator_before_attribute_value() {
+    let expected = "a^=b$=c*=d~=e|=f=g";
+    for op in ["=", "^=", "$=", "*=", "~=", "|="] {
+      let selector = format!("[data-code{op}\"{expected}\"]");
+      match parse_css_selector(&selector) {
+        ParsedSelector::Attribute {
+          name,
+          operator,
+          value,
+        } => {
+          assert_eq!(name, "data-code");
+          assert_eq!(operator.as_deref(), Some(op));
+          assert_eq!(value.as_deref(), Some(expected));
+        }
+        _ => panic!("expected attribute selector for {selector}"),
+      }
+    }
+  }
+
+  #[test]
+  fn trims_attribute_presence_name() {
+    match parse_css_selector("[ data-code ]") {
+      ParsedSelector::Attribute {
+        name,
+        operator,
+        value,
+      } => {
+        assert_eq!(name, "data-code");
+        assert!(operator.is_none());
+        assert!(value.is_none());
+      }
+      _ => panic!("expected attribute selector"),
+    }
+  }
+
+  #[test]
+  fn preserves_quotes_inside_attribute_values() {
+    for (selector, expected) in [
+      (r#"[ data-code = "'quoted'" ]"#, "'quoted'"),
+      (r#"[ data-code = '"quoted"' ]"#, "\"quoted\""),
+    ] {
+      match parse_css_selector(selector) {
+        ParsedSelector::Attribute { value, .. } => {
+          assert_eq!(value.as_deref(), Some(expected));
+        }
+        _ => panic!("expected attribute selector for {selector}"),
+      }
+    }
+  }
+
+  #[test]
+  fn keeps_non_css_whitespace_in_attribute_names() {
+    for separator in ['\u{a0}', '\x0b'] {
+      let expected = format!("{separator}data-code{separator}");
+      match parse_css_selector(&format!("[{expected}]")) {
+        ParsedSelector::Attribute { name, .. } => assert_eq!(name, expected),
+        _ => panic!("expected attribute selector"),
+      }
     }
   }
 

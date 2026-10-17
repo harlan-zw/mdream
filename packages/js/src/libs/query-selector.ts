@@ -68,6 +68,20 @@ function findAttributeEnd(selector: string, start: number): number {
   return -1
 }
 
+function isCssWhitespace(code: number): boolean {
+  return code === 32 || code === 9 || code === 10 || code === 12 || code === 13
+}
+
+function trimCssWhitespace(value: string): string {
+  let start = 0
+  let end = value.length
+  while (start < end && isCssWhitespace(value.charCodeAt(start)))
+    start++
+  while (end > start && isCssWhitespace(value.charCodeAt(end - 1)))
+    end--
+  return value.slice(start, end)
+}
+
 /**
  * Parses attribute selectors like [attr], [attr=value], [attr^="value"]
  * Uses a manual parser to avoid polynomial regex backtracking (CodeQL ReDoS).
@@ -78,7 +92,7 @@ function parseAttributeSelector(selector: string): { attr: string, op?: string, 
   const end = findAttributeEnd(selector, 0)
   if (end === -1)
     return null
-  const inner = selector.slice(1, end)
+  const inner = trimCssWhitespace(selector.slice(1, end))
 
   // Find operator position
   let opIdx = -1
@@ -93,14 +107,14 @@ function parseAttributeSelector(selector: string): { attr: string, op?: string, 
   if (opIdx === -1)
     return { attr: inner }
 
-  const attr = inner.slice(0, opIdx)
+  const attr = trimCssWhitespace(inner.slice(0, opIdx))
   // Operator is 1 or 2 chars (e.g. "=", "^=", "~=")
   let opEnd = opIdx + 1
   if (opEnd < inner.length && inner.charCodeAt(opEnd) === 61)
     opEnd++
   const op = inner.slice(opIdx, opEnd)
   // Strip quotes from value
-  let value = inner.slice(opEnd)
+  let value = trimCssWhitespace(inner.slice(opEnd))
   if ((value.charCodeAt(0) === 34 || value.charCodeAt(0) === 39) && value.charCodeAt(value.length - 1) === value.charCodeAt(0))
     value = value.slice(1, -1)
 

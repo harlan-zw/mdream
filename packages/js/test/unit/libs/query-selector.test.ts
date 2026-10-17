@@ -135,6 +135,37 @@ describe('query-selector', () => {
   })
 
   describe('parseSelector', () => {
+    it.each(['\u00A0', '\v'])('does not trim %j from attribute names', (separator) => {
+      const name = `${separator}data-code${separator}`
+      const selector = parseSelector(`[${name}]`)
+
+      expect(selector.matches(createTestElement('p', { [name]: 'value' }))).toBe(true)
+      expect(selector.matches(createTestElement('p', { 'data-code': 'value' }))).toBe(false)
+    })
+
+    it.each(['=', '^=', '$=', '*=', '~=', '|='])('keeps operator-like text in an attribute value with %s', (operator) => {
+      const value = 'a^=b$=c*=d~=e|=f=g'
+      const selector = parseSelector(`[data-code${operator}"${value}"]`)
+
+      expect(selector.matches(createTestElement('p', { 'data-code': value }))).toBe(true)
+      expect(selector.matches(createTestElement('p', { 'data-code': 'other' }))).toBe(false)
+    })
+
+    it.each([
+      ['[ data-code ]', 'value'],
+      ['[ data-code = "value" ]', 'value'],
+      ['[\tdata-code\t^=\t"val"\t]', 'value'],
+      ['[ data-code = " spaced " ]', ' spaced '],
+      ['[ data-code = "\'quoted\'" ]', '\'quoted\''],
+      ['[ data-code = \'"quoted"\' ]', '"quoted"'],
+      ['[data-code=\u00A0value\u00A0]', '\u00A0value\u00A0'],
+    ])('handles surrounding whitespace in %s', (input, value) => {
+      const selector = parseSelector(input)
+
+      expect(selector.matches(createTestElement('p', { 'data-code': value }))).toBe(true)
+      expect(selector.matches(createTestElement('p'))).toBe(false)
+    })
+
     it.each([
       ['a[href="https://example.com"]', 'a', { href: 'https://example.com' }],
       ['img[src$=".png"]', 'img', { src: 'image.png' }],
