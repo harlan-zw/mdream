@@ -72,8 +72,35 @@ pub(crate) fn parse_css_selector(selector: &str) -> ParsedSelector {
   let mut parts: Vec<ParsedSelector> = Vec::new();
   let mut current = String::new();
   let mut in_attr = false;
+  let mut quote = None;
+  let mut escaped = false;
 
   for ch in selector.chars() {
+    if in_attr {
+      current.push(ch);
+      if escaped {
+        escaped = false;
+        continue;
+      }
+      if ch == '\\' {
+        escaped = true;
+        continue;
+      }
+      if let Some(active_quote) = quote {
+        if ch == active_quote {
+          quote = None;
+        }
+        continue;
+      }
+      if ch == '"' || ch == '\'' {
+        quote = Some(ch);
+      } else if ch == ']' {
+        in_attr = false;
+        parts.push(parse_attr_selector(&current));
+        current.clear();
+      }
+      continue;
+    }
     if ch == '[' {
       if !current.is_empty() {
         parts.push(parse_simple_selector(&current));
@@ -84,16 +111,6 @@ pub(crate) fn parse_css_selector(selector: &str) -> ParsedSelector {
       continue;
     }
     if ch == ']' {
-      if in_attr {
-        current.push(ch);
-        in_attr = false;
-        parts.push(parse_attr_selector(&current));
-        current.clear();
-      }
-      continue;
-    }
-    if in_attr {
-      current.push(ch);
       continue;
     }
     if (ch == '.' || ch == '#') && !current.is_empty() {
@@ -259,6 +276,43 @@ mod tests {
     match parse_css_selector("div.card[data-x]") {
       ParsedSelector::Compound(parts) => assert_eq!(parts.len(), 3),
       _ => panic!("expected compound selector"),
+    }
+  }
+
+  #[test]
+  fn preserves_quoted_and_escaped_attribute_delimiters() {
+    for (selector, expected) in [
+      (
+        r#"a[href="/docs/[name].html#section"].active"#,
+        "/docs/[name].html#section",
+      ),
+      (
+        r"a[href='/docs/[name].html#section'].active",
+        "/docs/[name].html#section",
+      ),
+      (r#"a[href="a\"]b.c#d"].active"#, r#"a\"]b.c#d"#),
+      (r"a[href='a\']b.c#d'].active", r"a\']b.c#d"),
+      (r"a[href=a\]b.c#d].active", r"a\]b.c#d"),
+      (r#"a[href="a\\"].active"#, r"a\\"),
+    ] {
+      let ParsedSelector::Compound(parts) = parse_css_selector(selector) else {
+        panic!("expected compound selector for {selector}");
+      };
+      assert_eq!(parts.len(), 3, "{selector}");
+      assert!(matches!(&parts[0], ParsedSelector::Tag(tag) if tag == "a"));
+      match &parts[1] {
+        ParsedSelector::Attribute {
+          name,
+          operator,
+          value,
+        } => {
+          assert_eq!(name, "href");
+          assert_eq!(operator.as_deref(), Some("="));
+          assert_eq!(value.as_deref(), Some(expected), "{selector}");
+        }
+        _ => panic!("expected attribute selector for {selector}"),
+      }
+      assert!(matches!(&parts[2], ParsedSelector::Class(class) if class == "active"));
     }
   }
 

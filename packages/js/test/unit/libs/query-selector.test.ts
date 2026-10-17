@@ -135,6 +135,19 @@ describe('query-selector', () => {
   })
 
   describe('parseSelector', () => {
+    it.each([
+      ['a[href="https://example.com"]', 'a', { href: 'https://example.com' }],
+      ['img[src$=".png"]', 'img', { src: 'image.png' }],
+      ['a[href="#main"]', 'a', { href: '#main' }],
+      ['a[href="/docs/[name].html#section"].active', 'a', { href: '/docs/[name].html#section', class: 'active' }],
+      ['[data-label="[a], #b.c"].active, img', 'a', { 'data-label': '[a], #b.c', 'class': 'active' }],
+    ])('preserves punctuation in %s', (input, tag, attributes) => {
+      const selector = parseSelector(input)
+
+      expect(selector.matches(createTestElement(tag, attributes))).toBe(true)
+      expect(selector.matches(createTestElement(tag))).toBe(false)
+    })
+
     it('throws error for empty selector', () => {
       expect(() => parseSelector('')).toThrow('Empty selector')
       expect(() => parseSelector('   ')).toThrow('Empty selector')
