@@ -59,6 +59,40 @@ describe('parseAcceptHeader', () => {
   })
 })
 
+describe('quality parameter boundaries', () => {
+  const cases = [
+    ['seq=0', 1, 'markdown'],
+    ['x-q=0', 1, 'markdown'],
+    ['seq=0;Q=0.8', 0.8, 'markdown'],
+    ['x-q=0.9;q=0', 0, 'html'],
+    ['charset=utf-8; q=0.8', 0.8, 'markdown'],
+    ['note="q=0"', 1, 'markdown'],
+    ['note="x;q=0"', 1, 'markdown'],
+    [String.raw`note="a\";q=0"`, 1, 'markdown'],
+    ['note="q=0";\tQ=0.8', 0.8, 'markdown'],
+    ['note="x, text/markdown;q=1 ";Q=0', 0, 'html'],
+    [String.raw`note="x\\";q=0.2`, 0.2, 'html'],
+    ['q=0.8;seq=0', 0.8, 'markdown'],
+  ] as const
+
+  it.each(cases)('parses quality from %s', (parameters, quality) => {
+    expect(parseAcceptHeader(`text/markdown;${parameters}, text/html;q=0.5`)).toEqual([
+      { type: 'text/markdown', q: quality, position: 0 },
+      { type: 'text/html', q: 0.5, position: 1 },
+    ])
+  })
+
+  it.each(cases)('negotiates quality from %s', (parameters, _quality, format) => {
+    expect(negotiateContent(`text/markdown;${parameters}, text/html;q=0.5`)).toBe(format)
+  })
+
+  it('does not split a media type out of an unterminated quoted value', () => {
+    const header = 'text/html;q=0.5;note=", text/markdown'
+    expect(parseAcceptHeader(header)).toEqual([{ type: 'text/html', q: 0.5, position: 0 }])
+    expect(negotiateContent(header)).toBe('html')
+  })
+})
+
 describe('shouldServeMarkdown', () => {
   // Browser / crawler scenarios - should NOT serve markdown
   it('returns false for undefined Accept header', () => {
