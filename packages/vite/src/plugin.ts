@@ -111,8 +111,9 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     server: ViteDevServer | null = null,
     outDir?: string,
   ): Promise<MarkdownConversionResult> {
+    const { pathname } = new URL(url, 'http://localhost')
     // Remove .md extension if present
-    let basePath = url.endsWith('.md') ? url.slice(0, -3) : url
+    let basePath = pathname.endsWith('.md') ? pathname.slice(0, -3) : pathname
 
     // Handle index.md -> / mapping
     if (basePath === '/index') {
