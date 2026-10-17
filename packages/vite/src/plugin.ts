@@ -9,9 +9,7 @@ import { htmlToMarkdown } from 'mdream'
 
 const GLOB_BACKSLASH_RE = /\\/g
 const GLOB_DOT_RE = /\./g
-const GLOB_DOUBLE_STAR_RE = /\*\*/g
-const GLOB_STAR_RE = /\*/g
-const GLOB_QUESTION_RE = /\?/g
+const GLOB_WILDCARD_RE = /\*\*\/|\*\*|\*|\?/g
 
 /**
  * Merge the given tokens into the response's `Vary` header, preserving any
@@ -188,9 +186,14 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
       const regexPattern = pattern
         .replace(GLOB_BACKSLASH_RE, '\\\\') // Escape backslashes first
         .replace(GLOB_DOT_RE, '\\.') // Escape literal dots
-        .replace(GLOB_DOUBLE_STAR_RE, '.*') // ** matches anything including /
-        .replace(GLOB_STAR_RE, '[^/]*') // * matches filename chars except /
-        .replace(GLOB_QUESTION_RE, '.') // ? matches any single char
+        .replace(GLOB_WILDCARD_RE, (wildcard) => {
+          switch (wildcard) {
+            case '**/': return '(?:.*/)?'
+            case '**': return '.*'
+            case '*': return '[^/]*'
+            default: return '.'
+          }
+        })
 
       const regex = new RegExp(`^${regexPattern}$`)
       return regex.test(fileName)
