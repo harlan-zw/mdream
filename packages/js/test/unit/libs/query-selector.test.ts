@@ -82,6 +82,35 @@ describe('query-selector', () => {
       expect(selector.toString()).toBe('[href=https://example.com]')
     })
 
+    it('distinguishes an empty attribute value from attribute presence', () => {
+      const empty = parseSelector('[href=""]')
+      const present = parseSelector('[href]')
+
+      expect(empty.matches(createTestElement('a', { href: '' }))).toBe(true)
+      expect(empty.matches(createTestElement('a', { href: '/real' }))).toBe(false)
+      expect(empty.matches(createTestElement('a'))).toBe(false)
+      expect(present.matches(createTestElement('a', { href: '' }))).toBe(true)
+      expect(present.matches(createTestElement('a', { href: '/real' }))).toBe(true)
+      expect(empty.toString()).toBe('[href=]')
+    })
+
+    it.each(['^=', '$=', '*=', '~='])('never matches an empty %s operand', (operator) => {
+      const selector = parseSelector(`[href${operator}""]`)
+
+      expect(selector.matches(createTestElement('a', { href: '' }))).toBe(false)
+      expect(selector.matches(createTestElement('a', { href: '/real' }))).toBe(false)
+      expect(selector.matches(createTestElement('a'))).toBe(false)
+    })
+
+    it('matches empty and hyphen-prefixed values for an empty |= operand', () => {
+      const selector = parseSelector('[lang|=""]')
+
+      expect(selector.matches(createTestElement('div', { lang: '' }))).toBe(true)
+      expect(selector.matches(createTestElement('div', { lang: '-en' }))).toBe(true)
+      expect(selector.matches(createTestElement('div', { lang: 'en' }))).toBe(false)
+      expect(selector.matches(createTestElement('div'))).toBe(false)
+    })
+
     it('matches elements by attribute value prefix', () => {
       const selector = createAttributeSelector('[href^="https://"]')
 

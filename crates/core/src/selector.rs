@@ -172,9 +172,9 @@ pub(crate) fn matches_selector(tag: &ElementNode, selector: &ParsedSelector) -> 
       Some(attr_val) => match (operator.as_deref(), value.as_deref()) {
         (None, _) | (_, None) => true,
         (Some("="), Some(v)) => attr_val == v,
-        (Some("^="), Some(v)) => attr_val.starts_with(v),
-        (Some("$="), Some(v)) => attr_val.ends_with(v),
-        (Some("*="), Some(v)) => attr_val.contains(v),
+        (Some("^="), Some(v)) => !v.is_empty() && attr_val.starts_with(v),
+        (Some("$="), Some(v)) => !v.is_empty() && attr_val.ends_with(v),
+        (Some("*="), Some(v)) => !v.is_empty() && attr_val.contains(v),
         (Some("~="), Some(v)) => attr_val.split_whitespace().any(|w| w == v),
         (Some("|="), Some(v)) => attr_val == v || attr_val.starts_with(&format!("{v}-")),
         _ => false,
@@ -243,6 +243,24 @@ mod tests {
         }
         _ => panic!("expected attribute selector for {sel}"),
       }
+    }
+  }
+
+  #[test]
+  fn empty_attribute_substring_and_word_operands_never_match() {
+    for op in ["^=", "$=", "*=", "~="] {
+      let selector = parse_css_selector(&format!("[data-value{op}\"\"]"));
+      for value in ["", "real"] {
+        let mut element = ElementNode::default();
+        element
+          .attributes
+          .insert_custom("data-value".into(), Some(value));
+        assert!(
+          !matches_selector(&element, &selector),
+          "{op} with {value:?}"
+        );
+      }
+      assert!(!matches_selector(&ElementNode::default(), &selector));
     }
   }
 
