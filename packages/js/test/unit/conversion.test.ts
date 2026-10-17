@@ -9,6 +9,71 @@ import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText } from '../../src/text'
 
 describe('root conversion', () => {
+  it.each([0, 1, 7])('supports mutable processAttributes with chunk size %i', async (chunkSize) => {
+    const html = '<a>first</a><a href="/old" title="keep">second</a><a>third</a>'
+    const attributes: ElementNode['attributes'][] = []
+    const entered: string[] = []
+    const exited: string[] = []
+    const options = {
+      plugins: [
+        createPlugin({
+          processAttributes(node) {
+            if (node.name !== 'a')
+              return
+            expect(node.attributes.href).toBe(attributes.length === 1 ? '/old' : undefined)
+            attributes.push(node.attributes)
+            node.attributes.href = `/link-${attributes.length}`
+          },
+        }),
+        createPlugin({
+          processAttributes(node) {
+            if (node.name !== 'a')
+              return
+            expect(node.attributes).toBe(attributes[attributes.length - 1])
+            node.attributes.href += '-updated'
+          },
+          beforeNodeProcess(event) {
+            if (event.node.type === ELEMENT_NODE && event.node.name === 'a')
+              expect(event.node.attributes.href).toMatch(/^\/link-\d-updated$/)
+          },
+          onNodeEnter(node) {
+            if (node.name === 'a')
+              entered.push(node.attributes.href!)
+          },
+          onNodeExit(node) {
+            if (node.name === 'a')
+              exited.push(node.attributes.href!)
+          },
+        }),
+      ],
+    }
+    let output = ''
+    if (chunkSize === 0) {
+      output = htmlToMarkdown(html, options)
+    }
+    else {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let index = 0; index < html.length; index += chunkSize)
+            controller.enqueue(html.slice(index, index + chunkSize))
+          controller.close()
+        },
+      })
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+    }
+    expect(output).toBe('[first](/link-1-updated) [second](/link-2-updated "keep") [third](/link-3-updated)')
+    expect(attributes).toEqual([
+      { href: '/link-1-updated' },
+      { href: '/link-2-updated', title: 'keep' },
+      { href: '/link-3-updated' },
+    ])
+    expect(new Set(attributes).size).toBe(3)
+    expect(entered).toEqual(['/link-1-updated', '/link-2-updated', '/link-3-updated'])
+    expect(exited).toEqual(entered)
+    expect(htmlToMarkdown('<a>unmodified</a>')).toBe('unmodified')
+  })
+
   it.each([
     ['<p>alpha&amp;beta&#32;gamma</p>', 'alpha&beta gamma'],
     ['<p>alpha\t\n\r\f beta 🦊終</p>', 'alpha beta 🦊終'],
