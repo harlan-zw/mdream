@@ -1,5 +1,7 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
-use mdream::types::{CleanConfig, HtmlToMarkdownOptions, PluginConfig, TagOverrideConfig};
+use mdream::types::{
+  CleanConfig, FilterConfig, HtmlToMarkdownOptions, PluginConfig, TagOverrideConfig,
+};
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
 fn md(html: &str) -> String {
@@ -325,4 +327,120 @@ fn link_text_drops_the_space_before_an_empty_element() {
     md(r#"<ul><li><a href="/x">q<br> </a></li></ul>"#),
     "- [q  \n  ](/x)"
   );
+}
+
+// ── Inline delimiters around removed content ──
+
+#[test]
+fn space_after_removed_content_stays_outside_the_opening_delimiter() {
+  let options = HtmlToMarkdownOptions::default();
+  for html in [
+    r#"<p>Install. <strong><svg><path d="M0"/></svg> Warning:</strong> read</p>"#,
+    "<p>Install. <strong><script>x</script> Warning:</strong> read</p>",
+    "<p>Install. <strong><span></span> Warning:</strong> read</p>",
+    // With nothing to merge into, the space moves in front of the delimiter.
+    "<p>Install.<strong><svg></svg> Warning:</strong> read</p>",
+    "<p>Install.<strong> Warning:</strong> read</p>",
+  ] {
+    assert_every_chunking(html, &options, "Install. **Warning:** read");
+  }
+  let hidden = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_every_chunking(
+    "<p>Install. <strong><span hidden>!</span> Warning:</strong> read</p>",
+    &hidden,
+    "Install. **Warning:** read",
+  );
+  // Text that is only spaces has nothing to move.
+  assert_every_chunking("<p>x<em><span hidden>h</span> </em>y</p>", &hidden, "xy");
+  assert_eq!(
+    md("<p>Install. <em><svg></svg> Warning:</em> read</p>"),
+    "Install. *Warning:* read"
+  );
+  assert_eq!(
+    md("<p>Install. <del><svg></svg> Warning:</del> read</p>"),
+    "Install. ~~Warning:~~ read"
+  );
+  assert_eq!(
+    md("<p><strong><svg></svg> Warning:</strong> read</p>"),
+    "**Warning:** read"
+  );
+  assert_eq!(
+    md("<p>x<em><strong><svg></svg> y</strong></em> z</p>"),
+    "x ***y*** z"
+  );
+  assert_eq!(
+    md("<ul><li><strong><svg></svg> y</strong></li></ul>"),
+    "- **y**"
+  );
+  // Removed content alone leaves an empty pair, dropped like any other.
+  assert_eq!(
+    md("<p>a <strong><svg></svg></strong> b</p>"),
+    md("<p>a <strong></strong> b</p>")
+  );
+  // A code span keeps the spaces of its content.
+  assert_eq!(
+    md("<p>Install. <code><svg></svg> Warning:</code> read</p>"),
+    "Install. ` Warning:` read"
+  );
+}
+
+#[test]
+fn moved_space_stays_out_of_the_start_of_link_text() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    (
+      "<p><a href=\"/x\"><strong><svg></svg> now</strong></a></p>",
+      "[**now**](/x)",
+    ),
+    (
+      "<p>Go<a href=\"/x\"><strong> now</strong></a></p>",
+      "Go [**now**](/x)",
+    ),
+    // Nothing else parts the words, so the space stays after the bracket.
+    (
+      "<p><em>x</em><a href=\"/x\"><strong> now</strong></a></p>",
+      "*x*[ **now**](/x)",
+    ),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn code_like_content_is_left_as_written() {
+  assert_eq!(md("<p><kbd>a<strong> x</strong></kbd></p>"), "`a** x**`");
+  assert_eq!(md("<p><samp>a<em> x</em></samp></p>"), "`a* x*`");
+  assert_eq!(md("<p><var>a<b><svg></svg> x</b></var></p>"), "`a** x**`");
+  assert_eq!(md("<p><code>a<strong> x</strong></code></p>"), "`a** x**`");
+}
+
+#[test]
+fn setext_underline_after_a_hard_break_is_escaped() {
+  assert_every_chunking(
+    "<p>Line one<br>===</p>",
+    &HtmlToMarkdownOptions::default(),
+    "Line one  \n\\===",
+  );
+  assert_eq!(md("<p>Line one<br>=</p>"), "Line one  \n\\=");
+  assert_eq!(md("<p>Line one<br>--</p>"), "Line one  \n\\--");
+  assert_eq!(md("<p>Line one<br>---</p>"), "Line one  \n\\---");
+  assert_eq!(
+    md("<ul><li>Line one<br>===</li></ul>"),
+    "- Line one  \n  \\==="
+  );
+  assert_eq!(
+    md("<blockquote><p>Line one<br>===</p></blockquote>"),
+    "> Line one  \n> \\==="
+  );
+  assert_eq!(md("<p>a&#10;===</p>"), "a\n\\===");
+  // Other text on the line keeps it a paragraph line.
+  assert_eq!(md("<p>Line one<br>==x</p>"), "Line one  \n==x");
+  assert_eq!(md("<p>Line one<br>= =</p>"), "Line one  \n= =");
+  assert_eq!(md("<p>a = b</p>"), "a = b");
 }

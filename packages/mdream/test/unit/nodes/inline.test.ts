@@ -240,3 +240,60 @@ describe.each(engines)('gfm inline code delimiters $name', (engineConfig) => {
     }
   })
 })
+
+// Both engines write removed content as nothing, so the delimiters around it
+// must read as they would without it (CommonMark flanking rules).
+describe.each(engines)('inline delimiters around removed content $name', (engineConfig) => {
+  it('keeps the space after removed content outside the opening delimiter', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const expected = 'Install. **Warning:** read'
+    for (const html of [
+      '<p>Install. <strong><svg><path d="M0"/></svg> Warning:</strong> read</p>',
+      '<p>Install. <strong><script>x</script> Warning:</strong> read</p>',
+      '<p>Install.<strong><svg></svg> Warning:</strong> read</p>',
+    ]) {
+      expect(htmlToMarkdown(html, { engine })).toBe(expected)
+      for (let split = 1; split < html.length; split++) {
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, split), html.slice(split)]), { engine }))
+        expect(actual.trim(), `${html} split at ${split}`).toBe(expected)
+      }
+    }
+    const hidden = '<p>Install. <strong><span hidden>!</span> Warning:</strong> read</p>'
+    expect(htmlToMarkdown(hidden, { plugins: { filter: {} }, engine })).toBe(expected)
+    expect(htmlToMarkdown('<p>Install. <em><svg></svg> Warning:</em> read</p>', { engine })).toBe('Install. *Warning:* read')
+    expect(htmlToMarkdown('<p>Install. <del><svg></svg> Warning:</del> read</p>', { engine })).toBe('Install. ~~Warning:~~ read')
+  })
+
+  it('keeps the moved space out of the start of link text', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const cases: [string, string][] = [
+      ['<p><a href="/x"><strong><svg></svg> now</strong></a></p>', '[**now**](/x)'],
+      ['<p>Go<a href="/x"><strong> now</strong></a></p>', 'Go [**now**](/x)'],
+      ['<p><em>x</em><a href="/x"><strong> now</strong></a></p>', '*x*[ **now**](/x)'],
+    ]
+    for (const [html, expected] of cases) {
+      expect(htmlToMarkdown(html, { engine })).toBe(expected)
+      for (let split = 1; split < html.length; split++) {
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, split), html.slice(split)]), { engine }))
+        expect(actual.trim(), `${html} split at ${split}`).toBe(expected)
+      }
+    }
+  })
+
+  it('leaves code-like content as written', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p><kbd>a<strong> x</strong></kbd></p>', { engine })).toBe('`a** x**`')
+    expect(htmlToMarkdown('<p><samp>a<em> x</em></samp></p>', { engine })).toBe('`a* x*`')
+    expect(htmlToMarkdown('<p><var>a<b><svg></svg> x</b></var></p>', { engine })).toBe('`a** x**`')
+  })
+
+  it('moves no space for text that is only spaces', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<p>x<em><span hidden>h</span> </em>y</p>'
+    expect(htmlToMarkdown(html, { plugins: { filter: {} }, engine })).toBe('xy')
+    for (let split = 1; split < html.length; split++) {
+      const actual = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, split), html.slice(split)]), { plugins: { filter: {} }, engine }))
+      expect(actual.trim(), `split at ${split}`).toBe('xy')
+    }
+  })
+})

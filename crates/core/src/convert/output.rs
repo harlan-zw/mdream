@@ -387,6 +387,57 @@ impl ConvertState {
     }
   }
 
+  /// A space opening emphasis content stops its delimiter from opening
+  /// (CommonMark left-flanking rule), as the space after a dropped `<svg>`
+  /// does. When the output ends with a run of such openers, the space goes in
+  /// front of the run, merged with any whitespace already there, and this
+  /// returns true so the caller drops it from the text.
+  fn hoist_opener_space(&mut self, text: &str) -> bool {
+    let mut markers = self.open_markers.iter().rev();
+    let Some(innermost) = markers.next() else {
+      return false;
+    };
+    // Code-like spans keep their content as written.
+    if innermost.kind > 4
+      || innermost.content_start != self.buffer.len()
+      || self.depth_map[TAG_CODE as usize] != 0
+      || self.depth_map[TAG_PRE as usize] != 0
+      || self.depth_map[TAG_KBD as usize] != 0
+      || self.depth_map[TAG_SAMP as usize] != 0
+      || self.depth_map[TAG_VAR as usize] != 0
+    {
+      return false;
+    }
+    let mut start = innermost.output_start;
+    for marker in markers {
+      if marker.kind > 4 || marker.content_start != start {
+        break;
+      }
+      start = marker.output_start;
+    }
+    // Text that is only spaces is dropped with nothing to move.
+    if text.bytes().all(|byte| byte == b' ') {
+      return true;
+    }
+    // At the start of link text, whitespace before the `[` already parts the words.
+    let at = if self.link.open && self.link.bracket_emitted && start == self.link.bracket_pos + 1 {
+      self.link.bracket_pos
+    } else {
+      start
+    };
+    let before = match at.checked_sub(1) {
+      Some(index) => Some(self.buffer.as_bytes()[index]),
+      None if self.has_flushed_tail() => Some(self.flushed_tail[1]),
+      None => None,
+    };
+    if before.is_some_and(|byte| !matches!(byte, b' ' | b'\n' | b'\t'))
+      && self.replace_code_span_content(start..start, " ")
+    {
+      self.shift_offsets_at_or_after(start);
+    }
+    true
+  }
+
   fn max_backtick_run(value: &str) -> usize {
     let mut max = 0usize;
     let mut run = 0usize;
@@ -1139,6 +1190,8 @@ impl ConvertState {
       node_spacing = node.spacing;
       output = self.get_enter_output(node, ancestors);
     }
+    // The list separator below is whitespace, not output of this element.
+    let has_own_output = output.as_deref().is_some_and(|o| !o.is_empty());
 
     if self.hard_break_end == self.buffer.len()
       && matches!(tag_id, Some(TAG_P | TAG_DIV))
@@ -1231,7 +1284,8 @@ impl ConvertState {
 
     self.record_enter_marker(tag_id, output.as_deref(), output_start, false);
 
-    if !is_inline && !self.open_markers.is_empty() {
+    // An element that writes nothing, like a dropped `<svg>`, is no boundary.
+    if !is_inline && (configured_new_lines > 0 || has_own_output) && !self.open_markers.is_empty() {
       self.open_markers.clear();
     }
   }
@@ -1315,7 +1369,8 @@ impl ConvertState {
       return;
     }
 
-    self.release_markers_on_exit(!is_inline, output.as_deref());
+    let writes = configured_new_lines > 0 || output.as_deref().is_some_and(|o| !o.is_empty());
+    self.release_markers_on_exit(!is_inline && writes, output.as_deref());
 
     let output_start = self.buffer.len();
     self.write_output(
@@ -1514,6 +1569,9 @@ impl ConvertState {
         }
       }
     }
+
+    // The list separator below is whitespace, not output of this element.
+    let has_own_output = output.as_deref().is_some_and(|o| !o.is_empty());
 
     // A block boundary directly after a hard break keeps the paragraph blank
     // line at the top level (`q  \n\nX`), where the exit spacing pays for the
@@ -1854,7 +1912,12 @@ impl ConvertState {
 
     // A block boundary makes an enclosing inline marker permanent even when
     // the block has not emitted content yet. Release streamed output promptly.
-    if tag_id.is_some() && !is_inline && !self.open_markers.is_empty() {
+    // An element that writes nothing, like a dropped `<svg>`, is no boundary.
+    if tag_id.is_some()
+      && !is_inline
+      && (configured_new_lines > 0 || has_own_output)
+      && !self.open_markers.is_empty()
+    {
       self.open_markers.clear();
     }
 
@@ -2422,8 +2485,9 @@ impl ConvertState {
       return;
     }
 
+    let writes = configured_new_lines > 0 || output.as_deref().is_some_and(|o| !o.is_empty());
     self.release_markers_on_exit(
-      has_override || (tag_id.is_some() && !is_inline),
+      has_override || (tag_id.is_some() && !is_inline && writes),
       output.as_deref(),
     );
 
@@ -2723,13 +2787,22 @@ impl ConvertState {
     let mut escape_scratch = std::mem::take(&mut self.escape_scratch);
     let hazard =
       has_inline_gfm_hazard || context_hazard || self.starts_with_gfm_block_candidate(text);
-    let text = if self.escape_text_node(text, hazard, inside_raw_html_block, &mut escape_scratch) {
-      escape_scratch.as_str()
-    } else {
-      text
-    };
+    let mut text =
+      if self.escape_text_node(text, hazard, inside_raw_html_block, &mut escape_scratch) {
+        escape_scratch.as_str()
+      } else {
+        text
+      };
 
-    let add_space = self.should_add_spacing_before_text(last_char, text);
+    let mut add_space = self.should_add_spacing_before_text(last_char, text);
+    if (add_space || text.starts_with(' ')) && self.hoist_opener_space(text) {
+      text = text.trim_start_matches(' ');
+      if text.is_empty() {
+        self.return_escape_scratch(escape_scratch);
+        return;
+      }
+      add_space = false;
+    }
     self.push_text_uncapped(text, add_space);
     self.finish_text_node(text, contains_whitespace, depth, index);
     self.return_escape_scratch(escape_scratch);
@@ -2962,11 +3035,25 @@ impl ConvertState {
       && (has_inline_gfm_hazard
         || context_has_gfm_hazard(text)
         || self.starts_with_gfm_block_candidate(text));
-    let text = if self.escape_text_node(text, hazard, inside_raw_html_block, &mut escape_scratch) {
-      escape_scratch.as_str()
-    } else {
-      text
-    };
+    let mut text =
+      if self.escape_text_node(text, hazard, inside_raw_html_block, &mut escape_scratch) {
+        escape_scratch.as_str()
+      } else {
+        text
+      };
+
+    if !self.open_markers.is_empty()
+      && (text.starts_with(' ')
+        || (!owns_leading_space && self.should_add_spacing_before_text(last_char, text)))
+      && self.hoist_opener_space(text)
+    {
+      text = text.trim_start_matches(' ');
+      if text.is_empty() {
+        self.return_escape_scratch(escape_scratch);
+        return;
+      }
+      owns_leading_space = true;
+    }
 
     let generated_storage;
     let text = if generated_prefix.is_some() || generated_suffix.is_some() {
@@ -3093,9 +3180,13 @@ impl ConvertState {
             end - index <= 6 && Self::is_markdown_marker_whitespace(bytes.get(end).copied());
         } else if byte == b'-' || byte == b'+' {
           should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied())
-            || (byte == b'-' && Self::is_thematic_break(&bytes[index..], byte));
+            || (byte == b'-'
+              && (Self::is_thematic_break(&bytes[index..], byte)
+                || Self::is_setext_underline(&bytes[index..], byte)));
         } else if byte == b'>' {
           should_escape = true;
+        } else if byte == b'=' {
+          should_escape = Self::is_setext_underline(&bytes[index..], byte);
         }
       } else if !should_escape && ordered_digits > 0 && (byte == b'.' || byte == b')') {
         should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied());
@@ -3143,7 +3234,7 @@ impl ConvertState {
     // Text-side reject first: prose that cannot open a block skips the buffer
     // scan entirely, which is most text nodes.
     match text.as_bytes().first() {
-      Some(b' ' | b'#' | b'-' | b'+' | b'>' | b'0'..=b'9') => {}
+      Some(b' ' | b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9') => {}
       _ => return false,
     }
     let Some(mut indent) = self.markdown_line_indent() else {
@@ -3154,7 +3245,7 @@ impl ConvertState {
         indent += 1;
         continue;
       }
-      return matches!(byte, b'#' | b'-' | b'+' | b'>' | b'0'..=b'9');
+      return matches!(byte, b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9');
     }
     false
   }
@@ -3424,6 +3515,20 @@ impl ConvertState {
       }
     }
     count >= 3
+  }
+
+  /// A line of only `=` or only `-` turns the paragraph line above it, such as
+  /// the line before a hard break, into a setext heading.
+  #[inline]
+  fn is_setext_underline(value: &[u8], marker: u8) -> bool {
+    let mut index = 1;
+    while value.get(index) == Some(&marker) {
+      index += 1;
+    }
+    while matches!(value.get(index), Some(b' ' | b'\t')) {
+      index += 1;
+    }
+    matches!(value.get(index), None | Some(b'\n' | b'\r'))
   }
 
   #[inline]

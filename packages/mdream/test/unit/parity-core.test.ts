@@ -106,6 +106,12 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<p>a<q><br></q>b</p>',
     '<p>x<q><q>a</q></q>y</p>',
   ],
+  'delimiters around removed content': [
+    '<p>x <strong><svg></svg>*y</strong></p>',
+    '<p>a<q><strong><svg></svg> x</strong></q></p>',
+    '<p><kbd>a<strong> x</strong></kbd></p>',
+    '<p><a href="/x"><strong><svg></svg> now</strong></a></p>',
+  ],
 }
 
 describe('javaScript engine matches Rust output', () => {

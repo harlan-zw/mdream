@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { filterPlugin } from '../../src/plugins/filter'
 
 async function streamConvert(chunks: string[]): Promise<string> {
   const stream = new ReadableStream<string>({
@@ -37,6 +38,51 @@ describe('inline whitespace', () => {
       const output = await streamConvert([html.slice(0, split), html.slice(split)])
       expect(output.trimEnd(), `split at byte ${split}`).toBe('**[abc](http://xxx.yyy/)** def')
     }
+  })
+
+  it('keeps the space after removed content outside the opening delimiter', async () => {
+    const expected = 'Install. **Warning:** read'
+    for (const html of [
+      '<p>Install. <strong><svg><path d="M0"/></svg> Warning:</strong> read</p>',
+      '<p>Install. <strong><script>x</script> Warning:</strong> read</p>',
+      '<p>Install. <strong><span></span> Warning:</strong> read</p>',
+      // With nothing to merge into, the space moves in front of the delimiter.
+      '<p>Install.<strong><svg></svg> Warning:</strong> read</p>',
+      '<p>Install.<strong> Warning:</strong> read</p>',
+    ]) {
+      expect(htmlToMarkdown(html)).toBe(expected)
+      for (let split = 0; split <= html.length; split++) {
+        const output = await streamConvert([html.slice(0, split), html.slice(split)])
+        expect(output.trimEnd(), `${html} split at byte ${split}`).toBe(expected)
+      }
+    }
+    expect(htmlToMarkdown('<p>Install. <strong><span hidden>!</span> Warning:</strong> read</p>', { plugins: [filterPlugin()] }))
+      .toBe(expected)
+    expect(htmlToMarkdown('<p>Install. <em><svg></svg> Warning:</em> read</p>')).toBe('Install. *Warning:* read')
+    expect(htmlToMarkdown('<p>a <strong><svg></svg></strong> b</p>')).toBe(htmlToMarkdown('<p>a <strong></strong> b</p>'))
+  })
+
+  it('keeps the moved space out of the start of link text', async () => {
+    const cases: [string, string][] = [
+      ['<p><a href="/x"><strong><svg></svg> now</strong></a></p>', '[**now**](/x)'],
+      ['<p>Go<a href="/x"><strong> now</strong></a></p>', 'Go [**now**](/x)'],
+      // Nothing else parts the words, so the space stays after the bracket.
+      ['<p><em>x</em><a href="/x"><strong> now</strong></a></p>', '*x*[ **now**](/x)'],
+    ]
+    for (const [html, expected] of cases) {
+      expect(htmlToMarkdown(html)).toBe(expected)
+      for (let split = 0; split <= html.length; split++) {
+        const output = await streamConvert([html.slice(0, split), html.slice(split)])
+        expect(output.trimEnd(), `${html} split at byte ${split}`).toBe(expected)
+      }
+    }
+  })
+
+  it('leaves code-like content as written', () => {
+    expect(htmlToMarkdown('<p><kbd>a<strong> x</strong></kbd></p>')).toBe('`a** x**`')
+    expect(htmlToMarkdown('<p><samp>a<em> x</em></samp></p>')).toBe('`a* x*`')
+    expect(htmlToMarkdown('<p><var>a<b><svg></svg> x</b></var></p>')).toBe('`a** x**`')
+    expect(htmlToMarkdown('<p><code>a<strong> x</strong></code></p>')).toBe('`a** x**`')
   })
 })
 

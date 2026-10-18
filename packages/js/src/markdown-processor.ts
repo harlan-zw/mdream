@@ -594,6 +594,17 @@ function isThematicBreak(value: string, start: number, marker: number): boolean 
   return count >= 3
 }
 
+// A line of only `=` or only `-` turns the paragraph line above it, such as the
+// line before a hard break, into a setext heading.
+function isSetextUnderline(value: string, start: number, marker: number): boolean {
+  let index = start + 1
+  while (value.charCodeAt(index) === marker)
+    index++
+  while (value.charCodeAt(index) === 32 || value.charCodeAt(index) === 9)
+    index++
+  return index >= value.length || value.charCodeAt(index) === 10 || value.charCodeAt(index) === 13
+}
+
 const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
 
 /**
@@ -613,7 +624,7 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
   // Text-side reject first: prose that cannot open a block skips the buffer
   // scan entirely, which is most text nodes.
   const first = value.charCodeAt(0)
-  if (!' #+->'.includes(value[0]!) && !(first >= 48 && first <= 57)) {
+  if (!' #+->='.includes(value[0]!) && !(first >= 48 && first <= 57)) {
     return false
   }
 
@@ -630,7 +641,7 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
     return false
 
   const code = value.charCodeAt(index)
-  return '#+->'.includes(value[index]!)
+  return '#+->='.includes(value[index]!)
     || (code >= 48 && code <= 57)
 }
 
@@ -686,10 +697,13 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): 
       else if (code === 45 || code === 43) { // unordered list marker
         shouldEscape = index + 1 === value.length
           || isMarkdownMarkerWhitespace(value.charCodeAt(index + 1))
-          || (code === 45 && isThematicBreak(value, index, code))
+          || (code === 45 && (isThematicBreak(value, index, code) || isSetextUnderline(value, index, code)))
       }
       else if (code === 62) { // blockquote marker
         shouldEscape = true
+      }
+      else if (code === 61) { // =
+        shouldEscape = isSetextUnderline(value, index, code)
       }
     }
     else if (!shouldEscape && orderedDigits > 0 && (code === 46 || code === 41)) {
@@ -1612,6 +1626,48 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
   }
 
+  /**
+   * A space opening emphasis content stops its delimiter from opening
+   * (CommonMark left-flanking rule), as the space after a dropped `<svg>` does.
+   * Move it in front of the opener run, merged with any whitespace there.
+   * Returns false when no text is left to write.
+   */
+  function hoistOpenerSpace(textNode: TextNode): boolean {
+    const buffer = state.buffer
+    const depthMap = state.depthMap
+    let index = openMarkerCount - 1
+    let fragment = openMarkers[index]! >> 3
+    // Code-like spans keep their content as written.
+    if (fragment !== buffer.length - 1 || (openMarkers[index]! & MARKER_TYPE_MASK) > 4
+      || depthMap[TAG_CODE] || depthMap[TAG_PRE] || depthMap[TAG_KBD] || depthMap[TAG_SAMP] || depthMap[TAG_VAR]) {
+      return true
+    }
+    while (index > 0 && (openMarkers[index - 1]! & MARKER_TYPE_MASK) <= 4 && openMarkers[index - 1]! >> 3 === fragment - 1)
+      fragment = openMarkers[--index]! >> 3
+    let start = 1
+    while (textNode.value.charCodeAt(start) === 32)
+      start++
+    textNode.value = textNode.value.slice(start)
+    if (!textNode.value)
+      return false
+    let previous = fragment
+    let before = -1
+    while (before === -1 && --previous >= 0) {
+      const value = buffer[previous]!
+      if (value)
+        before = value.charCodeAt(value.length - 1)
+    }
+    // At the start of link text, whitespace before the `[` already parts the words.
+    if (previous >= 0 && previous === (openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment))
+      before = lastOutputChar(buffer, previous)
+    if (before !== -1 && before !== 32 && before !== 10 && before !== 9) {
+      const opener = ` ${buffer[fragment]}`
+      state.outputPositions?.replace(fragment, fragment + 1, [opener], offset => offset > 0 ? offset + 1 : offset)
+      buffer[fragment] = opener
+    }
+    return true
+  }
+
   function processTextNode(textNode: TextNode, lastNode: ElementNode | TextNode | undefined, lastChar: string): void {
     if (textNode.trimsAtLineStart)
       trimTextAtLineStart(textNode, state.buffer)
@@ -1644,6 +1700,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       if (!ownsCaptionSpace && shouldAddSpacingBeforeText(lastChar, lastNode, textNode))
         textNode.value = ` ${textNode.value}`
+
+      if (openMarkerCount && textNode.value.charCodeAt(0) === 32 && !hoistOpenerSpace(textNode))
+        return
 
       if ((state.depthMap[TAG_PRE] || 0) > 0 && (state.depthMap[TAG_LI] || 0) > 0) {
         const indent = state.listIndent
@@ -2362,9 +2421,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         commitCaptionFrames()
       }
     }
-    else if (openMarkerCount && ((eventType === NodeEventExit && handler?.literalExit) || (tagId !== -1 && !isInlineElement) || output?.some(hasNonWhitespace))) {
+    else if (openMarkerCount && ((eventType === NodeEventExit && handler?.literalExit)
+      || (tagId !== -1 && !isInlineElement && (output !== undefined || configuredNewLines > 0))
+      || output?.some(hasNonWhitespace))) {
       // Literal overrides, plugin output, and block boundaries make all open
-      // markers permanent, allowing streaming to release buffered content.
+      // markers permanent, allowing streaming to release buffered content. An
+      // element that writes nothing, like a dropped <svg>, is no boundary.
       openMarkerCount = 0
     }
 
