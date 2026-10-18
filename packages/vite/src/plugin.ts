@@ -53,6 +53,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     ...options.mdreamOptions,
   }
   const markdownCache = new Map<string, CacheEntry>()
+  const patternCache = new Map<string, RegExp>()
 
   function log(message: string) {
     if (options.verbose) {
@@ -181,19 +182,22 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
   function matchesPattern(fileName: string, patterns: string[]): boolean {
     return patterns.some((pattern) => {
-      // Simple glob pattern matching - convert to regex
-      const regexPattern = pattern
-        .replace(GLOB_REGEX_SPECIAL_RE, '\\$&')
-        .replace(GLOB_WILDCARD_RE, (wildcard) => {
-          switch (wildcard) {
-            case '**/': return '(?:.*/)?'
-            case '**': return '.*'
-            case '*': return '[^/]*'
-            default: return '[^/]'
-          }
-        })
+      let regex = patternCache.get(pattern)
+      if (!regex) {
+        const regexPattern = pattern
+          .replace(GLOB_REGEX_SPECIAL_RE, '\\$&')
+          .replace(GLOB_WILDCARD_RE, (wildcard) => {
+            switch (wildcard) {
+              case '**/': return '(?:.*/)?'
+              case '**': return '.*'
+              case '*': return '[^/]*'
+              default: return '[^/]'
+            }
+          })
 
-      const regex = new RegExp(`^${regexPattern}$`)
+        regex = new RegExp(`^${regexPattern}$`)
+        patternCache.set(pattern, regex)
+      }
       return regex.test(fileName)
     })
   }
@@ -296,6 +300,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
     // Build-time processing - generate static markdown files
     generateBundle(_outputOptions, bundle) {
+      patternCache.clear()
       const htmlFiles = Object.entries(bundle).filter(([fileName, file]) => {
         return (
           fileName.endsWith('.html')

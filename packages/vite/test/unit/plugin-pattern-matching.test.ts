@@ -2,6 +2,55 @@ import { describe, expect, it, vi } from 'vitest'
 import { viteHtmlToMarkdownPlugin } from '../../src/plugin.js'
 
 describe('viteHtmlToMarkdownPlugin - Pattern Matching', () => {
+  it('compiles each visited pattern once per bundle', () => {
+    const plugin = viteHtmlToMarkdownPlugin({
+      include: ['docs/*.html', '*.html'],
+      exclude: ['docs/private*.html', '*.html', 'docs/*.html'],
+    }) as any
+    const bundle = Object.fromEntries([
+      'index.html',
+      'docs/a.html',
+      'docs/b.html',
+      'docs/private.html',
+    ].map(fileName => [fileName, { type: 'asset', source: '<h1>Page</h1>' }]))
+    const emitFile = vi.fn()
+    const regexSpy = vi.spyOn(globalThis, 'RegExp')
+
+    try {
+      plugin.generateBundle.call({ emitFile }, {}, bundle)
+      expect(regexSpy).toHaveBeenCalledTimes(3)
+      regexSpy.mockClear()
+      plugin.generateBundle.call({ emitFile }, {}, bundle)
+      expect(regexSpy).toHaveBeenCalledTimes(3)
+      expect(emitFile).not.toHaveBeenCalled()
+    }
+    finally {
+      regexSpy.mockRestore()
+    }
+  })
+
+  it('uses changed include and exclude arrays on subsequent bundles', () => {
+    const include = ['first.html']
+    const exclude = ['second.html']
+    const plugin = viteHtmlToMarkdownPlugin({ include, exclude }) as any
+    const bundle = Object.fromEntries(['first.html', 'second.html'].map(fileName => [
+      fileName,
+      { type: 'asset', source: '<h1>Page</h1>' },
+    ]))
+    const emitFile = vi.fn()
+    include[0] = 'second.html'
+    exclude[0] = 'first.html'
+
+    plugin.generateBundle.call({ emitFile }, {}, bundle)
+    expect(emitFile.mock.calls.map(([file]) => file.fileName)).toEqual(['second.md'])
+
+    include[0] = 'first.html'
+    exclude[0] = 'second.html'
+    emitFile.mockClear()
+    plugin.generateBundle.call({ emitFile }, {}, bundle)
+    expect(emitFile.mock.calls.map(([file]) => file.fileName)).toEqual(['first.md'])
+  })
+
   it.each([undefined, ['**/*.html']])('matches root and nested HTML with include %j', (include) => {
     const plugin = viteHtmlToMarkdownPlugin(include ? { include } : {}) as any
     const mockBundle = Object.fromEntries([
