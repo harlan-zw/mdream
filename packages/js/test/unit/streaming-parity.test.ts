@@ -141,6 +141,17 @@ describe('streaming parity with the Rust core', () => {
   })
 
   it.each([
+    ['<ul><li><h3></h3><p>Partner description</p></li></ul>', '- ###\n\n  Partner description'],
+    ['<ol><li>a<ol><li>b<ol><li><h3></h3><p>c</p></li></ol></li></ol></li></ol>', '1. a\n   1. b\n      1. ###\n\n         c'],
+    ['<ul><li><pre>x</pre><h3></h3><p>b</p></li></ul>', '- ```\n  x\n  ```\n\n  ###\n\n  b'],
+    ['<ul><li><blockquote><h3></h3><p>b</p></blockquote></li></ul>', '- \n  > ###\n  >\n  > b'],
+    ['<ul><li><h3> # </h3><p>b</p></li></ul>', '- ### \\#\n\n  b'],
+  ])('ends a heading line in a list item across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+  })
+
+  it.each([
     '<summary>text <svg></svg></summary>',
     '<details><summary>text <svg><polyline points="1 2"></polyline></svg></summary><p>b</p></details>',
   ])('keeps raw closing tags after foreign children for %s', async (html) => {

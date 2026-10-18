@@ -3161,7 +3161,11 @@ impl ConvertState {
 
   /// GFM reads a heading's trailing `#` run as an ATX closing sequence and drops
   /// it along with the text it was meant to be, so the run is escaped. Only a run
-  /// preceded by whitespace (or forming the whole heading) closes a heading.
+  /// preceded by whitespace (or forming the whole heading) closes a heading. A
+  /// run that only the line's block lead precedes is the heading's own marker
+  /// instead: the heading is empty, and the marker's trailing space would read as
+  /// a list item's open content column, joining the next block to the heading's
+  /// line.
   fn escape_trailing_heading_hashes(&mut self) {
     let bytes = self.buffer.as_bytes();
     // Cheap reject: almost no heading ends in `#`.
@@ -3170,6 +3174,16 @@ impl ConvertState {
       end -= 1;
     }
     if end == 0 || bytes[end - 1] != b'#' {
+      return;
+    }
+    let mut marker = end - 1;
+    while marker > 0 && bytes[marker - 1] == b'#' {
+      marker -= 1;
+    }
+    if self.opens_block_line(bytes, marker) {
+      if bytes[bytes.len() - 1] == b' ' {
+        self.trim_trailing_spaces();
+      }
       return;
     }
     // Content begins past the opening `#` prefix, which this pass must not touch.
@@ -3192,6 +3206,44 @@ impl ConvertState {
     if run < end && (run == start || matches!(bytes[run - 1], b' ' | b'\t')) {
       self.replace_code_span_content(run..run, "\\");
     }
+  }
+
+  /// Whether only a block lead precedes `at` on its line: indentation, then
+  /// optionally a list marker and its space. Nested items indent past the three
+  /// spaces `list_marker_line_start` accepts.
+  fn opens_block_line(&self, bytes: &[u8], at: usize) -> bool {
+    let mut index = at;
+    let mut gap = 0;
+    while index > 0 && bytes[index - 1] == b' ' {
+      index -= 1;
+      gap += 1;
+    }
+    if index > 0 && bytes[index - 1] != b'\n' {
+      if gap == 0 {
+        return false;
+      }
+      match bytes[index - 1] {
+        b'-' | b'*' | b'+' => index -= 1,
+        b'.' | b')' => {
+          let digits = index - 1;
+          index = digits;
+          while index > 0 && bytes[index - 1].is_ascii_digit() {
+            index -= 1;
+          }
+          if index == digits || digits - index > 9 {
+            return false;
+          }
+        }
+        _ => return false,
+      }
+      while index > 0 && bytes[index - 1] == b' ' {
+        index -= 1;
+      }
+    }
+    if index == 0 {
+      return !self.has_flushed_tail() || self.flushed_tail[1] == b'\n';
+    }
+    bytes[index - 1] == b'\n'
   }
 
   /// Whether `end` sits just past a list marker that is all its line holds:

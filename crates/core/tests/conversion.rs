@@ -5250,6 +5250,59 @@ fn heading_keeps_a_trailing_hash() {
 }
 
 #[test]
+fn an_empty_heading_in_a_list_item_ends_its_line() {
+  // The heading's own `#` marker follows the item marker or the continuation
+  // indent: it is no closing sequence to escape, and its trailing space must not
+  // leave the line open for the next block to join.
+  for (html, expected) in [
+    (
+      "<main><ul><li><h3></h3><p>Partner description</p></li></ul></main>",
+      "- ###\n\n  Partner description",
+    ),
+    (
+      "<ol><li><h3></h3><p>Partner description</p></li></ol>",
+      "1. ###\n\n   Partner description",
+    ),
+    (
+      "<ol start=\"10\"><li><h1></h1><p>b</p></li></ol>",
+      "10. #\n\n    b",
+    ),
+    ("<ul><li><h3></h3></li><li>b</li></ul>", "- ###\n- b"),
+    (
+      "<ul><li>a<ul><li>b<ul><li><h3></h3><p>c</p></li></ul></li></ul></li></ul>",
+      "- a\n  - b\n    - ###\n\n      c",
+    ),
+    (
+      "<ul><li><pre>x</pre><h3></h3><p>b</p></li></ul>",
+      "- ```\n  x\n  ```\n\n  ###\n\n  b",
+    ),
+    (
+      "<ul><li><h2></h2><table><tr><td>x</td></tr></table></li></ul>",
+      "- ##\n\n  | x |\n  | --- |",
+    ),
+    (
+      "<blockquote><ol><li><h3></h3><p>b</p></li></ol></blockquote>",
+      "> 1. ###\n>\n>    b",
+    ),
+    (
+      "<ul><li><blockquote><h3></h3><p>b</p></blockquote></li></ul>",
+      "- \n  > ###\n  >\n  > b",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // A `#` run of the heading's content still closes it.
+  assert_eq!(
+    convert("<ul><li><h3>#</h3><p>b</p></li></ul>"),
+    "- ### \\#\n\n  b"
+  );
+  assert_eq!(
+    convert("<ul><li><pre>x</pre><h3>#</h3></li></ul>"),
+    "- ```\n  x\n  ```\n\n  ### \\#"
+  );
+}
+
+#[test]
 fn a_heading_without_an_atx_prefix_keeps_its_hash_unescaped() {
   // No `#` prefix is written in either case, so there is no closing sequence to
   // protect and a backslash would be literal content.

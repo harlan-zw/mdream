@@ -2001,6 +2001,23 @@ fn streaming_heading_trailing_hashes_matches_one_shot() {
   }
 }
 
+// An empty heading in a list item drops its marker's trailing space at its exit,
+// so that space must still be held when the exit runs.
+#[test]
+fn streaming_empty_heading_in_list_item_matches_one_shot() {
+  for html in [
+    "<ul><li><h3></h3><p>b</p></li></ul>",
+    "<ol start=\"10\"><li><h1></h1><p>b</p></li></ol>",
+    "<ul><li>a<ul><li>b<ul><li><h3></h3><p>c</p></li></ul></li></ul></li></ul>",
+    "<ul><li><pre>x</pre><h3></h3><p>b</p></li></ul>",
+    "<ul><li><blockquote><h3></h3><p>b</p></blockquote></li></ul>",
+    "<blockquote><ul><li><h3></h3><p>b</p></li></ul></blockquote>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // An empty `<li>` inserts a newline at its marker's line start when it resolves,
 // so the line stays mutable. Streaming used to yield the marker first, turning
 // one-shot's `- a\n\n  -` into `- a\n  --`.
