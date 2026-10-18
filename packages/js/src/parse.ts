@@ -626,6 +626,8 @@ export interface ParseState {
   lastTextNode?: Node
   /** Resolved plugin instances for event processing */
   resolvedPlugins?: TransformPlugin[]
+  /** Hands an event to the output past plugins and the splitter, as Rust writes a link label. */
+  outputEvent?: (event: NodeEvent) => void
   /** Output-specific tag behavior. Parsing metadata is used when absent. */
   tagHandlers?: Record<number, TagHandler>
   /** Tag override handlers built from declarative tagOverrides config */
@@ -1362,7 +1364,42 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   }
 
   handleEvent({ type: NodeEventEnter, node: textNode })
+  // Plugins flag the text they skip or rewrite during the event.
+  if (state.depthMap[TAG_A]) {
+    const wasBlank = !containsNonWhitespace && !inPreTag
+    const isBlank = textNode.rewrittenBlank ?? wasBlank
+    const hidden = textNode.excludedFromMarkdown || (isBlank && !wasBlank)
+    if (hidden || isBlank)
+      countHiddenLinkText(parentsToIncrement, hidden)
+  }
   state.lastTextNode = textNode
+}
+
+/**
+ * Excluded text never shows, and blank text after it only spaces it out, so
+ * neither is link text: a link holding only these still takes its label.
+ * Text that a hook turns blank or empty counts as excluded.
+ * Blank text with nothing hidden before it follows visible content and is not counted.
+ * Excluded and skipped links never take the label, so they get no count.
+ */
+function countHiddenLinkText(parents: ElementNode[], excluded: boolean | undefined): void {
+  for (const parent of parents) {
+    if (parent.tagId === TAG_A && (excluded || parent.hiddenTextNodes) && !parent.excludedFromMarkdown && !parent.enterSkipped)
+      parent.hiddenTextNodes = (parent.hiddenTextNodes || 0) + 1
+  }
+}
+
+/**
+ * Where an empty link's title or aria-label goes. Counted text that never shows
+ * leaves a link just as empty, but then the label only reaches the output, as
+ * in Rust: extraction, the splitter and other hooks see the link as before.
+ */
+function linkLabelTarget(node: ElementNode, state: ParseState, handleEvent: (event: NodeEvent) => void): ((event: NodeEvent) => void) | undefined {
+  if (!node.childTextNodeIndex)
+    return handleEvent
+  if (node.childTextNodeIndex === node.hiddenTextNodes && !node.excludedFromMarkdown && !node.enterSkipped)
+    return state.outputEvent
+  return undefined
 }
 
 /**
@@ -1551,7 +1588,8 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
   }
 
   // Handle empty links
-  if (node.tagId === TAG_A && !node.childTextNodeIndex) {
+  const emitLabel = node.tagId === TAG_A ? linkLabelTarget(node, state, handleEvent) : undefined
+  if (emitLabel) {
     const prefix = node.attributes?.title || node.attributes?.['aria-label'] || ''
     if (prefix) {
       node.childTextNodeIndex = 1
@@ -1563,7 +1601,7 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
         depth: node.depth + 1,
       } as TextNode
 
-      handleEvent({ type: NodeEventEnter, node: textNode })
+      emitLabel({ type: NodeEventEnter, node: textNode })
       for (const parent of traverseUpToFirstBlockNode(node)) {
         parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
       }

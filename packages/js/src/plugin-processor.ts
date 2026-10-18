@@ -1,5 +1,19 @@
 import type { ElementNode, MdreamRuntimeState, NodeEvent, PluginState, TextNode, TransformPlugin } from './types'
-import { ELEMENT_NODE, NodeEventEnter, TEXT_NODE } from './const'
+import { ELEMENT_NODE, NodeEventEnter, TAG_A, TAG_PRE, TEXT_NODE } from './const'
+
+/** Whether text shows nothing: empty, or only the parser's whitespace outside `<pre>`. */
+function isBlankText(value: string, inPreTag: boolean): boolean {
+  if (!value)
+    return true
+  if (inPreTag)
+    return false
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    if (code !== 32 && code !== 9 && code !== 10 && code !== 12 && code !== 13)
+      return false
+  }
+  return true
+}
 
 /**
  * Processes plugins for a given node event
@@ -20,6 +34,8 @@ export function processPluginsForEvent(
   state.depth = event.node.depth
   // Process plugins with full state access
   if (plugins?.length) {
+    // Text as the parser made it, to tell after the hooks whether they changed it.
+    const text = event.node.type === TEXT_NODE ? (event.node as TextNode).value : undefined
     // Run processAttributes BEFORE beforeNodeProcess so that
     // ancestor context (e.g. tailwind hidden state) is available
     // when descendant nodes check their ancestors in beforeNodeProcess.
@@ -47,6 +63,12 @@ export function processPluginsForEvent(
       }
     }
     if (shouldSkip) {
+      // The parser reads these flags after the event: skipped text does not
+      // count as link text, and a skipped link gets no fallback label.
+      if (event.node.type === TEXT_NODE)
+        (event.node as TextNode).excludedFromMarkdown = true
+      else if (event.type === NodeEventEnter && (event.node as ElementNode).tagId === TAG_A)
+        (event.node as ElementNode).enterSkipped = true
       return true // Skip this event
     }
 
@@ -84,12 +106,17 @@ export function processPluginsForEvent(
           const result = plugin.processTextNode(textNode, state)
           if (result) {
             if (result.skip) {
+              textNode.excludedFromMarkdown = true
               return true // Skip this text node
             }
             textNode.value = result.content
           }
         }
       }
+      // The output rewrites the value before the parser counts link text, so
+      // record here whether link text a hook changed is now blank.
+      if (textNode.value !== text && state.depthMap?.[TAG_A])
+        textNode.rewrittenBlank = isBlankText(textNode.value, (state.depthMap[TAG_PRE] || 0) > 0)
     }
   }
 

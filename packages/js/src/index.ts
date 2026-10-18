@@ -21,6 +21,7 @@ export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {
     depthMap: processor.state.depthMap,
     depth: 0,
     resolvedPlugins: plugins,
+    outputEvent: processor.processEvent,
     tagHandlers,
     tagOverrideHandlers,
     plainText: false,

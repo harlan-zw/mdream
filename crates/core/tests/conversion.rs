@@ -2,7 +2,7 @@ use std::fmt::Write as _;
 
 use mdream::types::{
   CleanConfig, ExtractionConfig, FilterConfig, FrontmatterConfig, HtmlToMarkdownOptions,
-  IsolateMainConfig, OutputFormat, PluginConfig, TagOverrideConfig,
+  IsolateMainConfig, OutputFormat, PluginConfig, TagOverrideConfig, TailwindConfig,
 };
 use mdream::{
   MarkdownStreamProcessor, html_to_html, html_to_markdown, html_to_markdown_result, html_to_text,
@@ -3107,6 +3107,152 @@ fn filter_strips_hidden_content_and_subtree() {
   assert_eq!(
     convert_with_filter("<p>a</p><div style=\"display:flex\">V</div><p>b</p>"),
     "a\n\nV\n\nb"
+  );
+}
+
+#[test]
+fn excluded_link_text_falls_back_to_the_link_label() {
+  let with_plugins = |plugins: PluginConfig| HtmlToMarkdownOptions {
+    plugins: Some(plugins),
+    ..Default::default()
+  };
+  let filter = |config: FilterConfig| {
+    with_plugins(PluginConfig {
+      filter: Some(config),
+      ..Default::default()
+    })
+  };
+
+  let html = r#"<main><p><a href="/cart" aria-label="Cart"><span hidden>🛒</span></a></p></main>"#;
+  assert_eq!(convert_with_filter(html), "[Cart](/cart)");
+  assert_eq!(html_to_text(html, filter(FilterConfig::default())), "Cart");
+  assert_eq!(
+    html_to_html(html, filter(FilterConfig::default())),
+    r#"<main><p><a href="/cart">Cart</a></p></main>"#
+  );
+  assert_eq!(convert(html), "[🛒](/cart)");
+
+  assert_eq!(
+    convert_with_filter(
+      r#"<p><a href="/cart" title="Cart"><span style="display:none">x</span></a></p>"#
+    ),
+    "[Cart](/cart)"
+  );
+  assert_eq!(
+    html_to_markdown(
+      r#"<p><a href="/cart" aria-label="Cart"><span class="icon">x</span></a></p>"#,
+      filter(FilterConfig::exclude(&[".icon"])),
+    ),
+    "[Cart](/cart)"
+  );
+  assert_eq!(
+    html_to_markdown(
+      r#"<div><a href="/cart" aria-label="Cart"><span>x</span></a></div>"#,
+      filter(FilterConfig {
+        include: Some(vec!["a".to_string()]),
+        process_children: Some(false),
+        ..Default::default()
+      }),
+    ),
+    "[Cart](/cart)"
+  );
+  assert_eq!(
+    html_to_markdown(
+      r#"<p><a href="/cart" aria-label="Cart"><span class="hidden">x</span></a></p>"#,
+      with_plugins(PluginConfig {
+        tailwind: Some(TailwindConfig),
+        ..Default::default()
+      }),
+    ),
+    "[Cart](/cart)"
+  );
+  // The space after excluded text is kept, as for visible text after it.
+  assert_eq!(
+    convert_with_filter(r#"<p><a href="/cart" aria-label="Cart"><span hidden>x</span> </a></p>"#),
+    "[ Cart](/cart)"
+  );
+  assert_eq!(
+    convert_with_filter(
+      r#"<p><a href="/cart" aria-label="Cart"><b><span hidden>x</span> </b></a></p>"#
+    ),
+    "[Cart](/cart)"
+  );
+  // Visible link text still wins over the label.
+  assert_eq!(
+    convert_with_filter(r#"<p><a href="/cart" aria-label="Cart"><span hidden>x</span>Go</a></p>"#),
+    "[Go](/cart)"
+  );
+  assert_eq!(
+    convert_with_filter(
+      r#"<p><a href="/cart" aria-label="Cart"><span hidden>x</span> <b>Go</b></a></p>"#
+    ),
+    "[ **Go**](/cart)"
+  );
+}
+
+#[test]
+fn excluded_link_text_keeps_the_space_after_it() {
+  let exclude_icon = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::exclude(&[".icon"])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let html = r#"<p>See<a href="/x"><span class="icon">arrow</span> <span>docs</span></a></p>"#;
+  assert_eq!(html_to_text(html, exclude_icon.clone()), "See docs");
+  assert_eq!(
+    html_to_html(html, exclude_icon),
+    r#"<p>See<a href="/x"> <span>docs</span></a></p>"#
+  );
+
+  let extract = |html: &str, plugins: PluginConfig, selector: &str| {
+    let result = html_to_markdown_result(
+      html,
+      HtmlToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          extraction: Some(ExtractionConfig {
+            selectors: vec![selector.to_string()],
+          }),
+          ..plugins
+        }),
+        ..Default::default()
+      },
+    );
+    result
+      .extracted
+      .unwrap()
+      .into_iter()
+      .map(|element| element.text_content)
+      .collect::<Vec<_>>()
+  };
+  let include_h1 = PluginConfig {
+    filter: Some(FilterConfig {
+      include: Some(vec!["h1".to_string()]),
+      process_children: Some(false),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    extract(
+      r#"<h1><a href="/x"><span>B</span> <span>C</span></a></h1>"#,
+      include_h1,
+      "h1"
+    ),
+    ["B C"]
+  );
+  let isolate_main = PluginConfig {
+    isolate_main: Some(IsolateMainConfig),
+    ..Default::default()
+  };
+  assert_eq!(
+    extract(
+      r#"<nav><a href="/docs"><span>Getting</span> <span>Started</span></a></nav><main><h1>T</h1><p>b</p></main>"#,
+      isolate_main,
+      "a[href]"
+    ),
+    ["Getting Started"]
   );
 }
 

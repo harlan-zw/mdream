@@ -485,13 +485,41 @@ impl ConvertState {
   }
 
   #[inline(always)]
-  fn advance_text_node_counters(&mut self, first_block_parent_index: Option<usize>) {
+  fn advance_text_node_counters(
+    &mut self,
+    first_block_parent_index: Option<usize>,
+    excluded: bool,
+    blank: bool,
+  ) {
     if let Some(parent) = self.stack.last_mut() {
       parent.current_walk_index += 1;
     }
     let up_to = first_block_parent_index.unwrap_or(0);
     for idx in up_to..self.stack.len() {
       self.stack[idx].child_text_node_index += 1;
+    }
+    if (excluded || blank) && self.depth_map[TAG_A as usize] > 0 {
+      self.count_hidden_link_text(up_to, excluded);
+    }
+  }
+
+  /// Excluded text never shows, and blank text after it only spaces it out, so
+  /// neither is link text: a link holding only these still takes its label.
+  /// Blank text with nothing hidden before it follows visible content and is not counted.
+  /// Excluded and skipped links never take the label, so they get no count.
+  #[inline(never)]
+  fn count_hidden_link_text(&mut self, up_to: usize, excluded: bool) {
+    for node in &mut self.stack[up_to..] {
+      if node.tag_id != Some(TAG_A) || node.excluded_from_markdown || node.enter_skipped {
+        continue;
+      }
+      if excluded {
+        node.extras.get_or_insert_default().hidden_text_nodes += 1;
+      } else if let Some(extras) = node.extras.as_mut()
+        && extras.hidden_text_nodes > 0
+      {
+        extras.hidden_text_nodes += 1;
+      }
     }
   }
 
@@ -567,7 +595,11 @@ impl ConvertState {
     text.clear();
     *text_buffer = text;
 
-    self.advance_text_node_counters(first_block_parent_index);
+    self.advance_text_node_counters(
+      first_block_parent_index,
+      excludes_text_nodes,
+      !contains_non_whitespace,
+    );
   }
 
   /// Emit buffered text. Internal size flushes split one source text node into
@@ -729,7 +761,11 @@ impl ConvertState {
     *text_buffer = text;
 
     if completes_text_node {
-      self.advance_text_node_counters(first_block_parent_index);
+      self.advance_text_node_counters(
+        first_block_parent_index,
+        excludes_text_nodes,
+        !contains_non_whitespace && !in_pre_tag,
+      );
     }
   }
 
@@ -1584,11 +1620,18 @@ impl ConvertState {
       self.generate_frontmatter_yaml();
     }
 
-    // Special: empty links — synthesize text from title/aria-label
+    // Empty links take their title or aria-label. Counted text that never
+    // shows leaves a link just as empty.
     if node_tag_id == Some(TAG_A)
-      && node_child_text_index == 0
       && !node_excluded
       && !node_enter_skipped
+      && (node_child_text_index == 0
+        || self
+          .stack
+          .retired()
+          .extras
+          .as_ref()
+          .is_some_and(|extras| extras.hidden_text_nodes == node_child_text_index))
     {
       let prefix = self
         .stack

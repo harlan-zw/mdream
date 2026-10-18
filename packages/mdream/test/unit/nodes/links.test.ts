@@ -393,6 +393,52 @@ describe.each(engines)('links $name', (engineConfig) => {
     expect(markdown).toBe('[Open on StackBlitz](https://nuxt.new/s/v3)')
   })
 
+  it('uses the link label in every format when a filter hides all link text', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<main><p><a href="/cart" aria-label="Cart"><span hidden>🛒</span></a></p></main>'
+    const plugins = { filter: {} }
+    expect(htmlToMarkdown(html, { engine, plugins })).toBe('[Cart](/cart)')
+    expect(htmlToMarkdown(html, { engine, plugins, format: 'text' })).toBe('Cart')
+    expect(htmlToMarkdown(html, { engine, plugins, format: 'html' })).toBe('<main><p><a href="/cart">Cart</a></p></main>')
+    expect(htmlToMarkdown(html, { engine })).toBe('[🛒](/cart)')
+  })
+
+  it.each([
+    ['<p><a href="/cart" title="Cart"><span style="display:none">x</span></a></p>', { filter: {} }, '[Cart](/cart)'],
+    ['<p><a href="/cart" aria-label="Cart"><span class="icon">x</span></a></p>', { filter: { exclude: ['.icon'] } }, '[Cart](/cart)'],
+    ['<div><a href="/cart" aria-label="Cart"><span>x</span></a></div>', { filter: { include: ['a'], processChildren: false } }, '[Cart](/cart)'],
+    ['<p><a href="/cart" aria-label="Cart"><span class="hidden">x</span></a></p>', { tailwind: true }, '[Cart](/cart)'],
+    // The space after excluded text is kept, as for visible text after it.
+    ['<p><a href="/cart" aria-label="Cart"><span hidden>x</span> </a></p>', { filter: {} }, '[ Cart](/cart)'],
+    ['<p><a href="/cart" aria-label="Cart">\n  <span hidden>x</span>\n</a></p>', { filter: {} }, '[ Cart](/cart)'],
+    ['<p><a href="/cart" aria-label="Cart"><b><span hidden>x</span> </b></a></p>', { filter: {} }, '[Cart](/cart)'],
+    ['<p>Go <a href="/cart" aria-label="Cart"><span hidden>x</span></a> now</p>', { filter: {} }, 'Go [Cart](/cart) now'],
+    ['<p><a href="/cart" aria-label="Cart"><span hidden>x</span>Go</a></p>', { filter: {} }, '[Go](/cart)'],
+    ['<p><a href="/cart" aria-label="Cart"><span hidden>x</span> <b>Go</b></a></p>', { filter: {} }, '[ **Go**](/cart)'],
+    ['<p><a href="/cart" aria-label="Cart"><span hidden>x</span><img src="/c.png" alt="C"></a></p>', { filter: {} }, '[![C](/c.png)](/cart)'],
+  ])('uses the link label only when excluded content leaves no link text in %s', async (html, plugins, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, plugins })).toBe(expected)
+  })
+
+  it('keeps the space after excluded link text in every format', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<p>See<a href="/x"><span class="icon">arrow</span> <span>docs</span></a></p>'
+    const plugins = { filter: { exclude: ['.icon'] } }
+    expect(htmlToMarkdown(html, { engine, plugins })).toBe('See [ docs](/x)')
+    expect(htmlToMarkdown(html, { engine, plugins, format: 'text' })).toBe('See docs')
+    expect(htmlToMarkdown(html, { engine, plugins, format: 'html' })).toBe('<p>See<a href="/x"> <span>docs</span></a></p>')
+  })
+
+  it('uses the link label of a heading link in every format', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<h2>Title <a href="#t" aria-label="Permalink"><span hidden>#</span></a></h2><p>body</p>'
+    const plugins = { filter: {} }
+    expect(htmlToMarkdown(html, { engine, plugins })).toBe('## Title [Permalink](#t)\n\nbody')
+    expect(htmlToMarkdown(html, { engine, plugins, format: 'text' })).toBe('Title Permalink\n\nbody')
+    expect(htmlToMarkdown(html, { engine, plugins, format: 'html' })).toBe('<h2 id="title-permalink">Title <a href="#t">Permalink</a></h2><p>body</p>')
+  })
+
   it('breaking title link', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<h2 id="new-project" class="relative text-2xl text-highlighted font-bold mt-12 mb-6 scroll-mt-[calc(48px+45px+var(--ui-header-height))] lg:scroll-mt-[calc(48px+var(--ui-header-height))] [&amp;>a]:focus-visible:outline-primary [&amp;>a>code]:border-dashed hover:[&amp;>a>code]:border-primary hover:[&amp;>a>code]:text-primary [&amp;>a>code]:text-xl/7 [&amp;>a>code]:font-bold [&amp;>a>code]:transition-colors"><a href="#new-project" class="group lg:ps-2 lg:-ms-2"><span class="absolute -ms-8 top-1 opacity-0 group-hover:opacity-100 group-focus:opacity-100 p-1 bg-elevated hover:text-primary rounded-md hidden lg:flex text-muted transition"><span class="iconify i-lucide:hash size-4 shrink-0" aria-hidden="true" style=""></span></span><!--[-->New Project<!--]--></a></h2>`
