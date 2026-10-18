@@ -33,8 +33,11 @@ describe('root conversion', () => {
             node.attributes.href += '-updated'
           },
           beforeNodeProcess(event) {
-            if (event.node.type === ELEMENT_NODE && event.node.name === 'a')
-              expect(event.node.attributes.href).toMatch(/^\/link-\d-updated$/)
+            if (event.node.type !== ELEMENT_NODE)
+              return
+            const node = event.node as ElementNode
+            if (node.name === 'a')
+              expect(node.attributes.href).toMatch(/^\/link-\d-updated$/)
           },
           onNodeEnter(node) {
             if (node.name === 'a')
