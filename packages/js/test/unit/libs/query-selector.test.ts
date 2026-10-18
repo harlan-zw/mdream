@@ -1,5 +1,5 @@
 import type { ElementNode } from '@mdream/js'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   createAttributeSelector,
   createClassSelector,
@@ -135,6 +135,40 @@ describe('query-selector', () => {
   })
 
   describe('parseSelector', () => {
+    it.each([
+      [String.raw`[data=a\]b\,c]`, String.raw`a\]b\,c`],
+      [String.raw`[data=a\]b,c]`, String.raw`a\]b,c`],
+      [String.raw`[data=a\"b,c]`, String.raw`a\"b,c`],
+      [String.raw`[data=a\'b,c]`, String.raw`a\'b,c`],
+      [String.raw`[data="a\"]b,c"]`, String.raw`a\"]b,c`],
+      [String.raw`[data='a\']b,c']`, String.raw`a\']b,c`],
+      [String.raw`[data=a\\]`, String.raw`a\\`],
+      [String.raw`[data=ação\\\]b,c]`, String.raw`ação\\\]b,c`],
+    ])('preserves escapes when splitting %s', (input, value) => {
+      const element = createTestElement('p', { data: value, class: 'active' })
+      expect(parseSelector(input).matches(element)).toBe(true)
+
+      const selector = parseSelector(`${input}.active, span`)
+      expect(selector.matches(element)).toBe(true)
+      expect(selector.matches(createTestElement('span'))).toBe(true)
+      expect(selector.matches(createTestElement('p', { data: value }))).toBe(false)
+      expect(selector.matches(createTestElement('p', { data: 'other', class: 'active' }))).toBe(false)
+    })
+
+    it('bounds character scans for unterminated attributes linearly', () => {
+      const input = '[data='.repeat(128)
+      const charCodeAt = vi.spyOn(String.prototype, 'charCodeAt')
+      let scans = 0
+      try {
+        parseSelector(input)
+        scans = charCodeAt.mock.calls.length
+      }
+      finally {
+        charCodeAt.mockRestore()
+      }
+      expect(scans).toBeLessThan(input.length * 4)
+    })
+
     it.each(['\u00A0', '\v'])('does not trim %j from attribute names', (separator) => {
       const name = `${separator}data-code${separator}`
       const selector = parseSelector(`[${name}]`)

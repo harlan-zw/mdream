@@ -22,17 +22,21 @@ pub(crate) fn parse_css_selector_list(selector: &str) -> ParsedSelectorList {
   let mut escaped = false;
 
   for (index, ch) in selector.char_indices() {
-    if let Some(active_quote) = quote {
+    if in_attr {
       if escaped {
         escaped = false;
-      } else if ch == '\\' {
-        escaped = true;
-      } else if ch == active_quote {
-        quote = None;
+        continue;
       }
-      continue;
-    }
-    if in_attr {
+      if ch == '\\' {
+        escaped = true;
+        continue;
+      }
+      if let Some(active_quote) = quote {
+        if ch == active_quote {
+          quote = None;
+        }
+        continue;
+      }
       if ch == '"' || ch == '\'' {
         quote = Some(ch);
       } else if ch == ']' {
@@ -387,6 +391,46 @@ mod tests {
         _ => panic!("expected attribute selector for {selector}"),
       }
       assert!(matches!(&parts[2], ParsedSelector::Class(class) if class == "active"));
+    }
+  }
+
+  #[test]
+  fn preserves_escapes_in_selector_lists() {
+    for (selector, expected) in [
+      (r"[data=a\]b\,c]", r"a\]b\,c"),
+      (r"[data=a\]b,c]", r"a\]b,c"),
+      (r#"[data=a\"b,c]"#, r#"a\"b,c"#),
+      (r"[data=a\'b,c]", r"a\'b,c"),
+      (r#"[data="a\"]b,c"]"#, r#"a\"]b,c"#),
+      (r"[data='a\']b,c']", r"a\']b,c"),
+      (r"[data=a\\]", r"a\\"),
+      (r"[data=ação\\\]b,c]", r"ação\\\]b,c"),
+    ] {
+      let ParsedSelectorList::Single(ParsedSelector::Attribute { name, value, .. }) =
+        parse_css_selector_list(selector)
+      else {
+        panic!("expected one attribute selector for {selector}");
+      };
+      assert_eq!(name, "data");
+      assert_eq!(value.as_deref(), Some(expected), "{selector}");
+
+      let ParsedSelectorList::Multiple(parts) =
+        parse_css_selector_list(&format!("{selector}.active, span"))
+      else {
+        panic!("expected a selector list for {selector}");
+      };
+      assert_eq!(parts.len(), 2, "{selector}");
+      let ParsedSelector::Compound(compound) = &parts[0] else {
+        panic!("expected a compound selector for {selector}");
+      };
+      assert_eq!(compound.len(), 2, "{selector}");
+      assert!(
+        matches!(&compound[0], ParsedSelector::Attribute { value, .. }
+        if value.as_deref() == Some(expected)),
+        "{selector}"
+      );
+      assert!(matches!(&compound[1], ParsedSelector::Class(class) if class == "active"));
+      assert!(matches!(&parts[1], ParsedSelector::Tag(tag) if tag == "span"));
     }
   }
 

@@ -231,10 +231,10 @@ function parseCompoundSelector(selector: string): SelectorMatcher {
 
     if (char === '[') {
       const end = findAttributeEnd(selector, i)
-      if (end !== -1) {
-        current += selector.slice(i + 1, end + 1)
-        i = end
-      }
+      if (end === -1)
+        return createTagSelector(selector)
+      current += selector.slice(i + 1, end + 1)
+      i = end
     }
   }
 
@@ -279,23 +279,19 @@ export function parseSelector(selector: string): SelectorMatcher {
   let start = 0
   let inAttribute = false
   let quote = 0
-  let escaped = false
 
   for (let i = 0; i < selector.length; i++) {
     const char = selector.charCodeAt(i)
-    if (quote) {
-      if (escaped) {
-        escaped = false
-      }
-      else if (char === 92 /* \ */) {
-        escaped = true
-      }
-      else if (char === quote) {
-        quote = 0
-      }
-      continue
-    }
     if (inAttribute) {
+      if (char === 92 /* \ */) {
+        i++
+        continue
+      }
+      if (quote) {
+        if (char === quote)
+          quote = 0
+        continue
+      }
       if (char === 34 /* " */ || char === 39 /* ' */)
         quote = char
       else if (char === 93 /* ] */)

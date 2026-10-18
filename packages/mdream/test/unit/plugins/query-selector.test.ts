@@ -6,6 +6,41 @@ import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines.ts'
 const RE_WHITESPACE = /\s+/
 
 describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
+  it.each([
+    [String.raw`[data=a\]b\,c]`, String.raw`a\]b\,c`],
+    [String.raw`[data=a\]b,c]`, String.raw`a\]b,c`],
+    [String.raw`[data=a\"b,c]`, String.raw`a\"b,c`],
+    [String.raw`[data=a\'b,c]`, String.raw`a\'b,c`],
+    [String.raw`[data="a\"]b,c"]`, String.raw`a\"]b,c`],
+    [String.raw`[data='a\']b,c']`, String.raw`a\']b,c`],
+    [String.raw`[data=a\\]`, String.raw`a\\`],
+    [String.raw`[data=ação\\\]b,c]`, String.raw`ação\\\]b,c`],
+  ])('filters and extracts escaped selector lists with %s', async (attribute, value) => {
+    const resolvedEngine = await resolveEngine(engine)
+    const selector = `${attribute}.active, span`
+    const html = `<p class="active" data="${value.replaceAll('"', '&quot;')}">selected</p><span>other</span><p>shown</p>`
+    const extracted: string[] = []
+
+    htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { extraction: {
+        [selector]: node => extracted.push(node.tagName),
+      } },
+    })
+    expect(extracted).toEqual(['p', 'span'])
+    expect(htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { filter: { exclude: [selector] } },
+    })).toBe('shown')
+    const included = htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { filter: { include: [selector] } },
+    })
+    expect(included).toContain('selected')
+    expect(included).toContain('other')
+    expect(included).not.toContain('shown')
+  })
+
   // Basic tests for including elements
   it('includes specified elements by tag when provided with include option', async () => {
     const html = `
