@@ -1,5 +1,5 @@
 import type { OutputAsset, RollupOutput } from 'rollup'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { build } from 'vite'
@@ -20,7 +20,8 @@ describe('viteHtmlToMarkdownPlugin in a Vite build', () => {
     ['page.html.html', 'page.html.md'],
     ['page.html', 'page.md'],
   ])('replaces only the final HTML extension in %s', async (fileName, markdownFileName) => {
-    root = mkdtempSync(join(tmpdir(), 'mdream-vite-'))
+    // Match Vite's canonical root when Windows temp paths use short names.
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'mdream-vite-')))
     const input = join(root, fileName)
     mkdirSync(dirname(input), { recursive: true })
     writeFileSync(input, '<html><body><h1>Hello</h1><p>World</p></body></html>')
@@ -39,7 +40,7 @@ describe('viteHtmlToMarkdownPlugin in a Vite build', () => {
   })
 
   it('emits Markdown for built HTML when used without extra config', async () => {
-    root = mkdtempSync(join(tmpdir(), 'mdream-vite-'))
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'mdream-vite-')))
     writeFileSync(join(root, 'index.html'), '<html><body><h1>Hello</h1><p>World</p></body></html>')
 
     const output = await build({
