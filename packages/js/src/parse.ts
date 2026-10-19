@@ -1609,6 +1609,7 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
         parent: node,
         index: 0,
         depth: node.depth + 1,
+        isLinkLabel: true,
       } as TextNode
 
       emitLabel({ type: NodeEventEnter, node: textNode })

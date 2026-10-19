@@ -1,5 +1,6 @@
 import type { ElementNode, Plugin } from '../../src/types'
 import { describe, expect, it } from 'vitest'
+import { clean } from '../../src/clean'
 import { NodeEventExit, TAG_A, TAG_SPAN } from '../../src/const'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
@@ -121,12 +122,36 @@ describe('filter plugin', () => {
   it.each(['&#32;', '&#x20;'])('uses the link label after excluded text followed by %s', async (entity) => {
     const html = `<p><a href="/cart" aria-label="Cart"><span hidden>x</span>${entity}</a></p>`
     const options = { plugins: [filterPlugin()] }
-    expect(htmlToMarkdown(html, options)).toBe('[ Cart](/cart)')
+    expect(htmlToMarkdown(html, options)).toBe('[Cart](/cart)')
     expect(htmlToText(html, options)).toBe('Cart')
     expect(htmlToSafeHtml(html, options)).toBe('<p><a href="/cart"> Cart</a></p>')
     for (let width = 1; width <= html.length; width++)
-      expect(await collect(streamHtmlToMarkdown(chunked(html, width), options)), `width=${width}`).toBe('[ Cart](/cart)')
+      expect(await collect(streamHtmlToMarkdown(chunked(html, width), options)), `width=${width}`).toBe('[Cart](/cart)')
     expect(htmlToMarkdown(html.replace(entity, '&#71;o'), options)).toBe('[Go](/cart)')
+  })
+
+  // The blank text only spaced out the hidden text, so it moves past the link
+  // like the trailing space of link text.
+  it.each([
+    ['<p>Go<a href="/cart" aria-label="Cart"><span hidden>x</span> </a>now</p>', 'Go [Cart](/cart) now'],
+    ['<p><a href="/cart" aria-label="Cart">\n  <span hidden>x</span>\n</a></p>', '[Cart](/cart)'],
+    ['<p><strong><a href="/cart" aria-label="Cart"><span hidden>x</span> </a></strong>B</p>', '**[Cart](/cart)** B'],
+    ['<p><a href="/cart" aria-label="Cart"><span hidden>x</span> </a><strong>B</strong></p>', '[Cart](/cart) **B**'],
+    ['<ul><li><a href="/cart" aria-label="Cart"><span hidden>x</span> </a>item</li></ul>', '- [Cart](/cart) item'],
+    ['<table><tr><td><a href="/cart" aria-label="Cart"><span hidden>x</span> </a>x</td><td>y</td></tr></table>', '| [Cart](/cart) x | y |\n| --- | --- |'],
+    ['<blockquote><p><a href="/cart" aria-label="Cart"><span hidden>x</span> </a>B</p></blockquote>', '> [Cart](/cart) B'],
+    ['<p><a href="https://x.com" aria-label="https://x.com"><span hidden>x</span> </a></p>', '<https://x.com>'],
+  ])('moves the blank before a link label past the link in %s', async (html, expected) => {
+    const options = { plugins: [filterPlugin()] }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await collect(streamHtmlToMarkdown(chunked(html, width), options)), `width=${width}`).toBe(expected)
+  })
+
+  it('moves a pending blank before a link label past the link', () => {
+    // Clean mode drops the image, so the blank before the label is still pending.
+    const html = '<p>Go<a href="/cart" aria-label="Cart"><span hidden>x</span> <img src="/c.png" alt=""> </a>now</p>'
+    expect(htmlToMarkdown(html, { plugins: [filterPlugin()], clean: clean() })).toBe('Go [Cart](/cart) now')
   })
 
   it.each([' ', '&#32;', '&#x20;'])('adds no link label when a hook turns %s visible', async (text) => {
@@ -167,11 +192,11 @@ describe('filter plugin', () => {
     for (const html of ['<p><a href="/x" aria-label="L">Go</a></p>', '<p><a href="/x" aria-label="L"><span hidden>x</span>Go</a></p>']) {
       expect(htmlToMarkdown(html, { plugins: [filterPlugin(), skip] }), html).toBe('[L](/x)')
       expect(htmlToMarkdown(html, { plugins: [filterPlugin(), rewrite('')] }), html).toBe('[L](/x)')
-      // The blank text stays ahead of the label, as after hidden content with no hook.
-      expect(htmlToMarkdown(html, { plugins: [filterPlugin(), rewrite(' ')] }), html).toBe('[ L](/x)')
+      // The blank text moves past the link, as after hidden content with no hook.
+      expect(htmlToMarkdown(html, { plugins: [filterPlugin(), rewrite(' ')] }), html).toBe('[L](/x)')
       expect(htmlToText(html, { plugins: [filterPlugin(), rewrite(' ')] }), html).toBe('L')
     }
-    expect(htmlToMarkdown('<p><a href="/x" aria-label="L"><span hidden>x</span> </a></p>', { plugins: [filterPlugin(), same] })).toBe('[ L](/x)')
+    expect(htmlToMarkdown('<p><a href="/x" aria-label="L"><span hidden>x</span> </a></p>', { plugins: [filterPlugin(), same] })).toBe('[L](/x)')
     expect(htmlToMarkdown('<p><a href="/x" aria-label="L">Go</a></p>', { plugins: [rewrite('Stop')] })).toBe('[Stop](/x)')
   })
 })

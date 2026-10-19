@@ -3166,10 +3166,10 @@ fn excluded_link_text_falls_back_to_the_link_label() {
     ),
     "[Cart](/cart)"
   );
-  // The space after excluded text is kept, as for visible text after it.
+  // The space after excluded text moves past the link, as trailing link text space does.
   assert_eq!(
     convert_with_filter(r#"<p><a href="/cart" aria-label="Cart"><span hidden>x</span> </a></p>"#),
-    "[ Cart](/cart)"
+    "[Cart](/cart)"
   );
   assert_eq!(
     convert_with_filter(
@@ -3202,7 +3202,7 @@ fn excluded_link_text_followed_by_encoded_space_uses_the_link_label() {
   for entity in ["&#32;", "&#x20;"] {
     let html =
       format!(r#"<p><a href="/cart" aria-label="Cart"><span hidden>x</span>{entity}</a></p>"#);
-    assert_eq!(html_to_markdown(&html, options.clone()), "[ Cart](/cart)");
+    assert_eq!(html_to_markdown(&html, options.clone()), "[Cart](/cart)");
     assert_eq!(html_to_text(&html, options.clone()), "Cart");
     assert_eq!(
       html_to_html(&html, options.clone()),
@@ -3215,13 +3215,88 @@ fn excluded_link_text_followed_by_encoded_space_uses_the_link_label() {
         output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
       }
       output.push_str(&stream.finish());
-      assert_eq!(output, "[ Cart](/cart)", "entity={entity} width={width}");
+      assert_eq!(output, "[Cart](/cart)", "entity={entity} width={width}");
     }
     assert_eq!(
       html_to_markdown(&html.replace(entity, "&#71;o"), options.clone()),
       "[Go](/cart)"
     );
   }
+}
+
+/// The blank text only spaced out the hidden text, so it moves past the link
+/// like the trailing space of link text.
+#[test]
+fn blank_before_a_link_label_moves_past_the_link() {
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let cases = [
+    (
+      r#"<p>Go<a href="/cart" aria-label="Cart"><span hidden>x</span> </a>now</p>"#,
+      "Go [Cart](/cart) now",
+    ),
+    (
+      "<p><a href=\"/cart\" aria-label=\"Cart\">\n  <span hidden>x</span>\n</a></p>",
+      "[Cart](/cart)",
+    ),
+    (
+      r#"<p><strong><a href="/cart" aria-label="Cart"><span hidden>x</span> </a></strong>B</p>"#,
+      "**[Cart](/cart)** B",
+    ),
+    (
+      r#"<p><a href="/cart" aria-label="Cart"><span hidden>x</span> </a><strong>B</strong></p>"#,
+      "[Cart](/cart) **B**",
+    ),
+    (
+      r#"<ul><li><a href="/cart" aria-label="Cart"><span hidden>x</span> </a>item</li></ul>"#,
+      "- [Cart](/cart) item",
+    ),
+    (
+      r#"<table><tr><td><a href="/cart" aria-label="Cart"><span hidden>x</span> </a>x</td><td>y</td></tr></table>"#,
+      "| [Cart](/cart) x | y |\n| --- | --- |",
+    ),
+    (
+      r#"<blockquote><p><a href="/cart" aria-label="Cart"><span hidden>x</span> </a>B</p></blockquote>"#,
+      "> [Cart](/cart) B",
+    ),
+    (
+      r#"<p><a href="https://x.com" aria-label="https://x.com"><span hidden>x</span> </a></p>"#,
+      "<https://x.com>",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(html_to_markdown(html, filter.clone()), expected, "{html}");
+    for options in [filter.clone(), filter.clone().with_max_node_bytes(4)] {
+      let one_shot = html_to_markdown(html, options.clone());
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, one_shot, "{html} width={width}");
+      }
+    }
+  }
+
+  // Clean mode drops the image, so the blank before the label is still pending.
+  let clean_filter = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..filter
+  };
+  assert_eq!(
+    html_to_markdown(
+      r#"<p>Go<a href="/cart" aria-label="Cart"><span hidden>x</span> <img src="/c.png" alt=""> </a>now</p>"#,
+      clean_filter,
+    ),
+    "Go [Cart](/cart) now"
+  );
 }
 
 #[test]

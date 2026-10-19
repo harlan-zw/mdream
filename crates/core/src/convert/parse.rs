@@ -1644,8 +1644,12 @@ impl ConvertState {
         modified_node.child_text_node_index = 1;
         let text_depth = node_depth + 1;
         self.stack.push(modified_node);
+        let moves_blank = self.take_blank_link_text(&prefix);
         // Emit synthetic text
         self.emit_text(&prefix, false, text_depth, 0);
+        if moves_blank {
+          self.pending_inline_whitespace = true;
+        }
         for prev in self.stack.iter_mut() {
           prev.child_text_node_index += 1;
         }

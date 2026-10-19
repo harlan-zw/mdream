@@ -1950,6 +1950,36 @@ impl ConvertState {
     false
   }
 
+  /// Before a visible link label: drop the spaces, written or pending, that are
+  /// all the link text so far. They only spaced out hidden text, so the caller
+  /// moves them past the link.
+  pub(crate) fn take_blank_link_text(&mut self, label: &str) -> bool {
+    if !self.is_markdown()
+      || !has_visible(label.as_bytes())
+      || !self.link.open
+      || !self.link.bracket_emitted
+      || self.link.hold_released
+      || self.link.begin_depth != self.depth
+    {
+      return false;
+    }
+    let text_start = self.link.bracket_pos + 1;
+    let Some(text) = self.buffer.as_bytes().get(text_start..) else {
+      return false;
+    };
+    if !text.iter().all(|&byte| byte == b' ')
+      || (text.is_empty() && !self.pending_inline_whitespace)
+    {
+      return false;
+    }
+    if !text.is_empty() {
+      self.truncate_buffer(text_start);
+      self.last_content_cache_len = self.last_content_cache_len.min(1);
+    }
+    self.pending_inline_whitespace = false;
+    true
+  }
+
   /// Clean-mode empty link: drop the whole `[](url)`, restoring the caption state it changed.
   fn drop_empty_link_text(&mut self, bracket_pos: usize, is_inline: bool) {
     self.truncate_buffer(bracket_pos);

@@ -408,9 +408,11 @@ describe.each(engines)('links $name', (engineConfig) => {
     ['<p><a href="/cart" aria-label="Cart"><span class="icon">x</span></a></p>', { filter: { exclude: ['.icon'] } }, '[Cart](/cart)'],
     ['<div><a href="/cart" aria-label="Cart"><span>x</span></a></div>', { filter: { include: ['a'], processChildren: false } }, '[Cart](/cart)'],
     ['<p><a href="/cart" aria-label="Cart"><span class="hidden">x</span></a></p>', { tailwind: true }, '[Cart](/cart)'],
-    // The space after excluded text is kept, as for visible text after it.
-    ['<p><a href="/cart" aria-label="Cart"><span hidden>x</span> </a></p>', { filter: {} }, '[ Cart](/cart)'],
-    ['<p><a href="/cart" aria-label="Cart">\n  <span hidden>x</span>\n</a></p>', { filter: {} }, '[ Cart](/cart)'],
+    // The space after excluded text moves past the link, as trailing link text space does.
+    ['<p><a href="/cart" aria-label="Cart"><span hidden>x</span> </a></p>', { filter: {} }, '[Cart](/cart)'],
+    ['<p><a href="/cart" aria-label="Cart">\n  <span hidden>x</span>\n</a></p>', { filter: {} }, '[Cart](/cart)'],
+    ['<p>Go<a href="/cart" aria-label="Cart"><span hidden>x</span> </a>now</p>', { filter: {} }, 'Go [Cart](/cart) now'],
+    ['<p><strong><a href="/cart" aria-label="Cart"><span hidden>x</span> </a></strong>B</p>', { filter: {} }, '**[Cart](/cart)** B'],
     ['<p><a href="/cart" aria-label="Cart"><b><span hidden>x</span> </b></a></p>', { filter: {} }, '[Cart](/cart)'],
     ['<p>Go <a href="/cart" aria-label="Cart"><span hidden>x</span></a> now</p>', { filter: {} }, 'Go [Cart](/cart) now'],
     ['<p><a href="/cart" aria-label="Cart"><span hidden>x</span>Go</a></p>', { filter: {} }, '[Go](/cart)'],
@@ -419,6 +421,13 @@ describe.each(engines)('links $name', (engineConfig) => {
   ])('uses the link label only when excluded content leaves no link text in %s', async (html, plugins, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine, plugins })).toBe(expected)
+  })
+
+  it('moves a pending blank before the link label past the link', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    // Clean mode drops the image, so the blank before the label is still pending.
+    const html = '<p>Go<a href="/cart" aria-label="Cart"><span hidden>x</span> <img src="/c.png" alt=""> </a>now</p>'
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} }, clean: true })).toBe('Go [Cart](/cart) now')
   })
 
   it('keeps the space after excluded link text in every format', async () => {

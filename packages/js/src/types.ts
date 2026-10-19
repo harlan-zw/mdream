@@ -224,6 +224,8 @@ export interface TextNode extends Node {
   trimsAtLineStart?: boolean
   /** Set when a hook changed this text inside a link: whether the new value shows nothing. */
   rewrittenBlank?: boolean
+  /** The title or aria-label written for a link with no visible text. */
+  isLinkLabel?: boolean
 }
 
 /**
