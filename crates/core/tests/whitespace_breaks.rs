@@ -331,6 +331,10 @@ fn link_text_drops_the_space_before_an_empty_element() {
 fn raw_html_blocks_end_before_following_markdown() {
   let cases = [
     (
+      "<dl><dd><details>X</details></dd></dl><strong>B</strong>",
+      "<dl><dd>\n\n<details>X</details>\n\n\n\n</dd></dl>\n\n**B**",
+    ),
+    (
       "<blockquote><address>A</address><blockquote><strong>B</strong></blockquote></blockquote>",
       "> <address>A</address>\n>\n> > **B**",
     ),

@@ -1697,7 +1697,7 @@ impl ConvertState {
 
     if tag_id.is_some_and(Self::is_raw_html_block_tag) && self.raw_html_needs_boundary {
       self.track_raw_html_markdown_context(self.buffer.len());
-      if self.raw_html_markdown {
+      if self.raw_html_markdown && !self.line_opens_raw_html_block() {
         self.raw_html_needs_boundary = false;
       }
     }
@@ -2489,7 +2489,7 @@ impl ConvertState {
       && self.depth_map[TAG_PRE as usize] == 0
     {
       self.track_raw_html_markdown_context(self.buffer.len());
-      if self.raw_html_markdown {
+      if self.raw_html_markdown && !self.line_opens_raw_html_block() {
         self.raw_html_needs_boundary = false;
       }
       if !has_override && output.is_some() && self.block_open_prefix("").is_none() {

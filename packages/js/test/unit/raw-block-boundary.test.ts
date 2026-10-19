@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src'
+import { createMarkdownProcessor } from '../../src/markdown-processor'
+import { createMarkdownDrain } from '../../src/markdown-stream'
 
 const cases: [string, string][] = [
+  ['<dl><dd><details>X</details></dd></dl><strong>B</strong>', '<dl><dd>\n\n<details>X</details>\n\n\n\n</dd></dl>\n\n**B**'],
   [
     '<blockquote><address>A</address><blockquote><strong>B</strong></blockquote></blockquote>',
     '> <address>A</address>\n>\n> > **B**',
@@ -205,4 +208,15 @@ describe('raw HTML block boundaries', () => {
       expect(output, `chunk width ${width}`).toBe(expected)
     }
   })
+})
+
+it('keeps unobserved blank lines in the mutable raw HTML scan tail', () => {
+  const processor = createMarkdownProcessor({}, context => ({
+    ...createMarkdownDrain(context, false),
+    scan: context.bufferScan,
+  }))
+  processor.state.buffer.push('<address>X', '\n\n', ' ')
+  expect(processor.getMarkdownChunk()).toBe('<address>X')
+  const unobserved = processor.state.buffer.slice(processor.scan[1]).join('')
+  expect(unobserved).toBe('\n\n ')
 })
