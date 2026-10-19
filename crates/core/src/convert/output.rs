@@ -1957,8 +1957,8 @@ impl ConvertState {
 
   /// Before a visible link label: drop the spaces, written or pending, that are
   /// all the link text so far. They only spaced out hidden text, so the caller
-  /// moves them past the link.
-  pub(crate) fn take_blank_link_text(&mut self, label: &str) -> bool {
+  /// moves them past the link, as it does a `trailing_blank` the parser dropped.
+  pub(crate) fn take_blank_link_text(&mut self, label: &str, trailing_blank: bool) -> bool {
     if !self.is_markdown()
       || !has_visible(label.as_bytes())
       || !self.link.open
@@ -1973,7 +1973,7 @@ impl ConvertState {
       return false;
     };
     if !text.iter().all(|&byte| byte == b' ')
-      || (text.is_empty() && !self.pending_inline_whitespace)
+      || (text.is_empty() && !self.pending_inline_whitespace && !trailing_blank)
     {
       return false;
     }

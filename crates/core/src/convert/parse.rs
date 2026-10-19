@@ -511,9 +511,10 @@ impl ConvertState {
     }
   }
 
-  /// Excluded text never shows, and blank text after it only spaces it out, so
+  /// Excluded text never shows, and blank text with only hidden text before it
+  /// (or none, as a decoded `&#32;` after an `<svg>`) only spaces it out, so
   /// neither is link text: a link holding only these still takes its label.
-  /// Blank text with nothing hidden before it follows visible content and is not counted.
+  /// Blank text after visible text is not counted.
   /// Excluded and skipped links never take the label, so they get no count.
   #[inline(never)]
   fn count_hidden_link_text(&mut self, up_to: usize, excluded: bool) {
@@ -521,13 +522,27 @@ impl ConvertState {
       if node.tag_id != Some(TAG_A) || node.excluded_from_markdown || node.enter_skipped {
         continue;
       }
-      if excluded {
+      let hidden = node
+        .extras
+        .as_ref()
+        .map_or(0, |extras| extras.hidden_text_nodes);
+      // The counters already include this text.
+      if excluded || hidden + 1 == node.child_text_node_index {
         node.extras.get_or_insert_default().hidden_text_nodes += 1;
-      } else if let Some(extras) = node.extras.as_mut()
-        && extras.hidden_text_nodes > 0
-      {
-        extras.hidden_text_nodes += 1;
       }
+    }
+  }
+
+  /// A blank dropped as a link's indentation after other content of the link, as
+  /// in `<a><svg></svg> </a>Next`, still spaces that content from what follows:
+  /// a label written in its place moves the blank past the link.
+  #[inline(never)]
+  fn note_trailing_link_blank(&mut self) {
+    if let Some(node) = self.stack.last_mut()
+      && node.tag_id == Some(TAG_A)
+      && node.current_walk_index > 0
+    {
+      node.extras.get_or_insert_default().trailing_blank = true;
     }
   }
 
@@ -557,6 +572,9 @@ impl ConvertState {
     }
 
     if !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty() {
+      if self.depth_map[TAG_A as usize] > 0 {
+        self.note_trailing_link_blank();
+      }
       return;
     }
     if text_buffer.is_empty() {
@@ -665,6 +683,9 @@ impl ConvertState {
       && child_text_node_index == 0
       && !self.stack.is_empty()
     {
+      if self.depth_map[TAG_A as usize] > 0 {
+        self.note_trailing_link_blank();
+      }
       return;
     }
     if text_buffer.is_empty() {
@@ -1650,9 +1671,13 @@ impl ConvertState {
       if !prefix.is_empty() {
         let mut modified_node = self.stack.take_retired();
         modified_node.child_text_node_index = 1;
+        let trailing_blank = modified_node
+          .extras
+          .as_ref()
+          .is_some_and(|extras| extras.trailing_blank);
         let text_depth = node_depth + 1;
         self.stack.push(modified_node);
-        let moves_blank = self.take_blank_link_text(&prefix);
+        let moves_blank = self.take_blank_link_text(&prefix, trailing_blank);
         // Emit synthetic text
         self.emit_text(&prefix, false, text_depth, 0);
         if moves_blank {

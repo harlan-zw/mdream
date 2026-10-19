@@ -454,6 +454,31 @@ describe.each(engines)('links $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine, plugins: { filter: {} }, clean: true })).toBe('Go [Cart](/cart) now')
   })
 
+  // A blank after link content the parser leaves out spaces that content like
+  // the blank after hidden text, whether a plain space or a decoded `&#32;`.
+  it.each([
+    ['<p>Go <a href="/cart" aria-label="Cart"><style>.i{}</style>&#32;</a></p>', 'Go [Cart](/cart)'],
+    ['<a href="/cart" aria-label="Cart"><svg></svg>&#32;</a>', '[Cart](/cart)'],
+    ['<p><a href="/c" aria-label="Item"><svg></svg> </a>Next</p>', '[Item](/c) Next'],
+    ['<p><a href="/c" aria-label="Item"><svg></svg>&#32;</a>Next</p>', '[Item](/c) Next'],
+    ['<p><a href="/c" aria-label="Item">\n  <svg aria-hidden="true"></svg>\n</a>Next</p>', '[Item](/c) Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><style>.i{}</style> </a>now</p>', 'Go [Item](/c) now'],
+    ['<ul><li><a href="/c" aria-label="Item"><svg></svg> </a>item</li></ul>', '- [Item](/c) item'],
+    ['<p><a href="/c"><svg></svg> </a>Next</p>', '[](/c)Next'],
+  ])('moves the blank after excluded link content past the label in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} } })).toBe(expected)
+  })
+
+  it('uses the link label for an encoded blank after excluded content in every format', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<p>Go<a href="/cart" aria-label="Cart"><svg></svg>&#32;</a>now</p>'
+    expect(htmlToMarkdown(html, { engine, clean: true })).toBe('Go [Cart](/cart) now')
+    expect(htmlToMarkdown(html, { engine, format: 'text' })).toBe('Go Cartnow')
+    expect(htmlToMarkdown(html, { engine, format: 'html' })).toBe('<p>Go<a href="/cart"> Cart</a>now</p>')
+  })
+
   it('keeps the space after excluded link text in every format', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>See<a href="/x"><span class="icon">arrow</span> <span>docs</span></a></p>'

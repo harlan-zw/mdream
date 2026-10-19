@@ -920,9 +920,9 @@ function resetRetractedCaptionFrames(frames: number[] | undefined, count: number
 /**
  * Before a visible link label: drop the spaces, written or pending, that are
  * all the link text so far. They only spaced out hidden text, so the caller
- * moves them past the link.
+ * moves them past the link, as it does a `trailingBlank` the parser dropped.
  */
-function dropBlankLinkText(state: MarkdownState, openFragment: number, label: string): boolean {
+function dropBlankLinkText(state: MarkdownState, openFragment: number, label: string, trailingBlank: boolean): boolean {
   const buffer = state.buffer
   if (openFragment < 0 || buffer[openFragment] !== '[' || !hasNonWhitespace(label))
     return false
@@ -935,7 +935,7 @@ function dropBlankLinkText(state: MarkdownState, openFragment: number, label: st
       hasSpace = true
     }
   }
-  if (!hasSpace && !state.pendingInlineWhitespace)
+  if (!hasSpace && !state.pendingInlineWhitespace && !trailingBlank)
     return false
   state.outputPositions?.replace(openFragment + 1, buffer.length, [])
   buffer.length = openFragment + 1
@@ -1831,7 +1831,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     const movesBlankPastLink = node.type === TEXT_NODE
       && (node as TextNode).isLinkLabel === true
-      && dropBlankLinkText(state, openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment, (node as TextNode).value)
+      && dropBlankLinkText(state, openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment, (node as TextNode).value, node.parent?.trailingBlank === true)
 
     let lastBuffEntry = buff.at(-1)!
     let lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''

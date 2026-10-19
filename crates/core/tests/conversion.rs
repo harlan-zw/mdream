@@ -3370,6 +3370,96 @@ fn blank_before_a_link_label_moves_past_the_link() {
   );
 }
 
+/// A blank after link content the parser leaves out, such as an empty `<svg>`
+/// or a `<style>`, spaces that content like the blank after hidden text: the
+/// link takes its label and the blank moves past the link, whether it is a
+/// plain space the parser drops or a decoded `&#32;`.
+#[test]
+fn blank_after_excluded_link_content_moves_past_the_label() {
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let cases = [
+    (
+      r#"<p>Go <a href="/cart" aria-label="Cart"><style>.i{}</style>&#32;</a></p>"#,
+      "Go [Cart](/cart)",
+    ),
+    (
+      r#"<a href="/cart" aria-label="Cart"><svg></svg>&#32;</a>"#,
+      "[Cart](/cart)",
+    ),
+    (
+      r#"<p><a href="/c" aria-label="Item"><svg></svg> </a>Next</p>"#,
+      "[Item](/c) Next",
+    ),
+    (
+      r#"<p><a href="/c" aria-label="Item"><svg></svg>&#32;</a>Next</p>"#,
+      "[Item](/c) Next",
+    ),
+    (
+      "<p><a href=\"/c\" aria-label=\"Item\">\n  <svg aria-hidden=\"true\"></svg>\n</a>Next</p>",
+      "[Item](/c) Next",
+    ),
+    (
+      r#"<p>Go<a href="/c" aria-label="Item"><style>.i{}</style> </a>now</p>"#,
+      "Go [Item](/c) now",
+    ),
+    (
+      r#"<ul><li><a href="/c" aria-label="Item"><svg></svg> </a>item</li></ul>"#,
+      "- [Item](/c) item",
+    ),
+    (
+      r#"<p><a href="/c" aria-label="Item"><svg></svg> </a><strong>B</strong></p>"#,
+      "[Item](/c) **B**",
+    ),
+    // Without a label nothing takes the place of the content.
+    (r#"<p><a href="/c"><svg></svg> </a>Next</p>"#, "[](/c)Next"),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "{html}");
+    assert_eq!(html_to_markdown(html, filter.clone()), expected, "{html}");
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      filter.clone(),
+      filter.clone().with_max_node_bytes(4),
+    ] {
+      let one_shot = html_to_markdown(html, options.clone());
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, one_shot, "{html} width={width}");
+      }
+    }
+  }
+
+  // Clean mode keeps the labeled link instead of dropping `[ ](/cart)`.
+  let clean = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown(
+      r#"<p>Go<a href="/cart" aria-label="Cart"><svg></svg>&#32;</a>now</p>"#,
+      clean,
+    ),
+    "Go [Cart](/cart) now"
+  );
+  let html = r#"<p>Go <a href="/cart" aria-label="Cart"><svg></svg>&#32;</a></p>"#;
+  assert_eq!(convert_text(html), "Go Cart");
+  assert_eq!(
+    html_to_html(html, HtmlToMarkdownOptions::default()),
+    r#"<p>Go <a href="/cart"> Cart</a></p>"#
+  );
+}
+
 #[test]
 fn excluded_link_text_keeps_the_space_after_it() {
   let exclude_icon = HtmlToMarkdownOptions {

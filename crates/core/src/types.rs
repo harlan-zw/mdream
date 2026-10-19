@@ -213,6 +213,9 @@ pub(crate) struct NodeExtras {
   /// Text counted in this link that never shows: excluded text and the blank
   /// text after it.
   pub hidden_text_nodes: u32,
+  /// This link dropped a blank that followed other content, as the space in
+  /// `<a><svg></svg> </a>`. A label written in place of that content keeps it.
+  pub trailing_blank: bool,
 }
 
 impl NodeExtras {

@@ -1311,6 +1311,11 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
 
   if (!inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex) {
+    // A blank dropped as a link's indentation after other content of the link,
+    // as in `<a><svg></svg> </a>Next`, still spaces that content from what
+    // follows: a label written in its place moves the blank past the link.
+    if (state.currentNode.tagId === TAG_A && state.currentNode.currentWalkIndex)
+      state.currentNode.trailingBlank = true
     return
   }
 
@@ -1389,16 +1394,21 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
 }
 
 /**
- * Excluded text never shows, and blank text after it only spaces it out, so
+ * Excluded text never shows, and blank text with only hidden text before it
+ * (or none, as a decoded `&#32;` after an `<svg>`) only spaces it out, so
  * neither is link text: a link holding only these still takes its label.
  * Text that a hook turns blank or empty counts as excluded.
- * Blank text with nothing hidden before it follows visible content and is not counted.
+ * Blank text after visible text is not counted.
  * Excluded and skipped links never take the label, so they get no count.
  */
 function countHiddenLinkText(parents: ElementNode[], excluded: boolean | undefined): void {
   for (const parent of parents) {
-    if (parent.tagId === TAG_A && (excluded || parent.hiddenTextNodes) && !parent.excludedFromMarkdown && !parent.enterSkipped)
-      parent.hiddenTextNodes = (parent.hiddenTextNodes || 0) + 1
+    if (parent.tagId !== TAG_A || parent.excludedFromMarkdown || parent.enterSkipped)
+      continue
+    const hidden = parent.hiddenTextNodes || 0
+    // The counters already include this text.
+    if (excluded || hidden + 1 === parent.childTextNodeIndex)
+      parent.hiddenTextNodes = hidden + 1
   }
 }
 

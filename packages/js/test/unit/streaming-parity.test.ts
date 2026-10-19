@@ -666,6 +666,20 @@ describe('streaming parity with the Rust core', () => {
       await expectStreamingParity(html, { format })
   })
 
+  it.each([
+    ['<p>Go <a href="/cart" aria-label="Cart"><style>.i{}</style>&#32;</a></p>', 'Go [Cart](/cart)'],
+    ['<a href="/cart" aria-label="Cart"><svg></svg>&#32;</a>', '[Cart](/cart)'],
+    ['<p><a href="/c" aria-label="Item"><svg></svg> </a>Next</p>', '[Item](/c) Next'],
+    ['<p><a href="/c" aria-label="Item"><svg></svg>&#32;</a>Next</p>', '[Item](/c) Next'],
+    ['<p><a href="/c" aria-label="Item">\n  <svg aria-hidden="true"></svg>\n</a>Next</p>', '[Item](/c) Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><style>.i{}</style> </a>now</p>', 'Go [Item](/c) now'],
+  ])('keeps the blank after excluded link content past the label across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    for (const format of ['markdown', 'text', 'html'] as const)
+      await expectStreamingParity(html, { format })
+    await expectStreamingParity(html, { clean: clean() })
+  })
+
   it.each(['html', 'text'] as const)('keeps linked-image %s output stable across every split', async (format) => {
     await expectStreamingParity(
       '<a href="/x" title="Title"><img src="/i" alt="Alt"></a>',
