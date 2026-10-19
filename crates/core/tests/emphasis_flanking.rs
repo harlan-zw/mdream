@@ -161,8 +161,25 @@ fn open_emphasis_still_yields_content_before_close() {
 
 #[test]
 fn heading_slugs_still_match_fragment_links() {
-  // A heading's slug reads a character reference and a link's text as
-  // written, so neither is used there; raw tags outside a link are dropped.
+  // A heading slug reads a character reference and a link's text as written,
+  // so neither is used while fragment cleaning collects slugs; raw tags
+  // outside a link are dropped from the slug.
+  for (html, expected) in [
+    (
+      r#"<h2><strong><a href="/x">b</a></strong>c</h2>"#,
+      "## **[b](/x)**&#99;",
+    ),
+    (
+      r#"<h2><a href="/x">a<strong>!b</strong></a></h2>"#,
+      "## [a<strong>!b</strong>](/x)",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html:?}"
+    );
+  }
   let options = HtmlToMarkdownOptions::default().with_clean(CleanConfig::all());
   for (html, expected) in [
     (

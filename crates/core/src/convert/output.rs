@@ -1137,9 +1137,9 @@ impl ConvertState {
 
   /// Track the emphasis opener an enter just wrote, unless raw HTML or code
   /// keeps its delimiters literal anyway. `<kbd>`, `<samp>` and `<var>` are
-  /// code spans too. A heading's Markdown gives the slug fragment links
-  /// resolve against, which takes a link's text as written, so a pair inside
-  /// a link there keeps its delimiters.
+  /// code spans too. With fragment cleaning, a heading's Markdown gives the
+  /// slug fragment links resolve against, which takes a link's text as
+  /// written, so a pair inside a link there keeps its delimiters.
   #[inline]
   fn track_flank_opener(
     &mut self,
@@ -1162,7 +1162,7 @@ impl ConvertState {
       && self.depth_map[TAG_KBD as usize] == 0
       && self.depth_map[TAG_SAMP as usize] == 0
       && self.depth_map[TAG_VAR as usize] == 0
-      && !(self.depth_map[TAG_A as usize] > 0 && self.in_heading())
+      && !(self.depth_map[TAG_A as usize] > 0 && self.in_slug_heading())
       && !self.in_raw_html_block()
     {
       self.flank_pairs.push(FlankPair {
@@ -1203,9 +1203,15 @@ impl ConvertState {
       .min()
   }
 
+  /// Inside a heading while fragment cleaning collects heading slugs.
+  #[inline]
+  fn in_slug_heading(&self) -> bool {
+    self.clean_flags & CLEAN_FRAGMENTS != 0 && self.in_heading()
+  }
+
   /// The element at `depth` closed: finish its pair, or wait for the byte
-  /// written after its closer. A heading's slug reads a character reference
-  /// as written, so a closer there gets none.
+  /// written after its closer. A heading slug reads a character reference as
+  /// written, so a closer there gets none while slugs are collected.
   pub(crate) fn close_flank_pair(&mut self, depth: usize) {
     if self.flank_pairs.is_empty() {
       return;
@@ -1225,7 +1231,7 @@ impl ConvertState {
         if pair.state == FlankState::Raw {
           self.replace_flank_bytes(closer, delimiter.len(), FLANK_RAW_CLOSE[pair.kind as usize]);
         } else if pair.state == FlankState::Kept
-          && !self.in_heading()
+          && !self.in_slug_heading()
           && flank_class(
             last
               .and_then(|at| at.checked_sub(1))
