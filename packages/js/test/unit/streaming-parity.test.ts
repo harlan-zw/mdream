@@ -152,6 +152,25 @@ describe('streaming parity with the Rust core', () => {
   })
 
   it.each([
+    ['<ul><li><h3></h3><div>Next</div></li></ul>', '- ###\n\n  Next'],
+    ['<ul><li><h3></h3><h2>Next</h2></li></ul>', '- ###\n\n  ## Next'],
+    ['<ol start="10"><li><h3></h3><div>Next</div></li></ol>', '10. ###\n\n    Next'],
+    ['<ul><li>Parent<ul><li><h3></h3><div>Next</div></li></ul></li></ul>', '- Parent\n  - ###\n\n    Next'],
+    ['<blockquote><ul><li><h3></h3><div>Next</div></li></ul></blockquote>', '> - ###\n>\n>   Next'],
+    ['<ul><li><h3></h3></li><li>Next</li></ul>', '- ###\n- Next'],
+    ['<ul><li><h3></h3></li></ul>', '- ###'],
+    ['<h3></h3><div>Next</div>', '###\n\nNext'],
+    ['<li>q<br>t<div>X', '- q  \n  t X'],
+    ['<ul><li>Text #<div>Next</div></li></ul>', '- Text # Next'],
+    ['<ul><li><h3></h3><span></span><div>Next</div></li></ul>', '- ###\n\n  Next'],
+    ['<table><tr><td><ul><li><h3></h3><div>Next</div></li></ul></td></tr></table>', '| <ul><li><h3></h3>Next</li></ul> |\n| --- |'],
+  ])('separates a block after an empty list heading across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
+  })
+
+  it.each([
     '<summary>text <svg></svg></summary>',
     '<details><summary>text <svg><polyline points="1 2"></polyline></svg></summary><p>b</p></details>',
   ])('keeps raw closing tags after foreign children for %s', async (html) => {

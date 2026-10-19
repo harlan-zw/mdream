@@ -4362,6 +4362,15 @@ impl ConvertState {
             static H_OPEN: [&str; 6] = ["<h1>", "<h2>", "<h3>", "<h4>", "<h5>", "<h6>"];
             Some(Cow::Borrowed(H_OPEN[depth]))
           }
+        } else if self.depth_map[TAG_LI as usize] > 0
+          && self
+            .last_output_byte()
+            .is_some_and(|last_char| last_char != b' ' && last_char != b'\n')
+        {
+          Some(Cow::Owned(format!(
+            "\n\n{}{}",
+            self.list_indent, HEADING_PREFIXES[depth]
+          )))
         } else {
           Some(Cow::Borrowed(HEADING_PREFIXES[depth]))
         }
@@ -4405,7 +4414,7 @@ impl ConvertState {
       TAG_SUB => Some(Cow::Borrowed("<sub>")),
       TAG_SUP => Some(Cow::Borrowed("<sup>")),
       TAG_INS => Some(Cow::Borrowed("<ins>")),
-      TAG_P => {
+      TAG_P | TAG_DIV => {
         // A drain can empty the buffer mid-document, so the check reads the
         // flushed tail like the close-side twin below, not just the buffer.
         if self.depth_map[TAG_LI as usize] > 0
@@ -4414,6 +4423,18 @@ impl ConvertState {
             .last_output_byte()
             .is_some_and(|last_char| last_char != b' ' && last_char != b'\n')
         {
+          // Divs otherwise keep their existing list spacing. Only a bare
+          // heading marker needs a boundary before the div's first text.
+          if tag_id == TAG_DIV {
+            let bytes = self.buffer.as_bytes();
+            let mut marker = bytes.len();
+            while marker > 0 && bytes[marker - 1] == b'#' {
+              marker -= 1;
+            }
+            if !(1..=6).contains(&(bytes.len() - marker)) || !self.opens_block_line(bytes, marker) {
+              return None;
+            }
+          }
           let indent = self.list_indent.as_str();
           let mut s = String::with_capacity(2 + indent.len());
           s.push_str("\n\n");

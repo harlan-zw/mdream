@@ -2018,6 +2018,53 @@ fn streaming_empty_heading_in_list_item_matches_one_shot() {
   }
 }
 
+#[test]
+fn streaming_block_after_empty_list_heading_keeps_its_boundary() {
+  for (html, expected) in [
+    (
+      "<ul><li><h3></h3><div>Next</div></li></ul>",
+      "- ###\n\n  Next",
+    ),
+    (
+      "<ul><li><h3></h3><h2>Next</h2></li></ul>",
+      "- ###\n\n  ## Next",
+    ),
+    (
+      "<ol start=\"10\"><li><h3></h3><div>Next</div></li></ol>",
+      "10. ###\n\n    Next",
+    ),
+    (
+      "<ul><li>Parent<ul><li><h3></h3><div>Next</div></li></ul></li></ul>",
+      "- Parent\n  - ###\n\n    Next",
+    ),
+    (
+      "<blockquote><ul><li><h3></h3><div>Next</div></li></ul></blockquote>",
+      "> - ###\n>\n>   Next",
+    ),
+    ("<ul><li><h3></h3></li><li>Next</li></ul>", "- ###\n- Next"),
+    ("<ul><li><h3></h3></li></ul>", "- ###"),
+    ("<h3></h3><div>Next</div>", "###\n\nNext"),
+    ("<li>q<br>t<div>X", "- q  \n  t X"),
+    ("<ul><li>Text #<div>Next</div></li></ul>", "- Text # Next"),
+    (
+      "<ul><li><h3></h3><span></span><div>Next</div></li></ul>",
+      "- ###\n\n  Next",
+    ),
+    (
+      "<table><tr><td><ul><li><h3></h3><div>Next</div></li></ul></td></tr></table>",
+      "| <ul><li><h3></h3>Next</li></ul> |\n| --- |",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // An empty `<li>` inserts a newline at its marker's line start when it resolves,
 // so the line stays mutable. Streaming used to yield the marker first, turning
 // one-shot's `- a\n\n  -` into `- a\n  --`.
