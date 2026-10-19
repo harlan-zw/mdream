@@ -1131,7 +1131,9 @@ impl ConvertState {
     output: &mut Option<Cow<'static, str>>,
   ) -> usize {
     let fragment = output.as_deref().unwrap_or("");
-    if matches!(tag_id, Some(TAG_LI | TAG_FIGCAPTION)) || fragment.contains('\n') {
+    if matches!(tag_id, Some(TAG_LI | TAG_FIGCAPTION))
+      || fragment.trim_start_matches(' ').starts_with('\n')
+    {
       self.heading_break_pending = false;
     } else if has_visible(fragment.as_bytes()) {
       self.heading_break_pending = false;

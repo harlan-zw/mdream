@@ -3,6 +3,39 @@ import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('headings $name', (engineConfig) => {
   it.each([
+    ['<div>x</div>', { div: { enter: '[', exit: ']' } }, '[x]'],
+    ['<ul><li><h3></h3><div></div></li></ul>', { div: { exit: 'X' } }, '- ###\n\n  X'],
+    ['<ul><li><h3></h3><div>x</div></li></ul>', { h3: { enter: '###', exit: '' } }, '- ###\n\n  x'],
+  ] as const)('preserves div overrides and list heading markers: %s', async (html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(engine.htmlToMarkdown(html, { plugins: { tagOverrides } })).toBe(expected)
+  })
+
+  it.each([
+    ['prefix\nsuffix', '- ### T\n\n  prefix\nsuffix'],
+    ['\n  suffix', '- ### T\n  suffix'],
+    ['  \n  suffix', '- ### T  \n  suffix'],
+  ])('separates a heading before override output starting with %j', async (enter, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li><h3>T</h3><span></span></li></ul>'
+    const options = { plugins: { tagOverrides: { span: { enter, exit: '' } } } }
+    expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `chunkSize=${width}`).toBe(expected)
+    }
+  })
+
+  it.each([
     ['<ul><li><h3>T #</h3>x</li></ul>', '### ', '', '- ### T \\#\n\n  x'],
     ['<ul><li><h3>T ## </h3>x</li></ul>', '### ', '', '- ### T \\##\n\n  x'],
     ['<ul><li><u><h3></h3>x</u></li></ul>', '### ', ' END', '- <u>\n\n  ### END\n\n  x</u>'],

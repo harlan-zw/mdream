@@ -2047,7 +2047,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     if (cleanPass && eventType === NodeEventExit)
       cleanPass.exit(element)
-    if (!output && !suppressedInPre && handler?.[eventFn]) {
+    if (!output && !suppressedInPre && handler?.[eventFn]
+      && (tagId !== TAG_DIV || state.depthMap[TAG_LI] || handler[eventFn] !== tagHandlers[TAG_DIV]!.enter)) {
       if (openLinkFragment >= 0
         && eventType === NodeEventExit
         && tagId === TAG_A) {
@@ -2420,7 +2421,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // engine's `settle_heading_break`.
     let linkHeadingBreak = false
     if (state.headingBreakPending && eventType === NodeEventEnter) {
-      if (tagId === TAG_LI || tagId === TAG_FIGCAPTION || output?.some(fragment => fragment.includes('\n'))) {
+      if (tagId === TAG_LI || tagId === TAG_FIGCAPTION || (output?.[0] && trimLeadingSpaces(output[0]).startsWith('\n'))) {
         state.headingBreakPending = false
       }
       else if (output?.some(hasNonWhitespace)) {
