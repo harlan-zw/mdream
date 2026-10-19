@@ -2599,10 +2599,20 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         let needsRaw = false
         if (firstClass === FLANK_PUNCTUATION) {
           let previous = kept > 0 ? value!.charCodeAt(kept - 1) : charBeforeRun(buffer, fragment, -1, delimiter.charCodeAt(0))
-          if (collectsHeadingSlugs && kept === 0) {
+          if (cleanPass && kept === 0) {
             previous = -1
+            const bracket = openLinkFragment >= 0 ? openLinkFragment : -openLinkFragment - 2
             for (let cursor = fragment - 1; cursor >= 0 && previous === -1; cursor--) {
               const part = buffer[cursor]!
+              if (cursor === bracket && part === '[') {
+                let anchor = node?.type === ELEMENT_NODE ? node as ElementNode : node?.parent
+                while (anchor && anchor.tagId !== TAG_A)
+                  anchor = anchor.parent
+                if (anchor?.attributes?.href?.charCodeAt(0) === 35
+                  && (collectsHeadingSlugs || (cleanRules?.selfLinkHeadings && isInsideHeading(state.depthMap)))) {
+                  continue
+                }
+              }
               if (part.charCodeAt(0) === FRAGMENT_LINK_CLOSE_CODE
                 || (part.length === 2 && part.charCodeAt(0) === FRAGMENT_LINK_OPEN_CODE && part.charCodeAt(1) === 91)) {
                 continue

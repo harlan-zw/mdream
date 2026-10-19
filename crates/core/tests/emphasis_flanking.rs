@@ -191,6 +191,10 @@ fn unwrapped_heading_link_retains_pending_emphasis_closer() {
   });
   for (html, expected) in [
     (
+      r##"<h2><em>x</em><a href="#x"><strong>!b</strong></a></h2>"##,
+      "## *x*<strong>!b</strong>",
+    ),
+    (
       r##"<h2><strong>b!</strong><a href="#x">c</a></h2>"##,
       "## **b!**&#99;",
     ),
@@ -237,6 +241,14 @@ fn deferred_fragment_cleanup_preserves_emphasis() {
     ..Default::default()
   });
   for (html, expected) in [
+    (
+      r##"<p><em>x</em><a href="#missing"><strong>!b</strong></a></p>"##,
+      "*x*<strong>!b</strong>",
+    ),
+    (
+      r##"<p><em>x</em><a href="#found"><strong>!b</strong></a></p><h2>found</h2>"##,
+      "*x*[<strong>!b</strong>](#found)\n\n## found",
+    ),
     (
       r##"<p><a href="#missing"><em>x</em></a><em>!b</em></p>"##,
       "*x*<em>!b</em>",

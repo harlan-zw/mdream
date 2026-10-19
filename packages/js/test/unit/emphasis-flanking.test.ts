@@ -66,6 +66,7 @@ async function streamConvert(html: string, chunkSize: number): Promise<string> {
 
 describe('emphasis delimiters that cannot flank', () => {
   it.each([
+    ['<h2><em>x</em><a href="#x"><strong>!b</strong></a></h2>', '## *x*<strong>!b</strong>'],
     ['<h2>Q<a href="#q">#</a></h2>', '## Q \\#'],
     ['<h2>Q<a href="#q">##</a></h2>', '## Q \\##'],
     ['<h2><strong>b!</strong><a href="#x">c</a></h2>', '## **b!**&#99;'],
@@ -93,6 +94,8 @@ describe('emphasis delimiters that cannot flank', () => {
   })
 
   it.each([
+    ['<p><em>x</em><a href="#missing"><strong>!b</strong></a></p>', '*x*<strong>!b</strong>'],
+    ['<p><em>x</em><a href="#found"><strong>!b</strong></a></p><h2>found</h2>', '*x*[<strong>!b</strong>](#found)\n\n## found'],
     ['<p><a href="#missing"><em>x</em></a><em>!b</em></p>', '*x*<em>!b</em>'],
     ['<p>x<a href="#missing"></a><strong>!b</strong></p>', 'x **!b**'],
     ['<p><em>x</em><a href="#missing"></a><em>!b</em></p>', '*x*<em>!b</em>'],

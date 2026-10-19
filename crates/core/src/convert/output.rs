@@ -1339,6 +1339,22 @@ impl ConvertState {
             while run_start > 0 && bytes[run_start - 1] == delimiter[0] {
               run_start -= 1;
             }
+            if self.clean_flags & (CLEAN_FRAGMENTS | CLEAN_SELF_LINK_HEADINGS) != 0
+              && self.link.open
+              && self.link.bracket_emitted
+              && run_start == self.link.bracket_pos + 1
+              && bytes.get(self.link.bracket_pos) == Some(&b'[')
+              && (self.clean_flags & CLEAN_FRAGMENTS != 0 || self.in_heading())
+              && self.stack[..]
+                .iter()
+                .rev()
+                .find(|node| node.tag_id == Some(TAG_A))
+                .and_then(|node| node.attributes.get_bit(ATTR_HREF))
+                .is_some_and(|href| href.starts_with('#'))
+            {
+              run_start = self.link.bracket_pos;
+              continue;
+            }
             if self.clean_flags & CLEAN_FRAGMENTS == 0 || link_index == 0 {
               break;
             }
