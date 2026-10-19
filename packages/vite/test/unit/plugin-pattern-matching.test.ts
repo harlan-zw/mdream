@@ -2,6 +2,21 @@ import { describe, expect, it, vi } from 'vitest'
 import { viteHtmlToMarkdownPlugin } from '../../src/plugin.js'
 
 describe('viteHtmlToMarkdownPlugin - Pattern Matching', () => {
+  it.each([
+    ['index.html', ['index.html', 'about.html'], ['index.md']],
+    ['**/nested/*.html', ['deep/nested/file.html', 'deep/other/file.html'], ['deep/nested/file.md']],
+    ['dist/**/*.html', ['dist/pages/test.html', 'src/pages/test.html'], ['dist/pages/test.md']],
+    ['pages/*.html', ['pages/about.html', 'docs/guide.html'], ['pages/about.md']],
+  ])('matches %s through bundle generation', (pattern, files, expected) => {
+    const plugin = viteHtmlToMarkdownPlugin({ include: [pattern], exclude: [] }) as any
+    const bundle = Object.fromEntries(files.map(fileName => [fileName, { type: 'asset', source: '<h1>Page</h1>' }]))
+    const emitFile = vi.fn()
+
+    plugin.generateBundle.call({ emitFile }, {}, bundle)
+
+    expect(emitFile.mock.calls.map(([file]) => file.fileName)).toEqual(expected)
+  })
+
   it('compiles each visited pattern once per bundle', () => {
     const plugin = viteHtmlToMarkdownPlugin({
       include: ['docs/*.html', '*.html'],
