@@ -261,7 +261,7 @@ export function opensBlockLine(buffer: string[], fragment: number, cursor: numbe
 // line's block lead precedes is the heading's own marker instead: the heading
 // is empty, and the marker's trailing space would read as a list item's open
 // content column, joining the next block to the heading's line.
-function escapeTrailingHeadingHashes(state: HandlerContext['state']): void {
+export function escapeTrailingHeadingHashes(state: HandlerContext['state']): void {
   const buffer = state.buffer
   let index = buffer.length - 1
   while (index >= 0 && buffer[index] === '')

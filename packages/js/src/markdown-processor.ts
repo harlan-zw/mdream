@@ -55,7 +55,7 @@ import {
   TAG_VAR,
   TEXT_NODE,
 } from './const'
-import { breakHandler, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
+import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
 import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
@@ -2464,6 +2464,21 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.lastContentCache = ' '
     }
 
+    // Only an ATX prefix can take in the text after it. Inside `<pre>` that
+    // text is code, and inside a caption the emphasis wrapping it, either of
+    // which a break would split.
+    if (eventType === NodeEventExit && tagId >= TAG_H1 && tagId <= TAG_H6
+      && state.depthMap[TAG_LI] && !state.depthMap[TAG_PRE] && captionFrameCount === 0 && !state.depthMap[TAG_A]
+      && !isInsideTableCell(state) && (!handler?.literalEnter || handler.literalEnterHeading)
+      && !headingKeptInlineInItem(element)) {
+      if (handler?.literalEnterHeading) {
+        if (handler.literalExit)
+          escapeTrailingHeadingHashes(state)
+        trimTrailingSpaces(buff)
+      }
+      state.headingBreakPending = true
+    }
+
     // Add all output fragments
     let outputStart = state.buffer.length
     if (output) {
@@ -2478,18 +2493,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     if (gfmAction)
       commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element)
-
-    // Only an ATX prefix can take in the text after it. Inside `<pre>` that
-    // text is code, and inside a caption the emphasis wrapping it, either of
-    // which a break would split.
-    if (eventType === NodeEventExit && tagId >= TAG_H1 && tagId <= TAG_H6
-      && state.depthMap[TAG_LI] && !state.depthMap[TAG_PRE] && captionFrameCount === 0 && !state.depthMap[TAG_A]
-      && !isInsideTableCell(state) && (!handler?.literalEnter || handler.literalEnterHeading)
-      && !headingKeptInlineInItem(element)) {
-      if (handler?.literalEnterHeading)
-        trimTrailingSpaces(buff)
-      state.headingBreakPending = true
-    }
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)

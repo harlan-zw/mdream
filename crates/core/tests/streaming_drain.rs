@@ -3675,3 +3675,52 @@ fn streaming_literal_heading_overrides_preserve_block_boundaries() {
     assert_stream_matches_every_split(html, options);
   }
 }
+
+#[test]
+fn streaming_literal_heading_overrides_preserve_content() {
+  for (html, enter, exit, expected) in [
+    (
+      "<ul><li><h3>T #</h3>x</li></ul>",
+      "### ",
+      "",
+      "- ### T \\#\n\n  x",
+    ),
+    (
+      "<ul><li><h3>T ## </h3>x</li></ul>",
+      "### ",
+      "",
+      "- ### T \\##\n\n  x",
+    ),
+    (
+      "<ul><li><u><h3></h3>x</u></li></ul>",
+      "### ",
+      " END",
+      "- <u>\n\n  ### END\n\n  x</u>",
+    ),
+    ("<ul><li><h3></h3></li></ul>", "###\t", "", "- ###"),
+    (
+      "<ul><li><h3></h3>x</li></ul>",
+      "###\t",
+      "",
+      "- ###\t\n\n  x",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "h3".into(),
+          TagOverrideConfig {
+            enter: Some(enter.into()),
+            exit: Some(exit.into()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}

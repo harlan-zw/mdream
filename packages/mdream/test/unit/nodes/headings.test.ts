@@ -3,6 +3,31 @@ import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('headings $name', (engineConfig) => {
   it.each([
+    ['<ul><li><h3>T #</h3>x</li></ul>', '### ', '', '- ### T \\#\n\n  x'],
+    ['<ul><li><h3>T ## </h3>x</li></ul>', '### ', '', '- ### T \\##\n\n  x'],
+    ['<ul><li><u><h3></h3>x</u></li></ul>', '### ', ' END', '- <u>\n\n  ### END\n\n  x</u>'],
+    ['<ul><li><h3></h3></li></ul>', '###\t', '', '- ###'],
+    ['<ul><li><h3></h3>x</li></ul>', '###\t', '', '- ###\t\n\n  x'],
+  ])('preserves literal heading override content: %s (%s, %s)', async (html, enter, exit, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { plugins: { tagOverrides: { h3: { enter, exit } } } }
+    expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `chunkSize=${width}`).toBe(expected)
+    }
+  })
+
+  it.each([
     ['<ul><li><h3></h3>x</li></ul>', '### ', '- ###\n\n  x'],
     ['<ul><li><h3>T</h3><h3>U</h3></li></ul>', '### ', '- ### T\n\n  ### U'],
     ['<ul><li><h3></h3><h3>U</h3></li></ul>', '### Label ', '- ### Label\n\n  ### Label U'],
