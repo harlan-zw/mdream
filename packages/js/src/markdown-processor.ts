@@ -1670,6 +1670,26 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     return true
   }
 
+  /**
+   * A blank the parser kept at the start of an inline element parts the word
+   * before it from the content after it. In front of an emphasis opener run
+   * that ends the output it moves before the run. A link or quote opener that
+   * ends the output already parts it from a word, and code keeps its content
+   * as written, so there it writes nothing. Anywhere else it is owed to the
+   * next visible inline output, as a separator trimmed from a closed element.
+   */
+  function placeLeadingBlank(): void {
+    const depthMap = state.depthMap
+    if (depthMap[TAG_CODE] || depthMap[TAG_PRE] || depthMap[TAG_KBD] || depthMap[TAG_SAMP] || depthMap[TAG_VAR]
+      || (openMarkerCount && hoistOpenerSpace())) {
+      return
+    }
+    const end = state.buffer.length - 1
+    const link = openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment
+    if (!(openMarkerCount && openMarkers[openMarkerCount - 1]! >> 3 === end) && !(link >= 0 && link === end))
+      state.pendingInlineWhitespace = true
+  }
+
   function processTextNode(textNode: TextNode, lastNode: ElementNode | TextNode | undefined, lastChar: string): void {
     if (textNode.trimsAtLineStart)
       trimTextAtLineStart(textNode, state.buffer)
@@ -1796,15 +1816,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (inTemplate)
       return
 
-    // A blank kept at the start of an element only parts the emphasis opener
-    // run that ends the output from the word before it. Anywhere else it is
-    // indentation, dropped before it can count as output. A plugin that
-    // removed it leaves nothing to move, and one that made it visible text
-    // gets that text written.
+    // A blank kept at the start of an inline element is placed as a word
+    // separator, never written as text. A plugin that removed it leaves
+    // nothing to place, and one that made it visible text gets that text
+    // written.
     const blank = node.type === TEXT_NODE && (node as TextNode).leadingBlank ? (node as TextNode).value : undefined
     if (blank !== undefined && !hasNonWhitespace(blank)) {
-      if (blank && openMarkerCount && !node.excludedFromMarkdown && !state.pendingInlineWhitespace && !captionNeedsPreparation())
-        hoistOpenerSpace()
+      if (blank && !node.excludedFromMarkdown && !state.pendingInlineWhitespace && !captionNeedsPreparation())
+        placeLeadingBlank()
       return
     }
 

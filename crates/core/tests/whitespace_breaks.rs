@@ -500,8 +500,10 @@ fn blank_behind_an_element_that_writes_nothing_keeps_the_word_separator() {
 }
 
 #[test]
-fn blank_that_follows_no_opener_writes_nothing() {
+fn blank_that_follows_no_opener_is_owed_to_later_text() {
   let options = HtmlToMarkdownOptions::default();
+  // A line break or the end of the block drops it, later text that brings its
+  // own space needs no other, and code keeps its content as written.
   for (html, expected) in [
     // A nested pair of the same kind writes no delimiter of its own.
     ("<p><i>x<i> <svg></svg></i></i></p>", "*x*"),
@@ -549,10 +551,11 @@ fn blank_that_follows_no_opener_writes_nothing() {
     &clean,
     "a**x**",
   );
+  // The link clean drops is no text; the `z` after the pair is.
   assert_every_chunking(
     r##"<p><i>x<i> <a href="#"></a></i></i>z</p>"##,
     &clean,
-    "*x*z",
+    "*x* z",
   );
 }
 
@@ -584,6 +587,77 @@ fn quote_around_a_moved_separator_is_dropped_when_empty() {
     text(r##"<p><q><i>y </i><q><a href="#"></a></q></q></p>"##),
     "\"y \""
   );
+}
+
+#[test]
+fn blank_opening_an_inline_wrapper_keeps_the_word_separator() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p>a<span> <span>b</span></span></p>", "a b"),
+    ("<p>a<span> <strong>b</strong></span></p>", "a **b**"),
+    ("<p>a<font> <b>x</b></font></p>", "a **x**"),
+    ("<p>a<label> <span>b</span></label></p>", "a b"),
+    ("<p>a<abbr> <span>b</span></abbr></p>", "a b"),
+    ("<p>a<small> <span>b</span></small></p>", "a b"),
+    ("<p>a<u> <span>b</span></u></p>", "a<u> b</u>"),
+    ("<p>a<span><span> <span>b</span></span></span></p>", "a b"),
+    (
+      "<p>a<font><small> <label><b>x</b></label></small></font></p>",
+      "a **x**",
+    ),
+    ("<p>a<span>\n  <span>b</span></span>c</p>", "a bc"),
+    ("<p>a<span> </span>b</p>", "a b"),
+    ("<p>a<span> <strong></strong></span>b</p>", "a b"),
+    ("<p>a<strong>x<span> <span>b</span></span></strong></p>", "a**x b**"),
+    ("<p><strong>a<span> </span></strong>b</p>", "**a** b"),
+    (
+      r#"<p>a<span> <img src="/i.png" alt="i"></span></p>"#,
+      "a ![i](/i.png)",
+    ),
+    // Already parted, or at the start of the line: nothing to add.
+    ("<p>a <span> <span>b</span></span></p>", "a b"),
+    ("<p><span> <strong>b</strong></span></p>", "**b**"),
+    ("<p>a<br><span> <span>b</span></span></p>", "a  \nb"),
+    ("<p>a<span> </span></p>", "a"),
+    // A link or quote opener already parts it from a word, and code keeps its
+    // content as written.
+    (r#"<p>a<a href="/x"> <span>b</span></a></p>"#, "a [b](/x)"),
+    ("<p>a<q> <span>b</span></q></p>", "a \"b\""),
+    ("<p>a<code> <span>b</span></code></p>", "a`b`"),
+    ("<p><code>a<span> <span>b</span></span></code></p>", "`ab`"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+  assert_eq!(
+    md("<ul><li>a<span> <span>b</span></span></li></ul>"),
+    "- a b"
+  );
+  assert_eq!(md("<h2>a<span> <span>b</span></span></h2>"), "## a b");
+  assert_eq!(
+    md("<blockquote><p>a<span> <span>b</span></span></p></blockquote>"),
+    "> a b"
+  );
+  assert_eq!(
+    md("<table><tr><th>h</th></tr><tr><td>a<span> <span>b</span></span></td></tr></table>"),
+    "| h |\n| --- |\n| a b |"
+  );
+  assert_eq!(md("a<span> <span>b</span></span>"), "a b");
+}
+
+#[test]
+fn separator_before_a_raw_line_break_is_dropped() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<h2>w<strong>a </strong><br>b</h2>", "## w**a**<br>b"),
+    ("<h2>w<strong> </strong><br>b</h2>", "## w<br>b"),
+    ("<h2>w<span> <br>b</span></h2>", "## w<br>b"),
+    (
+      "<table><tr><th>h</th></tr><tr><td>w<strong>a </strong><br>b</td></tr></table>",
+      "| h |\n| --- |\n| w**a**<br>b |",
+    ),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
 }
 
 #[test]

@@ -446,17 +446,37 @@ impl ConvertState {
     true
   }
 
-  /// A blank the parser kept at the start of an element only parts the
-  /// emphasis opener run that ends the output from the word before it.
-  /// Anywhere else it is indentation and writes nothing.
+  /// A blank the parser kept at the start of an inline element parts the word
+  /// before it from the content after it. In front of an emphasis opener run
+  /// that ends the output it moves before the run. A link or quote opener that
+  /// ends the output already parts it from a word, and code keeps its content
+  /// as written, so there it writes nothing. Anywhere else it is owed to the
+  /// next visible inline output, as a separator trimmed from a closed element.
   pub(crate) fn place_leading_blank(&mut self) {
     let caption_owns_space = self.caption_boundary != CaptionBoundary::None
       || self
         .caption_frames
         .iter()
         .any(|frame| !matches!(frame.state, CaptionState::Committed));
-    if !self.open_markers.is_empty() && !self.pending_inline_whitespace && !caption_owns_space {
-      self.hoist_opener_space();
+    if self.pending_inline_whitespace
+      || caption_owns_space
+      || self.depth_map[TAG_CODE as usize] != 0
+      || self.depth_map[TAG_PRE as usize] != 0
+      || self.depth_map[TAG_KBD as usize] != 0
+      || self.depth_map[TAG_SAMP as usize] != 0
+      || self.depth_map[TAG_VAR as usize] != 0
+      || (!self.open_markers.is_empty() && self.hoist_opener_space())
+    {
+      return;
+    }
+    let end = self.buffer.len();
+    let follows_opener = self
+      .open_markers
+      .last()
+      .is_some_and(|marker| marker.content_start == end)
+      || (self.link.open && self.link.bracket_emitted && self.link.bracket_pos + 1 == end);
+    if !follows_opener {
+      self.pending_inline_whitespace = true;
     }
   }
 
@@ -1710,6 +1730,11 @@ impl ConvertState {
       }
     }
 
+    // A separator owed from a closed element would only trail the line a
+    // `<br>` ends, also where it is written as raw HTML.
+    if tag_id == Some(TAG_BR) {
+      self.pending_inline_whitespace = false;
+    }
     // Whitespace immediately before <br> has no visual effect in HTML. Let the
     // explicit line boundary subsume it so the output has no trailing spaces.
     if tag_id == Some(TAG_BR)

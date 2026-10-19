@@ -328,7 +328,7 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
     }
   })
 
-  it('keeps a blank only to part an opener from the word before it', async () => {
+  it('places a blank kept inside emphasis without writing it as text', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const noStrongDelimiters = { plugins: { tagOverrides: { strong: { enter: '', exit: '' } } } }
     const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]?][] = [
@@ -348,7 +348,9 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
       ['<p>a<em><q><strong> <svg></svg></strong></q></em> b</p>', 'a b'],
       ['<p><q><cite>&#32;</cite></q></p>', ''],
       ['<p>a <q><span>y </span><q><a href="#"></a></q></q>z</p>', 'a "y "z', { format: 'text' }],
-      // Anywhere else the blank writes nothing.
+      // With no opener to part, it is owed to later text: a line break or the
+      // end of the block drops it, later text that brings its own space needs
+      // no other, and code keeps its content as written.
       ['<p><i>x<i> <svg></svg></i></i></p>', '*x*'],
       ['<p>a<b>x<b> <svg></svg></b></b>z</p>', 'a**x**z'],
       ['<p><i>a<i> <svg></svg> x</i></i></p>', '*a x*'],
@@ -358,7 +360,47 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
       ['<p>a<strong> <svg></svg> b</strong></p>', 'a b', noStrongDelimiters],
       ['a<strong> <svg></svg> b</strong>', 'a b', noStrongDelimiters],
       ['<p>a<b>x<b> <a href="#"></a></b></b></p>', 'a**x**', { clean: true }],
-      ['<p><i>x<i> <a href="#"></a></i></i>z</p>', '*x*z', { clean: true }],
+      ['<p><i>x<i> <a href="#"></a></i></i>z</p>', '*x* z', { clean: true }],
+    ]
+    for (const [html, expected, options] of cases) {
+      expect(htmlToMarkdown(html, { ...options, engine }), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { ...options, engine }))
+        expect(actual.trim(), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+  })
+
+  it('keeps the word separator when an inline wrapper starts with a blank', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const noStrongDelimiters = { plugins: { tagOverrides: { strong: { enter: '', exit: '' } } } }
+    const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]?][] = [
+      ['<p>a<span> <span>b</span></span></p>', 'a b'],
+      ['<p>a<span> <strong>b</strong></span></p>', 'a **b**'],
+      ['<p>a<font> <b>x</b></font></p>', 'a **x**'],
+      ['<p>a<label> <span>b</span></label></p>', 'a b'],
+      ['<p>a<abbr> <span>b</span></abbr></p>', 'a b'],
+      ['<p>a<small> <span>b</span></small></p>', 'a b'],
+      ['<p>a<u> <span>b</span></u></p>', 'a<u> b</u>'],
+      ['<p>a<span><span> <span>b</span></span></span></p>', 'a b'],
+      ['<p>a<font><small> <label><b>x</b></label></small></font></p>', 'a **x**'],
+      ['<p>a<span> </span>b</p>', 'a b'],
+      ['<p>a<span> <strong></strong></span>b</p>', 'a b'],
+      ['<p>a<strong>x<span> <span>b</span></span></strong></p>', 'a**x b**'],
+      ['<p>a<strong> <span>b</span></strong></p>', 'a b', noStrongDelimiters],
+      ['<p>a <span> <span>b</span></span></p>', 'a b'],
+      ['<p><span> <strong>b</strong></span></p>', '**b**'],
+      ['<p>a<br><span> <span>b</span></span></p>', 'a  \nb'],
+      ['<p>a<a href="/x"> <span>b</span></a></p>', 'a [b](/x)'],
+      ['<p>a<q> <span>b</span></q></p>', 'a "b"'],
+      ['<p>a<code> <span>b</span></code></p>', 'a`b`'],
+      ['<ul><li>a<span> <span>b</span></span></li></ul>', '- a b'],
+      ['<table><tr><th>h</th></tr><tr><td>a<span> <span>b</span></span></td></tr></table>', '| h |\n| --- |\n| a b |'],
+      ['<h2>w<span> <br>b</span></h2>', '## w<br>b'],
+      ['<h2>w<strong>a </strong><br>b</h2>', '## w**a**<br>b'],
     ]
     for (const [html, expected, options] of cases) {
       expect(htmlToMarkdown(html, { ...options, engine }), html).toBe(expected)

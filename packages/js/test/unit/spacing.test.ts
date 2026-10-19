@@ -114,7 +114,7 @@ describe('inline whitespace', () => {
     expect(htmlToMarkdown('<p><a href="/x">a<strong> <span>b</span></strong></a></p>')).toBe('[a **b**](/x)')
   })
 
-  it('keeps a blank only to part an opener from the word before it', async () => {
+  it('places a blank kept inside emphasis without writing it as text', async () => {
     const cases: [string, string][] = [
       // Elements that write nothing sit between the opener and the blank.
       ['<p>Click<strong><span class="w"> <a href="/x">here</a></span></strong> now</p>', 'Click **[here](/x)** now'],
@@ -125,7 +125,9 @@ describe('inline whitespace', () => {
       ['<p>a<q><em> </em></q>b</p>', 'a b'],
       ['<p>a<strong><q><em> </em></q>c</strong>b</p>', 'a **c**b'],
       ['<p>a<strong><q><em> </em></q><em>c</em></strong>b</p>', 'a ***c***b'],
-      // Anywhere else the blank writes nothing.
+      // With no opener to part, it is owed to later text: a line break or the
+      // end of the block drops it, later text that brings its own space needs
+      // no other, and code keeps its content as written.
       ['<p><i>x<i> <svg></svg></i></i></p>', '*x*'],
       ['<p><i>a<i> <svg></svg> x</i></i></p>', '*a x*'],
       ['<p>x<b>y<b> <strong></strong><br>z</b></b></p>', 'x**y  \nz**'],
@@ -145,7 +147,55 @@ describe('inline whitespace', () => {
     expect(htmlToMarkdown('<p>a<strong> <svg></svg> b</strong></p>', noStrongDelimiters)).toBe('a b')
     expect(htmlToMarkdown('a<strong> <svg></svg> b</strong>', noStrongDelimiters)).toBe('a b')
     expect(htmlToMarkdown('<p>a<b>x<b> <a href="#"></a></b></b></p>', { clean: clean() })).toBe('a**x**')
-    expect(htmlToMarkdown('<p><i>x<i> <a href="#"></a></i></i>z</p>', { clean: clean() })).toBe('*x*z')
+    expect(htmlToMarkdown('<p><i>x<i> <a href="#"></a></i></i>z</p>', { clean: clean() })).toBe('*x* z')
+  })
+
+  it('keeps the word separator when an inline wrapper starts with a blank', async () => {
+    const cases: [string, string][] = [
+      ['<p>a<span> <span>b</span></span></p>', 'a b'],
+      ['<p>a<span> <strong>b</strong></span></p>', 'a **b**'],
+      ['<p>a<font> <b>x</b></font></p>', 'a **x**'],
+      ['<p>a<label> <span>b</span></label></p>', 'a b'],
+      ['<p>a<abbr> <span>b</span></abbr></p>', 'a b'],
+      ['<p>a<small> <span>b</span></small></p>', 'a b'],
+      ['<p>a<u> <span>b</span></u></p>', 'a<u> b</u>'],
+      ['<p>a<span><span> <span>b</span></span></span></p>', 'a b'],
+      ['<p>a<font><small> <label><b>x</b></label></small></font></p>', 'a **x**'],
+      ['<p>a<span>\n  <span>b</span></span>c</p>', 'a bc'],
+      ['<p>a<span> </span>b</p>', 'a b'],
+      ['<p>a<span> <strong></strong></span>b</p>', 'a b'],
+      ['<p>a<strong>x<span> <span>b</span></span></strong></p>', 'a**x b**'],
+      ['<p><strong>a<span> </span></strong>b</p>', '**a** b'],
+      ['<p>a<span> <img src="/i.png" alt="i"></span></p>', 'a ![i](/i.png)'],
+      // Already parted, or at the start of the line: nothing to add.
+      ['<p>a <span> <span>b</span></span></p>', 'a b'],
+      ['<p><span> <strong>b</strong></span></p>', '**b**'],
+      ['<p>a<br><span> <span>b</span></span></p>', 'a  \nb'],
+      ['<p>a<span> </span></p>', 'a'],
+      // A link or quote opener already parts it from a word, and code keeps
+      // its content as written.
+      ['<p>a<a href="/x"> <span>b</span></a></p>', 'a [b](/x)'],
+      ['<p>a<q> <span>b</span></q></p>', 'a "b"'],
+      ['<p>a<code> <span>b</span></code></p>', 'a`b`'],
+      ['<p><code>a<span> <span>b</span></span></code></p>', '`ab`'],
+      // A raw line break ends the line the separator would trail.
+      ['<h2>w<span> <br>b</span></h2>', '## w<br>b'],
+      ['<h2>w<strong>a </strong><br>b</h2>', '## w**a**<br>b'],
+    ]
+    for (const [html, expected] of cases) {
+      expect(htmlToMarkdown(html)).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        expect(await streamConvert(chunks), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+    expect(htmlToMarkdown('<ul><li>a<span> <span>b</span></span></li></ul>')).toBe('- a b')
+    expect(htmlToMarkdown('<h2>a<span> <span>b</span></span></h2>')).toBe('## a b')
+    expect(htmlToMarkdown('<blockquote><p>a<span> <span>b</span></span></p></blockquote>')).toBe('> a b')
+    expect(htmlToMarkdown('<table><tr><th>h</th></tr><tr><td>a<span> <span>b</span></span></td></tr></table>')).toBe('| h |\n| --- |\n| a b |')
+    expect(htmlToMarkdown('a<span> <span>b</span></span>')).toBe('a b')
   })
 
   it('leaves code-like content as written', () => {

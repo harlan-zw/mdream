@@ -10,23 +10,18 @@ import {
   TAG_ADDRESS,
   TAG_ARTICLE,
   TAG_ASIDE,
-  TAG_B,
   TAG_BASE,
   TAG_BLOCKQUOTE,
   TAG_BUTTON,
   TAG_CAPTION,
   TAG_CENTER,
-  TAG_CITE,
   TAG_CODE,
   TAG_DD,
-  TAG_DEL,
   TAG_DETAILS,
-  TAG_DFN,
   TAG_DIALOG,
   TAG_DIV,
   TAG_DL,
   TAG_DT,
-  TAG_EM,
   TAG_FIELDSET,
   TAG_FIGCAPTION,
   TAG_FIGURE,
@@ -42,7 +37,6 @@ import {
   TAG_HEADER,
   TAG_HR,
   TAG_HTML,
-  TAG_I,
   TAG_LI,
   TAG_LINK,
   TAG_MAIN,
@@ -54,12 +48,9 @@ import {
   TAG_OPTION,
   TAG_P,
   TAG_PRE,
-  TAG_S,
   TAG_SCRIPT,
   TAG_SECTION,
   TAG_SELECT,
-  TAG_STRIKE,
-  TAG_STRONG,
   TAG_STYLE,
   TAG_SUMMARY,
   TAG_TABLE,
@@ -81,10 +72,6 @@ import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
 // A tag outside the dictionary with no override renders only its text, inline
 // with zero spacing, as in the Rust engine: `<x>X</x><y>Y</y>` is `XY`.
 const UNKNOWN_TAG_HANDLER: TagHandler = { isInline: true, spacing: NO_SPACING }
-
-// Elements written as emphasis delimiters, which need the word boundary
-// outside them.
-const EMPHASIS_TAGS = new Set([TAG_STRONG, TAG_B, TAG_DFN, TAG_EM, TAG_I, TAG_DEL, TAG_S, TAG_STRIKE, TAG_CITE])
 
 // Cache frequently used character codes
 const LT_CHAR = 60 // '<'
@@ -124,16 +111,11 @@ function shouldProtectDecodedEntityReferences(state: ParseState): boolean {
     && !isInsideRawHtmlBlock(depthMap)
 }
 
-// An element that writes nothing, like a `<span>`, can sit between the
-// delimiter and the blank, so the inline run is checked up to its block.
-function isInsideEmphasis(node: ElementNode | null | undefined): boolean {
-  for (; node; node = node.parent) {
-    if (EMPHASIS_TAGS.has(node.tagId ?? -1))
-      return true
-    if (!(node.tagHandler?.isInline ?? node.tagId === -1))
-      return false
-  }
-  return false
+// A blank that opens an inline element can be the only word separator,
+// whether the element writes a delimiter, like `<strong>`, or nothing, like a
+// `<span>`.
+function isInlineElement(node: ElementNode): boolean {
+  return node.tagHandler?.isInline ?? node.tagId === -1
 }
 
 const SCRIPT_DATA = 0
@@ -1334,9 +1316,9 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
 
   // Whitespace-only text before an element's first child is indentation, but
-  // in Markdown emphasis after earlier text it is the only word separator.
+  // in Markdown inline content after earlier text it is the only word separator.
   const isLeadingBlank = !inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex
-  if (isLeadingBlank && (state.plainText || !isInsideEmphasis(state.currentNode))) {
+  if (isLeadingBlank && (state.plainText || !isInlineElement(state.currentNode))) {
     return
   }
 

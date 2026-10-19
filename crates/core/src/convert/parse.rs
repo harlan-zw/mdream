@@ -30,15 +30,6 @@ fn is_head_content_tag(tag_id: Option<u8>) -> bool {
   )
 }
 
-/// Elements written as emphasis delimiters, which need the word boundary
-/// outside them.
-fn is_emphasis_tag(tag_id: Option<u8>) -> bool {
-  matches!(
-    tag_id,
-    Some(TAG_STRONG | TAG_B | TAG_DFN | TAG_EM | TAG_I | TAG_DEL | TAG_S | TAG_STRIKE | TAG_CITE)
-  )
-}
-
 /// Start tags that cannot appear inside a `<p>` and therefore imply its end
 /// (HTML §13.1.2.4 optional tags + the "in body" insertion mode, where these
 /// tags first close an open `<p>` in button scope). Block containers, headings,
@@ -478,15 +469,11 @@ impl ConvertState {
     }
   }
 
-  /// An element that writes nothing, like a `<span>`, can sit between the
-  /// delimiter and a blank, so the inline run is checked up to its block.
-  fn is_inside_emphasis(&self) -> bool {
-    self
-      .stack
-      .iter()
-      .rev()
-      .take_while(|node| node.is_inline)
-      .any(|node| is_emphasis_tag(node.tag_id))
+  /// A blank that opens an inline element can be the only word separator,
+  /// whether the element writes a delimiter, like `<strong>`, or nothing, like
+  /// a `<span>`.
+  fn is_inside_inline_element(&self) -> bool {
+    self.stack.last().is_some_and(|node| node.is_inline)
   }
 
   /// Depth and walk index for an emitted text node, plus its hazard flag.
@@ -542,7 +529,7 @@ impl ConvertState {
 
     let is_leading_blank =
       !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty();
-    if is_leading_blank && (!self.is_markdown() || !self.is_inside_emphasis()) {
+    if is_leading_blank && (!self.is_markdown() || !self.is_inside_inline_element()) {
       return;
     }
     if text_buffer.is_empty() {
@@ -585,11 +572,18 @@ impl ConvertState {
       self.has_encoded_html_entity = false;
     }
 
+    // The output places a leading blank as a word separator; the counters stay
+    // as if it were dropped, so it is no content of the element.
     if is_leading_blank {
       if !excludes_text_nodes {
         self.place_leading_blank();
       }
-    } else if !excludes_text_nodes {
+      text.clear();
+      *text_buffer = text;
+      return;
+    }
+
+    if !excludes_text_nodes {
       let (depth, index) = self.begin_text_emit(&text, has_inline_gfm_hazard);
       self.emit_plain_text_inline(&text, contains_whitespace, depth, index);
     }
@@ -597,11 +591,7 @@ impl ConvertState {
     text.clear();
     *text_buffer = text;
 
-    // The output moves a leading blank in front of the delimiter; the counters
-    // stay as if it were dropped, so it is no content of the element.
-    if !is_leading_blank {
-      self.advance_text_node_counters(first_block_parent_index);
-    }
+    self.advance_text_node_counters(first_block_parent_index);
   }
 
   /// Emit buffered text. Internal size flushes split one source text node into
@@ -654,15 +644,15 @@ impl ConvertState {
     let child_text_node_index = self.stack.last().map_or(0, |n| n.child_text_node_index);
 
     // Whitespace-only text before an element's first child is indentation and
-    // can be dropped, unless it parts words in Markdown emphasis after earlier
-    // text. At the fragment root it can instead separate adjacent inline
-    // siblings, so emit it and let the output layer trim or absorb it at
+    // can be dropped, unless it parts words in Markdown inline content after
+    // earlier text. At the fragment root it can instead separate adjacent
+    // inline siblings, so emit it and let the output layer trim or absorb it at
     // leading/trailing and block boundaries.
     let is_leading_blank = !in_pre_tag
       && !contains_non_whitespace
       && child_text_node_index == 0
       && !self.stack.is_empty();
-    if is_leading_blank && (!self.is_markdown() || !self.is_inside_emphasis()) {
+    if is_leading_blank && (!self.is_markdown() || !self.is_inside_inline_element()) {
       return;
     }
     if text_buffer.is_empty() {
@@ -750,11 +740,18 @@ impl ConvertState {
       }
     }
 
+    // The output places a leading blank as a word separator; the counters stay
+    // as if it were dropped, so it is no content of the element.
     if is_leading_blank {
       if !excludes_text_nodes {
         self.place_leading_blank();
       }
-    } else if !excludes_text_nodes {
+      text.clear();
+      *text_buffer = text;
+      return;
+    }
+
+    if !excludes_text_nodes {
       let (depth, index) = self.begin_text_emit(&text, has_inline_gfm_hazard);
       // Fast-context nodes take `process_plain_text_node`; this is the rare rest.
       self.emit_text_with_generated_markdown(
@@ -771,9 +768,7 @@ impl ConvertState {
     text.clear();
     *text_buffer = text;
 
-    // The output moves a leading blank in front of the delimiter; the counters
-    // stay as if it were dropped, so it is no content of the element.
-    if completes_text_node && !is_leading_blank {
+    if completes_text_node {
       self.advance_text_node_counters(first_block_parent_index);
     }
   }

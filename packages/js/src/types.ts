@@ -219,9 +219,8 @@ export interface TextNode extends Node {
    */
   trimsAtLineStart?: boolean
   /**
-   * Whitespace that opens an inline element inside emphasis. While it stays
-   * whitespace it only parts the opener from the word before it, and is not
-   * written as text.
+   * Whitespace that opens an inline element. While it stays whitespace it is
+   * placed as a word separator, and is not written as text.
    */
   leadingBlank?: boolean
 }
