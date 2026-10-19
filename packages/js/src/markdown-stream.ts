@@ -236,7 +236,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       // stays buffered even when that owner sits inside a preformatted block.
       while (stableLength > 0) {
         const code = currentContent.charCodeAt(stableLength - 1)
-        if (code !== 32 && code !== 10)
+        if (!isAsciiWhitespace(code))
           break
         stableLength--
       }

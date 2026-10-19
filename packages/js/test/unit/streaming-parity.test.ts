@@ -887,3 +887,29 @@ describe('flattened declaration carry', () => {
     }
   })
 })
+
+it.each(['\u000B', '\u00A0', '\u2003'])('preserves non-HTML whitespace %j at every chunk width', async (space) => {
+  const cases = [
+    [`T${space}`, `T${space}`],
+    [`<p>T</p>${space}`, `T\n\n${space}`],
+    [`<ul><li>T${space}</li></ul>`, `- T${space}`],
+    [`<ul><li><h3>T</h3>${space}</li></ul>`, `- ### T ${space}`],
+    [`<p>T</p>${space}<p>X</p>`, `T\n\n${space}\n\nX`],
+    [`<p>T</p>${space} `, `T\n\n${space}`],
+  ]
+  for (const [html, expected] of cases) {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await streamConvert(html, width), `${JSON.stringify(html)}, width ${width}`).toBe(expected)
+  }
+})
+
+it.each(['\t', '\n', '\f', '\r', ' ', '\u000B'])('holds trimmable override whitespace %j until the stream ends', async (space) => {
+  const options = { tagOverrides: { span: { exit: space } } }
+  for (const html of ['<span>T</span>', '<span>T</span>X']) {
+    const expected = html.endsWith('X') ? `T${space}X` : space === '\u000B' ? `T${space}` : 'T'
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await streamConvert(html, width, options), `width ${width}`).toBe(expected)
+  }
+})

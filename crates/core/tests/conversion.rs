@@ -6086,3 +6086,74 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
     "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
   );
 }
+
+#[test]
+fn non_html_whitespace_streaming_parity() {
+  for space in ['\u{000b}', '\u{00a0}', '\u{2003}'] {
+    let cases = [
+      (format!("T{space}"), format!("T{space}")),
+      (format!("<p>T</p>{space}"), format!("T\n\n{space}")),
+      (format!("<ul><li>T{space}</li></ul>"), format!("- T{space}")),
+      (
+        format!("<ul><li><h3>T</h3>{space}</li></ul>"),
+        format!("- ### T {space}"),
+      ),
+      (
+        format!("<p>T</p>{space}<p>X</p>"),
+        format!("T\n\n{space}\n\nX"),
+      ),
+      (format!("<p>T</p>{space} "), format!("T\n\n{space}")),
+    ];
+    for (html, expected) in cases {
+      assert_eq!(convert(&html), expected);
+      let chars: Vec<char> = html.chars().collect();
+      for width in 1..=chars.len() {
+        let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut output = String::new();
+        for chunk in chars.chunks(width) {
+          output.push_str(&stream.process_chunk(&chunk.iter().collect::<String>()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, expected, "{html:?}, width {width}");
+      }
+    }
+  }
+}
+
+#[test]
+fn override_whitespace_streaming_parity() {
+  for space in ['\t', '\n', '\u{000c}', '\r', ' ', '\u{000b}'] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "span".to_string(),
+          TagOverrideConfig {
+            exit: Some(space.to_string()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    for html in ["<span>T</span>", "<span>T</span>X"] {
+      let expected = if html.ends_with('X') {
+        format!("T{space}X")
+      } else if space == '\u{000b}' {
+        format!("T{space}")
+      } else {
+        "T".to_string()
+      };
+      assert_eq!(html_to_markdown(html, options.clone()), expected);
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for chunk in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, expected, "{html:?}, width {width}");
+      }
+    }
+  }
+}

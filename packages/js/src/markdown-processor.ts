@@ -886,7 +886,7 @@ function hasNonWhitespace(value: string): boolean {
 }
 
 export function isAsciiWhitespace(code: number): boolean {
-  return code === 32 || (code >= 9 && code <= 13)
+  return code === 32 || code === 9 || code === 10 || code === 12 || code === 13
 }
 
 export function trimAsciiWhitespaceEnd(value: string): string {
