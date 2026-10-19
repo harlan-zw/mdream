@@ -835,6 +835,82 @@ fn blank_pre_text_inside_a_link_is_no_link_text() {
   );
 }
 
+/// Text longer than the 64 KiB cut is read in pieces. A last piece that only
+/// decodes to spaces leaves the text before it, so the link keeps its text and
+/// takes no label, whatever the chunking.
+#[test]
+fn long_link_text_ending_in_encoded_blanks_is_link_text() {
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let clean = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..Default::default()
+  };
+  let words = "word ".repeat(13_100);
+  let text = words.trim_end();
+  let blanks = "&#32;".repeat(20);
+  let at_cut = "word ".repeat(13_107);
+  let cases = [
+    (
+      "plain",
+      format!(r#"<p><a href="/c" aria-label="Item">{words}{blanks}</a> next</p>"#),
+      format!("[{text}](/c) next"),
+    ),
+    (
+      "two blanks",
+      format!(r#"<p><a href="/c" aria-label="Item">{at_cut}&#32;&#32;</a> next</p>"#),
+      format!("[{}](/c) next", at_cut.trim_end()),
+    ),
+    (
+      "span",
+      format!(r#"<p><a href="/c" aria-label="Item"><span>{words}{blanks}</span></a> next</p>"#),
+      format!("[{text}](/c) next"),
+    ),
+    (
+      "svg text",
+      format!(
+        r#"<p><a href="/c" aria-label="Item"><svg><text>{words}{blanks}</text></svg></a> next</p>"#
+      ),
+      format!("[{text}](/c) next"),
+    ),
+    // Blank in every piece, the text is still blank.
+    (
+      "all blank",
+      format!(
+        r#"<p><a href="/c" aria-label="Item"><svg></svg>{}</a> next</p>"#,
+        "&#32;".repeat(20_000)
+      ),
+      "[Item](/c) next".to_string(),
+    ),
+  ];
+  for (id, html, expected) in &cases {
+    assert_eq!(convert(html), *expected, "{id}");
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      filter.clone(),
+      clean.clone(),
+    ] {
+      assert_eq!(html_to_markdown(html, options.clone()), *expected, "{id}");
+      for width in [64, 1000, 4096, 65_535, 65_536, 65_537, html.len()] {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, *expected, "{id} width={width}");
+      }
+    }
+  }
+  let html = html_to_html(&cases[0].1, HtmlToMarkdownOptions::default());
+  assert!(html.ends_with("</a> next</p>") && !html.contains("Item"));
+}
+
 #[test]
 fn linked_images_respect_mixed_case_builtin_override_scopes() {
   for (html, name, is_inline, expected) in [

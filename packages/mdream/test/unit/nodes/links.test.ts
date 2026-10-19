@@ -327,6 +327,22 @@ describe.each(engines)('links $name', (engineConfig) => {
       .toBe('a Item Next')
   })
 
+  // Text longer than the 64 KiB cut is read in pieces; a last piece that only
+  // decodes to spaces does not make the whole link text blank.
+  it.each([
+    ['plain', (text: string) => `<p><a href="/c" aria-label="Item">${text}</a> next</p>`],
+    ['span', (text: string) => `<p><a href="/c" aria-label="Item"><span>${text}</span></a> next</p>`],
+    ['svg text', (text: string) => `<p><a href="/c" aria-label="Item"><svg><text>${text}</text></svg></a> next</p>`],
+  ])('keeps long link text ending in encoded blanks as link text (%s)', async (_id, wrap) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const words = 'word '.repeat(13100)
+    const html = wrap(`${words}${'&#32;'.repeat(20)}`)
+    const expected = `[${words.trimEnd()}](/c) next`
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} } })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, format: 'html' })).not.toContain('Item')
+  })
+
   it('preserves empty-image and empty-link fallback behavior', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<a href="/file" title="File:Photo"><img src="/photo.jpg" alt=""></a>'

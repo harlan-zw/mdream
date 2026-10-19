@@ -621,7 +621,8 @@ impl ConvertState {
       self.emit_plain_text_inline(&text, contains_whitespace, depth, index);
     }
 
-    let has_text = self.depth_map[TAG_A as usize] > 0 && !text.bytes().all(is_whitespace);
+    let has_text = self.depth_map[TAG_A as usize] > 0
+      && (self.text_run_has_text || !text.bytes().all(is_whitespace));
     text.clear();
     *text_buffer = text;
 
@@ -785,8 +786,8 @@ impl ConvertState {
       );
     }
 
-    let has_text =
-      completes_text_node && self.depth_map[TAG_A as usize] > 0 && !text.bytes().all(is_whitespace);
+    let has_text = self.depth_map[TAG_A as usize] > 0
+      && (self.text_run_has_text || !text.bytes().all(is_whitespace));
 
     // Recover String allocation
     text.clear();
@@ -794,6 +795,9 @@ impl ConvertState {
 
     if completes_text_node {
       self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, has_text);
+    } else {
+      // A later piece may be blank only because the cut left it whitespace.
+      self.text_run_has_text = has_text;
     }
   }
 
