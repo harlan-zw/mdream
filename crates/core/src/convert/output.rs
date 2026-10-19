@@ -3117,7 +3117,7 @@ impl ConvertState {
       self.flush_list_rule();
     }
 
-    let mut pending_space = false;
+    let before_pending_space = self.buffer.len();
     if self.pending_inline_whitespace {
       if text.as_bytes().iter().all(|&b| is_whitespace(b)) {
         return;
@@ -3125,10 +3125,12 @@ impl ConvertState {
       let last = self.last_output_byte();
       let first = text.as_bytes()[0];
       if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
-        pending_space = self.push_code_span_content(" ", true) == 1;
+        self.push_code_span_content(" ", true);
       }
       self.pending_inline_whitespace = false;
     }
+    // The separator an inline close left pending, when the block above wrote it.
+    let pending_space = self.buffer.len() == before_pending_space + 1;
 
     // Open a deferred <pre> fence before its first non-whitespace text.
     if self.pre_fence_pending
