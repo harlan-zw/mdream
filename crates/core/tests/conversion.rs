@@ -6086,3 +6086,42 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
     "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
   );
 }
+
+#[test]
+fn bogus_comments_end_at_the_first_gt_without_opening_elements() {
+  for (html, expected) in [
+    ("<p>a</>b</p>", "ab"),
+    ("<p>a</1x>b</p>", "a b"),
+    ("<p>a</?x>b</p>", "a b"),
+    (r#"<p>a<?x y=">">b</p>"#, r#"a ">b"#),
+    (r#"<p>a</ x y=">">b</p>"#, r#"a ">b"#),
+    ("<p><a href=\"/c\">x<?x?> </a>Next</p>", "[x](/c) Next"),
+    ("<ol><li>a</li><?x?><li>b</li></ol>", "1. a\n2. b"),
+    ("<p><a href=\"/c\">x<?x y?> </a>Next</p>", "[x](/c) Next"),
+    ("<ol><li>a</li><?x y?><li>b</li></ol>", "1. a\n2. b"),
+    ("<p><a href=\"/c\">x<!x> </a>Next</p>", "[x](/c) Next"),
+    ("<ol><li>a</li><!x><li>b</li></ol>", "1. a\n2. b"),
+    ("<p><a href=\"/c\">x</ x> </a>Next</p>", "[x](/c) Next"),
+    ("<ol><li>a</li></ x><li>b</li></ol>", "1. a\n2. b"),
+    ("<p>before<?x y=\">after</p>", "before after"),
+    ("<p>before<!x y=\">after</p>", "before after"),
+    ("<p>before</ x y=\">after</p>", "before after"),
+    ("<p>before<?--x>after</p>", "before after"),
+    ("<p>before<?[CDATA[x>after</p>", "before after"),
+    ("<p>before</p><?x", "before"),
+    ("<p>before</p><!x", "before"),
+    ("<p>before</p></ x", "before"),
+    ("<textarea>a<?x?>b</textarea>", "a\\<?x?>b"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output.trim_end(), expected, "{html} chunk width {width}");
+    }
+  }
+}

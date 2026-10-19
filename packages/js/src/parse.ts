@@ -1073,6 +1073,23 @@ function parseHtmlInternal(
         break
       }
     }
+    else if ((nextCharCode === QUESTION_CHAR
+      || (nextCharCode === SLASH_CHAR && i + 2 < chunkLength
+        && htmlChunk.charCodeAt(i + 2) !== GT_CHAR && !isAsciiAlpha(htmlChunk.charCodeAt(i + 2))))
+      && !state.currentNode?.tagHandler?.isNonNesting) {
+      if (textBuffer.length > 0) {
+        processTextBuffer(textBuffer, state, handleEvent)
+        textBuffer = ''
+      }
+      // Bogus comments end at the first `>`, even inside quotes.
+      const end = htmlChunk.indexOf('>', i + 2)
+      if (end === -1) {
+        state.trailingText = '<!x'
+        return '<!x'
+      }
+      i = end + 1
+      runStart = i
+    }
     // CLOSING TAG
     else if (nextCharCode === SLASH_CHAR) {
       if (state.currentNode?.tagHandler?.isNonNesting) {

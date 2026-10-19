@@ -1962,6 +1962,23 @@ impl ConvertState {
           self.discard_declaration(remaining);
           break;
         }
+      } else if next == QUESTION_CHAR
+        || (next == SLASH_CHAR
+          && i + 2 < chunk_length
+          && bytes[i + 2] != GT_CHAR
+          && !bytes[i + 2].is_ascii_alphabetic())
+      {
+        // Bogus comments end at the first `>`, even inside quotes.
+        self.complete_text_node(&mut text_buffer);
+        if self.held_output_exceeded {
+          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+        }
+        run_start = i;
+        let Some(len) = discarded_gt(&chunk[i..]) else {
+          self.discard_declaration(&chunk[i..]);
+          break;
+        };
+        i += len;
       } else if next == SLASH_CHAR {
         self.complete_text_node(&mut text_buffer);
         if self.held_output_exceeded {
@@ -1977,18 +1994,6 @@ impl ConvertState {
           discard_end_tag = result.name_ended;
           break;
         }
-      } else if next == QUESTION_CHAR {
-        // `<?` opens a bogus comment, which ends at the first `>`.
-        self.complete_text_node(&mut text_buffer);
-        if self.held_output_exceeded {
-          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
-        }
-        run_start = i;
-        let Some(len) = discarded_gt(&chunk[i..]) else {
-          self.discard_declaration(&chunk[i..]);
-          break;
-        };
-        i += len;
       } else if !next.is_ascii_alphabetic() {
         // Tag open state starts a tag only on an ASCII letter. Anything else is
         // text, so `I <3 Rust` is not a tag named `3`.
