@@ -2161,6 +2161,34 @@ fn streaming_heading_in_list_item_breaks_out_of_a_wrapper_without_delimiters() {
   }
 }
 
+// A block marker at a list item's content column four or more spaces deep is
+// escaped, at every cut.
+#[test]
+fn streaming_block_markers_at_a_deep_list_content_column_are_escaped() {
+  for (html, expected) in [
+    (
+      "<ol start=\"10\"><li><h3>T</h3># x</li></ol>",
+      "10. ### T\n\n    \\# x",
+    ),
+    (
+      "<ul><li>a<ul><li>T<br>- x</li></ul></li></ul>",
+      "- a\n  - T  \n    \\- x",
+    ),
+    (
+      "<ol start=\"10\"><li><p>a</p><p>&gt; x</p></li><li>b</li></ol>",
+      "10. a\n\n    \\> x\n11. b",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // A `<pre>` fence opened by its first child pays the break a heading in the
 // list item owes, at every cut.
 #[test]

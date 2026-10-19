@@ -550,25 +550,33 @@ export function lineOpensRawHtmlBlock(buffer: string[], scan: BufferScanState): 
 /**
  * Return the current GFM line indent when a block marker may still start at
  * this position. A non-space byte, or more than three leading spaces, makes
- * the position ordinary inline text.
+ * the position ordinary inline text. A list item's content column (`column`,
+ * zero outside items) opens its blocks, so a line indented to it counts from
+ * there.
  */
-function markdownLineIndent(buffer: string[]): number {
+function markdownLineIndent(buffer: string[], column: number): number {
   let spaces = 0
   for (let fragmentIndex = buffer.length - 1; fragmentIndex >= 0; fragmentIndex--) {
     const fragment = buffer[fragmentIndex]!
     for (let index = fragment.length - 1; index >= 0; index--) {
       const code = fragment.charCodeAt(index)
       if (code === 10)
-        return spaces
+        return indentPastColumn(spaces, column)
       // A list marker is block prefix too: its content column opens a fresh
       // block context, so `- # h` escapes exactly like `# h` would.
-      if (code !== 32 || spaces === 3) {
+      if (code !== 32 || spaces === column + 3) {
         return listMarkerLineStart(buffer, fragmentIndex, index) ? 0 : -1
       }
       spaces++
     }
   }
-  return spaces
+  return indentPastColumn(spaces, column)
+}
+
+function indentPastColumn(spaces: number, column: number): number {
+  if (spaces >= column)
+    return spaces - column
+  return spaces <= 3 ? spaces : -1
 }
 
 function isMarkdownMarkerWhitespace(code: number): boolean {
@@ -607,7 +615,7 @@ const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
  * precise JavaScript scanner. A block marker can only begin within the first
  * four characters here; later lines are covered by the newline trigger.
  */
-function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array): boolean {
+function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array, listIndent: string): boolean {
   if (value.search(GFM_TEXT_NATIVE_TRIGGER) !== -1)
     return true
   if ((depthMap[TAG_TABLE] && value.includes('|'))
@@ -623,7 +631,7 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
     return false
   }
 
-  let lineIndent = markdownLineIndent(buffer)
+  let lineIndent = markdownLineIndent(buffer, depthMap[TAG_LI] ? listIndent.length : 0)
   if (lineIndent < 0)
     return false
 
@@ -645,11 +653,11 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
  * markers never pass through here, while code and raw-HTML contexts bypass it.
  * The common plain-text path returns the original string without allocation.
  */
-function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): string {
+function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, listIndent: string): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
   const inLink = Boolean(depthMap[TAG_A])
   const inBlockquote = Boolean(depthMap[TAG_BLOCKQUOTE])
-  let lineIndent = markdownLineIndent(buffer)
+  let lineIndent = markdownLineIndent(buffer, depthMap[TAG_LI] ? listIndent.length : 0)
   let orderedDigits = 0
   let copiedUntil = 0
   let escaped = ''
@@ -1726,9 +1734,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         // again. That test is O(1), so it goes before the text scans; the line
         // scan stays last, paid only by text that would be escaped anyway.
         && (!insideRawHtmlBlock || rawHtmlMarkdown)
-        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap)
+        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap, state.listIndent)
         && (!insideRawHtmlBlock || !lineOpensRawHtmlBlock(state.buffer, bufferScan))) {
-        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap)
+        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent)
       }
 
       if (textNode.generatedMarkdown && textNode.value)

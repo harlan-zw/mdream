@@ -3601,12 +3601,23 @@ impl ConvertState {
   #[inline]
   fn markdown_line_indent(&self) -> Option<u8> {
     let bytes = self.buffer.as_bytes();
-    let mut spaces = 0u8;
+    // A list item's content column opens its blocks, so a line indented to it
+    // counts from there: past three spaces is not yet indented code.
+    let column = if self.depth_map[TAG_LI as usize] > 0 {
+      self.list_indent.len()
+    } else {
+      0
+    };
+    let past_column = |spaces: usize| match spaces.checked_sub(column) {
+      Some(indent) => u8::try_from(indent).ok(),
+      None => u8::try_from(spaces).ok().filter(|&spaces| spaces <= 3),
+    };
+    let mut spaces = 0usize;
     for (offset, &byte) in bytes.iter().enumerate().rev() {
       if byte == b'\n' {
-        return Some(spaces);
+        return past_column(spaces);
       }
-      if byte != b' ' || spaces == 3 {
+      if byte != b' ' || spaces == column + 3 {
         // A list marker is block prefix too: its content column opens a fresh
         // block context, so `- # h` escapes exactly like `# h` would.
         return self.list_marker_line_start(bytes, offset + 1).then_some(0);
@@ -3620,7 +3631,7 @@ impl ConvertState {
         None
       }
     } else {
-      Some(spaces)
+      past_column(spaces)
     }
   }
 

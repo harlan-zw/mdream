@@ -5240,6 +5240,54 @@ fn block_markers_are_escaped_after_a_list_marker() {
 }
 
 #[test]
+fn block_markers_are_escaped_at_a_deep_list_content_column() {
+  // A line indented to the item's content column opens a block there, even
+  // when the column is four or more spaces deep: a wide ordered marker, or a
+  // nested item. A heading's break, a hard break and a paragraph all start one.
+  for (html, expected) in [
+    (
+      "<ol start=\"10\"><li><h3>T</h3># x</li></ol>",
+      "10. ### T\n\n    \\# x",
+    ),
+    (
+      "<ol start=\"10\"><li><h3>T</h3>- x</li></ol>",
+      "10. ### T\n\n    \\- x",
+    ),
+    (
+      "<ol start=\"10\"><li><h3>T</h3>&gt; x</li></ol>",
+      "10. ### T\n\n    \\> x",
+    ),
+    (
+      "<ol start=\"10\"><li><h3>T</h3>1. x</li></ol>",
+      "10. ### T\n\n    1\\. x",
+    ),
+    (
+      "<ul><li>a<ul><li><h3>T</h3># x</li></ul></li></ul>",
+      "- a\n  - ### T\n\n    \\# x",
+    ),
+    (
+      "<ul><li>a<ul><li>T<br>- x</li></ul></li></ul>",
+      "- a\n  - T  \n    \\- x",
+    ),
+    (
+      "<ol start=\"10\"><li><p>a</p><p># x</p></li></ol>",
+      "10. a\n\n    \\# x",
+    ),
+    // Only a block start is escaped, and code keeps its text.
+    (
+      "<ol start=\"10\"><li><p>a</p><p>x # y</p></li></ol>",
+      "10. a\n\n    x # y",
+    ),
+    (
+      "<ol start=\"10\"><li><pre>x\n# y</pre></li></ol>",
+      "10. ```\n    x\n    # y\n    ```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
 fn heading_keeps_a_trailing_hash() {
   assert_eq!(convert("<h2>Ends with #</h2>"), "## Ends with \\#");
   assert_eq!(convert("<h3>#</h3>"), "### \\#");

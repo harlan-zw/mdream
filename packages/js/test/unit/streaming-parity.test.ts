@@ -206,6 +206,18 @@ describe('streaming parity with the Rust core', () => {
     await expectEverySplitParity(html)
   })
 
+  // A block marker at a list item's content column four or more spaces deep
+  // is escaped.
+  it.each([
+    ['<ol start="10"><li><h3>T</h3># x</li></ol>', '10. ### T\n\n    \\# x'],
+    ['<ul><li>a<ul><li>T<br>- x</li></ul></li></ul>', '- a\n  - T  \n    \\- x'],
+    ['<ol start="10"><li><p>a</p><p>&gt; x</p></li><li>b</li></ol>', '10. a\n\n    \\> x\n11. b'],
+  ])('escapes a block marker at a deep list content column across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
+  })
+
   // A `<pre>` fence opened by its first child pays the break a heading in the
   // list item owes, so that break never lands inside the code.
   it.each([
