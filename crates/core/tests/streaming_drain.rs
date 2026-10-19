@@ -3551,3 +3551,37 @@ fn streaming_heading_materializing_a_list_caption_keeps_its_prefix_inline() {
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
+
+#[test]
+fn streaming_heading_overrides_inside_list_code_keep_their_output() {
+  for (html, expected, tag, config) in [
+    (
+      r#"<ul><li><pre>Intro<span><h3>T</h3></span></pre></li></ul>"#,
+      "- ```\n  Intro ### T\n  ```",
+      "span",
+      TagOverrideConfig::alias("strong"),
+    ),
+    (
+      r#"<ul><li><code><h6>
+</h6><h3></h3>x</code></li></ul>"#,
+      "- `###### ### x`",
+      "h3",
+      TagOverrideConfig {
+        enter: Some("### ".into()),
+        exit: Some(String::new()),
+        ..Default::default()
+      },
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(tag.into(), config)]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}

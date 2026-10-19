@@ -81,6 +81,15 @@ async function expectEverySplitParity(html: string, options: ParityOptions = {})
 
 describe('streaming parity with the Rust core', () => {
   it.each([
+    ['<ul><li><pre>Intro<span><h3>T</h3></span></pre></li></ul>', '- ```\n  Intro ### T\n  ```', { span: 'strong' }],
+    ['<ul><li><code><h6>\n</h6><h3></h3>x</code></li></ul>', '- `###### ### x`', { h3: { enter: '### ', exit: '' } }],
+  ] as const)('preserves heading overrides inside list code: %s', async (html, expected, tagOverrides) => {
+    expect(convertOnce(html, { tagOverrides })).toBe(expected)
+    await expectStreamingParity(html, { tagOverrides })
+    await expectEverySplitParity(html, { tagOverrides })
+  })
+
+  it.each([
     ['<ul><li><figure><figcaption><q><h3>T</h3></q>s</figcaption></figure></li></ul>', '- *"### T"s*'],
     ['<ul><li><figure><figcaption><q><h3></h3></q>s</figcaption></figure></li></ul>', '- *"### "s*'],
     ['<ul><li><figure><figcaption><a href="/l"></a><h3>T</h3></figcaption></figure></li></ul>', '- *[](/l)### T*'],

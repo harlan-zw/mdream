@@ -55,6 +55,14 @@ describe.each(engines)('headings $name', (engineConfig) => {
   // continuation indent: it is no closing sequence to escape, and the next block
   // still opens its own line, as it does at the root.
   it.each([
+    ['<ul><li><pre>Intro<span><h3>T</h3></span></pre></li></ul>', '- ```\n  Intro ### T\n  ```', { span: 'strong' }],
+    ['<ul><li><code><h6>\n</h6><h3></h3>x</code></li></ul>', '- `###### ### x`', { h3: { enter: '### ', exit: '' } }],
+  ] as const)('preserves heading overrides inside list code: %s', async (html, expected, tagOverrides) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li><figure><figcaption><q><h3>T</h3></q>s</figcaption></figure></li></ul>', '- *"### T"s*'],
     ['<ul><li><figure><figcaption><q><h3></h3></q>s</figcaption></figure></li></ul>', '- *"### "s*'],
     ['<ul><li><figure><figcaption><a href="/l"></a><h3>T</h3></figcaption></figure></li></ul>', '- *[](/l)### T*'],

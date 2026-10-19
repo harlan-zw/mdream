@@ -6449,11 +6449,55 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
 #[test]
 fn a_heading_materializing_a_list_caption_keeps_its_prefix_inline() {
   for (html, expected) in [
-    (r#"<ul><li><figure><figcaption><q><h3>T</h3></q>s</figcaption></figure></li></ul>"#, "- *\"### T\"s*"),
-    (r#"<ul><li><figure><figcaption><q><h3></h3></q>s</figcaption></figure></li></ul>"#, "- *\"### \"s*"),
-    (r#"<ul><li><figure><figcaption><a href="/l"></a><h3>T</h3></figcaption></figure></li></ul>"#, "- *[](/l)### T*"),
-    (r#"<ul><li><figure><figcaption><del><h3>T</h3></del></figcaption></figure></li></ul>"#, "- *~~### T~~*"),
+    (
+      r#"<ul><li><figure><figcaption><q><h3>T</h3></q>s</figcaption></figure></li></ul>"#,
+      "- *\"### T\"s*",
+    ),
+    (
+      r#"<ul><li><figure><figcaption><q><h3></h3></q>s</figcaption></figure></li></ul>"#,
+      "- *\"### \"s*",
+    ),
+    (
+      r#"<ul><li><figure><figcaption><a href="/l"></a><h3>T</h3></figcaption></figure></li></ul>"#,
+      "- *[](/l)### T*",
+    ),
+    (
+      r#"<ul><li><figure><figcaption><del><h3>T</h3></del></figcaption></figure></li></ul>"#,
+      "- *~~### T~~*",
+    ),
   ] {
     assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
+fn heading_overrides_inside_list_code_keep_their_output() {
+  for (html, expected, tag, config) in [
+    (
+      r#"<ul><li><pre>Intro<span><h3>T</h3></span></pre></li></ul>"#,
+      "- ```\n  Intro ### T\n  ```",
+      "span",
+      TagOverrideConfig::alias("strong"),
+    ),
+    (
+      r#"<ul><li><code><h6>
+</h6><h3></h3>x</code></li></ul>"#,
+      "- `###### ### x`",
+      "h3",
+      TagOverrideConfig {
+        enter: Some("### ".into()),
+        exit: Some(String::new()),
+        ..Default::default()
+      },
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(tag.into(), config)]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
   }
 }

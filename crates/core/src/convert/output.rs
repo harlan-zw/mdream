@@ -2466,7 +2466,11 @@ impl ConvertState {
       // Raw `<hN>` in a table cell and plain text both write no ATX prefix, so
       // there is no closing sequence to protect.
       if !plain_text!(self) && !self.in_table_cell() {
-        self.escape_trailing_heading_hashes();
+        // An overridden exit inside a code span has no ATX closing sequence.
+        // Keep its literal hashes, as the override's own handler does in JS.
+        if !has_override || self.code_spans.is_empty() {
+          self.escape_trailing_heading_hashes();
+        }
         // Only an ATX prefix can take in the text after it. Inside `<pre>` that
         // text is code, and inside a caption the emphasis wrapping it, either of
         // which a break would split.
@@ -5462,11 +5466,7 @@ impl ConvertState {
     }
     self.stack[..self.stack.len() - usize::from(is_enter)]
       .iter()
-      .any(|node| {
-        node.collapses_inner_white_space
-          && node.tag_id != Some(TAG_SPAN)
-          && self.wrapper_writes_delimiters(node)
-      })
+      .any(|node| node.collapses_inner_white_space && self.wrapper_writes_delimiters(node))
   }
 
   /// Emphasis, code, strikethrough and quote wrappers, and an override with
@@ -5479,8 +5479,10 @@ impl ConvertState {
         .as_ref()
         .and_then(|p| p.tag_overrides.as_ref());
       if let Some(ov) = Self::override_for_node(ovs, self.override_idx.as_deref(), node)
-        && (ov.enter.as_ref().is_some_and(|s| !s.is_empty())
-          || ov.exit.as_ref().is_some_and(|s| !s.is_empty()))
+        && ((node.tag_id != Some(TAG_SPAN)
+          && (ov.enter.as_ref().is_some_and(|s| !s.is_empty())
+            || ov.exit.as_ref().is_some_and(|s| !s.is_empty())))
+          || ov.alias_tag_id.and_then(Self::inline_marker_type).is_some())
       {
         return true;
       }
