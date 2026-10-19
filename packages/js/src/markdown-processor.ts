@@ -15,15 +15,20 @@ import {
   NodeEventExit,
   TAG_A,
   TAG_ABBR,
+  TAG_ADDRESS,
   TAG_B,
   TAG_BDO,
   TAG_BLOCKQUOTE,
   TAG_BR,
   TAG_CITE,
   TAG_CODE,
+  TAG_DD,
   TAG_DEL,
+  TAG_DETAILS,
   TAG_DFN,
   TAG_DIV,
+  TAG_DL,
+  TAG_DT,
   TAG_EM,
   TAG_FIGCAPTION,
   TAG_H1,
@@ -46,6 +51,7 @@ import {
   TAG_STRIKE,
   TAG_STRONG,
   TAG_SUB,
+  TAG_SUMMARY,
   TAG_SUP,
   TAG_TABLE,
   TAG_TD,
@@ -1354,6 +1360,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
   const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0]
   let inRawHtmlRegion = false
+  let rawHtmlNeedsBoundary = false
+  let pendingRawHtmlBoundary = false
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
   let openMarkerCount = 0
@@ -1612,7 +1620,46 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
   }
 
+  function finishRawHtmlBlock(value: string, generated = false): void {
+    if (!pendingRawHtmlBoundary || isInsideRawHtmlBlock(state.depthMap)
+      || !hasNonWhitespace(value) || (generated && value.charCodeAt(0) === 60)) {
+      return
+    }
+    pendingRawHtmlBoundary = false
+    let leadingNewlines = 0
+    if (generated) {
+      for (let i = 0; i < value.length; i++) {
+        const code = value.charCodeAt(i)
+        if (code === 10)
+          leadingNewlines++
+        else if (code !== 32 && code !== 9 && code !== 13)
+          break
+      }
+    }
+    let newlines = leadingNewlines
+    let scanning = true
+    for (let i = state.buffer.length - 1; i >= 0 && scanning; i--) {
+      const fragment = state.buffer[i]!
+      for (let j = fragment.length - 1; j >= 0; j--) {
+        const code = fragment.charCodeAt(j)
+        if (code === 10) {
+          if (++newlines === 2)
+            return
+        }
+        else if (code !== 32 && code !== 9 && code !== 13) {
+          scanning = false
+          break
+        }
+      }
+    }
+    const separator = '\n'.repeat(Math.max(0, 2 - newlines)) + (leadingNewlines ? '' : state.listIndent)
+    state.buffer.push(separator)
+    state.lastContentCache = separator
+    state.lastTextNode = undefined
+  }
+
   function processTextNode(textNode: TextNode, lastNode: ElementNode | TextNode | undefined, lastChar: string): void {
+    finishRawHtmlBlock(textNode.value)
     if (textNode.trimsAtLineStart)
       trimTextAtLineStart(textNode, state.buffer)
     if (textNode.value) {
@@ -1717,6 +1764,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    */
   function processEvent(event: NodeEvent): void {
     const { type: eventType, node } = event
+    if (pendingRawHtmlBoundary && eventType === NodeEventEnter && node.type === ELEMENT_NODE
+      && (node as ElementNode).tagId === TAG_PRE && !node.tagHandler?.literalEnter) {
+      pendingRawHtmlBoundary = false
+    }
     // Update depth for plugin access
     state.depth = node.depth
 
@@ -2154,6 +2205,28 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       output = undefined
     }
 
+    const rawBlockTag = tagId === TAG_ADDRESS || tagId === TAG_DL || tagId === TAG_DT
+      || tagId === TAG_DD || tagId === TAG_DETAILS || tagId === TAG_SUMMARY
+    if (rawBlockTag && rawHtmlNeedsBoundary && trackRawHtmlMarkdownContext(buff, bufferScan))
+      rawHtmlNeedsBoundary = false
+    if (rawBlockTag && !isInsideTableCell(state) && !state.depthMap[TAG_PRE]
+      && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
+      && handlerOutput && (pendingRawHtmlBoundary || blockOpenPrefix(buff, undefined) === undefined)) {
+      rawHtmlNeedsBoundary = true
+      bufferScan[0] = false
+      bufferScan[1] = buff.length
+    }
+    const endsRawHtmlBlock = rawBlockTag && eventType === NodeEventExit && !insideRawHtmlRegion
+    if (endsRawHtmlBlock) {
+      pendingRawHtmlBoundary = rawHtmlNeedsBoundary && !handler?.literalExit
+      rawHtmlNeedsBoundary = false
+    }
+    else if (rawBlockTag && eventType === NodeEventEnter) {
+      pendingRawHtmlBoundary = false
+    }
+    if (eventType === NodeEventExit && (tagId === TAG_LI || tagId === TAG_BLOCKQUOTE))
+      pendingRawHtmlBoundary = false
+
     // Handle newlines
     const newLineConfig = suppressedInPre
       ? NO_SPACING
@@ -2307,6 +2380,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (!captionTransition && tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
       state.buffer.push(' ')
       state.lastContentCache = ' '
+    }
+
+    if (pendingRawHtmlBoundary && output) {
+      if (newLines >= 2) {
+        pendingRawHtmlBoundary = false
+      }
+      else {
+        finishRawHtmlBlock(output.join(''), true)
+      }
     }
 
     // Add all output fragments

@@ -1695,6 +1695,28 @@ impl ConvertState {
       self.flush_streaming_blockquote_lines();
     }
 
+    if tag_id.is_some_and(Self::is_raw_html_block_tag) && self.raw_html_needs_boundary {
+      self.track_raw_html_markdown_context(self.buffer.len());
+      if self.raw_html_markdown {
+        self.raw_html_needs_boundary = false;
+      }
+    }
+    if !plain_text!(self)
+      && tag_id.is_some_and(Self::is_raw_html_block_tag)
+      && !enter_is_literal
+      && !self.in_table_cell()
+      && self.depth_map[TAG_PRE as usize] == 0
+      && output.is_some()
+      && (self.pending_raw_html_boundary
+        || configured_new_lines > 0
+        || self.block_open_prefix("").is_none())
+    {
+      self.raw_html_needs_boundary = true;
+      self.raw_html_markdown = false;
+      self.raw_html_scanned_to = self.buffer.len();
+      self.pending_raw_html_boundary = false;
+    }
+
     let output_start = self.buffer.len();
     self.write_output(
       true,
@@ -2453,6 +2475,28 @@ impl ConvertState {
       )));
     }
 
+    if !plain_text!(self)
+      && tag_id.is_some_and(Self::is_raw_html_block_tag)
+      && !self.in_table_cell()
+      && self.depth_map[TAG_PRE as usize] == 0
+    {
+      self.track_raw_html_markdown_context(self.buffer.len());
+      if self.raw_html_markdown {
+        self.raw_html_needs_boundary = false;
+      }
+      if !has_override && output.is_some() && self.block_open_prefix("").is_none() {
+        self.raw_html_needs_boundary = true;
+      }
+      if self.raw_html_block_depth() == 1 {
+        self.pending_raw_html_boundary = self.raw_html_needs_boundary && !has_override;
+        self.raw_html_needs_boundary = false;
+      }
+    }
+
+    if matches!(tag_id, Some(TAG_LI | TAG_BLOCKQUOTE)) {
+      self.pending_raw_html_boundary = false;
+    }
+
     // Get effective output
     let effective: Option<&str> = if let Some(ref sep) = table_separator {
       Some(sep.as_str())
@@ -2582,6 +2626,7 @@ impl ConvertState {
       && self.caption_frames.is_empty()
       && !self.list_rule_pending
       && !self.pending_inline_whitespace
+      && !self.pending_raw_html_boundary
       && !self.pre_fence_pending
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
@@ -2749,6 +2794,13 @@ impl ConvertState {
       self.emit_html_text(text);
       return;
     }
+    let pending_raw_boundary = self.pending_raw_html_boundary;
+    self.finish_raw_html_block(text, false);
+    let text = if pending_raw_boundary && !self.pending_raw_html_boundary {
+      text.trim_start_matches([' ', '\t', '\r', '\n'])
+    } else {
+      text
+    };
     let has_inline_gfm_hazard = std::mem::take(&mut self.text_buffer_has_inline_gfm_hazard);
     if text.is_empty() {
       return;
@@ -4829,6 +4881,36 @@ impl ConvertState {
     }
   }
 
+  fn finish_raw_html_block(&mut self, value: &str, generated: bool) {
+    if !self.pending_raw_html_boundary
+      || self.in_raw_html_block()
+      || (generated && value.starts_with('<'))
+      || !value.bytes().any(|byte| !is_whitespace(byte))
+    {
+      return;
+    }
+    self.pending_raw_html_boundary = false;
+    let mut newlines = 0;
+    for &byte in self.buffer.as_bytes().iter().rev() {
+      if byte == b'\n' {
+        newlines += 1;
+        if newlines == 2 {
+          return;
+        }
+      } else if !is_whitespace(byte) {
+        break;
+      }
+    }
+    // The separator belongs after the HTML close, even when it had no spacing.
+    for _ in newlines..2 {
+      self.buffer.push('\n');
+    }
+    self.buffer.push_str(&self.list_indent);
+    self.last_content_cache_len = 2 - newlines + self.list_indent.len();
+    self.has_last_text_node = false;
+    self.last_text_node_contains_whitespace = false;
+  }
+
   #[inline]
   pub(crate) fn write_output(
     &mut self,
@@ -4839,6 +4921,13 @@ impl ConvertState {
     literal: bool,
   ) {
     let output_str = output.unwrap_or("");
+    if is_enter {
+      if configured_new_lines >= 2 {
+        self.pending_raw_html_boundary = false;
+      } else {
+        self.finish_raw_html_block(output_str, true);
+      }
+    }
     let is_line_boundary =
       || !literal && (output_str.starts_with('\n') || output_str.starts_with("\\\n"));
 

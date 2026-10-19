@@ -322,6 +322,9 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
           state.buffer.push(emittedTail)
         lastYieldedLength = emittedTail.length
       }
+      // The emitted prefix was observed above; only the mutable tail can
+      // still introduce a blank line inside the current raw HTML region.
+      bufferScan[1] = retainMutableFragments ? Math.max(0, state.buffer.length - 1) : state.buffer.length
       // Retained newlines were already scanned before compaction.
       bufferScan[2] = state.buffer.length
       if (bufferScan[5] === undefined)
