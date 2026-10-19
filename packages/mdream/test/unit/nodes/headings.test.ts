@@ -3,6 +3,34 @@ import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('headings $name', (engineConfig) => {
   it.each([
+    ['<blockquote><ul><li><h3>T</h3># x</li></ul></blockquote>', '> - ### T\n>\n>   \\# x'],
+    ['<blockquote><ul><li><h3>T</h3>- x</li></ul></blockquote>', '> - ### T\n>\n>   \\- x'],
+    ['<blockquote><ul><li><h3>T</h3>> x</li></ul></blockquote>', '> - ### T\n>\n>   \\> x'],
+    ['<blockquote><ul><li><h3>T</h3>1. x</li></ul></blockquote>', '> - ### T\n>\n>   1\\. x'],
+    ['<blockquote><ul><li>outer<ul><li><h3>T</h3># x</li></ul></li></ul></blockquote>', '> - outer\n>   - ### T\n>\n>     \\# x'],
+    ['<ul><li><blockquote><h3>T</h3># x</blockquote></li></ul>', '- \n  > ### T\n  >\n  > \\# x'],
+    ['<ul><li><h3>T</h3><strong> </strong>x</li></ul>', '- ### T\n\n  x'],
+    ['<blockquote><ul><li><h3>T</h3><strong> </strong>x</li></ul></blockquote>', '> - ### T\n>\n>   x'],
+    ['<ul><li><h3>T</h3><em><strong> </strong></em>x</li></ul>', '- ### T\n\n  x'],
+  ])('preserves heading boundaries through quotes and empty markers: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(engine.htmlToMarkdown(html)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(input))
+        output += chunk
+      expect(output, `chunkSize=${width}`).toBe(expected)
+    }
+  })
+
+  it.each([
     ['<ul><li><h2>Heading</h2><a href="/x"></a></li><li>next</li></ul>', '- ## Heading\n- next'],
     ['<ul><li><h2>Heading</h2><a href="/x"> </a>tail</li></ul>', '- ## Heading\n\n  tail'],
     ['<ul><li><h2>Heading</h2><a href="/x"><span></span></a></li><li>next</li></ul>', '- ## Heading\n- next'],

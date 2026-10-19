@@ -2239,8 +2239,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && !handler?.literalExit) {
         const packed = openMarkers[--openMarkerCount]!
-        // No marker opens with a newline; only a prefixed heading break does.
-        const restoresHeadingBreak = buff[packed >> 3]?.charCodeAt(0) === 10
+        // Only a heading separator adds a newline to an opener. Whitespace
+        // moved before the opener must not hide the separator it carries.
+        const restoresHeadingBreak = buff[packed >> 3]?.includes('\n')
         const idx = dropEmptyMarker(buff, packed, markerType, state.outputPositions)
         if (idx >= 0) {
           if (restoresHeadingBreak)

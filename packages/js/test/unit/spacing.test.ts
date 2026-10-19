@@ -16,6 +16,36 @@ async function streamConvert(chunks: string[]): Promise<string> {
 }
 
 describe('inline whitespace', () => {
+  it('restores a heading break when whitespace precedes an empty opener', async () => {
+    const html = '<ul><li><h3>T</h3><strong></strong>x</li></ul>'
+    const options = {
+      plugins: [createPlugin({
+        onNodeExit(element, state) {
+          if (element.name === 'strong') {
+            // Move whitespace before the opener, including its heading separator.
+            const index = state.buffer.length - 1
+            state.buffer[index] = ` ${state.buffer[index]}`
+          }
+        },
+      })],
+    }
+    const expected = '- ### T\n\n  x'
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `chunkSize=${width}`).toBe(expected)
+    }
+  })
+
   it('preserves whitespace between root-level inline siblings', () => {
     expect(htmlToMarkdown('<span>One</span> <span>Two</span>')).toBe('One Two')
     expect(htmlToMarkdown('<strong>One</strong>\n<strong>Two</strong>')).toBe('**One** **Two**')
