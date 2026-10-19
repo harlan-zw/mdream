@@ -281,6 +281,30 @@ describe.each(engines)('links $name', (engineConfig) => {
       .toBe('[![A](/i)](/x) Caption')
   })
 
+  // Text in a block nested in a link, such as the `<text>` of an `<svg>`, is
+  // written like any link text, so the link takes no label.
+  it.each([
+    ['<p>Go <a href="/cart" aria-label="Cart"><svg><text>x</text></svg></a></p>', 'Go [x](/cart)'],
+    ['<p>Go <a href="/cart" aria-label="Cart"><svg aria-hidden="true"><text>x</text></svg></a></p>', 'Go [x](/cart)'],
+    ['<div><a href="/x" title="Title"><div>Text</div></a></div>', '[Text](/x "Title")'],
+    ['<p><a href="/c"><svg><text>x</text></svg></a> now</p>', '[x](/c) now'],
+    ['<div><a href="/x"><div>Text</div></a> now</div>', '[Text](/x) now'],
+  ])('treats text in a block inside a link as link text in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} } })).toBe(expected)
+  })
+
+  it('treats text in a block inside a link as link text in every format', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<p>Go <a href="/cart" aria-label="Cart"><svg><text>x</text></svg></a></p>'
+    expect(htmlToMarkdown(html, { engine, format: 'text' })).toBe('Go x')
+    expect(htmlToMarkdown(html, { engine, format: 'html' })).toBe('<p>Go <a href="/cart">x</a></p>')
+    // Hidden text in the block is still no link text.
+    expect(htmlToMarkdown('<p>Go <a href="/cart" aria-label="Cart"><svg><text hidden>x</text></svg></a></p>', { engine, plugins: { filter: {} } }))
+      .toBe('Go [Cart](/cart)')
+  })
+
   it('preserves empty-image and empty-link fallback behavior', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<a href="/file" title="File:Photo"><img src="/photo.jpg" alt=""></a>'

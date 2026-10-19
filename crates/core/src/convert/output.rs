@@ -351,9 +351,14 @@ impl ConvertState {
         anchor_in_scope = true;
       }
     }
-    if anchor_in_scope {
-      return;
+    if !anchor_in_scope {
+      self.count_content_in_enclosing_link(scope_start);
     }
+  }
+
+  /// Content inside a block nested in a link is link content too: count it for
+  /// the nearest link before `scope_start` and the inline nodes up to its block.
+  pub(super) fn count_content_in_enclosing_link(&mut self, scope_start: usize) {
     let mut anchor_found = false;
     for parent in self.stack[..scope_start].iter_mut().rev() {
       if !anchor_found {

@@ -692,6 +692,77 @@ fn rendered_images_mark_block_and_anchor_scopes() {
   assert_eq!(outer_scope, "[![Alt](/i)](/x) after");
 }
 
+/// Text in a block nested in a link, such as the `<text>` of an `<svg>`, is
+/// written like any link text, so the link takes no label and a space after
+/// the link still separates it.
+#[test]
+fn text_in_a_block_inside_a_link_is_link_text() {
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let cases = [
+    (
+      r#"<p>Go <a href="/cart" aria-label="Cart"><svg><text>x</text></svg></a></p>"#,
+      "Go [x](/cart)",
+    ),
+    (
+      r#"<p>Go <a href="/cart" aria-label="Cart"><svg aria-hidden="true"><text>x</text></svg></a></p>"#,
+      "Go [x](/cart)",
+    ),
+    (
+      r#"<div><a href="/x" title="Title"><div>Text</div></a></div>"#,
+      r#"[Text](/x "Title")"#,
+    ),
+    (
+      r#"<p><a href="/c"><svg><text>x</text></svg></a> now</p>"#,
+      "[x](/c) now",
+    ),
+    (
+      r#"<div><a href="/x"><div>Text</div></a> now</div>"#,
+      "[Text](/x) now",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "{html}");
+    assert_eq!(html_to_markdown(html, filter.clone()), expected, "{html}");
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      filter.clone(),
+      filter.clone().with_max_node_bytes(4),
+    ] {
+      let one_shot = html_to_markdown(html, options.clone());
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, one_shot, "{html} width={width}");
+      }
+    }
+  }
+
+  let html = r#"<p>Go <a href="/cart" aria-label="Cart"><svg><text>x</text></svg></a></p>"#;
+  assert_eq!(convert_text(html), "Go x");
+  assert_eq!(
+    html_to_html(html, HtmlToMarkdownOptions::default()),
+    r#"<p>Go <a href="/cart">x</a></p>"#
+  );
+  // Hidden text in the block is still no link text.
+  assert_eq!(
+    html_to_markdown(
+      r#"<p>Go <a href="/cart" aria-label="Cart"><svg><text hidden>x</text></svg></a></p>"#,
+      filter,
+    ),
+    "Go [Cart](/cart)"
+  );
+}
+
 #[test]
 fn linked_images_respect_mixed_case_builtin_override_scopes() {
   for (html, name, is_inline, expected) in [

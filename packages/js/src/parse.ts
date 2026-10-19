@@ -67,7 +67,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { parserTagHandlers } from './parser-tags'
-import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
+import { countContentInEnclosingLink, decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
 
 // A tag outside the dictionary with no override renders only its text, inline
 // with zero spacing, as in the Rust engine: `<x>X</x><y>Y</y>` is `XY`.
@@ -1381,6 +1381,9 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     const hidden = textNode.excludedFromMarkdown || (isBlank && !wasBlank)
     if (hidden || isBlank)
       countHiddenLinkText(parentsToIncrement, hidden)
+    else if (!parentsToIncrement.some(parent => parent.tagId === TAG_A))
+      // Visible text in a block nested in the link, such as `<svg><text>`.
+      countContentInEnclosingLink(firstBlockParent)
   }
   state.lastTextNode = textNode
 }

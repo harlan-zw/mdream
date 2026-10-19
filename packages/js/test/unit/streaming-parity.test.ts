@@ -656,6 +656,16 @@ describe('streaming parity with the Rust core', () => {
     await expectStreamingParity(html)
   })
 
+  it.each([
+    ['<p>Go <a href="/cart" aria-label="Cart"><svg><text>x</text></svg></a></p>', 'Go [x](/cart)'],
+    ['<div><a href="/x" title="Title"><div>Text</div></a></div>', '[Text](/x "Title")'],
+    ['<p><a href="/c"><svg><text>x</text></svg></a> now</p>', '[x](/c) now'],
+  ])('keeps text in a block inside a link as link text across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    for (const format of ['markdown', 'text', 'html'] as const)
+      await expectStreamingParity(html, { format })
+  })
+
   it.each(['html', 'text'] as const)('keeps linked-image %s output stable across every split', async (format) => {
     await expectStreamingParity(
       '<a href="/x" title="Title"><img src="/i" alt="Alt"></a>',

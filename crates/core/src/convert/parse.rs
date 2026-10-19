@@ -498,8 +498,16 @@ impl ConvertState {
     for idx in up_to..self.stack.len() {
       self.stack[idx].child_text_node_index += 1;
     }
-    if (excluded || blank) && self.depth_map[TAG_A as usize] > 0 {
-      self.count_hidden_link_text(up_to, excluded);
+    if self.depth_map[TAG_A as usize] > 0 {
+      if excluded || blank {
+        self.count_hidden_link_text(up_to, excluded);
+      } else if !self.stack[up_to..]
+        .iter()
+        .any(|node| node.tag_id == Some(TAG_A))
+      {
+        // Visible text in a block nested in the link, such as `<svg><text>`.
+        self.count_content_in_enclosing_link(up_to);
+      }
     }
   }
 

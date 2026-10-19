@@ -649,9 +649,16 @@ export function markRenderedChildContent(node: Node): void {
       break
     parent = parent.parent
   }
-  if (anchorInScope)
-    return
+  if (!anchorInScope)
+    countContentInEnclosingLink(parent)
+}
 
+/**
+ * Content inside a block nested in a link is link content too: count it for
+ * the nearest link above `block` and the inline nodes up to its block.
+ */
+export function countContentInEnclosingLink(block: ElementNode | null | undefined): void {
+  let parent = block
   let anchorFound = false
   while (parent?.parent) {
     parent = parent.parent
