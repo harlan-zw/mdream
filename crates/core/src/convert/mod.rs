@@ -2993,6 +2993,17 @@ impl ConvertState {
     if self.empty_item_hazard {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
+    // A future adjacent opener needs the character before the whole delimiter
+    // run. Keep a run crossing the cut, together with its preceding context.
+    if let Some(&mark @ (b'*' | b'~')) = self.buffer.as_bytes().get(drain_end) {
+      let mut run_start = drain_end;
+      while run_start > 0 && self.buffer.as_bytes()[run_start - 1] == mark {
+        run_start -= 1;
+      }
+      if run_start < drain_end {
+        drain_end = keep_two_before(&self.buffer, run_start);
+      }
+    }
     if drain_end == 0 {
       return;
     }
@@ -3274,6 +3285,23 @@ mod tests {
   use super::*;
   use crate::MarkdownStreamProcessor;
   use crate::types::{ExtractionConfig, PluginConfig};
+
+  #[test]
+  fn streamed_prefix_retains_context_before_a_delimiter_run() {
+    let mut state = ConvertState::new(
+      HtmlToMarkdownOptions::default(),
+      4096,
+      OutputFormat::Markdown,
+    );
+    for mark in ['*', '~'] {
+      state.buffer = format!("prefix a{}", mark.to_string().repeat(32));
+      state.last_yielded_length = state.buffer.len();
+      state.last_content_cache_len = 2;
+      state.drain_streamed_prefix();
+      assert!(state.buffer.starts_with(" a"), "{:?}", state.buffer);
+      assert_eq!(state.buffer.len(), 34);
+    }
+  }
 
   #[test]
   fn text_pieces_defer_child_counters_until_the_node_ends() {

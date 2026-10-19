@@ -8,6 +8,10 @@ import { htmlToText } from '../../src/text'
 // into raw HTML; a closer that cannot close is followed by a character
 // reference, which starts with punctuation.
 const cases: [string, string][] = [
+  ['<p><i>a</i><b><a href="/y">x</a></b></p>', '*a*<strong>[x](/y)</strong>'],
+  ['<p><b><a href="/x">a</a></b><i>c</i></p>', '**[a](/x)***&#99;*'],
+  ['<p><b><i>a</i></b><b><a href="/y">x</a></b></p>', '***a***<strong>[x](/y)</strong>'],
+  ['<p><b><a href="/x">a</a></b><b><i>c</i></b></p>', '**[a](/x)*****&#99;***'],
   ['<p>a<strong><a href="/x">b</a></strong></p>', 'a<strong>[b](/x)</strong>'],
   ['<p><strong><a href="/x">b</a></strong>c</p>', '**[b](/x)**&#99;'],
   ['<p>a<b><a href="/x">b</a></b>c</p>', 'a<strong>[b](/x)</strong>c'],

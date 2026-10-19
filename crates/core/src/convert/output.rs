@@ -1212,10 +1212,15 @@ impl ConvertState {
   /// The element at `depth` closed: finish its pair, or wait for the byte
   /// written after its closer. A heading slug reads a character reference as
   /// written, so a closer there gets none while slugs are collected.
+  #[inline]
   pub(crate) fn close_flank_pair(&mut self, depth: usize) {
     if self.flank_pairs.is_empty() {
       return;
     }
+    self.close_pending_flank_pair(depth);
+  }
+
+  fn close_pending_flank_pair(&mut self, depth: usize) {
     if let Some(index) = self
       .flank_pairs
       .iter()
@@ -1252,7 +1257,14 @@ impl ConvertState {
 
   /// At the end of each event, decide each opener whose content is now
   /// permanent and each closer whose next byte is written.
+  #[inline]
   pub(crate) fn settle_flank_pairs(&mut self) {
+    if !self.flank_pairs.is_empty() {
+      self.settle_pending_flank_pairs();
+    }
+  }
+
+  fn settle_pending_flank_pairs(&mut self) {
     let mut index = 0;
     while index < self.flank_pairs.len() {
       let pair = self.flank_pairs[index];
@@ -1290,13 +1302,20 @@ impl ConvertState {
           self.flank_pairs.remove(index);
           continue;
         }
-        let [previous, before] = match pair.offset {
-          0 => self.flushed_tail,
-          1 => [self.flushed_tail[1], bytes[0]],
-          offset => [bytes[offset - 2], bytes[offset - 1]],
+        let needs_raw = first == FLANK_PUNCTUATION && {
+          let mut run_start = pair.offset;
+          while run_start > 0 && bytes[run_start - 1] == delimiter[0] {
+            run_start -= 1;
+          }
+          let [previous, before] = match run_start {
+            0 => self.flushed_tail,
+            1 => [self.flushed_tail[1], bytes[0]],
+            offset => [bytes[offset - 2], bytes[offset - 1]],
+          };
+          flank_class(previous, Some(before)) == FLANK_WORD
         };
         self.flank_pairs[index].offset = usize::MAX;
-        if first == FLANK_PUNCTUATION && flank_class(previous, Some(before)) == FLANK_WORD {
+        if needs_raw {
           self.flank_pairs[index].state = FlankState::Raw;
           self.replace_flank_bytes(pair.offset, delimiter.len(), FLANK_RAW_OPEN[kind]);
         } else {
@@ -1305,7 +1324,10 @@ impl ConvertState {
         index += 1;
         continue;
       }
-      let next = pair.offset + delimiter.len();
+      let mut next = pair.offset + delimiter.len();
+      while next < bytes.len() && bytes[next] == delimiter[0] {
+        next += 1;
+      }
       if in_place && next == bytes.len() {
         index += 1;
         continue;

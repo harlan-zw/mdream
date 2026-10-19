@@ -8,6 +8,10 @@ type TestEngine = (typeof engines)[number]['engine']
 // other cannot flank. Both engines write the pair as raw HTML when its opener
 // cannot open, and follow a closer that cannot close with a character reference.
 const cases: [string, string][] = [
+  ['<p><i>a</i><b><a href="/y">x</a></b></p>', '*a*<strong>[x](/y)</strong>'],
+  ['<p><b><a href="/x">a</a></b><i>c</i></p>', '**[a](/x)***&#99;*'],
+  ['<p><b><i>a</i></b><b><a href="/y">x</a></b></p>', '***a***<strong>[x](/y)</strong>'],
+  ['<p><b><a href="/x">a</a></b><b><i>c</i></b></p>', '**[a](/x)*****&#99;***'],
   ['<p>a<strong><a href="/x">b</a></strong></p>', 'a<strong>[b](/x)</strong>'],
   ['<p><strong><a href="/x">b</a></strong>c</p>', '**[b](/x)**&#99;'],
   ['<p>a<em><img src="/i.png" alt="i"></em>c</p>', 'a<em>![i](/i.png)</em>c'],
@@ -51,6 +55,26 @@ async function streamConvert(engine: TestEngine, html: string, chunkSize: number
 }
 
 describe.each(engines)('emphasis that cannot flank $name', (engineConfig) => {
+  it('retains the character before a long delimiter run across flushes', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const run = '*'.repeat(32)
+    const options = { plugins: { tagOverrides: { span: { enter: run } } } }
+    const parts = ['<p>a<span></span>', '<b>', '<a href="/y">x</a></b></p>']
+    const expected = `a${run}<strong>[x](/y)</strong>`
+    expect(engine.htmlToMarkdown(parts.join(''), options)).toBe(expected)
+    const stream = new ReadableStream<string>({
+      start(controller) {
+        for (const part of parts)
+          controller.enqueue(part)
+        controller.close()
+      },
+    })
+    let output = ''
+    for await (const chunk of engine.streamHtmlToMarkdown(stream, options))
+      output += chunk
+    expect(output).toBe(expected)
+  })
+
   it.each(cases)('converts %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(engine.htmlToMarkdown(html)).toBe(expected)

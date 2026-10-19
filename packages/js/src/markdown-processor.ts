@@ -1441,6 +1441,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   const flankElements: ElementNode[] = []
   const flankStates: number[] = []
   const flankFragments: number[] = []
+  let pendingFlankCount = 0
   const clean = options.clean
   const cleanRules = typeof clean === 'object' && clean !== null ? clean : undefined
   const cleanEmptyLinkText = clean === true || cleanRules?.emptyLinkText === true
@@ -2462,6 +2463,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       flankElements.push(element)
       flankStates.push(FLANK_OPENING)
       flankFragments.push(buff.length - 1)
+      pendingFlankCount++
     }
 
     updateListIndent(state, element, eventType)
@@ -2486,12 +2488,20 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
 
   function dropFlankPair(index: number): void {
-    flankElements.splice(index, 1)
-    flankStates.splice(index, 1)
-    flankFragments.splice(index, 1)
+    if (flankFragments[index] !== -1)
+      pendingFlankCount--
+    for (let next = index + 1; next < flankElements.length; next++) {
+      flankElements[next - 1] = flankElements[next]!
+      flankStates[next - 1] = flankStates[next]!
+      flankFragments[next - 1] = flankFragments[next]!
+    }
+    flankElements.pop()
+    flankStates.pop()
+    flankFragments.pop()
   }
 
   function clearFlankPairs(): void {
+    pendingFlankCount = 0
     flankElements.length = 0
     flankStates.length = 0
     flankFragments.length = 0
@@ -2543,6 +2553,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && flankClass(charBeforeRun(buffer, closer, -1, delimiter.charCodeAt(0))) === FLANK_PUNCTUATION) {
         flankStates[index] = FLANK_CLOSING
         flankFragments[index] = closer
+        pendingFlankCount++
         return
       }
     }
@@ -2584,8 +2595,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           continue
         }
         const kept = value!.length - delimiter.length
-        const before = kept > 0 ? value!.charCodeAt(kept - 1) : lastOutputChar(buffer, fragment)
-        if (firstClass === FLANK_PUNCTUATION && flankClass(before) === FLANK_WORD) {
+        if (firstClass === FLANK_PUNCTUATION && flankClass(kept > 0 ? value!.charCodeAt(kept - 1) : charBeforeRun(buffer, fragment, -1, delimiter.charCodeAt(0))) === FLANK_WORD) {
           replaceFlankText(fragment, kept, delimiter.length, FLANK_RAW_OPEN[type]!)
           flankStates[index] = FLANK_RAW
         }
@@ -2593,16 +2603,26 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           flankStates[index] = FLANK_KEPT
         }
         flankFragments[index] = -1
+        pendingFlankCount--
         continue
       }
       let next = fragment + 1
-      while (next < buffer.length && !buffer[next])
+      let offset = 0
+      const mark = delimiter.charCodeAt(0)
+      while (next < buffer.length) {
+        const following = buffer[next]!
+        while (offset < following.length && following.charCodeAt(offset) === mark)
+          offset++
+        if (offset < following.length)
+          break
         next++
+        offset = 0
+      }
       if (value === delimiter && next === buffer.length)
         continue
-      const code = next < buffer.length ? buffer[next]!.charCodeAt(0) : -1
+      const code = next < buffer.length ? buffer[next]!.charCodeAt(offset) : -1
       if (value === delimiter && isAsciiAlphanumeric(code))
-        replaceFlankText(next, 0, 1, `&#${code};`)
+        replaceFlankText(next, offset, 1, `&#${code};`)
       dropFlankPair(index--)
     }
   }
@@ -2621,7 +2641,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (flankElements.length !== 0) {
       if (event.type === NodeEventExit && node.type === ELEMENT_NODE)
         closeFlankPair(node as ElementNode)
-      settleFlankPairs()
+      if (pendingFlankCount !== 0)
+        settleFlankPairs()
     }
   }
 
