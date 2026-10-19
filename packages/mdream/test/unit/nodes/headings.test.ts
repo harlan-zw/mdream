@@ -126,4 +126,18 @@ describe.each(engines)('headings $name', (engineConfig) => {
     const plugins = { tagOverrides: { h3: { enter: '', exit: '' } } }
     expect(htmlToMarkdown(html, { engine, plugins })).toBe(expected)
   })
+
+  // The fence of a `<pre>` after the heading pays the break the heading owes,
+  // even when the `<pre>`'s first child opens it, as highlighted code does.
+  it.each([
+    ['<ul><li><h3>T</h3><pre><span>x</span></pre></li></ul>', '- ### T\n\n  ```\n  x\n  ```'],
+    ['<ol><li><h2>Install</h2><pre class="language-sh"><span class="token function">npm</span> install mdream</pre></li><li>b</li></ol>', '1. ## Install\n\n   ```sh\n   npm install mdream\n   ```\n\n2. b'],
+    ['<ul><li><h3>T</h3><div class="highlight"><pre><span></span><span class="n">x</span></pre></div></li></ul>', '- ### T\n\n  ```\n  x\n  ```'],
+    ['<ul><li>a<ul><li><h3>T</h3><pre><div>x</div></pre>y</li></ul></li></ul>', '- a\n  - ### T\n\n    ```\n    x\n    ```\n\n    y'],
+  ])('keeps the code after a heading in a list item: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    const plugins = { tagOverrides: { span: 'strong' } }
+    expect(htmlToMarkdown(html, { engine, plugins })).toBe(expected)
+  })
 })

@@ -2587,6 +2587,9 @@ impl ConvertState {
     self.flush_streaming_blockquote_lines();
 
     self.pre_fence_pending = false;
+    // The fence opens its own block, which is the break a heading before it
+    // owed; written later, that break would land inside the code.
+    self.heading_break_pending = false;
     self.pre_fence_owner_depth = self.pre_fence_pending_depth;
     let li_depth = self.depth_map[TAG_LI as usize];
     let fence = if li_depth > 0 {

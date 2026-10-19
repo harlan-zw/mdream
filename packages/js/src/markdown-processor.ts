@@ -1187,6 +1187,9 @@ function collapseNestedBlockquoteSeparator(buffer: string[], positions?: OutputP
  */
 function flushPreFence(state: MarkdownState): void {
   state.preFencePending = false
+  // The fence opens its own block, which is the break a heading before it
+  // owed; written later, that break would land inside the code.
+  state.headingBreakPending = false
   state.preFenceOwnerDepth = state.preFencePendingDepth
   const lang = state.preFenceLang || ''
   const liDepth = state.depthMap[TAG_LI] || 0

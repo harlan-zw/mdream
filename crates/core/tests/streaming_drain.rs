@@ -2125,6 +2125,38 @@ fn streaming_heading_in_list_item_keeps_its_own_line() {
   }
 }
 
+// A `<pre>` fence opened by its first child pays the break a heading in the
+// list item owes, at every cut.
+#[test]
+fn streaming_code_block_after_list_heading_keeps_its_content() {
+  for (html, expected) in [
+    (
+      "<ul><li><h3>T</h3><pre><span>x</span></pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ol><li><h2>Install</h2><pre class=\"language-sh\"><span class=\"token function\">npm</span> install mdream</pre></li><li>b</li></ol>",
+      "1. ## Install\n\n   ```sh\n   npm install mdream\n   ```\n\n2. b",
+    ),
+    (
+      "<blockquote><ul><li><h3>T</h3><pre>\n<span>x</span></pre></li></ul></blockquote>",
+      "> - ### T\n>\n>   ```\n>   x\n>   ```",
+    ),
+    (
+      "<ul><li><h3>T</h3><pre><span></span></pre>x</li></ul>",
+      "- ### T\n\n  ```\n  \n  ```\n\n  x",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // An empty `<li>` inserts a newline at its marker's line start when it resolves,
 // so the line stays mutable. Streaming used to yield the marker first, turning
 // one-shot's `- a\n\n  -` into `- a\n  --`.

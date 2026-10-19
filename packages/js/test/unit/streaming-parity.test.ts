@@ -192,6 +192,19 @@ describe('streaming parity with the Rust core', () => {
     await expectEverySplitParity(html)
   })
 
+  // A `<pre>` fence opened by its first child pays the break a heading in the
+  // list item owes, so that break never lands inside the code.
+  it.each([
+    ['<ul><li><h3>T</h3><pre><span>x</span></pre></li></ul>', '- ### T\n\n  ```\n  x\n  ```'],
+    ['<ol><li><h2>Install</h2><pre class="language-sh"><span class="token function">npm</span> install mdream</pre></li><li>b</li></ol>', '1. ## Install\n\n   ```sh\n   npm install mdream\n   ```\n\n2. b'],
+    ['<blockquote><ul><li><h3>T</h3><pre>\n<span>x</span></pre></li></ul></blockquote>', '> - ### T\n>\n>   ```\n>   x\n>   ```'],
+    ['<ul><li><h3>T</h3><pre><span></span></pre>x</li></ul>', '- ### T\n\n  ```\n  \n  ```\n\n  x'],
+  ])('keeps the code after a heading in a list item across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
+  })
+
   it.each([
     '<summary>text <svg></svg></summary>',
     '<details><summary>text <svg><polyline points="1 2"></polyline></svg></summary><p>b</p></details>',

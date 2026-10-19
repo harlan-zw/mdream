@@ -5405,6 +5405,54 @@ fn a_heading_in_a_list_item_keeps_its_own_line() {
 }
 
 #[test]
+fn a_code_block_after_a_heading_in_a_list_item_keeps_its_content() {
+  // The fence pays the break the heading owes. A `<pre>` whose first child
+  // opens the fence, as highlighted code does, used to get that break again
+  // inside the code.
+  for (html, expected) in [
+    (
+      "<ul><li><h3>T</h3><pre><span>x</span></pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li><h3>T</h3><pre>\n<span>x</span></pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ol><li><h2>Install</h2><pre class=\"language-sh\"><span class=\"token function\">npm</span> install mdream</pre></li><li>b</li></ol>",
+      "1. ## Install\n\n   ```sh\n   npm install mdream\n   ```\n\n2. b",
+    ),
+    (
+      "<ul><li><h3>T</h3><div class=\"highlight\"><pre><span></span><span class=\"n\">x</span></pre></div></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>a<ul><li><h3>T</h3><pre><div>x</div></pre>y</li></ul></li></ul>",
+      "- a\n  - ### T\n\n    ```\n    x\n    ```\n\n    y",
+    ),
+    (
+      "<blockquote><ul><li><h3>T</h3><pre><img src=\"a.png\" alt=\"i\">x</pre></li></ul></blockquote>",
+      "> - ### T\n>\n>   ```\n>   ![i](a.png)x\n>   ```",
+    ),
+    (
+      "<ul><li><h3>T</h3><pre><span></span></pre>x</li></ul>",
+      "- ### T\n\n  ```\n  \n  ```\n\n  x",
+    ),
+    // A `<code>` child or a direct text node already opened the fence first.
+    (
+      "<ul><li><h3>T</h3><pre><code>x</code></pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li><h3>T</h3><pre>x</pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
 fn a_heading_without_an_atx_prefix_keeps_its_hash_unescaped() {
   // No `#` prefix is written in either case, so there is no closing sequence to
   // protect and a backslash would be literal content.
