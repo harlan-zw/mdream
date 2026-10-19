@@ -4220,7 +4220,9 @@ impl ConvertState {
   /// exceeds `self.wrap_width` characters. Words are never split, so a single
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
   /// A break only ever replaces an inter-word space, so words joined across
-  /// inline boundaries (e.g. `foo**bar**`) stay intact. `separator` is a
+  /// inline boundaries (e.g. `foo**bar**`) stay intact. In Markdown a word
+  /// that would open a block at the start of a line keeps its space and
+  /// overflows too (`opens_block_at_line_start`). `separator` is a
   /// pending space trimmed from a closed inline element, which wraps like a
   /// leading space of `text`.
   fn push_text_wrapped(
@@ -4253,7 +4255,11 @@ impl ConvertState {
       let word_len = word.chars().count();
       let need_space = if first { first_needs_space } else { true };
 
-      if need_space && col > prefix_len && col + 1 + word_len > width {
+      if need_space
+        && col > prefix_len
+        && col + 1 + word_len > width
+        && (plain_text!(self) || !Self::opens_block_at_line_start(word.as_bytes()))
+      {
         self.push_code_span_content("\n", true);
         self.push_code_span_content(&prefix, true);
         col = prefix_len;
@@ -4272,6 +4278,28 @@ impl ConvertState {
       self.push_code_span_content(" ", true);
     }
     self.last_content_cache_len = self.buffer.len() - buf_start;
+  }
+
+  /// Whether `word`, moved to the start of a line, would open a block there: a
+  /// quote, an ATX heading, a list item, a code fence, a setext underline or a
+  /// thematic break. Text escaped mid-line leaves these markers bare, so a wrap
+  /// must not be what puts one at the start of a line.
+  fn opens_block_at_line_start(word: &[u8]) -> bool {
+    let Some(&first) = word.first() else {
+      return false;
+    };
+    match first {
+      b'>' => true,
+      b'#' => word.len() <= 6 && word.iter().all(|&byte| byte == b'#'),
+      b'+' => word.len() == 1,
+      b'-' | b'=' | b'*' | b'_' => word.iter().all(|&byte| byte == first),
+      b'`' | b'~' => word.len() >= 3 && word[..3].iter().all(|&byte| byte == first),
+      b'0'..=b'9' => {
+        let digits = word.iter().take_while(|byte| byte.is_ascii_digit()).count();
+        digits <= 9 && word.len() == digits + 1 && matches!(word[digits], b'.' | b')')
+      }
+      _ => false,
+    }
   }
 
   /// Emit frontmatter content.

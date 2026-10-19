@@ -1,9 +1,27 @@
+import type { MdreamOptions } from '../../src/types'
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../src/index'
+import { htmlToMarkdown, streamHtmlToMarkdown as streamWithOptions } from '../../src/index'
 import { streamHtmlToMarkdown } from '../../src/stream'
 
 const wrap = (html: string, width: number) => htmlToMarkdown(html, { wrapWidth: width })
 const HARD_BREAK = '  \n'
+
+async function expectEveryChunking(html: string, options: Partial<MdreamOptions>, expected: string): Promise<void> {
+  expect(htmlToMarkdown(html, options)).toBe(expected)
+  for (let size = 1; size <= html.length; size++) {
+    const stream = new ReadableStream<string>({
+      start(controller) {
+        for (let offset = 0; offset < html.length; offset += size)
+          controller.enqueue(html.slice(offset, offset + size))
+        controller.close()
+      },
+    })
+    let out = ''
+    for await (const chunk of streamWithOptions(stream, options))
+      out += chunk
+    expect(out, `chunk size ${size}`).toBe(expected)
+  }
+}
 
 describe('wrap width (issue #106)', () => {
   it('is a no-op when unset or zero', () => {
@@ -112,6 +130,29 @@ describe('wrap width (issue #106)', () => {
         out += chunk
       expect(out, `chunk size ${size}`).toBe(expected)
     }
+  })
+
+  // Text escaped mid-line leaves these markers bare, so a break before one
+  // would open a list, quote, heading or fence. The marker overflows instead.
+  it.each([
+    ['<p>The configuration guide explains each option in detail, so read it first <b>Price </b>- 5 dollars per month for every user seat.</p>', 80, 'The configuration guide explains each option in detail, so read it first **Price** -\n5 dollars per month for every user seat.'],
+    ['<p>The configuration guide explains each option in detail, so read it before <code>count </code>&gt; 5 triggers the warning in the log.</p>', 80, 'The configuration guide explains each option in detail, so read it before `count` >\n5 triggers the warning in the log.'],
+    ['<p>The configuration guide explains each option in detail, so read it to see <a href="/issues">Issue </a># 42 for the full discussion.</p>', 80, 'The configuration guide explains each option in detail, so read it to see [Issue](/issues) #\n42 for the full discussion.'],
+    ['<p>The configuration guide explains each option in detail, so read it until the <em>end </em>---</p><p>Next paragraph.</p>', 80, 'The configuration guide explains each option in detail, so read it until the *end* ---\n\nNext paragraph.'],
+    ['<p><span>aaaaa </span>- bbbb</p>', 6, 'aaaaa -\nbbbb'],
+    ['<p>aaaaa - bbbb</p>', 6, 'aaaaa -\nbbbb'],
+    ['<p>aaaaa &gt;b</p>', 6, 'aaaaa >b'],
+    ['<p>aaaaa ## b</p>', 6, 'aaaaa ##\nb'],
+    ['<p>aaaaa 1) bb</p>', 6, 'aaaaa 1)\nbb'],
+    ['<p>aaaaa ===</p>', 6, 'aaaaa ==='],
+    ['<ul><li>aaaaa - bbbb</li></ul>', 8, '- aaaaa -\n  bbbb'],
+    ['<details><summary>S</summary><code>aaaaaaaa </code>~~~</details><p>After.</p>', 12, '<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> ~~~</details>\n\n\n\nAfter.'],
+    ['<details><summary>S</summary><code>aaaaaaaa</code> - x</details><p>After.</p>', 12, '<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> -\nx</details>\n\n\n\nAfter.'],
+    ['<p>aaaaa * bbbb</p>', 6, 'aaaaa\n\\*\nbbbb'],
+    ['<p>aaaaa 1.5 bb</p>', 6, 'aaaaa\n1.5 bb'],
+    ['<p>aaaaa ####### b</p>', 6, 'aaaaa\n#######\nb'],
+  ] as const)('never breaks before a block marker: %s', async (html, width, expected) => {
+    await expectEveryChunking(html, { wrapWidth: width }, expected)
   })
 
   it('wraps identically across streaming chunks', async () => {

@@ -352,6 +352,67 @@ fn wrap_breaks_at_a_separator_trimmed_from_an_inline_element() {
   }
 }
 
+#[test]
+fn wrap_never_breaks_before_a_block_marker() {
+  // Text escaped mid-line leaves `-`, `>`, `#`, `1)`, `===` or `~~~` bare, so a
+  // break before one would open a list, quote, heading or fence. The marker
+  // keeps its space and overflows instead.
+  let wrap = |width| HtmlToMarkdownOptions::default().with_wrap_width(width);
+  for (html, width, expected) in [
+    (
+      "<p>The configuration guide explains each option in detail, so read it first <b>Price </b>- 5 dollars per month for every user seat.</p>",
+      80,
+      "The configuration guide explains each option in detail, so read it first **Price** -\n5 dollars per month for every user seat.",
+    ),
+    (
+      "<p>The configuration guide explains each option in detail, so read it before <code>count </code>&gt; 5 triggers the warning in the log.</p>",
+      80,
+      "The configuration guide explains each option in detail, so read it before `count` >\n5 triggers the warning in the log.",
+    ),
+    (
+      "<p>The configuration guide explains each option in detail, so read it to see <a href=\"/issues\">Issue </a># 42 for the full discussion.</p>",
+      80,
+      "The configuration guide explains each option in detail, so read it to see [Issue](/issues) #\n42 for the full discussion.",
+    ),
+    (
+      "<p>The configuration guide explains each option in detail, so read it until the <em>end </em>---</p><p>Next paragraph.</p>",
+      80,
+      "The configuration guide explains each option in detail, so read it until the *end* ---\n\nNext paragraph.",
+    ),
+    ("<p><span>aaaaa </span>- bbbb</p>", 6, "aaaaa -\nbbbb"),
+    ("<p>aaaaa - bbbb</p>", 6, "aaaaa -\nbbbb"),
+    ("<p>aaaaa &gt;b</p>", 6, "aaaaa >b"),
+    ("<p>aaaaa ## b</p>", 6, "aaaaa ##\nb"),
+    ("<p>aaaaa 1) bb</p>", 6, "aaaaa 1)\nbb"),
+    ("<p>aaaaa ===</p>", 6, "aaaaa ==="),
+    ("<ul><li>aaaaa - bbbb</li></ul>", 8, "- aaaaa -\n  bbbb"),
+    // A raw HTML line skips the GFM escape, so `~~~` would open a fence that
+    // swallows the rest of the document.
+    (
+      "<details><summary>S</summary><code>aaaaaaaa </code>~~~</details><p>After.</p>",
+      12,
+      "<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> ~~~</details>\n\n\n\nAfter.",
+    ),
+    (
+      "<details><summary>S</summary><code>aaaaaaaa</code> - x</details><p>After.</p>",
+      12,
+      "<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> -\nx</details>\n\n\n\nAfter.",
+    ),
+    // Escaped or not a marker: the break stays.
+    ("<p>aaaaa * bbbb</p>", 6, "aaaaa\n\\*\nbbbb"),
+    ("<p>aaaaa 1.5 bb</p>", 6, "aaaaa\n1.5 bb"),
+    ("<p>aaaaa ####### b</p>", 6, "aaaaa\n#######\nb"),
+  ] {
+    assert_every_chunking(html, &wrap(width), expected);
+  }
+  // Plain text has no block syntax to protect.
+  assert_every_text_chunking(
+    "<p><span>aaaaa </span>- bbbb</p>",
+    &wrap(6),
+    "aaaaa\n- bbbb",
+  );
+}
+
 // ── tagOverrides spacing on a built-in inline tag ──
 
 fn md_block_override(html: &str, tag: &str) -> String {

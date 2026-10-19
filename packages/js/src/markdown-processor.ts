@@ -761,11 +761,22 @@ function columnWidth(value: string, start: number): number {
 }
 
 /**
+ * Whether `word`, moved to the start of a line, would open a block there: a
+ * quote, an ATX heading, a list item, a code fence, a setext underline or a
+ * thematic break. Text escaped mid-line leaves these markers bare, so a wrap
+ * must not be what puts one at the start of a line. Parity with the Rust
+ * `opens_block_at_line_start`.
+ */
+const BLOCK_START_WORD = /^(?:>|`{3}|~{3}|(?:#{1,6}|\+|-+|=+|\*+|_+|\d{1,9}[.)])$)/
+
+/**
  * Hard-wrap `value` on spaces so no output line exceeds `width` code points.
  * Words are never split, so an oversized token (e.g. a URL) overflows rather
- * than breaking, and a break only ever replaces an inter-word space. `value`
- * already carries any significant leading/trailing space (added upstream), so
- * those boundary spaces are preserved. Parity with the Rust `push_text_wrapped`.
+ * than breaking, and a break only ever replaces an inter-word space. A word
+ * that would open a block at the start of a line keeps its space and
+ * overflows too. `value` already carries any significant leading/trailing
+ * space (added upstream), so those boundary spaces are preserved. Parity with
+ * the Rust `push_text_wrapped`.
  */
 function wrapText(value: string, col: number, width: number, prefix: string): string {
   const leading = value.charCodeAt(0) === 32
@@ -784,7 +795,7 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
       const word = value.slice(i, next)
       const wordLen = [...word].length
       const needSpace = first ? leading : true
-      if (needSpace && col > prefixLen && col + 1 + wordLen > width) {
+      if (needSpace && col > prefixLen && col + 1 + wordLen > width && !BLOCK_START_WORD.test(word)) {
         out += `\n${prefix}`
         col = prefixLen
       }
