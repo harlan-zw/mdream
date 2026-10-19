@@ -1318,21 +1318,22 @@ impl ConvertState {
         index += 1;
         continue;
       }
+      // The empty-pair check can still drop an opener while it is open.
+      if pair.state == FlankState::Opening
+        && self
+          .open_markers
+          .iter()
+          .any(|marker| marker.output_start == pair.offset)
+      {
+        index += 1;
+        continue;
+      }
       let kind = pair.kind as usize;
       let delimiter = FLANK_DELIMITER[kind].as_bytes();
       let bytes = self.buffer.as_bytes();
       let in_place = bytes.get(pair.offset) == Some(&delimiter[0])
         && (delimiter.len() == 1 || bytes.get(pair.offset + 1) == Some(&delimiter[0]));
       if pair.state == FlankState::Opening {
-        // The empty-pair check can still drop an opener while it is open.
-        if self
-          .open_markers
-          .iter()
-          .any(|marker| marker.output_start == pair.offset)
-        {
-          index += 1;
-          continue;
-        }
         if !in_place {
           self.flank_pairs.remove(index);
           self.pending_flank_count -= 1;
