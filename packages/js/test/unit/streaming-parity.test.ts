@@ -1,4 +1,5 @@
 import type { ElementNode, MdreamOptions } from '../../src/types'
+import { strictEqual } from 'node:assert'
 import { describe, expect, it } from 'vitest'
 import { clean } from '../../src/clean'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
@@ -937,4 +938,57 @@ describe('flattened declaration carry', () => {
       }
     }
   })
+})
+
+it.for(['label', 'plain', 'span'].flatMap(kind => [
+  { kind, name: 'unbroken' },
+  { kind, name: 'words' },
+]))('moves decoded trailing spaces past long $kind links with $name', async ({ kind, name }) => {
+  const text = name === 'unbroken' ? 'x'.repeat(65_536) : 'word '.repeat(13_100)
+  const blanks = '&#32;'.repeat(20)
+  const content = kind === 'span' ? `<span>${text}${blanks}</span>` : text + blanks
+  const label = kind === 'label' ? ' aria-label="Label"' : ''
+  const html = `<a href="/x"${label}>${content}</a>Next`
+  const expected = `[${text.trimEnd()}](/x) Next`
+  expect(htmlToMarkdown(html) === expected).toBe(true)
+  for (let width = 1; width <= 64; width++) {
+    let offset = 0
+    const stream = new ReadableStream<string>({
+      pull(controller) {
+        if (offset === 0) {
+          offset = html.indexOf('&#32;') - 8
+          controller.enqueue(html.slice(0, offset))
+        }
+        else if (offset < html.length) {
+          controller.enqueue(html.slice(offset, offset + width))
+          offset += width
+        }
+        else {
+          controller.close()
+        }
+      },
+    })
+    let output = ''
+    for await (const chunk of streamHtmlToMarkdown(stream))
+      output += chunk
+    strictEqual(output, expected, `width=${width}`)
+  }
+  for (let split = html.indexOf('&#32;') - 8; split < html.length; split++)
+    strictEqual(await streamConvertAtSplit(html, split), expected, `split=${split}`)
+  const textStart = html.indexOf(text)
+  for (let split = textStart; split <= textStart + 16; split++)
+    strictEqual(await streamConvertAtSplit(html, split), expected, `split=${split}`)
+})
+
+it.each([
+  ['<a href="/x" title="x&#11;">x</a>', '[x](/x "x\u000B")'],
+  ['<a href="/x">x&#11;&#32;&#32;</a>Next', '[x\u000B](/x) Next'],
+  ['<a href="https://example.com">https://example.com&#32;</a>Next', '<https://example.com> Next'],
+  ['<a href="/x" title="x ">x&#32;</a>Next', '[x](/x) Next'],
+  ['<a href="/x" title="x">x&#32;</a>Next', '[x](/x) Next'],
+  ['<a href="/x"><code>x&#32;</code></a>Next', '[`x `](/x)Next'],
+])('keeps link rewrites compatible with trailing spaces in %s', async (html, expected) => {
+  expect(htmlToMarkdown(html)).toBe(expected)
+  for (let width = 1; width <= html.length; width++)
+    expect(await streamConvert(html, width), `width=${width}`).toBe(expected)
 })

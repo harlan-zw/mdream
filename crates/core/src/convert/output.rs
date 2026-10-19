@@ -2078,9 +2078,13 @@ impl ConvertState {
     // That trim misses a space before an empty element (`<a>A <span></span></a>`).
     let text_end = self.buffer.trim_end_matches(' ').len();
     if self.link.bracket_emitted
-      && text_end > self.link.bracket_pos + 1
+      && (self.link.hold_released || text_end > self.link.bracket_pos + 1)
       && text_end < self.buffer.len()
-      && !is_whitespace(self.buffer.as_bytes()[text_end - 1])
+      && if text_end > 0 {
+        !is_whitespace(self.buffer.as_bytes()[text_end - 1])
+      } else {
+        self.has_flushed_tail() && !is_whitespace(self.flushed_tail[1])
+      }
       && self.code_spans.is_empty()
     {
       let removed = self.buffer.len() - text_end;
@@ -5445,7 +5449,9 @@ impl ConvertState {
 
 #[cfg(test)]
 mod tests {
-  use super::{ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_LI, TAG_P, push_decimal};
+  use super::{
+    ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_LI, TAG_P, URL_RESOLVE_SLACK, push_decimal,
+  };
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
 
   #[test]
@@ -5749,6 +5755,46 @@ mod tests {
           processor.state.code_span_closed_bytes,
           html.len()
         );
+      }
+    }
+  }
+
+  #[test]
+  fn long_links_move_decoded_trailing_spaces_past_the_close() {
+    let text = "x".repeat(65_536);
+    let blanks = "&#32;".repeat(20);
+    for html in [
+      format!(r#"<a href="/x" aria-label="Label">{text}{blanks}</a>Next"#),
+      format!(r#"<a href="/x">{text}{blanks}</a>Next"#),
+      format!(r#"<a href="/x"><span>{text}{blanks}</span></a>Next"#),
+    ] {
+      let expected = format!("[{text}](/x) Next");
+      assert_eq!(
+        crate::html_to_markdown(&html, HtmlToMarkdownOptions::default()),
+        expected
+      );
+      for width in 1..=64 {
+        let mut stream = crate::MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert!(
+          output == expected,
+          "width={width}, tail={:?}",
+          &output[output.len() - 40..]
+        );
+      }
+      let text_start = html.find(&text).unwrap();
+      let blanks_start = html.find("&#32;").unwrap();
+      let release = text_start + URL_RESOLVE_SLACK + 1 + "/x".len();
+      for split in (release - 8..=release + 8).chain(blanks_start - 8..html.len()) {
+        let mut stream = crate::MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut output = stream.process_chunk(&html[..split]);
+        output.push_str(&stream.process_chunk(&html[split..]));
+        output.push_str(&stream.finish());
+        assert!(output == expected, "split={split}");
       }
     }
   }

@@ -666,7 +666,14 @@ export const tagHandlers: Record<number, TagHandler> = {
       let title = node.attributes?.title
       // Check if title matches the last content to avoid duplication
       const lastContent = state.lastContentCache
-      if (lastContent === title) {
+      let titleEnd = title?.length || 0
+      while (titleEnd > 0) {
+        const code = title!.charCodeAt(titleEnd - 1)
+        if (code !== 32 && (code < 9 || code === 11 || code > 13))
+          break
+        titleEnd--
+      }
+      if (lastContent === title?.slice(0, titleEnd)) {
         title = ''
       }
       // GFM autolink shorthand: when the link text equals href and href is a

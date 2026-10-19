@@ -2002,6 +2002,30 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         openLinkFragment = -1
         return
       }
+      if (eventType === NodeEventExit && tagId === TAG_A
+        && handler === tagHandlers[TAG_A] && openLinkFragment !== -1
+        && !gfmLifecycle.openCodeSpans.length && lastOutputChar(buff) === 32) {
+        const bracket = openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment
+        let removed = 0
+        for (let index = buff.length - 1; index > bracket; index--) {
+          const fragment = buff[index]!
+          let end = fragment.length
+          while (end > 0 && fragment.charCodeAt(end - 1) === 32)
+            end--
+          removed += fragment.length - end
+          if (end > 0) {
+            const code = fragment.charCodeAt(end - 1)
+            if (code !== 32 && (code < 9 || code === 11 || code > 13)) {
+              trimTrailingSpaces(buff)
+              if (state.lastContentCache)
+                state.lastContentCache = state.lastContentCache.slice(0, Math.max(0, state.lastContentCache.length - removed))
+              state.pendingInlineWhitespace = true
+            }
+            break
+          }
+        }
+      }
+
       const res = handler[eventFn]({ node: element, state })
       if (typeof res === 'string') {
         if (res) {
