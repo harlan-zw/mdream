@@ -28,6 +28,12 @@ const cases: [string, string][] = [
   ['<ul><li>a<strong><code>b</code><ul><li>c</li></ul></strong>d</li></ul><p>next</p>', '- a<strong>`b`  - c</strong>d\n\nnext'],
   ['<div>a<strong>!b<figure><figcaption>c</figcaption></figure></strong>d</div><p>next</p>', 'a<strong>!b*c*</strong>d\n\nnext'],
   ['<div>a<strong>b<div>c!</div></strong>d</div><p>next</p>', 'a**b c!**&#100;\n\nnext'],
+  // `<kbd>`, `<samp>` and `<var>` are code spans, where delimiters are literal.
+  ['<p><kbd><strong>b!</strong>c</kbd></p>', '`**b!**c`'],
+  ['<p><kbd>a<strong>!b</strong></kbd></p>', '`a**!b**`'],
+  ['<p><samp><em>(b)</em>c</samp></p>', '`*(b)*c`'],
+  ['<p><var>a<em>!b</em>c</var></p>', '`a*!b*c`'],
+  ['<p>a<strong><kbd>b</kbd></strong>c</p>', 'a<strong>`b`</strong>c'],
 ]
 
 async function streamConvert(engine: TestEngine, html: string, chunkSize: number): Promise<string> {

@@ -1136,7 +1136,8 @@ impl ConvertState {
   }
 
   /// Track the emphasis opener an enter just wrote, unless raw HTML or code
-  /// keeps its delimiters literal anyway.
+  /// keeps its delimiters literal anyway. `<kbd>`, `<samp>` and `<var>` are
+  /// code spans too.
   #[inline]
   fn track_flank_opener(
     &mut self,
@@ -1156,6 +1157,9 @@ impl ConvertState {
       && self.caption_frames.is_empty()
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
+      && self.depth_map[TAG_KBD as usize] == 0
+      && self.depth_map[TAG_SAMP as usize] == 0
+      && self.depth_map[TAG_VAR as usize] == 0
       && !self.in_raw_html_block()
     {
       self.flank_pairs.push(FlankPair {

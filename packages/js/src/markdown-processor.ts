@@ -2447,11 +2447,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     // Raw HTML means no Markdown there: emphasis in code, `<pre>` or a raw block
-    // keeps its delimiters.
+    // keeps its delimiters. `<kbd>`, `<samp>` and `<var>` are code spans too.
     const flankType = eventType === NodeEventEnter && handlerOutput !== undefined ? INLINE_MARKER_TYPE[tagId]! : 0
     if (flankType >= 1 && flankType <= 4 && handlerOutput === FLANK_DELIMITER[flankType]
       && buff[buff.length - 1] === handlerOutput && !handler?.literalEnter && captionFrameCount === 0
-      && !state.depthMap[TAG_PRE] && !state.depthMap[TAG_CODE] && !insideRawHtmlRegion) {
+      && !state.depthMap[TAG_PRE] && !state.depthMap[TAG_CODE] && !state.depthMap[TAG_KBD]
+      && !state.depthMap[TAG_SAMP] && !state.depthMap[TAG_VAR] && !insideRawHtmlRegion) {
       flankElements.push(element)
       flankStates.push(FLANK_OPENING)
       flankFragments.push(buff.length - 1)

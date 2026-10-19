@@ -183,4 +183,18 @@ fn keeps_delimiters_where_a_fix_cannot_help() {
     ),
     "`a**[b]**c`"
   );
+  // `<kbd>`, `<samp>` and `<var>` are code spans as well.
+  for (html, expected) in [
+    ("<p><kbd><strong>b!</strong>c</kbd></p>", "`**b!**c`"),
+    ("<p><kbd>a<strong>!b</strong></kbd></p>", "`a**!b**`"),
+    ("<p><samp><em>(b)</em>c</samp></p>", "`*(b)*c`"),
+    ("<p><var>a<em>!b</em>c</var></p>", "`a*!b*c`"),
+    ("<p>a<strong><kbd>b</kbd></strong>c</p>", "a<strong>`b`</strong>c"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html:?}"
+    );
+  }
 }
