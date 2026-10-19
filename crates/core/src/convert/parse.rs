@@ -471,9 +471,14 @@ impl ConvertState {
 
   /// A blank that opens an inline element can be the only word separator,
   /// whether the element writes a delimiter, like `<strong>`, or nothing, like
-  /// a `<span>`.
-  fn is_inside_inline_element(&self) -> bool {
-    self.stack.last().is_some_and(|node| node.is_inline)
+  /// a `<span>`. A literal `tagOverrides` opener is not held back, so a stream
+  /// may already have sent it: the blank is dropped there, or it would split
+  /// the opener from the content.
+  fn keeps_leading_blank(&self) -> bool {
+    self
+      .stack
+      .last()
+      .is_some_and(|node| node.is_inline && !self.writes_literal_opener(node))
   }
 
   /// Depth and walk index for an emitted text node, plus its hazard flag.
@@ -529,7 +534,7 @@ impl ConvertState {
 
     let is_leading_blank =
       !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty();
-    if is_leading_blank && (!self.is_markdown() || !self.is_inside_inline_element()) {
+    if is_leading_blank && (!self.is_markdown() || !self.keeps_leading_blank()) {
       return;
     }
     if text_buffer.is_empty() {
@@ -652,7 +657,7 @@ impl ConvertState {
       && !contains_non_whitespace
       && child_text_node_index == 0
       && !self.stack.is_empty();
-    if is_leading_blank && (!self.is_markdown() || !self.is_inside_inline_element()) {
+    if is_leading_blank && (!self.is_markdown() || !self.keeps_leading_blank()) {
       return;
     }
     if text_buffer.is_empty() {

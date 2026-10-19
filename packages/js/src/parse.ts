@@ -113,9 +113,14 @@ function shouldProtectDecodedEntityReferences(state: ParseState): boolean {
 
 // A blank that opens an inline element can be the only word separator,
 // whether the element writes a delimiter, like `<strong>`, or nothing, like a
-// `<span>`.
-function isInlineElement(node: ElementNode): boolean {
-  return node.tagHandler?.isInline ?? node.tagId === -1
+// `<span>`. A literal `tagOverrides` opener is not held back, so a stream may
+// already have sent it: the blank is dropped there, or it would split the
+// opener from the content.
+function keepsLeadingBlank(node: ElementNode): boolean {
+  const handler = node.tagHandler
+  if (handler?.literalEnterHasOutput)
+    return false
+  return handler?.isInline ?? node.tagId === -1
 }
 
 const SCRIPT_DATA = 0
@@ -1318,7 +1323,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   // Whitespace-only text before an element's first child is indentation, but
   // in Markdown inline content after earlier text it is the only word separator.
   const isLeadingBlank = !inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex
-  if (isLeadingBlank && (state.plainText || !isInlineElement(state.currentNode))) {
+  if (isLeadingBlank && (state.plainText || !keepsLeadingBlank(state.currentNode))) {
     return
   }
 

@@ -664,6 +664,58 @@ fn separator_before_a_raw_line_break_is_dropped() {
 }
 
 #[test]
+fn blank_after_a_literal_override_opener_is_dropped() {
+  let with_override = |tag: &str, config: TagOverrideConfig| {
+    HtmlToMarkdownOptions::default()
+      .with_plugins(PluginConfig::default().with_tag_override(tag, config))
+  };
+  // The opener may already be streamed, so the blank cannot move in front of
+  // it, and after it the blank would split it from the content.
+  let span = with_override("span", TagOverrideConfig::wrap("**", "**"));
+  for (html, expected) in [
+    ("<p>a<span> <i>x</i></span>z</p>", "a***x***z"),
+    ("<p>a<span> <b>x</b></span></p>", "a****x****"),
+    ("<p>a<span> <span>x</span></span>z</p>", "a****x****z"),
+    ("<p>a<span> </span>z</p>", "a****z"),
+    ("<p>a<b><span> <i>x</i></span></b>z</p>", "a*****x*****z"),
+  ] {
+    assert_every_chunking(html, &span, expected);
+  }
+  assert_every_chunking(
+    "<p>a<u> <i>x</i></u>z</p>",
+    &with_override("u", TagOverrideConfig::wrap("__", "__")),
+    "a__*x*__z",
+  );
+  assert_every_chunking(
+    "<p>a<sup> <span>2</span></sup>z</p>",
+    &with_override("sup", TagOverrideConfig::wrap("^", "^")),
+    "a^2^z",
+  );
+  assert_every_chunking(
+    "<p>a<b> <i>x</i></b>z</p>",
+    &with_override("b", TagOverrideConfig::wrap("<B>", "</B>")),
+    "a<B>*x*</B>z",
+  );
+  // An override that writes no opener keeps the separator.
+  assert_every_chunking(
+    "<p>a<span> <i>x</i></span>z</p>",
+    &with_override("span", TagOverrideConfig::wrap("", "")),
+    "a *x*z",
+  );
+  assert_every_chunking(
+    "<p>a<span> <i>x</i></span>z</p>",
+    &with_override(
+      "span",
+      TagOverrideConfig {
+        exit: Some("!".to_string()),
+        ..Default::default()
+      },
+    ),
+    "a *x*!z",
+  );
+}
+
+#[test]
 fn code_like_content_is_left_as_written() {
   assert_eq!(md("<p><kbd>a<strong> x</strong></kbd></p>"), "`a** x**`");
   assert_eq!(md("<p><samp>a<em> x</em></samp></p>"), "`a* x*`");

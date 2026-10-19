@@ -214,8 +214,9 @@ export interface TextNode extends Node {
   /** Follows an end tag that closed nothing, so it gets no separator. */
   joinsPrevious?: boolean
   /**
-   * Whitespace that opens an inline element. While it stays whitespace it is
-   * placed as a word separator, and is not written as text.
+   * Whitespace that opens an inline element, other than one with a literal
+   * `tagOverrides` opener. While it stays whitespace it is placed as a word
+   * separator, and is not written as text.
    */
   leadingBlank?: boolean
   /**
@@ -438,6 +439,8 @@ export interface TagHandler {
    * strings so markers like `^`/`~` attach to adjacent content (issue #93).
    */
   literalEnter?: boolean
+  /** Whether a declarative literal enter string writes output. */
+  literalEnterHasOutput?: boolean
   /** When true, the `exit` string is a user-supplied tagOverride, exempt from empty-pair cleanup. */
   literalExit?: boolean
   /** Whether a declarative literal exit string writes output. */

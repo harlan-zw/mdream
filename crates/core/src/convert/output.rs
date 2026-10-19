@@ -5370,6 +5370,21 @@ impl ConvertState {
     node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)
   }
 
+  /// Whether a tag override writes a non-empty literal enter string for the
+  /// node.
+  pub(crate) fn writes_literal_opener(&self, node: &ElementNode) -> bool {
+    if !self.has_tag_overrides {
+      return false;
+    }
+    let ovs = self
+      .options
+      .plugins
+      .as_ref()
+      .and_then(|p| p.tag_overrides.as_ref());
+    Self::override_for_node(ovs, self.override_idx.as_deref(), node)
+      .is_some_and(|ov| ov.enter.as_ref().is_some_and(|s| !s.is_empty()))
+  }
+
   /// Whether the tag writes visible inline Markdown around its content:
   /// emphasis, code ticks, raw-tag wrappers, or an anchor that emits markup.
   /// An override carrying non-empty enter or exit output counts too, since its

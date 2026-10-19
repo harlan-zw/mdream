@@ -438,4 +438,27 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
       }
     }
   })
+
+  it('drops a blank after a literal tag override opener', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const span = { plugins: { tagOverrides: { span: { enter: '**', exit: '**' } } } }
+    const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]][] = [
+      ['<p>a<span> <i>x</i></span>z</p>', 'a***x***z', span],
+      ['<p>a<span> <span>x</span></span>z</p>', 'a****x****z', span],
+      ['<p>a<span> </span>z</p>', 'a****z', span],
+      ['<p>a<u> <i>x</i></u>z</p>', 'a__*x*__z', { plugins: { tagOverrides: { u: { enter: '__', exit: '__' } } } }],
+      ['<p>a<sup> <span>2</span></sup>z</p>', 'a^2^z', { plugins: { tagOverrides: { sup: { enter: '^', exit: '^' } } } }],
+      ['<p>a<span> <i>x</i></span>z</p>', 'a *x*z', { plugins: { tagOverrides: { span: { enter: '', exit: '' } } } }],
+    ]
+    for (const [html, expected, options] of cases) {
+      expect(htmlToMarkdown(html, { ...options, engine }), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { ...options, engine }))
+        expect(actual.trim(), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+  })
 })

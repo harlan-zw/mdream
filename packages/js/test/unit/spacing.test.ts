@@ -237,6 +237,34 @@ describe('inline whitespace', () => {
     }
   })
 
+  it('drops a blank after a literal tag override opener', async () => {
+    const span = { tagOverrides: { span: { enter: '**', exit: '**' } } }
+    // The opener may already be streamed, so the blank cannot move in front of
+    // it, and after it the blank would split it from the content.
+    const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]][] = [
+      ['<p>a<span> <i>x</i></span>z</p>', 'a***x***z', span],
+      ['<p>a<span> <b>x</b></span></p>', 'a****x****', span],
+      ['<p>a<span> <span>x</span></span>z</p>', 'a****x****z', span],
+      ['<p>a<span> </span>z</p>', 'a****z', span],
+      ['<p>a<b><span> <i>x</i></span></b>z</p>', 'a*****x*****z', span],
+      ['<p>a<u> <i>x</i></u>z</p>', 'a__*x*__z', { tagOverrides: { u: { enter: '__', exit: '__' } } }],
+      ['<p>a<sup> <span>2</span></sup>z</p>', 'a^2^z', { tagOverrides: { sup: { enter: '^', exit: '^' } } }],
+      ['<p>a<b> <i>x</i></b>z</p>', 'a<B>*x*</B>z', { tagOverrides: { b: { enter: '<B>', exit: '</B>' } } }],
+      // An override that writes no opener keeps the separator.
+      ['<p>a<span> <i>x</i></span>z</p>', 'a *x*z', { tagOverrides: { span: { enter: '', exit: '' } } }],
+      ['<p>a<span> <i>x</i></span>z</p>', 'a *x*!z', { tagOverrides: { span: { exit: '!' } } }],
+    ]
+    for (const [html, expected, options] of cases) {
+      expect(htmlToMarkdown(html, options), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        expect(await streamConvert(chunks, options), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+  })
+
   it('leaves code-like content as written', () => {
     expect(htmlToMarkdown('<p><kbd>a<strong> x</strong></kbd></p>')).toBe('`a** x**`')
     expect(htmlToMarkdown('<p><samp>a<em> x</em></samp></p>')).toBe('`a* x*`')
