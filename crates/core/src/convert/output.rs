@@ -4873,7 +4873,17 @@ impl ConvertState {
       return;
     }
 
-    if configured_new_lines == 0 && !self.last_text_node_contains_whitespace {
+    let closes_emphasis = !is_enter
+      && !literal
+      && matches!(output_str, "*" | "**")
+      && matches!(
+        self.stack.retired().tag_id,
+        Some(TAG_EM | TAG_I | TAG_STRONG | TAG_B)
+      );
+    if configured_new_lines == 0
+      && !self.last_text_node_contains_whitespace
+      && !(closes_emphasis && self.buffer.ends_with('\u{000b}'))
+    {
       let tail_known = self.has_flushed_tail();
       let buf_len = self.buffer.len();
       let last_char = if buf_len > 0 {
@@ -5055,8 +5065,27 @@ impl ConvertState {
         self.last_content_cache_len = self.push_code_span_content(" ", true);
       }
 
+      // CommonMark treats vertical tabs as whitespace at emphasis delimiters.
+      let mut trailing_emphasis_whitespace = String::new();
+      if closes_emphasis {
+        let mut end = self.buffer.len();
+        while end > 0
+          && (self.buffer.as_bytes()[end - 1] == 11
+            || (end < self.buffer.len() && self.buffer.as_bytes()[end - 1].is_ascii_whitespace()))
+        {
+          end -= 1;
+        }
+        if end < self.buffer.len() {
+          trailing_emphasis_whitespace.push_str(&self.buffer[end..]);
+          self.truncate_buffer(end);
+        }
+      }
       if !output_str.is_empty() {
         self.last_content_cache_len = self.push_code_span_content(output_str, true);
+      }
+      if !trailing_emphasis_whitespace.is_empty() {
+        self.buffer.push_str(&trailing_emphasis_whitespace);
+        self.last_content_cache_len = trailing_emphasis_whitespace.len();
       }
     }
 

@@ -913,3 +913,24 @@ it.each(['\t', '\n', '\f', '\r', ' ', '\u000B'])('holds trimmable override white
       expect(await streamConvert(html, width, options), `width ${width}`).toBe(expected)
   }
 })
+
+describe('vertical tabs before emphasis closers', () => {
+  for (const [tag, marker] of [['em', '*'], ['i', '*'], ['strong', '**'], ['b', '**']]) {
+    for (const suffix of ['\u000B', '\u000B ', '\u000B\u000B ', '\u000B \t', ' \u000B', '\u000B \u000B ']) {
+      it(`preserves ${tag} with ${JSON.stringify(suffix)} at every chunk width`, async () => {
+        const html = `<${tag}>T${suffix}</${tag}>`
+        const expected = `${marker}T${marker}${suffix.replace(/[ \t]+$/, '')}`
+        for (const [input, markdown] of [
+          [html, expected],
+          [`<p>${html}</p>`, expected],
+          [`<ul><li>${html}</li></ul>`, `- ${expected}`],
+          [`${html}X`, `${expected}${suffix.endsWith(' ') || suffix.endsWith('\t') ? ' ' : ''}X`],
+        ]) {
+          expect(htmlToMarkdown(input!), input).toBe(markdown)
+          for (let width = 1; width <= input!.length; width++)
+            expect(await streamConvert(input!, width), `${input}, width ${width}`).toBe(markdown)
+        }
+      })
+    }
+  }
+})

@@ -2309,6 +2309,31 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.lastContentCache = ' '
     }
 
+    // CommonMark treats vertical tabs as whitespace at emphasis delimiters.
+    let trailingEmphasisWhitespace = ''
+    if (eventType === NodeEventExit && !handler?.literalExit
+      && (tagId === TAG_EM || tagId === TAG_I || tagId === TAG_STRONG || tagId === TAG_B)
+      && output?.[0]?.charCodeAt(0) === 42) {
+      for (let index = buff.length - 1; index >= 0; index--) {
+        const fragment = buff[index]!
+        let end = fragment.length
+        while (end > 0) {
+          const code = fragment.charCodeAt(end - 1)
+          if (code !== 11 && !((end < fragment.length || trailingEmphasisWhitespace) && isAsciiWhitespace(code)))
+            break
+          end--
+        }
+        if (end < fragment.length) {
+          trailingEmphasisWhitespace = fragment.slice(end) + trailingEmphasisWhitespace
+          const trimmed = fragment.slice(0, end)
+          state.outputPositions?.replace(index, index + 1, [trimmed])
+          buff[index] = trimmed
+        }
+        if (end > 0)
+          break
+      }
+    }
+
     // Add all output fragments
     let outputStart = state.buffer.length
     if (output) {
@@ -2319,6 +2344,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.lastContentCache = fragment
         }
       }
+    }
+
+    if (trailingEmphasisWhitespace) {
+      state.buffer.push(trailingEmphasisWhitespace)
+      state.lastContentCache = trailingEmphasisWhitespace
     }
 
     if (gfmAction)

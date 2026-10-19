@@ -2742,9 +2742,15 @@ impl ConvertState {
     // a trailing tab that a later trim then removes from the buffer alone.
     // Inside <pre>, that holds for a trailing whitespace run in the current
     // text node: it stays mutable until its inline/code element closes.
+    let hold_vertical_tabs = self.depth_map[TAG_EM as usize] != 0
+      || self.depth_map[TAG_I as usize] != 0
+      || self.depth_map[TAG_STRONG as usize] != 0
+      || self.depth_map[TAG_B as usize] != 0;
     let mut stable_end = self
       .held_whitespace
-      .start(self.buffer.as_bytes(), buf_len, |b| b.is_ascii_whitespace());
+      .start(self.buffer.as_bytes(), buf_len, |b| {
+        b.is_ascii_whitespace() || (b == 11 && hold_vertical_tabs)
+      });
     if in_pre && !self.last_text_node_contains_whitespace {
       // Other trailing spaces inside <pre> are significant code. A
       // line-leading run is the exception: list continuation indentation is

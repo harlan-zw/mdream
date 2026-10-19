@@ -6088,6 +6088,45 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
 }
 
 #[test]
+fn vertical_tabs_before_emphasis_closers() {
+  for (tag, marker) in [("em", "*"), ("i", "*"), ("strong", "**"), ("b", "**")] {
+    for suffix in [
+      "\u{000b}",
+      "\u{000b} ",
+      "\u{000b}\u{000b} ",
+      "\u{000b} \t",
+      " \u{000b}",
+      "\u{000b} \u{000b} ",
+    ] {
+      let html = format!("<{tag}>T{suffix}</{tag}>");
+      let expected = format!("{marker}T{marker}{}", suffix.trim_ascii_end());
+      let separator = if suffix.ends_with([' ', '\t']) {
+        " "
+      } else {
+        ""
+      };
+      for (html, expected) in [
+        (html.clone(), expected.clone()),
+        (format!("<p>{html}</p>"), expected.clone()),
+        (format!("<ul><li>{html}</li></ul>"), format!("- {expected}")),
+        (format!("{html}X"), format!("{expected}{separator}X")),
+      ] {
+        assert_eq!(convert(&html), expected, "{html:?}");
+        for width in 1..=html.len() {
+          let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+          let mut output = String::new();
+          for chunk in html.as_bytes().chunks(width) {
+            output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+          }
+          output.push_str(&stream.finish());
+          assert_eq!(output, expected, "{html:?}, width {width}");
+        }
+      }
+    }
+  }
+}
+
+#[test]
 fn non_html_whitespace_streaming_parity() {
   for space in ['\u{000b}', '\u{00a0}', '\u{2003}'] {
     let cases = [
