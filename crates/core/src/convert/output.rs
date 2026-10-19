@@ -1786,7 +1786,9 @@ impl ConvertState {
           frame.content_start = frame.content_start.min(self.buffer.len());
         }
       }
-      self.finish_raw_html_block(">", false);
+      if self.pending_raw_html_boundary {
+        self.finish_raw_html_block(">", false);
+      }
       self.blockquotes.push(BlockquoteFrame {
         content_start: self.buffer.len(),
         list_indent: self.list_indent.clone(),
@@ -2801,7 +2803,9 @@ impl ConvertState {
       return;
     }
     let pending_raw_boundary = self.pending_raw_html_boundary;
-    self.finish_raw_html_block(text, true);
+    if pending_raw_boundary {
+      self.finish_raw_html_block(text, true);
+    }
     let text = if pending_raw_boundary && !self.pending_raw_html_boundary {
       text.trim_start_matches([' ', '\t', '\r', '\n'])
     } else {
@@ -4930,7 +4934,7 @@ impl ConvertState {
     if is_enter {
       if configured_new_lines >= 2 {
         self.pending_raw_html_boundary = false;
-      } else {
+      } else if self.pending_raw_html_boundary {
         self.finish_raw_html_block(output_str, true);
       }
     }
