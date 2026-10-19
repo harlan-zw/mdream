@@ -1368,15 +1368,16 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
   }
 
+  let hasText = false
   let wasBlank = false
-  if (state.depthMap[TAG_A] && !inPreTag) {
-    wasBlank = true
+  if (state.depthMap[TAG_A]) {
     for (let i = 0; i < textNode.value.length; i++) {
       if (!isWhitespace(textNode.value.charCodeAt(i))) {
-        wasBlank = false
+        hasText = true
         break
       }
     }
+    wasBlank = !hasText && !inPreTag
   }
 
   handleEvent({ type: NodeEventEnter, node: textNode })
@@ -1386,8 +1387,9 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     const hidden = textNode.excludedFromMarkdown || (isBlank && !wasBlank)
     if (hidden || isBlank)
       countHiddenLinkText(parentsToIncrement, hidden)
-    else if (!parentsToIncrement.some(parent => parent.tagId === TAG_A))
-      // Visible text in a block nested in the link, such as `<svg><text>`.
+    else if ((hasText || textNode.rewrittenBlank === false) && !parentsToIncrement.some(parent => parent.tagId === TAG_A))
+      // Text in a block nested in the link, such as `<svg><text>`. Blank text
+      // there, as in `<pre> </pre>`, shows nothing.
       countContentInEnclosingLink(firstBlockParent)
   }
   state.lastTextNode = textNode

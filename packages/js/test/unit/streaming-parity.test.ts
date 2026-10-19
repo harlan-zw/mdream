@@ -667,6 +667,20 @@ describe('streaming parity with the Rust core', () => {
   })
 
   it.each([
+    ['<a href="/p" aria-label="L"><pre> </pre></a>', '[L](/p)'],
+    ['<a href="/p" aria-label="L"><pre>&#32;</pre></a>', '[L](/p)'],
+    ['<a href="/p" title="T"><pre> </pre></a>', '[T](/p)'],
+    ['<a href="/p" aria-label="L"><div><pre> </pre></div></a>', '[L](/p)'],
+    ['<pre>a <a href="/c" aria-label="Item"><svg><text> </text></svg></a> Next</pre>', '```\na Item Next\n```'],
+  ])('keeps the label of a link holding a blank pre across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    expect(convertOnce(html, { clean: clean() })).toBe(expected)
+    for (const format of ['markdown', 'text', 'html'] as const)
+      await expectStreamingParity(html, { format })
+    await expectStreamingParity(html, { clean: clean() })
+  })
+
+  it.each([
     ['<p>Go <a href="/cart" aria-label="Cart"><style>.i{}</style>&#32;</a></p>', 'Go [Cart](/cart)'],
     ['<a href="/cart" aria-label="Cart"><svg></svg>&#32;</a>', '[Cart](/cart)'],
     ['<p><a href="/c" aria-label="Item"><svg></svg> </a>Next</p>', '[Item](/c) Next'],

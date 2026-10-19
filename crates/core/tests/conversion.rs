@@ -763,6 +763,78 @@ fn text_in_a_block_inside_a_link_is_link_text() {
   );
 }
 
+/// Whitespace in a `<pre>` nested in a link is kept but shows nothing, so it
+/// is no link text: the link still takes its label.
+#[test]
+fn blank_pre_text_inside_a_link_is_no_link_text() {
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let clean = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..Default::default()
+  };
+  let cases = [
+    (r#"<a href="/p" aria-label="L"><pre> </pre></a>"#, "[L](/p)"),
+    (
+      r#"<a href="/p" aria-label="L"><pre>&#32;</pre></a>"#,
+      "[L](/p)",
+    ),
+    (r#"<a href="/p" title="T"><pre> </pre></a>"#, "[T](/p)"),
+    (
+      r#"<a href="/p" aria-label="L"><div><pre> </pre></div></a>"#,
+      "[L](/p)",
+    ),
+    (
+      r#"<pre>a <a href="/c" aria-label="Item"><svg><text> </text></svg></a> Next</pre>"#,
+      "```\na Item Next\n```",
+    ),
+    // Text in the `<pre>` still takes the label's place.
+    (
+      r#"<a href="/p" aria-label="L"><pre>x</pre></a>"#,
+      "[```\nx\n```](/p)",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "{html}");
+    assert_eq!(html_to_markdown(html, filter.clone()), expected, "{html}");
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      filter.clone(),
+      clean.clone(),
+      filter.clone().with_max_node_bytes(4),
+    ] {
+      let one_shot = html_to_markdown(html, options.clone());
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, one_shot, "{html} width={width}");
+      }
+    }
+  }
+
+  // Clean mode keeps the labeled link instead of dropping `[](/p)`.
+  assert_eq!(
+    html_to_markdown(r#"<a href="/p" aria-label="L"><pre> </pre></a>"#, clean),
+    "[L](/p)"
+  );
+  assert_eq!(
+    html_to_html(
+      r#"<a href="/p" aria-label="L"><pre> </pre></a>"#,
+      HtmlToMarkdownOptions::default()
+    ),
+    r#"<a href="/p"><pre tabindex="0"><code> </code></pre>L</a>"#
+  );
+}
+
 #[test]
 fn linked_images_respect_mixed_case_builtin_override_scopes() {
   for (html, name, is_inline, expected) in [

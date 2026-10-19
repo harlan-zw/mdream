@@ -484,12 +484,13 @@ impl ConvertState {
     (depth, index)
   }
 
+  /// `has_text`: inside a link, whether the text holds more than whitespace.
   #[inline(always)]
   fn advance_text_node_counters(
     &mut self,
     first_block_parent_index: Option<usize>,
     excluded: bool,
-    blank: bool,
+    has_text: bool,
   ) {
     if let Some(parent) = self.stack.last_mut() {
       parent.current_walk_index += 1;
@@ -499,13 +500,15 @@ impl ConvertState {
       self.stack[idx].child_text_node_index += 1;
     }
     if self.depth_map[TAG_A as usize] > 0 {
-      if excluded || blank {
+      if excluded || (!has_text && !self.in_pre) {
         self.count_hidden_link_text(up_to, excluded);
-      } else if !self.stack[up_to..]
-        .iter()
-        .any(|node| node.tag_id == Some(TAG_A))
+      } else if has_text
+        && !self.stack[up_to..]
+          .iter()
+          .any(|node| node.tag_id == Some(TAG_A))
       {
-        // Visible text in a block nested in the link, such as `<svg><text>`.
+        // Text in a block nested in the link, such as `<svg><text>`. Blank text
+        // there, as in `<pre> </pre>`, shows nothing.
         self.count_content_in_enclosing_link(up_to);
       }
     }
@@ -618,11 +621,11 @@ impl ConvertState {
       self.emit_plain_text_inline(&text, contains_whitespace, depth, index);
     }
 
-    let is_blank = self.depth_map[TAG_A as usize] > 0 && text.bytes().all(is_whitespace);
+    let has_text = self.depth_map[TAG_A as usize] > 0 && !text.bytes().all(is_whitespace);
     text.clear();
     *text_buffer = text;
 
-    self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, is_blank);
+    self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, has_text);
   }
 
   /// Emit buffered text. Internal size flushes split one source text node into
@@ -782,17 +785,15 @@ impl ConvertState {
       );
     }
 
-    let is_blank = completes_text_node
-      && self.depth_map[TAG_A as usize] > 0
-      && !in_pre_tag
-      && text.bytes().all(is_whitespace);
+    let has_text =
+      completes_text_node && self.depth_map[TAG_A as usize] > 0 && !text.bytes().all(is_whitespace);
 
     // Recover String allocation
     text.clear();
     *text_buffer = text;
 
     if completes_text_node {
-      self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, is_blank);
+      self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, has_text);
     }
   }
 

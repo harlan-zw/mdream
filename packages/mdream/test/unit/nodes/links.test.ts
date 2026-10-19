@@ -305,6 +305,28 @@ describe.each(engines)('links $name', (engineConfig) => {
       .toBe('Go [Cart](/cart)')
   })
 
+  // Whitespace in a `<pre>` nested in a link shows nothing, so the link keeps its label.
+  it.each([
+    ['<a href="/p" aria-label="L"><pre> </pre></a>', '[L](/p)'],
+    ['<a href="/p" aria-label="L"><pre>&#32;</pre></a>', '[L](/p)'],
+    ['<a href="/p" title="T"><pre> </pre></a>', '[T](/p)'],
+    ['<a href="/p" aria-label="L"><div><pre> </pre></div></a>', '[L](/p)'],
+    ['<pre>a <a href="/c" aria-label="Item"><svg><text> </text></svg></a> Next</pre>', '```\na Item Next\n```'],
+  ])('keeps the label of a link holding a blank pre in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} } })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, clean: true })).toBe(expected)
+  })
+
+  it('keeps the label of a link holding a blank pre in html output', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<a href="/p" aria-label="L"><pre> </pre></a>', { engine, format: 'html' }))
+      .toBe('<a href="/p"><pre tabindex="0"><code> </code></pre>L</a>')
+    expect(htmlToMarkdown('<pre>a <a href="/c" aria-label="Item"><svg><text> </text></svg></a> Next</pre>', { engine, format: 'text' }))
+      .toBe('a Item Next')
+  })
+
   it('preserves empty-image and empty-link fallback behavior', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<a href="/file" title="File:Photo"><img src="/photo.jpg" alt=""></a>'
