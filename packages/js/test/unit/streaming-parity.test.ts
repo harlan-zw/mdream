@@ -980,6 +980,15 @@ it.for(['label', 'plain', 'span'].flatMap(kind => [
     strictEqual(await streamConvertAtSplit(html, split), expected, `split=${split}`)
 })
 
+it('deduplicates an exact link title with a spacing-only override', async () => {
+  const html = '<a href="/x" title="x ">x&#32;</a>Next'
+  const options: ParityOptions = { tagOverrides: { a: { spacing: [0, 0] } } }
+  const expected = '[x ](/x)Next'
+  expect(convertOnce(html, options)).toBe(expected)
+  for (let width = 1; width <= html.length; width++)
+    expect(await streamConvert(html, width, options), `width=${width}`).toBe(expected)
+})
+
 it.each([
   ['<a href="/x" title="x&#11;">x</a>', '[x](/x "x\u000B")'],
   ['<a href="/x">x&#11;&#32;&#32;</a>Next', '[x\u000B](/x) Next'],

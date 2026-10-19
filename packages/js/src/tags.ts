@@ -673,7 +673,7 @@ export const tagHandlers: Record<number, TagHandler> = {
           break
         titleEnd--
       }
-      if (lastContent === title?.slice(0, titleEnd)) {
+      if (lastContent === title || lastContent === title?.slice(0, titleEnd)) {
         title = ''
       }
       // GFM autolink shorthand: when the link text equals href and href is a
