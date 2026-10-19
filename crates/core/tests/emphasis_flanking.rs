@@ -10,6 +10,14 @@ use mdream::{html_to_markdown, html_to_text};
 
 const CASES: &[(&str, &str)] = &[
   (
+    r#"<p>a<strong><span><span><a href="/x">b</a></span></span></strong><span>c</span></p>"#,
+    "a<strong>[b](/x)</strong>c",
+  ),
+  (
+    r#"<p><strong><span><a href="/x">b</a></span></strong><span><span>c</span></span></p>"#,
+    "**[b](/x)**&#99;",
+  ),
+  (
     r#"<p><i>a</i><b><a href="/y">x</a></b></p>"#,
     "*a*<strong>[x](/y)</strong>",
   ),

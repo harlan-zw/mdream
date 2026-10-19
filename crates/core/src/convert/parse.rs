@@ -1623,7 +1623,7 @@ impl ConvertState {
         // Emit exit
         self.release_flank_pairs(node_tag_id, modified_node2.is_inline, true);
         self.emit_exit_element(&modified_node2);
-        self.close_flank_pair(node_depth);
+        self.close_flank_pair(node_depth, node_tag_id);
         self.stack.restore_retired(modified_node2);
         self.stack.release_retired();
         if let Some(id) = node_tag_id {
@@ -1668,7 +1668,7 @@ impl ConvertState {
       self.emit_exit_element(&node);
       self.stack.restore_retired(node);
     }
-    self.close_flank_pair(node_depth);
+    self.close_flank_pair(node_depth, node_tag_id);
     self.stack.release_retired();
 
     if let Some(id) = node_tag_id {

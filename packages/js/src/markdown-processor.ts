@@ -2536,13 +2536,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    * closer there gets none while slugs are collected.
    */
   function closeFlankPair(element: ElementNode): void {
+    const type = INLINE_MARKER_TYPE[element.tagId!]!
+    if (!(type >= 1 && type <= 4))
+      return
     let index = flankElements.length - 1
     while (index >= 0 && flankElements[index] !== element)
       index--
     if (index === -1)
       return
     const buffer = state.buffer
-    const type = INLINE_MARKER_TYPE[element.tagId!]!
     const delimiter = FLANK_DELIMITER[type]!
     const closer = buffer.length - 1
     if (buffer[closer] === delimiter) {

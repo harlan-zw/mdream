@@ -1151,6 +1151,18 @@ impl ConvertState {
     let Some(kind @ 1..=4) = marker_tag.and_then(Self::inline_marker_type) else {
       return;
     };
+    self.track_emphasis_flank_opener(kind, depth, output, output_start);
+  }
+
+  // Keep the context checks out of the enter path for every non-emphasis tag.
+  #[inline(never)]
+  fn track_emphasis_flank_opener(
+    &mut self,
+    kind: u8,
+    depth: usize,
+    output: Option<&str>,
+    output_start: usize,
+  ) {
     let delimiter = FLANK_DELIMITER[kind as usize];
     if output == Some(delimiter)
       && self.buffer.len() > output_start
@@ -1185,6 +1197,11 @@ impl ConvertState {
     if self.flank_pairs.is_empty() {
       return;
     }
+    self.release_pending_flank_pairs(tag_id, is_inline, is_exit);
+  }
+
+  #[inline(never)]
+  fn release_pending_flank_pairs(&mut self, tag_id: Option<u8>, is_inline: bool, is_exit: bool) {
     if (tag_id.is_some() && !is_inline) || tag_id == Some(TAG_FIGCAPTION) {
       let before = self.flank_pairs.len();
       self.flank_pairs.retain(|pair| pair.offset == usize::MAX);
@@ -1221,13 +1238,18 @@ impl ConvertState {
   /// written after its closer. A heading slug reads a character reference as
   /// written, so a closer there gets none while slugs are collected.
   #[inline]
-  pub(crate) fn close_flank_pair(&mut self, depth: usize) {
+  pub(crate) fn close_flank_pair(&mut self, depth: usize, tag_id: Option<u8>) {
     if self.flank_pairs.is_empty() {
       return;
     }
-    self.close_pending_flank_pair(depth);
+    if matches!(tag_id.and_then(Self::inline_marker_type), Some(1..=4)) {
+      self.close_pending_flank_pair(depth);
+    } else {
+      self.settle_flank_pairs();
+    }
   }
 
+  #[inline(never)]
   fn close_pending_flank_pair(&mut self, depth: usize) {
     if let Some(index) = self
       .flank_pairs
@@ -1275,6 +1297,7 @@ impl ConvertState {
     }
   }
 
+  #[inline(never)]
   fn settle_pending_flank_pairs(&mut self) {
     let mut index = 0;
     while index < self.flank_pairs.len() {
