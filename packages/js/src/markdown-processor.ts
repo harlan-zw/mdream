@@ -904,6 +904,8 @@ function wrapperWritesDelimiters(node: ElementNode): boolean {
   const handler = node.tagHandler
   if ((handler?.literalEnter && node.hasEnterOutput) || (handler?.literalExit && handler.literalExitHasOutput))
     return true
+  if (handler?.literalEnter && handler.literalExit && !node.hasEnterOutput && !handler.literalExitHasOutput)
+    return false
   return Boolean(INLINE_MARKER_TYPE[node.tagId!])
 }
 

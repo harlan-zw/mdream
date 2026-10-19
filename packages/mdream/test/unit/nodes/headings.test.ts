@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
+import { engines, htmlToMarkdown, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
 
 describe.each(engines)('headings $name', (engineConfig) => {
   it.each([
@@ -342,6 +342,26 @@ describe.each(engines)('headings $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li>Intro <label><h3>T</h3></label>more</li></ul>'
     expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
+  })
+
+  it('gives headings block spacing through an explicitly empty emphasis override', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li>Intro<strong><h3>T</h3></strong>After</li></ul>'
+    const plugins = { tagOverrides: { strong: { enter: '', exit: '' } } }
+    expect(htmlToMarkdown(html, { engine, plugins })).toBe('- Intro\n\n  ### T\n\n  After')
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine, plugins }))
+        output += chunk
+      expect(output, `width=${width}`).toBe('- Intro\n\n  ### T\n\n  After')
+    }
   })
 
   // A `<p>` or `<div>` that opens the fence of a `<pre>` after the heading

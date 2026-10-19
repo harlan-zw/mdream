@@ -5521,13 +5521,17 @@ impl ConvertState {
         .plugins
         .as_ref()
         .and_then(|p| p.tag_overrides.as_ref());
-      if let Some(ov) = Self::override_for_node(ovs, self.override_idx.as_deref(), node)
-        && ((node.tag_id != Some(TAG_SPAN)
+      if let Some(ov) = Self::override_for_node(ovs, self.override_idx.as_deref(), node) {
+        if ov.enter.as_deref() == Some("") && ov.exit.as_deref() == Some("") {
+          return false;
+        }
+        if (node.tag_id != Some(TAG_SPAN)
           && (ov.enter.as_ref().is_some_and(|s| !s.is_empty())
             || ov.exit.as_ref().is_some_and(|s| !s.is_empty())))
-          || ov.alias_tag_id.and_then(Self::inline_marker_type).is_some())
-      {
-        return true;
+          || ov.alias_tag_id.and_then(Self::inline_marker_type).is_some()
+        {
+          return true;
+        }
       }
     }
     node.tag_id.and_then(Self::inline_marker_type).is_some()
