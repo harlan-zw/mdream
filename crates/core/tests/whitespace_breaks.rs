@@ -608,7 +608,10 @@ fn blank_opening_an_inline_wrapper_keeps_the_word_separator() {
     ("<p>a<span>\n  <span>b</span></span>c</p>", "a bc"),
     ("<p>a<span> </span>b</p>", "a b"),
     ("<p>a<span> <strong></strong></span>b</p>", "a b"),
-    ("<p>a<strong>x<span> <span>b</span></span></strong></p>", "a**x b**"),
+    (
+      "<p>a<strong>x<span> <span>b</span></span></strong></p>",
+      "a**x b**",
+    ),
     ("<p><strong>a<span> </span></strong>b</p>", "**a** b"),
     (
       r#"<p>a<span> <img src="/i.png" alt="i"></span></p>"#,
