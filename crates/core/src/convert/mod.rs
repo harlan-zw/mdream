@@ -167,6 +167,9 @@ struct OpenMarker {
   /// pair replaces that one as the latest, so dropping the empty pair has to
   /// make the outer break the latest again.
   starts_at_hard_break: bool,
+  /// The opener carries the block break a heading in a list item owed, so
+  /// dropping the empty pair owes it again.
+  restores_heading_break: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -946,6 +949,10 @@ pub struct ConvertState {
   empty_item_len: usize,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
+  /// A heading closed in a list item. Inside the item its block spacing is
+  /// collapsed, so the next visible content owes it the block break the root
+  /// writes, or that content joins the heading's line.
+  heading_break_pending: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1192,6 +1199,7 @@ impl ConvertState {
       empty_item_line_start: 0,
       empty_item_len: 0,
       list_rule_pending: false,
+      heading_break_pending: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,

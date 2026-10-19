@@ -55,7 +55,7 @@ import {
   TAG_VAR,
   TEXT_NODE,
 } from './const'
-import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
+import { breakHandler, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
 import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
@@ -126,6 +126,12 @@ export interface MarkdownState {
   emptyItemFragment?: number
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
+  /**
+   * A heading closed in a list item. Inside the item its block spacing is
+   * collapsed, so the next visible content owes it the block break the root
+   * writes, or that content joins the heading's line.
+   */
+  headingBreakPending?: boolean
 }
 
 interface CodeSpan {
@@ -821,6 +827,26 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
   if (tagId !== TAG_LI && (depthMap[TAG_LI] || 0) > 0) {
     return NO_SPACING
   }
+  if (collapsedByAncestor(node, state, eventType)) {
+    return NO_SPACING
+  }
+  if (node.tagHandler?.spacing) {
+    return node.tagHandler?.spacing
+  }
+  // Truly unknown tags (no dictionary entry) default to inline zero spacing so
+  // they don't fragment surrounding paragraphs. Built-in tags without a handler
+  // (e.g. caption) keep block-default. Applies whether or not an override
+  // handler is attached — overrides set isInline but inherit zero spacing.
+  if (tagId === -1) {
+    return NO_SPACING
+  }
+  return DEFAULT_BLOCK_SPACING
+}
+
+// Whether a collapsing ancestor keeps the node inline, as the spacing rules do
+// outside list items. Parity with the Rust engine's `collapsed_by_ancestor`.
+function collapsedByAncestor(node: ElementNode, state: MarkdownState, eventType: number): boolean {
+  const tagId = node.tagId
 
   // Adjust for inline elements
   // Block elements preserve spacing even inside span elements (presentational containers)
@@ -841,21 +867,11 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
         currParent = currParent.parent
         continue
       }
-      return NO_SPACING
+      return true
     }
     currParent = currParent.parent
   }
-  if (node.tagHandler?.spacing) {
-    return node.tagHandler?.spacing
-  }
-  // Truly unknown tags (no dictionary entry) default to inline zero spacing so
-  // they don't fragment surrounding paragraphs. Built-in tags without a handler
-  // (e.g. caption) keep block-default. Applies whether or not an override
-  // handler is attached — overrides set isInline but inherit zero spacing.
-  if (tagId === -1) {
-    return NO_SPACING
-  }
-  return DEFAULT_BLOCK_SPACING
+  return false
 }
 
 function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): boolean {
@@ -883,6 +899,13 @@ function hasNonWhitespace(value: string): boolean {
     }
   }
   return false
+}
+
+function trimLeadingSpaces(value: string): string {
+  let start = 0
+  while (value.charCodeAt(start) === 32)
+    start++
+  return start === 0 ? value : value.slice(start)
 }
 
 export function isAsciiWhitespace(code: number): boolean {
@@ -1766,6 +1789,31 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
 
+    if (state.headingBreakPending) {
+      if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
+        if (!hasNonWhitespace((node as TextNode).value))
+          return
+        const separator = `\n\n${state.listIndent}`
+        state.buffer.push(separator)
+        state.lastContentCache = separator
+        state.headingBreakPending = false
+        // The text opens the item's next block, where a leading space indents it.
+        if (!state.depthMap[TAG_PRE]) {
+          const textNode = node as TextNode
+          const value = textNode.value
+          let start = 0
+          let code = value.charCodeAt(0)
+          while (code === 32 || code === 9 || code === 10 || code === 12 || code === 13)
+            code = value.charCodeAt(++start)
+          if (start !== 0)
+            textNode.value = value.slice(start)
+        }
+      }
+      else if (node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_LI) {
+        state.headingBreakPending = false
+      }
+    }
+
     const lastNode = state.lastNode
     state.lastNode = event.node as ElementNode | TextNode
     const buff = state.buffer
@@ -1836,6 +1884,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       buff.push(separator)
       state.lastContentCache = separator
       state.lastTextNode = undefined
+      state.headingBreakPending = false
       lastBuffEntry = separator
       lastChar = separator.charAt(separator.length - 1)
     }
@@ -1878,6 +1927,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       if (state.pendingInlineWhitespace)
         state.pendingInlineWhitespace = false
+
+      if (state.headingBreakPending && breakOutput) {
+        if (breakOutput.includes('\n')) {
+          state.headingBreakPending = false
+        }
+        else if (hasNonWhitespace(breakOutput)) {
+          state.headingBreakPending = false
+          breakOutput = `\n\n${state.listIndent}${breakOutput}`
+        }
+      }
 
       const lastFragment = state.lastContentCache
       const lastTextNode = state.lastTextNode
@@ -2136,8 +2195,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && !handler?.literalExit) {
-        const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType, state.outputPositions)
+        const packed = openMarkers[--openMarkerCount]!
+        // No marker opens with a newline; only a prefixed heading break does.
+        const restoresHeadingBreak = buff[packed >> 3]?.charCodeAt(0) === 10
+        const idx = dropEmptyMarker(buff, packed, markerType, state.outputPositions)
         if (idx >= 0) {
+          if (restoresHeadingBreak)
+            state.headingBreakPending = true
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
           return
@@ -2303,6 +2367,51 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
 
+    // A pending heading break settles at an element's enter. Output that starts
+    // its own line already ends the heading's, and an item or a caption writes
+    // its own separation. Visible output takes the break as a prefix, so an
+    // empty marker pair dropped later takes it back; a leading space meant to
+    // separate it from text on the same line goes. Output with nothing
+    // visible leaves the break to whatever follows. Parity with the Rust
+    // engine's `settle_heading_break`.
+    if (state.headingBreakPending && eventType === NodeEventEnter) {
+      if (tagId === TAG_LI || tagId === TAG_FIGCAPTION || output?.some(fragment => fragment.includes('\n'))) {
+        state.headingBreakPending = false
+      }
+      else if (output?.some(hasNonWhitespace)) {
+        state.headingBreakPending = false
+        const separator = `\n\n${state.listIndent}`
+        // A link's bracket stays its own fragment, which is how its open is found.
+        if (tagId === TAG_A && output[0] === '[') {
+          buff.push(separator)
+          state.lastContentCache = separator
+          lastChar = ' '
+        }
+        else {
+          const first = output[0]!
+          output[0] = `${separator}${trimLeadingSpaces(first)}`
+          if (handlerOutput === first)
+            handlerOutput = output[0]
+          if (gfmAction?._tag === 'CodeSpanEnter')
+            gfmAction = { _tag: 'CodeSpanEnter', output: `${separator}${trimLeadingSpaces(gfmAction.output)}` }
+        }
+      }
+    }
+    // Inside a list item a heading opens its own block unless an inline wrapper
+    // keeps it inline, as at the root: after text on the item's line, even past
+    // a space, its `#` prefix would stay text. The space that ended the text
+    // goes too, which the reach-back trim keeps before a whitespace-collapsing
+    // element.
+    if (eventType === NodeEventEnter && tagId >= TAG_H1 && tagId <= TAG_H6
+      && state.depthMap[TAG_LI] && !handler?.literalEnter && !hasPluginOutput
+      && output?.length === 1 && output[0] === `${'#'.repeat(tagId - TAG_H1 + 1)} `
+      && !collapsedByAncestor(element, state, eventType)
+      && buff.length > 0 && !opensBlockLine(buff, buff.length - 1, buff.at(-1)!.length)) {
+      trimTrailingSpaces(buff)
+      output[0] = `\n\n${state.listIndent}${output[0]}`
+      handlerOutput = output[0]
+    }
+
     // Add spacing between inline elements if needed
     if (!captionTransition && tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
       state.buffer.push(' ')
@@ -2323,6 +2432,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     if (gfmAction)
       commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element)
+
+    // Only an ATX prefix can take in the text after it. Inside `<pre>` that
+    // text is code, and inside a caption the emphasis wrapping it, either of
+    // which a break would split.
+    if (eventType === NodeEventExit && tagId >= TAG_H1 && tagId <= TAG_H6
+      && state.depthMap[TAG_LI] && !state.depthMap[TAG_PRE] && captionFrameCount === 0 && !state.depthMap[TAG_A]
+      && !isInsideTableCell(state) && !handler?.literalEnter
+      && !collapsedByAncestor(element, state, eventType)) {
+      state.headingBreakPending = true
+    }
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)

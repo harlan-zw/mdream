@@ -5303,6 +5303,108 @@ fn an_empty_heading_in_a_list_item_ends_its_line() {
 }
 
 #[test]
+fn a_heading_in_a_list_item_keeps_its_own_line() {
+  // Text before the heading on the item's line, past a space too, and text
+  // after it each get a block of their own, as at the root (#388).
+  for (html, expected) in [
+    (
+      "<ul><li>Intro <h3>Title</h3><p>Body</p></li></ul>",
+      "- Intro\n\n  ### Title\n\n  Body",
+    ),
+    (
+      "<ul><li>Intro\n    <h3>Title</h3><p>Body</p></li></ul>",
+      "- Intro\n\n  ### Title\n\n  Body",
+    ),
+    (
+      "<ul><li><strong>Intro</strong> <h3>Title</h3></li></ul>",
+      "- **Intro**\n\n  ### Title",
+    ),
+    (
+      "<ol><li>a<ol><li>b<ol><li>Intro <h3>T</h3></li></ol></li></ol></li></ol>",
+      "1. a\n   1. b\n      1. Intro\n\n         ### T",
+    ),
+    (
+      "<ul><li>Intro <h3></h3><p>Body</p></li></ul>",
+      "- Intro\n\n  ###\n\n  Body",
+    ),
+    ("<ul><li><h3></h3>Text</li></ul>", "- ###\n\n  Text"),
+    (
+      "<ol><li><h1>T</h1>\nx</li><li>y</li></ol>",
+      "1. # T\n\n   x\n2. y",
+    ),
+    (
+      "<ul><li>a<ul><li>b<ul><li><h3></h3>c</li></ul></li></ul></li></ul>",
+      "- a\n  - b\n    - ###\n\n      c",
+    ),
+    (
+      "<ol start=\"10\"><li><h3>T</h3>x</li></ol>",
+      "10. ### T\n\n    x",
+    ),
+    (
+      "<ul><li><h3>Title</h3><strong>Text</strong></li></ul>",
+      "- ### Title\n\n  **Text**",
+    ),
+    (
+      "<ul><li><h3></h3><code>x</code></li></ul>",
+      "- ###\n\n  `x`",
+    ),
+    ("<ul><li><h3>T</h3><em></em>x</li></ul>", "- ### T\n\n  x"),
+    ("<ul><li><h3>T</h3># x</li></ul>", "- ### T\n\n  \\# x"),
+    ("<ul><li>x <h2></h2>  y</li></ul>", "- x\n\n  ##\n\n  y"),
+    (
+      "<ul><li><span><h3>T</h3>more</span></li></ul>",
+      "- ### T\n\n  more",
+    ),
+    (
+      "<blockquote><ul><li><h3>T</h3>x</li></ul></blockquote>",
+      "> - ### T\n>\n>   x",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  for (html, expected) in [
+    // The marker's own line, a line break, a nested list or the item's end
+    // already leave the heading its line.
+    ("<ul><li> <h3>Title</h3></li></ul>", "- ### Title"),
+    (
+      "<ul><li>Intro<br> <h3>Title</h3></li></ul>",
+      "- Intro  \n  ### Title",
+    ),
+    ("<ul><li><h3>T</h3><br>more</li></ul>", "- ### T  \n  more"),
+    (
+      "<ul><li><h3>T</h3><ul><li>x</li></ul></li></ul>",
+      "- ### T\n  - x",
+    ),
+    ("<ul><li><h3>T</h3> </li><li>b</li></ul>", "- ### T\n- b"),
+    // An empty marker pair takes no block of its own.
+    (
+      "<ul><li><h3>T</h3><i class=\"icon\"></i></li><li>b</li></ul>",
+      "- ### T\n- b",
+    ),
+    // An inline wrapper keeps the heading inline, as at the root.
+    (
+      "<ul><li><strong><h3>T</h3>more</strong></li></ul>",
+      "- **### T more**",
+    ),
+    (
+      "<ul><li><strong>Intro <h3>T</h3></strong></li></ul>",
+      "- **Intro ### T**",
+    ),
+    // Code and caption emphasis would be split.
+    (
+      "<ul><li><pre><h3>T</h3>b</pre></li></ul>",
+      "- ```\n  ### T b\n  ```",
+    ),
+    (
+      "<ul><li><figure><figcaption><h3>T</h3>b</figcaption></figure></li></ul>",
+      "- *### T b*",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
 fn a_heading_without_an_atx_prefix_keeps_its_hash_unescaped() {
   // No `#` prefix is written in either case, so there is no closing sequence to
   // protect and a backslash would be literal content.

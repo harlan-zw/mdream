@@ -170,6 +170,28 @@ describe('streaming parity with the Rust core', () => {
     await expectEverySplitParity(html)
   })
 
+  // The break a heading in a list item owes the text after it is written when
+  // that text arrives, and taken back with an empty marker pair (#388).
+  it.each([
+    ['<ul><li>Intro <h3>Title</h3><p>Body</p></li></ul>', '- Intro\n\n  ### Title\n\n  Body'],
+    ['<ul><li>Intro\n    <h3>Title</h3><p>Body</p></li></ul>', '- Intro\n\n  ### Title\n\n  Body'],
+    ['<ol><li>a<ol><li>b<ol><li>Intro <h3>T</h3></li></ol></li></ol></li></ol>', '1. a\n   1. b\n      1. Intro\n\n         ### T'],
+    ['<ul><li><h3></h3>Text</li></ul>', '- ###\n\n  Text'],
+    ['<ol><li><h1>T</h1>\nx</li><li>y</li></ol>', '1. # T\n\n   x\n2. y'],
+    ['<ul><li>a<ul><li>b<ul><li><h3></h3>c</li></ul></li></ul></li></ul>', '- a\n  - b\n    - ###\n\n      c'],
+    ['<ul><li><h3>Title</h3><strong>Text</strong></li></ul>', '- ### Title\n\n  **Text**'],
+    ['<ul><li><h3></h3><code>x</code></li></ul>', '- ###\n\n  `x`'],
+    ['<ul><li><h3>T</h3><em></em>x</li></ul>', '- ### T\n\n  x'],
+    ['<ul><li><h3>T</h3><i class="icon"></i></li><li>b</li></ul>', '- ### T\n- b'],
+    ['<ul><li>x <h2></h2>  y</li></ul>', '- x\n\n  ##\n\n  y'],
+    ['<blockquote><ul><li><h3>T</h3>x</li></ul></blockquote>', '> - ### T\n>\n>   x'],
+    ['<ul><li><strong><h3>T</h3>more</strong></li></ul>', '- **### T more**'],
+  ])('keeps a heading in a list item on its own line across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
+  })
+
   it.each([
     '<summary>text <svg></svg></summary>',
     '<details><summary>text <svg><polyline points="1 2"></polyline></svg></summary><p>b</p></details>',

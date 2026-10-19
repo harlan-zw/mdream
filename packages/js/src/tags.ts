@@ -124,7 +124,7 @@ import {
   TAG_XMP,
 } from './const'
 import { resolveUrl, safeAnchorOutput } from './url'
-import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
+import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
   if (!/[\t\n\f\r ()\\<>]/.test(destination))
@@ -213,7 +213,7 @@ const LEAD_INDENT = 2 // indentation before a list marker
 // indentation, then optionally a list marker and its space. Nested items indent
 // past the three spaces `listMarkerLineStart` accepts. Parity with the Rust
 // engine's `opens_block_line`.
-function opensBlockLine(buffer: string[], fragment: number, cursor: number): boolean {
+export function opensBlockLine(buffer: string[], fragment: number, cursor: number): boolean {
   let phase = LEAD_GAP
   let count = 0
   for (;;) {
@@ -408,12 +408,6 @@ function handleHeading(depth: number): TagHandler {
     enter: ({ state }) => {
       if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {
         return `<h${depth}>`
-      }
-      if ((state.depthMap?.[TAG_LI] || 0) > 0) {
-        const lastChar = lastOutputChar(state.buffer)
-        if (lastChar !== -1 && lastChar !== 32 && lastChar !== 10) {
-          return `\n\n${state.listIndent}${'#'.repeat(depth)} `
-        }
       }
       return `${'#'.repeat(depth)} `
     },
