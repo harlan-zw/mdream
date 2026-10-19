@@ -3538,3 +3538,16 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
     }
   }
 }
+
+#[test]
+fn streaming_heading_materializing_a_list_caption_keeps_its_prefix_inline() {
+  for html in [
+    r#"<ul><li><figure><figcaption><q><h3>T</h3></q>s</figcaption></figure></li></ul>"#,
+    r#"<ul><li><figure><figcaption><q><h3></h3></q>s</figcaption></figure></li></ul>"#,
+    r#"<ul><li><figure><figcaption><a href="/l"></a><h3>T</h3></figcaption></figure></li></ul>"#,
+    r#"<ul><li><figure><figcaption><del><h3>T</h3></del></figcaption></figure></li></ul>"#,
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}

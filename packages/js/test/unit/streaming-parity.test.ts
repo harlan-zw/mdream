@@ -81,6 +81,17 @@ async function expectEverySplitParity(html: string, options: ParityOptions = {})
 
 describe('streaming parity with the Rust core', () => {
   it.each([
+    ['<ul><li><figure><figcaption><q><h3>T</h3></q>s</figcaption></figure></li></ul>', '- *"### T"s*'],
+    ['<ul><li><figure><figcaption><q><h3></h3></q>s</figcaption></figure></li></ul>', '- *"### "s*'],
+    ['<ul><li><figure><figcaption><a href="/l"></a><h3>T</h3></figcaption></figure></li></ul>', '- *[](/l)### T*'],
+    ['<ul><li><figure><figcaption><del><h3>T</h3></del></figcaption></figure></li></ul>', '- *~~### T~~*'],
+  ])('keeps a heading opening a list caption inline: %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
+  })
+
+  it.each([
     [
       String.raw`<a href="x\" onclick=alert(1)">link</a>`,
       String.raw`[link](<x\\>)`,

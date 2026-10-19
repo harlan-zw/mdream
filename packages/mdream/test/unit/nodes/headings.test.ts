@@ -55,6 +55,16 @@ describe.each(engines)('headings $name', (engineConfig) => {
   // continuation indent: it is no closing sequence to escape, and the next block
   // still opens its own line, as it does at the root.
   it.each([
+    ['<ul><li><figure><figcaption><q><h3>T</h3></q>s</figcaption></figure></li></ul>', '- *"### T"s*'],
+    ['<ul><li><figure><figcaption><q><h3></h3></q>s</figcaption></figure></li></ul>', '- *"### "s*'],
+    ['<ul><li><figure><figcaption><a href="/l"></a><h3>T</h3></figcaption></figure></li></ul>', '- *[](/l)### T*'],
+    ['<ul><li><figure><figcaption><del><h3>T</h3></del></figcaption></figure></li></ul>', '- *~~### T~~*'],
+  ])('keeps a heading opening a list caption inline: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<main><ul><li><h3></h3><p>Partner description</p></li></ul></main>', '- ###\n\n  Partner description'],
     ['<ol><li><h3></h3><p>Partner description</p></li></ol>', '1. ###\n\n   Partner description'],
     ['<ol start="10"><li><h1></h1><p>b</p></li></ol>', '10. #\n\n    b'],

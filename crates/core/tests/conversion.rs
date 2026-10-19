@@ -6445,3 +6445,15 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
     "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
   );
 }
+
+#[test]
+fn a_heading_materializing_a_list_caption_keeps_its_prefix_inline() {
+  for (html, expected) in [
+    (r#"<ul><li><figure><figcaption><q><h3>T</h3></q>s</figcaption></figure></li></ul>"#, "- *\"### T\"s*"),
+    (r#"<ul><li><figure><figcaption><q><h3></h3></q>s</figcaption></figure></li></ul>"#, "- *\"### \"s*"),
+    (r#"<ul><li><figure><figcaption><a href="/l"></a><h3>T</h3></figcaption></figure></li></ul>"#, "- *[](/l)### T*"),
+    (r#"<ul><li><figure><figcaption><del><h3>T</h3></del></figcaption></figure></li></ul>"#, "- *~~### T~~*"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}

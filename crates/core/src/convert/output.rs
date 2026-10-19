@@ -1606,6 +1606,15 @@ impl ConvertState {
       !enter_is_literal && visible_output && tag_id.and_then(Self::inline_marker_type).is_some();
     let tentative_caption_output =
       default_inline_marker || (!enter_is_literal && tag_id == Some(TAG_A));
+    // Materializing the caption already places its opening emphasis before
+    // this heading. Do not insert another separator inside that inline run.
+    let caption_heading_enter = visible_output
+      && self.depth_map[TAG_LI as usize] > 0
+      && tag_id.is_some_and(|id| id.wrapping_sub(TAG_H1) < 6)
+      && self
+        .caption_frames
+        .iter()
+        .any(|frame| !matches!(frame.state, CaptionState::Committed));
     if visible_output || tag_id == Some(TAG_BLOCKQUOTE) {
       self.expand_deferred_caption_breaks();
     }
@@ -1758,7 +1767,7 @@ impl ConvertState {
       is_inline,
       configured_new_lines,
       output.as_deref(),
-      enter_is_literal,
+      enter_is_literal || caption_heading_enter,
     );
 
     if tag_id == Some(TAG_IMG)
