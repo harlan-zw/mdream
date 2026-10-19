@@ -1127,6 +1127,10 @@ impl ConvertState {
         kind: inline_marker_type,
         starts_at_hard_break: self.hard_break_end == marker_start,
       });
+      if inline_marker_type <= 4 {
+        let depth = self.stack[self.stack.len() - 1].depth;
+        self.track_emphasis_flank_opener(inline_marker_type, depth, output, output_start);
+      }
     } else if !keeps_markers
       && !self.open_markers.is_empty()
       && output.is_some_and(|o| has_visible(o.as_bytes()))
@@ -1140,20 +1144,6 @@ impl ConvertState {
   /// code spans too. With fragment cleaning, a heading's Markdown gives the
   /// slug fragment links resolve against, which takes a link's text as
   /// written, so a pair inside a link there keeps its delimiters.
-  #[inline]
-  fn track_flank_opener(
-    &mut self,
-    marker_tag: Option<u8>,
-    depth: usize,
-    output: Option<&str>,
-    output_start: usize,
-  ) {
-    let Some(kind @ 1..=4) = marker_tag.and_then(Self::inline_marker_type) else {
-      return;
-    };
-    self.track_emphasis_flank_opener(kind, depth, output, output_start);
-  }
-
   // Keep the context checks out of the enter path for every non-emphasis tag.
   #[inline(never)]
   fn track_emphasis_flank_opener(
@@ -1590,8 +1580,6 @@ impl ConvertState {
     });
 
     self.record_enter_marker(tag_id, output.as_deref(), output_start, false);
-    let depth = self.stack[stack_len - 1].depth;
-    self.track_flank_opener(tag_id, depth, output.as_deref(), output_start);
 
     if !is_inline && !self.open_markers.is_empty() {
       self.open_markers.clear();
@@ -2213,8 +2201,6 @@ impl ConvertState {
     let marker_tag = tag_id.filter(|&id| !enter_is_literal && (id != TAG_CODE || code_span_marker));
     let keeps_markers = tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
     self.record_enter_marker(marker_tag, output.as_deref(), output_start, keeps_markers);
-    let depth = self.stack[stack_len - 1].depth;
-    self.track_flank_opener(marker_tag, depth, output.as_deref(), output_start);
 
     // A block boundary makes an enclosing inline marker permanent even when
     // the block has not emitted content yet. Release streamed output promptly.

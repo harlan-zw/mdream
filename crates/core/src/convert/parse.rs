@@ -1432,7 +1432,8 @@ impl ConvertState {
 
     // Inline emit (no callback!)
     if !skip_node {
-      if let Some(node) = self.stack.last()
+      if !self.flank_pairs.is_empty()
+        && let Some(node) = self.stack.last()
         && !node.excluded_from_markdown
       {
         self.release_flank_pairs(node.tag_id, node.is_inline, false);
@@ -1654,7 +1655,7 @@ impl ConvertState {
       }
     }
 
-    if !node_excluded && !node_enter_skipped {
+    if !self.flank_pairs.is_empty() && !node_excluded && !node_enter_skipped {
       let is_inline = self.stack.retired().is_inline;
       self.release_flank_pairs(node_tag_id, is_inline, true);
     }

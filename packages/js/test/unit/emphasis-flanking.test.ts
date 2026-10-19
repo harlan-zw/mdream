@@ -65,6 +65,38 @@ async function streamConvert(html: string, chunkSize: number): Promise<string> {
 }
 
 describe('emphasis delimiters that cannot flank', () => {
+  it('reuses completed pairs across nested siblings and stream drains', async () => {
+    const fragment = '<p>a<strong><em><a href="/x">b</a></em></strong>c</p><p><strong><a href="/x">d</a></strong>e</p>'
+    const html = fragment.repeat(128)
+    const expected = Array.from({ length: 128 }).fill('a<strong>*[b](/x)*</strong>c\n\n**[d](/x)**&#101;').join('\n\n')
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 7, 64, 1024, 4096])
+      expect(await streamConvert(html, width), `chunkSize=${width}`).toBe(expected)
+
+    let consumed = 0
+    const input = new ReadableStream<string>({
+      pull(controller) {
+        if (consumed === 128) {
+          controller.close()
+        }
+        else {
+          consumed++
+          controller.enqueue(fragment)
+        }
+      },
+    })
+    let output = ''
+    let firstYieldAt = 0
+    for await (const chunk of streamHtmlToMarkdown(input)) {
+      if (chunk && !firstYieldAt)
+        firstYieldAt = consumed
+      output += chunk
+    }
+    expect(firstYieldAt).toBeGreaterThan(0)
+    expect(firstYieldAt).toBeLessThan(128)
+    expect(output).toBe(expected)
+  })
+
   it.each(cases)('converts %s', (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)
   })

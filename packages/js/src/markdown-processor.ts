@@ -1438,7 +1438,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   // Emphasis pairs whose delimiters may not flank, in output order: the element,
   // its state, and the fragment that state holds (the opener while opening, the
   // closer while closing, -1 otherwise).
-  const flankElements: ElementNode[] = []
+  const flankElements: (ElementNode | undefined)[] = []
+  let flankCount = 0
   const flankStates: number[] = []
   const flankFragments: number[] = []
   let pendingFlankCount = 0
@@ -2460,9 +2461,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       && !state.depthMap[TAG_PRE] && !state.depthMap[TAG_CODE] && !state.depthMap[TAG_KBD]
       && !state.depthMap[TAG_SAMP] && !state.depthMap[TAG_VAR] && !insideRawHtmlRegion
       && !(collectsHeadingSlugs && state.depthMap[TAG_A] && isInsideHeading(state.depthMap))) {
-      flankElements.push(element)
-      flankStates.push(FLANK_OPENING)
-      flankFragments.push(buff.length - 1)
+      flankElements[flankCount] = element
+      flankStates[flankCount] = FLANK_OPENING
+      flankFragments[flankCount++] = buff.length - 1
       pendingFlankCount++
     }
 
@@ -2490,21 +2491,19 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   function dropFlankPair(index: number): void {
     if (flankFragments[index] !== -1)
       pendingFlankCount--
-    for (let next = index + 1; next < flankElements.length; next++) {
+    for (let next = index + 1; next < flankCount; next++) {
       flankElements[next - 1] = flankElements[next]!
       flankStates[next - 1] = flankStates[next]!
       flankFragments[next - 1] = flankFragments[next]!
     }
-    flankElements.pop()
-    flankStates.pop()
-    flankFragments.pop()
+    // Keep the backing stores for the next sibling pair, but release its node.
+    flankElements[--flankCount] = undefined
   }
 
   function clearFlankPairs(): void {
     pendingFlankCount = 0
-    flankElements.length = 0
-    flankStates.length = 0
-    flankFragments.length = 0
+    while (flankCount)
+      flankElements[--flankCount] = undefined
   }
 
   /**
@@ -2517,13 +2516,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   function releaseFlankPairs(element: ElementNode, eventType: number): void {
     const tagId = element.tagId!
     if ((tagId !== -1 && element.tagHandler?.isInline !== true) || tagId === TAG_FIGCAPTION) {
-      for (let index = flankElements.length - 1; index >= 0; index--) {
+      for (let index = flankCount - 1; index >= 0; index--) {
         if (flankFragments[index] !== -1)
           dropFlankPair(index)
       }
     }
     else if (tagId === TAG_A && eventType === NodeEventExit) {
-      for (let index = flankElements.length - 1; index >= 0; index--) {
+      for (let index = flankCount - 1; index >= 0; index--) {
         if (flankStates[index] === FLANK_CLOSING)
           dropFlankPair(index)
       }
@@ -2539,7 +2538,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const type = INLINE_MARKER_TYPE[element.tagId!]!
     if (!(type >= 1 && type <= 4))
       return
-    let index = flankElements.length - 1
+    let index = flankCount - 1
     while (index >= 0 && flankElements[index] !== element)
       index--
     if (index === -1)
@@ -2568,7 +2567,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    */
   function settleFlankPairs(): void {
     const buffer = state.buffer
-    for (let index = 0; index < flankElements.length; index++) {
+    for (let index = 0; index < flankCount; index++) {
       const fragment = flankFragments[index]!
       if (fragment === -1)
         continue
@@ -2637,10 +2636,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
   function processMarkdownEvent(event: NodeEvent): void {
     const node = event.node
-    if (flankElements.length !== 0 && node.type === ELEMENT_NODE && !node.excludedFromMarkdown)
+    if (flankCount !== 0 && node.type === ELEMENT_NODE && !node.excludedFromMarkdown)
       releaseFlankPairs(node as ElementNode, event.type)
     processEvent(event)
-    if (flankElements.length !== 0) {
+    if (flankCount !== 0) {
       if (event.type === NodeEventExit && node.type === ELEMENT_NODE)
         closeFlankPair(node as ElementNode)
       if (pendingFlankCount !== 0)
@@ -2652,7 +2651,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    * Get the final markdown output
    */
   function getMarkdown(): string {
-    if (flankElements.length !== 0)
+    if (flankCount !== 0)
       finishFlankPairs()
     // Only ASCII whitespace ends the output, as in Rust: U+00A0 is content,
     // and a stream cannot take back a nbsp it already yielded.
@@ -2666,7 +2665,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // every hold, so scan and trim that position once. The final call drops
     // every hold: a fence whose owner reset the open flag before exiting can
     // never be rewritten, and holding it suppressed the whole output.
-    if (final && flankElements.length !== 0)
+    if (final && flankCount !== 0)
       finishFlankPairs()
     let heldFragment = final
       ? Infinity
@@ -2681,7 +2680,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (cleanPass && !final)
       heldFragment = Math.min(heldFragment, cleanPass.held())
     // An undecided emphasis opener, or a closer waiting for the next character.
-    for (let index = 0; index < flankFragments.length; index++) {
+    for (let index = 0; index < flankCount; index++) {
       if (flankFragments[index] !== -1)
         heldFragment = Math.min(heldFragment, flankFragments[index]!)
     }
