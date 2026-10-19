@@ -48,11 +48,14 @@ export function verifyComparison(base: unknown, head: unknown, label: string): s
 export function verifyWasmOutputs(native: unknown[], wasm: unknown[], label: string): void {
   assert.equal(native.length, 2, 'Expected base and PR native observations.')
   assert.equal(wasm.length, 2, 'Expected base and PR WASM observations.')
-  verifyComparison(wasm[0], wasm[1], `${label}: WASM`)
   for (const [side, observed] of wasm.entries()) {
-    const output = (observed as { output: string }).output
-    assert.equal(output, (native[side] as { output: string }).output, `${label}: native and WASM output differ`)
+    const output = (observed as { output?: unknown } | null)?.output
+    const nativeOutput = (native[side] as { output?: unknown } | null)?.output
+    assert.equal(typeof nativeOutput, 'string', `${label}: native observation ${side} must contain a string output`)
+    assert.equal(typeof output, 'string', `${label}: WASM observation ${side} must contain a string output`)
+    assert.equal(output, nativeOutput, `${label}: native and WASM output differ`)
   }
+  verifyComparison(wasm[0], wasm[1], `${label}: WASM`)
 }
 
 type Mode = 'verify' | 'cpu' | 'alloc'
