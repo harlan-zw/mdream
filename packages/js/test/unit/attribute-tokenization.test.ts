@@ -3,6 +3,17 @@ import { htmlToMarkdown } from '../../src'
 import { parseAttributes } from '../../src/parse'
 
 describe('html attribute tokenization', () => {
+  it.each(['', ' \t\n', 'title="original"'])('returns an independent mutable record for %j', (source) => {
+    const attributes = parseAttributes(source)
+    const otherAttributes = parseAttributes(source)
+
+    attributes.id = 'added'
+
+    expect(attributes.id).toBe('added')
+    expect(otherAttributes).not.toHaveProperty('id')
+    expect(parseAttributes(source)).toEqual(otherAttributes)
+  })
+
   it.each([
     [
       String.raw`href="x\" onclick=alert(1)"`,
