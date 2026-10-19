@@ -1,6 +1,7 @@
 import type { MdreamOptions } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown as streamWithOptions } from '../../src/index'
+import { filterPlugin } from '../../src/plugins'
 import { streamHtmlToMarkdown } from '../../src/stream'
 
 const wrap = (html: string, width: number) => htmlToMarkdown(html, { wrapWidth: width })
@@ -153,6 +154,19 @@ describe('wrap width (issue #106)', () => {
     ['<p>aaaaa ####### b</p>', 6, 'aaaaa\n#######\nb'],
   ] as const)('never breaks before a block marker: %s', async (html, width, expected) => {
     await expectEveryChunking(html, { wrapWidth: width }, expected)
+  })
+
+  // A blockquote a plugin or a literal override dropped writes no `>`.
+  const droppedQuoteCases: [string, Partial<MdreamOptions>, string][] = [
+    ['<blockquote><p><span>aaaaaaa </span>bbbb</p></blockquote>', { wrapWidth: 8, plugins: [filterPlugin({ include: ['p'] })] }, 'aaaaaaa\nbbbb'],
+    ['<blockquote><p>aaaaaaa b</p></blockquote>', { wrapWidth: 8, plugins: [filterPlugin({ include: ['p'] })] }, 'aaaaaaa\nb'],
+    ['<blockquote><p>aaaaaaa<br>b</p></blockquote>', { plugins: [filterPlugin({ include: ['p'] })] }, 'aaaaaaa  \nb'],
+    ['<blockquote><p>aaaaaaa b</p></blockquote>', { wrapWidth: 8, tagOverrides: { blockquote: { enter: '[', exit: ']' } } }, '[\n\naaaaaaa\nb\n\n]'],
+    ['<blockquote><p>aaaaaaa<br>b</p></blockquote>', { tagOverrides: { blockquote: { enter: '[', exit: ']' } } }, '[\n\naaaaaaa  \nb\n\n]'],
+    ['<blockquote><blockquote><p>aaaaaaa b</p></blockquote></blockquote>', { wrapWidth: 8, plugins: [filterPlugin({ include: ['blockquote'] })] }, '> > aaaaaaa\n> > b'],
+  ]
+  it.each(droppedQuoteCases)('continues a line without the marker of a dropped blockquote: %s', async (html, options, expected) => {
+    await expectEveryChunking(html, options, expected)
   })
 
   it('wraps identically across streaming chunks', async () => {

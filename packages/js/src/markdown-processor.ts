@@ -1700,7 +1700,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           textNode.value,
           currentColumn(state.buffer),
           wrapWidth,
-          continuationPrefix(textNode, state.listIndentWidths, state.blockquotes.length === 0),
+          continuationPrefix(textNode, state.listIndentWidths),
         )
         state.buffer.push(wrapped)
         state.lastContentCache = wrapped

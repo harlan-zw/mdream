@@ -89,7 +89,8 @@ describe('cross-engine wrap at a trimmed inline separator', () => {
 })
 
 describe('cross-engine wrap at the start of a block', () => {
-  // A break before a bare block marker would open a list, quote, heading or fence.
+  // A break before a bare block marker would open a list, quote, heading or
+  // fence, and a blockquote the filter or a literal override dropped writes no `>`.
   it.each([
     ['<p>The configuration guide explains each option in detail, so read it first <b>Price </b>- 5 dollars per month for every user seat.</p>', { wrapWidth: 80 }, 'The configuration guide explains each option in detail, so read it first **Price** -\n5 dollars per month for every user seat.'],
     ['<p>The configuration guide explains each option in detail, so read it to see <a href="/issues">Issue </a># 42 for the full discussion.</p>', { wrapWidth: 80 }, 'The configuration guide explains each option in detail, so read it to see [Issue](/issues) #\n42 for the full discussion.'],
@@ -99,6 +100,9 @@ describe('cross-engine wrap at the start of a block', () => {
     ['<p>aaaaa ===</p>', { wrapWidth: 6 }, 'aaaaa ==='],
     ['<details><summary>S</summary><code>aaaaaaaa </code>~~~</details><p>After.</p>', { wrapWidth: 12 }, '<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> ~~~</details>\n\n\n\nAfter.'],
     ['<p><span>aaaaa </span>- bbbb</p>', { wrapWidth: 6, format: 'text' }, 'aaaaa\n- bbbb'],
+    ['<blockquote><p><span>aaaaaaa </span>bbbb</p></blockquote>', { wrapWidth: 8, plugins: { filter: { include: ['p'] } } }, 'aaaaaaa\nbbbb'],
+    ['<blockquote><p>aaaaaaa<br>b</p></blockquote>', { plugins: { filter: { include: ['p'] } } }, 'aaaaaaa  \nb'],
+    ['<blockquote><p>aaaaaaa b</p></blockquote>', { wrapWidth: 8, plugins: { tagOverrides: { blockquote: { enter: '[', exit: ']' } } } }, '[\n\naaaaaaa\nb\n\n]'],
   ])('keeps one block at every chunk width: %s %o', async (html, options, expected) => {
     for (const { engine, name } of engines) {
       expect(engine.htmlToMarkdown(html, options), `engine=${name}`).toBe(expected)

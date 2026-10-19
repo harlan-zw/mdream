@@ -4168,35 +4168,28 @@ impl ConvertState {
   }
 
   /// Continuation prefix re-emitted at the start of each continued line so the
-  /// content stays inside its block context. Built by walking the open
-  /// ancestor stack outermost-first so blockquote markers (`> `) and list-item
-  /// indentation interleave in the real nesting order: `<li><blockquote>` →
-  /// `  > `, `<blockquote><li>` → `>   `. A flat "all quotes then all indent"
-  /// prefix would corrupt the Markdown structure of nested blocks.
+  /// content stays inside its list items: the marker width of every open
+  /// `<li>`, outermost first. Quote markers are never part of it. A rendered
+  /// blockquote buffers its content and prefixes every line when it closes,
+  /// and one the filter or a literal override dropped writes no `>` at all.
   fn continuation_prefix(&self) -> String {
-    // Only `<li>` and `<blockquote>` contribute, so with neither open there is
-    // nothing to walk and nothing to allocate.
-    if plain_text!(self)
-      || (self.depth_map[TAG_LI as usize] == 0 && self.depth_map[TAG_BLOCKQUOTE as usize] == 0)
-    {
+    // Only `<li>` contributes, so with none open there is nothing to walk and
+    // nothing to allocate.
+    if plain_text!(self) || self.depth_map[TAG_LI as usize] == 0 {
       return String::new();
     }
 
     let mut p = String::new();
     let mut li_idx = 0usize;
     for node in &self.stack {
-      match node.tag_id {
-        Some(TAG_BLOCKQUOTE) if self.blockquotes.is_empty() => p.push_str("> "),
-        Some(TAG_LI) => {
-          // Each open <li> contributes its marker-width of spaces, in
-          // the same order they were pushed onto list_indent_widths.
-          let w = self.list_indent_widths.get(li_idx).copied().unwrap_or(2) as usize;
-          for _ in 0..w {
-            p.push(' ');
-          }
-          li_idx += 1;
+      if node.tag_id == Some(TAG_LI) {
+        // Each open <li> contributes its marker-width of spaces, in
+        // the same order they were pushed onto list_indent_widths.
+        let w = self.list_indent_widths.get(li_idx).copied().unwrap_or(2) as usize;
+        for _ in 0..w {
+          p.push(' ');
         }
-        _ => {}
+        li_idx += 1;
       }
     }
     p

@@ -190,11 +190,7 @@ export function renderBreak(node: HandlerContext['node'], state: HandlerContext[
   if (depthMap[TAG_PRE] || depthMap[TAG_CODE])
     return '\n'
 
-  const prefix = continuationPrefix(
-    node,
-    state.listIndentWidths || [],
-    !state.bufferedBlockquoteDepth,
-  )
+  const prefix = continuationPrefix(node, state.listIndentWidths || [])
   return `  \n${prefix}`
 }
 
@@ -467,11 +463,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       // can actually carry a prefix asks for one.
       if (!(state.depthMap?.[TAG_LI] || state.bufferedBlockquoteDepth))
         return MARKDOWN_HORIZONTAL_RULE
-      const prefix = continuationPrefix(
-        node,
-        state.listIndentWidths || [],
-        !state.bufferedBlockquoteDepth,
-      )
+      const prefix = continuationPrefix(node, state.listIndentWidths || [])
       if (!prefix)
         return MARKDOWN_HORIZONTAL_RULE
       if (state.depthMap?.[TAG_LI])

@@ -1,6 +1,6 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
 use mdream::types::{
-  CleanConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
+  CleanConfig, FilterConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
 };
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
@@ -411,6 +411,68 @@ fn wrap_never_breaks_before_a_block_marker() {
     &wrap(6),
     "aaaaa\n- bbbb",
   );
+}
+
+#[test]
+fn continued_line_gets_no_marker_from_a_dropped_blockquote() {
+  // A blockquote the filter or a literal override dropped writes no `>`, so a
+  // wrapped or hard-broken line inside it must not start with one either.
+  let include = |selector: &str| HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::include(&[selector])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let literal = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "blockquote".to_string(),
+        TagOverrideConfig {
+          enter: Some("[".to_string()),
+          exit: Some("]".to_string()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, options, expected) in [
+    (
+      "<blockquote><p><span>aaaaaaa </span>bbbb</p></blockquote>",
+      include("p").with_wrap_width(8),
+      "aaaaaaa\nbbbb",
+    ),
+    (
+      "<blockquote><p>aaaaaaa b</p></blockquote>",
+      include("p").with_wrap_width(8),
+      "aaaaaaa\nb",
+    ),
+    (
+      "<blockquote><p>aaaaaaa<br>b</p></blockquote>",
+      include("p"),
+      "aaaaaaa  \nb",
+    ),
+    (
+      "<blockquote><p>aaaaaaa b</p></blockquote>",
+      literal.clone().with_wrap_width(8),
+      "[\n\naaaaaaa\nb\n\n]",
+    ),
+    (
+      "<blockquote><p>aaaaaaa<br>b</p></blockquote>",
+      literal,
+      "[\n\naaaaaaa  \nb\n\n]",
+    ),
+    // A rendered blockquote still prefixes every line.
+    (
+      "<blockquote><blockquote><p>aaaaaaa b</p></blockquote></blockquote>",
+      include("blockquote").with_wrap_width(8),
+      "> > aaaaaaa\n> > b",
+    ),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
 }
 
 // ── tagOverrides spacing on a built-in inline tag ──
