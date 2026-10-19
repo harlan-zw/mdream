@@ -306,12 +306,13 @@ Required option construction, output creation, and output disposal belong to the
 WASM reports linear memory capacity separately. That value does not measure allocation churn.
 
 The runner warms both revisions and alternates batch order. CPU time excludes process startup and fixture preparation.
-Verification compares outputs, metadata, and native truncation flags before timing. It also compares native and WASM output.
-Allocation runs must agree across repeated measurements. Any mismatch fails the job.
+Verification compares metadata and native truncation flags between revisions, and requires each revision's instrumented and WASM output to match its native output. Splitter results must also match between revisions.
+When only conversion output changes, both revisions are still measured, but every metric for that case is marked as not comparable. The report shows absolute costs without a performance delta or verdict for those metrics. The artifact `output-differences.json` preserves both observations for review, and each revision keeps its own verification digests.
+Allocation runs must agree across repeated measurements. Metadata, truncation, splitter, or per-revision output mismatches still fail the job.
 
 Scaling cases use N, 2N, and 4N input sizes with fixed options and chunk widths.
 The report shows CPU per MiB and doubling ratios separately from regression verdicts. Ordered-list cases vary item count and attribute length independently.
-Every timing delta remains visible, including changes inside the noise threshold.
+Every comparable timing delta remains visible, including changes inside the noise threshold. Normalized CPU and scaling rows preserve any unavailable comparison.
 Raw samples, fixture digests, build identities, verification digests, and inputs are uploaded as the `rust-performance` artifact.
 
 To validate benchmark sensitivity, run selected cases against a performance PR's parent and merged revision.
