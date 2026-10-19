@@ -1116,7 +1116,11 @@ impl ConvertState {
   /// separate it from text on the same line goes. Output with nothing visible
   /// leaves the break to whatever follows.
   #[inline(never)]
-  fn settle_heading_break(&mut self, tag_id: Option<u8>, output: &mut Option<Cow<'static, str>>) {
+  fn settle_heading_break(
+    &mut self,
+    tag_id: Option<u8>,
+    output: &mut Option<Cow<'static, str>>,
+  ) -> usize {
     let fragment = output.as_deref().unwrap_or("");
     if matches!(tag_id, Some(TAG_LI | TAG_FIGCAPTION)) || fragment.contains('\n') {
       self.heading_break_pending = false;
@@ -1124,7 +1128,9 @@ impl ConvertState {
       self.heading_break_pending = false;
       let fragment = fragment.trim_start_matches(' ');
       *output = Some(Cow::Owned(format!("\n\n{}{fragment}", self.list_indent)));
+      return 2 + self.list_indent.len();
     }
+    0
   }
 
   fn flush_heading_break(&mut self) {
@@ -1201,9 +1207,11 @@ impl ConvertState {
       return;
     }
 
-    if self.heading_break_pending {
-      self.settle_heading_break(tag_id, &mut output);
-    }
+    let heading_break_prefix_len = if self.heading_break_pending {
+      self.settle_heading_break(tag_id, &mut output)
+    } else {
+      0
+    };
 
     let output_start = self.buffer.len();
     self.write_output(
@@ -1227,6 +1235,11 @@ impl ConvertState {
       };
       self.begin_link(bracket_pos, false, false);
       self.link.bracket_emitted = emitted_bracket;
+      if emitted_bracket && heading_break_prefix_len != 0 {
+        self.link.heading_break_prefix_len = heading_break_prefix_len;
+        self.link.starts_at_hard_break =
+          self.hard_break_end == bracket_pos - self.link.heading_break_prefix_len;
+      }
       if self.streaming {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = emitted_bracket
@@ -1665,9 +1678,11 @@ impl ConvertState {
       }
     }
 
-    if self.heading_break_pending {
-      self.settle_heading_break(tag_id, &mut output);
-    }
+    let heading_break_prefix_len = if self.heading_break_pending {
+      self.settle_heading_break(tag_id, &mut output)
+    } else {
+      0
+    };
     // Inside a list item a heading opens its own block unless a wrapper keeps it
     // inline: after text on the item's line, even past a space, its `#` prefix
     // would stay text. The space that ended the text goes too, which the
@@ -1890,6 +1905,11 @@ impl ConvertState {
       };
       self.begin_link(bracket_pos, false, raw_html_link_open);
       self.link.bracket_emitted = emitted_bracket;
+      if emitted_bracket && heading_break_prefix_len != 0 {
+        self.link.heading_break_prefix_len = heading_break_prefix_len;
+        self.link.starts_at_hard_break =
+          self.hard_break_end == bracket_pos - self.link.heading_break_prefix_len;
+      }
       // Avoid the href lookup and hold bookkeeping for one-shot conversion, unless
       // `max_node_bytes` has to charge what the link holds back.
       if self.streaming || self.options.max_node_bytes != 0 {
@@ -2018,9 +2038,14 @@ impl ConvertState {
 
   /// Clean-mode empty link: drop the whole `[](url)`, restoring the caption state it changed.
   fn drop_empty_link_text(&mut self, bracket_pos: usize, is_inline: bool) {
-    self.truncate_buffer(bracket_pos);
+    let prefix_len = self.link.heading_break_prefix_len;
+    let start = bracket_pos - prefix_len;
+    self.truncate_buffer(start);
     if self.link.starts_at_hard_break {
-      self.hard_break_end = self.link.bracket_pos;
+      self.hard_break_end = start;
+    }
+    if prefix_len != 0 {
+      self.heading_break_pending = true;
     }
     for (frame, &(count, has_internal_break)) in self
       .caption_frames

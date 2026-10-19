@@ -254,6 +254,8 @@ struct LinkOutputState {
   /// The `[` starts where the latest hard break ends; see
   /// `OpenMarker::starts_at_hard_break`.
   starts_at_hard_break: bool,
+  /// Bytes before the link bracket owned by a pending heading break.
+  heading_break_prefix_len: usize,
 }
 
 struct FragmentLink {
@@ -2683,7 +2685,7 @@ impl ConvertState {
     if let Some(bracket_pos) = std::iter::once(&self.link)
       .chain(&self.parent_links)
       .filter(|link| link.open && (link.pins_output || link.empty_text_pending))
-      .map(|link| link.bracket_pos)
+      .map(|link| link.bracket_pos - link.heading_break_prefix_len)
       .min()
     {
       floor = floor.min(bracket_pos);
@@ -2907,7 +2909,7 @@ impl ConvertState {
     std::iter::once(&self.link)
       .chain(&self.parent_links)
       .filter(|link| self.link_hold_required(link))
-      .map(|link| link.bracket_pos)
+      .map(|link| link.bracket_pos - link.heading_break_prefix_len)
       .min()
   }
 

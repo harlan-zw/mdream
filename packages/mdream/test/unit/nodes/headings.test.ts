@@ -2,6 +2,52 @@ import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('headings $name', (engineConfig) => {
+  it.each([
+    ['<ul><li><h2>Heading</h2><a href="/x"></a></li><li>next</li></ul>', '- ## Heading\n- next'],
+    ['<ul><li><h2>Heading</h2><a href="/x"> </a>tail</li></ul>', '- ## Heading\n\n  tail'],
+    ['<ul><li><h2>Heading</h2><a href="/x"><span></span></a></li><li>next</li></ul>', '- ## Heading\n- next'],
+    ['<ul><li>outer<ul><li><h2>Heading</h2><a href="/x"></a></li><li>next</li></ul></li></ul>', '- outer\n  - ## Heading\n  - next'],
+  ])('restores a heading break after dropping an empty link: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    for (const plugins of [undefined, { tagOverrides: { a: { isInline: true } } }]) {
+      const options = { clean: { emptyLinkText: true }, plugins }
+      expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+      for (let size = 1; size <= html.length; size++) {
+        const input = new ReadableStream<string>({
+          start(controller) {
+            for (let at = 0; at < html.length; at += size)
+              controller.enqueue(html.slice(at, at + size))
+            controller.close()
+          },
+        })
+        let output = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+          output += chunk
+        expect(output, `chunkSize=${size}`).toBe(expected)
+      }
+    }
+  })
+
+  it('keeps the heading break pending through text removed by an include filter', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li><h2>Heading</h2><span>hidden</span></li><li>next</li></ul>'
+    const options = {
+      plugins: { filter: { include: ['ul', 'li', 'h2'], processChildren: false } },
+    }
+    expect(engine.htmlToMarkdown(html, options)).toBe('- ## Heading\n- next')
+    const input = new ReadableStream<string>({
+      start(controller) {
+        for (const character of html)
+          controller.enqueue(character)
+        controller.close()
+      },
+    })
+    let output = ''
+    for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+      output += chunk
+    expect(output).toBe('- ## Heading\n- next')
+  })
+
   it('converts h1', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<h1>Heading 1</h1>'

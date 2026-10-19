@@ -1424,6 +1424,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let captionBreakRun = 0
   const gfmLifecycle: GfmLifecycleState = { openCodeSpans: [] }
   let openLinkFragment = -1
+  let openLinkHeadingBreak = false
   let openLinkCaptionBreakRun = 0
   let openLinkCaptionFlags: Uint8Array | undefined
   const clean = options.clean
@@ -1445,7 +1446,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
 
   /** Track a link whose `[` sits at buffer index `fragment`. */
-  function openLink(fragment: number): void {
+  function openLink(fragment: number, headingBreak: boolean): void {
+    openLinkHeadingBreak = headingBreak
     if (!cleanEmptyLinkText) {
       openLinkFragment = -fragment - 2
       return
@@ -1827,7 +1829,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     if (state.headingBreakPending) {
       if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
-        if (!hasNonWhitespace((node as TextNode).value))
+        if ((node as TextNode).excludedFromMarkdown || !hasNonWhitespace((node as TextNode).value))
           return
         const separator = `\n\n${state.listIndent}`
         state.buffer.push(separator)
@@ -2050,6 +2052,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && eventType === NodeEventExit
         && tagId === TAG_A) {
         if (dropEmptyLinkText(buff, openLinkFragment, state.outputPositions)) {
+          if (openLinkHeadingBreak) {
+            state.outputPositions?.replace(openLinkFragment - 1, openLinkFragment, [])
+            buff.length--
+            state.headingBreakPending = true
+          }
           if (captionFrameCount !== 0) {
             captionBreakRun = openLinkCaptionBreakRun
             restoreCaptionBreakFlags(captionFrames, openLinkCaptionFlags, captionFrameCount)
@@ -2410,6 +2417,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // separate it from text on the same line goes. Output with nothing
     // visible leaves the break to whatever follows. Parity with the Rust
     // engine's `settle_heading_break`.
+    let linkHeadingBreak = false
     if (state.headingBreakPending && eventType === NodeEventEnter) {
       if (tagId === TAG_LI || tagId === TAG_FIGCAPTION || output?.some(fragment => fragment.includes('\n'))) {
         state.headingBreakPending = false
@@ -2419,6 +2427,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         const separator = `\n\n${state.listIndent}`
         // A link's bracket stays its own fragment, which is how its open is found.
         if (tagId === TAG_A && output[0] === '[') {
+          linkHeadingBreak = true
           buff.push(separator)
           state.lastContentCache = separator
           lastChar = ' '
@@ -2489,7 +2498,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       && tagId === TAG_A
       && outputStart < buff.length
       && buff.at(-1) === '[') {
-      openLink(buff.length - 1)
+      openLink(buff.length - 1, linkHeadingBreak)
     }
     if (cleanPass) {
       if (eventType === NodeEventEnter)
@@ -2558,7 +2567,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
           state.emptyItemFragment ?? Infinity,
           state.codeFence?.fragment ?? Infinity,
-          openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
+          openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment - Number(openLinkHeadingBreak),
         )
     // An open link can still be unwrapped at its close.
     if (cleanPass && !final)
