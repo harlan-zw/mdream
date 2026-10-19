@@ -143,12 +143,13 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
       const selfLink = selfLinkHeadings && href.charCodeAt(0) === 35 /* # */ && isInsideHeading(depthMap)
       if (!selfLink && !(redundantLinks && spells(buffer, bracket + 1, textLength, resolveUrl(href, target.options?.origin, rules))))
         return false
-      // A closed emphasis pair can still be waiting for the next character.
-      // Keep its fragment index stable when removing the link's bracket.
-      const prefix = opener.slice(0, -1)
-      target.outputPositions?.replace(bracket, bracket + 1, [prefix], offset => Math.min(offset, prefix.length))
-      buffer[bracket] = prefix
-      target.lastContentCache = prefix + buffer.slice(bracket + 1).join('')
+      // Everything past the `[` belongs to this link and is closed, so folding
+      // it into one entry moves no index another open element holds.
+      const unwrapped = opener.slice(0, -1) + buffer.slice(bracket + 1).join('')
+      target.outputPositions?.replace(bracket, buffer.length, [unwrapped], offset => offset > opener.length - 1 ? offset - 1 : offset)
+      buffer.length = bracket
+      buffer.push(unwrapped)
+      target.lastContentCache = unwrapped
       closing = -1
       return true
     },

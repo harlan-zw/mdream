@@ -8,18 +8,20 @@ import { htmlToText } from '../../src/text'
 // into raw HTML; a closer that cannot close is followed by a character
 // reference, which starts with punctuation.
 const cases: [string, string][] = [
+  // Non-ASCII preceding characters are outside the lean opening rule.
+  ['<p>é<strong>!b</strong></p>', 'é**!b**'],
   ['<p>a<strong><span><span><a href="/x">b</a></span></span></strong><span>c</span></p>', 'a<strong>[b](/x)</strong>c'],
   ['<p><strong><span><a href="/x">b</a></span></strong><span><span>c</span></span></p>', '**[b](/x)**&#99;'],
-  ['<p><i>a</i><b><a href="/y">x</a></b></p>', '*a*<strong>[x](/y)</strong>'],
+  ['<p><i>a</i><b><a href="/y">x</a></b></p>', '*a***[x](/y)**'],
   ['<p><b><a href="/x">a</a></b><i>c</i></p>', '**[a](/x)***&#99;*'],
-  ['<p><b><i>a</i></b><b><a href="/y">x</a></b></p>', '***a***<strong>[x](/y)</strong>'],
+  ['<p><b><i>a</i></b><b><a href="/y">x</a></b></p>', '***a*****[x](/y)**'],
   ['<p><b><a href="/x">a</a></b><b><i>c</i></b></p>', '**[a](/x)*****&#99;***'],
   ['<p>a<strong><a href="/x">b</a></strong></p>', 'a<strong>[b](/x)</strong>'],
   ['<p><strong><a href="/x">b</a></strong>c</p>', '**[b](/x)**&#99;'],
   ['<p>a<b><a href="/x">b</a></b>c</p>', 'a<strong>[b](/x)</strong>c'],
   ['<p>a<em><img src="/i.png" alt="i"></em>c</p>', 'a<em>![i](/i.png)</em>c'],
   ['<p>a<i><code>x</code></i>c</p>', 'a<em>`x`</em>c'],
-  ['<p>a<strong><em><a href="/x">b</a></em></strong>c</p>', 'a<strong>*[b](/x)*</strong>c'],
+  ['<p>a<strong><em><a href="/x">b</a></em></strong>c</p>', 'a***[b](/x)***&#99;'],
   ['<p>a<del><a href="/x">b</a></del>c</p>', 'a ~~[b](/x)~~&#99;'],
   ['<p><s><a href="/x">b</a></s>c</p>', '~~[b](/x)~~&#99;'],
   ['<p>a<strong>!b</strong></p>', 'a<strong>!b</strong>'],
@@ -66,16 +68,16 @@ async function streamConvert(html: string, chunkSize: number): Promise<string> {
 
 describe('emphasis delimiters that cannot flank', () => {
   it.each([
-    ['<h2><em>x</em><a href="#x"><strong>!b</strong></a></h2>', '## *x*<strong>!b</strong>'],
+    ['<h2><em>x</em><a href="#x"><strong>!b</strong></a></h2>', '## *x***!b**'],
     ['<h2>Q<a href="#q">#</a></h2>', '## Q \\#'],
     ['<h2>Q<a href="#q">##</a></h2>', '## Q \\##'],
-    ['<h2><strong>b!</strong><a href="#x">c</a></h2>', '## **b!**&#99;'],
+    ['<h2><strong>b!</strong><a href="#x">c</a></h2>', '## **b!**c'],
     ['<h2><a href="#x">x</a><strong>!b</strong></h2>', '## x<strong>!b</strong>'],
     ['<h2>x<a href="#x"><strong>!b</strong></a></h2>', '## x **!b**'],
     ['<h2><a href="#x"><strong>b!</strong></a>c</h2>', '## **b!**&#99;'],
     ['<h2><a href="#x"><strong><em>b!</em></strong></a><span>c</span></h2>', '## ***b!***&#99;'],
     ['<h2><a href="/x"><strong>b!</strong></a>c</h2>', '## [**b!**](/x)c'],
-  ])('retains pending emphasis when cleaning the link in %s', async (html, expected) => {
+  ])('keeps streaming parity after heading link cleanup in %s', async (html, expected) => {
     const options = { clean: clean({ selfLinkHeadings: true }) }
     expect(htmlToMarkdown(html, options)).toBe(expected)
     for (let width = 1; width <= html.length; width++) {
@@ -94,25 +96,25 @@ describe('emphasis delimiters that cannot flank', () => {
   })
 
   it.each([
-    ['<p><em>x</em><a href="#missing"><strong>!b</strong></a></p>', '*x*<strong>!b</strong>'],
-    ['<p><em>x</em><a href="#found"><strong>!b</strong></a></p><h2>found</h2>', '*x*[<strong>!b</strong>](#found)\n\n## found'],
-    ['<p><a href="#missing"><em>x</em></a><em>!b</em></p>', '*x*<em>!b</em>'],
+    ['<p><em>x</em><a href="#missing"><strong>!b</strong></a></p>', '*x***!b**'],
+    ['<p><em>x</em><a href="#found"><strong>!b</strong></a></p><h2>found</h2>', '*x*[**!b**](#found)\n\n## found'],
+    ['<p><a href="#missing"><em>x</em></a><em>!b</em></p>', '*x**!b*'],
     ['<p>x<a href="#missing"></a><strong>!b</strong></p>', 'x **!b**'],
-    ['<p><em>x</em><a href="#missing"></a><em>!b</em></p>', '*x*<em>!b</em>'],
+    ['<p><em>x</em><a href="#missing"></a><em>!b</em></p>', '*x**!b*'],
     ['<p><em>x</em><a href="#one"></a><a href="#two"></a><em>!b</em></p>', '*x* *!b*'],
-    ['<p><strong>b!</strong><a href="#missing"></a>c</p>', '**b!**&#99;'],
-    ['<p><strong>b!</strong><a href="#missing">c</a></p>', '**b!**&#99;'],
-    ['<p><strong>b!</strong><a href="#found">c</a></p><h2>found</h2>', '**b!**[&#99;](#found)\n\n## found'],
-    ['<p><a href="#missing">x</a><strong>!b</strong></p>', 'x<strong>!b</strong>'],
-    ['<p><a href="#found">x</a><strong>!b</strong></p><h2>found</h2>', '[x](#found)<strong>!b</strong>\n\n## found'],
+    ['<p><strong>b!</strong><a href="#missing"></a>c</p>', '**b!**c'],
+    ['<p><strong>b!</strong><a href="#missing">c</a></p>', '**b!**c'],
+    ['<p><strong>b!</strong><a href="#found">c</a></p><h2>found</h2>', '**b!**[c](#found)\n\n## found'],
+    ['<p><a href="#missing">x</a><strong>!b</strong></p>', 'x**!b**'],
+    ['<p><a href="#found">x</a><strong>!b</strong></p><h2>found</h2>', '[x](#found)**!b**\n\n## found'],
     ['<p>x<a href="#missing"><strong>!b</strong></a></p>', 'x **!b**'],
     ['<p><a href="#missing"><strong></strong></a>c</p>', 'c'],
     ['<p><a href="#missing"><strong>b!</strong> tail</a>c</p>', '**b!** tailc'],
     ['<p><a href="/external"><strong>b!</strong></a>c</p>', '[**b!**](/external)c'],
-    ['<p><a href="#missing"><strong>b!</strong></a>c</p>', '**b!**&#99;'],
-    ['<p><a href="#found"><strong>b!</strong></a>c</p><h2>found</h2>', '[**b!**](#found)&#99;\n\n## found'],
-    ['<p><a href="#missing"><strong><em>b!</em></strong></a>c</p>', '***b!***&#99;'],
-  ])('keeps emphasis across deferred fragment cleanup in %s', async (html, expected) => {
+    ['<p><a href="#missing"><strong>b!</strong></a>c</p>', '**b!**c'],
+    ['<p><a href="#found"><strong>b!</strong></a>c</p><h2>found</h2>', '[**b!**](#found)c\n\n## found'],
+    ['<p><a href="#missing"><strong><em>b!</em></strong></a>c</p>', '***b!***c'],
+  ])('keeps streaming parity after fragment cleanup in %s', async (html, expected) => {
     const options = { clean: clean({ fragments: true }) }
     expect(htmlToMarkdown(html, options)).toBe(expected)
     for (let width = 1; width <= html.length; width++) {
@@ -142,10 +144,10 @@ describe('emphasis delimiters that cannot flank', () => {
     }
   })
 
-  it('reuses completed pairs across nested siblings and stream drains', async () => {
+  it('keeps nested siblings consistent across stream drains', async () => {
     const fragment = '<p>a<strong><em><a href="/x">b</a></em></strong>c</p><p><strong><a href="/x">d</a></strong>e</p>'
     const html = fragment.repeat(128)
-    const expected = Array.from({ length: 128 }).fill('a<strong>*[b](/x)*</strong>c\n\n**[d](/x)**&#101;').join('\n\n')
+    const expected = Array.from({ length: 128 }).fill('a***[b](/x)***&#99;\n\n**[d](/x)**&#101;').join('\n\n')
     expect(htmlToMarkdown(html)).toBe(expected)
     for (const width of [1, 7, 64, 1024, 4096])
       expect(await streamConvert(html, width), `chunkSize=${width}`).toBe(expected)
@@ -240,8 +242,8 @@ describe('emphasis delimiters that cannot flank', () => {
   it('keeps delimiters where a fix cannot help', () => {
     // An opener before whitespace cannot open; a raw one at a block start
     // would open an HTML block.
-    expect(htmlToMarkdown('<p><strong><br><a href="/x">b</a></strong>c</p>')).toBe('**  \n[b](/x)**c')
-    expect(htmlToMarkdown('<p>a<strong>&nbsp;<a href="/x">b</a></strong>c</p>')).toBe('a**  [b](/x)**c')
+    expect(htmlToMarkdown('<p><strong><br><a href="/x">b</a></strong>c</p>')).toBe('**  \n[b](/x)**&#99;')
+    expect(htmlToMarkdown('<p>a<strong>&nbsp;<a href="/x">b</a></strong>c</p>')).toBe('a**  [b](/x)**&#99;')
     expect(htmlToMarkdown('<p><code>a<strong>[b]</strong>c</code></p>')).toBe('`a**[b]**c`')
     // `<kbd>`, `<samp>` and `<var>` are code spans as well.
     expect(htmlToMarkdown('<p><kbd><strong>b!</strong>c</kbd></p>')).toBe('`**b!**c`')

@@ -160,6 +160,8 @@ struct CodeSpanState {
 
 #[derive(Clone, Copy)]
 struct OpenMarker {
+  // Fits in the existing marker padding.
+  node_index: u32,
   output_start: usize,
   content_start: usize,
   kind: u8,
@@ -167,28 +169,6 @@ struct OpenMarker {
   /// pair replaces that one as the latest, so dropping the empty pair has to
   /// make the outer break the latest again.
   starts_at_hard_break: bool,
-}
-
-/// An emphasis pair whose delimiters may not flank (see `flank_class`).
-#[derive(Clone, Copy)]
-struct FlankPair {
-  /// Depth of the element, which identifies its exit.
-  depth: usize,
-  /// Inline marker type, 1 to 4.
-  kind: u8,
-  state: FlankState,
-  /// The opener while opening, the closer while closing, else `usize::MAX`.
-  offset: usize,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FlankState {
-  /// The opener waits for content.
-  Opening,
-  Kept,
-  Raw,
-  /// The closer waits for the byte after it.
-  Closing,
 }
 
 #[derive(Clone, Copy)]
@@ -903,9 +883,7 @@ pub struct ConvertState {
   pub(crate) streaming: bool,
   /// Open inline markers retained until visible content makes them permanent.
   open_markers: Vec<OpenMarker>,
-  /// Emphasis pairs whose delimiters may still fail to flank, in output order.
-  flank_pairs: Vec<FlankPair>,
-  pending_flank_count: usize,
+  pending_emphasis: u8,
   /// Figcaptions defer their opener until content commits the caption.
   caption_frames: Vec<CaptionFrame>,
   /// Unresolved trailing hard breaks retain one physical representative.
@@ -1189,8 +1167,7 @@ impl ConvertState {
       link_caption_break_snapshot_active: false,
       streaming: false,
       open_markers: Vec::new(),
-      flank_pairs: Vec::new(),
-      pending_flank_count: 0,
+      pending_emphasis: 0,
       caption_frames: Vec::new(),
       streaming_break_runs: Vec::new(),
       code_spans: Vec::new(),
@@ -2559,7 +2536,6 @@ impl ConvertState {
     while !self.stack.is_empty() {
       self.close_node();
     }
-    self.finish_flank_pairs();
   }
 
   #[inline]
@@ -2805,10 +2781,6 @@ impl ConvertState {
     if let Some(marker) = self.open_markers.first() {
       stable_end = stable_end.min(hold_before(&self.buffer, marker.output_start));
     }
-    // An undecided emphasis opener, or a closer waiting for the next byte.
-    if let Some(offset) = self.flank_hold() {
-      stable_end = stable_end.min(hold_before(&self.buffer, offset));
-    }
     if let Some(output_start) = self.first_tentative_caption_start() {
       stable_end = stable_end.min(hold_before(&self.buffer, output_start));
     }
@@ -2977,9 +2949,6 @@ impl ConvertState {
     if let Some(marker) = self.open_markers.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, marker.output_start));
     }
-    if let Some(offset) = self.flank_hold() {
-      drain_end = drain_end.min(keep_two_before(&self.buffer, offset));
-    }
     if let Some(span) = self.code_spans.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, span.output_start));
     }
@@ -2994,17 +2963,6 @@ impl ConvertState {
     self.resolve_item_marker(false);
     if self.empty_item_hazard {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
-    }
-    // A future adjacent opener needs the character before the whole delimiter
-    // run. Keep a run crossing the cut, together with its preceding context.
-    if let Some(&mark @ (b'*' | b'~')) = self.buffer.as_bytes().get(drain_end) {
-      let mut run_start = drain_end;
-      while run_start > 0 && self.buffer.as_bytes()[run_start - 1] == mark {
-        run_start -= 1;
-      }
-      if run_start < drain_end {
-        drain_end = keep_two_before(&self.buffer, run_start);
-      }
     }
     if drain_end == 0 {
       return;
@@ -3049,11 +3007,6 @@ impl ConvertState {
     for marker in &mut self.open_markers {
       marker.output_start -= drain_end;
       marker.content_start -= drain_end;
-    }
-    for pair in &mut self.flank_pairs {
-      if pair.offset != usize::MAX {
-        pair.offset -= drain_end;
-      }
     }
     for frame in &mut self.caption_frames {
       if let CaptionState::Tentative {
@@ -3287,23 +3240,6 @@ mod tests {
   use super::*;
   use crate::MarkdownStreamProcessor;
   use crate::types::{ExtractionConfig, PluginConfig};
-
-  #[test]
-  fn streamed_prefix_retains_context_before_a_delimiter_run() {
-    let mut state = ConvertState::new(
-      HtmlToMarkdownOptions::default(),
-      4096,
-      OutputFormat::Markdown,
-    );
-    for mark in ['*', '~'] {
-      state.buffer = format!("prefix a{}", mark.to_string().repeat(32));
-      state.last_yielded_length = state.buffer.len();
-      state.last_content_cache_len = 2;
-      state.drain_streamed_prefix();
-      assert!(state.buffer.starts_with(" a"), "{:?}", state.buffer);
-      assert_eq!(state.buffer.len(), 34);
-    }
-  }
 
   #[test]
   fn text_pieces_defer_child_counters_until_the_node_ends() {

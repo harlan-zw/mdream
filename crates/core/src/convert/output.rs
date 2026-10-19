@@ -26,45 +26,9 @@ const DESTINATION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 80, 0, 0, 0, 16, 0, 
 const TITLE_ESCAPES: [u8; 16] = [0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0];
 const IMAGE_DESCRIPTION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 64, 4, 0, 16, 0, 0, 0, 184, 1, 0, 0, 64];
 
-// CommonMark opens a delimiter run only when it is left-flanking and closes it
-// only when it is right-flanking, and `~~` follows the same rule in GFM. A word
-// character on one side with punctuation on the other fails, so `a**[b](/x)**`
-// and `**[b](/x)**c` keep literal delimiters. Streaming releases emphasis
-// content before the close, so each side is fixed when it is written: an
-// opener that cannot open turns its pair into raw HTML while the opener is
-// still held, and a closer that cannot close gets the ASCII letter or digit
-// after it as a character reference, `**[b](/x)**&#99;`, which starts with
-// punctuation. The classes match the JS engine: only ASCII and U+00A0, which
-// mdream writes for `&nbsp;`, are classified; every other byte counts as a
-// word character.
 const FLANK_DELIMITER: [&str; 5] = ["", "**", "*", "~~", "*"];
 const FLANK_RAW_OPEN: [&str; 5] = ["", "<strong>", "<em>", "<del>", "<em>"];
 const FLANK_RAW_CLOSE: [&str; 5] = ["", "</strong>", "</em>", "</del>", "</em>"];
-const FLANK_WHITESPACE: u8 = 0;
-const FLANK_PUNCTUATION: u8 = 1;
-const FLANK_WORD: u8 = 2;
-
-/// Class of `byte`, read with the byte before it so a no-break space (`C2 A0`)
-/// counts as whitespace. `None`, the edge of the output, is whitespace.
-#[inline]
-fn flank_class(previous: u8, byte: Option<u8>) -> u8 {
-  match byte {
-    None | Some(b' ' | b'\t' | b'\n' | 0x0C | b'\r') => FLANK_WHITESPACE,
-    Some(0xA0) if previous == 0xC2 => FLANK_WHITESPACE,
-    Some(byte) if byte.is_ascii_punctuation() => FLANK_PUNCTUATION,
-    Some(_) => FLANK_WORD,
-  }
-}
-
-/// Class of the character `bytes` starts with.
-#[inline]
-fn flank_class_at(bytes: &[u8]) -> u8 {
-  match bytes {
-    [0xC2, 0xA0, ..] => FLANK_WHITESPACE,
-    _ => flank_class(0, bytes.first().copied()),
-  }
-}
-
 #[inline]
 fn shift_past(offset: &mut usize, at: usize, delta: usize) {
   if *offset > at {
@@ -858,7 +822,6 @@ impl ConvertState {
     });
     [
       self.open_markers.first().map(|marker| marker.output_start),
-      self.flank_hold(),
       self.first_tentative_caption_start(),
       self.code_fence.as_ref().map(|fence| fence.output_start),
       self.code_spans.first().map(|span| span.output_start),
@@ -1125,47 +1088,80 @@ impl ConvertState {
         output_start: marker_start,
         content_start: self.buffer.len(),
         kind: inline_marker_type,
+        node_index: (self.stack.len() - 1) as u32,
         starts_at_hard_break: self.hard_break_end == marker_start,
       });
       if inline_marker_type <= 4 {
-        let depth = self.stack[self.stack.len() - 1].depth;
-        self.track_emphasis_flank_opener(inline_marker_type, depth, output, output_start);
+        let bytes = self.buffer.as_bytes();
+        let byte = if marker_start == 0 {
+          self.flushed_tail[1]
+        } else {
+          bytes[marker_start - 1]
+        };
+        if byte.is_ascii_alphanumeric() {
+          self.open_markers.last_mut().unwrap().kind |= 128;
+        }
       }
     } else if !keeps_markers
       && !self.open_markers.is_empty()
       && output.is_some_and(|o| has_visible(o.as_bytes()))
     {
+      self.resolve_emphasis();
       self.open_markers.clear();
     }
   }
 
-  /// Track the emphasis opener an enter just wrote, unless raw HTML or code
-  /// keeps its delimiters literal anyway. `<kbd>`, `<samp>` and `<var>` are
-  /// code spans too. With fragment cleaning, a heading's Markdown gives the
-  /// slug fragment links resolve against, which takes a link's text as
-  /// written, so a pair inside a link there keeps its delimiters.
-  // Keep the context checks out of the enter path for every non-emphasis tag.
+  #[inline(always)]
+  fn resolve_emphasis(&mut self) {
+    if self
+      .open_markers
+      .first()
+      .is_some_and(|marker| marker.kind & 128 != 0)
+    {
+      self.resolve_pending_emphasis();
+    }
+  }
+
   #[inline(never)]
-  fn track_emphasis_flank_opener(
-    &mut self,
-    kind: u8,
-    depth: usize,
-    output: Option<&str>,
-    output_start: usize,
-  ) {
-    let delimiter = FLANK_DELIMITER[kind as usize];
-    let mark = delimiter.as_bytes()[0];
-    let output_bytes = output.map(str::as_bytes);
+  fn resolve_pending_emphasis(&mut self) {
+    let Some(marker) = self.open_markers.first().copied() else {
+      return;
+    };
+    let kind = (marker.kind & 7) as usize;
+    if kind > 4 || marker.node_index as usize >= self.stack.len() {
+      return;
+    }
     let bytes = self.buffer.as_bytes();
-    if output_bytes.is_some_and(|output| {
-      output.len() == delimiter.len()
-        && output[0] == mark
-        && (delimiter.len() == 1 || output[1] == mark)
-    })
-      && self.buffer.len() > output_start
-      && bytes.len() >= delimiter.len()
-      && bytes.last() == Some(&mark)
-      && (delimiter.len() == 1 || bytes[bytes.len() - 2] == mark)
+    let mark = FLANK_DELIMITER[kind].as_bytes()[0];
+    let Some(&first) = bytes.get(marker.content_start) else {
+      return;
+    };
+    if first != mark
+      && first.is_ascii_punctuation()
+      && !self.has_tag_overrides
+      && self.is_markdown()
+      && self.caption_frames.is_empty()
+      && !self.in_raw_html_block()
+      && !self.stack[..marker.node_index as usize].iter().any(|node| {
+        matches!(
+          node.tag_id,
+          Some(TAG_PRE | TAG_CODE | TAG_KBD | TAG_SAMP | TAG_VAR)
+        ) || (node.tag_id == Some(TAG_A)
+          && self.clean_flags & CLEAN_FRAGMENTS != 0
+          && self.in_heading())
+      })
+    {
+      self.stack[marker.node_index as usize].emit_state = 128 | kind as u8;
+      self.replace_flank_bytes(
+        marker.output_start,
+        FLANK_DELIMITER[kind].len(),
+        FLANK_RAW_OPEN[kind],
+      );
+    }
+  }
+
+  fn emphasis_context(&self) -> bool {
+    !self.has_tag_overrides
       && self.is_markdown()
       && self.caption_frames.is_empty()
       && self.depth_map[TAG_PRE as usize] == 0
@@ -1173,326 +1169,10 @@ impl ConvertState {
       && self.depth_map[TAG_KBD as usize] == 0
       && self.depth_map[TAG_SAMP as usize] == 0
       && self.depth_map[TAG_VAR as usize] == 0
-      && !(self.depth_map[TAG_A as usize] > 0 && self.in_slug_heading())
       && !self.in_raw_html_block()
-    {
-      self.flank_pairs.push(FlankPair {
-        depth,
-        kind,
-        state: FlankState::Opening,
-        offset: self.buffer.len() - delimiter.len(),
-      });
-      self.pending_flank_count += 1;
-    }
   }
 
-  /// Blocks and figcaptions rewrite the output a pair points at, and a link
-  /// close can unwrap its text. A closer still waiting there is followed by a
-  /// line break or by `]`, which needs nothing. A decided pair points at
-  /// nothing and stays: a raw opener is already written, so its closer must
-  /// still turn raw.
-  #[inline]
-  pub(crate) fn release_flank_pairs(&mut self, tag_id: Option<u8>, is_inline: bool, is_exit: bool) {
-    if self.flank_pairs.is_empty() {
-      return;
-    }
-    self.release_pending_flank_pairs(tag_id, is_inline, is_exit);
-  }
-
-  #[inline(never)]
-  fn release_pending_flank_pairs(&mut self, tag_id: Option<u8>, is_inline: bool, is_exit: bool) {
-    if (tag_id.is_some() && !is_inline) || tag_id == Some(TAG_FIGCAPTION) {
-      let before = self.flank_pairs.len();
-      self.flank_pairs.retain(|pair| pair.offset == usize::MAX);
-      self.pending_flank_count -= before - self.flank_pairs.len();
-    } else if is_exit
-      && tag_id == Some(TAG_A)
-      && self.clean_flags & (CLEAN_SELF_LINK_HEADINGS | CLEAN_REDUNDANT_LINKS | CLEAN_FRAGMENTS)
-        == 0
-    {
-      let before = self.flank_pairs.len();
-      self
-        .flank_pairs
-        .retain(|pair| pair.state != FlankState::Closing);
-      self.pending_flank_count -= before - self.flank_pairs.len();
-    }
-  }
-
-  /// The earliest offset a pair holds back from streaming.
-  pub(super) fn flank_hold(&self) -> Option<usize> {
-    if self.pending_flank_count == 0 {
-      return None;
-    }
-    self
-      .flank_pairs
-      .iter()
-      .map(|pair| pair.offset)
-      .filter(|&offset| offset != usize::MAX)
-      .min()
-  }
-
-  /// Inside a heading while fragment cleaning collects heading slugs.
-  #[inline]
-  fn in_slug_heading(&self) -> bool {
-    self.clean_flags & CLEAN_FRAGMENTS != 0 && self.in_heading()
-  }
-
-  /// The element at `depth` closed: finish its pair, or wait for the byte
-  /// written after its closer. A heading slug reads a character reference as
-  /// written, so a closer there gets none while slugs are collected.
-  #[inline]
-  pub(crate) fn close_flank_pair(&mut self, depth: usize, tag_id: Option<u8>) {
-    if self.flank_pairs.is_empty() {
-      return;
-    }
-    if matches!(tag_id.and_then(Self::inline_marker_type), Some(1..=4)) {
-      self.close_pending_flank_pair(depth);
-    } else {
-      self.settle_flank_pairs();
-    }
-  }
-
-  #[inline(never)]
-  fn close_pending_flank_pair(&mut self, depth: usize) {
-    if let Some(index) = self
-      .flank_pairs
-      .iter()
-      .rposition(|pair| pair.depth == depth && pair.state != FlankState::Closing)
-    {
-      let pair = self.flank_pairs[index];
-      let delimiter = FLANK_DELIMITER[pair.kind as usize];
-      let bytes = self.buffer.as_bytes();
-      let mark = delimiter.as_bytes()[0];
-      // Every tracked delimiter is one or two bytes of the same ASCII mark.
-      if bytes.len() >= delimiter.len()
-        && bytes.last() == Some(&mark)
-        && (delimiter.len() == 1 || bytes[bytes.len() - 2] == mark)
-      {
-        let closer = bytes.len() - delimiter.len();
-        let last = bytes[..closer].iter().rposition(|&byte| byte != mark);
-        if pair.state == FlankState::Raw {
-          self.replace_flank_bytes(closer, delimiter.len(), FLANK_RAW_CLOSE[pair.kind as usize]);
-        } else if pair.state == FlankState::Kept
-          && !self.in_slug_heading()
-          && flank_class(
-            last
-              .and_then(|at| at.checked_sub(1))
-              .map_or(0, |at| bytes[at]),
-            last.map(|at| bytes[at]),
-          ) == FLANK_PUNCTUATION
-        {
-          self.flank_pairs[index].state = FlankState::Closing;
-          self.flank_pairs[index].offset = closer;
-          self.pending_flank_count += 1;
-          self.settle_flank_pairs();
-          return;
-        }
-      } else if pair.state == FlankState::Raw {
-        let mut end = bytes.len();
-        let mut has_vertical_tab = false;
-        while end > 0 && matches!(bytes[end - 1], b' ' | 9..=13) {
-          has_vertical_tab |= bytes[end - 1] == 11;
-          end -= 1;
-        }
-        if has_vertical_tab
-          && end >= delimiter.len()
-          && bytes[end - 1] == mark
-          && (delimiter.len() == 1 || bytes[end - 2] == mark)
-        {
-          self.replace_flank_bytes(
-            end - delimiter.len(),
-            delimiter.len(),
-            FLANK_RAW_CLOSE[pair.kind as usize],
-          );
-        }
-      }
-      if index + 1 == self.flank_pairs.len() {
-        self.flank_pairs.pop();
-      } else {
-        self.flank_pairs.remove(index);
-      }
-      if pair.offset != usize::MAX {
-        self.pending_flank_count -= 1;
-      }
-    }
-    self.settle_flank_pairs();
-  }
-
-  /// At the end of each event, decide each opener whose content is now
-  /// permanent and each closer whose next byte is written.
-  #[inline]
-  pub(crate) fn settle_flank_pairs(&mut self) {
-    if self.pending_flank_count != 0 {
-      self.settle_pending_flank_pairs();
-    }
-  }
-
-  #[inline(never)]
-  fn settle_pending_flank_pairs(&mut self) {
-    let mut index = 0;
-    while index < self.flank_pairs.len() {
-      let pair = self.flank_pairs[index];
-      if pair.offset == usize::MAX {
-        index += 1;
-        continue;
-      }
-      // The empty-pair check can still drop an opener while it is open.
-      if pair.state == FlankState::Opening
-        && self
-          .open_markers
-          .iter()
-          .any(|marker| marker.output_start == pair.offset)
-      {
-        index += 1;
-        continue;
-      }
-      let kind = pair.kind as usize;
-      let delimiter = FLANK_DELIMITER[kind].as_bytes();
-      let bytes = self.buffer.as_bytes();
-      let in_place = bytes.get(pair.offset) == Some(&delimiter[0])
-        && (delimiter.len() == 1 || bytes.get(pair.offset + 1) == Some(&delimiter[0]));
-      if pair.state == FlankState::Opening {
-        if !in_place {
-          self.flank_pairs.remove(index);
-          self.pending_flank_count -= 1;
-          continue;
-        }
-        let content = &bytes[pair.offset + delimiter.len()..];
-        let Some(skip) = content.iter().position(|&byte| byte != delimiter[0]) else {
-          index += 1;
-          continue;
-        };
-        let first = flank_class_at(&content[skip..]);
-        // An opener before whitespace cannot open, and a raw one at a block
-        // start would open an HTML block, so the pair stays as written.
-        if first == FLANK_WHITESPACE {
-          self.flank_pairs.remove(index);
-          self.pending_flank_count -= 1;
-          continue;
-        }
-        let needs_raw = first == FLANK_PUNCTUATION && {
-          let mut run_start = pair.offset;
-          let mut link_index = self.fragment_links.len();
-          loop {
-            while run_start > 0 && bytes[run_start - 1] == delimiter[0] {
-              run_start -= 1;
-            }
-            if self.clean_flags & (CLEAN_FRAGMENTS | CLEAN_SELF_LINK_HEADINGS) != 0
-              && self.link.open
-              && self.link.bracket_emitted
-              && run_start == self.link.bracket_pos + 1
-              && bytes.get(self.link.bracket_pos) == Some(&b'[')
-              && (self.clean_flags & CLEAN_FRAGMENTS != 0 || self.in_heading())
-              && self.stack[..]
-                .iter()
-                .rev()
-                .find(|node| node.tag_id == Some(TAG_A))
-                .and_then(|node| node.attributes.get_bit(ATTR_HREF))
-                .is_some_and(|href| href.starts_with('#'))
-            {
-              run_start = self.link.bracket_pos;
-              continue;
-            }
-            if self.clean_flags & CLEAN_FRAGMENTS == 0 || link_index == 0 {
-              break;
-            }
-            let link = &self.fragment_links[link_index - 1];
-            if link.link_end != run_start
-              || link.text_end >= run_start
-              || link.bracket_start >= link.text_end
-            {
-              break;
-            }
-            run_start = link.text_end;
-            while run_start > link.bracket_start + 1 && bytes[run_start - 1] == delimiter[0] {
-              run_start -= 1;
-            }
-            if run_start == link.bracket_start + 1 {
-              run_start = link.bracket_start;
-            }
-            link_index -= 1;
-          }
-          let [previous, before] = match run_start {
-            0 => self.flushed_tail,
-            1 => [self.flushed_tail[1], bytes[0]],
-            offset => [bytes[offset - 2], bytes[offset - 1]],
-          };
-          flank_class(previous, Some(before)) == FLANK_WORD
-        };
-        self.flank_pairs[index].offset = usize::MAX;
-        self.pending_flank_count -= 1;
-        if needs_raw {
-          self.flank_pairs[index].state = FlankState::Raw;
-          self.replace_flank_bytes(pair.offset, delimiter.len(), FLANK_RAW_OPEN[kind]);
-        } else {
-          self.flank_pairs[index].state = FlankState::Kept;
-        }
-        index += 1;
-        continue;
-      }
-      let mut next = pair.offset + delimiter.len();
-      loop {
-        while next < bytes.len() && bytes[next] == delimiter[0] {
-          next += 1;
-        }
-        if self.clean_flags & (CLEAN_FRAGMENTS | CLEAN_SELF_LINK_HEADINGS) != 0
-          && self.link.open
-          && self.link.bracket_emitted
-          && next == self.link.bracket_pos
-          && bytes.get(next) == Some(&b'[')
-          && (self.clean_flags & CLEAN_FRAGMENTS != 0 || self.in_heading())
-          && self.stack[..]
-            .iter()
-            .rev()
-            .find(|node| node.tag_id == Some(TAG_A))
-            .and_then(|node| node.attributes.get_bit(ATTR_HREF))
-            .is_some_and(|href| href.starts_with('#'))
-        {
-          next += 1;
-          continue;
-        }
-        if self.clean_flags & CLEAN_FRAGMENTS != 0
-          && bytes.get(next) == Some(&b'[')
-          && let Some(link) = self.fragment_links.last()
-          && link.bracket_start == next
-        {
-          next += 1;
-          continue;
-        }
-        // Fragment cleanup may remove the recorded link suffix later.
-        if self.clean_flags & CLEAN_FRAGMENTS != 0
-          && bytes.get(next) == Some(&b']')
-          && let Some(link) = self.fragment_links.last()
-          && link.text_end == next
-          && link.link_end > next
-          && link.link_end <= bytes.len()
-        {
-          next = link.link_end;
-        } else {
-          break;
-        }
-      }
-      if in_place && next == bytes.len() {
-        index += 1;
-        continue;
-      }
-      if in_place && bytes[next].is_ascii_alphanumeric() {
-        let reference = format!("&#{};", bytes[next]);
-        self.replace_flank_bytes(next, 1, &reference);
-      }
-      self.flank_pairs.remove(index);
-      self.pending_flank_count -= 1;
-    }
-  }
-
-  /// Output ends: a closer still waiting is followed by nothing.
-  pub(crate) fn finish_flank_pairs(&mut self) {
-    self.settle_flank_pairs();
-    self.flank_pairs.clear();
-    self.pending_flank_count = 0;
-  }
-
-  /// Replace `len` bytes at `at`, moving every offset recorded past it.
+  // At first content, only nested markers, code spans and links can start after the opener.
   fn replace_flank_bytes(&mut self, at: usize, len: usize, value: &str) {
     let delta = value.len() - len;
     if at
@@ -1505,53 +1185,18 @@ impl ConvertState {
     }
     self.note_buffer_rewrite(at);
     replace_buffer_range(&mut self.buffer, at..at + len, value);
-    for pair in &mut self.flank_pairs {
-      if pair.offset != usize::MAX {
-        shift_past(&mut pair.offset, at, delta);
-      }
-    }
     for marker in &mut self.open_markers {
       shift_past(&mut marker.output_start, at, delta);
       shift_past(&mut marker.content_start, at, delta);
-    }
-    for frame in &mut self.caption_frames {
-      if let CaptionState::Tentative {
-        output_start,
-        content_start,
-        ..
-      } = &mut frame.state
-      {
-        shift_past(output_start, at, delta);
-        shift_past(content_start, at, delta);
-      }
-    }
-    for run in &mut self.streaming_break_runs {
-      shift_past(&mut run.output_start, at, delta);
-      shift_past(&mut run.output_end, at, delta);
     }
     for span in &mut self.code_spans {
       shift_past(&mut span.output_start, at, delta);
       shift_past(&mut span.content_start, at, delta);
     }
-    if let Some(fence) = &mut self.code_fence {
-      shift_past(&mut fence.output_start, at, delta);
-      shift_past(&mut fence.content_start, at, delta);
-    }
     shift_past(&mut self.link.bracket_pos, at, delta);
     for link in &mut self.parent_links {
       shift_past(&mut link.bracket_pos, at, delta);
     }
-    for frame in &mut self.blockquotes {
-      shift_past(&mut frame.content_start, at, delta);
-    }
-    shift_past(&mut self.empty_item_line_start, at, delta);
-    shift_past(&mut self.empty_item_len, at, delta);
-    if self.hard_break_end != usize::MAX {
-      shift_past(&mut self.hard_break_end, at, delta);
-    }
-    shift_past(&mut self.heading_buffer_start, at, delta);
-    shift_past(&mut self.raw_html_scanned_to, at, delta);
-    self.shift_fragment_links_after(at + 1, delta as isize);
     self.invalidate_line_start();
   }
 
@@ -1684,6 +1329,7 @@ impl ConvertState {
       if !(self.open_markers.is_empty() || self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0)
         && output.as_deref().is_some_and(|o| has_visible(o.as_bytes()))
       {
+        self.resolve_emphasis();
         self.open_markers.clear();
       }
       if !is_inline && !self.open_markers.is_empty() {
@@ -1720,10 +1366,22 @@ impl ConvertState {
     if !emitted.is_some_and(|emitted| !emitted.is_empty()) {
       return false;
     }
+    if inline_marker_type <= 4 {
+      let mark = if inline_marker_type == 3 { b'~' } else { b'*' };
+      if self
+        .last_output_byte()
+        .is_some_and(|byte| byte != mark && byte.is_ascii_punctuation())
+        && emitted.is_some_and(|value| value.as_bytes().first() == Some(&mark))
+        && self.emphasis_context()
+        && !(self.clean_flags & CLEAN_FRAGMENTS != 0 && self.in_heading())
+      {
+        self.pending_emphasis = mark;
+      }
+    }
     let Some(open_marker) = self.open_markers.pop() else {
       return false;
     };
-    if open_marker.kind == inline_marker_type
+    if open_marker.kind & 7 == inline_marker_type
       && open_marker.content_start <= self.buffer.len()
       && self.buffer.as_bytes()[open_marker.content_start..]
         .iter()
@@ -1754,7 +1412,7 @@ impl ConvertState {
     } else {
       self.element_fast_path_ok(node.tag_id)
     });
-    if node.excluded_from_markdown || node.enter_skipped {
+    if node.excluded_from_markdown || node.emit_state == 64 {
       self.last_node_is_inline = node.is_inline;
       return;
     }
@@ -2446,11 +2104,6 @@ impl ConvertState {
   fn keep_link_text(&mut self, bracket_pos: usize, text_len: usize, is_inline: bool) {
     self.note_buffer_rewrite(bracket_pos);
     self.buffer.remove(bracket_pos);
-    for pair in &mut self.flank_pairs {
-      if pair.offset != usize::MAX && pair.offset > bracket_pos {
-        pair.offset -= 1;
-      }
-    }
     self.last_content_cache_len = text_len;
     self.end_link();
     self.last_node_is_inline = is_inline;
@@ -2582,7 +2235,7 @@ impl ConvertState {
   pub(crate) fn emit_exit_element(&mut self, node: &ElementNode) {
     // A skipped <pre> can still own the fence opened by an eligible <code> child.
     if node.excluded_from_markdown
-      || (node.enter_skipped
+      || (node.emit_state == 64
         && (node.tag_id != Some(TAG_PRE)
           || self.pre_fence_owner_depth != self.depth_map[TAG_PRE as usize]))
     {
@@ -2609,7 +2262,7 @@ impl ConvertState {
 
     // A skipped node must never emit its own override exit. The only output
     // allowed below is the matching close for a fence opened by its child.
-    let override_config = if node.enter_skipped {
+    let override_config = if node.emit_state == 64 {
       None
     } else if self.has_tag_overrides {
       let ovs = self
@@ -3116,6 +2769,35 @@ impl ConvertState {
     self.escape_gfm_text_into(text, scratch)
   }
 
+  fn take_emphasis_reference(&mut self, text: &str) -> u8 {
+    let mark = std::mem::take(&mut self.pending_emphasis);
+    if self.last_output_byte() == Some(mark)
+      && text
+        .as_bytes()
+        .first()
+        .is_some_and(u8::is_ascii_alphanumeric)
+    {
+      text.as_bytes()[0]
+    } else {
+      0
+    }
+  }
+
+  #[inline(never)]
+  fn push_emphasis_text(&mut self, text: &str) {
+    let code = self.take_emphasis_reference(text);
+    let start = self.buffer.len();
+    if code != 0 {
+      self.buffer.push_str("&#");
+      push_decimal(&mut self.buffer, u32::from(code));
+      self.buffer.push(';');
+      self.buffer.push_str(&text[1..]);
+      self.last_content_cache_len += self.buffer.len() - start - text.len();
+    } else {
+      self.buffer.push_str(text);
+    }
+  }
+
   #[inline(always)]
   fn push_text_uncapped(&mut self, text: &str, add_space: bool) {
     if add_space {
@@ -3124,7 +2806,11 @@ impl ConvertState {
     } else {
       self.last_content_cache_len = text.len();
     }
-    self.buffer.push_str(text);
+    if self.pending_emphasis != 0 {
+      self.push_emphasis_text(text);
+    } else {
+      self.buffer.push_str(text);
+    }
   }
 
   #[inline(always)]
@@ -3138,6 +2824,7 @@ impl ConvertState {
     if !self.open_markers.is_empty() || self.held_break_bytes != 0 {
       let visible = has_visible(text.as_bytes());
       if visible {
+        self.resolve_emphasis();
         self.open_markers.clear();
         // A tentative caption may still retract the held breaks.
         if self.held_break_bytes != 0 && self.first_tentative_caption_start().is_none() {
@@ -3456,6 +3143,19 @@ impl ConvertState {
     };
 
     let written_from = self.buffer.len();
+    let emphasis_text;
+    let text =
+      if self.pending_emphasis != 0 && (self.wrap_width != 0 || self.options.max_node_bytes != 0) {
+        let code = self.take_emphasis_reference(text);
+        if code != 0 {
+          emphasis_text = format!("&#{code};{}", &text[1..]);
+          emphasis_text.as_str()
+        } else {
+          text
+        }
+      } else {
+        text
+      };
     let owns_space =
       owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0);
     if self.wrap_width != 0 && self.can_wrap_here() {
@@ -3833,11 +3533,6 @@ impl ConvertState {
       }
       if marker.content_start >= at {
         marker.content_start += 1;
-      }
-    }
-    for pair in &mut self.flank_pairs {
-      if pair.offset != usize::MAX && pair.offset >= at {
-        pair.offset += 1;
       }
     }
     for run in &mut self.streaming_break_runs {
@@ -5098,6 +4793,11 @@ impl ConvertState {
       return Self::get_text_exit_output(node);
     }
 
+    if node.emit_state & 128 != 0 {
+      return Some(Cow::Borrowed(
+        FLANK_RAW_CLOSE[(node.emit_state & 7) as usize],
+      ));
+    }
     let tag_id = node.tag_id?;
     if self.depth_map[TAG_PRE as usize] > 0 && suppresses_formatting_in_pre(tag_id) {
       return None;
@@ -5569,6 +5269,9 @@ impl ConvertState {
 
   #[inline]
   pub(crate) fn needs_spacing(&self, last_byte: u8, first_byte: u8) -> bool {
+    if last_byte == b'~' && self.is_markdown() {
+      return first_byte == b'~';
+    }
     if matches!(last_byte, b' ' | b'\n' | b'\t') {
       return false;
     }
@@ -5577,12 +5280,6 @@ impl ConvertState {
     }
     if last_byte == b'|' && first_byte == b'<' && !self.buffer.is_empty() {
       return true;
-    }
-    // A strikethrough opener must touch its content to open, but two tilde runs
-    // written back to back would read as a `~~~~` code fence. Plain text has no
-    // delimiters and keeps its separator.
-    if last_byte == b'~' && self.is_markdown() {
-      return first_byte == b'~';
     }
     if matches!(last_byte, b'[' | b'(' | b'>' | b'*' | b'_' | b'`')
       || matches!(
@@ -5916,38 +5613,6 @@ mod tests {
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
 
   #[test]
-  fn raw_flank_closer_precedes_moved_vertical_tab() {
-    for kind in 1..=4 {
-      for suffix in ["\u{b}", "\u{b} ", "\u{b}\n"] {
-        let mut state =
-          ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
-        state.buffer = format!(
-          "{}!b{}{suffix}",
-          super::FLANK_RAW_OPEN[kind],
-          super::FLANK_DELIMITER[kind]
-        );
-        state.flank_pairs.push(super::FlankPair {
-          depth: 1,
-          kind: kind as u8,
-          state: super::FlankState::Raw,
-          offset: usize::MAX,
-        });
-        state.close_pending_flank_pair(1);
-        assert_eq!(
-          state.buffer,
-          format!(
-            "{}!b{}{suffix}",
-            super::FLANK_RAW_OPEN[kind],
-            super::FLANK_RAW_CLOSE[kind]
-          )
-        );
-        assert!(state.flank_pairs.is_empty());
-        assert_eq!(state.pending_flank_count, 0);
-      }
-    }
-  }
-
-  #[test]
   fn push_decimal_matches_display() {
     for value in [0, 1, 9, 10, 99, 100, 4_294_967_295] {
       let mut out = String::from("x");
@@ -6026,7 +5691,7 @@ mod tests {
       tag_id: Some(tag_id),
       contains_whitespace: false,
       excluded_from_markdown: false,
-      enter_skipped: false,
+      emit_state: 0,
       is_inline,
       excludes_text_nodes: false,
       is_non_nesting: false,

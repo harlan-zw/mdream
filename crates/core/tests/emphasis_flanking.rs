@@ -9,6 +9,8 @@ use mdream::types::HtmlToMarkdownOptions;
 use mdream::{html_to_markdown, html_to_text};
 
 const CASES: &[(&str, &str)] = &[
+  // Non-ASCII preceding characters are outside the lean opening rule.
+  ("<p>é<strong>!b</strong></p>", "é**!b**"),
   (
     r#"<p>a<strong><span><span><a href="/x">b</a></span></span></strong><span>c</span></p>"#,
     "a<strong>[b](/x)</strong>c",
@@ -19,7 +21,7 @@ const CASES: &[(&str, &str)] = &[
   ),
   (
     r#"<p><i>a</i><b><a href="/y">x</a></b></p>"#,
-    "*a*<strong>[x](/y)</strong>",
+    "*a***[x](/y)**",
   ),
   (
     r#"<p><b><a href="/x">a</a></b><i>c</i></p>"#,
@@ -27,7 +29,7 @@ const CASES: &[(&str, &str)] = &[
   ),
   (
     r#"<p><b><i>a</i></b><b><a href="/y">x</a></b></p>"#,
-    "***a***<strong>[x](/y)</strong>",
+    "***a*****[x](/y)**",
   ),
   (
     r#"<p><b><a href="/x">a</a></b><b><i>c</i></b></p>"#,
@@ -52,7 +54,7 @@ const CASES: &[(&str, &str)] = &[
   ("<p>a<i><code>x</code></i>c</p>", "a<em>`x`</em>c"),
   (
     r#"<p>a<strong><em><a href="/x">b</a></em></strong>c</p>"#,
-    "a<strong>*[b](/x)*</strong>c",
+    "a***[b](/x)***&#99;",
   ),
   (
     r#"<p>a<del><a href="/x">b</a></del>c</p>"#,
@@ -124,8 +126,9 @@ const CASES: &[(&str, &str)] = &[
 fn stream_chunks(html: &str, chunk: usize, options: &HtmlToMarkdownOptions) -> String {
   let mut processor = MarkdownStreamProcessor::new(options.clone());
   let mut out = String::new();
-  for part in html.as_bytes().chunks(chunk) {
-    out.push_str(&processor.process_chunk(std::str::from_utf8(part).unwrap()));
+  let chars: Vec<char> = html.chars().collect();
+  for part in chars.chunks(chunk) {
+    out.push_str(&processor.process_chunk(&part.iter().collect::<String>()));
   }
   out.push_str(&processor.finish());
   out
@@ -184,7 +187,7 @@ fn open_emphasis_still_yields_content_before_close() {
 }
 
 #[test]
-fn unwrapped_heading_link_retains_pending_emphasis_closer() {
+fn heading_link_cleanup_keeps_streaming_parity() {
   let options = HtmlToMarkdownOptions::default().with_clean(CleanConfig {
     self_link_headings: true,
     ..Default::default()
@@ -192,11 +195,11 @@ fn unwrapped_heading_link_retains_pending_emphasis_closer() {
   for (html, expected) in [
     (
       r##"<h2><em>x</em><a href="#x"><strong>!b</strong></a></h2>"##,
-      "## *x*<strong>!b</strong>",
+      "## *x***!b**",
     ),
     (
       r##"<h2><strong>b!</strong><a href="#x">c</a></h2>"##,
-      "## **b!**&#99;",
+      "## **b!**c",
     ),
     (
       r##"<h2><a href="#x">x</a><strong>!b</strong></h2>"##,
@@ -235,7 +238,7 @@ fn unwrapped_heading_link_retains_pending_emphasis_closer() {
 }
 
 #[test]
-fn deferred_fragment_cleanup_preserves_emphasis() {
+fn deferred_fragment_cleanup_keeps_streaming_parity() {
   let options = HtmlToMarkdownOptions::default().with_clean(CleanConfig {
     fragments: true,
     ..Default::default()
@@ -243,15 +246,15 @@ fn deferred_fragment_cleanup_preserves_emphasis() {
   for (html, expected) in [
     (
       r##"<p><em>x</em><a href="#missing"><strong>!b</strong></a></p>"##,
-      "*x*<strong>!b</strong>",
+      "*x***!b**",
     ),
     (
       r##"<p><em>x</em><a href="#found"><strong>!b</strong></a></p><h2>found</h2>"##,
-      "*x*[<strong>!b</strong>](#found)\n\n## found",
+      "*x*[**!b**](#found)\n\n## found",
     ),
     (
       r##"<p><a href="#missing"><em>x</em></a><em>!b</em></p>"##,
-      "*x*<em>!b</em>",
+      "*x**!b*",
     ),
     (
       r##"<p>x<a href="#missing"></a><strong>!b</strong></p>"##,
@@ -259,7 +262,7 @@ fn deferred_fragment_cleanup_preserves_emphasis() {
     ),
     (
       r##"<p><em>x</em><a href="#missing"></a><em>!b</em></p>"##,
-      "*x*<em>!b</em>",
+      "*x**!b*",
     ),
     (
       r##"<p><em>x</em><a href="#one"></a><a href="#two"></a><em>!b</em></p>"##,
@@ -267,23 +270,23 @@ fn deferred_fragment_cleanup_preserves_emphasis() {
     ),
     (
       r##"<p><strong>b!</strong><a href="#missing"></a>c</p>"##,
-      "**b!**&#99;",
+      "**b!**c",
     ),
     (
       r##"<p><strong>b!</strong><a href="#missing">c</a></p>"##,
-      "**b!**&#99;",
+      "**b!**c",
     ),
     (
       r##"<p><strong>b!</strong><a href="#found">c</a></p><h2>found</h2>"##,
-      "**b!**[&#99;](#found)\n\n## found",
+      "**b!**[c](#found)\n\n## found",
     ),
     (
       r##"<p><a href="#missing">x</a><strong>!b</strong></p>"##,
-      "x<strong>!b</strong>",
+      "x**!b**",
     ),
     (
       r##"<p><a href="#found">x</a><strong>!b</strong></p><h2>found</h2>"##,
-      "[x](#found)<strong>!b</strong>\n\n## found",
+      "[x](#found)**!b**\n\n## found",
     ),
     (
       r##"<p>x<a href="#missing"><strong>!b</strong></a></p>"##,
@@ -300,15 +303,15 @@ fn deferred_fragment_cleanup_preserves_emphasis() {
     ),
     (
       r##"<p><a href="#missing"><strong>b!</strong></a>c</p>"##,
-      "**b!**&#99;",
+      "**b!**c",
     ),
     (
       r##"<p><a href="#found"><strong>b!</strong></a>c</p><h2>found</h2>"##,
-      "[**b!**](#found)&#99;\n\n## found",
+      "[**b!**](#found)c\n\n## found",
     ),
     (
       r##"<p><a href="#missing"><strong><em>b!</em></strong></a>c</p>"##,
-      "***b!***&#99;",
+      "***b!***c",
     ),
   ] {
     assert_eq!(
@@ -447,14 +450,14 @@ fn keeps_delimiters_where_a_fix_cannot_help() {
       r#"<p><strong><br><a href="/x">b</a></strong>c</p>"#,
       HtmlToMarkdownOptions::default()
     ),
-    "**  \n[b](/x)**c"
+    "**  \n[b](/x)**&#99;"
   );
   assert_eq!(
     html_to_markdown(
       r#"<p>a<strong>&nbsp;<a href="/x">b</a></strong>c</p>"#,
       HtmlToMarkdownOptions::default()
     ),
-    "a**\u{a0} [b](/x)**c"
+    "a**\u{a0} [b](/x)**&#99;"
   );
   assert_eq!(
     html_to_markdown(

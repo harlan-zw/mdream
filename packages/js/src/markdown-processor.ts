@@ -180,67 +180,13 @@ INLINE_MARKER_TYPE[TAG_SAMP] = 5 // `
 INLINE_MARKER_TYPE[TAG_VAR] = 5 // `
 INLINE_MARKER_TYPE[TAG_Q] = 6 // "
 
-// CommonMark opens a delimiter run only when it is left-flanking and closes it
-// only when it is right-flanking, and `~~` follows the same rule in GFM. A word
-// character on one side with punctuation on the other fails, so `a**[b](/x)**`
-// and `**[b](/x)**c` keep literal delimiters. Streaming releases emphasis
-// content before the close, so each side is fixed when it is written: an
-// opener that cannot open turns its pair into raw HTML while the opener is
-// still held, and a closer that cannot close gets the ASCII letter or digit
-// after it as a character reference, `**[b](/x)**&#99;`, which starts with
-// punctuation. The classes match the Rust engine: only ASCII and U+00A0, which
-// mdream writes for `&nbsp;`, are classified; every other character counts as
-// a word character.
-const FLANK_DELIMITER = ['', '**', '*', '~~', '*']
-const FLANK_RAW_OPEN = ['', '<strong>', '<em>', '<del>', '<em>']
-const FLANK_RAW_CLOSE = ['', '</strong>', '</em>', '</del>', '</em>']
-const FLANK_WHITESPACE = 0
-const FLANK_PUNCTUATION = 1
-const FLANK_WORD = 2
-// Pair states: the opener waits for content, the pair is decided until its
-// close, or the closer waits for the character after it.
-const FLANK_OPENING = 0
-const FLANK_KEPT = 1
-const FLANK_RAW = 2
-const FLANK_CLOSING = 3
-
-/** -1, the edge of the output, counts as whitespace. */
-function flankClass(code: number): number {
-  if (code === -1 || code === 32 || code === 9 || code === 10 || code === 12 || code === 13 || code === 160)
-    return FLANK_WHITESPACE
-  return (code >= 33 && code <= 47) || (code >= 58 && code <= 64) || (code >= 91 && code <= 96) || (code >= 123 && code <= 126)
-    ? FLANK_PUNCTUATION
-    : FLANK_WORD
+const FLANK_TAG = ['', 'strong', 'em', 'del', 'em']
+function isAsciiPunctuation(code: number): boolean {
+  return code >= 33 && code <= 126 && !isAsciiAlphanumeric(code)
 }
 
 function isAsciiAlphanumeric(code: number): boolean {
   return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
-}
-
-/** First character after `fragment` and before `end`, past a run of `mark` (-1 for none). */
-function charAfterRun(buffer: string[], fragment: number, end: number, mark: number): number {
-  for (let index = fragment + 1; index < end; index++) {
-    const value = buffer[index]!
-    for (let offset = 0; offset < value.length; offset++) {
-      const code = value.charCodeAt(offset)
-      if (code !== mark)
-        return code
-    }
-  }
-  return -1
-}
-
-/** Last character before `fragment` and after `start`, past a run of `mark`. */
-function charBeforeRun(buffer: string[], fragment: number, start: number, mark: number): number {
-  for (let index = fragment - 1; index > start; index--) {
-    const value = buffer[index]!
-    for (let offset = value.length - 1; offset >= 0; offset--) {
-      const code = value.charCodeAt(offset)
-      if (code !== mark)
-        return code
-    }
-  }
-  return -1
 }
 
 // Inline tags whose Markdown delimiters are literal text inside a `<pre>`, so
@@ -397,8 +343,6 @@ function needsSpacing(lastChar: string, firstChar: string, state?: MarkdownState
     return true
   }
 
-  // A strikethrough opener must touch its content to open, but two tilde runs
-  // written back to back would read as a `~~~~` code fence.
   if (lastChar === '~')
     return firstChar === '~'
 
@@ -1425,6 +1369,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
   let openMarkerCount = 0
+  let pendingCloser = 0
   let captionFrames: number[] | undefined
   let captionFrameCount = 0
   // 1 needs a boundary; 2 emitted one and still owns the next source space.
@@ -1435,14 +1380,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let openLinkFragment = -1
   let openLinkCaptionBreakRun = 0
   let openLinkCaptionFlags: Uint8Array | undefined
-  // Emphasis pairs whose delimiters may not flank, in output order: the element,
-  // its state, and the fragment that state holds (the opener while opening, the
-  // closer while closing, -1 otherwise).
-  const flankElements: (ElementNode | undefined)[] = []
-  let flankCount = 0
-  const flankStates: number[] = []
-  const flankFragments: number[] = []
-  let pendingFlankCount = 0
   const clean = options.clean
   const cleanRules = typeof clean === 'object' && clean !== null ? clean : undefined
   const cleanEmptyLinkText = clean === true || cleanRules?.emptyLinkText === true
@@ -1451,8 +1388,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   const cleanPass = typeof (cleanRules as Cleaner | undefined)?.apply === 'function'
     ? (cleanRules as Cleaner).apply(state)
     : undefined
-  // Only `fragments` holds the output, and it collects heading slugs.
-  const collectsHeadingSlugs = cleanPass?.holdsOutput === true
   let rawHtmlLink: ElementNode | undefined
 
   let hasYieldedContent = false
@@ -1761,6 +1696,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (textNode.generatedMarkdown && textNode.value)
         textNode.value = `${textNode.generatedMarkdown.prefix}${textNode.value}${textNode.generatedMarkdown.suffix}`
 
+      if (pendingCloser && textNode.value) {
+        const code = textNode.value.charCodeAt(0)
+        if (lastChar.charCodeAt(0) === pendingCloser && isAsciiAlphanumeric(code))
+          textNode.value = `&#${code};${textNode.value.slice(1)}`
+        pendingCloser = 0
+      }
       const wrapWidth = state.options?.wrapWidth
       if (wrapWidth && canWrapHere(state.depthMap)) {
         const wrapped = wrapText(
@@ -1782,6 +1723,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (openLinkFragment >= 0 && hasVisibleText)
           openLinkFragment = -openLinkFragment - 2
         if (openMarkerCount && hasVisibleText) {
+          resolveEmphasis(textNode)
           openMarkerCount = 0
           commitCaptionFrames()
         }
@@ -2048,7 +1990,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         openLinkFragment = -1
         return
       }
-      const res = handler[eventFn]({ node: element, state })
+      const res = eventType === NodeEventExit && element.emphasis === -1 && !handler.literalExit
+        ? `</${FLANK_TAG[INLINE_MARKER_TYPE[tagId]!]}>`
+        : handler[eventFn]({ node: element, state })
       if (typeof res === 'string') {
         if (res) {
           output = [res]
@@ -2387,6 +2331,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.lastContentCache = ' '
     }
 
+    if (eventType === NodeEventExit && !handler?.literalExit && element.emphasis !== undefined && handlerOutput) {
+      if (element.emphasis !== -1 && !(cleanPass?.holdsOutput && isInsideHeading(state.depthMap))
+        && lastOutputChar(buff) !== handlerOutput.charCodeAt(0) && isAsciiPunctuation(lastOutputChar(buff))) {
+        pendingCloser = handlerOutput.charCodeAt(0)
+      }
+    }
+
     // Add all output fragments
     let outputStart = state.buffer.length
     if (output) {
@@ -2432,10 +2383,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && buff[buff.length - 1] === handlerOutput) {
         openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
+        if (markerType <= 4 && !options.tagOverrides && !captionFrameCount && !insideRawHtmlRegion
+          && !state.depthMap[TAG_PRE] && !state.depthMap[TAG_CODE]
+          && !state.depthMap[TAG_KBD] && !state.depthMap[TAG_SAMP] && !state.depthMap[TAG_VAR]
+          && !(cleanPass?.holdsOutput && state.depthMap[TAG_A] && isInsideHeading(state.depthMap))) {
+          element.emphasis = buff.length - 1
+        }
       }
       else if (openMarkerCount
         && !(tagId === TAG_A && cleanEmptyLinkText)
         && hasNonWhitespace(handlerOutput)) {
+        resolveEmphasis(element)
         openMarkerCount = 0
         commitCaptionFrames()
       }
@@ -2450,23 +2408,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       openLinkFragment = -1
     }
 
-    // Raw HTML means no Markdown there: emphasis in code, `<pre>` or a raw block
-    // keeps its delimiters. `<kbd>`, `<samp>` and `<var>` are code spans too.
-    // With fragment cleaning, a heading's Markdown gives the slug fragment
-    // links resolve against, which takes a link's text as written, so a pair
-    // inside a link there keeps its delimiters.
-    const flankType = eventType === NodeEventEnter && handlerOutput !== undefined ? INLINE_MARKER_TYPE[tagId]! : 0
-    if (flankType >= 1 && flankType <= 4 && handlerOutput === FLANK_DELIMITER[flankType]
-      && buff[buff.length - 1] === handlerOutput && !handler?.literalEnter && captionFrameCount === 0
-      && !state.depthMap[TAG_PRE] && !state.depthMap[TAG_CODE] && !state.depthMap[TAG_KBD]
-      && !state.depthMap[TAG_SAMP] && !state.depthMap[TAG_VAR] && !insideRawHtmlRegion
-      && !(collectsHeadingSlugs && state.depthMap[TAG_A] && isInsideHeading(state.depthMap))) {
-      flankElements[flankCount] = element
-      flankStates[flankCount] = FLANK_OPENING
-      flankFragments[flankCount++] = buff.length - 1
-      pendingFlankCount++
-    }
-
     updateListIndent(state, element, eventType)
 
     if (!insideRawHtmlRegion && inRawHtmlRegion) {
@@ -2476,251 +2417,24 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
   }
 
-  /** Replace `length` characters at `offset` in `fragment`. */
-  function replaceFlankText(fragment: number, offset: number, length: number, value: string): void {
-    const buffer = state.buffer
-    const current = buffer[fragment]!
-    const replaced = current.slice(0, offset) + value + current.slice(offset + length)
-    const delta = value.length - length
-    state.outputPositions?.replace(fragment, fragment + 1, [replaced], position => position > offset ? position + delta : position)
-    buffer[fragment] = replaced
-    if (fragment === buffer.length - 1)
-      state.lastContentCache = replaced
-  }
-
-  function dropFlankPair(index: number): void {
-    if (flankFragments[index] !== -1)
-      pendingFlankCount--
-    for (let next = index + 1; next < flankCount; next++) {
-      flankElements[next - 1] = flankElements[next]!
-      flankStates[next - 1] = flankStates[next]!
-      flankFragments[next - 1] = flankFragments[next]!
-    }
-    // Keep the backing stores for the next sibling pair, but release its node.
-    flankElements[--flankCount] = undefined
-  }
-
-  function clearFlankPairs(): void {
-    pendingFlankCount = 0
-    while (flankCount)
-      flankElements[--flankCount] = undefined
-  }
-
-  /**
-   * Blocks and figcaptions rewrite the fragments a pair points at, and a link
-   * close can unwrap its text. A closer still waiting there is followed by a
-   * line break or by `]`, which needs nothing. A decided pair points at
-   * nothing and stays: a raw opener is already written, so its closer must
-   * still turn raw.
-   */
-  function releaseFlankPairs(element: ElementNode, eventType: number): void {
-    const tagId = element.tagId!
-    if ((tagId !== -1 && element.tagHandler?.isInline !== true) || tagId === TAG_FIGCAPTION) {
-      for (let index = flankCount - 1; index >= 0; index--) {
-        if (flankFragments[index] !== -1)
-          dropFlankPair(index)
-      }
-    }
-    else if (tagId === TAG_A && eventType === NodeEventExit && !cleanPass) {
-      for (let index = flankCount - 1; index >= 0; index--) {
-        if (flankStates[index] === FLANK_CLOSING)
-          dropFlankPair(index)
-      }
-    }
-  }
-
-  /**
-   * The element closed: finish its pair, or wait for the character after its
-   * closer. A heading slug reads a character reference as written, so a
-   * closer there gets none while slugs are collected.
-   */
-  function closeFlankPair(element: ElementNode): void {
-    const type = INLINE_MARKER_TYPE[element.tagId!]!
-    if (!(type >= 1 && type <= 4))
+  // Only the first held marker can follow a word; nested markers follow punctuation.
+  function resolveEmphasis(node: Node): void {
+    const marker = openMarkers[0]!
+    const kind = marker & MARKER_TYPE_MASK
+    const fragment = marker >> 3
+    const first = state.buffer[fragment + 1]?.charCodeAt(0) ?? -1
+    if (kind > 4 || first === (kind === 3 ? 126 : 42) || !isAsciiAlphanumeric(lastOutputChar(state.buffer, fragment))
+      || !isAsciiPunctuation(first)) {
       return
-    let index = flankCount - 1
-    while (index >= 0 && flankElements[index] !== element)
-      index--
-    if (index === -1)
-      return
-    const buffer = state.buffer
-    const delimiter = FLANK_DELIMITER[type]!
-    const closer = buffer.length - 1
-    if (buffer[closer] === delimiter) {
-      if (flankStates[index] === FLANK_RAW) {
-        replaceFlankText(closer, 0, delimiter.length, FLANK_RAW_CLOSE[type]!)
-      }
-      else if (flankStates[index] === FLANK_KEPT && !(collectsHeadingSlugs && isInsideHeading(state.depthMap))
-        && flankClass(charBeforeRun(buffer, closer, -1, delimiter.charCodeAt(0))) === FLANK_PUNCTUATION) {
-        flankStates[index] = FLANK_CLOSING
-        flankFragments[index] = closer
-        pendingFlankCount++
-        return
-      }
     }
-    else if (flankStates[index] === FLANK_RAW) {
-      let fragment = closer
-      let end = buffer[fragment]?.length ?? 0
-      let hasVerticalTab = false
-      while (fragment >= 0) {
-        const value = buffer[fragment]!
-        while (end > 0) {
-          const code = value.charCodeAt(end - 1)
-          if (code !== 32 && (code < 9 || code > 13))
-            break
-          hasVerticalTab ||= code === 11
-          end--
-        }
-        if (end > 0)
-          break
-        fragment--
-        end = buffer[fragment]?.length ?? 0
-      }
-      const mark = delimiter.charCodeAt(0)
-      if (hasVerticalTab && end >= delimiter.length
-        && buffer[fragment]!.charCodeAt(end - 1) === mark
-        && (delimiter.length === 1 || buffer[fragment]!.charCodeAt(end - 2) === mark)) {
-        replaceFlankText(fragment, end - delimiter.length, delimiter.length, FLANK_RAW_CLOSE[type]!)
-      }
-    }
-    dropFlankPair(index)
-  }
-
-  /**
-   * At the end of each event, decide each opener whose content is now
-   * permanent and each closer whose next character is written.
-   */
-  function settleFlankPairs(node?: Node): void {
-    const buffer = state.buffer
-    for (let index = 0; index < flankCount; index++) {
-      const fragment = flankFragments[index]!
-      if (fragment === -1)
-        continue
-      const type = INLINE_MARKER_TYPE[flankElements[index]!.tagId!]!
-      const delimiter = FLANK_DELIMITER[type]!
-      const value = buffer[fragment]
-      if (flankStates[index] === FLANK_OPENING) {
-        // The empty-pair check can still drop an opener while it is open.
-        let isOpen = false
-        for (let marker = 0; marker < openMarkerCount && !isOpen; marker++)
-          isOpen = openMarkers[marker]! >> 3 === fragment
-        if (isOpen)
-          continue
-        const first = value?.endsWith(delimiter) ? charAfterRun(buffer, fragment, buffer.length, delimiter.charCodeAt(0)) : -2
-        if (first === -1)
-          continue
-        if (first === -2) {
-          dropFlankPair(index--)
-          continue
-        }
-        const firstClass = flankClass(first)
-        // An opener before whitespace cannot open, and a raw one at a block
-        // start would open an HTML block, so the pair stays as written.
-        if (firstClass === FLANK_WHITESPACE) {
-          dropFlankPair(index--)
-          continue
-        }
-        const kept = value!.length - delimiter.length
-        let needsRaw = false
-        if (firstClass === FLANK_PUNCTUATION) {
-          let previous = kept > 0 ? value!.charCodeAt(kept - 1) : charBeforeRun(buffer, fragment, -1, delimiter.charCodeAt(0))
-          if (cleanPass && kept === 0) {
-            previous = -1
-            const bracket = openLinkFragment >= 0 ? openLinkFragment : -openLinkFragment - 2
-            for (let cursor = fragment - 1; cursor >= 0 && previous === -1; cursor--) {
-              const part = buffer[cursor]!
-              if (cursor === bracket && part === '[') {
-                let anchor = node?.type === ELEMENT_NODE ? node as ElementNode : node?.parent
-                while (anchor && anchor.tagId !== TAG_A)
-                  anchor = anchor.parent
-                if (anchor?.attributes?.href?.charCodeAt(0) === 35
-                  && (collectsHeadingSlugs || (cleanRules?.selfLinkHeadings && isInsideHeading(state.depthMap)))) {
-                  continue
-                }
-              }
-              if (part.charCodeAt(0) === FRAGMENT_LINK_CLOSE_CODE
-                || (part.length === 2 && part.charCodeAt(0) === FRAGMENT_LINK_OPEN_CODE && part.charCodeAt(1) === 91)) {
-                continue
-              }
-              for (let offset = part.length - 1; offset >= 0; offset--) {
-                if (part.charCodeAt(offset) !== delimiter.charCodeAt(0)) {
-                  previous = part.charCodeAt(offset)
-                  break
-                }
-              }
-            }
-          }
-          needsRaw = flankClass(previous) === FLANK_WORD
-        }
-        if (needsRaw) {
-          replaceFlankText(fragment, kept, delimiter.length, FLANK_RAW_OPEN[type]!)
-          flankStates[index] = FLANK_RAW
-        }
-        else {
-          flankStates[index] = FLANK_KEPT
-        }
-        flankFragments[index] = -1
-        pendingFlankCount--
-        continue
-      }
-      let next = fragment + 1
-      let offset = 0
-      const mark = delimiter.charCodeAt(0)
-      const bracket = openLinkFragment >= 0 ? openLinkFragment : -openLinkFragment - 2
-      while (next < buffer.length) {
-        const following = buffer[next]!
-        while (offset < following.length && following.charCodeAt(offset) === mark)
-          offset++
-        if (cleanPass && next === bracket && offset === 0 && following === '[') {
-          let anchor = node?.type === ELEMENT_NODE ? node as ElementNode : node?.parent
-          while (anchor && anchor.tagId !== TAG_A)
-            anchor = anchor.parent
-          if (anchor?.attributes?.href?.charCodeAt(0) === 35
-            && (collectsHeadingSlugs || (cleanRules?.selfLinkHeadings && isInsideHeading(state.depthMap)))) {
-            next++
-            continue
-          }
-        }
-        if (collectsHeadingSlugs && offset === 0 && following.length === 2
-          && following.charCodeAt(0) === FRAGMENT_LINK_OPEN_CODE && following.charCodeAt(1) === 91) {
-          next++
-          continue
-        }
-        // Fragment cleanup may remove this entire link suffix later.
-        if (collectsHeadingSlugs && offset === 0 && following.charCodeAt(0) === FRAGMENT_LINK_CLOSE_CODE) {
-          next++
-          continue
-        }
-        if (offset < following.length)
-          break
-        next++
-        offset = 0
-      }
-      if (value === delimiter && next === buffer.length)
-        continue
-      const code = next < buffer.length ? buffer[next]!.charCodeAt(offset) : -1
-      if (value === delimiter && isAsciiAlphanumeric(code))
-        replaceFlankText(next, offset, 1, `&#${code};`)
-      dropFlankPair(index--)
-    }
-  }
-
-  /** Output ends: a closer still waiting is followed by nothing. */
-  function finishFlankPairs(): void {
-    settleFlankPairs()
-    clearFlankPairs()
-  }
-
-  function processMarkdownEvent(event: NodeEvent): void {
-    const node = event.node
-    if (flankCount !== 0 && node.type === ELEMENT_NODE && !node.excludedFromMarkdown)
-      releaseFlankPairs(node as ElementNode, event.type)
-    processEvent(event)
-    if (flankCount !== 0) {
-      if (event.type === NodeEventExit && node.type === ELEMENT_NODE)
-        closeFlankPair(node as ElementNode)
-      if (pendingFlankCount !== 0)
-        settleFlankPairs(node)
+    let owner = node.type === ELEMENT_NODE ? node as ElementNode : node.parent
+    while (owner && owner.emphasis !== fragment)
+      owner = owner.parent
+    if (owner) {
+      const value = `<${FLANK_TAG[kind]}>`
+      state.outputPositions?.replace(fragment, fragment + 1, [value])
+      state.buffer[fragment] = value
+      owner.emphasis = -1
     }
   }
 
@@ -2728,8 +2442,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    * Get the final markdown output
    */
   function getMarkdown(): string {
-    if (flankCount !== 0)
-      finishFlankPairs()
     // Only ASCII whitespace ends the output, as in Rust: U+00A0 is content,
     // and a stream cannot take back a nbsp it already yielded.
     const result = trimAsciiWhitespaceEnd(trimOutputStart(state.buffer.join('')))
@@ -2742,8 +2454,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // every hold, so scan and trim that position once. The final call drops
     // every hold: a fence whose owner reset the open flag before exiting can
     // never be rewritten, and holding it suppressed the whole output.
-    if (final && flankCount !== 0)
-      finishFlankPairs()
     let heldFragment = final
       ? Infinity
       : Math.min(
@@ -2756,11 +2466,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // An open link can still be unwrapped at its close.
     if (cleanPass && !final)
       heldFragment = Math.min(heldFragment, cleanPass.held())
-    // An undecided emphasis opener, or a closer waiting for the next character.
-    for (let index = 0; index < flankCount; index++) {
-      if (flankFragments[index] !== -1)
-        heldFragment = Math.min(heldFragment, flankFragments[index]!)
-    }
     const captionHoldCount = final ? 0 : captionFrameCount
     for (let index = 0; index < captionHoldCount; index++) {
       const offset = index * CAPTION_FRAME_SIZE
@@ -2795,7 +2500,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
 
   const processor = {
-    processEvent: processMarkdownEvent,
+    processEvent,
     getMarkdown,
     state,
     getHeldOutputFragment: cleanPass ? getHeldOutputFragment : undefined,

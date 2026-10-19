@@ -265,7 +265,7 @@ mod drain_equiv {
     "<pre><code>let x = 1;\nlet y = 2;</code></pre><p>done</p>",
     "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>",
     r#"<h2>Section</h2><p>text with a <a href="/rel">relative</a> link</p>"#,
-    // An emphasis pair rewritten as raw HTML once its closer's next byte is known.
+    // Nested emphasis and raw openers across stream drains.
     r#"<p>long lead text a<strong>b <em><a href="/x">c</a></em></strong>d and more</p>"#,
     r#"<blockquote><p>x<br>y<strong><a href="/x">b</a></strong>c</p></blockquote>"#,
     // A raw pair whose closer follows a block inside it.

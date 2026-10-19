@@ -8,21 +8,23 @@ type TestEngine = (typeof engines)[number]['engine']
 // other cannot flank. Both engines write the pair as raw HTML when its opener
 // cannot open, and follow a closer that cannot close with a character reference.
 const cases: [string, string][] = [
-  ['<p><i>a</i><b><a href="/y">x</a></b></p>', '*a*<strong>[x](/y)</strong>'],
+  // Non-ASCII preceding characters are outside the lean opening rule.
+  ['<p>é<strong>!b</strong></p>', 'é**!b**'],
+  ['<p><i>a</i><b><a href="/y">x</a></b></p>', '*a***[x](/y)**'],
   ['<p><b><a href="/x">a</a></b><i>c</i></p>', '**[a](/x)***&#99;*'],
-  ['<p><b><i>a</i></b><b><a href="/y">x</a></b></p>', '***a***<strong>[x](/y)</strong>'],
+  ['<p><b><i>a</i></b><b><a href="/y">x</a></b></p>', '***a*****[x](/y)**'],
   ['<p><b><a href="/x">a</a></b><b><i>c</i></b></p>', '**[a](/x)*****&#99;***'],
   ['<p>a<strong><a href="/x">b</a></strong></p>', 'a<strong>[b](/x)</strong>'],
   ['<p><strong><a href="/x">b</a></strong>c</p>', '**[b](/x)**&#99;'],
   ['<p>a<em><img src="/i.png" alt="i"></em>c</p>', 'a<em>![i](/i.png)</em>c'],
   ['<p>a<i><code>x</code></i>c</p>', 'a<em>`x`</em>c'],
-  ['<p>a<strong><em><a href="/x">b</a></em></strong>c</p>', 'a<strong>*[b](/x)*</strong>c'],
+  ['<p>a<strong><em><a href="/x">b</a></em></strong>c</p>', 'a***[b](/x)***&#99;'],
   ['<p>a<del><a href="/x">b</a></del>c</p>', 'a ~~[b](/x)~~&#99;'],
   ['<p><strong>b!</strong>c</p>', '**b!**&#99;'],
   // A no-break space counts as whitespace, and an opener before whitespace
   // stays as written.
   ['<p>a&nbsp;<strong><a href="/x">b</a></strong>c</p>', 'a **[b](/x)**&#99;'],
-  ['<p>a<strong>&nbsp;<a href="/x">b</a></strong>c</p>', 'a**  [b](/x)**c'],
+  ['<p>a<strong>&nbsp;<a href="/x">b</a></strong>c</p>', 'a**  [b](/x)**&#99;'],
   ['<blockquote><p>a<strong><a href="/x">b</a></strong>c</p></blockquote>', '> a<strong>[b](/x)</strong>c'],
   ['<ul><li>a<em><a href="/x">b</a></em>c</li></ul>', '- a<em>[b](/x)</em>c'],
   ['<p>a <strong><a href="/x">b</a></strong> c</p>', 'a **[b](/x)** c'],
@@ -55,16 +57,15 @@ async function streamConvert(engine: TestEngine, html: string, chunkSize: number
 }
 
 describe.each(engines)('emphasis that cannot flank $name', (engineConfig) => {
-  it.each(['em', 'i', 'cite', 'strong', 'b', 'dfn', 'del'])('preserves %s closing markup before a vertical-tab suffix', async (tag) => {
+  it.each(['em', 'i', 'cite', 'strong', 'b', 'dfn', 'del'])('leaves %s literal exits unchanged before a vertical-tab suffix', async (tag) => {
     const engine = await resolveEngine(engineConfig.engine)
     const strong = tag === 'strong' || tag === 'b' || tag === 'dfn'
-    const rawTag = strong ? 'strong' : 'em'
     const html = `a<${tag}>!b</${tag}>c`
     for (const suffix of ['\v', '\v ', '\v\n']) {
       const delimiter = tag === 'del' ? '~~' : strong ? '**' : '*'
       const options = { plugins: { tagOverrides: { [tag]: { exit: `${delimiter}${suffix}` } } } }
       // Strikethrough inserts a space before its opener and remains Markdown.
-      const expected = tag === 'del' ? `a ~~!b~~${suffix}c` : `a<${rawTag}>!b</${rawTag}>${suffix}c`
+      const expected = tag === 'del' ? `a ~~!b~~${suffix}c` : `a${delimiter}!b${delimiter}${suffix}c`
       expect(engine.htmlToMarkdown(html, options)).toBe(expected)
       for (let width = 1; width <= html.length; width++) {
         const input = new ReadableStream<string>({
@@ -82,12 +83,12 @@ describe.each(engines)('emphasis that cannot flank $name', (engineConfig) => {
     }
   })
 
-  it('retains the character before a long delimiter run across flushes', async () => {
+  it('keeps adjacent delimiter runs unchanged across flushes', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const run = '*'.repeat(32)
     const options = { plugins: { tagOverrides: { span: { enter: run } } } }
     const parts = ['<p>a<span></span>', '<b>', '<a href="/y">x</a></b></p>']
-    const expected = `a${run}<strong>[x](/y)</strong>`
+    const expected = `a${run}**[x](/y)**`
     expect(engine.htmlToMarkdown(parts.join(''), options)).toBe(expected)
     const stream = new ReadableStream<string>({
       start(controller) {

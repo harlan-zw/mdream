@@ -185,6 +185,8 @@ export { ELEMENT_NODE, TEXT_NODE } from './const'
 
 // Element nodes represent HTML tags with attributes
 export interface ElementNode extends Node {
+  /** @internal */
+  emphasis?: number
   /** Element tag name (for ELEMENT_NODE) */
   name: string
   /** HTML attributes (for ELEMENT_NODE) */

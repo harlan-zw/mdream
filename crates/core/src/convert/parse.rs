@@ -400,7 +400,7 @@ impl ConvertState {
       tag_id,
       contains_whitespace: false,
       excluded_from_markdown: false,
-      enter_skipped: false,
+      emit_state: 0,
       is_inline: handler.is_inline,
       excludes_text_nodes: handler.excludes_text_nodes,
       is_non_nesting: handler.is_non_nesting,
@@ -562,7 +562,6 @@ impl ConvertState {
     if !excludes_text_nodes {
       let (depth, index) = self.begin_text_emit(&text, has_inline_gfm_hazard);
       self.emit_plain_text_inline(&text, contains_whitespace, depth, index);
-      self.settle_flank_pairs();
     }
 
     text.clear();
@@ -723,7 +722,6 @@ impl ConvertState {
         tailwind_prefix.as_deref(),
         tailwind_suffix.as_deref(),
       );
-      self.settle_flank_pairs();
     }
 
     // Recover String allocation
@@ -1218,7 +1216,7 @@ impl ConvertState {
     tag.child_text_node_index = 0;
     tag.contains_whitespace = false;
     tag.excluded_from_markdown = false;
-    tag.enter_skipped = false;
+    tag.emit_state = 0;
     tag.is_inline = h_inline;
     tag.excludes_text_nodes = h_excludes;
     tag.is_non_nesting = h_non_nesting;
@@ -1379,7 +1377,7 @@ impl ConvertState {
     tag.excluded_from_markdown = in_template
       || filter_excluded
       || (skip_node && (!self.has_isolate_main || self.isolate_main_found));
-    tag.enter_skipped = skip_node;
+    tag.emit_state = if skip_node { 64 } else { 0 };
 
     if tag.collapses_inner_white_space && !tag.excluded_from_markdown {
       if tag.tag_id == Some(TAG_SPAN) {
@@ -1432,12 +1430,6 @@ impl ConvertState {
 
     // Inline emit (no callback!)
     if !skip_node {
-      if !self.flank_pairs.is_empty()
-        && let Some(node) = self.stack.last()
-        && !node.excluded_from_markdown
-      {
-        self.release_flank_pairs(node.tag_id, node.is_inline, false);
-      }
       if self.element_fast_path_ok(tag_id) {
         self.emit_enter_simple(false);
       } else if self.link_fast_path_ok(tag_id) {
@@ -1445,7 +1437,6 @@ impl ConvertState {
       } else {
         self.emit_enter_element();
       }
-      self.settle_flank_pairs();
     }
 
     // After the LI prefix is emitted, push this LI's marker-width worth of
@@ -1544,7 +1535,7 @@ impl ConvertState {
         node.tag_id,
         node.collapses_inner_white_space,
         node.excluded_from_markdown,
-        node.enter_skipped,
+        node.emit_state == 64,
         node.child_text_node_index,
       )
     };
@@ -1614,7 +1605,6 @@ impl ConvertState {
         self.stack.push(modified_node);
         // Emit synthetic text
         self.emit_text(&prefix, false, text_depth, 0);
-        self.settle_flank_pairs();
         for prev in self.stack.iter_mut() {
           prev.child_text_node_index += 1;
         }
@@ -1622,9 +1612,7 @@ impl ConvertState {
           return;
         };
         // Emit exit
-        self.release_flank_pairs(node_tag_id, modified_node2.is_inline, true);
         self.emit_exit_element(&modified_node2);
-        self.close_flank_pair(node_depth, node_tag_id);
         self.stack.restore_retired(modified_node2);
         self.stack.release_retired();
         if let Some(id) = node_tag_id {
@@ -1655,10 +1643,6 @@ impl ConvertState {
       }
     }
 
-    if !self.flank_pairs.is_empty() && !node_excluded && !node_enter_skipped {
-      let is_inline = self.stack.retired().is_inline;
-      self.release_flank_pairs(node_tag_id, is_inline, true);
-    }
     // The general exit needs the node owned; the fast ones read it in place.
     if self.element_fast_path_ok(node_tag_id) {
       self.emit_exit_simple(false);
@@ -1669,7 +1653,6 @@ impl ConvertState {
       self.emit_exit_element(&node);
       self.stack.restore_retired(node);
     }
-    self.close_flank_pair(node_depth, node_tag_id);
     self.stack.release_retired();
 
     if let Some(id) = node_tag_id {
@@ -1976,7 +1959,6 @@ impl ConvertState {
         let depth = self.depth;
         let index = self.stack.last().map_or(0, |n| n.current_walk_index);
         self.emit_text(content, false, depth, index as usize);
-        self.settle_flank_pairs();
       }
       if let Some(parent) = self.stack.last_mut() {
         parent.current_walk_index += 1;

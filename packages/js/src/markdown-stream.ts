@@ -148,17 +148,6 @@ function prepareQuoteOutput(state: MarkdownState, bufferScan: BufferScanState, q
   return quoteScan
 }
 
-// A later emphasis opener reads the character before the whole delimiter run.
-function keepDelimiterContext(content: string, start: number): number {
-  const mark = content.charCodeAt(start)
-  if (mark === 42 || mark === 126) {
-    while (start > 0 && content.charCodeAt(start - 1) === mark)
-      start--
-    start--
-  }
-  return Math.max(0, start)
-}
-
 /** Drain stable Markdown while retaining mutable fragments. */
 export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins: boolean) {
   const { state, options, bufferScan } = context
@@ -295,7 +284,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       let retainedStart = stableLength + leadingTrimmed - 17
       if (wrapping)
         retainedStart = Math.min(retainedStart, content.lastIndexOf('\n', stableLength + leadingTrimmed - 1))
-      const removed = compactQuotePrefix(heldFragment, content, keepDelimiterContext(content, retainedStart))
+      const removed = compactQuotePrefix(heldFragment, content, Math.max(0, retainedStart))
       lastYieldedLength -= removed
     }
     if (hasYieldedContent && !fragmentHeld && !headingHeld && (!retainMutableFragments || !inPre) && (!wrapping || leadingTrimmed === 0)) {
@@ -310,7 +299,6 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
         if (lineStart < contextStart)
           contextStart = lineStart
       }
-      contextStart = keepDelimiterContext(currentContent, contextStart)
       if (retainMutableFragments && leadingTrimmed === 0) {
         // Preserve the final fragment as a separate value: close handlers
         // identify and trim it by reference equality with lastContentCache.
