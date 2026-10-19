@@ -4534,7 +4534,10 @@ impl ConvertState {
     let trailing_space = text.ends_with(' ');
     // The space an inline close moved past its closer (`**b** c` from
     // `<b>b </b>c`) was just written; like an inter-word space, it can break.
-    let pending_space = pending_space && !leading_space && self.buffer.ends_with(' ');
+    // Only in Markdown: the JS plain text output keeps some of these spaces
+    // as written, where they cannot break.
+    let pending_space =
+      pending_space && self.is_markdown() && !leading_space && self.buffer.ends_with(' ');
     if pending_space {
       self.truncate_buffer(self.buffer.len() - 1);
     }
