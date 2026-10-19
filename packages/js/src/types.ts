@@ -203,8 +203,8 @@ export interface ElementNode extends Node {
   enterSkipped?: boolean
   /** Text counted in this link that never shows: excluded text and the blank text after it. */
   hiddenTextNodes?: number
-  /** This link dropped a blank that followed other content, as the space in `<a><svg></svg> </a>`. */
-  trailingBlank?: boolean
+  /** The child count when this link dropped a blank after other content, as the space in `<a><svg></svg> </a>`. */
+  trailingBlankAt?: number
 }
 
 export interface TextNode extends Node {

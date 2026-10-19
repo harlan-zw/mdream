@@ -1831,7 +1831,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     const movesBlankPastLink = node.type === TEXT_NODE
       && (node as TextNode).isLinkLabel === true
-      && dropBlankLinkText(state, openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment, (node as TextNode).value, node.parent?.trailingBlank === true)
+      && dropBlankLinkText(state, openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment, (node as TextNode).value, node.parent?.trailingBlankAt !== undefined && node.parent.trailingBlankAt === node.parent.currentWalkIndex)
 
     let lastBuffEntry = buff.at(-1)!
     let lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''

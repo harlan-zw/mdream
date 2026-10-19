@@ -538,14 +538,16 @@ impl ConvertState {
 
   /// A blank dropped as a link's indentation after other content of the link, as
   /// in `<a><svg></svg> </a>Next`, still spaces that content from what follows:
-  /// a label written in its place moves the blank past the link.
+  /// a label written in its place moves the blank past the link. A blank with
+  /// more children after it, as in `<a><svg></svg> <svg></svg></a>`, does not.
   #[inline(never)]
   fn note_trailing_link_blank(&mut self) {
     if let Some(node) = self.stack.last_mut()
       && node.tag_id == Some(TAG_A)
       && node.current_walk_index > 0
     {
-      node.extras.get_or_insert_default().trailing_blank = true;
+      let children = node.current_walk_index;
+      node.extras.get_or_insert_default().trailing_blank_at = Some(children);
     }
   }
 
@@ -1679,7 +1681,7 @@ impl ConvertState {
         let trailing_blank = modified_node
           .extras
           .as_ref()
-          .is_some_and(|extras| extras.trailing_blank);
+          .is_some_and(|extras| extras.trailing_blank_at == Some(modified_node.current_walk_index));
         let text_depth = node_depth + 1;
         self.stack.push(modified_node);
         let moves_blank = self.take_blank_link_text(&prefix, trailing_blank);

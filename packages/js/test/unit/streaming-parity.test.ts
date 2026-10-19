@@ -694,6 +694,19 @@ describe('streaming parity with the Rust core', () => {
     await expectStreamingParity(html, { clean: clean() })
   })
 
+  it.each([
+    ['<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg></a>Next</p>', 'Go [Item](/c)Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><span></span> <svg></svg></a>Next</p>', 'Go [Item](/c)Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg> <svg></svg></a>Next</p>', 'Go [Item](/c)Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg> </a>Next</p>', 'Go [Item](/c) Next'],
+    ['<p>Go <a href="/c" aria-label="A"><svg></svg> <!-- c --></a>Next</p>', 'Go [A](/c) Next'],
+  ])('keeps a blank between excluded link content in the label across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    for (const format of ['markdown', 'text', 'html'] as const)
+      await expectStreamingParity(html, { format })
+    await expectStreamingParity(html, { clean: clean() })
+  })
+
   it.each(['html', 'text'] as const)('keeps linked-image %s output stable across every split', async (format) => {
     await expectStreamingParity(
       '<a href="/x" title="Title"><img src="/i" alt="Alt"></a>',

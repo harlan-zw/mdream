@@ -517,6 +517,21 @@ describe.each(engines)('links $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine, format: 'html' })).toBe('<p>Go<a href="/cart"> Cart</a>now</p>')
   })
 
+  // A blank between two children of a link is part of the content the label
+  // replaces; only a blank after the last child moves past the link.
+  it.each([
+    ['<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg></a>Next</p>', 'Go [Item](/c)Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><span></span> <svg></svg></a>Next</p>', 'Go [Item](/c)Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg> <svg></svg></a>Next</p>', 'Go [Item](/c)Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg> </a>Next</p>', 'Go [Item](/c) Next'],
+    ['<p>Go <a href="/c" aria-label="A"><svg></svg> <!-- c --></a>Next</p>', 'Go [A](/c) Next'],
+  ])('keeps a blank between excluded link content in the label in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} } })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, clean: true })).toBe(expected)
+  })
+
   it('keeps the space after excluded link text in every format', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>See<a href="/x"><span class="icon">arrow</span> <span>docs</span></a></p>'

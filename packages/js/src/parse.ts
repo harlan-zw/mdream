@@ -1313,9 +1313,11 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   if (!inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex) {
     // A blank dropped as a link's indentation after other content of the link,
     // as in `<a><svg></svg> </a>Next`, still spaces that content from what
-    // follows: a label written in its place moves the blank past the link.
+    // follows: a label written in its place moves the blank past the link. A
+    // blank with more children after it, as in `<a><svg></svg> <svg></svg></a>`,
+    // does not.
     if (state.currentNode.tagId === TAG_A && state.currentNode.currentWalkIndex)
-      state.currentNode.trailingBlank = true
+      state.currentNode.trailingBlankAt = state.currentNode.currentWalkIndex
     return
   }
 

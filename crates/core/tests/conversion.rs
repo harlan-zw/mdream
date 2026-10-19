@@ -3608,6 +3608,70 @@ fn blank_after_excluded_link_content_moves_past_the_label() {
   );
 }
 
+/// A blank the parser drops between two children of a link, as between two
+/// icons, is part of the content the label replaces: only a blank after the
+/// link's last child moves past the link.
+#[test]
+fn blank_between_excluded_link_content_stays_in_the_label() {
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let cases = [
+    (
+      r#"<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg></a>Next</p>"#,
+      "Go [Item](/c)Next",
+    ),
+    (
+      r#"<p>Go<a href="/c" aria-label="Item"><span></span> <svg></svg></a>Next</p>"#,
+      "Go [Item](/c)Next",
+    ),
+    (
+      r#"<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg> <svg></svg></a>Next</p>"#,
+      "Go [Item](/c)Next",
+    ),
+    (
+      r#"<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg> </a>Next</p>"#,
+      "Go [Item](/c) Next",
+    ),
+    // A comment is no child of the link.
+    (
+      r#"<p>Go <a href="/c" aria-label="A"><svg></svg> <!-- c --></a>Next</p>"#,
+      "Go [A](/c) Next",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "{html}");
+    assert_eq!(html_to_markdown(html, filter.clone()), expected, "{html}");
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      filter.clone(),
+      filter.clone().with_max_node_bytes(4),
+    ] {
+      let one_shot = html_to_markdown(html, options.clone());
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, one_shot, "{html} width={width}");
+      }
+    }
+  }
+
+  let html = r#"<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg></a>Next</p>"#;
+  assert_eq!(convert_text(html), "Go ItemNext");
+  assert_eq!(
+    html_to_html(html, HtmlToMarkdownOptions::default()),
+    r#"<p>Go<a href="/c">Item</a>Next</p>"#
+  );
+}
+
 #[test]
 fn excluded_link_text_keeps_the_space_after_it() {
   let exclude_icon = HtmlToMarkdownOptions {
