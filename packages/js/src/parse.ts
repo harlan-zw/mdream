@@ -1390,12 +1390,20 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     const hidden = textNode.excludedFromMarkdown || (isBlank && !wasBlank)
     if (hidden || isBlank)
       countHiddenLinkText(parentsToIncrement, hidden)
-    else if ((hasText || textNode.rewrittenBlank === false) && !parentsToIncrement.some(parent => parent.tagId === TAG_A))
+    else if ((hasText || textNode.rewrittenBlank === false) && !hasAnchorParent(parentsToIncrement))
       // Text in a block nested in the link, such as `<svg><text>`. Blank text
       // there, as in `<pre> </pre>`, shows nothing.
       countContentInEnclosingLink(firstBlockParent)
   }
   state.lastTextNode = textNode
+}
+
+function hasAnchorParent(parents: ElementNode[]): boolean {
+  for (let i = 0; i < parents.length; i++) {
+    if (parents[i]!.tagId === TAG_A)
+      return true
+  }
+  return false
 }
 
 /**
