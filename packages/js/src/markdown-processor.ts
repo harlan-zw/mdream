@@ -2309,11 +2309,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.lastContentCache = ' '
     }
 
-    // CommonMark treats vertical tabs as whitespace at emphasis delimiters.
+    // Renderers such as micromark treat vertical tabs as whitespace at delimiters.
     let trailingEmphasisWhitespace = ''
     if (eventType === NodeEventExit && !handler?.literalExit
-      && (tagId === TAG_EM || tagId === TAG_I || tagId === TAG_STRONG || tagId === TAG_B)
-      && output?.[0]?.charCodeAt(0) === 42) {
+      && INLINE_MARKER_TYPE[tagId]! >= 1 && INLINE_MARKER_TYPE[tagId]! <= 4
+      && (output?.[0]?.charCodeAt(0) === 42 || output?.[0]?.charCodeAt(0) === 126)) {
       for (let index = buff.length - 1; index >= 0; index--) {
         const fragment = buff[index]!
         let end = fragment.length

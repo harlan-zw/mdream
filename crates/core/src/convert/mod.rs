@@ -2745,7 +2745,12 @@ impl ConvertState {
     let hold_vertical_tabs = self.depth_map[TAG_EM as usize] != 0
       || self.depth_map[TAG_I as usize] != 0
       || self.depth_map[TAG_STRONG as usize] != 0
-      || self.depth_map[TAG_B as usize] != 0;
+      || self.depth_map[TAG_B as usize] != 0
+      || self.depth_map[TAG_CITE as usize] != 0
+      || self.depth_map[TAG_DFN as usize] != 0
+      || self.depth_map[TAG_DEL as usize] != 0
+      || self.depth_map[TAG_S as usize] != 0
+      || self.depth_map[TAG_STRIKE as usize] != 0;
     let mut stable_end = self
       .held_whitespace
       .start(self.buffer.as_bytes(), buf_len, |b| {

@@ -6089,7 +6089,17 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
 
 #[test]
 fn vertical_tabs_before_emphasis_closers() {
-  for (tag, marker) in [("em", "*"), ("i", "*"), ("strong", "**"), ("b", "**")] {
+  for (tag, marker) in [
+    ("em", "*"),
+    ("i", "*"),
+    ("strong", "**"),
+    ("b", "**"),
+    ("cite", "*"),
+    ("dfn", "**"),
+    ("del", "~~"),
+    ("s", "~~"),
+    ("strike", "~~"),
+  ] {
     for suffix in [
       "\u{000b}",
       "\u{000b} ",

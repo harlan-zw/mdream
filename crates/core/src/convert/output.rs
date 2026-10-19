@@ -4875,10 +4875,14 @@ impl ConvertState {
 
     let closes_emphasis = !is_enter
       && !literal
-      && matches!(output_str, "*" | "**")
+      && matches!(output_str, "*" | "**" | "~~")
       && matches!(
-        self.stack.retired().tag_id,
-        Some(TAG_EM | TAG_I | TAG_STRONG | TAG_B)
+        self
+          .stack
+          .retired()
+          .tag_id
+          .and_then(Self::inline_marker_type),
+        Some(1..=4)
       );
     if configured_new_lines == 0
       && !self.last_text_node_contains_whitespace
@@ -5065,7 +5069,7 @@ impl ConvertState {
         self.last_content_cache_len = self.push_code_span_content(" ", true);
       }
 
-      // CommonMark treats vertical tabs as whitespace at emphasis delimiters.
+      // Renderers such as micromark treat vertical tabs as whitespace at delimiters.
       let mut trailing_emphasis_whitespace = String::new();
       if closes_emphasis {
         let mut end = self.buffer.len();

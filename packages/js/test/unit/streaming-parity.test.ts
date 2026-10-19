@@ -915,7 +915,7 @@ it.each(['\t', '\n', '\f', '\r', ' ', '\u000B'])('holds trimmable override white
 })
 
 describe('vertical tabs before emphasis closers', () => {
-  for (const [tag, marker] of [['em', '*'], ['i', '*'], ['strong', '**'], ['b', '**']]) {
+  for (const [tag, marker] of [['em', '*'], ['i', '*'], ['strong', '**'], ['b', '**'], ['cite', '*'], ['dfn', '**'], ['del', '~~'], ['s', '~~'], ['strike', '~~']]) {
     for (const suffix of ['\u000B', '\u000B ', '\u000B\u000B ', '\u000B \t', ' \u000B', '\u000B \u000B ']) {
       it(`preserves ${tag} with ${JSON.stringify(suffix)} at every chunk width`, async () => {
         const html = `<${tag}>T${suffix}</${tag}>`
