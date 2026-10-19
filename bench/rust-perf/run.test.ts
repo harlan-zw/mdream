@@ -62,6 +62,17 @@ it('keeps native and WASM agreement strict for each revision with changed output
   expect(() => verifyWasmOutputs(native, [wasm[0], { ...wasm[1], metadata: { extracted: ['changed'] } }], 'page')).toThrow('metadata differs')
 })
 
+it.each([null, undefined, {}, { output: undefined }, { output: 42 }])('rejects malformed native or WASM observations: %j', (observation) => {
+  const valid = { output: 'same' }
+  for (const side of [0, 1]) {
+    const malformed: unknown[] = [valid, valid]
+    malformed[side] = observation
+    expect(() => verifyWasmOutputs(malformed, [valid, valid], 'page')).toThrow(`page: native observation ${side} must contain a string output`)
+    expect(() => verifyWasmOutputs([valid, valid], malformed, 'page')).toThrow(`page: WASM observation ${side} must contain a string output`)
+  }
+  expect(() => verifyWasmOutputs([observation, observation], [observation, observation], 'page')).toThrow('must contain a string output')
+})
+
 it('retains absolute CPU samples without paired comparisons when output changes', () => {
   const rows = cpuRows('cpu', 'CPU', [10, 20], [5, 10], 'output changed')
   expect(rows.map(row => row.value)).toEqual([15, 7.5])
