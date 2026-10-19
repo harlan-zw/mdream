@@ -1154,9 +1154,18 @@ impl ConvertState {
     output_start: usize,
   ) {
     let delimiter = FLANK_DELIMITER[kind as usize];
-    if output == Some(delimiter)
+    let mark = delimiter.as_bytes()[0];
+    let output_bytes = output.map(str::as_bytes);
+    let bytes = self.buffer.as_bytes();
+    if output_bytes.is_some_and(|output| {
+      output.len() == delimiter.len()
+        && output[0] == mark
+        && (delimiter.len() == 1 || output[1] == mark)
+    })
       && self.buffer.len() > output_start
-      && self.buffer.ends_with(delimiter)
+      && bytes.len() >= delimiter.len()
+      && bytes.last() == Some(&mark)
+      && (delimiter.len() == 1 || bytes[bytes.len() - 2] == mark)
       && self.is_markdown()
       && self.caption_frames.is_empty()
       && self.depth_map[TAG_PRE as usize] == 0
@@ -1253,9 +1262,13 @@ impl ConvertState {
       let pair = self.flank_pairs[index];
       let delimiter = FLANK_DELIMITER[pair.kind as usize];
       let bytes = self.buffer.as_bytes();
-      if bytes.ends_with(delimiter.as_bytes()) {
+      let mark = delimiter.as_bytes()[0];
+      // Every tracked delimiter is one or two bytes of the same ASCII mark.
+      if bytes.len() >= delimiter.len()
+        && bytes.last() == Some(&mark)
+        && (delimiter.len() == 1 || bytes[bytes.len() - 2] == mark)
+      {
         let closer = bytes.len() - delimiter.len();
-        let mark = delimiter.as_bytes()[0];
         let last = bytes[..closer].iter().rposition(|&byte| byte != mark);
         if pair.state == FlankState::Raw {
           self.replace_flank_bytes(closer, delimiter.len(), FLANK_RAW_CLOSE[pair.kind as usize]);
@@ -1303,7 +1316,8 @@ impl ConvertState {
       let kind = pair.kind as usize;
       let delimiter = FLANK_DELIMITER[kind].as_bytes();
       let bytes = self.buffer.as_bytes();
-      let in_place = bytes.get(pair.offset..pair.offset + delimiter.len()) == Some(delimiter);
+      let in_place = bytes.get(pair.offset) == Some(&delimiter[0])
+        && (delimiter.len() == 1 || bytes.get(pair.offset + 1) == Some(&delimiter[0]));
       if pair.state == FlankState::Opening {
         // The empty-pair check can still drop an opener while it is open.
         if self
