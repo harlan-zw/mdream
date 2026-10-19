@@ -10,18 +10,23 @@ import {
   TAG_ADDRESS,
   TAG_ARTICLE,
   TAG_ASIDE,
+  TAG_B,
   TAG_BASE,
   TAG_BLOCKQUOTE,
   TAG_BUTTON,
   TAG_CAPTION,
   TAG_CENTER,
+  TAG_CITE,
   TAG_CODE,
   TAG_DD,
+  TAG_DEL,
   TAG_DETAILS,
+  TAG_DFN,
   TAG_DIALOG,
   TAG_DIV,
   TAG_DL,
   TAG_DT,
+  TAG_EM,
   TAG_FIELDSET,
   TAG_FIGCAPTION,
   TAG_FIGURE,
@@ -37,6 +42,7 @@ import {
   TAG_HEADER,
   TAG_HR,
   TAG_HTML,
+  TAG_I,
   TAG_LI,
   TAG_LINK,
   TAG_MAIN,
@@ -48,9 +54,12 @@ import {
   TAG_OPTION,
   TAG_P,
   TAG_PRE,
+  TAG_S,
   TAG_SCRIPT,
   TAG_SECTION,
   TAG_SELECT,
+  TAG_STRIKE,
+  TAG_STRONG,
   TAG_STYLE,
   TAG_SUMMARY,
   TAG_TABLE,
@@ -72,6 +81,10 @@ import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
 // A tag outside the dictionary with no override renders only its text, inline
 // with zero spacing, as in the Rust engine: `<x>X</x><y>Y</y>` is `XY`.
 const UNKNOWN_TAG_HANDLER: TagHandler = { isInline: true, spacing: NO_SPACING }
+
+// Elements written as emphasis delimiters, which need the word boundary
+// outside them.
+const EMPHASIS_TAGS = new Set([TAG_STRONG, TAG_B, TAG_DFN, TAG_EM, TAG_I, TAG_DEL, TAG_S, TAG_STRIKE, TAG_CITE])
 
 // Cache frequently used character codes
 const LT_CHAR = 60 // '<'
@@ -1308,7 +1321,10 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     || state.currentNode?.excludedFromMarkdown
   const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
 
-  if (!inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex) {
+  // Whitespace-only text before an element's first child is indentation, but
+  // in Markdown emphasis after earlier text it is the only word separator.
+  const isLeadingBlank = !inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex
+  if (isLeadingBlank && (state.plainText || !EMPHASIS_TAGS.has(state.currentNode.tagId ?? -1))) {
     return
   }
 
@@ -1334,6 +1350,26 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     if (start > 0) {
       text = text.substring(start)
     }
+  }
+
+  // The output moves the separator in front of the delimiter; the counters stay
+  // as if the blank were dropped, so it is no content of the element.
+  if (isLeadingBlank) {
+    if (text) {
+      const blank: TextNode = {
+        type: TEXT_NODE,
+        value: text,
+        parent: state.currentNode,
+        index: state.currentNode.currentWalkIndex!,
+        depth: state.depth,
+        containsWhitespace,
+        excludedFromMarkdown: excludesTextNodes,
+      }
+      if (inlineAtRoot)
+        blank.trimsAtLineStart = true
+      handleEvent({ type: NodeEventEnter, node: blank })
+    }
+    return
   }
 
   if (state.hasEncodedHtmlEntity) {

@@ -78,6 +78,41 @@ describe('inline whitespace', () => {
     }
   })
 
+  it('keeps the word separator when emphasis starts with a blank', async () => {
+    const cases: [string, string][] = [
+      ['<p>a<strong> <span>b</span></strong></p>', 'a **b**'],
+      ['<p>a<strong> </strong>b</p>', 'a b'],
+      ['<p>a<em> <span>b</span></em></p>', 'a *b*'],
+      ['<p>a<b>\n<span>b</span></b></p>', 'a **b**'],
+      ['<p>a<i>\t <span>b</span></i></p>', 'a *b*'],
+      ['<p>a<strong> <svg></svg>b</strong></p>', 'a **b**'],
+      ['<p>a<strong> <em>b</em></strong></p>', 'a ***b***'],
+      ['<p><em>x</em><strong> <span>b</span></strong></p>', '*x* **b**'],
+      // Already parted, or at the start of the line: nothing to add.
+      ['<p>a <strong> <span>b</span></strong></p>', 'a **b**'],
+      ['<p><strong> <span>b</span></strong></p>', '**b**'],
+      ['<p>a<br><strong> <span>b</span></strong></p>', 'a  \n**b**'],
+      // An empty pair owes its separator to what follows it, once.
+      ['<p>a<strong> </strong> b</p>', 'a b'],
+      ['<p>a<em> </em><strong> </strong>b</p>', 'a b'],
+      ['<p>a<strong> </strong><em></em> b</p>', 'a b'],
+      ['<p><a href="/x"><span>x</span><strong> </strong><em></em></a></p>', '[x](/x)'],
+    ]
+    for (const [html, expected] of cases) {
+      expect(htmlToMarkdown(html)).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        expect(await streamConvert(chunks), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+    expect(htmlToMarkdown('<p>x<em><span hidden>h</span> </em>y</p>', { plugins: [filterPlugin()] })).toBe('x y')
+    expect(htmlToMarkdown('<ul><li>a<strong> <span>b</span></strong></li></ul>')).toBe('- a **b**')
+    expect(htmlToMarkdown('<h2>a<strong> </strong>b</h2>')).toBe('## a b')
+    expect(htmlToMarkdown('<p><a href="/x">a<strong> <span>b</span></strong></a></p>')).toBe('[a **b**](/x)')
+  })
+
   it('leaves code-like content as written', () => {
     expect(htmlToMarkdown('<p><kbd>a<strong> x</strong></kbd></p>')).toBe('`a** x**`')
     expect(htmlToMarkdown('<p><samp>a<em> x</em></samp></p>')).toBe('`a* x*`')

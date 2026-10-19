@@ -287,13 +287,44 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
     expect(htmlToMarkdown('<p><var>a<b><svg></svg> x</b></var></p>', { engine })).toBe('`a** x**`')
   })
 
-  it('moves no space for text that is only spaces', async () => {
+  it('keeps the word separator for text that is only spaces', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>x<em><span hidden>h</span> </em>y</p>'
-    expect(htmlToMarkdown(html, { plugins: { filter: {} }, engine })).toBe('xy')
+    expect(htmlToMarkdown(html, { plugins: { filter: {} }, engine })).toBe('x y')
     for (let split = 1; split < html.length; split++) {
       const actual = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, split), html.slice(split)]), { plugins: { filter: {} }, engine }))
-      expect(actual.trim(), `split at ${split}`).toBe('xy')
+      expect(actual.trim(), `split at ${split}`).toBe('x y')
+    }
+  })
+
+  it('keeps the word separator when emphasis starts with a blank', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const cases: [string, string][] = [
+      ['<p>a<strong> <span>b</span></strong></p>', 'a **b**'],
+      ['<p>a<strong> </strong>b</p>', 'a b'],
+      ['<p>a<em> <span>b</span></em></p>', 'a *b*'],
+      ['<p>a<b>\n<span>b</span></b></p>', 'a **b**'],
+      ['<p>a<strong> <svg></svg>b</strong></p>', 'a **b**'],
+      ['<p>a<strong> <em>b</em></strong></p>', 'a ***b***'],
+      ['<p>a <strong> <span>b</span></strong></p>', 'a **b**'],
+      ['<p><strong> <span>b</span></strong></p>', '**b**'],
+      ['<p>a<strong> </strong> b</p>', 'a b'],
+      ['<p>a<em> </em><strong> </strong>b</p>', 'a b'],
+      ['<p>a<strong> </strong><em></em> b</p>', 'a b'],
+      ['<p><a href="/x"><span>x</span><strong> </strong><em></em></a></p>', '[x](/x)'],
+      ['<ul><li>a<strong> <span>b</span></strong></li></ul>', '- a **b**'],
+      ['<h2>a<strong> </strong>b</h2>', '## a b'],
+      ['<table><tr><th>h</th></tr><tr><td>a<strong> <span>b</span></strong></td></tr></table>', '| h |\n| --- |\n| a **b** |'],
+    ]
+    for (const [html, expected] of cases) {
+      expect(htmlToMarkdown(html, { engine })).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { engine }))
+        expect(actual.trim(), `${html} in chunks of ${width}`).toBe(expected)
+      }
     }
   })
 })

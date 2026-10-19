@@ -356,8 +356,13 @@ fn space_after_removed_content_stays_outside_the_opening_delimiter() {
     &hidden,
     "Install. **Warning:** read",
   );
-  // Text that is only spaces has nothing to move.
-  assert_every_chunking("<p>x<em><span hidden>h</span> </em>y</p>", &hidden, "xy");
+  // Text that is only spaces still parts the words.
+  assert_every_chunking("<p>x<em><span hidden>h</span> </em>y</p>", &hidden, "x y");
+  assert_every_chunking(
+    "<p>x<em><span hidden>h</span> <span>y</span></em></p>",
+    &hidden,
+    "x *y*",
+  );
   assert_eq!(
     md("<p>Install. <em><svg></svg> Warning:</em> read</p>"),
     "Install. *Warning:* read"
@@ -410,6 +415,57 @@ fn moved_space_stays_out_of_the_start_of_link_text() {
   ] {
     assert_every_chunking(html, &options, expected);
   }
+}
+
+#[test]
+fn blank_opening_emphasis_keeps_the_word_separator() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p>a<strong> <span>b</span></strong></p>", "a **b**"),
+    ("<p>a<strong> </strong>b</p>", "a b"),
+    ("<p>a<em> <span>b</span></em></p>", "a *b*"),
+    ("<p>a<b>\n<span>b</span></b></p>", "a **b**"),
+    ("<p>a<i>\t <span>b</span></i></p>", "a *b*"),
+    ("<p>a<cite>   <span>b</span></cite></p>", "a *b*"),
+    ("<p>a<strong> <svg></svg>b</strong></p>", "a **b**"),
+    ("<p>a<strong> <em>b</em></strong></p>", "a ***b***"),
+    (
+      "<p>a<strong><em> <span>b</span></em></strong></p>",
+      "a ***b***",
+    ),
+    (
+      "<p><em>x</em><strong> <span>b</span></strong></p>",
+      "*x* **b**",
+    ),
+    // Already parted, or at the start of the line: nothing to add.
+    ("<p>a <strong> <span>b</span></strong></p>", "a **b**"),
+    ("<p><strong> <span>b</span></strong></p>", "**b**"),
+    ("<p>a<br><strong> <span>b</span></strong></p>", "a  \n**b**"),
+    // An empty pair owes its separator to what follows it, once.
+    ("<p>a<strong> </strong> b</p>", "a b"),
+    ("<p>a<em> </em><strong> </strong>b</p>", "a b"),
+    ("<p>a<strong> </strong><em></em> b</p>", "a b"),
+    ("<p>a<strong> </strong></p>", "a"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+  assert_eq!(
+    md("<ul><li>a<strong> <span>b</span></strong></li></ul>"),
+    "- a **b**"
+  );
+  assert_eq!(md("<h2>a<strong> </strong>b</h2>"), "## a b");
+  assert_eq!(
+    md("<table><tr><th>h</th></tr><tr><td>a<strong> <span>b</span></strong></td></tr></table>"),
+    "| h |\n| --- |\n| a **b** |"
+  );
+  assert_eq!(
+    md(r#"<p><a href="/x">a<strong> <span>b</span></strong></a></p>"#),
+    "[a **b**](/x)"
+  );
+  assert_eq!(
+    md(r#"<p><a href="/x"><span>x</span><strong> </strong><em></em></a></p>"#),
+    "[x](/x)"
+  );
 }
 
 #[test]

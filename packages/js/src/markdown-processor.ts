@@ -1371,6 +1371,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
   let openMarkerCount = 0
+  // Per open marker: the opener follows the space a pending separator wrote.
+  const openMarkerFollowsSpace: boolean[] = []
+  // The fragment holding the space the current event's pending separator wrote.
+  let pendingSpaceFragment = -1
   let captionFrames: number[] | undefined
   let captionFrameCount = 0
   // 1 needs a boundary; 2 emitted one and still owns the next source space.
@@ -1648,8 +1652,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     while (textNode.value.charCodeAt(start) === 32)
       start++
     textNode.value = textNode.value.slice(start)
-    if (!textNode.value)
-      return false
+    // A space moved in front of the run earlier already parts the words.
+    if (buffer[fragment]!.charCodeAt(0) === 32)
+      return textNode.value !== ''
     let previous = fragment
     let before = -1
     while (before === -1 && --previous >= 0) {
@@ -1665,7 +1670,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.outputPositions?.replace(fragment, fragment + 1, [opener], offset => offset > 0 ? offset + 1 : offset)
       buffer[fragment] = opener
     }
-    return true
+    return textNode.value !== ''
   }
 
   function processTextNode(textNode: TextNode, lastNode: ElementNode | TextNode | undefined, lastChar: string): void {
@@ -2195,8 +2200,21 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && !handler?.literalExit) {
-        const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType, state.outputPositions)
+        const slot = --openMarkerCount
+        const marker = openMarkers[slot]!
+        // A word separator in front of the opener, moved there or written for
+        // a pending one, goes with it and is owed to the content after the pair.
+        const hoisted = markerType <= 4 && buff[marker >> 3]?.charCodeAt(0) === 32
+        let idx = dropEmptyMarker(buff, marker, markerType, state.outputPositions)
         if (idx >= 0) {
+          if (openMarkerFollowsSpace[slot] && buff[idx - 1] === ' ') {
+            idx--
+            state.outputPositions?.replace(idx, buff.length, [])
+            buff.length = idx
+            state.pendingInlineWhitespace = true
+          }
+          if (hoisted)
+            state.pendingInlineWhitespace = true
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
           return
@@ -2247,6 +2265,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (newLines > 0 && buff.length === 0 && !hasYieldedContent)
       newLines = 0
 
+    pendingSpaceFragment = -1
     if (state.pendingInlineWhitespace) {
       const firstOutput = output?.[0]?.[0] || ''
       if (eventType === NodeEventEnter) {
@@ -2258,6 +2277,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.buffer.push(' ')
             state.lastContentCache = ' '
             lastChar = ' '
+            pendingSpaceFragment = state.buffer.length - 1
           }
           state.pendingInlineWhitespace = false
         }
@@ -2412,6 +2432,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && buff[buff.length - 1] === handlerOutput) {
+        openMarkerFollowsSpace[openMarkerCount] = pendingSpaceFragment === buff.length - 2
         openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
       }
       else if (openMarkerCount

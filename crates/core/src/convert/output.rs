@@ -392,7 +392,7 @@ impl ConvertState {
   /// does. When the output ends with a run of such openers, the space goes in
   /// front of the run, merged with any whitespace already there, and this
   /// returns true so the caller drops it from the text.
-  fn hoist_opener_space(&mut self, text: &str) -> bool {
+  fn hoist_opener_space(&mut self) -> bool {
     let mut markers = self.open_markers.iter().rev();
     let Some(innermost) = markers.next() else {
       return false;
@@ -409,15 +409,13 @@ impl ConvertState {
       return false;
     }
     let mut start = innermost.output_start;
+    let mut outermost = self.open_markers.len() - 1;
     for marker in markers {
       if marker.kind > 4 || marker.content_start != start {
         break;
       }
       start = marker.output_start;
-    }
-    // Text that is only spaces is dropped with nothing to move.
-    if text.bytes().all(|byte| byte == b' ') {
-      return true;
+      outermost -= 1;
     }
     // At the start of link text, whitespace before the `[` already parts the words.
     let at = if self.link.open && self.link.bracket_emitted && start == self.link.bracket_pos + 1 {
@@ -434,6 +432,7 @@ impl ConvertState {
       && self.replace_code_span_content(start..start, " ")
     {
       self.shift_offsets_at_or_after(start);
+      self.open_markers[outermost].follows_separator = true;
     }
     true
   }
@@ -1117,6 +1116,7 @@ impl ConvertState {
     output_start: usize,
     keeps_markers: bool,
   ) {
+    let separator_end = std::mem::replace(&mut self.pending_space_end, usize::MAX);
     if let Some(id) = marker_tag
       && let Some(inline_marker_type) = Self::inline_marker_type(id)
       && let Some(emitted) = output
@@ -1130,6 +1130,7 @@ impl ConvertState {
         content_start: self.buffer.len(),
         kind: inline_marker_type,
         starts_at_hard_break: self.hard_break_end == marker_start,
+        follows_separator: separator_end == marker_start,
       });
     } else if !keeps_markers
       && !self.open_markers.is_empty()
@@ -1317,7 +1318,12 @@ impl ConvertState {
         .all(|&b| is_whitespace(b))
     {
       // `output_start` keeps the opener's own separator, not the spacing `write_output` adds.
-      self.truncate_buffer(open_marker.output_start);
+      let mut end = open_marker.output_start;
+      if open_marker.follows_separator && end > 0 && self.buffer.as_bytes()[end - 1] == b' ' {
+        end -= 1;
+        self.pending_inline_whitespace = true;
+      }
+      self.truncate_buffer(end);
       if open_marker.starts_at_hard_break {
         self.hard_break_end = open_marker.output_start;
       }
@@ -2795,7 +2801,7 @@ impl ConvertState {
       };
 
     let mut add_space = self.should_add_spacing_before_text(last_char, text);
-    if (add_space || text.starts_with(' ')) && self.hoist_opener_space(text) {
+    if (add_space || text.starts_with(' ')) && self.hoist_opener_space() {
       text = text.trim_start_matches(' ');
       if text.is_empty() {
         self.return_escape_scratch(escape_scratch);
@@ -3045,7 +3051,7 @@ impl ConvertState {
     if !self.open_markers.is_empty()
       && (text.starts_with(' ')
         || (!owns_leading_space && self.should_add_spacing_before_text(last_char, text)))
-      && self.hoist_opener_space(text)
+      && self.hoist_opener_space()
     {
       text = text.trim_start_matches(' ');
       if text.is_empty() {
@@ -4950,6 +4956,7 @@ impl ConvertState {
     // A separator trimmed from inside a previously closed inline element must
     // sit outside its Markdown delimiter. Resolve it only when later visible
     // inline output begins; block boundaries and line breaks subsume it.
+    self.pending_space_end = usize::MAX;
     if self.pending_inline_whitespace && is_enter {
       let first_output = output_str.as_bytes().first().copied();
       if !is_inline
@@ -4962,6 +4969,7 @@ impl ConvertState {
         let last = self.last_output_byte();
         if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
           self.push_code_span_content(" ", true);
+          self.pending_space_end = self.buffer.len();
         }
         self.pending_inline_whitespace = false;
       }

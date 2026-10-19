@@ -30,6 +30,15 @@ fn is_head_content_tag(tag_id: Option<u8>) -> bool {
   )
 }
 
+/// Elements written as emphasis delimiters, which need the word boundary
+/// outside them.
+fn is_emphasis_tag(tag_id: Option<u8>) -> bool {
+  matches!(
+    tag_id,
+    Some(TAG_STRONG | TAG_B | TAG_DFN | TAG_EM | TAG_I | TAG_DEL | TAG_S | TAG_STRIKE | TAG_CITE)
+  )
+}
+
 /// Start tags that cannot appear inside a `<p>` and therefore imply its end
 /// (HTML §13.1.2.4 optional tags + the "in body" insertion mode, where these
 /// tags first close an open `<p>` in button scope). Block containers, headings,
@@ -508,19 +517,22 @@ impl ConvertState {
     self.text_buffer_batchable_len = 0;
     self.text_buffer_has_inline_gfm_hazard = false;
 
-    let (mut excludes_text_nodes, child_text_node_index) = match self.stack.last() {
+    let (mut excludes_text_nodes, child_text_node_index, parent_tag_id) = match self.stack.last() {
       Some(parent) => (
         parent.excludes_text_nodes || (!self.overflow_included && parent.excluded_from_markdown),
         parent.child_text_node_index,
+        parent.tag_id,
       ),
-      None => (false, 0),
+      None => (false, 0, None),
     };
 
     if self.has_isolate_main && self.isolate_main_excludes() {
       excludes_text_nodes = true;
     }
 
-    if !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty() {
+    let is_leading_blank =
+      !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty();
+    if is_leading_blank && (!self.is_markdown() || !is_emphasis_tag(parent_tag_id)) {
       return;
     }
     if text_buffer.is_empty() {
@@ -549,6 +561,10 @@ impl ConvertState {
         text.drain(..start);
       }
     }
+    if is_leading_blank && text.is_empty() {
+      *text_buffer = text;
+      return;
+    }
 
     // Only raw HTML leaves decoded references unprotected.
     if self.has_encoded_html_entity {
@@ -567,7 +583,11 @@ impl ConvertState {
     text.clear();
     *text_buffer = text;
 
-    self.advance_text_node_counters(first_block_parent_index);
+    // The output moves a leading blank in front of the delimiter; the counters
+    // stay as if it were dropped, so it is no content of the element.
+    if !is_leading_blank {
+      self.advance_text_node_counters(first_block_parent_index);
+    }
   }
 
   /// Emit buffered text. Internal size flushes split one source text node into
@@ -620,13 +640,16 @@ impl ConvertState {
     let child_text_node_index = self.stack.last().map_or(0, |n| n.child_text_node_index);
 
     // Whitespace-only text before an element's first child is indentation and
-    // can be dropped. At the fragment root it can instead separate adjacent
-    // inline siblings, so emit it and let the output layer trim or absorb it at
+    // can be dropped, unless it parts words in Markdown emphasis after earlier
+    // text. At the fragment root it can instead separate adjacent inline
+    // siblings, so emit it and let the output layer trim or absorb it at
     // leading/trailing and block boundaries.
-    if !in_pre_tag
+    let is_leading_blank = !in_pre_tag
       && !contains_non_whitespace
       && child_text_node_index == 0
-      && !self.stack.is_empty()
+      && !self.stack.is_empty();
+    if is_leading_blank
+      && (!self.is_markdown() || !is_emphasis_tag(self.stack.last().and_then(|n| n.tag_id)))
     {
       return;
     }
@@ -664,6 +687,10 @@ impl ConvertState {
       if start > 0 {
         text.drain(..start);
       }
+    }
+    if is_leading_blank && text.is_empty() {
+      *text_buffer = text;
+      return;
     }
 
     if self.has_encoded_html_entity {
@@ -728,7 +755,9 @@ impl ConvertState {
     text.clear();
     *text_buffer = text;
 
-    if completes_text_node {
+    // The output moves a leading blank in front of the delimiter; the counters
+    // stay as if it were dropped, so it is no content of the element.
+    if completes_text_node && !is_leading_blank {
       self.advance_text_node_counters(first_block_parent_index);
     }
   }

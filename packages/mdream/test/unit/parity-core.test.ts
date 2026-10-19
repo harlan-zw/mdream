@@ -112,6 +112,16 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<p><kbd>a<strong> x</strong></kbd></p>',
     '<p><a href="/x"><strong><svg></svg> now</strong></a></p>',
   ],
+  'blank opening emphasis': [
+    '<p>a<strong> <span>b</span></strong></p>',
+    '<p>a<strong> </strong>b</p>',
+    '<p>a<em> <span>b</span></em></p>',
+    '<p>a<strong> <em> </em></strong>b</p>',
+    '<p>a<strong> </strong><em></em> b</p>',
+    '<p><a href="/x"><span>x</span><strong> </strong><em></em></a></p>',
+    '<figure><figcaption>a<strong> </strong>b</figcaption></figure>',
+    '<p><code>a<strong> <span>b</span></strong></code></p>',
+  ],
 }
 
 describe('javaScript engine matches Rust output', () => {
