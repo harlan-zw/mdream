@@ -1169,14 +1169,16 @@ impl ConvertState {
 
   /// Blocks and figcaptions rewrite the output a pair points at, and a link
   /// close can unwrap its text. A closer still waiting there is followed by a
-  /// line break or by `]`, which needs nothing.
+  /// line break or by `]`, which needs nothing. A decided pair points at
+  /// nothing and stays: a raw opener is already written, so its closer must
+  /// still turn raw.
   #[inline]
   pub(crate) fn release_flank_pairs(&mut self, tag_id: Option<u8>, is_inline: bool, is_exit: bool) {
     if self.flank_pairs.is_empty() {
       return;
     }
     if (tag_id.is_some() && !is_inline) || tag_id == Some(TAG_FIGCAPTION) {
-      self.flank_pairs.clear();
+      self.flank_pairs.retain(|pair| pair.offset == usize::MAX);
     } else if is_exit && tag_id == Some(TAG_A) {
       self
         .flank_pairs

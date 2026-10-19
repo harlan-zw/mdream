@@ -27,6 +27,13 @@ const cases: [string, string][] = [
   ['<p><a href="/y">a<strong>b!</strong></a>c</p>', '[a**b!**](/y)c'],
   // A strikethrough opener is not followed by a separator.
   ['<p><del><a href="/x">b</a></del></p>', '~~[b](/x)~~'],
+  // A block inside a decided pair leaves its closer to be written as decided.
+  ['<div>a<strong><a href="/x">b</a><div>c</div></strong>d</div><p>next</p>', 'a<strong>[b](/x) c</strong>d\n\nnext'],
+  ['<div>x<em>!<p>c</p></em>d</div><p>next</p>', 'x<em>! c</em>d\n\nnext'],
+  ['<ul><li>a<strong><code>b</code><ul><li>c</li></ul></strong>d</li></ul><p>next</p>', '- a<strong>`b`  - c</strong>d\n\nnext'],
+  ['<div>a<strong>!b<hr></strong>d</div><p>next</p>', 'a<strong>!b ---</strong>d\n\nnext'],
+  ['<div>a<strong>!b<figure><figcaption>c</figcaption></figure></strong>d</div><p>next</p>', 'a<strong>!b*c*</strong>d\n\nnext'],
+  ['<div>a<strong>b<div>c!</div></strong>d</div><p>next</p>', 'a**b c!**&#100;\n\nnext'],
 ]
 
 function toStream(chunks: string[]): ReadableStream<string> {

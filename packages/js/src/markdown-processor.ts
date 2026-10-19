@@ -2493,12 +2493,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   /**
    * Blocks and figcaptions rewrite the fragments a pair points at, and a link
    * close can unwrap its text. A closer still waiting there is followed by a
-   * line break or by `]`, which needs nothing.
+   * line break or by `]`, which needs nothing. A decided pair points at
+   * nothing and stays: a raw opener is already written, so its closer must
+   * still turn raw.
    */
   function releaseFlankPairs(element: ElementNode, eventType: number): void {
     const tagId = element.tagId!
     if ((tagId !== -1 && element.tagHandler?.isInline !== true) || tagId === TAG_FIGCAPTION) {
-      clearFlankPairs()
+      for (let index = flankElements.length - 1; index >= 0; index--) {
+        if (flankFragments[index] !== -1)
+          dropFlankPair(index)
+      }
     }
     else if (tagId === TAG_A && eventType === NodeEventExit) {
       for (let index = flankElements.length - 1; index >= 0; index--) {

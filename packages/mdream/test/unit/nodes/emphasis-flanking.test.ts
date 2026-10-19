@@ -23,6 +23,11 @@ const cases: [string, string][] = [
   ['<ul><li>a<em><a href="/x">b</a></em>c</li></ul>', '- a<em>[b](/x)</em>c'],
   ['<p>a <strong><a href="/x">b</a></strong> c</p>', 'a **[b](/x)** c'],
   ['<p><a href="/y">a<strong>b!</strong></a>c</p>', '[a**b!**](/y)c'],
+  // A block inside a decided pair leaves its closer to be written as decided.
+  ['<div>a<strong><a href="/x">b</a><div>c</div></strong>d</div><p>next</p>', 'a<strong>[b](/x) c</strong>d\n\nnext'],
+  ['<ul><li>a<strong><code>b</code><ul><li>c</li></ul></strong>d</li></ul><p>next</p>', '- a<strong>`b`  - c</strong>d\n\nnext'],
+  ['<div>a<strong>!b<figure><figcaption>c</figcaption></figure></strong>d</div><p>next</p>', 'a<strong>!b*c*</strong>d\n\nnext'],
+  ['<div>a<strong>b<div>c!</div></strong>d</div><p>next</p>', 'a**b c!**&#100;\n\nnext'],
 ]
 
 async function streamConvert(engine: TestEngine, html: string, chunkSize: number): Promise<string> {

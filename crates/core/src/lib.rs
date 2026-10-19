@@ -268,6 +268,8 @@ mod drain_equiv {
     // An emphasis pair rewritten as raw HTML once its closer's next byte is known.
     r#"<p>long lead text a<strong>b <em><a href="/x">c</a></em></strong>d and more</p>"#,
     r#"<blockquote><p>x<br>y<strong><a href="/x">b</a></strong>c</p></blockquote>"#,
+    // A raw pair whose closer follows a block inside it.
+    r#"<div>long lead a<strong><a href="/x">b</a><div>c</div></strong>d</div><p>next</p>"#,
     // Rewrite-after-yield constructs.
     r#"<p>Visit <a href="https://x.io">https://x.io</a> today.</p>"#,
     r##"<h2><a href="#section">Section</a></h2><p>body</p>"##,
