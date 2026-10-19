@@ -469,6 +469,124 @@ fn blank_opening_emphasis_keeps_the_word_separator() {
 }
 
 #[test]
+fn blank_behind_an_element_that_writes_nothing_keeps_the_word_separator() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    (
+      r#"<p>Click<strong><span class="w"> <a href="/x">here</a></span></strong> now</p>"#,
+      "Click **[here](/x)** now",
+    ),
+    (
+      "<p>a<strong><span> <span>b</span></span></strong></p>",
+      "a **b**",
+    ),
+    ("<p>a<strong><span> </span></strong>b</p>", "a b"),
+    ("<p>a<strong><span> </span>b</strong></p>", "a **b**"),
+    (
+      "<p>a<em><span> <strong>b</strong></span></em></p>",
+      "a ***b***",
+    ),
+    (
+      "<p>a<strong><font> <span>b</span></font></strong></p>",
+      "a **b**",
+    ),
+    (
+      "<p>a<strong><span>\n</span><span>b</span></strong></p>",
+      "a **b**",
+    ),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn blank_that_follows_no_opener_writes_nothing() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    // A nested pair of the same kind writes no delimiter of its own.
+    ("<p><i>x<i> <svg></svg></i></i></p>", "*x*"),
+    ("<p>a<b>x<b> <svg></svg></b></b>z</p>", "a**x**z"),
+    ("<p><i>a<i> <svg></svg> x</i></i></p>", "*a x*"),
+    (
+      "<p>x<b>y<b> <strong></strong><br>z</b></b></p>",
+      "x**y  \nz**",
+    ),
+    // Code keeps its content as written, and the blank is none of it.
+    ("<p><code>a<del> </del></code>z</p>", "`a `z"),
+    (
+      "<p><code>a<strong> <svg></svg> b</strong></code></p>",
+      "`a** b**`",
+    ),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+  let no_strong_delimiters = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "strong".to_string(),
+        TagOverrideConfig {
+          enter: Some(String::new()),
+          exit: Some(String::new()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<p>a<strong> <svg></svg> b</strong></p>",
+    "a<strong> <svg></svg> b</strong>",
+  ] {
+    assert_every_chunking(html, &no_strong_delimiters, "a b");
+  }
+  let clean = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..Default::default()
+  };
+  assert_every_chunking(
+    r##"<p>a<b>x<b> <a href="#"></a></b></b></p>"##,
+    &clean,
+    "a**x**",
+  );
+  assert_every_chunking(
+    r##"<p><i>x<i> <a href="#"></a></i></i>z</p>"##,
+    &clean,
+    "*x*z",
+  );
+}
+
+#[test]
+fn quote_around_a_moved_separator_is_dropped_when_empty() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p>a<q><em> </em></q>b</p>", "a b"),
+    ("<p>a<strong><q><em> </em></q></strong>b</p>", "a b"),
+    ("<p>a<strong><q><em> </em></q>c</strong>b</p>", "a **c**b"),
+    (
+      "<p>a<strong><q><em> </em></q><em>c</em></strong>b</p>",
+      "a ***c***b",
+    ),
+    (
+      "<p>a<em><q><strong> <svg></svg></strong></q></em> b</p>",
+      "a b",
+    ),
+    ("<p><q><cite>&#32;</cite></q></p>", ""),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+  // Text output writes no delimiters, so the separator stays where it was written.
+  assert_eq!(
+    text(r##"<p>a <q><span>y </span><q><a href="#"></a></q></q>z</p>"##),
+    "a \"y \"z"
+  );
+  assert_eq!(
+    text(r##"<p><q><i>y </i><q><a href="#"></a></q></q></p>"##),
+    "\"y \""
+  );
+}
+
+#[test]
 fn code_like_content_is_left_as_written() {
   assert_eq!(md("<p><kbd>a<strong> x</strong></kbd></p>"), "`a** x**`");
   assert_eq!(md("<p><samp>a<em> x</em></samp></p>"), "`a* x*`");

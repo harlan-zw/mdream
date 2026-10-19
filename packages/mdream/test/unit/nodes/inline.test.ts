@@ -327,4 +327,48 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
       }
     }
   })
+
+  it('keeps a blank only to part an opener from the word before it', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const noStrongDelimiters = { plugins: { tagOverrides: { strong: { enter: '', exit: '' } } } }
+    const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]?][] = [
+      // Elements that write nothing sit between the opener and the blank.
+      ['<p>Click<strong><span class="w"> <a href="/x">here</a></span></strong> now</p>', 'Click **[here](/x)** now'],
+      ['<p>a<strong><span> <span>b</span></span></strong></p>', 'a **b**'],
+      ['<p>a<strong><span> </span></strong>b</p>', 'a b'],
+      ['<p>a<strong><span> </span>b</strong></p>', 'a **b**'],
+      ['<p>a<em><span> <strong>b</strong></span></em></p>', 'a ***b***'],
+      ['<p>a<strong><font> <span>b</span></font></strong></p>', 'a **b**'],
+      ['<p>a<strong><span>\n</span><span>b</span></strong></p>', 'a **b**'],
+      // An emptied quote around the moved separator is dropped with it.
+      ['<p>a<q><em> </em></q>b</p>', 'a b'],
+      ['<p>a<strong><q><em> </em></q></strong>b</p>', 'a b'],
+      ['<p>a<strong><q><em> </em></q>c</strong>b</p>', 'a **c**b'],
+      ['<p>a<strong><q><em> </em></q><em>c</em></strong>b</p>', 'a ***c***b'],
+      ['<p>a<em><q><strong> <svg></svg></strong></q></em> b</p>', 'a b'],
+      ['<p><q><cite>&#32;</cite></q></p>', ''],
+      ['<p>a <q><span>y </span><q><a href="#"></a></q></q>z</p>', 'a "y "z', { format: 'text' }],
+      // Anywhere else the blank writes nothing.
+      ['<p><i>x<i> <svg></svg></i></i></p>', '*x*'],
+      ['<p>a<b>x<b> <svg></svg></b></b>z</p>', 'a**x**z'],
+      ['<p><i>a<i> <svg></svg> x</i></i></p>', '*a x*'],
+      ['<p>x<b>y<b> <strong></strong><br>z</b></b></p>', 'x**y  \nz**'],
+      ['<p><code>a<del> </del></code>z</p>', '`a `z'],
+      ['<p><code>a<strong> <svg></svg> b</strong></code></p>', '`a** b**`'],
+      ['<p>a<strong> <svg></svg> b</strong></p>', 'a b', noStrongDelimiters],
+      ['a<strong> <svg></svg> b</strong>', 'a b', noStrongDelimiters],
+      ['<p>a<b>x<b> <a href="#"></a></b></b></p>', 'a**x**', { clean: true }],
+      ['<p><i>x<i> <a href="#"></a></i></i>z</p>', '*x*z', { clean: true }],
+    ]
+    for (const [html, expected, options] of cases) {
+      expect(htmlToMarkdown(html, { ...options, engine }), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { ...options, engine }))
+        expect(actual.trim(), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+  })
 })

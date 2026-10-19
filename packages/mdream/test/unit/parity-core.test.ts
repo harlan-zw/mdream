@@ -121,6 +121,17 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<p><a href="/x"><span>x</span><strong> </strong><em></em></a></p>',
     '<figure><figcaption>a<strong> </strong>b</figcaption></figure>',
     '<p><code>a<strong> <span>b</span></strong></code></p>',
+    '<p>Click<strong><span class="w"> <a href="/x">here</a></span></strong> now</p>',
+    '<p>a<strong><span> </span></strong>b</p>',
+    '<p>a<q><em> </em></q>b</p>',
+    '<p>a<strong><q><em> </em></q>c</strong>b</p>',
+    '<p>a<strong><q><em> </em></q><em>c</em></strong>b</p>',
+    '<p><q><cite>&#32;</cite></q></p>',
+    '<p>a <q><span>y </span><q><a href="#"></a></q></q>z</p>',
+    '<p><i>a<i> <svg></svg> x</i></i></p>',
+    '<p>x<b>y<b> <strong></strong><br>z</b></b></p>',
+    '<p><code>a<del> </del></code>z</p>',
+    '<p><code>a<strong> <svg></svg> b</strong></code></p>',
   ],
 }
 

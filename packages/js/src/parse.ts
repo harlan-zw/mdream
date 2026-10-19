@@ -124,6 +124,18 @@ function shouldProtectDecodedEntityReferences(state: ParseState): boolean {
     && !isInsideRawHtmlBlock(depthMap)
 }
 
+// An element that writes nothing, like a `<span>`, can sit between the
+// delimiter and the blank, so the inline run is checked up to its block.
+function isInsideEmphasis(node: ElementNode | null | undefined): boolean {
+  for (; node; node = node.parent) {
+    if (EMPHASIS_TAGS.has(node.tagId ?? -1))
+      return true
+    if (!(node.tagHandler?.isInline ?? node.tagId === -1))
+      return false
+  }
+  return false
+}
+
 const SCRIPT_DATA = 0
 const SCRIPT_DATA_ESCAPED = 1
 const SCRIPT_DATA_ESCAPED_DASH = 2
@@ -1324,7 +1336,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   // Whitespace-only text before an element's first child is indentation, but
   // in Markdown emphasis after earlier text it is the only word separator.
   const isLeadingBlank = !inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex
-  if (isLeadingBlank && (state.plainText || !EMPHASIS_TAGS.has(state.currentNode.tagId ?? -1))) {
+  if (isLeadingBlank && (state.plainText || !isInsideEmphasis(state.currentNode))) {
     return
   }
 
@@ -1364,9 +1376,8 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
         depth: state.depth,
         containsWhitespace,
         excludedFromMarkdown: excludesTextNodes,
+        leadingBlank: true,
       }
-      if (inlineAtRoot)
-        blank.trimsAtLineStart = true
       handleEvent({ type: NodeEventEnter, node: blank })
     }
     return

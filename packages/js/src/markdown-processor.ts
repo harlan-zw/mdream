@@ -1633,10 +1633,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   /**
    * A space opening emphasis content stops its delimiter from opening
    * (CommonMark left-flanking rule), as the space after a dropped `<svg>` does.
-   * Move it in front of the opener run, merged with any whitespace there.
-   * Returns false when no text is left to write.
+   * When the output ends with a run of such openers, the space goes in front
+   * of the run, merged with any whitespace there, and this returns true so the
+   * caller drops it.
    */
-  function hoistOpenerSpace(textNode: TextNode): boolean {
+  function hoistOpenerSpace(): boolean {
     const buffer = state.buffer
     const depthMap = state.depthMap
     let index = openMarkerCount - 1
@@ -1644,17 +1645,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // Code-like spans keep their content as written.
     if (fragment !== buffer.length - 1 || (openMarkers[index]! & MARKER_TYPE_MASK) > 4
       || depthMap[TAG_CODE] || depthMap[TAG_PRE] || depthMap[TAG_KBD] || depthMap[TAG_SAMP] || depthMap[TAG_VAR]) {
-      return true
+      return false
     }
     while (index > 0 && (openMarkers[index - 1]! & MARKER_TYPE_MASK) <= 4 && openMarkers[index - 1]! >> 3 === fragment - 1)
       fragment = openMarkers[--index]! >> 3
-    let start = 1
-    while (textNode.value.charCodeAt(start) === 32)
-      start++
-    textNode.value = textNode.value.slice(start)
     // A space moved in front of the run earlier already parts the words.
     if (buffer[fragment]!.charCodeAt(0) === 32)
-      return textNode.value !== ''
+      return true
     let previous = fragment
     let before = -1
     while (before === -1 && --previous >= 0) {
@@ -1670,7 +1667,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.outputPositions?.replace(fragment, fragment + 1, [opener], offset => offset > 0 ? offset + 1 : offset)
       buffer[fragment] = opener
     }
-    return textNode.value !== ''
+    return true
   }
 
   function processTextNode(textNode: TextNode, lastNode: ElementNode | TextNode | undefined, lastChar: string): void {
@@ -1706,8 +1703,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (!ownsCaptionSpace && shouldAddSpacingBeforeText(lastChar, lastNode, textNode))
         textNode.value = ` ${textNode.value}`
 
-      if (openMarkerCount && textNode.value.charCodeAt(0) === 32 && !hoistOpenerSpace(textNode))
-        return
+      if (openMarkerCount && textNode.value.charCodeAt(0) === 32 && hoistOpenerSpace()) {
+        let start = 1
+        while (textNode.value.charCodeAt(start) === 32)
+          start++
+        textNode.value = textNode.value.slice(start)
+        if (!textNode.value)
+          return
+      }
 
       if ((state.depthMap[TAG_PRE] || 0) > 0 && (state.depthMap[TAG_LI] || 0) > 0) {
         const indent = state.listIndent
@@ -1792,6 +1795,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       : node.parent?.excludedFromMarkdown
     if (inTemplate)
       return
+
+    // A blank kept at the start of an element only parts the emphasis opener
+    // run that ends the output from the word before it. Anywhere else it is
+    // indentation, dropped before it can count as output. A plugin that
+    // removed it leaves nothing to move, and one that made it visible text
+    // gets that text written.
+    const blank = node.type === TEXT_NODE && (node as TextNode).leadingBlank ? (node as TextNode).value : undefined
+    if (blank !== undefined && !hasNonWhitespace(blank)) {
+      if (blank && openMarkerCount && !node.excludedFromMarkdown && !state.pendingInlineWhitespace && !captionNeedsPreparation())
+        hoistOpenerSpace()
+      return
+    }
 
     // A plugin can skip the first cell's enter while accepting its contents
     // or exit. Those events still need the row-owned opener. Fully excluded
@@ -2273,7 +2288,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.pendingInlineWhitespace = false
         }
         else if (firstOutput) {
-          if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput)) {
+          // An empty opener run ending the output takes the separator in front.
+          if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput)
+            && !(openMarkerCount && hoistOpenerSpace())) {
             state.buffer.push(' ')
             state.lastContentCache = ' '
             lastChar = ' '

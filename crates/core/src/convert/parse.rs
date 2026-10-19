@@ -478,6 +478,17 @@ impl ConvertState {
     }
   }
 
+  /// An element that writes nothing, like a `<span>`, can sit between the
+  /// delimiter and a blank, so the inline run is checked up to its block.
+  fn is_inside_emphasis(&self) -> bool {
+    self
+      .stack
+      .iter()
+      .rev()
+      .take_while(|node| node.is_inline)
+      .any(|node| is_emphasis_tag(node.tag_id))
+  }
+
   /// Depth and walk index for an emitted text node, plus its hazard flag.
   #[inline(always)]
   fn begin_text_emit(&mut self, text: &str, has_inline_gfm_hazard: bool) -> (usize, usize) {
@@ -517,13 +528,12 @@ impl ConvertState {
     self.text_buffer_batchable_len = 0;
     self.text_buffer_has_inline_gfm_hazard = false;
 
-    let (mut excludes_text_nodes, child_text_node_index, parent_tag_id) = match self.stack.last() {
+    let (mut excludes_text_nodes, child_text_node_index) = match self.stack.last() {
       Some(parent) => (
         parent.excludes_text_nodes || (!self.overflow_included && parent.excluded_from_markdown),
         parent.child_text_node_index,
-        parent.tag_id,
       ),
-      None => (false, 0, None),
+      None => (false, 0),
     };
 
     if self.has_isolate_main && self.isolate_main_excludes() {
@@ -532,7 +542,7 @@ impl ConvertState {
 
     let is_leading_blank =
       !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty();
-    if is_leading_blank && (!self.is_markdown() || !is_emphasis_tag(parent_tag_id)) {
+    if is_leading_blank && (!self.is_markdown() || !self.is_inside_emphasis()) {
       return;
     }
     if text_buffer.is_empty() {
@@ -575,7 +585,11 @@ impl ConvertState {
       self.has_encoded_html_entity = false;
     }
 
-    if !excludes_text_nodes {
+    if is_leading_blank {
+      if !excludes_text_nodes {
+        self.place_leading_blank();
+      }
+    } else if !excludes_text_nodes {
       let (depth, index) = self.begin_text_emit(&text, has_inline_gfm_hazard);
       self.emit_plain_text_inline(&text, contains_whitespace, depth, index);
     }
@@ -648,9 +662,7 @@ impl ConvertState {
       && !contains_non_whitespace
       && child_text_node_index == 0
       && !self.stack.is_empty();
-    if is_leading_blank
-      && (!self.is_markdown() || !is_emphasis_tag(self.stack.last().and_then(|n| n.tag_id)))
-    {
+    if is_leading_blank && (!self.is_markdown() || !self.is_inside_emphasis()) {
       return;
     }
     if text_buffer.is_empty() {
@@ -738,7 +750,11 @@ impl ConvertState {
       }
     }
 
-    if !excludes_text_nodes {
+    if is_leading_blank {
+      if !excludes_text_nodes {
+        self.place_leading_blank();
+      }
+    } else if !excludes_text_nodes {
       let (depth, index) = self.begin_text_emit(&text, has_inline_gfm_hazard);
       // Fast-context nodes take `process_plain_text_node`; this is the rare rest.
       self.emit_text_with_generated_markdown(

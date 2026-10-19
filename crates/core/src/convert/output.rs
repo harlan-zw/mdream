@@ -433,8 +433,31 @@ impl ConvertState {
     {
       self.shift_offsets_at_or_after(start);
       self.open_markers[outermost].follows_separator = true;
+      // The space is content of an enclosing `<q>` that starts with the run,
+      // so that pair still reads as empty once the run drops with it.
+      if let Some(enclosing) = outermost
+        .checked_sub(1)
+        .map(|index| &mut self.open_markers[index])
+        && enclosing.content_start == start + 1
+      {
+        enclosing.content_start = start;
+      }
     }
     true
+  }
+
+  /// A blank the parser kept at the start of an element only parts the
+  /// emphasis opener run that ends the output from the word before it.
+  /// Anywhere else it is indentation and writes nothing.
+  pub(crate) fn place_leading_blank(&mut self) {
+    let caption_owns_space = self.caption_boundary != CaptionBoundary::None
+      || self
+        .caption_frames
+        .iter()
+        .any(|frame| !matches!(frame.state, CaptionState::Committed));
+    if !self.open_markers.is_empty() && !self.pending_inline_whitespace && !caption_owns_space {
+      self.hoist_opener_space();
+    }
   }
 
   fn max_backtick_run(value: &str) -> usize {
@@ -2899,7 +2922,11 @@ impl ConvertState {
       }
       let last = self.last_output_byte();
       let first = text.as_bytes()[0];
-      if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
+      // An empty opener run ending the output takes the separator in front.
+      if !matches!(last, Some(b' ' | b'\n' | b'\t') | None)
+        && !is_whitespace(first)
+        && (self.open_markers.is_empty() || !self.hoist_opener_space())
+      {
         self.push_code_span_content(" ", true);
       }
       self.pending_inline_whitespace = false;
@@ -4967,9 +4994,16 @@ impl ConvertState {
         self.pending_inline_whitespace = false;
       } else if let Some(first) = first_output {
         let last = self.last_output_byte();
-        if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
+        // An empty opener run ending the output takes the separator in front.
+        if !matches!(last, Some(b' ' | b'\n' | b'\t') | None)
+          && !is_whitespace(first)
+          && (self.open_markers.is_empty() || !self.hoist_opener_space())
+        {
           self.push_code_span_content(" ", true);
-          self.pending_space_end = self.buffer.len();
+          // Only Markdown drops an empty pair with the separator in front of it.
+          if self.is_markdown() {
+            self.pending_space_end = self.buffer.len();
+          }
         }
         self.pending_inline_whitespace = false;
       }

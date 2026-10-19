@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { clean } from '../../src/clean'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { filterPlugin } from '../../src/plugins/filter'
 
@@ -111,6 +112,40 @@ describe('inline whitespace', () => {
     expect(htmlToMarkdown('<ul><li>a<strong> <span>b</span></strong></li></ul>')).toBe('- a **b**')
     expect(htmlToMarkdown('<h2>a<strong> </strong>b</h2>')).toBe('## a b')
     expect(htmlToMarkdown('<p><a href="/x">a<strong> <span>b</span></strong></a></p>')).toBe('[a **b**](/x)')
+  })
+
+  it('keeps a blank only to part an opener from the word before it', async () => {
+    const cases: [string, string][] = [
+      // Elements that write nothing sit between the opener and the blank.
+      ['<p>Click<strong><span class="w"> <a href="/x">here</a></span></strong> now</p>', 'Click **[here](/x)** now'],
+      ['<p>a<strong><span> <span>b</span></span></strong></p>', 'a **b**'],
+      ['<p>a<strong><span> </span></strong>b</p>', 'a b'],
+      ['<p>a<em><span> <strong>b</strong></span></em></p>', 'a ***b***'],
+      // An emptied quote around the moved separator is dropped with it.
+      ['<p>a<q><em> </em></q>b</p>', 'a b'],
+      ['<p>a<strong><q><em> </em></q>c</strong>b</p>', 'a **c**b'],
+      ['<p>a<strong><q><em> </em></q><em>c</em></strong>b</p>', 'a ***c***b'],
+      // Anywhere else the blank writes nothing.
+      ['<p><i>x<i> <svg></svg></i></i></p>', '*x*'],
+      ['<p><i>a<i> <svg></svg> x</i></i></p>', '*a x*'],
+      ['<p>x<b>y<b> <strong></strong><br>z</b></b></p>', 'x**y  \nz**'],
+      ['<p><code>a<del> </del></code>z</p>', '`a `z'],
+      ['<p><code>a<strong> <svg></svg> b</strong></code></p>', '`a** b**`'],
+    ]
+    for (const [html, expected] of cases) {
+      expect(htmlToMarkdown(html)).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        expect(await streamConvert(chunks), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+    const noStrongDelimiters = { tagOverrides: { strong: { enter: '', exit: '' } } }
+    expect(htmlToMarkdown('<p>a<strong> <svg></svg> b</strong></p>', noStrongDelimiters)).toBe('a b')
+    expect(htmlToMarkdown('a<strong> <svg></svg> b</strong>', noStrongDelimiters)).toBe('a b')
+    expect(htmlToMarkdown('<p>a<b>x<b> <a href="#"></a></b></b></p>', { clean: clean() })).toBe('a**x**')
+    expect(htmlToMarkdown('<p><i>x<i> <a href="#"></a></i></i>z</p>', { clean: clean() })).toBe('*x*z')
   })
 
   it('leaves code-like content as written', () => {

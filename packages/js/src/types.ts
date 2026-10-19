@@ -218,6 +218,12 @@ export interface TextNode extends Node {
    * the output is at the start of a line.
    */
   trimsAtLineStart?: boolean
+  /**
+   * Whitespace that opens an inline element inside emphasis. While it stays
+   * whitespace it only parts the opener from the word before it, and is not
+   * written as text.
+   */
+  leadingBlank?: boolean
 }
 
 /**
