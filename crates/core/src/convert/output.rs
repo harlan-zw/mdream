@@ -3111,6 +3111,7 @@ impl ConvertState {
       self.flush_list_rule();
     }
 
+    let mut pending_space = false;
     if self.pending_inline_whitespace {
       if text.as_bytes().iter().all(|&b| is_whitespace(b)) {
         return;
@@ -3118,7 +3119,7 @@ impl ConvertState {
       let last = self.last_output_byte();
       let first = text.as_bytes()[0];
       if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
-        self.push_code_span_content(" ", true);
+        pending_space = self.push_code_span_content(" ", true) == 1;
       }
       self.pending_inline_whitespace = false;
     }
@@ -3281,7 +3282,7 @@ impl ConvertState {
     let owns_space =
       owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0);
     if self.wrap_width != 0 && self.can_wrap_here() {
-      self.push_text_wrapped(text, last_char, owns_leading_space);
+      self.push_text_wrapped(text, last_char, owns_leading_space, pending_space);
     } else if self.options.max_node_bytes == 0 {
       let add_space = !owns_space && self.should_add_spacing_before_text(last_char, text);
       self.push_text_uncapped(text, add_space);
@@ -4517,7 +4518,13 @@ impl ConvertState {
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
   /// A break only ever replaces an inter-word space, so words joined across
   /// inline boundaries (e.g. `foo**bar**`) stay intact.
-  fn push_text_wrapped(&mut self, text: &str, last_char: Option<u8>, owns_leading_space: bool) {
+  fn push_text_wrapped(
+    &mut self,
+    text: &str,
+    last_char: Option<u8>,
+    owns_leading_space: bool,
+    pending_space: bool,
+  ) {
     let width = self.wrap_width;
     // A leading/trailing space in `text` is significant inter-word separation
     // across an inline boundary (e.g. `… </a> now`); the non-wrap path keeps
@@ -4525,8 +4532,15 @@ impl ConvertState {
     // would otherwise discard it as an empty segment.
     let leading_space = text.starts_with(' ');
     let trailing_space = text.ends_with(' ');
+    // The space an inline close moved past its closer (`**b** c` from
+    // `<b>b </b>c`) was just written; like an inter-word space, it can break.
+    let pending_space = pending_space && !leading_space && self.buffer.ends_with(' ');
+    if pending_space {
+      self.truncate_buffer(self.buffer.len() - 1);
+    }
     // A caption owns the space before its first text, as on the unwrapped path.
-    let first_needs_space = leading_space
+    let first_needs_space = pending_space
+      || leading_space
       || (!owns_leading_space && self.should_add_spacing_before_text(last_char, text));
     let prefix = self.continuation_prefix();
     let prefix_len = prefix.chars().count();

@@ -198,6 +198,40 @@ fn heading_slugs_still_match_fragment_links() {
 }
 
 #[test]
+fn wraps_at_the_space_moved_past_a_closer() {
+  // `<b>b </b>c` writes its space after the closer; it breaks like any other
+  // space between words.
+  for (width, html, expected) in [
+    (6, "<p>1<strong>b </strong>x</p>", "1**b**\nx"),
+    (80, "<p>1<strong>b </strong>x</p>", "1**b** x"),
+    (
+      12,
+      "<p>a<strong>!bb </strong>&nbsp;c</p>",
+      "a<strong>!bb</strong>\n\u{a0}c",
+    ),
+    (
+      12,
+      "<blockquote><blockquote>1<strong><del>b </del></strong>x</blockquote></blockquote>",
+      "> > 1<strong>~~b~~</strong>\n> > x",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default().with_wrap_width(width);
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "html={html:?}"
+    );
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, chunk, &options),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+  }
+}
+
+#[test]
 fn only_markdown_drops_the_space_after_a_tilde() {
   // A strikethrough opener must touch its content; plain text has no
   // delimiters and keeps the separator.

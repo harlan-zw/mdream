@@ -98,6 +98,17 @@ describe('emphasis delimiters that cannot flank', () => {
     expect(htmlToMarkdown(html, { clean: clean() })).toBe(expected)
   })
 
+  // `<b>b </b>c` writes its space after the closer; it breaks like any other
+  // space between words.
+  it.each([
+    [6, '<p>1<strong>b </strong>x</p>', '1**b**\nx'],
+    [80, '<p>1<strong>b </strong>x</p>', '1**b** x'],
+    [12, '<p>a<strong>!bb </strong>&nbsp;c</p>', 'a<strong>!bb</strong>\n c'],
+    [12, '<blockquote><blockquote>1<strong><del>b </del></strong>x</blockquote></blockquote>', '> > 1<strong>~~b~~</strong>\n> > x'],
+  ] as [number, string, string][])('wraps at width %i the space after the closer in %s', (wrapWidth, html, expected) => {
+    expect(htmlToMarkdown(html, { wrapWidth })).toBe(expected)
+  })
+
   it('drops the space after a tilde only in Markdown', () => {
     // A strikethrough opener must touch its content; plain text has no
     // delimiters and keeps the separator.
