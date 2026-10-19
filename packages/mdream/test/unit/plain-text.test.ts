@@ -264,3 +264,28 @@ describe.each(engines)('inline text separators $name', (engineConfig) => {
     }
   })
 })
+
+describe.each(engines)('wrapped inline text separators $name', (engineConfig) => {
+  it.each([
+    ['<p>aaa<span> <span>b</span></span></p>', 'aaa\nb'],
+    ['<p>aaa<span> </span>b</p>', 'aaa\nb'],
+    ['<p>aaa<span> <span>bb cc</span></span></p>', 'aaa\nbb\ncc'],
+    ['<p>aa<span> <span>b</span></span></p>', 'aa\nb'],
+    ['<p>a<span> <span>b</span></span></p>', 'a b'],
+    ['<pre>aaa<span> <span>b</span></span></pre>', 'aaa b'],
+  ])('wraps recovered separators at every chunk width: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { engine, format: 'text' as const, wrapWidth: 3 }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      expect(await collect(streamHtmlToMarkdown(stream, options)), `width=${width}`).toBe(expected)
+    }
+  })
+})

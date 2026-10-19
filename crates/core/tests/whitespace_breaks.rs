@@ -835,3 +835,30 @@ fn text_inline_separators_survive_every_chunk_width() {
     }
   }
 }
+
+#[test]
+fn text_wraps_recovered_separators_at_every_chunk_width() {
+  for (html, expected) in [
+    ("<p>aaa<span> <span>b</span></span></p>", "aaa\nb"),
+    ("<p>aaa<span> </span>b</p>", "aaa\nb"),
+    ("<p>aaa<span> <span>bb cc</span></span></p>", "aaa\nbb\ncc"),
+    ("<p>aa<span> <span>b</span></span></p>", "aa\nb"),
+    ("<p>a<span> <span>b</span></span></p>", "a b"),
+    ("<pre>aaa<span> <span>b</span></span></pre>", "aaa b"),
+  ] {
+    let options = HtmlToMarkdownOptions::default().with_wrap_width(3);
+    assert_eq!(html_to_text(html, options.clone()), expected, "html={html}");
+    for width in 1..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new_with_format(
+        options.clone(),
+        mdream::types::OutputFormat::Text,
+      );
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output, expected, "html={html} width={width}");
+    }
+  }
+}
