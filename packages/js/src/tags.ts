@@ -227,7 +227,10 @@ function escapeTrailingHeadingHashes(buffer: string[], positions?: OutputPositio
 
   // Only a run opening the heading content or preceded by whitespace closes it.
   // Requiring a space also rejects the `## ` prefix entry of an empty heading.
-  const previous = buffer[index - 1]
+  let previousIndex = index - 1
+  while (previousIndex >= 0 && buffer[previousIndex] === '')
+    previousIndex--
+  const previous = buffer[previousIndex]
   const before = run > 0 ? entry[run - 1] : previous?.charAt(previous.length - 1)
   if (before !== ' ' && before !== '\t')
     return
