@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { clean } from '../../src/clean'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { filterPlugin } from '../../src/plugins/filter'
+import { tailwindPlugin } from '../../src/plugins/tailwind'
 
-async function streamConvert(chunks: string[]): Promise<string> {
+async function streamConvert(chunks: string[], options?: Parameters<typeof streamHtmlToMarkdown>[1]): Promise<string> {
   const stream = new ReadableStream<string>({
     start(controller) {
       for (const chunk of chunks)
@@ -12,7 +13,7 @@ async function streamConvert(chunks: string[]): Promise<string> {
     },
   })
   let output = ''
-  for await (const chunk of streamHtmlToMarkdown(stream))
+  for await (const chunk of streamHtmlToMarkdown(stream, options))
     output += chunk
   return output
 }
@@ -196,6 +197,38 @@ describe('inline whitespace', () => {
     expect(htmlToMarkdown('<blockquote><p>a<span> <span>b</span></span></p></blockquote>')).toBe('> a b')
     expect(htmlToMarkdown('<table><tr><th>h</th></tr><tr><td>a<span> <span>b</span></span></td></tr></table>')).toBe('| h |\n| --- |\n| a b |')
     expect(htmlToMarkdown('a<span> <span>b</span></span>')).toBe('a b')
+  })
+
+  it('writes an owed separator before the text it parts', async () => {
+    const tailwind = () => ({ plugins: [tailwindPlugin()] })
+    const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]][] = [
+      // A line break may not take its place and set the text at a line start.
+      ['<p>aaaa<span> <span>1. b</span></span></p>', 'aaaa 1.\nb', { wrapWidth: 6 }],
+      ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax 1.\nb', { wrapWidth: 6 }],
+      ['<p>aaaa<span> <span>- b</span></span></p>', 'aaaa -\nb', { wrapWidth: 6 }],
+      ['<p>aaaaaa<span> <span>b</span></span></p>', 'aaaaaa b', { wrapWidth: 6 }],
+      ['<ul><li>aaaa<span> <span>1. b</span></span></li></ul>', '- aaaa 1.\n  b', { wrapWidth: 8 }],
+      [
+        '<p><a href="https://example.com/docs/getting-started/installation/index.html">Read the docs</a><span> <span>1. Install the CLI</span></span></p>',
+        '[Read the docs](https://example.com/docs/getting-started/installation/index.html) 1.\nInstall the CLI',
+        { wrapWidth: 80 },
+      ],
+      // Delimiters a plugin generates around the text stay tight around it.
+      ['<p>Read<label> <span class="font-bold">new</span></label> now</p>', 'Read **new** now', tailwind()],
+      ['<p>Price<span>: </span><span class="font-bold">$5</span></p>', 'Price: **$5**', tailwind()],
+      ['<p>a<span> <span class="italic">b</span></span>c</p>', 'a *b*c', tailwind()],
+      ['<ol><li>-<span class="font-bold"> <span> </span>b</span> z</li></ol>', '1. \\- **b** z', tailwind()],
+      ['<p>aaaa<span> <span class="font-bold">bb cc</span></span></p>', 'aaaa **bb\ncc**', { ...tailwind(), wrapWidth: 8 }],
+    ]
+    for (const [html, expected, options] of cases) {
+      expect(htmlToMarkdown(html, options), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        expect(await streamConvert(chunks, options), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
   })
 
   it('leaves code-like content as written', () => {

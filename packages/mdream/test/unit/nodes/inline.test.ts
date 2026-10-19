@@ -413,4 +413,29 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
       }
     }
   })
+
+  it('writes an owed separator before the text it parts', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const tailwind = { plugins: { tailwind: true } }
+    const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]][] = [
+      ['<p>aaaa<span> <span>1. b</span></span></p>', 'aaaa 1.\nb', { wrapWidth: 6 }],
+      ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax 1.\nb', { wrapWidth: 6 }],
+      ['<p>aaaaaa<span> <span>b</span></span></p>', 'aaaaaa b', { wrapWidth: 6 }],
+      ['<ul><li>aaaa<span> <span>1. b</span></span></li></ul>', '- aaaa 1.\n  b', { wrapWidth: 8 }],
+      ['<p>Read<label> <span class="font-bold">new</span></label> now</p>', 'Read **new** now', tailwind],
+      ['<p>Price<span>: </span><span class="font-bold">$5</span></p>', 'Price: **$5**', tailwind],
+      ['<p>a<span> <span class="italic">b</span></span>c</p>', 'a *b*c', tailwind],
+      ['<p>aaaa<span> <span class="font-bold">bb cc</span></span></p>', 'aaaa **bb\ncc**', { ...tailwind, wrapWidth: 8 }],
+    ]
+    for (const [html, expected, options] of cases) {
+      expect(htmlToMarkdown(html, { ...options, engine }), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { ...options, engine }))
+        expect(actual.trim(), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+  })
 })

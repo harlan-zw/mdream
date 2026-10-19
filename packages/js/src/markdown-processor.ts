@@ -1709,11 +1709,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         captionBoundary = 0
       }
 
+      // The owed separator is written on its own, as the Rust engine writes
+      // it: inside the text it could take a line break that sets the text at
+      // a line start, or land inside a generated delimiter.
       if (state.pendingInlineWhitespace) {
         if (!textNode.value.trim())
           return
-        if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || ''))
-          textNode.value = ` ${textNode.value}`
+        if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || '')
+          && !(openMarkerCount && hoistOpenerSpace())) {
+          state.buffer.push(' ')
+          state.lastContentCache = ' '
+          lastChar = ' '
+        }
         state.pendingInlineWhitespace = false
       }
 
