@@ -89,6 +89,31 @@ describe('wrap width (issue #106)', () => {
       expect(line.startsWith('>   ')).toBe(true)
   })
 
+  it.each([
+    ['<p><span>aaaaa </span>bbbb</p>', 6, 'aaaaa\nbbbb'],
+    ['<p><em>aaaaaaaaaaa </em>b</p>', 12, '*aaaaaaaaaaa*\nb'],
+    ['<p><a href="/x">aaaaa </a>bbbb cc</p>', 12, '[aaaaa](/x)\nbbbb cc'],
+    ['<p><code>aaaaa </code>bbbb cc</p>', 6, '`aaaaa`\nbbbb\ncc'],
+    ['<ul><li><em>aaaaaaa </em>bbbb cc dddd</li></ul>', 12, '- *aaaaaaa*\n  bbbb cc\n  dddd'],
+    ['<blockquote><p><em>aaaaaaa </em>bbbb cc dddd</p></blockquote>', 12, '> *aaaaaaa*\n> bbbb cc dddd'],
+    ['<p><strong>aaaaa </strong>bbbb cc</p>', 80, '**aaaaa** bbbb cc'],
+  ] as const)('breaks at a separator trimmed from an inline element: %s', async (html, width, expected) => {
+    expect(wrap(html, width)).toBe(expected)
+    for (let size = 1; size <= html.length; size++) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += size)
+            controller.enqueue(html.slice(offset, offset + size))
+          controller.close()
+        },
+      })
+      let out = ''
+      for await (const chunk of streamHtmlToMarkdown(stream, { wrapWidth: width }))
+        out += chunk
+      expect(out, `chunk size ${size}`).toBe(expected)
+    }
+  })
+
   it('wraps identically across streaming chunks', async () => {
     const html = '<p>The quick brown fox jumps over the lazy dog and then keeps on running well past the edge of the field.</p>'
     const oneshot = wrap(html, 40)

@@ -54,6 +54,40 @@ describe('cross-engine streaming byte parity', () => {
   })
 })
 
+// The space trimmed from a closed inline element is the only break point here.
+const WRAP_SEPARATOR_CASES = [
+  ['<p><span>aaaaa </span>bbbb</p>', { wrapWidth: 6 }, 'aaaaa\nbbbb'],
+  ['<p><em>aaaaaaaaaaa </em>b</p>', { wrapWidth: 12 }, '*aaaaaaaaaaa*\nb'],
+  ['<p><a href="/x">aaaaa </a>bbbb cc</p>', { wrapWidth: 12 }, '[aaaaa](/x)\nbbbb cc'],
+  ['<ul><li><em>aaaaaaa </em>bbbb cc dddd</li></ul>', { wrapWidth: 12 }, '- *aaaaaaa*\n  bbbb cc\n  dddd'],
+  ['<blockquote><p><em>aaaaaaa </em>bbbb cc dddd</p></blockquote>', { wrapWidth: 12 }, '> *aaaaaaa*\n> bbbb cc dddd'],
+  ['<p><strong>aaaaa </strong>bbbb cc</p>', { wrapWidth: 80 }, '**aaaaa** bbbb cc'],
+  ['<p><em>aaaaaaaaaaa </em>b</p>', { wrapWidth: 12, format: 'text' }, 'aaaaaaaaaaa\nb'],
+  ['<p>wwww<a href="/c"><span>x</span> </a>yyyy end</p>', { wrapWidth: 12, format: 'text' }, 'wwwwx yyyy\nend'],
+] as const
+
+describe('cross-engine wrap at a trimmed inline separator', () => {
+  it.each(WRAP_SEPARATOR_CASES)('breaks there at every chunk width: %s %o', async (html, options, expected) => {
+    for (const { engine, name } of engines) {
+      expect(engine.htmlToMarkdown(html, options), `engine=${name}`).toBe(expected)
+
+      for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {
+        const htmlStream = new ReadableStream<string>({
+          start(controller) {
+            for (let offset = 0; offset < html.length; offset += chunkSize)
+              controller.enqueue(html.slice(offset, offset + chunkSize))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, options))
+          streamed += chunk
+        expect(streamed, `engine=${name} chunkSize=${chunkSize}`).toBe(expected)
+      }
+    }
+  })
+})
+
 describe.each(engines)('hTML to Markdown Streaming $name', (engineConfig) => {
   describe('basic Stream Functionality', () => {
     it('converts a valid HTML stream to markdown chunks', async () => {

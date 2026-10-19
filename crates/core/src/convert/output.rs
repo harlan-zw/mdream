@@ -2814,6 +2814,7 @@ impl ConvertState {
       self.flush_list_rule();
     }
 
+    let mut wrap_separator = false;
     if self.pending_inline_whitespace {
       if text.as_bytes().iter().all(|&b| is_whitespace(b)) {
         return;
@@ -2821,7 +2822,12 @@ impl ConvertState {
       let last = self.last_output_byte();
       let first = text.as_bytes()[0];
       if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
-        self.push_code_span_content(" ", true);
+        // Wrapped text writes the separator itself, so it can become the break.
+        if self.wrap_width != 0 && self.can_wrap_here() {
+          wrap_separator = true;
+        } else {
+          self.push_code_span_content(" ", true);
+        }
       }
       self.pending_inline_whitespace = false;
     }
@@ -2984,7 +2990,7 @@ impl ConvertState {
     let owns_space =
       owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0);
     if self.wrap_width != 0 && self.can_wrap_here() {
-      self.push_text_wrapped(text, last_char, owns_leading_space);
+      self.push_text_wrapped(text, last_char, owns_leading_space, wrap_separator);
     } else if self.options.max_node_bytes == 0 {
       let add_space = !owns_space && self.should_add_spacing_before_text(last_char, text);
       self.push_text_uncapped(text, add_space);
@@ -4214,14 +4220,22 @@ impl ConvertState {
   /// exceeds `self.wrap_width` characters. Words are never split, so a single
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
   /// A break only ever replaces an inter-word space, so words joined across
-  /// inline boundaries (e.g. `foo**bar**`) stay intact.
-  fn push_text_wrapped(&mut self, text: &str, last_char: Option<u8>, owns_leading_space: bool) {
+  /// inline boundaries (e.g. `foo**bar**`) stay intact. `separator` is a
+  /// pending space trimmed from a closed inline element, which wraps like a
+  /// leading space of `text`.
+  fn push_text_wrapped(
+    &mut self,
+    text: &str,
+    last_char: Option<u8>,
+    owns_leading_space: bool,
+    separator: bool,
+  ) {
     let width = self.wrap_width;
     // A leading/trailing space in `text` is significant inter-word separation
     // across an inline boundary (e.g. `… </a> now`); the non-wrap path keeps
     // it by pushing `text` verbatim, so preserve it here too. `split(' ')`
     // would otherwise discard it as an empty segment.
-    let leading_space = text.starts_with(' ');
+    let leading_space = separator || text.starts_with(' ');
     let trailing_space = text.ends_with(' ');
     // A caption owns the space before its first text, as on the unwrapped path.
     let first_needs_space = leading_space

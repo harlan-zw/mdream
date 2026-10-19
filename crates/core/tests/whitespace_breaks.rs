@@ -1,5 +1,7 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
-use mdream::types::{CleanConfig, HtmlToMarkdownOptions, PluginConfig, TagOverrideConfig};
+use mdream::types::{
+  CleanConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
+};
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
 fn md(html: &str) -> String {
@@ -273,6 +275,81 @@ fn wrapped_caption_text_owns_no_leading_space() {
   assert_eq!(md_wrapped("<figcaption><blockquote>x", 40), "> *x*");
   // Unwrapped output is the reference.
   assert_eq!(md("<figcaption><div>C</div></figcaption>"), "*C*");
+}
+
+// ── wrapWidth at a separator trimmed from an inline element ──
+
+fn assert_every_text_chunking(html: &str, options: &HtmlToMarkdownOptions, expected: &str) {
+  assert_eq!(html_to_text(html, options.clone()), expected, "html={html}");
+  for chunk in 1..=html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(options.clone(), OutputFormat::Text);
+    let mut out = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "html={html} chunk={chunk}");
+  }
+}
+
+#[test]
+fn wrap_breaks_at_a_separator_trimmed_from_an_inline_element() {
+  // The space `</span>` or `</em>` trims is the only break point, so a line
+  // that would pass the width breaks there.
+  let wrap = |width| HtmlToMarkdownOptions::default().with_wrap_width(width);
+  for (html, width, expected) in [
+    ("<p><span>aaaaa </span>bbbb</p>", 6, "aaaaa\nbbbb"),
+    ("<p><em>aaaaaaaaaaa </em>b</p>", 12, "*aaaaaaaaaaa*\nb"),
+    (
+      "<p><a href=\"/x\">aaaaa </a>bbbb cc</p>",
+      12,
+      "[aaaaa](/x)\nbbbb cc",
+    ),
+    ("<p><code>aaaaa </code>bbbb cc</p>", 6, "`aaaaa`\nbbbb\ncc"),
+    (
+      "<p><em>aaaaa </em><span>bbbb </span>cccc dd</p>",
+      6,
+      "*aaaaa*\nbbbb\ncccc\ndd",
+    ),
+    (
+      "<ul><li><em>aaaaaaa </em>bbbb cc dddd</li></ul>",
+      12,
+      "- *aaaaaaa*\n  bbbb cc\n  dddd",
+    ),
+    (
+      "<ol><li><strong>aaaaa </strong>bbbb cc</li></ol>",
+      6,
+      "1. **aaaaa**\n   bbbb\n   cc",
+    ),
+    (
+      "<blockquote><p><em>aaaaaaa </em>bbbb cc dddd</p></blockquote>",
+      12,
+      "> *aaaaaaa*\n> bbbb cc dddd",
+    ),
+    (
+      "<blockquote><ul><li><span>aaaaa </span>bbbb cc</li></ul></blockquote>",
+      6,
+      "> - aaaaa\n>   bbbb\n>   cc",
+    ),
+    (
+      "<p><strong>aaaaa </strong>bbbb cc</p>",
+      80,
+      "**aaaaa** bbbb cc",
+    ),
+  ] {
+    assert_every_chunking(html, &wrap(width), expected);
+  }
+  for (html, width, expected) in [
+    ("<p><span>aaaaa </span>bbbb</p>", 6, "aaaaa\nbbbb"),
+    ("<p><em>aaaaaaaaaaa </em>b</p>", 12, "aaaaaaaaaaa\nb"),
+    (
+      "<p>wwww<a href=\"/c\"><span>x</span> </a>yyyy end</p>",
+      12,
+      "wwwwx yyyy\nend",
+    ),
+  ] {
+    assert_every_text_chunking(html, &wrap(width), expected);
+  }
 }
 
 // ── tagOverrides spacing on a built-in inline tag ──
