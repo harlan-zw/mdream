@@ -6206,3 +6206,95 @@ fn override_whitespace_streaming_parity() {
     }
   }
 }
+
+#[test]
+fn emphasis_override_vertical_tabs() {
+  for (tag, marker) in [("em", "*"), ("cite", "*"), ("dfn", "**"), ("del", "~~")] {
+    for (html, override_tag, exit, expected) in [
+      (
+        format!("<{tag}>T&#11;</{tag}>X"),
+        tag,
+        marker,
+        format!("{marker}T\u{000b}{marker}X"),
+      ),
+      (
+        format!("<{tag}>T<span></span></{tag}>X"),
+        "span",
+        "\u{000b} ",
+        format!("{marker}T{marker}\u{000b} X"),
+      ),
+    ] {
+      let options = HtmlToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          tag_overrides: Some(vec![(
+            override_tag.to_string(),
+            TagOverrideConfig {
+              exit: Some(exit.to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      };
+      assert_eq!(html_to_markdown(&html, options.clone()), expected, "{html}");
+      for width in 1..=html.len() {
+        let mut processor = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for chunk in html.as_bytes().chunks(width) {
+          output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+        }
+        output.push_str(&processor.finish());
+        assert_eq!(output, expected, "{html}, width {width}");
+      }
+    }
+  }
+}
+
+#[test]
+fn caption_vertical_tabs_keep_the_existing_marker_placement() {
+  for suffix in ["&#11;", "&#11; "] {
+    let html = format!("<figure><img src=\"a.png\"><figcaption>T{suffix}</figcaption></figure>");
+    let expected = convert(&html);
+    assert!(expected.contains("*T\u{000b}*"), "{expected:?}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "width {width}");
+    }
+  }
+}
+
+#[test]
+fn emphasis_vertical_tabs_before_breaks_and_aliases() {
+  let alias = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![("ex".to_string(), TagOverrideConfig::alias("em"))]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, options, expected) in [
+    (
+      "<em>T&#11;<br></em>X",
+      HtmlToMarkdownOptions::default(),
+      "*T*\u{000b}  \nX",
+    ),
+    ("<ex>T&#11;</ex>X", alias, "*T*\u{000b}X"),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(options.clone());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{html}, width {width}");
+    }
+  }
+}

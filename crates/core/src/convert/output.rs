@@ -1182,6 +1182,7 @@ impl ConvertState {
       configured_new_lines,
       output.as_deref(),
       false,
+      false,
     );
 
     if link {
@@ -1324,6 +1325,7 @@ impl ConvertState {
       configured_new_lines,
       output.as_deref(),
       false,
+      matches!(tag_id.and_then(Self::inline_marker_type), Some(1..=4)),
     );
     self.settle_empty_text_pending(output_start, || false);
   }
@@ -1702,6 +1704,7 @@ impl ConvertState {
       configured_new_lines,
       output.as_deref(),
       enter_is_literal,
+      false,
     );
 
     if tag_id == Some(TAG_IMG)
@@ -2038,7 +2041,7 @@ impl ConvertState {
     configured_new_lines: u8,
     resolved_href: Option<Cow<'_, str>>,
   ) {
-    self.write_output(false, is_inline, configured_new_lines, None, false);
+    self.write_output(false, is_inline, configured_new_lines, None, false, false);
 
     // That trim misses a space before an empty element (`<a>A <span></span></a>`).
     let text_end = self.buffer.trim_end_matches(' ').len();
@@ -2465,7 +2468,14 @@ impl ConvertState {
     }
 
     let output_start = self.buffer.len();
-    self.write_output(false, is_inline, configured_new_lines, effective, false);
+    self.write_output(
+      false,
+      is_inline,
+      configured_new_lines,
+      effective,
+      has_override,
+      !has_override && matches!(tag_id.and_then(Self::inline_marker_type), Some(1..=4)),
+    );
     if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
       self.caption_boundary = CaptionBoundary::None;
     }
@@ -3731,7 +3741,7 @@ impl ConvertState {
     }
 
     let output_start = self.buffer.len();
-    self.write_output(true, true, 0, Some(fragment), false);
+    self.write_output(true, true, 0, Some(fragment), false, false);
     if self.buffer.len() == output_start + fragment.len() {
       self.streaming_break_runs.push(StreamingBreakRun {
         output_start,
@@ -3861,7 +3871,7 @@ impl ConvertState {
         if run.fragment == "\n" && self.buffer.ends_with("\n\n") {
           continue;
         }
-        self.write_output(true, true, 0, Some(&run.fragment), false);
+        self.write_output(true, true, 0, Some(&run.fragment), false, false);
       }
     }
   }
@@ -4837,6 +4847,7 @@ impl ConvertState {
     configured_new_lines: u8,
     output: Option<&str>,
     literal: bool,
+    emphasis_exit: bool,
   ) {
     let output_str = output.unwrap_or("");
     let is_line_boundary =
@@ -4873,20 +4884,23 @@ impl ConvertState {
       return;
     }
 
-    let closes_emphasis = !is_enter
-      && !literal
-      && matches!(output_str, "*" | "**" | "~~")
-      && matches!(
-        self
-          .stack
-          .retired()
-          .tag_id
-          .and_then(Self::inline_marker_type),
-        Some(1..=4)
-      );
+    let closes_emphasis =
+      emphasis_exit && !is_enter && !literal && matches!(output_str, "*" | "**" | "~~");
+    let mut emphasis_whitespace_start = self.buffer.len();
+    let mut emphasis_has_vertical_tab = false;
+    if closes_emphasis {
+      while emphasis_whitespace_start > 0 {
+        let byte = self.buffer.as_bytes()[emphasis_whitespace_start - 1];
+        if !byte.is_ascii_whitespace() && byte != 11 {
+          break;
+        }
+        emphasis_has_vertical_tab |= byte == 11;
+        emphasis_whitespace_start -= 1;
+      }
+    }
     if configured_new_lines == 0
       && !self.last_text_node_contains_whitespace
-      && !(closes_emphasis && self.buffer.ends_with('\u{000b}'))
+      && !emphasis_has_vertical_tab
     {
       let tail_known = self.has_flushed_tail();
       let buf_len = self.buffer.len();
@@ -5071,18 +5085,9 @@ impl ConvertState {
 
       // Renderers such as micromark treat vertical tabs as whitespace at delimiters.
       let mut trailing_emphasis_whitespace = String::new();
-      if closes_emphasis {
-        let mut end = self.buffer.len();
-        while end > 0
-          && (self.buffer.as_bytes()[end - 1] == 11
-            || (end < self.buffer.len() && self.buffer.as_bytes()[end - 1].is_ascii_whitespace()))
-        {
-          end -= 1;
-        }
-        if end < self.buffer.len() {
-          trailing_emphasis_whitespace.push_str(&self.buffer[end..]);
-          self.truncate_buffer(end);
-        }
+      if emphasis_has_vertical_tab && emphasis_whitespace_start < self.buffer.len() {
+        trailing_emphasis_whitespace.push_str(&self.buffer[emphasis_whitespace_start..]);
+        self.truncate_buffer(emphasis_whitespace_start);
       }
       if !output_str.is_empty() {
         self.last_content_cache_len = self.push_code_span_content(output_str, true);
@@ -5464,7 +5469,7 @@ mod tests {
     state.cut_line_lead = CutLineLead::Blank(0);
     state.flushed_tail = [b'\n', b'\n'];
 
-    state.write_output(true, false, 2, Some("next"), false);
+    state.write_output(true, false, 2, Some("next"), false, false);
 
     assert_eq!(state.buffer, "next");
   }
@@ -5478,7 +5483,7 @@ mod tests {
     state.has_streamed_output = true;
     state.buffer.push('c');
 
-    state.write_output(true, false, 2, Some("next"), false);
+    state.write_output(true, false, 2, Some("next"), false, false);
 
     assert_eq!(state.buffer, "c\n\nnext");
   }

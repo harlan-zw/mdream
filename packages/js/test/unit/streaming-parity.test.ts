@@ -934,3 +934,34 @@ describe('vertical tabs before emphasis closers', () => {
     }
   }
 })
+
+it('preserves literal emphasis exits and moves override whitespace outside default exits', async () => {
+  for (const [tag, marker] of [['em', '*'], ['cite', '*'], ['dfn', '**'], ['del', '~~']] as const) {
+    for (const [html, options, expected] of [
+      [`<${tag}>T&#11;</${tag}>X`, { tagOverrides: { [tag]: { exit: marker } } }, `${marker}T\u000B${marker}X`],
+      [`<${tag}>T<span></span></${tag}>X`, { tagOverrides: { span: { exit: '\u000B ' } } }, `${marker}T${marker}\u000B X`],
+    ] as const) {
+      expect(htmlToMarkdown(html, options), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++)
+        expect(await streamConvert(html, width, options), `${html}, width ${width}`).toBe(expected)
+    }
+  }
+})
+
+it('keeps caption placement and handles vertical tabs before breaks and aliased exits', async () => {
+  for (const suffix of ['&#11;', '&#11; ']) {
+    const html = `<figure><img src="a.png"><figcaption>T${suffix}</figcaption></figure>`
+    const expected = htmlToMarkdown(html)
+    expect(expected).toContain('*T\u000B*')
+    for (let width = 1; width <= html.length; width++)
+      expect(await streamConvert(html, width)).toBe(expected)
+  }
+  for (const [html, options, expected] of [
+    ['<em>T&#11;<br></em>X', {}, '*T*\u000B  \nX'],
+    ['<ex>T&#11;</ex>X', { tagOverrides: { ex: 'em' } }, '*T*\u000BX'],
+  ] as const) {
+    expect(htmlToMarkdown(html, options), html).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await streamConvert(html, width, options), `${html}, width ${width}`).toBe(expected)
+  }
+})

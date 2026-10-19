@@ -2314,23 +2314,35 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (eventType === NodeEventExit && !handler?.literalExit
       && INLINE_MARKER_TYPE[tagId]! >= 1 && INLINE_MARKER_TYPE[tagId]! <= 4
       && (output?.[0]?.charCodeAt(0) === 42 || output?.[0]?.charCodeAt(0) === 126)) {
+      let firstFragment = buff.length
+      let firstOffset = 0
+      let hasVerticalTab = false
       for (let index = buff.length - 1; index >= 0; index--) {
         const fragment = buff[index]!
         let end = fragment.length
         while (end > 0) {
           const code = fragment.charCodeAt(end - 1)
-          if (code !== 11 && !((end < fragment.length || trailingEmphasisWhitespace) && isAsciiWhitespace(code)))
+          if (code !== 11 && !isAsciiWhitespace(code))
             break
+          hasVerticalTab ||= code === 11
           end--
         }
         if (end < fragment.length) {
-          trailingEmphasisWhitespace = fragment.slice(end) + trailingEmphasisWhitespace
+          firstFragment = index
+          firstOffset = end
+        }
+        if (end > 0)
+          break
+      }
+      if (hasVerticalTab) {
+        for (let index = firstFragment; index < buff.length; index++) {
+          const fragment = buff[index]!
+          const end = index === firstFragment ? firstOffset : 0
+          trailingEmphasisWhitespace += fragment.slice(end)
           const trimmed = fragment.slice(0, end)
           state.outputPositions?.replace(index, index + 1, [trimmed])
           buff[index] = trimmed
         }
-        if (end > 0)
-          break
       }
     }
 
