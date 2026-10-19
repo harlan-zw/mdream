@@ -592,14 +592,11 @@ impl ConvertState {
       self.emit_plain_text_inline(&text, contains_whitespace, depth, index);
     }
 
+    let is_blank = self.depth_map[TAG_A as usize] > 0 && text.bytes().all(is_whitespace);
     text.clear();
     *text_buffer = text;
 
-    self.advance_text_node_counters(
-      first_block_parent_index,
-      excludes_text_nodes,
-      !contains_non_whitespace,
-    );
+    self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, is_blank);
   }
 
   /// Emit buffered text. Internal size flushes split one source text node into
@@ -756,16 +753,17 @@ impl ConvertState {
       );
     }
 
+    let is_blank = completes_text_node
+      && self.depth_map[TAG_A as usize] > 0
+      && !in_pre_tag
+      && text.bytes().all(is_whitespace);
+
     // Recover String allocation
     text.clear();
     *text_buffer = text;
 
     if completes_text_node {
-      self.advance_text_node_counters(
-        first_block_parent_index,
-        excludes_text_nodes,
-        !contains_non_whitespace && !in_pre_tag,
-      );
+      self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, is_blank);
     }
   }
 

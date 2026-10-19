@@ -118,8 +118,19 @@ describe('filter plugin', () => {
     expect(seen).toEqual(['Go '])
   })
 
-  it('adds no link label when a hook turns blank link text visible', async () => {
-    const html = '<p><a href="/x" aria-label="Label"><span hidden>x</span> </a></p>'
+  it.each(['&#32;', '&#x20;'])('uses the link label after excluded text followed by %s', async (entity) => {
+    const html = `<p><a href="/cart" aria-label="Cart"><span hidden>x</span>${entity}</a></p>`
+    const options = { plugins: [filterPlugin()] }
+    expect(htmlToMarkdown(html, options)).toBe('[ Cart](/cart)')
+    expect(htmlToText(html, options)).toBe('Cart')
+    expect(htmlToSafeHtml(html, options)).toBe('<p><a href="/cart"> Cart</a></p>')
+    for (let width = 1; width <= html.length; width++)
+      expect(await collect(streamHtmlToMarkdown(chunked(html, width), options)), `width=${width}`).toBe('[ Cart](/cart)')
+    expect(htmlToMarkdown(html.replace(entity, '&#71;o'), options)).toBe('[Go](/cart)')
+  })
+
+  it.each([' ', '&#32;', '&#x20;'])('adds no link label when a hook turns %s visible', async (text) => {
+    const html = `<p><a href="/x" aria-label="Label"><span hidden>x</span>${text}</a></p>`
     const hooks = [
       createPlugin({ processTextNode: node => node.value === ' ' ? { content: 'Visible', skip: false } : undefined }),
       createPlugin({

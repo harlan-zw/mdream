@@ -3191,6 +3191,40 @@ fn excluded_link_text_falls_back_to_the_link_label() {
 }
 
 #[test]
+fn excluded_link_text_followed_by_encoded_space_uses_the_link_label() {
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for entity in ["&#32;", "&#x20;"] {
+    let html =
+      format!(r#"<p><a href="/cart" aria-label="Cart"><span hidden>x</span>{entity}</a></p>"#);
+    assert_eq!(html_to_markdown(&html, options.clone()), "[ Cart](/cart)");
+    assert_eq!(html_to_text(&html, options.clone()), "Cart");
+    assert_eq!(
+      html_to_html(&html, options.clone()),
+      r#"<p><a href="/cart"> Cart</a></p>"#
+    );
+    for width in 1..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(options.clone());
+      let mut output = String::new();
+      for piece in html.as_bytes().chunks(width) {
+        output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output, "[ Cart](/cart)", "entity={entity} width={width}");
+    }
+    assert_eq!(
+      html_to_markdown(&html.replace(entity, "&#71;o"), options.clone()),
+      "[Go](/cart)"
+    );
+  }
+}
+
+#[test]
 fn excluded_link_text_keeps_the_space_after_it() {
   let exclude_icon = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {

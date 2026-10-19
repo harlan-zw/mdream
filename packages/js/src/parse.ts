@@ -1363,10 +1363,20 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
   }
 
+  let wasBlank = false
+  if (state.depthMap[TAG_A] && !inPreTag) {
+    wasBlank = true
+    for (let i = 0; i < textNode.value.length; i++) {
+      if (!isWhitespace(textNode.value.charCodeAt(i))) {
+        wasBlank = false
+        break
+      }
+    }
+  }
+
   handleEvent({ type: NodeEventEnter, node: textNode })
   // Plugins flag the text they skip or rewrite during the event.
   if (state.depthMap[TAG_A]) {
-    const wasBlank = !containsNonWhitespace && !inPreTag
     const isBlank = textNode.rewrittenBlank ?? wasBlank
     const hidden = textNode.excludedFromMarkdown || (isBlank && !wasBlank)
     if (hidden || isBlank)
