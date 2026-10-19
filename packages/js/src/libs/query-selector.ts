@@ -32,6 +32,8 @@ export function createIdSelector(selector: string): SelectorMatcher {
 }
 
 function containsWhitespaceSeparatedToken(value: string, token: string): boolean {
+  if (!value.includes(token))
+    return false
   let start = 0
   for (let i = 0; i <= value.length; i++) {
     const char = value.charCodeAt(i)
