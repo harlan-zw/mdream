@@ -9,6 +9,7 @@ import { htmlToMarkdown } from 'mdream'
 
 const GLOB_REGEX_SPECIAL_RE = /[\\^$+.[\]{}()|]/g
 const GLOB_WILDCARD_RE = /\*\*\/|\*\*|\*|\?/g
+const ENCODED_PATH_SEPARATOR_RE = /%(2f|5c)/gi
 
 /**
  * Merge the given tokens into the response's `Vary` header, preserving any
@@ -109,8 +110,9 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     server: ViteDevServer | null = null,
     outDir?: string,
   ): Promise<MarkdownConversionResult> {
+    const { pathname } = new URL(url, 'http://localhost')
     // Remove .md extension if present
-    let basePath = url.endsWith('.md') ? url.slice(0, -3) : url
+    let basePath = pathname.endsWith('.md') ? pathname.slice(0, -3) : pathname
 
     // Handle index.md -> / mapping
     if (basePath === '/index') {
@@ -152,14 +154,19 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
       }
     }
     else if (outDir) {
-      // Preview mode - read from built files
+      // Keep encoded separators from becoming filesystem separators.
+      const filePath = decodeURIComponent(basePath.replace(ENCODED_PATH_SEPARATOR_RE, '%25$1'))
       const possiblePaths = [
-        path.join(outDir, `${basePath}.html`),
-        path.join(outDir, basePath, 'index.html'),
+        path.join(outDir, `${filePath}.html`),
+        path.join(outDir, filePath, 'index.html'),
         path.join(outDir, 'index.html'), // SPA fallback
       ]
 
       for (const htmlPath of possiblePaths) {
+        // Removing .md can expose dot segments after URL normalization.
+        const relativePath = path.relative(outDir, htmlPath)
+        if (relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath))
+          continue
         if (fs.existsSync(htmlPath)) {
           htmlContent = fs.readFileSync(htmlPath, 'utf-8')
           log(`Read HTML file from ${htmlPath}`)
