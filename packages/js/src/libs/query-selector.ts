@@ -124,7 +124,7 @@ export function createAttributeSelector(selector: string): SelectorMatcher {
         case '*=': // Contains
           return attrValue.length > 0 && value.includes(attrValue)
         case '~=': // Contains word
-          return value.trim().split(' ').filter(Boolean).includes(attrValue)
+          return attrValue.length > 0 && value.trim().split(' ').filter(Boolean).includes(attrValue)
         case '|=': // Starts with prefix
           return value === attrValue || value.startsWith(`${attrValue}-`)
         default:
