@@ -2003,7 +2003,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         return
       }
       if (eventType === NodeEventExit && tagId === TAG_A
-        && handler === tagHandlers[TAG_A] && openLinkFragment !== -1
+        && !handler.literalExit && handler.exit === tagHandlers[TAG_A]!.exit && openLinkFragment !== -1
         && !gfmLifecycle.openCodeSpans.length && lastOutputChar(buff) === 32) {
         const bracket = openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment
         let removed = 0

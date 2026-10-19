@@ -981,8 +981,8 @@ it.for(['label', 'plain', 'span'].flatMap(kind => [
 })
 
 it.each([
-  ['<a href="/x" title="x ">x&#32;</a>Next', '[x ](/x)Next'],
-  ['<a href="/x" title="other ">x&#32;</a>Next', '[x ](/x "other ")Next'],
+  ['<a href="/x" title="x ">x&#32;</a>Next', '[x](/x) Next'],
+  ['<a href="/x" title="other ">x&#32;</a>Next', '[x](/x "other ") Next'],
 ])('preserves link title deduplication with a spacing-only override: %s', async (html, expected) => {
   const options: ParityOptions = { tagOverrides: { a: { spacing: [0, 0] } } }
   expect(convertOnce(html, options)).toBe(expected)
@@ -1001,4 +1001,16 @@ it.each([
   expect(htmlToMarkdown(html)).toBe(expected)
   for (let width = 1; width <= html.length; width++)
     expect(await streamConvert(html, width), `width=${width}`).toBe(expected)
+})
+
+it.each<[string, NonNullable<ParityOptions['tagOverrides']>, string]>([
+  ['<ex href="/x">x&#32;</ex>Next', { ex: 'a' }, '[x](/x) Next'],
+  ['<a href="/x">x&#32;</a>Next', { a: { enter: '[' } }, '[x](/x) Next'],
+  ['<a href="/x">x&#32;</a>Next', { a: { exit: ')' } }, '[x )Next'],
+  ['<a href="/x">x&#11;&#32;</a>Next', { a: { spacing: [0, 0] } }, '[x\u000B](/x) Next'],
+])('relocates link spaces only with the retained built-in exit: %s', async (html, tagOverrides, expected) => {
+  const options: ParityOptions = { tagOverrides }
+  expect(convertOnce(html, options)).toBe(expected)
+  for (let width = 1; width <= html.length; width++)
+    expect(await streamConvert(html, width, options), `width=${width}`).toBe(expected)
 })

@@ -3327,3 +3327,61 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
     }
   }
 }
+
+#[test]
+fn link_space_relocation_respects_retained_exit() {
+  for (html, name, config, expected) in [
+    (
+      "<ex href=\"/x\">x&#32;</ex>Next",
+      "ex",
+      TagOverrideConfig {
+        alias_tag_id: mdream::get_tag_id("a"),
+        ..Default::default()
+      },
+      "[x](/x) Next",
+    ),
+    (
+      "<a href=\"/x\">x&#32;</a>Next",
+      "a",
+      TagOverrideConfig {
+        enter: Some("[".into()),
+        ..Default::default()
+      },
+      "[x](/x) Next",
+    ),
+    (
+      "<a href=\"/x\">x&#32;</a>Next",
+      "a",
+      TagOverrideConfig {
+        exit: Some(")".into()),
+        ..Default::default()
+      },
+      "[x )Next",
+    ),
+    (
+      "<a href=\"/x\">x&#11;&#32;</a>Next",
+      "a",
+      TagOverrideConfig {
+        spacing: Some([0, 0]),
+        ..Default::default()
+      },
+      "[x\u{b}](/x) Next",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(name.into(), config)]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, opts.clone()), expected);
+    for width in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, width, opts.clone()),
+        expected,
+        "width={width}"
+      );
+    }
+  }
+}
