@@ -179,7 +179,7 @@ function isAutolinkUri(s: string): boolean {
   return true
 }
 
-export function renderBreak(node: HandlerContext['node'], state: HandlerContext['state']): string {
+export function renderBreak(state: HandlerContext['state']): string {
   // A literal newline would terminate a table row/ATX heading or collapse
   // inside a raw HTML block, so preserve the inline HTML there.
   const depthMap = state.depthMap!
@@ -190,12 +190,11 @@ export function renderBreak(node: HandlerContext['node'], state: HandlerContext[
   if (depthMap[TAG_PRE] || depthMap[TAG_CODE])
     return '\n'
 
-  const prefix = continuationPrefix(node, state.listIndentWidths || [])
-  return `  \n${prefix}`
+  return `  \n${state.listIndent ?? ''}`
 }
 
 export const breakHandler: TagHandler = {
-  enter: ({ node, state }) => renderBreak(node, state),
+  enter: ({ state }) => renderBreak(state),
   isSelfClosing: true,
   spacing: NO_SPACING,
   collapsesInnerWhiteSpace: true,

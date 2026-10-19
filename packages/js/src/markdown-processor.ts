@@ -56,7 +56,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -93,7 +93,9 @@ export interface MarkdownState {
    * Cumulative indent for list-item continuation. Grows by each ancestor
    * `<li>`'s marker width (`"- "` = 2, `"N. "` = digits(N) + 2) so code blocks
    * and continuation paragraphs land in the content column CommonMark requires.
-   * Pushed on `<li>` enter, popped on `<li>` exit.
+   * Pushed on `<li>` enter, popped on `<li>` exit. It is the whole prefix of a
+   * wrapped or hard-broken line: an item a plugin skipped adds nothing, and a
+   * blockquote prefixes its own lines when it closes.
    */
   listIndent: string
   /** Per-`<li>` contribution widths, parallel stack to listIndent. */
@@ -1696,12 +1698,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       const wrapWidth = state.options?.wrapWidth
       if (wrapWidth && canWrapHere(state.depthMap)) {
-        const wrapped = wrapText(
-          textNode.value,
-          currentColumn(state.buffer),
-          wrapWidth,
-          continuationPrefix(textNode, state.listIndentWidths),
-        )
+        const wrapped = wrapText(textNode.value, currentColumn(state.buffer), wrapWidth, state.listIndent)
         state.buffer.push(wrapped)
         state.lastContentCache = wrapped
       }
@@ -1863,7 +1860,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       && handler === breakHandler
       && !element.pluginOutput?.length) {
       const inPre = state.depthMap[TAG_PRE] !== 0
-      let breakOutput: string | undefined = renderBreak(element, state)
+      let breakOutput: string | undefined = renderBreak(state)
 
       if (captionBoundary !== 0 || captionFrameCount !== 0) {
         const pendingCaption = captionFrameCount !== 0

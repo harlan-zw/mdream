@@ -169,6 +169,16 @@ describe('wrap width (issue #106)', () => {
     await expectEveryChunking(html, options, expected)
   })
 
+  // A list item a plugin skipped writes no marker, so it has no content column.
+  it.each([
+    ['<ul><li><blockquote><p>bb hhhhhhhhh</p></blockquote></li></ul>', 8, 'bb\nhhhhhhhhh'],
+    ['<ul><li><p>aaaaaaa b</p></li></ul>', 8, 'aaaaaaa\nb'],
+    ['<ul><li><p>a<br>b</p></li></ul>', 0, 'a  \nb'],
+    ['<ul><li>x<ul><li><p>aaaaaaa b<br>c</p></li></ul></li></ul>', 8, 'aaaaaaa\nb  \nc'],
+  ] as const)('continues a line without the indentation of a dropped list item: %s', async (html, width, expected) => {
+    await expectEveryChunking(html, { wrapWidth: width, plugins: [filterPlugin({ include: ['p'] })] }, expected)
+  })
+
   it('wraps identically across streaming chunks', async () => {
     const html = '<p>The quick brown fox jumps over the lazy dog and then keeps on running well past the edge of the field.</p>'
     const oneshot = wrap(html, 40)
