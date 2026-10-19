@@ -73,4 +73,10 @@ describe.each(engines)('emphasis that cannot flank $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(engine.htmlToMarkdown(html, { clean: true })).toBe(expected)
   })
+
+  it('drops the space after a tilde only in Markdown', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(engine.htmlToMarkdown('<p>x~<q>q</q></p>')).toBe('x\\~"q"')
+    expect(engine.htmlToMarkdown('<p>x~<q>q</q></p>', { format: 'text' })).toBe('x~ "q"')
+  })
 })

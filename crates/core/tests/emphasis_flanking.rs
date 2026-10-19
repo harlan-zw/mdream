@@ -5,8 +5,8 @@
 
 use mdream::CleanConfig;
 use mdream::MarkdownStreamProcessor;
-use mdream::html_to_markdown;
 use mdream::types::HtmlToMarkdownOptions;
+use mdream::{html_to_markdown, html_to_text};
 
 const CASES: &[(&str, &str)] = &[
   (
@@ -198,6 +198,21 @@ fn heading_slugs_still_match_fragment_links() {
 }
 
 #[test]
+fn only_markdown_drops_the_space_after_a_tilde() {
+  // A strikethrough opener must touch its content; plain text has no
+  // delimiters and keeps the separator.
+  let html = "<p>x~<q>q</q></p>";
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    "x\\~\"q\""
+  );
+  assert_eq!(
+    html_to_text(html, HtmlToMarkdownOptions::default()),
+    "x~ \"q\""
+  );
+}
+
+#[test]
 fn keeps_delimiters_where_a_fix_cannot_help() {
   // An opener before whitespace cannot open; a raw one at a block start would
   // open an HTML block.
@@ -228,7 +243,10 @@ fn keeps_delimiters_where_a_fix_cannot_help() {
     ("<p><kbd>a<strong>!b</strong></kbd></p>", "`a**!b**`"),
     ("<p><samp><em>(b)</em>c</samp></p>", "`*(b)*c`"),
     ("<p><var>a<em>!b</em>c</var></p>", "`a*!b*c`"),
-    ("<p>a<strong><kbd>b</kbd></strong>c</p>", "a<strong>`b`</strong>c"),
+    (
+      "<p>a<strong><kbd>b</kbd></strong>c</p>",
+      "a<strong>`b`</strong>c",
+    ),
   ] {
     assert_eq!(
       html_to_markdown(html, HtmlToMarkdownOptions::default()),

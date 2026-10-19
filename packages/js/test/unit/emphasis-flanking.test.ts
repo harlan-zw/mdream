@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { clean } from '../../src/clean'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { htmlToText } from '../../src/text'
 
 // CommonMark opens a delimiter run only when it is left-flanking and closes it
 // only when it is right-flanking. An opener that cannot open turns its pair
@@ -95,6 +96,13 @@ describe('emphasis delimiters that cannot flank', () => {
     ['<h2>a<strong>!b</strong>c</h2><p><a href="#abc">t</a></p>', '## a<strong>!b</strong>c\n\n[t](#abc)'],
   ])('keeps the heading slug of %s', (html, expected) => {
     expect(htmlToMarkdown(html, { clean: clean() })).toBe(expected)
+  })
+
+  it('drops the space after a tilde only in Markdown', () => {
+    // A strikethrough opener must touch its content; plain text has no
+    // delimiters and keeps the separator.
+    expect(htmlToMarkdown('<p>x~<q>q</q></p>')).toBe('x\\~"q"')
+    expect(htmlToText('<p>x~<q>q</q></p>')).toBe('x~ "q"')
   })
 
   it('keeps delimiters where a fix cannot help', () => {

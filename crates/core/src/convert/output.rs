@@ -5385,8 +5385,9 @@ impl ConvertState {
       return true;
     }
     // A strikethrough opener must touch its content to open, but two tilde runs
-    // written back to back would read as a `~~~~` code fence.
-    if last_byte == b'~' {
+    // written back to back would read as a `~~~~` code fence. Plain text has no
+    // delimiters and keeps its separator.
+    if last_byte == b'~' && self.is_markdown() {
       return first_byte == b'~';
     }
     if matches!(last_byte, b'[' | b'(' | b'>' | b'*' | b'_' | b'`')
