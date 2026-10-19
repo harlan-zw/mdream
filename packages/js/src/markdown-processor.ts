@@ -874,6 +874,31 @@ function collapsedByAncestor(node: ElementNode, state: MarkdownState, eventType:
   return false
 }
 
+// Whether a heading stays inline in its list item because a wrapper around it
+// writes delimiters that pair across its content, which a block break would
+// split. A raw tag (`<u>`, `<sup>`) or a wrapper that writes nothing
+// (`<label>`, `<small>`) reads the same either side of it. The caller checks
+// the caption, whose emphasis wraps the heading too. Parity with the Rust
+// engine's `heading_kept_inline_in_item`.
+function headingKeptInlineInItem(heading: ElementNode): boolean {
+  let parent = heading.parent
+  while (parent) {
+    if (parent.tagId !== TAG_SPAN && parent.tagHandler?.collapsesInnerWhiteSpace && wrapperWritesDelimiters(parent))
+      return true
+    parent = parent.parent
+  }
+  return false
+}
+
+// Emphasis, code, strikethrough and quote wrappers, and an override with
+// output of its own, whose markers are taken as a pair.
+function wrapperWritesDelimiters(node: ElementNode): boolean {
+  const handler = node.tagHandler
+  if ((handler?.literalEnter && node.hasEnterOutput) || (handler?.literalExit && handler.literalExitHasOutput))
+    return true
+  return Boolean(INLINE_MARKER_TYPE[node.tagId!])
+}
+
 function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): boolean {
   const handler = node.tagHandler
   // Custom exits have not run yet. Treat them as wrappers unless a
@@ -2400,15 +2425,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
     }
-    // Inside a list item a heading opens its own block unless an inline wrapper
-    // keeps it inline, as at the root: after text on the item's line, even past
-    // a space, its `#` prefix would stay text. The space that ended the text
-    // goes too, which the reach-back trim keeps before a whitespace-collapsing
-    // element.
+    // Inside a list item a heading opens its own block unless a wrapper keeps it
+    // inline: after text on the item's line, even past a space, its `#` prefix
+    // would stay text. The space that ended the text goes too, which the
+    // reach-back trim keeps before a whitespace-collapsing element.
     if (eventType === NodeEventEnter && tagId >= TAG_H1 && tagId <= TAG_H6
       && state.depthMap[TAG_LI] && !handler?.literalEnter && !hasPluginOutput
       && output?.length === 1 && output[0] === `${'#'.repeat(tagId - TAG_H1 + 1)} `
-      && !collapsedByAncestor(element, state, eventType)
+      && captionFrameCount === 0 && !headingKeptInlineInItem(element)
       && buff.length > 0 && !opensBlockLine(buff, buff.length - 1, buff.at(-1)!.length)) {
       trimTrailingSpaces(buff)
       output[0] = `\n\n${state.listIndent}${output[0]}`
@@ -2442,7 +2466,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (eventType === NodeEventExit && tagId >= TAG_H1 && tagId <= TAG_H6
       && state.depthMap[TAG_LI] && !state.depthMap[TAG_PRE] && captionFrameCount === 0 && !state.depthMap[TAG_A]
       && !isInsideTableCell(state) && !handler?.literalEnter
-      && !collapsedByAncestor(element, state, eventType)) {
+      && !headingKeptInlineInItem(element)) {
       state.headingBreakPending = true
     }
 

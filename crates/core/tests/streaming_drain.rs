@@ -2125,6 +2125,42 @@ fn streaming_heading_in_list_item_keeps_its_own_line() {
   }
 }
 
+// A heading in a wrapper that writes no delimiters breaks out of it before and
+// after, however deep the wrappers nest, at every cut.
+#[test]
+fn streaming_heading_in_list_item_breaks_out_of_a_wrapper_without_delimiters() {
+  for (html, expected) in [
+    (
+      "<ul><li><u><h4>T</h4></u>more</li></ul>",
+      "- <u>\n\n  #### T</u>\n\n  more",
+    ),
+    (
+      "<ul><li><label>Intro<h3>T</h3>more</label></li></ul>",
+      "- Intro\n\n  ### T\n\n  more",
+    ),
+    (
+      "<ul><li><small><abbr><h3>A</h3><h3>B</h3></abbr></small></li></ul>",
+      "- ### A\n\n  ### B",
+    ),
+    (
+      "<ol><li><small><abbr><h2>Title</h2></abbr></small>Body text</li><li>b</li></ol>",
+      "1. ## Title\n\n   Body text\n2. b",
+    ),
+    (
+      "<ul><li><small><strong><h3>T</h3></strong>more</small></li></ul>",
+      "- **### T**more",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // A `<pre>` fence opened by its first child pays the break a heading in the
 // list item owes, at every cut.
 #[test]

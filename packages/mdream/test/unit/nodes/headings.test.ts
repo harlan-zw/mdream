@@ -127,6 +127,35 @@ describe.each(engines)('headings $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine, plugins })).toBe(expected)
   })
 
+  // A raw tag or a wrapper that writes nothing reads the same on either side of
+  // a block break, so the heading still gets its own block.
+  it.each([
+    ['<ul><li>Intro <u><h4>T</h4></u></li></ul>', '- Intro <u>\n\n  #### T</u>'],
+    ['<ul><li><em>E</em><label><h6>T</h6></label></li></ul>', '- *E*\n\n  ###### T'],
+    ['<ul><li><button>Intro<h3>T</h3></button></li></ul>', '- Intro\n\n  ### T'],
+    ['<ul><li><label>Intro<h3>T</h3>more</label></li></ul>', '- Intro\n\n  ### T\n\n  more'],
+    ['<ul><li><small><abbr><h3>A</h3><h3>B</h3></abbr></small></li></ul>', '- ### A\n\n  ### B'],
+    ['<ul><li><small><abbr><h3>T</h3></abbr></small>x</li></ul>', '- ### T\n\n  x'],
+    ['<ul><li>x <address><h4>T</h4></address>more</li></ul>', '- x <address>\n\n  #### T</address>\n\n  more'],
+    // Delimiters that pair across the wrapper keep it inline.
+    ['<ul><li><q><h3>T</h3>more</q></li></ul>', '- " ### T more"'],
+    ['<ul><li><small><strong><h3>T</h3></strong>more</small></li></ul>', '- **### T**more'],
+  ])('breaks a heading in a list item out of a wrapper without delimiters: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  // An override's own markers pair like delimiters; one without output does not.
+  it.each([
+    [{ label: { enter: '**', exit: '**' } }, '- Intro **### T**more'],
+    [{ label: { exit: '!' } }, '- Intro ### T!more'],
+    [{ label: { enter: '' } }, '- Intro\n\n  ### T\n\n  more'],
+  ])('keeps a heading in a list item inline only in a wrapper override with output: %o', async (tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li>Intro <label><h3>T</h3></label>more</li></ul>'
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
+  })
+
   // The fence of a `<pre>` after the heading pays the break the heading owes,
   // even when the `<pre>`'s first child opens it, as highlighted code does.
   it.each([

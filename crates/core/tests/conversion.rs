@@ -5405,6 +5405,83 @@ fn a_heading_in_a_list_item_keeps_its_own_line() {
 }
 
 #[test]
+fn a_heading_in_a_list_item_breaks_out_of_a_wrapper_without_delimiters() {
+  // A raw tag or a wrapper that writes nothing reads the same on either side of
+  // a block break, so the heading still gets its own block, with text after it
+  // in the next one, however deep the wrappers nest.
+  for (html, expected) in [
+    (
+      "<ul><li>Intro <u><h4>T</h4></u></li></ul>",
+      "- Intro <u>\n\n  #### T</u>",
+    ),
+    (
+      "<ul><li><sup><h4>T</h4></sup>more</li></ul>",
+      "- <sup>\n\n  #### T</sup>\n\n  more",
+    ),
+    (
+      "<ul><li><em>E</em><label><h6>T</h6></label></li></ul>",
+      "- *E*\n\n  ###### T",
+    ),
+    (
+      "<ul><li><button>Intro<h3>T</h3></button></li></ul>",
+      "- Intro\n\n  ### T",
+    ),
+    (
+      "<ul><li>Intro <label><h3>T</h3></label></li></ul>",
+      "- Intro\n\n  ### T",
+    ),
+    (
+      "<ul><li><label>Intro<h3>T</h3>more</label></li></ul>",
+      "- Intro\n\n  ### T\n\n  more",
+    ),
+    (
+      "<ul><li><small><abbr><h3>A</h3><h3>B</h3></abbr></small></li></ul>",
+      "- ### A\n\n  ### B",
+    ),
+    (
+      "<ul><li><label><label><h2>A</h2></label><h2>B</h2></label></li></ul>",
+      "- ## A\n\n  ## B",
+    ),
+    (
+      "<ul><li><small><abbr><h3>T</h3></abbr></small>x</li></ul>",
+      "- ### T\n\n  x",
+    ),
+    (
+      "<ol><li><small><abbr><h2>Title</h2></abbr></small>Body text</li><li>b</li></ol>",
+      "1. ## Title\n\n   Body text\n2. b",
+    ),
+    (
+      "<ul><li>x <address><h4>T</h4></address>more</li></ul>",
+      "- x <address>\n\n  #### T</address>\n\n  more",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // Delimiters that pair across the wrapper's content, or a caption's
+  // emphasis, keep the heading inline.
+  for (html, expected) in [
+    (
+      "<ul><li><q><h3>T</h3>more</q></li></ul>",
+      "- \" ### T more\"",
+    ),
+    (
+      "<ul><li><small><strong><h3>T</h3></strong>more</small></li></ul>",
+      "- **### T**more",
+    ),
+    (
+      "<strong><ul><li>Intro <h3>T</h3>more</li></ul></strong>",
+      "**- Intro ### T more**",
+    ),
+    (
+      "<ul><li><figure><figcaption>a <label><h3>T</h3></label>s</figcaption></figure></li></ul>",
+      "- *a ### Ts*",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
 fn a_code_block_after_a_heading_in_a_list_item_keeps_its_content() {
   // The fence pays the break the heading owes. A `<pre>` whose first child
   // opens the fence, as highlighted code does, used to get that break again

@@ -1659,18 +1659,17 @@ impl ConvertState {
     if self.heading_break_pending {
       self.settle_heading_break(tag_id, &mut output);
     }
-    // Inside a list item a heading opens its own block unless an inline wrapper
-    // keeps it inline, as at the root: after text on the item's line, even past
-    // a space, its `#` prefix would stay text. The space that ended the text
-    // goes too, which the reach-back trim keeps before a whitespace-collapsing
-    // element.
+    // Inside a list item a heading opens its own block unless a wrapper keeps it
+    // inline: after text on the item's line, even past a space, its `#` prefix
+    // would stay text. The space that ended the text goes too, which the
+    // reach-back trim keeps before a whitespace-collapsing element.
     if !plain_text!(self)
       && !enter_is_literal
       && let Some(id) = tag_id
       && (TAG_H1..=TAG_H6).contains(&id)
       && self.depth_map[TAG_LI as usize] > 0
       && output.as_deref() == Some(HEADING_PREFIXES[(id - TAG_H1) as usize])
-      && !self.collapsed_by_ancestor(tag_id, true)
+      && !self.heading_kept_inline_in_item(true)
       && !self.opens_block_line(self.buffer.as_bytes(), self.buffer.len())
     {
       self.trim_trailing_spaces();
@@ -2464,9 +2463,8 @@ impl ConvertState {
         // which a break would split.
         if self.depth_map[TAG_LI as usize] > 0
           && self.depth_map[TAG_PRE as usize] == 0
-          && self.caption_frames.is_empty()
           && !enter_is_overridden
-          && !self.collapsed_by_ancestor(tag_id, false)
+          && !self.heading_kept_inline_in_item(false)
         {
           self.heading_break_pending = true;
         }
@@ -5428,6 +5426,43 @@ impl ConvertState {
           && node.tag_id != Some(TAG_SPAN)
       })
       .is_some_and(|node| self.wrapper_emits_inline_markdown(node))
+  }
+
+  /// Whether the heading at the top of the stack (`is_enter`) or just popped
+  /// stays inline in its list item: a caption's emphasis wraps it, or a wrapper
+  /// around it writes delimiters that pair across its content, which a block
+  /// break would split. A raw tag (`<u>`, `<sup>`) or a wrapper that writes
+  /// nothing (`<label>`, `<small>`) reads the same either side of it.
+  fn heading_kept_inline_in_item(&self, is_enter: bool) -> bool {
+    if !self.caption_frames.is_empty() {
+      return true;
+    }
+    self.stack[..self.stack.len() - usize::from(is_enter)]
+      .iter()
+      .any(|node| {
+        node.collapses_inner_white_space
+          && node.tag_id != Some(TAG_SPAN)
+          && self.wrapper_writes_delimiters(node)
+      })
+  }
+
+  /// Emphasis, code, strikethrough and quote wrappers, and an override with
+  /// output of its own, whose markers are taken as a pair.
+  fn wrapper_writes_delimiters(&self, node: &ElementNode) -> bool {
+    if self.has_tag_overrides {
+      let ovs = self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|p| p.tag_overrides.as_ref());
+      if let Some(ov) = Self::override_for_node(ovs, self.override_idx.as_deref(), node)
+        && (ov.enter.as_ref().is_some_and(|s| !s.is_empty())
+          || ov.exit.as_ref().is_some_and(|s| !s.is_empty()))
+      {
+        return true;
+      }
+    }
+    node.tag_id.and_then(Self::inline_marker_type).is_some()
   }
 
   #[inline]
