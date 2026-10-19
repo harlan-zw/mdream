@@ -751,6 +751,15 @@ fn setext_underline_after_a_hard_break_is_escaped() {
 #[test]
 fn text_inline_separators_survive_every_chunk_width() {
   for (html, expected) in [
+    ("a<figcaption> </figcaption>b", "ab"),
+    (
+      "<figure>a<figcaption><span> </span></figcaption>b</figure>",
+      "ab",
+    ),
+    (
+      "a<figcaption><span> <span>b</span></span></figcaption>c",
+      "a\n\nb\n\nc",
+    ),
     ("<p>a<span>x </span>&nbsp;<span>b</span></p>", "ax \u{a0}b"),
     ("<p>a<span> <span>b</span></span></p>", "a b"),
     ("<p>a<span> <strong>b</strong></span></p>", "a b"),

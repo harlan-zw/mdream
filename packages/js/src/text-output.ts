@@ -417,8 +417,10 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     if (node.excludedFromMarkdown || !node.value)
       return
     if (node.leadingBlank && !hasNonWhitespace(node.value)) {
-      if (openQuotes.at(-1) !== state.buffer.length - 1)
+      if (captionClosedSpacing === 0 && !(captionOpen > 0 && !captionContent)
+        && openQuotes.at(-1) !== state.buffer.length - 1) {
         state.pendingInlineWhitespace = true
+      }
       return
     }
     if (hasVisibleContent(node.value) && openCaptionBoundary()) {

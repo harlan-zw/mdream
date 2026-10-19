@@ -206,6 +206,9 @@ describe.each(engines)('plain text output $name', (engineConfig) => {
 
 describe.each(engines)('inline text separators $name', (engineConfig) => {
   it.each([
+    ['a<figcaption> </figcaption>b', 'ab'],
+    ['<figure>a<figcaption><span> </span></figcaption>b</figure>', 'ab'],
+    ['a<figcaption><span> <span>b</span></span></figcaption>c', 'a\n\nb\n\nc'],
     ['<p>a<span>x </span>&nbsp;<span>b</span></p>', 'ax \u00A0b'],
     ['<p>a<span> <span>b</span></span></p>', 'a b'],
     ['<p>a<span> <strong>b</strong></span></p>', 'a b'],
