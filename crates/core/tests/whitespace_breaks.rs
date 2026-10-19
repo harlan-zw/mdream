@@ -526,3 +526,29 @@ fn link_text_drops_the_space_before_an_empty_element() {
     "- [q  \n  ](/x)"
   );
 }
+
+#[test]
+fn recovered_separators_match_ordinary_separators_before_inline_producers() {
+  for producer in [
+    "<strong>b</strong>",
+    "<em>b</em>",
+    "<code>b</code>",
+    "<a href=\"/x\">b</a>",
+  ] {
+    for (before, after) in [
+      ("<p>", "</p>"),
+      ("<ul><li>", "</li></ul>"),
+      ("<blockquote><p>", "</p></blockquote>"),
+      ("<blockquote><ul><li>", "</li></ul></blockquote>"),
+    ] {
+      for width in [0, 6, 8, 12] {
+        let ordinary = format!("{before}aaaaa {producer}{after}");
+        let recovered = format!("{before}<span>aaaaa </span>{producer}{after}");
+        let options = HtmlToMarkdownOptions::default().with_wrap_width(width);
+        let expected = html_to_markdown(&ordinary, options.clone());
+        assert_every_chunking(&ordinary, &options, &expected);
+        assert_every_chunking(&recovered, &options, &expected);
+      }
+    }
+  }
+}

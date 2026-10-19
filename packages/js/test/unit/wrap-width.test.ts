@@ -67,6 +67,24 @@ describe('wrap width (issue #106)', () => {
       .toBe('```\nfirst  \nsecond\n```')
   })
 
+  it.each(['strong', 'em', 'code', 'a'] as const)('matches ordinary separators before inline producers: %s', async (tag) => {
+    const producer = tag === 'a' ? '<a href="/x">b</a>' : `<${tag}>b</${tag}>`
+    for (const [before, after] of [
+      ['<p>', '</p>'],
+      ['<ul><li>', '</li></ul>'],
+      ['<blockquote><p>', '</p></blockquote>'],
+      ['<blockquote><ul><li>', '</li></ul></blockquote>'],
+    ] as const) {
+      for (const wrapWidth of [0, 6, 8, 12]) {
+        const ordinary = `${before}aaaaa ${producer}${after}`
+        const recovered = `${before}<span>aaaaa </span>${producer}${after}`
+        const expected = wrap(ordinary, wrapWidth)
+        await expectEveryChunking(ordinary, { wrapWidth }, expected)
+        await expectEveryChunking(recovered, { wrapWidth }, expected)
+      }
+    }
+  })
+
   it('never splits an oversized token', () => {
     const out = wrap('<p>A superlongunbreakabletokenthatislongerthanthewrapwidthsoitoverflows end.</p>', 40)
     expect(out).toContain('superlongunbreakabletokenthatislongerthanthewrapwidthsoitoverflows')
