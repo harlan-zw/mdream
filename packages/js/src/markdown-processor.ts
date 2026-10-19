@@ -2448,8 +2448,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // would stay text. The space that ended the text goes too, which the
     // reach-back trim keeps before a whitespace-collapsing element.
     if (eventType === NodeEventEnter && tagId >= TAG_H1 && tagId <= TAG_H6
-      && state.depthMap[TAG_LI] && !handler?.literalEnter && !hasPluginOutput
-      && output?.length === 1 && output[0] === `${'#'.repeat(tagId - TAG_H1 + 1)} `
+      && state.depthMap[TAG_LI] && !state.depthMap[TAG_PRE] && !isInsideTableCell(state) && !hasPluginOutput
+      && output?.length === 1 && output[0]?.charCodeAt(0) === 35
+      && (handler?.literalEnterHeading || (!handler?.literalEnter && output[0] === `${'#'.repeat(tagId - TAG_H1 + 1)} `))
       && captionFrameCount === 0 && !headingKeptInlineInItem(element)
       && buff.length > 0 && !opensBlockLine(buff, buff.length - 1, buff.at(-1)!.length)) {
       trimTrailingSpaces(buff)
@@ -2483,8 +2484,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // which a break would split.
     if (eventType === NodeEventExit && tagId >= TAG_H1 && tagId <= TAG_H6
       && state.depthMap[TAG_LI] && !state.depthMap[TAG_PRE] && captionFrameCount === 0 && !state.depthMap[TAG_A]
-      && !isInsideTableCell(state) && !handler?.literalEnter
+      && !isInsideTableCell(state) && (!handler?.literalEnter || handler.literalEnterHeading)
       && !headingKeptInlineInItem(element)) {
+      if (handler?.literalEnterHeading)
+        trimTrailingSpaces(buff)
       state.headingBreakPending = true
     }
 

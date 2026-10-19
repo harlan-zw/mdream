@@ -3,6 +3,44 @@ import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('headings $name', (engineConfig) => {
   it.each([
+    ['<ul><li><h3></h3>x</li></ul>', '### ', '- ###\n\n  x'],
+    ['<ul><li><h3>T</h3><h3>U</h3></li></ul>', '### ', '- ### T\n\n  ### U'],
+    ['<ul><li><h3></h3><h3>U</h3></li></ul>', '### Label ', '- ### Label\n\n  ### Label U'],
+    ['<ul><li><h3>T</h3>x</li></ul>', '###\t', '- ###\tT\n\n  x'],
+    ['<ul><li><h3>T</h3>x</li></ul>', '### ', '- ### T\n\n  x'],
+    ['<ul><li>Intro <h3>T</h3></li></ul>', '### ', '- Intro\n\n  ### T'],
+    ['<ul><li>Intro <h3>T</h3>x</li></ul>', '## ', '- Intro\n\n  ## T\n\n  x'],
+    ['<ul><li>Intro <h3>T</h3>x</li></ul>', '### Label ', '- Intro\n\n  ### Label T\n\n  x'],
+    ['<blockquote><ul><li><h3>T</h3>x</li></ul></blockquote>', '### ', '> - ### T\n>\n>   x'],
+    ['<ul><li>outer<ul><li><h3>T</h3>x</li></ul></li></ul>', '### ', '- outer\n  - ### T\n\n    x'],
+    ['<ul><li><h3>T</h3><strong> </strong>x</li></ul>', '### ', '- ### T\n\n  x'],
+    ['<ul><li><h3>T</h3>x</li></ul>', '', '- T x'],
+    ['<ul><li><h3>T</h3>x</li></ul>', 'Title ', '- Title T x'],
+    ['<ul><li><h3>T</h3>x</li></ul>', 'prefix ### ', '- prefix ### T x'],
+    ['<ul><li><h3>T</h3>x</li></ul>', '####### ', '- ####### T x'],
+    ['<ul><li><h3>T</h3>x</li></ul>', '###inline ', '- ###inline T x'],
+    ['<ul><li><code><h3>T</h3>x</code></li></ul>', '### ', '- `### T x`'],
+    ['<ul><li><strong><h3>T</h3>x</strong></li></ul>', '### ', '- **### T x**'],
+  ])('preserves literal heading override boundaries: %s (%s)', async (html, enter, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { plugins: { tagOverrides: { h3: { enter, exit: '' } } } }
+    expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `chunkSize=${width}`).toBe(expected)
+    }
+  })
+
+  it.each([
     ['<blockquote><ul><li><h3>T</h3># x</li></ul></blockquote>', '> - ### T\n>\n>   \\# x'],
     ['<blockquote><ul><li><h3>T</h3>- x</li></ul></blockquote>', '> - ### T\n>\n>   \\- x'],
     ['<blockquote><ul><li><h3>T</h3>> x</li></ul></blockquote>', '> - ### T\n>\n>   \\> x'],

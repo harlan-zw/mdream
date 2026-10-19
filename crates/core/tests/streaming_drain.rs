@@ -3585,3 +3585,93 @@ fn streaming_heading_overrides_inside_list_code_keep_their_output() {
     assert_stream_matches_every_split(html, options);
   }
 }
+
+#[test]
+fn streaming_literal_heading_overrides_preserve_block_boundaries() {
+  for (html, enter, expected) in [
+    ("<ul><li><h3></h3>x</li></ul>", "### ", "- ###\n\n  x"),
+    (
+      "<ul><li><h3>T</h3><h3>U</h3></li></ul>",
+      "### ",
+      "- ### T\n\n  ### U",
+    ),
+    (
+      "<ul><li><h3></h3><h3>U</h3></li></ul>",
+      "### Label ",
+      "- ### Label\n\n  ### Label U",
+    ),
+    ("<ul><li><h3>T</h3>x</li></ul>", "###\t", "- ###\tT\n\n  x"),
+    ("<ul><li><h3>T</h3>x</li></ul>", "### ", "- ### T\n\n  x"),
+    (
+      "<ul><li>Intro <h3>T</h3></li></ul>",
+      "### ",
+      "- Intro\n\n  ### T",
+    ),
+    (
+      "<ul><li>Intro <h3>T</h3>x</li></ul>",
+      "## ",
+      "- Intro\n\n  ## T\n\n  x",
+    ),
+    (
+      "<ul><li>Intro <h3>T</h3>x</li></ul>",
+      "### Label ",
+      "- Intro\n\n  ### Label T\n\n  x",
+    ),
+    (
+      "<blockquote><ul><li><h3>T</h3>x</li></ul></blockquote>",
+      "### ",
+      "> - ### T\n>\n>   x",
+    ),
+    (
+      "<ul><li>outer<ul><li><h3>T</h3>x</li></ul></li></ul>",
+      "### ",
+      "- outer\n  - ### T\n\n    x",
+    ),
+    (
+      "<ul><li><h3>T</h3><strong> </strong>x</li></ul>",
+      "### ",
+      "- ### T\n\n  x",
+    ),
+    ("<ul><li><h3>T</h3>x</li></ul>", "", "- T x"),
+    ("<ul><li><h3>T</h3>x</li></ul>", "Title ", "- Title T x"),
+    (
+      "<ul><li><h3>T</h3>x</li></ul>",
+      "prefix ### ",
+      "- prefix ### T x",
+    ),
+    ("<ul><li><h3>T</h3>x</li></ul>", "####### ", "- ####### T x"),
+    (
+      "<ul><li><h3>T</h3>x</li></ul>",
+      "###inline ",
+      "- ###inline T x",
+    ),
+    (
+      "<ul><li><code><h3>T</h3>x</code></li></ul>",
+      "### ",
+      "- `### T x`",
+    ),
+    (
+      "<ul><li><strong><h3>T</h3>x</strong></li></ul>",
+      "### ",
+      "- **### T x**",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "h3".into(),
+          TagOverrideConfig {
+            enter: Some(enter.into()),
+            exit: Some(String::new()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}

@@ -2,6 +2,15 @@
 
 use super::*;
 
+fn starts_with_heading_prefix(value: &str) -> bool {
+  let bytes = value.as_bytes();
+  let mut hashes = 0;
+  while hashes < 7 && bytes.get(hashes) == Some(&b'#') {
+    hashes += 1;
+  }
+  hashes > 0 && hashes <= 6 && matches!(bytes.get(hashes), Some(b' ' | b'\t'))
+}
+
 /// Bytes rejected from a fenced-code info string.
 ///
 /// Two classes, for two different reasons:
@@ -1688,11 +1697,12 @@ impl ConvertState {
     // would stay text. The space that ended the text goes too, which the
     // reach-back trim keeps before a whitespace-collapsing element.
     if !plain_text!(self)
-      && !enter_is_literal
       && let Some(id) = tag_id
       && (TAG_H1..=TAG_H6).contains(&id)
       && self.depth_map[TAG_LI as usize] > 0
-      && output.as_deref() == Some(HEADING_PREFIXES[(id - TAG_H1) as usize])
+      && self.depth_map[TAG_PRE as usize] == 0
+      && !self.in_table_cell()
+      && output.as_deref().is_some_and(starts_with_heading_prefix)
       && !self.heading_kept_inline_in_item(true)
       && !self.opens_block_line(self.buffer.as_bytes(), self.buffer.len())
     {
@@ -1700,7 +1710,7 @@ impl ConvertState {
       output = Some(Cow::Owned(format!(
         "\n\n{}{}",
         self.list_indent,
-        HEADING_PREFIXES[(id - TAG_H1) as usize]
+        output.as_deref().unwrap_or_default()
       )));
     }
 
@@ -2283,6 +2293,9 @@ impl ConvertState {
     };
     let node_spacing = override_config.and_then(|ov| ov.spacing).or(node.spacing);
     let enter_is_overridden = override_config.is_some_and(|ov| ov.enter.is_some());
+    let enter_is_heading = override_config
+      .and_then(|ov| ov.enter.as_deref())
+      .is_some_and(starts_with_heading_prefix);
 
     if !has_override {
       // Special case: TR table separator
@@ -2501,9 +2514,12 @@ impl ConvertState {
         // which a break would split.
         if self.depth_map[TAG_LI as usize] > 0
           && self.depth_map[TAG_PRE as usize] == 0
-          && !enter_is_overridden
+          && (!enter_is_overridden || enter_is_heading)
           && !self.heading_kept_inline_in_item(false)
         {
+          if enter_is_heading {
+            self.trim_trailing_spaces();
+          }
           self.heading_break_pending = true;
         }
       }
