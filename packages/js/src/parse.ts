@@ -997,7 +997,11 @@ function parseHtmlInternal(
     }
 
     // COMMENT, DOCTYPE or CDATA
-    if (nextCharCode === EXCLAMATION_CHAR) {
+    if (nextCharCode === EXCLAMATION_CHAR && state.currentNode?.tagHandler?.isNonNesting) {
+      textBuffer += htmlChunk[i++]
+      continue
+    }
+    else if (nextCharCode === EXCLAMATION_CHAR) {
       // EOF emits an unfinished declaration inside visible raw text. Keep
       // those bytes, including aliases and depth-flattened raw-text elements.
       const handler = state.currentNode?.tagHandler
@@ -1046,16 +1050,27 @@ function parseHtmlInternal(
         // '[' but not a CDATA opener (e.g. `<![if IE]>`): fall through.
       }
 
-      if (textBuffer.length > 0) {
-        processTextBuffer(textBuffer, state, handleEvent)
-        textBuffer = ''
+      const declaration = (htmlChunk.charCodeAt(i + 2) | 32) === 100 || i + 2 === chunkLength
+        ? htmlChunk.substring(i, i + 9).toLowerCase()
+        : ''
+      if (declaration && declaration.length < 9 && '<!doctype'.startsWith(declaration)) {
+        declarationPending = true
+        textBuffer += htmlChunk.substring(i)
+        break
+      }
+      if (htmlChunk.startsWith('<!--', i) || declaration === '<!doctype') {
+        if (textBuffer.length > 0) {
+          processTextBuffer(textBuffer, state, handleEvent)
+          textBuffer = ''
+        }
         runStart = i
       }
 
       const result = processCommentOrDoctype(htmlChunk, i)
       if (result.complete) {
         i = result.newPosition
-        runStart = i
+        if (textBuffer.length === 0)
+          runStart = i
       }
       else {
         declarationPending = true
@@ -1066,8 +1081,8 @@ function parseHtmlInternal(
           const boundary = comment
             ? (result.remainingText.length <= 7 ? result.remainingText : `<!--x${result.remainingText.slice(-3)}`)
             : '<!x'
-          state.trailingText = boundary
-          return boundary
+          state.trailingText = textBuffer
+          return htmlChunk.substring(runStart, i) + boundary
         }
         textBuffer += result.remainingText
         break
@@ -1077,21 +1092,22 @@ function parseHtmlInternal(
       || (nextCharCode === SLASH_CHAR && i + 2 < chunkLength
         && htmlChunk.charCodeAt(i + 2) !== GT_CHAR && !isAsciiAlpha(htmlChunk.charCodeAt(i + 2))))
       && !state.currentNode?.tagHandler?.isNonNesting) {
-      if (textBuffer.length > 0) {
-        processTextBuffer(textBuffer, state, handleEvent)
-        textBuffer = ''
-      }
       // Bogus comments end at the first `>`, even inside quotes.
       const end = htmlChunk.indexOf('>', i + 2)
       if (end === -1) {
-        state.trailingText = '<!x'
-        return '<!x'
+        state.trailingText = textBuffer
+        return `${htmlChunk.substring(runStart, i)}<!x`
       }
       i = end + 1
-      runStart = i
+      if (textBuffer.length === 0)
+        runStart = i
     }
     // CLOSING TAG
     else if (nextCharCode === SLASH_CHAR) {
+      if (i + 2 === chunkLength) {
+        textBuffer += htmlChunk.substring(i)
+        break
+      }
       if (state.currentNode?.tagHandler?.isNonNesting) {
         // Peek at the closing tag name to check if it matches the non-nesting tag
         let peekEnd = i + 2

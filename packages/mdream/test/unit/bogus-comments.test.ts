@@ -2,11 +2,27 @@ import { describe, expect, it } from 'vitest'
 import { engines } from '../utils/engines'
 
 const cases = [
+  ['<p>a<!x>b</p>', 'ab'],
+  ['<p>a<?x', 'a'],
+  ['<p>a<!x', 'a'],
+  ['<p>a</ x', 'a'],
+  ['<p>a <?x?>b</p>', 'a b'],
+  ['<p>a<?x?> b</p>', 'a b'],
+  ['<p>a&amp;<?x?>b</p>', 'a&b'],
+  ['<code>a<?x?>b</code>', '`ab`'],
+  ['<pre>a<!x>b</pre>', '```\nab\n```'],
+  ['<textarea>a</ x>b</textarea>', 'a\\</ x>b'],
+  ['<textarea>a<!x', 'a\\<!x'],
+  ['<p>a<!dud>b</p>', 'ab'],
+  ['<p>a</ x>b</p>', 'ab'],
+  ['<p>a<?x?>b</p>', 'ab'],
+  ['<pre>a<?x?>b</pre>', '```\nab\n```'],
+  ['<textarea>a<!x>b</textarea>', 'a\\<!x>b'],
   ['<p>a</>b</p>', 'ab'],
-  ['<p>a</1x>b</p>', 'a b'],
-  ['<p>a</?x>b</p>', 'a b'],
-  ['<p>a<?x y=">">b</p>', 'a ">b'],
-  ['<p>a</ x y=">">b</p>', 'a ">b'],
+  ['<p>a</1x>b</p>', 'ab'],
+  ['<p>a</?x>b</p>', 'ab'],
+  ['<p>a<?x y=">">b</p>', 'a">b'],
+  ['<p>a</ x y=">">b</p>', 'a">b'],
   [
     '<p><a href="/c">x<?x?> </a>Next</p>',
     '[x](/c) Next',
@@ -41,23 +57,23 @@ const cases = [
   ],
   [
     '<p>before<?x y=">after</p>',
-    'before after',
+    'beforeafter',
   ],
   [
     '<p>before<!x y=">after</p>',
-    'before after',
+    'beforeafter',
   ],
   [
     '<p>before</ x y=">after</p>',
-    'before after',
+    'beforeafter',
   ],
   [
     '<p>before<?--x>after</p>',
-    'before after',
+    'beforeafter',
   ],
   [
     '<p>before<?[CDATA[x>after</p>',
-    'before after',
+    'beforeafter',
   ],
   [
     '<p>before</p><?x',

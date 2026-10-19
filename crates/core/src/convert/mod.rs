@@ -1941,9 +1941,25 @@ impl ConvertState {
           carry_bounded = true;
           break;
         }
-        self.complete_text_node(&mut text_buffer);
-        if self.held_output_exceeded {
-          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+        if remaining.len() < 9
+          && b"<!doctype"[..remaining.len()].eq_ignore_ascii_case(remaining.as_bytes())
+        {
+          run_start = i;
+          carry = true;
+          carry_bounded = true;
+          break;
+        }
+        if cdata.is_some()
+          || remaining.starts_with("<!--")
+          || remaining
+            .as_bytes()
+            .get(..9)
+            .is_some_and(|s| s.eq_ignore_ascii_case(b"<!doctype"))
+        {
+          self.complete_text_node(&mut text_buffer);
+          if self.held_output_exceeded {
+            return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+          }
         }
         run_start = i;
         if cdata.is_some() {
@@ -1969,10 +1985,6 @@ impl ConvertState {
           && !bytes[i + 2].is_ascii_alphabetic())
       {
         // Bogus comments end at the first `>`, even inside quotes.
-        self.complete_text_node(&mut text_buffer);
-        if self.held_output_exceeded {
-          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
-        }
         run_start = i;
         let Some(len) = discarded_gt(&chunk[i..]) else {
           self.discard_declaration(&chunk[i..]);
@@ -1980,6 +1992,12 @@ impl ConvertState {
         };
         i += len;
       } else if next == SLASH_CHAR {
+        if i + 2 == chunk_length {
+          run_start = i;
+          carry = true;
+          carry_bounded = true;
+          break;
+        }
         self.complete_text_node(&mut text_buffer);
         if self.held_output_exceeded {
           return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
