@@ -55,19 +55,8 @@ describe('filter plugin', () => {
     const options = { plugins: [filterPlugin()] }
     expect(htmlToMarkdown(html, options)).toBe('[Cart](/cart)')
     expect(htmlToMarkdownSplitChunks(html, { ...options, chunkSize: 1000 }).map(chunk => chunk.content).join('')).toBe('[Cart](/cart)')
-    for (let width = 1; width <= html.length; width++) {
-      const input = new ReadableStream<string>({
-        start(controller) {
-          for (let offset = 0; offset < html.length; offset += width)
-            controller.enqueue(html.slice(offset, offset + width))
-          controller.close()
-        },
-      })
-      let output = ''
-      for await (const chunk of streamHtmlToMarkdown(input, options))
-        output += chunk
-      expect(output, `width=${width}`).toBe('[Cart](/cart)')
-    }
+    for (let width = 1; width <= html.length; width++)
+      expect(await collect(streamHtmlToMarkdown(chunked(html, width), options)), `width=${width}`).toBe('[Cart](/cart)')
   })
 
   it('uses the link label when a hook plugin skips all link text', () => {

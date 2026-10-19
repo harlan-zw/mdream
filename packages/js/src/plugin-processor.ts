@@ -115,7 +115,7 @@ export function processPluginsForEvent(
       }
       // The output rewrites the value before the parser counts link text, so
       // record here whether link text a hook changed is now blank.
-      if (textNode.value !== text && state.depthMap?.[TAG_A])
+      if (state.depthMap?.[TAG_A] && textNode.value !== text)
         textNode.rewrittenBlank = isBlankText(textNode.value, (state.depthMap[TAG_PRE] || 0) > 0)
     }
   }
