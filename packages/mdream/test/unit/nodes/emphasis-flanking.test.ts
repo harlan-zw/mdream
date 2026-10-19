@@ -4,20 +4,19 @@ import { engines, resolveEngine } from '../../utils/engines'
 
 type TestEngine = (typeof engines)[number]['engine']
 
-// A delimiter run next to a word character on one side and punctuation on the
-// other cannot flank. Both engines write the pair as raw HTML when its opener
-// cannot open, and follow a closer that cannot close with a character reference.
+// Closing delimiters use a reference before an ASCII word after punctuation.
+// Opening-side cases retain their existing Markdown output.
 const cases: [string, string][] = [
-  // Non-ASCII preceding characters are outside the lean opening rule.
+  // Opening-side flanking is intentionally unchanged.
   ['<p>é<strong>!b</strong></p>', 'é**!b**'],
   ['<p><i>a</i><b><a href="/y">x</a></b></p>', '*a***[x](/y)**'],
   ['<p><b><a href="/x">a</a></b><i>c</i></p>', '**[a](/x)***&#99;*'],
   ['<p><b><i>a</i></b><b><a href="/y">x</a></b></p>', '***a*****[x](/y)**'],
   ['<p><b><a href="/x">a</a></b><b><i>c</i></b></p>', '**[a](/x)*****&#99;***'],
-  ['<p>a<strong><a href="/x">b</a></strong></p>', 'a<strong>[b](/x)</strong>'],
+  ['<p>a<strong><a href="/x">b</a></strong></p>', 'a**[b](/x)**'],
   ['<p><strong><a href="/x">b</a></strong>c</p>', '**[b](/x)**&#99;'],
-  ['<p>a<em><img src="/i.png" alt="i"></em>c</p>', 'a<em>![i](/i.png)</em>c'],
-  ['<p>a<i><code>x</code></i>c</p>', 'a<em>`x`</em>c'],
+  ['<p>a<em><img src="/i.png" alt="i"></em>c</p>', 'a*![i](/i.png)*&#99;'],
+  ['<p>a<i><code>x</code></i>c</p>', 'a*`x`*&#99;'],
   ['<p>a<strong><em><a href="/x">b</a></em></strong>c</p>', 'a***[b](/x)***&#99;'],
   ['<p>a<del><a href="/x">b</a></del>c</p>', 'a ~~[b](/x)~~&#99;'],
   ['<p><strong>b!</strong>c</p>', '**b!**&#99;'],
@@ -25,21 +24,21 @@ const cases: [string, string][] = [
   // stays as written.
   ['<p>a&nbsp;<strong><a href="/x">b</a></strong>c</p>', 'a **[b](/x)**&#99;'],
   ['<p>a<strong>&nbsp;<a href="/x">b</a></strong>c</p>', 'a**  [b](/x)**&#99;'],
-  ['<blockquote><p>a<strong><a href="/x">b</a></strong>c</p></blockquote>', '> a<strong>[b](/x)</strong>c'],
-  ['<ul><li>a<em><a href="/x">b</a></em>c</li></ul>', '- a<em>[b](/x)</em>c'],
+  ['<blockquote><p>a<strong><a href="/x">b</a></strong>c</p></blockquote>', '> a**[b](/x)**&#99;'],
+  ['<ul><li>a<em><a href="/x">b</a></em>c</li></ul>', '- a*[b](/x)*&#99;'],
   ['<p>a <strong><a href="/x">b</a></strong> c</p>', 'a **[b](/x)** c'],
   ['<p><a href="/y">a<strong>b!</strong></a>c</p>', '[a**b!**](/y)c'],
-  // A block inside a decided pair leaves its closer to be written as decided.
-  ['<div>a<strong><a href="/x">b</a><div>c</div></strong>d</div><p>next</p>', 'a<strong>[b](/x) c</strong>d\n\nnext'],
-  ['<ul><li>a<strong><code>b</code><ul><li>c</li></ul></strong>d</li></ul><p>next</p>', '- a<strong>`b`  - c</strong>d\n\nnext'],
-  ['<div>a<strong>!b<figure><figcaption>c</figcaption></figure></strong>d</div><p>next</p>', 'a<strong>!b*c*</strong>d\n\nnext'],
+  // Blocks inside emphasis preserve the existing Markdown delimiters.
+  ['<div>a<strong><a href="/x">b</a><div>c</div></strong>d</div><p>next</p>', 'a**[b](/x) c**d\n\nnext'],
+  ['<ul><li>a<strong><code>b</code><ul><li>c</li></ul></strong>d</li></ul><p>next</p>', '- a**`b`  - c**d\n\nnext'],
+  ['<div>a<strong>!b<figure><figcaption>c</figcaption></figure></strong>d</div><p>next</p>', 'a**!b*c***d\n\nnext'],
   ['<div>a<strong>b<div>c!</div></strong>d</div><p>next</p>', 'a**b c!**&#100;\n\nnext'],
   // `<kbd>`, `<samp>` and `<var>` are code spans, where delimiters are literal.
   ['<p><kbd><strong>b!</strong>c</kbd></p>', '`**b!**c`'],
   ['<p><kbd>a<strong>!b</strong></kbd></p>', '`a**!b**`'],
   ['<p><samp><em>(b)</em>c</samp></p>', '`*(b)*c`'],
   ['<p><var>a<em>!b</em>c</var></p>', '`a*!b*c`'],
-  ['<p>a<strong><kbd>b</kbd></strong>c</p>', 'a<strong>`b`</strong>c'],
+  ['<p>a<strong><kbd>b</kbd></strong>c</p>', 'a**`b`**&#99;'],
 ]
 
 async function streamConvert(engine: TestEngine, html: string, chunkSize: number): Promise<string> {
@@ -114,20 +113,18 @@ describe.each(engines)('emphasis that cannot flank $name', (engineConfig) => {
       expect(await streamConvert(engine, html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
   })
 
-  // A heading slug reads a character reference and a link's text as written,
-  // so neither is used while fragment cleaning collects slugs; raw tags
-  // outside a link are dropped from the slug.
-  it('uses references and raw pairs in headings without fragment cleaning', async () => {
+  // References stay disabled while fragment cleaning collects heading slugs.
+  it('uses closer references in headings without fragment cleaning', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(engine.htmlToMarkdown('<h2><strong><a href="/x">b</a></strong>c</h2>')).toBe('## **[b](/x)**&#99;')
-    expect(engine.htmlToMarkdown('<h2><a href="/x">a<strong>!b</strong></a></h2>')).toBe('## [a<strong>!b</strong>](/x)')
+    expect(engine.htmlToMarkdown('<h2><a href="/x">a<strong>!b</strong></a></h2>')).toBe('## [a**!b**](/x)')
   })
 
   it.each([
     ['<h2><strong><a href="/x">b</a></strong>c</h2><p><a href="#bc">to</a></p>', '## **[b](/x)**c\n\n[to](#bc)'],
     ['<h2><a href="/y"><strong><code>b</code></strong>c</a></h2><p><a href="#bc">t</a></p>', '## [**`b`**c](/y)\n\n[t](#bc)'],
     ['<h2><a href="/x">a<strong>!b</strong></a></h2><p><a href="#ab">t</a></p>', '## [a**!b**](/x)\n\n[t](#ab)'],
-    ['<h2>a<strong>!b</strong>c</h2><p><a href="#abc">t</a></p>', '## a<strong>!b</strong>c\n\n[t](#abc)'],
+    ['<h2>a<strong>!b</strong>c</h2><p><a href="#abc">t</a></p>', '## a**!b**c\n\n[t](#abc)'],
   ])('keeps the heading slug of %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(engine.htmlToMarkdown(html, { clean: true })).toBe(expected)
@@ -138,8 +135,8 @@ describe.each(engines)('emphasis that cannot flank $name', (engineConfig) => {
   it.each([
     [6, '<p>1<strong>b </strong>x</p>', '1**b**\nx'],
     [80, '<p>1<strong>b </strong>x</p>', '1**b** x'],
-    [12, '<p>a<strong>!bb </strong>&nbsp;c</p>', 'a<strong>!bb</strong>\n c'],
-    [12, '<blockquote><blockquote>1<strong><del>b </del></strong>x</blockquote></blockquote>', '> > 1<strong>~~b~~</strong>\n> > x'],
+    [12, '<p>a<strong>!bb </strong>&nbsp;c</p>', 'a**!bb**  c'],
+    [12, '<blockquote><blockquote>1<strong><del>b </del></strong>x</blockquote></blockquote>', '> > 1**~~b~~** x'],
   ] as [number, string, string][])('wraps at width %i the space after the closer in %s', async (wrapWidth, html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(engine.htmlToMarkdown(html, { wrapWidth })).toBe(expected)

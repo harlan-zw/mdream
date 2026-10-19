@@ -400,7 +400,7 @@ impl ConvertState {
       tag_id,
       contains_whitespace: false,
       excluded_from_markdown: false,
-      emit_state: 0,
+      enter_skipped: false,
       is_inline: handler.is_inline,
       excludes_text_nodes: handler.excludes_text_nodes,
       is_non_nesting: handler.is_non_nesting,
@@ -1216,7 +1216,7 @@ impl ConvertState {
     tag.child_text_node_index = 0;
     tag.contains_whitespace = false;
     tag.excluded_from_markdown = false;
-    tag.emit_state = 0;
+    tag.enter_skipped = false;
     tag.is_inline = h_inline;
     tag.excludes_text_nodes = h_excludes;
     tag.is_non_nesting = h_non_nesting;
@@ -1377,7 +1377,7 @@ impl ConvertState {
     tag.excluded_from_markdown = in_template
       || filter_excluded
       || (skip_node && (!self.has_isolate_main || self.isolate_main_found));
-    tag.emit_state = if skip_node { 64 } else { 0 };
+    tag.enter_skipped = skip_node;
 
     if tag.collapses_inner_white_space && !tag.excluded_from_markdown {
       if tag.tag_id == Some(TAG_SPAN) {
@@ -1535,7 +1535,7 @@ impl ConvertState {
         node.tag_id,
         node.collapses_inner_white_space,
         node.excluded_from_markdown,
-        node.emit_state == 64,
+        node.enter_skipped,
         node.child_text_node_index,
       )
     };

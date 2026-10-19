@@ -3,46 +3,44 @@ import { clean } from '../../src/clean'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { htmlToText } from '../../src/text'
 
-// CommonMark opens a delimiter run only when it is left-flanking and closes it
-// only when it is right-flanking. An opener that cannot open turns its pair
-// into raw HTML; a closer that cannot close is followed by a character
-// reference, which starts with punctuation.
+// A closer after punctuation needs a character reference before an ASCII word.
+// Opening delimiters remain unchanged, including unsupported opening-side cases.
 const cases: [string, string][] = [
-  // Non-ASCII preceding characters are outside the lean opening rule.
+  // Opening-side flanking is intentionally unchanged.
   ['<p>é<strong>!b</strong></p>', 'é**!b**'],
-  ['<p>a<strong><span><span><a href="/x">b</a></span></span></strong><span>c</span></p>', 'a<strong>[b](/x)</strong>c'],
+  ['<p>a<strong><span><span><a href="/x">b</a></span></span></strong><span>c</span></p>', 'a**[b](/x)**&#99;'],
   ['<p><strong><span><a href="/x">b</a></span></strong><span><span>c</span></span></p>', '**[b](/x)**&#99;'],
   ['<p><i>a</i><b><a href="/y">x</a></b></p>', '*a***[x](/y)**'],
   ['<p><b><a href="/x">a</a></b><i>c</i></p>', '**[a](/x)***&#99;*'],
   ['<p><b><i>a</i></b><b><a href="/y">x</a></b></p>', '***a*****[x](/y)**'],
   ['<p><b><a href="/x">a</a></b><b><i>c</i></b></p>', '**[a](/x)*****&#99;***'],
-  ['<p>a<strong><a href="/x">b</a></strong></p>', 'a<strong>[b](/x)</strong>'],
+  ['<p>a<strong><a href="/x">b</a></strong></p>', 'a**[b](/x)**'],
   ['<p><strong><a href="/x">b</a></strong>c</p>', '**[b](/x)**&#99;'],
-  ['<p>a<b><a href="/x">b</a></b>c</p>', 'a<strong>[b](/x)</strong>c'],
-  ['<p>a<em><img src="/i.png" alt="i"></em>c</p>', 'a<em>![i](/i.png)</em>c'],
-  ['<p>a<i><code>x</code></i>c</p>', 'a<em>`x`</em>c'],
+  ['<p>a<b><a href="/x">b</a></b>c</p>', 'a**[b](/x)**&#99;'],
+  ['<p>a<em><img src="/i.png" alt="i"></em>c</p>', 'a*![i](/i.png)*&#99;'],
+  ['<p>a<i><code>x</code></i>c</p>', 'a*`x`*&#99;'],
   ['<p>a<strong><em><a href="/x">b</a></em></strong>c</p>', 'a***[b](/x)***&#99;'],
   ['<p>a<del><a href="/x">b</a></del>c</p>', 'a ~~[b](/x)~~&#99;'],
   ['<p><s><a href="/x">b</a></s>c</p>', '~~[b](/x)~~&#99;'],
-  ['<p>a<strong>!b</strong></p>', 'a<strong>!b</strong>'],
+  ['<p>a<strong>!b</strong></p>', 'a**!b**'],
   ['<p><strong>b!</strong>c</p>', '**b!**&#99;'],
   ['<p><strong><a href="/x">b</a></strong><span>c</span></p>', '**[b](/x)**&#99;'],
   ['<p>a<strong>b <a href="/x">c</a></strong>d</p>', 'a**b [c](/x)**&#100;'],
   // A no-break space counts as whitespace next to a delimiter run.
   ['<p>a&nbsp;<strong><a href="/x">b</a></strong>c</p>', 'a **[b](/x)**&#99;'],
-  ['<table><tr><th>h</th></tr><tr><td>a<strong><a href="/x">b</a></strong>c</td></tr></table>', '| h |\n| --- |\n| a<strong>[b](/x)</strong>c |'],
+  ['<table><tr><th>h</th></tr><tr><td>a<strong><a href="/x">b</a></strong>c</td></tr></table>', '| h |\n| --- |\n| a**[b](/x)**&#99; |'],
   // Delimiters that flank stay as they are.
   ['<p>a <strong><a href="/x">b</a></strong> c</p>', 'a **[b](/x)** c'],
   ['<p>a<strong>b</strong>c</p>', 'a**b**c'],
   ['<p><a href="/y">a<strong>b!</strong></a>c</p>', '[a**b!**](/y)c'],
   // A strikethrough opener is not followed by a separator.
   ['<p><del><a href="/x">b</a></del></p>', '~~[b](/x)~~'],
-  // A block inside a decided pair leaves its closer to be written as decided.
-  ['<div>a<strong><a href="/x">b</a><div>c</div></strong>d</div><p>next</p>', 'a<strong>[b](/x) c</strong>d\n\nnext'],
-  ['<div>x<em>!<p>c</p></em>d</div><p>next</p>', 'x<em>! c</em>d\n\nnext'],
-  ['<ul><li>a<strong><code>b</code><ul><li>c</li></ul></strong>d</li></ul><p>next</p>', '- a<strong>`b`  - c</strong>d\n\nnext'],
-  ['<div>a<strong>!b<hr></strong>d</div><p>next</p>', 'a<strong>!b ---</strong>d\n\nnext'],
-  ['<div>a<strong>!b<figure><figcaption>c</figcaption></figure></strong>d</div><p>next</p>', 'a<strong>!b*c*</strong>d\n\nnext'],
+  // Blocks inside emphasis preserve the existing Markdown delimiters.
+  ['<div>a<strong><a href="/x">b</a><div>c</div></strong>d</div><p>next</p>', 'a**[b](/x) c**d\n\nnext'],
+  ['<div>x<em>!<p>c</p></em>d</div><p>next</p>', 'x*! c*d\n\nnext'],
+  ['<ul><li>a<strong><code>b</code><ul><li>c</li></ul></strong>d</li></ul><p>next</p>', '- a**`b`  - c**d\n\nnext'],
+  ['<div>a<strong>!b<hr></strong>d</div><p>next</p>', 'a**!b ---**&#100;\n\nnext'],
+  ['<div>a<strong>!b<figure><figcaption>c</figcaption></figure></strong>d</div><p>next</p>', 'a**!b*c***d\n\nnext'],
   ['<div>a<strong>b<div>c!</div></strong>d</div><p>next</p>', 'a**b c!**&#100;\n\nnext'],
 ]
 
@@ -72,7 +70,7 @@ describe('emphasis delimiters that cannot flank', () => {
     ['<h2>Q<a href="#q">#</a></h2>', '## Q \\#'],
     ['<h2>Q<a href="#q">##</a></h2>', '## Q \\##'],
     ['<h2><strong>b!</strong><a href="#x">c</a></h2>', '## **b!**c'],
-    ['<h2><a href="#x">x</a><strong>!b</strong></h2>', '## x<strong>!b</strong>'],
+    ['<h2><a href="#x">x</a><strong>!b</strong></h2>', '## x**!b**'],
     ['<h2>x<a href="#x"><strong>!b</strong></a></h2>', '## x **!b**'],
     ['<h2><a href="#x"><strong>b!</strong></a>c</h2>', '## **b!**&#99;'],
     ['<h2><a href="#x"><strong><em>b!</em></strong></a><span>c</span></h2>', '## ***b!***&#99;'],
@@ -195,28 +193,26 @@ describe('emphasis delimiters that cannot flank', () => {
     const output = streamHtmlToMarkdown(input)[Symbol.asyncIterator]()
     feed.enqueue('<p>a<b><a href="/x">link</a><span>')
     const first = await output.next()
-    expect(first.value).toContain('a<strong>[link](/x)')
+    expect(first.value).toContain('a**[link](/x)')
     feed.enqueue('more</span></b>c</p>')
     feed.close()
     let rest = ''
     for (let chunk = await output.next(); !chunk.done; chunk = await output.next())
       rest += chunk.value
-    expect(first.value + rest).toBe('a<strong>[link](/x)more</strong>c')
+    expect(first.value + rest).toBe('a**[link](/x)more**c')
   })
 
-  // A heading slug reads a character reference and a link's text as written,
-  // so neither is used while fragment cleaning collects slugs; raw tags
-  // outside a link are dropped from the slug.
-  it('uses references and raw pairs in headings without fragment cleaning', () => {
+  // References stay disabled while fragment cleaning collects heading slugs.
+  it('uses closer references in headings without fragment cleaning', () => {
     expect(htmlToMarkdown('<h2><strong><a href="/x">b</a></strong>c</h2>')).toBe('## **[b](/x)**&#99;')
-    expect(htmlToMarkdown('<h2><a href="/x">a<strong>!b</strong></a></h2>')).toBe('## [a<strong>!b</strong>](/x)')
+    expect(htmlToMarkdown('<h2><a href="/x">a<strong>!b</strong></a></h2>')).toBe('## [a**!b**](/x)')
   })
 
   it.each([
     ['<h2><strong><a href="/x">b</a></strong>c</h2><p><a href="#bc">to</a></p>', '## **[b](/x)**c\n\n[to](#bc)'],
     ['<h2><a href="/y"><strong><code>b</code></strong>c</a></h2><p><a href="#bc">t</a></p>', '## [**`b`**c](/y)\n\n[t](#bc)'],
     ['<h2><a href="/x">a<strong>!b</strong></a></h2><p><a href="#ab">t</a></p>', '## [a**!b**](/x)\n\n[t](#ab)'],
-    ['<h2>a<strong>!b</strong>c</h2><p><a href="#abc">t</a></p>', '## a<strong>!b</strong>c\n\n[t](#abc)'],
+    ['<h2>a<strong>!b</strong>c</h2><p><a href="#abc">t</a></p>', '## a**!b**c\n\n[t](#abc)'],
   ])('keeps the heading slug of %s', (html, expected) => {
     expect(htmlToMarkdown(html, { clean: clean() })).toBe(expected)
   })
@@ -226,8 +222,8 @@ describe('emphasis delimiters that cannot flank', () => {
   it.each([
     [6, '<p>1<strong>b </strong>x</p>', '1**b**\nx'],
     [80, '<p>1<strong>b </strong>x</p>', '1**b** x'],
-    [12, '<p>a<strong>!bb </strong>&nbsp;c</p>', 'a<strong>!bb</strong>\n c'],
-    [12, '<blockquote><blockquote>1<strong><del>b </del></strong>x</blockquote></blockquote>', '> > 1<strong>~~b~~</strong>\n> > x'],
+    [12, '<p>a<strong>!bb </strong>&nbsp;c</p>', 'a**!bb**  c'],
+    [12, '<blockquote><blockquote>1<strong><del>b </del></strong>x</blockquote></blockquote>', '> > 1**~~b~~** x'],
   ] as [number, string, string][])('wraps at width %i the space after the closer in %s', (wrapWidth, html, expected) => {
     expect(htmlToMarkdown(html, { wrapWidth })).toBe(expected)
   })
@@ -250,6 +246,6 @@ describe('emphasis delimiters that cannot flank', () => {
     expect(htmlToMarkdown('<p><kbd>a<strong>!b</strong></kbd></p>')).toBe('`a**!b**`')
     expect(htmlToMarkdown('<p><samp><em>(b)</em>c</samp></p>')).toBe('`*(b)*c`')
     expect(htmlToMarkdown('<p><var>a<em>!b</em>c</var></p>')).toBe('`a*!b*c`')
-    expect(htmlToMarkdown('<p>a<strong><kbd>b</kbd></strong>c</p>')).toBe('a<strong>`b`</strong>c')
+    expect(htmlToMarkdown('<p>a<strong><kbd>b</kbd></strong>c</p>')).toBe('a**`b`**&#99;')
   })
 })

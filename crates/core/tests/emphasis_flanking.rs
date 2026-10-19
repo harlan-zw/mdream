@@ -1,7 +1,5 @@
-//! A delimiter run next to a word character on one side and punctuation on the
-//! other is neither left- nor right-flanking in CommonMark. An opener that
-//! cannot open turns its pair into raw HTML; a closer that cannot close is
-//! followed by a character reference, which starts with punctuation.
+//! Closing delimiters use a reference before an ASCII word after punctuation.
+//! Opening-side cases retain their existing Markdown output.
 
 use mdream::CleanConfig;
 use mdream::MarkdownStreamProcessor;
@@ -9,11 +7,11 @@ use mdream::types::HtmlToMarkdownOptions;
 use mdream::{html_to_markdown, html_to_text};
 
 const CASES: &[(&str, &str)] = &[
-  // Non-ASCII preceding characters are outside the lean opening rule.
+  // Opening-side flanking is intentionally unchanged.
   ("<p>é<strong>!b</strong></p>", "é**!b**"),
   (
     r#"<p>a<strong><span><span><a href="/x">b</a></span></span></strong><span>c</span></p>"#,
-    "a<strong>[b](/x)</strong>c",
+    "a**[b](/x)**&#99;",
   ),
   (
     r#"<p><strong><span><a href="/x">b</a></span></strong><span><span>c</span></span></p>"#,
@@ -37,21 +35,18 @@ const CASES: &[(&str, &str)] = &[
   ),
   (
     r#"<p>a<strong><a href="/x">b</a></strong></p>"#,
-    "a<strong>[b](/x)</strong>",
+    "a**[b](/x)**",
   ),
   (
     r#"<p><strong><a href="/x">b</a></strong>c</p>"#,
     "**[b](/x)**&#99;",
   ),
-  (
-    r#"<p>a<b><a href="/x">b</a></b>c</p>"#,
-    "a<strong>[b](/x)</strong>c",
-  ),
+  (r#"<p>a<b><a href="/x">b</a></b>c</p>"#, "a**[b](/x)**&#99;"),
   (
     r#"<p>a<em><img src="/i.png" alt="i"></em>c</p>"#,
-    "a<em>![i](/i.png)</em>c",
+    "a*![i](/i.png)*&#99;",
   ),
-  ("<p>a<i><code>x</code></i>c</p>", "a<em>`x`</em>c"),
+  ("<p>a<i><code>x</code></i>c</p>", "a*`x`*&#99;"),
   (
     r#"<p>a<strong><em><a href="/x">b</a></em></strong>c</p>"#,
     "a***[b](/x)***&#99;",
@@ -61,7 +56,7 @@ const CASES: &[(&str, &str)] = &[
     "a ~~[b](/x)~~&#99;",
   ),
   (r#"<p><s><a href="/x">b</a></s>c</p>"#, "~~[b](/x)~~&#99;"),
-  ("<p>a<strong>!b</strong></p>", "a<strong>!b</strong>"),
+  ("<p>a<strong>!b</strong></p>", "a**!b**"),
   ("<p><strong>b!</strong>c</p>", "**b!**&#99;"),
   (
     r#"<p><strong><a href="/x">b</a></strong><span>c</span></p>"#,
@@ -78,11 +73,11 @@ const CASES: &[(&str, &str)] = &[
   ),
   (
     r#"<table><tr><th>h</th></tr><tr><td>a<strong><a href="/x">b</a></strong>c</td></tr></table>"#,
-    "| h |\n| --- |\n| a<strong>[b](/x)</strong>c |",
+    "| h |\n| --- |\n| a**[b](/x)**&#99; |",
   ),
   (
     r#"<blockquote><p>a<strong><a href="/x">b</a></strong>c</p></blockquote>"#,
-    "> a<strong>[b](/x)</strong>c",
+    "> a**[b](/x)**&#99;",
   ),
   // Delimiters that flank stay as they are.
   (
@@ -96,26 +91,26 @@ const CASES: &[(&str, &str)] = &[
   ),
   // A strikethrough opener is not followed by a separator.
   (r#"<p><del><a href="/x">b</a></del></p>"#, "~~[b](/x)~~"),
-  // A block inside a decided pair leaves its closer to be written as decided.
+  // Blocks inside emphasis preserve the existing Markdown delimiters.
   (
     r#"<div>a<strong><a href="/x">b</a><div>c</div></strong>d</div><p>next</p>"#,
-    "a<strong>[b](/x) c</strong>d\n\nnext",
+    "a**[b](/x) c**d\n\nnext",
   ),
   (
     "<div>x<em>!<p>c</p></em>d</div><p>next</p>",
-    "x<em>! c</em>d\n\nnext",
+    "x*! c*d\n\nnext",
   ),
   (
     "<ul><li>a<strong><code>b</code><ul><li>c</li></ul></strong>d</li></ul><p>next</p>",
-    "- a<strong>`b`  - c</strong>d\n\nnext",
+    "- a**`b`  - c**d\n\nnext",
   ),
   (
     "<div>a<strong>!b<hr></strong>d</div><p>next</p>",
-    "a<strong>!b ---</strong>d\n\nnext",
+    "a**!b ---**&#100;\n\nnext",
   ),
   (
     "<div>a<strong>!b<figure><figcaption>c</figcaption></figure></strong>d</div><p>next</p>",
-    "a<strong>!b*c*</strong>d\n\nnext",
+    "a**!b*c***d\n\nnext",
   ),
   (
     "<div>a<strong>b<div>c!</div></strong>d</div><p>next</p>",
@@ -135,7 +130,7 @@ fn stream_chunks(html: &str, chunk: usize, options: &HtmlToMarkdownOptions) -> S
 }
 
 #[test]
-fn writes_flanking_delimiters_or_raw_html() {
+fn writes_closer_references() {
   for &(html, expected) in CASES {
     assert_eq!(
       html_to_markdown(html, HtmlToMarkdownOptions::default()),
@@ -169,13 +164,13 @@ fn open_emphasis_still_yields_content_before_close() {
   let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let first = stream.process_chunk(r#"<p>a<b><a href="/x">link</a><span>"#);
   assert!(
-    first.contains("a<strong>[link](/x)"),
+    first.contains("a**[link](/x)"),
     "content held until close: {first:?}"
   );
   let mut full = first;
   full.push_str(&stream.process_chunk("more</span></b>c</p>"));
   full.push_str(&stream.finish());
-  assert_eq!(full, "a<strong>[link](/x)more</strong>c");
+  assert_eq!(full, "a**[link](/x)more**c");
 
   let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
   let first = stream.process_chunk("<p><b>x!<span>");
@@ -203,7 +198,7 @@ fn heading_link_cleanup_keeps_streaming_parity() {
     ),
     (
       r##"<h2><a href="#x">x</a><strong>!b</strong></h2>"##,
-      "## x<strong>!b</strong>",
+      "## x**!b**",
     ),
     (
       r##"<h2>x<a href="#x"><strong>!b</strong></a></h2>"##,
@@ -331,9 +326,7 @@ fn deferred_fragment_cleanup_keeps_streaming_parity() {
 
 #[test]
 fn heading_slugs_still_match_fragment_links() {
-  // A heading slug reads a character reference and a link's text as written,
-  // so neither is used while fragment cleaning collects slugs; raw tags
-  // outside a link are dropped from the slug.
+  // References stay disabled while fragment cleaning collects heading slugs.
   for (html, expected) in [
     (
       r#"<h2><strong><a href="/x">b</a></strong>c</h2>"#,
@@ -341,7 +334,7 @@ fn heading_slugs_still_match_fragment_links() {
     ),
     (
       r#"<h2><a href="/x">a<strong>!b</strong></a></h2>"#,
-      "## [a<strong>!b</strong>](/x)",
+      "## [a**!b**](/x)",
     ),
   ] {
     assert_eq!(
@@ -366,7 +359,7 @@ fn heading_slugs_still_match_fragment_links() {
     ),
     (
       r##"<h2>a<strong>!b</strong>c</h2><p><a href="#abc">t</a></p>"##,
-      "## a<strong>!b</strong>c\n\n[t](#abc)",
+      "## a**!b**c\n\n[t](#abc)",
     ),
   ] {
     assert_eq!(
@@ -394,12 +387,12 @@ fn wraps_at_the_space_moved_past_a_closer() {
     (
       12,
       "<p>a<strong>!bb </strong>&nbsp;c</p>",
-      "a<strong>!bb</strong>\n\u{a0}c",
+      "a**!bb** \u{a0}c",
     ),
     (
       12,
       "<blockquote><blockquote>1<strong><del>b </del></strong>x</blockquote></blockquote>",
-      "> > 1<strong>~~b~~</strong>\n> > x",
+      "> > 1**~~b~~** x",
     ),
   ] {
     let options = HtmlToMarkdownOptions::default().with_wrap_width(width);
@@ -472,10 +465,7 @@ fn keeps_delimiters_where_a_fix_cannot_help() {
     ("<p><kbd>a<strong>!b</strong></kbd></p>", "`a**!b**`"),
     ("<p><samp><em>(b)</em>c</samp></p>", "`*(b)*c`"),
     ("<p><var>a<em>!b</em>c</var></p>", "`a*!b*c`"),
-    (
-      "<p>a<strong><kbd>b</kbd></strong>c</p>",
-      "a<strong>`b`</strong>c",
-    ),
+    ("<p>a<strong><kbd>b</kbd></strong>c</p>", "a**`b`**&#99;"),
   ] {
     assert_eq!(
       html_to_markdown(html, HtmlToMarkdownOptions::default()),

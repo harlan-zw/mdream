@@ -26,16 +26,6 @@ const DESTINATION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 80, 0, 0, 0, 16, 0, 
 const TITLE_ESCAPES: [u8; 16] = [0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0];
 const IMAGE_DESCRIPTION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 64, 4, 0, 16, 0, 0, 0, 184, 1, 0, 0, 64];
 
-const FLANK_DELIMITER: [&str; 5] = ["", "**", "*", "~~", "*"];
-const FLANK_RAW_OPEN: [&str; 5] = ["", "<strong>", "<em>", "<del>", "<em>"];
-const FLANK_RAW_CLOSE: [&str; 5] = ["", "</strong>", "</em>", "</del>", "</em>"];
-#[inline]
-fn shift_past(offset: &mut usize, at: usize, delta: usize) {
-  if *offset > at {
-    *offset += delta;
-  }
-}
-
 /// Tags the simple element emitters handle, indexed by tag id.
 static SIMPLE_EMIT_TAG: [bool; MAX_TAG_ID] = {
   let mut table = [true; MAX_TAG_ID];
@@ -1088,75 +1078,13 @@ impl ConvertState {
         output_start: marker_start,
         content_start: self.buffer.len(),
         kind: inline_marker_type,
-        node_index: (self.stack.len() - 1) as u32,
         starts_at_hard_break: self.hard_break_end == marker_start,
       });
-      if inline_marker_type <= 4 {
-        let bytes = self.buffer.as_bytes();
-        let byte = if marker_start == 0 {
-          self.flushed_tail[1]
-        } else {
-          bytes[marker_start - 1]
-        };
-        if byte.is_ascii_alphanumeric() {
-          self.open_markers.last_mut().unwrap().kind |= 128;
-        }
-      }
     } else if !keeps_markers
       && !self.open_markers.is_empty()
       && output.is_some_and(|o| has_visible(o.as_bytes()))
     {
-      self.resolve_emphasis();
       self.open_markers.clear();
-    }
-  }
-
-  #[inline(always)]
-  fn resolve_emphasis(&mut self) {
-    if self
-      .open_markers
-      .first()
-      .is_some_and(|marker| marker.kind & 128 != 0)
-    {
-      self.resolve_pending_emphasis();
-    }
-  }
-
-  #[inline(never)]
-  fn resolve_pending_emphasis(&mut self) {
-    let Some(marker) = self.open_markers.first().copied() else {
-      return;
-    };
-    let kind = (marker.kind & 7) as usize;
-    if kind > 4 || marker.node_index as usize >= self.stack.len() {
-      return;
-    }
-    let bytes = self.buffer.as_bytes();
-    let mark = FLANK_DELIMITER[kind].as_bytes()[0];
-    let Some(&first) = bytes.get(marker.content_start) else {
-      return;
-    };
-    if first != mark
-      && first.is_ascii_punctuation()
-      && !self.has_tag_overrides
-      && self.is_markdown()
-      && self.caption_frames.is_empty()
-      && !self.in_raw_html_block()
-      && !self.stack[..marker.node_index as usize].iter().any(|node| {
-        matches!(
-          node.tag_id,
-          Some(TAG_PRE | TAG_CODE | TAG_KBD | TAG_SAMP | TAG_VAR)
-        ) || (node.tag_id == Some(TAG_A)
-          && self.clean_flags & CLEAN_FRAGMENTS != 0
-          && self.in_heading())
-      })
-    {
-      self.stack[marker.node_index as usize].emit_state = 128 | kind as u8;
-      self.replace_flank_bytes(
-        marker.output_start,
-        FLANK_DELIMITER[kind].len(),
-        FLANK_RAW_OPEN[kind],
-      );
     }
   }
 
@@ -1170,34 +1098,6 @@ impl ConvertState {
       && self.depth_map[TAG_SAMP as usize] == 0
       && self.depth_map[TAG_VAR as usize] == 0
       && !self.in_raw_html_block()
-  }
-
-  // At first content, only nested markers, code spans and links can start after the opener.
-  fn replace_flank_bytes(&mut self, at: usize, len: usize, value: &str) {
-    let delta = value.len() - len;
-    if at
-      >= self
-        .buffer
-        .len()
-        .saturating_sub(self.last_content_cache_len)
-    {
-      self.last_content_cache_len += delta;
-    }
-    self.note_buffer_rewrite(at);
-    replace_buffer_range(&mut self.buffer, at..at + len, value);
-    for marker in &mut self.open_markers {
-      shift_past(&mut marker.output_start, at, delta);
-      shift_past(&mut marker.content_start, at, delta);
-    }
-    for span in &mut self.code_spans {
-      shift_past(&mut span.output_start, at, delta);
-      shift_past(&mut span.content_start, at, delta);
-    }
-    shift_past(&mut self.link.bracket_pos, at, delta);
-    for link in &mut self.parent_links {
-      shift_past(&mut link.bracket_pos, at, delta);
-    }
-    self.invalidate_line_start();
   }
 
   /// Put the list separator owed by a hard break in front of a block's fragment.
@@ -1329,7 +1229,6 @@ impl ConvertState {
       if !(self.open_markers.is_empty() || self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0)
         && output.as_deref().is_some_and(|o| has_visible(o.as_bytes()))
       {
-        self.resolve_emphasis();
         self.open_markers.clear();
       }
       if !is_inline && !self.open_markers.is_empty() {
@@ -1381,7 +1280,7 @@ impl ConvertState {
     let Some(open_marker) = self.open_markers.pop() else {
       return false;
     };
-    if open_marker.kind & 7 == inline_marker_type
+    if open_marker.kind == inline_marker_type
       && open_marker.content_start <= self.buffer.len()
       && self.buffer.as_bytes()[open_marker.content_start..]
         .iter()
@@ -1412,7 +1311,7 @@ impl ConvertState {
     } else {
       self.element_fast_path_ok(node.tag_id)
     });
-    if node.excluded_from_markdown || node.emit_state == 64 {
+    if node.excluded_from_markdown || node.enter_skipped {
       self.last_node_is_inline = node.is_inline;
       return;
     }
@@ -2235,7 +2134,7 @@ impl ConvertState {
   pub(crate) fn emit_exit_element(&mut self, node: &ElementNode) {
     // A skipped <pre> can still own the fence opened by an eligible <code> child.
     if node.excluded_from_markdown
-      || (node.emit_state == 64
+      || (node.enter_skipped
         && (node.tag_id != Some(TAG_PRE)
           || self.pre_fence_owner_depth != self.depth_map[TAG_PRE as usize]))
     {
@@ -2262,7 +2161,7 @@ impl ConvertState {
 
     // A skipped node must never emit its own override exit. The only output
     // allowed below is the matching close for a fence opened by its child.
-    let override_config = if node.emit_state == 64 {
+    let override_config = if node.enter_skipped {
       None
     } else if self.has_tag_overrides {
       let ovs = self
@@ -2771,11 +2670,11 @@ impl ConvertState {
 
   fn take_emphasis_reference(&mut self, text: &str) -> u8 {
     let mark = std::mem::take(&mut self.pending_emphasis);
-    if self.last_output_byte() == Some(mark)
-      && text
-        .as_bytes()
-        .first()
-        .is_some_and(u8::is_ascii_alphanumeric)
+    if text
+      .as_bytes()
+      .first()
+      .is_some_and(u8::is_ascii_alphanumeric)
+      && self.last_output_byte() == Some(mark)
     {
       text.as_bytes()[0]
     } else {
@@ -2783,15 +2682,19 @@ impl ConvertState {
     }
   }
 
+  fn write_emphasis_reference(buffer: &mut String, code: u8, text: &str) {
+    buffer.push_str("&#");
+    push_decimal(buffer, u32::from(code));
+    buffer.push(';');
+    buffer.push_str(&text[1..]);
+  }
+
   #[inline(never)]
   fn push_emphasis_text(&mut self, text: &str) {
     let code = self.take_emphasis_reference(text);
     let start = self.buffer.len();
     if code != 0 {
-      self.buffer.push_str("&#");
-      push_decimal(&mut self.buffer, u32::from(code));
-      self.buffer.push(';');
-      self.buffer.push_str(&text[1..]);
+      Self::write_emphasis_reference(&mut self.buffer, code, text);
       self.last_content_cache_len += self.buffer.len() - start - text.len();
     } else {
       self.buffer.push_str(text);
@@ -2824,7 +2727,6 @@ impl ConvertState {
     if !self.open_markers.is_empty() || self.held_break_bytes != 0 {
       let visible = has_visible(text.as_bytes());
       if visible {
-        self.resolve_emphasis();
         self.open_markers.clear();
         // A tentative caption may still retract the held breaks.
         if self.held_break_bytes != 0 && self.first_tentative_caption_start().is_none() {
@@ -3143,12 +3045,13 @@ impl ConvertState {
     };
 
     let written_from = self.buffer.len();
-    let emphasis_text;
+    let mut emphasis_text;
     let text =
       if self.pending_emphasis != 0 && (self.wrap_width != 0 || self.options.max_node_bytes != 0) {
         let code = self.take_emphasis_reference(text);
         if code != 0 {
-          emphasis_text = format!("&#{code};{}", &text[1..]);
+          emphasis_text = String::with_capacity(text.len() + 6);
+          Self::write_emphasis_reference(&mut emphasis_text, code, text);
           emphasis_text.as_str()
         } else {
           text
@@ -4793,11 +4696,6 @@ impl ConvertState {
       return Self::get_text_exit_output(node);
     }
 
-    if node.emit_state & 128 != 0 {
-      return Some(Cow::Borrowed(
-        FLANK_RAW_CLOSE[(node.emit_state & 7) as usize],
-      ));
-    }
     let tag_id = node.tag_id?;
     if self.depth_map[TAG_PRE as usize] > 0 && suppresses_formatting_in_pre(tag_id) {
       return None;
@@ -5691,7 +5589,7 @@ mod tests {
       tag_id: Some(tag_id),
       contains_whitespace: false,
       excluded_from_markdown: false,
-      emit_state: 0,
+      enter_skipped: false,
       is_inline,
       excludes_text_nodes: false,
       is_non_nesting: false,

@@ -180,7 +180,6 @@ INLINE_MARKER_TYPE[TAG_SAMP] = 5 // `
 INLINE_MARKER_TYPE[TAG_VAR] = 5 // `
 INLINE_MARKER_TYPE[TAG_Q] = 6 // "
 
-const FLANK_TAG = ['', 'strong', 'em', 'del', 'em']
 function isAsciiPunctuation(code: number): boolean {
   return code >= 33 && code <= 126 && !isAsciiAlphanumeric(code)
 }
@@ -1723,7 +1722,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (openLinkFragment >= 0 && hasVisibleText)
           openLinkFragment = -openLinkFragment - 2
         if (openMarkerCount && hasVisibleText) {
-          resolveEmphasis(textNode)
           openMarkerCount = 0
           commitCaptionFrames()
         }
@@ -1990,9 +1988,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         openLinkFragment = -1
         return
       }
-      const res = eventType === NodeEventExit && element.emphasis === -1 && !handler.literalExit
-        ? `</${FLANK_TAG[INLINE_MARKER_TYPE[tagId]!]}>`
-        : handler[eventFn]({ node: element, state })
+      const res = handler[eventFn]({ node: element, state })
       if (typeof res === 'string') {
         if (res) {
           output = [res]
@@ -2331,10 +2327,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.lastContentCache = ' '
     }
 
-    if (eventType === NodeEventExit && !handler?.literalExit && element.emphasis !== undefined && handlerOutput) {
-      if (element.emphasis !== -1 && !(cleanPass?.holdsOutput && isInsideHeading(state.depthMap))
-        && lastOutputChar(buff) !== handlerOutput.charCodeAt(0) && isAsciiPunctuation(lastOutputChar(buff))) {
-        pendingCloser = handlerOutput.charCodeAt(0)
+    if (eventType === NodeEventExit && handlerOutput) {
+      const markerType = INLINE_MARKER_TYPE[tagId]!
+      if (markerType && markerType <= 4) {
+        const mark = handlerOutput.charCodeAt(0)
+        const previous = lastOutputChar(buff)
+        if (previous !== mark && isAsciiPunctuation(previous)
+          && !handler?.literalExit && !options.tagOverrides && !captionFrameCount && !insideRawHtmlRegion
+          && !state.depthMap[TAG_PRE] && !state.depthMap[TAG_CODE]
+          && !state.depthMap[TAG_KBD] && !state.depthMap[TAG_SAMP] && !state.depthMap[TAG_VAR]
+          && !(cleanPass?.holdsOutput && isInsideHeading(state.depthMap))) {
+          pendingCloser = mark
+        }
       }
     }
 
@@ -2383,17 +2387,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && buff[buff.length - 1] === handlerOutput) {
         openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
-        if (markerType <= 4 && !options.tagOverrides && !captionFrameCount && !insideRawHtmlRegion
-          && !state.depthMap[TAG_PRE] && !state.depthMap[TAG_CODE]
-          && !state.depthMap[TAG_KBD] && !state.depthMap[TAG_SAMP] && !state.depthMap[TAG_VAR]
-          && !(cleanPass?.holdsOutput && state.depthMap[TAG_A] && isInsideHeading(state.depthMap))) {
-          element.emphasis = buff.length - 1
-        }
       }
       else if (openMarkerCount
         && !(tagId === TAG_A && cleanEmptyLinkText)
         && hasNonWhitespace(handlerOutput)) {
-        resolveEmphasis(element)
         openMarkerCount = 0
         commitCaptionFrames()
       }
@@ -2414,27 +2411,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       bufferScan[0] = false
       bufferScan[1] = state.buffer.length
       inRawHtmlRegion = false
-    }
-  }
-
-  // Only the first held marker can follow a word; nested markers follow punctuation.
-  function resolveEmphasis(node: Node): void {
-    const marker = openMarkers[0]!
-    const kind = marker & MARKER_TYPE_MASK
-    const fragment = marker >> 3
-    const first = state.buffer[fragment + 1]?.charCodeAt(0) ?? -1
-    if (kind > 4 || first === (kind === 3 ? 126 : 42) || !isAsciiAlphanumeric(lastOutputChar(state.buffer, fragment))
-      || !isAsciiPunctuation(first)) {
-      return
-    }
-    let owner = node.type === ELEMENT_NODE ? node as ElementNode : node.parent
-    while (owner && owner.emphasis !== fragment)
-      owner = owner.parent
-    if (owner) {
-      const value = `<${FLANK_TAG[kind]}>`
-      state.outputPositions?.replace(fragment, fragment + 1, [value])
-      state.buffer[fragment] = value
-      owner.emphasis = -1
     }
   }
 

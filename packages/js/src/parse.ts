@@ -537,8 +537,6 @@ class ParsedElementNode implements ElementNode {
   currentWalkIndex?: number
   childTextNodeIndex?: number
   containsWhitespace?: boolean
-  // Emphasis writes must not change the parser node's shape.
-  emphasis?: number
   declare excludedFromMarkdown?: boolean
   pluginOutput?: string[]
   context?: ElementNode['context']

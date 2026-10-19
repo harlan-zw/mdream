@@ -160,8 +160,6 @@ struct CodeSpanState {
 
 #[derive(Clone, Copy)]
 struct OpenMarker {
-  // Fits in the existing marker padding.
-  node_index: u32,
   output_start: usize,
   content_start: usize,
   kind: u8,
