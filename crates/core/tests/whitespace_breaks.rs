@@ -331,6 +331,22 @@ fn link_text_drops_the_space_before_an_empty_element() {
 fn raw_html_blocks_end_before_following_markdown() {
   let cases = [
     (
+      "<blockquote><address>A</address><blockquote><strong>B</strong></blockquote></blockquote>",
+      "> <address>A</address>\n>\n> > **B**",
+    ),
+    (
+      "<address>A</address><sup>Z</sup> tail",
+      "<address>A</address>\n\n<sup>Z</sup> tail",
+    ),
+    (
+      "<ul><li><address>A</address><blockquote><strong>B</strong></blockquote></li></ul>",
+      "- <address>A</address>\n\n  > **B**",
+    ),
+    (
+      "<p>PPPPPPPPPPPPPPPPPP</p><blockquote><dl>A</dl><strong>B</strong></blockquote>",
+      "PPPPPPPPPPPPPPPPPP\n\n> <dl>A</dl>\n>\n> **B**",
+    ),
+    (
       "<address>A</address><strong>B</strong>",
       "<address>A</address>\n\n**B**",
     ),

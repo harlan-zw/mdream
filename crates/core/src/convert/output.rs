@@ -1717,6 +1717,8 @@ impl ConvertState {
       self.pending_raw_html_boundary = false;
     }
 
+    let raw_html_quote_boundary =
+      self.pending_raw_html_boundary && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE);
     let output_start = self.buffer.len();
     self.write_output(
       true,
@@ -1773,7 +1775,10 @@ impl ConvertState {
     }
 
     if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
-      if !self.blockquotes.is_empty() && self.buffer.ends_with("\n\n") {
+      if !self.blockquotes.is_empty()
+        && self.buffer.ends_with("\n\n")
+        && (!raw_html_quote_boundary || self.buffer.ends_with("\n\n\n"))
+      {
         self.truncate_buffer(self.buffer.len() - 1);
         // Frames anchored at the old end move with the popped byte. Siblings can
         // share an offset, so this is not only the innermost. See `trim_floor`.
@@ -1781,6 +1786,7 @@ impl ConvertState {
           frame.content_start = frame.content_start.min(self.buffer.len());
         }
       }
+      self.finish_raw_html_block(">", false);
       self.blockquotes.push(BlockquoteFrame {
         content_start: self.buffer.len(),
         list_indent: self.list_indent.clone(),
@@ -2795,7 +2801,7 @@ impl ConvertState {
       return;
     }
     let pending_raw_boundary = self.pending_raw_html_boundary;
-    self.finish_raw_html_block(text, false);
+    self.finish_raw_html_block(text, true);
     let text = if pending_raw_boundary && !self.pending_raw_html_boundary {
       text.trim_start_matches([' ', '\t', '\r', '\n'])
     } else {
@@ -4881,10 +4887,9 @@ impl ConvertState {
     }
   }
 
-  fn finish_raw_html_block(&mut self, value: &str, generated: bool) {
+  fn finish_raw_html_block(&mut self, value: &str, indent: bool) {
     if !self.pending_raw_html_boundary
       || self.in_raw_html_block()
-      || (generated && value.starts_with('<'))
       || !value.bytes().any(|byte| !is_whitespace(byte))
     {
       return;
@@ -4905,8 +4910,9 @@ impl ConvertState {
     for _ in newlines..2 {
       self.buffer.push('\n');
     }
-    self.buffer.push_str(&self.list_indent);
-    self.last_content_cache_len = 2 - newlines + self.list_indent.len();
+    let indent_len = if indent { self.list_indent.len() } else { 0 };
+    self.buffer.push_str(&self.list_indent[..indent_len]);
+    self.last_content_cache_len = 2 - newlines + indent_len;
     self.has_last_text_node = false;
     self.last_text_node_contains_whitespace = false;
   }

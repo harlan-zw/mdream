@@ -1266,10 +1266,11 @@ function commitGfmAction(
   lifecycle: GfmLifecycleState,
   outputStart: number,
   owner: ElementNode,
+  preserveSeparator = false,
 ): void {
   switch (action._tag) {
     case 'BlockquoteEnter': {
-      if (state.blockquotes.length > 0)
+      if (state.blockquotes.length > 0 && (!preserveSeparator || newlineRunBefore(state.buffer, state.buffer.length) > 2))
         collapseNestedBlockquoteSeparator(state.buffer, state.outputPositions)
       const before = lastOutputChar(state.buffer)
       state.blockquotes.push({
@@ -1622,7 +1623,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
   function finishRawHtmlBlock(value: string, generated = false): void {
     if (!pendingRawHtmlBoundary || isInsideRawHtmlBlock(state.depthMap)
-      || !hasNonWhitespace(value) || (generated && value.charCodeAt(0) === 60)) {
+      || !hasNonWhitespace(value)) {
       return
     }
     pendingRawHtmlBoundary = false
@@ -2382,7 +2383,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.lastContentCache = ' '
     }
 
-    if (pendingRawHtmlBoundary && output) {
+    const rawHtmlQuoteBoundary = pendingRawHtmlBoundary && gfmAction?._tag === 'BlockquoteEnter'
+    if (rawHtmlQuoteBoundary)
+      finishRawHtmlBlock(`${output?.join('') ?? ''}>`, true)
+
+    if (pendingRawHtmlBoundary && !endsRawHtmlBlock && output) {
       if (newLines >= 2) {
         pendingRawHtmlBoundary = false
       }
@@ -2404,7 +2409,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (gfmAction)
-      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element)
+      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element, rawHtmlQuoteBoundary)
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)

@@ -195,7 +195,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     for (const frame of state.blockquotes)
       frame.fragment -= fragment - 1
     quoteScan = undefined
-    bufferScan[1] = 0
+    bufferScan[1] = Math.max(0, bufferScan[1] - fragment + 1)
     bufferScan[2] = 1
     bufferScan[3] = bufferScan[5] === undefined ? 1 : 0
     bufferScan[4] = 0
