@@ -2558,6 +2558,31 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         return
       }
     }
+    else if (flankStates[index] === FLANK_RAW) {
+      let fragment = closer
+      let end = buffer[fragment]?.length ?? 0
+      let hasVerticalTab = false
+      while (fragment >= 0) {
+        const value = buffer[fragment]!
+        while (end > 0) {
+          const code = value.charCodeAt(end - 1)
+          if (code !== 32 && (code < 9 || code > 13))
+            break
+          hasVerticalTab ||= code === 11
+          end--
+        }
+        if (end > 0)
+          break
+        fragment--
+        end = buffer[fragment]?.length ?? 0
+      }
+      const mark = delimiter.charCodeAt(0)
+      if (hasVerticalTab && end >= delimiter.length
+        && buffer[fragment]!.charCodeAt(end - 1) === mark
+        && (delimiter.length === 1 || buffer[fragment]!.charCodeAt(end - 2) === mark)) {
+        replaceFlankText(fragment, end - delimiter.length, delimiter.length, FLANK_RAW_CLOSE[type]!)
+      }
+    }
     dropFlankPair(index)
   }
 

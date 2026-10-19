@@ -1287,6 +1287,24 @@ impl ConvertState {
           self.settle_flank_pairs();
           return;
         }
+      } else if pair.state == FlankState::Raw {
+        let mut end = bytes.len();
+        let mut has_vertical_tab = false;
+        while end > 0 && matches!(bytes[end - 1], b' ' | 9..=13) {
+          has_vertical_tab |= bytes[end - 1] == 11;
+          end -= 1;
+        }
+        if has_vertical_tab
+          && end >= delimiter.len()
+          && bytes[end - 1] == mark
+          && (delimiter.len() == 1 || bytes[end - 2] == mark)
+        {
+          self.replace_flank_bytes(
+            end - delimiter.len(),
+            delimiter.len(),
+            FLANK_RAW_CLOSE[pair.kind as usize],
+          );
+        }
       }
       if index + 1 == self.flank_pairs.len() {
         self.flank_pairs.pop();
@@ -5896,6 +5914,38 @@ impl ConvertState {
 mod tests {
   use super::{ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_LI, TAG_P, push_decimal};
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
+
+  #[test]
+  fn raw_flank_closer_precedes_moved_vertical_tab() {
+    for kind in 1..=4 {
+      for suffix in ["\u{b}", "\u{b} ", "\u{b}\n"] {
+        let mut state =
+          ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+        state.buffer = format!(
+          "{}!b{}{suffix}",
+          super::FLANK_RAW_OPEN[kind],
+          super::FLANK_DELIMITER[kind]
+        );
+        state.flank_pairs.push(super::FlankPair {
+          depth: 1,
+          kind: kind as u8,
+          state: super::FlankState::Raw,
+          offset: usize::MAX,
+        });
+        state.close_pending_flank_pair(1);
+        assert_eq!(
+          state.buffer,
+          format!(
+            "{}!b{}{suffix}",
+            super::FLANK_RAW_OPEN[kind],
+            super::FLANK_RAW_CLOSE[kind]
+          )
+        );
+        assert!(state.flank_pairs.is_empty());
+        assert_eq!(state.pending_flank_count, 0);
+      }
+    }
+  }
 
   #[test]
   fn push_decimal_matches_display() {

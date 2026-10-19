@@ -55,6 +55,33 @@ async function streamConvert(engine: TestEngine, html: string, chunkSize: number
 }
 
 describe.each(engines)('emphasis that cannot flank $name', (engineConfig) => {
+  it.each(['em', 'i', 'cite', 'strong', 'b', 'dfn', 'del'])('preserves %s closing markup before a vertical-tab suffix', async (tag) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const strong = tag === 'strong' || tag === 'b' || tag === 'dfn'
+    const rawTag = strong ? 'strong' : 'em'
+    const html = `a<${tag}>!b</${tag}>c`
+    for (const suffix of ['\v', '\v ', '\v\n']) {
+      const delimiter = tag === 'del' ? '~~' : strong ? '**' : '*'
+      const options = { plugins: { tagOverrides: { [tag]: { exit: `${delimiter}${suffix}` } } } }
+      // Strikethrough inserts a space before its opener and remains Markdown.
+      const expected = tag === 'del' ? `a ~~!b~~${suffix}c` : `a<${rawTag}>!b</${rawTag}>${suffix}c`
+      expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const input = new ReadableStream<string>({
+          start(controller) {
+            for (let offset = 0; offset < html.length; offset += width)
+              controller.enqueue(html.slice(offset, offset + width))
+            controller.close()
+          },
+        })
+        let output = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+          output += chunk
+        expect(output).toBe(expected)
+      }
+    }
+  })
+
   it('retains the character before a long delimiter run across flushes', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const run = '*'.repeat(32)
