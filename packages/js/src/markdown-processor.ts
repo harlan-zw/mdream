@@ -2447,12 +2447,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     // Raw HTML means no Markdown there: emphasis in code, `<pre>` or a raw block
-    // keeps its delimiters. `<kbd>`, `<samp>` and `<var>` are code spans too.
+    // keeps its delimiters. `<kbd>`, `<samp>` and `<var>` are code spans too. A
+    // heading's Markdown gives the slug fragment links resolve against, which
+    // takes a link's text as written, so a pair inside a link there keeps its
+    // delimiters.
     const flankType = eventType === NodeEventEnter && handlerOutput !== undefined ? INLINE_MARKER_TYPE[tagId]! : 0
     if (flankType >= 1 && flankType <= 4 && handlerOutput === FLANK_DELIMITER[flankType]
       && buff[buff.length - 1] === handlerOutput && !handler?.literalEnter && captionFrameCount === 0
       && !state.depthMap[TAG_PRE] && !state.depthMap[TAG_CODE] && !state.depthMap[TAG_KBD]
-      && !state.depthMap[TAG_SAMP] && !state.depthMap[TAG_VAR] && !insideRawHtmlRegion) {
+      && !state.depthMap[TAG_SAMP] && !state.depthMap[TAG_VAR] && !insideRawHtmlRegion
+      && !(state.depthMap[TAG_A] && isInsideHeading(state.depthMap))) {
       flankElements.push(element)
       flankStates.push(FLANK_OPENING)
       flankFragments.push(buff.length - 1)
@@ -2514,7 +2518,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
   }
 
-  /** The element closed: finish its pair, or wait for the character after its closer. */
+  /**
+   * The element closed: finish its pair, or wait for the character after its
+   * closer. A heading's slug reads a character reference as written, so a
+   * closer there gets none.
+   */
   function closeFlankPair(element: ElementNode): void {
     let index = flankElements.length - 1
     while (index >= 0 && flankElements[index] !== element)
@@ -2529,7 +2537,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (flankStates[index] === FLANK_RAW) {
         replaceFlankText(closer, 0, delimiter.length, FLANK_RAW_CLOSE[type]!)
       }
-      else if (flankStates[index] === FLANK_KEPT
+      else if (flankStates[index] === FLANK_KEPT && !isInsideHeading(state.depthMap)
         && flankClass(charBeforeRun(buffer, closer, -1, delimiter.charCodeAt(0))) === FLANK_PUNCTUATION) {
         flankStates[index] = FLANK_CLOSING
         flankFragments[index] = closer

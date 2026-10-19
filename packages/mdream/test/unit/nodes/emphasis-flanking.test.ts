@@ -61,4 +61,16 @@ describe.each(engines)('emphasis that cannot flank $name', (engineConfig) => {
     for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
       expect(await streamConvert(engine, html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
   })
+
+  // A heading's slug reads a character reference and a link's text as
+  // written, so neither is used there; raw tags outside a link are dropped.
+  it.each([
+    ['<h2><strong><a href="/x">b</a></strong>c</h2><p><a href="#bc">to</a></p>', '## **[b](/x)**c\n\n[to](#bc)'],
+    ['<h2><a href="/y"><strong><code>b</code></strong>c</a></h2><p><a href="#bc">t</a></p>', '## [**`b`**c](/y)\n\n[t](#bc)'],
+    ['<h2><a href="/x">a<strong>!b</strong></a></h2><p><a href="#ab">t</a></p>', '## [a**!b**](/x)\n\n[t](#ab)'],
+    ['<h2>a<strong>!b</strong>c</h2><p><a href="#abc">t</a></p>', '## a<strong>!b</strong>c\n\n[t](#abc)'],
+  ])('keeps the heading slug of %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(engine.htmlToMarkdown(html, { clean: true })).toBe(expected)
+  })
 })

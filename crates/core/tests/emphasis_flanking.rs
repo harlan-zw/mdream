@@ -3,6 +3,7 @@
 //! cannot open turns its pair into raw HTML; a closer that cannot close is
 //! followed by a character reference, which starts with punctuation.
 
+use mdream::CleanConfig;
 use mdream::MarkdownStreamProcessor;
 use mdream::html_to_markdown;
 use mdream::types::HtmlToMarkdownOptions;
@@ -156,6 +157,44 @@ fn open_emphasis_still_yields_content_before_close() {
   full.push_str(&stream.process_chunk("</span></b>c</p>"));
   full.push_str(&stream.finish());
   assert_eq!(full, "**x!**&#99;");
+}
+
+#[test]
+fn heading_slugs_still_match_fragment_links() {
+  // A heading's slug reads a character reference and a link's text as
+  // written, so neither is used there; raw tags outside a link are dropped.
+  let options = HtmlToMarkdownOptions::default().with_clean(CleanConfig::all());
+  for (html, expected) in [
+    (
+      r##"<h2><strong><a href="/x">b</a></strong>c</h2><p><a href="#bc">to</a></p>"##,
+      "## **[b](/x)**c\n\n[to](#bc)",
+    ),
+    (
+      r##"<h2><a href="/y"><strong><code>b</code></strong>c</a></h2><p><a href="#bc">t</a></p>"##,
+      "## [**`b`**c](/y)\n\n[t](#bc)",
+    ),
+    (
+      r##"<h2><a href="/x">a<strong>!b</strong></a></h2><p><a href="#ab">t</a></p>"##,
+      "## [a**!b**](/x)\n\n[t](#ab)",
+    ),
+    (
+      r##"<h2>a<strong>!b</strong>c</h2><p><a href="#abc">t</a></p>"##,
+      "## a<strong>!b</strong>c\n\n[t](#abc)",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "html={html:?}"
+    );
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, chunk, &options),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+  }
 }
 
 #[test]

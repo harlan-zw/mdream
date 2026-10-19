@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { clean } from '../../src/clean'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 
 // CommonMark opens a delimiter run only when it is left-flanking and closes it
@@ -83,6 +84,17 @@ describe('emphasis delimiters that cannot flank', () => {
     for (let chunk = await output.next(); !chunk.done; chunk = await output.next())
       rest += chunk.value
     expect(first.value + rest).toBe('a<strong>[link](/x)more</strong>c')
+  })
+
+  // A heading's slug reads a character reference and a link's text as
+  // written, so neither is used there; raw tags outside a link are dropped.
+  it.each([
+    ['<h2><strong><a href="/x">b</a></strong>c</h2><p><a href="#bc">to</a></p>', '## **[b](/x)**c\n\n[to](#bc)'],
+    ['<h2><a href="/y"><strong><code>b</code></strong>c</a></h2><p><a href="#bc">t</a></p>', '## [**`b`**c](/y)\n\n[t](#bc)'],
+    ['<h2><a href="/x">a<strong>!b</strong></a></h2><p><a href="#ab">t</a></p>', '## [a**!b**](/x)\n\n[t](#ab)'],
+    ['<h2>a<strong>!b</strong>c</h2><p><a href="#abc">t</a></p>', '## a<strong>!b</strong>c\n\n[t](#abc)'],
+  ])('keeps the heading slug of %s', (html, expected) => {
+    expect(htmlToMarkdown(html, { clean: clean() })).toBe(expected)
   })
 
   it('keeps delimiters where a fix cannot help', () => {
