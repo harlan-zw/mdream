@@ -843,6 +843,7 @@ export function parseHtml(html: string, options: ParseOptions = {}): ParseResult
     depth: 0,
     resolvedPlugins: options.resolvedPlugins || [],
     tagHandlers: options.tagHandlers,
+    outputEvent: event => events.push(event),
   }
 
   let remainingHtml = parseHtmlInternal(html, state, (event) => {

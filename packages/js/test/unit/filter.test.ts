@@ -1,9 +1,10 @@
-import type { ElementNode, Plugin } from '../../src/types'
+import type { ElementNode, Plugin, TextNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { clean } from '../../src/clean'
-import { NodeEventExit, TAG_A, TAG_SPAN } from '../../src/const'
+import { NodeEventEnter, NodeEventExit, TAG_A, TAG_SPAN, TEXT_NODE } from '../../src/const'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { parseHtml } from '../../src/parse'
 import { createPlugin } from '../../src/pluggable/plugin'
 import { extractionPlugin } from '../../src/plugins/extraction'
 import { filterPlugin } from '../../src/plugins/filter'
@@ -28,6 +29,15 @@ async function collect(chunks: AsyncIterable<string>): Promise<string> {
 }
 
 describe('filter plugin', () => {
+  it.each(['title', 'aria-label'])('emits the excluded-text link label through the direct parser with %s', (attribute) => {
+    const html = `<a href="/cart" ${attribute}="Cart"><span>x</span></a>`
+    const { events } = parseHtml(html, { tagHandlers: { [TAG_SPAN]: { isInline: true, excludesTextNodes: true } } })
+    const labels = events.filter(event => event.type === NodeEventEnter && event.node.type === TEXT_NODE && (event.node as TextNode).isLinkLabel)
+    expect(labels.map(event => (event.node as TextNode).value)).toEqual(['Cart'])
+    expect(events.at(-1)?.type).toBe(NodeEventExit)
+    expect((events.at(-1)?.node as ElementNode).name).toBe('a')
+  })
+
   it('skips an excluded subtree without hiding following siblings', () => {
     const html = '<div><nav><p>hidden <strong>nested</strong></p></nav><p>shown</p></div>'
     expect(htmlToMarkdown(html, {
