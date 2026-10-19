@@ -26,6 +26,52 @@ const DESTINATION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 80, 0, 0, 0, 16, 0, 
 const TITLE_ESCAPES: [u8; 16] = [0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0];
 const IMAGE_DESCRIPTION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 64, 4, 0, 16, 0, 0, 0, 184, 1, 0, 0, 64];
 
+// CommonMark opens a delimiter run only when it is left-flanking and closes it
+// only when it is right-flanking, and `~~` follows the same rule in GFM. A word
+// character on one side with punctuation on the other fails, so `a**[b](/x)**`
+// and `**[b](/x)**c` keep literal delimiters. Streaming releases emphasis
+// content before the close, so each side is fixed when it is written: an
+// opener that cannot open turns its pair into raw HTML while the opener is
+// still held, and a closer that cannot close gets the ASCII letter or digit
+// after it as a character reference, `**[b](/x)**&#99;`, which starts with
+// punctuation. The classes match the JS engine: only ASCII and U+00A0, which
+// mdream writes for `&nbsp;`, are classified; every other byte counts as a
+// word character.
+const FLANK_DELIMITER: [&str; 5] = ["", "**", "*", "~~", "*"];
+const FLANK_RAW_OPEN: [&str; 5] = ["", "<strong>", "<em>", "<del>", "<em>"];
+const FLANK_RAW_CLOSE: [&str; 5] = ["", "</strong>", "</em>", "</del>", "</em>"];
+const FLANK_WHITESPACE: u8 = 0;
+const FLANK_PUNCTUATION: u8 = 1;
+const FLANK_WORD: u8 = 2;
+
+/// Class of `byte`, read with the byte before it so a no-break space (`C2 A0`)
+/// counts as whitespace. `None`, the edge of the output, is whitespace.
+#[inline]
+fn flank_class(previous: u8, byte: Option<u8>) -> u8 {
+  match byte {
+    None | Some(b' ' | b'\t' | b'\n' | 0x0C | b'\r') => FLANK_WHITESPACE,
+    Some(0xA0) if previous == 0xC2 => FLANK_WHITESPACE,
+    Some(byte) if byte.is_ascii_punctuation() => FLANK_PUNCTUATION,
+    Some(_) => FLANK_WORD,
+  }
+}
+
+/// Class of the character `bytes` starts with.
+#[inline]
+fn flank_class_at(bytes: &[u8]) -> u8 {
+  match bytes {
+    [0xC2, 0xA0, ..] => FLANK_WHITESPACE,
+    _ => flank_class(0, bytes.first().copied()),
+  }
+}
+
+#[inline]
+fn shift_past(offset: &mut usize, at: usize, delta: usize) {
+  if *offset > at {
+    *offset += delta;
+  }
+}
+
 /// Tags the simple element emitters handle, indexed by tag id.
 static SIMPLE_EMIT_TAG: [bool; MAX_TAG_ID] = {
   let mut table = [true; MAX_TAG_ID];
@@ -812,6 +858,7 @@ impl ConvertState {
     });
     [
       self.open_markers.first().map(|marker| marker.output_start),
+      self.flank_hold(),
       self.first_tentative_caption_start(),
       self.code_fence.as_ref().map(|fence| fence.output_start),
       self.code_spans.first().map(|span| span.output_start),
@@ -1088,6 +1135,241 @@ impl ConvertState {
     }
   }
 
+  /// Track the emphasis opener an enter just wrote, unless raw HTML or code
+  /// keeps its delimiters literal anyway.
+  #[inline]
+  fn track_flank_opener(
+    &mut self,
+    marker_tag: Option<u8>,
+    depth: usize,
+    output: Option<&str>,
+    output_start: usize,
+  ) {
+    let Some(kind @ 1..=4) = marker_tag.and_then(Self::inline_marker_type) else {
+      return;
+    };
+    let delimiter = FLANK_DELIMITER[kind as usize];
+    if output == Some(delimiter)
+      && self.buffer.len() > output_start
+      && self.buffer.ends_with(delimiter)
+      && self.is_markdown()
+      && self.caption_frames.is_empty()
+      && self.depth_map[TAG_PRE as usize] == 0
+      && self.depth_map[TAG_CODE as usize] == 0
+      && !self.in_raw_html_block()
+    {
+      self.flank_pairs.push(FlankPair {
+        depth,
+        kind,
+        state: FlankState::Opening,
+        offset: self.buffer.len() - delimiter.len(),
+      });
+    }
+  }
+
+  /// Blocks and figcaptions rewrite the output a pair points at, and a link
+  /// close can unwrap its text. A closer still waiting there is followed by a
+  /// line break or by `]`, which needs nothing.
+  #[inline]
+  pub(crate) fn release_flank_pairs(&mut self, tag_id: Option<u8>, is_inline: bool, is_exit: bool) {
+    if self.flank_pairs.is_empty() {
+      return;
+    }
+    if (tag_id.is_some() && !is_inline) || tag_id == Some(TAG_FIGCAPTION) {
+      self.flank_pairs.clear();
+    } else if is_exit && tag_id == Some(TAG_A) {
+      self
+        .flank_pairs
+        .retain(|pair| pair.state != FlankState::Closing);
+    }
+  }
+
+  /// The earliest offset a pair holds back from streaming.
+  pub(super) fn flank_hold(&self) -> Option<usize> {
+    self
+      .flank_pairs
+      .iter()
+      .map(|pair| pair.offset)
+      .filter(|&offset| offset != usize::MAX)
+      .min()
+  }
+
+  /// The element at `depth` closed: finish its pair, or wait for the byte
+  /// written after its closer.
+  pub(crate) fn close_flank_pair(&mut self, depth: usize) {
+    if self.flank_pairs.is_empty() {
+      return;
+    }
+    if let Some(index) = self
+      .flank_pairs
+      .iter()
+      .rposition(|pair| pair.depth == depth && pair.state != FlankState::Closing)
+    {
+      let pair = self.flank_pairs[index];
+      let delimiter = FLANK_DELIMITER[pair.kind as usize];
+      let bytes = self.buffer.as_bytes();
+      if bytes.ends_with(delimiter.as_bytes()) {
+        let closer = bytes.len() - delimiter.len();
+        let mark = delimiter.as_bytes()[0];
+        let last = bytes[..closer].iter().rposition(|&byte| byte != mark);
+        if pair.state == FlankState::Raw {
+          self.replace_flank_bytes(closer, delimiter.len(), FLANK_RAW_CLOSE[pair.kind as usize]);
+        } else if pair.state == FlankState::Kept
+          && flank_class(
+            last
+              .and_then(|at| at.checked_sub(1))
+              .map_or(0, |at| bytes[at]),
+            last.map(|at| bytes[at]),
+          ) == FLANK_PUNCTUATION
+        {
+          self.flank_pairs[index].state = FlankState::Closing;
+          self.flank_pairs[index].offset = closer;
+          self.settle_flank_pairs();
+          return;
+        }
+      }
+      self.flank_pairs.remove(index);
+    }
+    self.settle_flank_pairs();
+  }
+
+  /// At the end of each event, decide each opener whose content is now
+  /// permanent and each closer whose next byte is written.
+  pub(crate) fn settle_flank_pairs(&mut self) {
+    let mut index = 0;
+    while index < self.flank_pairs.len() {
+      let pair = self.flank_pairs[index];
+      if pair.offset == usize::MAX {
+        index += 1;
+        continue;
+      }
+      let kind = pair.kind as usize;
+      let delimiter = FLANK_DELIMITER[kind].as_bytes();
+      let bytes = self.buffer.as_bytes();
+      let in_place = bytes.get(pair.offset..pair.offset + delimiter.len()) == Some(delimiter);
+      if pair.state == FlankState::Opening {
+        // The empty-pair check can still drop an opener while it is open.
+        if self
+          .open_markers
+          .iter()
+          .any(|marker| marker.output_start == pair.offset)
+        {
+          index += 1;
+          continue;
+        }
+        if !in_place {
+          self.flank_pairs.remove(index);
+          continue;
+        }
+        let content = &bytes[pair.offset + delimiter.len()..];
+        let Some(skip) = content.iter().position(|&byte| byte != delimiter[0]) else {
+          index += 1;
+          continue;
+        };
+        let first = flank_class_at(&content[skip..]);
+        // An opener before whitespace cannot open, and a raw one at a block
+        // start would open an HTML block, so the pair stays as written.
+        if first == FLANK_WHITESPACE {
+          self.flank_pairs.remove(index);
+          continue;
+        }
+        let [previous, before] = match pair.offset {
+          0 => self.flushed_tail,
+          1 => [self.flushed_tail[1], bytes[0]],
+          offset => [bytes[offset - 2], bytes[offset - 1]],
+        };
+        self.flank_pairs[index].offset = usize::MAX;
+        if first == FLANK_PUNCTUATION && flank_class(previous, Some(before)) == FLANK_WORD {
+          self.flank_pairs[index].state = FlankState::Raw;
+          self.replace_flank_bytes(pair.offset, delimiter.len(), FLANK_RAW_OPEN[kind]);
+        } else {
+          self.flank_pairs[index].state = FlankState::Kept;
+        }
+        index += 1;
+        continue;
+      }
+      let next = pair.offset + delimiter.len();
+      if in_place && next == bytes.len() {
+        index += 1;
+        continue;
+      }
+      if in_place && bytes[next].is_ascii_alphanumeric() {
+        let reference = format!("&#{};", bytes[next]);
+        self.replace_flank_bytes(next, 1, &reference);
+      }
+      self.flank_pairs.remove(index);
+    }
+  }
+
+  /// Output ends: a closer still waiting is followed by nothing.
+  pub(crate) fn finish_flank_pairs(&mut self) {
+    self.settle_flank_pairs();
+    self.flank_pairs.clear();
+  }
+
+  /// Replace `len` bytes at `at`, moving every offset recorded past it.
+  fn replace_flank_bytes(&mut self, at: usize, len: usize, value: &str) {
+    let delta = value.len() - len;
+    if at
+      >= self
+        .buffer
+        .len()
+        .saturating_sub(self.last_content_cache_len)
+    {
+      self.last_content_cache_len += delta;
+    }
+    self.note_buffer_rewrite(at);
+    replace_buffer_range(&mut self.buffer, at..at + len, value);
+    for pair in &mut self.flank_pairs {
+      if pair.offset != usize::MAX {
+        shift_past(&mut pair.offset, at, delta);
+      }
+    }
+    for marker in &mut self.open_markers {
+      shift_past(&mut marker.output_start, at, delta);
+      shift_past(&mut marker.content_start, at, delta);
+    }
+    for frame in &mut self.caption_frames {
+      if let CaptionState::Tentative {
+        output_start,
+        content_start,
+        ..
+      } = &mut frame.state
+      {
+        shift_past(output_start, at, delta);
+        shift_past(content_start, at, delta);
+      }
+    }
+    for run in &mut self.streaming_break_runs {
+      shift_past(&mut run.output_start, at, delta);
+      shift_past(&mut run.output_end, at, delta);
+    }
+    for span in &mut self.code_spans {
+      shift_past(&mut span.output_start, at, delta);
+      shift_past(&mut span.content_start, at, delta);
+    }
+    if let Some(fence) = &mut self.code_fence {
+      shift_past(&mut fence.output_start, at, delta);
+      shift_past(&mut fence.content_start, at, delta);
+    }
+    shift_past(&mut self.link.bracket_pos, at, delta);
+    for link in &mut self.parent_links {
+      shift_past(&mut link.bracket_pos, at, delta);
+    }
+    for frame in &mut self.blockquotes {
+      shift_past(&mut frame.content_start, at, delta);
+    }
+    shift_past(&mut self.empty_item_line_start, at, delta);
+    shift_past(&mut self.empty_item_len, at, delta);
+    if self.hard_break_end != usize::MAX {
+      shift_past(&mut self.hard_break_end, at, delta);
+    }
+    shift_past(&mut self.heading_buffer_start, at, delta);
+    shift_past(&mut self.raw_html_scanned_to, at, delta);
+    self.shift_fragment_links_after(at + 1, delta as isize);
+    self.invalidate_line_start();
+  }
+
   /// Put the list separator owed by a hard break in front of a block's fragment.
   #[inline(always)]
   fn prepend_list_break(&mut self, output: &mut Option<Cow<'static, str>>) {
@@ -1230,6 +1512,8 @@ impl ConvertState {
     });
 
     self.record_enter_marker(tag_id, output.as_deref(), output_start, false);
+    let depth = self.stack[stack_len - 1].depth;
+    self.track_flank_opener(tag_id, depth, output.as_deref(), output_start);
 
     if !is_inline && !self.open_markers.is_empty() {
       self.open_markers.clear();
@@ -1851,6 +2135,8 @@ impl ConvertState {
     let marker_tag = tag_id.filter(|&id| !enter_is_literal && (id != TAG_CODE || code_span_marker));
     let keeps_markers = tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
     self.record_enter_marker(marker_tag, output.as_deref(), output_start, keeps_markers);
+    let depth = self.stack[stack_len - 1].depth;
+    self.track_flank_opener(marker_tag, depth, output.as_deref(), output_start);
 
     // A block boundary makes an enclosing inline marker permanent even when
     // the block has not emitted content yet. Release streamed output promptly.
@@ -3358,6 +3644,11 @@ impl ConvertState {
       }
       if marker.content_start >= at {
         marker.content_start += 1;
+      }
+    }
+    for pair in &mut self.flank_pairs {
+      if pair.offset != usize::MAX && pair.offset >= at {
+        pair.offset += 1;
       }
     }
     for run in &mut self.streaming_break_runs {
@@ -5081,6 +5372,11 @@ impl ConvertState {
     }
     if last_byte == b'|' && first_byte == b'<' && !self.buffer.is_empty() {
       return true;
+    }
+    // A strikethrough opener must touch its content to open, but two tilde runs
+    // written back to back would read as a `~~~~` code fence.
+    if last_byte == b'~' {
+      return first_byte == b'~';
     }
     if matches!(last_byte, b'[' | b'(' | b'>' | b'*' | b'_' | b'`')
       || matches!(

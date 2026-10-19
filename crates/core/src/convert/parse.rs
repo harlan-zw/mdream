@@ -562,6 +562,7 @@ impl ConvertState {
     if !excludes_text_nodes {
       let (depth, index) = self.begin_text_emit(&text, has_inline_gfm_hazard);
       self.emit_plain_text_inline(&text, contains_whitespace, depth, index);
+      self.settle_flank_pairs();
     }
 
     text.clear();
@@ -722,6 +723,7 @@ impl ConvertState {
         tailwind_prefix.as_deref(),
         tailwind_suffix.as_deref(),
       );
+      self.settle_flank_pairs();
     }
 
     // Recover String allocation
@@ -1430,6 +1432,11 @@ impl ConvertState {
 
     // Inline emit (no callback!)
     if !skip_node {
+      if let Some(node) = self.stack.last()
+        && !node.excluded_from_markdown
+      {
+        self.release_flank_pairs(node.tag_id, node.is_inline, false);
+      }
       if self.element_fast_path_ok(tag_id) {
         self.emit_enter_simple(false);
       } else if self.link_fast_path_ok(tag_id) {
@@ -1437,6 +1444,7 @@ impl ConvertState {
       } else {
         self.emit_enter_element();
       }
+      self.settle_flank_pairs();
     }
 
     // After the LI prefix is emitted, push this LI's marker-width worth of
@@ -1605,6 +1613,7 @@ impl ConvertState {
         self.stack.push(modified_node);
         // Emit synthetic text
         self.emit_text(&prefix, false, text_depth, 0);
+        self.settle_flank_pairs();
         for prev in self.stack.iter_mut() {
           prev.child_text_node_index += 1;
         }
@@ -1612,7 +1621,9 @@ impl ConvertState {
           return;
         };
         // Emit exit
+        self.release_flank_pairs(node_tag_id, modified_node2.is_inline, true);
         self.emit_exit_element(&modified_node2);
+        self.close_flank_pair(node_depth);
         self.stack.restore_retired(modified_node2);
         self.stack.release_retired();
         if let Some(id) = node_tag_id {
@@ -1643,6 +1654,10 @@ impl ConvertState {
       }
     }
 
+    if !node_excluded && !node_enter_skipped {
+      let is_inline = self.stack.retired().is_inline;
+      self.release_flank_pairs(node_tag_id, is_inline, true);
+    }
     // The general exit needs the node owned; the fast ones read it in place.
     if self.element_fast_path_ok(node_tag_id) {
       self.emit_exit_simple(false);
@@ -1653,6 +1668,7 @@ impl ConvertState {
       self.emit_exit_element(&node);
       self.stack.restore_retired(node);
     }
+    self.close_flank_pair(node_depth);
     self.stack.release_retired();
 
     if let Some(id) = node_tag_id {
@@ -1959,6 +1975,7 @@ impl ConvertState {
         let depth = self.depth;
         let index = self.stack.last().map_or(0, |n| n.current_walk_index);
         self.emit_text(content, false, depth, index as usize);
+        self.settle_flank_pairs();
       }
       if let Some(parent) = self.stack.last_mut() {
         parent.current_walk_index += 1;

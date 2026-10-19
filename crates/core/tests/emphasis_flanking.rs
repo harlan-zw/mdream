@@ -1,0 +1,161 @@
+//! A delimiter run next to a word character on one side and punctuation on the
+//! other is neither left- nor right-flanking in CommonMark. An opener that
+//! cannot open turns its pair into raw HTML; a closer that cannot close is
+//! followed by a character reference, which starts with punctuation.
+
+use mdream::MarkdownStreamProcessor;
+use mdream::html_to_markdown;
+use mdream::types::HtmlToMarkdownOptions;
+
+const CASES: &[(&str, &str)] = &[
+  (
+    r#"<p>a<strong><a href="/x">b</a></strong></p>"#,
+    "a<strong>[b](/x)</strong>",
+  ),
+  (
+    r#"<p><strong><a href="/x">b</a></strong>c</p>"#,
+    "**[b](/x)**&#99;",
+  ),
+  (
+    r#"<p>a<b><a href="/x">b</a></b>c</p>"#,
+    "a<strong>[b](/x)</strong>c",
+  ),
+  (
+    r#"<p>a<em><img src="/i.png" alt="i"></em>c</p>"#,
+    "a<em>![i](/i.png)</em>c",
+  ),
+  ("<p>a<i><code>x</code></i>c</p>", "a<em>`x`</em>c"),
+  (
+    r#"<p>a<strong><em><a href="/x">b</a></em></strong>c</p>"#,
+    "a<strong>*[b](/x)*</strong>c",
+  ),
+  (
+    r#"<p>a<del><a href="/x">b</a></del>c</p>"#,
+    "a ~~[b](/x)~~&#99;",
+  ),
+  (r#"<p><s><a href="/x">b</a></s>c</p>"#, "~~[b](/x)~~&#99;"),
+  ("<p>a<strong>!b</strong></p>", "a<strong>!b</strong>"),
+  ("<p><strong>b!</strong>c</p>", "**b!**&#99;"),
+  (
+    r#"<p><strong><a href="/x">b</a></strong><span>c</span></p>"#,
+    "**[b](/x)**&#99;",
+  ),
+  (
+    r#"<p>a<strong>b <a href="/x">c</a></strong>d</p>"#,
+    "a**b [c](/x)**&#100;",
+  ),
+  // A no-break space counts as whitespace next to a delimiter run.
+  (
+    r#"<p>a&nbsp;<strong><a href="/x">b</a></strong>c</p>"#,
+    "a\u{a0}**[b](/x)**&#99;",
+  ),
+  (
+    r#"<table><tr><th>h</th></tr><tr><td>a<strong><a href="/x">b</a></strong>c</td></tr></table>"#,
+    "| h |\n| --- |\n| a<strong>[b](/x)</strong>c |",
+  ),
+  (
+    r#"<blockquote><p>a<strong><a href="/x">b</a></strong>c</p></blockquote>"#,
+    "> a<strong>[b](/x)</strong>c",
+  ),
+  // Delimiters that flank stay as they are.
+  (
+    r#"<p>a <strong><a href="/x">b</a></strong> c</p>"#,
+    "a **[b](/x)** c",
+  ),
+  ("<p>a<strong>b</strong>c</p>", "a**b**c"),
+  (
+    r#"<p><a href="/y">a<strong>b!</strong></a>c</p>"#,
+    "[a**b!**](/y)c",
+  ),
+  // A strikethrough opener is not followed by a separator.
+  (r#"<p><del><a href="/x">b</a></del></p>"#, "~~[b](/x)~~"),
+];
+
+fn stream_chunks(html: &str, chunk: usize, options: &HtmlToMarkdownOptions) -> String {
+  let mut processor = MarkdownStreamProcessor::new(options.clone());
+  let mut out = String::new();
+  for part in html.as_bytes().chunks(chunk) {
+    out.push_str(&processor.process_chunk(std::str::from_utf8(part).unwrap()));
+  }
+  out.push_str(&processor.finish());
+  out
+}
+
+#[test]
+fn writes_flanking_delimiters_or_raw_html() {
+  for &(html, expected) in CASES {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html:?}"
+    );
+  }
+}
+
+#[test]
+fn streaming_matches_one_shot_at_every_chunk_size() {
+  for options in [
+    HtmlToMarkdownOptions::default(),
+    HtmlToMarkdownOptions::default().with_wrap_width(6),
+  ] {
+    for &(html, _) in CASES {
+      let expected = html_to_markdown(html, options.clone());
+      for chunk in 1..=html.len() {
+        assert_eq!(
+          stream_chunks(html, chunk, &options),
+          expected,
+          "chunk={chunk} html={html:?}"
+        );
+      }
+    }
+  }
+}
+
+#[test]
+fn open_emphasis_still_yields_content_before_close() {
+  let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+  let first = stream.process_chunk(r#"<p>a<b><a href="/x">link</a><span>"#);
+  assert!(
+    first.contains("a<strong>[link](/x)"),
+    "content held until close: {first:?}"
+  );
+  let mut full = first;
+  full.push_str(&stream.process_chunk("more</span></b>c</p>"));
+  full.push_str(&stream.finish());
+  assert_eq!(full, "a<strong>[link](/x)more</strong>c");
+
+  let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+  let first = stream.process_chunk("<p><b>x!<span>");
+  assert!(first.contains("x!"), "content held until close: {first:?}");
+  let mut full = first;
+  full.push_str(&stream.process_chunk("</span></b>c</p>"));
+  full.push_str(&stream.finish());
+  assert_eq!(full, "**x!**&#99;");
+}
+
+#[test]
+fn keeps_delimiters_where_a_fix_cannot_help() {
+  // An opener before whitespace cannot open; a raw one at a block start would
+  // open an HTML block.
+  assert_eq!(
+    html_to_markdown(
+      r#"<p><strong><br><a href="/x">b</a></strong>c</p>"#,
+      HtmlToMarkdownOptions::default()
+    ),
+    "**  \n[b](/x)**c"
+  );
+  assert_eq!(
+    html_to_markdown(
+      r#"<p>a<strong>&nbsp;<a href="/x">b</a></strong>c</p>"#,
+      HtmlToMarkdownOptions::default()
+    ),
+    "a**\u{a0} [b](/x)**c"
+  );
+  assert_eq!(
+    html_to_markdown(
+      "<p><code>a<strong>[b]</strong>c</code></p>",
+      HtmlToMarkdownOptions::default()
+    ),
+    "`a**[b]**c`"
+  );
+}

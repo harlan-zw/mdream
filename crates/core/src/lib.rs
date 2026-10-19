@@ -265,6 +265,9 @@ mod drain_equiv {
     "<pre><code>let x = 1;\nlet y = 2;</code></pre><p>done</p>",
     "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>",
     r#"<h2>Section</h2><p>text with a <a href="/rel">relative</a> link</p>"#,
+    // An emphasis pair rewritten as raw HTML once its closer's next byte is known.
+    r#"<p>long lead text a<strong>b <em><a href="/x">c</a></em></strong>d and more</p>"#,
+    r#"<blockquote><p>x<br>y<strong><a href="/x">b</a></strong>c</p></blockquote>"#,
     // Rewrite-after-yield constructs.
     r#"<p>Visit <a href="https://x.io">https://x.io</a> today.</p>"#,
     r##"<h2><a href="#section">Section</a></h2><p>body</p>"##,

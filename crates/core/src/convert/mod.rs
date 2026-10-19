@@ -169,6 +169,28 @@ struct OpenMarker {
   starts_at_hard_break: bool,
 }
 
+/// An emphasis pair whose delimiters may not flank (see `flank_class`).
+#[derive(Clone, Copy)]
+struct FlankPair {
+  /// Depth of the element, which identifies its exit.
+  depth: usize,
+  /// Inline marker type, 1 to 4.
+  kind: u8,
+  state: FlankState,
+  /// The opener while opening, the closer while closing, else `usize::MAX`.
+  offset: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FlankState {
+  /// The opener waits for content.
+  Opening,
+  Kept,
+  Raw,
+  /// The closer waits for the byte after it.
+  Closing,
+}
+
 #[derive(Clone, Copy)]
 enum CaptionState {
   Pending,
@@ -881,6 +903,8 @@ pub struct ConvertState {
   pub(crate) streaming: bool,
   /// Open inline markers retained until visible content makes them permanent.
   open_markers: Vec<OpenMarker>,
+  /// Emphasis pairs whose delimiters may still fail to flank, in output order.
+  flank_pairs: Vec<FlankPair>,
   /// Figcaptions defer their opener until content commits the caption.
   caption_frames: Vec<CaptionFrame>,
   /// Unresolved trailing hard breaks retain one physical representative.
@@ -1164,6 +1188,7 @@ impl ConvertState {
       link_caption_break_snapshot_active: false,
       streaming: false,
       open_markers: Vec::new(),
+      flank_pairs: Vec::new(),
       caption_frames: Vec::new(),
       streaming_break_runs: Vec::new(),
       code_spans: Vec::new(),
@@ -2532,6 +2557,7 @@ impl ConvertState {
     while !self.stack.is_empty() {
       self.close_node();
     }
+    self.finish_flank_pairs();
   }
 
   #[inline]
@@ -2777,6 +2803,10 @@ impl ConvertState {
     if let Some(marker) = self.open_markers.first() {
       stable_end = stable_end.min(hold_before(&self.buffer, marker.output_start));
     }
+    // An undecided emphasis opener, or a closer waiting for the next byte.
+    if let Some(offset) = self.flank_hold() {
+      stable_end = stable_end.min(hold_before(&self.buffer, offset));
+    }
     if let Some(output_start) = self.first_tentative_caption_start() {
       stable_end = stable_end.min(hold_before(&self.buffer, output_start));
     }
@@ -2945,6 +2975,9 @@ impl ConvertState {
     if let Some(marker) = self.open_markers.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, marker.output_start));
     }
+    if let Some(offset) = self.flank_hold() {
+      drain_end = drain_end.min(keep_two_before(&self.buffer, offset));
+    }
     if let Some(span) = self.code_spans.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, span.output_start));
     }
@@ -3003,6 +3036,11 @@ impl ConvertState {
     for marker in &mut self.open_markers {
       marker.output_start -= drain_end;
       marker.content_start -= drain_end;
+    }
+    for pair in &mut self.flank_pairs {
+      if pair.offset != usize::MAX {
+        pair.offset -= drain_end;
+      }
     }
     for frame in &mut self.caption_frames {
       if let CaptionState::Tentative {
