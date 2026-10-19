@@ -747,3 +747,82 @@ fn setext_underline_after_a_hard_break_is_escaped() {
   assert_eq!(md("<p>Line one<br>= =</p>"), "Line one  \n= =");
   assert_eq!(md("<p>a = b</p>"), "a = b");
 }
+
+#[test]
+fn text_inline_separators_survive_every_chunk_width() {
+  for (html, expected) in [
+    ("<p>a<span>x </span>&nbsp;<span>b</span></p>", "ax \u{a0}b"),
+    ("<p>a<span> <span>b</span></span></p>", "a b"),
+    ("<p>a<span> <strong>b</strong></span></p>", "a b"),
+    ("<p>a<font> <b>x</b></font></p>", "a x"),
+    ("<p>a<label> <span>b</span></label></p>", "a b"),
+    ("<p>a<abbr> <span>b</span></abbr></p>", "a b"),
+    ("<p>a<small> <span>b</span></small></p>", "a b"),
+    ("<p>a<u> <span>b</span></u></p>", "a b"),
+    ("<p>a<span><span> <span>b</span></span></span></p>", "a b"),
+    ("<p>a<span>\n  <span>b</span></span>c</p>", "a bc"),
+    ("<p>a<span> </span>b</p>", "a b"),
+    ("<p>a<span> <strong></strong></span>b</p>", "a b"),
+    (
+      "<p>a<strong>x<span> <span>b</span></span></strong></p>",
+      "ax b",
+    ),
+    ("<p><strong>a<span> </span></strong>b</p>", "a b"),
+    ("<p>a <span> <span>b</span></span></p>", "a b"),
+    ("<p><span> <strong>b</strong></span></p>", "b"),
+    ("<p>a<br><span> <span>b</span></span></p>", "a\nb"),
+    ("<p>a<span> </span></p>", "a"),
+    ("<p>a<span> </span></p><p>b</p>", "a\n\nb"),
+    ("a<span> <span>b</span></span>", "a b"),
+    ("<span> <span>b</span></span>", "b"),
+    ("<p>a<span> </span>&nbsp;<span>b</span></p>", "a \u{a0}b"),
+    ("<p>a<span>x </span>&#160;<span>b</span></p>", "ax \u{a0}b"),
+    ("<p>a<span>x </span>\u{a0}<span>b</span></p>", "ax \u{a0}b"),
+    ("<p>a<span>&nbsp;<span>b</span></span></p>", "a\u{a0}b"),
+    ("<p><span>&nbsp;<span>b</span></span></p>", "b"),
+    ("<p>a<code> <span>b</span></code></p>", "a b"),
+    ("<p><code>a<span> <span>b</span></span></code></p>", "a b"),
+    ("<pre>a<span> <span>b</span></span></pre>", "a b"),
+    ("<p>a<q> <span>b</span></q></p>", "a \"b\""),
+    ("<p>a<q><span> </span></q>b</p>", "a b"),
+    ("<p>a<a href=\"/x\"> <span>b</span></a></p>", "a b"),
+    (
+      "<p>a<span> <img src=\"/i.png\" alt=\"i\"></span></p>",
+      "a i",
+    ),
+    ("<ul><li>a<span> <span>b</span></span></li></ul>", "a b"),
+    ("<h2>a<span> <span>b</span></span></h2>", "a b"),
+    (
+      "<blockquote><p>a<span> <span>b</span></span></p></blockquote>",
+      "a b",
+    ),
+    (
+      "<table><tr><th>h</th></tr><tr><td>a<span> <span>b</span></span></td></tr></table>",
+      "h\na b",
+    ),
+    (
+      "<figure>x<figcaption><span> <span>b</span></span></figcaption></figure>",
+      "x\n\nb",
+    ),
+    ("<p>a</p><p><span> <span>b</span></span></p>", "a\n\nb"),
+    (
+      "<p>a</p><p><span>&nbsp;<span>b</span></span></p>",
+      "a\n\n\u{a0}b",
+    ),
+  ] {
+    assert_eq!(text(html), expected, "html={html}");
+    let chars: Vec<char> = html.chars().collect();
+    for width in 1..=chars.len() {
+      let mut stream = MarkdownStreamProcessor::new_with_format(
+        HtmlToMarkdownOptions::default(),
+        mdream::types::OutputFormat::Text,
+      );
+      let mut output = String::new();
+      for chunk in chars.chunks(width) {
+        output.push_str(&stream.process_chunk(&chunk.iter().collect::<String>()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output, expected, "html={html} width={width}");
+    }
+  }
+}

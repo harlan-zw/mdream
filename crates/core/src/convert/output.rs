@@ -460,12 +460,13 @@ impl ConvertState {
         .any(|frame| !matches!(frame.state, CaptionState::Committed));
     if self.pending_inline_whitespace
       || caption_owns_space
-      || self.depth_map[TAG_CODE as usize] != 0
-      || self.depth_map[TAG_PRE as usize] != 0
-      || self.depth_map[TAG_KBD as usize] != 0
-      || self.depth_map[TAG_SAMP as usize] != 0
-      || self.depth_map[TAG_VAR as usize] != 0
-      || (!self.open_markers.is_empty() && self.hoist_opener_space())
+      || (!plain_text!(self)
+        && (self.depth_map[TAG_CODE as usize] != 0
+          || self.depth_map[TAG_PRE as usize] != 0
+          || self.depth_map[TAG_KBD as usize] != 0
+          || self.depth_map[TAG_SAMP as usize] != 0
+          || self.depth_map[TAG_VAR as usize] != 0
+          || (!self.open_markers.is_empty() && self.hoist_opener_space())))
     {
       return;
     }
