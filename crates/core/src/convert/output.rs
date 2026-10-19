@@ -1171,6 +1171,7 @@ impl ConvertState {
         state: FlankState::Opening,
         offset: self.buffer.len() - delimiter.len(),
       });
+      self.pending_flank_count += 1;
     }
   }
 
@@ -1185,16 +1186,23 @@ impl ConvertState {
       return;
     }
     if (tag_id.is_some() && !is_inline) || tag_id == Some(TAG_FIGCAPTION) {
+      let before = self.flank_pairs.len();
       self.flank_pairs.retain(|pair| pair.offset == usize::MAX);
+      self.pending_flank_count -= before - self.flank_pairs.len();
     } else if is_exit && tag_id == Some(TAG_A) {
+      let before = self.flank_pairs.len();
       self
         .flank_pairs
         .retain(|pair| pair.state != FlankState::Closing);
+      self.pending_flank_count -= before - self.flank_pairs.len();
     }
   }
 
   /// The earliest offset a pair holds back from streaming.
   pub(super) fn flank_hold(&self) -> Option<usize> {
+    if self.pending_flank_count == 0 {
+      return None;
+    }
     self
       .flank_pairs
       .iter()
@@ -1246,11 +1254,14 @@ impl ConvertState {
         {
           self.flank_pairs[index].state = FlankState::Closing;
           self.flank_pairs[index].offset = closer;
+          self.pending_flank_count += 1;
           self.settle_flank_pairs();
           return;
         }
       }
-      self.flank_pairs.remove(index);
+      if self.flank_pairs.remove(index).offset != usize::MAX {
+        self.pending_flank_count -= 1;
+      }
     }
     self.settle_flank_pairs();
   }
@@ -1259,7 +1270,7 @@ impl ConvertState {
   /// permanent and each closer whose next byte is written.
   #[inline]
   pub(crate) fn settle_flank_pairs(&mut self) {
-    if !self.flank_pairs.is_empty() {
+    if self.pending_flank_count != 0 {
       self.settle_pending_flank_pairs();
     }
   }
@@ -1288,6 +1299,7 @@ impl ConvertState {
         }
         if !in_place {
           self.flank_pairs.remove(index);
+          self.pending_flank_count -= 1;
           continue;
         }
         let content = &bytes[pair.offset + delimiter.len()..];
@@ -1300,6 +1312,7 @@ impl ConvertState {
         // start would open an HTML block, so the pair stays as written.
         if first == FLANK_WHITESPACE {
           self.flank_pairs.remove(index);
+          self.pending_flank_count -= 1;
           continue;
         }
         let needs_raw = first == FLANK_PUNCTUATION && {
@@ -1315,6 +1328,7 @@ impl ConvertState {
           flank_class(previous, Some(before)) == FLANK_WORD
         };
         self.flank_pairs[index].offset = usize::MAX;
+        self.pending_flank_count -= 1;
         if needs_raw {
           self.flank_pairs[index].state = FlankState::Raw;
           self.replace_flank_bytes(pair.offset, delimiter.len(), FLANK_RAW_OPEN[kind]);
@@ -1337,6 +1351,7 @@ impl ConvertState {
         self.replace_flank_bytes(next, 1, &reference);
       }
       self.flank_pairs.remove(index);
+      self.pending_flank_count -= 1;
     }
   }
 
@@ -1344,6 +1359,7 @@ impl ConvertState {
   pub(crate) fn finish_flank_pairs(&mut self) {
     self.settle_flank_pairs();
     self.flank_pairs.clear();
+    self.pending_flank_count = 0;
   }
 
   /// Replace `len` bytes at `at`, moving every offset recorded past it.

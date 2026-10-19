@@ -905,6 +905,7 @@ pub struct ConvertState {
   open_markers: Vec<OpenMarker>,
   /// Emphasis pairs whose delimiters may still fail to flank, in output order.
   flank_pairs: Vec<FlankPair>,
+  pending_flank_count: usize,
   /// Figcaptions defer their opener until content commits the caption.
   caption_frames: Vec<CaptionFrame>,
   /// Unresolved trailing hard breaks retain one physical representative.
@@ -1189,6 +1190,7 @@ impl ConvertState {
       streaming: false,
       open_markers: Vec::new(),
       flank_pairs: Vec::new(),
+      pending_flank_count: 0,
       caption_frames: Vec::new(),
       streaming_break_runs: Vec::new(),
       code_spans: Vec::new(),
