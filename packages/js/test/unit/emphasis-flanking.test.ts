@@ -65,6 +65,78 @@ async function streamConvert(html: string, chunkSize: number): Promise<string> {
 }
 
 describe('emphasis delimiters that cannot flank', () => {
+  it.each([
+    ['<h2><strong>b!</strong><a href="#x">c</a></h2>', '## **b!**&#99;'],
+    ['<h2><a href="#x">x</a><strong>!b</strong></h2>', '## x<strong>!b</strong>'],
+    ['<h2>x<a href="#x"><strong>!b</strong></a></h2>', '## x **!b**'],
+    ['<h2><a href="#x"><strong>b!</strong></a>c</h2>', '## **b!**&#99;'],
+    ['<h2><a href="#x"><strong><em>b!</em></strong></a><span>c</span></h2>', '## ***b!***&#99;'],
+    ['<h2><a href="/x"><strong>b!</strong></a>c</h2>', '## [**b!**](/x)c'],
+  ])('retains pending emphasis when cleaning the link in %s', async (html, expected) => {
+    const options = { clean: clean({ selfLinkHeadings: true }) }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `width=${width}`).toBe(expected)
+    }
+  })
+
+  it.each([
+    ['<p><a href="#missing"><em>x</em></a><em>!b</em></p>', '*x*<em>!b</em>'],
+    ['<p>x<a href="#missing"></a><strong>!b</strong></p>', 'x **!b**'],
+    ['<p><em>x</em><a href="#missing"></a><em>!b</em></p>', '*x*<em>!b</em>'],
+    ['<p><em>x</em><a href="#one"></a><a href="#two"></a><em>!b</em></p>', '*x* *!b*'],
+    ['<p><strong>b!</strong><a href="#missing"></a>c</p>', '**b!**&#99;'],
+    ['<p><strong>b!</strong><a href="#missing">c</a></p>', '**b!**&#99;'],
+    ['<p><strong>b!</strong><a href="#found">c</a></p><h2>found</h2>', '**b!**[&#99;](#found)\n\n## found'],
+    ['<p><a href="#missing">x</a><strong>!b</strong></p>', 'x<strong>!b</strong>'],
+    ['<p><a href="#found">x</a><strong>!b</strong></p><h2>found</h2>', '[x](#found)<strong>!b</strong>\n\n## found'],
+    ['<p>x<a href="#missing"><strong>!b</strong></a></p>', 'x **!b**'],
+    ['<p><a href="#missing"><strong></strong></a>c</p>', 'c'],
+    ['<p><a href="#missing"><strong>b!</strong> tail</a>c</p>', '**b!** tailc'],
+    ['<p><a href="/external"><strong>b!</strong></a>c</p>', '[**b!**](/external)c'],
+    ['<p><a href="#missing"><strong>b!</strong></a>c</p>', '**b!**&#99;'],
+    ['<p><a href="#found"><strong>b!</strong></a>c</p><h2>found</h2>', '[**b!**](#found)&#99;\n\n## found'],
+    ['<p><a href="#missing"><strong><em>b!</em></strong></a>c</p>', '***b!***&#99;'],
+  ])('keeps emphasis across deferred fragment cleanup in %s', async (html, expected) => {
+    const options = { clean: clean({ fragments: true }) }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const chunks: string[] = []
+      for (let offset = 0; offset < html.length; offset += width)
+        chunks.push(html.slice(offset, offset + width))
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(toStream(chunks), options))
+        output += chunk
+      expect(output, `width=${width}`).toBe(expected)
+    }
+  })
+
+  it('keeps cleaned heading links stable through long stream drains', async () => {
+    const html = `<blockquote><p>before</p><h2><a href="#x">${'word '.repeat(2000)}<strong>b!</strong></a>c</h2><figure><figcaption>caption</figcaption></figure></blockquote><p>after</p>`
+    const options = { clean: clean({ selfLinkHeadings: true }) }
+    const expected = htmlToMarkdown(html, options)
+    expect(expected).toContain('**b!**&#99;')
+    for (const width of [1, 7, 1024]) {
+      const chunks: string[] = []
+      for (let offset = 0; offset < html.length; offset += width)
+        chunks.push(html.slice(offset, offset + width))
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(toStream(chunks), options))
+        output += chunk
+      expect(output, `width=${width}`).toBe(expected)
+    }
+  })
+
   it('reuses completed pairs across nested siblings and stream drains', async () => {
     const fragment = '<p>a<strong><em><a href="/x">b</a></em></strong>c</p><p><strong><a href="/x">d</a></strong>e</p>'
     const html = fragment.repeat(128)

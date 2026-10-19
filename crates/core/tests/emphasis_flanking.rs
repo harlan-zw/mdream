@@ -184,6 +184,137 @@ fn open_emphasis_still_yields_content_before_close() {
 }
 
 #[test]
+fn unwrapped_heading_link_retains_pending_emphasis_closer() {
+  let options = HtmlToMarkdownOptions::default().with_clean(CleanConfig {
+    self_link_headings: true,
+    ..Default::default()
+  });
+  for (html, expected) in [
+    (
+      r##"<h2><strong>b!</strong><a href="#x">c</a></h2>"##,
+      "## **b!**&#99;",
+    ),
+    (
+      r##"<h2><a href="#x">x</a><strong>!b</strong></h2>"##,
+      "## x<strong>!b</strong>",
+    ),
+    (
+      r##"<h2>x<a href="#x"><strong>!b</strong></a></h2>"##,
+      "## x **!b**",
+    ),
+    (
+      r##"<h2><a href="#x"><strong>b!</strong></a>c</h2>"##,
+      "## **b!**&#99;",
+    ),
+    (
+      r##"<h2><a href="#x"><strong><em>b!</em></strong></a><span>c</span></h2>"##,
+      "## ***b!***&#99;",
+    ),
+    (
+      r##"<h2><a href="/x"><strong>b!</strong></a>c</h2>"##,
+      "## [**b!**](/x)c",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "html={html}"
+    );
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, chunk, &options),
+        expected,
+        "chunk={chunk} html={html}"
+      );
+    }
+  }
+}
+
+#[test]
+fn deferred_fragment_cleanup_preserves_emphasis() {
+  let options = HtmlToMarkdownOptions::default().with_clean(CleanConfig {
+    fragments: true,
+    ..Default::default()
+  });
+  for (html, expected) in [
+    (
+      r##"<p><a href="#missing"><em>x</em></a><em>!b</em></p>"##,
+      "*x*<em>!b</em>",
+    ),
+    (
+      r##"<p>x<a href="#missing"></a><strong>!b</strong></p>"##,
+      "x **!b**",
+    ),
+    (
+      r##"<p><em>x</em><a href="#missing"></a><em>!b</em></p>"##,
+      "*x*<em>!b</em>",
+    ),
+    (
+      r##"<p><em>x</em><a href="#one"></a><a href="#two"></a><em>!b</em></p>"##,
+      "*x* *!b*",
+    ),
+    (
+      r##"<p><strong>b!</strong><a href="#missing"></a>c</p>"##,
+      "**b!**&#99;",
+    ),
+    (
+      r##"<p><strong>b!</strong><a href="#missing">c</a></p>"##,
+      "**b!**&#99;",
+    ),
+    (
+      r##"<p><strong>b!</strong><a href="#found">c</a></p><h2>found</h2>"##,
+      "**b!**[&#99;](#found)\n\n## found",
+    ),
+    (
+      r##"<p><a href="#missing">x</a><strong>!b</strong></p>"##,
+      "x<strong>!b</strong>",
+    ),
+    (
+      r##"<p><a href="#found">x</a><strong>!b</strong></p><h2>found</h2>"##,
+      "[x](#found)<strong>!b</strong>\n\n## found",
+    ),
+    (
+      r##"<p>x<a href="#missing"><strong>!b</strong></a></p>"##,
+      "x **!b**",
+    ),
+    (r##"<p><a href="#missing"><strong></strong></a>c</p>"##, "c"),
+    (
+      r##"<p><a href="#missing"><strong>b!</strong> tail</a>c</p>"##,
+      "**b!** tailc",
+    ),
+    (
+      r##"<p><a href="/external"><strong>b!</strong></a>c</p>"##,
+      "[**b!**](/external)c",
+    ),
+    (
+      r##"<p><a href="#missing"><strong>b!</strong></a>c</p>"##,
+      "**b!**&#99;",
+    ),
+    (
+      r##"<p><a href="#found"><strong>b!</strong></a>c</p><h2>found</h2>"##,
+      "[**b!**](#found)&#99;\n\n## found",
+    ),
+    (
+      r##"<p><a href="#missing"><strong><em>b!</em></strong></a>c</p>"##,
+      "***b!***&#99;",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "html={html}"
+    );
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, chunk, &options),
+        expected,
+        "chunk={chunk} html={html}"
+      );
+    }
+  }
+}
+
+#[test]
 fn heading_slugs_still_match_fragment_links() {
   // A heading slug reads a character reference and a link's text as written,
   // so neither is used while fragment cleaning collects slugs; raw tags

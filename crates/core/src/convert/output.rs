@@ -1196,7 +1196,11 @@ impl ConvertState {
       let before = self.flank_pairs.len();
       self.flank_pairs.retain(|pair| pair.offset == usize::MAX);
       self.pending_flank_count -= before - self.flank_pairs.len();
-    } else if is_exit && tag_id == Some(TAG_A) {
+    } else if is_exit
+      && tag_id == Some(TAG_A)
+      && self.clean_flags & (CLEAN_SELF_LINK_HEADINGS | CLEAN_REDUNDANT_LINKS | CLEAN_FRAGMENTS)
+        == 0
+    {
       let before = self.flank_pairs.len();
       self
         .flank_pairs
@@ -1330,8 +1334,29 @@ impl ConvertState {
         }
         let needs_raw = first == FLANK_PUNCTUATION && {
           let mut run_start = pair.offset;
-          while run_start > 0 && bytes[run_start - 1] == delimiter[0] {
-            run_start -= 1;
+          let mut link_index = self.fragment_links.len();
+          loop {
+            while run_start > 0 && bytes[run_start - 1] == delimiter[0] {
+              run_start -= 1;
+            }
+            if self.clean_flags & CLEAN_FRAGMENTS == 0 || link_index == 0 {
+              break;
+            }
+            let link = &self.fragment_links[link_index - 1];
+            if link.link_end != run_start
+              || link.text_end >= run_start
+              || link.bracket_start >= link.text_end
+            {
+              break;
+            }
+            run_start = link.text_end;
+            while run_start > link.bracket_start + 1 && bytes[run_start - 1] == delimiter[0] {
+              run_start -= 1;
+            }
+            if run_start == link.bracket_start + 1 {
+              run_start = link.bracket_start;
+            }
+            link_index -= 1;
           }
           let [previous, before] = match run_start {
             0 => self.flushed_tail,
@@ -1352,8 +1377,46 @@ impl ConvertState {
         continue;
       }
       let mut next = pair.offset + delimiter.len();
-      while next < bytes.len() && bytes[next] == delimiter[0] {
-        next += 1;
+      loop {
+        while next < bytes.len() && bytes[next] == delimiter[0] {
+          next += 1;
+        }
+        if self.clean_flags & (CLEAN_FRAGMENTS | CLEAN_SELF_LINK_HEADINGS) != 0
+          && self.link.open
+          && self.link.bracket_emitted
+          && next == self.link.bracket_pos
+          && bytes.get(next) == Some(&b'[')
+          && (self.clean_flags & CLEAN_FRAGMENTS != 0 || self.in_heading())
+          && self.stack[..]
+            .iter()
+            .rev()
+            .find(|node| node.tag_id == Some(TAG_A))
+            .and_then(|node| node.attributes.get_bit(ATTR_HREF))
+            .is_some_and(|href| href.starts_with('#'))
+        {
+          next += 1;
+          continue;
+        }
+        if self.clean_flags & CLEAN_FRAGMENTS != 0
+          && bytes.get(next) == Some(&b'[')
+          && let Some(link) = self.fragment_links.last()
+          && link.bracket_start == next
+        {
+          next += 1;
+          continue;
+        }
+        // Fragment cleanup may remove the recorded link suffix later.
+        if self.clean_flags & CLEAN_FRAGMENTS != 0
+          && bytes.get(next) == Some(&b']')
+          && let Some(link) = self.fragment_links.last()
+          && link.text_end == next
+          && link.link_end > next
+          && link.link_end <= bytes.len()
+        {
+          next = link.link_end;
+        } else {
+          break;
+        }
       }
       if in_place && next == bytes.len() {
         index += 1;
@@ -2329,6 +2392,11 @@ impl ConvertState {
   fn keep_link_text(&mut self, bracket_pos: usize, text_len: usize, is_inline: bool) {
     self.note_buffer_rewrite(bracket_pos);
     self.buffer.remove(bracket_pos);
+    for pair in &mut self.flank_pairs {
+      if pair.offset != usize::MAX && pair.offset > bracket_pos {
+        pair.offset -= 1;
+      }
+    }
     self.last_content_cache_len = text_len;
     self.end_link();
     self.last_node_is_inline = is_inline;

@@ -2521,7 +2521,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           dropFlankPair(index)
       }
     }
-    else if (tagId === TAG_A && eventType === NodeEventExit) {
+    else if (tagId === TAG_A && eventType === NodeEventExit && !cleanPass) {
       for (let index = flankCount - 1; index >= 0; index--) {
         if (flankStates[index] === FLANK_CLOSING)
           dropFlankPair(index)
@@ -2565,7 +2565,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    * At the end of each event, decide each opener whose content is now
    * permanent and each closer whose next character is written.
    */
-  function settleFlankPairs(): void {
+  function settleFlankPairs(node?: Node): void {
     const buffer = state.buffer
     for (let index = 0; index < flankCount; index++) {
       const fragment = flankFragments[index]!
@@ -2596,7 +2596,28 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           continue
         }
         const kept = value!.length - delimiter.length
-        if (firstClass === FLANK_PUNCTUATION && flankClass(kept > 0 ? value!.charCodeAt(kept - 1) : charBeforeRun(buffer, fragment, -1, delimiter.charCodeAt(0))) === FLANK_WORD) {
+        let needsRaw = false
+        if (firstClass === FLANK_PUNCTUATION) {
+          let previous = kept > 0 ? value!.charCodeAt(kept - 1) : charBeforeRun(buffer, fragment, -1, delimiter.charCodeAt(0))
+          if (collectsHeadingSlugs && kept === 0) {
+            previous = -1
+            for (let cursor = fragment - 1; cursor >= 0 && previous === -1; cursor--) {
+              const part = buffer[cursor]!
+              if (part.charCodeAt(0) === FRAGMENT_LINK_CLOSE_CODE
+                || (part.length === 2 && part.charCodeAt(0) === FRAGMENT_LINK_OPEN_CODE && part.charCodeAt(1) === 91)) {
+                continue
+              }
+              for (let offset = part.length - 1; offset >= 0; offset--) {
+                if (part.charCodeAt(offset) !== delimiter.charCodeAt(0)) {
+                  previous = part.charCodeAt(offset)
+                  break
+                }
+              }
+            }
+          }
+          needsRaw = flankClass(previous) === FLANK_WORD
+        }
+        if (needsRaw) {
           replaceFlankText(fragment, kept, delimiter.length, FLANK_RAW_OPEN[type]!)
           flankStates[index] = FLANK_RAW
         }
@@ -2610,10 +2631,31 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       let next = fragment + 1
       let offset = 0
       const mark = delimiter.charCodeAt(0)
+      const bracket = openLinkFragment >= 0 ? openLinkFragment : -openLinkFragment - 2
       while (next < buffer.length) {
         const following = buffer[next]!
         while (offset < following.length && following.charCodeAt(offset) === mark)
           offset++
+        if (cleanPass && next === bracket && offset === 0 && following === '[') {
+          let anchor = node?.type === ELEMENT_NODE ? node as ElementNode : node?.parent
+          while (anchor && anchor.tagId !== TAG_A)
+            anchor = anchor.parent
+          if (anchor?.attributes?.href?.charCodeAt(0) === 35
+            && (collectsHeadingSlugs || (cleanRules?.selfLinkHeadings && isInsideHeading(state.depthMap)))) {
+            next++
+            continue
+          }
+        }
+        if (collectsHeadingSlugs && offset === 0 && following.length === 2
+          && following.charCodeAt(0) === FRAGMENT_LINK_OPEN_CODE && following.charCodeAt(1) === 91) {
+          next++
+          continue
+        }
+        // Fragment cleanup may remove this entire link suffix later.
+        if (collectsHeadingSlugs && offset === 0 && following.charCodeAt(0) === FRAGMENT_LINK_CLOSE_CODE) {
+          next++
+          continue
+        }
         if (offset < following.length)
           break
         next++
@@ -2643,7 +2685,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (event.type === NodeEventExit && node.type === ELEMENT_NODE)
         closeFlankPair(node as ElementNode)
       if (pendingFlankCount !== 0)
-        settleFlankPairs()
+        settleFlankPairs(node)
     }
   }
 
