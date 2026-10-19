@@ -2189,6 +2189,30 @@ fn streaming_block_markers_at_a_deep_list_content_column_are_escaped() {
   }
 }
 
+// A `<p>` or `<div>` that opens a `<pre>` fence in a list item leaves its
+// separator to the fence, at every cut.
+#[test]
+fn streaming_block_that_opens_a_list_code_block_stays_out_of_the_code() {
+  for (html, expected) in [
+    (
+      "<ul><li><h1></h1><pre><div>x</div></pre></li></ul>",
+      "- #\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>a<pre><p>x</p><p>y</p></pre></li></ul>",
+      "- a\n\n  ```\n  x\n\n  y\n  ```",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // A `<pre>` fence opened by its first child pays the break a heading in the
 // list item owes, at every cut.
 #[test]

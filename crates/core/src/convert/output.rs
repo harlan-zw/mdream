@@ -4511,9 +4511,12 @@ impl ConvertState {
       TAG_INS => Some(Cow::Borrowed("<ins>")),
       TAG_P | TAG_DIV => {
         // A drain can empty the buffer mid-document, so the check reads the
-        // flushed tail like the close-side twin below, not just the buffer.
+        // flushed tail like the close-side twin below, not just the buffer. A
+        // pending `<pre>` fence is written after this output and opens the
+        // block itself, so a separator here would land inside the code.
         if self.depth_map[TAG_LI as usize] > 0
           && !self.in_table_cell()
+          && !self.pre_fence_pending
           && self
             .last_output_byte()
             .is_some_and(|last_char| last_char != b' ' && last_char != b'\n')

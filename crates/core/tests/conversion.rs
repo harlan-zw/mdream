@@ -5578,6 +5578,37 @@ fn a_code_block_after_a_heading_in_a_list_item_keeps_its_content() {
 }
 
 #[test]
+fn a_block_that_opens_a_code_block_in_a_list_item_stays_out_of_the_code() {
+  // The fence a `<p>` or `<div>` child opens is written after that child's own
+  // separator, which then landed inside the code.
+  for (html, expected) in [
+    (
+      "<ul><li><h1></h1><pre><div>x</div></pre></li></ul>",
+      "- #\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li><h1></h1><pre> <p>x</p></pre></li></ul>",
+      "- #\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>a<pre><p>x</p></pre></li></ul>",
+      "- a\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>a<pre><p>x</p><p>y</p></pre></li></ul>",
+      "- a\n\n  ```\n  x\n\n  y\n  ```",
+    ),
+    // Text already opened the fence.
+    (
+      "<ul><li>a<pre>b<p>x</p></pre></li></ul>",
+      "- a\n\n  ```\n  b\n\n  x\n  ```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
 fn a_heading_without_an_atx_prefix_keeps_its_hash_unescaped() {
   // No `#` prefix is written in either case, so there is no closing sequence to
   // protect and a backslash would be literal content.

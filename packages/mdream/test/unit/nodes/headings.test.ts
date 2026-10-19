@@ -156,6 +156,17 @@ describe.each(engines)('headings $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
   })
 
+  // A `<p>` or `<div>` that opens the fence of a `<pre>` after the heading
+  // leaves its separator to the fence.
+  it.each([
+    ['<ul><li><h1></h1><pre><div>x</div></pre></li></ul>', '- #\n\n  ```\n  x\n  ```'],
+    ['<ul><li><h1></h1><pre> <p>x</p></pre></li></ul>', '- #\n\n  ```\n  x\n  ```'],
+    ['<ul><li>a<pre><p>x</p><p>y</p></pre></li></ul>', '- a\n\n  ```\n  x\n\n  y\n  ```'],
+  ])('keeps a block that opens a code block in a list item out of the code: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
   // The fence of a `<pre>` after the heading pays the break the heading owes,
   // even when the `<pre>`'s first child opens it, as highlighted code does.
   it.each([
