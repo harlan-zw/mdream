@@ -125,7 +125,7 @@ import {
   TAG_XMP,
 } from './const'
 import { resolveUrl, safeAnchorOutput } from './url'
-import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
+import { blockOpenPrefix, getLanguageFromClass, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
   if (!/[\t\n\f\r ()\\<>]/.test(destination))
@@ -454,15 +454,11 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_H5]: handleHeading(5),
   [TAG_H6]: handleHeading(6),
   [TAG_HR]: {
-    enter: ({ node, state }) => {
+    enter: ({ state }) => {
       // A thematic break cannot end a GFM row; raw <hr> can sit in a cell.
       if (isInsideTableCell(state))
         return '<hr>'
-      // `continuationPrefix` allocates an ancestor chain, so only a rule that
-      // can actually carry a prefix asks for one.
-      if (!(state.depthMap?.[TAG_LI] || state.bufferedBlockquoteDepth))
-        return MARKDOWN_HORIZONTAL_RULE
-      const prefix = continuationPrefix(node, state.listIndentWidths || [])
+      const prefix = state.depthMap?.[TAG_LI] ? state.listIndent : ''
       if (!prefix)
         return MARKDOWN_HORIZONTAL_RULE
       if (state.depthMap?.[TAG_LI])

@@ -179,6 +179,13 @@ describe('wrap width (issue #106)', () => {
     await expectEveryChunking(html, { wrapWidth: width, plugins: [filterPlugin({ include: ['p'] })] }, expected)
   })
 
+  it.each([
+    ['<p>before</p><ul><li><ul><li><hr></li></ul></li></ul><p>after</p>', 'before\n\n---\n\nafter'],
+    ['<ul><li><ul><li><hr><p>after</p></li></ul></li></ul>', '---\n\nafter'],
+  ])('does not indent a rule inside filtered list items: %s', async (html, expected) => {
+    await expectEveryChunking(html, { plugins: [filterPlugin({ include: ['hr', 'p'] })] }, expected)
+  })
+
   it('wraps identically across streaming chunks', async () => {
     const html = '<p>The quick brown fox jumps over the lazy dog and then keeps on running well past the edge of the field.</p>'
     const oneshot = wrap(html, 40)
