@@ -2771,6 +2771,39 @@ fn unicode_whitespace_does_not_settle_empty_link_text() {
 }
 
 #[test]
+fn spacing_only_link_override_preserves_title_deduplication() {
+  let opts = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "a".to_string(),
+        TagOverrideConfig {
+          spacing: Some([0, 0]),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (r#"<a href="/x" title="x ">x&#32;</a>Next"#, "[x](/x) Next"),
+    (
+      r#"<a href="/x" title="other ">x&#32;</a>Next"#,
+      r#"[x](/x "other ") Next"#,
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, opts.clone()), expected);
+    for width in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, width, opts.clone()),
+        expected,
+        "width={width}"
+      );
+    }
+  }
+}
+
+#[test]
 fn enter_only_link_override_keeps_clean_rewrites() {
   let path = format!("/{}", "a".repeat(70 * 1024));
   let html = format!("<a href=\"{path}\">{path}</a>");
