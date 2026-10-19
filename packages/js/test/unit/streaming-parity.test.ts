@@ -896,7 +896,7 @@ it.each(['\u000B', '\u00A0', '\u2003'])('preserves non-HTML whitespace %j at eve
     [`<ul><li><h3>T</h3>${space}</li></ul>`, `- ### T ${space}`],
     [`<p>T</p>${space}<p>X</p>`, `T\n\n${space}\n\nX`],
     [`<p>T</p>${space} `, `T\n\n${space}`],
-  ]
+  ] as const
   for (const [html, expected] of cases) {
     expect(htmlToMarkdown(html)).toBe(expected)
     for (let width = 1; width <= html.length; width++)
