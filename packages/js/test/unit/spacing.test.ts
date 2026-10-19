@@ -1,3 +1,4 @@
+import type { MarkdownState } from '../../src/markdown-processor'
 import { describe, expect, it } from 'vitest'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 
@@ -23,8 +24,9 @@ describe('inline whitespace', () => {
         onNodeExit(element, state) {
           if (element.name === 'strong') {
             // Move whitespace before the opener, including its heading separator.
-            const index = state.buffer.length - 1
-            state.buffer[index] = ` ${state.buffer[index]}`
+            const { buffer } = state as MarkdownState
+            const index = buffer.length - 1
+            buffer[index] = ` ${buffer[index]}`
           }
         },
       })],
