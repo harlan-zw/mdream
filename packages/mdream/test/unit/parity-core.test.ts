@@ -149,6 +149,13 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<h2>w<strong>a </strong><br>b</h2>',
     '<table><tr><th>h</th></tr><tr><td>w<strong>a </strong><br>b</td></tr></table>',
   ],
+  'no-break space after an owed separator': [[
+    '<p>Total:<span> </span>&nbsp;<b>5</b></p>',
+    '<p>a<span>x </span>&nbsp;<span>b</span></p>',
+    '<p>a<span> <span>&nbsp;</span></span>b</p>',
+    '<p>a<span> </span>&nbsp;</p>',
+    '<table><tr><td>a<span> </span><span>&nbsp;</span>b</td></tr></table>',
+  ], ['markdown', 'html']],
 }
 
 describe('javaScript engine matches Rust output', () => {

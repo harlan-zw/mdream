@@ -1711,9 +1711,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       // The owed separator is written on its own, as the Rust engine writes
       // it: inside the text it could take a line break that sets the text at
-      // a line start, or land inside a generated delimiter.
+      // a line start, or land inside a generated delimiter. U+00A0 is content
+      // that needs it, not a blank that takes its place.
       if (state.pendingInlineWhitespace) {
-        if (!textNode.value.trim())
+        if (!hasNonWhitespace(textNode.value))
           return
         if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || '')
           && !(openMarkerCount && hoistOpenerSpace())) {

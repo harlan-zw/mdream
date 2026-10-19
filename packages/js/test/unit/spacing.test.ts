@@ -219,6 +219,12 @@ describe('inline whitespace', () => {
       ['<p>a<span> <span class="italic">b</span></span>c</p>', 'a *b*c', tailwind()],
       ['<ol><li>-<span class="font-bold"> <span> </span>b</span> z</li></ol>', '1. \\- **b** z', tailwind()],
       ['<p>aaaa<span> <span class="font-bold">bb cc</span></span></p>', 'aaaa **bb\ncc**', { ...tailwind(), wrapWidth: 8 }],
+      // A no-break space is content, written after the separator.
+      ['<p>Total:<span> </span>&nbsp;<b>5</b></p>', 'Total:  **5**', {}],
+      ['<p>a<span>x </span>&nbsp;<span>b</span></p>', 'ax  b', {}],
+      ['<p>a<span> <span>&nbsp;</span></span>b</p>', 'a  b', {}],
+      ['<p>a<span> </span>&nbsp;</p>', 'a  ', {}],
+      ['<table><tr><td>a<span> </span><span>&nbsp;</span>b</td></tr></table>', '| a  b |\n| --- |', {}],
     ]
     for (const [html, expected, options] of cases) {
       expect(htmlToMarkdown(html, options), html).toBe(expected)
