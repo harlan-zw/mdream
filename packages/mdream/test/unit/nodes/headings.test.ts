@@ -3,6 +3,15 @@ import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('headings $name', (engineConfig) => {
   it.each([
+    ['<div>x</div>', { div: { enter: '[', exit: ']' } }, '[x]'],
+    ['<ul><li><h3></h3><div></div></li></ul>', { div: { exit: 'X' } }, '- ###\n\n  X'],
+    ['<ul><li><h3></h3><div>x</div></li></ul>', { h3: { enter: '###', exit: '' } }, '- ###\n\n  x'],
+  ] as const)('preserves div overrides and list heading markers: %s', async (html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(engine.htmlToMarkdown(html, { plugins: { tagOverrides } })).toBe(expected)
+  })
+
+  it.each([
     ['prefix\nsuffix', '- ### T\n\n  prefix\nsuffix'],
     ['\n  suffix', '- ### T\n  suffix'],
     ['  \n  suffix', '- ### T  \n  suffix'],
