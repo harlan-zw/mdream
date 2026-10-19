@@ -1288,7 +1288,12 @@ impl ConvertState {
           return;
         }
       }
-      if self.flank_pairs.remove(index).offset != usize::MAX {
+      if index + 1 == self.flank_pairs.len() {
+        self.flank_pairs.pop();
+      } else {
+        self.flank_pairs.remove(index);
+      }
+      if pair.offset != usize::MAX {
         self.pending_flank_count -= 1;
       }
     }
