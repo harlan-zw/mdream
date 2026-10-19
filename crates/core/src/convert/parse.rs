@@ -534,7 +534,7 @@ impl ConvertState {
 
     let is_leading_blank =
       !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty();
-    if is_leading_blank && (!self.is_markdown() || !self.keeps_leading_blank()) {
+    if is_leading_blank && (self.is_html() || !self.keeps_leading_blank()) {
       return;
     }
     if text_buffer.is_empty() {
@@ -649,7 +649,7 @@ impl ConvertState {
     let child_text_node_index = self.stack.last().map_or(0, |n| n.child_text_node_index);
 
     // Whitespace-only text before an element's first child is indentation and
-    // can be dropped, unless it parts words in Markdown inline content after
+    // can be dropped, unless it parts words in inline content after
     // earlier text. At the fragment root it can instead separate adjacent
     // inline siblings, so emit it and let the output layer trim or absorb it at
     // leading/trailing and block boundaries.
@@ -657,7 +657,7 @@ impl ConvertState {
       && !contains_non_whitespace
       && child_text_node_index == 0
       && !self.stack.is_empty();
-    if is_leading_blank && (!self.is_markdown() || !self.keeps_leading_blank()) {
+    if is_leading_blank && (self.is_html() || !self.keeps_leading_blank()) {
       return;
     }
     if text_buffer.is_empty() {

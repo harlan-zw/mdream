@@ -416,13 +416,20 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       trimTextAtLineStart(node, state.buffer)
     if (node.excludedFromMarkdown || !node.value)
       return
+    if (node.leadingBlank && !hasNonWhitespace(node.value)) {
+      if (captionClosedSpacing === 0 && !(captionOpen > 0 && !captionContent)
+        && openQuotes.at(-1) !== state.buffer.length - 1) {
+        state.pendingInlineWhitespace = true
+      }
+      return
+    }
     if (hasVisibleContent(node.value) && openCaptionBoundary()) {
       node.value = trimAsciiWhitespaceStart(node.value)
       state.pendingInlineWhitespace = false
     }
     const last = charOf(lastOutputChar(state.buffer))
     if (state.pendingInlineWhitespace) {
-      if (!node.value.trim())
+      if (!hasNonWhitespace(node.value))
         return
       if (last && !' \n\t\r'.includes(last) && !' \n\t\r'.includes(node.value[0] || ''))
         node.value = ` ${node.value}`

@@ -644,6 +644,7 @@ export interface ParseState {
   tagOverrideHandlers?: Map<string, TagHandler>
   /** Whether emitted text should skip Markdown-only escaping */
   plainText?: boolean
+  keepLeadingBlanks?: boolean
   /**
    * Parsed (whitespace-collapsed) form of the raw run the last parse returned.
    * At end of input it is committed instead of the raw run, so trailing text
@@ -1321,9 +1322,9 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
 
   // Whitespace-only text before an element's first child is indentation, but
-  // in Markdown inline content after earlier text it is the only word separator.
+  // in inline content after earlier text it is the only word separator.
   const isLeadingBlank = !inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex
-  if (isLeadingBlank && (state.plainText || !keepsLeadingBlank(state.currentNode))) {
+  if (isLeadingBlank && ((state.plainText && !state.keepLeadingBlanks) || !keepsLeadingBlank(state.currentNode))) {
     return
   }
 
