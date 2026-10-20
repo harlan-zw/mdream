@@ -3177,9 +3177,16 @@ impl ConvertState {
     let in_table = self.depth_map[TAG_TABLE as usize] > 0;
     let in_link = self.depth_map[TAG_A as usize] > 0;
     let in_blockquote = self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
-    let mut line_indent = self.markdown_line_indent();
-    let mut ordered_digits = 0u8;
     let bytes = text.as_bytes();
+    // Only a leading active byte reads the line's indent: an inactive first run
+    // resets it before any use, so most text nodes skip the buffer scan.
+    let mut line_indent = match bytes.first() {
+      Some(&byte) if GFM_BYTE_FLAGS[byte as usize] & GFM_TEXT_ACTIVE_BIT != 0 => {
+        self.markdown_line_indent()
+      }
+      _ => None,
+    };
+    let mut ordered_digits = 0u8;
     let mut escaped = false;
     let mut copied_until = 0usize;
     let mut index = 0usize;
