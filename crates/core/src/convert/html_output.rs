@@ -16,13 +16,37 @@ pub(super) enum HtmlFrame {
   },
 }
 
+#[inline]
+fn has_html_text_escape(word: u64) -> bool {
+  const ONES: u64 = 0x0101_0101_0101_0101;
+  const HIGH: u64 = 0x8080_8080_8080_8080;
+  let amp = word ^ (ONES * u64::from(b'&'));
+  let lt = word ^ (ONES * u64::from(b'<'));
+  let gt = word ^ (ONES * u64::from(b'>'));
+  ((amp.wrapping_sub(ONES) & !amp)
+    | (lt.wrapping_sub(ONES) & !lt)
+    | (gt.wrapping_sub(ONES) & !gt)) & HIGH != 0
+}
+
 fn push_escaped_inner<const ESCAPE_BRACKETS: bool>(
   output: &mut String,
   value: &str,
   attribute: bool,
 ) {
   let mut copied = 0usize;
-  for (index, byte) in value.bytes().enumerate() {
+  let bytes = value.as_bytes();
+  let mut scanned = 0;
+  if !attribute && !ESCAPE_BRACKETS && bytes.len() >= 16 {
+    while let Some(word) = bytes.get(scanned..scanned + 8) {
+      if has_html_text_escape(u64::from_le_bytes(word.try_into().unwrap())) {
+        break;
+      }
+      scanned += 8;
+    }
+  }
+  // Prefixes can end inside UTF-8; only ASCII escapes become string slice bounds.
+  for (offset, byte) in bytes[scanned..].iter().copied().enumerate() {
+    let index = scanned + offset;
     let replacement = match byte {
       b'&' => Some("&amp;"),
       b'<' => Some("&lt;"),
@@ -348,6 +372,68 @@ impl ConvertState {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  fn scalar_escaped_inner<const ESCAPE_BRACKETS: bool>(
+    output: &mut String,
+    value: &str,
+    attribute: bool,
+  ) {
+    let mut copied = 0usize;
+    for (index, byte) in value.bytes().enumerate() {
+      let replacement = match byte {
+        b'&' => Some("&amp;"),
+        b'<' => Some("&lt;"),
+        b'>' => Some("&gt;"),
+        b'"' if attribute => Some("&quot;"),
+        b'[' if ESCAPE_BRACKETS => Some("&#91;"),
+        b']' if ESCAPE_BRACKETS => Some("&#93;"),
+        _ => None,
+      };
+      if let Some(replacement) = replacement {
+        output.push_str(&value[copied..index]);
+        output.push_str(replacement);
+        copied = index + 1;
+      }
+    }
+    output.push_str(&value[copied..]);
+  }
+
+  #[test]
+  fn escape_words_match_every_byte_in_every_lane() {
+    for fill in [*b"abcdefgh", *b"&&<<>>>>", *b"x&x<x>x&", [0; 8], [0xff; 8], [0x80; 8], [0x26; 8], [0xc3, 0xa9, 0xe6, 0x9d, 0xb1, 0xe4, 0xba, 0xac]] {
+      for lane in 0..8 {
+        for byte in 0..=255u8 {
+          let mut word = fill;
+          word[lane] = byte;
+          assert_eq!(has_html_text_escape(u64::from_le_bytes(word)), word.iter().any(|b| matches!(b, b'&' | b'<' | b'>')), "{word:?}");
+        }
+      }
+    }
+  }
+
+  #[test]
+  fn prefix_escape_matches_scalar_at_boundaries() {
+    for prefix in ["x", "東京", "é", "🙂", "xé東🙂", "ééé€"] {
+      for length in 0..=40 {
+        for suffix in ["", "&", "<", ">", "&&<>&", "\"[]", "é&東<🙂>", "é東京🙂", "ééé€&", "ééé€<", "ééé€>"] {
+          let value = format!("{}{suffix}", prefix.repeat(length));
+          for attribute in [false, true] {
+            let mut actual = String::from("prefix:");
+            let mut expected = actual.clone();
+            push_escaped_inner::<false>(&mut actual, &value, attribute);
+            scalar_escaped_inner::<false>(&mut expected, &value, attribute);
+            assert_eq!(actual, expected, "{value:?}, attribute {attribute}");
+            actual.clear();
+            expected.clear();
+            push_escaped_inner::<true>(&mut actual, &value, attribute);
+            scalar_escaped_inner::<true>(&mut expected, &value, attribute);
+            assert_eq!(actual, expected, "brackets {value:?}, attribute {attribute}");
+          }
+        }
+      }
+    }
+  }
+
 
   #[test]
   fn html_tag_allowlist_is_exact() {
