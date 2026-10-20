@@ -83,6 +83,7 @@ const APOS_CHAR = 39 // '\''
 const EXCLAMATION_CHAR = 33 // '!'
 const QUESTION_CHAR = 63 // '?'
 const AMPERSAND_CHAR = 38 // '&'
+const HASH_CHAR = 35 // '#'
 const DASH_CHAR = 45 // '-'
 const SPACE_CHAR = 32 // ' '
 const TAB_CHAR = 9 // '\t'
@@ -606,6 +607,8 @@ export interface ParseState {
   currentNode?: ElementNode | null
   /** Whether current content contains HTML entities that need decoding */
   hasEncodedHtmlEntity?: boolean
+  /** Text buffer offsets where a discarded token ended the DOM text node */
+  entitySeals?: number[]
   /** Whether the last processed character was whitespace - for collapsing whitespace */
   lastCharWasWhitespace?: boolean
   /** Whether the last processed buffer has whitespace - optimization flag */
@@ -886,6 +889,8 @@ function parseHtmlInternal(
   state.isFirstTextInElement ??= false
   state.scriptDataState ??= SCRIPT_DATA
   state.rawtextEndTagPending = false
+  // The text buffer starts empty: earlier seals belong to bytes re-scanned here.
+  state.entitySeals = undefined
   // Process chunk character by character
   let i = 0
   const chunkLength = htmlChunk.length
@@ -1002,13 +1007,7 @@ function parseHtmlInternal(
       continue
     }
     else if (nextCharCode === EXCLAMATION_CHAR) {
-      // EOF emits an unfinished declaration inside visible raw text. Keep
-      // those bytes, including aliases and depth-flattened raw-text elements.
-      const handler = state.currentNode?.tagHandler
-      const visibleRawText = state.flattenedRawTagName !== undefined
-        ? !state.flattenedRawExcludesText
-        : handler?.isNonNesting && !handler.excludesTextNodes
-      const discardDeclaration = state.discardExcludedText && !visibleRawText
+      const discardDeclaration = state.discardExcludedText
       // Discriminate on the third char: '[' is a CDATA section, anything else
       // is a comment/doctype. Only the rare '[' case pays for the string work.
       if (htmlChunk.charCodeAt(i + 2) === OPEN_BRACKET_CHAR) {
@@ -1065,6 +1064,9 @@ function parseHtmlInternal(
         }
         runStart = i
       }
+      else {
+        sealTextRun(textBuffer, state)
+      }
 
       const result = processCommentOrDoctype(htmlChunk, i)
       if (result.complete) {
@@ -1093,6 +1095,7 @@ function parseHtmlInternal(
         && htmlChunk.charCodeAt(i + 2) !== GT_CHAR && !isAsciiAlpha(htmlChunk.charCodeAt(i + 2))))
       && !state.currentNode?.tagHandler?.isNonNesting) {
       // Bogus comments end at the first `>`, even inside quotes.
+      sealTextRun(textBuffer, state)
       const end = htmlChunk.indexOf('>', i + 2)
       if (end === -1) {
         state.trailingText = textBuffer
@@ -1284,6 +1287,7 @@ function parseHtmlInternal(
     state.textBufferContainsWhitespace = false
     state.textBufferContainsNonWhitespace = false
     state.hasEncodedHtmlEntity = false
+    state.entitySeals = undefined
   }
   if (remainingHtml.length > 0 && isWhitespace(remainingHtml.charCodeAt(0)))
     state.lastCharWasWhitespace = false
@@ -1295,7 +1299,88 @@ function parseHtmlInternal(
 /**
  * Process accumulated text buffer and create text node event
  */
+/**
+ * Marks the end of the text buffer as the end of a DOM text node: the token
+ * discarded there splits the text without the separator a new node adds.
+ */
+function sealTextRun(textBuffer: string, state: ParseState): void {
+  const at = textBuffer.length
+  // Only a `&` before the token can start a reference that reaches past it.
+  if (!state.hasEncodedHtmlEntity || at === 0)
+    return
+  const seals = state.entitySeals ??= []
+  if (seals[seals.length - 1] !== at)
+    seals.push(at)
+}
+
+/**
+ * Start of the character reference that text appended at `to` could still
+ * extend: a final `&` followed only by a name, or by `#` and digits. -1 if none.
+ */
+function openReferenceStart(text: string, from: number, to: number): number {
+  let amp = to - 1
+  while (amp >= from && text.charCodeAt(amp) !== AMPERSAND_CHAR)
+    amp--
+  if (amp < from)
+    return -1
+  let k = amp + 1
+  if (k < to && text.charCodeAt(k) === HASH_CHAR) {
+    k++
+    const hex = k < to && (text.charCodeAt(k) | 32) === 120
+    if (hex)
+      k++
+    for (; k < to; k++) {
+      const code = text.charCodeAt(k)
+      const digit = code >= 48 && code <= 57
+      if (!digit && !(hex && ((code | 32) >= 97 && (code | 32) <= 102)))
+        return -1
+    }
+    return amp
+  }
+  for (; k < to; k++) {
+    const code = text.charCodeAt(k)
+    if (!(code >= 48 && code <= 57) && !isAsciiAlpha(code))
+      return -1
+  }
+  return amp
+}
+
+/**
+ * `reference`, an open one from openReferenceStart, written so it decodes as
+ * it does alone and takes no character from the text after it.
+ */
+function endedReference(reference: string): string {
+  if (reference.charCodeAt(1) === HASH_CHAR) {
+    // Digits run to the first non-digit, and a `;` there is part of the reference.
+    const digitStart = (reference.charCodeAt(2) | 32) === 120 ? 3 : 2
+    if (reference.length > digitStart)
+      return `${reference};`
+  }
+  const decoded = decodeHTMLEntities(reference, false, false)
+  return decoded === reference ? `&amp;${reference.slice(1)}` : decoded.replaceAll('&', '&amp;')
+}
+
+/**
+ * Ends the character reference left open at each seal, so the decode that
+ * follows reads the text on each side of a discarded token apart.
+ */
+function endReferencesAtSeals(text: string, seals: number[]): string {
+  let ended = ''
+  let from = 0
+  for (let k = 0; k < seals.length; k++) {
+    const at = Math.min(seals[k]!, text.length)
+    const amp = openReferenceStart(text, from, at)
+    ended += amp === -1 ? text.slice(from, at) : text.slice(from, amp) + endedReference(text.slice(amp, at))
+    from = at
+  }
+  return ended + text.slice(from)
+}
+
 function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (event: NodeEvent) => void): void {
+  if (state.entitySeals) {
+    textBuffer = endReferencesAtSeals(textBuffer, state.entitySeals)
+    state.entitySeals = undefined
+  }
   const containsNonWhitespace = state.textBufferContainsNonWhitespace
   const containsWhitespace = state.textBufferContainsWhitespace
   state.textBufferContainsNonWhitespace = false
