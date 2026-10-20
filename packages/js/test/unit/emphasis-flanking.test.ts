@@ -156,8 +156,8 @@ describe('emphasis delimiters that cannot flank', () => {
     ['<p>x<a href="#missing"></a><strong>!b</strong></p>', 'x **!b**'],
     ['<p><em>x</em><a href="#missing"></a><em>!b</em></p>', '*x**!b*'],
     ['<p><em>x</em><a href="#one"></a><a href="#two"></a><em>!b</em></p>', '*x* *!b*'],
-    ['<p><strong>b!</strong><a href="#missing"></a>c</p>', '**b!**c'],
-    ['<p><strong>b!</strong><a href="#missing">c</a></p>', '**b!**c'],
+    ['<p><strong>b!</strong><a href="#missing"></a>c</p>', '**b!**&#99;'],
+    ['<p><strong>b!</strong><a href="#missing">c</a></p>', '**b!**&#99;'],
     ['<p><strong>b!</strong><a href="#found">c</a></p><h2>found</h2>', '**b!**[c](#found)\n\n## found'],
     ['<p><a href="#missing">x</a><strong>!b</strong></p>', 'x**!b**'],
     ['<p><a href="#found">x</a><strong>!b</strong></p><h2>found</h2>', '[x](#found)**!b**\n\n## found'],
@@ -165,9 +165,14 @@ describe('emphasis delimiters that cannot flank', () => {
     ['<p><a href="#missing"><strong></strong></a>c</p>', 'c'],
     ['<p><a href="#missing"><strong>b!</strong> tail</a>c</p>', '**b!** tailc'],
     ['<p><a href="/external"><strong>b!</strong></a>c</p>', '[**b!**](/external)c'],
-    ['<p><a href="#missing"><strong>b!</strong></a>c</p>', '**b!**c'],
+    ['<p><a href="#missing"><strong>b!</strong></a>c</p>', '**b!**&#99;'],
     ['<p><a href="#found"><strong>b!</strong></a>c</p><h2>found</h2>', '[**b!**](#found)c\n\n## found'],
-    ['<p><a href="#missing"><strong><em>b!</em></strong></a>c</p>', '***b!***c'],
+    ['<p><a href="#missing"><strong><em>b!</em></strong></a>c</p>', '***b!***&#99;'],
+    ['<p><strong>b!</strong><a href="#missing" title="t">c</a></p>', '**b!**&#99;'],
+    ['<p><a href="#missing" title="t"><strong>b!</strong></a>c</p>', '**b!**&#99;'],
+    ['<p><strong>b!</strong><a href="#missing">!c</a></p>', '**b!**!c'],
+    ['<p><a href="#missing"><strong>b!</strong></a><a href="#gone">c</a></p>', '**b!** c'],
+    ['<p><strong>b!</strong><a href="#gone"><a href="#missing">c</a></a></p>', '**b!** c'],
   ])('keeps streaming parity after fragment cleanup in %s', async (html, expected) => {
     const options = { clean: clean({ fragments: true }) }
     expect(htmlToMarkdown(html, options)).toBe(expected)

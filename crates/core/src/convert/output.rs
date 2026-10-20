@@ -1212,6 +1212,9 @@ impl ConvertState {
       };
       self.begin_link(bracket_pos, false, false);
       self.link.bracket_emitted = emitted_bracket;
+      if emitted_bracket && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+        self.link.closer_before = pending;
+      }
       if self.streaming {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = emitted_bracket
@@ -1853,6 +1856,9 @@ impl ConvertState {
       };
       self.begin_link(bracket_pos, false, raw_html_link_open);
       self.link.bracket_emitted = emitted_bracket;
+      if emitted_bracket && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+        self.link.closer_before = pending;
+      }
       // Avoid the href lookup and hold bookkeeping for one-shot conversion, unless
       // `max_node_bytes` has to charge what the link holds back.
       if self.streaming || self.options.max_node_bytes != 0 {
@@ -2062,6 +2068,8 @@ impl ConvertState {
       link_end: self.buffer.len(),
       fragment: fragment.to_string(),
       has_title,
+      bracket_closer: self.link.closer_before,
+      text_closer: self.link.closer_after,
     });
   }
 
@@ -2109,6 +2117,9 @@ impl ConvertState {
       // A released link no longer has a valid bracket anchor.
       if title.is_empty() && self.try_autolink_rewrite(resolved, capped_code_span, is_inline) {
         return;
+      }
+      if self.clean_flags & CLEAN_FRAGMENTS != 0 {
+        self.link.closer_after = self.pending_emphasis;
       }
       self.pending_emphasis = 0;
       if capped_code_span {
@@ -2699,6 +2710,52 @@ impl ConvertState {
     push_decimal(buffer, u32::from(code));
     buffer.push(';');
     buffer.push_str(&text[1..]);
+  }
+
+  /// `clean.fragments` removal for links that cancelled a pending closer.
+  /// `removals` are sorted ranges and `closers` holds `(removal end, closer)`
+  /// sorted by position. The first byte that survives a removal, however many
+  /// adjacent removals it follows, is written as a numeric reference when it
+  /// is ASCII alphanumeric and the closer now precedes it.
+  #[cold]
+  #[inline(never)]
+  pub(super) fn remove_fragment_wrappers(
+    buffer: &str,
+    removals: &[(usize, usize)],
+    closers: &[(usize, u8)],
+  ) -> String {
+    let mut out = String::with_capacity(buffer.len() + 5 * closers.len());
+    let mut read = 0usize;
+    let mut closer = 0u8;
+    let mut next = 0usize;
+    let push = |out: &mut String, text: &str, closer: u8| {
+      let first = text.as_bytes()[0];
+      if closer != 0 && first.is_ascii_alphanumeric() && out.as_bytes().last() == Some(&closer) {
+        Self::write_emphasis_reference(out, first, text);
+      } else {
+        out.push_str(text);
+      }
+    };
+    for &(remove_start, remove_end) in removals {
+      if remove_end <= read {
+        continue;
+      }
+      if remove_start > read {
+        push(&mut out, &buffer[read..remove_start], closer);
+        closer = 0;
+      }
+      read = remove_end;
+      while next < closers.len() && closers[next].0 <= remove_end {
+        if closers[next].0 == remove_end {
+          closer = closers[next].1;
+        }
+        next += 1;
+      }
+    }
+    if read < buffer.len() {
+      push(&mut out, &buffer[read..], closer);
+    }
+    out
   }
 
   #[inline(never)]

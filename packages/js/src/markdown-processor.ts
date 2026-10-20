@@ -2395,9 +2395,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     if (cleanPass) {
       if (eventType === NodeEventEnter)
-        cleanPass.enter(element, outputStart)
+        cleanPass.enter(element, outputStart, closerBefore)
       else if (handlerOutput)
-        cleanPass.closed(element, outputStart, handlerOutput)
+        cleanPass.closed(element, outputStart, handlerOutput, closerBefore)
     }
 
     // Track open inline markers for empty pair detection. Inline code in a

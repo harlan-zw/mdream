@@ -244,4 +244,36 @@ describe.each(engines)('emphasis that cannot flank $name', (engineConfig) => {
       expect(output, `width=${width}`).toBe(expected)
     }
   })
+
+  // A closer the removed link separated from the next word references the
+  // word, in either nesting order, only when the link is gone.
+  it.each([
+    ['<p><strong>b!</strong><a href="#missing">c</a></p>', { fragments: true }, '**b!**&#99;'],
+    ['<p><a href="#missing"><strong>b!</strong></a>c</p>', { fragments: true }, '**b!**&#99;'],
+    ['<p><strong>b!</strong><a href="#missing">c</a></p>', true, '**b!**&#99;'],
+    ['<p><a href="#missing"><strong>b!</strong></a>c</p>', true, '**b!**&#99;'],
+    ['<p><strong>b!</strong><a href="#missing">c</a></p>', { redundantLinks: true }, '**b!**[c](#missing)'],
+    ['<p><a href="#missing"><strong>b!</strong></a>c</p>', { redundantLinks: true }, '[**b!**](#missing)c'],
+    ['<p><strong>b!</strong><a href="#found">c</a></p><h2>found</h2>', { fragments: true }, '**b!**[c](#found)\n\n## found'],
+    ['<p><strong>b!</strong><a href="#missing">é</a></p>', { fragments: true }, '**b!**é'],
+    ['<p><a href="#missing"><strong>b!</strong></a>é</p>', { fragments: true }, '**b!**é'],
+    ['<p><a href="#missing"><strong>b!</strong></a></p>', { fragments: true }, '**b!**'],
+  ] as [string, true | Record<string, boolean>, string][])('references the word after a closer once cleanup removes a link in %s', async (html, clean, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { clean }
+    expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `width=${width}`).toBe(expected)
+    }
+  })
 })

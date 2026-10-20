@@ -361,11 +361,11 @@ fn deferred_fragment_cleanup_keeps_streaming_parity() {
     ),
     (
       r##"<p><strong>b!</strong><a href="#missing"></a>c</p>"##,
-      "**b!**c",
+      "**b!**&#99;",
     ),
     (
       r##"<p><strong>b!</strong><a href="#missing">c</a></p>"##,
-      "**b!**c",
+      "**b!**&#99;",
     ),
     (
       r##"<p><strong>b!</strong><a href="#found">c</a></p><h2>found</h2>"##,
@@ -394,7 +394,7 @@ fn deferred_fragment_cleanup_keeps_streaming_parity() {
     ),
     (
       r##"<p><a href="#missing"><strong>b!</strong></a>c</p>"##,
-      "**b!**c",
+      "**b!**&#99;",
     ),
     (
       r##"<p><a href="#found"><strong>b!</strong></a>c</p><h2>found</h2>"##,
@@ -402,7 +402,27 @@ fn deferred_fragment_cleanup_keeps_streaming_parity() {
     ),
     (
       r##"<p><a href="#missing"><strong><em>b!</em></strong></a>c</p>"##,
-      "***b!***c",
+      "***b!***&#99;",
+    ),
+    (
+      r##"<p><strong>b!</strong><a href="#missing" title="t">c</a></p>"##,
+      "**b!**&#99;",
+    ),
+    (
+      r##"<p><a href="#missing" title="t"><strong>b!</strong></a>c</p>"##,
+      "**b!**&#99;",
+    ),
+    (
+      r##"<p><strong>b!</strong><a href="#missing">!c</a></p>"##,
+      "**b!**!c",
+    ),
+    (
+      r##"<p><a href="#missing"><strong>b!</strong></a><a href="#gone">c</a></p>"##,
+      "**b!** c",
+    ),
+    (
+      r##"<p><strong>b!</strong><a href="#gone"><a href="#missing">c</a></a></p>"##,
+      "**b!** c",
     ),
   ] {
     assert_eq!(
