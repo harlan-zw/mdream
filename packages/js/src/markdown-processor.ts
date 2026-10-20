@@ -1288,9 +1288,16 @@ function commitGfmAction(
       })
       break
     case 'CodeFenceEnter': {
-      const fenceFragment = state.buffer.findIndex(
-        (fragment, index) => index >= outputStart && fragment.includes(MARKDOWN_CODE_BLOCK),
-      )
+      // The opener is in this event's output. Search only that, as the Rust
+      // engine does, instead of every fragment written before it.
+      const buffer = state.buffer
+      let fenceFragment = -1
+      for (let index = outputStart; index < buffer.length; index++) {
+        if (buffer[index]!.includes(MARKDOWN_CODE_BLOCK)) {
+          fenceFragment = index
+          break
+        }
+      }
       if (fenceFragment < 0)
         throw new Error('code fence opener missing from output')
       startCodeFence(state, fenceFragment, action.language, state.listIndent)
