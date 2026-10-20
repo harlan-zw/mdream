@@ -33,6 +33,7 @@ describe('release version synchronization', () => {
     }
   })
 
+  // This integration starts real Node, Git and Cargo processes on Windows too.
   it.each(['2.0.1', '2.1.0-beta.1'])('updates the native loader version for %s', (version) => {
     const root = mkdtempSync(join(tmpdir(), 'mdream-release-version-'))
     const write = (path: string, content: string) => {
@@ -46,7 +47,7 @@ describe('release version synchronization', () => {
     write('crates/core/Cargo.toml', '[package]\nname = "mdream-version-fixture"\nversion.workspace = true\nedition = "2021"\n')
     write('crates/core/src/lib.rs', '')
     try {
-      execFileSync('git', ['init', '--quiet'], { cwd: root })
+      execFileSync('git', ['init', '--quiet'], { cwd: root, timeout: 5000 })
       execFileSync(process.execPath, [syncScript], { cwd: root, stdio: 'pipe' })
       const loaderPackage = JSON.parse(readFileSync(join(root, 'crates/node/package.json'), 'utf8'))
       const platformPackage = JSON.parse(readFileSync(join(root, 'crates/node/npm/win32-x64-msvc/package.json'), 'utf8'))
@@ -56,5 +57,5 @@ describe('release version synchronization', () => {
     finally {
       rmSync(root, { recursive: true, force: true })
     }
-  })
+  }, 30_000)
 })
