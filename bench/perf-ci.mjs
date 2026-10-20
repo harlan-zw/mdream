@@ -48,6 +48,9 @@ const html = readFileSync(resolve(currentDir, 'bundle/wiki.html'), 'utf8')
 const htmlBytes = new TextEncoder().encode(html)
 const htmlAnchorChunks = splitAfterAnchors(html)
 const attributeHeavyHtml = '<div id="item" class="card primary" data-a="alpha" data-b="beta" aria-label="Card" title="Title"></div>'.repeat(12_000)
+// Release notes with a code block every few lines. A fence that rescans the
+// output before it makes this case grow with the square of its size.
+const codeBlockHtml = '<h3>v1.2.3</h3><ul><li>Fix <code>parse()</code> in <a href="https://example.com/pull/1">#1</a></li><li>Add <strong>new</strong> option</li></ul><pre><code class="language-diff">- old\n+ new\n</code></pre>'.repeat(8_000)
 const STREAM_CHUNK_SIZE = 16 * 1024
 const RUST_STREAM_CHUNK_SIZE = 8 * 1024
 const RUST_STREAM_BODY_SIZE = 2 * 1024 * 1024
@@ -376,6 +379,7 @@ async function main() {
   const JS_BENCHES = [
     ['core-wiki', 'JS htmlToMarkdown · wiki (1.8 MB)', () => convert(html), undefined],
     ['core-attributes', 'JS htmlToMarkdown · attribute-heavy (1.2 MB)', () => convert(attributeHeavyHtml), { warmup: 20, reps: 24, runs: 3 }],
+    ['core-code-blocks', 'JS htmlToMarkdown · code blocks (1.6 MB)', () => convert(codeBlockHtml), undefined],
     ['minimal-wiki', 'JS minimal preset · wiki', () => convertMinimal(html), { reps: 12, runs: 1 }],
     ['stream-wiki', 'JS stream drain · wiki', drainStream, undefined],
   ]
