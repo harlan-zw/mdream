@@ -1123,13 +1123,15 @@ impl ConvertState {
   /// its own separation. Visible output takes the break as a prefix, so an
   /// empty marker pair dropped later takes it back; a leading space meant to
   /// separate it from text on the same line goes. Output with nothing visible
-  /// leaves the break to whatever follows.
+  /// leaves the break to whatever follows. Returns the output and the length
+  /// of the break it took as a prefix.
+  #[cold]
   #[inline(never)]
   fn settle_heading_break(
     &mut self,
     tag_id: Option<u8>,
-    output: &mut Option<Cow<'static, str>>,
-  ) -> usize {
+    output: Option<Cow<'static, str>>,
+  ) -> (Option<Cow<'static, str>>, usize) {
     let fragment = output.as_deref().unwrap_or("");
     if matches!(tag_id, Some(TAG_LI | TAG_FIGCAPTION))
       || fragment.trim_start_matches(' ').starts_with('\n')
@@ -1138,16 +1140,93 @@ impl ConvertState {
     } else if has_visible(fragment.as_bytes()) {
       self.heading_break_pending = false;
       let fragment = fragment.trim_start_matches(' ');
-      *output = Some(Cow::Owned(format!("\n\n{}{fragment}", self.list_indent)));
-      return 2 + self.list_indent.len();
+      let prefixed = format!("\n\n{}{fragment}", self.list_indent);
+      return (Some(Cow::Owned(prefixed)), 2 + self.list_indent.len());
     }
-    0
+    (output, 0)
+  }
+
+  /// Write a pending heading break before a text node. Returns the text that
+  /// follows it, or `None` when the node is only whitespace and keeps waiting.
+  #[cold]
+  #[inline(never)]
+  fn flush_heading_break_before_text<'t>(&mut self, text: &'t str) -> Option<&'t str> {
+    if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
+      return None;
+    }
+    self.flush_heading_break();
+    // The text opens the item's next block, where a leading space indents it.
+    Some(if self.depth_map[TAG_PRE as usize] == 0 {
+      text.trim_start_matches(|c: char| c.is_ascii() && is_whitespace(c as u8))
+    } else {
+      text
+    })
   }
 
   fn flush_heading_break(&mut self) {
     self.heading_break_pending = false;
     let separator = format!("\n\n{}", self.list_indent);
     self.last_content_cache_len = self.push_code_span_content(&separator, true);
+  }
+
+  /// Inside a list item a heading opens its own block unless a wrapper keeps it
+  /// inline: after text on the item's line, even past a space, its `#` prefix
+  /// would stay text. The space that ended the text goes too, which the
+  /// reach-back trim keeps before a whitespace-collapsing element.
+  #[cold]
+  #[inline(never)]
+  fn open_item_heading_block(
+    &mut self,
+    output: Option<Cow<'static, str>>,
+  ) -> Option<Cow<'static, str>> {
+    if plain_text!(self)
+      || self.depth_map[TAG_PRE as usize] != 0
+      || self.in_table_cell()
+      || !output.as_deref().is_some_and(starts_with_heading_prefix)
+      || self.heading_kept_inline_in_item(true)
+      || self.opens_block_line(self.buffer.as_bytes(), self.buffer.len())
+    {
+      return output;
+    }
+    self.trim_trailing_spaces();
+    Some(Cow::Owned(format!(
+      "\n\n{}{}",
+      self.list_indent,
+      output.as_deref().unwrap_or_default()
+    )))
+  }
+
+  /// At a heading's exit in a list item: only an ATX prefix can take in the
+  /// text after it. Inside `<pre>` that text is code, and inside a caption the
+  /// emphasis wrapping it, either of which a break would split.
+  #[cold]
+  #[inline(never)]
+  fn owe_item_heading_break(&mut self, node: &ElementNode) {
+    if self.depth_map[TAG_PRE as usize] != 0 {
+      return;
+    }
+    // The same override the exit resolved: none for a skipped node.
+    let (enter_is_overridden, enter_is_heading) = if node.enter_skipped || !self.has_tag_overrides {
+      (false, false)
+    } else {
+      let ovs = self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|p| p.tag_overrides.as_ref());
+      let enter = Self::override_for_node(ovs, self.override_idx.as_deref(), node)
+        .and_then(|ov| ov.enter.as_deref());
+      (
+        enter.is_some(),
+        enter.is_some_and(starts_with_heading_prefix),
+      )
+    };
+    if (!enter_is_overridden || enter_is_heading) && !self.heading_kept_inline_in_item(false) {
+      if enter_is_heading {
+        self.trim_trailing_spaces();
+      }
+      self.heading_break_pending = true;
+    }
   }
 
   /// Simple-tag enter; `link` selects the `<a>` variant.
@@ -1219,7 +1298,9 @@ impl ConvertState {
     }
 
     let heading_break_prefix_len = if self.heading_break_pending {
-      self.settle_heading_break(tag_id, &mut output)
+      let (settled, prefix_len) = self.settle_heading_break(tag_id, output);
+      output = settled;
+      prefix_len
     } else {
       0
     };
@@ -1690,30 +1771,16 @@ impl ConvertState {
     }
 
     let heading_break_prefix_len = if self.heading_break_pending {
-      self.settle_heading_break(tag_id, &mut output)
+      let (settled, prefix_len) = self.settle_heading_break(tag_id, output);
+      output = settled;
+      prefix_len
     } else {
       0
     };
-    // Inside a list item a heading opens its own block unless a wrapper keeps it
-    // inline: after text on the item's line, even past a space, its `#` prefix
-    // would stay text. The space that ended the text goes too, which the
-    // reach-back trim keeps before a whitespace-collapsing element.
-    if !plain_text!(self)
-      && let Some(id) = tag_id
-      && (TAG_H1..=TAG_H6).contains(&id)
-      && self.depth_map[TAG_LI as usize] > 0
-      && self.depth_map[TAG_PRE as usize] == 0
-      && !self.in_table_cell()
-      && output.as_deref().is_some_and(starts_with_heading_prefix)
-      && !self.heading_kept_inline_in_item(true)
-      && !self.opens_block_line(self.buffer.as_bytes(), self.buffer.len())
+    if self.depth_map[TAG_LI as usize] > 0
+      && tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id))
     {
-      self.trim_trailing_spaces();
-      output = Some(Cow::Owned(format!(
-        "\n\n{}{}",
-        self.list_indent,
-        output.as_deref().unwrap_or_default()
-      )));
+      output = self.open_item_heading_block(output);
     }
 
     // Whitespace immediately before <br> has no visual effect in HTML. Let the
@@ -2211,23 +2278,26 @@ impl ConvertState {
   /// Emit markdown for exiting an element (node already popped from stack).
   #[inline]
   pub(crate) fn emit_exit_element(&mut self, node: &ElementNode) {
-    // A heading's break is owed only inside its item, even one whose markers a
-    // plugin skipped. An excluded item is no part of the output at all.
-    if node.tag_id == Some(TAG_LI) && !node.excluded_from_markdown {
-      self.heading_break_pending = false;
-    }
     // A skipped <pre> can still own the fence opened by an eligible <code> child.
     if node.excluded_from_markdown
       || (node.enter_skipped
         && (node.tag_id != Some(TAG_PRE)
           || self.pre_fence_owner_depth != self.depth_map[TAG_PRE as usize]))
     {
+      // A heading's break is owed only inside its item, even one whose markers
+      // a plugin skipped. An excluded item is no part of the output at all.
+      if node.tag_id == Some(TAG_LI) && !node.excluded_from_markdown {
+        self.heading_break_pending = false;
+      }
       self.last_node_is_inline = node.is_inline;
       return;
     }
 
     #[cfg(feature = "html")]
     if self.is_html() {
+      if node.tag_id == Some(TAG_LI) {
+        self.heading_break_pending = false;
+      }
       self.emit_html_exit(node);
       return;
     }
@@ -2235,6 +2305,7 @@ impl ConvertState {
     let tag_id = node.tag_id;
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
+      self.heading_break_pending = false;
     }
     let owns_pre_fence = tag_id == Some(TAG_PRE);
     // Only the <pre> owning the open fence may close it; a nested one closing
@@ -2294,10 +2365,6 @@ impl ConvertState {
       false
     };
     let node_spacing = override_config.and_then(|ov| ov.spacing).or(node.spacing);
-    let enter_is_overridden = override_config.is_some_and(|ov| ov.enter.is_some());
-    let enter_is_heading = override_config
-      .and_then(|ov| ov.enter.as_deref())
-      .is_some_and(starts_with_heading_prefix);
 
     if !has_override {
       // Special case: TR table separator
@@ -2511,18 +2578,8 @@ impl ConvertState {
         if !has_override || self.code_spans.is_empty() {
           self.escape_trailing_heading_hashes();
         }
-        // Only an ATX prefix can take in the text after it. Inside `<pre>` that
-        // text is code, and inside a caption the emphasis wrapping it, either of
-        // which a break would split.
-        if self.depth_map[TAG_LI as usize] > 0
-          && self.depth_map[TAG_PRE as usize] == 0
-          && (!enter_is_overridden || enter_is_heading)
-          && !self.heading_kept_inline_in_item(false)
-        {
-          if enter_is_heading {
-            self.trim_trailing_spaces();
-          }
-          self.heading_break_pending = true;
+        if self.depth_map[TAG_LI as usize] > 0 {
+          self.owe_item_heading_break(node);
         }
       }
     }
@@ -2889,16 +2946,10 @@ impl ConvertState {
 
     // Before a caption opens on this text, so its marker follows the break.
     let text = if self.heading_break_pending {
-      if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
+      let Some(text) = self.flush_heading_break_before_text(text) else {
         return;
-      }
-      self.flush_heading_break();
-      // The text opens the item's next block, where a leading space indents it.
-      if self.depth_map[TAG_PRE as usize] == 0 {
-        text.trim_start_matches(|c: char| c.is_ascii() && is_whitespace(c as u8))
-      } else {
-        text
-      }
+      };
+      text
     } else {
       text
     };
@@ -3663,14 +3714,43 @@ impl ConvertState {
   /// Current leading-space count when a GFM block marker may start here.
   #[inline]
   fn markdown_line_indent(&self) -> Option<u8> {
-    let bytes = self.buffer.as_bytes();
-    // A list item's content column opens its blocks, so a line indented to it
-    // counts from there: past three spaces is not yet indented code.
     let column = if self.depth_map[TAG_LI as usize] > 0 {
       self.list_indent.len()
     } else {
       0
     };
+    if column != 0 {
+      return self.markdown_line_indent_in_item(column);
+    }
+    let bytes = self.buffer.as_bytes();
+    let mut spaces = 0u8;
+    for (offset, &byte) in bytes.iter().enumerate().rev() {
+      if byte == b'\n' {
+        return Some(spaces);
+      }
+      if byte != b' ' || spaces == 3 {
+        // A list marker is block prefix too: its content column opens a fresh
+        // block context, so `- # h` escapes exactly like `# h` would.
+        return self.list_marker_line_start(bytes, offset + 1).then_some(0);
+      }
+      spaces += 1;
+    }
+    if self.buffer.is_empty() && self.has_streamed_output {
+      if self.flushed_tail[1] == b'\n' {
+        Some(0)
+      } else {
+        None
+      }
+    } else {
+      Some(spaces)
+    }
+  }
+
+  /// A list item's content column opens its blocks, so a line indented to it
+  /// counts from there: past three spaces is not yet indented code.
+  #[inline(never)]
+  fn markdown_line_indent_in_item(&self, column: usize) -> Option<u8> {
+    let bytes = self.buffer.as_bytes();
     let past_column = |spaces: usize| match spaces.checked_sub(column) {
       Some(indent) => u8::try_from(indent).ok(),
       None => u8::try_from(spaces).ok().filter(|&spaces| spaces <= 3),
@@ -5388,16 +5468,6 @@ impl ConvertState {
     } else if self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0 {
       return NO_SPACING;
     }
-    if self.collapsed_by_ancestor(tag_id, is_enter) {
-      return NO_SPACING;
-    }
-    node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)
-  }
-
-  /// Whether a collapsing ancestor keeps the node inline, as the spacing rules
-  /// do outside list items and plain-text quotes.
-  #[inline]
-  fn collapsed_by_ancestor(&self, tag_id: Option<u8>, is_enter: bool) -> bool {
     // A heading's own collapse keeps its block spacing, but in a table cell that
     // newline would end the row. The count holds the heading only while it is
     // open: at its exit the heading is already popped, so a count of 1 there is
@@ -5429,11 +5499,17 @@ impl ConvertState {
       .collapse_span_depth
       .saturating_sub(u8::from(counted_self && is_span));
     if non_span_depth > 0 && !heading_owns_collapse && !heading_exit_in_markerless_collapse {
-      return true;
+      return NO_SPACING;
     }
-    span_depth > 0
-      && !tag_id
-        .is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id) || matches!(id, TAG_P | TAG_DIV | TAG_LI))
+    if span_depth > 0 {
+      let is_block = tag_id.is_some_and(|id| {
+        (TAG_H1..=TAG_H6).contains(&id) || matches!(id, TAG_P | TAG_DIV | TAG_LI)
+      });
+      if !is_block {
+        return NO_SPACING;
+      }
+    }
+    node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)
   }
 
   /// Whether the tag writes visible inline Markdown around its content:
