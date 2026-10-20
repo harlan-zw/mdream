@@ -3275,16 +3275,26 @@ pub(crate) fn clamp_to_char_boundary(text: &str, max: usize) -> &str {
 fn batchable_run_end(bytes: &[u8], start: usize) -> (usize, bool) {
   let limit = bytes.len();
   let mut i = start + 1;
-  // A long prefix of letters advances a word at a time. The first word holding
-  // anything else leaves the rest of the run, spaces included, to the byte loop
-  // below, so a run of short words pays a single extra test.
+  let mut had_space = false;
+  // A long prefix of letters and single spaces advances a word at a time. The
+  // first word holding anything else leaves the rest of the run to the byte loop
+  // below, so a run of other text pays a single extra test. A space in the last
+  // lane joins the run only before a batchable byte, as the byte loop requires.
   while let Some(word) = bytes.get(i..i + 8) {
-    if !all_ascii_letters(u64::from_le_bytes(word.try_into().unwrap())) {
+    let Some(spaces) = letter_or_lone_space_lanes(u64::from_le_bytes(word.try_into().unwrap()))
+    else {
+      break;
+    };
+    if spaces >> 63 != 0
+      && !bytes
+        .get(i + 8)
+        .is_some_and(|&next| BATCHABLE_TEXT[next as usize])
+    {
       break;
     }
+    had_space |= spaces != 0;
     i += 8;
   }
-  let mut had_space = false;
   loop {
     while i < limit && BATCHABLE_TEXT[bytes[i] as usize] {
       i += 1;
@@ -3298,17 +3308,30 @@ fn batchable_run_end(bytes: &[u8], start: usize) -> (usize, bool) {
   }
 }
 
-/// Whether all eight bytes of `word` are ASCII letters, each of which is
-/// batchable. With every byte below 0x80, `| 0x20` keeps each below 0x80 and
-/// maps exactly the letters into `a..=z`, so adding 0x1F or 0x05 never carries
-/// into the next byte: the high bit of `x + 0x1F` is set exactly when a byte is
-/// at least `a`, and of `x + 0x05` exactly when it is past `z`.
+/// The space lanes of `word` as high bits, when every byte is an ASCII letter or
+/// a space and no two spaces are adjacent; `None` otherwise. Letters are
+/// batchable. Every test runs on bytes below 0x80, so no lane carries into the
+/// next: `| 0x20` maps exactly the letters into `a..=z`, and the high bit of
+/// `x + 0x1F` is set exactly when a byte is at least `a`, of `x + 0x05` exactly
+/// when it is past `z`. After `^ 0x20` a space is the zero lane, and
+/// `(y & 0x7F) + 0x7F` sets the high bit exactly when the lane is nonzero.
 #[inline(always)]
-fn all_ascii_letters(word: u64) -> bool {
+fn letter_or_lone_space_lanes(word: u64) -> Option<u64> {
   const LANES: u64 = 0x0101_0101_0101_0101;
   const HIGH: u64 = LANES * 0x80;
+  const LOW: u64 = LANES * 0x7F;
+  if word & HIGH != 0 {
+    return None;
+  }
   let x = word | (LANES * 0x20);
-  word & HIGH == 0 && (x + LANES * 0x1F) & !(x + LANES * 0x05) & HIGH == HIGH
+  let letters = (x + LANES * 0x1F) & !(x + LANES * 0x05) & HIGH;
+  // A word of letters alone, as in a long token, skips the space test.
+  if letters == HIGH {
+    return Some(0);
+  }
+  let y = word ^ (LANES * 0x20);
+  let spaces = !(((y & LOW) + LOW) | y) & HIGH;
+  ((letters | spaces) == HIGH && spaces & (spaces << 8) == 0).then_some(spaces)
 }
 
 /// End of the non-ASCII run that starts at `start`, stopping at `limit`.
@@ -3624,17 +3647,35 @@ mod batchable_run_tests {
     );
   }
 
+  /// Spaces as lane high bits when every byte is a letter or a space and no two
+  /// spaces touch, byte by byte.
+  fn lanes_oracle(word: [u8; 8]) -> Option<u64> {
+    let valid = word.iter().all(|&b| b.is_ascii_alphabetic() || b == b' ')
+      && !word.windows(2).any(|pair| pair == b"  ");
+    valid.then(|| {
+      (0..8)
+        .filter(|&lane| word[lane] == b' ')
+        .fold(0u64, |mask, lane| mask | (0x80u64 << (8 * lane)))
+    })
+  }
+
   #[test]
-  fn word_letter_test_matches_every_byte_in_every_lane() {
-    for lane in 0..8 {
-      for byte in 0..=255u8 {
-        for fill in [b'a', b'Z', b'm'] {
-          let mut word = [fill; 8];
+  fn word_lanes_match_every_byte_in_every_lane() {
+    for fill in [
+      *b"abcdefgh",
+      *b"a b c d ",
+      *b" bcdefgh",
+      *b"Zz yY Az",
+      *b"ab  cdef",
+    ] {
+      for lane in 0..8 {
+        for byte in 0..=255u8 {
+          let mut word = fill;
           word[lane] = byte;
           assert_eq!(
-            all_ascii_letters(u64::from_le_bytes(word)),
-            word.iter().all(u8::is_ascii_alphabetic),
-            "lane {lane} byte {byte:#04x}"
+            letter_or_lone_space_lanes(u64::from_le_bytes(word)),
+            lanes_oracle(word),
+            "fill {fill:?} lane {lane} byte {byte:#04x}"
           );
         }
       }
@@ -3643,19 +3684,28 @@ mod batchable_run_tests {
 
   #[test]
   fn run_end_matches_the_byte_loop_at_every_boundary() {
-    for len in 1..=26 {
-      for at in 0..len {
-        for byte in 0..=255u8 {
-          for fill in [b'x', b' '] {
-            let mut bytes = vec![b'x'; len];
-            if fill == b' ' && len > 3 {
-              bytes[len / 2] = b' ';
-            }
+    let fills: [&[u8]; 5] = [
+      b"xxxxxxxxxxxxxxxxxxxxxxxxxx",
+      b"ordinary words ordinary words ",
+      b"ab cd ef gh ij kl mn op qr st",
+      b"abcdefg hijklmn  opqrstuv wxyz",
+      b"abc def ghi 123 jkl. mno pqr",
+    ];
+    for fill in fills {
+      for len in 1..=26 {
+        for at in 0..len {
+          for byte in 0..=255u8 {
+            let mut bytes = fill[..len].to_vec();
+            bytes[0] = b'x';
             bytes[at] = byte;
+            if !BATCHABLE_TEXT[bytes[0] as usize] {
+              continue;
+            }
             assert_eq!(
               batchable_run_end(&bytes, 0),
               scalar_run_end(&bytes, 0),
-              "len {len} at {at} byte {byte:#04x} fill {fill}"
+              "fill {:?} len {len} at {at} byte {byte:#04x}",
+              std::str::from_utf8(fill)
             );
           }
         }
