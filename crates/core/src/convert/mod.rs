@@ -254,7 +254,8 @@ struct LinkOutputState {
   /// `OpenMarker::starts_at_hard_break`.
   starts_at_hard_break: bool,
   /// The pending emphasis closers this link's `[` and its close cancelled.
-  /// Only recorded under `clean.fragments`, which may remove both again.
+  /// The opener is recorded for cleaners that unwrap links; the close only
+  /// for `clean.fragments`, which may remove both again.
   closer_before: u8,
   closer_after: u8,
 }

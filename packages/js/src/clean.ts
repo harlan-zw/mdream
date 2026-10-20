@@ -108,7 +108,7 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
       if (tagId === TAG_A) {
         links.push(element)
         brackets.push(outputStart < buffer.length && buffer[buffer.length - 1] === '[' ? buffer.length - 1 : -1)
-        if (fragments && closer)
+        if (closer)
           (bracketClosers ??= [])[links.length - 1] = closer
       }
       // Rust takes a heading's slug from the Markdown after its `## ` prefix.
@@ -158,8 +158,15 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
         return false
       // Everything past the `[` belongs to this link and is closed, so folding
       // it into one entry moves no index another open element holds.
-      const unwrapped = opener.slice(0, -1) + buffer.slice(bracket + 1).join('')
-      target.outputPositions?.replace(bracket, buffer.length, [unwrapped], offset => offset > opener.length - 1 ? offset - 1 : offset)
+      const prefix = opener.slice(0, -1)
+      const text = buffer.slice(bracket + 1).join('')
+      const reference = closingCloser
+        ? closerReference(prefix || buffer[bracket - 1] || '', text.charCodeAt(0), closingCloser)
+        : ''
+      const unwrapped = prefix + (reference ? reference + text.slice(1) : text)
+      target.outputPositions?.replace(bracket, buffer.length, [unwrapped], offset =>
+        (offset > prefix.length ? offset - 1 : offset)
+        + (reference && offset > opener.length ? reference.length - 1 : 0))
       buffer.length = bracket
       buffer.push(unwrapped)
       target.lastContentCache = unwrapped

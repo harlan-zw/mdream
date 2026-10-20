@@ -1212,7 +1212,10 @@ impl ConvertState {
       };
       self.begin_link(bracket_pos, false, false);
       self.link.bracket_emitted = emitted_bracket;
-      if emitted_bracket && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+      if emitted_bracket
+        && self.clean_flags & (CLEAN_FRAGMENTS | CLEAN_SELF_LINK_HEADINGS | CLEAN_REDUNDANT_LINKS)
+          != 0
+      {
         self.link.closer_before = pending;
       }
       if self.streaming {
@@ -1856,7 +1859,10 @@ impl ConvertState {
       };
       self.begin_link(bracket_pos, false, raw_html_link_open);
       self.link.bracket_emitted = emitted_bracket;
-      if emitted_bracket && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+      if emitted_bracket
+        && self.clean_flags & (CLEAN_FRAGMENTS | CLEAN_SELF_LINK_HEADINGS | CLEAN_REDUNDANT_LINKS)
+          != 0
+      {
         self.link.closer_before = pending;
       }
       // Avoid the href lookup and hold bookkeeping for one-shot conversion, unless
@@ -2021,6 +2027,22 @@ impl ConvertState {
     self.note_buffer_rewrite(bracket_pos);
     self.buffer.remove(bracket_pos);
     self.last_content_cache_len = text_len;
+    let closer = self.link.closer_before;
+    if closer != 0
+      && bracket_pos > 0
+      && self.buffer.as_bytes()[bracket_pos - 1] == closer
+      && self.buffer.as_bytes()[bracket_pos].is_ascii_alphanumeric()
+    {
+      let mut reference = String::with_capacity(6);
+      reference.push_str("&#");
+      push_decimal(
+        &mut reference,
+        u32::from(self.buffer.as_bytes()[bracket_pos]),
+      );
+      reference.push(';');
+      replace_buffer_range(&mut self.buffer, bracket_pos..bracket_pos + 1, &reference);
+      self.last_content_cache_len += reference.len() - 1;
+    }
     self.end_link();
     self.last_node_is_inline = is_inline;
   }

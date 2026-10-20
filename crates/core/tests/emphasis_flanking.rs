@@ -278,6 +278,84 @@ fn open_emphasis_still_yields_content_before_close() {
 }
 
 #[test]
+fn immediate_link_cleanup_composes_with_fragments() {
+  let options = HtmlToMarkdownOptions::default().with_clean(CleanConfig {
+    fragments: true,
+    redundant_links: true,
+    self_link_headings: true,
+    ..Default::default()
+  });
+  for (html, expected) in [
+    (
+      r##"<h2><strong>b!</strong><a href="#x">c</a></h2>"##,
+      "## **b!**c",
+    ),
+    (
+      r##"<p><strong>b!</strong><a href="c">c</a></p>"##,
+      "**b!**&#99;",
+    ),
+    (
+      r##"<h2><strong>b!</strong><a href="#x">c<strong>d!</strong></a>e</h2>"##,
+      "## **b!**c**d!**e",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    for width in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, width, &options),
+        expected,
+        "width={width} {html}"
+      );
+    }
+  }
+}
+
+#[test]
+fn immediate_link_cleanup_preserves_preceding_closer() {
+  for (prefix, text, suffix, expected) in [
+    (
+      "<strong>Visit:</strong>",
+      "https://x.com",
+      "",
+      "**Visit:**&#104;ttps://x.com",
+    ),
+    ("<em>b!</em>", "c", "<strong>d</strong>", "*b!*&#99;**d**"),
+    ("<strong><em>b!</em></strong>", "7", "", "***b!***&#55;"),
+    ("<strong>b!</strong> ", "c", "", "**b!** c"),
+    ("<strong>b!</strong>", "!c", "", "**b!**!c"),
+    ("<strong>b!</strong>", "é", "", "**b!**é"),
+    ("<del>b!</del>", "c", "", "~~b!~~ c"),
+  ] {
+    for heading in [false, true] {
+      let (tag, href, lead) = if heading {
+        ("h2", "#x", "## ")
+      } else {
+        ("p", text, "")
+      };
+      let html = format!(r#"<{tag}>{prefix}<a href="{href}">{text}</a>{suffix}</{tag}>"#);
+      let options = HtmlToMarkdownOptions::default().with_clean(CleanConfig {
+        self_link_headings: heading,
+        redundant_links: !heading,
+        ..Default::default()
+      });
+      let expected = format!("{lead}{expected}");
+      // The cap routes link entry through the general emitter.
+      for cap in [0, 4096] {
+        let options = options.clone().with_max_node_bytes(cap);
+        assert_eq!(html_to_markdown(&html, options.clone()), expected, "{html}");
+        for width in 1..=html.len() {
+          assert_eq!(
+            stream_chunks(&html, width, &options),
+            expected,
+            "width={width} cap={cap} {html}"
+          );
+        }
+      }
+    }
+  }
+}
+
+#[test]
 fn heading_link_cleanup_keeps_streaming_parity() {
   let options = HtmlToMarkdownOptions::default().with_clean(CleanConfig {
     self_link_headings: true,
@@ -290,7 +368,11 @@ fn heading_link_cleanup_keeps_streaming_parity() {
     ),
     (
       r##"<h2><strong>b!</strong><a href="#x">c</a></h2>"##,
-      "## **b!**c",
+      "## **b!**&#99;",
+    ),
+    (
+      r##"<h2><strong>b!</strong><a href="#x">c<strong>d!</strong></a>e</h2>"##,
+      "## **b!**&#99;**d!**&#101;",
     ),
     (
       r##"<h2><a href="#x">x</a><strong>!b</strong></h2>"##,

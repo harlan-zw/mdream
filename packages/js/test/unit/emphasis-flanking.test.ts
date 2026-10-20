@@ -125,7 +125,8 @@ describe('emphasis delimiters that cannot flank', () => {
     ['<h2><em>x</em><a href="#x"><strong>!b</strong></a></h2>', '## *x***!b**'],
     ['<h2>Q<a href="#q">#</a></h2>', '## Q \\#'],
     ['<h2>Q<a href="#q">##</a></h2>', '## Q \\##'],
-    ['<h2><strong>b!</strong><a href="#x">c</a></h2>', '## **b!**c'],
+    ['<h2><strong>b!</strong><a href="#x">c</a></h2>', '## **b!**&#99;'],
+    ['<h2><strong>b!</strong><a href="#x">c<strong>d!</strong></a>e</h2>', '## **b!**&#99;**d!**&#101;'],
     ['<h2><a href="#x">x</a><strong>!b</strong></h2>', '## x**!b**'],
     ['<h2>x<a href="#x"><strong>!b</strong></a></h2>', '## x **!b**'],
     ['<h2><a href="#x"><strong>b!</strong></a>c</h2>', '## **b!**&#99;'],
@@ -292,6 +293,51 @@ describe('emphasis delimiters that cannot flank', () => {
   it('keeps the separator after a literal tilde', () => {
     expect(htmlToMarkdown('<p>x~<q>q</q></p>')).toBe('x\\~ "q"')
     expect(htmlToText('<p>x~<q>q</q></p>')).toBe('x~ "q"')
+  })
+
+  it.each([
+    ['<h2><strong>b!</strong><a href="#x">c</a></h2>', '## **b!**c'],
+    ['<p><strong>b!</strong><a href="c">c</a></p>', '**b!**&#99;'],
+    ['<h2><strong>b!</strong><a href="#x">c<strong>d!</strong></a>e</h2>', '## **b!**c**d!**e'],
+  ])('preserves fragment-cleaning composition in %s', async (html, expected) => {
+    const options = { clean: clean({ fragments: true, redundantLinks: true, selfLinkHeadings: true }) }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const chunks: string[] = []
+      for (let offset = 0; offset < html.length; offset += width)
+        chunks.push(html.slice(offset, offset + width))
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(toStream(chunks), options))
+        output += chunk
+      expect(output, `width=${width}`).toBe(expected)
+    }
+  })
+
+  it.each([
+    ['<strong>Visit:</strong>', 'https://x.com', '', '**Visit:**&#104;ttps://x.com'],
+    ['<em>b!</em>', 'c', '<strong>d</strong>', '*b!*&#99;**d**'],
+    ['<strong><em>b!</em></strong>', '7', '', '***b!***&#55;'],
+    ['<strong>b!</strong> ', 'c', '', '**b!** c'],
+    ['<strong>b!</strong>', '!c', '', '**b!**!c'],
+    ['<strong>b!</strong>', 'é', '', '**b!**é'],
+    ['<del>b!</del>', 'c', '', '~~b!~~ c'],
+  ])('preserves the closer before an immediately cleaned link after %s', async (prefix, text, suffix, expected) => {
+    for (const heading of [false, true]) {
+      const tag = heading ? 'h2' : 'p'
+      const html = `<${tag}>${prefix}<a href="${heading ? '#x' : text}">${text}</a>${suffix}</${tag}>`
+      const options = { clean: clean(heading ? { selfLinkHeadings: true } : { redundantLinks: true }) }
+      const result = `${heading ? '## ' : ''}${expected}`
+      expect(htmlToMarkdown(html, options)).toBe(result)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        let output = ''
+        for await (const chunk of streamHtmlToMarkdown(toStream(chunks), options))
+          output += chunk
+        expect(output, `width=${width}`).toBe(result)
+      }
+    }
   })
 
   // The separator after a strikethrough closer keeps it flanking once
