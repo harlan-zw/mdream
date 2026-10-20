@@ -39,7 +39,8 @@ describe('performance report', () => {
 
     it('does not gate a growth against an informational base', () => {
       const report = renderPerfReport({ benches: [unstable] }, { benches: [stable] })
-      expect(report).toContain('No significant change')
+      expect(report).toContain('No gated significant change')
+      expect(report).not.toContain('within CI noise')
       expect(report).toContain('ℹ️ **1 inconclusive** · past the gate, but the base measurement is informational')
       expect(report).not.toContain('slower')
       expect(report).toContain(`| ${name} | 90.6 KiB | ℹ️ +371.5% (base informational) | — |`)
@@ -49,7 +50,7 @@ describe('performance report', () => {
         { benches: [{ ...stable, informational: true }] },
         { benches: [{ ...unstable, informational: false }] },
       )
-      expect(report).toContain('No significant change')
+      expect(report).toContain('No gated significant change')
       expect(report).toContain('1 inconclusive')
       expect(report).not.toContain('faster')
       expect(report).toContain('ℹ️ -78.8% (base informational)')

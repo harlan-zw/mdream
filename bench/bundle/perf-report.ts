@@ -128,6 +128,8 @@ export function renderPerfReport(base: PerfRun | null, pr: PerfRun): string {
     out.push(`⚠️ **${slower.length} slower** · past the per-metric noise gate`)
   else if (changed.length)
     out.push(`🟢 **${changed.length} faster**`)
+  else if (inconclusive.length)
+    out.push('✅ **No gated significant change** _(inconclusive comparisons are excluded)_')
   else
     out.push('✅ **No significant change** _(within CI noise)_')
   if (inconclusive.length)
