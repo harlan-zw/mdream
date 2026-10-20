@@ -1281,7 +1281,6 @@ impl ConvertState {
         .is_some_and(|byte| byte != mark && byte.is_ascii_punctuation())
         && emitted.is_some_and(|value| value.as_bytes().first() == Some(&mark))
         && self.emphasis_context()
-        && !(self.clean_flags & CLEAN_FRAGMENTS != 0 && self.in_heading())
       {
         self.pending_emphasis = mark;
       }
@@ -2453,7 +2452,7 @@ impl ConvertState {
         // `None` there instead of panicking, and a heading with no content left
         // has no slug to record.
         if let Some(text) = self.buffer.get(self.heading_buffer_start..) {
-          let slug = slugify_heading(text);
+          let slug = slugify_markdown_heading(text);
           if !slug.is_empty() {
             self.heading_slugs.push(slug);
           }

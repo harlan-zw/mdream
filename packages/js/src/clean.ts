@@ -315,8 +315,79 @@ function slugify(text: string): string {
 
 export { slugify }
 
+/**
+ * The ASCII letter or digit a closer reference the converter wrote at `at`
+ * spells, as a char code, or 0; `end` bounds the scan. The converter writes
+ * `&#N;` in plain decimal right after an emphasis or strikethrough closer;
+ * source text never leaves that unescaped, since its `&` is written as `\&`.
+ */
+function closerReferenceAt(text: string, at: number, end: number): number {
+  const before = text.charCodeAt(at - 1)
+  if ((before !== 42 /* * */ && before !== 126 /* ~ */) || isEscaped(text, at - 1) || text.charCodeAt(at + 1) !== 35 /* # */)
+    return 0
+  let code = text.charCodeAt(at + 2)
+  if (!(code >= 49 && code <= 57))
+    return 0
+  let value = 0
+  let index = at + 2
+  while (index < at + 5 && index < end && code >= 48 && code <= 57) {
+    value = value * 10 + code - 48
+    code = text.charCodeAt(++index)
+  }
+  if (index >= end || code !== 59 /* ; */)
+    return 0
+  const folded = value | 32
+  return (value >= 48 && value <= 57) || (folded >= 97 && folded <= 122) ? value : 0
+}
+
+/**
+ * Link text as written, with its closer references outside code read as their
+ * character. An unmatched backtick run counts as open code, so no reference
+ * after it is read. Outside code a backslash escapes the next character, a
+ * backtick included; inside code it is literal.
+ */
+function linkTextWithCloserReferences(text: string, start: number, end: number): string {
+  let result = ''
+  let copied = start
+  let codeTicks = 0
+  let index = start
+  while (index < end) {
+    const code = text.charCodeAt(index)
+    if (code === 92 /* \ */ && codeTicks === 0) {
+      index += 2
+      continue
+    }
+    if (code === 96 /* ` */) {
+      const runStart = index
+      while (index < end && text.charCodeAt(index) === 96)
+        index++
+      const ticks = index - runStart
+      if (codeTicks === 0)
+        codeTicks = ticks
+      else if (codeTicks === ticks)
+        codeTicks = 0
+      continue
+    }
+    if (code === 38 /* & */ && codeTicks === 0) {
+      const decoded = closerReferenceAt(text, index, end)
+      if (decoded) {
+        result += text.slice(copied, index) + String.fromCharCode(decoded)
+        index = text.indexOf(';', index) + 1
+        copied = index
+        continue
+      }
+    }
+    index++
+  }
+  return result + text.slice(copied, end)
+}
+
 /** Strip inline markdown formatting from heading text for slug generation */
 export function stripHeadingFormatting(text: string): string {
+  return stripFormatting(text, false)
+}
+
+function stripFormatting(text: string, closerReferences: boolean): string {
   let result = ''
   const len = text.length
   const lastGt = text.lastIndexOf('>')
@@ -397,7 +468,7 @@ export function stripHeadingFormatting(text: string): string {
       if (close !== -1 && text.charCodeAt(close + 1) === 40 /* ( */) {
         const parenClose = text.indexOf(')', close + 2)
         if (parenClose !== -1) {
-          result += text.slice(i + 1, close)
+          result += closerReferences ? linkTextWithCloserReferences(text, i + 1, close) : text.slice(i + 1, close)
           i = parenClose + 1
           continue
         }
@@ -409,17 +480,28 @@ export function stripHeadingFormatting(text: string): string {
       i++
       continue
     }
+    if (c === 38 /* & */ && closerReferences) {
+      const decoded = closerReferenceAt(text, i, len)
+      if (decoded) {
+        result += String.fromCharCode(decoded)
+        i = text.indexOf(';', i) + 1
+        continue
+      }
+    }
     result += text[i]
     i++
   }
   return result.trim()
 }
 
-/** Slug for a heading's Markdown text, as Rust computes it. */
+/**
+ * Slug for a heading's Markdown text, as Rust computes it. A closer reference
+ * the converter wrote (`**b!**&#99;`) reads as its character, as it renders.
+ */
 function headingSlug(text: string): string {
   if (text.includes(FRAGMENT_LINK_OPEN) || text.includes(FRAGMENT_LINK_CLOSE))
     text = text.replaceAll(FRAGMENT_LINK_OPEN, '').replaceAll(FRAGMENT_LINK_CLOSE, '')
-  return slugify(stripHeadingFormatting(text))
+  return slugify(stripFormatting(text, true))
 }
 
 // ── Fragments ──

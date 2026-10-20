@@ -12,7 +12,11 @@ use crate::types::{
   ElementNode, ExtractedElement, HtmlToMarkdownOptions, NodeExtras, OutputFormat, TagHandler,
   TagOverrideConfig, TailwindData,
 };
-use crate::url::{is_autolink_uri, is_data_url, is_empty_link_href, resolve_url, slugify_heading};
+#[cfg(feature = "html")]
+use crate::url::slugify_heading;
+use crate::url::{
+  is_autolink_uri, is_data_url, is_empty_link_href, resolve_url, slugify_markdown_heading,
+};
 use std::borrow::Cow;
 
 /// Whether the conversion writes plain text. A macro rather than a method: a

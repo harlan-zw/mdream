@@ -2363,8 +2363,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (previous !== mark && isAsciiPunctuation(previous)
           && !handler?.literalExit && !options.tagOverrides && !captionFrameCount && !insideRawHtmlRegion
           && !state.depthMap[TAG_PRE] && !state.depthMap[TAG_CODE]
-          && !state.depthMap[TAG_KBD] && !state.depthMap[TAG_SAMP] && !state.depthMap[TAG_VAR]
-          && !(cleanPass?.holdsOutput && isInsideHeading(state.depthMap))) {
+          && !state.depthMap[TAG_KBD] && !state.depthMap[TAG_SAMP] && !state.depthMap[TAG_VAR]) {
           pendingCloser = mark
         }
       }

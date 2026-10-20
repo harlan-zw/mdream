@@ -356,8 +356,90 @@ fn heading_html_tag_end(bytes: &[u8], start: usize) -> Option<usize> {
   None
 }
 
+/// The ASCII letter or digit a closer reference the converter wrote at `at`
+/// spells, with the reference's length. The converter writes `&#N;` in plain
+/// decimal right after an emphasis or strikethrough closer; source text never
+/// leaves that unescaped, since its `&` is written as `\&`.
+fn closer_reference_at(bytes: &[u8], at: usize) -> Option<(u8, usize)> {
+  if at == 0
+    || !matches!(bytes[at - 1], b'*' | b'~')
+    || heading_is_escaped(bytes, at - 1)
+    || bytes.get(at + 1) != Some(&b'#')
+    || !bytes
+      .get(at + 2)
+      .is_some_and(|byte| matches!(byte, b'1'..=b'9'))
+  {
+    return None;
+  }
+  let mut value = 0u32;
+  let mut end = at + 2;
+  while end < at + 5 && bytes.get(end).is_some_and(u8::is_ascii_digit) {
+    value = value * 10 + u32::from(bytes[end] - b'0');
+    end += 1;
+  }
+  if bytes.get(end) != Some(&b';') {
+    return None;
+  }
+  let byte = u8::try_from(value).ok()?;
+  byte.is_ascii_alphanumeric().then_some((byte, end + 1 - at))
+}
+
+/// Link text pushed as written, with its closer references outside code read
+/// as their character. An unmatched backtick run counts as open code, so no
+/// reference after it is read. Outside code a backslash escapes the next byte,
+/// a backtick included; inside code it is literal.
+fn push_link_text(cleaned: &mut String, text: &str, start: usize, end: usize) {
+  let bytes = &text.as_bytes()[..end];
+  let mut copied = start;
+  let mut code_ticks = 0;
+  let mut i = start;
+  while i < end {
+    if bytes[i] == b'\\' && code_ticks == 0 {
+      i += 2;
+      continue;
+    }
+    if bytes[i] == b'`' {
+      let run_start = i;
+      while i < end && bytes[i] == b'`' {
+        i += 1;
+      }
+      let ticks = i - run_start;
+      if code_ticks == 0 {
+        code_ticks = ticks;
+      } else if code_ticks == ticks {
+        code_ticks = 0;
+      }
+      continue;
+    }
+    if bytes[i] == b'&'
+      && code_ticks == 0
+      && let Some((decoded, len)) = closer_reference_at(bytes, i)
+    {
+      cleaned.push_str(&text[copied..i]);
+      cleaned.push(decoded as char);
+      i += len;
+      copied = i;
+      continue;
+    }
+    i += 1;
+  }
+  cleaned.push_str(&text[copied..end]);
+}
+
 /// GFM-style slug from heading text: lowercase, collapse whitespace/- → -, strip non-alnum except -_
+#[cfg(any(feature = "html", test))]
 pub(crate) fn slugify_heading(text: &str) -> String {
+  slugify_heading_text(text, false)
+}
+
+/// Slug of a heading's Markdown output. A closer reference the converter wrote
+/// (`**b!**&#99;`) reads as its character, as it renders, so the slug matches
+/// the heading's text.
+pub(crate) fn slugify_markdown_heading(text: &str) -> String {
+  slugify_heading_text(text, true)
+}
+
+fn slugify_heading_text(text: &str, closer_references: bool) -> String {
   // Strip inline markdown formatting from heading text
   // Remove [text](url) → text, strip *_`~
   let mut cleaned = String::with_capacity(text.len());
@@ -448,7 +530,11 @@ pub(crate) fn slugify_heading(text: &str) -> String {
           && let Some(paren_close) = text[close_abs + 2..].find(')')
         {
           // Extract link text only
-          cleaned.push_str(&text[i + 1..close_abs]);
+          if closer_references {
+            push_link_text(&mut cleaned, text, i + 1, close_abs);
+          } else {
+            cleaned.push_str(&text[i + 1..close_abs]);
+          }
           i = close_abs + 2 + paren_close + 1;
           continue;
         }
@@ -456,6 +542,12 @@ pub(crate) fn slugify_heading(text: &str) -> String {
       i += 1;
     } else if bytes[i] == b'*' || bytes[i] == b'_' || bytes[i] == b'`' || bytes[i] == b'~' {
       i += 1;
+    } else if bytes[i] == b'&'
+      && closer_references
+      && let Some((decoded, len)) = closer_reference_at(bytes, i)
+    {
+      cleaned.push(decoded as char);
+      i += len;
     } else {
       cleaned.push(bytes[i] as char);
       i += 1;

@@ -170,7 +170,8 @@ describe.each(engines)('emphasis that cannot flank $name', (engineConfig) => {
       expect(await streamConvert(engine, html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
   })
 
-  // References stay disabled while fragment cleaning collects heading slugs.
+  // Fragment cleaning reads a reference the converter wrote as its character,
+  // so headings keep both the reference and their slug.
   it('uses closer references in headings without fragment cleaning', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(engine.htmlToMarkdown('<h2><strong><a href="/x">b</a></strong>c</h2>')).toBe('## **[b](/x)**&#99;')
@@ -178,13 +179,52 @@ describe.each(engines)('emphasis that cannot flank $name', (engineConfig) => {
   })
 
   it.each([
-    ['<h2><strong><a href="/x">b</a></strong>c</h2><p><a href="#bc">to</a></p>', '## **[b](/x)**c\n\n[to](#bc)'],
-    ['<h2><a href="/y"><strong><code>b</code></strong>c</a></h2><p><a href="#bc">t</a></p>', '## [**`b`**c](/y)\n\n[t](#bc)'],
+    ['<h2><strong><a href="/x">b</a></strong>c</h2><p><a href="#bc">to</a></p>', '## **[b](/x)**&#99;\n\n[to](#bc)'],
+    ['<h2><a href="/y"><strong><code>b</code></strong>c</a></h2><p><a href="#bc">t</a></p>', '## [**`b`**&#99;](/y)\n\n[t](#bc)'],
     ['<h2><a href="/x">a<strong>!b</strong></a></h2><p><a href="#ab">t</a></p>', '## [a**!b**](/x)\n\n[t](#ab)'],
     ['<h2>a<strong>!b</strong>c</h2><p><a href="#abc">t</a></p>', '## a**!b**c\n\n[t](#abc)'],
   ])('keeps the heading slug of %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(engine.htmlToMarkdown(html, { clean: true })).toBe(expected)
+  })
+
+  // Only the references the converter writes read back as characters: an
+  // escaped `\&` and code keep the slug they always had.
+  it.each([
+    ['<h2><strong>b!</strong>c</h2><p><a href="#bc">to</a></p>', [{ fragments: true }, true], '## **b!**&#99;\n\n[to](#bc)'],
+    ['<h2><em>v:</em>7</h2><p><a href="#v7">to</a></p>', [{ fragments: true }, true], '## *v:*&#55;\n\n[to](#v7)'],
+    ['<h2><strong>b!</strong>C</h2><p><a href="#bc">to</a></p>', [{ fragments: true }, true], '## **b!**&#67;\n\n[to](#bc)'],
+    ['<h2><del>b!</del>c</h2><p><a href="#bc">to</a></p>', [{ fragments: true }, true], '## ~~b!~~&#99;\n\n[to](#bc)'],
+    ['<h2>é<strong>ç!</strong>c</h2><p><a href="#c">to</a></p>', [{ fragments: true }, true], '## é**ç!**&#99;\n\n[to](#c)'],
+    ['<h2><strong>b!</strong><a href="#missing">c</a></h2><p><a href="#bc">to</a></p>', [{ fragments: true }, true], '## **b!**&#99;\n\n[to](#bc)'],
+    ['<h2><strong><a href="#b">b!</a></strong>c</h2><p><a href="#bc">to</a></p>', [{ selfLinkHeadings: true }, true], '## **b!**&#99;\n\n[to](#bc)'],
+    ['<h2><strong>b!</strong><a href="#x">c</a></h2><p><a href="#bc">to</a></p>', [{ selfLinkHeadings: true }, true], '## **b!**&#99;\n\n[to](#bc)'],
+    ['<h2><strong>b!</strong><a href="https://x.com">https://x.com</a></h2><p><a href="#bhttpsxcom">to</a></p>', [{ redundantLinks: true }, true], '## **b!**&#104;ttps://x.com\n\n[to](#bhttpsxcom)'],
+    ['<h2><strong><a href="https://x.com/">https://x.com/</a></strong>c</h2><p><a href="#httpsxcomc">to</a></p>', [{ redundantLinks: true }, true], '## **https://x.com/**&#99;\n\n[to](#httpsxcomc)'],
+    ['<h2><strong>b!</strong>&amp;#99;</h2><p><a href="#b99">x</a> <a href="#bc">y</a></p>', [{ fragments: true }, true], '## **b!**\\&#99;\n\n[x](#b99) y'],
+    ['<h2><strong>b!</strong><code>*&amp;#99;</code></h2><p><a href="#b99">x</a> <a href="#bc">y</a></p>', [{ fragments: true }, true], '## **b!**`*&#99;`\n\n[x](#b99) y'],
+    ['<h2><a href="/x"><code>*&amp;#99;</code></a></h2><p><a href="#99">x</a> <a href="#c">y</a></p>', [{ fragments: true }, true], '## [`*&#99;`](/x)\n\n[x](#99) y'],
+    ['<h2><a href="/x">`<strong>b!</strong>c</a></h2><p><a href="#bc">to</a></p>', [{ fragments: true }, true], '## [\\`**b!**&#99;](/x)\n\n[to](#bc)'],
+    ['<h2><a href="/x"><code>a\\</code><strong>b!</strong>c</a></h2><p><a href="#abc">to</a></p>', [{ fragments: true }, true], '## [`a\\`**b!**&#99;](/x)\n\n[to](#abc)'],
+  ] as [string, (true | Record<string, boolean>)[], string][])('keeps closer references and slugs in the heading of %s', async (html, rules, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    for (const clean of rules) {
+      const options = { clean }
+      expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const input = new ReadableStream<string>({
+          start(controller) {
+            for (let offset = 0; offset < html.length; offset += width)
+              controller.enqueue(html.slice(offset, offset + width))
+            controller.close()
+          },
+        })
+        let output = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+          output += chunk
+        expect(output, `width=${width} clean=${JSON.stringify(clean)}`).toBe(expected)
+      }
+    }
   })
 
   // `<b>b </b>c` writes its space after the closer; it breaks like any other

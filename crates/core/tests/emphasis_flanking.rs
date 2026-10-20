@@ -288,7 +288,7 @@ fn immediate_link_cleanup_composes_with_fragments() {
   for (html, expected) in [
     (
       r##"<h2><strong>b!</strong><a href="#x">c</a></h2>"##,
-      "## **b!**c",
+      "## **b!**&#99;",
     ),
     (
       r##"<p><strong>b!</strong><a href="c">c</a></p>"##,
@@ -296,7 +296,7 @@ fn immediate_link_cleanup_composes_with_fragments() {
     ),
     (
       r##"<h2><strong>b!</strong><a href="#x">c<strong>d!</strong></a>e</h2>"##,
-      "## **b!**c**d!**e",
+      "## **b!**&#99;**d!**&#101;",
     ),
   ] {
     assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
@@ -524,7 +524,8 @@ fn deferred_fragment_cleanup_keeps_streaming_parity() {
 
 #[test]
 fn heading_slugs_still_match_fragment_links() {
-  // References stay disabled while fragment cleaning collects heading slugs.
+  // Fragment cleaning reads a reference the converter wrote as its character,
+  // so headings keep both the reference and their slug.
   for (html, expected) in [
     (
       r#"<h2><strong><a href="/x">b</a></strong>c</h2>"#,
@@ -545,11 +546,11 @@ fn heading_slugs_still_match_fragment_links() {
   for (html, expected) in [
     (
       r##"<h2><strong><a href="/x">b</a></strong>c</h2><p><a href="#bc">to</a></p>"##,
-      "## **[b](/x)**c\n\n[to](#bc)",
+      "## **[b](/x)**&#99;\n\n[to](#bc)",
     ),
     (
       r##"<h2><a href="/y"><strong><code>b</code></strong>c</a></h2><p><a href="#bc">t</a></p>"##,
-      "## [**`b`**c](/y)\n\n[t](#bc)",
+      "## [**`b`**&#99;](/y)\n\n[t](#bc)",
     ),
     (
       r##"<h2><a href="/x">a<strong>!b</strong></a></h2><p><a href="#ab">t</a></p>"##,
@@ -571,6 +572,118 @@ fn heading_slugs_still_match_fragment_links() {
         expected,
         "chunk={chunk} html={html:?}"
       );
+    }
+  }
+}
+
+#[test]
+fn heading_closer_references_keep_fragment_slugs() {
+  // Only the references the converter writes read back as characters: an
+  // escaped `\&` and code keep the slug they always had.
+  let fragments = CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  let self_links = CleanConfig {
+    self_link_headings: true,
+    ..Default::default()
+  };
+  let redundant = CleanConfig {
+    redundant_links: true,
+    ..Default::default()
+  };
+  let all = CleanConfig::all();
+  for (html, configs, expected) in [
+    (
+      r##"<h2><strong>b!</strong>c</h2><p><a href="#bc">to</a></p>"##,
+      vec![&fragments, &all],
+      "## **b!**&#99;\n\n[to](#bc)",
+    ),
+    (
+      r##"<h2><em>v:</em>7</h2><p><a href="#v7">to</a></p>"##,
+      vec![&fragments, &all],
+      "## *v:*&#55;\n\n[to](#v7)",
+    ),
+    (
+      r##"<h2><strong>b!</strong>C</h2><p><a href="#bc">to</a></p>"##,
+      vec![&fragments, &all],
+      "## **b!**&#67;\n\n[to](#bc)",
+    ),
+    (
+      r##"<h2><del>b!</del>c</h2><p><a href="#bc">to</a></p>"##,
+      vec![&fragments, &all],
+      "## ~~b!~~&#99;\n\n[to](#bc)",
+    ),
+    (
+      r##"<h2>é<strong>ç!</strong>c</h2><p><a href="#c">to</a></p>"##,
+      vec![&fragments, &all],
+      "## é**ç!**&#99;\n\n[to](#c)",
+    ),
+    (
+      r##"<h2><strong>b!</strong><a href="#missing">c</a></h2><p><a href="#bc">to</a></p>"##,
+      vec![&fragments, &all],
+      "## **b!**&#99;\n\n[to](#bc)",
+    ),
+    (
+      r##"<h2><strong><a href="#b">b!</a></strong>c</h2><p><a href="#bc">to</a></p>"##,
+      vec![&self_links, &all],
+      "## **b!**&#99;\n\n[to](#bc)",
+    ),
+    (
+      r##"<h2><strong>b!</strong><a href="#x">c</a></h2><p><a href="#bc">to</a></p>"##,
+      vec![&self_links, &all],
+      "## **b!**&#99;\n\n[to](#bc)",
+    ),
+    (
+      r##"<h2><strong>b!</strong><a href="https://x.com">https://x.com</a></h2><p><a href="#bhttpsxcom">to</a></p>"##,
+      vec![&redundant, &all],
+      "## **b!**&#104;ttps://x.com\n\n[to](#bhttpsxcom)",
+    ),
+    (
+      r##"<h2><strong><a href="https://x.com/">https://x.com/</a></strong>c</h2><p><a href="#httpsxcomc">to</a></p>"##,
+      vec![&redundant, &all],
+      "## **https://x.com/**&#99;\n\n[to](#httpsxcomc)",
+    ),
+    (
+      r##"<h2><strong>b!</strong>&amp;#99;</h2><p><a href="#b99">x</a> <a href="#bc">y</a></p>"##,
+      vec![&fragments, &all],
+      "## **b!**\\&#99;\n\n[x](#b99) y",
+    ),
+    (
+      r##"<h2><strong>b!</strong><code>*&amp;#99;</code></h2><p><a href="#b99">x</a> <a href="#bc">y</a></p>"##,
+      vec![&fragments, &all],
+      "## **b!**`*&#99;`\n\n[x](#b99) y",
+    ),
+    (
+      r##"<h2><a href="/x"><code>*&amp;#99;</code></a></h2><p><a href="#99">x</a> <a href="#c">y</a></p>"##,
+      vec![&fragments, &all],
+      "## [`*&#99;`](/x)\n\n[x](#99) y",
+    ),
+    (
+      r##"<h2><a href="/x">`<strong>b!</strong>c</a></h2><p><a href="#bc">to</a></p>"##,
+      vec![&fragments, &all],
+      "## [\\`**b!**&#99;](/x)\n\n[to](#bc)",
+    ),
+    (
+      r##"<h2><a href="/x"><code>a\</code><strong>b!</strong>c</a></h2><p><a href="#abc">to</a></p>"##,
+      vec![&fragments, &all],
+      "## [`a\\`**b!**&#99;](/x)\n\n[to](#abc)",
+    ),
+  ] {
+    for config in configs {
+      let options = HtmlToMarkdownOptions::default().with_clean(config.clone());
+      assert_eq!(
+        html_to_markdown(html, options.clone()),
+        expected,
+        "config={config:?} html={html:?}"
+      );
+      for chunk in 1..=html.len() {
+        assert_eq!(
+          stream_chunks(html, chunk, &options),
+          expected,
+          "chunk={chunk} config={config:?} html={html:?}"
+        );
+      }
     }
   }
 }
