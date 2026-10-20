@@ -666,15 +666,19 @@ export const tagHandlers: Record<number, TagHandler> = {
       let title = node.attributes?.title
       // Check if title matches the last content to avoid duplication
       const lastContent = state.lastContentCache
-      let titleEnd = title?.length || 0
-      while (titleEnd > 0) {
-        const code = title!.charCodeAt(titleEnd - 1)
-        if (code !== 32 && (code < 9 || code === 11 || code > 13))
-          break
-        titleEnd--
-      }
-      if (lastContent === title || lastContent === title?.slice(0, titleEnd)) {
+      if (lastContent === title) {
         title = ''
+      }
+      else if (title) {
+        let titleEnd = title.length
+        while (titleEnd > 0) {
+          const code = title.charCodeAt(titleEnd - 1)
+          if (code !== 32 && (code < 9 || code === 11 || code > 13))
+            break
+          titleEnd--
+        }
+        if (titleEnd < title.length && lastContent === title.slice(0, titleEnd))
+          title = ''
       }
       // GFM autolink shorthand: when the link text equals href and href is a
       // bare absolute URI, emit `<href>` instead of `[href](href)`. Mirrors
