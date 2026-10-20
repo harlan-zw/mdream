@@ -342,6 +342,39 @@ fn raw_html_blocks_end_before_following_markdown() {
       "<address>A</address><sup>Z</sup> tail",
       "<address>A</address>\n\n<sup>Z</sup> tail",
     ),
+    ("<address>A</address> tail", "<address>A</address>\n\ntail"),
+    (
+      "<address>A</address>&#32;&#32;&#32;&#32;tail",
+      "<address>A</address>\n\ntail",
+    ),
+    (
+      "<address>A</address>&#9;tail",
+      "<address>A</address>\n\ntail",
+    ),
+    (
+      "<address>A</address>&#13;&#10;tail",
+      "<address>A</address>\n\ntail",
+    ),
+    (
+      "<address>A</address>&nbsp;tail",
+      "<address>A</address>\n\n\u{a0}tail",
+    ),
+    (
+      "<address>A</address>&#32;&#11;tail",
+      "<address>A</address>\n\n\u{b}tail",
+    ),
+    (
+      "<ul><li><address>A</address> tail</li></ul>",
+      "- <address>A</address>\n\n  tail",
+    ),
+    (
+      "<blockquote><address>A</address> tail</blockquote>",
+      "> <address>A</address>\n>\n> tail",
+    ),
+    (
+      "<address>A</address> <b>x</b>",
+      "<address>A</address> \n\n**x**",
+    ),
     (
       "<ul><li><address>A</address><blockquote><strong>B</strong></blockquote></li></ul>",
       "- <address>A</address>\n\n  > **B**",

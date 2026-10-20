@@ -1660,7 +1660,23 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
 
   function processTextNode(textNode: TextNode, lastNode: ElementNode | TextNode | undefined, lastChar: string): void {
-    finishRawHtmlBlock(textNode.value)
+    if (pendingRawHtmlBoundary) {
+      finishRawHtmlBlock(textNode.value)
+      // The boundary starts this text's line, so its leading space, tab and
+      // line breaks go, including decoded ones, as in the Rust engine.
+      if (!pendingRawHtmlBoundary) {
+        const value = textNode.value
+        let start = 0
+        while (start < value.length) {
+          const code = value.charCodeAt(start)
+          if (code !== 32 && code !== 9 && code !== 10 && code !== 13)
+            break
+          start++
+        }
+        if (start !== 0)
+          textNode.value = value.slice(start)
+      }
+    }
     if (textNode.trimsAtLineStart)
       trimTextAtLineStart(textNode, state.buffer)
     if (textNode.value) {
