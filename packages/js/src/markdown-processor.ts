@@ -188,6 +188,18 @@ function isAsciiAlphanumeric(code: number): boolean {
   return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
+// Output other than contiguous closing delimiters ends a pending closer. A
+// module function rather than a closure over the event type, which would make
+// every event allocate a context.
+function breaksPendingCloser(output: string[], entering: boolean, closer: number): boolean {
+  for (let index = 0; index < output.length; index++) {
+    const fragment = output[index]
+    if (fragment && (entering || fragment.charCodeAt(0) !== closer || fragment.charCodeAt(fragment.length - 1) !== closer))
+      return true
+  }
+  return false
+}
+
 // Inline tags whose Markdown delimiters are literal text inside a `<pre>`, so
 // only their content is emitted there. `<code>` and `<br>` are absent: both
 // already have `<pre>`-aware handlers.
@@ -2359,11 +2371,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     // Only contiguous closing delimiters may extend a pending closer.
-    if (pendingCloser && output?.some(fragment => fragment && (eventType === NodeEventEnter
-      || fragment.charCodeAt(0) !== pendingCloser
-      || fragment.charCodeAt(fragment.length - 1) !== pendingCloser))) {
+    if (pendingCloser && output && breaksPendingCloser(output, eventType === NodeEventEnter, pendingCloser))
       pendingCloser = 0
-    }
 
     // Add all output fragments
     let outputStart = state.buffer.length
