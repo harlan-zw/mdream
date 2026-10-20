@@ -2099,6 +2099,7 @@ impl ConvertState {
       if title.is_empty() && self.try_autolink_rewrite(resolved, capped_code_span, is_inline) {
         return;
       }
+      self.pending_emphasis = 0;
       if capped_code_span {
         let mut close = String::with_capacity(resolved.len() + title.len() + LINK_CLOSE_OVERHEAD);
         close.push(']');
@@ -4933,6 +4934,16 @@ impl ConvertState {
     literal: bool,
   ) {
     let output_str = output.unwrap_or("");
+    // Only contiguous closing delimiters may extend a pending closer.
+    if self.pending_emphasis != 0
+      && (configured_new_lines != 0
+        || (!output_str.is_empty()
+          && (is_enter
+            || output_str.as_bytes().first() != Some(&self.pending_emphasis)
+            || output_str.as_bytes().last() != Some(&self.pending_emphasis))))
+    {
+      self.pending_emphasis = 0;
+    }
     let is_line_boundary =
       || !literal && (output_str.starts_with('\n') || output_str.starts_with("\\\n"));
 
@@ -4950,6 +4961,7 @@ impl ConvertState {
       } else if let Some(first) = first_output {
         let last = self.last_output_byte();
         if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
+          self.pending_emphasis = 0;
           self.push_code_span_content(" ", true);
         }
         self.pending_inline_whitespace = false;

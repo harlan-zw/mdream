@@ -2214,6 +2214,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
         else if (firstOutput) {
           if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput)) {
+            pendingCloser = 0
             state.buffer.push(' ')
             state.lastContentCache = ' '
             lastChar = ' '
@@ -2227,6 +2228,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (newLines > 0) {
+      pendingCloser = 0
       if (!buff.length && !captionEvent && !captionTransition) {
         if (output) {
           for (const fragment of output) {
@@ -2323,6 +2325,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     // Add spacing between inline elements if needed
     if (!captionTransition && tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
+      pendingCloser = 0
       state.buffer.push(' ')
       state.lastContentCache = ' '
     }
@@ -2340,6 +2343,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           pendingCloser = mark
         }
       }
+    }
+
+    // Only contiguous closing delimiters may extend a pending closer.
+    if (pendingCloser && output?.some(fragment => fragment && (eventType === NodeEventEnter
+      || fragment.charCodeAt(0) !== pendingCloser
+      || fragment.charCodeAt(fragment.length - 1) !== pendingCloser))) {
+      pendingCloser = 0
     }
 
     // Add all output fragments

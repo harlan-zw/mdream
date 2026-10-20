@@ -7,6 +7,93 @@ use mdream::types::HtmlToMarkdownOptions;
 use mdream::{html_to_markdown, html_to_text};
 
 const CASES: &[(&str, &str)] = &[
+  (
+    r##"<p><strong><a href="/x">b</a> </strong><kbd><b>c</b></kbd></p>"##,
+    "**[b](/x)** `**c**`",
+  ),
+  (
+    r##"<p><strong><a href="/x">b</a> </strong><code><em>c</em></code></p>"##,
+    "**[b](/x)** `*c*`",
+  ),
+  (
+    r##"<li>a<strong>(b)</strong><b>c</b></li>"##,
+    "- a**(b)****c**",
+  ),
+  (
+    r##"<blockquote>a<strong>(b)</strong><b>c</b></blockquote>"##,
+    "> a**(b)****c**",
+  ),
+  (
+    r##"<h2>a<strong>(b)</strong><b>c</b></h2>"##,
+    "## a**(b)****c**",
+  ),
+  (
+    r##"<table><tr><td>a<strong>(b)</strong><b>c</b></td></tr></table>"##,
+    "| a**(b)****c** |\n| --- |",
+  ),
+  (
+    r##"<a href="/y">a<strong>(b)</strong><b>c</b></a>"##,
+    "[a**(b)****c**](/y)",
+  ),
+  (
+    r##"<ul><li><i><a href="/r">Sub (v.)</a></i></li><li><a href="/d"><strong>Domain</strong>/Super</a></li></ul>"##,
+    "- *[Sub (v.)](/r)*\n- [**Domain**/Super](/d)",
+  ),
+  (
+    r##"<p><em><a href="/x">a</a></em><kbd><b>Ctrl</b></kbd></p>"##,
+    "*[a](/x)*`**Ctrl**`",
+  ),
+  (
+    r##"<strong>b!</strong><code><em>c</em></code>"##,
+    "**b!**`*c*`",
+  ),
+  (r##"<p>a<strong>(b)</strong><b>c</b></p>"##, "a**(b)****c**"),
+  (
+    r##"<p><strong><a href="/x">b</a> </strong><b>c</b></p>"##,
+    "**[b](/x)** **c**",
+  ),
+  (r##"<strong>b! </strong><em>c</em>"##, "**b!** *c*"),
+  (
+    r##"<p><em><a href="/x">a</a></em><code><em>x</em></code></p>"##,
+    "*[a](/x)*`*x*`",
+  ),
+  (
+    r##"<p><em><a href="/x">a</a></em></p><p><code><em>x</em></code></p>"##,
+    "*[a](/x)*\n\n`*x*`",
+  ),
+  (
+    r##"<p><em><a href="/x">a</a></em><samp><em>x</em></samp></p>"##,
+    "*[a](/x)*`*x*`",
+  ),
+  (
+    r##"<p><em><a href="/x">a</a></em></p><p><samp><em>x</em></samp></p>"##,
+    "*[a](/x)*\n\n`*x*`",
+  ),
+  (
+    r##"<p><em><a href="/x">a</a></em><var><em>x</em></var></p>"##,
+    "*[a](/x)*`*x*`",
+  ),
+  (
+    r##"<p><em><a href="/x">a</a></em></p><p><var><em>x</em></var></p>"##,
+    "*[a](/x)*\n\n`*x*`",
+  ),
+  (
+    r##"<p><em><a href="/x">a</a></em><kbd><em>x</em></kbd></p>"##,
+    "*[a](/x)*`*x*`",
+  ),
+  (
+    r##"<p><em><a href="/x">a</a></em></p><p><kbd><em>x</em></kbd></p>"##,
+    "*[a](/x)*\n\n`*x*`",
+  ),
+  (r##"<p><strong>b!</strong><br><em>c</em>"##, "**b!**  \n*c*"),
+  (
+    r##"<p><strong>b!</strong></p><p><em>c</em>"##,
+    "**b!**\n\n*c*",
+  ),
+  (
+    r##"<p><strong>b!</strong></p><h2><em>c</em>"##,
+    "**b!**\n\n## *c*",
+  ),
   // Opening-side flanking is intentionally unchanged.
   ("<p>é<strong>!b</strong></p>", "é**!b**"),
   (
@@ -23,7 +110,7 @@ const CASES: &[(&str, &str)] = &[
   ),
   (
     r#"<p><b><a href="/x">a</a></b><i>c</i></p>"#,
-    "**[a](/x)***&#99;*",
+    "**[a](/x)***c*",
   ),
   (
     r#"<p><b><i>a</i></b><b><a href="/y">x</a></b></p>"#,
@@ -31,7 +118,7 @@ const CASES: &[(&str, &str)] = &[
   ),
   (
     r#"<p><b><a href="/x">a</a></b><b><i>c</i></b></p>"#,
-    "**[a](/x)*****&#99;***",
+    "**[a](/x)*****c***",
   ),
   (
     r#"<p>a<strong><a href="/x">b</a></strong></p>"#,
@@ -436,8 +523,7 @@ fn only_markdown_drops_the_space_after_a_tilde() {
 
 #[test]
 fn keeps_delimiters_where_a_fix_cannot_help() {
-  // An opener before whitespace cannot open; a raw one at a block start would
-  // open an HTML block.
+  // An opener before whitespace cannot open.
   assert_eq!(
     html_to_markdown(
       r#"<p><strong><br><a href="/x">b</a></strong>c</p>"#,
@@ -472,5 +558,38 @@ fn keeps_delimiters_where_a_fix_cannot_help() {
       expected,
       "html={html:?}"
     );
+  }
+}
+
+#[test]
+fn earlier_closers_do_not_change_heading_slugs() {
+  for fragments_only in [false, true] {
+    let options = HtmlToMarkdownOptions::default().with_clean(if fragments_only {
+      CleanConfig {
+        fragments: true,
+        ..Default::default()
+      }
+    } else {
+      CleanConfig::all()
+    });
+    for (html, expected) in [
+      (
+        r##"<p><em><a href="/x">a</a></em></p><h2><strong>Intro</strong></h2><p><a href="#intro">go</a></p>"##,
+        "*[a](/x)*\n\n## **Intro**\n\n[go](#intro)",
+      ),
+      (
+        r##"<strong>b!</strong><h2><em>c</em></h2><a href="#c">link</a>"##,
+        "**b!**\n\n## *c*\n\n[link](#c)",
+      ),
+    ] {
+      assert_eq!(html_to_markdown(html, options.clone()), expected);
+      for chunk in 1..=html.len() {
+        assert_eq!(
+          stream_chunks(html, chunk, &options),
+          expected,
+          "chunk={chunk} html={html}"
+        );
+      }
+    }
   }
 }

@@ -6,14 +6,38 @@ import { htmlToText } from '../../src/text'
 // A closer after punctuation needs a character reference before an ASCII word.
 // Opening delimiters remain unchanged, including unsupported opening-side cases.
 const cases: [string, string][] = [
+  ['<p><strong><a href="/x">b</a> </strong><kbd><b>c</b></kbd></p>', '**[b](/x)** `**c**`'],
+  ['<p><strong><a href="/x">b</a> </strong><code><em>c</em></code></p>', '**[b](/x)** `*c*`'],
+  ['<li>a<strong>(b)</strong><b>c</b></li>', '- a**(b)****c**'],
+  ['<blockquote>a<strong>(b)</strong><b>c</b></blockquote>', '> a**(b)****c**'],
+  ['<h2>a<strong>(b)</strong><b>c</b></h2>', '## a**(b)****c**'],
+  ['<table><tr><td>a<strong>(b)</strong><b>c</b></td></tr></table>', '| a**(b)****c** |\n| --- |'],
+  ['<a href="/y">a<strong>(b)</strong><b>c</b></a>', '[a**(b)****c**](/y)'],
+  ['<ul><li><i><a href="/r">Sub (v.)</a></i></li><li><a href="/d"><strong>Domain</strong>/Super</a></li></ul>', '- *[Sub (v.)](/r)*\n- [**Domain**/Super](/d)'],
+  ['<p><em><a href="/x">a</a></em><kbd><b>Ctrl</b></kbd></p>', '*[a](/x)*`**Ctrl**`'],
+  ['<strong>b!</strong><code><em>c</em></code>', '**b!**`*c*`'],
+  ['<p>a<strong>(b)</strong><b>c</b></p>', 'a**(b)****c**'],
+  ['<p><strong><a href="/x">b</a> </strong><b>c</b></p>', '**[b](/x)** **c**'],
+  ['<strong>b! </strong><em>c</em>', '**b!** *c*'],
+  ['<p><em><a href="/x">a</a></em><code><em>x</em></code></p>', '*[a](/x)*`*x*`'],
+  ['<p><em><a href="/x">a</a></em></p><p><code><em>x</em></code></p>', '*[a](/x)*\n\n`*x*`'],
+  ['<p><em><a href="/x">a</a></em><samp><em>x</em></samp></p>', '*[a](/x)*`*x*`'],
+  ['<p><em><a href="/x">a</a></em></p><p><samp><em>x</em></samp></p>', '*[a](/x)*\n\n`*x*`'],
+  ['<p><em><a href="/x">a</a></em><var><em>x</em></var></p>', '*[a](/x)*`*x*`'],
+  ['<p><em><a href="/x">a</a></em></p><p><var><em>x</em></var></p>', '*[a](/x)*\n\n`*x*`'],
+  ['<p><em><a href="/x">a</a></em><kbd><em>x</em></kbd></p>', '*[a](/x)*`*x*`'],
+  ['<p><em><a href="/x">a</a></em></p><p><kbd><em>x</em></kbd></p>', '*[a](/x)*\n\n`*x*`'],
+  ['<p><strong>b!</strong><br><em>c</em>', '**b!**  \n*c*'],
+  ['<p><strong>b!</strong></p><p><em>c</em>', '**b!**\n\n*c*'],
+  ['<p><strong>b!</strong></p><h2><em>c</em>', '**b!**\n\n## *c*'],
   // Opening-side flanking is intentionally unchanged.
   ['<p>é<strong>!b</strong></p>', 'é**!b**'],
   ['<p>a<strong><span><span><a href="/x">b</a></span></span></strong><span>c</span></p>', 'a**[b](/x)**&#99;'],
   ['<p><strong><span><a href="/x">b</a></span></strong><span><span>c</span></span></p>', '**[b](/x)**&#99;'],
   ['<p><i>a</i><b><a href="/y">x</a></b></p>', '*a***[x](/y)**'],
-  ['<p><b><a href="/x">a</a></b><i>c</i></p>', '**[a](/x)***&#99;*'],
+  ['<p><b><a href="/x">a</a></b><i>c</i></p>', '**[a](/x)***c*'],
   ['<p><b><i>a</i></b><b><a href="/y">x</a></b></p>', '***a*****[x](/y)**'],
-  ['<p><b><a href="/x">a</a></b><b><i>c</i></b></p>', '**[a](/x)*****&#99;***'],
+  ['<p><b><a href="/x">a</a></b><b><i>c</i></b></p>', '**[a](/x)*****c***'],
   ['<p>a<strong><a href="/x">b</a></strong></p>', 'a**[b](/x)**'],
   ['<p><strong><a href="/x">b</a></strong>c</p>', '**[b](/x)**&#99;'],
   ['<p>a<b><a href="/x">b</a></b>c</p>', 'a**[b](/x)**&#99;'],
@@ -65,6 +89,29 @@ async function streamConvert(html: string, chunkSize: number): Promise<string> {
 }
 
 describe('emphasis delimiters that cannot flank', () => {
+  it.each([
+    ['<p><em><a href="/x">a</a></em></p><h2><strong>Intro</strong></h2><p><a href="#intro">go</a></p>', '*[a](/x)*\n\n## **Intro**\n\n[go](#intro)'],
+    ['<strong>b!</strong><h2><em>c</em></h2><a href="#c">link</a>', '**b!**\n\n## *c*\n\n[link](#c)'],
+  ])('keeps fragment links after an earlier closer in %s', async (html, expected) => {
+    for (const fragmentsOnly of [false, true]) {
+      const options = { clean: fragmentsOnly ? clean({ fragments: true }) : clean() }
+      expect(htmlToMarkdown(html, options)).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const input = new ReadableStream<string>({
+          start(controller) {
+            for (let offset = 0; offset < html.length; offset += width)
+              controller.enqueue(html.slice(offset, offset + width))
+            controller.close()
+          },
+        })
+        let output = ''
+        for await (const chunk of streamHtmlToMarkdown(input, options))
+          output += chunk
+        expect(output, `width=${width}`).toBe(expected)
+      }
+    }
+  })
+
   it.each([
     ['<h2><em>x</em><a href="#x"><strong>!b</strong></a></h2>', '## *x***!b**'],
     ['<h2>Q<a href="#q">#</a></h2>', '## Q \\#'],
@@ -236,8 +283,7 @@ describe('emphasis delimiters that cannot flank', () => {
   })
 
   it('keeps delimiters where a fix cannot help', () => {
-    // An opener before whitespace cannot open; a raw one at a block start
-    // would open an HTML block.
+    // An opener before whitespace cannot open.
     expect(htmlToMarkdown('<p><strong><br><a href="/x">b</a></strong>c</p>')).toBe('**  \n[b](/x)**&#99;')
     expect(htmlToMarkdown('<p>a<strong>&nbsp;<a href="/x">b</a></strong>c</p>')).toBe('a**  [b](/x)**&#99;')
     expect(htmlToMarkdown('<p><code>a<strong>[b]</strong>c</code></p>')).toBe('`a**[b]**c`')
