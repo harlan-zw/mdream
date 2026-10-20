@@ -78,8 +78,11 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
   // Open anchors and the buffer index of the `[` each wrote, or -1.
   const links: ElementNode[] = []
   const brackets: number[] = []
-  // The emphasis closer each `[` cancelled, parallel to `brackets`.
-  const bracketClosers: number[] = []
+  // The emphasis closer a `[` cancelled, at its index in `brackets`. Written
+  // only when there is one, so most conversions never create the array: an
+  // array that empties with every root link reallocates its storage on the
+  // next push.
+  let bracketClosers: number[] | undefined
   // The exact Markdown each marked link produced, in the order the links
   // closed, which is the order of their close markers in the output. When
   // the source carries marker characters too, `finish` drops only markers
@@ -105,7 +108,8 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
       if (tagId === TAG_A) {
         links.push(element)
         brackets.push(outputStart < buffer.length && buffer[buffer.length - 1] === '[' ? buffer.length - 1 : -1)
-        bracketClosers.push(closer)
+        if (fragments && closer)
+          (bracketClosers ??= [])[links.length - 1] = closer
       }
       // Rust takes a heading's slug from the Markdown after its `## ` prefix.
       else if (fragments && headingStart < 0 && tagId >= TAG_H1 && tagId <= TAG_H6 && !depthMap[TAG_A]) {
@@ -120,10 +124,11 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
         for (let index = links.length - 1; index >= 0; index--) {
           if (links[index] === element) {
             closing = brackets[index]!
-            closingCloser = bracketClosers[index]!
+            closingCloser = bracketClosers?.[index] ?? 0
             links.length = index
             brackets.length = index
-            bracketClosers.length = index
+            if (bracketClosers && bracketClosers.length > index)
+              bracketClosers.length = index
             break
           }
         }
