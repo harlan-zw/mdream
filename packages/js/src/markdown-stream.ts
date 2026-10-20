@@ -234,13 +234,19 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     else {
       // The prefix ends before a mutable owner. Its trailing block spacing
       // stays buffered even when that owner sits inside a preformatted block.
-      const holdVerticalTabs = !final && (state.depthMap[TAG_EM] || state.depthMap[TAG_I]
-        || state.depthMap[TAG_STRONG] || state.depthMap[TAG_B] || state.depthMap[TAG_CITE]
-        || state.depthMap[TAG_DFN] || state.depthMap[TAG_DEL] || state.depthMap[TAG_S] || state.depthMap[TAG_STRIKE])
+      // Emphasis depths are read only when a vertical tab is actually trailing.
+      let holdVerticalTabs: boolean | undefined
       while (stableLength > 0) {
         const code = currentContent.charCodeAt(stableLength - 1)
-        if (!isAsciiWhitespace(code) && !(code === 11 && holdVerticalTabs))
-          break
+        if (!isAsciiWhitespace(code)) {
+          if (code !== 11)
+            break
+          holdVerticalTabs ??= !final && !!(state.depthMap[TAG_EM] || state.depthMap[TAG_I]
+            || state.depthMap[TAG_STRONG] || state.depthMap[TAG_B] || state.depthMap[TAG_CITE]
+            || state.depthMap[TAG_DFN] || state.depthMap[TAG_DEL] || state.depthMap[TAG_S] || state.depthMap[TAG_STRIKE])
+          if (!holdVerticalTabs)
+            break
+        }
         stableLength--
       }
       retainMutableFragments = stableLength < currentContent.length
