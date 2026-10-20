@@ -41,11 +41,18 @@ export function processPluginsForEvent(
     // when descendant nodes check their ancestors in beforeNodeProcess.
     if (event.node.type === ELEMENT_NODE && event.type === NodeEventEnter) {
       const element = event.node as ElementNode
+      let hasCheckedAttributes = false
       for (let index = 0; index < plugins.length; index++) {
         const plugin = plugins[index]
         if (plugin === undefined)
           throw new TypeError('Plugin arrays must not contain undefined entries.')
         if (plugin.processAttributes) {
+          if (!hasCheckedAttributes) {
+            hasCheckedAttributes = true
+            // The parser shares a frozen object for elements without attributes.
+            if (!Object.isExtensible(element.attributes))
+              element.attributes = { ...element.attributes }
+          }
           plugin.processAttributes(element, state)
         }
       }
