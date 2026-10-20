@@ -1695,26 +1695,8 @@ impl ConvertState {
       self.flush_streaming_blockquote_lines();
     }
 
-    if tag_id.is_some_and(Self::is_raw_html_block_tag) && self.raw_html_needs_boundary {
-      self.track_raw_html_markdown_context(self.buffer.len());
-      if self.raw_html_markdown && !self.line_opens_raw_html_block() {
-        self.raw_html_needs_boundary = false;
-      }
-    }
-    if !plain_text!(self)
-      && tag_id.is_some_and(Self::is_raw_html_block_tag)
-      && !enter_is_literal
-      && !self.in_table_cell()
-      && self.depth_map[TAG_PRE as usize] == 0
-      && output.is_some()
-      && (self.pending_raw_html_boundary
-        || configured_new_lines > 0
-        || self.block_open_prefix("").is_none())
-    {
-      self.raw_html_needs_boundary = true;
-      self.raw_html_markdown = false;
-      self.raw_html_scanned_to = self.buffer.len();
-      self.pending_raw_html_boundary = false;
+    if tag_id.is_some_and(Self::is_raw_html_block_tag) {
+      self.enter_raw_html_boundary(enter_is_literal, output.is_some(), configured_new_lines);
     }
 
     let raw_html_quote_boundary =
@@ -2488,17 +2470,7 @@ impl ConvertState {
       && !self.in_table_cell()
       && self.depth_map[TAG_PRE as usize] == 0
     {
-      self.track_raw_html_markdown_context(self.buffer.len());
-      if self.raw_html_markdown && !self.line_opens_raw_html_block() {
-        self.raw_html_needs_boundary = false;
-      }
-      if !has_override && output.is_some() && self.block_open_prefix("").is_none() {
-        self.raw_html_needs_boundary = true;
-      }
-      if self.raw_html_block_depth() == 1 {
-        self.pending_raw_html_boundary = self.raw_html_needs_boundary && !has_override;
-        self.raw_html_needs_boundary = false;
-      }
+      self.exit_raw_html_boundary(has_override, output.is_some());
     }
 
     if matches!(tag_id, Some(TAG_LI | TAG_BLOCKQUOTE)) {
@@ -4142,6 +4114,45 @@ impl ConvertState {
       id,
       TAG_DETAILS | TAG_SUMMARY | TAG_ADDRESS | TAG_DL | TAG_DT | TAG_DD
     )
+  }
+
+  // Keep boundary tracking out of the common element emitters. These helpers
+  // are reached only for the raw HTML tags above, never for Markdown BR/LI.
+  #[inline(never)]
+  fn enter_raw_html_boundary(&mut self, literal: bool, has_output: bool, new_lines: u8) {
+    if self.raw_html_needs_boundary {
+      self.track_raw_html_markdown_context(self.buffer.len());
+      if self.raw_html_markdown && !self.line_opens_raw_html_block() {
+        self.raw_html_needs_boundary = false;
+      }
+    }
+    if !plain_text!(self)
+      && !literal
+      && !self.in_table_cell()
+      && self.depth_map[TAG_PRE as usize] == 0
+      && has_output
+      && (self.pending_raw_html_boundary || new_lines > 0 || self.block_open_prefix("").is_none())
+    {
+      self.raw_html_needs_boundary = true;
+      self.raw_html_markdown = false;
+      self.raw_html_scanned_to = self.buffer.len();
+      self.pending_raw_html_boundary = false;
+    }
+  }
+
+  #[inline(never)]
+  fn exit_raw_html_boundary(&mut self, has_override: bool, has_output: bool) {
+    self.track_raw_html_markdown_context(self.buffer.len());
+    if self.raw_html_markdown && !self.line_opens_raw_html_block() {
+      self.raw_html_needs_boundary = false;
+    }
+    if !has_override && has_output && self.block_open_prefix("").is_none() {
+      self.raw_html_needs_boundary = true;
+    }
+    if self.raw_html_block_depth() == 1 {
+      self.pending_raw_html_boundary = self.raw_html_needs_boundary && !has_override;
+      self.raw_html_needs_boundary = false;
+    }
   }
 
   /// `1` at an enter means this tag begins the region.
