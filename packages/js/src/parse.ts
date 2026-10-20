@@ -1050,7 +1050,9 @@ function parseHtmlInternal(
         textBuffer += htmlChunk.substring(i)
         break
       }
-      if (htmlChunk.startsWith('<!--', i) || declaration === '<!doctype') {
+      // A comment becomes a DOM node. A DOCTYPE in content is ignored without
+      // one, so like a bogus comment it only ends the character reference.
+      if (htmlChunk.startsWith('<!--', i)) {
         if (textBuffer.length > 0) {
           processTextBuffer(textBuffer, state, handleEvent)
           textBuffer = ''

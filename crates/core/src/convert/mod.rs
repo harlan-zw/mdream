@@ -1996,13 +1996,9 @@ impl ConvertState {
           carry_bounded = true;
           break;
         }
-        if cdata.is_some()
-          || remaining.starts_with("<!--")
-          || remaining
-            .as_bytes()
-            .get(..9)
-            .is_some_and(|s| s.eq_ignore_ascii_case(b"<!doctype"))
-        {
+        // A comment becomes a DOM node. A DOCTYPE in content is ignored without
+        // one, so like a bogus comment it only ends the character reference.
+        if cdata.is_some() || remaining.starts_with("<!--") {
           self.complete_text_node(&mut text_buffer);
           if self.held_output_exceeded {
             return self.drop_after_held_output_exceeded(text_buffer, chunk_length);

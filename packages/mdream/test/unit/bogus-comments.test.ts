@@ -14,6 +14,9 @@ const cases = [
   ['<textarea>a</ x>b</textarea>', 'a\\</ x>b'],
   ['<textarea>a<!x', 'a\\<!x'],
   ['<p>a<!dud>b</p>', 'ab'],
+  ['<p>a<!doctypeX>b</p>', 'ab'],
+  ['<p>a<!DOCTYPE html>b</p>', 'ab'],
+  ['<p>a<!doctype>b</p>', 'ab'],
   ['<p>a</ x>b</p>', 'ab'],
   ['<p>a<?x?>b</p>', 'ab'],
   ['<pre>a<?x?>b</pre>', '```\nab\n```'],
@@ -131,6 +134,8 @@ const referenceCases = [
   ['<p>a&<?x?><?y?>amp;b</p>', '<p>a&amp;amp;b</p>'],
   ['<p>&<?x?>amp; b</p>', '<p>&amp;amp; b</p>'],
   ['<pre>a&<?x?>amp;b</pre>', '<pre>a&amp;amp;b</pre>'],
+  ['<p>a&<!doctypeX>amp;b</p>', '<p>a&amp;amp;b</p>'],
+  ['<p>a&amp<!doctype html>;b</p>', '<p>a&amp;;b</p>'],
 ]
 
 describe.each(engines)('$name references at discarded tokens', ({ engine }) => {
@@ -158,6 +163,7 @@ describe.each(engines)('$name references at discarded tokens', ({ engine }) => {
     ['<p>a&</ x>amp;b</p>', 'a\\&amp;b'],
     ['<p>a&am<!x>p;b</p>', 'a\\&amp;b'],
     ['<p>a&lt<!x>;b</p>', 'a<;b'],
+    ['<p>a&<!doctypeX>amp;b</p>', 'a\\&amp;b'],
   ])('keeps the source text the token splits: %s', (html, expected) => {
     expect(engine.htmlToMarkdown(html)).toBe(expected)
   })
