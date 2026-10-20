@@ -3276,6 +3276,20 @@ fn batchable_run_end(bytes: &[u8], start: usize) -> (usize, bool) {
   let limit = bytes.len();
   let mut i = start + 1;
   let mut had_space = false;
+  // Most runs end within their first word, between entities or tags: step those
+  // bytewise, the same steps as the byte loop below, and return with no word
+  // test. Only a run still going past the probe tries words.
+  let probe = limit.min(start + 9);
+  while i < probe {
+    if BATCHABLE_TEXT[bytes[i] as usize] {
+      i += 1;
+    } else if i + 1 < limit && bytes[i] == SPACE_CHAR && BATCHABLE_TEXT[bytes[i + 1] as usize] {
+      had_space = true;
+      i += 2;
+    } else {
+      return (i, had_space);
+    }
+  }
   // A long prefix of letters and single spaces advances a word at a time. The
   // first word holding anything else leaves the rest of the run to the byte loop
   // below, so a run of other text pays a single extra test. A space in the last
@@ -3692,21 +3706,23 @@ mod batchable_run_tests {
       b"abc def ghi 123 jkl. mno pqr",
     ];
     for fill in fills {
-      for len in 1..=26 {
-        for at in 0..len {
-          for byte in 0..=255u8 {
-            let mut bytes = fill[..len].to_vec();
-            bytes[0] = b'x';
-            bytes[at] = byte;
-            if !BATCHABLE_TEXT[bytes[0] as usize] {
-              continue;
+      for start in [0, 3] {
+        for len in start + 1..=26 {
+          for at in 0..len {
+            for byte in 0..=255u8 {
+              let mut bytes = fill[..len].to_vec();
+              bytes[start] = b'x';
+              bytes[at] = byte;
+              if !BATCHABLE_TEXT[bytes[start] as usize] {
+                continue;
+              }
+              assert_eq!(
+                batchable_run_end(&bytes, start),
+                scalar_run_end(&bytes, start),
+                "fill {:?} start {start} len {len} at {at} byte {byte:#04x}",
+                std::str::from_utf8(fill)
+              );
             }
-            assert_eq!(
-              batchable_run_end(&bytes, 0),
-              scalar_run_end(&bytes, 0),
-              "fill {:?} len {len} at {at} byte {byte:#04x}",
-              std::str::from_utf8(fill)
-            );
           }
         }
       }
