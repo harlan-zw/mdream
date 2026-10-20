@@ -954,14 +954,7 @@ function parseHtmlInternal(
         // through this parse loop.
         // Append a source run instead of allocating one rope node per character.
         const textStart = i++
-        while (i < chunkLength) {
-          const code = htmlChunk.charCodeAt(i)
-          if (code === LT_CHAR || isWhitespace(code))
-            break
-          if (code === AMPERSAND_CHAR)
-            state.hasEncodedHtmlEntity = true
-          i++
-        }
+        i = scanTextRun(htmlChunk, i, chunkLength, state)
         textBuffer += htmlChunk.substring(textStart, i)
         continue
       }
@@ -1294,6 +1287,22 @@ function parseHtmlInternal(
   state.trailingText = textBuffer
 
   return remainingHtml
+}
+
+/**
+ * End of the text run from `i`: the first `<` or whitespace, flagging any `&`.
+ * Kept out of parseHtmlInternal so this loop is optimized on its own.
+ */
+function scanTextRun(htmlChunk: string, i: number, chunkLength: number, state: ParseState): number {
+  while (i < chunkLength) {
+    const code = htmlChunk.charCodeAt(i)
+    if (code === LT_CHAR || isWhitespace(code))
+      break
+    if (code === AMPERSAND_CHAR)
+      state.hasEncodedHtmlEntity = true
+    i++
+  }
+  return i
 }
 
 /**
