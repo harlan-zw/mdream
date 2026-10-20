@@ -265,6 +265,11 @@ mod drain_equiv {
     "<pre><code>let x = 1;\nlet y = 2;</code></pre><p>done</p>",
     "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>",
     r#"<h2>Section</h2><p>text with a <a href="/rel">relative</a> link</p>"#,
+    // Nested emphasis across stream drains.
+    r#"<p>long lead text a<strong>b <em><a href="/x">c</a></em></strong>d and more</p>"#,
+    r#"<blockquote><p>x<br>y<strong><a href="/x">b</a></strong>c</p></blockquote>"#,
+    // An emphasis closer following a block inside its element.
+    r#"<div>long lead a<strong><a href="/x">b</a><div>c</div></strong>d</div><p>next</p>"#,
     // Rewrite-after-yield constructs.
     r#"<p>Visit <a href="https://x.io">https://x.io</a> today.</p>"#,
     r##"<h2><a href="#section">Section</a></h2><p>body</p>"##,
