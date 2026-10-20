@@ -1196,6 +1196,20 @@ impl ConvertState {
     )))
   }
 
+  /// A heading entering a list item's pending caption. Materializing the caption
+  /// already places its opening emphasis before the heading, so no separator
+  /// goes inside that inline run.
+  #[cold]
+  #[inline(never)]
+  fn caption_heading_enter(&self, tag_id: Option<u8>) -> bool {
+    self.depth_map[TAG_LI as usize] > 0
+      && tag_id.is_some_and(|id| id.wrapping_sub(TAG_H1) < 6)
+      && self
+        .caption_frames
+        .iter()
+        .any(|frame| !matches!(frame.state, CaptionState::Committed))
+  }
+
   /// At a heading's exit in a list item: only an ATX prefix can take in the
   /// text after it. Inside `<pre>` that text is code, and inside a caption the
   /// emphasis wrapping it, either of which a break would split.
@@ -1711,15 +1725,7 @@ impl ConvertState {
       !enter_is_literal && visible_output && tag_id.and_then(Self::inline_marker_type).is_some();
     let tentative_caption_output =
       default_inline_marker || (!enter_is_literal && tag_id == Some(TAG_A));
-    // Materializing the caption already places its opening emphasis before
-    // this heading. Do not insert another separator inside that inline run.
-    let caption_heading_enter = visible_output
-      && self.depth_map[TAG_LI as usize] > 0
-      && tag_id.is_some_and(|id| id.wrapping_sub(TAG_H1) < 6)
-      && self
-        .caption_frames
-        .iter()
-        .any(|frame| !matches!(frame.state, CaptionState::Committed));
+    let caption_heading_enter = visible_output && self.caption_heading_enter(tag_id);
     if visible_output || tag_id == Some(TAG_BLOCKQUOTE) {
       self.expand_deferred_caption_breaks();
     }
@@ -3748,7 +3754,7 @@ impl ConvertState {
 
   /// A list item's content column opens its blocks, so a line indented to it
   /// counts from there: past three spaces is not yet indented code.
-  #[inline(never)]
+  #[inline]
   fn markdown_line_indent_in_item(&self, column: usize) -> Option<u8> {
     let bytes = self.buffer.as_bytes();
     let past_column = |spaces: usize| match spaces.checked_sub(column) {
