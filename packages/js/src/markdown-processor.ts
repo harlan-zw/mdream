@@ -2350,6 +2350,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.outputPositions?.replace(index, index + 1, [trimmed])
           buff[index] = trimmed
         }
+        if (newLines > 0 && output) {
+          // Exit spacing follows the closer and its displaced source whitespace.
+          output.splice(output.length - 1, 0, trailingEmphasisWhitespace)
+          trailingEmphasisWhitespace = ''
+        }
       }
     }
 

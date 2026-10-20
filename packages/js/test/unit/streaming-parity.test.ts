@@ -935,6 +935,21 @@ describe('vertical tabs before emphasis closers', () => {
   }
 })
 
+it('keeps vertical tabs before exit spacing overrides', async () => {
+  for (const [tag, marker] of [['em', '*'], ['strong', '**'], ['strike', '~~']] as const) {
+    const html = `<${tag}>T\u000B</${tag}>X`
+    for (const literal of [false, true]) {
+      const options: ParityOptions = {
+        tagOverrides: { [tag]: { spacing: [0, 1], ...(literal ? { exit: marker } : {}) } },
+      }
+      const expected = literal ? `${marker}T\u000B${marker}\nX` : `${marker}T${marker}\u000B\nX`
+      expect(htmlToMarkdown(html, options), `${tag}, literal ${literal}`).toBe(expected)
+      for (let width = 1; width <= html.length; width++)
+        expect(await streamConvert(html, width, options), `${tag}, literal ${literal}, width ${width}`).toBe(expected)
+    }
+  }
+})
+
 it('preserves literal emphasis exits and moves override whitespace outside default exits', async () => {
   for (const [tag, marker] of [['em', '*'], ['cite', '*'], ['dfn', '**'], ['del', '~~']] as const) {
     for (const [html, options, expected] of [
