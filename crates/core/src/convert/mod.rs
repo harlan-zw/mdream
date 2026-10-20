@@ -1689,21 +1689,8 @@ impl ConvertState {
         {
           let start = i;
           let limit = chunk_length.min(i + self.text_run_room(&text_buffer));
-          i += 1;
-          let mut had_space = false;
-          loop {
-            while i < limit && BATCHABLE_TEXT[bytes[i] as usize] {
-              i += 1;
-            }
-            // Doubled, trailing, and pre-tag spaces leave the run to the
-            // general path, which keeps its collapsing semantics.
-            if i + 1 < limit && bytes[i] == SPACE_CHAR && BATCHABLE_TEXT[bytes[i + 1] as usize] {
-              had_space = true;
-              i += 2;
-              continue;
-            }
-            break;
-          }
+          let had_space;
+          (i, had_space) = batchable_run_end(&bytes[..limit], i);
           let before_len = text_buffer.len();
           self.truncated |= push_capped_text_node(
             &mut text_buffer,
@@ -3279,6 +3266,31 @@ pub(crate) fn clamp_to_char_boundary(text: &str, max: usize) -> &str {
     end -= 1;
   }
   &text[..end]
+}
+
+/// End of the batchable ASCII run whose first byte is at `start`, absorbing
+/// single spaces between batchable bytes, and whether it absorbed one. `bytes`
+/// ends at the run's limit, so the scan needs no other bound. Doubled,
+/// trailing, and pre-tag spaces leave the run to the general path, which keeps
+/// its collapsing semantics. Every byte it passes is ASCII, so the end is a
+/// char boundary. Out of line so this loop keeps its own code whatever the rest
+/// of `process_html` compiles to; one call per run.
+#[inline(never)]
+fn batchable_run_end(bytes: &[u8], start: usize) -> (usize, bool) {
+  let limit = bytes.len();
+  let mut i = start + 1;
+  let mut had_space = false;
+  loop {
+    while i < limit && BATCHABLE_TEXT[bytes[i] as usize] {
+      i += 1;
+    }
+    if i + 1 < limit && bytes[i] == SPACE_CHAR && BATCHABLE_TEXT[bytes[i + 1] as usize] {
+      had_space = true;
+      i += 2;
+      continue;
+    }
+    return (i, had_space);
+  }
 }
 
 /// End of the non-ASCII run that starts at `start`, stopping at `limit`.
