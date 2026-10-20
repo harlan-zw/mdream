@@ -3275,6 +3275,15 @@ pub(crate) fn clamp_to_char_boundary(text: &str, max: usize) -> &str {
 fn batchable_run_end(bytes: &[u8], start: usize) -> (usize, bool) {
   let limit = bytes.len();
   let mut i = start + 1;
+  // A long prefix of letters advances a word at a time. The first word holding
+  // anything else leaves the rest of the run, spaces included, to the byte loop
+  // below, so a run of short words pays a single extra test.
+  while let Some(word) = bytes.get(i..i + 8) {
+    if !all_ascii_letters(u64::from_le_bytes(word.try_into().unwrap())) {
+      break;
+    }
+    i += 8;
+  }
   let mut had_space = false;
   loop {
     while i < limit && BATCHABLE_TEXT[bytes[i] as usize] {
@@ -3287,6 +3296,19 @@ fn batchable_run_end(bytes: &[u8], start: usize) -> (usize, bool) {
     }
     return (i, had_space);
   }
+}
+
+/// Whether all eight bytes of `word` are ASCII letters, each of which is
+/// batchable. With every byte below 0x80, `| 0x20` keeps each below 0x80 and
+/// maps exactly the letters into `a..=z`, so adding 0x1F or 0x05 never carries
+/// into the next byte: the high bit of `x + 0x1F` is set exactly when a byte is
+/// at least `a`, and of `x + 0x05` exactly when it is past `z`.
+#[inline(always)]
+fn all_ascii_letters(word: u64) -> bool {
+  const LANES: u64 = 0x0101_0101_0101_0101;
+  const HIGH: u64 = LANES * 0x80;
+  let x = word | (LANES * 0x20);
+  word & HIGH == 0 && (x + LANES * 0x1F) & !(x + LANES * 0x05) & HIGH == HIGH
 }
 
 /// End of the non-ASCII run that starts at `start`, stopping at `limit`.
@@ -3568,6 +3590,77 @@ mod tests {
 
     check(&["<p><b></b> 😀"]);
     check(&["<p><b></b> ", "😀"]);
+  }
+}
+
+#[cfg(test)]
+mod batchable_run_tests {
+  use super::*;
+
+  /// The byte loop alone, as the run scan was before the word prefix.
+  fn scalar_run_end(bytes: &[u8], start: usize) -> (usize, bool) {
+    let limit = bytes.len();
+    let mut i = start + 1;
+    let mut had_space = false;
+    loop {
+      while i < limit && BATCHABLE_TEXT[bytes[i] as usize] {
+        i += 1;
+      }
+      if i + 1 < limit && bytes[i] == SPACE_CHAR && BATCHABLE_TEXT[bytes[i + 1] as usize] {
+        had_space = true;
+        i += 2;
+        continue;
+      }
+      return (i, had_space);
+    }
+  }
+
+  #[test]
+  fn letters_are_batchable() {
+    assert!(
+      (0..=255u8)
+        .filter(u8::is_ascii_alphabetic)
+        .all(|b| BATCHABLE_TEXT[b as usize])
+    );
+  }
+
+  #[test]
+  fn word_letter_test_matches_every_byte_in_every_lane() {
+    for lane in 0..8 {
+      for byte in 0..=255u8 {
+        for fill in [b'a', b'Z', b'm'] {
+          let mut word = [fill; 8];
+          word[lane] = byte;
+          assert_eq!(
+            all_ascii_letters(u64::from_le_bytes(word)),
+            word.iter().all(u8::is_ascii_alphabetic),
+            "lane {lane} byte {byte:#04x}"
+          );
+        }
+      }
+    }
+  }
+
+  #[test]
+  fn run_end_matches_the_byte_loop_at_every_boundary() {
+    for len in 1..=26 {
+      for at in 0..len {
+        for byte in 0..=255u8 {
+          for fill in [b'x', b' '] {
+            let mut bytes = vec![b'x'; len];
+            if fill == b' ' && len > 3 {
+              bytes[len / 2] = b' ';
+            }
+            bytes[at] = byte;
+            assert_eq!(
+              batchable_run_end(&bytes, 0),
+              scalar_run_end(&bytes, 0),
+              "len {len} at {at} byte {byte:#04x} fill {fill}"
+            );
+          }
+        }
+      }
+    }
   }
 }
 
