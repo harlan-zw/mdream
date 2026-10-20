@@ -4902,6 +4902,8 @@ impl ConvertState {
     }
   }
 
+  /// Separate content following a raw HTML region. A capped code span must
+  /// accept the complete separator before this consumes the pending boundary.
   fn finish_raw_html_block(&mut self, value: &str, indent: bool) {
     if !self.pending_raw_html_boundary
       || self.in_raw_html_block()
@@ -4909,24 +4911,36 @@ impl ConvertState {
     {
       return;
     }
-    self.pending_raw_html_boundary = false;
     let mut newlines = 0;
     for &byte in self.buffer.as_bytes().iter().rev() {
       if byte == b'\n' {
         newlines += 1;
         if newlines == 2 {
+          self.pending_raw_html_boundary = false;
           return;
         }
       } else if !is_whitespace(byte) {
         break;
       }
     }
-    // The separator belongs after the HTML close, even when it had no spacing.
-    for _ in newlines..2 {
-      self.buffer.push('\n');
-    }
     let indent_len = if indent { self.list_indent.len() } else { 0 };
-    self.buffer.push_str(&self.list_indent[..indent_len]);
+    // Charge the complete separator to an open code span. A rejected write
+    // leaves the boundary pending until content can be emitted again.
+    if self.options.max_node_bytes != 0 && !self.code_spans.is_empty() {
+      let mut separator = String::with_capacity(2 - newlines + indent_len);
+      separator.push_str(&"\n\n"[..2 - newlines]);
+      separator.push_str(&self.list_indent[..indent_len]);
+      if self.push_code_span_content(&separator, true) == 0 {
+        return;
+      }
+    } else {
+      // The separator belongs after the HTML close, even when it had no spacing.
+      for _ in newlines..2 {
+        self.buffer.push('\n');
+      }
+      self.buffer.push_str(&self.list_indent[..indent_len]);
+    }
+    self.pending_raw_html_boundary = false;
     self.last_content_cache_len = 2 - newlines + indent_len;
     self.has_last_text_node = false;
     self.last_text_node_contains_whitespace = false;
@@ -5788,6 +5802,28 @@ mod tests {
         .find(|node| node.tag_id == Some(TAG_A))
         .unwrap();
       assert_eq!(anchor.child_text_node_index, expected, "cap={cap}");
+    }
+  }
+
+  #[test]
+  fn raw_html_boundary_respects_inline_code_cap() {
+    for prefix in ["<code><br>", "<ul><li><code><br>"] {
+      for tag in ["details", "summary", "address", "dl", "dt", "dd"] {
+        for cap in 8..=32 {
+          let mut state = ConvertState::new(
+            HtmlToMarkdownOptions::default().with_max_node_bytes(cap),
+            64,
+            OutputFormat::Markdown,
+          );
+          let html = format!("{prefix}<{tag}>x</{tag}>y<span>");
+          assert_eq!(state.process_html(&html), html.len());
+          let held = state.buffer.len() - state.code_spans[0].content_start;
+          assert!(
+            held <= cap,
+            "{html}: held {held} bytes with a {cap}-byte cap"
+          );
+        }
+      }
     }
   }
 
