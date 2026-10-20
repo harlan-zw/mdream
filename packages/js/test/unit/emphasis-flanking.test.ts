@@ -275,11 +275,39 @@ describe('emphasis delimiters that cannot flank', () => {
     expect(htmlToMarkdown(html, { wrapWidth })).toBe(expected)
   })
 
-  it('drops the space after a tilde only in Markdown', () => {
-    // A strikethrough opener must touch its content; plain text has no
-    // delimiters and keeps the separator.
-    expect(htmlToMarkdown('<p>x~<q>q</q></p>')).toBe('x\\~"q"')
+  it('keeps the separator after a literal tilde', () => {
+    expect(htmlToMarkdown('<p>x~<q>q</q></p>')).toBe('x\\~ "q"')
     expect(htmlToText('<p>x~<q>q</q></p>')).toBe('x~ "q"')
+  })
+
+  // The separator after a strikethrough closer keeps it flanking once
+  // cleanup removes the link that followed it.
+  it.each([
+    ['<p><del>b!</del><a href="#missing">c</a></p>', { fragments: true }, '~~b!~~ c'],
+    ['<p><del>b!</del><a href="#missing">c</a></p>', undefined, '~~b!~~ c'],
+    ['<p><s>Old price!</s><a href="#note">New</a></p>', { fragments: true }, '~~Old price!~~ New'],
+    ['<p><del>a<code>b</code></del><a href="#missing">c</a></p>', { fragments: true }, '~~a`b`~~ c'],
+    ['<p><del>b!</del><a href="c">c</a></p>', { redundantLinks: true }, '~~b!~~ c'],
+    ['<h2 id="x"><del>b!</del><a href="#x">c</a></h2>', { selfLinkHeadings: true }, '## ~~b!~~ c'],
+    ['<h2 id="x"><del>b!</del><a href="#x">c</a></h2>', undefined, '## ~~b!~~ c'],
+    ['<p><del>b</del><a href="/c">c</a></p>', { fragments: true }, '~~b~~ [c](/c)'],
+    // An open ancestor is not a pending opener.
+    ['<p><em><s>b!</s><a href="#missing">c</a></em></p>', { fragments: true }, '*~~b!~~ c*'],
+    ['<p><em> <s>b!</s><a href="#missing">c</a></em></p>', { fragments: true }, '*~~b!~~ c*'],
+    ['<p><em><s><a href="#missing">b</a></s>c</em></p>', { fragments: true }, '*~~b~~&#99;*'],
+    ['<p><em><s><a href="/x">b</a></s>c</em></p>', { fragments: true }, '*~~[b](/x)~~&#99;*'],
+  ] as [string, Parameters<typeof clean>[0], string][])('keeps strikethrough before a cleaned link in %s', async (html, config, expected) => {
+    const options = { clean: clean(config) }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const chunks: string[] = []
+      for (let offset = 0; offset < html.length; offset += width)
+        chunks.push(html.slice(offset, offset + width))
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(toStream(chunks), options))
+        output += chunk
+      expect(output, `width=${width}`).toBe(expected)
+    }
   })
 
   it('keeps delimiters where a fix cannot help', () => {

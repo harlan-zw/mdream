@@ -5179,7 +5179,9 @@ impl ConvertState {
 
   #[inline]
   pub(crate) fn needs_spacing(&self, last_byte: u8, first_byte: u8) -> bool {
-    if last_byte == b'~' && self.is_markdown() {
+    // A strikethrough opener touches its content; a closer or a literal
+    // tilde keeps the separator.
+    if last_byte == b'~' && !self.open_markers.is_empty() {
       return first_byte == b'~';
     }
     if matches!(last_byte, b' ' | b'\n' | b'\t') {

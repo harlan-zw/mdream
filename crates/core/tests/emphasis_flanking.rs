@@ -507,18 +507,109 @@ fn wraps_at_the_space_moved_past_a_closer() {
 }
 
 #[test]
-fn only_markdown_drops_the_space_after_a_tilde() {
-  // A strikethrough opener must touch its content; plain text has no
-  // delimiters and keeps the separator.
+fn keeps_the_separator_after_a_literal_tilde() {
   let html = "<p>x~<q>q</q></p>";
   assert_eq!(
     html_to_markdown(html, HtmlToMarkdownOptions::default()),
-    "x\\~\"q\""
+    "x\\~ \"q\""
   );
   assert_eq!(
     html_to_text(html, HtmlToMarkdownOptions::default()),
     "x~ \"q\""
   );
+}
+
+/// The separator after a strikethrough closer keeps it flanking once cleanup
+/// removes the link that followed it.
+#[test]
+fn strikethrough_closer_keeps_its_separator_before_cleaned_links() {
+  let fragments = CleanConfig {
+    fragments: true,
+    ..Default::default()
+  };
+  for (html, clean, expected) in [
+    (
+      r##"<p><del>b!</del><a href="#missing">c</a></p>"##,
+      fragments.clone(),
+      "~~b!~~ c",
+    ),
+    (
+      r##"<p><del>b!</del><a href="#missing">c</a></p>"##,
+      CleanConfig::all(),
+      "~~b!~~ c",
+    ),
+    (
+      r##"<p><s>Old price!</s><a href="#note">New</a></p>"##,
+      fragments.clone(),
+      "~~Old price!~~ New",
+    ),
+    (
+      r##"<p><del>a<code>b</code></del><a href="#missing">c</a></p>"##,
+      fragments.clone(),
+      "~~a`b`~~ c",
+    ),
+    (
+      r##"<p><del>b!</del><a href="c">c</a></p>"##,
+      CleanConfig {
+        redundant_links: true,
+        ..Default::default()
+      },
+      "~~b!~~ c",
+    ),
+    (
+      r##"<h2 id="x"><del>b!</del><a href="#x">c</a></h2>"##,
+      CleanConfig {
+        self_link_headings: true,
+        ..Default::default()
+      },
+      "## ~~b!~~ c",
+    ),
+    (
+      r##"<h2 id="x"><del>b!</del><a href="#x">c</a></h2>"##,
+      CleanConfig::all(),
+      "## ~~b!~~ c",
+    ),
+    (
+      r##"<p><del>b</del><a href="/c">c</a></p>"##,
+      fragments.clone(),
+      "~~b~~ [c](/c)",
+    ),
+    // An open ancestor is not a pending opener.
+    (
+      r##"<p><em><s>b!</s><a href="#missing">c</a></em></p>"##,
+      fragments.clone(),
+      "*~~b!~~ c*",
+    ),
+    (
+      r##"<p><em> <s>b!</s><a href="#missing">c</a></em></p>"##,
+      fragments.clone(),
+      "*~~b!~~ c*",
+    ),
+    (
+      r##"<p><em><s><a href="#missing">b</a></s>c</em></p>"##,
+      fragments.clone(),
+      "*~~b~~&#99;*",
+    ),
+    (
+      r##"<p><em><s><a href="/x">b</a></s>c</em></p>"##,
+      fragments.clone(),
+      "*~~[b](/x)~~&#99;*",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default().with_clean(clean);
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "html={html:?}"
+    );
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, chunk, &options),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+  }
 }
 
 #[test]

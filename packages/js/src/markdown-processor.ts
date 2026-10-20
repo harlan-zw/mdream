@@ -332,7 +332,7 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
 /**
  * Determines if spacing is needed between two characters
  */
-function needsSpacing(lastChar: string, firstChar: string, state?: MarkdownState): boolean {
+function needsSpacing(lastChar: string, firstChar: string, state: MarkdownState, openMarkerCount: number): boolean {
   if (' \n\t'.includes(lastChar) || ' \n\t'.includes(firstChar)) {
     return false
   }
@@ -342,7 +342,9 @@ function needsSpacing(lastChar: string, firstChar: string, state?: MarkdownState
     return true
   }
 
-  if (lastChar === '~')
+  // A strikethrough opener touches its content; a closer or a literal tilde
+  // keeps the separator.
+  if (lastChar === '~' && openMarkerCount)
     return firstChar === '~'
 
   return !'[(>*_`'.includes(lastChar) && !'])<.,!?:;*_`'.includes(firstChar)
@@ -2324,7 +2326,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     // Add spacing between inline elements if needed
-    if (!captionTransition && tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
+    if (!captionTransition && tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state, openMarkerCount)) {
       pendingCloser = 0
       state.buffer.push(' ')
       state.lastContentCache = ' '
