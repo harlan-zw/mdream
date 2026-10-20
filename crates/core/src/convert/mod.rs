@@ -167,6 +167,8 @@ struct OpenMarker {
   /// pair replaces that one as the latest, so dropping the empty pair has to
   /// make the outer break the latest again.
   starts_at_hard_break: bool,
+  /// The pending closer this opener cleared, back in force if the pair drops.
+  pending: u8,
 }
 
 #[derive(Clone, Copy)]

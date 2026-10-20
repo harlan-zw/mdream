@@ -1371,6 +1371,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   const openMarkers: number[] = []
   let openMarkerCount = 0
   let pendingCloser = 0
+  // The pending closer each open marker's enter cleared.
+  const openMarkerClosers: number[] = []
   let captionFrames: number[] | undefined
   let captionFrameCount = 0
   // 1 needs a boundary; 2 emitted one and still owns the next source space.
@@ -1789,6 +1791,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const lastNode = state.lastNode
     state.lastNode = event.node as ElementNode | TextNode
     const buff = state.buffer
+    const closerBefore = pendingCloser
 
     // Deferred <pre> code fence (issue #97). A bare <pre> opens its fence right
     // before its first non-whitespace child so empty/whitespace-only blocks emit
@@ -2158,6 +2161,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && !handler?.literalExit) {
         const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType, state.outputPositions)
         if (idx >= 0) {
+          pendingCloser = openMarkerClosers[openMarkerCount]!
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
           return
@@ -2398,6 +2402,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && buff[buff.length - 1] === handlerOutput) {
+        openMarkerClosers[openMarkerCount] = closerBefore
         openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
       }
       else if (openMarkerCount

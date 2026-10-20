@@ -33,6 +33,15 @@ const cases: [string, string][] = [
   ['<p><strong>b!</strong></p><h2><em>c</em>', '**b!**\n\n## *c*'],
   // Opening-side flanking is intentionally unchanged.
   ['<p>é<strong>!b</strong></p>', 'é**!b**'],
+  // A dropped empty pair leaves the closer before it pending again.
+  ['<p><strong>b!</strong><em></em>c</p>', '**b!**&#99;'],
+  ['<p><strong>b!</strong><del></del>c</p>', '**b!**&#99;'],
+  ['<p><strong>b!</strong><em> </em>c</p>', '**b!**&#99;'],
+  ['<p><strong>b!</strong><em><b></b></em>c</p>', '**b!**&#99;'],
+  ['<p><strong>b!</strong><code></code>c</p>', '**b!**&#99;'],
+  ['<p>a<strong><em></em>(b)</strong>c</p>', 'a**(b)**c'],
+  ['<p><strong>b!</strong> <em></em>c</p>', '**b!** c'],
+  ['<p><strong>b!</strong><em><b></b>x</em>c</p>', '**b!***x*c'],
   ['<p><i>a</i><b><a href="/y">x</a></b></p>', '*a***[x](/y)**'],
   ['<p><b><a href="/x">a</a></b><i>c</i></p>', '**[a](/x)***c*'],
   ['<p><b><i>a</i></b><b><a href="/y">x</a></b></p>', '***a*****[x](/y)**'],

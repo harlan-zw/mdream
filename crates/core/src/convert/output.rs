@@ -1065,6 +1065,7 @@ impl ConvertState {
     output: Option<&str>,
     output_start: usize,
     keeps_markers: bool,
+    pending: u8,
   ) {
     if let Some(id) = marker_tag
       && let Some(inline_marker_type) = Self::inline_marker_type(id)
@@ -1079,6 +1080,7 @@ impl ConvertState {
         content_start: self.buffer.len(),
         kind: inline_marker_type,
         starts_at_hard_break: self.hard_break_end == marker_start,
+        pending,
       });
     } else if !keeps_markers
       && !self.open_markers.is_empty()
@@ -1188,6 +1190,7 @@ impl ConvertState {
     }
 
     let output_start = self.buffer.len();
+    let pending = self.pending_emphasis;
     self.write_output(
       true,
       is_inline,
@@ -1241,7 +1244,7 @@ impl ConvertState {
       tag_id.and_then(Self::inline_marker_type).is_some()
     });
 
-    self.record_enter_marker(tag_id, output.as_deref(), output_start, false);
+    self.record_enter_marker(tag_id, output.as_deref(), output_start, false, pending);
 
     if !is_inline && !self.open_markers.is_empty() {
       self.open_markers.clear();
@@ -1292,6 +1295,7 @@ impl ConvertState {
         self.hard_break_end = open_marker.output_start;
       }
       self.last_content_cache_len = 0;
+      self.pending_emphasis = open_marker.pending;
       self.reset_empty_tentative_caption_frames();
       self.last_node_is_inline = is_inline;
       return true;
@@ -1720,6 +1724,7 @@ impl ConvertState {
     }
 
     let output_start = self.buffer.len();
+    let pending = self.pending_emphasis;
     self.write_output(
       true,
       is_inline,
@@ -1874,7 +1879,13 @@ impl ConvertState {
     let code_span_marker = self.code_span_marker_ok();
     let marker_tag = tag_id.filter(|&id| !enter_is_literal && (id != TAG_CODE || code_span_marker));
     let keeps_markers = tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
-    self.record_enter_marker(marker_tag, output.as_deref(), output_start, keeps_markers);
+    self.record_enter_marker(
+      marker_tag,
+      output.as_deref(),
+      output_start,
+      keeps_markers,
+      pending,
+    );
 
     // A block boundary makes an enclosing inline marker permanent even when
     // the block has not emitted content yet. Release streamed output promptly.
