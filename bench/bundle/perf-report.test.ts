@@ -30,4 +30,48 @@ describe('performance report', () => {
     expect(report).toContain('No significant change')
     expect(report).toContain('4.00×')
   })
+  describe('retained heap with unstable samples', () => {
+    // Bundle Size Analysis run 39367804677 (PR #398): the base minimum came from
+    // one low sample while the first samples of both sides agreed.
+    const name = 'JS stream · style · 1 MiB retained heap (sampled peak)'
+    const unstable = { id: 'retained', name, kind: 'alloc' as const, value: 19672, samples: [104496, 19672], informational: true }
+    const stable = { id: 'retained', name, kind: 'alloc' as const, value: 92760, samples: [104592, 92760], informational: false }
+
+    it('does not gate a growth against an informational base', () => {
+      const report = renderPerfReport({ benches: [unstable] }, { benches: [stable] })
+      expect(report).toContain('No significant change')
+      expect(report).toContain('ℹ️ **1 inconclusive** · past the gate, but the base measurement is informational')
+      expect(report).not.toContain('slower')
+      expect(report).toContain(`| ${name} | 90.6 KiB | ℹ️ +371.5% (base informational) | — |`)
+    })
+    it('does not gate a reduction against an informational base', () => {
+      const report = renderPerfReport(
+        { benches: [{ ...stable, informational: true }] },
+        { benches: [{ ...unstable, informational: false }] },
+      )
+      expect(report).toContain('No significant change')
+      expect(report).toContain('1 inconclusive')
+      expect(report).not.toContain('faster')
+      expect(report).toContain('ℹ️ -78.8% (base informational)')
+    })
+    it('does not gate an informational PR side', () => {
+      const report = renderPerfReport({ benches: [stable] }, { benches: [{ ...unstable, value: 192760 }] })
+      expect(report).toContain('No significant change')
+      expect(report).toContain('ℹ️ +107.8% |')
+      expect(report).not.toContain('base informational')
+      expect(report).not.toContain('inconclusive')
+    })
+    it('still gates when neither side has a flag', () => {
+      const flagless = { id: 'retained', name, kind: 'alloc' as const }
+      const report = renderPerfReport({ benches: [{ ...flagless, value: 19672 }] }, { benches: [{ ...flagless, value: 92760 }] })
+      expect(report).toContain('1 slower')
+      expect(report).toContain('🔴 +71.4 KiB (+371.5%)')
+    })
+    it('still gates when both flags are false', () => {
+      const report = renderPerfReport({ benches: [{ ...unstable, informational: false }] }, { benches: [stable] })
+      expect(report).toContain('1 slower')
+      expect(report).not.toContain('inconclusive')
+      expect(report).toContain(`| **${name}** | 19.2 KiB → 90.6 KiB | 🔴 +71.4 KiB (+371.5%) |`)
+    })
+  })
 })
