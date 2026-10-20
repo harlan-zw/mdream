@@ -2216,7 +2216,7 @@ function scanTagAttributes(
  */
 export function parseAttributes(attrStr: string): Record<string, string> {
   if (!attrStr)
-    return EMPTY_ATTRIBUTES
+    return {}
 
   const result = scanAttributes(attrStr, 0, false, false)
   if (result._tag === 'incomplete')
