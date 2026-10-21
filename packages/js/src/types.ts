@@ -199,6 +199,12 @@ export interface ElementNode extends Node {
   pluginOutput?: string[]
   /** Whether this element's enter event wrote an inline wrapper. */
   hasEnterOutput?: boolean
+  /** A plugin skipped this link's start, so it takes no title or aria-label text. */
+  enterSkipped?: boolean
+  /** Text counted in this link that never shows: excluded text and the blank text after it. */
+  hiddenTextNodes?: number
+  /** The child count when this link dropped a blank after other content, as the space in `<a><svg></svg> </a>`. */
+  trailingBlankAt?: number
 }
 
 export interface TextNode extends Node {
@@ -218,6 +224,10 @@ export interface TextNode extends Node {
    * the output is at the start of a line.
    */
   trimsAtLineStart?: boolean
+  /** Set when a hook changed this text inside a link: whether the new value shows nothing. */
+  rewrittenBlank?: boolean
+  /** The title or aria-label written for a link with no visible text. */
+  isLinkLabel?: boolean
 }
 
 /**

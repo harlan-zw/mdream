@@ -917,6 +917,32 @@ function resetRetractedCaptionFrames(frames: number[] | undefined, count: number
   }
 }
 
+/**
+ * Before a visible link label: drop the spaces, written or pending, that are
+ * all the link text so far. They only spaced out hidden text, so the caller
+ * moves them past the link, as it does a `trailingBlank` the parser dropped.
+ */
+function dropBlankLinkText(state: MarkdownState, openFragment: number, label: string, trailingBlank: boolean): boolean {
+  const buffer = state.buffer
+  if (openFragment < 0 || buffer[openFragment] !== '[' || !hasNonWhitespace(label))
+    return false
+  let hasSpace = false
+  for (let index = openFragment + 1; index < buffer.length; index++) {
+    const fragment = buffer[index]!
+    for (let offset = 0; offset < fragment.length; offset++) {
+      if (fragment.charCodeAt(offset) !== 32)
+        return false
+      hasSpace = true
+    }
+  }
+  if (!hasSpace && !state.pendingInlineWhitespace && !trailingBlank)
+    return false
+  state.outputPositions?.replace(openFragment + 1, buffer.length, [])
+  buffer.length = openFragment + 1
+  state.pendingInlineWhitespace = false
+  return true
+}
+
 function dropEmptyLinkText(buffer: string[], openFragment: number, positions?: OutputPositions): boolean {
   for (let index = openFragment + 1; index < buffer.length; index++) {
     if (hasNonWhitespace(buffer[index]!))
@@ -1810,6 +1836,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
 
+    const movesBlankPastLink = node.type === TEXT_NODE
+      && (node as TextNode).isLinkLabel === true
+      && dropBlankLinkText(state, openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment, (node as TextNode).value, node.parent?.trailingBlankAt !== undefined && node.parent.trailingBlankAt === node.parent.currentWalkIndex)
+
     let lastBuffEntry = buff.at(-1)!
     let lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
     // An emptied trailing fragment is not the start of output: read the last
@@ -1822,6 +1852,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
       processTextNode(node as TextNode, lastNode, lastChar)
+      if (movesBlankPastLink)
+        state.pendingInlineWhitespace = true
       return
     }
 
@@ -1977,6 +2009,30 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         openLinkFragment = -1
         return
       }
+      if (eventType === NodeEventExit && tagId === TAG_A
+        && !handler.literalExit && handler.exit === tagHandlers[TAG_A]!.exit && openLinkFragment !== -1
+        && !gfmLifecycle.openCodeSpans.length && lastOutputChar(buff) === 32) {
+        const bracket = openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment
+        let removed = 0
+        for (let index = buff.length - 1; index > bracket; index--) {
+          const fragment = buff[index]!
+          let end = fragment.length
+          while (end > 0 && fragment.charCodeAt(end - 1) === 32)
+            end--
+          removed += fragment.length - end
+          if (end > 0) {
+            const code = fragment.charCodeAt(end - 1)
+            if (code !== 32 && (code < 9 || code === 11 || code > 13)) {
+              trimTrailingSpaces(buff)
+              if (state.lastContentCache)
+                state.lastContentCache = state.lastContentCache.slice(0, Math.max(0, state.lastContentCache.length - removed))
+              state.pendingInlineWhitespace = true
+            }
+            break
+          }
+        }
+      }
+
       const res = handler[eventFn]({ node: element, state })
       if (typeof res === 'string') {
         if (res) {

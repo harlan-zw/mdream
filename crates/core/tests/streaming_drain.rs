@@ -2771,6 +2771,39 @@ fn unicode_whitespace_does_not_settle_empty_link_text() {
 }
 
 #[test]
+fn spacing_only_link_override_preserves_title_deduplication() {
+  let opts = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "a".to_string(),
+        TagOverrideConfig {
+          spacing: Some([0, 0]),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (r#"<a href="/x" title="x ">x&#32;</a>Next"#, "[x](/x) Next"),
+    (
+      r#"<a href="/x" title="other ">x&#32;</a>Next"#,
+      r#"[x](/x "other ") Next"#,
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, opts.clone()), expected);
+    for width in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, width, opts.clone()),
+        expected,
+        "width={width}"
+      );
+    }
+  }
+}
+
+#[test]
 fn enter_only_link_override_keeps_clean_rewrites() {
   let path = format!("/{}", "a".repeat(70 * 1024));
   let html = format!("<a href=\"{path}\">{path}</a>");
@@ -3291,6 +3324,64 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
       }
       output.push_str(&processor.finish());
       assert_eq!(output, expected, "tail={tail}");
+    }
+  }
+}
+
+#[test]
+fn link_space_relocation_respects_retained_exit() {
+  for (html, name, config, expected) in [
+    (
+      "<ex href=\"/x\">x&#32;</ex>Next",
+      "ex",
+      TagOverrideConfig {
+        alias_tag_id: mdream::get_tag_id("a"),
+        ..Default::default()
+      },
+      "[x](/x) Next",
+    ),
+    (
+      "<a href=\"/x\">x&#32;</a>Next",
+      "a",
+      TagOverrideConfig {
+        enter: Some("[".into()),
+        ..Default::default()
+      },
+      "[x](/x) Next",
+    ),
+    (
+      "<a href=\"/x\">x&#32;</a>Next",
+      "a",
+      TagOverrideConfig {
+        exit: Some(")".into()),
+        ..Default::default()
+      },
+      "[x )Next",
+    ),
+    (
+      "<a href=\"/x\">x&#11;&#32;</a>Next",
+      "a",
+      TagOverrideConfig {
+        spacing: Some([0, 0]),
+        ..Default::default()
+      },
+      "[x\u{b}](/x) Next",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(name.into(), config)]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, opts.clone()), expected);
+    for width in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, width, opts.clone()),
+        expected,
+        "width={width}"
+      );
     }
   }
 }

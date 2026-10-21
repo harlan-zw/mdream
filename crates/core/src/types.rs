@@ -204,12 +204,19 @@ pub(crate) struct TailwindData {
   pub hidden: bool,
 }
 
-/// The two rare per-node fields, boxed together so every node stays small.
+/// The rare per-node fields, boxed together so every node stays small.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NodeExtras {
   /// Only set for custom (non-builtin) tags; built-in names come from `tag_id`.
   pub custom_name: Option<Box<str>>,
   pub tailwind: Option<TailwindData>,
+  /// Text counted in this link that never shows: excluded text and the blank
+  /// text after it.
+  pub hidden_text_nodes: u32,
+  /// The link's child count when it dropped a blank after other content, as the
+  /// space in `<a><svg></svg> </a>`. If no child followed the blank, a label
+  /// written in place of that content keeps it.
+  pub trailing_blank_at: Option<u32>,
 }
 
 impl NodeExtras {
@@ -220,7 +227,7 @@ impl NodeExtras {
     (!is_builtin).then(|| {
       Box::new(Self {
         custom_name: Some(tag_name.into()),
-        tailwind: None,
+        ..Self::default()
       })
     })
   }

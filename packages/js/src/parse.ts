@@ -67,7 +67,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { parserTagHandlers } from './parser-tags'
-import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
+import { countContentInEnclosingLink, decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
 
 // A tag outside the dictionary with no override renders only its text, inline
 // with zero spacing, as in the Rust engine: `<x>X</x><y>Y</y>` is `XY`.
@@ -626,6 +626,8 @@ export interface ParseState {
   lastTextNode?: Node
   /** Resolved plugin instances for event processing */
   resolvedPlugins?: TransformPlugin[]
+  /** Hands an event to the output past plugins and the splitter, as Rust writes a link label. */
+  outputEvent?: (event: NodeEvent) => void
   /** Output-specific tag behavior. Parsing metadata is used when absent. */
   tagHandlers?: Record<number, TagHandler>
   /** Tag override handlers built from declarative tagOverrides config */
@@ -841,6 +843,7 @@ export function parseHtml(html: string, options: ParseOptions = {}): ParseResult
     depth: 0,
     resolvedPlugins: options.resolvedPlugins || [],
     tagHandlers: options.tagHandlers,
+    outputEvent: event => events.push(event),
   }
 
   let remainingHtml = parseHtmlInternal(html, state, (event) => {
@@ -1309,6 +1312,13 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
 
   if (!inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex) {
+    // A blank dropped as a link's indentation after other content of the link,
+    // as in `<a><svg></svg> </a>Next`, still spaces that content from what
+    // follows: a label written in its place moves the blank past the link. A
+    // blank with more children after it, as in `<a><svg></svg> <svg></svg></a>`,
+    // does not.
+    if (state.currentNode.tagId === TAG_A && state.currentNode.currentWalkIndex)
+      state.currentNode.trailingBlankAt = state.currentNode.currentWalkIndex
     return
   }
 
@@ -1361,8 +1371,71 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
   }
 
+  let hasText = false
+  let wasBlank = false
+  if (state.depthMap[TAG_A]) {
+    for (let i = 0; i < textNode.value.length; i++) {
+      if (!isWhitespace(textNode.value.charCodeAt(i))) {
+        hasText = true
+        break
+      }
+    }
+    wasBlank = !hasText && !inPreTag
+  }
+
   handleEvent({ type: NodeEventEnter, node: textNode })
+  // Plugins flag the text they skip or rewrite during the event.
+  if (state.depthMap[TAG_A]) {
+    const isBlank = textNode.rewrittenBlank ?? wasBlank
+    const hidden = textNode.excludedFromMarkdown || (isBlank && !wasBlank)
+    if (hidden || isBlank)
+      countHiddenLinkText(parentsToIncrement, hidden)
+    else if ((hasText || textNode.rewrittenBlank === false) && !hasAnchorParent(parentsToIncrement))
+      // Text in a block nested in the link, such as `<svg><text>`. Blank text
+      // there, as in `<pre> </pre>`, shows nothing.
+      countContentInEnclosingLink(firstBlockParent)
+  }
   state.lastTextNode = textNode
+}
+
+function hasAnchorParent(parents: ElementNode[]): boolean {
+  for (let i = 0; i < parents.length; i++) {
+    if (parents[i]!.tagId === TAG_A)
+      return true
+  }
+  return false
+}
+
+/**
+ * Excluded text never shows, and blank text with only hidden text before it
+ * (or none, as a decoded `&#32;` after an `<svg>`) only spaces it out, so
+ * neither is link text: a link holding only these still takes its label.
+ * Text that a hook turns blank or empty counts as excluded.
+ * Blank text after visible text is not counted.
+ * Excluded and skipped links never take the label, so they get no count.
+ */
+function countHiddenLinkText(parents: ElementNode[], excluded: boolean | undefined): void {
+  for (const parent of parents) {
+    if (parent.tagId !== TAG_A || parent.excludedFromMarkdown || parent.enterSkipped)
+      continue
+    const hidden = parent.hiddenTextNodes || 0
+    // The counters already include this text.
+    if (excluded || hidden + 1 === parent.childTextNodeIndex)
+      parent.hiddenTextNodes = hidden + 1
+  }
+}
+
+/**
+ * Where an empty link's title or aria-label goes. Counted text that never shows
+ * leaves a link just as empty, but then the label only reaches the output, as
+ * in Rust: extraction, the splitter and other hooks see the link as before.
+ */
+function linkLabelTarget(node: ElementNode, state: ParseState, handleEvent: (event: NodeEvent) => void): ((event: NodeEvent) => void) | undefined {
+  if (!node.childTextNodeIndex)
+    return handleEvent
+  if (node.childTextNodeIndex === node.hiddenTextNodes && !node.excludedFromMarkdown && !node.enterSkipped)
+    return state.outputEvent
+  return undefined
 }
 
 /**
@@ -1551,7 +1624,8 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
   }
 
   // Handle empty links
-  if (node.tagId === TAG_A && !node.childTextNodeIndex) {
+  const emitLabel = node.tagId === TAG_A ? linkLabelTarget(node, state, handleEvent) : undefined
+  if (emitLabel) {
     const prefix = node.attributes?.title || node.attributes?.['aria-label'] || ''
     if (prefix) {
       node.childTextNodeIndex = 1
@@ -1561,9 +1635,10 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
         parent: node,
         index: 0,
         depth: node.depth + 1,
+        isLinkLabel: true,
       } as TextNode
 
-      handleEvent({ type: NodeEventEnter, node: textNode })
+      emitLabel({ type: NodeEventEnter, node: textNode })
       for (const parent of traverseUpToFirstBlockNode(node)) {
         parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
       }

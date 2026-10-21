@@ -302,6 +302,7 @@ export function* htmlToMarkdownSplitChunksStream(
     depthMap: processor.state.depthMap,
     depth: 0,
     resolvedPlugins: opts.resolvedPlugins,
+    outputEvent: processor.processEvent,
     tagHandlers,
     tagOverrideHandlers: opts.tagOverrideHandlers,
   }

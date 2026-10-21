@@ -17,13 +17,45 @@ export function statistics(samples: number[]) {
   return { value, rme: Math.sqrt(variance / samples.length) * 1.96 / value * 100 }
 }
 
-export function cpuRows(id: string, name: string, base: number[], head: number[]): [PerfBench, PerfBench] {
+export function cpuRows(id: string, name: string, base: number[], head: number[], comparisonUnavailableReason?: string): [PerfBench, PerfBench] {
   assert.equal(base.length, head.length, 'Paired samples must have equal lengths.')
-  const comparison = statistics(head.map((sample, index) => sample / base[index]!))
-  return [
-    { id, name, kind: 'time', ...statistics(base), samples: base },
-    { id, name, kind: 'time', ...statistics(head), samples: head, comparisonRatio: comparison.value, comparisonRme: comparison.rme },
+  const rows: [PerfBench, PerfBench] = [
+    { id, name, kind: 'time', ...statistics(base), samples: base, comparisonUnavailableReason },
+    { id, name, kind: 'time', ...statistics(head), samples: head, comparisonUnavailableReason },
   ]
+  if (!comparisonUnavailableReason) {
+    const comparison = statistics(head.map((sample, index) => sample / base[index]!))
+    rows[1].comparisonRatio = comparison.value
+    rows[1].comparisonRme = comparison.rme
+  }
+  return rows
+}
+
+// A functional fix can change text. All other verification data must still agree.
+export function verifyComparison(base: unknown, head: unknown, label: string): string | undefined {
+  if (base && head && !Array.isArray(base) && !Array.isArray(head)
+    && typeof (base as Record<string, unknown>).output === 'string'
+    && typeof (head as Record<string, unknown>).output === 'string') {
+    const { output: baseOutput, ...baseData } = base as Record<string, unknown>
+    const { output: headOutput, ...headData } = head as Record<string, unknown>
+    assert.deepEqual(baseData, headData, `${label}: metadata differs`)
+    return baseOutput === headOutput ? undefined : 'output changed'
+  }
+  // Splitter output and malformed conversion observations remain strict.
+  assert.deepEqual(base, head, `${label}: output differs`)
+}
+
+export function verifyWasmOutputs(native: unknown[], wasm: unknown[], label: string): void {
+  assert.equal(native.length, 2, 'Expected base and PR native observations.')
+  assert.equal(wasm.length, 2, 'Expected base and PR WASM observations.')
+  for (const [side, observed] of wasm.entries()) {
+    const output = (observed as { output?: unknown } | null)?.output
+    const nativeOutput = (native[side] as { output?: unknown } | null)?.output
+    assert.equal(typeof nativeOutput, 'string', `${label}: native observation ${side} must contain a string output`)
+    assert.equal(typeof output, 'string', `${label}: WASM observation ${side} must contain a string output`)
+    assert.equal(output, nativeOutput, `${label}: native and WASM output differ`)
+  }
+  verifyComparison(wasm[0], wasm[1], `${label}: WASM`)
 }
 
 type Mode = 'verify' | 'cpu' | 'alloc'
@@ -147,7 +179,7 @@ export function scalingRows(cases: Workload[], benches: PerfBench[]): PerfBench[
       const smaller = benches.find(row => row.id === `${runtime}-${prior.id}-cpu`)
       if (!current || !smaller)
         return []
-      return [{ id: `${runtime}-${fixture.id}-scaling`, name: `${runtime} ${fixture.name} / ${prior.name} CPU`, kind: 'ratio' as const, value: current.value / smaller.value, informational: true }]
+      return [{ id: `${runtime}-${fixture.id}-scaling`, name: `${runtime} ${fixture.name} / ${prior.name} CPU`, kind: 'ratio' as const, value: current.value / smaller.value, informational: true, comparisonUnavailableReason: current.comparisonUnavailableReason ?? smaller.comparisonUnavailableReason }]
     })
   })
 }
@@ -180,20 +212,26 @@ async function main() {
     cpu: nativeRunner(resolve(dist, 'rust-perf/cpu'), manifest),
     alloc: nativeRunner(resolve(dist, 'rust-perf/alloc'), manifest),
   }))
-  const verification: Record<string, string> = {}
+  const verification: [Record<string, string>, Record<string, string>] = [{}, {}]
+  const outputDifferences: Record<string, { base: unknown, pr: unknown }> = {}
   try {
     const wasm = nativeOnly ? [] : await Promise.all([loadWasm(baseDist, 'base'), loadWasm(headDist, 'head')])
     for (const [index, fixture] of cases.entries()) {
       process.stderr.write(`Benchmark ${index + 1}/${cases.length}: ${fixture.id}\n`)
       const observations = await Promise.all(runners.map(runner => runner.cpu.request(index, 'verify')))
-      assert.deepEqual(observations[0], observations[1], `${fixture.id}: native output differs`)
-      verification[fixture.id] = createHash('sha256').update(JSON.stringify(observations[1])).digest('hex')
+      const comparisonUnavailableReason = verifyComparison(observations[0], observations[1], `${fixture.id}: native`)
+      for (const [side, observed] of observations.entries())
+        verification[side]![fixture.id] = createHash('sha256').update(JSON.stringify(observed)).digest('hex')
+      if (comparisonUnavailableReason) {
+        process.stderr.write(`${fixture.id}: output changed; measuring both revisions without a performance comparison.\n`)
+        outputDifferences[fixture.id] = { base: observations[0], pr: observations[1] }
+      }
       for (const [side, runner] of runners.entries()) {
         assert.deepEqual(await runner.alloc.request(index, 'verify'), observations[side], `${fixture.id}: instrumented output differs`)
         const counts = await runner.alloc.request(index, 'alloc')
         assert.deepEqual(await runner.alloc.request(index, 'alloc'), counts, `${fixture.id}: allocation counts vary`)
         for (const field of ['calls', 'reallocations', 'bytes', 'peak']) {
-          results[side]!.benches.push({ id: `native-${fixture.id}-${field}`, name: `native ${fixture.name} ${field}`, kind: field === 'calls' || field === 'reallocations' ? 'count' : 'alloc', value: numberField(counts, field) })
+          results[side]!.benches.push({ id: `native-${fixture.id}-${field}`, name: `native ${fixture.name} ${field}`, kind: field === 'calls' || field === 'reallocations' ? 'count' : 'alloc', value: numberField(counts, field), comparisonUnavailableReason })
         }
       }
       const warm = await Promise.all(runners.map(runner => runner.cpu.request(index, 'cpu', 10)))
@@ -203,15 +241,11 @@ async function main() {
         for (const side of sample % 2 ? [1, 0] : [0, 1])
           times[side]!.push(numberField(await runners[side]!.cpu.request(index, 'cpu', batch), 'cpu'))
       }
-      const rows = cpuRows(`native-${fixture.id}-cpu`, `native ${fixture.name} CPU`, times[0], times[1])
+      const rows = cpuRows(`native-${fixture.id}-cpu`, `native ${fixture.name} CPU`, times[0], times[1], comparisonUnavailableReason)
       rows.forEach((row, side) => results[side]!.benches.push(row))
       if (fixture.operation !== 'split' && wasm.length) {
         const wasmOutputs = wasm.map(runtime => wasmRun(runtime.glue, fixture, true))
-        assert.deepEqual(wasmOutputs[0], wasmOutputs[1], `${fixture.id}: WASM output differs`)
-        for (const [side, observed] of wasmOutputs.entries()) {
-          const output = typeof observed === 'string' ? observed : (observed as { output: string }).output
-          assert.equal(output, (observations[side] as { output: string }).output, `${fixture.id}: native and WASM output differ`)
-        }
+        verifyWasmOutputs(observations, wasmOutputs, fixture.id)
         for (const runtime of wasm) {
           const until = performance.now() + 100
           do {
@@ -230,19 +264,20 @@ async function main() {
           }
         }
         assert.ok(consumed > 0, 'WASM produced no output.')
-        const wasmRows = cpuRows(`wasm-${fixture.id}-cpu`, `WASM ${fixture.name} CPU`, samplesBySide[0], samplesBySide[1])
+        const wasmRows = cpuRows(`wasm-${fixture.id}-cpu`, `WASM ${fixture.name} CPU`, samplesBySide[0], samplesBySide[1], comparisonUnavailableReason)
         wasmRows.forEach((row, side) => results[side]!.benches.push(row))
         for (const [side, dist] of [baseDist, headDist].entries()) {
           const fresh = await loadWasm(dist, `memory-${index}-${side}`)
           wasmRun(fresh.glue, fixture)
-          results[side]!.benches.push({ id: `wasm-${fixture.id}-memory`, name: `WASM ${fixture.name} linear memory`, kind: 'alloc', value: fresh.memory.buffer.byteLength })
+          results[side]!.benches.push({ id: `wasm-${fixture.id}-memory`, name: `WASM ${fixture.name} linear memory`, kind: 'alloc', value: fresh.memory.buffer.byteLength, comparisonUnavailableReason })
         }
       }
     }
+    writeFileSync(resolve(outputDir, 'output-differences.json'), JSON.stringify(outputDifferences, null, 2))
     for (const [side, label] of ['base', 'pr'].entries()) {
       const result = results[side]!
       result.benches.push(...scalingRows(cases, result.benches), ...normalizedCpuRows(cases, result.benches))
-      writeFileSync(resolve(outputDir, `${label}-rust-perf.json`), JSON.stringify({ ...result, build: builds[side], cpu: allowedCpu, architecture: process.arch, fixtureDigest: createHash('sha256').update(serialized).digest('hex'), verification, cases: cases.map(({ id, inputBytes, options, format, scaling }) => ({ id, inputBytes, options, format, scaling })) }))
+      writeFileSync(resolve(outputDir, `${label}-rust-perf.json`), JSON.stringify({ ...result, build: builds[side], cpu: allowedCpu, architecture: process.arch, fixtureDigest: createHash('sha256').update(serialized).digest('hex'), verification: verification[side], cases: cases.map(({ id, inputBytes, options, format, scaling }) => ({ id, inputBytes, options, format, scaling })) }))
     }
     for (const runner of runners) {
       await runner.cpu.close()
