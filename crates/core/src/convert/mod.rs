@@ -678,6 +678,9 @@ pub struct ConvertState {
   raw_html_block_open: bool,
   pub depth: usize,
   has_encoded_html_entity: bool,
+  /// Run offsets where a discarded token ended the DOM text node. No character
+  /// reference spans one, so decoding ends a reference still open there.
+  entity_seals: Vec<usize>,
   last_char_was_whitespace: bool,
   text_buffer_contains_whitespace: bool,
   text_buffer_contains_non_whitespace: bool,
@@ -1039,6 +1042,7 @@ impl ConvertState {
       raw_html_block_open: false,
       depth: 0,
       has_encoded_html_entity: false,
+      entity_seals: Vec::new(),
       last_char_was_whitespace: true,
       text_buffer_contains_whitespace: false,
       text_buffer_contains_non_whitespace: false,
@@ -1324,10 +1328,51 @@ impl ConvertState {
     self.script_text_buffer = script_text;
   }
 
+  /// Marks the end of the run as the end of a DOM text node: the token
+  /// discarded there splits the text without the separator a new node adds.
+  #[inline]
+  fn seal_text_run(&mut self, text_buffer: &str) {
+    let at = text_buffer.len();
+    // Only a `&` before the token can start a reference that reaches past it.
+    if self.has_encoded_html_entity && at != 0 && self.entity_seals.last() != Some(&at) {
+      self.entity_seals.push(at);
+    }
+  }
+
+  /// Ends the character reference left open at each seal, so the decode that
+  /// follows reads the text on each side of a discarded token apart. The run
+  /// keeps its source bytes until here, which is what the node cap counts.
+  #[cold]
+  #[inline(never)]
+  fn end_references_at_seals(&mut self, text_buffer: &mut String) {
+    let mut seals = std::mem::take(&mut self.entity_seals);
+    let mut ended = String::with_capacity(text_buffer.len() + 4 * seals.len());
+    let mut from = 0;
+    for &at in &seals {
+      let at = at.min(text_buffer.len());
+      let segment = &text_buffer[from..at];
+      match open_reference_start(segment.as_bytes()) {
+        Some(amp) => {
+          ended.push_str(&segment[..amp]);
+          push_ended_reference(&mut ended, &segment[amp..], &mut self.entity_buffer);
+        }
+        None => ended.push_str(segment),
+      }
+      from = at;
+    }
+    ended.push_str(&text_buffer[from..]);
+    *text_buffer = ended;
+    seals.clear();
+    self.entity_seals = seals;
+  }
+
   fn complete_text_node(&mut self, text_buffer: &mut String) {
     self.text_run_next_flush = TEXT_RUN_FLUSH_THRESHOLD;
     let exhausted = self.text_node_exhausted;
     if !text_buffer.is_empty() {
+      if !self.entity_seals.is_empty() {
+        self.end_references_at_seals(text_buffer);
+      }
       self.process_text_buffer(text_buffer);
       text_buffer.clear();
     } else if exhausted {
@@ -1474,7 +1519,22 @@ impl ConvertState {
     };
     self.text_run_next_flush = TEXT_RUN_FLUSH_THRESHOLD;
     let tail = text_buffer.split_off(cut);
+    let tail_seals = if self.entity_seals.is_empty() {
+      Vec::new()
+    } else {
+      let split = self.entity_seals.partition_point(|&at| at <= cut);
+      let tail_seals = self
+        .entity_seals
+        .drain(split..)
+        .map(|at| at - cut)
+        .collect();
+      if split > 0 {
+        self.end_references_at_seals(text_buffer);
+      }
+      tail_seals
+    };
     self.process_text_buffer_piece(text_buffer, false);
+    self.entity_seals = tail_seals;
     // A blank link's text can outgrow the cap within a single run.
     self.check_held_output();
     self.last_node_is_inline = true;
@@ -1629,21 +1689,8 @@ impl ConvertState {
         {
           let start = i;
           let limit = chunk_length.min(i + self.text_run_room(&text_buffer));
-          i += 1;
-          let mut had_space = false;
-          loop {
-            while i < limit && BATCHABLE_TEXT[bytes[i] as usize] {
-              i += 1;
-            }
-            // Doubled, trailing, and pre-tag spaces leave the run to the
-            // general path, which keeps its collapsing semantics.
-            if i + 1 < limit && bytes[i] == SPACE_CHAR && BATCHABLE_TEXT[bytes[i + 1] as usize] {
-              had_space = true;
-              i += 2;
-              continue;
-            }
-            break;
-          }
+          let had_space;
+          (i, had_space) = batchable_run_end(&bytes[..limit], i);
           let before_len = text_buffer.len();
           self.truncated |= push_capped_text_node(
             &mut text_buffer,
@@ -1941,9 +1988,23 @@ impl ConvertState {
           carry_bounded = true;
           break;
         }
-        self.complete_text_node(&mut text_buffer);
-        if self.held_output_exceeded {
-          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+        if remaining.len() < 9
+          && b"<!doctype"[..remaining.len()].eq_ignore_ascii_case(remaining.as_bytes())
+        {
+          run_start = i;
+          carry = true;
+          carry_bounded = true;
+          break;
+        }
+        // A comment becomes a DOM node. A DOCTYPE in content is ignored without
+        // one, so like a bogus comment it only ends the character reference.
+        if cdata.is_some() || remaining.starts_with("<!--") {
+          self.complete_text_node(&mut text_buffer);
+          if self.held_output_exceeded {
+            return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+          }
+        } else {
+          self.seal_text_run(&text_buffer);
         }
         run_start = i;
         if cdata.is_some() {
@@ -1962,7 +2023,14 @@ impl ConvertState {
           self.discard_declaration(remaining);
           break;
         }
-      } else if next == SLASH_CHAR {
+      } else if next == SLASH_CHAR
+        && i + 2 < chunk_length
+        // Lowercase first: real end tags are lowercase, and combined with the
+        // `>` test `is_ascii_alphabetic` compiled to `A-Z` before `a-z`.
+        && (bytes[i + 2].is_ascii_lowercase()
+          || bytes[i + 2].is_ascii_uppercase()
+          || bytes[i + 2] == GT_CHAR)
+      {
         self.complete_text_node(&mut text_buffer);
         if self.held_output_exceeded {
           return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
@@ -1977,12 +2045,15 @@ impl ConvertState {
           discard_end_tag = result.name_ended;
           break;
         }
-      } else if next == QUESTION_CHAR {
-        // `<?` opens a bogus comment, which ends at the first `>`.
-        self.complete_text_node(&mut text_buffer);
-        if self.held_output_exceeded {
-          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
-        }
+      } else if next == SLASH_CHAR && i + 2 == chunk_length {
+        // `</` at the chunk end is an end tag or a bogus comment.
+        run_start = i;
+        carry = true;
+        carry_bounded = true;
+        break;
+      } else if next == SLASH_CHAR || next == QUESTION_CHAR {
+        // Bogus comments end at the first `>`, even inside quotes.
+        self.seal_text_run(&text_buffer);
         run_start = i;
         let Some(len) = discarded_gt(&chunk[i..]) else {
           self.discard_declaration(&chunk[i..]);
@@ -2157,6 +2228,7 @@ impl ConvertState {
     chunk_length: usize,
   ) -> usize {
     text_buffer.clear();
+    self.entity_seals.clear();
     self.parse_text_buffer = text_buffer;
     self.pending_start = None;
     self.pending_tag = None;
@@ -3192,6 +3264,90 @@ pub(crate) fn clamp_to_char_boundary(text: &str, max: usize) -> &str {
   &text[..end]
 }
 
+/// End of the batchable ASCII run whose first byte is at `start`, absorbing
+/// single spaces between batchable bytes, and whether it absorbed one. `bytes`
+/// ends at the run's limit, so the scan needs no other bound. Doubled,
+/// trailing, and pre-tag spaces leave the run to the general path, which keeps
+/// its collapsing semantics. Every byte it passes is ASCII, so the end is a
+/// char boundary. Out of line so this loop keeps its own code whatever the rest
+/// of `process_html` compiles to; one call per run.
+#[inline(never)]
+fn batchable_run_end(bytes: &[u8], start: usize) -> (usize, bool) {
+  let limit = bytes.len();
+  let mut i = start + 1;
+  let mut had_space = false;
+  // Most runs end within their first word, between entities or tags: step those
+  // bytewise, the same steps as the byte loop below, and return with no word
+  // test. Only a run still going past the probe tries words.
+  let probe = limit.min(start + 9);
+  while i < probe {
+    if BATCHABLE_TEXT[bytes[i] as usize] {
+      i += 1;
+    } else if i + 1 < limit && bytes[i] == SPACE_CHAR && BATCHABLE_TEXT[bytes[i + 1] as usize] {
+      had_space = true;
+      i += 2;
+    } else {
+      return (i, had_space);
+    }
+  }
+  // A long prefix of letters and single spaces advances a word at a time. The
+  // first word holding anything else leaves the rest of the run to the byte loop
+  // below, so a run of other text pays a single extra test. A space in the last
+  // lane joins the run only before a batchable byte, as the byte loop requires.
+  while let Some(word) = bytes.get(i..i + 8) {
+    let Some(spaces) = letter_or_lone_space_lanes(u64::from_le_bytes(word.try_into().unwrap()))
+    else {
+      break;
+    };
+    if spaces >> 63 != 0
+      && !bytes
+        .get(i + 8)
+        .is_some_and(|&next| BATCHABLE_TEXT[next as usize])
+    {
+      break;
+    }
+    had_space |= spaces != 0;
+    i += 8;
+  }
+  loop {
+    while i < limit && BATCHABLE_TEXT[bytes[i] as usize] {
+      i += 1;
+    }
+    if i + 1 < limit && bytes[i] == SPACE_CHAR && BATCHABLE_TEXT[bytes[i + 1] as usize] {
+      had_space = true;
+      i += 2;
+      continue;
+    }
+    return (i, had_space);
+  }
+}
+
+/// The space lanes of `word` as high bits, when every byte is an ASCII letter or
+/// a space and no two spaces are adjacent; `None` otherwise. Letters are
+/// batchable. Every test runs on bytes below 0x80, so no lane carries into the
+/// next: `| 0x20` maps exactly the letters into `a..=z`, and the high bit of
+/// `x + 0x1F` is set exactly when a byte is at least `a`, of `x + 0x05` exactly
+/// when it is past `z`. After `^ 0x20` a space is the zero lane, and
+/// `(y & 0x7F) + 0x7F` sets the high bit exactly when the lane is nonzero.
+#[inline(always)]
+fn letter_or_lone_space_lanes(word: u64) -> Option<u64> {
+  const LANES: u64 = 0x0101_0101_0101_0101;
+  const HIGH: u64 = LANES * 0x80;
+  const LOW: u64 = LANES * 0x7F;
+  if word & HIGH != 0 {
+    return None;
+  }
+  let x = word | (LANES * 0x20);
+  let letters = (x + LANES * 0x1F) & !(x + LANES * 0x05) & HIGH;
+  // A word of letters alone, as in a long token, skips the space test.
+  if letters == HIGH {
+    return Some(0);
+  }
+  let y = word ^ (LANES * 0x20);
+  let spaces = !(((y & LOW) + LOW) | y) & HIGH;
+  ((letters | spaces) == HIGH && spaces & (spaces << 8) == 0).then_some(spaces)
+}
+
 /// End of the non-ASCII run that starts at `start`, stopping at `limit`.
 #[inline]
 fn non_ascii_run_end(bytes: &[u8], start: usize, limit: usize) -> usize {
@@ -3200,6 +3356,46 @@ fn non_ascii_run_end(bytes: &[u8], start: usize, limit: usize) -> usize {
     end += 1;
   }
   end
+}
+
+/// Start of the character reference that bytes appended after `run` could still
+/// extend: a final `&` followed only by a name, or by `#` and digits.
+fn open_reference_start(run: &[u8]) -> Option<usize> {
+  let amp = run.iter().rposition(|&byte| byte == AMPERSAND_CHAR)?;
+  let rest = &run[amp + 1..];
+  let open = match rest.split_first() {
+    Some((b'#', digits)) => match digits.split_first() {
+      Some((b'x' | b'X', digits)) => digits.iter().all(u8::is_ascii_hexdigit),
+      _ => digits.iter().all(u8::is_ascii_digit),
+    },
+    _ => rest.iter().all(u8::is_ascii_alphanumeric),
+  };
+  open.then_some(amp)
+}
+
+/// Writes `reference`, an open one from [`open_reference_start`], so it decodes
+/// as it does alone and takes no byte from the text written after it.
+fn push_ended_reference(out: &mut String, reference: &str, scratch: &mut String) {
+  if let Some(rest) = reference.strip_prefix("&#") {
+    // Digits run to the first non-digit, and a `;` there is part of the reference.
+    if !rest.strip_prefix(['x', 'X']).unwrap_or(rest).is_empty() {
+      out.push_str(reference);
+      out.push(';');
+      return;
+    }
+  }
+  if decode_html_entities_into(reference, false, false, scratch) {
+    for ch in scratch.chars() {
+      if ch == '&' {
+        out.push_str("&amp;");
+      } else {
+        out.push(ch);
+      }
+    }
+  } else {
+    out.push_str("&amp;");
+    out.push_str(&reference[1..]);
+  }
 }
 
 fn push_capped_text_node(
@@ -3431,6 +3627,106 @@ mod tests {
 
     check(&["<p><b></b> 😀"]);
     check(&["<p><b></b> ", "😀"]);
+  }
+}
+
+#[cfg(test)]
+mod batchable_run_tests {
+  use super::*;
+
+  /// The byte loop alone, as the run scan was before the word prefix.
+  fn scalar_run_end(bytes: &[u8], start: usize) -> (usize, bool) {
+    let limit = bytes.len();
+    let mut i = start + 1;
+    let mut had_space = false;
+    loop {
+      while i < limit && BATCHABLE_TEXT[bytes[i] as usize] {
+        i += 1;
+      }
+      if i + 1 < limit && bytes[i] == SPACE_CHAR && BATCHABLE_TEXT[bytes[i + 1] as usize] {
+        had_space = true;
+        i += 2;
+        continue;
+      }
+      return (i, had_space);
+    }
+  }
+
+  #[test]
+  fn letters_are_batchable() {
+    assert!(
+      (0..=255u8)
+        .filter(u8::is_ascii_alphabetic)
+        .all(|b| BATCHABLE_TEXT[b as usize])
+    );
+  }
+
+  /// Spaces as lane high bits when every byte is a letter or a space and no two
+  /// spaces touch, byte by byte.
+  fn lanes_oracle(word: [u8; 8]) -> Option<u64> {
+    let valid = word.iter().all(|&b| b.is_ascii_alphabetic() || b == b' ')
+      && !word.windows(2).any(|pair| pair == b"  ");
+    valid.then(|| {
+      (0..8)
+        .filter(|&lane| word[lane] == b' ')
+        .fold(0u64, |mask, lane| mask | (0x80u64 << (8 * lane)))
+    })
+  }
+
+  #[test]
+  fn word_lanes_match_every_byte_in_every_lane() {
+    for fill in [
+      *b"abcdefgh",
+      *b"a b c d ",
+      *b" bcdefgh",
+      *b"Zz yY Az",
+      *b"ab  cdef",
+    ] {
+      for lane in 0..8 {
+        for byte in 0..=255u8 {
+          let mut word = fill;
+          word[lane] = byte;
+          assert_eq!(
+            letter_or_lone_space_lanes(u64::from_le_bytes(word)),
+            lanes_oracle(word),
+            "fill {fill:?} lane {lane} byte {byte:#04x}"
+          );
+        }
+      }
+    }
+  }
+
+  #[test]
+  fn run_end_matches_the_byte_loop_at_every_boundary() {
+    let fills: [&[u8]; 5] = [
+      b"xxxxxxxxxxxxxxxxxxxxxxxxxx",
+      b"ordinary words ordinary words ",
+      b"ab cd ef gh ij kl mn op qr st",
+      b"abcdefg hijklmn  opqrstuv wxyz",
+      b"abc def ghi 123 jkl. mno pqr",
+    ];
+    for fill in fills {
+      for start in [0, 3] {
+        for len in start + 1..=26 {
+          for at in 0..len {
+            for byte in 0..=255u8 {
+              let mut bytes = fill[..len].to_vec();
+              bytes[start] = b'x';
+              bytes[at] = byte;
+              if !BATCHABLE_TEXT[bytes[start] as usize] {
+                continue;
+              }
+              assert_eq!(
+                batchable_run_end(&bytes, start),
+                scalar_run_end(&bytes, start),
+                "fill {:?} start {start} len {len} at {at} byte {byte:#04x}",
+                std::str::from_utf8(fill)
+              );
+            }
+          }
+        }
+      }
+    }
   }
 }
 
