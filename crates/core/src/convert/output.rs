@@ -2814,6 +2814,7 @@ impl ConvertState {
       self.flush_list_rule();
     }
 
+    let mut wrap_separator = false;
     if self.pending_inline_whitespace {
       if text.as_bytes().iter().all(|&b| is_whitespace(b)) {
         return;
@@ -2821,7 +2822,12 @@ impl ConvertState {
       let last = self.last_output_byte();
       let first = text.as_bytes()[0];
       if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
-        self.push_code_span_content(" ", true);
+        // Wrapped text writes the separator itself, so it can become the break.
+        if self.wrap_width != 0 && self.can_wrap_here() {
+          wrap_separator = true;
+        } else {
+          self.push_code_span_content(" ", true);
+        }
       }
       self.pending_inline_whitespace = false;
     }
@@ -2984,7 +2990,7 @@ impl ConvertState {
     let owns_space =
       owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0);
     if self.wrap_width != 0 && self.can_wrap_here() {
-      self.push_text_wrapped(text, last_char, owns_leading_space);
+      self.push_text_wrapped(text, last_char, owns_leading_space, wrap_separator);
     } else if self.options.max_node_bytes == 0 {
       let add_space = !owns_space && self.should_add_spacing_before_text(last_char, text);
       self.push_text_uncapped(text, add_space);
@@ -4162,35 +4168,28 @@ impl ConvertState {
   }
 
   /// Continuation prefix re-emitted at the start of each continued line so the
-  /// content stays inside its block context. Built by walking the open
-  /// ancestor stack outermost-first so blockquote markers (`> `) and list-item
-  /// indentation interleave in the real nesting order: `<li><blockquote>` →
-  /// `  > `, `<blockquote><li>` → `>   `. A flat "all quotes then all indent"
-  /// prefix would corrupt the Markdown structure of nested blocks.
+  /// content stays inside its list items: the marker width of every open
+  /// `<li>`, outermost first. Quote markers are never part of it. A rendered
+  /// blockquote buffers its content and prefixes every line when it closes,
+  /// and one the filter or a literal override dropped writes no `>` at all.
   fn continuation_prefix(&self) -> String {
-    // Only `<li>` and `<blockquote>` contribute, so with neither open there is
-    // nothing to walk and nothing to allocate.
-    if plain_text!(self)
-      || (self.depth_map[TAG_LI as usize] == 0 && self.depth_map[TAG_BLOCKQUOTE as usize] == 0)
-    {
+    // Only `<li>` contributes, so with none open there is nothing to walk and
+    // nothing to allocate.
+    if plain_text!(self) || self.depth_map[TAG_LI as usize] == 0 {
       return String::new();
     }
 
     let mut p = String::new();
     let mut li_idx = 0usize;
     for node in &self.stack {
-      match node.tag_id {
-        Some(TAG_BLOCKQUOTE) if self.blockquotes.is_empty() => p.push_str("> "),
-        Some(TAG_LI) => {
-          // Each open <li> contributes its marker-width of spaces, in
-          // the same order they were pushed onto list_indent_widths.
-          let w = self.list_indent_widths.get(li_idx).copied().unwrap_or(2) as usize;
-          for _ in 0..w {
-            p.push(' ');
-          }
-          li_idx += 1;
+      if node.tag_id == Some(TAG_LI) {
+        // Each open <li> contributes its marker-width of spaces, in
+        // the same order they were pushed onto list_indent_widths.
+        let w = self.list_indent_widths.get(li_idx).copied().unwrap_or(2) as usize;
+        for _ in 0..w {
+          p.push(' ');
         }
-        _ => {}
+        li_idx += 1;
       }
     }
     p
@@ -4214,14 +4213,24 @@ impl ConvertState {
   /// exceeds `self.wrap_width` characters. Words are never split, so a single
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
   /// A break only ever replaces an inter-word space, so words joined across
-  /// inline boundaries (e.g. `foo**bar**`) stay intact.
-  fn push_text_wrapped(&mut self, text: &str, last_char: Option<u8>, owns_leading_space: bool) {
+  /// inline boundaries (e.g. `foo**bar**`) stay intact. In Markdown a word
+  /// that would open a block at the start of a line keeps its space and
+  /// overflows too (`opens_block_at_line_start`). `separator` is a
+  /// pending space trimmed from a closed inline element, which wraps like a
+  /// leading space of `text`.
+  fn push_text_wrapped(
+    &mut self,
+    text: &str,
+    last_char: Option<u8>,
+    owns_leading_space: bool,
+    separator: bool,
+  ) {
     let width = self.wrap_width;
     // A leading/trailing space in `text` is significant inter-word separation
     // across an inline boundary (e.g. `… </a> now`); the non-wrap path keeps
     // it by pushing `text` verbatim, so preserve it here too. `split(' ')`
     // would otherwise discard it as an empty segment.
-    let leading_space = text.starts_with(' ');
+    let leading_space = separator || text.starts_with(' ');
     let trailing_space = text.ends_with(' ');
     // A caption owns the space before its first text, as on the unwrapped path.
     let first_needs_space = leading_space
@@ -4239,7 +4248,11 @@ impl ConvertState {
       let word_len = word.chars().count();
       let need_space = if first { first_needs_space } else { true };
 
-      if need_space && col > prefix_len && col + 1 + word_len > width {
+      if need_space
+        && col > prefix_len
+        && col + 1 + word_len > width
+        && (plain_text!(self) || !Self::opens_block_at_line_start(word.as_bytes()))
+      {
         self.push_code_span_content("\n", true);
         self.push_code_span_content(&prefix, true);
         col = prefix_len;
@@ -4258,6 +4271,28 @@ impl ConvertState {
       self.push_code_span_content(" ", true);
     }
     self.last_content_cache_len = self.buffer.len() - buf_start;
+  }
+
+  /// Whether `word`, moved to the start of a line, would open a block there: a
+  /// quote, an ATX heading, a list item, a code fence, a setext underline or a
+  /// thematic break. Text escaped mid-line leaves these markers bare, so a wrap
+  /// must not be what puts one at the start of a line.
+  fn opens_block_at_line_start(word: &[u8]) -> bool {
+    let Some(&first) = word.first() else {
+      return false;
+    };
+    match first {
+      b'>' => true,
+      b'#' => word.len() <= 6 && word.iter().all(|&byte| byte == b'#'),
+      b'+' => word.len() == 1,
+      b'-' | b'=' | b'*' | b'_' => word.iter().all(|&byte| byte == first),
+      b'`' | b'~' => word.len() >= 3 && word[..3].iter().all(|&byte| byte == first),
+      b'0'..=b'9' => {
+        let digits = word.iter().take_while(|byte| byte.is_ascii_digit()).count();
+        digits <= 9 && word.len() == digits + 1 && matches!(word[digits], b'.' | b')')
+      }
+      _ => false,
+    }
   }
 
   /// Emit frontmatter content.

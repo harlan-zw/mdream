@@ -1,9 +1,28 @@
+import type { MdreamOptions } from '../../src/types'
 import { describe, expect, it } from 'vitest'
-import { htmlToMarkdown } from '../../src/index'
+import { htmlToMarkdown, streamHtmlToMarkdown as streamWithOptions } from '../../src/index'
+import { filterPlugin } from '../../src/plugins'
 import { streamHtmlToMarkdown } from '../../src/stream'
 
 const wrap = (html: string, width: number) => htmlToMarkdown(html, { wrapWidth: width })
 const HARD_BREAK = '  \n'
+
+async function expectEveryChunking(html: string, options: Partial<MdreamOptions>, expected: string): Promise<void> {
+  expect(htmlToMarkdown(html, options)).toBe(expected)
+  for (let size = 1; size <= html.length; size++) {
+    const stream = new ReadableStream<string>({
+      start(controller) {
+        for (let offset = 0; offset < html.length; offset += size)
+          controller.enqueue(html.slice(offset, offset + size))
+        controller.close()
+      },
+    })
+    let out = ''
+    for await (const chunk of streamWithOptions(stream, options))
+      out += chunk
+    expect(out, `chunk size ${size}`).toBe(expected)
+  }
+}
 
 describe('wrap width (issue #106)', () => {
   it('is a no-op when unset or zero', () => {
@@ -48,6 +67,24 @@ describe('wrap width (issue #106)', () => {
       .toBe('```\nfirst  \nsecond\n```')
   })
 
+  it.each(['strong', 'em', 'code', 'a'] as const)('matches ordinary separators before inline producers: %s', async (tag) => {
+    const producer = tag === 'a' ? '<a href="/x">b</a>' : `<${tag}>b</${tag}>`
+    for (const [before, after] of [
+      ['<p>', '</p>'],
+      ['<ul><li>', '</li></ul>'],
+      ['<blockquote><p>', '</p></blockquote>'],
+      ['<blockquote><ul><li>', '</li></ul></blockquote>'],
+    ] as const) {
+      for (const wrapWidth of [0, 6, 8, 12]) {
+        const ordinary = `${before}aaaaa ${producer}${after}`
+        const recovered = `${before}<span>aaaaa </span>${producer}${after}`
+        const expected = wrap(ordinary, wrapWidth)
+        await expectEveryChunking(ordinary, { wrapWidth }, expected)
+        await expectEveryChunking(recovered, { wrapWidth }, expected)
+      }
+    }
+  })
+
   it('never splits an oversized token', () => {
     const out = wrap('<p>A superlongunbreakabletokenthatislongerthanthewrapwidthsoitoverflows end.</p>', 40)
     expect(out).toContain('superlongunbreakabletokenthatislongerthanthewrapwidthsoitoverflows')
@@ -87,6 +124,84 @@ describe('wrap width (issue #106)', () => {
     expect(lines[0]!.startsWith('> - ')).toBe(true)
     for (const line of lines.slice(1))
       expect(line.startsWith('>   ')).toBe(true)
+  })
+
+  it.each([
+    ['<p><span>aaaaa </span>bbbb</p>', 6, 'aaaaa\nbbbb'],
+    ['<p><em>aaaaaaaaaaa </em>b</p>', 12, '*aaaaaaaaaaa*\nb'],
+    ['<p><a href="/x">aaaaa </a>bbbb cc</p>', 12, '[aaaaa](/x)\nbbbb cc'],
+    ['<p><code>aaaaa </code>bbbb cc</p>', 6, '`aaaaa`\nbbbb\ncc'],
+    ['<ul><li><em>aaaaaaa </em>bbbb cc dddd</li></ul>', 12, '- *aaaaaaa*\n  bbbb cc\n  dddd'],
+    ['<blockquote><p><em>aaaaaaa </em>bbbb cc dddd</p></blockquote>', 12, '> *aaaaaaa*\n> bbbb cc dddd'],
+    ['<p><strong>aaaaa </strong>bbbb cc</p>', 80, '**aaaaa** bbbb cc'],
+  ] as const)('breaks at a separator trimmed from an inline element: %s', async (html, width, expected) => {
+    expect(wrap(html, width)).toBe(expected)
+    for (let size = 1; size <= html.length; size++) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += size)
+            controller.enqueue(html.slice(offset, offset + size))
+          controller.close()
+        },
+      })
+      let out = ''
+      for await (const chunk of streamHtmlToMarkdown(stream, { wrapWidth: width }))
+        out += chunk
+      expect(out, `chunk size ${size}`).toBe(expected)
+    }
+  })
+
+  // Text escaped mid-line leaves these markers bare, so a break before one
+  // would open a list, quote, heading or fence. The marker overflows instead.
+  it.each([
+    ['<p>The configuration guide explains each option in detail, so read it first <b>Price </b>- 5 dollars per month for every user seat.</p>', 80, 'The configuration guide explains each option in detail, so read it first **Price** -\n5 dollars per month for every user seat.'],
+    ['<p>The configuration guide explains each option in detail, so read it before <code>count </code>&gt; 5 triggers the warning in the log.</p>', 80, 'The configuration guide explains each option in detail, so read it before `count` >\n5 triggers the warning in the log.'],
+    ['<p>The configuration guide explains each option in detail, so read it to see <a href="/issues">Issue </a># 42 for the full discussion.</p>', 80, 'The configuration guide explains each option in detail, so read it to see [Issue](/issues) #\n42 for the full discussion.'],
+    ['<p>The configuration guide explains each option in detail, so read it until the <em>end </em>---</p><p>Next paragraph.</p>', 80, 'The configuration guide explains each option in detail, so read it until the *end* ---\n\nNext paragraph.'],
+    ['<p><span>aaaaa </span>- bbbb</p>', 6, 'aaaaa -\nbbbb'],
+    ['<p>aaaaa - bbbb</p>', 6, 'aaaaa -\nbbbb'],
+    ['<p>aaaaa &gt;b</p>', 6, 'aaaaa >b'],
+    ['<p>aaaaa ## b</p>', 6, 'aaaaa ##\nb'],
+    ['<p>aaaaa 1) bb</p>', 6, 'aaaaa 1)\nbb'],
+    ['<p>aaaaa ===</p>', 6, 'aaaaa ==='],
+    ['<ul><li>aaaaa - bbbb</li></ul>', 8, '- aaaaa -\n  bbbb'],
+    ['<details><summary>S</summary><code>aaaaaaaa </code>~~~</details><p>After.</p>', 12, '<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> ~~~</details>\n\n\n\nAfter.'],
+    ['<details><summary>S</summary><code>aaaaaaaa</code> - x</details><p>After.</p>', 12, '<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> -\nx</details>\n\n\n\nAfter.'],
+    ['<p>aaaaa * bbbb</p>', 6, 'aaaaa\n\\*\nbbbb'],
+    ['<p>aaaaa 1.5 bb</p>', 6, 'aaaaa\n1.5 bb'],
+    ['<p>aaaaa ####### b</p>', 6, 'aaaaa\n#######\nb'],
+  ] as const)('never breaks before a block marker: %s', async (html, width, expected) => {
+    await expectEveryChunking(html, { wrapWidth: width }, expected)
+  })
+
+  // A blockquote a plugin or a literal override dropped writes no `>`.
+  const droppedQuoteCases: [string, Partial<MdreamOptions>, string][] = [
+    ['<blockquote><p><span>aaaaaaa </span>bbbb</p></blockquote>', { wrapWidth: 8, plugins: [filterPlugin({ include: ['p'] })] }, 'aaaaaaa\nbbbb'],
+    ['<blockquote><p>aaaaaaa b</p></blockquote>', { wrapWidth: 8, plugins: [filterPlugin({ include: ['p'] })] }, 'aaaaaaa\nb'],
+    ['<blockquote><p>aaaaaaa<br>b</p></blockquote>', { plugins: [filterPlugin({ include: ['p'] })] }, 'aaaaaaa  \nb'],
+    ['<blockquote><p>aaaaaaa b</p></blockquote>', { wrapWidth: 8, tagOverrides: { blockquote: { enter: '[', exit: ']' } } }, '[\n\naaaaaaa\nb\n\n]'],
+    ['<blockquote><p>aaaaaaa<br>b</p></blockquote>', { tagOverrides: { blockquote: { enter: '[', exit: ']' } } }, '[\n\naaaaaaa  \nb\n\n]'],
+    ['<blockquote><blockquote><p>aaaaaaa b</p></blockquote></blockquote>', { wrapWidth: 8, plugins: [filterPlugin({ include: ['blockquote'] })] }, '> > aaaaaaa\n> > b'],
+  ]
+  it.each(droppedQuoteCases)('continues a line without the marker of a dropped blockquote: %s', async (html, options, expected) => {
+    await expectEveryChunking(html, options, expected)
+  })
+
+  // A list item a plugin skipped writes no marker, so it has no content column.
+  it.each([
+    ['<ul><li><blockquote><p>bb hhhhhhhhh</p></blockquote></li></ul>', 8, 'bb\nhhhhhhhhh'],
+    ['<ul><li><p>aaaaaaa b</p></li></ul>', 8, 'aaaaaaa\nb'],
+    ['<ul><li><p>a<br>b</p></li></ul>', 0, 'a  \nb'],
+    ['<ul><li>x<ul><li><p>aaaaaaa b<br>c</p></li></ul></li></ul>', 8, 'aaaaaaa\nb  \nc'],
+  ] as const)('continues a line without the indentation of a dropped list item: %s', async (html, width, expected) => {
+    await expectEveryChunking(html, { wrapWidth: width, plugins: [filterPlugin({ include: ['p'] })] }, expected)
+  })
+
+  it.each([
+    ['<p>before</p><ul><li><ul><li><hr></li></ul></li></ul><p>after</p>', 'before\n\n---\n\nafter'],
+    ['<ul><li><ul><li><hr><p>after</p></li></ul></li></ul>', '---\n\nafter'],
+  ])('does not indent a rule inside filtered list items: %s', async (html, expected) => {
+    await expectEveryChunking(html, { plugins: [filterPlugin({ include: ['hr', 'p'] })] }, expected)
   })
 
   it('wraps identically across streaming chunks', async () => {

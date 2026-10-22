@@ -56,7 +56,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -93,7 +93,9 @@ export interface MarkdownState {
    * Cumulative indent for list-item continuation. Grows by each ancestor
    * `<li>`'s marker width (`"- "` = 2, `"N. "` = digits(N) + 2) so code blocks
    * and continuation paragraphs land in the content column CommonMark requires.
-   * Pushed on `<li>` enter, popped on `<li>` exit.
+   * Pushed on `<li>` enter, popped on `<li>` exit. It is the whole prefix of a
+   * wrapped or hard-broken line: an item a plugin skipped adds nothing, and a
+   * blockquote prefixes its own lines when it closes.
    */
   listIndent: string
   /** Per-`<li>` contribution widths, parallel stack to listIndent. */
@@ -761,11 +763,22 @@ function columnWidth(value: string, start: number): number {
 }
 
 /**
+ * Whether `word`, moved to the start of a line, would open a block there: a
+ * quote, an ATX heading, a list item, a code fence, a setext underline or a
+ * thematic break. Text escaped mid-line leaves these markers bare, so a wrap
+ * must not be what puts one at the start of a line. Parity with the Rust
+ * `opens_block_at_line_start`.
+ */
+const BLOCK_START_WORD = /^(?:>|`{3}|~{3}|(?:#{1,6}|\+|-+|=+|\*+|_+|\d{1,9}[.)])$)/
+
+/**
  * Hard-wrap `value` on spaces so no output line exceeds `width` code points.
  * Words are never split, so an oversized token (e.g. a URL) overflows rather
- * than breaking, and a break only ever replaces an inter-word space. `value`
- * already carries any significant leading/trailing space (added upstream), so
- * those boundary spaces are preserved. Parity with the Rust `push_text_wrapped`.
+ * than breaking, and a break only ever replaces an inter-word space. A word
+ * that would open a block at the start of a line keeps its space and
+ * overflows too. `value` already carries any significant leading/trailing
+ * space (added upstream), so those boundary spaces are preserved. Parity with
+ * the Rust `push_text_wrapped`.
  */
 function wrapText(value: string, col: number, width: number, prefix: string): string {
   const leading = value.charCodeAt(0) === 32
@@ -784,7 +797,7 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
       const word = value.slice(i, next)
       const wordLen = [...word].length
       const needSpace = first ? leading : true
-      if (needSpace && col > prefixLen && col + 1 + wordLen > width) {
+      if (needSpace && col > prefixLen && col + 1 + wordLen > width && !BLOCK_START_WORD.test(word)) {
         out += `\n${prefix}`
         col = prefixLen
       }
@@ -1692,12 +1705,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       const wrapWidth = state.options?.wrapWidth
       if (wrapWidth && canWrapHere(state.depthMap)) {
-        const wrapped = wrapText(
-          textNode.value,
-          currentColumn(state.buffer),
-          wrapWidth,
-          continuationPrefix(textNode, state.listIndentWidths, state.blockquotes.length === 0),
-        )
+        const wrapped = wrapText(textNode.value, currentColumn(state.buffer), wrapWidth, state.listIndent)
         state.buffer.push(wrapped)
         state.lastContentCache = wrapped
       }
@@ -1859,7 +1867,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       && handler === breakHandler
       && !element.pluginOutput?.length) {
       const inPre = state.depthMap[TAG_PRE] !== 0
-      let breakOutput: string | undefined = renderBreak(element, state)
+      let breakOutput: string | undefined = renderBreak(state)
 
       if (captionBoundary !== 0 || captionFrameCount !== 0) {
         const pendingCaption = captionFrameCount !== 0

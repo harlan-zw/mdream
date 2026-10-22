@@ -54,6 +54,80 @@ describe('cross-engine streaming byte parity', () => {
   })
 })
 
+// The space trimmed from a closed inline element is the only break point here.
+const WRAP_SEPARATOR_CASES = [
+  ['<p><span>aaaaa </span>bbbb</p>', { wrapWidth: 6 }, 'aaaaa\nbbbb'],
+  ['<p><em>aaaaaaaaaaa </em>b</p>', { wrapWidth: 12 }, '*aaaaaaaaaaa*\nb'],
+  ['<p><a href="/x">aaaaa </a>bbbb cc</p>', { wrapWidth: 12 }, '[aaaaa](/x)\nbbbb cc'],
+  ['<ul><li><em>aaaaaaa </em>bbbb cc dddd</li></ul>', { wrapWidth: 12 }, '- *aaaaaaa*\n  bbbb cc\n  dddd'],
+  ['<blockquote><p><em>aaaaaaa </em>bbbb cc dddd</p></blockquote>', { wrapWidth: 12 }, '> *aaaaaaa*\n> bbbb cc dddd'],
+  ['<p><strong>aaaaa </strong>bbbb cc</p>', { wrapWidth: 80 }, '**aaaaa** bbbb cc'],
+  ['<p><em>aaaaaaaaaaa </em>b</p>', { wrapWidth: 12, format: 'text' }, 'aaaaaaaaaaa\nb'],
+  ['<p>wwww<a href="/c"><span>x</span> </a>yyyy end</p>', { wrapWidth: 12, format: 'text' }, 'wwwwx yyyy\nend'],
+] as const
+
+describe('cross-engine wrap at a trimmed inline separator', () => {
+  it.each(WRAP_SEPARATOR_CASES)('breaks there at every chunk width: %s %o', async (html, options, expected) => {
+    for (const { engine, name } of engines) {
+      expect(engine.htmlToMarkdown(html, options), `engine=${name}`).toBe(expected)
+
+      for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {
+        const htmlStream = new ReadableStream<string>({
+          start(controller) {
+            for (let offset = 0; offset < html.length; offset += chunkSize)
+              controller.enqueue(html.slice(offset, offset + chunkSize))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, options))
+          streamed += chunk
+        expect(streamed, `engine=${name} chunkSize=${chunkSize}`).toBe(expected)
+      }
+    }
+  })
+})
+
+describe('cross-engine wrap at the start of a block', () => {
+  // A break before a bare block marker would open a list, quote, heading or
+  // fence, a blockquote the filter or a literal override dropped writes no `>`,
+  // and a list item the filter dropped has no content column to indent to.
+  it.each([
+    ['<p>The configuration guide explains each option in detail, so read it first <b>Price </b>- 5 dollars per month for every user seat.</p>', { wrapWidth: 80 }, 'The configuration guide explains each option in detail, so read it first **Price** -\n5 dollars per month for every user seat.'],
+    ['<p>The configuration guide explains each option in detail, so read it to see <a href="/issues">Issue </a># 42 for the full discussion.</p>', { wrapWidth: 80 }, 'The configuration guide explains each option in detail, so read it to see [Issue](/issues) #\n42 for the full discussion.'],
+    ['<p><span>aaaaa </span>- bbbb</p>', { wrapWidth: 6 }, 'aaaaa -\nbbbb'],
+    ['<p>aaaaa - bbbb</p>', { wrapWidth: 6 }, 'aaaaa -\nbbbb'],
+    ['<p>aaaaa &gt;b</p>', { wrapWidth: 6 }, 'aaaaa >b'],
+    ['<p>aaaaa ===</p>', { wrapWidth: 6 }, 'aaaaa ==='],
+    ['<details><summary>S</summary><code>aaaaaaaa </code>~~~</details><p>After.</p>', { wrapWidth: 12 }, '<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> ~~~</details>\n\n\n\nAfter.'],
+    ['<p><span>aaaaa </span>- bbbb</p>', { wrapWidth: 6, format: 'text' }, 'aaaaa\n- bbbb'],
+    ['<blockquote><p><span>aaaaaaa </span>bbbb</p></blockquote>', { wrapWidth: 8, plugins: { filter: { include: ['p'] } } }, 'aaaaaaa\nbbbb'],
+    ['<blockquote><p>aaaaaaa<br>b</p></blockquote>', { plugins: { filter: { include: ['p'] } } }, 'aaaaaaa  \nb'],
+    ['<blockquote><p>aaaaaaa b</p></blockquote>', { wrapWidth: 8, plugins: { tagOverrides: { blockquote: { enter: '[', exit: ']' } } } }, '[\n\naaaaaaa\nb\n\n]'],
+    ['<ul><li><blockquote><p>bb hhhhhhhhh</p></blockquote></li></ul>', { wrapWidth: 8, plugins: { filter: { include: ['p'] } } }, 'bb\nhhhhhhhhh'],
+    ['<ul><li><p>aaaaaaa b</p></li></ul>', { wrapWidth: 8, plugins: { filter: { include: ['p'] } } }, 'aaaaaaa\nb'],
+    ['<ul><li><p>a<br>b</p></li></ul>', { plugins: { filter: { include: ['p'] } } }, 'a  \nb'],
+  ])('keeps one block at every chunk width: %s %o', async (html, options, expected) => {
+    for (const { engine, name } of engines) {
+      expect(engine.htmlToMarkdown(html, options), `engine=${name}`).toBe(expected)
+
+      for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {
+        const htmlStream = new ReadableStream<string>({
+          start(controller) {
+            for (let offset = 0; offset < html.length; offset += chunkSize)
+              controller.enqueue(html.slice(offset, offset + chunkSize))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, options))
+          streamed += chunk
+        expect(streamed, `engine=${name} chunkSize=${chunkSize}`).toBe(expected)
+      }
+    }
+  })
+})
+
 describe.each(engines)('hTML to Markdown Streaming $name', (engineConfig) => {
   describe('basic Stream Functionality', () => {
     it('converts a valid HTML stream to markdown chunks', async () => {
