@@ -887,3 +887,96 @@ describe('flattened declaration carry', () => {
     }
   })
 })
+
+it.each(['\u000B', '\u00A0', '\u2003'])('preserves non-HTML whitespace %j at every chunk width', async (space) => {
+  const cases = [
+    [`T${space}`, `T${space}`],
+    [`<p>T</p>${space}`, `T\n\n${space}`],
+    [`<ul><li>T${space}</li></ul>`, `- T${space}`],
+    [`<ul><li><h3>T</h3>${space}</li></ul>`, `- ### T ${space}`],
+    [`<p>T</p>${space}<p>X</p>`, `T\n\n${space}\n\nX`],
+    [`<p>T</p>${space} `, `T\n\n${space}`],
+  ] as const
+  for (const [html, expected] of cases) {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await streamConvert(html, width), `${JSON.stringify(html)}, width ${width}`).toBe(expected)
+  }
+})
+
+it.each(['\t', '\n', '\f', '\r', ' ', '\u000B'])('holds trimmable override whitespace %j until the stream ends', async (space) => {
+  const options = { tagOverrides: { span: { exit: space } } }
+  for (const html of ['<span>T</span>', '<span>T</span>X']) {
+    const expected = html.endsWith('X') ? `T${space}X` : space === '\u000B' ? `T${space}` : 'T'
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await streamConvert(html, width, options), `width ${width}`).toBe(expected)
+  }
+})
+
+describe('vertical tabs before emphasis closers', () => {
+  for (const [tag, marker] of [['em', '*'], ['i', '*'], ['strong', '**'], ['b', '**'], ['cite', '*'], ['dfn', '**'], ['del', '~~'], ['s', '~~'], ['strike', '~~']]) {
+    for (const suffix of ['\u000B', '\u000B ', '\u000B\u000B ', '\u000B \t', ' \u000B', '\u000B \u000B ']) {
+      it(`preserves ${tag} with ${JSON.stringify(suffix)} at every chunk width`, async () => {
+        const html = `<${tag}>T${suffix}</${tag}>`
+        const expected = `${marker}T${marker}${suffix.replace(/[ \t]+$/, '')}`
+        for (const [input, markdown] of [
+          [html, expected],
+          [`<p>${html}</p>`, expected],
+          [`<ul><li>${html}</li></ul>`, `- ${expected}`],
+          [`${html}X`, `${expected}${suffix.endsWith(' ') || suffix.endsWith('\t') ? ' ' : ''}X`],
+        ]) {
+          expect(htmlToMarkdown(input!), input).toBe(markdown)
+          for (let width = 1; width <= input!.length; width++)
+            expect(await streamConvert(input!, width), `${input}, width ${width}`).toBe(markdown)
+        }
+      })
+    }
+  }
+})
+
+it('keeps vertical tabs before exit spacing overrides', async () => {
+  for (const [tag, marker] of [['em', '*'], ['strong', '**'], ['strike', '~~']] as const) {
+    const html = `<${tag}>T\u000B</${tag}>X`
+    for (const literal of [false, true]) {
+      const options: ParityOptions = {
+        tagOverrides: { [tag]: { spacing: [0, 1], ...(literal ? { exit: marker } : {}) } },
+      }
+      const expected = literal ? `${marker}T\u000B${marker}\nX` : `${marker}T${marker}\u000B\nX`
+      expect(htmlToMarkdown(html, options), `${tag}, literal ${literal}`).toBe(expected)
+      for (let width = 1; width <= html.length; width++)
+        expect(await streamConvert(html, width, options), `${tag}, literal ${literal}, width ${width}`).toBe(expected)
+    }
+  }
+})
+
+it('preserves literal emphasis exits and moves override whitespace outside default exits', async () => {
+  for (const [tag, marker] of [['em', '*'], ['cite', '*'], ['dfn', '**'], ['del', '~~']] as const) {
+    for (const [html, options, expected] of [
+      [`<${tag}>T&#11;</${tag}>X`, { tagOverrides: { [tag]: { exit: marker } } }, `${marker}T\u000B${marker}X`],
+      [`<${tag}>T<span></span></${tag}>X`, { tagOverrides: { span: { exit: '\u000B ' } } }, `${marker}T${marker}\u000B X`],
+    ] as const) {
+      expect(htmlToMarkdown(html, options), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++)
+        expect(await streamConvert(html, width, options), `${html}, width ${width}`).toBe(expected)
+    }
+  }
+})
+
+it('keeps caption placement and handles vertical tabs before breaks and aliased exits', async () => {
+  for (const suffix of ['&#11;', '&#11; ']) {
+    const html = `<figure><img src="a.png"><figcaption>T${suffix}</figcaption></figure>`
+    const expected = htmlToMarkdown(html)
+    expect(expected).toContain('*T\u000B*')
+    for (let width = 1; width <= html.length; width++)
+      expect(await streamConvert(html, width)).toBe(expected)
+  }
+  for (const [html, options, expected] of [
+    ['<em>T&#11;<br></em>X', {}, '*T*\u000B  \nX'],
+    ['<ex>T&#11;</ex>X', { tagOverrides: { ex: 'em' } }, '*T*\u000BX'],
+  ] as const) {
+    expect(htmlToMarkdown(html, options), html).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await streamConvert(html, width, options), `${html}, width ${width}`).toBe(expected)
+  }
+})

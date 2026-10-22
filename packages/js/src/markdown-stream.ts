@@ -1,5 +1,5 @@
 import type { BlockquoteFrame, BufferScanState, MarkdownState, MarkdownStreamContext } from './markdown-processor'
-import { TAG_PRE } from './const'
+import { TAG_B, TAG_CITE, TAG_DEL, TAG_DFN, TAG_EM, TAG_I, TAG_PRE, TAG_S, TAG_STRIKE, TAG_STRONG } from './const'
 import { isAsciiWhitespace, lineOpensRawHtmlBlock, stripBlockquoteListIndent, trimAsciiWhitespaceEnd } from './markdown-processor'
 import { isInsideHeading, trimOutputStart } from './utils'
 
@@ -234,10 +234,19 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     else {
       // The prefix ends before a mutable owner. Its trailing block spacing
       // stays buffered even when that owner sits inside a preformatted block.
+      // Emphasis depths are read only when a vertical tab is actually trailing.
+      let holdVerticalTabs: boolean | undefined
       while (stableLength > 0) {
         const code = currentContent.charCodeAt(stableLength - 1)
-        if (code !== 32 && code !== 10)
-          break
+        if (!isAsciiWhitespace(code)) {
+          if (code !== 11)
+            break
+          holdVerticalTabs ??= !final && !!(state.depthMap[TAG_EM] || state.depthMap[TAG_I]
+            || state.depthMap[TAG_STRONG] || state.depthMap[TAG_B] || state.depthMap[TAG_CITE]
+            || state.depthMap[TAG_DFN] || state.depthMap[TAG_DEL] || state.depthMap[TAG_S] || state.depthMap[TAG_STRIKE])
+          if (!holdVerticalTabs)
+            break
+        }
         stableLength--
       }
       retainMutableFragments = stableLength < currentContent.length

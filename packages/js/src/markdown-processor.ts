@@ -886,7 +886,7 @@ function hasNonWhitespace(value: string): boolean {
 }
 
 export function isAsciiWhitespace(code: number): boolean {
-  return code === 32 || (code >= 9 && code <= 13)
+  return code === 32 || code === 9 || code === 10 || code === 12 || code === 13
 }
 
 export function trimAsciiWhitespaceEnd(value: string): string {
@@ -2316,6 +2316,48 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.lastContentCache = ' '
     }
 
+    // Renderers such as micromark treat vertical tabs as whitespace at delimiters.
+    let trailingEmphasisWhitespace = ''
+    if (eventType === NodeEventExit && !handler?.literalExit
+      && INLINE_MARKER_TYPE[tagId]! >= 1 && INLINE_MARKER_TYPE[tagId]! <= 4
+      && (output?.[0]?.charCodeAt(0) === 42 || output?.[0]?.charCodeAt(0) === 126)) {
+      let firstFragment = buff.length
+      let firstOffset = 0
+      let hasVerticalTab = false
+      for (let index = buff.length - 1; index >= 0; index--) {
+        const fragment = buff[index]!
+        let end = fragment.length
+        while (end > 0) {
+          const code = fragment.charCodeAt(end - 1)
+          if (code !== 11 && !isAsciiWhitespace(code))
+            break
+          hasVerticalTab ||= code === 11
+          end--
+        }
+        if (end < fragment.length) {
+          firstFragment = index
+          firstOffset = end
+        }
+        if (end > 0)
+          break
+      }
+      if (hasVerticalTab) {
+        for (let index = firstFragment; index < buff.length; index++) {
+          const fragment = buff[index]!
+          const end = index === firstFragment ? firstOffset : 0
+          trailingEmphasisWhitespace += fragment.slice(end)
+          const trimmed = fragment.slice(0, end)
+          state.outputPositions?.replace(index, index + 1, [trimmed])
+          buff[index] = trimmed
+        }
+        if (newLines > 0 && output) {
+          // Exit spacing follows the closer and its displaced source whitespace.
+          output.splice(output.length - 1, 0, trailingEmphasisWhitespace)
+          trailingEmphasisWhitespace = ''
+        }
+      }
+    }
+
     // Add all output fragments
     let outputStart = state.buffer.length
     if (output) {
@@ -2326,6 +2368,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.lastContentCache = fragment
         }
       }
+    }
+
+    if (trailingEmphasisWhitespace) {
+      state.buffer.push(trailingEmphasisWhitespace)
+      state.lastContentCache = trailingEmphasisWhitespace
     }
 
     if (gfmAction)
