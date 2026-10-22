@@ -22,17 +22,21 @@ pub(crate) fn parse_css_selector_list(selector: &str) -> ParsedSelectorList {
   let mut escaped = false;
 
   for (index, ch) in selector.char_indices() {
-    if let Some(active_quote) = quote {
+    if in_attr {
       if escaped {
         escaped = false;
-      } else if ch == '\\' {
-        escaped = true;
-      } else if ch == active_quote {
-        quote = None;
+        continue;
       }
-      continue;
-    }
-    if in_attr {
+      if ch == '\\' {
+        escaped = true;
+        continue;
+      }
+      if let Some(active_quote) = quote {
+        if ch == active_quote {
+          quote = None;
+        }
+        continue;
+      }
       if ch == '"' || ch == '\'' {
         quote = Some(ch);
       } else if ch == ']' {
@@ -72,8 +76,35 @@ pub(crate) fn parse_css_selector(selector: &str) -> ParsedSelector {
   let mut parts: Vec<ParsedSelector> = Vec::new();
   let mut current = String::new();
   let mut in_attr = false;
+  let mut quote = None;
+  let mut escaped = false;
 
   for ch in selector.chars() {
+    if in_attr {
+      current.push(ch);
+      if escaped {
+        escaped = false;
+        continue;
+      }
+      if ch == '\\' {
+        escaped = true;
+        continue;
+      }
+      if let Some(active_quote) = quote {
+        if ch == active_quote {
+          quote = None;
+        }
+        continue;
+      }
+      if ch == '"' || ch == '\'' {
+        quote = Some(ch);
+      } else if ch == ']' {
+        in_attr = false;
+        parts.push(parse_attr_selector(&current));
+        current.clear();
+      }
+      continue;
+    }
     if ch == '[' {
       if !current.is_empty() {
         parts.push(parse_simple_selector(&current));
@@ -84,16 +115,6 @@ pub(crate) fn parse_css_selector(selector: &str) -> ParsedSelector {
       continue;
     }
     if ch == ']' {
-      if in_attr {
-        current.push(ch);
-        in_attr = false;
-        parts.push(parse_attr_selector(&current));
-        current.clear();
-      }
-      continue;
-    }
-    if in_attr {
-      current.push(ch);
       continue;
     }
     if (ch == '.' || ch == '#') && !current.is_empty() {
@@ -128,25 +149,37 @@ fn parse_simple_selector(s: &str) -> ParsedSelector {
   }
 }
 
+fn trim_css_whitespace(value: &str) -> &str {
+  value.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c'))
+}
+
 fn parse_attr_selector(s: &str) -> ParsedSelector {
   if s.len() < 2 {
     return ParsedSelector::Tag(s.to_string());
   }
-  let inner = &s[1..s.len() - 1];
-  let operators = ["^=", "$=", "*=", "~=", "|=", "="];
-  for op in &operators {
-    if let Some(pos) = inner.find(op) {
-      let name = inner[..pos].trim().to_string();
-      let val = inner[pos + op.len()..]
-        .trim()
-        .trim_matches(|c| c == '"' || c == '\'')
-        .to_string();
-      return ParsedSelector::Attribute {
-        name,
-        operator: Some((*op).to_string()),
-        value: Some(val),
-      };
+  let inner = trim_css_whitespace(&s[1..s.len() - 1]);
+  if let Some(eq_index) = inner.find('=') {
+    let op_start = if eq_index > 0
+      && matches!(
+        inner.as_bytes()[eq_index - 1],
+        b'^' | b'$' | b'*' | b'~' | b'|'
+      ) {
+      eq_index - 1
+    } else {
+      eq_index
+    };
+    let mut val = trim_css_whitespace(&inner[eq_index + 1..]);
+    if val.len() >= 2
+      && matches!(val.as_bytes()[0], b'"' | b'\'')
+      && val.as_bytes()[0] == val.as_bytes()[val.len() - 1]
+    {
+      val = &val[1..val.len() - 1];
     }
+    return ParsedSelector::Attribute {
+      name: trim_css_whitespace(&inner[..op_start]).to_string(),
+      operator: Some(inner[op_start..=eq_index].to_string()),
+      value: Some(val.to_string()),
+    };
   }
   ParsedSelector::Attribute {
     name: inner.to_string(),
@@ -255,10 +288,149 @@ mod tests {
   }
 
   #[test]
+  fn parses_operator_before_attribute_value() {
+    let expected = "a^=b$=c*=d~=e|=f=g";
+    for op in ["=", "^=", "$=", "*=", "~=", "|="] {
+      let selector = format!("[data-code{op}\"{expected}\"]");
+      match parse_css_selector(&selector) {
+        ParsedSelector::Attribute {
+          name,
+          operator,
+          value,
+        } => {
+          assert_eq!(name, "data-code");
+          assert_eq!(operator.as_deref(), Some(op));
+          assert_eq!(value.as_deref(), Some(expected));
+        }
+        _ => panic!("expected attribute selector for {selector}"),
+      }
+    }
+  }
+
+  #[test]
+  fn trims_attribute_presence_name() {
+    match parse_css_selector("[ data-code ]") {
+      ParsedSelector::Attribute {
+        name,
+        operator,
+        value,
+      } => {
+        assert_eq!(name, "data-code");
+        assert!(operator.is_none());
+        assert!(value.is_none());
+      }
+      _ => panic!("expected attribute selector"),
+    }
+  }
+
+  #[test]
+  fn preserves_quotes_inside_attribute_values() {
+    for (selector, expected) in [
+      (r#"[ data-code = "'quoted'" ]"#, "'quoted'"),
+      (r#"[ data-code = '"quoted"' ]"#, "\"quoted\""),
+    ] {
+      match parse_css_selector(selector) {
+        ParsedSelector::Attribute { value, .. } => {
+          assert_eq!(value.as_deref(), Some(expected));
+        }
+        _ => panic!("expected attribute selector for {selector}"),
+      }
+    }
+  }
+
+  #[test]
+  fn keeps_non_css_whitespace_in_attribute_names() {
+    for separator in ['\u{a0}', '\x0b'] {
+      let expected = format!("{separator}data-code{separator}");
+      match parse_css_selector(&format!("[{expected}]")) {
+        ParsedSelector::Attribute { name, .. } => assert_eq!(name, expected),
+        _ => panic!("expected attribute selector"),
+      }
+    }
+  }
+
+  #[test]
   fn parses_compound_selector() {
     match parse_css_selector("div.card[data-x]") {
       ParsedSelector::Compound(parts) => assert_eq!(parts.len(), 3),
       _ => panic!("expected compound selector"),
+    }
+  }
+
+  #[test]
+  fn preserves_quoted_and_escaped_attribute_delimiters() {
+    for (selector, expected) in [
+      (
+        r#"a[href="/docs/[name].html#section"].active"#,
+        "/docs/[name].html#section",
+      ),
+      (
+        r"a[href='/docs/[name].html#section'].active",
+        "/docs/[name].html#section",
+      ),
+      (r#"a[href="a\"]b.c#d"].active"#, r#"a\"]b.c#d"#),
+      (r"a[href='a\']b.c#d'].active", r"a\']b.c#d"),
+      (r"a[href=a\]b.c#d].active", r"a\]b.c#d"),
+      (r#"a[href="a\\"].active"#, r"a\\"),
+    ] {
+      let ParsedSelector::Compound(parts) = parse_css_selector(selector) else {
+        panic!("expected compound selector for {selector}");
+      };
+      assert_eq!(parts.len(), 3, "{selector}");
+      assert!(matches!(&parts[0], ParsedSelector::Tag(tag) if tag == "a"));
+      match &parts[1] {
+        ParsedSelector::Attribute {
+          name,
+          operator,
+          value,
+        } => {
+          assert_eq!(name, "href");
+          assert_eq!(operator.as_deref(), Some("="));
+          assert_eq!(value.as_deref(), Some(expected), "{selector}");
+        }
+        _ => panic!("expected attribute selector for {selector}"),
+      }
+      assert!(matches!(&parts[2], ParsedSelector::Class(class) if class == "active"));
+    }
+  }
+
+  #[test]
+  fn preserves_escapes_in_selector_lists() {
+    for (selector, expected) in [
+      (r"[data=a\]b\,c]", r"a\]b\,c"),
+      (r"[data=a\]b,c]", r"a\]b,c"),
+      (r#"[data=a\"b,c]"#, r#"a\"b,c"#),
+      (r"[data=a\'b,c]", r"a\'b,c"),
+      (r#"[data="a\"]b,c"]"#, r#"a\"]b,c"#),
+      (r"[data='a\']b,c']", r"a\']b,c"),
+      (r"[data=a\\]", r"a\\"),
+      (r"[data=ação\\\]b,c]", r"ação\\\]b,c"),
+    ] {
+      let ParsedSelectorList::Single(ParsedSelector::Attribute { name, value, .. }) =
+        parse_css_selector_list(selector)
+      else {
+        panic!("expected one attribute selector for {selector}");
+      };
+      assert_eq!(name, "data");
+      assert_eq!(value.as_deref(), Some(expected), "{selector}");
+
+      let ParsedSelectorList::Multiple(parts) =
+        parse_css_selector_list(&format!("{selector}.active, span"))
+      else {
+        panic!("expected a selector list for {selector}");
+      };
+      assert_eq!(parts.len(), 2, "{selector}");
+      let ParsedSelector::Compound(compound) = &parts[0] else {
+        panic!("expected a compound selector for {selector}");
+      };
+      assert_eq!(compound.len(), 2, "{selector}");
+      assert!(
+        matches!(&compound[0], ParsedSelector::Attribute { value, .. }
+        if value.as_deref() == Some(expected)),
+        "{selector}"
+      );
+      assert!(matches!(&compound[1], ParsedSelector::Class(class) if class == "active"));
+      assert!(matches!(&parts[1], ParsedSelector::Tag(tag) if tag == "span"));
     }
   }
 
