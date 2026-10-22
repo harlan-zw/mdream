@@ -92,6 +92,20 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     expect(markdown).not.toContain('This footer should be excluded')
   })
 
+  it.each(['.active', '[class~="active"]'])('uses only ASCII whitespace as token separators with %s', async (selector) => {
+    const excluded = ['&#32;', '&#9;', '&#10;', '&#13;', '&#12;']
+      .map(separator => `<p class="notice${separator}active">hidden</p>`)
+      .join('')
+    const html = `${excluded}<p class="notice&nbsp;active">NBSP</p><p class="notice&#11;active">VT</p>`
+
+    const markdown = htmlToMarkdown(html, {
+      engine: await resolveEngine(engine),
+      plugins: { filter: { exclude: [selector] } },
+    })
+
+    expect(markdown).toBe('NBSP\n\nVT')
+  })
+
   // Tests for compound selectors
   it('handles compound selectors', async () => {
     const html = `

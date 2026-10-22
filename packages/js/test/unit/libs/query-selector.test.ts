@@ -1,5 +1,6 @@
 import type { ElementNode } from '@mdream/js'
 import { describe, expect, it } from 'vitest'
+import { htmlToMarkdown } from '../../../src/index.js'
 import {
   createAttributeSelector,
   createClassSelector,
@@ -8,6 +9,7 @@ import {
   createTagSelector,
   parseSelector,
 } from '../../../src/libs/query-selector'
+import { filterPlugin } from '../../../src/plugins/filter.js'
 
 function createTestElement(name: string, attributes?: Record<string, string>): ElementNode {
   return {
@@ -61,6 +63,29 @@ describe('query-selector', () => {
       const selector = createClassSelector('.active')
 
       expect(selector.matches(createTestElement('div', { class: '  btn   active  ' }))).toBe(true)
+    })
+
+    it.each([' ', '\t', '\n', '\r', '\f'])('matches class and word selectors across ASCII whitespace %j', (separator) => {
+      for (const input of ['.active', '[class~="active"]']) {
+        const selector = parseSelector(input)
+        expect(selector.matches(createTestElement('div', { class: `btn${separator}active${separator}primary` }))).toBe(true)
+        expect(selector.matches(createTestElement('div', { class: `${separator}active${separator}` }))).toBe(true)
+        expect(selector.matches(createTestElement('div', { class: `inactive${separator}active-other` }))).toBe(false)
+      }
+    })
+
+    it.each(['\u00A0', '\v'])('does not treat %j as a class separator', (separator) => {
+      for (const input of ['.active', '[class~="active"]']) {
+        const selector = parseSelector(input)
+        expect(selector.matches(createTestElement('div', { class: `btn${separator}active` }))).toBe(false)
+        expect(selector.matches(createTestElement('div', { class: `${separator}active${separator}` }))).toBe(false)
+      }
+    })
+
+    it.each(['.active', '[class~="active"]'])('filters entity-decoded class whitespace with %s', (selector) => {
+      expect(htmlToMarkdown('<p class="notice&#9;active">hidden</p><p class="notice&nbsp;active">shown</p>', {
+        plugins: [filterPlugin({ exclude: [selector] })],
+      })).toBe('shown')
     })
   })
 
