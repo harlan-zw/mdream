@@ -111,6 +111,18 @@ function shouldProtectDecodedEntityReferences(state: ParseState): boolean {
     && !isInsideRawHtmlBlock(depthMap)
 }
 
+// A blank that opens an inline element can be the only word separator,
+// whether the element writes a delimiter, like `<strong>`, or nothing, like a
+// `<span>`. A literal `tagOverrides` opener is not held back, so a stream may
+// already have sent it: the blank is dropped there, or it would split the
+// opener from the content.
+function keepsLeadingBlank(node: ElementNode): boolean {
+  const handler = node.tagHandler
+  if (handler?.literalEnterHasOutput)
+    return false
+  return handler?.isInline ?? node.tagId === -1
+}
+
 const SCRIPT_DATA = 0
 const SCRIPT_DATA_ESCAPED = 1
 const SCRIPT_DATA_ESCAPED_DASH = 2
@@ -632,6 +644,7 @@ export interface ParseState {
   tagOverrideHandlers?: Map<string, TagHandler>
   /** Whether emitted text should skip Markdown-only escaping */
   plainText?: boolean
+  keepLeadingBlanks?: boolean
   /**
    * Parsed (whitespace-collapsed) form of the raw run the last parse returned.
    * At end of input it is committed instead of the raw run, so trailing text
@@ -1308,7 +1321,10 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     || state.currentNode?.excludedFromMarkdown
   const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
 
-  if (!inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex) {
+  // Whitespace-only text before an element's first child is indentation, but
+  // in inline content after earlier text it is the only word separator.
+  const isLeadingBlank = !inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex
+  if (isLeadingBlank && ((state.plainText && !state.keepLeadingBlanks) || !keepsLeadingBlank(state.currentNode))) {
     return
   }
 
@@ -1334,6 +1350,25 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     if (start > 0) {
       text = text.substring(start)
     }
+  }
+
+  // The output moves the separator in front of the delimiter; the counters stay
+  // as if the blank were dropped, so it is no content of the element.
+  if (isLeadingBlank) {
+    if (text) {
+      const blank: TextNode = {
+        type: TEXT_NODE,
+        value: text,
+        parent: state.currentNode,
+        index: state.currentNode.currentWalkIndex!,
+        depth: state.depth,
+        containsWhitespace,
+        excludedFromMarkdown: excludesTextNodes,
+        leadingBlank: true,
+      }
+      handleEvent({ type: NodeEventEnter, node: blank })
+    }
+    return
   }
 
   if (state.hasEncodedHtmlEntity) {

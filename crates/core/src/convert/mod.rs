@@ -109,7 +109,7 @@ fn split_point(text: &str, floor: usize, hard_cut: bool) -> Option<usize> {
     if bytes[index] == SPACE_CHAR
       && !matches!(
         bytes[index + 1],
-        b' ' | b'#' | b'-' | b'+' | b'>' | b'0'..=b'9'
+        b' ' | b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9'
       )
     {
       return Some(index + 1);
@@ -140,7 +140,7 @@ const GFM_BYTE_FLAGS: [u8; 256] = {
   }
   t[b'\n' as usize] |= GFM_NEWLINE_BIT;
   t[b'\r' as usize] |= GFM_NEWLINE_BIT;
-  let active = b"\\*_~`[]|><\n\r#-+.) 0123456789";
+  let active = b"\\*_~`[]|><\n\r#-+=.) 0123456789";
   let mut i = 0usize;
   while i < active.len() {
     t[active[i] as usize] |= GFM_TEXT_ACTIVE_BIT;
@@ -167,6 +167,10 @@ struct OpenMarker {
   /// pair replaces that one as the latest, so dropping the empty pair has to
   /// make the outer break the latest again.
   starts_at_hard_break: bool,
+  /// A word separator sits right before the opener, moved there or written for
+  /// a pending one. When the pair turns out empty it goes with the opener and
+  /// is owed to the content after it.
+  follows_separator: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -825,6 +829,9 @@ pub struct ConvertState {
   /// delimiters close before the separator and streaming output has no
   /// speculative trailing whitespace.
   pending_inline_whitespace: bool,
+  /// End of the space the current element's enter wrote for a pending
+  /// separator, so an opener written right after it can take it along.
+  pending_space_end: usize,
   /// Deferred spacing after a committed figcaption.
   caption_boundary: CaptionBoundary,
 
@@ -1140,6 +1147,7 @@ impl ConvertState {
       has_last_text_node: false,
       last_node_is_inline: false,
       pending_inline_whitespace: false,
+      pending_space_end: usize::MAX,
       caption_boundary: CaptionBoundary::None,
       last_yielded_length: 0,
       has_streamed_output: false,
