@@ -175,7 +175,7 @@ pub(crate) fn matches_selector(tag: &ElementNode, selector: &ParsedSelector) -> 
         (Some("^="), Some(v)) => !v.is_empty() && attr_val.starts_with(v),
         (Some("$="), Some(v)) => !v.is_empty() && attr_val.ends_with(v),
         (Some("*="), Some(v)) => !v.is_empty() && attr_val.contains(v),
-        (Some("~="), Some(v)) => attr_val.split_whitespace().any(|w| w == v),
+        (Some("~="), Some(v)) => !v.is_empty() && attr_val.split_whitespace().any(|w| w == v),
         (Some("|="), Some(v)) => attr_val == v || attr_val.starts_with(&format!("{v}-")),
         _ => false,
       },
