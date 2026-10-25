@@ -82,6 +82,33 @@ describe('query-selector', () => {
       }
     })
 
+    it('does not match an empty class token in a long attribute', () => {
+      expect(createClassSelector('.').matches(createTestElement('div', { class: 'x'.repeat(10_000) }))).toBe(false)
+    })
+
+    it.each(['.active', '[class~="active"]'])('checks every occurrence and both token boundaries with %s', (input) => {
+      const selector = parseSelector(input)
+      for (const value of ['active other', 'other active', 'inactive active-other active', 'activeactive active']) {
+        expect(selector.matches(createTestElement('div', { class: value }))).toBe(true)
+      }
+      for (const value of ['inactive', 'active-other', 'inactive active-other', 'activeactive']) {
+        expect(selector.matches(createTestElement('div', { class: value }))).toBe(false)
+      }
+    })
+
+    it.each([' ', '\t', '\n', '\r', '\f'])('rejects a word operand containing HTML whitespace %j', (separator) => {
+      const token = `btn${separator}active`
+      const selector = createAttributeSelector(`[class~="${token}"]`)
+      expect(selector.matches(createTestElement('div', { class: token }))).toBe(false)
+      expect(selector.matches(createTestElement('div', { class: `other ${token} primary` }))).toBe(false)
+    })
+
+    it.each(['\u00A0', '\v'])('matches %j inside a word operand', (separator) => {
+      const token = `btn${separator}active`
+      const selector = createAttributeSelector(`[class~="${token}"]`)
+      expect(selector.matches(createTestElement('div', { class: `other ${token} primary` }))).toBe(true)
+    })
+
     it.each(['.active', '[class~="active"]'])('filters entity-decoded class whitespace with %s', (selector) => {
       expect(htmlToMarkdown('<p class="notice&#9;active">hidden</p><p class="notice&nbsp;active">shown</p>', {
         plugins: [filterPlugin({ exclude: [selector] })],

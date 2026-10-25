@@ -32,16 +32,28 @@ export function createIdSelector(selector: string): SelectorMatcher {
 }
 
 function containsWhitespaceSeparatedToken(value: string, token: string): boolean {
-  if (!value.includes(token))
+  if (!token)
     return false
-  let start = 0
-  for (let i = 0; i <= value.length; i++) {
-    const char = value.charCodeAt(i)
-    if (i === value.length || char === 32 || char === 9 || char === 10 || char === 12 || char === 13) {
-      if (i > start && i - start === token.length && value.startsWith(token, start))
+
+  let index = value.indexOf(token)
+  if (index === -1)
+    return false
+
+  for (let i = 0; i < token.length; i++) {
+    const char = token.charCodeAt(i)
+    if (char === 32 || char === 9 || char === 10 || char === 12 || char === 13)
+      return false
+  }
+
+  while (index !== -1) {
+    const before = value.charCodeAt(index - 1)
+    if (index === 0 || before === 32 || before === 9 || before === 10 || before === 12 || before === 13) {
+      const end = index + token.length
+      const after = value.charCodeAt(end)
+      if (end === value.length || after === 32 || after === 9 || after === 10 || after === 12 || after === 13)
         return true
-      start = i + 1
     }
+    index = value.indexOf(token, index + 1)
   }
   return false
 }
