@@ -2,9 +2,29 @@ import type { Plugin, ViteDevServer } from 'vite'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { viteHtmlToMarkdownPlugin } from '../../src/plugin.js'
 
+type DevServerPlugin = Plugin & { configureServer: (server: ViteDevServer) => void }
+
 describe('viteHtmlToMarkdownPlugin - Dev Server', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('uses the pathname for transforms and shares cached content across query strings', async () => {
+    const plugin = viteHtmlToMarkdownPlugin() as DevServerPlugin
+    const transformRequest = vi.fn((url: string) => Promise.resolve({ code: `<h1>${url}</h1>` }))
+    const server = { transformRequest, middlewares: { use: vi.fn() } } as unknown as ViteDevServer
+    plugin.configureServer(server)
+    const middleware = (server.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0][0]
+
+    for (const query of ['raw', 'url', 'inline', 'utm_source=llm']) {
+      for (const extension of ['.md', '']) {
+        const response = { setHeader: vi.fn(), end: vi.fn(), statusCode: 200 }
+        await middleware({ url: `/about${extension}?${query}`, headers: { accept: 'text/markdown' } }, response, vi.fn())
+        expect(response.end).toHaveBeenCalledWith('# /about.html')
+        expect(response.setHeader).toHaveBeenCalledWith('X-Markdown-Cached', query === 'raw' && extension ? 'false' : 'true')
+      }
+    }
+    expect(transformRequest.mock.calls).toEqual([['/about.html']])
   })
 
   it('should handle .md requests in dev server', async () => {

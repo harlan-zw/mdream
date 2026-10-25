@@ -6,6 +6,43 @@ interface AcceptEntry {
   position: number
 }
 
+function findDelimiter(value: string, start: number, delimiter: number): number {
+  let isQuoted = false
+  for (let i = start; i < value.length; i++) {
+    const char = value.charCodeAt(i)
+    if (isQuoted && char === 92 /* \\ */) {
+      i++
+      continue
+    }
+    if (char === 34 /* " */) {
+      isQuoted = !isQuoted
+      continue
+    }
+    if (!isQuoted && char === delimiter)
+      return i
+  }
+  return value.length
+}
+
+function parseQuality(part: string, start: number): number {
+  while (start < part.length) {
+    let char = part.charCodeAt(start)
+    while (char === 32 || char === 9) {
+      start++
+      char = part.charCodeAt(start)
+    }
+    if ((char === 113 || char === 81) && part.charCodeAt(start + 1) === 61 /* = */) {
+      const qStart = start + 2
+      let qEnd = qStart
+      while (qEnd < part.length && part.charCodeAt(qEnd) !== 59 && part.charCodeAt(qEnd) !== 32 && part.charCodeAt(qEnd) !== 9)
+        qEnd++
+      return +part.slice(qStart, qEnd) || 0
+    }
+    start = findDelimiter(part, start, 59 /* ; */) + 1
+  }
+  return 1
+}
+
 /**
  * Parse an HTTP Accept header into an ordered list of media types with quality values.
  * Supports quality weights (q=0.9) and preserves original position for tie-breaking.
@@ -14,9 +51,10 @@ export function parseAcceptHeader(accept: string): AcceptEntry[] {
   if (!accept)
     return []
   const entries: AcceptEntry[] = []
-  const parts = accept.split(',')
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i]!.trim()
+  for (let start = 0, i = 0; start < accept.length; i++) {
+    const end = findDelimiter(accept, start, 44 /* , */)
+    const part = accept.slice(start, end).trim()
+    start = end + 1
     if (!part)
       continue
     const semicolonIdx = part.indexOf(';')
@@ -27,16 +65,7 @@ export function parseAcceptHeader(accept: string): AcceptEntry[] {
     }
     else {
       type = part.slice(0, semicolonIdx).trim()
-      const paramStr = part.slice(semicolonIdx + 1)
-      const qIdx = paramStr.indexOf('q=')
-      if (qIdx !== -1) {
-        const qStart = qIdx + 2
-        let qEnd = qStart
-        while (qEnd < paramStr.length && paramStr.charCodeAt(qEnd) !== 59 /* ; */ && paramStr.charCodeAt(qEnd) !== 32 /* space */) {
-          qEnd++
-        }
-        q = +paramStr.slice(qStart, qEnd) || 0
-      }
+      q = parseQuality(part, semicolonIdx + 1)
     }
     entries.push({ type, q, position: i })
   }
@@ -80,9 +109,10 @@ export function negotiateContent(acceptHeader?: string, secFetchDest?: string): 
   let rejectedMd = false
   let rejectedHtml = false
 
-  const parts = accept.split(',')
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i]!.trim()
+  for (let start = 0, i = 0; start < accept.length; i++) {
+    const end = findDelimiter(accept, start, 44 /* , */)
+    const part = accept.slice(start, end).trim()
+    start = end + 1
     if (!part)
       continue
     sawAnyEntry = true
@@ -95,24 +125,7 @@ export function negotiateContent(acceptHeader?: string, secFetchDest?: string): 
     }
     else {
       type = part.slice(0, semicolonIdx).trim()
-      const paramStr = part.slice(semicolonIdx + 1)
-      // Find q= case-insensitively without allocating.
-      let qIdx = -1
-      for (let j = 0; j < paramStr.length - 1; j++) {
-        const c = paramStr.charCodeAt(j)
-        if ((c === 113 || c === 81) && paramStr.charCodeAt(j + 1) === 61 /* = */) {
-          qIdx = j
-          break
-        }
-      }
-      if (qIdx !== -1) {
-        const qStart = qIdx + 2
-        let qEnd = qStart
-        while (qEnd < paramStr.length && paramStr.charCodeAt(qEnd) !== 59 && paramStr.charCodeAt(qEnd) !== 32) {
-          qEnd++
-        }
-        q = +paramStr.slice(qStart, qEnd) || 0
-      }
+      q = parseQuality(part, semicolonIdx + 1)
     }
 
     // Normalize type for case-insensitive comparison (media types per RFC 7231).

@@ -19,8 +19,8 @@ describe('parseAcceptHeader', () => {
     expect(result[2]).toEqual({ type: 'text/plain', q: 1, position: 2 })
   })
 
-  it('parses quality values', () => {
-    const result = parseAcceptHeader('text/html;q=0.9, text/markdown;q=0.5')
+  it.each(['q', 'Q'])('parses quality values with %s', (parameter) => {
+    const result = parseAcceptHeader(`text/html;${parameter}=0.9, text/markdown;${parameter}=0.5`)
     expect(result[0]!.q).toBe(0.9)
     expect(result[1]!.q).toBe(0.5)
   })
@@ -42,8 +42,8 @@ describe('parseAcceptHeader', () => {
     expect(result).toHaveLength(2)
   })
 
-  it('handles q=0 (explicitly rejected)', () => {
-    const result = parseAcceptHeader('text/html;q=0')
+  it.each(['q', 'Q'])('handles %s=0 (explicitly rejected)', (parameter) => {
+    const result = parseAcceptHeader(`text/html;${parameter}=0`)
     expect(result[0]!.q).toBe(0)
   })
 
@@ -56,6 +56,40 @@ describe('parseAcceptHeader', () => {
     expect(result[2]!.q).toBe(0.9)
     expect(result[3]!.type).toBe('*/*')
     expect(result[3]!.q).toBe(0.8)
+  })
+})
+
+describe('quality parameter boundaries', () => {
+  const cases = [
+    ['seq=0', 1, 'markdown'],
+    ['x-q=0', 1, 'markdown'],
+    ['seq=0;Q=0.8', 0.8, 'markdown'],
+    ['x-q=0.9;q=0', 0, 'html'],
+    ['charset=utf-8; q=0.8', 0.8, 'markdown'],
+    ['note="q=0"', 1, 'markdown'],
+    ['note="x;q=0"', 1, 'markdown'],
+    [String.raw`note="a\";q=0"`, 1, 'markdown'],
+    ['note="q=0";\tQ=0.8', 0.8, 'markdown'],
+    ['note="x, text/markdown;q=1 ";Q=0', 0, 'html'],
+    [String.raw`note="x\\";q=0.2`, 0.2, 'html'],
+    ['q=0.8;seq=0', 0.8, 'markdown'],
+  ] as const
+
+  it.each(cases)('parses quality from %s', (parameters, quality) => {
+    expect(parseAcceptHeader(`text/markdown;${parameters}, text/html;q=0.5`)).toEqual([
+      { type: 'text/markdown', q: quality, position: 0 },
+      { type: 'text/html', q: 0.5, position: 1 },
+    ])
+  })
+
+  it.each(cases)('negotiates quality from %s', (parameters, _quality, format) => {
+    expect(negotiateContent(`text/markdown;${parameters}, text/html;q=0.5`)).toBe(format)
+  })
+
+  it('does not split a media type out of an unterminated quoted value', () => {
+    const header = 'text/html;q=0.5;note=", text/markdown'
+    expect(parseAcceptHeader(header)).toEqual([{ type: 'text/html', q: 0.5, position: 0 }])
+    expect(negotiateContent(header)).toBe('html')
   })
 })
 
