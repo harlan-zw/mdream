@@ -16,6 +16,7 @@ pub(super) enum HtmlFrame {
   },
 }
 
+/// Returns whether any byte is `&`, `<`, or `>` using byte-parallel zero detection.
 #[inline]
 fn has_html_text_escape(word: u64) -> bool {
   const ONES: u64 = 0x0101_0101_0101_0101;
@@ -23,11 +24,13 @@ fn has_html_text_escape(word: u64) -> bool {
   let amp = word ^ (ONES * u64::from(b'&'));
   let lt = word ^ (ONES * u64::from(b'<'));
   let gt = word ^ (ONES * u64::from(b'>'));
-  ((amp.wrapping_sub(ONES) & !amp)
-    | (lt.wrapping_sub(ONES) & !lt)
-    | (gt.wrapping_sub(ONES) & !gt)) & HIGH != 0
+  ((amp.wrapping_sub(ONES) & !amp) | (lt.wrapping_sub(ONES) & !lt) | (gt.wrapping_sub(ONES) & !gt))
+    & HIGH
+    != 0
 }
 
+/// Escapes text or attribute values while preserving UTF-8 slice boundaries.
+/// Plain text skips escape-free words; attributes and bracket escaping scan every byte.
 fn push_escaped_inner<const ESCAPE_BRACKETS: bool>(
   output: &mut String,
   value: &str,
@@ -400,12 +403,25 @@ mod tests {
 
   #[test]
   fn escape_words_match_every_byte_in_every_lane() {
-    for fill in [*b"abcdefgh", *b"&&<<>>>>", *b"x&x<x>x&", [0; 8], [0xff; 8], [0x80; 8], [0x26; 8], [0xc3, 0xa9, 0xe6, 0x9d, 0xb1, 0xe4, 0xba, 0xac]] {
+    for fill in [
+      *b"abcdefgh",
+      *b"&&<<>>>>",
+      *b"x&x<x>x&",
+      [0; 8],
+      [0xff; 8],
+      [0x80; 8],
+      [0x26; 8],
+      [0xc3, 0xa9, 0xe6, 0x9d, 0xb1, 0xe4, 0xba, 0xac],
+    ] {
       for lane in 0..8 {
         for byte in 0..=255u8 {
           let mut word = fill;
           word[lane] = byte;
-          assert_eq!(has_html_text_escape(u64::from_le_bytes(word)), word.iter().any(|b| matches!(b, b'&' | b'<' | b'>')), "{word:?}");
+          assert_eq!(
+            has_html_text_escape(u64::from_le_bytes(word)),
+            word.iter().any(|b| matches!(b, b'&' | b'<' | b'>')),
+            "{word:?}"
+          );
         }
       }
     }
@@ -415,7 +431,19 @@ mod tests {
   fn prefix_escape_matches_scalar_at_boundaries() {
     for prefix in ["x", "東京", "é", "🙂", "xé東🙂", "ééé€"] {
       for length in 0..=40 {
-        for suffix in ["", "&", "<", ">", "&&<>&", "\"[]", "é&東<🙂>", "é東京🙂", "ééé€&", "ééé€<", "ééé€>"] {
+        for suffix in [
+          "",
+          "&",
+          "<",
+          ">",
+          "&&<>&",
+          "\"[]",
+          "é&東<🙂>",
+          "é東京🙂",
+          "ééé€&",
+          "ééé€<",
+          "ééé€>",
+        ] {
           let value = format!("{}{suffix}", prefix.repeat(length));
           for attribute in [false, true] {
             let mut actual = String::from("prefix:");
@@ -427,13 +455,15 @@ mod tests {
             expected.clear();
             push_escaped_inner::<true>(&mut actual, &value, attribute);
             scalar_escaped_inner::<true>(&mut expected, &value, attribute);
-            assert_eq!(actual, expected, "brackets {value:?}, attribute {attribute}");
+            assert_eq!(
+              actual, expected,
+              "brackets {value:?}, attribute {attribute}"
+            );
           }
         }
       }
     }
   }
-
 
   #[test]
   fn html_tag_allowlist_is_exact() {
