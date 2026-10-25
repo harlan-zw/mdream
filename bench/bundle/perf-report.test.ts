@@ -98,7 +98,7 @@ describe('performance report', () => {
       expect(report).not.toContain('within CI noise')
       expect(report).toContain('ℹ️ **1 inconclusive** · past the gate, but the base measurement is informational')
       expect(report).not.toContain('slower')
-      expect(report).toContain(`| ${name} | 90.6 KiB | ℹ️ +371.5% (base informational) | — |`)
+      expect(report).toContain(`| ${name} | 19.2 KiB | 90.6 KiB | ℹ️ +371.5% (base informational) | — |`)
     })
     it('does not gate a reduction against an informational base', () => {
       const report = renderPerfReport(
