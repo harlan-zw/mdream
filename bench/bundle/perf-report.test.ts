@@ -129,5 +129,25 @@ describe('performance report', () => {
       expect(report).not.toContain('inconclusive')
       expect(report).toContain(`| **${name}** | 19.2 KiB → 90.6 KiB | 🔴 +71.4 KiB (+371.5%) |`)
     })
+    it('reports inconclusive and not comparable rows separately', () => {
+      const cpu = { id: 'cpu', name: 'CPU', kind: 'time' as const, value: 100 }
+      const report = renderPerfReport(
+        { benches: [unstable, cpu] },
+        { benches: [stable, { ...cpu, value: 1, comparisonUnavailableReason: 'output changed' }] },
+      )
+      expect(report).toContain('✅ **No gated significant change** _(inconclusive comparisons are excluded, comparable benchmarks only)_')
+      expect(report).toContain('ℹ️ **1 inconclusive** · past the gate, but the base measurement is informational')
+      expect(report).toContain('ℹ️ **1 benchmark not comparable**')
+      expect(report).toContain(`| ${name} | 19.2 KiB | 90.6 KiB | ℹ️ +371.5% (base informational) | — |`)
+      expect(report).toContain('| CPU | 100.00 ms | 1.00 ms | not comparable: output changed | n/a |')
+      expect(report).not.toMatch(/faster|slower|-99\.0%/)
+    })
+    it('does not count an unavailable comparison against an informational base as inconclusive', () => {
+      const report = renderPerfReport({ benches: [unstable] }, { benches: [{ ...stable, comparisonUnavailableReason: 'output changed' }] })
+      expect(report).toContain('No comparable benchmarks')
+      expect(report).toContain('1 benchmark not comparable')
+      expect(report).toContain(`| ${name} | 19.2 KiB | 90.6 KiB | not comparable: output changed | n/a |`)
+      expect(report).not.toMatch(/inconclusive|base informational|No gated significant change/)
+    })
   })
 })
