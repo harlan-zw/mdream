@@ -4285,7 +4285,9 @@ impl ConvertState {
       b'>' => true,
       b'#' => word.len() <= 6 && word.iter().all(|&byte| byte == b'#'),
       b'+' => word.len() == 1,
-      b'-' | b'=' | b'*' | b'_' => word.iter().all(|&byte| byte == first),
+      b'-' | b'=' => word.iter().all(|&byte| byte == first),
+      b'*' => word.len() != 2 && word.iter().all(|&byte| byte == first),
+      b'_' => word.len() >= 3 && word.iter().all(|&byte| byte == first),
       b'`' | b'~' => word.len() >= 3 && word[..3].iter().all(|&byte| byte == first),
       b'0'..=b'9' => {
         let digits = word.iter().take_while(|byte| byte.is_ascii_digit()).count();

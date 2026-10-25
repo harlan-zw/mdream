@@ -174,6 +174,18 @@ describe('wrap width (issue #106)', () => {
     await expectEveryChunking(html, { wrapWidth: width }, expected)
   })
 
+  it.each(['**', '_', '__'])('wraps before raw text that cannot open a block: %s', async (marker) => {
+    const html = `<details><summary>S</summary><code>aaaaaaaa</code> ${marker} x</details>`
+    const expected = `<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code>\n${marker} x</details>`
+    await expectEveryChunking(html, { wrapWidth: 12 }, expected)
+  })
+
+  it.each(['*', '***', '___'])('keeps raw block markers on their existing line: %s', async (marker) => {
+    const html = `<details><summary>S</summary><code>aaaaaaaa</code> ${marker} x</details>`
+    const expected = `<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> ${marker}\nx</details>`
+    await expectEveryChunking(html, { wrapWidth: 12 }, expected)
+  })
+
   // A blockquote a plugin or a literal override dropped writes no `>`.
   const droppedQuoteCases: [string, Partial<MdreamOptions>, string][] = [
     ['<blockquote><p><span>aaaaaaa </span>bbbb</p></blockquote>', { wrapWidth: 8, plugins: [filterPlugin({ include: ['p'] })] }, 'aaaaaaa\nbbbb'],

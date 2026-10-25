@@ -769,7 +769,7 @@ function columnWidth(value: string, start: number): number {
  * must not be what puts one at the start of a line. Parity with the Rust
  * `opens_block_at_line_start`.
  */
-const BLOCK_START_WORD = /^(?:>|`{3}|~{3}|(?:#{1,6}|\+|-+|=+|\*+|_+|\d{1,9}[.)])$)/
+const BLOCK_START_WORD = /^(?:>|`{3}|~{3}|(?:#{1,6}|\+|-+|=+|\*|\*{3,}|_{3,}|\d{1,9}[.)])$)/
 
 /**
  * Hard-wrap `value` on spaces so no output line exceeds `width` code points.
