@@ -96,6 +96,33 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
       .toBe('```\na\nb\n\n\n```\n\n[link](#x)')
   })
 
+  it.each([
+    [
+      'after inline code',
+      '<p>Run <code>a</code></p><pre><code>plain</code></pre><pre><code>last\n```\nend</code></pre>',
+      'Run `a`\n\n```\nplain\n```\n\n````\nlast\n```\nend\n````',
+    ],
+    [
+      'in a list item',
+      '<p>Intro</p><pre><code>one</code></pre><ul><li>item<pre><code class="language-js">x\n```\ny</code></pre></li></ul>',
+      'Intro\n\n```\none\n```\n\n- item\n\n  ````js\n  x\n  ```\n  y\n  ````',
+    ],
+    [
+      'in a blockquote',
+      '<pre><code>one</code></pre><blockquote><pre><code>before\n````\nafter</code></pre></blockquote>',
+      '```\none\n```\n\n> `````\n> before\n> ````\n> after\n> `````',
+    ],
+  ])('widens a later fence %s and leaves earlier fences unchanged', async (_, html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let split = 1; split < html.length; split++) {
+      expect(await collect(streamHtmlToMarkdown(
+        chunkedStream([html.slice(0, split), html.slice(split)]),
+        { engine },
+      )), `split at ${split}`).toBe(expected)
+    }
+  })
+
   it('leaves the existing <pre><code> behaviour unchanged', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<pre><code>const x = 1</code></pre>', { engine })).toBe('```\nconst x = 1\n```')
