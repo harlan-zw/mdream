@@ -123,6 +123,24 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
   })
 
   // Tests for attribute selectors
+  it.each([
+    ['[data-value]', 'empty\n\nhyphen\n\nvalue'],
+    ['[data-value=""]', 'empty'],
+    ['[data-value^=""]', ''],
+    ['[data-value$=""]', ''],
+    ['[data-value*=""]', ''],
+    ['[data-value~=""]', ''],
+    ['[data-value|=""]', 'empty\n\nhyphen'],
+  ])('handles the empty operand in %s', async (selector, expected) => {
+    const html = '<p data-value="">empty</p><p data-value="-en">hyphen</p><p data-value="real">value</p><p>absent</p>'
+    const markdown = htmlToMarkdown(html, {
+      engine: await resolveEngine(engine),
+      plugins: { filter: { include: [selector] } },
+    })
+
+    expect(markdown).toBe(expected)
+  })
+
   it('handles attribute selectors', async () => {
     const html = `
       <p>This should be excluded</p>

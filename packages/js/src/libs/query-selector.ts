@@ -130,7 +130,7 @@ export function createAttributeSelector(selector: string): SelectorMatcher {
       }
 
       // If we're just checking for existence, we've already confirmed it exists
-      if (!operator || !attrValue) {
+      if (!operator || attrValue === undefined) {
         return true
       }
 
@@ -144,11 +144,11 @@ export function createAttributeSelector(selector: string): SelectorMatcher {
         case '=': // Exact match
           return value === attrValue
         case '^=': // Starts with
-          return value.startsWith(attrValue)
+          return attrValue.length > 0 && value.startsWith(attrValue)
         case '$=': // Ends with
-          return value.endsWith(attrValue)
+          return attrValue.length > 0 && value.endsWith(attrValue)
         case '*=': // Contains
-          return value.includes(attrValue)
+          return attrValue.length > 0 && value.includes(attrValue)
         case '~=': // Contains word
           return containsWhitespaceSeparatedToken(value, attrValue)
         case '|=': // Starts with prefix
@@ -158,7 +158,7 @@ export function createAttributeSelector(selector: string): SelectorMatcher {
       }
     },
     toString: () => {
-      if (!operator || !attrValue) {
+      if (!operator || attrValue === undefined) {
         return `[${attrName}]`
       }
       return `[${attrName}${operator}${attrValue}]`
