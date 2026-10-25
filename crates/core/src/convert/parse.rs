@@ -726,6 +726,15 @@ impl ConvertState {
         start += 1;
       }
       if start > 0 {
+        // Inline text at a line start is trimmed for output, not extraction.
+        if first_block_parent_index.is_none() {
+          let current_depth = self.stack.len();
+          for tracked in &mut self.extraction_tracked {
+            if tracked.stack_depth <= current_depth {
+              tracked.text_content.push_str(&text[..start]);
+            }
+          }
+        }
         text.drain(..start);
       }
     }

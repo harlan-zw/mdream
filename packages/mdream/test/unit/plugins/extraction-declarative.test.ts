@@ -28,6 +28,42 @@ describe('declarative extraction public API', () => {
 })
 
 describe.each(engines)('declarative extraction (plugins.extraction) $name', (engineConfig) => {
+  it.each([
+    ['w.<label>x<br> a</label>H', 'x a', 'w.x  \naH', 'w.x  \n aH'],
+    ['w.<label>x<br> &amp; a</label>H', 'x & a', 'w.x  \n& aH', 'w.x  \n & aH'],
+    ['w.<label>x<br> a<br> b</label>H', 'x a b', 'w.x  \na  \nbH', 'w.x  \n a  \n bH'],
+    ['w.<label>x<br><span> a</span></label>H', 'x a', 'w.x  \naH', 'w.x  \n aH'],
+    ['w.<label>x<br>\n\t a</label>H', 'x a', 'w.x  \naH', 'w.x  \n aH'],
+    ['<div>w.<label>x<br> a</label>H</div>', 'x a', 'w.x  \n aH', 'w.x  \n aH'],
+    ['<label> a</label>', 'a', 'a', 'a'],
+    ['w.<label>x<br> &#32;a</label>H', 'x  a', 'w.x  \n aH', 'w.x  \n  aH'],
+  ])('preserves extracted spaces at line starts: %s', async (html, text, rustMarkdown, jsMarkdown) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const expectedMarkdown = engineConfig.name === 'Rust Engine' ? rustMarkdown : jsMarkdown
+    const extracted: string[] = []
+    const plugins = { extraction: { label: (element: ExtractedElement) => extracted.push(element.textContent) } }
+
+    expect(engine.htmlToMarkdown(html, { plugins })).toBe(expectedMarkdown)
+    expect(extracted).toEqual([text])
+
+    for (let width = 1; width <= html.length; width++) {
+      extracted.length = 0
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(stream, { plugins }))
+        markdown += chunk
+
+      expect(markdown, `chunk width ${width}`).toBe(expectedMarkdown)
+      expect(extracted, `chunk width ${width}`).toEqual([text])
+    }
+  })
+
   it('dispatches nested matches when their text content is complete', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const tags: string[] = []
