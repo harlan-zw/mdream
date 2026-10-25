@@ -5,7 +5,9 @@
 //           (~0.3% jitter), so a tight gate surfaces the marginal gains time can't show.
 // Wall time is `informational`: shown for reference but it never drives the verdict,
 // because it's the noisiest signal (GC/scheduling) and would false-alarm while CPU
-// and allocation agree. CPU is the gated time authority.
+// and allocation agree. CPU is the gated time authority. A metric flagged
+// informational on either side cannot drive the verdict: an unstable base value
+// is as unreliable a reference as an unstable PR value.
 
 export interface PerfBench {
   id: string
@@ -39,6 +41,7 @@ interface Row {
   base?: PerfBench
   status: Status
   deltaPct: number
+  informational: boolean
   comparisonUnavailableReason?: string
 }
 
@@ -64,11 +67,12 @@ function fmtPct(pct: number): string {
 }
 
 function classify(pr: PerfBench, base?: PerfBench): Row {
+  const informational = pr.informational === true || base?.informational === true
   const comparisonUnavailableReason = pr.comparisonUnavailableReason ?? base?.comparisonUnavailableReason
   if (comparisonUnavailableReason != null)
-    return { bench: pr, base, status: 'unavailable', deltaPct: 0, comparisonUnavailableReason }
+    return { bench: pr, base, status: 'unavailable', deltaPct: 0, informational, comparisonUnavailableReason }
   if (!base)
-    return { bench: pr, base, status: 'new', deltaPct: 0 }
+    return { bench: pr, base, status: 'new', deltaPct: 0, informational }
   const delta = pr.value - base.value
   const deltaPct = base.value !== 0 ? (delta / Math.abs(base.value)) * 100 : 0
   let significant: boolean
@@ -91,9 +95,9 @@ function classify(pr: PerfBench, base?: PerfBench): Row {
     significant = Math.abs(delta) > ALLOC_FLOOR_BYTES && (base.value === 0 || Math.abs(deltaPct) > ALLOC_FLOOR_PCT)
   }
   if (!significant)
-    return { bench: pr, base, status: 'same', deltaPct }
+    return { bench: pr, base, status: 'same', deltaPct, informational }
   // higher is worse for both time and allocation
-  return { bench: pr, base, status: delta > 0 ? 'slower' : 'faster', deltaPct }
+  return { bench: pr, base, status: delta > 0 ? 'slower' : 'faster', deltaPct, informational }
 }
 
 function deltaCell(row: Row): string {
@@ -104,8 +108,10 @@ function deltaCell(row: Row): string {
   if (row.bench.kind === 'ratio')
     return `ℹ️ ${fmtPct(row.deltaPct)}`
   // informational metrics (wall time) report their delta neutrally, never as slower/faster
-  if (row.bench.informational)
-    return row.status === 'same' ? `${fmtPct(row.deltaPct)} (within noise)` : `ℹ️ ${fmtPct(row.deltaPct)}`
+  if (row.informational) {
+    const delta = row.status === 'same' ? `${fmtPct(row.deltaPct)} (within noise)` : `ℹ️ ${fmtPct(row.deltaPct)}`
+    return row.bench.informational ? delta : `${delta} (base informational)`
+  }
   if (row.status === 'same')
     return `${fmtPct(row.deltaPct)} (within noise)`
   const emoji = row.status === 'slower' ? '🔴' : '🟢'
@@ -120,10 +126,13 @@ function deltaCell(row: Row): string {
 export function renderPerfReport(base: PerfRun | null, pr: PerfRun): string {
   const rows = pr.benches.map(b => classify(b, base?.benches?.find(x => x.id === b.id)))
   // informational benches (wall time) are shown in the details but never drive the verdict
-  const changed = rows.filter(r => !r.bench.informational && (r.status === 'slower' || r.status === 'faster'))
+  const changed = rows.filter(r => !r.informational && (r.status === 'slower' || r.status === 'faster'))
   const slower = changed.filter(r => r.status === 'slower')
+  // Past the gate, but only the base flag keeps them out of the verdict.
+  const inconclusive = rows.filter(r => r.informational && !r.bench.informational && (r.status === 'slower' || r.status === 'faster'))
   const unavailable = rows.filter(r => r.status === 'unavailable')
   const comparable = rows.filter(r => r.status !== 'unavailable' && r.status !== 'new')
+  const comparableOnly = unavailable.length ? ', comparable benchmarks only' : ''
 
   const out: string[] = ['### ⚡ Performance _(directional)_', '']
   if (!comparable.length)
@@ -132,9 +141,13 @@ export function renderPerfReport(base: PerfRun | null, pr: PerfRun): string {
     out.push(`⚠️ **${slower.length} slower** · past the per-metric noise gate`)
   else if (changed.length)
     out.push(`🟢 **${changed.length} faster**`)
+  else if (inconclusive.length)
+    out.push(`✅ **No gated significant change** _(inconclusive comparisons are excluded${comparableOnly})_`)
   else
-    out.push(`✅ **No significant change** _(within CI noise${unavailable.length ? ', comparable benchmarks only' : ''})_`)
+    out.push(`✅ **No significant change** _(within CI noise${comparableOnly})_`)
 
+  if (inconclusive.length)
+    out.push(`ℹ️ **${inconclusive.length} inconclusive** · past the gate, but the base measurement is informational`)
   if (unavailable.length)
     out.push(`ℹ️ **${unavailable.length} benchmark${unavailable.length === 1 ? '' : 's'} not comparable** · absolute measurements and reasons below`)
 
