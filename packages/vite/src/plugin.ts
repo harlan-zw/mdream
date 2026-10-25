@@ -331,7 +331,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
           const markdownContent = htmlToMarkdown(htmlContent, mdreamOptions)
 
           // Generate corresponding .md filename (preserving directory structure)
-          const markdownFileName = fileName.replace('.html', '.md')
+          const markdownFileName = `${fileName.slice(0, -5)}.md`
           const outputPath = options.outputDir
             ? `${options.outputDir}/${markdownFileName}`
             : markdownFileName
