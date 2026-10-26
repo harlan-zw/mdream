@@ -1,5 +1,5 @@
 import type { ElementNode } from '@mdream/js'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { htmlToMarkdown } from '../../../src/index.js'
 import {
   createAttributeSelector,
@@ -117,6 +117,16 @@ describe('query-selector', () => {
   })
 
   describe('createAttributeSelector', () => {
+    it.each(['"', '\''])('preserves a single %s in an attribute value', (quote) => {
+      const name = `a${quote}`
+      const input = `[${name}=${quote}]`
+      for (const selector of [createAttributeSelector(input), parseSelector(input)]) {
+        expect(selector.matches(createTestElement('p', { [name]: quote }))).toBe(true)
+        expect(selector.matches(createTestElement('p', { [name]: '' }))).toBe(false)
+        expect(selector.matches(createTestElement('p', { [name]: 'other' }))).toBe(false)
+      }
+    })
+
     it('matches elements by attribute existence', () => {
       const selector = createAttributeSelector('[data-id]')
 
@@ -216,6 +226,95 @@ describe('query-selector', () => {
   })
 
   describe('parseSelector', () => {
+    it.each(['[data=', '[data="a,b', '[data=ação\\'])('keeps an unterminated attribute intact in %s', (attribute) => {
+      expect(parseSelector(attribute).matches(createTestElement('p'))).toBe(false)
+      expect(parseSelector(`p${attribute}, span`).matches(createTestElement('span'))).toBe(false)
+      const selector = parseSelector(`span, p${attribute}, a`)
+      expect(selector.matches(createTestElement('span'))).toBe(true)
+      expect(selector.matches(createTestElement('p'))).toBe(false)
+      expect(selector.matches(createTestElement('a'))).toBe(false)
+    })
+
+    it.each([
+      [String.raw`[data=a\]b\,c]`, String.raw`a\]b\,c`],
+      [String.raw`[data=a\]b,c]`, String.raw`a\]b,c`],
+      [String.raw`[data=a\"b,c]`, String.raw`a\"b,c`],
+      [String.raw`[data=a\'b,c]`, String.raw`a\'b,c`],
+      [String.raw`[data="a\"]b,c"]`, String.raw`a\"]b,c`],
+      [String.raw`[data='a\']b,c']`, String.raw`a\']b,c`],
+      [String.raw`[data=a\\]`, String.raw`a\\`],
+      [String.raw`[data=ação\\\]b,c]`, String.raw`ação\\\]b,c`],
+      [String.raw`[data=a\çb]`, String.raw`a\çb`],
+      [String.raw`[data=a\🦀b]`, String.raw`a\🦀b`],
+    ])('preserves escapes when splitting %s', (input, value) => {
+      const element = createTestElement('p', { data: value, class: 'active' })
+      expect(parseSelector(input).matches(element)).toBe(true)
+
+      const selector = parseSelector(`${input}.active, span`)
+      expect(selector.matches(element)).toBe(true)
+      expect(selector.matches(createTestElement('span'))).toBe(true)
+      expect(selector.matches(createTestElement('p', { data: value }))).toBe(false)
+      expect(selector.matches(createTestElement('p', { data: 'other', class: 'active' }))).toBe(false)
+    })
+
+    it('bounds character scans for unterminated attributes linearly', () => {
+      const input = '[data='.repeat(128)
+      const charCodeAt = vi.spyOn(String.prototype, 'charCodeAt')
+      let scans = 0
+      try {
+        parseSelector(input)
+        scans = charCodeAt.mock.calls.length
+      }
+      finally {
+        charCodeAt.mockRestore()
+      }
+      expect(scans).toBeLessThan(input.length * 4)
+    })
+
+    it.each(['\u00A0', '\v'])('does not trim %j from attribute names', (separator) => {
+      const name = `${separator}data-code${separator}`
+      const selector = parseSelector(`[${name}]`)
+
+      expect(selector.matches(createTestElement('p', { [name]: 'value' }))).toBe(true)
+      expect(selector.matches(createTestElement('p', { 'data-code': 'value' }))).toBe(false)
+    })
+
+    it.each(['=', '^=', '$=', '*=', '~=', '|='])('keeps operator-like text in an attribute value with %s', (operator) => {
+      const value = 'a^=b$=c*=d~=e|=f=g'
+      const selector = parseSelector(`[data-code${operator}"${value}"]`)
+
+      expect(selector.matches(createTestElement('p', { 'data-code': value }))).toBe(true)
+      expect(selector.matches(createTestElement('p', { 'data-code': 'other' }))).toBe(false)
+    })
+
+    it.each([
+      ['[ data-code ]', 'value'],
+      ['[ data-code = "value" ]', 'value'],
+      ['[\tdata-code\t^=\t"val"\t]', 'value'],
+      ['[ data-code = " spaced " ]', ' spaced '],
+      ['[ data-code = "\'quoted\'" ]', '\'quoted\''],
+      ['[ data-code = \'"quoted"\' ]', '"quoted"'],
+      ['[data-code=\u00A0value\u00A0]', '\u00A0value\u00A0'],
+    ])('handles surrounding whitespace in %s', (input, value) => {
+      const selector = parseSelector(input)
+
+      expect(selector.matches(createTestElement('p', { 'data-code': value }))).toBe(true)
+      expect(selector.matches(createTestElement('p'))).toBe(false)
+    })
+
+    it.each([
+      ['a[href="https://example.com"]', 'a', { href: 'https://example.com' }],
+      ['img[src$=".png"]', 'img', { src: 'image.png' }],
+      ['a[href="#main"]', 'a', { href: '#main' }],
+      ['a[href="/docs/[name].html#section"].active', 'a', { href: '/docs/[name].html#section', class: 'active' }],
+      ['[data-label="[a], #b.c"].active, img', 'a', { 'data-label': '[a], #b.c', 'class': 'active' }],
+    ])('preserves punctuation in %s', (input, tag, attributes) => {
+      const selector = parseSelector(input)
+
+      expect(selector.matches(createTestElement(tag, attributes))).toBe(true)
+      expect(selector.matches(createTestElement(tag))).toBe(false)
+    })
+
     it('throws error for empty selector', () => {
       expect(() => parseSelector('')).toThrow('Empty selector')
       expect(() => parseSelector('   ')).toThrow('Empty selector')
