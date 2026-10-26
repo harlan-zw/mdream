@@ -1,5 +1,5 @@
 import type { ElementNode, Node, TextNode } from './types'
-import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_H1, TAG_H6, TAG_LI, TAG_SPAN, TAG_TD, TAG_TH } from './const'
+import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_H1, TAG_H6, TAG_SPAN, TAG_TD, TAG_TH } from './const'
 import {
   HTML_ENTITIES,
   MAX_ENTITY_NAME_LENGTH,
@@ -145,34 +145,6 @@ export function escapeHtml(value: string, attribute = false, protectMarkdown = f
     }
   }
   return copiedUntil === 0 ? value : escaped + value.slice(copiedUntil)
-}
-
-/**
- * Build the Markdown prefix needed to keep a continued line inside its open
- * list items, outermost first. Quote markers are never part of it. A rendered
- * blockquote buffers its content and prefixes every line when it closes, and
- * one a plugin or a literal override dropped writes no `>` at all.
- */
-export function continuationPrefix(
-  node: Pick<Node, 'parent'>,
-  listIndentWidths: readonly number[],
-): string {
-  const chain: ElementNode[] = []
-  let current = node.parent
-  while (current) {
-    chain.push(current)
-    current = current.parent
-  }
-
-  let prefix = ''
-  let listIndex = 0
-  for (let i = chain.length - 1; i >= 0; i--) {
-    if (chain[i]!.tagId === TAG_LI) {
-      prefix += ' '.repeat(listIndentWidths[listIndex] ?? 2)
-      listIndex++
-    }
-  }
-  return prefix
 }
 
 // U+0080–U+009F replacements from the numeric character reference end state.
