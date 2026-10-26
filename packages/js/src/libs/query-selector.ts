@@ -31,6 +31,33 @@ export function createIdSelector(selector: string): SelectorMatcher {
   }
 }
 
+function containsWhitespaceSeparatedToken(value: string, token: string): boolean {
+  if (!token)
+    return false
+
+  let index = value.indexOf(token)
+  if (index === -1)
+    return false
+
+  for (let i = 0; i < token.length; i++) {
+    const char = token.charCodeAt(i)
+    if (char === 32 || char === 9 || char === 10 || char === 12 || char === 13)
+      return false
+  }
+
+  while (index !== -1) {
+    const before = value.charCodeAt(index - 1)
+    if (index === 0 || before === 32 || before === 9 || before === 10 || before === 12 || before === 13) {
+      const end = index + token.length
+      const after = value.charCodeAt(end)
+      if (end === value.length || after === 32 || after === 9 || after === 10 || after === 12 || after === 13)
+        return true
+    }
+    index = value.indexOf(token, index + 1)
+  }
+  return false
+}
+
 /**
  * Creates a class selector matcher (e.g., '.container', '.header')
  */
@@ -40,8 +67,7 @@ export function createClassSelector(selector: string): SelectorMatcher {
     matches: (element: ElementNode) => {
       if (!element.attributes?.class)
         return false
-      const classes = element.attributes.class.trim().split(' ').filter(Boolean)
-      return classes.includes(className)
+      return containsWhitespaceSeparatedToken(element.attributes.class, className)
     },
     toString: () => `.${className}`,
   }
@@ -139,7 +165,7 @@ export function createAttributeSelector(selector: string): SelectorMatcher {
       }
 
       // If we're just checking for existence, we've already confirmed it exists
-      if (!operator || !attrValue) {
+      if (!operator || attrValue === undefined) {
         return true
       }
 
@@ -153,13 +179,13 @@ export function createAttributeSelector(selector: string): SelectorMatcher {
         case '=': // Exact match
           return value === attrValue
         case '^=': // Starts with
-          return value.startsWith(attrValue)
+          return attrValue.length > 0 && value.startsWith(attrValue)
         case '$=': // Ends with
-          return value.endsWith(attrValue)
+          return attrValue.length > 0 && value.endsWith(attrValue)
         case '*=': // Contains
-          return value.includes(attrValue)
+          return attrValue.length > 0 && value.includes(attrValue)
         case '~=': // Contains word
-          return value.trim().split(' ').filter(Boolean).includes(attrValue)
+          return containsWhitespaceSeparatedToken(value, attrValue)
         case '|=': // Starts with prefix
           return value === attrValue || value.startsWith(`${attrValue}-`)
         default:
@@ -167,7 +193,7 @@ export function createAttributeSelector(selector: string): SelectorMatcher {
       }
     },
     toString: () => {
-      if (!operator || !attrValue) {
+      if (!operator || attrValue === undefined) {
         return `[${attrName}]`
       }
       return `[${attrName}${operator}${attrValue}]`

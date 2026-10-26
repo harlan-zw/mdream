@@ -3111,6 +3111,46 @@ fn filter_strips_hidden_content_and_subtree() {
 }
 
 #[test]
+fn extraction_preserves_spaces_at_line_starts() {
+  for (html, text, markdown) in [
+    ("w.<label>x<br> a</label>H", "x a", "w.x  \naH"),
+    ("w.<label>x<br> &amp; a</label>H", "x & a", "w.x  \n& aH"),
+    ("w.<label>x<br> a<br> b</label>H", "x a b", "w.x  \na  \nbH"),
+    ("w.<label>x<br><span> a</span></label>H", "x a", "w.x  \naH"),
+    ("w.<label>x<br>\n\t a</label>H", "x a", "w.x  \naH"),
+    ("<div>w.<label>x<br> a</label>H</div>", "x a", "w.x  \n aH"),
+    ("<label> a</label>", "a", "a"),
+    ("w.<label>x<br> &#32;a</label>H", "x  a", "w.x  \n aH"),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        extraction: Some(ExtractionConfig::new(&["label"])),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let result = html_to_markdown_result(html, options.clone());
+    assert_eq!(result.markdown, markdown);
+    assert_eq!(result.extracted.unwrap()[0].text_content, text);
+
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(options.clone());
+      let mut output = String::new();
+      for piece in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(piece).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, markdown, "chunk width {width}: {html}");
+      assert_eq!(
+        processor.take_extracted().unwrap()[0].text_content,
+        text,
+        "chunk width {width}: {html}"
+      );
+    }
+  }
+}
+
+#[test]
 fn extraction_by_tag() {
   let result = html_to_markdown_result(
     "<html><body><h1>Title</h1><p>Content</p><h2>Sub</h2></body></html>",

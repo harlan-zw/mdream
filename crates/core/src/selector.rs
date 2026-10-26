@@ -194,7 +194,7 @@ pub(crate) fn matches_selector(tag: &ElementNode, selector: &ParsedSelector) -> 
     ParsedSelector::Class(class_name) => tag
       .attributes
       .get("class")
-      .is_some_and(|c| c.split_whitespace().any(|cls| cls == class_name)),
+      .is_some_and(|c| c.split_ascii_whitespace().any(|cls| cls == class_name)),
     ParsedSelector::Id(id) => tag.attributes.get("id").is_some_and(|v| v == id),
     ParsedSelector::Attribute {
       name,
@@ -205,10 +205,10 @@ pub(crate) fn matches_selector(tag: &ElementNode, selector: &ParsedSelector) -> 
       Some(attr_val) => match (operator.as_deref(), value.as_deref()) {
         (None, _) | (_, None) => true,
         (Some("="), Some(v)) => attr_val == v,
-        (Some("^="), Some(v)) => attr_val.starts_with(v),
-        (Some("$="), Some(v)) => attr_val.ends_with(v),
-        (Some("*="), Some(v)) => attr_val.contains(v),
-        (Some("~="), Some(v)) => attr_val.split_whitespace().any(|w| w == v),
+        (Some("^="), Some(v)) => !v.is_empty() && attr_val.starts_with(v),
+        (Some("$="), Some(v)) => !v.is_empty() && attr_val.ends_with(v),
+        (Some("*="), Some(v)) => !v.is_empty() && attr_val.contains(v),
+        (Some("~="), Some(v)) => !v.is_empty() && attr_val.split_ascii_whitespace().any(|w| w == v),
         (Some("|="), Some(v)) => attr_val == v || attr_val.starts_with(&format!("{v}-")),
         _ => false,
       },
@@ -230,6 +230,32 @@ pub(crate) fn matches_selector_list(tag: &ElementNode, selectors: &ParsedSelecto
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn class_and_word_selectors_use_ascii_whitespace() {
+    for (separator, expected) in [
+      (' ', true),
+      ('\t', true),
+      ('\n', true),
+      ('\r', true),
+      ('\x0c', true),
+      ('\u{a0}', false),
+      ('\x0b', false),
+    ] {
+      let mut element = ElementNode::default();
+      element.attributes.insert_known(
+        crate::consts::ATTR_CLASS,
+        Some(&format!("btn{separator}active{separator}primary")),
+      );
+      for selector in [".active", "[class~=\"active\"]"] {
+        assert_eq!(
+          matches_selector(&element, &parse_css_selector(selector)),
+          expected,
+          "{selector} with separator {separator:?}",
+        );
+      }
+    }
+  }
 
   #[test]
   fn parses_tag_class_id() {
@@ -276,6 +302,24 @@ mod tests {
         }
         _ => panic!("expected attribute selector for {sel}"),
       }
+    }
+  }
+
+  #[test]
+  fn empty_attribute_substring_and_word_operands_never_match() {
+    for op in ["^=", "$=", "*=", "~="] {
+      let selector = parse_css_selector(&format!("[data-value{op}\"\"]"));
+      for value in ["", "real"] {
+        let mut element = ElementNode::default();
+        element
+          .attributes
+          .insert_custom("data-value".into(), Some(value));
+        assert!(
+          !matches_selector(&element, &selector),
+          "{op} with {value:?}"
+        );
+      }
+      assert!(!matches_selector(&ElementNode::default(), &selector));
     }
   }
 

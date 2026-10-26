@@ -127,6 +127,20 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     expect(markdown).not.toContain('This footer should be excluded')
   })
 
+  it.each(['.active', '[class~="active"]'])('uses only ASCII whitespace as token separators with %s', async (selector) => {
+    const excluded = ['&#32;', '&#9;', '&#10;', '&#13;', '&#12;']
+      .map(separator => `<p class="notice${separator}active">hidden</p>`)
+      .join('')
+    const html = `${excluded}<p class="notice&nbsp;active">NBSP</p><p class="notice&#11;active">VT</p>`
+
+    const markdown = htmlToMarkdown(html, {
+      engine: await resolveEngine(engine),
+      plugins: { filter: { exclude: [selector] } },
+    })
+
+    expect(markdown).toBe('NBSP\n\nVT')
+  })
+
   // Tests for compound selectors
   it('handles compound selectors', async () => {
     const html = `
@@ -144,6 +158,24 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
   })
 
   // Tests for attribute selectors
+  it.each([
+    ['[data-value]', 'empty\n\nhyphen\n\nvalue'],
+    ['[data-value=""]', 'empty'],
+    ['[data-value^=""]', ''],
+    ['[data-value$=""]', ''],
+    ['[data-value*=""]', ''],
+    ['[data-value~=""]', ''],
+    ['[data-value|=""]', 'empty\n\nhyphen'],
+  ])('handles the empty operand in %s', async (selector, expected) => {
+    const html = '<p data-value="">empty</p><p data-value="-en">hyphen</p><p data-value="real">value</p><p>absent</p>'
+    const markdown = htmlToMarkdown(html, {
+      engine: await resolveEngine(engine),
+      plugins: { filter: { include: [selector] } },
+    })
+
+    expect(markdown).toBe(expected)
+  })
+
   it('handles attribute selectors', async () => {
     const html = `
       <p>This should be excluded</p>
