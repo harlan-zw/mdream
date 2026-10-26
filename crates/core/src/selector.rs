@@ -8,6 +8,30 @@ pub(crate) enum ParsedSelectorList {
   Multiple(Vec<ParsedSelector>),
 }
 
+fn attribute_end(selector: &str, open: usize) -> Option<usize> {
+  let bytes = selector.as_bytes();
+  let mut index = open + 1;
+  let mut quote = 0;
+  while index < bytes.len() {
+    let byte = bytes[index];
+    if byte == b'\\' {
+      index += 2;
+      continue;
+    }
+    if quote != 0 {
+      if byte == quote {
+        quote = 0;
+      }
+    } else if byte == b'"' || byte == b'\'' {
+      quote = byte;
+    } else if byte == b']' {
+      return Some(index);
+    }
+    index += 1;
+  }
+  None
+}
+
 /// Parses a comma-separated selector list while preserving attribute values.
 pub(crate) fn parse_css_selector_list(selector: &str) -> ParsedSelectorList {
   let selector = selector.trim();
@@ -17,43 +41,24 @@ pub(crate) fn parse_css_selector_list(selector: &str) -> ParsedSelectorList {
 
   let mut selectors = Vec::new();
   let mut start = 0;
-  let mut in_attr = false;
-  let mut quote = None;
-  let mut escaped = false;
+  let mut index = 0;
 
-  for (index, ch) in selector.char_indices() {
-    if in_attr {
-      if escaped {
-        escaped = false;
-        continue;
-      }
-      if ch == '\\' {
-        escaped = true;
-        continue;
-      }
-      if let Some(active_quote) = quote {
-        if ch == active_quote {
-          quote = None;
-        }
-        continue;
-      }
-      if ch == '"' || ch == '\'' {
-        quote = Some(ch);
-      } else if ch == ']' {
-        in_attr = false;
-      }
-      continue;
-    }
-    if ch == '[' {
-      in_attr = true;
-    } else if ch == ',' {
+  while index < selector.len() {
+    let byte = selector.as_bytes()[index];
+    if byte == b'[' {
+      let Some(end) = attribute_end(selector, index) else {
+        break;
+      };
+      index = end;
+    } else if byte == b',' {
       let part = selector[start..index].trim();
       if part.is_empty() {
         return ParsedSelectorList::Single(ParsedSelector::Tag(selector.to_string()));
       }
       selectors.push(parse_css_selector(part));
-      start = index + ch.len_utf8();
+      start = index + 1;
     }
+    index += 1;
   }
 
   if selectors.is_empty() {
@@ -75,45 +80,23 @@ pub(crate) fn parse_css_selector(selector: &str) -> ParsedSelector {
   }
   let mut parts: Vec<ParsedSelector> = Vec::new();
   let mut current = String::new();
-  let mut in_attr = false;
-  let mut quote = None;
-  let mut escaped = false;
+  let mut index = 0;
 
-  for ch in selector.chars() {
-    if in_attr {
-      current.push(ch);
-      if escaped {
-        escaped = false;
-        continue;
-      }
-      if ch == '\\' {
-        escaped = true;
-        continue;
-      }
-      if let Some(active_quote) = quote {
-        if ch == active_quote {
-          quote = None;
-        }
-        continue;
-      }
-      if ch == '"' || ch == '\'' {
-        quote = Some(ch);
-      } else if ch == ']' {
-        in_attr = false;
-        parts.push(parse_attr_selector(&current));
-        current.clear();
-      }
-      continue;
-    }
+  while let Some(ch) = selector[index..].chars().next() {
     if ch == '[' {
       if !current.is_empty() {
         parts.push(parse_simple_selector(&current));
         current.clear();
       }
-      in_attr = true;
-      current.push(ch);
+      let Some(end) = attribute_end(selector, index) else {
+        current.push_str(&selector[index..]);
+        break;
+      };
+      parts.push(parse_attr_selector(&selector[index..=end]));
+      index = end + 1;
       continue;
     }
+    index += ch.len_utf8();
     if ch == ']' {
       continue;
     }
@@ -149,15 +132,11 @@ fn parse_simple_selector(s: &str) -> ParsedSelector {
   }
 }
 
-fn trim_css_whitespace(value: &str) -> &str {
-  value.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c'))
-}
-
 fn parse_attr_selector(s: &str) -> ParsedSelector {
   if s.len() < 2 {
     return ParsedSelector::Tag(s.to_string());
   }
-  let inner = trim_css_whitespace(&s[1..s.len() - 1]);
+  let inner = s[1..s.len() - 1].trim_ascii();
   if let Some(eq_index) = inner.find('=') {
     let op_start = if eq_index > 0
       && matches!(
@@ -168,7 +147,7 @@ fn parse_attr_selector(s: &str) -> ParsedSelector {
     } else {
       eq_index
     };
-    let mut val = trim_css_whitespace(&inner[eq_index + 1..]);
+    let mut val = inner[eq_index + 1..].trim_ascii();
     if val.len() >= 2
       && matches!(val.as_bytes()[0], b'"' | b'\'')
       && val.as_bytes()[0] == val.as_bytes()[val.len() - 1]
@@ -176,7 +155,7 @@ fn parse_attr_selector(s: &str) -> ParsedSelector {
       val = &val[1..val.len() - 1];
     }
     return ParsedSelector::Attribute {
-      name: trim_css_whitespace(&inner[..op_start]).to_string(),
+      name: inner[..op_start].trim_ascii().to_string(),
       operator: Some(inner[op_start..=eq_index].to_string()),
       value: Some(val.to_string()),
     };
@@ -332,6 +311,64 @@ mod tests {
   }
 
   #[test]
+  fn preserves_single_quote_attribute_values() {
+    for quote in ['"', '\''] {
+      let selector = format!("[a{quote}={quote}]");
+      match parse_css_selector(&selector) {
+        ParsedSelector::Attribute { name, value, .. } => {
+          assert_eq!(name, format!("a{quote}"));
+          assert_eq!(value, Some(quote.to_string()));
+        }
+        _ => panic!("expected attribute selector for {selector}"),
+      }
+    }
+  }
+
+  #[test]
+  fn preserves_unterminated_attribute_parts() {
+    for attribute in ["[data=", "[data=\"a,b", "[data=ação\\"] {
+      let ParsedSelector::Compound(parts) = parse_css_selector(&format!("p{attribute}")) else {
+        panic!("expected compound selector for {attribute}");
+      };
+      assert_eq!(parts.len(), 2);
+      assert!(matches!(&parts[0], ParsedSelector::Tag(tag) if tag == "p"));
+      assert!(matches!(&parts[1], ParsedSelector::Tag(tag) if tag == attribute));
+
+      let ParsedSelectorList::Multiple(selectors) =
+        parse_css_selector_list(&format!("span, p{attribute}, a"))
+      else {
+        panic!("expected selector list for {attribute}");
+      };
+      assert_eq!(selectors.len(), 2);
+      assert!(matches!(&selectors[0], ParsedSelector::Tag(tag) if tag == "span"));
+      let ParsedSelector::Compound(parts) = &selectors[1] else {
+        panic!("expected compound selector for {attribute}");
+      };
+      assert_eq!(parts.len(), 2);
+      assert!(matches!(&parts[0], ParsedSelector::Tag(tag) if tag == "p"));
+      assert!(matches!(&parts[1], ParsedSelector::Tag(tag) if tag == &format!("{attribute}, a")));
+    }
+  }
+
+  #[test]
+  fn trims_only_css_whitespace_around_attribute_values() {
+    for separator in [' ', '\t', '\n', '\r', '\x0c', '\u{a0}', '\x0b'] {
+      let value = format!("{separator}value{separator}");
+      let ParsedSelector::Attribute { value: parsed, .. } =
+        parse_css_selector(&format!("[data={value}]"))
+      else {
+        panic!("expected attribute selector");
+      };
+      let expected = if matches!(separator, '\u{a0}' | '\x0b') {
+        value.as_str()
+      } else {
+        "value"
+      };
+      assert_eq!(parsed.as_deref(), Some(expected));
+    }
+  }
+
+  #[test]
   fn parses_operator_before_attribute_value() {
     let expected = "a^=b$=c*=d~=e|=f=g";
     for op in ["=", "^=", "$=", "*=", "~=", "|="] {
@@ -441,6 +478,8 @@ mod tests {
   #[test]
   fn preserves_escapes_in_selector_lists() {
     for (selector, expected) in [
+      (r#"[data="a,b"]"#, "a,b"),
+      (r#"[data="a]b"]"#, "a]b"),
       (r"[data=a\]b\,c]", r"a\]b\,c"),
       (r"[data=a\]b,c]", r"a\]b,c"),
       (r#"[data=a\"b,c]"#, r#"a\"b,c"#),
@@ -449,6 +488,8 @@ mod tests {
       (r"[data='a\']b,c']", r"a\']b,c"),
       (r"[data=a\\]", r"a\\"),
       (r"[data=ação\\\]b,c]", r"ação\\\]b,c"),
+      (r"[data=a\çb]", r"a\çb"),
+      (r"[data=a\🦀b]", r"a\🦀b"),
     ] {
       let ParsedSelectorList::Single(ParsedSelector::Attribute { name, value, .. }) =
         parse_css_selector_list(selector)

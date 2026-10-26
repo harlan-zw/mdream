@@ -6,6 +6,32 @@ import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines.ts'
 const RE_WHITESPACE = /\s+/
 
 describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
+  it.each(['[title=it\'s]', '[title="unfinished]', '[title=', '[title=ação\\'])('does not split an unterminated attribute in %s', async (attribute) => {
+    const resolvedEngine = await resolveEngine(engine)
+    const selector = `span, p${attribute}, a`
+    const html = '<p title="it\'s">shown</p><span>selected</span><a>also shown</a>'
+    const extracted: string[] = []
+
+    htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { extraction: {
+        [selector]: node => extracted.push(node.tagName),
+      } },
+    })
+    expect(extracted).toEqual(['span'])
+    expect(htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { filter: { include: [selector] } },
+    })).toBe('selected')
+    const excluded = htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { filter: { exclude: [selector] } },
+    })
+    expect(excluded).toContain('shown')
+    expect(excluded).toContain('also shown')
+    expect(excluded).not.toContain('selected')
+  })
+
   it.each([
     [String.raw`[data=a\]b\,c]`, String.raw`a\]b\,c`],
     [String.raw`[data=a\]b,c]`, String.raw`a\]b,c`],
@@ -15,6 +41,8 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     [String.raw`[data='a\']b,c']`, String.raw`a\']b,c`],
     [String.raw`[data=a\\]`, String.raw`a\\`],
     [String.raw`[data=ação\\\]b,c]`, String.raw`ação\\\]b,c`],
+    [String.raw`[data=a\çb]`, String.raw`a\çb`],
+    [String.raw`[data=a\🦀b]`, String.raw`a\🦀b`],
   ])('filters and extracts escaped selector lists with %s', async (attribute, value) => {
     const resolvedEngine = await resolveEngine(engine)
     const selector = `${attribute}.active, span`

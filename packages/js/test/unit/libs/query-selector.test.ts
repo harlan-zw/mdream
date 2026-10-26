@@ -117,6 +117,16 @@ describe('query-selector', () => {
   })
 
   describe('createAttributeSelector', () => {
+    it.each(['"', '\''])('preserves a single %s in an attribute value', (quote) => {
+      const name = `a${quote}`
+      const input = `[${name}=${quote}]`
+      for (const selector of [createAttributeSelector(input), parseSelector(input)]) {
+        expect(selector.matches(createTestElement('p', { [name]: quote }))).toBe(true)
+        expect(selector.matches(createTestElement('p', { [name]: '' }))).toBe(false)
+        expect(selector.matches(createTestElement('p', { [name]: 'other' }))).toBe(false)
+      }
+    })
+
     it('matches elements by attribute existence', () => {
       const selector = createAttributeSelector('[data-id]')
 
@@ -216,6 +226,15 @@ describe('query-selector', () => {
   })
 
   describe('parseSelector', () => {
+    it.each(['[data=', '[data="a,b', '[data=ação\\'])('keeps an unterminated attribute intact in %s', (attribute) => {
+      expect(parseSelector(attribute).matches(createTestElement('p'))).toBe(false)
+      expect(parseSelector(`p${attribute}, span`).matches(createTestElement('span'))).toBe(false)
+      const selector = parseSelector(`span, p${attribute}, a`)
+      expect(selector.matches(createTestElement('span'))).toBe(true)
+      expect(selector.matches(createTestElement('p'))).toBe(false)
+      expect(selector.matches(createTestElement('a'))).toBe(false)
+    })
+
     it.each([
       [String.raw`[data=a\]b\,c]`, String.raw`a\]b\,c`],
       [String.raw`[data=a\]b,c]`, String.raw`a\]b,c`],
@@ -225,6 +244,8 @@ describe('query-selector', () => {
       [String.raw`[data='a\']b,c']`, String.raw`a\']b,c`],
       [String.raw`[data=a\\]`, String.raw`a\\`],
       [String.raw`[data=ação\\\]b,c]`, String.raw`ação\\\]b,c`],
+      [String.raw`[data=a\çb]`, String.raw`a\çb`],
+      [String.raw`[data=a\🦀b]`, String.raw`a\🦀b`],
     ])('preserves escapes when splitting %s', (input, value) => {
       const element = createTestElement('p', { data: value, class: 'active' })
       expect(parseSelector(input).matches(element)).toBe(true)

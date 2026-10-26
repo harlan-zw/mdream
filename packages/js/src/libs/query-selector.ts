@@ -41,16 +41,16 @@ function containsWhitespaceSeparatedToken(value: string, token: string): boolean
 
   for (let i = 0; i < token.length; i++) {
     const char = token.charCodeAt(i)
-    if (char === 32 || char === 9 || char === 10 || char === 12 || char === 13)
+    if (isCssWhitespace(char))
       return false
   }
 
   while (index !== -1) {
     const before = value.charCodeAt(index - 1)
-    if (index === 0 || before === 32 || before === 9 || before === 10 || before === 12 || before === 13) {
+    if (index === 0 || isCssWhitespace(before)) {
       const end = index + token.length
       const after = value.charCodeAt(end)
-      if (end === value.length || after === 32 || after === 9 || after === 10 || after === 12 || after === 13)
+      if (end === value.length || isCssWhitespace(after))
         return true
     }
     index = value.indexOf(token, index + 1)
@@ -141,7 +141,7 @@ function parseAttributeSelector(selector: string): { attr: string, op?: string, 
   const op = inner.slice(opIdx, opEnd)
   // Strip quotes from value
   let value = trimCssWhitespace(inner.slice(opEnd))
-  if ((value.charCodeAt(0) === 34 || value.charCodeAt(0) === 39) && value.charCodeAt(value.length - 1) === value.charCodeAt(0))
+  if (value.length >= 2 && (value.charCodeAt(0) === 34 || value.charCodeAt(0) === 39) && value.charCodeAt(value.length - 1) === value.charCodeAt(0))
     value = value.slice(1, -1)
 
   return { attr, op, value }
@@ -303,29 +303,14 @@ export function parseSelector(selector: string): SelectorMatcher {
   // selector remains intact in extraction results; this only expands matching.
   const selectors: SelectorMatcher[] = []
   let start = 0
-  let inAttribute = false
-  let quote = 0
 
   for (let i = 0; i < selector.length; i++) {
     const char = selector.charCodeAt(i)
-    if (inAttribute) {
-      if (char === 92 /* \ */) {
-        i++
-        continue
-      }
-      if (quote) {
-        if (char === quote)
-          quote = 0
-        continue
-      }
-      if (char === 34 /* " */ || char === 39 /* ' */)
-        quote = char
-      else if (char === 93 /* ] */)
-        inAttribute = false
-      continue
-    }
     if (char === 91 /* [ */) {
-      inAttribute = true
+      const end = findAttributeEnd(selector, i)
+      if (end === -1)
+        break
+      i = end
     }
     else if (char === 44 /* , */) {
       const part = selector.slice(start, i).trim()
