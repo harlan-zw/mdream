@@ -414,6 +414,58 @@ fn wrap_never_breaks_before_a_block_marker() {
 }
 
 #[test]
+fn horizontal_rule_stays_separate_inside_filtered_list_items() {
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::include(&["hr", "p"])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    ("<ul><li><p>b</p><hr></li></ul>", "b\n\n---"),
+    ("<ul><li><p>b</p><hr><p>c</p></li></ul>", "b\n\n---\n\nc"),
+    (
+      "<ul><li><ul><li><p>b</p><hr></li></ul></li></ul>",
+      "b\n\n---",
+    ),
+    ("<ul><li><hr></li></ul>", "---"),
+    (
+      "<p>before</p><ul><li><ul><li><hr></li></ul></li></ul><p>after</p>",
+      "before\n\n---\n\nafter",
+    ),
+    (
+      "<ul><li><ul><li><hr><p>after</p></li></ul></li></ul>",
+      "---\n\nafter",
+    ),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn filtered_rule_keeps_both_block_boundaries() {
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::include(&["hr", "p", "br", "span"])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    ("<ul><li><hr><span>c</span></li></ul>", "---\n\nc"),
+    ("<ul><li><p>b</p><br><hr></li></ul>", "b  \n\n---"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+  assert_every_chunking(
+    "<ul><li>b<br><hr></li></ul>",
+    &HtmlToMarkdownOptions::default(),
+    "- b  \n  ***",
+  );
+}
+
+#[test]
 fn continued_line_gets_no_marker_from_a_dropped_blockquote() {
   // A blockquote the filter or a literal override dropped writes no `>`, so a
   // wrapped or hard-broken line inside it must not start with one either.

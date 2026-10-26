@@ -458,17 +458,16 @@ export const tagHandlers: Record<number, TagHandler> = {
       // A thematic break cannot end a GFM row; raw <hr> can sit in a cell.
       if (isInsideTableCell(state))
         return '<hr>'
-      const prefix = state.depthMap?.[TAG_LI] ? state.listIndent : ''
-      if (!prefix)
+      if (!state.depthMap?.[TAG_LI])
         return MARKDOWN_HORIZONTAL_RULE
-      if (state.depthMap?.[TAG_LI])
-        state.listRulePending = prefix
+      const prefix = state.listIndent
+      state.listRulePending = prefix
       const open = blockOpenPrefix(state.buffer, prefix)
       // Sharing the marker's line, where `---` would make the whole line a
       // thematic break and take the item with it.
-      return open === undefined
+      return open === undefined && prefix
         ? MARKDOWN_HORIZONTAL_RULE_ALT
-        : `${open}${MARKDOWN_HORIZONTAL_RULE}`
+        : `${open ?? ''}${MARKDOWN_HORIZONTAL_RULE}`
     },
     isSelfClosing: true,
   },

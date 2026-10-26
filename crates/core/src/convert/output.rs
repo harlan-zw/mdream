@@ -1527,7 +1527,8 @@ impl ConvertState {
     if !plain_text!(self)
       && self.hard_break_end == self.buffer.len()
       && !enter_is_literal
-      && matches!(tag_id, Some(TAG_P | TAG_DIV | TAG_PRE | TAG_TABLE))
+      && (matches!(tag_id, Some(TAG_P | TAG_DIV | TAG_PRE | TAG_TABLE))
+        || (tag_id == Some(TAG_HR) && self.list_indent.is_empty()))
       && self.depth_map[TAG_LI as usize] > 0
       && !self.in_table_cell()
       // At a <pre>'s own enter the parser has already counted it (depth 1);
@@ -4362,13 +4363,14 @@ impl ConvertState {
           return Some(Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE));
         }
         let prefix = self.continuation_prefix();
-        if prefix.is_empty() {
+        if prefix.is_empty() && self.depth_map[TAG_LI as usize] == 0 {
           return Some(Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE));
         }
         Some(match self.block_open_prefix(&prefix) {
           // Sharing the marker's line, where `---` would make the whole line a
           // thematic break and take the item with it.
-          None => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE_ALT),
+          None if !prefix.is_empty() => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE_ALT),
+          None => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE),
           Some(open) => Cow::Owned(format!("{open}{MARKDOWN_HORIZONTAL_RULE}")),
         })
       }

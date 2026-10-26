@@ -180,6 +180,22 @@ describe('wrap width (issue #106)', () => {
     await expectEveryChunking(html, { wrapWidth: 12 }, expected)
   })
 
+  it('separates a filtered rule from following inline text', async () => {
+    await expectEveryChunking('<ul><li><hr><span>c</span></li></ul>', {
+      plugins: [filterPlugin({ include: ['hr', 'span'] })],
+    }, '---\n\nc')
+  })
+
+  it('keeps a filtered rule after a hard break from becoming a heading', async () => {
+    await expectEveryChunking('<ul><li><p>b</p><br><hr></li></ul>', {
+      plugins: [filterPlugin({ include: ['p', 'br', 'hr'] })],
+    }, 'b  \n\n---')
+  })
+
+  it('preserves the rule marker after a hard break in a rendered list', async () => {
+    await expectEveryChunking('<ul><li>b<br><hr></li></ul>', {}, '- b  \n  ***')
+  })
+
   it.each(['*', '***', '___'])('keeps raw block markers on their existing line: %s', async (marker) => {
     const html = `<details><summary>S</summary><code>aaaaaaaa</code> ${marker} x</details>`
     const expected = `<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> ${marker}\nx</details>`
@@ -210,6 +226,10 @@ describe('wrap width (issue #106)', () => {
   })
 
   it.each([
+    ['<ul><li><p>b</p><hr></li></ul>', 'b\n\n---'],
+    ['<ul><li><p>b</p><hr><p>c</p></li></ul>', 'b\n\n---\n\nc'],
+    ['<ul><li><ul><li><p>b</p><hr></li></ul></li></ul>', 'b\n\n---'],
+    ['<ul><li><hr></li></ul>', '---'],
     ['<p>before</p><ul><li><ul><li><hr></li></ul></li></ul><p>after</p>', 'before\n\n---\n\nafter'],
     ['<ul><li><ul><li><hr><p>after</p></li></ul></li></ul>', '---\n\nafter'],
   ])('does not indent a rule inside filtered list items: %s', async (html, expected) => {

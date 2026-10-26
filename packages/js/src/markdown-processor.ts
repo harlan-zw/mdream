@@ -1844,7 +1844,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // A hard break ends a line, while a following block also ends the
     // paragraph. Preserve that extra boundary inside a list's content column.
     if (eventType === NodeEventEnter && state.depthMap[TAG_LI] && !insideRawHtmlRegion
-      && (tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_PRE || tagId === TAG_TABLE)
+      && (tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_PRE || tagId === TAG_TABLE
+        || (tagId === TAG_HR && !state.listIndent))
       && !handler?.literalEnter && endsAtHardBreak(buff)) {
       trimTrailingSpaces(buff)
       const separator = tagId === TAG_P || tagId === TAG_DIV ? `\n${state.listIndent}` : '\n'
