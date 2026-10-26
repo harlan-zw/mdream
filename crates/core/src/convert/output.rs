@@ -2632,6 +2632,7 @@ impl ConvertState {
     hazard: bool,
     inside_raw_html_block: bool,
     scratch: &mut String,
+    continuation_delimiter: Option<usize>,
   ) -> bool {
     if !hazard
       || (inside_raw_html_block && !(self.raw_html_markdown && !self.line_opens_raw_html_block()))
@@ -2642,7 +2643,7 @@ impl ConvertState {
     {
       self.gfm_escape_slow_path_calls += 1;
     }
-    self.escape_gfm_text_into(text, scratch)
+    self.escape_gfm_text_into(text, scratch, continuation_delimiter)
   }
 
   #[inline(always)]
@@ -2724,7 +2725,13 @@ impl ConvertState {
     let mut escape_scratch = std::mem::take(&mut self.escape_scratch);
     let hazard =
       has_inline_gfm_hazard || context_hazard || self.starts_with_gfm_block_candidate(text);
-    let text = if self.escape_text_node(text, hazard, inside_raw_html_block, &mut escape_scratch) {
+    let text = if self.escape_text_node(
+      text,
+      hazard,
+      inside_raw_html_block,
+      &mut escape_scratch,
+      None,
+    ) {
       escape_scratch.as_str()
     } else {
       text
@@ -2963,13 +2970,31 @@ impl ConvertState {
     let context_has_gfm_hazard =
       |text: &str| !inside_raw_html_block && context_gfm_hazard(text, in_table, in_link, in_quote);
     let mut escape_scratch = std::mem::take(&mut self.escape_scratch);
+    let continuation_delimiter = if !plain_text!(self)
+      && self.wrap_width != 0
+      && self.can_wrap_here()
+      && !wrap_separator
+      && generated_prefix.is_none_or(str::is_empty)
+      && !self.should_add_spacing_before_text(last_char, text)
+    {
+      self.wrapped_ordered_delimiter(text)
+    } else {
+      None
+    };
     let hazard = !plain_text!(self)
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
-      && (has_inline_gfm_hazard
+      && (continuation_delimiter.is_some()
+        || has_inline_gfm_hazard
         || context_has_gfm_hazard(text)
         || self.starts_with_gfm_block_candidate(text));
-    let text = if self.escape_text_node(text, hazard, inside_raw_html_block, &mut escape_scratch) {
+    let text = if self.escape_text_node(
+      text,
+      hazard,
+      inside_raw_html_block,
+      &mut escape_scratch,
+      continuation_delimiter,
+    ) {
       escape_scratch.as_str()
     } else {
       text
@@ -2991,7 +3016,12 @@ impl ConvertState {
     let owns_space =
       owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0);
     if self.wrap_width != 0 && self.can_wrap_here() {
-      self.push_text_wrapped(text, last_char, owns_leading_space, wrap_separator);
+      self.push_text_wrapped(
+        text,
+        last_char,
+        owns_leading_space || continuation_delimiter.is_some(),
+        wrap_separator,
+      );
     } else if self.options.max_node_bytes == 0 {
       let add_space = !owns_space && self.should_add_spacing_before_text(last_char, text);
       self.push_text_uncapped(text, add_space);
@@ -3029,9 +3059,64 @@ impl ConvertState {
     }
   }
 
+  /// Find a start-at-one marker completed across inline nodes after wrapping.
+  fn wrapped_ordered_delimiter(&self, text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let delimiter = bytes
+      .iter()
+      .take(9)
+      .take_while(|b| b.is_ascii_digit())
+      .count();
+    if !matches!(bytes.get(delimiter), Some(b'.' | b')'))
+      || !Self::is_markdown_marker_whitespace(bytes.get(delimiter + 1).copied())
+    {
+      return None;
+    }
+    let mut digits = 0;
+    for &byte in bytes[..delimiter].iter().rev() {
+      if byte != if digits == 0 { b'1' } else { b'0' } {
+        return None;
+      }
+      digits += 1;
+    }
+    let mut buffered_digits = 0;
+    let mut spaces = 0;
+    for &byte in self.buffer.as_bytes().iter().rev() {
+      if spaces == 0 && byte.is_ascii_digit() {
+        if digits == 9 || byte != if digits == 0 { b'1' } else { b'0' } {
+          return None;
+        }
+        digits += 1;
+        buffered_digits += 1;
+        continue;
+      }
+      if buffered_digits == 0 {
+        return None;
+      }
+      if byte == b' ' {
+        spaces += 1;
+        if spaces > self.list_indent.len() + 3 {
+          return None;
+        }
+        continue;
+      }
+      return (byte == b'\n' && (spaces <= 3 || spaces >= self.list_indent.len()))
+        .then_some(delimiter);
+    }
+    (buffered_digits > 0
+      && (spaces <= 3 || spaces >= self.list_indent.len())
+      && (!self.has_flushed_tail() || self.flushed_tail[1] == b'\n'))
+      .then_some(delimiter)
+  }
+
   /// Escape GFM syntax into `out`; returns false and leaves `out` alone if none is needed.
   #[inline]
-  fn escape_gfm_text_into(&self, text: &str, out: &mut String) -> bool {
+  fn escape_gfm_text_into(
+    &self,
+    text: &str,
+    out: &mut String,
+    continuation_delimiter: Option<usize>,
+  ) -> bool {
     let in_table = self.depth_map[TAG_TABLE as usize] > 0;
     let in_link = self.depth_map[TAG_A as usize] > 0;
     let in_blockquote = self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
@@ -3081,7 +3166,8 @@ impl ConvertState {
         continue;
       }
 
-      let mut should_escape = matches!(byte, b'\\' | b'*' | b'_' | b'~' | b'`' | b'[')
+      let mut should_escape = continuation_delimiter == Some(index)
+        || matches!(byte, b'\\' | b'*' | b'_' | b'~' | b'`' | b'[')
         || (byte == b']' && in_link)
         || (byte == b'|' && in_table)
         || (byte == b'>' && in_blockquote)
@@ -4290,9 +4376,11 @@ impl ConvertState {
       b'*' => word.len() != 2 && word.iter().all(|&byte| byte == first),
       b'_' => word.len() >= 3 && word.iter().all(|&byte| byte == first),
       b'`' | b'~' => word.len() >= 3 && word[..3].iter().all(|&byte| byte == first),
-      b'0'..=b'9' => {
-        let digits = word.iter().take_while(|byte| byte.is_ascii_digit()).count();
-        digits <= 9 && word.len() == digits + 1 && matches!(word[digits], b'.' | b')')
+      b'0' | b'1' => {
+        // Only a list starting at one can interrupt a paragraph. Leading zeros
+        // still count, within CommonMark's nine-digit marker limit.
+        let zeros = word.iter().take_while(|&&byte| byte == b'0').count();
+        zeros <= 8 && matches!(&word[zeros..], b"1." | b"1)")
       }
       _ => false,
     }

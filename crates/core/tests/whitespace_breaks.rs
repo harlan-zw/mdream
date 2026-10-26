@@ -414,6 +414,32 @@ fn wrap_never_breaks_before_a_block_marker() {
 }
 
 #[test]
+fn wrap_only_protects_ordered_markers_starting_at_one() {
+  let options = HtmlToMarkdownOptions::default().with_wrap_width(6);
+  for (marker, expected) in [
+    ("2015.", "aaaaa\n2015.\nbb"),
+    ("0)", "aaaaa\n0) bb"),
+    ("2.", "aaaaa\n2. bb"),
+    ("2)", "aaaaa\n2) bb"),
+    ("1.", "aaaaa 1.\nbb"),
+    ("1)", "aaaaa 1)\nbb"),
+    ("01.", "aaaaa 01.\nbb"),
+    ("000000001)", "aaaaa 000000001)\nbb"),
+    ("0000000001)", "aaaaa\n0000000001)\nbb"),
+  ] {
+    for text in ["aaaaa ", "<span>aaaaa </span>"] {
+      let html = format!("<p>{text}{marker} bb</p>");
+      assert_every_chunking(&html, &options, expected);
+    }
+  }
+  assert_every_chunking(
+    "<p>browsers since July 2015.</p>",
+    &HtmlToMarkdownOptions::default().with_wrap_width(20),
+    "browsers since July\n2015.",
+  );
+}
+
+#[test]
 fn horizontal_rule_stays_separate_inside_filtered_list_items() {
   let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
@@ -440,6 +466,80 @@ fn horizontal_rule_stays_separate_inside_filtered_list_items() {
     ),
   ] {
     assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn wrapped_ordered_marker_completed_by_an_inline_node_is_escaped() {
+  for delimiter in [".", ")"] {
+    let html = format!("<p><span>aaaaa </span><span>1</span>{delimiter} bb</p>");
+    let expected = format!("aaaaa\n1\\{delimiter} bb");
+    assert_every_chunking(
+      &html,
+      &HtmlToMarkdownOptions::default().with_wrap_width(6),
+      &expected,
+    );
+  }
+  for (tail, expected) in [
+    ("<span>0</span>1) bb", "aaaaa\n01\\)\nbb"),
+    ("<span>00000000</span>1) bb", "aaaaa\n000000001\\)\nbb"),
+    ("<span>000000000</span>1) bb", "aaaaa\n0000000001)\nbb"),
+    ("<span>2</span>) bb", "aaaaa\n2) bb"),
+    ("<span>1</span>.5 bb", "aaaaa\n1.5 bb"),
+    ("<span>1</span> bb", "aaaaa\n1 bb"),
+    ("<span>1 </span>) bb", "aaaaa\n1 ) bb"),
+  ] {
+    assert_every_chunking(
+      &format!("<p><span>aaaaa </span>{tail}</p>"),
+      &HtmlToMarkdownOptions::default().with_wrap_width(6),
+      expected,
+    );
+  }
+  for (html, width, expected) in [
+    (
+      "<ul><li>x<ul><li><span>aaaaa </span><span>1</span>) bb</li></ul></li></ul>",
+      10,
+      "- x\n  - aaaaa\n    1\\) bb",
+    ),
+    (
+      "<blockquote><p><span>aaaaa </span><span>1</span>) bb</p></blockquote>",
+      6,
+      "> aaaaa\n> 1\\) bb",
+    ),
+    (
+      "<p><span>aaaaa </span><span>1</span>) bb</p>",
+      0,
+      "aaaaa 1) bb",
+    ),
+  ] {
+    assert_every_chunking(
+      html,
+      &HtmlToMarkdownOptions::default().with_wrap_width(width),
+      expected,
+    );
+  }
+  assert_every_text_chunking(
+    "<p><span>aaaaa </span><span>1</span>) bb</p>",
+    &HtmlToMarkdownOptions::default().with_wrap_width(6),
+    "aaaaa\n1) bb",
+  );
+}
+
+#[test]
+fn split_marker_is_escaped_after_streaming_drain() {
+  let prefix = "x".repeat(9000);
+  let html = format!("<p>{prefix}</p><p><span>aaaaa </span><span>1</span>) bb</p>");
+  let expected = format!("{prefix}\n\naaaaa\n1\\) bb");
+  let options = HtmlToMarkdownOptions::default().with_wrap_width(6);
+  assert_eq!(html_to_markdown(&html, options.clone()), expected);
+  for size in [3, 1024] {
+    let mut stream = MarkdownStreamProcessor::new(options.clone());
+    let mut output = String::new();
+    for chunk in html.as_bytes().chunks(size) {
+      output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+    }
+    output.push_str(&stream.finish());
+    assert_eq!(output.trim_end(), expected);
   }
 }
 

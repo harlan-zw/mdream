@@ -180,6 +180,68 @@ describe('wrap width (issue #106)', () => {
     await expectEveryChunking(html, { wrapWidth: 12 }, expected)
   })
 
+  it.each([
+    ['2015.', 'aaaaa\n2015.\nbb'],
+    ['0)', 'aaaaa\n0) bb'],
+    ['2.', 'aaaaa\n2. bb'],
+    ['2)', 'aaaaa\n2) bb'],
+    ['1.', 'aaaaa 1.\nbb'],
+    ['1)', 'aaaaa 1)\nbb'],
+    ['01.', 'aaaaa 01.\nbb'],
+    ['000000001)', 'aaaaa 000000001)\nbb'],
+    ['0000000001)', 'aaaaa\n0000000001)\nbb'],
+  ])('only prevents wrapping before ordered markers starting at one: %s', async (marker, expected) => {
+    for (const text of ['aaaaa ', '<span>aaaaa </span>'])
+      await expectEveryChunking(`<p>${text}${marker} bb</p>`, { wrapWidth: 6 }, expected)
+  })
+
+  it('wraps a year at the end of a paragraph', async () => {
+    await expectEveryChunking('<p>browsers since July 2015.</p>', { wrapWidth: 20 }, 'browsers since July\n2015.')
+  })
+
+  it.each(['.', ')'])('escapes an ordered marker completed by a later inline node: %s', async (delimiter) => {
+    const html = `<p><span>aaaaa </span><span>1</span>${delimiter} bb</p>`
+    await expectEveryChunking(html, { wrapWidth: 6 }, `aaaaa\n1\\${delimiter} bb`)
+  })
+
+  it.each([
+    ['<span>0</span>1) bb', 'aaaaa\n01\\)\nbb'],
+    ['<span>00000000</span>1) bb', 'aaaaa\n000000001\\)\nbb'],
+    ['<span>000000000</span>1) bb', 'aaaaa\n0000000001)\nbb'],
+    ['<span>2</span>) bb', 'aaaaa\n2) bb'],
+    ['<span>1</span>.5 bb', 'aaaaa\n1.5 bb'],
+    ['<span>1</span> bb', 'aaaaa\n1 bb'],
+    ['<span>1 </span>) bb', 'aaaaa\n1 ) bb'],
+  ])('distinguishes split markers from ordinary numeric text: %s', async (tail, expected) => {
+    await expectEveryChunking(`<p><span>aaaaa </span>${tail}</p>`, { wrapWidth: 6 }, expected)
+  })
+
+  it('protects split markers in nested lists and blockquotes', async () => {
+    await expectEveryChunking('<ul><li>x<ul><li><span>aaaaa </span><span>1</span>) bb</li></ul></li></ul>', { wrapWidth: 10 }, '- x\n  - aaaaa\n    1\\) bb')
+    await expectEveryChunking('<blockquote><p><span>aaaaa </span><span>1</span>) bb</p></blockquote>', { wrapWidth: 6 }, '> aaaaa\n> 1\\) bb')
+    await expectEveryChunking('<p><span>aaaaa </span><span>1</span>) bb</p>', {}, 'aaaaa 1) bb')
+  })
+
+  it('protects split markers after earlier output has streamed', async () => {
+    const prefix = 'x'.repeat(9000)
+    const html = `<p>${prefix}</p><p><span>aaaaa </span><span>1</span>) bb</p>`
+    const expected = `${prefix}\n\naaaaa\n1\\) bb`
+    expect(wrap(html, 6)).toBe(expected)
+    for (const size of [3, 1024]) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += size)
+            controller.enqueue(html.slice(offset, offset + size))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamWithOptions(stream, { wrapWidth: 6 }))
+        output += chunk
+      expect(output).toBe(expected)
+    }
+  })
+
   it('separates a filtered rule from following inline text', async () => {
     await expectEveryChunking('<ul><li><hr><span>c</span></li></ul>', {
       plugins: [filterPlugin({ include: ['hr', 'span'] })],

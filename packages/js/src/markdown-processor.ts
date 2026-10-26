@@ -598,6 +598,49 @@ function isThematicBreak(value: string, start: number, marker: number): boolean 
 
 const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
 
+/** Find a start-at-one marker completed across inline nodes after wrapping. */
+function wrappedOrderedDelimiter(value: string, buffer: string[], indent: string): number {
+  let delimiter = 0
+  while (delimiter < 9 && value.charCodeAt(delimiter) >= 48 && value.charCodeAt(delimiter) <= 57)
+    delimiter++
+  if ((value.charCodeAt(delimiter) !== 46 && value.charCodeAt(delimiter) !== 41)
+    || !isMarkdownMarkerWhitespace(value.charCodeAt(delimiter + 1) || 0)) {
+    return -1
+  }
+  let digits = 0
+  for (let index = delimiter - 1; index >= 0; index--) {
+    if (value.charCodeAt(index) !== (digits === 0 ? 49 : 48))
+      return -1
+    digits++
+  }
+  let fragment = buffer.length - 1
+  let offset = fragment >= 0 ? buffer[fragment]!.length : 0
+  let bufferedDigits = 0
+  let spaces = 0
+  for (;;) {
+    while (offset === 0 && fragment >= 0) {
+      fragment--
+      offset = fragment >= 0 ? buffer[fragment]!.length : 0
+    }
+    const code = fragment >= 0 ? buffer[fragment]!.charCodeAt(--offset) : -1
+    if (spaces === 0 && code >= 48 && code <= 57) {
+      if (digits === 9 || code !== (digits === 0 ? 49 : 48))
+        return -1
+      digits++
+      bufferedDigits++
+      continue
+    }
+    if (bufferedDigits === 0)
+      return -1
+    if (code === 32) {
+      if (++spaces > indent.length + 3)
+        return -1
+      continue
+    }
+    return (code === -1 || code === 10) && (spaces <= 3 || spaces >= indent.length) ? delimiter : -1
+  }
+}
+
 /**
  * Reject ordinary prose through the native string search before entering the
  * precise JavaScript scanner. A block marker can only begin within the first
@@ -641,7 +684,7 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
  * markers never pass through here, while code and raw-HTML contexts bypass it.
  * The common plain-text path returns the original string without allocation.
  */
-function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): string {
+function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, continuationDelimiter = -1): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
   const inLink = Boolean(depthMap[TAG_A])
   const inBlockquote = Boolean(depthMap[TAG_BLOCKQUOTE])
@@ -671,7 +714,7 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): 
       continue
     }
 
-    let shouldEscape = '\\*_~`['.includes(character)
+    let shouldEscape = index === continuationDelimiter || '\\*_~`['.includes(character)
       || (code === 93 && inLink) // ]
       || (code === 124 && inTable) // |
       || (code === 62 && inBlockquote) // >
@@ -769,7 +812,7 @@ function columnWidth(value: string, start: number): number {
  * must not be what puts one at the start of a line. Parity with the Rust
  * `opens_block_at_line_start`.
  */
-const BLOCK_START_WORD = /^(?:>|`{3}|~{3}|(?:#{1,6}|\+|-+|=+|\*|\*{3,}|_{3,}|\d{1,9}[.)])$)/
+const BLOCK_START_WORD = /^(?:>|`{3}|~{3}|(?:#{1,6}|\+|-+|=+|\*|\*{3,}|_{3,}|0{0,8}1[.)])$)/
 
 /**
  * Hard-wrap `value` on spaces so no output line exceeds `width` code points.
@@ -1689,21 +1732,24 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         textNode.value = escapeRawHtmlText(textNode.value, state.depthMap, rawHtmlLink !== undefined && parent === rawHtmlLink)
       }
 
+      const wrapWidth = state.options?.wrapWidth
+      const continuationDelimiter = wrapWidth && canWrapHere(state.depthMap) && !textNode.generatedMarkdown?.prefix
+        ? wrappedOrderedDelimiter(textNode.value, state.buffer, state.listIndent)
+        : -1
       if (!state.depthMap[TAG_PRE]
         && !state.depthMap[TAG_CODE]
         // Inside a raw-HTML region only text past a blank line is Markdown
         // again. That test is O(1), so it goes before the text scans; the line
         // scan stays last, paid only by text that would be escaped anyway.
         && (!insideRawHtmlBlock || rawHtmlMarkdown)
-        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap)
+        && (continuationDelimiter >= 0 || mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap))
         && (!insideRawHtmlBlock || !lineOpensRawHtmlBlock(state.buffer, bufferScan))) {
-        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap)
+        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, continuationDelimiter)
       }
 
       if (textNode.generatedMarkdown && textNode.value)
         textNode.value = `${textNode.generatedMarkdown.prefix}${textNode.value}${textNode.generatedMarkdown.suffix}`
 
-      const wrapWidth = state.options?.wrapWidth
       if (wrapWidth && canWrapHere(state.depthMap)) {
         const wrapped = wrapText(textNode.value, currentColumn(state.buffer), wrapWidth, state.listIndent)
         state.buffer.push(wrapped)
