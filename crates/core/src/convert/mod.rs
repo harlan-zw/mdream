@@ -946,6 +946,12 @@ pub struct ConvertState {
   empty_item_len: usize,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
+  /// Actual built-in item marker end, distinct from marker-like source text.
+  empty_list_marker_end: usize,
+  empty_list_marker_depth: usize,
+  list_tail_pending: bool,
+  /// A tentative separator retractable while following wrappers are empty.
+  list_tail_start: usize,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1192,6 +1198,10 @@ impl ConvertState {
       empty_item_line_start: 0,
       empty_item_len: 0,
       list_rule_pending: false,
+      empty_list_marker_end: usize::MAX,
+      empty_list_marker_depth: 0,
+      list_tail_pending: false,
+      list_tail_start: usize::MAX,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
@@ -1342,7 +1352,10 @@ impl ConvertState {
     }
     // Every markup token completes the text before it, so this sees the same
     // states whatever the chunking. The parser stops before that token.
-    if self.empty_item_hazard {
+    if self.empty_item_hazard
+      || self.empty_list_marker_end != usize::MAX
+      || self.list_tail_start != usize::MAX
+    {
       self.settle_item_marker();
     }
     self.check_held_output();
@@ -2607,6 +2620,12 @@ impl ConvertState {
   /// Record that buffer bytes from `offset` on were rewritten or removed.
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
+    if offset < self.empty_list_marker_end {
+      self.empty_list_marker_end = usize::MAX;
+    }
+    if offset < self.list_tail_start {
+      self.list_tail_start = usize::MAX;
+    }
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
@@ -2798,6 +2817,12 @@ impl ConvertState {
     if self.empty_item_hazard {
       stable_end = stable_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
+    if self.empty_list_marker_end != usize::MAX {
+      stable_end = stable_end.min(self.empty_list_marker_end);
+    }
+    if self.list_tail_start != usize::MAX {
+      stable_end = stable_end.min(self.list_tail_start);
+    }
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
     // closing sequence, so hold the run (and the spacing that decides whether it
     // closes) until the heading is complete.
@@ -2960,6 +2985,12 @@ impl ConvertState {
     if self.empty_item_hazard {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
+    if self.empty_list_marker_end != usize::MAX {
+      drain_end = drain_end.min(self.empty_list_marker_end);
+    }
+    if self.list_tail_start != usize::MAX {
+      drain_end = drain_end.min(self.list_tail_start);
+    }
     if drain_end == 0 {
       return;
     }
@@ -3032,6 +3063,12 @@ impl ConvertState {
     }
     self.empty_item_line_start = self.empty_item_line_start.saturating_sub(drain_end);
     self.empty_item_len = self.empty_item_len.saturating_sub(drain_end);
+    if self.empty_list_marker_end != usize::MAX {
+      self.empty_list_marker_end -= drain_end;
+    }
+    if self.list_tail_start != usize::MAX {
+      self.list_tail_start -= drain_end;
+    }
     // Buffer-indexed like every other stored offset: left alone, streaming reads
     // a different line start than one-shot.
     self.raw_html_scanned_to = self.raw_html_scanned_to.saturating_sub(drain_end);

@@ -1123,13 +1123,15 @@ impl ConvertState {
       self.last_node_is_inline = self.stack[stack_len - 1].is_inline;
       return;
     }
-    if self.list_rule_pending
-      && !self.stack[stack_len - 1].excludes_text_nodes
-      && (!self.stack[stack_len - 1].is_inline
-        || self
-          .get_enter_output(&self.stack[stack_len - 1], &self.stack[..stack_len - 1])
-          .is_some_and(|output| !output.is_empty()))
-    {
+    if self.list_tail_pending && !self.stack[stack_len - 1].excludes_text_nodes {
+      if matches!(self.stack[stack_len - 1].tag_id, Some(TAG_BLOCKQUOTE)) {
+        self.list_tail_pending = false;
+        self.empty_list_marker_end = usize::MAX;
+      } else {
+        self.flush_empty_list_tail();
+      }
+    }
+    if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
       self.flush_list_rule();
     }
 
@@ -1365,13 +1367,15 @@ impl ConvertState {
       return;
     }
 
-    if self.list_rule_pending
-      && !self.stack[stack_len - 1].excludes_text_nodes
-      && (!self.stack[stack_len - 1].is_inline
-        || self
-          .get_enter_output(&self.stack[stack_len - 1], &self.stack[..stack_len - 1])
-          .is_some_and(|output| !output.is_empty()))
-    {
+    if self.list_tail_pending && !self.stack[stack_len - 1].excludes_text_nodes {
+      if matches!(self.stack[stack_len - 1].tag_id, Some(TAG_BLOCKQUOTE)) {
+        self.list_tail_pending = false;
+        self.empty_list_marker_end = usize::MAX;
+      } else {
+        self.flush_empty_list_tail();
+      }
+    }
+    if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
       self.flush_list_rule();
     }
 
@@ -1748,6 +1752,8 @@ impl ConvertState {
 
     if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
       self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
+      self.empty_list_marker_end = self.buffer.trim_end_matches(' ').len();
+      self.empty_list_marker_depth = self.stack[stack_len - 1].depth;
     }
 
     // The blank line that re-enables Markdown must be looked for *inside* the
@@ -2139,6 +2145,21 @@ impl ConvertState {
 
     let tag_id = node.tag_id;
     if tag_id == Some(TAG_LI) {
+      self.list_tail_pending = false;
+      if self.depth_map[TAG_LI as usize] == 1 {
+        self.empty_list_marker_end = usize::MAX;
+      }
+      if self.list_tail_start != usize::MAX {
+        let start = self.list_tail_start.min(self.buffer.len());
+        if self.buffer[start..]
+          .bytes()
+          .all(|byte| byte.is_ascii_whitespace())
+        {
+          self.truncate_buffer(start);
+          self.last_content_cache_len = 0;
+        }
+        self.list_tail_start = usize::MAX;
+      }
       self.list_rule_pending = false;
     }
     let owns_pre_fence = tag_id == Some(TAG_PRE);
@@ -2598,6 +2619,7 @@ impl ConvertState {
       && self.caption_boundary == CaptionBoundary::None
       && self.caption_frames.is_empty()
       && !self.list_rule_pending
+      && !self.list_tail_pending
       && !self.pending_inline_whitespace
       && !self.pre_fence_pending
       && self.depth_map[TAG_PRE as usize] == 0
@@ -2689,6 +2711,12 @@ impl ConvertState {
           self.held_break_bytes = 0;
         }
       }
+    }
+    if (self.empty_list_marker_end != usize::MAX || self.list_tail_start != usize::MAX)
+      && has_visible(text.as_bytes())
+    {
+      self.empty_list_marker_end = usize::MAX;
+      self.list_tail_start = usize::MAX;
     }
     self.last_text_node_contains_whitespace = contains_whitespace;
     self.has_last_text_node = true;
@@ -2824,6 +2852,12 @@ impl ConvertState {
       return;
     }
 
+    if self.list_tail_pending {
+      if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
+        return;
+      }
+      self.flush_empty_list_tail();
+    }
     if self.list_rule_pending {
       if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
         return;
@@ -3255,10 +3289,16 @@ impl ConvertState {
     }
     let output_start = output_start.min(self.buffer.len());
     let bytes = self.buffer.as_bytes();
-    let line_start = bytes[output_start..]
+    let mut line_start = bytes[output_start..]
       .iter()
       .rposition(|&byte| byte == b'\n')
       .map_or(output_start, |i| output_start + i + 1);
+    // A hard break may already have written the continuation indentation.
+    // Include that indent when locating the marker line, so the guard sees
+    // the preceding newline rather than mistaking spaces for a blank line.
+    while line_start > 0 && bytes[line_start - 1] == b' ' {
+      line_start -= 1;
+    }
     // Draining removes the front of the buffer, so read through it the way
     // `write_output` does: `flushed_tail` holds the two bytes before `buffer[0]`.
     let before = |offset: usize| -> u8 {
@@ -3296,6 +3336,29 @@ impl ConvertState {
   /// item writes after it, uncharged to `max_node_bytes`. Answered here, the
   /// blank line also survives a nested list whose first `<li>` dropped it.
   pub(crate) fn settle_item_marker(&mut self) {
+    if (self.empty_list_marker_end != usize::MAX || self.list_tail_start != usize::MAX)
+      && self.open_markers.is_empty()
+      && self.code_spans.is_empty()
+      && self.open_link_hold_floor().is_none()
+      && self.first_tentative_caption_start().is_none()
+    {
+      if self.empty_list_marker_end != usize::MAX
+        && self
+          .buffer
+          .get(self.empty_list_marker_end..)
+          .is_none_or(|tail| has_visible(tail.as_bytes()))
+      {
+        self.empty_list_marker_end = usize::MAX;
+      }
+      if self.list_tail_start != usize::MAX
+        && self
+          .buffer
+          .get(self.list_tail_start..)
+          .is_none_or(|tail| has_visible(tail.as_bytes()))
+      {
+        self.list_tail_start = usize::MAX;
+      }
+    }
     if self.buffer.len() > self.empty_item_len
       && self.buffer.as_bytes().last().is_some_and(|byte| !byte.is_ascii_whitespace())
       && self.open_markers.is_empty()
@@ -3363,6 +3426,7 @@ impl ConvertState {
       return;
     }
     self.empty_item_hazard = false;
+    let list_marker_end = self.empty_list_marker_end;
     if !self.replace_code_span_content(self.empty_item_line_start..self.empty_item_line_start, "\n")
     {
       return;
@@ -3378,6 +3442,7 @@ impl ConvertState {
     // `[` is the tail this function has already returned on.
 
     let at = self.empty_item_line_start;
+    self.empty_list_marker_end = list_marker_end;
     self.shift_offsets_at_or_after(at);
 
     self.invalidate_line_start();
@@ -3386,6 +3451,12 @@ impl ConvertState {
 
   /// Move every cached offset at or past `at` one byte right, for a newline inserted at `at`.
   fn shift_offsets_at_or_after(&mut self, at: usize) {
+    if self.empty_list_marker_end != usize::MAX && self.empty_list_marker_end >= at {
+      self.empty_list_marker_end += 1;
+    }
+    if self.list_tail_start != usize::MAX && self.list_tail_start >= at {
+      self.list_tail_start += 1;
+    }
     for marker in &mut self.open_markers {
       if marker.output_start >= at {
         marker.output_start += 1;
@@ -4230,27 +4301,38 @@ impl ConvertState {
     p
   }
 
-  // A nested empty marker must stay empty when its parent resumes text.
   fn defer_empty_list_tail(&mut self, tag_id: Option<u8>) {
-    if !plain_text!(self)
-      && matches!(tag_id, Some(TAG_UL | TAG_OL))
-      && !self.list_indent.is_empty()
+    if matches!(tag_id, Some(TAG_UL | TAG_OL))
+      && !plain_text!(self)
+      && self.depth_map[TAG_LI as usize] > 0
       && !self.in_table_cell()
       && !self.in_raw_html_block()
+      && self.empty_list_marker_end != usize::MAX
+      && self.empty_list_marker_depth > self.stack.len()
     {
-      let tail = self.buffer.trim_end_matches([' ', '\n', '\t', '\r']);
-      let line_start = tail.rfind('\n').map_or(0, |index| index + 1);
-      if !tail.is_empty()
-        && tail[line_start..].starts_with(&self.list_indent)
-        && self.list_marker_line_start(tail.as_bytes(), tail.len())
+      let end = self.empty_list_marker_end.min(self.buffer.len());
+      if self.buffer[end..]
+        .bytes()
+        .all(|byte| byte.is_ascii_whitespace())
       {
-        self.list_rule_pending = true;
+        self.list_tail_pending = true;
+      } else {
+        self.empty_list_marker_end = usize::MAX;
       }
     }
   }
 
-  fn flush_list_rule(&mut self) {
+  fn flush_empty_list_tail(&mut self) {
     self.trim_trailing_spaces();
+    self.list_tail_start = self.buffer.len();
+    let prefix = self.continuation_prefix();
+    let separator = format!("\n\n{prefix}");
+    self.push_code_span_content(&separator, true);
+    self.last_content_cache_len = separator.len();
+    self.list_tail_pending = false;
+  }
+
+  fn flush_list_rule(&mut self) {
     let prefix = self.continuation_prefix();
     if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
       self.buffer.reserve(2 + prefix.len());

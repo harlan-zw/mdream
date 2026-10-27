@@ -6230,3 +6230,186 @@ fn empty_nested_list_tail_stays_in_parent_item() {
     assert_eq!(convert(html), expected, "html={html}");
   }
 }
+
+#[test]
+fn empty_nested_list_review_regressions() {
+  for (id, html, expected, options) in [
+    (
+      "F8-1",
+      "<ul><li>lead<br><ul><li></li></ul>text</li></ul>",
+      "- lead  \n\n  -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F8-2",
+      "<ul><li>lead<br><ol><li></li></ol>text</li></ul>",
+      "- lead  \n\n  1.\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F8-3",
+      "<ul><li>lead<br><ul><li></li></ul></li></ul>",
+      "- lead  \n\n  -",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-1",
+      "<ul><li>lead<ul><li></li></ul>text</li></ul>",
+      "- lead\n\n  -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-2",
+      "<ul><li><p>lead</p><ul><li></li></ul>text</li></ul>",
+      "- lead\n\n  -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-3",
+      "<ul><li><blockquote><ul><li></li></ul>text</blockquote></li></ul>",
+      "- \n  >\n  > -\n  >\n  > text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-4",
+      "<ul><li><ul><li></li></ul>a<ul><li></li></ul>b</li></ul>",
+      "-\n  -\n\n  a\n\n  -\n\n  b",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F2-1",
+      "<ul><li><ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>text</li></ul>",
+      "-\n  -\n    -\n      -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F2-2",
+      "<ol><li><ol><li><ol><li><ol><li></li></ol></li></ol></li></ol>t</li></ol>",
+      "1.\n   1.\n      1.\n         1.\n\n   t",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F3-1",
+      "<ul><li><ul><li></li></ul><span>t</span></li></ul>",
+      "-\n  -\n\n  XtY",
+      HtmlToMarkdownOptions {
+        plugins: Some(mdream::types::PluginConfig {
+          tag_overrides: Some(vec![(
+            "span".to_string(),
+            mdream::types::TagOverrideConfig {
+              enter: Some("X".to_string()),
+              exit: Some("Y".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+    (
+      "F3-2",
+      "<ul><li><ul><li></li></ul><span></span></li><li>n</li></ul>",
+      "-\n  -\n\n  XY\n- n",
+      HtmlToMarkdownOptions {
+        plugins: Some(mdream::types::PluginConfig {
+          tag_overrides: Some(vec![(
+            "span".to_string(),
+            mdream::types::TagOverrideConfig {
+              enter: Some("X".to_string()),
+              exit: Some("Y".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+    (
+      "F3-3",
+      "<ul><li><ul><li></li></ul><em></em></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions {
+        plugins: Some(mdream::types::PluginConfig {
+          tag_overrides: Some(vec![(
+            "em".to_string(),
+            mdream::types::TagOverrideConfig {
+              enter: Some("".to_string()),
+              exit: Some("".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+    (
+      "F4-1",
+      "<ul><li><hr><br>text</li></ul>",
+      "- ***\n\n    \n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F4-2",
+      "<ul><li><ul><li></li></ul><br>text</li></ul>",
+      "-\n  -\n\n    \n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F4-3",
+      "<ul><li><ul><li></li></ul><br></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-1",
+      "<ul><li><ul><li></li></ul><div></div></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-2",
+      "<ul><li><ul><li></li></ul><p></p></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-3",
+      "<ul><li><ul><li></li></ul><em></em></li><li>next</li></ul>",
+      "-\n  -\n- next",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-4",
+      "<ul><li><ul><li></li></ul><code></code></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F6-1",
+      "<ul><li><ul><li>a<br>-</li></ul>text</li></ul>",
+      "-\n  - a  \n    - text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F6-2",
+      "<ul><li><ul><li>a<br>1.</li></ul>text</li></ul>",
+      "-\n  - a  \n    1. text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F7-1",
+      "<ul><li><ul><li></li></ul><blockquote>q</blockquote></li></ul>",
+      "-\n  - \n  > q",
+      HtmlToMarkdownOptions::default(),
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "{id}: {html}"
+    );
+  }
+}

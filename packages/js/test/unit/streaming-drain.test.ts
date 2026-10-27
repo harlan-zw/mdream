@@ -324,3 +324,30 @@ describe('streaming drain parity', () => {
     expect(peakRetainedLength).toBeLessThan(chunkSize)
   })
 })
+
+it.each(['<img src="/x">', '<br><img src="/x">', '<hr>', '<span></span>'])('releases an empty item marker for non-text output: %s', (content) => {
+  const plugins = content === '<span></span>'
+    ? [createPlugin({ onNodeEnter: node => node.name === 'span' ? 'X'.repeat(32) : undefined })]
+    : []
+  const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, plugins.length > 0))
+  const parseState: ParseState = { depthMap: processor.state.depthMap, depth: 0, resolvedPlugins: plugins, tagHandlers, plainText: false }
+  const handleEvent = plugins.length
+    ? (event: Parameters<typeof processor.processEvent>[0]) => processPluginsForEvent(event, plugins, processor.state, processor.processEvent)
+    : processor.processEvent
+  let remaining = parseHtmlStream('<ul><li>', parseState, handleEvent)
+  let markdown = processor.getMarkdownChunk()
+  let peakRetained = 0
+  const body = content.repeat(32)
+  for (let index = 0; index < 256; index++) {
+    remaining = parseHtmlStream(remaining + body, parseState, handleEvent)
+    markdown += processor.getMarkdownChunk()
+    peakRetained = Math.max(peakRetained, processor.state.buffer.reduce((size, fragment) => size + fragment.length, 0))
+    expect(processor.state.emptyListMarkerFragment).toBeUndefined()
+  }
+  expect(markdown.length).toBeGreaterThan(32 * 1024)
+  expect(peakRetained).toBeLessThan(4096)
+  remaining = parseHtmlStream(`${remaining}</li></ul>`, parseState, handleEvent)
+  finalizeParse(remaining, parseState, handleEvent)
+  markdown += processor.getMarkdownChunk(true)
+  expect(markdown).toBe(htmlToMarkdown(`<ul><li>${content.repeat(8192)}</li></ul>`, { plugins }))
+})

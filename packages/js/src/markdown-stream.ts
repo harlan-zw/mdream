@@ -1,6 +1,6 @@
 import type { BlockquoteFrame, BufferScanState, MarkdownState, MarkdownStreamContext } from './markdown-processor'
 import { TAG_PRE } from './const'
-import { isAsciiWhitespace, lineOpensRawHtmlBlock, stripBlockquoteListIndent, trimAsciiWhitespaceEnd } from './markdown-processor'
+import { isAsciiWhitespace, lineOpensRawHtmlBlock, noteListTailRewrite, stripBlockquoteListIndent, trimAsciiWhitespaceEnd } from './markdown-processor'
 import { isInsideHeading, trimOutputStart } from './utils'
 
 interface QuoteScan {
@@ -191,6 +191,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       return 0
     }
     const retained = content.slice(start)
+    noteListTailRewrite(state, 0)
     state.buffer.splice(0, fragment, retained)
     for (const frame of state.blockquotes)
       frame.fragment -= fragment - 1
@@ -306,6 +307,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
         const fragmentStart = currentContent.length - lastFragment.length
         const tailStart = Math.max(0, Math.min(contextStart, fragmentStart))
         const emittedTail = currentContent.slice(tailStart, fragmentStart)
+        noteListTailRewrite(state, 0)
         state.buffer.length = 0
         resetBufferScanCursors(bufferScan)
         if (emittedTail)
@@ -316,6 +318,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       else if (!retainMutableFragments) {
         const tailStart = Math.max(0, contextStart)
         const emittedTail = currentContent.slice(tailStart, stableLength)
+        noteListTailRewrite(state, 0)
         state.buffer.length = 0
         resetBufferScanCursors(bufferScan)
         if (emittedTail)
