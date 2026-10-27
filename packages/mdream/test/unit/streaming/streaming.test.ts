@@ -14,6 +14,17 @@ const BYTE_PARITY_CASES = [
   '<p>use <code>a`b</code> here</p>',
   '<a href="https://example.com">https://example.com</a>',
   '<p>answered on <span>03 Apr 2013,&nbsp;</span><span>09:53 AM</span></p>',
+  '<blockquote>q</blockquote>tail',
+  '<ul><li><blockquote>q</blockquote><span> </span><em> </em><script>hidden</script>tail</li></ul>',
+  '<ul><li><blockquote>q</blockquote><blockquote></blockquote>tail</li></ul>',
+  '<ul><li><blockquote>q</blockquote></li><li>next</li></ul>',
+  '<ul><li><blockquote>q</blockquote><blockquote>r</blockquote>tail</li></ul>',
+  '<ul><li><blockquote>q</blockquote><code>tail</code></li></ul>',
+  '<ul><li><blockquote>q</blockquote><a href="x">tail</a></li></ul>',
+  '<ul><li><blockquote>q</blockquote><ul><li>next</li></ul></li></ul>',
+  '<ul><li><blockquote>q</blockquote>tail</li></ul>',
+  '<ul><li><blockquote>outer<blockquote>q</blockquote>tail</blockquote>after</li></ul>',
+  '<hr><blockquote>q</blockquote>tail',
   // `<` before a non-letter is text, so a chunk can split between the `<` and
   // the byte that decides it is not a tag.
   '<p>I <3 Rust</p>',

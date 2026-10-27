@@ -1,3 +1,4 @@
+import type { TagOverride } from '@mdream/js'
 import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
@@ -143,6 +144,106 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
   ])('separates %s with a blank line', async (_name, html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li><blockquote>q</blockquote>tail</li></ul>', '- \n  > q\n\n  tail'],
+    ['<ul><li><blockquote>q</blockquote><em>tail</em></li></ul>', '- \n  > q\n\n  *tail*'],
+    ['<ul><li><blockquote>q</blockquote> <span></span><em></em><script>hidden</script>tail</li></ul>', '- \n  > q\n\n  tail'],
+    ['<ol start=\'10\'><li><blockquote>q</blockquote>tail</li></ol>', '10. \n    > q\n\n    tail'],
+    ['<ul><li><blockquote>outer<blockquote>q</blockquote>tail</blockquote>after</li></ul>', '- \n  > outer\n  > > q\n  >\n  > tail\n\n  after'],
+    ['<ul><li><blockquote></blockquote></li></ul>', '-'],
+    ['<blockquote>q</blockquote>tail', '> q\n\ntail'],
+    ['<ul><li><blockquote>q</blockquote><span> </span><em> </em><script>hidden</script>tail</li></ul>', '- \n  > q\n\n  tail'],
+    ['<ul><li><blockquote>q</blockquote><blockquote></blockquote>tail</li></ul>', '- \n  > q\n\n  tail'],
+    ['<ul><li><blockquote>q</blockquote></li><li>next</li></ul>', '- \n  > q\n- next'],
+    ['<ul><li><blockquote>q</blockquote><blockquote>r</blockquote>tail</li></ul>', '- \n  > q\n\n  > r\n\n  tail'],
+    ['<ul><li><blockquote>q</blockquote><code>tail</code></li></ul>', '- \n  > q\n\n  `tail`'],
+    ['<ul><li><blockquote>q</blockquote><a href="x">tail</a></li></ul>', '- \n  > q\n\n  [tail](x)'],
+    ['<ul><li><blockquote>q</blockquote><img src="x" alt="tail"></li></ul>', '- \n  > q\n\n  ![tail](x)'],
+    ['<ul><li><blockquote>q</blockquote><ul><li>next</li></ul></li></ul>', '- \n  > q\n  - next'],
+  ])('keeps blockquote parent continuation outside the quote: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(stream))
+        actual += chunk
+      expect(actual, `split ${split}`).toBe(expected)
+    }
+  })
+
+  it.each<[string, string, Record<string, TagOverride | string>, string]>([
+    ['alias', '<ul><li><x-q>q</x-q>tail</li></ul>', { 'x-q': 'blockquote' }, '- \n  > q\n\n  tail'],
+    ['literal', '<ul><li><blockquote>q</blockquote>tail</li></ul>', { blockquote: { enter: '[', exit: ']', spacing: [0, 0] } }, '- [q] tail'],
+    ['spacing', '<ul><li><blockquote>q</blockquote>tail</li></ul>', { blockquote: { spacing: [0, 0] } }, '- \n  > q\n\n  tail'],
+  ])('keeps blockquote parent continuation with %s overrides', async (_name, html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { engine, plugins: { tagOverrides } }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(stream, { plugins: { tagOverrides } }))
+        actual += chunk
+      expect(actual, `split ${split}`).toBe(expected)
+    }
+  })
+
+  it('keeps blockquote parent continuation after a list rule', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li><hr><blockquote>q</blockquote>tail</li></ul>'
+    // The pre-existing HR prefix differs between engines (tracked separately).
+    const prefix = engineConfig.name === 'Rust Engine' ? '- ***\n\n  > \n  > q' : '- ***\n\n  \n  > q'
+    const expected = `${prefix}\n\n  tail`
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(stream))
+        actual += chunk
+      expect(actual, `width ${width}`).toBe(expected)
+    }
+  })
+
+  it('keeps blockquote parent continuation after streaming drains', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const body = '<p>streamed quote paragraph</p>'.repeat(512)
+    const html = `<p>prefix</p><ul><li><blockquote>${body}</blockquote><em></em><span> </span>tail</li></ul>`
+    const expected = htmlToMarkdown(html, { engine })
+    expect(expected.endsWith('\n\n  tail')).toBe(true)
+    for (const width of [1, 31, 8192]) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(stream))
+        actual += chunk
+      expect(actual, `width ${width}`).toBe(expected)
+    }
   })
 
   it('keeps representative quote structure across every stream split', async () => {

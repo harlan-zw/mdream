@@ -52,6 +52,7 @@ import {
   TAG_TH,
   TAG_TR,
   TAG_U,
+  TAG_UL,
   TAG_VAR,
   TEXT_NODE,
 } from './const'
@@ -1366,7 +1367,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let openMarkerCount = 0
   let captionFrames: number[] | undefined
   let captionFrameCount = 0
-  // 1 needs a boundary; 2 emitted one and still owns the next source space.
+  // 1 needs caption spacing; 2 owns the next source space after a boundary;
+  // 3 needs quote-parent spacing, which ends when its list item closes.
   let captionBoundary = 0
   let captionBoundarySpacing = 0
   let captionBreakRun = 0
@@ -1472,7 +1474,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
   function prepareCaptionOutput(explicitTop: boolean, includeBoundaryListIndent = true): boolean {
     let changed = false
-    if (captionBoundary === 1)
+    if (captionBoundary === 1 || captionBoundary === 3)
       changed = appendCaptionSpacing(captionBoundarySpacing, includeBoundaryListIndent)
 
     const frames = captionFrames
@@ -1833,6 +1835,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const handler = node.tagHandler
     const tagId = element.tagId!
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
+    if (captionBoundary === 3 && eventType === NodeEventEnter
+      && (tagId === TAG_UL || tagId === TAG_OL || tagId === TAG_LI)) {
+      captionBoundary = 0
+    }
     // A hard break ends a line, while a following block also ends the
     // paragraph. Preserve that extra boundary inside a list's content column.
     if (eventType === NodeEventEnter && state.depthMap[TAG_LI] && !insideRawHtmlRegion
@@ -1944,6 +1950,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
     // An unknown tag with no handler is inline, as in the Rust engine.
     const isInlineElement = handler ? handler.isInline === true : tagId === -1
+    let closesQuote = false
     let gfmAction: GfmAction | undefined
     let handlerOutput: string | undefined
     const suppressedInPre = (state.depthMap[TAG_PRE] || 0) > 0
@@ -1994,6 +2001,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
         else {
           gfmAction = res
+          if (res._tag === 'BlockquoteExit')
+            closesQuote = state.blockquotes.length > 0
+          if (res._tag === 'CodeSpanEnter' && captionBoundary === 3 && res.output === ' `')
+            res.output = MARKDOWN_INLINE_CODE
           handlerOutput = consumeGfmAction(res, state, gfmLifecycle)
         }
         if (handlerOutput)
@@ -2039,7 +2050,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         pushCaptionFrame(element, handler)
 
       let dropBlockquoteOutput = false
-      if (captionBoundary === 1 && eventType === NodeEventEnter && tagId === TAG_BLOCKQUOTE) {
+      if ((captionBoundary === 1 || captionBoundary === 3) && eventType === NodeEventEnter && tagId === TAG_BLOCKQUOTE) {
         captionBufferChanged = appendCaptionSpacing(captionBoundarySpacing, false) || captionBufferChanged
         captionTransition = true
         captionBoundary = 0
@@ -2053,7 +2064,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         const markerType = INLINE_MARKER_TYPE[tagId]!
         const literal = eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit
         if ((markerType || (tagId === TAG_A && eventType === NodeEventEnter)) && !literal) {
-          if (captionBoundary === 1) {
+          if (captionBoundary === 1 || captionBoundary === 3) {
             captionBufferChanged = appendCaptionSpacing(captionBoundarySpacing, true) || captionBufferChanged
             captionTransition = true
             captionBoundary = 2
@@ -2379,6 +2390,19 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       openLinkFragment = -1
     }
 
+    // The existing deferred block boundary ignores invisible output and adds
+    // the parent's list indentation only when a continuation actually arrives.
+    if (eventType === NodeEventExit) {
+      if (closesQuote && state.depthMap[TAG_LI]
+        && !state.depthMap[TAG_PRE] && !insideRawHtmlRegion) {
+        captionBoundary = 3
+        captionBoundarySpacing = 2
+        state.listRulePending = undefined
+      }
+      else if (tagId === TAG_LI && captionBoundary === 3) {
+        captionBoundary = 0
+      }
+    }
     updateListIndent(state, element, eventType)
 
     if (!insideRawHtmlRegion && inRawHtmlRegion) {

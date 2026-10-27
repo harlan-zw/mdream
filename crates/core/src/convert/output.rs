@@ -1563,6 +1563,11 @@ impl ConvertState {
       });
     }
 
+    if self.caption_boundary == CaptionBoundary::QuoteParent
+      && matches!(tag_id, Some(TAG_UL | TAG_OL | TAG_LI))
+    {
+      self.caption_boundary = CaptionBoundary::None;
+    }
     let caption_active =
       self.caption_boundary != CaptionBoundary::None || !self.caption_frames.is_empty();
     let visible_output = caption_active
@@ -2127,6 +2132,9 @@ impl ConvertState {
     let tag_id = node.tag_id;
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
+      if self.caption_boundary == CaptionBoundary::QuoteParent {
+        self.caption_boundary = CaptionBoundary::None;
+      }
     }
     let owns_pre_fence = tag_id == Some(TAG_PRE);
     // Only the <pre> owning the open fence may close it; a nested one closing
@@ -2333,7 +2341,9 @@ impl ConvertState {
       self.list_rule_pending = true;
     }
 
-    if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty() {
+    let closes_quote =
+      !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty();
+    if closes_quote {
       self.finalize_blockquote();
     }
 
@@ -2471,6 +2481,18 @@ impl ConvertState {
     }
     if caption_exit_spacing > 0 {
       self.caption_boundary = CaptionBoundary::Pending(caption_exit_spacing);
+    }
+    // Reuse the deferred block boundary: it already ignores invisible output
+    // and supplies list continuation indentation, without taxing plain text.
+    if closes_quote
+      && !has_override
+      && self.depth_map[TAG_LI as usize] > 0
+      && self.depth_map[TAG_PRE as usize] == 0
+      && !self.in_raw_html_block()
+    {
+      self.caption_boundary = CaptionBoundary::QuoteParent;
+      // An HR inside this quote cannot own the parent's deferred separator.
+      self.list_rule_pending = false;
     }
     self.settle_empty_text_pending(output_start, || false);
     // Reset <pre> fence deferral once the element closes (issue #97).
@@ -3793,8 +3815,13 @@ impl ConvertState {
   #[inline]
   fn prepare_caption_boundary(&mut self, include_list_indent: bool) -> bool {
     let consumes_boundary = self.caption_boundary != CaptionBoundary::None;
-    if let CaptionBoundary::Pending(configured_new_lines) = self.caption_boundary {
-      self.write_caption_boundary(configured_new_lines, include_list_indent);
+    let spacing = match self.caption_boundary {
+      CaptionBoundary::Pending(spacing) => Some(spacing),
+      CaptionBoundary::QuoteParent => Some(2),
+      _ => None,
+    };
+    if let Some(spacing) = spacing {
+      self.write_caption_boundary(spacing, include_list_indent);
       self.caption_boundary = CaptionBoundary::ConsumeSpace;
     }
     consumes_boundary
@@ -4380,7 +4407,10 @@ impl ConvertState {
         // The completed subtree receives quote prefixes once every structural
         // newline is known. Preserve the list marker's trailing space here.
         (self.depth_map[TAG_LI as usize] > 0
-          && !matches!(self.caption_boundary, CaptionBoundary::Pending(_)))
+          && !matches!(
+            self.caption_boundary,
+            CaptionBoundary::Pending(_) | CaptionBoundary::QuoteParent
+          ))
         .then_some(Cow::Borrowed("\n"))
       }
       TAG_CODE => {
@@ -4436,12 +4466,14 @@ impl ConvertState {
           // separated with a space so CommonMark parses them as two
           // code spans rather than merging into one (` `a``b` ` →
           // single span with literal content ``a``b``).
-          if self.last_output_byte().is_some_and(|last_char| {
-            !matches!(
-              last_char,
-              b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
-            )
-          }) {
+          if self.caption_boundary != CaptionBoundary::QuoteParent
+            && self.last_output_byte().is_some_and(|last_char| {
+              !matches!(
+                last_char,
+                b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
+              )
+            })
+          {
             Some(Cow::Borrowed(" `"))
           } else {
             Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))

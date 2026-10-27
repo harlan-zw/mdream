@@ -3294,3 +3294,154 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
     }
   }
 }
+
+#[test]
+fn blockquote_parent_continuation_matches_every_width_and_split() {
+  for (html, expected) in [
+    (
+      "<ul><li><blockquote>q</blockquote>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em>tail</em></li></ul>",
+      "- \n  > q\n\n  *tail*",
+    ),
+    (
+      "<ul><li><blockquote>outer<blockquote>q</blockquote>tail</blockquote>after</li></ul>",
+      "- \n  > outer\n  > > q\n  >\n  > tail\n\n  after",
+    ),
+    (
+      "<ul><li><hr><blockquote>q</blockquote>tail</li></ul>",
+      "- ***\n\n  > \n  > q\n\n  tail",
+    ),
+    ("<blockquote>q</blockquote>tail", "> q\n\ntail"),
+    (
+      "<ul><li><blockquote>q</blockquote><span> </span><em> </em><script>hidden</script>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><blockquote></blockquote>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote></li><li>next</li></ul>",
+      "- \n  > q\n- next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><blockquote>r</blockquote>tail</li></ul>",
+      "- \n  > q\n\n  > r\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><code>tail</code></li></ul>",
+      "- \n  > q\n\n  `tail`",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"x\">tail</a></li></ul>",
+      "- \n  > q\n\n  [tail](x)",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><img src=\"x\" alt=\"tail\"></li></ul>",
+      "- \n  > q\n\n  ![tail](x)",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><ul><li>next</li></ul></li></ul>",
+      "- \n  > q\n  - next",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default();
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}
+
+#[test]
+fn blockquote_parent_continuation_after_drains_and_inside_capped_code() {
+  let paragraph = "<p>streamed quote paragraph</p>".repeat(512);
+  let html = format!(
+    "<p>prefix</p><ul><li><blockquote>{paragraph}</blockquote><em></em><span> </span>tail</li></ul>"
+  );
+  let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+  assert!(expected.ends_with("\n\n  tail"));
+  for chunk in [1, 31, 8192] {
+    assert_eq!(
+      stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
+      expected
+    );
+  }
+  for cap in [32, 128, 1024] {
+    for html in [
+      "<code><ul><li><blockquote>q</blockquote>tail</li></ul></code>".to_string(),
+      format!(
+        "<code><ul><li><blockquote>{}</blockquote>tail</li></ul></code>",
+        "quote ".repeat(64)
+      ),
+      "<ul><li><blockquote>q</blockquote><code>tail</code></li></ul>".to_string(),
+    ] {
+      let options = HtmlToMarkdownOptions::default().with_max_node_bytes(cap);
+      let expected = html_to_format_result(&html, options.clone(), OutputFormat::Markdown);
+      for width in [1, 31, 8192] {
+        let mut processor = MarkdownStreamProcessor::new(options.clone());
+        let mut actual = String::new();
+        for chunk in html.as_bytes().chunks(width) {
+          actual.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+        }
+        actual.push_str(&processor.finish());
+        assert_eq!(actual, expected.markdown, "cap={cap} width={width}");
+        assert_eq!(
+          processor.truncated(),
+          expected.truncated,
+          "cap={cap} width={width}"
+        );
+      }
+      assert_stream_matches(&html, options.clone());
+      assert_stream_matches_every_split(&html, options);
+    }
+  }
+}
+
+#[test]
+fn blockquote_parent_continuation_respects_overrides() {
+  for (html, override_name, config, expected) in [
+    (
+      "<ul><li><x-q>q</x-q>tail</li></ul>",
+      "x-q",
+      TagOverrideConfig {
+        alias_tag_id: mdream::get_tag_id("blockquote"),
+        ..Default::default()
+      },
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote>tail</li></ul>",
+      "blockquote",
+      TagOverrideConfig {
+        enter: Some("[".into()),
+        exit: Some("]".into()),
+        spacing: Some([0, 0]),
+        ..Default::default()
+      },
+      "- [q] tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote>tail</li></ul>",
+      "blockquote",
+      TagOverrideConfig {
+        spacing: Some([0, 0]),
+        ..Default::default()
+      },
+      "- \n  > q\n\n  tail",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(override_name.to_string(), config)]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}

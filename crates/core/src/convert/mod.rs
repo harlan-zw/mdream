@@ -210,6 +210,7 @@ struct CaptionFrame {
 enum CaptionBoundary {
   None,
   Pending(u8),
+  QuoteParent,
   ConsumeSpace,
 }
 
