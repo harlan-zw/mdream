@@ -916,6 +916,14 @@ function hasNonWhitespace(value: string): boolean {
   return false
 }
 
+function hasNonWhitespaceFrom(buffer: readonly string[], from: number): boolean {
+  for (let index = from; index < buffer.length; index++) {
+    if (hasNonWhitespace(buffer[index]!))
+      return true
+  }
+  return false
+}
+
 export function isAsciiWhitespace(code: number): boolean {
   return code === 32 || (code >= 9 && code <= 13)
 }
@@ -1913,7 +1921,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.emptyListMarkerFragment = undefined
     if (eventType === NodeEventExit && tagId === TAG_LI && state.listTailStart !== undefined) {
       const start = state.listTailStart
-      if (!buff.slice(start).some(hasNonWhitespace)) {
+      if (!hasNonWhitespaceFrom(buff, start)) {
         state.outputPositions?.replace(start, buff.length, [])
         buff.length = start
         state.lastContentCache = buff.at(-1)
@@ -1929,7 +1937,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       && state.emptyListMarkerFragment !== undefined
       && state.emptyListMarkerDepth! > element.depth) {
       const marker = state.emptyListMarkerFragment
-      if (marker < buff.length && !buff.slice(marker + 1).some(hasNonWhitespace))
+      if (marker < buff.length && !hasNonWhitespaceFrom(buff, marker + 1))
         state.listTailPending = true
       else
         state.emptyListMarkerFragment = undefined
@@ -2614,10 +2622,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         unresolvedCaptionFragment = codeSpanFragment
       if (unresolvedCaptionFragment === -1 && !state.codeFence) {
         const marker = state.emptyListMarkerFragment
-        if (marker !== undefined && (marker >= state.buffer.length || state.buffer.slice(marker + 1).some(hasNonWhitespace)))
+        if (marker !== undefined && (marker >= state.buffer.length || hasNonWhitespaceFrom(state.buffer, marker + 1)))
           state.emptyListMarkerFragment = undefined
         const start = state.listTailStart
-        if (start !== undefined && (start > state.buffer.length || state.buffer.slice(start).some(hasNonWhitespace)))
+        if (start !== undefined && (start > state.buffer.length || hasNonWhitespaceFrom(state.buffer, start)))
           state.listTailStart = undefined
       }
       resolveItemMarker(state, false, unresolvedCaptionFragment)

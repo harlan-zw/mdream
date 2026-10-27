@@ -351,3 +351,41 @@ it.each(['<img src="/x">', '<br><img src="/x">', '<hr>', '<span></span>'])('rele
   markdown += processor.getMarkdownChunk(true)
   expect(markdown).toBe(htmlToMarkdown(`<ul><li>${content.repeat(8192)}</li></ul>`, { plugins }))
 })
+
+it.each([
+  ['', '-\n  -\n- next'],
+  ['text', '-\n  -\n\n  text\n- next'],
+])('streams a pending empty list tail without allocating tail arrays: %s', (tail, expected) => {
+  const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, false))
+  const parseState: ParseState = { depthMap: processor.state.depthMap, depth: 0, resolvedPlugins: [], tagHandlers, plainText: false }
+  const buffer = processor.state.buffer
+  const originalSlice = buffer.slice
+  let tailArrayCopies = 0
+  buffer.slice = (start, end) => {
+    if (start !== undefined && start > 0 && end === undefined)
+      tailArrayCopies++
+    return originalSlice.call(buffer, start, end)
+  }
+  const prefix = '<ul><li><ul><li></li></ul>'
+  const emptyChunk = '<div></div><p></p><em></em><span> </span>'
+  let remaining = ''
+  let markdown = ''
+  for (const character of prefix) {
+    remaining = parseHtmlStream(remaining + character, parseState, processor.processEvent)
+    markdown += processor.getMarkdownChunk()
+  }
+  for (let index = 0; index < 64; index++) {
+    remaining = parseHtmlStream(remaining + emptyChunk, parseState, processor.processEvent)
+    markdown += processor.getMarkdownChunk()
+  }
+  const close = `${tail}</li><li>next</li></ul>`
+  for (const character of close) {
+    remaining = parseHtmlStream(remaining + character, parseState, processor.processEvent)
+    markdown += processor.getMarkdownChunk()
+  }
+  finalizeParse(remaining, parseState, processor.processEvent)
+  markdown += processor.getMarkdownChunk(true)
+  expect(markdown).toBe(expected)
+  expect(markdown).toBe(htmlToMarkdown(prefix + emptyChunk.repeat(64) + close))
+  expect(tailArrayCopies).toBe(0)
+})
