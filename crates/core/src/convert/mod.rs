@@ -2620,10 +2620,10 @@ impl ConvertState {
   /// Record that buffer bytes from `offset` on were rewritten or removed.
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
-    if offset < self.empty_list_marker_end {
+    if self.empty_list_marker_end != usize::MAX && offset < self.empty_list_marker_end {
       self.empty_list_marker_end = usize::MAX;
     }
-    if offset < self.list_tail_start {
+    if self.list_tail_start != usize::MAX && offset < self.list_tail_start {
       self.list_tail_start = usize::MAX;
     }
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
