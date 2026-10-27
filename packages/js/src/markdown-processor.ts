@@ -598,46 +598,60 @@ function isThematicBreak(value: string, start: number, marker: number): boolean 
 
 const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
 
-/** Find a start-at-one marker completed across inline nodes after wrapping. */
-function wrappedOrderedDelimiter(value: string, buffer: string[], indent: string): number {
-  let delimiter = 0
-  while (delimiter < 9 && value.charCodeAt(delimiter) >= 48 && value.charCodeAt(delimiter) <= 57)
-    delimiter++
-  if ((value.charCodeAt(delimiter) !== 46 && value.charCodeAt(delimiter) !== 41)
-    || !isMarkdownMarkerWhitespace(value.charCodeAt(delimiter + 1) || 0)) {
-    return -1
-  }
-  let digits = 0
-  for (let index = delimiter - 1; index >= 0; index--) {
-    if (value.charCodeAt(index) !== (digits === 0 ? 49 : 48))
-      return -1
-    digits++
-  }
+/**
+ * Digits that end the buffer at a line start. The escape pass counts them as
+ * the start of an ordered list marker that the next text may complete. After
+ * a soft break, which is what wrapping writes, only a list starting at one
+ * interrupts the paragraph. After a blank line or a hard break any number
+ * counts, as it does for a marker inside one text node. Parity with the Rust
+ * `line_start_digits`.
+ */
+function lineStartDigits(buffer: string[], indent: string, value: string): number {
+  let lead = 0
+  while (value.charCodeAt(lead) >= 48 && value.charCodeAt(lead) <= 57)
+    lead++
+  // Whether the buffered digits and those `value` adds read as one.
+  let one = lead === 0 || value.charCodeAt(lead - 1) === 49
+  for (let index = 0; one && index < lead - 1; index++)
+    one = value.charCodeAt(index) === 48
   let fragment = buffer.length - 1
   let offset = fragment >= 0 ? buffer[fragment]!.length : 0
-  let bufferedDigits = 0
+  let digits = 0
   let spaces = 0
+  let newline = false
   for (;;) {
     while (offset === 0 && fragment >= 0) {
       fragment--
       offset = fragment >= 0 ? buffer[fragment]!.length : 0
     }
     const code = fragment >= 0 ? buffer[fragment]!.charCodeAt(--offset) : -1
+    // A blank line or the spaces or backslash of a hard break; any other
+    // character ends the line at a soft break.
+    if (newline)
+      return code === -1 || code === 10 || code === 32 || code === 9 || code === 92 ? digits : 0
     if (spaces === 0 && code >= 48 && code <= 57) {
-      if (digits === 9 || code !== (digits === 0 ? 49 : 48))
-        return -1
-      digits++
-      bufferedDigits++
+      if (++digits > 9)
+        return 0
+      one &&= code === (digits === 1 && lead === 0 ? 49 : 48)
       continue
     }
-    if (bufferedDigits === 0)
-      return -1
+    if (digits === 0)
+      return 0
     if (code === 32) {
       if (++spaces > indent.length + 3)
-        return -1
+        return 0
       continue
     }
-    return (code === -1 || code === 10) && (spaces <= 3 || spaces >= indent.length) ? delimiter : -1
+    if (code === -1 || code === 10) {
+      if (spaces > 3 && spaces < indent.length)
+        return 0
+      if (code === -1 || one)
+        return digits
+      newline = true
+      continue
+    }
+    // A list item's content opens a block, so `- 1` + `. x` nests a list.
+    return spaces > 0 && spaces <= 3 && listMarkerLineStart(buffer, fragment, offset) ? digits : 0
   }
 }
 
@@ -684,12 +698,11 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
  * markers never pass through here, while code and raw-HTML contexts bypass it.
  * The common plain-text path returns the original string without allocation.
  */
-function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, continuationDelimiter = -1): string {
+function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, orderedDigits = 0): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
   const inLink = Boolean(depthMap[TAG_A])
   const inBlockquote = Boolean(depthMap[TAG_BLOCKQUOTE])
   let lineIndent = markdownLineIndent(buffer)
-  let orderedDigits = 0
   let copiedUntil = 0
   let escaped = ''
 
@@ -714,7 +727,7 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, c
       continue
     }
 
-    let shouldEscape = index === continuationDelimiter || '\\*_~`['.includes(character)
+    let shouldEscape = '\\*_~`['.includes(character)
       || (code === 93 && inLink) // ]
       || (code === 124 && inTable) // |
       || (code === 62 && inBlockquote) // >
@@ -1732,24 +1745,29 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         textNode.value = escapeRawHtmlText(textNode.value, state.depthMap, rawHtmlLink !== undefined && parent === rawHtmlLink)
       }
 
-      const wrapWidth = state.options?.wrapWidth
-      const continuationDelimiter = wrapWidth && canWrapHere(state.depthMap) && !textNode.generatedMarkdown?.prefix
-        ? wrappedOrderedDelimiter(textNode.value, state.buffer, state.listIndent)
-        : -1
+      // Digits already at a line start become an ordered marker if this text
+      // continues them with `.` or `)`. Both ends are checked before the scan.
+      const last = lastChar.charCodeAt(0)
+      const first = last >= 48 && last <= 57 ? textNode.value.charCodeAt(0) : 0
+      const orderedDigits = ((first >= 48 && first <= 57) || first === 46 || first === 41)
+        && !textNode.generatedMarkdown?.prefix
+        ? lineStartDigits(state.buffer, state.listIndent, textNode.value)
+        : 0
       if (!state.depthMap[TAG_PRE]
         && !state.depthMap[TAG_CODE]
         // Inside a raw-HTML region only text past a blank line is Markdown
         // again. That test is O(1), so it goes before the text scans; the line
         // scan stays last, paid only by text that would be escaped anyway.
         && (!insideRawHtmlBlock || rawHtmlMarkdown)
-        && (continuationDelimiter >= 0 || mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap))
+        && (orderedDigits > 0 || mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap))
         && (!insideRawHtmlBlock || !lineOpensRawHtmlBlock(state.buffer, bufferScan))) {
-        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, continuationDelimiter)
+        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, orderedDigits)
       }
 
       if (textNode.generatedMarkdown && textNode.value)
         textNode.value = `${textNode.generatedMarkdown.prefix}${textNode.value}${textNode.generatedMarkdown.suffix}`
 
+      const wrapWidth = state.options?.wrapWidth
       if (wrapWidth && canWrapHere(state.depthMap)) {
         const wrapped = wrapText(textNode.value, currentColumn(state.buffer), wrapWidth, state.listIndent)
         state.buffer.push(wrapped)

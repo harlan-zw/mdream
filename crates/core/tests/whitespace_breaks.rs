@@ -485,6 +485,7 @@ fn wrapped_ordered_marker_completed_by_an_inline_node_is_escaped() {
     ("<span>00000000</span>1) bb", "aaaaa\n000000001\\)\nbb"),
     ("<span>000000000</span>1) bb", "aaaaa\n0000000001)\nbb"),
     ("<span>2</span>) bb", "aaaaa\n2) bb"),
+    ("<span>1</span>0) bb", "aaaaa\n10) bb"),
     ("<span>1</span>.5 bb", "aaaaa\n1.5 bb"),
     ("<span>1</span> bb", "aaaaa\n1 bb"),
     ("<span>1 </span>) bb", "aaaaa\n1 ) bb"),
@@ -523,6 +524,34 @@ fn wrapped_ordered_marker_completed_by_an_inline_node_is_escaped() {
     &HtmlToMarkdownOptions::default().with_wrap_width(6),
     "aaaaa\n1) bb",
   );
+}
+
+#[test]
+fn split_ordered_marker_is_escaped_with_and_without_wrapping() {
+  for width in [0, 40] {
+    let options = HtmlToMarkdownOptions::default().with_wrap_width(width);
+    for (html, expected) in [
+      ("<p>1<span>. x</span></p>", "1\\. x"),
+      ("<p>aaaa<br>1<span>. x</span></p>", "aaaa  \n1\\. x"),
+      ("<p>aaaa<br>2<span>. x</span></p>", "aaaa  \n2\\. x"),
+      ("<p>aa<br><br>2<span>. x</span></p>", "aa  \n  \n2\\. x"),
+      ("<p>aaaa</p><p>2<span>. x</span></p>", "aaaa\n\n2\\. x"),
+      ("<p>2<span>) x</span></p>", "2\\) x"),
+      ("<p>1<span>0. x</span></p>", "10\\. x"),
+      ("<p>12345678<span>9. x</span></p>", "123456789\\. x"),
+      ("<p>12345678<span>90. x</span></p>", "1234567890. x"),
+      ("<ul><li>1<span>. x</span></li></ul>", "- 1\\. x"),
+      (
+        "<blockquote><p>1<span>. x</span></p></blockquote>",
+        "> 1\\. x",
+      ),
+      ("<p>a 1<span>. x</span></p>", "a 1. x"),
+      ("<p>1<span>.5 x</span></p>", "1.5 x"),
+      ("<p><span>1 </span>. x</p>", "1 . x"),
+    ] {
+      assert_every_chunking(html, &options, expected);
+    }
+  }
 }
 
 #[test]

@@ -2632,7 +2632,7 @@ impl ConvertState {
     hazard: bool,
     inside_raw_html_block: bool,
     scratch: &mut String,
-    continuation_delimiter: Option<usize>,
+    ordered_digits: u8,
   ) -> bool {
     if !hazard
       || (inside_raw_html_block && !(self.raw_html_markdown && !self.line_opens_raw_html_block()))
@@ -2643,7 +2643,7 @@ impl ConvertState {
     {
       self.gfm_escape_slow_path_calls += 1;
     }
-    self.escape_gfm_text_into(text, scratch, continuation_delimiter)
+    self.escape_gfm_text_into(text, scratch, ordered_digits)
   }
 
   #[inline(always)]
@@ -2723,21 +2723,31 @@ impl ConvertState {
     let context_hazard =
       !inside_raw_html_block && context_gfm_hazard(text, in_table, in_link, in_quote);
     let mut escape_scratch = std::mem::take(&mut self.escape_scratch);
-    let hazard =
-      has_inline_gfm_hazard || context_hazard || self.starts_with_gfm_block_candidate(text);
+    let ordered_digits = if matches!(last_char, Some(b'0'..=b'9'))
+      && matches!(text.as_bytes().first(), Some(b'0'..=b'9' | b'.' | b')'))
+      && !self.should_add_spacing_before_text(last_char, text)
+    {
+      self.line_start_digits(text)
+    } else {
+      0
+    };
+    let hazard = ordered_digits > 0
+      || has_inline_gfm_hazard
+      || context_hazard
+      || self.starts_with_gfm_block_candidate(text);
     let text = if self.escape_text_node(
       text,
       hazard,
       inside_raw_html_block,
       &mut escape_scratch,
-      None,
+      ordered_digits,
     ) {
       escape_scratch.as_str()
     } else {
       text
     };
 
-    let add_space = self.should_add_spacing_before_text(last_char, text);
+    let add_space = ordered_digits == 0 && self.should_add_spacing_before_text(last_char, text);
     self.push_text_uncapped(text, add_space);
     self.finish_text_node(text, contains_whitespace, depth, index);
     self.return_escape_scratch(escape_scratch);
@@ -2970,21 +2980,23 @@ impl ConvertState {
     let context_has_gfm_hazard =
       |text: &str| !inside_raw_html_block && context_gfm_hazard(text, in_table, in_link, in_quote);
     let mut escape_scratch = std::mem::take(&mut self.escape_scratch);
-    let continuation_delimiter = if !plain_text!(self)
-      && self.wrap_width != 0
-      && self.can_wrap_here()
+    let ordered_digits = if matches!(last_char, Some(b'0'..=b'9'))
+      && matches!(text.as_bytes().first(), Some(b'0'..=b'9' | b'.' | b')'))
+      && !plain_text!(self)
       && !wrap_separator
       && generated_prefix.is_none_or(str::is_empty)
-      && !self.should_add_spacing_before_text(last_char, text)
+      && (owns_leading_space || !self.should_add_spacing_before_text(last_char, text))
     {
-      self.wrapped_ordered_delimiter(text)
+      self.line_start_digits(text)
     } else {
-      None
+      0
     };
+    // Spacing was decided on the raw text; the escape may put `\` first.
+    let owns_leading_space = owns_leading_space || ordered_digits > 0;
     let hazard = !plain_text!(self)
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
-      && (continuation_delimiter.is_some()
+      && (ordered_digits > 0
         || has_inline_gfm_hazard
         || context_has_gfm_hazard(text)
         || self.starts_with_gfm_block_candidate(text));
@@ -2993,7 +3005,7 @@ impl ConvertState {
       hazard,
       inside_raw_html_block,
       &mut escape_scratch,
-      continuation_delimiter,
+      ordered_digits,
     ) {
       escape_scratch.as_str()
     } else {
@@ -3016,12 +3028,7 @@ impl ConvertState {
     let owns_space =
       owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0);
     if self.wrap_width != 0 && self.can_wrap_here() {
-      self.push_text_wrapped(
-        text,
-        last_char,
-        owns_leading_space || continuation_delimiter.is_some(),
-        wrap_separator,
-      );
+      self.push_text_wrapped(text, last_char, owns_leading_space, wrap_separator);
     } else if self.options.max_node_bytes == 0 {
       let add_space = !owns_space && self.should_add_spacing_before_text(last_char, text);
       self.push_text_uncapped(text, add_space);
@@ -3059,69 +3066,71 @@ impl ConvertState {
     }
   }
 
-  /// Find a start-at-one marker completed across inline nodes after wrapping.
-  fn wrapped_ordered_delimiter(&self, text: &str) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let delimiter = bytes
-      .iter()
-      .take(9)
-      .take_while(|b| b.is_ascii_digit())
-      .count();
-    if !matches!(bytes.get(delimiter), Some(b'.' | b')'))
-      || !Self::is_markdown_marker_whitespace(bytes.get(delimiter + 1).copied())
-    {
-      return None;
-    }
-    let mut digits = 0;
-    for &byte in bytes[..delimiter].iter().rev() {
-      if byte != if digits == 0 { b'1' } else { b'0' } {
-        return None;
-      }
-      digits += 1;
-    }
-    let mut buffered_digits = 0;
-    let mut spaces = 0;
-    for &byte in self.buffer.as_bytes().iter().rev() {
+  /// Digits that end the buffer at a line start. The escape pass counts them
+  /// as the start of an ordered list marker that `text` may complete. After a
+  /// soft break, which is what wrapping writes, only a list starting at one
+  /// interrupts the paragraph. After a blank line or a hard break any number
+  /// counts, as it does for a marker inside one text node.
+  fn line_start_digits(&self, text: &str) -> u8 {
+    let bytes = self.buffer.as_bytes();
+    let mut digits = 0u8;
+    let mut spaces = 0usize;
+    let lead = &text.as_bytes()[..text.bytes().take_while(u8::is_ascii_digit).count()];
+    // Whether the buffered digits and those `text` adds read as one.
+    let mut one = match lead.split_last() {
+      Some((&last, rest)) => last == b'1' && rest.iter().all(|&byte| byte == b'0'),
+      None => true,
+    };
+    for (offset, &byte) in bytes.iter().enumerate().rev() {
       if spaces == 0 && byte.is_ascii_digit() {
-        if digits == 9 || byte != if digits == 0 { b'1' } else { b'0' } {
-          return None;
+        if digits == 9 {
+          return 0;
         }
+        // Only the number's final digit may be the one.
+        one &= byte == b'0' + u8::from(digits == 0 && lead.is_empty());
         digits += 1;
-        buffered_digits += 1;
         continue;
-      }
-      if buffered_digits == 0 {
-        return None;
       }
       if byte == b' ' {
         spaces += 1;
         if spaces > self.list_indent.len() + 3 {
-          return None;
+          return 0;
         }
         continue;
       }
-      return (byte == b'\n' && (spaces <= 3 || spaces >= self.list_indent.len()))
-        .then_some(delimiter);
+      let opens = if byte == b'\n' {
+        // A blank line or the spaces or backslash of a hard break; any other
+        // byte ends the line at a soft break.
+        let before = match offset {
+          0 if self.has_flushed_tail() => self.flushed_tail[1],
+          0 => b'\n',
+          _ => bytes[offset - 1],
+        };
+        (spaces <= 3 || spaces >= self.list_indent.len())
+          && (one || matches!(before, b'\n' | b' ' | b'\t' | b'\\'))
+      } else {
+        // A list item's content opens a block, so `- 1` + `. x` nests a list.
+        (1..=3).contains(&spaces) && self.list_marker_line_start(bytes, offset + 1)
+      };
+      return if opens { digits } else { 0 };
     }
-    (buffered_digits > 0
-      && (spaces <= 3 || spaces >= self.list_indent.len())
-      && (!self.has_flushed_tail() || self.flushed_tail[1] == b'\n'))
-      .then_some(delimiter)
+    let opens = !self.has_flushed_tail()
+      || (self.flushed_tail[1] == b'\n'
+        && (one || matches!(self.flushed_tail[0], b'\n' | b' ' | b'\t' | b'\\')));
+    if opens && (spaces <= 3 || spaces >= self.list_indent.len()) {
+      digits
+    } else {
+      0
+    }
   }
 
   /// Escape GFM syntax into `out`; returns false and leaves `out` alone if none is needed.
   #[inline]
-  fn escape_gfm_text_into(
-    &self,
-    text: &str,
-    out: &mut String,
-    continuation_delimiter: Option<usize>,
-  ) -> bool {
+  fn escape_gfm_text_into(&self, text: &str, out: &mut String, mut ordered_digits: u8) -> bool {
     let in_table = self.depth_map[TAG_TABLE as usize] > 0;
     let in_link = self.depth_map[TAG_A as usize] > 0;
     let in_blockquote = self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
     let mut line_indent = self.markdown_line_indent();
-    let mut ordered_digits = 0u8;
     let bytes = text.as_bytes();
     let mut escaped = false;
     let mut copied_until = 0usize;
@@ -3166,8 +3175,7 @@ impl ConvertState {
         continue;
       }
 
-      let mut should_escape = continuation_delimiter == Some(index)
-        || matches!(byte, b'\\' | b'*' | b'_' | b'~' | b'`' | b'[')
+      let mut should_escape = matches!(byte, b'\\' | b'*' | b'_' | b'~' | b'`' | b'[')
         || (byte == b']' && in_link)
         || (byte == b'|' && in_table)
         || (byte == b'>' && in_blockquote)
@@ -5575,6 +5583,38 @@ mod tests {
     state.write_output(true, false, 2, Some("next"), false);
 
     assert_eq!(state.buffer, "c\n\nnext");
+  }
+
+  // A rewrite can trim the buffer back to the digits, so the bytes before them
+  // come from `flushed_tail`.
+  #[test]
+  fn line_start_digits_reads_the_flushed_tail() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.buffer.push('2');
+    assert_eq!(state.line_start_digits(". x"), 1);
+
+    state.has_streamed_output = true;
+    state.cut_line_lead = CutLineLead::Content;
+    for (tail, buffer, digits) in [
+      (*b"\n\n", "2", 1),
+      (*b" \n", "2", 1),
+      (*b"x\n", "2", 0),
+      (*b"x\n", "1", 1),
+      (*b"xy", "1", 0),
+      (*b"x\n", "\n2", 1),
+      (*b"x ", "\n2", 1),
+      (*b"xy", "\n2", 0),
+      (*b"xy", "\n1", 1),
+    ] {
+      state.flushed_tail = tail;
+      state.buffer.clear();
+      state.buffer.push_str(buffer);
+      assert_eq!(
+        state.line_start_digits(". x"),
+        digits,
+        "tail={tail:?} buffer={buffer:?}"
+      );
+    }
   }
 
   // Draining, and then a rewrite trimming what draining retained, leaves the

@@ -209,6 +209,7 @@ describe('wrap width (issue #106)', () => {
     ['<span>00000000</span>1) bb', 'aaaaa\n000000001\\)\nbb'],
     ['<span>000000000</span>1) bb', 'aaaaa\n0000000001)\nbb'],
     ['<span>2</span>) bb', 'aaaaa\n2) bb'],
+    ['<span>1</span>0) bb', 'aaaaa\n10) bb'],
     ['<span>1</span>.5 bb', 'aaaaa\n1.5 bb'],
     ['<span>1</span> bb', 'aaaaa\n1 bb'],
     ['<span>1 </span>) bb', 'aaaaa\n1 ) bb'],
@@ -220,6 +221,26 @@ describe('wrap width (issue #106)', () => {
     await expectEveryChunking('<ul><li>x<ul><li><span>aaaaa </span><span>1</span>) bb</li></ul></li></ul>', { wrapWidth: 10 }, '- x\n  - aaaaa\n    1\\) bb')
     await expectEveryChunking('<blockquote><p><span>aaaaa </span><span>1</span>) bb</p></blockquote>', { wrapWidth: 6 }, '> aaaaa\n> 1\\) bb')
     await expectEveryChunking('<p><span>aaaaa </span><span>1</span>) bb</p>', {}, 'aaaaa 1) bb')
+  })
+
+  it.each([
+    ['<p>1<span>. x</span></p>', '1\\. x'],
+    ['<p>aaaa<br>1<span>. x</span></p>', 'aaaa  \n1\\. x'],
+    ['<p>aaaa<br>2<span>. x</span></p>', 'aaaa  \n2\\. x'],
+    ['<p>aa<br><br>2<span>. x</span></p>', 'aa  \n  \n2\\. x'],
+    ['<p>aaaa</p><p>2<span>. x</span></p>', 'aaaa\n\n2\\. x'],
+    ['<p>2<span>) x</span></p>', '2\\) x'],
+    ['<p>1<span>0. x</span></p>', '10\\. x'],
+    ['<p>12345678<span>9. x</span></p>', '123456789\\. x'],
+    ['<p>12345678<span>90. x</span></p>', '1234567890. x'],
+    ['<ul><li>1<span>. x</span></li></ul>', '- 1\\. x'],
+    ['<blockquote><p>1<span>. x</span></p></blockquote>', '> 1\\. x'],
+    ['<p>a 1<span>. x</span></p>', 'a 1. x'],
+    ['<p>1<span>.5 x</span></p>', '1.5 x'],
+    ['<p><span>1 </span>. x</p>', '1 . x'],
+  ])('escapes a split ordered marker with and without wrapping: %s', async (html, expected) => {
+    for (const wrapWidth of [0, 40])
+      await expectEveryChunking(html, { wrapWidth }, expected)
   })
 
   it('protects split markers after earlier output has streamed', async () => {
