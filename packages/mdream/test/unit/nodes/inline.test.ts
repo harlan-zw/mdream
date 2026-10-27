@@ -243,6 +243,11 @@ describe.each(engines)('gfm inline code delimiters $name', (engineConfig) => {
 
 describe.each(engines)('setext equals escaping $name', (engineConfig) => {
   it.each([
+    ['<ul><li>x<ul><li>a<br># b</li></ul></li></ul>', '- x\n  - a  \n    \\# b'],
+    ['<ul><li>x<ul><li>a<br>- b</li></ul></li></ul>', '- x\n  - a  \n    \\- b'],
+    ['<ul><li>x<ul><li>a<br>+ b</li></ul></li></ul>', '- x\n  - a  \n    \\+ b'],
+    ['<ul><li>x<ul><li>a<br>1. b</li></ul></li></ul>', '- x\n  - a  \n    1\\. b'],
+    ['<ul><li>x<ul><li>a<br>&gt; b</li></ul></li></ul>', '- x\n  - a  \n    \\> b'],
     ['<p>aaaaa<br>===</p>', 'aaaaa  \n\\==='],
     ['<p>aaaaa<br><span>=</span><span>==</span></p>', 'aaaaa  \n\\==='],
     ['<p>aaaaa<br> <span></span>===</p>', 'aaaaa  \n\\==='],

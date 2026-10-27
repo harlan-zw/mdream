@@ -6130,6 +6130,26 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
 #[test]
 fn setext_equals_text_preserves_paragraphs() {
   for (html, expected) in [
+    (
+      "<ul><li>x<ul><li>a<br># b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\# b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>- b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\- b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>+ b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\+ b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>1. b</li></ul></li></ul>",
+      "- x\n  - a  \n    1\\. b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>&gt; b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\> b",
+    ),
     ("<p>aaaaa<br>===</p>", "aaaaa  \n\\==="),
     (
       "<p>aaaaa<br><span>=</span><span>==</span></p>",

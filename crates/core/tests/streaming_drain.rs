@@ -3298,6 +3298,26 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
 #[test]
 fn streaming_setext_equals_text_preserves_paragraphs() {
   for (html, expected) in [
+    (
+      "<ul><li>x<ul><li>a<br># b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\# b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>- b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\- b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>+ b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\+ b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>1. b</li></ul></li></ul>",
+      "- x\n  - a  \n    1\\. b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>&gt; b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\> b",
+    ),
     ("<p>aaaaa<br>===</p>", "aaaaa  \n\\==="),
     (
       "<p>aaaaa<br><span>=</span><span>==</span></p>",
