@@ -5154,6 +5154,25 @@ impl ConvertState {
     } else if self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0 {
       return NO_SPACING;
     }
+    // Only a list starting at 1 may interrupt its parent's paragraph. A bare
+    // parent marker has no paragraph to separate, so keep that list tight.
+    if !plain_text!(self)
+      && is_enter
+      && tag_id == Some(TAG_LI)
+      && self.depth_map[TAG_LI as usize] > 1
+      && self.stack.last().is_some_and(|node| node.index == 0)
+      && self
+        .stack
+        .iter()
+        .rev()
+        .nth(1)
+        .is_some_and(|node| node.tag_id == Some(TAG_OL))
+      && self.ordered_item_number(0) != 1
+      && !self.in_table_cell()
+      && (self.block_open_prefix("").is_some() || self.hard_break_end == self.buffer.len())
+    {
+      return DEFAULT_BLOCK_SPACING;
+    }
     // A heading's own collapse keeps its block spacing, but in a table cell that
     // newline would end the row. The count holds the heading only while it is
     // open: at its exit the heading is already popped, so a count of 1 there is

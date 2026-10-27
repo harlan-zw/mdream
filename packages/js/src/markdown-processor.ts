@@ -822,6 +822,15 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
     return NO_SPACING
   }
 
+  // Only a list starting at 1 may interrupt its parent's paragraph. A bare
+  // parent marker has no paragraph to separate, so keep that list tight.
+  if (eventType === NodeEventEnter && tagId === TAG_LI && depthMap[TAG_LI]! > 1
+    && node.index === 0 && node.parent?.tagId === TAG_OL
+    && orderedItemNumber(node.parent, 0) !== 1 && !isInsideTableCell(state)
+    && (blockOpenPrefix(state.buffer, '') !== undefined || endsAtHardBreak(state.buffer))) {
+    return DEFAULT_BLOCK_SPACING
+  }
+
   // Adjust for inline elements
   // Block elements preserve spacing even inside span elements (presentational containers)
   // because spans shouldn't affect block-level semantics of their children

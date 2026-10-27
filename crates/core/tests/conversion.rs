@@ -5329,7 +5329,7 @@ fn each_ordered_list_numbers_from_its_own_start() {
     convert(
       "<ol start=\"5\"><li>a<ol start=\"20\"><li>b</li></ol></li><li>c<ul><li>d</li></ul></li><li>e</li></ol><ol><li>f</li></ol>"
     ),
-    "5. a\n   20. b\n6. c\n   - d\n7. e\n\n1. f"
+    "5. a\n\n   20. b\n6. c\n   - d\n7. e\n\n1. f"
   );
   // Read once per list, so a padded value costs its length once, not per item.
   let html = format!(
@@ -6124,5 +6124,116 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
   assert_eq!(
     convert_with_origin(html, "https://example.com/docs/page"),
     "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
+  );
+}
+
+#[test]
+fn nested_ordered_start_separates_parent_paragraph() {
+  for (html, expected) in [
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li><span>x</span><span>z</span><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- xz\n\n  10. y",
+    ),
+    (
+      "<ul><li><strong>x</strong><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- **x**\n\n  10. y",
+    ),
+    (
+      "<ol start=\"5\"><li>x<ol start=\"20\"><li>y</li><li>z</li></ol></li></ol>",
+      "5. x\n\n   20. y\n   21. z",
+    ),
+    (
+      "<ul><li>x<ol start=\"0\"><li>y</li></ol></li></ul>",
+      "- x\n\n  0. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"1\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"-1\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "-\n  10. y",
+    ),
+    (
+      "<ul><li><span></span><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "-\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"></ol></li><li>z</li></ul>",
+      "- x\n- z",
+    ),
+    (
+      "<ul><li>x<ol reversed start=\"10\"><li value=\"20\">y</li><li>z</li></ol></li></ul>",
+      "- x\n\n  10. y\n  11. z",
+    ),
+    (
+      "<ul><li>x<ol reversed><li value=\"10\">y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<blockquote><ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul></blockquote>",
+      "> - x\n>\n>   10. y",
+    ),
+    (
+      "<ul><li>x<ul><li>z<ol start=\"10\"><li>y</li></ol></li></ul></li></ul>",
+      "- x\n  - z\n\n    10. y",
+    ),
+    (
+      "<ul><li><p>x</p><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol><ul><li>z</li></ul></li><li>after</li></ul>",
+      "- x\n\n  10. y\n  - z\n- after",
+    ),
+    (
+      "<ul><li>x<br><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- x  \n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ul><li>y</li></ul><ol start=\"10\"><li>z</li></ol></li></ul>",
+      "- x\n  - y\n\n  10. z",
+    ),
+    (
+      "<ol><li><ol start=\"10\"><li>y</li></ol></li></ol>",
+      "1.\n   10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"1000000000\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li></li></ol></li></ul>",
+      "- x\n\n  10.",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol><p>tail</p></li></ul>",
+      "- x\n\n  10. y\n\n  tail",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn nested_ordered_start_wraps_at_content_columns() {
+  assert_eq!(
+    html_to_markdown(
+      "<ul><li>alpha beta gamma delta<ol start=\"10\"><li>one two three four five</li></ol></li></ul>",
+      HtmlToMarkdownOptions::default().with_wrap_width(12)
+    ),
+    "- alpha beta\n  gamma\n  delta\n\n  10. one\n      two\n      three\n      four\n      five"
   );
 }

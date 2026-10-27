@@ -6,6 +6,30 @@ const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
 
 const BYTE_PARITY_CASES = [
+  '<ul><li>x<br><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ul><li>y</li></ul><ol start="10"><li>z</li></ol></li></ul>',
+  '<ol><li><ol start="10"><li>y</li></ol></li></ol>',
+  '<ul><li>x<ol start="1000000000"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="10"><li></li></ol></li></ul>',
+  '<ul><li>x<ol start="10"><li>y</li></ol><p>tail</p></li></ul>',
+  '<ul><li>alpha beta gamma delta<ol start="10"><li>one two three four five</li></ol></li></ul>',
+  '<ul><li>x<ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li><span>x</span><span>z</span><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li><strong>x</strong><ol start="10"><li>y</li></ol></li></ul>',
+  '<ol start="5"><li>x<ol start="20"><li>y</li><li>z</li></ol></li></ol>',
+  '<ul><li>x<ol start="0"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="1"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="-1"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start=""><li>y</li></ol></li></ul>',
+  '<ul><li><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li><span></span><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="10"></ol></li><li>z</li></ul>',
+  '<ul><li>x<ol reversed start="10"><li value="20">y</li><li>z</li></ol></li></ul>',
+  '<ul><li>x<ol reversed><li value="10">y</li></ol></li></ul>',
+  '<blockquote><ul><li>x<ol start="10"><li>y</li></ol></li></ul></blockquote>',
+  '<ul><li>x<ul><li>z<ol start="10"><li>y</li></ol></li></ul></li></ul>',
+  '<ul><li><p>x</p><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="10"><li>y</li></ol><ul><li>z</li></ul></li><li>after</li></ul>',
   '<div>Alpha</div>',
   '<div>Alpha</div><div>Beta</div>',
   '<div>Alpha</div><em></em>',
@@ -27,12 +51,12 @@ const BYTE_PARITY_CASES = [
   '<p>🎉</p>',
 ]
 
-describe('cross-engine streaming byte parity', () => {
+describe.each([undefined, 12])('cross-engine streaming byte parity wrapWidth=%s', (wrapWidth) => {
   it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width: %s', async (html) => {
     const engineOutputs: string[] = []
 
     for (const { engine, name } of engines) {
-      const expected = engine.htmlToMarkdown(html)
+      const expected = engine.htmlToMarkdown(html, { wrapWidth })
       engineOutputs.push(expected)
 
       for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {
@@ -44,7 +68,7 @@ describe('cross-engine streaming byte parity', () => {
           },
         })
         let streamed = ''
-        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream))
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, { wrapWidth }))
           streamed += chunk
         expect(streamed, `engine=${name} chunkSize=${chunkSize}`).toBe(expected)
       }
