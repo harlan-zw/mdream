@@ -2271,10 +2271,11 @@ fn ordered_list() {
 }
 
 #[test]
-fn long_text_before_an_ordered_list_item_counts_as_one_child() {
+fn long_text_before_an_ordered_list_item_does_not_renumber_it() {
+  // Only `<li>` children take a number, however many pieces the text is read in.
   let text = "word ".repeat(16_384);
   let html = format!("<ol>{text}<li>item</li></ol>");
-  assert_eq!(convert(&html).rsplit('\n').next(), Some("2. item"));
+  assert_eq!(convert(&html).rsplit('\n').next(), Some("1. item"));
 }
 
 #[test]
@@ -2717,6 +2718,15 @@ fn an_empty_list_item_does_not_underline_the_text_above() {
     "- a\n-\n- b"
   );
   assert_eq!(convert("<ul><li></li><li>a</li></ul>"), "-\n- a");
+  // A child that is not an item does not make the first item a later one.
+  assert_eq!(
+    convert("<ul><li>a<ul><script>s</script><li></li></ul></li></ul>"),
+    "- a\n\n  -"
+  );
+  assert_eq!(
+    convert("<ul><li>a<ol><template>t</template><li></li></ol></li></ul>"),
+    "- a\n\n  1."
+  );
   // A block opening the item settles the blank line before a nested list's
   // first marker can drop it.
   assert_eq!(
@@ -5331,6 +5341,12 @@ fn each_ordered_list_numbers_from_its_own_start() {
     ),
     "5. a\n\n   20. b\n6. c\n   - d\n7. e\n\n1. f"
   );
+  // Only `<li>` children take a number: a script or template between items does not.
+  assert_eq!(convert("<ol><script>s</script><li>y</li></ol>"), "1. y");
+  assert_eq!(
+    convert("<ol start=\"3\"><li>a</li><template>t</template><li>b</li></ol>"),
+    "3. a\n4. b"
+  );
   // Read once per list, so a padded value costs its length once, not per item.
   let html = format!(
     "<ol start=\"{}7\">{}</ol>",
@@ -6221,6 +6237,26 @@ fn nested_ordered_start_separates_parent_paragraph() {
     (
       "<ul><li>x<ol start=\"10\"><li>y</li></ol><p>tail</p></li></ul>",
       "- x\n\n  10. y\n\n  tail",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><script>s</script><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><style>a{}</style><li>y</li><li>z</li></ol></li></ul>",
+      "- x\n\n  10. y\n  11. z",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><noscript>n</noscript><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><template>t</template><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\">t<li>y</li></ol></li></ul>",
+      "- x t\n\n  10. y",
     ),
   ] {
     assert_eq!(convert(html), expected, "html={html:?}");

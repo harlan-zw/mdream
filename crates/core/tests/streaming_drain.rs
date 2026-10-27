@@ -2011,6 +2011,8 @@ fn streaming_empty_nested_item_marker_matches_one_shot() {
     "<ul><li>a<ol><li></li></ol></li></ul>",
     "<ul><li></li></ul>",
     "<ul><li>a<ul><li></li><li>b</li></ul></li></ul>",
+    "<ul><li>a<ul><script>s</script><li></li></ul></li></ul>",
+    "<ul><li>a<ol><template>t</template><li></li></ol></li></ul>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
@@ -3389,6 +3391,26 @@ fn nested_ordered_start_separates_parent_paragraph() {
     (
       "<ul><li>x<ol start=\"10\"><li>y</li></ol><p>tail</p></li></ul>",
       "- x\n\n  10. y\n\n  tail",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><script>s</script><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><style>a{}</style><li>y</li><li>z</li></ol></li></ul>",
+      "- x\n\n  10. y\n  11. z",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><noscript>n</noscript><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><template>t</template><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\">t<li>y</li></ol></li></ul>",
+      "- x t\n\n  10. y",
     ),
   ] {
     assert_eq!(

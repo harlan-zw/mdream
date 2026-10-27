@@ -26,7 +26,22 @@ describe.each(engines)('lists $name', (engineConfig) => {
     ['<ul><li>x<ol start="1000000000"><li>y</li></ol></li></ul>', '- x\n  1. y'],
     ['<ul><li>x<ol start="10"><li></li></ol></li></ul>', '- x\n\n  10.'],
     ['<ul><li>x<ol start="10"><li>y</li></ol><p>tail</p></li></ul>', '- x\n\n  10. y\n\n  tail'],
+    ['<ul><li>x<ol start="10"><script>s</script><li>y</li></ol></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li>x<ol start="10"><style>a{}</style><li>y</li><li>z</li></ol></li></ul>', '- x\n\n  10. y\n  11. z'],
+    ['<ul><li>x<ol start="10"><noscript>n</noscript><li>y</li></ol></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li>x<ol start="10"><template>t</template><li>y</li></ol></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li>x<ol start="10">t<li>y</li></ol></li></ul>', '- x t\n\n  10. y'],
   ])('separates nested ordered starts from parent paragraphs: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ol><script>s</script><li>y</li></ol>', '1. y'],
+    ['<ol start="3"><li>a</li><template>t</template><li>b</li></ol>', '3. a\n4. b'],
+    ['<ul><li>a<ul><script>s</script><li></li></ul></li></ul>', '- a\n\n  -'],
+    ['<ul><li>a<ol><template>t</template><li></li></ol></li></ul>', '- a\n\n  1.'],
+  ])('positions items among their list items only: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
