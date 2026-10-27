@@ -3317,3 +3317,10 @@ fn scout9_list_tail_quote_spacing_streaming() {
     assert_stream_matches_every_split(html, opts);
   }
 }
+
+#[test]
+fn hard_break_trim_preserves_an_empty_item_guard_at_every_split() {
+  let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+}

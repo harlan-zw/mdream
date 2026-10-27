@@ -2464,6 +2464,7 @@ impl ConvertState {
       // A hard break already ended the item. Its continuation indentation
       // must not become a whitespace-only line before the following block.
       if self.hard_break_end == self.buffer.len()
+        && !self.empty_item_hazard
         && !has_override
         && self.depth_map[TAG_PRE as usize] == 0
         && !self.in_table_cell()

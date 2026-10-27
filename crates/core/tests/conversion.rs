@@ -6146,3 +6146,9 @@ fn scout9_list_tail_quote_spacing() {
     );
   }
 }
+
+#[test]
+fn hard_break_trim_preserves_an_empty_item_guard() {
+  let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
+  assert_eq!(convert(html), "- x\n\n  - \n  \n    y");
+}
