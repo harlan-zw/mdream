@@ -3262,10 +3262,12 @@ impl ConvertState {
   #[inline(always)]
   pub(crate) fn end_list_gap(&mut self, start: usize) {
     // An empty inline wrapper retracts its opener on close. Defer the
-    // decision until visible text commits its marker or a code span closes.
+    // decision until visible text commits its marker, a code span closes, or
+    // an empty-text link survives cleaning.
     if start != usize::MAX
       && self.open_markers.is_empty()
       && self.code_spans.is_empty()
+      && !self.link.empty_text_pending
       && self
         .buffer
         .as_bytes()

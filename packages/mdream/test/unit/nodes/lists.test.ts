@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('lists $name', (engineConfig) => {
+  it.each([
+    ['<ul><li>a</li></ul><a href="x"></a><ul><li>b</li></ul>', '- a\n\n* b'],
+    ['<ol><li>a</li></ol><a href="x"></a><ol><li>b</li></ol>', '1. a\n\n1) b'],
+  ])('keeps lists separate when clean removes an empty link: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, clean: { emptyLinkText: true } })).toBe(expected)
+  })
+
   it('converts unordered lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li>Item 1</li><li>Item 2</li></ul>'

@@ -1785,7 +1785,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       const buffer = state.buffer
       // These openers can still disappear on an empty close. Visible text
       // commits inline markers; a code span commits when its close survives.
-      if (openMarkerCount === 0 && gfmLifecycle.openCodeSpans.length === 0) {
+      if (openMarkerCount === 0 && openLinkFragment < 0 && gfmLifecycle.openCodeSpans.length === 0) {
         for (let index = Math.min(fragments, buffer.length); index < buffer.length; index++) {
           if (hasNonWhitespace(buffer[index]!)) {
             siblingListMarker = 0

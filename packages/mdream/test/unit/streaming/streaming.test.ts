@@ -6,6 +6,8 @@ const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
 
 const BYTE_PARITY_CASES = [
+  '<ul><li>a</li></ul><a href="x"></a><ul><li>b</li></ul>',
+  '<ol><li>a</li></ol><a href="x"></a><ol><li>b</li></ol>',
   '<ul><li>a</li></ul><b></b><ul><li>b</li></ul>',
   '<ul><li>a</li></ul><code></code><ul><li>b</li></ul>',
   '<ul><li>a</li></ul><b><code></code></b><ul><li>b</li></ul>',
@@ -42,6 +44,42 @@ const BYTE_PARITY_CASES = [
 ]
 
 describe('cross-engine streaming byte parity', () => {
+  it.each([
+    ['<ul><li>a</li></ul><a href="x"></a><ul><li>b</li></ul>', '- a\n\n* b'],
+    ['<ol><li>a</li></ol><a href="x"></a><ol><li>b</li></ol>', '1. a\n\n1) b'],
+  ])('keeps cleaned empty links from joining lists: %s', async (html, expected) => {
+    const options = { clean: { emptyLinkText: true } }
+    for (const { engine, name } of engines) {
+      expect(engine.htmlToMarkdown(html, options), name).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        let output = ''
+        const input = new ReadableStream<string>({
+          start(controller) {
+            for (let start = 0; start < html.length; start += width)
+              controller.enqueue(html.slice(start, start + width))
+            controller.close()
+          },
+        })
+        for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+          output += chunk
+        expect(output, `${name} width=${width}`).toBe(expected)
+      }
+      for (let split = 0; split <= html.length; split++) {
+        let output = ''
+        const input = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+          output += chunk
+        expect(output, `${name} split=${split}`).toBe(expected)
+      }
+    }
+  })
+
   it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width: %s', async (html) => {
     const engineOutputs: string[] = []
 

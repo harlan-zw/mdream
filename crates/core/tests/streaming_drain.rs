@@ -3360,3 +3360,28 @@ fn removable_output_adjacent_lists_streaming() {
     HtmlToMarkdownOptions::default(),
   );
 }
+
+#[test]
+fn cleaned_empty_links_preserve_adjacent_lists_at_every_split() {
+  let options = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_link_text: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      "<ul><li>a</li></ul><a href=\"x\"></a><ul><li>b</li></ul>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ol><li>a</li></ol><a href=\"x\"></a><ol><li>b</li></ol>",
+      "1. a\n\n1) b",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options.clone());
+  }
+}

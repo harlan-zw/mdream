@@ -6285,3 +6285,26 @@ fn excluded_quote_preserves_adjacent_list_markers() {
     "- a\n\n* b"
   );
 }
+
+#[test]
+fn cleaned_empty_links_preserve_adjacent_list_markers() {
+  let options = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_link_text: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      "<ul><li>a</li></ul><a href=\"x\"></a><ul><li>b</li></ul>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ol><li>a</li></ol><a href=\"x\"></a><ol><li>b</li></ol>",
+      "1. a\n\n1) b",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
+  }
+}
