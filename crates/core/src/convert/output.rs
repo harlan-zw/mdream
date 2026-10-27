@@ -3195,7 +3195,9 @@ impl ConvertState {
   }
 
   /// Whether `end` sits just past a list marker that is all its line holds:
-  /// optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
+  /// optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else. A nested
+  /// marker is indented by its ancestors' items, past the three spaces a
+  /// top-level one may have.
   fn list_marker_line_start(&self, bytes: &[u8], end: usize) -> bool {
     let mut index = end - 1;
     match bytes[index] {
@@ -3211,8 +3213,9 @@ impl ConvertState {
       b'-' | b'*' | b'+' => {}
       _ => return false,
     }
+    let max_spaces = self.list_indent.len() + 3;
     let mut spaces = 0;
-    while index > 0 && bytes[index - 1] == b' ' && spaces < 3 {
+    while index > 0 && bytes[index - 1] == b' ' && spaces < max_spaces {
       index -= 1;
       spaces += 1;
     }
@@ -3250,7 +3253,21 @@ impl ConvertState {
     };
     let starts_document = line_start == 0 && !self.has_streamed_output;
     let blank_above = before(1) != b'\n' || before(2) == b'\n';
-    self.empty_item_hazard = !starts_document && !blank_above;
+    // A parent's bare marker is no paragraph, and a blank line under it would
+    // end that item and turn this one into its sibling. A marker outside the
+    // innermost blockquote keeps the blank line it already had, which the
+    // quote's prefix makes harmless.
+    let mut above_end = line_start.saturating_sub(1);
+    while above_end > 0 && bytes[above_end - 1] == b' ' {
+      above_end -= 1;
+    }
+    let follows_marker = above_end > 0
+      && self
+        .blockquotes
+        .last()
+        .is_none_or(|frame| above_end > frame.content_start)
+      && self.list_marker_line_start(bytes, above_end);
+    self.empty_item_hazard = !starts_document && !blank_above && !follows_marker;
     self.empty_item_line_start = line_start;
     self.empty_item_len = self.buffer.len();
   }

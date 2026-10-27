@@ -248,6 +248,22 @@ function recordItemMarker(state: MarkdownState, index: number): void {
     state.emptyItemFragment = undefined
     return
   }
+  // A parent's bare marker is no paragraph, and a blank line under it would end
+  // that item and turn this one into its sibling. A marker outside the
+  // innermost blockquote keeps the blank line it already had, which the quote's
+  // prefix makes harmless.
+  for (let fragment = state.buffer.length - 2; fragment >= (state.blockquotes.at(-1)?.fragment ?? 0); fragment--) {
+    const value = state.buffer[fragment]!
+    for (let cursor = value.length - 1; cursor >= 0; cursor--) {
+      const code = value.charCodeAt(cursor)
+      if (code === 10 || code === 32)
+        continue
+      state.emptyItemFragment = listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length)
+        ? undefined
+        : state.buffer.length - 1
+      return
+    }
+  }
   state.emptyItemFragment = state.buffer.length - 1
 }
 
@@ -546,7 +562,7 @@ export function lineOpensRawHtmlBlock(buffer: string[], scan: BufferScanState): 
  * this position. A non-space byte, or more than three leading spaces, makes
  * the position ordinary inline text.
  */
-function markdownLineIndent(buffer: string[]): number {
+function markdownLineIndent(buffer: string[], listIndent: number): number {
   let spaces = 0
   for (let fragmentIndex = buffer.length - 1; fragmentIndex >= 0; fragmentIndex--) {
     const fragment = buffer[fragmentIndex]!
@@ -557,7 +573,7 @@ function markdownLineIndent(buffer: string[]): number {
       // A list marker is block prefix too: its content column opens a fresh
       // block context, so `- # h` escapes exactly like `# h` would.
       if (code !== 32 || spaces === 3) {
-        return listMarkerLineStart(buffer, fragmentIndex, index) ? 0 : -1
+        return listMarkerLineStart(buffer, fragmentIndex, index, listIndent) ? 0 : -1
       }
       spaces++
     }
@@ -601,7 +617,7 @@ const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
  * precise JavaScript scanner. A block marker can only begin within the first
  * four characters here; later lines are covered by the newline trigger.
  */
-function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array): boolean {
+function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array, listIndent: number): boolean {
   if (value.search(GFM_TEXT_NATIVE_TRIGGER) !== -1)
     return true
   if ((depthMap[TAG_TABLE] && value.includes('|'))
@@ -617,7 +633,7 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
     return false
   }
 
-  let lineIndent = markdownLineIndent(buffer)
+  let lineIndent = markdownLineIndent(buffer, listIndent)
   if (lineIndent < 0)
     return false
 
@@ -639,11 +655,11 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
  * markers never pass through here, while code and raw-HTML contexts bypass it.
  * The common plain-text path returns the original string without allocation.
  */
-function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): string {
+function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, listIndent: number): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
   const inLink = Boolean(depthMap[TAG_A])
   const inBlockquote = Boolean(depthMap[TAG_BLOCKQUOTE])
-  let lineIndent = markdownLineIndent(buffer)
+  let lineIndent = markdownLineIndent(buffer, listIndent)
   let orderedDigits = 0
   let copiedUntil = 0
   let escaped = ''
@@ -1170,7 +1186,7 @@ function flushPreFence(state: MarkdownState): void {
   // A blank line between the marker and the fence ends the item, leaving the block
   // a sibling of the list, so a pending marker takes no separator.
   const fence = liDepth > 0
-    ? `${blockOpenPrefix(state.buffer, state.listIndent) ?? ''}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
+    ? `${blockOpenPrefix(state.buffer, state.listIndent, state.listIndent.length) ?? ''}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
     : `${MARKDOWN_CODE_BLOCK}${lang}\n`
   state.buffer.push(fence)
   startCodeFence(state, state.buffer.length - 1, lang, state.listIndent)
@@ -1437,7 +1453,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (spacing === CAPTION_DEFAULT_SPACING)
       spacing = DEFAULT_BLOCK_SPACING[0]
     const indent = includeListIndent ? state.listIndent : ''
-    const blockPrefix = blockOpenPrefix(state.buffer, indent, beforeFragment)
+    const blockPrefix = blockOpenPrefix(state.buffer, indent, state.listIndent.length, beforeFragment)
     const trailingNewLines = newlineRunBeforePrefix(state.buffer, beforeFragment, indent)
     if (blockPrefix === undefined && trailingNewLines === 0)
       return ''
@@ -1682,9 +1698,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         // again. That test is O(1), so it goes before the text scans; the line
         // scan stays last, paid only by text that would be escaped anyway.
         && (!insideRawHtmlBlock || rawHtmlMarkdown)
-        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap)
+        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap, state.listIndent.length)
         && (!insideRawHtmlBlock || !lineOpensRawHtmlBlock(state.buffer, bufferScan))) {
-        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap)
+        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent.length)
       }
 
       if (textNode.generatedMarkdown && textNode.value)
@@ -1760,7 +1776,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && eventType === NodeEventEnter
         && !node.tagHandler?.excludesTextNodes
       if (isVisibleText || opensVisibleElement) {
-        const separator = blockOpenPrefix(state.buffer, state.listRulePending)!
+        const separator = blockOpenPrefix(state.buffer, state.listRulePending, state.listIndent.length)!
         state.buffer.push(separator)
         state.lastContentCache = separator
         state.listRulePending = undefined

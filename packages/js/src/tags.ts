@@ -246,7 +246,7 @@ const LINE_CONTENT = 2 // other content, so the row needs a block break
 // A row must open its own line at the item's content column: sharing one with
 // preceding content (a `<caption>`) leaves the header as prose and the
 // delimiter row never forms a table.
-function lineStateBeforeRow(buffer: string[]): number {
+function lineStateBeforeRow(buffer: string[], listIndent: number): number {
   let fragment = buffer.length - 1
   while (fragment >= 0 && buffer[fragment]!.length === 0)
     fragment--
@@ -288,14 +288,14 @@ function lineStateBeforeRow(buffer: string[]): number {
     return LINE_ROW
   // A pending list marker is block prefix, not content: a table's first row
   // belongs on it.
-  return listMarkerLineStart(buffer, markerFragment, markerIndex) ? LINE_OPEN : LINE_CONTENT
+  return listMarkerLineStart(buffer, markerFragment, markerIndex, listIndent) ? LINE_OPEN : LINE_CONTENT
 }
 
 // A row's own line at the enclosing list item's content column. Outside a list
 // the marker is constant, which covers most tables.
 export function rowMarker(state: HandlerContext['state']): string {
   const indent = state.listIndent
-  const lineState = lineStateBeforeRow(state.buffer)
+  const lineState = lineStateBeforeRow(state.buffer, state.listIndent?.length ?? 0)
   if (!indent) {
     return lineState === LINE_ROW ? '\n| ' : lineState === LINE_CONTENT ? '\n\n| ' : '| '
   }
@@ -476,7 +476,7 @@ export const tagHandlers: Record<number, TagHandler> = {
         return MARKDOWN_HORIZONTAL_RULE
       if (state.depthMap?.[TAG_LI])
         state.listRulePending = prefix
-      const open = blockOpenPrefix(state.buffer, prefix)
+      const open = blockOpenPrefix(state.buffer, prefix, state.listIndent?.length ?? 0)
       // Sharing the marker's line, where `---` would make the whole line a
       // thematic break and take the item with it.
       return open === undefined
@@ -565,7 +565,7 @@ export const tagHandlers: Record<number, TagHandler> = {
           const indent = state.listIndent
           // A blank line between the marker and the fence ends the item, leaving
           // the block a sibling of the list.
-          const open = blockOpenPrefix(state.buffer, indent) ?? ''
+          const open = blockOpenPrefix(state.buffer, indent, state.listIndent?.length ?? 0) ?? ''
           return {
             _tag: 'CodeFenceEnter',
             language,
@@ -753,7 +753,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     enter: ({ state }) => {
       if ((state.depthMap?.[TAG_LI] || 0) === 0 || isInsideTableCell(state))
         return undefined
-      return blockOpenPrefix(state.buffer, state.listIndent)
+      return blockOpenPrefix(state.buffer, state.listIndent, state.listIndent?.length ?? 0)
     },
   },
   [TAG_THEAD]: {

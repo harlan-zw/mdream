@@ -2208,6 +2208,34 @@ fn streaming_block_open_after_drained_line_matches_one_shot() {
   }
 }
 
+// A marker nested past three spaces is recognized from its whole line lead, so
+// the lead has to survive a drain for streaming to match one-shot.
+#[test]
+fn streaming_nested_list_markers_match_one_shot() {
+  let nested = [
+    "<ul><li><ul><li><ul><li># h</li></ul></li></ul></li></ul>",
+    "<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table></li></ul></li></ul></li></ul>",
+    "<ul><li><ul><li><ul><li><hr></li></ul></li></ul></li></ul>",
+    "<ul><li><ul><li></li></ul></li></ul>",
+    "<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+  ];
+  for html in nested {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+  let prefix = format!("<p>{}</p>", "x".repeat(9000));
+  for html in nested {
+    let html = format!("{prefix}{html}");
+    for chunk in [1, 7, 64, 4096] {
+      assert_eq!(
+        stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
+        html_to_markdown(&html, HtmlToMarkdownOptions::default()),
+        "chunk={chunk}"
+      );
+    }
+  }
+}
+
 // The newline an empty item inserts at its marker line moves every buffer offset
 // at or past it. An inline element still open across the insertion measures its
 // own emptiness from one of them, so leaving it unshifted stops an empty element
