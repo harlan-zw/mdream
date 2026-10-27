@@ -1769,7 +1769,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (event.type === NodeEventEnter)
         state.listMarkers.push(nextListMarker(tagId === TAG_OL))
     }
-    else if (tagId === TAG_BLOCKQUOTE) {
+    else if (tagId === TAG_BLOCKQUOTE && !(node as ElementNode).excludedFromMarkdown) {
       // A quote boundary ends the list before it, written or not.
       siblingListMarker = 0
     }
@@ -1783,10 +1783,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       const fragments = state.buffer.length
       renderEvent(event)
       const buffer = state.buffer
-      for (let index = Math.min(fragments, buffer.length); index < buffer.length; index++) {
-        if (hasNonWhitespace(buffer[index]!)) {
-          siblingListMarker = 0
-          break
+      // These openers can still disappear on an empty close. Visible text
+      // commits inline markers; a code span commits when its close survives.
+      if (openMarkerCount === 0 && gfmLifecycle.openCodeSpans.length === 0) {
+        for (let index = Math.min(fragments, buffer.length); index < buffer.length; index++) {
+          if (hasNonWhitespace(buffer[index]!)) {
+            siblingListMarker = 0
+            break
+          }
         }
       }
     }

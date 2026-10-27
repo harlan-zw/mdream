@@ -3316,3 +3316,47 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
     }
   }
 }
+
+#[test]
+fn removable_output_adjacent_lists_streaming() {
+  assert_stream_matches_every_split(
+    "<ul><li>a</li></ul><b></b><ul><li>b</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li>a</li></ul><code></code><ul><li>b</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li>a</li></ul><b><code></code></b><ul><li>b</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li>a</li></ul><template><blockquote>x</blockquote></template><ul><li>b</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li>a</li></ol><b></b><ol><li>b</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li>a</li></ol><code></code><ol><li>b</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li>a</li></ol><b><code></code></b><ol><li>b</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li>a</li></ol><template><blockquote>x</blockquote></template><ol><li>b</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li>a</li></ul><b>x</b><ul><li>b</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li>a</li></ol><code>x</code><ol><li>b</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+}

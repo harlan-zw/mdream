@@ -1421,7 +1421,7 @@ impl ConvertState {
         self.next_list_marker(ordered)
       };
       self.list_markers.push(marker);
-    } else if tag_id == Some(TAG_BLOCKQUOTE) && !skip_node {
+    } else if tag_id == Some(TAG_BLOCKQUOTE) && !skip_node && !tag.excluded_from_markdown {
       // A quote boundary ends the list before it, written or not.
       self.sibling_list_marker = 0;
     }
@@ -1718,7 +1718,7 @@ impl ConvertState {
           self.sibling_list_marker = marker & !LIST_HAS_ITEM;
           self.sibling_list_depth = self.depth_map[TAG_LI as usize];
         }
-      } else if id == TAG_BLOCKQUOTE && !node_enter_skipped {
+      } else if id == TAG_BLOCKQUOTE && !node_enter_skipped && !node_excluded {
         self.sibling_list_marker = 0;
       }
       if id == TAG_LI

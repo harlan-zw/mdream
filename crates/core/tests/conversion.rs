@@ -6227,3 +6227,61 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
     "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
   );
 }
+
+#[test]
+fn removable_output_preserves_adjacent_list_markers() {
+  assert_eq!(
+    convert("<ul><li>a</li></ul><b></b><ul><li>b</li></ul>"),
+    "- a\n\n* b"
+  );
+  assert_eq!(
+    convert("<ul><li>a</li></ul><code></code><ul><li>b</li></ul>"),
+    "- a\n\n* b"
+  );
+  assert_eq!(
+    convert("<ul><li>a</li></ul><b><code></code></b><ul><li>b</li></ul>"),
+    "- a\n\n* b"
+  );
+  assert_eq!(
+    convert(
+      "<ul><li>a</li></ul><template><blockquote>x</blockquote></template><ul><li>b</li></ul>"
+    ),
+    "- a\n\n* b"
+  );
+  assert_eq!(
+    convert("<ol><li>a</li></ol><b></b><ol><li>b</li></ol>"),
+    "1. a\n\n1) b"
+  );
+  assert_eq!(
+    convert("<ol><li>a</li></ol><code></code><ol><li>b</li></ol>"),
+    "1. a\n\n1) b"
+  );
+  assert_eq!(
+    convert("<ol><li>a</li></ol><b><code></code></b><ol><li>b</li></ol>"),
+    "1. a\n\n1) b"
+  );
+  assert_eq!(
+    convert(
+      "<ol><li>a</li></ol><template><blockquote>x</blockquote></template><ol><li>b</li></ol>"
+    ),
+    "1. a\n\n1) b"
+  );
+  assert_eq!(
+    convert("<ul><li>a</li></ul><b>x</b><ul><li>b</li></ul>"),
+    "- a\n\n**x**\n\n- b"
+  );
+  assert_eq!(
+    convert("<ol><li>a</li></ol><code>x</code><ol><li>b</li></ol>"),
+    "1. a\n\n`x`\n\n1. b"
+  );
+}
+
+#[test]
+fn excluded_quote_preserves_adjacent_list_markers() {
+  assert_eq!(
+    convert(
+      "<ul><li>a</li></ul><template><blockquote>x</blockquote></template><ul><li>b</li></ul>"
+    ),
+    "- a\n\n* b"
+  );
+}
