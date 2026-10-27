@@ -870,6 +870,7 @@ fn streaming_cmark_block_structure_matches_every_split() {
   for html in [
     "<ul><li>text <hr>after</li></ul>",
     "<ul><li><blockquote>text<hr></blockquote>after</li></ul>",
+    "<ul><li><hr><blockquote><p>q</p><p>r</p></blockquote>after</li></ul>",
     "<ol><li><span>parent<ul><li>child</li><li>child 2</li></ul></span></li></ol>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());

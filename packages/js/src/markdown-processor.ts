@@ -1760,7 +1760,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && eventType === NodeEventEnter
         && !node.tagHandler?.excludesTextNodes
       if (isVisibleText || opensVisibleElement) {
-        const separator = blockOpenPrefix(state.buffer, state.listRulePending)!
+        // A quote's own enter writes the line break into the item and its
+        // subtree is quoted once it completes, so the rule only ends its line.
+        const separator = opensVisibleElement
+          && (node as ElementNode).tagId === TAG_BLOCKQUOTE
+          && !node.tagHandler?.literalEnter
+          ? '\n'
+          : blockOpenPrefix(state.buffer, state.listRulePending)!
         state.buffer.push(separator)
         state.lastContentCache = separator
         state.listRulePending = undefined

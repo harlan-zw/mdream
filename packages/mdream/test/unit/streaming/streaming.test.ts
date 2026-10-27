@@ -25,6 +25,7 @@ const BYTE_PARITY_CASES = [
   '<>',
   // String chunks split the UTF-16 surrogate pair at width 1.
   '<p>🎉</p>',
+  '<ul><li><hr><blockquote>q</blockquote></li></ul>',
 ]
 
 describe('cross-engine streaming byte parity', () => {

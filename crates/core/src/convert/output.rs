@@ -1124,7 +1124,7 @@ impl ConvertState {
       return;
     }
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule();
+      self.flush_list_rule(false);
     }
 
     let tag_id: Option<u8>;
@@ -1359,7 +1359,7 @@ impl ConvertState {
     }
 
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule();
+      self.flush_list_rule(self.rule_break_opens_quote(stack_len - 1));
     }
 
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
@@ -2811,7 +2811,7 @@ impl ConvertState {
       if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
         return;
       }
-      self.flush_list_rule();
+      self.flush_list_rule(false);
     }
 
     if self.pending_inline_whitespace {
@@ -4196,15 +4196,42 @@ impl ConvertState {
     p
   }
 
-  fn flush_list_rule(&mut self) {
-    let prefix = self.continuation_prefix();
-    if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
-      self.buffer.reserve(2 + prefix.len());
-      self.buffer.push_str("\n\n");
-      self.buffer.push_str(&prefix);
-      self.last_content_cache_len = 2 + prefix.len();
+  /// Whether the element at `index` is a quote whose own enter writes the line
+  /// break into the item. Its subtree is quoted once it completes, so a rule
+  /// before it only has to end its line: the full separator would leave a stray
+  /// continuation line above the quote, and here `continuation_prefix` already
+  /// counts the entering quote's own `> `.
+  #[cold]
+  fn rule_break_opens_quote(&self, index: usize) -> bool {
+    let node = &self.stack[index];
+    node.tag_id == Some(TAG_BLOCKQUOTE)
+      && !(self.has_tag_overrides
+        && Self::override_for_node(
+          self
+            .options
+            .plugins
+            .as_ref()
+            .and_then(|p| p.tag_overrides.as_ref()),
+          self.override_idx.as_deref(),
+          node,
+        )
+        .is_some_and(|ov| ov.enter.is_some()))
+  }
+
+  fn flush_list_rule(&mut self, opens_quote: bool) {
+    let prefix = if opens_quote {
+      String::new()
     } else {
-      let output = format!("\n\n{prefix}");
+      self.continuation_prefix()
+    };
+    let breaks = if opens_quote { "\n" } else { "\n\n" };
+    if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
+      self.buffer.reserve(breaks.len() + prefix.len());
+      self.buffer.push_str(breaks);
+      self.buffer.push_str(&prefix);
+      self.last_content_cache_len = breaks.len() + prefix.len();
+    } else {
+      let output = format!("{breaks}{prefix}");
       self.last_content_cache_len = self.push_code_span_content(&output, true);
     }
     self.list_rule_pending = false;

@@ -2754,6 +2754,45 @@ fn a_rule_inside_a_list_item_keeps_its_own_block() {
   );
 }
 
+#[test]
+fn a_quote_after_a_rule_in_a_list_item_starts_on_its_own_line() {
+  // The quote writes its own break into the item, so the rule's separator must
+  // not leave a blank `> ` (or bare indent) line above it.
+  assert_eq!(
+    convert("<ul><li><hr><blockquote>q</blockquote></li></ul>"),
+    "- ***\n\n  > q"
+  );
+  assert_eq!(
+    convert("<ol><li><hr><blockquote>q</blockquote></li></ol>"),
+    "1. ***\n\n   > q"
+  );
+  assert_eq!(
+    convert("<ul><li><ul><li><hr><blockquote>q</blockquote></li></ul></li></ul>"),
+    "-\n  - ***\n\n    > q"
+  );
+  assert_eq!(
+    convert("<ul><li>a<hr> <blockquote><p>q</p><p>r</p></blockquote></li></ul>"),
+    "- a\n\n  ---\n\n  > q\n  >\n  > r"
+  );
+  assert_eq!(
+    convert("<ul><li><hr><blockquote><blockquote>q</blockquote></blockquote></li></ul>"),
+    "- ***\n\n  > > q"
+  );
+  assert_eq!(
+    convert("<blockquote><ul><li><hr><blockquote>q</blockquote></li></ul></blockquote>"),
+    "> - ***\n>   > q"
+  );
+  assert_eq!(
+    convert("<ul><li><blockquote>t<hr><blockquote>q</blockquote></blockquote></li></ul>"),
+    "- \n  > t\n  >\n  > ---\n  > > q"
+  );
+  // An empty quote leaves nothing behind, as it does anywhere else.
+  assert_eq!(
+    convert("<ul><li><hr><blockquote></blockquote></li></ul>"),
+    "- ***"
+  );
+}
+
 // ── Paragraphs and spacing ──
 
 #[test]
