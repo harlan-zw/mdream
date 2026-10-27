@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderPerfReport } from './bundle/perf-report.ts'
-import { assertPairedOutputEquivalence, countByteChunks, drainByteChunks, perfRun } from './perf-paired-ci.mjs'
+import { countByteChunks, drainByteChunks, pairedOutputChanged, perfRun } from './perf-paired-ci.mjs'
 
 const textChunks = ['<p>alpha</p>', '<p>beta</p>']
 const byteChunks = textChunks.map(chunk => new TextEncoder().encode(chunk))
@@ -18,7 +18,7 @@ function streamGlue(outputs: string[], bytes: boolean) {
 }
 
 function paired(base: string[], pr: string[], bytes: boolean) {
-  return () => assertPairedOutputEquivalence(
+  return () => pairedOutputChanged(
     () => drainByteChunks(streamGlue(base, bytes), bytes ? textChunks : byteChunks),
     () => drainByteChunks(streamGlue(pr, bytes), bytes ? textChunks : byteChunks),
   )
@@ -27,17 +27,17 @@ function paired(base: string[], pr: string[], bytes: boolean) {
 describe.each([
   ['byte', true],
   ['text', false],
-])('paired ci equivalence guard (%s stream)', (_name, bytes) => {
-  it('throws when equal-length output content differs', () => {
-    expect(paired(['gamma one', 'delta two'], ['amma oneZ', 'delta two'], bytes)).toThrow(TypeError)
+])('paired ci output comparison (%s stream)', (_name, bytes) => {
+  it('marks changed equal-length output content', () => {
+    expect(paired(['gamma one', 'delta two'], ['amma oneZ', 'delta two'], bytes)()).toBe(true)
   })
 
-  it('throws when output lengths differ', () => {
-    expect(paired(['gamma one', 'delta two'], ['gamma one', 'delta two!'], bytes)).toThrow(TypeError)
+  it('marks changed output lengths', () => {
+    expect(paired(['gamma one', 'delta two'], ['gamma one', 'delta two!'], bytes)()).toBe(true)
   })
 
-  it('passes identical output', () => {
-    expect(paired(['gamma one', 'delta two'], ['gamma one', 'delta two'], bytes)).not.toThrow()
+  it('keeps identical output unmarked', () => {
+    expect(paired(['gamma one', 'delta two'], ['gamma one', 'delta two'], bytes)()).toBe(false)
   })
 })
 
@@ -76,4 +76,13 @@ it('decodes Unicode byte boundaries when the older stream accepts strings', () =
   expect(result.length).toBe('東京🙂'.length)
   expect(result.digest).toEqual(expected.digest)
   expect(countByteChunks(glue, chunks)).toBe(result.length)
+})
+
+it('retains paired measurements when the fixture output changes', () => {
+  const descriptor = { id: 'changed', name: 'Changed fixture', outputChanged: true }
+  const base = perfRun({ cpu: [10, 10], wall: [20, 20] }, undefined, descriptor)
+  const head = perfRun({ cpu: [20, 20], wall: [40, 40] }, undefined, descriptor)
+  expect(head.benches.every(row => row.outputChanged)).toBe(true)
+  expect(renderPerfReport(base, head)).toContain('Changed fixture (output changed)')
+  expect(renderPerfReport(base, head)).toContain('20.00 ms')
 })
