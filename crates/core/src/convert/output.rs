@@ -1123,7 +1123,13 @@ impl ConvertState {
       self.last_node_is_inline = self.stack[stack_len - 1].is_inline;
       return;
     }
-    if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
+    if self.list_rule_pending
+      && !self.stack[stack_len - 1].excludes_text_nodes
+      && (!self.stack[stack_len - 1].is_inline
+        || self
+          .get_enter_output(&self.stack[stack_len - 1], &self.stack[..stack_len - 1])
+          .is_some_and(|output| !output.is_empty()))
+    {
       self.flush_list_rule();
     }
 
@@ -1326,6 +1332,7 @@ impl ConvertState {
       false,
     );
     self.settle_empty_text_pending(output_start, || false);
+    self.defer_empty_list_tail(tag_id);
   }
 
   #[inline(always)]
@@ -1358,7 +1365,13 @@ impl ConvertState {
       return;
     }
 
-    if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
+    if self.list_rule_pending
+      && !self.stack[stack_len - 1].excludes_text_nodes
+      && (!self.stack[stack_len - 1].is_inline
+        || self
+          .get_enter_output(&self.stack[stack_len - 1], &self.stack[..stack_len - 1])
+          .is_some_and(|output| !output.is_empty()))
+    {
       self.flush_list_rule();
     }
 
@@ -2331,6 +2344,10 @@ impl ConvertState {
       && self.depth_map[TAG_LI as usize] > 0
     {
       self.list_rule_pending = true;
+    }
+
+    if !has_override {
+      self.defer_empty_list_tail(tag_id);
     }
 
     if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty() {
@@ -4213,7 +4230,27 @@ impl ConvertState {
     p
   }
 
+  // A nested empty marker must stay empty when its parent resumes text.
+  fn defer_empty_list_tail(&mut self, tag_id: Option<u8>) {
+    if !plain_text!(self)
+      && matches!(tag_id, Some(TAG_UL | TAG_OL))
+      && !self.list_indent.is_empty()
+      && !self.in_table_cell()
+      && !self.in_raw_html_block()
+    {
+      let tail = self.buffer.trim_end_matches([' ', '\n', '\t', '\r']);
+      let line_start = tail.rfind('\n').map_or(0, |index| index + 1);
+      if !tail.is_empty()
+        && tail[line_start..].starts_with(&self.list_indent)
+        && self.list_marker_line_start(tail.as_bytes(), tail.len())
+      {
+        self.list_rule_pending = true;
+      }
+    }
+  }
+
   fn flush_list_rule(&mut self) {
+    self.trim_trailing_spaces();
     let prefix = self.continuation_prefix();
     if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
       self.buffer.reserve(2 + prefix.len());

@@ -6,6 +6,19 @@ const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
 
 const BYTE_PARITY_CASES = [
+  '<ul><li><ol><li></li></ol>text</li></ul>',
+  '<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr>text</li></ul>',
+  '<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr></li><li>next</li></ul>',
+  '<ul><li><ul><li></li></ul>text</li></ul>',
+  '<ul><li><ul><li></li></ul><span>te</span><span>xt</span></li></ul>',
+  '<ul><li><ul><li></li></ul><em>text</em></li></ul>',
+  '<ol start="10"><li><ul><li></li></ul>text</li></ol>',
+  '<blockquote><ul><li><ul><li></li></ul>text</li></ul></blockquote>',
+  '<ul><li><ul><li><ul><li></li></ul>text</li></ul></li></ul>',
+  '<ul><li><ul><li></li></ul></li></ul>',
+  '<ul><li><ul></ul>text</li></ul>',
+  '<ul><li><ul><li></li></ul><span></span> </li><li>next</li></ul>',
+  '<ul><li><ul><li>inner</li></ul></li><li>next</li></ul>',
   '<div>Alpha</div>',
   '<div>Alpha</div><div>Beta</div>',
   '<div>Alpha</div><em></em>',
@@ -32,7 +45,7 @@ const BYTE_PARITY_CASES = [
 ]
 
 describe('cross-engine streaming byte parity', () => {
-  it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width: %s', async (html) => {
+  it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width and split: %s', async (html) => {
     const engineOutputs: string[] = []
 
     for (const { engine, name } of engines) {
@@ -51,6 +64,22 @@ describe('cross-engine streaming byte parity', () => {
         for await (const chunk of engine.streamHtmlToMarkdown(htmlStream))
           streamed += chunk
         expect(streamed, `engine=${name} chunkSize=${chunkSize}`).toBe(expected)
+      }
+    }
+
+    for (const { engine, name } of engines) {
+      for (let split = 1; split < html.length; split++) {
+        const htmlStream = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream))
+          streamed += chunk
+        expect(streamed, `engine=${name} split=${split}`).toBe(engineOutputs[0])
       }
     }
 

@@ -52,6 +52,7 @@ import {
   TAG_TH,
   TAG_TR,
   TAG_U,
+  TAG_UL,
   TAG_VAR,
   TEXT_NODE,
 } from './const'
@@ -1735,6 +1736,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     state.lastTextNode = textNode
   }
 
+  function flushListRule(): void {
+    const prefix = state.listRulePending!
+    trimTrailingSpaces(state.buffer)
+    state.lastTextNode = undefined
+    const separator = blockOpenPrefix(state.buffer, prefix, state.listIndent.length)
+      ?? `\n\n${prefix}`
+    state.buffer.push(separator)
+    state.lastContentCache = separator
+    state.listRulePending = undefined
+  }
+
   /**
    * Process a DOM event and generate markdown
    */
@@ -1771,15 +1783,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (state.listRulePending !== undefined) {
       const isVisibleText = node.type === TEXT_NODE
         && eventType === NodeEventEnter
+        && !node.parent?.tagHandler?.excludesTextNodes
         && hasNonWhitespace((node as TextNode).value)
       const opensVisibleElement = node.type === ELEMENT_NODE
         && eventType === NodeEventEnter
         && !node.tagHandler?.excludesTextNodes
+        && !node.tagHandler?.isInline
+        && (node as ElementNode).tagId !== -1
       if (isVisibleText || opensVisibleElement) {
-        const separator = blockOpenPrefix(state.buffer, state.listRulePending, state.listIndent.length)!
-        state.buffer.push(separator)
-        state.lastContentCache = separator
-        state.listRulePending = undefined
+        flushListRule()
       }
       else if (node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_LI) {
         state.listRulePending = undefined
@@ -1789,6 +1801,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
 
+    const inlineListRulePending = state.listRulePending !== undefined
     const lastNode = state.lastNode
     state.lastNode = event.node as ElementNode | TextNode
     const buff = state.buffer
@@ -1849,6 +1862,23 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const handler = node.tagHandler
     const tagId = element.tagId!
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
+    // Text after a nested list ending in an empty item belongs to its parent.
+    // Defer the paragraph break so an outer item close keeps the list tight.
+    if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL)
+      && state.listIndent && !insideRawHtmlRegion && !isInsideTableCell(state)
+      && !handler?.literalExit && !element.pluginOutput?.length) {
+      for (let fragment = buff.length - 1; fragment >= 0; fragment--) {
+        const value = trimAsciiWhitespaceEnd(buff[fragment]!)
+        if (!value)
+          continue
+        // Built-in item markers carry their complete indentation in one fragment.
+        if (value.startsWith(state.listIndent)
+          && listMarkerLineStart(buff, fragment, value.length - 1, state.listIndent.length)) {
+          state.listRulePending = state.listIndent
+        }
+        break
+      }
+    }
     // A hard break ends a line, while a following block also ends the
     // paragraph. Preserve that extra boundary inside a list's content column.
     if (eventType === NodeEventEnter && state.depthMap[TAG_LI] && !insideRawHtmlRegion
@@ -1955,6 +1985,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       element.pluginOutput = undefined
     }
 
+    if (inlineListRulePending && output?.some(hasNonWhitespace) && eventType === NodeEventEnter && state.listRulePending !== undefined) {
+      flushListRule()
+      lastBuffEntry = buff.at(-1)!
+      lastChar = lastBuffEntry.at(-1) || ''
+    }
+
     let captionBufferChanged = false
 
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
@@ -1994,6 +2030,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         return
       }
       const res = handler[eventFn]({ node: element, state })
+      if (inlineListRulePending && res && eventType === NodeEventEnter && state.listRulePending !== undefined) {
+        flushListRule()
+        lastBuffEntry = buff.at(-1)!
+        lastChar = lastBuffEntry.at(-1) || ''
+      }
       if (typeof res === 'string') {
         if (res) {
           output = [res]

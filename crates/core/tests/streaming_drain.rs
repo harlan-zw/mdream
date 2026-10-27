@@ -3322,3 +3322,63 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
     }
   }
 }
+
+#[test]
+fn empty_nested_list_tail_stays_in_parent_item() {
+  for (html, expected) in [
+    (
+      "<ul><li><ol><li></li></ol>text</li></ul>",
+      "-\n  1.\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr>text</li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr></li><li>next</li></ul>",
+      "-\n  -\n- next",
+    ),
+    (
+      "<ul><li><ul><li></li></ul>text</li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><span>te</span><span>xt</span></li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><em>text</em></li></ul>",
+      "-\n  -\n\n  *text*",
+    ),
+    (
+      "<ol start=\"10\"><li><ul><li></li></ul>text</li></ol>",
+      "10.\n    -\n\n    text",
+    ),
+    (
+      "<blockquote><ul><li><ul><li></li></ul>text</li></ul></blockquote>",
+      "> -\n>   -\n>\n>   text",
+    ),
+    (
+      "<ul><li><ul><li><ul><li></li></ul>text</li></ul></li></ul>",
+      "-\n  -\n    -\n\n    text",
+    ),
+    ("<ul><li><ul><li></li></ul></li></ul>", "-\n  -"),
+    ("<ul><li><ul></ul>text</li></ul>", "- text"),
+    (
+      "<ul><li><ul><li></li></ul><span></span> </li><li>next</li></ul>",
+      "-\n  -\n- next",
+    ),
+    (
+      "<ul><li><ul><li>inner</li></ul></li><li>next</li></ul>",
+      "-\n  - inner\n- next",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}

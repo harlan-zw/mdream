@@ -2,6 +2,55 @@ import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('lists $name', (engineConfig) => {
+  it.each([
+    ['<ul><li><ol><li></li></ol>text</li></ul>', '-\n  1.\n\n  text'],
+    ['<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr>text</li></ul>', '-\n  -\n\n  text'],
+    ['<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr></li><li>next</li></ul>', '-\n  -\n- next'],
+    [
+      '<ul><li><ul><li></li></ul>text</li></ul>',
+      '-\n  -\n\n  text',
+    ],
+    [
+      '<ul><li><ul><li></li></ul><span>te</span><span>xt</span></li></ul>',
+      '-\n  -\n\n  text',
+    ],
+    [
+      '<ul><li><ul><li></li></ul><em>text</em></li></ul>',
+      '-\n  -\n\n  *text*',
+    ],
+    [
+      '<ol start="10"><li><ul><li></li></ul>text</li></ol>',
+      '10.\n    -\n\n    text',
+    ],
+    [
+      '<blockquote><ul><li><ul><li></li></ul>text</li></ul></blockquote>',
+      '> -\n>   -\n>\n>   text',
+    ],
+    [
+      '<ul><li><ul><li><ul><li></li></ul>text</li></ul></li></ul>',
+      '-\n  -\n    -\n\n    text',
+    ],
+    [
+      '<ul><li><ul><li></li></ul></li></ul>',
+      '-\n  -',
+    ],
+    [
+      '<ul><li><ul></ul>text</li></ul>',
+      '- text',
+    ],
+    [
+      '<ul><li><ul><li></li></ul><span></span> </li><li>next</li></ul>',
+      '-\n  -\n- next',
+    ],
+    [
+      '<ul><li><ul><li>inner</li></ul></li><li>next</li></ul>',
+      '-\n  - inner\n- next',
+    ],
+  ])('keeps empty nested list tails in their parent: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
   it('converts unordered lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li>Item 1</li><li>Item 2</li></ul>'
