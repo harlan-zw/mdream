@@ -996,6 +996,16 @@ function parseHtmlInternal(
       }
     }
 
+    // Raw-text handlers only recognize their own end tag. In particular, a
+    // declaration opener must not hide that end tag inside a comment scan.
+    // Native script data has already been consumed by its dedicated scanner.
+    if (state.currentNode?.tagHandler?.isNonNesting && nextCharCode !== SLASH_CHAR) {
+      state.textBufferContainsNonWhitespace = true
+      state.lastCharWasWhitespace = false
+      textBuffer += htmlChunk[i++]
+      continue
+    }
+
     // COMMENT, DOCTYPE or CDATA
     if (nextCharCode === EXCLAMATION_CHAR) {
       // EOF emits an unfinished declaration inside visible raw text. Keep
@@ -1156,13 +1166,6 @@ function parseHtmlInternal(
       const mappedTagId = TagIdMap[tagName]
       const tagId = effectiveTagId(tagName, typeof mappedTagId === 'number' ? mappedTagId : -1, state)
       i2 = tagNameEnd
-
-      // Inside a non-nesting element (script/style/title/textarea) no opening
-      // tag is a real element; a nested `<script>` is literal text (issue #93).
-      if (state.currentNode?.tagHandler?.isNonNesting) {
-        textBuffer += htmlChunk[i++]
-        continue
-      }
 
       if (!tagName) {
         // `<` followed by whitespace or `>` is not a tag: treat as literal text

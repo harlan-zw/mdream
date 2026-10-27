@@ -6148,3 +6148,133 @@ fn builtin_blockquote_alias_uses_div_semantics() {
     assert_eq!(html_to_markdown(html, opts.clone()), expected, "{html}");
   }
 }
+
+#[test]
+fn raw_text_aliases_use_source_closing_names() {
+  for (html, source, target, expected) in [
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<script>a</div>b</script><p>tail</p>",
+      "script",
+      "div",
+      "ab\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<style>a</div>b</style><p>tail</p>",
+      "style",
+      "div",
+      "ab\n\ntail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "script", "tail"),
+    ("<x>a</script>b</x><p>tail</p>", "x", "script", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "script",
+      "tail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "style", "tail"),
+    ("<x>a</style>b</x><p>tail</p>", "x", "style", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "style",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "script", "tail"),
+    ("<div>a</script>b</div><p>tail</p>", "div", "script", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "script",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "style", "tail"),
+    ("<div>a</style>b</div><p>tail</p>", "div", "style", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "style",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>a</style>b</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>before <!--unfinished</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>a</script>b</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>before <!--unfinished</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    ("<X>hidden</X><p>tail</p>", "x", "script", "tail"),
+    (
+      "<script><!--<script></script>--></script><p>tail</p>",
+      "script",
+      "script",
+      "tail",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "{html} {source}:{target}"
+    );
+  }
+}
