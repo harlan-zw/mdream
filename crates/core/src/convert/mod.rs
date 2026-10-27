@@ -448,6 +448,10 @@ const MAX_CELL_SPAN: u8 = 64;
 /// nine digits, so anything wider stops being a list marker at all.
 const MAX_ORDERED_START: u32 = 999_999_999;
 
+/// Set on a [`ConvertState::list_markers`] entry once the list wrote an item.
+/// Marker characters are ASCII, so the high bit is free.
+const LIST_HAS_ITEM: u8 = 0x80;
+
 // Clean mode bitmask flags
 const CLEAN_EMPTY_LINKS: u8 = 1;
 const CLEAN_FRAGMENTS: u8 = 2;
@@ -924,6 +928,21 @@ pub struct ConvertState {
   /// Parsed `start` of each open `<ol>`, innermost last. Every item numbers
   /// itself from it, so the attribute is read once rather than once per item.
   ordered_starts: Vec<Option<u32>>,
+  /// Marker character of each open `<ul>`/`<ol>`, innermost last, with
+  /// [`LIST_HAS_ITEM`] set once one of its items wrote a marker.
+  list_markers: Vec<u8>,
+  /// Marker character of the list that last closed with items, or 0 once
+  /// visible output follows it. CommonMark joins the next list of the same type
+  /// into it, blank line or not, so that list takes the other character.
+  sibling_list_marker: u8,
+  /// `<li>` depth that list closed at: a list opening at another one is no sibling.
+  sibling_list_depth: u16,
+  /// Lowest offset rewritten since the current event began, while
+  /// `sibling_list_marker` is set. A trim can move the event's own output below
+  /// the length the buffer started at.
+  list_gap_rewrite: usize,
+  /// The latest item marker is `*`, where a rule on its line reads `* ***`.
+  last_item_star: bool,
 
   /// `<pre>` fenced-code deferral (issue #97). A bare `<pre>` (no `<code>`
   /// child) becomes a fenced code block, but the opening fence is deferred
@@ -1183,6 +1202,11 @@ impl ConvertState {
       list_indent: String::new(),
       list_indent_widths: Vec::with_capacity(8),
       ordered_starts: Vec::new(),
+      list_markers: Vec::new(),
+      sibling_list_marker: 0,
+      sibling_list_depth: 0,
+      list_gap_rewrite: usize::MAX,
+      last_item_star: false,
 
       pre_fence_pending: false,
       pre_fence_pending_depth: 0,
@@ -1474,7 +1498,9 @@ impl ConvertState {
     };
     self.text_run_next_flush = TEXT_RUN_FLUSH_THRESHOLD;
     let tail = text_buffer.split_off(cut);
+    let list_gap = self.list_gap_start();
     self.process_text_buffer_piece(text_buffer, false);
+    self.end_list_gap(list_gap);
     // A blank link's text can outgrow the cap within a single run.
     self.check_held_output();
     self.last_node_is_inline = true;
@@ -2608,6 +2634,7 @@ impl ConvertState {
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
+    self.list_gap_rewrite = self.list_gap_rewrite.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
     self.held_heading_run.note_rewrite(offset);

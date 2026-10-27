@@ -275,19 +275,24 @@ fn push_decimal(out: &mut String, mut value: u32) {
   }
 }
 
-/// Spaces then the bullet; an item borrows the suffix after its own indent.
-const INDENTED_BULLET: &str = {
-  const LEN: usize = MAX_BORROWED_INDENT + UNORDERED_MARKER.len();
-  const BYTES: [u8; LEN] = {
-    let mut bytes = [b' '; LEN];
-    bytes[MAX_BORROWED_INDENT] = b'-';
-    bytes
-  };
-  match core::str::from_utf8(&BYTES) {
+/// [`MAX_BORROWED_INDENT`] spaces, then `bullet` and its space.
+const fn indented_bullet(bullet: u8) -> [u8; MAX_BORROWED_INDENT + UNORDERED_MARKER.len()] {
+  let mut bytes = [b' '; MAX_BORROWED_INDENT + UNORDERED_MARKER.len()];
+  bytes[MAX_BORROWED_INDENT] = bullet;
+  bytes
+}
+
+const fn ascii_str(bytes: &'static [u8]) -> &'static str {
+  match core::str::from_utf8(bytes) {
     Ok(bullet) => bullet,
     Err(_) => panic!("ASCII"),
   }
-};
+}
+
+/// Spaces then the bullet; an item borrows the suffix after its own indent.
+const INDENTED_BULLET: &str = ascii_str(&indented_bullet(b'-'));
+/// The same for a list that follows one CommonMark would join it into.
+const INDENTED_STAR_BULLET: &str = ascii_str(&indented_bullet(b'*'));
 
 /// Largest escape scratch kept between text nodes.
 const ESCAPE_SCRATCH_CAPACITY: usize = 4096;
@@ -3222,6 +3227,51 @@ impl ConvertState {
     bytes[index - 1] == b'\n'
   }
 
+  /// Marker character for a list opening here: the other one of its kind when
+  /// the list before it has the same type, sits at the same depth and nothing
+  /// visible came between, since CommonMark would join the two.
+  pub(crate) fn next_list_marker(&self, ordered: bool) -> u8 {
+    let sibling = self.sibling_list_marker;
+    if sibling != 0
+      && self.sibling_list_depth == self.depth_map[TAG_LI as usize]
+      && matches!(sibling, b'.' | b')') == ordered
+    {
+      return match sibling {
+        b'-' => b'*',
+        b'*' => b'-',
+        b'.' => b')',
+        _ => b'.',
+      };
+    }
+    if ordered { b'.' } else { b'-' }
+  }
+
+  /// Buffer length before output that may separate a closed list from the next
+  /// one, or `usize::MAX` while no list waits for a sibling.
+  #[inline(always)]
+  pub(crate) fn list_gap_start(&mut self) -> usize {
+    if self.sibling_list_marker == 0 {
+      return usize::MAX;
+    }
+    self.list_gap_rewrite = usize::MAX;
+    self.buffer.len()
+  }
+
+  /// Visible output written since `start`, or since the lowest offset the event
+  /// rewrote, ends the closed list's run.
+  #[inline(always)]
+  pub(crate) fn end_list_gap(&mut self, start: usize) {
+    if start != usize::MAX
+      && self
+        .buffer
+        .as_bytes()
+        .get(start.min(self.list_gap_rewrite)..)
+        .is_some_and(has_visible)
+    {
+      self.sibling_list_marker = 0;
+    }
+  }
+
   /// Arm the empty-item guard for the `<li>` whose marker was just written from
   /// `output_start`. A marker line continuing the paragraph above turns a lone
   /// marker into a setext underline: the text becomes a heading and the item
@@ -4329,8 +4379,10 @@ impl ConvertState {
           return Some(Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE));
         }
         Some(match self.block_open_prefix(&prefix) {
-          // Sharing the marker's line, where `---` would make the whole line a
-          // thematic break and take the item with it.
+          // Sharing the marker's line, where a rule of the bullet's own
+          // character would make the whole line a thematic break and take the
+          // item with it.
+          None if self.last_item_star => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE),
           None => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE_ALT),
           Some(open) => Cow::Owned(format!("{open}{MARKDOWN_HORIZONTAL_RULE}")),
         })
@@ -4474,19 +4526,26 @@ impl ConvertState {
         // contribution is pushed onto list_indent AFTER this output
         // is written to the buffer.
         let ordered = _ancestors.last().filter(|p| p.tag_id == Some(TAG_OL));
+        // The innermost list's character; an item outside any list takes `-`.
+        let marker = self.list_markers.last().map_or(0, |m| m & !LIST_HAS_ITEM);
         if ordered.is_none() && self.list_indent.len() <= MAX_BORROWED_INDENT {
           debug_assert!(self.list_indent.bytes().all(|b| b == b' '));
+          let bullets = if marker == b'*' {
+            INDENTED_STAR_BULLET
+          } else {
+            INDENTED_BULLET
+          };
           return Some(Cow::Borrowed(
-            &INDENTED_BULLET[MAX_BORROWED_INDENT - self.list_indent.len()..],
+            &bullets[MAX_BORROWED_INDENT - self.list_indent.len()..],
           ));
         }
         let mut s = String::with_capacity(self.list_indent.len() + ORDERED_MARKER_CAPACITY);
         s.push_str(&self.list_indent);
         if ordered.is_some() {
           push_decimal(&mut s, self.ordered_item_number(node.index as usize));
-          s.push_str(". ");
+          s.push_str(if marker == b')' { ") " } else { ". " });
         } else {
-          s.push_str("- ");
+          s.push_str(if marker == b'*' { "* " } else { "- " });
         }
         Some(Cow::Owned(s))
       }

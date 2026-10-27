@@ -6,6 +6,7 @@ import {
   FRAGMENT_LINK_CLOSE_CODE,
   FRAGMENT_LINK_OPEN_CODE,
   isInsideRawHtmlBlock,
+  LIST_HAS_ITEM,
   MARKDOWN_CODE_BLOCK,
   MARKDOWN_EMPHASIS,
   MARKDOWN_INLINE_CODE,
@@ -52,6 +53,7 @@ import {
   TAG_TH,
   TAG_TR,
   TAG_U,
+  TAG_UL,
   TAG_VAR,
   TEXT_NODE,
 } from './const'
@@ -126,6 +128,10 @@ export interface MarkdownState {
   emptyItemFragment?: number
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
+  /** See `MdreamRuntimeState.listMarkers`. */
+  listMarkers: number[]
+  /** See `MdreamRuntimeState.lastItemStar`. */
+  lastItemStar: boolean
 }
 
 interface CodeSpan {
@@ -314,6 +320,15 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
     const width = isOrdered ? String(orderedItemNumber(element.parent, element.index)).length + 2 : 2
     state.listIndentWidths.push(width)
     state.listIndent += ' '.repeat(width)
+    const markers = state.listMarkers
+    const top = markers.length - 1
+    let star = false
+    if (top >= 0) {
+      const marker = markers[top]! | LIST_HAS_ITEM
+      markers[top] = marker
+      star = !isOrdered && marker === (LIST_HAS_ITEM | 42) // *
+    }
+    state.lastItemStar = star
   }
   else if (eventType === NodeEventExit) {
     const width = state.listIndentWidths.pop() ?? 0
@@ -1358,7 +1373,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     preFencePending: false,
     preFencePendingDepth: 0,
     preFenceOwnerDepth: 0,
+    listMarkers: [],
+    lastItemStar: false,
   }
+  // Marker character code of the list that last closed with items, or 0 once
+  // visible output follows it. CommonMark joins the next list of the same type
+  // into it, blank line or not, so that list takes the other character.
+  let siblingListMarker = 0
+  // `<li>` depth that list closed at: a list opening at another one is no sibling.
+  let siblingListDepth = 0
   const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0]
   let inRawHtmlRegion = false
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
@@ -1720,9 +1743,67 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
 
   /**
-   * Process a DOM event and generate markdown
+   * Marker character code for a list opening here: the other one of its kind
+   * when the list before it has the same type, sits at the same depth and
+   * nothing visible came between, since CommonMark would join the two.
+   */
+  function nextListMarker(ordered: boolean): number {
+    const sibling = siblingListMarker
+    if (sibling !== 0 && siblingListDepth === state.depthMap[TAG_LI]
+      && (sibling === 46 || sibling === 41) === ordered) {
+      // - * . )
+      return sibling === 45 ? 42 : sibling === 42 ? 45 : sibling === 46 ? 41 : 46
+    }
+    return ordered ? 46 : 45
+  }
+
+  /**
+   * Process a DOM event. A list closed with items waits for its same-type
+   * sibling until an event writes visible output.
    */
   function processEvent(event: NodeEvent): void {
+    const node = event.node
+    const tagId = node.type === ELEMENT_NODE ? (node as ElementNode).tagId : undefined
+    const isList = tagId === TAG_UL || tagId === TAG_OL
+    if (isList) {
+      if (event.type === NodeEventEnter)
+        state.listMarkers.push(nextListMarker(tagId === TAG_OL))
+    }
+    else if (tagId === TAG_BLOCKQUOTE) {
+      // A quote boundary ends the list before it, written or not.
+      siblingListMarker = 0
+    }
+    if (siblingListMarker === 0) {
+      renderEvent(event)
+    }
+    else {
+      // Fragments already written are only trimmed, or dropped back to a
+      // construct whose visible opener already ended the run, so whatever the
+      // event writes lands in fragments it pushes.
+      const fragments = state.buffer.length
+      renderEvent(event)
+      const buffer = state.buffer
+      for (let index = Math.min(fragments, buffer.length); index < buffer.length; index++) {
+        if (hasNonWhitespace(buffer[index]!)) {
+          siblingListMarker = 0
+          break
+        }
+      }
+    }
+    if (isList && event.type === NodeEventExit) {
+      // An empty list writes nothing, leaving the one before it in place.
+      const marker = state.listMarkers.pop()
+      if (marker !== undefined && (marker & LIST_HAS_ITEM) !== 0) {
+        siblingListMarker = marker ^ LIST_HAS_ITEM
+        siblingListDepth = state.depthMap[TAG_LI]!
+      }
+    }
+  }
+
+  /**
+   * Process a DOM event and generate markdown
+   */
+  function renderEvent(event: NodeEvent): void {
     const { type: eventType, node } = event
     // Update depth for plugin access
     state.depth = node.depth

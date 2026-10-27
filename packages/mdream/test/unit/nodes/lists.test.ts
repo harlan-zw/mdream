@@ -16,6 +16,31 @@ describe.each(engines)('lists $name', (engineConfig) => {
     expect(markdown).toBe('1. First\n2. Second')
   })
 
+  // CommonMark joins a list into the one before it when both use the same
+  // marker character, blank line or not. A sibling list switches characters.
+  it.each([
+    ['<ul><li>a</li></ul><ul><li>b</li></ul><ul><li>c</li></ul>', '- a\n\n* b\n\n- c'],
+    ['<ol><li>a</li></ol><ol start="3"><li>b</li></ol><ol><li>c</li></ol>', '1. a\n\n3) b\n\n1. c'],
+    ['<ul><li>a</li></ul><div><!-- c --><ul></ul><ul><li>b</li></ul></div>', '- a\n\n* b'],
+    ['<ul><li>a<ul><li>b</li></ul><ul><li>c</li></ul></li></ul>', '- a\n  - b\n  * c'],
+    ['<ul><li>x<ul><li>a</li></ul></li></ul><ul><li>b</li></ul>', '- x\n  - a\n\n* b'],
+    ['<blockquote><ul><li>a</li></ul><ul><li>b</li></ul></blockquote>', '> - a\n>\n> * b'],
+    ['<ul><li>a</li></ul><ul><li><hr></li><li>* * *</li></ul>', '- a\n\n* ---\n* \\* \\* \\*'],
+  ])('alternates the marker of an adjacent same-type list: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li>a</li></ul><p>x</p><ul><li>b</li></ul>', '- a\n\nx\n\n- b'],
+    ['<ul><li>a</li></ul><ol><li>b</li></ol>', '- a\n\n1. b'],
+    ['<blockquote><ul><li>a</li></ul></blockquote><blockquote><ul><li>b</li></ul></blockquote>', '> - a\n\n> - b'],
+    ['<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote>', '- a\n\n> - b'],
+  ])('keeps the default marker when content separates the lists: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
   it('handles nested unordered lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li>Level 1<ul><li>Level 2</li></ul></li><li>Another Level 1</li></ul>'

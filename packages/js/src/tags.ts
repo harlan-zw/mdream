@@ -3,6 +3,7 @@ import type { HandlerContext, TagHandler } from './types'
 import {
   BLOCKQUOTE_SPACING,
   isInsideRawHtmlBlock,
+  LIST_HAS_ITEM,
   LIST_ITEM_SPACING,
   MARKDOWN_CODE_BLOCK,
   MARKDOWN_EMPHASIS,
@@ -477,11 +478,11 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (state.depthMap?.[TAG_LI])
         state.listRulePending = prefix
       const open = blockOpenPrefix(state.buffer, prefix)
-      // Sharing the marker's line, where `---` would make the whole line a
-      // thematic break and take the item with it.
-      return open === undefined
-        ? MARKDOWN_HORIZONTAL_RULE_ALT
-        : `${open}${MARKDOWN_HORIZONTAL_RULE}`
+      // Sharing the marker's line, where a rule of the bullet's own character
+      // would make the whole line a thematic break and take the item with it.
+      if (open === undefined)
+        return state.lastItemStar ? MARKDOWN_HORIZONTAL_RULE : MARKDOWN_HORIZONTAL_RULE_ALT
+      return `${open}${MARKDOWN_HORIZONTAL_RULE}`
     },
     isSelfClosing: true,
   },
@@ -638,7 +639,12 @@ export const tagHandlers: Record<number, TagHandler> = {
       // is pushed onto state.listIndent after the enter output is written
       // (see markdown-processor.ts).
       const isOrdered = node.parent?.tagId === TAG_OL
-      const marker = isOrdered ? `${orderedItemNumber(node.parent, node.index)}. ` : '- '
+      // The innermost list's character; an item outside any list takes `-`.
+      const markers = state.listMarkers
+      const character = markers && markers.length > 0 ? markers[markers.length - 1]! & ~LIST_HAS_ITEM : 0
+      const marker = isOrdered
+        ? `${orderedItemNumber(node.parent, node.index)}${character === 41 ? ') ' : '. '}`
+        : character === 42 ? '* ' : '- '
       return `${state.listIndent}${marker}`
     },
     exit: ({ state }) => isInsideTableCell(state) ? '</li>' : undefined,

@@ -435,11 +435,13 @@ impl ConvertState {
   }
 
   pub(crate) fn process_text_buffer(&mut self, text_buffer: &mut String) {
+    let list_gap = self.list_gap_start();
     if self.text_node_fast_path_ok() {
       self.process_plain_text_node(text_buffer);
     } else {
       self.process_text_buffer_piece(text_buffer, true);
     }
+    self.end_list_gap(list_gap);
   }
 
   /// Gate for [`Self::process_plain_text_node`]: no per-node state needs the general path.
@@ -1409,6 +1411,20 @@ impl ConvertState {
           .and_then(|value| super::output::parse_bounded_u32(value, MAX_ORDERED_START)),
       );
     }
+    // A skipped node writes nothing and takes no part, as its events take none
+    // in the JS engine.
+    if matches!(tag_id, Some(TAG_UL | TAG_OL)) {
+      let ordered = tag_id == Some(TAG_OL);
+      let marker = if skip_node {
+        if ordered { b'.' } else { b'-' }
+      } else {
+        self.next_list_marker(ordered)
+      };
+      self.list_markers.push(marker);
+    } else if tag_id == Some(TAG_BLOCKQUOTE) && !skip_node {
+      // A quote boundary ends the list before it, written or not.
+      self.sibling_list_marker = 0;
+    }
 
     if let Some(p) = parent {
       self.stack[p].current_walk_index += 1;
@@ -1439,6 +1455,7 @@ impl ConvertState {
 
     // Inline emit (no callback!)
     if !skip_node {
+      let list_gap = self.list_gap_start();
       if self.element_fast_path_ok(tag_id) {
         self.emit_enter_simple(false);
       } else if self.link_fast_path_ok(tag_id) {
@@ -1446,6 +1463,7 @@ impl ConvertState {
       } else {
         self.emit_enter_element();
       }
+      self.end_list_gap(list_gap);
     }
 
     // After the LI prefix is emitted, push this LI's marker-width worth of
@@ -1458,10 +1476,13 @@ impl ConvertState {
     if tag_id == Some(TAG_LI)
       && let Some(li) = self.stack.last()
     {
+      let wrote_marker = !li.excluded_from_markdown;
+      let mut ordered = false;
       let width: usize = if !skip_node && !self.in_table_cell() && !plain_text!(self) {
         let stack_len = self.stack.len();
         let parent_is_ordered = stack_len >= 2 && self.stack[stack_len - 2].tag_id == Some(TAG_OL);
         if parent_is_ordered {
+          ordered = true;
           // Must match the marker actually written, `start` included, or the
           // item's continuation content drifts out of it.
           let n = self.ordered_item_number(li.index as usize).max(1);
@@ -1479,6 +1500,14 @@ impl ConvertState {
         .push(u8::try_from(width).unwrap_or(u8::MAX));
       for _ in 0..width {
         self.list_indent.push(' ');
+      }
+      if width != 0 && wrote_marker {
+        let mut star = false;
+        if let Some(marker) = self.list_markers.last_mut() {
+          *marker |= LIST_HAS_ITEM;
+          star = !ordered && *marker == LIST_HAS_ITEM | b'*';
+        }
+        self.last_item_star = star;
       }
     }
 
@@ -1612,6 +1641,7 @@ impl ConvertState {
         modified_node.child_text_node_index = 1;
         let text_depth = node_depth + 1;
         self.stack.push(modified_node);
+        let list_gap = self.list_gap_start();
         // Emit synthetic text
         self.emit_text(&prefix, false, text_depth, 0);
         for prev in self.stack.iter_mut() {
@@ -1622,6 +1652,7 @@ impl ConvertState {
         };
         // Emit exit
         self.emit_exit_element(&modified_node2);
+        self.end_list_gap(list_gap);
         self.stack.restore_retired(modified_node2);
         self.stack.release_retired();
         if let Some(id) = node_tag_id {
@@ -1653,6 +1684,7 @@ impl ConvertState {
     }
 
     // The general exit needs the node owned; the fast ones read it in place.
+    let list_gap = self.list_gap_start();
     if self.element_fast_path_ok(node_tag_id) {
       self.emit_exit_simple(false);
     } else if self.link_fast_path_ok(node_tag_id) {
@@ -1662,6 +1694,7 @@ impl ConvertState {
       self.emit_exit_element(&node);
       self.stack.restore_retired(node);
     }
+    self.end_list_gap(list_gap);
     self.stack.release_retired();
 
     if let Some(id) = node_tag_id {
@@ -1676,6 +1709,17 @@ impl ConvertState {
       self.update_in_pre_on_close(id);
       if id == TAG_OL {
         self.ordered_starts.pop();
+      }
+      if id == TAG_UL || id == TAG_OL {
+        // An empty list writes nothing, leaving the one before it in place.
+        if let Some(marker) = self.list_markers.pop()
+          && marker & LIST_HAS_ITEM != 0
+        {
+          self.sibling_list_marker = marker & !LIST_HAS_ITEM;
+          self.sibling_list_depth = self.depth_map[TAG_LI as usize];
+        }
+      } else if id == TAG_BLOCKQUOTE && !node_enter_skipped {
+        self.sibling_list_marker = 0;
       }
       if id == TAG_LI
         && let Some(w) = self.list_indent_widths.pop()
@@ -1967,7 +2011,9 @@ impl ConvertState {
       if !excluded {
         let depth = self.depth;
         let index = self.stack.last().map_or(0, |n| n.current_walk_index);
+        let list_gap = self.list_gap_start();
         self.emit_text(content, false, depth, index as usize);
+        self.end_list_gap(list_gap);
       }
       if let Some(parent) = self.stack.last_mut() {
         parent.current_walk_index += 1;

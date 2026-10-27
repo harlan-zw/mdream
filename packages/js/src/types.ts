@@ -365,6 +365,13 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
   bufferedBlockquoteDepth?: number
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
+  /**
+   * Marker character code of each open `<ul>`/`<ol>`, innermost last, with
+   * `LIST_HAS_ITEM` set once one of its items wrote a marker.
+   */
+  listMarkers?: number[]
+  /** The latest item marker is `*`, where a rule on its line reads `* ***`. */
+  lastItemStar?: boolean
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
 }

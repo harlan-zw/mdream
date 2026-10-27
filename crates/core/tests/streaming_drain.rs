@@ -3244,6 +3244,28 @@ fn metadata_pending_output_cap_matches_one_shot() {
 }
 
 #[test]
+fn adjacent_list_markers_match_one_shot_at_every_chunk() {
+  assert_eq!(
+    html_to_markdown(
+      "<ul><li>a</li></ul><ul><li>b</li></ul><ul><li>c</li></ul>",
+      HtmlToMarkdownOptions::default()
+    ),
+    "- a\n\n* b\n\n- c"
+  );
+  for html in [
+    "<ul><li>a</li></ul><ul><li>b</li></ul><ul><li>c</li></ul>",
+    "<ol><li>a</li></ol>\n<ol start=\"3\"><li>b</li></ol>",
+    "<ul><li>a<ul><li>b</li></ul><ul><li>c</li></ul></li></ul><ul><li>d</li></ul>",
+    "<blockquote><ul><li>a</li></ul><ul><li>b</li></ul></blockquote><ul><li>c</li></ul>",
+    "<ul><li>a</li></ul><div><!-- c --><ul></ul><ul><li><hr></li></ul></div>",
+    "<ul><li>a</li></ul><p>x</p><ul><li>b</li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn quote_long_line_waits_for_a_completed_line() {
   let span = format!("<span>{}</span>", "x".repeat(1024));
   let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());

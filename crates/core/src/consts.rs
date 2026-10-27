@@ -374,7 +374,8 @@ pub const MARKDOWN_CODE_BLOCK: &str = "```";
 pub const MARKDOWN_INLINE_CODE: &str = "`";
 pub const MARKDOWN_HORIZONTAL_RULE: &str = "---";
 /// Rule sharing a line with a list marker: `- ---` is dashes and spaces only, so
-/// the whole line is a thematic break and the item is lost. `*` cannot collide.
+/// the whole line is a thematic break and the item is lost. A `*` bullet takes
+/// [`MARKDOWN_HORIZONTAL_RULE`] there instead.
 pub const MARKDOWN_HORIZONTAL_RULE_ALT: &str = "***";
 
 pub const NO_SPACING: [u8; 2] = [0, 0];
