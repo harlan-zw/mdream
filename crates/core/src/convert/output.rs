@@ -4236,10 +4236,22 @@ impl ConvertState {
       if word.is_empty() {
         continue;
       }
-      let word_len = word.chars().count();
+      let first_byte = word.as_bytes()[0];
+      let (word_len, setext_word) = if matches!(first_byte, b'-' | b'=') {
+        // Reuse the word-width traversal for marker runs; do not scan again.
+        word.chars().fold((0, true), |(len, marker), ch| {
+          (len + 1, marker && ch == char::from(first_byte))
+        })
+      } else {
+        (word.chars().count(), false)
+      };
       let need_space = if first { first_needs_space } else { true };
 
-      if need_space && col > prefix_len && col + 1 + word_len > width {
+      if need_space
+        && col > prefix_len
+        && col + 1 + word_len > width
+        && (plain_text!(self) || !setext_word)
+      {
         self.push_code_span_content("\n", true);
         self.push_code_span_content(&prefix, true);
         col = prefix_len;

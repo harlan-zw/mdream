@@ -180,3 +180,39 @@ line2</code></pre></li></ol>`
     expect(markdown).toBe('- Active\n- Future')
   })
 })
+
+describe.each(engines)('scout9_wrap_setext_boundary $name', (engineConfig) => {
+  it.each([
+    [
+      '<p>aaaaaaaaaa --</p>',
+      'aaaaaaaaaa --',
+    ],
+    [
+      '<p>aaaaaaaaaa ==</p>',
+      'aaaaaaaaaa ==',
+    ],
+    [
+      '<p>aaaaaaaaaa -</p>',
+      'aaaaaaaaaa -',
+    ],
+    [
+      '<p>aaaaaaaaaa ---</p>',
+      'aaaaaaaaaa ---',
+    ],
+    [
+      '<p>aaaaaaaaaa =</p>',
+      'aaaaaaaaaa =',
+    ],
+    [
+      '<p>aaaaaaaaaa --word</p>',
+      'aaaaaaaaaa\n--word',
+    ],
+    [
+      '<p>aaaaaaaaaa ==word</p>',
+      'aaaaaaaaaa\n==word',
+    ],
+  ])('preserves structure: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, wrapWidth: 10 })).toBe(expected)
+  })
+})

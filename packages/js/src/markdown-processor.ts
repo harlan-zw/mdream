@@ -782,9 +782,21 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
       next = len
     if (next > i) {
       const word = value.slice(i, next)
-      const wordLen = [...word].length
+      const firstCode = word.charCodeAt(0)
+      let setextWord = firstCode === 45 || firstCode === 61
+      let wordLen = 0
+      if (setextWord) {
+        // Reuse the word-width traversal for marker runs; do not scan again.
+        for (const character of word) {
+          wordLen++
+          setextWord = setextWord && character.charCodeAt(0) === firstCode
+        }
+      }
+      else {
+        wordLen = [...word].length
+      }
       const needSpace = first ? leading : true
-      if (needSpace && col > prefixLen && col + 1 + wordLen > width) {
+      if (needSpace && col > prefixLen && col + 1 + wordLen > width && !setextWord) {
         out += `\n${prefix}`
         col = prefixLen
       }
