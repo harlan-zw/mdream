@@ -6473,3 +6473,31 @@ fn empty_nested_list_review_regressions() {
     );
   }
 }
+
+#[test]
+fn empty_ancestor_list_markers_do_not_underline_parent_text() {
+  for (html, expected) in [
+    (
+      "<ol><li>lead<ul><li><ol><li></li></ol></li></ul></li></ol>",
+      "1. lead\n\n   -\n     1.",
+    ),
+    (
+      "<ul><li><blockquote><p>lead</p><ul><li><ul><li></li></ul></li></ul></blockquote></li></ul>",
+      "- \n  > lead\n  >\n  > -\n  >   -",
+    ),
+    (
+      "<ul><li>lead<ul><li><ul><li>x</li></ul></li></ul></li></ul>",
+      "- lead\n\n  -\n    - x",
+    ),
+    (
+      "<ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>",
+      "-\n  -\n    -",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}

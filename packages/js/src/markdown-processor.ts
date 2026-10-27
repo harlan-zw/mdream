@@ -253,6 +253,9 @@ function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string)
  * a sibling marker, opens its own block instead.
  */
 function recordItemMarker(state: MarkdownState, index: number): void {
+  // A descendant marker settles a bare ancestor before replacing its guard.
+  if (state.emptyItemFragment !== undefined)
+    resolveItemMarker(state, true)
   // Only a list's first item can follow a paragraph, so every later sibling
   // skips the scan below.
   if (index !== 0 || newlineRunBefore(state.buffer, state.buffer.length - 1) !== 1) {

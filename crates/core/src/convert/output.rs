@@ -3282,6 +3282,13 @@ impl ConvertState {
   /// marker into a setext underline: the text becomes a heading and the item
   /// disappears. A blank line, or a sibling marker, opens its own block instead.
   fn record_item_marker(&mut self, index: usize, output_start: usize) {
+    // A descendant marker settles a bare ancestor before replacing its guard.
+    let mut output_start = output_start;
+    if self.empty_item_hazard {
+      let before = self.buffer.len();
+      self.resolve_item_marker(true);
+      output_start += self.buffer.len() - before;
+    }
     // Only a list's first item can follow a paragraph, so every later sibling
     // skips the line scan below.
     if index != 0 {

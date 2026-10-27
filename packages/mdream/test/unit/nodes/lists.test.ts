@@ -3,6 +3,16 @@ import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('lists $name', (engineConfig) => {
   it.each([
+    ['<ol><li>lead<ul><li><ol><li></li></ol></li></ul></li></ol>', '1. lead\n\n   -\n     1.'],
+    ['<ul><li><blockquote><p>lead</p><ul><li><ul><li></li></ul></li></ul></blockquote></li></ul>', '- \n  > lead\n  >\n  > -\n  >   -'],
+    ['<ul><li>lead<ul><li><ul><li>x</li></ul></li></ul></li></ul>', '- lead\n\n  -\n    - x'],
+    ['<ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>', '-\n  -\n    -'],
+  ])('keeps empty ancestor markers below paragraphs: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li><ol><li></li></ol>text</li></ul>', '-\n  1.\n\n  text'],
     ['<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr>text</li></ul>', '-\n  -\n\n  text'],
     ['<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr></li><li>next</li></ul>', '-\n  -\n- next'],

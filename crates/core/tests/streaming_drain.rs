@@ -3700,3 +3700,16 @@ fn empty_list_marker_releases_non_text_content_before_item_close() {
     );
   }
 }
+
+#[test]
+fn empty_ancestor_list_markers_match_every_split() {
+  for html in [
+    "<ol><li>lead<ul><li><ol><li></li></ol></li></ul></li></ol>",
+    "<ul><li><blockquote><p>lead</p><ul><li><ul><li></li></ul></li></ul></blockquote></li></ul>",
+    "<ul><li>lead<ul><li><ul><li>x</li></ul></li></ul></li></ul>",
+    "<ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
